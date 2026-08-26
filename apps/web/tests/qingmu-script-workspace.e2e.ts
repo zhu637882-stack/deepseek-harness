@@ -54,6 +54,38 @@ const SCENE_REPAIR_ASSET_SHA = 'cd'.repeat(32)
 const SCENE_STALE_ASSET_ID = 'scene-reference-stale-1'
 const SCENE_STALE_ASSET_SHA = 'ef'.repeat(32)
 const REFERENCE_REPAIR_PROMPT = '保留走廊冷白灯和湿润地面，修复画面边缘断裂与人物残影。'
+const PROMPT_IR_STORYBOARD_REVISION_ID = 'storyboard-revision-1'
+const PROMPT_IR_FRAME_ID = 'frame-1'
+const PROMPT_IR_TARGET_ID = `${PROMPT_IR_STORYBOARD_REVISION_ID}:${PROMPT_IR_FRAME_ID}`
+const PROMPT_IR_READY_ID = 'prompt-ir-ready-4'
+const PROMPT_IR_DRAFT_ID = 'prompt-ir-draft-5'
+const PROMPT_IR_READY_VERSION = 4
+const PROMPT_IR_DRAFT_VERSION = 5
+const PROMPT_IR_READY_CONTENT_SHA = '31'.repeat(32)
+const PROMPT_IR_DRAFT_CONTENT_SHA = '42'.repeat(32)
+const PROMPT_IR_CHANGE_SET_ID = 'changeset-prompt-ir-1'
+const PROMPT_IR_PAYLOAD_SHA = '53'.repeat(32)
+const PROMPT_IR_BASE_EDITABLE = {
+  imageGenPrompt: '雨夜车站首帧，林青站在站牌旁。',
+  lastFrameImagePrompt: '',
+  videoGenPrompt: '镜头缓慢前推，林青抬头看向远处。',
+  motionPrompt: '雨丝斜落，风衣衣角轻摆。',
+  negativePrompt: '无文字，无水印，不增加人物。',
+} as const
+const PROMPT_IR_CANDIDATE_EDITABLE = {
+  ...PROMPT_IR_BASE_EDITABLE,
+  videoGenPrompt: '镜头稳定前推，林青抬头后停住，保持动作连续。',
+} as const
+const PROMPT_IR_EDIT_IDEMPOTENCY_KEY = `qingmu:prompt-ir:edit:v1:${createHash('sha256').update(PROMPT_IR_CHANGE_SET_ID, 'utf8').digest('hex')}:${PROMPT_IR_PAYLOAD_SHA}`
+const PROMPT_IR_SELECTION_IDEMPOTENCY_KEY = `qingmu:prompt-ir:select:v1:${createHash('sha256').update(JSON.stringify([
+  'project-1',
+  'episode-1',
+  PROMPT_IR_STORYBOARD_REVISION_ID,
+  PROMPT_IR_FRAME_ID,
+  PROMPT_IR_DRAFT_ID,
+  PROMPT_IR_DRAFT_VERSION,
+  PROMPT_IR_DRAFT_CONTENT_SHA,
+]), 'utf8').digest('hex')}`
 const IMAGO_ATTESTATION_KEY = 'qingmu-real-host-chromium-attestation-key-测试'
 const ORIGINAL_TOKEN = process.env.YIMENG_API_TOKEN
 const ORIGINAL_ATTESTATION_KEY = process.env.QINGMU_IMAGO_ATTESTATION_KEY
@@ -493,7 +525,193 @@ function commitReceiptFixture(idempotencyKey: string) {
   }
 }
 
-function workflowFixture(revision: number) {
+function promptIrSubject(selected: boolean) {
+  return {
+    schema: 'jason.qingmu-prompt-ir-subject.v1',
+    projectId: 'project-1',
+    episodeId: 'episode-1',
+    targetType: 'prompt_ir',
+    targetId: PROMPT_IR_TARGET_ID,
+    storyboardRevisionId: PROMPT_IR_STORYBOARD_REVISION_ID,
+    frameId: PROMPT_IR_FRAME_ID,
+    promptIrId: selected ? PROMPT_IR_DRAFT_ID : PROMPT_IR_READY_ID,
+    promptIrVersion: selected ? PROMPT_IR_DRAFT_VERSION : PROMPT_IR_READY_VERSION,
+    promptIrContentSha256: selected ? PROMPT_IR_DRAFT_CONTENT_SHA : PROMPT_IR_READY_CONTENT_SHA,
+    status: 'Ready',
+    editableProjection: selected ? PROMPT_IR_CANDIDATE_EDITABLE : PROMPT_IR_BASE_EDITABLE,
+  } as const
+}
+
+function promptIrReadFixture(selected: boolean) {
+  const subject = promptIrSubject(selected)
+  return {
+    schema: 'jason.qingmu-prompt-ir-subject-read.v1',
+    subject,
+    baseRevision: subject.promptIrVersion,
+    baseSnapshotSha256: canonicalSha256(subject),
+  } as const
+}
+
+function promptIrWorkflowShot(selected: boolean) {
+  const subject = promptIrSubject(selected)
+  return {
+    shotId: 'shot-1',
+    name: '雨夜车站',
+    frameId: PROMPT_IR_FRAME_ID,
+    promptLineage: {
+      storyboardRevisionId: PROMPT_IR_STORYBOARD_REVISION_ID,
+      id: subject.promptIrId,
+      version: subject.promptIrVersion,
+      contentSha256: subject.promptIrContentSha256,
+      status: 'Ready',
+    },
+  } as const
+}
+
+function promptIrChangeSetFixture() {
+  return {
+    schema: 'jason.qingmu-change-set.v1',
+    id: PROMPT_IR_CHANGE_SET_ID,
+    workspaceId: null,
+    projectId: 'project-1',
+    episodeId: 'episode-1',
+    targetType: 'prompt_ir',
+    targetId: PROMPT_IR_TARGET_ID,
+    baseRevision: PROMPT_IR_READY_VERSION,
+    baseSnapshotSha256: canonicalSha256(promptIrSubject(false)),
+    payloadSha256: PROMPT_IR_PAYLOAD_SHA,
+    originKind: 'human',
+    actorUserId: 'owner-1',
+    harnessSessionId: null,
+    status: 'Proposed',
+    authoritativeRevision: null,
+    authoritativeSnapshotSha256: null,
+    committedByUserId: null,
+    committedEventId: null,
+    committedAt: null,
+    createdAt: '2026-08-27T10:00:00+00:00',
+    updatedAt: '2026-08-27T10:00:00+00:00',
+  } as const
+}
+
+function promptIrPreviewFixture() {
+  return {
+    schema: 'jason.qingmu-prompt-ir-preview.v1',
+    changeSetId: PROMPT_IR_CHANGE_SET_ID,
+    target: {
+      projectId: 'project-1',
+      episodeId: 'episode-1',
+      storyboardRevisionId: PROMPT_IR_STORYBOARD_REVISION_ID,
+      frameId: PROMPT_IR_FRAME_ID,
+      targetId: PROMPT_IR_TARGET_ID,
+    },
+    basePromptIr: {
+      id: PROMPT_IR_READY_ID,
+      version: PROMPT_IR_READY_VERSION,
+      contentSha256: PROMPT_IR_READY_CONTENT_SHA,
+      status: 'Ready',
+      editableProjection: PROMPT_IR_BASE_EDITABLE,
+    },
+    candidatePromptIr: {
+      id: PROMPT_IR_DRAFT_ID,
+      version: PROMPT_IR_DRAFT_VERSION,
+      contentSha256: PROMPT_IR_DRAFT_CONTENT_SHA,
+      status: 'Draft',
+      editableProjection: PROMPT_IR_CANDIDATE_EDITABLE,
+    },
+    promptDiff: {
+      changed: true,
+      changedPaths: ['$.videoGenPrompt'],
+      before: PROMPT_IR_BASE_EDITABLE,
+      after: PROMPT_IR_CANDIDATE_EDITABLE,
+    },
+    providerCalls: 0,
+    workerStarted: false,
+    humanApprovalInferred: false,
+    humanSignoff: false,
+  } as const
+}
+
+function promptIrEditReceiptFixture() {
+  return {
+    schema: 'jason.qingmu-prompt-ir-edit-commit-result.v1',
+    changeSetId: PROMPT_IR_CHANGE_SET_ID,
+    commandReceiptId: 'receipt-prompt-ir-edit-1',
+    eventId: 'event-prompt-ir-edit-1',
+    eventType: 'PromptIrDraftCommitted',
+    projectId: 'project-1',
+    episodeId: 'episode-1',
+    targetType: 'prompt_ir',
+    targetId: PROMPT_IR_TARGET_ID,
+    storyboardRevisionId: PROMPT_IR_STORYBOARD_REVISION_ID,
+    frameId: PROMPT_IR_FRAME_ID,
+    promptIr: {
+      id: PROMPT_IR_DRAFT_ID,
+      version: PROMPT_IR_DRAFT_VERSION,
+      contentSha256: PROMPT_IR_DRAFT_CONTENT_SHA,
+      status: 'Draft',
+      editableProjection: PROMPT_IR_CANDIDATE_EDITABLE,
+    },
+    previousReadyPromptIr: {
+      id: PROMPT_IR_READY_ID,
+      version: PROMPT_IR_READY_VERSION,
+      contentSha256: PROMPT_IR_READY_CONTENT_SHA,
+      status: 'Ready',
+    },
+    payloadSha256: PROMPT_IR_PAYLOAD_SHA,
+    idempotencyKey: PROMPT_IR_EDIT_IDEMPOTENCY_KEY,
+    changed: true,
+    providerCalls: 0,
+    workerStarted: false,
+    humanApprovalInferred: false,
+    humanSignoff: false,
+    deduplicated: false,
+    committedAt: '2026-08-27T10:01:00+00:00',
+  } as const
+}
+
+function promptIrSelectionReceiptFixture() {
+  return {
+    schema: 'jason.qingmu-prompt-ir-selection-result.v1',
+    changeSetId: 'changeset-prompt-ir-selection-1',
+    commandReceiptId: 'receipt-prompt-ir-selection-1',
+    eventId: 'event-prompt-ir-selection-1',
+    eventType: 'PromptIrSelected',
+    projectId: 'project-1',
+    episodeId: 'episode-1',
+    targetType: 'prompt_ir',
+    targetId: PROMPT_IR_TARGET_ID,
+    storyboardRevisionId: PROMPT_IR_STORYBOARD_REVISION_ID,
+    frameId: PROMPT_IR_FRAME_ID,
+    selectedPromptIr: {
+      id: PROMPT_IR_DRAFT_ID,
+      version: PROMPT_IR_DRAFT_VERSION,
+      contentSha256: PROMPT_IR_DRAFT_CONTENT_SHA,
+      status: 'Ready',
+      editableProjection: PROMPT_IR_CANDIDATE_EDITABLE,
+    },
+    stalePromptIrIds: [PROMPT_IR_READY_ID],
+    idempotencyKey: PROMPT_IR_SELECTION_IDEMPOTENCY_KEY,
+    changed: true,
+    providerCall: false,
+    workerStarted: false,
+    humanApprovalInferred: false,
+    humanSignoff: false,
+    deduplicated: false,
+    committedAt: '2026-08-27T10:02:00+00:00',
+  } as const
+}
+
+function promptIrRecoveryEnvelope(receipt: unknown) {
+  return {
+    schema: 'jason.qingmu-command-receipt-recovery.v1',
+    recovered: true,
+    receiptSha256: canonicalSha256(receipt),
+    receipt,
+  } as const
+}
+
+function workflowFixture(revision: number, promptIrSelected = false) {
   return {
     schema: 'jason.episode-workflow-projection.v1',
     projectId: 'project-1',
@@ -545,7 +763,7 @@ function workflowFixture(revision: number) {
       ],
     },
     director: {},
-    shots: { items: [] },
+    shots: { items: [promptIrWorkflowShot(promptIrSelected)] },
     video: {},
     audio: {},
     timeline: {},
@@ -635,6 +853,7 @@ async function startYimengDouble(
   sceneReadRevisions: number[],
   propReadRevisions: number[],
   sceneReferenceCandidateReads: ReturnType<typeof sceneReferenceCandidatesFixture>[],
+  promptIrWorkflowStatuses: string[],
 ): Promise<{
   readonly server: Server
   readonly baseUrl: string
@@ -648,6 +867,10 @@ async function startYimengDouble(
   readonly releaseReferenceCommitResponse: () => void
   readonly referenceRegenerationCommitAccepted: Promise<void>
   readonly releaseReferenceRegenerationCommitResponse: () => void
+  readonly promptIrEditAccepted: Promise<void>
+  readonly releasePromptIrEditResponse: () => void
+  readonly promptIrSelectionAccepted: Promise<void>
+  readonly releasePromptIrSelectionResponse: () => void
 }> {
   let revision = 3
   let authoritativeScript: Record<string, unknown> = INITIAL_SCRIPT
@@ -664,6 +887,10 @@ async function startYimengDouble(
   let propPrompt = PROP_ORIGINAL_PROMPT
   let propMethodProjectionSha256: string | undefined
   let persistedPropReceipt: ReturnType<typeof propCommitReceiptFixture> | undefined
+  let promptIrDraftCommitted = false
+  let promptIrSelected = false
+  let persistedPromptIrEditReceipt: ReturnType<typeof promptIrEditReceiptFixture> | undefined
+  let persistedPromptIrSelectionReceipt: ReturnType<typeof promptIrSelectionReceiptFixture> | undefined
   const reviewComments: Record<ElementKind, Array<Record<string, unknown>>> = { actor: [], scene: [], prop: [] }
   const reviewDecisions: Record<ElementKind, Array<Record<string, unknown>>> = { actor: [], scene: [], prop: [] }
   let resolveCommitAccepted: (() => void) | undefined
@@ -706,6 +933,22 @@ async function startYimengDouble(
   })
   const referenceRegenerationCommitResponseReleased = new Promise<void>((resolve) => {
     resolveReferenceRegenerationCommitResponse = resolve
+  })
+  let resolvePromptIrEditAccepted: (() => void) | undefined
+  let resolvePromptIrEditResponse: (() => void) | undefined
+  const promptIrEditAccepted = new Promise<void>((resolve) => {
+    resolvePromptIrEditAccepted = resolve
+  })
+  const promptIrEditResponseReleased = new Promise<void>((resolve) => {
+    resolvePromptIrEditResponse = resolve
+  })
+  let resolvePromptIrSelectionAccepted: (() => void) | undefined
+  let resolvePromptIrSelectionResponse: (() => void) | undefined
+  const promptIrSelectionAccepted = new Promise<void>((resolve) => {
+    resolvePromptIrSelectionAccepted = resolve
+  })
+  const promptIrSelectionResponseReleased = new Promise<void>((resolve) => {
+    resolvePromptIrSelectionResponse = resolve
   })
   const server = createServer((request, response) => {
     void (async () => {
@@ -754,7 +997,17 @@ async function startYimengDouble(
         return
       }
       if (request.method === 'GET' && url.pathname === '/api/episodes/episode-1/workflow-projection') {
-        json(response, 200, workflowFixture(revision))
+        const workflow = workflowFixture(revision, promptIrSelected)
+        const promptLineage = workflow.shots.items[0]?.promptLineage
+        promptIrWorkflowStatuses.push(promptLineage?.status ?? 'missing')
+        json(response, 200, workflow)
+        return
+      }
+      if (
+        request.method === 'GET'
+        && url.pathname === `/api/qingmu/projects/project-1/episodes/episode-1/storyboard-revisions/${PROMPT_IR_STORYBOARD_REVISION_ID}/frames/${PROMPT_IR_FRAME_ID}/prompt-ir`
+      ) {
+        json(response, 200, promptIrReadFixture(promptIrSelected))
         return
       }
       if (request.method === 'GET' && url.pathname === '/api/episodes/episode-1/script') {
@@ -937,6 +1190,37 @@ async function startYimengDouble(
         json(response, 201, { schema: 'jason.qingmu-element-human-decision-result.v1', decision })
         return
       }
+      if (
+        request.method === 'POST'
+        && url.pathname === `/api/qingmu/projects/project-1/episodes/episode-1/storyboard-revisions/${PROMPT_IR_STORYBOARD_REVISION_ID}/frames/${PROMPT_IR_FRAME_ID}/prompt-ir/change-sets`
+      ) {
+        const proposal = isRecord(body) ? body : {}
+        const expectedKeys = [
+          'basePromptIrId',
+          'baseVersion',
+          'baseContentSha256',
+          'replacements',
+        ].sort()
+        const replacements = isRecord(proposal.replacements) ? proposal.replacements : {}
+        if (
+          promptIrDraftCommitted
+          || Object.keys(proposal).sort().some((key, index) => key !== expectedKeys[index])
+          || Object.keys(proposal).length !== expectedKeys.length
+          || proposal.basePromptIrId !== PROMPT_IR_READY_ID
+          || proposal.baseVersion !== PROMPT_IR_READY_VERSION
+          || proposal.baseContentSha256 !== PROMPT_IR_READY_CONTENT_SHA
+          || Object.keys(replacements).length !== 1
+          || replacements.videoGenPrompt !== PROMPT_IR_CANDIDATE_EDITABLE.videoGenPrompt
+        ) {
+          throw new Error('PromptIR proposal lineage mismatch')
+        }
+        json(response, 201, {
+          schema: 'jason.qingmu-prompt-ir-change-set-proposal.v1',
+          changeSet: promptIrChangeSetFixture(),
+          nextAction: 'preview',
+        })
+        return
+      }
       if (request.method === 'POST' && url.pathname === '/api/qingmu/episodes/episode-1/script/change-sets') {
         json(response, 201, {
           schema: 'jason.qingmu-change-set-proposal.v1',
@@ -1010,6 +1294,37 @@ async function startYimengDouble(
           ),
           nextAction: 'preview',
         })
+        return
+      }
+      if (request.method === 'POST' && url.pathname === `/api/qingmu/change-sets/${PROMPT_IR_CHANGE_SET_ID}:preview`) {
+        const command = isRecord(body) ? body : {}
+        const expectedKeys = [
+          'projectId',
+          'episodeId',
+          'targetType',
+          'targetId',
+          'storyboardRevisionId',
+          'frameId',
+          'basePromptIrId',
+          'baseRevision',
+          'baseSnapshotSha256',
+        ].sort()
+        if (
+          Object.keys(command).sort().some((key, index) => key !== expectedKeys[index])
+          || Object.keys(command).length !== expectedKeys.length
+          || command.projectId !== 'project-1'
+          || command.episodeId !== 'episode-1'
+          || command.targetType !== 'prompt_ir'
+          || command.targetId !== PROMPT_IR_TARGET_ID
+          || command.storyboardRevisionId !== PROMPT_IR_STORYBOARD_REVISION_ID
+          || command.frameId !== PROMPT_IR_FRAME_ID
+          || command.basePromptIrId !== PROMPT_IR_READY_ID
+          || command.baseRevision !== PROMPT_IR_READY_VERSION
+          || command.baseSnapshotSha256 !== canonicalSha256(promptIrSubject(false))
+        ) {
+          throw new Error('PromptIR preview lineage mismatch')
+        }
+        json(response, 200, promptIrPreviewFixture())
         return
       }
       if (request.method === 'POST' && url.pathname === `/api/qingmu/change-sets/${CHANGE_SET_ID}:preview`) {
@@ -1139,6 +1454,76 @@ async function startYimengDouble(
           workerStarted: false,
           humanApprovalInferred: false,
         })
+        return
+      }
+      if (request.method === 'POST' && url.pathname === `/api/qingmu/change-sets/${PROMPT_IR_CHANGE_SET_ID}:commit`) {
+        const command = isRecord(body) ? body : {}
+        const expectedKeys = [
+          'projectId',
+          'episodeId',
+          'targetType',
+          'targetId',
+          'storyboardRevisionId',
+          'frameId',
+          'basePromptIrId',
+          'baseRevision',
+          'baseSnapshotSha256',
+          'idempotencyKey',
+          'expectedPayloadSha256',
+        ].sort()
+        if (
+          promptIrDraftCommitted
+          || Object.keys(command).sort().some((key, index) => key !== expectedKeys[index])
+          || Object.keys(command).length !== expectedKeys.length
+          || command.projectId !== 'project-1'
+          || command.episodeId !== 'episode-1'
+          || command.targetType !== 'prompt_ir'
+          || command.targetId !== PROMPT_IR_TARGET_ID
+          || command.storyboardRevisionId !== PROMPT_IR_STORYBOARD_REVISION_ID
+          || command.frameId !== PROMPT_IR_FRAME_ID
+          || command.basePromptIrId !== PROMPT_IR_READY_ID
+          || command.baseRevision !== PROMPT_IR_READY_VERSION
+          || command.baseSnapshotSha256 !== canonicalSha256(promptIrSubject(false))
+          || command.idempotencyKey !== PROMPT_IR_EDIT_IDEMPOTENCY_KEY
+          || command.expectedPayloadSha256 !== PROMPT_IR_PAYLOAD_SHA
+        ) {
+          throw new Error('PromptIR edit commit lineage mismatch')
+        }
+        promptIrDraftCommitted = true
+        persistedPromptIrEditReceipt = promptIrEditReceiptFixture()
+        resolvePromptIrEditAccepted?.()
+        await promptIrEditResponseReleased
+        if (!response.destroyed && !response.writableEnded) json(response, 200, persistedPromptIrEditReceipt)
+        return
+      }
+      if (
+        request.method === 'POST'
+        && url.pathname === `/api/qingmu/projects/project-1/episodes/episode-1/storyboard-revisions/${PROMPT_IR_STORYBOARD_REVISION_ID}/frames/${PROMPT_IR_FRAME_ID}/prompt-ir:select`
+      ) {
+        const command = isRecord(body) ? body : {}
+        const expectedKeys = [
+          'draftPromptIrId',
+          'draftVersion',
+          'draftContentSha256',
+          'idempotencyKey',
+        ].sort()
+        if (
+          !promptIrDraftCommitted
+          || promptIrSelected
+          || Object.keys(command).sort().some((key, index) => key !== expectedKeys[index])
+          || Object.keys(command).length !== expectedKeys.length
+          || command.draftPromptIrId !== PROMPT_IR_DRAFT_ID
+          || command.draftVersion !== PROMPT_IR_DRAFT_VERSION
+          || command.draftContentSha256 !== PROMPT_IR_DRAFT_CONTENT_SHA
+          || command.idempotencyKey !== PROMPT_IR_SELECTION_IDEMPOTENCY_KEY
+        ) {
+          throw new Error('PromptIR selection lineage mismatch')
+        }
+        promptIrSelected = true
+        persistedPromptIrSelectionReceipt = promptIrSelectionReceiptFixture()
+        resolvePromptIrSelectionAccepted?.()
+        await promptIrSelectionResponseReleased
+        if (!response.destroyed && !response.writableEnded) json(response, 200, persistedPromptIrSelectionReceipt)
         return
       }
       if (request.method === 'POST' && url.pathname === `/api/qingmu/change-sets/${CHANGE_SET_ID}:commit`) {
@@ -1277,6 +1662,36 @@ async function startYimengDouble(
       }
       if (
         request.method === 'GET'
+        && url.pathname === `/api/qingmu/projects/project-1/episodes/episode-1/storyboard-revisions/${PROMPT_IR_STORYBOARD_REVISION_ID}/frames/${PROMPT_IR_FRAME_ID}/prompt-ir/change-sets/${PROMPT_IR_CHANGE_SET_ID}/command-receipt`
+      ) {
+        if (
+          persistedPromptIrEditReceipt === undefined
+          || url.search !== ''
+          || request.headers['idempotency-key'] !== PROMPT_IR_EDIT_IDEMPOTENCY_KEY
+        ) {
+          json(response, 404, { error: 'PromptIR edit receipt not found' })
+          return
+        }
+        json(response, 200, promptIrRecoveryEnvelope(persistedPromptIrEditReceipt))
+        return
+      }
+      if (
+        request.method === 'GET'
+        && url.pathname === `/api/qingmu/projects/project-1/episodes/episode-1/storyboard-revisions/${PROMPT_IR_STORYBOARD_REVISION_ID}/frames/${PROMPT_IR_FRAME_ID}/prompt-ir/selection-command-receipt`
+      ) {
+        if (
+          persistedPromptIrSelectionReceipt === undefined
+          || url.search !== ''
+          || request.headers['idempotency-key'] !== PROMPT_IR_SELECTION_IDEMPOTENCY_KEY
+        ) {
+          json(response, 404, { error: 'PromptIR selection receipt not found' })
+          return
+        }
+        json(response, 200, promptIrRecoveryEnvelope(persistedPromptIrSelectionReceipt))
+        return
+      }
+      if (
+        request.method === 'GET'
         && path === `/api/qingmu/projects/project-1/episodes/episode-1/change-sets/${CHANGE_SET_ID}/command-receipt`
       ) {
         if (persistedReceipt === undefined) {
@@ -1360,6 +1775,10 @@ async function startYimengDouble(
     releaseReferenceCommitResponse: () => resolveReferenceCommitResponse?.(),
     referenceRegenerationCommitAccepted,
     releaseReferenceRegenerationCommitResponse: () => resolveReferenceRegenerationCommitResponse?.(),
+    promptIrEditAccepted,
+    releasePromptIrEditResponse: () => resolvePromptIrEditResponse?.(),
+    promptIrSelectionAccepted,
+    releasePromptIrSelectionResponse: () => resolvePromptIrSelectionResponse?.(),
   }
 }
 
@@ -1411,12 +1830,17 @@ describe.skipIf(
     let releaseReferenceCommitResponse: (() => void) | undefined
     let referenceRegenerationCommitAccepted: Promise<void> | undefined
     let releaseReferenceRegenerationCommitResponse: (() => void) | undefined
+    let promptIrEditAccepted: Promise<void> | undefined
+    let releasePromptIrEditResponse: (() => void) | undefined
+    let promptIrSelectionAccepted: Promise<void> | undefined
+    let releasePromptIrSelectionResponse: (() => void) | undefined
     const capturedRequests: CapturedYimengRequest[] = []
     const scriptReadRevisions: number[] = []
     const actorReadRevisions: number[] = []
     const sceneReadRevisions: number[] = []
     const propReadRevisions: number[] = []
     const sceneReferenceCandidateReads: ReturnType<typeof sceneReferenceCandidatesFixture>[] = []
+    const promptIrWorkflowStatuses: string[] = []
 
     beforeAll(async () => {
       if (IMAGO_CORE_ROOT === undefined || IMAGO_CORE_ROOT === '') {
@@ -1431,6 +1855,7 @@ describe.skipIf(
         sceneReadRevisions,
         propReadRevisions,
         sceneReferenceCandidateReads,
+        promptIrWorkflowStatuses,
       )
       yimengServer = yimeng.server
       commitAccepted = yimeng.commitAccepted
@@ -1443,6 +1868,10 @@ describe.skipIf(
       releaseReferenceCommitResponse = yimeng.releaseReferenceCommitResponse
       referenceRegenerationCommitAccepted = yimeng.referenceRegenerationCommitAccepted
       releaseReferenceRegenerationCommitResponse = yimeng.releaseReferenceRegenerationCommitResponse
+      promptIrEditAccepted = yimeng.promptIrEditAccepted
+      releasePromptIrEditResponse = yimeng.releasePromptIrEditResponse
+      promptIrSelectionAccepted = yimeng.promptIrSelectionAccepted
+      releasePromptIrSelectionResponse = yimeng.releasePromptIrSelectionResponse
       overlayRoot = await mkdtemp(join(tmpdir(), 'dsh-qingmu-script-e2e-'))
       const overlayPath = join(overlayRoot, 'qingmu-script.overlay.yml')
       const qingmuOverlay = resolveQingmuOverlayEntrypoints(await readFile(QINGMU_OVERLAY, 'utf8'))
@@ -1493,6 +1922,8 @@ describe.skipIf(
       releasePropCommitResponse?.()
       releaseReferenceCommitResponse?.()
       releaseReferenceRegenerationCommitResponse?.()
+      releasePromptIrEditResponse?.()
+      releasePromptIrSelectionResponse?.()
       const requestEvidencePath = process.env.QINGMU_REQUEST_EVIDENCE_PATH?.trim()
       if (requestEvidencePath !== undefined && requestEvidencePath !== '') {
         await (async () => {
@@ -2467,6 +2898,167 @@ describe.skipIf(
         }),
       ])
       expect(capturedRequests.filter(request => request.path === recoveryPath)).toEqual([])
+      expect(capturedRequests.filter(request => /(?:provider|worker|generate|generation-job)/i.test(request.path))).toEqual([])
+      expect(await page.locator('html').innerHTML()).not.toContain(IMAGO_ATTESTATION_KEY)
+      expect(await page.content()).not.toContain(YIMENG_TOKEN)
+      await expectNoVisibleTechnicalBrand(page)
+      expect(tripwire.pageErrors).toEqual([])
+      expect(tripwire.warnings).toEqual([])
+    }, 120_000)
+
+    it('connects the Ready PromptIR edit and separate selection pipeline with GET-only recovery', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-prompt-ir-vertical'))
+      const readyReadPath = `/api/qingmu/projects/project-1/episodes/episode-1/storyboard-revisions/${PROMPT_IR_STORYBOARD_REVISION_ID}/frames/${PROMPT_IR_FRAME_ID}/prompt-ir`
+      const proposalPath = `${readyReadPath}/change-sets`
+      const previewPath = `/api/qingmu/change-sets/${PROMPT_IR_CHANGE_SET_ID}:preview`
+      const editCommitPath = `/api/qingmu/change-sets/${PROMPT_IR_CHANGE_SET_ID}:commit`
+      const editRecoveryPath = `${proposalPath}/${PROMPT_IR_CHANGE_SET_ID}/command-receipt`
+      const selectionPath = `${readyReadPath}:select`
+      const selectionRecoveryPath = `${readyReadPath}/selection-command-receipt`
+      const workflowStatusStart = promptIrWorkflowStatuses.length
+
+      await page.reload({ waitUntil: 'load' })
+      await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+      const initialEnterButton = page.getByRole('button', { name: '进入青木 OS' })
+      if (await initialEnterButton.isVisible()) await initialEnterButton.click()
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await dialog.waitFor({ timeout: 10_000 })
+      await dialog.getByLabel('安全边界').getByText('EP1 · 雨夜').waitFor({ timeout: 15_000 })
+      await dialog.getByRole('tab', { name: '剧本与资产' }).click()
+      const workspace = dialog.getByRole('region', { name: 'PromptIR 五字段变更台' })
+      const editor = workspace.getByRole('textbox', { name: 'PromptIR 五字段 JSON' })
+      await expect.poll(() => editor.inputValue(), { timeout: 15_000 })
+        .toBe(JSON.stringify(PROMPT_IR_BASE_EDITABLE, null, 2))
+      await editor.fill(JSON.stringify(PROMPT_IR_CANDIDATE_EDITABLE, null, 2))
+      await workspace.getByRole('button', { name: '先运行 IMAGO 方法检查' }).click()
+
+      const method = workspace.getByRole('region', { name: 'IMAGO PromptIR 方法检查' })
+      await method.waitFor({ timeout: 30_000 })
+      await method.getByText('/editableProjection/videoGenPrompt', { exact: true }).waitFor()
+      await method.getByText('Provider 调用为 0，Worker 未启动，未自动选择，也未推断人工批准或签收。', {
+        exact: true,
+      }).waitFor()
+      expect(capturedRequests.filter(request => request.path === proposalPath)).toEqual([])
+      await method.getByRole('button', { name: '生成 PromptIR ChangeSet 预览' }).click()
+
+      const preview = workspace.getByRole('region', { name: 'PromptIR ChangeSet 预览' })
+      await preview.getByText(PROMPT_IR_CHANGE_SET_ID, { exact: true }).waitFor({ timeout: 20_000 })
+      await preview.getByText(PROMPT_IR_DRAFT_ID, { exact: true }).waitFor()
+      await preview.getByText('$.videoGenPrompt', { exact: true }).waitFor()
+      await preview.getByText('本次编辑提交只创建 Draft，并保留原 Ready；不会自动选择。', { exact: true }).waitFor()
+      const editButton = preview.getByRole('button', { name: '确认提交 PromptIR Draft' })
+      expect(await editButton.isDisabled()).toBe(true)
+      await preview.getByRole('checkbox', {
+        name: '我已核对五字段差异，确认把这次编辑提交为 Draft；这不是批准、签收或选择 Ready。',
+      }).check()
+      await editButton.click()
+
+      if (promptIrEditAccepted === undefined) throw new Error('isolated PromptIR edit gate was not initialized')
+      await promptIrEditAccepted
+      expect(capturedRequests.filter(request => request.path === editCommitPath)).toHaveLength(1)
+      expect(capturedRequests.filter(request => request.path === editRecoveryPath)).toEqual([])
+      expect(await page.evaluate(() => Object.keys(sessionStorage)
+        .filter(key => key.startsWith('qingmu:prompt-ir-edit-recovery:v1:')))).toEqual([
+        `qingmu:prompt-ir-edit-recovery:v1:project-1:episode-1:${PROMPT_IR_STORYBOARD_REVISION_ID}:${PROMPT_IR_FRAME_ID}`,
+      ])
+
+      await page.reload({ waitUntil: 'load' })
+      releasePromptIrEditResponse?.()
+      await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+      const editRecoveryEnterButton = page.getByRole('button', { name: '进入青木 OS' })
+      if (await editRecoveryEnterButton.isVisible()) await editRecoveryEnterButton.click()
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const editRecoveryDialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await editRecoveryDialog.waitFor({ timeout: 10_000 })
+      await editRecoveryDialog.getByLabel('安全边界').getByText('EP1 · 雨夜').waitFor({ timeout: 15_000 })
+      await editRecoveryDialog.getByRole('tab', { name: '剧本与资产' }).click()
+      const editRecoveryWorkspace = editRecoveryDialog.getByRole('region', { name: 'PromptIR 五字段变更台' })
+      const recoveredEditor = editRecoveryWorkspace.getByRole('textbox', { name: 'PromptIR 五字段 JSON' })
+      await expect.poll(() => recoveredEditor.inputValue(), { timeout: 15_000 })
+        .toBe(JSON.stringify(PROMPT_IR_BASE_EDITABLE, null, 2))
+      expect(await recoveredEditor.isDisabled()).toBe(true)
+      await editRecoveryWorkspace.getByRole('button', { name: '只查询原编辑回执' }).click()
+      await editRecoveryWorkspace.getByRole('heading', { name: 'PromptIR 编辑事件已生成 Draft' })
+        .waitFor({ timeout: 20_000 })
+      await editRecoveryWorkspace.getByText(PROMPT_IR_DRAFT_ID, { exact: true }).waitFor()
+      expect(capturedRequests.filter(request => request.path === editCommitPath)).toHaveLength(1)
+      expect(capturedRequests.filter(request => request.path === editRecoveryPath)).toEqual([
+        expect.objectContaining({
+          method: 'GET',
+          idempotencyKey: PROMPT_IR_EDIT_IDEMPOTENCY_KEY,
+          body: undefined,
+        }),
+      ])
+      expect(await page.evaluate(() => Object.keys(sessionStorage)
+        .filter(key => key.startsWith('qingmu:prompt-ir-edit-recovery:v1:')))).toHaveLength(1)
+
+      await editRecoveryWorkspace.getByRole('checkbox', {
+        name: '我另行确认把这个精确 Draft 选择为新的 Ready；这是选择事件，不是批准或签收。',
+      }).check()
+      const selectionButton = editRecoveryWorkspace.getByRole('button', { name: '确认选择为 Ready' })
+      await selectionButton.click()
+      if (promptIrSelectionAccepted === undefined) throw new Error('isolated PromptIR selection gate was not initialized')
+      await promptIrSelectionAccepted
+      expect(capturedRequests.filter(request => request.path === selectionPath)).toHaveLength(1)
+      expect(capturedRequests.filter(request => request.path === selectionRecoveryPath)).toEqual([])
+      expect(await page.evaluate(() => Object.keys(sessionStorage)
+        .filter(key => key.startsWith('qingmu:prompt-ir-selection-recovery:v1:')))).toHaveLength(1)
+
+      await page.reload({ waitUntil: 'load' })
+      releasePromptIrSelectionResponse?.()
+      await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+      const selectionRecoveryEnterButton = page.getByRole('button', { name: '进入青木 OS' })
+      if (await selectionRecoveryEnterButton.isVisible()) await selectionRecoveryEnterButton.click()
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const selectionRecoveryDialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await selectionRecoveryDialog.waitFor({ timeout: 10_000 })
+      await selectionRecoveryDialog.getByLabel('安全边界').getByText('EP1 · 雨夜').waitFor({ timeout: 15_000 })
+      await selectionRecoveryDialog.getByRole('tab', { name: '剧本与资产' }).click()
+      const selectionRecoveryWorkspace = selectionRecoveryDialog.getByRole('region', { name: 'PromptIR 五字段变更台' })
+      const readyReadsBeforeSelectionRecovery = capturedRequests.filter(request => request.path === readyReadPath).length
+      await selectionRecoveryWorkspace.getByRole('button', { name: '只查询原选择回执' }).click()
+      await expect.poll(
+        () => capturedRequests.filter(request => request.path === readyReadPath).length,
+        { timeout: 20_000 },
+      ).toBe(readyReadsBeforeSelectionRecovery + 1)
+      await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage)
+        .filter(key => key.startsWith('qingmu:prompt-ir-'))), { timeout: 20_000 }).toEqual([])
+
+      expect(capturedRequests.filter(request => request.path === proposalPath)).toEqual([
+        expect.objectContaining({
+          method: 'POST',
+          body: {
+            basePromptIrId: PROMPT_IR_READY_ID,
+            baseVersion: PROMPT_IR_READY_VERSION,
+            baseContentSha256: PROMPT_IR_READY_CONTENT_SHA,
+            replacements: { videoGenPrompt: PROMPT_IR_CANDIDATE_EDITABLE.videoGenPrompt },
+          },
+        }),
+      ])
+      expect(capturedRequests.filter(request => request.path === previewPath)).toHaveLength(1)
+      expect(capturedRequests.filter(request => request.path === editCommitPath)).toHaveLength(1)
+      expect(capturedRequests.filter(request => request.path === selectionPath)).toEqual([
+        expect.objectContaining({
+          method: 'POST',
+          body: {
+            draftPromptIrId: PROMPT_IR_DRAFT_ID,
+            draftVersion: PROMPT_IR_DRAFT_VERSION,
+            draftContentSha256: PROMPT_IR_DRAFT_CONTENT_SHA,
+            idempotencyKey: PROMPT_IR_SELECTION_IDEMPOTENCY_KEY,
+          },
+        }),
+      ])
+      expect(capturedRequests.filter(request => request.path === selectionRecoveryPath)).toEqual([
+        expect.objectContaining({
+          method: 'GET',
+          idempotencyKey: PROMPT_IR_SELECTION_IDEMPOTENCY_KEY,
+          body: undefined,
+        }),
+      ])
+      const workflowStatuses = promptIrWorkflowStatuses.slice(workflowStatusStart)
+      expect(workflowStatuses.length).toBeGreaterThan(0)
+      expect(workflowStatuses.every(status => status === 'Ready')).toBe(true)
       expect(capturedRequests.filter(request => /(?:provider|worker|generate|generation-job)/i.test(request.path))).toEqual([])
       expect(await page.locator('html').innerHTML()).not.toContain(IMAGO_ATTESTATION_KEY)
       expect(await page.content()).not.toContain(YIMENG_TOKEN)
