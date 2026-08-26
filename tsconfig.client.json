@@ -65,6 +65,8 @@
     { "path": "./packages/client/ui-layout" },
     { "path": "./packages/client/ui-sidebar" },
     { "path": "./packages/client/ui-brand-official" },
+    { "path": "./packages/experimental/client-ui-brand-qingmu" },
+    { "path": "./packages/experimental/client-ui-qingmu-cockpit" },
     { "path": "./packages/client/ui-conversation" },
     { "path": "./packages/client/ui-tool" },
     { "path": "./packages/client/ui-deliverables" },

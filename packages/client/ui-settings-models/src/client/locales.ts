@@ -98,6 +98,11 @@ export const en = {
   onboardingLater: 'Configure later',
   onboardingSave: 'Save and continue',
   onboardingSaving: 'Saving…',
+  qingmuOnboardingTitle: 'Connect a model when you are ready',
+  qingmuOnboardingDescription: 'Qingmu OS does not bind your team to one model provider. Open Models to choose an installed provider or add a compatible service. You can also enter the read-only workspace first.',
+  qingmuOnboardingOpenModels: 'Open Models',
+  qingmuOnboardingLater: 'Enter read-only workspace',
+  qingmuOnboardingLoadError: 'The model directory is temporarily unavailable. You can still open Models to inspect the connection or enter the read-only workspace.',
   keyRequired: 'Enter an API key to continue.',
 }
 
@@ -200,5 +205,10 @@ export const zh: { [Key in keyof typeof en]: string } = {
   onboardingLater: '稍后配置',
   onboardingSave: '保存并继续',
   onboardingSaving: '保存中…',
+  qingmuOnboardingTitle: '准备好后，连接一个模型',
+  qingmuOnboardingDescription: '青木 OS 不绑定单一模型提供方。你可以打开“模型”，选择已安装的提供方或添加兼容服务；也可以先以只读方式进入工作区。',
+  qingmuOnboardingOpenModels: '打开模型设置',
+  qingmuOnboardingLater: '先以只读方式进入',
+  qingmuOnboardingLoadError: '模型目录暂时不可用。你仍可打开模型设置检查连接，或先以只读方式进入工作区。',
   keyRequired: '请输入 API 密钥后继续。',
 }

@@ -1,0 +1,250 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/health"
+  },
+  {
+    "method": "GET",
+    "path": "/api/projects?page=1&page_size=100"
+  },
+  {
+    "method": "GET",
+    "path": "/api/projects/project-1/episodes"
+  },
+  {
+    "method": "GET",
+    "path": "/api/episodes/episode-1/workflow-projection"
+  },
+  {
+    "method": "GET",
+    "path": "/api/episodes/episode-1/script"
+  },
+  {
+    "method": "GET",
+    "path": "/api/qingmu/projects/project-1/elements/actor/actor-1"
+  },
+  {
+    "method": "POST",
+    "path": "/api/qingmu/episodes/episode-1/script/change-sets",
+    "body": {
+      "baseRevision": 3
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/qingmu/change-sets/changeset-episode-script-1:preview",
+    "body": {
+      "baseRevision": 3
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/qingmu/change-sets/changeset-episode-script-1:commit",
+    "body": {
+      "baseRevision": 3
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/health"
+  },
+  {
+    "method": "GET",
+    "path": "/api/projects?page=1&page_size=100"
+  },
+  {
+    "method": "GET",
+    "path": "/api/projects/project-1/episodes"
+  },
+  {
+    "method": "GET",
+    "path": "/api/episodes/episode-1/workflow-projection"
+  },
+  {
+    "method": "GET",
+    "path": "/api/episodes/episode-1/script"
+  },
+  {
+    "method": "GET",
+    "path": "/api/qingmu/projects/project-1/elements/actor/actor-1"
+  },
+  {
+    "method": "GET",
+    "path": "/api/qingmu/projects/project-1/episodes/episode-1/change-sets/changeset-episode-script-1/command-receipt",
+    "idempotencyKey": "qingmu:changeset-episode-script-1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  {
+    "method": "GET",
+    "path": "/api/episodes/episode-1/script"
+  },
+  {
+    "method": "GET",
+    "path": "/api/episodes/episode-1/workflow-projection"
+  },
+  {
+    "method": "POST",
+    "path": "/api/qingmu/projects/project-1/elements/actor/actor-1/change-sets",
+    "body": {
+      "elementKind": "actor",
+      "operation": "replaceVisualIdentity",
+      "baseRevision": 3,
+      "methodId": "imago-v6-b2ac-actor-profile"
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/qingmu/change-sets/changeset-actor-profile-1:preview",
+    "body": {
+      "targetType": "element_profile",
+      "targetId": "actor-1",
+      "elementKind": "actor",
+      "baseRevision": 3
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/qingmu/change-sets/changeset-actor-profile-1:commit",
+    "body": {
+      "targetType": "element_profile",
+      "targetId": "actor-1",
+      "elementKind": "actor",
+      "baseRevision": 3
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/health"
+  },
+  {
+    "method": "GET",
+    "path": "/api/projects?page=1&page_size=100"
+  },
+  {
+    "method": "GET",
+    "path": "/api/projects/project-1/episodes"
+  },
+  {
+    "method": "GET",
+    "path": "/api/episodes/episode-1/workflow-projection"
+  },
+  {
+    "method": "GET",
+    "path": "/api/episodes/episode-1/script"
+  },
+  {
+    "method": "GET",
+    "path": "/api/qingmu/projects/project-1/elements/actor/actor-1"
+  },
+  {
+    "method": "GET",
+    "path": "/api/qingmu/projects/project-1/elements/actor/actor-1/change-sets/changeset-actor-profile-1/command-receipt",
+    "idempotencyKey": "qingmu:element:v2:6c53ca17104c8927ede85ec814f248617b31c4a0f0b978177023e047b9e09388:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  {
+    "method": "GET",
+    "path": "/api/qingmu/projects/project-1/elements/actor/actor-1"
+  },
+  {
+    "method": "GET",
+    "path": "/api/episodes/episode-1/workflow-projection"
+  },
+  {
+    "method": "GET",
+    "path": "/api/qingmu/projects/project-1/elements/scene/scene-1"
+  },
+  {
+    "method": "POST",
+    "path": "/api/qingmu/projects/project-1/elements/scene/scene-1/change-sets",
+    "body": {
+      "elementKind": "scene",
+      "operation": "replaceVisualPrompt",
+      "baseRevision": 3,
+      "methodId": "imago-v6-b2as-scene-profile"
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/qingmu/change-sets/changeset-scene-profile-1:preview",
+    "body": {
+      "targetType": "element_profile",
+      "targetId": "scene-1",
+      "elementKind": "scene",
+      "baseRevision": 3
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/qingmu/projects/project-1/elements/prop/prop-1"
+  },
+  {
+    "method": "POST",
+    "path": "/api/qingmu/projects/project-1/elements/prop/prop-1/change-sets",
+    "body": {
+      "elementKind": "prop",
+      "operation": "replaceVisualPrompt",
+      "baseRevision": 3,
+      "methodId": "imago-v6-b2as-prop-profile"
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/qingmu/change-sets/changeset-prop-profile-1:preview",
+    "body": {
+      "targetType": "element_profile",
+      "targetId": "prop-1",
+      "elementKind": "prop",
+      "baseRevision": 3
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/qingmu/change-sets/changeset-prop-profile-1:commit",
+    "body": {
+      "targetType": "element_profile",
+      "targetId": "prop-1",
+      "elementKind": "prop",
+      "baseRevision": 3
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/health"
+  },
+  {
+    "method": "GET",
+    "path": "/api/projects?page=1&page_size=100"
+  },
+  {
+    "method": "GET",
+    "path": "/api/projects/project-1/episodes"
+  },
+  {
+    "method": "GET",
+    "path": "/api/episodes/episode-1/workflow-projection"
+  },
+  {
+    "method": "GET",
+    "path": "/api/episodes/episode-1/script"
+  },
+  {
+    "method": "GET",
+    "path": "/api/qingmu/projects/project-1/elements/actor/actor-1"
+  },
+  {
+    "method": "GET",
+    "path": "/api/qingmu/projects/project-1/elements/prop/prop-1"
+  },
+  {
+    "method": "GET",
+    "path": "/api/qingmu/projects/project-1/elements/prop/prop-1/change-sets/changeset-prop-profile-1/command-receipt",
+    "idempotencyKey": "qingmu:element:v2:901eb1d9b9cc01ab20ba965f30018b23198518fd59a65d13cd547a64e931effc:7777777777777777777777777777777777777777777777777777777777777777"
+  },
+  {
+    "method": "GET",
+    "path": "/api/qingmu/projects/project-1/elements/prop/prop-1"
+  },
+  {
+    "method": "GET",
+    "path": "/api/episodes/episode-1/workflow-projection"
+  }
+]

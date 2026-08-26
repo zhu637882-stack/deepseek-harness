@@ -619,6 +619,62 @@ export interface Config {
 
 来源：[`packages/experimental/agent-team/src/types.ts:125`](../packages/experimental/agent-team/src/types.ts)
 
+<a id="deepseek-aidsh-experimental-qingmu-imago-method-adapter"></a>
+
+## `@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter`
+
+需要：`connection`
+
+```ts config-catalog
+/** Deployment-specific path and bounded local compiler execution settings. */
+export interface ImagoMethodAdapterConfig {
+  /** Absolute IMAGO OS Core root containing the reviewed compiler. */
+  readonly coreRoot?: string
+  /** Python executable used only for the local compiler subprocess. */
+  readonly pythonExecutable?: string
+  /** Compiler deadline in milliseconds, from 100 through 60,000. */
+  readonly timeoutMs?: number
+}
+```
+
+来源：[`packages/experimental/qingmu-imago-method-adapter/src/index.ts:108`](../packages/experimental/qingmu-imago-method-adapter/src/index.ts)
+
+<a id="deepseek-aidsh-experimental-qingmu-yimeng-command-adapter"></a>
+
+## `@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter`
+
+需要：`connection`
+
+```ts config-catalog
+/** Deployment-tunable loopback upstream and request deadline. */
+export interface YimengCommandAdapterConfig {
+  /** Pathless loopback HTTP(S) origin of the authoritative Yimeng API. */
+  readonly baseUrl?: string
+  /** Command deadline in milliseconds, from 100 through 60,000. */
+  readonly timeoutMs?: number
+}
+```
+
+来源：[`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:86`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
+
+<a id="deepseek-aidsh-experimental-qingmu-yimeng-read-adapter"></a>
+
+## `@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter`
+
+需要：`connection`
+
+```ts config-catalog
+/** Deployment-tunable upstream address and request deadline. */
+export interface YimengReadAdapterConfig {
+  /** Pathless loopback HTTP(S) origin of the authoritative Yimeng API. */
+  readonly baseUrl?: string
+  /** Read deadline in milliseconds, from 100 through 60,000. */
+  readonly timeoutMs?: number
+}
+```
+
+来源：[`packages/experimental/qingmu-yimeng-read-adapter/src/index.ts:75`](../packages/experimental/qingmu-yimeng-read-adapter/src/index.ts)
+
 <a id="deepseek-aidsh-experimental-tool-agent-team"></a>
 
 ## `@deepseek-ai/dsh-experimental-tool-agent-team`
@@ -3269,6 +3325,9 @@ export interface Config {
 - `@deepseek-ai/dsh-command-goal` — 需要 `commands` · `goals`（[`packages/goal/command-goal/src/index.ts`](../packages/goal/command-goal/src/index.ts)）
 - `@deepseek-ai/dsh-commands`（[`packages/interaction/commands/src/index.ts`](../packages/interaction/commands/src/index.ts)）
 - `@deepseek-ai/dsh-cordis-client-runner`（[`packages/extensions/cordis-client-runner/src/index.ts`](../packages/extensions/cordis-client-runner/src/index.ts)）
+- `@deepseek-ai/dsh-experimental-client-ui-brand-qingmu`（[`packages/experimental/client-ui-brand-qingmu/src/index.ts`](../packages/experimental/client-ui-brand-qingmu/src/index.ts)）
+- `@deepseek-ai/dsh-experimental-client-ui-qingmu-cockpit`（[`packages/experimental/client-ui-qingmu-cockpit/src/index.ts`](../packages/experimental/client-ui-qingmu-cockpit/src/index.ts)）
+- `@deepseek-ai/dsh-experimental-qingmu-web`（[`packages/experimental/qingmu-web/src/index.ts`](../packages/experimental/qingmu-web/src/index.ts)）
 - `@deepseek-ai/dsh-fs-e2b` — 需要 `e2b`（[`packages/e2b/fs-e2b/src/index.ts`](../packages/e2b/fs-e2b/src/index.ts)）
 - `@deepseek-ai/dsh-fs-observation-policy`（[`packages/fs/fs-observation-policy/src/index.ts`](../packages/fs/fs-observation-policy/src/index.ts)）
 - `@deepseek-ai/dsh-goal-round-driver` — 需要 `agents` · `goals` · `sessions`（[`packages/goal/goal-round-driver/src/index.ts`](../packages/goal/goal-round-driver/src/index.ts)）

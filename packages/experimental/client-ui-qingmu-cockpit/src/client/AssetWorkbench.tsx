@@ -1,0 +1,2076 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type {
+  ImagoElementMethodResponse,
+  ImagoReferenceAssetMethodResponse,
+  JsonRecord,
+  QingmuYimengPort,
+  YimengCommitElementProfileResponse,
+  YimengCreateCommentResponse,
+  YimengCreateHumanDecisionResponse,
+  YimengElementProfileResponse,
+  YimengElementReviewFeedResponse,
+  YimengHumanDecision,
+  YimengHumanDecisionValue,
+  YimengPreviewElementProfileResponse,
+  YimengReferenceAssetCandidate,
+  YimengReferenceAssetOperation,
+  YimengReferenceCandidatesResponse,
+  YimengReferencePreviewElementProfileResponse,
+  YimengRecoverElementProfileCommitResponse,
+} from './contracts.ts'
+import type { QingmuCockpitKey } from './locales.ts'
+import {
+  clearCommandCommitRecoveryMarker,
+  createCommandCommitRecoveryMarker,
+  deriveCommandIdempotencyKey,
+  discardCommandCommitRecoveryMarker,
+  readCommandCommitRecoveryMarker,
+  writeCommandCommitRecoveryMarker,
+  type CommandElementKind,
+  type CommandCommitRecoveryMarker,
+  type CommandCommitRecoveryMarkerRead,
+} from './command-commit-recovery.ts'
+import css from './QingmuCockpit.module.css'
+
+const SHA256 = /^[0-9a-f]{64}$/
+
+type Phase = 'empty' | 'loading' | 'draft' | 'preparing' | 'preview' | 'committing' | 'recovering' | 'committed'
+
+const PHASE_LOCALE_KEY = {
+  empty: 'assetPhase_empty',
+  loading: 'assetPhase_loading',
+  draft: 'assetPhase_draft',
+  preparing: 'assetPhase_preparing',
+  preview: 'assetPhase_preview',
+  committing: 'assetPhase_committing',
+  recovering: 'assetPhase_recovering',
+  committed: 'assetPhase_committed',
+} as const satisfies Record<Phase, QingmuCockpitKey>
+
+export interface AssetWorkbenchProps {
+  readonly projectId: string
+  readonly semanticAssets: readonly unknown[]
+  readonly port: QingmuYimengPort
+  readonly t: (key: QingmuCockpitKey) => string
+  readonly onCommitted: () => Promise<void>
+}
+
+interface ElementChoice {
+  readonly id: string
+  readonly kind: CommandElementKind
+  readonly name: string
+}
+
+interface ReferenceProposalLineage {
+  readonly changeSetId: string
+  readonly baseRevision: number
+  readonly baseSnapshotSha256: string
+  readonly payloadSha256: string
+  readonly operation: YimengReferenceAssetOperation
+  readonly candidateAssetId: string
+  readonly candidateAssetSha256: string
+}
+
+const ELEMENT_KIND_LOCALE_KEY = {
+  actor: 'assetKindActor',
+  scene: 'assetKindScene',
+  prop: 'assetKindProp',
+} as const satisfies Record<CommandElementKind, QingmuCockpitKey>
+
+const ELEMENT_ID_FIELD = {
+  actor: 'actorId',
+  scene: 'sceneId',
+  prop: 'propId',
+} as const satisfies Record<CommandElementKind, string>
+
+const REFERENCE_STATUS_LOCALE_KEY = {
+  Unselected: 'assetReferenceStatus_Unselected',
+  Selected: 'assetReferenceStatus_Selected',
+  Rejected: 'assetReferenceStatus_Rejected',
+  Stale: 'assetReferenceStatus_Stale',
+} as const satisfies Record<YimengReferenceAssetCandidate['selectionStatus'], QingmuCockpitKey>
+
+const HUMAN_DECISION_LOCALE_KEY = {
+  approve: 'assetReviewDecisionApprove',
+  reject: 'assetReviewDecisionReject',
+  request_changes: 'assetReviewDecisionRequestChanges',
+} as const satisfies Record<YimengHumanDecisionValue, QingmuCockpitKey>
+
+function semanticElementKind(value: unknown): CommandElementKind | undefined {
+  if (value === 'character' || value === 'actor') return 'actor'
+  if (value === 'scene' || value === 'environment') return 'scene'
+  return value === 'prop' ? 'prop' : undefined
+}
+
+function elementOperation(kind: CommandElementKind): 'replaceVisualIdentity' | 'replaceVisualPrompt' {
+  return kind === 'actor' ? 'replaceVisualIdentity' : 'replaceVisualPrompt'
+}
+
+function elementVisualValue(subject: JsonRecord, kind: CommandElementKind): string {
+  return stringOf(kind === 'actor' ? subject.visualIdentity : subject.visualPrompt) ?? ''
+}
+
+function recordOf(value: unknown): JsonRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as JsonRecord
+    : {}
+}
+
+function hasExactKeys(value: JsonRecord, expected: readonly string[]): boolean {
+  const keys = Object.keys(value)
+  return keys.length === expected.length && keys.every(key => expected.includes(key))
+}
+
+function stringOf(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value : undefined
+}
+
+function boolOf(value: unknown): boolean {
+  return value === true
+}
+
+/** Keep runtime RPC validation exact even when generated TypeScript contracts use literal fields. */
+function runtimeEquals(left: unknown, right: unknown): boolean {
+  return left === right
+}
+
+function isSignalAborted(signal: AbortSignal): boolean {
+  return signal.aborted
+}
+
+function arrayOf(value: unknown): readonly unknown[] {
+  return Array.isArray(value) ? value : []
+}
+
+function isStringArray(value: unknown): boolean {
+  return Array.isArray(value) && value.every(item => typeof item === 'string')
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function assertSnapshot(
+  snapshot: YimengElementProfileResponse,
+  projectId: string,
+  targetId: string,
+  elementKind: CommandElementKind,
+): void {
+  const root = snapshot as unknown as JsonRecord
+  const subject = recordOf(snapshot.subject)
+  if (
+    root.schema !== 'jason.qingmu-element-profile-subject-read.v1'
+    || subject.schema !== 'jason.qingmu-element-profile-subject.v1'
+    || subject.projectId !== projectId
+    || subject.targetType !== 'element_profile'
+    || subject.elementKind !== elementKind
+    || subject[ELEMENT_ID_FIELD[elementKind]] !== targetId
+    || !Number.isSafeInteger(subject.profileRevision)
+    || (subject.profileRevision as number) < 0
+    || !SHA256.test(snapshot.snapshotSha256)
+  ) {
+    throw new Error('易梦返回的元素资料与当前业务对象不一致')
+  }
+}
+
+function isHumanDecisionValue(value: unknown): value is YimengHumanDecisionValue {
+  return value === 'approve' || value === 'reject' || value === 'request_changes'
+}
+
+function sameCommentEvent(left: unknown, right: unknown): boolean {
+  const a = recordOf(left)
+  const b = recordOf(right)
+  return [
+    'id',
+    'subjectType',
+    'subjectId',
+    'subjectRevision',
+    'subjectSha256',
+    'body',
+    'actorId',
+    'actorRole',
+    'authSessionId',
+    'createdAt',
+  ].every(field => a[field] === b[field])
+}
+
+function sameHumanDecision(left: unknown, right: unknown, includeStale = true): boolean {
+  const a = recordOf(left)
+  const b = recordOf(right)
+  const fields = [
+    'id',
+    'subjectType',
+    'subjectId',
+    'subjectRevision',
+    'subjectSha256',
+    'decision',
+    'reason',
+    'actorId',
+    'actorRole',
+    'authSessionId',
+    'decidedAt',
+  ]
+  return fields.every(field => a[field] === b[field])
+    && (!includeStale || a.stale === b.stale)
+}
+
+function assertReviewComment(value: unknown, subjectId: string, field: string): void {
+  const comment = recordOf(value)
+  const body = stringOf(comment.body)
+  if (
+    comment.subjectType !== 'element_profile'
+    || comment.subjectId !== subjectId
+    || !Number.isSafeInteger(comment.subjectRevision)
+    || (comment.subjectRevision as number) < 0
+    || typeof comment.subjectSha256 !== 'string'
+    || !SHA256.test(comment.subjectSha256)
+    || body === undefined
+    || body.length > 8000
+    || stringOf(comment.id) === undefined
+    || stringOf(comment.actorId) === undefined
+    || comment.actorRole !== 'commenter'
+    || stringOf(comment.authSessionId) === undefined
+    || stringOf(comment.createdAt) === undefined
+  ) {
+    throw new Error(`${field} 与当前评论合同不一致`)
+  }
+}
+
+function assertReviewDecision(
+  value: unknown,
+  subject: { readonly id: string; readonly revision: number; readonly sha256: string },
+  field: string,
+): void {
+  const decision = recordOf(value)
+  const stale = decision.subjectId !== subject.id
+    || decision.subjectRevision !== subject.revision
+    || decision.subjectSha256 !== subject.sha256
+  if (
+    decision.subjectType !== 'element_profile'
+    || stringOf(decision.subjectId) === undefined
+    || !Number.isSafeInteger(decision.subjectRevision)
+    || (decision.subjectRevision as number) < 0
+    || typeof decision.subjectSha256 !== 'string'
+    || !SHA256.test(decision.subjectSha256)
+    || !isHumanDecisionValue(decision.decision)
+    || stringOf(decision.reason) === undefined
+    || stringOf(decision.id) === undefined
+    || stringOf(decision.actorId) === undefined
+    || decision.actorRole !== 'approver'
+    || stringOf(decision.authSessionId) === undefined
+    || stringOf(decision.decidedAt) === undefined
+    || decision.stale !== stale
+  ) {
+    throw new Error(`${field} 与正式人工决定合同不一致`)
+  }
+}
+
+function assertReviewFeed(
+  feed: YimengElementReviewFeedResponse,
+  snapshot: YimengElementProfileResponse,
+  projectId: string,
+  targetId: string,
+  elementKind: CommandElementKind,
+): void {
+  const root = recordOf(feed)
+  const subject = recordOf(root.subject)
+  const capabilities = recordOf(root.capabilities)
+  const snapshotSubject = recordOf(snapshot.subject)
+  if (
+    root.schema !== 'jason.qingmu-element-review-feed.v1'
+    || root.projectId !== projectId
+    || root.elementKind !== elementKind
+    || root.targetId !== targetId
+    || subject.type !== 'element_profile'
+    || subject.id !== targetId
+    || subject.revision !== snapshotSubject.profileRevision
+    || subject.sha256 !== snapshot.snapshotSha256
+    || typeof capabilities.canComment !== 'boolean'
+    || typeof capabilities.canDecide !== 'boolean'
+    || !Array.isArray(root.comments)
+    || !Array.isArray(root.decisions)
+    || (root.currentDecision !== null && (
+      typeof root.currentDecision !== 'object'
+      || Array.isArray(root.currentDecision)
+    ))
+  ) {
+    throw new Error('易梦评论与决定未精确绑定当前元素资料版本')
+  }
+  for (const [index, comment] of feed.comments.entries()) {
+    assertReviewComment(comment, targetId, `评论[${String(index)}]`)
+  }
+  for (const [index, decision] of feed.decisions.entries()) {
+    assertReviewDecision(decision, feed.subject, `正式人工决定[${String(index)}]`)
+  }
+  if (feed.currentDecision !== null) {
+    assertReviewDecision(feed.currentDecision, feed.subject, '当前正式人工决定')
+    if (
+      feed.currentDecision.stale
+      || !feed.decisions.some(decision => sameHumanDecision(decision, feed.currentDecision))
+    ) {
+      throw new Error('易梦当前正式人工决定未精确绑定当前元素资料版本')
+    }
+  }
+}
+
+function assertCandidateSelectionUnchanged(
+  before: YimengReferenceCandidatesResponse,
+  after: YimengReferenceCandidatesResponse,
+): void {
+  if (before.candidates.length !== after.candidates.length) {
+    throw new Error('评论后的权威候选选择状态发生变化')
+  }
+  for (const candidate of before.candidates) {
+    const matches = after.candidates.filter(value => (
+      value.assetId === candidate.assetId && value.sha256 === candidate.sha256
+    ))
+    if (
+      matches.length !== 1
+      || matches[0]?.selectionStatus !== candidate.selectionStatus
+      || matches[0]?.isSelected !== candidate.isSelected
+    ) {
+      throw new Error('评论后的权威候选选择状态发生变化')
+    }
+  }
+}
+
+function assertCurrentDecisionUnchanged(
+  before: YimengHumanDecision | null,
+  after: YimengHumanDecision | null,
+): void {
+  if (
+    (before === null) !== (after === null)
+    || (before !== null && after !== null && !sameHumanDecision(before, after))
+  ) {
+    throw new Error('评论后的正式人工决定发生变化')
+  }
+}
+
+function assertCreatedComment(
+  response: YimengCreateCommentResponse,
+  expectedBody: string,
+  feed: YimengElementReviewFeedResponse,
+): JsonRecord {
+  const root = recordOf(response)
+  const comment = recordOf(root.comment)
+  if (
+    root.schema !== 'jason.qingmu-element-comment-result.v1'
+    || comment.subjectRevision !== feed.subject.revision
+    || comment.subjectSha256 !== feed.subject.sha256
+    || comment.body !== expectedBody
+  ) {
+    throw new Error('易梦评论回执与当前元素资料版本不一致')
+  }
+  assertReviewComment(comment, feed.subject.id, '评论回执')
+  return comment
+}
+
+function assertCreatedHumanDecision(
+  response: YimengCreateHumanDecisionResponse,
+  expectedDecision: YimengHumanDecisionValue,
+  expectedReason: string,
+  feed: YimengElementReviewFeedResponse,
+): JsonRecord {
+  const root = recordOf(response)
+  const decision = recordOf(root.decision)
+  if (
+    root.schema !== 'jason.qingmu-element-human-decision-result.v1'
+    || decision.subjectType !== 'element_profile'
+    || decision.subjectId !== feed.subject.id
+    || decision.subjectRevision !== feed.subject.revision
+    || decision.subjectSha256 !== feed.subject.sha256
+    || decision.decision !== expectedDecision
+    || decision.reason !== expectedReason
+    || decision.actorRole !== 'approver'
+    || stringOf(decision.id) === undefined
+    || stringOf(decision.actorId) === undefined
+    || stringOf(decision.authSessionId) === undefined
+    || stringOf(decision.decidedAt) === undefined
+  ) {
+    throw new Error('易梦正式人工决定回执与当前元素资料版本不一致')
+  }
+  return decision
+}
+
+function createReviewIdempotencyKey(lane: 'comment' | 'decision'): string {
+  const nonce = globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+  return `qingmu:element-review:${lane}:${nonce}`
+}
+
+function assertReferenceCandidates(
+  candidates: YimengReferenceCandidatesResponse,
+  snapshot: YimengElementProfileResponse,
+  projectId: string,
+  targetId: string,
+  elementKind: CommandElementKind,
+): void {
+  const subject = recordOf(snapshot.subject)
+  const root = recordOf(candidates)
+  const candidateValues = root.candidates
+  if (
+    root.schema !== 'jason.qingmu-reference-asset-candidates.v1'
+    || root.projectId !== projectId
+    || root.targetType !== 'element_profile'
+    || root.targetId !== targetId
+    || root.elementKind !== elementKind
+    || root.profileRevision !== subject.profileRevision
+    || root.elementSnapshotSha256 !== snapshot.snapshotSha256
+    || root.humanApprovalInferred !== false
+    || !Array.isArray(candidateValues)
+  ) {
+    throw new Error('易梦参考素材候选与当前元素资料快照不一致')
+  }
+  for (const candidateValue of candidateValues) {
+    const candidate = recordOf(candidateValue)
+    const assetId = stringOf(candidate.assetId)
+    const sha256 = stringOf(candidate.sha256)
+    const materializedSha256 = stringOf(candidate.materializedSha256)
+    const qualityProjectionSha256 = stringOf(candidate.qualityProjectionSha256)
+    const qualityStatus = stringOf(candidate.qualityStatus)
+    const selectionStatus = stringOf(candidate.selectionStatus)
+    const decisionKind = stringOf(candidate.decisionKind)
+    if (
+      candidate.projectId !== projectId
+      || candidate.ownerType !== elementKind
+      || candidate.ownerId !== targetId
+      || assetId === undefined
+      || sha256 === undefined
+      || !SHA256.test(sha256)
+      || materializedSha256 === undefined
+      || (materializedSha256 !== '' && !SHA256.test(materializedSha256))
+      || qualityProjectionSha256 === undefined
+      || !SHA256.test(qualityProjectionSha256)
+      || qualityStatus === undefined
+      || !['pending', 'passed', 'failed'].includes(qualityStatus)
+      || selectionStatus === undefined
+      || !['Unselected', 'Selected', 'Rejected', 'Stale'].includes(selectionStatus)
+      || decisionKind === undefined
+      || !['none', 'referenceSelection', 'humanReview'].includes(decisionKind)
+      || typeof candidate.bindingValid !== 'boolean'
+      || typeof candidate.isSelected !== 'boolean'
+      || typeof candidate.formalConsistencyPassed !== 'boolean'
+    ) {
+      throw new Error('易梦参考素材候选血缘与当前元素不一致')
+    }
+  }
+}
+
+function assertReferenceCandidatePostState(
+  candidates: YimengReferenceCandidatesResponse,
+  marker: CommandCommitRecoveryMarker,
+): void {
+  if (
+    marker.operation !== 'selectReferenceAsset'
+    && marker.operation !== 'requestReferenceRegeneration'
+  ) {
+    throw new Error('参考素材提交恢复标记操作无效')
+  }
+  const matches = candidates.candidates.filter(candidate => (
+    candidate.assetId === marker.candidateAssetId
+    && candidate.sha256 === marker.candidateAssetSha256
+  ))
+  if (matches.length !== 1) throw new Error('易梦参考素材提交后未返回唯一目标候选')
+  const candidate = matches[0]
+  if (
+    candidate === undefined
+    || !candidate.bindingValid
+    || candidate.materializedSha256 !== marker.candidateAssetSha256
+  ) {
+    throw new Error('易梦参考素材提交后目标候选血缘不一致')
+  }
+  const valid = marker.operation === 'selectReferenceAsset'
+    ? candidate.selectionStatus === 'Selected'
+      && candidate.isSelected
+      && candidate.decisionKind === 'referenceSelection'
+      && candidate.decisionIdentity.trim() !== ''
+    : candidate.selectionStatus === 'Rejected'
+      && !candidate.isSelected
+      && candidate.decisionKind === 'none'
+      && candidate.decisionIdentity === ''
+  if (!valid) throw new Error('易梦参考素材提交后目标候选状态与操作不一致')
+}
+
+function referenceCandidateEligible(
+  candidate: YimengReferenceAssetCandidate,
+  operation: YimengReferenceAssetOperation,
+): boolean {
+  if (
+    !candidate.bindingValid
+    || candidate.sha256 !== candidate.materializedSha256
+    || candidate.sourceRevisionId === ''
+    || candidate.formalConsistencyCheckId === ''
+  ) return false
+  if (operation === 'selectReferenceAsset') {
+    return candidate.selectionStatus === 'Unselected'
+      && !candidate.isSelected
+      && candidate.qualityStatus === 'passed'
+      && candidate.formalConsistencyPassed
+  }
+  return candidate.selectionStatus === 'Rejected'
+    || (
+      candidate.selectionStatus === 'Selected'
+      && candidate.isSelected
+      && (candidate.decisionKind === 'referenceSelection' || candidate.decisionKind === 'humanReview')
+      && candidate.decisionIdentity !== ''
+    )
+}
+
+function assertMethod(
+  method: ImagoElementMethodResponse,
+  snapshot: YimengElementProfileResponse,
+  projectId: string,
+  targetId: string,
+  elementKind: CommandElementKind,
+): void {
+  const subject = recordOf(method.projection.subject)
+  const profile = recordOf(snapshot.subject)
+  const attestation = recordOf(method.methodAttestation)
+  if (
+    !runtimeEquals(method.schema, 'qingmu.imago-element-method-adapter-result.v1')
+    || !SHA256.test(method.projectionSha256)
+    || subject.project_id !== projectId
+    || subject.target_type !== 'element_profile'
+    || subject.target_id !== targetId
+    || subject.element_kind !== elementKind
+    || subject.scope_type !== 'project'
+    || subject.scope_id !== projectId
+    || subject.base_revision !== profile.profileRevision
+    || subject.base_snapshot_sha256 !== snapshot.snapshotSha256
+    || !runtimeEquals(method.projection.project_state_persisted, false)
+    || !runtimeEquals(method.projection.paid_provider_authority, 'not_granted')
+    || !runtimeEquals(method.projection.selection_authority, 'not_granted')
+    || !runtimeEquals(method.projection.human_approval_inferred, false)
+    || !hasExactKeys(attestation, [
+      'schema',
+      'algorithm',
+      'projectionSha256',
+      'inputSnapshotSha256',
+      'subjectSha256',
+      'signature',
+    ])
+    || attestation.schema !== 'qingmu.imago-element-method-attestation.v1'
+    || attestation.algorithm !== 'hmac-sha256'
+    || !SHA256.test(String(attestation.projectionSha256))
+    || !SHA256.test(String(attestation.inputSnapshotSha256))
+    || !SHA256.test(String(attestation.subjectSha256))
+    || !SHA256.test(String(attestation.signature))
+    || attestation.projectionSha256 !== method.projectionSha256
+    || attestation.inputSnapshotSha256 !== method.projection.input_snapshot_sha256
+  ) {
+    throw new Error('IMAGO 方法投影与当前易梦资料基线不一致')
+  }
+}
+
+function assertReferenceMethod(
+  method: ImagoReferenceAssetMethodResponse,
+  snapshot: YimengElementProfileResponse,
+  candidate: YimengReferenceAssetCandidate,
+  projectId: string,
+  targetId: string,
+  elementKind: CommandElementKind,
+  operation: YimengReferenceAssetOperation,
+): void {
+  const subject = recordOf(snapshot.subject)
+  const root = recordOf(method)
+  const projection = recordOf(root.projection)
+  const target = recordOf(projection.target)
+  const attestation = recordOf(root.methodAttestation)
+  const projectionSha256 = stringOf(root.projectionSha256)
+  const inputSnapshotSha256 = stringOf(projection.input_snapshot_sha256)
+  if (
+    root.schema !== 'qingmu.imago-reference-asset-method-adapter-result.v1'
+    || projectionSha256 === undefined
+    || !SHA256.test(projectionSha256)
+    || projection.schema !== 'qingmu.imago-reference-asset-method-projection.v1'
+    || inputSnapshotSha256 === undefined
+    || !SHA256.test(inputSnapshotSha256)
+    || target.projectId !== projectId
+    || target.elementKind !== elementKind
+    || target.elementId !== targetId
+    || target.profileRevision !== subject.profileRevision
+    || target.snapshotSha256 !== snapshot.snapshotSha256
+    || target.assetId !== candidate.assetId
+    || target.assetSha256 !== candidate.sha256
+    || target.operation !== operation
+    || !Array.isArray(projection.source_bindings)
+    || projection.project_state_persisted !== false
+    || projection.providerCalls !== 0
+    || projection.workerStarted !== false
+    || projection.human_approval_inferred !== false
+    || projection.human_signoff_inferred !== false
+    || projection.selection_executed !== false
+    || !hasExactKeys(attestation, [
+      'schema',
+      'algorithm',
+      'projectionSha256',
+      'inputSnapshotSha256',
+      'targetSha256',
+      'signature',
+    ])
+    || attestation.schema !== 'qingmu.imago-reference-asset-method-attestation.v1'
+    || attestation.algorithm !== 'hmac-sha256'
+    || attestation.projectionSha256 !== projectionSha256
+    || attestation.inputSnapshotSha256 !== inputSnapshotSha256
+    || !SHA256.test(String(attestation.targetSha256))
+    || !SHA256.test(String(attestation.signature))
+  ) {
+    throw new Error('IMAGO 参考素材方法与当前易梦候选血缘不一致')
+  }
+}
+
+function isReferencePreview(
+  preview: YimengPreviewElementProfileResponse,
+): preview is YimengReferencePreviewElementProfileResponse {
+  return preview.schema === 'jason.qingmu-reference-asset-preview.v1'
+}
+
+function assertReferencePreview(
+  preview: YimengPreviewElementProfileResponse,
+  snapshot: YimengElementProfileResponse,
+  changeSetId: string,
+  candidate: YimengReferenceAssetCandidate,
+  projectId: string,
+  targetId: string,
+  elementKind: CommandElementKind,
+  operation: YimengReferenceAssetOperation,
+): asserts preview is YimengReferencePreviewElementProfileResponse {
+  const subject = recordOf(snapshot.subject)
+  const root = recordOf(preview)
+  if (
+    root.schema !== 'jason.qingmu-reference-asset-preview.v1'
+    || root.changeSetId !== changeSetId
+    || root.projectId !== projectId
+    || root.targetType !== 'element_profile'
+    || root.targetId !== targetId
+    || root.elementKind !== elementKind
+    || root.operation !== operation
+    || root.candidateAssetId !== candidate.assetId
+    || root.candidateAssetSha256 !== candidate.sha256
+    || root.providerCalls !== 0
+    || root.workerStarted !== false
+    || root.humanApprovalInferred !== false
+    || (root.candidateDrift === true && root.canCommit === true)
+    || !Number.isSafeInteger(subject.profileRevision)
+  ) {
+    throw new Error('易梦参考素材预览与当前候选、操作或零执行边界不一致')
+  }
+}
+
+function assertPreview(
+  preview: YimengPreviewElementProfileResponse,
+  snapshot: YimengElementProfileResponse,
+  method: ImagoElementMethodResponse,
+  targetId: string,
+  elementKind: CommandElementKind,
+  proposedValue: string,
+): void {
+  if (isReferencePreview(preview)) {
+    throw new Error('易梦返回的元素预览操作类型不一致')
+  }
+  const subject = recordOf(snapshot.subject)
+  const changeSet = preview.changeSet
+  const impact = recordOf(preview.impactAnalysis)
+  if (
+    !runtimeEquals(preview.schema, 'jason.qingmu-change-set-preview.v1')
+    || preview.changeSetId !== changeSet.id
+    || preview.projectId !== subject.projectId
+    || !runtimeEquals(preview.targetType, 'element_profile')
+    || preview.targetId !== targetId
+    || !runtimeEquals(preview.elementKind, elementKind)
+    || !runtimeEquals(preview.operation, elementOperation(elementKind))
+    || preview.baseRevision !== subject.profileRevision
+    || preview.baseSnapshotSha256 !== snapshot.snapshotSha256
+    || preview.payloadSha256 !== changeSet.payloadSha256
+    || preview.methodProjectionSha256 !== method.projectionSha256
+    || (elementKind === 'actor'
+      ? preview.proposedVisualIdentity !== proposedValue || preview.proposedVisualPrompt !== undefined
+      : preview.proposedVisualPrompt !== proposedValue || preview.proposedVisualIdentity !== undefined)
+    || changeSet.projectId !== subject.projectId
+    || !runtimeEquals(changeSet.episodeId, null)
+    || !runtimeEquals(changeSet.targetType, 'element_profile')
+    || changeSet.targetId !== targetId
+    || changeSet.baseRevision !== subject.profileRevision
+    || changeSet.baseSnapshotSha256 !== snapshot.snapshotSha256
+    || !SHA256.test(preview.previewSha256)
+    || !SHA256.test(preview.impactSha256)
+    || !hasExactKeys(impact, [
+      'affectedReferenceAssetIds',
+      'invalidatedApprovalAssetIds',
+      'affectedDerivedAssetIds',
+      'affectedReferencePackIds',
+      'affectedPromptIrIds',
+      'affectedStoryboardFrameIds',
+      'unknowns',
+    ])
+    || !Object.values(impact).every(isStringArray)
+  ) {
+    throw new Error('易梦返回的元素提案、预览或 IMAGO 方法血缘不一致')
+  }
+}
+
+function assertCommitReceiptLineage(
+  receipt: YimengCommitElementProfileResponse,
+  marker: CommandCommitRecoveryMarker,
+): void {
+  if (marker.operation === 'selectReferenceAsset' || marker.operation === 'requestReferenceRegeneration') {
+    const root = recordOf(receipt)
+    const authoritativeSnapshotSha256 = stringOf(root.authoritativeSnapshotSha256)
+    if (
+      root.schema !== 'jason.qingmu-reference-asset-commit-result.v1'
+      || root.changeSetId !== marker.changeSetId
+      || root.projectId !== marker.projectId
+      || root.targetType !== marker.targetType
+      || root.targetId !== marker.targetId
+      || root.elementKind !== marker.elementKind
+      || root.operation !== marker.operation
+      || root.candidateAssetId !== marker.candidateAssetId
+      || root.candidateAssetSha256 !== marker.candidateAssetSha256
+      || root.baseRevision !== marker.baseRevision
+      || root.payloadSha256 !== marker.payloadSha256
+      || root.idempotencyKey !== marker.idempotencyKey
+      || root.changed !== true
+      || root.providerCalls !== 0
+      || root.workerStarted !== false
+      || root.humanApprovalInferred !== false
+      || root.eventType !== (marker.operation === 'selectReferenceAsset'
+        ? 'ReferenceAssetSelected'
+        : 'ReferenceRegenerationRequested')
+      || authoritativeSnapshotSha256 === undefined
+      || !SHA256.test(authoritativeSnapshotSha256)
+    ) {
+      throw new Error('易梦返回的参考素材提交回执与本次 ChangeSet 血缘不一致')
+    }
+    return
+  }
+  if (
+    receipt.schema !== 'jason.qingmu-element-profile-commit-result.v1'
+    || receipt.changeSetId !== marker.changeSetId
+    || receipt.projectId !== marker.projectId
+    || !runtimeEquals(receipt.targetType, marker.targetType)
+    || receipt.targetId !== marker.targetId
+    || receipt.elementKind !== marker.elementKind
+    || receipt.operation !== marker.operation
+    || receipt.operation !== elementOperation(marker.elementKind)
+    || receipt.baseRevision !== marker.baseRevision
+    || receipt.payloadSha256 !== marker.payloadSha256
+    || receipt.idempotencyKey !== marker.idempotencyKey
+    || !SHA256.test(receipt.authoritativeSnapshotSha256)
+    || !SHA256.test(receipt.impactSha256)
+  ) {
+    throw new Error('易梦返回的元素提交回执与本次 ChangeSet 血缘不一致')
+  }
+}
+
+function assertRecoveryLineage(
+  recovery: YimengRecoverElementProfileCommitResponse,
+  marker: CommandCommitRecoveryMarker,
+): YimengCommitElementProfileResponse {
+  if (
+    !runtimeEquals(recovery.schema, 'jason.qingmu-command-receipt-recovery.v1')
+    || !runtimeEquals(recovery.recovered, true)
+    || !SHA256.test(recovery.receiptSha256)
+  ) {
+    throw new Error('易梦返回的元素回执恢复合同不完整')
+  }
+  assertCommitReceiptLineage(recovery.receipt, marker)
+  return recovery.receipt
+}
+
+/** Human-operated Yimeng element profile editor enriched by a stateless IMAGO method projection. */
+export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted }: AssetWorkbenchProps) {
+  const allChoices = useMemo<readonly ElementChoice[]>(() => semanticAssets.flatMap((value) => {
+    const item = recordOf(value)
+    const kind = semanticElementKind(item.type)
+    const id = stringOf(item.assetId)
+    const itemProject = stringOf(item.projectId)
+    if (kind === undefined || id === undefined || (itemProject !== undefined && itemProject !== projectId)) return []
+    return [{ id, kind, name: stringOf(item.name) ?? id }]
+  }), [projectId, semanticAssets])
+  const availableKinds = useMemo<readonly CommandElementKind[]>(
+    () => (['actor', 'scene', 'prop'] as const).filter(kind => allChoices.some(choice => choice.kind === kind)),
+    [allChoices],
+  )
+  const [elementKind, setElementKind] = useState<CommandElementKind>('actor')
+  const choices = useMemo(
+    () => allChoices.filter(choice => choice.kind === elementKind),
+    [allChoices, elementKind],
+  )
+  const [selectedTargetId, setSelectedTargetId] = useState('')
+  const targetId = choices.some(choice => choice.id === selectedTargetId)
+    ? selectedTargetId
+    : choices[0]?.id ?? ''
+  const [snapshot, setSnapshot] = useState<YimengElementProfileResponse>()
+  const [method, setMethod] = useState<ImagoElementMethodResponse>()
+  const [referenceCandidates, setReferenceCandidates] = useState<YimengReferenceCandidatesResponse>()
+  const [referenceOperation, setReferenceOperation] =
+    useState<YimengReferenceAssetOperation>('selectReferenceAsset')
+  const [selectedCandidateId, setSelectedCandidateId] = useState('')
+  const [repairPrompt, setRepairPrompt] = useState('')
+  const [referenceError, setReferenceError] = useState<string>()
+  const [referenceProposalLineage, setReferenceProposalLineage] = useState<ReferenceProposalLineage>()
+  const [reviewFeed, setReviewFeed] = useState<YimengElementReviewFeedResponse>()
+  const [reviewError, setReviewError] = useState<string>()
+  const [reviewBusy, setReviewBusy] = useState<'comment' | 'decision'>()
+  const [reviewStatus, setReviewStatus] = useState<'comment' | 'decision'>()
+  const [commentBody, setCommentBody] = useState('')
+  const [decisionValue, setDecisionValue] = useState<YimengHumanDecisionValue>('approve')
+  const [decisionReason, setDecisionReason] = useState('')
+  const [draft, setDraft] = useState('')
+  const [preview, setPreview] = useState<YimengPreviewElementProfileResponse>()
+  const [commitReceipt, setCommitReceipt] = useState<YimengCommitElementProfileResponse>()
+  const [commitRecovered, setCommitRecovered] = useState(false)
+  const [phase, setPhase] = useState<Phase>('empty')
+  const [confirmed, setConfirmed] = useState(false)
+  const [error, setError] = useState<string>()
+  const [warning, setWarning] = useState<string>()
+  const [recovery, setRecovery] = useState<CommandCommitRecoveryMarkerRead>({ status: 'none' })
+  const abortRef = useRef<AbortController>()
+  const referenceFeedbackRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (availableKinds.includes(elementKind)) return
+    const nextKind = availableKinds[0] ?? 'actor'
+    setElementKind(nextKind)
+    setSelectedTargetId(allChoices.find(choice => choice.kind === nextKind)?.id ?? '')
+  }, [allChoices, availableKinds, elementKind])
+
+  useEffect(() => {
+    if (selectedTargetId !== targetId) setSelectedTargetId(targetId)
+  }, [selectedTargetId, targetId])
+
+  useEffect(() => {
+    setRecovery(targetId === ''
+      ? { status: 'none' }
+      : readCommandCommitRecoveryMarker(projectId, elementKind, targetId))
+  }, [elementKind, projectId, targetId])
+
+  useEffect(() => {
+    if (referenceError !== undefined) referenceFeedbackRef.current?.focus()
+  }, [referenceError])
+
+  const loadSnapshot = useCallback(async (): Promise<void> => {
+    abortRef.current?.abort()
+    setSnapshot(undefined)
+    setMethod(undefined)
+    setReferenceCandidates(undefined)
+    setSelectedCandidateId('')
+    setRepairPrompt('')
+    setReferenceError(undefined)
+    setReferenceProposalLineage(undefined)
+    setReviewFeed(undefined)
+    setReviewError(undefined)
+    setReviewBusy(undefined)
+    setReviewStatus(undefined)
+    setCommentBody('')
+    setDecisionReason('')
+    setPreview(undefined)
+    setCommitReceipt(undefined)
+    setCommitRecovered(false)
+    setConfirmed(false)
+    setError(undefined)
+    setWarning(undefined)
+    if (projectId === '' || targetId === '') {
+      setPhase('empty')
+      return
+    }
+    const controller = new AbortController()
+    abortRef.current = controller
+    setPhase('loading')
+    try {
+      const nextSnapshot = await port.elementProfile({ projectId, elementKind, targetId }, controller.signal)
+      assertSnapshot(nextSnapshot, projectId, targetId, elementKind)
+      const subject = recordOf(nextSnapshot.subject)
+      const nextMethod = await port.elementMethod({
+        projectId,
+        targetType: 'element_profile',
+        targetId,
+        elementKind,
+        scopeType: 'project',
+        scopeId: projectId,
+        baseRevision: subject.profileRevision as number,
+        baseSnapshotSha256: nextSnapshot.snapshotSha256,
+      }, controller.signal)
+      assertMethod(nextMethod, nextSnapshot, projectId, targetId, elementKind)
+      let nextReferenceCandidates: YimengReferenceCandidatesResponse | undefined
+      let nextReviewFeed: YimengElementReviewFeedResponse | undefined
+      const [candidateResult, reviewResult] = await Promise.allSettled([
+        port.referenceCandidates({ projectId, elementKind, targetId }, controller.signal),
+        port.reviewEvents({ projectId, elementKind, targetId }, controller.signal),
+      ])
+      if (candidateResult.status === 'fulfilled') {
+        try {
+          assertReferenceCandidates(candidateResult.value, nextSnapshot, projectId, targetId, elementKind)
+          nextReferenceCandidates = candidateResult.value
+        } catch (cause) {
+          if (!isSignalAborted(controller.signal)) setReferenceError(messageOf(cause))
+        }
+      } else if (!isSignalAborted(controller.signal)) {
+        setReferenceError(messageOf(candidateResult.reason))
+      }
+      if (reviewResult.status === 'fulfilled') {
+        try {
+          assertReviewFeed(reviewResult.value, nextSnapshot, projectId, targetId, elementKind)
+          nextReviewFeed = reviewResult.value
+        } catch (cause) {
+          if (!isSignalAborted(controller.signal)) setReviewError(messageOf(cause))
+        }
+      } else if (!isSignalAborted(controller.signal)) {
+        setReviewError(messageOf(reviewResult.reason))
+      }
+      if (isSignalAborted(controller.signal)) return
+      setSnapshot(nextSnapshot)
+      setMethod(nextMethod)
+      setReferenceCandidates(nextReferenceCandidates)
+      setReviewFeed(nextReviewFeed)
+      setDraft(elementVisualValue(subject, elementKind))
+      setPhase('draft')
+    } catch (cause) {
+      if (!isSignalAborted(controller.signal)) {
+        setError(messageOf(cause))
+        setPhase('empty')
+      }
+    }
+  }, [elementKind, port, projectId, targetId])
+
+  useEffect(() => {
+    void loadSnapshot()
+    return () => { abortRef.current?.abort() }
+  }, [loadSnapshot])
+
+  const prepare = async (): Promise<void> => {
+    if (snapshot === undefined || method === undefined || draft.trim() === '' || recovery.status !== 'none') return
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    setPhase('preparing')
+    setPreview(undefined)
+    setReferenceProposalLineage(undefined)
+    setCommitReceipt(undefined)
+    setConfirmed(false)
+    setError(undefined)
+    setWarning(undefined)
+    const subject = recordOf(snapshot.subject)
+    try {
+      const proposalBase = {
+        projectId,
+        targetType: 'element_profile',
+        targetId,
+        baseRevision: subject.profileRevision as number,
+        baseSnapshotSha256: snapshot.snapshotSha256,
+        methodProjection: method.projection,
+        methodProjectionSha256: method.projectionSha256,
+        methodAttestation: method.methodAttestation,
+        references: [],
+      } as const
+      const proposal = elementKind === 'actor'
+        ? await port.proposeElementProfile({
+          ...proposalBase,
+          elementKind: 'actor',
+          operation: 'replaceVisualIdentity',
+          visualIdentity: draft,
+        }, controller.signal)
+        : await port.proposeElementProfile({
+          ...proposalBase,
+          elementKind,
+          operation: 'replaceVisualPrompt',
+          visualPrompt: draft,
+        }, controller.signal)
+      const changeSet = proposal.changeSet
+      if (
+        !runtimeEquals(proposal.schema, 'jason.qingmu-change-set-proposal.v1')
+        || !runtimeEquals(proposal.nextAction, 'preview')
+        || changeSet.projectId !== projectId
+        || !runtimeEquals(changeSet.episodeId, null)
+        || !runtimeEquals(changeSet.targetType, 'element_profile')
+        || changeSet.targetId !== targetId
+        || changeSet.baseRevision !== subject.profileRevision
+        || changeSet.baseSnapshotSha256 !== snapshot.snapshotSha256
+      ) {
+        throw new Error('易梦返回的元素 ChangeSet 与当前基线不一致')
+      }
+      const nextPreview = await port.previewElementProfile({
+        projectId,
+        targetType: 'element_profile',
+        targetId,
+        elementKind,
+        episodeId: null,
+        changeSetId: changeSet.id,
+        baseRevision: changeSet.baseRevision,
+        baseSnapshotSha256: snapshot.snapshotSha256,
+      }, controller.signal)
+      assertPreview(nextPreview, snapshot, method, targetId, elementKind, draft)
+      if (isSignalAborted(controller.signal)) return
+      setPreview(nextPreview)
+      setPhase('preview')
+    } catch (cause) {
+      if (!isSignalAborted(controller.signal)) {
+        setError(messageOf(cause))
+        setPhase('draft')
+      }
+    }
+  }
+
+  const prepareReference = async (): Promise<void> => {
+    const candidate = referenceCandidates?.candidates.find(value => value.assetId === selectedCandidateId)
+    const prompt = repairPrompt.trim()
+    if (
+      snapshot === undefined
+      || candidate === undefined
+      || !referenceCandidateEligible(candidate, referenceOperation)
+      || recovery.status !== 'none'
+      || (referenceOperation === 'requestReferenceRegeneration' && (prompt === '' || prompt.length > 8000))
+    ) return
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    setPhase('preparing')
+    setPreview(undefined)
+    setReferenceProposalLineage(undefined)
+    setCommitReceipt(undefined)
+    setConfirmed(false)
+    setError(undefined)
+    setReferenceError(undefined)
+    const subject = recordOf(snapshot.subject)
+    try {
+      const referenceMethod = await port.referenceAssetMethod({
+        projectId,
+        elementKind,
+        elementId: targetId,
+        profileRevision: subject.profileRevision as number,
+        snapshotSha256: snapshot.snapshotSha256,
+        assetId: candidate.assetId,
+        assetSha256: candidate.sha256,
+        operation: referenceOperation,
+      }, controller.signal)
+      assertReferenceMethod(
+        referenceMethod,
+        snapshot,
+        candidate,
+        projectId,
+        targetId,
+        elementKind,
+        referenceOperation,
+      )
+      const proposalBase = {
+        projectId,
+        targetType: 'element_profile',
+        targetId,
+        elementKind,
+        operation: referenceOperation,
+        candidateAssetId: candidate.assetId,
+        candidateAssetSha256: candidate.sha256,
+        baseRevision: subject.profileRevision as number,
+        baseSnapshotSha256: snapshot.snapshotSha256,
+        methodProjection: referenceMethod.projection,
+        methodProjectionSha256: referenceMethod.projectionSha256,
+        methodAttestation: referenceMethod.methodAttestation,
+      } as const
+      const proposal = referenceOperation === 'requestReferenceRegeneration'
+        ? await port.proposeReferenceAsset({ ...proposalBase, repairPrompt: prompt }, controller.signal)
+        : await port.proposeReferenceAsset(proposalBase, controller.signal)
+      const changeSet = proposal.changeSet
+      const proposalRoot = recordOf(proposal)
+      const changeSetRoot = recordOf(changeSet)
+      const payloadSha256 = stringOf(changeSetRoot.payloadSha256)
+      if (
+        proposalRoot.schema !== 'jason.qingmu-change-set-proposal.v1'
+        || proposalRoot.nextAction !== 'preview'
+        || changeSetRoot.projectId !== projectId
+        || changeSetRoot.episodeId !== null
+        || changeSetRoot.targetType !== 'element_profile'
+        || changeSetRoot.targetId !== targetId
+        || changeSetRoot.baseRevision !== subject.profileRevision
+        || changeSetRoot.baseSnapshotSha256 !== snapshot.snapshotSha256
+        || payloadSha256 === undefined
+        || !SHA256.test(payloadSha256)
+      ) {
+        throw new Error('易梦返回的参考素材 ChangeSet 与当前候选基线不一致')
+      }
+      const nextPreview = await port.previewElementProfile({
+        projectId,
+        targetType: 'element_profile',
+        targetId,
+        elementKind,
+        episodeId: null,
+        changeSetId: changeSet.id,
+        baseRevision: changeSet.baseRevision,
+        baseSnapshotSha256: snapshot.snapshotSha256,
+        operation: referenceOperation,
+        candidateAssetId: candidate.assetId,
+        candidateAssetSha256: candidate.sha256,
+      }, controller.signal)
+      assertReferencePreview(
+        nextPreview,
+        snapshot,
+        changeSet.id,
+        candidate,
+        projectId,
+        targetId,
+        elementKind,
+        referenceOperation,
+      )
+      if (isSignalAborted(controller.signal)) return
+      setReferenceProposalLineage({
+        changeSetId: changeSet.id,
+        baseRevision: changeSet.baseRevision,
+        baseSnapshotSha256: changeSet.baseSnapshotSha256,
+        payloadSha256: changeSet.payloadSha256,
+        operation: referenceOperation,
+        candidateAssetId: candidate.assetId,
+        candidateAssetSha256: candidate.sha256,
+      })
+      setPreview(nextPreview)
+      setPhase('preview')
+    } catch (cause) {
+      if (!isSignalAborted(controller.signal)) {
+        setReferenceError(messageOf(cause))
+        setReferenceProposalLineage(undefined)
+        setPhase('draft')
+      }
+    }
+  }
+
+  const finishAcceptedCommit = async (
+    receipt: YimengCommitElementProfileResponse,
+    marker: CommandCommitRecoveryMarker,
+    controller: AbortController,
+    recovered: boolean,
+  ): Promise<void> => {
+    assertCommitReceiptLineage(receipt, marker)
+    if (isSignalAborted(controller.signal)) return
+    const referenceMarker = marker.operation === 'selectReferenceAsset'
+      || marker.operation === 'requestReferenceRegeneration'
+    if (!referenceMarker) {
+      setCommitReceipt(receipt)
+      setCommitRecovered(recovered)
+      setPreview(undefined)
+      setConfirmed(false)
+      setPhase('committed')
+    }
+    const [snapshotResult, candidatesResult, reviewResult, workflowResult] = await Promise.allSettled([
+      port.elementProfile({ projectId, elementKind, targetId }, controller.signal),
+      referenceMarker
+        ? port.referenceCandidates({ projectId, elementKind, targetId }, controller.signal)
+        : Promise.resolve(undefined),
+      port.reviewEvents({ projectId, elementKind, targetId }, controller.signal),
+      onCommitted(),
+    ])
+    if (isSignalAborted(controller.signal)) return
+    let authoritativeReadSucceeded = false
+    let referenceReadSucceeded = !referenceMarker
+    let referenceReadError: string | undefined
+    let reviewReadError: string | undefined
+    let methodWarning: string | undefined
+    if (snapshotResult.status === 'fulfilled') {
+      try {
+        assertSnapshot(snapshotResult.value, projectId, targetId, elementKind)
+        const subject = recordOf(snapshotResult.value.subject)
+        authoritativeReadSucceeded = subject.profileRevision === receipt.authoritativeRevision
+          && snapshotResult.value.snapshotSha256 === receipt.authoritativeSnapshotSha256
+        if (authoritativeReadSucceeded) {
+          setSnapshot(snapshotResult.value)
+          setDraft(elementVisualValue(subject, elementKind))
+          if (referenceMarker && candidatesResult.status === 'fulfilled' && candidatesResult.value !== undefined) {
+            try {
+              assertReferenceCandidates(candidatesResult.value, snapshotResult.value, projectId, targetId, elementKind)
+              assertReferenceCandidatePostState(candidatesResult.value, marker)
+              setReferenceCandidates(candidatesResult.value)
+              setSelectedCandidateId('')
+              setRepairPrompt('')
+              referenceReadSucceeded = true
+            } catch (cause) {
+              referenceReadError = messageOf(cause)
+              setReferenceError(referenceReadError)
+            }
+          }
+          if (reviewResult.status === 'fulfilled') {
+            try {
+              assertReviewFeed(reviewResult.value, snapshotResult.value, projectId, targetId, elementKind)
+              setReviewFeed(reviewResult.value)
+              setReviewError(undefined)
+            } catch (cause) {
+              reviewReadError = messageOf(cause)
+              setReviewFeed(undefined)
+              setReviewError(reviewReadError)
+            }
+          } else {
+            reviewReadError = messageOf(reviewResult.reason)
+            setReviewFeed(undefined)
+            setReviewError(reviewReadError)
+          }
+          try {
+            const refreshedMethod = await port.elementMethod({
+              projectId,
+              targetType: 'element_profile',
+              targetId,
+              elementKind,
+              scopeType: 'project',
+              scopeId: projectId,
+              baseRevision: receipt.authoritativeRevision,
+              baseSnapshotSha256: receipt.authoritativeSnapshotSha256,
+            }, controller.signal)
+            assertMethod(refreshedMethod, snapshotResult.value, projectId, targetId, elementKind)
+            if (!isSignalAborted(controller.signal)) setMethod(refreshedMethod)
+          } catch (cause) {
+            setMethod(undefined)
+            methodWarning = messageOf(cause)
+          }
+        }
+      } catch (cause) {
+        methodWarning = messageOf(cause)
+      }
+    }
+    if (!authoritativeReadSucceeded) {
+      reviewReadError = snapshotResult.status === 'rejected'
+        ? messageOf(snapshotResult.reason)
+        : t('assetRecoverySnapshotMismatch')
+      setReviewFeed(undefined)
+      setReviewError(reviewReadError)
+    }
+    const markerCleared = authoritativeReadSucceeded
+      && referenceReadSucceeded
+      && clearCommandCommitRecoveryMarker(marker)
+    if (markerCleared) setRecovery({ status: 'none' })
+    const warnings = [
+      ...(!authoritativeReadSucceeded ? [t('assetRecoverySnapshotMismatch')] : []),
+      ...(snapshotResult.status === 'rejected' ? [messageOf(snapshotResult.reason)] : []),
+      ...(referenceMarker && candidatesResult.status === 'rejected' ? [messageOf(candidatesResult.reason)] : []),
+      ...(workflowResult.status === 'rejected' ? [messageOf(workflowResult.reason)] : []),
+      ...(methodWarning !== undefined ? [methodWarning] : []),
+      ...(authoritativeReadSucceeded && !markerCleared ? [t('receiptRecoveryClearWarning')] : []),
+    ]
+    setWarning(warnings.length > 0 ? warnings.join(' · ') : undefined)
+    if (referenceMarker && !markerCleared) {
+      throw new Error(referenceReadError ?? t('receiptRecoveryClearWarning'))
+    }
+    if (referenceMarker) {
+      setCommitReceipt(receipt)
+      setCommitRecovered(recovered)
+      setPreview(undefined)
+      setConfirmed(false)
+      setPhase('committed')
+    }
+  }
+
+  const commit = async (): Promise<void> => {
+    if (preview === undefined || !preview.canCommit || !confirmed || recovery.status !== 'none') return
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    setPhase('committing')
+    setError(undefined)
+    let marker: CommandCommitRecoveryMarker
+    try {
+      if (isReferencePreview(preview)) {
+        const lineage = referenceProposalLineage
+        if (
+          lineage === undefined
+          || lineage.changeSetId !== preview.changeSetId
+          || lineage.operation !== preview.operation
+          || lineage.candidateAssetId !== preview.candidateAssetId
+          || lineage.candidateAssetSha256 !== preview.candidateAssetSha256
+        ) throw new Error('参考素材预览与提案血缘不一致')
+        marker = createCommandCommitRecoveryMarker({
+          projectId,
+          targetType: 'element_profile',
+          elementKind,
+          targetId,
+          changeSetId: lineage.changeSetId,
+          baseRevision: lineage.baseRevision,
+          baseSnapshotSha256: lineage.baseSnapshotSha256,
+          payloadSha256: lineage.payloadSha256,
+          idempotencyKey: await deriveCommandIdempotencyKey(lineage.changeSetId, lineage.payloadSha256),
+          operation: lineage.operation,
+          candidateAssetId: lineage.candidateAssetId,
+          candidateAssetSha256: lineage.candidateAssetSha256,
+        })
+      } else {
+        marker = createCommandCommitRecoveryMarker({
+          projectId,
+          targetType: 'element_profile',
+          elementKind,
+          targetId,
+          changeSetId: preview.changeSetId,
+          baseRevision: preview.baseRevision,
+          baseSnapshotSha256: preview.baseSnapshotSha256,
+          payloadSha256: preview.payloadSha256,
+          idempotencyKey: await deriveCommandIdempotencyKey(preview.changeSetId, preview.payloadSha256),
+          operation: preview.operation,
+        })
+      }
+      if (isSignalAborted(controller.signal)) return
+    } catch (cause) {
+      if (!isSignalAborted(controller.signal)) {
+        setError(messageOf(cause))
+        setPhase('preview')
+      }
+      return
+    }
+    const existing = readCommandCommitRecoveryMarker(projectId, elementKind, targetId)
+    if (existing.status !== 'none') {
+      setRecovery(existing)
+      setError(t('assetRecoveryExistingMarker'))
+      setPhase('preview')
+      return
+    }
+    if (!writeCommandCommitRecoveryMarker(marker)) {
+      setError(t('receiptRecoveryStorageFailed'))
+      setPhase('preview')
+      return
+    }
+    setRecovery({ status: 'ready', marker })
+    try {
+      const commandBase = {
+        projectId: marker.projectId,
+        targetType: marker.targetType,
+        targetId: marker.targetId,
+        elementKind: marker.elementKind,
+        episodeId: null,
+        changeSetId: marker.changeSetId,
+        baseRevision: marker.baseRevision,
+        baseSnapshotSha256: marker.baseSnapshotSha256,
+        idempotencyKey: marker.idempotencyKey,
+        expectedPayloadSha256: marker.payloadSha256,
+      } as const
+      const result = marker.operation === 'selectReferenceAsset'
+        || marker.operation === 'requestReferenceRegeneration'
+        ? await port.commitElementProfile({
+          ...commandBase,
+          operation: marker.operation,
+          candidateAssetId: marker.candidateAssetId,
+          candidateAssetSha256: marker.candidateAssetSha256,
+        }, controller.signal)
+        : await port.commitElementProfile(commandBase, controller.signal)
+      await finishAcceptedCommit(result, marker, controller, false)
+    } catch (cause) {
+      if (!isSignalAborted(controller.signal)) {
+        setError(messageOf(cause))
+        setPhase('preview')
+      }
+    }
+  }
+
+  const recover = async (): Promise<void> => {
+    if (recovery.status !== 'ready') return
+    const marker = recovery.marker
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    setPhase('recovering')
+    setError(undefined)
+    try {
+      const recoveryBase = {
+        projectId: marker.projectId,
+        targetType: marker.targetType,
+        targetId: marker.targetId,
+        elementKind: marker.elementKind,
+        episodeId: null,
+        changeSetId: marker.changeSetId,
+        baseRevision: marker.baseRevision,
+        baseSnapshotSha256: marker.baseSnapshotSha256,
+        idempotencyKey: marker.idempotencyKey,
+        expectedPayloadSha256: marker.payloadSha256,
+      } as const
+      const recovered = marker.operation === 'selectReferenceAsset'
+        || marker.operation === 'requestReferenceRegeneration'
+        ? await port.recoverElementProfileCommit({
+          ...recoveryBase,
+          operation: marker.operation,
+          candidateAssetId: marker.candidateAssetId,
+          candidateAssetSha256: marker.candidateAssetSha256,
+        }, controller.signal)
+        : await port.recoverElementProfileCommit(recoveryBase, controller.signal)
+      if (isSignalAborted(controller.signal)) return
+      await finishAcceptedCommit(assertRecoveryLineage(recovered, marker), marker, controller, true)
+    } catch (cause) {
+      if (!isSignalAborted(controller.signal)) {
+        setError(messageOf(cause))
+        setPhase(snapshot === undefined ? 'empty' : 'draft')
+      }
+    }
+  }
+
+  const discardRecovery = (): void => {
+    if (targetId !== '' && discardCommandCommitRecoveryMarker(projectId, elementKind, targetId)) {
+      setRecovery({ status: 'none' })
+      setError(undefined)
+      return
+    }
+    setRecovery(targetId === '' ? { status: 'none' } : readCommandCommitRecoveryMarker(projectId, elementKind, targetId))
+    setError(t('receiptRecoveryDiscardFailed'))
+  }
+
+  const submitComment = async (): Promise<void> => {
+    const body = commentBody.trim()
+    const baselineFeed = reviewFeed
+    const baselineCandidates = referenceCandidates
+    if (
+      snapshot === undefined
+      || baselineFeed === undefined
+      || !baselineFeed.capabilities.canComment
+      || body === ''
+      || body.length > 8000
+      || recovery.status !== 'none'
+    ) return
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    setReviewBusy('comment')
+    setReviewError(undefined)
+    setReviewStatus(undefined)
+    try {
+      const response = await port.createComment({
+        projectId,
+        elementKind,
+        targetId,
+        expectedSubjectRevision: baselineFeed.subject.revision,
+        expectedSubjectSha256: baselineFeed.subject.sha256,
+        body,
+        idempotencyKey: createReviewIdempotencyKey('comment'),
+      }, controller.signal)
+      const createdComment = assertCreatedComment(response, body, baselineFeed)
+      const [feedResult, candidatesResult] = await Promise.allSettled([
+        port.reviewEvents({ projectId, elementKind, targetId }, controller.signal),
+        baselineCandidates === undefined
+          ? Promise.resolve(undefined)
+          : port.referenceCandidates({ projectId, elementKind, targetId }, controller.signal),
+      ])
+      if (isSignalAborted(controller.signal)) return
+      if (feedResult.status === 'rejected') throw feedResult.reason
+      const refreshedFeed = feedResult.value
+      assertReviewFeed(refreshedFeed, snapshot, projectId, targetId, elementKind)
+      assertCurrentDecisionUnchanged(baselineFeed.currentDecision, refreshedFeed.currentDecision)
+      if (!refreshedFeed.comments.some(comment => sameCommentEvent(comment, createdComment))) {
+        throw new Error('评论后重读未返回刚刚记录的评论')
+      }
+      if (baselineCandidates !== undefined) {
+        if (candidatesResult.status === 'fulfilled' && candidatesResult.value !== undefined) {
+          assertReferenceCandidates(candidatesResult.value, snapshot, projectId, targetId, elementKind)
+          assertCandidateSelectionUnchanged(baselineCandidates, candidatesResult.value)
+          setReferenceCandidates(candidatesResult.value)
+          setReferenceError(undefined)
+        } else {
+          setReferenceError(candidatesResult.status === 'rejected'
+            ? messageOf(candidatesResult.reason)
+            : t('assetReferenceLoadError'))
+        }
+      }
+      setReviewFeed(refreshedFeed)
+      setCommentBody('')
+      setReviewStatus('comment')
+    } catch (cause) {
+      if (!isSignalAborted(controller.signal)) setReviewError(messageOf(cause))
+    } finally {
+      if (abortRef.current === controller) setReviewBusy(undefined)
+    }
+  }
+
+  const submitHumanDecision = async (): Promise<void> => {
+    const reason = decisionReason.trim()
+    const baselineFeed = reviewFeed
+    if (
+      snapshot === undefined
+      || baselineFeed === undefined
+      || !baselineFeed.capabilities.canDecide
+      || reason === ''
+      || reason.length > 8000
+      || recovery.status !== 'none'
+    ) return
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    setReviewBusy('decision')
+    setReviewError(undefined)
+    setReviewStatus(undefined)
+    try {
+      const response = await port.createHumanDecision({
+        projectId,
+        elementKind,
+        targetId,
+        expectedSubjectRevision: baselineFeed.subject.revision,
+        expectedSubjectSha256: baselineFeed.subject.sha256,
+        decision: decisionValue,
+        reason,
+        idempotencyKey: createReviewIdempotencyKey('decision'),
+      }, controller.signal)
+      const createdDecision = assertCreatedHumanDecision(response, decisionValue, reason, baselineFeed)
+      const refreshedFeed = await port.reviewEvents({ projectId, elementKind, targetId }, controller.signal)
+      if (isSignalAborted(controller.signal)) return
+      assertReviewFeed(refreshedFeed, snapshot, projectId, targetId, elementKind)
+      if (
+        refreshedFeed.currentDecision === null
+        || refreshedFeed.currentDecision.stale
+        || !sameHumanDecision(refreshedFeed.currentDecision, createdDecision, false)
+      ) {
+        throw new Error('正式人工决定后重读未返回精确绑定的当前决定')
+      }
+      setReviewFeed(refreshedFeed)
+      setDecisionReason('')
+      setReviewStatus('decision')
+    } catch (cause) {
+      if (!isSignalAborted(controller.signal)) setReviewError(messageOf(cause))
+    } finally {
+      if (abortRef.current === controller) setReviewBusy(undefined)
+    }
+  }
+
+  const busy = phase === 'loading'
+    || phase === 'preparing'
+    || phase === 'committing'
+    || phase === 'recovering'
+    || reviewBusy !== undefined
+  const subject = recordOf(snapshot?.subject)
+  const fieldHints = arrayOf(method?.projection.field_hints)
+  const checklist = arrayOf(method?.projection.checklist)
+  const reviewCard = recordOf(method?.projection.review_card)
+  const hardVetoes = arrayOf(reviewCard.hard_vetoes)
+  const candidateItems = referenceCandidates?.candidates ?? []
+  const selectedCandidate = candidateItems.find(candidate => candidate.assetId === selectedCandidateId)
+  const referenceInputValid = selectedCandidate !== undefined
+    && referenceCandidateEligible(selectedCandidate, referenceOperation)
+    && (referenceOperation === 'selectReferenceAsset'
+      || (repairPrompt.trim() !== '' && repairPrompt.trim().length <= 8000))
+  const visualFieldLabel = t(elementKind === 'actor' ? 'assetIdentityLabel' : 'assetPromptLabel')
+  const referencePreview = preview !== undefined && isReferencePreview(preview) ? preview : undefined
+  const visualPreview = preview !== undefined && !isReferencePreview(preview) ? preview : undefined
+  const baseVisual = visualPreview === undefined ? '' : elementVisualValue(recordOf(visualPreview.baseSubject), elementKind)
+  const currentVisual = visualPreview === undefined ? '' : elementVisualValue(recordOf(visualPreview.authoritativeCurrentSubject), elementKind)
+  const proposedVisual = visualPreview === undefined
+    ? ''
+    : elementKind === 'actor'
+      ? visualPreview.proposedVisualIdentity ?? ''
+      : visualPreview.proposedVisualPrompt ?? ''
+  const impactGroups = visualPreview === undefined ? [] : [
+    { label: t('assetImpactReferenceAssets'), values: visualPreview.impactAnalysis.affectedReferenceAssetIds },
+    { label: t('assetImpactApprovals'), values: visualPreview.impactAnalysis.invalidatedApprovalAssetIds },
+    { label: t('assetImpactDerivedAssets'), values: visualPreview.impactAnalysis.affectedDerivedAssetIds },
+    { label: t('assetImpactReferencePacks'), values: visualPreview.impactAnalysis.affectedReferencePackIds },
+    { label: t('assetImpactPromptIr'), values: visualPreview.impactAnalysis.affectedPromptIrIds },
+    { label: t('assetImpactStoryboardFrames'), values: visualPreview.impactAnalysis.affectedStoryboardFrameIds },
+    { label: t('assetImpactUnknowns'), values: visualPreview.impactAnalysis.unknowns },
+  ]
+
+  return (
+    <section className={css.scriptWorkspace} aria-label={t('assetWorkbenchTitle')}>
+      <div className={css.scriptWorkspaceHead}>
+        <div>
+          <h3>{t('assetWorkbenchTitle')}</h3>
+          <p>{t('assetWorkbenchBoundary')}</p>
+        </div>
+        <button type="button" onClick={() => { void loadSnapshot() }} disabled={busy || targetId === ''}>
+          {t('assetReload')}
+        </button>
+      </div>
+
+      {availableKinds.length > 0 && (
+        <div className={css.assetKindSwitch} role="group" aria-label={t('assetChooseElement')}>
+          {availableKinds.map(kind => (
+            <button
+              type="button"
+              key={kind}
+              aria-pressed={elementKind === kind}
+              disabled={busy}
+              onClick={() => {
+                abortRef.current?.abort()
+                setElementKind(kind)
+                setSelectedTargetId(allChoices.find(choice => choice.kind === kind)?.id ?? '')
+              }}
+            >
+              {t(ELEMENT_KIND_LOCALE_KEY[kind])}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {choices.length === 0 ? <p className={css.empty}>{t('assetNoElements')}</p> : (
+        <label className={css.assetSubjectPicker}>
+          <span>{t('assetChooseElement')}</span>
+          <select value={targetId} onChange={(event) => { setSelectedTargetId(event.target.value) }} disabled={busy}>
+            {choices.map(choice => <option value={choice.id} key={choice.id}>{choice.name}</option>)}
+          </select>
+        </label>
+      )}
+
+      {snapshot !== undefined && (
+        <dl className={css.scriptMeta}>
+          <div><dt>{t('assetProfileRevision')}</dt><dd>{String(subject.profileRevision)}</dd></div>
+          <div><dt>{t('assetSnapshotHash')}</dt><dd>{snapshot.snapshotSha256}</dd></div>
+          <div><dt>{t('scriptState')}</dt><dd>{t(PHASE_LOCALE_KEY[phase])}</dd></div>
+        </dl>
+      )}
+
+      {recovery.status === 'ready' && (
+        <section className={css.recoveryDock} aria-label={t('assetRecoveryTitle')}>
+          <div><h4>{t('assetRecoveryTitle')}</h4><p>{t('assetRecoveryBody')}</p></div>
+          <dl>
+            <div><dt>{t('changeSet')}</dt><dd>{recovery.marker.changeSetId}</dd></div>
+            <div><dt>{t('assetProfileRevision')}</dt><dd>{recovery.marker.baseRevision}</dd></div>
+            <div><dt>{t('payloadHash')}</dt><dd>{recovery.marker.payloadSha256}</dd></div>
+          </dl>
+          <div className={css.recoveryActions}>
+            <button type="button" className={css.primaryAction} onClick={() => { void recover() }} disabled={busy}>
+              {phase === 'recovering' ? t('recoveringReceipt') : t('recoverReceipt')}
+            </button>
+            <button type="button" onClick={discardRecovery} disabled={busy}>{t('discardRecoveryMarker')}</button>
+          </div>
+        </section>
+      )}
+
+      {recovery.status === 'invalid' && (
+        <div className={css.scriptError} role="alert">
+          <strong>{t('receiptRecoveryInvalidTitle')}</strong>
+          <p>{t('receiptRecoveryInvalidBody')}: {recovery.error}</p>
+          <button type="button" onClick={discardRecovery} disabled={busy}>{t('discardRecoveryMarker')}</button>
+        </div>
+      )}
+
+      {method !== undefined && (
+        <div className={css.methodGrid}>
+          <section>
+            <h4>{t('assetMethodTitle')}</h4>
+            <ul>{fieldHints.map((value, index) => {
+              const hint = recordOf(value)
+              return <li key={stringOf(hint.hint_id) ?? String(index)}><strong>{stringOf(hint.title) ?? t('unknown')}</strong><span>{stringOf(hint.guidance) ?? ''}</span></li>
+            })}</ul>
+          </section>
+          <section>
+            <h4>{t('assetMethodChecklist')}</h4>
+            <ul>{checklist.map((value, index) => {
+              const item = recordOf(value)
+              return <li key={stringOf(item.check_id) ?? String(index)}>{stringOf(item.label) ?? t('unknown')}</li>
+            })}</ul>
+          </section>
+          <section>
+            <h4>{stringOf(reviewCard.title) ?? t('assetReviewCard')}</h4>
+            <ul>{hardVetoes.map((value, index) => <li key={`${String(index)}-${String(value)}`}>{String(value)}</li>)}</ul>
+          </section>
+        </div>
+      )}
+
+      {snapshot !== undefined && (
+        <label className={css.scriptEditor}>
+          <span>{visualFieldLabel}</span>
+          <textarea
+            aria-label={visualFieldLabel}
+            value={draft}
+            onChange={(event) => {
+              setDraft(event.target.value)
+              setPreview(undefined)
+              setReferenceProposalLineage(undefined)
+              setConfirmed(false)
+              setPhase('draft')
+            }}
+            disabled={busy || method === undefined || recovery.status !== 'none'}
+            rows={8}
+          />
+          <small>{t('assetPromptHint')}</small>
+        </label>
+      )}
+
+      {snapshot !== undefined && (
+        <div className={css.scriptActions}>
+          <button
+            type="button"
+            className={css.primaryAction}
+            onClick={() => { void prepare() }}
+            disabled={busy || method === undefined || draft.trim() === '' || recovery.status !== 'none'}
+          >
+            {phase === 'preparing' ? t('assetPreparing') : t('assetPrepare')}
+          </button>
+          <span>{t('assetPrepareBoundary')}</span>
+        </div>
+      )}
+
+      {snapshot !== undefined && (
+        <section className={css.previewDock} aria-label={t('assetReferenceTitle')}>
+          <div className={css.previewHead}>
+            <div><h4>{t('assetReferenceTitle')}</h4><p>{t('assetReferenceBoundary')}</p></div>
+          </div>
+          <div className={css.assetKindSwitch} role="group" aria-label={t('assetReferenceTitle')}>
+            <button
+              type="button"
+              aria-pressed={referenceOperation === 'selectReferenceAsset'}
+              disabled={busy || recovery.status !== 'none'}
+              onClick={() => {
+                setReferenceOperation('selectReferenceAsset')
+                setSelectedCandidateId('')
+                setRepairPrompt('')
+                setPreview(undefined)
+                setReferenceProposalLineage(undefined)
+                setConfirmed(false)
+                setReferenceError(undefined)
+                setPhase('draft')
+              }}
+            >
+              {t('assetReferenceSelectOperation')}
+            </button>
+            <button
+              type="button"
+              aria-pressed={referenceOperation === 'requestReferenceRegeneration'}
+              disabled={busy || recovery.status !== 'none'}
+              onClick={() => {
+                setReferenceOperation('requestReferenceRegeneration')
+                setSelectedCandidateId('')
+                setPreview(undefined)
+                setReferenceProposalLineage(undefined)
+                setConfirmed(false)
+                setReferenceError(undefined)
+                setPhase('draft')
+              }}
+            >
+              {t('assetReferenceRegenerateOperation')}
+            </button>
+          </div>
+          <fieldset disabled={busy || recovery.status !== 'none'}>
+            <legend>{t('assetReferenceCandidates')}</legend>
+            {candidateItems.length === 0 ? <p className={css.empty}>{t('assetReferenceNoCandidates')}</p> : (
+              <div className={css.methodGrid}>
+                {candidateItems.map((candidate) => {
+                  const eligible = referenceCandidateEligible(candidate, referenceOperation)
+                  const status = t(REFERENCE_STATUS_LOCALE_KEY[candidate.selectionStatus])
+                  return (
+                    <label key={`${candidate.assetId}:${candidate.sha256}`}>
+                      <input
+                        type="radio"
+                        name={`reference-candidate-${projectId}-${elementKind}-${targetId}`}
+                        checked={selectedCandidateId === candidate.assetId}
+                        disabled={!eligible}
+                        onChange={() => {
+                          setSelectedCandidateId(candidate.assetId)
+                          setPreview(undefined)
+                          setReferenceProposalLineage(undefined)
+                          setConfirmed(false)
+                          setReferenceError(undefined)
+                          setPhase('draft')
+                        }}
+                      />
+                      <strong>{candidate.assetId}</strong>
+                      <span>{status}</span>
+                      <small>{candidate.sha256}</small>
+                    </label>
+                  )
+                })}
+              </div>
+            )}
+          </fieldset>
+          {referenceOperation === 'requestReferenceRegeneration' && (
+            <label className={css.scriptEditor}>
+              <span>{t('assetReferenceRepairPrompt')}</span>
+              <textarea
+                aria-label={t('assetReferenceRepairPrompt')}
+                value={repairPrompt}
+                maxLength={8000}
+                rows={5}
+                disabled={busy || recovery.status !== 'none'}
+                onChange={(event) => {
+                  setRepairPrompt(event.target.value)
+                  setPreview(undefined)
+                  setReferenceProposalLineage(undefined)
+                  setConfirmed(false)
+                  setReferenceError(undefined)
+                  setPhase('draft')
+                }}
+              />
+              <small>{t('assetReferenceRepairPromptHint')}</small>
+            </label>
+          )}
+          <div className={css.scriptActions}>
+            <button
+              type="button"
+              className={css.primaryAction}
+              onClick={() => { void prepareReference() }}
+              disabled={busy || !referenceInputValid || recovery.status !== 'none'}
+            >
+              {t(referenceOperation === 'selectReferenceAsset'
+                ? 'assetReferencePrepareSelect'
+                : 'assetReferencePrepareRegenerate')}
+            </button>
+            <span aria-live="polite">
+              {t(referenceOperation === 'selectReferenceAsset'
+                ? 'assetReferenceSelectNotice'
+                : 'assetReferenceRegenerateNotice')}
+            </span>
+          </div>
+        </section>
+      )}
+
+      {referenceError !== undefined && (
+        <div ref={referenceFeedbackRef} tabIndex={-1} className={css.scriptError} role="alert">
+          <strong>{t('assetReferenceLoadError')}</strong><p>{referenceError}</p>
+        </div>
+      )}
+
+      {snapshot !== undefined && (
+        <section className={css.previewDock} aria-label={t('assetReviewEventsTitle')}>
+          <div className={css.previewHead}>
+            <div>
+              <h4>{t('assetReviewEventsTitle')}</h4>
+              <p>{t('assetReviewEventsBoundary')}</p>
+            </div>
+          </div>
+          {reviewFeed !== undefined && (
+            <dl className={css.previewMeta}>
+              <div><dt>{t('assetReviewSubject')}</dt><dd>{reviewFeed.subject.id}</dd></div>
+              <div><dt>{t('assetProfileRevision')}</dt><dd>{reviewFeed.subject.revision}</dd></div>
+              <div><dt>{t('assetSnapshotHash')}</dt><dd>{reviewFeed.subject.sha256}</dd></div>
+            </dl>
+          )}
+          {reviewError !== undefined && (
+            <div className={css.scriptError} role="alert">
+              <strong>{t(reviewFeed === undefined ? 'assetReviewLoadError' : 'assetReviewOperationError')}</strong>
+              <p>{reviewError}</p>
+            </div>
+          )}
+          {reviewFeed === undefined && <p className={css.empty} role="status">{t('assetReviewLoadBlocked')}</p>}
+          <div className={css.methodGrid}>
+            <section aria-label={t('assetReviewCommentTitle')}>
+              <h5>{t('assetReviewCommentTitle')}</h5>
+              {reviewFeed !== undefined && !reviewFeed.capabilities.canComment && (
+                <p role="status">{t('assetReviewCommentBlockedPermission')}</p>
+              )}
+              <label className={css.scriptEditor}>
+                <span>{t('assetReviewCommentLabel')}</span>
+                <textarea
+                  aria-label={t('assetReviewCommentLabel')}
+                  value={commentBody}
+                  maxLength={8000}
+                  rows={4}
+                  disabled={busy
+                    || reviewFeed?.capabilities.canComment !== true
+                    || recovery.status !== 'none'}
+                  onChange={(event) => {
+                    setCommentBody(event.target.value)
+                    setReviewError(undefined)
+                    setReviewStatus(undefined)
+                  }}
+                />
+              </label>
+              <div className={css.scriptActions}>
+                <button
+                  type="button"
+                  className={css.primaryAction}
+                  onClick={() => { void submitComment() }}
+                  disabled={busy
+                    || reviewFeed?.capabilities.canComment !== true
+                    || commentBody.trim() === ''
+                    || recovery.status !== 'none'}
+                >
+                  {reviewBusy === 'comment'
+                    ? t('assetReviewCommentSubmitting')
+                    : t('assetReviewCommentSubmit')}
+                </button>
+              </div>
+            </section>
+            <section aria-label={t('assetReviewDecisionTitle')}>
+              <h5>{t('assetReviewDecisionTitle')}</h5>
+              {reviewFeed !== undefined && !reviewFeed.capabilities.canDecide && (
+                <p role="status">{t('assetReviewDecisionBlockedPermission')}</p>
+              )}
+              <label className={css.assetSubjectPicker}>
+                <span>{t('assetReviewDecisionValue')}</span>
+                <select
+                  aria-label={t('assetReviewDecisionValue')}
+                  value={decisionValue}
+                  disabled={busy || reviewFeed?.capabilities.canDecide !== true || recovery.status !== 'none'}
+                  onChange={(event) => {
+                    if (isHumanDecisionValue(event.target.value)) setDecisionValue(event.target.value)
+                    setReviewError(undefined)
+                    setReviewStatus(undefined)
+                  }}
+                >
+                  <option value="approve">{t('assetReviewDecisionApprove')}</option>
+                  <option value="reject">{t('assetReviewDecisionReject')}</option>
+                  <option value="request_changes">{t('assetReviewDecisionRequestChanges')}</option>
+                </select>
+              </label>
+              <label className={css.scriptEditor}>
+                <span>{t('assetReviewDecisionReason')}</span>
+                <textarea
+                  aria-label={t('assetReviewDecisionReason')}
+                  value={decisionReason}
+                  maxLength={8000}
+                  rows={4}
+                  disabled={busy || reviewFeed?.capabilities.canDecide !== true || recovery.status !== 'none'}
+                  onChange={(event) => {
+                    setDecisionReason(event.target.value)
+                    setReviewError(undefined)
+                    setReviewStatus(undefined)
+                  }}
+                />
+              </label>
+              <div className={css.scriptActions}>
+                <button
+                  type="button"
+                  className={css.primaryAction}
+                  onClick={() => { void submitHumanDecision() }}
+                  disabled={busy
+                    || reviewFeed?.capabilities.canDecide !== true
+                    || decisionReason.trim() === ''
+                    || recovery.status !== 'none'}
+                >
+                  {reviewBusy === 'decision'
+                    ? t('assetReviewDecisionSubmitting')
+                    : t('assetReviewDecisionSubmit')}
+                </button>
+              </div>
+            </section>
+          </div>
+          {reviewStatus !== undefined && (
+            <div className={css.impactSummary} role="status" aria-live="polite">
+              <span>{t(reviewStatus === 'comment'
+                ? 'assetReviewCommentSucceeded'
+                : 'assetReviewDecisionSucceeded')}</span>
+            </div>
+          )}
+          {reviewFeed !== undefined && (
+            <section aria-label={t('assetReviewHistory')}>
+              <h5>{t('assetReviewCurrentDecision')}</h5>
+              {reviewFeed.currentDecision === null ? (
+                <p className={css.empty}>{t('assetReviewNoCurrentDecision')}</p>
+              ) : (
+                <div className={css.impactSummary}>
+                  <strong>{t(HUMAN_DECISION_LOCALE_KEY[reviewFeed.currentDecision.decision])}</strong>
+                  <span>{reviewFeed.currentDecision.reason}</span>
+                  <small>{reviewFeed.currentDecision.actorId} · {t('assetReviewDecisionCurrent')}</small>
+                </div>
+              )}
+              <h5>{t('assetReviewHistory')}</h5>
+              {reviewFeed.comments.length === 0 && reviewFeed.decisions.length === 0 ? (
+                <p className={css.empty}>{t('assetReviewNoEvents')}</p>
+              ) : (
+                <div className={css.methodGrid}>
+                  {reviewFeed.comments.map(comment => (
+                    <article key={comment.id}>
+                      <strong>{t('assetReviewCommentTitle')} · {comment.actorId}</strong>
+                      <p>{comment.body}</p>
+                      <small>{comment.createdAt}</small>
+                    </article>
+                  ))}
+                  {reviewFeed.decisions.map(decision => (
+                    <article key={decision.id}>
+                      <strong>{t(HUMAN_DECISION_LOCALE_KEY[decision.decision])} · {decision.actorId}</strong>
+                      <p>{decision.reason}</p>
+                      <small>{decision.decidedAt} · {t(decision.stale
+                        ? 'assetReviewDecisionStale'
+                        : 'assetReviewDecisionCurrent')}</small>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+        </section>
+      )}
+
+      {error !== undefined && <div className={css.scriptError} role="alert"><strong>{t('assetOperationError')}</strong><p>{error}</p></div>}
+
+      {visualPreview !== undefined && (
+        <section className={css.previewDock} aria-label={t('assetPreviewTitle')}>
+          <div className={css.previewHead}>
+            <div><h4>{t('assetPreviewTitle')}</h4><p>{visualPreview.changed ? t('assetChanged') : t('assetNoChange')}</p></div>
+            <span>{visualPreview.canCommit ? t('previewCommittable') : t('previewBlocked')}</span>
+          </div>
+          <dl className={css.previewMeta}>
+            <div><dt>{t('changeSet')}</dt><dd>{visualPreview.changeSetId}</dd></div>
+            <div><dt>{t('previewHash')}</dt><dd>{visualPreview.previewSha256}</dd></div>
+            <div><dt>{t('assetProfileRevision')}</dt><dd>{visualPreview.baseRevision} → {visualPreview.authoritativeRevision}</dd></div>
+            <div><dt>{t('assetImpactHash')}</dt><dd>{visualPreview.impactSha256}</dd></div>
+          </dl>
+          <div className={css.previewColumns}>
+            <div><strong>{t('assetVersionBase')}</strong><p>{baseVisual}</p></div>
+            <div><strong>{t('assetVersionCurrent')}</strong><p>{currentVisual}</p></div>
+            <div><strong>{t('assetVersionProposed')}</strong><p>{proposedVisual}</p></div>
+          </div>
+          <section className={css.impactPanel} aria-label={t('assetReferenceImpact')}>
+            <div className={css.impactSummary}>
+              <strong>{t('assetReferenceImpact')}</strong>
+              <span>{boolOf(visualPreview.referenceInvalidationExpected) ? t('assetReferenceWillInvalidate') : t('assetReferenceUnchanged')}</span>
+            </div>
+            <div className={css.impactGrid}>
+              {impactGroups.map(group => (
+                <div key={group.label} className={css.impactGroup}>
+                  <strong>{group.label}</strong>
+                  {group.values.length === 0
+                    ? <span>{t('assetImpactNone')}</span>
+                    : <ul>{group.values.map(value => <li key={value}>{value}</li>)}</ul>}
+                </div>
+              ))}
+            </div>
+          </section>
+          {(visualPreview.revisionConflict || visualPreview.baseSnapshotConflict) && (
+            <div className={css.conflict} role="status"><strong>{t('assetConflictTitle')}</strong><p>{t('assetConflictBody')}</p></div>
+          )}
+          {visualPreview.canCommit && recovery.status === 'none' && (
+            <div className={css.commitDock}>
+              <label>
+                <input type="checkbox" checked={confirmed} onChange={(event) => { setConfirmed(event.target.checked) }} disabled={busy} />
+                <span>{t('assetConfirmLabel')}</span>
+              </label>
+              <button type="button" className={css.primaryAction} disabled={!confirmed || busy} onClick={() => { void commit() }}>
+                {phase === 'committing' ? t('assetCommitting') : t('assetCommit')}
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+
+      {referencePreview !== undefined && (
+        <section className={css.previewDock} aria-label={t('assetReferencePreviewTitle')}>
+          <div className={css.previewHead}>
+            <div><h4>{t('assetReferencePreviewTitle')}</h4><p>{t(referencePreview.operation === 'selectReferenceAsset' ? 'assetReferenceSelectNotice' : 'assetReferenceRegenerateNotice')}</p></div>
+            <span>{referencePreview.canCommit ? t('previewCommittable') : t('previewBlocked')}</span>
+          </div>
+          <dl className={css.previewMeta}>
+            <div><dt>{t('changeSet')}</dt><dd>{referencePreview.changeSetId}</dd></div>
+            <div><dt>{t('assetReferenceCandidates')}</dt><dd>{referencePreview.candidateAssetId}</dd></div>
+            <div><dt>{t('assetSnapshotHash')}</dt><dd>{referencePreview.candidateAssetSha256}</dd></div>
+            <div><dt>{t('status')}</dt><dd>{t(referencePreview.operation === 'selectReferenceAsset' ? 'assetReferenceSelectOperation' : 'assetReferenceRegenerateOperation')}</dd></div>
+          </dl>
+          <p>{t('assetReferenceZeroExecution')}</p>
+          <div className={referencePreview.candidateDrift ? css.conflict : css.impactSummary} role="status">
+            <span>{t(referencePreview.candidateDrift ? 'assetReferenceCandidateDrift' : 'assetReferenceCandidateCurrent')}</span>
+          </div>
+          {referencePreview.canCommit && recovery.status === 'none' && (
+            <div className={css.commitDock}>
+              <label>
+                <input type="checkbox" checked={confirmed} onChange={(event) => { setConfirmed(event.target.checked) }} disabled={busy} />
+                <span>{t(referencePreview.operation === 'selectReferenceAsset' ? 'assetReferenceConfirmSelect' : 'assetReferenceConfirmRegenerate')}</span>
+              </label>
+              <button type="button" className={css.primaryAction} disabled={!confirmed || busy} onClick={() => { void commit() }}>
+                {phase === 'committing'
+                  ? t('assetCommitting')
+                  : t(referencePreview.operation === 'selectReferenceAsset' ? 'assetReferenceCommitSelect' : 'assetReferenceCommitRegenerate')}
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+
+      {commitReceipt !== undefined && (
+        <section className={css.commitReceipt} role="status">
+          <h4>{commitRecovered
+            ? t('receiptRecovered')
+            : t(commitReceipt.schema === 'jason.qingmu-element-profile-commit-result.v1'
+              ? 'assetCommitSucceeded'
+              : commitReceipt.operation === 'selectReferenceAsset'
+                ? 'assetReferenceCommitSucceededSelect'
+                : 'assetReferenceCommitSucceededRegenerate')}</h4>
+          <dl>
+            <div><dt>{t('receiptId')}</dt><dd>{commitReceipt.commandReceiptId}</dd></div>
+            <div><dt>{t('eventId')}</dt><dd>{commitReceipt.eventId}</dd></div>
+            <div><dt>{t('authoritativeRevision')}</dt><dd>{commitReceipt.authoritativeRevision}</dd></div>
+            {commitReceipt.schema === 'jason.qingmu-element-profile-commit-result.v1'
+              ? <div><dt>{t('assetImpactHash')}</dt><dd>{commitReceipt.impactSha256}</dd></div>
+              : <>
+                <div><dt>{t('assetReferenceCandidates')}</dt><dd>{commitReceipt.candidateAssetId}</dd></div>
+                <div><dt>{t('assetSnapshotHash')}</dt><dd>{commitReceipt.candidateAssetSha256}</dd></div>
+              </>}
+            <div><dt>{t('deduplicated')}</dt><dd>{commitReceipt.deduplicated ? t('yes') : t('no')}</dd></div>
+          </dl>
+          {commitReceipt.schema === 'jason.qingmu-reference-asset-commit-result.v1' && <p>{t('assetReferenceZeroExecution')}</p>}
+          {warning !== undefined && <p className={css.warning}>{t('postCommitWarning')}: {warning}</p>}
+        </section>
+      )}
+    </section>
+  )
+}

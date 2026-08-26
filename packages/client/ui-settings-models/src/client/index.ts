@@ -19,13 +19,19 @@ import { ModelsSection } from './ModelsSection.tsx'
 import type { ModelsSectionInjected } from './ModelsSection.tsx'
 import { DeepSeekOnboardingDialog } from './DeepSeekOnboardingDialog.tsx'
 import type { DeepSeekOnboardingInjected } from './DeepSeekOnboardingDialog.tsx'
+import { QingmuModelOnboarding } from './QingmuModelOnboarding.tsx'
+import type { QingmuModelOnboardingInjected } from './QingmuModelOnboarding.tsx'
 import { WelcomeNotice } from './WelcomeNotice.tsx'
 import type { WelcomeNoticeInjected } from './WelcomeNotice.tsx'
 import { decodeWelcomeSection, WelcomeNoticeStore } from './welcome-store.ts'
 import { ModelsSettingsStore } from './store.ts'
 import { createSettingsSchemaOperations } from './schema-operations.ts'
 import { en, zh, type ModelsKey } from './locales.ts'
-import { WELCOME_NOTICE_SETTINGS_NAMESPACE } from '../onboarding-copy.ts'
+import {
+  DEEPSEEK_ONBOARDING_ENABLED,
+  QINGMU_MODEL_ONBOARDING_ENABLED,
+  WELCOME_NOTICE_SETTINGS_NAMESPACE,
+} from '../onboarding-copy.ts'
 
 export type { ModelsSectionInjected, ModelsSectionProps } from './ModelsSection.tsx'
 export type { ModelsKey } from './locales.ts'
@@ -87,6 +93,11 @@ export function apply(ctx: ClientContext): void {
     schema,
     t,
   })
+  const qingmuModelOnboardingInjected = (): QingmuModelOnboardingInjected => ({
+    controller,
+    hooks: { models: controller.store },
+    t,
+  })
   // The scope's own memory mode is what keeps a remote browser process-local,
   // so the store needs no isLoopback branch of its own.
   const welcomeController = new WelcomeNoticeStore(ctx.settingsScope.bind({
@@ -131,10 +142,20 @@ export function apply(ctx: ClientContext): void {
     order: -100,
     inject: welcomeInjected,
   }, WelcomeNotice))
-  ctx.slots.inject('settings.onboarding', () => ctx.slots.register({
-    name: 'settings.onboarding',
-    id: 'deepseek-official',
-    order: 0,
-    inject: deepSeekOnboardingInjected,
-  }, DeepSeekOnboardingDialog))
+  if (DEEPSEEK_ONBOARDING_ENABLED) {
+    ctx.slots.inject('settings.onboarding', () => ctx.slots.register({
+      name: 'settings.onboarding',
+      id: 'deepseek-official',
+      order: 0,
+      inject: deepSeekOnboardingInjected,
+    }, DeepSeekOnboardingDialog))
+  }
+  if (QINGMU_MODEL_ONBOARDING_ENABLED) {
+    ctx.slots.inject('settings.onboarding', () => ctx.slots.register({
+      name: 'settings.onboarding',
+      id: 'qingmu-models',
+      order: 0,
+      inject: qingmuModelOnboardingInjected,
+    }, QingmuModelOnboarding))
+  }
 }

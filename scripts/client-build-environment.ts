@@ -22,6 +22,17 @@ const OFFICIAL_CLIENT_BUILD_ENVIRONMENT = {
   DSH_CLIENT_TITLE: 'DeepSeek Harness',
 } as const
 
+/** Public client environment required by Qingmu OS artifacts. */
+const QINGMU_CLIENT_BUILD_ENVIRONMENT = {
+  DSH_CLIENT_BUILD_PROFILE: 'qingmu',
+  DSH_CLIENT_TITLE: '青木 OS',
+} as const
+
+const NAMED_CLIENT_BUILD_ENVIRONMENTS = {
+  official: OFFICIAL_CLIENT_BUILD_ENVIRONMENT,
+  qingmu: QINGMU_CLIENT_BUILD_ENVIRONMENT,
+} as const
+
 /** Public variable carrying the source commit embedded in client artifacts. */
 const CLIENT_COMMIT_HASH_VARIABLE = 'DSH_CLIENT_COMMIT_HASH'
 
@@ -113,14 +124,17 @@ export function resolveClientBuildEnvironment(
   profile: string | undefined = environment[CLIENT_BUILD_PROFILE_SELECTOR],
 ): ClientBuildEnvironment {
   if (profile === undefined) return clientBuildEnvironment(environment)
-  if (profile === 'official') {
-    const commitHash = environment[CLIENT_COMMIT_HASH_VARIABLE]
-    if (commitHash === undefined) {
-      throw new Error(`${CLIENT_COMMIT_HASH_VARIABLE} is required for the official client build profile`)
-    }
-    return { DSH_CLIENT_COMMIT_HASH: commitHash, ...OFFICIAL_CLIENT_BUILD_ENVIRONMENT }
+  const namedEnvironment = NAMED_CLIENT_BUILD_ENVIRONMENTS[
+    profile as keyof typeof NAMED_CLIENT_BUILD_ENVIRONMENTS
+  ]
+  if (namedEnvironment === undefined) {
+    throw new Error(`unknown client build profile ${JSON.stringify(profile)}; expected "official" or "qingmu"`)
   }
-  throw new Error(`unknown client build profile ${JSON.stringify(profile)}; expected "official"`)
+  const commitHash = environment[CLIENT_COMMIT_HASH_VARIABLE]
+  if (commitHash === undefined) {
+    throw new Error(`${CLIENT_COMMIT_HASH_VARIABLE} is required for the ${profile} client build profile`)
+  }
+  return { DSH_CLIENT_COMMIT_HASH: commitHash, ...namedEnvironment }
 }
 
 /**

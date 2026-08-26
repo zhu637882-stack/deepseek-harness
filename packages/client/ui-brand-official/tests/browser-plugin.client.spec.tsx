@@ -41,6 +41,12 @@ describe('official browser-brand plugin', () => {
     for (const hole of HOLES) expect(subject.slots.entries(hole)).toHaveLength(0)
   })
 
+  it('fails loud when loaded from a Qingmu client artifact', async () => {
+    vi.stubEnv('DSH_CLIENT_BUILD_PROFILE', 'qingmu')
+    const subject = await bench()
+    expect(() => { apply(subject.ctx as never) }).toThrow(/cannot load from a qingmu client artifact/)
+  })
+
   it('fills declarations before or after apply and removes every occupant on teardown', async () => {
     vi.stubEnv('DSH_CLIENT_BUILD_PROFILE', 'official')
     const before = await bench()

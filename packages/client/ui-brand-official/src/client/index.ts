@@ -12,7 +12,11 @@ export const inject = ['slots']
  * @param ctx - Client root context.
  */
 export function apply(ctx: ClientContext): void {
-  if (process.env.DSH_CLIENT_BUILD_PROFILE !== 'official') return
+  const buildProfile = process.env.DSH_CLIENT_BUILD_PROFILE
+  if (buildProfile === 'qingmu') {
+    throw new Error('Official brand cannot load from a qingmu client artifact')
+  }
+  if (buildProfile !== 'official') return
   ctx.slots.inject('sidebar.brand.mark', () =>
     ctx.slots.inject('sidebar.brand.name', () =>
       ctx.slots.inject('conversation.hero.brand.mark', function* () {

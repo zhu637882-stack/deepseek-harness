@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react'
 import { clientBuildEnvironmentDefines } from '../../scripts/client-build-environment.ts'
 
 const src = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url))
+const clientBuildProfile = process.env.DSH_CLIENT_BUILD_PROFILE
 const STANDALONE_ERROR = 'apps/web is not a standalone application: bare Vite cannot inject window.__DSH_BOOT__. '
   + 'From a repository checkout, run `pnpm dsh web`; an installed package uses `dsh web`. '
   + 'For client-plugin HMR, run `pnpm dsh web` together with `pnpm run dev:web`.'
@@ -108,6 +109,7 @@ function npmPackageOf(id: string): string | undefined {
 }
 
 export default defineConfig({
+  publicDir: clientBuildProfile === 'qingmu' ? src('./public-qingmu') : src('./public'),
   plugins: [rejectStandaloneServe(), clientDocumentTitle(), react()],
   build: {
     sourcemap: true,

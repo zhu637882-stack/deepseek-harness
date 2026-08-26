@@ -1,0 +1,15 @@
+# Qingmu OS distribution layer. Apply after dsh-base and dsh-web-app.
+- id: ui-brand-official
+  disabled: true
+
+- insert:
+    - id: ui-brand-qingmu
+      name: '@deepseek-ai/dsh-experimental-client-ui-brand-qingmu'
+    - id: qingmu-yimeng-read-adapter
+      name: '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
+    - id: qingmu-imago-method-adapter
+      name: '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter'
+    - id: qingmu-yimeng-command-adapter
+      name: '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter'
+    - id: ui-qingmu-cockpit
+      name: '@deepseek-ai/dsh-experimental-client-ui-qingmu-cockpit'

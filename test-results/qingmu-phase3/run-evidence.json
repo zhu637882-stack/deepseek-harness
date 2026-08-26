@@ -1,0 +1,15 @@
+{
+  "schema": "qingmu.browser-run-evidence.v1",
+  "browser": "chromium",
+  "pageUrl": "http://127.0.0.1:51762",
+  "coreRoot": "/Users/a1234/Downloads/imago-os-core",
+  "coreActiveRuntimeBundlePath": "/Users/a1234/Downloads/imago-os-core/pipeline/v6-active-runtime-bundle.json",
+  "coreActiveRuntimeBundleSha256": "0b0b1f8281dcaad0111a70f32484737dd7609e2225365559366f0c7e25387350",
+  "requestCount": 47,
+  "screenshots": {
+    "script": "/Users/a1234/qingmu-harness/test-results/qingmu-phase3/script-workspace.png",
+    "actor": "/Users/a1234/qingmu-harness/test-results/qingmu-phase3/actor-workbench.png",
+    "scene": "/Users/a1234/qingmu-harness/test-results/qingmu-phase3/scene-workbench.png",
+    "prop": "/Users/a1234/qingmu-harness/test-results/qingmu-phase3/prop-workbench.png"
+  }
+}

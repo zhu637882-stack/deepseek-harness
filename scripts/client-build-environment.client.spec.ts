@@ -67,7 +67,7 @@ describe('client build environment', () => {
     }).toThrow(/DSH_CLIENT_UNDECLARED/)
   })
 
-  it('inherits public values by default and isolates an explicit official profile', () => {
+  it('inherits public values by default and isolates explicit named profiles', () => {
     const parent = {
       PATH: '/bin',
       DSH_BUILD_CLIENT_PROFILE: 'official',
@@ -85,8 +85,16 @@ describe('client build environment', () => {
       DSH_CLIENT_COMMIT_HASH: COMMIT_HASH.slice(0, 7),
       DSH_CLIENT_TITLE: 'DeepSeek Harness',
     })
+    expect(resolveClientBuildEnvironment(parent, 'qingmu')).toEqual({
+      DSH_CLIENT_BUILD_PROFILE: 'qingmu',
+      DSH_CLIENT_COMMIT_HASH: COMMIT_HASH.slice(0, 7),
+      DSH_CLIENT_TITLE: '青木 OS',
+    })
     expect(() => {
       resolveClientBuildEnvironment({ DSH_BUILD_CLIENT_PROFILE: 'official' })
+    }).toThrow(/DSH_CLIENT_COMMIT_HASH/)
+    expect(() => {
+      resolveClientBuildEnvironment({ DSH_BUILD_CLIENT_PROFILE: 'qingmu' })
     }).toThrow(/DSH_CLIENT_COMMIT_HASH/)
     expect(() => { resolveClientBuildEnvironment({}, 'unknown') }).toThrow(/unknown client build profile/)
     expect(clientBuildProcessEnvironment(parent, {
@@ -98,6 +106,16 @@ describe('client build environment', () => {
       DSH_CLIENT_BUILD_PROFILE: 'official',
       DSH_CLIENT_COMMIT_HASH: COMMIT_HASH.slice(0, 7),
       DSH_CLIENT_TITLE: 'DeepSeek Harness',
+    })
+    expect(clientBuildProcessEnvironment(parent, {
+      DSH_CLIENT_BUILD_PROFILE: 'qingmu',
+      DSH_CLIENT_COMMIT_HASH: COMMIT_HASH.slice(0, 7),
+      DSH_CLIENT_TITLE: '青木 OS',
+    })).toEqual({
+      PATH: '/bin',
+      DSH_CLIENT_BUILD_PROFILE: 'qingmu',
+      DSH_CLIENT_COMMIT_HASH: COMMIT_HASH.slice(0, 7),
+      DSH_CLIENT_TITLE: '青木 OS',
     })
     expect(repositoryCommitHash('/unused', { DSH_CLIENT_COMMIT_HASH: COMMIT_HASH })).toBe(COMMIT_HASH.slice(0, 7))
   })
