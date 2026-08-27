@@ -310,6 +310,88 @@ function workflowFixture(schema = 'jason.episode-workflow-projection.v1'): Recor
     valid: true,
     blockers: [],
   }
+  const assetId = 'asset-hero-frame-1'
+  const mediaSha256 = 'e'.repeat(64)
+  const bindingSha256 = createHash('sha256')
+    .update(canonicalJson({ assetId, mediaSha256, shotId: 'frame-1' }), 'utf8')
+    .digest('hex')
+  const annotations = [
+    {
+      annotationId: 'annotation-subject-1',
+      kind: 'subject_region',
+      elementRef: { elementKind: 'actor', elementId: 'actor-1' },
+      points: [{ x: 1200, y: 1800 }, { x: 4200, y: 8800 }],
+    },
+    {
+      annotationId: 'annotation-object-1',
+      kind: 'object_anchor',
+      elementRef: { elementKind: 'prop', elementId: 'prop-1' },
+      points: [{ x: 6200, y: 7100 }],
+    },
+    {
+      annotationId: 'annotation-motion-1',
+      kind: 'motion_vector',
+      elementRef: { elementKind: 'actor', elementId: 'actor-1' },
+      points: [{ x: 2200, y: 5400 }, { x: 7600, y: 5200 }],
+    },
+  ]
+  const compiled = {
+    subjectLayout: [{
+      annotationId: 'annotation-subject-1',
+      elementRef: { elementKind: 'actor', elementId: 'actor-1' },
+      bounds: { xMin: 1200, yMin: 1800, xMax: 4200, yMax: 8800 },
+    }],
+    objectAnchors: [{
+      annotationId: 'annotation-object-1',
+      elementRef: { elementKind: 'prop', elementId: 'prop-1' },
+      point: { x: 6200, y: 7100 },
+    }],
+    actionTrajectory: [{
+      annotationId: 'annotation-motion-1',
+      elementRef: { elementKind: 'actor', elementId: 'actor-1' },
+      from: { x: 2200, y: 5400 },
+      to: { x: 7600, y: 5200 },
+    }],
+  }
+  const heroFrameStoryboardsShot = {
+    shotId: 'frame-1',
+    shotSnapshotSha256: 'f'.repeat(64),
+    heroFrame: {
+      assetId,
+      mediaSha256,
+      browserUrl: '/api/qingmu/assets/asset-hero-frame-1/content?signature=test',
+      bindingSha256,
+    },
+    canvas: {
+      schema: 'jason.qingmu-storyboard-canvas.v1',
+      heroFrameBindingSha256: bindingSha256,
+      annotations,
+      rawAnnotationsSha256: createHash('sha256').update(canonicalJson(annotations), 'utf8').digest('hex'),
+      compiled,
+      compiledSha256: createHash('sha256').update(canonicalJson(compiled), 'utf8').digest('hex'),
+    },
+    blockers: [],
+  }
+  const stableHeroFrameStoryboardsShot = {
+    ...heroFrameStoryboardsShot,
+    heroFrame: { assetId, mediaSha256, bindingSha256 },
+  }
+  const heroFrameStoryboards = {
+    schema: 'jason.qingmu-hero-frame-storyboards.v1',
+    projectId: 'project-1',
+    episodeId: 'episode-1',
+    episodeRevision: 7,
+    storyboardRevision: {
+      revisionId: 'storyboard-revision-7',
+      revisionVersion: 3,
+      sourceSha256: 'a'.repeat(64),
+    },
+    shotRelationsSha256: createHash('sha256').update(canonicalJson(shotRelations), 'utf8').digest('hex'),
+    shots: [heroFrameStoryboardsShot],
+    shotsSha256: createHash('sha256').update(canonicalJson([stableHeroFrameStoryboardsShot]), 'utf8').digest('hex'),
+    valid: true,
+    blockers: [],
+  }
   return {
     schema,
     projectId: 'project-1',
@@ -336,7 +418,7 @@ function workflowFixture(schema = 'jason.episode-workflow-projection.v1'): Recor
     },
     stageHandoff: {},
     assets: { items: [], retained: { nested: true } },
-    director: { shotRelations },
+    director: { shotRelations, heroFrameStoryboards },
     shots: {},
     video: {},
     audio: {},
@@ -1059,6 +1141,109 @@ describe('qingmu Yimeng read adapter', () => {
       expect(result.ok).toBe(false)
       if (result.ok) throw new Error('invalid Shot relation must fail closed')
       expect(result.error.message).toMatch(/workflow\.director\.shotRelations/)
+    }
+  })
+
+  it('joins E5-2 Hero Frames and canvas annotations to the exact E5-1 Shot authority', async () => {
+    const base = workflowFixture()
+    const director = base.director as Record<string, unknown>
+    const heroFrameStoryboards = director.heroFrameStoryboards as Record<string, unknown>
+    const shots = heroFrameStoryboards.shots as Array<Record<string, unknown>>
+    const firstShot = shots[0]
+    if (firstShot === undefined) throw new Error('fixture E5-2 Shot is missing')
+    const heroFrame = firstShot.heroFrame as Record<string, unknown>
+    const changedUrl = {
+      ...base,
+      director: {
+        ...director,
+        heroFrameStoryboards: {
+          ...heroFrameStoryboards,
+          shots: [{ ...firstShot, heroFrame: { ...heroFrame, browserUrl: '/signed/rotated-url' } }],
+        },
+      },
+    }
+    const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(changedUrl), 'test-token'))
+
+    const result = await handler('workflow', { projectId: 'project-1', episodeId: 'episode-1' }, signal())
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error(result.error.message)
+    expect((result.value as YimengWorkflowProjection).director.heroFrameStoryboards.shots[0]).toMatchObject({
+      shotId: 'frame-1',
+      heroFrame: { assetId: 'asset-hero-frame-1', browserUrl: '/signed/rotated-url' },
+      canvas: {
+        schema: 'jason.qingmu-storyboard-canvas.v1',
+        compiled: {
+          subjectLayout: [{ annotationId: 'annotation-subject-1' }],
+          objectAnchors: [{ annotationId: 'annotation-object-1' }],
+          actionTrajectory: [{ annotationId: 'annotation-motion-1' }],
+        },
+      },
+    })
+  })
+
+  it('fails E5-2 closed on lineage, binding, annotation, compilation, or stable-shot SHA drift', async () => {
+    const mutators: Array<(base: Record<string, unknown>) => void> = [
+      (base) => {
+        const director = base.director as Record<string, unknown>
+        const projection = director.heroFrameStoryboards as Record<string, unknown>
+        projection.episodeRevision = 8
+      },
+      (base) => {
+        const director = base.director as Record<string, unknown>
+        const projection = director.heroFrameStoryboards as Record<string, unknown>
+        const shots = projection.shots as Array<Record<string, unknown>>
+        const first = shots[0]
+        if (first === undefined) throw new Error('fixture E5-2 Shot is missing')
+        shots.push(structuredClone(first))
+      },
+      (base) => {
+        const director = base.director as Record<string, unknown>
+        const projection = director.heroFrameStoryboards as Record<string, unknown>
+        const shots = projection.shots as Array<Record<string, unknown>>
+        const hero = shots[0]?.heroFrame as Record<string, unknown>
+        hero.bindingSha256 = '9'.repeat(64)
+      },
+      (base) => {
+        const director = base.director as Record<string, unknown>
+        const projection = director.heroFrameStoryboards as Record<string, unknown>
+        const shots = projection.shots as Array<Record<string, unknown>>
+        const canvas = shots[0]?.canvas as Record<string, unknown>
+        const annotations = canvas.annotations as Array<Record<string, unknown>>
+        annotations[0] = {
+          ...annotations[0],
+          elementRef: { elementKind: 'actor', elementId: 'actor-missing' },
+        }
+      },
+      (base) => {
+        const director = base.director as Record<string, unknown>
+        const projection = director.heroFrameStoryboards as Record<string, unknown>
+        const shots = projection.shots as Array<Record<string, unknown>>
+        const canvas = shots[0]?.canvas as Record<string, unknown>
+        canvas.rawAnnotationsSha256 = '8'.repeat(64)
+      },
+      (base) => {
+        const director = base.director as Record<string, unknown>
+        const projection = director.heroFrameStoryboards as Record<string, unknown>
+        const shots = projection.shots as Array<Record<string, unknown>>
+        const canvas = shots[0]?.canvas as Record<string, unknown>
+        canvas.compiled = { subjectLayout: [], objectAnchors: [], actionTrajectory: [] }
+      },
+      (base) => {
+        const director = base.director as Record<string, unknown>
+        const projection = director.heroFrameStoryboards as Record<string, unknown>
+        projection.shotsSha256 = '7'.repeat(64)
+      },
+    ]
+
+    for (const mutate of mutators) {
+      const upstream = workflowFixture()
+      mutate(upstream)
+      const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(upstream), 'test-token'))
+      const result = await handler('workflow', { projectId: 'project-1', episodeId: 'episode-1' }, signal())
+      expect(result.ok).toBe(false)
+      if (result.ok) throw new Error('invalid E5-2 projection should fail closed')
+      expect(result.error.message).toContain('workflow.director.heroFrameStoryboards')
     }
   })
 

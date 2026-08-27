@@ -488,9 +488,99 @@ export interface YimengShotRelationsProjection {
   readonly blockers: readonly YimengShotRelationBlocker[]
 }
 
-/** Workflow director facts with the E5-1 authoritative relation projection. */
+/** Integer point in the browser/compiler-neutral 0..10000 storyboard grid. */
+export interface YimengStoryboardCanvasPoint {
+  readonly x: number
+  readonly y: number
+}
+
+export type YimengStoryboardCanvasAnnotationKind = 'subject_region' | 'object_anchor' | 'motion_vector'
+
+/** One raw human-authored canvas annotation. It never becomes a Shot identity. */
+export interface YimengStoryboardCanvasAnnotation {
+  readonly annotationId: string
+  readonly kind: YimengStoryboardCanvasAnnotationKind
+  readonly elementRef: {
+    readonly elementKind: 'actor' | 'prop'
+    readonly elementId: string
+  }
+  readonly points: readonly YimengStoryboardCanvasPoint[]
+}
+
+/** Deterministic IMAGO compilation mirrored by Yimeng inside the current storyboard revision. */
+export interface YimengStoryboardCanvasCompiled extends YimengJsonObject {
+  readonly subjectLayout: readonly {
+    readonly annotationId: string
+    readonly elementRef: { readonly elementKind: 'actor'; readonly elementId: string }
+    readonly bounds: { readonly xMin: number; readonly yMin: number; readonly xMax: number; readonly yMax: number }
+  }[]
+  readonly objectAnchors: readonly {
+    readonly annotationId: string
+    readonly elementRef: { readonly elementKind: 'prop'; readonly elementId: string }
+    readonly point: YimengStoryboardCanvasPoint
+  }[]
+  readonly actionTrajectory: readonly {
+    readonly annotationId: string
+    readonly elementRef: { readonly elementKind: 'actor' | 'prop'; readonly elementId: string }
+    readonly from: YimengStoryboardCanvasPoint
+    readonly to: YimengStoryboardCanvasPoint
+  }[]
+}
+
+/** Selected first-frame asset for the same canonical storyboard frame. */
+export interface YimengHeroFrameBinding {
+  readonly assetId: string
+  readonly mediaSha256: string
+  readonly browserUrl: string
+  readonly bindingSha256: string
+}
+
+/** Saved canvas authority; the enclosing storyboard revision is its only revision identity. */
+export interface YimengStoryboardCanvas {
+  readonly schema: 'jason.qingmu-storyboard-canvas.v1'
+  readonly heroFrameBindingSha256: string
+  readonly annotations: readonly YimengStoryboardCanvasAnnotation[]
+  readonly rawAnnotationsSha256: string
+  readonly compiled: YimengStoryboardCanvasCompiled
+  readonly compiledSha256: string
+}
+
+/** Diagnostic fact emitted by Yimeng for one Hero Frame/canvas binding. */
+export interface YimengHeroFrameStoryboardBlocker extends YimengJsonObject {
+  readonly scope: string
+  readonly reason: string
+  readonly shotId?: string
+  readonly annotationId?: string
+  readonly elementId?: string
+}
+
+/** One canonical Shot joined to its selected Hero Frame and optional saved canvas. */
+export interface YimengHeroFrameStoryboardShot {
+  readonly shotId: string
+  readonly shotSnapshotSha256: string
+  readonly heroFrame: YimengHeroFrameBinding | null
+  readonly canvas: YimengStoryboardCanvas | null
+  readonly blockers: readonly YimengHeroFrameStoryboardBlocker[]
+}
+
+/** Rebuildable E5-2 sibling projection; it is not a canvas repository or state machine. */
+export interface YimengHeroFrameStoryboardsProjection {
+  readonly schema: 'jason.qingmu-hero-frame-storyboards.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly episodeRevision: number
+  readonly storyboardRevision: Omit<YimengShotRelationsStoryboardRevision, 'episodeRevision'>
+  readonly shotRelationsSha256: string
+  readonly shots: readonly YimengHeroFrameStoryboardShot[]
+  readonly shotsSha256: string
+  readonly valid: true
+  readonly blockers: readonly YimengHeroFrameStoryboardBlocker[]
+}
+
+/** Workflow director facts with the E5-1 relation and E5-2 Hero Frame/canvas projections. */
 export interface YimengWorkflowDirector extends YimengJsonObject {
   readonly shotRelations: YimengShotRelationsProjection
+  readonly heroFrameStoryboards: YimengHeroFrameStoryboardsProjection
 }
 
 /** Workflow stage facts supplied by Yimeng. */

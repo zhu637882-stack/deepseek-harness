@@ -42,6 +42,10 @@ import type {
   YimengReferenceRightsScalar,
   YimengScriptRequest,
   YimengScriptResponse,
+  YimengHeroFrameBinding,
+  YimengHeroFrameStoryboardBlocker,
+  YimengHeroFrameStoryboardShot,
+  YimengHeroFrameStoryboardsProjection,
   YimengShotRelationBeat,
   YimengShotRelationBlocker,
   YimengShotRelationElement,
@@ -49,6 +53,9 @@ import type {
   YimengShotRelationScene,
   YimengShotRelationShot,
   YimengShotRelationsProjection,
+  YimengStoryboardCanvas,
+  YimengStoryboardCanvasAnnotation,
+  YimengStoryboardCanvasCompiled,
   YimengWorkflowBlocker,
   YimengWorkflowDirector,
   YimengWorkflowProjection,
@@ -99,6 +106,10 @@ export type {
   YimengReadEndpointMap,
   YimengScriptRequest,
   YimengScriptResponse,
+  YimengHeroFrameBinding,
+  YimengHeroFrameStoryboardBlocker,
+  YimengHeroFrameStoryboardShot,
+  YimengHeroFrameStoryboardsProjection,
   YimengShotRelationBeat,
   YimengShotRelationBlocker,
   YimengShotRelationElement,
@@ -107,6 +118,9 @@ export type {
   YimengShotRelationShot,
   YimengShotRelationsProjection,
   YimengShotRelationsStoryboardRevision,
+  YimengStoryboardCanvas,
+  YimengStoryboardCanvasAnnotation,
+  YimengStoryboardCanvasCompiled,
   YimengWorkflowBlocker,
   YimengWorkflowDirector,
   YimengWorkflowInterpretation,
@@ -125,6 +139,10 @@ const MAX_JSON_BYTES = 5 * 1024 * 1024
 const MAX_SCRIPT_JSON_BYTES = 20 * 1024 * 1024
 const WORKFLOW_SCHEMA = 'jason.episode-workflow-projection.v1'
 const SHOT_RELATIONS_SCHEMA = 'jason.scene-shot-beat-element-relations.v1'
+const HERO_FRAME_STORYBOARDS_SCHEMA = 'jason.qingmu-hero-frame-storyboards.v1'
+const STORYBOARD_CANVAS_SCHEMA = 'jason.qingmu-storyboard-canvas.v1'
+const MAX_STORYBOARD_ANNOTATIONS = 256
+const STORYBOARD_GRID_MAX = 10_000
 const REFERENCE_CANDIDATES_SCHEMA = 'jason.qingmu-reference-asset-candidates.v1'
 const ELEMENT_REVIEW_FEED_SCHEMA = 'jason.qingmu-element-review-feed.v1'
 const REFERENCE_RIGHTS_EXCEPTION_RELEASE_FEED_SCHEMA = 'jason.qingmu-reference-rights-exception-release-feed.v1'
@@ -1846,6 +1864,303 @@ function normalizeShotRelations(
   }
 }
 
+function normalizeHeroFrameStoryboardBlocker(
+  value: unknown,
+  index: number,
+  parentField: string,
+): YimengHeroFrameStoryboardBlocker {
+  const field = `${parentField}[${String(index)}]`
+  const blocker = requireObject(value, field)
+  const shotId = requireOptionalIdentifier(blocker.shotId, `${field}.shotId`)
+  const annotationId = requireOptionalIdentifier(blocker.annotationId, `${field}.annotationId`)
+  const elementId = requireOptionalIdentifier(blocker.elementId, `${field}.elementId`)
+  return {
+    ...blocker,
+    scope: requireIdentifier(blocker.scope, `${field}.scope`),
+    reason: requireIdentifier(blocker.reason, `${field}.reason`),
+    ...(shotId === undefined ? {} : { shotId }),
+    ...(annotationId === undefined ? {} : { annotationId }),
+    ...(elementId === undefined ? {} : { elementId }),
+  }
+}
+
+function normalizeStoryboardCanvasPoint(value: unknown, field: string): { readonly x: number; readonly y: number } {
+  const point = requireObject(value, field)
+  assertExactOutputKeys(point, ['x', 'y'], field)
+  return {
+    x: requireInteger(point.x, `${field}.x`, 0, STORYBOARD_GRID_MAX),
+    y: requireInteger(point.y, `${field}.y`, 0, STORYBOARD_GRID_MAX),
+  }
+}
+
+function normalizeStoryboardCanvasAnnotation(
+  value: unknown,
+  index: number,
+  allowedElements: ReadonlyMap<string, YimengShotRelationElementKind>,
+  parentField: string,
+): YimengStoryboardCanvasAnnotation {
+  const field = `${parentField}[${String(index)}]`
+  const annotation = requireObject(value, field)
+  assertExactOutputKeys(annotation, ['annotationId', 'kind', 'elementRef', 'points'], field)
+  if (
+    annotation.kind !== 'subject_region'
+    && annotation.kind !== 'object_anchor'
+    && annotation.kind !== 'motion_vector'
+  ) throw new UpstreamContractError(`${field}.kind is invalid`)
+  const elementRef = requireObject(annotation.elementRef, `${field}.elementRef`)
+  assertExactOutputKeys(elementRef, ['elementKind', 'elementId'], `${field}.elementRef`)
+  if (elementRef.elementKind !== 'actor' && elementRef.elementKind !== 'prop') {
+    throw new UpstreamContractError(`${field}.elementRef.elementKind must be actor or prop`)
+  }
+  const elementId = requireIdentifier(elementRef.elementId, `${field}.elementRef.elementId`)
+  if (allowedElements.get(elementId) !== elementRef.elementKind) {
+    throw new UpstreamContractError(`${field}.elementRef does not belong to the canonical Shot`)
+  }
+  if (
+    (annotation.kind === 'subject_region' && elementRef.elementKind !== 'actor')
+    || (annotation.kind === 'object_anchor' && elementRef.elementKind !== 'prop')
+  ) throw new UpstreamContractError(`${field}.kind and elementRef mismatch`)
+  if (!Array.isArray(annotation.points)) throw new UpstreamContractError(`${field}.points must be an array`)
+  const points = annotation.points.map((point, pointIndex) => (
+    normalizeStoryboardCanvasPoint(point, `${field}.points[${String(pointIndex)}]`)
+  ))
+  const expectedPoints = annotation.kind === 'object_anchor' ? 1 : 2
+  if (points.length !== expectedPoints) throw new UpstreamContractError(`${field}.points length mismatch`)
+  if (annotation.kind === 'subject_region') {
+    const [first, second] = points
+    if (first === undefined || second === undefined || first.x === second.x || first.y === second.y) {
+      throw new UpstreamContractError(`${field} subject region must have non-zero area`)
+    }
+  }
+  if (annotation.kind === 'motion_vector') {
+    const [first, second] = points
+    if (first === undefined || second === undefined || (first.x === second.x && first.y === second.y)) {
+      throw new UpstreamContractError(`${field} motion vector must have distinct endpoints`)
+    }
+  }
+  return {
+    annotationId: requireIdentifier(annotation.annotationId, `${field}.annotationId`),
+    kind: annotation.kind,
+    elementRef: { elementKind: elementRef.elementKind, elementId },
+    points,
+  }
+}
+
+function compileStoryboardAnnotations(
+  annotations: readonly YimengStoryboardCanvasAnnotation[],
+): YimengStoryboardCanvasCompiled {
+  return {
+    subjectLayout: annotations.flatMap((annotation) => {
+      if (annotation.kind !== 'subject_region' || annotation.elementRef.elementKind !== 'actor') return []
+      const [first, second] = annotation.points
+      if (first === undefined || second === undefined) return []
+      return [{
+        annotationId: annotation.annotationId,
+        elementRef: { elementKind: 'actor', elementId: annotation.elementRef.elementId },
+        bounds: {
+          xMin: Math.min(first.x, second.x),
+          yMin: Math.min(first.y, second.y),
+          xMax: Math.max(first.x, second.x),
+          yMax: Math.max(first.y, second.y),
+        },
+      }]
+    }),
+    objectAnchors: annotations.flatMap((annotation) => {
+      if (annotation.kind !== 'object_anchor' || annotation.elementRef.elementKind !== 'prop') return []
+      const point = annotation.points[0]
+      return point === undefined ? [] : [{
+        annotationId: annotation.annotationId,
+        elementRef: { elementKind: 'prop', elementId: annotation.elementRef.elementId },
+        point,
+      }]
+    }),
+    actionTrajectory: annotations.flatMap((annotation) => {
+      if (annotation.kind !== 'motion_vector') return []
+      const [from, to] = annotation.points
+      return from === undefined || to === undefined ? [] : [{
+        annotationId: annotation.annotationId,
+        elementRef: annotation.elementRef,
+        from,
+        to,
+      }]
+    }),
+  }
+}
+
+function normalizeStoryboardCanvas(
+  value: unknown,
+  heroFrame: YimengHeroFrameBinding,
+  allowedElements: ReadonlyMap<string, YimengShotRelationElementKind>,
+  field: string,
+): YimengStoryboardCanvas {
+  const canvas = requireObject(value, field)
+  assertExactOutputKeys(canvas, [
+    'schema',
+    'heroFrameBindingSha256',
+    'annotations',
+    'rawAnnotationsSha256',
+    'compiled',
+    'compiledSha256',
+  ], field)
+  if (canvas.schema !== STORYBOARD_CANVAS_SCHEMA) throw new UpstreamContractError(`${field}.schema mismatch`)
+  if (canvas.heroFrameBindingSha256 !== heroFrame.bindingSha256) {
+    throw new UpstreamContractError(`${field}.heroFrameBindingSha256 mismatch`)
+  }
+  if (!Array.isArray(canvas.annotations) || canvas.annotations.length > MAX_STORYBOARD_ANNOTATIONS) {
+    throw new UpstreamContractError(`${field}.annotations exceeds the bounded canvas contract`)
+  }
+  const annotations = canvas.annotations.map((annotation, index) => (
+    normalizeStoryboardCanvasAnnotation(annotation, index, allowedElements, `${field}.annotations`)
+  ))
+  const annotationIds = annotations.map(annotation => annotation.annotationId)
+  if (new Set(annotationIds).size !== annotationIds.length) {
+    throw new UpstreamContractError(`${field}.annotations contains duplicate annotationId`)
+  }
+  const rawAnnotationsSha256 = requireSha256(canvas.rawAnnotationsSha256, `${field}.rawAnnotationsSha256`)
+  if (rawAnnotationsSha256 !== canonicalJsonSha256(annotations, `${field}.annotations`)) {
+    throw new UpstreamContractError(`${field}.rawAnnotationsSha256 mismatch`)
+  }
+  const compiled = requireObject(canvas.compiled, `${field}.compiled`)
+  assertExactOutputKeys(compiled, ['subjectLayout', 'objectAnchors', 'actionTrajectory'], `${field}.compiled`)
+  const expectedCompiled = compileStoryboardAnnotations(annotations)
+  if (!isDeepStrictEqual(compiled, expectedCompiled)) {
+    throw new UpstreamContractError(`${field}.compiled does not match raw annotations`)
+  }
+  const compiledSha256 = requireSha256(canvas.compiledSha256, `${field}.compiledSha256`)
+  if (compiledSha256 !== canonicalJsonSha256(expectedCompiled, `${field}.compiled`)) {
+    throw new UpstreamContractError(`${field}.compiledSha256 mismatch`)
+  }
+  return {
+    schema: STORYBOARD_CANVAS_SCHEMA,
+    heroFrameBindingSha256: heroFrame.bindingSha256,
+    annotations,
+    rawAnnotationsSha256,
+    compiled: expectedCompiled,
+    compiledSha256,
+  }
+}
+
+function normalizeHeroFrameStoryboards(
+  value: unknown,
+  relations: YimengShotRelationsProjection,
+): YimengHeroFrameStoryboardsProjection {
+  const field = 'workflow.director.heroFrameStoryboards'
+  const root = requireObject(value, field)
+  assertExactOutputKeys(root, [
+    'schema',
+    'projectId',
+    'episodeId',
+    'episodeRevision',
+    'storyboardRevision',
+    'shotRelationsSha256',
+    'shots',
+    'shotsSha256',
+    'valid',
+    'blockers',
+  ], field)
+  if (root.schema !== HERO_FRAME_STORYBOARDS_SCHEMA) throw new UpstreamContractError(`${field}.schema mismatch`)
+  const projectId = requireIdentifier(root.projectId, `${field}.projectId`)
+  const episodeId = requireIdentifier(root.episodeId, `${field}.episodeId`)
+  const episodeRevision = requireInteger(root.episodeRevision, `${field}.episodeRevision`, 0)
+  if (
+    projectId !== relations.projectId
+    || episodeId !== relations.episodeId
+    || episodeRevision !== relations.storyboardRevision.episodeRevision
+  ) throw new UpstreamContractError(`${field} subject or episode revision mismatch`)
+  const revision = requireObject(root.storyboardRevision, `${field}.storyboardRevision`)
+  assertExactOutputKeys(revision, ['revisionId', 'revisionVersion', 'sourceSha256'], `${field}.storyboardRevision`)
+  const storyboardRevision = {
+    revisionId: requireIdentifier(revision.revisionId, `${field}.storyboardRevision.revisionId`),
+    revisionVersion: requireInteger(revision.revisionVersion, `${field}.storyboardRevision.revisionVersion`, 1),
+    sourceSha256: requireSha256(revision.sourceSha256, `${field}.storyboardRevision.sourceSha256`),
+  }
+  if (
+    storyboardRevision.revisionId !== relations.storyboardRevision.revisionId
+    || storyboardRevision.revisionVersion !== relations.storyboardRevision.revisionVersion
+    || storyboardRevision.sourceSha256 !== relations.storyboardRevision.sourceSha256
+  ) throw new UpstreamContractError(`${field}.storyboardRevision does not match Shot relations`)
+  if (!Array.isArray(root.blockers)) throw new UpstreamContractError(`${field}.blockers must be an array`)
+  const blockers = root.blockers.map((blocker, index) => (
+    normalizeHeroFrameStoryboardBlocker(blocker, index, `${field}.blockers`)
+  ))
+  if (root.valid !== true || blockers.length !== 0) {
+    throw new UpstreamContractError(`${field} is invalid: ${blockers[0]?.reason ?? 'unknown Hero Frame blocker'}`)
+  }
+  const relationByShotId = new Map(relations.shots.map(shot => [shot.shotId, shot]))
+  const shotRows = requireObjectItems(root.shots, `${field}.shots`)
+  const shots = shotRows.map((row, index): YimengHeroFrameStoryboardShot => {
+    const shotField = `${field}.shots[${String(index)}]`
+    assertExactOutputKeys(row, ['shotId', 'shotSnapshotSha256', 'heroFrame', 'canvas', 'blockers'], shotField)
+    const shotId = requireIdentifier(row.shotId, `${shotField}.shotId`)
+    const relation = relationByShotId.get(shotId)
+    if (relation === undefined) throw new UpstreamContractError(`${shotField}.shotId is absent from Shot relations`)
+    if (!Array.isArray(row.blockers)) throw new UpstreamContractError(`${shotField}.blockers must be an array`)
+    const shotBlockers = row.blockers.map((blocker, blockerIndex) => (
+      normalizeHeroFrameStoryboardBlocker(blocker, blockerIndex, `${shotField}.blockers`)
+    ))
+    let heroFrame: YimengHeroFrameBinding | null = null
+    if (row.heroFrame !== null) {
+      const hero = requireObject(row.heroFrame, `${shotField}.heroFrame`)
+      assertExactOutputKeys(hero, ['assetId', 'mediaSha256', 'browserUrl', 'bindingSha256'], `${shotField}.heroFrame`)
+      const assetId = requireIdentifier(hero.assetId, `${shotField}.heroFrame.assetId`)
+      const mediaSha256 = requireSha256(hero.mediaSha256, `${shotField}.heroFrame.mediaSha256`)
+      const browserUrl = requireString(hero.browserUrl, `${shotField}.heroFrame.browserUrl`)
+      if (browserUrl.length === 0 || browserUrl.length > 4_096 || browserUrl.trim() !== browserUrl) {
+        throw new UpstreamContractError(`${shotField}.heroFrame.browserUrl is invalid`)
+      }
+      const bindingSha256 = requireSha256(hero.bindingSha256, `${shotField}.heroFrame.bindingSha256`)
+      if (bindingSha256 !== canonicalJsonSha256({ assetId, mediaSha256, shotId }, `${shotField}.heroFrame.binding`)) {
+        throw new UpstreamContractError(`${shotField}.heroFrame.bindingSha256 mismatch`)
+      }
+      heroFrame = { assetId, mediaSha256, browserUrl, bindingSha256 }
+    }
+    const allowedElements = new Map(relation.elements.map(element => [element.elementId, element.elementKind]))
+    if (row.canvas !== null && heroFrame === null) {
+      throw new UpstreamContractError(`${shotField}.canvas requires a selected Hero Frame`)
+    }
+    const canvas = row.canvas === null
+      ? null
+      : normalizeStoryboardCanvas(row.canvas, heroFrame as YimengHeroFrameBinding, allowedElements, `${shotField}.canvas`)
+    return {
+      shotId,
+      shotSnapshotSha256: requireSha256(row.shotSnapshotSha256, `${shotField}.shotSnapshotSha256`),
+      heroFrame,
+      canvas,
+      blockers: shotBlockers,
+    }
+  })
+  const shotIds = shots.map(shot => shot.shotId)
+  if (
+    new Set(shotIds).size !== shotIds.length
+    || shots.length !== relations.shots.length
+    || relations.shots.some(shot => !shotIds.includes(shot.shotId))
+  ) throw new UpstreamContractError(`${field}.shots must join one-to-one with Shot relations`)
+  const stableShots = shots.map(shot => ({
+    ...shot,
+    heroFrame: shot.heroFrame === null ? null : {
+      assetId: shot.heroFrame.assetId,
+      mediaSha256: shot.heroFrame.mediaSha256,
+      bindingSha256: shot.heroFrame.bindingSha256,
+    },
+  }))
+  const shotsSha256 = requireSha256(root.shotsSha256, `${field}.shotsSha256`)
+  if (shotsSha256 !== canonicalJsonSha256(stableShots, `${field}.stableShots`)) {
+    throw new UpstreamContractError(`${field}.shotsSha256 mismatch`)
+  }
+  return {
+    schema: HERO_FRAME_STORYBOARDS_SCHEMA,
+    projectId,
+    episodeId,
+    episodeRevision,
+    storyboardRevision,
+    shotRelationsSha256: requireSha256(root.shotRelationsSha256, `${field}.shotRelationsSha256`),
+    shots,
+    shotsSha256,
+    valid: true,
+    blockers,
+  }
+}
+
 function normalizeWorkflow(value: unknown): YimengWorkflowProjection {
   const root = requireObject(value, 'workflow')
   if (root.schema !== WORKFLOW_SCHEMA) throw new UpstreamContractError('workflow.schema mismatch')
@@ -1857,9 +2172,11 @@ function normalizeWorkflow(value: unknown): YimengWorkflowProjection {
   )
   if (!Array.isArray(root.blockers)) throw new UpstreamContractError('workflow.blockers must be an array')
   const directorRoot = requireObject(root.director, 'workflow.director')
+  const shotRelations = normalizeShotRelations(directorRoot.shotRelations, projectId, episodeId)
   const director: YimengWorkflowDirector = {
     ...directorRoot,
-    shotRelations: normalizeShotRelations(directorRoot.shotRelations, projectId, episodeId),
+    shotRelations,
+    heroFrameStoryboards: normalizeHeroFrameStoryboards(directorRoot.heroFrameStoryboards, shotRelations),
   }
   return {
     ...root,

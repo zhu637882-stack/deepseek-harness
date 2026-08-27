@@ -14,7 +14,9 @@
 
 `referenceCandidates` 要求 `jason.qingmu-reference-asset-candidates.v1`、`targetType: element_profile`、请求中的项目、元素类型与目标 ID、非负档案修订号、小写 `elementSnapshotSha256`，以及字面值 `humanApprovalInferred: false`。每个返回候选只包含 `assetId`、`sha256`、`materializedSha256`、`bindingValid`、`projectId`、`sourceEpisodeId`、`ownerType`、`ownerId`、`role`、`localPath`、`qualityStatus`、`selectionStatus`、`isSelected`、`generationJobId`、`sourceRevisionId`、`formalConsistencyCheckId`、`formalConsistencyPassed`、`qualityProjectionSha256`、`decisionKind` 和 `decisionIdentity`。Host 会先校验候选的项目与 owner 绑定、ID、布尔值、SHA-256 字段，以及准确的 `Unselected | Selected | Rejected | Stale`、`pending | passed | failed` 和 `none | referenceSelection | humanReview` 取值集合，再返回投影。
 
-包根入口导出请求与响应类型，包括 `YimengHealth`、`YimengProjectsResponse`、`YimengEpisodesResponse`、`YimengScriptResponse`、`YimengElementProfileRequest`、`YimengElementProfileResponse`、`YimengReferenceAssetCandidate`、`YimengReferenceCandidatesRequest`、`YimengReferenceCandidatesResponse` 和 `YimengWorkflowProjection`。
+`workflow.director.heroFrameStoryboards` 同级投影与 E5-1 权威 Shot 及准确分镜修订一对一连接。Host 会校验已选择首帧资产的绑定、有界整数 `0..10000` 标注坐标、Shot 内人物/道具引用、确定性的 `subjectLayout`、`objectAnchors` 与 `actionTrajectory` 编译结果，以及全部稳定 SHA。会过期的 `browserUrl` 被明确排除在 `shotsSha256` 之外，资产 ID、媒体 SHA 和绑定 SHA 仍在哈希覆盖范围内。这个对象只是只读投影，不是第二个画布仓库或修订系统。
+
+包根入口导出请求与响应类型，包括 `YimengHealth`、`YimengProjectsResponse`、`YimengEpisodesResponse`、`YimengScriptResponse`、`YimengElementProfileRequest`、`YimengElementProfileResponse`、`YimengReferenceAssetCandidate`、`YimengReferenceCandidatesRequest`、`YimengReferenceCandidatesResponse`、`YimengHeroFrameStoryboardsProjection` 和 `YimengWorkflowProjection`。
 
 ## 安全边界
 
