@@ -3073,6 +3073,17 @@ async function closeServer(server: Server | undefined): Promise<void> {
   })
 }
 
+async function selectReloadedElement(dialog: Locator, kind: '环境' | '道具'): Promise<void> {
+  const actorEditor = dialog.getByRole('textbox', { name: '人物视觉身份定义' })
+  await expect.poll(() => actorEditor.inputValue(), { timeout: 15_000 }).toBe(ACTOR_UPDATED_IDENTITY)
+  const kindButton = dialog.getByRole('group', { name: '选择人物、环境或道具' })
+    .getByRole('button', { name: kind })
+  await kindButton.click()
+  await expect.poll(() => kindButton.getAttribute('aria-pressed')).toBe('true')
+  await expect.poll(() => dialog.getByRole('combobox', { name: '选择人物、环境或道具' }).inputValue())
+    .toBe(kind === '环境' ? 'scene-1' : 'prop-1')
+}
+
 function restoreToken(): void {
   if (ORIGINAL_TOKEN === undefined) Reflect.deleteProperty(process.env, 'YIMENG_API_TOKEN')
   else process.env.YIMENG_API_TOKEN = ORIGINAL_TOKEN
@@ -3950,8 +3961,7 @@ describe.skipIf(
       await recoveredDialog.waitFor({ timeout: 10_000 })
       await recoveredDialog.getByLabel('安全边界').getByText('EP1 · 雨夜').waitFor({ timeout: 15_000 })
       await recoveredDialog.getByRole('tab', { name: '剧本与资产' }).click()
-      await recoveredDialog.getByRole('group', { name: '选择人物、环境或道具' })
-        .getByRole('button', { name: '道具' }).click()
+      await selectReloadedElement(recoveredDialog, '道具')
 
       const recoveredEditor = recoveredDialog.getByRole('textbox', { name: '环境／道具视觉提示词' })
       await expect.poll(() => recoveredEditor.inputValue(), { timeout: 15_000 }).toBe(PROP_UPDATED_PROMPT)
@@ -4268,14 +4278,7 @@ describe.skipIf(
       await recoveredDialog.waitFor({ timeout: 10_000 })
       await recoveredDialog.getByLabel('安全边界').getByText('EP1 · 雨夜').waitFor({ timeout: 15_000 })
       await recoveredDialog.getByRole('tab', { name: '剧本与资产' }).click()
-      const recoveredActorEditor = recoveredDialog.getByRole('textbox', { name: '人物视觉身份定义' })
-      await expect.poll(() => recoveredActorEditor.inputValue(), { timeout: 15_000 }).toBe(ACTOR_UPDATED_IDENTITY)
-      const propKindButton = recoveredDialog.getByRole('group', { name: '选择人物、环境或道具' })
-        .getByRole('button', { name: '道具' })
-      await propKindButton.click()
-      await expect.poll(() => propKindButton.getAttribute('aria-pressed')).toBe('true')
-      await expect.poll(() => recoveredDialog.getByRole('combobox', { name: '选择人物、环境或道具' }).inputValue())
-        .toBe('prop-1')
+      await selectReloadedElement(recoveredDialog, '道具')
       const recoveredPropEditor = recoveredDialog.getByRole('textbox', { name: '环境／道具视觉提示词' })
       await expect.poll(() => recoveredPropEditor.inputValue(), { timeout: 15_000 }).toBe(PROP_UPDATED_PROMPT)
       expect(capturedRequests.filter(request => request.path === recoveryPath)).toEqual([])
@@ -4570,8 +4573,7 @@ describe.skipIf(
       await recoveredDialog.waitFor({ timeout: 10_000 })
       await recoveredDialog.getByLabel('安全边界').getByText('EP1 · 雨夜').waitFor({ timeout: 15_000 })
       await recoveredDialog.getByRole('tab', { name: '剧本与资产' }).click()
-      await recoveredDialog.getByRole('group', { name: '选择人物、环境或道具' })
-        .getByRole('button', { name: '道具' }).click()
+      await selectReloadedElement(recoveredDialog, '道具')
 
       const recoveryDock = recoveredDialog.getByRole('region', { name: '存在待恢复的异常放行回执' })
       await recoveryDock.waitFor({ timeout: 15_000 })
@@ -4719,8 +4721,7 @@ describe.skipIf(
       await recoveredDialog.waitFor({ timeout: 10_000 })
       await recoveredDialog.getByLabel('安全边界').getByText('EP1 · 雨夜').waitFor({ timeout: 15_000 })
       await recoveredDialog.getByRole('tab', { name: '剧本与资产' }).click()
-      await recoveredDialog.getByRole('group', { name: '选择人物、环境或道具' })
-        .getByRole('button', { name: '环境' }).click()
+      await selectReloadedElement(recoveredDialog, '环境')
       const recoveredEditor = recoveredDialog.getByRole('textbox', { name: '环境／道具视觉提示词' })
       await expect.poll(() => recoveredEditor.inputValue(), { timeout: 15_000 }).toBe(SCENE_ORIGINAL_PROMPT)
       expect(await recoveredEditor.isDisabled()).toBe(true)
