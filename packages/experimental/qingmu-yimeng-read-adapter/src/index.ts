@@ -42,7 +42,15 @@ import type {
   YimengReferenceRightsScalar,
   YimengScriptRequest,
   YimengScriptResponse,
+  YimengShotRelationBeat,
+  YimengShotRelationBlocker,
+  YimengShotRelationElement,
+  YimengShotRelationElementKind,
+  YimengShotRelationScene,
+  YimengShotRelationShot,
+  YimengShotRelationsProjection,
   YimengWorkflowBlocker,
+  YimengWorkflowDirector,
   YimengWorkflowProjection,
   YimengWorkflowRequest,
   YimengWorkflowStage,
@@ -91,7 +99,16 @@ export type {
   YimengReadEndpointMap,
   YimengScriptRequest,
   YimengScriptResponse,
+  YimengShotRelationBeat,
+  YimengShotRelationBlocker,
+  YimengShotRelationElement,
+  YimengShotRelationElementKind,
+  YimengShotRelationScene,
+  YimengShotRelationShot,
+  YimengShotRelationsProjection,
+  YimengShotRelationsStoryboardRevision,
   YimengWorkflowBlocker,
+  YimengWorkflowDirector,
   YimengWorkflowInterpretation,
   YimengWorkflowProjection,
   YimengWorkflowRequest,
@@ -107,6 +124,7 @@ const MAX_SEARCH_LENGTH = 500
 const MAX_JSON_BYTES = 5 * 1024 * 1024
 const MAX_SCRIPT_JSON_BYTES = 20 * 1024 * 1024
 const WORKFLOW_SCHEMA = 'jason.episode-workflow-projection.v1'
+const SHOT_RELATIONS_SCHEMA = 'jason.scene-shot-beat-element-relations.v1'
 const REFERENCE_CANDIDATES_SCHEMA = 'jason.qingmu-reference-asset-candidates.v1'
 const ELEMENT_REVIEW_FEED_SCHEMA = 'jason.qingmu-element-review-feed.v1'
 const REFERENCE_RIGHTS_EXCEPTION_RELEASE_FEED_SCHEMA = 'jason.qingmu-reference-rights-exception-release-feed.v1'
@@ -1642,19 +1660,212 @@ function normalizeWorkflowBlocker(value: unknown, index: number): YimengWorkflow
   return { ...blocker, reason: requireString(blocker.reason, `workflow.blockers[${String(index)}].reason`) }
 }
 
+function requireOptionalIdentifier(value: unknown, field: string): string | undefined {
+  return value === undefined ? undefined : requireIdentifier(value, field)
+}
+
+function normalizeShotRelationBlocker(value: unknown, index: number): YimengShotRelationBlocker {
+  const field = `workflow.director.shotRelations.blockers[${String(index)}]`
+  const blocker = requireObject(value, field)
+  const elementKind = blocker.elementKind
+  if (elementKind !== undefined && elementKind !== 'actor' && elementKind !== 'scene' && elementKind !== 'prop') {
+    throw new UpstreamContractError(`${field}.elementKind is invalid`)
+  }
+  const sceneId = requireOptionalIdentifier(blocker.sceneId, `${field}.sceneId`)
+  const shotId = requireOptionalIdentifier(blocker.shotId, `${field}.shotId`)
+  const beatId = requireOptionalIdentifier(blocker.beatId, `${field}.beatId`)
+  const elementId = requireOptionalIdentifier(blocker.elementId, `${field}.elementId`)
+  return {
+    ...blocker,
+    scope: requireIdentifier(blocker.scope, `${field}.scope`),
+    reason: requireIdentifier(blocker.reason, `${field}.reason`),
+    ...(sceneId === undefined ? {} : { sceneId }),
+    ...(shotId === undefined ? {} : { shotId }),
+    ...(beatId === undefined ? {} : { beatId }),
+    ...(elementId === undefined ? {} : { elementId }),
+    ...(elementKind === undefined ? {} : { elementKind: elementKind as YimengShotRelationElementKind }),
+  }
+}
+
+function requireUniqueIdentifiers(values: unknown, field: string): string[] {
+  if (!Array.isArray(values)) throw new UpstreamContractError(`${field} must be an array`)
+  const identifiers = values.map((value, index) => requireIdentifier(value, `${field}[${String(index)}]`))
+  if (new Set(identifiers).size !== identifiers.length) {
+    throw new UpstreamContractError(`${field} must not contain duplicate identifiers`)
+  }
+  return identifiers
+}
+
+function normalizeShotRelationElement(value: unknown, field: string): YimengShotRelationElement {
+  const element = requireObject(value, field)
+  assertExactOutputKeys(
+    element,
+    ['elementKind', 'elementId', 'name', 'profileRevision', 'snapshotSha256'],
+    field,
+  )
+  if (element.elementKind !== 'actor' && element.elementKind !== 'scene' && element.elementKind !== 'prop') {
+    throw new UpstreamContractError(`${field}.elementKind is invalid`)
+  }
+  return {
+    elementKind: element.elementKind,
+    elementId: requireIdentifier(element.elementId, `${field}.elementId`),
+    name: requireString(element.name, `${field}.name`),
+    profileRevision: requireInteger(element.profileRevision, `${field}.profileRevision`, 0),
+    snapshotSha256: requireSha256(element.snapshotSha256, `${field}.snapshotSha256`),
+  }
+}
+
+function normalizeShotRelationBeat(value: unknown, field: string): YimengShotRelationBeat {
+  const beat = requireObject(value, field)
+  assertExactOutputKeys(
+    beat,
+    ['beatId', 'order', 'type', 'startSec', 'endSec', 'actorIds', 'propIds', 'visualResponsibility'],
+    field,
+  )
+  if (typeof beat.startSec !== 'number' || !Number.isFinite(beat.startSec) || beat.startSec < 0) {
+    throw new UpstreamContractError(`${field}.startSec must be a non-negative finite number`)
+  }
+  if (typeof beat.endSec !== 'number' || !Number.isFinite(beat.endSec) || beat.endSec < beat.startSec) {
+    throw new UpstreamContractError(`${field}.endSec must be finite and not precede startSec`)
+  }
+  return {
+    beatId: requireIdentifier(beat.beatId, `${field}.beatId`),
+    order: requireInteger(beat.order, `${field}.order`, 0),
+    type: requireIdentifier(beat.type, `${field}.type`),
+    startSec: beat.startSec,
+    endSec: beat.endSec,
+    actorIds: requireUniqueIdentifiers(beat.actorIds, `${field}.actorIds`),
+    propIds: requireUniqueIdentifiers(beat.propIds, `${field}.propIds`),
+    visualResponsibility: requireIdentifier(beat.visualResponsibility, `${field}.visualResponsibility`),
+  }
+}
+
+function normalizeShotRelations(
+  value: unknown,
+  expectedProjectId: string,
+  expectedEpisodeId: string,
+): YimengShotRelationsProjection {
+  const field = 'workflow.director.shotRelations'
+  const root = requireObject(value, field)
+  assertExactOutputKeys(
+    root,
+    ['schema', 'projectId', 'episodeId', 'storyboardRevision', 'scenes', 'shots', 'valid', 'blockers'],
+    field,
+  )
+  if (root.schema !== SHOT_RELATIONS_SCHEMA) throw new UpstreamContractError(`${field}.schema mismatch`)
+  const projectId = requireIdentifier(root.projectId, `${field}.projectId`)
+  const episodeId = requireIdentifier(root.episodeId, `${field}.episodeId`)
+  if (projectId !== expectedProjectId || episodeId !== expectedEpisodeId) {
+    throw new UpstreamContractError(`${field} project or episode subject mismatch`)
+  }
+  if (!Array.isArray(root.blockers)) throw new UpstreamContractError(`${field}.blockers must be an array`)
+  const blockers = root.blockers.map(normalizeShotRelationBlocker)
+  if (root.valid !== true || blockers.length !== 0) {
+    throw new UpstreamContractError(`${field} is invalid: ${blockers[0]?.reason ?? 'unknown relation blocker'}`)
+  }
+
+  const revision = requireObject(root.storyboardRevision, `${field}.storyboardRevision`)
+  assertExactOutputKeys(
+    revision,
+    ['episodeRevision', 'revisionId', 'revisionVersion', 'sourceSha256'],
+    `${field}.storyboardRevision`,
+  )
+  const storyboardRevision = {
+    episodeRevision: requireInteger(revision.episodeRevision, `${field}.storyboardRevision.episodeRevision`, 0),
+    revisionId: requireIdentifier(revision.revisionId, `${field}.storyboardRevision.revisionId`),
+    revisionVersion: requireInteger(revision.revisionVersion, `${field}.storyboardRevision.revisionVersion`, 1),
+    sourceSha256: requireSha256(revision.sourceSha256, `${field}.storyboardRevision.sourceSha256`),
+  }
+
+  const sceneRows = requireObjectItems(root.scenes, `${field}.scenes`)
+  const scenes = sceneRows.map((scene, index): YimengShotRelationScene => {
+    const sceneField = `${field}.scenes[${String(index)}]`
+    assertExactOutputKeys(scene, ['sceneId', 'name', 'profileRevision', 'snapshotSha256'], sceneField)
+    return {
+      sceneId: requireIdentifier(scene.sceneId, `${sceneField}.sceneId`),
+      name: requireString(scene.name, `${sceneField}.name`),
+      profileRevision: requireInteger(scene.profileRevision, `${sceneField}.profileRevision`, 0),
+      snapshotSha256: requireSha256(scene.snapshotSha256, `${sceneField}.snapshotSha256`),
+    }
+  })
+  const sceneIds = new Set(scenes.map(scene => scene.sceneId))
+  if (sceneIds.size !== scenes.length) throw new UpstreamContractError(`${field}.scenes contains duplicate sceneId`)
+
+  const shotRows = requireObjectItems(root.shots, `${field}.shots`)
+  const shots = shotRows.map((shot, shotIndex): YimengShotRelationShot => {
+    const shotField = `${field}.shots[${String(shotIndex)}]`
+    assertExactOutputKeys(shot, ['shotId', 'sceneId', 'title', 'beats', 'elements'], shotField)
+    const shotId = requireIdentifier(shot.shotId, `${shotField}.shotId`)
+    const sceneId = requireIdentifier(shot.sceneId, `${shotField}.sceneId`)
+    if (!sceneIds.has(sceneId)) throw new UpstreamContractError(`${shotField}.sceneId is dangling`)
+    if (shot.title !== null && typeof shot.title !== 'string') {
+      throw new UpstreamContractError(`${shotField}.title must be a string or null`)
+    }
+    if (typeof shot.title === 'string' && (shot.title.trim() === '' || shot.title !== shot.title.trim())) {
+      throw new UpstreamContractError(`${shotField}.title must be non-empty and trimmed`)
+    }
+    const elements = requireObjectItems(shot.elements, `${shotField}.elements`)
+      .map((element, index) => normalizeShotRelationElement(element, `${shotField}.elements[${String(index)}]`))
+    const elementKeys = elements.map(element => `${element.elementKind}:${element.elementId}`)
+    if (new Set(elementKeys).size !== elementKeys.length) {
+      throw new UpstreamContractError(`${shotField}.elements contains duplicate authority bindings`)
+    }
+    if (!elements.some(element => element.elementKind === 'scene' && element.elementId === sceneId)) {
+      throw new UpstreamContractError(`${shotField}.elements does not bind its canonical scene`)
+    }
+    const actorIds = new Set(elements.filter(element => element.elementKind === 'actor').map(element => element.elementId))
+    const propIds = new Set(elements.filter(element => element.elementKind === 'prop').map(element => element.elementId))
+    const beats = requireObjectItems(shot.beats, `${shotField}.beats`)
+      .map((beat, index) => normalizeShotRelationBeat(beat, `${shotField}.beats[${String(index)}]`))
+    const beatIds = new Set<string>()
+    beats.forEach((beat, index) => {
+      if (beatIds.has(beat.beatId)) throw new UpstreamContractError(`${shotField}.beats contains duplicate beatId`)
+      beatIds.add(beat.beatId)
+      if (beat.order !== index) throw new UpstreamContractError(`${shotField}.beats order must match array position`)
+      if (beat.actorIds.some(elementId => !actorIds.has(elementId))) {
+        throw new UpstreamContractError(`${shotField}.beats references a dangling actorId`)
+      }
+      if (beat.propIds.some(elementId => !propIds.has(elementId))) {
+        throw new UpstreamContractError(`${shotField}.beats references a dangling propId`)
+      }
+    })
+    return { shotId, sceneId, title: shot.title, beats, elements }
+  })
+  const shotIds = new Set(shots.map(shot => shot.shotId))
+  if (shotIds.size !== shots.length) throw new UpstreamContractError(`${field}.shots contains duplicate shotId`)
+
+  return {
+    schema: SHOT_RELATIONS_SCHEMA,
+    projectId,
+    episodeId,
+    storyboardRevision,
+    scenes,
+    shots,
+    valid: true,
+    blockers,
+  }
+}
+
 function normalizeWorkflow(value: unknown): YimengWorkflowProjection {
   const root = requireObject(value, 'workflow')
   if (root.schema !== WORKFLOW_SCHEMA) throw new UpstreamContractError('workflow.schema mismatch')
+  const projectId = requireIdentifier(root.projectId, 'workflow.projectId')
+  const episodeId = requireIdentifier(root.episodeId, 'workflow.episodeId')
   const stagesRoot = requireObject(root.stages, 'workflow.stages')
   const stages = Object.fromEntries(
     Object.entries(stagesRoot).map(([key, stage]) => [key, normalizeWorkflowStage(stage, `workflow.stages.${key}`)]),
   )
   if (!Array.isArray(root.blockers)) throw new UpstreamContractError('workflow.blockers must be an array')
+  const directorRoot = requireObject(root.director, 'workflow.director')
+  const director: YimengWorkflowDirector = {
+    ...directorRoot,
+    shotRelations: normalizeShotRelations(directorRoot.shotRelations, projectId, episodeId),
+  }
   return {
     ...root,
     schema: WORKFLOW_SCHEMA,
-    projectId: requireString(root.projectId, 'workflow.projectId'),
-    episodeId: requireString(root.episodeId, 'workflow.episodeId'),
+    projectId,
+    episodeId,
     sourceRevision: requireObject(root.sourceRevision, 'workflow.sourceRevision'),
     inputFingerprint: requireString(root.inputFingerprint, 'workflow.inputFingerprint'),
     activeTaskId: requireNullableString(root.activeTaskId, 'workflow.activeTaskId'),
@@ -1667,7 +1878,7 @@ function normalizeWorkflow(value: unknown): YimengWorkflowProjection {
     stages,
     stageHandoff: requireObject(root.stageHandoff, 'workflow.stageHandoff'),
     assets: requireObject(root.assets, 'workflow.assets'),
-    director: requireObject(root.director, 'workflow.director'),
+    director,
     shots: requireObject(root.shots, 'workflow.shots'),
     video: requireObject(root.video, 'workflow.video'),
     audio: requireObject(root.audio, 'workflow.audio'),
@@ -1724,6 +1935,10 @@ export function createYimengReadHandler(
         const request = parseEpisodeRequest(payload)
         path = `/api/episodes/${encodeURIComponent(request.episodeId)}/workflow-projection`
         normalize = (value) => {
+          const root = requireObject(value, 'workflow')
+          if (root.projectId !== request.projectId || root.episodeId !== request.episodeId) {
+            throw new UpstreamContractError('workflow project or episode subject mismatch')
+          }
           const result = normalizeWorkflow(value)
           if (result.projectId !== request.projectId || result.episodeId !== request.episodeId) {
             throw new UpstreamContractError('workflow project or episode subject mismatch')

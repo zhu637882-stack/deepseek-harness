@@ -253,6 +253,63 @@ function dependencies(fetch: typeof globalThis.fetch, token?: string): YimengRea
 }
 
 function workflowFixture(schema = 'jason.episode-workflow-projection.v1'): Record<string, unknown> {
+  const shotRelations = {
+    schema: 'jason.scene-shot-beat-element-relations.v1',
+    projectId: 'project-1',
+    episodeId: 'episode-1',
+    storyboardRevision: {
+      episodeRevision: 7,
+      revisionId: 'storyboard-revision-7',
+      revisionVersion: 3,
+      sourceSha256: 'a'.repeat(64),
+    },
+    scenes: [{
+      sceneId: 'scene-1',
+      name: '雨夜巷口',
+      profileRevision: 2,
+      snapshotSha256: 'b'.repeat(64),
+    }],
+    shots: [{
+      shotId: 'frame-1',
+      sceneId: 'scene-1',
+      title: '林夏推门',
+      beats: [{
+        beatId: 'beat-open-door',
+        order: 0,
+        type: 'action',
+        startSec: 0,
+        endSec: 1.5,
+        actorIds: ['actor-1'],
+        propIds: ['prop-1'],
+        visualResponsibility: '建立人物、道具与场景关系',
+      }],
+      elements: [
+        {
+          elementKind: 'scene',
+          elementId: 'scene-1',
+          name: '雨夜巷口',
+          profileRevision: 2,
+          snapshotSha256: 'b'.repeat(64),
+        },
+        {
+          elementKind: 'actor',
+          elementId: 'actor-1',
+          name: '林夏',
+          profileRevision: 4,
+          snapshotSha256: 'c'.repeat(64),
+        },
+        {
+          elementKind: 'prop',
+          elementId: 'prop-1',
+          name: '旧钥匙',
+          profileRevision: 1,
+          snapshotSha256: 'd'.repeat(64),
+        },
+      ],
+    }],
+    valid: true,
+    blockers: [],
+  }
   return {
     schema,
     projectId: 'project-1',
@@ -279,7 +336,7 @@ function workflowFixture(schema = 'jason.episode-workflow-projection.v1'): Recor
     },
     stageHandoff: {},
     assets: { items: [], retained: { nested: true } },
-    director: {},
+    director: { shotRelations },
     shots: {},
     video: {},
     audio: {},
@@ -965,6 +1022,46 @@ describe('qingmu Yimeng read adapter', () => {
     })
   })
 
+  it('fails closed on invalid, duplicate, or dangling E5-1 Shot relations', async () => {
+    const base = workflowFixture()
+    const director = base.director as Record<string, unknown>
+    const relations = director.shotRelations as Record<string, unknown>
+    const shots = relations.shots as Array<Record<string, unknown>>
+    const cases = [
+      {
+        ...base,
+        director: {
+          shotRelations: {
+            ...relations,
+            valid: false,
+            blockers: [{ scope: 'shot_relation', reason: 'element_profile_binding_missing', shotId: 'frame-1' }],
+          },
+        },
+      },
+      {
+        ...base,
+        director: { shotRelations: { ...relations, shots: [shots[0], shots[0]] } },
+      },
+      {
+        ...base,
+        director: {
+          shotRelations: {
+            ...relations,
+            shots: [{ ...shots[0], sceneId: 'scene-missing' }],
+          },
+        },
+      },
+    ]
+
+    for (const upstream of cases) {
+      const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(upstream), 'test-token'))
+      const result = await handler('workflow', { projectId: 'project-1', episodeId: 'episode-1' }, signal())
+      expect(result.ok).toBe(false)
+      if (result.ok) throw new Error('invalid Shot relation must fail closed')
+      expect(result.error.message).toMatch(/workflow\.director\.shotRelations/)
+    }
+  })
+
   it('fails closed on subject or canonical-evidence mismatch and accepts an exact not-found contract', async () => {
     const scriptHandler = createYimengReadHandler({}, dependencies(
       async () => jsonResponse({
@@ -1336,6 +1433,16 @@ describe('qingmu Yimeng read adapter', () => {
     expect(projection.retainedTopLevel).toEqual({ nested: true })
     expect(projection.assets.retained).toEqual({ nested: true })
     expect(projection.budget).toEqual({ valid: true, retained: { nested: true } })
+    expect(projection.director.shotRelations).toMatchObject({
+      schema: 'jason.scene-shot-beat-element-relations.v1',
+      projectId: 'project-1',
+      episodeId: 'episode-1',
+      valid: true,
+    })
+    expect(projection.director.shotRelations.shots[0]).toMatchObject({
+      shotId: 'frame-1',
+      sceneId: 'scene-1',
+    })
     expect(projection.interpretation).toEqual({
       providerAuthorization: 'not-exposed',
       humanSignoff: 'not-inferred',

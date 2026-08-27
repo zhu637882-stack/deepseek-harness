@@ -417,6 +417,82 @@ export interface YimengWorkflowRequest {
   readonly episodeId: string
 }
 
+/** Storyboard authority shared by every E5-1 relation view. */
+export interface YimengShotRelationsStoryboardRevision {
+  readonly episodeRevision: number
+  readonly revisionId: string
+  readonly revisionVersion: number
+  readonly sourceSha256: string
+}
+
+/** Canonical Scene authority referenced by one or more Shots. */
+export interface YimengShotRelationScene {
+  readonly sceneId: string
+  readonly name: string
+  readonly profileRevision: number
+  readonly snapshotSha256: string
+}
+
+export type YimengShotRelationElementKind = 'actor' | 'scene' | 'prop'
+
+/** Canonical Actor, Scene, or Prop authority referenced by a Shot. */
+export interface YimengShotRelationElement {
+  readonly elementKind: YimengShotRelationElementKind
+  readonly elementId: string
+  readonly name: string
+  readonly profileRevision: number
+  readonly snapshotSha256: string
+}
+
+/** Beat identity is local to its parent Shot and never promoted to a business entity. */
+export interface YimengShotRelationBeat {
+  readonly beatId: string
+  readonly order: number
+  readonly type: string
+  readonly startSec: number
+  readonly endSec: number
+  readonly actorIds: readonly string[]
+  readonly propIds: readonly string[]
+  readonly visualResponsibility: string
+}
+
+/** One canonical Yimeng Shot and its read-only E5-1 relationships. */
+export interface YimengShotRelationShot {
+  readonly shotId: string
+  readonly sceneId: string
+  readonly title: string | null
+  readonly beats: readonly YimengShotRelationBeat[]
+  readonly elements: readonly YimengShotRelationElement[]
+}
+
+/** Diagnostic facts emitted only by Yimeng; valid projections must have none. */
+export interface YimengShotRelationBlocker extends YimengJsonObject {
+  readonly scope: string
+  readonly reason: string
+  readonly sceneId?: string
+  readonly shotId?: string
+  readonly beatId?: string
+  readonly elementId?: string
+  readonly elementKind?: YimengShotRelationElementKind
+}
+
+/** Strict, rebuildable Scene/Shot/Beat/Element projection; never a second store. */
+export interface YimengShotRelationsProjection {
+  readonly schema: 'jason.scene-shot-beat-element-relations.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly storyboardRevision: YimengShotRelationsStoryboardRevision
+  readonly scenes: readonly YimengShotRelationScene[]
+  readonly shots: readonly YimengShotRelationShot[]
+  readonly valid: true
+  readonly blockers: readonly YimengShotRelationBlocker[]
+}
+
+/** Workflow director facts with the E5-1 authoritative relation projection. */
+export interface YimengWorkflowDirector extends YimengJsonObject {
+  readonly shotRelations: YimengShotRelationsProjection
+}
+
 /** Workflow stage facts supplied by Yimeng. */
 export interface YimengWorkflowStage extends YimengJsonObject {
   readonly status: string
@@ -460,7 +536,7 @@ export interface YimengWorkflowProjection extends YimengJsonObject {
   readonly stages: Readonly<Record<string, YimengWorkflowStage>>
   readonly stageHandoff: YimengJsonObject
   readonly assets: YimengJsonObject
-  readonly director: YimengJsonObject
+  readonly director: YimengWorkflowDirector
   readonly shots: YimengJsonObject
   readonly video: YimengJsonObject
   readonly audio: YimengJsonObject
