@@ -2,6 +2,7 @@
 // The assembled Host talks only to a loopback Yimeng double; no model, Provider,
 // production service, or persistent business database participates.
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { Buffer } from 'node:buffer'
 import { createHash, createHmac } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -92,6 +93,41 @@ const PROMPT_IR_SELECTION_IDEMPOTENCY_KEY = `qingmu:prompt-ir:select:v1:${create
   PROMPT_IR_DRAFT_CONTENT_SHA,
 ]), 'utf8').digest('hex')}`
 const IMAGO_ATTESTATION_KEY = 'qingmu-real-host-chromium-attestation-key-测试'
+const STORYBOARD_CANVAS_CHANGE_SET_ID = 'changeset-storyboard-canvas-1'
+const STORYBOARD_CANVAS_PAYLOAD_SHA = '81'.repeat(32)
+const STORYBOARD_CANVAS_HERO_ASSET_ID = 'hero-frame-asset-1'
+const STORYBOARD_CANVAS_HERO_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR42mNkYPj/n4GBgYGJAQoAHgQCAZ7FY0QAAAAASUVORK5CYII=',
+  'base64',
+)
+const STORYBOARD_CANVAS_HERO_MEDIA_SHA = createHash('sha256')
+  .update(STORYBOARD_CANVAS_HERO_PNG)
+  .digest('hex')
+const STORYBOARD_CANVAS_HERO_BINDING_SHA = createHash('sha256').update(JSON.stringify({
+  assetId: STORYBOARD_CANVAS_HERO_ASSET_ID,
+  mediaSha256: STORYBOARD_CANVAS_HERO_MEDIA_SHA,
+  shotId: PROMPT_IR_FRAME_ID,
+}), 'utf8').digest('hex')
+const STORYBOARD_CANVAS_BASE_REVISION = {
+  revisionId: PROMPT_IR_STORYBOARD_REVISION_ID,
+  revisionVersion: 1,
+  sourceSha256: SHOT_RELATION_SOURCE_SHA,
+} as const
+const STORYBOARD_CANVAS_AUTHORITATIVE_REVISION = {
+  revisionId: 'storyboard-revision-2',
+  revisionVersion: 2,
+  sourceSha256: '82'.repeat(32),
+} as const
+const STORYBOARD_CANVAS_CHANGED_PATHS = [
+  '$.directorPlan.storyboardCanvas',
+  '$.directorPlan.subjectLayout',
+  '$.directorPlan.objectAnchors',
+  '$.directorPlan.actionTrajectory',
+  '$.visualAtoms.storyboardCanvas',
+  '$.visualAtoms.subjectLayout',
+  '$.visualAtoms.objectAnchors',
+  '$.visualAtoms.actionTrajectory',
+] as const
 const ORIGINAL_TOKEN = process.env.YIMENG_API_TOKEN
 const ORIGINAL_ATTESTATION_KEY = process.env.QINGMU_IMAGO_ATTESTATION_KEY
 const IMAGO_CORE_ROOT = process.env.IMAGO_OS_CORE_ROOT?.trim()
@@ -171,6 +207,12 @@ interface CapturedYimengRequest {
   readonly body: unknown
 }
 
+interface StoryboardRevisionFixture {
+  readonly revisionId: string
+  readonly revisionVersion: number
+  readonly sourceSha256: string
+}
+
 type ElementKind = 'actor' | 'scene' | 'prop'
 
 const ELEMENT_FIXTURES = {
@@ -229,7 +271,7 @@ function compareUnicodeCodePoints(left: string, right: string): number {
 
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value)
-  if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value)
+  if (typeof value === 'number' && Number.isFinite(value)) return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
   if (isRecord(value)) {
     return `{${Object.keys(value).sort(compareUnicodeCodePoints).map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`
@@ -758,16 +800,17 @@ function promptIrWorkflowShot(selected: boolean) {
   } as const
 }
 
-function shotRelationsFixture(revision: number) {
+function shotRelationsFixture(
+  revision: number,
+  storyboardRevision: StoryboardRevisionFixture = STORYBOARD_CANVAS_BASE_REVISION,
+) {
   return {
     schema: 'jason.scene-shot-beat-element-relations.v1',
     projectId: 'project-1',
     episodeId: 'episode-1',
     storyboardRevision: {
       episodeRevision: revision,
-      revisionId: PROMPT_IR_STORYBOARD_REVISION_ID,
-      revisionVersion: 1,
-      sourceSha256: SHOT_RELATION_SOURCE_SHA,
+      ...storyboardRevision,
     },
     scenes: [{
       sceneId: 'scene-1',
@@ -813,6 +856,48 @@ function shotRelationsFixture(revision: number) {
         },
       ],
     }],
+    valid: true,
+    blockers: [],
+  } as const
+}
+
+function heroFrameStoryboardsFixture(
+  revision: number,
+  storyboardRevision: StoryboardRevisionFixture,
+  browserUrl: string,
+  canvas: Record<string, unknown> | null,
+) {
+  const shotRelations = shotRelationsFixture(revision, storyboardRevision)
+  const heroFrame = {
+    assetId: STORYBOARD_CANVAS_HERO_ASSET_ID,
+    mediaSha256: STORYBOARD_CANVAS_HERO_MEDIA_SHA,
+    browserUrl,
+    bindingSha256: STORYBOARD_CANVAS_HERO_BINDING_SHA,
+  } as const
+  const shot = {
+    shotId: PROMPT_IR_FRAME_ID,
+    shotSnapshotSha256: storyboardRevision.revisionVersion === 1 ? '83'.repeat(32) : '84'.repeat(32),
+    heroFrame,
+    canvas,
+    blockers: [],
+  } as const
+  const stableShot = {
+    ...shot,
+    heroFrame: {
+      assetId: heroFrame.assetId,
+      mediaSha256: heroFrame.mediaSha256,
+      bindingSha256: heroFrame.bindingSha256,
+    },
+  }
+  return {
+    schema: 'jason.qingmu-hero-frame-storyboards.v1',
+    projectId: 'project-1',
+    episodeId: 'episode-1',
+    episodeRevision: revision,
+    storyboardRevision,
+    shotRelationsSha256: canonicalSha256(shotRelations),
+    shots: [shot],
+    shotsSha256: canonicalSha256([stableShot]),
     valid: true,
     blockers: [],
   } as const
@@ -961,7 +1046,14 @@ function promptIrRecoveryEnvelope(receipt: unknown) {
   } as const
 }
 
-function workflowFixture(revision: number, promptIrSelected = false) {
+function workflowFixture(
+  revision: number,
+  promptIrSelected = false,
+  storyboardRevision: StoryboardRevisionFixture = STORYBOARD_CANVAS_BASE_REVISION,
+  heroBrowserUrl = 'http://127.0.0.1/api/qingmu/assets/hero-frame-asset-1/content',
+  storyboardCanvas: Record<string, unknown> | null = null,
+) {
+  const shotRelations = shotRelationsFixture(revision, storyboardRevision)
   return {
     schema: 'jason.episode-workflow-projection.v1',
     projectId: 'project-1',
@@ -1012,7 +1104,15 @@ function workflowFixture(revision: number, promptIrSelected = false) {
         },
       ],
     },
-    director: { shotRelations: shotRelationsFixture(revision) },
+    director: {
+      shotRelations,
+      heroFrameStoryboards: heroFrameStoryboardsFixture(
+        revision,
+        storyboardRevision,
+        heroBrowserUrl,
+        storyboardCanvas,
+      ),
+    },
     shots: {
       count: 1,
       shotGroupCount: 1,
@@ -1185,6 +1285,225 @@ function validateReferenceRightsMethodProof(
   return methodProjectionSha256
 }
 
+interface StoryboardCanvasMethodProof {
+  readonly canvas: Record<string, unknown>
+  readonly methodHeroFrameBindingSha256: string
+  readonly methodRawAnnotationsSha256: string
+  readonly compiledSha256: string
+  readonly projectionSha256: string
+}
+
+function validateStoryboardCanvasProposal(
+  body: unknown,
+  baseSnapshotSha256: string,
+): StoryboardCanvasMethodProof {
+  const proposal = isRecord(body) ? body : {}
+  const expectedKeys = [
+    'operation',
+    'baseRevision',
+    'baseSnapshotSha256',
+    'baseCanvasSha256',
+    'heroFrameAssetId',
+    'heroFrameMediaSha256',
+    'heroFrameBindingSha256',
+    'methodHeroFrameBindingSha256',
+    'methodProjection',
+    'methodProjectionSha256',
+    'methodAttestation',
+    'harnessSessionId',
+  ].sort()
+  const projection = isRecord(proposal.methodProjection) ? proposal.methodProjection : {}
+  const canvasProjection = isRecord(projection.canvas_projection) ? projection.canvas_projection : {}
+  const projectedHero = isRecord(canvasProjection.heroFrame) ? canvasProjection.heroFrame : {}
+  const attestation = isRecord(proposal.methodAttestation) ? proposal.methodAttestation : {}
+  const attestationKeys = [
+    'schema',
+    'algorithm',
+    'projectionSha256',
+    'inputSnapshotSha256',
+    'targetSha256',
+    'relationSnapshotSha256',
+    'selectedShotSha256',
+    'heroFrameBindingSha256',
+    'rawAnnotationsSha256',
+    'compiledResultSha256',
+    'signature',
+  ].sort()
+  const annotations = Array.isArray(canvasProjection.rawAnnotations) ? canvasProjection.rawAnnotations : []
+  const compiled = isRecord(canvasProjection.compiledResult) ? canvasProjection.compiledResult : {}
+  const plainAnnotationsSha256 = canonicalSha256(annotations)
+  const projectionSha256 = canonicalSha256(projection)
+  if (
+    Object.keys(proposal).sort().some((key, index) => key !== expectedKeys[index])
+    || Object.keys(proposal).length !== expectedKeys.length
+    || Object.keys(attestation).sort().some((key, index) => key !== attestationKeys[index])
+    || Object.keys(attestation).length !== attestationKeys.length
+    || proposal.operation !== 'replaceStoryboardCanvas'
+    || proposal.baseRevision !== STORYBOARD_CANVAS_BASE_REVISION.revisionVersion
+    || proposal.baseSnapshotSha256 !== baseSnapshotSha256
+    || proposal.baseCanvasSha256 !== null
+    || proposal.heroFrameAssetId !== STORYBOARD_CANVAS_HERO_ASSET_ID
+    || proposal.heroFrameMediaSha256 !== STORYBOARD_CANVAS_HERO_MEDIA_SHA
+    || proposal.heroFrameBindingSha256 !== STORYBOARD_CANVAS_HERO_BINDING_SHA
+    || proposal.harnessSessionId !== null
+    || projection.schema !== 'qingmu.imago-hero-frame-storyboard-method-projection.v1'
+    || canvasProjection.canonicalShotIdSource !== 'yimeng_storyboard_frame_id'
+    || canvasProjection.shotId !== PROMPT_IR_FRAME_ID
+    || canvasProjection.baseCanvasSha256 !== null
+    || projectedHero.assetId !== STORYBOARD_CANVAS_HERO_ASSET_ID
+    || projectedHero.mediaSha256 !== STORYBOARD_CANVAS_HERO_MEDIA_SHA
+    || typeof projectedHero.bindingSha256 !== 'string'
+    || proposal.methodHeroFrameBindingSha256 !== projectedHero.bindingSha256
+    || proposal.methodProjectionSha256 !== projectionSha256
+    || annotations.length === 0
+    || typeof canvasProjection.rawAnnotationsSha256 !== 'string'
+    || canvasProjection.rawAnnotationsSha256 === plainAnnotationsSha256
+    || typeof canvasProjection.compiledResultSha256 !== 'string'
+    || canvasProjection.compiledResultSha256 !== canonicalSha256(compiled)
+    || projection.providerCalls !== 0
+    || projection.workerStarted !== false
+    || projection.selection_executed !== false
+    || projection.human_approval_inferred !== false
+    || projection.human_signoff_inferred !== false
+    || attestation.schema !== 'qingmu.imago-hero-frame-storyboard-method-attestation.v1'
+    || attestation.algorithm !== 'hmac-sha256'
+    || attestation.projectionSha256 !== projectionSha256
+    || attestation.inputSnapshotSha256 !== projection.input_snapshot_sha256
+    || attestation.heroFrameBindingSha256 !== projectedHero.bindingSha256
+    || attestation.rawAnnotationsSha256 !== canvasProjection.rawAnnotationsSha256
+    || attestation.compiledResultSha256 !== canvasProjection.compiledResultSha256
+  ) {
+    throw new Error('storyboard canvas proposal or IMAGO method lineage mismatch')
+  }
+  const { signature, ...unsignedAttestation } = attestation
+  if (
+    typeof signature !== 'string'
+    || signature !== createHmac('sha256', IMAGO_ATTESTATION_KEY)
+      .update(canonicalJson(unsignedAttestation), 'utf8')
+      .digest('hex')
+  ) {
+    throw new Error('storyboard canvas method attestation signature mismatch')
+  }
+  return {
+    canvas: {
+      schema: 'jason.qingmu-storyboard-canvas.v1',
+      heroFrameBindingSha256: STORYBOARD_CANVAS_HERO_BINDING_SHA,
+      annotations,
+      rawAnnotationsSha256: plainAnnotationsSha256,
+      compiled,
+      compiledSha256: canvasProjection.compiledResultSha256,
+    },
+    methodHeroFrameBindingSha256: projectedHero.bindingSha256,
+    methodRawAnnotationsSha256: canvasProjection.rawAnnotationsSha256,
+    compiledSha256: canvasProjection.compiledResultSha256,
+    projectionSha256,
+  }
+}
+
+function storyboardCanvasChangeSetFixture(baseSnapshotSha256: string) {
+  return {
+    schema: 'jason.qingmu-change-set.v1',
+    id: STORYBOARD_CANVAS_CHANGE_SET_ID,
+    workspaceId: null,
+    projectId: 'project-1',
+    episodeId: 'episode-1',
+    targetType: 'storyboard_frame',
+    targetId: PROMPT_IR_FRAME_ID,
+    baseRevision: STORYBOARD_CANVAS_BASE_REVISION.revisionVersion,
+    baseSnapshotSha256,
+    payloadSha256: STORYBOARD_CANVAS_PAYLOAD_SHA,
+    originKind: 'human',
+    actorUserId: 'owner-1',
+    harnessSessionId: null,
+    status: 'draft',
+    authoritativeRevision: null,
+    authoritativeSnapshotSha256: null,
+    committedByUserId: null,
+    committedEventId: null,
+    committedAt: null,
+    createdAt: '2026-08-27T11:00:00+00:00',
+    updatedAt: '2026-08-27T11:00:00+00:00',
+  } as const
+}
+
+function storyboardCanvasPreviewFixture(
+  baseSnapshotSha256: string,
+  proof: StoryboardCanvasMethodProof,
+) {
+  return {
+    schema: 'jason.qingmu-storyboard-canvas-preview.v1',
+    changeSetId: STORYBOARD_CANVAS_CHANGE_SET_ID,
+    projectId: 'project-1',
+    episodeId: 'episode-1',
+    targetType: 'storyboard_frame',
+    targetId: PROMPT_IR_FRAME_ID,
+    operation: 'replaceStoryboardCanvas',
+    storyboardRevision: STORYBOARD_CANVAS_BASE_REVISION,
+    baseRevision: STORYBOARD_CANVAS_BASE_REVISION.revisionVersion,
+    baseSnapshotSha256,
+    payloadSha256: STORYBOARD_CANVAS_PAYLOAD_SHA,
+    heroFrame: {
+      assetId: STORYBOARD_CANVAS_HERO_ASSET_ID,
+      mediaSha256: STORYBOARD_CANVAS_HERO_MEDIA_SHA,
+      bindingSha256: STORYBOARD_CANVAS_HERO_BINDING_SHA,
+    },
+    methodHeroFrameBindingSha256: proof.methodHeroFrameBindingSha256,
+    before: null,
+    after: proof.canvas,
+    changedPaths: STORYBOARD_CANVAS_CHANGED_PATHS,
+    providerCalls: 0,
+    workerStarted: false,
+    selectionExecuted: false,
+    humanApprovalInferred: false,
+    humanSignoff: false,
+  } as const
+}
+
+function storyboardCanvasCommitReceiptFixture(
+  proof: StoryboardCanvasMethodProof,
+  authoritativeSnapshotSha256: string,
+  idempotencyKey: string,
+) {
+  return {
+    schema: 'jason.qingmu-storyboard-canvas-commit-result.v1',
+    changeSetId: STORYBOARD_CANVAS_CHANGE_SET_ID,
+    commandReceiptId: 'receipt-storyboard-canvas-1',
+    eventId: 'event-storyboard-canvas-1',
+    eventType: 'StoryboardCanvasReplaced',
+    projectId: 'project-1',
+    episodeId: 'episode-1',
+    targetType: 'storyboard_frame',
+    targetId: PROMPT_IR_FRAME_ID,
+    operation: 'replaceStoryboardCanvas',
+    storyboardRevision: {
+      base: STORYBOARD_CANVAS_BASE_REVISION,
+      authoritative: STORYBOARD_CANVAS_AUTHORITATIVE_REVISION,
+    },
+    baseRevision: STORYBOARD_CANVAS_BASE_REVISION.revisionVersion,
+    authoritativeRevision: STORYBOARD_CANVAS_AUTHORITATIVE_REVISION.revisionVersion,
+    authoritativeSnapshotSha256,
+    heroFrame: {
+      assetId: STORYBOARD_CANVAS_HERO_ASSET_ID,
+      mediaSha256: STORYBOARD_CANVAS_HERO_MEDIA_SHA,
+      bindingSha256: STORYBOARD_CANVAS_HERO_BINDING_SHA,
+    },
+    methodHeroFrameBindingSha256: proof.methodHeroFrameBindingSha256,
+    rawAnnotationsSha256: proof.canvas.rawAnnotationsSha256,
+    methodRawAnnotationsSha256: proof.methodRawAnnotationsSha256,
+    compiledSha256: proof.compiledSha256,
+    payloadSha256: STORYBOARD_CANVAS_PAYLOAD_SHA,
+    idempotencyKey,
+    changed: true,
+    providerCalls: 0,
+    workerStarted: false,
+    selectionExecuted: false,
+    humanApprovalInferred: false,
+    humanSignoff: false,
+    deduplicated: false,
+    committedAt: '2026-08-27T11:02:00+00:00',
+  } as const
+}
+
 async function startYimengDouble(
   captured: CapturedYimengRequest[],
   scriptReadRevisions: number[],
@@ -1218,6 +1537,8 @@ async function startYimengDouble(
   readonly releasePromptIrEditResponse: () => void
   readonly promptIrSelectionAccepted: Promise<void>
   readonly releasePromptIrSelectionResponse: () => void
+  readonly storyboardCanvasCommitAccepted: Promise<void>
+  readonly releaseStoryboardCanvasCommitResponse: () => void
 }> {
   let revision = 3
   let authoritativeScript: Record<string, unknown> = INITIAL_SCRIPT
@@ -1248,6 +1569,12 @@ async function startYimengDouble(
   let promptIrSelected = false
   let persistedPromptIrEditReceipt: ReturnType<typeof promptIrEditReceiptFixture> | undefined
   let persistedPromptIrSelectionReceipt: ReturnType<typeof promptIrSelectionReceiptFixture> | undefined
+  let storyboardRevision: StoryboardRevisionFixture = STORYBOARD_CANVAS_BASE_REVISION
+  let storyboardCanvas: Record<string, unknown> | null = null
+  let pendingStoryboardCanvasProof: StoryboardCanvasMethodProof | undefined
+  let storyboardCanvasBaseSnapshotSha256: string | undefined
+  let persistedStoryboardCanvasReceipt: ReturnType<typeof storyboardCanvasCommitReceiptFixture> | undefined
+  let publicBaseUrl = ''
   const reviewComments: Record<ElementKind, Array<Record<string, unknown>>> = { actor: [], scene: [], prop: [] }
   const reviewDecisions: Record<ElementKind, Array<Record<string, unknown>>> = { actor: [], scene: [], prop: [] }
   let resolveCommitAccepted: (() => void) | undefined
@@ -1323,6 +1650,14 @@ async function startYimengDouble(
   const promptIrSelectionResponseReleased = new Promise<void>((resolve) => {
     resolvePromptIrSelectionResponse = resolve
   })
+  let resolveStoryboardCanvasCommitAccepted: (() => void) | undefined
+  let resolveStoryboardCanvasCommitResponse: (() => void) | undefined
+  const storyboardCanvasCommitAccepted = new Promise<void>((resolve) => {
+    resolveStoryboardCanvasCommitAccepted = resolve
+  })
+  const storyboardCanvasCommitResponseReleased = new Promise<void>((resolve) => {
+    resolveStoryboardCanvasCommitResponse = resolve
+  })
   const server = createServer((request, response) => {
     void (async () => {
       const body = request.method === 'POST' ? await readJsonBody(request) : undefined
@@ -1353,6 +1688,19 @@ async function startYimengDouble(
         })
         return
       }
+      if (
+        request.method === 'GET'
+        && url.pathname === `/api/qingmu/assets/${STORYBOARD_CANVAS_HERO_ASSET_ID}/content`
+      ) {
+        response.writeHead(200, {
+          'content-type': 'image/png',
+          'content-length': String(STORYBOARD_CANVAS_HERO_PNG.byteLength),
+          'cache-control': 'no-store',
+          'access-control-allow-origin': '*',
+        })
+        response.end(STORYBOARD_CANVAS_HERO_PNG)
+        return
+      }
       if (request.method === 'GET' && url.pathname === '/api/projects') {
         json(response, 200, {
           items: [{ id: 'project-1', name: '青木样片' }],
@@ -1370,7 +1718,13 @@ async function startYimengDouble(
         return
       }
       if (request.method === 'GET' && url.pathname === '/api/episodes/episode-1/workflow-projection') {
-        const workflow = workflowFixture(revision, promptIrSelected)
+        const workflow = workflowFixture(
+          revision,
+          promptIrSelected,
+          storyboardRevision,
+          `${publicBaseUrl}/api/qingmu/assets/${STORYBOARD_CANVAS_HERO_ASSET_ID}/content`,
+          storyboardCanvas,
+        )
         const promptLineage = workflow.shots.items[0]?.promptLineage
         promptIrWorkflowStatuses.push(promptLineage?.status ?? 'missing')
         json(response, 200, workflow)
@@ -2460,9 +2814,152 @@ async function startYimengDouble(
         return
       }
 
+      const storyboardCanvasProposalPath = `/api/qingmu/projects/project-1/episodes/episode-1/storyboard-revisions/${STORYBOARD_CANVAS_BASE_REVISION.revisionId}/frames/${PROMPT_IR_FRAME_ID}/storyboard-canvas/change-sets`
+      if (request.method === 'POST' && url.pathname === storyboardCanvasProposalPath) {
+        if (
+          storyboardRevision.revisionId !== STORYBOARD_CANVAS_BASE_REVISION.revisionId
+          || storyboardCanvas !== null
+          || pendingStoryboardCanvasProof !== undefined
+        ) {
+          throw new Error('storyboard canvas proposal was repeated or started from stale authority')
+        }
+        const baseProjection = heroFrameStoryboardsFixture(
+          revision,
+          STORYBOARD_CANVAS_BASE_REVISION,
+          `${publicBaseUrl}/api/qingmu/assets/${STORYBOARD_CANVAS_HERO_ASSET_ID}/content`,
+          null,
+        )
+        storyboardCanvasBaseSnapshotSha256 = baseProjection.shotsSha256
+        pendingStoryboardCanvasProof = validateStoryboardCanvasProposal(body, baseProjection.shotsSha256)
+        json(response, 201, {
+          schema: 'jason.qingmu-storyboard-canvas-change-set-proposal.v1',
+          changeSet: storyboardCanvasChangeSetFixture(baseProjection.shotsSha256),
+          nextAction: 'preview',
+        })
+        return
+      }
+      if (
+        request.method === 'POST'
+        && url.pathname === `/api/qingmu/change-sets/${STORYBOARD_CANVAS_CHANGE_SET_ID}:preview`
+      ) {
+        const command = isRecord(body) ? body : {}
+        const expectedKeys = [
+          'projectId',
+          'episodeId',
+          'storyboardRevisionId',
+          'frameId',
+          'targetType',
+          'targetId',
+          'baseRevision',
+          'baseSnapshotSha256',
+        ].sort()
+        if (
+          pendingStoryboardCanvasProof === undefined
+          || storyboardCanvasBaseSnapshotSha256 === undefined
+          || Object.keys(command).sort().some((key, index) => key !== expectedKeys[index])
+          || Object.keys(command).length !== expectedKeys.length
+          || command.projectId !== 'project-1'
+          || command.episodeId !== 'episode-1'
+          || command.storyboardRevisionId !== STORYBOARD_CANVAS_BASE_REVISION.revisionId
+          || command.frameId !== PROMPT_IR_FRAME_ID
+          || command.targetType !== 'storyboard_frame'
+          || command.targetId !== PROMPT_IR_FRAME_ID
+          || command.baseRevision !== STORYBOARD_CANVAS_BASE_REVISION.revisionVersion
+          || command.baseSnapshotSha256 !== storyboardCanvasBaseSnapshotSha256
+        ) {
+          throw new Error('storyboard canvas preview lineage mismatch')
+        }
+        json(response, 200, storyboardCanvasPreviewFixture(
+          storyboardCanvasBaseSnapshotSha256,
+          pendingStoryboardCanvasProof,
+        ))
+        return
+      }
+      if (
+        request.method === 'POST'
+        && url.pathname === `/api/qingmu/change-sets/${STORYBOARD_CANVAS_CHANGE_SET_ID}:commit`
+      ) {
+        const command = isRecord(body) ? body : {}
+        const expectedKeys = [
+          'projectId',
+          'episodeId',
+          'storyboardRevisionId',
+          'frameId',
+          'targetType',
+          'targetId',
+          'baseRevision',
+          'baseSnapshotSha256',
+          'idempotencyKey',
+          'expectedPayloadSha256',
+        ].sort()
+        const expectedIdempotencyKey = `qingmu:storyboard-canvas:commit:v1:${createHash('sha256')
+          .update(STORYBOARD_CANVAS_CHANGE_SET_ID, 'utf8')
+          .digest('hex')}:${STORYBOARD_CANVAS_PAYLOAD_SHA}`
+        if (
+          pendingStoryboardCanvasProof === undefined
+          || storyboardCanvasBaseSnapshotSha256 === undefined
+          || persistedStoryboardCanvasReceipt !== undefined
+          || Object.keys(command).sort().some((key, index) => key !== expectedKeys[index])
+          || Object.keys(command).length !== expectedKeys.length
+          || command.projectId !== 'project-1'
+          || command.episodeId !== 'episode-1'
+          || command.storyboardRevisionId !== STORYBOARD_CANVAS_BASE_REVISION.revisionId
+          || command.frameId !== PROMPT_IR_FRAME_ID
+          || command.targetType !== 'storyboard_frame'
+          || command.targetId !== PROMPT_IR_FRAME_ID
+          || command.baseRevision !== STORYBOARD_CANVAS_BASE_REVISION.revisionVersion
+          || command.baseSnapshotSha256 !== storyboardCanvasBaseSnapshotSha256
+          || command.idempotencyKey !== expectedIdempotencyKey
+          || command.expectedPayloadSha256 !== STORYBOARD_CANVAS_PAYLOAD_SHA
+        ) {
+          throw new Error('storyboard canvas commit lineage mismatch')
+        }
+        storyboardRevision = STORYBOARD_CANVAS_AUTHORITATIVE_REVISION
+        storyboardCanvas = pendingStoryboardCanvasProof.canvas
+        const authoritativeProjection = heroFrameStoryboardsFixture(
+          revision,
+          storyboardRevision,
+          `${publicBaseUrl}/api/qingmu/assets/${STORYBOARD_CANVAS_HERO_ASSET_ID}/content`,
+          storyboardCanvas,
+        )
+        persistedStoryboardCanvasReceipt = storyboardCanvasCommitReceiptFixture(
+          pendingStoryboardCanvasProof,
+          authoritativeProjection.shotsSha256,
+          expectedIdempotencyKey,
+        )
+        resolveStoryboardCanvasCommitAccepted?.()
+        await storyboardCanvasCommitResponseReleased
+        if (!response.destroyed && !response.writableEnded) json(response, 200, persistedStoryboardCanvasReceipt)
+        return
+      }
+      if (
+        request.method === 'GET'
+        && url.pathname === `${storyboardCanvasProposalPath}/${STORYBOARD_CANVAS_CHANGE_SET_ID}/command-receipt`
+      ) {
+        const expectedIdempotencyKey = `qingmu:storyboard-canvas:commit:v1:${createHash('sha256')
+          .update(STORYBOARD_CANVAS_CHANGE_SET_ID, 'utf8')
+          .digest('hex')}:${STORYBOARD_CANVAS_PAYLOAD_SHA}`
+        if (
+          persistedStoryboardCanvasReceipt === undefined
+          || url.search !== ''
+          || request.headers['idempotency-key'] !== expectedIdempotencyKey
+        ) {
+          json(response, 404, { error: 'storyboard canvas receipt not found' })
+          return
+        }
+        json(response, 200, {
+          schema: 'jason.qingmu-command-receipt-recovery.v1',
+          recovered: true,
+          receiptSha256: canonicalSha256(persistedStoryboardCanvasReceipt),
+          receipt: persistedStoryboardCanvasReceipt,
+        })
+        return
+      }
+
       json(response, 404, { error: 'unexpected isolated route' })
-    })().catch(() => {
-      if (!response.headersSent) json(response, 500, { error: 'isolated double failed' })
+    })().catch((error: unknown) => {
+      const detail = error instanceof Error ? error.message : String(error)
+      if (!response.headersSent) json(response, 500, { error: `isolated double failed: ${detail}` })
       else response.end()
     })
   })
@@ -2477,9 +2974,10 @@ async function startYimengDouble(
   if (address === null || typeof address === 'string') {
     throw new Error('isolated Yimeng double did not bind a TCP port')
   }
+  publicBaseUrl = `http://127.0.0.1:${String(address.port)}`
   return {
     server,
-    baseUrl: `http://127.0.0.1:${String((address).port)}`,
+    baseUrl: publicBaseUrl,
     commitAccepted,
     releaseCommitResponse: () => resolveCommitResponse?.(),
     actorCommitAccepted,
@@ -2498,6 +2996,8 @@ async function startYimengDouble(
     releasePromptIrEditResponse: () => resolvePromptIrEditResponse?.(),
     promptIrSelectionAccepted,
     releasePromptIrSelectionResponse: () => resolvePromptIrSelectionResponse?.(),
+    storyboardCanvasCommitAccepted,
+    releaseStoryboardCanvasCommitResponse: () => resolveStoryboardCanvasCommitResponse?.(),
   }
 }
 
@@ -2557,6 +3057,8 @@ describe.skipIf(
     let releasePromptIrEditResponse: (() => void) | undefined
     let promptIrSelectionAccepted: Promise<void> | undefined
     let releasePromptIrSelectionResponse: (() => void) | undefined
+    let storyboardCanvasCommitAccepted: Promise<void> | undefined
+    let releaseStoryboardCanvasCommitResponse: (() => void) | undefined
     const capturedRequests: CapturedYimengRequest[] = []
     const scriptReadRevisions: number[] = []
     const actorReadRevisions: number[] = []
@@ -2568,6 +3070,13 @@ describe.skipIf(
     const propReferenceCandidateReads: ReturnType<typeof propReferenceCandidatesFixture>[] = []
     const promptIrWorkflowStatuses: string[] = []
     const browserRpcRequests: Array<{ readonly path: string; readonly body: unknown }> = []
+    const browserConsoleErrors: Array<{ readonly text: string; readonly location: string }> = []
+    const failedBrowserRequests: Array<{
+      readonly method: string
+      readonly path: string
+      readonly errorText: string
+    }> = []
+    let storyboardCanvasBrowserEvidence: Record<string, unknown> | undefined
     let resolveReferenceRightsMethodProjectionSha256: ((sha256: string) => void) | undefined
     const referenceRightsMethodProjectionSha256 = new Promise<string>((resolve) => {
       resolveReferenceRightsMethodProjectionSha256 = resolve
@@ -2611,6 +3120,8 @@ describe.skipIf(
       releasePromptIrEditResponse = yimeng.releasePromptIrEditResponse
       promptIrSelectionAccepted = yimeng.promptIrSelectionAccepted
       releasePromptIrSelectionResponse = yimeng.releasePromptIrSelectionResponse
+      storyboardCanvasCommitAccepted = yimeng.storyboardCanvasCommitAccepted
+      releaseStoryboardCanvasCommitResponse = yimeng.releaseStoryboardCanvasCommitResponse
       overlayRoot = await mkdtemp(join(tmpdir(), 'dsh-qingmu-script-e2e-'))
       const overlayPath = join(overlayRoot, 'qingmu-script.overlay.yml')
       const qingmuOverlay = resolveQingmuOverlayEntrypoints(await readFile(QINGMU_OVERLAY, 'utf8'))
@@ -2657,6 +3168,21 @@ describe.skipIf(
           }
         }).catch(() => undefined)
       })
+      page.on('console', (message) => {
+        if (message.type() !== 'error') return
+        const location = message.location()
+        browserConsoleErrors.push({
+          text: message.text(),
+          location: `${location.url ?? ''}:${String(location.lineNumber ?? 0)}:${String(location.columnNumber ?? 0)}`,
+        })
+      })
+      page.on('requestfailed', (request) => {
+        failedBrowserRequests.push({
+          method: request.method(),
+          path: new URL(request.url()).pathname,
+          errorText: request.failure()?.errorText ?? 'unknown browser request failure',
+        })
+      })
       tripwire = watchConsole(page)
       await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
       expect(await page.locator('html').innerHTML()).not.toContain(IMAGO_ATTESTATION_KEY)
@@ -2684,6 +3210,7 @@ describe.skipIf(
       releaseReferenceRegenerationCommitResponse?.()
       releasePromptIrEditResponse?.()
       releasePromptIrSelectionResponse?.()
+      releaseStoryboardCanvasCommitResponse?.()
       const requestEvidencePath = process.env.QINGMU_REQUEST_EVIDENCE_PATH?.trim()
       if (requestEvidencePath !== undefined && requestEvidencePath !== '') {
         await (async () => {
@@ -2738,11 +3265,14 @@ describe.skipIf(
             screenshots: {
               relation: process.env.QINGMU_E5_1_EVIDENCE_SCREENSHOT,
               relationMethod: process.env.QINGMU_E5_1_METHOD_EVIDENCE_SCREENSHOT,
+              storyboardCanvas: process.env.QINGMU_E5_2_CANVAS_EVIDENCE_SCREENSHOT,
+              storyboardCanvasMethod: process.env.QINGMU_E5_2_METHOD_EVIDENCE_SCREENSHOT,
               script: process.env.QINGMU_EVIDENCE_SCREENSHOT,
               actor: process.env.QINGMU_ACTOR_EVIDENCE_SCREENSHOT,
               scene: process.env.QINGMU_SCENE_EVIDENCE_SCREENSHOT,
               prop: process.env.QINGMU_ASSET_EVIDENCE_SCREENSHOT,
             },
+            storyboardCanvas: storyboardCanvasBrowserEvidence,
           }
           await mkdir(dirname(runEvidencePath), { recursive: true })
           await writeFile(runEvidencePath, `${JSON.stringify(evidence, null, 2)}\n`)
@@ -2934,7 +3464,13 @@ describe.skipIf(
 
       const health = capturedRequests.find(request => request.path === '/api/health')
       expect(health?.authorization).toBeUndefined()
-      const protectedRequests = capturedRequests.filter(request => request.path !== '/api/health')
+      const heroMediaPath = `/api/qingmu/assets/${STORYBOARD_CANVAS_HERO_ASSET_ID}/content`
+      const heroMediaRequests = capturedRequests.filter(request => request.path === heroMediaPath)
+      expect(heroMediaRequests.length).toBeGreaterThan(0)
+      expect(heroMediaRequests.every(request =>
+        request.authorization === undefined && request.cookie === undefined)).toBe(true)
+      const protectedRequests = capturedRequests.filter(request =>
+        request.path !== '/api/health' && request.path !== heroMediaPath)
       expect(protectedRequests.length).toBeGreaterThan(0)
       expect(protectedRequests.every(request => request.authorization === `Bearer ${YIMENG_TOKEN}`)).toBe(true)
       expect(capturedRequests.every(request => request.cookie === undefined)).toBe(true)
@@ -4422,5 +4958,235 @@ describe.skipIf(
       expect(tripwire.pageErrors).toEqual([])
       expect(tripwire.warnings).toEqual([])
     }, 120_000)
+
+    it('commits one E5-2 Hero Frame storyboard canvas and recovers the lost response with the old revision coordinates', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e5-2-storyboard-canvas'))
+      const proposalPath = `/api/qingmu/projects/project-1/episodes/episode-1/storyboard-revisions/${STORYBOARD_CANVAS_BASE_REVISION.revisionId}/frames/${PROMPT_IR_FRAME_ID}/storyboard-canvas/change-sets`
+      const previewPath = `/api/qingmu/change-sets/${STORYBOARD_CANVAS_CHANGE_SET_ID}:preview`
+      const commitPath = `/api/qingmu/change-sets/${STORYBOARD_CANVAS_CHANGE_SET_ID}:commit`
+      const recoveryPath = `${proposalPath}/${STORYBOARD_CANVAS_CHANGE_SET_ID}/command-receipt`
+      const workflowPath = '/api/episodes/episode-1/workflow-projection'
+      const methodRequestStart = browserRpcRequests.length
+      const workflowReadStart = capturedRequests.filter(request => request.path === workflowPath).length
+
+      await page.reload({ waitUntil: 'load' })
+      await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+      const initialEnterButton = page.getByRole('button', { name: '进入青木 OS' })
+      if (await initialEnterButton.isVisible()) await initialEnterButton.click()
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await dialog.waitFor({ timeout: 10_000 })
+      await dialog.getByRole('tab', { name: '分镜与镜头' }).click()
+      await dialog.locator(`[data-shot-id="${PROMPT_IR_FRAME_ID}"]`).waitFor({ timeout: 15_000 })
+      const canvas = dialog.getByRole('region', { name: 'Hero Frame 故事板画布' })
+      const canvasSvg = canvas.getByRole('img', { name: '已选 Hero Frame 与故事板标注画布' })
+      await canvasSvg.waitFor({ timeout: 20_000 })
+      const heroUrl = await canvasSvg.locator('image').getAttribute('href')
+      expect(heroUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/api\/qingmu\/assets\/hero-frame-asset-1\/content$/)
+      if (heroUrl === null) throw new Error('E5-2 Hero Frame did not expose its loopback image URL')
+      const decodedHero = await page.evaluate(async (source) => {
+        const image = new Image()
+        image.src = source
+        await image.decode()
+        return { width: image.naturalWidth, height: image.naturalHeight }
+      }, heroUrl)
+      expect(decodedHero).toEqual({ width: 2, height: 2 })
+      const browserConsoleErrorStart = browserConsoleErrors.length
+      const failedBrowserRequestStart = failedBrowserRequests.length
+
+      await canvas.getByRole('spinbutton', { name: '点 1 X' }).fill('1300')
+      await canvas.getByRole('button', { name: '添加标注' }).click()
+      const canvasEvidencePath = process.env.QINGMU_E5_2_CANVAS_EVIDENCE_SCREENSHOT?.trim()
+      if (canvasEvidencePath !== undefined && canvasEvidencePath !== '') {
+        await canvas.scrollIntoViewIfNeeded()
+        await mkdir(dirname(canvasEvidencePath), { recursive: true })
+        await page.screenshot({ path: canvasEvidencePath, fullPage: true })
+      }
+
+      await canvas.getByRole('button', { name: '运行 IMAGO 结构检查' }).click()
+      await canvas.getByText('机器结构检查已通过（不是创意批准）', { exact: true }).waitFor({ timeout: 30_000 })
+      const methodEvidencePath = process.env.QINGMU_E5_2_METHOD_EVIDENCE_SCREENSHOT?.trim()
+      if (methodEvidencePath !== undefined && methodEvidencePath !== '') {
+        await canvas.getByText('机器结构检查已通过（不是创意批准）', { exact: true }).scrollIntoViewIfNeeded()
+        await mkdir(dirname(methodEvidencePath), { recursive: true })
+        await page.screenshot({ path: methodEvidencePath, fullPage: true })
+      }
+
+      const methodWire = browserRpcRequests.slice(methodRequestStart).find(request =>
+        request.path === '/qingmu-imago-method/heroFrameStoryboardMethod')
+      expect(methodWire).toBeDefined()
+      if (methodWire === undefined || !isRecord(methodWire.body) || !isRecord(methodWire.body.payload)) {
+        throw new Error('browser did not expose the bounded E5-2 Hero Frame IMAGO request')
+      }
+      const methodPayload = methodWire.body.payload
+      expect(methodWire.body.method).toBe('heroFrameStoryboardMethod')
+      expect(methodPayload.selectedShotId).toBe(PROMPT_IR_FRAME_ID)
+      expect(methodPayload.heroFrame).toEqual({
+        assetId: STORYBOARD_CANVAS_HERO_ASSET_ID,
+        mediaSha256: STORYBOARD_CANVAS_HERO_MEDIA_SHA,
+      })
+      expect(methodPayload.canvas).toEqual(expect.objectContaining({ baseCanvasSha256: null }))
+      const methodCanvas = isRecord(methodPayload.canvas) ? methodPayload.canvas : {}
+      const methodAnnotations = Array.isArray(methodCanvas.annotations) ? methodCanvas.annotations : []
+      expect(methodAnnotations).toHaveLength(1)
+      expect(methodAnnotations[0]).toEqual(expect.objectContaining({
+        kind: 'subject_region',
+        elementRef: { elementKind: 'actor', elementId: 'actor-1' },
+        points: [{ x: 1300, y: 2500 }, { x: 7500, y: 7500 }],
+      }))
+
+      const previewWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng-command/previewStoryboardCanvas')
+      await canvas.getByRole('button', { name: '创建提案并读取技术预览' }).click()
+      const previewWire = await previewWirePromise
+      const previewRpc = await previewWire.json() as unknown
+      const previewRpcRoot = isRecord(previewRpc) ? previewRpc : {}
+      const previewRpcResult = isRecord(previewRpcRoot.result) ? previewRpcRoot.result : {}
+      const previewValue = isRecord(previewRpcResult.value) ? previewRpcResult.value : {}
+      expect(previewRpcResult.ok).toBe(true)
+      expect(previewValue).toEqual(expect.objectContaining({
+        schema: 'jason.qingmu-storyboard-canvas-preview.v1',
+        providerCalls: 0,
+        workerStarted: false,
+        selectionExecuted: false,
+        humanApprovalInferred: false,
+        humanSignoff: false,
+      }))
+      await canvas.getByText('技术预览', { exact: true }).waitFor({ timeout: 20_000 })
+
+      const proposalRequest = capturedRequests.find(request => request.path === proposalPath)
+      if (proposalRequest === undefined || !isRecord(proposalRequest.body)) {
+        throw new Error('E5-2 proposal did not reach the loopback Yimeng authority')
+      }
+      const proposalProjection = isRecord(proposalRequest.body.methodProjection)
+        ? proposalRequest.body.methodProjection
+        : {}
+      const canvasProjection = isRecord(proposalProjection.canvas_projection)
+        ? proposalProjection.canvas_projection
+        : {}
+      const rawAnnotations = Array.isArray(canvasProjection.rawAnnotations) ? canvasProjection.rawAnnotations : []
+      const plainRawAnnotationsSha256 = canonicalSha256(rawAnnotations)
+      const methodRawAnnotationsSha256 = canvasProjection.rawAnnotationsSha256
+      expect(methodRawAnnotationsSha256).toMatch(/^[0-9a-f]{64}$/)
+      expect(methodRawAnnotationsSha256).not.toBe(plainRawAnnotationsSha256)
+      expect(proposalRequest.body.heroFrameBindingSha256).toBe(STORYBOARD_CANVAS_HERO_BINDING_SHA)
+      expect(proposalRequest.body.methodHeroFrameBindingSha256).not.toBe(STORYBOARD_CANVAS_HERO_BINDING_SHA)
+
+      const commitButton = canvas.getByRole('button', { name: '提交权威画布' })
+      expect(await commitButton.isDisabled()).toBe(true)
+      await canvas.getByRole('checkbox', { name: '我确认把此技术预览提交到易梦权威画布' }).check()
+      await commitButton.click()
+      if (storyboardCanvasCommitAccepted === undefined) {
+        throw new Error('isolated storyboard canvas commit gate was not initialized')
+      }
+      await storyboardCanvasCommitAccepted
+      expect(capturedRequests.filter(request => request.path === commitPath)).toHaveLength(1)
+      expect(capturedRequests.filter(request => request.path === recoveryPath)).toEqual([])
+      expect(await page.evaluate(() => Object.keys(sessionStorage)
+        .filter(key => key.startsWith('qingmu:storyboard-canvas-commit-recovery:v1:')))).toEqual([
+        `qingmu:storyboard-canvas-commit-recovery:v1:project-1:episode-1:${PROMPT_IR_FRAME_ID}`,
+      ])
+
+      await page.reload({ waitUntil: 'load' })
+      releaseStoryboardCanvasCommitResponse?.()
+      await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+      const recoveryEnterButton = page.getByRole('button', { name: '进入青木 OS' })
+      if (await recoveryEnterButton.isVisible()) await recoveryEnterButton.click()
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const recoveryDialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await recoveryDialog.waitFor({ timeout: 10_000 })
+      await recoveryDialog.getByRole('tab', { name: '分镜与镜头' }).click()
+      const recoveryCanvas = recoveryDialog.getByRole('region', { name: 'Hero Frame 故事板画布' })
+      const recoveryButton = recoveryCanvas.getByRole('button', { name: '恢复原提交回执' })
+      await recoveryButton.waitFor({ timeout: 20_000 })
+      const recoveryWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng-command/recoverStoryboardCanvasCommit')
+      await recoveryButton.click()
+      const recoveryWire = await recoveryWirePromise
+      const recoveryRpc = await recoveryWire.json() as unknown
+      const recoveryRpcRoot = isRecord(recoveryRpc) ? recoveryRpc : {}
+      const recoveryRpcResult = isRecord(recoveryRpcRoot.result) ? recoveryRpcRoot.result : {}
+      const recoveryValue = isRecord(recoveryRpcResult.value) ? recoveryRpcResult.value : {}
+      const recoveredReceipt = isRecord(recoveryValue.receipt) ? recoveryValue.receipt : {}
+      expect(recoveryRpcResult.ok).toBe(true)
+      expect(recoveredReceipt.rawAnnotationsSha256).toBe(plainRawAnnotationsSha256)
+      expect(recoveredReceipt.methodRawAnnotationsSha256).toBe(methodRawAnnotationsSha256)
+      expect(recoveredReceipt.rawAnnotationsSha256).not.toBe(recoveredReceipt.methodRawAnnotationsSha256)
+      expect(recoveredReceipt.providerCalls).toBe(0)
+      expect(recoveredReceipt.workerStarted).toBe(false)
+      expect(recoveredReceipt.selectionExecuted).toBe(false)
+      expect(recoveredReceipt.humanApprovalInferred).toBe(false)
+      expect(recoveredReceipt.humanSignoff).toBe(false)
+      await recoveryCanvas.getByText('权威画布已提交并完成回执恢复与刷新', { exact: true })
+        .waitFor({ timeout: 20_000 })
+
+      expect(capturedRequests.filter(request => request.path === proposalPath)).toHaveLength(1)
+      expect(capturedRequests.filter(request => request.path === previewPath)).toHaveLength(1)
+      expect(capturedRequests.filter(request => request.path === commitPath)).toHaveLength(1)
+      expect(capturedRequests.filter(request => request.path === recoveryPath)).toEqual([
+        expect.objectContaining({ method: 'GET', body: undefined }),
+      ])
+      const recoveryRequest = capturedRequests.find(request => request.path === recoveryPath)
+      expect(recoveryRequest?.idempotencyKey).toBe(recoveredReceipt.idempotencyKey)
+      expect(capturedRequests.filter(request => request.path === workflowPath).length)
+        .toBeGreaterThan(workflowReadStart + 1)
+      expect(await page.evaluate(() => Object.keys(sessionStorage)
+        .filter(key => key.startsWith('qingmu:storyboard-canvas-commit-recovery:v1:')))).toEqual([])
+      expect(capturedRequests.filter(request => /(?:provider|worker|generate|generation-job)/i.test(request.path))).toEqual([])
+      expect(await page.locator('html').innerHTML()).not.toContain(IMAGO_ATTESTATION_KEY)
+      expect(await page.content()).not.toContain(YIMENG_TOKEN)
+      await expectNoVisibleTechnicalBrand(page)
+
+      const e5ConsoleErrors = browserConsoleErrors.slice(browserConsoleErrorStart)
+      const e5FailedRequests = failedBrowserRequests.slice(failedBrowserRequestStart)
+      const unexpectedFailedRequests = e5FailedRequests.filter(request => !(
+        /(?:ABORTED|aborted|cancelled)/.test(request.errorText)
+        && (
+          (request.method === 'GET' && request.path === '/plugins/events')
+          || (
+            request.method === 'POST'
+            && request.path === '/qingmu-yimeng-command/commitStoryboardCanvas'
+          )
+        )
+      ))
+      expect(e5ConsoleErrors).toEqual([])
+      expect(unexpectedFailedRequests).toEqual([])
+      expect(e5FailedRequests.filter(request => request.path === '/plugins/events').length).toBeLessThanOrEqual(1)
+      expect(e5FailedRequests.filter(request =>
+        request.path === '/qingmu-yimeng-command/commitStoryboardCanvas').length).toBeLessThanOrEqual(1)
+      expect(e5FailedRequests.length).toBeLessThanOrEqual(2)
+      expect(tripwire.pageErrors).toEqual([])
+      expect(tripwire.warnings).toEqual([])
+
+      storyboardCanvasBrowserEvidence = {
+        schema: 'qingmu.e5-2-storyboard-canvas-browser-evidence.v1',
+        frameId: PROMPT_IR_FRAME_ID,
+        heroFrame: {
+          assetId: STORYBOARD_CANVAS_HERO_ASSET_ID,
+          mediaSha256: STORYBOARD_CANVAS_HERO_MEDIA_SHA,
+          browserUrl: heroUrl,
+          decodedWidth: decodedHero.width,
+          decodedHeight: decodedHero.height,
+        },
+        editInput: { mechanism: 'numeric-input-and-button', point1X: 1300 },
+        methodProjectionSha256: proposalRequest.body.methodProjectionSha256,
+        plainRawAnnotationsSha256,
+        methodRawAnnotationsSha256,
+        hashesDistinct: true,
+        commitPostCount: capturedRequests.filter(request => request.path === commitPath).length,
+        recoveryMethod: recoveryRequest?.method,
+        recoveryStoryboardRevisionId: STORYBOARD_CANVAS_BASE_REVISION.revisionId,
+        authoritativeStoryboardRevisionId: STORYBOARD_CANVAS_AUTHORITATIVE_REVISION.revisionId,
+        providerCalls: 0,
+        workerStarted: false,
+        selectionExecuted: false,
+        humanApprovalInferred: false,
+        humanSignoff: false,
+        consoleErrors: e5ConsoleErrors,
+        pageErrors: tripwire.pageErrors,
+        failedRequests: e5FailedRequests,
+        unexpectedFailedRequests,
+      }
+    }, 180_000)
   },
 )
