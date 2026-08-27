@@ -16,7 +16,9 @@
 
 `workflow.director.heroFrameStoryboards` 同级投影与 E5-1 权威 Shot 及准确分镜修订一对一连接。Host 会校验已选择首帧资产的绑定、有界整数 `0..10000` 标注坐标、Shot 内人物/道具引用、确定性的 `subjectLayout`、`objectAnchors` 与 `actionTrajectory` 编译结果，以及全部稳定 SHA。会过期的 `browserUrl` 被明确排除在 `shotsSha256` 之外，资产 ID、媒体 SHA 和绑定 SHA 仍在哈希覆盖范围内。这个对象只是只读投影，不是第二个画布仓库或修订系统。
 
-包根入口导出请求与响应类型，包括 `YimengHealth`、`YimengProjectsResponse`、`YimengEpisodesResponse`、`YimengScriptResponse`、`YimengElementProfileRequest`、`YimengElementProfileResponse`、`YimengReferenceAssetCandidate`、`YimengReferenceCandidatesRequest`、`YimengReferenceCandidatesResponse`、`YimengHeroFrameStoryboardsProjection` 和 `YimengWorkflowProjection`。
+`workflow.director.shotRelations.shots` 数组投影易梦权威故事板帧，不增加 Shot 真源。每个 Shot 携带 `shotId`、唯一 Shot 排序字段 `frameNo`、`durationSec` 和派生的 `dialogueRhythm`；它绝不携带 Shot 级 `order`、`sortOrder` 或 `sequence`。每个元素携带 `currentReferenceAvailability`，并携带 `currentReference: null` 或 E4-3 唯一当前已选参考的 `assetId`、`sha256` 与血缘。适配器不选择参考，也不持久化 Shot 选择状态。
+
+包根入口导出请求与响应类型，包括 `YimengHealth`、`YimengProjectsResponse`、`YimengEpisodesResponse`、`YimengScriptResponse`、`YimengElementProfileRequest`、`YimengElementProfileResponse`、`YimengReferenceAssetCandidate`、`YimengReferenceCandidatesRequest`、`YimengReferenceCandidatesResponse`、`YimengShotRelationShot`、`YimengShotDialogueCue`、`YimengShotDialogueRhythm`、`YimengShotCurrentReference`、`YimengShotCurrentReferenceLineage`、`YimengShotRelationsProjection`、`YimengHeroFrameStoryboardsProjection` 和 `YimengWorkflowProjection`。
 
 ## 安全边界
 
