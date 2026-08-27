@@ -171,6 +171,20 @@ const REFERENCE_QUALITY_STATUSES = new Set<YimengReferenceCandidateQualityStatus
 const REFERENCE_DECISION_KINDS = new Set<YimengReferenceCandidateDecisionKind>([
   'none', 'referenceSelection', 'humanReview',
 ])
+const SHOT_CURRENT_REFERENCE_ROLES = {
+  actor: [
+    'identity_board',
+    'identity_board:age_variant',
+    'turnaround_front',
+    'turnaround_left',
+    'turnaround_right',
+    'turnaround_back',
+    'face_closeup',
+    'video_identity_reference',
+  ],
+  scene: ['scene_reference'],
+  prop: ['prop_reference'],
+} as const satisfies Record<YimengShotRelationElementKind, readonly string[]>
 const RIGHTS_KNOWLEDGE_STATES = new Set<YimengReferenceRightsKnowledgeState>([
   'known', 'unknown', 'not_applicable',
 ])
@@ -1722,6 +1736,13 @@ function requireUniqueIdentifiers(values: unknown, field: string): string[] {
   return identifiers
 }
 
+function isShotCurrentReferenceRole(
+  elementKind: YimengShotRelationElementKind,
+  role: string,
+): boolean {
+  return (SHOT_CURRENT_REFERENCE_ROLES[elementKind] as readonly string[]).includes(role)
+}
+
 function normalizeShotCurrentReference(
   value: unknown,
   field: string,
@@ -1768,6 +1789,7 @@ function normalizeShotCurrentReference(
     normalizedLineage.projectId !== projectId
     || normalizedLineage.ownerType !== elementKind
     || normalizedLineage.ownerId !== elementId
+    || !isShotCurrentReferenceRole(elementKind, normalizedLineage.role)
   ) {
     throw new UpstreamContractError(`${lineageField} subject mismatch`)
   }
@@ -1860,6 +1882,10 @@ function normalizeShotDialogueRhythm(
   })
   const cueCount = requireInteger(rhythm.cueCount, `${field}.cueCount`, 0)
   const timedCueCount = requireInteger(rhythm.timedCueCount, `${field}.timedCueCount`, 0)
+  const v2LineIds = cues.flatMap(cue => cue.lineId === null ? [] : [cue.lineId])
+  if (new Set(v2LineIds).size !== v2LineIds.length) {
+    throw new UpstreamContractError(`${field} v2 lineId duplicate`)
+  }
   if (
     cueCount !== cues.length
     || timedCueCount !== cues.filter(cue => cue.timingVerified).length

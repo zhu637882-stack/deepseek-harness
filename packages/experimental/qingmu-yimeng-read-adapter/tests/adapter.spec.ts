@@ -1179,6 +1179,57 @@ describe('qingmu Yimeng read adapter', () => {
     }
   })
 
+  it('orders non-lexical E5-3 Shot IDs only by authoritative frameNo', async () => {
+    const upstream = structuredClone(workflowFixture())
+    const director = upstream.director as Record<string, unknown>
+    const relations = director.shotRelations as Record<string, unknown>
+    const firstShot = (relations.shots as Array<Record<string, unknown>>)[0]
+    if (firstShot === undefined) throw new Error('fixture Shot is missing')
+    const shotA = { ...structuredClone(firstShot), shotId: 'shot-z', frameNo: 7 }
+    const shotB = { ...structuredClone(firstShot), shotId: 'shot-b', frameNo: 12 }
+    relations.shots = [shotB, shotA]
+    const heroFrameStoryboards = director.heroFrameStoryboards as Record<string, unknown>
+    const heroRows = [
+      {
+        shotId: 'shot-b',
+        shotSnapshotSha256: '1'.repeat(64),
+        heroFrame: null,
+        canvas: null,
+        blockers: [],
+      },
+      {
+        shotId: 'shot-z',
+        shotSnapshotSha256: '2'.repeat(64),
+        heroFrame: null,
+        canvas: null,
+        blockers: [],
+      },
+    ]
+    heroFrameStoryboards.shotRelationsSha256 = createHash('sha256')
+      .update(canonicalJson(relations), 'utf8')
+      .digest('hex')
+    heroFrameStoryboards.shots = heroRows
+    heroFrameStoryboards.shotsSha256 = createHash('sha256')
+      .update(canonicalJson(heroRows), 'utf8')
+      .digest('hex')
+    const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(upstream), 'test-token'))
+
+    const result = await handler('workflow', { projectId: 'project-1', episodeId: 'episode-1' }, signal())
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error(result.error.message)
+    const shots = (result.value as YimengWorkflowProjection).director.shotRelations.shots
+    expect(shots.map(shot => [shot.shotId, shot.frameNo])).toEqual([
+      ['shot-z', 7],
+      ['shot-b', 12],
+    ])
+    for (const shot of shots) {
+      expect(shot).not.toHaveProperty('order')
+      expect(shot).not.toHaveProperty('sortOrder')
+      expect(shot).not.toHaveProperty('sequence')
+    }
+  })
+
   it('fails closed on forged E5-3 Shot rhythm and current-reference fields', async () => {
     const mutations: Array<(
       shot: Record<string, unknown>,
@@ -1204,6 +1255,14 @@ describe('qingmu Yimeng read adapter', () => {
         cue.plannedEndSec = 4
       },
       (shot) => {
+        const rhythm = shot.dialogueRhythm as Record<string, unknown>
+        const cue = (rhythm.cues as Array<Record<string, unknown>>)[0]
+        if (cue === undefined) throw new Error('fixture cue is missing')
+        rhythm.cues = [cue, { ...cue, verbatimText: '还是同一句。' }]
+        rhythm.cueCount = 2
+        rhythm.timedCueCount = 2
+      },
+      (shot) => {
         const actor = (shot.elements as Array<Record<string, unknown>>)[1]
         if (actor === undefined) throw new Error('fixture actor is missing')
         const reference = actor.currentReference as Record<string, unknown>
@@ -1215,6 +1274,13 @@ describe('qingmu Yimeng read adapter', () => {
         const reference = actor.currentReference as Record<string, unknown>
         const lineage = reference.lineage as Record<string, unknown>
         lineage.ownerId = 'actor-foreign'
+      },
+      (shot) => {
+        const actor = (shot.elements as Array<Record<string, unknown>>)[1]
+        if (actor === undefined) throw new Error('fixture actor is missing')
+        const reference = actor.currentReference as Record<string, unknown>
+        const lineage = reference.lineage as Record<string, unknown>
+        lineage.role = 'prop_reference'
       },
       (shot) => {
         const actor = (shot.elements as Array<Record<string, unknown>>)[1]
@@ -1237,6 +1303,49 @@ describe('qingmu Yimeng read adapter', () => {
       expect(result.ok).toBe(false)
       if (result.ok) throw new Error('forged E5-3 Shot relation must fail closed')
       expect(result.error.message).toMatch(/workflow\.director\.shotRelations/)
+    }
+  })
+
+  it('enforces the canonical current-reference role for each E5-3 element kind', async () => {
+    const cases = [
+      { elementKind: 'actor', role: 'identity_board', valid: true },
+      { elementKind: 'actor', role: 'turnaround_front', valid: true },
+      { elementKind: 'actor', role: 'prop_reference', valid: false },
+      { elementKind: 'scene', role: 'scene_reference', valid: true },
+      { elementKind: 'scene', role: 'prop_reference', valid: false },
+      { elementKind: 'prop', role: 'prop_reference', valid: true },
+      { elementKind: 'prop', role: 'scene_reference', valid: false },
+    ] as const
+    for (const testCase of cases) {
+      const upstream = structuredClone(workflowFixture())
+      const director = upstream.director as Record<string, unknown>
+      const relations = director.shotRelations as Record<string, unknown>
+      const shot = (relations.shots as Array<Record<string, unknown>>)[0]
+      if (shot === undefined) throw new Error('fixture Shot is missing')
+      const element = (shot.elements as Array<Record<string, unknown>>)
+        .find(value => value.elementKind === testCase.elementKind)
+      if (element === undefined) throw new Error(`fixture ${testCase.elementKind} is missing`)
+      const elementId = element.elementId as string
+      element.currentReferenceAvailability = 'available'
+      element.currentReference = {
+        assetId: `asset-${elementId}`,
+        sha256: 'f'.repeat(64),
+        lineage: {
+          projectId: 'project-1',
+          sourceEpisodeId: 'episode-1',
+          ownerType: testCase.elementKind,
+          ownerId: elementId,
+          role: testCase.role,
+          generationJobId: `job-${elementId}`,
+          sourceRevisionId: `revision-${elementId}`,
+          formalConsistencyCheckId: `check-${elementId}`,
+        },
+      }
+      const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(upstream), 'test-token'))
+
+      const result = await handler('workflow', { projectId: 'project-1', episodeId: 'episode-1' }, signal())
+
+      expect(result.ok).toBe(testCase.valid)
     }
   })
 
