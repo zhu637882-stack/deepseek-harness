@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 import {
   clearReferenceRightsExceptionReleaseRecoveryMarker,
   createReferenceRightsExceptionReleaseRecoveryMarker,
@@ -45,8 +46,16 @@ describe('reference-rights exception-release recovery marker v1', () => {
   })
 
   it('derives digests and a deterministic bounded idempotency key from exact coordinates', async () => {
-    const reasonSha256 = await digestReferenceRightsExceptionReason('权利人已书面确认本次素材用途。')
+    const reason = '权利人已书面确认本次素材用途。'
+    const reasonSha256 = await digestReferenceRightsExceptionReason(reason)
     const scopeSha256 = await digestReferenceRightsExceptionScope(SCOPE)
+    const canonicalScope = JSON.stringify({
+      kind: 'reference_rights',
+      referenceAssetId: SCOPE.referenceAssetId,
+      referenceAssetSha256: SCOPE.referenceAssetSha256,
+      rightsFields: ['sourceType', 'rightsHolder'],
+      rightsRecordSha256: SCOPE.rightsRecordSha256,
+    })
     const coordinates = {
       projectId: 'project-1',
       elementKind: 'prop',
@@ -63,6 +72,8 @@ describe('reference-rights exception-release recovery marker v1', () => {
 
     expect(reasonSha256).toMatch(/^[0-9a-f]{64}$/)
     expect(scopeSha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(reasonSha256).toBe(createHash('sha256').update(JSON.stringify(reason), 'utf8').digest('hex'))
+    expect(scopeSha256).toBe(createHash('sha256').update(canonicalScope, 'utf8').digest('hex'))
     expect(key).toMatch(/^qingmu:rights-exception:v1:[0-9a-f]{64}$/)
     expect(key.length).toBeLessThanOrEqual(200)
     expect(await deriveReferenceRightsExceptionIdempotencyKey(coordinates)).toBe(key)

@@ -215,6 +215,23 @@ const RIGHTS_EXCEPTION_REQUEST = {
   reason: '仅对已核验的来源、权利人和授权范围做本次例外放行。',
   scope: RIGHTS_EXCEPTION_SCOPE,
 } as const
+const RIGHTS_EXCEPTION_RECOVERY_REQUEST = {
+  projectId: RIGHTS_EXCEPTION_REQUEST.projectId,
+  elementKind: RIGHTS_EXCEPTION_REQUEST.elementKind,
+  targetId: RIGHTS_EXCEPTION_REQUEST.targetId,
+  expectedSubjectRevision: RIGHTS_EXCEPTION_REQUEST.expectedSubjectRevision,
+  expectedSubjectSha256: RIGHTS_EXCEPTION_REQUEST.expectedSubjectSha256,
+  referenceAssetId: RIGHTS_EXCEPTION_SCOPE.referenceAssetId,
+  referenceAssetSha256: RIGHTS_EXCEPTION_SCOPE.referenceAssetSha256,
+  rightsRecordSha256: RIGHTS_EXCEPTION_SCOPE.rightsRecordSha256,
+  reasonSha256: createHash('sha256')
+    .update(canonicalJson(RIGHTS_EXCEPTION_REQUEST.reason), 'utf8')
+    .digest('hex'),
+  scopeSha256: createHash('sha256')
+    .update(canonicalJson(RIGHTS_EXCEPTION_SCOPE), 'utf8')
+    .digest('hex'),
+  idempotencyKey: RIGHTS_EXCEPTION_REQUEST.idempotencyKey,
+} as const
 const RIGHTS_EXCEPTION_RELEASE = {
   id: 'rights-exception-release-1',
   decision: 'exception_release',
@@ -1320,7 +1337,7 @@ describe('qingmu Yimeng command adapter', () => {
       ['createComment', COMMENT_REQUEST],
       ['createHumanDecision', DECISION_REQUEST],
       ['createReferenceRightsExceptionRelease', RIGHTS_EXCEPTION_REQUEST],
-      ['recoverReferenceRightsExceptionRelease', RIGHTS_EXCEPTION_REQUEST],
+      ['recoverReferenceRightsExceptionRelease', RIGHTS_EXCEPTION_RECOVERY_REQUEST],
     ] as const) {
       expect(await handler(endpoint, payload, signal())).toEqual({
         ok: false,
@@ -1421,7 +1438,7 @@ describe('qingmu Yimeng command adapter', () => {
 
     expect(await handler('createReferenceRightsExceptionRelease', RIGHTS_EXCEPTION_REQUEST, signal()))
       .toEqual({ ok: true, value: RIGHTS_EXCEPTION_RESULT })
-    expect(await handler('recoverReferenceRightsExceptionRelease', RIGHTS_EXCEPTION_REQUEST, signal()))
+    expect(await handler('recoverReferenceRightsExceptionRelease', RIGHTS_EXCEPTION_RECOVERY_REQUEST, signal()))
       .toEqual({ ok: true, value: RIGHTS_EXCEPTION_RECOVERY })
 
     expect(requests.map(item => item.url)).toEqual([
@@ -1469,6 +1486,12 @@ describe('qingmu Yimeng command adapter', () => {
     }
     expect(fetch).not.toHaveBeenCalled()
 
+    expect(await handler('recoverReferenceRightsExceptionRelease', {
+      ...RIGHTS_EXCEPTION_RECOVERY_REQUEST,
+      reason: RIGHTS_EXCEPTION_REQUEST.reason,
+    }, signal())).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    expect(fetch).not.toHaveBeenCalled()
+
     for (const result of [
       { ...RIGHTS_EXCEPTION_RESULT, release: { ...RIGHTS_EXCEPTION_RELEASE, subjectSha256: 'f'.repeat(64) } },
       { ...RIGHTS_EXCEPTION_RESULT, release: { ...RIGHTS_EXCEPTION_RELEASE, reason: 'different reason' } },
@@ -1488,7 +1511,19 @@ describe('qingmu Yimeng command adapter', () => {
       ...RIGHTS_EXCEPTION_RECOVERY,
       receiptSha256: 'f'.repeat(64),
     }), 'test-token'))
-    expect(await tamperedRecovery('recoverReferenceRightsExceptionRelease', RIGHTS_EXCEPTION_REQUEST, signal()))
+    expect(await tamperedRecovery('recoverReferenceRightsExceptionRelease', RIGHTS_EXCEPTION_RECOVERY_REQUEST, signal()))
+      .toMatchObject({ ok: false, error: { code: 'internal' } })
+
+    const driftedReceipt = {
+      ...RIGHTS_EXCEPTION_RESULT,
+      release: { ...RIGHTS_EXCEPTION_RELEASE, reason: 'receipt reason drift' },
+    }
+    const digestDrift = createYimengCommandHandler({}, deps(async () => jsonResponse({
+      ...RIGHTS_EXCEPTION_RECOVERY,
+      receiptSha256: createHash('sha256').update(canonicalJson(driftedReceipt), 'utf8').digest('hex'),
+      receipt: driftedReceipt,
+    }), 'test-token'))
+    expect(await digestDrift('recoverReferenceRightsExceptionRelease', RIGHTS_EXCEPTION_RECOVERY_REQUEST, signal()))
       .toMatchObject({ ok: false, error: { code: 'internal' } })
   })
 

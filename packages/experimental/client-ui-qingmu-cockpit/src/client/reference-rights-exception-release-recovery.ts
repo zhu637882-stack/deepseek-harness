@@ -92,8 +92,37 @@ function getSubtleCrypto(): SubtleCrypto {
   return cryptoValue.subtle as SubtleCrypto
 }
 
+function compareUnicodeCodePoints(left: string, right: string): number {
+  const leftPoints = Array.from(left, character => character.codePointAt(0) ?? 0)
+  const rightPoints = Array.from(right, character => character.codePointAt(0) ?? 0)
+  const length = Math.min(leftPoints.length, rightPoints.length)
+  for (let index = 0; index < length; index += 1) {
+    const difference = (leftPoints[index] ?? 0) - (rightPoints[index] ?? 0)
+    if (difference !== 0) return difference
+  }
+  return leftPoints.length - rightPoints.length
+}
+
+/** Canonical JSON shared semantically with the Host receipt verifier. */
+function canonicalJson(value: unknown): string {
+  if (value === null) return 'null'
+  if (typeof value === 'string') return JSON.stringify(value)
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value)) throw new Error('异常放行摘要只接受安全整数')
+    return String(value)
+  }
+  if (Array.isArray(value)) return `[${value.map(item => canonicalJson(item)).join(',')}]`
+  if (typeof value === 'object' && value !== null) {
+    const record = value as Record<string, unknown>
+    const keys = Object.keys(record).sort(compareUnicodeCodePoints)
+    return `{${keys.map(key => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`
+  }
+  throw new Error('异常放行摘要输入不是规范 JSON')
+}
+
 async function digestCanonical(value: unknown): Promise<string> {
-  const bytes = new TextEncoder().encode(JSON.stringify(value))
+  const bytes = new TextEncoder().encode(canonicalJson(value))
   const digest = await getSubtleCrypto().digest('SHA-256', bytes)
   return [...new Uint8Array(digest)]
     .map(byte => byte.toString(16).padStart(2, '0'))

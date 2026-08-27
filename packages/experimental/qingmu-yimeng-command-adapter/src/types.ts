@@ -611,9 +611,24 @@ export interface YimengCreateReferenceRightsExceptionReleaseResponse {
   readonly humanApprovalInferred: false
 }
 
-/** Read-only receipt lookup uses the same pre-submit coordinates and Host idempotency header. */
-export type YimengRecoverReferenceRightsExceptionReleaseRequest =
-  YimengCreateReferenceRightsExceptionReleaseRequest
+/**
+ * Read-only receipt lookup uses only the marker's non-sensitive bindings.
+ * The reason and scope bodies are recovered from the immutable receipt and
+ * checked against their canonical SHA-256 values; they are never persisted locally.
+ */
+export interface YimengRecoverReferenceRightsExceptionReleaseRequest {
+  readonly projectId: string
+  readonly elementKind: YimengElementKind
+  readonly targetId: string
+  readonly expectedSubjectRevision: number
+  readonly expectedSubjectSha256: string
+  readonly referenceAssetId: string
+  readonly referenceAssetSha256: string
+  readonly rightsRecordSha256: string
+  readonly reasonSha256: string
+  readonly scopeSha256: string
+  readonly idempotencyKey: string
+}
 
 /** Exact original POST receipt returned without replaying its command. */
 export interface YimengRecoverReferenceRightsExceptionReleaseResponse extends YimengCommandJsonObject {

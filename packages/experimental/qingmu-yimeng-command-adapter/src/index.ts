@@ -1059,7 +1059,33 @@ function parseCreateReferenceRightsExceptionReleaseRequest(
 function parseRecoverReferenceRightsExceptionReleaseRequest(
   payload: unknown,
 ): YimengRecoverReferenceRightsExceptionReleaseRequest {
-  return parseCreateReferenceRightsExceptionReleaseRequest(payload)
+  const input = requireInputObject(payload)
+  assertOnlyInputKeys(input, [
+    'projectId',
+    'elementKind',
+    'targetId',
+    'expectedSubjectRevision',
+    'expectedSubjectSha256',
+    'referenceAssetId',
+    'referenceAssetSha256',
+    'rightsRecordSha256',
+    'reasonSha256',
+    'scopeSha256',
+    'idempotencyKey',
+  ])
+  return {
+    projectId: parseIdentifier(input.projectId, 'projectId'),
+    elementKind: parseElementKind(input.elementKind),
+    targetId: parseIdentifier(input.targetId, 'targetId'),
+    expectedSubjectRevision: parseExpectedSubjectRevision(input.expectedSubjectRevision),
+    expectedSubjectSha256: parseInputSha256(input.expectedSubjectSha256, 'expectedSubjectSha256'),
+    referenceAssetId: parseIdentifier(input.referenceAssetId, 'referenceAssetId'),
+    referenceAssetSha256: parseInputSha256(input.referenceAssetSha256, 'referenceAssetSha256'),
+    rightsRecordSha256: parseInputSha256(input.rightsRecordSha256, 'rightsRecordSha256'),
+    reasonSha256: parseInputSha256(input.reasonSha256, 'reasonSha256'),
+    scopeSha256: parseInputSha256(input.scopeSha256, 'scopeSha256'),
+    idempotencyKey: parseReviewIdempotencyKey(input.idempotencyKey),
+  }
 }
 
 function parseMethodAttestation(value: unknown): YimengImagoElementMethodAttestation {
@@ -3625,7 +3651,9 @@ function normalizeReferenceRightsExceptionScope(
 
 function normalizeReferenceRightsExceptionReleaseFact(
   value: unknown,
-  expected: YimengCreateReferenceRightsExceptionReleaseRequest,
+  expected:
+    | YimengCreateReferenceRightsExceptionReleaseRequest
+    | YimengRecoverReferenceRightsExceptionReleaseRequest,
 ): YimengReferenceRightsExceptionReleaseFact {
   const field = 'referenceRightsExceptionReleaseResult.release'
   const release = requireObject(value, field)
@@ -3704,9 +3732,21 @@ function normalizeReferenceRightsExceptionReleaseFact(
     fact.subjectId !== expected.targetId
     || fact.subjectRevision !== expected.expectedSubjectRevision
     || fact.subjectSha256 !== expected.expectedSubjectSha256
-    || fact.reason !== expected.reason
-    || canonicalJson(fact.scope, `${field}.scope`) !== canonicalJson(expected.scope, 'expected.scope')
   ) throw new UpstreamContractError('referenceRightsExceptionReleaseResult release lineage mismatch')
+  if ('scope' in expected) {
+    if (
+      fact.reason !== expected.reason
+      || canonicalJson(fact.scope, `${field}.scope`) !== canonicalJson(expected.scope, 'expected.scope')
+    ) throw new UpstreamContractError('referenceRightsExceptionReleaseResult release lineage mismatch')
+  } else if (
+    fact.scope.referenceAssetId !== expected.referenceAssetId
+    || fact.scope.referenceAssetSha256 !== expected.referenceAssetSha256
+    || fact.scope.rightsRecordSha256 !== expected.rightsRecordSha256
+    || canonicalJsonSha256(fact.reason, `${field}.reason`) !== expected.reasonSha256
+    || canonicalJsonSha256(fact.scope, `${field}.scope`) !== expected.scopeSha256
+  ) {
+    throw new UpstreamContractError('referenceRightsExceptionReleaseResult recovery digest mismatch')
+  }
   if (fact.reason.trim().length === 0 || fact.reason.length > 8_000) {
     throw new UpstreamContractError(`${field}.reason must be between 1 and 8000 characters`)
   }
@@ -3715,7 +3755,9 @@ function normalizeReferenceRightsExceptionReleaseFact(
 
 function normalizeCreateReferenceRightsExceptionReleaseResponse(
   value: unknown,
-  expected: YimengCreateReferenceRightsExceptionReleaseRequest,
+  expected:
+    | YimengCreateReferenceRightsExceptionReleaseRequest
+    | YimengRecoverReferenceRightsExceptionReleaseRequest,
 ): YimengCreateReferenceRightsExceptionReleaseResponse {
   const field = 'referenceRightsExceptionReleaseResult'
   const root = requireObject(value, field)
