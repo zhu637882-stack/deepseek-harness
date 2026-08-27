@@ -7,18 +7,31 @@ import type {
   YimengCommitElementProfileResponse,
   YimengCreateCommentResponse,
   YimengCreateHumanDecisionResponse,
+  YimengElementProfileReference,
   YimengElementProfileResponse,
   YimengElementReviewFeedResponse,
   YimengHumanDecision,
   YimengHumanDecisionValue,
   YimengPreviewElementProfileResponse,
   YimengReferenceAssetCandidate,
+  YimengReferenceActionOperation,
   YimengReferenceAssetOperation,
   YimengReferenceCandidatesResponse,
   YimengReferencePreviewElementProfileResponse,
+  YimengReferenceRightsPreviewElementProfileResponse,
+  YimengReferenceRightsRecord,
   YimengRecoverElementProfileCommitResponse,
 } from './contracts.ts'
 import type { QingmuCockpitKey } from './locales.ts'
+import { ReferenceRightsEditor, ReferenceRightsSummary } from './ReferenceRightsEditor.tsx'
+import {
+  assertCanonicalReferenceRightsRecord,
+  createReferenceRightsDraft,
+  digestReferenceRightsRecord,
+  normalizeReferenceRightsDraft,
+  referenceRightsRecordsEqual,
+  type ReferenceRightsDraft,
+} from './reference-rights.ts'
 import {
   clearCommandCommitRecoveryMarker,
   createCommandCommitRecoveryMarker,
@@ -61,15 +74,30 @@ interface ElementChoice {
   readonly name: string
 }
 
-interface ReferenceProposalLineage {
+interface ReferenceActionProposalLineage {
   readonly changeSetId: string
   readonly baseRevision: number
   readonly baseSnapshotSha256: string
   readonly payloadSha256: string
-  readonly operation: YimengReferenceAssetOperation
+  readonly operation: YimengReferenceActionOperation
   readonly candidateAssetId: string
   readonly candidateAssetSha256: string
 }
+
+interface ReferenceRightsProposalLineage {
+  readonly changeSetId: string
+  readonly baseRevision: number
+  readonly baseSnapshotSha256: string
+  readonly payloadSha256: string
+  readonly operation: 'replaceReferenceRights'
+  readonly referenceAssetId: string
+  readonly referenceAssetSha256: string
+  readonly rights: YimengReferenceRightsRecord
+  readonly selectionStatus: string
+  readonly isSelected: boolean
+}
+
+type ReferenceProposalLineage = ReferenceActionProposalLineage | ReferenceRightsProposalLineage
 
 const ELEMENT_KIND_LOCALE_KEY = {
   actor: 'assetKindActor',
@@ -159,8 +187,8 @@ function assertSnapshot(
   const root = snapshot as unknown as JsonRecord
   const subject = recordOf(snapshot.subject)
   if (
-    root.schema !== 'jason.qingmu-element-profile-subject-read.v1'
-    || subject.schema !== 'jason.qingmu-element-profile-subject.v1'
+    root.schema !== 'jason.qingmu-element-profile-subject-read.v2'
+    || subject.schema !== 'jason.qingmu-element-profile-subject.v2'
     || subject.projectId !== projectId
     || subject.targetType !== 'element_profile'
     || subject.elementKind !== elementKind
@@ -168,9 +196,59 @@ function assertSnapshot(
     || !Number.isSafeInteger(subject.profileRevision)
     || (subject.profileRevision as number) < 0
     || !SHA256.test(snapshot.snapshotSha256)
+    || !Array.isArray(subject.references)
   ) {
     throw new Error('易梦返回的元素资料与当前业务对象不一致')
   }
+  const bindings = new Set<string>()
+  for (const [index, value] of snapshot.subject.references.entries()) {
+    const reference = recordOf(value)
+    const assetId = stringOf(reference.assetId)
+    const sha256 = stringOf(reference.sha256)
+    const selectionStatus = stringOf(reference.selectionStatus)
+    if (
+      assetId === undefined
+      || sha256 === undefined
+      || !SHA256.test(sha256)
+      || selectionStatus === undefined
+      || typeof reference.isSelected !== 'boolean'
+      || typeof reference.rightsRecorded !== 'boolean'
+    ) throw new Error(`易梦参考素材[${String(index)}]权威字段不完整`)
+    assertCanonicalReferenceRightsRecord(reference.rights, `易梦参考素材[${String(index)}].rights`)
+    const binding = `${assetId}:${sha256}`
+    if (bindings.has(binding)) throw new Error('易梦返回了重复的参考素材绑定')
+    bindings.add(binding)
+  }
+}
+
+function referenceBinding(reference: Pick<YimengElementProfileReference, 'assetId' | 'sha256'>): string {
+  return `${reference.assetId}:${reference.sha256}`
+}
+
+function findReference(
+  subjectValue: unknown,
+  assetId: string,
+  sha256: string,
+): YimengElementProfileReference | undefined {
+  const references = arrayOf(recordOf(subjectValue).references)
+  const matches = references.filter((value) => {
+    const reference = recordOf(value)
+    return reference.assetId === assetId && reference.sha256 === sha256
+  })
+  return matches.length === 1 ? matches[0] as YimengElementProfileReference : undefined
+}
+
+function assertReferenceSelectionPreserved(
+  reference: YimengElementProfileReference | undefined,
+  selectionStatus: string,
+  isSelected: boolean,
+  field: string,
+): asserts reference is YimengElementProfileReference {
+  if (
+    reference === undefined
+    || reference.selectionStatus !== selectionStatus
+    || reference.isSelected !== isSelected
+  ) throw new Error(`${field}改变了参考素材 selectionStatus 或 isSelected`)
 }
 
 function isHumanDecisionValue(value: unknown): value is YimengHumanDecisionValue {
@@ -346,6 +424,24 @@ function assertCurrentDecisionUnchanged(
   }
 }
 
+function assertHumanDecisionsPreserved(
+  before: YimengElementReviewFeedResponse,
+  after: YimengElementReviewFeedResponse,
+): void {
+  if (
+    before.decisions.length !== after.decisions.length
+    || before.decisions.some(decision => !after.decisions.some(candidate => (
+      candidate.id === decision.id && sameHumanDecision(candidate, decision, false)
+    )))
+  ) {
+    throw new Error('权利记录提交后的正式人工决定发生变化')
+  }
+  if (
+    before.subject.revision === after.subject.revision
+    && before.subject.sha256 === after.subject.sha256
+  ) assertCurrentDecisionUnchanged(before.currentDecision, after.currentDecision)
+}
+
 function assertCreatedComment(
   response: YimengCreateCommentResponse,
   expectedBody: string,
@@ -490,9 +586,31 @@ function assertReferenceCandidatePostState(
   if (!valid) throw new Error('易梦参考素材提交后目标候选状态与操作不一致')
 }
 
+async function assertReferenceRightsPostState(
+  snapshot: YimengElementProfileResponse,
+  marker: CommandCommitRecoveryMarker,
+): Promise<YimengElementProfileReference> {
+  if (marker.operation !== 'replaceReferenceRights') {
+    throw new Error('参考素材权利提交恢复标记操作无效')
+  }
+  const reference = findReference(snapshot.subject, marker.referenceAssetId, marker.referenceAssetSha256)
+  assertReferenceSelectionPreserved(
+    reference,
+    marker.selectionStatus,
+    marker.isSelected,
+    '权利提交后的权威参考素材',
+  )
+  if (!reference.rightsRecorded) throw new Error('权利提交后的权威参考素材未登记 rightsRecorded')
+  assertCanonicalReferenceRightsRecord(reference.rights, '权利提交后的权威参考素材.rights')
+  if (await digestReferenceRightsRecord(reference.rights) !== marker.referenceRightsSha256) {
+    throw new Error('权利提交后的权威参考素材 rights hash 不一致')
+  }
+  return reference
+}
+
 function referenceCandidateEligible(
   candidate: YimengReferenceAssetCandidate,
-  operation: YimengReferenceAssetOperation,
+  operation: YimengReferenceActionOperation,
 ): boolean {
   if (
     !candidate.bindingValid
@@ -568,8 +686,11 @@ function assertReferenceMethod(
   projectId: string,
   targetId: string,
   elementKind: CommandElementKind,
-  operation: YimengReferenceAssetOperation,
-): void {
+  operation: YimengReferenceActionOperation,
+): asserts method is Extract<
+  ImagoReferenceAssetMethodResponse,
+  { readonly schema: 'qingmu.imago-reference-asset-method-adapter-result.v1' }
+> {
   const subject = recordOf(snapshot.subject)
   const root = recordOf(method)
   const projection = recordOf(root.projection)
@@ -618,10 +739,40 @@ function assertReferenceMethod(
   }
 }
 
+function assertReferenceRightsMethod(
+  method: ImagoReferenceAssetMethodResponse,
+  snapshot: YimengElementProfileResponse,
+  projectId: string,
+  targetId: string,
+  elementKind: CommandElementKind,
+): asserts method is ImagoElementMethodResponse {
+  if (method.schema !== 'qingmu.imago-element-method-adapter-result.v1') {
+    throw new Error('IMAGO 权利方法返回了错误的投影合同')
+  }
+  assertMethod(method, snapshot, projectId, targetId, elementKind)
+  const definition = recordOf(method.projection.method_definition)
+  const workOrder = recordOf(method.projection.work_order_projection)
+  if (
+    definition.id !== 'imago-v6-reference-rights-record'
+    || definition.version !== 1
+    || workOrder.operation !== 'replaceReferenceRights'
+    || !Array.isArray(workOrder.allowed_mutations)
+    || workOrder.allowed_mutations.length !== 1
+    || workOrder.allowed_mutations[0] !== 'replaceReferenceRights'
+  ) throw new Error('IMAGO 权利方法未绑定当前 replaceReferenceRights 工作单')
+}
+
 function isReferencePreview(
   preview: YimengPreviewElementProfileResponse,
 ): preview is YimengReferencePreviewElementProfileResponse {
   return preview.schema === 'jason.qingmu-reference-asset-preview.v1'
+}
+
+function isReferenceRightsPreview(
+  preview: YimengPreviewElementProfileResponse,
+): preview is YimengReferenceRightsPreviewElementProfileResponse {
+  return preview.schema === 'jason.qingmu-change-set-preview.v1'
+    && preview.operation === 'replaceReferenceRights'
 }
 
 function assertReferencePreview(
@@ -632,7 +783,7 @@ function assertReferencePreview(
   projectId: string,
   targetId: string,
   elementKind: CommandElementKind,
-  operation: YimengReferenceAssetOperation,
+  operation: YimengReferenceActionOperation,
 ): asserts preview is YimengReferencePreviewElementProfileResponse {
   const subject = recordOf(snapshot.subject)
   const root = recordOf(preview)
@@ -656,6 +807,74 @@ function assertReferencePreview(
   }
 }
 
+function assertReferenceRightsPreview(
+  preview: YimengPreviewElementProfileResponse,
+  snapshot: YimengElementProfileResponse,
+  method: ImagoElementMethodResponse,
+  changeSetId: string,
+  reference: YimengElementProfileReference,
+  rights: YimengReferenceRightsRecord,
+  projectId: string,
+  targetId: string,
+  elementKind: CommandElementKind,
+): asserts preview is YimengReferenceRightsPreviewElementProfileResponse {
+  if (!isReferenceRightsPreview(preview)) throw new Error('易梦返回的权利预览操作类型不一致')
+  const changeSet = preview.changeSet
+  const impact = recordOf(preview.impactAnalysis)
+  const preflight = recordOf(preview.preflight)
+  const baseReference = findReference(preview.baseSubject, reference.assetId, reference.sha256)
+  const currentReference = findReference(preview.authoritativeCurrentSubject, reference.assetId, reference.sha256)
+  assertReferenceSelectionPreserved(baseReference, reference.selectionStatus, reference.isSelected, '权利预览基线')
+  if (preview.canCommit) {
+    assertReferenceSelectionPreserved(currentReference, reference.selectionStatus, reference.isSelected, '权利预览当前版本')
+  }
+  if (
+    preview.changeSetId !== changeSetId
+    || preview.changeSetId !== changeSet.id
+    || preview.projectId !== projectId
+    || preview.targetType !== 'element_profile'
+    || preview.targetId !== targetId
+    || preview.elementKind !== elementKind
+    || preview.operation !== 'replaceReferenceRights'
+    || preview.referenceAssetId !== reference.assetId
+    || preview.referenceAssetSha256 !== reference.sha256
+    || preview.baseRevision !== snapshot.subject.profileRevision
+    || preview.baseSnapshotSha256 !== snapshot.snapshotSha256
+    || preview.payloadSha256 !== changeSet.payloadSha256
+    || preview.methodProjectionSha256 !== method.projectionSha256
+    || changeSet.projectId !== projectId
+    || changeSet.episodeId !== null
+    || changeSet.targetType !== 'element_profile'
+    || changeSet.targetId !== targetId
+    || changeSet.baseRevision !== snapshot.subject.profileRevision
+    || changeSet.baseSnapshotSha256 !== snapshot.snapshotSha256
+    || !referenceRightsRecordsEqual(preview.proposedReferenceRights, rights)
+    || !SHA256.test(preview.previewSha256)
+    || !SHA256.test(preview.impactSha256)
+    || typeof preview.changed !== 'boolean'
+    || typeof preview.authoritativeChanged !== 'boolean'
+    || typeof preview.revisionConflict !== 'boolean'
+    || typeof preview.baseSnapshotConflict !== 'boolean'
+    || typeof preview.impactConflict !== 'boolean'
+    || typeof preview.canCommit !== 'boolean'
+    || typeof preview.referenceInvalidationExpected !== 'boolean'
+    || ((preview.revisionConflict || preview.baseSnapshotConflict || preview.impactConflict) && preview.canCommit)
+    || !hasExactKeys(impact, [
+      'affectedReferenceAssetIds',
+      'invalidatedApprovalAssetIds',
+      'affectedDerivedAssetIds',
+      'affectedReferencePackIds',
+      'affectedPromptIrIds',
+      'affectedStoryboardFrameIds',
+      'unknowns',
+    ])
+    || !Object.values(impact).every(isStringArray)
+    || preflight.costGate !== 'not_granted'
+    || preflight.selectionAuthority !== 'not_granted'
+    || preflight.humanApprovalInferred !== false
+  ) throw new Error('易梦权利预览与当前素材、权利正文、影响或非授权边界不一致')
+}
+
 function assertPreview(
   preview: YimengPreviewElementProfileResponse,
   snapshot: YimengElementProfileResponse,
@@ -664,7 +883,7 @@ function assertPreview(
   elementKind: CommandElementKind,
   proposedValue: string,
 ): void {
-  if (isReferencePreview(preview)) {
+  if (isReferencePreview(preview) || isReferenceRightsPreview(preview)) {
     throw new Error('易梦返回的元素预览操作类型不一致')
   }
   const subject = recordOf(snapshot.subject)
@@ -742,6 +961,49 @@ function assertCommitReceiptLineage(
     }
     return
   }
+  if (marker.operation === 'replaceReferenceRights') {
+    const root = recordOf(receipt)
+    const impact = recordOf(root.impactAnalysis)
+    if (
+      root.schema !== 'jason.qingmu-element-profile-commit-result.v1'
+      || root.changeSetId !== marker.changeSetId
+      || root.projectId !== marker.projectId
+      || root.targetType !== marker.targetType
+      || root.targetId !== marker.targetId
+      || root.elementKind !== marker.elementKind
+      || root.operation !== marker.operation
+      || root.referenceAssetId !== marker.referenceAssetId
+      || root.referenceAssetSha256 !== marker.referenceAssetSha256
+      || root.baseRevision !== marker.baseRevision
+      || root.payloadSha256 !== marker.payloadSha256
+      || root.idempotencyKey !== marker.idempotencyKey
+      || typeof root.changed !== 'boolean'
+      || !Number.isSafeInteger(root.authoritativeRevision)
+      || typeof root.referenceInvalidated !== 'boolean'
+      || root.eventType !== (root.referenceInvalidated ? 'ReferenceInvalidated' : 'ElementProfileChanged')
+      || typeof root.authoritativeSnapshotSha256 !== 'string'
+      || !SHA256.test(root.authoritativeSnapshotSha256)
+      || (root.changed === false && (
+        root.authoritativeRevision !== marker.baseRevision
+        || root.authoritativeSnapshotSha256 !== marker.baseSnapshotSha256
+        || root.referenceInvalidated !== false
+      ))
+      || (root.changed === true && root.authoritativeRevision !== marker.baseRevision + 1)
+      || typeof root.impactSha256 !== 'string'
+      || !SHA256.test(root.impactSha256)
+      || !hasExactKeys(impact, [
+        'affectedReferenceAssetIds',
+        'invalidatedApprovalAssetIds',
+        'affectedDerivedAssetIds',
+        'affectedReferencePackIds',
+        'affectedPromptIrIds',
+        'affectedStoryboardFrameIds',
+        'unknowns',
+      ])
+      || !Object.values(impact).every(isStringArray)
+    ) throw new Error('易梦返回的参考素材权利提交回执与本次 ChangeSet 血缘不一致')
+    return
+  }
   if (
     receipt.schema !== 'jason.qingmu-element-profile-commit-result.v1'
     || receipt.changeSetId !== marker.changeSetId
@@ -805,6 +1067,8 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
   const [referenceOperation, setReferenceOperation] =
     useState<YimengReferenceAssetOperation>('selectReferenceAsset')
   const [selectedCandidateId, setSelectedCandidateId] = useState('')
+  const [selectedRightsReference, setSelectedRightsReference] = useState('')
+  const [rightsDraft, setRightsDraft] = useState<ReferenceRightsDraft>()
   const [repairPrompt, setRepairPrompt] = useState('')
   const [referenceError, setReferenceError] = useState<string>()
   const [referenceProposalLineage, setReferenceProposalLineage] = useState<ReferenceProposalLineage>()
@@ -854,6 +1118,8 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
     setMethod(undefined)
     setReferenceCandidates(undefined)
     setSelectedCandidateId('')
+    setSelectedRightsReference('')
+    setRightsDraft(undefined)
     setRepairPrompt('')
     setReferenceError(undefined)
     setReferenceProposalLineage(undefined)
@@ -1011,15 +1277,29 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
   }
 
   const prepareReference = async (): Promise<void> => {
-    const candidate = referenceCandidates?.candidates.find(value => value.assetId === selectedCandidateId)
+    if (snapshot === undefined || recovery.status !== 'none') return
+    const subject = recordOf(snapshot.subject)
     const prompt = repairPrompt.trim()
-    if (
-      snapshot === undefined
-      || candidate === undefined
-      || !referenceCandidateEligible(candidate, referenceOperation)
-      || recovery.status !== 'none'
-      || (referenceOperation === 'requestReferenceRegeneration' && (prompt === '' || prompt.length > 8000))
-    ) return
+    const rightsReference = snapshot.subject.references.find(reference => (
+      referenceBinding(reference) === selectedRightsReference
+    ))
+    let normalizedRights: YimengReferenceRightsRecord | undefined
+    if (referenceOperation === 'replaceReferenceRights') {
+      if (rightsReference === undefined || rightsDraft === undefined) return
+      try {
+        normalizedRights = normalizeReferenceRightsDraft(rightsDraft)
+      } catch (cause) {
+        setReferenceError(messageOf(cause))
+        return
+      }
+    } else {
+      const candidate = referenceCandidates?.candidates.find(value => value.assetId === selectedCandidateId)
+      if (
+        candidate === undefined
+        || !referenceCandidateEligible(candidate, referenceOperation)
+        || (referenceOperation === 'requestReferenceRegeneration' && (prompt === '' || prompt.length > 8000))
+      ) return
+    }
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
@@ -1030,8 +1310,90 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
     setConfirmed(false)
     setError(undefined)
     setReferenceError(undefined)
-    const subject = recordOf(snapshot.subject)
+    setWarning(undefined)
     try {
+      if (referenceOperation === 'replaceReferenceRights') {
+        if (rightsReference === undefined || normalizedRights === undefined) return
+        const rightsMethod = await port.referenceAssetMethod({
+          projectId,
+          elementKind,
+          elementId: targetId,
+          profileRevision: subject.profileRevision as number,
+          snapshotSha256: snapshot.snapshotSha256,
+          operation: 'replaceReferenceRights',
+        }, controller.signal)
+        assertReferenceRightsMethod(rightsMethod, snapshot, projectId, targetId, elementKind)
+        const proposal = await port.proposeReferenceAsset({
+          projectId,
+          targetType: 'element_profile',
+          targetId,
+          elementKind,
+          operation: 'replaceReferenceRights',
+          referenceAssetId: rightsReference.assetId,
+          referenceAssetSha256: rightsReference.sha256,
+          rights: normalizedRights,
+          baseRevision: subject.profileRevision as number,
+          baseSnapshotSha256: snapshot.snapshotSha256,
+          methodProjection: rightsMethod.projection,
+          methodProjectionSha256: rightsMethod.projectionSha256,
+          methodAttestation: rightsMethod.methodAttestation,
+        }, controller.signal)
+        const changeSet = proposal.changeSet
+        if (
+          proposal.schema !== 'jason.qingmu-change-set-proposal.v1'
+          || proposal.nextAction !== 'preview'
+          || changeSet.projectId !== projectId
+          || changeSet.episodeId !== null
+          || changeSet.targetType !== 'element_profile'
+          || changeSet.targetId !== targetId
+          || changeSet.baseRevision !== subject.profileRevision
+          || changeSet.baseSnapshotSha256 !== snapshot.snapshotSha256
+          || !SHA256.test(changeSet.payloadSha256)
+        ) throw new Error('易梦返回的权利 ChangeSet 与当前参考素材基线不一致')
+        const nextPreview = await port.previewElementProfile({
+          projectId,
+          targetType: 'element_profile',
+          targetId,
+          elementKind,
+          episodeId: null,
+          changeSetId: changeSet.id,
+          baseRevision: changeSet.baseRevision,
+          baseSnapshotSha256: snapshot.snapshotSha256,
+          operation: 'replaceReferenceRights',
+          referenceAssetId: rightsReference.assetId,
+          referenceAssetSha256: rightsReference.sha256,
+        }, controller.signal)
+        assertReferenceRightsPreview(
+          nextPreview,
+          snapshot,
+          rightsMethod,
+          changeSet.id,
+          rightsReference,
+          normalizedRights,
+          projectId,
+          targetId,
+          elementKind,
+        )
+        if (isSignalAborted(controller.signal)) return
+        setReferenceProposalLineage({
+          changeSetId: changeSet.id,
+          baseRevision: changeSet.baseRevision,
+          baseSnapshotSha256: changeSet.baseSnapshotSha256,
+          payloadSha256: changeSet.payloadSha256,
+          operation: 'replaceReferenceRights',
+          referenceAssetId: rightsReference.assetId,
+          referenceAssetSha256: rightsReference.sha256,
+          rights: normalizedRights,
+          selectionStatus: rightsReference.selectionStatus,
+          isSelected: rightsReference.isSelected,
+        })
+        setPreview(nextPreview)
+        setPhase('preview')
+        return
+      }
+      const operation = referenceOperation
+      const candidate = referenceCandidates?.candidates.find(value => value.assetId === selectedCandidateId)
+      if (candidate === undefined || !referenceCandidateEligible(candidate, operation)) return
       const referenceMethod = await port.referenceAssetMethod({
         projectId,
         elementKind,
@@ -1040,7 +1402,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
         snapshotSha256: snapshot.snapshotSha256,
         assetId: candidate.assetId,
         assetSha256: candidate.sha256,
-        operation: referenceOperation,
+        operation,
       }, controller.signal)
       assertReferenceMethod(
         referenceMethod,
@@ -1049,14 +1411,14 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
         projectId,
         targetId,
         elementKind,
-        referenceOperation,
+        operation,
       )
       const proposalBase = {
         projectId,
         targetType: 'element_profile',
         targetId,
         elementKind,
-        operation: referenceOperation,
+        operation,
         candidateAssetId: candidate.assetId,
         candidateAssetSha256: candidate.sha256,
         baseRevision: subject.profileRevision as number,
@@ -1065,7 +1427,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
         methodProjectionSha256: referenceMethod.projectionSha256,
         methodAttestation: referenceMethod.methodAttestation,
       } as const
-      const proposal = referenceOperation === 'requestReferenceRegeneration'
+      const proposal = operation === 'requestReferenceRegeneration'
         ? await port.proposeReferenceAsset({ ...proposalBase, repairPrompt: prompt }, controller.signal)
         : await port.proposeReferenceAsset(proposalBase, controller.signal)
       const changeSet = proposal.changeSet
@@ -1095,7 +1457,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
         changeSetId: changeSet.id,
         baseRevision: changeSet.baseRevision,
         baseSnapshotSha256: snapshot.snapshotSha256,
-        operation: referenceOperation,
+        operation,
         candidateAssetId: candidate.assetId,
         candidateAssetSha256: candidate.sha256,
       }, controller.signal)
@@ -1107,7 +1469,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
         projectId,
         targetId,
         elementKind,
-        referenceOperation,
+        operation,
       )
       if (isSignalAborted(controller.signal)) return
       setReferenceProposalLineage({
@@ -1115,7 +1477,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
         baseRevision: changeSet.baseRevision,
         baseSnapshotSha256: changeSet.baseSnapshotSha256,
         payloadSha256: changeSet.payloadSha256,
-        operation: referenceOperation,
+        operation,
         candidateAssetId: candidate.assetId,
         candidateAssetSha256: candidate.sha256,
       })
@@ -1138,9 +1500,13 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
   ): Promise<void> => {
     assertCommitReceiptLineage(receipt, marker)
     if (isSignalAborted(controller.signal)) return
-    const referenceMarker = marker.operation === 'selectReferenceAsset'
+    const referenceActionMarker = marker.operation === 'selectReferenceAsset'
       || marker.operation === 'requestReferenceRegeneration'
-    if (!referenceMarker) {
+    const referenceRightsMarker = marker.operation === 'replaceReferenceRights'
+    const referenceBoundMarker = referenceActionMarker || referenceRightsMarker
+    const baselineSnapshot = snapshot
+    const baselineReviewFeed = reviewFeed
+    if (!referenceBoundMarker) {
       setCommitReceipt(receipt)
       setCommitRecovered(recovered)
       setPreview(undefined)
@@ -1149,7 +1515,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
     }
     const [snapshotResult, candidatesResult, reviewResult, workflowResult] = await Promise.allSettled([
       port.elementProfile({ projectId, elementKind, targetId }, controller.signal),
-      referenceMarker
+      referenceActionMarker
         ? port.referenceCandidates({ projectId, elementKind, targetId }, controller.signal)
         : Promise.resolve(undefined),
       port.reviewEvents({ projectId, elementKind, targetId }, controller.signal),
@@ -1157,7 +1523,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
     ])
     if (isSignalAborted(controller.signal)) return
     let authoritativeReadSucceeded = false
-    let referenceReadSucceeded = !referenceMarker
+    let referenceReadSucceeded = !referenceBoundMarker
     let referenceReadError: string | undefined
     let reviewReadError: string | undefined
     let methodWarning: string | undefined
@@ -1170,7 +1536,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
         if (authoritativeReadSucceeded) {
           setSnapshot(snapshotResult.value)
           setDraft(elementVisualValue(subject, elementKind))
-          if (referenceMarker && candidatesResult.status === 'fulfilled' && candidatesResult.value !== undefined) {
+          if (referenceActionMarker && candidatesResult.status === 'fulfilled' && candidatesResult.value !== undefined) {
             try {
               assertReferenceCandidates(candidatesResult.value, snapshotResult.value, projectId, targetId, elementKind)
               assertReferenceCandidatePostState(candidatesResult.value, marker)
@@ -1183,20 +1549,50 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
               setReferenceError(referenceReadError)
             }
           }
+          if (referenceRightsMarker) {
+            try {
+              const authoritativeReference = await assertReferenceRightsPostState(snapshotResult.value, marker)
+              if (baselineSnapshot !== undefined) {
+                const baselineSubject = recordOf(baselineSnapshot.subject)
+                if (
+                  baselineSubject.visualIdentity !== subject.visualIdentity
+                  || baselineSubject.visualPrompt !== subject.visualPrompt
+                  || baselineSubject.officialReferenceImageUrl !== subject.officialReferenceImageUrl
+                ) throw new Error('权利记录提交后的权威视觉资料发生变化')
+              }
+              setSelectedRightsReference(referenceBinding(authoritativeReference))
+              setRightsDraft(createReferenceRightsDraft(authoritativeReference.rights))
+              referenceReadSucceeded = true
+            } catch (cause) {
+              referenceReadError = messageOf(cause)
+              setReferenceError(referenceReadError)
+            }
+          }
           if (reviewResult.status === 'fulfilled') {
             try {
               assertReviewFeed(reviewResult.value, snapshotResult.value, projectId, targetId, elementKind)
+              if (referenceRightsMarker && baselineReviewFeed !== undefined) {
+                assertHumanDecisionsPreserved(baselineReviewFeed, reviewResult.value)
+              }
               setReviewFeed(reviewResult.value)
               setReviewError(undefined)
             } catch (cause) {
               reviewReadError = messageOf(cause)
               setReviewFeed(undefined)
               setReviewError(reviewReadError)
+              if (referenceRightsMarker && baselineReviewFeed !== undefined) {
+                referenceReadSucceeded = false
+                referenceReadError = reviewReadError
+              }
             }
           } else {
             reviewReadError = messageOf(reviewResult.reason)
             setReviewFeed(undefined)
             setReviewError(reviewReadError)
+            if (referenceRightsMarker && baselineReviewFeed !== undefined) {
+              referenceReadSucceeded = false
+              referenceReadError = reviewReadError
+            }
           }
           try {
             const refreshedMethod = await port.elementMethod({
@@ -1234,16 +1630,16 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
     const warnings = [
       ...(!authoritativeReadSucceeded ? [t('assetRecoverySnapshotMismatch')] : []),
       ...(snapshotResult.status === 'rejected' ? [messageOf(snapshotResult.reason)] : []),
-      ...(referenceMarker && candidatesResult.status === 'rejected' ? [messageOf(candidatesResult.reason)] : []),
+      ...(referenceActionMarker && candidatesResult.status === 'rejected' ? [messageOf(candidatesResult.reason)] : []),
       ...(workflowResult.status === 'rejected' ? [messageOf(workflowResult.reason)] : []),
       ...(methodWarning !== undefined ? [methodWarning] : []),
       ...(authoritativeReadSucceeded && !markerCleared ? [t('receiptRecoveryClearWarning')] : []),
     ]
     setWarning(warnings.length > 0 ? warnings.join(' · ') : undefined)
-    if (referenceMarker && !markerCleared) {
+    if (referenceBoundMarker && !markerCleared) {
       throw new Error(referenceReadError ?? t('receiptRecoveryClearWarning'))
     }
-    if (referenceMarker) {
+    if (referenceBoundMarker) {
       setCommitReceipt(receipt)
       setCommitRecovered(recovered)
       setPreview(undefined)
@@ -1283,6 +1679,33 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
           operation: lineage.operation,
           candidateAssetId: lineage.candidateAssetId,
           candidateAssetSha256: lineage.candidateAssetSha256,
+        })
+      } else if (isReferenceRightsPreview(preview)) {
+        const lineage = referenceProposalLineage
+        if (
+          lineage === undefined
+          || lineage.operation !== 'replaceReferenceRights'
+          || lineage.changeSetId !== preview.changeSetId
+          || lineage.referenceAssetId !== preview.referenceAssetId
+          || lineage.referenceAssetSha256 !== preview.referenceAssetSha256
+          || !referenceRightsRecordsEqual(lineage.rights, preview.proposedReferenceRights)
+        ) throw new Error('参考素材权利预览与提案血缘不一致')
+        marker = createCommandCommitRecoveryMarker({
+          projectId,
+          targetType: 'element_profile',
+          elementKind,
+          targetId,
+          changeSetId: lineage.changeSetId,
+          baseRevision: lineage.baseRevision,
+          baseSnapshotSha256: lineage.baseSnapshotSha256,
+          payloadSha256: lineage.payloadSha256,
+          idempotencyKey: await deriveCommandIdempotencyKey(lineage.changeSetId, lineage.payloadSha256),
+          operation: 'replaceReferenceRights',
+          referenceAssetId: lineage.referenceAssetId,
+          referenceAssetSha256: lineage.referenceAssetSha256,
+          referenceRightsSha256: await digestReferenceRightsRecord(lineage.rights),
+          selectionStatus: lineage.selectionStatus,
+          isSelected: lineage.isSelected,
         })
       } else {
         marker = createCommandCommitRecoveryMarker({
@@ -1340,7 +1763,14 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
           candidateAssetId: marker.candidateAssetId,
           candidateAssetSha256: marker.candidateAssetSha256,
         }, controller.signal)
-        : await port.commitElementProfile(commandBase, controller.signal)
+        : marker.operation === 'replaceReferenceRights'
+          ? await port.commitElementProfile({
+            ...commandBase,
+            operation: marker.operation,
+            referenceAssetId: marker.referenceAssetId,
+            referenceAssetSha256: marker.referenceAssetSha256,
+          }, controller.signal)
+          : await port.commitElementProfile(commandBase, controller.signal)
       await finishAcceptedCommit(result, marker, controller, false)
     } catch (cause) {
       if (!isSignalAborted(controller.signal)) {
@@ -1379,7 +1809,14 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
           candidateAssetId: marker.candidateAssetId,
           candidateAssetSha256: marker.candidateAssetSha256,
         }, controller.signal)
-        : await port.recoverElementProfileCommit(recoveryBase, controller.signal)
+        : marker.operation === 'replaceReferenceRights'
+          ? await port.recoverElementProfileCommit({
+            ...recoveryBase,
+            operation: marker.operation,
+            referenceAssetId: marker.referenceAssetId,
+            referenceAssetSha256: marker.referenceAssetSha256,
+          }, controller.signal)
+          : await port.recoverElementProfileCommit(recoveryBase, controller.signal)
       if (isSignalAborted(controller.signal)) return
       await finishAcceptedCommit(assertRecoveryLineage(recovered, marker), marker, controller, true)
     } catch (cause) {
@@ -1526,13 +1963,22 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
   const hardVetoes = arrayOf(reviewCard.hard_vetoes)
   const candidateItems = referenceCandidates?.candidates ?? []
   const selectedCandidate = candidateItems.find(candidate => candidate.assetId === selectedCandidateId)
-  const referenceInputValid = selectedCandidate !== undefined
-    && referenceCandidateEligible(selectedCandidate, referenceOperation)
-    && (referenceOperation === 'selectReferenceAsset'
-      || (repairPrompt.trim() !== '' && repairPrompt.trim().length <= 8000))
+  const rightsReferences = snapshot?.subject.references ?? []
+  const selectedRightsRecord = rightsReferences.find(reference => (
+    referenceBinding(reference) === selectedRightsReference
+  ))
+  const referenceInputValid = referenceOperation === 'replaceReferenceRights'
+    ? selectedRightsRecord !== undefined && rightsDraft !== undefined
+    : selectedCandidate !== undefined
+      && referenceCandidateEligible(selectedCandidate, referenceOperation)
+      && (referenceOperation === 'selectReferenceAsset'
+        || (repairPrompt.trim() !== '' && repairPrompt.trim().length <= 8000))
   const visualFieldLabel = t(elementKind === 'actor' ? 'assetIdentityLabel' : 'assetPromptLabel')
   const referencePreview = preview !== undefined && isReferencePreview(preview) ? preview : undefined
-  const visualPreview = preview !== undefined && !isReferencePreview(preview) ? preview : undefined
+  const rightsPreview = preview !== undefined && isReferenceRightsPreview(preview) ? preview : undefined
+  const visualPreview = preview !== undefined && !isReferencePreview(preview) && !isReferenceRightsPreview(preview)
+    ? preview
+    : undefined
   const baseVisual = visualPreview === undefined ? '' : elementVisualValue(recordOf(visualPreview.baseSubject), elementKind)
   const currentVisual = visualPreview === undefined ? '' : elementVisualValue(recordOf(visualPreview.authoritativeCurrentSubject), elementKind)
   const proposedVisual = visualPreview === undefined
@@ -1548,6 +1994,15 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
     { label: t('assetImpactPromptIr'), values: visualPreview.impactAnalysis.affectedPromptIrIds },
     { label: t('assetImpactStoryboardFrames'), values: visualPreview.impactAnalysis.affectedStoryboardFrameIds },
     { label: t('assetImpactUnknowns'), values: visualPreview.impactAnalysis.unknowns },
+  ]
+  const rightsImpactGroups = rightsPreview === undefined ? [] : [
+    { label: t('assetImpactReferenceAssets'), values: rightsPreview.impactAnalysis.affectedReferenceAssetIds },
+    { label: t('assetImpactApprovals'), values: rightsPreview.impactAnalysis.invalidatedApprovalAssetIds },
+    { label: t('assetImpactDerivedAssets'), values: rightsPreview.impactAnalysis.affectedDerivedAssetIds },
+    { label: t('assetImpactReferencePacks'), values: rightsPreview.impactAnalysis.affectedReferencePackIds },
+    { label: t('assetImpactPromptIr'), values: rightsPreview.impactAnalysis.affectedPromptIrIds },
+    { label: t('assetImpactStoryboardFrames'), values: rightsPreview.impactAnalysis.affectedStoryboardFrameIds },
+    { label: t('assetImpactUnknowns'), values: rightsPreview.impactAnalysis.unknowns },
   ]
 
   return (
@@ -1694,6 +2149,8 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
               onClick={() => {
                 setReferenceOperation('selectReferenceAsset')
                 setSelectedCandidateId('')
+                setSelectedRightsReference('')
+                setRightsDraft(undefined)
                 setRepairPrompt('')
                 setPreview(undefined)
                 setReferenceProposalLineage(undefined)
@@ -1711,6 +2168,8 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
               onClick={() => {
                 setReferenceOperation('requestReferenceRegeneration')
                 setSelectedCandidateId('')
+                setSelectedRightsReference('')
+                setRightsDraft(undefined)
                 setPreview(undefined)
                 setReferenceProposalLineage(undefined)
                 setConfirmed(false)
@@ -1720,39 +2179,110 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
             >
               {t('assetReferenceRegenerateOperation')}
             </button>
+            <button
+              type="button"
+              aria-pressed={referenceOperation === 'replaceReferenceRights'}
+              disabled={busy || recovery.status !== 'none'}
+              onClick={() => {
+                setReferenceOperation('replaceReferenceRights')
+                setSelectedCandidateId('')
+                setSelectedRightsReference('')
+                setRightsDraft(undefined)
+                setRepairPrompt('')
+                setPreview(undefined)
+                setReferenceProposalLineage(undefined)
+                setConfirmed(false)
+                setReferenceError(undefined)
+                setPhase('draft')
+              }}
+            >
+              {t('assetRightsOperation')}
+            </button>
           </div>
-          <fieldset disabled={busy || recovery.status !== 'none'}>
-            <legend>{t('assetReferenceCandidates')}</legend>
-            {candidateItems.length === 0 ? <p className={css.empty}>{t('assetReferenceNoCandidates')}</p> : (
-              <div className={css.methodGrid}>
-                {candidateItems.map((candidate) => {
-                  const eligible = referenceCandidateEligible(candidate, referenceOperation)
-                  const status = t(REFERENCE_STATUS_LOCALE_KEY[candidate.selectionStatus])
-                  return (
-                    <label key={`${candidate.assetId}:${candidate.sha256}`}>
-                      <input
-                        type="radio"
-                        name={`reference-candidate-${projectId}-${elementKind}-${targetId}`}
-                        checked={selectedCandidateId === candidate.assetId}
-                        disabled={!eligible}
-                        onChange={() => {
-                          setSelectedCandidateId(candidate.assetId)
-                          setPreview(undefined)
-                          setReferenceProposalLineage(undefined)
-                          setConfirmed(false)
-                          setReferenceError(undefined)
-                          setPhase('draft')
-                        }}
-                      />
-                      <strong>{candidate.assetId}</strong>
-                      <span>{status}</span>
-                      <small>{candidate.sha256}</small>
-                    </label>
-                  )
-                })}
-              </div>
-            )}
-          </fieldset>
+          {referenceOperation !== 'replaceReferenceRights' && (
+            <fieldset disabled={busy || recovery.status !== 'none'}>
+              <legend>{t('assetReferenceCandidates')}</legend>
+              {candidateItems.length === 0 ? <p className={css.empty}>{t('assetReferenceNoCandidates')}</p> : (
+                <div className={css.methodGrid}>
+                  {candidateItems.map((candidate) => {
+                    const eligible = referenceCandidateEligible(candidate, referenceOperation)
+                    const status = t(REFERENCE_STATUS_LOCALE_KEY[candidate.selectionStatus])
+                    return (
+                      <label key={`${candidate.assetId}:${candidate.sha256}`}>
+                        <input
+                          type="radio"
+                          name={`reference-candidate-${projectId}-${elementKind}-${targetId}`}
+                          checked={selectedCandidateId === candidate.assetId}
+                          disabled={!eligible}
+                          onChange={() => {
+                            setSelectedCandidateId(candidate.assetId)
+                            setPreview(undefined)
+                            setReferenceProposalLineage(undefined)
+                            setConfirmed(false)
+                            setReferenceError(undefined)
+                            setPhase('draft')
+                          }}
+                        />
+                        <strong>{candidate.assetId}</strong>
+                        <span>{status}</span>
+                        <small>{candidate.sha256}</small>
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+            </fieldset>
+          )}
+          {referenceOperation === 'replaceReferenceRights' && (
+            <>
+              <fieldset disabled={busy || recovery.status !== 'none'}>
+                <legend>{t('assetRightsReferences')}</legend>
+                {rightsReferences.length === 0 ? <p className={css.empty}>{t('assetRightsNoReferences')}</p> : (
+                  <div className={css.methodGrid}>
+                    {rightsReferences.map((reference) => {
+                      const binding = referenceBinding(reference)
+                      return (
+                        <label key={binding}>
+                          <input
+                            type="radio"
+                            name={`reference-rights-${projectId}-${elementKind}-${targetId}`}
+                            checked={selectedRightsReference === binding}
+                            onChange={() => {
+                              setSelectedRightsReference(binding)
+                              setRightsDraft(createReferenceRightsDraft(reference.rights))
+                              setPreview(undefined)
+                              setReferenceProposalLineage(undefined)
+                              setConfirmed(false)
+                              setReferenceError(undefined)
+                              setPhase('draft')
+                            }}
+                          />
+                          <strong>{reference.assetId}</strong>
+                          <span>{t(reference.rightsRecorded ? 'assetRightsRecorded' : 'assetRightsNotRecorded')}</span>
+                          <small>{reference.sha256}</small>
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
+              </fieldset>
+              {selectedRightsRecord !== undefined && rightsDraft !== undefined && (
+                <ReferenceRightsEditor
+                  value={rightsDraft}
+                  disabled={busy || recovery.status !== 'none'}
+                  onChange={(next) => {
+                    setRightsDraft(next)
+                    setPreview(undefined)
+                    setReferenceProposalLineage(undefined)
+                    setConfirmed(false)
+                    setReferenceError(undefined)
+                    setPhase('draft')
+                  }}
+                  t={t}
+                />
+              )}
+            </>
+          )}
           {referenceOperation === 'requestReferenceRegeneration' && (
             <label className={css.scriptEditor}>
               <span>{t('assetReferenceRepairPrompt')}</span>
@@ -1781,14 +2311,20 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
               onClick={() => { void prepareReference() }}
               disabled={busy || !referenceInputValid || recovery.status !== 'none'}
             >
-              {t(referenceOperation === 'selectReferenceAsset'
-                ? 'assetReferencePrepareSelect'
-                : 'assetReferencePrepareRegenerate')}
+              {phase === 'preparing'
+                ? t('assetPreparing')
+                : t(referenceOperation === 'selectReferenceAsset'
+                  ? 'assetReferencePrepareSelect'
+                  : referenceOperation === 'requestReferenceRegeneration'
+                    ? 'assetReferencePrepareRegenerate'
+                    : 'assetRightsPrepare')}
             </button>
             <span aria-live="polite">
               {t(referenceOperation === 'selectReferenceAsset'
                 ? 'assetReferenceSelectNotice'
-                : 'assetReferenceRegenerateNotice')}
+                : referenceOperation === 'requestReferenceRegeneration'
+                  ? 'assetReferenceRegenerateNotice'
+                  : 'assetRightsNotice')}
             </span>
           </div>
         </section>
@@ -2046,12 +2582,67 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
         </section>
       )}
 
+      {rightsPreview !== undefined && (
+        <section className={css.previewDock} aria-label={t('assetRightsPreviewTitle')}>
+          <div className={css.previewHead}>
+            <div>
+              <h4>{t('assetRightsPreviewTitle')}</h4>
+              <p>{rightsPreview.changed ? t('assetChanged') : t('assetNoChange')}</p>
+            </div>
+            <span>{rightsPreview.canCommit ? t('previewCommittable') : t('previewBlocked')}</span>
+          </div>
+          <dl className={css.previewMeta}>
+            <div><dt>{t('changeSet')}</dt><dd>{rightsPreview.changeSetId}</dd></div>
+            <div><dt>{t('assetRightsReferenceBinding')}</dt><dd>{rightsPreview.referenceAssetId}:{rightsPreview.referenceAssetSha256}</dd></div>
+            <div><dt>{t('assetProfileRevision')}</dt><dd>{rightsPreview.baseRevision} → {rightsPreview.authoritativeRevision}</dd></div>
+            <div><dt>{t('assetImpactHash')}</dt><dd>{rightsPreview.impactSha256}</dd></div>
+          </dl>
+          <ReferenceRightsSummary value={rightsPreview.proposedReferenceRights} t={t} />
+          <p>{t('assetRightsNotice')}</p>
+          <div className={css.impactSummary} role="status">
+            <span>{t('assetRightsSelectionPreserved')}</span>
+          </div>
+          <section className={css.impactPanel} aria-label={t('assetReferenceImpact')}>
+            <div className={css.impactSummary}>
+              <strong>{t('assetReferenceImpact')}</strong>
+              <span>{rightsPreview.referenceInvalidationExpected ? t('assetReferenceWillInvalidate') : t('assetReferenceUnchanged')}</span>
+            </div>
+            <div className={css.impactGrid}>
+              {rightsImpactGroups.map(group => (
+                <div key={group.label} className={css.impactGroup}>
+                  <strong>{group.label}</strong>
+                  {group.values.length === 0
+                    ? <span>{t('assetImpactNone')}</span>
+                    : <ul>{group.values.map(value => <li key={value}>{value}</li>)}</ul>}
+                </div>
+              ))}
+            </div>
+          </section>
+          {(rightsPreview.revisionConflict || rightsPreview.baseSnapshotConflict || rightsPreview.impactConflict) && (
+            <div className={css.conflict} role="status"><strong>{t('assetConflictTitle')}</strong><p>{t('assetRightsConflictBody')}</p></div>
+          )}
+          {rightsPreview.canCommit && recovery.status === 'none' && (
+            <div className={css.commitDock}>
+              <label>
+                <input type="checkbox" checked={confirmed} onChange={(event) => { setConfirmed(event.target.checked) }} disabled={busy} />
+                <span>{t('assetRightsConfirm')}</span>
+              </label>
+              <button type="button" className={css.primaryAction} disabled={!confirmed || busy} onClick={() => { void commit() }}>
+                {phase === 'committing' ? t('assetCommitting') : t('assetRightsCommit')}
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+
       {commitReceipt !== undefined && (
         <section className={css.commitReceipt} role="status">
           <h4>{commitRecovered
             ? t('receiptRecovered')
             : t(commitReceipt.schema === 'jason.qingmu-element-profile-commit-result.v1'
-              ? 'assetCommitSucceeded'
+              ? commitReceipt.operation === 'replaceReferenceRights'
+                ? 'assetRightsCommitSucceeded'
+                : 'assetCommitSucceeded'
               : commitReceipt.operation === 'selectReferenceAsset'
                 ? 'assetReferenceCommitSucceededSelect'
                 : 'assetReferenceCommitSucceededRegenerate')}</h4>
@@ -2060,13 +2651,21 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
             <div><dt>{t('eventId')}</dt><dd>{commitReceipt.eventId}</dd></div>
             <div><dt>{t('authoritativeRevision')}</dt><dd>{commitReceipt.authoritativeRevision}</dd></div>
             {commitReceipt.schema === 'jason.qingmu-element-profile-commit-result.v1'
-              ? <div><dt>{t('assetImpactHash')}</dt><dd>{commitReceipt.impactSha256}</dd></div>
+              ? <>
+                {commitReceipt.operation === 'replaceReferenceRights' && (
+                  <div><dt>{t('assetRightsReferenceBinding')}</dt><dd>{commitReceipt.referenceAssetId}:{commitReceipt.referenceAssetSha256}</dd></div>
+                )}
+                <div><dt>{t('assetImpactHash')}</dt><dd>{commitReceipt.impactSha256}</dd></div>
+              </>
               : <>
                 <div><dt>{t('assetReferenceCandidates')}</dt><dd>{commitReceipt.candidateAssetId}</dd></div>
                 <div><dt>{t('assetSnapshotHash')}</dt><dd>{commitReceipt.candidateAssetSha256}</dd></div>
               </>}
             <div><dt>{t('deduplicated')}</dt><dd>{commitReceipt.deduplicated ? t('yes') : t('no')}</dd></div>
           </dl>
+          {commitReceipt.schema === 'jason.qingmu-element-profile-commit-result.v1'
+            && commitReceipt.operation === 'replaceReferenceRights'
+            && <p>{t('assetRightsSelectionPreserved')}</p>}
           {commitReceipt.schema === 'jason.qingmu-reference-asset-commit-result.v1' && <p>{t('assetReferenceZeroExecution')}</p>}
           {warning !== undefined && <p className={css.warning}>{t('postCommitWarning')}: {warning}</p>}
         </section>

@@ -191,9 +191,9 @@ const RECOVERY = {
 } as const
 
 const ACTOR_PROFILE = {
-  schema: 'jason.qingmu-element-profile-subject-read.v1',
+  schema: 'jason.qingmu-element-profile-subject-read.v2',
   subject: {
-    schema: 'jason.qingmu-element-profile-subject.v1',
+    schema: 'jason.qingmu-element-profile-subject.v2',
     projectId: 'project-1',
     targetType: 'element_profile',
     elementKind: 'actor',

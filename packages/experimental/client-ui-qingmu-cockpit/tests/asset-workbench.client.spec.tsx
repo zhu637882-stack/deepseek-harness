@@ -26,14 +26,39 @@ const IMPACT_SHA = '7'.repeat(64)
 const OLD_PROMPT = '一枚磨损的银色怀表，表盖闭合。'
 const NEW_PROMPT = '一枚磨损的银色怀表，表盖有细小裂痕，指针停在午夜十二点。'
 const CHANGE_SET_ID = 'changeset-prop-1'
-const IDEMPOTENCY_KEY = `qingmu:element:v3:faa0d4311297d15a4287746d5c19fd928688d2dde43ff3db8eb2dab86740b2cb:${PAYLOAD_SHA}`
+const IDEMPOTENCY_KEY = `qingmu:element:v4:faa0d4311297d15a4287746d5c19fd928688d2dde43ff3db8eb2dab86740b2cb:${PAYLOAD_SHA}`
 
 const t = (key: keyof typeof zh) => zh[key]
 
+const UNKNOWN_RIGHTS = {
+  schema: 'jason.qingmu-reference-rights-record.v1',
+  sourceType: { state: 'unknown', value: null },
+  rightsHolder: { state: 'unknown', value: null },
+  authorizationScope: { state: 'unknown', values: [] },
+  territory: { state: 'unknown', values: [] },
+  term: { state: 'unknown', startsAt: null, endsAt: null, perpetual: null },
+  restrictions: { state: 'unknown', values: [] },
+  contains: {
+    realPersonLikeness: 'unknown',
+    trademark: 'unknown',
+    music: 'unknown',
+    font: 'unknown',
+    thirdPartyCharacter: 'unknown',
+  },
+  providerTerms: { state: 'unknown', terms: null, reviewedAt: null },
+  modelLicenses: {
+    code: { state: 'unknown', value: null },
+    weights: { state: 'unknown', value: null },
+    outputUse: { state: 'unknown', value: null },
+  },
+  humanDeclaration: { state: 'unknown', text: null },
+  contentCredentials: { state: 'unknown', value: null },
+} as const
+
 const SNAPSHOT = {
-  schema: 'jason.qingmu-element-profile-subject-read.v1',
+  schema: 'jason.qingmu-element-profile-subject-read.v2',
   subject: {
-    schema: 'jason.qingmu-element-profile-subject.v1',
+    schema: 'jason.qingmu-element-profile-subject.v2',
     projectId: PROJECT_ID,
     targetType: 'element_profile',
     elementKind: 'prop',
@@ -47,6 +72,8 @@ const SNAPSHOT = {
       sha256: '1'.repeat(64),
       selectionStatus: 'Selected',
       isSelected: true,
+      rightsRecorded: false,
+      rights: UNKNOWN_RIGHTS,
     }],
   },
   canonicalSnapshot: {
@@ -231,7 +258,7 @@ const REFERENCE_ASSET_SHA = '9'.repeat(64)
 const REFERENCE_SNAPSHOT_SHA = '8'.repeat(64)
 const REFERENCE_CHANGE_SET_ID = 'changeset-reference-1'
 const REFERENCE_PAYLOAD_SHA = '6'.repeat(64)
-const REFERENCE_IDEMPOTENCY_KEY = `qingmu:element:v3:reference:${REFERENCE_PAYLOAD_SHA}`
+const REFERENCE_IDEMPOTENCY_KEY = `qingmu:element:v4:reference:${REFERENCE_PAYLOAD_SHA}`
 const REPAIR_PROMPT = '保留怀表裂痕与午夜指针，修正表盖反光并重新生成候选。'
 
 const REFERENCE_CANDIDATE = {
@@ -437,6 +464,8 @@ const REFERENCE_UPDATED_SNAPSHOT = {
       sha256: REFERENCE_ASSET_SHA,
       selectionStatus: 'Selected',
       isSelected: true,
+      rightsRecorded: false,
+      rights: UNKNOWN_RIGHTS,
     }],
   },
   canonicalSnapshot: {
@@ -445,6 +474,231 @@ const REFERENCE_UPDATED_SNAPSHOT = {
   },
   snapshotSha256: REFERENCE_SNAPSHOT_SHA,
 } as const
+
+const RIGHTS_CHANGE_SET_ID = 'changeset-reference-rights-1'
+const RIGHTS_PAYLOAD_SHA = '5'.repeat(64)
+const RIGHTS_UPDATED_SHA = '2'.repeat(64)
+const RIGHTS_IMPACT = {
+  affectedReferenceAssetIds: ['reference-1'],
+  invalidatedApprovalAssetIds: [],
+  affectedDerivedAssetIds: [],
+  affectedReferencePackIds: [],
+  affectedPromptIrIds: [],
+  affectedStoryboardFrameIds: [],
+  unknowns: [],
+} as const
+
+const RIGHTS_RECORDED_SNAPSHOT = {
+  ...SNAPSHOT,
+  subject: {
+    ...SNAPSHOT.subject,
+    references: [{ ...SNAPSHOT.subject.references[0], rightsRecorded: true }],
+  },
+} as const
+
+const RIGHTS_UPDATED_SNAPSHOT = {
+  ...SNAPSHOT,
+  subject: {
+    ...SNAPSHOT.subject,
+    profileRevision: 4,
+    references: [{ ...SNAPSHOT.subject.references[0], rightsRecorded: true }],
+  },
+  canonicalSnapshot: { ...SNAPSHOT.canonicalSnapshot, profileRevision: 4 },
+  snapshotSha256: RIGHTS_UPDATED_SHA,
+} as const
+
+function rightsMethodResponse(
+  snapshot: typeof SNAPSHOT | typeof RIGHTS_RECORDED_SNAPSHOT | typeof RIGHTS_UPDATED_SNAPSHOT = SNAPSHOT,
+) {
+  const response = methodResponse({
+    baseRevision: snapshot.subject.profileRevision,
+    baseSnapshotSha256: snapshot.snapshotSha256,
+  })
+  return {
+    ...response,
+    projection: {
+      ...response.projection,
+      method_definition: { id: 'imago-v6-reference-rights-record', version: 1 },
+      work_order_projection: {
+        operation: 'replaceReferenceRights',
+        allowed_mutations: ['replaceReferenceRights'],
+      },
+    },
+  } as const
+}
+
+function rightsChangeSet(snapshot: typeof SNAPSHOT | typeof RIGHTS_RECORDED_SNAPSHOT) {
+  return {
+    ...CHANGE_SET,
+    id: RIGHTS_CHANGE_SET_ID,
+    baseRevision: snapshot.subject.profileRevision,
+    baseSnapshotSha256: snapshot.snapshotSha256,
+    payloadSha256: RIGHTS_PAYLOAD_SHA,
+  } as const
+}
+
+function rightsPreview(
+  snapshot: typeof SNAPSHOT | typeof RIGHTS_RECORDED_SNAPSHOT,
+  changed: boolean,
+) {
+  const changeSet = rightsChangeSet(snapshot)
+  return {
+    schema: 'jason.qingmu-change-set-preview.v1',
+    changeSet,
+    baseSubject: snapshot.subject,
+    authoritativeCurrentSubject: snapshot.subject,
+    changeSetId: changeSet.id,
+    payloadSha256: changeSet.payloadSha256,
+    projectId: PROJECT_ID,
+    targetType: 'element_profile',
+    targetId: TARGET_ID,
+    elementKind: 'prop',
+    operation: 'replaceReferenceRights',
+    referenceAssetId: 'reference-1',
+    referenceAssetSha256: '1'.repeat(64),
+    proposedReferenceRights: UNKNOWN_RIGHTS,
+    baseRevision: snapshot.subject.profileRevision,
+    authoritativeRevision: snapshot.subject.profileRevision,
+    baseSnapshotSha256: snapshot.snapshotSha256,
+    authoritativeSnapshotSha256: snapshot.snapshotSha256,
+    changed,
+    authoritativeChanged: false,
+    revisionConflict: false,
+    baseSnapshotConflict: false,
+    impactConflict: false,
+    canCommit: true,
+    referenceInvalidationExpected: false,
+    impactAnalysis: RIGHTS_IMPACT,
+    impactSha256: IMPACT_SHA,
+    preflight: {
+      costGate: 'not_granted',
+      selectionAuthority: 'not_granted',
+      humanApprovalInferred: false,
+    },
+    references: snapshot.subject.references,
+    methodProjectionSha256: METHOD_SHA,
+    previewSha256: '4'.repeat(64),
+  } as const
+}
+
+function createRightsPort(options: {
+  readonly noOp?: boolean
+  readonly lostResponse?: boolean
+  readonly changedOfficialReferenceImageUrl?: boolean
+} = {}) {
+  const noOp = options.noOp === true
+  const initialSnapshot = noOp ? RIGHTS_RECORDED_SNAPSHOT : SNAPSHOT
+  const normalPostSnapshot = noOp ? RIGHTS_RECORDED_SNAPSHOT : RIGHTS_UPDATED_SNAPSHOT
+  const postSnapshot = options.changedOfficialReferenceImageUrl
+    ? {
+      ...RIGHTS_UPDATED_SNAPSHOT,
+      subject: {
+        ...RIGHTS_UPDATED_SNAPSHOT.subject,
+        officialReferenceImageUrl: '/media/props/changed-by-rights.png',
+      },
+    } as const
+    : normalPostSnapshot
+  const changed = !noOp
+  const elementProfile = vi.fn()
+    .mockResolvedValueOnce(initialSnapshot)
+    .mockResolvedValue(postSnapshot)
+  const elementMethod = vi.fn(async (request: { readonly baseRevision: number; readonly baseSnapshotSha256: string }) => (
+    methodResponse(request)
+  ))
+  const referenceAssetMethod = vi.fn(async () => rightsMethodResponse(initialSnapshot))
+  const changeSet = rightsChangeSet(initialSnapshot)
+  const proposeReferenceAsset = vi.fn(async () => ({
+    schema: 'jason.qingmu-change-set-proposal.v1',
+    changeSet,
+    nextAction: 'preview',
+  } as const))
+  const previewElementProfile = vi.fn(async () => rightsPreview(initialSnapshot, changed))
+  const receiptFor = (request: { readonly idempotencyKey: string }) => ({
+    schema: 'jason.qingmu-element-profile-commit-result.v1',
+    changeSetId: RIGHTS_CHANGE_SET_ID,
+    commandReceiptId: 'receipt-reference-rights-1',
+    eventId: 'event-reference-rights-1',
+    eventType: 'ElementProfileChanged',
+    projectId: PROJECT_ID,
+    targetType: 'element_profile',
+    targetId: TARGET_ID,
+    elementKind: 'prop',
+    operation: 'replaceReferenceRights',
+    referenceAssetId: 'reference-1',
+    referenceAssetSha256: '1'.repeat(64),
+    baseRevision: initialSnapshot.subject.profileRevision,
+    authoritativeRevision: postSnapshot.subject.profileRevision,
+    authoritativeSnapshotSha256: postSnapshot.snapshotSha256,
+    payloadSha256: RIGHTS_PAYLOAD_SHA,
+    idempotencyKey: request.idempotencyKey,
+    changed,
+    referenceInvalidated: false,
+    impactAnalysis: RIGHTS_IMPACT,
+    impactSha256: IMPACT_SHA,
+    deduplicated: false,
+    committedAt: '2026-08-27T09:00:00+00:00',
+  } as const)
+  let markerDuringCommit: string | null = null
+  const commitElementProfile = vi.fn(async (request: { readonly idempotencyKey: string }) => {
+    markerDuringCommit = sessionStorage.getItem(
+      'qingmu:command-commit-recovery:v4:project-1:element_profile:prop:prop-1',
+    )
+    if (options.lostResponse) throw new Error('commit response lost')
+    return receiptFor(request)
+  })
+  const recoverElementProfileCommit = vi.fn(async (request: { readonly idempotencyKey: string }) => ({
+    schema: 'jason.qingmu-command-receipt-recovery.v1',
+    recovered: true,
+    receiptSha256: RECEIPT_SHA,
+    receipt: receiptFor(request),
+  } as const))
+  const staleDecision = { ...REVIEW_DECISION, stale: true } as const
+  const initialFeed = reviewFeed({ decisions: [REVIEW_DECISION], currentDecision: REVIEW_DECISION })
+  const postFeed = noOp
+    ? initialFeed
+    : reviewFeed({
+      revision: postSnapshot.subject.profileRevision,
+      sha256: postSnapshot.snapshotSha256,
+      decisions: [staleDecision],
+      currentDecision: null,
+    })
+  const createHumanDecision = vi.fn()
+  const port = {
+    elementProfile,
+    referenceCandidates: vi.fn(async () => ({
+      schema: 'jason.qingmu-reference-asset-candidates.v1',
+      projectId: PROJECT_ID,
+      targetType: 'element_profile',
+      targetId: TARGET_ID,
+      elementKind: 'prop',
+      profileRevision: initialSnapshot.subject.profileRevision,
+      elementSnapshotSha256: initialSnapshot.snapshotSha256,
+      candidates: [],
+      humanApprovalInferred: false,
+    } as const)),
+    reviewEvents: vi.fn()
+      .mockResolvedValueOnce(initialFeed)
+      .mockResolvedValue(postFeed),
+    elementMethod,
+    referenceAssetMethod,
+    proposeReferenceAsset,
+    previewElementProfile,
+    commitElementProfile,
+    recoverElementProfileCommit,
+    createHumanDecision,
+  } as unknown as QingmuYimengPort
+  return {
+    port,
+    elementProfile,
+    referenceAssetMethod,
+    proposeReferenceAsset,
+    previewElementProfile,
+    commitElementProfile,
+    recoverElementProfileCommit,
+    createHumanDecision,
+    markerDuringCommit: () => markerDuringCommit,
+  }
+}
 
 function createPort(options: { readonly commit?: () => Promise<typeof COMMIT> } = {}) {
   const elementProfile = vi.fn()
@@ -557,6 +811,25 @@ function mount(
   }
 }
 
+async function prepareRightsPreview(): Promise<void> {
+  fireEvent.click(await screen.findByRole('button', { name: zh.assetRightsOperation }))
+  fireEvent.click(await screen.findByRole('radio', { name: /reference-1/ }))
+  expect(screen.getByRole('group', { name: zh.assetRightsEditorTitle })).toBeTruthy()
+  expect(screen.getByText(zh.assetRightsSourceType)).toBeTruthy()
+  expect(screen.getByText(zh.assetRightsHolder)).toBeTruthy()
+  expect(screen.getByText(zh.assetRightsAuthorizationScope)).toBeTruthy()
+  expect(screen.getByText(zh.assetRightsTerritory)).toBeTruthy()
+  expect(screen.getByText(zh.assetRightsTerm)).toBeTruthy()
+  expect(screen.getByText(zh.assetRightsRestrictions)).toBeTruthy()
+  expect(screen.getByText(zh.assetRightsContains)).toBeTruthy()
+  expect(screen.getByText(zh.assetRightsProviderTerms)).toBeTruthy()
+  expect(screen.getByText(zh.assetRightsModelLicenses)).toBeTruthy()
+  expect(screen.getByText(zh.assetRightsHumanDeclaration)).toBeTruthy()
+  expect(screen.getByText(zh.assetRightsContentCredentials)).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: zh.assetRightsPrepare }))
+  await screen.findByRole('heading', { name: zh.assetRightsPreviewTitle })
+}
+
 beforeEach(() => {
   sessionStorage.clear()
 })
@@ -567,6 +840,152 @@ afterEach(() => {
 })
 
 describe('AssetWorkbench', () => {
+  it('fails closed on a legacy v1 authoritative element-profile read', async () => {
+    const { port } = createPort()
+    const elementMethod = vi.fn()
+    Object.assign(port, {
+      elementProfile: vi.fn(async () => ({
+        ...SNAPSHOT,
+        schema: 'jason.qingmu-element-profile-subject-read.v1',
+      })),
+      elementMethod,
+    })
+
+    mount(port)
+
+    expect((await screen.findByRole('alert')).textContent)
+      .toContain('易梦返回的元素资料与当前业务对象不一致')
+    expect(elementMethod).not.toHaveBeenCalled()
+    expect(screen.queryByRole('textbox', { name: zh.assetPromptLabel })).toBeNull()
+  })
+
+  it('records all structured rights only through IMAGO preflight, Yimeng preview, and explicit confirmation', async () => {
+    const {
+      port,
+      elementProfile,
+      referenceAssetMethod,
+      proposeReferenceAsset,
+      commitElementProfile,
+      createHumanDecision,
+      markerDuringCommit,
+    } = createRightsPort()
+    mount(port)
+
+    await prepareRightsPreview()
+
+    expect(referenceAssetMethod).toHaveBeenCalledTimes(1)
+    const methodRequest = referenceAssetMethod.mock.calls[0]?.[0]
+    expect(methodRequest).toEqual({
+      projectId: PROJECT_ID,
+      elementKind: 'prop',
+      elementId: TARGET_ID,
+      profileRevision: 3,
+      snapshotSha256: BASE_SHA,
+      operation: 'replaceReferenceRights',
+    })
+    expect(Object.keys(methodRequest ?? {}).sort()).toEqual([
+      'elementId',
+      'elementKind',
+      'operation',
+      'profileRevision',
+      'projectId',
+      'snapshotSha256',
+    ].sort())
+    expect(methodRequest).not.toHaveProperty('assetId')
+    expect(methodRequest).not.toHaveProperty('assetSha256')
+    expect(methodRequest).not.toHaveProperty('rights')
+    expect(proposeReferenceAsset).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'replaceReferenceRights',
+      referenceAssetId: 'reference-1',
+      referenceAssetSha256: '1'.repeat(64),
+      rights: UNKNOWN_RIGHTS,
+      methodProjection: rightsMethodResponse().projection,
+      methodProjectionSha256: METHOD_SHA,
+      methodAttestation: rightsMethodResponse().methodAttestation,
+    }), expect.any(AbortSignal))
+    expect(commitElementProfile).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: zh.assetRightsConfirm }))
+    fireEvent.click(screen.getByRole('button', { name: zh.assetRightsCommit }))
+
+    expect(await screen.findByRole('heading', { name: zh.assetRightsCommitSucceeded })).toBeTruthy()
+    expect(commitElementProfile).toHaveBeenCalledTimes(1)
+    const commitRequest = commitElementProfile.mock.calls[0]?.[0]
+    expect(commitRequest).toMatchObject({
+      operation: 'replaceReferenceRights',
+      referenceAssetId: 'reference-1',
+      referenceAssetSha256: '1'.repeat(64),
+    })
+    expect(commitRequest).not.toHaveProperty('rights')
+    expect(markerDuringCommit()).not.toBeNull()
+    expect(markerDuringCommit()).not.toContain('rightsHolder')
+    expect(markerDuringCommit()).not.toContain('authorizationScope')
+    expect(createHumanDecision).not.toHaveBeenCalled()
+    expect(elementProfile).toHaveBeenCalledTimes(2)
+    await waitFor(() => {
+      expect(readCommandCommitRecoveryMarker(PROJECT_ID, 'prop', TARGET_ID).status).toBe('none')
+    })
+  })
+
+  it('commits an exact same-value rights no-op without inventing a new revision', async () => {
+    const { port, elementProfile, commitElementProfile } = createRightsPort({ noOp: true })
+    mount(port)
+
+    await prepareRightsPreview()
+    expect(screen.getByText(zh.assetNoChange)).toBeTruthy()
+    expect(commitElementProfile).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('checkbox', { name: zh.assetRightsConfirm }))
+    fireEvent.click(screen.getByRole('button', { name: zh.assetRightsCommit }))
+
+    expect(await screen.findByRole('heading', { name: zh.assetRightsCommitSucceeded })).toBeTruthy()
+    expect(elementProfile).toHaveBeenCalledTimes(2)
+    const lastSnapshot = await elementProfile.mock.results[1]?.value
+    expect(lastSnapshot.subject.profileRevision).toBe(3)
+    expect(lastSnapshot.snapshotSha256).toBe(BASE_SHA)
+  })
+
+  it('recovers a lost rights commit response through GET only and never resubmits the commit', async () => {
+    const {
+      port,
+      commitElementProfile,
+      recoverElementProfileCommit,
+    } = createRightsPort({ lostResponse: true })
+    mount(port)
+
+    await prepareRightsPreview()
+    fireEvent.click(screen.getByRole('checkbox', { name: zh.assetRightsConfirm }))
+    fireEvent.click(screen.getByRole('button', { name: zh.assetRightsCommit }))
+    expect(await screen.findAllByText('commit response lost')).not.toHaveLength(0)
+    expect(readCommandCommitRecoveryMarker(PROJECT_ID, 'prop', TARGET_ID).status).toBe('ready')
+
+    fireEvent.click(screen.getByRole('button', { name: zh.recoverReceipt }))
+
+    expect(await screen.findByRole('heading', { name: zh.receiptRecovered })).toBeTruthy()
+    expect(commitElementProfile).toHaveBeenCalledTimes(1)
+    expect(recoverElementProfileCommit).toHaveBeenCalledTimes(1)
+    expect(recoverElementProfileCommit).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'replaceReferenceRights',
+      referenceAssetId: 'reference-1',
+      referenceAssetSha256: '1'.repeat(64),
+    }), expect.any(AbortSignal))
+    await waitFor(() => {
+      expect(readCommandCommitRecoveryMarker(PROJECT_ID, 'prop', TARGET_ID).status).toBe('none')
+    })
+  })
+
+  it('keeps the marker and hides success when a rights commit changes the official reference image', async () => {
+    const { port } = createRightsPort({ changedOfficialReferenceImageUrl: true })
+    mount(port)
+
+    await prepareRightsPreview()
+    fireEvent.click(screen.getByRole('checkbox', { name: zh.assetRightsConfirm }))
+    fireEvent.click(screen.getByRole('button', { name: zh.assetRightsCommit }))
+
+    expect(await screen.findAllByText('权利记录提交后的权威视觉资料发生变化')).not.toHaveLength(0)
+    expect(readCommandCommitRecoveryMarker(PROJECT_ID, 'prop', TARGET_ID).status).toBe('ready')
+    expect(screen.queryByRole('heading', { name: zh.assetRightsCommitSucceeded })).toBeNull()
+  })
+
   it('loads Yimeng truth and IMAGO guidance, then commits only after preview and explicit confirmation', async () => {
     const commit = vi.fn(async () => {
       expect(readCommandCommitRecoveryMarker(PROJECT_ID, 'prop', TARGET_ID).status).toBe('ready')

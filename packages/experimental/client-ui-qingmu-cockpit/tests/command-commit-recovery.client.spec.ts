@@ -29,14 +29,24 @@ const REFERENCE_INPUT = {
   candidateAssetSha256: 'c'.repeat(64),
 } as const
 
+const RIGHTS_INPUT = {
+  ...INPUT,
+  operation: 'replaceReferenceRights',
+  referenceAssetId: 'asset-1',
+  referenceAssetSha256: 'c'.repeat(64),
+  referenceRightsSha256: 'd'.repeat(64),
+  selectionStatus: 'Selected',
+  isSelected: true,
+} as const
+
 beforeEach(() => { sessionStorage.clear() })
 
-describe('element command commit recovery marker v3', () => {
+describe('element command commit recovery marker v4', () => {
   it('derives a deterministic key within the backend limit for a full-length ChangeSet ID', async () => {
     const fullLengthId = 'x'.repeat(256)
     const key = await deriveCommandIdempotencyKey(fullLengthId, INPUT.payloadSha256)
 
-    expect(key).toMatch(/^qingmu:element:v3:[0-9a-f]{64}:[0-9a-f]{64}$/)
+    expect(key).toMatch(/^qingmu:element:v4:[0-9a-f]{64}:[0-9a-f]{64}$/)
     expect(key.length).toBeLessThanOrEqual(200)
     expect(await deriveCommandIdempotencyKey(fullLengthId, INPUT.payloadSha256)).toBe(key)
     expect(await deriveCommandIdempotencyKey(`${'x'.repeat(255)}y`, INPUT.payloadSha256)).not.toBe(key)
@@ -50,7 +60,7 @@ describe('element command commit recovery marker v3', () => {
     expect(writeCommandCommitRecoveryMarker(marker)).toBe(true)
     expect(readCommandCommitRecoveryMarker('project-1', 'prop', 'prop-1')).toEqual({ status: 'ready', marker })
     expect(Array.from({ length: sessionStorage.length }, (_, index) => sessionStorage.key(index))).toEqual([
-      'qingmu:command-commit-recovery:v3:project-1:element_profile:prop:prop-1',
+      'qingmu:command-commit-recovery:v4:project-1:element_profile:prop:prop-1',
     ])
   })
 
@@ -60,18 +70,54 @@ describe('element command commit recovery marker v3', () => {
     expect(writeCommandCommitRecoveryMarker(marker)).toBe(true)
     expect(readCommandCommitRecoveryMarker('project-1', 'prop', 'prop-1')).toEqual({ status: 'ready', marker })
     expect(marker).toMatchObject({
-      schema: 'qingmu.command-commit-recovery-marker.v3',
+      schema: 'qingmu.command-commit-recovery-marker.v4',
       operation: 'selectReferenceAsset',
       candidateAssetId: 'asset-1',
       candidateAssetSha256: 'c'.repeat(64),
     })
   })
 
-  it('fails closed on a legacy v2 marker until that exact subject marker is discarded', () => {
+  it('stores only rights digest, immutable asset lineage, and pre-commit selection facts', () => {
+    const marker = createCommandCommitRecoveryMarker(RIGHTS_INPUT)
+
+    expect(writeCommandCommitRecoveryMarker(marker)).toBe(true)
+    expect(readCommandCommitRecoveryMarker('project-1', 'prop', 'prop-1')).toEqual({ status: 'ready', marker })
+    expect(marker).toEqual({ schema: 'qingmu.command-commit-recovery-marker.v4', ...RIGHTS_INPUT })
+    const serialized = sessionStorage.getItem(
+      'qingmu:command-commit-recovery:v4:project-1:element_profile:prop:prop-1',
+    )
+    expect(serialized).not.toBeNull()
+    expect(serialized).not.toContain('rightsHolder')
+    expect(serialized).not.toContain('authorizationScope')
+    expect(Object.keys(JSON.parse(serialized ?? '{}')).sort()).toEqual([
+      'baseRevision',
+      'baseSnapshotSha256',
+      'changeSetId',
+      'elementKind',
+      'idempotencyKey',
+      'isSelected',
+      'operation',
+      'payloadSha256',
+      'projectId',
+      'referenceAssetId',
+      'referenceAssetSha256',
+      'referenceRightsSha256',
+      'schema',
+      'selectionStatus',
+      'targetId',
+      'targetType',
+    ].sort())
+    expect(() => createCommandCommitRecoveryMarker({
+      ...RIGHTS_INPUT,
+      rights: { rightsHolder: 'must-not-persist' },
+    } as unknown as typeof RIGHTS_INPUT)).toThrow('恢复标记字段不符合合同')
+  })
+
+  it('fails closed on a legacy v3 marker until that exact subject marker is discarded', () => {
     sessionStorage.setItem(
-      'qingmu:command-commit-recovery:v2:project-1:element_profile:prop:prop-1',
+      'qingmu:command-commit-recovery:v3:project-1:element_profile:prop:prop-1',
       JSON.stringify({
-        schema: 'qingmu.command-commit-recovery-marker.v2',
+        schema: 'qingmu.command-commit-recovery-marker.v3',
         projectId: INPUT.projectId,
         targetType: INPUT.targetType,
         elementKind: INPUT.elementKind,
@@ -101,6 +147,10 @@ describe('element command commit recovery marker v3', () => {
       ...REFERENCE_INPUT,
       candidateAssetSha256: undefined,
     } as unknown as typeof REFERENCE_INPUT)).toThrow('恢复标记候选资产 SHA-256 无效')
+    expect(() => createCommandCommitRecoveryMarker({
+      ...RIGHTS_INPUT,
+      referenceRightsSha256: undefined,
+    } as unknown as typeof RIGHTS_INPUT)).toThrow('恢复标记权利记录 SHA-256 无效')
   })
 
   it('does not clear a different marker written for the same subject', () => {
@@ -118,11 +168,11 @@ describe('element command commit recovery marker v3', () => {
 
   it('retains malformed storage as invalid and discards only the requested element key', () => {
     sessionStorage.setItem(
-      'qingmu:command-commit-recovery:v3:project-1:element_profile:prop:prop-1',
+      'qingmu:command-commit-recovery:v4:project-1:element_profile:prop:prop-1',
       JSON.stringify({ ...createCommandCommitRecoveryMarker(INPUT), baseRevision: -1 }),
     )
     sessionStorage.setItem(
-      'qingmu:command-commit-recovery:v3:project-1:element_profile:prop:prop-2',
+      'qingmu:command-commit-recovery:v4:project-1:element_profile:prop:prop-2',
       'keep',
     )
 
@@ -132,7 +182,7 @@ describe('element command commit recovery marker v3', () => {
     })
     expect(discardCommandCommitRecoveryMarker('project-1', 'prop', 'prop-1')).toBe(true)
     expect(sessionStorage.getItem(
-      'qingmu:command-commit-recovery:v3:project-1:element_profile:prop:prop-2',
+      'qingmu:command-commit-recovery:v4:project-1:element_profile:prop:prop-2',
     )).toBe('keep')
   })
 })
