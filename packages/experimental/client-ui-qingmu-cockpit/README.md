@@ -32,6 +32,12 @@ The read-only IMAGO method receives the complete E5-3 rhythm and reference field
 
 Canvas editing continues through IMAGO structural checks, Yimeng proposal and preview, and explicit commit confirmation. If the response is lost, recovery uses the original storyboard revision and selected Shot coordinates for a GET-only receipt query; it neither selects another Shot nor repeats the commit. A newer authoritative revision does not rewrite those recovery coordinates.
 
+## Read-only continuity panel
+
+The same selected Shot drives incoming/outgoing continuity cards through the Host's three-ID `continuityMethod`. The panel distinguishes current selected assets, historical audit bindings, and missing evidence; it never labels missing records as failed checks. Explicitly failed dimensions are displayed as pending-attribution candidates, not formal Findings or automatic rework. Lock definitions and propagation rules are expandable, with project lock instances explicitly unavailable.
+
+There is only a reload control in this panel. Source-object changes, refreshes, Shot changes, closure, and read errors hide old evidence immediately; cancellation plus response identity checks prevent late results from a previous Shot from becoming visible. The panel does not expose Skill or Stage selection, persist a second project state, sign off content, or create a Provider job.
+
 ## Security boundary
 
 `YIMENG_API_TOKEN` and `QINGMU_IMAGO_ATTESTATION_KEY` belong only to Qingmu Host processes. The browser plugin does not read environment variables, `localStorage`, `JWT_SECRET`, or cookies, and it never receives or renders either secret. Its only persistence is the bounded non-secret receipt-recovery marker in the current tab's `sessionStorage`. Read and command channels are separate Host plugins, both limited to loopback upstreams. If the token is absent, the cockpit shows a recovery instruction to configure the Host and restart the local instance.

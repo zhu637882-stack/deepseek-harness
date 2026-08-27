@@ -1,3 +1,9 @@
+import type {
+  YimengContinuityDeltaProjection,
+  YimengContinuityPair,
+  YimengShotRelationsStoryboardRevision,
+} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
+
 /** JSON object retained from the stateless IMAGO method projection. */
 export interface ImagoMethodJsonObject {
   readonly [key: string]: unknown
@@ -696,6 +702,114 @@ export interface ImagoWorksetMethodResponse extends ImagoMethodJsonObject {
   readonly projection: ImagoWorksetProjection
 }
 
+/** Only the selected canonical Shot identity crosses the browser-to-Host boundary. */
+export interface ImagoContinuityMethodRequest extends ImagoWorksetMethodRequest {
+  readonly selectedShotId: string
+}
+
+/** Fresh business subject; a revision binding does not grant approval. */
+export interface ImagoContinuityMethodSubject extends ImagoContinuityMethodRequest {
+  readonly storyboardRevision: YimengShotRelationsStoryboardRevision
+}
+
+/** Host-built input containing all adjacent evidence and no command authority. */
+export interface ImagoContinuityMethodSnapshot extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.continuity-method-snapshot.v1'
+  readonly subject: ImagoContinuityMethodSubject
+  readonly shots: readonly { readonly shotId: string; readonly frameNo: number }[]
+  readonly source_projection_sha256: string
+  readonly source_revision_sha256: string
+  readonly continuity: YimengContinuityDeltaProjection | null
+}
+
+/** An observed failed dimension awaiting human attribution, not a formal Finding. */
+export interface ImagoContinuityCandidateFinding {
+  readonly from_shot_id: string
+  readonly to_shot_id: string
+  readonly dimension: 'character' | 'scene' | 'prop' | 'action'
+  readonly reason: string | null
+  readonly check_id: string | null
+  readonly evidence_ref: string | null
+  readonly evidence_scope: 'current' | 'historical' | 'unavailable'
+  readonly severity: null
+  readonly earliest_owner: null
+  readonly timecode: null
+  readonly attribution: 'pending'
+  readonly formal_finding: false
+}
+
+/** Static current-rule definition; this is never a project lock instance. */
+export interface ImagoContinuityLockDefinition {
+  readonly id: string
+  readonly producer_stage: string
+}
+
+/** Current rule for an explicitly changed lock, without executing invalidation. */
+export interface ImagoContinuityReworkPropagation {
+  readonly changed_lock: string
+  readonly invalidates_from: string
+  readonly scope: string
+}
+
+/** Stateless explanation bound to the local current-rule source set. */
+export interface ImagoContinuityFieldHelp {
+  readonly field: string
+  readonly label: string
+  readonly help: string
+  readonly source_paths: readonly string[]
+}
+
+/** Read-only inspection prompt, not a completed media review. */
+export interface ImagoContinuityChecklistItem {
+  readonly id: string
+  readonly label: string
+  readonly source_paths: readonly string[]
+}
+
+/** Selected Shot evidence, candidate findings, and non-executing current methods. */
+export interface ImagoContinuityMethodProjection extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-continuity-method-projection.v1'
+  readonly subject: ImagoContinuityMethodSubject
+  readonly selected_shot: { readonly shotId: string; readonly frameNo: number }
+  readonly source_projection_sha256: string
+  readonly source_revision_sha256: string
+  readonly input_snapshot_sha256: string
+  readonly continuity_snapshot_sha256: string | null
+  readonly rule_bindings: Readonly<Record<string, string>>
+  readonly rules_sha256: string
+  readonly availability: { readonly status: 'available' | 'unavailable'; readonly reason: string | null }
+  readonly adjacent_pairs: { readonly incoming: YimengContinuityPair | null; readonly outgoing: YimengContinuityPair | null }
+  readonly candidate_findings: readonly ImagoContinuityCandidateFinding[]
+  readonly lock_definitions: readonly ImagoContinuityLockDefinition[]
+  readonly rework_propagation: readonly ImagoContinuityReworkPropagation[]
+  readonly lock_authority: { readonly status: 'unavailable'; readonly reason: 'authoritative_lock_instances_unavailable'; readonly instances: readonly never[] }
+  readonly field_help: readonly ImagoContinuityFieldHelp[]
+  readonly checklist: readonly ImagoContinuityChecklistItem[]
+  readonly work_order: {
+    readonly mode: 'read_only'
+    readonly allowed_actions: readonly ['inspect_current_binding', 'inspect_historical_audit', 'review_candidate_findings', 'inspect_lock_definitions']
+    readonly allowed_mutations: readonly never[]
+    readonly requires_human_attribution: true
+    readonly provider_calls: 0
+    readonly task_mutation: false
+    readonly budget_mutation: false
+    readonly human_signoff_inferred: false
+  }
+  readonly read_only: true
+  readonly provider_calls: 0
+  readonly task_mutation: false
+  readonly budget_mutation: false
+  readonly human_signoff_inferred: false
+  readonly project_state_persisted: false
+  readonly formal_activation_allowed: false
+}
+
+/** Read-only response with no command or human-signoff attestation. */
+export interface ImagoContinuityMethodResponse extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-continuity-method-adapter-result.v1'
+  readonly projection: ImagoContinuityMethodProjection
+}
+
 /** Result values exposed by `/qingmu-imago-method`. */
 export interface ImagoMethodEndpointMap {
   readonly elementMethod: ImagoElementMethodResponse
@@ -704,6 +818,7 @@ export interface ImagoMethodEndpointMap {
   readonly shotRelationMethod: ImagoShotRelationMethodResponse
   readonly heroFrameStoryboardMethod: ImagoHeroFrameStoryboardMethodResponse
   readonly worksetMethod: ImagoWorksetMethodResponse
+  readonly continuityMethod: ImagoContinuityMethodResponse
 }
 
 /** Endpoint names accepted by the private method channel. */

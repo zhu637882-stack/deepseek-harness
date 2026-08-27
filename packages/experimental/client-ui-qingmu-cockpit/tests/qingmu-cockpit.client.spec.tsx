@@ -13,6 +13,7 @@ import { ShotRelationsView } from '../src/client/ShotRelationsView.tsx'
 import type { QingmuYimengPort } from '../src/client/contracts.ts'
 import { zh } from '../src/client/locales.ts'
 import { unavailableWorksetResponse } from './fixtures/workset-method.client.ts'
+import { continuityResponse } from './fixtures/continuity-method.client.ts'
 import {
   createScriptCommitRecoveryMarker,
   readScriptCommitRecoveryMarker,
@@ -622,6 +623,9 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     workflow: vi.fn(async () => WORKFLOW),
     worksetMethod: vi.fn(async (request: Parameters<QingmuYimengPort['worksetMethod']>[0]) => (
       unavailableWorksetResponse(request.projectId, request.episodeId)
+    )),
+    continuityMethod: vi.fn(async (request: Parameters<QingmuYimengPort['continuityMethod']>[0]) => (
+      continuityResponse(WORKFLOW, request.selectedShotId)
     )),
     proposeElementProfile: vi.fn(async () => { throw new Error('element proposal is not part of this fixture') }),
     proposeReferenceAsset: vi.fn(async () => { throw new Error('reference proposal is not part of this fixture') }),

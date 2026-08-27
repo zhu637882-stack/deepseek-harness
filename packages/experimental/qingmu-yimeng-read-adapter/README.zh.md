@@ -20,6 +20,12 @@
 
 包根入口导出请求与响应类型，包括 `YimengHealth`、`YimengProjectsResponse`、`YimengEpisodesResponse`、`YimengScriptResponse`、`YimengElementProfileRequest`、`YimengElementProfileResponse`、`YimengReferenceAssetCandidate`、`YimengReferenceCandidatesRequest`、`YimengReferenceCandidatesResponse`、`YimengShotRelationShot`、`YimengShotDialogueCue`、`YimengShotDialogueRhythm`、`YimengShotCurrentReference`、`YimengShotCurrentReferenceLineage`、`YimengShotRelationsProjection`、`YimengHeroFrameStoryboardsProjection` 和 `YimengWorkflowProjection`。
 
+## 连续性证据
+
+可选的 `workflow.director.continuityDelta` 字段使用 `jason.qingmu-continuity-delta.v1`，绑定准确分镜修订及按 `frameNo` 排序的全部相邻 canonical Shot。字段存在时校验精确字段集、来源 SHA、ID、布尔值、有序四维记录、当前绑定和历史就绪关系；错误证据使工作流读取失败关闭。旧上游省略字段仍可兼容。
+
+当前 SHA 必须有具名物化素材。审计 ID 缺失时可保留原始 SHA 声明，但不完整证据不能声称历史就绪或当前绑定。`legacyEvidenceReady` 保留易梦原有历史语义；`currentEvidenceReady` 还要求当前/审计素材 ID 与 SHA 相同、选定视频与尾帧任务血缘一致、下镜首帧已选且非 Stale，并且 handoff 未过期。未知维度保持 `null`。不创建检查、选择、Finding、锁实例或人工批准。
+
 ## 安全边界
 
 同一个已配置处理函数还作为仅供 Host 使用的 `qingmuYimengRead` 能力提供给内部调用方。内部调用方可以复用原有 `workflow` GET，不另建 HTTP 客户端、令牌配置或缓存。Cordis 会在所属插件卸载时移除该能力。这不会把业务阶段完成、已选媒体或未知透传字段解释为具名 IMAGO Stage/LSU 批准。

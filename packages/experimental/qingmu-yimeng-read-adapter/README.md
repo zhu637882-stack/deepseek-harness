@@ -20,6 +20,12 @@ The `workflow.director.shotRelations.shots` array projects Yimeng's canonical st
 
 The package root exports the request and response types, including `YimengHealth`, `YimengProjectsResponse`, `YimengEpisodesResponse`, `YimengScriptResponse`, `YimengElementProfileRequest`, `YimengElementProfileResponse`, `YimengReferenceAssetCandidate`, `YimengReferenceCandidatesRequest`, `YimengReferenceCandidatesResponse`, `YimengShotRelationShot`, `YimengShotDialogueCue`, `YimengShotDialogueRhythm`, `YimengShotCurrentReference`, `YimengShotCurrentReferenceLineage`, `YimengShotRelationsProjection`, `YimengHeroFrameStoryboardsProjection`, and `YimengWorkflowProjection`.
 
+## Continuity evidence
+
+The optional `workflow.director.continuityDelta` field is `jason.qingmu-continuity-delta.v1`, bound to the exact storyboard revision and every adjacent canonical Shot in `frameNo` order. If present, its exact fields, source SHA, IDs, booleans, four ordered dimensions, current binding, and historical readiness relationships are validated; malformed evidence fails the workflow read closed. Omission preserves compatibility with older upstreams.
+
+Current SHA fields require materialized assets with IDs. Stored audit SHA declarations may survive missing audit IDs, but such incomplete evidence cannot claim historical readiness or current binding. `legacyEvidenceReady` retains Yimeng's existing historical semantics. `currentEvidenceReady` additionally requires matching current/audit asset IDs and SHAs, the selected video/tail task lineage, a selected non-stale next first frame, and no stale handoff. Unknown dimensions stay `null`. No check, selection, Finding, lock instance, or human approval is created.
+
 ## Security boundary
 
 The same configured handler is also provided as the Host-only `qingmuYimengRead` capability. Internal consumers can reuse the existing `workflow` GET without creating another HTTP client, token configuration, or cache. Cordis removes the capability when its owning plugin unloads. This does not reinterpret business-stage completion, selected media, or unknown forwarded fields as named IMAGO Stage/LSU approval.

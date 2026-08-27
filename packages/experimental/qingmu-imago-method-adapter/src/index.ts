@@ -11,6 +11,8 @@ import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import type {
+  ImagoContinuityMethodResponse,
+  ImagoContinuityMethodSnapshot,
   ImagoElementMethodProjection,
   ImagoElementMethodRequest,
   ImagoElementMethodResponse,
@@ -68,8 +70,26 @@ import {
   WorksetContractError,
   WorksetInputError,
 } from './workset.ts'
+import {
+  buildContinuitySnapshot,
+  ContinuityContractError,
+  ContinuityInputError,
+  normalizeContinuityProjection,
+  parseContinuityMethodRequest,
+  readContinuityRules,
+} from './continuity.ts'
 
 export type {
+  ImagoContinuityCandidateFinding,
+  ImagoContinuityChecklistItem,
+  ImagoContinuityFieldHelp,
+  ImagoContinuityLockDefinition,
+  ImagoContinuityMethodProjection,
+  ImagoContinuityMethodRequest,
+  ImagoContinuityMethodResponse,
+  ImagoContinuityMethodSnapshot,
+  ImagoContinuityMethodSubject,
+  ImagoContinuityReworkPropagation,
   ImagoElementMethodProjection,
   ImagoElementMethodRequest,
   ImagoElementMethodResponse,
@@ -151,6 +171,7 @@ const PROMPT_IR_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_prompt_ir_metho
 const SHOT_RELATION_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_shot_relation_method.py'
 const HERO_FRAME_STORYBOARD_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_hero_frame_storyboard_method.py'
 const WORKSET_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_imago_workset_v2.py'
+const CONTINUITY_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_continuity_method.py'
 const COMMON_SOURCE_PATHS = [
   'pipeline/imago-os-current.json',
   'pipeline/workflow-channel-registry.json',
@@ -457,11 +478,17 @@ export interface ImagoMethodAdapterDependencies {
     execution: ImagoMethodCompilerExecution,
     signal: AbortSignal,
   ) => Promise<unknown>
-  /** Fresh configured business read; absent only disables the workset endpoint. */
+  /** Fresh configured business read; absence disables only endpoints that depend on it. */
   readonly readWorkflow?: (request: ImagoWorksetMethodRequest, signal: AbortSignal) => Promise<RpcResult<unknown>>
   /** Optional injectable boundary for the non-executing Core workset compiler. */
   readonly runWorksetCompiler?: (
     snapshot: ImagoWorksetMethodSnapshot,
+    execution: ImagoMethodCompilerExecution,
+    signal: AbortSignal,
+  ) => Promise<unknown>
+  /** Optional injectable boundary for current continuity evidence and read-only guidance. */
+  readonly runContinuityCompiler?: (
+    snapshot: ImagoContinuityMethodSnapshot,
     execution: ImagoMethodCompilerExecution,
     signal: AbortSignal,
   ) => Promise<unknown>
@@ -3206,6 +3233,14 @@ async function runWorksetCompilerProcess(
   return await runCompilerSubprocess(snapshot, execution, signal, WORKSET_COMPILER_RELATIVE_PATH)
 }
 
+async function runContinuityCompilerProcess(
+  snapshot: ImagoContinuityMethodSnapshot,
+  execution: ImagoMethodCompilerExecution,
+  signal: AbortSignal,
+): Promise<unknown> {
+  return await runCompilerSubprocess(snapshot, execution, signal, CONTINUITY_COMPILER_RELATIVE_PATH)
+}
+
 async function runCompilerSubprocess(
   snapshot: ImagoMethodJsonObject,
   execution: ImagoMethodCompilerExecution,
@@ -3213,6 +3248,8 @@ async function runCompilerSubprocess(
   compilerRelativePath: string,
 ): Promise<unknown> {
   if (signal.aborted) throw new CompilerCancelledError()
+  const waitForCloseOnCancel = compilerRelativePath === WORKSET_COMPILER_RELATIVE_PATH
+    || compilerRelativePath === CONTINUITY_COMPILER_RELATIVE_PATH
   return await new Promise((resolve, reject) => {
     const child = spawn(
       execution.pythonExecutable,
@@ -3239,8 +3276,8 @@ async function runCompilerSubprocess(
     }
     const abort = (): void => {
       child.kill('SIGKILL')
-      // Workset completion waits for process close; preserve other method lifecycles.
-      if (compilerRelativePath !== WORKSET_COMPILER_RELATIVE_PATH) fail(new CompilerCancelledError())
+      // Fresh-read methods wait for process close; preserve earlier method lifecycles.
+      if (!waitForCloseOnCancel) fail(new CompilerCancelledError())
     }
     const timer = setTimeout(() => {
       timedOut = true
@@ -3289,7 +3326,7 @@ async function runCompilerSubprocess(
     child.stdin.end(compilerRelativePath === SHOT_RELATION_COMPILER_RELATIVE_PATH
       ? e53CanonicalJson(snapshot, 'snapshot')
       : canonicalJson(snapshot, 'snapshot'), 'utf8')
-    if (compilerRelativePath === WORKSET_COMPILER_RELATIVE_PATH && signal.aborted) abort()
+    if (waitForCloseOnCancel && signal.aborted) abort()
   })
 }
 
@@ -3310,6 +3347,7 @@ const DEFAULT_DEPENDENCIES: ImagoMethodAdapterDependencies = {
   runShotRelationCompiler: runShotRelationCompilerProcess,
   runHeroFrameStoryboardCompiler: runHeroFrameStoryboardCompilerProcess,
   runWorksetCompiler: runWorksetCompilerProcess,
+  runContinuityCompiler: runContinuityCompilerProcess,
 }
 
 /**
@@ -3332,8 +3370,28 @@ export function createImagoMethodHandler(
         && endpoint !== 'shotRelationMethod'
         && endpoint !== 'heroFrameStoryboardMethod'
         && endpoint !== 'worksetMethod'
+        && endpoint !== 'continuityMethod'
       ) {
         throw new InputError(`unknown IMAGO method endpoint: ${endpoint}`)
+      }
+      if (endpoint === 'continuityMethod') {
+        const request = parseContinuityMethodRequest(payload)
+        if (signal.aborted) return cancelled()
+        if (dependencies.readWorkflow === undefined) return internalError('Yimeng read capability is unavailable')
+        const workflow = await dependencies.readWorkflow({ projectId: request.projectId, episodeId: request.episodeId }, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- the source read can be cancelled while awaited.
+        if (signal.aborted) return cancelled()
+        if (!workflow.ok) return workflow
+        const snapshot = buildContinuitySnapshot(request, workflow.value, e53CanonicalJson)
+        const raw = await (dependencies.runContinuityCompiler ?? runContinuityCompilerProcess)(snapshot, execution, signal)
+        const rules = await readContinuityRules(execution.coreRoot)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- compiler and rule reads are asynchronous.
+        if (signal.aborted) return cancelled()
+        const projection = normalizeContinuityProjection(raw, snapshot, rules, canonicalJson)
+        const value: ImagoContinuityMethodResponse = {
+          schema: 'qingmu.imago-continuity-method-adapter-result.v1', projection,
+        }
+        return { ok: true, value }
       }
       if (endpoint === 'worksetMethod') {
         const request = parseWorksetMethodRequest(payload)
@@ -3470,10 +3528,12 @@ export function createImagoMethodHandler(
       }
       return { ok: true, value }
     } catch (error) {
-      if (error instanceof InputError || error instanceof WorksetInputError) return badRequest(error.message)
+      if (error instanceof InputError || error instanceof WorksetInputError || error instanceof ContinuityInputError) {
+        return badRequest(error.message)
+      }
       if (error instanceof AttestationKeyError) return internalError('IMAGO method attestation is unavailable')
       if (signal.aborted || error instanceof CompilerCancelledError) return cancelled()
-      if (error instanceof ProjectionContractError || error instanceof WorksetContractError) {
+      if (error instanceof ProjectionContractError || error instanceof WorksetContractError || error instanceof ContinuityContractError) {
         return internalError(`IMAGO method projection contract failed: ${error.message}`)
       }
       return internalError('IMAGO method compiler failed')

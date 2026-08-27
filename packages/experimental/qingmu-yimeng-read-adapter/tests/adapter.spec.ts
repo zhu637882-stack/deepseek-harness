@@ -1141,6 +1141,36 @@ describe('qingmu Yimeng read adapter', () => {
     })
   })
 
+  it.each(['available', 'unavailable'] as const)('retains the optional %s continuity projection on the existing workflow read', async (availability) => {
+    const upstream = workflowFixture()
+    const director = upstream.director as Record<string, unknown>
+    const relations = director.shotRelations as Record<string, unknown>
+    const body = {
+      schema: 'jason.qingmu-continuity-delta.v1', projectId: 'project-1', episodeId: 'episode-1',
+      storyboardRevision: relations.storyboardRevision, availability,
+      reason: availability === 'unavailable' ? 'continuity_evidence_unavailable' : null, pairs: [],
+      readOnly: true, providerCalls: 0, taskMutation: false, budgetMutation: false, humanSignoffInferred: false,
+    }
+    const delta = { ...body, snapshotSha256: createHash('sha256').update(canonicalJson(body)).digest('hex') }
+    director.continuityDelta = delta
+    const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(upstream), 'test-token'))
+    const result = await handler('workflow', { projectId: 'project-1', episodeId: 'episode-1' }, signal())
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error(result.error.message)
+    expect((result.value as YimengWorkflowProjection).director.continuityDelta).toEqual(delta)
+  })
+
+  it('fails closed when the optional continuity field has an invalid digest or authority', async () => {
+    for (const invalid of [null, { schema: 'jason.qingmu-continuity-delta.v1', approved: true }]) {
+      const upstream = workflowFixture()
+      const director = upstream.director as Record<string, unknown>
+      director.continuityDelta = invalid
+      const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(upstream), 'test-token'))
+      const result = await handler('workflow', { projectId: 'project-1', episodeId: 'episode-1' }, signal())
+      expect(result.ok).toBe(false)
+    }
+  })
+
   it('fails closed on invalid, duplicate, or dangling E5-1 Shot relations', async () => {
     const base = workflowFixture()
     const director = base.director as Record<string, unknown>

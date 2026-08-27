@@ -6,7 +6,7 @@
 
 ## 证明边界
 
-除只读 `worksetMethod` 外，各端点都只从 Host 进程环境读取 `QINGMU_IMAGO_ATTESTATION_KEY`。原始环境字符串就是 HMAC 密钥：不做 trim，并且必须至少包含 32 个 UTF-8 字节。缺失、空串或不足长度时，这些方法会在编译前失败关闭。密钥不会进入 Cordis 配置、编译器子进程环境、浏览器响应、日志或错误正文。`worksetMethod` 既不需要该密钥，也不签发批准证明。
+除只读 `worksetMethod` 与 `continuityMethod` 外，各端点都只从 Host 进程环境读取 `QINGMU_IMAGO_ATTESTATION_KEY`。原始环境字符串就是 HMAC 密钥：不做 trim，并且必须至少包含 32 个 UTF-8 字节。缺失、空串或不足长度时，这些方法会在编译前失败关闭。密钥不会进入 Cordis 配置、编译器子进程环境、浏览器响应、日志或错误正文。两个只读方法既不需要该密钥，也不签发批准证明。
 
 对带证明的方法，Host 验证当前 Core 投影后，返回投影、投影 SHA-256，以及方法专用证明。Shot 关系证明通过下文的 E5-3 哈希投影，绑定准确的编译器输入、目标、Host 派生的 `relationSnapshotSha256` 和当前所选 canonical Shot。Hero Frame Storyboard 证明还绑定所选 Shot SHA、完整 Hero Frame 血缘绑定、原始标注 SHA 和编译结果 SHA。所选 Shot 始终是易梦故事板 frame ID，Beat ID 始终只在所属 Shot 内有效。浏览器只能转发证明，不能在缺少服务端密钥时签发或验证。
 
@@ -22,13 +22,19 @@ E5-3 的 `shotRelationMethod` 请求增加权威 `frameNo`、数值 `durationSec
 
 ## 只读 IMAGO 工作集
 
-`worksetMethod` 只接受准确的 `projectId` 和 `episodeId`，不接受浏览器提供的工作流、批准、规则或命令。每次调用都解析可选的 `qingmuYimengRead` 能力，复用已配置只读适配器原有的 `workflow` GET，沿用其令牌、超时、取消、范围校验与响应上限。卸载该读取插件只会禁用这个端点；重新加载后即可恢复能力，无需重新注册其他方法。
+`worksetMethod` 只接受准确的 `projectId` 和 `episodeId`，不接受浏览器提供的工作流、批准、规则或命令。每次调用都解析可选的 `qingmuYimengRead` 能力，复用已配置只读适配器原有的 `workflow` GET，沿用其令牌、超时、取消、范围校验与响应上限。卸载该读取插件会禁用工作集与连续性读取；重新加载后即可恢复这些能力，无需重新注册其他方法。
 
 Host 对完整归一化工作流与完整 `sourceRevision` 计算哈希，保留合法有限小数 JSON 值。原有 `inputFingerprint` 只保留为血缘信息，不作为唯一缓存键。v2 输入固定报告 `authority_snapshot.status: unavailable`，原因是 `authoritative_stage_evidence_unavailable`：旧工作流的 `complete`、已选参考、质量检查或未知透传批准字段，都不能建立具名 IMAGO Stage 或 LSU 权威。响应包含当前 23 个阶段定义模板，但不虚构阶段实例、合法任务、推荐或完成结论；`availability` 和 `shadow_comparison` 会说明不可用原因。
 
 固定的 `scripts/compile_qingmu_imago_workset_v2.py` 编译器返回 `qingmu.imago-workset.v2`，外层为 `qingmu.imago-workset-method-adapter-result.v1`。Host 独立对七个本地规则文件计算哈希，校验准确的 `rule_bindings` 映射及其 `rules_sha256`，并绑定准确输入字节、分集主体、来源投影和不执行标记。七个文件是 `pipeline/imago-os-current.json`、`pipeline/workflow-channel-registry.json`、`pipeline/v6-stage-contracts.json`、`pipeline/workflow-spec.v6.production-beta.json`、`scripts/compile_qingmu_imago_workset.py`、`scripts/compile_qingmu_imago_workset_v2.py` 和 `scripts/imago_v6_draft_ctl.py`。Core 继续独占定义、依赖与排序规则；Harness 不保存第二套 DAG 或项目状态。
 
 编译器进程不会收到名称包含 `key`、`token`、`secret` 或 `password` 的环境变量，匹配不区分大小写。共享执行器对 stdout 和 stderr 分别设置 5 MiB 上限，超时、输出无效或退出失败时拒绝结果，不返回 stderr。工作集取消会等待被终止的子进程关闭后再返回。工作集不提供执行、付费派发或人工签收端点。
+
+## 只读镜头连续性
+
+`continuityMethod` 只接受 `projectId`、`episodeId` 与 canonical `selectedShotId`。它重新读取同一个已配置工作流，绑定完整来源与修订，并以精确 stdin 字节哈希调用 `scripts/compile_qingmu_continuity_method.py`。编译后 Host 独立重算固定 14 份 Core 文件的原始 SHA：当前机器规则、C5 与 LSUQC 岗位方法和参考，以及两个编译器来源。锁定义与返修传播必须匹配实际 workflow 规则字节。
+
+响应区分当前物化素材绑定与审计原始声明。旧检查可合法通过另一尾帧，但不能证明当前选中链已验证。缺少维度保持未知，不转成失败。只有明确 false 的维度成为 Finding 候选，严重度、最早责任人和时码保持 null；候选不会创建正式 Finding、任务或审核决定。六类锁定义不代表项目锁实例，`lock_authority` 仍不可用。来源明确 unavailable 或旧上游省略字段时均显示不可用。取消会等待编译器子进程关闭；本端点不执行写入或 Provider 调用。
 
 ## 模型体验
 

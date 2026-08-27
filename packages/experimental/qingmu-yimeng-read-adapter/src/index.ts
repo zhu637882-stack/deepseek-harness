@@ -7,6 +7,7 @@ import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
+import { normalizeContinuityDelta } from './continuity.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -76,6 +77,11 @@ import type {
 } from './types.ts'
 
 export type {
+  YimengContinuityAudit,
+  YimengContinuityCurrentBinding,
+  YimengContinuityDeltaProjection,
+  YimengContinuityDimension,
+  YimengContinuityPair,
   YimengElementKind,
   YimengElementProfileReference,
   YimengElementProfileRequest,
@@ -2417,6 +2423,9 @@ function normalizeWorkflow(value: unknown): YimengWorkflowProjection {
     ...directorRoot,
     shotRelations,
     heroFrameStoryboards: normalizeHeroFrameStoryboards(directorRoot.heroFrameStoryboards, shotRelations),
+    ...(directorRoot.continuityDelta === undefined ? {} : {
+      continuityDelta: normalizeContinuityDelta(directorRoot.continuityDelta, shotRelations, canonicalJson),
+    }),
   }
   return {
     ...root,

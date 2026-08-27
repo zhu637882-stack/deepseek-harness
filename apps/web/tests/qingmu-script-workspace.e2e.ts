@@ -13,6 +13,7 @@ import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import { launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts'
 import { REPO_ROOT, saveFailureShot, ZH_BROWSER_LOCALE } from './support.ts'
+import { continuityFixture, rebindContinuity } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/continuity-fixture.ts'
 
 const YIMENG_TOKEN = 'qingmu-script-workspace-test-token'
 const CHANGE_SET_ID = 'changeset-episode-script-1'
@@ -1107,20 +1108,54 @@ function promptIrRecoveryEnvelope(receipt: unknown) {
   } as const
 }
 
+type ContinuityMode = 'current' | 'historical' | 'historical-failed' | 'unknown' | 'unavailable' | 'omitted'
+
+function continuityDeltaFixture(
+  revision: number,
+  storyboardRevision: StoryboardRevisionFixture,
+  mode: Exclude<ContinuityMode, 'omitted'>,
+) {
+  const base = continuityFixture()
+  const historical = mode === 'historical' || mode === 'historical-failed'
+  const evidenceReady = mode === 'current' || mode === 'historical'
+  return rebindContinuity({
+    ...base, projectId: 'project-1', episodeId: 'episode-1',
+    storyboardRevision: { episodeRevision: revision, ...storyboardRevision },
+    availability: mode === 'unavailable' ? 'unavailable' : 'available',
+    reason: mode === 'unavailable' ? 'continuity_source_unavailable' : null,
+    pairs: mode === 'unavailable' ? [] : base.pairs.map(pair => ({
+      ...pair, fromShotId: SHOT_RIVER_FIRST_FRAME_ID, toShotId: PROMPT_IR_FRAME_ID,
+      legacyStatus: evidenceReady ? 'passed' : 'blocked', legacyEvidenceReady: evidenceReady,
+      bindingStatus: historical ? 'different' : 'current', currentEvidenceReady: mode === 'current',
+      currentBinding: historical
+        ? { ...pair.currentBinding, tailAssetId: 'tail-e55-new', tailSha256: createHash('sha256').update('replacement-tail').digest('hex') }
+        : pair.currentBinding,
+      audit: {
+        ...pair.audit, passed: mode === 'unknown' ? null : mode !== 'historical-failed',
+        dimensions: pair.audit.dimensions.map(item => item.dimension === 'prop' && !evidenceReady
+          ? { ...item, result: mode === 'unknown' ? null : false, reason: mode === 'unknown' ? null : '历史检查：怀表位置不符' } : item),
+      },
+      warnings: historical ? ['current_tail_differs_from_audited_tail'] : mode === 'unknown' ? ['prop_evidence_unavailable'] : [],
+    })),
+  })
+}
+
 function workflowFixture(
   revision: number,
   promptIrSelected = false,
   storyboardRevision: StoryboardRevisionFixture = STORYBOARD_CANVAS_BASE_REVISION,
   heroBrowserUrl = 'http://127.0.0.1/api/qingmu/assets/hero-frame-asset-1/content',
   storyboardCanvas: Record<string, unknown> | null = null,
+  continuityMode: ContinuityMode = 'omitted',
 ) {
   const shotRelations = shotRelationsFixture(revision, storyboardRevision)
+  const continuityDelta = continuityMode === 'omitted' ? undefined : continuityDeltaFixture(revision, storyboardRevision, continuityMode)
   return {
     schema: 'jason.episode-workflow-projection.v1',
     projectId: 'project-1',
     episodeId: 'episode-1',
     sourceRevision: { script: revision },
-    inputFingerprint: `fingerprint-${String(revision)}`,
+    inputFingerprint: `fingerprint-${String(revision)}${continuityDelta === undefined ? '' : `:${continuityDelta.snapshotSha256}`}`,
     activeTaskId: null,
     status: 'active',
     hasData: true,
@@ -1169,6 +1204,7 @@ function workflowFixture(
     },
     director: {
       shotRelations,
+      ...(continuityDelta === undefined ? {} : { continuityDelta }),
       heroFrameStoryboards: heroFrameStoryboardsFixture(
         revision,
         storyboardRevision,
@@ -1602,8 +1638,10 @@ async function startYimengDouble(
   readonly releasePromptIrSelectionResponse: () => void
   readonly storyboardCanvasCommitAccepted: Promise<void>
   readonly releaseStoryboardCanvasCommitResponse: () => void
+  readonly setContinuityMode: (mode: ContinuityMode) => void
 }> {
   let revision = 3
+  let continuityMode: ContinuityMode = 'omitted'
   let authoritativeScript: Record<string, unknown> = INITIAL_SCRIPT
   let persistedReceipt: ReturnType<typeof commitReceiptFixture> | undefined
   let actorRevision = 3
@@ -1787,6 +1825,7 @@ async function startYimengDouble(
           storyboardRevision,
           `${publicBaseUrl}/api/qingmu/assets/${STORYBOARD_CANVAS_HERO_ASSET_ID}/content`,
           storyboardCanvas,
+          continuityMode,
         )
         const promptLineage = workflow.shots.items[0]?.promptLineage
         promptIrWorkflowStatuses.push(promptLineage?.status ?? 'missing')
@@ -3061,6 +3100,7 @@ async function startYimengDouble(
     releasePromptIrSelectionResponse: () => resolvePromptIrSelectionResponse?.(),
     storyboardCanvasCommitAccepted,
     releaseStoryboardCanvasCommitResponse: () => resolveStoryboardCanvasCommitResponse?.(),
+    setContinuityMode: (mode) => { continuityMode = mode },
   }
 }
 
@@ -3133,6 +3173,7 @@ describe.skipIf(
     let releasePromptIrSelectionResponse: (() => void) | undefined
     let storyboardCanvasCommitAccepted: Promise<void> | undefined
     let releaseStoryboardCanvasCommitResponse: (() => void) | undefined
+    let setContinuityMode: ((mode: ContinuityMode) => void) | undefined
     const capturedRequests: CapturedYimengRequest[] = []
     const scriptReadRevisions: number[] = []
     const actorReadRevisions: number[] = []
@@ -3153,6 +3194,7 @@ describe.skipIf(
     let shotRiverBrowserEvidence: Record<string, unknown> | undefined
     let storyboardCanvasBrowserEvidence: Record<string, unknown> | undefined
     let worksetBrowserEvidence: Record<string, unknown> | undefined
+    let continuityBrowserEvidence: Record<string, unknown> | undefined
     let resolveReferenceRightsMethodProjectionSha256: ((sha256: string) => void) | undefined
     const referenceRightsMethodProjectionSha256 = new Promise<string>((resolve) => {
       resolveReferenceRightsMethodProjectionSha256 = resolve
@@ -3198,6 +3240,7 @@ describe.skipIf(
       releasePromptIrSelectionResponse = yimeng.releasePromptIrSelectionResponse
       storyboardCanvasCommitAccepted = yimeng.storyboardCanvasCommitAccepted
       releaseStoryboardCanvasCommitResponse = yimeng.releaseStoryboardCanvasCommitResponse
+      setContinuityMode = yimeng.setContinuityMode
       overlayRoot = await mkdtemp(join(tmpdir(), 'dsh-qingmu-script-e2e-'))
       const overlayPath = join(overlayRoot, 'qingmu-script.overlay.yml')
       const qingmuOverlay = resolveQingmuOverlayEntrypoints(await readFile(QINGMU_OVERLAY, 'utf8'))
@@ -3346,6 +3389,8 @@ describe.skipIf(
               storyboardCanvasMethod: process.env.QINGMU_E5_2_METHOD_EVIDENCE_SCREENSHOT,
               workset: process.env.QINGMU_E5_4_EVIDENCE_SCREENSHOT,
               worksetMobile: process.env.QINGMU_E5_4_MOBILE_EVIDENCE_SCREENSHOT,
+              continuity: process.env.QINGMU_E5_5_EVIDENCE_SCREENSHOT,
+              continuityMobile: process.env.QINGMU_E5_5_MOBILE_EVIDENCE_SCREENSHOT,
               script: process.env.QINGMU_EVIDENCE_SCREENSHOT,
               actor: process.env.QINGMU_ACTOR_EVIDENCE_SCREENSHOT,
               scene: process.env.QINGMU_SCENE_EVIDENCE_SCREENSHOT,
@@ -3354,6 +3399,7 @@ describe.skipIf(
             shotRiver: shotRiverBrowserEvidence,
             storyboardCanvas: storyboardCanvasBrowserEvidence,
             workset: worksetBrowserEvidence,
+            continuity: continuityBrowserEvidence,
           }
           await mkdir(dirname(runEvidencePath), { recursive: true })
           await writeFile(runEvidencePath, `${JSON.stringify(evidence, null, 2)}\n`)
@@ -3481,6 +3527,180 @@ describe.skipIf(
       if (tracePath !== undefined && tracePath !== '') {
         await mkdir(dirname(tracePath), { recursive: true })
         await page.context().tracing.stop({ path: tracePath })
+      }
+    }, 120_000)
+
+    it('binds E5-5 continuity to the shared Shot and distinguishes current, historical, and missing evidence in Chromium', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e5-5-continuity'))
+      const requestStart = capturedRequests.length
+      const rpcStart = browserRpcRequests.length
+      const consoleStart = browserConsoleErrors.length
+      const tracePath = process.env.QINGMU_E5_5_TRACE_PATH?.trim()
+      if (tracePath) await page.context().tracing.start({ screenshots: true, snapshots: true })
+      const nextWire = () => page.waitForResponse(response => new URL(response.url()).pathname === '/qingmu-imago-method/continuityMethod')
+      const readProjection = async (wire: ReturnType<typeof nextWire>) => {
+        const raw = await (await wire).json() as unknown
+        const result = isRecord(raw) && isRecord(raw.result) ? raw.result : {}
+        const value = isRecord(result.value) ? result.value : {}
+        expect(result.ok).toBe(true)
+        expect(value.schema).toBe('qingmu.imago-continuity-method-adapter-result.v1')
+        if (!isRecord(value.projection)) throw new Error('missing continuity projection')
+        return value.projection
+      }
+      if (setContinuityMode === undefined) throw new Error('continuity fixture control missing')
+      setContinuityMode('current')
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      const initialWire = nextWire()
+      await dialog.getByRole('tab', { name: '分镜与镜头' }).click()
+      const continuity = dialog.getByRole('region', { name: '镜头连续性', exact: true })
+      const river = dialog.getByRole('list', { name: '镜头选择' })
+      const scenarios: Record<string, unknown>[] = []
+      try {
+        const current = await readProjection(initialWire)
+        await continuity.getByText('当前选中链有匹配的检查证据', { exact: true }).waitFor({ timeout: 20_000 })
+        expect(current.selected_shot).toEqual({ shotId: SHOT_RIVER_FIRST_FRAME_ID, frameNo: 7 })
+        expect(current.continuity_snapshot_sha256).toBe(continuityDeltaFixture(3, STORYBOARD_CANVAS_BASE_REVISION, 'current').snapshotSha256)
+        const pairs = isRecord(current.adjacent_pairs) ? current.adjacent_pairs : {}
+        expect(pairs.incoming).toBeNull()
+        expect(pairs.outgoing).toEqual(expect.objectContaining({ legacyEvidenceReady: true, currentEvidenceReady: true, bindingStatus: 'current' }))
+        expect(current.candidate_findings).toEqual([])
+        expect(current.lock_definitions).toHaveLength(6)
+        expect(current.rework_propagation).toHaveLength(5)
+        expect(current.lock_authority).toEqual({ status: 'unavailable', reason: 'authoritative_lock_instances_unavailable', instances: [] })
+        expect(current).toEqual(expect.objectContaining({
+          read_only: true, provider_calls: 0, task_mutation: false, budget_mutation: false,
+          human_signoff_inferred: false, project_state_persisted: false, formal_activation_allowed: false,
+        }))
+        const ruleBindings = isRecord(current.rule_bindings) ? current.rule_bindings : {}
+        const rulePaths = [
+          'pipeline/imago-os-current.json', 'pipeline/workflow-channel-registry.json', 'pipeline/v6-stage-contracts.json',
+          'pipeline/role-capability-spec.v6.json', 'pipeline/workflow-spec.v6.production-beta.json',
+          'pipeline/v6-lsuqc-completion-routing-policy.json', 'agents/c5-execution-director/AGENTS.md',
+          'skill-package/imago-c5-execution-storyboard/SKILL.md',
+          'skill-package/imago-c5-execution-storyboard/references/shot-grammar-continuity-lsu-method.md',
+          'agents/lsu-dailies-qc/AGENTS.md', 'skill-package/imago-lsu-dailies-qc/SKILL.md',
+          'skill-package/imago-lsu-dailies-qc/references/lsu-dailies-standard.md',
+          'scripts/compile_qingmu_continuity_method.py', 'scripts/compile_qingmu_element_method.py',
+        ]
+        expect(Object.keys(ruleBindings).sort()).toEqual([...rulePaths].sort())
+        if (IMAGO_CORE_ROOT === undefined) throw new Error('Core root is required for continuity evidence')
+        for (const path of rulePaths) {
+          expect(ruleBindings[path]).toBe(createHash('sha256').update(await readFile(join(IMAGO_CORE_ROOT, path))).digest('hex'))
+        }
+        expect(current.rules_sha256).toBe(canonicalSha256(ruleBindings))
+        scenarios.push({ name: 'current', projection: current })
+
+        const selectedWire = nextWire()
+        await river.getByRole('button', { name: /frame-1/ }).click()
+        const selected = await readProjection(selectedWire)
+        expect(selected.selected_shot).toEqual({ shotId: PROMPT_IR_FRAME_ID, frameNo: 12 })
+        const selectedPairs = isRecord(selected.adjacent_pairs) ? selected.adjacent_pairs : {}
+        expect(selectedPairs.incoming).toEqual(pairs.outgoing)
+        expect(selectedPairs.outgoing).toBeNull()
+        await continuity.getByRole('article', { name: '前镜头 → 当前镜头' }).getByText('7 → 12', { exact: true }).waitFor()
+        expect(await continuity.getByRole('button').allTextContents()).toEqual(['重读连续性证据'])
+        await continuity.locator('summary').filter({ hasText: '锁与返修规则 · 6' }).click()
+        await continuity.getByText('项目锁实例尚未接入。下面只展示当前方法定义，不代表已锁定，也不会执行失效或返修。', { exact: true }).waitFor()
+        await continuity.locator('summary').filter({ hasText: '锁与返修规则 · 6' }).click()
+        const desktopPath = process.env.QINGMU_E5_5_EVIDENCE_SCREENSHOT?.trim()
+        if (desktopPath) {
+          await mkdir(dirname(desktopPath), { recursive: true })
+          await continuity.getByRole('heading', { name: '镜头连续性', exact: true }).scrollIntoViewIfNeeded()
+          await continuity.evaluate((element) => { element.scrollIntoView({ block: 'start' }) })
+          await page.screenshot({ path: desktopPath })
+        }
+
+        const reload = async (mode: ContinuityMode) => {
+          setContinuityMode?.(mode)
+          const wire = nextWire()
+          await dialog.getByRole('button', { name: '刷新只读投影', exact: true }).click()
+          const projection = await readProjection(wire)
+          await expect.poll(() => continuity.getByText('正在核对相邻镜头与当前规则…', { exact: true }).count()).toBe(0)
+          scenarios.push({ name: mode, projection })
+          return projection
+        }
+        const historical = await reload('historical')
+        await continuity.getByText('历史检查对应另一组资产', { exact: true }).waitFor()
+        const historicalPairs = isRecord(historical.adjacent_pairs) ? historical.adjacent_pairs : {}
+        expect(historicalPairs.incoming).toEqual(expect.objectContaining({
+          legacyEvidenceReady: true, currentEvidenceReady: false, bindingStatus: 'different',
+        }))
+        expect(historicalPairs.outgoing).toBeNull()
+        expect(await continuity.getByText('当前选中链有匹配的检查证据', { exact: true }).count()).toBe(0)
+        const failed = await reload('historical-failed')
+        expect(failed.candidate_findings).toEqual([{
+          from_shot_id: SHOT_RIVER_FIRST_FRAME_ID, to_shot_id: PROMPT_IR_FRAME_ID, dimension: 'prop', reason: '历史检查：怀表位置不符',
+          check_id: 'check-e55', evidence_ref: 'test-evidence:e55', evidence_scope: 'historical',
+          severity: null, earliest_owner: null, timecode: null, attribution: 'pending', formal_finding: false,
+        }])
+        await continuity.getByText('道具 · 历史资产', { exact: true }).waitFor()
+        await continuity.getByText('待人工归因 · 未创建返修任务', { exact: true }).waitFor()
+        await page.setViewportSize({ width: 390, height: 844 })
+        const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
+        const cardOverflow = await continuity.evaluate(element => element.scrollWidth > element.clientWidth)
+        expect(mobileOverflow).toBe(false)
+        expect(cardOverflow).toBe(false)
+        const refreshBox = await continuity.getByRole('button', { name: '重读连续性证据' }).boundingBox()
+        expect(refreshBox?.height).toBeGreaterThanOrEqual(44)
+        const mobilePath = process.env.QINGMU_E5_5_MOBILE_EVIDENCE_SCREENSHOT?.trim()
+        if (mobilePath) {
+          await mkdir(dirname(mobilePath), { recursive: true })
+          await continuity.getByText('道具 · 历史资产', { exact: true }).scrollIntoViewIfNeeded()
+          await page.screenshot({ path: mobilePath })
+        }
+        await page.setViewportSize({ width: 1680, height: 1100 })
+
+        const unknown = await reload('unknown')
+        expect(unknown.candidate_findings).toEqual([])
+        await continuity.getByRole('row', { name: '道具 缺少记录', exact: true }).waitFor()
+        expect(await continuity.getByRole('list', { name: '待归因的问题线索', exact: true }).count()).toBe(0)
+        for (const mode of ['unavailable', 'omitted'] as const) {
+          const unavailable = await reload(mode)
+          expect(unavailable.availability).toEqual({
+            status: 'unavailable', reason: mode === 'omitted' ? 'continuity_evidence_unavailable' : 'continuity_source_unavailable',
+          })
+          expect(unavailable.continuity_snapshot_sha256).toBe(mode === 'omitted'
+            ? null : continuityDeltaFixture(3, STORYBOARD_CANVAS_BASE_REVISION, mode).snapshotSha256)
+          await continuity.getByText('易梦尚未提供可绑定的连续性证据；不能据此判断通过或失败。', { exact: true }).waitFor()
+          expect(await continuity.getByRole('article').count()).toBe(0)
+        }
+        await reload('current')
+        const firstAgainWire = nextWire()
+        await river.getByRole('button', { name: /frame-z/ }).click()
+        await readProjection(firstAgainWire)
+        await continuity.getByRole('article', { name: '当前镜头 → 后镜头' }).getByText('7 → 12', { exact: true }).waitFor()
+        await expectNoVisibleTechnicalBrand(page)
+        const requests = capturedRequests.slice(requestStart)
+        expect(requests.length).toBeGreaterThan(0)
+        expect(requests.every(request => request.method === 'GET' && request.body === undefined)).toBe(true)
+        const methodRequests = browserRpcRequests.slice(rpcStart).filter(request => request.path === '/qingmu-imago-method/continuityMethod')
+        expect(methodRequests.length).toBeGreaterThanOrEqual(9)
+        for (const request of methodRequests) {
+          const payload = isRecord(request.body) ? request.body.payload : undefined
+          const subject = isRecord(payload) ? payload : {}
+          expect(Object.keys(subject).sort()).toEqual(['episodeId', 'projectId', 'selectedShotId'])
+          expect(subject.projectId).toBe('project-1')
+          expect(subject.episodeId).toBe('episode-1')
+          expect([SHOT_RIVER_FIRST_FRAME_ID, PROMPT_IR_FRAME_ID]).toContain(subject.selectedShotId)
+        }
+        expect(browserConsoleErrors.slice(consoleStart)).toEqual([])
+        expect(tripwire.pageErrors).toEqual([])
+        continuityBrowserEvidence = {
+          schema: 'qingmu.e5-5-continuity-browser-evidence.v1', scenarios, ruleBindings, rulesSha256: current.rules_sha256,
+          sharedShotSelection: true, historicalPassDidNotApproveCurrent: true, unknownDimensionNotFailure: true,
+          methodRequests, yimengGetOnly: true, yimengRequestCount: requests.length,
+          mobileOverflow, cardOverflow, refreshControlHeight: refreshBox?.height,
+          lockInstanceCount: 0, formalFindingCount: 0, providerCalls: 0, humanSignoffInferred: false,
+          consoleErrors: browserConsoleErrors.slice(consoleStart), pageErrors: tripwire.pageErrors,
+        }
+      } finally {
+        setContinuityMode('omitted')
+        await page.setViewportSize({ width: 1680, height: 1100 })
+        // Restore the entry tab so the next case does not mount a method against the retained Shot snapshot.
+        await dialog.getByRole('tab', { name: '总览', exact: true }).click()
+        await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
+        if (tracePath) { await mkdir(dirname(tracePath), { recursive: true }); await page.context().tracing.stop({ path: tracePath }) }
       }
     }, 120_000)
 

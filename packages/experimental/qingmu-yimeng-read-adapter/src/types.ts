@@ -617,10 +617,83 @@ export interface YimengHeroFrameStoryboardsProjection {
   readonly blockers: readonly YimengHeroFrameStoryboardBlocker[]
 }
 
-/** Workflow director facts with the E5-1 relation and E5-2 Hero Frame/canvas projections. */
+/** Four dimensions recorded by an existing continuity check, not a new review. */
+export interface YimengContinuityDimension {
+  readonly dimension: 'character' | 'scene' | 'prop' | 'action'
+  readonly result: boolean | null
+  readonly reason: string | null
+}
+
+/** Current materialized pair and selected-video lineage supplied by Yimeng. */
+export interface YimengContinuityCurrentBinding {
+  readonly tailAssetId: string | null
+  readonly tailSha256: string | null
+  readonly nextFirstFrameAssetId: string | null
+  readonly nextFirstFrameSha256: string | null
+  readonly selectedVideoAssetId: string | null
+  readonly selectedVideoTaskId: string | null
+  readonly tailSourceTaskId: string | null
+  readonly tailFromSelectedVideo: boolean
+  readonly nextFirstFrameSelected: boolean
+  readonly nextFirstFrameStale: boolean
+  readonly staleHandoff: boolean
+}
+
+/** Exact stored audit binding; its SHA values are claims in that audit record. */
+export interface YimengContinuityAudit {
+  readonly checkId: string | null
+  readonly passed: boolean | null
+  readonly createdAt: string | null
+  readonly tailAssetId: string | null
+  readonly tailSha256: string | null
+  readonly nextFirstFrameAssetId: string | null
+  readonly nextFirstFrameSha256: string | null
+  readonly providerTaskId: string | null
+  readonly evidenceRef: string | null
+  readonly dimensions: readonly YimengContinuityDimension[]
+}
+
+/** Adjacent canonical Shots with historical and current evidence kept separate. */
+export interface YimengContinuityPair {
+  readonly fromShotId: string
+  readonly toShotId: string
+  readonly fromFrameNo: number
+  readonly toFrameNo: number
+  readonly required: boolean
+  readonly enforced: boolean
+  readonly exemption: 'scene_change' | 'hard_cut' | null
+  readonly legacyStatus: 'passed' | 'blocked' | 'advisory' | 'exempt'
+  readonly legacyEvidenceReady: boolean
+  readonly contractDigest: string
+  readonly currentBinding: YimengContinuityCurrentBinding
+  readonly audit: YimengContinuityAudit
+  readonly bindingStatus: 'current' | 'different' | 'unavailable'
+  readonly currentEvidenceReady: boolean
+  readonly warnings: readonly string[]
+}
+
+/** Rebuildable E5-5 evidence; availability is readability, never approval. */
+export interface YimengContinuityDeltaProjection {
+  readonly schema: 'jason.qingmu-continuity-delta.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly storyboardRevision: YimengShotRelationsStoryboardRevision
+  readonly availability: 'available' | 'unavailable'
+  readonly reason: string | null
+  readonly pairs: readonly YimengContinuityPair[]
+  readonly snapshotSha256: string
+  readonly readOnly: true
+  readonly providerCalls: 0
+  readonly taskMutation: false
+  readonly budgetMutation: false
+  readonly humanSignoffInferred: false
+}
+
+/** Workflow director facts; older upstreams may not yet export continuity evidence. */
 export interface YimengWorkflowDirector extends YimengJsonObject {
   readonly shotRelations: YimengShotRelationsProjection
   readonly heroFrameStoryboards: YimengHeroFrameStoryboardsProjection
+  readonly continuityDelta?: YimengContinuityDeltaProjection
 }
 
 /** Workflow stage facts supplied by Yimeng. */

@@ -5,6 +5,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { QingmuCockpit } from './QingmuCockpit.tsx'
 import type {
+  ImagoContinuityMethodResponse,
   ImagoElementMethodResponse, ImagoHeroFrameStoryboardMethodResponse, ImagoPromptIrMethodResponse,
   ImagoReferenceAssetMethodResponse, ImagoShotRelationMethodResponse, ImagoWorksetMethodResponse, QingmuYimengPort,
   YimengCommitElementProfileResponse, YimengCommitPromptIrEditResponse, YimengCommitScriptResponse,
@@ -29,6 +30,7 @@ import { en, NS, zh } from './locales.ts'
 
 export type { QingmuCockpitFace } from './slots.ts'
 export type {
+  ImagoContinuityMethodResponse,
   ImagoElementMethodResponse, ImagoHeroFrameStoryboardMethodResponse, ImagoPromptIrMethodResponse,
   ImagoReferenceAssetMethodResponse, ImagoShotRelationMethodResponse, ImagoWorksetMethodResponse,
   QingmuImagoMethodPort, QingmuYimengCommandPort,
@@ -83,6 +85,7 @@ export function apply(ctx: ClientContext): void {
     promptIr: (request, signal) => read<YimengPromptIrResponse>('promptIr', request, signal),
     workflow: (request, signal) => read<YimengWorkflowProjection>('workflow', request, signal),
     worksetMethod: (request, signal) => method<ImagoWorksetMethodResponse>('worksetMethod', request, signal),
+    continuityMethod: (request, signal) => method<ImagoContinuityMethodResponse>('continuityMethod', request, signal),
     elementMethod: (request, signal) => method<ImagoElementMethodResponse>('elementMethod', request, signal),
     referenceAssetMethod: (request, signal) =>
       method<ImagoReferenceAssetMethodResponse>('referenceAssetMethod', request, signal),

@@ -1,5 +1,8 @@
 /** Stable Client-side view of the private Yimeng read-adapter RPC contract. */
 import type {
+  ImagoContinuityMethodProjection,
+  ImagoContinuityMethodRequest,
+  ImagoContinuityMethodResponse,
   ImagoElementMethodRequest,
   ImagoElementMethodResponse,
   ImagoHeroFrameStoryboardAnnotation,
@@ -114,6 +117,9 @@ import type {
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 
 export type {
+  ImagoContinuityMethodProjection,
+  ImagoContinuityMethodRequest,
+  ImagoContinuityMethodResponse,
   ImagoElementMethodRequest,
   ImagoElementMethodResponse,
   ImagoHeroFrameStoryboardAnnotation,
@@ -311,6 +317,7 @@ export interface QingmuYimengCommandPort {
 
 /** Read-only, stateless professional method compiler channel. */
 export interface QingmuImagoMethodPort {
+  continuityMethod(request: ImagoContinuityMethodRequest, signal?: AbortSignal): Promise<ImagoContinuityMethodResponse>
   worksetMethod(request: ImagoWorksetMethodRequest, signal?: AbortSignal): Promise<ImagoWorksetMethodResponse>
   elementMethod(request: ImagoElementMethodRequest, signal?: AbortSignal): Promise<ImagoElementMethodResponse>
   referenceAssetMethod(request: ImagoReferenceAssetMethodRequest, signal?: AbortSignal): Promise<ImagoReferenceAssetMethodResponse>
