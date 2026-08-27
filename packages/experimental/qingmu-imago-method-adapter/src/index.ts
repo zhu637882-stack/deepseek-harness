@@ -32,6 +32,7 @@ import type {
   ImagoReferenceAssetMethodRequest,
   ImagoReferenceAssetMethodSnapshot,
   ImagoReferenceRightsMethodRequest,
+  ImagoReferenceRightsOperation,
 } from './types.ts'
 
 export type {
@@ -60,6 +61,7 @@ export type {
   ImagoReferenceAssetMethodResponse,
   ImagoReferenceAssetMethodSnapshot,
   ImagoReferenceRightsMethodRequest,
+  ImagoReferenceRightsOperation,
   ImagoReferenceAssetActionOperation,
   ImagoReferenceAssetOperation,
 } from './types.ts'
@@ -74,6 +76,7 @@ const SHA256 = /^[0-9a-f]{64}$/
 const ELEMENT_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_element_method.py'
 const REFERENCE_ASSET_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_reference_asset_method.py'
 const REFERENCE_RIGHTS_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_reference_rights_method.py'
+const REFERENCE_RIGHTS_EXCEPTION_RELEASE_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_reference_rights_exception_release_method.py'
 const PROMPT_IR_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_prompt_ir_method.py'
 const COMMON_SOURCE_PATHS = [
   'pipeline/imago-os-current.json',
@@ -118,6 +121,15 @@ const REFERENCE_ASSET_FORBIDDEN_WORK = [
   'human_signoff',
   'comment_as_decision',
   'review_note_as_decision',
+  'project_state_write',
+] as const
+const REFERENCE_RIGHTS_EXCEPTION_RELEASE_FORBIDDEN_WORK = [
+  'provider_dispatch',
+  'asset_generation',
+  'asset_selection',
+  'rights_record_write',
+  'subject_revision_write',
+  'ordinary_human_decision_inference',
   'project_state_write',
 ] as const
 const PROMPT_IR_EDITABLE_FIELDS = [
@@ -243,6 +255,12 @@ export interface ImagoMethodAdapterDependencies {
   ) => Promise<unknown>
   /** Optional element-contract compiler boundary for reference rights guidance. */
   readonly runReferenceRightsCompiler?: (
+    snapshot: ImagoElementMethodSnapshot,
+    execution: ImagoMethodCompilerExecution,
+    signal: AbortSignal,
+  ) => Promise<unknown>
+  /** Optional subject-only compiler boundary for exception-release guidance. */
+  readonly runReferenceRightsExceptionReleaseCompiler?: (
     snapshot: ImagoElementMethodSnapshot,
     execution: ImagoMethodCompilerExecution,
     signal: AbortSignal,
@@ -437,9 +455,10 @@ function parseReferenceAssetRequest(payload: unknown): ImagoReferenceAssetMethod
     input.operation !== 'selectReferenceAsset'
     && input.operation !== 'requestReferenceRegeneration'
     && input.operation !== 'replaceReferenceRights'
+    && input.operation !== 'recordReferenceRightsExceptionRelease'
   ) {
     throw new InputError(
-      'operation must be selectReferenceAsset, requestReferenceRegeneration, or replaceReferenceRights',
+      'operation must be selectReferenceAsset, requestReferenceRegeneration, replaceReferenceRights, or recordReferenceRightsExceptionRelease',
     )
   }
   const common: Omit<ImagoReferenceRightsMethodRequest, 'operation'> = {
@@ -449,7 +468,7 @@ function parseReferenceAssetRequest(payload: unknown): ImagoReferenceAssetMethod
     profileRevision: parseInputInteger(input.profileRevision, 'profileRevision'),
     snapshotSha256: parseInputSha256(input.snapshotSha256, 'snapshotSha256'),
   }
-  if (input.operation === 'replaceReferenceRights') {
+  if (input.operation === 'replaceReferenceRights' || input.operation === 'recordReferenceRightsExceptionRelease') {
     assertOnlyInputKeys(input, [
       'projectId',
       'elementKind',
@@ -458,7 +477,7 @@ function parseReferenceAssetRequest(payload: unknown): ImagoReferenceAssetMethod
       'snapshotSha256',
       'operation',
     ])
-    return { ...common, operation: 'replaceReferenceRights' }
+    return { ...common, operation: input.operation }
   }
   assertOnlyInputKeys(input, [
     'projectId',
@@ -849,6 +868,7 @@ function normalizeProjection(
 function normalizeReferenceRightsProjection(
   value: unknown,
   snapshot: ImagoElementMethodSnapshot,
+  operation: ImagoReferenceRightsOperation,
 ): ImagoElementMethodProjection {
   assertSafeJsonNumbers(value, 'projection')
   const root = requireExactObject(value, [
@@ -891,8 +911,11 @@ function normalizeReferenceRightsProjection(
     'agent_path',
     'skill_path',
   ], 'projection.method_definition')
+  const exceptionRelease = operation === 'recordReferenceRightsExceptionRelease'
   if (
-    definition.id !== 'imago-v6-reference-rights-record'
+    definition.id !== (exceptionRelease
+      ? 'imago-v6-reference-rights-exception-release'
+      : 'imago-v6-reference-rights-record')
     || requireInteger(definition.version, 'projection.method_definition.version', 1) !== 1
     || definition.agent_path !== sourcePaths[4]
     || definition.skill_path !== sourcePaths[5]
@@ -971,13 +994,13 @@ function normalizeReferenceRightsProjection(
   ], 'projection.work_order_projection')
   if (
     !isDeepStrictEqual(workOrder.target, expectedTarget)
-    || workOrder.operation !== 'replaceReferenceRights'
+    || workOrder.operation !== operation
   ) {
     throw new ProjectionContractError('projection work order target or operation mismatch')
   }
   requireExactArray(
     workOrder.allowed_mutations,
-    ['replaceReferenceRights'],
+    [operation],
     'projection.work_order_projection.allowed_mutations',
   )
   if (!isDeepStrictEqual(workOrder.required_read_set, [{
@@ -1018,15 +1041,23 @@ function normalizeReferenceRightsProjection(
   )
   requireExactArray(
     legalWorkSet.writes,
-    ['replace_reference_rights_via_changeset'],
+    [exceptionRelease
+      ? 'record_reference_rights_exception_release_via_human_command'
+      : 'replace_reference_rights_via_changeset'],
     'projection.legal_work_set.writes',
   )
   requireExactArray(
     legalWorkSet.invalidates,
-    ['reference_rights_dependent_projection'],
+    [exceptionRelease
+      ? 'reference_rights_exception_release_projection'
+      : 'reference_rights_dependent_projection'],
     'projection.legal_work_set.invalidates',
   )
-  requireExactArray(legalWorkSet.forbidden, FORBIDDEN_WORK, 'projection.legal_work_set.forbidden')
+  requireExactArray(
+    legalWorkSet.forbidden,
+    exceptionRelease ? REFERENCE_RIGHTS_EXCEPTION_RELEASE_FORBIDDEN_WORK : FORBIDDEN_WORK,
+    'projection.legal_work_set.forbidden',
+  )
 
   if (
     root.authority_snapshot_attestation !== 'not_verified_by_compiler'
@@ -1525,6 +1556,19 @@ async function runReferenceRightsCompilerProcess(
   return await runCompilerSubprocess(snapshot, execution, signal, REFERENCE_RIGHTS_COMPILER_RELATIVE_PATH)
 }
 
+async function runReferenceRightsExceptionReleaseCompilerProcess(
+  snapshot: ImagoElementMethodSnapshot,
+  execution: ImagoMethodCompilerExecution,
+  signal: AbortSignal,
+): Promise<unknown> {
+  return await runCompilerSubprocess(
+    snapshot,
+    execution,
+    signal,
+    REFERENCE_RIGHTS_EXCEPTION_RELEASE_COMPILER_RELATIVE_PATH,
+  )
+}
+
 async function runPromptIrCompilerProcess(
   snapshot: ImagoPromptIrMethodSnapshot,
   execution: ImagoMethodCompilerExecution,
@@ -1634,6 +1678,7 @@ export function createImagoMethodHandler(
     runCompiler: runCompilerProcess,
     runReferenceAssetCompiler: runReferenceAssetCompilerProcess,
     runReferenceRightsCompiler: runReferenceRightsCompilerProcess,
+    runReferenceRightsExceptionReleaseCompiler: runReferenceRightsExceptionReleaseCompilerProcess,
     runPromptIrCompiler: runPromptIrCompilerProcess,
   },
 ): ConnectionRpcHandler {
@@ -1664,14 +1709,20 @@ export function createImagoMethodHandler(
       }
       if (endpoint === 'referenceAssetMethod') {
         const request = parseReferenceAssetRequest(payload)
-        if (request.operation === 'replaceReferenceRights') {
+        if (
+          request.operation === 'replaceReferenceRights'
+          || request.operation === 'recordReferenceRightsExceptionRelease'
+        ) {
           const snapshot = buildReferenceRightsSnapshot(request)
           if (signal.aborted) return cancelled()
-          if (dependencies.runReferenceRightsCompiler === undefined) throw new CompilerExecutionError()
-          const rawProjection = await dependencies.runReferenceRightsCompiler(snapshot, execution, signal)
+          const runRightsCompiler = request.operation === 'recordReferenceRightsExceptionRelease'
+            ? dependencies.runReferenceRightsExceptionReleaseCompiler
+            : dependencies.runReferenceRightsCompiler
+          if (runRightsCompiler === undefined) throw new CompilerExecutionError()
+          const rawProjection = await runRightsCompiler(snapshot, execution, signal)
           // oxlint-disable-next-line typescript/no-unnecessary-condition -- the signal can abort while awaited.
           if (signal.aborted) return cancelled()
-          const projection = normalizeReferenceRightsProjection(rawProjection, snapshot)
+          const projection = normalizeReferenceRightsProjection(rawProjection, snapshot, request.operation)
           const methodAttestation = createMethodAttestation(attestationKey, projection, snapshot)
           const value: ImagoElementMethodResponse = {
             schema: 'qingmu.imago-element-method-adapter-result.v1',
@@ -1680,6 +1731,9 @@ export function createImagoMethodHandler(
             methodAttestation,
           }
           return { ok: true, value }
+        }
+        if (!('assetId' in request) || !('assetSha256' in request)) {
+          throw new InputError('reference-asset action lineage is missing')
         }
         const snapshot = buildReferenceAssetSnapshot(request)
         if (signal.aborted) return cancelled()

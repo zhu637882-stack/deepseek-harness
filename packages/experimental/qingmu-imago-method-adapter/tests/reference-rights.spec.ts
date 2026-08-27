@@ -22,6 +22,10 @@ const REQUEST = {
   snapshotSha256: 'a'.repeat(64),
   operation: 'replaceReferenceRights',
 } as const
+const EXCEPTION_RELEASE_REQUEST = {
+  ...REQUEST,
+  operation: 'recordReferenceRightsExceptionRelease',
+} as const
 const SOURCE_PATHS = [
   'pipeline/imago-os-current.json',
   'pipeline/workflow-channel-registry.json',
@@ -45,6 +49,15 @@ const FORBIDDEN = [
   'asset_generation',
   'asset_selection',
   'human_decision',
+  'project_state_write',
+] as const
+const EXCEPTION_RELEASE_FORBIDDEN = [
+  'provider_dispatch',
+  'asset_generation',
+  'asset_selection',
+  'rights_record_write',
+  'subject_revision_write',
+  'ordinary_human_decision_inference',
   'project_state_write',
 ] as const
 
@@ -140,16 +153,139 @@ function projection(snapshot: ImagoElementMethodSnapshot): ImagoElementMethodPro
   }
 }
 
+function exceptionReleaseProjection(snapshot: ImagoElementMethodSnapshot): ImagoElementMethodProjection {
+  const base = projection(snapshot)
+  return {
+    ...base,
+    method_definition: {
+      ...base.method_definition,
+      id: 'imago-v6-reference-rights-exception-release',
+    },
+    field_hints: [{
+      hint_id: 'exception-exact-subject',
+      field: 'rightsExceptionRelease',
+      title: '精确对象绑定',
+      guidance: 'IMAGO 只提供方法，不创建放行事实。',
+    }],
+    checklist: [{ check_id: 'exception-subject-binding-current', label: '复核精确绑定', required: true }],
+    work_order_projection: {
+      ...base.work_order_projection,
+      operation: 'recordReferenceRightsExceptionRelease',
+      allowed_mutations: ['recordReferenceRightsExceptionRelease'],
+      before_write: ['重新读取易梦当前对象'],
+      after_write: ['只通过易梦独立人类命令记录事实'],
+    },
+    review_card: {
+      title: '参考资产权利异常放行复核',
+      summary: '复核精确绑定与人工权限。',
+      review_dimensions: ['对象与权利谱系'],
+      hard_vetoes: ['不得由 IMAGO 产生放行事实'],
+      decision_boundary: '只有易梦近期认证的独立人类命令可以记录异常放行。',
+    },
+    legal_work_set: {
+      reads: ['yimeng_element_reference_rights_snapshot'],
+      writes: ['record_reference_rights_exception_release_via_human_command'],
+      invalidates: ['reference_rights_exception_release_projection'],
+      forbidden: EXCEPTION_RELEASE_FORBIDDEN,
+    },
+  }
+}
+
 function dependencies(
   runReferenceRightsCompiler: NonNullable<ImagoMethodAdapterDependencies['runReferenceRightsCompiler']>,
 ): ImagoMethodAdapterDependencies {
   return { runCompiler: vi.fn(), runReferenceRightsCompiler }
 }
 
+function exceptionReleaseDependencies(
+  runReferenceRightsExceptionReleaseCompiler:
+  NonNullable<ImagoMethodAdapterDependencies['runReferenceRightsExceptionReleaseCompiler']>,
+): ImagoMethodAdapterDependencies {
+  return { runCompiler: vi.fn(), runReferenceRightsExceptionReleaseCompiler }
+}
+
 beforeEach(() => { vi.stubEnv('QINGMU_IMAGO_ATTESTATION_KEY', TEST_ATTESTATION_KEY) })
 afterEach(() => { vi.unstubAllEnvs() })
 
 describe('qingmu IMAGO reference rights method adapter', () => {
+  it('compiles exception-release guidance from subject lineage only through the existing method endpoint', async () => {
+    const compiler = vi.fn(async (snapshot: ImagoElementMethodSnapshot) => exceptionReleaseProjection(snapshot))
+    const handler = createImagoMethodHandler(
+      { coreRoot: '/opt/imago-os-core' },
+      exceptionReleaseDependencies(compiler),
+    )
+
+    const result = await handler('referenceAssetMethod', EXCEPTION_RELEASE_REQUEST, signal())
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error(result.error.message)
+    const value = result.value as ImagoElementMethodResponse
+    expect(compiler).toHaveBeenCalledOnce()
+    expect(compiler.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      schema: 'qingmu.element-method-snapshot.v1',
+      subject: expect.objectContaining({
+        project_id: 'project-1',
+        target_id: 'prop-1',
+        base_revision: 3,
+        base_snapshot_sha256: 'a'.repeat(64),
+      }),
+    }))
+    expect(value.projection.method_definition.id).toBe('imago-v6-reference-rights-exception-release')
+    expect(value.projection.work_order_projection).toEqual(expect.objectContaining({
+      operation: 'recordReferenceRightsExceptionRelease',
+      allowed_mutations: ['recordReferenceRightsExceptionRelease'],
+    }))
+    expect(value.projection.legal_work_set).toEqual({
+      reads: ['yimeng_element_reference_rights_snapshot'],
+      writes: ['record_reference_rights_exception_release_via_human_command'],
+      invalidates: ['reference_rights_exception_release_projection'],
+      forbidden: EXCEPTION_RELEASE_FORBIDDEN,
+    })
+    const compiledInput = JSON.stringify(compiler.mock.calls[0]?.[0])
+    for (const forbidden of [
+      'reason',
+      'rightsFields',
+      'referenceAssetId',
+      'referenceAssetSha256',
+      'rightsRecordSha256',
+      'assetId',
+      'assetSha256',
+      'actorId',
+      'authSessionId',
+    ]) {
+      expect(compiledInput).not.toContain(forbidden)
+    }
+  })
+
+  it('rejects exception-release decision fields before Core and forged method output after Core', async () => {
+    const compiler = vi.fn(async (snapshot: ImagoElementMethodSnapshot) => exceptionReleaseProjection(snapshot))
+    const handler = createImagoMethodHandler(
+      { coreRoot: '/opt/imago-os-core' },
+      exceptionReleaseDependencies(compiler),
+    )
+    for (const payload of [
+      { ...EXCEPTION_RELEASE_REQUEST, reason: 'browser reason' },
+      { ...EXCEPTION_RELEASE_REQUEST, scope: {} },
+      { ...EXCEPTION_RELEASE_REQUEST, rights: {} },
+      { ...EXCEPTION_RELEASE_REQUEST, actorId: 'browser-actor' },
+    ]) {
+      const result = await handler('referenceAssetMethod', payload, signal())
+      expect(result.ok).toBe(false)
+      if (result.ok) throw new Error('forbidden exception-release input should fail')
+      expect(result.error.code).toBe('bad-request')
+    }
+    expect(compiler).not.toHaveBeenCalled()
+
+    const forged = createImagoMethodHandler(
+      { coreRoot: '/opt/imago-os-core' },
+      exceptionReleaseDependencies(async snapshot => projection(snapshot)),
+    )
+    const forgedResult = await forged('referenceAssetMethod', EXCEPTION_RELEASE_REQUEST, signal())
+    expect(forgedResult.ok).toBe(false)
+    if (forgedResult.ok) throw new Error('forged exception-release method should fail')
+    expect(forgedResult.error.message).toContain('projection contract failed')
+  })
+
   it('strips asset transport lineage and returns the element-method attestation', async () => {
     const runReferenceRightsCompiler = vi.fn(async (snapshot: ImagoElementMethodSnapshot) => projection(snapshot))
     const handler = createImagoMethodHandler(
@@ -262,6 +398,36 @@ describe('qingmu IMAGO reference rights method adapter', () => {
         writes: ['replace_reference_rights_via_changeset'],
         invalidates: ['reference_rights_dependent_projection'],
         forbidden: FORBIDDEN,
+      })
+    },
+  )
+
+  it.runIf(INTEGRATION_CORE_ROOT !== undefined && INTEGRATION_CORE_ROOT !== '')(
+    'runs the reviewed current exception-release compiler through the existing endpoint',
+    async () => {
+      const coreRoot = INTEGRATION_CORE_ROOT
+      expect(existsSync(`${coreRoot}/scripts/compile_qingmu_reference_rights_exception_release_method.py`)).toBe(true)
+      const result = await createImagoMethodHandler({})(
+        'referenceAssetMethod',
+        EXCEPTION_RELEASE_REQUEST,
+        signal(),
+      )
+      expect(result.ok).toBe(true)
+      if (!result.ok) throw new Error(result.error.message)
+      const value = result.value as ImagoElementMethodResponse
+      expect(value.projection.method_definition).toMatchObject({
+        id: 'imago-v6-reference-rights-exception-release',
+        version: 1,
+      })
+      expect(value.projection.work_order_projection).toEqual(expect.objectContaining({
+        operation: 'recordReferenceRightsExceptionRelease',
+        allowed_mutations: ['recordReferenceRightsExceptionRelease'],
+      }))
+      expect(value.projection.legal_work_set).toEqual({
+        reads: ['yimeng_element_reference_rights_snapshot'],
+        writes: ['record_reference_rights_exception_release_via_human_command'],
+        invalidates: ['reference_rights_exception_release_projection'],
+        forbidden: EXCEPTION_RELEASE_FORBIDDEN,
       })
     },
   )

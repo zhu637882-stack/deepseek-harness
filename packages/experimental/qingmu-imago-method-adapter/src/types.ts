@@ -79,8 +79,13 @@ export interface ImagoElementMethodResponse extends ImagoMethodJsonObject {
 /** Existing reference-asset action operations compiled without executing them. */
 export type ImagoReferenceAssetActionOperation = 'selectReferenceAsset' | 'requestReferenceRegeneration'
 
+/** Rights operations compiled from target lineage only; no rights body or release decision enters IMAGO. */
+export type ImagoReferenceRightsOperation =
+  | 'replaceReferenceRights'
+  | 'recordReferenceRightsExceptionRelease'
+
 /** All operations transported through the existing reference-asset method endpoint. */
-export type ImagoReferenceAssetOperation = ImagoReferenceAssetActionOperation | 'replaceReferenceRights'
+export type ImagoReferenceAssetOperation = ImagoReferenceAssetActionOperation | ImagoReferenceRightsOperation
 
 /** Exact browser input for compiling a reference-asset operation method. */
 interface ImagoReferenceAssetMethodRequestBase {
@@ -100,7 +105,7 @@ export interface ImagoReferenceAssetActionMethodRequest extends ImagoReferenceAs
 
 /** Rights request carries only target lineage; the rights draft never enters IMAGO. */
 export interface ImagoReferenceRightsMethodRequest extends ImagoReferenceAssetMethodRequestBase {
-  readonly operation: 'replaceReferenceRights'
+  readonly operation: ImagoReferenceRightsOperation
 }
 
 /** Exact browser input accepted by the existing reference-asset method endpoint. */
