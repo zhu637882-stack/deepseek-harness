@@ -20,6 +20,7 @@ import {
   createProductionUnitDouble, PRODUCTION_UNIT_BROWSER_GROUP_ID, PRODUCTION_UNIT_BROWSER_UNIT_ID,
   PRODUCTION_UNIT_BROWSER_RULE_PATHS,
 } from './qingmu-production-unit-fixture.ts'
+import { createStageSourceDouble, STAGE_SOURCE_BROWSER_RULE_PATHS } from './qingmu-stage-source-fixture.ts'
 
 const YIMENG_TOKEN = 'qingmu-script-workspace-test-token'
 const CHANGE_SET_ID = 'changeset-episode-script-1'
@@ -1671,12 +1672,16 @@ async function startYimengDouble(
   readonly setVideoReviewMode: (mode: VideoReviewMode) => void
   readonly shotFindings: ReturnType<typeof createShotFindingDouble>
   readonly productionUnits: ReturnType<typeof createProductionUnitDouble>
+  readonly stageSources: ReturnType<typeof createStageSourceDouble>
 }> {
   let revision = 3
   const shotFindings = createShotFindingDouble({
     token: YIMENG_TOKEN, attestationKey: IMAGO_ATTESTATION_KEY, canonicalJson, canonicalSha256,
   })
   const productionUnits = createProductionUnitDouble({
+    token: YIMENG_TOKEN, attestationKey: IMAGO_ATTESTATION_KEY, canonicalJson, canonicalSha256,
+  })
+  const stageSources = createStageSourceDouble({
     token: YIMENG_TOKEN, attestationKey: IMAGO_ATTESTATION_KEY, canonicalJson, canonicalSha256,
   })
   let continuityMode: ContinuityMode = 'omitted'
@@ -1880,6 +1885,9 @@ async function startYimengDouble(
       }
       if (shotFindings.handle(request, response, url, body, revision)) return
       if (productionUnits.handle(request, response, url, body, revision)) return
+      if (stageSources.handle(request, response, url, body, {
+        revision, contentSha256: revision === 3 ? INITIAL_SCRIPT_SHA256 : AUTHORITATIVE_SNAPSHOT_SHA,
+      })) return
       if (
         request.method === 'GET'
         && url.pathname === `/api/qingmu/projects/project-1/episodes/episode-1/storyboard-revisions/${PROMPT_IR_STORYBOARD_REVISION_ID}/frames/${PROMPT_IR_FRAME_ID}/prompt-ir`
@@ -3152,6 +3160,7 @@ async function startYimengDouble(
     setVideoReviewMode: (mode) => { videoReviewMode = mode },
     shotFindings,
     productionUnits,
+    stageSources,
   }
 }
 
@@ -3228,6 +3237,7 @@ describe.skipIf(
     let setVideoReviewMode: ((mode: VideoReviewMode) => void) | undefined
     let shotFindingDouble: ReturnType<typeof createShotFindingDouble> | undefined
     let productionUnitDouble: ReturnType<typeof createProductionUnitDouble> | undefined
+    let stageSourceDouble: ReturnType<typeof createStageSourceDouble> | undefined
     const capturedRequests: CapturedYimengRequest[] = []
     const scriptReadRevisions: number[] = []
     const actorReadRevisions: number[] = []
@@ -3252,6 +3262,7 @@ describe.skipIf(
     let selectedVideoReviewBrowserEvidence: Record<string, unknown> | undefined
     let shotFindingBrowserEvidence: Record<string, unknown> | undefined
     let productionUnitBrowserEvidence: Record<string, unknown> | undefined
+    let stageSourceBrowserEvidence: Record<string, unknown> | undefined
     let resolveReferenceRightsMethodProjectionSha256: ((sha256: string) => void) | undefined
     const referenceRightsMethodProjectionSha256 = new Promise<string>((resolve) => {
       resolveReferenceRightsMethodProjectionSha256 = resolve
@@ -3301,6 +3312,7 @@ describe.skipIf(
       setVideoReviewMode = yimeng.setVideoReviewMode
       shotFindingDouble = yimeng.shotFindings
       productionUnitDouble = yimeng.productionUnits
+      stageSourceDouble = yimeng.stageSources
       overlayRoot = await mkdtemp(join(tmpdir(), 'dsh-qingmu-script-e2e-'))
       const overlayPath = join(overlayRoot, 'qingmu-script.overlay.yml')
       const qingmuOverlay = resolveQingmuOverlayEntrypoints(await readFile(QINGMU_OVERLAY, 'utf8'))
@@ -3334,6 +3346,8 @@ describe.skipIf(
           '/qingmu-yimeng-command/recordShotFinding', '/qingmu-yimeng-command/recoverShotFinding',
           '/qingmu-yimeng/productionUnits', '/qingmu-yimeng-command/bindProductionUnit',
           '/qingmu-yimeng-command/recoverProductionUnitBinding',
+          '/qingmu-yimeng/stageSources', '/qingmu-yimeng-command/bindStageSource',
+          '/qingmu-yimeng-command/recoverStageSourceBinding',
         ].includes(requestPath)) return
         browserRpcRequests.push({ path: requestPath, body: request.postDataJSON() as unknown })
       })
@@ -3467,6 +3481,9 @@ describe.skipIf(
               productionUnitMobile: process.env.QINGMU_E5_5_PRODUCTION_UNIT_MOBILE_SCREENSHOT,
               productionUnitMobileEnd: process.env.QINGMU_E5_5_PRODUCTION_UNIT_MOBILE_END_SCREENSHOT,
               productionUnitFinding: process.env.QINGMU_E5_5_PRODUCTION_UNIT_FINDING_SCREENSHOT,
+              stageSource: process.env.QINGMU_E5_5_STAGE_SOURCE_SCREENSHOT,
+              stageSourceMobile: process.env.QINGMU_E5_5_STAGE_SOURCE_MOBILE_SCREENSHOT,
+              stageSourceHistorical: process.env.QINGMU_E5_5_STAGE_SOURCE_HISTORICAL_SCREENSHOT,
               script: process.env.QINGMU_EVIDENCE_SCREENSHOT,
               actor: process.env.QINGMU_ACTOR_EVIDENCE_SCREENSHOT,
               scene: process.env.QINGMU_SCENE_EVIDENCE_SCREENSHOT,
@@ -3479,6 +3496,7 @@ describe.skipIf(
             selectedVideoReview: selectedVideoReviewBrowserEvidence,
             shotFinding: shotFindingBrowserEvidence,
             productionUnit: productionUnitBrowserEvidence,
+            stageSource: stageSourceBrowserEvidence,
           }
           await mkdir(dirname(runEvidencePath), { recursive: true })
           await writeFile(runEvidencePath, `${JSON.stringify(evidence, null, 2)}\n`)
@@ -6537,5 +6555,230 @@ describe.skipIf(
         unexpectedFailedRequests,
       }
     }, 180_000)
+
+    it('registers only the saved screenplay source and recovers its original receipt after source loss in Chromium', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-stage-source'))
+      if (stageSourceDouble === undefined || IMAGO_CORE_ROOT === undefined || IMAGO_CORE_ROOT === '') {
+        throw new Error('Stage-source fixture controls missing')
+      }
+      const sources = stageSourceDouble
+      const requestStart = capturedRequests.length
+      const rpcStart = browserRpcRequests.length
+      const consoleStart = browserConsoleErrors.length
+      const tracePath = process.env.QINGMU_E5_5_STAGE_SOURCE_TRACE_PATH?.trim()
+      if (tracePath) await page.context().tracing.start({ screenshots: true, snapshots: true })
+      const nextWire = (path: string) => page.waitForResponse((response) => {
+        if (new URL(response.url()).pathname !== path) return false
+        const body = response.request().postDataJSON() as unknown
+        if (!isRecord(body) || !isRecord(body.payload)) return false
+        return body.payload.projectId === 'project-1' && body.payload.episodeId === 'episode-1'
+      })
+      const readWire = async (wire: ReturnType<typeof nextWire>) => {
+        const response = await wire
+        expect(response.status()).toBe(200)
+        const raw = await response.json() as unknown
+        if (!isRecord(raw) || !isRecord(raw.result)) throw new Error('Stage-source RPC carrier missing')
+        return raw.result
+      }
+      const markers = () => page.evaluate(() => Object.keys(sessionStorage)
+        .filter(key => decodeURIComponent(key).startsWith('qingmu:stage-source-recovery:v1:'))
+        .map(key => ({ key, value: sessionStorage.getItem(key) })))
+      const base = '/api/qingmu/projects/project-1/episodes/episode-1/stage-sources'
+      const bindingPath = `${base}/A1S/binding`
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      const panel = dialog.getByRole('region', { name: '编剧方法的剧本来源', exact: true })
+      sources.setMode('available')
+      if (!await dialog.isVisible()) await page.getByRole('button', { name: '青木制作台' }).click()
+      const initialRead = nextWire('/qingmu-yimeng/stageSources')
+      const scriptRead = nextWire('/qingmu-yimeng/script')
+      const methodRead = nextWire('/qingmu-imago-method/stageSourceMethod')
+      await dialog.getByRole('tab', { name: '剧本与资产' }).click()
+      try {
+        const initialFeed = await readWire(initialRead)
+        const script = await readWire(scriptRead)
+        const method = await readWire(methodRead)
+        expect(initialFeed.ok).toBe(true)
+        expect(script.ok).toBe(true)
+        expect(method.ok).toBe(true)
+        if (!isRecord(initialFeed.value) || !isRecord(initialFeed.value.source) || !isRecord(script.value)
+          || !isRecord(method.value) || !isRecord(method.value.projection)) throw new Error('Saved script source missing')
+        const source = initialFeed.value.source
+        const projection = method.value.projection
+        expect(source).toEqual({ schema: 'jason.qingmu-stage-source.v1', projectId: 'project-1', episodeId: 'episode-1',
+          sourceType: 'episode_script', sourceId: 'episode-1', revision: script.value.revision, contentSha256: script.value.scriptSha256 })
+        expect(projection.subject).toEqual(source)
+        expect(projection.subjectSnapshotSha256).toBe(canonicalSha256(source))
+        expect(projection.definition).toMatchObject({ sourceUsage: 'source_reference_only',
+          operation: 'bind_existing_episode_script_source', stageArtifactCreationAllowed: false, stageApprovalAllowed: false, providerCalls: 0 })
+        expect(method.value.projectionSha256).toBe(canonicalSha256(projection))
+        if (!isRecord(projection.ruleBindings)) throw new Error('Source rule bindings missing')
+        expect(Object.keys(projection.ruleBindings).sort()).toEqual([...STAGE_SOURCE_BROWSER_RULE_PATHS].sort())
+        for (const path of STAGE_SOURCE_BROWSER_RULE_PATHS) {
+          expect(projection.ruleBindings[path]).toBe(createHash('sha256').update(await readFile(join(IMAGO_CORE_ROOT, path))).digest('hex'))
+        }
+        const confirm = panel.getByRole('checkbox')
+        await confirm.waitFor()
+        expect(await confirm.isChecked()).toBe(false)
+        const bind = panel.getByRole('button', { name: '确认登记剧本来源', exact: true })
+        expect(await bind.isDisabled()).toBe(true)
+        expect(await markers()).toEqual([])
+        expect(capturedRequests.slice(requestStart).filter(request => request.method === 'POST')).toEqual([])
+        const unsavedTitle = '尚未提交的来源回归草稿'
+        await dialog.getByRole('textbox', { name: '结构化剧本 JSON', exact: true }).fill(JSON.stringify({
+          scenes: [{ sceneIndex: 1, title: unsavedTitle, actionDescription: '这段改动仍是草稿。', dialogues: [] }],
+        }))
+        await confirm.check()
+        await expect.poll(() => bind.isDisabled()).toBe(false)
+        const bindControlHeight = (await bind.boundingBox())?.height
+        expect(bindControlHeight).toBeGreaterThanOrEqual(44)
+        sources.loseNextBindingResponse()
+        const lostRead = nextWire('/qingmu-yimeng-command/bindStageSource')
+        await bind.click()
+        expect(await readWire(lostRead)).toMatchObject({ ok: false })
+        await panel.getByText('来源登记未确认成功；若保留了恢复标记，请只查询原回执，不要重复提交。', { exact: true }).waitFor()
+        const retainedMarkers = await markers()
+        expect(retainedMarkers).toHaveLength(1)
+        const retained = retainedMarkers[0]
+        if (retained?.value === null || retained?.value === undefined) throw new Error('Source recovery intent missing')
+        const intent: unknown = JSON.parse(retained.value)
+        if (!isRecord(intent)) throw new Error('Source recovery intent must be an object')
+        expect(Object.keys(intent).sort()).toEqual(['schema', 'projectId', 'episodeId', 'stageId', 'expectedSubjectSha256',
+          'expectedBindingRevision', 'expectedBindingSha256', 'methodProjectionSha256', 'rulesSha256', 'idempotencyKey'].sort())
+        expect(intent).toMatchObject({ projectId: 'project-1', episodeId: 'episode-1', stageId: 'A1S',
+          expectedBindingRevision: 0, expectedBindingSha256: null, expectedSubjectSha256: projection.subjectSnapshotSha256,
+          methodProjectionSha256: method.value.projectionSha256, rulesSha256: projection.rulesSha256 })
+        expect(retained.value).not.toMatch(/signature|authSession|owner-fixture|methodAttestation/)
+        expect(retained.value).not.toContain(YIMENG_TOKEN)
+        expect(retained.value).not.toContain(IMAGO_ATTESTATION_KEY)
+        expect(retained.value).not.toContain(unsavedTitle)
+        const original = sources.getLatest()
+        expect(original?.binding.source).toEqual(source)
+        expect(original?.binding.bindingRevision).toBe(1)
+        expect(await panel.getByText('当前已保存版本的来源已登记；未据此审核剧本。', { exact: true }).count()).toBe(0)
+
+        sources.setMode('unavailable')
+        const recoveryStart = capturedRequests.length
+        const recoveryRpcStart = browserRpcRequests.length
+        await page.reload()
+        await page.getByRole('button', { name: '青木制作台' }).click()
+        const unavailableRead = nextWire('/qingmu-yimeng/stageSources')
+        await dialog.getByRole('tab', { name: '剧本与资产' }).click()
+        expect(await readWire(unavailableRead)).toMatchObject({ ok: true, value: {
+          source: null, subjectSnapshotSha256: null, latestBinding: original, currentBinding: null,
+        } })
+        expect(await markers()).toEqual(retainedMarkers)
+        const recoveryRead = nextWire('/qingmu-yimeng-command/recoverStageSourceBinding')
+        const recoveredFeedRead = nextWire('/qingmu-yimeng/stageSources')
+        await panel.getByRole('button', { name: '查询原来源登记回执', exact: true }).click()
+        const recovered = await readWire(recoveryRead)
+        expect(recovered).toEqual({ ok: true, value: { schema: 'jason.qingmu-stage-source-recovery.v1', receipt: original } })
+        expect(await readWire(recoveredFeedRead)).toMatchObject({ ok: true,
+          value: { source: null, currentBinding: null, latestBinding: original } })
+        await expect.poll(markers).toEqual([])
+        await panel.getByText('旧来源登记保留；不适用于当前已保存剧本。', { exact: true }).waitFor()
+        await panel.getByText('当前方法规则尚未核实；不据此判定旧登记有效。', { exact: true }).waitFor()
+        const recoveryRequests = capturedRequests.slice(recoveryStart)
+        expect(recoveryRequests.length).toBeGreaterThan(0)
+        expect(recoveryRequests.every(request => request.method === 'GET' && request.body === undefined)).toBe(true)
+        const receipts = recoveryRequests.filter(request => request.path.startsWith(`${bindingPath}/command-receipt?`))
+        expect(receipts).toHaveLength(1)
+        const receiptRequest = receipts[0]
+        if (receiptRequest === undefined) throw new Error('Source original GET not observed')
+        const query = new URL(receiptRequest.path, 'http://127.0.0.1').searchParams
+        expect([...query.keys()]).toEqual(['expectedSubjectSha256'])
+        expect(query.get('expectedSubjectSha256')).toBe(intent.expectedSubjectSha256)
+        expect(receiptRequest.idempotencyKey).toBe(intent.idempotencyKey)
+        expect(browserRpcRequests.slice(recoveryRpcStart).filter(request => request.path.endsWith('/stageSourceMethod'))).toEqual([])
+        const historicalAria = await captureStableAria(page, 'role=region[name="编剧方法的剧本来源"]', scaffold.workspaceCwd)
+        await compareOrRefreshGolden(join(REPO_ROOT, 'apps/web/tests/snapshots/qingmu-stage-source-recovery/ui.expected.md'),
+          historicalAria, scaffold.mode)
+        const historicalPath = process.env.QINGMU_E5_5_STAGE_SOURCE_HISTORICAL_SCREENSHOT?.trim()
+        if (historicalPath) {
+          await mkdir(dirname(historicalPath), { recursive: true })
+          await panel.getByRole('heading', { name: '编剧方法的剧本来源', exact: true }).scrollIntoViewIfNeeded()
+          await page.screenshot({ path: historicalPath })
+        }
+        sources.setMode('available')
+        const currentRead = nextWire('/qingmu-yimeng/stageSources')
+        await panel.getByRole('button', { name: '重读剧本来源', exact: true }).click()
+        const currentFeed = await readWire(currentRead)
+        expect(currentFeed).toMatchObject({ ok: true, value: { source, latestBinding: original, currentBinding: original } })
+        await panel.getByText('当前已保存版本的来源已登记；未据此审核剧本。', { exact: true }).waitFor()
+        await panel.getByText('已登记方法与本次读取的规则一致。', { exact: true }).waitFor()
+        expect(await panel.getByRole('checkbox').count()).toBe(0)
+        const desktopPath = process.env.QINGMU_E5_5_STAGE_SOURCE_SCREENSHOT?.trim()
+        if (desktopPath) {
+          await mkdir(dirname(desktopPath), { recursive: true })
+          await panel.getByRole('heading', { name: '编剧方法的剧本来源', exact: true }).scrollIntoViewIfNeeded()
+          await page.screenshot({ path: desktopPath })
+        }
+        await page.setViewportSize({ width: 390, height: 844 })
+        const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
+        const panelOverflow = await panel.evaluate(element => element.scrollWidth > element.clientWidth)
+        expect(mobileOverflow).toBe(false)
+        expect(panelOverflow).toBe(false)
+        const refreshControlHeight = (await panel.getByRole('button', { name: '重读剧本来源', exact: true }).boundingBox())?.height
+        expect(refreshControlHeight).toBeGreaterThanOrEqual(44)
+        const mobilePath = process.env.QINGMU_E5_5_STAGE_SOURCE_MOBILE_SCREENSHOT?.trim()
+        if (mobilePath) {
+          await mkdir(dirname(mobilePath), { recursive: true })
+          await panel.getByText('当前已保存版本的来源已登记；未据此审核剧本。', { exact: true }).scrollIntoViewIfNeeded()
+          await page.screenshot({ path: mobilePath })
+        }
+        sources.setMode('drifted')
+        const driftRead = nextWire('/qingmu-yimeng/stageSources')
+        await panel.getByRole('button', { name: '重读剧本来源', exact: true }).click()
+        expect(await readWire(driftRead)).toMatchObject({ ok: true, value: { currentBinding: null, latestBinding: original,
+          source: { ...source, contentSha256: 'c'.repeat(64) } } })
+        await panel.getByText('旧来源登记保留；不适用于当前已保存剧本。', { exact: true }).waitFor()
+        expect(await panel.getByRole('checkbox').count()).toBe(0)
+        const requests = capturedRequests.slice(requestStart)
+        const posts = requests.filter(request => request.method === 'POST')
+        expect(posts).toHaveLength(1)
+        expect(posts[0]?.path).toBe(bindingPath)
+        const post = posts[0]?.body
+        if (!isRecord(post)) throw new Error('Source binding POST body missing')
+        expect(Object.keys(post).sort()).toEqual(['expectedSubjectSha256', 'expectedBindingRevision', 'expectedBindingSha256',
+          'methodProjection', 'methodProjectionSha256', 'methodAttestation', 'idempotencyKey'].sort())
+        expect(post).toMatchObject({ expectedSubjectSha256: intent.expectedSubjectSha256, expectedBindingRevision: 0,
+          expectedBindingSha256: null, methodProjection: projection, idempotencyKey: intent.idempotencyKey })
+        expect(JSON.stringify(post)).not.toContain(unsavedTitle)
+        const sourceRpc = browserRpcRequests.slice(rpcStart)
+          .filter(request => /stageSources|stageSourceMethod|bindStageSource|recoverStageSourceBinding/.test(request.path))
+        expect(sourceRpc.filter(request => request.path.endsWith('/bindStageSource'))).toHaveLength(1)
+        expect(sourceRpc.filter(request => request.path.endsWith('/recoverStageSourceBinding'))).toHaveLength(1)
+        for (const request of sourceRpc.filter(request => /stageSources|stageSourceMethod/.test(request.path))) {
+          const payload = isRecord(request.body) ? request.body.payload : undefined
+          if (!isRecord(payload)) throw new Error('Source read coordinates missing')
+          expect(Object.keys(payload).sort()).toEqual(request.path.endsWith('/stageSources')
+            ? ['episodeId', 'projectId'] : ['episodeId', 'projectId', 'stageId'])
+        }
+        expect(JSON.stringify(sourceRpc)).not.toContain(YIMENG_TOKEN)
+        expect(JSON.stringify(sourceRpc)).not.toContain(IMAGO_ATTESTATION_KEY)
+        expect(requests.filter(request => /provider|worker|generate|approval|select/i.test(request.path))).toEqual([])
+        expect(sources.getContractErrors()).toEqual([])
+        expect(browserConsoleErrors.slice(consoleStart)).toEqual([])
+        expect(tripwire.pageErrors).toEqual([])
+        expect(await markers()).toEqual([])
+        await expectNoVisibleTechnicalBrand(page)
+        stageSourceBrowserEvidence = { schema: 'qingmu.e5-5-stage-source-browser-evidence.v1', source, method, recovered, currentFeed,
+          sourceRpc, bindingPostCount: posts.length, recoveryReceiptGetCount: receipts.length,
+          recoveryWindowGetCount: recoveryRequests.length,
+          savedScriptOnly: true, unsavedDraftIgnored: true, recoveryGetOnly: true, sourceLossRecoveryVerified: true,
+          contentOnlyDriftInvalidatesCurrent: true, finalMarkerCount: (await markers()).length, automaticPostRetryCount: 0,
+          ruleBindingCount: STAGE_SOURCE_BROWSER_RULE_PATHS.length, ruleRawShaVerified: true,
+          mobileOverflow, panelOverflow, bindControlHeight, refreshControlHeight, providerCalls: 0,
+          stageArtifactCreated: false, stageApprovalGranted: false, lockActivated: false, planSealed: false,
+          humanSignoffInferred: false, reworkExecuted: false,
+          consoleErrors: browserConsoleErrors.slice(consoleStart), pageErrors: tripwire.pageErrors }
+      } finally {
+        sources.setMode('unavailable')
+        await page.setViewportSize({ width: 1680, height: 1100 })
+        if (tracePath) {
+          await mkdir(dirname(tracePath), { recursive: true })
+          await page.context().tracing.stop({ path: tracePath })
+        }
+      }
+    }, 120_000)
   },
 )

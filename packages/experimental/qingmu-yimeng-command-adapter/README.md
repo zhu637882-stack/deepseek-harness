@@ -36,6 +36,16 @@ The receipt must match those coordinates, the next binding revision, method and 
 
 `recoverProductionUnitBinding` sends one `GET` to the same binding path plus `/command-receipt`, with the original group ID and source SHA in the query and the original `Idempotency-Key` header. It accepts only a matching `found: true` receipt or `found: false` with `result: null`. Recovery does not require today's source, HMAC key, or historical bearer-token session. Interrupted writes are never retried automatically; receipt corruption and lineage mismatches fail closed.
 
+## Episode-script source-reference bindings
+
+`bindStageSource` accepts the project and episode IDs, explicit `stageId: A1S`, current source SHA, previous binding revision/SHA, idempotency key, and the original Host-signed method projection, projection SHA, and attestation. The Host verifies the canonical source, method, rules, definition, and HMAC before sending one `POST` to `/api/qingmu/projects/{projectId}/episodes/{episodeId}/stage-sources/A1S/binding`. Its seven-field body omits the path IDs; actor and session come only from Yimeng authentication. The owner-only backend transaction checks both source and binding CAS and records a source reference without rewriting the script.
+
+Both source-binding endpoints require an unchanged idempotency key of 8..200 visible ASCII characters (`U+0021..U+007E`) so the same key can travel in JSON and the recovery header. They never trim, encode, or rewrite that key; project and episode IDs retain their Unicode contract.
+
+The exact `jason.qingmu-stage-source-result.v1` receipt must bind the requested source, next binding revision, method and rule hashes, definition, and request-session SHA. The Host recomputes the binding SHA and rejects any claim of artifact creation, stage approval, lock activation, plan sealing, human signoff, rework, or Provider calls. An episode-script reference does not satisfy the complete A1S output or make workset authority available.
+
+`recoverStageSourceBinding` sends one `GET` to that binding path plus `/command-receipt`, with the original `expectedSubjectSha256` query and `Idempotency-Key` header. It validates the original `jason.qingmu-stage-source-recovery.v1` wrapper and nested `receipt`; a missing or wrong-scope receipt remains an upstream 404, not a successful `found` wrapper. Recovery needs neither the current source nor today's HMAC key or original bearer-token session. Interrupted writes are never automatically retried. A changed session or attestation is not the same original POST intent; use receipt recovery instead.
+
 ## Security boundary
 
 The upstream must be loopback HTTP(S). The adapter never returns the Host token, sends no cookies, rejects redirects, bounds payload size and request time, and normalizes upstream errors without reflecting response bodies. The browser receives only validated command data and durable receipt identifiers.
@@ -59,7 +69,7 @@ Independent. Command requests do not modify a model request or reusable prefix.
 ## Known Limitations and Deferred Work
 
 - This local adapter is not an Internet-facing gateway.
-- It implements the `episode_script` plus actor, scene, and prop `element_profile` ChangeSet vertical slices, including explicit reference selection and regeneration-request intents, records selected-video Findings, and registers production-unit scope bindings. Actual generation and automatic creative approval remain outside these operations; scope registration alone does not complete the production workflow.
+- It implements the `episode_script` plus actor, scene, and prop `element_profile` ChangeSet vertical slices, including explicit reference selection and regeneration-request intents, records selected-video Findings, and registers production-unit scope and episode-script source-reference bindings. Actual generation and automatic creative approval remain outside these operations; registration alone does not complete the production workflow.
 - It does not start an outbox dispatcher or transport events across processes.
-- Conflict recovery requires a fresh authoritative read and a new explicit proposal.
+- ChangeSet proposal conflicts require a fresh authoritative read and a new explicit proposal.
 - Receipt recovery depends on Yimeng retaining the original command receipt; mismatches fail closed. A missing Finding receipt returns `not_found` without resubmitting the write.

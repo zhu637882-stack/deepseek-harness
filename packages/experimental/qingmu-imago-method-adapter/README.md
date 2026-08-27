@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 This private experimental Host plugin compiles current IMAGO OS methods into browser-safe guidance. `elementMethod` covers profile editing, `referenceAssetMethod` covers bounded reference actions and rights guidance, `promptIrMethod` covers provider-neutral PromptIR candidates, `shotRelationMethod` covers the canonical Scene/Shot/Shot-local-Beat/Element graph plus Shot River rhythm and reference bindings, and `heroFrameStoryboardMethod` deterministically compiles one selected Hero Frame and its Shot-local canvas annotations. `worksetMethod` reads a fresh episode workflow and returns current IMAGO stage definitions with explicit authority availability. These input-snapshot methods build their own bounded input in the Host and invoke their reviewed Core compiler with Unicode-code-point-sorted, whitespace-free JSON on stdin. Their compiler's `input_snapshot_sha256` must match the SHA-256 of those exact input bytes.
 
-`shotFindingMethod` and `productionUnitMethod` use their subject hash contracts described below; the older methods' `input_snapshot_sha256` field is not part of these schemas.
+`shotFindingMethod`, `productionUnitMethod`, and `stageSourceMethod` use their subject hash contracts described below; the older methods' `input_snapshot_sha256` field is not part of these schemas.
 
 ## Attestation boundary
 
@@ -51,6 +51,14 @@ The projection binds the canonical current subject SHA, all eight required field
 The fixed `scripts/compile_qingmu_production_unit_method.py` receives only `schema`, `subject`, and `snapshotSha256`, bounded to 1 MiB. The Host preserves original IDs and titles, validates safe integers and ordered unique member Shots, and rechecks the source SHA. It independently verifies the active pointer and registry, stage contract hashes, and the current six per-unit methods against the workflow loop. Its nine fixed raw rule hashes cover the seven workset sources plus `scripts/compile_qingmu_element_method.py` and this compiler; all must remain unchanged across compilation.
 
 The response is `qingmu.imago-production-unit-method-adapter-result.v1` with `projection`, `projectionSha256`, and `methodAttestation`, signed with the existing Host-only key. It allocates no unit ID, records no binding, seals no plan, approves no stage, and calls no Provider. Missing or changed source/rules, invalid compiler output, an unplugged reader, or an unavailable key fail closed. Cancellation waits for the killed child to close. Tests may inject `readProductionUnits` and `runProductionUnitCompiler` through `createImagoMethodHandler`; no new configuration or model-visible surface is added.
+
+## Episode-script source-reference method
+
+`stageSourceMethod` accepts exactly `projectId`, `episodeId`, and `stageId: A1S`. It reads the current `stageSources` descriptor through the optional configured read capability before and after compilation. The browser cannot supply a source, snapshot, rules, or script text. Historical bindings cannot replace an unavailable current source; owner capability does not itself establish or invalidate source evidence.
+
+The fixed `scripts/compile_qingmu_stage_source_method.py` receives `schema`, `stageId`, the seven-field `subject`, and `snapshotSha256`. The Host independently checks the current A1S contract, including its global scope, complete screenplay-package requirements, upstream and lock dependencies, and canonical output. Its nine raw rule hashes cover the seven workset sources plus `scripts/compile_qingmu_element_method.py` and this compiler. Source and rule drift across compilation fail closed.
+
+The response is `qingmu.imago-stage-source-method-adapter-result.v1` with `projection`, `projectionSha256`, and `methodAttestation`. The existing Host-only key signs the validated source-reference coordinates; it does not turn one episode script into `SCREENPLAY_PACKAGE` or grant stage completion, approval, locks, plan sealing, or Provider execution. The backend remains the authority for source and binding CAS. Tests may inject `readStageSources` and `runStageSourceCompiler` through `createImagoMethodHandler`; the normal path uses the bounded subprocess runner and waits for child closure on cancellation.
 
 ## Model Experience
 

@@ -5,6 +5,7 @@ import type {
   YimengRecoverScriptCommitResponse,
 } from './contracts.ts'
 import type { QingmuCockpitKey } from './locales.ts'
+import { StageSourceView } from './StageSourceView.tsx'
 import {
   INITIAL_SCRIPT_WORKSPACE_STATE,
   canCommitScript,
@@ -338,6 +339,9 @@ export function ScriptWorkspace({ projectId, episodeId, port, t, onCommitted }: 
         <div><dt>{t('scriptUpdated')}</dt><dd>{state.snapshot?.updatedAt || t('unknown')}</dd></div>
         <div><dt>{t('scriptState')}</dt><dd>{t(`scriptPhase_${state.phase}`)}</dd></div>
       </dl>
+
+      <StageSourceView projectId={projectId} episodeId={episodeId} savedScript={state.snapshot}
+        scriptBusy={busy || recovery.status !== 'none'} port={port} t={t} />
 
       {recovery.status === 'ready' && (
         <section className={css.recoveryDock} aria-label={t('receiptRecoveryTitle')}>

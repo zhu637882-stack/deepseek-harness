@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `shotFindings`, `productionUnits`, and `workflow`; it exposes no mutation endpoint.
+This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `shotFindings`, `productionUnits`, `stageSources`, and `workflow`; it exposes no mutation endpoint.
 
 ## Contract
 
@@ -44,9 +44,15 @@ The feed separates `currentBinding` from history; missing current media does not
 
 Historical bindings remain readable when the current group is unavailable or absent. `currentBinding` must match the current source and its SHA exactly; `canBindUnit` represents only Yimeng's existing owner permission. Historical method definitions and their stored SHA fields are retained, not re-attested against the current Core rules. The feed fixes `planSealed: false`, `providerCalls: 0`, `humanSignoffInferred: false`, and `reworkExecuted: false`. This endpoint does not bind a unit, seal a plan, approve a Stage, select media, or execute rework. The root and `/types` export `YimengProductionUnitsRequest`, `YimengProductionUnitsResponse`, `YimengProductionUnitSource`, `YimengProductionUnitDefinition`, and `YimengProductionUnitBinding`.
 
+## Episode-script source references
+
+`stageSources` accepts exactly `projectId` and `episodeId` and sends one authenticated, body-free GET to `/api/qingmu/projects/{projectId}/episodes/{episodeId}/stage-sources`. It validates `jason.qingmu-stage-source-feed.v1`, the fixed `A1S` coordinate, the seven-field `episode_script` source descriptor, canonical subject and binding hashes, binding revision, original receipt IDs, and the non-approval flags. Yimeng computes `contentSha256` from the complete stored script JSON, including metadata; this endpoint carries no script text and does not reproduce that content hash in the Host.
+
+`latestBinding` retains the original source-reference receipt even when the script is missing or changed. `currentBinding` may only be that latest receipt with an exact match to the current source and subject SHA; an older matching record cannot replace it. `canBind` reports existing owner permission independently of source availability. A source reference is not a `SCREENPLAY_PACKAGE`, a completed stage, an approved artifact, a lock, or workset authority. The root and `/types` export `YimengStageSourcesRequest`, `YimengStageSourcesResponse`, `YimengStageSource`, `YimengStageSourceDefinition`, `YimengStageSourceBinding`, and `YimengStageSourceResult`.
+
 ## Security boundary
 
-The same configured handler is also provided as the Host-only `qingmuYimengRead` capability. Internal consumers can reuse the existing `workflow` and `productionUnits` GETs without creating another HTTP client, token configuration, or cache. Cordis removes the capability when its owning plugin unloads. This does not reinterpret business-stage completion, selected media, or unknown forwarded fields as named IMAGO Stage/LSU approval.
+The same configured handler is also provided as the Host-only `qingmuYimengRead` capability. Internal consumers can reuse the existing `workflow`, `productionUnits`, and `stageSources` GETs without creating another HTTP client, token configuration, or cache. Cordis removes the capability when its owning plugin unloads. This does not reinterpret business-stage completion, selected media, or unknown forwarded fields as named IMAGO Stage/LSU approval.
 
 The default upstream is `http://127.0.0.1:8115`. A configured base URL must remain an HTTP or HTTPS loopback address. Protected reads take `YIMENG_API_TOKEN` from the Host environment and send it only as an `Authorization: Bearer` header; the adapter does not read `localStorage` or `JWT_SECRET`, send cookies, or return the token. Requests use `cache: no-store`, a timeout, caller cancellation, and fail-closed redirect handling. Ordinary JSON responses remain capped at 5 MiB. Only the script response is capped separately at 20 MiB so a legal command body near 5 MiB can still return the parsed script plus its escaped canonical evidence without making the read unbounded.
 

@@ -11,6 +11,7 @@ import { normalizeContinuityDelta } from './continuity.ts'
 import { normalizeSelectedVideoReview } from './selected-video-review.ts'
 import { normalizeShotFindingFeed, parseShotFindingReadRequest } from './shot-findings.ts'
 import { normalizeProductionUnitsFeed, parseProductionUnitsReadRequest } from './production-units.ts'
+import { normalizeStageSourcesFeed, parseStageSourcesReadRequest } from './stage-sources.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -34,6 +35,7 @@ import type {
   YimengHumanDecisionValue,
   YimengJsonObject,
   YimengProductionUnitsRequest,
+  YimengStageSourcesRequest,
   YimengProjectsRequest,
   YimengProjectsResponse,
   YimengPromptIrEditableProjection,
@@ -146,6 +148,12 @@ export type {
   YimengProductionUnitBinding,
   YimengProductionUnitsRequest,
   YimengProductionUnitsResponse,
+  YimengStageSourcesRequest,
+  YimengStageSourcesResponse,
+  YimengStageSource,
+  YimengStageSourceDefinition,
+  YimengStageSourceBinding,
+  YimengStageSourceResult,
   YimengHeroFrameBinding,
   YimengHeroFrameStoryboardBlocker,
   YimengHeroFrameStoryboardShot,
@@ -193,7 +201,7 @@ const REFERENCE_RIGHTS_EXCEPTION_RELEASE_FEED_SCHEMA = 'jason.qingmu-reference-r
 const SHA256 = /^[0-9a-f]{64}$/
 const PROTECTED_ENDPOINTS = new Set([
   'projects', 'episodes', 'script', 'promptIr', 'elementProfile', 'referenceCandidates', 'reviewEvents',
-  'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'shotFindings', 'productionUnits',
+  'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'shotFindings', 'productionUnits', 'stageSources',
 ])
 const HUMAN_DECISION_VALUES = new Set<YimengHumanDecisionValue>([
   'approve', 'reject', 'request_changes',
@@ -554,6 +562,14 @@ function parseProductionUnitsRequest(payload: unknown): YimengProductionUnitsReq
     return parseProductionUnitsReadRequest(payload)
   } catch {
     throw new InputError('productionUnits accepts only canonical projectId and episodeId')
+  }
+}
+
+function parseStageSourcesRequest(payload: unknown): YimengStageSourcesRequest {
+  try {
+    return parseStageSourcesReadRequest(payload)
+  } catch {
+    throw new InputError('stageSources accepts only canonical projectId and episodeId')
   }
 }
 
@@ -2586,6 +2602,11 @@ export function createYimengReadHandler(
         path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)
           + '/episodes/' + encodeURIComponent(request.episodeId) + '/production-units'
         normalize = value => normalizeProductionUnitsFeed(value, request, canonicalJsonSha256)
+      } else if (endpoint === 'stageSources') {
+        const request = parseStageSourcesRequest(payload)
+        path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)
+          + '/episodes/' + encodeURIComponent(request.episodeId) + '/stage-sources'
+        normalize = value => normalizeStageSourcesFeed(value, request, canonicalJsonSha256)
       } else if (endpoint === 'elementProfile') {
         const request = parseElementProfileRequest(payload)
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/elements/${encodeURIComponent(request.elementKind)}/${encodeURIComponent(request.targetId)}`

@@ -966,6 +966,85 @@ export interface YimengProductionUnitsResponse extends YimengProductionUnitsRequ
   readonly reworkExecuted: false
 }
 
+/** Exact episode coordinates for reading source-reference evidence. */
+export interface YimengStageSourcesRequest {
+  readonly projectId: string
+  readonly episodeId: string
+}
+
+/** Full business-script digest; this descriptor is not a completed method artifact. */
+export interface YimengStageSource extends YimengStageSourcesRequest {
+  readonly schema: 'jason.qingmu-stage-source.v1'
+  readonly sourceType: 'episode_script'
+  readonly sourceId: string
+  readonly revision: number
+  readonly contentSha256: string
+}
+
+/** Sealed source-reference method, without artifact creation or approval authority. */
+export interface YimengStageSourceDefinition {
+  readonly id: 'IMAGO-V6-A1S-SOURCE'
+  readonly version: string
+  readonly stageId: 'A1S'
+  readonly roleId: 'A1S'
+  readonly scope: 'global'
+  readonly contractSha256: string
+  readonly artifactKind: 'SCREENPLAY_PACKAGE'
+  readonly canonicalOutput: 'inputs/screenplay-package.json'
+  readonly sourceType: 'episode_script'
+  readonly sourceUsage: 'source_reference_only'
+  readonly operation: 'bind_existing_episode_script_source'
+  readonly stageArtifactCreationAllowed: false
+  readonly stageApprovalAllowed: false
+  readonly providerCalls: 0
+}
+
+/** Immutable ledger record; source and binding revisions are separate CAS coordinates. */
+export interface YimengStageSourceBinding extends YimengStageSourcesRequest {
+  readonly schema: 'jason.qingmu-stage-source-binding.v1'
+  readonly changeSetId: string
+  readonly stageId: 'A1S'
+  readonly source: YimengStageSource
+  readonly subjectSnapshotSha256: string
+  readonly definition: YimengStageSourceDefinition
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+  readonly bindingRevision: number
+  readonly actorId: string
+  readonly authSessionId: string
+  readonly createdAt: string
+  readonly stageArtifactCreated: false
+  readonly stageApprovalGranted: false
+  readonly lockActivated: false
+  readonly planSealed: false
+  readonly providerCalls: 0
+  readonly humanSignoffInferred: false
+  readonly reworkExecuted: false
+}
+
+/** Original three-ledger receipt, returned without inferred completion fields. */
+export interface YimengStageSourceResult {
+  readonly schema: 'jason.qingmu-stage-source-result.v1'
+  readonly binding: YimengStageSourceBinding
+  readonly bindingSha256: string
+  readonly receiptId: string
+  readonly outboxEventId: string
+}
+
+/** Current full-script source and latest historical reference, independently distinguished. */
+export interface YimengStageSourcesResponse extends YimengStageSourcesRequest {
+  readonly schema: 'jason.qingmu-stage-source-feed.v1'
+  readonly stageId: 'A1S'
+  readonly canBind: boolean
+  readonly source: YimengStageSource | null
+  readonly subjectSnapshotSha256: string | null
+  readonly unavailableReason: string | null
+  readonly bindingRevision: number
+  readonly bindingSha256: string | null
+  readonly latestBinding: YimengStageSourceResult | null
+  readonly currentBinding: YimengStageSourceResult | null
+}
+
 /** Result values exposed by each `/qingmu-yimeng` endpoint. */
 export interface YimengReadEndpointMap {
   readonly health: YimengHealth
@@ -976,6 +1055,7 @@ export interface YimengReadEndpointMap {
   readonly selectedVideoReview: YimengSelectedVideoReviewResponse
   readonly shotFindings: YimengShotFindingFeedResponse
   readonly productionUnits: YimengProductionUnitsResponse
+  readonly stageSources: YimengStageSourcesResponse
   readonly elementProfile: YimengElementProfileResponse
   readonly referenceCandidates: YimengReferenceCandidatesResponse
   readonly reviewEvents: YimengElementReviewFeedResponse

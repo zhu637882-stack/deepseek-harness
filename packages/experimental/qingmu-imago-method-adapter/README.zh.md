@@ -4,7 +4,7 @@
 
 这个私有实验性 Host 插件把当前 IMAGO OS 方法编译为浏览器安全指引。`elementMethod` 用于资料编辑，`referenceAssetMethod` 用于受限的参考资产动作与权利指引，`promptIrMethod` 用于供应商无关的 PromptIR 候选，`shotRelationMethod` 用于 canonical Scene/Shot/Shot 内局部 Beat/Element 关系图以及 Shot River 节奏与参考绑定，`heroFrameStoryboardMethod` 用于确定性编译一个已选 Hero Frame 及其 Shot 内画布标注。`worksetMethod` 重新读取分集工作流，返回当前 IMAGO 阶段定义与明确的权威可用性。上述输入快照方法在 Host 内构造各自的有界输入，并把按 Unicode code point 排序、无空格的 JSON 通过 stdin 交给已审核的 Core 编译器。对应编译器返回的 `input_snapshot_sha256` 必须匹配这组准确输入字节的 SHA-256。
 
-`shotFindingMethod` 与 `productionUnitMethod` 使用下文各自的主体哈希约定；旧方法的 `input_snapshot_sha256` 字段不属于这些 schema。
+`shotFindingMethod`、`productionUnitMethod` 与 `stageSourceMethod` 使用下文各自的主体哈希约定；旧方法的 `input_snapshot_sha256` 字段不属于这些 schema。
 
 ## 证明边界
 
@@ -51,6 +51,14 @@ Host 对完整归一化工作流与完整 `sourceRevision` 计算哈希，保留
 固定的 `scripts/compile_qingmu_production_unit_method.py` 只接收 `schema`、`subject` 和 `snapshotSha256`，上限为 1 MiB。Host 保留 ID 和标题原文，校验安全整数、顺序正确且不重复的成员 Shot，并重算来源 SHA。它独立检查活跃指针、注册表、阶段约定哈希，以及当前六个逐单元方法与工作流循环的一致性。固定九份原始规则哈希覆盖七份工作集来源，再加 `scripts/compile_qingmu_element_method.py` 与此编译器；编译前后全部必须保持不变。
 
 响应为 `qingmu.imago-production-unit-method-adapter-result.v1`，包含 `projection`、`projectionSha256` 和 `methodAttestation`，使用现有 Host 专属密钥签名。它不分配单元 ID、不登记绑定、不封存计划、不批准阶段，也不调用 Provider。来源或规则缺失及变化、编译输出无效、读取插件卸载或密钥不可用时失败关闭。取消会等待被终止的子进程关闭。测试可通过 `createImagoMethodHandler` 注入 `readProductionUnits` 与 `runProductionUnitCompiler`；没有新增配置或模型可见内容。
+
+## 单集剧本来源引用方法
+
+`stageSourceMethod` 只接受 `projectId`、`episodeId` 和 `stageId: A1S`。它在编译前后通过已配置的可选读取能力读取当前 `stageSources` 描述。浏览器不能提供来源、快照、规则或剧本正文。历史绑定不能替代不可用的当前来源；所有者权限本身既不建立也不否定来源证据。
+
+固定的 `scripts/compile_qingmu_stage_source_method.py` 接收 `schema`、`stageId`、七字段 `subject` 和 `snapshotSha256`。Host 独立检查当前 A1S 约定，包括全局范围、完整编剧包要求、上游与锁依赖，以及规范输出。九份原始规则哈希覆盖七份工作集来源，再加 `scripts/compile_qingmu_element_method.py` 与此编译器。编译前后来源或规则变化时失败关闭。
+
+响应为 `qingmu.imago-stage-source-method-adapter-result.v1`，包含 `projection`、`projectionSha256` 和 `methodAttestation`。现有 Host 专属密钥只签署已核验的来源引用坐标；不会把单集剧本变成 `SCREENPLAY_PACKAGE`，也不授予阶段完成、批准、锁、计划封存或 Provider 执行权。来源与绑定 CAS 的最终权威仍是后端。测试可通过 `createImagoMethodHandler` 注入 `readStageSources` 和 `runStageSourceCompiler`；正常路径使用有界子进程执行器，取消时等待子进程关闭。
 
 ## 模型体验
 

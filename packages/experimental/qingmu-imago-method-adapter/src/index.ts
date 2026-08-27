@@ -11,6 +11,8 @@ import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import type {
+  ImagoStageSourceMethodRequest,
+  ImagoStageSourceMethodSnapshot,
   ImagoProductionUnitMethodRequest,
   ImagoProductionUnitMethodSnapshot,
   ImagoShotFindingMethodRequest,
@@ -90,8 +92,18 @@ import {
   attestProductionUnitMethod, buildProductionUnitSnapshot, parseProductionUnitMethodRequest, readProductionUnitRules,
   ProductionUnitContractError, ProductionUnitInputError,
 } from './production-unit.ts'
+import {
+  attestStageSourceMethod, buildStageSourceSnapshot, parseStageSourceMethodRequest, readStageSourceRules,
+  StageSourceContractError, StageSourceInputError,
+} from './stage-source.ts'
 
 export type {
+  ImagoStageSourceMethodRequest,
+  ImagoStageSourceMethodSnapshot,
+  ImagoStageSourceMethodDefinition,
+  ImagoStageSourceMethodProjection,
+  ImagoStageSourceMethodAttestation,
+  ImagoStageSourceMethodResponse,
   ImagoProductionUnitMethodRequest,
   ImagoProductionUnitMethodSnapshot,
   ImagoProductionUnitMethodDefinition,
@@ -197,6 +209,7 @@ const HERO_FRAME_STORYBOARD_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_her
 const WORKSET_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_imago_workset_v2.py'
 const CONTINUITY_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_continuity_method.py'
 const PRODUCTION_UNIT_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_production_unit_method.py'
+const STAGE_SOURCE_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_stage_source_method.py'
 const COMMON_SOURCE_PATHS = [
   'pipeline/imago-os-current.json',
   'pipeline/workflow-channel-registry.json',
@@ -462,6 +475,14 @@ export interface ImagoMethodCompilerExecution {
 
 /** Injectable local process boundary used by isolated tests. */
 export interface ImagoMethodAdapterDependencies {
+  /** Fresh full-script descriptor; the normal script GET is not a canonical source snapshot. */
+  readonly readStageSources?: (
+    request: Pick<ImagoStageSourceMethodRequest, 'projectId' | 'episodeId'>, signal: AbortSignal,
+  ) => Promise<RpcResult<unknown>>
+  /** Optional boundary for the stateless, source-reference-only compiler. */
+  readonly runStageSourceCompiler?: (
+    snapshot: ImagoStageSourceMethodSnapshot, execution: ImagoMethodCompilerExecution, signal: AbortSignal,
+  ) => Promise<unknown>
   /** Fresh native group sources; no current group is inferred from list position. */
   readonly readProductionUnits?: (
     request: Pick<ImagoProductionUnitMethodRequest, 'projectId' | 'episodeId'>, signal: AbortSignal,
@@ -3302,6 +3323,7 @@ async function runCompilerSubprocess(
   const waitForCloseOnCancel = compilerRelativePath === WORKSET_COMPILER_RELATIVE_PATH
     || compilerRelativePath === CONTINUITY_COMPILER_RELATIVE_PATH
     || compilerRelativePath === PRODUCTION_UNIT_COMPILER_RELATIVE_PATH
+    || compilerRelativePath === STAGE_SOURCE_COMPILER_RELATIVE_PATH
   return await new Promise((resolve, reject) => {
     const child = spawn(
       execution.pythonExecutable,
@@ -3425,6 +3447,7 @@ export function createImagoMethodHandler(
         && endpoint !== 'continuityMethod'
         && endpoint !== 'shotFindingMethod'
         && endpoint !== 'productionUnitMethod'
+        && endpoint !== 'stageSourceMethod'
       ) {
         throw new InputError(`unknown IMAGO method endpoint: ${endpoint}`)
       }
@@ -3468,6 +3491,37 @@ export function createImagoMethodHandler(
         return { ok: true, value }
       }
       const attestationKey = readAttestationKey()
+      if (endpoint === 'stageSourceMethod') {
+        const request = parseStageSourceMethodRequest(payload)
+        if (signal.aborted) return cancelled()
+        if (dependencies.readStageSources === undefined) return internalError('Yimeng read capability is unavailable')
+        const coordinates = { projectId: request.projectId, episodeId: request.episodeId }
+        const feed = await dependencies.readStageSources(coordinates, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- cancellation can arrive during a source read.
+        if (signal.aborted) return cancelled()
+        if (!feed.ok) return feed
+        const snapshot = buildStageSourceSnapshot(request, feed.value, canonicalJson)
+        const beforeRules = await readStageSourceRules(execution.coreRoot, canonicalJson)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- fixed rule reads are asynchronous.
+        if (signal.aborted) return cancelled()
+        const raw = dependencies.runStageSourceCompiler === undefined
+          ? await runCompilerSubprocess(snapshot, execution, signal, STAGE_SOURCE_COMPILER_RELATIVE_PATH)
+          : await dependencies.runStageSourceCompiler(snapshot, execution, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- the compiler may finish after cancellation.
+        if (signal.aborted) return cancelled()
+        const currentFeed = await dependencies.readStageSources(coordinates, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- the second read can be cancelled.
+        if (signal.aborted) return cancelled()
+        if (!currentFeed.ok) return currentFeed
+        if (!isDeepStrictEqual(snapshot, buildStageSourceSnapshot(request, currentFeed.value, canonicalJson))) {
+          throw new StageSourceContractError('current script source changed during compilation')
+        }
+        const currentRules = await readStageSourceRules(execution.coreRoot, canonicalJson)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- final rule reads are asynchronous.
+        if (signal.aborted) return cancelled()
+        if (!isDeepStrictEqual(beforeRules, currentRules)) throw new StageSourceContractError('current rules changed during compilation')
+        return { ok: true, value: attestStageSourceMethod(raw, snapshot, currentRules, canonicalJson, attestationKey) }
+      }
       if (endpoint === 'productionUnitMethod') {
         const request = parseProductionUnitMethodRequest(payload)
         if (signal.aborted) return cancelled()
@@ -3627,14 +3681,15 @@ export function createImagoMethodHandler(
       return { ok: true, value }
     } catch (error) {
       if (error instanceof InputError || error instanceof WorksetInputError
-        || error instanceof ContinuityInputError || error instanceof ShotFindingInputError || error instanceof ProductionUnitInputError) {
+        || error instanceof ContinuityInputError || error instanceof ShotFindingInputError || error instanceof ProductionUnitInputError
+        || error instanceof StageSourceInputError) {
         return badRequest(error.message)
       }
       if (error instanceof AttestationKeyError) return internalError('IMAGO method attestation is unavailable')
       if (signal.aborted || error instanceof CompilerCancelledError) return cancelled()
       if (error instanceof ProjectionContractError || error instanceof WorksetContractError
         || error instanceof ContinuityContractError || error instanceof ShotFindingContractError
-        || error instanceof ProductionUnitContractError) {
+        || error instanceof ProductionUnitContractError || error instanceof StageSourceContractError) {
         return internalError(`IMAGO method projection contract failed: ${error.message}`)
       }
       return internalError('IMAGO method compiler failed')
@@ -3646,6 +3701,10 @@ export function createImagoMethodHandler(
 export function apply(ctx: Context, config: ImagoMethodAdapterConfig): void {
   const handler = createImagoMethodHandler(config, {
     ...DEFAULT_DEPENDENCIES,
+    readStageSources: async (request, signal) => {
+      const read = ctx.get('qingmuYimengRead')
+      return read === undefined ? internalError('Yimeng read capability is unavailable') : await read('stageSources', request, signal)
+    },
     readProductionUnits: async (request, signal) => {
       const read = ctx.get('qingmuYimengRead')
       return read === undefined ? internalError('Yimeng read capability is unavailable') : await read('productionUnits', request, signal)

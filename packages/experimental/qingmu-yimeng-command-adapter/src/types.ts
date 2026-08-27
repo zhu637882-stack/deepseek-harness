@@ -1337,6 +1337,112 @@ export interface YimengProductionUnitRecovery extends YimengRecoverProductionUni
   readonly result: YimengProductionUnitResult | null
 }
 
+/** Exact full-script source descriptor; it is not a completed screenplay package. */
+export interface YimengStageSource {
+  readonly schema: 'jason.qingmu-stage-source.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly sourceType: 'episode_script'
+  readonly sourceId: string
+  readonly revision: number
+  readonly contentSha256: string
+}
+
+/** A1S source-reference method sealed in the historical binding. */
+export interface YimengStageSourceDefinition {
+  readonly id: 'IMAGO-V6-A1S-SOURCE'
+  readonly version: string
+  readonly stageId: 'A1S'
+  readonly roleId: 'A1S'
+  readonly scope: 'global'
+  readonly contractSha256: string
+  readonly artifactKind: 'SCREENPLAY_PACKAGE'
+  readonly canonicalOutput: 'inputs/screenplay-package.json'
+  readonly sourceType: 'episode_script'
+  readonly sourceUsage: 'source_reference_only'
+  readonly operation: 'bind_existing_episode_script_source'
+  readonly stageArtifactCreationAllowed: false
+  readonly stageApprovalAllowed: false
+  readonly providerCalls: 0
+}
+
+/** Exact Host-signed method returned unchanged by the browser command. */
+export interface YimengImagoStageSourceMethodProjection {
+  readonly schema: 'qingmu.imago-stage-source-method.v1'
+  readonly subject: YimengStageSource
+  readonly subjectSnapshotSha256: string
+  readonly definition: YimengStageSourceDefinition
+  readonly ruleBindings: Readonly<Record<string, string>>
+  readonly rulesSha256: string
+}
+
+/** Method signature binds source and method digests, never approval. */
+export interface YimengImagoStageSourceMethodAttestation {
+  readonly schema: 'qingmu.imago-stage-source-method-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly subjectSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly signature: string
+}
+
+/** Original coordinates for GET-only receipt recovery, independent of current source or key. */
+export interface YimengRecoverStageSourceBindingRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly stageId: 'A1S'
+  readonly expectedSubjectSha256: string
+  readonly idempotencyKey: string
+}
+
+/** Explicit source registration with separate source and binding CAS. */
+export interface YimengBindStageSourceRequest extends YimengRecoverStageSourceBindingRequest {
+  readonly expectedBindingRevision: number
+  readonly expectedBindingSha256: string | null
+  readonly methodProjection: YimengImagoStageSourceMethodProjection
+  readonly methodProjectionSha256: string
+  readonly methodAttestation: YimengImagoStageSourceMethodAttestation
+}
+
+/** Immutable source-reference record; all approval and execution flags remain false. */
+export interface YimengStageSourceBinding {
+  readonly schema: 'jason.qingmu-stage-source-binding.v1'
+  readonly changeSetId: string
+  readonly projectId: string
+  readonly episodeId: string
+  readonly stageId: 'A1S'
+  readonly source: YimengStageSource
+  readonly subjectSnapshotSha256: string
+  readonly definition: YimengStageSourceDefinition
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+  readonly bindingRevision: number
+  readonly actorId: string
+  readonly authSessionId: string
+  readonly createdAt: string
+  readonly stageArtifactCreated: false
+  readonly stageApprovalGranted: false
+  readonly lockActivated: false
+  readonly planSealed: false
+  readonly providerCalls: 0
+  readonly humanSignoffInferred: false
+  readonly reworkExecuted: false
+}
+
+/** Exact original receipt; creation versus replay is expressed by HTTP status upstream. */
+export interface YimengStageSourceResult {
+  readonly schema: 'jason.qingmu-stage-source-result.v1'
+  readonly binding: YimengStageSourceBinding
+  readonly bindingSha256: string
+  readonly receiptId: string
+  readonly outboxEventId: string
+}
+
+/** Successful original GET receipt; unknown coordinates remain an upstream 404. */
+export interface YimengStageSourceRecovery {
+  readonly schema: 'jason.qingmu-stage-source-recovery.v1'
+  readonly receipt: YimengStageSourceResult
+}
+
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
   readonly proposeScript: YimengProposeScriptResponse
@@ -1360,6 +1466,8 @@ export interface YimengCommandEndpointMap {
   readonly recoverShotFinding: YimengShotFindingRecovery
   readonly bindProductionUnit: YimengProductionUnitResult
   readonly recoverProductionUnitBinding: YimengProductionUnitRecovery
+  readonly bindStageSource: YimengStageSourceResult
+  readonly recoverStageSourceBinding: YimengStageSourceRecovery
   readonly proposePromptIr: YimengProposePromptIrResponse
   readonly previewPromptIr: YimengPreviewPromptIrResponse
   readonly commitPromptIrEdit: YimengCommitPromptIrEditResponse

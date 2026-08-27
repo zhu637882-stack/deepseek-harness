@@ -614,6 +614,14 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     elementMethod: vi.fn(async (request: Parameters<QingmuYimengPort['elementMethod']>[0]) => actorMethod(request)),
     referenceAssetMethod: vi.fn(async () => { throw new Error('reference method is not part of this fixture') }),
     script: vi.fn(async () => SCRIPT),
+    stageSources: vi.fn(async (request: Parameters<QingmuYimengPort['stageSources']>[0]) => ({
+      schema: 'jason.qingmu-stage-source-feed.v1', ...request, stageId: 'A1S', canBind: false,
+      source: null, subjectSnapshotSha256: null, unavailableReason: 'episode_script_missing',
+      bindingRevision: 0, bindingSha256: null, latestBinding: null, currentBinding: null,
+    } as const)),
+    stageSourceMethod: vi.fn(async () => { throw new Error('Stage-source method is not part of this fixture') }),
+    bindStageSource: vi.fn(async () => { throw new Error('Stage-source binding is not part of this fixture') }),
+    recoverStageSourceBinding: vi.fn(async () => { throw new Error('Stage-source recovery is not part of this fixture') }),
     promptIr: vi.fn(async () => { throw new Error('PromptIR read is not part of this fixture') }),
     promptIrMethod: vi.fn(async () => { throw new Error('PromptIR method is not part of this fixture') }),
     shotRelationMethod: vi.fn(async (request: Parameters<QingmuYimengPort['shotRelationMethod']>[0]) => (

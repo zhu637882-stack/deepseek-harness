@@ -1,5 +1,8 @@
 /** Stable Client-side view of the private Yimeng read-adapter RPC contract. */
 import type {
+  ImagoStageSourceMethodRequest,
+  ImagoStageSourceMethodResponse,
+  ImagoStageSourceMethodProjection,
   ImagoProductionUnitMethodRequest,
   ImagoProductionUnitMethodResponse,
   ImagoProductionUnitMethodProjection,
@@ -25,6 +28,12 @@ import type {
   ImagoWorksetProjection,
 } from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter/types'
 import type {
+  YimengStageSource,
+  YimengStageSourceDefinition,
+  YimengStageSourceBinding,
+  YimengStageSourceResult,
+  YimengStageSourcesRequest,
+  YimengStageSourcesResponse,
   YimengProductionUnitSource,
   YimengProductionUnitDefinition,
   YimengProductionUnitBinding,
@@ -81,6 +90,9 @@ import type {
   YimengWorkflowRequest,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type {
+  YimengBindStageSourceRequest,
+  YimengRecoverStageSourceBindingRequest,
+  YimengStageSourceRecovery,
   YimengBindProductionUnitRequest,
   YimengRecoverProductionUnitBindingRequest,
   YimengProductionUnitResult,
@@ -142,6 +154,9 @@ import type {
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 
 export type {
+  ImagoStageSourceMethodRequest,
+  ImagoStageSourceMethodResponse,
+  ImagoStageSourceMethodProjection,
   ImagoProductionUnitMethodRequest,
   ImagoProductionUnitMethodResponse,
   ImagoProductionUnitMethodProjection,
@@ -167,6 +182,12 @@ export type {
   ImagoWorksetProjection,
 }
 export type {
+  YimengStageSource,
+  YimengStageSourceDefinition,
+  YimengStageSourceBinding,
+  YimengStageSourceResult,
+  YimengStageSourcesRequest,
+  YimengStageSourcesResponse,
   YimengProductionUnitSource,
   YimengProductionUnitDefinition,
   YimengProductionUnitBinding,
@@ -222,6 +243,9 @@ export type {
   YimengWorkflowRequest,
 }
 export type {
+  YimengBindStageSourceRequest,
+  YimengRecoverStageSourceBindingRequest,
+  YimengStageSourceRecovery,
   YimengBindProductionUnitRequest,
   YimengRecoverProductionUnitBindingRequest,
   YimengProductionUnitResult,
@@ -287,6 +311,7 @@ export type JsonRecord = YimengJsonObject
 
 /** Read-only browser-facing methods exposed by the Qingmu Host adapter. */
 export interface QingmuYimengReadPort {
+  stageSources(request: YimengStageSourcesRequest, signal?: AbortSignal): Promise<YimengStageSourcesResponse>
   productionUnits(request: YimengProductionUnitsRequest, signal?: AbortSignal): Promise<YimengProductionUnitsResponse>
   health(signal?: AbortSignal): Promise<YimengHealth>
   projects(request: YimengProjectsRequest, signal?: AbortSignal): Promise<YimengProjectsResponse>
@@ -307,6 +332,8 @@ export interface QingmuYimengReadPort {
 
 /** Explicit ChangeSet commands exposed through the separate Host-only command channel. */
 export interface QingmuYimengCommandPort {
+  bindStageSource(request: YimengBindStageSourceRequest, signal?: AbortSignal): Promise<YimengStageSourceResult>
+  recoverStageSourceBinding(request: YimengRecoverStageSourceBindingRequest, signal?: AbortSignal): Promise<YimengStageSourceRecovery>
   bindProductionUnit(request: YimengBindProductionUnitRequest, signal?: AbortSignal): Promise<YimengProductionUnitResult>
   recoverProductionUnitBinding(
     request: YimengRecoverProductionUnitBindingRequest, signal?: AbortSignal,
@@ -376,6 +403,7 @@ export interface QingmuYimengCommandPort {
 
 /** Read-only, stateless professional method compiler channel. */
 export interface QingmuImagoMethodPort {
+  stageSourceMethod(request: ImagoStageSourceMethodRequest, signal?: AbortSignal): Promise<ImagoStageSourceMethodResponse>
   productionUnitMethod(request: ImagoProductionUnitMethodRequest, signal?: AbortSignal): Promise<ImagoProductionUnitMethodResponse>
   shotFindingMethod(request: ImagoShotFindingMethodRequest, signal?: AbortSignal): Promise<ImagoShotFindingMethodResponse>
   continuityMethod(request: ImagoContinuityMethodRequest, signal?: AbortSignal): Promise<ImagoContinuityMethodResponse>

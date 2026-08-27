@@ -16,6 +16,14 @@ Immediately before a commit `POST`, the browser synchronously stores and reads b
 
 The workflow view accepts only the `jason.episode-workflow-projection.v1` contract produced by the Host adapter. Runtime identity, project and episode scope, source fingerprint, blockers, status facts, and lineage remain visible as a projection; none of those fields becomes a command.
 
+## Explicit saved-script source registration
+
+The existing script workspace can register its saved episode script as a source reference for the current IMAGO screenwriting method. It uses the saved revision and Host-verified complete script SHA, including edit metadata, never the uncommitted draft below. The seven-field source descriptor is distinct from the script content hash. The method is freshly compiled by the existing Host adapter; the browser cannot supply its own rules or sign a proof.
+
+Registration requires current owner capability, matching saved script coordinates, and explicit confirmation. Before one POST, the client stores and reads back an exact ten-field recovery marker containing only coordinates, hashes, compare conditions, and a deterministic key. An uncertain response keeps the marker. Explicit GET-only recovery does not require the current script, method, or write capability; Yimeng still checks current read access and the original actor. A matching receipt conditionally clears only the original marker, then rereads Yimeng. The receipt alone never renders a current binding. Source changes and rule changes are displayed separately; a historical reference does not become current through recovery.
+
+Source registration neither creates a screenplay package or Stage instance nor approves a script, activates a lock, seals a plan, starts rework, or authorizes a Provider call. There is no Stage or Skill selector, new page, ledger, or workflow engine.
+
 ## Read-only workset recommendation
 
 Overview asks the Host for a workset using only project and episode IDs. The method adapter rereads the existing Yimeng workflow service, binds the complete normalized projection and revision to SHA-256, and runs the stateless Core compiler. The browser never supplies stage approvals or a compiler snapshot.
@@ -95,7 +103,7 @@ Independent. Opening, refreshing, or closing the cockpit does not change a model
 - The bounded workbenches and Shot River do not declare all of Phase 3 or Epic 5 complete. Paid generation, automatic selection or approval, agent signoff, and production release remain outside these local flows.
 - Workset compilation does not create missing Yimeng stage or LSU authority. The Core's available-authority branch has fixture coverage; the current Host integration deliberately exposes only the unavailable branch.
 - Receipt recovery lasts only for the current tab's `sessionStorage` lifetime. Explicitly discarding the local marker cannot prove or reverse the server-side outcome.
-- For scripts, the browser does not reproduce Python canonical JSON. The Host verifies Yimeng's exact canonical bytes and exposes only `scriptSha256`; a missing or mismatched verified hash keeps the recovery marker locked. Finding and production-unit contracts separately permit only well-formed strings and safe integer numbers and use explicit Unicode-key canonicalization for their bounded JSON hashes; this algorithm does not extend to arbitrary script JSON.
+- For scripts, the browser does not reproduce Python canonical JSON. The Host verifies Yimeng's exact canonical bytes and exposes only `scriptSha256`; a missing or mismatched verified hash keeps the script-edit recovery marker locked. Finding, production-unit, and source-reference contracts separately permit only well-formed strings and safe integer numbers and use explicit Unicode-key canonicalization for their bounded JSON hashes; this algorithm does not extend to arbitrary script JSON.
 - Anonymous health proves liveness only; it does not prove production readiness or release identity unless the returned fields explicitly do so.
 - `releaseReady` is neither `verify_episode` success nor final human signoff.
 - The plugin requires the Qingmu build composition plus the private Host read and command adapters on the same local Harness runtime.

@@ -5,6 +5,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { QingmuCockpit } from './QingmuCockpit.tsx'
 import type {
+  ImagoStageSourceMethodResponse, YimengStageSourcesResponse, YimengStageSourceResult, YimengStageSourceRecovery,
   ImagoProductionUnitMethodResponse, YimengProductionUnitsResponse, YimengProductionUnitResult, YimengProductionUnitRecovery,
   ImagoContinuityMethodResponse,
   ImagoShotFindingMethodResponse, YimengShotFindingFeedResponse, YimengShotFindingResult, YimengShotFindingRecovery,
@@ -33,6 +34,7 @@ import { en, NS, zh } from './locales.ts'
 
 export type { QingmuCockpitFace } from './slots.ts'
 export type {
+  ImagoStageSourceMethodResponse, YimengStageSourcesResponse, YimengStageSourceResult, YimengStageSourceRecovery,
   ImagoProductionUnitMethodResponse, YimengProductionUnitsResponse, YimengProductionUnitResult, YimengProductionUnitRecovery,
   ImagoContinuityMethodResponse,
   ImagoShotFindingMethodResponse, YimengShotFindingFeedResponse, YimengShotFindingResult, YimengShotFindingRecovery,
@@ -78,6 +80,10 @@ export function apply(ctx: ClientContext): void {
     unwrapRpc(await connection.rpc.call('/qingmu-imago-method', endpoint, payload, signal)) as T
 
   const port: QingmuYimengPort = {
+    stageSources: (request, signal) => read<YimengStageSourcesResponse>('stageSources', request, signal),
+    stageSourceMethod: (request, signal) => method<ImagoStageSourceMethodResponse>('stageSourceMethod', request, signal),
+    bindStageSource: (request, signal) => command<YimengStageSourceResult>('bindStageSource', request, signal),
+    recoverStageSourceBinding: (request, signal) => command<YimengStageSourceRecovery>('recoverStageSourceBinding', request, signal),
     productionUnits: (request, signal) => read<YimengProductionUnitsResponse>('productionUnits', request, signal),
     productionUnitMethod: (request, signal) => method<ImagoProductionUnitMethodResponse>('productionUnitMethod', request, signal),
     bindProductionUnit: (request, signal) => command<YimengProductionUnitResult>('bindProductionUnit', request, signal),

@@ -1,4 +1,7 @@
 import type {
+  YimengStageSource,
+  YimengStageSourceDefinition,
+  YimengStageSourcesRequest,
   YimengProductionUnitDefinition,
   YimengProductionUnitSource,
   YimengProductionUnitsRequest,
@@ -904,6 +907,49 @@ export interface ImagoProductionUnitMethodResponse extends ImagoMethodJsonObject
   readonly methodAttestation: ImagoProductionUnitMethodAttestation
 }
 
+/** Browser supplies coordinates only; the Host obtains the full-script source digest. */
+export interface ImagoStageSourceMethodRequest extends YimengStageSourcesRequest {
+  readonly stageId: 'A1S'
+}
+
+/** Source-reference-only input constructed from the current business read. */
+export interface ImagoStageSourceMethodSnapshot extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.stage-source-method-snapshot.v1'
+  readonly stageId: 'A1S'
+  readonly subject: YimengStageSource
+  readonly snapshotSha256: string
+}
+
+/** Current A1S method metadata; not a global screenplay-package delivery. */
+export type ImagoStageSourceMethodDefinition = YimengStageSourceDefinition
+
+/** Stateless Core projection bound to the exact source descriptor and rule bytes. */
+export interface ImagoStageSourceMethodProjection extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-stage-source-method.v1'
+  readonly subject: YimengStageSource
+  readonly subjectSnapshotSha256: string
+  readonly definition: ImagoStageSourceMethodDefinition
+  readonly ruleBindings: Readonly<Record<string, string>>
+  readonly rulesSha256: string
+}
+
+/** Host-only signature authenticates method provenance, not human approval. */
+export interface ImagoStageSourceMethodAttestation extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-stage-source-method-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly subjectSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly signature: string
+}
+
+/** Validated current source-reference method and its Host attestation. */
+export interface ImagoStageSourceMethodResponse extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-stage-source-method-adapter-result.v1'
+  readonly projection: ImagoStageSourceMethodProjection
+  readonly projectionSha256: string
+  readonly methodAttestation: ImagoStageSourceMethodAttestation
+}
+
 /** Result values exposed by `/qingmu-imago-method`. */
 export interface ImagoMethodEndpointMap {
   readonly elementMethod: ImagoElementMethodResponse
@@ -915,6 +961,7 @@ export interface ImagoMethodEndpointMap {
   readonly continuityMethod: ImagoContinuityMethodResponse
   readonly shotFindingMethod: ImagoShotFindingMethodResponse
   readonly productionUnitMethod: ImagoProductionUnitMethodResponse
+  readonly stageSourceMethod: ImagoStageSourceMethodResponse
 }
 
 /** Endpoint names accepted by the private method channel. */

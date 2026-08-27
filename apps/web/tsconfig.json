@@ -32,6 +32,7 @@
     "tests/qingmu-script-workspace.e2e.ts",
     "tests/qingmu-shot-finding-fixture.ts",
     "tests/qingmu-production-unit-fixture.ts",
+    "tests/qingmu-stage-source-fixture.ts",
     "tests/approval-composer.e2e.ts",
     "tests/plan-control-row.e2e.ts",
     "tests/plan-review.e2e.ts",

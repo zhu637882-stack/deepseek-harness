@@ -21,6 +21,7 @@
     "apps/web/tests/qingmu-script-workspace.e2e.ts",
     "apps/web/tests/qingmu-shot-finding-fixture.ts",
     "apps/web/tests/qingmu-production-unit-fixture.ts",
+    "apps/web/tests/qingmu-stage-source-fixture.ts",
     "apps/web/tests/approval-composer.e2e.ts",
     "apps/web/tests/plan-control-row.e2e.ts",
     "apps/web/tests/plan-review.e2e.ts",
