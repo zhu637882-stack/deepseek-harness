@@ -8,6 +8,7 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import { normalizeContinuityDelta } from './continuity.ts'
+import { normalizeSelectedVideoReview } from './selected-video-review.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -51,6 +52,7 @@ import type {
   YimengReferenceRightsScalar,
   YimengScriptRequest,
   YimengScriptResponse,
+  YimengSelectedVideoReviewRequest,
   YimengHeroFrameBinding,
   YimengHeroFrameStoryboardBlocker,
   YimengHeroFrameStoryboardShot,
@@ -124,6 +126,12 @@ export type {
   YimengReadEndpointMap,
   YimengScriptRequest,
   YimengScriptResponse,
+  YimengSelectedVideoReviewRequest,
+  YimengSelectedVideoReviewResponse,
+  YimengSelectedVideoReviewAsset,
+  YimengSelectedVideoReviewStatus,
+  YimengVideoReviewDefect,
+  YimengVideoReviewRecord,
   YimengHeroFrameBinding,
   YimengHeroFrameStoryboardBlocker,
   YimengHeroFrameStoryboardShot,
@@ -171,7 +179,7 @@ const REFERENCE_RIGHTS_EXCEPTION_RELEASE_FEED_SCHEMA = 'jason.qingmu-reference-r
 const SHA256 = /^[0-9a-f]{64}$/
 const PROTECTED_ENDPOINTS = new Set([
   'projects', 'episodes', 'script', 'promptIr', 'elementProfile', 'referenceCandidates', 'reviewEvents',
-  'referenceRightsExceptionReleases', 'workflow',
+  'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview',
 ])
 const HUMAN_DECISION_VALUES = new Set<YimengHumanDecisionValue>([
   'approve', 'reject', 'request_changes',
@@ -505,6 +513,16 @@ function parsePromptIrRequest(payload: unknown): YimengPromptIrRequest {
     projectId: parseIdentifier(input.projectId, 'projectId'),
     episodeId: parseIdentifier(input.episodeId, 'episodeId'),
     storyboardRevisionId: parseIdentifier(input.storyboardRevisionId, 'storyboardRevisionId'),
+    frameId: parseIdentifier(input.frameId, 'frameId'),
+  }
+}
+
+function parseSelectedVideoReviewRequest(payload: unknown): YimengSelectedVideoReviewRequest {
+  const input = requireInputObject(payload)
+  assertOnlyInputKeys(input, ['projectId', 'episodeId', 'frameId'])
+  return {
+    projectId: parseIdentifier(input.projectId, 'projectId'),
+    episodeId: parseIdentifier(input.episodeId, 'episodeId'),
     frameId: parseIdentifier(input.frameId, 'frameId'),
   }
 }
@@ -2525,6 +2543,10 @@ export function createYimengReadHandler(
         const request = parsePromptIrRequest(payload)
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/storyboard-revisions/${encodeURIComponent(request.storyboardRevisionId)}/frames/${encodeURIComponent(request.frameId)}/prompt-ir`
         normalize = value => normalizePromptIr(value, request)
+      } else if (endpoint === 'selectedVideoReview') {
+        const request = parseSelectedVideoReviewRequest(payload)
+        path = `/api/frames/${encodeURIComponent(request.frameId)}/video-candidates`
+        normalize = value => normalizeSelectedVideoReview(value, request)
       } else if (endpoint === 'elementProfile') {
         const request = parseElementProfileRequest(payload)
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/elements/${encodeURIComponent(request.elementKind)}/${encodeURIComponent(request.targetId)}`

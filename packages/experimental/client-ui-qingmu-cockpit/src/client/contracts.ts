@@ -49,6 +49,9 @@ import type {
   YimengReferenceRightsExceptionScope,
   YimengScriptRequest,
   YimengScriptResponse,
+  YimengSelectedVideoReviewRequest,
+  YimengSelectedVideoReviewResponse,
+  YimengSelectedVideoReviewStatus,
   YimengShotRelationBeat,
   YimengShotRelationElement,
   YimengShotRelationScene,
@@ -165,6 +168,9 @@ export type {
   YimengReferenceRightsExceptionScope,
   YimengScriptRequest,
   YimengScriptResponse,
+  YimengSelectedVideoReviewRequest,
+  YimengSelectedVideoReviewResponse,
+  YimengSelectedVideoReviewStatus,
   YimengShotRelationBeat,
   YimengShotRelationElement,
   YimengShotRelationScene,
@@ -249,6 +255,7 @@ export interface QingmuYimengReadPort {
   ): Promise<YimengReferenceRightsExceptionReleaseFeedResponse>
   script(request: YimengScriptRequest, signal?: AbortSignal): Promise<YimengScriptResponse>
   promptIr(request: YimengPromptIrRequest, signal?: AbortSignal): Promise<YimengPromptIrResponse>
+  selectedVideoReview(request: YimengSelectedVideoReviewRequest, signal?: AbortSignal): Promise<YimengSelectedVideoReviewResponse>
   workflow(request: YimengWorkflowRequest, signal?: AbortSignal): Promise<YimengWorkflowProjection>
 }
 

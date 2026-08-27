@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import { launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts'
 import { REPO_ROOT, saveFailureShot, ZH_BROWSER_LOCALE } from './support.ts'
 import { continuityFixture, rebindContinuity } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/continuity-fixture.ts'
+import { videoCandidatesFixture } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/selected-video-review-fixture.ts'
 
 const YIMENG_TOKEN = 'qingmu-script-workspace-test-token'
 const CHANGE_SET_ID = 'changeset-episode-script-1'
@@ -1603,6 +1604,29 @@ function storyboardCanvasCommitReceiptFixture(
   } as const
 }
 
+type VideoReviewMode = 'none' | 'accepted' | 'rejected' | 'pending' | 'stale' | 'invalid'
+  | 'wrong-subject' | 'wrong-asset-sha' | 'revision-mismatch' | 'unselected-accepted'
+
+function selectedVideoReviewFixture(frameId: string, revision: number, mode: VideoReviewMode): unknown {
+  const subject = { projectId: 'project-1', episodeId: 'episode-1', frameId }
+  if (mode === 'none') return { ...subject, selectedAssetId: null, items: [] }
+  const status = ['wrong-subject', 'wrong-asset-sha', 'revision-mismatch', 'unselected-accepted'].includes(mode) ? 'accepted' : mode
+  const root = videoCandidatesFixture(subject, status as 'accepted' | 'rejected' | 'pending' | 'stale' | 'invalid')
+  return {
+    ...root,
+    ...(mode === 'wrong-subject' ? { projectId: 'different-project' } : {}),
+    ...(mode === 'unselected-accepted' ? { selectedAssetId: null } : {}),
+    items: root.items.map(item => ({
+      ...item,
+      ...(mode === 'unselected-accepted' ? { isSelected: false } : {}),
+      formalReview: item.formalReview === null ? null : {
+        ...item.formalReview, storyboardRevision: revision + (mode === 'revision-mismatch' ? 1 : 0),
+        ...(mode === 'wrong-asset-sha' ? { assetSha256: 'c'.repeat(64) } : {}),
+      },
+    })),
+  }
+}
+
 async function startYimengDouble(
   captured: CapturedYimengRequest[],
   scriptReadRevisions: number[],
@@ -1639,9 +1663,11 @@ async function startYimengDouble(
   readonly storyboardCanvasCommitAccepted: Promise<void>
   readonly releaseStoryboardCanvasCommitResponse: () => void
   readonly setContinuityMode: (mode: ContinuityMode) => void
+  readonly setVideoReviewMode: (mode: VideoReviewMode) => void
 }> {
   let revision = 3
   let continuityMode: ContinuityMode = 'omitted'
+  let videoReviewMode: VideoReviewMode = 'none'
   let authoritativeScript: Record<string, unknown> = INITIAL_SCRIPT
   let persistedReceipt: ReturnType<typeof commitReceiptFixture> | undefined
   let actorRevision = 3
@@ -1830,6 +1856,13 @@ async function startYimengDouble(
         const promptLineage = workflow.shots.items[0]?.promptLineage
         promptIrWorkflowStatuses.push(promptLineage?.status ?? 'missing')
         json(response, 200, workflow)
+        return
+      }
+      if (request.method === 'GET' && (url.pathname === `/api/frames/${PROMPT_IR_FRAME_ID}/video-candidates`
+        || url.pathname === `/api/frames/${SHOT_RIVER_FIRST_FRAME_ID}/video-candidates`)) {
+        const frameId = url.pathname.split('/')[3]
+        if (frameId === undefined) throw new Error('video fixture frame is missing')
+        json(response, 200, selectedVideoReviewFixture(frameId, revision, videoReviewMode))
         return
       }
       if (
@@ -3101,6 +3134,7 @@ async function startYimengDouble(
     storyboardCanvasCommitAccepted,
     releaseStoryboardCanvasCommitResponse: () => resolveStoryboardCanvasCommitResponse?.(),
     setContinuityMode: (mode) => { continuityMode = mode },
+    setVideoReviewMode: (mode) => { videoReviewMode = mode },
   }
 }
 
@@ -3174,6 +3208,7 @@ describe.skipIf(
     let storyboardCanvasCommitAccepted: Promise<void> | undefined
     let releaseStoryboardCanvasCommitResponse: (() => void) | undefined
     let setContinuityMode: ((mode: ContinuityMode) => void) | undefined
+    let setVideoReviewMode: ((mode: VideoReviewMode) => void) | undefined
     const capturedRequests: CapturedYimengRequest[] = []
     const scriptReadRevisions: number[] = []
     const actorReadRevisions: number[] = []
@@ -3195,6 +3230,7 @@ describe.skipIf(
     let storyboardCanvasBrowserEvidence: Record<string, unknown> | undefined
     let worksetBrowserEvidence: Record<string, unknown> | undefined
     let continuityBrowserEvidence: Record<string, unknown> | undefined
+    let selectedVideoReviewBrowserEvidence: Record<string, unknown> | undefined
     let resolveReferenceRightsMethodProjectionSha256: ((sha256: string) => void) | undefined
     const referenceRightsMethodProjectionSha256 = new Promise<string>((resolve) => {
       resolveReferenceRightsMethodProjectionSha256 = resolve
@@ -3241,6 +3277,7 @@ describe.skipIf(
       storyboardCanvasCommitAccepted = yimeng.storyboardCanvasCommitAccepted
       releaseStoryboardCanvasCommitResponse = yimeng.releaseStoryboardCanvasCommitResponse
       setContinuityMode = yimeng.setContinuityMode
+      setVideoReviewMode = yimeng.setVideoReviewMode
       overlayRoot = await mkdtemp(join(tmpdir(), 'dsh-qingmu-script-e2e-'))
       const overlayPath = join(overlayRoot, 'qingmu-script.overlay.yml')
       const qingmuOverlay = resolveQingmuOverlayEntrypoints(await readFile(QINGMU_OVERLAY, 'utf8'))
@@ -3269,7 +3306,7 @@ describe.skipIf(
       page = await browser.newPage({ viewport: { width: 1680, height: 1100 }, locale: ZH_BROWSER_LOCALE })
       page.on('request', (request) => {
         const requestPath = new URL(request.url()).pathname
-        if (!requestPath.startsWith('/qingmu-imago-method/')) return
+        if (!requestPath.startsWith('/qingmu-imago-method/') && requestPath !== '/qingmu-yimeng/selectedVideoReview') return
         browserRpcRequests.push({ path: requestPath, body: request.postDataJSON() as unknown })
       })
       page.on('response', (response) => {
@@ -3391,6 +3428,8 @@ describe.skipIf(
               worksetMobile: process.env.QINGMU_E5_4_MOBILE_EVIDENCE_SCREENSHOT,
               continuity: process.env.QINGMU_E5_5_EVIDENCE_SCREENSHOT,
               continuityMobile: process.env.QINGMU_E5_5_MOBILE_EVIDENCE_SCREENSHOT,
+              selectedVideoReview: process.env.QINGMU_E5_5_VIDEO_REVIEW_SCREENSHOT,
+              selectedVideoReviewMobile: process.env.QINGMU_E5_5_VIDEO_REVIEW_MOBILE_SCREENSHOT,
               script: process.env.QINGMU_EVIDENCE_SCREENSHOT,
               actor: process.env.QINGMU_ACTOR_EVIDENCE_SCREENSHOT,
               scene: process.env.QINGMU_SCENE_EVIDENCE_SCREENSHOT,
@@ -3400,6 +3439,7 @@ describe.skipIf(
             storyboardCanvas: storyboardCanvasBrowserEvidence,
             workset: worksetBrowserEvidence,
             continuity: continuityBrowserEvidence,
+            selectedVideoReview: selectedVideoReviewBrowserEvidence,
           }
           await mkdir(dirname(runEvidencePath), { recursive: true })
           await writeFile(runEvidencePath, `${JSON.stringify(evidence, null, 2)}\n`)
@@ -3698,6 +3738,146 @@ describe.skipIf(
         setContinuityMode('omitted')
         await page.setViewportSize({ width: 1680, height: 1100 })
         // Restore the entry tab so the next case does not mount a method against the retained Shot snapshot.
+        await dialog.getByRole('tab', { name: '总览', exact: true }).click()
+        await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
+        if (tracePath) { await mkdir(dirname(tracePath), { recursive: true }); await page.context().tracing.stop({ path: tracePath }) }
+      }
+    }, 120_000)
+
+    it('reads E5-5 selected video reviews on the shared Shot without promoting stale or unselected records in Chromium', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e5-5-video-review'))
+      if (setVideoReviewMode === undefined) throw new Error('video review fixture control missing')
+      const setMode = setVideoReviewMode
+      const requestStart = capturedRequests.length
+      const rpcStart = browserRpcRequests.length
+      const consoleStart = browserConsoleErrors.length
+      const tracePath = process.env.QINGMU_E5_5_VIDEO_REVIEW_TRACE_PATH?.trim()
+      if (tracePath) await page.context().tracing.start({ screenshots: true, snapshots: true })
+      const nextWire = () => page.waitForResponse(response => new URL(response.url()).pathname === '/qingmu-yimeng/selectedVideoReview')
+      const readWire = async (wire: ReturnType<typeof nextWire>) => {
+        const response = await wire
+        expect(response.status()).toBe(200)
+        const raw = await response.json() as unknown
+        if (!isRecord(raw) || !isRecord(raw.result)) throw new Error('video review carrier missing')
+        return raw.result
+      }
+      setMode('rejected')
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      const firstWire = nextWire()
+      await dialog.getByRole('tab', { name: '分镜与镜头' }).click()
+      const panel = dialog.getByRole('region', { name: '当前选中视频审核', exact: true })
+      const river = dialog.getByRole('list', { name: '镜头选择' })
+      const scenarios: Record<string, unknown>[] = []
+      try {
+        const first = await readWire(firstWire)
+        expect(first).toMatchObject({ ok: true, value: { frameId: SHOT_RIVER_FIRST_FRAME_ID,
+          selectedAssetId: `video-${SHOT_RIVER_FIRST_FRAME_ID}`, selected: { formalReviewStatus: 'rejected' } } })
+        await panel.getByText('易梦记录：已退回', { exact: true }).waitFor()
+        expect(await panel.getByRole('button').allTextContents()).toEqual(['重读视频审核'])
+        expect(await panel.locator('video, img, audio, a').count()).toBe(0)
+        await panel.getByText('0 s', { exact: true }).waitFor()
+        await panel.getByText('1.25 s', { exact: true }).waitFor()
+        await panel.getByText('时间点未提供', { exact: true }).waitFor()
+        await panel.getByText('开场怀表位置与上一镜不符。', { exact: true }).waitFor()
+        scenarios.push({ name: 'original-rejection', result: first })
+
+        const secondWire = nextWire()
+        await river.getByRole('button', { name: /frame-1/ }).click()
+        const second = await readWire(secondWire)
+        expect(second).toMatchObject({ ok: true, value: { frameId: PROMPT_IR_FRAME_ID,
+          selectedAssetId: `video-${PROMPT_IR_FRAME_ID}` } })
+        await panel.getByText('video-frame-1', { exact: true }).waitFor()
+        expect(await panel.getByText('video-frame-z', { exact: true }).count()).toBe(0)
+        scenarios.push({ name: 'shared-shot-change', result: second })
+        const desktopPath = process.env.QINGMU_E5_5_VIDEO_REVIEW_SCREENSHOT?.trim()
+        if (desktopPath) {
+          await mkdir(dirname(desktopPath), { recursive: true })
+          await panel.evaluate((element) => { element.scrollIntoView({ block: 'start' }) })
+          await page.screenshot({ path: desktopPath })
+        }
+        await page.setViewportSize({ width: 390, height: 844 })
+        const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
+        const cardOverflow = await panel.evaluate(element => element.scrollWidth > element.clientWidth)
+        expect(mobileOverflow).toBe(false)
+        expect(cardOverflow).toBe(false)
+        const refreshBox = await panel.getByRole('button', { name: '重读视频审核' }).boundingBox()
+        expect(refreshBox?.height).toBeGreaterThanOrEqual(44)
+        const mobilePath = process.env.QINGMU_E5_5_VIDEO_REVIEW_MOBILE_SCREENSHOT?.trim()
+        if (mobilePath) {
+          await mkdir(dirname(mobilePath), { recursive: true })
+          await panel.getByRole('heading', { name: '原审核缺陷 · 3', exact: true }).scrollIntoViewIfNeeded()
+          await page.screenshot({ path: mobilePath })
+        }
+        await page.setViewportSize({ width: 1680, height: 1100 })
+
+        const reload = async (mode: VideoReviewMode) => {
+          setMode(mode)
+          const wire = nextWire()
+          await panel.getByRole('button', { name: '重读视频审核' }).click()
+          const result = await readWire(wire)
+          await expect.poll(() => panel.getByText('正在读取当前选中视频的审核记录…', { exact: true }).count()).toBe(0)
+          scenarios.push({ name: mode, result })
+          return result
+        }
+        await reload('accepted')
+        await panel.getByText('易梦记录：已通过', { exact: true }).waitFor()
+        for (const [mode, label] of [
+          ['pending', '待人工审核'], ['stale', '审核已失效'], ['invalid', '审核不可用'],
+        ] as const) {
+          const result = await reload(mode)
+          expect(result).toMatchObject({ ok: true, value: { selected: { formalReviewStatus: mode, formalReview: null } } })
+          await panel.getByText(label, { exact: true }).waitFor()
+          expect(await panel.getByText('易梦记录：已通过', { exact: true }).count()).toBe(0)
+          expect(await panel.getByRole('list', { name: '原审核缺陷', exact: true }).count()).toBe(0)
+        }
+        await panel.getByText('当前文件或审核证据不可用。下方 SHA 可能是资产表旧值，不代表当前字节已验证。', { exact: true }).waitFor()
+        for (const mode of ['wrong-subject', 'wrong-asset-sha', 'revision-mismatch'] as const) {
+          const result = await reload(mode)
+          expect(result.ok).toBe(mode === 'revision-mismatch')
+          await panel.getByRole('alert').waitFor()
+          expect(await panel.getByText('易梦记录：已通过', { exact: true }).count()).toBe(0)
+          expect(await panel.getByText('video-frame-1', { exact: true }).count()).toBe(0)
+        }
+        for (const mode of ['none', 'unselected-accepted'] as const) {
+          const result = await reload(mode)
+          expect(result).toMatchObject({ ok: true, value: { selectedAssetId: null, selected: null } })
+          await panel.getByText('易梦尚未为这个镜头选中视频；不会自动选用其他已通过的候选。', { exact: true }).waitFor()
+          expect(await panel.getByText('易梦记录：已通过', { exact: true }).count()).toBe(0)
+        }
+        await reload('rejected')
+        const firstAgainWire = nextWire()
+        await river.getByRole('button', { name: /frame-z/ }).click()
+        await readWire(firstAgainWire)
+        await panel.getByText('video-frame-z', { exact: true }).waitFor()
+        await expectNoVisibleTechnicalBrand(page)
+        const requests = capturedRequests.slice(requestStart)
+        expect(requests.length).toBeGreaterThan(0)
+        expect(requests.every(request => request.method === 'GET' && request.body === undefined)).toBe(true)
+        const readRequests = browserRpcRequests.slice(rpcStart).filter(request => request.path === '/qingmu-yimeng/selectedVideoReview')
+        expect(readRequests.length).toBeGreaterThanOrEqual(13)
+        for (const request of readRequests) {
+          const payload = isRecord(request.body) ? request.body.payload : undefined
+          const subject = isRecord(payload) ? payload : {}
+          expect(Object.keys(subject).sort()).toEqual(['episodeId', 'frameId', 'projectId'])
+          expect(subject.projectId).toBe('project-1')
+          expect(subject.episodeId).toBe('episode-1')
+          expect([SHOT_RIVER_FIRST_FRAME_ID, PROMPT_IR_FRAME_ID]).toContain(subject.frameId)
+        }
+        expect(browserConsoleErrors.slice(consoleStart)).toEqual([])
+        expect(tripwire.pageErrors).toEqual([])
+        selectedVideoReviewBrowserEvidence = {
+          schema: 'qingmu.e5-5-selected-video-review-browser-evidence.v1', scenarios, readRequests,
+          sharedShotSelection: true, staleReviewNotAccepted: true, unselectedReviewNotPromoted: true,
+          originalTimecodes: [0, 1.25, null], mediaElementCount: 0,
+          yimengGetOnly: true, yimengRequestCount: requests.length,
+          mobileOverflow, cardOverflow, refreshControlHeight: refreshBox?.height,
+          formalFindingCount: 0, providerCalls: 0, humanSignoffInferred: false,
+          consoleErrors: browserConsoleErrors.slice(consoleStart), pageErrors: tripwire.pageErrors,
+        }
+      } finally {
+        setMode('none')
+        await page.setViewportSize({ width: 1680, height: 1100 })
         await dialog.getByRole('tab', { name: '总览', exact: true }).click()
         await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
         if (tracePath) { await mkdir(dirname(tracePath), { recursive: true }); await page.context().tracing.stop({ path: tracePath }) }

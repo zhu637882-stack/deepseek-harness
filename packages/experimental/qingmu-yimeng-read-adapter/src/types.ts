@@ -106,6 +106,74 @@ export interface YimengPromptIrResponse extends YimengJsonObject {
   readonly baseSnapshotSha256: string
 }
 
+/** Read-only coordinates for the selected video on one canonical storyboard frame. */
+export interface YimengSelectedVideoReviewRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+}
+
+/** Status returned by Yimeng's existing, byte/revision-aware human-review reader. */
+export type YimengSelectedVideoReviewStatus = 'accepted' | 'rejected' | 'pending' | 'stale' | 'invalid'
+
+/** Original defect fields, not an IMAGO Finding or an assigned rework instruction. */
+export interface YimengVideoReviewDefect {
+  readonly defectType: string
+  readonly timecodeSec: number | null
+  readonly note: string
+}
+
+/** Whitelisted existing review evidence; no authenticated approver or review time is inferred. */
+export interface YimengVideoReviewRecord {
+  readonly version: 'formal-video-human-review-v1'
+  readonly decision: 'accepted' | 'rejected'
+  readonly reviewScope: 'full_video'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly formalVideoAssetId: string
+  readonly assetSha256: string
+  readonly frameUpdatedAt: string
+  readonly frameContentSha256: string | null
+  readonly storyboardRevision: number
+  readonly reviewer: string
+  readonly reviewNote: string | null
+  readonly reasonCode: string | null
+  readonly playbackProgress: number
+  readonly checks: Readonly<Record<string, boolean>>
+  readonly defects: readonly YimengVideoReviewDefect[] | null
+  readonly machineFailureExceptionAccepted: boolean
+}
+
+/** Selected asset metadata and its upstream review, without media URLs or write capabilities. */
+export interface YimengSelectedVideoReviewAsset {
+  readonly assetId: string
+  readonly version: number
+  /** May be an asset-table fallback when status is invalid; not a Host byte verification. */
+  readonly sha256: string | null
+  readonly taskId: string | null
+  readonly providerTaskId: string | null
+  readonly durationSec: number | null
+  readonly isSelected: true
+  readonly selectionStatus: 'Selected'
+  readonly formalReviewAccepted: boolean
+  readonly formalReviewStatus: YimengSelectedVideoReviewStatus
+  readonly formalReviewBlockerCode: string | null
+  readonly formalReview: YimengVideoReviewRecord | null
+}
+
+/** Host projection of an existing GET only; it never creates a new approval or selection. */
+export interface YimengSelectedVideoReviewResponse extends YimengSelectedVideoReviewRequest {
+  readonly schema: 'qingmu.yimeng-selected-video-review.v1'
+  readonly selectedAssetId: string | null
+  readonly selected: YimengSelectedVideoReviewAsset | null
+  readonly readOnly: true
+  readonly providerCalls: 0
+  readonly taskMutation: false
+  readonly budgetMutation: false
+  readonly humanSignoffInferred: false
+}
+
 /** Element kinds reserved by the generic element-profile route. */
 export type YimengElementKind = 'actor' | 'scene' | 'prop'
 
@@ -758,6 +826,7 @@ export interface YimengReadEndpointMap {
   readonly episodes: YimengEpisodesResponse
   readonly script: YimengScriptResponse
   readonly promptIr: YimengPromptIrResponse
+  readonly selectedVideoReview: YimengSelectedVideoReviewResponse
   readonly elementProfile: YimengElementProfileResponse
   readonly referenceCandidates: YimengReferenceCandidatesResponse
   readonly reviewEvents: YimengElementReviewFeedResponse

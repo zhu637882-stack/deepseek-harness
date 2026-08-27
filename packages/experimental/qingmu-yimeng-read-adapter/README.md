@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, and `workflow`; it exposes no mutation endpoint.
+This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, and `workflow`; it exposes no mutation endpoint.
 
 ## Contract
 
@@ -25,6 +25,12 @@ The package root exports the request and response types, including `YimengHealth
 The optional `workflow.director.continuityDelta` field is `jason.qingmu-continuity-delta.v1`, bound to the exact storyboard revision and every adjacent canonical Shot in `frameNo` order. If present, its exact fields, source SHA, IDs, booleans, four ordered dimensions, current binding, and historical readiness relationships are validated; malformed evidence fails the workflow read closed. Omission preserves compatibility with older upstreams.
 
 Current SHA fields require materialized assets with IDs. Stored audit SHA declarations may survive missing audit IDs, but such incomplete evidence cannot claim historical readiness or current binding. `legacyEvidenceReady` retains Yimeng's existing historical semantics. `currentEvidenceReady` additionally requires matching current/audit asset IDs and SHAs, the selected video/tail task lineage, a selected non-stale next first frame, and no stale handoff. Unknown dimensions stay `null`. No check, selection, Finding, lock instance, or human approval is created.
+
+## Selected video review
+
+`selectedVideoReview` accepts only project, episode, and canonical frame IDs. It reuses Yimeng's existing `/api/frames/{frameId}/video-candidates` GET and returns metadata for the uniquely selected asset only. Root identity, selection flags, review status, decision, asset ID/SHA, revision, numeric fields, and acceptance checks must agree. Pending, stale, and invalid responses cannot carry an old review. An accepted but unselected candidate is never promoted.
+
+The normalized response preserves original defects, notes, and zero, fractional, or null timecodes. Missing legacy content SHA and defects remain explicitly absent. Yimeng verifies current media and frame binding; the Host does not hash media bytes, and an invalid asset's stored SHA is not proof of its current file. Media URLs, asset timestamps, and costs are omitted. Existing machine-failure exceptions remain labeled records, not machine passes or independently revalidated approval authority. This read creates no Finding, lock, task, selection, or human signoff.
 
 ## Security boundary
 

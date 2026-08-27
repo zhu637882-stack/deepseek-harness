@@ -18,6 +18,7 @@ import { ShotRelationMethodView } from './ShotRelationMethodView.tsx'
 import { HeroFrameStoryboardCanvas } from './HeroFrameStoryboardCanvas.tsx'
 import { WorksetRecommendation } from './WorksetRecommendation.tsx'
 import { ContinuityDeltaView } from './ContinuityDeltaView.tsx'
+import { SelectedVideoReviewView } from './SelectedVideoReviewView.tsx'
 import css from './QingmuCockpit.module.css'
 
 export type QingmuCockpitProps = PropsRuntime<'sidebar.footer.action'>
@@ -489,6 +490,15 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
         )}
       </Card>
       <ContinuityDeltaView
+        projectId={projectId}
+        episodeId={episodeId}
+        selectedShotId={selectedShotId}
+        projection={projection}
+        enabled={open && !loading && error === undefined}
+        port={port}
+        t={t}
+      />
+      <SelectedVideoReviewView
         projectId={projectId}
         episodeId={episodeId}
         selectedShotId={selectedShotId}

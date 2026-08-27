@@ -21,6 +21,7 @@ import type {
   YimengRecoverPromptIrEditCommitResponse, YimengRecoverPromptIrSelectionResponse,
   YimengRecoverScriptCommitResponse, YimengRecoverStoryboardCanvasCommitResponse,
   YimengScriptResponse, YimengSelectPromptIrResponse,
+  YimengSelectedVideoReviewResponse,
   YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengWorkflowProjection,
 } from './contracts.ts'
@@ -48,6 +49,7 @@ export type {
   YimengRecoverPromptIrEditCommitResponse, YimengRecoverPromptIrSelectionResponse,
   YimengRecoverScriptCommitResponse, YimengRecoverStoryboardCanvasCommitResponse,
   YimengScriptResponse, YimengSelectPromptIrResponse,
+  YimengSelectedVideoReviewResponse,
   YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengWorkflowProjection,
 } from './contracts.ts'
@@ -83,6 +85,7 @@ export function apply(ctx: ClientContext): void {
       read<YimengReferenceRightsExceptionReleaseFeedResponse>('referenceRightsExceptionReleases', request, signal),
     script: (request, signal) => read<YimengScriptResponse>('script', request, signal),
     promptIr: (request, signal) => read<YimengPromptIrResponse>('promptIr', request, signal),
+    selectedVideoReview: (request, signal) => read<YimengSelectedVideoReviewResponse>('selectedVideoReview', request, signal),
     workflow: (request, signal) => read<YimengWorkflowProjection>('workflow', request, signal),
     worksetMethod: (request, signal) => method<ImagoWorksetMethodResponse>('worksetMethod', request, signal),
     continuityMethod: (request, signal) => method<ImagoContinuityMethodResponse>('continuityMethod', request, signal),

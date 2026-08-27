@@ -1,0 +1,151 @@
+.review {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.header > div {
+  flex: 1 1 280px;
+}
+
+.header h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.header button {
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.header button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.header button:focus-visible,
+.details > summary:focus-visible {
+  outline: 2px solid var(--qingmu-accent);
+  outline-offset: 3px;
+}
+
+.body {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.body h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.body p {
+  margin: 6px 0;
+  white-space: pre-wrap;
+}
+
+.status {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-left: 4px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.status[data-review-status="accepted"] {
+  border-left-color: var(--qingmu-accent);
+  background: var(--qingmu-soft);
+}
+
+.status strong {
+  font-size: 16px;
+}
+
+.status small,
+.boundary,
+.evidence dt {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.notice {
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+.defects ol {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.defects li {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+.defects li > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.defects li span {
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.details {
+  min-width: 0;
+  padding: 0 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+.details > summary {
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 12px 0;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.details[open] {
+  padding-bottom: 12px;
+}
+
+.evidence {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 12px;
+  font-size: 12px;
+}
+
+.evidence > div {
+  min-width: 0;
+}
+
+.evidence dd {
+  margin: 4px 0 0;
+}

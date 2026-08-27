@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates` 和 `workflow`；它不暴露任何写入端点。
+这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates`、`selectedVideoReview` 和 `workflow`；它不暴露任何写入端点。
 
 ## 约定
 
@@ -25,6 +25,12 @@
 可选的 `workflow.director.continuityDelta` 字段使用 `jason.qingmu-continuity-delta.v1`，绑定准确分镜修订及按 `frameNo` 排序的全部相邻 canonical Shot。字段存在时校验精确字段集、来源 SHA、ID、布尔值、有序四维记录、当前绑定和历史就绪关系；错误证据使工作流读取失败关闭。旧上游省略字段仍可兼容。
 
 当前 SHA 必须有具名物化素材。审计 ID 缺失时可保留原始 SHA 声明，但不完整证据不能声称历史就绪或当前绑定。`legacyEvidenceReady` 保留易梦原有历史语义；`currentEvidenceReady` 还要求当前/审计素材 ID 与 SHA 相同、选定视频与尾帧任务血缘一致、下镜首帧已选且非 Stale，并且 handoff 未过期。未知维度保持 `null`。不创建检查、选择、Finding、锁实例或人工批准。
+
+## 已选视频审核
+
+`selectedVideoReview` 只接受项目、剧集与 canonical frame 三个 ID。它复用易梦已有 `/api/frames/{frameId}/video-candidates` GET，只返回唯一当前选中素材的元数据。根主体、选择标志、审核状态、决定、素材 ID/SHA、修订、数值和通过检查必须一致。待审、过期或不可用响应不能夹带旧审核；未选中的已通过候选不会被提升为当前素材。
+
+规范化响应保留原始缺陷、备注，以及零、分数或 null 时间点。旧版缺少内容 SHA、缺陷时明确保留缺失。当前媒体与帧绑定由易梦核验；Host 不计算媒体字节哈希，不可用素材的存储 SHA 也不证明当前文件。媒体 URL、素材时间戳和费用均不透传。既有机器失败例外只作为原记录展示，不变成机器通过或经独立重验的批准权威。本读取不创建 Finding、锁、任务、选择或人工签收。
 
 ## 安全边界
 

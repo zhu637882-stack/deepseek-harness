@@ -627,6 +627,10 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     continuityMethod: vi.fn(async (request: Parameters<QingmuYimengPort['continuityMethod']>[0]) => (
       continuityResponse(WORKFLOW, request.selectedShotId)
     )),
+    selectedVideoReview: vi.fn(async (request: Parameters<QingmuYimengPort['selectedVideoReview']>[0]) => ({
+      schema: 'qingmu.yimeng-selected-video-review.v1', ...request, selectedAssetId: null, selected: null,
+      readOnly: true, providerCalls: 0, taskMutation: false, budgetMutation: false, humanSignoffInferred: false,
+    } as const)),
     proposeElementProfile: vi.fn(async () => { throw new Error('element proposal is not part of this fixture') }),
     proposeReferenceAsset: vi.fn(async () => { throw new Error('reference proposal is not part of this fixture') }),
     previewElementProfile: vi.fn(async () => { throw new Error('element preview is not part of this fixture') }),

@@ -38,6 +38,12 @@ The same selected Shot drives incoming/outgoing continuity cards through the Hos
 
 There is only a reload control in this panel. Source-object changes, refreshes, Shot changes, closure, and read errors hide old evidence immediately; cancellation plus response identity checks prevent late results from a previous Shot from becoming visible. The panel does not expose Skill or Stage selection, persist a second project state, sign off content, or create a Provider job.
 
+## Selected video review on the same Shot
+
+The shared Shot also drives a metadata-only view of Yimeng's current selected video review. Original accepted, rejected, pending, stale, and invalid states remain distinct. Defect types, notes, and exact available timecodes are retained without inventing severity, ownership, authenticated reviewer roles, or review timestamps. The existing record is not independent Qingmu or IMAGO signoff.
+
+The view checks the response's three IDs, asset/SHA binding, read-only markers, and review revision against the visible episode's storyboard revision. Shot, projection, port, refresh, closure, and source changes invalidate old responses. The only action is reload; there are no media elements, external links, selection controls, or approval commands. A missing selected asset stays missing even when another candidate is accepted.
+
 ## Security boundary
 
 `YIMENG_API_TOKEN` and `QINGMU_IMAGO_ATTESTATION_KEY` belong only to Qingmu Host processes. The browser plugin does not read environment variables, `localStorage`, `JWT_SECRET`, or cookies, and it never receives or renders either secret. Its only persistence is the bounded non-secret receipt-recovery marker in the current tab's `sessionStorage`. Read and command channels are separate Host plugins, both limited to loopback upstreams. If the token is absent, the cockpit shows a recovery instruction to configure the Host and restart the local instance.
