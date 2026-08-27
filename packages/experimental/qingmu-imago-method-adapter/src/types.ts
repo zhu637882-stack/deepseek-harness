@@ -76,25 +76,42 @@ export interface ImagoElementMethodResponse extends ImagoMethodJsonObject {
   readonly methodAttestation: ImagoElementMethodAttestation
 }
 
-/** Reference-asset operations compiled into guidance without executing them. */
-export type ImagoReferenceAssetOperation = 'selectReferenceAsset' | 'requestReferenceRegeneration'
+/** Existing reference-asset action operations compiled without executing them. */
+export type ImagoReferenceAssetActionOperation = 'selectReferenceAsset' | 'requestReferenceRegeneration'
+
+/** All operations transported through the existing reference-asset method endpoint. */
+export type ImagoReferenceAssetOperation = ImagoReferenceAssetActionOperation | 'replaceReferenceRights'
 
 /** Exact browser input for compiling a reference-asset operation method. */
-export interface ImagoReferenceAssetMethodRequest {
+interface ImagoReferenceAssetMethodRequestBase {
   readonly projectId: string
   readonly elementKind: ImagoElementKind
   readonly elementId: string
   readonly profileRevision: number
   readonly snapshotSha256: string
+}
+
+/** Selection/regeneration request compiled with the reference-asset method contract. */
+export interface ImagoReferenceAssetActionMethodRequest extends ImagoReferenceAssetMethodRequestBase {
   readonly assetId: string
   readonly assetSha256: string
-  readonly operation: ImagoReferenceAssetOperation
+  readonly operation: ImagoReferenceAssetActionOperation
 }
+
+/** Rights request carries only target lineage; the rights draft never enters IMAGO. */
+export interface ImagoReferenceRightsMethodRequest extends ImagoReferenceAssetMethodRequestBase {
+  readonly operation: 'replaceReferenceRights'
+}
+
+/** Exact browser input accepted by the existing reference-asset method endpoint. */
+export type ImagoReferenceAssetMethodRequest =
+  | ImagoReferenceAssetActionMethodRequest
+  | ImagoReferenceRightsMethodRequest
 
 /** Host-constructed reference-asset target plus fixed non-escalating authority. */
 export interface ImagoReferenceAssetMethodSnapshot extends ImagoMethodJsonObject {
   readonly schema: 'qingmu.reference-asset-method-snapshot.v1'
-  readonly target: ImagoReferenceAssetMethodRequest
+  readonly target: ImagoReferenceAssetActionMethodRequest
   readonly authority: {
     readonly business_truth: 'yimeng'
     readonly method_source: 'imago_os_current'
@@ -135,12 +152,17 @@ export interface ImagoReferenceAssetMethodAttestation extends ImagoMethodJsonObj
 }
 
 /** Host-attested reference-asset guidance; its SHA covers canonical projection JSON. */
-export interface ImagoReferenceAssetMethodResponse extends ImagoMethodJsonObject {
+export interface ImagoReferenceAssetActionMethodResponse extends ImagoMethodJsonObject {
   readonly schema: 'qingmu.imago-reference-asset-method-adapter-result.v1'
   readonly projectionSha256: string
   readonly projection: ImagoReferenceAssetMethodProjection
   readonly methodAttestation: ImagoReferenceAssetMethodAttestation
 }
+
+/** Endpoint result: action guidance uses the legacy proof, rights guidance uses the element proof. */
+export type ImagoReferenceAssetMethodResponse =
+  | ImagoReferenceAssetActionMethodResponse
+  | ImagoElementMethodResponse
 
 /** The only Yimeng v2 PromptIR fields exposed by the bounded E4-4 method. */
 export type ImagoPromptIrEditableField =

@@ -47,8 +47,64 @@ export type YimengElementKind = 'actor' | 'scene' | 'prop'
 /** Field replacement operation fixed by the authoritative element kind. */
 export type YimengElementProfileOperation = 'replaceVisualIdentity' | 'replaceVisualPrompt'
 
-/** Reference-asset intentions supported by the existing element ChangeSet lane. */
-export type YimengReferenceAssetOperation = 'selectReferenceAsset' | 'requestReferenceRegeneration'
+/** Selection/regeneration intentions supported by the existing reference lane. */
+export type YimengReferenceActionOperation = 'selectReferenceAsset' | 'requestReferenceRegeneration'
+
+/** Every reference-bound intention supported by the existing element ChangeSet lane. */
+export type YimengReferenceAssetOperation = YimengReferenceActionOperation | 'replaceReferenceRights'
+
+/** Explicit knowledge state used by one normalized reference-rights fact. */
+export type YimengReferenceRightsKnowledgeState = 'known' | 'unknown' | 'not_applicable'
+
+/** One scalar reference-rights fact. */
+export interface YimengReferenceRightsScalar {
+  readonly state: YimengReferenceRightsKnowledgeState
+  readonly value: string | null
+}
+
+/** One list-valued reference-rights fact. */
+export interface YimengReferenceRightsList {
+  readonly state: YimengReferenceRightsKnowledgeState
+  readonly values: readonly string[]
+}
+
+/** Exact normalized human-owned rights record for one immutable reference binding. */
+export interface YimengReferenceRightsRecord {
+  readonly schema: 'jason.qingmu-reference-rights-record.v1'
+  readonly sourceType: YimengReferenceRightsScalar
+  readonly rightsHolder: YimengReferenceRightsScalar
+  readonly authorizationScope: YimengReferenceRightsList
+  readonly territory: YimengReferenceRightsList
+  readonly term: {
+    readonly state: YimengReferenceRightsKnowledgeState
+    readonly startsAt: string | null
+    readonly endsAt: string | null
+    readonly perpetual: boolean | null
+  }
+  readonly restrictions: YimengReferenceRightsList
+  readonly contains: {
+    readonly realPersonLikeness: 'yes' | 'no' | 'unknown'
+    readonly trademark: 'yes' | 'no' | 'unknown'
+    readonly music: 'yes' | 'no' | 'unknown'
+    readonly font: 'yes' | 'no' | 'unknown'
+    readonly thirdPartyCharacter: 'yes' | 'no' | 'unknown'
+  }
+  readonly providerTerms: {
+    readonly state: YimengReferenceRightsKnowledgeState
+    readonly terms: string | null
+    readonly reviewedAt: string | null
+  }
+  readonly modelLicenses: {
+    readonly code: YimengReferenceRightsScalar
+    readonly weights: YimengReferenceRightsScalar
+    readonly outputUse: YimengReferenceRightsScalar
+  }
+  readonly humanDeclaration: {
+    readonly state: 'provided' | 'unknown' | 'not_applicable'
+    readonly text: string | null
+  }
+  readonly contentCredentials: YimengReferenceRightsScalar
+}
 
 /** Opaque Host-issued proof forwarded to Yimeng without browser-side signing. */
 export interface YimengImagoElementMethodAttestation extends YimengCommandJsonObject {
@@ -104,7 +160,7 @@ export interface YimengImagoReferenceAssetMethodProjection extends YimengCommand
     readonly snapshotSha256: string
     readonly assetId: string
     readonly assetSha256: string
-    readonly operation: YimengReferenceAssetOperation
+    readonly operation: YimengReferenceActionOperation
   }
   readonly method_definition: YimengCommandJsonObject
   readonly source_bindings: readonly YimengCommandJsonObject[]
@@ -132,23 +188,42 @@ export interface YimengImagoReferenceAssetMethodAttestation extends YimengComman
   readonly signature: string
 }
 
-/** Browser-safe reference proposal; the proof is verified and stripped in the Host. */
-export interface YimengProposeReferenceAssetRequest {
+interface YimengProposeReferenceRequestBase {
   readonly projectId: string
   readonly targetType: 'element_profile'
   readonly targetId: string
   readonly elementKind: YimengElementKind
-  readonly operation: YimengReferenceAssetOperation
-  readonly candidateAssetId: string
-  readonly candidateAssetSha256: string
   readonly baseRevision: number
   readonly baseSnapshotSha256: string
-  readonly repairPrompt?: string
   readonly harnessSessionId?: string
+}
+
+/** Browser-safe selection/regeneration proposal; Host verifies and strips its proof. */
+export interface YimengProposeReferenceActionRequest extends YimengProposeReferenceRequestBase {
+  readonly operation: YimengReferenceActionOperation
+  readonly candidateAssetId: string
+  readonly candidateAssetSha256: string
+  readonly repairPrompt?: string
   readonly methodProjection: YimengImagoReferenceAssetMethodProjection
   readonly methodProjectionSha256: string
   readonly methodAttestation: YimengImagoReferenceAssetMethodAttestation
 }
+
+/** Browser-safe rights replacement; the element-method proof carries no rights draft. */
+export interface YimengProposeReferenceRightsRequest extends YimengProposeReferenceRequestBase {
+  readonly operation: 'replaceReferenceRights'
+  readonly referenceAssetId: string
+  readonly referenceAssetSha256: string
+  readonly rights: YimengReferenceRightsRecord
+  readonly methodProjection: YimengCommandJsonObject
+  readonly methodProjectionSha256: string
+  readonly methodAttestation: YimengImagoElementMethodAttestation
+}
+
+/** Browser-safe proposal input for the existing reference ChangeSet lane. */
+export type YimengProposeReferenceAssetRequest =
+  | YimengProposeReferenceActionRequest
+  | YimengProposeReferenceRightsRequest
 
 /** Element-profile proposal receipt; it is not a commit. */
 export interface YimengProposeElementProfileResponse extends YimengCommandJsonObject {
@@ -177,15 +252,23 @@ export type YimengVisualPreviewElementProfileRequest = YimengElementProfileComma
 
 /** Reference preview coordinates retain exact operation and candidate lineage in the Host. */
 export interface YimengReferencePreviewElementProfileRequest extends YimengElementProfileCommandSubject {
-  readonly operation: YimengReferenceAssetOperation
+  readonly operation: YimengReferenceActionOperation
   readonly candidateAssetId: string
   readonly candidateAssetSha256: string
+}
+
+/** Rights preview coordinates retain the immutable asset binding. */
+export interface YimengReferenceRightsPreviewElementProfileRequest extends YimengElementProfileCommandSubject {
+  readonly operation: 'replaceReferenceRights'
+  readonly referenceAssetId: string
+  readonly referenceAssetSha256: string
 }
 
 /** Exact element subject submitted to generic preview. */
 export type YimengPreviewElementProfileRequest =
   | YimengVisualPreviewElementProfileRequest
   | YimengReferencePreviewElementProfileRequest
+  | YimengReferenceRightsPreviewElementProfileRequest
 
 /** Exact dependency impact calculated from Yimeng authority, never from browser claims. */
 export interface YimengElementImpactAnalysis extends YimengCommandJsonObject {
@@ -239,7 +322,7 @@ export interface YimengReferencePreviewElementProfileResponse extends YimengComm
   readonly targetType: 'element_profile'
   readonly targetId: string
   readonly elementKind: YimengElementKind
-  readonly operation: YimengReferenceAssetOperation
+  readonly operation: YimengReferenceActionOperation
   readonly candidateAssetId: string
   readonly candidateAssetSha256: string
   readonly candidateDrift: boolean
@@ -249,10 +332,46 @@ export interface YimengReferencePreviewElementProfileResponse extends YimengComm
   readonly humanApprovalInferred: false
 }
 
+/** Generic ChangeSet preview for a strict rights replacement. */
+export interface YimengReferenceRightsPreviewElementProfileResponse extends YimengCommandJsonObject {
+  readonly schema: 'jason.qingmu-change-set-preview.v1'
+  readonly changeSet: YimengElementProfileChangeSet
+  readonly baseSubject: YimengCommandJsonObject
+  readonly authoritativeCurrentSubject: YimengCommandJsonObject
+  readonly changeSetId: string
+  readonly payloadSha256: string
+  readonly projectId: string
+  readonly targetType: 'element_profile'
+  readonly targetId: string
+  readonly elementKind: YimengElementKind
+  readonly operation: 'replaceReferenceRights'
+  readonly referenceAssetId: string
+  readonly referenceAssetSha256: string
+  readonly proposedReferenceRights: YimengReferenceRightsRecord
+  readonly baseRevision: number
+  readonly authoritativeRevision: number
+  readonly baseSnapshotSha256: string
+  readonly authoritativeSnapshotSha256: string
+  readonly changed: boolean
+  readonly authoritativeChanged: boolean
+  readonly revisionConflict: boolean
+  readonly baseSnapshotConflict: boolean
+  readonly impactConflict: boolean
+  readonly canCommit: boolean
+  readonly referenceInvalidationExpected: boolean
+  readonly impactAnalysis: YimengElementImpactAnalysis
+  readonly impactSha256: string
+  readonly preflight: YimengCommandJsonObject
+  readonly references: readonly YimengCommandJsonObject[]
+  readonly methodProjectionSha256: string
+  readonly previewSha256: string
+}
+
 /** Generic element preview may describe a visual edit or a reference intention. */
 export type YimengPreviewElementProfileResponse =
   | YimengVisualPreviewElementProfileResponse
   | YimengReferencePreviewElementProfileResponse
+  | YimengReferenceRightsPreviewElementProfileResponse
 
 /** Explicit element commit input. Reusing the key makes an exact retry idempotent. */
 export type YimengCommitElementProfileRequest = YimengPreviewElementProfileRequest & {
@@ -296,7 +415,7 @@ export interface YimengReferenceCommitElementProfileResponse extends YimengComma
   readonly targetType: 'element_profile'
   readonly targetId: string
   readonly elementKind: YimengElementKind
-  readonly operation: YimengReferenceAssetOperation
+  readonly operation: YimengReferenceActionOperation
   readonly candidateAssetId: string
   readonly candidateAssetSha256: string
   readonly baseRevision: number
@@ -312,10 +431,38 @@ export interface YimengReferenceCommitElementProfileResponse extends YimengComma
   readonly committedAt: string
 }
 
+/** Durable receipt for a rights replacement; the sensitive rights body is deliberately absent. */
+export interface YimengReferenceRightsCommitElementProfileResponse extends YimengCommandJsonObject {
+  readonly schema: 'jason.qingmu-element-profile-commit-result.v1'
+  readonly changeSetId: string
+  readonly commandReceiptId: string
+  readonly eventId: string
+  readonly eventType: 'ElementProfileChanged' | 'ReferenceInvalidated'
+  readonly projectId: string
+  readonly targetType: 'element_profile'
+  readonly targetId: string
+  readonly elementKind: YimengElementKind
+  readonly operation: 'replaceReferenceRights'
+  readonly referenceAssetId: string
+  readonly referenceAssetSha256: string
+  readonly baseRevision: number
+  readonly authoritativeRevision: number
+  readonly authoritativeSnapshotSha256: string
+  readonly payloadSha256: string
+  readonly idempotencyKey: string
+  readonly changed: boolean
+  readonly referenceInvalidated: boolean
+  readonly impactAnalysis: YimengElementImpactAnalysis
+  readonly impactSha256: string
+  readonly deduplicated: boolean
+  readonly committedAt: string
+}
+
 /** Generic element commit receipt for the existing visual and reference lanes. */
 export type YimengCommitElementProfileResponse =
   | YimengVisualCommitElementProfileResponse
   | YimengReferenceCommitElementProfileResponse
+  | YimengReferenceRightsCommitElementProfileResponse
 
 /** Read-only lookup input for recovering one accepted element commit receipt. */
 export type YimengRecoverElementProfileCommitRequest = YimengCommitElementProfileRequest

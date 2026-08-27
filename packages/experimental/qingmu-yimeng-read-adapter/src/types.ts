@@ -109,16 +109,72 @@ export interface YimengPromptIrResponse extends YimengJsonObject {
 /** Element kinds reserved by the generic element-profile route. */
 export type YimengElementKind = 'actor' | 'scene' | 'prop'
 
+/** Explicit knowledge state used by one strictly normalized rights field. */
+export type YimengReferenceRightsKnowledgeState = 'known' | 'unknown' | 'not_applicable'
+
+/** One scalar rights fact. Non-known values are always null. */
+export interface YimengReferenceRightsScalar {
+  readonly state: YimengReferenceRightsKnowledgeState
+  readonly value: string | null
+}
+
+/** One list-valued rights fact. Non-known values are always empty. */
+export interface YimengReferenceRightsList {
+  readonly state: YimengReferenceRightsKnowledgeState
+  readonly values: readonly string[]
+}
+
+/** Exact normalized record attached to one immutable reference asset binding. */
+export interface YimengReferenceRightsRecord {
+  readonly schema: 'jason.qingmu-reference-rights-record.v1'
+  readonly sourceType: YimengReferenceRightsScalar
+  readonly rightsHolder: YimengReferenceRightsScalar
+  readonly authorizationScope: YimengReferenceRightsList
+  readonly territory: YimengReferenceRightsList
+  readonly term: {
+    readonly state: YimengReferenceRightsKnowledgeState
+    readonly startsAt: string | null
+    readonly endsAt: string | null
+    readonly perpetual: boolean | null
+  }
+  readonly restrictions: YimengReferenceRightsList
+  readonly contains: {
+    readonly realPersonLikeness: 'yes' | 'no' | 'unknown'
+    readonly trademark: 'yes' | 'no' | 'unknown'
+    readonly music: 'yes' | 'no' | 'unknown'
+    readonly font: 'yes' | 'no' | 'unknown'
+    readonly thirdPartyCharacter: 'yes' | 'no' | 'unknown'
+  }
+  readonly providerTerms: {
+    readonly state: YimengReferenceRightsKnowledgeState
+    readonly terms: string | null
+    readonly reviewedAt: string | null
+  }
+  readonly modelLicenses: {
+    readonly code: YimengReferenceRightsScalar
+    readonly weights: YimengReferenceRightsScalar
+    readonly outputUse: YimengReferenceRightsScalar
+  }
+  readonly humanDeclaration: {
+    readonly state: 'provided' | 'unknown' | 'not_applicable'
+    readonly text: string | null
+  }
+  readonly contentCredentials: YimengReferenceRightsScalar
+}
+
 /** A reference attached to an authoritative element profile subject. */
 export interface YimengElementProfileReference extends YimengJsonObject {
   readonly assetId: string
   readonly sha256: string
   readonly selectionStatus: string
   readonly isSelected: boolean
+  readonly rightsRecorded: boolean
+  readonly rights: YimengReferenceRightsRecord
+  readonly role?: string
 }
 
 interface YimengElementProfileSubjectBase extends YimengJsonObject {
-  readonly schema: 'jason.qingmu-element-profile-subject.v1'
+  readonly schema: 'jason.qingmu-element-profile-subject.v2'
   readonly projectId: string
   readonly targetType: 'element_profile'
   readonly profileRevision: number
@@ -167,7 +223,7 @@ export interface YimengElementProfileRequest {
  * snapshot itself is deliberately retained by the Host and never exposed.
  */
 export interface YimengElementProfileResponse extends YimengJsonObject {
-  readonly schema: 'jason.qingmu-element-profile-subject-read.v1'
+  readonly schema: 'jason.qingmu-element-profile-subject-read.v2'
   readonly subject: YimengElementProfileSubject
   readonly snapshotSha256: string
 }

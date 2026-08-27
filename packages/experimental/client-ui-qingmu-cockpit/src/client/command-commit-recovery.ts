@@ -1,10 +1,14 @@
-const MARKER_SCHEMA = 'qingmu.command-commit-recovery-marker.v3'
-const STORAGE_PREFIX = 'qingmu:command-commit-recovery:v3'
-const LEGACY_STORAGE_PREFIX = 'qingmu:command-commit-recovery:v2'
+const MARKER_SCHEMA = 'qingmu.command-commit-recovery-marker.v4'
+const STORAGE_PREFIX = 'qingmu:command-commit-recovery:v4'
+const LEGACY_STORAGE_PREFIXES = [
+  'qingmu:command-commit-recovery:v3',
+  'qingmu:command-commit-recovery:v2',
+] as const
 const SHA256 = /^[0-9a-f]{64}$/
 const ELEMENT_KINDS = ['actor', 'scene', 'prop'] as const
 const VISUAL_OPERATIONS = ['replaceVisualIdentity', 'replaceVisualPrompt'] as const
 const REFERENCE_OPERATIONS = ['selectReferenceAsset', 'requestReferenceRegeneration'] as const
+const REFERENCE_RIGHTS_OPERATION = 'replaceReferenceRights' as const
 const MARKER_KEYS = [
   'schema',
   'projectId',
@@ -23,6 +27,14 @@ const REFERENCE_MARKER_KEYS = [
   'candidateAssetId',
   'candidateAssetSha256',
 ] as const
+const REFERENCE_RIGHTS_MARKER_KEYS = [
+  ...MARKER_KEYS,
+  'referenceAssetId',
+  'referenceAssetSha256',
+  'referenceRightsSha256',
+  'selectionStatus',
+  'isSelected',
+] as const
 
 /** Element kinds supported by the subject-scoped commit-recovery marker. */
 export type CommandElementKind = typeof ELEMENT_KINDS[number]
@@ -33,8 +45,14 @@ export type CommandVisualOperation = typeof VISUAL_OPERATIONS[number]
 /** Reference-asset operations that can be recovered without resubmitting their commit. */
 export type CommandReferenceOperation = typeof REFERENCE_OPERATIONS[number]
 
+/** Structured rights replacement carried by the existing reference ChangeSet lane. */
+export type CommandReferenceRightsOperation = typeof REFERENCE_RIGHTS_OPERATION
+
 /** Every element-profile operation bound into a commit-recovery marker. */
-export type CommandElementOperation = CommandVisualOperation | CommandReferenceOperation
+export type CommandElementOperation =
+  | CommandVisualOperation
+  | CommandReferenceOperation
+  | CommandReferenceRightsOperation
 
 interface CommandCommitRecoveryMarkerBase {
   readonly schema: typeof MARKER_SCHEMA
@@ -61,10 +79,21 @@ export interface CommandReferenceCommitRecoveryMarker extends CommandCommitRecov
   readonly candidateAssetSha256: string
 }
 
+/** Rights commit lineage bound to the immutable reference and pre-commit selection facts. */
+export interface CommandReferenceRightsCommitRecoveryMarker extends CommandCommitRecoveryMarkerBase {
+  readonly operation: CommandReferenceRightsOperation
+  readonly referenceAssetId: string
+  readonly referenceAssetSha256: string
+  readonly referenceRightsSha256: string
+  readonly selectionStatus: string
+  readonly isSelected: boolean
+}
+
 /** Non-secret lineage needed to recover an element-profile commit without resubmitting it. */
 export type CommandCommitRecoveryMarker =
   | CommandVisualCommitRecoveryMarker
   | CommandReferenceCommitRecoveryMarker
+  | CommandReferenceRightsCommitRecoveryMarker
 
 type WithoutSchema<T> = T extends unknown ? Omit<T, 'schema'> : never
 
@@ -78,7 +107,7 @@ export type CommandCommitRecoveryMarkerRead =
   | { readonly status: 'invalid'; readonly error: string }
 
 function storageKey(
-  prefix: typeof STORAGE_PREFIX | typeof LEGACY_STORAGE_PREFIX,
+  prefix: typeof STORAGE_PREFIX | typeof LEGACY_STORAGE_PREFIXES[number],
   projectId: string,
   elementKind: CommandElementKind,
   targetId: string,
@@ -132,7 +161,7 @@ export async function deriveCommandIdempotencyKey(
   const changeSetSha256 = [...new Uint8Array(digest)]
     .map(value => value.toString(16).padStart(2, '0'))
     .join('')
-  return `qingmu:element:v3:${changeSetSha256}:${payloadSha256}`
+  return `qingmu:element:v4:${changeSetSha256}:${payloadSha256}`
 }
 
 function isElementKind(value: unknown): value is CommandElementKind {
@@ -147,8 +176,12 @@ function isReferenceOperation(value: unknown): value is CommandReferenceOperatio
   return REFERENCE_OPERATIONS.includes(value as CommandReferenceOperation)
 }
 
+function isReferenceRightsOperation(value: unknown): value is CommandReferenceRightsOperation {
+  return value === REFERENCE_RIGHTS_OPERATION
+}
+
 function isElementOperation(value: unknown): value is CommandElementOperation {
-  return isVisualOperation(value) || isReferenceOperation(value)
+  return isVisualOperation(value) || isReferenceOperation(value) || isReferenceRightsOperation(value)
 }
 
 function assertOperationMatchesElementKind(
@@ -174,7 +207,11 @@ function parseMarker(
   }
   const record = value as Record<string, unknown>
   const keys = Object.keys(record).sort()
-  const expectedKeys = [...(isReferenceOperation(record.operation) ? REFERENCE_MARKER_KEYS : MARKER_KEYS)].sort()
+  const expectedKeys = [...(isReferenceOperation(record.operation)
+    ? REFERENCE_MARKER_KEYS
+    : isReferenceRightsOperation(record.operation)
+      ? REFERENCE_RIGHTS_MARKER_KEYS
+      : MARKER_KEYS)].sort()
   if (keys.length !== expectedKeys.length || keys.some((key, index) => key !== expectedKeys[index])) {
     throw new Error('恢复标记字段不符合合同')
   }
@@ -210,21 +247,47 @@ function parseMarker(
     payloadSha256: record.payloadSha256,
     idempotencyKey: record.idempotencyKey,
   }
-  if (!isReferenceOperation(record.operation)) return { ...base, operation: record.operation }
-  if (!isIdentifier(record.candidateAssetId)) throw new Error('恢复标记候选资产 ID 无效')
-  if (typeof record.candidateAssetSha256 !== 'string' || !SHA256.test(record.candidateAssetSha256)) {
-    throw new Error('恢复标记候选资产 SHA-256 无效')
+  if (isReferenceOperation(record.operation)) {
+    if (!isIdentifier(record.candidateAssetId)) throw new Error('恢复标记候选资产 ID 无效')
+    if (typeof record.candidateAssetSha256 !== 'string' || !SHA256.test(record.candidateAssetSha256)) {
+      throw new Error('恢复标记候选资产 SHA-256 无效')
+    }
+    return {
+      ...base,
+      operation: record.operation,
+      candidateAssetId: record.candidateAssetId,
+      candidateAssetSha256: record.candidateAssetSha256,
+    }
   }
-  return {
-    ...base,
-    operation: record.operation,
-    candidateAssetId: record.candidateAssetId,
-    candidateAssetSha256: record.candidateAssetSha256,
+  if (isReferenceRightsOperation(record.operation)) {
+    if (!isIdentifier(record.referenceAssetId)) throw new Error('恢复标记参考资产 ID 无效')
+    if (typeof record.referenceAssetSha256 !== 'string' || !SHA256.test(record.referenceAssetSha256)) {
+      throw new Error('恢复标记参考资产 SHA-256 无效')
+    }
+    if (typeof record.referenceRightsSha256 !== 'string' || !SHA256.test(record.referenceRightsSha256)) {
+      throw new Error('恢复标记权利记录 SHA-256 无效')
+    }
+    if (!isIdentifier(record.selectionStatus, 128)) throw new Error('恢复标记选择状态无效')
+    if (typeof record.isSelected !== 'boolean') throw new Error('恢复标记选择事实无效')
+    return {
+      ...base,
+      operation: record.operation,
+      referenceAssetId: record.referenceAssetId,
+      referenceAssetSha256: record.referenceAssetSha256,
+      referenceRightsSha256: record.referenceRightsSha256,
+      selectionStatus: record.selectionStatus,
+      isSelected: record.isSelected,
+    }
   }
+  return { ...base, operation: record.operation }
 }
 
 function sameMarker(left: CommandCommitRecoveryMarker, right: CommandCommitRecoveryMarker): boolean {
-  const keys = isReferenceOperation(left.operation) ? REFERENCE_MARKER_KEYS : MARKER_KEYS
+  const keys = isReferenceOperation(left.operation)
+    ? REFERENCE_MARKER_KEYS
+    : isReferenceRightsOperation(left.operation)
+      ? REFERENCE_RIGHTS_MARKER_KEYS
+      : MARKER_KEYS
   const leftRecord = left as unknown as Record<string, unknown>
   const rightRecord = right as unknown as Record<string, unknown>
   return keys.every(key => leftRecord[key] === rightRecord[key])
@@ -259,8 +322,10 @@ export function readCommandCommitRecoveryMarker(
   targetId: string,
 ): CommandCommitRecoveryMarkerRead {
   try {
-    const legacy = sessionStorage.getItem(storageKey(LEGACY_STORAGE_PREFIX, projectId, elementKind, targetId))
-    if (legacy !== null) {
+    const legacy = LEGACY_STORAGE_PREFIXES.some(prefix => (
+      sessionStorage.getItem(storageKey(prefix, projectId, elementKind, targetId)) !== null
+    ))
+    if (legacy) {
       return { status: 'invalid', error: '检测到旧版恢复标记，必须先丢弃后才能继续' }
     }
     const serialized = sessionStorage.getItem(storageKey(STORAGE_PREFIX, projectId, elementKind, targetId))
@@ -281,8 +346,9 @@ export function readCommandCommitRecoveryMarker(
  */
 export function writeCommandCommitRecoveryMarker(marker: CommandCommitRecoveryMarker): boolean {
   try {
-    const legacyKey = storageKey(LEGACY_STORAGE_PREFIX, marker.projectId, marker.elementKind, marker.targetId)
-    if (sessionStorage.getItem(legacyKey) !== null) return false
+    if (LEGACY_STORAGE_PREFIXES.some(prefix => (
+      sessionStorage.getItem(storageKey(prefix, marker.projectId, marker.elementKind, marker.targetId)) !== null
+    ))) return false
     const validated = parseMarker(marker, marker.projectId, marker.elementKind, marker.targetId)
     const serialized = JSON.stringify(validated)
     const key = storageKey(STORAGE_PREFIX, marker.projectId, marker.elementKind, marker.targetId)
@@ -305,8 +371,9 @@ export function writeCommandCommitRecoveryMarker(marker: CommandCommitRecoveryMa
  */
 export function clearCommandCommitRecoveryMarker(marker: CommandCommitRecoveryMarker): boolean {
   try {
-    const legacyKey = storageKey(LEGACY_STORAGE_PREFIX, marker.projectId, marker.elementKind, marker.targetId)
-    if (sessionStorage.getItem(legacyKey) !== null) return false
+    if (LEGACY_STORAGE_PREFIXES.some(prefix => (
+      sessionStorage.getItem(storageKey(prefix, marker.projectId, marker.elementKind, marker.targetId)) !== null
+    ))) return false
     const key = storageKey(STORAGE_PREFIX, marker.projectId, marker.elementKind, marker.targetId)
     const serialized = sessionStorage.getItem(key)
     if (serialized === null) return true
@@ -338,10 +405,13 @@ export function discardCommandCommitRecoveryMarker(
 ): boolean {
   try {
     const currentKey = storageKey(STORAGE_PREFIX, projectId, elementKind, targetId)
-    const legacyKey = storageKey(LEGACY_STORAGE_PREFIX, projectId, elementKind, targetId)
     sessionStorage.removeItem(currentKey)
-    sessionStorage.removeItem(legacyKey)
-    return sessionStorage.getItem(currentKey) === null && sessionStorage.getItem(legacyKey) === null
+    for (const prefix of LEGACY_STORAGE_PREFIXES) {
+      sessionStorage.removeItem(storageKey(prefix, projectId, elementKind, targetId))
+    }
+    return sessionStorage.getItem(currentKey) === null && LEGACY_STORAGE_PREFIXES.every(prefix => (
+      sessionStorage.getItem(storageKey(prefix, projectId, elementKind, targetId)) === null
+    ))
   } catch {
     return false
   }

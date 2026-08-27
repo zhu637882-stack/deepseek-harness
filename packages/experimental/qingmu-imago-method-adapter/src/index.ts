@@ -25,11 +25,13 @@ import type {
   ImagoPromptIrMethodRequest,
   ImagoPromptIrMethodResponse,
   ImagoPromptIrMethodSnapshot,
+  ImagoReferenceAssetActionMethodRequest,
+  ImagoReferenceAssetActionMethodResponse,
   ImagoReferenceAssetMethodAttestation,
   ImagoReferenceAssetMethodProjection,
   ImagoReferenceAssetMethodRequest,
-  ImagoReferenceAssetMethodResponse,
   ImagoReferenceAssetMethodSnapshot,
+  ImagoReferenceRightsMethodRequest,
 } from './types.ts'
 
 export type {
@@ -50,11 +52,15 @@ export type {
   ImagoPromptIrMethodRequest,
   ImagoPromptIrMethodResponse,
   ImagoPromptIrMethodSnapshot,
+  ImagoReferenceAssetActionMethodRequest,
+  ImagoReferenceAssetActionMethodResponse,
   ImagoReferenceAssetMethodAttestation,
   ImagoReferenceAssetMethodProjection,
   ImagoReferenceAssetMethodRequest,
   ImagoReferenceAssetMethodResponse,
   ImagoReferenceAssetMethodSnapshot,
+  ImagoReferenceRightsMethodRequest,
+  ImagoReferenceAssetActionOperation,
   ImagoReferenceAssetOperation,
 } from './types.ts'
 
@@ -67,6 +73,7 @@ const MAX_OUTPUT_BYTES = 5 * 1024 * 1024
 const SHA256 = /^[0-9a-f]{64}$/
 const ELEMENT_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_element_method.py'
 const REFERENCE_ASSET_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_reference_asset_method.py'
+const REFERENCE_RIGHTS_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_reference_rights_method.py'
 const PROMPT_IR_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_prompt_ir_method.py'
 const COMMON_SOURCE_PATHS = [
   'pipeline/imago-os-current.json',
@@ -231,6 +238,12 @@ export interface ImagoMethodAdapterDependencies {
   /** Optional injectable boundary for the reference-asset compiler. */
   readonly runReferenceAssetCompiler?: (
     snapshot: ImagoReferenceAssetMethodSnapshot,
+    execution: ImagoMethodCompilerExecution,
+    signal: AbortSignal,
+  ) => Promise<unknown>
+  /** Optional element-contract compiler boundary for reference rights guidance. */
+  readonly runReferenceRightsCompiler?: (
+    snapshot: ImagoElementMethodSnapshot,
     execution: ImagoMethodCompilerExecution,
     signal: AbortSignal,
   ) => Promise<unknown>
@@ -399,13 +412,14 @@ function parseRequest(payload: unknown): ImagoElementMethodRequest {
   if (input.elementKind !== 'actor' && input.elementKind !== 'scene' && input.elementKind !== 'prop') {
     throw new InputError('elementKind must be actor, scene, or prop')
   }
+  const elementKind = input.elementKind
   if (input.scopeType !== 'project') throw new InputError('scopeType must be project')
   if (scopeId !== projectId) throw new InputError('scopeId must equal projectId')
   return {
     projectId,
     targetType: 'element_profile',
     targetId: parseIdentifier(input.targetId, 'targetId'),
-    elementKind: input.elementKind,
+    elementKind,
     scopeType: 'project',
     scopeId,
     baseRevision: parseInputInteger(input.baseRevision, 'baseRevision'),
@@ -415,6 +429,37 @@ function parseRequest(payload: unknown): ImagoElementMethodRequest {
 
 function parseReferenceAssetRequest(payload: unknown): ImagoReferenceAssetMethodRequest {
   const input = parseInputObject(payload)
+  if (input.elementKind !== 'actor' && input.elementKind !== 'scene' && input.elementKind !== 'prop') {
+    throw new InputError('elementKind must be actor, scene, or prop')
+  }
+  const elementKind = input.elementKind
+  if (
+    input.operation !== 'selectReferenceAsset'
+    && input.operation !== 'requestReferenceRegeneration'
+    && input.operation !== 'replaceReferenceRights'
+  ) {
+    throw new InputError(
+      'operation must be selectReferenceAsset, requestReferenceRegeneration, or replaceReferenceRights',
+    )
+  }
+  const common: Omit<ImagoReferenceRightsMethodRequest, 'operation'> = {
+    projectId: parseIdentifier(input.projectId, 'projectId'),
+    elementKind,
+    elementId: parseIdentifier(input.elementId, 'elementId'),
+    profileRevision: parseInputInteger(input.profileRevision, 'profileRevision'),
+    snapshotSha256: parseInputSha256(input.snapshotSha256, 'snapshotSha256'),
+  }
+  if (input.operation === 'replaceReferenceRights') {
+    assertOnlyInputKeys(input, [
+      'projectId',
+      'elementKind',
+      'elementId',
+      'profileRevision',
+      'snapshotSha256',
+      'operation',
+    ])
+    return { ...common, operation: 'replaceReferenceRights' }
+  }
   assertOnlyInputKeys(input, [
     'projectId',
     'elementKind',
@@ -425,18 +470,8 @@ function parseReferenceAssetRequest(payload: unknown): ImagoReferenceAssetMethod
     'assetSha256',
     'operation',
   ])
-  if (input.elementKind !== 'actor' && input.elementKind !== 'scene' && input.elementKind !== 'prop') {
-    throw new InputError('elementKind must be actor, scene, or prop')
-  }
-  if (input.operation !== 'selectReferenceAsset' && input.operation !== 'requestReferenceRegeneration') {
-    throw new InputError('operation must be selectReferenceAsset or requestReferenceRegeneration')
-  }
   return {
-    projectId: parseIdentifier(input.projectId, 'projectId'),
-    elementKind: input.elementKind,
-    elementId: parseIdentifier(input.elementId, 'elementId'),
-    profileRevision: parseInputInteger(input.profileRevision, 'profileRevision'),
-    snapshotSha256: parseInputSha256(input.snapshotSha256, 'snapshotSha256'),
+    ...common,
     assetId: parseIdentifier(input.assetId, 'assetId'),
     assetSha256: parseInputSha256(input.assetSha256, 'assetSha256'),
     operation: input.operation,
@@ -560,7 +595,7 @@ function buildSnapshot(request: ImagoElementMethodRequest): ImagoElementMethodSn
 }
 
 function buildReferenceAssetSnapshot(
-  request: ImagoReferenceAssetMethodRequest,
+  request: ImagoReferenceAssetActionMethodRequest,
 ): ImagoReferenceAssetMethodSnapshot {
   return {
     schema: 'qingmu.reference-asset-method-snapshot.v1',
@@ -572,6 +607,19 @@ function buildReferenceAssetSnapshot(
       paid_provider_authority: 'not_granted',
     },
   }
+}
+
+function buildReferenceRightsSnapshot(request: ImagoReferenceRightsMethodRequest): ImagoElementMethodSnapshot {
+  return buildSnapshot({
+    projectId: request.projectId,
+    targetType: 'element_profile',
+    targetId: request.elementId,
+    elementKind: request.elementKind,
+    scopeType: 'project',
+    scopeId: request.projectId,
+    baseRevision: request.profileRevision,
+    baseSnapshotSha256: request.snapshotSha256,
+  })
 }
 
 function buildPromptIrSnapshot(request: ImagoPromptIrMethodRequest): ImagoPromptIrMethodSnapshot {
@@ -784,6 +832,200 @@ function normalizeProjection(
   requireExactArray(legalWorkSet.reads, profile.reads, 'projection.legal_work_set.reads')
   requireExactArray(legalWorkSet.writes, profile.writes, 'projection.legal_work_set.writes')
   requireExactArray(legalWorkSet.invalidates, profile.invalidates, 'projection.legal_work_set.invalidates')
+  requireExactArray(legalWorkSet.forbidden, FORBIDDEN_WORK, 'projection.legal_work_set.forbidden')
+
+  if (
+    root.authority_snapshot_attestation !== 'not_verified_by_compiler'
+    || requireBoolean(root.project_state_persisted, 'projection.project_state_persisted')
+    || root.paid_provider_authority !== 'not_granted'
+    || requireBoolean(root.human_approval_inferred, 'projection.human_approval_inferred')
+    || root.selection_authority !== 'not_granted'
+  ) {
+    throw new ProjectionContractError('projection authority boundary mismatch')
+  }
+  return root as ImagoElementMethodProjection
+}
+
+function normalizeReferenceRightsProjection(
+  value: unknown,
+  snapshot: ImagoElementMethodSnapshot,
+): ImagoElementMethodProjection {
+  assertSafeJsonNumbers(value, 'projection')
+  const root = requireExactObject(value, [
+    'schema',
+    'input_snapshot_sha256',
+    'subject',
+    'method_definition',
+    'source_bindings',
+    'field_hints',
+    'checklist',
+    'work_order_projection',
+    'review_card',
+    'legal_work_set',
+    'authority_snapshot_attestation',
+    'project_state_persisted',
+    'paid_provider_authority',
+    'human_approval_inferred',
+    'selection_authority',
+  ], 'projection')
+  if (root.schema !== 'qingmu.imago-element-method-projection.v1') {
+    throw new ProjectionContractError('projection.schema mismatch')
+  }
+  if (
+    requireSha256(root.input_snapshot_sha256, 'projection.input_snapshot_sha256')
+    !== canonicalSha256(snapshot, 'snapshot')
+  ) {
+    throw new ProjectionContractError('projection input snapshot hash mismatch')
+  }
+  if (!isDeepStrictEqual(root.subject, snapshot.subject)) {
+    throw new ProjectionContractError('projection subject mismatch')
+  }
+  const sourcePaths = ELEMENT_METHOD_PROFILES[snapshot.subject.element_kind].sourcePaths
+
+  const definition = requireExactObject(root.method_definition, [
+    'id',
+    'version',
+    'sha256',
+    'stage_contract_sha256',
+    'role_capability_sha256',
+    'agent_path',
+    'skill_path',
+  ], 'projection.method_definition')
+  if (
+    definition.id !== 'imago-v6-reference-rights-record'
+    || requireInteger(definition.version, 'projection.method_definition.version', 1) !== 1
+    || definition.agent_path !== sourcePaths[4]
+    || definition.skill_path !== sourcePaths[5]
+  ) {
+    throw new ProjectionContractError('projection method definition mismatch')
+  }
+  for (const field of ['sha256', 'stage_contract_sha256', 'role_capability_sha256']) {
+    requireSha256(definition[field], `projection.method_definition.${field}`)
+  }
+
+  const bindings = requireObjectArray(root.source_bindings, 'projection.source_bindings')
+  if (bindings.length !== sourcePaths.length) {
+    throw new ProjectionContractError('projection source bindings mismatch')
+  }
+  bindings.forEach((bindingValue, index) => {
+    const binding = requireExactObject(
+      bindingValue,
+      ['kind', 'path', 'sha256'],
+      `projection.source_bindings[${String(index)}]`,
+    )
+    if (
+      binding.kind !== REFERENCE_ASSET_SOURCE_KINDS[index]
+      || binding.path !== sourcePaths[index]
+    ) {
+      throw new ProjectionContractError('projection source bindings mismatch')
+    }
+    requireSha256(binding.sha256, `projection.source_bindings[${String(index)}].sha256`)
+  })
+
+  const fieldHints = requireObjectArray(root.field_hints, 'projection.field_hints')
+  if (fieldHints.length === 0) throw new ProjectionContractError('projection field hints must not be empty')
+  fieldHints.forEach((hintValue, index) => {
+    const hint = requireExactObject(
+      hintValue,
+      ['hint_id', 'field', 'title', 'guidance'],
+      `projection.field_hints[${String(index)}]`,
+    )
+    for (const field of ['hint_id', 'field', 'title', 'guidance']) {
+      if (requireString(hint[field], `projection.field_hints[${String(index)}].${field}`).length === 0) {
+        throw new ProjectionContractError('projection field hints must not contain empty strings')
+      }
+    }
+  })
+  const checklist = requireObjectArray(root.checklist, 'projection.checklist')
+  if (checklist.length === 0) throw new ProjectionContractError('projection checklist must not be empty')
+  checklist.forEach((itemValue, index) => {
+    const item = requireExactObject(
+      itemValue,
+      ['check_id', 'label', 'required'],
+      `projection.checklist[${String(index)}]`,
+    )
+    if (
+      requireString(item.check_id, `projection.checklist[${String(index)}].check_id`).length === 0
+      || requireString(item.label, `projection.checklist[${String(index)}].label`).length === 0
+      || !requireBoolean(item.required, `projection.checklist[${String(index)}].required`)
+    ) {
+      throw new ProjectionContractError('projection checklist item mismatch')
+    }
+  })
+
+  const expectedTarget = {
+    projectId: snapshot.subject.project_id,
+    targetType: snapshot.subject.target_type,
+    targetId: snapshot.subject.target_id,
+    elementKind: snapshot.subject.element_kind,
+    scopeType: snapshot.subject.scope_type,
+    scopeId: snapshot.subject.scope_id,
+  }
+  const workOrder = requireExactObject(root.work_order_projection, [
+    'target',
+    'operation',
+    'allowed_mutations',
+    'required_read_set',
+    'before_write',
+    'after_write',
+  ], 'projection.work_order_projection')
+  if (
+    !isDeepStrictEqual(workOrder.target, expectedTarget)
+    || workOrder.operation !== 'replaceReferenceRights'
+  ) {
+    throw new ProjectionContractError('projection work order target or operation mismatch')
+  }
+  requireExactArray(
+    workOrder.allowed_mutations,
+    ['replaceReferenceRights'],
+    'projection.work_order_projection.allowed_mutations',
+  )
+  if (!isDeepStrictEqual(workOrder.required_read_set, [{
+    source: 'yimeng',
+    resource: 'element_reference_rights_snapshot',
+    revision: snapshot.subject.base_revision,
+    sha256: snapshot.subject.base_snapshot_sha256,
+  }])) {
+    throw new ProjectionContractError('projection work order required reads mismatch')
+  }
+  requireNonemptyStringArray(workOrder.before_write, 'projection.work_order_projection.before_write')
+  requireNonemptyStringArray(workOrder.after_write, 'projection.work_order_projection.after_write')
+
+  const reviewCard = requireExactObject(root.review_card, [
+    'title',
+    'summary',
+    'review_dimensions',
+    'hard_vetoes',
+    'decision_boundary',
+  ], 'projection.review_card')
+  for (const field of ['title', 'summary', 'decision_boundary']) {
+    if (requireString(reviewCard[field], `projection.review_card.${field}`).length === 0) {
+      throw new ProjectionContractError('projection review card must not contain empty strings')
+    }
+  }
+  requireNonemptyStringArray(reviewCard.review_dimensions, 'projection.review_card.review_dimensions')
+  requireNonemptyStringArray(reviewCard.hard_vetoes, 'projection.review_card.hard_vetoes')
+
+  const legalWorkSet = requireExactObject(
+    root.legal_work_set,
+    ['reads', 'writes', 'invalidates', 'forbidden'],
+    'projection.legal_work_set',
+  )
+  requireExactArray(
+    legalWorkSet.reads,
+    ['yimeng_element_reference_rights_snapshot'],
+    'projection.legal_work_set.reads',
+  )
+  requireExactArray(
+    legalWorkSet.writes,
+    ['replace_reference_rights_via_changeset'],
+    'projection.legal_work_set.writes',
+  )
+  requireExactArray(
+    legalWorkSet.invalidates,
+    ['reference_rights_dependent_projection'],
+    'projection.legal_work_set.invalidates',
+  )
   requireExactArray(legalWorkSet.forbidden, FORBIDDEN_WORK, 'projection.legal_work_set.forbidden')
 
   if (
@@ -1275,6 +1517,14 @@ async function runReferenceAssetCompilerProcess(
   return await runCompilerSubprocess(snapshot, execution, signal, REFERENCE_ASSET_COMPILER_RELATIVE_PATH)
 }
 
+async function runReferenceRightsCompilerProcess(
+  snapshot: ImagoElementMethodSnapshot,
+  execution: ImagoMethodCompilerExecution,
+  signal: AbortSignal,
+): Promise<unknown> {
+  return await runCompilerSubprocess(snapshot, execution, signal, REFERENCE_RIGHTS_COMPILER_RELATIVE_PATH)
+}
+
 async function runPromptIrCompilerProcess(
   snapshot: ImagoPromptIrMethodSnapshot,
   execution: ImagoMethodCompilerExecution,
@@ -1383,6 +1633,7 @@ export function createImagoMethodHandler(
   dependencies: ImagoMethodAdapterDependencies = {
     runCompiler: runCompilerProcess,
     runReferenceAssetCompiler: runReferenceAssetCompilerProcess,
+    runReferenceRightsCompiler: runReferenceRightsCompilerProcess,
     runPromptIrCompiler: runPromptIrCompilerProcess,
   },
 ): ConnectionRpcHandler {
@@ -1413,6 +1664,23 @@ export function createImagoMethodHandler(
       }
       if (endpoint === 'referenceAssetMethod') {
         const request = parseReferenceAssetRequest(payload)
+        if (request.operation === 'replaceReferenceRights') {
+          const snapshot = buildReferenceRightsSnapshot(request)
+          if (signal.aborted) return cancelled()
+          if (dependencies.runReferenceRightsCompiler === undefined) throw new CompilerExecutionError()
+          const rawProjection = await dependencies.runReferenceRightsCompiler(snapshot, execution, signal)
+          // oxlint-disable-next-line typescript/no-unnecessary-condition -- the signal can abort while awaited.
+          if (signal.aborted) return cancelled()
+          const projection = normalizeReferenceRightsProjection(rawProjection, snapshot)
+          const methodAttestation = createMethodAttestation(attestationKey, projection, snapshot)
+          const value: ImagoElementMethodResponse = {
+            schema: 'qingmu.imago-element-method-adapter-result.v1',
+            projectionSha256: methodAttestation.projectionSha256,
+            projection,
+            methodAttestation,
+          }
+          return { ok: true, value }
+        }
         const snapshot = buildReferenceAssetSnapshot(request)
         if (signal.aborted) return cancelled()
         if (dependencies.runReferenceAssetCompiler === undefined) throw new CompilerExecutionError()
@@ -1421,7 +1689,7 @@ export function createImagoMethodHandler(
         if (signal.aborted) return cancelled()
         const projection = normalizeReferenceAssetProjection(rawProjection, snapshot)
         const methodAttestation = createReferenceAssetMethodAttestation(attestationKey, projection, snapshot)
-        const value: ImagoReferenceAssetMethodResponse = {
+        const value: ImagoReferenceAssetActionMethodResponse = {
           schema: 'qingmu.imago-reference-asset-method-adapter-result.v1',
           projectionSha256: methodAttestation.projectionSha256,
           projection,

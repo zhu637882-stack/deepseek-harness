@@ -518,9 +518,38 @@ function recoveryFixture() {
   }
 }
 
+function unknownReferenceRightsFixture() {
+  const unknownScalar = { state: 'unknown', value: null } as const
+  const unknownList = { state: 'unknown', values: [] } as const
+  return {
+    schema: 'jason.qingmu-reference-rights-record.v1',
+    sourceType: unknownScalar,
+    rightsHolder: unknownScalar,
+    authorizationScope: unknownList,
+    territory: unknownList,
+    term: { state: 'unknown', startsAt: null, endsAt: null, perpetual: null },
+    restrictions: unknownList,
+    contains: {
+      realPersonLikeness: 'unknown',
+      trademark: 'unknown',
+      music: 'unknown',
+      font: 'unknown',
+      thirdPartyCharacter: 'unknown',
+    },
+    providerTerms: { state: 'unknown', terms: null, reviewedAt: null },
+    modelLicenses: {
+      code: unknownScalar,
+      weights: unknownScalar,
+      outputUse: unknownScalar,
+    },
+    humanDeclaration: { state: 'unknown', text: null },
+    contentCredentials: unknownScalar,
+  } as const
+}
+
 function elementSubjectFixture(visualPrompt = '旧铜表面') {
   return {
-    schema: 'jason.qingmu-element-profile-subject.v1',
+    schema: 'jason.qingmu-element-profile-subject.v2',
     projectId: 'project-1',
     targetType: 'element_profile',
     elementKind: 'prop',
@@ -534,6 +563,8 @@ function elementSubjectFixture(visualPrompt = '旧铜表面') {
       sha256: 'd'.repeat(64),
       selectionStatus: 'Selected',
       isSelected: true,
+      rightsRecorded: false,
+      rights: unknownReferenceRightsFixture(),
     }],
   }
 }
@@ -760,7 +791,7 @@ function elementContractFixture(elementKind: ElementKind) {
       ? '雨夜码头，冷色逆光，湿润石板反光'
       : '新铜表面，保留清晰刻度'
   const subjectCommon = {
-    schema: 'jason.qingmu-element-profile-subject.v1',
+    schema: 'jason.qingmu-element-profile-subject.v2',
     projectId: 'project-1',
     targetType: 'element_profile',
     elementKind,
@@ -772,6 +803,9 @@ function elementContractFixture(elementKind: ElementKind) {
       sha256: 'd'.repeat(64),
       selectionStatus: 'Selected',
       isSelected: true,
+      rightsRecorded: false,
+      rights: unknownReferenceRightsFixture(),
+      ...(elementKind === 'prop' ? {} : { role: elementKind === 'actor' ? 'primary' : 'establishing' }),
     }],
   }
   const subject = elementKind === 'actor'

@@ -57,9 +57,16 @@ import type {
   YimengRecoverScriptCommitRequest,
   YimengRecoverScriptCommitResponse,
   YimengReferenceCommitElementProfileResponse,
+  YimengReferenceActionOperation,
   YimengReferencePreviewElementProfileRequest,
   YimengReferencePreviewElementProfileResponse,
-  YimengReferenceAssetOperation,
+  YimengReferenceRightsCommitElementProfileResponse,
+  YimengReferenceRightsKnowledgeState,
+  YimengReferenceRightsList,
+  YimengReferenceRightsPreviewElementProfileRequest,
+  YimengReferenceRightsPreviewElementProfileResponse,
+  YimengReferenceRightsRecord,
+  YimengReferenceRightsScalar,
   YimengSelectPromptIrRequest,
   YimengSelectPromptIrResponse,
   YimengVisualCommitElementProfileResponse,
@@ -122,9 +129,17 @@ export type {
   YimengRecoverScriptCommitRequest,
   YimengRecoverScriptCommitResponse,
   YimengReferenceAssetOperation,
+  YimengReferenceActionOperation,
   YimengReferenceCommitElementProfileResponse,
   YimengReferencePreviewElementProfileRequest,
   YimengReferencePreviewElementProfileResponse,
+  YimengReferenceRightsCommitElementProfileResponse,
+  YimengReferenceRightsKnowledgeState,
+  YimengReferenceRightsList,
+  YimengReferenceRightsPreviewElementProfileRequest,
+  YimengReferenceRightsPreviewElementProfileResponse,
+  YimengReferenceRightsRecord,
+  YimengReferenceRightsScalar,
   YimengSelectPromptIrRequest,
   YimengSelectPromptIrResponse,
   YimengVisualCommitElementProfileResponse,
@@ -146,6 +161,13 @@ const PROMPT_IR_EDITABLE_FIELDS = [
   'motionPrompt',
   'negativePrompt',
 ] as const
+const RIGHTS_KNOWLEDGE_STATES = new Set<YimengReferenceRightsKnowledgeState>([
+  'known', 'unknown', 'not_applicable',
+])
+const RIGHTS_CONTAINS_KEYS = [
+  'realPersonLikeness', 'trademark', 'music', 'font', 'thirdPartyCharacter',
+] as const
+const RIGHTS_CONTAINS_STATES = new Set(['yes', 'no', 'unknown'] as const)
 const SAFE_ERROR_CODE = /^[a-z0-9_:-]{1,128}$/
 const SENSITIVE_RESPONSE_KEYS = new Set([
   'authorization', 'proxyauthorization', 'cookie', 'setcookie', 'xapikey',
@@ -360,6 +382,235 @@ function assertOnlyInputKeys(input: YimengCommandJsonObject, allowed: readonly s
   const keys = new Set(allowed)
   const unknown = Object.keys(input).find(key => !keys.has(key))
   if (unknown !== undefined) throw new InputError(`unknown payload field: ${unknown}`)
+}
+
+type RightsContractErrorFactory = (message: string) => Error
+
+function requireExactRightsObject(
+  value: unknown,
+  expectedKeys: readonly string[],
+  field: string,
+  error: RightsContractErrorFactory,
+): YimengCommandJsonObject {
+  if (!isJsonObject(value)) throw error(`${field} must be an object`)
+  const actual = Object.keys(value).sort()
+  const expected = [...expectedKeys].sort()
+  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
+    throw error(`${field} fields mismatch`)
+  }
+  return value
+}
+
+function normalizeRightsText(
+  value: unknown,
+  field: string,
+  required: boolean,
+  error: RightsContractErrorFactory,
+): string | null {
+  if (value === null && !required) return null
+  if (typeof value !== 'string' || value.includes('\0')) throw error(`${field} must be a valid string or null`)
+  const normalized = value.trim()
+  if ((required && normalized.length === 0) || normalized.length > 4_000) {
+    throw error(`${field} must be between ${required ? '1' : '0'} and 4000 characters`)
+  }
+  return normalized.length === 0 ? null : normalized
+}
+
+function normalizeRightsState(
+  value: unknown,
+  field: string,
+  error: RightsContractErrorFactory,
+): YimengReferenceRightsKnowledgeState {
+  if (!RIGHTS_KNOWLEDGE_STATES.has(value as YimengReferenceRightsKnowledgeState)) {
+    throw error(`${field} must be known, unknown, or not_applicable`)
+  }
+  return value as YimengReferenceRightsKnowledgeState
+}
+
+function normalizeRightsScalar(
+  value: unknown,
+  field: string,
+  error: RightsContractErrorFactory,
+): YimengReferenceRightsScalar {
+  const scalar = requireExactRightsObject(value, ['state', 'value'], field, error)
+  const state = normalizeRightsState(scalar.state, `${field}.state`, error)
+  const normalizedValue = normalizeRightsText(scalar.value, `${field}.value`, state === 'known', error)
+  if (state !== 'known' && normalizedValue !== null) throw error(`${field}.value must be null unless state is known`)
+  return { state, value: normalizedValue }
+}
+
+function normalizeRightsList(
+  value: unknown,
+  field: string,
+  allowEmptyKnown: boolean,
+  error: RightsContractErrorFactory,
+): YimengReferenceRightsList {
+  const listed = requireExactRightsObject(value, ['state', 'values'], field, error)
+  const state = normalizeRightsState(listed.state, `${field}.state`, error)
+  if (!Array.isArray(listed.values)) throw error(`${field}.values must be an array`)
+  const normalized = listed.values.map((item, index) =>
+    normalizeRightsText(item, `${field}.values[${String(index)}]`, true, error) as string)
+  const deduplicated = [...new Set(normalized)].sort(compareUnicodeCodePoints)
+  if (listed.values.length !== deduplicated.length || deduplicated.length > 50) {
+    throw error(`${field}.values must contain at most 50 unique values`)
+  }
+  if (state === 'known' && !allowEmptyKnown && deduplicated.length === 0) {
+    throw error(`${field}.values must not be empty when state is known`)
+  }
+  if (state !== 'known' && deduplicated.length > 0) throw error(`${field}.values must be empty unless state is known`)
+  return { state, values: deduplicated }
+}
+
+function normalizeRightsTimestamp(
+  value: unknown,
+  field: string,
+  required: boolean,
+  error: RightsContractErrorFactory,
+): string | null {
+  const normalized = normalizeRightsText(value, field, required, error)
+  if (normalized === null) return null
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?Z$/.exec(normalized)
+  if (match === null || Number.isNaN(Date.parse(normalized))) throw error(`${field} must be a UTC Z timestamp`)
+  const parsed = new Date(normalized)
+  if (parsed.toISOString().slice(0, 19) !== match[1]) throw error(`${field} must be a valid UTC Z timestamp`)
+  const fraction = match[2]?.padEnd(6, '0')
+  return `${match[1]}${fraction !== undefined && Number(fraction) !== 0 ? `.${fraction}` : ''}Z`
+}
+
+function normalizeReferenceRightsRecordWith(
+  value: unknown,
+  field: string,
+  error: RightsContractErrorFactory,
+): YimengReferenceRightsRecord {
+  const rights = requireExactRightsObject(value, [
+    'schema',
+    'sourceType',
+    'rightsHolder',
+    'authorizationScope',
+    'territory',
+    'term',
+    'restrictions',
+    'contains',
+    'providerTerms',
+    'modelLicenses',
+    'humanDeclaration',
+    'contentCredentials',
+  ], field, error)
+  if (rights.schema !== 'jason.qingmu-reference-rights-record.v1') throw error(`${field}.schema mismatch`)
+
+  const term = requireExactRightsObject(
+    rights.term,
+    ['state', 'startsAt', 'endsAt', 'perpetual'],
+    `${field}.term`,
+    error,
+  )
+  const termState = normalizeRightsState(term.state, `${field}.term.state`, error)
+  let normalizedTerm: YimengReferenceRightsRecord['term']
+  if (termState !== 'known') {
+    if (term.startsAt !== null || term.endsAt !== null || term.perpetual !== null) {
+      throw error(`${field}.term values must be null unless state is known`)
+    }
+    normalizedTerm = { state: termState, startsAt: null, endsAt: null, perpetual: null }
+  } else {
+    if (typeof term.perpetual !== 'boolean') throw error(`${field}.term.perpetual must be a boolean`)
+    const startsAt = normalizeRightsTimestamp(term.startsAt, `${field}.term.startsAt`, true, error)
+    const endsAt = normalizeRightsTimestamp(term.endsAt, `${field}.term.endsAt`, !term.perpetual, error)
+    if (term.perpetual && endsAt !== null) throw error(`${field}.term.endsAt must be null when perpetual`)
+    if (!term.perpetual && startsAt !== null && endsAt !== null && Date.parse(endsAt) < Date.parse(startsAt)) {
+      throw error(`${field}.term.endsAt must not be before startsAt`)
+    }
+    normalizedTerm = { state: 'known', startsAt, endsAt, perpetual: term.perpetual }
+  }
+
+  const contains = requireExactRightsObject(rights.contains, RIGHTS_CONTAINS_KEYS, `${field}.contains`, error)
+  for (const key of RIGHTS_CONTAINS_KEYS) {
+    if (!RIGHTS_CONTAINS_STATES.has(contains[key] as 'yes' | 'no' | 'unknown')) {
+      throw error(`${field}.contains.${key} must be yes, no, or unknown`)
+    }
+  }
+
+  const providerTerms = requireExactRightsObject(
+    rights.providerTerms,
+    ['state', 'terms', 'reviewedAt'],
+    `${field}.providerTerms`,
+    error,
+  )
+  const providerState = normalizeRightsState(providerTerms.state, `${field}.providerTerms.state`, error)
+  const terms = normalizeRightsText(
+    providerTerms.terms,
+    `${field}.providerTerms.terms`,
+    providerState === 'known',
+    error,
+  )
+  const reviewedAt = normalizeRightsTimestamp(
+    providerTerms.reviewedAt,
+    `${field}.providerTerms.reviewedAt`,
+    providerState === 'known',
+    error,
+  )
+  if (providerState !== 'known' && (terms !== null || reviewedAt !== null)) {
+    throw error(`${field}.providerTerms values must be null unless state is known`)
+  }
+
+  const modelLicenses = requireExactRightsObject(
+    rights.modelLicenses,
+    ['code', 'weights', 'outputUse'],
+    `${field}.modelLicenses`,
+    error,
+  )
+  const humanDeclaration = requireExactRightsObject(
+    rights.humanDeclaration,
+    ['state', 'text'],
+    `${field}.humanDeclaration`,
+    error,
+  )
+  if (
+    humanDeclaration.state !== 'provided'
+    && humanDeclaration.state !== 'unknown'
+    && humanDeclaration.state !== 'not_applicable'
+  ) {
+    throw error(`${field}.humanDeclaration.state mismatch`)
+  }
+  const declarationText = normalizeRightsText(
+    humanDeclaration.text,
+    `${field}.humanDeclaration.text`,
+    humanDeclaration.state === 'provided',
+    error,
+  )
+  if (humanDeclaration.state !== 'provided' && declarationText !== null) {
+    throw error(`${field}.humanDeclaration.text must be null unless state is provided`)
+  }
+
+  return {
+    schema: 'jason.qingmu-reference-rights-record.v1',
+    sourceType: normalizeRightsScalar(rights.sourceType, `${field}.sourceType`, error),
+    rightsHolder: normalizeRightsScalar(rights.rightsHolder, `${field}.rightsHolder`, error),
+    authorizationScope: normalizeRightsList(rights.authorizationScope, `${field}.authorizationScope`, false, error),
+    territory: normalizeRightsList(rights.territory, `${field}.territory`, false, error),
+    term: normalizedTerm,
+    restrictions: normalizeRightsList(rights.restrictions, `${field}.restrictions`, true, error),
+    contains: Object.fromEntries(RIGHTS_CONTAINS_KEYS.map(key => [key, contains[key]])) as YimengReferenceRightsRecord['contains'],
+    providerTerms: { state: providerState, terms, reviewedAt },
+    modelLicenses: {
+      code: normalizeRightsScalar(modelLicenses.code, `${field}.modelLicenses.code`, error),
+      weights: normalizeRightsScalar(modelLicenses.weights, `${field}.modelLicenses.weights`, error),
+      outputUse: normalizeRightsScalar(modelLicenses.outputUse, `${field}.modelLicenses.outputUse`, error),
+    },
+    humanDeclaration: {
+      state: humanDeclaration.state,
+      text: declarationText,
+    } as YimengReferenceRightsRecord['humanDeclaration'],
+    contentCredentials: normalizeRightsScalar(rights.contentCredentials, `${field}.contentCredentials`, error),
+  }
+}
+
+/** Normalize and strictly whitelist one browser-provided reference-rights record. */
+export function normalizeReferenceRightsRecord(value: unknown, field = 'rights'): YimengReferenceRightsRecord {
+  return normalizeReferenceRightsRecordWith(value, field, message => new InputError(message))
+}
+
+function normalizeUpstreamReferenceRightsRecord(value: unknown, field: string): YimengReferenceRightsRecord {
+  return normalizeReferenceRightsRecordWith(value, field, message => new UpstreamContractError(message))
 }
 
 function parseIdentifier(value: unknown, field: string): string {
@@ -744,14 +995,14 @@ function parseMethodAttestation(value: unknown): YimengImagoElementMethodAttesta
   }
 }
 
-function parseReferenceAssetOperation(value: unknown, field = 'operation'): YimengReferenceAssetOperation {
+function parseReferenceActionOperation(value: unknown, field = 'operation'): YimengReferenceActionOperation {
   if (value !== 'selectReferenceAsset' && value !== 'requestReferenceRegeneration') {
     throw new InputError(`${field} must be selectReferenceAsset or requestReferenceRegeneration`)
   }
   return value
 }
 
-function requireReferenceAssetOperation(value: unknown, field: string): YimengReferenceAssetOperation {
+function requireReferenceActionOperation(value: unknown, field: string): YimengReferenceActionOperation {
   if (value !== 'selectReferenceAsset' && value !== 'requestReferenceRegeneration') {
     throw new UpstreamContractError(`${field} must be selectReferenceAsset or requestReferenceRegeneration`)
   }
@@ -838,7 +1089,7 @@ function parseReferenceProjection(value: unknown): YimengImagoReferenceAssetMeth
     snapshotSha256: parseInputSha256(value.target.snapshotSha256, 'methodProjection.target.snapshotSha256'),
     assetId: parseIdentifier(value.target.assetId, 'methodProjection.target.assetId'),
     assetSha256: parseInputSha256(value.target.assetSha256, 'methodProjection.target.assetSha256'),
-    operation: parseReferenceAssetOperation(value.target.operation, 'methodProjection.target.operation'),
+    operation: parseReferenceActionOperation(value.target.operation, 'methodProjection.target.operation'),
   }
   if (
     value.authority_snapshot_attestation !== 'not_verified_by_compiler'
@@ -875,6 +1126,138 @@ function parseReferenceProjection(value: unknown): YimengImagoReferenceAssetMeth
   }
 }
 
+function parseReferenceRightsProjection(value: unknown): YimengCommandJsonObject {
+  if (!isJsonObject(value)) throw new InputError('methodProjection must be an object')
+  assertOnlyInputKeys(value, [
+    'schema',
+    'input_snapshot_sha256',
+    'subject',
+    'method_definition',
+    'source_bindings',
+    'field_hints',
+    'checklist',
+    'work_order_projection',
+    'review_card',
+    'legal_work_set',
+    'authority_snapshot_attestation',
+    'project_state_persisted',
+    'paid_provider_authority',
+    'human_approval_inferred',
+    'selection_authority',
+  ])
+  if (Object.keys(value).length !== 15 || value.schema !== 'qingmu.imago-element-method-projection.v1') {
+    throw new InputError('methodProjection fields or schema mismatch')
+  }
+  const subject = requireExactRightsObject(value.subject, [
+    'project_id',
+    'target_type',
+    'target_id',
+    'element_kind',
+    'scope_type',
+    'scope_id',
+    'base_revision',
+    'base_snapshot_sha256',
+  ], 'methodProjection.subject', message => new InputError(message))
+  const methodDefinition = requireExactRightsObject(value.method_definition, [
+    'id',
+    'version',
+    'sha256',
+    'stage_contract_sha256',
+    'role_capability_sha256',
+    'agent_path',
+    'skill_path',
+  ], 'methodProjection.method_definition', message => new InputError(message))
+  if (methodDefinition.id !== 'imago-v6-reference-rights-record' || methodDefinition.version !== 1) {
+    throw new InputError('methodProjection.method_definition mismatch')
+  }
+  for (const key of ['sha256', 'stage_contract_sha256', 'role_capability_sha256'] as const) {
+    parseInputSha256(methodDefinition[key], `methodProjection.method_definition.${key}`)
+  }
+  parseIdentifier(methodDefinition.agent_path, 'methodProjection.method_definition.agent_path')
+  parseIdentifier(methodDefinition.skill_path, 'methodProjection.method_definition.skill_path')
+  const sourceBindings = parseReferenceProjectionObjects(value.source_bindings, 'methodProjection.source_bindings')
+  const expectedSourceKinds = new Set([
+    'runtime_pointer',
+    'runtime_channel_registry',
+    'stage_contracts',
+    'role_capability_spec',
+    'role_agent',
+    'role_method',
+    'method_reference',
+  ])
+  if (
+    sourceBindings.length !== expectedSourceKinds.size
+    || sourceBindings.some(binding => !expectedSourceKinds.has(binding.kind as string))
+    || new Set(sourceBindings.map(binding => binding.kind)).size !== expectedSourceKinds.size
+  ) {
+    throw new InputError('methodProjection.source_bindings mismatch')
+  }
+  const workOrder = requireExactRightsObject(value.work_order_projection, [
+    'target',
+    'operation',
+    'allowed_mutations',
+    'required_read_set',
+    'before_write',
+    'after_write',
+  ], 'methodProjection.work_order_projection', message => new InputError(message))
+  if (
+    workOrder.operation !== 'replaceReferenceRights'
+    || !Array.isArray(workOrder.allowed_mutations)
+    || workOrder.allowed_mutations.length !== 1
+    || workOrder.allowed_mutations[0] !== 'replaceReferenceRights'
+  ) {
+    throw new InputError('methodProjection.work_order_projection operation mismatch')
+  }
+  const legalWorkSet = requireExactRightsObject(value.legal_work_set, [
+    'reads', 'writes', 'invalidates', 'forbidden',
+  ], 'methodProjection.legal_work_set', message => new InputError(message))
+  const exactList = (actual: unknown, expected: readonly string[]): boolean =>
+    Array.isArray(actual) && actual.length === expected.length && actual.every((item, index) => item === expected[index])
+  if (
+    !exactList(legalWorkSet.reads, ['yimeng_element_reference_rights_snapshot'])
+    || !exactList(legalWorkSet.writes, ['replace_reference_rights_via_changeset'])
+    || !exactList(legalWorkSet.invalidates, ['reference_rights_dependent_projection'])
+    || !exactList(legalWorkSet.forbidden, [
+      'provider_dispatch',
+      'asset_generation',
+      'asset_selection',
+      'human_decision',
+      'project_state_write',
+    ])
+  ) {
+    throw new InputError('methodProjection.legal_work_set mismatch')
+  }
+  if (
+    value.authority_snapshot_attestation !== 'not_verified_by_compiler'
+    || value.project_state_persisted !== false
+    || value.paid_provider_authority !== 'not_granted'
+    || value.human_approval_inferred !== false
+    || value.selection_authority !== 'not_granted'
+  ) {
+    throw new InputError('methodProjection authority boundary mismatch')
+  }
+  return {
+    schema: 'qingmu.imago-element-method-projection.v1',
+    input_snapshot_sha256: parseInputSha256(
+      value.input_snapshot_sha256,
+      'methodProjection.input_snapshot_sha256',
+    ),
+    subject,
+    method_definition: methodDefinition,
+    source_bindings: sourceBindings,
+    field_hints: parseReferenceProjectionObjects(value.field_hints, 'methodProjection.field_hints'),
+    checklist: parseReferenceProjectionObjects(value.checklist, 'methodProjection.checklist'),
+    work_order_projection: workOrder,
+    review_card: parseReferenceProjectionObject(value.review_card, 'methodProjection.review_card'),
+    legal_work_set: legalWorkSet,
+    authority_snapshot_attestation: 'not_verified_by_compiler',
+    project_state_persisted: false,
+    paid_provider_authority: 'not_granted',
+    human_approval_inferred: false,
+    selection_authority: 'not_granted',
+  }
+}
+
 function readReferenceAttestationKey(): string {
   const key = process.env.QINGMU_IMAGO_ATTESTATION_KEY
   if (key === undefined || key === '' || Buffer.byteLength(key, 'utf8') < 32) throw new AttestationKeyError()
@@ -882,7 +1265,18 @@ function readReferenceAttestationKey(): string {
 }
 
 function verifyReferenceMethodProof(
-  request: Omit<YimengProposeReferenceAssetRequest, 'methodProjection' | 'methodAttestation'>,
+  request: {
+    readonly projectId: string
+    readonly targetType: 'element_profile'
+    readonly targetId: string
+    readonly elementKind: YimengElementKind
+    readonly operation: YimengReferenceActionOperation
+    readonly candidateAssetId: string
+    readonly candidateAssetSha256: string
+    readonly baseRevision: number
+    readonly baseSnapshotSha256: string
+    readonly methodProjectionSha256: string
+  },
   methodProjection: YimengImagoReferenceAssetMethodProjection,
   methodAttestation: YimengImagoReferenceAssetMethodAttestation,
 ): void {
@@ -939,6 +1333,79 @@ function verifyReferenceMethodProof(
     || inputCanonicalSha256(methodProjection.target, 'methodProjection.target') !== targetSha256
   ) {
     throw new InputError('method target binding mismatch')
+  }
+}
+
+function verifyReferenceRightsMethodProof(
+  request: {
+    readonly projectId: string
+    readonly targetType: 'element_profile'
+    readonly targetId: string
+    readonly elementKind: YimengElementKind
+    readonly operation: 'replaceReferenceRights'
+    readonly referenceAssetId: string
+    readonly referenceAssetSha256: string
+    readonly rights: YimengReferenceRightsRecord
+    readonly baseRevision: number
+    readonly baseSnapshotSha256: string
+    readonly methodProjectionSha256: string
+  },
+  methodProjection: YimengCommandJsonObject,
+  methodAttestation: YimengImagoElementMethodAttestation,
+): void {
+  const key = readReferenceAttestationKey()
+  const unsigned = {
+    schema: methodAttestation.schema,
+    algorithm: methodAttestation.algorithm,
+    projectionSha256: methodAttestation.projectionSha256,
+    inputSnapshotSha256: methodAttestation.inputSnapshotSha256,
+    subjectSha256: methodAttestation.subjectSha256,
+  } as const
+  const expectedSignature = createHmac('sha256', key)
+    .update(canonicalJson(unsigned, 'methodAttestation'), 'utf8')
+    .digest()
+  const receivedSignature = Buffer.from(methodAttestation.signature, 'hex')
+  if (receivedSignature.length !== expectedSignature.length || !timingSafeEqual(receivedSignature, expectedSignature)) {
+    throw new InputError('methodAttestation signature mismatch')
+  }
+
+  const subject = {
+    project_id: request.projectId,
+    target_type: 'element_profile',
+    target_id: request.targetId,
+    element_kind: request.elementKind,
+    scope_type: 'project',
+    scope_id: request.projectId,
+    base_revision: request.baseRevision,
+    base_snapshot_sha256: request.baseSnapshotSha256,
+  } as const
+  const snapshot = {
+    schema: 'qingmu.element-method-snapshot.v1',
+    subject,
+    authority: {
+      business_truth: 'yimeng',
+      method_source: 'imago_os_current',
+      human_approval: 'not_granted',
+      paid_provider_authority: 'not_granted',
+    },
+  } as const
+  const projectionSha256 = inputCanonicalSha256(methodProjection, 'methodProjection')
+  const inputSnapshotSha256 = inputCanonicalSha256(snapshot, 'methodSnapshot')
+  const subjectSha256 = inputCanonicalSha256(subject, 'methodSnapshot.subject')
+  if (request.methodProjectionSha256 !== projectionSha256 || methodAttestation.projectionSha256 !== projectionSha256) {
+    throw new InputError('method projection sha256 binding mismatch')
+  }
+  if (
+    methodProjection.input_snapshot_sha256 !== inputSnapshotSha256
+    || methodAttestation.inputSnapshotSha256 !== inputSnapshotSha256
+  ) {
+    throw new InputError('method input snapshot binding mismatch')
+  }
+  if (
+    methodAttestation.subjectSha256 !== subjectSha256
+    || inputCanonicalSha256(methodProjection.subject, 'methodProjection.subject') !== subjectSha256
+  ) {
+    throw new InputError('method subject binding mismatch')
   }
 }
 
@@ -1100,6 +1567,9 @@ function parseProposeReferenceAssetRequest(payload: unknown): YimengProposeRefer
     'operation',
     'candidateAssetId',
     'candidateAssetSha256',
+    'referenceAssetId',
+    'referenceAssetSha256',
+    'rights',
     'baseRevision',
     'baseSnapshotSha256',
     'repairPrompt',
@@ -1108,7 +1578,50 @@ function parseProposeReferenceAssetRequest(payload: unknown): YimengProposeRefer
     'methodProjectionSha256',
     'methodAttestation',
   ])
-  const operation = parseReferenceAssetOperation(input.operation)
+  const common = {
+    projectId: parseIdentifier(input.projectId, 'projectId'),
+    targetType: parseElementTargetType(input.targetType),
+    targetId: parseIdentifier(input.targetId, 'targetId'),
+    elementKind: parseElementKind(input.elementKind),
+    baseRevision: parseRevision(input.baseRevision),
+    baseSnapshotSha256: parseInputSha256(input.baseSnapshotSha256, 'baseSnapshotSha256'),
+    methodProjectionSha256: parseInputSha256(input.methodProjectionSha256, 'methodProjectionSha256'),
+  } as const
+  let harnessSessionId: string | undefined
+  if (input.harnessSessionId !== undefined) {
+    harnessSessionId = parseIdentifier(input.harnessSessionId, 'harnessSessionId')
+    if (harnessSessionId.length > 200) throw new InputError('harnessSessionId must not exceed 200 characters')
+  }
+  if (input.operation === 'replaceReferenceRights') {
+    if (
+      input.candidateAssetId !== undefined
+      || input.candidateAssetSha256 !== undefined
+      || input.repairPrompt !== undefined
+    ) {
+      throw new InputError('selection candidate fields are not valid for replaceReferenceRights')
+    }
+    const requestWithoutProof = {
+      ...common,
+      operation: 'replaceReferenceRights',
+      referenceAssetId: parseIdentifier(input.referenceAssetId, 'referenceAssetId'),
+      referenceAssetSha256: parseInputSha256(input.referenceAssetSha256, 'referenceAssetSha256'),
+      rights: normalizeReferenceRightsRecord(input.rights),
+      ...(harnessSessionId === undefined ? {} : { harnessSessionId }),
+    } as const
+    const methodProjection = parseReferenceRightsProjection(input.methodProjection)
+    const methodAttestation = parseMethodAttestation(input.methodAttestation)
+    verifyReferenceRightsMethodProof(requestWithoutProof, methodProjection, methodAttestation)
+    return { ...requestWithoutProof, methodProjection, methodAttestation }
+  }
+
+  if (
+    input.referenceAssetId !== undefined
+    || input.referenceAssetSha256 !== undefined
+    || input.rights !== undefined
+  ) {
+    throw new InputError('rights fields are only valid for replaceReferenceRights')
+  }
+  const operation = parseReferenceActionOperation(input.operation)
   let repairPrompt: string | undefined
   if (operation === 'requestReferenceRegeneration') {
     if (
@@ -1122,42 +1635,50 @@ function parseProposeReferenceAssetRequest(payload: unknown): YimengProposeRefer
   } else if (input.repairPrompt !== undefined) {
     throw new InputError('repairPrompt is only valid for requestReferenceRegeneration')
   }
-  let harnessSessionId: string | undefined
-  if (input.harnessSessionId !== undefined) {
-    harnessSessionId = parseIdentifier(input.harnessSessionId, 'harnessSessionId')
-    if (harnessSessionId.length > 200) throw new InputError('harnessSessionId must not exceed 200 characters')
-  }
   const methodProjection = parseReferenceProjection(input.methodProjection)
   const methodAttestation = parseReferenceMethodAttestation(input.methodAttestation)
   const requestWithoutProof = {
-    projectId: parseIdentifier(input.projectId, 'projectId'),
-    targetType: parseElementTargetType(input.targetType),
-    targetId: parseIdentifier(input.targetId, 'targetId'),
-    elementKind: parseElementKind(input.elementKind),
+    ...common,
     operation,
     candidateAssetId: parseIdentifier(input.candidateAssetId, 'candidateAssetId'),
     candidateAssetSha256: parseInputSha256(input.candidateAssetSha256, 'candidateAssetSha256'),
-    baseRevision: parseRevision(input.baseRevision),
-    baseSnapshotSha256: parseInputSha256(input.baseSnapshotSha256, 'baseSnapshotSha256'),
     ...(repairPrompt === undefined ? {} : { repairPrompt }),
     ...(harnessSessionId === undefined ? {} : { harnessSessionId }),
-    methodProjectionSha256: parseInputSha256(input.methodProjectionSha256, 'methodProjectionSha256'),
   } as const
   verifyReferenceMethodProof(requestWithoutProof, methodProjection, methodAttestation)
   return { ...requestWithoutProof, methodProjection, methodAttestation }
 }
 
 function parseReferenceCommandLineage(input: YimengCommandJsonObject): {
-  operation: YimengReferenceAssetOperation
+  operation: YimengReferenceActionOperation
   candidateAssetId: string
   candidateAssetSha256: string
+} | {
+  operation: 'replaceReferenceRights'
+  referenceAssetId: string
+  referenceAssetSha256: string
 } | undefined {
   const hasReferenceField = input.operation !== undefined
     || input.candidateAssetId !== undefined
     || input.candidateAssetSha256 !== undefined
+    || input.referenceAssetId !== undefined
+    || input.referenceAssetSha256 !== undefined
   if (!hasReferenceField) return undefined
+  if (input.operation === 'replaceReferenceRights') {
+    if (input.candidateAssetId !== undefined || input.candidateAssetSha256 !== undefined) {
+      throw new InputError('candidate lineage is not valid for replaceReferenceRights')
+    }
+    return {
+      operation: 'replaceReferenceRights',
+      referenceAssetId: parseIdentifier(input.referenceAssetId, 'referenceAssetId'),
+      referenceAssetSha256: parseInputSha256(input.referenceAssetSha256, 'referenceAssetSha256'),
+    }
+  }
+  if (input.referenceAssetId !== undefined || input.referenceAssetSha256 !== undefined) {
+    throw new InputError('reference rights lineage is only valid for replaceReferenceRights')
+  }
   return {
-    operation: parseReferenceAssetOperation(input.operation),
+    operation: parseReferenceActionOperation(input.operation),
     candidateAssetId: parseIdentifier(input.candidateAssetId, 'candidateAssetId'),
     candidateAssetSha256: parseInputSha256(input.candidateAssetSha256, 'candidateAssetSha256'),
   }
@@ -1177,6 +1698,8 @@ function parsePreviewElementProfileRequest(payload: unknown): YimengPreviewEleme
     'operation',
     'candidateAssetId',
     'candidateAssetSha256',
+    'referenceAssetId',
+    'referenceAssetSha256',
   ])
   const referenceLineage = parseReferenceCommandLineage(input)
   return {
@@ -1202,6 +1725,8 @@ function parseCommitElementProfileRequest(payload: unknown): YimengCommitElement
     'operation',
     'candidateAssetId',
     'candidateAssetSha256',
+    'referenceAssetId',
+    'referenceAssetSha256',
   ])
   const idempotencyKey = parseIdentifier(input.idempotencyKey, 'idempotencyKey')
   if (idempotencyKey.length < 8 || idempotencyKey.length > 200) {
@@ -2076,25 +2601,50 @@ function normalizeElementProfileSubject(
   expectedElementKind: YimengElementKind,
 ): YimengCommandJsonObject {
   const subject = requireObject(value, field)
-  if (subject.schema !== 'jason.qingmu-element-profile-subject.v1') {
+  if (subject.schema !== 'jason.qingmu-element-profile-subject.v2') {
     throw new UpstreamContractError(`${field}.schema mismatch`)
   }
   if (subject.targetType !== 'element_profile') throw new UpstreamContractError(`${field}.targetType mismatch`)
   const elementKind = requireElementKind(subject.elementKind, `${field}.elementKind`)
   if (elementKind !== expectedElementKind) throw new UpstreamContractError(`${field}.elementKind mismatch`)
+  assertExactOutputKeys(subject, [
+    'schema',
+    'projectId',
+    'targetType',
+    'elementKind',
+    'profileRevision',
+    'name',
+    'officialReferenceImageUrl',
+    'references',
+    ...(elementKind === 'actor'
+      ? ['actorId', 'visualIdentity']
+      : elementKind === 'scene'
+        ? ['sceneId', 'sceneType', 'visualPrompt']
+        : ['propId', 'visualPrompt']),
+  ], field)
   const references = requireObjectArray(subject.references, `${field}.references`).map((value, index) => {
     const referenceField = `${field}.references[${String(index)}]`
+    assertExactOutputKeys(value, [
+      'assetId',
+      'sha256',
+      'selectionStatus',
+      'isSelected',
+      'rightsRecorded',
+      'rights',
+      ...(elementKind === 'prop' ? [] : ['role']),
+    ], referenceField)
     return {
-      ...value,
       assetId: requireString(value.assetId, `${referenceField}.assetId`),
       sha256: requireSha256(value.sha256, `${referenceField}.sha256`),
       selectionStatus: requireString(value.selectionStatus, `${referenceField}.selectionStatus`),
       isSelected: requireBoolean(value.isSelected, `${referenceField}.isSelected`),
+      rightsRecorded: requireBoolean(value.rightsRecorded, `${referenceField}.rightsRecorded`),
+      rights: normalizeUpstreamReferenceRightsRecord(value.rights, `${referenceField}.rights`),
+      ...(elementKind === 'prop' ? {} : { role: requireString(value.role, `${referenceField}.role`) }),
     }
   })
   const common = {
-    ...subject,
-    schema: 'jason.qingmu-element-profile-subject.v1',
+    schema: 'jason.qingmu-element-profile-subject.v2',
     projectId: requireString(subject.projectId, `${field}.projectId`),
     targetType: 'element_profile',
     elementKind,
@@ -2178,9 +2728,19 @@ function assertExactOutputKeys(
   }
 }
 
-function isReferenceElementRequest(
+function isReferenceActionElementRequest(
   request: YimengPreviewElementProfileRequest,
 ): request is YimengReferencePreviewElementProfileRequest {
+  return 'operation' in request && request.operation !== 'replaceReferenceRights'
+}
+
+function isReferenceRightsElementRequest(
+  request: YimengPreviewElementProfileRequest,
+): request is YimengReferenceRightsPreviewElementProfileRequest {
+  return 'operation' in request && request.operation === 'replaceReferenceRights'
+}
+
+function isAnyReferenceElementRequest(request: YimengPreviewElementProfileRequest): boolean {
   return 'operation' in request
 }
 
@@ -2216,7 +2776,7 @@ function normalizeReferenceElementPreview(
     targetType: 'element_profile',
     targetId: requireString(root.targetId, 'preview.targetId'),
     elementKind: requireElementKind(root.elementKind, 'preview.elementKind'),
-    operation: requireReferenceAssetOperation(root.operation, 'preview.operation'),
+    operation: requireReferenceActionOperation(root.operation, 'preview.operation'),
     candidateAssetId: requireString(root.candidateAssetId, 'preview.candidateAssetId'),
     candidateAssetSha256: requireSha256(root.candidateAssetSha256, 'preview.candidateAssetSha256'),
     candidateDrift: requireBoolean(root.candidateDrift, 'preview.candidateDrift'),
@@ -2279,7 +2839,7 @@ function normalizeReferenceElementCommit(
     throw new UpstreamContractError('commit.schema mismatch')
   }
   if (root.targetType !== 'element_profile') throw new UpstreamContractError('commit.targetType mismatch')
-  const operation = requireReferenceAssetOperation(root.operation, 'commit.operation')
+  const operation = requireReferenceActionOperation(root.operation, 'commit.operation')
   const eventType = root.eventType
   if (eventType !== 'ReferenceAssetSelected' && eventType !== 'ReferenceRegenerationRequested') {
     throw new UpstreamContractError('commit.eventType mismatch')
@@ -2341,11 +2901,257 @@ function normalizeReferenceElementCommit(
   return result
 }
 
+function normalizeReferenceRightsElementPreview(
+  value: unknown,
+  expected: YimengReferenceRightsPreviewElementProfileRequest,
+): YimengReferenceRightsPreviewElementProfileResponse {
+  const root = requireObject(value, 'preview')
+  assertExactOutputKeys(root, [
+    'schema',
+    'changeSet',
+    'baseSubject',
+    'authoritativeCurrentSubject',
+    'changeSetId',
+    'payloadSha256',
+    'projectId',
+    'targetType',
+    'targetId',
+    'elementKind',
+    'operation',
+    'baseRevision',
+    'authoritativeRevision',
+    'baseSnapshotSha256',
+    'authoritativeSnapshotSha256',
+    'changed',
+    'authoritativeChanged',
+    'revisionConflict',
+    'baseSnapshotConflict',
+    'impactConflict',
+    'canCommit',
+    'referenceInvalidationExpected',
+    'impactAnalysis',
+    'impactSha256',
+    'preflight',
+    'references',
+    'methodProjectionSha256',
+    'referenceAssetId',
+    'referenceAssetSha256',
+    'proposedReferenceRights',
+    'previewSha256',
+  ], 'preview')
+  if (root.schema !== 'jason.qingmu-change-set-preview.v1' || root.targetType !== 'element_profile') {
+    throw new UpstreamContractError('preview schema or targetType mismatch')
+  }
+  if (root.operation !== 'replaceReferenceRights') throw new UpstreamContractError('preview.operation mismatch')
+  const elementKind = requireElementKind(root.elementKind, 'preview.elementKind')
+  const baseSubject = normalizeElementProfileSubject(root.baseSubject, 'preview.baseSubject', elementKind)
+  const authoritativeCurrentSubject = normalizeElementProfileSubject(
+    root.authoritativeCurrentSubject,
+    'preview.authoritativeCurrentSubject',
+    elementKind,
+  )
+  const impactAnalysis = normalizeElementImpactAnalysis(root.impactAnalysis, 'preview.impactAnalysis')
+  const impactSha256 = requireSha256(root.impactSha256, 'preview.impactSha256')
+  if (canonicalJsonSha256(impactAnalysis, 'preview.impactAnalysis') !== impactSha256) {
+    throw new UpstreamContractError('preview impact sha256 mismatch')
+  }
+  const preflight = requireObject(root.preflight, 'preview.preflight')
+  if (
+    preflight.status !== 'pass'
+    || preflight.costGate !== 'not_granted'
+    || preflight.selectionAuthority !== 'not_granted'
+    || preflight.humanApprovalInferred !== false
+  ) {
+    throw new UpstreamContractError('preview preflight authority mismatch')
+  }
+  const result: YimengReferenceRightsPreviewElementProfileResponse = {
+    schema: 'jason.qingmu-change-set-preview.v1',
+    changeSet: normalizeElementProfileChangeSet(root.changeSet),
+    baseSubject,
+    authoritativeCurrentSubject,
+    changeSetId: requireString(root.changeSetId, 'preview.changeSetId'),
+    payloadSha256: requireSha256(root.payloadSha256, 'preview.payloadSha256'),
+    projectId: requireString(root.projectId, 'preview.projectId'),
+    targetType: 'element_profile',
+    targetId: requireString(root.targetId, 'preview.targetId'),
+    elementKind,
+    operation: 'replaceReferenceRights',
+    referenceAssetId: requireString(root.referenceAssetId, 'preview.referenceAssetId'),
+    referenceAssetSha256: requireSha256(root.referenceAssetSha256, 'preview.referenceAssetSha256'),
+    proposedReferenceRights: normalizeUpstreamReferenceRightsRecord(
+      root.proposedReferenceRights,
+      'preview.proposedReferenceRights',
+    ),
+    baseRevision: requireInteger(root.baseRevision, 'preview.baseRevision'),
+    authoritativeRevision: requireInteger(root.authoritativeRevision, 'preview.authoritativeRevision'),
+    baseSnapshotSha256: requireSha256(root.baseSnapshotSha256, 'preview.baseSnapshotSha256'),
+    authoritativeSnapshotSha256: requireSha256(
+      root.authoritativeSnapshotSha256,
+      'preview.authoritativeSnapshotSha256',
+    ),
+    changed: requireBoolean(root.changed, 'preview.changed'),
+    authoritativeChanged: requireBoolean(root.authoritativeChanged, 'preview.authoritativeChanged'),
+    revisionConflict: requireBoolean(root.revisionConflict, 'preview.revisionConflict'),
+    baseSnapshotConflict: requireBoolean(root.baseSnapshotConflict, 'preview.baseSnapshotConflict'),
+    impactConflict: requireBoolean(root.impactConflict, 'preview.impactConflict'),
+    canCommit: requireBoolean(root.canCommit, 'preview.canCommit'),
+    referenceInvalidationExpected: requireBoolean(
+      root.referenceInvalidationExpected,
+      'preview.referenceInvalidationExpected',
+    ),
+    impactAnalysis,
+    impactSha256,
+    preflight,
+    references: requireObjectArray(root.references, 'preview.references'),
+    methodProjectionSha256: requireSha256(root.methodProjectionSha256, 'preview.methodProjectionSha256'),
+    previewSha256: requireSha256(root.previewSha256, 'preview.previewSha256'),
+  }
+  const baseCoordinates = requireElementCoordinates(baseSubject, 'preview.baseSubject', elementKind)
+  const currentCoordinates = requireElementCoordinates(
+    authoritativeCurrentSubject,
+    'preview.authoritativeCurrentSubject',
+    elementKind,
+  )
+  if (
+    result.changeSetId !== expected.changeSetId
+    || result.changeSet.id !== expected.changeSetId
+    || result.projectId !== expected.projectId
+    || result.targetId !== expected.targetId
+    || result.elementKind !== expected.elementKind
+    || result.referenceAssetId !== expected.referenceAssetId
+    || result.referenceAssetSha256 !== expected.referenceAssetSha256
+    || result.changeSet.projectId !== expected.projectId
+    || result.changeSet.targetId !== expected.targetId
+    || baseCoordinates.projectId !== expected.projectId
+    || baseCoordinates.targetId !== expected.targetId
+    || currentCoordinates.projectId !== expected.projectId
+    || currentCoordinates.targetId !== expected.targetId
+  ) {
+    throw new UpstreamContractError('preview reference rights subject mismatch')
+  }
+  if (result.payloadSha256 !== result.changeSet.payloadSha256) {
+    throw new UpstreamContractError('preview payload lineage mismatch')
+  }
+  if (
+    result.baseRevision !== expected.baseRevision
+    || result.baseRevision !== result.changeSet.baseRevision
+    || result.baseRevision !== baseCoordinates.profileRevision
+    || result.authoritativeRevision !== currentCoordinates.profileRevision
+  ) {
+    throw new UpstreamContractError('preview revision lineage mismatch')
+  }
+  if (
+    result.baseSnapshotSha256 !== expected.baseSnapshotSha256
+    || result.baseSnapshotSha256 !== result.changeSet.baseSnapshotSha256
+    || canonicalJsonSha256(baseSubject, 'preview.baseSubject') !== result.baseSnapshotSha256
+    || canonicalJsonSha256(authoritativeCurrentSubject, 'preview.authoritativeCurrentSubject')
+      !== result.authoritativeSnapshotSha256
+  ) {
+    throw new UpstreamContractError('preview snapshot lineage mismatch')
+  }
+  if (result.canCommit && (result.revisionConflict || result.baseSnapshotConflict || result.impactConflict)) {
+    throw new UpstreamContractError('preview conflict cannot be committable')
+  }
+  return result
+}
+
+function normalizeReferenceRightsElementCommit(
+  value: unknown,
+  expected: YimengCommitElementProfileRequest & YimengReferenceRightsPreviewElementProfileRequest,
+): YimengReferenceRightsCommitElementProfileResponse {
+  const root = requireObject(value, 'commit')
+  assertExactOutputKeys(root, [
+    'schema',
+    'changeSetId',
+    'commandReceiptId',
+    'eventId',
+    'eventType',
+    'projectId',
+    'targetType',
+    'targetId',
+    'elementKind',
+    'operation',
+    'referenceAssetId',
+    'referenceAssetSha256',
+    'baseRevision',
+    'authoritativeRevision',
+    'authoritativeSnapshotSha256',
+    'payloadSha256',
+    'idempotencyKey',
+    'changed',
+    'referenceInvalidated',
+    'impactAnalysis',
+    'impactSha256',
+    'deduplicated',
+    'committedAt',
+  ], 'commit')
+  if (root.schema !== 'jason.qingmu-element-profile-commit-result.v1' || root.targetType !== 'element_profile') {
+    throw new UpstreamContractError('commit schema or targetType mismatch')
+  }
+  if (root.operation !== 'replaceReferenceRights') throw new UpstreamContractError('commit.operation mismatch')
+  if (root.eventType !== 'ElementProfileChanged' && root.eventType !== 'ReferenceInvalidated') {
+    throw new UpstreamContractError('commit.eventType mismatch')
+  }
+  const impactAnalysis = normalizeElementImpactAnalysis(root.impactAnalysis, 'commit.impactAnalysis')
+  const impactSha256 = requireSha256(root.impactSha256, 'commit.impactSha256')
+  if (canonicalJsonSha256(impactAnalysis, 'commit.impactAnalysis') !== impactSha256) {
+    throw new UpstreamContractError('commit impact sha256 mismatch')
+  }
+  const result: YimengReferenceRightsCommitElementProfileResponse = {
+    schema: 'jason.qingmu-element-profile-commit-result.v1',
+    changeSetId: requireString(root.changeSetId, 'commit.changeSetId'),
+    commandReceiptId: requireString(root.commandReceiptId, 'commit.commandReceiptId'),
+    eventId: requireString(root.eventId, 'commit.eventId'),
+    eventType: root.eventType,
+    projectId: requireString(root.projectId, 'commit.projectId'),
+    targetType: 'element_profile',
+    targetId: requireString(root.targetId, 'commit.targetId'),
+    elementKind: requireElementKind(root.elementKind, 'commit.elementKind'),
+    operation: 'replaceReferenceRights',
+    referenceAssetId: requireString(root.referenceAssetId, 'commit.referenceAssetId'),
+    referenceAssetSha256: requireSha256(root.referenceAssetSha256, 'commit.referenceAssetSha256'),
+    baseRevision: requireInteger(root.baseRevision, 'commit.baseRevision'),
+    authoritativeRevision: requireInteger(root.authoritativeRevision, 'commit.authoritativeRevision'),
+    authoritativeSnapshotSha256: requireSha256(
+      root.authoritativeSnapshotSha256,
+      'commit.authoritativeSnapshotSha256',
+    ),
+    payloadSha256: requireSha256(root.payloadSha256, 'commit.payloadSha256'),
+    idempotencyKey: requireString(root.idempotencyKey, 'commit.idempotencyKey'),
+    changed: requireBoolean(root.changed, 'commit.changed'),
+    referenceInvalidated: requireBoolean(root.referenceInvalidated, 'commit.referenceInvalidated'),
+    impactAnalysis,
+    impactSha256,
+    deduplicated: requireBoolean(root.deduplicated, 'commit.deduplicated'),
+    committedAt: requireString(root.committedAt, 'commit.committedAt'),
+  }
+  if (
+    result.changeSetId !== expected.changeSetId
+    || result.projectId !== expected.projectId
+    || result.targetId !== expected.targetId
+    || result.elementKind !== expected.elementKind
+    || result.referenceAssetId !== expected.referenceAssetId
+    || result.referenceAssetSha256 !== expected.referenceAssetSha256
+    || result.baseRevision !== expected.baseRevision
+    || result.authoritativeRevision !== expected.baseRevision + Number(result.changed)
+    || result.payloadSha256 !== expected.expectedPayloadSha256
+    || result.idempotencyKey !== expected.idempotencyKey
+  ) {
+    throw new UpstreamContractError('commit reference rights lineage mismatch')
+  }
+  const expectedEventType = result.referenceInvalidated ? 'ReferenceInvalidated' : 'ElementProfileChanged'
+  if (result.eventType !== expectedEventType || (result.referenceInvalidated && !result.changed)) {
+    throw new UpstreamContractError('commit reference rights event lineage mismatch')
+  }
+  return result
+}
+
 function normalizeElementPreview(
   value: unknown,
   expected: YimengPreviewElementProfileRequest,
 ): YimengPreviewElementProfileResponse {
-  if (isReferenceElementRequest(expected)) return normalizeReferenceElementPreview(value, expected)
+  if (isReferenceRightsElementRequest(expected)) return normalizeReferenceRightsElementPreview(value, expected)
+  if (isReferenceActionElementRequest(expected)) return normalizeReferenceElementPreview(value, expected)
   const root = requireObject(value, 'preview')
   if (root.schema !== 'jason.qingmu-change-set-preview.v1') throw new UpstreamContractError('preview.schema mismatch')
   if (root.targetType !== 'element_profile') throw new UpstreamContractError('preview.targetType mismatch')
@@ -2469,7 +3275,8 @@ function normalizeElementCommit(
   value: unknown,
   expected: YimengCommitElementProfileRequest,
 ): YimengCommitElementProfileResponse {
-  if (isReferenceElementRequest(expected)) return normalizeReferenceElementCommit(value, expected)
+  if (isReferenceRightsElementRequest(expected)) return normalizeReferenceRightsElementCommit(value, expected)
+  if (isReferenceActionElementRequest(expected)) return normalizeReferenceElementCommit(value, expected)
   const root = requireObject(value, 'commit')
   if (root.schema !== 'jason.qingmu-element-profile-commit-result.v1') {
     throw new UpstreamContractError('commit.schema mismatch')
@@ -2539,7 +3346,7 @@ function normalizeElementRecovery(
   expected: YimengRecoverElementProfileCommitRequest,
 ): YimengRecoverElementProfileCommitResponse {
   const root = requireObject(value, 'recovery')
-  if (isReferenceElementRequest(expected)) {
+  if (isAnyReferenceElementRequest(expected)) {
     assertExactOutputKeys(root, ['schema', 'recovered', 'receiptSha256', 'receipt'], 'recovery')
   }
   if (root.schema !== 'jason.qingmu-command-receipt-recovery.v1') {
@@ -2836,16 +3643,26 @@ export function createYimengCommandHandler(
       } else if (endpoint === 'proposeReferenceAsset') {
         const request = parseProposeReferenceAssetRequest(payload)
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/elements/${encodeURIComponent(request.elementKind)}/${encodeURIComponent(request.targetId)}/reference-change-sets`
-        const body: YimengCommandJsonObject = {
-          elementKind: request.elementKind,
-          operation: request.operation,
-          candidateAssetId: request.candidateAssetId,
-          candidateAssetSha256: request.candidateAssetSha256,
-          baseRevision: request.baseRevision,
-          baseSnapshotSha256: request.baseSnapshotSha256,
-          ...(request.repairPrompt === undefined ? {} : { repairPrompt: request.repairPrompt }),
-          ...(request.harnessSessionId === undefined ? {} : { harnessSessionId: request.harnessSessionId }),
-        }
+        const body: YimengCommandJsonObject = request.operation === 'replaceReferenceRights'
+          ? {
+            elementKind: request.elementKind,
+            operation: request.operation,
+            referenceAssetId: request.referenceAssetId,
+            referenceAssetSha256: request.referenceAssetSha256,
+            rights: request.rights,
+            baseRevision: request.baseRevision,
+            baseSnapshotSha256: request.baseSnapshotSha256,
+          }
+          : {
+            elementKind: request.elementKind,
+            operation: request.operation,
+            candidateAssetId: request.candidateAssetId,
+            candidateAssetSha256: request.candidateAssetSha256,
+            baseRevision: request.baseRevision,
+            baseSnapshotSha256: request.baseSnapshotSha256,
+            ...(request.repairPrompt === undefined ? {} : { repairPrompt: request.repairPrompt }),
+            ...(request.harnessSessionId === undefined ? {} : { harnessSessionId: request.harnessSessionId }),
+          }
         requestInit = { method: 'POST', body: serializeBody(body) }
         normalize = value => normalizeElementProposal(value, request)
       } else if (endpoint === 'previewElementProfile') {

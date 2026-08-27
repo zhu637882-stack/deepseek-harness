@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   apply,
   createYimengReadHandler,
+  normalizeReferenceRightsRecord,
   type YimengReadAdapterDependencies,
   type YimengWorkflowProjection,
 } from '../src/index.ts'
@@ -136,9 +137,33 @@ const REVIEW_FEED_FIXTURE = {
 
 type ElementKind = 'actor' | 'scene' | 'prop'
 
+function unknownRightsRecord(): Record<string, unknown> {
+  const scalar = { state: 'unknown', value: null }
+  return {
+    schema: 'jason.qingmu-reference-rights-record.v1',
+    sourceType: scalar,
+    rightsHolder: scalar,
+    authorizationScope: { state: 'unknown', values: [] },
+    territory: { state: 'unknown', values: [] },
+    term: { state: 'unknown', startsAt: null, endsAt: null, perpetual: null },
+    restrictions: { state: 'unknown', values: [] },
+    contains: {
+      realPersonLikeness: 'unknown',
+      trademark: 'unknown',
+      music: 'unknown',
+      font: 'unknown',
+      thirdPartyCharacter: 'unknown',
+    },
+    providerTerms: { state: 'unknown', terms: null, reviewedAt: null },
+    modelLicenses: { code: scalar, weights: scalar, outputUse: scalar },
+    humanDeclaration: { state: 'unknown', text: null },
+    contentCredentials: scalar,
+  }
+}
+
 function elementSubjectFixture(elementKind: ElementKind): Record<string, unknown> {
   const common = {
-    schema: 'jason.qingmu-element-profile-subject.v1',
+    schema: 'jason.qingmu-element-profile-subject.v2',
     projectId: 'project-1',
     targetType: 'element_profile',
     elementKind,
@@ -150,6 +175,9 @@ function elementSubjectFixture(elementKind: ElementKind): Record<string, unknown
       sha256: 'd'.repeat(64),
       selectionStatus: 'Unselected',
       isSelected: false,
+      rightsRecorded: false,
+      rights: unknownRightsRecord(),
+      ...(elementKind === 'prop' ? {} : { role: elementKind === 'actor' ? 'primary' : 'environment' }),
     }],
   }
   if (elementKind === 'actor') {
@@ -508,7 +536,7 @@ describe('qingmu Yimeng read adapter', () => {
       const handler = createYimengReadHandler({}, dependencies(async (input) => {
         capturedUrl = requestUrl(input)
         return jsonResponse({
-          schema: 'jason.qingmu-element-profile-subject-read.v1',
+          schema: 'jason.qingmu-element-profile-subject-read.v2',
           subject,
           canonicalSnapshot,
           snapshotSha256,
@@ -524,7 +552,7 @@ describe('qingmu Yimeng read adapter', () => {
       expect(result).toEqual({
         ok: true,
         value: {
-          schema: 'jason.qingmu-element-profile-subject-read.v1',
+          schema: 'jason.qingmu-element-profile-subject-read.v2',
           subject,
           snapshotSha256,
         },
@@ -538,7 +566,7 @@ describe('qingmu Yimeng read adapter', () => {
     const subject = elementSubjectFixture('prop')
     const canonicalSnapshot = JSON.stringify(subject)
     const fetch = vi.fn<typeof globalThis.fetch>(async () => jsonResponse({
-      schema: 'jason.qingmu-element-profile-subject-read.v1',
+      schema: 'jason.qingmu-element-profile-subject-read.v2',
       subject,
       canonicalSnapshot,
       snapshotSha256: 'f'.repeat(64),
@@ -590,13 +618,13 @@ describe('qingmu Yimeng read adapter', () => {
           const { actorId: _actorId, visualIdentity: _visualIdentity, ...common } = actor
           return { ...common, propId: 'actor-1', visualPrompt: '冒充人物字段' }
         })(),
-        expectedMessage: 'elementProfile.subject.actorId must be a string',
+        expectedMessage: 'elementProfile.subject fields mismatch',
       },
     ]
     for (const item of forgedCases) {
       const itemCanonical = JSON.stringify(item.subject)
       const itemHandler = createYimengReadHandler({}, dependencies(async () => jsonResponse({
-        schema: 'jason.qingmu-element-profile-subject-read.v1',
+        schema: 'jason.qingmu-element-profile-subject-read.v2',
         subject: item.subject,
         canonicalSnapshot: itemCanonical,
         snapshotSha256: createHash('sha256').update(itemCanonical, 'utf8').digest('hex'),
@@ -614,6 +642,84 @@ describe('qingmu Yimeng read adapter', () => {
           details: {},
         },
       })
+    }
+  })
+
+  it('normalizes the complete rights record and rejects non-canonical or unknown fields', () => {
+    const rights = unknownRightsRecord()
+    const normalized = normalizeReferenceRightsRecord({
+      ...rights,
+      sourceType: { state: 'known', value: '  commissioned  ' },
+      rightsHolder: { state: 'known', value: '  青木工作室  ' },
+      authorizationScope: { state: 'known', values: ['短剧', '宣传'] },
+      territory: { state: 'known', values: ['中国大陆'] },
+      term: {
+        state: 'known',
+        startsAt: '2026-08-27T00:00:00.1Z',
+        endsAt: '2027-08-27T00:00:00Z',
+        perpetual: false,
+      },
+      restrictions: { state: 'known', values: [] },
+      providerTerms: {
+        state: 'known',
+        terms: '  仅限当前项目  ',
+        reviewedAt: '2026-08-27T01:02:03.12Z',
+      },
+      humanDeclaration: { state: 'provided', text: '  已核对授权文件  ' },
+    })
+
+    expect(normalized).toMatchObject({
+      sourceType: { state: 'known', value: 'commissioned' },
+      rightsHolder: { state: 'known', value: '青木工作室' },
+      term: {
+        state: 'known',
+        startsAt: '2026-08-27T00:00:00.100000Z',
+        endsAt: '2027-08-27T00:00:00Z',
+        perpetual: false,
+      },
+      providerTerms: {
+        state: 'known',
+        terms: '仅限当前项目',
+        reviewedAt: '2026-08-27T01:02:03.120000Z',
+      },
+      humanDeclaration: { state: 'provided', text: '已核对授权文件' },
+    })
+    expect(() => normalizeReferenceRightsRecord({ ...rights, unexpected: true })).toThrow('rights fields mismatch')
+    expect(() => normalizeReferenceRightsRecord({
+      ...rights,
+      territory: { state: 'known', values: ['中国大陆', '中国大陆'] },
+    })).toThrow('rights.territory.values are invalid')
+    expect(() => normalizeReferenceRightsRecord({
+      ...rights,
+      providerTerms: { state: 'known', terms: '条款', reviewedAt: '2026-02-30T00:00:00Z' },
+    })).toThrow('rights.providerTerms.reviewedAt must be a valid UTC Z timestamp')
+  })
+
+  it('fails old v1 and unknown v2 subject/reference fields closed with matching canonical evidence', async () => {
+    const base = elementSubjectFixture('prop')
+    const reference = (base.references as Array<Record<string, unknown>>)[0] as Record<string, unknown>
+    const cases = [
+      { ...base, schema: 'jason.qingmu-element-profile-subject.v1' },
+      { ...base, unexpected: true },
+      { ...base, references: [{ ...reference, unexpected: true }] },
+      { ...base, references: [{ ...reference, rights: { ...(reference.rights as object), unexpected: true } }] },
+    ]
+    for (const subject of cases) {
+      const canonicalSnapshot = JSON.stringify(subject)
+      const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse({
+        schema: 'jason.qingmu-element-profile-subject-read.v2',
+        subject,
+        canonicalSnapshot,
+        snapshotSha256: createHash('sha256').update(canonicalSnapshot, 'utf8').digest('hex'),
+      }), 'test-token'))
+      const result = await handler('elementProfile', {
+        projectId: 'project-1',
+        elementKind: 'prop',
+        targetId: 'prop-1',
+      }, signal())
+      expect(result.ok).toBe(false)
+      if (result.ok) throw new Error('strict v2 subject should fail closed')
+      expect(result.error.message).toContain('Yimeng response contract failed')
     }
   })
 

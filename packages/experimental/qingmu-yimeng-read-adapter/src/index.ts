@@ -32,6 +32,10 @@ import type {
   YimengReferenceCandidateQualityStatus,
   YimengReferenceCandidateSelectionStatus,
   YimengReferenceCandidatesResponse,
+  YimengReferenceRightsKnowledgeState,
+  YimengReferenceRightsList,
+  YimengReferenceRightsRecord,
+  YimengReferenceRightsScalar,
   YimengScriptRequest,
   YimengScriptResponse,
   YimengWorkflowBlocker,
@@ -69,6 +73,10 @@ export type {
   YimengReferenceCandidateSelectionStatus,
   YimengReferenceCandidatesRequest,
   YimengReferenceCandidatesResponse,
+  YimengReferenceRightsKnowledgeState,
+  YimengReferenceRightsList,
+  YimengReferenceRightsRecord,
+  YimengReferenceRightsScalar,
   YimengReadEndpoint,
   YimengReadEndpointMap,
   YimengScriptRequest,
@@ -107,6 +115,13 @@ const REFERENCE_QUALITY_STATUSES = new Set<YimengReferenceCandidateQualityStatus
 const REFERENCE_DECISION_KINDS = new Set<YimengReferenceCandidateDecisionKind>([
   'none', 'referenceSelection', 'humanReview',
 ])
+const RIGHTS_KNOWLEDGE_STATES = new Set<YimengReferenceRightsKnowledgeState>([
+  'known', 'unknown', 'not_applicable',
+])
+const RIGHTS_CONTAINS_KEYS = [
+  'realPersonLikeness', 'trademark', 'music', 'font', 'thirdPartyCharacter',
+] as const
+const RIGHTS_CONTAINS_STATES = new Set(['yes', 'no', 'unknown'] as const)
 const SENSITIVE_RESPONSE_KEYS = new Set([
   'authorization', 'proxyauthorization', 'cookie', 'setcookie', 'xapikey',
   'apikey', 'accesstoken', 'refreshtoken', 'csrftoken', 'idtoken', 'token',
@@ -693,21 +708,200 @@ function normalizePromptIr(value: unknown, expected: YimengPromptIrRequest): Yim
   }
 }
 
-function normalizeElementProfileReference(value: unknown, index: number): YimengElementProfileReference {
+function requireExactKeys(value: YimengJsonObject, keys: readonly string[], field: string): void {
+  const actual = Object.keys(value).sort()
+  const expected = [...keys].sort()
+  if (!isDeepStrictEqual(actual, expected)) {
+    throw new UpstreamContractError(`${field} fields mismatch`)
+  }
+}
+
+function normalizeRightsText(value: unknown, required: boolean, field: string): string | null {
+  if (value === null && !required) return null
+  if (typeof value !== 'string' || value.includes('\u0000')) {
+    throw new UpstreamContractError(`${field} must be text or null`)
+  }
+  const normalized = value.trim()
+  if ((required && normalized.length === 0) || normalized.length > 4_000) {
+    throw new UpstreamContractError(`${field} is invalid`)
+  }
+  return normalized.length === 0 ? null : normalized
+}
+
+function normalizeRightsState(value: unknown, field: string): YimengReferenceRightsKnowledgeState {
+  if (!RIGHTS_KNOWLEDGE_STATES.has(value as YimengReferenceRightsKnowledgeState)) {
+    throw new UpstreamContractError(`${field} is invalid`)
+  }
+  return value as YimengReferenceRightsKnowledgeState
+}
+
+function normalizeRightsScalar(value: unknown, field: string): YimengReferenceRightsScalar {
+  const object = requireObject(value, field)
+  requireExactKeys(object, ['state', 'value'], field)
+  const state = normalizeRightsState(object.state, `${field}.state`)
+  const normalizedValue = normalizeRightsText(object.value, state === 'known', `${field}.value`)
+  if (state !== 'known' && normalizedValue !== null) {
+    throw new UpstreamContractError(`${field}.value must be null unless known`)
+  }
+  return { state, value: normalizedValue }
+}
+
+function normalizeRightsList(
+  value: unknown,
+  field: string,
+  allowEmptyKnown = false,
+): YimengReferenceRightsList {
+  const object = requireObject(value, field)
+  requireExactKeys(object, ['state', 'values'], field)
+  const state = normalizeRightsState(object.state, `${field}.state`)
+  if (!Array.isArray(object.values)) throw new UpstreamContractError(`${field}.values must be an array`)
+  const normalized = [...new Set(object.values.map((item, index) => (
+    normalizeRightsText(item, true, `${field}.values[${String(index)}]`) as string
+  )))].sort(compareUnicodeCodePoints)
+  if (normalized.length !== object.values.length || normalized.length > 50) {
+    throw new UpstreamContractError(`${field}.values are invalid`)
+  }
+  if (state === 'known' ? (!allowEmptyKnown && normalized.length === 0) : normalized.length !== 0) {
+    throw new UpstreamContractError(`${field}.values conflict with state`)
+  }
+  return { state, values: normalized }
+}
+
+function normalizeRightsTimestamp(value: unknown, required: boolean, field: string): string | null {
+  const normalized = normalizeRightsText(value, required, field)
+  if (normalized === null) return null
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?Z$/.exec(normalized)
+  if (match === null || Number.isNaN(Date.parse(normalized))) {
+    throw new UpstreamContractError(`${field} must be a UTC Z timestamp`)
+  }
+  const parsed = new Date(normalized)
+  if (parsed.toISOString().slice(0, 19) !== match[1]) {
+    throw new UpstreamContractError(`${field} must be a valid UTC Z timestamp`)
+  }
+  const fraction = match[2]?.padEnd(6, '0')
+  return `${match[1]}${fraction !== undefined && Number(fraction) !== 0 ? `.${fraction}` : ''}Z`
+}
+
+/** Strictly normalize one authoritative reference-rights record without retaining unknown fields. */
+export function normalizeReferenceRightsRecord(value: unknown, field = 'rights'): YimengReferenceRightsRecord {
+  const object = requireObject(value, field)
+  requireExactKeys(object, [
+    'schema', 'sourceType', 'rightsHolder', 'authorizationScope', 'territory', 'term',
+    'restrictions', 'contains', 'providerTerms', 'modelLicenses', 'humanDeclaration',
+    'contentCredentials',
+  ], field)
+  if (object.schema !== 'jason.qingmu-reference-rights-record.v1') {
+    throw new UpstreamContractError(`${field}.schema mismatch`)
+  }
+  const term = requireObject(object.term, `${field}.term`)
+  requireExactKeys(term, ['state', 'startsAt', 'endsAt', 'perpetual'], `${field}.term`)
+  const termState = normalizeRightsState(term.state, `${field}.term.state`)
+  let startsAt: string | null = null
+  let endsAt: string | null = null
+  let perpetual: boolean | null = null
+  if (termState === 'known') {
+    startsAt = normalizeRightsTimestamp(term.startsAt, true, `${field}.term.startsAt`)
+    if (typeof term.perpetual !== 'boolean') {
+      throw new UpstreamContractError(`${field}.term.perpetual must be boolean when known`)
+    }
+    perpetual = term.perpetual
+    endsAt = normalizeRightsTimestamp(term.endsAt, !perpetual, `${field}.term.endsAt`)
+    if (perpetual && endsAt !== null) throw new UpstreamContractError(`${field}.term.endsAt must be null when perpetual`)
+    if (!perpetual && startsAt !== null && endsAt !== null && Date.parse(endsAt) < Date.parse(startsAt)) {
+      throw new UpstreamContractError(`${field}.term ends before it starts`)
+    }
+  } else if (term.startsAt !== null || term.endsAt !== null || term.perpetual !== null) {
+    throw new UpstreamContractError(`${field}.term values must be null unless known`)
+  }
+  const contains = requireObject(object.contains, `${field}.contains`)
+  requireExactKeys(contains, RIGHTS_CONTAINS_KEYS, `${field}.contains`)
+  for (const key of RIGHTS_CONTAINS_KEYS) {
+    if (!RIGHTS_CONTAINS_STATES.has(contains[key] as 'yes' | 'no' | 'unknown')) {
+      throw new UpstreamContractError(`${field}.contains.${key} is invalid`)
+    }
+  }
+  const providerTerms = requireObject(object.providerTerms, `${field}.providerTerms`)
+  requireExactKeys(providerTerms, ['state', 'terms', 'reviewedAt'], `${field}.providerTerms`)
+  const providerState = normalizeRightsState(providerTerms.state, `${field}.providerTerms.state`)
+  const terms = normalizeRightsText(providerTerms.terms, providerState === 'known', `${field}.providerTerms.terms`)
+  const reviewedAt = normalizeRightsTimestamp(
+    providerTerms.reviewedAt,
+    providerState === 'known',
+    `${field}.providerTerms.reviewedAt`,
+  )
+  if (providerState !== 'known' && (terms !== null || reviewedAt !== null)) {
+    throw new UpstreamContractError(`${field}.providerTerms values must be null unless known`)
+  }
+  const licenses = requireObject(object.modelLicenses, `${field}.modelLicenses`)
+  requireExactKeys(licenses, ['code', 'weights', 'outputUse'], `${field}.modelLicenses`)
+  const declaration = requireObject(object.humanDeclaration, `${field}.humanDeclaration`)
+  requireExactKeys(declaration, ['state', 'text'], `${field}.humanDeclaration`)
+  if (
+    declaration.state !== 'provided'
+    && declaration.state !== 'unknown'
+    && declaration.state !== 'not_applicable'
+  ) {
+    throw new UpstreamContractError(`${field}.humanDeclaration.state is invalid`)
+  }
+  const declarationText = normalizeRightsText(
+    declaration.text,
+    declaration.state === 'provided',
+    `${field}.humanDeclaration.text`,
+  )
+  if (declaration.state !== 'provided' && declarationText !== null) {
+    throw new UpstreamContractError(`${field}.humanDeclaration.text must be null unless provided`)
+  }
+  return {
+    schema: 'jason.qingmu-reference-rights-record.v1',
+    sourceType: normalizeRightsScalar(object.sourceType, `${field}.sourceType`),
+    rightsHolder: normalizeRightsScalar(object.rightsHolder, `${field}.rightsHolder`),
+    authorizationScope: normalizeRightsList(object.authorizationScope, `${field}.authorizationScope`),
+    territory: normalizeRightsList(object.territory, `${field}.territory`),
+    term: { state: termState, startsAt, endsAt, perpetual },
+    restrictions: normalizeRightsList(object.restrictions, `${field}.restrictions`, true),
+    contains: {
+      realPersonLikeness: contains.realPersonLikeness as 'yes' | 'no' | 'unknown',
+      trademark: contains.trademark as 'yes' | 'no' | 'unknown',
+      music: contains.music as 'yes' | 'no' | 'unknown',
+      font: contains.font as 'yes' | 'no' | 'unknown',
+      thirdPartyCharacter: contains.thirdPartyCharacter as 'yes' | 'no' | 'unknown',
+    },
+    providerTerms: { state: providerState, terms, reviewedAt },
+    modelLicenses: {
+      code: normalizeRightsScalar(licenses.code, `${field}.modelLicenses.code`),
+      weights: normalizeRightsScalar(licenses.weights, `${field}.modelLicenses.weights`),
+      outputUse: normalizeRightsScalar(licenses.outputUse, `${field}.modelLicenses.outputUse`),
+    },
+    humanDeclaration: { state: declaration.state, text: declarationText },
+    contentCredentials: normalizeRightsScalar(object.contentCredentials, `${field}.contentCredentials`),
+  }
+}
+
+function normalizeElementProfileReference(
+  value: unknown,
+  index: number,
+  elementKind: 'actor' | 'scene' | 'prop',
+): YimengElementProfileReference {
   const field = `elementProfile.subject.references[${String(index)}]`
   const reference = requireObject(value, field)
+  requireExactKeys(reference, [
+    'assetId', 'sha256', 'selectionStatus', 'isSelected', 'rightsRecorded', 'rights',
+    ...(elementKind === 'prop' ? [] : ['role']),
+  ], field)
   return {
-    ...reference,
     assetId: requireString(reference.assetId, `${field}.assetId`),
     sha256: requireSha256(reference.sha256, `${field}.sha256`),
     selectionStatus: requireString(reference.selectionStatus, `${field}.selectionStatus`),
     isSelected: requireBoolean(reference.isSelected, `${field}.isSelected`),
+    rightsRecorded: requireBoolean(reference.rightsRecorded, `${field}.rightsRecorded`),
+    rights: normalizeReferenceRightsRecord(reference.rights, `${field}.rights`),
+    ...(elementKind === 'prop' ? {} : { role: requireString(reference.role, `${field}.role`) }),
   }
 }
 
 function normalizeElementProfileSubject(value: unknown): YimengElementProfileSubject {
   const subject = requireObject(value, 'elementProfile.subject')
-  if (subject.schema !== 'jason.qingmu-element-profile-subject.v1') {
+  if (subject.schema !== 'jason.qingmu-element-profile-subject.v2') {
     throw new UpstreamContractError('elementProfile.subject.schema mismatch')
   }
   if (subject.targetType !== 'element_profile') {
@@ -720,9 +914,18 @@ function normalizeElementProfileSubject(value: unknown): YimengElementProfileSub
     throw new UpstreamContractError('elementProfile.subject.references must be an array')
   }
   assertSafeJsonNumbers(subject, 'elementProfile.subject')
+  const expectedSubjectKeys = [
+    'schema', 'projectId', 'targetType', 'elementKind', 'profileRevision', 'name',
+    'officialReferenceImageUrl', 'references',
+    ...(subject.elementKind === 'actor'
+      ? ['actorId', 'visualIdentity']
+      : subject.elementKind === 'scene'
+        ? ['sceneId', 'sceneType', 'visualPrompt']
+        : ['propId', 'visualPrompt']),
+  ]
+  requireExactKeys(subject, expectedSubjectKeys, 'elementProfile.subject')
   const common = {
-    ...subject,
-    schema: 'jason.qingmu-element-profile-subject.v1' as const,
+    schema: 'jason.qingmu-element-profile-subject.v2' as const,
     projectId: requireString(subject.projectId, 'elementProfile.subject.projectId'),
     targetType: 'element_profile' as const,
     profileRevision: requireInteger(subject.profileRevision, 'elementProfile.subject.profileRevision', 0),
@@ -731,7 +934,9 @@ function normalizeElementProfileSubject(value: unknown): YimengElementProfileSub
       subject.officialReferenceImageUrl,
       'elementProfile.subject.officialReferenceImageUrl',
     ),
-    references: subject.references.map(normalizeElementProfileReference),
+    references: subject.references.map((reference, index) => (
+      normalizeElementProfileReference(reference, index, subject.elementKind as 'actor' | 'scene' | 'prop')
+    )),
   }
   if (subject.elementKind === 'actor') {
     return {
@@ -769,7 +974,7 @@ function normalizeElementProfile(
   expected: YimengElementProfileRequest,
 ): YimengElementProfileResponse {
   const root = requireObject(value, 'elementProfile')
-  if (root.schema !== 'jason.qingmu-element-profile-subject-read.v1') {
+  if (root.schema !== 'jason.qingmu-element-profile-subject-read.v2') {
     throw new UpstreamContractError('elementProfile.schema mismatch')
   }
   const subject = normalizeElementProfileSubject(root.subject)
@@ -796,11 +1001,9 @@ function normalizeElementProfile(
   if (!isJsonObject(canonicalSubject) || !isDeepStrictEqual(canonicalSubject, subject)) {
     throw new UpstreamContractError('elementProfile canonical snapshot content mismatch')
   }
-  const retained = { ...root }
-  delete retained.canonicalSnapshot
+  requireExactKeys(root, ['schema', 'subject', 'canonicalSnapshot', 'snapshotSha256'], 'elementProfile')
   return {
-    ...retained,
-    schema: 'jason.qingmu-element-profile-subject-read.v1',
+    schema: 'jason.qingmu-element-profile-subject-read.v2',
     subject,
     snapshotSha256,
   }
