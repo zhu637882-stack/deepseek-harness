@@ -18,6 +18,11 @@ import type {
 import { HeroFrameStoryboardCanvas } from '../src/client/HeroFrameStoryboardCanvas.tsx'
 import type { QingmuCockpitKey } from '../src/client/locales.ts'
 import { zh } from '../src/client/locales.ts'
+import {
+  createStoryboardCanvasRecoveryMarker,
+  deriveStoryboardCanvasIdempotencyKey,
+  writeStoryboardCanvasRecoveryMarker,
+} from '../src/client/storyboard-canvas-recovery.ts'
 
 const sha = (character: string): string => character.repeat(64)
 const STORYBOARD_SOURCE_SHA = sha('1')
@@ -346,7 +351,9 @@ function buildFixture(options: { readonly wrongPlainReceipt?: boolean } = {}) {
     }
     return state.receipt
   })
-  const recoverStoryboardCanvasCommit = vi.fn(async (): Promise<YimengRecoverStoryboardCanvasCommitResponse> => {
+  const recoverStoryboardCanvasCommit = vi.fn(async (
+    _request: YimengCommitStoryboardCanvasRequest,
+  ): Promise<YimengRecoverStoryboardCanvasCommitResponse> => {
     if (state.receipt === undefined) throw new Error('commit receipt missing')
     return {
       schema: 'jason.qingmu-command-receipt-recovery.v1',
@@ -471,6 +478,126 @@ describe('HeroFrameStoryboardCanvas', () => {
       humanApprovalInferred: false,
       humanSignoff: false,
     })
+  })
+
+  it('finds an old-revision pending marker after authority refresh and recovers with its original GET coordinates only', async () => {
+    const fixture = buildFixture()
+    const canvas: NonNullable<YimengHeroFrameStoryboardsProjection['shots'][number]['canvas']> = {
+      schema: 'jason.qingmu-storyboard-canvas.v1',
+      heroFrameBindingSha256: HERO_BINDING_SHA,
+      annotations: [],
+      rawAnnotationsSha256: canonicalSha256([]),
+      compiled: { subjectLayout: [], objectAnchors: [], actionTrajectory: [] },
+      compiledSha256: COMPILED_SHA,
+    }
+    const idempotencyKey = await deriveStoryboardCanvasIdempotencyKey('change-set-1', PAYLOAD_SHA)
+    const marker = createStoryboardCanvasRecoveryMarker({
+      projectId: 'project-1',
+      episodeId: 'episode-1',
+      storyboardRevisionId: 'storyboard-revision-1',
+      frameId: 'frame-1',
+      targetType: 'storyboard_frame',
+      targetId: 'frame-1',
+      changeSetId: 'change-set-1',
+      baseRevision: 1,
+      baseSnapshotSha256: BASE_SNAPSHOT_SHA,
+      idempotencyKey,
+      expectedPayloadSha256: PAYLOAD_SHA,
+    })
+    fixture.state.canvas = canvas
+    fixture.state.receipt = {
+      schema: 'jason.qingmu-storyboard-canvas-commit-result.v1',
+      changeSetId: marker.changeSetId,
+      commandReceiptId: 'command-receipt-1',
+      eventId: 'event-1',
+      eventType: 'StoryboardCanvasReplaced',
+      projectId: marker.projectId,
+      episodeId: marker.episodeId,
+      targetType: 'storyboard_frame',
+      targetId: marker.targetId,
+      operation: 'replaceStoryboardCanvas',
+      storyboardRevision: {
+        base: { revisionId: marker.storyboardRevisionId, revisionVersion: 1, sourceSha256: STORYBOARD_SOURCE_SHA },
+        authoritative: { revisionId: 'storyboard-revision-2', revisionVersion: 2, sourceSha256: AUTHORITATIVE_SOURCE_SHA },
+      },
+      baseRevision: marker.baseRevision,
+      authoritativeRevision: 2,
+      authoritativeSnapshotSha256: AUTHORITATIVE_SNAPSHOT_SHA,
+      heroFrame: { assetId: HERO.assetId, mediaSha256: HERO.mediaSha256, bindingSha256: HERO.bindingSha256 },
+      methodHeroFrameBindingSha256: METHOD_HERO_BINDING_SHA,
+      rawAnnotationsSha256: canvas.rawAnnotationsSha256,
+      methodRawAnnotationsSha256: METHOD_RAW_SHA,
+      compiledSha256: COMPILED_SHA,
+      payloadSha256: marker.expectedPayloadSha256,
+      idempotencyKey: marker.idempotencyKey,
+      changed: true,
+      providerCalls: 0,
+      workerStarted: false,
+      selectionExecuted: false,
+      humanApprovalInferred: false,
+      humanSignoff: false,
+      deduplicated: false,
+      committedAt: '2026-08-27T04:01:00.000Z',
+    }
+    expect(writeStoryboardCanvasRecoveryMarker(marker)).toBe(true)
+
+    const authoritativeRelations: YimengShotRelationsProjection = {
+      ...RELATIONS,
+      storyboardRevision: {
+        ...RELATIONS.storyboardRevision,
+        revisionId: 'storyboard-revision-2',
+        revisionVersion: 2,
+        sourceSha256: AUTHORITATIVE_SOURCE_SHA,
+      },
+    }
+    const authoritativeProjection: YimengHeroFrameStoryboardsProjection = {
+      ...heroProjection(),
+      storyboardRevision: {
+        revisionId: 'storyboard-revision-2',
+        revisionVersion: 2,
+        sourceSha256: AUTHORITATIVE_SOURCE_SHA,
+      },
+      shots: [{
+        shotId: 'frame-1',
+        shotSnapshotSha256: SHOT_SNAPSHOT_SHA,
+        heroFrame: HERO,
+        canvas,
+        blockers: [],
+      }],
+      shotsSha256: AUTHORITATIVE_SNAPSHOT_SHA,
+    }
+    render(<HeroFrameStoryboardCanvas
+      relations={authoritativeRelations}
+      heroFrameStoryboards={authoritativeProjection}
+      selectedShotId="frame-1"
+      port={fixture.port}
+      t={t}
+      onCommitted={fixture.onCommitted}
+    />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '恢复原提交回执' }))
+    await screen.findByText('权威画布已提交并完成回执恢复与刷新')
+
+    expect(fixture.recoverStoryboardCanvasCommit).toHaveBeenCalledTimes(1)
+    expect(fixture.recoverStoryboardCanvasCommit.mock.calls[0]?.[0]).toEqual({
+      projectId: 'project-1',
+      episodeId: 'episode-1',
+      storyboardRevisionId: 'storyboard-revision-1',
+      frameId: 'frame-1',
+      targetType: 'storyboard_frame',
+      targetId: 'frame-1',
+      changeSetId: 'change-set-1',
+      baseRevision: 1,
+      baseSnapshotSha256: BASE_SNAPSHOT_SHA,
+      idempotencyKey,
+      expectedPayloadSha256: PAYLOAD_SHA,
+    })
+    expect(fixture.heroFrameStoryboardMethod).not.toHaveBeenCalled()
+    expect(fixture.proposeStoryboardCanvas).not.toHaveBeenCalled()
+    expect(fixture.previewStoryboardCanvas).not.toHaveBeenCalled()
+    expect(fixture.commitStoryboardCanvas).not.toHaveBeenCalled()
+    expect(fixture.onCommitted).toHaveBeenCalledTimes(1)
+    expect(sessionStorage.length).toBe(0)
   })
 
   it('fails closed when a receipt substitutes the rich method envelope SHA for the plain annotation SHA', async () => {

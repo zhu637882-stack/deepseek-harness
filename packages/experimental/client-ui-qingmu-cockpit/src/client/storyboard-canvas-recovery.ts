@@ -17,7 +17,7 @@ const KEYS = [
   'expectedPayloadSha256',
 ] as const
 
-/** Exact frame coordinates isolating one same-tab commit recovery marker. */
+/** Frame coordinates used to discover one same-tab commit recovery marker. */
 export interface StoryboardCanvasRecoveryCoordinates {
   readonly projectId: string
   readonly episodeId: string
@@ -71,17 +71,25 @@ function requireExactKeys(record: Record<string, unknown>): void {
 function requireCoordinates(
   record: Record<string, unknown>,
   expected: StoryboardCanvasRecoveryCoordinates,
+  revisionPolicy: 'exact' | 'stored',
 ): void {
-  for (const key of ['projectId', 'episodeId', 'storyboardRevisionId', 'frameId'] as const) {
+  for (const key of ['projectId', 'episodeId', 'frameId'] as const) {
     if (!isIdentifier(record[key]) || record[key] !== expected[key]) {
       throw new Error(`故事板画布恢复标记 ${key} 不匹配`)
     }
+  }
+  if (!isIdentifier(record.storyboardRevisionId)) {
+    throw new Error('故事板画布恢复标记 storyboardRevisionId 无效')
+  }
+  if (revisionPolicy === 'exact' && record.storyboardRevisionId !== expected.storyboardRevisionId) {
+    throw new Error('故事板画布恢复标记 storyboardRevisionId 不匹配')
   }
 }
 
 function parseMarker(
   value: unknown,
   expected: StoryboardCanvasRecoveryCoordinates,
+  revisionPolicy: 'exact' | 'stored' = 'exact',
 ): StoryboardCanvasCommitRecoveryMarker {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error('故事板画布恢复标记不是对象')
@@ -89,7 +97,7 @@ function parseMarker(
   const record = value as Record<string, unknown>
   requireExactKeys(record)
   if (record.schema !== SCHEMA) throw new Error('故事板画布恢复标记合同不匹配')
-  requireCoordinates(record, expected)
+  requireCoordinates(record, expected, revisionPolicy)
   if (record.targetType !== 'storyboard_frame') throw new Error('故事板画布恢复标记 Target Type 不匹配')
   const targetId = expected.frameId
   if (!isIdentifier(record.targetId) || record.targetId !== targetId) {
@@ -125,7 +133,6 @@ function storageKey(coordinates: StoryboardCanvasRecoveryCoordinates): string {
     STORAGE_PREFIX,
     encodeURIComponent(coordinates.projectId),
     encodeURIComponent(coordinates.episodeId),
-    encodeURIComponent(coordinates.storyboardRevisionId),
     encodeURIComponent(coordinates.frameId),
   ].join(':')
 }
@@ -170,14 +177,14 @@ export function createStoryboardCanvasRecoveryMarker(
   return parseMarker({ schema: SCHEMA, ...coordinates }, coordinates)
 }
 
-/** Read only the marker isolated to this exact storyboard frame. */
+/** Discover the frame marker while retaining its originating revision and commit lineage. */
 export function readStoryboardCanvasRecoveryMarker(
   coordinates: StoryboardCanvasRecoveryCoordinates,
 ): StoryboardCanvasRecoveryMarkerRead {
   try {
     const serialized = sessionStorage.getItem(storageKey(coordinates))
     if (serialized === null) return { status: 'none' }
-    return { status: 'ready', marker: parseMarker(JSON.parse(serialized) as unknown, coordinates) }
+    return { status: 'ready', marker: parseMarker(JSON.parse(serialized) as unknown, coordinates, 'stored') }
   } catch (error) {
     return { status: 'invalid', error: error instanceof Error ? error.message : String(error) }
   }

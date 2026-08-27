@@ -66,4 +66,24 @@ describe('Storyboard Canvas commit recovery marker', () => {
     expect(writeStoryboardCanvasRecoveryMarker({ ...marker, expectedPayloadSha256: 'invalid' })).toBe(false)
     expect(readStoryboardCanvasRecoveryMarker(COORDINATES)).toEqual({ status: 'ready', marker })
   })
+
+  it('discovers an old-revision marker from the stable frame index without rewriting its commit coordinates', async () => {
+    const marker = createStoryboardCanvasRecoveryMarker({
+      ...COORDINATES,
+      targetType: 'storyboard_frame',
+      targetId: 'shot-frame-3',
+      changeSetId: 'change-set-1',
+      baseRevision: 7,
+      baseSnapshotSha256: SHA_A,
+      idempotencyKey: await deriveStoryboardCanvasIdempotencyKey('change-set-1', SHA_B),
+      expectedPayloadSha256: SHA_B,
+    })
+    expect(writeStoryboardCanvasRecoveryMarker(marker)).toBe(true)
+
+    const refreshedCoordinates = { ...COORDINATES, storyboardRevisionId: 'storyboard-8' }
+    expect(readStoryboardCanvasRecoveryMarker(refreshedCoordinates)).toEqual({ status: 'ready', marker })
+    expect(clearStoryboardCanvasRecoveryMarker({ ...marker, storyboardRevisionId: 'storyboard-8' })).toBe(false)
+    expect(readStoryboardCanvasRecoveryMarker(refreshedCoordinates)).toEqual({ status: 'ready', marker })
+    expect(sessionStorage.length).toBe(1)
+  })
 })
