@@ -277,6 +277,173 @@ describe('same-Shot Finding authoring', () => {
   })
 })
 
+describe('Finding read-only rework preparation', () => {
+  const title = '返修准备 · 非正式路由'
+
+  async function openPreparation() {
+    fireEvent.click(await screen.findByText(zh.findingRecordDetails))
+    return screen.getByRole('region', { name: title })
+  }
+
+  it('shows the current binding without changing author text, duplicate evidence, hashes, requests, or markers', async () => {
+    const author = { ...shotFindingAuthorInput(), timecode: '\uFEFF00:00.000–00:01.250',
+      observation: '\uFEFF 原观察。\n 第二行\uFEFF', ownerReason: '\uFEFF原归因\n不改写',
+      suggestion: '\uFEFF原建议\n不执行', reworkScope: '\uFEFF原返修范围\n不扩展',
+      evidenceRefs: ['\uFEFFasset://video-a#t=0,1.25', '\uFEFFasset://video-a#t=0,1.25'] }
+    const item = { ...shotFindingResult(shotFindingMethod(), author).finding, currentBinding: true }
+    const port = makePort({ ...shotFindingFeed(), capabilities: { canRecordFinding: false }, items: [item] })
+    const storage = vi.spyOn(Storage.prototype, 'setItem')
+    render(<ShotFindingView {...props(port)} />)
+    await screen.findByRole('combobox', { name: zh.findingEarliestOwner })
+    const buttons = screen.getAllByRole('button').length
+    const preparation = await openPreparation()
+    expect(within(preparation).getByRole('heading', { name: title, level: 5 })).toBeTruthy()
+    expect(within(preparation).getByText('原记录与当前选中素材一致')).toBeTruthy()
+    expect(within(preparation).getByText(`${zh.findingOwnerVideo} · 按制作单元`)).toBeTruthy()
+    expect(within(preparation).getByText('与记录时一致')).toBeTruthy()
+    const history = screen.getByRole('list', { name: zh.findingHistory })
+    expect(history.querySelector('p')?.textContent).toBe(`${author.timecode} · ${zh.findingSeverityMajor}`)
+    expect(within(history).getByText((_, node) => node?.tagName === 'P' && node.textContent === author.observation)).toBeTruthy()
+    for (const [label, value] of [
+      [zh.findingOwnerCode, author.earliestOwner], [zh.findingOwnerReason, author.ownerReason],
+      [zh.findingSuggestion, author.suggestion], [zh.findingReworkScope, author.reworkScope],
+      [zh.findingSession, item.authSessionId], [zh.findingAssetSha, item.subject.assetSha256],
+      [zh.findingSnapshotSha, item.subjectSnapshotSha256], [zh.findingMethodSha, item.methodProjectionSha256],
+      [zh.findingRulesSha, item.rulesSha256],
+    ] as const) expect(within(history).getByText(label).nextElementSibling?.textContent).toBe(value)
+    const references = within(history).getByText(zh.findingEvidenceRefs).nextElementSibling
+    expect(Array.from(references?.querySelectorAll('li') ?? [], node => node.textContent)).toEqual(author.evidenceRefs)
+    expect(preparation.querySelector('button, a, input, select, textarea, video, audio, img')).toBeNull()
+    fireEvent.click(screen.getByText(zh.findingRecordDetails))
+    fireEvent.click(screen.getByText(zh.findingRecordDetails))
+    expect(screen.getAllByRole('button')).toHaveLength(buttons)
+    expect(port.shotFindings).toHaveBeenCalledOnce()
+    expect(port.shotFindingMethod).toHaveBeenCalledOnce()
+    expect(port.recordShotFinding).not.toHaveBeenCalled()
+    expect(port.recoverShotFinding).not.toHaveBeenCalled()
+    expect(storage).not.toHaveBeenCalled()
+    expect(sessionStorage.length).toBe(0)
+  })
+
+  it.each(['historical', 'unavailable'] as const)('distinguishes %s media from a current binding while retaining the sealed record', async (kind) => {
+    const original = shotFindingFeed()
+    const item = { ...shotFindingResult().finding, currentBinding: false }
+    const feed: YimengShotFindingFeedResponse = kind === 'historical'
+      ? { ...changedFeed(original, { assetId: 'video-new', assetSha256: 'e'.repeat(64) }), items: [item] }
+      : { ...original, subject: null, snapshotSha256: null, availability: { status: 'unavailable', reason: 'selected_video_missing' }, items: [item] }
+    const port = makePort(feed)
+    render(<ShotFindingView {...props(port)} />)
+    if (kind === 'historical') await screen.findByRole('combobox', { name: zh.findingEarliestOwner })
+    else await screen.findByText(zh.findingNoSubject)
+    const preparation = await openPreparation()
+    expect(within(preparation).getByText(kind === 'historical' ? '历史记录，不作为当前素材依据' : '当前素材不可核验')).toBeTruthy()
+    expect(within(preparation).queryByText('原记录与当前选中素材一致')).toBeNull()
+    const history = screen.getByRole('list', { name: zh.findingHistory })
+    expect(within(history).getByText(zh.findingSnapshotSha).nextElementSibling?.textContent).toBe(item.subjectSnapshotSha256)
+    expect(within(history).getByText(zh.findingRulesSha).nextElementSibling?.textContent).toBe(item.rulesSha256)
+    if (kind === 'unavailable') {
+      expect(within(preparation).getByText('当前规则不可核验')).toBeTruthy()
+      expect(port.shotFindingMethod).not.toHaveBeenCalled()
+    }
+  })
+
+  it.each(['C5F', 'C5'] as const)('uses only an exact current stage match for original Owner %s', async (earliestOwner) => {
+    const item = { ...shotFindingResult().finding, earliestOwner, currentBinding: true }
+    const port = makePort({ ...shotFindingFeed(), items: [item] })
+    render(<ShotFindingView {...props(port)} />)
+    await screen.findByRole('combobox', { name: zh.findingEarliestOwner })
+    const preparation = await openPreparation()
+    expect(screen.getByText(zh.findingOwnerCode).nextElementSibling?.textContent).toBe(earliestOwner)
+    if (earliestOwner === 'C5F') {
+      expect(within(preparation).getByText(`${zh.findingOwnerStoryboard} · 全局岗位`)).toBeTruthy()
+    } else {
+      expect(within(preparation).getByText('当前方法未提供匹配岗位，保留原归因')).toBeTruthy()
+      expect(within(preparation).queryByText(`${zh.findingOwnerStoryboard} · 全局岗位`)).toBeNull()
+      expect(within(preparation).queryByText(`${zh.findingOwnerVideo} · 按制作单元`)).toBeNull()
+    }
+  })
+
+  it('compares current rules with the original SHA without overwriting the historical method evidence', async () => {
+    const item = { ...shotFindingResult().finding, rulesSha256: 'e'.repeat(64), methodProjectionSha256: 'f'.repeat(64), currentBinding: true }
+    const port = makePort({ ...shotFindingFeed(), items: [item] })
+    render(<ShotFindingView {...props(port)} />)
+    await screen.findByRole('combobox', { name: zh.findingEarliestOwner })
+    const preparation = await openPreparation()
+    expect(within(preparation).getByText('与记录时不同，原记录保持不变')).toBeTruthy()
+    expect(within(preparation).getByText('当前方法规则 SHA').nextElementSibling?.textContent).toBe(shotFindingMethod().projection.rulesSha256)
+    expect(screen.getByText(zh.findingRulesSha).nextElementSibling?.textContent).toBe(item.rulesSha256)
+    expect(screen.getByText(zh.findingMethodSha).nextElementSibling?.textContent).toBe(item.methodProjectionSha256)
+  })
+
+  it('keeps the record but does not guess a known role or current rules when the method is unavailable', async () => {
+    const item = { ...shotFindingResult().finding, currentBinding: true }
+    const port = makePort({ ...shotFindingFeed(), items: [item] })
+    port.shotFindingMethod.mockRejectedValue(new Error('method unavailable'))
+    render(<ShotFindingView {...props(port)} />)
+    await screen.findByText(zh.findingMethodUnavailable)
+    const preparation = await openPreparation()
+    expect(within(preparation).getByText('当前方法未提供匹配岗位，保留原归因')).toBeTruthy()
+    expect(within(preparation).getByText('当前规则不可核验')).toBeTruthy()
+    expect(within(preparation).queryByText(/视频生产|按制作单元|当前方法规则 SHA/)).toBeNull()
+    expect(screen.getByText(zh.findingRulesSha).nextElementSibling?.textContent).toBe(item.rulesSha256)
+    expect(port.recordShotFinding).not.toHaveBeenCalled()
+  })
+
+  it('does not promote ordinary completion, quality, source-lock or editing-TTL facts into routing authority', async () => {
+    const source = { ...shotFindingSource(), status: 'complete', qualityPassed: true,
+      stages: { video: { status: 'complete', hasData: true, isStale: false, qualityPassed: true, selected: true, canProceed: true } },
+      legacy: { sourceLock: 'source-lock:source-only', editingLock: { owner: 'editor', ttl: 300 } } }
+    const feed = shotFindingFeed(source)
+    const item = { ...shotFindingResult(shotFindingMethod(feed)).finding, earliestOwner: 'C5F', currentBinding: true }
+    const port = makePort({ ...feed, items: [item] })
+    render(<ShotFindingView {...props(port, source)} />)
+    await screen.findByRole('combobox', { name: zh.findingEarliestOwner })
+    const preparation = await openPreparation()
+    for (const label of ['阶段实例', '制作单元映射', '批准锁实例', '独立正式决定']) {
+      expect(within(preparation).getByText(label).nextElementSibling?.textContent).toBe('当前读合同未提供')
+    }
+    expect(within(preparation).getAllByText('当前读合同未提供')).toHaveLength(4)
+    expect(within(preparation).getByText('未知，不能按责任岗位推断')).toBeTruthy()
+    expect(within(preparation).getByText('当前视图无正式路由证据；本视图不提供执行')).toBeTruthy()
+    expect(within(preparation).getByText('以上仅说明证据提供情况，不表示系统不存在；制作单元映射不作为全局岗位的额外要求。')).toBeTruthy()
+    expect(preparation.querySelector('button, a, input, select, textarea')).toBeNull()
+    expect(port.recordShotFinding).not.toHaveBeenCalled()
+    expect(port.recoverShotFinding).not.toHaveBeenCalled()
+  })
+
+  it.each(['source', 'port', 'refresh', 'shot', 'disable'] as const)('hides the previous preparation immediately after %s changes', async (change) => {
+    const source = shotFindingSource()
+    const feed = shotFindingFeed(source)
+    const item = { ...shotFindingResult().finding, currentBinding: true }
+    const port = makePort({ ...feed, items: [item] })
+    const mounted = render(<ShotFindingView {...props(port, source)} />)
+    await screen.findByRole('combobox', { name: zh.findingEarliestOwner })
+    expect(within(await openPreparation()).getByText(`${zh.findingOwnerVideo} · 按制作单元`)).toBeTruthy()
+    const originalSignal = port.shotFindings.mock.calls[0]?.[1]
+    const response = pending<YimengShotFindingFeedResponse>()
+    const nextFrameId = change === 'shot' ? 'frame-z' : feed.frameId
+    const nextFeed = shotFindingFeed(source, nextFrameId)
+    const nextMethod = shotFindingMethod(nextFeed)
+    const nextItem = { ...shotFindingResult(nextMethod, { ...shotFindingAuthorInput(), earliestOwner: 'C5F', observation: '新来源记录' }).finding, currentBinding: true }
+    const nextPort = change === 'port' ? makePort(nextFeed) : port
+    nextPort.shotFindings.mockReturnValue(response.promise)
+    nextPort.shotFindingMethod.mockResolvedValue(nextMethod)
+    if (change === 'refresh') fireEvent.click(screen.getByRole('button', { name: zh.findingRefresh }))
+    else mounted.rerender(<ShotFindingView {...props(nextPort, change === 'source' ? { ...source } : source, nextFrameId)} enabled={change !== 'disable'} />)
+    expect(originalSignal?.aborted).toBe(true)
+    expect(screen.queryByRole('region', { name: title })).toBeNull()
+    if (change !== 'disable') {
+      await act(async () => { response.resolve({ ...nextFeed, items: [nextItem] }) })
+      await screen.findByRole('combobox', { name: zh.findingEarliestOwner })
+      const preparation = await openPreparation()
+      expect(within(preparation).getByText(`${zh.findingOwnerStoryboard} · 全局岗位`)).toBeTruthy()
+      expect(within(preparation).queryByText(`${zh.findingOwnerVideo} · 按制作单元`)).toBeNull()
+    }
+    expect(nextPort.recordShotFinding).not.toHaveBeenCalled()
+    expect(nextPort.recoverShotFinding).not.toHaveBeenCalled()
+  })
+})
+
 describe('Finding original-receipt recovery', () => {
   it('uses GET coordinates only and keeps not_found without any repost', async () => {
     const { marker } = await savedIntent()

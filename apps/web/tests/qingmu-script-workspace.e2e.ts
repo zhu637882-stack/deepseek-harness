@@ -11,7 +11,7 @@ import { pathToFileURL } from 'node:url'
 import type { Browser, Locator, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
-import { launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts'
+import { captureStableAria, compareOrRefreshGolden, launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts'
 import { REPO_ROOT, saveFailureShot, ZH_BROWSER_LOCALE } from './support.ts'
 import { continuityFixture, rebindContinuity } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/continuity-fixture.ts'
 import { videoCandidatesFixture } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/selected-video-review-fixture.ts'
@@ -3445,6 +3445,9 @@ describe.skipIf(
               selectedVideoReviewMobile: process.env.QINGMU_E5_5_VIDEO_REVIEW_MOBILE_SCREENSHOT,
               shotFinding: process.env.QINGMU_E5_5_FINDING_SCREENSHOT,
               shotFindingMobile: process.env.QINGMU_E5_5_FINDING_MOBILE_SCREENSHOT,
+              reworkPreparation: process.env.QINGMU_E5_5_REWORK_SCREENSHOT,
+              reworkPreparationMobile: process.env.QINGMU_E5_5_REWORK_MOBILE_SCREENSHOT,
+              reworkPreparationMobileEnd: process.env.QINGMU_E5_5_REWORK_MOBILE_END_SCREENSHOT,
               script: process.env.QINGMU_EVIDENCE_SCREENSHOT,
               actor: process.env.QINGMU_ACTOR_EVIDENCE_SCREENSHOT,
               scene: process.env.QINGMU_SCENE_EVIDENCE_SCREENSHOT,
@@ -3900,7 +3903,7 @@ describe.skipIf(
       }
     }, 120_000)
 
-    it('records a bound E5-5 Finding and recovers only its original receipt after a lost response in Chromium', async () => {
+    it('records a bound E5-5 Finding, shows read-only rework preparation, and recovers its original receipt in Chromium', async () => {
       onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e5-5-finding'))
       if (shotFindingDouble === undefined || setVideoReviewMode === undefined) throw new Error('Finding fixture controls missing')
       const controls = shotFindingDouble
@@ -3988,6 +3991,60 @@ describe.skipIf(
           changed: false, providerCalls: 0, selectionChanged: false, humanSignoffInferred: false, reworkExecuted: false } })
         await panel.getByText('问题已记录；未批准视频，也未执行返修。', { exact: true }).waitFor()
         await panel.getByRole('list', { name: '问题历史', exact: true }).getByText(firstFinding.observation, { exact: true }).waitFor()
+        await panel.getByRole('combobox', { name: '最早责任岗位', exact: true }).waitFor()
+        expect(await markers()).toEqual([])
+        const preparationRequestStart = capturedRequests.length
+        const preparationRpcStart = browserRpcRequests.length
+        const firstDetails = panel.getByRole('list', { name: '问题历史', exact: true })
+          .getByRole('listitem').filter({ has: page.getByText(firstFinding.observation, { exact: true }) }).locator('details')
+        await firstDetails.locator('summary').click()
+        const preparation = firstDetails.getByRole('region', { name: '返修准备 · 非正式路由', exact: true })
+        await preparation.waitFor()
+        expect(await preparation.getByText('原记录与当前选中素材一致', { exact: true }).count()).toBe(1)
+        expect(await preparation.getByText('视频生产 · 按制作单元', { exact: true }).count()).toBe(1)
+        expect(await preparation.getByText('与记录时一致', { exact: true }).count()).toBe(1)
+        expect(await preparation.getByText('当前读合同未提供', { exact: true }).count()).toBe(4)
+        expect(await preparation.getByText('未知，不能按责任岗位推断', { exact: true }).count()).toBe(1)
+        expect(await preparation.getByText('当前视图无正式路由证据；本视图不提供执行', { exact: true }).count()).toBe(1)
+        expect(await preparation.locator('button, a, input, select, textarea').count()).toBe(0)
+        const currentPreparationAria = await captureStableAria(page, 'role=region[name="返修准备 · 非正式路由"]', scaffold.workspaceCwd)
+        const preparationDesktopPath = process.env.QINGMU_E5_5_REWORK_SCREENSHOT?.trim()
+        if (preparationDesktopPath) {
+          await mkdir(dirname(preparationDesktopPath), { recursive: true })
+          await preparation.screenshot({ path: preparationDesktopPath })
+        }
+        await page.setViewportSize({ width: 390, height: 844 })
+        const preparationMobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
+        const preparationCardOverflow = await preparation.evaluate(element => element.scrollWidth > element.clientWidth)
+        const detailsControlHeight = (await firstDetails.locator('summary').boundingBox())?.height
+        expect(preparationMobileOverflow).toBe(false)
+        expect(preparationCardOverflow).toBe(false)
+        expect(detailsControlHeight).toBeGreaterThanOrEqual(44)
+        const preparationMobileFields = await preparation.locator('h5, dt, dd, p').all()
+        for (const field of preparationMobileFields) {
+          await field.scrollIntoViewIfNeeded()
+          expect(await field.evaluate((element) => {
+            const box = element.getBoundingClientRect()
+            return element.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2))
+          })).toBe(true)
+        }
+        // The region is taller than the mobile dialog's scroll port. Capture
+        // actual viewport positions, not a clipped tall element screenshot.
+        const preparationMobilePath = process.env.QINGMU_E5_5_REWORK_MOBILE_SCREENSHOT?.trim()
+        if (preparationMobilePath) {
+          await mkdir(dirname(preparationMobilePath), { recursive: true })
+          await preparation.getByRole('heading', { name: '返修准备 · 非正式路由', exact: true }).scrollIntoViewIfNeeded()
+          await page.screenshot({ path: preparationMobilePath })
+        }
+        const preparationMobileEndPath = process.env.QINGMU_E5_5_REWORK_MOBILE_END_SCREENSHOT?.trim()
+        if (preparationMobileEndPath) {
+          await mkdir(dirname(preparationMobileEndPath), { recursive: true })
+          await preparation.locator('p').last().scrollIntoViewIfNeeded()
+          await page.screenshot({ path: preparationMobileEndPath })
+        }
+        await page.setViewportSize({ width: 1680, height: 1100 })
+        expect(capturedRequests.length - preparationRequestStart).toBe(0)
+        expect(browserRpcRequests.length - preparationRpcStart).toBe(0)
         expect(await markers()).toEqual([])
         const secondMethodWire = nextWire('/qingmu-imago-method/shotFindingMethod', PROMPT_IR_FRAME_ID)
         await river.getByRole('button', { name: /frame-1/ }).click()
@@ -3996,6 +4053,7 @@ describe.skipIf(
         } } })
         await panel.getByRole('combobox', { name: '最早责任岗位', exact: true }).waitFor()
         expect(await panel.getByText(firstFinding.observation, { exact: true }).count()).toBe(0)
+        expect(await panel.getByRole('region', { name: '返修准备 · 非正式路由', exact: true }).count()).toBe(0)
         const secondFinding = await fillFinding(PROMPT_IR_FRAME_ID, '人物转身时怀表短暂消失。')
         controls.loseNextRecordResponse()
         const uncertainWire = nextWire('/qingmu-yimeng-command/recordShotFinding', PROMPT_IR_FRAME_ID)
@@ -4038,6 +4096,26 @@ describe.skipIf(
         await expect.poll(markers).toEqual([])
         await panel.getByRole('list', { name: '问题历史', exact: true }).getByText(secondFinding.observation, { exact: true }).waitFor()
         expect(await panel.getByRole('button', { name: '记录问题', exact: true }).count()).toBe(0)
+        const unavailablePreparationRequestStart = capturedRequests.length
+        const unavailablePreparationRpcStart = browserRpcRequests.length
+        const recoveredDetails = panel.getByRole('list', { name: '问题历史', exact: true })
+          .getByRole('listitem').filter({ has: page.getByText(secondFinding.observation, { exact: true }) }).locator('details')
+        await recoveredDetails.locator('summary').click()
+        const unavailablePreparation = recoveredDetails.getByRole('region', { name: '返修准备 · 非正式路由', exact: true })
+        await unavailablePreparation.waitFor()
+        expect(await unavailablePreparation.getByText('当前素材不可核验', { exact: true }).count()).toBe(1)
+        expect(await unavailablePreparation.getByText('当前方法未提供匹配岗位，保留原归因', { exact: true }).count()).toBe(1)
+        expect(await unavailablePreparation.getByText('当前规则不可核验', { exact: true }).count()).toBe(1)
+        expect(await unavailablePreparation.getByText('当前读合同未提供', { exact: true }).count()).toBe(4)
+        expect(await unavailablePreparation.getByText('当前视图无正式路由证据；本视图不提供执行', { exact: true }).count()).toBe(1)
+        expect(await unavailablePreparation.locator('button, a, input, select, textarea').count()).toBe(0)
+        const unavailablePreparationAria = await captureStableAria(page, 'role=region[name="返修准备 · 非正式路由"]', scaffold.workspaceCwd)
+        const preparationGoldenPath = join(REPO_ROOT, 'apps/web/tests/snapshots/qingmu-shot-finding-rework/ui.expected.md')
+        if (scaffold.mode === 'refresh') await mkdir(dirname(preparationGoldenPath), { recursive: true })
+        await compareOrRefreshGolden(preparationGoldenPath, `## Current binding\n\n${currentPreparationAria}\n\n## Current media unavailable\n\n${unavailablePreparationAria}`, scaffold.mode)
+        expect(capturedRequests.length - unavailablePreparationRequestStart).toBe(0)
+        expect(browserRpcRequests.length - unavailablePreparationRpcStart).toBe(0)
+        expect(await markers()).toEqual([])
         const recoveryRequests = capturedRequests.slice(recoveryStart)
         expect(recoveryRequests.length).toBeGreaterThanOrEqual(2)
         expect(recoveryRequests.every(request => request.method === 'GET' && request.body === undefined)).toBe(true)
@@ -4081,6 +4159,12 @@ describe.skipIf(
           lostResponseRetainedAcrossReload: true, notFoundRetainedMarker: true, recoveryWithoutCurrentMedia: true,
           duplicateEvidencePreserved: true, sharedShotSelection: true, automaticPostRetryCount: 0,
           mobileOverflow, cardOverflow, recordControlHeight: recordBox?.height, mediaElementCount: 0,
+          reworkPreparation: {
+            currentPreparationAria, unavailablePreparationAria, additionalUpstreamRequests: 0, additionalRpcRequests: 0,
+            sourceSwitchHidesPreparation: true, requiredEvidenceUnprovided: 4, interactiveControlCount: 0,
+            mobileOverflow: preparationMobileOverflow, cardOverflow: preparationCardOverflow, detailsControlHeight,
+            mobileUnobscuredFieldCount: preparationMobileFields.length,
+          },
           providerCalls: 0, humanSignoffInferred: false, reworkExecuted: false,
           consoleErrors: browserConsoleErrors.slice(consoleStart), pageErrors: tripwire.pageErrors,
         }

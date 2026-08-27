@@ -1,0 +1,51 @@
+## Current binding
+
+- region "返修准备 · 非正式路由":
+  - heading "返修准备 · 非正式路由" [level=5]
+  - paragraph: 仅核对原记录与当前方法定义，保留记录者建议；不构成正式路由。
+  - term: 当前素材绑定
+  - definition: 原记录与当前选中素材一致
+  - term: 当前方法中的责任岗位
+  - definition: 视频生产 · 按制作单元
+  - term: 规则对照
+  - definition: 与记录时一致
+  - term: 当前方法规则 SHA
+  - definition: 3f6f1dba4ba866e0c556a198498c30fbf0af2323abdf5c3c1863898f6dc3cb63
+  - term: 阶段实例
+  - definition: 当前读合同未提供
+  - term: 制作单元映射
+  - definition: 当前读合同未提供
+  - term: 批准锁实例
+  - definition: 当前读合同未提供
+  - term: 独立正式决定
+  - definition: 当前读合同未提供
+  - term: 受影响锁
+  - definition: 未知，不能按责任岗位推断
+  - term: 正式返修路由
+  - definition: 当前视图无正式路由证据；本视图不提供执行
+  - paragraph: 以上仅说明证据提供情况，不表示系统不存在；制作单元映射不作为全局岗位的额外要求。
+
+## Current media unavailable
+
+- region "返修准备 · 非正式路由":
+  - heading "返修准备 · 非正式路由" [level=5]
+  - paragraph: 仅核对原记录与当前方法定义，保留记录者建议；不构成正式路由。
+  - term: 当前素材绑定
+  - definition: 当前素材不可核验
+  - term: 当前方法中的责任岗位
+  - definition: 当前方法未提供匹配岗位，保留原归因
+  - term: 规则对照
+  - definition: 当前规则不可核验
+  - term: 阶段实例
+  - definition: 当前读合同未提供
+  - term: 制作单元映射
+  - definition: 当前读合同未提供
+  - term: 批准锁实例
+  - definition: 当前读合同未提供
+  - term: 独立正式决定
+  - definition: 当前读合同未提供
+  - term: 受影响锁
+  - definition: 未知，不能按责任岗位推断
+  - term: 正式返修路由
+  - definition: 当前视图无正式路由证据；本视图不提供执行
+  - paragraph: 以上仅说明证据提供情况，不表示系统不存在；制作单元映射不作为全局岗位的额外要求。

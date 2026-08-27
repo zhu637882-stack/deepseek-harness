@@ -254,6 +254,13 @@ function ShotFindingPanel({ projectId, episodeId, selectedShotId, projection, en
     const label = SHOT_FINDING_OWNER_LABELS[roleId ?? stageId]
     return t(label ?? 'findingOwnerUnavailable')
   }
+  function preparationOwnerLabel(stageId: string): string {
+    const owner = method?.projection.definition.ownerOptions.find(option => option.stageId === stageId)
+    if (owner === undefined) return t('findingReworkOwnerUnavailable')
+    const label = SHOT_FINDING_OWNER_LABELS[owner.roleId]
+    if (label === undefined) return t('findingReworkOwnerUnavailable')
+    return `${t(label)} · ${t(owner.scope === 'global' ? 'findingReworkScopeGlobal' : 'findingReworkScopePerLsu')}`
+  }
 
   return <section className={`${card.card} ${css.panel}`} aria-label={t('findingTitle')}>
     <div className={css.header}>
@@ -349,6 +356,24 @@ function ShotFindingPanel({ projectId, episodeId, selectedShotId, projection, en
                 <div><dt>{t('findingMethodSha')}</dt><dd>{item.methodProjectionSha256}</dd></div>
                 <div><dt>{t('findingRulesSha')}</dt><dd>{item.rulesSha256}</dd></div>
               </dl>
+              <section className={css.rework} aria-label={t('findingReworkTitle')}>
+                <h5>{t('findingReworkTitle')}</h5>
+                <p className={css.hint}>{t('findingReworkHelp')}</p>
+                <dl className={css.evidence}>
+                  <div><dt>{t('findingSource')}</dt><dd>{t(feed.subject === null ? 'findingReworkMediaUnavailable'
+                    : item.currentBinding ? 'findingReworkCurrent' : 'findingReworkHistorical')}</dd></div>
+                  <div><dt>{t('findingReworkOwner')}</dt><dd>{preparationOwnerLabel(item.earliestOwner)}</dd></div>
+                  <div><dt>{t('findingReworkRules')}</dt><dd>{t(method === undefined ? 'findingReworkUnavailable'
+                    : item.rulesSha256 === method.projection.rulesSha256 ? 'findingReworkSame' : 'findingReworkChanged')}</dd></div>
+                  {method !== undefined && <div><dt>{t('findingReworkCurrentRulesSha')}</dt><dd>{method.projection.rulesSha256}</dd></div>}
+                  {(['findingReworkStageEvidence', 'findingReworkLsuEvidence', 'findingReworkLockEvidence', 'findingReworkDecisionEvidence'] as const).map(key => <div key={key}>
+                    <dt>{t(key)}</dt><dd>{t('findingReworkNotProvided')}</dd>
+                  </div>)}
+                  <div><dt>{t('findingReworkChangedLock')}</dt><dd>{t('findingReworkChangedLockUnknown')}</dd></div>
+                  <div><dt>{t('findingReworkRoute')}</dt><dd>{t('findingReworkRouteUnavailable')}</dd></div>
+                </dl>
+                <p className={css.hint}>{t('findingReworkEvidenceHelp')}</p>
+              </section>
             </details>
           </li>)}
         </ul>}

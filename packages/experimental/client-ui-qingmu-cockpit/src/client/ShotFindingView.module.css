@@ -16,7 +16,8 @@
 }
 
 .panel h3,
-.panel h4 {
+.panel h4,
+.panel h5 {
   margin: 0 0 8px;
   color: var(--dsw-alias-label-primary);
   font-size: 15px;
@@ -203,6 +204,13 @@
 .evidence ul {
   margin: 0;
   padding-left: 18px;
+}
+
+.rework {
+  min-width: 0;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--dsw-alias-border-l2);
 }
 
 @media (max-width: 640px) {
