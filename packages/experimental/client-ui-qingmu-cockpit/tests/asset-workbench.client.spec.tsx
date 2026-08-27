@@ -1,18 +1,23 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AssetWorkbench } from '../src/client/AssetWorkbench.tsx'
 import type {
   ImagoReferenceAssetMethodRequest,
   QingmuYimengPort,
+  YimengCreateReferenceRightsExceptionReleaseResponse,
   YimengElementReviewFeedResponse,
   YimengReferenceAssetCandidate,
+  YimengReferenceRightsExceptionReleaseFeedResponse,
 } from '../src/client/contracts.ts'
 import {
   createCommandCommitRecoveryMarker,
   readCommandCommitRecoveryMarker,
   writeCommandCommitRecoveryMarker,
 } from '../src/client/command-commit-recovery.ts'
+import {
+  readReferenceRightsExceptionReleaseRecoveryMarker,
+} from '../src/client/reference-rights-exception-release-recovery.ts'
 import { zh } from '../src/client/locales.ts'
 
 const PROJECT_ID = 'project-1'
@@ -362,6 +367,206 @@ function reviewFeed(options: {
   } as const
 }
 
+function referenceRightsExceptionFeed(options: {
+  readonly targetId?: string
+  readonly elementKind?: 'actor' | 'scene' | 'prop'
+  readonly revision?: number
+  readonly sha256?: string
+  readonly canRelease?: boolean
+  readonly blockedReasonCode?: string | null
+  readonly blockedReason?: string | null
+  readonly releases?: YimengReferenceRightsExceptionReleaseFeedResponse['releases']
+  readonly currentReleases?: YimengReferenceRightsExceptionReleaseFeedResponse['currentReleases']
+} = {}): YimengReferenceRightsExceptionReleaseFeedResponse {
+  const targetId = options.targetId ?? TARGET_ID
+  const elementKind = options.elementKind ?? 'prop'
+  const revision = options.revision ?? 3
+  const sha256 = options.sha256 ?? BASE_SHA
+  const canRelease = options.canRelease ?? false
+  return {
+    schema: 'jason.qingmu-reference-rights-exception-release-feed.v1',
+    projectId: PROJECT_ID,
+    elementKind,
+    targetId,
+    subject: { type: 'element_profile', id: targetId, revision, sha256 },
+    capabilities: {
+      canRelease,
+      blockedReasonCode: options.blockedReasonCode ?? (canRelease ? null : 'missing_exception_release_capability'),
+      blockedReason: options.blockedReason ?? (canRelease ? null : '当前会话没有异常放行权限。'),
+      requiresRecentAuthentication: true,
+    },
+    releases: options.releases ?? [],
+    currentReleases: options.currentReleases ?? [],
+  }
+}
+
+function referenceRightsExceptionMethodResponse() {
+  const response = methodResponse({ baseRevision: 3, baseSnapshotSha256: BASE_SHA })
+  return {
+    ...response,
+    projection: {
+      ...response.projection,
+      method_definition: {
+        id: 'imago-v6-reference-rights-exception-release',
+        version: 1,
+      },
+      field_hints: [],
+      checklist: [],
+      work_order_projection: {
+        operation: 'recordReferenceRightsExceptionRelease',
+        allowed_mutations: ['recordReferenceRightsExceptionRelease'],
+      },
+      review_card: {},
+      legal_work_set: {
+        reads: ['current_element_profile_subject'],
+        writes: [],
+        forbidden: [
+          'provider_dispatch',
+          'paid_generation',
+          'asset_selection',
+          'publication',
+          'human_decision',
+        ],
+      },
+    },
+  } as const
+}
+
+function referenceRightsExceptionResult(
+  request: Parameters<QingmuYimengPort['createReferenceRightsExceptionRelease']>[0],
+): YimengCreateReferenceRightsExceptionReleaseResponse {
+  return {
+    schema: 'jason.qingmu-reference-rights-exception-release-result.v1',
+    changeSetId: 'changeset-rights-exception-1',
+    commandReceiptId: 'receipt-rights-exception-1',
+    eventId: 'event-rights-exception-1',
+    payloadSha256: '4'.repeat(64),
+    release: {
+      id: 'rights-exception-release-1',
+      decision: 'exception_release',
+      subjectType: 'element_profile',
+      subjectId: request.targetId,
+      subjectRevision: request.expectedSubjectRevision,
+      subjectSha256: request.expectedSubjectSha256,
+      scope: request.scope,
+      actorId: 'approver-user-1',
+      actorRole: 'approver',
+      actorNaturalPersonId: 'natural-person-approver-1',
+      producerActorId: 'producer-user-1',
+      producerNaturalPersonId: 'natural-person-producer-1',
+      assetProducerActorId: 'asset-producer-user-1',
+      assetProducerNaturalPersonId: 'natural-person-asset-producer-1',
+      assetProducerTaskId: 'asset-task-1',
+      assetProducerTaskRequestSha256: '5'.repeat(64),
+      authSessionId: 'recent-auth-session-1',
+      reason: request.reason,
+      releasedAt: '2026-08-27T09:15:00+00:00',
+    },
+    changed: false,
+    providerCalls: 0,
+    selectionAuthority: 'not_granted',
+    humanApprovalInferred: false,
+  }
+}
+
+function referenceRightsExceptionReadRelease(
+  result: YimengCreateReferenceRightsExceptionReleaseResponse,
+  stale = false,
+) {
+  return {
+    ...result.release,
+    stale,
+    staleReasonCodes: stale ? ['rights_record_sha256_changed'] : [],
+  } as const
+}
+
+function createExceptionReleasePort(options: {
+  readonly acceptedResult?: YimengCreateReferenceRightsExceptionReleaseResponse
+  readonly losePostResponse?: boolean
+  readonly staleRead?: boolean
+  readonly canRelease?: boolean
+  readonly blockedReasonCode?: string
+  readonly blockedReason?: string
+} = {}) {
+  let acceptedResult = options.acceptedResult
+  let markerSerializedDuringPost: string | null = null
+  let markerStatusDuringAuthoritativeRead: string | undefined
+  const referenceRightsExceptionReleases = vi.fn(async () => {
+    if (acceptedResult !== undefined) {
+      markerStatusDuringAuthoritativeRead = readReferenceRightsExceptionReleaseRecoveryMarker(
+        PROJECT_ID,
+        'prop',
+        TARGET_ID,
+      ).status
+    }
+    const release = acceptedResult === undefined
+      ? undefined
+      : referenceRightsExceptionReadRelease(acceptedResult, options.staleRead ?? false)
+    return referenceRightsExceptionFeed({
+      canRelease: options.canRelease ?? true,
+      blockedReasonCode: options.blockedReasonCode,
+      blockedReason: options.blockedReason,
+      releases: release === undefined ? [] : [release],
+      currentReleases: release === undefined || release.stale ? [] : [release],
+    })
+  })
+  const referenceAssetMethod = vi.fn(async () => referenceRightsExceptionMethodResponse())
+  const createReferenceRightsExceptionRelease = vi.fn(async (
+    request: Parameters<QingmuYimengPort['createReferenceRightsExceptionRelease']>[0],
+  ) => {
+    const storageKey = Array.from({ length: sessionStorage.length }, (_, index) => sessionStorage.key(index))
+      .find(key => key?.startsWith('qingmu:reference-rights-exception-release-recovery:v1:'))
+    markerSerializedDuringPost = storageKey === undefined || storageKey === null
+      ? null
+      : sessionStorage.getItem(storageKey)
+    acceptedResult = referenceRightsExceptionResult(request)
+    if (options.losePostResponse) throw new Error('异常放行响应丢失')
+    return acceptedResult
+  })
+  const recoverReferenceRightsExceptionRelease = vi.fn(async () => {
+    if (acceptedResult === undefined) throw new Error('测试缺少原始异常放行回执')
+    return {
+      schema: 'jason.qingmu-command-receipt-recovery.v1',
+      recovered: true,
+      receiptSha256: '6'.repeat(64),
+      receipt: acceptedResult,
+    } as const
+  })
+  const createHumanDecision = vi.fn()
+  const port = {
+    elementProfile: vi.fn(async () => SNAPSHOT),
+    referenceCandidates: vi.fn(async () => ({
+      schema: 'jason.qingmu-reference-asset-candidates.v1',
+      projectId: PROJECT_ID,
+      targetType: 'element_profile',
+      targetId: TARGET_ID,
+      elementKind: 'prop',
+      profileRevision: 3,
+      elementSnapshotSha256: BASE_SHA,
+      candidates: [],
+      humanApprovalInferred: false,
+    } as const)),
+    reviewEvents: vi.fn(async () => reviewFeed()),
+    referenceRightsExceptionReleases,
+    elementMethod: vi.fn(async (request: Parameters<typeof methodResponse>[0]) => methodResponse(request)),
+    referenceAssetMethod,
+    createReferenceRightsExceptionRelease,
+    recoverReferenceRightsExceptionRelease,
+    createHumanDecision,
+  } as unknown as QingmuYimengPort
+  return {
+    port,
+    referenceRightsExceptionReleases,
+    referenceAssetMethod,
+    createReferenceRightsExceptionRelease,
+    recoverReferenceRightsExceptionRelease,
+    createHumanDecision,
+    acceptedResult: () => acceptedResult,
+    markerSerializedDuringPost: () => markerSerializedDuringPost,
+    markerStatusDuringAuthoritativeRead: () => markerStatusDuringAuthoritativeRead,
+  }
+}
+
 function referenceMethodResponse(operation: 'selectReferenceAsset' | 'requestReferenceRegeneration') {
   const projectionSha256 = operation === 'selectReferenceAsset' ? '4'.repeat(64) : '3'.repeat(64)
   const inputSnapshotSha256 = operation === 'selectReferenceAsset' ? '2'.repeat(64) : '1'.repeat(64)
@@ -687,6 +892,15 @@ function createRightsPort(options: {
     reviewEvents: vi.fn()
       .mockResolvedValueOnce(initialFeed)
       .mockResolvedValue(postFeed),
+    referenceRightsExceptionReleases: vi.fn()
+      .mockResolvedValueOnce(referenceRightsExceptionFeed({
+        revision: initialSnapshot.subject.profileRevision,
+        sha256: initialSnapshot.snapshotSha256,
+      }))
+      .mockResolvedValue(referenceRightsExceptionFeed({
+        revision: postSnapshot.subject.profileRevision,
+        sha256: postSnapshot.snapshotSha256,
+      })),
     elementMethod,
     referenceAssetMethod,
     proposeReferenceAsset,
@@ -735,6 +949,9 @@ function createPort(options: { readonly commit?: () => Promise<typeof COMMIT> } 
     reviewEvents: vi.fn()
       .mockResolvedValueOnce(reviewFeed())
       .mockResolvedValue(reviewFeed({ revision: 4, sha256: UPDATED_SHA })),
+    referenceRightsExceptionReleases: vi.fn()
+      .mockResolvedValueOnce(referenceRightsExceptionFeed())
+      .mockResolvedValue(referenceRightsExceptionFeed({ revision: 4, sha256: UPDATED_SHA })),
     elementMethod,
     proposeElementProfile,
     previewElementProfile: vi.fn(async () => PREVIEW),
@@ -782,6 +999,9 @@ function createReferencePort(
     reviewEvents: vi.fn()
       .mockResolvedValueOnce(reviewFeed())
       .mockResolvedValue(reviewFeed({ revision: 4, sha256: REFERENCE_SNAPSHOT_SHA })),
+    referenceRightsExceptionReleases: vi.fn()
+      .mockResolvedValueOnce(referenceRightsExceptionFeed())
+      .mockResolvedValue(referenceRightsExceptionFeed({ revision: 4, sha256: REFERENCE_SNAPSHOT_SHA })),
     elementMethod,
     referenceAssetMethod,
     proposeReferenceAsset,
@@ -821,21 +1041,46 @@ function mount(
 
 async function prepareRightsPreview(): Promise<void> {
   fireEvent.click(await screen.findByRole('button', { name: zh.assetRightsOperation }))
-  fireEvent.click(await screen.findByRole('radio', { name: /reference-1/ }))
-  expect(screen.getByRole('group', { name: zh.assetRightsEditorTitle })).toBeTruthy()
-  expect(screen.getByText(zh.assetRightsSourceType)).toBeTruthy()
-  expect(screen.getByText(zh.assetRightsHolder)).toBeTruthy()
-  expect(screen.getByText(zh.assetRightsAuthorizationScope)).toBeTruthy()
-  expect(screen.getByText(zh.assetRightsTerritory)).toBeTruthy()
-  expect(screen.getByText(zh.assetRightsTerm)).toBeTruthy()
-  expect(screen.getByText(zh.assetRightsRestrictions)).toBeTruthy()
-  expect(screen.getByText(zh.assetRightsContains)).toBeTruthy()
-  expect(screen.getByText(zh.assetRightsProviderTerms)).toBeTruthy()
-  expect(screen.getByText(zh.assetRightsModelLicenses)).toBeTruthy()
-  expect(screen.getByText(zh.assetRightsHumanDeclaration)).toBeTruthy()
-  expect(screen.getByText(zh.assetRightsContentCredentials)).toBeTruthy()
+  const rightsRegion = await screen.findByRole('region', { name: zh.assetReferenceTitle })
+  fireEvent.click(within(rightsRegion).getByRole('radio', { name: /reference-1/ }))
+  const rightsEditor = screen.getByRole('group', { name: zh.assetRightsEditorTitle })
+  expect(within(rightsEditor).getByText(zh.assetRightsSourceType)).toBeTruthy()
+  expect(within(rightsEditor).getByText(zh.assetRightsHolder)).toBeTruthy()
+  expect(within(rightsEditor).getByText(zh.assetRightsAuthorizationScope)).toBeTruthy()
+  expect(within(rightsEditor).getByText(zh.assetRightsTerritory)).toBeTruthy()
+  expect(within(rightsEditor).getByText(zh.assetRightsTerm)).toBeTruthy()
+  expect(within(rightsEditor).getByText(zh.assetRightsRestrictions)).toBeTruthy()
+  expect(within(rightsEditor).getByText(zh.assetRightsContains)).toBeTruthy()
+  expect(within(rightsEditor).getByText(zh.assetRightsProviderTerms)).toBeTruthy()
+  expect(within(rightsEditor).getByText(zh.assetRightsModelLicenses)).toBeTruthy()
+  expect(within(rightsEditor).getByText(zh.assetRightsHumanDeclaration)).toBeTruthy()
+  expect(within(rightsEditor).getByText(zh.assetRightsContentCredentials)).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: zh.assetRightsPrepare }))
   await screen.findByRole('heading', { name: zh.assetRightsPreviewTitle })
+}
+
+async function prepareReferenceRightsExceptionRelease(
+  reason = '  项目法律顾问已核对本次有限范围。  ',
+): Promise<HTMLElement> {
+  const region = await screen.findByRole('region', { name: zh.assetRightsExceptionTitle })
+  const reference = within(region).getByRole('radio', { name: /reference-1/ })
+  await waitFor(() => { expect(reference).toHaveProperty('disabled', false) })
+  fireEvent.click(reference)
+  fireEvent.click(within(region).getByRole('checkbox', { name: zh.assetRightsSourceType }))
+  fireEvent.click(within(region).getByRole('checkbox', { name: zh.assetRightsHolder }))
+  const reasonInput = within(region).getByRole('textbox', { name: zh.assetRightsExceptionReason })
+  fireEvent.change(reasonInput, { target: { value: '非法\0理由' } })
+  expect(within(region).getByRole('alert')).toHaveProperty(
+    'textContent',
+    zh.assetRightsExceptionReasonInvalid,
+  )
+  expect(within(region).getByRole('checkbox', { name: zh.assetRightsExceptionConfirm }))
+    .toHaveProperty('disabled', true)
+  fireEvent.change(reasonInput, { target: { value: reason } })
+  const confirmation = within(region).getByRole('checkbox', { name: zh.assetRightsExceptionConfirm })
+  await waitFor(() => { expect(confirmation).toHaveProperty('disabled', false) })
+  fireEvent.click(confirmation)
+  return region
 }
 
 beforeEach(() => {
@@ -1093,7 +1338,7 @@ describe('AssetWorkbench', () => {
     }), expect.any(AbortSignal))
     expect(commitElementProfile).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('checkbox', { name: zh.assetConfirmLabel }))
     fireEvent.click(screen.getByRole('button', { name: zh.assetCommit }))
 
     expect(await screen.findByText(zh.assetCommitSucceeded)).toBeTruthy()
@@ -1131,7 +1376,7 @@ describe('AssetWorkbench', () => {
     const editor = screen.getByRole('textbox', { name: zh.assetPromptLabel })
     fireEvent.change(editor, { target: { value: NEW_PROMPT } })
     fireEvent.click(screen.getByRole('button', { name: zh.assetPrepare }))
-    fireEvent.click(await screen.findByRole('checkbox'))
+    fireEvent.click(await screen.findByRole('checkbox', { name: zh.assetConfirmLabel }))
     fireEvent.click(screen.getByRole('button', { name: zh.assetCommit }))
 
     expect(await screen.findByText(zh.assetCommitSucceeded)).toBeTruthy()
@@ -1219,7 +1464,17 @@ describe('AssetWorkbench', () => {
       readonly elementKind: 'actor' | 'scene' | 'prop'
       readonly targetId: string
     }) => reviewFeed({ targetId: request.targetId, elementKind: request.elementKind }))
-    const port = { elementProfile, elementMethod, referenceCandidates, reviewEvents } as unknown as QingmuYimengPort
+    const referenceRightsExceptionReleases = vi.fn(async (request: {
+      readonly elementKind: 'actor' | 'scene' | 'prop'
+      readonly targetId: string
+    }) => referenceRightsExceptionFeed({ targetId: request.targetId, elementKind: request.elementKind }))
+    const port = {
+      elementProfile,
+      elementMethod,
+      referenceCandidates,
+      reviewEvents,
+      referenceRightsExceptionReleases,
+    } as unknown as QingmuYimengPort
 
     mount(port, vi.fn(async () => {}), [
       { assetId: actorId, projectId: PROJECT_ID, type: 'character', name: '林默' },
@@ -1750,5 +2005,196 @@ describe('AssetWorkbench', () => {
       .not.toHaveLength(0)
     expect(readCommandCommitRecoveryMarker(PROJECT_ID, 'prop', TARGET_ID).status).toBe('ready')
     expect(screen.queryByRole('heading', { name: zh.assetReferenceCommitSucceededRegenerate })).toBeNull()
+  })
+
+  it('records an exact reference-rights exception only after IMAGO subject guidance and authoritative GET reconciliation', async () => {
+    const harness = createExceptionReleasePort()
+    mount(harness.port)
+
+    const exceptionRegion = await prepareReferenceRightsExceptionRelease()
+    expect(within(exceptionRegion).getByText(zh.assetRightsExceptionBoundary)).toBeTruthy()
+    expect(within(exceptionRegion).getByText(zh.assetRightsExceptionApproverBoundary)).toBeTruthy()
+    fireEvent.click(within(exceptionRegion).getByRole('button', { name: zh.assetRightsExceptionSubmit }))
+
+    const receipt = await screen.findByRole('region', { name: zh.assetRightsExceptionSucceeded })
+    expect(within(receipt).getByText('changeset-rights-exception-1')).toBeTruthy()
+    expect(within(receipt).getByText('receipt-rights-exception-1')).toBeTruthy()
+    expect(within(receipt).getByText('event-rights-exception-1')).toBeTruthy()
+    expect(within(receipt).getByText('4'.repeat(64))).toBeTruthy()
+    expect(harness.referenceAssetMethod).toHaveBeenCalledWith({
+      projectId: PROJECT_ID,
+      elementKind: 'prop',
+      elementId: TARGET_ID,
+      profileRevision: 3,
+      snapshotSha256: BASE_SHA,
+      operation: 'recordReferenceRightsExceptionRelease',
+    }, expect.any(AbortSignal))
+
+    expect(harness.createReferenceRightsExceptionRelease).toHaveBeenCalledTimes(1)
+    const request = harness.createReferenceRightsExceptionRelease.mock.calls[0]?.[0]
+    if (request === undefined) throw new Error('exception-release request was not captured')
+    expect(Object.keys(request).sort()).toEqual([
+      'projectId',
+      'elementKind',
+      'targetId',
+      'expectedSubjectRevision',
+      'expectedSubjectSha256',
+      'idempotencyKey',
+      'reason',
+      'scope',
+    ].sort())
+    expect(request).toMatchObject({
+      projectId: PROJECT_ID,
+      elementKind: 'prop',
+      targetId: TARGET_ID,
+      expectedSubjectRevision: 3,
+      expectedSubjectSha256: BASE_SHA,
+      reason: '项目法律顾问已核对本次有限范围。',
+      scope: {
+        kind: 'reference_rights',
+        referenceAssetId: 'reference-1',
+        referenceAssetSha256: '1'.repeat(64),
+        rightsFields: ['sourceType', 'rightsHolder'],
+      },
+    })
+    expect(request.idempotencyKey).toMatch(/^qingmu:rights-exception:v1:[0-9a-f]{64}$/)
+    for (const key of [
+      'actorId',
+      'actorRole',
+      'naturalPersonId',
+      'authSessionId',
+      'releasedAt',
+      'decision',
+    ]) expect(request).not.toHaveProperty(key)
+
+    const markerText = harness.markerSerializedDuringPost()
+    expect(markerText).not.toBeNull()
+    expect(markerText).not.toContain('项目法律顾问已核对本次有限范围。')
+    expect(markerText).not.toContain('rightsFields')
+    expect(markerText).not.toContain('sourceType')
+    expect(markerText).not.toContain('rightsHolder')
+    expect(markerText).not.toContain('actorId')
+    expect(harness.markerStatusDuringAuthoritativeRead()).toBe('ready')
+    expect(readReferenceRightsExceptionReleaseRecoveryMarker(PROJECT_ID, 'prop', TARGET_ID).status)
+      .toBe('none')
+    expect(harness.referenceRightsExceptionReleases).toHaveBeenCalledTimes(2)
+    expect(harness.createHumanDecision).not.toHaveBeenCalled()
+  })
+
+  it('recovers a lost exception-release response only after an explicit GET and never performs a second POST', async () => {
+    const first = createExceptionReleasePort({ losePostResponse: true })
+    const mounted = mount(first.port)
+    const exceptionRegion = await prepareReferenceRightsExceptionRelease('  有限范围权利例外。  ')
+    fireEvent.click(within(exceptionRegion).getByRole('button', { name: zh.assetRightsExceptionSubmit }))
+
+    expect(await screen.findByText('异常放行响应丢失')).toBeTruthy()
+    expect(first.createReferenceRightsExceptionRelease).toHaveBeenCalledTimes(1)
+    expect(first.recoverReferenceRightsExceptionRelease).not.toHaveBeenCalled()
+    expect(readReferenceRightsExceptionReleaseRecoveryMarker(PROJECT_ID, 'prop', TARGET_ID).status)
+      .toBe('ready')
+    expect(screen.queryByRole('region', { name: zh.assetRightsExceptionSucceeded })).toBeNull()
+    const acceptedResult = first.acceptedResult()
+    if (acceptedResult === undefined) throw new Error('lost-response fixture did not retain the server receipt')
+
+    mounted.unmount()
+    const second = createExceptionReleasePort({ acceptedResult })
+    mount(second.port)
+    const recoveryDock = await screen.findByRole('region', { name: zh.assetRightsExceptionRecoveryTitle })
+    expect(second.recoverReferenceRightsExceptionRelease).not.toHaveBeenCalled()
+    fireEvent.click(within(recoveryDock).getByRole('button', { name: zh.assetRightsExceptionRecover }))
+
+    const recoveredReceipt = await screen.findByRole('region', { name: zh.assetRightsExceptionSucceeded })
+    expect(within(recoveredReceipt).getByRole('heading', { name: zh.assetRightsExceptionRecovered }))
+      .toBeTruthy()
+    expect(second.recoverReferenceRightsExceptionRelease).toHaveBeenCalledTimes(1)
+    const recoveryRequest = second.recoverReferenceRightsExceptionRelease.mock.calls[0]?.[0]
+    if (recoveryRequest === undefined) throw new Error('exception-release recovery request was not captured')
+    expect(Object.keys(recoveryRequest).sort()).toEqual([
+      'projectId',
+      'elementKind',
+      'targetId',
+      'expectedSubjectRevision',
+      'expectedSubjectSha256',
+      'referenceAssetId',
+      'referenceAssetSha256',
+      'rightsRecordSha256',
+      'reasonSha256',
+      'scopeSha256',
+      'idempotencyKey',
+    ].sort())
+    expect(recoveryRequest).not.toHaveProperty('reason')
+    expect(recoveryRequest).not.toHaveProperty('scope')
+    expect(second.createReferenceRightsExceptionRelease).not.toHaveBeenCalled()
+    expect(readReferenceRightsExceptionReleaseRecoveryMarker(PROJECT_ID, 'prop', TARGET_ID).status)
+      .toBe('none')
+  })
+
+  it('keeps the marker and hides success when GET recovery projects the release as stale', async () => {
+    const first = createExceptionReleasePort({ losePostResponse: true })
+    const mounted = mount(first.port)
+    const exceptionRegion = await prepareReferenceRightsExceptionRelease('权利记录漂移测试。')
+    fireEvent.click(within(exceptionRegion).getByRole('button', { name: zh.assetRightsExceptionSubmit }))
+    expect(await screen.findByText('异常放行响应丢失')).toBeTruthy()
+    const acceptedResult = first.acceptedResult()
+    if (acceptedResult === undefined) throw new Error('drift fixture did not retain the server receipt')
+
+    mounted.unmount()
+    const second = createExceptionReleasePort({ acceptedResult, staleRead: true })
+    mount(second.port)
+    const recoveryDock = await screen.findByRole('region', { name: zh.assetRightsExceptionRecoveryTitle })
+    fireEvent.click(within(recoveryDock).getByRole('button', { name: zh.assetRightsExceptionRecover }))
+
+    expect(await screen.findByText('权威 GET 未返回当前有效且精确对账的异常放行事实')).toBeTruthy()
+    expect(second.recoverReferenceRightsExceptionRelease).toHaveBeenCalledTimes(1)
+    expect(second.createReferenceRightsExceptionRelease).not.toHaveBeenCalled()
+    expect(readReferenceRightsExceptionReleaseRecoveryMarker(PROJECT_ID, 'prop', TARGET_ID).status)
+      .toBe('ready')
+    expect(screen.queryByRole('region', { name: zh.assetRightsExceptionSucceeded })).toBeNull()
+  })
+
+  it('shows server authority blocking and stale history without enabling exception release', async () => {
+    const acceptedResult = referenceRightsExceptionResult({
+      projectId: PROJECT_ID,
+      elementKind: 'prop',
+      targetId: TARGET_ID,
+      expectedSubjectRevision: 3,
+      expectedSubjectSha256: BASE_SHA,
+      idempotencyKey: 'qingmu:rights-exception:v1:historical-fixture',
+      reason: '旧版本有限范围例外。',
+      scope: {
+        kind: 'reference_rights',
+        referenceAssetId: 'reference-1',
+        referenceAssetSha256: '1'.repeat(64),
+        rightsRecordSha256: '7'.repeat(64),
+        rightsFields: ['sourceType'],
+      },
+    })
+    const harness = createExceptionReleasePort({
+      acceptedResult,
+      staleRead: true,
+      canRelease: false,
+      blockedReasonCode: 'recent_authentication_required',
+      blockedReason: '请由具备独立权限的 Approver 近期重新认证。',
+    })
+    mount(harness.port)
+
+    const exceptionRegion = await screen.findByRole('region', { name: zh.assetRightsExceptionTitle })
+    expect(within(exceptionRegion).getByText(zh.assetRightsExceptionBoundary)).toBeTruthy()
+    expect(within(exceptionRegion).getByText(zh.assetRightsExceptionApproverBoundary)).toBeTruthy()
+    expect(within(exceptionRegion).getByText('recent_authentication_required')).toBeTruthy()
+    expect(within(exceptionRegion).getByText('请由具备独立权限的 Approver 近期重新认证。')).toBeTruthy()
+    expect(within(exceptionRegion).getByText('旧版本有限范围例外。')).toBeTruthy()
+    expect(within(exceptionRegion).getByText('approver-user-1 · natural-person-approver-1')).toBeTruthy()
+    expect(within(exceptionRegion).getByText(
+      (_, element) => element?.tagName === 'STRONG'
+        && element.textContent?.includes(zh.assetRightsExceptionStale) === true,
+    )).toBeTruthy()
+    expect(within(exceptionRegion).getByRole('radio', { name: /reference-1/ }).closest('fieldset'))
+      .toHaveProperty('disabled', true)
+    expect(within(exceptionRegion).getByRole('button', { name: zh.assetRightsExceptionSubmit }))
+      .toHaveProperty('disabled', true)
+    expect(harness.referenceAssetMethod).not.toHaveBeenCalled()
+    expect(harness.createReferenceRightsExceptionRelease).not.toHaveBeenCalled()
+    expect(harness.createHumanDecision).not.toHaveBeenCalled()
   })
 })

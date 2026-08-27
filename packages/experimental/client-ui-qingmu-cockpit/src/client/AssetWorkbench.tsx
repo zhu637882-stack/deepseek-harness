@@ -7,6 +7,7 @@ import type {
   YimengCommitElementProfileResponse,
   YimengCreateCommentResponse,
   YimengCreateHumanDecisionResponse,
+  YimengCreateReferenceRightsExceptionReleaseResponse,
   YimengElementProfileReference,
   YimengElementProfileResponse,
   YimengElementReviewFeedResponse,
@@ -20,7 +21,11 @@ import type {
   YimengReferencePreviewElementProfileResponse,
   YimengReferenceRightsPreviewElementProfileResponse,
   YimengReferenceRightsRecord,
+  YimengReferenceRightsExceptionField,
+  YimengReferenceRightsExceptionRelease,
+  YimengReferenceRightsExceptionReleaseFeedResponse,
   YimengRecoverElementProfileCommitResponse,
+  YimengRecoverReferenceRightsExceptionReleaseResponse,
 } from './contracts.ts'
 import type { QingmuCockpitKey } from './locales.ts'
 import { ReferenceRightsEditor, ReferenceRightsSummary } from './ReferenceRightsEditor.tsx'
@@ -45,6 +50,21 @@ import {
   type CommandCommitRecoveryMarker,
   type CommandCommitRecoveryMarkerRead,
 } from './command-commit-recovery.ts'
+import {
+  REFERENCE_RIGHTS_EXCEPTION_FIELDS,
+  clearReferenceRightsExceptionReleaseRecoveryMarker,
+  createReferenceRightsExceptionReleaseRecoveryMarker,
+  deriveReferenceRightsExceptionIdempotencyKey,
+  digestReferenceRightsExceptionReason,
+  digestReferenceRightsExceptionScope,
+  discardReferenceRightsExceptionReleaseRecoveryMarker,
+  normalizeReferenceRightsExceptionScope,
+  readReferenceRightsExceptionReleaseRecoveryMarker,
+  writeReferenceRightsExceptionReleaseRecoveryMarker,
+  type ReferenceRightsExceptionReleaseRecoveryMarker,
+  type ReferenceRightsExceptionReleaseRecoveryRead,
+  type ReferenceRightsExceptionScope,
+} from './reference-rights-exception-release-recovery.ts'
 import css from './QingmuCockpit.module.css'
 
 const SHA256 = /^[0-9a-f]{64}$/
@@ -125,6 +145,20 @@ const HUMAN_DECISION_LOCALE_KEY = {
   reject: 'assetReviewDecisionReject',
   request_changes: 'assetReviewDecisionRequestChanges',
 } as const satisfies Record<YimengHumanDecisionValue, QingmuCockpitKey>
+
+const REFERENCE_RIGHTS_EXCEPTION_FIELD_LOCALE_KEY = {
+  sourceType: 'assetRightsSourceType',
+  rightsHolder: 'assetRightsHolder',
+  authorizationScope: 'assetRightsAuthorizationScope',
+  territory: 'assetRightsTerritory',
+  term: 'assetRightsTerm',
+  restrictions: 'assetRightsRestrictions',
+  contains: 'assetRightsContains',
+  providerTerms: 'assetRightsProviderTerms',
+  modelLicenses: 'assetRightsModelLicenses',
+  humanDeclaration: 'assetRightsHumanDeclaration',
+  contentCredentials: 'assetRightsContentCredentials',
+} as const satisfies Record<YimengReferenceRightsExceptionField, QingmuCockpitKey>
 
 function semanticElementKind(value: unknown): CommandElementKind | undefined {
   if (value === 'character' || value === 'actor') return 'actor'
@@ -746,6 +780,214 @@ function assertReferenceRightsMethod(
   ) throw new Error('IMAGO 权利方法未绑定当前 replaceReferenceRights 工作单')
 }
 
+type ReferenceRightsExceptionReleaseFact =
+  YimengCreateReferenceRightsExceptionReleaseResponse['release']
+
+function normalizeReferenceRightsExceptionReasonInput(value: string): string {
+  const normalized = value.trim()
+  if (normalized === '' || normalized.length > 8000 || normalized.includes('\u0000')) {
+    throw new Error('异常放行理由必须是 1 至 8000 个字符且不得包含 NUL')
+  }
+  return normalized
+}
+
+function sameReferenceRightsExceptionScope(
+  left: ReferenceRightsExceptionScope,
+  right: ReferenceRightsExceptionScope,
+): boolean {
+  return left.kind === right.kind
+    && left.referenceAssetId === right.referenceAssetId
+    && left.referenceAssetSha256 === right.referenceAssetSha256
+    && left.rightsRecordSha256 === right.rightsRecordSha256
+    && left.rightsFields.length === right.rightsFields.length
+    && left.rightsFields.every((field, index) => field === right.rightsFields[index])
+}
+
+function sameReferenceRightsExceptionMarker(
+  left: ReferenceRightsExceptionReleaseRecoveryMarker,
+  right: ReferenceRightsExceptionReleaseRecoveryMarker,
+): boolean {
+  return left.projectId === right.projectId
+    && left.elementKind === right.elementKind
+    && left.targetId === right.targetId
+    && left.expectedSubjectRevision === right.expectedSubjectRevision
+    && left.expectedSubjectSha256 === right.expectedSubjectSha256
+    && left.referenceAssetId === right.referenceAssetId
+    && left.referenceAssetSha256 === right.referenceAssetSha256
+    && left.rightsRecordSha256 === right.rightsRecordSha256
+    && left.reasonSha256 === right.reasonSha256
+    && left.scopeSha256 === right.scopeSha256
+    && left.idempotencyKey === right.idempotencyKey
+}
+
+function assertReferenceRightsExceptionFeed(
+  feed: YimengReferenceRightsExceptionReleaseFeedResponse,
+  snapshot: YimengElementProfileResponse,
+  projectId: string,
+  targetId: string,
+  elementKind: CommandElementKind,
+): void {
+  if (
+    feed.schema !== 'jason.qingmu-reference-rights-exception-release-feed.v1'
+    || feed.projectId !== projectId
+    || feed.elementKind !== elementKind
+    || feed.targetId !== targetId
+    || feed.subject.type !== 'element_profile'
+    || feed.subject.id !== targetId
+    || feed.subject.revision !== snapshot.subject.profileRevision
+    || feed.subject.sha256 !== snapshot.snapshotSha256
+    || feed.capabilities.requiresRecentAuthentication !== true
+    || feed.capabilities.canRelease
+      !== (feed.capabilities.blockedReasonCode === null && feed.capabilities.blockedReason === null)
+  ) throw new Error('权利异常放行读取未精确绑定当前元素资料与服务器权限')
+}
+
+function assertReferenceRightsExceptionMethod(
+  method: ImagoReferenceAssetMethodResponse,
+  snapshot: YimengElementProfileResponse,
+  projectId: string,
+  targetId: string,
+  elementKind: CommandElementKind,
+): asserts method is ImagoElementMethodResponse {
+  if (method.schema !== 'qingmu.imago-element-method-adapter-result.v1') {
+    throw new Error('IMAGO 异常放行方法返回了错误的投影合同')
+  }
+  assertMethod(method, snapshot, projectId, targetId, elementKind)
+  const definition = recordOf(method.projection.method_definition)
+  const workOrder = recordOf(method.projection.work_order_projection)
+  if (
+    definition.id !== 'imago-v6-reference-rights-exception-release'
+    || definition.version !== 1
+    || workOrder.operation !== 'recordReferenceRightsExceptionRelease'
+    || !Array.isArray(workOrder.allowed_mutations)
+    || workOrder.allowed_mutations.length !== 1
+    || workOrder.allowed_mutations[0] !== 'recordReferenceRightsExceptionRelease'
+  ) throw new Error('IMAGO 方法未绑定当前权利异常放行检查单')
+}
+
+async function assertReferenceRightsExceptionResult(
+  result: YimengCreateReferenceRightsExceptionReleaseResponse,
+  marker: ReferenceRightsExceptionReleaseRecoveryMarker,
+): Promise<void> {
+  const release = result.release
+  const scope = normalizeReferenceRightsExceptionScope(release.scope)
+  const normalizedReason = normalizeReferenceRightsExceptionReasonInput(release.reason)
+  if (
+    result.schema !== 'jason.qingmu-reference-rights-exception-release-result.v1'
+    || stringOf(result.changeSetId) === undefined
+    || stringOf(result.commandReceiptId) === undefined
+    || stringOf(result.eventId) === undefined
+    || !SHA256.test(result.payloadSha256)
+    || result.changed !== false
+    || result.providerCalls !== 0
+    || result.selectionAuthority !== 'not_granted'
+    || result.humanApprovalInferred !== false
+    || stringOf(release.id) === undefined
+    || release.decision !== 'exception_release'
+    || release.subjectType !== 'element_profile'
+    || release.subjectId !== marker.targetId
+    || release.subjectRevision !== marker.expectedSubjectRevision
+    || release.subjectSha256 !== marker.expectedSubjectSha256
+    || scope.referenceAssetId !== marker.referenceAssetId
+    || scope.referenceAssetSha256 !== marker.referenceAssetSha256
+    || scope.rightsRecordSha256 !== marker.rightsRecordSha256
+    || release.actorRole !== 'approver'
+    || release.actorNaturalPersonId === release.producerNaturalPersonId
+    || release.actorNaturalPersonId === release.assetProducerNaturalPersonId
+    || release.reason !== normalizedReason
+  ) throw new Error('易梦异常放行回执与本次精确对象、权限或零授权边界不一致')
+  const [reasonSha256, scopeSha256] = await Promise.all([
+    digestReferenceRightsExceptionReason(normalizedReason),
+    digestReferenceRightsExceptionScope(scope),
+  ])
+  if (reasonSha256 !== marker.reasonSha256 || scopeSha256 !== marker.scopeSha256) {
+    throw new Error('易梦异常放行回执理由或范围摘要与恢复标记不一致')
+  }
+}
+
+async function assertReferenceRightsExceptionRecovery(
+  recovery: YimengRecoverReferenceRightsExceptionReleaseResponse,
+  marker: ReferenceRightsExceptionReleaseRecoveryMarker,
+): Promise<YimengCreateReferenceRightsExceptionReleaseResponse> {
+  if (
+    recovery.schema !== 'jason.qingmu-command-receipt-recovery.v1'
+    || recovery.recovered !== true
+    || !SHA256.test(recovery.receiptSha256)
+  ) throw new Error('易梦异常放行 GET 回执恢复合同不完整')
+  await assertReferenceRightsExceptionResult(recovery.receipt, marker)
+  return recovery.receipt
+}
+
+async function assertReferenceRightsExceptionMarkerCurrent(
+  snapshot: YimengElementProfileResponse,
+  marker: ReferenceRightsExceptionReleaseRecoveryMarker,
+): Promise<void> {
+  if (
+    snapshot.subject.profileRevision !== marker.expectedSubjectRevision
+    || snapshot.snapshotSha256 !== marker.expectedSubjectSha256
+  ) throw new Error('当前元素版本已漂移，异常放行恢复不能显示成功')
+  const reference = findReference(
+    snapshot.subject,
+    marker.referenceAssetId,
+    marker.referenceAssetSha256,
+  )
+  if (reference === undefined) {
+    throw new Error('当前参考素材绑定已漂移，异常放行恢复不能显示成功')
+  }
+  assertCanonicalReferenceRightsRecord(reference.rights, '异常放行恢复参考素材.rights')
+  if (await digestReferenceRightsRecord(reference.rights) !== marker.rightsRecordSha256) {
+    throw new Error('当前参考素材权利记录已漂移，异常放行恢复不能显示成功')
+  }
+}
+
+function sameReferenceRightsExceptionRelease(
+  release: YimengReferenceRightsExceptionRelease,
+  fact: ReferenceRightsExceptionReleaseFact,
+): boolean {
+  return release.id === fact.id
+    && release.decision === fact.decision
+    && release.subjectType === fact.subjectType
+    && release.subjectId === fact.subjectId
+    && release.subjectRevision === fact.subjectRevision
+    && release.subjectSha256 === fact.subjectSha256
+    && sameReferenceRightsExceptionScope(release.scope, fact.scope)
+    && release.actorId === fact.actorId
+    && release.actorRole === fact.actorRole
+    && release.actorNaturalPersonId === fact.actorNaturalPersonId
+    && release.producerActorId === fact.producerActorId
+    && release.producerNaturalPersonId === fact.producerNaturalPersonId
+    && release.assetProducerActorId === fact.assetProducerActorId
+    && release.assetProducerNaturalPersonId === fact.assetProducerNaturalPersonId
+    && release.assetProducerTaskId === fact.assetProducerTaskId
+    && release.assetProducerTaskRequestSha256 === fact.assetProducerTaskRequestSha256
+    && release.authSessionId === fact.authSessionId
+    && release.reason === fact.reason
+    && release.releasedAt === fact.releasedAt
+}
+
+function assertReferenceRightsExceptionFeedReconciled(
+  feed: YimengReferenceRightsExceptionReleaseFeedResponse,
+  result: YimengCreateReferenceRightsExceptionReleaseResponse,
+  snapshot: YimengElementProfileResponse,
+  projectId: string,
+  targetId: string,
+  elementKind: CommandElementKind,
+): void {
+  assertReferenceRightsExceptionFeed(feed, snapshot, projectId, targetId, elementKind)
+  const historical = feed.releases.filter(release => (
+    release.id === result.release.id && sameReferenceRightsExceptionRelease(release, result.release)
+  ))
+  const current = feed.currentReleases.filter(release => (
+    release.id === result.release.id && sameReferenceRightsExceptionRelease(release, result.release)
+  ))
+  if (
+    historical.length !== 1
+    || current.length !== 1
+    || current[0]?.stale !== false
+    || current[0]?.staleReasonCodes.length !== 0
+  ) throw new Error('权威 GET 未返回当前有效且精确对账的异常放行事实')
+}
+
 function isReferencePreview(
   preview: YimengPreviewElementProfileResponse,
 ): preview is YimengReferencePreviewElementProfileResponse {
@@ -1063,6 +1305,22 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
   const [commentBody, setCommentBody] = useState('')
   const [decisionValue, setDecisionValue] = useState<YimengHumanDecisionValue>('approve')
   const [decisionReason, setDecisionReason] = useState('')
+  const [exceptionFeed, setExceptionFeed] =
+    useState<YimengReferenceRightsExceptionReleaseFeedResponse>()
+  const [exceptionFeedError, setExceptionFeedError] = useState<string>()
+  const [exceptionReferenceBinding, setExceptionReferenceBinding] = useState('')
+  const [exceptionRightsRecordSha256, setExceptionRightsRecordSha256] = useState<string>()
+  const [exceptionRightsFields, setExceptionRightsFields] =
+    useState<readonly YimengReferenceRightsExceptionField[]>([])
+  const [exceptionReason, setExceptionReason] = useState('')
+  const [exceptionConfirmed, setExceptionConfirmed] = useState(false)
+  const [exceptionBusy, setExceptionBusy] = useState<'submitting' | 'recovering'>()
+  const [exceptionError, setExceptionError] = useState<string>()
+  const [exceptionReceipt, setExceptionReceipt] =
+    useState<YimengCreateReferenceRightsExceptionReleaseResponse>()
+  const [exceptionReceiptRecovered, setExceptionReceiptRecovered] = useState(false)
+  const [exceptionRecovery, setExceptionRecovery] =
+    useState<ReferenceRightsExceptionReleaseRecoveryRead>({ status: 'none' })
   const [draft, setDraft] = useState('')
   const [preview, setPreview] = useState<YimengPreviewElementProfileResponse>()
   const [commitReceipt, setCommitReceipt] = useState<YimengCommitElementProfileResponse>()
@@ -1090,7 +1348,26 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
     setRecovery(targetId === ''
       ? { status: 'none' }
       : readCommandCommitRecoveryMarker(projectId, elementKind, targetId))
+    setExceptionRecovery(targetId === ''
+      ? { status: 'none' }
+      : readReferenceRightsExceptionReleaseRecoveryMarker(projectId, elementKind, targetId))
   }, [elementKind, projectId, targetId])
+
+  useEffect(() => {
+    let current = true
+    setExceptionRightsRecordSha256(undefined)
+    const reference = snapshot?.subject.references.find(value => (
+      referenceBinding(value) === exceptionReferenceBinding
+    ))
+    if (reference !== undefined) {
+      void digestReferenceRightsRecord(reference.rights)
+        .then((sha256) => { if (current) setExceptionRightsRecordSha256(sha256) })
+        .catch((cause: unknown) => {
+          if (current) setExceptionError(messageOf(cause))
+        })
+    }
+    return () => { current = false }
+  }, [exceptionReferenceBinding, snapshot])
 
   useEffect(() => {
     if (referenceError !== undefined) referenceFeedbackRef.current?.focus()
@@ -1113,6 +1390,17 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
     setReviewStatus(undefined)
     setCommentBody('')
     setDecisionReason('')
+    setExceptionFeed(undefined)
+    setExceptionFeedError(undefined)
+    setExceptionReferenceBinding('')
+    setExceptionRightsRecordSha256(undefined)
+    setExceptionRightsFields([])
+    setExceptionReason('')
+    setExceptionConfirmed(false)
+    setExceptionBusy(undefined)
+    setExceptionError(undefined)
+    setExceptionReceipt(undefined)
+    setExceptionReceiptRecovered(false)
     setPreview(undefined)
     setCommitReceipt(undefined)
     setCommitRecovered(false)
@@ -1143,9 +1431,11 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
       assertMethod(nextMethod, nextSnapshot, projectId, targetId, elementKind)
       let nextReferenceCandidates: YimengReferenceCandidatesResponse | undefined
       let nextReviewFeed: YimengElementReviewFeedResponse | undefined
-      const [candidateResult, reviewResult] = await Promise.allSettled([
+      let nextExceptionFeed: YimengReferenceRightsExceptionReleaseFeedResponse | undefined
+      const [candidateResult, reviewResult, exceptionResult] = await Promise.allSettled([
         port.referenceCandidates({ projectId, elementKind, targetId }, controller.signal),
         port.reviewEvents({ projectId, elementKind, targetId }, controller.signal),
+        port.referenceRightsExceptionReleases({ projectId, elementKind, targetId }, controller.signal),
       ])
       if (candidateResult.status === 'fulfilled') {
         try {
@@ -1167,11 +1457,28 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
       } else if (!isSignalAborted(controller.signal)) {
         setReviewError(messageOf(reviewResult.reason))
       }
+      if (exceptionResult.status === 'fulfilled') {
+        try {
+          assertReferenceRightsExceptionFeed(
+            exceptionResult.value,
+            nextSnapshot,
+            projectId,
+            targetId,
+            elementKind,
+          )
+          nextExceptionFeed = exceptionResult.value
+        } catch (cause) {
+          if (!isSignalAborted(controller.signal)) setExceptionFeedError(messageOf(cause))
+        }
+      } else if (!isSignalAborted(controller.signal)) {
+        setExceptionFeedError(messageOf(exceptionResult.reason))
+      }
       if (isSignalAborted(controller.signal)) return
       setSnapshot(nextSnapshot)
       setMethod(nextMethod)
       setReferenceCandidates(nextReferenceCandidates)
       setReviewFeed(nextReviewFeed)
+      setExceptionFeed(nextExceptionFeed)
       setDraft(elementVisualValue(subject, elementKind))
       setPhase('draft')
     } catch (cause) {
@@ -1187,8 +1494,10 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
     return () => { abortRef.current?.abort() }
   }, [loadSnapshot])
 
+  const recoveryPending = recovery.status !== 'none' || exceptionRecovery.status !== 'none'
+
   const prepare = async (): Promise<void> => {
-    if (snapshot === undefined || method === undefined || draft.trim() === '' || recovery.status !== 'none') return
+    if (snapshot === undefined || method === undefined || draft.trim() === '' || recoveryPending) return
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
@@ -1261,7 +1570,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
   }
 
   const prepareReference = async (): Promise<void> => {
-    if (snapshot === undefined || recovery.status !== 'none') return
+    if (snapshot === undefined || recoveryPending) return
     const subject = recordOf(snapshot.subject)
     const prompt = repairPrompt.trim()
     const rightsReference = snapshot.subject.references.find(reference => (
@@ -1495,12 +1804,13 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
       setConfirmed(false)
       setPhase('committed')
     }
-    const [snapshotResult, candidatesResult, reviewResult, workflowResult] = await Promise.allSettled([
+    const [snapshotResult, candidatesResult, reviewResult, exceptionResult, workflowResult] = await Promise.allSettled([
       port.elementProfile({ projectId, elementKind, targetId }, controller.signal),
       referenceActionMarker
         ? port.referenceCandidates({ projectId, elementKind, targetId }, controller.signal)
         : Promise.resolve(undefined),
       port.reviewEvents({ projectId, elementKind, targetId }, controller.signal),
+      port.referenceRightsExceptionReleases({ projectId, elementKind, targetId }, controller.signal),
       onCommitted(),
     ])
     if (isSignalAborted(controller.signal)) return
@@ -1576,6 +1886,25 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
               referenceReadError = reviewReadError
             }
           }
+          if (exceptionResult.status === 'fulfilled') {
+            try {
+              assertReferenceRightsExceptionFeed(
+                exceptionResult.value,
+                snapshotResult.value,
+                projectId,
+                targetId,
+                elementKind,
+              )
+              setExceptionFeed(exceptionResult.value)
+              setExceptionFeedError(undefined)
+            } catch (cause) {
+              setExceptionFeed(undefined)
+              setExceptionFeedError(messageOf(cause))
+            }
+          } else {
+            setExceptionFeed(undefined)
+            setExceptionFeedError(messageOf(exceptionResult.reason))
+          }
           try {
             const refreshedMethod = await port.elementMethod({
               projectId,
@@ -1604,6 +1933,8 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
         : t('assetRecoverySnapshotMismatch')
       setReviewFeed(undefined)
       setReviewError(reviewReadError)
+      setExceptionFeed(undefined)
+      setExceptionFeedError(t('assetRecoverySnapshotMismatch'))
     }
     const markerCleared = authoritativeReadSucceeded
       && referenceReadSucceeded
@@ -1631,7 +1962,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
   }
 
   const commit = async (): Promise<void> => {
-    if (preview === undefined || !preview.canCommit || !confirmed || recovery.status !== 'none') return
+    if (preview === undefined || !preview.canCommit || !confirmed || recoveryPending) return
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
@@ -1840,7 +2171,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
       || !baselineFeed.capabilities.canComment
       || body === ''
       || body.length > 8000
-      || recovery.status !== 'none'
+      || recoveryPending
     ) return
     abortRef.current?.abort()
     const controller = new AbortController()
@@ -1904,7 +2235,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
       || !baselineFeed.capabilities.canDecide
       || reason === ''
       || reason.length > 8000
-      || recovery.status !== 'none'
+      || recoveryPending
     ) return
     abortRef.current?.abort()
     const controller = new AbortController()
@@ -1944,11 +2275,203 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
     }
   }
 
+  const finishAcceptedReferenceRightsExceptionRelease = async (
+    result: YimengCreateReferenceRightsExceptionReleaseResponse,
+    marker: ReferenceRightsExceptionReleaseRecoveryMarker,
+    controller: AbortController,
+    recovered: boolean,
+  ): Promise<void> => {
+    if (snapshot === undefined) throw new Error('异常放行对账缺少当前元素资料')
+    await assertReferenceRightsExceptionResult(result, marker)
+    await assertReferenceRightsExceptionMarkerCurrent(snapshot, marker)
+    const refreshedFeed = await port.referenceRightsExceptionReleases(
+      { projectId, elementKind, targetId },
+      controller.signal,
+    )
+    if (isSignalAborted(controller.signal)) return
+    assertReferenceRightsExceptionFeedReconciled(
+      refreshedFeed,
+      result,
+      snapshot,
+      projectId,
+      targetId,
+      elementKind,
+    )
+    if (!clearReferenceRightsExceptionReleaseRecoveryMarker(marker)) {
+      throw new Error('异常放行已对账，但本地恢复标记未能安全清除')
+    }
+    setExceptionFeed(refreshedFeed)
+    setExceptionFeedError(undefined)
+    setExceptionRecovery({ status: 'none' })
+    setExceptionReceipt(result)
+    setExceptionReceiptRecovered(recovered)
+    setExceptionRightsFields([])
+    setExceptionReason('')
+    setExceptionConfirmed(false)
+    setExceptionError(undefined)
+  }
+
+  const submitReferenceRightsExceptionRelease = async (): Promise<void> => {
+    const baselineSnapshot = snapshot
+    const baselineFeed = exceptionFeed
+    const reference = baselineSnapshot?.subject.references.find(value => (
+      referenceBinding(value) === exceptionReferenceBinding
+    ))
+    let normalizedReason: string
+    try {
+      normalizedReason = normalizeReferenceRightsExceptionReasonInput(exceptionReason)
+    } catch (cause) {
+      setExceptionError(messageOf(cause))
+      return
+    }
+    if (
+      baselineSnapshot === undefined
+      || baselineFeed === undefined
+      || !baselineFeed.capabilities.canRelease
+      || reference === undefined
+      || exceptionRightsFields.length === 0
+      || !exceptionConfirmed
+      || recoveryPending
+    ) return
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    setExceptionBusy('submitting')
+    setExceptionError(undefined)
+    setExceptionReceipt(undefined)
+    setExceptionReceiptRecovered(false)
+    try {
+      assertSnapshot(baselineSnapshot, projectId, targetId, elementKind)
+      assertReferenceRightsExceptionFeed(
+        baselineFeed,
+        baselineSnapshot,
+        projectId,
+        targetId,
+        elementKind,
+      )
+      const rightsRecordSha256 = await digestReferenceRightsRecord(reference.rights)
+      const scope = normalizeReferenceRightsExceptionScope({
+        kind: 'reference_rights',
+        referenceAssetId: reference.assetId,
+        referenceAssetSha256: reference.sha256,
+        rightsRecordSha256,
+        rightsFields: exceptionRightsFields,
+      })
+      const method = await port.referenceAssetMethod({
+        projectId,
+        elementKind,
+        elementId: targetId,
+        profileRevision: baselineSnapshot.subject.profileRevision,
+        snapshotSha256: baselineSnapshot.snapshotSha256,
+        operation: 'recordReferenceRightsExceptionRelease',
+      }, controller.signal)
+      assertReferenceRightsExceptionMethod(method, baselineSnapshot, projectId, targetId, elementKind)
+      const [reasonSha256, scopeSha256] = await Promise.all([
+        digestReferenceRightsExceptionReason(normalizedReason),
+        digestReferenceRightsExceptionScope(scope),
+      ])
+      const markerInput = {
+        projectId,
+        elementKind,
+        targetId,
+        expectedSubjectRevision: baselineSnapshot.subject.profileRevision,
+        expectedSubjectSha256: baselineSnapshot.snapshotSha256,
+        referenceAssetId: scope.referenceAssetId,
+        referenceAssetSha256: scope.referenceAssetSha256,
+        rightsRecordSha256: scope.rightsRecordSha256,
+        reasonSha256,
+        scopeSha256,
+      } as const
+      const marker = createReferenceRightsExceptionReleaseRecoveryMarker({
+        ...markerInput,
+        idempotencyKey: await deriveReferenceRightsExceptionIdempotencyKey(markerInput),
+      })
+      if (isSignalAborted(controller.signal)) return
+      const existingCommit = readCommandCommitRecoveryMarker(projectId, elementKind, targetId)
+      if (existingCommit.status !== 'none') {
+        setRecovery(existingCommit)
+        throw new Error('存在尚未处理的元素命令恢复标记')
+      }
+      const existingException = readReferenceRightsExceptionReleaseRecoveryMarker(
+        projectId,
+        elementKind,
+        targetId,
+      )
+      if (existingException.status !== 'none') {
+        setExceptionRecovery(existingException)
+        throw new Error('存在尚未处理的异常放行恢复标记')
+      }
+      if (!writeReferenceRightsExceptionReleaseRecoveryMarker(marker)) {
+        throw new Error('浏览器无法同步写入异常放行恢复标记')
+      }
+      const stored = readReferenceRightsExceptionReleaseRecoveryMarker(projectId, elementKind, targetId)
+      if (stored.status !== 'ready' || !sameReferenceRightsExceptionMarker(stored.marker, marker)) {
+        throw new Error('异常放行恢复标记写后回读不一致')
+      }
+      setExceptionRecovery(stored)
+      const result = await port.createReferenceRightsExceptionRelease({
+        projectId,
+        elementKind,
+        targetId,
+        expectedSubjectRevision: marker.expectedSubjectRevision,
+        expectedSubjectSha256: marker.expectedSubjectSha256,
+        idempotencyKey: marker.idempotencyKey,
+        reason: normalizedReason,
+        scope,
+      }, controller.signal)
+      await finishAcceptedReferenceRightsExceptionRelease(result, marker, controller, false)
+    } catch (cause) {
+      if (!isSignalAborted(controller.signal)) setExceptionError(messageOf(cause))
+    } finally {
+      if (abortRef.current === controller) setExceptionBusy(undefined)
+    }
+  }
+
+  const recoverReferenceRightsExceptionRelease = async (): Promise<void> => {
+    if (exceptionRecovery.status !== 'ready' || snapshot === undefined) return
+    const marker = exceptionRecovery.marker
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    setExceptionBusy('recovering')
+    setExceptionError(undefined)
+    setExceptionReceipt(undefined)
+    setExceptionReceiptRecovered(false)
+    try {
+      const recovered = await port.recoverReferenceRightsExceptionRelease({ ...marker }, controller.signal)
+      if (isSignalAborted(controller.signal)) return
+      const result = await assertReferenceRightsExceptionRecovery(recovered, marker)
+      await finishAcceptedReferenceRightsExceptionRelease(result, marker, controller, true)
+    } catch (cause) {
+      if (!isSignalAborted(controller.signal)) setExceptionError(messageOf(cause))
+    } finally {
+      if (abortRef.current === controller) setExceptionBusy(undefined)
+    }
+  }
+
+  const discardReferenceRightsExceptionRecovery = (): void => {
+    if (
+      targetId !== ''
+      && discardReferenceRightsExceptionReleaseRecoveryMarker(projectId, elementKind, targetId)
+    ) {
+      setExceptionRecovery({ status: 'none' })
+      setExceptionError(undefined)
+      setExceptionReceipt(undefined)
+      setExceptionReceiptRecovered(false)
+      return
+    }
+    setExceptionRecovery(targetId === ''
+      ? { status: 'none' }
+      : readReferenceRightsExceptionReleaseRecoveryMarker(projectId, elementKind, targetId))
+    setExceptionError('无法安全丢弃本地异常放行恢复标记')
+  }
+
   const busy = phase === 'loading'
     || phase === 'preparing'
     || phase === 'committing'
     || phase === 'recovering'
     || reviewBusy !== undefined
+    || exceptionBusy !== undefined
   const subject = recordOf(snapshot?.subject)
   const fieldHints = arrayOf(method?.projection.field_hints)
   const checklist = arrayOf(method?.projection.checklist)
@@ -1960,6 +2483,25 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
   const selectedRightsRecord = rightsReferences.find(reference => (
     referenceBinding(reference) === selectedRightsReference
   ))
+  const selectedExceptionReference = rightsReferences.find(reference => (
+    referenceBinding(reference) === exceptionReferenceBinding
+  ))
+  let normalizedExceptionReason: string | undefined
+  try {
+    normalizedExceptionReason = normalizeReferenceRightsExceptionReasonInput(exceptionReason)
+  } catch {
+    normalizedExceptionReason = undefined
+  }
+  const currentExceptionReleaseIds = new Set(
+    exceptionFeed?.currentReleases.map(release => release.id) ?? [],
+  )
+  const exceptionCanSubmit = exceptionFeed?.capabilities.canRelease === true
+    && selectedExceptionReference !== undefined
+    && exceptionRightsRecordSha256 !== undefined
+    && exceptionRightsFields.length > 0
+    && normalizedExceptionReason !== undefined
+    && exceptionConfirmed
+    && !recoveryPending
   const referenceInputValid = referenceOperation === 'replaceReferenceRights'
     ? selectedRightsRecord !== undefined && rightsDraft !== undefined
     : selectedCandidate !== undefined
@@ -2108,7 +2650,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
               setConfirmed(false)
               setPhase('draft')
             }}
-            disabled={busy || method === undefined || recovery.status !== 'none'}
+            disabled={busy || method === undefined || recoveryPending}
             rows={8}
           />
           <small>{t('assetPromptHint')}</small>
@@ -2121,7 +2663,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
             type="button"
             className={css.primaryAction}
             onClick={() => { void prepare() }}
-            disabled={busy || method === undefined || draft.trim() === '' || recovery.status !== 'none'}
+            disabled={busy || method === undefined || draft.trim() === '' || recoveryPending}
           >
             {phase === 'preparing' ? t('assetPreparing') : t('assetPrepare')}
           </button>
@@ -2138,7 +2680,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
             <button
               type="button"
               aria-pressed={referenceOperation === 'selectReferenceAsset'}
-              disabled={busy || recovery.status !== 'none'}
+              disabled={busy || recoveryPending}
               onClick={() => {
                 setReferenceOperation('selectReferenceAsset')
                 setSelectedCandidateId('')
@@ -2157,7 +2699,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
             <button
               type="button"
               aria-pressed={referenceOperation === 'requestReferenceRegeneration'}
-              disabled={busy || recovery.status !== 'none'}
+              disabled={busy || recoveryPending}
               onClick={() => {
                 setReferenceOperation('requestReferenceRegeneration')
                 setSelectedCandidateId('')
@@ -2175,7 +2717,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
             <button
               type="button"
               aria-pressed={referenceOperation === 'replaceReferenceRights'}
-              disabled={busy || recovery.status !== 'none'}
+              disabled={busy || recoveryPending}
               onClick={() => {
                 setReferenceOperation('replaceReferenceRights')
                 setSelectedCandidateId('')
@@ -2193,7 +2735,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
             </button>
           </div>
           {referenceOperation !== 'replaceReferenceRights' && (
-            <fieldset disabled={busy || recovery.status !== 'none'}>
+            <fieldset disabled={busy || recoveryPending}>
               <legend>{t('assetReferenceCandidates')}</legend>
               {candidateItems.length === 0 ? <p className={css.empty}>{t('assetReferenceNoCandidates')}</p> : (
                 <div className={css.methodGrid}>
@@ -2228,7 +2770,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
           )}
           {referenceOperation === 'replaceReferenceRights' && (
             <>
-              <fieldset disabled={busy || recovery.status !== 'none'}>
+              <fieldset disabled={busy || recoveryPending}>
                 <legend>{t('assetRightsReferences')}</legend>
                 {rightsReferences.length === 0 ? <p className={css.empty}>{t('assetRightsNoReferences')}</p> : (
                   <div className={css.methodGrid}>
@@ -2262,7 +2804,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
               {selectedRightsRecord !== undefined && rightsDraft !== undefined && (
                 <ReferenceRightsEditor
                   value={rightsDraft}
-                  disabled={busy || recovery.status !== 'none'}
+                  disabled={busy || recoveryPending}
                   onChange={(next) => {
                     setRightsDraft(next)
                     setPreview(undefined)
@@ -2284,7 +2826,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
                 value={repairPrompt}
                 maxLength={8000}
                 rows={5}
-                disabled={busy || recovery.status !== 'none'}
+                disabled={busy || recoveryPending}
                 onChange={(event) => {
                   setRepairPrompt(event.target.value)
                   setPreview(undefined)
@@ -2302,7 +2844,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
               type="button"
               className={css.primaryAction}
               onClick={() => { void prepareReference() }}
-              disabled={busy || !referenceInputValid || recovery.status !== 'none'}
+              disabled={busy || !referenceInputValid || recoveryPending}
             >
               {phase === 'preparing'
                 ? t('assetPreparing')
@@ -2327,6 +2869,270 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
         <div ref={referenceFeedbackRef} tabIndex={-1} className={css.scriptError} role="alert">
           <strong>{t('assetReferenceLoadError')}</strong><p>{referenceError}</p>
         </div>
+      )}
+
+      {snapshot !== undefined && (
+        <section className={css.previewDock} aria-label={t('assetRightsExceptionTitle')}>
+          <div className={css.previewHead}>
+            <div>
+              <h4>{t('assetRightsExceptionTitle')}</h4>
+              <p>{t('assetRightsExceptionBoundary')}</p>
+            </div>
+          </div>
+
+          {exceptionRecovery.status === 'ready' && (
+            <section className={css.recoveryDock} aria-label={t('assetRightsExceptionRecoveryTitle')}>
+              <div>
+                <h4>{t('assetRightsExceptionRecoveryTitle')}</h4>
+                <p>{t('assetRightsExceptionRecoveryBody')}</p>
+              </div>
+              <dl>
+                <div><dt>{t('projectId')}</dt><dd>{exceptionRecovery.marker.projectId}</dd></div>
+                <div><dt>{t('assetReviewSubject')}</dt><dd>{exceptionRecovery.marker.targetId}</dd></div>
+                <div><dt>{t('assetProfileRevision')}</dt><dd>{exceptionRecovery.marker.expectedSubjectRevision}</dd></div>
+                <div><dt>{t('assetSnapshotHash')}</dt><dd>{exceptionRecovery.marker.expectedSubjectSha256}</dd></div>
+                <div><dt>{t('assetRightsExceptionReferenceAsset')}</dt><dd>{exceptionRecovery.marker.referenceAssetId}</dd></div>
+                <div><dt>{t('assetRightsExceptionReferenceSha')}</dt><dd>{exceptionRecovery.marker.referenceAssetSha256}</dd></div>
+                <div><dt>{t('assetRightsExceptionRightsHash')}</dt><dd>{exceptionRecovery.marker.rightsRecordSha256}</dd></div>
+                <div><dt>{t('assetRightsExceptionReasonHash')}</dt><dd>{exceptionRecovery.marker.reasonSha256}</dd></div>
+                <div><dt>{t('assetRightsExceptionScopeHash')}</dt><dd>{exceptionRecovery.marker.scopeSha256}</dd></div>
+                <div><dt>{t('assetRightsExceptionIdempotency')}</dt><dd>{exceptionRecovery.marker.idempotencyKey}</dd></div>
+              </dl>
+              <p>{t('assetRightsExceptionRecoveryGetOnly')}</p>
+              <div className={css.recoveryActions}>
+                <button
+                  type="button"
+                  className={css.primaryAction}
+                  disabled={exceptionBusy !== undefined || snapshot === undefined}
+                  onClick={() => { void recoverReferenceRightsExceptionRelease() }}
+                >
+                  {exceptionBusy === 'recovering'
+                    ? t('assetRightsExceptionRecovering')
+                    : t('assetRightsExceptionRecover')}
+                </button>
+                <button
+                  type="button"
+                  disabled={exceptionBusy !== undefined}
+                  onClick={discardReferenceRightsExceptionRecovery}
+                >
+                  {t('assetRightsExceptionDiscard')}
+                </button>
+              </div>
+            </section>
+          )}
+
+          {exceptionRecovery.status === 'invalid' && (
+            <div className={css.scriptError} role="alert">
+              <strong>{t('assetRightsExceptionRecoveryInvalid')}</strong>
+              <p>{exceptionRecovery.error}</p>
+              <button type="button" onClick={discardReferenceRightsExceptionRecovery}>
+                {t('assetRightsExceptionDiscard')}
+              </button>
+            </div>
+          )}
+
+          {exceptionFeed !== undefined && (
+            <>
+              <dl className={css.previewMeta}>
+                <div><dt>{t('assetReviewSubject')}</dt><dd>{exceptionFeed.subject.id}</dd></div>
+                <div><dt>{t('assetProfileRevision')}</dt><dd>{exceptionFeed.subject.revision}</dd></div>
+                <div><dt>{t('assetSnapshotHash')}</dt><dd>{exceptionFeed.subject.sha256}</dd></div>
+                <div><dt>{t('assetRightsExceptionCapability')}</dt><dd>{t(exceptionFeed.capabilities.canRelease ? 'yes' : 'no')}</dd></div>
+                <div><dt>{t('assetRightsExceptionBlockedReasonCode')}</dt><dd>{exceptionFeed.capabilities.blockedReasonCode ?? t('empty')}</dd></div>
+                <div><dt>{t('assetRightsExceptionBlockedReason')}</dt><dd>{exceptionFeed.capabilities.blockedReason ?? t('empty')}</dd></div>
+                <div><dt>{t('assetRightsExceptionRecentAuth')}</dt><dd>{t('yes')}</dd></div>
+              </dl>
+              <p>{t('assetRightsExceptionApproverBoundary')}</p>
+            </>
+          )}
+
+          {exceptionFeedError !== undefined && (
+            <div className={css.scriptError} role="alert">
+              <strong>{t('assetRightsExceptionLoadError')}</strong>
+              <p>{exceptionFeedError}</p>
+            </div>
+          )}
+
+          {exceptionFeed === undefined && exceptionFeedError === undefined && (
+            <p className={css.empty} role="status">{t('assetRightsExceptionLoadBlocked')}</p>
+          )}
+
+          <fieldset disabled={busy || recoveryPending || exceptionFeed?.capabilities.canRelease !== true}>
+            <legend>{t('assetRightsExceptionReference')}</legend>
+            {rightsReferences.length === 0 ? <p className={css.empty}>{t('assetRightsNoReferences')}</p> : (
+              <div className={css.methodGrid}>
+                {rightsReferences.map((reference) => {
+                  const binding = referenceBinding(reference)
+                  return (
+                    <label key={binding}>
+                      <input
+                        type="radio"
+                        name={`reference-rights-exception-${projectId}-${elementKind}-${targetId}`}
+                        checked={exceptionReferenceBinding === binding}
+                        onChange={() => {
+                          setExceptionReferenceBinding(binding)
+                          setExceptionRightsFields([])
+                          setExceptionConfirmed(false)
+                          setExceptionReceipt(undefined)
+                          setExceptionReceiptRecovered(false)
+                          setExceptionError(undefined)
+                        }}
+                      />
+                      <strong>{reference.assetId}</strong>
+                      <span>{t(reference.rightsRecorded ? 'assetRightsRecorded' : 'assetRightsNotRecorded')}</span>
+                      <small>{reference.sha256}</small>
+                    </label>
+                  )
+                })}
+              </div>
+            )}
+          </fieldset>
+
+          {selectedExceptionReference !== undefined && (
+            <dl className={css.previewMeta}>
+              <div><dt>{t('assetRightsExceptionReferenceAsset')}</dt><dd>{selectedExceptionReference.assetId}</dd></div>
+              <div><dt>{t('assetRightsExceptionReferenceSha')}</dt><dd>{selectedExceptionReference.sha256}</dd></div>
+              <div><dt>{t('assetRightsExceptionRightsHash')}</dt><dd>{exceptionRightsRecordSha256 ?? t('unknown')}</dd></div>
+            </dl>
+          )}
+
+          <fieldset disabled={busy || recoveryPending || selectedExceptionReference === undefined}>
+            <legend>{t('assetRightsExceptionFields')}</legend>
+            <div className={css.methodGrid}>
+              {REFERENCE_RIGHTS_EXCEPTION_FIELDS.map(field => (
+                <label key={field}>
+                  <input
+                    type="checkbox"
+                    checked={exceptionRightsFields.includes(field)}
+                    onChange={(event) => {
+                      setExceptionRightsFields(current => REFERENCE_RIGHTS_EXCEPTION_FIELDS.filter(candidate => (
+                        candidate === field ? event.target.checked : current.includes(candidate)
+                      )))
+                      setExceptionConfirmed(false)
+                      setExceptionReceipt(undefined)
+                      setExceptionReceiptRecovered(false)
+                      setExceptionError(undefined)
+                    }}
+                  />
+                  <span>{t(REFERENCE_RIGHTS_EXCEPTION_FIELD_LOCALE_KEY[field])}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <label className={css.scriptEditor}>
+            <span>{t('assetRightsExceptionReason')}</span>
+            <textarea
+              aria-label={t('assetRightsExceptionReason')}
+              value={exceptionReason}
+              maxLength={8000}
+              rows={5}
+              disabled={busy || recoveryPending || selectedExceptionReference === undefined}
+              onChange={(event) => {
+                setExceptionReason(event.target.value)
+                setExceptionConfirmed(false)
+                setExceptionReceipt(undefined)
+                setExceptionReceiptRecovered(false)
+                setExceptionError(undefined)
+              }}
+            />
+            {exceptionReason !== '' && normalizedExceptionReason === undefined && (
+              <small role="alert">{t('assetRightsExceptionReasonInvalid')}</small>
+            )}
+          </label>
+
+          <div className={css.commitDock}>
+            <label>
+              <input
+                type="checkbox"
+                checked={exceptionConfirmed}
+                disabled={busy
+                  || recoveryPending
+                  || selectedExceptionReference === undefined
+                  || exceptionRightsFields.length === 0
+                  || normalizedExceptionReason === undefined}
+                onChange={(event) => {
+                  setExceptionConfirmed(event.target.checked)
+                  setExceptionReceipt(undefined)
+                  setExceptionReceiptRecovered(false)
+                  setExceptionError(undefined)
+                }}
+              />
+              <span>{t('assetRightsExceptionConfirm')}</span>
+            </label>
+            <button
+              type="button"
+              className={css.primaryAction}
+              disabled={busy || !exceptionCanSubmit}
+              onClick={() => { void submitReferenceRightsExceptionRelease() }}
+            >
+              {exceptionBusy === 'submitting'
+                ? t('assetRightsExceptionSubmitting')
+                : t('assetRightsExceptionSubmit')}
+            </button>
+          </div>
+
+          {exceptionError !== undefined && (
+            <div className={css.scriptError} role="alert">
+              <strong>{t('assetRightsExceptionOperationError')}</strong>
+              <p>{exceptionError}</p>
+            </div>
+          )}
+
+          {exceptionReceipt !== undefined && (
+            <section className={css.commitReceipt} aria-label={t('assetRightsExceptionSucceeded')}>
+              <h4>{t(exceptionReceiptRecovered
+                ? 'assetRightsExceptionRecovered'
+                : 'assetRightsExceptionSucceeded')}</h4>
+              <dl>
+                <div><dt>{t('changeSet')}</dt><dd>{exceptionReceipt.changeSetId}</dd></div>
+                <div><dt>{t('receiptId')}</dt><dd>{exceptionReceipt.commandReceiptId}</dd></div>
+                <div><dt>{t('eventId')}</dt><dd>{exceptionReceipt.eventId}</dd></div>
+                <div><dt>{t('payloadHash')}</dt><dd>{exceptionReceipt.payloadSha256}</dd></div>
+                <div><dt>{t('assetRightsExceptionReleaseId')}</dt><dd>{exceptionReceipt.release.id}</dd></div>
+                <div><dt>{t('assetRightsExceptionReleasedAt')}</dt><dd>{exceptionReceipt.release.releasedAt}</dd></div>
+              </dl>
+            </section>
+          )}
+
+          {exceptionFeed !== undefined && (
+            <section aria-label={t('assetRightsExceptionHistory')}>
+              <h5>{t('assetRightsExceptionHistory')}</h5>
+              {exceptionFeed.releases.length === 0 ? (
+                <p className={css.empty}>{t('assetRightsExceptionNoHistory')}</p>
+              ) : (
+                <div className={css.methodGrid}>
+                  {exceptionFeed.releases.map(release => (
+                    <article key={release.id}>
+                      <strong>{release.id} · {t(currentExceptionReleaseIds.has(release.id)
+                        ? 'assetRightsExceptionCurrent'
+                        : release.stale
+                          ? 'assetRightsExceptionStale'
+                          : 'assetRightsExceptionHistorical')}</strong>
+                      <p>{release.reason}</p>
+                      <dl className={css.previewMeta}>
+                        <div><dt>{t('assetProfileRevision')}</dt><dd>{release.subjectRevision}</dd></div>
+                        <div><dt>{t('assetSnapshotHash')}</dt><dd>{release.subjectSha256}</dd></div>
+                        <div><dt>{t('assetRightsExceptionReferenceAsset')}</dt><dd>{release.scope.referenceAssetId}</dd></div>
+                        <div><dt>{t('assetRightsExceptionReferenceSha')}</dt><dd>{release.scope.referenceAssetSha256}</dd></div>
+                        <div><dt>{t('assetRightsExceptionRightsHash')}</dt><dd>{release.scope.rightsRecordSha256}</dd></div>
+                        <div><dt>{t('assetRightsExceptionFields')}</dt><dd>{release.scope.rightsFields.map(field => t(REFERENCE_RIGHTS_EXCEPTION_FIELD_LOCALE_KEY[field])).join(' · ')}</dd></div>
+                        <div><dt>{t('assetRightsExceptionApprover')}</dt><dd>{release.actorId} · {release.actorNaturalPersonId}</dd></div>
+                        <div><dt>{t('assetRightsExceptionProducer')}</dt><dd>{release.producerActorId} · {release.producerNaturalPersonId}</dd></div>
+                        <div><dt>{t('assetRightsExceptionAssetProducer')}</dt><dd>{release.assetProducerActorId} · {release.assetProducerNaturalPersonId}</dd></div>
+                        <div><dt>{t('assetRightsExceptionAssetProducerTask')}</dt><dd>{release.assetProducerTaskId}</dd></div>
+                        <div><dt>{t('assetRightsExceptionAssetProducerRequest')}</dt><dd>{release.assetProducerTaskRequestSha256}</dd></div>
+                        <div><dt>{t('assetRightsExceptionAuthSession')}</dt><dd>{release.authSessionId}</dd></div>
+                        <div><dt>{t('assetRightsExceptionReleasedAt')}</dt><dd>{release.releasedAt}</dd></div>
+                        <div><dt>{t('assetRightsExceptionStaleReasons')}</dt><dd>{release.staleReasonCodes.join(' · ') || t('empty')}</dd></div>
+                      </dl>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+        </section>
       )}
 
       {snapshot !== undefined && (
@@ -2366,7 +3172,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
                   rows={4}
                   disabled={busy
                     || reviewFeed?.capabilities.canComment !== true
-                    || recovery.status !== 'none'}
+                    || recoveryPending}
                   onChange={(event) => {
                     setCommentBody(event.target.value)
                     setReviewError(undefined)
@@ -2382,7 +3188,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
                   disabled={busy
                     || reviewFeed?.capabilities.canComment !== true
                     || commentBody.trim() === ''
-                    || recovery.status !== 'none'}
+                    || recoveryPending}
                 >
                   {reviewBusy === 'comment'
                     ? t('assetReviewCommentSubmitting')
@@ -2400,7 +3206,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
                 <select
                   aria-label={t('assetReviewDecisionValue')}
                   value={decisionValue}
-                  disabled={busy || reviewFeed?.capabilities.canDecide !== true || recovery.status !== 'none'}
+                  disabled={busy || reviewFeed?.capabilities.canDecide !== true || recoveryPending}
                   onChange={(event) => {
                     if (isHumanDecisionValue(event.target.value)) setDecisionValue(event.target.value)
                     setReviewError(undefined)
@@ -2419,7 +3225,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
                   value={decisionReason}
                   maxLength={8000}
                   rows={4}
-                  disabled={busy || reviewFeed?.capabilities.canDecide !== true || recovery.status !== 'none'}
+                  disabled={busy || reviewFeed?.capabilities.canDecide !== true || recoveryPending}
                   onChange={(event) => {
                     setDecisionReason(event.target.value)
                     setReviewError(undefined)
@@ -2435,7 +3241,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
                   disabled={busy
                     || reviewFeed?.capabilities.canDecide !== true
                     || decisionReason.trim() === ''
-                    || recovery.status !== 'none'}
+                    || recoveryPending}
                 >
                   {reviewBusy === 'decision'
                     ? t('assetReviewDecisionSubmitting')
@@ -2529,7 +3335,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
           {(visualPreview.revisionConflict || visualPreview.baseSnapshotConflict) && (
             <div className={css.conflict} role="status"><strong>{t('assetConflictTitle')}</strong><p>{t('assetConflictBody')}</p></div>
           )}
-          {visualPreview.canCommit && recovery.status === 'none' && (
+          {visualPreview.canCommit && !recoveryPending && (
             <div className={css.commitDock}>
               <label>
                 <input type="checkbox" checked={confirmed} onChange={(event) => { setConfirmed(event.target.checked) }} disabled={busy} />
@@ -2559,7 +3365,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
           <div className={referencePreview.candidateDrift ? css.conflict : css.impactSummary} role="status">
             <span>{t(referencePreview.candidateDrift ? 'assetReferenceCandidateDrift' : 'assetReferenceCandidateCurrent')}</span>
           </div>
-          {referencePreview.canCommit && recovery.status === 'none' && (
+          {referencePreview.canCommit && !recoveryPending && (
             <div className={css.commitDock}>
               <label>
                 <input type="checkbox" checked={confirmed} onChange={(event) => { setConfirmed(event.target.checked) }} disabled={busy} />
@@ -2614,7 +3420,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
           {(rightsPreview.revisionConflict || rightsPreview.baseSnapshotConflict || rightsPreview.impactConflict) && (
             <div className={css.conflict} role="status"><strong>{t('assetConflictTitle')}</strong><p>{t('assetRightsConflictBody')}</p></div>
           )}
-          {rightsPreview.canCommit && recovery.status === 'none' && (
+          {rightsPreview.canCommit && !recoveryPending && (
             <div className={css.commitDock}>
               <label>
                 <input type="checkbox" checked={confirmed} onChange={(event) => { setConfirmed(event.target.checked) }} disabled={busy} />
