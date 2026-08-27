@@ -6,7 +6,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { QingmuCockpit } from './QingmuCockpit.tsx'
 import type {
   ImagoElementMethodResponse, ImagoHeroFrameStoryboardMethodResponse, ImagoPromptIrMethodResponse,
-  ImagoReferenceAssetMethodResponse, ImagoShotRelationMethodResponse, QingmuYimengPort,
+  ImagoReferenceAssetMethodResponse, ImagoShotRelationMethodResponse, ImagoWorksetMethodResponse, QingmuYimengPort,
   YimengCommitElementProfileResponse, YimengCommitPromptIrEditResponse, YimengCommitScriptResponse,
   YimengCommitStoryboardCanvasResponse,
   YimengElementProfileResponse, YimengEpisodesResponse, YimengHealth, YimengPreviewElementProfileResponse,
@@ -30,7 +30,7 @@ import { en, NS, zh } from './locales.ts'
 export type { QingmuCockpitFace } from './slots.ts'
 export type {
   ImagoElementMethodResponse, ImagoHeroFrameStoryboardMethodResponse, ImagoPromptIrMethodResponse,
-  ImagoReferenceAssetMethodResponse, ImagoShotRelationMethodResponse,
+  ImagoReferenceAssetMethodResponse, ImagoShotRelationMethodResponse, ImagoWorksetMethodResponse,
   QingmuImagoMethodPort, QingmuYimengCommandPort,
   QingmuYimengPort, QingmuYimengReadPort,
   YimengCommitElementProfileResponse, YimengCommitPromptIrEditResponse, YimengCommitScriptResponse,
@@ -82,6 +82,7 @@ export function apply(ctx: ClientContext): void {
     script: (request, signal) => read<YimengScriptResponse>('script', request, signal),
     promptIr: (request, signal) => read<YimengPromptIrResponse>('promptIr', request, signal),
     workflow: (request, signal) => read<YimengWorkflowProjection>('workflow', request, signal),
+    worksetMethod: (request, signal) => method<ImagoWorksetMethodResponse>('worksetMethod', request, signal),
     elementMethod: (request, signal) => method<ImagoElementMethodResponse>('elementMethod', request, signal),
     referenceAssetMethod: (request, signal) =>
       method<ImagoReferenceAssetMethodResponse>('referenceAssetMethod', request, signal),

@@ -12,6 +12,9 @@ import type {
   ImagoReferenceAssetMethodResponse,
   ImagoShotRelationMethodRequest,
   ImagoShotRelationMethodResponse,
+  ImagoWorksetMethodRequest,
+  ImagoWorksetMethodResponse,
+  ImagoWorksetProjection,
 } from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter/types'
 import type {
   YimengEpisodesRequest,
@@ -123,6 +126,9 @@ export type {
   ImagoReferenceAssetMethodResponse,
   ImagoShotRelationMethodRequest,
   ImagoShotRelationMethodResponse,
+  ImagoWorksetMethodRequest,
+  ImagoWorksetMethodResponse,
+  ImagoWorksetProjection,
 }
 export type {
   YimengEpisodesRequest,
@@ -305,6 +311,7 @@ export interface QingmuYimengCommandPort {
 
 /** Read-only, stateless professional method compiler channel. */
 export interface QingmuImagoMethodPort {
+  worksetMethod(request: ImagoWorksetMethodRequest, signal?: AbortSignal): Promise<ImagoWorksetMethodResponse>
   elementMethod(request: ImagoElementMethodRequest, signal?: AbortSignal): Promise<ImagoElementMethodResponse>
   referenceAssetMethod(request: ImagoReferenceAssetMethodRequest, signal?: AbortSignal): Promise<ImagoReferenceAssetMethodResponse>
   promptIrMethod(request: ImagoPromptIrMethodRequest, signal?: AbortSignal): Promise<ImagoPromptIrMethodResponse>

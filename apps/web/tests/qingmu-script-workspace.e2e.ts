@@ -1128,6 +1128,8 @@ function workflowFixture(
     qualityPassed: true,
     selected: true,
     canProceed: true,
+    // Untrusted legacy extension: workset compilation must never treat this as stage authority.
+    imagoStageApproval: { approved: true, scope: 'GLOBAL', stageId: 'A0' },
     stages: {
       script: {
         label: '剧本',
@@ -3150,6 +3152,7 @@ describe.skipIf(
     }> = []
     let shotRiverBrowserEvidence: Record<string, unknown> | undefined
     let storyboardCanvasBrowserEvidence: Record<string, unknown> | undefined
+    let worksetBrowserEvidence: Record<string, unknown> | undefined
     let resolveReferenceRightsMethodProjectionSha256: ((sha256: string) => void) | undefined
     const referenceRightsMethodProjectionSha256 = new Promise<string>((resolve) => {
       resolveReferenceRightsMethodProjectionSha256 = resolve
@@ -3341,6 +3344,8 @@ describe.skipIf(
               shotRiver: process.env.QINGMU_E5_3_EVIDENCE_SCREENSHOT,
               storyboardCanvas: process.env.QINGMU_E5_2_CANVAS_EVIDENCE_SCREENSHOT,
               storyboardCanvasMethod: process.env.QINGMU_E5_2_METHOD_EVIDENCE_SCREENSHOT,
+              workset: process.env.QINGMU_E5_4_EVIDENCE_SCREENSHOT,
+              worksetMobile: process.env.QINGMU_E5_4_MOBILE_EVIDENCE_SCREENSHOT,
               script: process.env.QINGMU_EVIDENCE_SCREENSHOT,
               actor: process.env.QINGMU_ACTOR_EVIDENCE_SCREENSHOT,
               scene: process.env.QINGMU_SCENE_EVIDENCE_SCREENSHOT,
@@ -3348,6 +3353,7 @@ describe.skipIf(
             },
             shotRiver: shotRiverBrowserEvidence,
             storyboardCanvas: storyboardCanvasBrowserEvidence,
+            workset: worksetBrowserEvidence,
           }
           await mkdir(dirname(runEvidencePath), { recursive: true })
           await writeFile(runEvidencePath, `${JSON.stringify(evidence, null, 2)}\n`)
@@ -3363,6 +3369,120 @@ describe.skipIf(
       restoreAttestationKey()
       if (failures.length > 0) throw new AggregateError(failures, 'Qingmu script e2e cleanup failed')
     })
+
+    it('compiles the E5-4 read-only workset through the real Host and Core without inventing stage authority', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e5-4-workset'))
+      const requestStart = capturedRequests.length
+      const rpcStart = browserRpcRequests.length
+      const consoleStart = browserConsoleErrors.length
+      const tracePath = process.env.QINGMU_E5_4_TRACE_PATH?.trim()
+      if (tracePath !== undefined && tracePath !== '') {
+        await page.context().tracing.start({ screenshots: true, snapshots: true })
+      }
+      const worksetWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-imago-method/worksetMethod')
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      const workset = dialog.getByRole('region', { name: '推荐下一步' })
+      await workset.getByText('阶段与 LSU 权威证据尚未接入，暂不推荐生产任务。', { exact: true }).waitFor({ timeout: 20_000 })
+      const wire = await (await worksetWirePromise).json() as unknown
+      const root = isRecord(wire) ? wire : {}
+      const result = isRecord(root.result) ? root.result : {}
+      const value = isRecord(result.value) ? result.value : {}
+      const projection = isRecord(value.projection) ? value.projection : {}
+      expect(result.ok).toBe(true)
+      expect(value.schema).toBe('qingmu.imago-workset-method-adapter-result.v1')
+      expect(projection).toEqual(expect.objectContaining({
+        schema: 'qingmu.imago-workset.v2',
+        work_items: [], legal_work_items: [], recommended_order: [], recommended_item: null,
+        project_state_persisted: false, human_approval_inferred: false,
+        formal_activation_allowed: false, paid_provider_authority: 'not_granted',
+      }))
+      expect(projection.stage_definitions).toHaveLength(23)
+      expect(projection.availability).toEqual({
+        status: 'unavailable', authority_snapshot: 'unavailable', global_scope: 'unavailable',
+        per_lsu_scope: 'unavailable', reason: 'authoritative_stage_evidence_unavailable',
+      })
+      expect(projection.shadow_comparison).toEqual(expect.objectContaining({
+        status: 'unavailable', activation_allowed: false, execution_equivalence_claimed: false, comparisons: [],
+      }))
+      const ruleBindings = isRecord(projection.rule_bindings) ? projection.rule_bindings : {}
+      const expectedRulePaths = [
+        'pipeline/imago-os-current.json', 'pipeline/workflow-channel-registry.json',
+        'pipeline/v6-stage-contracts.json', 'pipeline/workflow-spec.v6.production-beta.json',
+        'scripts/compile_qingmu_imago_workset.py', 'scripts/compile_qingmu_imago_workset_v2.py',
+        'scripts/imago_v6_draft_ctl.py',
+      ]
+      expect(Object.keys(ruleBindings).sort()).toEqual([...expectedRulePaths].sort())
+      if (IMAGO_CORE_ROOT === undefined) throw new Error('Core root is required for workset evidence')
+      for (const rulePath of expectedRulePaths) {
+        expect(ruleBindings[rulePath]).toBe(createHash('sha256').update(await readFile(join(IMAGO_CORE_ROOT, rulePath))).digest('hex'))
+      }
+      expect(projection.rules_sha256).toBe(canonicalSha256(ruleBindings))
+      expect(projection.source_projection_sha256).toMatch(/^[0-9a-f]{64}$/)
+      expect(projection.input_snapshot_sha256).toMatch(/^[0-9a-f]{64}$/)
+      expect(await dialog.getByRole('heading', { name: '易梦业务状态' }).count()).toBe(1)
+      expect(await workset.getByRole('article').count()).toBe(0)
+      await expectNoVisibleTechnicalBrand(page)
+
+      const desktopPath = process.env.QINGMU_E5_4_EVIDENCE_SCREENSHOT?.trim()
+      if (desktopPath !== undefined && desktopPath !== '') {
+        await mkdir(dirname(desktopPath), { recursive: true })
+        await page.screenshot({ path: desktopPath, fullPage: true })
+      }
+      await workset.locator('summary').filter({ hasText: '完整合法工作集 · 0' }).click()
+      await workset.getByText('没有可放行的工作项。规则定义不等于当前任务。', { exact: true }).waitFor()
+      await workset.locator('summary').filter({ hasText: '方法规则定义 · 23' }).click()
+      expect(await workset.locator('ul li').count()).toBeGreaterThanOrEqual(23)
+      await workset.locator('summary').filter({ hasText: '来源与规则证据' }).click()
+      await workset.getByText(String(projection.rules_sha256), { exact: true }).waitFor()
+      const refreshWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-imago-method/worksetMethod')
+      await workset.getByRole('button', { name: '重编只读建议' }).click()
+      const refreshedWire = await (await refreshWirePromise).json() as unknown
+      expect(isRecord(refreshedWire) ? refreshedWire.result : undefined).toEqual(result)
+      await workset.getByText('阶段与 LSU 权威证据尚未接入，暂不推荐生产任务。', { exact: true }).waitFor()
+
+      await page.setViewportSize({ width: 390, height: 844 })
+      const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
+      expect(mobileOverflow).toBe(false)
+      const refreshBox = await workset.getByRole('button', { name: '重编只读建议' }).boundingBox()
+      expect(refreshBox?.height).toBeGreaterThanOrEqual(44)
+      const mobilePath = process.env.QINGMU_E5_4_MOBILE_EVIDENCE_SCREENSHOT?.trim()
+      if (mobilePath !== undefined && mobilePath !== '') {
+        await mkdir(dirname(mobilePath), { recursive: true })
+        await page.screenshot({ path: mobilePath, fullPage: true })
+      }
+      await page.setViewportSize({ width: 1680, height: 1100 })
+      const requests = capturedRequests.slice(requestStart)
+      expect(requests.every(request => request.method === 'GET' && request.body === undefined)).toBe(true)
+      expect(requests.filter(request => request.path === '/api/episodes/episode-1/workflow-projection').length).toBeGreaterThanOrEqual(3)
+      const methodRequests = browserRpcRequests.slice(rpcStart).filter(request => request.path === '/qingmu-imago-method/worksetMethod')
+      expect(methodRequests).toHaveLength(2)
+      for (const request of methodRequests) {
+        expect(isRecord(request.body) ? request.body.payload : undefined).toEqual({ projectId: 'project-1', episodeId: 'episode-1' })
+      }
+      expect(browserConsoleErrors.slice(consoleStart)).toEqual([])
+      expect(tripwire.pageErrors).toEqual([])
+      expect(await page.content()).not.toContain(YIMENG_TOKEN)
+      expect(await page.content()).not.toContain(IMAGO_ATTESTATION_KEY)
+      worksetBrowserEvidence = {
+        schema: 'qingmu.e5-4-workset-browser-evidence.v1',
+        stageDefinitionCount: 23, workItemCount: 0, legalWorkItemCount: 0, recommendedItem: null,
+        authorityStatus: 'unavailable', rulesSha256: projection.rules_sha256, ruleBindings,
+        sourceProjectionSha256: projection.source_projection_sha256, inputSnapshotSha256: projection.input_snapshot_sha256,
+        deterministicRecompile: true, legacyGreenDidNotGrantApproval: true, ignoredUntrustedStageApproval: true,
+        methodRequestCount: methodRequests.length, yimengGetOnly: true, yimengRequestCount: requests.length,
+        mobileOverflow, refreshControlHeight: refreshBox?.height,
+        projectStatePersisted: false, paidProviderCalls: 0, humanApprovalInferred: false,
+        consoleErrors: browserConsoleErrors.slice(consoleStart), pageErrors: tripwire.pageErrors,
+      }
+      await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
+      if (tracePath !== undefined && tracePath !== '') {
+        await mkdir(dirname(tracePath), { recursive: true })
+        await page.context().tracing.stop({ path: tracePath })
+      }
+    }, 120_000)
 
     it('renders and selects the canonical E5-3 Shot River through Yimeng, IMAGO, and Chromium', async () => {
       onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e5-1-shot-relations'))
@@ -5369,7 +5489,11 @@ describe.skipIf(
           (request.method === 'GET' && request.path === '/plugins/events')
           || (
             request.method === 'POST'
-            && request.path === '/qingmu-yimeng-command/commitStoryboardCanvas'
+            && (
+              request.path === '/qingmu-yimeng-command/commitStoryboardCanvas'
+              // Leaving Overview after the intentional reload cancels its read-only advice request.
+              || request.path === '/qingmu-imago-method/worksetMethod'
+            )
           )
         )
       ))
@@ -5378,7 +5502,9 @@ describe.skipIf(
       expect(e5FailedRequests.filter(request => request.path === '/plugins/events').length).toBeLessThanOrEqual(1)
       expect(e5FailedRequests.filter(request =>
         request.path === '/qingmu-yimeng-command/commitStoryboardCanvas').length).toBeLessThanOrEqual(1)
-      expect(e5FailedRequests.length).toBeLessThanOrEqual(2)
+      expect(e5FailedRequests.filter(request =>
+        request.path === '/qingmu-imago-method/worksetMethod').length).toBeLessThanOrEqual(1)
+      expect(e5FailedRequests.length).toBeLessThanOrEqual(3)
       expect(tripwire.pageErrors).toEqual([])
       expect(tripwire.warnings).toEqual([])
 

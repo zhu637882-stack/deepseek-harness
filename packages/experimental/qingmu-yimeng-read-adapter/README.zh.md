@@ -22,6 +22,8 @@
 
 ## 安全边界
 
+同一个已配置处理函数还作为仅供 Host 使用的 `qingmuYimengRead` 能力提供给内部调用方。内部调用方可以复用原有 `workflow` GET，不另建 HTTP 客户端、令牌配置或缓存。Cordis 会在所属插件卸载时移除该能力。这不会把业务阶段完成、已选媒体或未知透传字段解释为具名 IMAGO Stage/LSU 批准。
+
 默认上游为 `http://127.0.0.1:8115`。配置的基础 URL 必须继续使用 HTTP 或 HTTPS 回环地址。受保护读取从 Host 环境获取 `YIMENG_API_TOKEN`，并且只通过 `Authorization: Bearer` 请求头发送；适配器不读取 `localStorage` 或 `JWT_SECRET`、不发送 Cookie，也不返回令牌。请求使用 `cache: no-store`，并具有超时、调用方取消和失败关闭的重定向处理。普通 JSON 响应继续限制为 5 MiB；只有剧本响应单独限制为 20 MiB，使接近 5 MiB 的合法命令体仍可回传解析后剧本及其转义后的 canonical 证据，同时保持读取有界。
 
 ## 三项相互独立的权力
@@ -36,11 +38,11 @@
 
 #### 模型可见内容
 
-无。`/qingmu-yimeng` 响应只返回给 Client 连接；适配器不注册提示词、工具 schema、工具结果或其他模型可见上下文。
+无。`/qingmu-yimeng` 响应返回给 Client 连接，`qingmuYimengRead` 供 Host 内部调用方使用；适配器不注册提示词、工具 schema、工具结果或其他模型可见上下文。
 
 #### token 影响
 
-直接 token 影响为零，因为响应只返回给发起请求的 Client 连接。
+直接 token 影响为零，因为读取结果不进入模型上下文。
 
 #### KV Cache 影响
 

@@ -2,13 +2,13 @@
 
 English | [中文](README.zh.md)
 
-This private experimental Host plugin compiles current IMAGO OS methods into browser-safe guidance. `elementMethod` covers profile editing, `referenceAssetMethod` covers bounded reference actions and rights guidance, `promptIrMethod` covers provider-neutral PromptIR candidates, `shotRelationMethod` covers the canonical Scene/Shot/Shot-local-Beat/Element graph plus Shot River rhythm and reference bindings, and `heroFrameStoryboardMethod` deterministically compiles one selected Hero Frame and its Shot-local canvas annotations. Every endpoint constructs fixed Yimeng authority in the Host and invokes its reviewed Core compiler with Unicode-code-point-sorted, whitespace-free JSON on stdin. The compiler's `input_snapshot_sha256` must match the SHA-256 of those exact input bytes.
+This private experimental Host plugin compiles current IMAGO OS methods into browser-safe guidance. `elementMethod` covers profile editing, `referenceAssetMethod` covers bounded reference actions and rights guidance, `promptIrMethod` covers provider-neutral PromptIR candidates, `shotRelationMethod` covers the canonical Scene/Shot/Shot-local-Beat/Element graph plus Shot River rhythm and reference bindings, and `heroFrameStoryboardMethod` deterministically compiles one selected Hero Frame and its Shot-local canvas annotations. `worksetMethod` reads a fresh episode workflow and returns current IMAGO stage definitions with explicit authority availability. Each endpoint builds its own bounded input in the Host and invokes its reviewed Core compiler with Unicode-code-point-sorted, whitespace-free JSON on stdin. The compiler's `input_snapshot_sha256` must match the SHA-256 of those exact input bytes.
 
 ## Attestation boundary
 
-All endpoints read `QINGMU_IMAGO_ATTESTATION_KEY` only from the Host process environment. The raw environment string is the HMAC key: it is not trimmed and must contain at least 32 UTF-8 bytes. A missing, empty, or shorter key fails closed before compilation. The key is absent from Cordis configuration, compiler child-process environment, browser responses, logs, and error text.
+Except for the read-only `worksetMethod`, endpoints read `QINGMU_IMAGO_ATTESTATION_KEY` only from the Host process environment. The raw environment string is the HMAC key: it is not trimmed and must contain at least 32 UTF-8 bytes. A missing, empty, or shorter key fails closed before those methods compile. The key is absent from Cordis configuration, compiler child-process environment, browser responses, logs, and error text. `worksetMethod` neither requires this key nor issues an approval proof.
 
-After validating the current Core projection, the Host returns the projection, its SHA-256, and a method-specific proof. The Shot relation proof binds the exact compiler input, target, Host-derived `relationSnapshotSha256`, and selected canonical Shot, using the E5-3 hash projection described below. The Hero Frame Storyboard proof additionally binds the selected Shot SHA, the full Hero Frame lineage binding, the raw-annotation SHA, and the compiled-result SHA. The selected Shot remains the Yimeng storyboard frame ID, and Beat IDs remain local to their parent Shot. The browser may forward a proof but cannot issue or verify it without the server-only key.
+After validating a current Core projection for an attested method, the Host returns the projection, its SHA-256, and a method-specific proof. The Shot relation proof binds the exact compiler input, target, Host-derived `relationSnapshotSha256`, and selected canonical Shot, using the E5-3 hash projection described below. The Hero Frame Storyboard proof additionally binds the selected Shot SHA, the full Hero Frame lineage binding, the raw-annotation SHA, and the compiled-result SHA. The selected Shot remains the Yimeng storyboard frame ID, and Beat IDs remain local to their parent Shot. The browser may forward a proof but cannot issue or verify it without the server-only key.
 
 The Host derives the relation authority and selected Shot SHAs from the validated Yimeng relation input. For `heroFrameStoryboardMethod`, it also derives the Hero Frame binding and raw-annotation SHAs; the browser cannot supply those authority hashes or a second Shot identity. The Host requires exact target, graph, canvas, deterministic compiled result, source-binding, work-order, legal-work, and authority fields. The method may describe `replaceStoryboardCanvas` through a Yimeng ChangeSet, but this adapter never performs that write and rejects generation, selection, approval, signoff, Provider, or worker receipts. It creates no relation identity, canvas repository, database record, project state, or second state machine.
 
@@ -20,13 +20,23 @@ The E5-3 `shotRelationMethod` request adds authoritative `frameNo`, numeric `dur
 
 Only E5-3 relation, projection, and selected-Shot digests use `qingmu.e5-3-seconds-binary64-hash-projection.v1`: a `schema`/`subject` wrapper replaces the fixed `durationSec`, `plannedStartSec`, and `plannedEndSec` paths with `binary64:<16 big-endian hex digits>` for hashing. `null` remains `null`; negative zero hashes as zero. Actual request and response seconds remain numbers. The input-snapshot SHA still binds the exact numeric stdin bytes, avoiding Python/JavaScript exponent-format differences without changing the general canonical serializer. Hero/E5-2 retains its narrower ID graph and existing hash semantics.
 
+## Read-only IMAGO workset
+
+`worksetMethod` accepts exactly `projectId` and `episodeId`; it accepts no browser-supplied workflow, approval, rules, or command. On every call it resolves the optional `qingmuYimengRead` capability and reuses the configured read adapter's existing `workflow` GET, with its token, timeout, cancellation, scope validation, and response limit. Unloading that read plugin disables only this endpoint; loading it again restores the capability without re-registering the other methods.
+
+The Host hashes the complete normalized workflow and complete `sourceRevision`, preserving finite fractional JSON numbers. The legacy `inputFingerprint` is retained as lineage, not used as a sole cache key. The v2 input always reports `authority_snapshot.status: unavailable` with reason `authoritative_stage_evidence_unavailable`: legacy `complete`, selected references, quality checks, and unknown forwarded approval fields do not establish named IMAGO Stage or LSU authority. The response contains the current 23 stage-definition templates, but no synthetic stage instances, legal tasks, recommendation, or completion claim. `availability` and `shadow_comparison` explain why these are unavailable.
+
+The fixed `scripts/compile_qingmu_imago_workset_v2.py` compiler returns `qingmu.imago-workset.v2` inside `qingmu.imago-workset-method-adapter-result.v1`. The Host independently hashes seven local rule files, checks the exact `rule_bindings` map and its `rules_sha256`, and binds the exact input bytes, episode subject, source projection, and non-execution flags. Those files are `pipeline/imago-os-current.json`, `pipeline/workflow-channel-registry.json`, `pipeline/v6-stage-contracts.json`, `pipeline/workflow-spec.v6.production-beta.json`, `scripts/compile_qingmu_imago_workset.py`, `scripts/compile_qingmu_imago_workset_v2.py`, and `scripts/imago_v6_draft_ctl.py`. Core remains the owner of definitions, dependencies, and ordering; Harness stores no second DAG or project state.
+
+Compiler processes receive no environment variable whose name contains `key`, `token`, `secret`, or `password`, case-insensitively. The shared runner bounds stdout and stderr at 5 MiB each and rejects timeouts, malformed output, and unsuccessful exits without returning stderr. Workset cancellation waits for the killed child to close before returning. The workset provides no execution, paid dispatch, or human-signoff endpoint.
+
 ## Model Experience
 
 ### Private method RPCs
 
 #### What the model sees
 
-Nothing. Endpoints such as `shotRelationMethod` are private browser RPCs, not model tools, prompt sections, or session events.
+Nothing. Endpoints such as `shotRelationMethod` and `worksetMethod` are private browser RPCs, not model tools, prompt sections, or session events.
 
 #### Token effect
 
@@ -41,3 +51,4 @@ None. No model-facing tokens are added.
 - Shot relations accept only the bounded ID graph, rhythm, and reference bindings; Hero Frame Storyboard accepts its existing graph, lineage, and normalized integer annotations. Titles, actual generation, selection execution, ChangeSet commit, comments, and creative review decisions remain outside this adapter.
 - Attestation proves Host validation and exact input binding. It does not grant paid Provider authority, asset selection, human approval, or production-state writes.
 - Key rotation and multi-key verification are not part of this bounded slice.
+- Workset templates are not approved business stages. Named Stage/LSU authority must be supplied by a future explicit business contract before actual legal-work recommendations or shadow comparisons can be shown; no legacy status fallback is used.

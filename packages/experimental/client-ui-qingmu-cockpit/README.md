@@ -16,6 +16,14 @@ Immediately before a commit `POST`, the browser synchronously stores and reads b
 
 The workflow view accepts only the `jason.episode-workflow-projection.v1` contract produced by the Host adapter. Runtime identity, project and episode scope, source fingerprint, blockers, status facts, and lineage remain visible as a projection; none of those fields becomes a command.
 
+## Read-only workset recommendation
+
+Overview asks the Host for a workset using only project and episode IDs. The method adapter rereads the existing Yimeng workflow service, binds the complete normalized projection and revision to SHA-256, and runs the stateless Core compiler. The browser never supplies stage approvals or a compiler snapshot.
+
+The view highlights at most one recommendation and keeps the complete legal workset expandable. Each item carries prerequisites, its responsible role, and an advisory dependency-frontier group. Method definitions, source hashes, rule-file hashes, and the limited dependency-and-lock shadow comparison are separate details. None of these read-only results starts a task or grants execution, payment, or approval authority.
+
+The current Yimeng workflow does not export authoritative IMAGO stage evidence or LSU instances. The Host therefore returns an unavailable workset with zero task instances and no recommendation; the 23 method definitions are templates, not 23 ready tasks. Ordinary Yimeng business status remains separate and cannot substitute for approval. Refreshes, scope changes, closure, and source-read failures invalidate old advice even when the source fingerprint is unchanged.
+
 ## Shot River and shared Shot selection
 
 The Storyboard & Shots tab renders Shot River in authoritative `frameNo` order, not lexicographic ID or input-array order. Each card shows duration, dialogue and timed-cue counts, and current reference bindings. Selecting a card uses the existing Yimeng storyboard frame ID across relation details, Hero Frame canvas, and PromptIR. Selection is transient React state; it adds no second Shot identity, ordering store, or business write.
@@ -53,6 +61,7 @@ Independent. Opening, refreshing, or closing the cockpit does not change a model
 ## Known Limitations and Deferred Work
 
 - The bounded workbenches and Shot River do not declare all of Phase 3 or Epic 5 complete. Paid generation, automatic selection or approval, agent signoff, and production release remain outside these local flows.
+- Workset compilation does not create missing Yimeng stage or LSU authority. The Core's available-authority branch has fixture coverage; the current Host integration deliberately exposes only the unavailable branch.
 - Receipt recovery lasts only for the current tab's `sessionStorage` lifetime. Explicitly discarding the local marker cannot prove or reverse the server-side outcome.
 - The browser never reproduces Python canonical JSON. The Host verifies Yimeng's exact canonical bytes and exposes only `scriptSha256`; a missing or mismatched verified hash keeps the recovery marker locked for explicit operator resolution.
 - Anonymous health proves liveness only; it does not prove production readiness or release identity unless the returned fields explicitly do so.

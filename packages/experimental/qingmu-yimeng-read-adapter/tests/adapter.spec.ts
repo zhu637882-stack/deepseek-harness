@@ -473,13 +473,15 @@ describe('qingmu Yimeng read adapter', () => {
       _handler: ConnectionRpcHandler,
       _options: ConnectionRpcHandlerOptions,
     ) => async () => {})
-    const ctx = { connection: { rpc: { handle } } } as unknown as Context
+    const provide = vi.fn()
+    const ctx = { provide, connection: { rpc: { handle } } } as unknown as Context
 
     apply(ctx)
 
     expect(handle).toHaveBeenCalledOnce()
     expect(handle.mock.calls[0]?.[0]).toBe('/qingmu-yimeng')
     expect(handle.mock.calls[0]?.[2]).toEqual({ authority: 'loopback' })
+    expect(provide).toHaveBeenCalledExactlyOnceWith('qingmuYimengRead', handle.mock.calls[0]?.[1])
   })
 
   it('rejects protected reads without a token before fetch', async () => {

@@ -573,6 +573,129 @@ export interface ImagoHeroFrameStoryboardMethodResponse extends ImagoMethodJsonO
   readonly methodAttestation: ImagoHeroFrameStoryboardMethodAttestation
 }
 
+/** Only episode identity crosses the browser-to-Host workset request. */
+export interface ImagoWorksetMethodRequest {
+  readonly projectId: string
+  readonly episodeId: string
+}
+
+/** Source identity bound to the complete Yimeng revision object, not a display stage. */
+export interface ImagoWorksetSubject extends ImagoMethodJsonObject {
+  readonly project_id: string
+  readonly episode_id: string
+  readonly source_revision_sha256: string
+  readonly input_fingerprint: string
+  readonly projection_schema: 'jason.episode-workflow-projection.v1'
+}
+
+/** Host-derived input; legacy readiness never supplies IMAGO Stage or LSU approval. */
+export interface ImagoWorksetMethodSnapshot extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-workset-snapshot.v2'
+  readonly subject: ImagoWorksetSubject
+  readonly source_projection_sha256: string
+  readonly authority_snapshot: {
+    readonly status: 'unavailable'
+    readonly reason: 'authoritative_stage_evidence_unavailable'
+  }
+}
+
+/** One current IMAGO definition, not an instantiated or approved business stage. */
+export interface ImagoWorksetStageDefinition {
+  readonly stage_id: string
+  readonly stage_name: string
+  readonly scope: 'global' | 'per_lsu'
+  readonly owner_role: string
+  readonly source_stage_ids: readonly string[]
+  readonly required_lock_ids: readonly string[]
+  readonly produces_lock_id: string | null
+  readonly contract_order: number
+  readonly contract_sha256: string
+}
+
+/** Explicit reason a stage, lock, or authoritative snapshot is unavailable. */
+export interface ImagoWorksetBlocker {
+  readonly code: string
+  readonly stage_id: string | null
+  readonly scope_instance: string | null
+  readonly lock_id: string | null
+}
+
+/** Compiler-owned availability of one authoritative stage instance. */
+export type ImagoWorksetStatus = 'blocked' | 'ready' | 'waiting_human' | 'preflight_ready' | 'complete'
+
+/** A non-executing next action; no value grants approval or paid dispatch. */
+export type ImagoWorksetAction = 'review_artifact' | 'compile_preflight' | 'prepare_work_order'
+
+/** Stable identity for one compiler work item. */
+export interface ImagoWorksetItemIdentity {
+  readonly stage_id: string
+  readonly scope_instance: string
+}
+
+/** Work item derived by Core from named stage evidence, never persisted by Harness. */
+export interface ImagoWorksetItem extends ImagoWorksetItemIdentity {
+  readonly owner_role: string
+  readonly status: ImagoWorksetStatus
+  readonly blockers: readonly ImagoWorksetBlocker[]
+  readonly prerequisites: {
+    readonly stages: readonly (ImagoWorksetItemIdentity & { readonly status: ImagoWorksetStatus })[]
+    readonly locks: readonly { readonly lock_id: string; readonly status: 'absent' | 'active' }[]
+  }
+  readonly parallel_group: string | null
+  readonly stable_sort_key: readonly [number, number, number, string]
+  readonly priority_class: 'human_pending' | 'unlocked_critical_path' | 'low_cost_preflight' | 'other_legal_work' | null
+  readonly allowed_action: ImagoWorksetAction | null
+  readonly contract_sha256: string
+}
+
+/** Browser-safe compiler result with explicit authority and shadow-comparison limits. */
+export interface ImagoWorksetProjection extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-workset.v2'
+  readonly subject: ImagoWorksetSubject
+  readonly source_projection_sha256: string
+  readonly input_snapshot_sha256: string
+  readonly rule_bindings: Readonly<Record<string, string>>
+  readonly rules_sha256: string
+  readonly stage_definitions: readonly ImagoWorksetStageDefinition[]
+  readonly work_items: readonly ImagoWorksetItem[]
+  readonly legal_work_items: readonly ImagoWorksetItem[]
+  readonly recommended_order: readonly ImagoWorksetItemIdentity[]
+  readonly recommended_item: (ImagoWorksetItemIdentity & { readonly allowed_action: ImagoWorksetAction }) | null
+  readonly availability: {
+    readonly status: 'available' | 'partial' | 'unavailable'
+    readonly authority_snapshot: 'available' | 'unavailable'
+    readonly global_scope: 'available' | 'unavailable'
+    readonly per_lsu_scope: 'available' | 'unavailable'
+    readonly reason: string | null
+  }
+  readonly blockers: readonly ImagoWorksetBlocker[]
+  readonly shadow_comparison: {
+    readonly status: 'compared' | 'unavailable'
+    readonly reason: string | null
+    readonly comparison_scope: 'dependency_and_lock_readiness_only'
+    readonly activation_allowed: false
+    readonly execution_equivalence_claimed: false
+    readonly comparisons: readonly (ImagoWorksetItemIdentity & {
+      readonly compiler_dependencies_ready: boolean
+      readonly controller_dependencies_ready: boolean
+      readonly compiler_locks_ready: boolean
+      readonly controller_locks_ready: boolean
+      readonly equivalent: boolean
+    })[]
+  }
+  readonly project_state_persisted: false
+  readonly paid_provider_authority: 'not_granted'
+  readonly human_approval_inferred: false
+  readonly authority_snapshot_attestation: 'not_verified_by_compiler'
+  readonly formal_activation_allowed: false
+}
+
+/** Read-only wrapper with no HMAC approval or command-execution proof. */
+export interface ImagoWorksetMethodResponse extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-workset-method-adapter-result.v1'
+  readonly projection: ImagoWorksetProjection
+}
+
 /** Result values exposed by `/qingmu-imago-method`. */
 export interface ImagoMethodEndpointMap {
   readonly elementMethod: ImagoElementMethodResponse
@@ -580,6 +703,7 @@ export interface ImagoMethodEndpointMap {
   readonly promptIrMethod: ImagoPromptIrMethodResponse
   readonly shotRelationMethod: ImagoShotRelationMethodResponse
   readonly heroFrameStoryboardMethod: ImagoHeroFrameStoryboardMethodResponse
+  readonly worksetMethod: ImagoWorksetMethodResponse
 }
 
 /** Endpoint names accepted by the private method channel. */

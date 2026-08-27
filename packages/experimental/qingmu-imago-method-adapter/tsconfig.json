@@ -24,6 +24,9 @@
       "path": "../../host/apiproxy"
     },
     {
+      "path": "../qingmu-yimeng-read-adapter"
+    },
+    {
       "path": "../../runtime-diagnostics/invariants"
     }
   ]

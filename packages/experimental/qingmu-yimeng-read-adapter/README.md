@@ -22,6 +22,8 @@ The package root exports the request and response types, including `YimengHealth
 
 ## Security boundary
 
+The same configured handler is also provided as the Host-only `qingmuYimengRead` capability. Internal consumers can reuse the existing `workflow` GET without creating another HTTP client, token configuration, or cache. Cordis removes the capability when its owning plugin unloads. This does not reinterpret business-stage completion, selected media, or unknown forwarded fields as named IMAGO Stage/LSU approval.
+
 The default upstream is `http://127.0.0.1:8115`. A configured base URL must remain an HTTP or HTTPS loopback address. Protected reads take `YIMENG_API_TOKEN` from the Host environment and send it only as an `Authorization: Bearer` header; the adapter does not read `localStorage` or `JWT_SECRET`, send cookies, or return the token. Requests use `cache: no-store`, a timeout, caller cancellation, and fail-closed redirect handling. Ordinary JSON responses remain capped at 5 MiB. Only the script response is capped separately at 20 MiB so a legal command body near 5 MiB can still return the parsed script plus its escaped canonical evidence without making the read unbounded.
 
 ## Three independent authorities
@@ -36,11 +38,11 @@ The default upstream is `http://127.0.0.1:8115`. A configured base URL must rema
 
 #### What the model sees
 
-Nothing. The `/qingmu-yimeng` response returns only to the Client connection; the adapter registers no prompt, tool schema, tool result, or other model-visible context.
+Nothing. The `/qingmu-yimeng` response returns to the Client connection, and `qingmuYimengRead` serves internal Host consumers; the adapter registers no prompt, tool schema, tool result, or other model-visible context.
 
 #### Token effect
 
-Zero direct token effect because the response is returned only to the requesting Client connection.
+Zero direct token effect because read results remain outside model context.
 
 #### KV Cache effect
 

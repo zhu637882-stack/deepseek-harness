@@ -7,6 +7,14 @@ import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** The same configured read-only handler exposed on the private Connection channel. */
+    qingmuYimengRead: ConnectionRpcHandler
+  }
+}
+
 import type {
   YimengElementProfileReference,
   YimengElementProfileRequest,
@@ -2565,5 +2573,7 @@ export function createYimengReadHandler(
  * @param config - loopback upstream and timeout settings.
  */
 export function apply(ctx: Context, config: YimengReadAdapterConfig = {}): void {
-  ctx.connection.rpc.handle(CHANNEL, createYimengReadHandler(config), { authority: 'loopback' })
+  const handler = createYimengReadHandler(config)
+  ctx.provide('qingmuYimengRead', handler)
+  ctx.connection.rpc.handle(CHANNEL, handler, { authority: 'loopback' })
 }

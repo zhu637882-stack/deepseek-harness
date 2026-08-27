@@ -1,0 +1,140 @@
+.workset {
+  min-width: 0;
+  border-left: 4px solid var(--qingmu-accent);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.header h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.header > div {
+  flex: 1 1 280px;
+}
+
+.header button {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.header button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.header button:focus-visible,
+.details > summary:focus-visible {
+  outline: 2px solid var(--qingmu-accent);
+  outline-offset: 3px;
+}
+
+.body {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.notice,
+.recommendation {
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--qingmu-soft);
+}
+
+.recommendation h4,
+.items h4 {
+  margin: 6px 0;
+  font-size: 14px;
+}
+
+.recommendation > span {
+  color: var(--qingmu-accent-strong);
+  font-size: 12px;
+}
+
+.recommendation small,
+.items span,
+.definitions span {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.details {
+  min-width: 0;
+  padding: 0 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+.details > summary {
+  min-height: 44px;
+  padding: 12px 0;
+  box-sizing: border-box;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.details[open] {
+  padding-bottom: 12px;
+}
+
+.items,
+.codes {
+  padding-left: 22px;
+}
+
+.items li + li {
+  margin-top: 16px;
+}
+
+.definitions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+  gap: 10px;
+  padding: 0;
+  list-style: none;
+}
+
+.definitions li {
+  display: grid;
+  gap: 5px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+  font-size: 12px;
+}
+
+.evidence {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+  font-size: 12px;
+}
+
+.evidence dt {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.evidence dd {
+  margin: 4px 0 0;
+}
+
+.workset code,
+.items li,
+.definitions li {
+  overflow-wrap: anywhere;
+}

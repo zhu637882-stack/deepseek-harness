@@ -4244,6 +4244,9 @@ importers:
       '@deepseek-ai/dsh-client-connection':
         specifier: workspace:^
         version: link:../../client/connection
+      '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter':
+        specifier: workspace:^
+        version: link:../qingmu-yimeng-read-adapter
       '@deepseek-ai/dsh-host-apiproxy':
         specifier: workspace:^
         version: link:../../host/apiproxy

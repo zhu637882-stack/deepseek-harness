@@ -7,6 +7,7 @@ import { isDeepStrictEqual } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-client-connection'
+import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import type {
@@ -55,7 +56,18 @@ import type {
   ImagoReferenceAssetMethodSnapshot,
   ImagoReferenceRightsMethodRequest,
   ImagoReferenceRightsOperation,
+  ImagoWorksetMethodRequest,
+  ImagoWorksetMethodResponse,
+  ImagoWorksetMethodSnapshot,
 } from './types.ts'
+import {
+  buildWorksetSnapshot,
+  normalizeWorksetProjection,
+  parseWorksetMethodRequest,
+  readWorksetRuleHashes,
+  WorksetContractError,
+  WorksetInputError,
+} from './workset.ts'
 
 export type {
   ImagoElementMethodProjection,
@@ -111,6 +123,17 @@ export type {
   ImagoReferenceRightsOperation,
   ImagoReferenceAssetActionOperation,
   ImagoReferenceAssetOperation,
+  ImagoWorksetAction,
+  ImagoWorksetBlocker,
+  ImagoWorksetItem,
+  ImagoWorksetItemIdentity,
+  ImagoWorksetMethodRequest,
+  ImagoWorksetMethodResponse,
+  ImagoWorksetMethodSnapshot,
+  ImagoWorksetProjection,
+  ImagoWorksetStageDefinition,
+  ImagoWorksetStatus,
+  ImagoWorksetSubject,
 } from './types.ts'
 
 const CHANNEL = '/qingmu-imago-method'
@@ -127,6 +150,7 @@ const REFERENCE_RIGHTS_EXCEPTION_RELEASE_COMPILER_RELATIVE_PATH = 'scripts/compi
 const PROMPT_IR_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_prompt_ir_method.py'
 const SHOT_RELATION_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_shot_relation_method.py'
 const HERO_FRAME_STORYBOARD_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_hero_frame_storyboard_method.py'
+const WORKSET_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_imago_workset_v2.py'
 const COMMON_SOURCE_PATHS = [
   'pipeline/imago-os-current.json',
   'pipeline/workflow-channel-registry.json',
@@ -430,6 +454,14 @@ export interface ImagoMethodAdapterDependencies {
   /** Optional injectable boundary for the Hero Frame and Storyboard Canvas compiler. */
   readonly runHeroFrameStoryboardCompiler?: (
     snapshot: ImagoHeroFrameStoryboardMethodSnapshot,
+    execution: ImagoMethodCompilerExecution,
+    signal: AbortSignal,
+  ) => Promise<unknown>
+  /** Fresh configured business read; absent only disables the workset endpoint. */
+  readonly readWorkflow?: (request: ImagoWorksetMethodRequest, signal: AbortSignal) => Promise<RpcResult<unknown>>
+  /** Optional injectable boundary for the non-executing Core workset compiler. */
+  readonly runWorksetCompiler?: (
+    snapshot: ImagoWorksetMethodSnapshot,
     execution: ImagoMethodCompilerExecution,
     signal: AbortSignal,
   ) => Promise<unknown>
@@ -3166,6 +3198,14 @@ async function runHeroFrameStoryboardCompilerProcess(
   return await runCompilerSubprocess(snapshot, execution, signal, HERO_FRAME_STORYBOARD_COMPILER_RELATIVE_PATH)
 }
 
+async function runWorksetCompilerProcess(
+  snapshot: ImagoWorksetMethodSnapshot,
+  execution: ImagoMethodCompilerExecution,
+  signal: AbortSignal,
+): Promise<unknown> {
+  return await runCompilerSubprocess(snapshot, execution, signal, WORKSET_COMPILER_RELATIVE_PATH)
+}
+
 async function runCompilerSubprocess(
   snapshot: ImagoMethodJsonObject,
   execution: ImagoMethodCompilerExecution,
@@ -3199,7 +3239,8 @@ async function runCompilerSubprocess(
     }
     const abort = (): void => {
       child.kill('SIGKILL')
-      fail(new CompilerCancelledError())
+      // Workset completion waits for process close; preserve other method lifecycles.
+      if (compilerRelativePath !== WORKSET_COMPILER_RELATIVE_PATH) fail(new CompilerCancelledError())
     }
     const timer = setTimeout(() => {
       timedOut = true
@@ -3248,32 +3289,38 @@ async function runCompilerSubprocess(
     child.stdin.end(compilerRelativePath === SHOT_RELATION_COMPILER_RELATIVE_PATH
       ? e53CanonicalJson(snapshot, 'snapshot')
       : canonicalJson(snapshot, 'snapshot'), 'utf8')
+    if (compilerRelativePath === WORKSET_COMPILER_RELATIVE_PATH && signal.aborted) abort()
   })
 }
 
 function compilerEnvironment(): NodeJS.ProcessEnv {
   const environment = { ...process.env }
-  Reflect.deleteProperty(environment, 'QINGMU_IMAGO_ATTESTATION_KEY')
+  for (const key of Object.keys(environment)) {
+    if (/KEY|TOKEN|SECRET|PASSWORD/i.test(key)) Reflect.deleteProperty(environment, key)
+  }
   return environment
+}
+
+const DEFAULT_DEPENDENCIES: ImagoMethodAdapterDependencies = {
+  runCompiler: runCompilerProcess,
+  runReferenceAssetCompiler: runReferenceAssetCompilerProcess,
+  runReferenceRightsCompiler: runReferenceRightsCompilerProcess,
+  runReferenceRightsExceptionReleaseCompiler: runReferenceRightsExceptionReleaseCompilerProcess,
+  runPromptIrCompiler: runPromptIrCompilerProcess,
+  runShotRelationCompiler: runShotRelationCompilerProcess,
+  runHeroFrameStoryboardCompiler: runHeroFrameStoryboardCompilerProcess,
+  runWorksetCompiler: runWorksetCompilerProcess,
 }
 
 /**
  * Create the generic Connection handler without registering it.
  * @param config - absolute Core root and bounded local compiler settings.
- * @param dependencies - injectable compiler runner for isolated verification.
- * @returns a handler for private element, reference-asset, PromptIR, Shot relation, and Storyboard Canvas methods.
+ * @param dependencies - injectable local compiler and fresh business-read boundaries.
+ * @returns a handler for private method projections and the read-only IMAGO workset.
  */
 export function createImagoMethodHandler(
   config: ImagoMethodAdapterConfig,
-  dependencies: ImagoMethodAdapterDependencies = {
-    runCompiler: runCompilerProcess,
-    runReferenceAssetCompiler: runReferenceAssetCompilerProcess,
-    runReferenceRightsCompiler: runReferenceRightsCompilerProcess,
-    runReferenceRightsExceptionReleaseCompiler: runReferenceRightsExceptionReleaseCompilerProcess,
-    runPromptIrCompiler: runPromptIrCompilerProcess,
-    runShotRelationCompiler: runShotRelationCompilerProcess,
-    runHeroFrameStoryboardCompiler: runHeroFrameStoryboardCompilerProcess,
-  },
+  dependencies: ImagoMethodAdapterDependencies = DEFAULT_DEPENDENCIES,
 ): ConnectionRpcHandler {
   const execution = resolveExecution(config)
   return async (endpoint, payload, signal) => {
@@ -3284,8 +3331,29 @@ export function createImagoMethodHandler(
         && endpoint !== 'promptIrMethod'
         && endpoint !== 'shotRelationMethod'
         && endpoint !== 'heroFrameStoryboardMethod'
+        && endpoint !== 'worksetMethod'
       ) {
         throw new InputError(`unknown IMAGO method endpoint: ${endpoint}`)
+      }
+      if (endpoint === 'worksetMethod') {
+        const request = parseWorksetMethodRequest(payload)
+        if (signal.aborted) return cancelled()
+        if (dependencies.readWorkflow === undefined) return internalError('Yimeng read capability is unavailable')
+        const workflow = await dependencies.readWorkflow(request, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- the source read can be cancelled while awaited.
+        if (signal.aborted) return cancelled()
+        if (!workflow.ok) return workflow
+        const snapshot = buildWorksetSnapshot(request, workflow.value, e53CanonicalJson)
+        const rawProjection = await (dependencies.runWorksetCompiler ?? runWorksetCompilerProcess)(snapshot, execution, signal)
+        const ruleHashes = await readWorksetRuleHashes(execution.coreRoot)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- compiler and file reads are asynchronous.
+        if (signal.aborted) return cancelled()
+        const projection = normalizeWorksetProjection(rawProjection, snapshot, ruleHashes, canonicalJson)
+        const value: ImagoWorksetMethodResponse = {
+          schema: 'qingmu.imago-workset-method-adapter-result.v1',
+          projection,
+        }
+        return { ok: true, value }
       }
       const attestationKey = readAttestationKey()
       if (endpoint === 'heroFrameStoryboardMethod') {
@@ -3402,10 +3470,10 @@ export function createImagoMethodHandler(
       }
       return { ok: true, value }
     } catch (error) {
-      if (error instanceof InputError) return badRequest(error.message)
+      if (error instanceof InputError || error instanceof WorksetInputError) return badRequest(error.message)
       if (error instanceof AttestationKeyError) return internalError('IMAGO method attestation is unavailable')
       if (signal.aborted || error instanceof CompilerCancelledError) return cancelled()
-      if (error instanceof ProjectionContractError) {
+      if (error instanceof ProjectionContractError || error instanceof WorksetContractError) {
         return internalError(`IMAGO method projection contract failed: ${error.message}`)
       }
       return internalError('IMAGO method compiler failed')
@@ -3415,5 +3483,14 @@ export function createImagoMethodHandler(
 
 /** Register the stateless method adapter on a loopback-only Host channel. */
 export function apply(ctx: Context, config: ImagoMethodAdapterConfig): void {
-  ctx.connection.rpc.handle(CHANNEL, createImagoMethodHandler(config), { authority: 'loopback' })
+  const handler = createImagoMethodHandler(config, {
+    ...DEFAULT_DEPENDENCIES,
+    readWorkflow: async (request, signal) => {
+      const read = ctx.get('qingmuYimengRead')
+      return read === undefined
+        ? internalError('Yimeng read capability is unavailable')
+        : await read('workflow', request, signal)
+    },
+  })
+  ctx.connection.rpc.handle(CHANNEL, handler, { authority: 'loopback' })
 }

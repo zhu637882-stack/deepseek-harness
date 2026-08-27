@@ -16,6 +16,7 @@ import { ScriptWorkspace } from './ScriptWorkspace.tsx'
 import { ShotRelationsView } from './ShotRelationsView.tsx'
 import { ShotRelationMethodView } from './ShotRelationMethodView.tsx'
 import { HeroFrameStoryboardCanvas } from './HeroFrameStoryboardCanvas.tsx'
+import { WorksetRecommendation } from './WorksetRecommendation.tsx'
 import css from './QingmuCockpit.module.css'
 
 export type QingmuCockpitProps = PropsRuntime<'sidebar.footer.action'>
@@ -348,13 +349,16 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
 
   const overview = (
     <div className={css.stack}>
-      <Card title={t('recommended')} className={css.recommended}>
-        <p>{projection === undefined
-          ? t('recommendedChoose')
-          : blockers.length > 0 ? t('recommendedBlocked') : t('recommendedReady')}</p>
-        {blockers.length > 0 && <strong>{namedItem(blockers[0], short(blockers[0]))}</strong>}
-      </Card>
+      <WorksetRecommendation
+        projectId={projectId}
+        episodeId={episodeId}
+        projection={projection}
+        enabled={open && !loading && error === undefined}
+        port={port}
+        t={t}
+      />
       <Card title={t('stages')}>
+        <p>{t('stagesBoundary')}</p>
         {stages.length === 0
           ? <p className={css.empty}>{t('noProjection')}</p>
           : (
