@@ -52,6 +52,10 @@ import type {
   YimengShotRelationElementKind,
   YimengShotRelationScene,
   YimengShotRelationShot,
+  YimengShotCurrentReference,
+  YimengShotCurrentReferenceLineage,
+  YimengShotDialogueCue,
+  YimengShotDialogueRhythm,
   YimengShotRelationsProjection,
   YimengStoryboardCanvas,
   YimengStoryboardCanvasAnnotation,
@@ -116,6 +120,10 @@ export type {
   YimengShotRelationElementKind,
   YimengShotRelationScene,
   YimengShotRelationShot,
+  YimengShotCurrentReference,
+  YimengShotCurrentReferenceLineage,
+  YimengShotDialogueCue,
+  YimengShotDialogueRhythm,
   YimengShotRelationsProjection,
   YimengShotRelationsStoryboardRevision,
   YimengStoryboardCanvas,
@@ -1714,22 +1722,200 @@ function requireUniqueIdentifiers(values: unknown, field: string): string[] {
   return identifiers
 }
 
-function normalizeShotRelationElement(value: unknown, field: string): YimengShotRelationElement {
+function normalizeShotCurrentReference(
+  value: unknown,
+  field: string,
+  projectId: string,
+  elementKind: YimengShotRelationElementKind,
+  elementId: string,
+): YimengShotCurrentReference {
+  const reference = requireObject(value, field)
+  assertExactOutputKeys(reference, ['assetId', 'sha256', 'lineage'], field)
+  const lineageField = `${field}.lineage`
+  const lineage = requireObject(reference.lineage, lineageField)
+  assertExactOutputKeys(
+    lineage,
+    [
+      'projectId',
+      'sourceEpisodeId',
+      'ownerType',
+      'ownerId',
+      'role',
+      'generationJobId',
+      'sourceRevisionId',
+      'formalConsistencyCheckId',
+    ],
+    lineageField,
+  )
+  const ownerType = lineage.ownerType
+  if (ownerType !== 'actor' && ownerType !== 'scene' && ownerType !== 'prop') {
+    throw new UpstreamContractError(`${lineageField}.ownerType is invalid`)
+  }
+  const normalizedLineage: YimengShotCurrentReferenceLineage = {
+    projectId: requireIdentifier(lineage.projectId, `${lineageField}.projectId`),
+    sourceEpisodeId: requireIdentifier(lineage.sourceEpisodeId, `${lineageField}.sourceEpisodeId`),
+    ownerType,
+    ownerId: requireIdentifier(lineage.ownerId, `${lineageField}.ownerId`),
+    role: requireIdentifier(lineage.role, `${lineageField}.role`),
+    generationJobId: requireIdentifier(lineage.generationJobId, `${lineageField}.generationJobId`),
+    sourceRevisionId: requireIdentifier(lineage.sourceRevisionId, `${lineageField}.sourceRevisionId`),
+    formalConsistencyCheckId: requireIdentifier(
+      lineage.formalConsistencyCheckId,
+      `${lineageField}.formalConsistencyCheckId`,
+    ),
+  }
+  if (
+    normalizedLineage.projectId !== projectId
+    || normalizedLineage.ownerType !== elementKind
+    || normalizedLineage.ownerId !== elementId
+  ) {
+    throw new UpstreamContractError(`${lineageField} subject mismatch`)
+  }
+  return {
+    assetId: requireIdentifier(reference.assetId, `${field}.assetId`),
+    sha256: requireSha256(reference.sha256, `${field}.sha256`),
+    lineage: normalizedLineage,
+  }
+}
+
+function normalizeShotDialogueRhythm(
+  value: unknown,
+  field: string,
+  durationSec: number,
+): YimengShotDialogueRhythm {
+  const rhythm = requireObject(value, field)
+  assertExactOutputKeys(rhythm, ['cueCount', 'timedCueCount', 'cues'], field)
+  if (!Array.isArray(rhythm.cues)) throw new UpstreamContractError(`${field}.cues must be an array`)
+  const cues = rhythm.cues.map((value, index): YimengShotDialogueCue => {
+    const cueField = `${field}.cues[${String(index)}]`
+    const cue = requireObject(value, cueField)
+    assertExactOutputKeys(
+      cue,
+      [
+        'schemaVersion',
+        'lineId',
+        'speakerId',
+        'verbatimText',
+        'plannedStartSec',
+        'plannedEndSec',
+        'timingVerified',
+        'legacy',
+      ],
+      cueField,
+    )
+    const verbatimText = requireString(cue.verbatimText, `${cueField}.verbatimText`)
+    if (verbatimText.trim() === '' || verbatimText !== verbatimText.trim()) {
+      throw new UpstreamContractError(`${cueField}.verbatimText must be non-empty and trimmed`)
+    }
+    if (cue.schemaVersion === 'dialogue-cue-v2') {
+      const plannedStartSec = cue.plannedStartSec
+      const plannedEndSec = cue.plannedEndSec
+      if (
+        typeof plannedStartSec !== 'number'
+        || !Number.isFinite(plannedStartSec)
+        || plannedStartSec < 0
+        || typeof plannedEndSec !== 'number'
+        || !Number.isFinite(plannedEndSec)
+        || plannedEndSec <= plannedStartSec
+        || plannedEndSec > durationSec + 1e-6
+        || cue.timingVerified !== true
+        || cue.legacy !== false
+      ) {
+        throw new UpstreamContractError(`${cueField} v2 timing contract mismatch`)
+      }
+      return {
+        schemaVersion: 'dialogue-cue-v2',
+        lineId: requireIdentifier(cue.lineId, `${cueField}.lineId`),
+        speakerId: requireIdentifier(cue.speakerId, `${cueField}.speakerId`),
+        verbatimText,
+        plannedStartSec,
+        plannedEndSec,
+        timingVerified: true,
+        legacy: false,
+      }
+    }
+    if (
+      cue.schemaVersion !== 'dialogue-cue-legacy-v1'
+      || cue.lineId !== null
+      || (cue.speakerId !== null && typeof cue.speakerId !== 'string')
+      || cue.plannedStartSec !== null
+      || cue.plannedEndSec !== null
+      || cue.timingVerified !== false
+      || cue.legacy !== true
+    ) {
+      throw new UpstreamContractError(`${cueField} legacy timing contract mismatch`)
+    }
+    return {
+      schemaVersion: 'dialogue-cue-legacy-v1',
+      lineId: null,
+      speakerId: cue.speakerId === null
+        ? null
+        : requireIdentifier(cue.speakerId, `${cueField}.speakerId`),
+      verbatimText,
+      plannedStartSec: null,
+      plannedEndSec: null,
+      timingVerified: false,
+      legacy: true,
+    }
+  })
+  const cueCount = requireInteger(rhythm.cueCount, `${field}.cueCount`, 0)
+  const timedCueCount = requireInteger(rhythm.timedCueCount, `${field}.timedCueCount`, 0)
+  if (
+    cueCount !== cues.length
+    || timedCueCount !== cues.filter(cue => cue.timingVerified).length
+  ) {
+    throw new UpstreamContractError(`${field} cue counts mismatch`)
+  }
+  return { cueCount, timedCueCount, cues }
+}
+
+function normalizeShotRelationElement(
+  value: unknown,
+  field: string,
+  projectId: string,
+): YimengShotRelationElement {
   const element = requireObject(value, field)
   assertExactOutputKeys(
     element,
-    ['elementKind', 'elementId', 'name', 'profileRevision', 'snapshotSha256'],
+    [
+      'elementKind',
+      'elementId',
+      'name',
+      'profileRevision',
+      'snapshotSha256',
+      'currentReferenceAvailability',
+      'currentReference',
+    ],
     field,
   )
   if (element.elementKind !== 'actor' && element.elementKind !== 'scene' && element.elementKind !== 'prop') {
     throw new UpstreamContractError(`${field}.elementKind is invalid`)
   }
+  const elementId = requireIdentifier(element.elementId, `${field}.elementId`)
+  const availability = element.currentReferenceAvailability
+  if (availability !== 'missing' && availability !== 'available') {
+    throw new UpstreamContractError(`${field}.currentReferenceAvailability is invalid`)
+  }
+  const currentReference = availability === 'missing'
+    ? null
+    : normalizeShotCurrentReference(
+      element.currentReference,
+      `${field}.currentReference`,
+      projectId,
+      element.elementKind,
+      elementId,
+    )
+  if (availability === 'missing' && element.currentReference !== null) {
+    throw new UpstreamContractError(`${field}.currentReference must be null when missing`)
+  }
   return {
     elementKind: element.elementKind,
-    elementId: requireIdentifier(element.elementId, `${field}.elementId`),
+    elementId,
     name: requireString(element.name, `${field}.name`),
     profileRevision: requireInteger(element.profileRevision, `${field}.profileRevision`, 0),
     snapshotSha256: requireSha256(element.snapshotSha256, `${field}.snapshotSha256`),
+    currentReferenceAvailability: availability,
+    currentReference,
   }
 }
 
@@ -1812,8 +1998,13 @@ function normalizeShotRelations(
   const shotRows = requireObjectItems(root.shots, `${field}.shots`)
   const shots = shotRows.map((shot, shotIndex): YimengShotRelationShot => {
     const shotField = `${field}.shots[${String(shotIndex)}]`
-    assertExactOutputKeys(shot, ['shotId', 'sceneId', 'title', 'beats', 'elements'], shotField)
+    assertExactOutputKeys(
+      shot,
+      ['shotId', 'frameNo', 'sceneId', 'title', 'durationSec', 'dialogueRhythm', 'beats', 'elements'],
+      shotField,
+    )
     const shotId = requireIdentifier(shot.shotId, `${shotField}.shotId`)
+    const frameNo = requireInteger(shot.frameNo, `${shotField}.frameNo`, 1)
     const sceneId = requireIdentifier(shot.sceneId, `${shotField}.sceneId`)
     if (!sceneIds.has(sceneId)) throw new UpstreamContractError(`${shotField}.sceneId is dangling`)
     if (shot.title !== null && typeof shot.title !== 'string') {
@@ -1822,8 +2013,21 @@ function normalizeShotRelations(
     if (typeof shot.title === 'string' && (shot.title.trim() === '' || shot.title !== shot.title.trim())) {
       throw new UpstreamContractError(`${shotField}.title must be non-empty and trimmed`)
     }
+    if (typeof shot.durationSec !== 'number' || !Number.isFinite(shot.durationSec) || shot.durationSec <= 0) {
+      throw new UpstreamContractError(`${shotField}.durationSec must be a positive finite number`)
+    }
+    const durationSec = shot.durationSec
+    const dialogueRhythm = normalizeShotDialogueRhythm(
+      shot.dialogueRhythm,
+      `${shotField}.dialogueRhythm`,
+      durationSec,
+    )
     const elements = requireObjectItems(shot.elements, `${shotField}.elements`)
-      .map((element, index) => normalizeShotRelationElement(element, `${shotField}.elements[${String(index)}]`))
+      .map((element, index) => normalizeShotRelationElement(
+        element,
+        `${shotField}.elements[${String(index)}]`,
+        projectId,
+      ))
     const elementKeys = elements.map(element => `${element.elementKind}:${element.elementId}`)
     if (new Set(elementKeys).size !== elementKeys.length) {
       throw new UpstreamContractError(`${shotField}.elements contains duplicate authority bindings`)
@@ -1847,10 +2051,12 @@ function normalizeShotRelations(
         throw new UpstreamContractError(`${shotField}.beats references a dangling propId`)
       }
     })
-    return { shotId, sceneId, title: shot.title, beats, elements }
-  })
+    return { shotId, frameNo, sceneId, title: shot.title, durationSec, dialogueRhythm, beats, elements }
+  }).sort((left, right) => left.frameNo - right.frameNo)
   const shotIds = new Set(shots.map(shot => shot.shotId))
   if (shotIds.size !== shots.length) throw new UpstreamContractError(`${field}.shots contains duplicate shotId`)
+  const frameNos = new Set(shots.map(shot => shot.frameNo))
+  if (frameNos.size !== shots.length) throw new UpstreamContractError(`${field}.shots contains duplicate frameNo`)
 
   return {
     schema: SHOT_RELATIONS_SCHEMA,

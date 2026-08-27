@@ -271,8 +271,24 @@ function workflowFixture(schema = 'jason.episode-workflow-projection.v1'): Recor
     }],
     shots: [{
       shotId: 'frame-1',
+      frameNo: 7,
       sceneId: 'scene-1',
       title: '林夏推门',
+      durationSec: 3.5,
+      dialogueRhythm: {
+        cueCount: 1,
+        timedCueCount: 1,
+        cues: [{
+          schemaVersion: 'dialogue-cue-v2',
+          lineId: 'line-1',
+          speakerId: 'actor-1',
+          verbatimText: '门外有人。',
+          plannedStartSec: 1,
+          plannedEndSec: 2,
+          timingVerified: true,
+          legacy: false,
+        }],
+      },
       beats: [{
         beatId: 'beat-open-door',
         order: 0,
@@ -290,6 +306,8 @@ function workflowFixture(schema = 'jason.episode-workflow-projection.v1'): Recor
           name: '雨夜巷口',
           profileRevision: 2,
           snapshotSha256: 'b'.repeat(64),
+          currentReferenceAvailability: 'missing',
+          currentReference: null,
         },
         {
           elementKind: 'actor',
@@ -297,6 +315,21 @@ function workflowFixture(schema = 'jason.episode-workflow-projection.v1'): Recor
           name: '林夏',
           profileRevision: 4,
           snapshotSha256: 'c'.repeat(64),
+          currentReferenceAvailability: 'available',
+          currentReference: {
+            assetId: 'asset-actor-1',
+            sha256: 'f'.repeat(64),
+            lineage: {
+              projectId: 'project-1',
+              sourceEpisodeId: 'episode-1',
+              ownerType: 'actor',
+              ownerId: 'actor-1',
+              role: 'identity_board',
+              generationJobId: 'job-actor-1',
+              sourceRevisionId: 'revision-actor-1',
+              formalConsistencyCheckId: 'check-actor-1',
+            },
+          },
         },
         {
           elementKind: 'prop',
@@ -304,6 +337,8 @@ function workflowFixture(schema = 'jason.episode-workflow-projection.v1'): Recor
           name: '旧钥匙',
           profileRevision: 1,
           snapshotSha256: 'd'.repeat(64),
+          currentReferenceAvailability: 'missing',
+          currentReference: null,
         },
       ],
     }],
@@ -1144,6 +1179,67 @@ describe('qingmu Yimeng read adapter', () => {
     }
   })
 
+  it('fails closed on forged E5-3 Shot rhythm and current-reference fields', async () => {
+    const mutations: Array<(
+      shot: Record<string, unknown>,
+      relations: Record<string, unknown>,
+    ) => void> = [
+      (shot) => { delete shot.frameNo },
+      (shot) => { shot.frameNo = 0 },
+      (shot) => { shot.frameNo = true },
+      (shot) => { shot.frameNo = Number.MAX_SAFE_INTEGER + 1 },
+      (shot, relations) => {
+        relations.shots = [{ ...shot }, { ...shot, shotId: 'frame-duplicate' }]
+      },
+      (shot) => { shot.durationSec = 0 },
+      (shot) => { shot.order = 7 },
+      (shot) => {
+        const rhythm = shot.dialogueRhythm as Record<string, unknown>
+        rhythm.cueCount = 0
+      },
+      (shot) => {
+        const rhythm = shot.dialogueRhythm as Record<string, unknown>
+        const cue = (rhythm.cues as Array<Record<string, unknown>>)[0]
+        if (cue === undefined) throw new Error('fixture cue is missing')
+        cue.plannedEndSec = 4
+      },
+      (shot) => {
+        const actor = (shot.elements as Array<Record<string, unknown>>)[1]
+        if (actor === undefined) throw new Error('fixture actor is missing')
+        const reference = actor.currentReference as Record<string, unknown>
+        reference.sha256 = 'bad-sha'
+      },
+      (shot) => {
+        const actor = (shot.elements as Array<Record<string, unknown>>)[1]
+        if (actor === undefined) throw new Error('fixture actor is missing')
+        const reference = actor.currentReference as Record<string, unknown>
+        const lineage = reference.lineage as Record<string, unknown>
+        lineage.ownerId = 'actor-foreign'
+      },
+      (shot) => {
+        const actor = (shot.elements as Array<Record<string, unknown>>)[1]
+        if (actor === undefined) throw new Error('fixture actor is missing')
+        actor.currentReferenceAvailability = 'missing'
+      },
+    ]
+
+    for (const mutate of mutations) {
+      const upstream = structuredClone(workflowFixture())
+      const director = upstream.director as Record<string, unknown>
+      const relations = director.shotRelations as Record<string, unknown>
+      const shot = (relations.shots as Array<Record<string, unknown>>)[0]
+      if (shot === undefined) throw new Error('fixture Shot is missing')
+      mutate(shot, relations)
+      const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(upstream), 'test-token'))
+
+      const result = await handler('workflow', { projectId: 'project-1', episodeId: 'episode-1' }, signal())
+
+      expect(result.ok).toBe(false)
+      if (result.ok) throw new Error('forged E5-3 Shot relation must fail closed')
+      expect(result.error.message).toMatch(/workflow\.director\.shotRelations/)
+    }
+  })
+
   it('joins E5-2 Hero Frames and canvas annotations to the exact E5-1 Shot authority', async () => {
     const base = workflowFixture()
     const director = base.director as Record<string, unknown>
@@ -1626,7 +1722,13 @@ describe('qingmu Yimeng read adapter', () => {
     })
     expect(projection.director.shotRelations.shots[0]).toMatchObject({
       shotId: 'frame-1',
+      frameNo: 7,
       sceneId: 'scene-1',
+      durationSec: 3.5,
+      dialogueRhythm: {
+        cueCount: 1,
+        timedCueCount: 1,
+      },
     })
     expect(projection.interpretation).toEqual({
       providerAuthorization: 'not-exposed',

@@ -435,6 +435,24 @@ export interface YimengShotRelationScene {
 
 export type YimengShotRelationElementKind = 'actor' | 'scene' | 'prop'
 
+/** Minimal immutable lineage for the one E4-3 current reference selection. */
+export interface YimengShotCurrentReferenceLineage {
+  readonly projectId: string
+  readonly sourceEpisodeId: string
+  readonly ownerType: YimengShotRelationElementKind
+  readonly ownerId: string
+  readonly role: string
+  readonly generationJobId: string
+  readonly sourceRevisionId: string
+  readonly formalConsistencyCheckId: string
+}
+
+export interface YimengShotCurrentReference {
+  readonly assetId: string
+  readonly sha256: string
+  readonly lineage: YimengShotCurrentReferenceLineage
+}
+
 /** Canonical Actor, Scene, or Prop authority referenced by a Shot. */
 export interface YimengShotRelationElement {
   readonly elementKind: YimengShotRelationElementKind
@@ -442,6 +460,25 @@ export interface YimengShotRelationElement {
   readonly name: string
   readonly profileRevision: number
   readonly snapshotSha256: string
+  readonly currentReferenceAvailability: 'missing' | 'available'
+  readonly currentReference: YimengShotCurrentReference | null
+}
+
+export interface YimengShotDialogueCue {
+  readonly schemaVersion: 'dialogue-cue-v2' | 'dialogue-cue-legacy-v1'
+  readonly lineId: string | null
+  readonly speakerId: string | null
+  readonly verbatimText: string
+  readonly plannedStartSec: number | null
+  readonly plannedEndSec: number | null
+  readonly timingVerified: boolean
+  readonly legacy: boolean
+}
+
+export interface YimengShotDialogueRhythm {
+  readonly cueCount: number
+  readonly timedCueCount: number
+  readonly cues: readonly YimengShotDialogueCue[]
 }
 
 /** Beat identity is local to its parent Shot and never promoted to a business entity. */
@@ -459,8 +496,11 @@ export interface YimengShotRelationBeat {
 /** One canonical Yimeng Shot and its read-only E5-1 relationships. */
 export interface YimengShotRelationShot {
   readonly shotId: string
+  readonly frameNo: number
   readonly sceneId: string
   readonly title: string | null
+  readonly durationSec: number
+  readonly dialogueRhythm: YimengShotDialogueRhythm
   readonly beats: readonly YimengShotRelationBeat[]
   readonly elements: readonly YimengShotRelationElement[]
 }
