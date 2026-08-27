@@ -271,6 +271,8 @@ export interface ImagoPromptIrMethodResponse extends ImagoMethodJsonObject {
 /** Canonical Scene relation submitted to the read-only Shot relation compiler. */
 export interface ImagoShotRelationScene extends ImagoMethodJsonObject {
   readonly sceneId: string
+  readonly profileRevision: number
+  readonly snapshotSha256: string
   readonly elementIds: readonly string[]
 }
 
@@ -292,12 +294,15 @@ export interface ImagoShotRelationShot extends ImagoMethodJsonObject {
 export interface ImagoShotRelationElement extends ImagoMethodJsonObject {
   readonly elementId: string
   readonly elementKind: ImagoElementKind
+  readonly profileRevision: number
+  readonly snapshotSha256: string
 }
 
 /** Browser input containing only Yimeng lineage and the compiler-ready relation ID graph. */
 export interface ImagoShotRelationMethodRequest {
   readonly projectId: string
   readonly episodeId: string
+  readonly episodeRevision: number
   readonly storyboardRevisionId: string
   readonly storyboardRevisionVersion: number
   readonly storyboardSourceSha256: string
@@ -313,6 +318,7 @@ export interface ImagoShotRelationMethodSnapshot extends ImagoMethodJsonObject {
   readonly target: {
     readonly projectId: string
     readonly episodeId: string
+    readonly episodeRevision: number
     readonly storyboardRevisionId: string
     readonly storyboardRevisionVersion: number
     readonly storyboardSourceSha256: string

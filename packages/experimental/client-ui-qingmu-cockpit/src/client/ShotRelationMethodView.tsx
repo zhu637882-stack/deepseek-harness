@@ -87,7 +87,7 @@ function uniqueIds(ids: readonly string[], label: string): readonly string[] {
   })
 }
 
-/** Compile the strict Yimeng read projection into the ID-only IMAGO input graph. */
+/** Compile the strict Yimeng read projection into the lineage-bound IMAGO input graph. */
 export function buildShotRelationMethodRequest(
   relations: YimengShotRelationsProjection,
   selectedShotId: string,
@@ -97,16 +97,28 @@ export function buildShotRelationMethodRequest(
 
   const sceneIds = new Set(relations.scenes.map(scene => scene.sceneId))
   if (sceneIds.size !== relations.scenes.length) throw new Error('易梦关系快照含重复 Scene ID')
-  const elements = new Map<string, 'actor' | 'scene' | 'prop'>()
+  const elements = new Map<string, {
+    readonly elementKind: 'actor' | 'scene' | 'prop'
+    readonly profileRevision: number
+    readonly snapshotSha256: string
+  }>()
   const shots = relations.shots.map((shot) => {
     if (!sceneIds.has(shot.sceneId)) throw new Error(`Shot ${shot.shotId} 指向未知 Scene`)
     const elementIds = uniqueIds(shot.elements.map(element => element.elementId), `Shot ${shot.shotId} Element`)
     for (const element of shot.elements) {
       const existing = elements.get(element.elementId)
-      if (existing !== undefined && existing !== element.elementKind) {
-        throw new Error(`Element ${element.elementId} 的类型不一致`)
+      if (existing !== undefined && (
+        existing.elementKind !== element.elementKind
+        || existing.profileRevision !== element.profileRevision
+        || existing.snapshotSha256 !== element.snapshotSha256
+      )) {
+        throw new Error(`Element ${element.elementId} 的权威血缘不一致`)
       }
-      elements.set(element.elementId, element.elementKind)
+      elements.set(element.elementId, {
+        elementKind: element.elementKind,
+        profileRevision: element.profileRevision,
+        snapshotSha256: element.snapshotSha256,
+      })
     }
     const shotElementIds = new Set(elementIds)
     const beats = shot.beats.map((beat) => {
@@ -121,19 +133,22 @@ export function buildShotRelationMethodRequest(
 
   const scenes = relations.scenes.map(scene => ({
     sceneId: scene.sceneId,
+    profileRevision: scene.profileRevision,
+    snapshotSha256: scene.snapshotSha256,
     elementIds: [...new Set(shots.filter(shot => shot.sceneId === scene.sceneId).flatMap(shot => shot.elementIds))],
   }))
 
   return {
     projectId: relations.projectId,
     episodeId: relations.episodeId,
+    episodeRevision: relations.storyboardRevision.episodeRevision,
     storyboardRevisionId: relations.storyboardRevision.revisionId,
     storyboardRevisionVersion: relations.storyboardRevision.revisionVersion,
     storyboardSourceSha256: relations.storyboardRevision.sourceSha256,
     selectedShotId,
     scenes,
     shots,
-    elements: [...elements].map(([elementId, elementKind]) => ({ elementId, elementKind })),
+    elements: [...elements].map(([elementId, lineage]) => ({ elementId, ...lineage })),
   }
 }
 
@@ -150,6 +165,7 @@ function normalizeMethodDisplay(
   const expectedTarget = {
     projectId: request.projectId,
     episodeId: request.episodeId,
+    episodeRevision: request.episodeRevision,
     storyboardRevisionId: request.storyboardRevisionId,
     storyboardRevisionVersion: request.storyboardRevisionVersion,
     storyboardSourceSha256: request.storyboardSourceSha256,

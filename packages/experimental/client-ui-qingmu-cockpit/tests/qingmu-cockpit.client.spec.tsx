@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import type { YimengHealth, YimengWorkflowProjection } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
+import type {
+  YimengHealth,
+  YimengShotRelationsProjection,
+  YimengWorkflowProjection,
+} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import { QingmuCockpit, type QingmuCockpitProps } from '../src/client/QingmuCockpit.tsx'
+import { buildShotRelationMethodRequest } from '../src/client/ShotRelationMethodView.tsx'
 import type { QingmuYimengPort } from '../src/client/contracts.ts'
 import { zh } from '../src/client/locales.ts'
 import {
@@ -409,6 +414,7 @@ function shotRelationMethod(request: Parameters<QingmuYimengPort['shotRelationMe
       target: {
         projectId: request.projectId,
         episodeId: request.episodeId,
+        episodeRevision: request.episodeRevision,
         storyboardRevisionId: request.storyboardRevisionId,
         storyboardRevisionVersion: request.storyboardRevisionVersion,
         storyboardSourceSha256: request.storyboardSourceSha256,
@@ -579,6 +585,51 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+describe('buildShotRelationMethodRequest', () => {
+  it('preserves the complete Yimeng episode, Scene, and Element authority lineage', () => {
+    const request = buildShotRelationMethodRequest(SHOT_RELATIONS, 'frame-2')
+
+    expect(request.episodeRevision).toBe(3)
+    expect(request.scenes).toEqual([
+      {
+        sceneId: 'scene-1',
+        profileRevision: 2,
+        snapshotSha256: '2'.repeat(64),
+        elementIds: ['character-1', 'scene-1', 'prop-1'],
+      },
+      {
+        sceneId: 'scene-2',
+        profileRevision: 4,
+        snapshotSha256: '3'.repeat(64),
+        elementIds: ['character-1', 'scene-2'],
+      },
+    ])
+    expect(request.elements).toEqual([
+      { elementId: 'character-1', elementKind: 'actor', profileRevision: 2, snapshotSha256: '4'.repeat(64) },
+      { elementId: 'scene-1', elementKind: 'scene', profileRevision: 2, snapshotSha256: '2'.repeat(64) },
+      { elementId: 'prop-1', elementKind: 'prop', profileRevision: 1, snapshotSha256: '5'.repeat(64) },
+      { elementId: 'scene-2', elementKind: 'scene', profileRevision: 4, snapshotSha256: '3'.repeat(64) },
+    ])
+  })
+
+  it('fails closed when one Element ID carries divergent Yimeng lineage across Shots', () => {
+    const divergent = {
+      ...SHOT_RELATIONS,
+      shots: SHOT_RELATIONS.shots.map((shot, shotIndex) => ({
+        ...shot,
+        elements: shot.elements.map(element => (
+          shotIndex === 1 && element.elementId === 'character-1'
+            ? { ...element, profileRevision: 3, snapshotSha256: '6'.repeat(64) }
+            : element
+        )),
+      })),
+    } as YimengShotRelationsProjection
+
+    expect(() => buildShotRelationMethodRequest(divergent, 'frame-2'))
+      .toThrow('Element character-1 的权威血缘不一致')
+  })
+})
+
 describe('QingmuCockpit journey', () => {
   it('opens the five-tab projection, states authority boundaries, and restores trigger focus on close', async () => {
     const workflow = vi.fn(async () => WORKFLOW)
@@ -665,11 +716,22 @@ describe('QingmuCockpit journey', () => {
     expect(within(dialog).getByText('beat-2')).toBeTruthy()
     await waitFor(() => {
       expect(relationMethod).toHaveBeenLastCalledWith(expect.objectContaining({
+        episodeRevision: SHOT_RELATIONS.storyboardRevision.episodeRevision,
         storyboardRevisionId: SHOT_RELATIONS.storyboardRevision.revisionId,
         selectedShotId: 'frame-2',
         scenes: [
-          { sceneId: 'scene-1', elementIds: ['character-1', 'scene-1', 'prop-1'] },
-          { sceneId: 'scene-2', elementIds: ['character-1', 'scene-2'] },
+          {
+            sceneId: 'scene-1',
+            profileRevision: 2,
+            snapshotSha256: '2'.repeat(64),
+            elementIds: ['character-1', 'scene-1', 'prop-1'],
+          },
+          {
+            sceneId: 'scene-2',
+            profileRevision: 4,
+            snapshotSha256: '3'.repeat(64),
+            elementIds: ['character-1', 'scene-2'],
+          },
         ],
         shots: [
           {
@@ -686,10 +748,10 @@ describe('QingmuCockpit journey', () => {
           },
         ],
         elements: [
-          { elementId: 'character-1', elementKind: 'actor' },
-          { elementId: 'scene-1', elementKind: 'scene' },
-          { elementId: 'prop-1', elementKind: 'prop' },
-          { elementId: 'scene-2', elementKind: 'scene' },
+          { elementId: 'character-1', elementKind: 'actor', profileRevision: 2, snapshotSha256: '4'.repeat(64) },
+          { elementId: 'scene-1', elementKind: 'scene', profileRevision: 2, snapshotSha256: '2'.repeat(64) },
+          { elementId: 'prop-1', elementKind: 'prop', profileRevision: 1, snapshotSha256: '5'.repeat(64) },
+          { elementId: 'scene-2', elementKind: 'scene', profileRevision: 4, snapshotSha256: '3'.repeat(64) },
         ],
       }), expect.any(AbortSignal))
     })

@@ -482,6 +482,12 @@ function parseInputInteger(value: unknown, field: string): number {
   return value as number
 }
 
+function parseInputPositiveInteger(value: unknown, field: string): number {
+  const integer = parseInputInteger(value, field)
+  if (integer === 0) throw new InputError(`${field} must be a positive safe integer`)
+  return integer
+}
+
 function parseInputSha256(value: unknown, field: string): string {
   if (typeof value !== 'string' || !SHA256.test(value)) {
     throw new InputError(`${field} must be a lowercase SHA-256`)
@@ -514,6 +520,7 @@ function parseShotRelationRequest(payload: unknown): ImagoShotRelationMethodRequ
   const input = parseExactInputObject(payload, [
     'projectId',
     'episodeId',
+    'episodeRevision',
     'storyboardRevisionId',
     'storyboardRevisionVersion',
     'storyboardSourceSha256',
@@ -523,31 +530,63 @@ function parseShotRelationRequest(payload: unknown): ImagoShotRelationMethodRequ
     'elements',
   ], 'payload')
   if (!Array.isArray(input.elements)) throw new InputError('elements must be an array')
-  const elementIds = new Set<string>()
+  const elementAuthorityById = new Map<string, ImagoShotRelationElement>()
   const elements: ImagoShotRelationElement[] = input.elements.map((value, index) => {
-    const element = parseExactInputObject(value, ['elementId', 'elementKind'], `elements[${String(index)}]`)
+    const element = parseExactInputObject(
+      value,
+      ['elementId', 'elementKind', 'profileRevision', 'snapshotSha256'],
+      `elements[${String(index)}]`,
+    )
     const elementId = parseIdentifier(element.elementId, `elements[${String(index)}].elementId`)
-    if (elementIds.has(elementId)) throw new InputError(`duplicate Element ID: ${elementId}`)
     if (element.elementKind !== 'actor' && element.elementKind !== 'scene' && element.elementKind !== 'prop') {
       throw new InputError(`elements[${String(index)}].elementKind must be actor, scene, or prop`)
     }
-    elementIds.add(elementId)
-    return { elementId, elementKind: element.elementKind }
+    const normalizedElement: ImagoShotRelationElement = {
+      elementId,
+      elementKind: element.elementKind,
+      profileRevision: parseInputInteger(
+        element.profileRevision,
+        `elements[${String(index)}].profileRevision`,
+      ),
+      snapshotSha256: parseInputSha256(
+        element.snapshotSha256,
+        `elements[${String(index)}].snapshotSha256`,
+      ),
+    }
+    const existing = elementAuthorityById.get(elementId)
+    if (existing !== undefined) {
+      if (!isDeepStrictEqual(existing, normalizedElement)) {
+        throw new InputError(`conflicting Element kind/revision/SHA for ID: ${elementId}`)
+      }
+      throw new InputError(`duplicate Element ID: ${elementId}`)
+    }
+    elementAuthorityById.set(elementId, normalizedElement)
+    return normalizedElement
   })
+  const elementIds = new Set(elementAuthorityById.keys())
 
   if (!Array.isArray(input.scenes) || input.scenes.length === 0) {
     throw new InputError('scenes must be a non-empty array')
   }
   const sceneElements = new Map<string, ReadonlySet<string>>()
   const scenes: ImagoShotRelationScene[] = input.scenes.map((value, index) => {
-    const scene = parseExactInputObject(value, ['sceneId', 'elementIds'], `scenes[${String(index)}]`)
+    const scene = parseExactInputObject(
+      value,
+      ['sceneId', 'profileRevision', 'snapshotSha256', 'elementIds'],
+      `scenes[${String(index)}]`,
+    )
     const sceneId = parseIdentifier(scene.sceneId, `scenes[${String(index)}].sceneId`)
     if (sceneElements.has(sceneId)) throw new InputError(`duplicate Scene ID: ${sceneId}`)
     const relatedElements = parseIdentifierArray(scene.elementIds, `scenes[${String(index)}].elementIds`)
     const unknown = relatedElements.find(elementId => !elementIds.has(elementId))
     if (unknown !== undefined) throw new InputError(`Scene ${sceneId} references unknown Element ID: ${unknown}`)
     sceneElements.set(sceneId, new Set(relatedElements))
-    return { sceneId, elementIds: relatedElements }
+    return {
+      sceneId,
+      profileRevision: parseInputInteger(scene.profileRevision, `scenes[${String(index)}].profileRevision`),
+      snapshotSha256: parseInputSha256(scene.snapshotSha256, `scenes[${String(index)}].snapshotSha256`),
+      elementIds: relatedElements,
+    }
   })
 
   if (!Array.isArray(input.shots) || input.shots.length === 0) {
@@ -606,8 +645,12 @@ function parseShotRelationRequest(payload: unknown): ImagoShotRelationMethodRequ
   return {
     projectId: parseIdentifier(input.projectId, 'projectId'),
     episodeId: parseIdentifier(input.episodeId, 'episodeId'),
+    episodeRevision: parseInputInteger(input.episodeRevision, 'episodeRevision'),
     storyboardRevisionId: parseIdentifier(input.storyboardRevisionId, 'storyboardRevisionId'),
-    storyboardRevisionVersion: parseInputInteger(input.storyboardRevisionVersion, 'storyboardRevisionVersion'),
+    storyboardRevisionVersion: parseInputPositiveInteger(
+      input.storyboardRevisionVersion,
+      'storyboardRevisionVersion',
+    ),
     storyboardSourceSha256: parseInputSha256(input.storyboardSourceSha256, 'storyboardSourceSha256'),
     selectedShotId,
     scenes,
@@ -870,6 +913,7 @@ function buildYimengShotRelationAuthority(request: ImagoShotRelationMethodReques
     schema: 'jason.qingmu-shot-relation-authority.v1',
     projectId: request.projectId,
     episodeId: request.episodeId,
+    episodeRevision: request.episodeRevision,
     storyboardRevisionId: request.storyboardRevisionId,
     storyboardRevisionVersion: request.storyboardRevisionVersion,
     storyboardSourceSha256: request.storyboardSourceSha256,
@@ -887,6 +931,7 @@ function buildShotRelationSnapshot(
     target: {
       projectId: request.projectId,
       episodeId: request.episodeId,
+      episodeRevision: request.episodeRevision,
       storyboardRevisionId: request.storyboardRevisionId,
       storyboardRevisionVersion: request.storyboardRevisionVersion,
       storyboardSourceSha256: request.storyboardSourceSha256,
@@ -1822,6 +1867,7 @@ function normalizeShotRelationProjection(
   const target = requireExactObject(root.target, [
     'projectId',
     'episodeId',
+    'episodeRevision',
     'storyboardRevisionId',
     'storyboardRevisionVersion',
     'storyboardSourceSha256',
@@ -1974,6 +2020,7 @@ function normalizeShotRelationProjection(
     resource: 'scene_shot_beat_element_relation_snapshot',
     projectId: snapshot.target.projectId,
     episodeId: snapshot.target.episodeId,
+    episodeRevision: snapshot.target.episodeRevision,
     storyboardRevisionId: snapshot.target.storyboardRevisionId,
     storyboardRevisionVersion: snapshot.target.storyboardRevisionVersion,
     storyboardSourceSha256: snapshot.target.storyboardSourceSha256,

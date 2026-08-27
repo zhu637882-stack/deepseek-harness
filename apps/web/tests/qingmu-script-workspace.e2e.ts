@@ -61,6 +61,7 @@ const REFERENCE_REPAIR_PROMPT = '保留走廊冷白灯和湿润地面，修复�
 const PROMPT_IR_STORYBOARD_REVISION_ID = 'storyboard-revision-1'
 const PROMPT_IR_FRAME_ID = 'frame-1'
 const PROMPT_IR_TARGET_ID = `${PROMPT_IR_STORYBOARD_REVISION_ID}:${PROMPT_IR_FRAME_ID}`
+const SHOT_RELATION_SOURCE_SHA = '71'.repeat(32)
 const PROMPT_IR_READY_ID = 'prompt-ir-ready-4'
 const PROMPT_IR_DRAFT_ID = 'prompt-ir-draft-5'
 const PROMPT_IR_READY_VERSION = 4
@@ -757,6 +758,66 @@ function promptIrWorkflowShot(selected: boolean) {
   } as const
 }
 
+function shotRelationsFixture(revision: number) {
+  return {
+    schema: 'jason.scene-shot-beat-element-relations.v1',
+    projectId: 'project-1',
+    episodeId: 'episode-1',
+    storyboardRevision: {
+      episodeRevision: revision,
+      revisionId: PROMPT_IR_STORYBOARD_REVISION_ID,
+      revisionVersion: 1,
+      sourceSha256: SHOT_RELATION_SOURCE_SHA,
+    },
+    scenes: [{
+      sceneId: 'scene-1',
+      name: '旧体育馆走廊',
+      profileRevision: 3,
+      snapshotSha256: '72'.repeat(32),
+    }],
+    shots: [{
+      shotId: PROMPT_IR_FRAME_ID,
+      sceneId: 'scene-1',
+      title: '雨夜车站',
+      beats: [{
+        beatId: 'beat-frame-1-opening',
+        order: 0,
+        type: 'action',
+        startSec: 0,
+        endSec: 2.5,
+        actorIds: ['actor-1'],
+        propIds: ['prop-1'],
+        visualResponsibility: '林青在雨夜车站抬头，银色怀表保持在右手。',
+      }],
+      elements: [
+        {
+          elementKind: 'actor',
+          elementId: 'actor-1',
+          name: '林青',
+          profileRevision: 3,
+          snapshotSha256: '73'.repeat(32),
+        },
+        {
+          elementKind: 'scene',
+          elementId: 'scene-1',
+          name: '旧体育馆走廊',
+          profileRevision: 3,
+          snapshotSha256: '72'.repeat(32),
+        },
+        {
+          elementKind: 'prop',
+          elementId: 'prop-1',
+          name: '银色怀表',
+          profileRevision: 5,
+          snapshotSha256: '74'.repeat(32),
+        },
+      ],
+    }],
+    valid: true,
+    blockers: [],
+  } as const
+}
+
 function promptIrChangeSetFixture() {
   return {
     schema: 'jason.qingmu-change-set.v1',
@@ -951,8 +1012,14 @@ function workflowFixture(revision: number, promptIrSelected = false) {
         },
       ],
     },
-    director: {},
-    shots: { items: [promptIrWorkflowShot(promptIrSelected)] },
+    director: { shotRelations: shotRelationsFixture(revision) },
+    shots: {
+      count: 1,
+      shotGroupCount: 1,
+      segmentCount: 1,
+      unresolvedAssetRefCount: 0,
+      items: [promptIrWorkflowShot(promptIrSelected)],
+    },
     video: {},
     audio: {},
     timeline: {},
@@ -2572,7 +2639,7 @@ describe.skipIf(
       page = await browser.newPage({ viewport: { width: 1680, height: 1100 }, locale: ZH_BROWSER_LOCALE })
       page.on('request', (request) => {
         const requestPath = new URL(request.url()).pathname
-        if (requestPath !== '/qingmu-imago-method/referenceAssetMethod') return
+        if (!requestPath.startsWith('/qingmu-imago-method/')) return
         browserRpcRequests.push({ path: requestPath, body: request.postDataJSON() as unknown })
       })
       page.on('response', (response) => {
@@ -2669,6 +2736,8 @@ describe.skipIf(
             coreActiveRuntimeBundleSha256: activeRuntimeBundle.bundle_sha256,
             requestCount: capturedRequests.length,
             screenshots: {
+              relation: process.env.QINGMU_E5_1_EVIDENCE_SCREENSHOT,
+              relationMethod: process.env.QINGMU_E5_1_METHOD_EVIDENCE_SCREENSHOT,
               script: process.env.QINGMU_EVIDENCE_SCREENSHOT,
               actor: process.env.QINGMU_ACTOR_EVIDENCE_SCREENSHOT,
               scene: process.env.QINGMU_SCENE_EVIDENCE_SCREENSHOT,
@@ -2690,8 +2759,85 @@ describe.skipIf(
       if (failures.length > 0) throw new AggregateError(failures, 'Qingmu script e2e cleanup failed')
     })
 
+    it('renders one canonical E5-1 Shot through Yimeng, IMAGO, and the real Qingmu Chromium UI', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e5-1-shot-relations'))
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await dialog.waitFor({ timeout: 10_000 })
+      await dialog.getByRole('tab', { name: '分镜与镜头' }).click()
+
+      await dialog.locator(`[data-shot-id="${PROMPT_IR_FRAME_ID}"]`).waitFor({ timeout: 15_000 })
+      await dialog.getByText('beat-frame-1-opening', { exact: true }).waitFor()
+      await dialog.getByText('actor-1', { exact: true }).waitFor()
+      await dialog.getByText('prop-1', { exact: true }).waitFor()
+      const method = dialog.getByRole('region', { name: 'IMAGO 镜头关系方法' })
+      await method.getByText('Scene / Shot / Beat / Element 关系检查', { exact: true }).waitFor({ timeout: 20_000 })
+      await method.getByText('只读 · 零执行', { exact: true }).waitFor()
+      await method.getByText('字段帮助', { exact: true }).waitFor()
+      await method.getByText('检查清单', { exact: true }).waitFor()
+      await method.getByText('inspectCanonicalShotRelations', { exact: true }).waitFor()
+
+      const methodWire = browserRpcRequests.find(request =>
+        request.path === '/qingmu-imago-method/shotRelationMethod')
+      expect(methodWire).toBeDefined()
+      if (methodWire === undefined || !isRecord(methodWire.body) || !isRecord(methodWire.body.payload)) {
+        throw new Error('browser did not expose the bounded E5-1 shot-relation IMAGO request')
+      }
+      expect(methodWire.body.method).toBe('shotRelationMethod')
+      expect(methodWire.body.payload).toEqual({
+        projectId: 'project-1',
+        episodeId: 'episode-1',
+        episodeRevision: 3,
+        storyboardRevisionId: PROMPT_IR_STORYBOARD_REVISION_ID,
+        storyboardRevisionVersion: 1,
+        storyboardSourceSha256: SHOT_RELATION_SOURCE_SHA,
+        selectedShotId: PROMPT_IR_FRAME_ID,
+        scenes: [{
+          sceneId: 'scene-1',
+          profileRevision: 3,
+          snapshotSha256: '72'.repeat(32),
+          elementIds: ['actor-1', 'scene-1', 'prop-1'],
+        }],
+        shots: [{
+          shotId: PROMPT_IR_FRAME_ID,
+          sceneId: 'scene-1',
+          elementIds: ['actor-1', 'scene-1', 'prop-1'],
+          beats: [{ beatId: 'beat-frame-1-opening', elementIds: ['actor-1', 'prop-1'] }],
+        }],
+        elements: [
+          { elementId: 'actor-1', elementKind: 'actor', profileRevision: 3, snapshotSha256: '73'.repeat(32) },
+          { elementId: 'scene-1', elementKind: 'scene', profileRevision: 3, snapshotSha256: '72'.repeat(32) },
+          { elementId: 'prop-1', elementKind: 'prop', profileRevision: 5, snapshotSha256: '74'.repeat(32) },
+        ],
+      })
+
+      const evidencePath = process.env.QINGMU_E5_1_EVIDENCE_SCREENSHOT?.trim()
+      if (evidencePath !== undefined && evidencePath !== '') {
+        await mkdir(dirname(evidencePath), { recursive: true })
+        await page.screenshot({ path: evidencePath, fullPage: true })
+      }
+      const methodEvidencePath = process.env.QINGMU_E5_1_METHOD_EVIDENCE_SCREENSHOT?.trim()
+      if (methodEvidencePath !== undefined && methodEvidencePath !== '') {
+        await method.scrollIntoViewIfNeeded()
+        await mkdir(dirname(methodEvidencePath), { recursive: true })
+        await page.screenshot({ path: methodEvidencePath, fullPage: true })
+      }
+
+      await dialog.getByRole('tab', { name: '剧本与资产' }).click()
+      const frameSelect = dialog.getByRole('combobox', { name: '故事板帧' })
+      await frameSelect.waitFor({ timeout: 15_000 })
+      expect(await frameSelect.inputValue()).toBe(PROMPT_IR_FRAME_ID)
+      await expectNoVisibleTechnicalBrand(page)
+      expect(tripwire.pageErrors).toEqual([])
+      expect(tripwire.warnings).toEqual([])
+
+      await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
+      await dialog.waitFor({ state: 'hidden', timeout: 10_000 })
+    }, 60_000)
+
     it('recovers a committed receipt after the response is lost to a same-tab reload without resubmitting', async () => {
       onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-script-workspace'))
+      const initialScriptReadCount = scriptReadRevisions.length
       await page.getByRole('button', { name: '青木制作台' }).click()
       const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
       await dialog.waitFor({ timeout: 10_000 })
@@ -2744,7 +2890,10 @@ describe.skipIf(
         .waitFor({ timeout: 10_000 })
       await expect.poll(() => recoveredEditor.inputValue(), { timeout: 10_000 })
         .toBe(JSON.stringify(PROPOSED_SCRIPT, null, 2))
-      await expect.poll(() => [...scriptReadRevisions], { timeout: 10_000 }).toEqual([3, 4, 4])
+      await expect.poll(
+        () => scriptReadRevisions.slice(initialScriptReadCount),
+        { timeout: 10_000 },
+      ).toEqual([3, 4, 4])
       expect(await recoveredDialog.getByText('receipt-1').count()).toBe(1)
       expect(await recoveredDialog.getByText('event-1').count()).toBe(1)
       expect(await page.evaluate(() => Object.keys(sessionStorage)

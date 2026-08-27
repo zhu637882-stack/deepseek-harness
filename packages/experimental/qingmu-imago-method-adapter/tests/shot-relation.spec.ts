@@ -98,12 +98,15 @@ function canonicalSha256(value: unknown): string {
 const REQUEST: ImagoShotRelationMethodRequest = {
   projectId: 'project-1',
   episodeId: 'episode-1',
+  episodeRevision: 9,
   storyboardRevisionId: 'storyboard-revision-7',
   storyboardRevisionVersion: 7,
   storyboardSourceSha256: 'a'.repeat(64),
   selectedShotId: 'frame-2',
   scenes: [{
     sceneId: 'scene-1',
+    profileRevision: 4,
+    snapshotSha256: '2'.repeat(64),
     elementIds: ['actor-1', 'scene-element-1', 'prop-1'],
   }],
   shots: [
@@ -121,9 +124,9 @@ const REQUEST: ImagoShotRelationMethodRequest = {
     },
   ],
   elements: [
-    { elementId: 'actor-1', elementKind: 'actor' },
-    { elementId: 'scene-element-1', elementKind: 'scene' },
-    { elementId: 'prop-1', elementKind: 'prop' },
+    { elementId: 'actor-1', elementKind: 'actor', profileRevision: 5, snapshotSha256: '3'.repeat(64) },
+    { elementId: 'scene-element-1', elementKind: 'scene', profileRevision: 4, snapshotSha256: '2'.repeat(64) },
+    { elementId: 'prop-1', elementKind: 'prop', profileRevision: 6, snapshotSha256: '4'.repeat(64) },
   ],
 }
 
@@ -132,6 +135,7 @@ function relationAuthority(request: ImagoShotRelationMethodRequest): Record<stri
     schema: 'jason.qingmu-shot-relation-authority.v1',
     projectId: request.projectId,
     episodeId: request.episodeId,
+    episodeRevision: request.episodeRevision,
     storyboardRevisionId: request.storyboardRevisionId,
     storyboardRevisionVersion: request.storyboardRevisionVersion,
     storyboardSourceSha256: request.storyboardSourceSha256,
@@ -147,6 +151,7 @@ function expectedSnapshot(request: ImagoShotRelationMethodRequest): ImagoShotRel
     target: {
       projectId: request.projectId,
       episodeId: request.episodeId,
+      episodeRevision: request.episodeRevision,
       storyboardRevisionId: request.storyboardRevisionId,
       storyboardRevisionVersion: request.storyboardRevisionVersion,
       storyboardSourceSha256: request.storyboardSourceSha256,
@@ -216,6 +221,7 @@ function projection(snapshot: ImagoShotRelationMethodSnapshot): ImagoShotRelatio
         resource: 'scene_shot_beat_element_relation_snapshot',
         projectId: snapshot.target.projectId,
         episodeId: snapshot.target.episodeId,
+        episodeRevision: snapshot.target.episodeRevision,
         storyboardRevisionId: snapshot.target.storyboardRevisionId,
         storyboardRevisionVersion: snapshot.target.storyboardRevisionVersion,
         storyboardSourceSha256: snapshot.target.storyboardSourceSha256,
@@ -317,6 +323,59 @@ describe('qingmu Shot relation method adapter', () => {
       .digest('hex'))
   })
 
+  it('binds Episode, Scene, and Element authority lineage into the relation snapshot SHA', async () => {
+    const baselineSha256 = expectedSnapshot(REQUEST).target.relationSnapshotSha256
+    const lineageVariants: ImagoShotRelationMethodRequest[] = [
+      { ...REQUEST, episodeRevision: REQUEST.episodeRevision + 1 },
+      {
+        ...REQUEST,
+        scenes: REQUEST.scenes.map((scene, index) => index === 0
+          ? { ...scene, profileRevision: scene.profileRevision + 1 }
+          : scene),
+      },
+      {
+        ...REQUEST,
+        scenes: REQUEST.scenes.map((scene, index) => index === 0
+          ? { ...scene, snapshotSha256: '5'.repeat(64) }
+          : scene),
+      },
+      {
+        ...REQUEST,
+        elements: REQUEST.elements.map((element, index) => index === 0
+          ? { ...element, profileRevision: element.profileRevision + 1 }
+          : element),
+      },
+      {
+        ...REQUEST,
+        elements: REQUEST.elements.map((element, index) => index === 0
+          ? { ...element, snapshotSha256: '6'.repeat(64) }
+          : element),
+      },
+    ]
+    const observedSha256 = new Set([baselineSha256])
+
+    for (const request of lineageVariants) {
+      const handler = createImagoMethodHandler(
+        { coreRoot: '/opt/imago-os-core' },
+        dependencies(async snapshot => projection(snapshot)),
+      )
+      const result = await handler('shotRelationMethod', request, signal())
+
+      expect(result.ok).toBe(true)
+      if (!result.ok) throw new Error(result.error.message)
+      const value = result.value as ImagoShotRelationMethodResponse
+      const relationSha256 = value.projection.target.relationSnapshotSha256
+      expect(relationSha256).toBe(canonicalSha256(relationAuthority(request)))
+      expect(relationSha256).not.toBe(baselineSha256)
+      expect(value.projection.target.episodeRevision).toBe(request.episodeRevision)
+      expect(value.projection.relationship_projection.scenes).toEqual(request.scenes)
+      expect(value.projection.relationship_projection.elements).toEqual(request.elements)
+      observedSha256.add(relationSha256)
+    }
+
+    expect(observedSha256).toHaveLength(lineageVariants.length + 1)
+  })
+
   it('rejects browser-supplied authority, duplicate IDs, dangling relations, and unknown selected Shots before Core', async () => {
     const runShotRelationCompiler = vi.fn()
     const handler = createImagoMethodHandler(
@@ -339,14 +398,45 @@ describe('qingmu Shot relation method adapter', () => {
         ? { ...shot, beats: [{ ...shot.beats[0], elementIds: ['prop-1'] }] }
         : shot),
     }
+    const firstElement = REQUEST.elements[0]
+    if (firstElement === undefined) throw new Error('fixture first Element is missing')
     const invalidPayloads: unknown[] = [
       { ...REQUEST, relationSnapshotSha256: '9'.repeat(64) },
       duplicateBeat,
       outsideScene,
       outsideShot,
       { ...REQUEST, selectedShotId: 'missing-shot' },
-      { ...REQUEST, elements: [...REQUEST.elements, REQUEST.elements[0]] },
+      { ...REQUEST, elements: [...REQUEST.elements, firstElement] },
+      {
+        ...REQUEST,
+        elements: [
+          ...REQUEST.elements,
+          { ...firstElement, profileRevision: firstElement.profileRevision + 1 },
+        ],
+      },
+      { ...REQUEST, episodeRevision: Number.MAX_SAFE_INTEGER + 1 },
+      { ...REQUEST, storyboardRevisionVersion: 0 },
       { ...REQUEST, storyboardRevisionVersion: Number.MAX_SAFE_INTEGER + 1 },
+      {
+        ...REQUEST,
+        scenes: [{ ...REQUEST.scenes[0], profileRevision: Number.MAX_SAFE_INTEGER + 1 }],
+      },
+      {
+        ...REQUEST,
+        scenes: [{ ...REQUEST.scenes[0], snapshotSha256: 'A'.repeat(64) }],
+      },
+      {
+        ...REQUEST,
+        elements: REQUEST.elements.map((element, index) => index === 0
+          ? { ...element, profileRevision: Number.MAX_SAFE_INTEGER + 1 }
+          : element),
+      },
+      {
+        ...REQUEST,
+        elements: REQUEST.elements.map((element, index) => index === 0
+          ? { ...element, snapshotSha256: 'z'.repeat(64) }
+          : element),
+      },
     ]
 
     for (const payload of invalidPayloads) {
@@ -368,6 +458,16 @@ describe('qingmu Shot relation method adapter', () => {
       (value: Record<string, unknown>): void => {
         const relationships = value.relationship_projection as Record<string, unknown>
         relationships.selectedShot = REQUEST.shots[0]
+      },
+      (value: Record<string, unknown>): void => {
+        const relationships = value.relationship_projection as Record<string, unknown>
+        const scenes = relationships.scenes as Record<string, unknown>[]
+        scenes[0] = { ...scenes[0], profileRevision: 99 }
+      },
+      (value: Record<string, unknown>): void => {
+        const relationships = value.relationship_projection as Record<string, unknown>
+        const elements = relationships.elements as Record<string, unknown>[]
+        elements[0] = { ...elements[0], snapshotSha256: '8'.repeat(64) }
       },
       (value: Record<string, unknown>): void => {
         const definition = value.method_definition as Record<string, unknown>
