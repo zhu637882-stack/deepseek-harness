@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { createHash } from 'node:crypto'
+import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type {
   ImagoHeroFrameStoryboardMethodRequest,
   ImagoHeroFrameStoryboardMethodResponse,
@@ -10,12 +11,15 @@ import type {
   YimengCommitStoryboardCanvasResponse,
   YimengHeroFrameStoryboardsProjection,
   YimengPreviewStoryboardCanvasResponse,
+  YimengPreviewStoryboardCanvasRequest,
+  YimengProposeStoryboardCanvasRequest,
   YimengProposeStoryboardCanvasResponse,
   YimengRecoverStoryboardCanvasCommitResponse,
   YimengShotRelationsProjection,
   YimengWorkflowProjection,
 } from '../src/client/contracts.ts'
 import { HeroFrameStoryboardCanvas } from '../src/client/HeroFrameStoryboardCanvas.tsx'
+import { ShotRelationsView } from '../src/client/ShotRelationsView.tsx'
 import type { QingmuCockpitKey } from '../src/client/locales.ts'
 import { zh } from '../src/client/locales.ts'
 import {
@@ -79,8 +83,24 @@ const RELATIONS: YimengShotRelationsProjection = {
   scenes: [{ sceneId: 'scene-1', name: '雨夜巷口', profileRevision: 2, snapshotSha256: sha('2') }],
   shots: [{
     shotId: 'frame-1',
+    frameNo: 1,
     sceneId: 'scene-1',
     title: '雨夜相遇',
+    durationSec: 2.5,
+    dialogueRhythm: {
+      cueCount: 1,
+      timedCueCount: 1,
+      cues: [{
+        schemaVersion: 'dialogue-cue-v2',
+        lineId: 'line-1',
+        speakerId: 'character-1',
+        verbatimText: '你终于来了。',
+        plannedStartSec: 0.5,
+        plannedEndSec: 1.5,
+        timingVerified: true,
+        legacy: false,
+      }],
+    },
     beats: [{
       beatId: 'beat-1',
       order: 0,
@@ -92,13 +112,52 @@ const RELATIONS: YimengShotRelationsProjection = {
       visualResponsibility: '林青进入巷口。',
     }],
     elements: [
-      { elementKind: 'actor', elementId: 'character-1', name: '林青', profileRevision: 2, snapshotSha256: sha('4') },
-      { elementKind: 'scene', elementId: 'scene-1', name: '雨夜巷口', profileRevision: 2, snapshotSha256: sha('2') },
-      { elementKind: 'prop', elementId: 'prop-1', name: '黑伞', profileRevision: 1, snapshotSha256: sha('5') },
+      {
+        elementKind: 'actor', elementId: 'character-1', name: '林青', profileRevision: 2,
+        snapshotSha256: sha('4'), currentReferenceAvailability: 'available',
+        currentReference: {
+          assetId: 'asset-character-1', sha256: sha('a'),
+          lineage: {
+            projectId: 'project-1', sourceEpisodeId: 'episode-1', ownerType: 'actor', ownerId: 'character-1',
+            role: 'identity_board', generationJobId: 'job-character-1', sourceRevisionId: 'revision-character-1',
+            formalConsistencyCheckId: 'check-character-1',
+          },
+        },
+      },
+      {
+        elementKind: 'scene', elementId: 'scene-1', name: '雨夜巷口', profileRevision: 2,
+        snapshotSha256: sha('2'), currentReferenceAvailability: 'missing', currentReference: null,
+      },
+      {
+        elementKind: 'prop', elementId: 'prop-1', name: '黑伞', profileRevision: 1,
+        snapshotSha256: sha('5'), currentReferenceAvailability: 'missing', currentReference: null,
+      },
     ],
   }],
   valid: true,
   blockers: [],
+}
+
+const RIVER_RELATIONS: YimengShotRelationsProjection = {
+  ...RELATIONS,
+  shots: [
+    {
+      ...RELATIONS.shots[0]!,
+      shotId: 'shot-b',
+      frameNo: 12,
+      title: '走廊回望',
+      durationSec: 1.5,
+      dialogueRhythm: { cueCount: 0, timedCueCount: 0, cues: [] },
+      beats: RELATIONS.shots[0]!.beats.map(beat => ({ ...beat, endSec: 1.5, propIds: [] })),
+      elements: RELATIONS.shots[0]!.elements.slice(0, 2),
+    },
+    {
+      ...RELATIONS.shots[0]!,
+      shotId: 'shot-z',
+      frameNo: 7,
+      title: '雨夜相遇',
+    },
+  ],
 }
 
 const HERO = {
@@ -108,25 +167,28 @@ const HERO = {
   bindingSha256: HERO_BINDING_SHA,
 } as const
 
-function heroProjection(heroFrame: typeof HERO | null = HERO): YimengHeroFrameStoryboardsProjection {
+function heroProjection(
+  heroFrame: typeof HERO | null = HERO,
+  relations: YimengShotRelationsProjection = RELATIONS,
+): YimengHeroFrameStoryboardsProjection {
   return {
     schema: 'jason.qingmu-hero-frame-storyboards.v1',
-    projectId: 'project-1',
-    episodeId: 'episode-1',
-    episodeRevision: 3,
+    projectId: relations.projectId,
+    episodeId: relations.episodeId,
+    episodeRevision: relations.storyboardRevision.episodeRevision,
     storyboardRevision: {
-      revisionId: 'storyboard-revision-1',
-      revisionVersion: 1,
-      sourceSha256: STORYBOARD_SOURCE_SHA,
+      revisionId: relations.storyboardRevision.revisionId,
+      revisionVersion: relations.storyboardRevision.revisionVersion,
+      sourceSha256: relations.storyboardRevision.sourceSha256,
     },
     shotRelationsSha256: RELATIONS_SHA,
-    shots: [{
-      shotId: 'frame-1',
+    shots: relations.shots.map(shot => ({
+      shotId: shot.shotId,
       shotSnapshotSha256: SHOT_SNAPSHOT_SHA,
       heroFrame,
       canvas: null,
       blockers: [],
-    }],
+    })),
     shotsSha256: BASE_SNAPSHOT_SHA,
     valid: true,
     blockers: [],
@@ -229,7 +291,7 @@ function methodResponse(request: ImagoHeroFrameStoryboardMethodRequest): ImagoHe
   }
 }
 
-function proposalResponse(): YimengProposeStoryboardCanvasResponse {
+function proposalResponse(targetId = 'frame-1'): YimengProposeStoryboardCanvasResponse {
   return {
     schema: 'jason.qingmu-storyboard-canvas-change-set-proposal.v1',
     changeSet: {
@@ -239,7 +301,7 @@ function proposalResponse(): YimengProposeStoryboardCanvasResponse {
       projectId: 'project-1',
       episodeId: 'episode-1',
       targetType: 'storyboard_frame',
-      targetId: 'frame-1',
+      targetId,
       baseRevision: 1,
       baseSnapshotSha256: BASE_SNAPSHOT_SHA,
       payloadSha256: PAYLOAD_SHA,
@@ -265,14 +327,22 @@ interface FixtureState {
   receipt?: YimengCommitStoryboardCanvasResponse
 }
 
-function buildFixture(options: { readonly wrongPlainReceipt?: boolean } = {}) {
+function buildFixture(options: {
+  readonly wrongPlainReceipt?: boolean
+  readonly relations?: YimengShotRelationsProjection
+} = {}) {
+  const relations = options.relations ?? RELATIONS
   const state: FixtureState = {}
   const heroFrameStoryboardMethod = vi.fn(async (request: ImagoHeroFrameStoryboardMethodRequest) => {
     state.request = request
     return methodResponse(request)
   })
-  const proposeStoryboardCanvas = vi.fn(async () => proposalResponse())
-  const previewStoryboardCanvas = vi.fn(async (): Promise<YimengPreviewStoryboardCanvasResponse> => {
+  const proposeStoryboardCanvas = vi.fn(async (request: YimengProposeStoryboardCanvasRequest) => (
+    proposalResponse(request.frameId)
+  ))
+  const previewStoryboardCanvas = vi.fn(async (
+    previewRequest: YimengPreviewStoryboardCanvasRequest,
+  ): Promise<YimengPreviewStoryboardCanvasResponse> => {
     const request = state.request
     if (request === undefined) throw new Error('method request missing')
     const canvas: NonNullable<YimengHeroFrameStoryboardsProjection['shots'][number]['canvas']> = {
@@ -290,7 +360,7 @@ function buildFixture(options: { readonly wrongPlainReceipt?: boolean } = {}) {
       projectId: 'project-1',
       episodeId: 'episode-1',
       targetType: 'storyboard_frame',
-      targetId: 'frame-1',
+      targetId: previewRequest.frameId,
       operation: 'replaceStoryboardCanvas',
       storyboardRevision: {
         revisionId: 'storyboard-revision-1', revisionVersion: 1, sourceSha256: STORYBOARD_SOURCE_SHA,
@@ -364,35 +434,35 @@ function buildFixture(options: { readonly wrongPlainReceipt?: boolean } = {}) {
   })
   const onCommitted = vi.fn(async (): Promise<YimengWorkflowProjection> => {
     if (state.canvas === undefined) throw new Error('authoritative canvas missing')
-    const relations = {
-      ...RELATIONS,
+    const authoritativeRelations = {
+      ...relations,
       storyboardRevision: {
-        ...RELATIONS.storyboardRevision,
+        ...relations.storyboardRevision,
         revisionId: 'storyboard-revision-2',
         revisionVersion: 2,
         sourceSha256: AUTHORITATIVE_SOURCE_SHA,
       },
     }
     const projection: YimengHeroFrameStoryboardsProjection = {
-      ...heroProjection(),
+      ...heroProjection(HERO, authoritativeRelations),
       storyboardRevision: {
         revisionId: 'storyboard-revision-2',
         revisionVersion: 2,
         sourceSha256: AUTHORITATIVE_SOURCE_SHA,
       },
-      shots: [{
-        shotId: 'frame-1',
+      shots: authoritativeRelations.shots.map(shot => ({
+        shotId: shot.shotId,
         shotSnapshotSha256: SHOT_SNAPSHOT_SHA,
         heroFrame: HERO,
-        canvas: state.canvas,
+        canvas: shot.shotId === state.receipt?.targetId ? state.canvas : null,
         blockers: [],
-      }],
+      })),
       shotsSha256: AUTHORITATIVE_SNAPSHOT_SHA,
     }
     return {
       projectId: 'project-1',
       episodeId: 'episode-1',
-      director: { shotRelations: relations, heroFrameStoryboards: projection },
+      director: { shotRelations: authoritativeRelations, heroFrameStoryboards: projection },
     } as unknown as YimengWorkflowProjection
   })
   const port = {
@@ -437,6 +507,55 @@ afterEach(() => {
 })
 
 describe('HeroFrameStoryboardCanvas', () => {
+  it('routes a clicked Shot-B through the complete E5-2 canvas receipt and GET-only recovery chain', async () => {
+    const fixture = buildFixture({ relations: RIVER_RELATIONS })
+    function ShotRiverCanvasJourney() {
+      const [selectedShotId, setSelectedShotId] = useState('shot-z')
+      return <>
+        <ShotRelationsView
+          relations={RIVER_RELATIONS}
+          selectedShotId={selectedShotId}
+          onSelectShotId={setSelectedShotId}
+          t={t}
+        />
+        <HeroFrameStoryboardCanvas
+          relations={RIVER_RELATIONS}
+          heroFrameStoryboards={heroProjection(HERO, RIVER_RELATIONS)}
+          selectedShotId={selectedShotId}
+          port={fixture.port}
+          t={t}
+          onCommitted={fixture.onCommitted}
+        />
+      </>
+    }
+    const view = render(<ShotRiverCanvasJourney />)
+
+    const river = screen.getByRole('list', { name: zh.shotRiver })
+    fireEvent.click(within(river).getByRole('button', { name: /shot-b/u }))
+    const selected = view.container.querySelector('[data-shot-id="shot-b"]')
+    expect(selected).toBeTruthy()
+    if (!(selected instanceof HTMLElement)) throw new Error('Shot-B detail is missing')
+    expect(await within(selected).findByText('0 句 · 0 已定时')).toBeTruthy()
+    expect(within(selected).getByText('1/2 参考已绑定')).toBeTruthy()
+
+    await prepareAndConfirmCommit()
+    await screen.findByText('权威画布已提交并完成回执恢复与刷新')
+
+    expect(fixture.state.request?.selectedShotId).toBe('shot-b')
+    expect(fixture.proposeStoryboardCanvas).toHaveBeenCalledTimes(1)
+    expect(fixture.proposeStoryboardCanvas.mock.calls[0]?.[0]).toMatchObject({ frameId: 'shot-b' })
+    expect(fixture.previewStoryboardCanvas).toHaveBeenCalledTimes(1)
+    expect(fixture.previewStoryboardCanvas.mock.calls[0]?.[0]).toMatchObject({ frameId: 'shot-b' })
+    expect(fixture.commitStoryboardCanvas).toHaveBeenCalledTimes(1)
+    expect(fixture.commitStoryboardCanvas.mock.calls[0]?.[0]).toMatchObject({ targetId: 'shot-b' })
+    expect(fixture.state.receipt).toMatchObject({ targetId: 'shot-b' })
+    expect(fixture.recoverStoryboardCanvasCommit).toHaveBeenCalledTimes(1)
+    expect(fixture.recoverStoryboardCanvasCommit.mock.calls[0]?.[0]).toEqual(
+      fixture.commitStoryboardCanvas.mock.calls[0]?.[0],
+    )
+    expect(sessionStorage.length).toBe(0)
+  })
+
   it('keeps one frame identity and completes method, proposal, preview, commit, GET-style recovery, and refresh', async () => {
     const fixture = buildFixture()
     render(<HeroFrameStoryboardCanvas

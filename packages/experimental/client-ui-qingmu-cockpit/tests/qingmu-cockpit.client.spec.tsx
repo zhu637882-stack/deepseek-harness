@@ -9,6 +9,7 @@ import type {
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import { QingmuCockpit, type QingmuCockpitProps } from '../src/client/QingmuCockpit.tsx'
 import { buildShotRelationMethodRequest } from '../src/client/ShotRelationMethodView.tsx'
+import { ShotRelationsView } from '../src/client/ShotRelationsView.tsx'
 import type { QingmuYimengPort } from '../src/client/contracts.ts'
 import { zh } from '../src/client/locales.ts'
 import {
@@ -50,8 +51,24 @@ const SHOT_RELATIONS = {
   shots: [
     {
       shotId: 'frame-1',
+      frameNo: 1,
       sceneId: 'scene-1',
       title: '雨夜相遇',
+      durationSec: 2.5,
+      dialogueRhythm: {
+        cueCount: 1,
+        timedCueCount: 1,
+        cues: [{
+          schemaVersion: 'dialogue-cue-v2',
+          lineId: 'line-1',
+          speakerId: 'character-1',
+          verbatimText: '你终于来了。',
+          plannedStartSec: 0.5,
+          plannedEndSec: 1.5,
+          timingVerified: true,
+          legacy: false,
+        }],
+      },
       beats: [{
         beatId: 'beat-1',
         order: 0,
@@ -63,15 +80,35 @@ const SHOT_RELATIONS = {
         visualResponsibility: '林青进入巷口并看向伞下的人。',
       }],
       elements: [
-        { elementKind: 'actor', elementId: 'character-1', name: '林青', profileRevision: 2, snapshotSha256: '4'.repeat(64) },
-        { elementKind: 'scene', elementId: 'scene-1', name: '雨夜巷口', profileRevision: 2, snapshotSha256: '2'.repeat(64) },
-        { elementKind: 'prop', elementId: 'prop-1', name: '黑伞', profileRevision: 1, snapshotSha256: '5'.repeat(64) },
+        {
+          elementKind: 'actor', elementId: 'character-1', name: '林青', profileRevision: 2,
+          snapshotSha256: '4'.repeat(64), currentReferenceAvailability: 'available',
+          currentReference: {
+            assetId: 'asset-character-1', sha256: 'a'.repeat(64),
+            lineage: {
+              projectId: 'project-1', sourceEpisodeId: 'episode-1', ownerType: 'actor', ownerId: 'character-1',
+              role: 'identity_board', generationJobId: 'job-character-1', sourceRevisionId: 'revision-character-1',
+              formalConsistencyCheckId: 'check-character-1',
+            },
+          },
+        },
+        {
+          elementKind: 'scene', elementId: 'scene-1', name: '雨夜巷口', profileRevision: 2,
+          snapshotSha256: '2'.repeat(64), currentReferenceAvailability: 'missing', currentReference: null,
+        },
+        {
+          elementKind: 'prop', elementId: 'prop-1', name: '黑伞', profileRevision: 1,
+          snapshotSha256: '5'.repeat(64), currentReferenceAvailability: 'missing', currentReference: null,
+        },
       ],
     },
     {
       shotId: 'frame-2',
+      frameNo: 2,
       sceneId: 'scene-2',
       title: '走廊回望',
+      durationSec: 1.5,
+      dialogueRhythm: { cueCount: 0, timedCueCount: 0, cues: [] },
       beats: [{
         beatId: 'beat-2',
         order: 0,
@@ -83,8 +120,22 @@ const SHOT_RELATIONS = {
         visualResponsibility: '林青停步回望。',
       }],
       elements: [
-        { elementKind: 'actor', elementId: 'character-1', name: '林青', profileRevision: 2, snapshotSha256: '4'.repeat(64) },
-        { elementKind: 'scene', elementId: 'scene-2', name: '旧走廊', profileRevision: 4, snapshotSha256: '3'.repeat(64) },
+        {
+          elementKind: 'actor', elementId: 'character-1', name: '林青', profileRevision: 2,
+          snapshotSha256: '4'.repeat(64), currentReferenceAvailability: 'available',
+          currentReference: {
+            assetId: 'asset-character-1', sha256: 'a'.repeat(64),
+            lineage: {
+              projectId: 'project-1', sourceEpisodeId: 'episode-1', ownerType: 'actor', ownerId: 'character-1',
+              role: 'identity_board', generationJobId: 'job-character-1', sourceRevisionId: 'revision-character-1',
+              formalConsistencyCheckId: 'check-character-1',
+            },
+          },
+        },
+        {
+          elementKind: 'scene', elementId: 'scene-2', name: '旧走廊', profileRevision: 4,
+          snapshotSha256: '3'.repeat(64), currentReferenceAvailability: 'missing', currentReference: null,
+        },
       ],
     },
   ],
@@ -664,6 +715,48 @@ describe('buildShotRelationMethodRequest', () => {
 
     expect(() => buildShotRelationMethodRequest(divergent, 'frame-2'))
       .toThrow('Element character-1 的权威血缘不一致')
+  })
+})
+
+describe('ShotRelationsView', () => {
+  it('renders the Shot River by frameNo with scan-ready rhythm and reference status', () => {
+    const onSelectShotId = vi.fn()
+    const shotZ = { ...structuredClone(SHOT_RELATIONS.shots[0]), shotId: 'shot-z', frameNo: 7 }
+    const shotB = { ...structuredClone(SHOT_RELATIONS.shots[1]), shotId: 'shot-b', frameNo: 12 }
+    const relations = {
+      ...structuredClone(SHOT_RELATIONS),
+      shots: [shotB, shotZ],
+    } as YimengShotRelationsProjection
+
+    render(
+      <ShotRelationsView
+        relations={relations}
+        selectedShotId="shot-z"
+        onSelectShotId={onSelectShotId}
+        t={t}
+      />,
+    )
+
+    const river = screen.getByRole('list', { name: zh.shotRiver })
+    const buttons = within(river).getAllByRole('button')
+    expect(buttons.map(button => button.textContent)).toEqual([
+      '07雨夜相遇shot-z2.5 秒1 句 · 1 已定时1/3 参考已绑定',
+      '12走廊回望shot-b1.5 秒0 句 · 0 已定时1/2 参考已绑定',
+    ])
+    const selected = document.querySelector('[data-shot-id="shot-z"]')
+    expect(selected).toBeTruthy()
+    if (!(selected instanceof HTMLElement)) throw new Error('Shot-Z detail is missing')
+    expect(within(selected).getByText('asset-character-1', { exact: false })).toBeTruthy()
+    expect(within(selected).getByText('a'.repeat(64), { exact: false })).toBeTruthy()
+    expect(within(selected).getByText('project-1 · episode-1 · actor:character-1')).toBeTruthy()
+    expect(within(selected).getByText('identity_board', { exact: false })).toBeTruthy()
+    expect(within(selected).getByText('job-character-1')).toBeTruthy()
+    expect(within(selected).getByText('revision-character-1')).toBeTruthy()
+    expect(within(selected).getByText('check-character-1')).toBeTruthy()
+
+    fireEvent.click(buttons[1] as HTMLButtonElement)
+    expect(onSelectShotId).toHaveBeenCalledOnce()
+    expect(onSelectShotId).toHaveBeenCalledWith('shot-b')
   })
 })
 

@@ -21,9 +21,16 @@ const ELEMENT_LABELS = {
 /** One transient selector over Yimeng's rebuildable relation projection. */
 export function ShotRelationsView({ relations, selectedShotId, onSelectShotId, t }: ShotRelationsViewProps) {
   const selectedShot = relations.shots.find(shot => shot.shotId === selectedShotId)
+  const orderedShots = [...relations.shots].sort((left, right) => left.frameNo - right.frameNo)
   const scene = selectedShot === undefined
     ? undefined
     : relations.scenes.find(item => item.sceneId === selectedShot.sceneId)
+  const dialogueSummary = selectedShot === undefined
+    ? ''
+    : `${selectedShot.dialogueRhythm.cueCount} ${t('shotRiverCueUnit')} · ${selectedShot.dialogueRhythm.timedCueCount} ${t('shotRiverTimed')}`
+  const referenceSummary = selectedShot === undefined
+    ? ''
+    : `${selectedShot.elements.filter(element => element.currentReferenceAvailability === 'available').length}/${selectedShot.elements.length} ${t('shotRiverReferencesBound')}`
 
   return (
     <section className={css.shotRelations} aria-label={t('shotRelationsTitle')}>
@@ -37,20 +44,30 @@ export function ShotRelationsView({ relations, selectedShotId, onSelectShotId, t
         ? <p className={css.empty}>{t('shotsEmpty')}</p>
         : (
           <ol className={css.shotRiver} aria-label={t('shotRiver')}>
-            {relations.shots.slice(0, 80).map((shot, index) => (
-              <li key={shot.shotId}>
-                <button
-                  type="button"
-                  className={shot.shotId === selectedShotId ? css.shotRiverSelected : undefined}
-                  aria-pressed={shot.shotId === selectedShotId}
-                  onClick={() => { onSelectShotId(shot.shotId) }}
-                >
-                  <span>{String(index + 1).padStart(2, '0')}</span>
-                  <strong>{shot.title ?? shot.shotId}</strong>
-                  <small>{shot.shotId}</small>
-                </button>
-              </li>
-            ))}
+            {orderedShots.slice(0, 80).map((shot) => {
+              const availableReferences = shot.elements.filter(
+                element => element.currentReferenceAvailability === 'available',
+              ).length
+              return (
+                <li key={shot.shotId}>
+                  <button
+                    type="button"
+                    className={shot.shotId === selectedShotId ? css.shotRiverSelected : undefined}
+                    aria-pressed={shot.shotId === selectedShotId}
+                    onClick={() => { onSelectShotId(shot.shotId) }}
+                  >
+                    <span className={css.shotRiverNumber}>{String(shot.frameNo).padStart(2, '0')}</span>
+                    <strong>{shot.title ?? shot.shotId}</strong>
+                    <small>{shot.shotId}</small>
+                    <span className={css.shotRiverMeta}>
+                      <small>{shot.durationSec} {t('shotRiverSeconds')}</small>
+                      <small>{shot.dialogueRhythm.cueCount} {t('shotRiverCueUnit')} · {shot.dialogueRhythm.timedCueCount} {t('shotRiverTimed')}</small>
+                      <small>{availableReferences}/{shot.elements.length} {t('shotRiverReferencesBound')}</small>
+                    </span>
+                  </button>
+                </li>
+              )
+            })}
           </ol>
         )}
 
@@ -62,6 +79,10 @@ export function ShotRelationsView({ relations, selectedShotId, onSelectShotId, t
               <h4>{t('shotRelationScene')}</h4>
               <dl>
                 <div><dt>{t('shotRelationShotId')}</dt><dd>{selectedShot.shotId}</dd></div>
+                <div><dt>{t('shotRiverFrameNo')}</dt><dd>{selectedShot.frameNo}</dd></div>
+                <div><dt>{t('shotRiverDuration')}</dt><dd>{selectedShot.durationSec} {t('shotRiverSeconds')}</dd></div>
+                <div><dt>{t('shotRiverDialogue')}</dt><dd>{dialogueSummary}</dd></div>
+                <div><dt>{t('shotRiverReferences')}</dt><dd>{referenceSummary}</dd></div>
                 <div><dt>{t('shotRelationSceneId')}</dt><dd>{selectedShot.sceneId}</dd></div>
                 <div><dt>{t('shotRelationSceneName')}</dt><dd>{scene?.name ?? t('unknown')}</dd></div>
                 <div><dt>{t('shotRelationProfileRevision')}</dt><dd>{scene?.profileRevision ?? t('unknown')}</dd></div>
@@ -93,6 +114,18 @@ export function ShotRelationsView({ relations, selectedShotId, onSelectShotId, t
                   <small>{element.elementId}</small>
                   <small>{t('shotRelationProfileRevision')}: {element.profileRevision}</small>
                   <small>{t('shotRelationSnapshotHash')}: {element.snapshotSha256}</small>
+                  <small>{t('shotRelationCurrentReference')}: {element.currentReferenceAvailability === 'available'
+                    ? t('shotRelationReferenceAvailable')
+                    : t('shotRelationReferenceMissing')}</small>
+                  {element.currentReference === null ? null : <>
+                    <small>{t('shotRelationReferenceAssetId')}: {element.currentReference.assetId}</small>
+                    <small>{t('shotRelationReferenceSha')}: {element.currentReference.sha256}</small>
+                    <small>{t('shotRelationReferenceSubject')}: <code>{element.currentReference.lineage.projectId} · {element.currentReference.lineage.sourceEpisodeId ?? t('empty')} · {element.currentReference.lineage.ownerType}:{element.currentReference.lineage.ownerId}</code></small>
+                    <small>{t('shotRelationReferenceRole')}: {element.currentReference.lineage.role}</small>
+                    <small>{t('shotRelationReferenceGenerationJob')}: <code>{element.currentReference.lineage.generationJobId ?? t('empty')}</code></small>
+                    <small>{t('shotRelationReferenceSourceRevision')}: <code>{element.currentReference.lineage.sourceRevisionId ?? t('empty')}</code></small>
+                    <small>{t('shotRelationReferenceConsistencyCheck')}: <code>{element.currentReference.lineage.formalConsistencyCheckId ?? t('empty')}</code></small>
+                  </>}
                 </li>
               ))}</ul>
             </article>

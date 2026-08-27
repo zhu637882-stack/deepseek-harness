@@ -901,7 +901,7 @@
 
 .shotRiver {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 8px;
   margin: 0;
   padding: 0;
@@ -917,7 +917,7 @@
   grid-template-columns: auto minmax(0, 1fr);
   gap: 3px 8px;
   width: 100%;
-  min-height: 54px;
+  min-height: 84px;
   padding: 8px 10px;
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 9px;
@@ -936,7 +936,7 @@
   background: var(--qingmu-soft);
 }
 
-.shotRiver span {
+.shotRiverNumber {
   grid-row: 1 / span 2;
   color: var(--dsw-alias-label-tertiary);
   font-variant-numeric: tabular-nums;
@@ -955,6 +955,19 @@
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.shotRiverMeta {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding-top: 4px;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+
+.shotRiverMeta small {
+  font-variant-numeric: tabular-nums;
 }
 
 .shotRelations {
@@ -1032,6 +1045,13 @@
 
 .relationList p {
   margin: 2px 0;
+}
+
+.relationList code {
+  overflow-wrap: anywhere;
+  color: var(--dsw-alias-label-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
 }
 
 .relationList small {
