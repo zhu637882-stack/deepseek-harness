@@ -32,8 +32,28 @@ const REFERENCE_RIGHTS_MARKER_KEYS = [
   'referenceAssetId',
   'referenceAssetSha256',
   'referenceRightsSha256',
+  'preCommitVisualBaselineSha256',
+  'preCommitHumanDecisionsSha256',
   'selectionStatus',
   'isSelected',
+] as const
+const VISUAL_BASELINE_FIELDS = [
+  'visualIdentity',
+  'visualPrompt',
+  'officialReferenceImageUrl',
+] as const
+const HUMAN_DECISION_DIGEST_FIELDS = [
+  'id',
+  'subjectType',
+  'subjectId',
+  'subjectRevision',
+  'subjectSha256',
+  'decision',
+  'reason',
+  'actorId',
+  'actorRole',
+  'authSessionId',
+  'decidedAt',
 ] as const
 
 /** Element kinds supported by the subject-scoped commit-recovery marker. */
@@ -85,6 +105,8 @@ export interface CommandReferenceRightsCommitRecoveryMarker extends CommandCommi
   readonly referenceAssetId: string
   readonly referenceAssetSha256: string
   readonly referenceRightsSha256: string
+  readonly preCommitVisualBaselineSha256: string
+  readonly preCommitHumanDecisionsSha256: string
   readonly selectionStatus: string
   readonly isSelected: boolean
 }
@@ -162,6 +184,77 @@ export async function deriveCommandIdempotencyKey(
     .map(value => value.toString(16).padStart(2, '0'))
     .join('')
   return `qingmu:element:v4:${changeSetSha256}:${payloadSha256}`
+}
+
+async function digestCanonicalRecoveryValue(value: unknown): Promise<string> {
+  const encoded = new TextEncoder().encode(JSON.stringify(value))
+  const digest = await getSubtleCrypto().digest('SHA-256', encoded)
+  return [...new Uint8Array(digest)]
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+function objectRecord(value: unknown, field: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`${field} 不是对象`)
+  }
+  return value as Record<string, unknown>
+}
+
+function normalizeVisualField(
+  subject: Record<string, unknown>,
+  field: typeof VISUAL_BASELINE_FIELDS[number],
+): readonly [string] | readonly [string, string] {
+  if (!Object.prototype.hasOwnProperty.call(subject, field)) return ['absent']
+  const value = subject[field]
+  if (value === null) return ['null']
+  if (typeof value !== 'string') throw new Error(`权利恢复视觉基线字段 ${field} 无效`)
+  return ['string', value]
+}
+
+/**
+ * Digest the three authoritative visual fields without persisting their text values.
+ * @param subject - validated authoritative element-profile subject.
+ * @returns SHA-256 of a fixed-field, presence-aware visual baseline.
+ */
+export async function digestCommandRecoveryVisualBaseline(subject: unknown): Promise<string> {
+  const record = objectRecord(subject, '权利恢复视觉基线')
+  return digestCanonicalRecoveryValue(VISUAL_BASELINE_FIELDS.map(field => [
+    field,
+    normalizeVisualField(record, field),
+  ]))
+}
+
+function normalizeHumanDecision(value: unknown, index: number): Record<string, string | number> {
+  const decision = objectRecord(value, `正式人工决定[${String(index)}]`)
+  const normalized: Record<string, string | number> = {}
+  for (const field of HUMAN_DECISION_DIGEST_FIELDS) {
+    const fieldValue = decision[field]
+    if (field === 'subjectRevision') {
+      if (!Number.isSafeInteger(fieldValue) || (fieldValue as number) < 0) {
+        throw new Error(`正式人工决定[${String(index)}].subjectRevision 无效`)
+      }
+      normalized[field] = fieldValue as number
+    } else {
+      if (typeof fieldValue !== 'string') {
+        throw new Error(`正式人工决定[${String(index)}].${field} 无效`)
+      }
+      normalized[field] = fieldValue
+    }
+  }
+  return normalized
+}
+
+/**
+ * Digest normalized HumanDecision events while ignoring only the derived stale flag and input order.
+ * @param decisions - validated authoritative HumanDecision event collection.
+ * @returns SHA-256 that changes on event additions, removals, or content mutation.
+ */
+export async function digestCommandRecoveryHumanDecisions(decisions: readonly unknown[]): Promise<string> {
+  const normalized = decisions
+    .map((decision, index) => JSON.stringify(normalizeHumanDecision(decision, index)))
+    .sort()
+  return digestCanonicalRecoveryValue(normalized)
 }
 
 function isElementKind(value: unknown): value is CommandElementKind {
@@ -267,6 +360,14 @@ function parseMarker(
     if (typeof record.referenceRightsSha256 !== 'string' || !SHA256.test(record.referenceRightsSha256)) {
       throw new Error('恢复标记权利记录 SHA-256 无效')
     }
+    if (
+      typeof record.preCommitVisualBaselineSha256 !== 'string'
+      || !SHA256.test(record.preCommitVisualBaselineSha256)
+    ) throw new Error('恢复标记提交前视觉基线 SHA-256 无效')
+    if (
+      typeof record.preCommitHumanDecisionsSha256 !== 'string'
+      || !SHA256.test(record.preCommitHumanDecisionsSha256)
+    ) throw new Error('恢复标记提交前正式人工决定 SHA-256 无效')
     if (!isIdentifier(record.selectionStatus, 128)) throw new Error('恢复标记选择状态无效')
     if (typeof record.isSelected !== 'boolean') throw new Error('恢复标记选择事实无效')
     return {
@@ -275,6 +376,8 @@ function parseMarker(
       referenceAssetId: record.referenceAssetId,
       referenceAssetSha256: record.referenceAssetSha256,
       referenceRightsSha256: record.referenceRightsSha256,
+      preCommitVisualBaselineSha256: record.preCommitVisualBaselineSha256,
+      preCommitHumanDecisionsSha256: record.preCommitHumanDecisionsSha256,
       selectionStatus: record.selectionStatus,
       isSelected: record.isSelected,
     }

@@ -35,6 +35,8 @@ import {
 import {
   clearCommandCommitRecoveryMarker,
   createCommandCommitRecoveryMarker,
+  digestCommandRecoveryHumanDecisions,
+  digestCommandRecoveryVisualBaseline,
   deriveCommandIdempotencyKey,
   discardCommandCommitRecoveryMarker,
   readCommandCommitRecoveryMarker,
@@ -422,24 +424,6 @@ function assertCurrentDecisionUnchanged(
   ) {
     throw new Error('评论后的正式人工决定发生变化')
   }
-}
-
-function assertHumanDecisionsPreserved(
-  before: YimengElementReviewFeedResponse,
-  after: YimengElementReviewFeedResponse,
-): void {
-  if (
-    before.decisions.length !== after.decisions.length
-    || before.decisions.some(decision => !after.decisions.some(candidate => (
-      candidate.id === decision.id && sameHumanDecision(candidate, decision, false)
-    )))
-  ) {
-    throw new Error('权利记录提交后的正式人工决定发生变化')
-  }
-  if (
-    before.subject.revision === after.subject.revision
-    && before.subject.sha256 === after.subject.sha256
-  ) assertCurrentDecisionUnchanged(before.currentDecision, after.currentDecision)
 }
 
 function assertCreatedComment(
@@ -1504,8 +1488,6 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
       || marker.operation === 'requestReferenceRegeneration'
     const referenceRightsMarker = marker.operation === 'replaceReferenceRights'
     const referenceBoundMarker = referenceActionMarker || referenceRightsMarker
-    const baselineSnapshot = snapshot
-    const baselineReviewFeed = reviewFeed
     if (!referenceBoundMarker) {
       setCommitReceipt(receipt)
       setCommitRecovered(recovered)
@@ -1552,14 +1534,10 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
           if (referenceRightsMarker) {
             try {
               const authoritativeReference = await assertReferenceRightsPostState(snapshotResult.value, marker)
-              if (baselineSnapshot !== undefined) {
-                const baselineSubject = recordOf(baselineSnapshot.subject)
-                if (
-                  baselineSubject.visualIdentity !== subject.visualIdentity
-                  || baselineSubject.visualPrompt !== subject.visualPrompt
-                  || baselineSubject.officialReferenceImageUrl !== subject.officialReferenceImageUrl
-                ) throw new Error('权利记录提交后的权威视觉资料发生变化')
-              }
+              if (
+                await digestCommandRecoveryVisualBaseline(subject)
+                !== marker.preCommitVisualBaselineSha256
+              ) throw new Error('权利记录提交后的权威视觉资料摘要不一致')
               setSelectedRightsReference(referenceBinding(authoritativeReference))
               setRightsDraft(createReferenceRightsDraft(authoritativeReference.rights))
               referenceReadSucceeded = true
@@ -1571,8 +1549,12 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
           if (reviewResult.status === 'fulfilled') {
             try {
               assertReviewFeed(reviewResult.value, snapshotResult.value, projectId, targetId, elementKind)
-              if (referenceRightsMarker && baselineReviewFeed !== undefined) {
-                assertHumanDecisionsPreserved(baselineReviewFeed, reviewResult.value)
+              if (
+                referenceRightsMarker
+                && await digestCommandRecoveryHumanDecisions(reviewResult.value.decisions)
+                  !== marker.preCommitHumanDecisionsSha256
+              ) {
+                throw new Error('权利记录提交后的正式人工决定摘要不一致')
               }
               setReviewFeed(reviewResult.value)
               setReviewError(undefined)
@@ -1580,7 +1562,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
               reviewReadError = messageOf(cause)
               setReviewFeed(undefined)
               setReviewError(reviewReadError)
-              if (referenceRightsMarker && baselineReviewFeed !== undefined) {
+              if (referenceRightsMarker) {
                 referenceReadSucceeded = false
                 referenceReadError = reviewReadError
               }
@@ -1589,7 +1571,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
             reviewReadError = messageOf(reviewResult.reason)
             setReviewFeed(undefined)
             setReviewError(reviewReadError)
-            if (referenceRightsMarker && baselineReviewFeed !== undefined) {
+            if (referenceRightsMarker) {
               referenceReadSucceeded = false
               referenceReadError = reviewReadError
             }
@@ -1690,6 +1672,15 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
           || lineage.referenceAssetSha256 !== preview.referenceAssetSha256
           || !referenceRightsRecordsEqual(lineage.rights, preview.proposedReferenceRights)
         ) throw new Error('参考素材权利预览与提案血缘不一致')
+        if (snapshot === undefined || reviewFeed === undefined) {
+          throw new Error('参考素材权利提交缺少提交前权威视觉或正式人工决定基线')
+        }
+        assertSnapshot(snapshot, projectId, targetId, elementKind)
+        assertReviewFeed(reviewFeed, snapshot, projectId, targetId, elementKind)
+        const [preCommitVisualBaselineSha256, preCommitHumanDecisionsSha256] = await Promise.all([
+          digestCommandRecoveryVisualBaseline(snapshot.subject),
+          digestCommandRecoveryHumanDecisions(reviewFeed.decisions),
+        ])
         marker = createCommandCommitRecoveryMarker({
           projectId,
           targetType: 'element_profile',
@@ -1704,6 +1695,8 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
           referenceAssetId: lineage.referenceAssetId,
           referenceAssetSha256: lineage.referenceAssetSha256,
           referenceRightsSha256: await digestReferenceRightsRecord(lineage.rights),
+          preCommitVisualBaselineSha256,
+          preCommitHumanDecisionsSha256,
           selectionStatus: lineage.selectionStatus,
           isSelected: lineage.isSelected,
         })

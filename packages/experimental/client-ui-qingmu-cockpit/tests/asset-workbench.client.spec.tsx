@@ -586,6 +586,7 @@ function createRightsPort(options: {
   readonly noOp?: boolean
   readonly lostResponse?: boolean
   readonly changedOfficialReferenceImageUrl?: boolean
+  readonly humanDecisionDrift?: boolean
 } = {}) {
   const noOp = options.noOp === true
   const initialSnapshot = noOp ? RIGHTS_RECORDED_SNAPSHOT : SNAPSHOT
@@ -657,13 +658,16 @@ function createRightsPort(options: {
     receipt: receiptFor(request),
   } as const))
   const staleDecision = { ...REVIEW_DECISION, stale: true } as const
+  const postDecision = options.humanDecisionDrift
+    ? { ...staleDecision, reason: '权利事务篡改了正式人工决定事件。' } as const
+    : staleDecision
   const initialFeed = reviewFeed({ decisions: [REVIEW_DECISION], currentDecision: REVIEW_DECISION })
   const postFeed = noOp
     ? initialFeed
     : reviewFeed({
       revision: postSnapshot.subject.profileRevision,
       sha256: postSnapshot.snapshotSha256,
-      decisions: [staleDecision],
+      decisions: [postDecision],
       currentDecision: null,
     })
   const createHumanDecision = vi.fn()
@@ -924,6 +928,15 @@ describe('AssetWorkbench', () => {
     expect(markerDuringCommit()).not.toBeNull()
     expect(markerDuringCommit()).not.toContain('rightsHolder')
     expect(markerDuringCommit()).not.toContain('authorizationScope')
+    expect(markerDuringCommit()).not.toContain(OLD_PROMPT)
+    expect(markerDuringCommit()).not.toContain(REVIEW_DECISION.reason)
+    expect(markerDuringCommit()).not.toContain('authSessionId')
+    expect(markerDuringCommit()).not.toContain('token')
+    expect(markerDuringCommit()).not.toContain('proof')
+    expect(JSON.parse(markerDuringCommit() ?? '{}')).toMatchObject({
+      preCommitVisualBaselineSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      preCommitHumanDecisionsSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+    })
     expect(createHumanDecision).not.toHaveBeenCalled()
     expect(elementProfile).toHaveBeenCalledTimes(2)
     await waitFor(() => {
@@ -985,8 +998,54 @@ describe('AssetWorkbench', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: zh.assetRightsConfirm }))
     fireEvent.click(screen.getByRole('button', { name: zh.assetRightsCommit }))
 
-    expect(await screen.findAllByText('权利记录提交后的权威视觉资料发生变化')).not.toHaveLength(0)
+    expect(await screen.findAllByText('权利记录提交后的权威视觉资料摘要不一致')).not.toHaveLength(0)
     expect(readCommandCommitRecoveryMarker(PROJECT_ID, 'prop', TARGET_ID).status).toBe('ready')
+    expect(screen.queryByRole('heading', { name: zh.assetRightsCommitSucceeded })).toBeNull()
+  })
+
+  it('keeps the marker after remount when GET-only rights recovery detects visual drift', async () => {
+    const { port, commitElementProfile, recoverElementProfileCommit } = createRightsPort({
+      lostResponse: true,
+      changedOfficialReferenceImageUrl: true,
+    })
+    mount(port)
+    await prepareRightsPreview()
+    fireEvent.click(screen.getByRole('checkbox', { name: zh.assetRightsConfirm }))
+    fireEvent.click(screen.getByRole('button', { name: zh.assetRightsCommit }))
+    expect(await screen.findAllByText('commit response lost')).not.toHaveLength(0)
+    cleanup()
+
+    mount(port)
+    fireEvent.click(await screen.findByRole('button', { name: zh.recoverReceipt }))
+
+    expect(await screen.findAllByText('权利记录提交后的权威视觉资料摘要不一致')).not.toHaveLength(0)
+    expect(commitElementProfile).toHaveBeenCalledTimes(1)
+    expect(recoverElementProfileCommit).toHaveBeenCalledTimes(1)
+    expect(readCommandCommitRecoveryMarker(PROJECT_ID, 'prop', TARGET_ID).status).toBe('ready')
+    expect(screen.queryByRole('heading', { name: zh.receiptRecovered })).toBeNull()
+    expect(screen.queryByRole('heading', { name: zh.assetRightsCommitSucceeded })).toBeNull()
+  })
+
+  it('keeps the marker after remount when GET-only rights recovery detects HumanDecision event drift', async () => {
+    const { port, commitElementProfile, recoverElementProfileCommit } = createRightsPort({
+      lostResponse: true,
+      humanDecisionDrift: true,
+    })
+    mount(port)
+    await prepareRightsPreview()
+    fireEvent.click(screen.getByRole('checkbox', { name: zh.assetRightsConfirm }))
+    fireEvent.click(screen.getByRole('button', { name: zh.assetRightsCommit }))
+    expect(await screen.findAllByText('commit response lost')).not.toHaveLength(0)
+    cleanup()
+
+    mount(port)
+    fireEvent.click(await screen.findByRole('button', { name: zh.recoverReceipt }))
+
+    expect(await screen.findAllByText('权利记录提交后的正式人工决定摘要不一致')).not.toHaveLength(0)
+    expect(commitElementProfile).toHaveBeenCalledTimes(1)
+    expect(recoverElementProfileCommit).toHaveBeenCalledTimes(1)
+    expect(readCommandCommitRecoveryMarker(PROJECT_ID, 'prop', TARGET_ID).status).toBe('ready')
+    expect(screen.queryByRole('heading', { name: zh.receiptRecovered })).toBeNull()
     expect(screen.queryByRole('heading', { name: zh.assetRightsCommitSucceeded })).toBeNull()
   })
 
