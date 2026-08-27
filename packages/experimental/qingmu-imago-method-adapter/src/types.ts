@@ -950,6 +950,109 @@ export interface ImagoStageSourceMethodResponse extends ImagoMethodJsonObject {
   readonly methodAttestation: ImagoStageSourceMethodAttestation
 }
 
+/** Immutable V6 Stage envelope supplied for machine validation and later registration. */
+export interface ImagoStageArtifact extends ImagoMethodJsonObject {
+  readonly schema_version: '6.0.0-draft.1'
+  readonly workflow_version: '6.0.0-draft.2'
+  readonly stage_id: string
+  readonly scope_instance: string
+  readonly artifact_revision: string
+  readonly created_at: string
+  readonly producer: ImagoMethodJsonObject
+  readonly source_bindings: readonly unknown[]
+  readonly lock_bindings: readonly unknown[]
+  readonly content: unknown
+  readonly open_issues: readonly unknown[]
+}
+
+/** Exact artifact and business coordinates; no approval or dependency claim is accepted. */
+export interface ImagoStageArtifactMethodRequest extends ImagoMethodJsonObject {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly stageId: string
+  readonly scopeInstance: string
+  readonly artifact: ImagoStageArtifact
+}
+
+/** Canonical Core input constructed and hashed by the Host. */
+export interface ImagoStageArtifactMethodSnapshot extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.stage-artifact-method-snapshot.v1'
+  readonly subject: ImagoStageArtifactSubject
+  readonly subjectSnapshotSha256: string
+  readonly artifact: ImagoStageArtifact
+}
+
+/** Artifact identity bound independently from its nested content hash. */
+export interface ImagoStageArtifactSubject extends ImagoMethodJsonObject {
+  readonly schema: 'jason.qingmu-imago-stage-artifact.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly stageId: string
+  readonly scopeInstance: string
+  readonly artifactRevision: string
+  readonly artifactSha256: string
+}
+
+/** Current Stage contract metadata; every execution or approval authority remains false. */
+export interface ImagoStageArtifactMethodDefinition extends ImagoMethodJsonObject {
+  readonly id: 'IMAGO-V6-STAGE-ARTIFACT'
+  readonly version: string
+  readonly stageId: string
+  readonly roleId: string
+  readonly scope: 'global' | 'per_lsu'
+  readonly contractSha256: string
+  readonly artifactKind: string
+  readonly canonicalOutput: string
+  readonly requiredSourceStageIds: readonly string[]
+  readonly requiredLockIds: readonly string[]
+  readonly producesLockId: string | null
+  readonly operation: 'register_machine_validated_stage_artifact'
+  readonly stageArtifactRegistrationAllowed: true
+  readonly dependencyAuthorityRequiredForApproval: true
+  readonly dependencyAuthorityVerified: false
+  readonly stageApprovalAllowed: false
+  readonly lockActivationAllowed: false
+  readonly lsuPlanSealingAllowed: false
+  readonly reworkExecutionAllowed: false
+  readonly providerCalls: 0
+}
+
+/** Deterministic Core validation receipt bound to the exact artifact and Stage contract. */
+export interface ImagoStageArtifactMachineValidation extends ImagoMethodJsonObject {
+  readonly status: 'PASS'
+  readonly validator: 'scripts/validate_v6_stage_contracts.py'
+  readonly validatedArtifactSha256: string
+  readonly contractSha256: string
+}
+
+/** Stateless projection returned by current Core; it is not a Stage approval. */
+export interface ImagoStageArtifactMethodProjection extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-stage-artifact-method.v1'
+  readonly subject: ImagoStageArtifactSubject
+  readonly subjectSnapshotSha256: string
+  readonly machineValidation: ImagoStageArtifactMachineValidation
+  readonly definition: ImagoStageArtifactMethodDefinition
+  readonly ruleBindings: Readonly<Record<string, string>>
+  readonly rulesSha256: string
+}
+
+/** Host-origin proof for one machine projection, never human or dependency authority. */
+export interface ImagoStageArtifactMethodAttestation extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-stage-artifact-method-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly subjectSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly signature: string
+}
+
+/** Validated current projection and its Host-only HMAC proof. */
+export interface ImagoStageArtifactMethodResponse extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-stage-artifact-method-adapter-result.v1'
+  readonly projection: ImagoStageArtifactMethodProjection
+  readonly projectionSha256: string
+  readonly methodAttestation: ImagoStageArtifactMethodAttestation
+}
+
 /** Result values exposed by `/qingmu-imago-method`. */
 export interface ImagoMethodEndpointMap {
   readonly elementMethod: ImagoElementMethodResponse
@@ -962,6 +1065,7 @@ export interface ImagoMethodEndpointMap {
   readonly shotFindingMethod: ImagoShotFindingMethodResponse
   readonly productionUnitMethod: ImagoProductionUnitMethodResponse
   readonly stageSourceMethod: ImagoStageSourceMethodResponse
+  readonly stageArtifactMethod: ImagoStageArtifactMethodResponse
 }
 
 /** Endpoint names accepted by the private method channel. */

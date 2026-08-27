@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-This private experimental Host plugin exposes explicit Yimeng `episode_script` and actor, scene, and prop `element_profile` ChangeSet flows over the loopback-only `/qingmu-yimeng-command` channel. The script operations remain `proposeScript`, `previewScript`, `commitScript`, and the read-only `recoverScriptCommit`. Element operations are `proposeElementProfile`, `proposeReferenceAsset`, `previewElementProfile`, `commitElementProfile`, and the read-only `recoverElementProfileCommit`. Selected-video Findings use `recordShotFinding` and the read-only `recoverShotFinding`.
+This private experimental Host plugin exposes explicit Yimeng `episode_script` and actor, scene, and prop `element_profile` ChangeSet flows over the loopback-only `/qingmu-yimeng-command` channel. The script operations remain `proposeScript`, `previewScript`, `commitScript`, and the read-only `recoverScriptCommit`. Element operations are `proposeElementProfile`, `proposeReferenceAsset`, `previewElementProfile`, `commitElementProfile`, and the read-only `recoverElementProfileCommit`. Selected-video Findings use `recordShotFinding` and the read-only `recoverShotFinding`. Machine-validated Stage artifacts use `registerStageArtifact` and the read-only `recoverStageArtifactRegistration`.
 
 ## Command boundary
 
@@ -46,9 +46,17 @@ The exact `jason.qingmu-stage-source-result.v1` receipt must bind the requested 
 
 `recoverStageSourceBinding` sends one `GET` to that binding path plus `/command-receipt`, with the original `expectedSubjectSha256` query and `Idempotency-Key` header. It validates the original `jason.qingmu-stage-source-recovery.v1` wrapper and nested `receipt`; a missing or wrong-scope receipt remains an upstream 404, not a successful `found` wrapper. Recovery needs neither the current source nor today's HMAC key or original bearer-token session. Interrupted writes are never automatically retried. A changed session or attestation is not the same original POST intent; use receipt recovery instead.
 
+## Immutable Stage artifact registrations
+
+`registerStageArtifact` accepts the project, episode, Stage, and scope coordinates, one exact V6 artifact, artifact-record revision/SHA compare conditions, a visible-ASCII idempotency key, and the current Host-signed `qingmu.imago-stage-artifact-method.v1` projection. The Host independently binds the artifact SHA and revision to the subject, validates the current Stage definition and its version, machine-validation result, rule digest, and HMAC proof, and rejects every approval or execution grant. It serializes the artifact through the same Stage-only Python-compatible finite-number fixed point and rejects physical JSON nesting above Yimeng's 64-level route limit before transport. It then sends one `POST` to `/api/qingmu/projects/{projectId}/episodes/{episodeId}/stage-artifacts/{stageId}/{scopeInstance}`. Path IDs, actor, natural-person identity, and session are never accepted from browser fields in the POST body; Yimeng authentication and its transaction remain authoritative for those identities.
+
+The exact receipt binds the immutable artifact, next record revision, method and rule hashes, authenticated producer identity and request-session SHA. The Host recomputes the record SHA and requires `stageArtifactRegistered: true` while `stageArtifactAvailable`, dependency authority, Stage approval, lock activation, plan sealing, human signoff, rework, and Provider calls remain false or zero. Registration therefore does not satisfy dependencies, approve a Stage, activate a lock, seal an LSU plan, or start production work.
+
+`recoverStageArtifactRegistration` accepts only the original coordinates, subject SHA, and idempotency key. It sends one bodyless `GET` to the same path plus `/command-receipt`, preserving the key in the `Idempotency-Key` header and the subject SHA in the query. It accepts only the exact `jason.qingmu-stage-artifact-recovery.v1` wrapper and revalidates the nested original receipt. Recovery deliberately needs neither today's artifact nor the current HMAC key or historical bearer-token session. An uncertain registration POST is never retried.
+
 ## Security boundary
 
-The upstream must be loopback HTTP(S). The adapter never returns the Host token, sends no cookies, rejects redirects, bounds payload size and request time, and normalizes upstream errors without reflecting response bodies. The browser receives only validated command data and durable receipt identifiers.
+The upstream must be loopback HTTP(S). The adapter never returns the Host bearer credential, sends no cookies, rejects redirects, bounds payload size and request time, and normalizes non-success responses without reflecting their bodies. Successful Stage registration and recovery responses remain intact until their complete business schema is validated, so legitimate receipt fields named `token` are not deleted by generic secret redaction. After validation, any key or string containing the actual current bearer credential fails closed with a static error. Contract failures still return only static safe errors. The browser receives only validated command data and durable receipt identifiers.
 
 ## Model Experience
 
@@ -69,7 +77,7 @@ Independent. Command requests do not modify a model request or reusable prefix.
 ## Known Limitations and Deferred Work
 
 - This local adapter is not an Internet-facing gateway.
-- It implements the `episode_script` plus actor, scene, and prop `element_profile` ChangeSet vertical slices, including explicit reference selection and regeneration-request intents, records selected-video Findings, and registers production-unit scope and episode-script source-reference bindings. Actual generation and automatic creative approval remain outside these operations; registration alone does not complete the production workflow.
+- It implements the `episode_script` plus actor, scene, and prop `element_profile` ChangeSet vertical slices, including explicit reference selection and regeneration-request intents, records selected-video Findings, and registers production-unit scope, episode-script source references, and machine-validated Stage artifacts. Actual generation, dependency authority, and automatic creative approval remain outside these operations; registration alone does not complete the production workflow.
 - It does not start an outbox dispatcher or transport events across processes.
 - ChangeSet proposal conflicts require a fresh authoritative read and a new explicit proposal.
 - Receipt recovery depends on Yimeng retaining the original command receipt; mismatches fail closed. A missing Finding receipt returns `not_found` without resubmitting the write.

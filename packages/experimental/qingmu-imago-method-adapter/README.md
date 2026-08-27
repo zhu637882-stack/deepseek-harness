@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 This private experimental Host plugin compiles current IMAGO OS methods into browser-safe guidance. `elementMethod` covers profile editing, `referenceAssetMethod` covers bounded reference actions and rights guidance, `promptIrMethod` covers provider-neutral PromptIR candidates, `shotRelationMethod` covers the canonical Scene/Shot/Shot-local-Beat/Element graph plus Shot River rhythm and reference bindings, and `heroFrameStoryboardMethod` deterministically compiles one selected Hero Frame and its Shot-local canvas annotations. `worksetMethod` reads a fresh episode workflow and returns current IMAGO stage definitions with explicit authority availability. These input-snapshot methods build their own bounded input in the Host and invoke their reviewed Core compiler with Unicode-code-point-sorted, whitespace-free JSON on stdin. Their compiler's `input_snapshot_sha256` must match the SHA-256 of those exact input bytes.
 
-`shotFindingMethod`, `productionUnitMethod`, and `stageSourceMethod` use their subject hash contracts described below; the older methods' `input_snapshot_sha256` field is not part of these schemas.
+`shotFindingMethod`, `productionUnitMethod`, `stageSourceMethod`, and `stageArtifactMethod` use their subject hash contracts described below; the older methods' `input_snapshot_sha256` field is not part of these schemas.
 
 ## Attestation boundary
 
@@ -59,6 +59,14 @@ The response is `qingmu.imago-production-unit-method-adapter-result.v1` with `pr
 The fixed `scripts/compile_qingmu_stage_source_method.py` receives `schema`, `stageId`, the seven-field `subject`, and `snapshotSha256`. The Host independently checks the current A1S contract, including its global scope, complete screenplay-package requirements, upstream and lock dependencies, and canonical output. Its nine raw rule hashes cover the seven workset sources plus `scripts/compile_qingmu_element_method.py` and this compiler. Source and rule drift across compilation fail closed.
 
 The response is `qingmu.imago-stage-source-method-adapter-result.v1` with `projection`, `projectionSha256`, and `methodAttestation`. The existing Host-only key signs the validated source-reference coordinates; it does not turn one episode script into `SCREENPLAY_PACKAGE` or grant stage completion, approval, locks, plan sealing, or Provider execution. The backend remains the authority for source and binding CAS. Tests may inject `readStageSources` and `runStageSourceCompiler` through `createImagoMethodHandler`; the normal path uses the bounded subprocess runner and waits for child closure on cancellation.
+
+## Machine-validated Stage artifact method
+
+`stageArtifactMethod` accepts only `projectId`, `episodeId`, `stageId`, `scopeInstance`, and one complete V6 Stage artifact. The fixed artifact envelope remains machine-owned while Stage-specific content fields remain intact. The Host uses a Stage-only canonical JSON fixed point matching Core's Python load/dump path, including finite fractions, exponent boundaries, and negative zero; non-finite numbers fail closed. It rejects snapshots above 1 MiB and creates a separate subject digest over the coordinates, artifact revision, and exact artifact SHA. Browser-supplied approval, dependency, lock, plan, rework, rule, or execution claims are not request fields.
+
+The normal path invokes the current `scripts/compile_qingmu_stage_artifact_method.py` subprocess. Before and after compilation, the Host independently reads the seven workset rules plus `scripts/build_v6_stage_contracts.py`, `scripts/validate_v6_stage_contracts.py`, `scripts/compile_qingmu_element_method.py`, and the Stage artifact compiler itself. It reconstructs the exact current Stage owner, scope, contract hash, source and lock requirements, artifact kind, and canonical output; changed bytes or a compiler projection that differs from those facts fail closed. Core performs the full deterministic artifact validation, including Stage-specific source, lock, content-section, and open-issue requirements.
+
+The response is `qingmu.imago-stage-artifact-method-adapter-result.v1` with a SHA-bound projection and Host-only HMAC attestation. It allows only registration of that machine-validated artifact. Dependency authority remains unverified; Stage approval, lock activation, LSU plan sealing, rework execution, Provider calls, and human signoff remain unavailable. This method reads no Yimeng business state and performs no write. A separate command and the Yimeng transaction own immutable registration; later dependency-authority and independent-review checkpoints remain separate work.
 
 ## Model Experience
 

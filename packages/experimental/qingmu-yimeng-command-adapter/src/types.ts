@@ -1443,6 +1443,151 @@ export interface YimengStageSourceRecovery {
   readonly receipt: YimengStageSourceResult
 }
 
+/** Exact V6 Stage artifact retained in the Yimeng immutable record. */
+export interface YimengStageArtifact extends YimengCommandJsonObject {
+  readonly schema_version: '6.0.0-draft.1'
+  readonly workflow_version: '6.0.0-draft.2'
+  readonly stage_id: string
+  readonly scope_instance: string
+  readonly artifact_revision: string
+  readonly created_at: string
+  readonly producer: YimengCommandJsonObject
+  readonly source_bindings: readonly unknown[]
+  readonly lock_bindings: readonly unknown[]
+  readonly content: unknown
+  readonly open_issues: readonly unknown[]
+}
+
+/** Canonical artifact identity signed by the Host and stored by Yimeng. */
+export interface YimengStageArtifactSubject extends YimengCommandJsonObject {
+  readonly schema: 'jason.qingmu-imago-stage-artifact.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly stageId: string
+  readonly scopeInstance: string
+  readonly artifactRevision: string
+  readonly artifactSha256: string
+}
+
+/** Current Core Stage registration contract with no approval or execution grant. */
+export interface YimengStageArtifactDefinition extends YimengCommandJsonObject {
+  readonly id: 'IMAGO-V6-STAGE-ARTIFACT'
+  readonly version: string
+  readonly stageId: string
+  readonly roleId: string
+  readonly scope: 'global' | 'per_lsu'
+  readonly contractSha256: string
+  readonly artifactKind: string
+  readonly canonicalOutput: string
+  readonly requiredSourceStageIds: readonly string[]
+  readonly requiredLockIds: readonly string[]
+  readonly producesLockId: string | null
+  readonly operation: 'register_machine_validated_stage_artifact'
+  readonly stageArtifactRegistrationAllowed: true
+  readonly dependencyAuthorityRequiredForApproval: true
+  readonly dependencyAuthorityVerified: false
+  readonly stageApprovalAllowed: false
+  readonly lockActivationAllowed: false
+  readonly lsuPlanSealingAllowed: false
+  readonly reworkExecutionAllowed: false
+  readonly providerCalls: 0
+}
+
+/** Deterministic Core validation facts for the exact artifact and Stage contract. */
+export interface YimengStageArtifactMachineValidation extends YimengCommandJsonObject {
+  readonly status: 'PASS'
+  readonly validator: 'scripts/validate_v6_stage_contracts.py'
+  readonly validatedArtifactSha256: string
+  readonly contractSha256: string
+}
+
+/** Host-validated current Core projection forwarded unchanged to Yimeng. */
+export interface YimengImagoStageArtifactMethodProjection extends YimengCommandJsonObject {
+  readonly schema: 'qingmu.imago-stage-artifact-method.v1'
+  readonly subject: YimengStageArtifactSubject
+  readonly subjectSnapshotSha256: string
+  readonly machineValidation: YimengStageArtifactMachineValidation
+  readonly definition: YimengStageArtifactDefinition
+  readonly ruleBindings: Readonly<Record<string, string>>
+  readonly rulesSha256: string
+}
+
+/** Host method-origin proof; it does not authenticate dependencies or approve the Stage. */
+export interface YimengImagoStageArtifactMethodAttestation extends YimengCommandJsonObject {
+  readonly schema: 'qingmu.imago-stage-artifact-method-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly subjectSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly signature: string
+}
+
+/** Original immutable coordinates used by GET-only command-receipt recovery. */
+export interface YimengRecoverStageArtifactRegistrationRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly stageId: string
+  readonly scopeInstance: string
+  readonly expectedSubjectSha256: string
+  readonly idempotencyKey: string
+}
+
+/** One explicit artifact registration with separate record CAS preconditions. */
+export interface YimengRegisterStageArtifactRequest extends YimengRecoverStageArtifactRegistrationRequest {
+  readonly artifact: YimengStageArtifact
+  readonly expectedArtifactRecordRevision: number
+  readonly expectedArtifactRecordSha256: string | null
+  readonly methodProjection: YimengImagoStageArtifactMethodProjection
+  readonly methodProjectionSha256: string
+  readonly methodAttestation: YimengImagoStageArtifactMethodAttestation
+}
+
+/** Immutable business record; registration never makes the artifact available or approved. */
+export interface YimengStageArtifactRecord extends YimengCommandJsonObject {
+  readonly schema: 'jason.qingmu-stage-artifact-record.v1'
+  readonly changeSetId: string
+  readonly projectId: string
+  readonly episodeId: string
+  readonly stageId: string
+  readonly scopeInstance: string
+  readonly artifact: YimengStageArtifact
+  readonly artifactRevision: string
+  readonly artifactSha256: string
+  readonly subjectSnapshotSha256: string
+  readonly definition: YimengStageArtifactDefinition
+  readonly machineValidation: YimengStageArtifactMachineValidation
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+  readonly artifactRecordRevision: number
+  readonly producerActorId: string
+  readonly producerNaturalPersonId: string
+  readonly authSessionId: string
+  readonly createdAt: string
+  readonly stageArtifactRegistered: true
+  readonly stageArtifactAvailable: false
+  readonly dependencyAuthorityVerified: false
+  readonly stageApprovalGranted: false
+  readonly lockActivated: false
+  readonly planSealed: false
+  readonly providerCalls: 0
+  readonly humanSignoffInferred: false
+  readonly reworkExecuted: false
+}
+
+/** Exact durable registration receipt. */
+export interface YimengStageArtifactResult {
+  readonly schema: 'jason.qingmu-stage-artifact-result.v1'
+  readonly artifactRecord: YimengStageArtifactRecord
+  readonly artifactRecordSha256: string
+  readonly receiptId: string
+  readonly outboxEventId: string
+}
+
+/** Original receipt recovered without requiring today's artifact, key, or session. */
+export interface YimengStageArtifactRecovery {
+  readonly schema: 'jason.qingmu-stage-artifact-recovery.v1'
+  readonly receipt: YimengStageArtifactResult
+}
+
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
   readonly proposeScript: YimengProposeScriptResponse
@@ -1468,6 +1613,8 @@ export interface YimengCommandEndpointMap {
   readonly recoverProductionUnitBinding: YimengProductionUnitRecovery
   readonly bindStageSource: YimengStageSourceResult
   readonly recoverStageSourceBinding: YimengStageSourceRecovery
+  readonly registerStageArtifact: YimengStageArtifactResult
+  readonly recoverStageArtifactRegistration: YimengStageArtifactRecovery
   readonly proposePromptIr: YimengProposePromptIrResponse
   readonly previewPromptIr: YimengPreviewPromptIrResponse
   readonly commitPromptIrEdit: YimengCommitPromptIrEditResponse

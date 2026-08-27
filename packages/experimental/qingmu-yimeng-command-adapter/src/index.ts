@@ -8,6 +8,7 @@ import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import { prepareShotFindingCommand } from './shot-finding.ts'
 import { prepareProductionUnitCommand } from './production-unit.ts'
+import { prepareStageArtifactCommand, stageArtifactCanonicalJson } from './stage-artifact.ts'
 import { prepareStageSourceCommand } from './stage-source.ts'
 import type {
   YimengChangeSet,
@@ -203,6 +204,17 @@ export type {
   YimengProductionUnitResult,
   YimengProductionUnitSource,
   YimengRecoverProductionUnitBindingRequest,
+  YimengStageArtifact,
+  YimengStageArtifactDefinition,
+  YimengStageArtifactMachineValidation,
+  YimengStageArtifactRecord,
+  YimengStageArtifactRecovery,
+  YimengStageArtifactResult,
+  YimengStageArtifactSubject,
+  YimengImagoStageArtifactMethodAttestation,
+  YimengImagoStageArtifactMethodProjection,
+  YimengRecoverStageArtifactRegistrationRequest,
+  YimengRegisterStageArtifactRequest,
   YimengStageSource,
   YimengStageSourceDefinition,
   YimengStageSourceBinding,
@@ -2495,6 +2507,40 @@ function serializeBody(value: YimengCommandJsonObject): string {
   return body
 }
 
+function exceedsYimengJsonNesting(raw: string): boolean {
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (const character of raw) {
+    if (inString) {
+      if (escaped) escaped = false
+      else if (character === '\\') escaped = true
+      else if (character === '"') inString = false
+    } else if (character === '"') inString = true
+    else if (character === '[' || character === '{') {
+      depth += 1
+      if (depth > 64) return true
+    } else if (character === ']' || character === '}') depth -= 1
+  }
+  return false
+}
+
+function serializeStageArtifactBody(value: YimengCommandJsonObject): string {
+  let body: string
+  try {
+    body = stageArtifactCanonicalJson(value, 'payload')
+  } catch {
+    throw new InputError('payload must be JSON serializable')
+  }
+  if (new TextEncoder().encode(body).byteLength > MAX_JSON_BYTES) {
+    throw new InputError('payload exceeds the command size limit')
+  }
+  if (exceedsYimengJsonNesting(body)) {
+    throw new InputError('payload exceeds the Yimeng JSON nesting limit')
+  }
+  return body
+}
+
 function sanitizeUpstreamValue(value: unknown, token: string, depth = 0): unknown {
   if (depth > 100) throw new InvalidJsonResponseError('response nesting exceeds limit')
   if (typeof value === 'string') return value.split(token).join('[REDACTED]')
@@ -2508,6 +2554,18 @@ function sanitizeUpstreamValue(value: unknown, token: string, depth = 0): unknow
       ))
       .map(([key, item]) => [key, sanitizeUpstreamValue(item, token, depth + 1)]),
   )
+}
+
+function containsReflectedCredential(value: unknown, token: string, depth = 0): boolean {
+  if (depth > 100) return true
+  if (typeof value === 'string') return value.includes(token)
+  if (Array.isArray(value)) {
+    return value.some(item => containsReflectedCredential(item, token, depth + 1))
+  }
+  if (!isJsonObject(value)) return false
+  return Object.entries(value).some(([key, item]) => (
+    key.includes(token) || containsReflectedCredential(item, token, depth + 1)
+  ))
 }
 
 async function readBoundedJson(response: Response): Promise<unknown> {
@@ -2576,6 +2634,7 @@ async function fetchJson(
   request: FetchJsonRequest,
   timeoutMs: number,
   signal: AbortSignal,
+  preserveSuccessfulJson = false,
 ): Promise<FetchJsonResult> {
   const controller = new AbortController()
   const timeoutReason = Object.freeze({ kind: 'qingmu-yimeng-command-timeout' })
@@ -2602,7 +2661,10 @@ async function fetchJson(
     let value: unknown = undefined
     let invalidJson = false
     try {
-      value = sanitizeUpstreamValue(await readBoundedJson(response), token)
+      const upstreamValue = await readBoundedJson(response)
+      value = response.ok && preserveSuccessfulJson
+        ? upstreamValue
+        : sanitizeUpstreamValue(upstreamValue, token)
     } catch (error) {
       if (error instanceof ResponseTooLargeError) {
         return internalError('Yimeng response exceeded size limit')
@@ -4818,7 +4880,8 @@ export function createYimengCommandHandler(
       let normalize: (value: unknown, token: string) => unknown
       if (endpoint === 'recordShotFinding' || endpoint === 'recoverShotFinding'
         || endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
-        || endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding') {
+        || endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
+        || endpoint === 'registerStageArtifact' || endpoint === 'recoverStageArtifactRegistration') {
         const helpers = {
           canonicalJson,
           inputError: (message: string) => new InputError(message),
@@ -4826,15 +4889,21 @@ export function createYimengCommandHandler(
           readAttestationKey: readReferenceAttestationKey,
           requireTimestamp: requireRfc3339Timestamp,
         }
-        const prepared = endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
-          ? prepareProductionUnitCommand(endpoint, payload, helpers)
-          : endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
-            ? prepareStageSourceCommand(endpoint, payload, helpers)
-            : prepareShotFindingCommand(endpoint, payload, helpers)
+        const prepared = endpoint === 'registerStageArtifact' || endpoint === 'recoverStageArtifactRegistration'
+          ? prepareStageArtifactCommand(endpoint, payload, helpers)
+          : endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
+            ? prepareProductionUnitCommand(endpoint, payload, helpers)
+            : endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
+              ? prepareStageSourceCommand(endpoint, payload, helpers)
+              : prepareShotFindingCommand(endpoint, payload, helpers)
         path = prepared.path
         requestInit = {
           method: prepared.request.method,
-          ...(prepared.request.body === undefined ? {} : { body: serializeBody(prepared.request.body) }),
+          ...(prepared.request.body === undefined ? {} : {
+            body: endpoint === 'registerStageArtifact'
+              ? serializeStageArtifactBody(prepared.request.body)
+              : serializeBody(prepared.request.body),
+          }),
           ...(prepared.request.idempotencyKey === undefined ? {} : { idempotencyKey: prepared.request.idempotencyKey }),
         }
         normalize = prepared.normalize
@@ -5133,6 +5202,8 @@ export function createYimengCommandHandler(
 
       const token = normalizeToken(dependencies.readToken())
       if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
+      const isStageArtifactCommand = endpoint === 'registerStageArtifact'
+        || endpoint === 'recoverStageArtifactRegistration'
       const response = await fetchJson(
         dependencies,
         `${baseUrl}${path}`,
@@ -5140,10 +5211,15 @@ export function createYimengCommandHandler(
         requestInit,
         timeoutMs,
         signal,
+        isStageArtifactCommand,
       )
       if (!response.ok) return response
       try {
-        return { ok: true, value: normalize(response.value, token) }
+        const value = normalize(response.value, token)
+        if (isStageArtifactCommand && containsReflectedCredential(value, token)) {
+          return internalError('Yimeng command contract failed')
+        }
+        return { ok: true, value }
       } catch (error) {
         if (error instanceof UpstreamContractError) {
           return internalError(`Yimeng command contract failed: ${error.message}`)

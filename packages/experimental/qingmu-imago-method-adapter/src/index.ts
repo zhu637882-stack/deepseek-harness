@@ -11,6 +11,7 @@ import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import type {
+  ImagoStageArtifactMethodSnapshot,
   ImagoStageSourceMethodRequest,
   ImagoStageSourceMethodSnapshot,
   ImagoProductionUnitMethodRequest,
@@ -96,8 +97,21 @@ import {
   attestStageSourceMethod, buildStageSourceSnapshot, parseStageSourceMethodRequest, readStageSourceRules,
   StageSourceContractError, StageSourceInputError,
 } from './stage-source.ts'
+import {
+  attestStageArtifactMethod, buildStageArtifactSnapshot, parseStageArtifactMethodRequest, readStageArtifactRules,
+  stageArtifactCanonicalJson, StageArtifactContractError, StageArtifactInputError,
+} from './stage-artifact.ts'
 
 export type {
+  ImagoStageArtifact,
+  ImagoStageArtifactMachineValidation,
+  ImagoStageArtifactMethodAttestation,
+  ImagoStageArtifactMethodDefinition,
+  ImagoStageArtifactMethodProjection,
+  ImagoStageArtifactMethodRequest,
+  ImagoStageArtifactMethodResponse,
+  ImagoStageArtifactMethodSnapshot,
+  ImagoStageArtifactSubject,
   ImagoStageSourceMethodRequest,
   ImagoStageSourceMethodSnapshot,
   ImagoStageSourceMethodDefinition,
@@ -210,6 +224,7 @@ const WORKSET_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_imago_workset_v2.
 const CONTINUITY_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_continuity_method.py'
 const PRODUCTION_UNIT_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_production_unit_method.py'
 const STAGE_SOURCE_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_stage_source_method.py'
+const STAGE_ARTIFACT_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_stage_artifact_method.py'
 const COMMON_SOURCE_PATHS = [
   'pipeline/imago-os-current.json',
   'pipeline/workflow-channel-registry.json',
@@ -475,6 +490,10 @@ export interface ImagoMethodCompilerExecution {
 
 /** Injectable local process boundary used by isolated tests. */
 export interface ImagoMethodAdapterDependencies {
+  /** Optional boundary for the exact-artifact current Core machine validator. */
+  readonly runStageArtifactCompiler?: (
+    snapshot: ImagoStageArtifactMethodSnapshot, execution: ImagoMethodCompilerExecution, signal: AbortSignal,
+  ) => Promise<unknown>
   /** Fresh full-script descriptor; the normal script GET is not a canonical source snapshot. */
   readonly readStageSources?: (
     request: Pick<ImagoStageSourceMethodRequest, 'projectId' | 'episodeId'>, signal: AbortSignal,
@@ -3313,6 +3332,12 @@ async function runProductionUnitCompilerProcess(
   return await runCompilerSubprocess(snapshot, execution, signal, PRODUCTION_UNIT_COMPILER_RELATIVE_PATH)
 }
 
+async function runStageArtifactCompilerProcess(
+  snapshot: ImagoStageArtifactMethodSnapshot, execution: ImagoMethodCompilerExecution, signal: AbortSignal,
+): Promise<unknown> {
+  return await runCompilerSubprocess(snapshot, execution, signal, STAGE_ARTIFACT_COMPILER_RELATIVE_PATH)
+}
+
 async function runCompilerSubprocess(
   snapshot: ImagoMethodJsonObject,
   execution: ImagoMethodCompilerExecution,
@@ -3324,6 +3349,7 @@ async function runCompilerSubprocess(
     || compilerRelativePath === CONTINUITY_COMPILER_RELATIVE_PATH
     || compilerRelativePath === PRODUCTION_UNIT_COMPILER_RELATIVE_PATH
     || compilerRelativePath === STAGE_SOURCE_COMPILER_RELATIVE_PATH
+    || compilerRelativePath === STAGE_ARTIFACT_COMPILER_RELATIVE_PATH
   return await new Promise((resolve, reject) => {
     const child = spawn(
       execution.pythonExecutable,
@@ -3399,7 +3425,9 @@ async function runCompilerSubprocess(
     child.stdin.once('error', () => {})
     child.stdin.end(compilerRelativePath === SHOT_RELATION_COMPILER_RELATIVE_PATH
       ? e53CanonicalJson(snapshot, 'snapshot')
-      : canonicalJson(snapshot, 'snapshot'), 'utf8')
+      : compilerRelativePath === STAGE_ARTIFACT_COMPILER_RELATIVE_PATH
+        ? stageArtifactCanonicalJson(snapshot, 'snapshot')
+        : canonicalJson(snapshot, 'snapshot'), 'utf8')
     if (waitForCloseOnCancel && signal.aborted) abort()
   })
 }
@@ -3448,6 +3476,7 @@ export function createImagoMethodHandler(
         && endpoint !== 'shotFindingMethod'
         && endpoint !== 'productionUnitMethod'
         && endpoint !== 'stageSourceMethod'
+        && endpoint !== 'stageArtifactMethod'
       ) {
         throw new InputError(`unknown IMAGO method endpoint: ${endpoint}`)
       }
@@ -3491,6 +3520,30 @@ export function createImagoMethodHandler(
         return { ok: true, value }
       }
       const attestationKey = readAttestationKey()
+      if (endpoint === 'stageArtifactMethod') {
+        const request = parseStageArtifactMethodRequest(payload)
+        const snapshot = buildStageArtifactSnapshot(request, stageArtifactCanonicalJson)
+        if (signal.aborted) return cancelled()
+        const beforeRules = await readStageArtifactRules(
+          execution.coreRoot, request.stageId, request.scopeInstance, stageArtifactCanonicalJson,
+        )
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- fixed rule reads are asynchronous.
+        if (signal.aborted) return cancelled()
+        const raw = await (dependencies.runStageArtifactCompiler ?? runStageArtifactCompilerProcess)(snapshot, execution, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- the compiler can finish after cancellation.
+        if (signal.aborted) return cancelled()
+        const currentRules = await readStageArtifactRules(
+          execution.coreRoot, request.stageId, request.scopeInstance, stageArtifactCanonicalJson,
+        )
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- final fixed rule reads are asynchronous.
+        if (signal.aborted) return cancelled()
+        if (!isDeepStrictEqual(beforeRules, currentRules)) {
+          throw new StageArtifactContractError('current rules changed during compilation')
+        }
+        return { ok: true, value: attestStageArtifactMethod(
+          raw, snapshot, currentRules, stageArtifactCanonicalJson, attestationKey,
+        ) }
+      }
       if (endpoint === 'stageSourceMethod') {
         const request = parseStageSourceMethodRequest(payload)
         if (signal.aborted) return cancelled()
@@ -3682,14 +3735,15 @@ export function createImagoMethodHandler(
     } catch (error) {
       if (error instanceof InputError || error instanceof WorksetInputError
         || error instanceof ContinuityInputError || error instanceof ShotFindingInputError || error instanceof ProductionUnitInputError
-        || error instanceof StageSourceInputError) {
+        || error instanceof StageSourceInputError || error instanceof StageArtifactInputError) {
         return badRequest(error.message)
       }
       if (error instanceof AttestationKeyError) return internalError('IMAGO method attestation is unavailable')
       if (signal.aborted || error instanceof CompilerCancelledError) return cancelled()
       if (error instanceof ProjectionContractError || error instanceof WorksetContractError
         || error instanceof ContinuityContractError || error instanceof ShotFindingContractError
-        || error instanceof ProductionUnitContractError || error instanceof StageSourceContractError) {
+        || error instanceof ProductionUnitContractError || error instanceof StageSourceContractError
+        || error instanceof StageArtifactContractError) {
         return internalError(`IMAGO method projection contract failed: ${error.message}`)
       }
       return internalError('IMAGO method compiler failed')

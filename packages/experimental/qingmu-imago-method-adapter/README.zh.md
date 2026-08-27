@@ -4,7 +4,7 @@
 
 这个私有实验性 Host 插件把当前 IMAGO OS 方法编译为浏览器安全指引。`elementMethod` 用于资料编辑，`referenceAssetMethod` 用于受限的参考资产动作与权利指引，`promptIrMethod` 用于供应商无关的 PromptIR 候选，`shotRelationMethod` 用于 canonical Scene/Shot/Shot 内局部 Beat/Element 关系图以及 Shot River 节奏与参考绑定，`heroFrameStoryboardMethod` 用于确定性编译一个已选 Hero Frame 及其 Shot 内画布标注。`worksetMethod` 重新读取分集工作流，返回当前 IMAGO 阶段定义与明确的权威可用性。上述输入快照方法在 Host 内构造各自的有界输入，并把按 Unicode code point 排序、无空格的 JSON 通过 stdin 交给已审核的 Core 编译器。对应编译器返回的 `input_snapshot_sha256` 必须匹配这组准确输入字节的 SHA-256。
 
-`shotFindingMethod`、`productionUnitMethod` 与 `stageSourceMethod` 使用下文各自的主体哈希约定；旧方法的 `input_snapshot_sha256` 字段不属于这些 schema。
+`shotFindingMethod`、`productionUnitMethod`、`stageSourceMethod` 与 `stageArtifactMethod` 使用下文各自的主体哈希约定；旧方法的 `input_snapshot_sha256` 字段不属于这些 schema。
 
 ## 证明边界
 
@@ -59,6 +59,14 @@ Host 对完整归一化工作流与完整 `sourceRevision` 计算哈希，保留
 固定的 `scripts/compile_qingmu_stage_source_method.py` 接收 `schema`、`stageId`、七字段 `subject` 和 `snapshotSha256`。Host 独立检查当前 A1S 约定，包括全局范围、完整编剧包要求、上游与锁依赖，以及规范输出。九份原始规则哈希覆盖七份工作集来源，再加 `scripts/compile_qingmu_element_method.py` 与此编译器。编译前后来源或规则变化时失败关闭。
 
 响应为 `qingmu.imago-stage-source-method-adapter-result.v1`，包含 `projection`、`projectionSha256` 和 `methodAttestation`。现有 Host 专属密钥只签署已核验的来源引用坐标；不会把单集剧本变成 `SCREENPLAY_PACKAGE`，也不授予阶段完成、批准、锁、计划封存或 Provider 执行权。来源与绑定 CAS 的最终权威仍是后端。测试可通过 `createImagoMethodHandler` 注入 `readStageSources` 和 `runStageSourceCompiler`；正常路径使用有界子进程执行器，取消时等待子进程关闭。
+
+## 机器校验的阶段工件方法
+
+`stageArtifactMethod` 只接受 `projectId`、`episodeId`、`stageId`、`scopeInstance` 和一份完整 V6 阶段工件。固定工件信封仍由机器合同掌管，阶段专属内容字段保持原样。Host 使用只限阶段工件的规范 JSON 定点表示，与 Core 的 Python 加载/转储路径一致，并覆盖有限小数、指数边界和负零；非有限数字失败关闭。它拒绝超过 1 MiB 的快照，并对坐标、工件修订与准确工件 SHA 组成的独立主体计算摘要。浏览器提供的批准、依赖、锁、计划、返修、规则或执行声明都不是请求字段。
+
+正常路径调用当前 `scripts/compile_qingmu_stage_artifact_method.py` 子进程。编译前后，Host 都独立读取七份工作集规则，以及 `scripts/build_v6_stage_contracts.py`、`scripts/validate_v6_stage_contracts.py`、`scripts/compile_qingmu_element_method.py` 和阶段工件编译器本身。它重建准确的当前阶段 Owner、范围、合同哈希、来源与锁要求、工件类型和标准输出；规则字节发生变化，或编译器投影与这些事实不同，都会失败关闭。Core 执行完整的确定性工件校验，包括阶段专属来源、锁、内容章节和未决问题要求。
+
+响应为 `qingmu.imago-stage-artifact-method-adapter-result.v1`，包含由 SHA 绑定的投影与 Host 专属 HMAC 证明。它只允许登记这份已通过机器校验的工件。依赖权威仍未核验；阶段批准、锁激活、LSU 计划封存、返修执行、Provider 调用和人工签收均不可用。此方法不读取易梦业务状态，也不执行写入。不可变登记由独立命令与易梦事务掌管；后续依赖权威和独立审核仍是分开的检查点。
 
 ## 模型体验
 

@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这个私有实验性 Host 插件通过仅限回环地址的 `/qingmu-yimeng-command` 通道，暴露易梦 `episode_script` 与人物、环境、道具 `element_profile` ChangeSet 的显式流程。剧本操作继续是 `proposeScript`、`previewScript`、`commitScript` 和只读的 `recoverScriptCommit`；元素操作是 `proposeElementProfile`、`proposeReferenceAsset`、`previewElementProfile`、`commitElementProfile` 和只读的 `recoverElementProfileCommit`。所选视频 Finding 使用 `recordShotFinding` 和只读的 `recoverShotFinding`。
+这个私有实验性 Host 插件通过仅限回环地址的 `/qingmu-yimeng-command` 通道，暴露易梦 `episode_script` 与人物、环境、道具 `element_profile` ChangeSet 的显式流程。剧本操作继续是 `proposeScript`、`previewScript`、`commitScript` 和只读的 `recoverScriptCommit`；元素操作是 `proposeElementProfile`、`proposeReferenceAsset`、`previewElementProfile`、`commitElementProfile` 和只读的 `recoverElementProfileCommit`。所选视频 Finding 使用 `recordShotFinding` 和只读的 `recoverShotFinding`。通过机器校验的阶段工件使用 `registerStageArtifact` 和只读的 `recoverStageArtifactRegistration`。
 
 ## 命令边界
 
@@ -46,9 +46,17 @@ ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只
 
 `recoverStageSourceBinding` 向该绑定路径加 `/command-receipt` 发送一次 `GET`，携带原 `expectedSubjectSha256` query 和 `Idempotency-Key` 请求头。它校验原 `jason.qingmu-stage-source-recovery.v1` 包装层及内嵌 `receipt`；回执缺失或范围错误时仍是上游 404，不包装成成功的 `found` 响应。恢复既不需要当前来源，也不要求今天的 HMAC 密钥或原 bearer-token 会话相同。中断的写入绝不自动重试。会话或证明变化后不再是原 POST 意图，应改用回执恢复。
 
+## 不可变阶段工件登记
+
+`registerStageArtifact` 接收项目、单集、阶段与范围坐标，一份准确 V6 工件，工件记录修订/SHA 比较条件，可见 ASCII 幂等键，以及当前 Host 签名的 `qingmu.imago-stage-artifact-method.v1` 投影。Host 独立把工件 SHA 与修订绑定到主体，校验当前阶段定义及其版本、机器校验结果、规则摘要与 HMAC 证明，并拒绝一切批准或执行授权。它通过同一套只限阶段工件、兼容 Python 的有限数字定点表示序列化工件，并在传输前拒绝物理 JSON 嵌套超过易梦路由的 64 层上限。随后它只向 `/api/qingmu/projects/{projectId}/episodes/{episodeId}/stage-artifacts/{stageId}/{scopeInstance}` 发送一次 `POST`。路径 ID、actor、自然人身份和 session 绝不接受浏览器在 POST 正文中指定；这些身份只由易梦认证和事务掌管。
+
+准确回执绑定不可变工件、下一记录修订、方法与规则哈希、认证生产者身份和本次请求的会话 SHA。Host 重算记录 SHA，并要求 `stageArtifactRegistered: true`，同时确保工件可用性、依赖权威、阶段批准、锁激活、计划封存、人工签收、返修和 Provider 调用保持 false 或零。因此，登记不会满足依赖、批准阶段、激活锁、封存 LSU 计划或启动生产工作。
+
+`recoverStageArtifactRegistration` 只接收原始坐标、主体 SHA 与幂等键。它向同一路径加 `/command-receipt` 发送一次无正文 `GET`，在 `Idempotency-Key` 请求头中保留原键，在 query 中携带主体 SHA。它只接受准确的 `jason.qingmu-stage-artifact-recovery.v1` 包装层，并重新校验内嵌原回执。恢复特意不要求今天的工件、当前 HMAC 密钥或历史 bearer-token 会话仍然相同。结果不确定的登记 POST 绝不重试。
+
 ## 安全边界
 
-上游必须是回环 HTTP(S)。适配器绝不返回 Host 令牌、不发送 Cookie、拒绝重定向、限制载荷大小和请求时长，并且不会把上游响应正文反射到错误中。浏览器只接收经过校验的命令数据和持久回执标识。
+上游必须是回环 HTTP(S)。适配器绝不返回 Host bearer 凭据、不发送 Cookie、拒绝重定向、限制载荷大小和请求时长，并且不会把非成功响应正文反射到错误中。成功的阶段登记与恢复响应会保持完整，直到整份业务 schema 校验结束，因此名为 `token` 的合法回执字段不会被通用秘密脱敏误删。校验后，任意键或字符串只要包含当前实际 bearer 凭据，就会用静态错误失败关闭。合同失败仍只返回静态安全错误。浏览器只接收经过校验的命令数据和持久回执标识。
 
 ## 模型体验
 
@@ -69,7 +77,7 @@ ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只
 ## 已知限制与延期工作
 
 - 这个本地适配器不是面向互联网的网关。
-- 它实现 `episode_script` 以及人物、环境、道具 `element_profile` ChangeSet 垂直切片，支持显式的参考资产选择与重生成请求意图，记录所选视频 Finding，并登记生产单元范围和单集剧本来源引用绑定。真实生成和自动创意批准不属于这些操作；仅登记不代表生产流程已完成。
+- 它实现 `episode_script` 以及人物、环境、道具 `element_profile` ChangeSet 垂直切片，支持显式的参考资产选择与重生成请求意图，记录所选视频 Finding，并登记生产单元范围、单集剧本来源引用和机器校验阶段工件。真实生成、依赖权威和自动创意批准不属于这些操作；仅登记不代表生产流程已完成。
 - 它不启动 outbox dispatcher，也不跨进程传输事件。
 - ChangeSet 提案发生冲突时，必须先重新读取权威数据，再由用户明确创建新提案。
 - 回执恢复依赖易梦保留原始命令回执；血缘错配时一律失败关闭。Finding 回执不存在时返回 `not_found`，不会重新提交写入。
