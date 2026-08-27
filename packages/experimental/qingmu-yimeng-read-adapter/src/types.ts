@@ -174,6 +174,74 @@ export interface YimengSelectedVideoReviewResponse extends YimengSelectedVideoRe
   readonly humanSignoffInferred: false
 }
 
+/** Exact selected-video bytes and canonical Shot revision owned by Yimeng. */
+export interface YimengShotVideoSubject extends YimengSelectedVideoReviewRequest {
+  readonly schema: 'jason.qingmu-shot-video-subject.v1'
+  readonly frameNo: number
+  readonly storyboardRevision: number
+  readonly frameContentSha256: string
+  readonly assetId: string
+  readonly assetVersion: number
+  readonly assetSha256: string
+}
+
+/** Explicit reviewer attribution; no severity, Owner, or evidence is inferred. */
+export interface YimengShotFindingPayload {
+  readonly timecode: string
+  readonly observation: string
+  readonly evidenceRefs: readonly string[]
+  readonly earliestOwner: string
+  readonly ownerReason: string
+  readonly severity: 'BLOCKER' | 'MAJOR' | 'MINOR'
+  readonly suggestion: string
+  readonly reworkScope: string
+}
+
+/** Immutable problem record, not a media approval or executable rework command. */
+export interface YimengShotFinding extends YimengShotFindingPayload {
+  readonly id: string
+  readonly eventId: string
+  readonly subject: YimengShotVideoSubject
+  readonly subjectSnapshotSha256: string
+  readonly status: 'OPEN'
+  readonly actorId: string
+  readonly actorRole: 'reviewer'
+  readonly authSessionId: string
+  readonly createdAt: string
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+}
+
+/** Read-only history with binding freshness independent of reviewer permissions. */
+export interface YimengShotFindingFeedResponse extends YimengSelectedVideoReviewRequest {
+  readonly schema: 'jason.qingmu-shot-finding-feed.v1'
+  readonly subject: YimengShotVideoSubject | null
+  readonly snapshotSha256: string | null
+  readonly availability: { readonly status: 'available' | 'unavailable'; readonly reason: string | null }
+  readonly capabilities: { readonly canRecordFinding: boolean }
+  readonly items: readonly (YimengShotFinding & { readonly currentBinding: boolean })[]
+}
+
+/** Existing Yimeng ledger receipt; business state, selection, and signoff are unchanged. */
+export interface YimengShotFindingResult {
+  readonly schema: 'jason.qingmu-shot-finding-result.v1'
+  readonly finding: YimengShotFinding
+  readonly changed: false
+  readonly providerCalls: 0
+  readonly selectionChanged: false
+  readonly humanSignoffInferred: false
+  readonly reworkExecuted: false
+}
+
+/** Receipt lookup is read-only and can recover the original binding after it changes. */
+export interface YimengShotFindingRecovery extends YimengSelectedVideoReviewRequest {
+  readonly schema: 'jason.qingmu-shot-finding-recovery.v1'
+  readonly expectedSubjectSha256: string
+  readonly idempotencyKey: string
+  readonly status: 'committed' | 'not_found'
+  readonly result: YimengShotFindingResult | null
+}
+
 /** Element kinds reserved by the generic element-profile route. */
 export type YimengElementKind = 'actor' | 'scene' | 'prop'
 
@@ -827,6 +895,7 @@ export interface YimengReadEndpointMap {
   readonly script: YimengScriptResponse
   readonly promptIr: YimengPromptIrResponse
   readonly selectedVideoReview: YimengSelectedVideoReviewResponse
+  readonly shotFindings: YimengShotFindingFeedResponse
   readonly elementProfile: YimengElementProfileResponse
   readonly referenceCandidates: YimengReferenceCandidatesResponse
   readonly reviewEvents: YimengElementReviewFeedResponse

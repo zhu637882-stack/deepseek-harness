@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates`、`selectedVideoReview` 和 `workflow`；它不暴露任何写入端点。
+这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates`、`selectedVideoReview`、`shotFindings` 和 `workflow`；它不暴露任何写入端点。
 
 ## 约定
 
@@ -31,6 +31,12 @@
 `selectedVideoReview` 只接受项目、剧集与 canonical frame 三个 ID。它复用易梦已有 `/api/frames/{frameId}/video-candidates` GET，只返回唯一当前选中素材的元数据。根主体、选择标志、审核状态、决定、素材 ID/SHA、修订、数值和通过检查必须一致。待审、过期或不可用响应不能夹带旧审核；未选中的已通过候选不会被提升为当前素材。
 
 规范化响应保留原始缺陷、备注，以及零、分数或 null 时间点。旧版缺少内容 SHA、缺陷时明确保留缺失。当前媒体与帧绑定由易梦核验；Host 不计算媒体字节哈希，不可用素材的存储 SHA 也不证明当前文件。媒体 URL、素材时间戳和费用均不透传。既有机器失败例外只作为原记录展示，不变成机器通过或经独立重验的批准权威。本读取不创建 Finding、锁、任务、选择或人工签收。
+
+## 镜头问题账本
+
+`shotFindings` 只接受 `projectId`、`episodeId` 和 canonical `frameId`，向 `/api/qingmu/projects/{projectId}/episodes/{episodeId}/frames/{frameId}/findings` 发送一次认证 GET，不带请求体。当前选中视频主体与原始问题账本均由易梦持有。Host 校验精确字段、规范主体 SHA、正整数 `frameNo`、非负安全整数修订、八字段原文、`OPEN` 状态、记录者身份，以及唯一 Finding/event ID。资产缺少版本列时沿用已有零哨兵值，不虚构新版本。
+
+响应区分 `currentBinding` 与历史；当前媒体缺失不会抹掉旧记录。`canRecordFinding` 只表示明确的项目 reviewer 功能权限，不代表媒体或方法可用，也不是批准。记录动作与 GET 回执恢复走独立命令适配器。本读取不代选 Owner、不改严重度、不批准视频，也不执行返修。
 
 ## 安全边界
 
@@ -64,5 +70,5 @@
 
 - 适配器继续保持只读且仅限本地使用。剧本修改走独立私有命令适配器与明确的 ChangeSet 预览；本通道没有写入、生成、批准或发布端点。
 - Host 凭据缺失时，受保护读取会在任何上游请求前失败。
-- 浏览器不复现 Python canonical JSON；完整性比较只使用 Host 已验证的 `scriptSha256`，因此也覆盖 `1e-06` 这类合法 Python 浮点表示。
+- 浏览器的剧本完整性比较只使用 Host 已验证的 `scriptSha256`，不复现 `1e-06` 等 Python 浮点写法。Finding 坐标只含安全整数，另行遵守受限的规范主体合同。
 - 健康响应只证明存活，工作流投影只报告事实，不授权生产或交付。

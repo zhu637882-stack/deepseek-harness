@@ -6,6 +6,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { QingmuCockpit } from './QingmuCockpit.tsx'
 import type {
   ImagoContinuityMethodResponse,
+  ImagoShotFindingMethodResponse, YimengShotFindingFeedResponse, YimengShotFindingResult, YimengShotFindingRecovery,
   ImagoElementMethodResponse, ImagoHeroFrameStoryboardMethodResponse, ImagoPromptIrMethodResponse,
   ImagoReferenceAssetMethodResponse, ImagoShotRelationMethodResponse, ImagoWorksetMethodResponse, QingmuYimengPort,
   YimengCommitElementProfileResponse, YimengCommitPromptIrEditResponse, YimengCommitScriptResponse,
@@ -32,6 +33,7 @@ import { en, NS, zh } from './locales.ts'
 export type { QingmuCockpitFace } from './slots.ts'
 export type {
   ImagoContinuityMethodResponse,
+  ImagoShotFindingMethodResponse, YimengShotFindingFeedResponse, YimengShotFindingResult, YimengShotFindingRecovery,
   ImagoElementMethodResponse, ImagoHeroFrameStoryboardMethodResponse, ImagoPromptIrMethodResponse,
   ImagoReferenceAssetMethodResponse, ImagoShotRelationMethodResponse, ImagoWorksetMethodResponse,
   QingmuImagoMethodPort, QingmuYimengCommandPort,
@@ -86,6 +88,10 @@ export function apply(ctx: ClientContext): void {
     script: (request, signal) => read<YimengScriptResponse>('script', request, signal),
     promptIr: (request, signal) => read<YimengPromptIrResponse>('promptIr', request, signal),
     selectedVideoReview: (request, signal) => read<YimengSelectedVideoReviewResponse>('selectedVideoReview', request, signal),
+    shotFindings: (request, signal) => read<YimengShotFindingFeedResponse>('shotFindings', request, signal),
+    shotFindingMethod: (request, signal) => method<ImagoShotFindingMethodResponse>('shotFindingMethod', request, signal),
+    recordShotFinding: (request, signal) => command<YimengShotFindingResult>('recordShotFinding', request, signal),
+    recoverShotFinding: (request, signal) => command<YimengShotFindingRecovery>('recoverShotFinding', request, signal),
     workflow: (request, signal) => read<YimengWorkflowProjection>('workflow', request, signal),
     worksetMethod: (request, signal) => method<ImagoWorksetMethodResponse>('worksetMethod', request, signal),
     continuityMethod: (request, signal) => method<ImagoContinuityMethodResponse>('continuityMethod', request, signal),

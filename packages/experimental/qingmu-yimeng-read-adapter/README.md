@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, and `workflow`; it exposes no mutation endpoint.
+This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `shotFindings`, and `workflow`; it exposes no mutation endpoint.
 
 ## Contract
 
@@ -31,6 +31,12 @@ Current SHA fields require materialized assets with IDs. Stored audit SHA declar
 `selectedVideoReview` accepts only project, episode, and canonical frame IDs. It reuses Yimeng's existing `/api/frames/{frameId}/video-candidates` GET and returns metadata for the uniquely selected asset only. Root identity, selection flags, review status, decision, asset ID/SHA, revision, numeric fields, and acceptance checks must agree. Pending, stale, and invalid responses cannot carry an old review. An accepted but unselected candidate is never promoted.
 
 The normalized response preserves original defects, notes, and zero, fractional, or null timecodes. Missing legacy content SHA and defects remain explicitly absent. Yimeng verifies current media and frame binding; the Host does not hash media bytes, and an invalid asset's stored SHA is not proof of its current file. Media URLs, asset timestamps, and costs are omitted. Existing machine-failure exceptions remain labeled records, not machine passes or independently revalidated approval authority. This read creates no Finding, lock, task, selection, or human signoff.
+
+## Shot Finding ledger
+
+`shotFindings` accepts exactly `projectId`, `episodeId`, and canonical `frameId`, then sends one authenticated, body-free GET to `/api/qingmu/projects/{projectId}/episodes/{episodeId}/frames/{frameId}/findings`. Yimeng owns both the current selected-video subject and the original Finding journal. The Host verifies exact fields, canonical subject SHA, positive `frameNo`, nonnegative safe-integer revisions, original eight-field payloads, `OPEN` status, reviewer identity, and unique Finding/event IDs. An absent asset version is the existing zero sentinel, not a newly assigned version.
+
+The feed separates `currentBinding` from history; missing current media does not erase prior records. `canRecordFinding` means only the explicit project reviewer feature, not current media availability, method availability, or approval. Recording and GET receipt recovery use the separate command adapter. This read never chooses an Owner, changes severity, approves a video, or executes rework.
 
 ## Security boundary
 
@@ -64,5 +70,5 @@ Independent. Reading or cancelling a projection does not change a model request 
 
 - The adapter remains read-only and local. Script mutations use the separate private command adapter and an explicit ChangeSet preview; this channel has no write, generation, approval, or release endpoint.
 - Missing Host credentials fail protected reads before any upstream request.
-- The browser does not reproduce Python canonical JSON. Integrity comparisons use only the Host-verified `scriptSha256`, including for legal Python float spellings such as `1e-06`.
+- Script integrity comparisons in the browser use the Host-verified `scriptSha256`, without reproducing Python float spellings such as `1e-06`. Finding coordinates contain only safe integers and use the separately bounded canonical subject contract.
 - A healthy response proves liveness only, while a workflow projection reports facts without authorizing production or delivery.

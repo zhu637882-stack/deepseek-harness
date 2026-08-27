@@ -15,6 +15,7 @@ import { launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts
 import { REPO_ROOT, saveFailureShot, ZH_BROWSER_LOCALE } from './support.ts'
 import { continuityFixture, rebindContinuity } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/continuity-fixture.ts'
 import { videoCandidatesFixture } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/selected-video-review-fixture.ts'
+import { createShotFindingDouble } from './qingmu-shot-finding-fixture.ts'
 
 const YIMENG_TOKEN = 'qingmu-script-workspace-test-token'
 const CHANGE_SET_ID = 'changeset-episode-script-1'
@@ -1664,8 +1665,12 @@ async function startYimengDouble(
   readonly releaseStoryboardCanvasCommitResponse: () => void
   readonly setContinuityMode: (mode: ContinuityMode) => void
   readonly setVideoReviewMode: (mode: VideoReviewMode) => void
+  readonly shotFindings: ReturnType<typeof createShotFindingDouble>
 }> {
   let revision = 3
+  const shotFindings = createShotFindingDouble({
+    token: YIMENG_TOKEN, attestationKey: IMAGO_ATTESTATION_KEY, canonicalJson, canonicalSha256,
+  })
   let continuityMode: ContinuityMode = 'omitted'
   let videoReviewMode: VideoReviewMode = 'none'
   let authoritativeScript: Record<string, unknown> = INITIAL_SCRIPT
@@ -1865,6 +1870,7 @@ async function startYimengDouble(
         json(response, 200, selectedVideoReviewFixture(frameId, revision, videoReviewMode))
         return
       }
+      if (shotFindings.handle(request, response, url, body, revision)) return
       if (
         request.method === 'GET'
         && url.pathname === `/api/qingmu/projects/project-1/episodes/episode-1/storyboard-revisions/${PROMPT_IR_STORYBOARD_REVISION_ID}/frames/${PROMPT_IR_FRAME_ID}/prompt-ir`
@@ -3135,6 +3141,7 @@ async function startYimengDouble(
     releaseStoryboardCanvasCommitResponse: () => resolveStoryboardCanvasCommitResponse?.(),
     setContinuityMode: (mode) => { continuityMode = mode },
     setVideoReviewMode: (mode) => { videoReviewMode = mode },
+    shotFindings,
   }
 }
 
@@ -3209,6 +3216,7 @@ describe.skipIf(
     let releaseStoryboardCanvasCommitResponse: (() => void) | undefined
     let setContinuityMode: ((mode: ContinuityMode) => void) | undefined
     let setVideoReviewMode: ((mode: VideoReviewMode) => void) | undefined
+    let shotFindingDouble: ReturnType<typeof createShotFindingDouble> | undefined
     const capturedRequests: CapturedYimengRequest[] = []
     const scriptReadRevisions: number[] = []
     const actorReadRevisions: number[] = []
@@ -3231,6 +3239,7 @@ describe.skipIf(
     let worksetBrowserEvidence: Record<string, unknown> | undefined
     let continuityBrowserEvidence: Record<string, unknown> | undefined
     let selectedVideoReviewBrowserEvidence: Record<string, unknown> | undefined
+    let shotFindingBrowserEvidence: Record<string, unknown> | undefined
     let resolveReferenceRightsMethodProjectionSha256: ((sha256: string) => void) | undefined
     const referenceRightsMethodProjectionSha256 = new Promise<string>((resolve) => {
       resolveReferenceRightsMethodProjectionSha256 = resolve
@@ -3278,6 +3287,7 @@ describe.skipIf(
       releaseStoryboardCanvasCommitResponse = yimeng.releaseStoryboardCanvasCommitResponse
       setContinuityMode = yimeng.setContinuityMode
       setVideoReviewMode = yimeng.setVideoReviewMode
+      shotFindingDouble = yimeng.shotFindings
       overlayRoot = await mkdtemp(join(tmpdir(), 'dsh-qingmu-script-e2e-'))
       const overlayPath = join(overlayRoot, 'qingmu-script.overlay.yml')
       const qingmuOverlay = resolveQingmuOverlayEntrypoints(await readFile(QINGMU_OVERLAY, 'utf8'))
@@ -3306,7 +3316,10 @@ describe.skipIf(
       page = await browser.newPage({ viewport: { width: 1680, height: 1100 }, locale: ZH_BROWSER_LOCALE })
       page.on('request', (request) => {
         const requestPath = new URL(request.url()).pathname
-        if (!requestPath.startsWith('/qingmu-imago-method/') && requestPath !== '/qingmu-yimeng/selectedVideoReview') return
+        if (!requestPath.startsWith('/qingmu-imago-method/') && ![
+          '/qingmu-yimeng/selectedVideoReview', '/qingmu-yimeng/shotFindings',
+          '/qingmu-yimeng-command/recordShotFinding', '/qingmu-yimeng-command/recoverShotFinding',
+        ].includes(requestPath)) return
         browserRpcRequests.push({ path: requestPath, body: request.postDataJSON() as unknown })
       })
       page.on('response', (response) => {
@@ -3430,6 +3443,8 @@ describe.skipIf(
               continuityMobile: process.env.QINGMU_E5_5_MOBILE_EVIDENCE_SCREENSHOT,
               selectedVideoReview: process.env.QINGMU_E5_5_VIDEO_REVIEW_SCREENSHOT,
               selectedVideoReviewMobile: process.env.QINGMU_E5_5_VIDEO_REVIEW_MOBILE_SCREENSHOT,
+              shotFinding: process.env.QINGMU_E5_5_FINDING_SCREENSHOT,
+              shotFindingMobile: process.env.QINGMU_E5_5_FINDING_MOBILE_SCREENSHOT,
               script: process.env.QINGMU_EVIDENCE_SCREENSHOT,
               actor: process.env.QINGMU_ACTOR_EVIDENCE_SCREENSHOT,
               scene: process.env.QINGMU_SCENE_EVIDENCE_SCREENSHOT,
@@ -3440,6 +3455,7 @@ describe.skipIf(
             workset: worksetBrowserEvidence,
             continuity: continuityBrowserEvidence,
             selectedVideoReview: selectedVideoReviewBrowserEvidence,
+            shotFinding: shotFindingBrowserEvidence,
           }
           await mkdir(dirname(runEvidencePath), { recursive: true })
           await writeFile(runEvidencePath, `${JSON.stringify(evidence, null, 2)}\n`)
@@ -3884,6 +3900,201 @@ describe.skipIf(
       }
     }, 120_000)
 
+    it('records a bound E5-5 Finding and recovers only its original receipt after a lost response in Chromium', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e5-5-finding'))
+      if (shotFindingDouble === undefined || setVideoReviewMode === undefined) throw new Error('Finding fixture controls missing')
+      const controls = shotFindingDouble
+      const requestStart = capturedRequests.length
+      const rpcStart = browserRpcRequests.length
+      const consoleStart = browserConsoleErrors.length
+      const tracePath = process.env.QINGMU_E5_5_FINDING_TRACE_PATH?.trim()
+      if (tracePath) await page.context().tracing.start({ screenshots: true, snapshots: true })
+      const nextWire = (path: string, frameId: string) => page.waitForResponse((response) => {
+        if (new URL(response.url()).pathname !== path) return false
+        const body = response.request().postDataJSON() as unknown
+        return isRecord(body) && isRecord(body.payload) && body.payload.projectId === 'project-1'
+          && body.payload.episodeId === 'episode-1' && body.payload.frameId === frameId
+      })
+      const readWire = async (wire: ReturnType<typeof nextWire>) => {
+        const response = await wire
+        expect(response.status()).toBe(200)
+        const raw = await response.json() as unknown
+        if (!isRecord(raw) || !isRecord(raw.result)) throw new Error('Finding carrier missing')
+        return raw.result
+      }
+      const markers = () => page.evaluate(() => Object.keys(sessionStorage)
+        .filter(key => decodeURIComponent(key).startsWith('qingmu:shot-finding-recovery:v1:'))
+        .map(key => ({ key, value: sessionStorage.getItem(key) })))
+      controls.setMode('available')
+      setVideoReviewMode('pending')
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      const firstMethodWire = nextWire('/qingmu-imago-method/shotFindingMethod', SHOT_RIVER_FIRST_FRAME_ID)
+      await dialog.getByRole('tab', { name: '分镜与镜头' }).click()
+      const panel = dialog.getByRole('region', { name: '镜头问题记录', exact: true })
+      const river = dialog.getByRole('list', { name: '镜头选择' })
+      try {
+        const firstMethod = await readWire(firstMethodWire)
+        expect(firstMethod).toMatchObject({ ok: true, value: { projection: {
+          subject: { frameId: SHOT_RIVER_FIRST_FRAME_ID, frameNo: 7, storyboardRevision: 3 },
+          definition: { statusOnRecord: 'OPEN', approvalAuthority: 'not_granted', reworkExecutionAllowed: false },
+        } } })
+        await panel.getByRole('combobox', { name: '最早责任岗位', exact: true }).waitFor()
+        expect(await panel.getByRole('combobox', { name: '最早责任岗位', exact: true }).inputValue()).toBe('')
+        expect(await panel.getByRole('combobox', { name: '严重度', exact: true }).inputValue()).toBe('')
+        expect(await panel.getByRole('button', { name: '记录问题', exact: true }).isDisabled()).toBe(true)
+        const fillFinding = async (frameId: string, observation: string) => {
+          const finding = {
+            timecode: ' 00:00:01.250 ', observation,
+            evidenceRefs: [`asset://video-${frameId}#t=1.25`, `asset://video-${frameId}#t=1.25`],
+            earliestOwner: 'F', ownerReason: '当前视频动作与已确认输入不符。', severity: 'MAJOR',
+            suggestion: '复查动作连续性并保留怀表位置。', reworkScope: '仅复查本镜头，不自动返修或生成。',
+          }
+          await panel.getByLabel('时间点或时间范围', { exact: true }).fill(finding.timecode)
+          await panel.getByLabel('观察到的问题', { exact: true }).fill(finding.observation)
+          await panel.getByLabel('证据引用', { exact: true }).fill(finding.evidenceRefs.join('\n'))
+          await panel.getByRole('combobox', { name: '最早责任岗位', exact: true }).selectOption({ label: '视频生产' })
+          await panel.getByLabel('责任归因依据', { exact: true }).fill(finding.ownerReason)
+          await panel.getByRole('combobox', { name: '严重度', exact: true }).selectOption(finding.severity)
+          await panel.getByLabel('建议', { exact: true }).fill(finding.suggestion)
+          await panel.getByLabel('建议返修范围', { exact: true }).fill(finding.reworkScope)
+          return finding
+        }
+        const firstFinding = await fillFinding(SHOT_RIVER_FIRST_FRAME_ID, '空镜中怀表位置出现不连续变化。')
+        const desktopPath = process.env.QINGMU_E5_5_FINDING_SCREENSHOT?.trim()
+        if (desktopPath) {
+          await mkdir(dirname(desktopPath), { recursive: true })
+          await panel.evaluate((element) => { element.scrollIntoView({ block: 'start' }) })
+          await page.screenshot({ path: desktopPath })
+        }
+        await page.setViewportSize({ width: 390, height: 844 })
+        const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
+        const cardOverflow = await panel.evaluate(element => element.scrollWidth > element.clientWidth)
+        const recordBox = await panel.getByRole('button', { name: '记录问题', exact: true }).boundingBox()
+        expect(mobileOverflow).toBe(false)
+        expect(cardOverflow).toBe(false)
+        expect(recordBox?.height).toBeGreaterThanOrEqual(44)
+        const mobilePath = process.env.QINGMU_E5_5_FINDING_MOBILE_SCREENSHOT?.trim()
+        if (mobilePath) {
+          await mkdir(dirname(mobilePath), { recursive: true })
+          await panel.getByRole('combobox', { name: '最早责任岗位', exact: true }).scrollIntoViewIfNeeded()
+          await page.screenshot({ path: mobilePath })
+        }
+        await page.setViewportSize({ width: 1680, height: 1100 })
+        const firstRecordWire = nextWire('/qingmu-yimeng-command/recordShotFinding', SHOT_RIVER_FIRST_FRAME_ID)
+        await panel.getByRole('button', { name: '记录问题', exact: true }).click()
+        const firstRecord = await readWire(firstRecordWire)
+        expect(firstRecord).toMatchObject({ ok: true, value: { finding: firstFinding,
+          changed: false, providerCalls: 0, selectionChanged: false, humanSignoffInferred: false, reworkExecuted: false } })
+        await panel.getByText('问题已记录；未批准视频，也未执行返修。', { exact: true }).waitFor()
+        await panel.getByRole('list', { name: '问题历史', exact: true }).getByText(firstFinding.observation, { exact: true }).waitFor()
+        expect(await markers()).toEqual([])
+        const secondMethodWire = nextWire('/qingmu-imago-method/shotFindingMethod', PROMPT_IR_FRAME_ID)
+        await river.getByRole('button', { name: /frame-1/ }).click()
+        expect(await readWire(secondMethodWire)).toMatchObject({ ok: true, value: { projection: {
+          subject: { frameId: PROMPT_IR_FRAME_ID, frameNo: 12, storyboardRevision: 3 },
+        } } })
+        await panel.getByRole('combobox', { name: '最早责任岗位', exact: true }).waitFor()
+        expect(await panel.getByText(firstFinding.observation, { exact: true }).count()).toBe(0)
+        const secondFinding = await fillFinding(PROMPT_IR_FRAME_ID, '人物转身时怀表短暂消失。')
+        controls.loseNextRecordResponse()
+        const uncertainWire = nextWire('/qingmu-yimeng-command/recordShotFinding', PROMPT_IR_FRAME_ID)
+        await panel.getByRole('button', { name: '记录问题', exact: true }).click()
+        expect(await readWire(uncertainWire)).toMatchObject({ ok: false })
+        await panel.getByRole('button', { name: '只读恢复原回执', exact: true }).waitFor()
+        const retainedMarkers = await markers()
+        expect(retainedMarkers).toHaveLength(1)
+        const retained = retainedMarkers[0]
+        if (retained?.value === null || retained?.value === undefined) throw new Error('Finding intent was not retained')
+        const intent: unknown = JSON.parse(retained.value)
+        if (!isRecord(intent)) throw new Error('Finding intent is not an object')
+        expect(Object.keys(intent)).toHaveLength(8)
+        expect(intent.frameId).toBe(PROMPT_IR_FRAME_ID)
+        expect(retained.value).not.toContain(secondFinding.observation)
+        expect(retained.value).not.toContain('signature')
+
+        controls.setMode('unavailable')
+        controls.setRecoveryVisible(false)
+        await page.reload()
+        await page.getByRole('button', { name: '青木制作台' }).click()
+        await dialog.getByRole('tab', { name: '分镜与镜头' }).click()
+        await river.getByRole('button', { name: /frame-1/ }).click()
+        const recoverButton = panel.getByRole('button', { name: '只读恢复原回执', exact: true })
+        await recoverButton.waitFor()
+        const recoveryStart = capturedRequests.length
+        const notFoundWire = nextWire('/qingmu-yimeng-command/recoverShotFinding', PROMPT_IR_FRAME_ID)
+        await recoverButton.click()
+        expect(await readWire(notFoundWire)).toMatchObject({ ok: true, value: { status: 'not_found', result: null,
+          frameId: PROMPT_IR_FRAME_ID, expectedSubjectSha256: intent.expectedSubjectSha256, idempotencyKey: intent.idempotencyKey } })
+        expect(await markers()).toEqual(retainedMarkers)
+        controls.setRecoveryVisible(true)
+        await expect.poll(() => recoverButton.isDisabled()).toBe(false)
+        const recoveredWire = nextWire('/qingmu-yimeng-command/recoverShotFinding', PROMPT_IR_FRAME_ID)
+        await recoverButton.click()
+        const recovered = await readWire(recoveredWire)
+        expect(recovered).toMatchObject({ ok: true, value: { status: 'committed', frameId: PROMPT_IR_FRAME_ID,
+          expectedSubjectSha256: intent.expectedSubjectSha256, idempotencyKey: intent.idempotencyKey,
+          result: { finding: secondFinding, changed: false, reworkExecuted: false, humanSignoffInferred: false } } })
+        await expect.poll(markers).toEqual([])
+        await panel.getByRole('list', { name: '问题历史', exact: true }).getByText(secondFinding.observation, { exact: true }).waitFor()
+        expect(await panel.getByRole('button', { name: '记录问题', exact: true }).count()).toBe(0)
+        const recoveryRequests = capturedRequests.slice(recoveryStart)
+        expect(recoveryRequests.length).toBeGreaterThanOrEqual(2)
+        expect(recoveryRequests.every(request => request.method === 'GET' && request.body === undefined)).toBe(true)
+        const requests = capturedRequests.slice(requestStart)
+        const posts = requests.filter(request => request.method === 'POST')
+        expect(posts).toHaveLength(2)
+        expect(posts.map(request => request.path)).toEqual([
+          `/api/qingmu/projects/project-1/episodes/episode-1/frames/${SHOT_RIVER_FIRST_FRAME_ID}/findings`,
+          `/api/qingmu/projects/project-1/episodes/episode-1/frames/${PROMPT_IR_FRAME_ID}/findings`,
+        ])
+        expect(posts[0]?.body).toMatchObject({ finding: firstFinding })
+        expect(posts[1]?.body).toMatchObject({ finding: secondFinding, idempotencyKey: intent.idempotencyKey })
+        expect(requests.filter(request => /provider|worker|generate|approval|select/i.test(request.path))).toEqual([])
+        const recorded = controls.getRecordedResults()
+        expect(recorded).toHaveLength(2)
+        expect(recorded[0]?.finding.id).not.toBe(recorded[1]?.finding.id)
+        const findingRpc = browserRpcRequests.slice(rpcStart)
+          .filter(request => /shotFindings|shotFindingMethod|recordShotFinding|recoverShotFinding/.test(request.path))
+        const readRpc = findingRpc.filter(request => /shotFindings|shotFindingMethod/.test(request.path))
+        expect(readRpc.some(request => request.path.endsWith('/shotFindings'))).toBe(true)
+        expect(readRpc.some(request => request.path.endsWith('/shotFindingMethod'))).toBe(true)
+        for (const request of readRpc) {
+          const payload = isRecord(request.body) ? request.body.payload : undefined
+          if (!isRecord(payload)) throw new Error('Finding read coordinates missing')
+          expect(Object.keys(payload).sort()).toEqual(['episodeId', 'frameId', 'projectId'])
+          expect(payload.projectId).toBe('project-1')
+          expect(payload.episodeId).toBe('episode-1')
+          expect([SHOT_RIVER_FIRST_FRAME_ID, PROMPT_IR_FRAME_ID]).toContain(payload.frameId)
+        }
+        expect(findingRpc.filter(request => request.path.endsWith('/recordShotFinding'))).toHaveLength(2)
+        expect(findingRpc.filter(request => request.path.endsWith('/recoverShotFinding'))).toHaveLength(2)
+        expect(JSON.stringify(findingRpc)).not.toContain(YIMENG_TOKEN)
+        expect(JSON.stringify(findingRpc)).not.toContain(IMAGO_ATTESTATION_KEY)
+        expect(await panel.locator('video, img, audio, a').count()).toBe(0)
+        expect(browserConsoleErrors.slice(consoleStart)).toEqual([])
+        expect(tripwire.pageErrors).toEqual([])
+        await expectNoVisibleTechnicalBrand(page)
+        shotFindingBrowserEvidence = {
+          schema: 'qingmu.e5-5-shot-finding-browser-evidence.v1', firstMethod, firstRecord, recovered,
+          recorded, findingRpc, postCount: posts.length, recoveryGetOnly: true, recoveryRequestCount: recoveryRequests.length,
+          lostResponseRetainedAcrossReload: true, notFoundRetainedMarker: true, recoveryWithoutCurrentMedia: true,
+          duplicateEvidencePreserved: true, sharedShotSelection: true, automaticPostRetryCount: 0,
+          mobileOverflow, cardOverflow, recordControlHeight: recordBox?.height, mediaElementCount: 0,
+          providerCalls: 0, humanSignoffInferred: false, reworkExecuted: false,
+          consoleErrors: browserConsoleErrors.slice(consoleStart), pageErrors: tripwire.pageErrors,
+        }
+      } finally {
+        controls.setMode('unavailable')
+        controls.setRecoveryVisible(true)
+        setVideoReviewMode('none')
+        await page.setViewportSize({ width: 1680, height: 1100 })
+        await dialog.getByRole('tab', { name: '总览', exact: true }).click()
+        await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
+        if (tracePath) { await mkdir(dirname(tracePath), { recursive: true }); await page.context().tracing.stop({ path: tracePath }) }
+      }
+    }, 120_000)
+
     it('renders and selects the canonical E5-3 Shot River through Yimeng, IMAGO, and Chromium', async () => {
       onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e5-1-shot-relations'))
       const methodRequestStart = browserRpcRequests.length
@@ -4070,6 +4281,7 @@ describe.skipIf(
     it('recovers a committed receipt after the response is lost to a same-tab reload without resubmitting', async () => {
       onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-script-workspace'))
       const initialScriptReadCount = scriptReadRevisions.length
+      const requestStart = capturedRequests.length
       await page.getByRole('button', { name: '青木制作台' }).click()
       const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
       await dialog.waitFor({ timeout: 10_000 })
@@ -4099,7 +4311,7 @@ describe.skipIf(
         .filter(key => key.startsWith('qingmu:script-commit-recovery:v1:')).length), { timeout: 10_000 })
         .toBe(1)
 
-      expect(capturedRequests.filter(request => request.path.includes('/command-receipt'))).toEqual([])
+      expect(capturedRequests.slice(requestStart).filter(request => request.path.includes('/command-receipt'))).toEqual([])
       await page.reload({ waitUntil: 'load' })
       releaseCommitResponse?.()
       await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
@@ -4115,7 +4327,7 @@ describe.skipIf(
       await expect.poll(() => recoveredEditor.inputValue(), { timeout: 10_000 })
         .toBe(JSON.stringify(PROPOSED_SCRIPT, null, 2))
       expect(await recoveredEditor.isDisabled()).toBe(true)
-      expect(capturedRequests.filter(request => request.path.includes('/command-receipt'))).toEqual([])
+      expect(capturedRequests.slice(requestStart).filter(request => request.path.includes('/command-receipt'))).toEqual([])
       await recoveredDialog.getByRole('button', { name: '查询并恢复原回执' }).click()
 
       await recoveredDialog.getByRole('heading', { name: '已恢复原始提交回执' })
@@ -4131,7 +4343,7 @@ describe.skipIf(
       expect(await page.evaluate(() => Object.keys(sessionStorage)
         .filter(key => key.startsWith('qingmu:script-commit-recovery:v1:')))).toEqual([])
 
-      const commands = capturedRequests.filter(request => request.method === 'POST')
+      const commands = capturedRequests.slice(requestStart).filter(request => request.method === 'POST')
       expect(commands.map(request => request.path)).toEqual([
         '/api/qingmu/episodes/episode-1/script/change-sets',
         `/api/qingmu/change-sets/${CHANGE_SET_ID}:preview`,
@@ -4155,7 +4367,7 @@ describe.skipIf(
         expectedPayloadSha256: PAYLOAD_SHA,
       })
 
-      const recoveryRequests = capturedRequests.filter(request => request.path.includes('/command-receipt'))
+      const recoveryRequests = capturedRequests.slice(requestStart).filter(request => request.path.includes('/command-receipt'))
       expect(recoveryRequests).toHaveLength(1)
       expect(recoveryRequests[0]).toMatchObject({
         method: 'GET',

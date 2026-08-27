@@ -9,6 +9,7 @@ import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import { normalizeContinuityDelta } from './continuity.ts'
 import { normalizeSelectedVideoReview } from './selected-video-review.ts'
+import { normalizeShotFindingFeed, parseShotFindingReadRequest } from './shot-findings.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -132,6 +133,12 @@ export type {
   YimengSelectedVideoReviewStatus,
   YimengVideoReviewDefect,
   YimengVideoReviewRecord,
+  YimengShotVideoSubject,
+  YimengShotFindingPayload,
+  YimengShotFinding,
+  YimengShotFindingFeedResponse,
+  YimengShotFindingResult,
+  YimengShotFindingRecovery,
   YimengHeroFrameBinding,
   YimengHeroFrameStoryboardBlocker,
   YimengHeroFrameStoryboardShot,
@@ -179,7 +186,7 @@ const REFERENCE_RIGHTS_EXCEPTION_RELEASE_FEED_SCHEMA = 'jason.qingmu-reference-r
 const SHA256 = /^[0-9a-f]{64}$/
 const PROTECTED_ENDPOINTS = new Set([
   'projects', 'episodes', 'script', 'promptIr', 'elementProfile', 'referenceCandidates', 'reviewEvents',
-  'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview',
+  'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'shotFindings',
 ])
 const HUMAN_DECISION_VALUES = new Set<YimengHumanDecisionValue>([
   'approve', 'reject', 'request_changes',
@@ -524,6 +531,14 @@ function parseSelectedVideoReviewRequest(payload: unknown): YimengSelectedVideoR
     projectId: parseIdentifier(input.projectId, 'projectId'),
     episodeId: parseIdentifier(input.episodeId, 'episodeId'),
     frameId: parseIdentifier(input.frameId, 'frameId'),
+  }
+}
+
+function parseShotFindingRequest(payload: unknown): YimengSelectedVideoReviewRequest {
+  try {
+    return parseShotFindingReadRequest(payload)
+  } catch {
+    throw new InputError('shotFindings accepts only canonical projectId, episodeId, and frameId')
   }
 }
 
@@ -2547,6 +2562,10 @@ export function createYimengReadHandler(
         const request = parseSelectedVideoReviewRequest(payload)
         path = `/api/frames/${encodeURIComponent(request.frameId)}/video-candidates`
         normalize = value => normalizeSelectedVideoReview(value, request)
+      } else if (endpoint === 'shotFindings') {
+        const request = parseShotFindingRequest(payload)
+        path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/frames/${encodeURIComponent(request.frameId)}/findings`
+        normalize = value => normalizeShotFindingFeed(value, request, canonicalJsonSha256)
       } else if (endpoint === 'elementProfile') {
         const request = parseElementProfileRequest(payload)
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/elements/${encodeURIComponent(request.elementKind)}/${encodeURIComponent(request.targetId)}`

@@ -2,6 +2,8 @@ import type {
   YimengContinuityDeltaProjection,
   YimengContinuityPair,
   YimengShotRelationsStoryboardRevision,
+  YimengSelectedVideoReviewRequest,
+  YimengShotVideoSubject,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 
 /** JSON object retained from the stateless IMAGO method projection. */
@@ -810,6 +812,53 @@ export interface ImagoContinuityMethodResponse extends ImagoMethodJsonObject {
   readonly projection: ImagoContinuityMethodProjection
 }
 
+/** Identity-only request: the Host resolves current video bytes through Yimeng. */
+export type ImagoShotFindingMethodRequest = YimengSelectedVideoReviewRequest
+
+/** Fresh selected-video snapshot; no browser-authored subject or business state. */
+export interface ImagoShotFindingMethodSnapshot extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.shot-finding-method-snapshot.v1'
+  readonly subject: YimengShotVideoSubject
+  readonly snapshotSha256: string
+}
+
+/** Current IMAGO form contract, not a chosen Owner or an approved Finding. */
+export interface ImagoShotFindingMethodDefinition {
+  readonly requiredFields: readonly string[]
+  readonly severities: readonly ['BLOCKER', 'MAJOR', 'MINOR']
+  readonly ownerOptions: readonly { readonly stageId: string; readonly roleId: string; readonly scope: 'global' | 'per_lsu' }[]
+  readonly statusOnRecord: 'OPEN'
+  readonly approvalAuthority: 'not_granted'
+  readonly reworkExecutionAllowed: false
+}
+
+/** Stateless current-rule projection frozen to one selected video and Shot revision. */
+export interface ImagoShotFindingMethodProjection extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-shot-finding-method.v1'
+  readonly subject: YimengShotVideoSubject
+  readonly subjectSnapshotSha256: string
+  readonly definition: ImagoShotFindingMethodDefinition
+  readonly ruleBindings: Readonly<Record<string, string>>
+  readonly rulesSha256: string
+}
+
+/** Method-origin proof only; it does not grant reviewer permission or media approval. */
+export interface ImagoShotFindingMethodAttestation {
+  readonly schema: 'qingmu.imago-shot-finding-method-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly subjectSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly signature: string
+}
+
+/** Bound form plus Host HMAC, without exposing the key to the browser. */
+export interface ImagoShotFindingMethodResponse extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-shot-finding-method-adapter-result.v1'
+  readonly projection: ImagoShotFindingMethodProjection
+  readonly projectionSha256: string
+  readonly methodAttestation: ImagoShotFindingMethodAttestation
+}
+
 /** Result values exposed by `/qingmu-imago-method`. */
 export interface ImagoMethodEndpointMap {
   readonly elementMethod: ImagoElementMethodResponse
@@ -819,6 +868,7 @@ export interface ImagoMethodEndpointMap {
   readonly heroFrameStoryboardMethod: ImagoHeroFrameStoryboardMethodResponse
   readonly worksetMethod: ImagoWorksetMethodResponse
   readonly continuityMethod: ImagoContinuityMethodResponse
+  readonly shotFindingMethod: ImagoShotFindingMethodResponse
 }
 
 /** Endpoint names accepted by the private method channel. */

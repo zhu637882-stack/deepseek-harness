@@ -2,7 +2,9 @@
 
 English | [中文](README.zh.md)
 
-This private experimental Host plugin compiles current IMAGO OS methods into browser-safe guidance. `elementMethod` covers profile editing, `referenceAssetMethod` covers bounded reference actions and rights guidance, `promptIrMethod` covers provider-neutral PromptIR candidates, `shotRelationMethod` covers the canonical Scene/Shot/Shot-local-Beat/Element graph plus Shot River rhythm and reference bindings, and `heroFrameStoryboardMethod` deterministically compiles one selected Hero Frame and its Shot-local canvas annotations. `worksetMethod` reads a fresh episode workflow and returns current IMAGO stage definitions with explicit authority availability. Each endpoint builds its own bounded input in the Host and invokes its reviewed Core compiler with Unicode-code-point-sorted, whitespace-free JSON on stdin. The compiler's `input_snapshot_sha256` must match the SHA-256 of those exact input bytes.
+This private experimental Host plugin compiles current IMAGO OS methods into browser-safe guidance. `elementMethod` covers profile editing, `referenceAssetMethod` covers bounded reference actions and rights guidance, `promptIrMethod` covers provider-neutral PromptIR candidates, `shotRelationMethod` covers the canonical Scene/Shot/Shot-local-Beat/Element graph plus Shot River rhythm and reference bindings, and `heroFrameStoryboardMethod` deterministically compiles one selected Hero Frame and its Shot-local canvas annotations. `worksetMethod` reads a fresh episode workflow and returns current IMAGO stage definitions with explicit authority availability. These input-snapshot methods build their own bounded input in the Host and invoke their reviewed Core compiler with Unicode-code-point-sorted, whitespace-free JSON on stdin. Their compiler's `input_snapshot_sha256` must match the SHA-256 of those exact input bytes.
+
+The newer `shotFindingMethod` uses the selected-video subject hash contract described below; the older methods' `input_snapshot_sha256` field is not part of that schema.
 
 ## Attestation boundary
 
@@ -35,6 +37,12 @@ Compiler processes receive no environment variable whose name contains `key`, `t
 `continuityMethod` accepts exactly `projectId`, `episodeId`, and the canonical `selectedShotId`. It freshly reads the same configured workflow, binds the full source and revision, and runs `scripts/compile_qingmu_continuity_method.py` with exact stdin-byte hashing. The Host independently rehashes 14 fixed Core files after compilation: current machine rules, C5 and LSUQC methods and references, and both compiler sources. Lock definitions and rework propagation must match the actual workflow rule bytes.
 
 The response separates current materialized asset binding from the original audit declaration. An old check may legitimately pass for a different tail asset; it cannot establish current selected-chain readiness. Missing dimensions remain unknown, not failures. Only explicitly false dimensions become candidate Findings, with severity, earliest owner, and timecode left null. Candidates do not create formal Findings, tasks, or review decisions. Six lock definitions do not imply project lock instances: `lock_authority` remains unavailable. Both unavailable and legacy-omitted continuity sources remain visibly unavailable. Cancellation waits for the compiler child to close; this endpoint performs no writes or Provider calls.
+
+## Bound Shot Finding method
+
+`shotFindingMethod` accepts exactly the three Yimeng IDs: `projectId`, `episodeId`, and canonical `frameId`. It reads a fresh `shotFindings` feed through the optional configured read capability; no browser subject, Owner, or severity enters Core. It runs `scripts/compile_qingmu_shot_finding_method.py` and independently rehashes 18 fixed current sources. Current workflow, stage contracts, role definitions, literal QC Owner rules, provider-neutral review policy, and the implementation plan must agree. Only active workflow Owners are offered; compatibility-only Owners are excluded.
+
+The projection binds the canonical current subject SHA, all eight required fields, three severities, active Owner options, rule hashes, and the fixed `OPEN`/no-approval/no-rework boundary. This schema uses `subjectSnapshotSha256` rather than the older `input_snapshot_sha256`. The Host signs only those validated method coordinates with the existing server-only HMAC key. The method does not record a Finding or infer attribution, approval, task creation, asset selection, or paid generation. Missing media, unplugged reads, unavailable rules, changed source bytes, or a missing signing key disable this method without disabling unrelated methods.
 
 ## Model Experience
 

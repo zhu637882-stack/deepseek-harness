@@ -1126,6 +1126,112 @@ export interface YimengRecoverPromptIrSelectionResponse extends YimengCommandJso
   readonly receipt: YimengSelectPromptIrResponse
 }
 
+/** Exact Yimeng-selected video bytes and canonical Shot revision. */
+export interface YimengShotVideoSubject {
+  readonly schema: 'jason.qingmu-shot-video-subject.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly frameNo: number
+  readonly storyboardRevision: number
+  readonly frameContentSha256: string
+  readonly assetId: string
+  readonly assetVersion: number
+  readonly assetSha256: string
+}
+
+/** Reviewer-authored problem details, retained without defaults or text rewriting. */
+export interface YimengShotFindingPayload {
+  readonly timecode: string
+  readonly observation: string
+  readonly evidenceRefs: readonly string[]
+  readonly earliestOwner: string
+  readonly ownerReason: string
+  readonly severity: 'BLOCKER' | 'MAJOR' | 'MINOR'
+  readonly suggestion: string
+  readonly reworkScope: string
+}
+
+/** Stateless IMAGO method output; owner options grant no approval or rework execution. */
+export interface YimengImagoShotFindingMethodProjection {
+  readonly schema: 'qingmu.imago-shot-finding-method.v1'
+  readonly subject: YimengShotVideoSubject
+  readonly subjectSnapshotSha256: string
+  readonly definition: {
+    readonly requiredFields: readonly string[]
+    readonly severities: readonly ['BLOCKER', 'MAJOR', 'MINOR']
+    readonly ownerOptions: readonly {
+      readonly stageId: string
+      readonly roleId: string
+      readonly scope: 'global' | 'per_lsu'
+    }[]
+    readonly statusOnRecord: 'OPEN'
+    readonly approvalAuthority: 'not_granted'
+    readonly reworkExecutionAllowed: false
+  }
+  readonly ruleBindings: Readonly<Record<string, string>>
+  readonly rulesSha256: string
+}
+
+/** Host HMAC proof binds one exact method projection and selected-video subject. */
+export interface YimengImagoShotFindingMethodAttestation {
+  readonly schema: 'qingmu.imago-shot-finding-method-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly subjectSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly signature: string
+}
+
+/** Read-only lookup coordinates retained before a record request is sent. */
+export interface YimengRecoverShotFindingRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly expectedSubjectSha256: string
+  readonly idempotencyKey: string
+}
+
+/** Explicit problem recording; actor and authenticated session are server-owned. */
+export interface YimengRecordShotFindingRequest extends YimengRecoverShotFindingRequest {
+  readonly finding: YimengShotFindingPayload
+  readonly methodProjection: YimengImagoShotFindingMethodProjection
+  readonly methodProjectionSha256: string
+  readonly methodAttestation: YimengImagoShotFindingMethodAttestation
+}
+
+/** Immutable Finding fact; OPEN is not approval or an executable rework instruction. */
+export interface YimengShotFinding extends YimengShotFindingPayload {
+  readonly id: string
+  readonly eventId: string
+  readonly subject: YimengShotVideoSubject
+  readonly subjectSnapshotSha256: string
+  readonly status: 'OPEN'
+  readonly actorId: string
+  readonly actorRole: 'reviewer'
+  readonly authSessionId: string
+  readonly createdAt: string
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+}
+
+/** Finding ledger receipt; selected assets and media state remain unchanged. */
+export interface YimengShotFindingResult {
+  readonly schema: 'jason.qingmu-shot-finding-result.v1'
+  readonly finding: YimengShotFinding
+  readonly changed: false
+  readonly providerCalls: 0
+  readonly selectionChanged: false
+  readonly humanSignoffInferred: false
+  readonly reworkExecuted: false
+}
+
+/** Historical lookup does not require today's subject, session, or HMAC key to match. */
+export interface YimengShotFindingRecovery extends YimengRecoverShotFindingRequest {
+  readonly schema: 'jason.qingmu-shot-finding-recovery.v1'
+  readonly status: 'committed' | 'not_found'
+  readonly result: YimengShotFindingResult | null
+}
+
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
   readonly proposeScript: YimengProposeScriptResponse
@@ -1145,6 +1251,8 @@ export interface YimengCommandEndpointMap {
   readonly createHumanDecision: YimengCreateHumanDecisionResponse
   readonly createReferenceRightsExceptionRelease: YimengCreateReferenceRightsExceptionReleaseResponse
   readonly recoverReferenceRightsExceptionRelease: YimengRecoverReferenceRightsExceptionReleaseResponse
+  readonly recordShotFinding: YimengShotFindingResult
+  readonly recoverShotFinding: YimengShotFindingRecovery
   readonly proposePromptIr: YimengProposePromptIrResponse
   readonly previewPromptIr: YimengPreviewPromptIrResponse
   readonly commitPromptIrEdit: YimengCommitPromptIrEditResponse

@@ -2,7 +2,9 @@
 
 [English](README.md) | 中文
 
-这个私有实验性 Host 插件把当前 IMAGO OS 方法编译为浏览器安全指引。`elementMethod` 用于资料编辑，`referenceAssetMethod` 用于受限的参考资产动作与权利指引，`promptIrMethod` 用于供应商无关的 PromptIR 候选，`shotRelationMethod` 用于 canonical Scene/Shot/Shot 内局部 Beat/Element 关系图以及 Shot River 节奏与参考绑定，`heroFrameStoryboardMethod` 用于确定性编译一个已选 Hero Frame 及其 Shot 内画布标注。`worksetMethod` 重新读取分集工作流，返回当前 IMAGO 阶段定义与明确的权威可用性。每个端点都在 Host 内构造各自的有界输入，并把按 Unicode code point 排序、无空格的 JSON 通过 stdin 交给已审核的 Core 编译器。编译器返回的 `input_snapshot_sha256` 必须匹配这组准确输入字节的 SHA-256。
+这个私有实验性 Host 插件把当前 IMAGO OS 方法编译为浏览器安全指引。`elementMethod` 用于资料编辑，`referenceAssetMethod` 用于受限的参考资产动作与权利指引，`promptIrMethod` 用于供应商无关的 PromptIR 候选，`shotRelationMethod` 用于 canonical Scene/Shot/Shot 内局部 Beat/Element 关系图以及 Shot River 节奏与参考绑定，`heroFrameStoryboardMethod` 用于确定性编译一个已选 Hero Frame 及其 Shot 内画布标注。`worksetMethod` 重新读取分集工作流，返回当前 IMAGO 阶段定义与明确的权威可用性。上述输入快照方法在 Host 内构造各自的有界输入，并把按 Unicode code point 排序、无空格的 JSON 通过 stdin 交给已审核的 Core 编译器。对应编译器返回的 `input_snapshot_sha256` 必须匹配这组准确输入字节的 SHA-256。
+
+新增 `shotFindingMethod` 使用下文的选中视频主体哈希合同；旧方法的 `input_snapshot_sha256` 字段不属于这个新 schema。
 
 ## 证明边界
 
@@ -35,6 +37,12 @@ Host 对完整归一化工作流与完整 `sourceRevision` 计算哈希，保留
 `continuityMethod` 只接受 `projectId`、`episodeId` 与 canonical `selectedShotId`。它重新读取同一个已配置工作流，绑定完整来源与修订，并以精确 stdin 字节哈希调用 `scripts/compile_qingmu_continuity_method.py`。编译后 Host 独立重算固定 14 份 Core 文件的原始 SHA：当前机器规则、C5 与 LSUQC 岗位方法和参考，以及两个编译器来源。锁定义与返修传播必须匹配实际 workflow 规则字节。
 
 响应区分当前物化素材绑定与审计原始声明。旧检查可合法通过另一尾帧，但不能证明当前选中链已验证。缺少维度保持未知，不转成失败。只有明确 false 的维度成为 Finding 候选，严重度、最早责任人和时码保持 null；候选不会创建正式 Finding、任务或审核决定。六类锁定义不代表项目锁实例，`lock_authority` 仍不可用。来源明确 unavailable 或旧上游省略字段时均显示不可用。取消会等待编译器子进程关闭；本端点不执行写入或 Provider 调用。
+
+## 绑定镜头问题方法
+
+`shotFindingMethod` 只接受易梦的三个 ID：`projectId`、`episodeId` 和 canonical `frameId`。它通过已配置的可插拔只读能力重新读取 `shotFindings`；浏览器主体、Owner、严重度不进入 Core。它运行 `scripts/compile_qingmu_shot_finding_method.py`，并独立重算固定 18 份当前来源。当前工作流、阶段合同、角色定义、QC Owner 字面规则、供应商中立审核策略和实施方案必须一致。只提供当前活跃工作流中的 Owner，排除仅为兼容保留的岗位。
+
+输出绑定规范主体 SHA、八个必填字段、三种严重度、当前 Owner 选项、规则 SHA，以及固定的 `OPEN`、不批准、不执行返修边界。此 schema 使用 `subjectSnapshotSha256`，不同于旧 schema 的 `input_snapshot_sha256`。Host 只用现有服务端 HMAC 密钥签署已校验的方法坐标；不记录 Finding，不代做归因、批准、建任务、选素材或付费生成。媒体缺失、读取插件卸载、规则不可用、来源字节变化或密钥缺失只禁用本方法，不影响无关方法。
 
 ## 模型体验
 

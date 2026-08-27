@@ -15,6 +15,8 @@ import type {
   ImagoReferenceAssetMethodResponse,
   ImagoShotRelationMethodRequest,
   ImagoShotRelationMethodResponse,
+  ImagoShotFindingMethodRequest,
+  ImagoShotFindingMethodResponse,
   ImagoWorksetMethodRequest,
   ImagoWorksetMethodResponse,
   ImagoWorksetProjection,
@@ -52,6 +54,12 @@ import type {
   YimengSelectedVideoReviewRequest,
   YimengSelectedVideoReviewResponse,
   YimengSelectedVideoReviewStatus,
+  YimengShotFinding,
+  YimengShotFindingPayload,
+  YimengShotFindingFeedResponse,
+  YimengShotFindingResult,
+  YimengShotFindingRecovery,
+  YimengShotVideoSubject,
   YimengShotRelationBeat,
   YimengShotRelationElement,
   YimengShotRelationScene,
@@ -117,6 +125,8 @@ import type {
   YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengSelectPromptIrRequest,
   YimengSelectPromptIrResponse,
+  YimengRecordShotFindingRequest,
+  YimengRecoverShotFindingRequest,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 
 export type {
@@ -135,6 +145,8 @@ export type {
   ImagoReferenceAssetMethodResponse,
   ImagoShotRelationMethodRequest,
   ImagoShotRelationMethodResponse,
+  ImagoShotFindingMethodRequest,
+  ImagoShotFindingMethodResponse,
   ImagoWorksetMethodRequest,
   ImagoWorksetMethodResponse,
   ImagoWorksetProjection,
@@ -171,6 +183,12 @@ export type {
   YimengSelectedVideoReviewRequest,
   YimengSelectedVideoReviewResponse,
   YimengSelectedVideoReviewStatus,
+  YimengShotFinding,
+  YimengShotFindingPayload,
+  YimengShotFindingFeedResponse,
+  YimengShotFindingResult,
+  YimengShotFindingRecovery,
+  YimengShotVideoSubject,
   YimengShotRelationBeat,
   YimengShotRelationElement,
   YimengShotRelationScene,
@@ -236,6 +254,8 @@ export type {
   YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengSelectPromptIrRequest,
   YimengSelectPromptIrResponse,
+  YimengRecordShotFindingRequest,
+  YimengRecoverShotFindingRequest,
 }
 
 /** Open JSON object retained without inventing a stricter Yimeng business schema. */
@@ -256,11 +276,14 @@ export interface QingmuYimengReadPort {
   script(request: YimengScriptRequest, signal?: AbortSignal): Promise<YimengScriptResponse>
   promptIr(request: YimengPromptIrRequest, signal?: AbortSignal): Promise<YimengPromptIrResponse>
   selectedVideoReview(request: YimengSelectedVideoReviewRequest, signal?: AbortSignal): Promise<YimengSelectedVideoReviewResponse>
+  shotFindings(request: YimengSelectedVideoReviewRequest, signal?: AbortSignal): Promise<YimengShotFindingFeedResponse>
   workflow(request: YimengWorkflowRequest, signal?: AbortSignal): Promise<YimengWorkflowProjection>
 }
 
 /** Explicit ChangeSet commands exposed through the separate Host-only command channel. */
 export interface QingmuYimengCommandPort {
+  recordShotFinding(request: YimengRecordShotFindingRequest, signal?: AbortSignal): Promise<YimengShotFindingResult>
+  recoverShotFinding(request: YimengRecoverShotFindingRequest, signal?: AbortSignal): Promise<YimengShotFindingRecovery>
   proposeElementProfile(request: YimengProposeElementProfileRequest, signal?: AbortSignal): Promise<YimengProposeElementProfileResponse>
   proposeReferenceAsset(request: YimengProposeReferenceAssetRequest, signal?: AbortSignal): Promise<YimengProposeReferenceAssetResponse>
   previewElementProfile(request: YimengPreviewElementProfileRequest, signal?: AbortSignal): Promise<YimengPreviewElementProfileResponse>
@@ -324,6 +347,7 @@ export interface QingmuYimengCommandPort {
 
 /** Read-only, stateless professional method compiler channel. */
 export interface QingmuImagoMethodPort {
+  shotFindingMethod(request: ImagoShotFindingMethodRequest, signal?: AbortSignal): Promise<ImagoShotFindingMethodResponse>
   continuityMethod(request: ImagoContinuityMethodRequest, signal?: AbortSignal): Promise<ImagoContinuityMethodResponse>
   worksetMethod(request: ImagoWorksetMethodRequest, signal?: AbortSignal): Promise<ImagoWorksetMethodResponse>
   elementMethod(request: ImagoElementMethodRequest, signal?: AbortSignal): Promise<ImagoElementMethodResponse>

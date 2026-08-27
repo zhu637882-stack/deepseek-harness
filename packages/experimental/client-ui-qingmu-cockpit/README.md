@@ -44,6 +44,14 @@ The shared Shot also drives a metadata-only view of Yimeng's current selected vi
 
 The view checks the response's three IDs, asset/SHA binding, read-only markers, and review revision against the visible episode's storyboard revision. Shot, projection, port, refresh, closure, and source changes invalidate old responses. The only action is reload; there are no media elements, external links, selection controls, or approval commands. A missing selected asset stays missing even when another candidate is accepted.
 
+## Human-recorded issues on the same Shot
+
+The shared Shot has a Finding panel with eight explicit fields: timecode, observation, evidence references, earliest responsible role, attribution reason, severity, suggestion, and suggested rework scope. IMAGO supplies the current field and role contract; the user supplies every value, with no default owner or severity. Only Yimeng's explicit reviewer capability permits recording. A Finding is an OPEN issue bound to the selected video's asset hash, frame content, and storyboard revision. It is not an approval, selection, or rework command.
+
+The browser verifies the feed and method against the current Shot before enabling the form. The Host validates the method proof; Yimeng rechecks the current subject and records the Finding and receipt atomically in its existing transaction ledger. Refresh invalidates old requests; Shot or subject changes discard the in-memory draft. Historical records remain readable when current media or the method plugin is unavailable, without rebinding them to the current asset.
+
+Before the single record POST, the client stores and reads back an exact eight-field, non-secret recovery marker. It contains hashes and original operation coordinates, not free-text evidence, credentials, or the method signature. An uncertain response offers an explicit GET-only lookup of that original receipt, including after a page reload or when current media becomes unavailable. A missing or mismatched receipt retains the marker; recovery never resubmits the record or rewrites its subject. Clearing the local marker is a separate warned action and cannot undo a server record. Recording does not execute rework or infer human signoff.
+
 ## Security boundary
 
 `YIMENG_API_TOKEN` and `QINGMU_IMAGO_ATTESTATION_KEY` belong only to Qingmu Host processes. The browser plugin does not read environment variables, `localStorage`, `JWT_SECRET`, or cookies, and it never receives or renders either secret. Its only persistence is the bounded non-secret receipt-recovery marker in the current tab's `sessionStorage`. Read and command channels are separate Host plugins, both limited to loopback upstreams. If the token is absent, the cockpit shows a recovery instruction to configure the Host and restart the local instance.
@@ -75,7 +83,7 @@ Independent. Opening, refreshing, or closing the cockpit does not change a model
 - The bounded workbenches and Shot River do not declare all of Phase 3 or Epic 5 complete. Paid generation, automatic selection or approval, agent signoff, and production release remain outside these local flows.
 - Workset compilation does not create missing Yimeng stage or LSU authority. The Core's available-authority branch has fixture coverage; the current Host integration deliberately exposes only the unavailable branch.
 - Receipt recovery lasts only for the current tab's `sessionStorage` lifetime. Explicitly discarding the local marker cannot prove or reverse the server-side outcome.
-- The browser never reproduces Python canonical JSON. The Host verifies Yimeng's exact canonical bytes and exposes only `scriptSha256`; a missing or mismatched verified hash keeps the recovery marker locked for explicit operator resolution.
+- For scripts, the browser does not reproduce Python canonical JSON. The Host verifies Yimeng's exact canonical bytes and exposes only `scriptSha256`; a missing or mismatched verified hash keeps the recovery marker locked. Finding contracts separately permit only well-formed strings and safe integer numbers and use explicit Unicode-key canonicalization for their bounded JSON hashes; this algorithm does not extend to arbitrary script JSON.
 - Anonymous health proves liveness only; it does not prove production readiness or release identity unless the returned fields explicitly do so.
 - `releaseReady` is neither `verify_episode` success nor final human signoff.
 - The plugin requires the Qingmu build composition plus the private Host read and command adapters on the same local Harness runtime.

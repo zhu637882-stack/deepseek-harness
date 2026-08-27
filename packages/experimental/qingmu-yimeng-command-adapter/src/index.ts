@@ -6,6 +6,7 @@ import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
+import { prepareShotFindingCommand } from './shot-finding.ts'
 import type {
   YimengChangeSet,
   YimengChangeSetBase,
@@ -188,6 +189,18 @@ export type {
   YimengStoryboardCanvasCommandSubject,
   YimengStoryboardFrameChangeSet,
   YimengStoryboardRevisionCoordinate,
+} from './types.ts'
+
+export type {
+  YimengImagoShotFindingMethodAttestation,
+  YimengImagoShotFindingMethodProjection,
+  YimengRecordShotFindingRequest,
+  YimengRecoverShotFindingRequest,
+  YimengShotFinding,
+  YimengShotFindingPayload,
+  YimengShotFindingRecovery,
+  YimengShotFindingResult,
+  YimengShotVideoSubject,
 } from './types.ts'
 
 const CHANNEL = '/qingmu-yimeng-command'
@@ -4782,8 +4795,23 @@ export function createYimengCommandHandler(
     try {
       let path: string
       let requestInit: FetchJsonRequest
-      let normalize: (value: unknown) => unknown
-      if (endpoint === 'proposeScript') {
+      let normalize: (value: unknown, token: string) => unknown
+      if (endpoint === 'recordShotFinding' || endpoint === 'recoverShotFinding') {
+        const prepared = prepareShotFindingCommand(endpoint, payload, {
+          canonicalJson,
+          inputError: message => new InputError(message),
+          responseError: message => new UpstreamContractError(message),
+          readAttestationKey: readReferenceAttestationKey,
+          requireTimestamp: requireRfc3339Timestamp,
+        })
+        path = prepared.path
+        requestInit = {
+          method: prepared.request.method,
+          ...(prepared.request.body === undefined ? {} : { body: serializeBody(prepared.request.body) }),
+          ...(prepared.request.idempotencyKey === undefined ? {} : { idempotencyKey: prepared.request.idempotencyKey }),
+        }
+        normalize = prepared.normalize
+      } else if (endpoint === 'proposeScript') {
         const request = parseProposeRequest(payload)
         path = `/api/qingmu/episodes/${encodeURIComponent(request.episodeId)}/script/change-sets`
         const body: YimengCommandJsonObject = {
@@ -5088,7 +5116,7 @@ export function createYimengCommandHandler(
       )
       if (!response.ok) return response
       try {
-        return { ok: true, value: normalize(response.value) }
+        return { ok: true, value: normalize(response.value, token) }
       } catch (error) {
         if (error instanceof UpstreamContractError) {
           return internalError(`Yimeng command contract failed: ${error.message}`)

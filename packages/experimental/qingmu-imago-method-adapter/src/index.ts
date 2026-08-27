@@ -11,6 +11,8 @@ import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import type {
+  ImagoShotFindingMethodRequest,
+  ImagoShotFindingMethodSnapshot,
   ImagoContinuityMethodResponse,
   ImagoContinuityMethodSnapshot,
   ImagoElementMethodProjection,
@@ -78,8 +80,18 @@ import {
   parseContinuityMethodRequest,
   readContinuityRules,
 } from './continuity.ts'
+import {
+  attestShotFindingMethod, buildShotFindingSnapshot, parseShotFindingMethodRequest, readShotFindingRules,
+  ShotFindingContractError, ShotFindingInputError,
+} from './shot-finding.ts'
 
 export type {
+  ImagoShotFindingMethodRequest,
+  ImagoShotFindingMethodSnapshot,
+  ImagoShotFindingMethodDefinition,
+  ImagoShotFindingMethodProjection,
+  ImagoShotFindingMethodAttestation,
+  ImagoShotFindingMethodResponse,
   ImagoContinuityCandidateFinding,
   ImagoContinuityChecklistItem,
   ImagoContinuityFieldHelp,
@@ -437,6 +449,12 @@ export interface ImagoMethodCompilerExecution {
 
 /** Injectable local process boundary used by isolated tests. */
 export interface ImagoMethodAdapterDependencies {
+  /** Fresh selected-video subject; absence disables only the Finding method endpoint. */
+  readonly readShotFindings?: (request: ImagoShotFindingMethodRequest, signal: AbortSignal) => Promise<RpcResult<unknown>>
+  /** Optional injectable boundary for the stateless, current-rule Finding compiler. */
+  readonly runShotFindingCompiler?: (
+    snapshot: ImagoShotFindingMethodSnapshot, execution: ImagoMethodCompilerExecution, signal: AbortSignal,
+  ) => Promise<unknown>
   readonly runCompiler: (
     snapshot: ImagoElementMethodSnapshot,
     execution: ImagoMethodCompilerExecution,
@@ -3241,6 +3259,12 @@ async function runContinuityCompilerProcess(
   return await runCompilerSubprocess(snapshot, execution, signal, CONTINUITY_COMPILER_RELATIVE_PATH)
 }
 
+async function runShotFindingCompilerProcess(
+  snapshot: ImagoShotFindingMethodSnapshot, execution: ImagoMethodCompilerExecution, signal: AbortSignal,
+): Promise<unknown> {
+  return await runCompilerSubprocess(snapshot, execution, signal, 'scripts/compile_qingmu_shot_finding_method.py')
+}
+
 async function runCompilerSubprocess(
   snapshot: ImagoMethodJsonObject,
   execution: ImagoMethodCompilerExecution,
@@ -3371,6 +3395,7 @@ export function createImagoMethodHandler(
         && endpoint !== 'heroFrameStoryboardMethod'
         && endpoint !== 'worksetMethod'
         && endpoint !== 'continuityMethod'
+        && endpoint !== 'shotFindingMethod'
       ) {
         throw new InputError(`unknown IMAGO method endpoint: ${endpoint}`)
       }
@@ -3414,6 +3439,21 @@ export function createImagoMethodHandler(
         return { ok: true, value }
       }
       const attestationKey = readAttestationKey()
+      if (endpoint === 'shotFindingMethod') {
+        const request = parseShotFindingMethodRequest(payload)
+        if (signal.aborted) return cancelled()
+        if (dependencies.readShotFindings === undefined) return internalError('Yimeng read capability is unavailable')
+        const feed = await dependencies.readShotFindings(request, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- cancellation can arrive during the read.
+        if (signal.aborted) return cancelled()
+        if (!feed.ok) return feed
+        const snapshot = buildShotFindingSnapshot(request, feed.value, canonicalJson)
+        const raw = await (dependencies.runShotFindingCompiler ?? runShotFindingCompilerProcess)(snapshot, execution, signal)
+        const rules = await readShotFindingRules(execution.coreRoot)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- compiler and fixed rule reads are asynchronous.
+        if (signal.aborted) return cancelled()
+        return { ok: true, value: attestShotFindingMethod(raw, snapshot, rules, canonicalJson, attestationKey) }
+      }
       if (endpoint === 'heroFrameStoryboardMethod') {
         const request = parseHeroFrameStoryboardRequest(payload)
         const snapshot = buildHeroFrameStoryboardSnapshot(request)
@@ -3528,12 +3568,14 @@ export function createImagoMethodHandler(
       }
       return { ok: true, value }
     } catch (error) {
-      if (error instanceof InputError || error instanceof WorksetInputError || error instanceof ContinuityInputError) {
+      if (error instanceof InputError || error instanceof WorksetInputError
+        || error instanceof ContinuityInputError || error instanceof ShotFindingInputError) {
         return badRequest(error.message)
       }
       if (error instanceof AttestationKeyError) return internalError('IMAGO method attestation is unavailable')
       if (signal.aborted || error instanceof CompilerCancelledError) return cancelled()
-      if (error instanceof ProjectionContractError || error instanceof WorksetContractError || error instanceof ContinuityContractError) {
+      if (error instanceof ProjectionContractError || error instanceof WorksetContractError
+        || error instanceof ContinuityContractError || error instanceof ShotFindingContractError) {
         return internalError(`IMAGO method projection contract failed: ${error.message}`)
       }
       return internalError('IMAGO method compiler failed')
@@ -3545,6 +3587,10 @@ export function createImagoMethodHandler(
 export function apply(ctx: Context, config: ImagoMethodAdapterConfig): void {
   const handler = createImagoMethodHandler(config, {
     ...DEFAULT_DEPENDENCIES,
+    readShotFindings: async (request, signal) => {
+      const read = ctx.get('qingmuYimengRead')
+      return read === undefined ? internalError('Yimeng read capability is unavailable') : await read('shotFindings', request, signal)
+    },
     readWorkflow: async (request, signal) => {
       const read = ctx.get('qingmuYimengRead')
       return read === undefined
