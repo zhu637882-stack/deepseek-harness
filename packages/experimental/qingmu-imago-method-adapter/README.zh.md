@@ -4,7 +4,7 @@
 
 这个私有实验性 Host 插件把当前 IMAGO OS 方法编译为浏览器安全指引。`elementMethod` 用于资料编辑，`referenceAssetMethod` 用于受限的参考资产动作与权利指引，`promptIrMethod` 用于供应商无关的 PromptIR 候选，`shotRelationMethod` 用于 canonical Scene/Shot/Shot 内局部 Beat/Element 关系图以及 Shot River 节奏与参考绑定，`heroFrameStoryboardMethod` 用于确定性编译一个已选 Hero Frame 及其 Shot 内画布标注。`worksetMethod` 重新读取分集工作流，返回当前 IMAGO 阶段定义与明确的权威可用性。上述输入快照方法在 Host 内构造各自的有界输入，并把按 Unicode code point 排序、无空格的 JSON 通过 stdin 交给已审核的 Core 编译器。对应编译器返回的 `input_snapshot_sha256` 必须匹配这组准确输入字节的 SHA-256。
 
-新增 `shotFindingMethod` 使用下文的选中视频主体哈希合同；旧方法的 `input_snapshot_sha256` 字段不属于这个新 schema。
+`shotFindingMethod` 与 `productionUnitMethod` 使用下文各自的主体哈希约定；旧方法的 `input_snapshot_sha256` 字段不属于这些 schema。
 
 ## 证明边界
 
@@ -44,6 +44,14 @@ Host 对完整归一化工作流与完整 `sourceRevision` 计算哈希，保留
 
 输出绑定规范主体 SHA、八个必填字段、三种严重度、当前 Owner 选项、规则 SHA，以及固定的 `OPEN`、不批准、不执行返修边界。此 schema 使用 `subjectSnapshotSha256`，不同于旧 schema 的 `input_snapshot_sha256`。Host 只用现有服务端 HMAC 密钥签署已校验的方法坐标；不记录 Finding，不代做归因、批准、建任务、选素材或付费生成。媒体缺失、读取插件卸载、规则不可用、来源字节变化或密钥缺失只禁用本方法，不影响无关方法。
 
+## 制作单元绑定方法
+
+`productionUnitMethod` 只接受 `projectId`、`episodeId` 和 `groupId`。它在编译前后通过已配置的可选读取能力调用 `productionUnits` GET，只比较所请求且可用分组的来源。其他分组不可用、历史绑定或 `canBindUnit: false` 都不会提供或否定该来源。浏览器传入的快照、规则与单元 ID 会被拒绝。分组成员与绑定 CAS 的最终权威仍是后端事务。
+
+固定的 `scripts/compile_qingmu_production_unit_method.py` 只接收 `schema`、`subject` 和 `snapshotSha256`，上限为 1 MiB。Host 保留 ID 和标题原文，校验安全整数、顺序正确且不重复的成员 Shot，并重算来源 SHA。它独立检查活跃指针、注册表、阶段约定哈希，以及当前六个逐单元方法与工作流循环的一致性。固定九份原始规则哈希覆盖七份工作集来源，再加 `scripts/compile_qingmu_element_method.py` 与此编译器；编译前后全部必须保持不变。
+
+响应为 `qingmu.imago-production-unit-method-adapter-result.v1`，包含 `projection`、`projectionSha256` 和 `methodAttestation`，使用现有 Host 专属密钥签名。它不分配单元 ID、不登记绑定、不封存计划、不批准阶段，也不调用 Provider。来源或规则缺失及变化、编译输出无效、读取插件卸载或密钥不可用时失败关闭。取消会等待被终止的子进程关闭。测试可通过 `createImagoMethodHandler` 注入 `readProductionUnits` 与 `runProductionUnitCompiler`；没有新增配置或模型可见内容。
+
 ## 模型体验
 
 ### 私有方法 RPC
@@ -62,7 +70,7 @@ Host 对完整归一化工作流与完整 `sourceRevision` 计算哈希，保留
 
 ## 已知限制与延期工作
 
-- Shot 关系只接受受限 ID 图、节奏与参考绑定；Hero Frame Storyboard 接受原有关系图、血缘和归一化整数标注。标题、实际生成、选择执行、ChangeSet 提交、评论和创意审核决定仍不属于本适配器。
+- Shot 关系只接受受限 ID 图、节奏与参考绑定；Hero Frame Storyboard 接受原有关系图、血缘和归一化整数标注。标题编辑、实际生成、选择执行、ChangeSet 提交、评论和创意审核决定仍不属于本适配器。
 - 证明只表示 Host 校验及精确输入绑定，不授予付费 Provider、资产选择、人工批准或生产状态写入权。
 - 本次受限切片不包含密钥轮换或多密钥验证。
 - 工作集模板不是已批准的业务阶段。只有未来明确的业务约定提供具名 Stage/LSU 权威后，才可展示实际合法工作推荐或影子对照；不使用旧状态回退。

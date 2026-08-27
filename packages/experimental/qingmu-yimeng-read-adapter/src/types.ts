@@ -887,6 +887,85 @@ export interface YimengWorkflowProjection extends YimengJsonObject {
   readonly interpretation: YimengWorkflowInterpretation
 }
 
+/** Read coordinates for explicit production-unit bindings in one episode. */
+export interface YimengProductionUnitsRequest {
+  readonly projectId: string
+  readonly episodeId: string
+}
+
+/** Canonical existing shot group and its ordered, content-bound storyboard members. */
+export interface YimengProductionUnitSource extends YimengProductionUnitsRequest {
+  readonly schema: 'jason.qingmu-production-unit-source.v1'
+  readonly groupId: string
+  readonly groupNo: number
+  readonly title: string
+  readonly groupExecutionPromptSha256: string
+  readonly storyboardRevision: number
+  readonly shots: readonly {
+    readonly frameId: string
+    readonly frameNo: number
+    readonly frameContentSha256: string
+  }[]
+}
+
+/** Recorded method definition for scope binding only, not Stage or plan approval. */
+export interface YimengProductionUnitDefinition {
+  readonly id: 'IMAGO-V6-LSU'
+  readonly version: string
+  readonly unitIdPattern: 'LSU[0-9]{2,}'
+  readonly scope: 'per_lsu'
+  readonly stages: readonly {
+    readonly stageId: string
+    readonly roleId: string
+    readonly contractSha256: string
+  }[]
+  readonly operation: 'bind_existing_shot_group'
+  readonly planSealingAllowed: false
+  readonly stageApprovalAllowed: false
+  readonly providerCalls: 0
+}
+
+/** Highest recorded binding revision for an explicitly chosen project-scoped unit ID. */
+export interface YimengProductionUnitBinding extends YimengProductionUnitsRequest {
+  readonly unitId: string
+  readonly groupId: string
+  readonly revision: number
+  readonly source: YimengProductionUnitSource
+  readonly sourceSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+  readonly definition: YimengProductionUnitDefinition
+  readonly actorId: string
+  readonly authSessionId: string
+  readonly eventId: string
+  readonly changeSetId: string
+  readonly createdAt: string
+}
+
+/** Yimeng's current group sources and immutable binding heads, without inferred approvals. */
+export interface YimengProductionUnitsResponse extends YimengProductionUnitsRequest {
+  readonly schema: 'jason.qingmu-production-unit-feed.v1'
+  readonly capabilities: { readonly canBindUnit: boolean }
+  readonly groups: readonly {
+    readonly groupId: string
+    readonly subject: YimengProductionUnitSource | null
+    readonly snapshotSha256: string | null
+    readonly availability: {
+      readonly status: 'available' | 'unavailable'
+      readonly reason: string | null
+    }
+  }[]
+  readonly bindings: readonly {
+    readonly binding: YimengProductionUnitBinding
+    readonly bindingSha256: string
+    readonly currentBinding: boolean
+  }[]
+  readonly planSealed: false
+  readonly providerCalls: 0
+  readonly humanSignoffInferred: false
+  readonly reworkExecuted: false
+}
+
 /** Result values exposed by each `/qingmu-yimeng` endpoint. */
 export interface YimengReadEndpointMap {
   readonly health: YimengHealth
@@ -896,6 +975,7 @@ export interface YimengReadEndpointMap {
   readonly promptIr: YimengPromptIrResponse
   readonly selectedVideoReview: YimengSelectedVideoReviewResponse
   readonly shotFindings: YimengShotFindingFeedResponse
+  readonly productionUnits: YimengProductionUnitsResponse
   readonly elementProfile: YimengElementProfileResponse
   readonly referenceCandidates: YimengReferenceCandidatesResponse
   readonly reviewEvents: YimengElementReviewFeedResponse

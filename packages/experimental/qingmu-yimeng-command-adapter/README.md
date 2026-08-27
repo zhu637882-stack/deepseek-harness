@@ -28,6 +28,14 @@ The adapter sends exactly one `POST` to `/api/qingmu/projects/{projectId}/episod
 
 `recoverShotFinding` accepts only the three IDs, original subject SHA, and idempotency key. It sends one `GET` to the same path plus `/command-receipt`, with `expectedSubjectSha256` in the query and the original `Idempotency-Key` header. It accepts only a matching `committed` result or `not_found` with `result: null`. Recovery remains authenticated by Yimeng but does not fetch the current subject or require the historical record to match today's HMAC key or bearer-token session.
 
+## Production-unit scope bindings
+
+`bindProductionUnit` registers an explicitly chosen unit ID against an existing native shot group. The request binds the project, episode, group, and unit IDs to the current source SHA, previous binding revision/SHA, and the signed `qingmu.imago-production-unit-method.v1` projection. Revision zero requires a null previous SHA. The Host checks the source and method digests, HMAC proof, method definition, and rules digest before sending one `POST` to `/api/qingmu/projects/{projectId}/episodes/{episodeId}/production-units/{unitId}/binding`. Actor and session fields come from Yimeng authentication, never browser input.
+
+The receipt must match those coordinates, the next binding revision, method and rules hashes, definition, and request-session SHA. `planSealed`, `humanSignoffInferred`, and `reworkExecuted` must remain false, and `providerCalls` must remain zero. A scope binding neither seals the LSU plan nor creates a StageInstance, approval, workset, or generation task.
+
+`recoverProductionUnitBinding` sends one `GET` to the same binding path plus `/command-receipt`, with the original group ID and source SHA in the query and the original `Idempotency-Key` header. It accepts only a matching `found: true` receipt or `found: false` with `result: null`. Recovery does not require today's source, HMAC key, or historical bearer-token session. Interrupted writes are never retried automatically; receipt corruption and lineage mismatches fail closed.
+
 ## Security boundary
 
 The upstream must be loopback HTTP(S). The adapter never returns the Host token, sends no cookies, rejects redirects, bounds payload size and request time, and normalizes upstream errors without reflecting response bodies. The browser receives only validated command data and durable receipt identifiers.
@@ -51,7 +59,7 @@ Independent. Command requests do not modify a model request or reusable prefix.
 ## Known Limitations and Deferred Work
 
 - This local adapter is not an Internet-facing gateway.
-- It implements the `episode_script` plus actor, scene, and prop `element_profile` ChangeSet vertical slices, including explicit reference selection and regeneration-request intents, and records selected-video Findings. PromptIR, actual generation, comments, approval, signoff, and creative review decisions remain outside this adapter, so this does not declare Phase 3 complete.
+- It implements the `episode_script` plus actor, scene, and prop `element_profile` ChangeSet vertical slices, including explicit reference selection and regeneration-request intents, records selected-video Findings, and registers production-unit scope bindings. Actual generation and automatic creative approval remain outside these operations; scope registration alone does not complete the production workflow.
 - It does not start an outbox dispatcher or transport events across processes.
 - Conflict recovery requires a fresh authoritative read and a new explicit proposal.
 - Receipt recovery depends on Yimeng retaining the original command receipt; mismatches fail closed. A missing Finding receipt returns `not_found` without resubmitting the write.

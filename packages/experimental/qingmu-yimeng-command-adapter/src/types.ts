@@ -1232,6 +1232,111 @@ export interface YimengShotFindingRecovery extends YimengRecoverShotFindingReque
   readonly result: YimengShotFindingResult | null
 }
 
+/** Native shot-group contents; group order never allocates an IMAGO unit ID. */
+export interface YimengProductionUnitSource {
+  readonly schema: 'jason.qingmu-production-unit-source.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly groupId: string
+  readonly groupNo: number
+  readonly title: string
+  readonly groupExecutionPromptSha256: string
+  readonly storyboardRevision: number
+  readonly shots: readonly {
+    readonly frameId: string
+    readonly frameNo: number
+    readonly frameContentSha256: string
+  }[]
+}
+
+/** Signed method definition, not a sealed plan, stage instance, or approval. */
+export interface YimengProductionUnitDefinition {
+  readonly id: 'IMAGO-V6-LSU'
+  readonly version: string
+  readonly unitIdPattern: 'LSU[0-9]{2,}'
+  readonly scope: 'per_lsu'
+  readonly stages: readonly { readonly stageId: string; readonly roleId: string; readonly contractSha256: string }[]
+  readonly operation: 'bind_existing_shot_group'
+  readonly planSealingAllowed: false
+  readonly stageApprovalAllowed: false
+  readonly providerCalls: 0
+}
+
+/** Stateless method and exact source submitted to the Yimeng transaction. */
+export interface YimengImagoProductionUnitMethodProjection {
+  readonly schema: 'qingmu.imago-production-unit-method.v1'
+  readonly subject: YimengProductionUnitSource
+  readonly subjectSnapshotSha256: string
+  readonly definition: YimengProductionUnitDefinition
+  readonly ruleBindings: Readonly<Record<string, string>>
+  readonly rulesSha256: string
+}
+
+/** Host provenance proof; it grants neither content approval nor Provider authority. */
+export interface YimengImagoProductionUnitMethodAttestation {
+  readonly schema: 'qingmu.imago-production-unit-method-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly subjectSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly signature: string
+}
+
+/** Original command coordinates retained for a GET-only historical receipt lookup. */
+export interface YimengRecoverProductionUnitBindingRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly groupId: string
+  readonly unitId: string
+  readonly expectedSubjectSha256: string
+  readonly idempotencyKey: string
+}
+
+/** Explicit scope registration with separate source and previous-binding preconditions. */
+export interface YimengBindProductionUnitRequest extends YimengRecoverProductionUnitBindingRequest {
+  readonly expectedBindingRevision: number
+  readonly expectedBindingSha256: string | null
+  readonly methodProjection: YimengImagoProductionUnitMethodProjection
+  readonly methodProjectionSha256: string
+  readonly methodAttestation: YimengImagoProductionUnitMethodAttestation
+}
+
+/** Immutable Yimeng scope record; currency is obtained separately from its read feed. */
+export interface YimengProductionUnitBinding {
+  readonly unitId: string
+  readonly groupId: string
+  readonly projectId: string
+  readonly episodeId: string
+  readonly revision: number
+  readonly source: YimengProductionUnitSource
+  readonly sourceSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+  readonly definition: YimengProductionUnitDefinition
+  readonly actorId: string
+  readonly authSessionId: string
+  readonly eventId: string
+  readonly changeSetId: string
+  readonly createdAt: string
+}
+
+/** Scope-binding receipt without any production, approval, or rework side effects. */
+export interface YimengProductionUnitResult {
+  readonly schema: 'jason.qingmu-production-unit-result.v1'
+  readonly binding: YimengProductionUnitBinding
+  readonly bindingSha256: string
+  readonly planSealed: false
+  readonly providerCalls: 0
+  readonly humanSignoffInferred: false
+  readonly reworkExecuted: false
+}
+
+/** Historical receipt; a missing receipt never authorizes automatic resubmission. */
+export interface YimengProductionUnitRecovery extends YimengRecoverProductionUnitBindingRequest {
+  readonly schema: 'jason.qingmu-production-unit-recovery.v1'
+  readonly found: boolean
+  readonly result: YimengProductionUnitResult | null
+}
+
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
   readonly proposeScript: YimengProposeScriptResponse
@@ -1253,6 +1358,8 @@ export interface YimengCommandEndpointMap {
   readonly recoverReferenceRightsExceptionRelease: YimengRecoverReferenceRightsExceptionReleaseResponse
   readonly recordShotFinding: YimengShotFindingResult
   readonly recoverShotFinding: YimengShotFindingRecovery
+  readonly bindProductionUnit: YimengProductionUnitResult
+  readonly recoverProductionUnitBinding: YimengProductionUnitRecovery
   readonly proposePromptIr: YimengProposePromptIrResponse
   readonly previewPromptIr: YimengPreviewPromptIrResponse
   readonly commitPromptIrEdit: YimengCommitPromptIrEditResponse

@@ -28,6 +28,14 @@ ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只
 
 `recoverShotFinding` 只接收三个 ID、原 subject SHA 和幂等键。它向相同路径加 `/command-receipt` 发送一次 `GET`，query 携带 `expectedSubjectSha256`，请求头携带原 `Idempotency-Key`。它只接受相匹配的 `committed` 结果，或 `result: null` 的 `not_found`。恢复仍由易梦认证，但不会读取当前 subject，也不要求历史记录匹配今天的 HMAC 密钥或 bearer-token 会话。
 
+## 生产单元范围绑定
+
+`bindProductionUnit` 把明确选择的单元 ID 登记到现有原生镜头组。请求将项目、剧集、镜头组和单元 ID 绑定到当前来源 SHA、上一条绑定修订号/SHA，以及带证明的 `qingmu.imago-production-unit-method.v1` 投影。修订号为零时，上一条 SHA 必须为 null。Host 先核验来源与方法摘要、HMAC 证明、方法定义和规则摘要，再向 `/api/qingmu/projects/{projectId}/episodes/{episodeId}/production-units/{unitId}/binding` 发送一次 `POST`。actor 和 session 字段来自易梦认证，绝不接受浏览器指定。
+
+回执必须匹配这些坐标、下一条绑定修订号、方法与规则哈希、定义和本次请求的会话 SHA。`planSealed`、`humanSignoffInferred` 和 `reworkExecuted` 必须保持 false，`providerCalls` 必须保持零。范围绑定既不封存 LSU 计划，也不创建 StageInstance、批准、工作集或生成任务。
+
+`recoverProductionUnitBinding` 向相同绑定路径加 `/command-receipt` 发送一次 `GET`，query 携带原镜头组 ID 和来源 SHA，请求头携带原 `Idempotency-Key`。它只接受相匹配的 `found: true` 回执，或 `result: null` 的 `found: false`。恢复不要求今天的来源、HMAC 密钥或历史 bearer-token 会话仍然相同。中断的写入绝不自动重试；回执损坏和血缘错配均失败关闭。
+
 ## 安全边界
 
 上游必须是回环 HTTP(S)。适配器绝不返回 Host 令牌、不发送 Cookie、拒绝重定向、限制载荷大小和请求时长，并且不会把上游响应正文反射到错误中。浏览器只接收经过校验的命令数据和持久回执标识。
@@ -51,7 +59,7 @@ ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只
 ## 已知限制与延期工作
 
 - 这个本地适配器不是面向互联网的网关。
-- 它实现 `episode_script` 以及人物、环境、道具 `element_profile` ChangeSet 垂直切片，支持显式的参考资产选择与重生成请求意图，并记录所选视频 Finding。PromptIR、真实生成、评论、批准、签收和创意审核决定仍不属于本适配器，因此这不表示 Phase 3 已完成。
+- 它实现 `episode_script` 以及人物、环境、道具 `element_profile` ChangeSet 垂直切片，支持显式的参考资产选择与重生成请求意图，记录所选视频 Finding，并登记生产单元范围绑定。真实生成和自动创意批准不属于这些操作；仅登记范围不代表生产流程已完成。
 - 它不启动 outbox dispatcher，也不跨进程传输事件。
 - 冲突恢复必须先重新读取权威数据，再由用户明确创建新提案。
 - 回执恢复依赖易梦保留原始命令回执；血缘错配时一律失败关闭。Finding 回执不存在时返回 `not_found`，不会重新提交写入。

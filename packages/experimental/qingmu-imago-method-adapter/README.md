@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 This private experimental Host plugin compiles current IMAGO OS methods into browser-safe guidance. `elementMethod` covers profile editing, `referenceAssetMethod` covers bounded reference actions and rights guidance, `promptIrMethod` covers provider-neutral PromptIR candidates, `shotRelationMethod` covers the canonical Scene/Shot/Shot-local-Beat/Element graph plus Shot River rhythm and reference bindings, and `heroFrameStoryboardMethod` deterministically compiles one selected Hero Frame and its Shot-local canvas annotations. `worksetMethod` reads a fresh episode workflow and returns current IMAGO stage definitions with explicit authority availability. These input-snapshot methods build their own bounded input in the Host and invoke their reviewed Core compiler with Unicode-code-point-sorted, whitespace-free JSON on stdin. Their compiler's `input_snapshot_sha256` must match the SHA-256 of those exact input bytes.
 
-The newer `shotFindingMethod` uses the selected-video subject hash contract described below; the older methods' `input_snapshot_sha256` field is not part of that schema.
+`shotFindingMethod` and `productionUnitMethod` use their subject hash contracts described below; the older methods' `input_snapshot_sha256` field is not part of these schemas.
 
 ## Attestation boundary
 
@@ -44,6 +44,14 @@ The response separates current materialized asset binding from the original audi
 
 The projection binds the canonical current subject SHA, all eight required fields, three severities, active Owner options, rule hashes, and the fixed `OPEN`/no-approval/no-rework boundary. This schema uses `subjectSnapshotSha256` rather than the older `input_snapshot_sha256`. The Host signs only those validated method coordinates with the existing server-only HMAC key. The method does not record a Finding or infer attribution, approval, task creation, asset selection, or paid generation. Missing media, unplugged reads, unavailable rules, changed source bytes, or a missing signing key disable this method without disabling unrelated methods.
 
+## Production-unit binding method
+
+`productionUnitMethod` accepts exactly `projectId`, `episodeId`, and `groupId`. It resolves the optional configured reader's `productionUnits` GET before and after compilation and compares only the requested available group's source. Unavailable unrelated groups, historical bindings, and `canBindUnit: false` do not supply or invalidate that source. Browser-supplied snapshots, rules, and unit IDs are rejected. The backend transaction remains the final authority for membership and binding CAS.
+
+The fixed `scripts/compile_qingmu_production_unit_method.py` receives only `schema`, `subject`, and `snapshotSha256`, bounded to 1 MiB. The Host preserves original IDs and titles, validates safe integers and ordered unique member Shots, and rechecks the source SHA. It independently verifies the active pointer and registry, stage contract hashes, and the current six per-unit methods against the workflow loop. Its nine fixed raw rule hashes cover the seven workset sources plus `scripts/compile_qingmu_element_method.py` and this compiler; all must remain unchanged across compilation.
+
+The response is `qingmu.imago-production-unit-method-adapter-result.v1` with `projection`, `projectionSha256`, and `methodAttestation`, signed with the existing Host-only key. It allocates no unit ID, records no binding, seals no plan, approves no stage, and calls no Provider. Missing or changed source/rules, invalid compiler output, an unplugged reader, or an unavailable key fail closed. Cancellation waits for the killed child to close. Tests may inject `readProductionUnits` and `runProductionUnitCompiler` through `createImagoMethodHandler`; no new configuration or model-visible surface is added.
+
 ## Model Experience
 
 ### Private method RPCs
@@ -62,7 +70,7 @@ None. No model-facing tokens are added.
 
 ## Known Limitations and Deferred Work
 
-- Shot relations accept only the bounded ID graph, rhythm, and reference bindings; Hero Frame Storyboard accepts its existing graph, lineage, and normalized integer annotations. Titles, actual generation, selection execution, ChangeSet commit, comments, and creative review decisions remain outside this adapter.
+- Shot relations accept only the bounded ID graph, rhythm, and reference bindings; Hero Frame Storyboard accepts its existing graph, lineage, and normalized integer annotations. Title editing, actual generation, selection execution, ChangeSet commit, comments, and creative review decisions remain outside this adapter.
 - Attestation proves Host validation and exact input binding. It does not grant paid Provider authority, asset selection, human approval, or production-state writes.
 - Key rotation and multi-key verification are not part of this bounded slice.
 - Workset templates are not approved business stages. Named Stage/LSU authority must be supplied by a future explicit business contract before actual legal-work recommendations or shadow comparisons can be shown; no legacy status fallback is used.

@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates`、`selectedVideoReview`、`shotFindings` 和 `workflow`；它不暴露任何写入端点。
+这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates`、`selectedVideoReview`、`shotFindings`、`productionUnits` 和 `workflow`；它不暴露任何写入端点。
 
 ## 约定
 
@@ -38,9 +38,15 @@
 
 响应区分 `currentBinding` 与历史；当前媒体缺失不会抹掉旧记录。`canRecordFinding` 只表示明确的项目 reviewer 功能权限，不代表媒体或方法可用，也不是批准。记录动作与 GET 回执恢复走独立命令适配器。本读取不代选 Owner、不改严重度、不批准视频，也不执行返修。
 
+## 生产单元绑定
+
+`productionUnits` 只接受 `projectId` 和 `episodeId`，向 `/api/qingmu/projects/{projectId}/episodes/{episodeId}/production-units` 发送一次认证 GET，不带请求体。它原样保留 `jason.qingmu-production-unit-feed.v1`：当前镜头组来源、各单元最新的显式绑定、所有者权限与原文。Host 校验精确字段、来源与绑定的规范 SHA、项目/剧集/组身份、唯一组/单元身份、正安全整数的组号与镜号、有序且唯一的成员镜头，以及非负分镜修订号。镜号可以不连续；不根据组号推导单元 ID。ID 与文本按 Python 空白语义和 Unicode 码点长度校验，不重写输入。
+
+当前组不可用或不存在时，历史绑定仍可读取。`currentBinding` 必须与当前来源及其 SHA 精确一致；`canBindUnit` 只表示易梦已有的所有者权限。历史方法定义及其存储 SHA 原样保留，不按当前 Core 规则重新签证。响应固定 `planSealed: false`、`providerCalls: 0`、`humanSignoffInferred: false` 和 `reworkExecuted: false`。此端点不绑定单元、不封存计划、不批准 Stage、不选择媒体，也不执行返修。根入口和 `/types` 导出 `YimengProductionUnitsRequest`、`YimengProductionUnitsResponse`、`YimengProductionUnitSource`、`YimengProductionUnitDefinition` 与 `YimengProductionUnitBinding`。
+
 ## 安全边界
 
-同一个已配置处理函数还作为仅供 Host 使用的 `qingmuYimengRead` 能力提供给内部调用方。内部调用方可以复用原有 `workflow` GET，不另建 HTTP 客户端、令牌配置或缓存。Cordis 会在所属插件卸载时移除该能力。这不会把业务阶段完成、已选媒体或未知透传字段解释为具名 IMAGO Stage/LSU 批准。
+同一个已配置处理函数还作为仅供 Host 使用的 `qingmuYimengRead` 能力提供给内部调用方。内部调用方可以复用原有 `workflow` 与 `productionUnits` GET，不另建 HTTP 客户端、令牌配置或缓存。Cordis 会在所属插件卸载时移除该能力。这不会把业务阶段完成、已选媒体或未知透传字段解释为具名 IMAGO Stage/LSU 批准。
 
 默认上游为 `http://127.0.0.1:8115`。配置的基础 URL 必须继续使用 HTTP 或 HTTPS 回环地址。受保护读取从 Host 环境获取 `YIMENG_API_TOKEN`，并且只通过 `Authorization: Bearer` 请求头发送；适配器不读取 `localStorage` 或 `JWT_SECRET`、不发送 Cookie，也不返回令牌。请求使用 `cache: no-store`，并具有超时、调用方取消和失败关闭的重定向处理。普通 JSON 响应继续限制为 5 MiB；只有剧本响应单独限制为 20 MiB，使接近 5 MiB 的合法命令体仍可回传解析后剧本及其转义后的 canonical 证据，同时保持读取有界。
 

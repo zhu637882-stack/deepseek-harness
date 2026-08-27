@@ -1,4 +1,7 @@
 import type {
+  YimengProductionUnitDefinition,
+  YimengProductionUnitSource,
+  YimengProductionUnitsRequest,
   YimengContinuityDeltaProjection,
   YimengContinuityPair,
   YimengShotRelationsStoryboardRevision,
@@ -859,6 +862,48 @@ export interface ImagoShotFindingMethodResponse extends ImagoMethodJsonObject {
   readonly methodAttestation: ImagoShotFindingMethodAttestation
 }
 
+/** Identity-only request; the Host resolves current native group membership. */
+export interface ImagoProductionUnitMethodRequest extends YimengProductionUnitsRequest {
+  readonly groupId: string
+}
+
+/** Exact Core input, built from the configured business reader rather than browser data. */
+export interface ImagoProductionUnitMethodSnapshot extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.production-unit-method-snapshot.v1'
+  readonly subject: YimengProductionUnitSource
+  readonly snapshotSha256: string
+}
+
+/** Current per-unit methods; this definition allocates no ID and grants no approval. */
+export type ImagoProductionUnitMethodDefinition = YimengProductionUnitDefinition
+
+/** Non-executing current-rule method bound to one exact native group source. */
+export interface ImagoProductionUnitMethodProjection extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-production-unit-method.v1'
+  readonly subject: YimengProductionUnitSource
+  readonly subjectSnapshotSha256: string
+  readonly definition: ImagoProductionUnitMethodDefinition
+  readonly ruleBindings: Readonly<Record<string, string>>
+  readonly rulesSha256: string
+}
+
+/** Host method-origin proof, not an owner permission or a sealed LSU plan. */
+export interface ImagoProductionUnitMethodAttestation {
+  readonly schema: 'qingmu.imago-production-unit-method-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly subjectSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly signature: string
+}
+
+/** Fresh source and current method evidence, without a binding write or allocated unit ID. */
+export interface ImagoProductionUnitMethodResponse extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-production-unit-method-adapter-result.v1'
+  readonly projection: ImagoProductionUnitMethodProjection
+  readonly projectionSha256: string
+  readonly methodAttestation: ImagoProductionUnitMethodAttestation
+}
+
 /** Result values exposed by `/qingmu-imago-method`. */
 export interface ImagoMethodEndpointMap {
   readonly elementMethod: ImagoElementMethodResponse
@@ -869,6 +914,7 @@ export interface ImagoMethodEndpointMap {
   readonly worksetMethod: ImagoWorksetMethodResponse
   readonly continuityMethod: ImagoContinuityMethodResponse
   readonly shotFindingMethod: ImagoShotFindingMethodResponse
+  readonly productionUnitMethod: ImagoProductionUnitMethodResponse
 }
 
 /** Endpoint names accepted by the private method channel. */

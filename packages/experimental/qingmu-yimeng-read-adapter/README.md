@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `shotFindings`, and `workflow`; it exposes no mutation endpoint.
+This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `shotFindings`, `productionUnits`, and `workflow`; it exposes no mutation endpoint.
 
 ## Contract
 
@@ -38,9 +38,15 @@ The normalized response preserves original defects, notes, and zero, fractional,
 
 The feed separates `currentBinding` from history; missing current media does not erase prior records. `canRecordFinding` means only the explicit project reviewer feature, not current media availability, method availability, or approval. Recording and GET receipt recovery use the separate command adapter. This read never chooses an Owner, changes severity, approves a video, or executes rework.
 
+## Production unit bindings
+
+`productionUnits` accepts exactly `projectId` and `episodeId` and sends one authenticated, body-free GET to `/api/qingmu/projects/{projectId}/episodes/{episodeId}/production-units`. It preserves `jason.qingmu-production-unit-feed.v1`: current group sources, the latest explicit binding for each unit, owner capability, and original text. It validates exact fields, source and binding canonical SHAs, project/episode/group identity, unique group/unit identities, positive safe-integer group and Shot numbers, ordered unique Shot members, and nonnegative storyboard revisions. Nonconsecutive Shot numbers are valid; no unit ID is derived from a group number. IDs and text use Python-compatible whitespace and Unicode code-point limits without rewriting the input.
+
+Historical bindings remain readable when the current group is unavailable or absent. `currentBinding` must match the current source and its SHA exactly; `canBindUnit` represents only Yimeng's existing owner permission. Historical method definitions and their stored SHA fields are retained, not re-attested against the current Core rules. The feed fixes `planSealed: false`, `providerCalls: 0`, `humanSignoffInferred: false`, and `reworkExecuted: false`. This endpoint does not bind a unit, seal a plan, approve a Stage, select media, or execute rework. The root and `/types` export `YimengProductionUnitsRequest`, `YimengProductionUnitsResponse`, `YimengProductionUnitSource`, `YimengProductionUnitDefinition`, and `YimengProductionUnitBinding`.
+
 ## Security boundary
 
-The same configured handler is also provided as the Host-only `qingmuYimengRead` capability. Internal consumers can reuse the existing `workflow` GET without creating another HTTP client, token configuration, or cache. Cordis removes the capability when its owning plugin unloads. This does not reinterpret business-stage completion, selected media, or unknown forwarded fields as named IMAGO Stage/LSU approval.
+The same configured handler is also provided as the Host-only `qingmuYimengRead` capability. Internal consumers can reuse the existing `workflow` and `productionUnits` GETs without creating another HTTP client, token configuration, or cache. Cordis removes the capability when its owning plugin unloads. This does not reinterpret business-stage completion, selected media, or unknown forwarded fields as named IMAGO Stage/LSU approval.
 
 The default upstream is `http://127.0.0.1:8115`. A configured base URL must remain an HTTP or HTTPS loopback address. Protected reads take `YIMENG_API_TOKEN` from the Host environment and send it only as an `Authorization: Bearer` header; the adapter does not read `localStorage` or `JWT_SECRET`, send cookies, or return the token. Requests use `cache: no-store`, a timeout, caller cancellation, and fail-closed redirect handling. Ordinary JSON responses remain capped at 5 MiB. Only the script response is capped separately at 20 MiB so a legal command body near 5 MiB can still return the parsed script plus its escaped canonical evidence without making the read unbounded.
 

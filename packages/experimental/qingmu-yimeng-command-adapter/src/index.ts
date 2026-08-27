@@ -7,6 +7,7 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import { prepareShotFindingCommand } from './shot-finding.ts'
+import { prepareProductionUnitCommand } from './production-unit.ts'
 import type {
   YimengChangeSet,
   YimengChangeSetBase,
@@ -192,6 +193,15 @@ export type {
 } from './types.ts'
 
 export type {
+  YimengBindProductionUnitRequest,
+  YimengImagoProductionUnitMethodAttestation,
+  YimengImagoProductionUnitMethodProjection,
+  YimengProductionUnitBinding,
+  YimengProductionUnitDefinition,
+  YimengProductionUnitRecovery,
+  YimengProductionUnitResult,
+  YimengProductionUnitSource,
+  YimengRecoverProductionUnitBindingRequest,
   YimengImagoShotFindingMethodAttestation,
   YimengImagoShotFindingMethodProjection,
   YimengRecordShotFindingRequest,
@@ -4796,14 +4806,18 @@ export function createYimengCommandHandler(
       let path: string
       let requestInit: FetchJsonRequest
       let normalize: (value: unknown, token: string) => unknown
-      if (endpoint === 'recordShotFinding' || endpoint === 'recoverShotFinding') {
-        const prepared = prepareShotFindingCommand(endpoint, payload, {
+      if (endpoint === 'recordShotFinding' || endpoint === 'recoverShotFinding'
+        || endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding') {
+        const helpers = {
           canonicalJson,
-          inputError: message => new InputError(message),
-          responseError: message => new UpstreamContractError(message),
+          inputError: (message: string) => new InputError(message),
+          responseError: (message: string) => new UpstreamContractError(message),
           readAttestationKey: readReferenceAttestationKey,
           requireTimestamp: requireRfc3339Timestamp,
-        })
+        }
+        const prepared = endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
+          ? prepareProductionUnitCommand(endpoint, payload, helpers)
+          : prepareShotFindingCommand(endpoint, payload, helpers)
         path = prepared.path
         requestInit = {
           method: prepared.request.method,

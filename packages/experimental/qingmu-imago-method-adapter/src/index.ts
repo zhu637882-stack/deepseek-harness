@@ -11,6 +11,8 @@ import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import type {
+  ImagoProductionUnitMethodRequest,
+  ImagoProductionUnitMethodSnapshot,
   ImagoShotFindingMethodRequest,
   ImagoShotFindingMethodSnapshot,
   ImagoContinuityMethodResponse,
@@ -84,8 +86,18 @@ import {
   attestShotFindingMethod, buildShotFindingSnapshot, parseShotFindingMethodRequest, readShotFindingRules,
   ShotFindingContractError, ShotFindingInputError,
 } from './shot-finding.ts'
+import {
+  attestProductionUnitMethod, buildProductionUnitSnapshot, parseProductionUnitMethodRequest, readProductionUnitRules,
+  ProductionUnitContractError, ProductionUnitInputError,
+} from './production-unit.ts'
 
 export type {
+  ImagoProductionUnitMethodRequest,
+  ImagoProductionUnitMethodSnapshot,
+  ImagoProductionUnitMethodDefinition,
+  ImagoProductionUnitMethodProjection,
+  ImagoProductionUnitMethodAttestation,
+  ImagoProductionUnitMethodResponse,
   ImagoShotFindingMethodRequest,
   ImagoShotFindingMethodSnapshot,
   ImagoShotFindingMethodDefinition,
@@ -184,6 +196,7 @@ const SHOT_RELATION_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_shot_relati
 const HERO_FRAME_STORYBOARD_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_hero_frame_storyboard_method.py'
 const WORKSET_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_imago_workset_v2.py'
 const CONTINUITY_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_continuity_method.py'
+const PRODUCTION_UNIT_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_production_unit_method.py'
 const COMMON_SOURCE_PATHS = [
   'pipeline/imago-os-current.json',
   'pipeline/workflow-channel-registry.json',
@@ -449,6 +462,14 @@ export interface ImagoMethodCompilerExecution {
 
 /** Injectable local process boundary used by isolated tests. */
 export interface ImagoMethodAdapterDependencies {
+  /** Fresh native group sources; no current group is inferred from list position. */
+  readonly readProductionUnits?: (
+    request: Pick<ImagoProductionUnitMethodRequest, 'projectId' | 'episodeId'>, signal: AbortSignal,
+  ) => Promise<RpcResult<unknown>>
+  /** Optional boundary for the binding-only stateless production-unit compiler. */
+  readonly runProductionUnitCompiler?: (
+    snapshot: ImagoProductionUnitMethodSnapshot, execution: ImagoMethodCompilerExecution, signal: AbortSignal,
+  ) => Promise<unknown>
   /** Fresh selected-video subject; absence disables only the Finding method endpoint. */
   readonly readShotFindings?: (request: ImagoShotFindingMethodRequest, signal: AbortSignal) => Promise<RpcResult<unknown>>
   /** Optional injectable boundary for the stateless, current-rule Finding compiler. */
@@ -3265,6 +3286,12 @@ async function runShotFindingCompilerProcess(
   return await runCompilerSubprocess(snapshot, execution, signal, 'scripts/compile_qingmu_shot_finding_method.py')
 }
 
+async function runProductionUnitCompilerProcess(
+  snapshot: ImagoProductionUnitMethodSnapshot, execution: ImagoMethodCompilerExecution, signal: AbortSignal,
+): Promise<unknown> {
+  return await runCompilerSubprocess(snapshot, execution, signal, PRODUCTION_UNIT_COMPILER_RELATIVE_PATH)
+}
+
 async function runCompilerSubprocess(
   snapshot: ImagoMethodJsonObject,
   execution: ImagoMethodCompilerExecution,
@@ -3274,6 +3301,7 @@ async function runCompilerSubprocess(
   if (signal.aborted) throw new CompilerCancelledError()
   const waitForCloseOnCancel = compilerRelativePath === WORKSET_COMPILER_RELATIVE_PATH
     || compilerRelativePath === CONTINUITY_COMPILER_RELATIVE_PATH
+    || compilerRelativePath === PRODUCTION_UNIT_COMPILER_RELATIVE_PATH
   return await new Promise((resolve, reject) => {
     const child = spawn(
       execution.pythonExecutable,
@@ -3396,6 +3424,7 @@ export function createImagoMethodHandler(
         && endpoint !== 'worksetMethod'
         && endpoint !== 'continuityMethod'
         && endpoint !== 'shotFindingMethod'
+        && endpoint !== 'productionUnitMethod'
       ) {
         throw new InputError(`unknown IMAGO method endpoint: ${endpoint}`)
       }
@@ -3439,6 +3468,35 @@ export function createImagoMethodHandler(
         return { ok: true, value }
       }
       const attestationKey = readAttestationKey()
+      if (endpoint === 'productionUnitMethod') {
+        const request = parseProductionUnitMethodRequest(payload)
+        if (signal.aborted) return cancelled()
+        if (dependencies.readProductionUnits === undefined) return internalError('Yimeng read capability is unavailable')
+        const coordinates = { projectId: request.projectId, episodeId: request.episodeId }
+        const feed = await dependencies.readProductionUnits(coordinates, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- cancellation can arrive during the read.
+        if (signal.aborted) return cancelled()
+        if (!feed.ok) return feed
+        const snapshot = buildProductionUnitSnapshot(request, feed.value, canonicalJson)
+        const beforeRules = await readProductionUnitRules(execution.coreRoot, canonicalJson)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- fixed rule reads are asynchronous.
+        if (signal.aborted) return cancelled()
+        const raw = await (dependencies.runProductionUnitCompiler ?? runProductionUnitCompilerProcess)(snapshot, execution, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- the subprocess can be cancelled while awaited.
+        if (signal.aborted) return cancelled()
+        const currentFeed = await dependencies.readProductionUnits(coordinates, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- the second source read can be cancelled.
+        if (signal.aborted) return cancelled()
+        if (!currentFeed.ok) return currentFeed
+        if (!isDeepStrictEqual(snapshot, buildProductionUnitSnapshot(request, currentFeed.value, canonicalJson))) {
+          throw new ProductionUnitContractError('current shot group changed during compilation')
+        }
+        const currentRules = await readProductionUnitRules(execution.coreRoot, canonicalJson)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- final fixed rule reads are asynchronous.
+        if (signal.aborted) return cancelled()
+        if (!isDeepStrictEqual(beforeRules, currentRules)) throw new ProductionUnitContractError('current rules changed during compilation')
+        return { ok: true, value: attestProductionUnitMethod(raw, snapshot, currentRules, canonicalJson, attestationKey) }
+      }
       if (endpoint === 'shotFindingMethod') {
         const request = parseShotFindingMethodRequest(payload)
         if (signal.aborted) return cancelled()
@@ -3569,13 +3627,14 @@ export function createImagoMethodHandler(
       return { ok: true, value }
     } catch (error) {
       if (error instanceof InputError || error instanceof WorksetInputError
-        || error instanceof ContinuityInputError || error instanceof ShotFindingInputError) {
+        || error instanceof ContinuityInputError || error instanceof ShotFindingInputError || error instanceof ProductionUnitInputError) {
         return badRequest(error.message)
       }
       if (error instanceof AttestationKeyError) return internalError('IMAGO method attestation is unavailable')
       if (signal.aborted || error instanceof CompilerCancelledError) return cancelled()
       if (error instanceof ProjectionContractError || error instanceof WorksetContractError
-        || error instanceof ContinuityContractError || error instanceof ShotFindingContractError) {
+        || error instanceof ContinuityContractError || error instanceof ShotFindingContractError
+        || error instanceof ProductionUnitContractError) {
         return internalError(`IMAGO method projection contract failed: ${error.message}`)
       }
       return internalError('IMAGO method compiler failed')
@@ -3587,6 +3646,10 @@ export function createImagoMethodHandler(
 export function apply(ctx: Context, config: ImagoMethodAdapterConfig): void {
   const handler = createImagoMethodHandler(config, {
     ...DEFAULT_DEPENDENCIES,
+    readProductionUnits: async (request, signal) => {
+      const read = ctx.get('qingmuYimengRead')
+      return read === undefined ? internalError('Yimeng read capability is unavailable') : await read('productionUnits', request, signal)
+    },
     readShotFindings: async (request, signal) => {
       const read = ctx.get('qingmuYimengRead')
       return read === undefined ? internalError('Yimeng read capability is unavailable') : await read('shotFindings', request, signal)
