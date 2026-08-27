@@ -15,6 +15,7 @@ import { PromptIrWorkspace } from './PromptIrWorkspace.tsx'
 import { ScriptWorkspace } from './ScriptWorkspace.tsx'
 import { ShotRelationsView } from './ShotRelationsView.tsx'
 import { ShotRelationMethodView } from './ShotRelationMethodView.tsx'
+import { HeroFrameStoryboardCanvas } from './HeroFrameStoryboardCanvas.tsx'
 import css from './QingmuCockpit.module.css'
 
 export type QingmuCockpitProps = PropsRuntime<'sidebar.footer.action'>
@@ -255,20 +256,28 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
     }
   }
 
-  const refreshWorkflowAfterCommit = async (): Promise<void> => {
-    if (projectId === '' || episodeId === '') return
+  const refreshWorkflowProjectionAfterCommit = async (): Promise<YimengWorkflowProjection | undefined> => {
+    if (projectId === '' || episodeId === '') return undefined
     const request = begin()
     setLoading(true)
     setError(undefined)
     try {
       const nextProjection = await port.workflow({ projectId, episodeId }, request.controller.signal)
-      if (current(request.id)) setProjection(nextProjection)
+      if (current(request.id)) {
+        setProjection(nextProjection)
+        return nextProjection
+      }
+      return undefined
     } catch (cause) {
       if (!request.controller.signal.aborted && current(request.id)) setError(errorMessage(cause))
       throw cause
     } finally {
       if (current(request.id)) setLoading(false)
     }
+  }
+
+  const refreshWorkflowAfterCommit = async (): Promise<void> => {
+    await refreshWorkflowProjectionAfterCommit()
   }
 
   const close = (): void => {
@@ -300,7 +309,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
     const trap = (event: KeyboardEvent): void => {
       if (event.key !== 'Tab') return
       const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
       ) ?? [])].filter(node => !node.hidden)
       if (focusable.length === 0) return
       const first = focusable[0]
@@ -461,6 +470,16 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
             selectedShotId={selectedShotId}
             port={port}
             t={t}
+          />
+        )}
+        {shotRelations !== undefined && (
+          <HeroFrameStoryboardCanvas
+            relations={shotRelations}
+            heroFrameStoryboards={projection?.director.heroFrameStoryboards}
+            selectedShotId={selectedShotId}
+            port={port}
+            t={t}
+            onCommitted={refreshWorkflowProjectionAfterCommit}
           />
         )}
       </Card>

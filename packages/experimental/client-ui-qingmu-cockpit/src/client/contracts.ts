@@ -2,6 +2,10 @@
 import type {
   ImagoElementMethodRequest,
   ImagoElementMethodResponse,
+  ImagoHeroFrameStoryboardAnnotation,
+  ImagoHeroFrameStoryboardMethodRequest,
+  ImagoHeroFrameStoryboardMethodResponse,
+  ImagoHeroFrameStoryboardPoint,
   ImagoPromptIrMethodRequest,
   ImagoPromptIrMethodResponse,
   ImagoReferenceAssetMethodRequest,
@@ -20,6 +24,9 @@ import type {
   YimengHumanDecision,
   YimengHumanDecisionValue,
   YimengHealth,
+  YimengHeroFrameBinding,
+  YimengHeroFrameStoryboardShot,
+  YimengHeroFrameStoryboardsProjection,
   YimengJsonObject,
   YimengProjectsRequest,
   YimengProjectsResponse,
@@ -41,6 +48,10 @@ import type {
   YimengShotRelationScene,
   YimengShotRelationShot,
   YimengShotRelationsProjection,
+  YimengStoryboardCanvas,
+  YimengStoryboardCanvasAnnotation,
+  YimengStoryboardCanvasAnnotationKind,
+  YimengStoryboardCanvasPoint,
   YimengWorkflowProjection,
   YimengWorkflowRequest,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
@@ -49,6 +60,8 @@ import type {
   YimengCommitElementProfileResponse,
   YimengCommitPromptIrEditRequest,
   YimengCommitPromptIrEditResponse,
+  YimengCommitStoryboardCanvasRequest,
+  YimengCommitStoryboardCanvasResponse,
   YimengCommitScriptRequest,
   YimengCommitScriptResponse,
   YimengCreateCommentRequest,
@@ -63,6 +76,8 @@ import type {
   YimengPreviewPromptIrResponse,
   YimengPreviewScriptRequest,
   YimengPreviewScriptResponse,
+  YimengPreviewStoryboardCanvasRequest,
+  YimengPreviewStoryboardCanvasResponse,
   YimengProposeElementProfileRequest,
   YimengProposeElementProfileResponse,
   YimengProposePromptIrRequest,
@@ -77,6 +92,8 @@ import type {
   YimengReferenceRightsPreviewElementProfileResponse,
   YimengProposeScriptRequest,
   YimengProposeScriptResponse,
+  YimengProposeStoryboardCanvasRequest,
+  YimengProposeStoryboardCanvasResponse,
   YimengRecoverElementProfileCommitRequest,
   YimengRecoverElementProfileCommitResponse,
   YimengRecoverPromptIrEditCommitRequest,
@@ -85,6 +102,8 @@ import type {
   YimengRecoverPromptIrSelectionResponse,
   YimengRecoverScriptCommitRequest,
   YimengRecoverScriptCommitResponse,
+  YimengRecoverStoryboardCanvasCommitRequest,
+  YimengRecoverStoryboardCanvasCommitResponse,
   YimengRecoverReferenceRightsExceptionReleaseRequest,
   YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengSelectPromptIrRequest,
@@ -94,6 +113,10 @@ import type {
 export type {
   ImagoElementMethodRequest,
   ImagoElementMethodResponse,
+  ImagoHeroFrameStoryboardAnnotation,
+  ImagoHeroFrameStoryboardMethodRequest,
+  ImagoHeroFrameStoryboardMethodResponse,
+  ImagoHeroFrameStoryboardPoint,
   ImagoPromptIrMethodRequest,
   ImagoPromptIrMethodResponse,
   ImagoReferenceAssetMethodRequest,
@@ -112,6 +135,9 @@ export type {
   YimengHumanDecision,
   YimengHumanDecisionValue,
   YimengHealth,
+  YimengHeroFrameBinding,
+  YimengHeroFrameStoryboardShot,
+  YimengHeroFrameStoryboardsProjection,
   YimengProjectsRequest,
   YimengProjectsResponse,
   YimengPromptIrRequest,
@@ -132,6 +158,10 @@ export type {
   YimengShotRelationScene,
   YimengShotRelationShot,
   YimengShotRelationsProjection,
+  YimengStoryboardCanvas,
+  YimengStoryboardCanvasAnnotation,
+  YimengStoryboardCanvasAnnotationKind,
+  YimengStoryboardCanvasPoint,
   YimengWorkflowProjection,
   YimengWorkflowRequest,
 }
@@ -140,6 +170,8 @@ export type {
   YimengCommitElementProfileResponse,
   YimengCommitPromptIrEditRequest,
   YimengCommitPromptIrEditResponse,
+  YimengCommitStoryboardCanvasRequest,
+  YimengCommitStoryboardCanvasResponse,
   YimengCommitScriptRequest,
   YimengCommitScriptResponse,
   YimengCreateCommentRequest,
@@ -154,6 +186,8 @@ export type {
   YimengPreviewPromptIrResponse,
   YimengPreviewScriptRequest,
   YimengPreviewScriptResponse,
+  YimengPreviewStoryboardCanvasRequest,
+  YimengPreviewStoryboardCanvasResponse,
   YimengProposeElementProfileRequest,
   YimengProposeElementProfileResponse,
   YimengProposePromptIrRequest,
@@ -168,6 +202,8 @@ export type {
   YimengReferenceRightsPreviewElementProfileResponse,
   YimengProposeScriptRequest,
   YimengProposeScriptResponse,
+  YimengProposeStoryboardCanvasRequest,
+  YimengProposeStoryboardCanvasResponse,
   YimengRecoverElementProfileCommitRequest,
   YimengRecoverElementProfileCommitResponse,
   YimengRecoverPromptIrEditCommitRequest,
@@ -176,6 +212,8 @@ export type {
   YimengRecoverPromptIrSelectionResponse,
   YimengRecoverScriptCommitRequest,
   YimengRecoverScriptCommitResponse,
+  YimengRecoverStoryboardCanvasCommitRequest,
+  YimengRecoverStoryboardCanvasCommitResponse,
   YimengRecoverReferenceRightsExceptionReleaseRequest,
   YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengSelectPromptIrRequest,
@@ -247,6 +285,22 @@ export interface QingmuYimengCommandPort {
     request: YimengRecoverPromptIrSelectionRequest,
     signal?: AbortSignal,
   ): Promise<YimengRecoverPromptIrSelectionResponse>
+  proposeStoryboardCanvas(
+    request: YimengProposeStoryboardCanvasRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengProposeStoryboardCanvasResponse>
+  previewStoryboardCanvas(
+    request: YimengPreviewStoryboardCanvasRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengPreviewStoryboardCanvasResponse>
+  commitStoryboardCanvas(
+    request: YimengCommitStoryboardCanvasRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengCommitStoryboardCanvasResponse>
+  recoverStoryboardCanvasCommit(
+    request: YimengRecoverStoryboardCanvasCommitRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengRecoverStoryboardCanvasCommitResponse>
 }
 
 /** Read-only, stateless professional method compiler channel. */
@@ -255,6 +309,10 @@ export interface QingmuImagoMethodPort {
   referenceAssetMethod(request: ImagoReferenceAssetMethodRequest, signal?: AbortSignal): Promise<ImagoReferenceAssetMethodResponse>
   promptIrMethod(request: ImagoPromptIrMethodRequest, signal?: AbortSignal): Promise<ImagoPromptIrMethodResponse>
   shotRelationMethod(request: ImagoShotRelationMethodRequest, signal?: AbortSignal): Promise<ImagoShotRelationMethodResponse>
+  heroFrameStoryboardMethod(
+    request: ImagoHeroFrameStoryboardMethodRequest,
+    signal?: AbortSignal,
+  ): Promise<ImagoHeroFrameStoryboardMethodResponse>
 }
 
 /** Browser-facing Qingmu port. All three Host plugins remain independently pluggable. */

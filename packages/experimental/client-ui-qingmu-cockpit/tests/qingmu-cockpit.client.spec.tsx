@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type {
   YimengHealth,
+  YimengHeroFrameStoryboardsProjection,
   YimengShotRelationsProjection,
   YimengWorkflowProjection,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
@@ -91,6 +92,35 @@ const SHOT_RELATIONS = {
   blockers: [],
 } as const
 
+function heroFrameStoryboardsFor(
+  relations: YimengShotRelationsProjection,
+): YimengHeroFrameStoryboardsProjection {
+  return {
+    schema: 'jason.qingmu-hero-frame-storyboards.v1',
+    projectId: relations.projectId,
+    episodeId: relations.episodeId,
+    episodeRevision: relations.storyboardRevision.episodeRevision,
+    storyboardRevision: {
+      revisionId: relations.storyboardRevision.revisionId,
+      revisionVersion: relations.storyboardRevision.revisionVersion,
+      sourceSha256: relations.storyboardRevision.sourceSha256,
+    },
+    shotRelationsSha256: '8'.repeat(64),
+    shots: relations.shots.map(shot => ({
+      shotId: shot.shotId,
+      shotSnapshotSha256: '7'.repeat(64),
+      heroFrame: null,
+      canvas: null,
+      blockers: [],
+    })),
+    shotsSha256: '9'.repeat(64),
+    valid: true,
+    blockers: [],
+  }
+}
+
+const HERO_FRAME_STORYBOARDS = heroFrameStoryboardsFor(SHOT_RELATIONS)
+
 const WORKFLOW: YimengWorkflowProjection = {
   schema: 'jason.episode-workflow-projection.v1',
   projectId: 'project-1',
@@ -124,7 +154,7 @@ const WORKFLOW: YimengWorkflowProjection = {
       provenance: { reviewAccepted: false, reviewStatus: 'AwaitingHumanReview' },
     }],
   },
-  director: { shotRelations: SHOT_RELATIONS },
+  director: { shotRelations: SHOT_RELATIONS, heroFrameStoryboards: HERO_FRAME_STORYBOARDS },
   shots: {
     count: 2,
     shotGroupCount: 2,
@@ -207,22 +237,24 @@ function promptIrRead(frameId: string) {
 function workflowFor(projectId: string, episodeId: string, shotId: string, title: string): YimengWorkflowProjection {
   const scene = SHOT_RELATIONS.scenes[0]
   const shot = SHOT_RELATIONS.shots[0]
+  const shotRelations: YimengShotRelationsProjection = {
+    ...SHOT_RELATIONS,
+    projectId,
+    episodeId,
+    storyboardRevision: {
+      ...SHOT_RELATIONS.storyboardRevision,
+      revisionId: `${episodeId}-storyboard-revision`,
+    },
+    scenes: [scene],
+    shots: [{ ...shot, shotId, title }],
+  }
   return {
     ...WORKFLOW,
     projectId,
     episodeId,
     director: {
-      shotRelations: {
-        ...SHOT_RELATIONS,
-        projectId,
-        episodeId,
-        storyboardRevision: {
-          ...SHOT_RELATIONS.storyboardRevision,
-          revisionId: `${episodeId}-storyboard-revision`,
-        },
-        scenes: [scene],
-        shots: [{ ...shot, shotId, title }],
-      },
+      shotRelations,
+      heroFrameStoryboards: heroFrameStoryboardsFor(shotRelations),
     },
     shots: {
       ...WORKFLOW.shots,
@@ -533,6 +565,7 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     shotRelationMethod: vi.fn(async (request: Parameters<QingmuYimengPort['shotRelationMethod']>[0]) => (
       shotRelationMethod(request)
     )),
+    heroFrameStoryboardMethod: vi.fn(async () => { throw new Error('Hero Frame storyboard method is not part of this fixture') }),
     workflow: vi.fn(async () => WORKFLOW),
     proposeElementProfile: vi.fn(async () => { throw new Error('element proposal is not part of this fixture') }),
     proposeReferenceAsset: vi.fn(async () => { throw new Error('reference proposal is not part of this fixture') }),
@@ -561,6 +594,10 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     recoverPromptIrEditCommit: vi.fn(async () => { throw new Error('PromptIR edit recovery is not part of this fixture') }),
     selectPromptIr: vi.fn(async () => { throw new Error('PromptIR selection is not part of this fixture') }),
     recoverPromptIrSelection: vi.fn(async () => { throw new Error('PromptIR selection recovery is not part of this fixture') }),
+    proposeStoryboardCanvas: vi.fn(async () => { throw new Error('storyboard canvas proposal is not part of this fixture') }),
+    previewStoryboardCanvas: vi.fn(async () => { throw new Error('storyboard canvas preview is not part of this fixture') }),
+    commitStoryboardCanvas: vi.fn(async () => { throw new Error('storyboard canvas commit is not part of this fixture') }),
+    recoverStoryboardCanvasCommit: vi.fn(async () => { throw new Error('storyboard canvas recovery is not part of this fixture') }),
     ...overrides,
   }
 }

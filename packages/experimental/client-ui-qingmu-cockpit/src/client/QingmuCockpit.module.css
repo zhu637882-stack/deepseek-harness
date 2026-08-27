@@ -1124,6 +1124,343 @@
   }
 }
 
+.storyboardCanvas {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  margin-top: 16px;
+  padding: 16px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--qingmu-accent) 38%, var(--dsw-alias-border-l2));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--qingmu-accent) 4%, var(--dsw-alias-bg-layer-1));
+}
+
+.canvasHead,
+.canvasAnnotationList > div,
+.canvasMethodPanel > div:first-child,
+.canvasActions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 16px;
+  min-width: 0;
+}
+
+.canvasHead {
+  flex-wrap: wrap;
+}
+
+.canvasHead h4,
+.canvasHead p,
+.canvasAnnotationList h5,
+.canvasMethodPanel h5,
+.canvasMethodPanel p {
+  margin: 0;
+}
+
+.canvasHead p,
+.canvasMethodPanel > p,
+.canvasActions > span,
+.canvasInstruction {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.canvasHead > div,
+.canvasMethodPanel,
+.canvasControls,
+.canvasStage {
+  min-width: 0;
+}
+
+.canvasHead > div {
+  flex: 1 1 420px;
+}
+
+.canvasHead > span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+}
+
+.canvasEmpty {
+  padding: 22px;
+  border: 1px dashed var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1);
+  text-align: center;
+}
+
+.canvasEmpty p {
+  margin: 6px 0 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+}
+
+.canvasWorkspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr);
+  gap: 14px;
+  min-width: 0;
+}
+
+.canvasStage {
+  align-self: start;
+  overflow: hidden;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: #111916;
+}
+
+.canvasSvg {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.canvasVeil {
+  fill: rgb(8 18 14 / 10%);
+  pointer-events: none;
+}
+
+.canvasSubjectRegion,
+.canvasObjectAnchor,
+.canvasMotionVector,
+.canvasCursor {
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.canvasSubjectRegion {
+  fill: rgb(80 208 159 / 16%);
+  stroke: #50d09f;
+  stroke-width: 90;
+}
+
+.canvasObjectAnchor {
+  fill: rgb(255 200 92 / 20%);
+  stroke: #ffc85c;
+  stroke-width: 90;
+}
+
+.canvasObjectAnchor path,
+.canvasMotionVector,
+.canvasCursor path {
+  fill: none;
+}
+
+.canvasMotionVector {
+  stroke: #77bdfb;
+  stroke-width: 110;
+}
+
+.canvasMotionVector + marker,
+.canvasSvg marker path {
+  fill: #77bdfb;
+}
+
+.canvasCursor {
+  fill: rgb(255 255 255 / 80%);
+  stroke: #111916;
+  stroke-width: 70;
+}
+
+.canvasInstruction {
+  margin: 0;
+  padding: 8px 10px;
+}
+
+.canvasControls {
+  padding: 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.canvasControls fieldset {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.canvasControls legend {
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+.canvasControls label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+}
+
+.canvasControls select,
+.canvasControls input,
+.storyboardCanvas button {
+  min-height: 44px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+}
+
+.canvasControls select,
+.canvasControls input {
+  width: 100%;
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.storyboardCanvas button {
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+.storyboardCanvas button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.canvasToolSwitch {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.canvasToolSwitch button[aria-pressed='true'],
+.canvasPointRow > button[aria-pressed='true'] {
+  border-color: var(--qingmu-accent);
+  background: var(--qingmu-soft);
+  color: var(--qingmu-accent-strong);
+  font-weight: 700;
+}
+
+.canvasPointGrid {
+  display: grid;
+  gap: 8px;
+}
+
+.canvasPointRow {
+  display: grid;
+  grid-template-columns: auto repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.canvasNudge {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(44px, 1fr));
+  gap: 6px;
+}
+
+.canvasNudge button:last-child {
+  grid-column: 1 / -1;
+}
+
+.canvasControls p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+
+.canvasAdd,
+.primaryAction {
+  border-color: var(--qingmu-accent) !important;
+  background: var(--qingmu-accent) !important;
+  color: #fff !important;
+  font-weight: 700;
+}
+
+.canvasAnnotationList,
+.canvasMethodPanel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.canvasAnnotationList ul {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.canvasAnnotationList li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.canvasAnnotationList li > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.canvasAnnotationList span,
+.canvasAnnotationList small,
+.canvasMethodPanel dd {
+  overflow-wrap: anywhere;
+}
+
+.canvasActions {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.canvasActions > span {
+  flex: 1 1 340px;
+}
+
+.canvasMethodPanel dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.canvasMethodPanel dl > div {
+  min-width: 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.canvasMethodPanel dt {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+}
+
+.canvasMethodPanel dd {
+  margin: 4px 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+}
+
 .generationGrid article h4 {
   margin: 0 0 8px;
 }
@@ -1160,6 +1497,10 @@
 .scriptWorkspace input:focus-visible,
 .scriptWorkspace select:focus-visible,
 .shotRiver button:focus-visible,
+.storyboardCanvas button:focus-visible,
+.storyboardCanvas input:focus-visible,
+.storyboardCanvas select:focus-visible,
+.canvasSvg:focus-visible,
 .body > main:focus-visible {
   outline: 2px solid var(--qingmu-accent);
   outline-offset: 2px;
@@ -1179,6 +1520,10 @@
   .body > main,
   .evidence {
     overflow: visible;
+  }
+
+  .canvasWorkspace {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .evidence {
@@ -1247,9 +1592,22 @@
   .previewHead,
   .commitDock,
   .recoveryActions,
-  .scriptActions {
+  .scriptActions,
+  .canvasHead,
+  .canvasAnnotationList li,
+  .canvasActions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .storyboardCanvas {
+    padding: 12px;
+  }
+
+  .canvasToolSwitch,
+  .canvasPointRow,
+  .canvasMethodPanel dl {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .truthStrip article {
@@ -1285,5 +1643,14 @@
   .body,
   .tabs {
     scroll-behavior: auto;
+  }
+
+  .storyboardCanvas *,
+  .storyboardCanvas *::before,
+  .storyboardCanvas *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

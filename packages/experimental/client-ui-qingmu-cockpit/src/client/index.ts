@@ -5,18 +5,21 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { QingmuCockpit } from './QingmuCockpit.tsx'
 import type {
-  ImagoElementMethodResponse, ImagoPromptIrMethodResponse, ImagoReferenceAssetMethodResponse,
-  ImagoShotRelationMethodResponse, QingmuYimengPort,
+  ImagoElementMethodResponse, ImagoHeroFrameStoryboardMethodResponse, ImagoPromptIrMethodResponse,
+  ImagoReferenceAssetMethodResponse, ImagoShotRelationMethodResponse, QingmuYimengPort,
   YimengCommitElementProfileResponse, YimengCommitPromptIrEditResponse, YimengCommitScriptResponse,
+  YimengCommitStoryboardCanvasResponse,
   YimengElementProfileResponse, YimengEpisodesResponse, YimengHealth, YimengPreviewElementProfileResponse,
-  YimengPreviewPromptIrResponse, YimengPreviewScriptResponse,
+  YimengPreviewPromptIrResponse, YimengPreviewScriptResponse, YimengPreviewStoryboardCanvasResponse,
   YimengCreateCommentResponse, YimengCreateHumanDecisionResponse, YimengElementReviewFeedResponse,
   YimengCreateReferenceRightsExceptionReleaseResponse, YimengReferenceRightsExceptionReleaseFeedResponse,
   YimengProjectsResponse, YimengProposeElementProfileResponse, YimengProposeReferenceAssetResponse,
-  YimengProposePromptIrResponse, YimengProposeScriptResponse, YimengPromptIrResponse,
+  YimengProposePromptIrResponse, YimengProposeScriptResponse, YimengProposeStoryboardCanvasResponse,
+  YimengPromptIrResponse,
   YimengReferenceCandidatesResponse, YimengRecoverElementProfileCommitResponse,
   YimengRecoverPromptIrEditCommitResponse, YimengRecoverPromptIrSelectionResponse,
-  YimengRecoverScriptCommitResponse, YimengScriptResponse, YimengSelectPromptIrResponse,
+  YimengRecoverScriptCommitResponse, YimengRecoverStoryboardCanvasCommitResponse,
+  YimengScriptResponse, YimengSelectPromptIrResponse,
   YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengWorkflowProjection,
 } from './contracts.ts'
@@ -26,20 +29,23 @@ import { en, NS, zh } from './locales.ts'
 
 export type { QingmuCockpitFace } from './slots.ts'
 export type {
-  ImagoElementMethodResponse, ImagoPromptIrMethodResponse, ImagoReferenceAssetMethodResponse,
-  ImagoShotRelationMethodResponse,
+  ImagoElementMethodResponse, ImagoHeroFrameStoryboardMethodResponse, ImagoPromptIrMethodResponse,
+  ImagoReferenceAssetMethodResponse, ImagoShotRelationMethodResponse,
   QingmuImagoMethodPort, QingmuYimengCommandPort,
   QingmuYimengPort, QingmuYimengReadPort,
   YimengCommitElementProfileResponse, YimengCommitPromptIrEditResponse, YimengCommitScriptResponse,
+  YimengCommitStoryboardCanvasResponse,
   YimengElementProfileResponse, YimengEpisodesResponse, YimengHealth, YimengPreviewElementProfileResponse,
-  YimengPreviewPromptIrResponse, YimengPreviewScriptResponse,
+  YimengPreviewPromptIrResponse, YimengPreviewScriptResponse, YimengPreviewStoryboardCanvasResponse,
   YimengCreateCommentResponse, YimengCreateHumanDecisionResponse, YimengElementReviewFeedResponse,
   YimengCreateReferenceRightsExceptionReleaseResponse, YimengReferenceRightsExceptionReleaseFeedResponse,
   YimengProjectsResponse, YimengProposeElementProfileResponse, YimengProposeReferenceAssetResponse,
-  YimengProposePromptIrResponse, YimengProposeScriptResponse, YimengPromptIrResponse,
+  YimengProposePromptIrResponse, YimengProposeScriptResponse, YimengProposeStoryboardCanvasResponse,
+  YimengPromptIrResponse,
   YimengReferenceCandidatesResponse, YimengRecoverElementProfileCommitResponse,
   YimengRecoverPromptIrEditCommitResponse, YimengRecoverPromptIrSelectionResponse,
-  YimengRecoverScriptCommitResponse, YimengScriptResponse, YimengSelectPromptIrResponse,
+  YimengRecoverScriptCommitResponse, YimengRecoverStoryboardCanvasCommitResponse,
+  YimengScriptResponse, YimengSelectPromptIrResponse,
   YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengWorkflowProjection,
 } from './contracts.ts'
@@ -82,6 +88,8 @@ export function apply(ctx: ClientContext): void {
     promptIrMethod: (request, signal) => method<ImagoPromptIrMethodResponse>('promptIrMethod', request, signal),
     shotRelationMethod: (request, signal) =>
       method<ImagoShotRelationMethodResponse>('shotRelationMethod', request, signal),
+    heroFrameStoryboardMethod: (request, signal) =>
+      method<ImagoHeroFrameStoryboardMethodResponse>('heroFrameStoryboardMethod', request, signal),
     proposeElementProfile: (request, signal) =>
       command<YimengProposeElementProfileResponse>('proposeElementProfile', request, signal),
     proposeReferenceAsset: (request, signal) =>
@@ -120,6 +128,14 @@ export function apply(ctx: ClientContext): void {
     selectPromptIr: (request, signal) => command<YimengSelectPromptIrResponse>('selectPromptIr', request, signal),
     recoverPromptIrSelection: (request, signal) =>
       command<YimengRecoverPromptIrSelectionResponse>('recoverPromptIrSelection', request, signal),
+    proposeStoryboardCanvas: (request, signal) =>
+      command<YimengProposeStoryboardCanvasResponse>('proposeStoryboardCanvas', request, signal),
+    previewStoryboardCanvas: (request, signal) =>
+      command<YimengPreviewStoryboardCanvasResponse>('previewStoryboardCanvas', request, signal),
+    commitStoryboardCanvas: (request, signal) =>
+      command<YimengCommitStoryboardCanvasResponse>('commitStoryboardCanvas', request, signal),
+    recoverStoryboardCanvasCommit: (request, signal) =>
+      command<YimengRecoverStoryboardCanvasCommitResponse>('recoverStoryboardCanvasCommit', request, signal),
   }
 
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
