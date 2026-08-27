@@ -52,6 +52,7 @@ type Operation = 'idle' | 'loading' | 'checking' | 'previewing' | 'committing' |
 
 interface PromptIrFrame extends PromptIrRecoveryCoordinates {
   readonly key: string
+  readonly shotId: string
   readonly promptIrId: string
   readonly promptIrVersion: number
   readonly promptIrContentSha256: string
@@ -64,6 +65,9 @@ export interface PromptIrWorkspaceProps {
   readonly projectId: string
   readonly episodeId: string
   readonly shotItems: readonly unknown[]
+  readonly storyboardRevisionId: string
+  readonly selectedShotId: string
+  readonly onSelectShotId: (shotId: string) => void
   readonly port: QingmuYimengPort
   readonly t: (key: QingmuCockpitKey) => string
   readonly onCommitted: () => Promise<void>
@@ -119,6 +123,7 @@ function framesOf(
   projectId: string,
   episodeId: string,
   shotItems: readonly unknown[],
+  expectedStoryboardRevisionId: string,
 ): readonly PromptIrFrame[] {
   const candidates: PromptIrFrame[] = []
   for (const item of shotItems) {
@@ -133,6 +138,7 @@ function framesOf(
     if (
       !isIdentifier(frameId)
       || !isIdentifier(storyboardRevisionId)
+      || storyboardRevisionId !== expectedStoryboardRevisionId
       || !isIdentifier(promptIrId)
       || !Number.isSafeInteger(promptIrVersion)
       || (promptIrVersion as number) < 1
@@ -146,6 +152,7 @@ function framesOf(
       : typeof shot?.shotId === 'string' && shot.shotId.trim() !== '' ? shot.shotId : frameId
     candidates.push({
       key,
+      shotId: frameId,
       projectId,
       episodeId,
       storyboardRevisionId,
@@ -439,10 +446,19 @@ function selectionCommandRequest(marker: PromptIrSelectionRecoveryMarker): Yimen
 }
 
 /** Human-operated five-field PromptIR check, Draft commit, and separate Ready selection. */
-export function PromptIrWorkspace({ projectId, episodeId, shotItems, port, t, onCommitted }: PromptIrWorkspaceProps) {
-  const frames = framesOf(projectId, episodeId, shotItems)
-  const [selectedKey, setSelectedKey] = useState('')
-  const active = frames.find(frame => frame.key === selectedKey) ?? frames[0]
+export function PromptIrWorkspace({
+  projectId,
+  episodeId,
+  shotItems,
+  storyboardRevisionId,
+  selectedShotId,
+  onSelectShotId,
+  port,
+  t,
+  onCommitted,
+}: PromptIrWorkspaceProps) {
+  const frames = framesOf(projectId, episodeId, shotItems, storyboardRevisionId)
+  const active = frames.find(frame => frame.shotId === selectedShotId)
   const [reload, setReload] = useState(0)
   const [operation, setOperation] = useState<Operation>('idle')
   const [snapshot, setSnapshot] = useState<YimengPromptIrResponse>()
@@ -846,6 +862,8 @@ export function PromptIrWorkspace({ projectId, episodeId, shotItems, port, t, on
 
   if (projectId === '' || episodeId === '') return <p className={css.empty}>{t('promptIrChooseEpisode')}</p>
   if (frames.length === 0) return <p className={css.empty}>{t('promptIrNoFrames')}</p>
+  if (selectedShotId === '') return <p className={css.empty}>{t('promptIrChooseShot')}</p>
+  if (active === undefined) return <p className={css.empty}>{t('promptIrSelectedShotUnavailable')}</p>
 
   const busy = operation !== 'idle'
   const locked = editRecovery.status !== 'none' || selectionRecovery.status !== 'none'
@@ -866,11 +884,11 @@ export function PromptIrWorkspace({ projectId, episodeId, shotItems, port, t, on
         <span>{t('promptIrFrame')}</span>
         <select
           aria-label={t('promptIrFrame')}
-          value={active?.key ?? ''}
+          value={active.shotId}
           disabled={busy || locked}
-          onChange={(event) => { setSelectedKey(event.target.value) }}
+          onChange={(event) => { onSelectShotId(event.target.value) }}
         >
-          {frames.map(frame => <option key={frame.key} value={frame.key}>{frame.label} · {frame.status}</option>)}
+          {frames.map(frame => <option key={frame.shotId} value={frame.shotId}>{frame.label} · {frame.status}</option>)}
         </select>
       </label>
 

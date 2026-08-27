@@ -34,6 +34,11 @@ import type {
   YimengReferenceRightsExceptionScope,
   YimengScriptRequest,
   YimengScriptResponse,
+  YimengShotRelationBeat,
+  YimengShotRelationElement,
+  YimengShotRelationScene,
+  YimengShotRelationShot,
+  YimengShotRelationsProjection,
   YimengWorkflowProjection,
   YimengWorkflowRequest,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
@@ -118,6 +123,11 @@ export type {
   YimengReferenceRightsExceptionScope,
   YimengScriptRequest,
   YimengScriptResponse,
+  YimengShotRelationBeat,
+  YimengShotRelationElement,
+  YimengShotRelationScene,
+  YimengShotRelationShot,
+  YimengShotRelationsProjection,
   YimengWorkflowProjection,
   YimengWorkflowRequest,
 }

@@ -340,6 +340,9 @@ describe('PromptIrWorkspace vertical slice', () => {
         projectId={PROJECT_ID}
         episodeId={EPISODE_ID}
         shotItems={frame('Ready')}
+        storyboardRevisionId={STORYBOARD_REVISION_ID}
+        selectedShotId={FRAME_ID}
+        onSelectShotId={vi.fn()}
         port={port}
         t={t}
         onCommitted={onCommitted}
@@ -387,6 +390,9 @@ describe('PromptIrWorkspace vertical slice', () => {
         projectId={PROJECT_ID}
         episodeId={EPISODE_ID}
         shotItems={frame('Ready')}
+        storyboardRevisionId={STORYBOARD_REVISION_ID}
+        selectedShotId={FRAME_ID}
+        onSelectShotId={vi.fn()}
         port={port}
         t={t}
         onCommitted={onCommitted}
@@ -438,6 +444,9 @@ describe('PromptIrWorkspace vertical slice', () => {
         projectId={PROJECT_ID}
         episodeId={EPISODE_ID}
         shotItems={frame('Ready')}
+        storyboardRevisionId={STORYBOARD_REVISION_ID}
+        selectedShotId={FRAME_ID}
+        onSelectShotId={vi.fn()}
         port={port}
         t={t}
         onCommitted={async () => {}}
@@ -460,5 +469,55 @@ describe('PromptIrWorkspace vertical slice', () => {
     expect(spies.workflow).not.toHaveBeenCalled()
     expect(readPromptIrEditRecoveryMarker(COORDINATES).status).toBe('ready')
     screen.getByRole('checkbox', { name: zh.promptIrSelectionConfirm })
+  })
+
+  it('emits the canonical frame-backed Shot ID from its controlled selector', async () => {
+    const { port } = createPort()
+    const onSelectShotId = vi.fn()
+    const secondFrameId = 'frame-4'
+    render(
+      <PromptIrWorkspace
+        projectId={PROJECT_ID}
+        episodeId={EPISODE_ID}
+        shotItems={[
+          ...frame('Ready'),
+          {
+            ...frame('Ready')[0],
+            frameId: secondFrameId,
+            name: '走廊回望',
+          },
+        ]}
+        storyboardRevisionId={STORYBOARD_REVISION_ID}
+        selectedShotId={FRAME_ID}
+        onSelectShotId={onSelectShotId}
+        port={port}
+        t={t}
+        onCommitted={async () => {}}
+      />,
+    )
+
+    const selector = await screen.findByRole('combobox', { name: zh.promptIrFrame })
+    fireEvent.change(selector, { target: { value: secondFrameId } })
+    expect(onSelectShotId).toHaveBeenCalledWith(secondFrameId)
+  })
+
+  it('does not fall back to another PromptIR when the selected Shot is unavailable', async () => {
+    const { port, spies } = createPort()
+    render(
+      <PromptIrWorkspace
+        projectId={PROJECT_ID}
+        episodeId={EPISODE_ID}
+        shotItems={frame('Ready')}
+        storyboardRevisionId={STORYBOARD_REVISION_ID}
+        selectedShotId="missing-shot"
+        onSelectShotId={vi.fn()}
+        port={port}
+        t={t}
+        onCommitted={async () => {}}
+      />,
+    )
+
+    expect(await screen.findByText(zh.promptIrSelectedShotUnavailable)).toBeTruthy()
+    expect(spies.promptIr).not.toHaveBeenCalled()
   })
 })

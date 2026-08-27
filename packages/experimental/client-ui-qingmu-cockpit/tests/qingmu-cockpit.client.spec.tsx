@@ -27,6 +27,65 @@ const HEALTH: YimengHealth = {
   hints: null,
 }
 
+const SHOT_RELATIONS = {
+  schema: 'jason.scene-shot-beat-element-relations.v1',
+  projectId: 'project-1',
+  episodeId: 'episode-1',
+  storyboardRevision: {
+    episodeRevision: 3,
+    revisionId: 'storyboard-revision-1',
+    revisionVersion: 1,
+    sourceSha256: '1'.repeat(64),
+  },
+  scenes: [
+    { sceneId: 'scene-1', name: '雨夜巷口', profileRevision: 2, snapshotSha256: '2'.repeat(64) },
+    { sceneId: 'scene-2', name: '旧走廊', profileRevision: 4, snapshotSha256: '3'.repeat(64) },
+  ],
+  shots: [
+    {
+      shotId: 'frame-1',
+      sceneId: 'scene-1',
+      title: '雨夜相遇',
+      beats: [{
+        beatId: 'beat-1',
+        order: 0,
+        type: 'action',
+        startSec: 0,
+        endSec: 2.5,
+        actorIds: ['character-1'],
+        propIds: ['prop-1'],
+        visualResponsibility: '林青进入巷口并看向伞下的人。',
+      }],
+      elements: [
+        { elementKind: 'actor', elementId: 'character-1', name: '林青', profileRevision: 2, snapshotSha256: '4'.repeat(64) },
+        { elementKind: 'scene', elementId: 'scene-1', name: '雨夜巷口', profileRevision: 2, snapshotSha256: '2'.repeat(64) },
+        { elementKind: 'prop', elementId: 'prop-1', name: '黑伞', profileRevision: 1, snapshotSha256: '5'.repeat(64) },
+      ],
+    },
+    {
+      shotId: 'frame-2',
+      sceneId: 'scene-2',
+      title: '走廊回望',
+      beats: [{
+        beatId: 'beat-2',
+        order: 0,
+        type: 'reaction',
+        startSec: 0,
+        endSec: 1.5,
+        actorIds: ['character-1'],
+        propIds: [],
+        visualResponsibility: '林青停步回望。',
+      }],
+      elements: [
+        { elementKind: 'actor', elementId: 'character-1', name: '林青', profileRevision: 2, snapshotSha256: '4'.repeat(64) },
+        { elementKind: 'scene', elementId: 'scene-2', name: '旧走廊', profileRevision: 4, snapshotSha256: '3'.repeat(64) },
+      ],
+    },
+  ],
+  valid: true,
+  blockers: [],
+} as const
+
 const WORKFLOW: YimengWorkflowProjection = {
   schema: 'jason.episode-workflow-projection.v1',
   projectId: 'project-1',
@@ -60,13 +119,16 @@ const WORKFLOW: YimengWorkflowProjection = {
       provenance: { reviewAccepted: false, reviewStatus: 'AwaitingHumanReview' },
     }],
   },
-  director: {},
+  director: { shotRelations: SHOT_RELATIONS },
   shots: {
-    count: 1,
-    shotGroupCount: 1,
-    segmentCount: 1,
+    count: 2,
+    shotGroupCount: 2,
+    segmentCount: 2,
     unresolvedAssetRefCount: 0,
-    items: [{ shotId: 'shot-1', name: '雨夜相遇' }],
+    items: [
+      { shotId: 'shot-1', name: '雨夜相遇' },
+      { shotId: 'shot-2', name: '走廊回望' },
+    ],
   },
   video: { candidates: [{ id: 'video-1' }], selected: [], completedCount: 1, qualityPassed: true },
   audio: { candidates: [], selected: [], dialogueLineCount: 2, qualityPassed: false },
@@ -87,6 +149,84 @@ const WORKFLOW: YimengWorkflowProjection = {
     productionReadiness: 'not-inferred',
     statusFacts: ['budget.valid', 'release.releaseReady', 'qualityPassed'],
   },
+}
+
+const PROMPT_IR_WORKFLOW: YimengWorkflowProjection = {
+  ...WORKFLOW,
+  shots: {
+    ...WORKFLOW.shots,
+    items: SHOT_RELATIONS.shots.map((shot, index) => ({
+      shotId: `public-shot-${index + 1}`,
+      name: shot.title,
+      frameId: shot.shotId,
+      promptLineage: {
+        storyboardRevisionId: SHOT_RELATIONS.storyboardRevision.revisionId,
+        id: `prompt-ready-${index + 1}`,
+        version: 1,
+        contentSha256: String(index + 6).repeat(64),
+        status: 'Ready',
+      },
+    })),
+  },
+}
+
+function promptIrRead(frameId: string) {
+  const index = frameId === 'frame-2' ? 2 : 1
+  return {
+    schema: 'jason.qingmu-prompt-ir-subject-read.v1',
+    subject: {
+      schema: 'jason.qingmu-prompt-ir-subject.v1',
+      projectId: 'project-1',
+      episodeId: 'episode-1',
+      targetType: 'prompt_ir',
+      targetId: `${SHOT_RELATIONS.storyboardRevision.revisionId}:${frameId}`,
+      storyboardRevisionId: SHOT_RELATIONS.storyboardRevision.revisionId,
+      frameId,
+      promptIrId: `prompt-ready-${index}`,
+      promptIrVersion: 1,
+      promptIrContentSha256: String(index + 5).repeat(64),
+      status: 'Ready',
+      editableProjection: {
+        imageGenPrompt: `镜头 ${frameId}`,
+        lastFrameImagePrompt: '末帧',
+        videoGenPrompt: '视频',
+        motionPrompt: '动作',
+        negativePrompt: '水印',
+      },
+    },
+    baseRevision: 1,
+    baseSnapshotSha256: 'f'.repeat(64),
+  } as const
+}
+
+function workflowFor(projectId: string, episodeId: string, shotId: string, title: string): YimengWorkflowProjection {
+  const scene = SHOT_RELATIONS.scenes[0]
+  const shot = SHOT_RELATIONS.shots[0]
+  return {
+    ...WORKFLOW,
+    projectId,
+    episodeId,
+    director: {
+      shotRelations: {
+        ...SHOT_RELATIONS,
+        projectId,
+        episodeId,
+        storyboardRevision: {
+          ...SHOT_RELATIONS.storyboardRevision,
+          revisionId: `${episodeId}-storyboard-revision`,
+        },
+        scenes: [scene],
+        shots: [{ ...shot, shotId, title }],
+      },
+    },
+    shots: {
+      ...WORKFLOW.shots,
+      count: 1,
+      shotGroupCount: 1,
+      segmentCount: 1,
+      items: [{ shotId: `public-${shotId}`, name: title }],
+    },
+  }
 }
 
 const SCRIPT = {
@@ -411,6 +551,11 @@ describe('QingmuCockpit journey', () => {
 
     fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabShots }))
     expect(within(dialog).getByText('雨夜相遇')).toBeTruthy()
+    expect(within(dialog).getAllByText('frame-1').length).toBeGreaterThanOrEqual(1)
+    expect(within(dialog).getAllByText('scene-1').length).toBeGreaterThanOrEqual(1)
+    expect(within(dialog).getByText('beat-1')).toBeTruthy()
+    expect(within(dialog).getAllByText('character-1').length).toBeGreaterThanOrEqual(1)
+    expect(within(dialog).getAllByText('prop-1').length).toBeGreaterThanOrEqual(1)
 
     fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabGeneration }))
     expect(within(dialog).getByRole('heading', { name: zh.generationTitle })).toBeTruthy()
@@ -423,6 +568,86 @@ describe('QingmuCockpit journey', () => {
     await waitFor(() => { expect(screen.queryByRole('dialog', { name: zh.title })).toBeNull() })
     await waitFor(() => { expect(document.activeElement).toBe(trigger) })
     expect(trigger.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('shares one transient canonical Shot selection between relations and PromptIR', async () => {
+    const storageWrite = vi.spyOn(Storage.prototype, 'setItem')
+    const promptIr = vi.fn(async (request: Parameters<QingmuYimengPort['promptIr']>[0]) => promptIrRead(request.frameId))
+    const port = makePort({
+      workflow: vi.fn(async () => PROMPT_IR_WORKFLOW),
+      promptIr,
+    })
+    mount(port)
+    fireEvent.click(screen.getByRole('button', { name: zh.trigger }))
+    const dialog = await screen.findByRole('dialog', { name: zh.title })
+
+    fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabShots }))
+    fireEvent.click(await within(dialog).findByRole('button', { name: /frame-2/ }))
+    await waitFor(() => {
+      expect(dialog.querySelector('[data-shot-id="frame-2"]')).toBeTruthy()
+    })
+    expect(within(dialog).getByText('beat-2')).toBeTruthy()
+
+    fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabAssets }))
+    const selector = await within(dialog).findByRole('combobox', { name: zh.promptIrFrame })
+    expect((selector as HTMLSelectElement).value).toBe('frame-2')
+    await waitFor(() => {
+      expect(promptIr).toHaveBeenCalledWith({
+        projectId: 'project-1',
+        episodeId: 'episode-1',
+        storyboardRevisionId: SHOT_RELATIONS.storyboardRevision.revisionId,
+        frameId: 'frame-2',
+      }, expect.any(AbortSignal))
+    })
+
+    fireEvent.change(selector, { target: { value: 'frame-1' } })
+    fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabShots }))
+    await waitFor(() => {
+      expect(dialog.querySelector('[data-shot-id="frame-1"]')).toBeTruthy()
+    })
+    expect(storageWrite).not.toHaveBeenCalled()
+  })
+
+  it('resets transient Shot selection on episode and project authority changes', async () => {
+    const episodeTwo = workflowFor('project-1', 'episode-2', 'episode-2-frame-1', '第二集首镜')
+    const projectTwo = workflowFor('project-2', 'episode-3', 'project-2-frame-1', '另一项目首镜')
+    const projects = vi.fn(async () => ({
+      items: [
+        { id: 'project-1', name: '青木样片' },
+        { id: 'project-2', name: '青木新片' },
+      ],
+      pagination: { page: 1, pageSize: 100, pages: 1, total: 2 },
+    }))
+    const episodes = vi.fn(async (request: Parameters<QingmuYimengPort['episodes']>[0]) => ({
+      items: request.projectId === 'project-1'
+        ? [
+          { id: 'episode-1', projectId: 'project-1', episodeNumber: 1, name: '雨夜' },
+          { id: 'episode-2', projectId: 'project-1', episodeNumber: 2, name: '追踪' },
+        ]
+        : [{ id: 'episode-3', projectId: 'project-2', episodeNumber: 1, name: '开场' }],
+    }))
+    const workflow = vi.fn(async (request: Parameters<QingmuYimengPort['workflow']>[0]) => {
+      if (request.projectId === 'project-2') return projectTwo
+      if (request.episodeId === 'episode-2') return episodeTwo
+      return WORKFLOW
+    })
+    mount(makePort({ projects, episodes, workflow }))
+    fireEvent.click(screen.getByRole('button', { name: zh.trigger }))
+    const dialog = await screen.findByRole('dialog', { name: zh.title })
+    fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabShots }))
+    fireEvent.click(await within(dialog).findByRole('button', { name: /frame-2/ }))
+    await waitFor(() => { expect(dialog.querySelector('[data-shot-id="frame-2"]')).toBeTruthy() })
+
+    fireEvent.change(within(dialog).getByRole('combobox', { name: zh.episode }), { target: { value: 'episode-2' } })
+    await waitFor(() => {
+      expect(dialog.querySelector('[data-shot-id="episode-2-frame-1"]')).toBeTruthy()
+    })
+
+    fireEvent.change(within(dialog).getByRole('combobox', { name: zh.project }), { target: { value: 'project-2' } })
+    await waitFor(() => {
+      expect(dialog.querySelector('[data-shot-id="project-2-frame-1"]')).toBeTruthy()
+    })
+    expect(dialog.querySelector('[data-shot-id="frame-2"]')).toBeNull()
   })
 
   it('shows Host-only token recovery when protected reads fail before projection', async () => {

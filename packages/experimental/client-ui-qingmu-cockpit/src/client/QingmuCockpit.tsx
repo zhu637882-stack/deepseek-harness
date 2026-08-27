@@ -13,6 +13,7 @@ import type { QingmuCockpitKey } from './locales.ts'
 import { AssetWorkbench } from './AssetWorkbench.tsx'
 import { PromptIrWorkspace } from './PromptIrWorkspace.tsx'
 import { ScriptWorkspace } from './ScriptWorkspace.tsx'
+import { ShotRelationsView } from './ShotRelationsView.tsx'
 import css from './QingmuCockpit.module.css'
 
 export type QingmuCockpitProps = PropsRuntime<'sidebar.footer.action'>
@@ -145,6 +146,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   const [projectId, setProjectId] = useState('')
   const [episodeId, setEpisodeId] = useState('')
   const [projection, setProjection] = useState<YimengWorkflowProjection>()
+  const [selectedShotId, setSelectedShotId] = useState('')
   const triggerRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
@@ -184,6 +186,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
         setEpisodes([])
         setEpisodeId('')
         setProjection(undefined)
+        setSelectedShotId('')
         return
       }
 
@@ -196,6 +199,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
       setEpisodeId(nextEpisodeId)
       if (nextEpisodeId === '') {
         setProjection(undefined)
+        setSelectedShotId('')
         return
       }
       const nextProjection = await port.workflow({ projectId: nextProjectId, episodeId: nextEpisodeId }, request.controller.signal)
@@ -211,6 +215,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
     setProjectId(nextProjectId)
     setEpisodeId('')
     setProjection(undefined)
+    setSelectedShotId('')
     if (nextProjectId === '') return
     const request = begin()
     setLoading(true)
@@ -234,6 +239,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   const chooseEpisode = async (nextEpisodeId: string): Promise<void> => {
     setEpisodeId(nextEpisodeId)
     setProjection(undefined)
+    setSelectedShotId('')
     if (nextEpisodeId === '') return
     const request = begin()
     setLoading(true)
@@ -272,6 +278,16 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   }
 
   useEffect(() => () => { abortRef.current?.abort() }, [])
+
+  const shotRelations = projection?.director.shotRelations
+  useEffect(() => {
+    const relationShots = shotRelations?.shots ?? []
+    setSelectedShotId(currentShotId => (
+      relationShots.some(shot => shot.shotId === currentShotId)
+        ? currentShotId
+        : relationShots[0]?.shotId ?? ''
+    ))
+  }, [projectId, episodeId, shotRelations])
 
   useEffect(() => {
     if (!open) return
@@ -378,6 +394,9 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
         projectId={projectId}
         episodeId={episodeId}
         shotItems={shotItems}
+        storyboardRevisionId={shotRelations?.storyboardRevision.revisionId ?? ''}
+        selectedShotId={selectedShotId}
+        onSelectShotId={setSelectedShotId}
         port={port}
         t={t}
         onCommitted={refreshWorkflowAfterCommit}
@@ -425,14 +444,16 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
           <Metric label={t('segmentCount')} value={numberOf(shots.segmentCount) ?? 0} />
           <Metric label={t('unresolvedAssets')} value={numberOf(shots.unresolvedAssetRefCount) ?? 0} />
         </div>
-        {shotItems.length === 0
-          ? <p className={css.empty}>{t('shotsEmpty')}</p>
-          : <ol className={css.shotRiver}>{shotItems.slice(0, 80).map((item, index) => (
-            <li key={namedItem(item, String(index))}>
-              <span>{String(index + 1).padStart(2, '0')}</span>
-              <strong>{namedItem(item, `Shot ${String(index + 1)}`)}</strong>
-            </li>
-          ))}</ol>}
+        {shotRelations === undefined
+          ? <p className={css.empty}>{t('noProjection')}</p>
+          : (
+            <ShotRelationsView
+              relations={shotRelations}
+              selectedShotId={selectedShotId}
+              onSelectShotId={setSelectedShotId}
+              t={t}
+            />
+          )}
       </Card>
     </div>
   )
