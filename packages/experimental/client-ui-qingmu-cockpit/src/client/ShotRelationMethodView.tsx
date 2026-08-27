@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import type {
+  ImagoE53ShotRelationElement,
+  ImagoShotRelationAuthorityRequest,
   ImagoShotRelationMethodRequest,
   ImagoShotRelationMethodResponse,
 } from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter/types'
@@ -31,7 +33,7 @@ interface MethodDisplay {
   readonly relationSnapshotSha256: string
   readonly reviewTitle: string
   readonly decisionBoundary: string
-  readonly operation: string
+  readonly operations: readonly string[]
   readonly hints: readonly MethodHint[]
   readonly checks: readonly MethodCheck[]
 }
@@ -87,7 +89,7 @@ function uniqueIds(ids: readonly string[], label: string): readonly string[] {
   })
 }
 
-/** Compile the strict Yimeng read projection into the lineage-bound IMAGO input graph. */
+/** Map the authoritative Shot River fields into the read-only E5-3 method graph. */
 export function buildShotRelationMethodRequest(
   relations: YimengShotRelationsProjection,
   selectedShotId: string,
@@ -97,28 +99,27 @@ export function buildShotRelationMethodRequest(
 
   const sceneIds = new Set(relations.scenes.map(scene => scene.sceneId))
   if (sceneIds.size !== relations.scenes.length) throw new Error('易梦关系快照含重复 Scene ID')
-  const elements = new Map<string, {
-    readonly elementKind: 'actor' | 'scene' | 'prop'
-    readonly profileRevision: number
-    readonly snapshotSha256: string
-  }>()
+  const elements = new Map<string, ImagoE53ShotRelationElement>()
   const shots = relations.shots.map((shot) => {
     if (!sceneIds.has(shot.sceneId)) throw new Error(`Shot ${shot.shotId} 指向未知 Scene`)
     const elementIds = uniqueIds(shot.elements.map(element => element.elementId), `Shot ${shot.shotId} Element`)
     for (const element of shot.elements) {
-      const existing = elements.get(element.elementId)
-      if (existing !== undefined && (
-        existing.elementKind !== element.elementKind
-        || existing.profileRevision !== element.profileRevision
-        || existing.snapshotSha256 !== element.snapshotSha256
-      )) {
-        throw new Error(`Element ${element.elementId} 的权威血缘不一致`)
-      }
-      elements.set(element.elementId, {
+      const lineage: ImagoE53ShotRelationElement = {
+        elementId: element.elementId,
         elementKind: element.elementKind,
         profileRevision: element.profileRevision,
         snapshotSha256: element.snapshotSha256,
-      })
+        currentReferenceAvailability: element.currentReferenceAvailability,
+        currentReference: element.currentReference === null ? null : {
+          ...element.currentReference,
+          lineage: { ...element.currentReference.lineage },
+        },
+      }
+      const existing = elements.get(element.elementId)
+      if (existing !== undefined && canonicalJson(existing) !== canonicalJson(lineage)) {
+        throw new Error(`Element ${element.elementId} 的权威血缘不一致`)
+      }
+      elements.set(element.elementId, lineage)
     }
     const shotElementIds = new Set(elementIds)
     const beats = shot.beats.map((beat) => {
@@ -128,7 +129,18 @@ export function buildShotRelationMethodRequest(
       }
       return { beatId: beat.beatId, elementIds: beatElementIds }
     })
-    return { shotId: shot.shotId, sceneId: shot.sceneId, elementIds, beats }
+    return {
+      shotId: shot.shotId,
+      sceneId: shot.sceneId,
+      frameNo: shot.frameNo,
+      durationSec: shot.durationSec,
+      dialogueRhythm: {
+        ...shot.dialogueRhythm,
+        cues: shot.dialogueRhythm.cues.map(cue => ({ ...cue })),
+      },
+      elementIds,
+      beats,
+    }
   })
 
   const scenes = relations.scenes.map(scene => ({
@@ -148,7 +160,22 @@ export function buildShotRelationMethodRequest(
     selectedShotId,
     scenes,
     shots,
-    elements: [...elements].map(([elementId, lineage]) => ({ elementId, ...lineage })),
+    elements: [...elements.values()],
+  }
+}
+
+/** Keep Hero's E5-2 hash and write authority separate from E5-3 read-only fields. */
+export function buildHeroFrameRelationRequest(
+  relations: YimengShotRelationsProjection,
+  selectedShotId: string,
+): ImagoShotRelationAuthorityRequest {
+  const request = buildShotRelationMethodRequest(relations, selectedShotId)
+  return {
+    ...request,
+    shots: request.shots.map(({ shotId, sceneId, elementIds, beats }) => ({ shotId, sceneId, elementIds, beats })),
+    elements: request.elements.map(({ elementId, elementKind, profileRevision, snapshotSha256 }) => ({
+      elementId, elementKind, profileRevision, snapshotSha256,
+    })),
   }
 }
 
@@ -212,6 +239,11 @@ function normalizeMethodDisplay(
   const review = recordOf(projection.review_card, 'review_card')
   const workOrder = recordOf(projection.work_order_projection, 'work_order_projection')
   if (workOrder.operation !== 'inspectCanonicalShotRelations') throw new Error('工作单操作不匹配')
+  const operations = arrayOf(workOrder.operations, 'work_order_projection.operations')
+    .map((operation, index) => stringOf(operation, `work_order_projection.operations[${String(index)}]`))
+  if (canonicalJson(operations) !== canonicalJson([
+    'inspectCanonicalShotRelations', 'inspectShotRiverRhythmAndReferences',
+  ])) throw new Error('工作单操作不匹配')
   if (arrayOf(workOrder.allowed_mutations, 'allowed_mutations').length !== 0
     || workOrder.providerCalls !== 0 || workOrder.workerStarted !== false) {
     throw new Error('工作单包含写入或执行权限')
@@ -240,7 +272,7 @@ function normalizeMethodDisplay(
     relationSnapshotSha256,
     reviewTitle: stringOf(review.title, 'review_card.title'),
     decisionBoundary: stringOf(review.decision_boundary, 'review_card.decision_boundary'),
-    operation: stringOf(workOrder.operation, 'work_order_projection.operation'),
+    operations,
     hints,
     checks,
   }
@@ -289,7 +321,7 @@ export function ShotRelationMethodView({ relations, selectedShotId, port, t }: S
             <div><dt>{t('shotRelationMethodReview')}</dt><dd>{state.display.reviewTitle}</dd></div>
             <div><dt>{t('shotRelationMethodHash')}</dt><dd>{state.display.methodSha256}</dd></div>
             <div><dt>{t('shotRelationMethodRelationHash')}</dt><dd>{state.display.relationSnapshotSha256}</dd></div>
-            <div><dt>{t('shotRelationMethodWorkOrder')}</dt><dd>{state.display.operation}</dd></div>
+            <div><dt>{t('shotRelationMethodWorkOrder')}</dt><dd>{state.display.operations.join(' · ')}</dd></div>
           </dl>
           <p className={css.boundary}>{state.display.decisionBoundary}</p>
           <div className={css.relationMethodColumns}>

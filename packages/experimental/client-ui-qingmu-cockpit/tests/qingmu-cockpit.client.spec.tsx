@@ -8,7 +8,7 @@ import type {
   YimengWorkflowProjection,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import { QingmuCockpit, type QingmuCockpitProps } from '../src/client/QingmuCockpit.tsx'
-import { buildShotRelationMethodRequest } from '../src/client/ShotRelationMethodView.tsx'
+import { buildHeroFrameRelationRequest, buildShotRelationMethodRequest } from '../src/client/ShotRelationMethodView.tsx'
 import { ShotRelationsView } from '../src/client/ShotRelationsView.tsx'
 import type { QingmuYimengPort } from '../src/client/contracts.ts'
 import { zh } from '../src/client/locales.ts'
@@ -518,6 +518,7 @@ function shotRelationMethod(request: Parameters<QingmuYimengPort['shotRelationMe
       checklist: [{ check_id: 'zero-execution', label: '没有写入或执行', required: true }],
       work_order_projection: {
         operation: 'inspectCanonicalShotRelations',
+        operations: ['inspectCanonicalShotRelations', 'inspectShotRiverRhythmAndReferences'],
         allowed_mutations: [],
         providerCalls: 0,
         workerStarted: false,
@@ -674,7 +675,7 @@ afterEach(() => {
 })
 
 describe('buildShotRelationMethodRequest', () => {
-  it('preserves the complete Yimeng episode, Scene, and Element authority lineage', () => {
+  it('preserves Yimeng frame numbers, rhythm, and exact current references without adding state', () => {
     const request = buildShotRelationMethodRequest(SHOT_RELATIONS, 'frame-2')
 
     expect(request.episodeRevision).toBe(3)
@@ -693,11 +694,50 @@ describe('buildShotRelationMethodRequest', () => {
       },
     ])
     expect(request.elements).toEqual([
-      { elementId: 'character-1', elementKind: 'actor', profileRevision: 2, snapshotSha256: '4'.repeat(64) },
-      { elementId: 'scene-1', elementKind: 'scene', profileRevision: 2, snapshotSha256: '2'.repeat(64) },
-      { elementId: 'prop-1', elementKind: 'prop', profileRevision: 1, snapshotSha256: '5'.repeat(64) },
-      { elementId: 'scene-2', elementKind: 'scene', profileRevision: 4, snapshotSha256: '3'.repeat(64) },
+      {
+        elementId: 'character-1', elementKind: 'actor', profileRevision: 2, snapshotSha256: '4'.repeat(64),
+        currentReferenceAvailability: 'available', currentReference: SHOT_RELATIONS.shots[0].elements[0].currentReference,
+      },
+      {
+        elementId: 'scene-1', elementKind: 'scene', profileRevision: 2, snapshotSha256: '2'.repeat(64),
+        currentReferenceAvailability: 'missing', currentReference: null,
+      },
+      {
+        elementId: 'prop-1', elementKind: 'prop', profileRevision: 1, snapshotSha256: '5'.repeat(64),
+        currentReferenceAvailability: 'missing', currentReference: null,
+      },
+      {
+        elementId: 'scene-2', elementKind: 'scene', profileRevision: 4, snapshotSha256: '3'.repeat(64),
+        currentReferenceAvailability: 'missing', currentReference: null,
+      },
     ])
+    expect(request.shots).toEqual([
+      {
+        shotId: 'frame-1', sceneId: 'scene-1', frameNo: 1, durationSec: 2.5,
+        dialogueRhythm: SHOT_RELATIONS.shots[0].dialogueRhythm,
+        elementIds: ['character-1', 'scene-1', 'prop-1'],
+        beats: [{ beatId: 'beat-1', elementIds: ['character-1', 'prop-1'] }],
+      },
+      {
+        shotId: 'frame-2', sceneId: 'scene-2', frameNo: 2, durationSec: 1.5,
+        dialogueRhythm: { cueCount: 0, timedCueCount: 0, cues: [] },
+        elementIds: ['character-1', 'scene-2'],
+        beats: [{ beatId: 'beat-2', elementIds: ['character-1'] }],
+      },
+    ])
+  })
+
+  it('keeps the Hero method on the E5-2 authority graph without the E5-3 read-only additions', () => {
+    const request = buildHeroFrameRelationRequest(SHOT_RELATIONS, 'frame-2')
+    expect(request.selectedShotId).toBe('frame-2')
+    expect(request.shots[1]).toEqual({
+      shotId: 'frame-2', sceneId: 'scene-2', elementIds: ['character-1', 'scene-2'],
+      beats: [{ beatId: 'beat-2', elementIds: ['character-1'] }],
+    })
+    expect(request.elements[0]).toEqual({
+      elementId: 'character-1', elementKind: 'actor', profileRevision: 2, snapshotSha256: '4'.repeat(64),
+    })
+    expect(request.scenes).toEqual(buildShotRelationMethodRequest(SHOT_RELATIONS, 'frame-2').scenes)
   })
 
   it('fails closed when one Element ID carries divergent Yimeng lineage across Shots', () => {
@@ -713,6 +753,20 @@ describe('buildShotRelationMethodRequest', () => {
       })),
     } as YimengShotRelationsProjection
 
+    expect(() => buildShotRelationMethodRequest(divergent, 'frame-2'))
+      .toThrow('Element character-1 的权威血缘不一致')
+  })
+
+  it('fails closed when a repeated Element has a different current reference in another Shot', () => {
+    const divergent: YimengShotRelationsProjection = {
+      ...SHOT_RELATIONS,
+      shots: SHOT_RELATIONS.shots.map((shot, index) => ({
+        ...shot,
+        elements: shot.elements.map(element => index === 1 && element.elementId === 'character-1'
+          ? { ...element, currentReferenceAvailability: 'missing', currentReference: null }
+          : element),
+      })),
+    }
     expect(() => buildShotRelationMethodRequest(divergent, 'frame-2'))
       .toThrow('Element character-1 的权威血缘不一致')
   })
@@ -867,21 +921,39 @@ describe('QingmuCockpit journey', () => {
           {
             shotId: 'frame-1',
             sceneId: 'scene-1',
+            frameNo: 1,
+            durationSec: 2.5,
+            dialogueRhythm: SHOT_RELATIONS.shots[0].dialogueRhythm,
             elementIds: ['character-1', 'scene-1', 'prop-1'],
             beats: [{ beatId: 'beat-1', elementIds: ['character-1', 'prop-1'] }],
           },
           {
             shotId: 'frame-2',
             sceneId: 'scene-2',
+            frameNo: 2,
+            durationSec: 1.5,
+            dialogueRhythm: SHOT_RELATIONS.shots[1].dialogueRhythm,
             elementIds: ['character-1', 'scene-2'],
             beats: [{ beatId: 'beat-2', elementIds: ['character-1'] }],
           },
         ],
         elements: [
-          { elementId: 'character-1', elementKind: 'actor', profileRevision: 2, snapshotSha256: '4'.repeat(64) },
-          { elementId: 'scene-1', elementKind: 'scene', profileRevision: 2, snapshotSha256: '2'.repeat(64) },
-          { elementId: 'prop-1', elementKind: 'prop', profileRevision: 1, snapshotSha256: '5'.repeat(64) },
-          { elementId: 'scene-2', elementKind: 'scene', profileRevision: 4, snapshotSha256: '3'.repeat(64) },
+          {
+            elementId: 'character-1', elementKind: 'actor', profileRevision: 2, snapshotSha256: '4'.repeat(64),
+            currentReferenceAvailability: 'available', currentReference: SHOT_RELATIONS.shots[0].elements[0].currentReference,
+          },
+          {
+            elementId: 'scene-1', elementKind: 'scene', profileRevision: 2, snapshotSha256: '2'.repeat(64),
+            currentReferenceAvailability: 'missing', currentReference: null,
+          },
+          {
+            elementId: 'prop-1', elementKind: 'prop', profileRevision: 1, snapshotSha256: '5'.repeat(64),
+            currentReferenceAvailability: 'missing', currentReference: null,
+          },
+          {
+            elementId: 'scene-2', elementKind: 'scene', profileRevision: 4, snapshotSha256: '3'.repeat(64),
+            currentReferenceAvailability: 'missing', currentReference: null,
+          },
         ],
       }), expect.any(AbortSignal))
     })
@@ -922,6 +994,51 @@ describe('QingmuCockpit journey', () => {
     const method = await within(dialog).findByRole('region', { name: zh.shotRelationMethodTitle })
     expect((await within(method).findByRole('alert')).textContent).toContain('零执行边界')
     expect(within(method).queryByText('Scene / Shot / Beat / Element 关系检查')).toBeNull()
+  })
+
+  it('requires both E5-3 read operations and never accepts a new write operation', async () => {
+    const relationMethod = vi.fn(async (request: Parameters<QingmuYimengPort['shotRelationMethod']>[0]) => {
+      const valid = shotRelationMethod(request)
+      return {
+        ...valid,
+        projection: {
+          ...valid.projection,
+          work_order_projection: { ...valid.projection.work_order_projection, operations: ['reorderShots'] },
+        },
+      }
+    })
+    mount(makePort({ shotRelationMethod: relationMethod }))
+    fireEvent.click(screen.getByRole('button', { name: zh.trigger }))
+    const dialog = await screen.findByRole('dialog', { name: zh.title })
+    fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabShots }))
+    const method = await within(dialog).findByRole('region', { name: zh.shotRelationMethodTitle })
+    expect((await within(method).findByRole('alert')).textContent).toContain('工作单操作不匹配')
+  })
+
+  it.each(['duration', 'reference'] as const)('rejects stale E5-3 %s returned by the method', async (field) => {
+    const relationMethod = vi.fn(async (request: Parameters<QingmuYimengPort['shotRelationMethod']>[0]) => {
+      const valid = shotRelationMethod(request)
+      const relationships = valid.projection.relationship_projection
+      return {
+        ...valid,
+        projection: {
+          ...valid.projection,
+          relationship_projection: {
+            ...relationships,
+            ...(field === 'duration'
+              ? { shots: relationships.shots.map((shot, index) => index === 0 ? { ...shot, durationSec: 9 } : shot) }
+              : { elements: relationships.elements.map((element, index) => index === 0
+                ? { ...element, currentReferenceAvailability: 'missing', currentReference: null } : element) }),
+          },
+        },
+      } as unknown as Awaited<ReturnType<QingmuYimengPort['shotRelationMethod']>>
+    })
+    mount(makePort({ shotRelationMethod: relationMethod }))
+    fireEvent.click(screen.getByRole('button', { name: zh.trigger }))
+    const dialog = await screen.findByRole('dialog', { name: zh.title })
+    fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabShots }))
+    const method = await within(dialog).findByRole('region', { name: zh.shotRelationMethodTitle })
+    expect((await within(method).findByRole('alert')).textContent).toContain('与当前易梦关系快照不一致')
   })
 
   it('resets transient Shot selection on episode and project authority changes', async () => {

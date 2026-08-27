@@ -32,7 +32,13 @@ import type {
   ImagoPromptIrMethodRequest,
   ImagoPromptIrMethodResponse,
   ImagoPromptIrMethodSnapshot,
+  ImagoE53ShotRelationElement,
+  ImagoE53ShotRelationShot,
+  ImagoShotCurrentReference,
+  ImagoShotDialogueCue,
+  ImagoShotDialogueRhythm,
   ImagoShotRelationBeat,
+  ImagoShotRelationAuthorityRequest,
   ImagoShotRelationElement,
   ImagoShotRelationMethodAttestation,
   ImagoShotRelationMethodProjection,
@@ -78,7 +84,14 @@ export type {
   ImagoPromptIrMethodRequest,
   ImagoPromptIrMethodResponse,
   ImagoPromptIrMethodSnapshot,
+  ImagoE53ShotRelationElement,
+  ImagoE53ShotRelationShot,
+  ImagoShotCurrentReference,
+  ImagoShotCurrentReferenceLineage,
+  ImagoShotDialogueCue,
+  ImagoShotDialogueRhythm,
   ImagoShotRelationBeat,
+  ImagoShotRelationAuthorityRequest,
   ImagoShotRelationElement,
   ImagoShotRelationMethodAttestation,
   ImagoShotRelationMethodProjection,
@@ -223,6 +236,9 @@ const SHOT_RELATION_HINT_IDS = [
   'element-subset-binding',
   'revision-sha-boundary',
   'read-only-method-boundary',
+  'authoritative-frame-number',
+  'shot-duration-and-dialogue-rhythm',
+  'current-reference-lineage',
 ] as const
 const SHOT_RELATION_CHECK_IDS = [
   'canonical-shot-id',
@@ -230,8 +246,25 @@ const SHOT_RELATION_CHECK_IDS = [
   'beat-local-only',
   'element-subsets-close',
   'revision-and-sha-current',
+  'frame-number-unique',
+  'dialogue-rhythm-valid',
+  'current-reference-exact',
   'zero-execution',
 ] as const
+const SHOT_CURRENT_REFERENCE_ROLES = {
+  actor: new Set([
+    'identity_board',
+    'identity_board:age_variant',
+    'turnaround_front',
+    'turnaround_left',
+    'turnaround_right',
+    'turnaround_back',
+    'face_closeup',
+    'video_identity_reference',
+  ]),
+  scene: new Set(['scene_reference']),
+  prop: new Set(['prop_reference']),
+} as const
 const SHOT_RELATION_FORBIDDEN_WORK = [
   'project_state_write',
   'database_write',
@@ -243,6 +276,7 @@ const SHOT_RELATION_FORBIDDEN_WORK = [
   'human_approval',
   'human_signoff',
 ] as const
+const E53_SECONDS_HASH_SCHEMA = 'qingmu.e5-3-seconds-binary64-hash-projection.v1'
 const HERO_FRAME_STORYBOARD_HINT_IDS = [
   'canonical-shot-identity',
   'normalized-canvas-coordinates',
@@ -567,7 +601,7 @@ function parseIdentifierArray(value: unknown, field: string): string[] {
   return identifiers
 }
 
-function parseShotRelationRequest(payload: unknown): ImagoShotRelationMethodRequest {
+function parseShotRelationAuthorityRequest(payload: unknown): ImagoShotRelationAuthorityRequest {
   const input = parseExactInputObject(payload, [
     'projectId',
     'episodeId',
@@ -710,6 +744,259 @@ function parseShotRelationRequest(payload: unknown): ImagoShotRelationMethodRequ
   }
 }
 
+function parseInputPositiveFiniteNumber(value: unknown, field: string): number {
+  if (
+    typeof value !== 'number'
+    || !Number.isFinite(value)
+    || value <= 0
+  ) {
+    throw new InputError(`${field} must be a positive finite number`)
+  }
+  return value
+}
+
+function parseShotDialogueRhythm(
+  value: unknown,
+  field: string,
+  durationSec: number,
+): ImagoShotDialogueRhythm {
+  const rhythm = parseExactInputObject(value, ['cueCount', 'timedCueCount', 'cues'], field)
+  if (!Array.isArray(rhythm.cues)) throw new InputError(`${field}.cues must be an array`)
+  const v2LineIds = new Set<string>()
+  const cues: ImagoShotDialogueCue[] = rhythm.cues.map((value, index) => {
+    const cueField = `${field}.cues[${String(index)}]`
+    const cue = parseExactInputObject(value, [
+      'schemaVersion',
+      'lineId',
+      'speakerId',
+      'verbatimText',
+      'plannedStartSec',
+      'plannedEndSec',
+      'timingVerified',
+      'legacy',
+    ], cueField)
+    if (
+      typeof cue.verbatimText !== 'string'
+      || cue.verbatimText.length === 0
+      || Array.from(cue.verbatimText).length > 256
+      || cue.verbatimText.includes('\0')
+      // Python str.strip includes the four information separators, but not BOM.
+      || /(?:^[\p{White_Space}\u001c-\u001f]|[\p{White_Space}\u001c-\u001f]$)/u.test(cue.verbatimText)
+    ) {
+      throw new InputError(`${cueField}.verbatimText must be trimmed, non-empty, NUL-free, and at most 256 characters`)
+    }
+    if (cue.schemaVersion === 'dialogue-cue-v2') {
+      const lineId = parseIdentifier(cue.lineId, `${cueField}.lineId`)
+      if (v2LineIds.has(lineId)) throw new InputError(`${field} has duplicate v2 lineId: ${lineId}`)
+      v2LineIds.add(lineId)
+      const plannedStartSec = cue.plannedStartSec
+      const plannedEndSec = cue.plannedEndSec
+      if (
+        typeof plannedStartSec !== 'number'
+        || !Number.isFinite(plannedStartSec)
+        || plannedStartSec < 0
+        || typeof plannedEndSec !== 'number'
+        || !Number.isFinite(plannedEndSec)
+        || plannedEndSec <= plannedStartSec
+        || plannedEndSec > durationSec + 1e-6
+        || cue.timingVerified !== true
+        || cue.legacy !== false
+      ) {
+        throw new InputError(`${cueField} v2 timing contract mismatch`)
+      }
+      return {
+        schemaVersion: 'dialogue-cue-v2',
+        lineId,
+        speakerId: parseIdentifier(cue.speakerId, `${cueField}.speakerId`),
+        verbatimText: cue.verbatimText,
+        plannedStartSec: plannedStartSec === 0 ? 0 : plannedStartSec,
+        plannedEndSec,
+        timingVerified: true,
+        legacy: false,
+      }
+    }
+    if (
+      cue.schemaVersion !== 'dialogue-cue-legacy-v1'
+      || cue.lineId !== null
+      || cue.plannedStartSec !== null
+      || cue.plannedEndSec !== null
+      || cue.timingVerified !== false
+      || cue.legacy !== true
+    ) {
+      throw new InputError(`${cueField} legacy timing contract mismatch`)
+    }
+    return {
+      schemaVersion: 'dialogue-cue-legacy-v1',
+      lineId: null,
+      speakerId: cue.speakerId === null
+        ? null
+        : parseIdentifier(cue.speakerId, `${cueField}.speakerId`),
+      verbatimText: cue.verbatimText,
+      plannedStartSec: null,
+      plannedEndSec: null,
+      timingVerified: false,
+      legacy: true,
+    }
+  })
+  const cueCount = parseInputInteger(rhythm.cueCount, `${field}.cueCount`)
+  const timedCueCount = parseInputInteger(rhythm.timedCueCount, `${field}.timedCueCount`)
+  if (
+    cueCount !== cues.length
+    || timedCueCount !== cues.filter(cue => cue.timingVerified).length
+  ) {
+    throw new InputError(`${field} cue counts mismatch`)
+  }
+  return { cueCount, timedCueCount, cues }
+}
+
+function parseShotCurrentReference(
+  value: unknown,
+  field: string,
+  projectId: string,
+  element: ImagoShotRelationElement,
+): ImagoShotCurrentReference {
+  const reference = parseExactInputObject(value, ['assetId', 'sha256', 'lineage'], field)
+  const lineageField = `${field}.lineage`
+  const lineage = parseExactInputObject(reference.lineage, [
+    'projectId',
+    'sourceEpisodeId',
+    'ownerType',
+    'ownerId',
+    'role',
+    'generationJobId',
+    'sourceRevisionId',
+    'formalConsistencyCheckId',
+  ], lineageField)
+  if (lineage.ownerType !== 'actor' && lineage.ownerType !== 'scene' && lineage.ownerType !== 'prop') {
+    throw new InputError(`${lineageField}.ownerType must be actor, scene, or prop`)
+  }
+  const normalizedLineage: ImagoShotCurrentReference['lineage'] = {
+    projectId: parseIdentifier(lineage.projectId, `${lineageField}.projectId`),
+    sourceEpisodeId: parseIdentifier(lineage.sourceEpisodeId, `${lineageField}.sourceEpisodeId`),
+    ownerType: lineage.ownerType,
+    ownerId: parseIdentifier(lineage.ownerId, `${lineageField}.ownerId`),
+    role: parseIdentifier(lineage.role, `${lineageField}.role`),
+    generationJobId: parseIdentifier(lineage.generationJobId, `${lineageField}.generationJobId`),
+    sourceRevisionId: parseIdentifier(lineage.sourceRevisionId, `${lineageField}.sourceRevisionId`),
+    formalConsistencyCheckId: parseIdentifier(
+      lineage.formalConsistencyCheckId,
+      `${lineageField}.formalConsistencyCheckId`,
+    ),
+  }
+  if (
+    normalizedLineage.projectId !== projectId
+    || normalizedLineage.ownerType !== element.elementKind
+    || normalizedLineage.ownerId !== element.elementId
+    || !SHOT_CURRENT_REFERENCE_ROLES[element.elementKind].has(normalizedLineage.role)
+  ) {
+    throw new InputError(`${lineageField} subject mismatch`)
+  }
+  return {
+    assetId: parseIdentifier(reference.assetId, `${field}.assetId`),
+    sha256: parseInputSha256(reference.sha256, `${field}.sha256`),
+    lineage: normalizedLineage,
+  }
+}
+
+function parseShotRelationRequest(payload: unknown): ImagoShotRelationMethodRequest {
+  const input = parseExactInputObject(payload, [
+    'projectId',
+    'episodeId',
+    'episodeRevision',
+    'storyboardRevisionId',
+    'storyboardRevisionVersion',
+    'storyboardSourceSha256',
+    'selectedShotId',
+    'scenes',
+    'shots',
+    'elements',
+  ], 'payload')
+  if (!Array.isArray(input.shots)) throw new InputError('shots must be an array')
+  if (!Array.isArray(input.elements)) throw new InputError('elements must be an array')
+  const rawShots = input.shots.map((value, index) => parseExactInputObject(value, [
+    'shotId',
+    'frameNo',
+    'sceneId',
+    'durationSec',
+    'dialogueRhythm',
+    'elementIds',
+    'beats',
+  ], `shots[${String(index)}]`))
+  const rawElements = input.elements.map((value, index) => parseExactInputObject(value, [
+    'elementId',
+    'elementKind',
+    'profileRevision',
+    'snapshotSha256',
+    'currentReferenceAvailability',
+    'currentReference',
+  ], `elements[${String(index)}]`))
+  const relations = parseShotRelationAuthorityRequest({
+    ...input,
+    shots: rawShots.map(shot => ({
+      shotId: shot.shotId,
+      sceneId: shot.sceneId,
+      elementIds: shot.elementIds,
+      beats: shot.beats,
+    })),
+    elements: rawElements.map(element => ({
+      elementId: element.elementId,
+      elementKind: element.elementKind,
+      profileRevision: element.profileRevision,
+      snapshotSha256: element.snapshotSha256,
+    })),
+  })
+  const frameNos = new Set<number>()
+  const shots: ImagoE53ShotRelationShot[] = relations.shots.map((shot, index) => {
+    const rawShot = rawShots[index]
+    if (rawShot === undefined) throw new InputError('Shot normalization mismatch')
+    const frameNo = parseInputPositiveInteger(rawShot.frameNo, `shots[${String(index)}].frameNo`)
+    if (frameNos.has(frameNo)) throw new InputError(`duplicate frameNo: ${String(frameNo)}`)
+    frameNos.add(frameNo)
+    const durationSec = parseInputPositiveFiniteNumber(
+      rawShot.durationSec,
+      `shots[${String(index)}].durationSec`,
+    )
+    return {
+      ...shot,
+      frameNo,
+      durationSec,
+      dialogueRhythm: parseShotDialogueRhythm(
+        rawShot.dialogueRhythm,
+        `shots[${String(index)}].dialogueRhythm`,
+        durationSec,
+      ),
+    }
+  })
+  const elements: ImagoE53ShotRelationElement[] = relations.elements.map((element, index) => {
+    const rawElement = rawElements[index]
+    if (rawElement === undefined) throw new InputError('Element normalization mismatch')
+    const availability = rawElement.currentReferenceAvailability
+    if (availability !== 'missing' && availability !== 'available') {
+      throw new InputError(`elements[${String(index)}].currentReferenceAvailability must be missing or available`)
+    }
+    if (availability === 'missing') {
+      if (rawElement.currentReference !== null) {
+        throw new InputError(`elements[${String(index)}].currentReference must be null when missing`)
+      }
+      return { ...element, currentReferenceAvailability: 'missing', currentReference: null }
+    }
+    if (rawElement.currentReference === null) {
+      throw new InputError(`elements[${String(index)}].currentReference is required when available`)
+    }
+    return {
+      ...element,
+      currentReferenceAvailability: 'available',
+      currentReference: parseShotCurrentReference(
+        rawElement.currentReference,
+        `elements[${String(index)}].currentReference`,
+        relations.projectId,
+        element,
+      ),
+    }
+  })
+  return { ...relations, shots, elements }
+}
+
 function parseStoryboardPoint(value: unknown, field: string): { x: number; y: number } {
   const point = parseExactInputObject(value, ['x', 'y'], field)
   const x = parseInputInteger(point.x, `${field}.x`)
@@ -820,7 +1107,7 @@ function parseHeroFrameStoryboardRequest(payload: unknown): ImagoHeroFrameStoryb
     'heroFrame',
     'canvas',
   ], 'payload')
-  const relations = parseShotRelationRequest({
+  const relations = parseShotRelationAuthorityRequest({
     projectId: input.projectId,
     episodeId: input.episodeId,
     episodeRevision: input.episodeRevision,
@@ -1103,7 +1390,7 @@ function buildPromptIrSnapshot(request: ImagoPromptIrMethodRequest): ImagoPrompt
   }
 }
 
-function buildYimengShotRelationAuthority(request: ImagoShotRelationMethodRequest): ImagoMethodJsonObject {
+function buildYimengShotRelationAuthority(request: ImagoShotRelationAuthorityRequest): ImagoMethodJsonObject {
   return {
     schema: 'jason.qingmu-shot-relation-authority.v1',
     projectId: request.projectId,
@@ -1131,7 +1418,7 @@ function buildShotRelationSnapshot(
       storyboardRevisionVersion: request.storyboardRevisionVersion,
       storyboardSourceSha256: request.storyboardSourceSha256,
       relationSnapshotSha256: canonicalSha256(
-        buildYimengShotRelationAuthority(request),
+        buildE53ShotRelationHashProjection(request),
         'yimengShotRelationAuthority',
       ),
       selectedShotId: request.selectedShotId,
@@ -1146,6 +1433,58 @@ function buildShotRelationSnapshot(
       method_source: 'imago_os_current',
       human_approval: 'not_granted',
       paid_provider_authority: 'not_granted',
+    },
+  }
+}
+
+/** Only E5-3 hash projections encode the three seconds fields; wire values stay numeric. */
+function buildE53ShotRelationHashProjection(request: ImagoShotRelationMethodRequest): ImagoMethodJsonObject {
+  return {
+    schema: E53_SECONDS_HASH_SCHEMA,
+    subject: {
+      ...buildYimengShotRelationAuthority(request),
+      shots: request.shots.map(buildE53ShotHashFields),
+    },
+  }
+}
+
+function buildE53ShotHashFields(shot: ImagoE53ShotRelationShot): ImagoMethodJsonObject {
+  const bytes = Buffer.alloc(8)
+  const secondsHex = (value: number | null): string | null => {
+    if (value === null) return null
+    bytes.writeDoubleBE(value === 0 ? 0 : value)
+    return `binary64:${bytes.toString('hex')}`
+  }
+  return {
+    ...shot,
+    durationSec: secondsHex(shot.durationSec),
+    dialogueRhythm: {
+      ...shot.dialogueRhythm,
+      cues: shot.dialogueRhythm.cues.map(cue => ({
+        ...cue,
+        plannedStartSec: secondsHex(cue.plannedStartSec),
+        plannedEndSec: secondsHex(cue.plannedEndSec),
+      })),
+    },
+  }
+}
+
+function buildE53ShotHashProjection(shot: ImagoE53ShotRelationShot): ImagoMethodJsonObject {
+  return { schema: E53_SECONDS_HASH_SCHEMA, subject: buildE53ShotHashFields(shot) }
+}
+
+function buildE53ProjectionHashProjection(
+  projection: ImagoShotRelationMethodProjection,
+): ImagoMethodJsonObject {
+  return {
+    schema: E53_SECONDS_HASH_SCHEMA,
+    subject: {
+      ...projection,
+      relationship_projection: {
+        ...projection.relationship_projection,
+        shots: projection.relationship_projection.shots.map(buildE53ShotHashFields),
+        selectedShot: buildE53ShotHashFields(projection.relationship_projection.selectedShot),
+      },
     },
   }
 }
@@ -1317,6 +1656,26 @@ function canonicalSha256(value: unknown, field: string): string {
   return createHash('sha256').update(canonicalJson(value, field), 'utf8').digest('hex')
 }
 
+/** E5-3 wire JSON permits finite seconds without changing the integer-only legacy compiler JSON. */
+function e53CanonicalJson(value: unknown, field: string, depth = 0): string {
+  if (depth > 100) throw new ProjectionContractError(`${field} nesting exceeds limit`)
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new ProjectionContractError(`${field} must contain only finite numbers`)
+    return JSON.stringify(value)
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item, index) => e53CanonicalJson(item, `${field}[${String(index)}]`, depth + 1)).join(',')}]`
+  }
+  if (isJsonObject(value)) {
+    return `{${Object.keys(value).sort(compareUnicodeCodePoints).map(key => `${JSON.stringify(key)}:${e53CanonicalJson(value[key], `${field}.${key}`, depth + 1)}`).join(',')}}`
+  }
+  return canonicalJson(value, field)
+}
+
+function e53CanonicalSha256(value: unknown, field: string): string {
+  return createHash('sha256').update(e53CanonicalJson(value, field), 'utf8').digest('hex')
+}
+
 function readAttestationKey(): string {
   const key = process.env.QINGMU_IMAGO_ATTESTATION_KEY
   if (key === undefined || key === '' || Buffer.byteLength(key, 'utf8') < 32) {
@@ -1404,11 +1763,11 @@ function createShotRelationMethodAttestation(
   const unsigned = {
     schema: 'qingmu.imago-shot-relation-method-attestation.v1',
     algorithm: 'hmac-sha256',
-    projectionSha256: canonicalSha256(projection, 'projection'),
-    inputSnapshotSha256: canonicalSha256(snapshot, 'snapshot'),
+    projectionSha256: canonicalSha256(buildE53ProjectionHashProjection(projection), 'projectionHashProjection'),
+    inputSnapshotSha256: e53CanonicalSha256(snapshot, 'snapshot'),
     targetSha256: canonicalSha256(snapshot.target, 'snapshot.target'),
     relationSnapshotSha256: snapshot.target.relationSnapshotSha256,
-    selectedShotSha256: canonicalSha256(selectedShot, 'snapshot.selectedShot'),
+    selectedShotSha256: canonicalSha256(buildE53ShotHashProjection(selectedShot), 'selectedShotHashProjection'),
   } as const
   return {
     ...unsigned,
@@ -2191,7 +2550,7 @@ function normalizeShotRelationProjection(
   value: unknown,
   snapshot: ImagoShotRelationMethodSnapshot,
 ): ImagoShotRelationMethodProjection {
-  assertSafeJsonNumbers(value, 'projection')
+  e53CanonicalJson(value, 'projection')
   const root = requireExactObject(value, [
     'schema',
     'input_snapshot_sha256',
@@ -2217,7 +2576,7 @@ function normalizeShotRelationProjection(
   }
   if (
     requireSha256(root.input_snapshot_sha256, 'projection.input_snapshot_sha256')
-    !== canonicalSha256(snapshot, 'snapshot')
+    !== e53CanonicalSha256(snapshot, 'snapshot')
   ) {
     throw new ProjectionContractError('projection input snapshot hash mismatch')
   }
@@ -2358,6 +2717,7 @@ function normalizeShotRelationProjection(
   const workOrder = requireExactObject(root.work_order_projection, [
     'target',
     'operation',
+    'operations',
     'allowed_mutations',
     'required_read_set',
     'before_compile',
@@ -2371,6 +2731,11 @@ function normalizeShotRelationProjection(
   ) {
     throw new ProjectionContractError('projection work order target or operation mismatch')
   }
+  requireExactArray(
+    workOrder.operations,
+    ['inspectCanonicalShotRelations', 'inspectShotRiverRhythmAndReferences'],
+    'projection.work_order_projection.operations',
+  )
   requireExactArray(workOrder.allowed_mutations, [], 'projection.work_order_projection.allowed_mutations')
   const expectedReadSet = [{
     source: 'yimeng',
@@ -2880,7 +3245,9 @@ async function runCompilerSubprocess(
       }
     })
     child.stdin.once('error', () => {})
-    child.stdin.end(canonicalJson(snapshot, 'snapshot'), 'utf8')
+    child.stdin.end(compilerRelativePath === SHOT_RELATION_COMPILER_RELATIVE_PATH
+      ? e53CanonicalJson(snapshot, 'snapshot')
+      : canonicalJson(snapshot, 'snapshot'), 'utf8')
   })
 }
 

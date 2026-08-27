@@ -8,7 +8,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { Browser, Page } from 'playwright'
+import type { Browser, Locator, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import { launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts'
@@ -61,6 +61,7 @@ const SCENE_STALE_ASSET_SHA = 'ef'.repeat(32)
 const REFERENCE_REPAIR_PROMPT = '保留走廊冷白灯和湿润地面，修复画面边缘断裂与人物残影。'
 const PROMPT_IR_STORYBOARD_REVISION_ID = 'storyboard-revision-1'
 const PROMPT_IR_FRAME_ID = 'frame-1'
+const SHOT_RIVER_FIRST_FRAME_ID = 'frame-z'
 const PROMPT_IR_TARGET_ID = `${PROMPT_IR_STORYBOARD_REVISION_ID}:${PROMPT_IR_FRAME_ID}`
 const SHOT_RELATION_SOURCE_SHA = '71'.repeat(32)
 const PROMPT_IR_READY_ID = 'prompt-ir-ready-4'
@@ -818,10 +819,27 @@ function shotRelationsFixture(
       profileRevision: 3,
       snapshotSha256: '72'.repeat(32),
     }],
+    // Keep transport order deliberately reversed: frameNo is the only Shot River order authority.
     shots: [{
       shotId: PROMPT_IR_FRAME_ID,
+      frameNo: 12,
       sceneId: 'scene-1',
       title: '雨夜车站',
+      durationSec: 2.5,
+      dialogueRhythm: {
+        cueCount: 1,
+        timedCueCount: 1,
+        cues: [{
+          schemaVersion: 'dialogue-cue-v2',
+          lineId: 'line-frame-1-opening',
+          speakerId: 'actor-1',
+          verbatimText: '你终于来了。',
+          plannedStartSec: 0.5,
+          plannedEndSec: 1.5,
+          timingVerified: true,
+          legacy: false,
+        }],
+      },
       beats: [{
         beatId: 'beat-frame-1-opening',
         order: 0,
@@ -839,6 +857,21 @@ function shotRelationsFixture(
           name: '林青',
           profileRevision: 3,
           snapshotSha256: '73'.repeat(32),
+          currentReferenceAvailability: 'available',
+          currentReference: {
+            assetId: 'asset-actor-1-current-reference',
+            sha256: '75'.repeat(32),
+            lineage: {
+              projectId: 'project-1',
+              sourceEpisodeId: 'episode-1',
+              ownerType: 'actor',
+              ownerId: 'actor-1',
+              role: 'identity_board',
+              generationJobId: 'job-actor-1-current-reference',
+              sourceRevisionId: 'revision-actor-1-current-reference',
+              formalConsistencyCheckId: 'check-actor-1-current-reference',
+            },
+          },
         },
         {
           elementKind: 'scene',
@@ -846,6 +879,8 @@ function shotRelationsFixture(
           name: '旧体育馆走廊',
           profileRevision: 3,
           snapshotSha256: '72'.repeat(32),
+          currentReferenceAvailability: 'missing',
+          currentReference: null,
         },
         {
           elementKind: 'prop',
@@ -853,8 +888,27 @@ function shotRelationsFixture(
           name: '银色怀表',
           profileRevision: 5,
           snapshotSha256: '74'.repeat(32),
+          currentReferenceAvailability: 'missing',
+          currentReference: null,
         },
       ],
+    }, {
+      shotId: SHOT_RIVER_FIRST_FRAME_ID,
+      frameNo: 7,
+      sceneId: 'scene-1',
+      title: '走廊空镜',
+      durationSec: 1.25,
+      dialogueRhythm: { cueCount: 0, timedCueCount: 0, cues: [] },
+      beats: [],
+      elements: [{
+        elementKind: 'scene',
+        elementId: 'scene-1',
+        name: '旧体育馆走廊',
+        profileRevision: 3,
+        snapshotSha256: '72'.repeat(32),
+        currentReferenceAvailability: 'missing',
+        currentReference: null,
+      }],
     }],
     valid: true,
     blockers: [],
@@ -889,6 +943,13 @@ function heroFrameStoryboardsFixture(
       bindingSha256: heroFrame.bindingSha256,
     },
   }
+  const firstShot = {
+    shotId: SHOT_RIVER_FIRST_FRAME_ID,
+    shotSnapshotSha256: storyboardRevision.revisionVersion === 1 ? '85'.repeat(32) : '86'.repeat(32),
+    heroFrame: null,
+    canvas: null,
+    blockers: [],
+  } as const
   return {
     schema: 'jason.qingmu-hero-frame-storyboards.v1',
     projectId: 'project-1',
@@ -896,8 +957,8 @@ function heroFrameStoryboardsFixture(
     episodeRevision: revision,
     storyboardRevision,
     shotRelationsSha256: canonicalSha256(shotRelations),
-    shots: [shot],
-    shotsSha256: canonicalSha256([stableShot]),
+    shots: [shot, firstShot],
+    shotsSha256: canonicalSha256([stableShot, firstShot]),
     valid: true,
     blockers: [],
   } as const
@@ -3076,6 +3137,7 @@ describe.skipIf(
       readonly path: string
       readonly errorText: string
     }> = []
+    let shotRiverBrowserEvidence: Record<string, unknown> | undefined
     let storyboardCanvasBrowserEvidence: Record<string, unknown> | undefined
     let resolveReferenceRightsMethodProjectionSha256: ((sha256: string) => void) | undefined
     const referenceRightsMethodProjectionSha256 = new Promise<string>((resolve) => {
@@ -3265,6 +3327,7 @@ describe.skipIf(
             screenshots: {
               relation: process.env.QINGMU_E5_1_EVIDENCE_SCREENSHOT,
               relationMethod: process.env.QINGMU_E5_1_METHOD_EVIDENCE_SCREENSHOT,
+              shotRiver: process.env.QINGMU_E5_3_EVIDENCE_SCREENSHOT,
               storyboardCanvas: process.env.QINGMU_E5_2_CANVAS_EVIDENCE_SCREENSHOT,
               storyboardCanvasMethod: process.env.QINGMU_E5_2_METHOD_EVIDENCE_SCREENSHOT,
               script: process.env.QINGMU_EVIDENCE_SCREENSHOT,
@@ -3272,6 +3335,7 @@ describe.skipIf(
               scene: process.env.QINGMU_SCENE_EVIDENCE_SCREENSHOT,
               prop: process.env.QINGMU_ASSET_EVIDENCE_SCREENSHOT,
             },
+            shotRiver: shotRiverBrowserEvidence,
             storyboardCanvas: storyboardCanvasBrowserEvidence,
           }
           await mkdir(dirname(runEvidencePath), { recursive: true })
@@ -3289,29 +3353,75 @@ describe.skipIf(
       if (failures.length > 0) throw new AggregateError(failures, 'Qingmu script e2e cleanup failed')
     })
 
-    it('renders one canonical E5-1 Shot through Yimeng, IMAGO, and the real Qingmu Chromium UI', async () => {
+    it('renders and selects the canonical E5-3 Shot River through Yimeng, IMAGO, and Chromium', async () => {
       onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e5-1-shot-relations'))
+      const methodRequestStart = browserRpcRequests.length
       await page.getByRole('button', { name: '青木制作台' }).click()
       const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
       await dialog.waitFor({ timeout: 10_000 })
       await dialog.getByRole('tab', { name: '分镜与镜头' }).click()
 
-      await dialog.locator(`[data-shot-id="${PROMPT_IR_FRAME_ID}"]`).waitFor({ timeout: 15_000 })
+      const shotRiver = dialog.getByRole('list', { name: '镜头选择' })
+      const firstShotCard = shotRiver.getByRole('button', { name: /frame-z/ })
+      const selectedShotCard = shotRiver.getByRole('button', { name: /frame-1/ })
+      await firstShotCard.waitFor({ timeout: 15_000 })
+      await selectedShotCard.waitFor({ timeout: 15_000 })
+      const shotCards = shotRiver.getByRole('button')
+      expect(await shotCards.allTextContents()).toEqual([
+        '07走廊空镜frame-z1.25 秒0 句 · 0 已定时0/1 参考已绑定',
+        '12雨夜车站frame-12.5 秒1 句 · 1 已定时1/3 参考已绑定',
+      ])
+      await firstShotCard.click()
+      await expect.poll(() => browserRpcRequests.slice(methodRequestStart).filter(request =>
+        request.path === '/qingmu-imago-method/shotRelationMethod'
+        && isRecord(request.body)
+        && isRecord(request.body.payload)
+        && request.body.payload.selectedShotId === SHOT_RIVER_FIRST_FRAME_ID).length, { timeout: 20_000 }).toBe(1)
+      const method = dialog.getByRole('region', { name: 'IMAGO 镜头关系方法' })
+      await method.getByText('Scene / Shot / Beat / Element 关系检查', { exact: true }).waitFor({ timeout: 20_000 })
+      const selectedMethodWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-imago-method/shotRelationMethod')
+      await selectedShotCard.click()
+      const selectedMethodWire = await selectedMethodWirePromise
+      const selectedMethodRpc = await selectedMethodWire.json() as unknown
+      const selectedMethodRoot = isRecord(selectedMethodRpc) ? selectedMethodRpc : {}
+      const selectedMethodResult = isRecord(selectedMethodRoot.result) ? selectedMethodRoot.result : {}
+      const selectedMethodValue = isRecord(selectedMethodResult.value) ? selectedMethodResult.value : {}
+      const selectedMethodProjection = isRecord(selectedMethodValue.projection) ? selectedMethodValue.projection : {}
+      expect(selectedMethodResult.ok).toBe(true)
+      expect(selectedMethodProjection).toEqual(expect.objectContaining({
+        project_state_persisted: false,
+        providerCalls: 0,
+        workerStarted: false,
+        selection_executed: false,
+        human_approval_inferred: false,
+        human_signoff_inferred: false,
+      }))
+      await expect.poll(() => browserRpcRequests.slice(methodRequestStart).filter(request =>
+        request.path === '/qingmu-imago-method/shotRelationMethod'
+        && isRecord(request.body)
+        && isRecord(request.body.payload)
+        && request.body.payload.selectedShotId === PROMPT_IR_FRAME_ID).length, { timeout: 20_000 }).toBeGreaterThanOrEqual(1)
       await dialog.getByText('beat-frame-1-opening', { exact: true }).waitFor()
       await dialog.getByText('actor-1', { exact: true }).waitFor()
       await dialog.getByText('prop-1', { exact: true }).waitFor()
-      const method = dialog.getByRole('region', { name: 'IMAGO 镜头关系方法' })
       await method.getByText('Scene / Shot / Beat / Element 关系检查', { exact: true }).waitFor({ timeout: 20_000 })
       await method.getByText('只读 · 零执行', { exact: true }).waitFor()
       await method.getByText('字段帮助', { exact: true }).waitFor()
       await method.getByText('检查清单', { exact: true }).waitFor()
-      await method.getByText('inspectCanonicalShotRelations', { exact: true }).waitFor()
+      await method.getByText(
+        'inspectCanonicalShotRelations · inspectShotRiverRhythmAndReferences',
+        { exact: true },
+      ).waitFor()
 
-      const methodWire = browserRpcRequests.find(request =>
-        request.path === '/qingmu-imago-method/shotRelationMethod')
+      const methodWire = browserRpcRequests.slice(methodRequestStart).findLast(request =>
+        request.path === '/qingmu-imago-method/shotRelationMethod'
+        && isRecord(request.body)
+        && isRecord(request.body.payload)
+        && request.body.payload.selectedShotId === PROMPT_IR_FRAME_ID)
       expect(methodWire).toBeDefined()
       if (methodWire === undefined || !isRecord(methodWire.body) || !isRecord(methodWire.body.payload)) {
-        throw new Error('browser did not expose the bounded E5-1 shot-relation IMAGO request')
+        throw new Error('browser did not expose the bounded E5-3 shot-relation IMAGO request')
       }
       expect(methodWire.body.method).toBe('shotRelationMethod')
       expect(methodWire.body.payload).toEqual({
@@ -3326,20 +3436,75 @@ describe.skipIf(
           sceneId: 'scene-1',
           profileRevision: 3,
           snapshotSha256: '72'.repeat(32),
-          elementIds: ['actor-1', 'scene-1', 'prop-1'],
+          elementIds: ['scene-1', 'actor-1', 'prop-1'],
         }],
         shots: [{
+          shotId: SHOT_RIVER_FIRST_FRAME_ID,
+          sceneId: 'scene-1',
+          frameNo: 7,
+          durationSec: 1.25,
+          dialogueRhythm: { cueCount: 0, timedCueCount: 0, cues: [] },
+          elementIds: ['scene-1'],
+          beats: [],
+        }, {
           shotId: PROMPT_IR_FRAME_ID,
           sceneId: 'scene-1',
+          frameNo: 12,
+          durationSec: 2.5,
+          dialogueRhythm: {
+            cueCount: 1,
+            timedCueCount: 1,
+            cues: [{
+              schemaVersion: 'dialogue-cue-v2', lineId: 'line-frame-1-opening', speakerId: 'actor-1',
+              verbatimText: '你终于来了。', plannedStartSec: 0.5, plannedEndSec: 1.5,
+              timingVerified: true, legacy: false,
+            }],
+          },
           elementIds: ['actor-1', 'scene-1', 'prop-1'],
           beats: [{ beatId: 'beat-frame-1-opening', elementIds: ['actor-1', 'prop-1'] }],
         }],
         elements: [
-          { elementId: 'actor-1', elementKind: 'actor', profileRevision: 3, snapshotSha256: '73'.repeat(32) },
-          { elementId: 'scene-1', elementKind: 'scene', profileRevision: 3, snapshotSha256: '72'.repeat(32) },
-          { elementId: 'prop-1', elementKind: 'prop', profileRevision: 5, snapshotSha256: '74'.repeat(32) },
+          {
+            elementId: 'scene-1', elementKind: 'scene', profileRevision: 3, snapshotSha256: '72'.repeat(32),
+            currentReferenceAvailability: 'missing', currentReference: null,
+          },
+          {
+            elementId: 'actor-1', elementKind: 'actor', profileRevision: 3, snapshotSha256: '73'.repeat(32),
+            currentReferenceAvailability: 'available',
+            currentReference: {
+              assetId: 'asset-actor-1-current-reference', sha256: '75'.repeat(32),
+              lineage: {
+                projectId: 'project-1', sourceEpisodeId: 'episode-1', ownerType: 'actor', ownerId: 'actor-1',
+                role: 'identity_board', generationJobId: 'job-actor-1-current-reference',
+                sourceRevisionId: 'revision-actor-1-current-reference',
+                formalConsistencyCheckId: 'check-actor-1-current-reference',
+              },
+            },
+          },
+          {
+            elementId: 'prop-1', elementKind: 'prop', profileRevision: 5, snapshotSha256: '74'.repeat(32),
+            currentReferenceAvailability: 'missing', currentReference: null,
+          },
         ],
       })
+
+      shotRiverBrowserEvidence = {
+        schema: 'qingmu.e5-3-shot-river-browser-evidence.v1',
+        renderedShotOrder: [SHOT_RIVER_FIRST_FRAME_ID, PROMPT_IR_FRAME_ID],
+        frameNumbers: [7, 12],
+        selectedShotId: PROMPT_IR_FRAME_ID,
+        durationSec: 2.5,
+        dialogueCueCount: 1,
+        currentReferenceAssetId: 'asset-actor-1-current-reference',
+        methodOperations: ['inspectCanonicalShotRelations', 'inspectShotRiverRhythmAndReferences'],
+        methodProjectionSha256: selectedMethodValue.projectionSha256,
+        projectStatePersisted: selectedMethodProjection.project_state_persisted,
+        providerCalls: selectedMethodProjection.providerCalls,
+        workerStarted: selectedMethodProjection.workerStarted,
+        selectionExecuted: selectedMethodProjection.selection_executed,
+        humanApprovalInferred: selectedMethodProjection.human_approval_inferred,
+        humanSignoffInferred: selectedMethodProjection.human_signoff_inferred,
+      }
 
       const evidencePath = process.env.QINGMU_E5_1_EVIDENCE_SCREENSHOT?.trim()
       if (evidencePath !== undefined && evidencePath !== '') {
@@ -3351,6 +3516,12 @@ describe.skipIf(
         await method.scrollIntoViewIfNeeded()
         await mkdir(dirname(methodEvidencePath), { recursive: true })
         await page.screenshot({ path: methodEvidencePath, fullPage: true })
+      }
+      const shotRiverEvidencePath = process.env.QINGMU_E5_3_EVIDENCE_SCREENSHOT?.trim()
+      if (shotRiverEvidencePath !== undefined && shotRiverEvidencePath !== '') {
+        await shotRiver.scrollIntoViewIfNeeded()
+        await mkdir(dirname(shotRiverEvidencePath), { recursive: true })
+        await page.screenshot({ path: shotRiverEvidencePath, fullPage: true })
       }
 
       await dialog.getByRole('tab', { name: '剧本与资产' }).click()
@@ -4097,8 +4268,16 @@ describe.skipIf(
       await recoveredDialog.waitFor({ timeout: 10_000 })
       await recoveredDialog.getByLabel('安全边界').getByText('EP1 · 雨夜').waitFor({ timeout: 15_000 })
       await recoveredDialog.getByRole('tab', { name: '剧本与资产' }).click()
-      await recoveredDialog.getByRole('group', { name: '选择人物、环境或道具' })
-        .getByRole('button', { name: '道具' }).click()
+      const recoveredActorEditor = recoveredDialog.getByRole('textbox', { name: '人物视觉身份定义' })
+      await expect.poll(() => recoveredActorEditor.inputValue(), { timeout: 15_000 }).toBe(ACTOR_UPDATED_IDENTITY)
+      const propKindButton = recoveredDialog.getByRole('group', { name: '选择人物、环境或道具' })
+        .getByRole('button', { name: '道具' })
+      await propKindButton.click()
+      await expect.poll(() => propKindButton.getAttribute('aria-pressed')).toBe('true')
+      await expect.poll(() => recoveredDialog.getByRole('combobox', { name: '选择人物、环境或道具' }).inputValue())
+        .toBe('prop-1')
+      const recoveredPropEditor = recoveredDialog.getByRole('textbox', { name: '环境／道具视觉提示词' })
+      await expect.poll(() => recoveredPropEditor.inputValue(), { timeout: 15_000 }).toBe(PROP_UPDATED_PROMPT)
       expect(capturedRequests.filter(request => request.path === recoveryPath)).toEqual([])
       const propReadsBeforeRecovery = propReadSubjects.length
       await recoveredDialog.getByRole('button', { name: '查询并恢复原回执' }).click()
@@ -4808,6 +4987,21 @@ describe.skipIf(
       const selectionPath = `${readyReadPath}:select`
       const selectionRecoveryPath = `${readyReadPath}/selection-command-receipt`
       const workflowStatusStart = promptIrWorkflowStatuses.length
+      const openSelectedPromptIr = async (currentDialog: Locator): Promise<void> => {
+        await currentDialog.getByRole('tab', { name: '分镜与镜头' }).click()
+        await currentDialog.locator(`[data-shot-id="${SHOT_RIVER_FIRST_FRAME_ID}"]`).waitFor()
+        await currentDialog.getByRole('region', { name: 'IMAGO 镜头关系方法' })
+          .getByText('Scene / Shot / Beat / Element 关系检查', { exact: true }).waitFor({ timeout: 20_000 })
+        const selectedRelationResponse = page.waitForResponse(response =>
+          new URL(response.url()).pathname === '/qingmu-imago-method/shotRelationMethod')
+        await currentDialog.getByRole('list', { name: '镜头选择' })
+          .getByRole('button', { name: /frame-1/ }).click()
+        await (await selectedRelationResponse).finished()
+        await currentDialog.locator(`[data-shot-id="${PROMPT_IR_FRAME_ID}"]`).waitFor()
+        await currentDialog.getByRole('tab', { name: '剧本与资产' }).click()
+        await expect.poll(() => currentDialog.getByRole('combobox', { name: '故事板帧' }).inputValue())
+          .toBe(PROMPT_IR_FRAME_ID)
+      }
 
       await page.reload({ waitUntil: 'load' })
       await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
@@ -4817,7 +5011,7 @@ describe.skipIf(
       const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
       await dialog.waitFor({ timeout: 10_000 })
       await dialog.getByLabel('安全边界').getByText('EP1 · 雨夜').waitFor({ timeout: 15_000 })
-      await dialog.getByRole('tab', { name: '剧本与资产' }).click()
+      await openSelectedPromptIr(dialog)
       const workspace = dialog.getByRole('region', { name: 'PromptIR 五字段变更台' })
       const editor = workspace.getByRole('textbox', { name: 'PromptIR 五字段 JSON' })
       await expect.poll(() => editor.inputValue(), { timeout: 15_000 })
@@ -4864,7 +5058,7 @@ describe.skipIf(
       const editRecoveryDialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
       await editRecoveryDialog.waitFor({ timeout: 10_000 })
       await editRecoveryDialog.getByLabel('安全边界').getByText('EP1 · 雨夜').waitFor({ timeout: 15_000 })
-      await editRecoveryDialog.getByRole('tab', { name: '剧本与资产' }).click()
+      await openSelectedPromptIr(editRecoveryDialog)
       const editRecoveryWorkspace = editRecoveryDialog.getByRole('region', { name: 'PromptIR 五字段变更台' })
       const recoveredEditor = editRecoveryWorkspace.getByRole('textbox', { name: 'PromptIR 五字段 JSON' })
       await expect.poll(() => recoveredEditor.inputValue(), { timeout: 15_000 })
@@ -4906,7 +5100,7 @@ describe.skipIf(
       const selectionRecoveryDialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
       await selectionRecoveryDialog.waitFor({ timeout: 10_000 })
       await selectionRecoveryDialog.getByLabel('安全边界').getByText('EP1 · 雨夜').waitFor({ timeout: 15_000 })
-      await selectionRecoveryDialog.getByRole('tab', { name: '剧本与资产' }).click()
+      await openSelectedPromptIr(selectionRecoveryDialog)
       const selectionRecoveryWorkspace = selectionRecoveryDialog.getByRole('region', { name: 'PromptIR 五字段变更台' })
       const readyReadsBeforeSelectionRecovery = capturedRequests.filter(request => request.path === readyReadPath).length
       await selectionRecoveryWorkspace.getByRole('button', { name: '只查询原选择回执' }).click()
@@ -4959,7 +5153,7 @@ describe.skipIf(
       expect(tripwire.warnings).toEqual([])
     }, 120_000)
 
-    it('commits one E5-2 Hero Frame storyboard canvas and recovers the lost response with the old revision coordinates', async () => {
+    it('edits the second E5-3 Shot through E5-2 Hero Canvas and recovers once with the old revision coordinates', async () => {
       onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e5-2-storyboard-canvas'))
       const proposalPath = `/api/qingmu/projects/project-1/episodes/episode-1/storyboard-revisions/${STORYBOARD_CANVAS_BASE_REVISION.revisionId}/frames/${PROMPT_IR_FRAME_ID}/storyboard-canvas/change-sets`
       const previewPath = `/api/qingmu/change-sets/${STORYBOARD_CANVAS_CHANGE_SET_ID}:preview`
@@ -4977,7 +5171,17 @@ describe.skipIf(
       const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
       await dialog.waitFor({ timeout: 10_000 })
       await dialog.getByRole('tab', { name: '分镜与镜头' }).click()
+      const shotRiver = dialog.getByRole('list', { name: '镜头选择' })
+      await shotRiver.getByRole('button', { name: /frame-z/ }).click()
+      await dialog.locator(`[data-shot-id="${SHOT_RIVER_FIRST_FRAME_ID}"]`).waitFor()
+      await dialog.getByRole('region', { name: 'IMAGO 镜头关系方法' })
+        .getByText('Scene / Shot / Beat / Element 关系检查', { exact: true }).waitFor({ timeout: 20_000 })
+      const selectedRelationWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-imago-method/shotRelationMethod')
+      await shotRiver.getByRole('button', { name: /frame-1/ }).click()
+      await (await selectedRelationWirePromise).finished()
       await dialog.locator(`[data-shot-id="${PROMPT_IR_FRAME_ID}"]`).waitFor({ timeout: 15_000 })
+      expect(await shotRiver.getByRole('button').nth(1).getAttribute('aria-pressed')).toBe('true')
       const canvas = dialog.getByRole('region', { name: 'Hero Frame 故事板画布' })
       const canvasSvg = canvas.getByRole('img', { name: '已选 Hero Frame 与故事板标注画布' })
       await canvasSvg.waitFor({ timeout: 20_000 })
@@ -5021,6 +5225,18 @@ describe.skipIf(
       const methodPayload = methodWire.body.payload
       expect(methodWire.body.method).toBe('heroFrameStoryboardMethod')
       expect(methodPayload.selectedShotId).toBe(PROMPT_IR_FRAME_ID)
+      expect(methodPayload.shots).toEqual([
+        { shotId: SHOT_RIVER_FIRST_FRAME_ID, sceneId: 'scene-1', elementIds: ['scene-1'], beats: [] },
+        {
+          shotId: PROMPT_IR_FRAME_ID, sceneId: 'scene-1', elementIds: ['actor-1', 'scene-1', 'prop-1'],
+          beats: [{ beatId: 'beat-frame-1-opening', elementIds: ['actor-1', 'prop-1'] }],
+        },
+      ])
+      expect(methodPayload.elements).toEqual([
+        { elementId: 'scene-1', elementKind: 'scene', profileRevision: 3, snapshotSha256: '72'.repeat(32) },
+        { elementId: 'actor-1', elementKind: 'actor', profileRevision: 3, snapshotSha256: '73'.repeat(32) },
+        { elementId: 'prop-1', elementKind: 'prop', profileRevision: 5, snapshotSha256: '74'.repeat(32) },
+      ])
       expect(methodPayload.heroFrame).toEqual({
         assetId: STORYBOARD_CANVAS_HERO_ASSET_ID,
         mediaSha256: STORYBOARD_CANVAS_HERO_MEDIA_SHA,
@@ -5096,6 +5312,12 @@ describe.skipIf(
       const recoveryDialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
       await recoveryDialog.waitFor({ timeout: 10_000 })
       await recoveryDialog.getByRole('tab', { name: '分镜与镜头' }).click()
+      await recoveryDialog.getByRole('region', { name: 'IMAGO 镜头关系方法' })
+        .getByText('Scene / Shot / Beat / Element 关系检查', { exact: true }).waitFor({ timeout: 20_000 })
+      const recoveryRelationWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-imago-method/shotRelationMethod')
+      await recoveryDialog.getByRole('list', { name: '镜头选择' }).getByRole('button', { name: /frame-1/ }).click()
+      await (await recoveryRelationWirePromise).finished()
       const recoveryCanvas = recoveryDialog.getByRole('region', { name: 'Hero Frame 故事板画布' })
       const recoveryButton = recoveryCanvas.getByRole('button', { name: '恢复原提交回执' })
       await recoveryButton.waitFor({ timeout: 20_000 })
@@ -5109,6 +5331,7 @@ describe.skipIf(
       const recoveryValue = isRecord(recoveryRpcResult.value) ? recoveryRpcResult.value : {}
       const recoveredReceipt = isRecord(recoveryValue.receipt) ? recoveryValue.receipt : {}
       expect(recoveryRpcResult.ok).toBe(true)
+      expect(recoveredReceipt.targetId).toBe(PROMPT_IR_FRAME_ID)
       expect(recoveredReceipt.rawAnnotationsSha256).toBe(plainRawAnnotationsSha256)
       expect(recoveredReceipt.methodRawAnnotationsSha256).toBe(methodRawAnnotationsSha256)
       expect(recoveredReceipt.rawAnnotationsSha256).not.toBe(recoveredReceipt.methodRawAnnotationsSha256)
@@ -5160,6 +5383,8 @@ describe.skipIf(
 
       storyboardCanvasBrowserEvidence = {
         schema: 'qingmu.e5-2-storyboard-canvas-browser-evidence.v1',
+        shotRiverOrder: [SHOT_RIVER_FIRST_FRAME_ID, PROMPT_IR_FRAME_ID],
+        selectedFrameNo: 12,
         frameId: PROMPT_IR_FRAME_ID,
         heroFrame: {
           assetId: STORYBOARD_CANVAS_HERO_ASSET_ID,
@@ -5173,6 +5398,8 @@ describe.skipIf(
         plainRawAnnotationsSha256,
         methodRawAnnotationsSha256,
         hashesDistinct: true,
+        proposalPostCount: capturedRequests.filter(request => request.path === proposalPath).length,
+        previewPostCount: capturedRequests.filter(request => request.path === previewPath).length,
         commitPostCount: capturedRequests.filter(request => request.path === commitPath).length,
         recoveryMethod: recoveryRequest?.method,
         recoveryStoryboardRevisionId: STORYBOARD_CANVAS_BASE_REVISION.revisionId,

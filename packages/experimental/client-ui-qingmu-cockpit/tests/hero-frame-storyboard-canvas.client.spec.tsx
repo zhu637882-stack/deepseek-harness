@@ -433,7 +433,8 @@ function buildFixture(options: {
     }
   })
   const onCommitted = vi.fn(async (): Promise<YimengWorkflowProjection> => {
-    if (state.canvas === undefined) throw new Error('authoritative canvas missing')
+    const authoritativeCanvas = state.canvas
+    if (authoritativeCanvas === undefined) throw new Error('authoritative canvas missing')
     const authoritativeRelations = {
       ...relations,
       storyboardRevision: {
@@ -454,7 +455,7 @@ function buildFixture(options: {
         shotId: shot.shotId,
         shotSnapshotSha256: SHOT_SNAPSHOT_SHA,
         heroFrame: HERO,
-        canvas: shot.shotId === state.receipt?.targetId ? state.canvas : null,
+        canvas: shot.shotId === state.receipt?.targetId ? authoritativeCanvas : null,
         blockers: [],
       })),
       shotsSha256: AUTHORITATIVE_SNAPSHOT_SHA,

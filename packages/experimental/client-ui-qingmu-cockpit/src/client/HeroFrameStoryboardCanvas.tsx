@@ -18,7 +18,7 @@ import type {
   YimengWorkflowProjection,
 } from './contracts.ts'
 import type { QingmuCockpitKey } from './locales.ts'
-import { buildShotRelationMethodRequest } from './ShotRelationMethodView.tsx'
+import { buildHeroFrameRelationRequest } from './ShotRelationMethodView.tsx'
 import {
   clearStoryboardCanvasRecoveryMarker,
   createStoryboardCanvasRecoveryMarker,
@@ -947,7 +947,7 @@ export function HeroFrameStoryboardCanvas({
     setPreview(undefined)
     setConfirmed(false)
     try {
-      const relationRequest = buildShotRelationMethodRequest(relations, context.frameId)
+      const relationRequest = buildHeroFrameRelationRequest(relations, context.frameId)
       const baseCanvasSha256 = context.savedCanvas === null ? null : await canonicalSha256(context.savedCanvas)
       if (controller.signal.aborted || lineageRef.current !== lineageKey) return
       const request: ImagoHeroFrameStoryboardMethodRequest = {

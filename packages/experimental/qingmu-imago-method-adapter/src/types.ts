@@ -290,6 +290,35 @@ export interface ImagoShotRelationShot extends ImagoMethodJsonObject {
   readonly beats: readonly ImagoShotRelationBeat[]
 }
 
+/** One exact E5-3 dialogue cue; legacy cues deliberately retain null timing. */
+export interface ImagoShotDialogueCue extends ImagoMethodJsonObject {
+  readonly schemaVersion: 'dialogue-cue-v2' | 'dialogue-cue-legacy-v1'
+  readonly lineId: string | null
+  readonly speakerId: string | null
+  /** Exact text: Python-strip-clean, NUL-free, and 1–256 Unicode code points. */
+  readonly verbatimText: string
+  /** Finite timing seconds, not safe-integer-limited; legacy cues retain null. */
+  readonly plannedStartSec: number | null
+  readonly plannedEndSec: number | null
+  readonly timingVerified: boolean
+  readonly legacy: boolean
+}
+
+/** Read-only timing projection derived from the authoritative Yimeng dialogue plan. */
+export interface ImagoShotDialogueRhythm extends ImagoMethodJsonObject {
+  readonly cueCount: number
+  readonly timedCueCount: number
+  readonly cues: readonly ImagoShotDialogueCue[]
+}
+
+/** E5-3 Shot authority; frameNo is the sole ordering projection. */
+export interface ImagoE53ShotRelationShot extends ImagoShotRelationShot {
+  readonly frameNo: number
+  /** Positive finite seconds, with no safe-integer limit or quantization. */
+  readonly durationSec: number
+  readonly dialogueRhythm: ImagoShotDialogueRhythm
+}
+
 /** Canonical Element identity retained in the relation authority snapshot. */
 export interface ImagoShotRelationElement extends ImagoMethodJsonObject {
   readonly elementId: string
@@ -298,8 +327,33 @@ export interface ImagoShotRelationElement extends ImagoMethodJsonObject {
   readonly snapshotSha256: string
 }
 
-/** Browser input containing only Yimeng lineage and the compiler-ready relation ID graph. */
-export interface ImagoShotRelationMethodRequest {
+/** Exact immutable coordinates of the one E4-3 current reference selection. */
+export interface ImagoShotCurrentReferenceLineage extends ImagoMethodJsonObject {
+  readonly projectId: string
+  readonly sourceEpisodeId: string
+  readonly ownerType: ImagoElementKind
+  readonly ownerId: string
+  readonly role: string
+  readonly generationJobId: string
+  readonly sourceRevisionId: string
+  readonly formalConsistencyCheckId: string
+}
+
+/** Read-only E4-3 reference binding exposed to the E5-3 method. */
+export interface ImagoShotCurrentReference extends ImagoMethodJsonObject {
+  readonly assetId: string
+  readonly sha256: string
+  readonly lineage: ImagoShotCurrentReferenceLineage
+}
+
+/** E5-3 Element authority with an explicit current-reference availability state. */
+export interface ImagoE53ShotRelationElement extends ImagoShotRelationElement {
+  readonly currentReferenceAvailability: 'missing' | 'available'
+  readonly currentReference: ImagoShotCurrentReference | null
+}
+
+/** Shared E5-1/E5-2 relation authority retained for the Hero Frame compiler. */
+export interface ImagoShotRelationAuthorityRequest {
   readonly projectId: string
   readonly episodeId: string
   readonly episodeRevision: number
@@ -312,7 +366,13 @@ export interface ImagoShotRelationMethodRequest {
   readonly elements: readonly ImagoShotRelationElement[]
 }
 
-/** Exact compiler input constructed in the Host with a derived relation snapshot SHA. */
+/** Browser input containing only Yimeng lineage and the compiler-ready relation ID graph. */
+export interface ImagoShotRelationMethodRequest extends ImagoShotRelationAuthorityRequest {
+  readonly shots: readonly ImagoE53ShotRelationShot[]
+  readonly elements: readonly ImagoE53ShotRelationElement[]
+}
+
+/** Numeric wire input; relation SHA uses the domain-tagged E5-3 binary64-seconds hash projection. */
 export interface ImagoShotRelationMethodSnapshot extends ImagoMethodJsonObject {
   readonly schema: 'qingmu.shot-relation-method-snapshot.v1'
   readonly target: {
@@ -326,8 +386,8 @@ export interface ImagoShotRelationMethodSnapshot extends ImagoMethodJsonObject {
     readonly selectedShotId: string
   }
   readonly scenes: readonly ImagoShotRelationScene[]
-  readonly shots: readonly ImagoShotRelationShot[]
-  readonly elements: readonly ImagoShotRelationElement[]
+  readonly shots: readonly ImagoE53ShotRelationShot[]
+  readonly elements: readonly ImagoE53ShotRelationElement[]
   readonly authority: {
     readonly business_truth: 'yimeng'
     readonly shot_id_source: 'yimeng_storyboard_frame_id'
@@ -347,9 +407,9 @@ export interface ImagoShotRelationMethodProjection extends ImagoMethodJsonObject
     readonly canonicalShotIdSource: 'yimeng_storyboard_frame_id'
     readonly beatIdScope: 'shot_local'
     readonly scenes: readonly ImagoShotRelationScene[]
-    readonly shots: readonly ImagoShotRelationShot[]
-    readonly elements: readonly ImagoShotRelationElement[]
-    readonly selectedShot: ImagoShotRelationShot
+    readonly shots: readonly ImagoE53ShotRelationShot[]
+    readonly elements: readonly ImagoE53ShotRelationElement[]
+    readonly selectedShot: ImagoE53ShotRelationShot
   }
   readonly method_definition: ImagoMethodJsonObject
   readonly source_bindings: readonly ImagoMethodJsonObject[]
@@ -367,7 +427,10 @@ export interface ImagoShotRelationMethodProjection extends ImagoMethodJsonObject
   readonly human_signoff_inferred: false
 }
 
-/** HMAC proof over the exact relation input, target, authority SHA, selected Shot, and output. */
+/**
+ * HMAC proof binding the exact numeric input wire bytes and target.
+ * Relation, selected Shot, and output hashes use the domain-tagged E5-3 binary64-seconds projection.
+ */
 export interface ImagoShotRelationMethodAttestation extends ImagoMethodJsonObject {
   readonly schema: 'qingmu.imago-shot-relation-method-attestation.v1'
   readonly algorithm: 'hmac-sha256'
@@ -408,7 +471,7 @@ export interface ImagoHeroFrameStoryboardAnnotation extends ImagoMethodJsonObjec
 }
 
 /** Browser input containing canonical Yimeng lineage, one selected Hero Frame, and transient canvas annotations. */
-export interface ImagoHeroFrameStoryboardMethodRequest extends ImagoShotRelationMethodRequest {
+export interface ImagoHeroFrameStoryboardMethodRequest extends ImagoShotRelationAuthorityRequest {
   readonly heroFrame: {
     readonly assetId: string
     readonly mediaSha256: string
