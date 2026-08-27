@@ -1,10 +1,20 @@
 import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mutateSource, sourceSha } from '../../qingmu-yimeng-read-adapter/tests/stage-source-fixture.ts'
-import { createYimengCommandHandler } from '../src/index.ts'
+import {
+  createYimengCommandHandler,
+  type YimengCommandAdapterDependencies,
+  type YimengStageArtifact,
+} from '../src/index.ts'
 import { stageArtifactCanonicalJson } from '../src/stage-artifact.ts'
 import {
   signStageArtifactRequest,
+  stageArtifactAuthorityProbeResult,
+  stageArtifactAuthorityRequest,
+  stageArtifactDecisionRecoveryRequest,
+  stageArtifactDecisionRequest,
+  stageArtifactDecisionResult,
+  stageArtifactMethodResponse,
   stageArtifactRecoveryRequest,
   stageArtifactRequest,
   stageArtifactResult,
@@ -26,14 +36,161 @@ function stageNetwork(value: unknown, status = 200): ReturnType<typeof vi.fn<typ
   }))
 }
 
-function handler(fetch: typeof globalThis.fetch, readToken = () => TOKEN) {
-  return createYimengCommandHandler({}, { fetch, readToken })
+type StageArtifactMethodRunner = NonNullable<YimengCommandAdapterDependencies['runStageArtifactMethod']>
+
+const runCurrentStageArtifactMethod: StageArtifactMethodRunner = async (payload) => {
+  const artifact = (payload as { artifact: YimengStageArtifact }).artifact
+  return { ok: true, value: stageArtifactMethodResponse(artifact, KEY) }
+}
+
+function handler(
+  fetch: typeof globalThis.fetch,
+  readToken = () => TOKEN,
+  runStageArtifactMethod: StageArtifactMethodRunner = runCurrentStageArtifactMethod,
+) {
+  return createYimengCommandHandler({}, { fetch, readToken, runStageArtifactMethod })
 }
 
 beforeEach(() => { vi.stubEnv('QINGMU_IMAGO_ATTESTATION_KEY', KEY) })
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks() })
 
 describe('Stage artifact registration and receipt recovery transport', () => {
+  it('sends one exact independent decision POST without browser actor or session authority', async () => {
+    const registration = stageArtifactRequest(KEY)
+    const registered = stageArtifactResult(registration, TOKEN)
+    const request = stageArtifactDecisionRequest(registration, registered)
+    const expected = stageArtifactDecisionResult(request, TOKEN)
+    const currentMethod = stageArtifactMethodResponse(request.artifact, KEY)
+    const fetch = network(expected, 201)
+
+    expect(await handler(fetch)('commitStageArtifactDecision', request, signal())).toEqual({ ok: true, value: expected })
+
+    expect(fetch).toHaveBeenCalledOnce()
+    const [url, init] = fetch.mock.calls[0] ?? []
+    expect(url).toBe('http://127.0.0.1:8115/api/qingmu/projects/artifact-project/episodes/artifact-episode/'
+      + 'stage-artifacts/A0/GLOBAL/decisions')
+    if (typeof init?.body !== 'string') throw new Error('serialized decision body required')
+    expect(JSON.parse(init.body)).toEqual({
+      expectedArtifactRecordRevision: request.expectedArtifactRecordRevision,
+      expectedArtifactRecordSha256: request.expectedArtifactRecordSha256,
+      expectedArtifactRevision: request.expectedArtifactRevision,
+      expectedArtifactSha256: request.expectedArtifactSha256,
+      expectedSubjectSha256: request.expectedSubjectSha256,
+      methodProjection: currentMethod.projection,
+      methodProjectionSha256: currentMethod.projectionSha256,
+      methodAttestation: currentMethod.methodAttestation,
+      decision: request.decision,
+      reason: request.reason,
+      idempotencyKey: request.idempotencyKey,
+    })
+    expect(init.body).not.toContain('actorNaturalPersonId')
+    expect(init.body).not.toContain('authSessionId')
+    expect(expected.decision).toMatchObject({
+      stageArtifactAvailable: true,
+      dependencyAuthorityVerified: true,
+      stageApprovalGranted: true,
+      lockActivated: true,
+      planSealed: false,
+      providerCalls: 0,
+      humanSignoffInferred: false,
+      reworkExecuted: false,
+    })
+  })
+
+  it('recovers the original decision receipt with GET only after the key and token rotate', async () => {
+    const registration = stageArtifactRequest(KEY)
+    const request = stageArtifactDecisionRequest(registration, stageArtifactResult(registration, TOKEN))
+    const receipt = stageArtifactDecisionResult(request, TOKEN)
+    const recovery = { schema: 'jason.qingmu-stage-artifact-decision-recovery.v1', receipt }
+    vi.stubEnv('QINGMU_IMAGO_ATTESTATION_KEY', '')
+    const fetch = network(recovery)
+
+    expect(await handler(fetch, () => 'rotated-token')(
+      'recoverStageArtifactDecision', stageArtifactDecisionRecoveryRequest(request), signal(),
+    )).toEqual({ ok: true, value: recovery })
+
+    const [url, init] = fetch.mock.calls[0] ?? []
+    expect(url).toBe('http://127.0.0.1:8115/api/qingmu/projects/artifact-project/episodes/artifact-episode/'
+      + `stage-artifacts/A0/GLOBAL/decision-command-receipt?expectedArtifactRecordRevision=1&expectedArtifactRecordSha256=${request.expectedArtifactRecordSha256}`)
+    expect(init).toMatchObject({ method: 'GET', cache: 'no-store', redirect: 'error' })
+    expect(init?.body).toBeUndefined()
+    expect(new Headers(init?.headers).get('Idempotency-Key')).toBe(request.idempotencyKey)
+  })
+
+  it('probes current authority with one fresh signed method and no caller-supplied identity', async () => {
+    const registration = stageArtifactRequest(KEY)
+    const registered = stageArtifactResult(registration, TOKEN)
+    const request = stageArtifactAuthorityRequest(registration, registered)
+    const currentMethod = stageArtifactMethodResponse(request.artifact, KEY)
+    const decision = stageArtifactDecisionResult(
+      stageArtifactDecisionRequest(registration, registered),
+      TOKEN,
+    )
+    const expected = stageArtifactAuthorityProbeResult(request, decision)
+    const fetch = network(expected)
+
+    expect(await handler(fetch)('probeStageArtifactAuthority', request, signal())).toEqual({
+      ok: true,
+      value: expected,
+    })
+    expect(fetch).toHaveBeenCalledOnce()
+    const [url, init] = fetch.mock.calls[0] ?? []
+    expect(url).toBe('http://127.0.0.1:8115/api/qingmu/projects/artifact-project/episodes/artifact-episode/'
+      + 'stage-artifacts/A0/GLOBAL/authority-probe')
+    if (typeof init?.body !== 'string') throw new Error('serialized authority probe body required')
+    expect(JSON.parse(init.body)).toEqual({
+      expectedArtifactRecordRevision: request.expectedArtifactRecordRevision,
+      expectedArtifactRecordSha256: request.expectedArtifactRecordSha256,
+      expectedArtifactRevision: request.expectedArtifactRevision,
+      expectedArtifactSha256: request.expectedArtifactSha256,
+      expectedSubjectSha256: request.expectedSubjectSha256,
+      methodProjection: currentMethod.projection,
+      methodProjectionSha256: currentMethod.projectionSha256,
+      methodAttestation: currentMethod.methodAttestation,
+    })
+    expect(init.body).not.toContain('actorNaturalPersonId')
+    expect(init.body).not.toContain('authSessionId')
+    expect(init.body).not.toContain('idempotencyKey')
+    expect(expected).toMatchObject({
+      dependencyAuthorityVerified: true,
+      stageArtifactAvailable: true,
+      stageApprovalGranted: true,
+      lockActivated: true,
+      planSealed: false,
+      providerCalls: 0,
+      reworkExecuted: false,
+    })
+  })
+
+  it('accepts a rules-drift probe only as fail-closed non-authority', async () => {
+    const registration = stageArtifactRequest(KEY)
+    const registered = stageArtifactResult(registration, TOKEN)
+    const request = stageArtifactAuthorityRequest(registration, registered)
+    const currentMethod = stageArtifactMethodResponse(
+      request.artifact,
+      KEY,
+      undefined,
+      { 'pipeline/imago-os-current.json': 'b'.repeat(64) },
+    )
+    const expected = stageArtifactAuthorityProbeResult(request, null, ['target_rules_not_current'])
+    expected.rulesSha256 = currentMethod.projection.rulesSha256
+    const runStageArtifactMethod: StageArtifactMethodRunner = async () => ({ ok: true, value: currentMethod })
+
+    expect(await handler(network(expected), () => TOKEN, runStageArtifactMethod)(
+      'probeStageArtifactAuthority', request, signal(),
+    )).toEqual({
+      ok: true,
+      value: expected,
+    })
+    expect(expected).toMatchObject({
+      currentDecisionResult: null,
+      dependencyAuthorityVerified: false,
+      stageArtifactAvailable: false,
+      stageApprovalGranted: false,
+      lockActivated: false,
+    })
+  })
+
   it('sends exactly one explicit POST body and validates the immutable non-authoritative receipt', async () => {
     const request = stageArtifactRequest(KEY)
     const expected = stageArtifactResult(request, TOKEN)
@@ -145,7 +302,15 @@ describe('Stage artifact registration and receipt recovery transport', () => {
 
   it('preserves Python-canonical finite numbers through the POST body and GET recovery', async () => {
     const request = stageArtifactRequest(KEY)
-    const numbers = { durationSeconds: 1.5, exponent: 1e-7, exponentBoundary: 1e-6, negativeZero: -0 }
+    const numbers = {
+      durationSeconds: 1.5,
+      exponent: 1e-7,
+      exponentBoundary: 1e-6,
+      integerExponent: 1e21,
+      fractionalExponent: 1.2345678901234568e21,
+      maximumFinite: Number.MAX_VALUE,
+      negativeZero: -0,
+    }
     mutateSource(request, 'artifact.content.source_ledger.data', numbers)
     const artifactSha256 = stageArtifactSha(request.artifact)
     mutateSource(request, 'methodProjection.subject.artifactSha256', artifactSha256)
@@ -160,6 +325,9 @@ describe('Stage artifact registration and receipt recovery transport', () => {
     if (typeof init?.body !== 'string') throw new Error('serialized Stage request body required')
     expect(init.body).toContain('"exponent":1e-07')
     expect(init.body).toContain('"exponentBoundary":1e-06')
+    expect(init.body).toContain('"integerExponent":1e+21')
+    expect(init.body).toContain('"fractionalExponent":1.2345678901234568e+21')
+    expect(init.body).toContain('"maximumFinite":1.7976931348623157e+308')
     expect(init.body).toContain('"negativeZero":-0.0')
     const sent = JSON.parse(init.body) as { artifact: { content: { source_ledger: { data: typeof numbers } } } }
     expect(Object.is(sent.artifact.content.source_ledger.data.negativeZero, -0)).toBe(true)
@@ -253,6 +421,164 @@ describe('Stage artifact commands fail closed before transport', () => {
     abort.abort()
     expect(await handler(fetch)('registerStageArtifact', request, abort.signal)).toMatchObject({ ok: false })
     expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['expectedArtifactRecordRevision', 0],
+    ['expectedArtifactRecordSha256', 'f'.repeat(63)],
+    ['expectedArtifactRevision', ''],
+    ['expectedArtifactSha256', 'f'.repeat(63)],
+    ['decision', 'comment'],
+    ['reason', ''],
+    ['actorNaturalPersonId', 'browser-person'],
+    ['artifact.artifact_revision', 'other-revision'],
+    ['methodProjection', {}],
+    ['methodAttestation', {}],
+  ])('rejects decision command mutation %s before transport', async (path, value) => {
+    const registration = stageArtifactRequest(KEY)
+    const request = stageArtifactDecisionRequest(registration, stageArtifactResult(registration, TOKEN))
+    mutateSource(request, path, value)
+    const fetch = network(stageArtifactDecisionResult(
+      stageArtifactDecisionRequest(registration, stageArtifactResult(registration, TOKEN)),
+      TOKEN,
+    ))
+
+    expect(await handler(fetch)('commitStageArtifactDecision', request, signal())).toMatchObject({
+      ok: false,
+      error: { code: 'bad-request' },
+    })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('accepts request_changes with explicit unresolved dependency blockers but grants no authority', async () => {
+    const registration = stageArtifactRequest(KEY)
+    const request = stageArtifactDecisionRequest(registration, stageArtifactResult(registration, TOKEN))
+    mutateSource(request, 'decision', 'request_changes')
+    const result = stageArtifactDecisionResult(request, TOKEN)
+    mutateSource(result, 'decision.dependencyAuthority.blockers', ['required_source_not_current:F'])
+    mutateSource(result, 'decision.dependencyAuthority.verified', false)
+    mutateSource(result, 'decision.dependencyAuthorityVerified', false)
+
+    expect(await handler(network(result, 201))('commitStageArtifactDecision', request, signal())).toEqual({
+      ok: true,
+      value: result,
+    })
+    expect(result.decision).toMatchObject({
+      stageArtifactAvailable: false,
+      stageApprovalGranted: false,
+      lockActivated: false,
+      humanSignoffInferred: false,
+      providerCalls: 0,
+    })
+    expect(result.producedLock).toBeNull()
+  })
+
+  it('rejects replayed caller Method proofs before the current Core Method or transport runs', async () => {
+    const registration = stageArtifactRequest(KEY)
+    const receipt = stageArtifactResult(registration, TOKEN)
+    const runStageArtifactMethod = vi.fn<StageArtifactMethodRunner>(runCurrentStageArtifactMethod)
+    const fetch = network({})
+    const replayProof = {
+      methodProjection: structuredClone(registration.methodProjection),
+      methodProjectionSha256: registration.methodProjectionSha256,
+      methodAttestation: structuredClone(registration.methodAttestation),
+    }
+    const attempts = [
+      ['commitStageArtifactDecision', {
+        ...stageArtifactDecisionRequest(registration, receipt),
+        ...replayProof,
+      }],
+      ['probeStageArtifactAuthority', {
+        ...stageArtifactAuthorityRequest(registration, receipt),
+        ...replayProof,
+      }],
+    ] as const
+
+    for (const [endpoint, request] of attempts) {
+      expect(await handler(fetch, () => TOKEN, runStageArtifactMethod)(endpoint, request, signal())).toMatchObject({
+        ok: false,
+        error: { code: 'bad-request' },
+      })
+    }
+    expect(runStageArtifactMethod).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('requires the trusted current Method capability before a decision or authority probe', async () => {
+    const registration = stageArtifactRequest(KEY)
+    const receipt = stageArtifactResult(registration, TOKEN)
+    const fetch = network({})
+    const withoutMethod = (endpoint: 'commitStageArtifactDecision' | 'probeStageArtifactAuthority', payload: unknown) => (
+      createYimengCommandHandler({}, { fetch, readToken: () => TOKEN })(endpoint, payload, signal())
+    )
+
+    expect(await withoutMethod(
+      'commitStageArtifactDecision',
+      stageArtifactDecisionRequest(registration, receipt),
+    )).toMatchObject({ ok: false, error: { code: 'internal' } })
+    expect(await withoutMethod(
+      'probeStageArtifactAuthority',
+      stageArtifactAuthorityRequest(registration, receipt),
+    )).toMatchObject({ ok: false, error: { code: 'internal' } })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+})
+
+describe('Stage artifact decision receipt binding', () => {
+  const cases: Array<[string, unknown]> = [
+    ['schema', 'other'],
+    ['decision.subjectArtifactRecordRevision', 2],
+    ['decision.subjectArtifactRecordSha256', 'f'.repeat(64)],
+    ['decision.methodProjectionSha256', 'f'.repeat(64)],
+    ['decision.actorNaturalPersonId', 'natural-person-producer'],
+    ['decision.decisionOrdinal', 0],
+    ['decision.authSessionId', 'f'.repeat(64)],
+    ['decision.dependencyAuthority.verified', false],
+    ['decision.stageArtifactAvailable', false],
+    ['decision.planSealed', true],
+    ['decision.providerCalls', 1],
+    ['decision.humanSignoffInferred', true],
+    ['producedLock.eventSha256', 'f'.repeat(64)],
+    ['extra', true],
+  ]
+
+  it.each(cases)('refuses forged decision receipt %s without transport retry', async (path, value) => {
+    const registration = stageArtifactRequest(KEY)
+    const request = stageArtifactDecisionRequest(registration, stageArtifactResult(registration, TOKEN))
+    const reply = structuredClone(stageArtifactDecisionResult(request, TOKEN))
+    mutateSource(reply, path, value)
+    const fetch = network(reply, 201)
+
+    expect(await handler(fetch)('commitStageArtifactDecision', request, signal())).toMatchObject({
+      ok: false,
+      error: { code: 'internal' },
+    })
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    ['wrong declared lock', (reply: ReturnType<typeof stageArtifactAuthorityProbeResult>) => {
+      mutateSource(reply, 'currentDecisionResult.producedLock.lockId', 'FORGED_LOCK')
+    }],
+    ['missing declared lock', (reply: ReturnType<typeof stageArtifactAuthorityProbeResult>) => {
+      mutateSource(reply, 'currentDecisionResult.producedLock', null)
+      mutateSource(reply, 'currentDecisionResult.decision.lockActivated', false)
+      mutateSource(reply, 'lockActivated', false)
+    }],
+  ] as const)('refuses an authority probe with %s', async (_label, forge) => {
+    const registration = stageArtifactRequest(KEY)
+    const registered = stageArtifactResult(registration, TOKEN)
+    const request = stageArtifactAuthorityRequest(registration, registered)
+    const decision = stageArtifactDecisionResult(stageArtifactDecisionRequest(registration, registered), TOKEN)
+    const reply = stageArtifactAuthorityProbeResult(request, decision)
+    forge(reply)
+    const fetch = network(reply)
+
+    expect(await handler(fetch)('probeStageArtifactAuthority', request, signal())).toMatchObject({
+      ok: false,
+      error: { code: 'internal' },
+    })
+    expect(fetch).toHaveBeenCalledOnce()
   })
 })
 

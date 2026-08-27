@@ -94,7 +94,9 @@ function canonicalNumber(value: number, field: string): string {
   }
   digits = digits.replace(/^0+/u, '').replace(/0+$/u, '')
   const sign = negative ? '-' : ''
-  if (Number.isInteger(value)) return `${sign}${digits}${'0'.repeat(exponent + 1 - digits.length)}`
+  if (Number.isInteger(value) && exponentText === undefined) {
+    return `${sign}${digits}${'0'.repeat(exponent + 1 - digits.length)}`
+  }
   if (exponent < -4 || exponent >= 16) {
     const mantissa = digits.length === 1 ? digits : `${digits[0]}.${digits.slice(1)}`
     return `${sign}${mantissa}e${exponent < 0 ? '-' : '+'}${String(Math.abs(exponent)).padStart(2, '0')}`

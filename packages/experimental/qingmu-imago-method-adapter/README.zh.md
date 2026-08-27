@@ -66,7 +66,7 @@ Host 对完整归一化工作流与完整 `sourceRevision` 计算哈希，保留
 
 正常路径调用当前 `scripts/compile_qingmu_stage_artifact_method.py` 子进程。编译前后，Host 都独立读取七份工作集规则，以及 `scripts/build_v6_stage_contracts.py`、`scripts/validate_v6_stage_contracts.py`、`scripts/compile_qingmu_element_method.py` 和阶段工件编译器本身。它重建准确的当前阶段 Owner、范围、合同哈希、来源与锁要求、工件类型和标准输出；规则字节发生变化，或编译器投影与这些事实不同，都会失败关闭。Core 执行完整的确定性工件校验，包括阶段专属来源、锁、内容章节和未决问题要求。
 
-响应为 `qingmu.imago-stage-artifact-method-adapter-result.v1`，包含由 SHA 绑定的投影与 Host 专属 HMAC 证明。它只允许登记这份已通过机器校验的工件。依赖权威仍未核验；阶段批准、锁激活、LSU 计划封存、返修执行、Provider 调用和人工签收均不可用。此方法不读取易梦业务状态，也不执行写入。不可变登记由独立命令与易梦事务掌管；后续依赖权威和独立审核仍是分开的检查点。
+响应为 `qingmu.imago-stage-artifact-method-adapter-result.v1`，包含由 SHA 绑定的投影与 Host 专属 HMAC 证明。插件还把同一处理器提供为私有 Cordis `qingmuImagoMethod` 能力，使受信 Host 命令能按当前已加载的 Core 规则重新编译准确工件，而不是接受调用方提供的历史证明。它只允许登记这份已通过机器校验的工件。依赖权威仍未核验；阶段批准、锁激活、LSU 计划封存、返修执行、Provider 调用和人工签收均不可用。此方法不读取易梦业务状态，也不执行写入。不可变登记由独立命令与易梦事务掌管；后续依赖权威和独立审核仍是分开的检查点。
 
 ## 模型体验
 

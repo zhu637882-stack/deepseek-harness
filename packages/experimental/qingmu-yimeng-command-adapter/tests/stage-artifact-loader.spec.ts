@@ -17,10 +17,23 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { mutateSource, sourceCanonical, sourceSha } from '../../qingmu-yimeng-read-adapter/tests/stage-source-fixture.ts'
 import { STAGE_ARTIFACT_RULE_PATHS } from '../../qingmu-imago-method-adapter/src/stage-artifact.ts'
 import * as Command from '../src/index.ts'
-import type { YimengRegisterStageArtifactRequest, YimengStageArtifactResult } from '../src/types.ts'
+import type {
+  YimengCommitStageArtifactDecisionRequest,
+  YimengForwardedStageArtifactAuthorityProbeRequest,
+  YimengForwardedStageArtifactDecisionRequest,
+  YimengRegisterStageArtifactRequest,
+  YimengStageArtifactAuthorityProbe,
+  YimengStageArtifactDecisionResult,
+  YimengStageArtifactResult,
+} from '../src/types.ts'
 import {
   STAGE_ARTIFACT_IDS,
   stageArtifact,
+  stageArtifactAuthorityProbeResult,
+  stageArtifactAuthorityRequest,
+  stageArtifactDecisionRecoveryRequest,
+  stageArtifactDecisionRequest,
+  stageArtifactDecisionResult,
   stageArtifactResult,
   stageArtifactSha,
 } from './stage-artifact-fixture.ts'
@@ -47,15 +60,21 @@ afterEach(async () => {
 })
 
 it.skipIf(!CORE_ROOT)(
-  'composes real Core validation, one lost registration POST, and original GET-only recovery after key/session change',
+  'composes current Core validation plus lost registration and decision responses with GET-only recovery',
   { timeout: 60_000 },
   async () => {
     if (CORE_ROOT === undefined || CORE_ROOT === '') throw new Error('current Core root required')
     vi.stubEnv('YIMENG_API_TOKEN', TOKEN)
     vi.stubEnv('QINGMU_IMAGO_ATTESTATION_KEY', KEY)
     const artifact = stageArtifact()
+    mutateSource(artifact, 'content.source_ledger.data.canonicalNumbers', {
+      integerExponent: 1e21,
+      maximumFinite: Number.MAX_VALUE,
+    })
     let submitted: YimengRegisterStageArtifactRequest | undefined
     let receipt: YimengStageArtifactResult | undefined
+    let decisionSubmitted: YimengForwardedStageArtifactDecisionRequest | undefined
+    let decisionReceipt: YimengStageArtifactDecisionResult | undefined
     const calls: Array<{ method: string | undefined; path: string }> = []
     const errors: unknown[] = []
     upstream = createServer((incoming, response) => {
@@ -109,12 +128,97 @@ it.skipIf(!CORE_ROOT)(
           response.destroy()
           return
         }
+        if (incoming.method === 'POST' && url.pathname === `${base}/decisions`) {
+          let raw = ''
+          for await (const chunk of incoming) raw += String(chunk)
+          const body = JSON.parse(raw) as Omit<YimengForwardedStageArtifactDecisionRequest,
+            'projectId' | 'episodeId' | 'stageId' | 'scopeInstance'>
+          expect(Object.keys(body).sort()).toEqual([
+            'expectedArtifactRecordRevision',
+            'expectedArtifactRecordSha256',
+            'expectedArtifactRevision',
+            'expectedArtifactSha256',
+            'expectedSubjectSha256',
+            'methodProjection',
+            'methodProjectionSha256',
+            'methodAttestation',
+            'decision',
+            'reason',
+            'idempotencyKey',
+          ].sort())
+          expect(body).not.toHaveProperty('actorId')
+          expect(body).not.toHaveProperty('actorNaturalPersonId')
+          expect(body).not.toHaveProperty('authSessionId')
+          expect(body.expectedArtifactRecordRevision).toBe(receipt?.artifactRecord.artifactRecordRevision)
+          expect(body.expectedArtifactRecordSha256).toBe(receipt?.artifactRecordSha256)
+          expect(body.expectedArtifactRevision).toBe(receipt?.artifactRecord.artifactRevision)
+          expect(body.expectedArtifactSha256).toBe(receipt?.artifactRecord.artifactSha256)
+          expect(body.expectedSubjectSha256).toBe(receipt?.artifactRecord.subjectSnapshotSha256)
+          expect(body.methodProjectionSha256).toBe(sourceSha(body.methodProjection))
+          expect(body.methodProjection.definition).toMatchObject({
+            dependencyAuthorityVerified: false,
+            stageApprovalAllowed: false,
+            lockActivationAllowed: false,
+            lsuPlanSealingAllowed: false,
+            reworkExecutionAllowed: false,
+            providerCalls: 0,
+          })
+          decisionSubmitted = { ...body, ...STAGE_ARTIFACT_IDS }
+          decisionReceipt = stageArtifactDecisionResult(
+            decisionSubmitted,
+            process.env.YIMENG_API_TOKEN ?? '',
+          )
+          response.destroy()
+          return
+        }
+        if (incoming.method === 'POST' && url.pathname === `${base}/authority-probe`) {
+          let raw = ''
+          for await (const chunk of incoming) raw += String(chunk)
+          const body = JSON.parse(raw) as Omit<YimengForwardedStageArtifactAuthorityProbeRequest,
+            'projectId' | 'episodeId' | 'stageId' | 'scopeInstance'>
+          expect(Object.keys(body).sort()).toEqual([
+            'expectedArtifactRecordRevision',
+            'expectedArtifactRecordSha256',
+            'expectedArtifactRevision',
+            'expectedArtifactSha256',
+            'expectedSubjectSha256',
+            'methodProjection',
+            'methodProjectionSha256',
+            'methodAttestation',
+          ].sort())
+          expect(body).not.toHaveProperty('actorId')
+          expect(body).not.toHaveProperty('actorNaturalPersonId')
+          expect(body).not.toHaveProperty('authSessionId')
+          expect(body).not.toHaveProperty('idempotencyKey')
+          if (decisionReceipt === undefined) throw new Error('decision receipt required before authority probe')
+          const request: YimengForwardedStageArtifactAuthorityProbeRequest = { ...body, ...STAGE_ARTIFACT_IDS }
+          const probe = stageArtifactAuthorityProbeResult(request, decisionReceipt)
+          response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'private, no-store' })
+          response.end(JSON.stringify(probe))
+          return
+        }
         if (incoming.method === 'GET' && url.pathname === `${base}/command-receipt`) {
           expect(incoming.headers['idempotency-key']).toBe(submitted?.idempotencyKey)
           expect(url.searchParams.get('expectedSubjectSha256')).toBe(submitted?.expectedSubjectSha256)
           if (receipt === undefined) throw new Error('durable receipt required before recovery')
           response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'private, no-store' })
           response.end(JSON.stringify({ schema: 'jason.qingmu-stage-artifact-recovery.v1', receipt }))
+          return
+        }
+        if (incoming.method === 'GET' && url.pathname === `${base}/decision-command-receipt`) {
+          expect(incoming.headers['idempotency-key']).toBe(decisionSubmitted?.idempotencyKey)
+          expect(url.searchParams.get('expectedArtifactRecordRevision')).toBe(
+            String(decisionSubmitted?.expectedArtifactRecordRevision),
+          )
+          expect(url.searchParams.get('expectedArtifactRecordSha256')).toBe(
+            decisionSubmitted?.expectedArtifactRecordSha256,
+          )
+          if (decisionReceipt === undefined) throw new Error('durable decision receipt required before recovery')
+          response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'private, no-store' })
+          response.end(JSON.stringify({
+            schema: 'jason.qingmu-stage-artifact-decision-recovery.v1',
+            receipt: decisionReceipt,
+          }))
           return
         }
         throw new Error(`unexpected request ${incoming.method ?? ''} ${url.pathname}`)
@@ -161,6 +265,7 @@ it.skipIf(!CORE_ROOT)(
     await context.loader.await()
     const loaded = context
     expect([...loaded.loader.entries()].filter(entry => entry.fiber === undefined && !entry.disabled)).toEqual([])
+    expect(typeof loaded.get('qingmuImagoMethod')).toBe('function')
     const origin = `http://127.0.0.1:${String(loaded.webServer.port)}`
     let rpcId = 0
     async function rpc<T>(channel: string, endpoint: string, payload: unknown): Promise<RpcResult<T>> {
@@ -214,6 +319,18 @@ it.skipIf(!CORE_ROOT)(
     })
     expect(disabledMethod.status).toBe(404)
     expect(calls).toHaveLength(callCount)
+    if (receipt === undefined) throw new Error('registration receipt required before disabled Method checks')
+    expect(await rpc('/qingmu-yimeng-command', 'commitStageArtifactDecision',
+      stageArtifactDecisionRequest(registration, receipt))).toMatchObject({
+      ok: false,
+      error: { code: 'internal' },
+    })
+    expect(await rpc('/qingmu-yimeng-command', 'probeStageArtifactAuthority',
+      stageArtifactAuthorityRequest(registration, receipt))).toMatchObject({
+      ok: false,
+      error: { code: 'internal' },
+    })
+    expect(calls).toHaveLength(callCount)
     expect(await rpc('/qingmu-yimeng-command', 'recoverStageArtifactRegistration', {
       ...STAGE_ARTIFACT_IDS,
       expectedSubjectSha256: registration.expectedSubjectSha256,
@@ -227,8 +344,7 @@ it.skipIf(!CORE_ROOT)(
     vi.stubEnv('QINGMU_IMAGO_ATTESTATION_KEY', KEY)
     await loaded.loader.update(entry.id, { disabled: false })
     await loaded.loader.await()
-    expect(await rpc('/qingmu-imago-method', 'stageArtifactMethod', { ...STAGE_ARTIFACT_IDS, artifact }))
-      .toMatchObject({ ok: true })
+    expect(typeof loaded.get('qingmuImagoMethod')).toBe('function')
     expect(calls.filter(call => call.method === 'POST')).toHaveLength(1)
 
     const deepArtifact = stageArtifact()
@@ -259,6 +375,60 @@ it.skipIf(!CORE_ROOT)(
       },
     })
     expect(calls).toHaveLength(callsBeforeDeepRegistration)
+
+    const decision: YimengCommitStageArtifactDecisionRequest = {
+      ...stageArtifactDecisionRequest(registration, receipt),
+      idempotencyKey: 'stage-artifact-loader-decision-001',
+    }
+    expect(await rpc('/qingmu-yimeng-command', 'commitStageArtifactDecision', decision)).toMatchObject({ ok: false })
+    expect(calls.filter(call => call.method === 'POST')).toHaveLength(2)
+    expect(decisionReceipt).toMatchObject({
+      decision: {
+        stageArtifactAvailable: true,
+        dependencyAuthorityVerified: true,
+        stageApprovalGranted: true,
+        lockActivated: true,
+        planSealed: false,
+        providerCalls: 0,
+        humanSignoffInferred: false,
+        reworkExecuted: false,
+      },
+    })
+
+    const authorityRequest = stageArtifactAuthorityRequest(registration, receipt)
+    const authority = await rpc<YimengStageArtifactAuthorityProbe>(
+      '/qingmu-yimeng-command',
+      'probeStageArtifactAuthority',
+      authorityRequest,
+    )
+    expect(authority).toMatchObject({
+      ok: true,
+      value: {
+        dependencyAuthorityVerified: true,
+        stageArtifactAvailable: true,
+        stageApprovalGranted: true,
+        lockActivated: true,
+        planSealed: false,
+        providerCalls: 0,
+        reworkExecuted: false,
+      },
+    })
+
+    vi.stubEnv('QINGMU_IMAGO_ATTESTATION_KEY', '')
+    vi.stubEnv('YIMENG_API_TOKEN', 'stage-artifact-decision-recovery-token')
+    await loaded.loader.update(entry.id, { disabled: true })
+    await loaded.loader.await()
+    const decisionCallCount = calls.length
+    expect(await rpc('/qingmu-yimeng-command', 'recoverStageArtifactDecision',
+      stageArtifactDecisionRecoveryRequest(decision))).toEqual({
+      ok: true,
+      value: {
+        schema: 'jason.qingmu-stage-artifact-decision-recovery.v1',
+        receipt: decisionReceipt,
+      },
+    })
+    expect(calls.filter(call => call.method === 'POST')).toHaveLength(3)
+    expect(calls).toHaveLength(decisionCallCount + 1)
     expect(errors).toEqual([])
   },
 )

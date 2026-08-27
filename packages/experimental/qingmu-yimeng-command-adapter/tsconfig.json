@@ -11,6 +11,7 @@
     { "path": "../../../vendor/schemastery" },
     { "path": "../../client/connection/tsconfig.host.json" },
     { "path": "../../host/apiproxy" },
+    { "path": "../qingmu-imago-method-adapter" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]
 }

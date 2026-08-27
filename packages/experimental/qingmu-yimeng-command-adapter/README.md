@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-This private experimental Host plugin exposes explicit Yimeng `episode_script` and actor, scene, and prop `element_profile` ChangeSet flows over the loopback-only `/qingmu-yimeng-command` channel. The script operations remain `proposeScript`, `previewScript`, `commitScript`, and the read-only `recoverScriptCommit`. Element operations are `proposeElementProfile`, `proposeReferenceAsset`, `previewElementProfile`, `commitElementProfile`, and the read-only `recoverElementProfileCommit`. Selected-video Findings use `recordShotFinding` and the read-only `recoverShotFinding`. Machine-validated Stage artifacts use `registerStageArtifact` and the read-only `recoverStageArtifactRegistration`.
+This private experimental Host plugin exposes explicit Yimeng `episode_script` and actor, scene, and prop `element_profile` ChangeSet flows over the loopback-only `/qingmu-yimeng-command` channel. The script operations remain `proposeScript`, `previewScript`, `commitScript`, and the read-only `recoverScriptCommit`. Element operations are `proposeElementProfile`, `proposeReferenceAsset`, `previewElementProfile`, `commitElementProfile`, and the read-only `recoverElementProfileCommit`. Selected-video Findings use `recordShotFinding` and the read-only `recoverShotFinding`. Machine-validated Stage artifacts use `registerStageArtifact`, `commitStageArtifactDecision`, and the read-only `recoverStageArtifactRegistration` and `recoverStageArtifactDecision`.
 
 ## Command boundary
 
@@ -54,9 +54,21 @@ The exact receipt binds the immutable artifact, next record revision, method and
 
 `recoverStageArtifactRegistration` accepts only the original coordinates, subject SHA, and idempotency key. It sends one bodyless `GET` to the same path plus `/command-receipt`, preserving the key in the `Idempotency-Key` header and the subject SHA in the query. It accepts only the exact `jason.qingmu-stage-artifact-recovery.v1` wrapper and revalidates the nested original receipt. Recovery deliberately needs neither today's artifact nor the current HMAC key or historical bearer-token session. An uncertain registration POST is never retried.
 
+## Independent exact Stage artifact decisions
+
+`commitStageArtifactDecision` accepts one explicit `approve`, `reject`, or `request_changes` intent and reason, bound to the exact current artifact-record revision/SHA, artifact revision/SHA, subject SHA, and the complete exact artifact. The caller cannot supply a method projection, projection SHA, or attestation. The trusted Host invokes the currently loaded `stageArtifactMethod` capability for that artifact, revalidates its projection, rule digest, definition, subject binding, and HMAC proof, then sends one POST to the same Stage artifact path plus `/decisions`. It never accepts actor, natural-person identity, role, or session fields from the caller. Yimeng authentication derives those facts, enforces that producer and approver are different natural people, recomputes current upstream and lock authority, and owns the only durable decision journal.
+
+The result must bind the exact artifact record, method and rules, authenticated approver and session, producer identity, and Yimeng-computed dependency snapshot. An approval is accepted only with a verified snapshot; any source, rule, record, artifact, revision, SHA, or lock-event drift fails closed in Yimeng. `reject` and `request_changes` never make an artifact available. A valid approval may activate only the lock declared by the registered Stage definition. Every result must keep plan sealing, inferred human signoff, rework execution, and Provider calls false or zero. Harness validates these claims but never computes or stores dependency authority and adds no second DAG or state machine.
+
+`recoverStageArtifactDecision` accepts only the original Stage coordinates, artifact-record revision/SHA, and idempotency key. It sends one bodyless `GET` to `/decision-command-receipt`, preserving the record coordinates in the query and the key in the header, and revalidates the original exact receipt. Recovery needs neither today's HMAC key nor the historical bearer session and never resubmits an uncertain decision POST.
+
+`probeStageArtifactAuthority` is the read-only current-authority path. It accepts the exact artifact-record revision/SHA, artifact revision/SHA, subject SHA, and complete exact artifact. The trusted Host internally invokes the currently loaded `stageArtifactMethod` capability and forwards its fresh proof in one POST to `/authority-probe`, without caller identity or idempotency fields. Caller-supplied historical method fields are rejected before that capability runs. The compact result is accepted only when Yimeng's recomputed dependency snapshot, current decision, rules SHA, availability, approval, and the exact lock declared by the current Stage definition agree. The ordinary artifact `GET` remains a historical feed and deliberately grants no current authority without this fresh proof. Rule or lineage drift therefore returns a valid fail-closed probe with no current approval instead of resurrecting an old decision.
+
 ## Security boundary
 
 The upstream must be loopback HTTP(S). The adapter never returns the Host bearer credential, sends no cookies, rejects redirects, bounds payload size and request time, and normalizes non-success responses without reflecting their bodies. Successful Stage registration and recovery responses remain intact until their complete business schema is validated, so legitimate receipt fields named `token` are not deleted by generic secret redaction. After validation, any key or string containing the actual current bearer credential fails closed with a static error. Contract failures still return only static safe errors. The browser receives only validated command data and durable receipt identifiers.
+
+The same complete-schema validation and post-validation credential-reflection check apply to Stage decision results, recovered decision receipts, and authority probes.
 
 ## Model Experience
 
@@ -77,7 +89,7 @@ Independent. Command requests do not modify a model request or reusable prefix.
 ## Known Limitations and Deferred Work
 
 - This local adapter is not an Internet-facing gateway.
-- It implements the `episode_script` plus actor, scene, and prop `element_profile` ChangeSet vertical slices, including explicit reference selection and regeneration-request intents, records selected-video Findings, and registers production-unit scope, episode-script source references, and machine-validated Stage artifacts. Actual generation, dependency authority, and automatic creative approval remain outside these operations; registration alone does not complete the production workflow.
+- It implements the `episode_script` plus actor, scene, and prop `element_profile` ChangeSet vertical slices, including explicit reference selection and regeneration-request intents, records selected-video Findings, and registers production-unit scope, episode-script source references, and machine-validated Stage artifacts. It also carries exact independent Stage decisions, read-only receipt recovery, and fresh signed current-authority probes, while Yimeng alone computes and persists dependency and lock authority. Actual generation and automatic creative approval remain outside these operations; registration or approval alone does not complete the production workflow.
 - It does not start an outbox dispatcher or transport events across processes.
 - ChangeSet proposal conflicts require a fresh authoritative read and a new explicit proposal.
 - Receipt recovery depends on Yimeng retaining the original command receipt; mismatches fail closed. A missing Finding receipt returns `not_found` without resubmitting the write.

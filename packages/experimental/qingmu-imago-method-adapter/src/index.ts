@@ -10,6 +10,13 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** The same configured stateless Method handler exposed on the private Connection channel. */
+    qingmuImagoMethod: ConnectionRpcHandler
+  }
+}
 import type {
   ImagoStageArtifactMethodSnapshot,
   ImagoStageSourceMethodRequest,
@@ -3774,5 +3781,6 @@ export function apply(ctx: Context, config: ImagoMethodAdapterConfig): void {
         : await read('workflow', request, signal)
     },
   })
+  ctx.provide('qingmuImagoMethod', handler)
   ctx.connection.rpc.handle(CHANNEL, handler, { authority: 'loopback' })
 }

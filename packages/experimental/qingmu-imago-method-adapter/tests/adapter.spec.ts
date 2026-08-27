@@ -171,11 +171,15 @@ describe('qingmu IMAGO method adapter', () => {
       _handler: ConnectionRpcHandler,
       _options: ConnectionRpcHandlerOptions,
     ) => async () => {})
-    const ctx = { connection: { rpc: { handle } } } as unknown as Context
+    const provide = vi.fn()
+    const ctx = { provide, connection: { rpc: { handle } } } as unknown as Context
 
     apply(ctx, { coreRoot: '/opt/imago-os-core' })
 
     expect(handle).toHaveBeenCalledOnce()
+    expect(provide).toHaveBeenCalledOnce()
+    expect(provide.mock.calls[0]?.[0]).toBe('qingmuImagoMethod')
+    expect(provide.mock.calls[0]?.[1]).toBe(handle.mock.calls[0]?.[1])
     expect(handle.mock.calls[0]?.[0]).toBe('/qingmu-imago-method')
     expect(handle.mock.calls[0]?.[2]).toEqual({ authority: 'loopback' })
   })

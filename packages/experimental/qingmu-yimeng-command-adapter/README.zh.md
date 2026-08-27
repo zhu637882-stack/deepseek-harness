@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这个私有实验性 Host 插件通过仅限回环地址的 `/qingmu-yimeng-command` 通道，暴露易梦 `episode_script` 与人物、环境、道具 `element_profile` ChangeSet 的显式流程。剧本操作继续是 `proposeScript`、`previewScript`、`commitScript` 和只读的 `recoverScriptCommit`；元素操作是 `proposeElementProfile`、`proposeReferenceAsset`、`previewElementProfile`、`commitElementProfile` 和只读的 `recoverElementProfileCommit`。所选视频 Finding 使用 `recordShotFinding` 和只读的 `recoverShotFinding`。通过机器校验的阶段工件使用 `registerStageArtifact` 和只读的 `recoverStageArtifactRegistration`。
+这个私有实验性 Host 插件通过仅限回环地址的 `/qingmu-yimeng-command` 通道，暴露易梦 `episode_script` 与人物、环境、道具 `element_profile` ChangeSet 的显式流程。剧本操作继续是 `proposeScript`、`previewScript`、`commitScript` 和只读的 `recoverScriptCommit`；元素操作是 `proposeElementProfile`、`proposeReferenceAsset`、`previewElementProfile`、`commitElementProfile` 和只读的 `recoverElementProfileCommit`。所选视频 Finding 使用 `recordShotFinding` 和只读的 `recoverShotFinding`。通过机器校验的阶段工件使用 `registerStageArtifact`、`commitStageArtifactDecision`，以及只读的 `recoverStageArtifactRegistration` 和 `recoverStageArtifactDecision`。
 
 ## 命令边界
 
@@ -54,9 +54,21 @@ ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只
 
 `recoverStageArtifactRegistration` 只接收原始坐标、主体 SHA 与幂等键。它向同一路径加 `/command-receipt` 发送一次无正文 `GET`，在 `Idempotency-Key` 请求头中保留原键，在 query 中携带主体 SHA。它只接受准确的 `jason.qingmu-stage-artifact-recovery.v1` 包装层，并重新校验内嵌原回执。恢复特意不要求今天的工件、当前 HMAC 密钥或历史 bearer-token 会话仍然相同。结果不确定的登记 POST 绝不重试。
 
+## 绑定准确记录的独立阶段决定
+
+`commitStageArtifactDecision` 接收一次明确的 `approve`、`reject` 或 `request_changes` 意图与理由，并绑定准确的当前工件记录修订/SHA、工件修订/SHA、主体 SHA 和完整准确工件。调用方不能提供方法投影、投影 SHA 或证明。受信 Host 针对该工件调用当前已加载的 `stageArtifactMethod` 能力，重新核验其投影、规则摘要、阶段定义、主体绑定和 HMAC 证明，再向同一阶段工件路径加 `/decisions` 发送一次 POST。调用方也不能提供 actor、自然人身份、岗位或 session 字段；这些事实由易梦认证派生。易梦还负责强制生产者与批准者是不同自然人、重新计算当前上游与锁权威，并拥有唯一持久决定账本。
+
+结果必须绑定准确工件记录、方法与规则、认证批准者及会话、生产者身份和易梦计算的依赖快照。只有快照已核验时才接受批准；来源、规则、记录、工件、修订、SHA 或锁事件任一漂移，都会在易梦失败关闭。`reject` 与 `request_changes` 绝不会让工件变为可用。有效批准只能激活已登记阶段定义声明的锁。所有结果都必须保持计划封存、推断人工签收、返修执行和 Provider 调用为 false 或零。Harness 只校验这些声明，不计算或保存依赖权威，也不增加第二套 DAG 或状态机。
+
+`recoverStageArtifactDecision` 只接收原始阶段坐标、工件记录修订/SHA 与幂等键。它向 `/decision-command-receipt` 发送一次无正文 `GET`，query 保留记录坐标，请求头保留原幂等键，并重新校验原始准确回执。恢复不要求今天的 HMAC 密钥或历史 bearer 会话仍然相同，也绝不重提结果不确定的决定 POST。
+
+`probeStageArtifactAuthority` 是只读的当前权威路径。它接收准确的工件记录修订/SHA、工件修订/SHA、主体 SHA 和完整准确工件。受信 Host 在内部调用当前已加载的 `stageArtifactMethod` 能力，并把新鲜证明随一次不含调用方身份或幂等字段的 POST 转发到 `/authority-probe`。调用方夹带的历史方法字段会在该能力运行前被拒绝。只有易梦重算的依赖快照、当前决定、规则 SHA、可用性、批准状态和当前阶段定义声明的准确锁彼此一致时，Harness 才接受紧凑结果。普通工件 `GET` 仍只是历史 feed；没有这份新鲜证明时，它有意不授予当前权威。因此，规则或血缘漂移会返回一份没有当前批准的有效失败关闭探针，而不会复活旧决定。
+
 ## 安全边界
 
 上游必须是回环 HTTP(S)。适配器绝不返回 Host bearer 凭据、不发送 Cookie、拒绝重定向、限制载荷大小和请求时长，并且不会把非成功响应正文反射到错误中。成功的阶段登记与恢复响应会保持完整，直到整份业务 schema 校验结束，因此名为 `token` 的合法回执字段不会被通用秘密脱敏误删。校验后，任意键或字符串只要包含当前实际 bearer 凭据，就会用静态错误失败关闭。合同失败仍只返回静态安全错误。浏览器只接收经过校验的命令数据和持久回执标识。
+
+阶段决定结果、恢复出的决定回执和权威探针同样先经过整份 schema 校验，再执行凭据反射检查。
 
 ## 模型体验
 
@@ -77,7 +89,7 @@ ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只
 ## 已知限制与延期工作
 
 - 这个本地适配器不是面向互联网的网关。
-- 它实现 `episode_script` 以及人物、环境、道具 `element_profile` ChangeSet 垂直切片，支持显式的参考资产选择与重生成请求意图，记录所选视频 Finding，并登记生产单元范围、单集剧本来源引用和机器校验阶段工件。真实生成、依赖权威和自动创意批准不属于这些操作；仅登记不代表生产流程已完成。
+- 它实现 `episode_script` 以及人物、环境、道具 `element_profile` ChangeSet 垂直切片，支持显式的参考资产选择与重生成请求意图，记录所选视频 Finding，并登记生产单元范围、单集剧本来源引用和机器校验阶段工件。它还传递绑定准确记录的独立阶段决定、只读回执恢复和新鲜签名的当前权威探针，但依赖与锁权威只由易梦计算和持久化。真实生成和自动创意批准不属于这些操作；登记或批准本身都不代表生产流程已完成。
 - 它不启动 outbox dispatcher，也不跨进程传输事件。
 - ChangeSet 提案发生冲突时，必须先重新读取权威数据，再由用户明确创建新提案。
 - 回执恢复依赖易梦保留原始命令回执；血缘错配时一律失败关闭。Finding 回执不存在时返回 `not_found`，不会重新提交写入。

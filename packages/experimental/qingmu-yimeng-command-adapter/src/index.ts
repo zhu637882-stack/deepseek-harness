@@ -4,11 +4,16 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-client-connection'
+import type {} from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import { prepareShotFindingCommand } from './shot-finding.ts'
 import { prepareProductionUnitCommand } from './production-unit.ts'
-import { prepareStageArtifactCommand, stageArtifactCanonicalJson } from './stage-artifact.ts'
+import {
+  prepareCurrentStageArtifactMethodRequest,
+  prepareStageArtifactCommand,
+  stageArtifactCanonicalJson,
+} from './stage-artifact.ts'
 import { prepareStageSourceCommand } from './stage-source.ts'
 import type {
   YimengChangeSet,
@@ -211,6 +216,16 @@ export type {
   YimengStageArtifactRecovery,
   YimengStageArtifactResult,
   YimengStageArtifactSubject,
+  YimengStageArtifactDecision,
+  YimengStageArtifactDecisionRecovery,
+  YimengStageArtifactDecisionResult,
+  YimengStageArtifactDecisionValue,
+  YimengStageArtifactProducedLock,
+  YimengStageDependencyAuthority,
+  YimengStageDependencyAuthorityLock,
+  YimengStageDependencyAuthoritySource,
+  YimengCommitStageArtifactDecisionRequest,
+  YimengRecoverStageArtifactDecisionRequest,
   YimengImagoStageArtifactMethodAttestation,
   YimengImagoStageArtifactMethodProjection,
   YimengRecoverStageArtifactRegistrationRequest,
@@ -311,6 +326,11 @@ export const Config: z<YimengCommandAdapterConfig> = z.object({
 export interface YimengCommandAdapterDependencies {
   readonly fetch: typeof globalThis.fetch
   readonly readToken: () => string | undefined
+  /** Trusted Host call that recompiles one exact Stage artifact against current Core rules. */
+  readonly runStageArtifactMethod?: (
+    payload: unknown,
+    signal: AbortSignal,
+  ) => Promise<RpcResult<unknown>>
 }
 
 class InputError extends Error {}
@@ -4875,22 +4895,45 @@ export function createYimengCommandHandler(
   const timeoutMs = resolveTimeout(config.timeoutMs ?? DEFAULT_TIMEOUT_MS)
   return async (endpoint, payload, signal) => {
     try {
+      const stageArtifactHelpers = {
+        canonicalJson,
+        inputError: (message: string) => new InputError(message),
+        responseError: (message: string) => new UpstreamContractError(message),
+        readAttestationKey: readReferenceAttestationKey,
+        requireTimestamp: requireRfc3339Timestamp,
+      }
+      let currentStageArtifactMethod: unknown
+      let currentStageArtifactToken: string | undefined
+      if (endpoint === 'commitStageArtifactDecision' || endpoint === 'probeStageArtifactAuthority') {
+        const methodPayload = prepareCurrentStageArtifactMethodRequest(
+          endpoint,
+          payload,
+          stageArtifactHelpers,
+        )
+        currentStageArtifactToken = normalizeToken(dependencies.readToken())
+        if (currentStageArtifactToken === undefined) return internalError('YIMENG_API_TOKEN is not configured')
+        if (dependencies.runStageArtifactMethod === undefined) {
+          return internalError('current IMAGO Stage artifact Method is unavailable')
+        }
+        const methodResult = await dependencies.runStageArtifactMethod(methodPayload, signal)
+        if (signal.aborted) return cancelled()
+        if (!methodResult.ok) return methodResult
+        currentStageArtifactMethod = methodResult.value
+      }
       let path: string
       let requestInit: FetchJsonRequest
       let normalize: (value: unknown, token: string) => unknown
       if (endpoint === 'recordShotFinding' || endpoint === 'recoverShotFinding'
         || endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
         || endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
-        || endpoint === 'registerStageArtifact' || endpoint === 'recoverStageArtifactRegistration') {
-        const helpers = {
-          canonicalJson,
-          inputError: (message: string) => new InputError(message),
-          responseError: (message: string) => new UpstreamContractError(message),
-          readAttestationKey: readReferenceAttestationKey,
-          requireTimestamp: requireRfc3339Timestamp,
-        }
+        || endpoint === 'registerStageArtifact' || endpoint === 'recoverStageArtifactRegistration'
+        || endpoint === 'commitStageArtifactDecision' || endpoint === 'recoverStageArtifactDecision'
+        || endpoint === 'probeStageArtifactAuthority') {
+        const helpers = stageArtifactHelpers
         const prepared = endpoint === 'registerStageArtifact' || endpoint === 'recoverStageArtifactRegistration'
-          ? prepareStageArtifactCommand(endpoint, payload, helpers)
+          || endpoint === 'commitStageArtifactDecision' || endpoint === 'recoverStageArtifactDecision'
+          || endpoint === 'probeStageArtifactAuthority'
+          ? prepareStageArtifactCommand(endpoint, payload, helpers, currentStageArtifactMethod)
           : endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
             ? prepareProductionUnitCommand(endpoint, payload, helpers)
             : endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
@@ -4900,7 +4943,8 @@ export function createYimengCommandHandler(
         requestInit = {
           method: prepared.request.method,
           ...(prepared.request.body === undefined ? {} : {
-            body: endpoint === 'registerStageArtifact'
+            body: endpoint === 'registerStageArtifact' || endpoint === 'commitStageArtifactDecision'
+              || endpoint === 'probeStageArtifactAuthority'
               ? serializeStageArtifactBody(prepared.request.body)
               : serializeBody(prepared.request.body),
           }),
@@ -5200,10 +5244,13 @@ export function createYimengCommandHandler(
         throw new InputError(`unknown Yimeng command endpoint: ${endpoint}`)
       }
 
-      const token = normalizeToken(dependencies.readToken())
+      const token = currentStageArtifactToken ?? normalizeToken(dependencies.readToken())
       if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
       const isStageArtifactCommand = endpoint === 'registerStageArtifact'
         || endpoint === 'recoverStageArtifactRegistration'
+        || endpoint === 'commitStageArtifactDecision'
+        || endpoint === 'recoverStageArtifactDecision'
+        || endpoint === 'probeStageArtifactAuthority'
       const response = await fetchJson(
         dependencies,
         `${baseUrl}${path}`,
@@ -5238,5 +5285,14 @@ export function createYimengCommandHandler(
 
 /** Register the command adapter on a loopback-only Host Connection channel. */
 export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): void {
-  ctx.connection.rpc.handle(CHANNEL, createYimengCommandHandler(config), { authority: 'loopback' })
+  ctx.connection.rpc.handle(CHANNEL, createYimengCommandHandler(config, {
+    fetch: globalThis.fetch,
+    readToken: () => process.env.YIMENG_API_TOKEN,
+    runStageArtifactMethod: async (payload, signal) => {
+      const method = ctx.get('qingmuImagoMethod')
+      return method === undefined
+        ? internalError('current IMAGO Stage artifact Method is unavailable')
+        : await method('stageArtifactMethod', payload, signal)
+    },
+  }), { authority: 'loopback' })
 }

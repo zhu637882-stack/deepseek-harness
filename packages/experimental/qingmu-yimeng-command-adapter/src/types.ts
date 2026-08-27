@@ -1588,6 +1588,179 @@ export interface YimengStageArtifactRecovery {
   readonly receipt: YimengStageArtifactResult
 }
 
+/** Human decision values accepted by the Yimeng Stage authority. */
+export type YimengStageArtifactDecisionValue = 'approve' | 'reject' | 'request_changes'
+
+/** Original exact record coordinates used by decision receipt recovery. */
+export interface YimengRecoverStageArtifactDecisionRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly stageId: string
+  readonly scopeInstance: string
+  readonly expectedArtifactRecordRevision: number
+  readonly expectedArtifactRecordSha256: string
+  readonly idempotencyKey: string
+}
+
+/** Explicit natural-person decision intent; Host derives the current Method while actor and session remain server-derived. */
+export interface YimengCommitStageArtifactDecisionRequest extends YimengRecoverStageArtifactDecisionRequest {
+  readonly artifact: YimengStageArtifact
+  readonly expectedArtifactRevision: string
+  readonly expectedArtifactSha256: string
+  readonly expectedSubjectSha256: string
+  readonly decision: YimengStageArtifactDecisionValue
+  readonly reason: string
+}
+
+/** Host-to-Yimeng decision command after the current Core Method is recomputed inside the trusted Host. */
+export interface YimengForwardedStageArtifactDecisionRequest extends Omit<
+  YimengCommitStageArtifactDecisionRequest,
+  'artifact'
+> {
+  readonly methodProjection: YimengImagoStageArtifactMethodProjection
+  readonly methodProjectionSha256: string
+  readonly methodAttestation: YimengImagoStageArtifactMethodAttestation
+}
+
+/** Exact Stage record and artifact intent used for a fresh read-only authority projection. */
+export interface YimengProbeStageArtifactAuthorityRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly stageId: string
+  readonly scopeInstance: string
+  readonly artifact: YimengStageArtifact
+  readonly expectedArtifactRecordRevision: number
+  readonly expectedArtifactRecordSha256: string
+  readonly expectedArtifactRevision: string
+  readonly expectedArtifactSha256: string
+  readonly expectedSubjectSha256: string
+}
+
+/** Host-to-Yimeng probe after the current Core Method is recomputed inside the trusted Host. */
+export interface YimengForwardedStageArtifactAuthorityProbeRequest extends Omit<
+  YimengProbeStageArtifactAuthorityRequest,
+  'artifact'
+> {
+  readonly methodProjection: YimengImagoStageArtifactMethodProjection
+  readonly methodProjectionSha256: string
+  readonly methodAttestation: YimengImagoStageArtifactMethodAttestation
+}
+
+/** One current approved upstream artifact in Yimeng's dependency authority snapshot. */
+export interface YimengStageDependencyAuthoritySource extends YimengCommandJsonObject {
+  readonly stageId: string
+  readonly scopeInstance: string
+  readonly artifactRevision: string
+  readonly artifactSha256: string
+  readonly artifactRecordRevision: number
+  readonly artifactRecordSha256: string
+  readonly decisionId: string
+  readonly approvalEventSha256: string
+}
+
+/** One current lock-producing approval event in Yimeng's dependency authority snapshot. */
+export interface YimengStageDependencyAuthorityLock extends YimengCommandJsonObject {
+  readonly lockId: string
+  readonly stageId: string
+  readonly scopeInstance: string
+  readonly artifactRecordRevision: number
+  readonly artifactRecordSha256: string
+  readonly decisionId: string
+  readonly eventSha256: string
+}
+
+/** Recomputed dependency and lock authority for one exact Stage artifact record. */
+export interface YimengStageDependencyAuthority extends YimengCommandJsonObject {
+  readonly schema: 'jason.qingmu-stage-dependency-authority.v1'
+  readonly targetId: string
+  readonly artifactRecordRevision: number
+  readonly artifactRecordSha256: string
+  readonly sources: readonly YimengStageDependencyAuthoritySource[]
+  readonly locks: readonly YimengStageDependencyAuthorityLock[]
+  readonly blockers: readonly string[]
+  readonly verified: boolean
+}
+
+/** Exact independent decision retained in the existing Yimeng three-ledger journal. */
+export interface YimengStageArtifactDecision extends YimengCommandJsonObject {
+  readonly id: string
+  readonly decisionOrdinal: number
+  readonly subjectType: 'stage_artifact_record'
+  readonly subjectId: string
+  readonly subjectArtifactRecordRevision: number
+  readonly subjectArtifactRecordSha256: string
+  readonly artifactRevision: string
+  readonly artifactSha256: string
+  readonly subjectSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+  readonly decision: YimengStageArtifactDecisionValue
+  readonly reason: string
+  readonly actorId: string
+  readonly actorRole: 'approver'
+  readonly actorNaturalPersonId: string
+  readonly producerActorId: string
+  readonly producerNaturalPersonId: string
+  readonly authSessionId: string
+  readonly dependencyAuthority: YimengStageDependencyAuthority
+  readonly stageArtifactAvailable: boolean
+  readonly dependencyAuthorityVerified: boolean
+  readonly stageApprovalGranted: boolean
+  readonly lockActivated: boolean
+  readonly planSealed: false
+  readonly providerCalls: 0
+  readonly humanSignoffInferred: false
+  readonly reworkExecuted: false
+  readonly decidedAt: string
+}
+
+/** Lock lineage emitted only by a current approved exact record that declares the lock. */
+export interface YimengStageArtifactProducedLock extends YimengCommandJsonObject {
+  readonly lockId: string
+  readonly stageId: string
+  readonly scopeInstance: string
+  readonly artifactRecordRevision: number
+  readonly artifactRecordSha256: string
+  readonly eventSha256: string
+}
+
+/** Durable result of one explicit Stage artifact decision. */
+export interface YimengStageArtifactDecisionResult {
+  readonly schema: 'jason.qingmu-stage-artifact-decision-result.v1'
+  readonly decision: YimengStageArtifactDecision
+  readonly decisionEventSha256: string
+  readonly producedLock: YimengStageArtifactProducedLock | null
+  readonly receiptId: string
+  readonly outboxEventId: string
+}
+
+/** Original decision receipt recovered without replaying the write. */
+export interface YimengStageArtifactDecisionRecovery {
+  readonly schema: 'jason.qingmu-stage-artifact-decision-recovery.v1'
+  readonly receipt: YimengStageArtifactDecisionResult
+}
+
+/** Fail-closed read projection under one fresh signed Core rules generation. */
+export interface YimengStageArtifactAuthorityProbe {
+  readonly schema: 'jason.qingmu-stage-artifact-authority-probe.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly stageId: string
+  readonly scopeInstance: string
+  readonly artifactRecordRevision: number
+  readonly artifactRecordSha256: string
+  readonly rulesSha256: string
+  readonly dependencyAuthority: YimengStageDependencyAuthority
+  readonly currentDecisionResult: YimengStageArtifactDecisionResult | null
+  readonly dependencyAuthorityVerified: boolean
+  readonly stageArtifactAvailable: boolean
+  readonly stageApprovalGranted: boolean
+  readonly lockActivated: boolean
+  readonly planSealed: false
+  readonly providerCalls: 0
+  readonly reworkExecuted: false
+}
+
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
   readonly proposeScript: YimengProposeScriptResponse
@@ -1615,6 +1788,9 @@ export interface YimengCommandEndpointMap {
   readonly recoverStageSourceBinding: YimengStageSourceRecovery
   readonly registerStageArtifact: YimengStageArtifactResult
   readonly recoverStageArtifactRegistration: YimengStageArtifactRecovery
+  readonly commitStageArtifactDecision: YimengStageArtifactDecisionResult
+  readonly recoverStageArtifactDecision: YimengStageArtifactDecisionRecovery
+  readonly probeStageArtifactAuthority: YimengStageArtifactAuthorityProbe
   readonly proposePromptIr: YimengProposePromptIrResponse
   readonly previewPromptIr: YimengPreviewPromptIrResponse
   readonly commitPromptIrEdit: YimengCommitPromptIrEditResponse
