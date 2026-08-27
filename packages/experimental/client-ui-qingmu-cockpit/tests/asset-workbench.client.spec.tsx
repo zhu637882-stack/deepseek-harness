@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { AssetWorkbench } from '../src/client/AssetWorkbench.tsx'
 import type {
+  ImagoReferenceAssetMethodRequest,
   QingmuYimengPort,
   YimengElementReviewFeedResponse,
   YimengReferenceAssetCandidate,
@@ -605,7 +606,10 @@ function createRightsPort(options: {
   const elementMethod = vi.fn(async (request: { readonly baseRevision: number; readonly baseSnapshotSha256: string }) => (
     methodResponse(request)
   ))
-  const referenceAssetMethod = vi.fn(async () => rightsMethodResponse(initialSnapshot))
+  const referenceAssetMethod = vi.fn(async (request: ImagoReferenceAssetMethodRequest) => {
+    void request
+    return rightsMethodResponse(initialSnapshot)
+  })
   const changeSet = rightsChangeSet(initialSnapshot)
   const proposeReferenceAsset = vi.fn(async () => ({
     schema: 'jason.qingmu-change-set-proposal.v1',
