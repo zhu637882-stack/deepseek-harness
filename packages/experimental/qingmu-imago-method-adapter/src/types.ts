@@ -5,6 +5,9 @@ import type {
   YimengProductionUnitDefinition,
   YimengProductionUnitSource,
   YimengProductionUnitsRequest,
+  YimengLsuPlanDefinition,
+  YimengLsuPlanSubject,
+  YimengLsuPlanSourceRequest,
   YimengContinuityDeltaProjection,
   YimengContinuityPair,
   YimengShotRelationsStoryboardRevision,
@@ -907,6 +910,48 @@ export interface ImagoProductionUnitMethodResponse extends ImagoMethodJsonObject
   readonly methodAttestation: ImagoProductionUnitMethodAttestation
 }
 
+/** Browser supplies business coordinates only; current lock-rule and plan-source facts stay in the Host. */
+export type ImagoLsuPlanMethodRequest = Pick<YimengLsuPlanSourceRequest, 'projectId' | 'episodeId'>
+
+/** Exact current Yimeng subject bound to the current IMAGO rule generation. */
+export interface ImagoLsuPlanMethodSnapshot extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.lsu-plan-method-snapshot.v1'
+  readonly subject: YimengLsuPlanSubject
+  readonly subjectSnapshotSha256: string
+}
+
+/** Current plan-declaration method; it grants no Stage, lock, rework, Provider, or signoff authority. */
+export type ImagoLsuPlanMethodDefinition = YimengLsuPlanDefinition
+
+/** Stateless current-rule method bound to the complete current episode LSU scope. */
+export interface ImagoLsuPlanMethodProjection extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-lsu-plan-method.v1'
+  readonly subject: YimengLsuPlanSubject
+  readonly subjectSnapshotSha256: string
+  readonly definition: ImagoLsuPlanMethodDefinition
+  readonly ruleBindings: Readonly<Record<string, string>>
+  readonly rulesSha256: string
+  readonly lockRuleBindings: Readonly<Record<string, string>>
+  readonly lockRulesSha256: string
+}
+
+/** Host-origin proof only; Yimeng still owns natural-person authorization and durable CAS. */
+export interface ImagoLsuPlanMethodAttestation extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-lsu-plan-method-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly subjectSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly signature: string
+}
+
+/** Fresh complete-scope Method and Host HMAC without performing a plan write. */
+export interface ImagoLsuPlanMethodResponse extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-lsu-plan-method-adapter-result.v1'
+  readonly projection: ImagoLsuPlanMethodProjection
+  readonly projectionSha256: string
+  readonly methodAttestation: ImagoLsuPlanMethodAttestation
+}
+
 /** Browser supplies coordinates only; the Host obtains the full-script source digest. */
 export interface ImagoStageSourceMethodRequest extends YimengStageSourcesRequest {
   readonly stageId: 'A1S'
@@ -1064,6 +1109,7 @@ export interface ImagoMethodEndpointMap {
   readonly continuityMethod: ImagoContinuityMethodResponse
   readonly shotFindingMethod: ImagoShotFindingMethodResponse
   readonly productionUnitMethod: ImagoProductionUnitMethodResponse
+  readonly lsuPlanMethod: ImagoLsuPlanMethodResponse
   readonly stageSourceMethod: ImagoStageSourceMethodResponse
   readonly stageArtifactMethod: ImagoStageArtifactMethodResponse
 }

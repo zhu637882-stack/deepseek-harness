@@ -15,6 +15,7 @@ import {
   stageArtifactCanonicalJson,
 } from './stage-artifact.ts'
 import { prepareStageSourceCommand } from './stage-source.ts'
+import { prepareCurrentLsuPlanMethodRequest, prepareLsuPlanCommand } from './lsu-plan.ts'
 import type {
   YimengChangeSet,
   YimengChangeSetBase,
@@ -230,6 +231,20 @@ export type {
   YimengImagoStageArtifactMethodProjection,
   YimengRecoverStageArtifactRegistrationRequest,
   YimengRegisterStageArtifactRequest,
+  YimengForwardedLsuPlanAuthorityProbeRequest,
+  YimengForwardedSealLsuPlanRequest,
+  YimengImagoLsuPlanMethodAttestation,
+  YimengImagoLsuPlanMethodProjection,
+  YimengLsuPlanAuthorityProbe,
+  YimengLsuPlanBlueprintLock,
+  YimengLsuPlanDefinition,
+  YimengLsuPlanProductionUnit,
+  YimengLsuPlanSeal,
+  YimengLsuPlanSealRecovery,
+  YimengLsuPlanSealResult,
+  YimengLsuPlanSubject,
+  YimengProbeLsuPlanAuthorityRequest,
+  YimengSealLsuPlanRequest,
   YimengStageSource,
   YimengStageSourceDefinition,
   YimengStageSourceBinding,
@@ -328,6 +343,11 @@ export interface YimengCommandAdapterDependencies {
   readonly readToken: () => string | undefined
   /** Trusted Host call that recompiles one exact Stage artifact against current Core rules. */
   readonly runStageArtifactMethod?: (
+    payload: unknown,
+    signal: AbortSignal,
+  ) => Promise<RpcResult<unknown>>
+  /** Trusted Host call that recompiles the complete current LSU scope and rule generation. */
+  readonly runLsuPlanMethod?: (
     payload: unknown,
     signal: AbortSignal,
   ) => Promise<RpcResult<unknown>>
@@ -4920,6 +4940,20 @@ export function createYimengCommandHandler(
         if (!methodResult.ok) return methodResult
         currentStageArtifactMethod = methodResult.value
       }
+      let currentLsuPlanMethod: unknown
+      let currentLsuPlanToken: string | undefined
+      if (endpoint === 'sealLsuPlan' || endpoint === 'probeLsuPlanAuthority') {
+        const methodPayload = prepareCurrentLsuPlanMethodRequest(endpoint, payload, stageArtifactHelpers)
+        currentLsuPlanToken = normalizeToken(dependencies.readToken())
+        if (currentLsuPlanToken === undefined) return internalError('YIMENG_API_TOKEN is not configured')
+        if (dependencies.runLsuPlanMethod === undefined) {
+          return internalError('current IMAGO LSU plan Method is unavailable')
+        }
+        const methodResult = await dependencies.runLsuPlanMethod(methodPayload, signal)
+        if (signal.aborted) return cancelled()
+        if (!methodResult.ok) return methodResult
+        currentLsuPlanMethod = methodResult.value
+      }
       let path: string
       let requestInit: FetchJsonRequest
       let normalize: (value: unknown, token: string) => unknown
@@ -4928,17 +4962,22 @@ export function createYimengCommandHandler(
         || endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
         || endpoint === 'registerStageArtifact' || endpoint === 'recoverStageArtifactRegistration'
         || endpoint === 'commitStageArtifactDecision' || endpoint === 'recoverStageArtifactDecision'
-        || endpoint === 'probeStageArtifactAuthority') {
+        || endpoint === 'probeStageArtifactAuthority'
+        || endpoint === 'sealLsuPlan' || endpoint === 'recoverLsuPlanSeal'
+        || endpoint === 'probeLsuPlanAuthority') {
         const helpers = stageArtifactHelpers
-        const prepared = endpoint === 'registerStageArtifact' || endpoint === 'recoverStageArtifactRegistration'
+        const prepared = endpoint === 'sealLsuPlan' || endpoint === 'recoverLsuPlanSeal'
+          || endpoint === 'probeLsuPlanAuthority'
+          ? prepareLsuPlanCommand(endpoint, payload, helpers, currentLsuPlanMethod)
+          : endpoint === 'registerStageArtifact' || endpoint === 'recoverStageArtifactRegistration'
           || endpoint === 'commitStageArtifactDecision' || endpoint === 'recoverStageArtifactDecision'
           || endpoint === 'probeStageArtifactAuthority'
-          ? prepareStageArtifactCommand(endpoint, payload, helpers, currentStageArtifactMethod)
-          : endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
-            ? prepareProductionUnitCommand(endpoint, payload, helpers)
-            : endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
-              ? prepareStageSourceCommand(endpoint, payload, helpers)
-              : prepareShotFindingCommand(endpoint, payload, helpers)
+            ? prepareStageArtifactCommand(endpoint, payload, helpers, currentStageArtifactMethod)
+            : endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
+              ? prepareProductionUnitCommand(endpoint, payload, helpers)
+              : endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
+                ? prepareStageSourceCommand(endpoint, payload, helpers)
+                : prepareShotFindingCommand(endpoint, payload, helpers)
         path = prepared.path
         requestInit = {
           method: prepared.request.method,
@@ -5244,13 +5283,16 @@ export function createYimengCommandHandler(
         throw new InputError(`unknown Yimeng command endpoint: ${endpoint}`)
       }
 
-      const token = currentStageArtifactToken ?? normalizeToken(dependencies.readToken())
+      const token = currentStageArtifactToken ?? currentLsuPlanToken ?? normalizeToken(dependencies.readToken())
       if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
       const isStageArtifactCommand = endpoint === 'registerStageArtifact'
         || endpoint === 'recoverStageArtifactRegistration'
         || endpoint === 'commitStageArtifactDecision'
         || endpoint === 'recoverStageArtifactDecision'
         || endpoint === 'probeStageArtifactAuthority'
+        || endpoint === 'sealLsuPlan'
+        || endpoint === 'recoverLsuPlanSeal'
+        || endpoint === 'probeLsuPlanAuthority'
       const response = await fetchJson(
         dependencies,
         `${baseUrl}${path}`,
@@ -5293,6 +5335,12 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
       return method === undefined
         ? internalError('current IMAGO Stage artifact Method is unavailable')
         : await method('stageArtifactMethod', payload, signal)
+    },
+    runLsuPlanMethod: async (payload, signal) => {
+      const method = ctx.get('qingmuImagoMethod')
+      return method === undefined
+        ? internalError('current IMAGO LSU plan Method is unavailable')
+        : await method('lsuPlanMethod', payload, signal)
     },
   }), { authority: 'loopback' })
 }

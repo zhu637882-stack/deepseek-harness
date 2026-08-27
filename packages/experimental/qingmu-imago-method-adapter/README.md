@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 This private experimental Host plugin compiles current IMAGO OS methods into browser-safe guidance. `elementMethod` covers profile editing, `referenceAssetMethod` covers bounded reference actions and rights guidance, `promptIrMethod` covers provider-neutral PromptIR candidates, `shotRelationMethod` covers the canonical Scene/Shot/Shot-local-Beat/Element graph plus Shot River rhythm and reference bindings, and `heroFrameStoryboardMethod` deterministically compiles one selected Hero Frame and its Shot-local canvas annotations. `worksetMethod` reads a fresh episode workflow and returns current IMAGO stage definitions with explicit authority availability. These input-snapshot methods build their own bounded input in the Host and invoke their reviewed Core compiler with Unicode-code-point-sorted, whitespace-free JSON on stdin. Their compiler's `input_snapshot_sha256` must match the SHA-256 of those exact input bytes.
 
-`shotFindingMethod`, `productionUnitMethod`, `stageSourceMethod`, and `stageArtifactMethod` use their subject hash contracts described below; the older methods' `input_snapshot_sha256` field is not part of these schemas.
+`shotFindingMethod`, `productionUnitMethod`, `stageSourceMethod`, `stageArtifactMethod`, and `lsuPlanMethod` use their subject hash contracts described below; the older methods' `input_snapshot_sha256` field is not part of these schemas.
 
 ## Attestation boundary
 
@@ -67,6 +67,12 @@ The response is `qingmu.imago-stage-source-method-adapter-result.v1` with `proje
 The normal path invokes the current `scripts/compile_qingmu_stage_artifact_method.py` subprocess. Before and after compilation, the Host independently reads the seven workset rules plus `scripts/build_v6_stage_contracts.py`, `scripts/validate_v6_stage_contracts.py`, `scripts/compile_qingmu_element_method.py`, and the Stage artifact compiler itself. It reconstructs the exact current Stage owner, scope, contract hash, source and lock requirements, artifact kind, and canonical output; changed bytes or a compiler projection that differs from those facts fail closed. Core performs the full deterministic artifact validation, including Stage-specific source, lock, content-section, and open-issue requirements.
 
 The response is `qingmu.imago-stage-artifact-method-adapter-result.v1` with a SHA-bound projection and Host-only HMAC attestation. The plugin also provides the same handler as the private Cordis `qingmuImagoMethod` capability so trusted Host commands can recompile the exact artifact under the currently loaded Core rules instead of accepting a caller-supplied historical proof. It allows only registration of that machine-validated artifact. Dependency authority remains unverified; Stage approval, lock activation, LSU plan sealing, rework execution, Provider calls, and human signoff remain unavailable. This method reads no Yimeng business state and performs no write. A separate command and the Yimeng transaction own immutable registration; later dependency-authority and independent-review checkpoints remain separate work.
+
+## Current complete-scope LSU plan method
+
+`lsuPlanMethod` accepts exactly `projectId` and `episodeId`. The Host first reconstructs the current Production Unit and C5F lock rules, derives their lock-rule SHA, and obtains the exact current scope through the configured `lsuPlanSource` capability. It then runs `scripts/compile_qingmu_lsu_plan_method.py`, reads the same source again, and reconstructs every rule again. Any subject, binding, blueprint-lock, file-byte, rule-hash, or definition drift fails closed before attestation.
+
+The exact projection binds a non-empty sorted set of already registered `LSU[0-9]{2,}` units, the current independently approved `PRODUCTION_BLUEPRINT_LOCK`, the six current per-LSU Stage definitions, all compiler and rule bytes, and the lock-rule subset. The Host independently checks every field and signs the projection with its HMAC key. This stateless Method only permits an explicit Yimeng plan-seal transaction; it creates no Stage instance, approval, lock, rework, Provider call, worker, project state, or human signoff.
 
 ## Model Experience
 

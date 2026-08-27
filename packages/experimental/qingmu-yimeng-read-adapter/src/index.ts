@@ -12,6 +12,7 @@ import { normalizeSelectedVideoReview } from './selected-video-review.ts'
 import { normalizeShotFindingFeed, parseShotFindingReadRequest } from './shot-findings.ts'
 import { normalizeProductionUnitsFeed, parseProductionUnitsReadRequest } from './production-units.ts'
 import { normalizeStageSourcesFeed, parseStageSourcesReadRequest } from './stage-sources.ts'
+import { normalizeLsuPlanSource, parseLsuPlanSourceRequest } from './lsu-plan.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -35,6 +36,7 @@ import type {
   YimengHumanDecisionValue,
   YimengJsonObject,
   YimengProductionUnitsRequest,
+  YimengLsuPlanSourceRequest,
   YimengStageSourcesRequest,
   YimengProjectsRequest,
   YimengProjectsResponse,
@@ -148,6 +150,14 @@ export type {
   YimengProductionUnitBinding,
   YimengProductionUnitsRequest,
   YimengProductionUnitsResponse,
+  YimengLsuPlanBlueprintLock,
+  YimengLsuPlanDefinition,
+  YimengLsuPlanProductionUnit,
+  YimengLsuPlanSeal,
+  YimengLsuPlanSealResult,
+  YimengLsuPlanSourceRequest,
+  YimengLsuPlanSourceResponse,
+  YimengLsuPlanSubject,
   YimengStageSourcesRequest,
   YimengStageSourcesResponse,
   YimengStageSource,
@@ -202,6 +212,7 @@ const SHA256 = /^[0-9a-f]{64}$/
 const PROTECTED_ENDPOINTS = new Set([
   'projects', 'episodes', 'script', 'promptIr', 'elementProfile', 'referenceCandidates', 'reviewEvents',
   'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'shotFindings', 'productionUnits', 'stageSources',
+  'lsuPlanSource',
 ])
 const HUMAN_DECISION_VALUES = new Set<YimengHumanDecisionValue>([
   'approve', 'reject', 'request_changes',
@@ -570,6 +581,14 @@ function parseStageSourcesRequest(payload: unknown): YimengStageSourcesRequest {
     return parseStageSourcesReadRequest(payload)
   } catch {
     throw new InputError('stageSources accepts only canonical projectId and episodeId')
+  }
+}
+
+function parseLsuPlanReadRequest(payload: unknown): YimengLsuPlanSourceRequest {
+  try {
+    return parseLsuPlanSourceRequest(payload)
+  } catch {
+    throw new InputError('lsuPlanSource accepts only canonical projectId, episodeId, and lockRulesSha256')
   }
 }
 
@@ -2607,6 +2626,12 @@ export function createYimengReadHandler(
         path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)
           + '/episodes/' + encodeURIComponent(request.episodeId) + '/stage-sources'
         normalize = value => normalizeStageSourcesFeed(value, request, canonicalJsonSha256)
+      } else if (endpoint === 'lsuPlanSource') {
+        const request = parseLsuPlanReadRequest(payload)
+        const query = new URLSearchParams({ lockRulesSha256: request.lockRulesSha256 })
+        path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)
+          + '/episodes/' + encodeURIComponent(request.episodeId) + `/lsu-plan/source?${query.toString()}`
+        normalize = value => normalizeLsuPlanSource(value, request, canonicalJsonSha256)
       } else if (endpoint === 'elementProfile') {
         const request = parseElementProfileRequest(payload)
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/elements/${encodeURIComponent(request.elementKind)}/${encodeURIComponent(request.targetId)}`

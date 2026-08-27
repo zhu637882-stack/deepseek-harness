@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `shotFindings`, `productionUnits`, `stageSources`, and `workflow`; it exposes no mutation endpoint.
+This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `shotFindings`, `productionUnits`, `lsuPlanSource`, `stageSources`, and `workflow`; it exposes no mutation endpoint.
 
 ## Contract
 
@@ -44,6 +44,12 @@ The feed separates `currentBinding` from history; missing current media does not
 
 Historical bindings remain readable when the current group is unavailable or absent. `currentBinding` must match the current source and its SHA exactly; `canBindUnit` represents only Yimeng's existing owner permission. Historical method definitions and their stored SHA fields are retained, not re-attested against the current Core rules. The feed fixes `planSealed: false`, `providerCalls: 0`, `humanSignoffInferred: false`, and `reworkExecuted: false`. This endpoint does not bind a unit, seal a plan, approve a Stage, select media, or execute rework. The root and `/types` export `YimengProductionUnitsRequest`, `YimengProductionUnitsResponse`, `YimengProductionUnitSource`, `YimengProductionUnitDefinition`, and `YimengProductionUnitBinding`.
 
+## Current LSU plan source
+
+`lsuPlanSource` accepts exactly `projectId`, `episodeId`, and the Host-derived current C5F lock-rule SHA. It sends one authenticated, body-free GET to `/api/qingmu/projects/{projectId}/episodes/{episodeId}/lsu-plan/source`. The exact non-empty subject contains only sorted current Production Unit bindings and the independently approved `PRODUCTION_BLUEPRINT_LOCK` lineage. The Host validates unique unit and group IDs, positive binding and artifact-record revisions, canonical SHAs, exact coordinates, and the requested lock-rule generation before a Method compiler may use it.
+
+The latest durable seal remains historical evidence. `latestSealSourceCurrent` may be true only when that seal's complete subject, subject SHA, and lock-rule SHA match today's source; unavailable current scope does not erase the old receipt. `canSealPlan` reports Yimeng's existing permission only. This read performs no seal, Stage approval, lock activation, rework, Provider call, or signoff, and it does not turn a historical receipt into current authority.
+
 ## Episode-script source references
 
 `stageSources` accepts exactly `projectId` and `episodeId` and sends one authenticated, body-free GET to `/api/qingmu/projects/{projectId}/episodes/{episodeId}/stage-sources`. It validates `jason.qingmu-stage-source-feed.v1`, the fixed `A1S` coordinate, the seven-field `episode_script` source descriptor, canonical subject and binding hashes, binding revision, original receipt IDs, and the non-approval flags. Yimeng computes `contentSha256` from the complete stored script JSON, including metadata; this endpoint carries no script text and does not reproduce that content hash in the Host.
@@ -52,7 +58,7 @@ Historical bindings remain readable when the current group is unavailable or abs
 
 ## Security boundary
 
-The same configured handler is also provided as the Host-only `qingmuYimengRead` capability. Internal consumers can reuse the existing `workflow`, `productionUnits`, and `stageSources` GETs without creating another HTTP client, token configuration, or cache. Cordis removes the capability when its owning plugin unloads. This does not reinterpret business-stage completion, selected media, or unknown forwarded fields as named IMAGO Stage/LSU approval.
+The same configured handler is also provided as the Host-only `qingmuYimengRead` capability. Internal consumers can reuse the existing `workflow`, `productionUnits`, `lsuPlanSource`, and `stageSources` GETs without creating another HTTP client, token configuration, or cache. Cordis removes the capability when its owning plugin unloads. This does not reinterpret business-stage completion, selected media, or unknown forwarded fields as named IMAGO Stage/LSU approval.
 
 The default upstream is `http://127.0.0.1:8115`. A configured base URL must remain an HTTP or HTTPS loopback address. Protected reads take `YIMENG_API_TOKEN` from the Host environment and send it only as an `Authorization: Bearer` header; the adapter does not read `localStorage` or `JWT_SECRET`, send cookies, or return the token. Requests use `cache: no-store`, a timeout, caller cancellation, and fail-closed redirect handling. Ordinary JSON responses remain capped at 5 MiB. Only the script response is capped separately at 20 MiB so a legal command body near 5 MiB can still return the parsed script plus its escaped canonical evidence without making the read unbounded.
 

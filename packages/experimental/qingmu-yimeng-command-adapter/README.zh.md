@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这个私有实验性 Host 插件通过仅限回环地址的 `/qingmu-yimeng-command` 通道，暴露易梦 `episode_script` 与人物、环境、道具 `element_profile` ChangeSet 的显式流程。剧本操作继续是 `proposeScript`、`previewScript`、`commitScript` 和只读的 `recoverScriptCommit`；元素操作是 `proposeElementProfile`、`proposeReferenceAsset`、`previewElementProfile`、`commitElementProfile` 和只读的 `recoverElementProfileCommit`。所选视频 Finding 使用 `recordShotFinding` 和只读的 `recoverShotFinding`。通过机器校验的阶段工件使用 `registerStageArtifact`、`commitStageArtifactDecision`，以及只读的 `recoverStageArtifactRegistration` 和 `recoverStageArtifactDecision`。
+这个私有实验性 Host 插件通过仅限回环地址的 `/qingmu-yimeng-command` 通道，暴露易梦 `episode_script` 与人物、环境、道具 `element_profile` ChangeSet 的显式流程。剧本操作继续是 `proposeScript`、`previewScript`、`commitScript` 和只读的 `recoverScriptCommit`；元素操作是 `proposeElementProfile`、`proposeReferenceAsset`、`previewElementProfile`、`commitElementProfile` 和只读的 `recoverElementProfileCommit`。所选视频 Finding 使用 `recordShotFinding` 和只读的 `recoverShotFinding`。通过机器校验的阶段工件使用 `registerStageArtifact`、`commitStageArtifactDecision`，以及只读的 `recoverStageArtifactRegistration` 和 `recoverStageArtifactDecision`。完整范围 LSU 计划使用 `sealLsuPlan`、只读的 `recoverLsuPlanSeal` 和 `probeLsuPlanAuthority`。
 
 ## 命令边界
 
@@ -64,6 +64,12 @@ ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只
 
 `probeStageArtifactAuthority` 是只读的当前权威路径。它接收准确的工件记录修订/SHA、工件修订/SHA、主体 SHA 和完整准确工件。受信 Host 在内部调用当前已加载的 `stageArtifactMethod` 能力，并把新鲜证明随一次不含调用方身份或幂等字段的 POST 转发到 `/authority-probe`。调用方夹带的历史方法字段会在该能力运行前被拒绝。只有易梦重算的依赖快照、当前决定、规则 SHA、可用性、批准状态和当前阶段定义声明的准确锁彼此一致时，Harness 才接受紧凑结果。普通工件 `GET` 仍只是历史 feed；没有这份新鲜证明时，它有意不授予当前权威。因此，规则或血缘漂移会返回一份没有当前批准的有效失败关闭探针，而不会复活旧决定。
 
+## 准确完整范围 LSU 计划封存
+
+`sealLsuPlan` 只接受项目/剧集坐标、预期当前主体 SHA、上一计划修订/SHA 的 CAS 对，以及一个可见 ASCII 幂等键。调用方不能提供 Method、actor、自然人身份、session、批准或锁声明。Host 调用当前已加载的 `lsuPlanMethod`，校验其完整主体、定义、规则代际、投影 SHA 和 HMAC，随后只向 `/lsu-plan/seals` 转发一次 POST。只有易梦负责认证所有者、重新核对准确当前生产单元绑定与已批准 C5F 制作蓝图锁、执行 CAS，并在既有三本账中持久化封存。
+
+回执绑定下一修订、完整主体、Method/规则 SHA、认证所有者与会话、事件及 ChangeSet。它只授予 `planSealed: true`；Stage 批准、锁激活、Provider 调用、推断签收和返修仍为 false 或零。结果不确定的 POST 绝不重试。`recoverLsuPlanSeal` 使用原主体 SHA、计划 CAS 坐标和幂等键发送一次无正文 GET，不要求今日 Method 密钥或历史 bearer 会话仍相同。`probeLsuPlanAuthority` 每次都重编新鲜 Method，并让易梦判断最新历史封存是否仍匹配今日完整主体和两组规则代际；普通来源读取和旧回执都不授予当前权威。
+
 ## 安全边界
 
 上游必须是回环 HTTP(S)。适配器绝不返回 Host bearer 凭据、不发送 Cookie、拒绝重定向、限制载荷大小和请求时长，并且不会把非成功响应正文反射到错误中。成功的阶段登记与恢复响应会保持完整，直到整份业务 schema 校验结束，因此名为 `token` 的合法回执字段不会被通用秘密脱敏误删。校验后，任意键或字符串只要包含当前实际 bearer 凭据，就会用静态错误失败关闭。合同失败仍只返回静态安全错误。浏览器只接收经过校验的命令数据和持久回执标识。
@@ -89,7 +95,7 @@ ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只
 ## 已知限制与延期工作
 
 - 这个本地适配器不是面向互联网的网关。
-- 它实现 `episode_script` 以及人物、环境、道具 `element_profile` ChangeSet 垂直切片，支持显式的参考资产选择与重生成请求意图，记录所选视频 Finding，并登记生产单元范围、单集剧本来源引用和机器校验阶段工件。它还传递绑定准确记录的独立阶段决定、只读回执恢复和新鲜签名的当前权威探针，但依赖与锁权威只由易梦计算和持久化。真实生成和自动创意批准不属于这些操作；登记或批准本身都不代表生产流程已完成。
+- 它实现 `episode_script` 以及人物、环境、道具 `element_profile` ChangeSet 垂直切片，支持显式的参考资产选择与重生成请求意图，记录所选视频 Finding，并登记生产单元范围、单集剧本来源引用、机器校验阶段工件和完整范围 LSU 计划封存。它还传递绑定准确记录的独立阶段决定、只读回执恢复和新鲜签名的当前权威探针，但依赖、锁和当前计划权威只由易梦计算和持久化。真实生成和自动创意批准不属于这些操作；登记、批准或计划封存本身都不代表生产流程已完成。
 - 它不启动 outbox dispatcher，也不跨进程传输事件。
 - ChangeSet 提案发生冲突时，必须先重新读取权威数据，再由用户明确创建新提案。
 - 回执恢复依赖易梦保留原始命令回执；血缘错配时一律失败关闭。Finding 回执不存在时返回 `not_found`，不会重新提交写入。

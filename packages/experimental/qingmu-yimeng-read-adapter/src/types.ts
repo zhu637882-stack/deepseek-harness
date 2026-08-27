@@ -1045,6 +1045,118 @@ export interface YimengStageSourcesResponse extends YimengStageSourcesRequest {
   readonly currentBinding: YimengStageSourceResult | null
 }
 
+/** Exact coordinates plus the current Core lock-rule generation used to derive one plan source. */
+export interface YimengLsuPlanSourceRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly lockRulesSha256: string
+}
+
+/** One current production-unit binding frozen into an episode LSU plan. */
+export interface YimengLsuPlanProductionUnit {
+  readonly unitId: string
+  readonly groupId: string
+  readonly bindingRevision: number
+  readonly bindingSha256: string
+  readonly sourceSnapshotSha256: string
+}
+
+/** Current independently approved C5F lock lineage required by the exact plan scope. */
+export interface YimengLsuPlanBlueprintLock {
+  readonly lockId: 'PRODUCTION_BLUEPRINT_LOCK'
+  readonly stageId: 'C5F'
+  readonly scopeInstance: 'GLOBAL'
+  readonly artifactRecordRevision: number
+  readonly artifactRecordSha256: string
+  readonly decisionId: string
+  readonly eventSha256: string
+}
+
+/** Yimeng-owned plan subject; it contains no Stage approval or execution state. */
+export interface YimengLsuPlanSubject extends YimengJsonObject {
+  readonly schema: 'jason.qingmu-lsu-plan-subject.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly productionUnits: readonly YimengLsuPlanProductionUnit[]
+  readonly productionBlueprintLock: YimengLsuPlanBlueprintLock
+}
+
+/** Current IMAGO plan declaration method retained with a durable Yimeng seal. */
+export interface YimengLsuPlanDefinition extends YimengJsonObject {
+  readonly id: 'IMAGO-V6-LSU-PLAN'
+  readonly version: string
+  readonly scope: 'per_episode'
+  readonly unitIdPattern: 'LSU[0-9]{2,}'
+  readonly stages: readonly {
+    readonly stageId: string
+    readonly roleId: string
+    readonly contractSha256: string
+  }[]
+  readonly requiredLockId: 'PRODUCTION_BLUEPRINT_LOCK'
+  readonly requiredLockStageId: 'C5F'
+  readonly requiredLockScopeInstance: 'GLOBAL'
+  readonly declarationPolicy: 'exact_current_instantiated_units'
+  readonly operation: 'seal_current_lsu_plan'
+  readonly planSealingAllowed: true
+  readonly stageApprovalAllowed: false
+  readonly lockActivationAllowed: false
+  readonly reworkExecutionAllowed: false
+  readonly providerCalls: 0
+}
+
+/** Immutable plan head written to Yimeng's existing three-ledger journal. */
+export interface YimengLsuPlanSeal extends YimengJsonObject {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly revision: number
+  readonly subject: YimengLsuPlanSubject
+  readonly subjectSnapshotSha256: string
+  readonly definition: YimengLsuPlanDefinition
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+  readonly lockRulesSha256: string
+  readonly actorId: string
+  readonly actorNaturalPersonId: string
+  readonly authSessionId: string
+  readonly eventId: string
+  readonly changeSetId: string
+  readonly sealedAt: string
+}
+
+/** Durable seal receipt. `planSealed` is historical until a fresh authority probe succeeds. */
+export interface YimengLsuPlanSealResult extends YimengJsonObject {
+  readonly schema: 'jason.qingmu-lsu-plan-seal-result.v1'
+  readonly seal: YimengLsuPlanSeal
+  readonly sealSha256: string
+  readonly receiptId: string
+  readonly outboxEventId: string
+  readonly planSealed: true
+  readonly stageApprovalGranted: false
+  readonly lockActivated: false
+  readonly providerCalls: 0
+  readonly humanSignoffInferred: false
+  readonly reworkExecuted: false
+}
+
+/** Fresh business source for compiling the current plan method and choosing exact CAS coordinates. */
+export interface YimengLsuPlanSourceResponse extends YimengProductionUnitsRequest {
+  readonly schema: 'jason.qingmu-lsu-plan-feed.v1'
+  readonly capabilities: { readonly canSealPlan: boolean }
+  readonly subject: YimengLsuPlanSubject | null
+  readonly subjectSnapshotSha256: string | null
+  readonly availability: {
+    readonly status: 'available' | 'unavailable'
+    readonly reason: string | null
+  }
+  readonly latestSeal: YimengLsuPlanSealResult | null
+  readonly latestSealSourceCurrent: boolean
+  readonly currentLockRulesSha256: string
+  readonly providerCalls: 0
+  readonly stageApprovalGranted: false
+  readonly lockActivated: false
+  readonly reworkExecuted: false
+}
+
 /** Result values exposed by each `/qingmu-yimeng` endpoint. */
 export interface YimengReadEndpointMap {
   readonly health: YimengHealth
@@ -1056,6 +1168,7 @@ export interface YimengReadEndpointMap {
   readonly shotFindings: YimengShotFindingFeedResponse
   readonly productionUnits: YimengProductionUnitsResponse
   readonly stageSources: YimengStageSourcesResponse
+  readonly lsuPlanSource: YimengLsuPlanSourceResponse
   readonly elementProfile: YimengElementProfileResponse
   readonly referenceCandidates: YimengReferenceCandidatesResponse
   readonly reviewEvents: YimengElementReviewFeedResponse

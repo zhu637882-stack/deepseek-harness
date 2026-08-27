@@ -4,7 +4,7 @@
 
 这个私有实验性 Host 插件把当前 IMAGO OS 方法编译为浏览器安全指引。`elementMethod` 用于资料编辑，`referenceAssetMethod` 用于受限的参考资产动作与权利指引，`promptIrMethod` 用于供应商无关的 PromptIR 候选，`shotRelationMethod` 用于 canonical Scene/Shot/Shot 内局部 Beat/Element 关系图以及 Shot River 节奏与参考绑定，`heroFrameStoryboardMethod` 用于确定性编译一个已选 Hero Frame 及其 Shot 内画布标注。`worksetMethod` 重新读取分集工作流，返回当前 IMAGO 阶段定义与明确的权威可用性。上述输入快照方法在 Host 内构造各自的有界输入，并把按 Unicode code point 排序、无空格的 JSON 通过 stdin 交给已审核的 Core 编译器。对应编译器返回的 `input_snapshot_sha256` 必须匹配这组准确输入字节的 SHA-256。
 
-`shotFindingMethod`、`productionUnitMethod`、`stageSourceMethod` 与 `stageArtifactMethod` 使用下文各自的主体哈希约定；旧方法的 `input_snapshot_sha256` 字段不属于这些 schema。
+`shotFindingMethod`、`productionUnitMethod`、`stageSourceMethod`、`stageArtifactMethod` 与 `lsuPlanMethod` 使用下文各自的主体哈希约定；旧方法的 `input_snapshot_sha256` 字段不属于这些 schema。
 
 ## 证明边界
 
@@ -67,6 +67,12 @@ Host 对完整归一化工作流与完整 `sourceRevision` 计算哈希，保留
 正常路径调用当前 `scripts/compile_qingmu_stage_artifact_method.py` 子进程。编译前后，Host 都独立读取七份工作集规则，以及 `scripts/build_v6_stage_contracts.py`、`scripts/validate_v6_stage_contracts.py`、`scripts/compile_qingmu_element_method.py` 和阶段工件编译器本身。它重建准确的当前阶段 Owner、范围、合同哈希、来源与锁要求、工件类型和标准输出；规则字节发生变化，或编译器投影与这些事实不同，都会失败关闭。Core 执行完整的确定性工件校验，包括阶段专属来源、锁、内容章节和未决问题要求。
 
 响应为 `qingmu.imago-stage-artifact-method-adapter-result.v1`，包含由 SHA 绑定的投影与 Host 专属 HMAC 证明。插件还把同一处理器提供为私有 Cordis `qingmuImagoMethod` 能力，使受信 Host 命令能按当前已加载的 Core 规则重新编译准确工件，而不是接受调用方提供的历史证明。它只允许登记这份已通过机器校验的工件。依赖权威仍未核验；阶段批准、锁激活、LSU 计划封存、返修执行、Provider 调用和人工签收均不可用。此方法不读取易梦业务状态，也不执行写入。不可变登记由独立命令与易梦事务掌管；后续依赖权威和独立审核仍是分开的检查点。
+
+## 当前完整范围 LSU 计划方法
+
+`lsuPlanMethod` 只接受 `projectId` 与 `episodeId`。Host 先重建当前生产单元规则和 C5F 锁规则，派生锁规则 SHA，再通过已配置的 `lsuPlanSource` 能力取得准确当前范围。随后运行 `scripts/compile_qingmu_lsu_plan_method.py`，再次读取同一来源并再次重建全部规则。主体、绑定、制作蓝图锁、文件字节、规则哈希或定义发生任何漂移，都会在签证前失败关闭。
+
+准确投影绑定非空且按序排列的已登记 `LSU[0-9]{2,}` 单元、当前已独立批准的 `PRODUCTION_BLUEPRINT_LOCK`、六个当前逐 LSU 阶段定义、全部编译器/规则字节及锁规则子集。Host 独立校验每个字段后用 HMAC 密钥签名。这个无状态 Method 只允许显式的易梦计划封存事务；它不创建 Stage 实例、批准、锁、返修、Provider 调用、Worker、项目状态或人工签收。
 
 ## 模型体验
 

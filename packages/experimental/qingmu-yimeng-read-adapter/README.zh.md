@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates`、`selectedVideoReview`、`shotFindings`、`productionUnits`、`stageSources` 和 `workflow`；它不暴露任何写入端点。
+这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates`、`selectedVideoReview`、`shotFindings`、`productionUnits`、`lsuPlanSource`、`stageSources` 和 `workflow`；它不暴露任何写入端点。
 
 ## 约定
 
@@ -44,6 +44,12 @@
 
 当前组不可用或不存在时，历史绑定仍可读取。`currentBinding` 必须与当前来源及其 SHA 精确一致；`canBindUnit` 只表示易梦已有的所有者权限。历史方法定义及其存储 SHA 原样保留，不按当前 Core 规则重新签证。响应固定 `planSealed: false`、`providerCalls: 0`、`humanSignoffInferred: false` 和 `reworkExecuted: false`。此端点不绑定单元、不封存计划、不批准 Stage、不选择媒体，也不执行返修。根入口和 `/types` 导出 `YimengProductionUnitsRequest`、`YimengProductionUnitsResponse`、`YimengProductionUnitSource`、`YimengProductionUnitDefinition` 与 `YimengProductionUnitBinding`。
 
+## 当前 LSU 计划来源
+
+`lsuPlanSource` 只接受 `projectId`、`episodeId` 和 Host 派生的当前 C5F 锁规则 SHA，向 `/api/qingmu/projects/{projectId}/episodes/{episodeId}/lsu-plan/source` 发送一次认证 GET，不带正文。准确的非空主体只含按序排列的当前生产单元绑定和已独立批准的 `PRODUCTION_BLUEPRINT_LOCK` 血缘。Host 会先校验唯一单元/镜头组 ID、正整数绑定与工件记录修订、规范 SHA、准确坐标及所请求的锁规则代际，Method 编译器才能使用它。
+
+最新持久封存仍然只是历史证据。只有该封存的完整主体、主体 SHA 与锁规则 SHA 都匹配今日来源，`latestSealSourceCurrent` 才能为 true；当前范围不可用不会抹掉旧回执。`canSealPlan` 只报告易梦已有权限。本读取不会封存、批准 Stage、激活锁、执行返修、调用 Provider 或推断签收，也不会把历史回执提升为当前权威。
+
 ## 单集剧本来源引用
 
 `stageSources` 只接受 `projectId` 和 `episodeId`，向 `/api/qingmu/projects/{projectId}/episodes/{episodeId}/stage-sources` 发送一次认证 GET，不带请求体。它校验 `jason.qingmu-stage-source-feed.v1`、固定的 `A1S` 坐标、七字段 `episode_script` 来源描述、规范主体与绑定哈希、绑定修订号、原回执 ID，以及不授予批准的标记。易梦对包含 metadata 的完整存储剧本 JSON 计算 `contentSha256`；此端点不携带剧本正文，Host 也不复算该内容哈希。
@@ -52,7 +58,7 @@
 
 ## 安全边界
 
-同一个已配置处理函数还作为仅供 Host 使用的 `qingmuYimengRead` 能力提供给内部调用方。内部调用方可以复用原有 `workflow`、`productionUnits` 与 `stageSources` GET，不另建 HTTP 客户端、令牌配置或缓存。Cordis 会在所属插件卸载时移除该能力。这不会把业务阶段完成、已选媒体或未知透传字段解释为具名 IMAGO Stage/LSU 批准。
+同一个已配置处理函数还作为仅供 Host 使用的 `qingmuYimengRead` 能力提供给内部调用方。内部调用方可以复用原有 `workflow`、`productionUnits`、`lsuPlanSource` 与 `stageSources` GET，不另建 HTTP 客户端、令牌配置或缓存。Cordis 会在所属插件卸载时移除该能力。这不会把业务阶段完成、已选媒体或未知透传字段解释为具名 IMAGO Stage/LSU 批准。
 
 默认上游为 `http://127.0.0.1:8115`。配置的基础 URL 必须继续使用 HTTP 或 HTTPS 回环地址。受保护读取从 Host 环境获取 `YIMENG_API_TOKEN`，并且只通过 `Authorization: Bearer` 请求头发送；适配器不读取 `localStorage` 或 `JWT_SECRET`、不发送 Cookie，也不返回令牌。请求使用 `cache: no-store`，并具有超时、调用方取消和失败关闭的重定向处理。普通 JSON 响应继续限制为 5 MiB；只有剧本响应单独限制为 20 MiB，使接近 5 MiB 的合法命令体仍可回传解析后剧本及其转义后的 canonical 证据，同时保持读取有界。
 

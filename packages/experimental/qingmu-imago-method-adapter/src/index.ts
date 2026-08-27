@@ -23,6 +23,8 @@ import type {
   ImagoStageSourceMethodSnapshot,
   ImagoProductionUnitMethodRequest,
   ImagoProductionUnitMethodSnapshot,
+  ImagoLsuPlanMethodRequest,
+  ImagoLsuPlanMethodSnapshot,
   ImagoShotFindingMethodRequest,
   ImagoShotFindingMethodSnapshot,
   ImagoContinuityMethodResponse,
@@ -108,6 +110,10 @@ import {
   attestStageArtifactMethod, buildStageArtifactSnapshot, parseStageArtifactMethodRequest, readStageArtifactRules,
   stageArtifactCanonicalJson, StageArtifactContractError, StageArtifactInputError,
 } from './stage-artifact.ts'
+import {
+  attestLsuPlanMethod, buildLsuPlanSnapshot, LsuPlanContractError, LsuPlanInputError,
+  parseLsuPlanMethodRequest, readLsuPlanRules,
+} from './lsu-plan.ts'
 
 export type {
   ImagoStageArtifact,
@@ -131,6 +137,12 @@ export type {
   ImagoProductionUnitMethodProjection,
   ImagoProductionUnitMethodAttestation,
   ImagoProductionUnitMethodResponse,
+  ImagoLsuPlanMethodRequest,
+  ImagoLsuPlanMethodSnapshot,
+  ImagoLsuPlanMethodDefinition,
+  ImagoLsuPlanMethodProjection,
+  ImagoLsuPlanMethodAttestation,
+  ImagoLsuPlanMethodResponse,
   ImagoShotFindingMethodRequest,
   ImagoShotFindingMethodSnapshot,
   ImagoShotFindingMethodDefinition,
@@ -232,6 +244,7 @@ const CONTINUITY_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_continuity_met
 const PRODUCTION_UNIT_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_production_unit_method.py'
 const STAGE_SOURCE_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_stage_source_method.py'
 const STAGE_ARTIFACT_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_stage_artifact_method.py'
+const LSU_PLAN_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_lsu_plan_method.py'
 const COMMON_SOURCE_PATHS = [
   'pipeline/imago-os-current.json',
   'pipeline/workflow-channel-registry.json',
@@ -497,6 +510,15 @@ export interface ImagoMethodCompilerExecution {
 
 /** Injectable local process boundary used by isolated tests. */
 export interface ImagoMethodAdapterDependencies {
+  /** Fresh complete-scope plan subject, bound to the current lock-rule generation. */
+  readonly readLsuPlanSource?: (
+    request: { readonly projectId: string; readonly episodeId: string; readonly lockRulesSha256: string },
+    signal: AbortSignal,
+  ) => Promise<RpcResult<unknown>>
+  /** Optional boundary for the stateless complete-scope LSU-plan compiler. */
+  readonly runLsuPlanCompiler?: (
+    snapshot: ImagoLsuPlanMethodSnapshot, execution: ImagoMethodCompilerExecution, signal: AbortSignal,
+  ) => Promise<unknown>
   /** Optional boundary for the exact-artifact current Core machine validator. */
   readonly runStageArtifactCompiler?: (
     snapshot: ImagoStageArtifactMethodSnapshot, execution: ImagoMethodCompilerExecution, signal: AbortSignal,
@@ -3345,6 +3367,12 @@ async function runStageArtifactCompilerProcess(
   return await runCompilerSubprocess(snapshot, execution, signal, STAGE_ARTIFACT_COMPILER_RELATIVE_PATH)
 }
 
+async function runLsuPlanCompilerProcess(
+  snapshot: ImagoLsuPlanMethodSnapshot, execution: ImagoMethodCompilerExecution, signal: AbortSignal,
+): Promise<unknown> {
+  return await runCompilerSubprocess(snapshot, execution, signal, LSU_PLAN_COMPILER_RELATIVE_PATH)
+}
+
 async function runCompilerSubprocess(
   snapshot: ImagoMethodJsonObject,
   execution: ImagoMethodCompilerExecution,
@@ -3357,6 +3385,7 @@ async function runCompilerSubprocess(
     || compilerRelativePath === PRODUCTION_UNIT_COMPILER_RELATIVE_PATH
     || compilerRelativePath === STAGE_SOURCE_COMPILER_RELATIVE_PATH
     || compilerRelativePath === STAGE_ARTIFACT_COMPILER_RELATIVE_PATH
+    || compilerRelativePath === LSU_PLAN_COMPILER_RELATIVE_PATH
   return await new Promise((resolve, reject) => {
     const child = spawn(
       execution.pythonExecutable,
@@ -3484,6 +3513,7 @@ export function createImagoMethodHandler(
         && endpoint !== 'productionUnitMethod'
         && endpoint !== 'stageSourceMethod'
         && endpoint !== 'stageArtifactMethod'
+        && endpoint !== 'lsuPlanMethod'
       ) {
         throw new InputError(`unknown IMAGO method endpoint: ${endpoint}`)
       }
@@ -3527,6 +3557,38 @@ export function createImagoMethodHandler(
         return { ok: true, value }
       }
       const attestationKey = readAttestationKey()
+      if (endpoint === 'lsuPlanMethod') {
+        const request: ImagoLsuPlanMethodRequest = parseLsuPlanMethodRequest(payload)
+        if (signal.aborted) return cancelled()
+        if (dependencies.readLsuPlanSource === undefined) return internalError('Yimeng read capability is unavailable')
+        const beforeRules = await readLsuPlanRules(execution.coreRoot, canonicalJson)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- fixed rule reads are asynchronous.
+        if (signal.aborted) return cancelled()
+        const lockRulesSha256 = canonicalSha256(beforeRules.lockHashes, 'lsuPlanLockRules')
+        const sourceRequest = { ...request, lockRulesSha256 }
+        const feed = await dependencies.readLsuPlanSource(sourceRequest, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- cancellation can arrive during a source read.
+        if (signal.aborted) return cancelled()
+        if (!feed.ok) return feed
+        const snapshot = buildLsuPlanSnapshot(request, feed.value, lockRulesSha256, canonicalJson)
+        const raw = await (dependencies.runLsuPlanCompiler ?? runLsuPlanCompilerProcess)(snapshot, execution, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- the compiler can finish after cancellation.
+        if (signal.aborted) return cancelled()
+        const currentFeed = await dependencies.readLsuPlanSource(sourceRequest, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- the second source read can be cancelled.
+        if (signal.aborted) return cancelled()
+        if (!currentFeed.ok) return currentFeed
+        if (!isDeepStrictEqual(snapshot, buildLsuPlanSnapshot(request, currentFeed.value, lockRulesSha256, canonicalJson))) {
+          throw new LsuPlanContractError('current LSU plan subject changed during compilation')
+        }
+        const currentRules = await readLsuPlanRules(execution.coreRoot, canonicalJson)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- final fixed rule reads are asynchronous.
+        if (signal.aborted) return cancelled()
+        if (!isDeepStrictEqual(beforeRules, currentRules)) {
+          throw new LsuPlanContractError('current LSU plan rules changed during compilation')
+        }
+        return { ok: true, value: attestLsuPlanMethod(raw, snapshot, currentRules, canonicalJson, attestationKey) }
+      }
       if (endpoint === 'stageArtifactMethod') {
         const request = parseStageArtifactMethodRequest(payload)
         const snapshot = buildStageArtifactSnapshot(request, stageArtifactCanonicalJson)
@@ -3742,7 +3804,7 @@ export function createImagoMethodHandler(
     } catch (error) {
       if (error instanceof InputError || error instanceof WorksetInputError
         || error instanceof ContinuityInputError || error instanceof ShotFindingInputError || error instanceof ProductionUnitInputError
-        || error instanceof StageSourceInputError || error instanceof StageArtifactInputError) {
+        || error instanceof StageSourceInputError || error instanceof StageArtifactInputError || error instanceof LsuPlanInputError) {
         return badRequest(error.message)
       }
       if (error instanceof AttestationKeyError) return internalError('IMAGO method attestation is unavailable')
@@ -3750,7 +3812,7 @@ export function createImagoMethodHandler(
       if (error instanceof ProjectionContractError || error instanceof WorksetContractError
         || error instanceof ContinuityContractError || error instanceof ShotFindingContractError
         || error instanceof ProductionUnitContractError || error instanceof StageSourceContractError
-        || error instanceof StageArtifactContractError) {
+        || error instanceof StageArtifactContractError || error instanceof LsuPlanContractError) {
         return internalError(`IMAGO method projection contract failed: ${error.message}`)
       }
       return internalError('IMAGO method compiler failed')
@@ -3769,6 +3831,12 @@ export function apply(ctx: Context, config: ImagoMethodAdapterConfig): void {
     readProductionUnits: async (request, signal) => {
       const read = ctx.get('qingmuYimengRead')
       return read === undefined ? internalError('Yimeng read capability is unavailable') : await read('productionUnits', request, signal)
+    },
+    readLsuPlanSource: async (request, signal) => {
+      const read = ctx.get('qingmuYimengRead')
+      return read === undefined
+        ? internalError('Yimeng read capability is unavailable')
+        : await read('lsuPlanSource', request, signal)
     },
     readShotFindings: async (request, signal) => {
       const read = ctx.get('qingmuYimengRead')
