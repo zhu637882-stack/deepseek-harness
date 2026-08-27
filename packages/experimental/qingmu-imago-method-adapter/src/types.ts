@@ -268,11 +268,125 @@ export interface ImagoPromptIrMethodResponse extends ImagoMethodJsonObject {
   readonly methodAttestation: ImagoPromptIrMethodAttestation
 }
 
+/** Canonical Scene relation submitted to the read-only Shot relation compiler. */
+export interface ImagoShotRelationScene extends ImagoMethodJsonObject {
+  readonly sceneId: string
+  readonly elementIds: readonly string[]
+}
+
+/** Shot-local Beat relation; its ID has no meaning outside the parent Shot. */
+export interface ImagoShotRelationBeat extends ImagoMethodJsonObject {
+  readonly beatId: string
+  readonly elementIds: readonly string[]
+}
+
+/** Canonical Yimeng Shot relation submitted without display-only fields. */
+export interface ImagoShotRelationShot extends ImagoMethodJsonObject {
+  readonly shotId: string
+  readonly sceneId: string
+  readonly elementIds: readonly string[]
+  readonly beats: readonly ImagoShotRelationBeat[]
+}
+
+/** Canonical Element identity retained in the relation authority snapshot. */
+export interface ImagoShotRelationElement extends ImagoMethodJsonObject {
+  readonly elementId: string
+  readonly elementKind: ImagoElementKind
+}
+
+/** Browser input containing only Yimeng lineage and the compiler-ready relation ID graph. */
+export interface ImagoShotRelationMethodRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly storyboardRevisionId: string
+  readonly storyboardRevisionVersion: number
+  readonly storyboardSourceSha256: string
+  readonly selectedShotId: string
+  readonly scenes: readonly ImagoShotRelationScene[]
+  readonly shots: readonly ImagoShotRelationShot[]
+  readonly elements: readonly ImagoShotRelationElement[]
+}
+
+/** Exact compiler input constructed in the Host with a derived relation snapshot SHA. */
+export interface ImagoShotRelationMethodSnapshot extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.shot-relation-method-snapshot.v1'
+  readonly target: {
+    readonly projectId: string
+    readonly episodeId: string
+    readonly storyboardRevisionId: string
+    readonly storyboardRevisionVersion: number
+    readonly storyboardSourceSha256: string
+    readonly relationSnapshotSha256: string
+    readonly selectedShotId: string
+  }
+  readonly scenes: readonly ImagoShotRelationScene[]
+  readonly shots: readonly ImagoShotRelationShot[]
+  readonly elements: readonly ImagoShotRelationElement[]
+  readonly authority: {
+    readonly business_truth: 'yimeng'
+    readonly shot_id_source: 'yimeng_storyboard_frame_id'
+    readonly beat_id_scope: 'shot_local'
+    readonly method_source: 'imago_os_current'
+    readonly human_approval: 'not_granted'
+    readonly paid_provider_authority: 'not_granted'
+  }
+}
+
+/** Strictly read-only current IMAGO guidance for one canonical Yimeng Shot relation. */
+export interface ImagoShotRelationMethodProjection extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-shot-relation-method-projection.v1'
+  readonly input_snapshot_sha256: string
+  readonly target: ImagoShotRelationMethodSnapshot['target']
+  readonly relationship_projection: {
+    readonly canonicalShotIdSource: 'yimeng_storyboard_frame_id'
+    readonly beatIdScope: 'shot_local'
+    readonly scenes: readonly ImagoShotRelationScene[]
+    readonly shots: readonly ImagoShotRelationShot[]
+    readonly elements: readonly ImagoShotRelationElement[]
+    readonly selectedShot: ImagoShotRelationShot
+  }
+  readonly method_definition: ImagoMethodJsonObject
+  readonly source_bindings: readonly ImagoMethodJsonObject[]
+  readonly field_hints: readonly ImagoMethodJsonObject[]
+  readonly checklist: readonly ImagoMethodJsonObject[]
+  readonly work_order_projection: ImagoMethodJsonObject
+  readonly review_card: ImagoMethodJsonObject
+  readonly legal_work_set: ImagoMethodJsonObject
+  readonly authority_snapshot_attestation: 'not_verified_by_compiler'
+  readonly project_state_persisted: false
+  readonly providerCalls: 0
+  readonly workerStarted: false
+  readonly selection_executed: false
+  readonly human_approval_inferred: false
+  readonly human_signoff_inferred: false
+}
+
+/** HMAC proof over the exact relation input, target, authority SHA, selected Shot, and output. */
+export interface ImagoShotRelationMethodAttestation extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-shot-relation-method-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly projectionSha256: string
+  readonly inputSnapshotSha256: string
+  readonly targetSha256: string
+  readonly relationSnapshotSha256: string
+  readonly selectedShotSha256: string
+  readonly signature: string
+}
+
+/** Host-attested wrapper for one non-executing Shot relation method result. */
+export interface ImagoShotRelationMethodResponse extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-shot-relation-method-adapter-result.v1'
+  readonly projectionSha256: string
+  readonly projection: ImagoShotRelationMethodProjection
+  readonly methodAttestation: ImagoShotRelationMethodAttestation
+}
+
 /** Result values exposed by `/qingmu-imago-method`. */
 export interface ImagoMethodEndpointMap {
   readonly elementMethod: ImagoElementMethodResponse
   readonly referenceAssetMethod: ImagoReferenceAssetMethodResponse
   readonly promptIrMethod: ImagoPromptIrMethodResponse
+  readonly shotRelationMethod: ImagoShotRelationMethodResponse
 }
 
 /** Endpoint names accepted by the private method channel. */

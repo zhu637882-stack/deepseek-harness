@@ -2,15 +2,15 @@
 
 [English](README.md) | 中文
 
-这个私有实验性 Host 插件把当前 IMAGO OS 的人物、环境或道具方法编译为浏览器安全指引。`elementMethod` 用于资料编辑。`referenceAssetMethod` 针对一个精确的资料版本、资料 SHA、候选资产 ID 和资产 SHA，提供 `selectReferenceAsset` 或 `requestReferenceRegeneration` 指引。两个端点都在 Host 内构造固定的易梦权威信息，并把按 Unicode code point 排序、无空格的 canonical JSON 通过 stdin 交给各自已审核的 Core 编译器。编译器返回的 `input_snapshot_sha256` 必须匹配这组准确 canonical 字节的 SHA-256。
+这个私有实验性 Host 插件把当前 IMAGO OS 方法编译为浏览器安全指引。`elementMethod` 用于资料编辑，`referenceAssetMethod` 用于受限的参考资产动作与权利指引，`promptIrMethod` 用于供应商无关的 PromptIR 候选，`shotRelationMethod` 用于一个 canonical Scene/Shot/Shot 内局部 Beat/Element ID 图。每个端点都在 Host 内构造固定的易梦权威信息，并把按 Unicode code point 排序、无空格的 canonical JSON 通过 stdin 交给已审核的 Core 编译器。编译器返回的 `input_snapshot_sha256` 必须匹配这组准确 canonical 字节的 SHA-256。
 
 ## 证明边界
 
-两个端点都只从 Host 进程环境读取 `QINGMU_IMAGO_ATTESTATION_KEY`。原始环境字符串就是 HMAC 密钥：不做 trim，并且必须至少包含 32 个 UTF-8 字节。缺失、空串或不足长度时，会在编译前失败关闭。密钥不会进入 Cordis 配置、编译器子进程环境、浏览器响应、日志或错误正文。
+所有端点都只从 Host 进程环境读取 `QINGMU_IMAGO_ATTESTATION_KEY`。原始环境字符串就是 HMAC 密钥：不做 trim，并且必须至少包含 32 个 UTF-8 字节。缺失、空串或不足长度时，会在编译前失败关闭。密钥不会进入 Cordis 配置、编译器子进程环境、浏览器响应、日志或错误正文。
 
-Host 验证当前 Core 投影后，返回投影、投影 canonical SHA-256，以及方法专用证明。`qingmu.imago-element-method-attestation.v1` 绑定资料 subject。`qingmu.imago-reference-asset-method-attestation.v1` 则通过 `targetSha256` 绑定精确参考资产目标，不复用元素证明的 `subjectSha256` 语义。浏览器只能转发这两类 HMAC-SHA-256 证明，不能在缺少服务端密钥时签发或验证它们。
+Host 验证当前 Core 投影后，返回投影、投影 canonical SHA-256，以及方法专用证明。Shot 关系证明绑定准确的编译器输入、目标、Host 派生的 `relationSnapshotSha256` 和当前所选 canonical Shot。所选 Shot 始终是易梦故事板 frame ID，Beat ID 始终只在所属 Shot 内有效。浏览器只能转发证明，不能在缺少服务端密钥时签发或验证。
 
-参考资产投影只是严格只读指引。Host 要求目标、来源绑定、操作、合法工作集合和权威字段全部精确匹配，包括 `providerCalls: 0`、`workerStarted: false` 和 `selection_executed: false`。选择或请求重新生成仍是后续易梦 ChangeSet 操作；本适配器不执行其中任何一种。
+Shot 关系投影只是严格只读指引。Host 从准确 ID 图派生关系权威 SHA，要求目标、关系图、来源绑定、工作单、合法工作集合和权威字段全部精确匹配，并拒绝任何写入、生成、选择、批准、签收、Provider 或 Worker 回执。它不创建关系身份、数据库记录、项目状态或第二状态机。
 
 Core 根目录继续由部署环境决定。非空白 `config.coreRoot` 优先，否则必须提供 `IMAGO_OS_CORE_ROOT`。本包不包含任何机器专属 Core 路径。
 
@@ -20,7 +20,7 @@ Core 根目录继续由部署环境决定。非空白 `config.coreRoot` 优先�
 
 #### 模型看到的内容
 
-无。`elementMethod` 和 `referenceAssetMethod` 是私有浏览器 RPC 端点，不是模型工具、提示词段落或会话事件。
+无。这些端点是私有浏览器 RPC，不是模型工具、提示词段落或会话事件。
 
 #### Token 影响
 
@@ -32,6 +32,6 @@ Core 根目录继续由部署环境决定。非空白 `config.coreRoot` 优先�
 
 ## 已知限制与延期工作
 
-- 当前切片支持受限的人物、环境和道具资料指引，以及参考资产选择或重新生成指引。PromptIR 编译、实际生成、选择执行、评论和创意审核决定仍不属于本适配器。
+- Shot 关系切片只接受可直接送入编译器的 ID 和血缘。展示元数据、Hero Frame、故事板画布、Shot River 节奏、实际生成、选择执行、评论和创意审核决定仍不属于本适配器。
 - 证明只表示 Host 校验及精确输入绑定，不授予付费 Provider、资产选择、人工批准或生产状态写入权。
 - 本次受限切片不包含密钥轮换或多密钥验证。
