@@ -539,6 +539,90 @@ export interface YimengCreateHumanDecisionResponse {
   readonly decision: YimengHumanDecision
 }
 
+/** The only rights fields that an exact exception release may cover. */
+export type YimengReferenceRightsExceptionField =
+  | 'sourceType'
+  | 'rightsHolder'
+  | 'authorizationScope'
+  | 'territory'
+  | 'term'
+  | 'restrictions'
+  | 'contains'
+  | 'providerTerms'
+  | 'modelLicenses'
+  | 'humanDeclaration'
+  | 'contentCredentials'
+
+/** Immutable, non-wildcard rights scope submitted by the browser. */
+export interface YimengReferenceRightsExceptionScope {
+  readonly kind: 'reference_rights'
+  readonly referenceAssetId: string
+  readonly referenceAssetSha256: string
+  readonly rightsRecordSha256: string
+  readonly rightsFields: readonly YimengReferenceRightsExceptionField[]
+}
+
+/** Browser-safe command input. Authentication and all identities remain Host/server-only. */
+export interface YimengCreateReferenceRightsExceptionReleaseRequest {
+  readonly projectId: string
+  readonly elementKind: YimengElementKind
+  readonly targetId: string
+  readonly expectedSubjectRevision: number
+  readonly expectedSubjectSha256: string
+  readonly idempotencyKey: string
+  readonly reason: string
+  readonly scope: YimengReferenceRightsExceptionScope
+}
+
+/** Immutable exception fact returned by POST and persisted in the original receipt. */
+export interface YimengReferenceRightsExceptionReleaseFact {
+  readonly id: string
+  readonly decision: 'exception_release'
+  readonly subjectType: 'element_profile'
+  readonly subjectId: string
+  readonly subjectRevision: number
+  readonly subjectSha256: string
+  readonly scope: YimengReferenceRightsExceptionScope
+  readonly actorId: string
+  readonly actorRole: 'approver'
+  readonly actorNaturalPersonId: string
+  readonly producerActorId: string
+  readonly producerNaturalPersonId: string
+  readonly assetProducerActorId: string
+  readonly assetProducerNaturalPersonId: string
+  readonly assetProducerTaskId: string
+  readonly assetProducerTaskRequestSha256: string
+  readonly authSessionId: string
+  readonly reason: string
+  readonly releasedAt: string
+}
+
+/** Dedicated release receipt. It is not a ChangeSet v4 or ordinary HumanDecision. */
+export interface YimengCreateReferenceRightsExceptionReleaseResponse {
+  readonly schema: 'jason.qingmu-reference-rights-exception-release-result.v1'
+  readonly changeSetId: string
+  readonly commandReceiptId: string
+  readonly eventId: string
+  readonly payloadSha256: string
+  readonly release: YimengReferenceRightsExceptionReleaseFact
+  readonly changed: false
+  readonly providerCalls: 0
+  readonly selectionAuthority: 'not_granted'
+  readonly humanApprovalInferred: false
+}
+
+/** Read-only receipt lookup uses the same pre-submit coordinates and Host idempotency header. */
+export type YimengRecoverReferenceRightsExceptionReleaseRequest =
+  YimengCreateReferenceRightsExceptionReleaseRequest
+
+/** Exact original POST receipt returned without replaying its command. */
+export interface YimengRecoverReferenceRightsExceptionReleaseResponse extends YimengCommandJsonObject {
+  readonly schema: 'jason.qingmu-command-receipt-recovery.v1'
+  readonly recovered: true
+  readonly receiptSha256: string
+  readonly receipt: YimengCreateReferenceRightsExceptionReleaseResponse
+}
+
 /** Browser-safe proposal input. Authentication remains in the Host. */
 export interface YimengProposeScriptRequest {
   readonly projectId: string
@@ -828,6 +912,8 @@ export interface YimengCommandEndpointMap {
   readonly recoverElementProfileCommit: YimengRecoverElementProfileCommitResponse
   readonly createComment: YimengCreateCommentResponse
   readonly createHumanDecision: YimengCreateHumanDecisionResponse
+  readonly createReferenceRightsExceptionRelease: YimengCreateReferenceRightsExceptionReleaseResponse
+  readonly recoverReferenceRightsExceptionRelease: YimengRecoverReferenceRightsExceptionReleaseResponse
   readonly proposePromptIr: YimengProposePromptIrResponse
   readonly previewPromptIr: YimengPreviewPromptIrResponse
   readonly commitPromptIrEdit: YimengCommitPromptIrEditResponse

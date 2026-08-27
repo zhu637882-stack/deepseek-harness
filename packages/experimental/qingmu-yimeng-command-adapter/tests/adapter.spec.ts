@@ -198,6 +198,62 @@ const DECISION_RESULT = {
     decidedAt: '2026-08-27T08:01:00Z',
   },
 } as const
+const RIGHTS_EXCEPTION_SCOPE = {
+  kind: 'reference_rights',
+  referenceAssetId: REFERENCE_ASSET_ID,
+  referenceAssetSha256: REFERENCE_ASSET_SHA,
+  rightsRecordSha256: '7'.repeat(64),
+  rightsFields: ['sourceType', 'rightsHolder', 'authorizationScope'],
+} as const
+const RIGHTS_EXCEPTION_REQUEST = {
+  projectId: 'project-1',
+  elementKind: 'prop',
+  targetId: 'prop-1',
+  expectedSubjectRevision: 4,
+  expectedSubjectSha256: REVIEW_SUBJECT_SHA,
+  idempotencyKey: 'qingmu-rights-exception-1',
+  reason: '仅对已核验的来源、权利人和授权范围做本次例外放行。',
+  scope: RIGHTS_EXCEPTION_SCOPE,
+} as const
+const RIGHTS_EXCEPTION_RELEASE = {
+  id: 'rights-exception-release-1',
+  decision: 'exception_release',
+  subjectType: 'element_profile',
+  subjectId: 'prop-1',
+  subjectRevision: 4,
+  subjectSha256: REVIEW_SUBJECT_SHA,
+  scope: RIGHTS_EXCEPTION_SCOPE,
+  actorId: 'approver-1',
+  actorRole: 'approver',
+  actorNaturalPersonId: 'natural-approver-1',
+  producerActorId: 'producer-1',
+  producerNaturalPersonId: 'natural-producer-1',
+  assetProducerActorId: 'asset-producer-1',
+  assetProducerNaturalPersonId: 'natural-asset-producer-1',
+  assetProducerTaskId: 'asset-task-1',
+  assetProducerTaskRequestSha256: '8'.repeat(64),
+  authSessionId: 'auth-session-rights-exception-1',
+  reason: RIGHTS_EXCEPTION_REQUEST.reason,
+  releasedAt: '2026-08-27T08:02:00Z',
+} as const
+const RIGHTS_EXCEPTION_RESULT = {
+  schema: 'jason.qingmu-reference-rights-exception-release-result.v1',
+  changeSetId: 'changeset-rights-exception-1',
+  commandReceiptId: 'command-receipt-rights-exception-1',
+  eventId: 'event-rights-exception-1',
+  payloadSha256: 'e'.repeat(64),
+  release: RIGHTS_EXCEPTION_RELEASE,
+  changed: false,
+  providerCalls: 0,
+  selectionAuthority: 'not_granted',
+  humanApprovalInferred: false,
+} as const
+const RIGHTS_EXCEPTION_RECOVERY = {
+  schema: 'jason.qingmu-command-receipt-recovery.v1',
+  recovered: true,
+  receiptSha256: createHash('sha256').update(canonicalJson(RIGHTS_EXCEPTION_RESULT), 'utf8').digest('hex'),
+  receipt: RIGHTS_EXCEPTION_RESULT,
+} as const
 const PROMPT_IR_BASE = {
   imageGenPrompt: '雨夜车站首帧。',
   lastFrameImagePrompt: '',
@@ -1263,6 +1319,8 @@ describe('qingmu Yimeng command adapter', () => {
       ['recoverElementProfileCommit', ELEMENT_COMMIT_REQUEST],
       ['createComment', COMMENT_REQUEST],
       ['createHumanDecision', DECISION_REQUEST],
+      ['createReferenceRightsExceptionRelease', RIGHTS_EXCEPTION_REQUEST],
+      ['recoverReferenceRightsExceptionRelease', RIGHTS_EXCEPTION_REQUEST],
     ] as const) {
       expect(await handler(endpoint, payload, signal())).toEqual({
         ok: false,
@@ -1346,6 +1404,92 @@ describe('qingmu Yimeng command adapter', () => {
       ok: false,
       error: { code: 'internal' },
     })
+  })
+
+  it('uses an exact Host-only POST and a GET-only receipt recovery for rights exception releases', async () => {
+    const requests: Array<{ url: string; init: RequestInit; body: unknown }> = []
+    const handler = createYimengCommandHandler({}, deps(async (input, init = {}) => {
+      const url = requestUrl(input)
+      const body: unknown = typeof init.body === 'string' ? JSON.parse(init.body) : undefined
+      requests.push({ url, init, body })
+      if (url.endsWith('/command-receipt')) return jsonResponse(RIGHTS_EXCEPTION_RECOVERY)
+      if (url.endsWith('/reference-rights/exception-releases')) {
+        return jsonResponse(RIGHTS_EXCEPTION_RESULT, { status: 201 })
+      }
+      throw new Error(`unexpected URL: ${url}`)
+    }, 'test-token'))
+
+    expect(await handler('createReferenceRightsExceptionRelease', RIGHTS_EXCEPTION_REQUEST, signal()))
+      .toEqual({ ok: true, value: RIGHTS_EXCEPTION_RESULT })
+    expect(await handler('recoverReferenceRightsExceptionRelease', RIGHTS_EXCEPTION_REQUEST, signal()))
+      .toEqual({ ok: true, value: RIGHTS_EXCEPTION_RECOVERY })
+
+    expect(requests.map(item => item.url)).toEqual([
+      'http://127.0.0.1:8115/api/qingmu/projects/project-1/elements/prop/prop-1/reference-rights/exception-releases',
+      'http://127.0.0.1:8115/api/qingmu/projects/project-1/elements/prop/prop-1/reference-rights/exception-releases/command-receipt',
+    ])
+    expect(requests[0]?.body).toEqual({
+      expectedSubjectRevision: 4,
+      expectedSubjectSha256: REVIEW_SUBJECT_SHA,
+      scope: RIGHTS_EXCEPTION_SCOPE,
+      reason: RIGHTS_EXCEPTION_REQUEST.reason,
+    })
+    expect(requests[0]?.body).not.toHaveProperty('idempotencyKey')
+    expect(requests[1]?.body).toBeUndefined()
+    expect(requests.map(item => item.init.method)).toEqual(['POST', 'GET'])
+    for (const request of requests) {
+      const headers = new Headers(request.init.headers)
+      expect(headers.get('authorization')).toBe('Bearer test-token')
+      expect(headers.get('idempotency-key')).toBe(RIGHTS_EXCEPTION_REQUEST.idempotencyKey)
+      expect(headers.has('cookie')).toBe(false)
+      expect(request.init.cache).toBe('no-store')
+    }
+    expect(requests.filter(item => item.init.method === 'POST')).toHaveLength(1)
+  })
+
+  it('fails closed on rights exception browser authority, finite-scope, lineage, identity, or receipt drift', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>()
+    const handler = createYimengCommandHandler({}, deps(fetch, 'test-token'))
+    for (const payload of [
+      { ...RIGHTS_EXCEPTION_REQUEST, actorId: 'browser-claim' },
+      { ...RIGHTS_EXCEPTION_REQUEST, actorNaturalPersonId: 'browser-person' },
+      { ...RIGHTS_EXCEPTION_REQUEST, releasedAt: '2026-08-27T08:02:00Z' },
+      { ...RIGHTS_EXCEPTION_REQUEST, decision: 'exception_release' },
+      { ...RIGHTS_EXCEPTION_REQUEST, providerCalls: 0 },
+      { ...RIGHTS_EXCEPTION_REQUEST, scope: { ...RIGHTS_EXCEPTION_SCOPE, rightsFields: [] } },
+      { ...RIGHTS_EXCEPTION_REQUEST, scope: { ...RIGHTS_EXCEPTION_SCOPE, rightsFields: ['*'] } },
+      { ...RIGHTS_EXCEPTION_REQUEST, scope: { ...RIGHTS_EXCEPTION_SCOPE, rightsFields: ['rightsHolder', 'rightsHolder'] } },
+      { ...RIGHTS_EXCEPTION_REQUEST, scope: { ...RIGHTS_EXCEPTION_SCOPE, rightsFields: ['rightsHolder', 'sourceType'] } },
+      { ...RIGHTS_EXCEPTION_REQUEST, scope: { ...RIGHTS_EXCEPTION_SCOPE, projectWide: true } },
+    ]) {
+      expect(await handler('createReferenceRightsExceptionRelease', payload, signal())).toMatchObject({
+        ok: false,
+        error: { code: 'bad-request' },
+      })
+    }
+    expect(fetch).not.toHaveBeenCalled()
+
+    for (const result of [
+      { ...RIGHTS_EXCEPTION_RESULT, release: { ...RIGHTS_EXCEPTION_RELEASE, subjectSha256: 'f'.repeat(64) } },
+      { ...RIGHTS_EXCEPTION_RESULT, release: { ...RIGHTS_EXCEPTION_RELEASE, reason: 'different reason' } },
+      { ...RIGHTS_EXCEPTION_RESULT, release: { ...RIGHTS_EXCEPTION_RELEASE, actorNaturalPersonId: 'natural-producer-1' } },
+      { ...RIGHTS_EXCEPTION_RESULT, release: { ...RIGHTS_EXCEPTION_RELEASE, stale: false } },
+      { ...RIGHTS_EXCEPTION_RESULT, changed: true },
+      { ...RIGHTS_EXCEPTION_RESULT, providerCalls: 1 },
+      { ...RIGHTS_EXCEPTION_RESULT, selectionAuthority: 'granted' },
+      { ...RIGHTS_EXCEPTION_RESULT, humanApprovalInferred: true },
+    ]) {
+      const drifted = createYimengCommandHandler({}, deps(async () => jsonResponse(result), 'test-token'))
+      expect(await drifted('createReferenceRightsExceptionRelease', RIGHTS_EXCEPTION_REQUEST, signal()))
+        .toMatchObject({ ok: false, error: { code: 'internal' } })
+    }
+
+    const tamperedRecovery = createYimengCommandHandler({}, deps(async () => jsonResponse({
+      ...RIGHTS_EXCEPTION_RECOVERY,
+      receiptSha256: 'f'.repeat(64),
+    }), 'test-token'))
+    expect(await tamperedRecovery('recoverReferenceRightsExceptionRelease', RIGHTS_EXCEPTION_REQUEST, signal()))
+      .toMatchObject({ ok: false, error: { code: 'internal' } })
   })
 
   it('performs the prop element-profile ChangeSet flow on canonical generic routes', async () => {

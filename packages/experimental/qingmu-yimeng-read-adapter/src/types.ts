@@ -291,6 +291,77 @@ export interface YimengElementReviewFeedResponse {
   readonly currentDecision: YimengHumanDecision | null
 }
 
+/** The only rights fields that an exact exception release may cover. */
+export type YimengReferenceRightsExceptionField =
+  | 'sourceType'
+  | 'rightsHolder'
+  | 'authorizationScope'
+  | 'territory'
+  | 'term'
+  | 'restrictions'
+  | 'contains'
+  | 'providerTerms'
+  | 'modelLicenses'
+  | 'humanDeclaration'
+  | 'contentCredentials'
+
+/** Immutable asset and rights-record bindings covered by one finite exception. */
+export interface YimengReferenceRightsExceptionScope {
+  readonly kind: 'reference_rights'
+  readonly referenceAssetId: string
+  readonly referenceAssetSha256: string
+  readonly rightsRecordSha256: string
+  readonly rightsFields: readonly YimengReferenceRightsExceptionField[]
+}
+
+/** Server-derived authority for the independent exception-release lane. */
+export interface YimengReferenceRightsExceptionCapabilities {
+  readonly canRelease: boolean
+  readonly blockedReasonCode: string | null
+  readonly blockedReason: string | null
+  readonly requiresRecentAuthentication: true
+}
+
+/** Server-authenticated exception fact, projected against current authority at read time. */
+export interface YimengReferenceRightsExceptionRelease {
+  readonly id: string
+  readonly decision: 'exception_release'
+  readonly subjectType: 'element_profile'
+  readonly subjectId: string
+  readonly subjectRevision: number
+  readonly subjectSha256: string
+  readonly scope: YimengReferenceRightsExceptionScope
+  readonly actorId: string
+  readonly actorRole: 'approver'
+  readonly actorNaturalPersonId: string
+  readonly producerActorId: string
+  readonly producerNaturalPersonId: string
+  readonly assetProducerActorId: string
+  readonly assetProducerNaturalPersonId: string
+  readonly assetProducerTaskId: string
+  readonly assetProducerTaskRequestSha256: string
+  readonly authSessionId: string
+  readonly reason: string
+  readonly releasedAt: string
+  readonly stale: boolean
+  readonly staleReasonCodes: readonly string[]
+}
+
+/** Validated request for the separate reference-rights exception feed. */
+export type YimengReferenceRightsExceptionReleaseFeedRequest = YimengElementProfileRequest
+
+/** Historical and current exception facts for one exact element subject. */
+export interface YimengReferenceRightsExceptionReleaseFeedResponse {
+  readonly schema: 'jason.qingmu-reference-rights-exception-release-feed.v1'
+  readonly projectId: string
+  readonly elementKind: YimengElementKind
+  readonly targetId: string
+  readonly subject: YimengElementReviewSubject
+  readonly capabilities: YimengReferenceRightsExceptionCapabilities
+  readonly releases: readonly YimengReferenceRightsExceptionRelease[]
+  readonly currentReleases: readonly YimengReferenceRightsExceptionRelease[]
+}
+
 /** Selection states emitted by the Yimeng reference-candidate facade. */
 export type YimengReferenceCandidateSelectionStatus = 'Unselected' | 'Selected' | 'Rejected' | 'Stale'
 
@@ -411,6 +482,7 @@ export interface YimengReadEndpointMap {
   readonly elementProfile: YimengElementProfileResponse
   readonly referenceCandidates: YimengReferenceCandidatesResponse
   readonly reviewEvents: YimengElementReviewFeedResponse
+  readonly referenceRightsExceptionReleases: YimengReferenceRightsExceptionReleaseFeedResponse
   readonly workflow: YimengWorkflowProjection
 }
 

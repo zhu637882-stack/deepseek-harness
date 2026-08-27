@@ -33,6 +33,10 @@ import type {
   YimengReferenceCandidateSelectionStatus,
   YimengReferenceCandidatesResponse,
   YimengReferenceRightsKnowledgeState,
+  YimengReferenceRightsExceptionField,
+  YimengReferenceRightsExceptionRelease,
+  YimengReferenceRightsExceptionReleaseFeedResponse,
+  YimengReferenceRightsExceptionScope,
   YimengReferenceRightsList,
   YimengReferenceRightsRecord,
   YimengReferenceRightsScalar,
@@ -74,6 +78,12 @@ export type {
   YimengReferenceCandidatesRequest,
   YimengReferenceCandidatesResponse,
   YimengReferenceRightsKnowledgeState,
+  YimengReferenceRightsExceptionCapabilities,
+  YimengReferenceRightsExceptionField,
+  YimengReferenceRightsExceptionRelease,
+  YimengReferenceRightsExceptionReleaseFeedRequest,
+  YimengReferenceRightsExceptionReleaseFeedResponse,
+  YimengReferenceRightsExceptionScope,
   YimengReferenceRightsList,
   YimengReferenceRightsRecord,
   YimengReferenceRightsScalar,
@@ -99,9 +109,11 @@ const MAX_SCRIPT_JSON_BYTES = 20 * 1024 * 1024
 const WORKFLOW_SCHEMA = 'jason.episode-workflow-projection.v1'
 const REFERENCE_CANDIDATES_SCHEMA = 'jason.qingmu-reference-asset-candidates.v1'
 const ELEMENT_REVIEW_FEED_SCHEMA = 'jason.qingmu-element-review-feed.v1'
+const REFERENCE_RIGHTS_EXCEPTION_RELEASE_FEED_SCHEMA = 'jason.qingmu-reference-rights-exception-release-feed.v1'
 const SHA256 = /^[0-9a-f]{64}$/
 const PROTECTED_ENDPOINTS = new Set([
-  'projects', 'episodes', 'script', 'promptIr', 'elementProfile', 'referenceCandidates', 'reviewEvents', 'workflow',
+  'projects', 'episodes', 'script', 'promptIr', 'elementProfile', 'referenceCandidates', 'reviewEvents',
+  'referenceRightsExceptionReleases', 'workflow',
 ])
 const HUMAN_DECISION_VALUES = new Set<YimengHumanDecisionValue>([
   'approve', 'reject', 'request_changes',
@@ -122,6 +134,20 @@ const RIGHTS_CONTAINS_KEYS = [
   'realPersonLikeness', 'trademark', 'music', 'font', 'thirdPartyCharacter',
 ] as const
 const RIGHTS_CONTAINS_STATES = new Set(['yes', 'no', 'unknown'] as const)
+const RIGHTS_EXCEPTION_FIELDS = [
+  'sourceType',
+  'rightsHolder',
+  'authorizationScope',
+  'territory',
+  'term',
+  'restrictions',
+  'contains',
+  'providerTerms',
+  'modelLicenses',
+  'humanDeclaration',
+  'contentCredentials',
+] as const satisfies readonly YimengReferenceRightsExceptionField[]
+const RIGHTS_EXCEPTION_FIELD_SET = new Set<YimengReferenceRightsExceptionField>(RIGHTS_EXCEPTION_FIELDS)
 const SENSITIVE_RESPONSE_KEYS = new Set([
   'authorization', 'proxyauthorization', 'cookie', 'setcookie', 'xapikey',
   'apikey', 'accesstoken', 'refreshtoken', 'csrftoken', 'idtoken', 'token',
@@ -180,6 +206,14 @@ function isJsonObject(value: unknown): value is YimengJsonObject {
 function requireObject(value: unknown, field: string): YimengJsonObject {
   if (!isJsonObject(value)) throw new UpstreamContractError(`${field} must be an object`)
   return value
+}
+
+function assertExactOutputKeys(value: YimengJsonObject, expected: readonly string[], field: string): void {
+  const keys = Object.keys(value).sort()
+  const expectedKeys = [...expected].sort()
+  if (keys.length !== expectedKeys.length || keys.some((key, index) => key !== expectedKeys[index])) {
+    throw new UpstreamContractError(`${field} fields mismatch`)
+  }
 }
 
 function requireString(value: unknown, field: string): string {
@@ -1295,6 +1329,257 @@ function normalizeElementReviewFeed(
   }
 }
 
+function normalizeReferenceRightsExceptionScope(
+  value: unknown,
+  field: string,
+): YimengReferenceRightsExceptionScope {
+  const scope = requireObject(value, field)
+  assertExactOutputKeys(scope, [
+    'kind', 'referenceAssetId', 'referenceAssetSha256', 'rightsRecordSha256', 'rightsFields',
+  ], field)
+  if (scope.kind !== 'reference_rights') {
+    throw new UpstreamContractError(`${field}.kind must be reference_rights`)
+  }
+  if (!Array.isArray(scope.rightsFields) || scope.rightsFields.length === 0) {
+    throw new UpstreamContractError(`${field}.rightsFields must be a non-empty array`)
+  }
+  const rightsFields = scope.rightsFields.map((item, index) => {
+    const rightsField = requireString(item, `${field}.rightsFields[${String(index)}]`)
+    if (!RIGHTS_EXCEPTION_FIELD_SET.has(rightsField as YimengReferenceRightsExceptionField)) {
+      throw new UpstreamContractError(`${field}.rightsFields contains an unknown field`)
+    }
+    return rightsField as YimengReferenceRightsExceptionField
+  })
+  if (new Set(rightsFields).size !== rightsFields.length) {
+    throw new UpstreamContractError(`${field}.rightsFields must not contain duplicates`)
+  }
+  const canonical = RIGHTS_EXCEPTION_FIELDS.filter(item => rightsFields.includes(item))
+  if (!isDeepStrictEqual(rightsFields, canonical)) {
+    throw new UpstreamContractError(`${field}.rightsFields must use canonical order`)
+  }
+  return {
+    kind: 'reference_rights',
+    referenceAssetId: requireIdentifier(scope.referenceAssetId, `${field}.referenceAssetId`),
+    referenceAssetSha256: requireSha256(scope.referenceAssetSha256, `${field}.referenceAssetSha256`),
+    rightsRecordSha256: requireSha256(scope.rightsRecordSha256, `${field}.rightsRecordSha256`),
+    rightsFields,
+  }
+}
+
+function normalizeReferenceRightsExceptionRelease(
+  value: unknown,
+  field: string,
+  subject: YimengElementReviewSubject,
+): YimengReferenceRightsExceptionRelease {
+  const release = requireObject(value, field)
+  assertExactOutputKeys(release, [
+    'id',
+    'decision',
+    'subjectType',
+    'subjectId',
+    'subjectRevision',
+    'subjectSha256',
+    'scope',
+    'actorId',
+    'actorRole',
+    'actorNaturalPersonId',
+    'producerActorId',
+    'producerNaturalPersonId',
+    'assetProducerActorId',
+    'assetProducerNaturalPersonId',
+    'assetProducerTaskId',
+    'assetProducerTaskRequestSha256',
+    'authSessionId',
+    'reason',
+    'releasedAt',
+    'stale',
+    'staleReasonCodes',
+  ], field)
+  if (release.decision !== 'exception_release') {
+    throw new UpstreamContractError(`${field}.decision must be exception_release`)
+  }
+  if (release.subjectType !== 'element_profile') {
+    throw new UpstreamContractError(`${field}.subjectType must be element_profile`)
+  }
+  if (release.actorRole !== 'approver') {
+    throw new UpstreamContractError(`${field}.actorRole must be approver`)
+  }
+  const subjectId = requireIdentifier(release.subjectId, `${field}.subjectId`)
+  if (subjectId !== subject.id) throw new UpstreamContractError(`${field}.subjectId must match the feed subject`)
+  const subjectRevision = requireInteger(release.subjectRevision, `${field}.subjectRevision`, 0)
+  const subjectSha256 = requireSha256(release.subjectSha256, `${field}.subjectSha256`)
+  const actorNaturalPersonId = requireIdentifier(
+    release.actorNaturalPersonId,
+    `${field}.actorNaturalPersonId`,
+  )
+  const producerNaturalPersonId = requireIdentifier(
+    release.producerNaturalPersonId,
+    `${field}.producerNaturalPersonId`,
+  )
+  const assetProducerNaturalPersonId = requireIdentifier(
+    release.assetProducerNaturalPersonId,
+    `${field}.assetProducerNaturalPersonId`,
+  )
+  if (
+    actorNaturalPersonId === producerNaturalPersonId
+    || actorNaturalPersonId === assetProducerNaturalPersonId
+  ) throw new UpstreamContractError(`${field} approver must differ from producers`)
+  const reason = requireString(release.reason, `${field}.reason`)
+  if (reason.trim().length === 0 || reason.length > 8_000) {
+    throw new UpstreamContractError(`${field}.reason must be between 1 and 8000 characters`)
+  }
+  const stale = requireBoolean(release.stale, `${field}.stale`)
+  if (!Array.isArray(release.staleReasonCodes)) {
+    throw new UpstreamContractError(`${field}.staleReasonCodes must be an array`)
+  }
+  const staleReasonCodes = release.staleReasonCodes.map((code, index) => (
+    requireIdentifier(code, `${field}.staleReasonCodes[${String(index)}]`, false)
+  ))
+  if (new Set(staleReasonCodes).size !== staleReasonCodes.length) {
+    throw new UpstreamContractError(`${field}.staleReasonCodes must not contain duplicates`)
+  }
+  if (stale !== (staleReasonCodes.length > 0)) {
+    throw new UpstreamContractError(`${field}.stale must match staleReasonCodes`)
+  }
+  if (!stale && (subjectRevision !== subject.revision || subjectSha256 !== subject.sha256)) {
+    throw new UpstreamContractError(`${field} current subject lineage mismatch`)
+  }
+  return {
+    id: requireIdentifier(release.id, `${field}.id`),
+    decision: 'exception_release',
+    subjectType: 'element_profile',
+    subjectId,
+    subjectRevision,
+    subjectSha256,
+    scope: normalizeReferenceRightsExceptionScope(release.scope, `${field}.scope`),
+    actorId: requireIdentifier(release.actorId, `${field}.actorId`),
+    actorRole: 'approver',
+    actorNaturalPersonId,
+    producerActorId: requireIdentifier(release.producerActorId, `${field}.producerActorId`),
+    producerNaturalPersonId,
+    assetProducerActorId: requireIdentifier(release.assetProducerActorId, `${field}.assetProducerActorId`),
+    assetProducerNaturalPersonId,
+    assetProducerTaskId: requireIdentifier(release.assetProducerTaskId, `${field}.assetProducerTaskId`),
+    assetProducerTaskRequestSha256: requireSha256(
+      release.assetProducerTaskRequestSha256,
+      `${field}.assetProducerTaskRequestSha256`,
+    ),
+    authSessionId: requireIdentifier(release.authSessionId, `${field}.authSessionId`),
+    reason,
+    releasedAt: requireIdentifier(release.releasedAt, `${field}.releasedAt`),
+    stale,
+    staleReasonCodes,
+  }
+}
+
+function normalizeReferenceRightsExceptionReleaseFeed(
+  value: unknown,
+  expected: YimengElementProfileRequest,
+): YimengReferenceRightsExceptionReleaseFeedResponse {
+  const root = requireObject(value, 'referenceRightsExceptionReleases')
+  assertExactOutputKeys(root, [
+    'schema', 'projectId', 'elementKind', 'targetId', 'subject', 'capabilities', 'releases', 'currentReleases',
+  ], 'referenceRightsExceptionReleases')
+  if (root.schema !== REFERENCE_RIGHTS_EXCEPTION_RELEASE_FEED_SCHEMA) {
+    throw new UpstreamContractError('referenceRightsExceptionReleases.schema mismatch')
+  }
+  const projectId = requireIdentifier(root.projectId, 'referenceRightsExceptionReleases.projectId')
+  const elementKind = requireString(root.elementKind, 'referenceRightsExceptionReleases.elementKind')
+  const targetId = requireIdentifier(root.targetId, 'referenceRightsExceptionReleases.targetId')
+  const subjectValue = requireObject(root.subject, 'referenceRightsExceptionReleases.subject')
+  assertExactOutputKeys(subjectValue, ['type', 'id', 'revision', 'sha256'], 'referenceRightsExceptionReleases.subject')
+  if (subjectValue.type !== 'element_profile') {
+    throw new UpstreamContractError('referenceRightsExceptionReleases.subject.type must be element_profile')
+  }
+  const subject: YimengElementReviewSubject = {
+    type: 'element_profile',
+    id: requireIdentifier(subjectValue.id, 'referenceRightsExceptionReleases.subject.id'),
+    revision: requireInteger(subjectValue.revision, 'referenceRightsExceptionReleases.subject.revision', 0),
+    sha256: requireSha256(subjectValue.sha256, 'referenceRightsExceptionReleases.subject.sha256'),
+  }
+  if (
+    projectId !== expected.projectId
+    || elementKind !== expected.elementKind
+    || targetId !== expected.targetId
+    || subject.id !== expected.targetId
+  ) throw new UpstreamContractError('referenceRightsExceptionReleases project or element subject mismatch')
+  const capabilitiesValue = requireObject(
+    root.capabilities,
+    'referenceRightsExceptionReleases.capabilities',
+  )
+  assertExactOutputKeys(capabilitiesValue, [
+    'canRelease', 'blockedReasonCode', 'blockedReason', 'requiresRecentAuthentication',
+  ], 'referenceRightsExceptionReleases.capabilities')
+  const canRelease = requireBoolean(
+    capabilitiesValue.canRelease,
+    'referenceRightsExceptionReleases.capabilities.canRelease',
+  )
+  const blockedReasonCode = requireNullableString(
+    capabilitiesValue.blockedReasonCode,
+    'referenceRightsExceptionReleases.capabilities.blockedReasonCode',
+  )
+  const blockedReason = requireNullableString(
+    capabilitiesValue.blockedReason,
+    'referenceRightsExceptionReleases.capabilities.blockedReason',
+  )
+  if (capabilitiesValue.requiresRecentAuthentication !== true) {
+    throw new UpstreamContractError(
+      'referenceRightsExceptionReleases.capabilities.requiresRecentAuthentication must be true',
+    )
+  }
+  if (
+    canRelease !== (blockedReasonCode === null && blockedReason === null)
+    || (blockedReasonCode === null) !== (blockedReason === null)
+    || blockedReasonCode === ''
+    || blockedReason === ''
+  ) throw new UpstreamContractError('referenceRightsExceptionReleases capability reason mismatch')
+  if (!Array.isArray(root.releases) || !Array.isArray(root.currentReleases)) {
+    throw new UpstreamContractError('referenceRightsExceptionReleases release collections must be arrays')
+  }
+  const releases = root.releases.map((release, index) => normalizeReferenceRightsExceptionRelease(
+    release,
+    `referenceRightsExceptionReleases.releases[${String(index)}]`,
+    subject,
+  ))
+  const currentReleases = root.currentReleases.map((release, index) => normalizeReferenceRightsExceptionRelease(
+    release,
+    `referenceRightsExceptionReleases.currentReleases[${String(index)}]`,
+    subject,
+  ))
+  if (new Set(releases.map(release => release.id)).size !== releases.length) {
+    throw new UpstreamContractError('referenceRightsExceptionReleases.releases IDs must be unique')
+  }
+  if (new Set(currentReleases.map(release => release.id)).size !== currentReleases.length) {
+    throw new UpstreamContractError('referenceRightsExceptionReleases.currentReleases IDs must be unique')
+  }
+  for (const current of currentReleases) {
+    if (current.stale) {
+      throw new UpstreamContractError('referenceRightsExceptionReleases.currentReleases must not be stale')
+    }
+    const listed = releases.find(release => release.id === current.id)
+    if (listed === undefined || !isDeepStrictEqual(listed, current)) {
+      throw new UpstreamContractError(
+        'referenceRightsExceptionReleases.currentReleases must match listed releases',
+      )
+    }
+  }
+  return {
+    schema: REFERENCE_RIGHTS_EXCEPTION_RELEASE_FEED_SCHEMA,
+    projectId,
+    elementKind: expected.elementKind,
+    targetId,
+    subject,
+    capabilities: {
+      canRelease,
+      blockedReasonCode,
+      blockedReason,
+      requiresRecentAuthentication: true,
+    },
+    releases,
+    currentReleases,
+  }
+}
+
 function normalizeWorkflowStage(value: unknown, field: string): YimengWorkflowStage {
   const stage = requireObject(value, field)
   return {
@@ -1427,6 +1712,10 @@ export function createYimengReadHandler(
         const request = parseElementProfileRequest(payload)
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/elements/${encodeURIComponent(request.elementKind)}/${encodeURIComponent(request.targetId)}/review-events`
         normalize = value => normalizeElementReviewFeed(value, request)
+      } else if (endpoint === 'referenceRightsExceptionReleases') {
+        const request = parseElementProfileRequest(payload)
+        path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/elements/${encodeURIComponent(request.elementKind)}/${encodeURIComponent(request.targetId)}/reference-rights/exception-releases`
+        normalize = value => normalizeReferenceRightsExceptionReleaseFeed(value, request)
       } else {
         throw new InputError(`unknown Yimeng endpoint: ${endpoint}`)
       }

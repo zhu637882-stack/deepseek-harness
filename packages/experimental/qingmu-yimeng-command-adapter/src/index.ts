@@ -14,6 +14,8 @@ import type {
   YimengCreateCommentResponse,
   YimengCreateHumanDecisionRequest,
   YimengCreateHumanDecisionResponse,
+  YimengCreateReferenceRightsExceptionReleaseRequest,
+  YimengCreateReferenceRightsExceptionReleaseResponse,
   YimengCommitElementProfileRequest,
   YimengCommitElementProfileResponse,
   YimengCommitScriptRequest,
@@ -56,12 +58,17 @@ import type {
   YimengRecoverElementProfileCommitResponse,
   YimengRecoverScriptCommitRequest,
   YimengRecoverScriptCommitResponse,
+  YimengRecoverReferenceRightsExceptionReleaseRequest,
+  YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengReferenceCommitElementProfileResponse,
   YimengReferenceActionOperation,
   YimengReferencePreviewElementProfileRequest,
   YimengReferencePreviewElementProfileResponse,
   YimengReferenceRightsCommitElementProfileResponse,
   YimengReferenceRightsKnowledgeState,
+  YimengReferenceRightsExceptionField,
+  YimengReferenceRightsExceptionReleaseFact,
+  YimengReferenceRightsExceptionScope,
   YimengReferenceRightsList,
   YimengReferenceRightsPreviewElementProfileRequest,
   YimengReferenceRightsPreviewElementProfileResponse,
@@ -83,6 +90,8 @@ export type {
   YimengCreateCommentResponse,
   YimengCreateHumanDecisionRequest,
   YimengCreateHumanDecisionResponse,
+  YimengCreateReferenceRightsExceptionReleaseRequest,
+  YimengCreateReferenceRightsExceptionReleaseResponse,
   YimengCommitElementProfileRequest,
   YimengCommitElementProfileResponse,
   YimengCommitScriptRequest,
@@ -128,6 +137,8 @@ export type {
   YimengRecoverElementProfileCommitResponse,
   YimengRecoverScriptCommitRequest,
   YimengRecoverScriptCommitResponse,
+  YimengRecoverReferenceRightsExceptionReleaseRequest,
+  YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengReferenceAssetOperation,
   YimengReferenceActionOperation,
   YimengReferenceCommitElementProfileResponse,
@@ -135,6 +146,9 @@ export type {
   YimengReferencePreviewElementProfileResponse,
   YimengReferenceRightsCommitElementProfileResponse,
   YimengReferenceRightsKnowledgeState,
+  YimengReferenceRightsExceptionField,
+  YimengReferenceRightsExceptionReleaseFact,
+  YimengReferenceRightsExceptionScope,
   YimengReferenceRightsList,
   YimengReferenceRightsPreviewElementProfileRequest,
   YimengReferenceRightsPreviewElementProfileResponse,
@@ -168,6 +182,20 @@ const RIGHTS_CONTAINS_KEYS = [
   'realPersonLikeness', 'trademark', 'music', 'font', 'thirdPartyCharacter',
 ] as const
 const RIGHTS_CONTAINS_STATES = new Set(['yes', 'no', 'unknown'] as const)
+const RIGHTS_EXCEPTION_FIELDS = [
+  'sourceType',
+  'rightsHolder',
+  'authorizationScope',
+  'territory',
+  'term',
+  'restrictions',
+  'contains',
+  'providerTerms',
+  'modelLicenses',
+  'humanDeclaration',
+  'contentCredentials',
+] as const satisfies readonly YimengReferenceRightsExceptionField[]
+const RIGHTS_EXCEPTION_FIELD_SET = new Set<YimengReferenceRightsExceptionField>(RIGHTS_EXCEPTION_FIELDS)
 const SAFE_ERROR_CODE = /^[a-z0-9_:-]{1,128}$/
 const SENSITIVE_RESPONSE_KEYS = new Set([
   'authorization', 'proxyauthorization', 'cookie', 'setcookie', 'xapikey',
@@ -969,6 +997,69 @@ function parseCreateHumanDecisionRequest(payload: unknown): YimengCreateHumanDec
     reason: parseReviewText(input.reason, 'reason'),
     idempotencyKey: parseReviewIdempotencyKey(input.idempotencyKey),
   }
+}
+
+function parseReferenceRightsExceptionScope(value: unknown): YimengReferenceRightsExceptionScope {
+  if (!isJsonObject(value)) throw new InputError('scope must be an object')
+  assertOnlyInputKeys(value, [
+    'kind', 'referenceAssetId', 'referenceAssetSha256', 'rightsRecordSha256', 'rightsFields',
+  ])
+  if (value.kind !== 'reference_rights') throw new InputError('scope.kind must be reference_rights')
+  if (!Array.isArray(value.rightsFields) || value.rightsFields.length === 0) {
+    throw new InputError('scope.rightsFields must be a non-empty array')
+  }
+  const rightsFields = value.rightsFields.map((item) => {
+    if (typeof item !== 'string' || !RIGHTS_EXCEPTION_FIELD_SET.has(item as YimengReferenceRightsExceptionField)) {
+      throw new InputError('scope.rightsFields contains an unknown field')
+    }
+    return item as YimengReferenceRightsExceptionField
+  })
+  if (new Set(rightsFields).size !== rightsFields.length) {
+    throw new InputError('scope.rightsFields must not contain duplicates')
+  }
+  const canonical = RIGHTS_EXCEPTION_FIELDS.filter(field => rightsFields.includes(field))
+  if (rightsFields.some((field, index) => field !== canonical[index])) {
+    throw new InputError('scope.rightsFields must use canonical order')
+  }
+  return {
+    kind: 'reference_rights',
+    referenceAssetId: parseIdentifier(value.referenceAssetId, 'scope.referenceAssetId'),
+    referenceAssetSha256: parseInputSha256(value.referenceAssetSha256, 'scope.referenceAssetSha256'),
+    rightsRecordSha256: parseInputSha256(value.rightsRecordSha256, 'scope.rightsRecordSha256'),
+    rightsFields,
+  }
+}
+
+function parseCreateReferenceRightsExceptionReleaseRequest(
+  payload: unknown,
+): YimengCreateReferenceRightsExceptionReleaseRequest {
+  const input = requireInputObject(payload)
+  assertOnlyInputKeys(input, [
+    'projectId',
+    'elementKind',
+    'targetId',
+    'expectedSubjectRevision',
+    'expectedSubjectSha256',
+    'idempotencyKey',
+    'reason',
+    'scope',
+  ])
+  return {
+    projectId: parseIdentifier(input.projectId, 'projectId'),
+    elementKind: parseElementKind(input.elementKind),
+    targetId: parseIdentifier(input.targetId, 'targetId'),
+    expectedSubjectRevision: parseExpectedSubjectRevision(input.expectedSubjectRevision),
+    expectedSubjectSha256: parseInputSha256(input.expectedSubjectSha256, 'expectedSubjectSha256'),
+    idempotencyKey: parseReviewIdempotencyKey(input.idempotencyKey),
+    reason: parseReviewText(input.reason, 'reason'),
+    scope: parseReferenceRightsExceptionScope(input.scope),
+  }
+}
+
+function parseRecoverReferenceRightsExceptionReleaseRequest(
+  payload: unknown,
+): YimengRecoverReferenceRightsExceptionReleaseRequest {
+  return parseCreateReferenceRightsExceptionReleaseRequest(payload)
 }
 
 function parseMethodAttestation(value: unknown): YimengImagoElementMethodAttestation {
@@ -1899,6 +1990,7 @@ async function fetchJson(
         ...(request.idempotencyKey === undefined ? {} : { 'Idempotency-Key': request.idempotencyKey }),
       },
       ...(request.body === undefined ? {} : { body: request.body }),
+      cache: 'no-store',
       redirect: 'error',
       signal: controller.signal,
     })
@@ -3494,6 +3586,199 @@ function normalizeCreateHumanDecisionResponse(
   }
 }
 
+function normalizeReferenceRightsExceptionScope(
+  value: unknown,
+  field: string,
+): YimengReferenceRightsExceptionScope {
+  const scope = requireObject(value, field)
+  assertExactOutputKeys(scope, [
+    'kind', 'referenceAssetId', 'referenceAssetSha256', 'rightsRecordSha256', 'rightsFields',
+  ], field)
+  if (scope.kind !== 'reference_rights') {
+    throw new UpstreamContractError(`${field}.kind must be reference_rights`)
+  }
+  if (!Array.isArray(scope.rightsFields) || scope.rightsFields.length === 0) {
+    throw new UpstreamContractError(`${field}.rightsFields must be a non-empty array`)
+  }
+  const rightsFields = scope.rightsFields.map((item, index) => {
+    const rightsField = requireString(item, `${field}.rightsFields[${String(index)}]`)
+    if (!RIGHTS_EXCEPTION_FIELD_SET.has(rightsField as YimengReferenceRightsExceptionField)) {
+      throw new UpstreamContractError(`${field}.rightsFields contains an unknown field`)
+    }
+    return rightsField as YimengReferenceRightsExceptionField
+  })
+  if (new Set(rightsFields).size !== rightsFields.length) {
+    throw new UpstreamContractError(`${field}.rightsFields must not contain duplicates`)
+  }
+  const canonical = RIGHTS_EXCEPTION_FIELDS.filter(item => rightsFields.includes(item))
+  if (rightsFields.some((item, index) => item !== canonical[index])) {
+    throw new UpstreamContractError(`${field}.rightsFields must use canonical order`)
+  }
+  return {
+    kind: 'reference_rights',
+    referenceAssetId: requireString(scope.referenceAssetId, `${field}.referenceAssetId`),
+    referenceAssetSha256: requireSha256(scope.referenceAssetSha256, `${field}.referenceAssetSha256`),
+    rightsRecordSha256: requireSha256(scope.rightsRecordSha256, `${field}.rightsRecordSha256`),
+    rightsFields,
+  }
+}
+
+function normalizeReferenceRightsExceptionReleaseFact(
+  value: unknown,
+  expected: YimengCreateReferenceRightsExceptionReleaseRequest,
+): YimengReferenceRightsExceptionReleaseFact {
+  const field = 'referenceRightsExceptionReleaseResult.release'
+  const release = requireObject(value, field)
+  assertExactOutputKeys(release, [
+    'id',
+    'decision',
+    'subjectType',
+    'subjectId',
+    'subjectRevision',
+    'subjectSha256',
+    'scope',
+    'actorId',
+    'actorRole',
+    'actorNaturalPersonId',
+    'producerActorId',
+    'producerNaturalPersonId',
+    'assetProducerActorId',
+    'assetProducerNaturalPersonId',
+    'assetProducerTaskId',
+    'assetProducerTaskRequestSha256',
+    'authSessionId',
+    'reason',
+    'releasedAt',
+  ], field)
+  if (release.decision !== 'exception_release') {
+    throw new UpstreamContractError(`${field}.decision must be exception_release`)
+  }
+  if (release.subjectType !== 'element_profile') {
+    throw new UpstreamContractError(`${field}.subjectType must be element_profile`)
+  }
+  if (release.actorRole !== 'approver') {
+    throw new UpstreamContractError(`${field}.actorRole must be approver`)
+  }
+  const scope = normalizeReferenceRightsExceptionScope(release.scope, `${field}.scope`)
+  const actorNaturalPersonId = requireString(
+    release.actorNaturalPersonId,
+    `${field}.actorNaturalPersonId`,
+  )
+  const producerNaturalPersonId = requireString(
+    release.producerNaturalPersonId,
+    `${field}.producerNaturalPersonId`,
+  )
+  const assetProducerNaturalPersonId = requireString(
+    release.assetProducerNaturalPersonId,
+    `${field}.assetProducerNaturalPersonId`,
+  )
+  if (
+    actorNaturalPersonId === producerNaturalPersonId
+    || actorNaturalPersonId === assetProducerNaturalPersonId
+  ) throw new UpstreamContractError(`${field} approver must differ from producers`)
+  const fact: YimengReferenceRightsExceptionReleaseFact = {
+    id: requireString(release.id, `${field}.id`),
+    decision: 'exception_release',
+    subjectType: 'element_profile',
+    subjectId: requireString(release.subjectId, `${field}.subjectId`),
+    subjectRevision: requireInteger(release.subjectRevision, `${field}.subjectRevision`),
+    subjectSha256: requireSha256(release.subjectSha256, `${field}.subjectSha256`),
+    scope,
+    actorId: requireString(release.actorId, `${field}.actorId`),
+    actorRole: 'approver',
+    actorNaturalPersonId,
+    producerActorId: requireString(release.producerActorId, `${field}.producerActorId`),
+    producerNaturalPersonId,
+    assetProducerActorId: requireString(release.assetProducerActorId, `${field}.assetProducerActorId`),
+    assetProducerNaturalPersonId,
+    assetProducerTaskId: requireString(release.assetProducerTaskId, `${field}.assetProducerTaskId`),
+    assetProducerTaskRequestSha256: requireSha256(
+      release.assetProducerTaskRequestSha256,
+      `${field}.assetProducerTaskRequestSha256`,
+    ),
+    authSessionId: requireString(release.authSessionId, `${field}.authSessionId`),
+    reason: requireString(release.reason, `${field}.reason`),
+    releasedAt: requireString(release.releasedAt, `${field}.releasedAt`),
+  }
+  if (
+    fact.subjectId !== expected.targetId
+    || fact.subjectRevision !== expected.expectedSubjectRevision
+    || fact.subjectSha256 !== expected.expectedSubjectSha256
+    || fact.reason !== expected.reason
+    || canonicalJson(fact.scope, `${field}.scope`) !== canonicalJson(expected.scope, 'expected.scope')
+  ) throw new UpstreamContractError('referenceRightsExceptionReleaseResult release lineage mismatch')
+  if (fact.reason.trim().length === 0 || fact.reason.length > 8_000) {
+    throw new UpstreamContractError(`${field}.reason must be between 1 and 8000 characters`)
+  }
+  return fact
+}
+
+function normalizeCreateReferenceRightsExceptionReleaseResponse(
+  value: unknown,
+  expected: YimengCreateReferenceRightsExceptionReleaseRequest,
+): YimengCreateReferenceRightsExceptionReleaseResponse {
+  const field = 'referenceRightsExceptionReleaseResult'
+  const root = requireObject(value, field)
+  assertExactOutputKeys(root, [
+    'schema',
+    'changeSetId',
+    'commandReceiptId',
+    'eventId',
+    'payloadSha256',
+    'release',
+    'changed',
+    'providerCalls',
+    'selectionAuthority',
+    'humanApprovalInferred',
+  ], field)
+  if (root.schema !== 'jason.qingmu-reference-rights-exception-release-result.v1') {
+    throw new UpstreamContractError(`${field}.schema mismatch`)
+  }
+  if (root.changed !== false) throw new UpstreamContractError(`${field}.changed must be false`)
+  if (root.providerCalls !== 0) throw new UpstreamContractError(`${field}.providerCalls must be zero`)
+  if (root.selectionAuthority !== 'not_granted') {
+    throw new UpstreamContractError(`${field}.selectionAuthority must be not_granted`)
+  }
+  if (root.humanApprovalInferred !== false) {
+    throw new UpstreamContractError(`${field}.humanApprovalInferred must be false`)
+  }
+  return {
+    schema: 'jason.qingmu-reference-rights-exception-release-result.v1',
+    changeSetId: requireString(root.changeSetId, `${field}.changeSetId`),
+    commandReceiptId: requireString(root.commandReceiptId, `${field}.commandReceiptId`),
+    eventId: requireString(root.eventId, `${field}.eventId`),
+    payloadSha256: requireSha256(root.payloadSha256, `${field}.payloadSha256`),
+    release: normalizeReferenceRightsExceptionReleaseFact(root.release, expected),
+    changed: false,
+    providerCalls: 0,
+    selectionAuthority: 'not_granted',
+    humanApprovalInferred: false,
+  }
+}
+
+function normalizeRecoverReferenceRightsExceptionReleaseResponse(
+  value: unknown,
+  expected: YimengRecoverReferenceRightsExceptionReleaseRequest,
+): YimengRecoverReferenceRightsExceptionReleaseResponse {
+  const field = 'referenceRightsExceptionReleaseRecovery'
+  const root = requireObject(value, field)
+  assertExactOutputKeys(root, ['schema', 'recovered', 'receiptSha256', 'receipt'], field)
+  if (root.schema !== 'jason.qingmu-command-receipt-recovery.v1') {
+    throw new UpstreamContractError(`${field}.schema mismatch`)
+  }
+  if (root.recovered !== true) throw new UpstreamContractError(`${field}.recovered must be true`)
+  const receiptSha256 = requireSha256(root.receiptSha256, `${field}.receiptSha256`)
+  if (canonicalJsonSha256(root.receipt, `${field}.receipt`) !== receiptSha256) {
+    throw new UpstreamContractError(`${field}.receiptSha256 mismatch`)
+  }
+  return {
+    schema: 'jason.qingmu-command-receipt-recovery.v1',
+    recovered: true,
+    receiptSha256,
+    receipt: normalizeCreateReferenceRightsExceptionReleaseResponse(root.receipt, expected),
+  }
+}
+
 /**
  * Create the private command handler without registering it.
  * @param config - Loopback upstream and timeout settings.
@@ -3727,6 +4012,26 @@ export function createYimengCommandHandler(
         }
         requestInit = { method: 'POST', body: serializeBody(body) }
         normalize = value => normalizeCreateHumanDecisionResponse(value, request)
+      } else if (endpoint === 'createReferenceRightsExceptionRelease') {
+        const request = parseCreateReferenceRightsExceptionReleaseRequest(payload)
+        path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/elements/${encodeURIComponent(request.elementKind)}/${encodeURIComponent(request.targetId)}/reference-rights/exception-releases`
+        const body: YimengCommandJsonObject = {
+          expectedSubjectRevision: request.expectedSubjectRevision,
+          expectedSubjectSha256: request.expectedSubjectSha256,
+          scope: request.scope,
+          reason: request.reason,
+        }
+        requestInit = {
+          method: 'POST',
+          body: serializeBody(body),
+          idempotencyKey: request.idempotencyKey,
+        }
+        normalize = value => normalizeCreateReferenceRightsExceptionReleaseResponse(value, request)
+      } else if (endpoint === 'recoverReferenceRightsExceptionRelease') {
+        const request = parseRecoverReferenceRightsExceptionReleaseRequest(payload)
+        path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/elements/${encodeURIComponent(request.elementKind)}/${encodeURIComponent(request.targetId)}/reference-rights/exception-releases/command-receipt`
+        requestInit = { method: 'GET', idempotencyKey: request.idempotencyKey }
+        normalize = value => normalizeRecoverReferenceRightsExceptionReleaseResponse(value, request)
       } else {
         throw new InputError(`unknown Yimeng command endpoint: ${endpoint}`)
       }

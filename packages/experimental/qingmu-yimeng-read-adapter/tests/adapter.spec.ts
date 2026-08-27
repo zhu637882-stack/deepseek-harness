@@ -135,6 +135,65 @@ const REVIEW_FEED_FIXTURE = {
   currentDecision: REVIEW_DECISION,
 } as const
 
+const RIGHTS_EXCEPTION_SCOPE = {
+  kind: 'reference_rights',
+  referenceAssetId: 'asset-prop-1',
+  referenceAssetSha256: 'a'.repeat(64),
+  rightsRecordSha256: 'b'.repeat(64),
+  rightsFields: ['sourceType', 'rightsHolder'],
+} as const
+const RIGHTS_EXCEPTION_RELEASE = {
+  id: 'rights-exception-release-1',
+  decision: 'exception_release',
+  subjectType: 'element_profile',
+  subjectId: 'prop-1',
+  subjectRevision: 4,
+  subjectSha256: REVIEW_SUBJECT_SHA,
+  scope: RIGHTS_EXCEPTION_SCOPE,
+  actorId: 'approver-1',
+  actorRole: 'approver',
+  actorNaturalPersonId: 'person-approver-1',
+  producerActorId: 'producer-1',
+  producerNaturalPersonId: 'person-producer-1',
+  assetProducerActorId: 'asset-producer-1',
+  assetProducerNaturalPersonId: 'person-asset-producer-1',
+  assetProducerTaskId: 'task-1',
+  assetProducerTaskRequestSha256: 'c'.repeat(64),
+  authSessionId: 'auth-session-release-1',
+  reason: '权利人已书面确认当前参考资产的本次用途。',
+  releasedAt: '2026-08-27T08:02:00Z',
+  stale: false,
+  staleReasonCodes: [],
+} as const
+const STALE_RIGHTS_EXCEPTION_RELEASE = {
+  ...RIGHTS_EXCEPTION_RELEASE,
+  id: 'rights-exception-release-0',
+  subjectRevision: 3,
+  subjectSha256: 'e'.repeat(64),
+  stale: true,
+  staleReasonCodes: ['subject_revision_changed'],
+} as const
+const RIGHTS_EXCEPTION_FEED_FIXTURE = {
+  schema: 'jason.qingmu-reference-rights-exception-release-feed.v1',
+  projectId: 'project-1',
+  elementKind: 'prop',
+  targetId: 'prop-1',
+  subject: {
+    type: 'element_profile',
+    id: 'prop-1',
+    revision: 4,
+    sha256: REVIEW_SUBJECT_SHA,
+  },
+  capabilities: {
+    canRelease: true,
+    blockedReasonCode: null,
+    blockedReason: null,
+    requiresRecentAuthentication: true,
+  },
+  releases: [STALE_RIGHTS_EXCEPTION_RELEASE, RIGHTS_EXCEPTION_RELEASE],
+  currentReleases: [RIGHTS_EXCEPTION_RELEASE],
+} as const
+
 type ElementKind = 'actor' | 'scene' | 'prop'
 
 function unknownRightsRecord(): Record<string, unknown> {
@@ -264,6 +323,9 @@ describe('qingmu Yimeng read adapter', () => {
       ['elementProfile', { projectId: 'project-1', elementKind: 'prop', targetId: 'prop-1' }],
       ['referenceCandidates', { projectId: 'project-1', elementKind: 'prop', targetId: 'prop-1' }],
       ['reviewEvents', { projectId: 'project-1', elementKind: 'prop', targetId: 'prop-1' }],
+      ['referenceRightsExceptionReleases', {
+        projectId: 'project-1', elementKind: 'prop', targetId: 'prop-1',
+      }],
     ] as const) {
       const result = await handler(endpoint, payload, signal())
       expect(result).toEqual({
@@ -384,6 +446,83 @@ describe('qingmu Yimeng read adapter', () => {
     ]) {
       const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(value), 'test-token'))
       const result = await handler('reviewEvents', {
+        projectId: 'project-1',
+        elementKind: 'prop',
+        targetId: 'prop-1',
+      }, signal())
+      expect(result).toMatchObject({ ok: false, error: { code: 'internal' } })
+    }
+  })
+
+  it('reads the independent exception-release feed with current and stale history', async () => {
+    let capturedUrl = ''
+    let capturedInit: RequestInit | undefined
+    const handler = createYimengReadHandler({}, dependencies(async (input, init) => {
+      capturedUrl = requestUrl(input)
+      capturedInit = init
+      return jsonResponse(RIGHTS_EXCEPTION_FEED_FIXTURE)
+    }, 'test-token'))
+
+    const result = await handler('referenceRightsExceptionReleases', {
+      projectId: 'project-1',
+      elementKind: 'prop',
+      targetId: 'prop-1',
+    }, signal())
+
+    expect(result).toEqual({ ok: true, value: RIGHTS_EXCEPTION_FEED_FIXTURE })
+    expect(capturedUrl).toBe(
+      'http://127.0.0.1:8115/api/qingmu/projects/project-1/elements/prop/prop-1/reference-rights/exception-releases',
+    )
+    const headers = new Headers(capturedInit?.headers)
+    expect(capturedInit?.method).toBe('GET')
+    expect(capturedInit?.cache).toBe('no-store')
+    expect(headers.get('authorization')).toBe('Bearer test-token')
+    expect(headers.has('cookie')).toBe(false)
+  })
+
+  it('fails exception-release feeds closed on forged authority, scope, or current projection', async () => {
+    const invalid = [
+      { ...RIGHTS_EXCEPTION_FEED_FIXTURE, extraAuthority: true },
+      {
+        ...RIGHTS_EXCEPTION_FEED_FIXTURE,
+        capabilities: { ...RIGHTS_EXCEPTION_FEED_FIXTURE.capabilities, requiresRecentAuthentication: false },
+      },
+      {
+        ...RIGHTS_EXCEPTION_FEED_FIXTURE,
+        releases: [{
+          ...RIGHTS_EXCEPTION_RELEASE,
+          actorNaturalPersonId: RIGHTS_EXCEPTION_RELEASE.producerNaturalPersonId,
+        }],
+        currentReleases: [],
+      },
+      {
+        ...RIGHTS_EXCEPTION_FEED_FIXTURE,
+        releases: [{
+          ...RIGHTS_EXCEPTION_RELEASE,
+          scope: { ...RIGHTS_EXCEPTION_SCOPE, rightsFields: ['rightsHolder', 'sourceType'] },
+        }],
+        currentReleases: [],
+      },
+      {
+        ...RIGHTS_EXCEPTION_FEED_FIXTURE,
+        currentReleases: [{ ...RIGHTS_EXCEPTION_RELEASE, stale: true, staleReasonCodes: ['rights_record_changed'] }],
+      },
+      {
+        ...RIGHTS_EXCEPTION_FEED_FIXTURE,
+        capabilities: {
+          canRelease: false,
+          blockedReasonCode: null,
+          blockedReason: null,
+          requiresRecentAuthentication: true,
+        },
+      },
+    ]
+    for (const response of invalid) {
+      const handler = createYimengReadHandler({}, dependencies(
+        async () => jsonResponse(response),
+        'test-token',
+      ))
+      const result = await handler('referenceRightsExceptionReleases', {
         projectId: 'project-1',
         elementKind: 'prop',
         targetId: 'prop-1',
