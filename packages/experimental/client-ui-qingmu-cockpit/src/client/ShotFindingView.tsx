@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type {
   ImagoShotFindingMethodResponse, QingmuYimengPort, YimengShotFindingFeedResponse,
-  YimengShotFindingPayload, YimengShotFindingResult, YimengWorkflowProjection,
+  YimengShotFindingPayload, YimengShotFindingResult, YimengWorkflowProjection, YimengProductionUnitsResponse,
 } from './contracts.ts'
 import type { QingmuCockpitKey } from './locales.ts'
 import {
@@ -23,6 +23,7 @@ interface ShotFindingViewProps {
   readonly projection: YimengWorkflowProjection | undefined
   readonly enabled: boolean
   readonly port: Pick<QingmuYimengPort, 'shotFindings' | 'shotFindingMethod' | 'recordShotFinding' | 'recoverShotFinding'>
+  readonly productionUnits?: YimengProductionUnitsResponse | undefined
   readonly t: (key: QingmuCockpitKey) => string
 }
 
@@ -75,7 +76,7 @@ export function ShotFindingView(props: ShotFindingViewProps) {
   return <ShotFindingPanel key={JSON.stringify([props.projectId, props.episodeId, props.selectedShotId])} {...props} />
 }
 
-function ShotFindingPanel({ projectId, episodeId, selectedShotId, projection, enabled, port, t }: ShotFindingViewProps) {
+function ShotFindingPanel({ projectId, episodeId, selectedShotId, projection, enabled, port, t, productionUnits }: ShotFindingViewProps) {
   const scope = { projectId, episodeId, frameId: selectedShotId }
   const [refresh, setRefresh] = useState(0)
   const [state, setState] = useState<LoadState>()
@@ -262,6 +263,22 @@ function ShotFindingPanel({ projectId, episodeId, selectedShotId, projection, en
     return `${t(label)} · ${t(owner.scope === 'global' ? 'findingReworkScopeGlobal' : 'findingReworkScopePerLsu')}`
   }
 
+  function preparationUnitEvidence(item: YimengShotFindingFeedResponse['items'][number]) {
+    if (productionUnits === undefined || productionUnits.projectId !== projectId || productionUnits.episodeId !== episodeId) {
+      return <p>{t('findingUnitUnavailable')}</p>
+    }
+    const matched = productionUnits.bindings.filter(({ binding }) => binding.source.projectId === item.subject.projectId
+      && binding.source.episodeId === item.subject.episodeId && binding.source.storyboardRevision === item.subject.storyboardRevision
+      && binding.source.shots.some(shot => shot.frameId === item.subject.frameId && shot.frameNo === item.subject.frameNo
+        && shot.frameContentSha256 === item.subject.frameContentSha256))
+    if (matched.length === 0) return <p>{t('findingUnitMissing')}</p>
+    return <ul>{matched.map(({ binding, currentBinding }) => <li key={binding.unitId}>
+      <strong>{binding.unitId}</strong> · {t(currentBinding ? 'findingUnitCurrent' : 'findingUnitHistorical')}
+      <p>{t('unitGroup')}：{binding.source.title} · {t('unitBindingRevision')}：{binding.revision}</p>
+      <p>{t('findingUnitBoundary')}</p>
+    </li>)}</ul>
+  }
+
   return <section className={`${card.card} ${css.panel}`} aria-label={t('findingTitle')}>
     <div className={css.header}>
       <div><h3>{t('findingTitle')}</h3><p className={css.hint}>{t('findingBoundary')}</p></div>
@@ -366,6 +383,7 @@ function ShotFindingPanel({ projectId, episodeId, selectedShotId, projection, en
                   <div><dt>{t('findingReworkRules')}</dt><dd>{t(method === undefined ? 'findingReworkUnavailable'
                     : item.rulesSha256 === method.projection.rulesSha256 ? 'findingReworkSame' : 'findingReworkChanged')}</dd></div>
                   {method !== undefined && <div><dt>{t('findingReworkCurrentRulesSha')}</dt><dd>{method.projection.rulesSha256}</dd></div>}
+                  <div><dt>{t('findingUnitEvidence')}</dt><dd>{preparationUnitEvidence(item)}</dd></div>
                   {(['findingReworkStageEvidence', 'findingReworkLsuEvidence', 'findingReworkLockEvidence', 'findingReworkDecisionEvidence'] as const).map(key => <div key={key}>
                     <dt>{t(key)}</dt><dd>{t('findingReworkNotProvided')}</dd>
                   </div>)}

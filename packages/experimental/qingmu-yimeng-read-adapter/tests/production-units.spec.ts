@@ -276,7 +276,7 @@ describe('production unit read-only scope bindings', () => {
     await expectContractFailure({
       ...productionUnitsFeed(), bindings: [],
       groups: [{ groupId: 'group-three', subject: null, snapshotSha256: null,
-        availability: { status: 'unavailable', reason: 'missing', ...change } }],
+        availability: { status: 'unavailable', ...change } }],
     })
   })
 

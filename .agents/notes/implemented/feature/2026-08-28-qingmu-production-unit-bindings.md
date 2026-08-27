@@ -16,6 +16,8 @@ The command plugin sends one explicitly requested binding with source SHA and bi
 
 These are extensions of the three existing plugins, not another runtime or ledger. Missing read capability disables method preparation. A scope binding does not seal a production plan, create an executable workset, approve a stage or content, release locks, execute rework, or call a Provider.
 
+The existing Shot workspace requires an explicit group, unit ID, and scope-only confirmation. It durably records an eleven-field, non-secret recovery marker before the single POST. Recovery uses the original coordinates even when the current Shot, source, or method is unavailable. A verified receipt permits conditional marker removal and a fresh authority read, not an optimistic binding row. Finding details reuse that validated feed without another request and match the original Finding's project, episode, frame ID, display number, frame-content SHA, and storyboard revision.
+
 ## Alternatives considered
 
 **Infer units from frame numbers or Findings.** That would manufacture a production scope without an explicit native group and owner action. The existing group and its canonical frame IDs are required.
@@ -28,4 +30,6 @@ These are extensions of the three existing plugins, not another runtime or ledge
 
 Host tests cover malformed contracts, Unicode, source and method drift, stale compare-and-swap, historical recovery, cancellation, timeouts, and bounded responses. A real Loader/Connection test uses current Core and an isolated HTTP upstream to exercise a lost write response, original receipt recovery, and read-plugin removal/restoration. The HTTP upstream is a test double, not a production database. Separate Core/Yimeng temporary-SQLite evidence covers the backend transaction.
 
-The browser surface and the use of this binding in rework details are the next slice. No production activation, fee, human signoff, deployment, or push is implied by this Host checkpoint.
+Client tests also cover explicit confirmation, storage failure, marker compare-and-swap, malformed evidence, late responses, closure, and shared-feed invalidation. A real Chromium scenario exercises the existing Host and current Core, explicit registration, a lost POST response, page reload, original receipt recovery with an unavailable source, and the subsequent authoritative read. Desktop and mobile checks cover the bounded workspace and read-only Finding linkage. Its Yimeng upstream remains the isolated HTTP test double.
+
+These checks do not establish production activation, a sealed plan, independent approval, human signoff, deployment, or paid generation. No push is part of this checkpoint.

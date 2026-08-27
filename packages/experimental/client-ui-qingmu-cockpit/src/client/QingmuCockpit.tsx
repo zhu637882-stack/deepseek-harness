@@ -19,7 +19,7 @@ import { HeroFrameStoryboardCanvas } from './HeroFrameStoryboardCanvas.tsx'
 import { WorksetRecommendation } from './WorksetRecommendation.tsx'
 import { ContinuityDeltaView } from './ContinuityDeltaView.tsx'
 import { SelectedVideoReviewView } from './SelectedVideoReviewView.tsx'
-import { ShotFindingView } from './ShotFindingView.tsx'
+import { ProductionUnitView } from './ProductionUnitView.tsx'
 import css from './QingmuCockpit.module.css'
 
 export type QingmuCockpitProps = PropsRuntime<'sidebar.footer.action'>
@@ -508,7 +508,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
         port={port}
         t={t}
       />
-      <ShotFindingView
+      <ProductionUnitView
         projectId={projectId}
         episodeId={episodeId}
         selectedShotId={selectedShotId}

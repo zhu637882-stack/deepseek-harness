@@ -16,6 +16,10 @@ import { REPO_ROOT, saveFailureShot, ZH_BROWSER_LOCALE } from './support.ts'
 import { continuityFixture, rebindContinuity } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/continuity-fixture.ts'
 import { videoCandidatesFixture } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/selected-video-review-fixture.ts'
 import { createShotFindingDouble } from './qingmu-shot-finding-fixture.ts'
+import {
+  createProductionUnitDouble, PRODUCTION_UNIT_BROWSER_GROUP_ID, PRODUCTION_UNIT_BROWSER_UNIT_ID,
+  PRODUCTION_UNIT_BROWSER_RULE_PATHS,
+} from './qingmu-production-unit-fixture.ts'
 
 const YIMENG_TOKEN = 'qingmu-script-workspace-test-token'
 const CHANGE_SET_ID = 'changeset-episode-script-1'
@@ -1666,9 +1670,13 @@ async function startYimengDouble(
   readonly setContinuityMode: (mode: ContinuityMode) => void
   readonly setVideoReviewMode: (mode: VideoReviewMode) => void
   readonly shotFindings: ReturnType<typeof createShotFindingDouble>
+  readonly productionUnits: ReturnType<typeof createProductionUnitDouble>
 }> {
   let revision = 3
   const shotFindings = createShotFindingDouble({
+    token: YIMENG_TOKEN, attestationKey: IMAGO_ATTESTATION_KEY, canonicalJson, canonicalSha256,
+  })
+  const productionUnits = createProductionUnitDouble({
     token: YIMENG_TOKEN, attestationKey: IMAGO_ATTESTATION_KEY, canonicalJson, canonicalSha256,
   })
   let continuityMode: ContinuityMode = 'omitted'
@@ -1871,6 +1879,7 @@ async function startYimengDouble(
         return
       }
       if (shotFindings.handle(request, response, url, body, revision)) return
+      if (productionUnits.handle(request, response, url, body, revision)) return
       if (
         request.method === 'GET'
         && url.pathname === `/api/qingmu/projects/project-1/episodes/episode-1/storyboard-revisions/${PROMPT_IR_STORYBOARD_REVISION_ID}/frames/${PROMPT_IR_FRAME_ID}/prompt-ir`
@@ -3142,6 +3151,7 @@ async function startYimengDouble(
     setContinuityMode: (mode) => { continuityMode = mode },
     setVideoReviewMode: (mode) => { videoReviewMode = mode },
     shotFindings,
+    productionUnits,
   }
 }
 
@@ -3217,6 +3227,7 @@ describe.skipIf(
     let setContinuityMode: ((mode: ContinuityMode) => void) | undefined
     let setVideoReviewMode: ((mode: VideoReviewMode) => void) | undefined
     let shotFindingDouble: ReturnType<typeof createShotFindingDouble> | undefined
+    let productionUnitDouble: ReturnType<typeof createProductionUnitDouble> | undefined
     const capturedRequests: CapturedYimengRequest[] = []
     const scriptReadRevisions: number[] = []
     const actorReadRevisions: number[] = []
@@ -3240,6 +3251,7 @@ describe.skipIf(
     let continuityBrowserEvidence: Record<string, unknown> | undefined
     let selectedVideoReviewBrowserEvidence: Record<string, unknown> | undefined
     let shotFindingBrowserEvidence: Record<string, unknown> | undefined
+    let productionUnitBrowserEvidence: Record<string, unknown> | undefined
     let resolveReferenceRightsMethodProjectionSha256: ((sha256: string) => void) | undefined
     const referenceRightsMethodProjectionSha256 = new Promise<string>((resolve) => {
       resolveReferenceRightsMethodProjectionSha256 = resolve
@@ -3288,6 +3300,7 @@ describe.skipIf(
       setContinuityMode = yimeng.setContinuityMode
       setVideoReviewMode = yimeng.setVideoReviewMode
       shotFindingDouble = yimeng.shotFindings
+      productionUnitDouble = yimeng.productionUnits
       overlayRoot = await mkdtemp(join(tmpdir(), 'dsh-qingmu-script-e2e-'))
       const overlayPath = join(overlayRoot, 'qingmu-script.overlay.yml')
       const qingmuOverlay = resolveQingmuOverlayEntrypoints(await readFile(QINGMU_OVERLAY, 'utf8'))
@@ -3319,6 +3332,8 @@ describe.skipIf(
         if (!requestPath.startsWith('/qingmu-imago-method/') && ![
           '/qingmu-yimeng/selectedVideoReview', '/qingmu-yimeng/shotFindings',
           '/qingmu-yimeng-command/recordShotFinding', '/qingmu-yimeng-command/recoverShotFinding',
+          '/qingmu-yimeng/productionUnits', '/qingmu-yimeng-command/bindProductionUnit',
+          '/qingmu-yimeng-command/recoverProductionUnitBinding',
         ].includes(requestPath)) return
         browserRpcRequests.push({ path: requestPath, body: request.postDataJSON() as unknown })
       })
@@ -3448,6 +3463,10 @@ describe.skipIf(
               reworkPreparation: process.env.QINGMU_E5_5_REWORK_SCREENSHOT,
               reworkPreparationMobile: process.env.QINGMU_E5_5_REWORK_MOBILE_SCREENSHOT,
               reworkPreparationMobileEnd: process.env.QINGMU_E5_5_REWORK_MOBILE_END_SCREENSHOT,
+              productionUnit: process.env.QINGMU_E5_5_PRODUCTION_UNIT_SCREENSHOT,
+              productionUnitMobile: process.env.QINGMU_E5_5_PRODUCTION_UNIT_MOBILE_SCREENSHOT,
+              productionUnitMobileEnd: process.env.QINGMU_E5_5_PRODUCTION_UNIT_MOBILE_END_SCREENSHOT,
+              productionUnitFinding: process.env.QINGMU_E5_5_PRODUCTION_UNIT_FINDING_SCREENSHOT,
               script: process.env.QINGMU_EVIDENCE_SCREENSHOT,
               actor: process.env.QINGMU_ACTOR_EVIDENCE_SCREENSHOT,
               scene: process.env.QINGMU_SCENE_EVIDENCE_SCREENSHOT,
@@ -3459,6 +3478,7 @@ describe.skipIf(
             continuity: continuityBrowserEvidence,
             selectedVideoReview: selectedVideoReviewBrowserEvidence,
             shotFinding: shotFindingBrowserEvidence,
+            productionUnit: productionUnitBrowserEvidence,
           }
           await mkdir(dirname(runEvidencePath), { recursive: true })
           await writeFile(runEvidencePath, `${JSON.stringify(evidence, null, 2)}\n`)
@@ -4176,6 +4196,285 @@ describe.skipIf(
         await dialog.getByRole('tab', { name: '总览', exact: true }).click()
         await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
         if (tracePath) { await mkdir(dirname(tracePath), { recursive: true }); await page.context().tracing.stop({ path: tracePath }) }
+      }
+    }, 120_000)
+
+    it('registers an explicit production-unit scope and recovers its lost response without resubmitting in Chromium', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-production-unit'))
+      if (productionUnitDouble === undefined || shotFindingDouble === undefined || setVideoReviewMode === undefined
+        || IMAGO_CORE_ROOT === undefined || IMAGO_CORE_ROOT === '') throw new Error('Production-unit fixture controls missing')
+      const units = productionUnitDouble
+      const findings = shotFindingDouble
+      const requestStart = capturedRequests.length
+      const rpcStart = browserRpcRequests.length
+      const consoleStart = browserConsoleErrors.length
+      const tracePath = process.env.QINGMU_E5_5_PRODUCTION_UNIT_TRACE_PATH?.trim()
+      if (tracePath) await page.context().tracing.start({ screenshots: true, snapshots: true })
+      const nextWire = (path: string, coordinates: { groupId?: string; frameId?: string } = {}) => page.waitForResponse((response) => {
+        if (new URL(response.url()).pathname !== path) return false
+        const body = response.request().postDataJSON() as unknown
+        if (!isRecord(body) || !isRecord(body.payload)) return false
+        const payload = body.payload
+        return payload.projectId === 'project-1' && payload.episodeId === 'episode-1'
+          && Object.entries(coordinates).every(([key, value]) => payload[key] === value)
+      })
+      const readWire = async (wire: ReturnType<typeof nextWire>) => {
+        const response = await wire
+        expect(response.status()).toBe(200)
+        const raw = await response.json() as unknown
+        if (!isRecord(raw) || !isRecord(raw.result)) throw new Error('Production-unit RPC carrier missing')
+        return raw.result
+      }
+      const markers = () => page.evaluate(() => Object.keys(sessionStorage)
+        .filter(key => decodeURIComponent(key).startsWith('qingmu:production-unit-recovery:v1:'))
+        .map(key => ({ key, value: sessionStorage.getItem(key) })))
+      units.setMode('available')
+      findings.setMode('available')
+      setVideoReviewMode('pending')
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      const initialRead = nextWire('/qingmu-yimeng/productionUnits')
+      await dialog.getByRole('tab', { name: '分镜与镜头' }).click()
+      const panel = dialog.getByRole('region', { name: '制作单元范围登记', exact: true })
+      const river = dialog.getByRole('list', { name: '镜头选择' })
+      const groupCoordinates = { groupId: PRODUCTION_UNIT_BROWSER_GROUP_ID }
+      const unitBase = '/api/qingmu/projects/project-1/episodes/episode-1/production-units'
+      const bindingPath = `${unitBase}/${PRODUCTION_UNIT_BROWSER_UNIT_ID}/binding`
+      try {
+        const initialFeed = await readWire(initialRead)
+        expect(initialFeed).toMatchObject({ ok: true, value: { bindings: [], groups: [{
+          groupId: PRODUCTION_UNIT_BROWSER_GROUP_ID, subject: { groupNo: 3, storyboardRevision: 3,
+            shots: [{ frameId: SHOT_RIVER_FIRST_FRAME_ID, frameNo: 7 }, { frameId: PROMPT_IR_FRAME_ID, frameNo: 12 }] },
+        }], planSealed: false, humanSignoffInferred: false, reworkExecuted: false, providerCalls: 0 } })
+        const group = panel.getByRole('combobox', { name: '已有镜头组', exact: true })
+        await group.waitFor()
+        expect(await group.inputValue()).toBe('')
+        expect(browserRpcRequests.slice(rpcStart).filter(request => request.path.endsWith('/productionUnitMethod'))).toEqual([])
+        expect(await markers()).toEqual([])
+        const methodWire = nextWire('/qingmu-imago-method/productionUnitMethod', groupCoordinates)
+        await group.selectOption(PRODUCTION_UNIT_BROWSER_GROUP_ID)
+        const method = await readWire(methodWire)
+        expect(method.ok).toBe(true)
+        if (!isRecord(method.value) || !isRecord(method.value.projection)) throw new Error('Real Core unit method missing')
+        const projection = method.value.projection
+        expect(projection.subject).toEqual(units.getFeed(3).groups[0]?.subject)
+        expect(projection.definition).toMatchObject({ operation: 'bind_existing_shot_group',
+          planSealingAllowed: false, stageApprovalAllowed: false, providerCalls: 0 })
+        expect(method.value.projectionSha256).toBe(canonicalSha256(projection))
+        if (!isRecord(projection.ruleBindings)) throw new Error('Unit rule bindings missing')
+        expect(Object.keys(projection.ruleBindings).sort()).toEqual([...PRODUCTION_UNIT_BROWSER_RULE_PATHS].sort())
+        for (const path of PRODUCTION_UNIT_BROWSER_RULE_PATHS) {
+          expect(projection.ruleBindings[path]).toBe(createHash('sha256').update(await readFile(join(IMAGO_CORE_ROOT, path))).digest('hex'))
+        }
+        const unitId = panel.getByRole('textbox', { name: '制作单元 ID', exact: true })
+        expect(await unitId.inputValue()).toBe('')
+        await unitId.fill(PRODUCTION_UNIT_BROWSER_UNIT_ID)
+        const confirm = panel.getByRole('checkbox', { name: '我确认仅登记所示镜头范围，不作审批或计划封存。', exact: true })
+        expect(await confirm.isChecked()).toBe(false)
+        const bind = panel.getByRole('button', { name: '确认登记范围', exact: true })
+        expect(await bind.isDisabled()).toBe(true)
+        await confirm.check()
+        await expect.poll(() => bind.isDisabled()).toBe(false)
+        const bindControlHeight = (await bind.boundingBox())?.height
+        expect(bindControlHeight).toBeGreaterThanOrEqual(44)
+        units.loseNextBindingResponse()
+        const lostWire = nextWire('/qingmu-yimeng-command/bindProductionUnit', groupCoordinates)
+        await bind.click()
+        expect(await readWire(lostWire)).toMatchObject({ ok: false })
+        await panel.getByText('登记结果未知。请查询原回执，不要重复提交。', { exact: true }).waitFor()
+        const retainedMarkers = await markers()
+        expect(retainedMarkers).toHaveLength(1)
+        const retained = retainedMarkers[0]
+        if (retained?.value === null || retained?.value === undefined) throw new Error('Unit recovery intent missing')
+        const intent: unknown = JSON.parse(retained.value)
+        if (!isRecord(intent)) throw new Error('Unit recovery intent must be an object')
+        expect(Object.keys(intent).sort()).toEqual(['schema', 'projectId', 'episodeId', 'groupId', 'unitId',
+          'expectedSubjectSha256', 'expectedBindingRevision', 'expectedBindingSha256',
+          'methodProjectionSha256', 'rulesSha256', 'idempotencyKey'].sort())
+        expect(intent).toMatchObject({ projectId: 'project-1', episodeId: 'episode-1', groupId: PRODUCTION_UNIT_BROWSER_GROUP_ID,
+          unitId: PRODUCTION_UNIT_BROWSER_UNIT_ID, expectedSubjectSha256: projection.subjectSnapshotSha256,
+          methodProjectionSha256: method.value.projectionSha256, rulesSha256: projection.rulesSha256 })
+        expect(Object.hasOwn(intent, 'methodProjection')).toBe(false)
+        expect(retained.value).not.toMatch(/signature|authSession|owner-fixture/)
+        expect(retained.value).not.toContain(YIMENG_TOKEN)
+        expect(retained.value).not.toContain(IMAGO_ATTESTATION_KEY)
+        expect(capturedRequests.slice(requestStart).filter(request => request.path === bindingPath && request.method === 'POST')).toHaveLength(1)
+
+        // The source becomes unreadable before a real page reload. Recovery must
+        // still use the original frozen coordinates and must not resubmit.
+        units.setMode('unavailable')
+        const recoveryStart = capturedRequests.length
+        await page.reload()
+        await page.getByRole('button', { name: '青木制作台' }).click()
+        const unavailableRead = nextWire('/qingmu-yimeng/productionUnits')
+        await dialog.getByRole('tab', { name: '分镜与镜头' }).click()
+        expect(await readWire(unavailableRead)).toMatchObject({ ok: true, value: {
+          groups: [{ subject: null, snapshotSha256: null, availability: { status: 'unavailable' } }],
+          bindings: [{ currentBinding: false }],
+        } })
+        expect(await markers()).toEqual(retainedMarkers)
+        const recover = panel.getByRole('button', { name: '查询原登记回执', exact: true })
+        await recover.waitFor()
+        const recoveryWire = nextWire('/qingmu-yimeng-command/recoverProductionUnitBinding', groupCoordinates)
+        const recoveredFeedWire = nextWire('/qingmu-yimeng/productionUnits')
+        await recover.click()
+        const recovered = await readWire(recoveryWire)
+        expect(recovered).toMatchObject({ ok: true, value: { found: true,
+          projectId: 'project-1', episodeId: 'episode-1', groupId: PRODUCTION_UNIT_BROWSER_GROUP_ID,
+          unitId: PRODUCTION_UNIT_BROWSER_UNIT_ID, expectedSubjectSha256: intent.expectedSubjectSha256,
+          idempotencyKey: intent.idempotencyKey, result: { binding: { revision: 1 }, ...{
+            planSealed: false, humanSignoffInferred: false, reworkExecuted: false, providerCalls: 0,
+          } },
+        } })
+        expect(await readWire(recoveredFeedWire)).toMatchObject({ ok: true, value: {
+          groups: [{ subject: null, snapshotSha256: null, availability: { status: 'unavailable' } }],
+          bindings: [{ currentBinding: false }],
+        } })
+        await expect.poll(markers).toEqual([])
+        const recoveryRequests = capturedRequests.slice(recoveryStart)
+        expect(recoveryRequests.length).toBeGreaterThan(0)
+        expect(recoveryRequests.every(request => request.method === 'GET' && request.body === undefined)).toBe(true)
+        const receipts = recoveryRequests.filter(request => request.path.startsWith(`${bindingPath}/command-receipt?`))
+        expect(receipts).toHaveLength(1)
+        const receiptRequest = receipts[0]
+        if (receiptRequest === undefined) throw new Error('Original unit receipt GET was not observed')
+        const receiptQuery = new URL(receiptRequest.path, 'http://127.0.0.1').searchParams
+        expect([...receiptQuery.keys()].sort()).toEqual(['expectedSubjectSha256', 'groupId'])
+        expect(receiptQuery.get('groupId')).toBe(PRODUCTION_UNIT_BROWSER_GROUP_ID)
+        expect(receiptQuery.get('expectedSubjectSha256')).toBe(intent.expectedSubjectSha256)
+        expect(receiptRequest.idempotencyKey).toBe(intent.idempotencyKey)
+
+        units.setMode('available')
+        const currentRead = nextWire('/qingmu-yimeng/productionUnits')
+        await panel.getByRole('button', { name: '刷新单元范围', exact: true }).click()
+        const currentFeed = await readWire(currentRead)
+        expect(currentFeed).toMatchObject({ ok: true, value: { bindings: [{ currentBinding: true,
+          binding: { unitId: PRODUCTION_UNIT_BROWSER_UNIT_ID, groupId: PRODUCTION_UNIT_BROWSER_GROUP_ID,
+            revision: 1, source: { storyboardRevision: 3 } } }] } })
+        await panel.getByText('范围来源当前一致', { exact: true }).waitFor()
+        const desktopPath = process.env.QINGMU_E5_5_PRODUCTION_UNIT_SCREENSHOT?.trim()
+        if (desktopPath) {
+          await mkdir(dirname(desktopPath), { recursive: true })
+          await panel.getByRole('heading', { name: '制作单元范围登记', exact: true }).scrollIntoViewIfNeeded()
+          await page.screenshot({ path: desktopPath })
+        }
+        await page.setViewportSize({ width: 390, height: 844 })
+        const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
+        const panelOverflow = await panel.evaluate(element => element.scrollWidth > element.clientWidth)
+        expect(mobileOverflow).toBe(false)
+        expect(panelOverflow).toBe(false)
+        const refreshControlHeight = (await panel.getByRole('button', { name: '刷新单元范围', exact: true }).boundingBox())?.height
+        expect(refreshControlHeight).toBeGreaterThanOrEqual(44)
+        const mobilePath = process.env.QINGMU_E5_5_PRODUCTION_UNIT_MOBILE_SCREENSHOT?.trim()
+        if (mobilePath) {
+          await mkdir(dirname(mobilePath), { recursive: true })
+          await panel.getByRole('heading', { name: '制作单元范围登记', exact: true }).scrollIntoViewIfNeeded()
+          await page.screenshot({ path: mobilePath })
+        }
+        const mobileEndPath = process.env.QINGMU_E5_5_PRODUCTION_UNIT_MOBILE_END_SCREENSHOT?.trim()
+        if (mobileEndPath) {
+          await mkdir(dirname(mobileEndPath), { recursive: true })
+          await panel.getByText('范围来源当前一致', { exact: true }).scrollIntoViewIfNeeded()
+          await page.screenshot({ path: mobileEndPath })
+        }
+        await page.setViewportSize({ width: 1680, height: 1100 })
+
+        // A separate explicit Finding POST makes this scenario independently
+        // runnable. It is counted separately from the one unit binding POST.
+        const findingPanel = dialog.getByRole('region', { name: '镜头问题记录', exact: true })
+        await findingPanel.getByRole('combobox', { name: '最早责任岗位', exact: true }).waitFor()
+        const observation = '范围登记回读后，核对怀表动作连续性。'
+        await findingPanel.getByLabel('时间点或时间范围', { exact: true }).fill('00:00:01.250')
+        await findingPanel.getByLabel('观察到的问题', { exact: true }).fill(observation)
+        await findingPanel.getByLabel('证据引用', { exact: true }).fill(`asset://video-${SHOT_RIVER_FIRST_FRAME_ID}#t=1.25`)
+        await findingPanel.getByRole('combobox', { name: '最早责任岗位', exact: true }).selectOption({ label: '视频生产' })
+        await findingPanel.getByLabel('责任归因依据', { exact: true }).fill('仅以当前视频动作与镜头来源作核对。')
+        await findingPanel.getByRole('combobox', { name: '严重度', exact: true }).selectOption('MINOR')
+        await findingPanel.getByLabel('建议', { exact: true }).fill('由原岗位核对，不自动执行。')
+        await findingPanel.getByLabel('建议返修范围', { exact: true }).fill('仅本镜头。')
+        const findingWire = nextWire('/qingmu-yimeng-command/recordShotFinding', { frameId: SHOT_RIVER_FIRST_FRAME_ID })
+        await findingPanel.getByRole('button', { name: '记录问题', exact: true }).click()
+        const recordedFinding = await readWire(findingWire)
+        expect(recordedFinding).toMatchObject({ ok: true, value: {
+          finding: { observation,
+            subject: { frameId: SHOT_RIVER_FIRST_FRAME_ID, frameNo: 7, storyboardRevision: 3, frameContentSha256: 'b'.repeat(64) } },
+          changed: false, providerCalls: 0, selectionChanged: false, humanSignoffInferred: false, reworkExecuted: false,
+        } })
+        const details = findingPanel.getByRole('list', { name: '问题历史', exact: true })
+          .getByRole('listitem').filter({ has: page.getByText(observation, { exact: true }) }).locator('details')
+        await details.locator('summary').click()
+        const unitEvidence = details.locator('dl > div').filter({ has: page.getByText('制作单元范围绑定', { exact: true }) })
+        await unitEvidence.getByText(PRODUCTION_UNIT_BROWSER_UNIT_ID, { exact: true }).waitFor()
+        expect(await unitEvidence.innerText()).toContain('当前范围绑定')
+        expect(await unitEvidence.innerText()).toContain('不证明计划已封存、实例已建立或返修已获准')
+        expect(await unitEvidence.locator('button, a, input, select').count()).toBe(0)
+        const findingScreenshot = process.env.QINGMU_E5_5_PRODUCTION_UNIT_FINDING_SCREENSHOT?.trim()
+        if (findingScreenshot) {
+          await mkdir(dirname(findingScreenshot), { recursive: true })
+          await unitEvidence.scrollIntoViewIfNeeded()
+          await page.screenshot({ path: findingScreenshot })
+        }
+        const secondFindingRead = nextWire('/qingmu-yimeng/shotFindings', { frameId: PROMPT_IR_FRAME_ID })
+        await river.getByRole('button', { name: /frame-1/ }).click()
+        expect(await readWire(secondFindingRead)).toMatchObject({ ok: true, value: { frameId: PROMPT_IR_FRAME_ID } })
+        expect(await findingPanel.getByText(observation, { exact: true }).count()).toBe(0)
+        expect(await markers()).toEqual([])
+        const requests = capturedRequests.slice(requestStart)
+        const unitPosts = requests.filter(request => request.method === 'POST' && request.path === bindingPath)
+        const findingPosts = requests.filter(request => request.method === 'POST' && request.path.endsWith('/findings'))
+        expect(unitPosts).toHaveLength(1)
+        expect(findingPosts).toHaveLength(1)
+        expect(requests.filter(request => request.method === 'POST')).toHaveLength(2)
+        const postBody = unitPosts[0]?.body
+        if (!isRecord(postBody)) throw new Error('Unit binding POST body missing')
+        expect(Object.keys(postBody).sort()).toEqual(['groupId', 'expectedSubjectSha256', 'expectedBindingRevision',
+          'expectedBindingSha256', 'methodProjection', 'methodProjectionSha256', 'methodAttestation', 'idempotencyKey'].sort())
+        expect(postBody).toMatchObject({ groupId: PRODUCTION_UNIT_BROWSER_GROUP_ID, expectedBindingRevision: 0,
+          expectedBindingSha256: null, expectedSubjectSha256: intent.expectedSubjectSha256, idempotencyKey: intent.idempotencyKey })
+        const unitRpc = browserRpcRequests.slice(rpcStart)
+          .filter(request => /productionUnits|productionUnitMethod|bindProductionUnit|recoverProductionUnitBinding/.test(request.path))
+        expect(unitRpc.filter(request => request.path.endsWith('/bindProductionUnit'))).toHaveLength(1)
+        expect(unitRpc.filter(request => request.path.endsWith('/recoverProductionUnitBinding'))).toHaveLength(1)
+        expect(unitRpc.some(request => request.path.endsWith('/productionUnits'))).toBe(true)
+        expect(unitRpc.some(request => request.path.endsWith('/productionUnitMethod'))).toBe(true)
+        for (const request of unitRpc.filter(request => /productionUnits|productionUnitMethod/.test(request.path))) {
+          const payload = isRecord(request.body) ? request.body.payload : undefined
+          if (!isRecord(payload)) throw new Error('Unit read coordinates missing')
+          expect(Object.keys(payload).sort()).toEqual(request.path.endsWith('/productionUnits')
+            ? ['episodeId', 'projectId'] : ['episodeId', 'groupId', 'projectId'])
+        }
+        expect(JSON.stringify(unitRpc)).not.toContain(YIMENG_TOKEN)
+        expect(JSON.stringify(unitRpc)).not.toContain(IMAGO_ATTESTATION_KEY)
+        expect(requests.filter(request => /provider|worker|generate|approval|select/i.test(request.path))).toEqual([])
+        expect(units.getContractErrors()).toEqual([])
+        expect(await panel.locator('video, img, audio, a').count()).toBe(0)
+        expect(browserConsoleErrors.slice(consoleStart)).toEqual([])
+        expect(tripwire.pageErrors).toEqual([])
+        await expectNoVisibleTechnicalBrand(page)
+        productionUnitBrowserEvidence = {
+          schema: 'qingmu.e5-5-production-unit-browser-evidence.v1', method, currentFeed, recovered, recordedFinding,
+          unitRpc, unitPostCount: unitPosts.length, findingPostCount: findingPosts.length,
+          recoveryReceiptGetCount: receipts.length, recoveryWindowGetCount: recoveryRequests.length,
+          recoveryGetOnly: true, originalCoordinatesPreserved: true, lostResponseRetainedAcrossReload: true,
+          recoveryWithoutCurrentSource: true, finalMarkerCount: (await markers()).length, automaticPostRetryCount: 0,
+          ruleBindingCount: PRODUCTION_UNIT_BROWSER_RULE_PATHS.length, ruleRawShaVerified: true,
+          groupNo: 3, explicitUnitId: PRODUCTION_UNIT_BROWSER_UNIT_ID, frameIds: [SHOT_RIVER_FIRST_FRAME_ID, PROMPT_IR_FRAME_ID],
+          frameNos: [7, 12], storyboardRevision: 3, findingMatchedFrameContentSha256: 'b'.repeat(64),
+          mobileOverflow, panelOverflow, bindControlHeight, refreshControlHeight,
+          providerCalls: 0, planSealed: false, humanSignoffInferred: false, reworkExecuted: false,
+          consoleErrors: browserConsoleErrors.slice(consoleStart), pageErrors: tripwire.pageErrors,
+        }
+      } finally {
+        units.setMode('disabled')
+        findings.setMode('unavailable')
+        setVideoReviewMode('none')
+        await page.setViewportSize({ width: 1680, height: 1100 })
+        await dialog.getByRole('tab', { name: '总览', exact: true }).click()
+        await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
+        if (tracePath) {
+          await mkdir(dirname(tracePath), { recursive: true })
+          await page.context().tracing.stop({ path: tracePath })
+        }
       }
     }, 120_000)
 

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type {
   ImagoShotFindingMethodResponse, QingmuYimengPort, YimengShotFindingFeedResponse,
-  YimengShotFindingRecovery, YimengShotFindingResult,
+  YimengShotFindingRecovery, YimengShotFindingResult, YimengProductionUnitSource, YimengProductionUnitsResponse,
 } from '../src/client/contracts.ts'
 import { ShotFindingView } from '../src/client/ShotFindingView.tsx'
 import { zh, type QingmuCockpitKey } from '../src/client/locales.ts'
@@ -13,6 +13,7 @@ import type { ShotFindingRecoveryMarker } from '../src/client/shot-finding-contr
 import {
   shotFindingAuthorInput, shotFindingFeed, shotFindingMethod, shotFindingResult, shotFindingSha, shotFindingSource,
 } from './fixtures/shot-finding.client.ts'
+import { productionUnitsFeed } from '../../qingmu-yimeng-read-adapter/tests/production-unit-fixture.ts'
 
 type Port = Pick<QingmuYimengPort, 'shotFindings' | 'shotFindingMethod' | 'recordShotFinding' | 'recoverShotFinding'>
 const t = (key: QingmuCockpitKey) => zh[key]
@@ -75,6 +76,22 @@ function recovery(marker: ShotFindingRecoveryMarker, result: YimengShotFindingRe
 }
 function storageKey(marker: ShotFindingRecoveryMarker) {
   return ['qingmu:shot-finding-recovery:v1', marker.projectId, marker.episodeId, marker.frameId].map(encodeURIComponent).join(':')
+}
+function unitEvidence(changes: Partial<YimengProductionUnitSource> = {}, currentBinding = true): YimengProductionUnitsResponse {
+  const feed = productionUnitsFeed()
+  const subject = shotFindingResult().finding.subject
+  const previous = feed.bindings[0]
+  if (previous === undefined) throw new Error('Controlled unit fixture needs a binding')
+  const source: YimengProductionUnitSource = { ...previous.binding.source, projectId: subject.projectId, episodeId: subject.episodeId,
+    storyboardRevision: subject.storyboardRevision,
+    shots: [{ frameId: subject.frameId, frameNo: subject.frameNo, frameContentSha256: subject.frameContentSha256 }], ...changes }
+  const binding = { ...previous.binding, projectId: source.projectId, episodeId: source.episodeId, source,
+    sourceSnapshotSha256: shotFindingSha(source) }
+  const currentSource = currentBinding ? source : { ...source, title: 'Changed native group title' }
+  return { ...feed, projectId: source.projectId, episodeId: source.episodeId,
+    groups: [{ groupId: source.groupId, subject: currentSource, snapshotSha256: shotFindingSha(currentSource),
+      availability: { status: 'available', reason: null } }],
+    bindings: [{ binding, bindingSha256: shotFindingSha(binding), currentBinding }] }
 }
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); sessionStorage.clear() })
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
@@ -285,6 +302,61 @@ describe('Finding read-only rework preparation', () => {
     return screen.getByRole('region', { name: title })
   }
 
+  it.each([true, false])('shows exact unit scope evidence with current=%s without granting production authority', async (currentBinding) => {
+    const item = { ...shotFindingResult().finding, currentBinding: true }
+    const port = makePort({ ...shotFindingFeed(), items: [item] })
+    render(<ShotFindingView {...props(port)} productionUnits={unitEvidence({}, currentBinding)} />)
+    await screen.findByRole('combobox', { name: zh.findingEarliestOwner })
+    const preparation = await openPreparation()
+    expect(within(preparation).getByText('LSU17')).toBeTruthy()
+    expect(within(preparation).getByText(currentBinding ? zh.findingUnitCurrent : zh.findingUnitHistorical, { exact: false })).toBeTruthy()
+    expect(within(preparation).getByText(zh.findingUnitBoundary)).toBeTruthy()
+    expect(within(preparation).getAllByText(zh.findingReworkNotProvided)).toHaveLength(4)
+    expect(within(preparation).getByText(zh.findingReworkRouteUnavailable)).toBeTruthy()
+    expect(preparation.querySelector('button, input, select, textarea')).toBeNull()
+    expect(port.shotFindings).toHaveBeenCalledOnce()
+    expect(port.recordShotFinding).not.toHaveBeenCalled()
+    expect(port.recoverShotFinding).not.toHaveBeenCalled()
+  })
+
+  it.each(['frameId', 'frameNo', 'frameContentSha256', 'storyboardRevision'] as const)(
+    'does not promote a unit binding with mismatched %s to Finding evidence', async (field) => {
+      const subject = shotFindingResult().finding.subject
+      const shot = { frameId: subject.frameId, frameNo: subject.frameNo, frameContentSha256: subject.frameContentSha256 }
+      const changes: Partial<YimengProductionUnitSource> = field === 'storyboardRevision'
+        ? { storyboardRevision: subject.storyboardRevision + 1 }
+        : { shots: [{ ...shot, [field]: field === 'frameNo' ? subject.frameNo + 1
+          : field === 'frameId' ? 'another-canonical-frame' : 'f'.repeat(64) }] }
+      const port = makePort({ ...shotFindingFeed(), items: [{ ...shotFindingResult().finding, currentBinding: true }] })
+      render(<ShotFindingView {...props(port)} productionUnits={unitEvidence(changes)} />)
+      const preparation = await openPreparation()
+      expect(within(preparation).getByText(zh.findingUnitMissing)).toBeTruthy()
+      expect(within(preparation).queryByText('LSU17')).toBeNull()
+    },
+  )
+
+  it.each(['projectId', 'episodeId'] as const)('rejects %s from another unit-feed scope', async (field) => {
+    const port = makePort({ ...shotFindingFeed(), items: [{ ...shotFindingResult().finding, currentBinding: true }] })
+    render(<ShotFindingView {...props(port)} productionUnits={unitEvidence({ [field]: 'other-scope' })} />)
+    const preparation = await openPreparation()
+    expect(within(preparation).getByText(zh.findingUnitUnavailable)).toBeTruthy()
+    expect(within(preparation).queryByText('LSU17')).toBeNull()
+  })
+
+  it('removes previous unit evidence when its current read is invalidated, without extra Finding requests', async () => {
+    const port = makePort({ ...shotFindingFeed(), items: [{ ...shotFindingResult().finding, currentBinding: true }] })
+    const input = props(port)
+    const view = render(<ShotFindingView {...input} productionUnits={unitEvidence()} />)
+    await screen.findByRole('combobox', { name: zh.findingEarliestOwner })
+    const preparation = await openPreparation()
+    expect(within(preparation).getByText('LSU17')).toBeTruthy()
+    view.rerender(<ShotFindingView {...input} />)
+    expect(within(preparation).queryByText('LSU17')).toBeNull()
+    expect(within(preparation).getByText(zh.findingUnitUnavailable)).toBeTruthy()
+    expect(port.shotFindings).toHaveBeenCalledOnce()
+    expect(port.shotFindingMethod).toHaveBeenCalledOnce()
+  })
+
   it('shows the current binding without changing author text, duplicate evidence, hashes, requests, or markers', async () => {
     const author = { ...shotFindingAuthorInput(), timecode: '\uFEFF00:00.000–00:01.250',
       observation: '\uFEFF 原观察。\n 第二行\uFEFF', ownerReason: '\uFEFF原归因\n不改写',
@@ -399,13 +471,13 @@ describe('Finding read-only rework preparation', () => {
     render(<ShotFindingView {...props(port, source)} />)
     await screen.findByRole('combobox', { name: zh.findingEarliestOwner })
     const preparation = await openPreparation()
-    for (const label of ['阶段实例', '制作单元映射', '批准锁实例', '独立正式决定']) {
+    for (const label of ['阶段实例', '已封存计划中的单元实例', '批准锁实例', '独立正式决定']) {
       expect(within(preparation).getByText(label).nextElementSibling?.textContent).toBe('当前读合同未提供')
     }
     expect(within(preparation).getAllByText('当前读合同未提供')).toHaveLength(4)
     expect(within(preparation).getByText('未知，不能按责任岗位推断')).toBeTruthy()
     expect(within(preparation).getByText('当前视图无正式路由证据；本视图不提供执行')).toBeTruthy()
-    expect(within(preparation).getByText('以上仅说明证据提供情况，不表示系统不存在；制作单元映射不作为全局岗位的额外要求。')).toBeTruthy()
+    expect(within(preparation).getByText('以上仅说明证据提供情况，不表示系统不存在；单元实例不作为全局岗位的额外要求。')).toBeTruthy()
     expect(preparation.querySelector('button, a, input, select, textarea')).toBeNull()
     expect(port.recordShotFinding).not.toHaveBeenCalled()
     expect(port.recoverShotFinding).not.toHaveBeenCalled()

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/experimental/client-ui-qingmu-cockpit/README.md
-README.md: 83817b604cfd35750dc2ae03abfc42005d45fdcd
-README.zh.md: df2a9e5c8da389a6745a24efc231231c118eb2a7
+README.md: d80434d4847718d13dda4fb02737e011fb2d6f46
+README.zh.md: d32c8346d947d7daadd062d65b6cb3829fa37f68

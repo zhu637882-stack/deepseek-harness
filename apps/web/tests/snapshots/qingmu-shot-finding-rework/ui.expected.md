@@ -11,9 +11,12 @@
   - definition: 与记录时一致
   - term: 当前方法规则 SHA
   - definition: 3f6f1dba4ba866e0c556a198498c30fbf0af2323abdf5c3c1863898f6dc3cb63
+  - term: 制作单元范围绑定
+  - definition:
+    - paragraph: 尚无与此问题的镜头来源一致的范围绑定。
   - term: 阶段实例
   - definition: 当前读合同未提供
-  - term: 制作单元映射
+  - term: 已封存计划中的单元实例
   - definition: 当前读合同未提供
   - term: 批准锁实例
   - definition: 当前读合同未提供
@@ -23,7 +26,7 @@
   - definition: 未知，不能按责任岗位推断
   - term: 正式返修路由
   - definition: 当前视图无正式路由证据；本视图不提供执行
-  - paragraph: 以上仅说明证据提供情况，不表示系统不存在；制作单元映射不作为全局岗位的额外要求。
+  - paragraph: 以上仅说明证据提供情况，不表示系统不存在；单元实例不作为全局岗位的额外要求。
 
 ## Current media unavailable
 
@@ -36,9 +39,12 @@
   - definition: 当前方法未提供匹配岗位，保留原归因
   - term: 规则对照
   - definition: 当前规则不可核验
+  - term: 制作单元范围绑定
+  - definition:
+    - paragraph: 尚无与此问题的镜头来源一致的范围绑定。
   - term: 阶段实例
   - definition: 当前读合同未提供
-  - term: 制作单元映射
+  - term: 已封存计划中的单元实例
   - definition: 当前读合同未提供
   - term: 批准锁实例
   - definition: 当前读合同未提供
@@ -48,4 +54,4 @@
   - definition: 未知，不能按责任岗位推断
   - term: 正式返修路由
   - definition: 当前视图无正式路由证据；本视图不提供执行
-  - paragraph: 以上仅说明证据提供情况，不表示系统不存在；制作单元映射不作为全局岗位的额外要求。
+  - paragraph: 以上仅说明证据提供情况，不表示系统不存在；单元实例不作为全局岗位的额外要求。

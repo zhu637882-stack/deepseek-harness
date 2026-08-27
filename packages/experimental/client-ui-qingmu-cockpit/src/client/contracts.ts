@@ -1,5 +1,8 @@
 /** Stable Client-side view of the private Yimeng read-adapter RPC contract. */
 import type {
+  ImagoProductionUnitMethodRequest,
+  ImagoProductionUnitMethodResponse,
+  ImagoProductionUnitMethodProjection,
   ImagoContinuityMethodProjection,
   ImagoContinuityMethodRequest,
   ImagoContinuityMethodResponse,
@@ -22,6 +25,11 @@ import type {
   ImagoWorksetProjection,
 } from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter/types'
 import type {
+  YimengProductionUnitSource,
+  YimengProductionUnitDefinition,
+  YimengProductionUnitBinding,
+  YimengProductionUnitsRequest,
+  YimengProductionUnitsResponse,
   YimengEpisodesRequest,
   YimengEpisodesResponse,
   YimengElementProfileRequest,
@@ -73,6 +81,10 @@ import type {
   YimengWorkflowRequest,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type {
+  YimengBindProductionUnitRequest,
+  YimengRecoverProductionUnitBindingRequest,
+  YimengProductionUnitResult,
+  YimengProductionUnitRecovery,
   YimengCommitElementProfileRequest,
   YimengCommitElementProfileResponse,
   YimengCommitPromptIrEditRequest,
@@ -130,6 +142,9 @@ import type {
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 
 export type {
+  ImagoProductionUnitMethodRequest,
+  ImagoProductionUnitMethodResponse,
+  ImagoProductionUnitMethodProjection,
   ImagoContinuityMethodProjection,
   ImagoContinuityMethodRequest,
   ImagoContinuityMethodResponse,
@@ -152,6 +167,11 @@ export type {
   ImagoWorksetProjection,
 }
 export type {
+  YimengProductionUnitSource,
+  YimengProductionUnitDefinition,
+  YimengProductionUnitBinding,
+  YimengProductionUnitsRequest,
+  YimengProductionUnitsResponse,
   YimengEpisodesRequest,
   YimengEpisodesResponse,
   YimengElementProfileRequest,
@@ -202,6 +222,10 @@ export type {
   YimengWorkflowRequest,
 }
 export type {
+  YimengBindProductionUnitRequest,
+  YimengRecoverProductionUnitBindingRequest,
+  YimengProductionUnitResult,
+  YimengProductionUnitRecovery,
   YimengCommitElementProfileRequest,
   YimengCommitElementProfileResponse,
   YimengCommitPromptIrEditRequest,
@@ -263,6 +287,7 @@ export type JsonRecord = YimengJsonObject
 
 /** Read-only browser-facing methods exposed by the Qingmu Host adapter. */
 export interface QingmuYimengReadPort {
+  productionUnits(request: YimengProductionUnitsRequest, signal?: AbortSignal): Promise<YimengProductionUnitsResponse>
   health(signal?: AbortSignal): Promise<YimengHealth>
   projects(request: YimengProjectsRequest, signal?: AbortSignal): Promise<YimengProjectsResponse>
   episodes(request: YimengEpisodesRequest, signal?: AbortSignal): Promise<YimengEpisodesResponse>
@@ -282,6 +307,10 @@ export interface QingmuYimengReadPort {
 
 /** Explicit ChangeSet commands exposed through the separate Host-only command channel. */
 export interface QingmuYimengCommandPort {
+  bindProductionUnit(request: YimengBindProductionUnitRequest, signal?: AbortSignal): Promise<YimengProductionUnitResult>
+  recoverProductionUnitBinding(
+    request: YimengRecoverProductionUnitBindingRequest, signal?: AbortSignal,
+  ): Promise<YimengProductionUnitRecovery>
   recordShotFinding(request: YimengRecordShotFindingRequest, signal?: AbortSignal): Promise<YimengShotFindingResult>
   recoverShotFinding(request: YimengRecoverShotFindingRequest, signal?: AbortSignal): Promise<YimengShotFindingRecovery>
   proposeElementProfile(request: YimengProposeElementProfileRequest, signal?: AbortSignal): Promise<YimengProposeElementProfileResponse>
@@ -347,6 +376,7 @@ export interface QingmuYimengCommandPort {
 
 /** Read-only, stateless professional method compiler channel. */
 export interface QingmuImagoMethodPort {
+  productionUnitMethod(request: ImagoProductionUnitMethodRequest, signal?: AbortSignal): Promise<ImagoProductionUnitMethodResponse>
   shotFindingMethod(request: ImagoShotFindingMethodRequest, signal?: AbortSignal): Promise<ImagoShotFindingMethodResponse>
   continuityMethod(request: ImagoContinuityMethodRequest, signal?: AbortSignal): Promise<ImagoContinuityMethodResponse>
   worksetMethod(request: ImagoWorksetMethodRequest, signal?: AbortSignal): Promise<ImagoWorksetMethodResponse>

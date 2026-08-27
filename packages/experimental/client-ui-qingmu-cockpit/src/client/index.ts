@@ -5,6 +5,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { QingmuCockpit } from './QingmuCockpit.tsx'
 import type {
+  ImagoProductionUnitMethodResponse, YimengProductionUnitsResponse, YimengProductionUnitResult, YimengProductionUnitRecovery,
   ImagoContinuityMethodResponse,
   ImagoShotFindingMethodResponse, YimengShotFindingFeedResponse, YimengShotFindingResult, YimengShotFindingRecovery,
   ImagoElementMethodResponse, ImagoHeroFrameStoryboardMethodResponse, ImagoPromptIrMethodResponse,
@@ -32,6 +33,7 @@ import { en, NS, zh } from './locales.ts'
 
 export type { QingmuCockpitFace } from './slots.ts'
 export type {
+  ImagoProductionUnitMethodResponse, YimengProductionUnitsResponse, YimengProductionUnitResult, YimengProductionUnitRecovery,
   ImagoContinuityMethodResponse,
   ImagoShotFindingMethodResponse, YimengShotFindingFeedResponse, YimengShotFindingResult, YimengShotFindingRecovery,
   ImagoElementMethodResponse, ImagoHeroFrameStoryboardMethodResponse, ImagoPromptIrMethodResponse,
@@ -76,6 +78,10 @@ export function apply(ctx: ClientContext): void {
     unwrapRpc(await connection.rpc.call('/qingmu-imago-method', endpoint, payload, signal)) as T
 
   const port: QingmuYimengPort = {
+    productionUnits: (request, signal) => read<YimengProductionUnitsResponse>('productionUnits', request, signal),
+    productionUnitMethod: (request, signal) => method<ImagoProductionUnitMethodResponse>('productionUnitMethod', request, signal),
+    bindProductionUnit: (request, signal) => command<YimengProductionUnitResult>('bindProductionUnit', request, signal),
+    recoverProductionUnitBinding: (request, signal) => command<YimengProductionUnitRecovery>('recoverProductionUnitBinding', request, signal),
     health: signal => read<YimengHealth>('health', {}, signal),
     projects: (request, signal) => read<YimengProjectsResponse>('projects', request, signal),
     episodes: (request, signal) => read<YimengEpisodesResponse>('episodes', request, signal),

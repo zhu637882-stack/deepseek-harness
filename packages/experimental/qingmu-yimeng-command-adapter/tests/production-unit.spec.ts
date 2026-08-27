@@ -210,7 +210,7 @@ describe('production-unit binding transport', () => {
 })
 
 describe('production-unit command validation', () => {
-  const cases: readonly (readonly [string, unknown, boolean?])[] = [
+  const cases: [string, unknown, boolean?][] = [
     ['actorId', 'browser-owner'], ['authSessionId', 'a'.repeat(64)], ['confirmed', true],
     ['expectedBindingSha256', undefined], ['expectedBindingSha256', 'f'.repeat(64)],
     ['expectedBindingRevision', 1], ['expectedBindingRevision', true], ['expectedBindingRevision', -1],
