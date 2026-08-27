@@ -387,12 +387,136 @@ export interface ImagoShotRelationMethodResponse extends ImagoMethodJsonObject {
   readonly methodAttestation: ImagoShotRelationMethodAttestation
 }
 
+/** Integer point in the browser-independent 0..10000 storyboard coordinate space. */
+export interface ImagoHeroFrameStoryboardPoint extends ImagoMethodJsonObject {
+  readonly x: number
+  readonly y: number
+}
+
+/** Canonical Shot-local actor or prop reference used by one canvas annotation. */
+export interface ImagoHeroFrameStoryboardElementRef extends ImagoMethodJsonObject {
+  readonly elementKind: 'actor' | 'prop'
+  readonly elementId: string
+}
+
+/** Raw Shot-local annotation compiled into deterministic director fields. */
+export interface ImagoHeroFrameStoryboardAnnotation extends ImagoMethodJsonObject {
+  readonly annotationId: string
+  readonly kind: 'subject_region' | 'object_anchor' | 'motion_vector'
+  readonly elementRef: ImagoHeroFrameStoryboardElementRef
+  readonly points: readonly ImagoHeroFrameStoryboardPoint[]
+}
+
+/** Browser input containing canonical Yimeng lineage, one selected Hero Frame, and transient canvas annotations. */
+export interface ImagoHeroFrameStoryboardMethodRequest extends ImagoShotRelationMethodRequest {
+  readonly heroFrame: {
+    readonly assetId: string
+    readonly mediaSha256: string
+  }
+  readonly canvas: {
+    readonly baseCanvasSha256: string | null
+    readonly annotations: readonly ImagoHeroFrameStoryboardAnnotation[]
+  }
+}
+
+/** Exact compiler input constructed by the Host with every relation, Hero Frame, and annotation SHA derived. */
+export interface ImagoHeroFrameStoryboardMethodSnapshot extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.hero-frame-storyboard-method-snapshot.v1'
+  readonly target: ImagoShotRelationMethodSnapshot['target'] & {
+    readonly selectedShotSnapshotSha256: string
+  }
+  readonly scenes: readonly ImagoShotRelationScene[]
+  readonly shots: readonly ImagoShotRelationShot[]
+  readonly elements: readonly ImagoShotRelationElement[]
+  readonly heroFrame: {
+    readonly assetId: string
+    readonly mediaSha256: string
+    readonly bindingSha256: string
+  }
+  readonly canvas: {
+    readonly baseCanvasSha256: string | null
+    readonly rawAnnotationsSha256: string
+    readonly annotations: readonly ImagoHeroFrameStoryboardAnnotation[]
+  }
+  readonly authority: {
+    readonly business_truth: 'yimeng'
+    readonly shot_id_source: 'yimeng_storyboard_frame_id'
+    readonly hero_frame_source: 'yimeng_selected_first_frame'
+    readonly method_source: 'imago_os_current'
+    readonly human_approval: 'not_granted'
+    readonly paid_provider_authority: 'not_granted'
+  }
+}
+
+/** Deterministic fields compiled from raw canvas annotations. */
+export interface ImagoHeroFrameStoryboardCompiledResult extends ImagoMethodJsonObject {
+  readonly subjectLayout: readonly ImagoMethodJsonObject[]
+  readonly objectAnchors: readonly ImagoMethodJsonObject[]
+  readonly actionTrajectory: readonly ImagoMethodJsonObject[]
+}
+
+/** Stateless IMAGO Hero Frame and Storyboard Canvas method projection for one canonical Yimeng Shot. */
+export interface ImagoHeroFrameStoryboardMethodProjection extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-hero-frame-storyboard-method-projection.v1'
+  readonly input_snapshot_sha256: string
+  readonly target: ImagoHeroFrameStoryboardMethodSnapshot['target']
+  readonly canvas_projection: {
+    readonly canonicalShotIdSource: 'yimeng_storyboard_frame_id'
+    readonly shotId: string
+    readonly selectedShot: ImagoShotRelationShot
+    readonly heroFrame: ImagoHeroFrameStoryboardMethodSnapshot['heroFrame']
+    readonly baseCanvasSha256: string | null
+    readonly rawAnnotations: readonly ImagoHeroFrameStoryboardAnnotation[]
+    readonly rawAnnotationsSha256: string
+    readonly compiledResult: ImagoHeroFrameStoryboardCompiledResult
+    readonly compiledResultSha256: string
+  }
+  readonly method_definition: ImagoMethodJsonObject
+  readonly source_bindings: readonly ImagoMethodJsonObject[]
+  readonly field_hints: readonly ImagoMethodJsonObject[]
+  readonly checklist: readonly ImagoMethodJsonObject[]
+  readonly work_order_projection: ImagoMethodJsonObject
+  readonly review_card: ImagoMethodJsonObject
+  readonly legal_work_set: ImagoMethodJsonObject
+  readonly authority_snapshot_attestation: 'not_verified_by_compiler'
+  readonly project_state_persisted: false
+  readonly providerCalls: 0
+  readonly workerStarted: false
+  readonly selection_executed: false
+  readonly human_approval_inferred: false
+  readonly human_signoff_inferred: false
+}
+
+/** HMAC proof over every immutable lineage and compiled Storyboard Canvas result. */
+export interface ImagoHeroFrameStoryboardMethodAttestation extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-hero-frame-storyboard-method-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly projectionSha256: string
+  readonly inputSnapshotSha256: string
+  readonly targetSha256: string
+  readonly relationSnapshotSha256: string
+  readonly selectedShotSha256: string
+  readonly heroFrameBindingSha256: string
+  readonly rawAnnotationsSha256: string
+  readonly compiledResultSha256: string
+  readonly signature: string
+}
+
+/** Host-attested wrapper for one non-executing Hero Frame and Storyboard Canvas compile. */
+export interface ImagoHeroFrameStoryboardMethodResponse extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-hero-frame-storyboard-method-adapter-result.v1'
+  readonly projectionSha256: string
+  readonly projection: ImagoHeroFrameStoryboardMethodProjection
+  readonly methodAttestation: ImagoHeroFrameStoryboardMethodAttestation
+}
+
 /** Result values exposed by `/qingmu-imago-method`. */
 export interface ImagoMethodEndpointMap {
   readonly elementMethod: ImagoElementMethodResponse
   readonly referenceAssetMethod: ImagoReferenceAssetMethodResponse
   readonly promptIrMethod: ImagoPromptIrMethodResponse
   readonly shotRelationMethod: ImagoShotRelationMethodResponse
+  readonly heroFrameStoryboardMethod: ImagoHeroFrameStoryboardMethodResponse
 }
 
 /** Endpoint names accepted by the private method channel. */

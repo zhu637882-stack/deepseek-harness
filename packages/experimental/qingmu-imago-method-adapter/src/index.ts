@@ -16,6 +16,13 @@ import type {
   ImagoElementMethodSnapshot,
   ImagoElementMethodAttestation,
   ImagoElementKind,
+  ImagoHeroFrameStoryboardAnnotation,
+  ImagoHeroFrameStoryboardCompiledResult,
+  ImagoHeroFrameStoryboardMethodAttestation,
+  ImagoHeroFrameStoryboardMethodProjection,
+  ImagoHeroFrameStoryboardMethodRequest,
+  ImagoHeroFrameStoryboardMethodResponse,
+  ImagoHeroFrameStoryboardMethodSnapshot,
   ImagoMethodJsonObject,
   ImagoPromptIrEditableField,
   ImagoPromptIrEditableProjection,
@@ -51,6 +58,15 @@ export type {
   ImagoElementMethodSnapshot,
   ImagoElementMethodAttestation,
   ImagoElementKind,
+  ImagoHeroFrameStoryboardAnnotation,
+  ImagoHeroFrameStoryboardCompiledResult,
+  ImagoHeroFrameStoryboardElementRef,
+  ImagoHeroFrameStoryboardMethodAttestation,
+  ImagoHeroFrameStoryboardMethodProjection,
+  ImagoHeroFrameStoryboardMethodRequest,
+  ImagoHeroFrameStoryboardMethodResponse,
+  ImagoHeroFrameStoryboardMethodSnapshot,
+  ImagoHeroFrameStoryboardPoint,
   ImagoMethodEndpoint,
   ImagoMethodEndpointMap,
   ImagoMethodJsonObject,
@@ -97,6 +113,7 @@ const REFERENCE_RIGHTS_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_referenc
 const REFERENCE_RIGHTS_EXCEPTION_RELEASE_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_reference_rights_exception_release_method.py'
 const PROMPT_IR_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_prompt_ir_method.py'
 const SHOT_RELATION_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_shot_relation_method.py'
+const HERO_FRAME_STORYBOARD_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_hero_frame_storyboard_method.py'
 const COMMON_SOURCE_PATHS = [
   'pipeline/imago-os-current.json',
   'pipeline/workflow-channel-registry.json',
@@ -226,6 +243,34 @@ const SHOT_RELATION_FORBIDDEN_WORK = [
   'human_approval',
   'human_signoff',
 ] as const
+const HERO_FRAME_STORYBOARD_HINT_IDS = [
+  'canonical-shot-identity',
+  'normalized-canvas-coordinates',
+  'shot-local-element-reference',
+  'raw-and-compiled-pair',
+  'preflight-not-approval',
+] as const
+const HERO_FRAME_STORYBOARD_CHECK_IDS = [
+  'canonical-shot-id',
+  'hero-frame-lineage',
+  'annotation-shape',
+  'element-subset',
+  'revision-and-sha-current',
+  'zero-execution',
+] as const
+const HERO_FRAME_STORYBOARD_FORBIDDEN_WORK = [
+  'direct_project_state_write',
+  'direct_database_write',
+  'second_shot_identity_create',
+  'imago_canvas_state_persist',
+  'provider_dispatch',
+  'asset_generation',
+  'asset_selection',
+  'human_approval',
+  'human_signoff',
+] as const
+const STORYBOARD_COORDINATE_MAX = 10_000
+const MAX_STORYBOARD_ANNOTATIONS = 256
 
 interface ElementMethodProfile {
   readonly methodId: string
@@ -345,6 +390,12 @@ export interface ImagoMethodAdapterDependencies {
   /** Optional injectable boundary for the read-only Scene/Shot/Beat/Element relation compiler. */
   readonly runShotRelationCompiler?: (
     snapshot: ImagoShotRelationMethodSnapshot,
+    execution: ImagoMethodCompilerExecution,
+    signal: AbortSignal,
+  ) => Promise<unknown>
+  /** Optional injectable boundary for the Hero Frame and Storyboard Canvas compiler. */
+  readonly runHeroFrameStoryboardCompiler?: (
+    snapshot: ImagoHeroFrameStoryboardMethodSnapshot,
     execution: ImagoMethodCompilerExecution,
     signal: AbortSignal,
   ) => Promise<unknown>
@@ -659,6 +710,150 @@ function parseShotRelationRequest(payload: unknown): ImagoShotRelationMethodRequ
   }
 }
 
+function parseStoryboardPoint(value: unknown, field: string): { x: number; y: number } {
+  const point = parseExactInputObject(value, ['x', 'y'], field)
+  const x = parseInputInteger(point.x, `${field}.x`)
+  const y = parseInputInteger(point.y, `${field}.y`)
+  if (x > STORYBOARD_COORDINATE_MAX || y > STORYBOARD_COORDINATE_MAX) {
+    throw new InputError(`${field} coordinates must be integers from 0 to ${String(STORYBOARD_COORDINATE_MAX)}`)
+  }
+  return { x, y }
+}
+
+function parseHeroFrameStoryboardAnnotations(
+  value: unknown,
+  selectedShot: ImagoShotRelationShot,
+  elements: readonly ImagoShotRelationElement[],
+): ImagoHeroFrameStoryboardAnnotation[] {
+  if (!Array.isArray(value)) throw new InputError('canvas.annotations must be an array')
+  if (value.length > MAX_STORYBOARD_ANNOTATIONS) {
+    throw new InputError(`canvas.annotations must not exceed ${String(MAX_STORYBOARD_ANNOTATIONS)} items`)
+  }
+  const shotElementIds = new Set(selectedShot.elementIds)
+  const elementKindById = new Map(elements.map(element => [element.elementId, element.elementKind]))
+  const annotationIds = new Set<string>()
+  return value.map((rawAnnotation, index) => {
+    const field = `canvas.annotations[${String(index)}]`
+    const annotation = parseExactInputObject(
+      rawAnnotation,
+      ['annotationId', 'kind', 'elementRef', 'points'],
+      field,
+    )
+    const annotationId = parseIdentifier(annotation.annotationId, `${field}.annotationId`)
+    if (annotationIds.has(annotationId)) throw new InputError(`duplicate annotationId: ${annotationId}`)
+    annotationIds.add(annotationId)
+    if (
+      annotation.kind !== 'subject_region'
+      && annotation.kind !== 'object_anchor'
+      && annotation.kind !== 'motion_vector'
+    ) {
+      throw new InputError(`${field}.kind must be subject_region, object_anchor, or motion_vector`)
+    }
+    const elementRef = parseExactInputObject(
+      annotation.elementRef,
+      ['elementKind', 'elementId'],
+      `${field}.elementRef`,
+    )
+    if (elementRef.elementKind !== 'actor' && elementRef.elementKind !== 'prop') {
+      throw new InputError(`${field}.elementRef.elementKind must be actor or prop`)
+    }
+    const elementId = parseIdentifier(elementRef.elementId, `${field}.elementRef.elementId`)
+    if (!shotElementIds.has(elementId)) {
+      throw new InputError(`${field}.elementRef references Element outside selected Shot: ${elementId}`)
+    }
+    if (elementKindById.get(elementId) !== elementRef.elementKind) {
+      throw new InputError(`${field}.elementRef kind does not match Element authority`)
+    }
+    if (annotation.kind === 'subject_region' && elementRef.elementKind !== 'actor') {
+      throw new InputError(`${field}.subject_region requires an actor Element`)
+    }
+    if (annotation.kind === 'object_anchor' && elementRef.elementKind !== 'prop') {
+      throw new InputError(`${field}.object_anchor requires a prop Element`)
+    }
+    const expectedPoints = annotation.kind === 'object_anchor' ? 1 : 2
+    if (!Array.isArray(annotation.points) || annotation.points.length !== expectedPoints) {
+      throw new InputError(`${field}.points must contain exactly ${String(expectedPoints)} point(s)`)
+    }
+    const points = annotation.points.map((point, pointIndex) => (
+      parseStoryboardPoint(point, `${field}.points[${String(pointIndex)}]`)
+    ))
+    const first = points[0]
+    const second = points[1]
+    if (
+      annotation.kind === 'subject_region'
+      && first !== undefined
+      && second !== undefined
+      && (first.x === second.x || first.y === second.y)
+    ) {
+      throw new InputError(`${field}.subject_region points must define a non-zero rectangle`)
+    }
+    if (
+      annotation.kind === 'motion_vector'
+      && first !== undefined
+      && second !== undefined
+      && first.x === second.x
+      && first.y === second.y
+    ) {
+      throw new InputError(`${field}.motion_vector points must be different`)
+    }
+    return {
+      annotationId,
+      kind: annotation.kind,
+      elementRef: { elementKind: elementRef.elementKind, elementId },
+      points,
+    }
+  })
+}
+
+function parseHeroFrameStoryboardRequest(payload: unknown): ImagoHeroFrameStoryboardMethodRequest {
+  const input = parseExactInputObject(payload, [
+    'projectId',
+    'episodeId',
+    'episodeRevision',
+    'storyboardRevisionId',
+    'storyboardRevisionVersion',
+    'storyboardSourceSha256',
+    'selectedShotId',
+    'scenes',
+    'shots',
+    'elements',
+    'heroFrame',
+    'canvas',
+  ], 'payload')
+  const relations = parseShotRelationRequest({
+    projectId: input.projectId,
+    episodeId: input.episodeId,
+    episodeRevision: input.episodeRevision,
+    storyboardRevisionId: input.storyboardRevisionId,
+    storyboardRevisionVersion: input.storyboardRevisionVersion,
+    storyboardSourceSha256: input.storyboardSourceSha256,
+    selectedShotId: input.selectedShotId,
+    scenes: input.scenes,
+    shots: input.shots,
+    elements: input.elements,
+  })
+  const selectedShot = relations.shots.find(shot => shot.shotId === relations.selectedShotId)
+  if (selectedShot === undefined) throw new InputError('selectedShotId references unknown Shot ID')
+  const heroFrame = parseExactInputObject(input.heroFrame, ['assetId', 'mediaSha256'], 'heroFrame')
+  const canvas = parseExactInputObject(input.canvas, ['baseCanvasSha256', 'annotations'], 'canvas')
+  if (canvas.baseCanvasSha256 !== null && typeof canvas.baseCanvasSha256 !== 'string') {
+    throw new InputError('canvas.baseCanvasSha256 must be null or a lowercase SHA-256')
+  }
+  return {
+    ...relations,
+    heroFrame: {
+      assetId: parseIdentifier(heroFrame.assetId, 'heroFrame.assetId'),
+      mediaSha256: parseInputSha256(heroFrame.mediaSha256, 'heroFrame.mediaSha256'),
+    },
+    canvas: {
+      baseCanvasSha256: canvas.baseCanvasSha256 === null
+        ? null
+        : parseInputSha256(canvas.baseCanvasSha256, 'canvas.baseCanvasSha256'),
+      annotations: parseHeroFrameStoryboardAnnotations(canvas.annotations, selectedShot, relations.elements),
+    },
+  }
+}
+
 function parseRequest(payload: unknown): ImagoElementMethodRequest {
   const input = parseInputObject(payload)
   assertOnlyInputKeys(input, [
@@ -955,6 +1150,138 @@ function buildShotRelationSnapshot(
   }
 }
 
+function buildHeroFrameBindingSubject(
+  target: ImagoHeroFrameStoryboardMethodSnapshot['target'],
+  heroFrame: ImagoHeroFrameStoryboardMethodRequest['heroFrame'],
+): ImagoMethodJsonObject {
+  return {
+    schema: 'jason.qingmu-hero-frame-binding.v1',
+    projectId: target.projectId,
+    episodeId: target.episodeId,
+    episodeRevision: target.episodeRevision,
+    storyboardRevisionId: target.storyboardRevisionId,
+    storyboardRevisionVersion: target.storyboardRevisionVersion,
+    storyboardSourceSha256: target.storyboardSourceSha256,
+    relationSnapshotSha256: target.relationSnapshotSha256,
+    selectedShotId: target.selectedShotId,
+    selectedShotSnapshotSha256: target.selectedShotSnapshotSha256,
+    assetId: heroFrame.assetId,
+    mediaSha256: heroFrame.mediaSha256,
+  }
+}
+
+function buildRawAnnotationsSubject(
+  target: ImagoHeroFrameStoryboardMethodSnapshot['target'],
+  heroFrameBindingSha256: string,
+  annotations: readonly ImagoHeroFrameStoryboardAnnotation[],
+): ImagoMethodJsonObject {
+  return {
+    schema: 'jason.qingmu-storyboard-raw-annotations.v1',
+    projectId: target.projectId,
+    episodeId: target.episodeId,
+    storyboardRevisionId: target.storyboardRevisionId,
+    storyboardRevisionVersion: target.storyboardRevisionVersion,
+    selectedShotId: target.selectedShotId,
+    selectedShotSnapshotSha256: target.selectedShotSnapshotSha256,
+    heroFrameBindingSha256,
+    annotations,
+  }
+}
+
+function buildHeroFrameStoryboardSnapshot(
+  request: ImagoHeroFrameStoryboardMethodRequest,
+): ImagoHeroFrameStoryboardMethodSnapshot {
+  const selectedShot = request.shots.find(shot => shot.shotId === request.selectedShotId)
+  if (selectedShot === undefined) throw new InputError('selectedShotId references unknown Shot ID')
+  const target: ImagoHeroFrameStoryboardMethodSnapshot['target'] = {
+    projectId: request.projectId,
+    episodeId: request.episodeId,
+    episodeRevision: request.episodeRevision,
+    storyboardRevisionId: request.storyboardRevisionId,
+    storyboardRevisionVersion: request.storyboardRevisionVersion,
+    storyboardSourceSha256: request.storyboardSourceSha256,
+    relationSnapshotSha256: canonicalSha256(
+      buildYimengShotRelationAuthority(request),
+      'yimengShotRelationAuthority',
+    ),
+    selectedShotId: request.selectedShotId,
+    selectedShotSnapshotSha256: canonicalSha256(selectedShot, 'selectedShot'),
+  }
+  const bindingSha256 = canonicalSha256(
+    buildHeroFrameBindingSubject(target, request.heroFrame),
+    'heroFrameBindingSubject',
+  )
+  return {
+    schema: 'qingmu.hero-frame-storyboard-method-snapshot.v1',
+    target,
+    scenes: request.scenes,
+    shots: request.shots,
+    elements: request.elements,
+    heroFrame: {
+      ...request.heroFrame,
+      bindingSha256,
+    },
+    canvas: {
+      baseCanvasSha256: request.canvas.baseCanvasSha256,
+      rawAnnotationsSha256: canonicalSha256(
+        buildRawAnnotationsSubject(target, bindingSha256, request.canvas.annotations),
+        'rawAnnotationsSubject',
+      ),
+      annotations: request.canvas.annotations,
+    },
+    authority: {
+      business_truth: 'yimeng',
+      shot_id_source: 'yimeng_storyboard_frame_id',
+      hero_frame_source: 'yimeng_selected_first_frame',
+      method_source: 'imago_os_current',
+      human_approval: 'not_granted',
+      paid_provider_authority: 'not_granted',
+    },
+  }
+}
+
+function compileHeroFrameStoryboardAnnotations(
+  annotations: readonly ImagoHeroFrameStoryboardAnnotation[],
+): ImagoHeroFrameStoryboardCompiledResult {
+  const subjectLayout: ImagoMethodJsonObject[] = []
+  const objectAnchors: ImagoMethodJsonObject[] = []
+  const actionTrajectory: ImagoMethodJsonObject[] = []
+  for (const annotation of annotations) {
+    const first = annotation.points[0]
+    if (first === undefined) throw new ProjectionContractError('raw annotation point is absent')
+    if (annotation.kind === 'subject_region') {
+      const second = annotation.points[1]
+      if (second === undefined) throw new ProjectionContractError('subject region second point is absent')
+      subjectLayout.push({
+        annotationId: annotation.annotationId,
+        elementRef: annotation.elementRef,
+        bounds: {
+          xMin: Math.min(first.x, second.x),
+          yMin: Math.min(first.y, second.y),
+          xMax: Math.max(first.x, second.x),
+          yMax: Math.max(first.y, second.y),
+        },
+      })
+    } else if (annotation.kind === 'object_anchor') {
+      objectAnchors.push({
+        annotationId: annotation.annotationId,
+        elementRef: annotation.elementRef,
+        point: first,
+      })
+    } else {
+      const second = annotation.points[1]
+      if (second === undefined) throw new ProjectionContractError('motion vector second point is absent')
+      actionTrajectory.push({
+        annotationId: annotation.annotationId,
+        elementRef: annotation.elementRef,
+        from: first,
+        to: second,
+      })
+    }
+  }
+  return { subjectLayout, objectAnchors, actionTrajectory }
+}
+
 function compareUnicodeCodePoints(left: string, right: string): number {
   const leftPoints = Array.from(left, char => char.codePointAt(0) ?? 0)
   const rightPoints = Array.from(right, char => char.codePointAt(0) ?? 0)
@@ -1083,6 +1410,36 @@ function createShotRelationMethodAttestation(
     relationSnapshotSha256: snapshot.target.relationSnapshotSha256,
     selectedShotSha256: canonicalSha256(selectedShot, 'snapshot.selectedShot'),
   } as const
+  return {
+    ...unsigned,
+    signature: createHmac('sha256', key)
+      .update(canonicalJson(unsigned, 'methodAttestation'), 'utf8')
+      .digest('hex'),
+  }
+}
+
+function createHeroFrameStoryboardMethodAttestation(
+  key: string,
+  projection: ImagoHeroFrameStoryboardMethodProjection,
+  snapshot: ImagoHeroFrameStoryboardMethodSnapshot,
+): ImagoHeroFrameStoryboardMethodAttestation {
+  const selectedShot = snapshot.shots.find(shot => shot.shotId === snapshot.target.selectedShotId)
+  if (selectedShot === undefined) throw new ProjectionContractError('selected Shot is absent from attestation input')
+  const unsigned = {
+    schema: 'qingmu.imago-hero-frame-storyboard-method-attestation.v1',
+    algorithm: 'hmac-sha256',
+    projectionSha256: canonicalSha256(projection, 'projection'),
+    inputSnapshotSha256: canonicalSha256(snapshot, 'snapshot'),
+    targetSha256: canonicalSha256(snapshot.target, 'snapshot.target'),
+    relationSnapshotSha256: snapshot.target.relationSnapshotSha256,
+    selectedShotSha256: snapshot.target.selectedShotSnapshotSha256,
+    heroFrameBindingSha256: snapshot.heroFrame.bindingSha256,
+    rawAnnotationsSha256: snapshot.canvas.rawAnnotationsSha256,
+    compiledResultSha256: projection.canvas_projection.compiledResultSha256,
+  } as const
+  if (unsigned.selectedShotSha256 !== canonicalSha256(selectedShot, 'snapshot.selectedShot')) {
+    throw new ProjectionContractError('selected Shot attestation hash mismatch')
+  }
   return {
     ...unsigned,
     signature: createHmac('sha256', key)
@@ -2085,6 +2442,284 @@ function normalizeShotRelationProjection(
   return root as ImagoShotRelationMethodProjection
 }
 
+function normalizeHeroFrameStoryboardProjection(
+  value: unknown,
+  snapshot: ImagoHeroFrameStoryboardMethodSnapshot,
+): ImagoHeroFrameStoryboardMethodProjection {
+  assertSafeJsonNumbers(value, 'projection')
+  const root = requireExactObject(value, [
+    'schema',
+    'input_snapshot_sha256',
+    'target',
+    'canvas_projection',
+    'method_definition',
+    'source_bindings',
+    'field_hints',
+    'checklist',
+    'work_order_projection',
+    'review_card',
+    'legal_work_set',
+    'authority_snapshot_attestation',
+    'project_state_persisted',
+    'providerCalls',
+    'workerStarted',
+    'selection_executed',
+    'human_approval_inferred',
+    'human_signoff_inferred',
+  ], 'projection')
+  if (root.schema !== 'qingmu.imago-hero-frame-storyboard-method-projection.v1') {
+    throw new ProjectionContractError('projection.schema mismatch')
+  }
+  if (
+    requireSha256(root.input_snapshot_sha256, 'projection.input_snapshot_sha256')
+    !== canonicalSha256(snapshot, 'snapshot')
+  ) {
+    throw new ProjectionContractError('projection input snapshot hash mismatch')
+  }
+  const target = requireExactObject(root.target, [
+    'projectId',
+    'episodeId',
+    'episodeRevision',
+    'storyboardRevisionId',
+    'storyboardRevisionVersion',
+    'storyboardSourceSha256',
+    'relationSnapshotSha256',
+    'selectedShotId',
+    'selectedShotSnapshotSha256',
+  ], 'projection.target')
+  if (!isDeepStrictEqual(target, snapshot.target)) {
+    throw new ProjectionContractError('projection target mismatch')
+  }
+
+  const selectedShot = snapshot.shots.find(shot => shot.shotId === snapshot.target.selectedShotId)
+  if (selectedShot === undefined) throw new ProjectionContractError('projection selected Shot is absent')
+  const expectedCompiledResult = compileHeroFrameStoryboardAnnotations(snapshot.canvas.annotations)
+  const canvas = requireExactObject(root.canvas_projection, [
+    'canonicalShotIdSource',
+    'shotId',
+    'selectedShot',
+    'heroFrame',
+    'baseCanvasSha256',
+    'rawAnnotations',
+    'rawAnnotationsSha256',
+    'compiledResult',
+    'compiledResultSha256',
+  ], 'projection.canvas_projection')
+  if (
+    canvas.canonicalShotIdSource !== 'yimeng_storyboard_frame_id'
+    || canvas.shotId !== snapshot.target.selectedShotId
+    || !isDeepStrictEqual(canvas.selectedShot, selectedShot)
+    || !isDeepStrictEqual(canvas.heroFrame, snapshot.heroFrame)
+    || canvas.baseCanvasSha256 !== snapshot.canvas.baseCanvasSha256
+    || !isDeepStrictEqual(canvas.rawAnnotations, snapshot.canvas.annotations)
+    || canvas.rawAnnotationsSha256 !== snapshot.canvas.rawAnnotationsSha256
+    || !isDeepStrictEqual(canvas.compiledResult, expectedCompiledResult)
+  ) {
+    throw new ProjectionContractError('projection canvas lineage or compiled result mismatch')
+  }
+  if (
+    requireSha256(canvas.compiledResultSha256, 'projection.canvas_projection.compiledResultSha256')
+    !== canonicalSha256(expectedCompiledResult, 'compiledResult')
+  ) {
+    throw new ProjectionContractError('projection compiled result hash mismatch')
+  }
+
+  const definition = requireExactObject(root.method_definition, [
+    'id',
+    'version',
+    'sha256',
+    'stage_contract_sha256',
+    'role_capability_sha256',
+    'agent_paths',
+    'skill_paths',
+  ], 'projection.method_definition')
+  if (
+    definition.id !== 'imago-v6-c-c5-hero-frame-storyboard-canvas'
+    || requireInteger(definition.version, 'projection.method_definition.version', 1) !== 1
+  ) {
+    throw new ProjectionContractError('projection method definition mismatch')
+  }
+  requireSha256(definition.sha256, 'projection.method_definition.sha256')
+  const stageContracts = requireExactObject(
+    definition.stage_contract_sha256,
+    ['CDEV', 'C5R'],
+    'projection.method_definition.stage_contract_sha256',
+  )
+  requireSha256(stageContracts.CDEV, 'projection.method_definition.stage_contract_sha256.CDEV')
+  requireSha256(stageContracts.C5R, 'projection.method_definition.stage_contract_sha256.C5R')
+  const roleCapabilities = requireExactObject(
+    definition.role_capability_sha256,
+    ['C', 'C5'],
+    'projection.method_definition.role_capability_sha256',
+  )
+  requireSha256(roleCapabilities.C, 'projection.method_definition.role_capability_sha256.C')
+  requireSha256(roleCapabilities.C5, 'projection.method_definition.role_capability_sha256.C5')
+  requireExactArray(
+    definition.agent_paths,
+    [SHOT_RELATION_SOURCE_PATHS[5], SHOT_RELATION_SOURCE_PATHS[8]],
+    'projection.method_definition.agent_paths',
+  )
+  requireExactArray(
+    definition.skill_paths,
+    [SHOT_RELATION_SOURCE_PATHS[6], SHOT_RELATION_SOURCE_PATHS[9]],
+    'projection.method_definition.skill_paths',
+  )
+
+  const bindings = requireObjectArray(root.source_bindings, 'projection.source_bindings')
+  if (bindings.length !== SHOT_RELATION_SOURCE_PATHS.length) {
+    throw new ProjectionContractError('projection source bindings mismatch')
+  }
+  bindings.forEach((value, index) => {
+    const binding = requireExactObject(
+      value,
+      ['kind', 'path', 'sha256'],
+      `projection.source_bindings[${String(index)}]`,
+    )
+    if (
+      binding.kind !== SHOT_RELATION_SOURCE_KINDS[index]
+      || binding.path !== SHOT_RELATION_SOURCE_PATHS[index]
+    ) {
+      throw new ProjectionContractError('projection source bindings mismatch')
+    }
+    requireSha256(binding.sha256, `projection.source_bindings[${String(index)}].sha256`)
+  })
+
+  const fieldHints = requireObjectArray(root.field_hints, 'projection.field_hints')
+  if (fieldHints.length !== HERO_FRAME_STORYBOARD_HINT_IDS.length) {
+    throw new ProjectionContractError('projection field hints mismatch')
+  }
+  fieldHints.forEach((value, index) => {
+    const hint = requireExactObject(
+      value,
+      ['hint_id', 'title', 'guidance'],
+      `projection.field_hints[${String(index)}]`,
+    )
+    if (
+      hint.hint_id !== HERO_FRAME_STORYBOARD_HINT_IDS[index]
+      || requireString(hint.title, `projection.field_hints[${String(index)}].title`).length === 0
+      || requireString(hint.guidance, `projection.field_hints[${String(index)}].guidance`).length === 0
+    ) {
+      throw new ProjectionContractError('projection field hints mismatch')
+    }
+  })
+  const checklist = requireObjectArray(root.checklist, 'projection.checklist')
+  if (checklist.length !== HERO_FRAME_STORYBOARD_CHECK_IDS.length) {
+    throw new ProjectionContractError('projection checklist mismatch')
+  }
+  checklist.forEach((value, index) => {
+    const item = requireExactObject(
+      value,
+      ['check_id', 'label', 'required'],
+      `projection.checklist[${String(index)}]`,
+    )
+    if (
+      item.check_id !== HERO_FRAME_STORYBOARD_CHECK_IDS[index]
+      || requireString(item.label, `projection.checklist[${String(index)}].label`).length === 0
+      || !requireBoolean(item.required, `projection.checklist[${String(index)}].required`)
+    ) {
+      throw new ProjectionContractError('projection checklist mismatch')
+    }
+  })
+
+  const workOrder = requireExactObject(root.work_order_projection, [
+    'target',
+    'operation',
+    'allowed_mutations',
+    'required_read_set',
+    'before_compile',
+    'after_compile',
+    'providerCalls',
+    'workerStarted',
+  ], 'projection.work_order_projection')
+  if (
+    !isDeepStrictEqual(workOrder.target, snapshot.target)
+    || workOrder.operation !== 'compileHeroFrameStoryboardCanvas'
+  ) {
+    throw new ProjectionContractError('projection work order target or operation mismatch')
+  }
+  requireExactArray(
+    workOrder.allowed_mutations,
+    ['replaceStoryboardCanvas'],
+    'projection.work_order_projection.allowed_mutations',
+  )
+  const expectedReadSet = [{
+    source: 'yimeng',
+    resource: 'hero_frame_storyboard_canvas_snapshot',
+    projectId: snapshot.target.projectId,
+    episodeId: snapshot.target.episodeId,
+    episodeRevision: snapshot.target.episodeRevision,
+    storyboardRevisionId: snapshot.target.storyboardRevisionId,
+    storyboardRevisionVersion: snapshot.target.storyboardRevisionVersion,
+    storyboardSourceSha256: snapshot.target.storyboardSourceSha256,
+    relationSnapshotSha256: snapshot.target.relationSnapshotSha256,
+    selectedShotId: snapshot.target.selectedShotId,
+    selectedShotSnapshotSha256: snapshot.target.selectedShotSnapshotSha256,
+    heroFrameBindingSha256: snapshot.heroFrame.bindingSha256,
+    baseCanvasSha256: snapshot.canvas.baseCanvasSha256,
+    rawAnnotationsSha256: snapshot.canvas.rawAnnotationsSha256,
+  }]
+  if (!isDeepStrictEqual(workOrder.required_read_set, expectedReadSet)) {
+    throw new ProjectionContractError('projection work order required reads mismatch')
+  }
+  requireNonemptyStringArray(workOrder.before_compile, 'projection.work_order_projection.before_compile')
+  requireNonemptyStringArray(workOrder.after_compile, 'projection.work_order_projection.after_compile')
+  if (
+    workOrder.providerCalls !== 0
+    || requireBoolean(workOrder.workerStarted, 'projection.work_order_projection.workerStarted')
+  ) {
+    throw new ProjectionContractError('projection work order execution boundary mismatch')
+  }
+
+  const reviewCard = requireExactObject(root.review_card, [
+    'title',
+    'summary',
+    'review_dimensions',
+    'hard_vetoes',
+    'decision_boundary',
+  ], 'projection.review_card')
+  for (const field of ['title', 'summary', 'decision_boundary']) {
+    if (requireString(reviewCard[field], `projection.review_card.${field}`).length === 0) {
+      throw new ProjectionContractError('projection review card must not contain empty strings')
+    }
+  }
+  requireNonemptyStringArray(reviewCard.review_dimensions, 'projection.review_card.review_dimensions')
+  requireNonemptyStringArray(reviewCard.hard_vetoes, 'projection.review_card.hard_vetoes')
+
+  const legalWorkSet = requireExactObject(
+    root.legal_work_set,
+    ['reads', 'writes', 'forbidden'],
+    'projection.legal_work_set',
+  )
+  requireExactArray(
+    legalWorkSet.reads,
+    ['yimeng_hero_frame_storyboard_canvas_snapshot'],
+    'projection.legal_work_set.reads',
+  )
+  requireExactArray(
+    legalWorkSet.writes,
+    ['replace_storyboard_canvas_via_changeset'],
+    'projection.legal_work_set.writes',
+  )
+  requireExactArray(
+    legalWorkSet.forbidden,
+    HERO_FRAME_STORYBOARD_FORBIDDEN_WORK,
+    'projection.legal_work_set.forbidden',
+  )
+
+  if (
+    root.authority_snapshot_attestation !== 'not_verified_by_compiler'
+    || requireBoolean(root.project_state_persisted, 'projection.project_state_persisted')
+    || root.providerCalls !== 0
+    || requireBoolean(root.workerStarted, 'projection.workerStarted')
+    || requireBoolean(root.selection_executed, 'projection.selection_executed')
+    || requireBoolean(root.human_approval_inferred, 'projection.human_approval_inferred')
+    || requireBoolean(root.human_signoff_inferred, 'projection.human_signoff_inferred')
+  ) {
+    throw new ProjectionContractError('projection authority or execution boundary mismatch')
+  }
+  return root as ImagoHeroFrameStoryboardMethodProjection
+}
+
 function resolveExecution(config: ImagoMethodAdapterConfig): ImagoMethodCompilerExecution {
   const configuredCoreRoot = config.coreRoot?.trim()
   const coreRoot = (configuredCoreRoot === undefined || configuredCoreRoot === ''
@@ -2156,6 +2791,14 @@ async function runShotRelationCompilerProcess(
   signal: AbortSignal,
 ): Promise<unknown> {
   return await runCompilerSubprocess(snapshot, execution, signal, SHOT_RELATION_COMPILER_RELATIVE_PATH)
+}
+
+async function runHeroFrameStoryboardCompilerProcess(
+  snapshot: ImagoHeroFrameStoryboardMethodSnapshot,
+  execution: ImagoMethodCompilerExecution,
+  signal: AbortSignal,
+): Promise<unknown> {
+  return await runCompilerSubprocess(snapshot, execution, signal, HERO_FRAME_STORYBOARD_COMPILER_RELATIVE_PATH)
 }
 
 async function runCompilerSubprocess(
@@ -2251,7 +2894,7 @@ function compilerEnvironment(): NodeJS.ProcessEnv {
  * Create the generic Connection handler without registering it.
  * @param config - absolute Core root and bounded local compiler settings.
  * @param dependencies - injectable compiler runner for isolated verification.
- * @returns a handler for private element, reference-asset, PromptIR, and Shot relation method endpoints.
+ * @returns a handler for private element, reference-asset, PromptIR, Shot relation, and Storyboard Canvas methods.
  */
 export function createImagoMethodHandler(
   config: ImagoMethodAdapterConfig,
@@ -2262,6 +2905,7 @@ export function createImagoMethodHandler(
     runReferenceRightsExceptionReleaseCompiler: runReferenceRightsExceptionReleaseCompilerProcess,
     runPromptIrCompiler: runPromptIrCompilerProcess,
     runShotRelationCompiler: runShotRelationCompilerProcess,
+    runHeroFrameStoryboardCompiler: runHeroFrameStoryboardCompilerProcess,
   },
 ): ConnectionRpcHandler {
   const execution = resolveExecution(config)
@@ -2272,10 +2916,29 @@ export function createImagoMethodHandler(
         && endpoint !== 'referenceAssetMethod'
         && endpoint !== 'promptIrMethod'
         && endpoint !== 'shotRelationMethod'
+        && endpoint !== 'heroFrameStoryboardMethod'
       ) {
         throw new InputError(`unknown IMAGO method endpoint: ${endpoint}`)
       }
       const attestationKey = readAttestationKey()
+      if (endpoint === 'heroFrameStoryboardMethod') {
+        const request = parseHeroFrameStoryboardRequest(payload)
+        const snapshot = buildHeroFrameStoryboardSnapshot(request)
+        if (signal.aborted) return cancelled()
+        if (dependencies.runHeroFrameStoryboardCompiler === undefined) throw new CompilerExecutionError()
+        const rawProjection = await dependencies.runHeroFrameStoryboardCompiler(snapshot, execution, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- the signal can abort while awaited.
+        if (signal.aborted) return cancelled()
+        const projection = normalizeHeroFrameStoryboardProjection(rawProjection, snapshot)
+        const methodAttestation = createHeroFrameStoryboardMethodAttestation(attestationKey, projection, snapshot)
+        const value: ImagoHeroFrameStoryboardMethodResponse = {
+          schema: 'qingmu.imago-hero-frame-storyboard-method-adapter-result.v1',
+          projectionSha256: methodAttestation.projectionSha256,
+          projection,
+          methodAttestation,
+        }
+        return { ok: true, value }
+      }
       if (endpoint === 'shotRelationMethod') {
         const request = parseShotRelationRequest(payload)
         const snapshot = buildShotRelationSnapshot(request)
