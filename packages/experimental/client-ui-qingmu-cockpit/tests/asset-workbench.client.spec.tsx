@@ -476,7 +476,7 @@ function referenceRightsExceptionReadRelease(
   return {
     ...result.release,
     stale,
-    staleReasonCodes: stale ? ['rights_record_sha256_changed'] : [],
+    staleReasonCodes: stale ? ['rights_record_sha256_drift'] : [],
   } as const
 }
 

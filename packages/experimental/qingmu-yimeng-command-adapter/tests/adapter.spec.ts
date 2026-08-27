@@ -1496,6 +1496,8 @@ describe('qingmu Yimeng command adapter', () => {
       { ...RIGHTS_EXCEPTION_RESULT, release: { ...RIGHTS_EXCEPTION_RELEASE, subjectSha256: 'f'.repeat(64) } },
       { ...RIGHTS_EXCEPTION_RESULT, release: { ...RIGHTS_EXCEPTION_RELEASE, reason: 'different reason' } },
       { ...RIGHTS_EXCEPTION_RESULT, release: { ...RIGHTS_EXCEPTION_RELEASE, actorNaturalPersonId: 'natural-producer-1' } },
+      { ...RIGHTS_EXCEPTION_RESULT, release: { ...RIGHTS_EXCEPTION_RELEASE, releasedAt: '2026-02-30T08:02:00Z' } },
+      { ...RIGHTS_EXCEPTION_RESULT, release: { ...RIGHTS_EXCEPTION_RELEASE, releasedAt: '2026-08-27T08:02:00' } },
       { ...RIGHTS_EXCEPTION_RESULT, release: { ...RIGHTS_EXCEPTION_RELEASE, stale: false } },
       { ...RIGHTS_EXCEPTION_RESULT, changed: true },
       { ...RIGHTS_EXCEPTION_RESULT, providerCalls: 1 },

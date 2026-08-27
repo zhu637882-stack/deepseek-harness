@@ -196,6 +196,7 @@ const RIGHTS_EXCEPTION_FIELDS = [
   'contentCredentials',
 ] as const satisfies readonly YimengReferenceRightsExceptionField[]
 const RIGHTS_EXCEPTION_FIELD_SET = new Set<YimengReferenceRightsExceptionField>(RIGHTS_EXCEPTION_FIELDS)
+const RFC3339_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(Z|[+-](\d{2}):(\d{2}))$/
 const SAFE_ERROR_CODE = /^[a-z0-9_:-]{1,128}$/
 const SENSITIVE_RESPONSE_KEYS = new Set([
   'authorization', 'proxyauthorization', 'cookie', 'setcookie', 'xapikey',
@@ -263,6 +264,35 @@ function requireString(value: unknown, field: string): string {
     throw new UpstreamContractError(`${field} must be a non-empty string`)
   }
   return value
+}
+
+function requireRfc3339Timestamp(value: unknown, field: string): string {
+  const timestamp = requireString(value, field)
+  const match = RFC3339_TIMESTAMP.exec(timestamp)
+  if (match === null) throw new UpstreamContractError(`${field} must be an RFC3339 timestamp with an offset`)
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const hour = Number(match[4])
+  const minute = Number(match[5])
+  const second = Number(match[6])
+  const offsetHour = Number(match[8] ?? 0)
+  const offsetMinute = Number(match[9] ?? 0)
+  const date = new Date(0)
+  date.setUTCFullYear(year, month - 1, day)
+  date.setUTCHours(hour, minute, second, 0)
+  if (
+    year < 1
+    || date.getUTCFullYear() !== year
+    || date.getUTCMonth() !== month - 1
+    || date.getUTCDate() !== day
+    || date.getUTCHours() !== hour
+    || date.getUTCMinutes() !== minute
+    || date.getUTCSeconds() !== second
+    || offsetHour > 23
+    || offsetMinute > 59
+  ) throw new UpstreamContractError(`${field} must be a valid RFC3339 timestamp`)
+  return timestamp
 }
 
 function requireNullableString(value: unknown, field: string): string | null {
@@ -3726,7 +3756,7 @@ function normalizeReferenceRightsExceptionReleaseFact(
     ),
     authSessionId: requireString(release.authSessionId, `${field}.authSessionId`),
     reason: requireString(release.reason, `${field}.reason`),
-    releasedAt: requireString(release.releasedAt, `${field}.releasedAt`),
+    releasedAt: requireRfc3339Timestamp(release.releasedAt, `${field}.releasedAt`),
   }
   if (
     fact.subjectId !== expected.targetId

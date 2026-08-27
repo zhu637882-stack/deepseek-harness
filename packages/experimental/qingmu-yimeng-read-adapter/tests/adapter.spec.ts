@@ -171,7 +171,7 @@ const STALE_RIGHTS_EXCEPTION_RELEASE = {
   subjectRevision: 3,
   subjectSha256: 'e'.repeat(64),
   stale: true,
-  staleReasonCodes: ['subject_revision_changed'],
+  staleReasonCodes: ['subject_binding_drift'],
 } as const
 const RIGHTS_EXCEPTION_FEED_FIXTURE = {
   schema: 'jason.qingmu-reference-rights-exception-release-feed.v1',
@@ -505,7 +505,26 @@ describe('qingmu Yimeng read adapter', () => {
       },
       {
         ...RIGHTS_EXCEPTION_FEED_FIXTURE,
-        currentReleases: [{ ...RIGHTS_EXCEPTION_RELEASE, stale: true, staleReasonCodes: ['rights_record_changed'] }],
+        currentReleases: [{ ...RIGHTS_EXCEPTION_RELEASE, stale: true, staleReasonCodes: ['rights_record_sha256_drift'] }],
+      },
+      {
+        ...RIGHTS_EXCEPTION_FEED_FIXTURE,
+        releases: [{ ...STALE_RIGHTS_EXCEPTION_RELEASE, staleReasonCodes: ['subject_revision_changed'] }, RIGHTS_EXCEPTION_RELEASE],
+      },
+      {
+        ...RIGHTS_EXCEPTION_FEED_FIXTURE,
+        releases: [{
+          ...STALE_RIGHTS_EXCEPTION_RELEASE,
+          staleReasonCodes: ['rights_record_sha256_drift', 'subject_binding_drift'],
+        }, RIGHTS_EXCEPTION_RELEASE],
+      },
+      {
+        ...RIGHTS_EXCEPTION_FEED_FIXTURE,
+        releases: [
+          STALE_RIGHTS_EXCEPTION_RELEASE,
+          { ...RIGHTS_EXCEPTION_RELEASE, releasedAt: '2026-02-30T08:02:00Z' },
+        ],
+        currentReleases: [{ ...RIGHTS_EXCEPTION_RELEASE, releasedAt: '2026-02-30T08:02:00Z' }],
       },
       {
         ...RIGHTS_EXCEPTION_FEED_FIXTURE,

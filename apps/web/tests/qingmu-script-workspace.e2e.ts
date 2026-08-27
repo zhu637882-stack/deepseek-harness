@@ -1420,7 +1420,7 @@ async function startYimengDouble(
           : {
             ...release,
             stale: !releaseIsCurrent,
-            staleReasonCodes: releaseIsCurrent ? [] : ['subject_revision_changed'],
+            staleReasonCodes: releaseIsCurrent ? [] : ['subject_binding_drift'],
           }
         json(response, 200, {
           schema: 'jason.qingmu-reference-rights-exception-release-feed.v1',
