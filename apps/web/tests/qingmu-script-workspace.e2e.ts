@@ -1141,6 +1141,8 @@ async function startYimengDouble(
   readonly releasePropCommitResponse: () => void
   readonly referenceRightsCommitAccepted: Promise<void>
   readonly releaseReferenceRightsCommitResponse: () => void
+  readonly referenceRightsExceptionReleaseAccepted: Promise<void>
+  readonly releaseReferenceRightsExceptionReleaseResponse: () => void
   readonly referenceCommitAccepted: Promise<void>
   readonly releaseReferenceCommitResponse: () => void
   readonly referenceRegenerationCommitAccepted: Promise<void>
@@ -1173,6 +1175,8 @@ async function startYimengDouble(
   let propMethodProjectionSha256: string | undefined
   let persistedPropReceipt: ReturnType<typeof propCommitReceiptFixture> | undefined
   let persistedReferenceRightsReceipt: ReturnType<typeof referenceRightsCommitReceiptFixture> | undefined
+  let persistedReferenceRightsExceptionResult: Record<string, unknown> | undefined
+  let persistedReferenceRightsExceptionIdempotencyKey: string | undefined
   let promptIrDraftCommitted = false
   let promptIrSelected = false
   let persistedPromptIrEditReceipt: ReturnType<typeof promptIrEditReceiptFixture> | undefined
@@ -1210,6 +1214,14 @@ async function startYimengDouble(
   })
   const referenceRightsCommitResponseReleased = new Promise<void>((resolve) => {
     resolveReferenceRightsCommitResponse = resolve
+  })
+  let resolveReferenceRightsExceptionReleaseAccepted: (() => void) | undefined
+  let resolveReferenceRightsExceptionReleaseResponse: (() => void) | undefined
+  const referenceRightsExceptionReleaseAccepted = new Promise<void>((resolve) => {
+    resolveReferenceRightsExceptionReleaseAccepted = resolve
+  })
+  const referenceRightsExceptionReleaseResponseReleased = new Promise<void>((resolve) => {
+    resolveReferenceRightsExceptionReleaseResponse = resolve
   })
   let persistedReferenceReceipt: ReturnType<typeof referenceCommitReceiptFixture> | undefined
   let resolveReferenceCommitAccepted: (() => void) | undefined
@@ -1384,6 +1396,52 @@ async function startYimengDouble(
             humanApprovalInferred: false,
           })
         }
+        return
+      }
+      if (
+        request.method === 'GET'
+        && url.pathname === '/api/qingmu/projects/project-1/elements/prop/prop-1/reference-rights/exception-releases'
+      ) {
+        const subject = currentPropSubject()
+        const subjectSha256 = canonicalSha256(subject)
+        const currentReference = subject.references[0]
+        const release = isRecord(persistedReferenceRightsExceptionResult?.release)
+          ? persistedReferenceRightsExceptionResult.release
+          : undefined
+        const releaseScope = isRecord(release?.scope) ? release.scope : undefined
+        const releaseIsCurrent = release !== undefined
+          && release.subjectRevision === propRevision
+          && release.subjectSha256 === subjectSha256
+          && releaseScope?.referenceAssetId === currentReference?.assetId
+          && releaseScope?.referenceAssetSha256 === currentReference?.sha256
+          && releaseScope?.rightsRecordSha256 === canonicalSha256(currentReference?.rights)
+        const projectedRelease = release === undefined
+          ? undefined
+          : {
+            ...release,
+            stale: !releaseIsCurrent,
+            staleReasonCodes: releaseIsCurrent ? [] : ['subject_revision_changed'],
+          }
+        json(response, 200, {
+          schema: 'jason.qingmu-reference-rights-exception-release-feed.v1',
+          projectId: 'project-1',
+          elementKind: 'prop',
+          targetId: 'prop-1',
+          subject: {
+            type: 'element_profile',
+            id: 'prop-1',
+            revision: propRevision,
+            sha256: subjectSha256,
+          },
+          capabilities: {
+            canRelease: true,
+            blockedReasonCode: null,
+            blockedReason: null,
+            requiresRecentAuthentication: true,
+          },
+          releases: projectedRelease === undefined ? [] : [projectedRelease],
+          currentReleases: projectedRelease === undefined || !releaseIsCurrent ? [] : [projectedRelease],
+        })
         return
       }
       const reviewEventsMatch = /^\/api\/qingmu\/projects\/project-1\/elements\/(actor|scene|prop)\/([^/]+)\/review-events$/
@@ -2052,6 +2110,88 @@ async function startYimengDouble(
       }
       if (
         request.method === 'POST'
+        && url.pathname === '/api/qingmu/projects/project-1/elements/prop/prop-1/reference-rights/exception-releases'
+      ) {
+        const command = isRecord(body) ? body : {}
+        const expectedKeys = ['expectedSubjectRevision', 'expectedSubjectSha256', 'scope', 'reason'].sort()
+        const scope = isRecord(command.scope) ? command.scope : {}
+        const expectedScopeKeys = [
+          'kind',
+          'referenceAssetId',
+          'referenceAssetSha256',
+          'rightsRecordSha256',
+          'rightsFields',
+        ].sort()
+        const subject = currentPropSubject()
+        const subjectSha256 = canonicalSha256(subject)
+        const reference = subject.references[0]
+        const idempotencyKey = typeof request.headers['idempotency-key'] === 'string'
+          ? request.headers['idempotency-key']
+          : undefined
+        if (
+          propRevision !== 5
+          || !propRightsRecorded
+          || persistedReferenceRightsExceptionResult !== undefined
+          || url.search !== ''
+          || Object.keys(command).length !== expectedKeys.length
+          || Object.keys(command).sort().some((key, index) => key !== expectedKeys[index])
+          || command.expectedSubjectRevision !== 5
+          || command.expectedSubjectSha256 !== subjectSha256
+          || command.reason !== '项目法律顾问已核对当前素材的有限范围。'
+          || Object.keys(scope).length !== expectedScopeKeys.length
+          || Object.keys(scope).sort().some((key, index) => key !== expectedScopeKeys[index])
+          || scope.kind !== 'reference_rights'
+          || scope.referenceAssetId !== reference?.assetId
+          || scope.referenceAssetSha256 !== reference?.sha256
+          || scope.rightsRecordSha256 !== canonicalSha256(reference?.rights)
+          || canonicalJson(scope.rightsFields) !== canonicalJson(['sourceType', 'rightsHolder'])
+          || idempotencyKey === undefined
+          || !/^qingmu:rights-exception:v1:[0-9a-f]{64}$/.test(idempotencyKey)
+        ) {
+          throw new Error('reference rights exception release browser boundary or lineage mismatch')
+        }
+        persistedReferenceRightsExceptionIdempotencyKey = idempotencyKey
+        persistedReferenceRightsExceptionResult = {
+          schema: 'jason.qingmu-reference-rights-exception-release-result.v1',
+          changeSetId: 'changeset-rights-exception-e2e-1',
+          commandReceiptId: 'command-receipt-rights-exception-e2e-1',
+          eventId: 'event-rights-exception-e2e-1',
+          payloadSha256: 'e7'.repeat(32),
+          release: {
+            id: 'rights-exception-release-e2e-1',
+            decision: 'exception_release',
+            subjectType: 'element_profile',
+            subjectId: 'prop-1',
+            subjectRevision: 5,
+            subjectSha256,
+            scope,
+            actorId: 'approver-e2e-1',
+            actorRole: 'approver',
+            actorNaturalPersonId: 'natural-person-approver-e2e-1',
+            producerActorId: 'producer-e2e-1',
+            producerNaturalPersonId: 'natural-person-producer-e2e-1',
+            assetProducerActorId: 'asset-producer-e2e-1',
+            assetProducerNaturalPersonId: 'natural-person-asset-producer-e2e-1',
+            assetProducerTaskId: 'asset-producer-task-e2e-1',
+            assetProducerTaskRequestSha256: 'd6'.repeat(32),
+            authSessionId: 'recent-auth-session-e2e-1',
+            reason: command.reason,
+            releasedAt: '2026-08-27T10:15:00+08:00',
+          },
+          changed: false,
+          providerCalls: 0,
+          selectionAuthority: 'not_granted',
+          humanApprovalInferred: false,
+        }
+        resolveReferenceRightsExceptionReleaseAccepted?.()
+        await referenceRightsExceptionReleaseResponseReleased
+        if (!response.destroyed && !response.writableEnded) {
+          json(response, 201, persistedReferenceRightsExceptionResult)
+        }
+        return
+      }
+      if (
+        request.method === 'POST'
         && url.pathname === `/api/qingmu/change-sets/${REFERENCE_RIGHTS_CHANGE_SET_ID}:commit`
       ) {
         const command = isRecord(body) ? body : {}
@@ -2175,6 +2315,27 @@ async function startYimengDouble(
       }
       if (
         request.method === 'GET'
+        && url.pathname === '/api/qingmu/projects/project-1/elements/prop/prop-1/reference-rights/exception-releases/command-receipt'
+      ) {
+        if (
+          persistedReferenceRightsExceptionResult === undefined
+          || persistedReferenceRightsExceptionIdempotencyKey === undefined
+          || url.search !== ''
+          || request.headers['idempotency-key'] !== persistedReferenceRightsExceptionIdempotencyKey
+        ) {
+          json(response, 404, { error: 'reference rights exception release receipt not found' })
+          return
+        }
+        json(response, 200, {
+          schema: 'jason.qingmu-command-receipt-recovery.v1',
+          recovered: true,
+          receiptSha256: canonicalSha256(persistedReferenceRightsExceptionResult),
+          receipt: persistedReferenceRightsExceptionResult,
+        })
+        return
+      }
+      if (
+        request.method === 'GET'
         && url.pathname === `/api/qingmu/projects/project-1/elements/prop/prop-1/change-sets/${REFERENCE_RIGHTS_CHANGE_SET_ID}/command-receipt`
       ) {
         if (
@@ -2260,6 +2421,8 @@ async function startYimengDouble(
     releasePropCommitResponse: () => resolvePropCommitResponse?.(),
     referenceRightsCommitAccepted,
     releaseReferenceRightsCommitResponse: () => resolveReferenceRightsCommitResponse?.(),
+    referenceRightsExceptionReleaseAccepted,
+    releaseReferenceRightsExceptionReleaseResponse: () => resolveReferenceRightsExceptionReleaseResponse?.(),
     referenceCommitAccepted,
     releaseReferenceCommitResponse: () => resolveReferenceCommitResponse?.(),
     referenceRegenerationCommitAccepted,
@@ -2317,6 +2480,8 @@ describe.skipIf(
     let releasePropCommitResponse: (() => void) | undefined
     let referenceRightsCommitAccepted: Promise<void> | undefined
     let releaseReferenceRightsCommitResponse: (() => void) | undefined
+    let referenceRightsExceptionReleaseAccepted: Promise<void> | undefined
+    let releaseReferenceRightsExceptionReleaseResponse: (() => void) | undefined
     let referenceCommitAccepted: Promise<void> | undefined
     let releaseReferenceCommitResponse: (() => void) | undefined
     let referenceRegenerationCommitAccepted: Promise<void> | undefined
@@ -2369,6 +2534,8 @@ describe.skipIf(
       releasePropCommitResponse = yimeng.releasePropCommitResponse
       referenceRightsCommitAccepted = yimeng.referenceRightsCommitAccepted
       releaseReferenceRightsCommitResponse = yimeng.releaseReferenceRightsCommitResponse
+      referenceRightsExceptionReleaseAccepted = yimeng.referenceRightsExceptionReleaseAccepted
+      releaseReferenceRightsExceptionReleaseResponse = yimeng.releaseReferenceRightsExceptionReleaseResponse
       referenceCommitAccepted = yimeng.referenceCommitAccepted
       releaseReferenceCommitResponse = yimeng.releaseReferenceCommitResponse
       referenceRegenerationCommitAccepted = yimeng.referenceRegenerationCommitAccepted
@@ -3369,6 +3536,238 @@ describe.skipIf(
           },
         }),
       ])
+      expect(capturedRequests.filter(request => /provider|worker/i.test(request.path))).toEqual([])
+      expect(capturedRequests.every(request => request.cookie === undefined)).toBe(true)
+      expect(await page.content()).not.toContain(YIMENG_TOKEN)
+      expect(await page.content()).not.toContain(IMAGO_ATTESTATION_KEY)
+      await expectNoVisibleTechnicalBrand(page)
+      expect(tripwire.pageErrors).toEqual([])
+      expect(tripwire.warnings).toEqual([])
+    }, 60_000)
+
+    it('records a bounded rights exception through lost-response GET-only recovery without mutating business truth', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-reference-rights-exception-release'))
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await dialog.getByRole('group', { name: '选择人物、环境或道具' })
+        .getByRole('button', { name: '道具' }).click()
+
+      const recordedRights = recordedReferenceRightsRecord()
+      const baselineSubject = propSubject(5, PROP_UPDATED_PROMPT, {
+        rightsRecorded: true,
+        rights: recordedRights,
+      })
+      const baselineSubjectSha256 = canonicalSha256(baselineSubject)
+      const baselineCandidates = propReferenceCandidatesFixture(5, baselineSubjectSha256)
+      await expect.poll(() => propReadSubjects.at(-1), { timeout: 15_000 }).toEqual(baselineSubject)
+      await expect.poll(() => propReferenceCandidateReads.at(-1), { timeout: 15_000 }).toEqual(baselineCandidates)
+      const baselineDecisions = propReviewDecisionReads.at(-1)?.map(decision => ({ ...decision }))
+      if (baselineDecisions === undefined) throw new Error('exception release HumanDecision baseline was not loaded')
+
+      const feedPath = '/api/qingmu/projects/project-1/elements/prop/prop-1/reference-rights/exception-releases'
+      const recoveryPath = `${feedPath}/command-receipt`
+      const decisionPostPath = '/api/qingmu/projects/project-1/elements/prop/prop-1/human-decisions'
+      const decisionPostsBefore = capturedRequests.filter(request => (
+        request.method === 'POST' && request.path === decisionPostPath
+      )).length
+      const exceptionRegion = dialog.getByRole('region', { name: '参考素材权利异常放行' })
+      await exceptionRegion.waitFor({ timeout: 15_000 })
+      await exceptionRegion.getByText(
+        '这是权利记录与普通人工决定之外的第三条独立通道。异常放行只覆盖所勾选的精确素材、权利记录 SHA 与字段；它不授予 Provider 调用、费用、素材选择、发布、普通审批或人工签收。',
+        { exact: true },
+      ).waitFor()
+      const exceptionReference = exceptionRegion.getByRole('radio', { name: /reference-prop-1/ })
+      expect(await exceptionReference.isEnabled()).toBe(true)
+      await exceptionReference.check()
+      await exceptionRegion.getByRole('checkbox', { name: '来源类型' }).check()
+      await exceptionRegion.getByRole('checkbox', { name: '权利人' }).check()
+      const submittedReason = '  项目法律顾问已核对当前素材的有限范围。  '
+      const normalizedReason = submittedReason.trim()
+      await exceptionRegion.getByRole('textbox', { name: '异常放行理由' }).fill(submittedReason)
+      const confirmation = exceptionRegion.getByRole('checkbox', {
+        name: '我已逐项核对当前元素版本、素材 ID/SHA、权利记录 SHA、所勾选字段和理由，并明确确认本次异常放行；此确认不授予 Provider、费用、选择、发布、普通审批或人工签收。',
+      })
+      expect(await confirmation.isEnabled()).toBe(true)
+      await confirmation.check()
+      const submit = exceptionRegion.getByRole('button', { name: '确认记录异常放行' })
+      expect(await submit.isEnabled()).toBe(true)
+      await submit.click()
+
+      if (referenceRightsExceptionReleaseAccepted === undefined) {
+        throw new Error('isolated reference rights exception release gate was not initialized')
+      }
+      await referenceRightsExceptionReleaseAccepted
+      const scope = {
+        kind: 'reference_rights',
+        referenceAssetId: 'reference-prop-1',
+        referenceAssetSha256: PROP_REFERENCE_SHA,
+        rightsRecordSha256: canonicalSha256(recordedRights),
+        rightsFields: ['sourceType', 'rightsHolder'],
+      } as const
+      const markerInput = {
+        projectId: 'project-1',
+        elementKind: 'prop',
+        targetId: 'prop-1',
+        expectedSubjectRevision: 5,
+        expectedSubjectSha256: baselineSubjectSha256,
+        referenceAssetId: scope.referenceAssetId,
+        referenceAssetSha256: scope.referenceAssetSha256,
+        rightsRecordSha256: scope.rightsRecordSha256,
+        reasonSha256: canonicalSha256(normalizedReason),
+        scopeSha256: canonicalSha256(scope),
+      } as const
+      const expectedIdempotencyKey = `qingmu:rights-exception:v1:${canonicalSha256([
+        ['projectId', markerInput.projectId],
+        ['elementKind', markerInput.elementKind],
+        ['targetId', markerInput.targetId],
+        ['expectedSubjectRevision', markerInput.expectedSubjectRevision],
+        ['expectedSubjectSha256', markerInput.expectedSubjectSha256],
+        ['referenceAssetId', markerInput.referenceAssetId],
+        ['referenceAssetSha256', markerInput.referenceAssetSha256],
+        ['rightsRecordSha256', markerInput.rightsRecordSha256],
+        ['reasonSha256', markerInput.reasonSha256],
+        ['scopeSha256', markerInput.scopeSha256],
+      ])}`
+      const markers = await page.evaluate(() => Object.entries(sessionStorage)
+        .filter(([key]) => key.startsWith('qingmu:reference-rights-exception-release-recovery:v1:'))
+        .map(([key, value]) => ({ key, marker: JSON.parse(String(value)) as unknown })))
+      expect(markers).toEqual([{
+        key: 'qingmu:reference-rights-exception-release-recovery:v1:project-1:prop:prop-1',
+        marker: { ...markerInput, idempotencyKey: expectedIdempotencyKey },
+      }])
+      const serializedMarker = JSON.stringify(markers)
+      for (const forbidden of [
+        normalizedReason,
+        'rightsFields',
+        'sourceType',
+        'rightsHolder',
+        'actorId',
+        'actorRole',
+        'naturalPerson',
+        'authSessionId',
+        'releasedAt',
+        'decision',
+        YIMENG_TOKEN,
+        IMAGO_ATTESTATION_KEY,
+      ]) expect(serializedMarker).not.toContain(forbidden)
+
+      const postRequests = () => capturedRequests.filter(request => (
+        request.method === 'POST' && request.path === feedPath
+      ))
+      expect(postRequests()).toEqual([expect.objectContaining({
+        authorization: `Bearer ${YIMENG_TOKEN}`,
+        idempotencyKey: expectedIdempotencyKey,
+        cookie: undefined,
+        body: {
+          expectedSubjectRevision: 5,
+          expectedSubjectSha256: baselineSubjectSha256,
+          scope,
+          reason: normalizedReason,
+        },
+      })])
+      const firstPostRequest = postRequests()[0]
+      const postBody = firstPostRequest !== undefined && isRecord(firstPostRequest.body)
+        ? firstPostRequest.body
+        : {}
+      expect(Object.keys(postBody).sort()).toEqual([
+        'expectedSubjectRevision', 'expectedSubjectSha256', 'scope', 'reason',
+      ].sort())
+      for (const forbidden of [
+        'actorId', 'actorRole', 'actorNaturalPersonId', 'authSessionId', 'releasedAt', 'decision',
+      ]) expect(postBody).not.toHaveProperty(forbidden)
+      expect(capturedRequests.filter(request => request.path === recoveryPath)).toEqual([])
+
+      const exceptionMethodWire = browserRpcRequests
+        .map(request => isRecord(request.body) ? request.body : {})
+        .find(wire => isRecord(wire.payload)
+          && wire.payload.operation === 'recordReferenceRightsExceptionRelease')
+      expect(exceptionMethodWire).toBeDefined()
+      if (exceptionMethodWire === undefined || !isRecord(exceptionMethodWire.payload)) {
+        throw new Error('browser did not expose the bounded exception-release IMAGO request')
+      }
+      expect(exceptionMethodWire.payload).toEqual({
+        projectId: 'project-1',
+        elementKind: 'prop',
+        elementId: 'prop-1',
+        profileRevision: 5,
+        snapshotSha256: baselineSubjectSha256,
+        operation: 'recordReferenceRightsExceptionRelease',
+      })
+      for (const forbidden of ['reason', 'scope', 'rights', 'rightsFields', 'decision', 'actorId']) {
+        expect(exceptionMethodWire.payload).not.toHaveProperty(forbidden)
+      }
+
+      await page.reload({ waitUntil: 'load' })
+      releaseReferenceRightsExceptionReleaseResponse?.()
+      await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+      const enterButton = page.getByRole('button', { name: '进入青木 OS' })
+      if (await enterButton.isVisible()) await enterButton.click()
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const recoveredDialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await recoveredDialog.waitFor({ timeout: 10_000 })
+      await recoveredDialog.getByLabel('安全边界').getByText('EP1 · 雨夜').waitFor({ timeout: 15_000 })
+      await recoveredDialog.getByRole('tab', { name: '剧本与资产' }).click()
+      await recoveredDialog.getByRole('group', { name: '选择人物、环境或道具' })
+        .getByRole('button', { name: '道具' }).click()
+
+      const recoveryDock = recoveredDialog.getByRole('region', { name: '存在待恢复的异常放行回执' })
+      await recoveryDock.waitFor({ timeout: 15_000 })
+      await recoveryDock.getByText(
+        '恢复严格使用 GET + 原 Idempotency-Key，无请求正文、无 Cookie、无 POST fallback；任何对象或摘要漂移都不会显示成功。',
+        { exact: true },
+      ).waitFor()
+      expect(capturedRequests.filter(request => request.path === recoveryPath)).toEqual([])
+      expect(postRequests()).toHaveLength(1)
+      await expect.poll(() => propReadSubjects.at(-1), { timeout: 15_000 }).toEqual(baselineSubject)
+      await expect.poll(() => propReferenceCandidateReads.at(-1), { timeout: 15_000 }).toEqual(baselineCandidates)
+      await expect.poll(() => propReviewDecisionReads.at(-1), { timeout: 15_000 }).toEqual(baselineDecisions)
+      const feedReadsBeforeRecovery = capturedRequests.filter(request => (
+        request.method === 'GET' && request.path === feedPath
+      )).length
+      await recoveryDock.getByRole('button', { name: '仅 GET 查询原始回执' }).click()
+
+      const recoveredReceipt = recoveredDialog.getByRole('region', { name: '异常放行已由权威 GET 精确对账' })
+      await recoveredReceipt.getByRole('heading', {
+        name: '原异常放行回执已通过 GET 恢复并精确对账',
+      }).waitFor({ timeout: 20_000 })
+      await expect.poll(() => capturedRequests.filter(request => (
+        request.method === 'GET' && request.path === feedPath
+      )).length, { timeout: 15_000 }).toBe(feedReadsBeforeRecovery + 1)
+      expect(postRequests()).toHaveLength(1)
+      expect(capturedRequests.filter(request => request.path === recoveryPath)).toEqual([
+        expect.objectContaining({
+          method: 'GET',
+          idempotencyKey: expectedIdempotencyKey,
+          cookie: undefined,
+          body: undefined,
+        }),
+      ])
+      await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage)
+        .filter(key => key.startsWith('qingmu:reference-rights-exception-release-recovery:v1:'))), {
+        timeout: 15_000,
+      }).toEqual([])
+
+      expect(propReadSubjects.at(-1)).toEqual(baselineSubject)
+      expect(propReferenceCandidateReads.at(-1)).toEqual(baselineCandidates)
+      expect(propReviewDecisionReads.at(-1)).toEqual(baselineDecisions)
+      expect(capturedRequests.filter(request => (
+        request.method === 'POST' && request.path === decisionPostPath
+      ))).toHaveLength(decisionPostsBefore)
+      const refreshedExceptionRegion = recoveredDialog.getByRole('region', { name: '参考素材权利异常放行' })
+      await refreshedExceptionRegion.getByText(normalizedReason, { exact: true }).waitFor()
+      await refreshedExceptionRegion.getByText(
+        'approver-e2e-1 · natural-person-approver-e2e-1',
+        { exact: true },
+      ).waitFor()
+      await refreshedExceptionRegion.getByText(
+        'producer-e2e-1 · natural-person-producer-e2e-1',
+        { exact: true },
+      ).waitFor()
+      await refreshedExceptionRegion.getByText(
+        'asset-producer-e2e-1 · natural-person-asset-producer-e2e-1',
+        { exact: true },
+      ).waitFor()
+      await refreshedExceptionRegion.getByText('recent-auth-session-e2e-1', { exact: true }).waitFor()
+      await refreshedExceptionRegion.locator('strong').filter({ hasText: '当前有效' }).waitFor()
       expect(capturedRequests.filter(request => /provider|worker/i.test(request.path))).toEqual([])
       expect(capturedRequests.every(request => request.cookie === undefined)).toBe(true)
       expect(await page.content()).not.toContain(YIMENG_TOKEN)

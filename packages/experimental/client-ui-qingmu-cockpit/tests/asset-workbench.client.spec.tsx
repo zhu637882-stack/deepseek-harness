@@ -504,8 +504,10 @@ function createExceptionReleasePort(options: {
       : referenceRightsExceptionReadRelease(acceptedResult, options.staleRead ?? false)
     return referenceRightsExceptionFeed({
       canRelease: options.canRelease ?? true,
-      blockedReasonCode: options.blockedReasonCode,
-      blockedReason: options.blockedReason,
+      ...(options.blockedReasonCode === undefined
+        ? {}
+        : { blockedReasonCode: options.blockedReasonCode }),
+      ...(options.blockedReason === undefined ? {} : { blockedReason: options.blockedReason }),
       releases: release === undefined ? [] : [release],
       currentReleases: release === undefined || release.stale ? [] : [release],
     })
@@ -523,7 +525,9 @@ function createExceptionReleasePort(options: {
     if (options.losePostResponse) throw new Error('异常放行响应丢失')
     return acceptedResult
   })
-  const recoverReferenceRightsExceptionRelease = vi.fn(async () => {
+  const recoverReferenceRightsExceptionRelease = vi.fn(async (
+    _request: Parameters<QingmuYimengPort['recoverReferenceRightsExceptionRelease']>[0],
+  ) => {
     if (acceptedResult === undefined) throw new Error('测试缺少原始异常放行回执')
     return {
       schema: 'jason.qingmu-command-receipt-recovery.v1',
@@ -534,7 +538,7 @@ function createExceptionReleasePort(options: {
   })
   const createHumanDecision = vi.fn()
   const port = {
-    elementProfile: vi.fn(async () => SNAPSHOT),
+    elementProfile: vi.fn(async () => RIGHTS_RECORDED_SNAPSHOT),
     referenceCandidates: vi.fn(async () => ({
       schema: 'jason.qingmu-reference-asset-candidates.v1',
       projectId: PROJECT_ID,
@@ -2196,5 +2200,40 @@ describe('AssetWorkbench', () => {
     expect(harness.referenceAssetMethod).not.toHaveBeenCalled()
     expect(harness.createReferenceRightsExceptionRelease).not.toHaveBeenCalled()
     expect(harness.createHumanDecision).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when a release is falsely projected current after rights drift', async () => {
+    const acceptedResult = referenceRightsExceptionResult({
+      projectId: PROJECT_ID,
+      elementKind: 'prop',
+      targetId: TARGET_ID,
+      expectedSubjectRevision: 3,
+      expectedSubjectSha256: BASE_SHA,
+      idempotencyKey: 'qingmu:rights-exception:v1:drifted-current-fixture',
+      reason: '旧权利记录的有限范围例外。',
+      scope: {
+        kind: 'reference_rights',
+        referenceAssetId: 'reference-1',
+        referenceAssetSha256: '1'.repeat(64),
+        rightsRecordSha256: '7'.repeat(64),
+        rightsFields: ['sourceType'],
+      },
+    })
+    const driftedCurrent = referenceRightsExceptionReadRelease(acceptedResult)
+    const harness = createExceptionReleasePort()
+    harness.port.referenceRightsExceptionReleases = vi.fn(async () => referenceRightsExceptionFeed({
+      canRelease: true,
+      releases: [driftedCurrent],
+      currentReleases: [driftedCurrent],
+    }))
+    mount(harness.port)
+
+    expect(await screen.findByText('权利异常放行当前投影与当前参考素材或权利记录不一致')).toBeTruthy()
+    const exceptionRegion = screen.getByRole('region', { name: zh.assetRightsExceptionTitle })
+    expect(within(exceptionRegion).queryByText(zh.assetRightsExceptionCurrent)).toBeNull()
+    expect(within(exceptionRegion).getByRole('button', { name: zh.assetRightsExceptionSubmit }))
+      .toHaveProperty('disabled', true)
+    expect(harness.referenceAssetMethod).not.toHaveBeenCalled()
+    expect(harness.createReferenceRightsExceptionRelease).not.toHaveBeenCalled()
   })
 })

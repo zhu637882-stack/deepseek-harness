@@ -820,13 +820,13 @@ function sameReferenceRightsExceptionMarker(
     && left.idempotencyKey === right.idempotencyKey
 }
 
-function assertReferenceRightsExceptionFeed(
+async function assertReferenceRightsExceptionFeed(
   feed: YimengReferenceRightsExceptionReleaseFeedResponse,
   snapshot: YimengElementProfileResponse,
   projectId: string,
   targetId: string,
   elementKind: CommandElementKind,
-): void {
+): Promise<void> {
   if (
     feed.schema !== 'jason.qingmu-reference-rights-exception-release-feed.v1'
     || feed.projectId !== projectId
@@ -840,6 +840,37 @@ function assertReferenceRightsExceptionFeed(
     || feed.capabilities.canRelease
       !== (feed.capabilities.blockedReasonCode === null && feed.capabilities.blockedReason === null)
   ) throw new Error('权利异常放行读取未精确绑定当前元素资料与服务器权限')
+
+  const projectedCurrentReleases = feed.releases.filter(release => !release.stale)
+  if (
+    new Set(feed.releases.map(release => release.id)).size !== feed.releases.length
+    || new Set(feed.currentReleases.map(release => release.id)).size !== feed.currentReleases.length
+    || feed.currentReleases.length !== projectedCurrentReleases.length
+  ) throw new Error('权利异常放行当前投影不是全部非过期历史事实的精确集合')
+
+  for (const [index, release] of projectedCurrentReleases.entries()) {
+    const current = feed.currentReleases[index]
+    if (
+      current === undefined
+      || current.stale
+      || current.staleReasonCodes.length !== 0
+      || !sameReferenceRightsExceptionRelease(current, release)
+      || release.subjectType !== 'element_profile'
+      || release.subjectId !== targetId
+      || release.subjectRevision !== snapshot.subject.profileRevision
+      || release.subjectSha256 !== snapshot.snapshotSha256
+    ) throw new Error('权利异常放行当前投影与当前元素版本不一致')
+    const reference = findReference(
+      snapshot.subject,
+      release.scope.referenceAssetId,
+      release.scope.referenceAssetSha256,
+    )
+    if (
+      reference === undefined
+      || !reference.rightsRecorded
+      || await digestReferenceRightsRecord(reference.rights) !== release.scope.rightsRecordSha256
+    ) throw new Error('权利异常放行当前投影与当前参考素材或权利记录不一致')
+  }
 }
 
 function assertReferenceRightsExceptionMethod(
@@ -965,15 +996,15 @@ function sameReferenceRightsExceptionRelease(
     && release.releasedAt === fact.releasedAt
 }
 
-function assertReferenceRightsExceptionFeedReconciled(
+async function assertReferenceRightsExceptionFeedReconciled(
   feed: YimengReferenceRightsExceptionReleaseFeedResponse,
   result: YimengCreateReferenceRightsExceptionReleaseResponse,
   snapshot: YimengElementProfileResponse,
   projectId: string,
   targetId: string,
   elementKind: CommandElementKind,
-): void {
-  assertReferenceRightsExceptionFeed(feed, snapshot, projectId, targetId, elementKind)
+): Promise<void> {
+  await assertReferenceRightsExceptionFeed(feed, snapshot, projectId, targetId, elementKind)
   const historical = feed.releases.filter(release => (
     release.id === result.release.id && sameReferenceRightsExceptionRelease(release, result.release)
   ))
@@ -1459,7 +1490,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
       }
       if (exceptionResult.status === 'fulfilled') {
         try {
-          assertReferenceRightsExceptionFeed(
+          await assertReferenceRightsExceptionFeed(
             exceptionResult.value,
             nextSnapshot,
             projectId,
@@ -1888,7 +1919,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
           }
           if (exceptionResult.status === 'fulfilled') {
             try {
-              assertReferenceRightsExceptionFeed(
+              await assertReferenceRightsExceptionFeed(
                 exceptionResult.value,
                 snapshotResult.value,
                 projectId,
@@ -2289,7 +2320,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
       controller.signal,
     )
     if (isSignalAborted(controller.signal)) return
-    assertReferenceRightsExceptionFeedReconciled(
+    await assertReferenceRightsExceptionFeedReconciled(
       refreshedFeed,
       result,
       snapshot,
@@ -2342,7 +2373,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
     setExceptionReceiptRecovered(false)
     try {
       assertSnapshot(baselineSnapshot, projectId, targetId, elementKind)
-      assertReferenceRightsExceptionFeed(
+      await assertReferenceRightsExceptionFeed(
         baselineFeed,
         baselineSnapshot,
         projectId,

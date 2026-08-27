@@ -1552,16 +1552,16 @@ function normalizeReferenceRightsExceptionReleaseFeed(
   if (new Set(currentReleases.map(release => release.id)).size !== currentReleases.length) {
     throw new UpstreamContractError('referenceRightsExceptionReleases.currentReleases IDs must be unique')
   }
-  for (const current of currentReleases) {
-    if (current.stale) {
-      throw new UpstreamContractError('referenceRightsExceptionReleases.currentReleases must not be stale')
-    }
-    const listed = releases.find(release => release.id === current.id)
-    if (listed === undefined || !isDeepStrictEqual(listed, current)) {
-      throw new UpstreamContractError(
-        'referenceRightsExceptionReleases.currentReleases must match listed releases',
-      )
-    }
+  const projectedCurrentReleases = releases.filter(release => !release.stale)
+  if (
+    currentReleases.length !== projectedCurrentReleases.length
+    || currentReleases.some((current, index) => (
+      current.stale || !isDeepStrictEqual(current, projectedCurrentReleases[index])
+    ))
+  ) {
+    throw new UpstreamContractError(
+      'referenceRightsExceptionReleases.currentReleases must exactly project all non-stale releases',
+    )
   }
   return {
     schema: REFERENCE_RIGHTS_EXCEPTION_RELEASE_FEED_SCHEMA,

@@ -509,6 +509,10 @@ describe('qingmu Yimeng read adapter', () => {
       },
       {
         ...RIGHTS_EXCEPTION_FEED_FIXTURE,
+        currentReleases: [],
+      },
+      {
+        ...RIGHTS_EXCEPTION_FEED_FIXTURE,
         capabilities: {
           canRelease: false,
           blockedReasonCode: null,
