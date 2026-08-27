@@ -394,6 +394,71 @@ function actorMethod(request: {
   } as const
 }
 
+function shotRelationMethod(request: Parameters<QingmuYimengPort['shotRelationMethod']>[0]) {
+  const selectedShot = request.shots.find(shot => shot.shotId === request.selectedShotId)
+  if (selectedShot === undefined) throw new Error('fixture selected Shot is missing')
+  const projectionSha256 = 'c'.repeat(64)
+  const inputSnapshotSha256 = 'd'.repeat(64)
+  const relationSnapshotSha256 = 'e'.repeat(64)
+  return {
+    schema: 'qingmu.imago-shot-relation-method-adapter-result.v1',
+    projectionSha256,
+    projection: {
+      schema: 'qingmu.imago-shot-relation-method-projection.v1',
+      input_snapshot_sha256: inputSnapshotSha256,
+      target: {
+        projectId: request.projectId,
+        episodeId: request.episodeId,
+        storyboardRevisionId: request.storyboardRevisionId,
+        storyboardRevisionVersion: request.storyboardRevisionVersion,
+        storyboardSourceSha256: request.storyboardSourceSha256,
+        relationSnapshotSha256,
+        selectedShotId: request.selectedShotId,
+      },
+      relationship_projection: {
+        canonicalShotIdSource: 'yimeng_storyboard_frame_id',
+        beatIdScope: 'shot_local',
+        scenes: request.scenes,
+        shots: request.shots,
+        elements: request.elements,
+        selectedShot,
+      },
+      method_definition: { sha256: 'f'.repeat(64), agent_paths: ['hidden-agent'], skill_paths: ['hidden-skill'] },
+      source_bindings: [],
+      field_hints: [{ hint_id: 'same-shot', title: '同一镜头身份', guidance: '只使用易梦 Shot ID。' }],
+      checklist: [{ check_id: 'zero-execution', label: '没有写入或执行', required: true }],
+      work_order_projection: {
+        operation: 'inspectCanonicalShotRelations',
+        allowed_mutations: [],
+        providerCalls: 0,
+        workerStarted: false,
+      },
+      review_card: {
+        title: 'Scene / Shot / Beat / Element 关系检查',
+        decision_boundary: '结构通过只代表关系可读，不产生创意批准、资产选择或人工签收。',
+      },
+      legal_work_set: { reads: ['yimeng'], writes: [] },
+      authority_snapshot_attestation: 'not_verified_by_compiler',
+      project_state_persisted: false,
+      providerCalls: 0,
+      workerStarted: false,
+      selection_executed: false,
+      human_approval_inferred: false,
+      human_signoff_inferred: false,
+    },
+    methodAttestation: {
+      schema: 'qingmu.imago-shot-relation-method-attestation.v1',
+      algorithm: 'hmac-sha256',
+      projectionSha256,
+      inputSnapshotSha256,
+      targetSha256: '1'.repeat(64),
+      relationSnapshotSha256,
+      selectedShotSha256: '2'.repeat(64),
+      signature: '3'.repeat(64),
+    },
+  } as const
+}
+
 function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
   return {
     health: vi.fn(async () => HEALTH),
@@ -459,6 +524,9 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     script: vi.fn(async () => SCRIPT),
     promptIr: vi.fn(async () => { throw new Error('PromptIR read is not part of this fixture') }),
     promptIrMethod: vi.fn(async () => { throw new Error('PromptIR method is not part of this fixture') }),
+    shotRelationMethod: vi.fn(async (request: Parameters<QingmuYimengPort['shotRelationMethod']>[0]) => (
+      shotRelationMethod(request)
+    )),
     workflow: vi.fn(async () => WORKFLOW),
     proposeElementProfile: vi.fn(async () => { throw new Error('element proposal is not part of this fixture') }),
     proposeReferenceAsset: vi.fn(async () => { throw new Error('reference proposal is not part of this fixture') }),
@@ -556,6 +624,12 @@ describe('QingmuCockpit journey', () => {
     expect(within(dialog).getByText('beat-1')).toBeTruthy()
     expect(within(dialog).getAllByText('character-1').length).toBeGreaterThanOrEqual(1)
     expect(within(dialog).getAllByText('prop-1').length).toBeGreaterThanOrEqual(1)
+    const method = await within(dialog).findByRole('region', { name: zh.shotRelationMethodTitle })
+    expect(within(method).getByText('Scene / Shot / Beat / Element 关系检查')).toBeTruthy()
+    expect(within(method).getByText('同一镜头身份')).toBeTruthy()
+    expect(within(method).getByText('没有写入或执行')).toBeTruthy()
+    expect(within(method).queryByText('hidden-agent')).toBeNull()
+    expect(within(method).queryByText('hidden-skill')).toBeNull()
 
     fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabGeneration }))
     expect(within(dialog).getByRole('heading', { name: zh.generationTitle })).toBeTruthy()
@@ -573,9 +647,11 @@ describe('QingmuCockpit journey', () => {
   it('shares one transient canonical Shot selection between relations and PromptIR', async () => {
     const storageWrite = vi.spyOn(Storage.prototype, 'setItem')
     const promptIr = vi.fn(async (request: Parameters<QingmuYimengPort['promptIr']>[0]) => promptIrRead(request.frameId))
+    const relationMethod = vi.fn(async (request: Parameters<QingmuYimengPort['shotRelationMethod']>[0]) => shotRelationMethod(request))
     const port = makePort({
       workflow: vi.fn(async () => PROMPT_IR_WORKFLOW),
       promptIr,
+      shotRelationMethod: relationMethod,
     })
     mount(port)
     fireEvent.click(screen.getByRole('button', { name: zh.trigger }))
@@ -587,6 +663,36 @@ describe('QingmuCockpit journey', () => {
       expect(dialog.querySelector('[data-shot-id="frame-2"]')).toBeTruthy()
     })
     expect(within(dialog).getByText('beat-2')).toBeTruthy()
+    await waitFor(() => {
+      expect(relationMethod).toHaveBeenLastCalledWith(expect.objectContaining({
+        storyboardRevisionId: SHOT_RELATIONS.storyboardRevision.revisionId,
+        selectedShotId: 'frame-2',
+        scenes: [
+          { sceneId: 'scene-1', elementIds: ['character-1', 'scene-1', 'prop-1'] },
+          { sceneId: 'scene-2', elementIds: ['character-1', 'scene-2'] },
+        ],
+        shots: [
+          {
+            shotId: 'frame-1',
+            sceneId: 'scene-1',
+            elementIds: ['character-1', 'scene-1', 'prop-1'],
+            beats: [{ beatId: 'beat-1', elementIds: ['character-1', 'prop-1'] }],
+          },
+          {
+            shotId: 'frame-2',
+            sceneId: 'scene-2',
+            elementIds: ['character-1', 'scene-2'],
+            beats: [{ beatId: 'beat-2', elementIds: ['character-1'] }],
+          },
+        ],
+        elements: [
+          { elementId: 'character-1', elementKind: 'actor' },
+          { elementId: 'scene-1', elementKind: 'scene' },
+          { elementId: 'prop-1', elementKind: 'prop' },
+          { elementId: 'scene-2', elementKind: 'scene' },
+        ],
+      }), expect.any(AbortSignal))
+    })
 
     fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabAssets }))
     const selector = await within(dialog).findByRole('combobox', { name: zh.promptIrFrame })
@@ -606,6 +712,24 @@ describe('QingmuCockpit journey', () => {
       expect(dialog.querySelector('[data-shot-id="frame-1"]')).toBeTruthy()
     })
     expect(storageWrite).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when the IMAGO relation method claims a project-state write', async () => {
+    const relationMethod = vi.fn(async (request: Parameters<QingmuYimengPort['shotRelationMethod']>[0]) => {
+      const valid = shotRelationMethod(request)
+      return {
+        ...valid,
+        projection: { ...valid.projection, project_state_persisted: true },
+      } as unknown as Awaited<ReturnType<QingmuYimengPort['shotRelationMethod']>>
+    })
+    mount(makePort({ shotRelationMethod: relationMethod }))
+    fireEvent.click(screen.getByRole('button', { name: zh.trigger }))
+    const dialog = await screen.findByRole('dialog', { name: zh.title })
+    fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabShots }))
+
+    const method = await within(dialog).findByRole('region', { name: zh.shotRelationMethodTitle })
+    expect((await within(method).findByRole('alert')).textContent).toContain('零执行边界')
+    expect(within(method).queryByText('Scene / Shot / Beat / Element 关系检查')).toBeNull()
   })
 
   it('resets transient Shot selection on episode and project authority changes', async () => {

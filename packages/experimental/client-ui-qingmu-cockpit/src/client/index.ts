@@ -5,7 +5,8 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { QingmuCockpit } from './QingmuCockpit.tsx'
 import type {
-  ImagoElementMethodResponse, ImagoPromptIrMethodResponse, ImagoReferenceAssetMethodResponse, QingmuYimengPort,
+  ImagoElementMethodResponse, ImagoPromptIrMethodResponse, ImagoReferenceAssetMethodResponse,
+  ImagoShotRelationMethodResponse, QingmuYimengPort,
   YimengCommitElementProfileResponse, YimengCommitPromptIrEditResponse, YimengCommitScriptResponse,
   YimengElementProfileResponse, YimengEpisodesResponse, YimengHealth, YimengPreviewElementProfileResponse,
   YimengPreviewPromptIrResponse, YimengPreviewScriptResponse,
@@ -26,6 +27,7 @@ import { en, NS, zh } from './locales.ts'
 export type { QingmuCockpitFace } from './slots.ts'
 export type {
   ImagoElementMethodResponse, ImagoPromptIrMethodResponse, ImagoReferenceAssetMethodResponse,
+  ImagoShotRelationMethodResponse,
   QingmuImagoMethodPort, QingmuYimengCommandPort,
   QingmuYimengPort, QingmuYimengReadPort,
   YimengCommitElementProfileResponse, YimengCommitPromptIrEditResponse, YimengCommitScriptResponse,
@@ -78,6 +80,8 @@ export function apply(ctx: ClientContext): void {
     referenceAssetMethod: (request, signal) =>
       method<ImagoReferenceAssetMethodResponse>('referenceAssetMethod', request, signal),
     promptIrMethod: (request, signal) => method<ImagoPromptIrMethodResponse>('promptIrMethod', request, signal),
+    shotRelationMethod: (request, signal) =>
+      method<ImagoShotRelationMethodResponse>('shotRelationMethod', request, signal),
     proposeElementProfile: (request, signal) =>
       command<YimengProposeElementProfileResponse>('proposeElementProfile', request, signal),
     proposeReferenceAsset: (request, signal) =>

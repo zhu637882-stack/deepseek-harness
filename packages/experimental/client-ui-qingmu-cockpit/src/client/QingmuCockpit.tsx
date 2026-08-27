@@ -14,6 +14,7 @@ import { AssetWorkbench } from './AssetWorkbench.tsx'
 import { PromptIrWorkspace } from './PromptIrWorkspace.tsx'
 import { ScriptWorkspace } from './ScriptWorkspace.tsx'
 import { ShotRelationsView } from './ShotRelationsView.tsx'
+import { ShotRelationMethodView } from './ShotRelationMethodView.tsx'
 import css from './QingmuCockpit.module.css'
 
 export type QingmuCockpitProps = PropsRuntime<'sidebar.footer.action'>
@@ -454,6 +455,14 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
               t={t}
             />
           )}
+        {shotRelations !== undefined && (
+          <ShotRelationMethodView
+            relations={shotRelations}
+            selectedShotId={selectedShotId}
+            port={port}
+            t={t}
+          />
+        )}
       </Card>
     </div>
   )

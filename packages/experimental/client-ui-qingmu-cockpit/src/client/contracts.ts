@@ -6,6 +6,8 @@ import type {
   ImagoPromptIrMethodResponse,
   ImagoReferenceAssetMethodRequest,
   ImagoReferenceAssetMethodResponse,
+  ImagoShotRelationMethodRequest,
+  ImagoShotRelationMethodResponse,
 } from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter/types'
 import type {
   YimengEpisodesRequest,
@@ -96,6 +98,8 @@ export type {
   ImagoPromptIrMethodResponse,
   ImagoReferenceAssetMethodRequest,
   ImagoReferenceAssetMethodResponse,
+  ImagoShotRelationMethodRequest,
+  ImagoShotRelationMethodResponse,
 }
 export type {
   YimengEpisodesRequest,
@@ -250,6 +254,7 @@ export interface QingmuImagoMethodPort {
   elementMethod(request: ImagoElementMethodRequest, signal?: AbortSignal): Promise<ImagoElementMethodResponse>
   referenceAssetMethod(request: ImagoReferenceAssetMethodRequest, signal?: AbortSignal): Promise<ImagoReferenceAssetMethodResponse>
   promptIrMethod(request: ImagoPromptIrMethodRequest, signal?: AbortSignal): Promise<ImagoPromptIrMethodResponse>
+  shotRelationMethod(request: ImagoShotRelationMethodRequest, signal?: AbortSignal): Promise<ImagoShotRelationMethodResponse>
 }
 
 /** Browser-facing Qingmu port. All three Host plugins remain independently pluggable. */
