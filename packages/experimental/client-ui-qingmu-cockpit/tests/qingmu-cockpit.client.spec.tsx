@@ -292,6 +292,28 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
       decisions: [],
       currentDecision: null,
     } as const)),
+    referenceRightsExceptionReleases: vi.fn(async (
+      request: Parameters<QingmuYimengPort['referenceRightsExceptionReleases']>[0],
+    ) => ({
+      schema: 'jason.qingmu-reference-rights-exception-release-feed.v1',
+      projectId: request.projectId,
+      elementKind: request.elementKind,
+      targetId: request.targetId,
+      subject: {
+        type: 'element_profile',
+        id: request.targetId,
+        revision: 2,
+        sha256: ACTOR_PROFILE.snapshotSha256,
+      },
+      capabilities: {
+        canRelease: false,
+        blockedReasonCode: 'reference_rights_unavailable',
+        blockedReason: '当前没有可绑定的参考资产权利记录',
+        requiresRecentAuthentication: true,
+      },
+      releases: [],
+      currentReleases: [],
+    } as const)),
     elementMethod: vi.fn(async (request: Parameters<QingmuYimengPort['elementMethod']>[0]) => actorMethod(request)),
     referenceAssetMethod: vi.fn(async () => { throw new Error('reference method is not part of this fixture') }),
     script: vi.fn(async () => SCRIPT),
@@ -305,6 +327,12 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     recoverElementProfileCommit: vi.fn(async () => { throw new Error('element recovery is not part of this fixture') }),
     createComment: vi.fn(async () => { throw new Error('comment is not part of this fixture') }),
     createHumanDecision: vi.fn(async () => { throw new Error('HumanDecision is not part of this fixture') }),
+    createReferenceRightsExceptionRelease: vi.fn(async () => {
+      throw new Error('reference-rights exception release is not part of this fixture')
+    }),
+    recoverReferenceRightsExceptionRelease: vi.fn(async () => {
+      throw new Error('reference-rights exception recovery is not part of this fixture')
+    }),
     proposeScript: vi.fn(async () => ({
       schema: 'jason.qingmu-change-set-proposal.v1',
       changeSet: CHANGE_SET,

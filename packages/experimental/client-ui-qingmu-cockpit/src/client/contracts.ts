@@ -27,6 +27,11 @@ import type {
   YimengReferenceCandidatesResponse,
   YimengReferenceAssetCandidate,
   YimengReferenceRightsRecord,
+  YimengReferenceRightsExceptionReleaseFeedRequest,
+  YimengReferenceRightsExceptionReleaseFeedResponse,
+  YimengReferenceRightsExceptionRelease,
+  YimengReferenceRightsExceptionField,
+  YimengReferenceRightsExceptionScope,
   YimengScriptRequest,
   YimengScriptResponse,
   YimengWorkflowProjection,
@@ -43,6 +48,8 @@ import type {
   YimengCreateCommentResponse,
   YimengCreateHumanDecisionRequest,
   YimengCreateHumanDecisionResponse,
+  YimengCreateReferenceRightsExceptionReleaseRequest,
+  YimengCreateReferenceRightsExceptionReleaseResponse,
   YimengPreviewElementProfileRequest,
   YimengPreviewElementProfileResponse,
   YimengPreviewPromptIrRequest,
@@ -71,6 +78,8 @@ import type {
   YimengRecoverPromptIrSelectionResponse,
   YimengRecoverScriptCommitRequest,
   YimengRecoverScriptCommitResponse,
+  YimengRecoverReferenceRightsExceptionReleaseRequest,
+  YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengSelectPromptIrRequest,
   YimengSelectPromptIrResponse,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
@@ -102,6 +111,11 @@ export type {
   YimengReferenceCandidatesResponse,
   YimengReferenceAssetCandidate,
   YimengReferenceRightsRecord,
+  YimengReferenceRightsExceptionReleaseFeedRequest,
+  YimengReferenceRightsExceptionReleaseFeedResponse,
+  YimengReferenceRightsExceptionRelease,
+  YimengReferenceRightsExceptionField,
+  YimengReferenceRightsExceptionScope,
   YimengScriptRequest,
   YimengScriptResponse,
   YimengWorkflowProjection,
@@ -118,6 +132,8 @@ export type {
   YimengCreateCommentResponse,
   YimengCreateHumanDecisionRequest,
   YimengCreateHumanDecisionResponse,
+  YimengCreateReferenceRightsExceptionReleaseRequest,
+  YimengCreateReferenceRightsExceptionReleaseResponse,
   YimengPreviewElementProfileRequest,
   YimengPreviewElementProfileResponse,
   YimengPreviewPromptIrRequest,
@@ -146,6 +162,8 @@ export type {
   YimengRecoverPromptIrSelectionResponse,
   YimengRecoverScriptCommitRequest,
   YimengRecoverScriptCommitResponse,
+  YimengRecoverReferenceRightsExceptionReleaseRequest,
+  YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengSelectPromptIrRequest,
   YimengSelectPromptIrResponse,
 }
@@ -161,6 +179,10 @@ export interface QingmuYimengReadPort {
   elementProfile(request: YimengElementProfileRequest, signal?: AbortSignal): Promise<YimengElementProfileResponse>
   referenceCandidates(request: YimengReferenceCandidatesRequest, signal?: AbortSignal): Promise<YimengReferenceCandidatesResponse>
   reviewEvents(request: YimengElementReviewFeedRequest, signal?: AbortSignal): Promise<YimengElementReviewFeedResponse>
+  referenceRightsExceptionReleases(
+    request: YimengReferenceRightsExceptionReleaseFeedRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengReferenceRightsExceptionReleaseFeedResponse>
   script(request: YimengScriptRequest, signal?: AbortSignal): Promise<YimengScriptResponse>
   promptIr(request: YimengPromptIrRequest, signal?: AbortSignal): Promise<YimengPromptIrResponse>
   workflow(request: YimengWorkflowRequest, signal?: AbortSignal): Promise<YimengWorkflowProjection>
@@ -184,6 +206,14 @@ export interface QingmuYimengCommandPort {
     request: YimengCreateHumanDecisionRequest,
     signal?: AbortSignal,
   ): Promise<YimengCreateHumanDecisionResponse>
+  createReferenceRightsExceptionRelease(
+    request: YimengCreateReferenceRightsExceptionReleaseRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengCreateReferenceRightsExceptionReleaseResponse>
+  recoverReferenceRightsExceptionRelease(
+    request: YimengRecoverReferenceRightsExceptionReleaseRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengRecoverReferenceRightsExceptionReleaseResponse>
   proposeScript(request: YimengProposeScriptRequest, signal?: AbortSignal): Promise<YimengProposeScriptResponse>
   previewScript(request: YimengPreviewScriptRequest, signal?: AbortSignal): Promise<YimengPreviewScriptResponse>
   commitScript(request: YimengCommitScriptRequest, signal?: AbortSignal): Promise<YimengCommitScriptResponse>

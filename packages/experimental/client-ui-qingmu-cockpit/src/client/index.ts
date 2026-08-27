@@ -10,11 +10,13 @@ import type {
   YimengElementProfileResponse, YimengEpisodesResponse, YimengHealth, YimengPreviewElementProfileResponse,
   YimengPreviewPromptIrResponse, YimengPreviewScriptResponse,
   YimengCreateCommentResponse, YimengCreateHumanDecisionResponse, YimengElementReviewFeedResponse,
+  YimengCreateReferenceRightsExceptionReleaseResponse, YimengReferenceRightsExceptionReleaseFeedResponse,
   YimengProjectsResponse, YimengProposeElementProfileResponse, YimengProposeReferenceAssetResponse,
   YimengProposePromptIrResponse, YimengProposeScriptResponse, YimengPromptIrResponse,
   YimengReferenceCandidatesResponse, YimengRecoverElementProfileCommitResponse,
   YimengRecoverPromptIrEditCommitResponse, YimengRecoverPromptIrSelectionResponse,
   YimengRecoverScriptCommitResponse, YimengScriptResponse, YimengSelectPromptIrResponse,
+  YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengWorkflowProjection,
 } from './contracts.ts'
 import { unwrapRpc } from './contracts.ts'
@@ -30,11 +32,13 @@ export type {
   YimengElementProfileResponse, YimengEpisodesResponse, YimengHealth, YimengPreviewElementProfileResponse,
   YimengPreviewPromptIrResponse, YimengPreviewScriptResponse,
   YimengCreateCommentResponse, YimengCreateHumanDecisionResponse, YimengElementReviewFeedResponse,
+  YimengCreateReferenceRightsExceptionReleaseResponse, YimengReferenceRightsExceptionReleaseFeedResponse,
   YimengProjectsResponse, YimengProposeElementProfileResponse, YimengProposeReferenceAssetResponse,
   YimengProposePromptIrResponse, YimengProposeScriptResponse, YimengPromptIrResponse,
   YimengReferenceCandidatesResponse, YimengRecoverElementProfileCommitResponse,
   YimengRecoverPromptIrEditCommitResponse, YimengRecoverPromptIrSelectionResponse,
   YimengRecoverScriptCommitResponse, YimengScriptResponse, YimengSelectPromptIrResponse,
+  YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengWorkflowProjection,
 } from './contracts.ts'
 
@@ -65,6 +69,8 @@ export function apply(ctx: ClientContext): void {
     referenceCandidates: (request, signal) =>
       read<YimengReferenceCandidatesResponse>('referenceCandidates', request, signal),
     reviewEvents: (request, signal) => read<YimengElementReviewFeedResponse>('reviewEvents', request, signal),
+    referenceRightsExceptionReleases: (request, signal) =>
+      read<YimengReferenceRightsExceptionReleaseFeedResponse>('referenceRightsExceptionReleases', request, signal),
     script: (request, signal) => read<YimengScriptResponse>('script', request, signal),
     promptIr: (request, signal) => read<YimengPromptIrResponse>('promptIr', request, signal),
     workflow: (request, signal) => read<YimengWorkflowProjection>('workflow', request, signal),
@@ -85,6 +91,18 @@ export function apply(ctx: ClientContext): void {
     createComment: (request, signal) => command<YimengCreateCommentResponse>('createComment', request, signal),
     createHumanDecision: (request, signal) =>
       command<YimengCreateHumanDecisionResponse>('createHumanDecision', request, signal),
+    createReferenceRightsExceptionRelease: (request, signal) =>
+      command<YimengCreateReferenceRightsExceptionReleaseResponse>(
+        'createReferenceRightsExceptionRelease',
+        request,
+        signal,
+      ),
+    recoverReferenceRightsExceptionRelease: (request, signal) =>
+      command<YimengRecoverReferenceRightsExceptionReleaseResponse>(
+        'recoverReferenceRightsExceptionRelease',
+        request,
+        signal,
+      ),
     proposeScript: (request, signal) => command<YimengProposeScriptResponse>('proposeScript', request, signal),
     previewScript: (request, signal) => command<YimengPreviewScriptResponse>('previewScript', request, signal),
     commitScript: (request, signal) => command<YimengCommitScriptResponse>('commitScript', request, signal),
