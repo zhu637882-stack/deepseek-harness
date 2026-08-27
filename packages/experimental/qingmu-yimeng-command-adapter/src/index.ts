@@ -18,6 +18,8 @@ import type {
   YimengCreateReferenceRightsExceptionReleaseResponse,
   YimengCommitElementProfileRequest,
   YimengCommitElementProfileResponse,
+  YimengCommitStoryboardCanvasRequest,
+  YimengCommitStoryboardCanvasResponse,
   YimengCommitScriptRequest,
   YimengCommitScriptResponse,
   YimengElementImpactAnalysis,
@@ -27,7 +29,10 @@ import type {
   YimengElementReviewComment,
   YimengHumanDecision,
   YimengHumanDecisionValue,
+  YimengHeroFrameBinding,
   YimengImagoElementMethodAttestation,
+  YimengImagoHeroFrameStoryboardMethodAttestation,
+  YimengImagoHeroFrameStoryboardMethodProjection,
   YimengImagoReferenceAssetMethodAttestation,
   YimengImagoReferenceAssetMethodProjection,
   YimengPreviewElementProfileRequest,
@@ -36,8 +41,12 @@ import type {
   YimengPreviewPromptIrResponse,
   YimengPreviewScriptRequest,
   YimengPreviewScriptResponse,
+  YimengPreviewStoryboardCanvasRequest,
+  YimengPreviewStoryboardCanvasResponse,
   YimengProposeElementProfileRequest,
   YimengProposeElementProfileResponse,
+  YimengProposeStoryboardCanvasRequest,
+  YimengProposeStoryboardCanvasResponse,
   YimengProposePromptIrRequest,
   YimengProposePromptIrResponse,
   YimengProposeReferenceAssetRequest,
@@ -58,6 +67,8 @@ import type {
   YimengRecoverElementProfileCommitResponse,
   YimengRecoverScriptCommitRequest,
   YimengRecoverScriptCommitResponse,
+  YimengRecoverStoryboardCanvasCommitRequest,
+  YimengRecoverStoryboardCanvasCommitResponse,
   YimengRecoverReferenceRightsExceptionReleaseRequest,
   YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengReferenceCommitElementProfileResponse,
@@ -76,6 +87,9 @@ import type {
   YimengReferenceRightsScalar,
   YimengSelectPromptIrRequest,
   YimengSelectPromptIrResponse,
+  YimengStoryboardCanvas,
+  YimengStoryboardFrameChangeSet,
+  YimengStoryboardRevisionCoordinate,
   YimengVisualCommitElementProfileResponse,
   YimengVisualPreviewElementProfileResponse,
 } from './types.ts'
@@ -94,6 +108,8 @@ export type {
   YimengCreateReferenceRightsExceptionReleaseResponse,
   YimengCommitElementProfileRequest,
   YimengCommitElementProfileResponse,
+  YimengCommitStoryboardCanvasRequest,
+  YimengCommitStoryboardCanvasResponse,
   YimengCommitScriptRequest,
   YimengCommitScriptResponse,
   YimengElementKind,
@@ -104,16 +120,23 @@ export type {
   YimengHumanDecision,
   YimengHumanDecisionValue,
   YimengImagoElementMethodAttestation,
+  YimengImagoHeroFrameStoryboardMethodAttestation,
+  YimengImagoHeroFrameStoryboardMethodProjection,
   YimengImagoReferenceAssetMethodAttestation,
   YimengImagoReferenceAssetMethodProjection,
+  YimengHeroFrameBinding,
   YimengPreviewElementProfileRequest,
   YimengPreviewElementProfileResponse,
   YimengPreviewPromptIrRequest,
   YimengPreviewPromptIrResponse,
   YimengPreviewScriptRequest,
   YimengPreviewScriptResponse,
+  YimengPreviewStoryboardCanvasRequest,
+  YimengPreviewStoryboardCanvasResponse,
   YimengProposeElementProfileRequest,
   YimengProposeElementProfileResponse,
+  YimengProposeStoryboardCanvasRequest,
+  YimengProposeStoryboardCanvasResponse,
   YimengProposePromptIrRequest,
   YimengProposePromptIrResponse,
   YimengProposeReferenceAssetRequest,
@@ -137,6 +160,8 @@ export type {
   YimengRecoverElementProfileCommitResponse,
   YimengRecoverScriptCommitRequest,
   YimengRecoverScriptCommitResponse,
+  YimengRecoverStoryboardCanvasCommitRequest,
+  YimengRecoverStoryboardCanvasCommitResponse,
   YimengRecoverReferenceRightsExceptionReleaseRequest,
   YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengReferenceAssetOperation,
@@ -159,6 +184,10 @@ export type {
   YimengVisualCommitElementProfileResponse,
   YimengVisualPreviewElementProfileResponse,
   YimengScriptChangeSet,
+  YimengStoryboardCanvas,
+  YimengStoryboardCanvasCommandSubject,
+  YimengStoryboardFrameChangeSet,
+  YimengStoryboardRevisionCoordinate,
 } from './types.ts'
 
 const CHANNEL = '/qingmu-yimeng-command'
@@ -174,6 +203,16 @@ const PROMPT_IR_EDITABLE_FIELDS = [
   'videoGenPrompt',
   'motionPrompt',
   'negativePrompt',
+] as const
+const STORYBOARD_CANVAS_CHANGED_PATHS = [
+  '$.directorPlan.storyboardCanvas',
+  '$.directorPlan.subjectLayout',
+  '$.directorPlan.objectAnchors',
+  '$.directorPlan.actionTrajectory',
+  '$.visualAtoms.storyboardCanvas',
+  '$.visualAtoms.subjectLayout',
+  '$.visualAtoms.objectAnchors',
+  '$.visualAtoms.actionTrajectory',
 ] as const
 const RIGHTS_KNOWLEDGE_STATES = new Set<YimengReferenceRightsKnowledgeState>([
   'known', 'unknown', 'not_applicable',
@@ -1556,6 +1595,483 @@ function verifyReferenceRightsMethodProof(
   }
 }
 
+function parseHeroFrameStoryboardMethodAttestation(
+  value: unknown,
+): YimengImagoHeroFrameStoryboardMethodAttestation {
+  const item = requireExactRightsObject(value, [
+    'schema',
+    'algorithm',
+    'projectionSha256',
+    'inputSnapshotSha256',
+    'targetSha256',
+    'relationSnapshotSha256',
+    'selectedShotSha256',
+    'heroFrameBindingSha256',
+    'rawAnnotationsSha256',
+    'compiledResultSha256',
+    'signature',
+  ], 'methodAttestation', message => new InputError(message))
+  if (item.schema !== 'qingmu.imago-hero-frame-storyboard-method-attestation.v1') {
+    throw new InputError('methodAttestation.schema mismatch')
+  }
+  if (item.algorithm !== 'hmac-sha256') throw new InputError('methodAttestation.algorithm mismatch')
+  return {
+    schema: 'qingmu.imago-hero-frame-storyboard-method-attestation.v1',
+    algorithm: 'hmac-sha256',
+    projectionSha256: parseInputSha256(item.projectionSha256, 'methodAttestation.projectionSha256'),
+    inputSnapshotSha256: parseInputSha256(item.inputSnapshotSha256, 'methodAttestation.inputSnapshotSha256'),
+    targetSha256: parseInputSha256(item.targetSha256, 'methodAttestation.targetSha256'),
+    relationSnapshotSha256: parseInputSha256(
+      item.relationSnapshotSha256,
+      'methodAttestation.relationSnapshotSha256',
+    ),
+    selectedShotSha256: parseInputSha256(item.selectedShotSha256, 'methodAttestation.selectedShotSha256'),
+    heroFrameBindingSha256: parseInputSha256(
+      item.heroFrameBindingSha256,
+      'methodAttestation.heroFrameBindingSha256',
+    ),
+    rawAnnotationsSha256: parseInputSha256(item.rawAnnotationsSha256, 'methodAttestation.rawAnnotationsSha256'),
+    compiledResultSha256: parseInputSha256(
+      item.compiledResultSha256,
+      'methodAttestation.compiledResultSha256',
+    ),
+    signature: parseInputSha256(item.signature, 'methodAttestation.signature'),
+  }
+}
+
+function parseHeroFrameStoryboardMethodProjection(
+  value: unknown,
+): YimengImagoHeroFrameStoryboardMethodProjection {
+  const root = requireExactRightsObject(value, [
+    'schema',
+    'input_snapshot_sha256',
+    'target',
+    'canvas_projection',
+    'method_definition',
+    'source_bindings',
+    'field_hints',
+    'checklist',
+    'work_order_projection',
+    'review_card',
+    'legal_work_set',
+    'authority_snapshot_attestation',
+    'project_state_persisted',
+    'providerCalls',
+    'workerStarted',
+    'selection_executed',
+    'human_approval_inferred',
+    'human_signoff_inferred',
+  ], 'methodProjection', message => new InputError(message))
+  if (root.schema !== 'qingmu.imago-hero-frame-storyboard-method-projection.v1') {
+    throw new InputError('methodProjection.schema mismatch')
+  }
+  const targetValue = requireExactRightsObject(root.target, [
+    'projectId',
+    'episodeId',
+    'episodeRevision',
+    'storyboardRevisionId',
+    'storyboardRevisionVersion',
+    'storyboardSourceSha256',
+    'relationSnapshotSha256',
+    'selectedShotId',
+    'selectedShotSnapshotSha256',
+  ], 'methodProjection.target', message => new InputError(message))
+  const target = {
+    projectId: parseIdentifier(targetValue.projectId, 'methodProjection.target.projectId'),
+    episodeId: parseIdentifier(targetValue.episodeId, 'methodProjection.target.episodeId'),
+    episodeRevision: parsePromptIrVersion(targetValue.episodeRevision, 'methodProjection.target.episodeRevision'),
+    storyboardRevisionId: parseIdentifier(
+      targetValue.storyboardRevisionId,
+      'methodProjection.target.storyboardRevisionId',
+    ),
+    storyboardRevisionVersion: parsePromptIrVersion(
+      targetValue.storyboardRevisionVersion,
+      'methodProjection.target.storyboardRevisionVersion',
+    ),
+    storyboardSourceSha256: parseInputSha256(
+      targetValue.storyboardSourceSha256,
+      'methodProjection.target.storyboardSourceSha256',
+    ),
+    relationSnapshotSha256: parseInputSha256(
+      targetValue.relationSnapshotSha256,
+      'methodProjection.target.relationSnapshotSha256',
+    ),
+    selectedShotId: parseIdentifier(targetValue.selectedShotId, 'methodProjection.target.selectedShotId'),
+    selectedShotSnapshotSha256: parseInputSha256(
+      targetValue.selectedShotSnapshotSha256,
+      'methodProjection.target.selectedShotSnapshotSha256',
+    ),
+  }
+  const canvasValue = requireExactRightsObject(root.canvas_projection, [
+    'canonicalShotIdSource',
+    'shotId',
+    'selectedShot',
+    'heroFrame',
+    'baseCanvasSha256',
+    'rawAnnotations',
+    'rawAnnotationsSha256',
+    'compiledResult',
+    'compiledResultSha256',
+  ], 'methodProjection.canvas_projection', message => new InputError(message))
+  if (canvasValue.canonicalShotIdSource !== 'yimeng_storyboard_frame_id') {
+    throw new InputError('methodProjection canvas Shot identity source mismatch')
+  }
+  const shotId = parseIdentifier(canvasValue.shotId, 'methodProjection.canvas_projection.shotId')
+  const selectedShot = requireExactRightsObject(canvasValue.selectedShot, [
+    'shotId', 'sceneId', 'elementIds', 'beats',
+  ], 'methodProjection.canvas_projection.selectedShot', message => new InputError(message))
+  if (selectedShot.shotId !== shotId) throw new InputError('methodProjection selected Shot identity mismatch')
+  const heroValue = requireExactRightsObject(canvasValue.heroFrame, [
+    'assetId', 'mediaSha256', 'bindingSha256',
+  ], 'methodProjection.canvas_projection.heroFrame', message => new InputError(message))
+  const heroFrame = {
+    assetId: parseIdentifier(heroValue.assetId, 'methodProjection.canvas_projection.heroFrame.assetId'),
+    mediaSha256: parseInputSha256(
+      heroValue.mediaSha256,
+      'methodProjection.canvas_projection.heroFrame.mediaSha256',
+    ),
+    bindingSha256: parseInputSha256(
+      heroValue.bindingSha256,
+      'methodProjection.canvas_projection.heroFrame.bindingSha256',
+    ),
+  }
+  if (canvasValue.baseCanvasSha256 !== null && typeof canvasValue.baseCanvasSha256 !== 'string') {
+    throw new InputError('methodProjection.canvas_projection.baseCanvasSha256 must be null or sha256')
+  }
+  const baseCanvasSha256 = canvasValue.baseCanvasSha256 === null
+    ? null
+    : parseInputSha256(canvasValue.baseCanvasSha256, 'methodProjection.canvas_projection.baseCanvasSha256')
+  const rawAnnotations = parseReferenceProjectionObjects(
+    canvasValue.rawAnnotations,
+    'methodProjection.canvas_projection.rawAnnotations',
+  )
+  const compiledResult = requireExactRightsObject(canvasValue.compiledResult, [
+    'subjectLayout', 'objectAnchors', 'actionTrajectory',
+  ], 'methodProjection.canvas_projection.compiledResult', message => new InputError(message))
+  for (const field of ['subjectLayout', 'objectAnchors', 'actionTrajectory'] as const) {
+    parseReferenceProjectionObjects(
+      compiledResult[field],
+      `methodProjection.canvas_projection.compiledResult.${field}`,
+    )
+  }
+  const rawAnnotationsSha256 = parseInputSha256(
+    canvasValue.rawAnnotationsSha256,
+    'methodProjection.canvas_projection.rawAnnotationsSha256',
+  )
+  const compiledResultSha256 = parseInputSha256(
+    canvasValue.compiledResultSha256,
+    'methodProjection.canvas_projection.compiledResultSha256',
+  )
+  if (compiledResultSha256 !== inputCanonicalSha256(compiledResult, 'methodProjection.canvas_projection.compiledResult')) {
+    throw new InputError('methodProjection compiled result sha256 mismatch')
+  }
+
+  const methodDefinition = requireExactRightsObject(root.method_definition, [
+    'id', 'version', 'sha256', 'stage_contract_sha256', 'role_capability_sha256', 'agent_paths', 'skill_paths',
+  ], 'methodProjection.method_definition', message => new InputError(message))
+  if (methodDefinition.id !== 'imago-v6-c-c5-hero-frame-storyboard-canvas' || methodDefinition.version !== 1) {
+    throw new InputError('methodProjection.method_definition mismatch')
+  }
+  const sourceBindings = parseReferenceProjectionObjects(root.source_bindings, 'methodProjection.source_bindings')
+  const fieldHints = parseReferenceProjectionObjects(root.field_hints, 'methodProjection.field_hints')
+  const checklist = parseReferenceProjectionObjects(root.checklist, 'methodProjection.checklist')
+  const workOrder = requireExactRightsObject(root.work_order_projection, [
+    'target', 'operation', 'allowed_mutations', 'required_read_set', 'before_compile', 'after_compile',
+    'providerCalls', 'workerStarted',
+  ], 'methodProjection.work_order_projection', message => new InputError(message))
+  const exactList = (actual: unknown, expected: readonly string[]): boolean => (
+    Array.isArray(actual)
+    && actual.length === expected.length
+    && actual.every((item, index) => item === expected[index])
+  )
+  if (
+    inputCanonicalSha256(workOrder.target, 'methodProjection.work_order_projection.target')
+      !== inputCanonicalSha256(target, 'methodProjection.target')
+    || workOrder.operation !== 'compileHeroFrameStoryboardCanvas'
+    || !exactList(workOrder.allowed_mutations, ['replaceStoryboardCanvas'])
+    || workOrder.providerCalls !== 0
+    || workOrder.workerStarted !== false
+  ) {
+    throw new InputError('methodProjection work order mismatch')
+  }
+  const reviewCard = parseReferenceProjectionObject(root.review_card, 'methodProjection.review_card')
+  const legalWorkSet = requireExactRightsObject(root.legal_work_set, [
+    'reads', 'writes', 'forbidden',
+  ], 'methodProjection.legal_work_set', message => new InputError(message))
+  if (
+    !exactList(legalWorkSet.reads, ['yimeng_hero_frame_storyboard_canvas_snapshot'])
+    || !exactList(legalWorkSet.writes, ['replace_storyboard_canvas_via_changeset'])
+    || !exactList(legalWorkSet.forbidden, [
+      'direct_project_state_write',
+      'direct_database_write',
+      'second_shot_identity_create',
+      'imago_canvas_state_persist',
+      'provider_dispatch',
+      'asset_generation',
+      'asset_selection',
+      'human_approval',
+      'human_signoff',
+    ])
+  ) {
+    throw new InputError('methodProjection legal work set mismatch')
+  }
+  if (
+    root.authority_snapshot_attestation !== 'not_verified_by_compiler'
+    || root.project_state_persisted !== false
+    || root.providerCalls !== 0
+    || root.workerStarted !== false
+    || root.selection_executed !== false
+    || root.human_approval_inferred !== false
+    || root.human_signoff_inferred !== false
+  ) {
+    throw new InputError('methodProjection authority or execution boundary mismatch')
+  }
+  return {
+    schema: 'qingmu.imago-hero-frame-storyboard-method-projection.v1',
+    input_snapshot_sha256: parseInputSha256(
+      root.input_snapshot_sha256,
+      'methodProjection.input_snapshot_sha256',
+    ),
+    target,
+    canvas_projection: {
+      canonicalShotIdSource: 'yimeng_storyboard_frame_id',
+      shotId,
+      selectedShot,
+      heroFrame,
+      baseCanvasSha256,
+      rawAnnotations,
+      rawAnnotationsSha256,
+      compiledResult,
+      compiledResultSha256,
+    },
+    method_definition: methodDefinition,
+    source_bindings: sourceBindings,
+    field_hints: fieldHints,
+    checklist,
+    work_order_projection: workOrder,
+    review_card: reviewCard,
+    legal_work_set: legalWorkSet,
+    authority_snapshot_attestation: 'not_verified_by_compiler',
+    project_state_persisted: false,
+    providerCalls: 0,
+    workerStarted: false,
+    selection_executed: false,
+    human_approval_inferred: false,
+    human_signoff_inferred: false,
+  }
+}
+
+function verifyHeroFrameStoryboardMethodProof(
+  request: Omit<YimengProposeStoryboardCanvasRequest, 'methodProjection' | 'methodAttestation'>,
+  projection: YimengImagoHeroFrameStoryboardMethodProjection,
+  attestation: YimengImagoHeroFrameStoryboardMethodAttestation,
+): void {
+  const unsigned = {
+    schema: attestation.schema,
+    algorithm: attestation.algorithm,
+    projectionSha256: attestation.projectionSha256,
+    inputSnapshotSha256: attestation.inputSnapshotSha256,
+    targetSha256: attestation.targetSha256,
+    relationSnapshotSha256: attestation.relationSnapshotSha256,
+    selectedShotSha256: attestation.selectedShotSha256,
+    heroFrameBindingSha256: attestation.heroFrameBindingSha256,
+    rawAnnotationsSha256: attestation.rawAnnotationsSha256,
+    compiledResultSha256: attestation.compiledResultSha256,
+  } as const
+  const expectedSignature = createHmac('sha256', readReferenceAttestationKey())
+    .update(canonicalJson(unsigned, 'methodAttestation'), 'utf8')
+    .digest()
+  const receivedSignature = Buffer.from(attestation.signature, 'hex')
+  if (receivedSignature.length !== expectedSignature.length || !timingSafeEqual(receivedSignature, expectedSignature)) {
+    throw new InputError('methodAttestation signature mismatch')
+  }
+  const target = projection.target
+  const canvas = projection.canvas_projection
+  if (
+    target.projectId !== request.projectId
+    || target.episodeId !== request.episodeId
+    || target.storyboardRevisionId !== request.storyboardRevisionId
+    || target.storyboardRevisionVersion !== request.baseRevision
+    || target.selectedShotId !== request.frameId
+    || canvas.shotId !== request.frameId
+    || canvas.heroFrame.assetId !== request.heroFrameAssetId
+    || canvas.heroFrame.mediaSha256 !== request.heroFrameMediaSha256
+  ) {
+    throw new InputError('method projection Storyboard Canvas subject mismatch')
+  }
+  const simpleHeroBindingSha256 = inputCanonicalSha256({
+    assetId: request.heroFrameAssetId,
+    mediaSha256: request.heroFrameMediaSha256,
+    shotId: request.frameId,
+  }, 'heroFrameBinding')
+  if (request.heroFrameBindingSha256 !== simpleHeroBindingSha256) {
+    throw new InputError('heroFrameBindingSha256 mismatch')
+  }
+  const richHeroBindingSha256 = inputCanonicalSha256({
+    schema: 'jason.qingmu-hero-frame-binding.v1',
+    projectId: target.projectId,
+    episodeId: target.episodeId,
+    episodeRevision: target.episodeRevision,
+    storyboardRevisionId: target.storyboardRevisionId,
+    storyboardRevisionVersion: target.storyboardRevisionVersion,
+    storyboardSourceSha256: target.storyboardSourceSha256,
+    relationSnapshotSha256: target.relationSnapshotSha256,
+    selectedShotId: target.selectedShotId,
+    selectedShotSnapshotSha256: target.selectedShotSnapshotSha256,
+    assetId: canvas.heroFrame.assetId,
+    mediaSha256: canvas.heroFrame.mediaSha256,
+  }, 'heroFrameBindingSubject')
+  const rawAnnotationsSha256 = inputCanonicalSha256({
+    schema: 'jason.qingmu-storyboard-raw-annotations.v1',
+    projectId: target.projectId,
+    episodeId: target.episodeId,
+    storyboardRevisionId: target.storyboardRevisionId,
+    storyboardRevisionVersion: target.storyboardRevisionVersion,
+    selectedShotId: target.selectedShotId,
+    selectedShotSnapshotSha256: target.selectedShotSnapshotSha256,
+    heroFrameBindingSha256: richHeroBindingSha256,
+    annotations: canvas.rawAnnotations,
+  }, 'rawAnnotationsSubject')
+  const projectionSha256 = inputCanonicalSha256(projection, 'methodProjection')
+  const targetSha256 = inputCanonicalSha256(target, 'methodProjection.target')
+  const selectedShotSha256 = inputCanonicalSha256(canvas.selectedShot, 'methodProjection.canvas_projection.selectedShot')
+  if (
+    request.methodProjectionSha256 !== projectionSha256
+    || attestation.projectionSha256 !== projectionSha256
+    || projection.input_snapshot_sha256 !== attestation.inputSnapshotSha256
+    || attestation.targetSha256 !== targetSha256
+    || attestation.relationSnapshotSha256 !== target.relationSnapshotSha256
+    || attestation.selectedShotSha256 !== selectedShotSha256
+    || target.selectedShotSnapshotSha256 !== selectedShotSha256
+    || canvas.heroFrame.bindingSha256 !== richHeroBindingSha256
+    || attestation.heroFrameBindingSha256 !== richHeroBindingSha256
+    || canvas.rawAnnotationsSha256 !== rawAnnotationsSha256
+    || attestation.rawAnnotationsSha256 !== rawAnnotationsSha256
+    || attestation.compiledResultSha256 !== canvas.compiledResultSha256
+  ) {
+    throw new InputError('method projection or attestation lineage mismatch')
+  }
+}
+
+function parseProposeStoryboardCanvasRequest(payload: unknown): YimengProposeStoryboardCanvasRequest {
+  const input = requireInputObject(payload)
+  assertOnlyInputKeys(input, [
+    'projectId',
+    'episodeId',
+    'storyboardRevisionId',
+    'frameId',
+    'operation',
+    'baseRevision',
+    'baseSnapshotSha256',
+    'heroFrameAssetId',
+    'heroFrameMediaSha256',
+    'heroFrameBindingSha256',
+    'methodProjection',
+    'methodProjectionSha256',
+    'methodAttestation',
+    'harnessSessionId',
+  ])
+  if (input.operation !== 'replaceStoryboardCanvas') {
+    throw new InputError('operation must be replaceStoryboardCanvas')
+  }
+  const requestBase = {
+    projectId: parseIdentifier(input.projectId, 'projectId'),
+    episodeId: parseIdentifier(input.episodeId, 'episodeId'),
+    storyboardRevisionId: parseIdentifier(input.storyboardRevisionId, 'storyboardRevisionId'),
+    frameId: parseIdentifier(input.frameId, 'frameId'),
+    operation: 'replaceStoryboardCanvas' as const,
+    baseRevision: parseRevision(input.baseRevision),
+    baseSnapshotSha256: parseInputSha256(input.baseSnapshotSha256, 'baseSnapshotSha256'),
+    heroFrameAssetId: parseIdentifier(input.heroFrameAssetId, 'heroFrameAssetId'),
+    heroFrameMediaSha256: parseInputSha256(input.heroFrameMediaSha256, 'heroFrameMediaSha256'),
+    heroFrameBindingSha256: parseInputSha256(input.heroFrameBindingSha256, 'heroFrameBindingSha256'),
+    methodProjectionSha256: parseInputSha256(input.methodProjectionSha256, 'methodProjectionSha256'),
+    ...(() => {
+      const harnessSessionId = parseOptionalHarnessSessionId(input.harnessSessionId)
+      return harnessSessionId === undefined ? {} : { harnessSessionId }
+    })(),
+  }
+  const methodProjection = parseHeroFrameStoryboardMethodProjection(input.methodProjection)
+  const methodAttestation = parseHeroFrameStoryboardMethodAttestation(input.methodAttestation)
+  verifyHeroFrameStoryboardMethodProof(requestBase, methodProjection, methodAttestation)
+  return { ...requestBase, methodProjection, methodAttestation }
+}
+
+function parseStoryboardCanvasCommandSubject(
+  payload: unknown,
+): YimengPreviewStoryboardCanvasRequest {
+  const input = requireInputObject(payload)
+  assertOnlyInputKeys(input, [
+    'projectId',
+    'episodeId',
+    'storyboardRevisionId',
+    'frameId',
+    'targetType',
+    'targetId',
+    'changeSetId',
+    'baseRevision',
+    'baseSnapshotSha256',
+  ])
+  if (input.targetType !== 'storyboard_frame') {
+    throw new InputError('targetType must be storyboard_frame')
+  }
+  const frameId = parseIdentifier(input.frameId, 'frameId')
+  const targetId = parseIdentifier(input.targetId, 'targetId')
+  if (targetId !== frameId) throw new InputError('targetId must equal frameId')
+  return {
+    projectId: parseIdentifier(input.projectId, 'projectId'),
+    episodeId: parseIdentifier(input.episodeId, 'episodeId'),
+    storyboardRevisionId: parseIdentifier(input.storyboardRevisionId, 'storyboardRevisionId'),
+    frameId,
+    targetType: 'storyboard_frame',
+    targetId,
+    changeSetId: parseIdentifier(input.changeSetId, 'changeSetId'),
+    baseRevision: parseRevision(input.baseRevision),
+    baseSnapshotSha256: parseInputSha256(input.baseSnapshotSha256, 'baseSnapshotSha256'),
+  }
+}
+
+function parseCommitStoryboardCanvasRequest(
+  payload: unknown,
+): YimengCommitStoryboardCanvasRequest {
+  const input = requireInputObject(payload)
+  assertOnlyInputKeys(input, [
+    'projectId',
+    'episodeId',
+    'storyboardRevisionId',
+    'frameId',
+    'targetType',
+    'targetId',
+    'changeSetId',
+    'baseRevision',
+    'baseSnapshotSha256',
+    'idempotencyKey',
+    'expectedPayloadSha256',
+  ])
+  const subject = parseStoryboardCanvasCommandSubject({
+    projectId: input.projectId,
+    episodeId: input.episodeId,
+    storyboardRevisionId: input.storyboardRevisionId,
+    frameId: input.frameId,
+    targetType: input.targetType,
+    targetId: input.targetId,
+    changeSetId: input.changeSetId,
+    baseRevision: input.baseRevision,
+    baseSnapshotSha256: input.baseSnapshotSha256,
+  })
+  return {
+    ...subject,
+    idempotencyKey: parseReviewIdempotencyKey(input.idempotencyKey),
+    expectedPayloadSha256: parseInputSha256(input.expectedPayloadSha256, 'expectedPayloadSha256'),
+  }
+}
+
+function parseRecoverStoryboardCanvasCommitRequest(
+  payload: unknown,
+): YimengRecoverStoryboardCanvasCommitRequest {
+  return parseCommitStoryboardCanvasRequest(payload)
+}
+
 function inputCanonicalSha256(value: unknown, field: string): string {
   try {
     return canonicalJsonSha256(value, field)
@@ -2136,6 +2652,402 @@ function normalizeElementProfileChangeSet(value: unknown): YimengElementProfileC
     ...base,
     episodeId: null,
     targetType: 'element_profile',
+  }
+}
+
+function normalizeStoryboardFrameChangeSet(value: unknown): YimengStoryboardFrameChangeSet {
+  const { item, base } = normalizeChangeSetBase(value)
+  assertExactOutputKeys(item, [
+    'schema',
+    'id',
+    'workspaceId',
+    'projectId',
+    'episodeId',
+    'targetType',
+    'targetId',
+    'baseRevision',
+    'baseSnapshotSha256',
+    'payloadSha256',
+    'originKind',
+    'actorUserId',
+    'harnessSessionId',
+    'status',
+    'authoritativeRevision',
+    'authoritativeSnapshotSha256',
+    'committedByUserId',
+    'committedEventId',
+    'committedAt',
+    'createdAt',
+    'updatedAt',
+  ], 'changeSet')
+  if (item.targetType !== 'storyboard_frame') {
+    throw new UpstreamContractError('changeSet.targetType mismatch')
+  }
+  return {
+    ...base,
+    episodeId: requireString(item.episodeId, 'changeSet.episodeId'),
+    targetType: 'storyboard_frame',
+  }
+}
+
+function normalizeStoryboardRevisionCoordinate(
+  value: unknown,
+  field: string,
+): YimengStoryboardRevisionCoordinate {
+  const item = requireObject(value, field)
+  assertExactOutputKeys(item, ['revisionId', 'revisionVersion', 'sourceSha256'], field)
+  return {
+    revisionId: requireString(item.revisionId, `${field}.revisionId`),
+    revisionVersion: requireInteger(item.revisionVersion, `${field}.revisionVersion`),
+    sourceSha256: requireSha256(item.sourceSha256, `${field}.sourceSha256`),
+  }
+}
+
+function normalizeHeroFrameBinding(value: unknown, field: string): YimengHeroFrameBinding {
+  const item = requireObject(value, field)
+  assertExactOutputKeys(item, ['assetId', 'mediaSha256', 'bindingSha256'], field)
+  return {
+    assetId: requireString(item.assetId, `${field}.assetId`),
+    mediaSha256: requireSha256(item.mediaSha256, `${field}.mediaSha256`),
+    bindingSha256: requireSha256(item.bindingSha256, `${field}.bindingSha256`),
+  }
+}
+
+function normalizeStoryboardCanvas(value: unknown, field: string): YimengStoryboardCanvas {
+  const item = requireObject(value, field)
+  assertExactOutputKeys(item, [
+    'schema',
+    'heroFrameBindingSha256',
+    'annotations',
+    'rawAnnotationsSha256',
+    'compiled',
+    'compiledSha256',
+  ], field)
+  if (item.schema !== 'jason.qingmu-storyboard-canvas.v1') {
+    throw new UpstreamContractError(`${field}.schema mismatch`)
+  }
+  const annotations = requireObjectArray(item.annotations, `${field}.annotations`)
+  const rawAnnotationsSha256 = requireSha256(
+    item.rawAnnotationsSha256,
+    `${field}.rawAnnotationsSha256`,
+  )
+  if (canonicalJsonSha256(annotations, `${field}.annotations`) !== rawAnnotationsSha256) {
+    throw new UpstreamContractError(`${field}.rawAnnotationsSha256 mismatch`)
+  }
+  const compiled = requireObject(item.compiled, `${field}.compiled`)
+  assertExactOutputKeys(
+    compiled,
+    ['subjectLayout', 'objectAnchors', 'actionTrajectory'],
+    `${field}.compiled`,
+  )
+  const normalizedCompiled = {
+    subjectLayout: requireObjectArray(compiled.subjectLayout, `${field}.compiled.subjectLayout`),
+    objectAnchors: requireObjectArray(compiled.objectAnchors, `${field}.compiled.objectAnchors`),
+    actionTrajectory: requireObjectArray(compiled.actionTrajectory, `${field}.compiled.actionTrajectory`),
+  }
+  const compiledSha256 = requireSha256(item.compiledSha256, `${field}.compiledSha256`)
+  if (canonicalJsonSha256(normalizedCompiled, `${field}.compiled`) !== compiledSha256) {
+    throw new UpstreamContractError(`${field}.compiledSha256 mismatch`)
+  }
+  return {
+    schema: 'jason.qingmu-storyboard-canvas.v1',
+    heroFrameBindingSha256: requireSha256(
+      item.heroFrameBindingSha256,
+      `${field}.heroFrameBindingSha256`,
+    ),
+    annotations,
+    rawAnnotationsSha256,
+    compiled: normalizedCompiled,
+    compiledSha256,
+  }
+}
+
+function exactStringList(actual: readonly string[], expected: readonly string[]): boolean {
+  return actual.length === expected.length && actual.every((item, index) => item === expected[index])
+}
+
+function normalizeStoryboardCanvasProposal(
+  value: unknown,
+  expected: YimengProposeStoryboardCanvasRequest,
+): YimengProposeStoryboardCanvasResponse {
+  const root = requireObject(value, 'storyboardCanvasProposal')
+  assertExactOutputKeys(root, ['schema', 'changeSet', 'nextAction'], 'storyboardCanvasProposal')
+  if (root.schema !== 'jason.qingmu-storyboard-canvas-change-set-proposal.v1') {
+    throw new UpstreamContractError('storyboardCanvasProposal.schema mismatch')
+  }
+  if (root.nextAction !== 'preview') {
+    throw new UpstreamContractError('storyboardCanvasProposal.nextAction mismatch')
+  }
+  const changeSet = normalizeStoryboardFrameChangeSet(root.changeSet)
+  if (
+    changeSet.projectId !== expected.projectId
+    || changeSet.episodeId !== expected.episodeId
+    || changeSet.targetId !== expected.frameId
+    || changeSet.baseRevision !== expected.baseRevision
+    || changeSet.baseSnapshotSha256 !== expected.baseSnapshotSha256
+    || changeSet.harnessSessionId !== (expected.harnessSessionId ?? null)
+    || changeSet.status !== 'draft'
+    || changeSet.authoritativeRevision !== null
+    || changeSet.authoritativeSnapshotSha256 !== null
+  ) {
+    throw new UpstreamContractError('storyboardCanvasProposal lineage mismatch')
+  }
+  return {
+    schema: 'jason.qingmu-storyboard-canvas-change-set-proposal.v1',
+    changeSet,
+    nextAction: 'preview',
+  }
+}
+
+function normalizeStoryboardCanvasPreview(
+  value: unknown,
+  expected: YimengPreviewStoryboardCanvasRequest,
+): YimengPreviewStoryboardCanvasResponse {
+  const root = requireObject(value, 'storyboardCanvasPreview')
+  assertExactOutputKeys(root, [
+    'schema',
+    'changeSetId',
+    'projectId',
+    'episodeId',
+    'targetType',
+    'targetId',
+    'operation',
+    'storyboardRevision',
+    'baseRevision',
+    'baseSnapshotSha256',
+    'payloadSha256',
+    'heroFrame',
+    'methodHeroFrameBindingSha256',
+    'before',
+    'after',
+    'changedPaths',
+    'providerCalls',
+    'workerStarted',
+    'selectionExecuted',
+    'humanApprovalInferred',
+    'humanSignoff',
+  ], 'storyboardCanvasPreview')
+  if (root.schema !== 'jason.qingmu-storyboard-canvas-preview.v1') {
+    throw new UpstreamContractError('storyboardCanvasPreview.schema mismatch')
+  }
+  const storyboardRevision = normalizeStoryboardRevisionCoordinate(
+    root.storyboardRevision,
+    'storyboardCanvasPreview.storyboardRevision',
+  )
+  const heroFrame = normalizeHeroFrameBinding(root.heroFrame, 'storyboardCanvasPreview.heroFrame')
+  const before = root.before === null
+    ? null
+    : normalizeStoryboardCanvas(root.before, 'storyboardCanvasPreview.before')
+  const after = normalizeStoryboardCanvas(root.after, 'storyboardCanvasPreview.after')
+  const changedPaths = requireStringArray(root.changedPaths, 'storyboardCanvasPreview.changedPaths')
+  if (
+    root.changeSetId !== expected.changeSetId
+    || root.projectId !== expected.projectId
+    || root.episodeId !== expected.episodeId
+    || root.targetType !== 'storyboard_frame'
+    || root.targetId !== expected.frameId
+    || root.operation !== 'replaceStoryboardCanvas'
+    || storyboardRevision.revisionId !== expected.storyboardRevisionId
+    || storyboardRevision.revisionVersion !== expected.baseRevision
+    || root.baseRevision !== expected.baseRevision
+    || root.baseSnapshotSha256 !== expected.baseSnapshotSha256
+    || after.heroFrameBindingSha256 !== heroFrame.bindingSha256
+    || (before !== null && before.heroFrameBindingSha256 !== heroFrame.bindingSha256)
+    || !exactStringList(changedPaths, STORYBOARD_CANVAS_CHANGED_PATHS)
+  ) {
+    throw new UpstreamContractError('storyboardCanvasPreview lineage mismatch')
+  }
+  if (
+    root.providerCalls !== 0
+    || root.workerStarted !== false
+    || root.selectionExecuted !== false
+    || root.humanApprovalInferred !== false
+    || root.humanSignoff !== false
+  ) {
+    throw new UpstreamContractError('storyboardCanvasPreview execution boundary mismatch')
+  }
+  return {
+    schema: 'jason.qingmu-storyboard-canvas-preview.v1',
+    changeSetId: expected.changeSetId,
+    projectId: expected.projectId,
+    episodeId: expected.episodeId,
+    targetType: 'storyboard_frame',
+    targetId: expected.frameId,
+    operation: 'replaceStoryboardCanvas',
+    storyboardRevision,
+    baseRevision: expected.baseRevision,
+    baseSnapshotSha256: expected.baseSnapshotSha256,
+    payloadSha256: requireSha256(root.payloadSha256, 'storyboardCanvasPreview.payloadSha256'),
+    heroFrame,
+    methodHeroFrameBindingSha256: requireSha256(
+      root.methodHeroFrameBindingSha256,
+      'storyboardCanvasPreview.methodHeroFrameBindingSha256',
+    ),
+    before,
+    after,
+    changedPaths,
+    providerCalls: 0,
+    workerStarted: false,
+    selectionExecuted: false,
+    humanApprovalInferred: false,
+    humanSignoff: false,
+  }
+}
+
+function normalizeStoryboardCanvasCommit(
+  value: unknown,
+  expected: YimengCommitStoryboardCanvasRequest,
+): YimengCommitStoryboardCanvasResponse {
+  const root = requireObject(value, 'storyboardCanvasCommit')
+  assertExactOutputKeys(root, [
+    'schema',
+    'changeSetId',
+    'commandReceiptId',
+    'eventId',
+    'eventType',
+    'projectId',
+    'episodeId',
+    'targetType',
+    'targetId',
+    'operation',
+    'storyboardRevision',
+    'baseRevision',
+    'authoritativeRevision',
+    'authoritativeSnapshotSha256',
+    'heroFrame',
+    'methodHeroFrameBindingSha256',
+    'rawAnnotationsSha256',
+    'methodRawAnnotationsSha256',
+    'compiledSha256',
+    'payloadSha256',
+    'idempotencyKey',
+    'changed',
+    'providerCalls',
+    'workerStarted',
+    'selectionExecuted',
+    'humanApprovalInferred',
+    'humanSignoff',
+    'deduplicated',
+    'committedAt',
+  ], 'storyboardCanvasCommit')
+  if (root.schema !== 'jason.qingmu-storyboard-canvas-commit-result.v1') {
+    throw new UpstreamContractError('storyboardCanvasCommit.schema mismatch')
+  }
+  const revisions = requireObject(root.storyboardRevision, 'storyboardCanvasCommit.storyboardRevision')
+  assertExactOutputKeys(revisions, ['base', 'authoritative'], 'storyboardCanvasCommit.storyboardRevision')
+  const baseRevision = normalizeStoryboardRevisionCoordinate(
+    revisions.base,
+    'storyboardCanvasCommit.storyboardRevision.base',
+  )
+  const authoritativeRevision = normalizeStoryboardRevisionCoordinate(
+    revisions.authoritative,
+    'storyboardCanvasCommit.storyboardRevision.authoritative',
+  )
+  const heroFrame = normalizeHeroFrameBinding(root.heroFrame, 'storyboardCanvasCommit.heroFrame')
+  const authoritativeVersion = requireInteger(
+    root.authoritativeRevision,
+    'storyboardCanvasCommit.authoritativeRevision',
+  )
+  if (
+    root.changeSetId !== expected.changeSetId
+    || root.projectId !== expected.projectId
+    || root.episodeId !== expected.episodeId
+    || root.targetType !== 'storyboard_frame'
+    || root.targetId !== expected.frameId
+    || root.operation !== 'replaceStoryboardCanvas'
+    || root.eventType !== 'StoryboardCanvasReplaced'
+    || baseRevision.revisionId !== expected.storyboardRevisionId
+    || baseRevision.revisionVersion !== expected.baseRevision
+    || root.baseRevision !== expected.baseRevision
+    || authoritativeRevision.revisionVersion !== authoritativeVersion
+    || root.payloadSha256 !== expected.expectedPayloadSha256
+    || root.idempotencyKey !== expected.idempotencyKey
+    || root.changed !== true
+  ) {
+    throw new UpstreamContractError('storyboardCanvasCommit lineage mismatch')
+  }
+  if (
+    root.providerCalls !== 0
+    || root.workerStarted !== false
+    || root.selectionExecuted !== false
+    || root.humanApprovalInferred !== false
+    || root.humanSignoff !== false
+  ) {
+    throw new UpstreamContractError('storyboardCanvasCommit execution boundary mismatch')
+  }
+  return {
+    schema: 'jason.qingmu-storyboard-canvas-commit-result.v1',
+    changeSetId: expected.changeSetId,
+    commandReceiptId: requireString(root.commandReceiptId, 'storyboardCanvasCommit.commandReceiptId'),
+    eventId: requireString(root.eventId, 'storyboardCanvasCommit.eventId'),
+    eventType: 'StoryboardCanvasReplaced',
+    projectId: expected.projectId,
+    episodeId: expected.episodeId,
+    targetType: 'storyboard_frame',
+    targetId: expected.frameId,
+    operation: 'replaceStoryboardCanvas',
+    storyboardRevision: { base: baseRevision, authoritative: authoritativeRevision },
+    baseRevision: expected.baseRevision,
+    authoritativeRevision: authoritativeVersion,
+    authoritativeSnapshotSha256: requireSha256(
+      root.authoritativeSnapshotSha256,
+      'storyboardCanvasCommit.authoritativeSnapshotSha256',
+    ),
+    heroFrame,
+    methodHeroFrameBindingSha256: requireSha256(
+      root.methodHeroFrameBindingSha256,
+      'storyboardCanvasCommit.methodHeroFrameBindingSha256',
+    ),
+    rawAnnotationsSha256: requireSha256(
+      root.rawAnnotationsSha256,
+      'storyboardCanvasCommit.rawAnnotationsSha256',
+    ),
+    methodRawAnnotationsSha256: requireSha256(
+      root.methodRawAnnotationsSha256,
+      'storyboardCanvasCommit.methodRawAnnotationsSha256',
+    ),
+    compiledSha256: requireSha256(root.compiledSha256, 'storyboardCanvasCommit.compiledSha256'),
+    payloadSha256: expected.expectedPayloadSha256,
+    idempotencyKey: expected.idempotencyKey,
+    changed: true,
+    providerCalls: 0,
+    workerStarted: false,
+    selectionExecuted: false,
+    humanApprovalInferred: false,
+    humanSignoff: false,
+    deduplicated: requireBoolean(root.deduplicated, 'storyboardCanvasCommit.deduplicated'),
+    committedAt: requireString(root.committedAt, 'storyboardCanvasCommit.committedAt'),
+  }
+}
+
+function normalizeStoryboardCanvasRecovery(
+  value: unknown,
+  expected: YimengRecoverStoryboardCanvasCommitRequest,
+): YimengRecoverStoryboardCanvasCommitResponse {
+  const root = requireObject(value, 'storyboardCanvasRecovery')
+  assertExactOutputKeys(
+    root,
+    ['schema', 'recovered', 'receiptSha256', 'receipt'],
+    'storyboardCanvasRecovery',
+  )
+  if (root.schema !== 'jason.qingmu-command-receipt-recovery.v1') {
+    throw new UpstreamContractError('storyboardCanvasRecovery.schema mismatch')
+  }
+  if (root.recovered !== true) {
+    throw new UpstreamContractError('storyboardCanvasRecovery.recovered mismatch')
+  }
+  const receiptSha256 = requireSha256(
+    root.receiptSha256,
+    'storyboardCanvasRecovery.receiptSha256',
+  )
+  if (canonicalJsonSha256(root.receipt, 'storyboardCanvasRecovery.receipt') !== receiptSha256) {
+    throw new UpstreamContractError('storyboardCanvasRecovery receipt sha256 mismatch')
+  }
+  return {
+    schema: 'jason.qingmu-command-receipt-recovery.v1',
+    recovered: true,
+    receiptSha256,
+    receipt: normalizeStoryboardCanvasCommit(root.receipt, expected),
   }
 }
 
@@ -3910,6 +4822,62 @@ export function createYimengCommandHandler(
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/change-sets/${encodeURIComponent(request.changeSetId)}/command-receipt`
         requestInit = { method: 'GET', idempotencyKey: request.idempotencyKey }
         normalize = value => normalizeRecovery(value, request)
+      } else if (endpoint === 'proposeStoryboardCanvas') {
+        const request = parseProposeStoryboardCanvasRequest(payload)
+        path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/storyboard-revisions/${encodeURIComponent(request.storyboardRevisionId)}/frames/${encodeURIComponent(request.frameId)}/storyboard-canvas/change-sets`
+        const body: YimengCommandJsonObject = {
+          operation: request.operation,
+          baseRevision: request.baseRevision,
+          baseSnapshotSha256: request.baseSnapshotSha256,
+          baseCanvasSha256: request.methodProjection.canvas_projection.baseCanvasSha256,
+          heroFrameAssetId: request.heroFrameAssetId,
+          heroFrameMediaSha256: request.heroFrameMediaSha256,
+          heroFrameBindingSha256: request.heroFrameBindingSha256,
+          methodHeroFrameBindingSha256: request.methodProjection.canvas_projection.heroFrame.bindingSha256,
+          methodProjection: request.methodProjection,
+          methodProjectionSha256: request.methodProjectionSha256,
+          methodAttestation: request.methodAttestation,
+          harnessSessionId: request.harnessSessionId ?? null,
+        }
+        requestInit = { method: 'POST', body: serializeBody(body) }
+        normalize = value => normalizeStoryboardCanvasProposal(value, request)
+      } else if (endpoint === 'previewStoryboardCanvas') {
+        const request = parseStoryboardCanvasCommandSubject(payload)
+        path = `/api/qingmu/change-sets/${encodeURIComponent(request.changeSetId)}:preview`
+        const body: YimengCommandJsonObject = {
+          projectId: request.projectId,
+          targetType: request.targetType,
+          targetId: request.targetId,
+          episodeId: request.episodeId,
+          storyboardRevisionId: request.storyboardRevisionId,
+          frameId: request.frameId,
+          baseRevision: request.baseRevision,
+          baseSnapshotSha256: request.baseSnapshotSha256,
+        }
+        requestInit = { method: 'POST', body: serializeBody(body) }
+        normalize = value => normalizeStoryboardCanvasPreview(value, request)
+      } else if (endpoint === 'commitStoryboardCanvas') {
+        const request = parseCommitStoryboardCanvasRequest(payload)
+        path = `/api/qingmu/change-sets/${encodeURIComponent(request.changeSetId)}:commit`
+        const body: YimengCommandJsonObject = {
+          projectId: request.projectId,
+          targetType: request.targetType,
+          targetId: request.targetId,
+          episodeId: request.episodeId,
+          storyboardRevisionId: request.storyboardRevisionId,
+          frameId: request.frameId,
+          baseRevision: request.baseRevision,
+          baseSnapshotSha256: request.baseSnapshotSha256,
+          idempotencyKey: request.idempotencyKey,
+          expectedPayloadSha256: request.expectedPayloadSha256,
+        }
+        requestInit = { method: 'POST', body: serializeBody(body) }
+        normalize = value => normalizeStoryboardCanvasCommit(value, request)
+      } else if (endpoint === 'recoverStoryboardCanvasCommit') {
+        const request = parseRecoverStoryboardCanvasCommitRequest(payload)
+        path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/storyboard-revisions/${encodeURIComponent(request.storyboardRevisionId)}/frames/${encodeURIComponent(request.frameId)}/storyboard-canvas/change-sets/${encodeURIComponent(request.changeSetId)}/command-receipt`
+        requestInit = { method: 'GET', idempotencyKey: request.idempotencyKey }
+        normalize = value => normalizeStoryboardCanvasRecovery(value, request)
       } else if (endpoint === 'proposePromptIr') {
         const request = parseProposePromptIrRequest(payload)
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/storyboard-revisions/${encodeURIComponent(request.storyboardRevisionId)}/frames/${encodeURIComponent(request.frameId)}/prompt-ir/change-sets`

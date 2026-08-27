@@ -7,6 +7,7 @@ import {
   createYimengCommandHandler,
   type YimengCommandAdapterDependencies,
 } from '../src/index.ts'
+import { buildStoryboardCanvasFixture } from './storyboard-canvas.fixture.ts'
 
 const PAYLOAD_SHA = 'a'.repeat(64)
 const SNAPSHOT_SHA = 'b'.repeat(64)
@@ -1311,8 +1312,10 @@ describe('qingmu Yimeng command adapter', () => {
   })
 
   it('rejects every command without a Host token before fetch', async () => {
+    vi.stubEnv('QINGMU_IMAGO_ATTESTATION_KEY', ATTESTATION_KEY)
     const fetch = vi.fn<typeof globalThis.fetch>()
     const handler = createYimengCommandHandler({}, deps(fetch))
+    const storyboardCanvas = buildStoryboardCanvasFixture(ATTESTATION_KEY)
     for (const [endpoint, payload] of [
       ['proposeScript', { projectId: 'project-1', episodeId: 'episode-1', script: { scenes: [{ title: '场景' }] }, baseRevision: 2 }],
       ['previewScript', PREVIEW_REQUEST],
@@ -1334,6 +1337,10 @@ describe('qingmu Yimeng command adapter', () => {
       ['previewElementProfile', ELEMENT_PREVIEW_REQUEST],
       ['commitElementProfile', ELEMENT_COMMIT_REQUEST],
       ['recoverElementProfileCommit', ELEMENT_COMMIT_REQUEST],
+      ['proposeStoryboardCanvas', storyboardCanvas.proposeRequest],
+      ['previewStoryboardCanvas', storyboardCanvas.previewRequest],
+      ['commitStoryboardCanvas', storyboardCanvas.commitRequest],
+      ['recoverStoryboardCanvasCommit', storyboardCanvas.commitRequest],
       ['createComment', COMMENT_REQUEST],
       ['createHumanDecision', DECISION_REQUEST],
       ['createReferenceRightsExceptionRelease', RIGHTS_EXCEPTION_REQUEST],
@@ -2721,6 +2728,133 @@ describe('qingmu Yimeng command adapter', () => {
     )).resolves.toMatchObject({
       ok: false,
       error: { code: 'internal', message: 'Yimeng command contract failed: promptIrEditRecovery receipt sha256 mismatch' },
+    })
+  })
+
+  it('keeps Hero Frame Storyboard Canvas edits on the four-step ChangeSet command chain', async () => {
+    vi.stubEnv('QINGMU_IMAGO_ATTESTATION_KEY', ATTESTATION_KEY)
+    const fixture = buildStoryboardCanvasFixture(ATTESTATION_KEY)
+    const responses = [fixture.proposal, fixture.preview, fixture.commit, fixture.recovery]
+    const requests: Array<{ url: string; init: RequestInit | undefined }> = []
+    const handler = createYimengCommandHandler({}, deps(async (input, init) => {
+      requests.push({ url: requestUrl(input), init })
+      return jsonResponse(responses[requests.length - 1])
+    }, 'test-token'))
+
+    await expect(handler('proposeStoryboardCanvas', fixture.proposeRequest, signal())).resolves.toEqual({
+      ok: true,
+      value: fixture.proposal,
+    })
+    await expect(handler('previewStoryboardCanvas', fixture.previewRequest, signal())).resolves.toEqual({
+      ok: true,
+      value: fixture.preview,
+    })
+    await expect(handler('commitStoryboardCanvas', fixture.commitRequest, signal())).resolves.toEqual({
+      ok: true,
+      value: fixture.commit,
+    })
+    await expect(handler('recoverStoryboardCanvasCommit', fixture.commitRequest, signal())).resolves.toEqual({
+      ok: true,
+      value: fixture.recovery,
+    })
+
+    expect(requests.map(request => [new URL(request.url).pathname, request.init?.method])).toEqual([
+      ['/api/qingmu/projects/project-1/episodes/episode-1/storyboard-revisions/storyboard-revision-7/frames/frame-1/storyboard-canvas/change-sets', 'POST'],
+      ['/api/qingmu/change-sets/changeset-canvas-1:preview', 'POST'],
+      ['/api/qingmu/change-sets/changeset-canvas-1:commit', 'POST'],
+      ['/api/qingmu/projects/project-1/episodes/episode-1/storyboard-revisions/storyboard-revision-7/frames/frame-1/storyboard-canvas/change-sets/changeset-canvas-1/command-receipt', 'GET'],
+    ])
+    expect(requestJsonBody(requests[0]?.init)).toEqual({
+      operation: 'replaceStoryboardCanvas',
+      baseRevision: fixture.proposeRequest.baseRevision,
+      baseSnapshotSha256: fixture.proposeRequest.baseSnapshotSha256,
+      baseCanvasSha256: null,
+      heroFrameAssetId: fixture.proposeRequest.heroFrameAssetId,
+      heroFrameMediaSha256: fixture.proposeRequest.heroFrameMediaSha256,
+      heroFrameBindingSha256: fixture.proposeRequest.heroFrameBindingSha256,
+      methodHeroFrameBindingSha256: fixture.methodHeroFrameBindingSha256,
+      methodProjection: fixture.methodProjection,
+      methodProjectionSha256: fixture.methodProjectionSha256,
+      methodAttestation: fixture.methodAttestation,
+      harnessSessionId: 'harness-session-1',
+    })
+    expect(requestJsonBody(requests[1]?.init)).toEqual({
+      projectId: fixture.previewRequest.projectId,
+      targetType: fixture.previewRequest.targetType,
+      targetId: fixture.previewRequest.targetId,
+      episodeId: fixture.previewRequest.episodeId,
+      storyboardRevisionId: fixture.previewRequest.storyboardRevisionId,
+      frameId: fixture.previewRequest.frameId,
+      baseRevision: fixture.previewRequest.baseRevision,
+      baseSnapshotSha256: fixture.previewRequest.baseSnapshotSha256,
+    })
+    expect(requestJsonBody(requests[2]?.init)).toEqual({
+      projectId: fixture.commitRequest.projectId,
+      targetType: fixture.commitRequest.targetType,
+      targetId: fixture.commitRequest.targetId,
+      episodeId: fixture.commitRequest.episodeId,
+      storyboardRevisionId: fixture.commitRequest.storyboardRevisionId,
+      frameId: fixture.commitRequest.frameId,
+      baseRevision: fixture.commitRequest.baseRevision,
+      baseSnapshotSha256: fixture.commitRequest.baseSnapshotSha256,
+      idempotencyKey: fixture.commitRequest.idempotencyKey,
+      expectedPayloadSha256: fixture.commitRequest.expectedPayloadSha256,
+    })
+    expect(new Headers(requests[3]?.init?.headers).get('Idempotency-Key')).toBe(
+      fixture.commitRequest.idempotencyKey,
+    )
+    expect(requests[3]?.init?.body).toBeUndefined()
+  })
+
+  it('fails Storyboard Canvas commands closed on forged proof, Shot drift, or execution claims', async () => {
+    vi.stubEnv('QINGMU_IMAGO_ATTESTATION_KEY', ATTESTATION_KEY)
+    const fixture = buildStoryboardCanvasFixture(ATTESTATION_KEY)
+    const unreachable = vi.fn<typeof globalThis.fetch>()
+    const inputHandler = createYimengCommandHandler({}, deps(unreachable, 'test-token'))
+
+    await expect(inputHandler('proposeStoryboardCanvas', {
+      ...fixture.proposeRequest,
+      methodAttestation: {
+        ...fixture.methodAttestation,
+        signature: 'f'.repeat(64),
+      },
+    }, signal())).resolves.toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    await expect(inputHandler('previewStoryboardCanvas', {
+      ...fixture.previewRequest,
+      targetId: 'frame-2',
+    }, signal())).resolves.toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    expect(unreachable).not.toHaveBeenCalled()
+
+    const executionClaim = createYimengCommandHandler({}, deps(
+      async () => jsonResponse({ ...fixture.preview, providerCalls: 1 }),
+      'test-token',
+    ))
+    await expect(executionClaim(
+      'previewStoryboardCanvas',
+      fixture.previewRequest,
+      signal(),
+    )).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: 'internal',
+        message: 'Yimeng command contract failed: storyboardCanvasPreview execution boundary mismatch',
+      },
+    })
+
+    const wrongRecoveryHash = createYimengCommandHandler({}, deps(
+      async () => jsonResponse({ ...fixture.recovery, receiptSha256: 'f'.repeat(64) }),
+      'test-token',
+    ))
+    await expect(wrongRecoveryHash(
+      'recoverStoryboardCanvasCommit',
+      fixture.commitRequest,
+      signal(),
+    )).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: 'internal',
+        message: 'Yimeng command contract failed: storyboardCanvasRecovery receipt sha256 mismatch',
+      },
     })
   })
 

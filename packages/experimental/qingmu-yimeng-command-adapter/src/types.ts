@@ -726,6 +726,218 @@ export interface YimengRecoverScriptCommitResponse extends YimengCommandJsonObje
   readonly receipt: YimengCommitScriptResponse
 }
 
+/** Storyboard-frame ChangeSet coordinates; the canonical Shot ID is always the frame ID. */
+export interface YimengStoryboardFrameChangeSet extends YimengChangeSetBase {
+  readonly episodeId: string
+  readonly targetType: 'storyboard_frame'
+}
+
+/** Host-attested IMAGO method projection accepted by the Storyboard Canvas proposal lane. */
+export interface YimengImagoHeroFrameStoryboardMethodProjection extends YimengCommandJsonObject {
+  readonly schema: 'qingmu.imago-hero-frame-storyboard-method-projection.v1'
+  readonly input_snapshot_sha256: string
+  readonly target: {
+    readonly projectId: string
+    readonly episodeId: string
+    readonly episodeRevision: number
+    readonly storyboardRevisionId: string
+    readonly storyboardRevisionVersion: number
+    readonly storyboardSourceSha256: string
+    readonly relationSnapshotSha256: string
+    readonly selectedShotId: string
+    readonly selectedShotSnapshotSha256: string
+  }
+  readonly canvas_projection: {
+    readonly canonicalShotIdSource: 'yimeng_storyboard_frame_id'
+    readonly shotId: string
+    readonly selectedShot: YimengCommandJsonObject
+    readonly heroFrame: {
+      readonly assetId: string
+      readonly mediaSha256: string
+      readonly bindingSha256: string
+    }
+    readonly baseCanvasSha256: string | null
+    readonly rawAnnotations: readonly YimengCommandJsonObject[]
+    readonly rawAnnotationsSha256: string
+    readonly compiledResult: YimengCommandJsonObject
+    readonly compiledResultSha256: string
+  }
+  readonly method_definition: YimengCommandJsonObject
+  readonly source_bindings: readonly YimengCommandJsonObject[]
+  readonly field_hints: readonly YimengCommandJsonObject[]
+  readonly checklist: readonly YimengCommandJsonObject[]
+  readonly work_order_projection: YimengCommandJsonObject
+  readonly review_card: YimengCommandJsonObject
+  readonly legal_work_set: YimengCommandJsonObject
+  readonly authority_snapshot_attestation: 'not_verified_by_compiler'
+  readonly project_state_persisted: false
+  readonly providerCalls: 0
+  readonly workerStarted: false
+  readonly selection_executed: false
+  readonly human_approval_inferred: false
+  readonly human_signoff_inferred: false
+}
+
+/** HMAC proof created by the Host method adapter; the browser never receives the signing key. */
+export interface YimengImagoHeroFrameStoryboardMethodAttestation extends YimengCommandJsonObject {
+  readonly schema: 'qingmu.imago-hero-frame-storyboard-method-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly projectionSha256: string
+  readonly inputSnapshotSha256: string
+  readonly targetSha256: string
+  readonly relationSnapshotSha256: string
+  readonly selectedShotSha256: string
+  readonly heroFrameBindingSha256: string
+  readonly rawAnnotationsSha256: string
+  readonly compiledResultSha256: string
+  readonly signature: string
+}
+
+/** Browser-safe proposal for replacing only one current Storyboard Canvas. */
+export interface YimengProposeStoryboardCanvasRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly storyboardRevisionId: string
+  readonly frameId: string
+  readonly operation: 'replaceStoryboardCanvas'
+  readonly baseRevision: number
+  readonly baseSnapshotSha256: string
+  readonly heroFrameAssetId: string
+  readonly heroFrameMediaSha256: string
+  readonly heroFrameBindingSha256: string
+  readonly methodProjection: YimengImagoHeroFrameStoryboardMethodProjection
+  readonly methodProjectionSha256: string
+  readonly methodAttestation: YimengImagoHeroFrameStoryboardMethodAttestation
+  readonly harnessSessionId?: string
+}
+
+/** One immutable Storyboard revision coordinate returned by Yimeng. */
+export interface YimengStoryboardRevisionCoordinate extends YimengCommandJsonObject {
+  readonly revisionId: string
+  readonly revisionVersion: number
+  readonly sourceSha256: string
+}
+
+/** The selected Hero Frame binding owned by Yimeng. */
+export interface YimengHeroFrameBinding extends YimengCommandJsonObject {
+  readonly assetId: string
+  readonly mediaSha256: string
+  readonly bindingSha256: string
+}
+
+/** Raw human canvas plus the deterministic IMAGO compilation persisted by Yimeng. */
+export interface YimengStoryboardCanvas extends YimengCommandJsonObject {
+  readonly schema: 'jason.qingmu-storyboard-canvas.v1'
+  readonly heroFrameBindingSha256: string
+  readonly annotations: readonly YimengCommandJsonObject[]
+  readonly rawAnnotationsSha256: string
+  readonly compiled: {
+    readonly subjectLayout: readonly YimengCommandJsonObject[]
+    readonly objectAnchors: readonly YimengCommandJsonObject[]
+    readonly actionTrajectory: readonly YimengCommandJsonObject[]
+  }
+  readonly compiledSha256: string
+}
+
+/** Durable Yimeng proposal; it is only a draft and never creative approval. */
+export interface YimengProposeStoryboardCanvasResponse extends YimengCommandJsonObject {
+  readonly schema: 'jason.qingmu-storyboard-canvas-change-set-proposal.v1'
+  readonly changeSet: YimengStoryboardFrameChangeSet
+  readonly nextAction: 'preview'
+}
+
+/** Shared subject and CAS lineage for Storyboard Canvas preview and commit. */
+export interface YimengStoryboardCanvasCommandSubject {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly storyboardRevisionId: string
+  readonly frameId: string
+  readonly targetType: 'storyboard_frame'
+  readonly targetId: string
+  readonly changeSetId: string
+  readonly baseRevision: number
+  readonly baseSnapshotSha256: string
+}
+
+/** Read-only technical preview. Passing preflight is not human approval. */
+export type YimengPreviewStoryboardCanvasRequest = YimengStoryboardCanvasCommandSubject
+
+export interface YimengPreviewStoryboardCanvasResponse extends YimengCommandJsonObject {
+  readonly schema: 'jason.qingmu-storyboard-canvas-preview.v1'
+  readonly changeSetId: string
+  readonly projectId: string
+  readonly episodeId: string
+  readonly targetType: 'storyboard_frame'
+  readonly targetId: string
+  readonly operation: 'replaceStoryboardCanvas'
+  readonly storyboardRevision: YimengStoryboardRevisionCoordinate
+  readonly baseRevision: number
+  readonly baseSnapshotSha256: string
+  readonly payloadSha256: string
+  readonly heroFrame: YimengHeroFrameBinding
+  readonly methodHeroFrameBindingSha256: string
+  readonly before: YimengStoryboardCanvas | null
+  readonly after: YimengStoryboardCanvas
+  readonly changedPaths: readonly string[]
+  readonly providerCalls: 0
+  readonly workerStarted: false
+  readonly selectionExecuted: false
+  readonly humanApprovalInferred: false
+  readonly humanSignoff: false
+}
+
+/** Exact retry coordinates for the single transactional Canvas replacement. */
+export interface YimengCommitStoryboardCanvasRequest extends YimengStoryboardCanvasCommandSubject {
+  readonly idempotencyKey: string
+  readonly expectedPayloadSha256: string
+}
+
+/** Durable commit receipt. It records a technical write, never content signoff. */
+export interface YimengCommitStoryboardCanvasResponse extends YimengCommandJsonObject {
+  readonly schema: 'jason.qingmu-storyboard-canvas-commit-result.v1'
+  readonly changeSetId: string
+  readonly commandReceiptId: string
+  readonly eventId: string
+  readonly eventType: 'StoryboardCanvasReplaced'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly targetType: 'storyboard_frame'
+  readonly targetId: string
+  readonly operation: 'replaceStoryboardCanvas'
+  readonly storyboardRevision: {
+    readonly base: YimengStoryboardRevisionCoordinate
+    readonly authoritative: YimengStoryboardRevisionCoordinate
+  }
+  readonly baseRevision: number
+  readonly authoritativeRevision: number
+  readonly authoritativeSnapshotSha256: string
+  readonly heroFrame: YimengHeroFrameBinding
+  readonly methodHeroFrameBindingSha256: string
+  readonly rawAnnotationsSha256: string
+  readonly methodRawAnnotationsSha256: string
+  readonly compiledSha256: string
+  readonly payloadSha256: string
+  readonly idempotencyKey: string
+  readonly changed: true
+  readonly providerCalls: 0
+  readonly workerStarted: false
+  readonly selectionExecuted: false
+  readonly humanApprovalInferred: false
+  readonly humanSignoff: false
+  readonly deduplicated: boolean
+  readonly committedAt: string
+}
+
+/** Read-only lookup for a previously accepted Canvas replacement receipt. */
+export type YimengRecoverStoryboardCanvasCommitRequest = YimengCommitStoryboardCanvasRequest
+
+export interface YimengRecoverStoryboardCanvasCommitResponse extends YimengCommandJsonObject {
+  readonly schema: 'jason.qingmu-command-receipt-recovery.v1'
+  readonly recovered: true
+  readonly receiptSha256: string
+  readonly receipt: YimengCommitStoryboardCanvasResponse
+}
+
 /** The only five PromptIR fields exposed by Yimeng for human editing. */
 export interface YimengPromptIrEditableProjection extends YimengCommandJsonObject {
   readonly imageGenPrompt: string
@@ -920,6 +1132,10 @@ export interface YimengCommandEndpointMap {
   readonly previewScript: YimengPreviewScriptResponse
   readonly commitScript: YimengCommitScriptResponse
   readonly recoverScriptCommit: YimengRecoverScriptCommitResponse
+  readonly proposeStoryboardCanvas: YimengProposeStoryboardCanvasResponse
+  readonly previewStoryboardCanvas: YimengPreviewStoryboardCanvasResponse
+  readonly commitStoryboardCanvas: YimengCommitStoryboardCanvasResponse
+  readonly recoverStoryboardCanvasCommit: YimengRecoverStoryboardCanvasCommitResponse
   readonly proposeElementProfile: YimengProposeElementProfileResponse
   readonly proposeReferenceAsset: YimengProposeReferenceAssetResponse
   readonly previewElementProfile: YimengPreviewElementProfileResponse
