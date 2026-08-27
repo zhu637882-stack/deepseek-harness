@@ -1035,6 +1035,89 @@ function validateElementProposal(body: unknown, elementKind: ElementKind): strin
   return proposal.methodProjectionSha256
 }
 
+function validateReferenceRightsMethodProof(
+  proposal: Record<string, unknown>,
+  baseSubject: ReturnType<typeof propSubject>,
+): string {
+  const methodProjection = isRecord(proposal.methodProjection) ? proposal.methodProjection : {}
+  const methodSubject = isRecord(methodProjection.subject) ? methodProjection.subject : {}
+  const methodDefinition = isRecord(methodProjection.method_definition) ? methodProjection.method_definition : {}
+  const methodAttestation = isRecord(proposal.methodAttestation) ? proposal.methodAttestation : {}
+  const projectionKeys = [
+    'schema',
+    'input_snapshot_sha256',
+    'subject',
+    'method_definition',
+    'source_bindings',
+    'field_hints',
+    'checklist',
+    'work_order_projection',
+    'review_card',
+    'legal_work_set',
+    'authority_snapshot_attestation',
+    'project_state_persisted',
+    'paid_provider_authority',
+    'human_approval_inferred',
+    'selection_authority',
+  ].sort()
+  const subjectKeys = [
+    'project_id',
+    'target_type',
+    'target_id',
+    'element_kind',
+    'scope_type',
+    'scope_id',
+    'base_revision',
+    'base_snapshot_sha256',
+  ].sort()
+  const attestationKeys = [
+    'schema',
+    'algorithm',
+    'projectionSha256',
+    'inputSnapshotSha256',
+    'subjectSha256',
+    'signature',
+  ].sort()
+  const methodProjectionSha256 = canonicalSha256(methodProjection)
+  if (
+    Object.keys(methodProjection).sort().some((key, index) => key !== projectionKeys[index])
+    || Object.keys(methodProjection).length !== projectionKeys.length
+    || Object.keys(methodSubject).sort().some((key, index) => key !== subjectKeys[index])
+    || Object.keys(methodSubject).length !== subjectKeys.length
+    || Object.keys(methodAttestation).sort().some((key, index) => key !== attestationKeys[index])
+    || Object.keys(methodAttestation).length !== attestationKeys.length
+    || methodProjection.schema !== 'qingmu.imago-element-method-projection.v1'
+    || methodDefinition.id !== 'imago-v6-reference-rights-record'
+    || methodDefinition.version !== 1
+    || methodSubject.project_id !== 'project-1'
+    || methodSubject.target_type !== 'element_profile'
+    || methodSubject.target_id !== 'prop-1'
+    || methodSubject.element_kind !== 'prop'
+    || methodSubject.scope_type !== 'project'
+    || methodSubject.scope_id !== 'project-1'
+    || methodSubject.base_revision !== 4
+    || methodSubject.base_snapshot_sha256 !== canonicalSha256(baseSubject)
+    || proposal.methodProjectionSha256 !== methodProjectionSha256
+    || methodAttestation.schema !== 'qingmu.imago-element-method-attestation.v1'
+    || methodAttestation.algorithm !== 'hmac-sha256'
+    || methodAttestation.projectionSha256 !== methodProjectionSha256
+    || methodAttestation.inputSnapshotSha256 !== methodProjection.input_snapshot_sha256
+    || methodAttestation.subjectSha256 !== canonicalSha256(methodSubject)
+  ) {
+    throw new Error('reference rights proposal method proof lineage mismatch')
+  }
+  const { signature, ...unsignedAttestation } = methodAttestation
+  if (
+    typeof signature !== 'string'
+    || signature !== createHmac('sha256', IMAGO_ATTESTATION_KEY)
+      .update(canonicalJson(unsignedAttestation), 'utf8')
+      .digest('hex')
+  ) {
+    throw new Error('reference rights proposal method attestation signature mismatch')
+  }
+  return methodProjectionSha256
+}
+
 async function startYimengDouble(
   captured: CapturedYimengRequest[],
   scriptReadRevisions: number[],
@@ -1452,7 +1535,11 @@ async function startYimengDouble(
       }
       const elementProposalMatch = /^\/api\/qingmu\/projects\/project-1\/elements\/(actor|scene|prop)\/([^/]+)\/change-sets$/
         .exec(url.pathname)
-      if (request.method === 'POST' && elementProposalMatch !== null) {
+      if (
+        request.method === 'POST'
+        && elementProposalMatch !== null
+        && (!isRecord(body) || body.operation !== 'replaceReferenceRights')
+      ) {
         const elementKind = elementProposalMatch[1] as ElementKind
         const fixture = ELEMENT_FIXTURES[elementKind]
         if (elementProposalMatch[2] !== fixture.targetId) throw new Error('element proposal target mismatch')
@@ -1470,7 +1557,7 @@ async function startYimengDouble(
       }
       if (
         request.method === 'POST'
-        && url.pathname === '/api/qingmu/projects/project-1/elements/prop/prop-1/reference-change-sets'
+        && url.pathname === '/api/qingmu/projects/project-1/elements/prop/prop-1/change-sets'
       ) {
         const proposal = isRecord(body) ? body : {}
         const expectedKeys = [
@@ -1481,8 +1568,12 @@ async function startYimengDouble(
           'rights',
           'baseRevision',
           'baseSnapshotSha256',
+          'methodProjection',
+          'methodProjectionSha256',
+          'methodAttestation',
         ].sort()
         const baseSubject = currentPropSubject()
+        const methodProjectionSha256 = validateReferenceRightsMethodProof(proposal, baseSubject)
         if (
           propRevision !== 4
           || propRightsRecorded
@@ -1498,6 +1589,9 @@ async function startYimengDouble(
           || proposal.baseSnapshotSha256 !== canonicalSha256(baseSubject)
         ) {
           throw new Error('reference rights proposal lineage mismatch')
+        }
+        if (methodProjectionSha256 !== await referenceRightsMethodProjectionSha256) {
+          throw new Error('reference rights proposal did not transport the browser-observed IMAGO proof')
         }
         json(response, 201, {
           schema: 'jason.qingmu-change-set-proposal.v1',
@@ -3035,11 +3129,16 @@ describe.skipIf(
       await rightsHolder.getByRole('combobox', { name: '信息状态' }).selectOption('known')
       await rightsHolder.getByRole('textbox', { name: '权利人 · 内容' }).fill('青木工作室')
 
-      const proposalPath = '/api/qingmu/projects/project-1/elements/prop/prop-1/reference-change-sets'
+      const proposalPath = '/api/qingmu/projects/project-1/elements/prop/prop-1/change-sets'
+      const rightsProposalRequests = () => capturedRequests.filter(request => (
+        request.path === proposalPath
+        && isRecord(request.body)
+        && request.body.operation === 'replaceReferenceRights'
+      ))
       const previewPath = `/api/qingmu/change-sets/${REFERENCE_RIGHTS_CHANGE_SET_ID}:preview`
       const commitPath = `/api/qingmu/change-sets/${REFERENCE_RIGHTS_CHANGE_SET_ID}:commit`
       const recoveryPath = `/api/qingmu/projects/project-1/elements/prop/prop-1/change-sets/${REFERENCE_RIGHTS_CHANGE_SET_ID}/command-receipt`
-      expect(capturedRequests.filter(request => request.path === proposalPath)).toEqual([])
+      expect(rightsProposalRequests()).toEqual([])
       expect(capturedRequests.filter(request => request.path === commitPath)).toEqual([])
       await reference.getByRole('button', { name: '生成权利变更预览' }).click()
 
@@ -3208,10 +3307,25 @@ describe.skipIf(
           body: undefined,
         }),
       ])
-      expect(capturedRequests.filter(request => request.path === proposalPath)).toEqual([
+      const proposalRequests = rightsProposalRequests()
+      expect(proposalRequests).toHaveLength(1)
+      const proposalBody = isRecord(proposalRequests[0]?.body) ? proposalRequests[0].body : {}
+      expect(Object.keys(proposalBody).sort()).toEqual([
+        'elementKind',
+        'operation',
+        'referenceAssetId',
+        'referenceAssetSha256',
+        'rights',
+        'baseRevision',
+        'baseSnapshotSha256',
+        'methodProjection',
+        'methodProjectionSha256',
+        'methodAttestation',
+      ].sort())
+      expect(proposalRequests).toEqual([
         expect.objectContaining({
           method: 'POST',
-          body: {
+          body: expect.objectContaining({
             elementKind: 'prop',
             operation: 'replaceReferenceRights',
             referenceAssetId: 'reference-prop-1',
@@ -3219,9 +3333,12 @@ describe.skipIf(
             rights: recordedRights,
             baseRevision: 4,
             baseSnapshotSha256: canonicalSha256(baselineSubject),
-          },
+          }),
         }),
       ])
+      expect(validateReferenceRightsMethodProof(proposalBody, baselineSubject)).toBe(
+        await referenceRightsMethodProjectionSha256,
+      )
       expect(capturedRequests.filter(request => request.path === previewPath)).toEqual([
         expect.objectContaining({
           method: 'POST',

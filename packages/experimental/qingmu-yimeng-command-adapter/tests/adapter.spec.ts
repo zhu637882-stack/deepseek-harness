@@ -1628,7 +1628,7 @@ describe('qingmu Yimeng command adapter', () => {
     }
   })
 
-  it('runs a rights-only ChangeSet and strips the IMAGO proof and Host token from business payloads', async () => {
+  it('runs a rights-only ChangeSet with its verified IMAGO proof and strips the Host token', async () => {
     vi.stubEnv('QINGMU_IMAGO_ATTESTATION_KEY', ATTESTATION_KEY)
     const fixture = referenceRightsContractFixture({
       rights: recordedReferenceRightsFixture(),
@@ -1641,14 +1641,17 @@ describe('qingmu Yimeng command adapter', () => {
       const url = requestUrl(input)
       const body = typeof init.body === 'string' ? JSON.parse(init.body) as unknown : undefined
       requests.push({ url, init, body })
-      if (url.endsWith('/reference-change-sets')) return jsonResponse(fixture.proposal, { status: 201 })
+      if (url.endsWith('/elements/prop/prop-1/change-sets')) return jsonResponse(fixture.proposal, { status: 201 })
       if (url.endsWith(':preview')) return jsonResponse(fixture.preview)
       if (url.endsWith(':commit')) return jsonResponse(fixture.commit)
       if (url.endsWith('/command-receipt')) return jsonResponse(fixture.recovery)
       throw new Error(`unexpected URL: ${url}`)
     }, 'rights-test-token'))
 
-    const proposal = await handler('proposeReferenceAsset', fixture.proposalRequest, signal())
+    const proposal = await handler('proposeReferenceAsset', {
+      ...fixture.proposalRequest,
+      harnessSessionId: 'rights-session-1',
+    }, signal())
     const preview = await handler('previewElementProfile', fixture.previewRequest, signal())
     const commit = await handler('commitElementProfile', fixture.commitRequest, signal())
     const recovery = await handler('recoverElementProfileCommit', fixture.commitRequest, signal())
@@ -1657,6 +1660,9 @@ describe('qingmu Yimeng command adapter', () => {
     expect(preview).toEqual({ ok: true, value: fixture.preview })
     expect(commit).toEqual({ ok: true, value: fixture.commit })
     expect(recovery).toEqual({ ok: true, value: fixture.recovery })
+    expect(requests[0]?.url).toBe(
+      'http://127.0.0.1:8115/api/qingmu/projects/project-1/elements/prop/prop-1/change-sets',
+    )
     expect(requests[0]?.body).toEqual({
       elementKind: 'prop',
       operation: 'replaceReferenceRights',
@@ -1665,9 +1671,11 @@ describe('qingmu Yimeng command adapter', () => {
       rights: recordedReferenceRightsFixture(),
       baseRevision: 4,
       baseSnapshotSha256: fixture.proposalRequest.baseSnapshotSha256,
+      methodProjection: fixture.proposalRequest.methodProjection,
+      methodProjectionSha256: fixture.proposalRequest.methodProjectionSha256,
+      methodAttestation: fixture.proposalRequest.methodAttestation,
+      harnessSessionId: 'rights-session-1',
     })
-    expect(requests[0]?.body).not.toHaveProperty('methodProjection')
-    expect(requests[0]?.body).not.toHaveProperty('methodAttestation')
     expect(JSON.stringify(requests.map(request => request.body))).not.toContain('rights-test-token')
     expect(JSON.stringify([proposal, preview, commit, recovery])).not.toContain('rights-test-token')
     expect(fixture.commit).not.toHaveProperty('rights')
@@ -1700,7 +1708,7 @@ describe('qingmu Yimeng command adapter', () => {
     })
     const handler = createYimengCommandHandler({}, deps(async (input) => {
       const url = requestUrl(input)
-      if (url.endsWith('/reference-change-sets')) return jsonResponse(fixture.proposal, { status: 201 })
+      if (url.endsWith('/elements/prop/prop-1/change-sets')) return jsonResponse(fixture.proposal, { status: 201 })
       if (url.endsWith(':preview')) return jsonResponse(fixture.preview)
       if (url.endsWith(':commit')) return jsonResponse(fixture.commit)
       throw new Error(`unexpected URL: ${url}`)
@@ -1733,7 +1741,7 @@ describe('qingmu Yimeng command adapter', () => {
     })
     const handler = createYimengCommandHandler({}, deps(async (input) => {
       const url = requestUrl(input)
-      if (url.endsWith('/reference-change-sets')) return jsonResponse(fixture.proposal, { status: 201 })
+      if (url.endsWith('/elements/prop/prop-1/change-sets')) return jsonResponse(fixture.proposal, { status: 201 })
       if (url.endsWith(':preview')) return jsonResponse(fixture.preview)
       if (url.endsWith(':commit')) return jsonResponse(fixture.commit)
       if (url.endsWith('/command-receipt')) return jsonResponse(fixture.recovery)

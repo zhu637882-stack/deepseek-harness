@@ -3642,7 +3642,7 @@ export function createYimengCommandHandler(
         normalize = value => normalizeElementProposal(value, request)
       } else if (endpoint === 'proposeReferenceAsset') {
         const request = parseProposeReferenceAssetRequest(payload)
-        path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/elements/${encodeURIComponent(request.elementKind)}/${encodeURIComponent(request.targetId)}/reference-change-sets`
+        path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/elements/${encodeURIComponent(request.elementKind)}/${encodeURIComponent(request.targetId)}/${request.operation === 'replaceReferenceRights' ? 'change-sets' : 'reference-change-sets'}`
         const body: YimengCommandJsonObject = request.operation === 'replaceReferenceRights'
           ? {
             elementKind: request.elementKind,
@@ -3652,6 +3652,10 @@ export function createYimengCommandHandler(
             rights: request.rights,
             baseRevision: request.baseRevision,
             baseSnapshotSha256: request.baseSnapshotSha256,
+            methodProjection: request.methodProjection,
+            methodProjectionSha256: request.methodProjectionSha256,
+            methodAttestation: request.methodAttestation,
+            ...(request.harnessSessionId === undefined ? {} : { harnessSessionId: request.harnessSessionId }),
           }
           : {
             elementKind: request.elementKind,
