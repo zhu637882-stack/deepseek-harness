@@ -25,14 +25,14 @@ const PROP_CHANGE_SET_ID = 'changeset-prop-profile-1'
 const PROP_PAYLOAD_SHA = '7'.repeat(64)
 const PROP_PREVIEW_SHA = '8'.repeat(64)
 const PROP_REFERENCE_SHA = '9'.repeat(64)
-const PROP_IDEMPOTENCY_KEY = `qingmu:element:v3:901eb1d9b9cc01ab20ba965f30018b23198518fd59a65d13cd547a64e931effc:${PROP_PAYLOAD_SHA}`
+const PROP_IDEMPOTENCY_KEY = `qingmu:element:v4:901eb1d9b9cc01ab20ba965f30018b23198518fd59a65d13cd547a64e931effc:${PROP_PAYLOAD_SHA}`
 const PROP_ORIGINAL_PROMPT = '一枚磨损的银色怀表，表盖闭合。'
 const PROP_UPDATED_PROMPT = '一枚磨损的银色怀表，表盖有细小裂痕，指针停在午夜十二点。'
 const ACTOR_CHANGE_SET_ID = 'changeset-actor-profile-1'
 const ACTOR_PAYLOAD_SHA = '1'.repeat(64)
 const ACTOR_PREVIEW_SHA = '2'.repeat(64)
 const ACTOR_REFERENCE_SHA = '3'.repeat(64)
-const ACTOR_IDEMPOTENCY_KEY = `qingmu:element:v3:${createHash('sha256').update(ACTOR_CHANGE_SET_ID, 'utf8').digest('hex')}:${ACTOR_PAYLOAD_SHA}`
+const ACTOR_IDEMPOTENCY_KEY = `qingmu:element:v4:${createHash('sha256').update(ACTOR_CHANGE_SET_ID, 'utf8').digest('hex')}:${ACTOR_PAYLOAD_SHA}`
 const ACTOR_ORIGINAL_IDENTITY = '林青，二十七岁，短黑发，左眉尾有浅疤，深灰风衣。'
 const ACTOR_UPDATED_IDENTITY = '林青，二十七岁，短黑发，左眉尾有浅疤，深灰风衣，右手戴旧银戒。'
 const SCENE_CHANGE_SET_ID = 'changeset-scene-profile-1'
@@ -43,10 +43,14 @@ const SCENE_ORIGINAL_PROMPT = '雨夜里的旧体育馆走廊，冷白顶灯，�
 const SCENE_UPDATED_PROMPT = '雨夜里的旧体育馆走廊，冷白顶灯间歇闪烁，湿润水磨石地面映出长条反光。'
 const REFERENCE_SELECT_CHANGE_SET_ID = 'changeset-scene-reference-select-1'
 const REFERENCE_SELECT_PAYLOAD_SHA = 'd'.repeat(64)
-const REFERENCE_SELECT_IDEMPOTENCY_KEY = `qingmu:element:v3:${createHash('sha256').update(REFERENCE_SELECT_CHANGE_SET_ID, 'utf8').digest('hex')}:${REFERENCE_SELECT_PAYLOAD_SHA}`
+const REFERENCE_SELECT_IDEMPOTENCY_KEY = `qingmu:element:v4:${createHash('sha256').update(REFERENCE_SELECT_CHANGE_SET_ID, 'utf8').digest('hex')}:${REFERENCE_SELECT_PAYLOAD_SHA}`
 const REFERENCE_REGEN_CHANGE_SET_ID = 'changeset-scene-reference-regeneration-1'
 const REFERENCE_REGEN_PAYLOAD_SHA = 'e'.repeat(64)
-const REFERENCE_REGEN_IDEMPOTENCY_KEY = `qingmu:element:v3:${createHash('sha256').update(REFERENCE_REGEN_CHANGE_SET_ID, 'utf8').digest('hex')}:${REFERENCE_REGEN_PAYLOAD_SHA}`
+const REFERENCE_REGEN_IDEMPOTENCY_KEY = `qingmu:element:v4:${createHash('sha256').update(REFERENCE_REGEN_CHANGE_SET_ID, 'utf8').digest('hex')}:${REFERENCE_REGEN_PAYLOAD_SHA}`
+const REFERENCE_RIGHTS_CHANGE_SET_ID = 'changeset-prop-reference-rights-1'
+const REFERENCE_RIGHTS_PAYLOAD_SHA = '54'.repeat(32)
+const REFERENCE_RIGHTS_PREVIEW_SHA = '65'.repeat(32)
+const REFERENCE_RIGHTS_IDEMPOTENCY_KEY = `qingmu:element:v4:${createHash('sha256').update(REFERENCE_RIGHTS_CHANGE_SET_ID, 'utf8').digest('hex')}:${REFERENCE_RIGHTS_PAYLOAD_SHA}`
 const SCENE_SELECT_ASSET_ID = 'scene-reference-candidate-1'
 const SCENE_SELECT_ASSET_SHA = 'ab'.repeat(32)
 const SCENE_REPAIR_ASSET_ID = 'scene-reference-rejected-1'
@@ -236,11 +240,89 @@ function canonicalSha256(value: unknown): string {
   return createHash('sha256').update(canonicalJson(value), 'utf8').digest('hex')
 }
 
-function elementSubject(elementKind: ElementKind, revision: number, value: string) {
+function commandRecoveryVisualBaselineSha256(subject: Record<string, unknown>): string {
+  const baseline = (['visualIdentity', 'visualPrompt', 'officialReferenceImageUrl'] as const).map((field) => {
+    const value = subject[field]
+    const normalized = !Object.prototype.hasOwnProperty.call(subject, field)
+      ? ['absent']
+      : value === null
+        ? ['null']
+        : ['string', value]
+    return [field, normalized]
+  })
+  return createHash('sha256').update(JSON.stringify(baseline), 'utf8').digest('hex')
+}
+
+function commandRecoveryHumanDecisionsSha256(decisions: readonly Record<string, unknown>[]): string {
+  const normalized = decisions.map(decision => JSON.stringify({
+    id: decision.id,
+    subjectType: decision.subjectType,
+    subjectId: decision.subjectId,
+    subjectRevision: decision.subjectRevision,
+    subjectSha256: decision.subjectSha256,
+    decision: decision.decision,
+    reason: decision.reason,
+    actorId: decision.actorId,
+    actorRole: decision.actorRole,
+    authSessionId: decision.authSessionId,
+    decidedAt: decision.decidedAt,
+  })).sort()
+  return createHash('sha256').update(JSON.stringify(normalized), 'utf8').digest('hex')
+}
+
+function unknownReferenceRightsRecord() {
+  return {
+    schema: 'jason.qingmu-reference-rights-record.v1',
+    sourceType: { state: 'unknown', value: null },
+    rightsHolder: { state: 'unknown', value: null },
+    authorizationScope: { state: 'unknown', values: [] },
+    territory: { state: 'unknown', values: [] },
+    term: { state: 'unknown', startsAt: null, endsAt: null, perpetual: null },
+    restrictions: { state: 'unknown', values: [] },
+    contains: {
+      realPersonLikeness: 'unknown',
+      trademark: 'unknown',
+      music: 'unknown',
+      font: 'unknown',
+      thirdPartyCharacter: 'unknown',
+    },
+    providerTerms: { state: 'unknown', terms: null, reviewedAt: null },
+    modelLicenses: {
+      code: { state: 'unknown', value: null },
+      weights: { state: 'unknown', value: null },
+      outputUse: { state: 'unknown', value: null },
+    },
+    humanDeclaration: { state: 'unknown', text: null },
+    contentCredentials: { state: 'unknown', value: null },
+  } as const
+}
+
+function recordedReferenceRightsRecord() {
+  return {
+    ...unknownReferenceRightsRecord(),
+    sourceType: { state: 'known', value: 'commissioned' },
+    rightsHolder: { state: 'known', value: '青木工作室' },
+  } as const
+}
+
+type ReferenceRightsState = {
+  readonly rightsRecorded: boolean
+  readonly rights: ReturnType<typeof unknownReferenceRightsRecord> | ReturnType<typeof recordedReferenceRightsRecord>
+}
+
+function elementSubject(
+  elementKind: ElementKind,
+  revision: number,
+  value: string,
+  referenceRights: ReferenceRightsState = {
+    rightsRecorded: false,
+    rights: unknownReferenceRightsRecord(),
+  },
+) {
   const fixture = ELEMENT_FIXTURES[elementKind]
   const selected = revision === 3
   const common = {
-    schema: 'jason.qingmu-element-profile-subject.v1',
+    schema: 'jason.qingmu-element-profile-subject.v2',
     projectId: 'project-1',
     targetType: 'element_profile',
     elementKind,
@@ -252,6 +334,13 @@ function elementSubject(elementKind: ElementKind, revision: number, value: strin
       sha256: fixture.referenceSha256,
       selectionStatus: selected ? 'Selected' : 'Stale',
       isSelected: selected,
+      ...(elementKind === 'actor'
+        ? { role: 'primary' }
+        : elementKind === 'scene'
+          ? { role: 'environment' }
+          : {}),
+      rightsRecorded: referenceRights.rightsRecorded,
+      rights: referenceRights.rights,
     }],
   } as const
   if (elementKind === 'actor') {
@@ -274,6 +363,9 @@ function sceneReferenceSubject(revision: number, selectedReference: boolean) {
       sha256: SCENE_SELECT_ASSET_SHA,
       selectionStatus: 'Selected',
       isSelected: true,
+      role: 'environment',
+      rightsRecorded: false,
+      rights: unknownReferenceRightsRecord(),
     }],
   } as const
 }
@@ -332,6 +424,45 @@ function sceneReferenceCandidatesFixture(
       sceneReferenceCandidate(SCENE_REPAIR_ASSET_ID, SCENE_REPAIR_ASSET_SHA, 'Rejected', false),
       sceneReferenceCandidate(SCENE_STALE_ASSET_ID, SCENE_STALE_ASSET_SHA, 'Stale', false),
     ],
+    humanApprovalInferred: false,
+  } as const
+}
+
+function propReferenceCandidatesFixture(profileRevision: number, elementSnapshotSha256: string) {
+  return {
+    schema: 'jason.qingmu-reference-asset-candidates.v1',
+    projectId: 'project-1',
+    targetType: 'element_profile',
+    targetId: 'prop-1',
+    elementKind: 'prop',
+    profileRevision,
+    elementSnapshotSha256,
+    candidates: [{
+      assetId: 'reference-prop-1',
+      sha256: PROP_REFERENCE_SHA,
+      materializedSha256: PROP_REFERENCE_SHA,
+      bindingValid: true,
+      projectId: 'project-1',
+      sourceEpisodeId: 'episode-1',
+      ownerType: 'prop',
+      ownerId: 'prop-1',
+      role: 'prop_reference',
+      localPath: 'storage/props/reference-prop-1.png',
+      qualityStatus: 'passed',
+      selectionStatus: 'Stale',
+      isSelected: false,
+      generationJobId: 'job-reference-prop-1',
+      sourceRevisionId: 'revision-reference-prop-1',
+      formalConsistencyCheckId: 'check-reference-prop-1',
+      formalConsistencyPassed: true,
+      qualityProjectionSha256: canonicalSha256({
+        assetId: 'reference-prop-1',
+        sha256: PROP_REFERENCE_SHA,
+        quality: 'passed',
+      }),
+      decisionKind: 'none',
+      decisionIdentity: '',
+    }],
     humanApprovalInferred: false,
   } as const
 }
@@ -406,6 +537,32 @@ function referenceChangeSetFixture(
   } as const
 }
 
+function referenceRightsChangeSetFixture(baseSnapshotSha256: string) {
+  return {
+    schema: 'jason.qingmu-change-set.v1',
+    id: REFERENCE_RIGHTS_CHANGE_SET_ID,
+    workspaceId: null,
+    projectId: 'project-1',
+    episodeId: null,
+    targetType: 'element_profile',
+    targetId: 'prop-1',
+    baseRevision: 4,
+    baseSnapshotSha256,
+    payloadSha256: REFERENCE_RIGHTS_PAYLOAD_SHA,
+    originKind: 'human',
+    actorUserId: 'owner-1',
+    harnessSessionId: null,
+    status: 'proposed',
+    authoritativeRevision: null,
+    authoritativeSnapshotSha256: null,
+    committedByUserId: null,
+    committedEventId: null,
+    committedAt: null,
+    createdAt: '2026-08-27T11:00:00+00:00',
+    updatedAt: '2026-08-27T11:00:00+00:00',
+  } as const
+}
+
 function referenceCommitReceiptFixture(
   operation: 'selectReferenceAsset' | 'requestReferenceRegeneration',
   authoritativeSnapshotSha256: string,
@@ -471,8 +628,40 @@ function elementCommitReceiptFixture(
   } as const
 }
 
-function propSubject(revision: number, prompt: string) {
-  return elementSubject('prop', revision, prompt)
+function referenceRightsCommitReceiptFixture(authoritativeSnapshotSha256: string) {
+  const impactAnalysis = elementImpactFixture('prop')
+  return {
+    schema: 'jason.qingmu-element-profile-commit-result.v1',
+    changeSetId: REFERENCE_RIGHTS_CHANGE_SET_ID,
+    commandReceiptId: 'receipt-prop-reference-rights-1',
+    eventId: 'event-prop-reference-rights-1',
+    eventType: 'ReferenceInvalidated',
+    projectId: 'project-1',
+    targetType: 'element_profile',
+    targetId: 'prop-1',
+    elementKind: 'prop',
+    operation: 'replaceReferenceRights',
+    referenceAssetId: 'reference-prop-1',
+    referenceAssetSha256: PROP_REFERENCE_SHA,
+    baseRevision: 4,
+    authoritativeRevision: 5,
+    authoritativeSnapshotSha256,
+    payloadSha256: REFERENCE_RIGHTS_PAYLOAD_SHA,
+    idempotencyKey: REFERENCE_RIGHTS_IDEMPOTENCY_KEY,
+    changed: true,
+    referenceInvalidated: true,
+    impactAnalysis,
+    impactSha256: canonicalSha256(impactAnalysis),
+    deduplicated: false,
+    committedAt: '2026-08-27T11:01:00+00:00',
+  } as const
+}
+
+function propSubject(revision: number, prompt: string, referenceRights?: ReferenceRightsState) {
+  return elementSubject('prop', revision, prompt, referenceRights) as Extract<
+    ReturnType<typeof elementSubject>,
+    { readonly propId: string }
+  >
 }
 
 function propCommitReceiptFixture(snapshotSha256: string) {
@@ -852,8 +1041,12 @@ async function startYimengDouble(
   actorReadRevisions: number[],
   sceneReadRevisions: number[],
   propReadRevisions: number[],
+  propReadSubjects: Array<ReturnType<typeof propSubject>>,
+  propReviewDecisionReads: Array<Array<Record<string, unknown>>>,
   sceneReferenceCandidateReads: ReturnType<typeof sceneReferenceCandidatesFixture>[],
+  propReferenceCandidateReads: ReturnType<typeof propReferenceCandidatesFixture>[],
   promptIrWorkflowStatuses: string[],
+  referenceRightsMethodProjectionSha256: Promise<string>,
 ): Promise<{
   readonly server: Server
   readonly baseUrl: string
@@ -863,6 +1056,8 @@ async function startYimengDouble(
   readonly releaseActorCommitResponse: () => void
   readonly propCommitAccepted: Promise<void>
   readonly releasePropCommitResponse: () => void
+  readonly referenceRightsCommitAccepted: Promise<void>
+  readonly releaseReferenceRightsCommitResponse: () => void
   readonly referenceCommitAccepted: Promise<void>
   readonly releaseReferenceCommitResponse: () => void
   readonly referenceRegenerationCommitAccepted: Promise<void>
@@ -885,8 +1080,16 @@ async function startYimengDouble(
   let sceneMethodProjectionSha256: string | undefined
   let propRevision = 3
   let propPrompt = PROP_ORIGINAL_PROMPT
+  let propRightsRecorded = false
+  let propRights: ReferenceRightsState['rights'] = unknownReferenceRightsRecord()
+  const currentPropRights = (): ReferenceRightsState => ({
+    rightsRecorded: propRightsRecorded,
+    rights: propRights,
+  })
+  const currentPropSubject = () => propSubject(propRevision, propPrompt, currentPropRights())
   let propMethodProjectionSha256: string | undefined
   let persistedPropReceipt: ReturnType<typeof propCommitReceiptFixture> | undefined
+  let persistedReferenceRightsReceipt: ReturnType<typeof referenceRightsCommitReceiptFixture> | undefined
   let promptIrDraftCommitted = false
   let promptIrSelected = false
   let persistedPromptIrEditReceipt: ReturnType<typeof promptIrEditReceiptFixture> | undefined
@@ -916,6 +1119,14 @@ async function startYimengDouble(
   })
   const propCommitResponseReleased = new Promise<void>((resolve) => {
     resolvePropCommitResponse = resolve
+  })
+  let resolveReferenceRightsCommitAccepted: (() => void) | undefined
+  let resolveReferenceRightsCommitResponse: (() => void) | undefined
+  const referenceRightsCommitAccepted = new Promise<void>((resolve) => {
+    resolveReferenceRightsCommitAccepted = resolve
+  })
+  const referenceRightsCommitResponseReleased = new Promise<void>((resolve) => {
+    resolveReferenceRightsCommitResponse = resolve
   })
   let persistedReferenceReceipt: ReturnType<typeof referenceCommitReceiptFixture> | undefined
   let resolveReferenceCommitAccepted: (() => void) | undefined
@@ -1040,10 +1251,13 @@ async function startYimengDouble(
         readRevisions.push(elementRevision)
         const subject = elementKind === 'scene'
           ? sceneReferenceSubject(elementRevision, sceneReferenceSelected)
-          : elementSubject(elementKind, elementRevision, elementValue)
+          : elementKind === 'prop'
+            ? currentPropSubject()
+            : elementSubject(elementKind, elementRevision, elementValue)
+        if (elementKind === 'prop') propReadSubjects.push(subject as ReturnType<typeof propSubject>)
         const canonicalSnapshot = canonicalJson(subject)
         json(response, 200, {
-          schema: 'jason.qingmu-element-profile-subject-read.v1',
+          schema: 'jason.qingmu-element-profile-subject-read.v2',
           subject,
           canonicalSnapshot,
           snapshotSha256: createHash('sha256').update(canonicalSnapshot, 'utf8').digest('hex'),
@@ -1060,7 +1274,7 @@ async function startYimengDouble(
           ? [actorRevision, elementSubject('actor', actorRevision, actorIdentity)] as const
           : elementKind === 'scene'
             ? [sceneRevision, sceneReferenceSubject(sceneRevision, sceneReferenceSelected)] as const
-            : [propRevision, propSubject(propRevision, propPrompt)] as const
+            : [propRevision, currentPropSubject()] as const
         const elementSnapshotSha256 = canonicalSha256(subject)
         if (elementKind === 'scene') {
           const candidateResponse = sceneReferenceCandidatesFixture(
@@ -1069,6 +1283,10 @@ async function startYimengDouble(
             sceneReferenceSelected,
           )
           sceneReferenceCandidateReads.push(candidateResponse)
+          json(response, 200, candidateResponse)
+        } else if (elementKind === 'prop') {
+          const candidateResponse = propReferenceCandidatesFixture(elementRevision, elementSnapshotSha256)
+          propReferenceCandidateReads.push(candidateResponse)
           json(response, 200, candidateResponse)
         } else {
           json(response, 200, {
@@ -1095,8 +1313,11 @@ async function startYimengDouble(
           ? [actorRevision, elementSubject('actor', actorRevision, actorIdentity)] as const
           : elementKind === 'scene'
             ? [sceneRevision, sceneReferenceSubject(sceneRevision, sceneReferenceSelected)] as const
-            : [propRevision, propSubject(propRevision, propPrompt)] as const
+            : [propRevision, currentPropSubject()] as const
         const subjectSha256 = canonicalSha256(subject)
+        if (elementKind === 'prop') {
+          propReviewDecisionReads.push(reviewDecisions.prop.map(decision => ({ ...decision })))
+        }
         const currentDecision = [...reviewDecisions[elementKind]].reverse().find(decision =>
           decision.subjectId === fixture.targetId
           && decision.subjectRevision === elementRevision
@@ -1130,7 +1351,7 @@ async function startYimengDouble(
           ? [actorRevision, elementSubject('actor', actorRevision, actorIdentity)] as const
           : elementKind === 'scene'
             ? [sceneRevision, sceneReferenceSubject(sceneRevision, sceneReferenceSelected)] as const
-            : [propRevision, propSubject(propRevision, propPrompt)] as const
+            : [propRevision, currentPropSubject()] as const
         const subjectSha256 = canonicalSha256(subject)
         const command = isRecord(body) ? body : {}
         const expectedKeys = commandKind === 'comments'
@@ -1247,6 +1468,44 @@ async function startYimengDouble(
         })
         return
       }
+      if (
+        request.method === 'POST'
+        && url.pathname === '/api/qingmu/projects/project-1/elements/prop/prop-1/reference-change-sets'
+      ) {
+        const proposal = isRecord(body) ? body : {}
+        const expectedKeys = [
+          'elementKind',
+          'operation',
+          'referenceAssetId',
+          'referenceAssetSha256',
+          'rights',
+          'baseRevision',
+          'baseSnapshotSha256',
+        ].sort()
+        const baseSubject = currentPropSubject()
+        if (
+          propRevision !== 4
+          || propRightsRecorded
+          || Object.keys(proposal).sort().some((key, index) => key !== expectedKeys[index])
+          || Object.keys(proposal).length !== expectedKeys.length
+          || proposal.elementKind !== 'prop'
+          || proposal.operation !== 'replaceReferenceRights'
+          || proposal.referenceAssetId !== 'reference-prop-1'
+          || proposal.referenceAssetSha256 !== PROP_REFERENCE_SHA
+          || !isRecord(proposal.rights)
+          || canonicalJson(proposal.rights) !== canonicalJson(recordedReferenceRightsRecord())
+          || proposal.baseRevision !== 4
+          || proposal.baseSnapshotSha256 !== canonicalSha256(baseSubject)
+        ) {
+          throw new Error('reference rights proposal lineage mismatch')
+        }
+        json(response, 201, {
+          schema: 'jason.qingmu-change-set-proposal.v1',
+          changeSet: referenceRightsChangeSetFixture(canonicalSha256(baseSubject)),
+          nextAction: 'preview',
+        })
+        return
+      }
       const referenceProposalMatch = /^\/api\/qingmu\/projects\/project-1\/elements\/scene\/scene-1\/reference-change-sets$/
         .exec(url.pathname)
       if (request.method === 'POST' && referenceProposalMatch !== null) {
@@ -1348,6 +1607,77 @@ async function startYimengDouble(
           preflight: { valid: true },
           references: [],
           previewSha256: PREVIEW_SHA,
+        })
+        return
+      }
+      if (
+        request.method === 'POST'
+        && url.pathname === `/api/qingmu/change-sets/${REFERENCE_RIGHTS_CHANGE_SET_ID}:preview`
+      ) {
+        const command = isRecord(body) ? body : {}
+        const expectedKeys = [
+          'projectId',
+          'targetType',
+          'targetId',
+          'elementKind',
+          'episodeId',
+          'baseRevision',
+          'baseSnapshotSha256',
+        ].sort()
+        const baseSubject = currentPropSubject()
+        if (
+          propRevision !== 4
+          || propRightsRecorded
+          || Object.keys(command).sort().some((key, index) => key !== expectedKeys[index])
+          || Object.keys(command).length !== expectedKeys.length
+          || command.projectId !== 'project-1'
+          || command.targetType !== 'element_profile'
+          || command.targetId !== 'prop-1'
+          || command.elementKind !== 'prop'
+          || command.episodeId !== null
+          || command.baseRevision !== 4
+          || command.baseSnapshotSha256 !== canonicalSha256(baseSubject)
+        ) {
+          throw new Error('reference rights preview lineage mismatch')
+        }
+        const impactAnalysis = elementImpactFixture('prop')
+        json(response, 200, {
+          schema: 'jason.qingmu-change-set-preview.v1',
+          changeSet: referenceRightsChangeSetFixture(canonicalSha256(baseSubject)),
+          baseSubject,
+          authoritativeCurrentSubject: baseSubject,
+          changeSetId: REFERENCE_RIGHTS_CHANGE_SET_ID,
+          payloadSha256: REFERENCE_RIGHTS_PAYLOAD_SHA,
+          projectId: 'project-1',
+          targetType: 'element_profile',
+          targetId: 'prop-1',
+          elementKind: 'prop',
+          operation: 'replaceReferenceRights',
+          referenceAssetId: 'reference-prop-1',
+          referenceAssetSha256: PROP_REFERENCE_SHA,
+          proposedReferenceRights: recordedReferenceRightsRecord(),
+          baseRevision: 4,
+          authoritativeRevision: 4,
+          baseSnapshotSha256: canonicalSha256(baseSubject),
+          authoritativeSnapshotSha256: canonicalSha256(baseSubject),
+          changed: true,
+          authoritativeChanged: false,
+          revisionConflict: false,
+          baseSnapshotConflict: false,
+          impactConflict: false,
+          canCommit: true,
+          referenceInvalidationExpected: true,
+          impactAnalysis,
+          impactSha256: canonicalSha256(impactAnalysis),
+          preflight: {
+            status: 'pass',
+            costGate: 'not_granted',
+            selectionAuthority: 'not_granted',
+            humanApprovalInferred: false,
+          },
+          references: [{ kind: 'human_note', id: 'rights-review-e2e' }],
+          methodProjectionSha256: await referenceRightsMethodProjectionSha256,
+          previewSha256: REFERENCE_RIGHTS_PREVIEW_SHA,
         })
         return
       }
@@ -1626,6 +1956,49 @@ async function startYimengDouble(
         if (!response.destroyed && !response.writableEnded) json(response, 200, receipt)
         return
       }
+      if (
+        request.method === 'POST'
+        && url.pathname === `/api/qingmu/change-sets/${REFERENCE_RIGHTS_CHANGE_SET_ID}:commit`
+      ) {
+        const command = isRecord(body) ? body : {}
+        const expectedKeys = [
+          'projectId',
+          'targetType',
+          'targetId',
+          'elementKind',
+          'episodeId',
+          'baseRevision',
+          'baseSnapshotSha256',
+          'idempotencyKey',
+          'expectedPayloadSha256',
+        ].sort()
+        const baseSubject = currentPropSubject()
+        if (
+          propRevision !== 4
+          || propRightsRecorded
+          || Object.keys(command).sort().some((key, index) => key !== expectedKeys[index])
+          || Object.keys(command).length !== expectedKeys.length
+          || command.projectId !== 'project-1'
+          || command.targetType !== 'element_profile'
+          || command.targetId !== 'prop-1'
+          || command.elementKind !== 'prop'
+          || command.episodeId !== null
+          || command.baseRevision !== 4
+          || command.baseSnapshotSha256 !== canonicalSha256(baseSubject)
+          || command.idempotencyKey !== REFERENCE_RIGHTS_IDEMPOTENCY_KEY
+          || command.expectedPayloadSha256 !== REFERENCE_RIGHTS_PAYLOAD_SHA
+        ) {
+          throw new Error('reference rights commit lineage mismatch')
+        }
+        propRevision = 5
+        propRightsRecorded = true
+        propRights = recordedReferenceRightsRecord()
+        persistedReferenceRightsReceipt = referenceRightsCommitReceiptFixture(canonicalSha256(currentPropSubject()))
+        resolveReferenceRightsCommitAccepted?.()
+        await referenceRightsCommitResponseReleased
+        if (!response.destroyed && !response.writableEnded) json(response, 200, persistedReferenceRightsReceipt)
+        return
+      }
       const elementCommitKind = (['actor', 'prop'] as const).find(elementKind =>
         url.pathname === `/api/qingmu/change-sets/${ELEMENT_FIXTURES[elementKind].changeSetId}:commit`)
       if (request.method === 'POST' && elementCommitKind !== undefined) {
@@ -1653,7 +2026,7 @@ async function startYimengDouble(
         } else {
           propRevision = 4
           propPrompt = PROP_UPDATED_PROMPT
-          persistedPropReceipt = propCommitReceiptFixture(canonicalSha256(propSubject(propRevision, propPrompt)))
+          persistedPropReceipt = propCommitReceiptFixture(canonicalSha256(currentPropSubject()))
           resolvePropCommitAccepted?.()
           await propCommitResponseReleased
           if (!response.destroyed && !response.writableEnded) json(response, 200, persistedPropReceipt)
@@ -1703,6 +2076,26 @@ async function startYimengDouble(
           recovered: true,
           receiptSha256: RECEIPT_SHA,
           receipt: persistedReceipt,
+        })
+        return
+      }
+      if (
+        request.method === 'GET'
+        && url.pathname === `/api/qingmu/projects/project-1/elements/prop/prop-1/change-sets/${REFERENCE_RIGHTS_CHANGE_SET_ID}/command-receipt`
+      ) {
+        if (
+          persistedReferenceRightsReceipt === undefined
+          || url.search !== ''
+          || request.headers['idempotency-key'] !== REFERENCE_RIGHTS_IDEMPOTENCY_KEY
+        ) {
+          json(response, 404, { error: 'reference rights receipt not found' })
+          return
+        }
+        json(response, 200, {
+          schema: 'jason.qingmu-command-receipt-recovery.v1',
+          recovered: true,
+          receiptSha256: canonicalSha256(persistedReferenceRightsReceipt),
+          receipt: persistedReferenceRightsReceipt,
         })
         return
       }
@@ -1771,6 +2164,8 @@ async function startYimengDouble(
     releaseActorCommitResponse: () => resolveActorCommitResponse?.(),
     propCommitAccepted,
     releasePropCommitResponse: () => resolvePropCommitResponse?.(),
+    referenceRightsCommitAccepted,
+    releaseReferenceRightsCommitResponse: () => resolveReferenceRightsCommitResponse?.(),
     referenceCommitAccepted,
     releaseReferenceCommitResponse: () => resolveReferenceCommitResponse?.(),
     referenceRegenerationCommitAccepted,
@@ -1826,6 +2221,8 @@ describe.skipIf(
     let releaseActorCommitResponse: (() => void) | undefined
     let propCommitAccepted: Promise<void> | undefined
     let releasePropCommitResponse: (() => void) | undefined
+    let referenceRightsCommitAccepted: Promise<void> | undefined
+    let releaseReferenceRightsCommitResponse: (() => void) | undefined
     let referenceCommitAccepted: Promise<void> | undefined
     let releaseReferenceCommitResponse: (() => void) | undefined
     let referenceRegenerationCommitAccepted: Promise<void> | undefined
@@ -1839,8 +2236,16 @@ describe.skipIf(
     const actorReadRevisions: number[] = []
     const sceneReadRevisions: number[] = []
     const propReadRevisions: number[] = []
+    const propReadSubjects: Array<ReturnType<typeof propSubject>> = []
+    const propReviewDecisionReads: Array<Array<Record<string, unknown>>> = []
     const sceneReferenceCandidateReads: ReturnType<typeof sceneReferenceCandidatesFixture>[] = []
+    const propReferenceCandidateReads: ReturnType<typeof propReferenceCandidatesFixture>[] = []
     const promptIrWorkflowStatuses: string[] = []
+    const browserRpcRequests: Array<{ readonly path: string; readonly body: unknown }> = []
+    let resolveReferenceRightsMethodProjectionSha256: ((sha256: string) => void) | undefined
+    const referenceRightsMethodProjectionSha256 = new Promise<string>((resolve) => {
+      resolveReferenceRightsMethodProjectionSha256 = resolve
+    })
 
     beforeAll(async () => {
       if (IMAGO_CORE_ROOT === undefined || IMAGO_CORE_ROOT === '') {
@@ -1854,8 +2259,12 @@ describe.skipIf(
         actorReadRevisions,
         sceneReadRevisions,
         propReadRevisions,
+        propReadSubjects,
+        propReviewDecisionReads,
         sceneReferenceCandidateReads,
+        propReferenceCandidateReads,
         promptIrWorkflowStatuses,
+        referenceRightsMethodProjectionSha256,
       )
       yimengServer = yimeng.server
       commitAccepted = yimeng.commitAccepted
@@ -1864,6 +2273,8 @@ describe.skipIf(
       releaseActorCommitResponse = yimeng.releaseActorCommitResponse
       propCommitAccepted = yimeng.propCommitAccepted
       releasePropCommitResponse = yimeng.releasePropCommitResponse
+      referenceRightsCommitAccepted = yimeng.referenceRightsCommitAccepted
+      releaseReferenceRightsCommitResponse = yimeng.releaseReferenceRightsCommitResponse
       referenceCommitAccepted = yimeng.referenceCommitAccepted
       releaseReferenceCommitResponse = yimeng.releaseReferenceCommitResponse
       referenceRegenerationCommitAccepted = yimeng.referenceRegenerationCommitAccepted
@@ -1898,6 +2309,26 @@ describe.skipIf(
       const executablePath = process.env.DSH_PLAYWRIGHT_EXECUTABLE_PATH
       browser = await chromium.launch(executablePath === undefined ? {} : { executablePath })
       page = await browser.newPage({ viewport: { width: 1680, height: 1100 }, locale: ZH_BROWSER_LOCALE })
+      page.on('request', (request) => {
+        const requestPath = new URL(request.url()).pathname
+        if (requestPath !== '/qingmu-imago-method/referenceAssetMethod') return
+        browserRpcRequests.push({ path: requestPath, body: request.postDataJSON() as unknown })
+      })
+      page.on('response', (response) => {
+        if (new URL(response.url()).pathname !== '/qingmu-imago-method/referenceAssetMethod') return
+        void response.json().then((wire: unknown) => {
+          const root = isRecord(wire) ? wire : {}
+          const result = isRecord(root.result) ? root.result : {}
+          const value = isRecord(result.value) ? result.value : {}
+          if (
+            result.ok === true
+            && value.schema === 'qingmu.imago-element-method-adapter-result.v1'
+            && typeof value.projectionSha256 === 'string'
+          ) {
+            resolveReferenceRightsMethodProjectionSha256?.(value.projectionSha256)
+          }
+        }).catch(() => undefined)
+      })
       tripwire = watchConsole(page)
       await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
       expect(await page.locator('html').innerHTML()).not.toContain(IMAGO_ATTESTATION_KEY)
@@ -1920,6 +2351,7 @@ describe.skipIf(
       releaseCommitResponse?.()
       releaseActorCommitResponse?.()
       releasePropCommitResponse?.()
+      releaseReferenceRightsCommitResponse?.()
       releaseReferenceCommitResponse?.()
       releaseReferenceRegenerationCommitResponse?.()
       releasePromptIrEditResponse?.()
@@ -2165,7 +2597,7 @@ describe.skipIf(
       if (actorCommitAccepted === undefined) throw new Error('isolated actor commit gate was not initialized')
       await actorCommitAccepted
       await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage)
-        .filter(key => key.startsWith('qingmu:command-commit-recovery:v3:')).length), { timeout: 10_000 })
+        .filter(key => key.startsWith('qingmu:command-commit-recovery:v4:')).length), { timeout: 10_000 })
         .toBe(1)
 
       const recoveryPath = `/api/qingmu/projects/project-1/elements/actor/actor-1/change-sets/${ACTOR_CHANGE_SET_ID}/command-receipt`
@@ -2195,7 +2627,7 @@ describe.skipIf(
       expect(await recoveredDialog.getByText('event-actor-1').count()).toBe(1)
       expect(await recoveredDialog.getByText(canonicalSha256(elementImpactFixture('actor')), { exact: true }).count()).toBe(1)
       await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage)
-        .filter(key => key.startsWith('qingmu:command-commit-recovery:v3:'))), {
+        .filter(key => key.startsWith('qingmu:command-commit-recovery:v4:'))), {
         timeout: 15_000,
       }).toEqual([])
 
@@ -2386,7 +2818,7 @@ describe.skipIf(
       if (propCommitAccepted === undefined) throw new Error('isolated prop commit gate was not initialized')
       await propCommitAccepted
       await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage)
-        .filter(key => key.startsWith('qingmu:command-commit-recovery:v3:')).length), { timeout: 10_000 })
+        .filter(key => key.startsWith('qingmu:command-commit-recovery:v4:')).length), { timeout: 10_000 })
         .toBe(1)
 
       const recoveryPath = `/api/qingmu/projects/project-1/elements/prop/prop-1/change-sets/${PROP_CHANGE_SET_ID}/command-receipt`
@@ -2423,7 +2855,7 @@ describe.skipIf(
       expect(await recoveredDialog.getByText('event-prop-1').count()).toBe(1)
       expect(await recoveredDialog.getByText(canonicalSha256(elementImpactFixture('prop')), { exact: true }).count()).toBe(1)
       await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage)
-        .filter(key => key.startsWith('qingmu:command-commit-recovery:v3:'))), {
+        .filter(key => key.startsWith('qingmu:command-commit-recovery:v4:'))), {
         timeout: 15_000,
       }).toEqual([])
 
@@ -2570,6 +3002,265 @@ describe.skipIf(
       expect(tripwire.warnings).toEqual([])
     }, 60_000)
 
+    it('records reference rights through explicit confirmation and lost-response GET-only recovery', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-reference-rights'))
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await dialog.getByRole('group', { name: '选择人物、环境或道具' })
+        .getByRole('button', { name: '道具' }).click()
+      const reference = dialog.getByRole('region', { name: '参考素材选择与返修' })
+      await reference.waitFor({ timeout: 15_000 })
+
+      const baselineSubject = propSubject(4, PROP_UPDATED_PROMPT)
+      await expect.poll(() => propReadSubjects.at(-1), { timeout: 15_000 }).toEqual(baselineSubject)
+      await expect.poll(() => propReferenceCandidateReads.at(-1), { timeout: 15_000 }).toEqual(
+        propReferenceCandidatesFixture(4, canonicalSha256(baselineSubject)),
+      )
+      const baselineDecisions = propReviewDecisionReads.at(-1)?.map(decision => ({ ...decision }))
+      expect(baselineDecisions).toHaveLength(1)
+      if (baselineDecisions === undefined) throw new Error('pre-commit HumanDecision baseline was not loaded')
+      const decisionPostPath = '/api/qingmu/projects/project-1/elements/prop/prop-1/human-decisions'
+      const decisionPostsBefore = capturedRequests.filter(request => (
+        request.method === 'POST' && request.path === decisionPostPath
+      )).length
+
+      await reference.getByRole('button', { name: '维护参考素材权利' }).click()
+      const rightsReference = reference.getByRole('radio', { name: /reference-prop-1/ })
+      await rightsReference.waitFor({ timeout: 15_000 })
+      await rightsReference.check()
+      const editor = reference.getByRole('group', { name: '结构化权利记录' })
+      const sourceType = editor.locator('label').filter({ hasText: '来源类型' }).first()
+      await sourceType.getByRole('combobox', { name: '信息状态' }).selectOption('known')
+      await sourceType.getByRole('textbox', { name: '来源类型 · 内容' }).fill('commissioned')
+      const rightsHolder = editor.locator('label').filter({ hasText: '权利人' }).first()
+      await rightsHolder.getByRole('combobox', { name: '信息状态' }).selectOption('known')
+      await rightsHolder.getByRole('textbox', { name: '权利人 · 内容' }).fill('青木工作室')
+
+      const proposalPath = '/api/qingmu/projects/project-1/elements/prop/prop-1/reference-change-sets'
+      const previewPath = `/api/qingmu/change-sets/${REFERENCE_RIGHTS_CHANGE_SET_ID}:preview`
+      const commitPath = `/api/qingmu/change-sets/${REFERENCE_RIGHTS_CHANGE_SET_ID}:commit`
+      const recoveryPath = `/api/qingmu/projects/project-1/elements/prop/prop-1/change-sets/${REFERENCE_RIGHTS_CHANGE_SET_ID}/command-receipt`
+      expect(capturedRequests.filter(request => request.path === proposalPath)).toEqual([])
+      expect(capturedRequests.filter(request => request.path === commitPath)).toEqual([])
+      await reference.getByRole('button', { name: '生成权利变更预览' }).click()
+
+      const preview = dialog.getByRole('region', { name: '参考素材权利 ChangeSet 预览' })
+      await preview.getByText(REFERENCE_RIGHTS_CHANGE_SET_ID, { exact: true }).waitFor({ timeout: 20_000 })
+      await preview.getByText(`reference-prop-1:${PROP_REFERENCE_SHA}`, { exact: true }).waitFor()
+      await preview.getByText('commissioned', { exact: true }).waitFor()
+      await preview.getByText('青木工作室', { exact: true }).waitFor()
+      await preview.getByText(
+        '本次权利变更必须保持该素材的 selectionStatus 与 isSelected 不变。',
+        { exact: true },
+      ).waitFor()
+      const commitButton = preview.getByRole('button', { name: '确认提交权利记录' })
+      expect(await commitButton.isDisabled()).toBe(true)
+      expect(capturedRequests.filter(request => request.path === commitPath)).toEqual([])
+
+      const rightsRpcWire = browserRpcRequests
+        .map(request => isRecord(request.body) ? request.body : {})
+        .find(wire => isRecord(wire.payload) && wire.payload.operation === 'replaceReferenceRights')
+      expect(rightsRpcWire).toBeDefined()
+      if (rightsRpcWire === undefined || !isRecord(rightsRpcWire.payload)) {
+        throw new Error('browser did not expose the bounded reference-rights IMAGO request')
+      }
+      expect(Object.keys(rightsRpcWire).sort()).toEqual(['method', 'payload', 'rpcId', 'type'])
+      expect(rightsRpcWire.type).toBe('client-request')
+      expect(rightsRpcWire.method).toBe('referenceAssetMethod')
+      expect(typeof rightsRpcWire.rpcId).toBe('string')
+      expect(Object.keys(rightsRpcWire.payload).sort()).toEqual([
+        'elementId',
+        'elementKind',
+        'operation',
+        'profileRevision',
+        'projectId',
+        'snapshotSha256',
+      ])
+      expect(rightsRpcWire.payload).toEqual({
+        projectId: 'project-1',
+        elementKind: 'prop',
+        elementId: 'prop-1',
+        profileRevision: 4,
+        snapshotSha256: canonicalSha256(baselineSubject),
+        operation: 'replaceReferenceRights',
+      })
+      expect(rightsRpcWire.payload).not.toHaveProperty('referenceAssetId')
+      expect(rightsRpcWire.payload).not.toHaveProperty('referenceAssetSha256')
+      expect(rightsRpcWire.payload).not.toHaveProperty('rights')
+
+      await preview.getByRole('checkbox', {
+        name: '我已核对完整权利记录、素材 ID/SHA 和影响分析，并确认提交此 ChangeSet；机器提示不构成批准或签收。',
+      }).check()
+      expect(await commitButton.isEnabled()).toBe(true)
+      await commitButton.click()
+
+      if (referenceRightsCommitAccepted === undefined) {
+        throw new Error('isolated reference rights commit gate was not initialized')
+      }
+      await referenceRightsCommitAccepted
+      const rightsMarkers = await page.evaluate(() => Object.entries(sessionStorage)
+        .filter(([key]) => key.startsWith('qingmu:command-commit-recovery:v4:'))
+        .map(([key, value]) => ({ key, marker: JSON.parse(String(value)) as unknown })))
+      expect(rightsMarkers).toEqual([{
+        key: 'qingmu:command-commit-recovery:v4:project-1:element_profile:prop:prop-1',
+        marker: {
+          schema: 'qingmu.command-commit-recovery-marker.v4',
+          projectId: 'project-1',
+          targetType: 'element_profile',
+          elementKind: 'prop',
+          targetId: 'prop-1',
+          changeSetId: REFERENCE_RIGHTS_CHANGE_SET_ID,
+          baseRevision: 4,
+          baseSnapshotSha256: canonicalSha256(baselineSubject),
+          payloadSha256: REFERENCE_RIGHTS_PAYLOAD_SHA,
+          idempotencyKey: REFERENCE_RIGHTS_IDEMPOTENCY_KEY,
+          operation: 'replaceReferenceRights',
+          referenceAssetId: 'reference-prop-1',
+          referenceAssetSha256: PROP_REFERENCE_SHA,
+          referenceRightsSha256: canonicalSha256(recordedReferenceRightsRecord()),
+          preCommitVisualBaselineSha256: commandRecoveryVisualBaselineSha256(baselineSubject),
+          preCommitHumanDecisionsSha256: commandRecoveryHumanDecisionsSha256(baselineDecisions),
+          selectionStatus: 'Stale',
+          isSelected: false,
+        },
+      }])
+      const serializedMarker = JSON.stringify(rightsMarkers)
+      expect(isRecord(rightsMarkers[0]?.marker) ? rightsMarkers[0]?.marker : {}).not.toHaveProperty('rights')
+      expect(serializedMarker).not.toContain('commissioned')
+      expect(serializedMarker).not.toContain('青木工作室')
+      expect(serializedMarker).not.toContain(YIMENG_TOKEN)
+      expect(serializedMarker).not.toContain(IMAGO_ATTESTATION_KEY)
+      expect(serializedMarker).not.toContain('methodProjection')
+      expect(serializedMarker).not.toContain('methodAttestation')
+      expect(serializedMarker).not.toContain('signature')
+      expect(serializedMarker).not.toContain('proof')
+      expect(capturedRequests.filter(request => request.path === recoveryPath)).toEqual([])
+      expect(capturedRequests.filter(request => request.path === commitPath)).toHaveLength(1)
+
+      await page.reload({ waitUntil: 'load' })
+      releaseReferenceRightsCommitResponse?.()
+      await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+      const enterButton = page.getByRole('button', { name: '进入青木 OS' })
+      if (await enterButton.isVisible()) await enterButton.click()
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const recoveredDialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await recoveredDialog.waitFor({ timeout: 10_000 })
+      await recoveredDialog.getByLabel('安全边界').getByText('EP1 · 雨夜').waitFor({ timeout: 15_000 })
+      await recoveredDialog.getByRole('tab', { name: '剧本与资产' }).click()
+      await recoveredDialog.getByRole('group', { name: '选择人物、环境或道具' })
+        .getByRole('button', { name: '道具' }).click()
+      expect(capturedRequests.filter(request => request.path === recoveryPath)).toEqual([])
+      const propReadsBeforeRecovery = propReadSubjects.length
+      await recoveredDialog.getByRole('button', { name: '查询并恢复原回执' }).click()
+      await recoveredDialog.getByRole('heading', { name: '已恢复原始提交回执' }).waitFor({ timeout: 20_000 })
+      await expect.poll(() => propReadSubjects.length, { timeout: 15_000 }).toBe(propReadsBeforeRecovery + 1)
+
+      const recordedRights = recordedReferenceRightsRecord()
+      const expectedPostSubject = propSubject(5, PROP_UPDATED_PROMPT, {
+        rightsRecorded: true,
+        rights: recordedRights,
+      })
+      await expect.poll(() => propReadSubjects.at(-1), { timeout: 15_000 }).toEqual(expectedPostSubject)
+      const postSubject = propReadSubjects.at(-1)
+      if (postSubject === undefined) throw new Error('reference rights recovery did not reread the prop subject')
+      const baselineReference = baselineSubject.references[0]
+      const postReference = postSubject.references[0]
+      expect(postReference).toMatchObject({
+        assetId: baselineReference?.assetId,
+        sha256: baselineReference?.sha256,
+        selectionStatus: baselineReference?.selectionStatus,
+        isSelected: baselineReference?.isSelected,
+        rightsRecorded: true,
+        rights: recordedRights,
+      })
+      expect(canonicalSha256(postReference?.rights)).toBe(canonicalSha256(recordedRights))
+      expect(postSubject.visualPrompt).toBe(baselineSubject.visualPrompt)
+      expect(postSubject.officialReferenceImageUrl).toBe(baselineSubject.officialReferenceImageUrl)
+      expect(postSubject).not.toHaveProperty('visualIdentity')
+
+      await expect.poll(() => propReferenceCandidateReads.at(-1), { timeout: 15_000 }).toEqual(
+        propReferenceCandidatesFixture(5, canonicalSha256(expectedPostSubject)),
+      )
+      const postCandidate = propReferenceCandidateReads.at(-1)?.candidates[0]
+      const baselineCandidate = propReferenceCandidatesFixture(4, canonicalSha256(baselineSubject)).candidates[0]
+      expect(postCandidate).toMatchObject({
+        assetId: baselineCandidate.assetId,
+        sha256: baselineCandidate.sha256,
+        selectionStatus: baselineCandidate.selectionStatus,
+        isSelected: baselineCandidate.isSelected,
+        decisionKind: baselineCandidate.decisionKind,
+        decisionIdentity: baselineCandidate.decisionIdentity,
+      })
+      await expect.poll(() => propReviewDecisionReads.at(-1), { timeout: 15_000 }).toEqual(baselineDecisions)
+      expect(capturedRequests.filter(request => (
+        request.method === 'POST' && request.path === decisionPostPath
+      ))).toHaveLength(decisionPostsBefore)
+      await recoveredDialog.getByText('当前版本的怀表造型可以进入下一环节。', { exact: true }).waitFor()
+
+      await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage)
+        .filter(key => key.startsWith('qingmu:command-commit-recovery:v4:'))), {
+        timeout: 15_000,
+      }).toEqual([])
+      expect(capturedRequests.filter(request => request.path === commitPath)).toHaveLength(1)
+      expect(capturedRequests.filter(request => request.path === recoveryPath)).toEqual([
+        expect.objectContaining({
+          method: 'GET',
+          idempotencyKey: REFERENCE_RIGHTS_IDEMPOTENCY_KEY,
+          body: undefined,
+        }),
+      ])
+      expect(capturedRequests.filter(request => request.path === proposalPath)).toEqual([
+        expect.objectContaining({
+          method: 'POST',
+          body: {
+            elementKind: 'prop',
+            operation: 'replaceReferenceRights',
+            referenceAssetId: 'reference-prop-1',
+            referenceAssetSha256: PROP_REFERENCE_SHA,
+            rights: recordedRights,
+            baseRevision: 4,
+            baseSnapshotSha256: canonicalSha256(baselineSubject),
+          },
+        }),
+      ])
+      expect(capturedRequests.filter(request => request.path === previewPath)).toEqual([
+        expect.objectContaining({
+          method: 'POST',
+          body: {
+            projectId: 'project-1',
+            targetType: 'element_profile',
+            targetId: 'prop-1',
+            elementKind: 'prop',
+            episodeId: null,
+            baseRevision: 4,
+            baseSnapshotSha256: canonicalSha256(baselineSubject),
+          },
+        }),
+      ])
+      expect(capturedRequests.filter(request => request.path === commitPath)).toEqual([
+        expect.objectContaining({
+          method: 'POST',
+          body: {
+            projectId: 'project-1',
+            targetType: 'element_profile',
+            targetId: 'prop-1',
+            elementKind: 'prop',
+            episodeId: null,
+            baseRevision: 4,
+            baseSnapshotSha256: canonicalSha256(baselineSubject),
+            idempotencyKey: REFERENCE_RIGHTS_IDEMPOTENCY_KEY,
+            expectedPayloadSha256: REFERENCE_RIGHTS_PAYLOAD_SHA,
+          },
+        }),
+      ])
+      expect(capturedRequests.filter(request => /provider|worker/i.test(request.path))).toEqual([])
+      expect(capturedRequests.every(request => request.cookie === undefined)).toBe(true)
+      expect(await page.content()).not.toContain(YIMENG_TOKEN)
+      expect(await page.content()).not.toContain(IMAGO_ATTESTATION_KEY)
+      await expectNoVisibleTechnicalBrand(page)
+      expect(tripwire.pageErrors).toEqual([])
+      expect(tripwire.warnings).toEqual([])
+    }, 60_000)
+
     it('selects an authoritative reference through lost-response GET-only recovery and rereads both authorities', async () => {
       onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-reference-selection'))
       const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
@@ -2616,12 +3307,12 @@ describe.skipIf(
       if (referenceCommitAccepted === undefined) throw new Error('isolated reference selection commit gate was not initialized')
       await referenceCommitAccepted
       const selectionMarkers = await page.evaluate(() => Object.entries(sessionStorage)
-        .filter(([key]) => key.startsWith('qingmu:command-commit-recovery:v3:'))
+        .filter(([key]) => key.startsWith('qingmu:command-commit-recovery:v4:'))
         .map(([key, value]) => ({ key, marker: JSON.parse(String(value)) as unknown })))
       expect(selectionMarkers).toEqual([{
-        key: 'qingmu:command-commit-recovery:v3:project-1:element_profile:scene:scene-1',
+        key: 'qingmu:command-commit-recovery:v4:project-1:element_profile:scene:scene-1',
         marker: {
-          schema: 'qingmu.command-commit-recovery-marker.v3',
+          schema: 'qingmu.command-commit-recovery-marker.v4',
           projectId: 'project-1',
           targetType: 'element_profile',
           elementKind: 'scene',
@@ -2690,7 +3381,7 @@ describe.skipIf(
       expect(await recoveredDialog.getByText('event-scene-reference-select-1', { exact: true }).count()).toBe(1)
       expect(await recoveredDialog.getByText('本次方法与预览确认 Provider 调用为 0、Worker 未启动、选择未自动执行。', { exact: true }).count()).toBe(1)
       await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage)
-        .filter(key => key.startsWith('qingmu:command-commit-recovery:v3:'))), {
+        .filter(key => key.startsWith('qingmu:command-commit-recovery:v4:'))), {
         timeout: 15_000,
       }).toEqual([])
 
@@ -2793,12 +3484,12 @@ describe.skipIf(
       }
       await referenceRegenerationCommitAccepted
       const regenerationMarkers = await page.evaluate(() => Object.entries(sessionStorage)
-        .filter(([key]) => key.startsWith('qingmu:command-commit-recovery:v3:'))
+        .filter(([key]) => key.startsWith('qingmu:command-commit-recovery:v4:'))
         .map(([key, value]) => ({ key, marker: JSON.parse(String(value)) as unknown })))
       expect(regenerationMarkers).toEqual([{
-        key: 'qingmu:command-commit-recovery:v3:project-1:element_profile:scene:scene-1',
+        key: 'qingmu:command-commit-recovery:v4:project-1:element_profile:scene:scene-1',
         marker: {
-          schema: 'qingmu.command-commit-recovery-marker.v3',
+          schema: 'qingmu.command-commit-recovery-marker.v4',
           projectId: 'project-1',
           targetType: 'element_profile',
           elementKind: 'scene',
@@ -2846,7 +3537,7 @@ describe.skipIf(
         decisionIdentity: '',
       })
       await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage)
-        .filter(key => key.startsWith('qingmu:command-commit-recovery:v3:'))), {
+        .filter(key => key.startsWith('qingmu:command-commit-recovery:v4:'))), {
         timeout: 20_000,
       }).toEqual([])
       await reference.getByText('已选择（未签收）', { exact: true }).waitFor({ timeout: 15_000 })
