@@ -780,6 +780,308 @@ function referenceMethodFor(operation: 'selectReferenceAsset' | 'requestReferenc
   }
 }
 
+function recordedReferenceRightsFixture() {
+  return {
+    schema: 'jason.qingmu-reference-rights-record.v1',
+    sourceType: { state: 'known', value: 'commissioned' },
+    rightsHolder: { state: 'known', value: '青木工作室' },
+    authorizationScope: { state: 'known', values: ['AI短剧制作', '宣传物料'] },
+    territory: { state: 'known', values: ['中国大陆'] },
+    term: {
+      state: 'known',
+      startsAt: '2026-08-27T00:00:00Z',
+      endsAt: '2027-08-27T00:00:00Z',
+      perpetual: false,
+    },
+    restrictions: { state: 'known', values: [] },
+    contains: {
+      realPersonLikeness: 'no',
+      trademark: 'no',
+      music: 'no',
+      font: 'no',
+      thirdPartyCharacter: 'no',
+    },
+    providerTerms: {
+      state: 'known',
+      terms: '允许商业短剧及宣传物料使用。',
+      reviewedAt: '2026-08-27T00:30:00Z',
+    },
+    modelLicenses: {
+      code: { state: 'not_applicable', value: null },
+      weights: { state: 'known', value: 'licensed' },
+      outputUse: { state: 'known', value: 'commercial-short-drama' },
+    },
+    humanDeclaration: { state: 'provided', text: '已核对委托协议与素材授权范围。' },
+    contentCredentials: { state: 'known', value: 'c2pa:asset-1' },
+  } as const
+}
+
+function elementSubjectRightsFixture(
+  rightsRecorded: boolean,
+  rights: ReturnType<typeof recordedReferenceRightsFixture> | ReturnType<typeof unknownReferenceRightsFixture>,
+) {
+  const subject = elementSubjectFixture()
+  const reference = subject.references[0]
+  if (reference === undefined) throw new Error('reference fixture is missing')
+  return {
+    ...subject,
+    references: [{ ...reference, rightsRecorded, rights }],
+  }
+}
+
+function referenceRightsMethodFor(baseSnapshotSha256: string) {
+  const subject = {
+    project_id: 'project-1',
+    target_type: 'element_profile',
+    target_id: 'prop-1',
+    element_kind: 'prop',
+    scope_type: 'project',
+    scope_id: 'project-1',
+    base_revision: 4,
+    base_snapshot_sha256: baseSnapshotSha256,
+  } as const
+  const snapshot = {
+    schema: 'qingmu.element-method-snapshot.v1',
+    subject,
+    authority: {
+      business_truth: 'yimeng',
+      method_source: 'imago_os_current',
+      human_approval: 'not_granted',
+      paid_provider_authority: 'not_granted',
+    },
+  } as const
+  const sourceKinds = [
+    'runtime_pointer',
+    'runtime_channel_registry',
+    'stage_contracts',
+    'role_capability_spec',
+    'role_agent',
+    'role_method',
+    'method_reference',
+  ] as const
+  const target = {
+    projectId: 'project-1',
+    targetType: 'element_profile',
+    targetId: 'prop-1',
+    elementKind: 'prop',
+    scopeType: 'project',
+    scopeId: 'project-1',
+  } as const
+  const methodProjection = {
+    schema: 'qingmu.imago-element-method-projection.v1',
+    input_snapshot_sha256: createHash('sha256').update(canonicalJson(snapshot), 'utf8').digest('hex'),
+    subject,
+    method_definition: {
+      id: 'imago-v6-reference-rights-record',
+      version: 1,
+      sha256: '3'.repeat(64),
+      stage_contract_sha256: '4'.repeat(64),
+      role_capability_sha256: '5'.repeat(64),
+      agent_path: 'agents/b2a-art-director/scene-designer/AGENTS.md',
+      skill_path: 'skill-package/imago-b2as-scene-prop-fx-design/SKILL.md',
+    },
+    source_bindings: sourceKinds.map((kind, index) => ({
+      kind,
+      path: `source-${String(index + 1)}`,
+      sha256: '6'.repeat(64),
+    })),
+    field_hints: [{ hint_id: 'rights-source-holder', field: 'rights' }],
+    checklist: [{ check_id: 'rights-record-complete', required: true }],
+    work_order_projection: {
+      target,
+      operation: 'replaceReferenceRights',
+      allowed_mutations: ['replaceReferenceRights'],
+      required_read_set: [{
+        source: 'yimeng',
+        resource: 'element_reference_rights_snapshot',
+        revision: 4,
+        sha256: baseSnapshotSha256,
+      }],
+      before_write: ['重新读取易梦权威资料'],
+      after_write: ['仅通过易梦 Change Set 写路径替换权利记录'],
+    },
+    review_card: {
+      title: '参考资产权利字段审核',
+      summary: '核对完整记录和显式未知项。',
+      review_dimensions: ['来源与授权依据'],
+      hard_vetoes: ['不得把 unknown 写成已清权'],
+      decision_boundary: '机器不产生权利批准、签收或异常放行结论。',
+    },
+    legal_work_set: {
+      reads: ['yimeng_element_reference_rights_snapshot'],
+      writes: ['replace_reference_rights_via_changeset'],
+      invalidates: ['reference_rights_dependent_projection'],
+      forbidden: [
+        'provider_dispatch',
+        'asset_generation',
+        'asset_selection',
+        'human_decision',
+        'project_state_write',
+      ],
+    },
+    authority_snapshot_attestation: 'not_verified_by_compiler',
+    project_state_persisted: false,
+    paid_provider_authority: 'not_granted',
+    human_approval_inferred: false,
+    selection_authority: 'not_granted',
+  } as const
+  const methodProjectionSha256 = createHash('sha256')
+    .update(canonicalJson(methodProjection), 'utf8')
+    .digest('hex')
+  const unsigned = {
+    schema: 'qingmu.imago-element-method-attestation.v1',
+    algorithm: 'hmac-sha256',
+    projectionSha256: methodProjectionSha256,
+    inputSnapshotSha256: methodProjection.input_snapshot_sha256,
+    subjectSha256: createHash('sha256').update(canonicalJson(subject), 'utf8').digest('hex'),
+  } as const
+  return {
+    methodProjection,
+    methodProjectionSha256,
+    methodAttestation: {
+      ...unsigned,
+      signature: createHmac('sha256', ATTESTATION_KEY).update(canonicalJson(unsigned), 'utf8').digest('hex'),
+    },
+  }
+}
+
+function emptyElementImpactFixture() {
+  return {
+    affectedReferenceAssetIds: [],
+    invalidatedApprovalAssetIds: [],
+    affectedDerivedAssetIds: [],
+    affectedReferencePackIds: [],
+    affectedPromptIrIds: [],
+    affectedStoryboardFrameIds: [],
+    unknowns: [],
+  }
+}
+
+function referenceRightsContractFixture(options: {
+  rights: ReturnType<typeof recordedReferenceRightsFixture> | ReturnType<typeof unknownReferenceRightsFixture>
+  baseSubject: ReturnType<typeof elementSubjectRightsFixture>
+  changed: boolean
+  referenceInvalidated: boolean
+}) {
+  const baseSnapshotSha256 = createHash('sha256')
+    .update(canonicalJson(options.baseSubject), 'utf8')
+    .digest('hex')
+  const method = referenceRightsMethodFor(baseSnapshotSha256)
+  const changeSetId = 'changeset-rights-1'
+  const changeSet = {
+    ...elementChangeSetFixture(),
+    id: changeSetId,
+    baseSnapshotSha256,
+  }
+  const previewRequest = {
+    projectId: 'project-1',
+    targetType: 'element_profile',
+    targetId: 'prop-1',
+    elementKind: 'prop',
+    episodeId: null,
+    changeSetId,
+    baseRevision: 4,
+    baseSnapshotSha256,
+    operation: 'replaceReferenceRights',
+    referenceAssetId: 'asset-1',
+    referenceAssetSha256: 'd'.repeat(64),
+  } as const
+  const commitRequest = {
+    ...previewRequest,
+    idempotencyKey: 'qingmu-rights-1',
+    expectedPayloadSha256: PAYLOAD_SHA,
+  } as const
+  const impactAnalysis = options.referenceInvalidated ? ELEMENT_IMPACT_ANALYSIS : emptyElementImpactFixture()
+  const impactSha256 = createHash('sha256').update(canonicalJson(impactAnalysis), 'utf8').digest('hex')
+  const commit = {
+    schema: 'jason.qingmu-element-profile-commit-result.v1',
+    changeSetId,
+    commandReceiptId: 'receipt-rights-1',
+    eventId: 'event-rights-1',
+    eventType: options.referenceInvalidated ? 'ReferenceInvalidated' : 'ElementProfileChanged',
+    projectId: 'project-1',
+    targetType: 'element_profile',
+    targetId: 'prop-1',
+    elementKind: 'prop',
+    operation: 'replaceReferenceRights',
+    referenceAssetId: 'asset-1',
+    referenceAssetSha256: 'd'.repeat(64),
+    baseRevision: 4,
+    authoritativeRevision: 4 + Number(options.changed),
+    authoritativeSnapshotSha256: options.changed ? '7'.repeat(64) : baseSnapshotSha256,
+    payloadSha256: PAYLOAD_SHA,
+    idempotencyKey: 'qingmu-rights-1',
+    changed: options.changed,
+    referenceInvalidated: options.referenceInvalidated,
+    impactAnalysis,
+    impactSha256,
+    deduplicated: false,
+    committedAt: '2026-08-27T01:00:00Z',
+  } as const
+  return {
+    proposalRequest: {
+      projectId: 'project-1',
+      targetType: 'element_profile',
+      targetId: 'prop-1',
+      elementKind: 'prop',
+      operation: 'replaceReferenceRights',
+      referenceAssetId: 'asset-1',
+      referenceAssetSha256: 'd'.repeat(64),
+      rights: options.rights,
+      baseRevision: 4,
+      baseSnapshotSha256,
+      ...method,
+    } as const,
+    previewRequest,
+    commitRequest,
+    proposal: {
+      schema: 'jason.qingmu-change-set-proposal.v1',
+      changeSet,
+      nextAction: 'preview',
+    } as const,
+    preview: {
+      schema: 'jason.qingmu-change-set-preview.v1',
+      changeSet,
+      baseSubject: options.baseSubject,
+      authoritativeCurrentSubject: options.baseSubject,
+      changeSetId,
+      payloadSha256: PAYLOAD_SHA,
+      projectId: 'project-1',
+      targetType: 'element_profile',
+      targetId: 'prop-1',
+      elementKind: 'prop',
+      operation: 'replaceReferenceRights',
+      referenceAssetId: 'asset-1',
+      referenceAssetSha256: 'd'.repeat(64),
+      proposedReferenceRights: options.rights,
+      baseRevision: 4,
+      authoritativeRevision: 4,
+      baseSnapshotSha256,
+      authoritativeSnapshotSha256: baseSnapshotSha256,
+      changed: options.changed,
+      authoritativeChanged: false,
+      revisionConflict: false,
+      baseSnapshotConflict: false,
+      impactConflict: false,
+      canCommit: true,
+      referenceInvalidationExpected: options.referenceInvalidated,
+      impactAnalysis,
+      impactSha256,
+      preflight: {
+        status: 'pass',
+        costGate: 'not_granted',
+        selectionAuthority: 'not_granted',
+        humanApprovalInferred: false,
+      },
+      references: [{ kind: 'human_note', id: 'rights-review-1' }],
+      methodProjectionSha256: method.methodProjectionSha256,
+      previewSha256: PREVIEW_SHA,
+    } as const,
+    commit,
+    recovery: recoveryEnvelope(commit),
+  }
+}
+
 type ElementKind = 'actor' | 'scene' | 'prop'
 
 function elementContractFixture(elementKind: ElementKind) {
@@ -1323,6 +1625,255 @@ describe('qingmu Yimeng command adapter', () => {
       const handler = createYimengCommandHandler({}, deps(async () => jsonResponse(forged.value), 'test-token'))
       const result = await handler(forged.endpoint, forged.request, signal())
       expect(result).toMatchObject({ ok: false, error: { code: 'internal' } })
+    }
+  })
+
+  it('runs a rights-only ChangeSet and strips the IMAGO proof and Host token from business payloads', async () => {
+    vi.stubEnv('QINGMU_IMAGO_ATTESTATION_KEY', ATTESTATION_KEY)
+    const fixture = referenceRightsContractFixture({
+      rights: recordedReferenceRightsFixture(),
+      baseSubject: elementSubjectRightsFixture(false, unknownReferenceRightsFixture()),
+      changed: true,
+      referenceInvalidated: true,
+    })
+    const requests: Array<{ url: string; init: RequestInit; body: unknown }> = []
+    const handler = createYimengCommandHandler({}, deps(async (input, init = {}) => {
+      const url = requestUrl(input)
+      const body = typeof init.body === 'string' ? JSON.parse(init.body) as unknown : undefined
+      requests.push({ url, init, body })
+      if (url.endsWith('/reference-change-sets')) return jsonResponse(fixture.proposal, { status: 201 })
+      if (url.endsWith(':preview')) return jsonResponse(fixture.preview)
+      if (url.endsWith(':commit')) return jsonResponse(fixture.commit)
+      if (url.endsWith('/command-receipt')) return jsonResponse(fixture.recovery)
+      throw new Error(`unexpected URL: ${url}`)
+    }, 'rights-test-token'))
+
+    const proposal = await handler('proposeReferenceAsset', fixture.proposalRequest, signal())
+    const preview = await handler('previewElementProfile', fixture.previewRequest, signal())
+    const commit = await handler('commitElementProfile', fixture.commitRequest, signal())
+    const recovery = await handler('recoverElementProfileCommit', fixture.commitRequest, signal())
+
+    expect(proposal).toMatchObject({ ok: true, value: { nextAction: 'preview' } })
+    expect(preview).toEqual({ ok: true, value: fixture.preview })
+    expect(commit).toEqual({ ok: true, value: fixture.commit })
+    expect(recovery).toEqual({ ok: true, value: fixture.recovery })
+    expect(requests[0]?.body).toEqual({
+      elementKind: 'prop',
+      operation: 'replaceReferenceRights',
+      referenceAssetId: 'asset-1',
+      referenceAssetSha256: 'd'.repeat(64),
+      rights: recordedReferenceRightsFixture(),
+      baseRevision: 4,
+      baseSnapshotSha256: fixture.proposalRequest.baseSnapshotSha256,
+    })
+    expect(requests[0]?.body).not.toHaveProperty('methodProjection')
+    expect(requests[0]?.body).not.toHaveProperty('methodAttestation')
+    expect(JSON.stringify(requests.map(request => request.body))).not.toContain('rights-test-token')
+    expect(JSON.stringify([proposal, preview, commit, recovery])).not.toContain('rights-test-token')
+    expect(fixture.commit).not.toHaveProperty('rights')
+    expect(fixture.commit).not.toHaveProperty('providerCalls')
+    expect(fixture.commit).not.toHaveProperty('workerStarted')
+    const beforeReference = fixture.preview.baseSubject.references[0]
+    const currentReference = fixture.preview.authoritativeCurrentSubject.references[0]
+    expect(currentReference).toEqual(beforeReference)
+    expect(currentReference).toMatchObject({
+      assetId: 'asset-1',
+      sha256: 'd'.repeat(64),
+      selectionStatus: 'Selected',
+      isSelected: true,
+      rightsRecorded: false,
+    })
+    expect(fixture.preview.authoritativeCurrentSubject).toMatchObject({
+      visualPrompt: '旧铜表面',
+      officialReferenceImageUrl: '/api/media/asset-1',
+    })
+  })
+
+  it('treats the first explicit unknown rights record as a real change', async () => {
+    vi.stubEnv('QINGMU_IMAGO_ATTESTATION_KEY', ATTESTATION_KEY)
+    const unknownRights = unknownReferenceRightsFixture()
+    const fixture = referenceRightsContractFixture({
+      rights: unknownRights,
+      baseSubject: elementSubjectRightsFixture(false, unknownRights),
+      changed: true,
+      referenceInvalidated: true,
+    })
+    const handler = createYimengCommandHandler({}, deps(async (input) => {
+      const url = requestUrl(input)
+      if (url.endsWith('/reference-change-sets')) return jsonResponse(fixture.proposal, { status: 201 })
+      if (url.endsWith(':preview')) return jsonResponse(fixture.preview)
+      if (url.endsWith(':commit')) return jsonResponse(fixture.commit)
+      throw new Error(`unexpected URL: ${url}`)
+    }, 'test-token'))
+
+    expect(await handler('proposeReferenceAsset', fixture.proposalRequest, signal())).toMatchObject({ ok: true })
+    expect(await handler('previewElementProfile', fixture.previewRequest, signal())).toMatchObject({
+      ok: true,
+      value: {
+        changed: true,
+        canCommit: true,
+        proposedReferenceRights: unknownRights,
+        baseSubject: { references: [{ rightsRecorded: false, rights: unknownRights }] },
+      },
+    })
+    expect(await handler('commitElementProfile', fixture.commitRequest, signal())).toMatchObject({
+      ok: true,
+      value: { changed: true, authoritativeRevision: 5, referenceInvalidated: true },
+    })
+  })
+
+  it('accepts an exact recorded-rights no-op without inventing a revision', async () => {
+    vi.stubEnv('QINGMU_IMAGO_ATTESTATION_KEY', ATTESTATION_KEY)
+    const rights = recordedReferenceRightsFixture()
+    const fixture = referenceRightsContractFixture({
+      rights,
+      baseSubject: elementSubjectRightsFixture(true, rights),
+      changed: false,
+      referenceInvalidated: false,
+    })
+    const handler = createYimengCommandHandler({}, deps(async (input) => {
+      const url = requestUrl(input)
+      if (url.endsWith('/reference-change-sets')) return jsonResponse(fixture.proposal, { status: 201 })
+      if (url.endsWith(':preview')) return jsonResponse(fixture.preview)
+      if (url.endsWith(':commit')) return jsonResponse(fixture.commit)
+      if (url.endsWith('/command-receipt')) return jsonResponse(fixture.recovery)
+      throw new Error(`unexpected URL: ${url}`)
+    }, 'test-token'))
+
+    expect(await handler('proposeReferenceAsset', fixture.proposalRequest, signal())).toMatchObject({ ok: true })
+    expect(await handler('previewElementProfile', fixture.previewRequest, signal())).toMatchObject({
+      ok: true,
+      value: { changed: false, canCommit: true, referenceInvalidationExpected: false },
+    })
+    expect(await handler('commitElementProfile', fixture.commitRequest, signal())).toMatchObject({
+      ok: true,
+      value: {
+        changed: false,
+        authoritativeRevision: 4,
+        eventType: 'ElementProfileChanged',
+        referenceInvalidated: false,
+      },
+    })
+    expect(await handler('recoverElementProfileCommit', fixture.commitRequest, signal())).toMatchObject({
+      ok: true,
+      value: { recovered: true, receipt: { changed: false, authoritativeRevision: 4 } },
+    })
+  })
+
+  it('recovers a lost rights commit response by one receipt GET and never posts the commit twice', async () => {
+    vi.stubEnv('QINGMU_IMAGO_ATTESTATION_KEY', ATTESTATION_KEY)
+    const fixture = referenceRightsContractFixture({
+      rights: recordedReferenceRightsFixture(),
+      baseSubject: elementSubjectRightsFixture(false, unknownReferenceRightsFixture()),
+      changed: true,
+      referenceInvalidated: true,
+    })
+    const requests: Array<{ url: string; method: string | undefined; body: BodyInit | null | undefined }> = []
+    const handler = createYimengCommandHandler({}, deps(async (input, init = {}) => {
+      const url = requestUrl(input)
+      requests.push({ url, method: init.method, body: init.body })
+      if (url.endsWith(':commit')) throw new TypeError('connection closed after upstream accepted the commit')
+      if (url.endsWith('/command-receipt')) return jsonResponse(fixture.recovery)
+      throw new Error(`unexpected URL: ${url}`)
+    }, 'test-token'))
+
+    expect(await handler('commitElementProfile', fixture.commitRequest, signal())).toMatchObject({
+      ok: false,
+      error: { code: 'internal' },
+    })
+    expect(await handler('recoverElementProfileCommit', fixture.commitRequest, signal())).toEqual({
+      ok: true,
+      value: fixture.recovery,
+    })
+    expect(requests.map(request => [new URL(request.url).pathname, request.method])).toEqual([
+      ['/api/qingmu/change-sets/changeset-rights-1:commit', 'POST'],
+      ['/api/qingmu/projects/project-1/elements/prop/prop-1/change-sets/changeset-rights-1/command-receipt', 'GET'],
+    ])
+    expect(requests.filter(request => request.method === 'POST')).toHaveLength(1)
+    expect(requests[1]?.body).toBeUndefined()
+  })
+
+  it('fails rights input, proof, preview, commit, and recovery contracts closed', async () => {
+    vi.stubEnv('QINGMU_IMAGO_ATTESTATION_KEY', ATTESTATION_KEY)
+    const fixture = referenceRightsContractFixture({
+      rights: recordedReferenceRightsFixture(),
+      baseSubject: elementSubjectRightsFixture(false, unknownReferenceRightsFixture()),
+      changed: true,
+      referenceInvalidated: true,
+    })
+    const fetch = vi.fn<typeof globalThis.fetch>()
+    const inputHandler = createYimengCommandHandler({}, deps(fetch, 'test-token'))
+    const inputCases = [
+      { ...fixture.proposalRequest, proof: 'browser-proof' },
+      { ...fixture.proposalRequest, token: 'browser-token' },
+      {
+        ...fixture.proposalRequest,
+        rights: { ...recordedReferenceRightsFixture(), exceptionApproved: true },
+      },
+      {
+        ...fixture.proposalRequest,
+        methodAttestation: { ...fixture.proposalRequest.methodAttestation, signature: '0'.repeat(64) },
+      },
+      {
+        ...fixture.proposalRequest,
+        methodProjection: { ...fixture.proposalRequest.methodProjection, referenceAssetId: 'asset-1' },
+      },
+    ]
+    for (const input of inputCases) {
+      expect(await inputHandler('proposeReferenceAsset', input, signal())).toMatchObject({
+        ok: false,
+        error: { code: 'bad-request' },
+      })
+    }
+    expect(fetch).not.toHaveBeenCalled()
+
+    const oldSubject = { ...fixture.preview.baseSubject, schema: 'jason.qingmu-element-profile-subject.v1' }
+    const malformedResponses = [
+      {
+        endpoint: 'previewElementProfile',
+        request: fixture.previewRequest,
+        response: { ...fixture.preview, baseSubject: oldSubject },
+      },
+      {
+        endpoint: 'previewElementProfile',
+        request: fixture.previewRequest,
+        response: {
+          ...fixture.preview,
+          proposedReferenceRights: { ...recordedReferenceRightsFixture(), unknownField: true },
+        },
+      },
+      {
+        endpoint: 'previewElementProfile',
+        request: fixture.previewRequest,
+        response: { ...fixture.preview, providerCalls: 0 },
+      },
+      {
+        endpoint: 'commitElementProfile',
+        request: fixture.commitRequest,
+        response: { ...fixture.commit, authoritativeRevision: 4 },
+      },
+      {
+        endpoint: 'commitElementProfile',
+        request: fixture.commitRequest,
+        response: { ...fixture.commit, eventType: 'ElementProfileChanged' },
+      },
+      {
+        endpoint: 'commitElementProfile',
+        request: fixture.commitRequest,
+        response: { ...fixture.commit, rights: recordedReferenceRightsFixture() },
+      },
+      {
+        endpoint: 'recoverElementProfileCommit',
+        request: fixture.commitRequest,
+        response: { ...fixture.recovery, receiptSha256: '0'.repeat(64) },
+      },
+    ] as const
+    for (const malformed of malformedResponses) {
+      const handler = createYimengCommandHandler({}, deps(async () => jsonResponse(malformed.response), 'test-token'))
+      expect(await handler(malformed.endpoint, malformed.request, signal())).toMatchObject({
+        ok: false,
+        error: { code: 'internal' },
+      })
     }
   })
 
