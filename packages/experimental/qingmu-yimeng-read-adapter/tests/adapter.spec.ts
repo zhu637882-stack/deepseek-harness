@@ -1280,6 +1280,13 @@ describe('qingmu Yimeng read adapter', () => {
         if (actor === undefined) throw new Error('fixture actor is missing')
         const reference = actor.currentReference as Record<string, unknown>
         const lineage = reference.lineage as Record<string, unknown>
+        lineage.projectId = 'project-foreign'
+      },
+      (shot) => {
+        const actor = (shot.elements as Array<Record<string, unknown>>)[1]
+        if (actor === undefined) throw new Error('fixture actor is missing')
+        const reference = actor.currentReference as Record<string, unknown>
+        const lineage = reference.lineage as Record<string, unknown>
         lineage.role = 'prop_reference'
       },
       (shot) => {
