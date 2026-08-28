@@ -15,6 +15,7 @@ import type {
   ImagoReferenceAssetMethodResponse, ImagoShotRelationMethodResponse, ImagoWorksetMethodResponse, QingmuYimengPort,
   YimengCommitElementProfileResponse, YimengCommitPromptIrEditResponse, YimengCommitScriptResponse,
   YimengCommitStoryboardCanvasResponse,
+  YimengCapabilityCatalogResponse,
   YimengElementProfileResponse, YimengEpisodesResponse, YimengHealth, YimengPreviewElementProfileResponse,
   YimengPreviewPromptIrResponse, YimengPreviewScriptResponse, YimengPreviewStoryboardCanvasResponse,
   YimengCreateCommentResponse, YimengCreateHumanDecisionResponse, YimengElementReviewFeedResponse,
@@ -48,6 +49,8 @@ export type {
   QingmuYimengPort, QingmuYimengReadPort,
   YimengCommitElementProfileResponse, YimengCommitPromptIrEditResponse, YimengCommitScriptResponse,
   YimengCommitStoryboardCanvasResponse,
+  YimengCapabilityCatalogItem, YimengCapabilityCatalogRequest, YimengCapabilityCatalogResponse,
+  YimengCapabilityEligibility, YimengCapabilityMutualExclusion, YimengCapabilitySnapshot,
   YimengElementProfileResponse, YimengEpisodesResponse, YimengHealth, YimengPreviewElementProfileResponse,
   YimengPreviewPromptIrResponse, YimengPreviewScriptResponse, YimengPreviewStoryboardCanvasResponse,
   YimengCreateCommentResponse, YimengCreateHumanDecisionResponse, YimengElementReviewFeedResponse,
@@ -84,6 +87,8 @@ export function apply(ctx: ClientContext): void {
     unwrapRpc(await connection.rpc.call('/qingmu-imago-method', endpoint, payload, signal)) as T
 
   const port: QingmuYimengPort = {
+    capabilityCatalog: (request, signal) =>
+      read<YimengCapabilityCatalogResponse>('capabilityCatalog', request, signal),
     stageSources: (request, signal) => read<YimengStageSourcesResponse>('stageSources', request, signal),
     stageSourceMethod: (request, signal) => method<ImagoStageSourceMethodResponse>('stageSourceMethod', request, signal),
     bindStageSource: (request, signal) => command<YimengStageSourceResult>('bindStageSource', request, signal),

@@ -553,6 +553,17 @@ function shotRelationMethod(request: Parameters<QingmuYimengPort['shotRelationMe
 
 function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
   return {
+    capabilityCatalog: vi.fn(async () => ({
+      schema: 'jason.provider-capability-catalog.v1',
+      productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+      snapshotPolicy: 'rfc8785-jcs-sha256-v1',
+      activeProfile: 'quality',
+      catalogSnapshotSha256: 'a'.repeat(64),
+      requestSnapshotSha256: 'b'.repeat(64),
+      preflightSnapshotSha256: 'c'.repeat(64),
+      request: { modelId: null, capability: null, requestedControls: [], dryRun: true },
+      items: [], providerCalls: 0, databaseWrites: 0, paidGenerationAuthorized: false,
+    } as const)),
     health: vi.fn(async () => HEALTH),
     projects: vi.fn(async () => ({
       items: [{ id: 'project-1', name: '青木样片' }],

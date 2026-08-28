@@ -17,6 +17,98 @@ export interface YimengHealth {
   readonly hints: YimengJsonObject | null
 }
 
+/** Optional read-only filters for one Gate A capability-catalog projection. */
+export interface YimengCapabilityCatalogRequest {
+  readonly modelId?: string
+  readonly capability?: string
+  readonly requestedControls?: readonly string[]
+}
+
+/** One explicitly declared mutual-exclusion rule owned by Yimeng's model source. */
+export interface YimengCapabilityMutualExclusion {
+  readonly ruleId: string
+  readonly controls: readonly string[]
+  readonly maxSelected: number
+}
+
+/** Immutable model capability declaration whose canonical bytes are SHA-bound. */
+export interface YimengCapabilitySnapshot {
+  readonly schema: 'jason.provider-capability-snapshot.v1'
+  readonly modelId: string
+  readonly providerId: string
+  readonly familyId: string
+  readonly displayName: string
+  readonly enabled: boolean
+  readonly inputs: YimengJsonObject
+  readonly outputs: YimengJsonObject
+  readonly geometry: YimengJsonObject
+  readonly consistency: {
+    readonly capabilities: readonly string[]
+    readonly referenceAware: boolean
+  }
+  readonly controls: readonly string[]
+  readonly mutualExclusions: readonly YimengCapabilityMutualExclusion[]
+  readonly cost: YimengJsonObject
+  readonly runtime: {
+    readonly endpoint: string
+    readonly endpointsByCapability: YimengJsonObject
+    readonly deploymentScope: string
+    readonly region: string
+  }
+  readonly compliance: {
+    readonly docs: readonly string[]
+    readonly evidenceLevel: string
+    readonly paidDispatchAllowed: boolean
+    readonly paidDispatchByCapability: YimengJsonObject
+    readonly productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION'
+  }
+  readonly declaration: {
+    readonly inputsDeclared: boolean
+    readonly outputsDeclared: boolean
+    readonly geometryDeclared: boolean
+    readonly mutualExclusionsDeclared: boolean
+    readonly errors: readonly string[]
+  }
+}
+
+/** Server-side Gate A evaluation; false never grants or denies Provider authority. */
+export interface YimengCapabilityEligibility {
+  readonly evaluated: boolean
+  readonly eligible: boolean
+  readonly errors: readonly string[]
+}
+
+/** One model snapshot and its exact canonical source bytes. */
+export interface YimengCapabilityCatalogItem {
+  readonly capabilitySnapshotId: string
+  readonly capabilitySnapshotSha256: string
+  readonly capabilitySnapshotCanonicalJson: string
+  readonly productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION'
+  readonly snapshot: YimengCapabilitySnapshot
+  readonly eligibility: YimengCapabilityEligibility
+}
+
+/** Read-only Yimeng projection; it never calls a Provider or writes a database. */
+export interface YimengCapabilityCatalogResponse {
+  readonly schema: 'jason.provider-capability-catalog.v1'
+  readonly productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION'
+  readonly snapshotPolicy: 'rfc8785-jcs-sha256-v1'
+  readonly activeProfile: string
+  readonly catalogSnapshotSha256: string
+  readonly requestSnapshotSha256: string
+  readonly preflightSnapshotSha256: string
+  readonly request: {
+    readonly modelId: string | null
+    readonly capability: string | null
+    readonly requestedControls: readonly string[]
+    readonly dryRun: true
+  }
+  readonly items: readonly YimengCapabilityCatalogItem[]
+  readonly providerCalls: 0
+  readonly databaseWrites: 0
+  readonly paidGenerationAuthorized: false
+}
+
 /** Validated request for the projects endpoint. */
 export interface YimengProjectsRequest {
   readonly page?: number
@@ -1262,6 +1354,7 @@ export interface YimengReworkRouteSourceResponse extends YimengSelectedVideoRevi
 /** Result values exposed by each `/qingmu-yimeng` endpoint. */
 export interface YimengReadEndpointMap {
   readonly health: YimengHealth
+  readonly capabilityCatalog: YimengCapabilityCatalogResponse
   readonly projects: YimengProjectsResponse
   readonly episodes: YimengEpisodesResponse
   readonly script: YimengScriptResponse

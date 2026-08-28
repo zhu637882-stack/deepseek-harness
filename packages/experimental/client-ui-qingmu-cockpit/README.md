@@ -6,7 +6,7 @@ This private experimental Client plugin adds the Qingmu OS production cockpit to
 
 ## Projection and ChangeSet workflow
 
-The cockpit opens from the sidebar into five tabs: Overview, Script & Assets, Storyboard & Shots, Generation & QC, and Cost & Delivery. It reads `health`, `projects`, `episodes`, `script`, `workflow`, element profiles, and authoritative reference candidates over the loopback-only `/qingmu-yimeng` RPC channel.
+The cockpit opens from the sidebar into five tabs: Overview, Script & Assets, Storyboard & Shots, Generation & QC, and Cost & Delivery. It reads `health`, `capabilityCatalog`, `projects`, `episodes`, `script`, `workflow`, element profiles, and authoritative reference candidates over the loopback-only `/qingmu-yimeng` RPC channel.
 
 The Script & Assets tab formats the authoritative structured script into a draft and exposes one unified actor, environment, and prop workbench. It renders type-specific authoritative fields, a base/current/proposed three-way version comparison, and the seven exact impact groups with their canonical impact hash. Preparing a change creates an immutable ChangeSet and then fetches its server-side preview; neither step mutates the authoritative script or element profile. Commit remains disabled until the preview is committable and the user explicitly confirms the exact diff. For every element kind, the browser accepts only the exact six-field, lowercase-hex IMAGO method attestation and forwards it unchanged with the projection and projection hash. It never reads the attestation key or signs a proof. Conflicts fail closed and require reloading the new authority.
 
@@ -15,6 +15,12 @@ The same workbench reads reference candidates from Yimeng before allowing an exp
 Immediately before a commit `POST`, the browser synchronously stores and reads back a minimal, non-secret, subject-scoped recovery marker in `sessionStorage`. Every marker binds the exact operation; reference markers additionally bind the candidate asset ID and SHA-256. Unrecognized marker versions fail closed. If storage cannot prove the exact marker, no commit is sent. If the dialog, subject, or page goes away after Yimeng accepts the request, the restored workspace offers an explicit read-only receipt query; it never resubmits the commit. A recovered receipt must match the complete marker lineage. The fresh authoritative read must match the subject, revision, and the Host-verified authority hash declared by the receipt before that exact marker is conditionally cleared. Reference operations also require a matching authoritative candidate reread. Failures and mismatches retain the marker and keep new edits locked. The user may explicitly discard only the local marker after a warning; that action neither calls Yimeng nor undoes a server-side commit.
 
 The workflow view accepts only the `jason.episode-workflow-projection.v1` contract produced by the Host adapter. Runtime identity, project and episode scope, source fingerprint, blockers, status facts, and lineage remain visible as a projection; none of those fields becomes a command.
+
+## Read-only Gate A capability catalog
+
+Generation & QC lazily reads Yimeng's RFC 8785 content-addressed Provider capability snapshots only while that tab is visible. Harness independently verifies snapshot bytes and recomputes the SHA-bound preflight decision before the browser receives it. Each card separates model identity, inputs and outputs, geometry, declared capabilities, mutual-exclusion rules, catalog SHA, and per-model snapshot SHA. Missing mutual-exclusion declarations remain visibly incomplete and fail closed; the cockpit does not hardcode or infer model compatibility.
+
+Loading preserves the card's layout and exposes an accessible busy status; errors use an alert. Closing or changing tabs aborts the request and drops late results. The only action is reload. The panel always labels the catalog unverified for paid production and displays the zero-authority receipt: no Provider call, database write, paid generation authorization, task, budget reservation, or routing mutation.
 
 ## Explicit saved-script source registration
 

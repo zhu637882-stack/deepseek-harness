@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `shotFindings`, `productionUnits`, `lsuPlanSource`, `stageSources`, and `workflow`; it exposes no mutation endpoint.
+This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `capabilityCatalog`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `shotFindings`, `productionUnits`, `lsuPlanSource`, `stageSources`, and `workflow`; it exposes no mutation endpoint.
 
 ## Contract
 
@@ -19,6 +19,12 @@ The `workflow.director.heroFrameStoryboards` sibling projection joins one-to-one
 The `workflow.director.shotRelations.shots` array projects Yimeng's canonical storyboard frames without adding a Shot authority. Each Shot carries `shotId`, the sole Shot ordering field `frameNo`, `durationSec`, and derived `dialogueRhythm`; it never carries a Shot-level `order`, `sortOrder`, or `sequence`. Each element carries `currentReferenceAvailability` plus either `currentReference: null` or the uniquely selected E4-3 reference's `assetId`, `sha256`, and lineage. The adapter does not choose references or persist Shot selection state.
 
 The package root exports the request and response types, including `YimengHealth`, `YimengProjectsResponse`, `YimengEpisodesResponse`, `YimengScriptResponse`, `YimengElementProfileRequest`, `YimengElementProfileResponse`, `YimengReferenceAssetCandidate`, `YimengReferenceCandidatesRequest`, `YimengReferenceCandidatesResponse`, `YimengShotRelationShot`, `YimengShotDialogueCue`, `YimengShotDialogueRhythm`, `YimengShotCurrentReference`, `YimengShotCurrentReferenceLineage`, `YimengShotRelationsProjection`, `YimengHeroFrameStoryboardsProjection`, and `YimengWorkflowProjection`.
+
+## Gate A capability catalog
+
+`capabilityCatalog` accepts optional `modelId`, `capability`, and sorted, de-duplicated `requestedControls`, then sends one authenticated GET to Yimeng's existing model-catalog service. The Host independently recompiles every model snapshot with RFC 8785 JCS, validates its content-addressed ID, checks the exact request and catalog identities, and recomputes eligibility from the normalized request plus declared mutual-exclusion rules. One preflight SHA binds the catalog, request, item IDs, and recomputed decisions. Any byte, identity, request, field, ordering, decision, or authority drift fails closed.
+
+The projection fixes `UNVERIFIED_FOR_PAID_PRODUCTION`, `providerCalls: 0`, `databaseWrites: 0`, and `paidGenerationAuthorized: false`. Missing real-model mutual-exclusion declarations remain explicit errors; the adapter does not invent Provider facts or reinterpret a catalog's existing paid-dispatch fields as current authorization. A dry-run eligibility result only evaluates the requested capability and control combination. It creates no task, budget reservation, database row, Provider request, routing decision, or human signoff.
 
 ## Continuity evidence
 

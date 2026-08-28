@@ -23,6 +23,10 @@ declare module '@deepseek-ai/cordis' {
 }
 
 import type {
+  YimengCapabilityCatalogRequest,
+  YimengCapabilityCatalogResponse,
+  YimengCapabilityCatalogItem,
+  YimengCapabilitySnapshot,
   YimengElementProfileReference,
   YimengElementProfileRequest,
   YimengElementProfileResponse,
@@ -88,6 +92,12 @@ import type {
 } from './types.ts'
 
 export type {
+  YimengCapabilityCatalogRequest,
+  YimengCapabilityCatalogResponse,
+  YimengCapabilityCatalogItem,
+  YimengCapabilityEligibility,
+  YimengCapabilityMutualExclusion,
+  YimengCapabilitySnapshot,
   YimengContinuityAudit,
   YimengContinuityCurrentBinding,
   YimengContinuityDeltaProjection,
@@ -219,7 +229,7 @@ const ELEMENT_REVIEW_FEED_SCHEMA = 'jason.qingmu-element-review-feed.v1'
 const REFERENCE_RIGHTS_EXCEPTION_RELEASE_FEED_SCHEMA = 'jason.qingmu-reference-rights-exception-release-feed.v1'
 const SHA256 = /^[0-9a-f]{64}$/
 const PROTECTED_ENDPOINTS = new Set([
-  'projects', 'episodes', 'script', 'promptIr', 'elementProfile', 'referenceCandidates', 'reviewEvents',
+  'projects', 'episodes', 'script', 'promptIr', 'capabilityCatalog', 'elementProfile', 'referenceCandidates', 'reviewEvents',
   'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'shotFindings', 'productionUnits', 'stageSources',
   'lsuPlanSource', 'reworkRouteSource',
 ])
@@ -469,6 +479,55 @@ function canonicalJson(value: unknown, field: string): string {
 
 function canonicalJsonSha256(value: unknown, field: string): string {
   return createHash('sha256').update(canonicalJson(value, field), 'utf8').digest('hex')
+}
+
+function assertUnicodeScalarString(value: string, field: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index)
+    if (codeUnit >= 0xD800 && codeUnit <= 0xDBFF) {
+      const next = value.charCodeAt(index + 1)
+      if (!(next >= 0xDC00 && next <= 0xDFFF)) {
+        throw new UpstreamContractError(`${field} contains a lone Unicode surrogate`)
+      }
+      index += 1
+    } else if (codeUnit >= 0xDC00 && codeUnit <= 0xDFFF) {
+      throw new UpstreamContractError(`${field} contains a lone Unicode surrogate`)
+    }
+  }
+}
+
+/** RFC 8785 JCS used only by the E6 capability/preflight contract. */
+function jcsCanonicalJson(value: unknown, field: string, depth = 0): string {
+  if (depth > 100) throw new UpstreamContractError(`${field} nesting exceeds limit`)
+  if (value === null) return 'null'
+  if (typeof value === 'string') {
+    assertUnicodeScalarString(value, field)
+    return JSON.stringify(value)
+  }
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) {
+      throw new UpstreamContractError(`${field} contains a non-finite number or unsafe integer`)
+    }
+    return JSON.stringify(value)
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item, index) => (
+      jcsCanonicalJson(item, `${field}[${String(index)}]`, depth + 1)
+    )).join(',')}]`
+  }
+  if (isJsonObject(value)) {
+    const keys = Object.keys(value).sort()
+    return `{${keys.map((key) => {
+      assertUnicodeScalarString(key, `${field} key`)
+      return `${JSON.stringify(key)}:${jcsCanonicalJson(value[key], `${field}.${key}`, depth + 1)}`
+    }).join(',')}}`
+  }
+  throw new UpstreamContractError(`${field} must be RFC 8785 JSON`)
+}
+
+function jcsSha256(value: unknown, field: string): string {
+  return createHash('sha256').update(jcsCanonicalJson(value, field), 'utf8').digest('hex')
 }
 
 function requireObjectItems(value: unknown, field: string): YimengJsonObject[] {
@@ -797,6 +856,280 @@ function normalizeHealth(value: unknown): YimengHealth {
     },
     build: isJsonObject(root.build) ? root.build : null,
     hints: isJsonObject(root.hints) ? root.hints : null,
+  }
+}
+
+function parseCapabilityCatalogRequest(payload: unknown): YimengCapabilityCatalogRequest {
+  if (!isJsonObject(payload)) throw new InputError('capability catalog request must be an object')
+  const allowed = new Set(['modelId', 'capability', 'requestedControls'])
+  if (Object.keys(payload).some(key => !allowed.has(key))) {
+    throw new InputError('capability catalog request contains unknown fields')
+  }
+  const modelId = payload.modelId === undefined ? undefined : parseIdentifier(payload.modelId, 'modelId')
+  const capability = payload.capability === undefined
+    ? undefined
+    : parseIdentifier(payload.capability, 'capability')
+  if (capability !== undefined && capability.length > 128) {
+    throw new InputError('capability must be at most 128 characters')
+  }
+  if (payload.requestedControls !== undefined && !Array.isArray(payload.requestedControls)) {
+    throw new InputError('requestedControls must be an array')
+  }
+  const requestedControls = [...new Set((payload.requestedControls ?? []).map((value, index) => {
+    const control = parseIdentifier(value, `requestedControls[${String(index)}]`)
+    if (control.length > 128) throw new InputError('requested control must be at most 128 characters')
+    return control
+  }))].sort(compareUnicodeCodePoints)
+  if (requestedControls.length > 64) throw new InputError('requestedControls exceeds limit')
+  return {
+    ...(modelId === undefined ? {} : { modelId }),
+    ...(capability === undefined ? {} : { capability }),
+    ...(requestedControls.length === 0 ? {} : { requestedControls }),
+  }
+}
+
+function requireCanonicalStringArray(value: unknown, field: string): string[] {
+  if (!Array.isArray(value)) throw new UpstreamContractError(`${field} must be an array`)
+  const items = value.map((item, index) => requireIdentifier(item, `${field}[${String(index)}]`))
+  const canonical = [...new Set(items)].sort(compareUnicodeCodePoints)
+  if (!isDeepStrictEqual(items, canonical)) {
+    throw new UpstreamContractError(`${field} must be sorted and unique`)
+  }
+  return items
+}
+
+function normalizeCapabilitySnapshot(value: unknown): YimengCapabilitySnapshot {
+  const root = requireObject(value, 'capabilityCatalog.item.snapshot')
+  assertExactOutputKeys(root, [
+    'schema', 'modelId', 'providerId', 'familyId', 'displayName', 'enabled', 'inputs', 'outputs',
+    'geometry', 'consistency', 'controls', 'mutualExclusions', 'cost', 'runtime', 'compliance', 'declaration',
+  ], 'capabilityCatalog.item.snapshot')
+  if (root.schema !== 'jason.provider-capability-snapshot.v1') {
+    throw new UpstreamContractError('capability snapshot schema mismatch')
+  }
+  const consistency = requireObject(root.consistency, 'capabilityCatalog.item.snapshot.consistency')
+  assertExactOutputKeys(consistency, ['capabilities', 'referenceAware'], 'capabilityCatalog.item.snapshot.consistency')
+  const runtime = requireObject(root.runtime, 'capabilityCatalog.item.snapshot.runtime')
+  assertExactOutputKeys(runtime, [
+    'endpoint', 'endpointsByCapability', 'deploymentScope', 'region',
+  ], 'capabilityCatalog.item.snapshot.runtime')
+  const compliance = requireObject(root.compliance, 'capabilityCatalog.item.snapshot.compliance')
+  assertExactOutputKeys(compliance, [
+    'docs', 'evidenceLevel', 'paidDispatchAllowed', 'paidDispatchByCapability', 'productionStatus',
+  ], 'capabilityCatalog.item.snapshot.compliance')
+  if (compliance.productionStatus !== 'UNVERIFIED_FOR_PAID_PRODUCTION') {
+    throw new UpstreamContractError('capability snapshot paid-production status mismatch')
+  }
+  const declaration = requireObject(root.declaration, 'capabilityCatalog.item.snapshot.declaration')
+  assertExactOutputKeys(declaration, [
+    'inputsDeclared', 'outputsDeclared', 'geometryDeclared', 'mutualExclusionsDeclared', 'errors',
+  ], 'capabilityCatalog.item.snapshot.declaration')
+  if (!Array.isArray(root.mutualExclusions)) {
+    throw new UpstreamContractError('capability mutualExclusions must be an array')
+  }
+  const seenRules = new Set<string>()
+  const mutualExclusions = root.mutualExclusions.map((raw, index) => {
+    const rule = requireObject(raw, `capabilityCatalog.item.snapshot.mutualExclusions[${String(index)}]`)
+    assertExactOutputKeys(rule, ['ruleId', 'controls', 'maxSelected'], 'capability mutual-exclusion rule')
+    const ruleId = requireIdentifier(rule.ruleId, 'capability mutual-exclusion ruleId')
+    const controls = requireCanonicalStringArray(rule.controls, 'capability mutual-exclusion controls')
+    const maxSelected = requireInteger(rule.maxSelected, 'capability mutual-exclusion maxSelected', 0)
+    if (seenRules.has(ruleId) || controls.length < 2 || maxSelected >= controls.length) {
+      throw new UpstreamContractError('capability mutual-exclusion rule is invalid')
+    }
+    seenRules.add(ruleId)
+    return { ruleId, controls, maxSelected }
+  })
+  if (!isDeepStrictEqual(mutualExclusions.map(rule => rule.ruleId), [...seenRules].sort(compareUnicodeCodePoints))) {
+    throw new UpstreamContractError('capability mutual-exclusion rules must be sorted')
+  }
+  const inputs = requireObject(root.inputs, 'capability snapshot inputs')
+  const outputs = requireObject(root.outputs, 'capability snapshot outputs')
+  const geometry = requireObject(root.geometry, 'capability snapshot geometry')
+  const cost = requireObject(root.cost, 'capability snapshot cost')
+  const endpointsByCapability = requireObject(runtime.endpointsByCapability, 'capability endpoints')
+  const paidDispatchByCapability = requireObject(compliance.paidDispatchByCapability, 'capability paid dispatch map')
+  for (const [field, item] of Object.entries({ inputs, outputs, geometry, cost, endpointsByCapability, paidDispatchByCapability })) {
+    assertSafeJsonNumbers(item, `capability snapshot ${field}`)
+  }
+  return {
+    schema: 'jason.provider-capability-snapshot.v1',
+    modelId: requireIdentifier(root.modelId, 'capability snapshot modelId'),
+    providerId: requireIdentifier(root.providerId, 'capability snapshot providerId'),
+    familyId: requireIdentifier(root.familyId, 'capability snapshot familyId'),
+    displayName: requireIdentifier(root.displayName, 'capability snapshot displayName'),
+    enabled: requireBoolean(root.enabled, 'capability snapshot enabled'),
+    inputs, outputs, geometry,
+    consistency: {
+      capabilities: requireCanonicalStringArray(consistency.capabilities, 'capability snapshot capabilities'),
+      referenceAware: requireBoolean(consistency.referenceAware, 'capability snapshot referenceAware'),
+    },
+    controls: requireCanonicalStringArray(root.controls, 'capability snapshot controls'),
+    mutualExclusions, cost,
+    runtime: {
+      endpoint: requireString(runtime.endpoint, 'capability snapshot endpoint'), endpointsByCapability,
+      deploymentScope: requireString(runtime.deploymentScope, 'capability snapshot deploymentScope'),
+      region: requireString(runtime.region, 'capability snapshot region'),
+    },
+    compliance: {
+      docs: requireCanonicalStringArray(compliance.docs, 'capability snapshot docs'),
+      evidenceLevel: requireIdentifier(compliance.evidenceLevel, 'capability snapshot evidenceLevel'),
+      paidDispatchAllowed: requireBoolean(compliance.paidDispatchAllowed, 'capability snapshot paidDispatchAllowed'),
+      paidDispatchByCapability, productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+    },
+    declaration: {
+      inputsDeclared: requireBoolean(declaration.inputsDeclared, 'capability inputsDeclared'),
+      outputsDeclared: requireBoolean(declaration.outputsDeclared, 'capability outputsDeclared'),
+      geometryDeclared: requireBoolean(declaration.geometryDeclared, 'capability geometryDeclared'),
+      mutualExclusionsDeclared: requireBoolean(declaration.mutualExclusionsDeclared, 'capability mutualExclusionsDeclared'),
+      errors: requireCanonicalStringArray(declaration.errors, 'capability declaration errors'),
+    },
+  }
+}
+
+function evaluateCapabilitySnapshot(
+  snapshot: YimengCapabilitySnapshot,
+  request: YimengCapabilityCatalogResponse['request'],
+): YimengCapabilityCatalogItem['eligibility'] {
+  const evaluated = Boolean(request.capability || request.requestedControls.length > 0)
+  if (!evaluated) {
+    return { evaluated: false, eligible: false, errors: ['requirements_not_supplied'] }
+  }
+  const errors: string[] = []
+  if (!snapshot.enabled) errors.push('model_disabled')
+  if (request.capability !== null && !snapshot.controls.includes(request.capability)) {
+    errors.push(`capability_unsupported:${request.capability}`)
+  }
+  for (const control of request.requestedControls) {
+    if (!snapshot.controls.includes(control)) errors.push(`control_unsupported:${control}`)
+  }
+  if (request.requestedControls.length > 0 && !snapshot.declaration.mutualExclusionsDeclared) {
+    errors.push('mutual_exclusions_undeclared')
+  }
+  errors.push(...snapshot.declaration.errors)
+  const selected = new Set(request.requestedControls)
+  for (const rule of snapshot.mutualExclusions) {
+    const selectedCount = rule.controls.filter(control => selected.has(control)).length
+    if (selectedCount > rule.maxSelected) errors.push(`mutual_exclusion:${rule.ruleId}`)
+  }
+  const uniqueErrors = [...new Set(errors)].sort(compareUnicodeCodePoints)
+  return { evaluated: true, eligible: uniqueErrors.length === 0, errors: uniqueErrors }
+}
+
+function normalizeCapabilityCatalog(
+  value: unknown,
+  expected: YimengCapabilityCatalogRequest,
+): YimengCapabilityCatalogResponse {
+  const root = requireObject(value, 'capabilityCatalog')
+  assertExactOutputKeys(root, [
+    'schema', 'productionStatus', 'snapshotPolicy', 'activeProfile', 'catalogSnapshotSha256',
+    'requestSnapshotSha256', 'preflightSnapshotSha256', 'request', 'items', 'providerCalls',
+    'databaseWrites', 'paidGenerationAuthorized',
+  ], 'capabilityCatalog')
+  if (root.schema !== 'jason.provider-capability-catalog.v1'
+    || root.productionStatus !== 'UNVERIFIED_FOR_PAID_PRODUCTION'
+    || root.snapshotPolicy !== 'rfc8785-jcs-sha256-v1'
+    || root.providerCalls !== 0 || root.databaseWrites !== 0 || root.paidGenerationAuthorized !== false) {
+    throw new UpstreamContractError('capability catalog identity or authority mismatch')
+  }
+  const request = requireObject(root.request, 'capabilityCatalog.request')
+  assertExactOutputKeys(request, ['modelId', 'capability', 'requestedControls', 'dryRun'], 'capabilityCatalog.request')
+  const normalizedRequest = {
+    modelId: request.modelId === null ? null : requireIdentifier(request.modelId, 'capabilityCatalog.request.modelId'),
+    capability: request.capability === null ? null : requireIdentifier(request.capability, 'capabilityCatalog.request.capability'),
+    requestedControls: requireCanonicalStringArray(request.requestedControls, 'capabilityCatalog.request.requestedControls'),
+    dryRun: true as const,
+  }
+  if (request.dryRun !== true
+    || normalizedRequest.modelId !== (expected.modelId ?? null)
+    || normalizedRequest.capability !== (expected.capability ?? null)
+    || !isDeepStrictEqual(normalizedRequest.requestedControls, expected.requestedControls ?? [])) {
+    throw new UpstreamContractError('capability catalog request echo mismatch')
+  }
+  const requestSnapshotSha256 = requireSha256(root.requestSnapshotSha256, 'capabilityCatalog.requestSnapshotSha256')
+  if (requestSnapshotSha256 !== jcsSha256(normalizedRequest, 'capabilityCatalog.request')) {
+    throw new UpstreamContractError('capability catalog request SHA mismatch')
+  }
+  if (!Array.isArray(root.items)) throw new UpstreamContractError('capability catalog items must be an array')
+  const seen = new Set<string>()
+  const items: YimengCapabilityCatalogItem[] = root.items.map((raw, index) => {
+    const item = requireObject(raw, `capabilityCatalog.items[${String(index)}]`)
+    assertExactOutputKeys(item, [
+      'capabilitySnapshotId', 'capabilitySnapshotSha256', 'capabilitySnapshotCanonicalJson',
+      'productionStatus', 'snapshot', 'eligibility',
+    ], 'capabilityCatalog.item')
+    const snapshot = normalizeCapabilitySnapshot(item.snapshot)
+    const sha256 = requireSha256(item.capabilitySnapshotSha256, 'capabilityCatalog.item.capabilitySnapshotSha256')
+    const id = requireIdentifier(item.capabilitySnapshotId, 'capabilityCatalog.item.capabilitySnapshotId')
+    const canonical = requireString(item.capabilitySnapshotCanonicalJson, 'capabilityCatalog.item.capabilitySnapshotCanonicalJson')
+    const expectedCanonical = jcsCanonicalJson(snapshot, 'capabilityCatalog.item.snapshot')
+    if (id !== `capability-snapshot:sha256:${sha256}`
+      || createHash('sha256').update(canonical, 'utf8').digest('hex') !== sha256
+      || canonical !== expectedCanonical
+      || item.productionStatus !== 'UNVERIFIED_FOR_PAID_PRODUCTION'
+      || seen.has(id)) {
+      throw new UpstreamContractError('capability snapshot bytes or identity mismatch')
+    }
+    seen.add(id)
+    const eligibility = requireObject(item.eligibility, 'capabilityCatalog.item.eligibility')
+    assertExactOutputKeys(eligibility, ['evaluated', 'eligible', 'errors'], 'capabilityCatalog.item.eligibility')
+    const normalizedEligibility = {
+      evaluated: requireBoolean(eligibility.evaluated, 'capability eligibility evaluated'),
+      eligible: requireBoolean(eligibility.eligible, 'capability eligibility eligible'),
+      errors: requireCanonicalStringArray(eligibility.errors, 'capability eligibility errors'),
+    }
+    const expectedEligibility = evaluateCapabilitySnapshot(snapshot, normalizedRequest)
+    if (!isDeepStrictEqual(normalizedEligibility, expectedEligibility)) {
+      throw new UpstreamContractError('capability eligibility does not match the Host evaluation')
+    }
+    return {
+      capabilitySnapshotId: id, capabilitySnapshotSha256: sha256,
+      capabilitySnapshotCanonicalJson: canonical,
+      productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION', snapshot,
+      eligibility: normalizedEligibility,
+    }
+  })
+  const expectedItemOrder = [...items].sort((left, right) => (
+    compareUnicodeCodePoints(left.snapshot.providerId, right.snapshot.providerId)
+      || compareUnicodeCodePoints(left.snapshot.modelId, right.snapshot.modelId)
+  ))
+  if (!isDeepStrictEqual(items, expectedItemOrder)) {
+    throw new UpstreamContractError('capability catalog items must use canonical provider/model order')
+  }
+  const activeProfile = requireIdentifier(root.activeProfile, 'capabilityCatalog.activeProfile')
+  const identity = {
+    schema: 'jason.provider-capability-catalog.v1', activeProfile,
+    items: items.map(item => ({
+      capabilitySnapshotId: item.capabilitySnapshotId,
+      capabilitySnapshotSha256: item.capabilitySnapshotSha256,
+    })),
+  }
+  const catalogSnapshotSha256 = requireSha256(root.catalogSnapshotSha256, 'capabilityCatalog.catalogSnapshotSha256')
+  if (catalogSnapshotSha256 !== jcsSha256(identity, 'capabilityCatalog.identity')) {
+    throw new UpstreamContractError('capability catalog SHA mismatch')
+  }
+  const preflightIdentity = {
+    schema: 'jason.provider-capability-preflight.v1',
+    catalogSnapshotSha256,
+    requestSnapshotSha256,
+    items: items.map(item => ({
+      capabilitySnapshotId: item.capabilitySnapshotId,
+      eligibility: item.eligibility,
+    })),
+  }
+  const preflightSnapshotSha256 = requireSha256(
+    root.preflightSnapshotSha256,
+    'capabilityCatalog.preflightSnapshotSha256',
+  )
+  if (preflightSnapshotSha256 !== jcsSha256(preflightIdentity, 'capabilityCatalog.preflightIdentity')) {
+    throw new UpstreamContractError('capability preflight SHA mismatch')
+  }
+  return {
+    schema: 'jason.provider-capability-catalog.v1',
+    productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION', snapshotPolicy: 'rfc8785-jcs-sha256-v1',
+    activeProfile, catalogSnapshotSha256, requestSnapshotSha256, preflightSnapshotSha256,
+    request: normalizedRequest,
+    items, providerCalls: 0, databaseWrites: 0, paidGenerationAuthorized: false,
   }
 }
 
@@ -2585,6 +2918,16 @@ export function createYimengReadHandler(
         assertEmptyRequest(payload)
         path = '/api/health'
         normalize = normalizeHealth
+      } else if (endpoint === 'capabilityCatalog') {
+        const request = parseCapabilityCatalogRequest(payload)
+        const query = new URLSearchParams()
+        if (request.modelId !== undefined) query.set('model_id', request.modelId)
+        if (request.capability !== undefined) query.set('capability', request.capability)
+        for (const control of request.requestedControls ?? []) {
+          query.append('requested_control', control)
+        }
+        path = `/api/providers/capability-catalog${query.size === 0 ? '' : `?${query.toString()}`}`
+        normalize = value => normalizeCapabilityCatalog(value, request)
       } else if (endpoint === 'projects') {
         const request = parseProjectsRequest(payload)
         const query = new URLSearchParams({ page: String(request.page), page_size: String(request.pageSize) })

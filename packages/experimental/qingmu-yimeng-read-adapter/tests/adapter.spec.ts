@@ -6,6 +6,7 @@ import {
   apply,
   createYimengReadHandler,
   normalizeReferenceRightsRecord,
+  type YimengCapabilityCatalogResponse,
   type YimengReadAdapterDependencies,
   type YimengWorkflowProjection,
 } from '../src/index.ts'
@@ -31,6 +32,101 @@ function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
   const object = value as Record<string, unknown>
   return `{${Object.keys(object).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(object[key])}`).join(',')}}`
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex')
+}
+
+const EXPECTED_CAPABILITY_SNAPSHOT_SHA256 = 'dec586e77ec04900da0df89c80a9b96c6ddae82acc31eb5056881db5b93144c6'
+
+const CAPABILITY_SNAPSHOT = {
+  schema: 'jason.provider-capability-snapshot.v1',
+  modelId: 'fake-video-v1',
+  providerId: 'fake',
+  familyId: 'fake-video',
+  displayName: 'Gate A Fake Video',
+  enabled: true,
+  inputs: { first_frame_url: 'url_optional', prompt: 'string', '😀': 'emoji-key', '\uE000': 'bmp-key' },
+  outputs: { video_url: 'url' },
+  geometry: { max_duration_sec: 8, min_duration_sec: 2, resolutions: ['720P'] },
+  consistency: {
+    capabilities: ['video.continuation', 'video.first_frame', 'video.visual'],
+    referenceAware: true,
+  },
+  controls: ['video.continuation', 'video.first_frame', 'video.visual'],
+  mutualExclusions: [{
+    ruleId: 'fake-first-frame-or-continuation',
+    controls: ['video.continuation', 'video.first_frame'],
+    maxSelected: 1,
+  }],
+  cost: { by_resolution: { '720P': 0 }, currency: 'CNY', micro_unit: 0.000001, unit: 'second' },
+  runtime: { endpoint: '', endpointsByCapability: {}, deploymentScope: '', region: '' },
+  compliance: {
+    docs: ['test://gate-a-fake'],
+    evidenceLevel: 'L2',
+    paidDispatchAllowed: false,
+    paidDispatchByCapability: {},
+    productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+  },
+  declaration: {
+    inputsDeclared: true,
+    outputsDeclared: true,
+    geometryDeclared: true,
+    mutualExclusionsDeclared: true,
+    errors: [],
+  },
+} as const
+
+function capabilityCatalogFixture() {
+  const capabilitySnapshotCanonicalJson = canonicalJson(CAPABILITY_SNAPSHOT)
+  const capabilitySnapshotSha256 = sha256(capabilitySnapshotCanonicalJson)
+  const capabilitySnapshotId = `capability-snapshot:sha256:${capabilitySnapshotSha256}`
+  const request = {
+    modelId: 'fake-video-v1',
+    capability: 'video.visual',
+    requestedControls: ['video.continuation', 'video.first_frame'],
+    dryRun: true,
+  } as const
+  const identity = {
+    schema: 'jason.provider-capability-catalog.v1',
+    activeProfile: 'quality',
+    items: [{ capabilitySnapshotId, capabilitySnapshotSha256 }],
+  }
+  const eligibility = {
+    evaluated: true,
+    eligible: false,
+    errors: ['mutual_exclusion:fake-first-frame-or-continuation'],
+  } as const
+  const catalogSnapshotSha256 = sha256(canonicalJson(identity))
+  const requestSnapshotSha256 = sha256(canonicalJson(request))
+  const preflightIdentity = {
+    schema: 'jason.provider-capability-preflight.v1',
+    catalogSnapshotSha256,
+    requestSnapshotSha256,
+    items: [{ capabilitySnapshotId, eligibility }],
+  }
+  return {
+    schema: 'jason.provider-capability-catalog.v1',
+    productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+    snapshotPolicy: 'rfc8785-jcs-sha256-v1',
+    activeProfile: 'quality',
+    catalogSnapshotSha256,
+    requestSnapshotSha256,
+    preflightSnapshotSha256: sha256(canonicalJson(preflightIdentity)),
+    request,
+    items: [{
+      capabilitySnapshotId,
+      capabilitySnapshotSha256,
+      capabilitySnapshotCanonicalJson,
+      productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+      snapshot: CAPABILITY_SNAPSHOT,
+      eligibility,
+    }],
+    providerCalls: 0,
+    databaseWrites: 0,
+    paidGenerationAuthorized: false,
+  } as const
 }
 
 const PROMPT_IR_SUBJECT = {
@@ -489,6 +585,7 @@ describe('qingmu Yimeng read adapter', () => {
     const handler = createYimengReadHandler({}, dependencies(fetch))
 
     for (const [endpoint, payload] of [
+      ['capabilityCatalog', {}],
       ['projects', {}],
       ['episodes', { projectId: 'project-1' }],
       ['script', { projectId: 'project-1', episodeId: 'episode-1' }],
@@ -509,6 +606,142 @@ describe('qingmu Yimeng read adapter', () => {
         error: { code: 'internal', message: 'YIMENG_API_TOKEN is not configured', details: {} },
       })
     }
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('reads the exact Gate A capability snapshot and preserves zero-authority boundaries', async () => {
+    let capturedUrl = ''
+    let capturedInit: RequestInit | undefined
+    const fixture = capabilityCatalogFixture()
+    const handler = createYimengReadHandler({}, dependencies(async (input, init) => {
+      capturedUrl = requestUrl(input)
+      capturedInit = init
+      return jsonResponse(fixture)
+    }, 'test-token'))
+
+    const result = await handler('capabilityCatalog', {
+      modelId: 'fake-video-v1',
+      capability: 'video.visual',
+      requestedControls: ['video.first_frame', 'video.continuation'],
+    }, signal())
+
+    expect(result).toEqual({ ok: true, value: fixture })
+    expect(fixture.items[0].capabilitySnapshotSha256).toBe(EXPECTED_CAPABILITY_SNAPSHOT_SHA256)
+    expect(capturedUrl).toBe(
+      'http://127.0.0.1:8115/api/providers/capability-catalog?model_id=fake-video-v1&capability=video.visual&requested_control=video.continuation&requested_control=video.first_frame',
+    )
+    const headers = new Headers(capturedInit?.headers)
+    expect(headers.get('authorization')).toBe('Bearer test-token')
+    expect(capturedInit?.method).toBe('GET')
+    expect(capturedInit?.cache).toBe('no-store')
+    if (!result.ok) throw new Error(result.error.message)
+    const value = result.value as YimengCapabilityCatalogResponse
+    expect(value.providerCalls).toBe(0)
+    expect(value.databaseWrites).toBe(0)
+    expect(value.paidGenerationAuthorized).toBe(false)
+  })
+
+  it('fails capability-catalog reads closed on request, bytes, identity, or authority drift', async () => {
+    const fixture = capabilityCatalogFixture()
+    const nonCanonicalJson = JSON.stringify(CAPABILITY_SNAPSHOT)
+    expect(nonCanonicalJson).not.toBe(fixture.items[0].capabilitySnapshotCanonicalJson)
+    const nonCanonicalSha256 = sha256(nonCanonicalJson)
+    const nonCanonicalId = `capability-snapshot:sha256:${nonCanonicalSha256}`
+    const nonCanonicalItem = {
+      ...fixture.items[0],
+      capabilitySnapshotId: nonCanonicalId,
+      capabilitySnapshotSha256: nonCanonicalSha256,
+      capabilitySnapshotCanonicalJson: nonCanonicalJson,
+    }
+    const nonCanonicalCatalogSha256 = sha256(canonicalJson({
+      schema: fixture.schema,
+      activeProfile: fixture.activeProfile,
+      items: [{
+        capabilitySnapshotId: nonCanonicalId,
+        capabilitySnapshotSha256: nonCanonicalSha256,
+      }],
+    }))
+    const nonCanonicalPreflightSha256 = sha256(canonicalJson({
+      schema: 'jason.provider-capability-preflight.v1',
+      catalogSnapshotSha256: nonCanonicalCatalogSha256,
+      requestSnapshotSha256: fixture.requestSnapshotSha256,
+      items: [{ capabilitySnapshotId: nonCanonicalId, eligibility: nonCanonicalItem.eligibility }],
+    }))
+    const forgedEligibility = { evaluated: true, eligible: true, errors: [] } as const
+    const eligibilityItem = { ...fixture.items[0], eligibility: forgedEligibility }
+    const eligibilityPreflightSha256 = sha256(canonicalJson({
+      schema: 'jason.provider-capability-preflight.v1',
+      catalogSnapshotSha256: fixture.catalogSnapshotSha256,
+      requestSnapshotSha256: fixture.requestSnapshotSha256,
+      items: [{
+        capabilitySnapshotId: fixture.items[0].capabilitySnapshotId,
+        eligibility: forgedEligibility,
+      }],
+    }))
+    const disabledSnapshot = { ...CAPABILITY_SNAPSHOT, enabled: false }
+    const disabledCanonicalJson = canonicalJson(disabledSnapshot)
+    const disabledSha256 = sha256(disabledCanonicalJson)
+    const disabledId = `capability-snapshot:sha256:${disabledSha256}`
+    const disabledItem = {
+      ...fixture.items[0],
+      capabilitySnapshotId: disabledId,
+      capabilitySnapshotSha256: disabledSha256,
+      capabilitySnapshotCanonicalJson: disabledCanonicalJson,
+      snapshot: disabledSnapshot,
+      eligibility: forgedEligibility,
+    }
+    const disabledCatalogSha256 = sha256(canonicalJson({
+      schema: fixture.schema,
+      activeProfile: fixture.activeProfile,
+      items: [{ capabilitySnapshotId: disabledId, capabilitySnapshotSha256: disabledSha256 }],
+    }))
+    const disabledPreflightSha256 = sha256(canonicalJson({
+      schema: 'jason.provider-capability-preflight.v1',
+      catalogSnapshotSha256: disabledCatalogSha256,
+      requestSnapshotSha256: fixture.requestSnapshotSha256,
+      items: [{ capabilitySnapshotId: disabledId, eligibility: forgedEligibility }],
+    }))
+    const invalid = [
+      { ...fixture, request: { ...fixture.request, modelId: 'fake-video-v2' } },
+      {
+        ...fixture,
+        items: [{ ...fixture.items[0], capabilitySnapshotCanonicalJson: `${fixture.items[0].capabilitySnapshotCanonicalJson} ` }],
+      },
+      { ...fixture, catalogSnapshotSha256: 'f'.repeat(64) },
+      {
+        ...fixture,
+        catalogSnapshotSha256: nonCanonicalCatalogSha256,
+        preflightSnapshotSha256: nonCanonicalPreflightSha256,
+        items: [nonCanonicalItem],
+      },
+      {
+        ...fixture,
+        preflightSnapshotSha256: eligibilityPreflightSha256,
+        items: [eligibilityItem],
+      },
+      {
+        ...fixture,
+        catalogSnapshotSha256: disabledCatalogSha256,
+        preflightSnapshotSha256: disabledPreflightSha256,
+        items: [disabledItem],
+      },
+      { ...fixture, providerCalls: 1 },
+      { ...fixture, paidGenerationAuthorized: true },
+    ]
+    for (const response of invalid) {
+      const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(response), 'test-token'))
+      const result = await handler('capabilityCatalog', {
+        modelId: 'fake-video-v1',
+        capability: 'video.visual',
+        requestedControls: ['video.continuation', 'video.first_frame'],
+      }, signal())
+      expect(result).toMatchObject({ ok: false, error: { code: 'internal' } })
+    }
+
+    const fetch = vi.fn<typeof globalThis.fetch>()
+    const handler = createYimengReadHandler({}, dependencies(fetch, 'test-token'))
+    const result = await handler('capabilityCatalog', { unknownAuthority: true }, signal())
+    expect(result).toMatchObject({ ok: false, error: { code: 'bad-request' } })
     expect(fetch).not.toHaveBeenCalled()
   })
 

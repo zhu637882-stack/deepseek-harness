@@ -217,6 +217,10 @@ interface CapturedYimengRequest {
   readonly body: unknown
 }
 
+function isCapabilityCatalogRead(request: CapturedYimengRequest): boolean {
+  return request.method === 'GET' && request.path === '/api/providers/capability-catalog'
+}
+
 interface StoryboardRevisionFixture {
   readonly revisionId: string
   readonly revisionVersion: number
@@ -291,6 +295,99 @@ function canonicalJson(value: unknown): string {
 
 function canonicalSha256(value: unknown): string {
   return createHash('sha256').update(canonicalJson(value), 'utf8').digest('hex')
+}
+
+function jcsCanonicalJson(value: unknown): string {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value)
+  if (typeof value === 'number' && Number.isFinite(value)) return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(jcsCanonicalJson).join(',')}]`
+  if (isRecord(value)) {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${jcsCanonicalJson(value[key])}`).join(',')}}`
+  }
+  throw new Error('fixture is not RFC 8785 JSON')
+}
+
+function jcsSha256(value: unknown): string {
+  return createHash('sha256').update(jcsCanonicalJson(value), 'utf8').digest('hex')
+}
+
+function capabilityCatalogFixture() {
+  const snapshot = {
+    schema: 'jason.provider-capability-snapshot.v1',
+    modelId: 'fake-video-v1',
+    providerId: 'fake',
+    familyId: 'fake-video',
+    displayName: 'Gate A Fake Video',
+    enabled: true,
+    inputs: { first_frame_url: 'url_optional', prompt: 'string', '😀': 'emoji-key', '\uE000': 'bmp-key' },
+    outputs: { video_url: 'url' },
+    geometry: { max_duration_sec: 8, min_duration_sec: 2, resolutions: ['720P'] },
+    consistency: {
+      capabilities: ['video.continuation', 'video.first_frame', 'video.visual'],
+      referenceAware: true,
+    },
+    controls: ['video.continuation', 'video.first_frame', 'video.visual'],
+    mutualExclusions: [{
+      ruleId: 'fake-first-frame-or-continuation',
+      controls: ['video.continuation', 'video.first_frame'],
+      maxSelected: 1,
+    }],
+    cost: { by_resolution: { '720P': 0 }, currency: 'CNY', micro_unit: 0.000001, unit: 'second' },
+    runtime: { deploymentScope: '', endpoint: '', endpointsByCapability: {}, region: '' },
+    compliance: {
+      docs: ['test://gate-a-fake'],
+      evidenceLevel: 'L2',
+      paidDispatchAllowed: false,
+      paidDispatchByCapability: {},
+      productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+    },
+    declaration: {
+      inputsDeclared: true,
+      outputsDeclared: true,
+      geometryDeclared: true,
+      mutualExclusionsDeclared: true,
+      errors: [],
+    },
+  } as const
+  const capabilitySnapshotCanonicalJson = jcsCanonicalJson(snapshot)
+  const capabilitySnapshotSha256 = jcsSha256(snapshot)
+  const capabilitySnapshotId = `capability-snapshot:sha256:${capabilitySnapshotSha256}`
+  const request = { modelId: null, capability: null, requestedControls: [], dryRun: true } as const
+  const items = [{
+    capabilitySnapshotId,
+    capabilitySnapshotSha256,
+    capabilitySnapshotCanonicalJson,
+    productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+    snapshot,
+    eligibility: { evaluated: false, eligible: false, errors: ['requirements_not_supplied'] },
+  }] as const
+  const catalogIdentity = {
+    schema: 'jason.provider-capability-catalog.v1',
+    activeProfile: 'quality',
+    items: [{ capabilitySnapshotId, capabilitySnapshotSha256 }],
+  } as const
+  const catalogSnapshotSha256 = jcsSha256(catalogIdentity)
+  const requestSnapshotSha256 = jcsSha256(request)
+  const preflightIdentity = {
+    schema: 'jason.provider-capability-preflight.v1',
+    catalogSnapshotSha256,
+    requestSnapshotSha256,
+    items: [{ capabilitySnapshotId, eligibility: items[0].eligibility }],
+  } as const
+  return {
+    schema: 'jason.provider-capability-catalog.v1',
+    productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+    snapshotPolicy: 'rfc8785-jcs-sha256-v1',
+    activeProfile: 'quality',
+    catalogSnapshotSha256,
+    requestSnapshotSha256,
+    preflightSnapshotSha256: jcsSha256(preflightIdentity),
+    request,
+    items,
+    providerCalls: 0,
+    databaseWrites: 0,
+    paidGenerationAuthorized: false,
+  } as const
 }
 
 function commandRecoveryVisualBaselineSha256(subject: Record<string, unknown>): string {
@@ -1842,6 +1939,10 @@ async function startYimengDouble(
         })
         return
       }
+      if (request.method === 'GET' && url.pathname === '/api/providers/capability-catalog') {
+        json(response, 200, capabilityCatalogFixture())
+        return
+      }
       if (
         request.method === 'GET'
         && url.pathname === `/api/qingmu/assets/${STORYBOARD_CANVAS_HERO_ASSET_ID}/content`
@@ -3363,6 +3464,7 @@ describe.skipIf(
           '/qingmu-yimeng-command/recoverProductionUnitBinding',
           '/qingmu-yimeng/stageSources', '/qingmu-yimeng-command/bindStageSource',
           '/qingmu-yimeng-command/recoverStageSourceBinding',
+          '/qingmu-yimeng/capabilityCatalog',
         ].includes(requestPath)) return
         browserRpcRequests.push({ path: requestPath, body: request.postDataJSON() as unknown })
       })
@@ -3526,6 +3628,93 @@ describe.skipIf(
       restoreToken()
       restoreAttestationKey()
       if (failures.length > 0) throw new AggregateError(failures, 'Qingmu script e2e cleanup failed')
+    })
+
+    it('renders the E6-1 capability snapshots through real Host composition with zero production authority', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e6-1-capability-catalog'))
+      const tracePath = process.env.QINGMU_E6_1_TRACE_PATH?.trim()
+      if (tracePath) {
+        await mkdir(dirname(tracePath), { recursive: true })
+        await page.context().tracing.start({ screenshots: true, snapshots: true, sources: true })
+      }
+      const requestStart = capturedRequests.length
+      const rpcStart = browserRpcRequests.length
+      const capabilityWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng/capabilityCatalog')
+
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await dialog.getByRole('tab', { name: '生成与质检' }).click()
+      const capabilityWire = await (await capabilityWirePromise).json() as unknown
+      const capabilityWireRoot = isRecord(capabilityWire) ? capabilityWire : {}
+      const capabilityWireResult = isRecord(capabilityWireRoot.result) ? capabilityWireRoot.result : {}
+      if (capabilityWireResult.ok !== true) {
+        throw new Error(`capability catalog Host response failed: ${JSON.stringify(capabilityWireResult)}`)
+      }
+      expect(capabilityWire).toMatchObject({ result: { ok: true, value: {
+        schema: 'jason.provider-capability-catalog.v1',
+        productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+        providerCalls: 0,
+        databaseWrites: 0,
+        paidGenerationAuthorized: false,
+      } } })
+
+      const region = dialog.getByRole('region', { name: 'Provider 能力目录 · Gate A', exact: true })
+      await region.getByText('Gate A Fake Video', { exact: true }).waitFor({ timeout: 20_000 })
+      await region.getByText('fake-first-frame-or-continuation', { exact: true }).waitFor()
+      await region.getByText('本次读取回执：Provider 调用 0 · 数据库写入 0 · 付费生成授权 否。', { exact: true }).waitFor()
+      await region.locator('summary').click()
+      const fixture = capabilityCatalogFixture()
+      expect(fixture.items[0].capabilitySnapshotSha256).toBe(
+        'dec586e77ec04900da0df89c80a9b96c6ddae82acc31eb5056881db5b93144c6',
+      )
+      await region.getByText(fixture.items[0].capabilitySnapshotSha256, { exact: true }).waitFor()
+      expect(await region.getByRole('button', { name: '重读能力目录', exact: true }).isEnabled()).toBe(true)
+
+      const upstream = capturedRequests.slice(requestStart)
+        .filter(request => request.path.startsWith('/api/providers/capability-catalog'))
+      expect(upstream).toEqual([expect.objectContaining({
+        method: 'GET',
+        path: '/api/providers/capability-catalog',
+        authorization: `Bearer ${YIMENG_TOKEN}`,
+        body: undefined,
+      })])
+      expect(capturedRequests.slice(requestStart).filter(request => request.method === 'POST')).toEqual([])
+      const capabilityRequests = browserRpcRequests.slice(rpcStart)
+        .filter(request => request.path === '/qingmu-yimeng/capabilityCatalog')
+      expect(capabilityRequests).toHaveLength(1)
+      const capabilityRequest = capabilityRequests[0]
+      expect(capabilityRequest?.path).toBe('/qingmu-yimeng/capabilityCatalog')
+      if (!isRecord(capabilityRequest?.body)) throw new Error('missing capabilityCatalog client request')
+      expect(capabilityRequest.body.type).toBe('client-request')
+      expect(capabilityRequest.body.method).toBe('capabilityCatalog')
+      expect(capabilityRequest.body.payload).toEqual({})
+      expect(typeof capabilityRequest.body.rpcId).toBe('string')
+
+      const aria = await captureStableAria(
+        page,
+        'role=region[name="Provider 能力目录 · Gate A"]',
+        scaffold.workspaceCwd,
+      )
+      const goldenPath = join(REPO_ROOT, 'apps/web/tests/snapshots/qingmu-capability-catalog/ui.expected.md')
+      if (scaffold.mode === 'refresh') await mkdir(dirname(goldenPath), { recursive: true })
+      await compareOrRefreshGolden(goldenPath, aria, scaffold.mode)
+
+      const screenshotPath = process.env.QINGMU_E6_1_CAPABILITY_SCREENSHOT?.trim()
+      if (screenshotPath) {
+        await mkdir(dirname(screenshotPath), { recursive: true })
+        await region.getByRole('heading', { name: 'Provider 能力目录 · Gate A', exact: true }).scrollIntoViewIfNeeded()
+        await page.screenshot({ path: screenshotPath })
+      }
+      await page.setViewportSize({ width: 390, height: 844 })
+      expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false)
+      expect(await region.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
+      expect((await region.getByRole('button', { name: '重读能力目录', exact: true }).boundingBox())?.height)
+        .toBeGreaterThanOrEqual(44)
+      await page.setViewportSize({ width: 1680, height: 1100 })
+      await dialog.getByRole('tab', { name: '总览', exact: true }).click()
+      await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
+      if (tracePath) await page.context().tracing.stop({ path: tracePath })
     })
 
     it('compiles the E5-4 read-only workset through the real Host and Core without inventing stage authority', async () => {
@@ -5650,7 +5839,8 @@ describe.skipIf(
           },
         }),
       ])
-      expect(capturedRequests.filter(request => /provider|worker/i.test(request.path))).toEqual([])
+      expect(capturedRequests.filter(request =>
+        !isCapabilityCatalogRead(request) && /provider|worker/i.test(request.path))).toEqual([])
       expect(capturedRequests.every(request => request.cookie === undefined)).toBe(true)
       expect(await page.content()).not.toContain(YIMENG_TOKEN)
       expect(await page.content()).not.toContain(IMAGO_ATTESTATION_KEY)
@@ -5881,7 +6071,8 @@ describe.skipIf(
       ).waitFor()
       await refreshedExceptionRegion.getByText('recent-auth-session-e2e-1', { exact: true }).waitFor()
       await refreshedExceptionRegion.locator('strong').filter({ hasText: '当前有效' }).waitFor()
-      expect(capturedRequests.filter(request => /provider|worker/i.test(request.path))).toEqual([])
+      expect(capturedRequests.filter(request =>
+        !isCapabilityCatalogRead(request) && /provider|worker/i.test(request.path))).toEqual([])
       expect(capturedRequests.every(request => request.cookie === undefined)).toBe(true)
       expect(await page.content()).not.toContain(YIMENG_TOKEN)
       expect(await page.content()).not.toContain(IMAGO_ATTESTATION_KEY)
@@ -6217,7 +6408,8 @@ describe.skipIf(
         }),
       ])
       expect(capturedRequests.filter(request => request.path === recoveryPath)).toEqual([])
-      expect(capturedRequests.filter(request => /(?:provider|worker|generate|generation-job)/i.test(request.path))).toEqual([])
+      expect(capturedRequests.filter(request => !isCapabilityCatalogRead(request)
+        && /(?:provider|worker|generate|generation-job)/i.test(request.path))).toEqual([])
       expect(await page.locator('html').innerHTML()).not.toContain(IMAGO_ATTESTATION_KEY)
       expect(await page.content()).not.toContain(YIMENG_TOKEN)
       await expectNoVisibleTechnicalBrand(page)
@@ -6393,7 +6585,8 @@ describe.skipIf(
       const workflowStatuses = promptIrWorkflowStatuses.slice(workflowStatusStart)
       expect(workflowStatuses.length).toBeGreaterThan(0)
       expect(workflowStatuses.every(status => status === 'Ready')).toBe(true)
-      expect(capturedRequests.filter(request => /(?:provider|worker|generate|generation-job)/i.test(request.path))).toEqual([])
+      expect(capturedRequests.filter(request => !isCapabilityCatalogRead(request)
+        && /(?:provider|worker|generate|generation-job)/i.test(request.path))).toEqual([])
       expect(await page.locator('html').innerHTML()).not.toContain(IMAGO_ATTESTATION_KEY)
       expect(await page.content()).not.toContain(YIMENG_TOKEN)
       await expectNoVisibleTechnicalBrand(page)
@@ -6603,7 +6796,8 @@ describe.skipIf(
         .toBeGreaterThan(workflowReadStart + 1)
       expect(await page.evaluate(() => Object.keys(sessionStorage)
         .filter(key => key.startsWith('qingmu:storyboard-canvas-commit-recovery:v1:')))).toEqual([])
-      expect(capturedRequests.filter(request => /(?:provider|worker|generate|generation-job)/i.test(request.path))).toEqual([])
+      expect(capturedRequests.filter(request => !isCapabilityCatalogRead(request)
+        && /(?:provider|worker|generate|generation-job)/i.test(request.path))).toEqual([])
       expect(await page.locator('html').innerHTML()).not.toContain(IMAGO_ATTESTATION_KEY)
       expect(await page.content()).not.toContain(YIMENG_TOKEN)
       await expectNoVisibleTechnicalBrand(page)

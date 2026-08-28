@@ -30,6 +30,12 @@ import type {
   ImagoWorksetProjection,
 } from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter/types'
 import type {
+  YimengCapabilityCatalogItem,
+  YimengCapabilityCatalogRequest,
+  YimengCapabilityCatalogResponse,
+  YimengCapabilityEligibility,
+  YimengCapabilityMutualExclusion,
+  YimengCapabilitySnapshot,
   YimengStageSource,
   YimengStageSourceDefinition,
   YimengStageSourceBinding,
@@ -193,6 +199,12 @@ export type {
   ImagoWorksetProjection,
 }
 export type {
+  YimengCapabilityCatalogItem,
+  YimengCapabilityCatalogRequest,
+  YimengCapabilityCatalogResponse,
+  YimengCapabilityEligibility,
+  YimengCapabilityMutualExclusion,
+  YimengCapabilitySnapshot,
   YimengStageSource,
   YimengStageSourceDefinition,
   YimengStageSourceBinding,
@@ -329,6 +341,10 @@ export type JsonRecord = YimengJsonObject
 
 /** Read-only browser-facing methods exposed by the Qingmu Host adapter. */
 export interface QingmuYimengReadPort {
+  capabilityCatalog(
+    request: YimengCapabilityCatalogRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengCapabilityCatalogResponse>
   stageSources(request: YimengStageSourcesRequest, signal?: AbortSignal): Promise<YimengStageSourcesResponse>
   productionUnits(request: YimengProductionUnitsRequest, signal?: AbortSignal): Promise<YimengProductionUnitsResponse>
   health(signal?: AbortSignal): Promise<YimengHealth>

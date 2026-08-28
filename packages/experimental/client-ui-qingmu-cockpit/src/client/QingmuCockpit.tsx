@@ -20,6 +20,7 @@ import { WorksetRecommendation } from './WorksetRecommendation.tsx'
 import { ContinuityDeltaView } from './ContinuityDeltaView.tsx'
 import { SelectedVideoReviewView } from './SelectedVideoReviewView.tsx'
 import { ProductionUnitView } from './ProductionUnitView.tsx'
+import { GenerationCapabilityCatalog } from './GenerationCapabilityCatalog.tsx'
 import css from './QingmuCockpit.module.css'
 
 export type QingmuCockpitProps = PropsRuntime<'sidebar.footer.action'>
@@ -522,6 +523,11 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
 
   const generationView = (
     <div className={css.stack}>
+      <GenerationCapabilityCatalog
+        enabled={open && tab === 'generation' && !loading && error === undefined}
+        port={port}
+        t={t}
+      />
       <Card title={t('generationTitle')}>
         <div className={css.generationGrid}>
           <article>
