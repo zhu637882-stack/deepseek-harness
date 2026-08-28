@@ -104,6 +104,7 @@ import type {
   YimengSelectedVideoReviewStatus,
   YimengTakeVersion,
   YimengTakeVersionRequest,
+  YimengTakePreviewRequest, YimengTakePreviewResponse,
   YimengTakeVersionStackResponse,
   YimengTakeVersionStackSubject,
   YimengTakeComment,
@@ -354,6 +355,7 @@ export type {
   YimengSelectedVideoReviewStatus,
   YimengTakeVersion,
   YimengTakeVersionRequest,
+  YimengTakePreviewRequest, YimengTakePreviewResponse,
   YimengTakeVersionStackResponse,
   YimengTakeVersionStackSubject,
   YimengTakeComment,
@@ -535,6 +537,7 @@ export interface QingmuYimengReadPort {
   promptIr(request: YimengPromptIrRequest, signal?: AbortSignal): Promise<YimengPromptIrResponse>
   selectedVideoReview(request: YimengSelectedVideoReviewRequest, signal?: AbortSignal): Promise<YimengSelectedVideoReviewResponse>
   takeVersions(request: YimengTakeVersionRequest, signal?: AbortSignal): Promise<YimengTakeVersionStackResponse>
+  takePreview(request: YimengTakePreviewRequest, signal?: AbortSignal): Promise<YimengTakePreviewResponse>
   takeComments(request: YimengTakeCommentRequest, signal?: AbortSignal): Promise<YimengTakeCommentFeedResponse>
   takeReviewAuthority(
     request: YimengTakeReviewAuthorityRequest,

@@ -1228,6 +1228,7 @@ describe('qingmu Yimeng read adapter', () => {
       capturedUrl = requestUrl(input)
       return jsonResponse({
         schema: 'jason.qingmu-prompt-ir-subject-read.v1',
+        draft: null,
         subject: PROMPT_IR_SUBJECT,
         baseRevision: 4,
         baseSnapshotSha256: PROMPT_IR_SNAPSHOT_SHA256,
@@ -1245,6 +1246,7 @@ describe('qingmu Yimeng read adapter', () => {
       ok: true,
       value: {
         schema: 'jason.qingmu-prompt-ir-subject-read.v1',
+        draft: null,
         subject: PROMPT_IR_SUBJECT,
         baseRevision: 4,
         baseSnapshotSha256: PROMPT_IR_SNAPSHOT_SHA256,
@@ -1263,7 +1265,7 @@ describe('qingmu Yimeng read adapter', () => {
       { subject: PROMPT_IR_SUBJECT, baseRevision: 4, baseSnapshotSha256: 'b'.repeat(64) },
     ]) {
       const handler = createYimengReadHandler({}, dependencies(
-        async () => jsonResponse({ schema: 'jason.qingmu-prompt-ir-subject-read.v1', ...value }),
+        async () => jsonResponse({ schema: 'jason.qingmu-prompt-ir-subject-read.v1', draft: null, ...value }),
         'test-token',
       ))
       const result = await handler('promptIr', {
@@ -1274,6 +1276,42 @@ describe('qingmu Yimeng read adapter', () => {
       }, signal())
       expect(result).toMatchObject({ ok: false, error: { code: 'internal' } })
     }
+  })
+
+  it('verifies saved Draft identity, hash and base binding independently of effective Ready', async () => {
+    const subject = { ...PROMPT_IR_SUBJECT, promptIrId: 'draft-5', promptIrVersion: 5, status: 'Draft',
+      editableProjection: { ...PROMPT_IR_SUBJECT.editableProjection, videoGenPrompt: '已存导演修改' } }
+    const draft = { status: 'current', reason: null, subject, subjectSnapshotSha256: sha256(canonicalJson(subject)),
+      baseBinding: { id: PROMPT_IR_SUBJECT.promptIrId, version: 4, contentSha256: PROMPT_IR_SUBJECT.promptIrContentSha256 } }
+    const base = { schema: 'jason.qingmu-prompt-ir-subject-read.v1', subject: PROMPT_IR_SUBJECT,
+      baseRevision: 4, baseSnapshotSha256: PROMPT_IR_SNAPSHOT_SHA256 }
+    const request = { projectId: 'project-1', episodeId: 'episode-1', storyboardRevisionId: 'storyboard-1', frameId: 'frame-1' }
+    const read = async (value: unknown) => createYimengReadHandler({}, dependencies(async () => jsonResponse(value), 'test-token'))('promptIr', request, signal())
+    expect(await read({ ...base, draft })).toMatchObject({ ok: true, value: { draft, subject: PROMPT_IR_SUBJECT } })
+    const stale = { ...draft, status: 'stale', reason: 'prompt_ir_base_snapshot_conflict', baseBinding: { ...draft.baseBinding, id: 'old-ready' } }
+    expect(await read({ ...base, draft: stale })).toMatchObject({ ok: true, value: { draft: stale } })
+    for (const invalid of [undefined, {}, { ...draft, subjectSnapshotSha256: '0'.repeat(64) },
+      { ...draft, status: 'stale' }, { ...draft, subject: { ...subject, frameId: 'other-frame' } },
+      { ...draft, baseBinding: { ...draft.baseBinding, version: 3 } }]) {
+      expect(await read({ ...base, draft: invalid })).toMatchObject({ ok: false, error: { code: 'internal' } })
+    }
+  })
+
+  it('consumes normalized stage, legacy-reason and release blockers without hiding real business failures', async () => {
+    // Same producer cases pinned by Yimeng test_qingmu_workflow_blocker_contract.py.
+    const blockers = [
+      { stage: 'script', reasonCode: 'script_handoff_missing', requiredForGeneration: true, reason: 'script_handoff_missing' },
+      { reason: 'existing_reason', diagnostic: 'retained' },
+      { scope: 'release_readiness', reason: 'missing_final_output' },
+    ]
+    const fixture = { ...workflowFixture(), blockers }
+    const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(fixture), 'test-token'))
+    expect(await handler('workflow', { projectId: 'project-1', episodeId: 'episode-1' }, signal()))
+      .toMatchObject({ ok: true, value: { blockers } })
+    const invalid = createYimengReadHandler({}, dependencies(async () => jsonResponse({ ...fixture,
+      blockers: [{ reasonCode: 'script_missing' }] }), 'test-token'))
+    expect(await invalid('workflow', { projectId: 'project-1', episodeId: 'episode-1' }, signal()))
+      .toMatchObject({ ok: false, error: { code: 'internal' } })
   })
 
   it('reads a version-bound review feed with independent comment and decision capabilities', async () => {

@@ -1033,3 +1033,18 @@
     width: 100%;
   }
 }
+.preview {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  background: #050b08;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.preview video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  display: block;
+  object-fit: contain;
+}

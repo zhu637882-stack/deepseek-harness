@@ -7,6 +7,7 @@ import type {
 } from './contracts.ts'
 import type { QingmuCockpitKey } from './locales.ts'
 import { TakeCommentsPanel, type TakeCommentPort } from './TakeCommentsPanel.tsx'
+import { TakePreviewPlayer } from './TakePreviewPlayer.tsx'
 import {
   TakeReviewAuthorityPanel,
   type TakeReviewAuthorityPort,
@@ -33,11 +34,13 @@ interface TakeVersionCompareViewProps {
   readonly selectedShotId: string
   readonly projection: YimengWorkflowProjection | undefined
   readonly enabled: boolean
+  readonly readOnly?: boolean
   readonly port: Pick<QingmuYimengPort,
     'takeVersions' | 'takeAcceptance' | 'takeAcceptanceMethod'
     | 'selectTakeVersion' | 'recoverTakeVersionSelection'>
     & Partial<TakeCommentPort> & Partial<TakeReviewAuthorityPort> & Partial<TakeTechnicalQcPort>
     & Partial<TakeApprovalLifecyclePort>
+    & Partial<Pick<QingmuYimengPort, 'takePreview'>>
   readonly t: (key: QingmuCockpitKey) => string
 }
 
@@ -404,7 +407,7 @@ export function TakeVersionCompareView(props: TakeVersionCompareViewProps) {
 }
 
 function TakeVersionComparePanel({
-  projectId, episodeId, selectedShotId, projection, enabled, port, t,
+  projectId, episodeId, selectedShotId, projection, enabled, readOnly = false, port, t,
 }: TakeVersionCompareViewProps) {
   const scope = { projectId, episodeId, frameId: selectedShotId }
   const [refresh, setRefresh] = useState(0)
@@ -579,7 +582,7 @@ function TakeVersionComparePanel({
   async function selectVersion(candidate: YimengTakeVersion) {
     const run = runRef.current
     if (run === undefined || stack === undefined || marker.status !== 'none'
-      || !stack.capabilities.canSelect || !candidate.canAttemptSelection
+      || readOnly || !stack.capabilities.canSelect || !candidate.canAttemptSelection
       || !candidate.lineageComplete || candidate.outputSha256 === null) return
     const active = begin(run, 'select')
     if (active === undefined) return
@@ -630,9 +633,9 @@ function TakeVersionComparePanel({
 
   return <section className={`${card.card} ${css.panel}`} aria-label={t('takeVersionTitle')}>
     <div className={css.header}>
-      <div><h3>{t('takeVersionTitle')}</h3><p>{t('takeVersionBoundary')}</p></div>
+      <div><h3>{t('takeVersionTitle')}</h3><p>{t(readOnly ? 'takePreviewBoundary' : 'takeVersionBoundary')}</p></div>
       <button type="button" disabled={!eligible || loading || activeBusy !== undefined}
-        onClick={() => { setRefresh(value => value + 1) }}>{t('takeVersionRefresh')}</button>
+        onClick={() => { setRefresh(value => value + 1) }}>{t(readOnly ? 'takePreviewRefresh' : 'takeVersionRefresh')}</button>
     </div>
     {!eligible && enabled && <p>{t('takeVersionChooseShot')}</p>}
     {loading && <p role="status">{t('takeVersionLoading')}</p>}
@@ -640,7 +643,7 @@ function TakeVersionComparePanel({
     {notice !== undefined && <p role={notice.error ? 'alert' : 'status'} className={notice.error ? card.warning : css.notice}>
       {t(notice.key)}
     </p>}
-    {marker.status !== 'none' && eligible && <div className={css.recovery}>
+    {!readOnly && marker.status !== 'none' && eligible && <div className={css.recovery}>
       <strong>{t('takeVersionRecoveryTitle')}</strong>
       <p>{t(marker.status === 'ready' ? 'takeVersionRecoveryHelp' : 'takeVersionRecoveryInvalid')}</p>
       {marker.status === 'ready' && <button type="button" disabled={activeBusy !== undefined} onClick={recover}>
@@ -654,13 +657,13 @@ function TakeVersionComparePanel({
       {t('takeVersionReceipt')} · <code>{receipt.commandReceiptId}</code> · v{receipt.selectedTake.versionOrdinal}
     </p>}
     {stack !== undefined && <div className={css.body}>
-      <div className={css.stackHeader}>
+      {!readOnly && <details open><summary>{t('takeVersionAuthority')}</summary><div className={css.stackHeader}>
         <div><strong>Shot #{stack.subject.frameNo}</strong><span><code>{stack.subject.frameId}</code></span></div>
         <div><span>{t('takeVersionSelectionRevision')}</span><strong>{stack.subject.selectionRevision}</strong></div>
         <div><span>{t('takeVersionStackSha')}</span><code>{stack.stackSnapshotSha256}</code></div>
-      </div>
-      <p className={css.boundary}>{t('takeVersionSelectedNotApproval')}</p>
-      <TakeAcceptancePanel state={currentAcceptance} t={t} />
+      </div></details>}
+      {!readOnly && <p className={css.boundary}>{t('takeVersionSelectedNotApproval')}</p>}
+      {!readOnly && <TakeAcceptancePanel state={currentAcceptance} t={t} />}
       {stack.subject.versions.length === 0 ? <p role="status">{t('takeVersionNoVersions')}</p> : <>
         <div className={css.versionBar} aria-label={t('takeVersionStack')}>
           {stack.subject.versions.map(version => <button key={version.takeId} type="button"
@@ -668,9 +671,14 @@ function TakeVersionComparePanel({
             v{version.versionOrdinal}{version.isSelected ? ` · ${t('takeVersionSelectedBadge')}` : ''}
           </button>)}
         </div>
-        <p className={css.compareHelp}>{t('takeVersionCompareHelp')}</p>
+        {!readOnly && <p className={css.compareHelp}>{t('takeVersionCompareHelp')}</p>}
         <div className={css.compareGrid} role="region" aria-label={t('takeVersionCompare')}>
-          {compared.map(version => <TakeCard key={version.takeId} version={version} canSelect={stack.capabilities.canSelect}
+          {compared.map(version => <TakeCard key={`${version.takeId}:${version.outputSha256}`} version={version} canSelect={!readOnly && stack.capabilities.canSelect}
+            readOnly={readOnly} preview={readOnly && port.takePreview !== undefined && version.outputSha256 !== null
+              && version.outputBindingStatus === 'verified'
+              ? <TakePreviewPlayer request={{ projectId, episodeId, frameId: selectedShotId,
+                takeId: version.takeId, expectedOutputSha256: version.outputSha256 }} load={port.takePreview} t={t} />
+              : undefined}
             busy={activeBusy !== undefined || marker.status !== 'none'} onSelect={selectVersion} t={t} />)}
         </div>
       </>}
@@ -678,23 +686,24 @@ function TakeVersionComparePanel({
       <details className={css.details}>
         <summary>{t('takeVersionAuthority')}</summary>
         <p>{t('takeVersionAuthorityBody')}</p>
+        {readOnly && <><p>{t('takeVersionSelectedNotApproval')}</p><code>{stack.stackSnapshotSha256}</code></>}
         <dl><div><dt>{t('takeVersionFrameSha')}</dt><dd><code>{stack.subject.frameContentSha256}</code></dd></div>
           <div><dt>{t('takeVersionStoryboardRevision')}</dt><dd>{stack.subject.storyboardRevision}</dd></div></dl>
       </details>
     </div>}
-    {eligible && commentPreferredTakeId !== undefined && hasTakeCommentPort(port)
+    {!readOnly && eligible && commentPreferredTakeId !== undefined && hasTakeCommentPort(port)
       && <TakeCommentsPanel projectId={projectId} episodeId={episodeId} frameId={selectedShotId}
         preferredTakeId={commentPreferredTakeId} refresh={refresh} port={port} t={t} />}
-    {eligible && commentPreferredTakeId !== undefined && hasTakeReviewAuthorityPort(port)
+    {!readOnly && eligible && commentPreferredTakeId !== undefined && hasTakeReviewAuthorityPort(port)
       && <TakeReviewAuthorityPanel projectId={projectId} episodeId={episodeId} frameId={selectedShotId}
         preferredTakeId={commentPreferredTakeId} refresh={refresh} port={port} t={t} />}
-    {eligible && stack !== undefined && stack.subject.selectedTakeId !== null
+    {!readOnly && eligible && stack !== undefined && stack.subject.selectedTakeId !== null
       && hasTakeTechnicalQcPort(port)
       && <TakeTechnicalQcPanel
         key={`${projectId}:${episodeId}:${selectedShotId}:${stack.subject.selectedTakeId}`}
         projectId={projectId} episodeId={episodeId} frameId={selectedShotId}
         refresh={refresh} port={port} t={t} />}
-    {eligible && stack !== undefined && stack.subject.selectedTakeId !== null
+    {!readOnly && eligible && stack !== undefined && stack.subject.selectedTakeId !== null
       && hasTakeApprovalLifecyclePort(port)
       && <TakeApprovalLifecyclePanel
         key={`${projectId}:${episodeId}:${selectedShotId}:${stack.subject.selectedTakeId}:approval-lifecycle`}
@@ -770,9 +779,11 @@ function AcceptanceCard({
 }
 
 function TakeCard({
-  version, canSelect, busy, onSelect, t,
+  version, canSelect, busy, onSelect, t, readOnly, preview,
 }: {
   readonly version: YimengTakeVersion
+  readonly readOnly: boolean | undefined
+  readonly preview: React.ReactNode
   readonly canSelect: boolean
   readonly busy: boolean
   readonly onSelect: (version: YimengTakeVersion) => Promise<void>
@@ -782,14 +793,15 @@ function TakeCard({
   return <article className={css.take} data-selected={version.isSelected ? 'true' : 'false'}>
     <header><div><strong>v{version.versionOrdinal}</strong><span>{version.source}</span></div>
       {version.isSelected && <mark>{t('takeVersionSelectedBadge')}</mark>}</header>
-    <dl>
+    {preview}
+    <details open={!readOnly}><summary>{t('takeVersionEvidence')}</summary><dl>
       <div><dt>{t('takeVersionTakeId')}</dt><dd><code>{version.takeId}</code></dd></div>
       <div><dt>{t('takeVersionDuration')}</dt><dd>{version.durationSec === null ? t('unknown') : `${version.durationSec}s`}</dd></div>
       <div><dt>{t('takeVersionCost')}</dt><dd>{version.estimatedCny === null ? t('unknown') : `¥${version.estimatedCny}`}</dd></div>
       <div><dt>{t('takeVersionQuality')}</dt><dd>{version.qualityStatus} · {version.qualityCheckCount}</dd></div>
       <div><dt>{t('takeVersionBinding')}</dt><dd>{version.outputBindingStatus}</dd></div>
       <div><dt>{t('takeVersionLineage')}</dt><dd>{t(version.lineageComplete ? 'takeVersionLineageComplete' : 'takeVersionLineageIncomplete')}</dd></div>
-    </dl>
+    </dl></details>
     {version.blockers.length > 0 && <div className={css.blockers}><strong>{t('takeVersionBlockers')}</strong>
       <ul>{version.blockers.map(blocker => <li key={blocker}>{blocker}</li>)}</ul></div>}
     <details><summary>{t('takeVersionEvidence')}</summary><dl>
@@ -801,7 +813,7 @@ function TakeCard({
       <div><dt>{t('takeVersionInputHash')}</dt><dd><code>{version.inputHash ?? t('unknown')}</code></dd></div>
       <div><dt>{t('takeVersionOutputHash')}</dt><dd><code>{version.outputSha256 ?? t('unknown')}</code></dd></div>
     </dl></details>
-    {!version.isSelected && <button className={css.select} type="button" disabled={!selectionAllowed}
+    {!readOnly && !version.isSelected && <button className={css.select} type="button" disabled={!selectionAllowed}
       onClick={() => { void onSelect(version) }}>{t('takeVersionSelectButton')}</button>}
   </article>
 }

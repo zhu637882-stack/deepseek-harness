@@ -6,6 +6,8 @@ This private experimental Host plugin is the read-only BFF between Qingmu OS and
 
 ## Episode evidence and explicit verification
 
+The separate `takePreview` read requests `/api/qingmu/projects/{projectId}/episodes/{episodeId}/frames/{frameId}/takes/{takeId}/preview?expectedOutputSha256=…`. Only authenticated existing local MP4/WebM bytes are accepted. The Host validates exact scope, read-only flags, canonical base64, byte count and actual SHA-256. Media is capped at 16 MiB, this endpoint's JSON at 24 MiB and concurrent preview requests at two. No URL, token or filesystem path reaches the browser; there is no generation, export, download or business write.
+
 `evidenceLedger` reads `/api/qingmu/projects/{projectId}/episodes/{episodeId}/evidence-ledger`. `verifyEpisode` explicitly POSTs only the current `sourceSnapshotSha256` to its `verify-episode` sibling. Neither operation writes business state. The Host verifies the RFC 8785 source and report hashes, exact scope and canonical Take/comment/review bindings; it preserves the canonical verifier report, including a false `ok`.
 
 Ledger reads never invoke probes. Receipt inputs and stored QC/lifecycle records remain separate; stored records are not asserted to have a current probed binding. Missing evidence stays missing. Yimeng binds database, media and probe-sidecar inputs before and after reads and verification. It uses short-lived DB/WAL read snapshots so SQLite cannot create auxiliary files in the business directory. No persistent Ledger database or export is created.
@@ -107,6 +109,8 @@ The latest durable seal remains historical evidence. `latestSealSourceCurrent` m
 `latestBinding` retains the original source-reference receipt even when the script is missing or changed. `currentBinding` may only be that latest receipt with an exact match to the current source and subject SHA; an older matching record cannot replace it. `canBind` reports existing owner permission independently of source availability. A source reference is not a `SCREENPLAY_PACKAGE`, a completed stage, an approved artifact, a lock, or workset authority. The root and `/types` export `YimengStageSourcesRequest`, `YimengStageSourcesResponse`, `YimengStageSource`, `YimengStageSourceDefinition`, `YimengStageSourceBinding`, and `YimengStageSourceResult`.
 
 ## Security boundary
+
+`promptIr` retains the effective Ready subject and additionally verifies the latest persisted Draft's complete subject SHA and base binding. No Draft is `null`; malformed provenance is an error. A Draft based on another Ready is explicitly stale, never promoted by the reader. Root workflow blockers must contain a non-empty `reason`; Yimeng normalizes stage `reasonCode` and release blockers before this boundary, preserving diagnostic fields.
 
 The same configured handler is also provided as the Host-only `qingmuYimengRead` capability. Internal consumers can reuse the existing `workflow`, `productionUnits`, `lsuPlanSource`, and `stageSources` GETs without creating another HTTP client, token configuration, or cache. Cordis removes the capability when its owning plugin unloads. This does not reinterpret business-stage completion, selected media, or unknown forwarded fields as named IMAGO Stage/LSU approval.
 

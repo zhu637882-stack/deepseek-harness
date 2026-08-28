@@ -295,6 +295,7 @@ const PROMPT_IR_PROPOSAL_REQUEST = {
   basePromptIrId: 'prompt-ir-ready-4',
   baseVersion: 4,
   baseContentSha256: PROMPT_IR_BASE_CONTENT_SHA,
+  baseDraftSnapshotSha256: null,
   replacements: { motionPrompt: PROMPT_IR_AFTER.motionPrompt },
   harnessSessionId: 'harness-session-1',
   references: [{ kind: 'shot', id: 'shot-1' }],
@@ -2561,6 +2562,19 @@ describe('qingmu Yimeng command adapter', () => {
     })
   })
 
+  it('requires an explicit null or valid SHA for the latest Draft source before transport', async () => {
+    const transport = vi.fn(async () => jsonResponse(promptIrProposalFixture()))
+    const handler = createYimengCommandHandler({}, deps(transport, 'test-token'))
+    for (const source of [undefined, '', 'null', 'g'.repeat(64), 123]) {
+      await expect(handler('proposePromptIr', { ...PROMPT_IR_PROPOSAL_REQUEST, baseDraftSnapshotSha256: source }, signal()))
+        .resolves.toMatchObject({ ok: false })
+    }
+    expect(transport).not.toHaveBeenCalled()
+    await expect(handler('proposePromptIr', { ...PROMPT_IR_PROPOSAL_REQUEST, baseDraftSnapshotSha256: 'a'.repeat(64) }, signal()))
+      .resolves.toMatchObject({ ok: true })
+    expect(transport).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps PromptIR edit and authenticated selection as separate receipt-backed commands', async () => {
     const responses = [
       promptIrProposalFixture(),
@@ -2634,6 +2648,7 @@ describe('qingmu Yimeng command adapter', () => {
       basePromptIrId: 'prompt-ir-ready-4',
       baseVersion: 4,
       baseContentSha256: PROMPT_IR_BASE_CONTENT_SHA,
+      baseDraftSnapshotSha256: null,
       replacements: { motionPrompt: PROMPT_IR_AFTER.motionPrompt },
       harnessSessionId: 'harness-session-1',
       references: [{ kind: 'shot', id: 'shot-1' }],

@@ -37,6 +37,7 @@ import type {
   YimengScriptResponse, YimengSelectPromptIrResponse,
   YimengSelectedVideoReviewResponse,
   YimengTakeVersionStackResponse,
+  YimengTakePreviewResponse,
   YimengTakeVersionSelectionResult, YimengTakeVersionSelectionRecovery,
   YimengTakeCommentFeedResponse, YimengTakeCommentResult, YimengTakeCommentRecovery,
   YimengTakeReviewAuthorityFeedResponse,
@@ -87,6 +88,7 @@ export type {
   YimengScriptResponse, YimengSelectPromptIrResponse,
   YimengSelectedVideoReviewResponse,
   YimengTakeVersion, YimengTakeVersionRequest, YimengTakeVersionStackResponse,
+  YimengTakePreviewRequest, YimengTakePreviewResponse,
   YimengTakeVersionStackSubject, YimengSelectTakeVersionRequest,
   YimengTakeAcceptanceRequest, YimengTakeAcceptanceResponse, YimengTakeAcceptanceEvidence,
   YimengTakeAcceptanceSubject,
@@ -166,6 +168,7 @@ export function apply(ctx: ClientContext): void {
     promptIr: (request, signal) => read<YimengPromptIrResponse>('promptIr', request, signal),
     selectedVideoReview: (request, signal) => read<YimengSelectedVideoReviewResponse>('selectedVideoReview', request, signal),
     takeVersions: (request, signal) => read<YimengTakeVersionStackResponse>('takeVersions', request, signal),
+    takePreview: (request, signal) => read<YimengTakePreviewResponse>('takePreview', request, signal),
     takeComments: (request, signal) => read<YimengTakeCommentFeedResponse>('takeComments', request, signal),
     takeReviewAuthority: (request, signal) =>
       read<YimengTakeReviewAuthorityFeedResponse>('takeReviewAuthority', request, signal),

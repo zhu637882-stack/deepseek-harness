@@ -10,6 +10,7 @@ import z from '@deepseek-ai/schemastery'
 import { normalizeContinuityDelta } from './continuity.ts'
 import { normalizeSelectedVideoReview } from './selected-video-review.ts'
 import { normalizeTakeVersionStack, parseTakeVersionReadRequest } from './take-versions.ts'
+import { normalizeTakePreview, parseTakePreviewRequest } from './take-preview.ts'
 import { normalizeTakeCommentFeed, parseTakeCommentReadRequest } from './take-comments.ts'
 import {
   normalizeTakeReviewAuthorityFeed,
@@ -192,6 +193,7 @@ export type {
   YimengSelectedVideoReviewStatus,
   YimengTakeVersion,
   YimengTakeVersionRequest,
+  YimengTakePreviewRequest, YimengTakePreviewResponse,
   YimengTakeVersionStackResponse,
   YimengTakeVersionStackSubject,
   YimengTakeComment,
@@ -311,6 +313,7 @@ const PROTECTED_ENDPOINTS = new Set([
   'referenceCandidates', 'reviewEvents',
   'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'takeComments', 'takeReviewAuthority', 'takeAcceptance', 'takeTechnicalQc', 'takeApprovalLifecycle', 'evidenceLedger', 'verifyEpisode', 'shotFindings', 'productionUnits', 'stageSources',
   'lsuPlanSource', 'reworkRouteSource',
+  'takePreview',
 ])
 const HUMAN_DECISION_VALUES = new Set<YimengHumanDecisionValue>([
   'approve', 'reject', 'request_changes',
@@ -2111,11 +2114,44 @@ function normalizePromptIr(value: unknown, expected: YimengPromptIrRequest): Yim
   if (canonicalJsonSha256(subject, 'promptIr.subject') !== baseSnapshotSha256) {
     throw new UpstreamContractError('promptIr subject snapshot sha256 mismatch')
   }
+  let draft: YimengPromptIrResponse['draft'] = null
+  if (root.draft !== null) {
+    const item = requireObject(root.draft, 'promptIr.draft')
+    const raw = requireObject(item.subject, 'promptIr.draft.subject')
+    if (raw.status !== 'Draft') throw new UpstreamContractError('promptIr draft status mismatch')
+    // Reuse the Ready subject's exact scope/field validation without making the Draft effective.
+    const readyShape = { ...raw, status: 'Ready' }
+    const validated = normalizePromptIr({
+      schema: root.schema, subject: readyShape, baseRevision: raw.promptIrVersion,
+      baseSnapshotSha256: canonicalJsonSha256(readyShape, 'promptIr.draft.subject'), draft: null,
+    }, expected).subject
+    const draftSubject = { ...validated, status: 'Draft' as const }
+    const subjectSnapshotSha256 = requireSha256(item.subjectSnapshotSha256, 'promptIr.draft.subjectSnapshotSha256')
+    if (canonicalJsonSha256(draftSubject, 'promptIr.draft.subject') !== subjectSnapshotSha256) {
+      throw new UpstreamContractError('promptIr draft snapshot sha256 mismatch')
+    }
+    const binding = requireObject(item.baseBinding, 'promptIr.draft.baseBinding')
+    const baseBinding = {
+      id: requireIdentifier(binding.id, 'promptIr.draft.baseBinding.id'),
+      version: requireInteger(binding.version, 'promptIr.draft.baseBinding.version', 1),
+      contentSha256: requireSha256(binding.contentSha256, 'promptIr.draft.baseBinding.contentSha256'),
+    }
+    const current = baseBinding.id === subject.promptIrId && baseBinding.version === subject.promptIrVersion
+      && baseBinding.contentSha256 === subject.promptIrContentSha256
+    if (item.status !== (current ? 'current' : 'stale')
+      || item.reason !== (current ? null : 'prompt_ir_base_snapshot_conflict')
+      || draftSubject.promptIrId === subject.promptIrId) {
+      throw new UpstreamContractError('promptIr draft base binding mismatch')
+    }
+    draft = { status: current ? 'current' : 'stale', reason: current ? null : 'prompt_ir_base_snapshot_conflict',
+      subject: draftSubject, subjectSnapshotSha256, baseBinding }
+  }
   return {
     schema: 'jason.qingmu-prompt-ir-subject-read.v1',
     subject,
     baseRevision,
     baseSnapshotSha256,
+    draft,
   }
 }
 
@@ -3752,6 +3788,7 @@ export function createYimengReadHandler(
   const timeoutMs = resolveTimeout(config.timeoutMs ?? DEFAULT_TIMEOUT_MS)
   const verificationTimeoutMs = resolveTimeout(config.verificationTimeoutMs ?? DEFAULT_VERIFICATION_TIMEOUT_MS)
   let verificationInFlight = false
+  let previewsInFlight = 0
   return async (endpoint, payload, signal) => {
     try {
       let path: string
@@ -3846,6 +3883,11 @@ export function createYimengReadHandler(
           + '/episodes/' + encodeURIComponent(request.episodeId)
           + '/frames/' + encodeURIComponent(request.frameId) + '/take-versions'
         normalize = value => normalizeTakeVersionStack(value, request, jcsSha256)
+      } else if (endpoint === 'takePreview') {
+        let request
+        try { request = parseTakePreviewRequest(payload) } catch { throw new InputError('invalid Take preview request') }
+        path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/frames/${encodeURIComponent(request.frameId)}/takes/${encodeURIComponent(request.takeId)}/preview?expectedOutputSha256=${request.expectedOutputSha256}`
+        normalize = value => normalizeTakePreview(value, request)
       } else if (endpoint === 'takeComments') {
         const request = parseTakeCommentRequest(payload)
         path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)
@@ -3947,9 +3989,12 @@ export function createYimengReadHandler(
         authorizationToken = scrubToken
       }
       const verification = endpoint === 'verifyEpisode'
+      const preview = endpoint === 'takePreview'
+      if (preview && previewsInFlight >= 2) return internalError('PREVIEW_BUSY')
       if (verification && verificationInFlight) return internalError('VERIFY_BUSY')
       if (verification && verificationBody === undefined) return internalError('Yimeng adapter failed')
       if (verification) verificationInFlight = true
+      if (preview) previewsInFlight++
       const fetchOptions: FetchJsonOptions | undefined = verification
         ? {
           method: 'POST',
@@ -3965,12 +4010,13 @@ export function createYimengReadHandler(
           authorizationToken,
           scrubToken,
           verification ? verificationTimeoutMs : timeoutMs,
-          endpoint === 'script' ? MAX_SCRIPT_JSON_BYTES : MAX_JSON_BYTES,
+          preview ? 24 * 1024 * 1024 : endpoint === 'script' ? MAX_SCRIPT_JSON_BYTES : MAX_JSON_BYTES,
           signal,
           fetchOptions,
         )
       } finally {
         if (verification) verificationInFlight = false
+        if (preview) previewsInFlight--
       }
       if (!response.ok) return response
       try {

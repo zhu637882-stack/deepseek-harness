@@ -48,6 +48,28 @@
   min-height: 0;
 }
 
+/* The director desk is a scoped dark production surface, not a global theme change. */
+.directorShell {
+  --dsw-alias-bg-layer-1: #0c1210;
+  --dsw-alias-bg-layer-2: #141e19;
+  --dsw-alias-label-primary: #edf8f0;
+  --dsw-alias-label-secondary: #b9cfc0;
+  --dsw-alias-label-tertiary: #9bb6a5;
+  --dsw-alias-border-l2: #34483c;
+  --qingmu-accent: #4bd99a;
+  --qingmu-accent-strong: #27865e;
+  --qingmu-soft: #192c22;
+  color-scheme: dark;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+}
+.directorShell .truthStrip, .directorShell .evidence { display: none; }
+.directorShell .body { grid-template-columns: minmax(0, 1fr); }
+.directorShell .primaryAction { background: #1b6345; color: #f4fff8; }
+.directorShell textarea { font-family: inherit; font-size: 14px; line-height: 1.6; }
+.directorShell summary { cursor: pointer; min-height: 32px; padding: 6px 0; }
+.directorShell details > summary:focus-visible { outline: 2px solid var(--qingmu-accent); outline-offset: 3px; }
+
 .header {
   display: flex;
   align-items: center;

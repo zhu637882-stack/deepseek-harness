@@ -48,6 +48,7 @@ const CANDIDATE_EDITABLE = {
 }
 
 const BASE_READ = {
+  draft: null,
   schema: 'jason.qingmu-prompt-ir-subject-read.v1',
   subject: {
     schema: 'jason.qingmu-prompt-ir-subject.v1',
@@ -332,6 +333,113 @@ afterEach(() => {
 })
 
 describe('PromptIrWorkspace vertical slice', () => {
+  it('unlocks a proven historical commit when a newer Draft is current, retaining text for explicit rebase', async () => {
+    const { port, spies } = createPort()
+    render(<PromptIrWorkspace projectId={PROJECT_ID} episodeId={EPISODE_ID} storyboardRevisionId={STORYBOARD_REVISION_ID}
+      shotItems={frame('Ready')} selectedShotId={FRAME_ID} onSelectShotId={vi.fn()} port={port} t={t}
+      onCommitted={vi.fn(async () => {})} presentation="director" />)
+    const input = await screen.findByLabelText(zh.directorVideoPrompt)
+    fireEvent.change(input, { target: { value: CANDIDATE_EDITABLE.videoGenPrompt } })
+    fireEvent.click(screen.getByRole('button', { name: zh.promptIrCheckMethod }))
+    fireEvent.click(await screen.findByRole('button', { name: zh.promptIrPreparePreview }))
+    fireEvent.click(await screen.findByRole('checkbox', { name: zh.promptIrEditConfirm }))
+    fireEvent.click(screen.getByRole('button', { name: zh.promptIrCommitEdit }))
+    const recover = await screen.findByRole('button', { name: zh.promptIrRecoverEdit })
+    await waitFor(() => { expect((recover as HTMLButtonElement).disabled).toBe(false) })
+    const latest = { ...BASE_READ, draft: { status: 'current', reason: null,
+      subject: { ...BASE_READ.subject, status: 'Draft', promptIrId: 'newer-draft', promptIrVersion: DRAFT_VERSION + 1,
+        promptIrContentSha256: 'b'.repeat(64), editableProjection: { ...BASE_EDITABLE, videoGenPrompt: '其他会话新稿' } },
+      subjectSnapshotSha256: 'c'.repeat(64), baseBinding: { id: BASE_ID, version: BASE_VERSION, contentSha256: BASE_CONTENT_SHA } } }
+    spies.promptIr.mockResolvedValueOnce(latest as unknown as typeof BASE_READ)
+    fireEvent.click(recover)
+    await screen.findByText(zh.directorHistoricalCommitted)
+    expect(readPromptIrEditRecoveryMarker(COORDINATES).status).toBe('none')
+    expect(screen.queryByRole('button', { name: zh.promptIrRecoverEdit })).toBeNull()
+    expect((input as HTMLTextAreaElement).value).toBe(CANDIDATE_EDITABLE.videoGenPrompt)
+    expect(screen.getByRole('button', { name: zh.directorRebase })).toBeTruthy()
+    expect(spies.commitPromptIrEdit).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps unsaved text in memory when recovery storage fails and blocks destructive reread', async () => {
+    const { port, spies } = createPort()
+    render(<PromptIrWorkspace projectId={PROJECT_ID} episodeId={EPISODE_ID} storyboardRevisionId={STORYBOARD_REVISION_ID}
+      shotItems={frame('Ready')} selectedShotId={FRAME_ID} onSelectShotId={vi.fn()} port={port} t={t}
+      onCommitted={vi.fn(async () => {})} presentation="director" />)
+    const input = await screen.findByLabelText(zh.directorVideoPrompt)
+    const storage = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota') })
+    try {
+      fireEvent.change(input, { target: { value: '必须保留的文字' } })
+      await screen.findByText(zh.directorStorageError)
+      fireEvent.click(screen.getByRole('button', { name: zh.promptIrReload }))
+      expect((input as HTMLTextAreaElement).value).toBe('必须保留的文字')
+      expect(spies.promptIr).toHaveBeenCalledTimes(1)
+    } finally { storage.mockRestore() }
+  })
+
+  it('explicitly rebases a stale saved Draft and binds its exact source in the proposal', async () => {
+    const { port, spies } = createPort()
+    const saved = { status: 'stale', reason: 'prompt_ir_base_snapshot_conflict',
+      subject: { ...BASE_READ.subject, status: 'Draft', promptIrId: DRAFT_ID, promptIrVersion: DRAFT_VERSION,
+        promptIrContentSha256: DRAFT_CONTENT_SHA, editableProjection: CANDIDATE_EDITABLE },
+      subjectSnapshotSha256: CANDIDATE_SHA, baseBinding: { id: 'previous-ready', version: 1, contentSha256: BASE_CONTENT_SHA } }
+    const readPort = { ...port, promptIr: vi.fn(async () => ({ ...BASE_READ, draft: saved })) } as unknown as QingmuYimengPort
+    render(<PromptIrWorkspace projectId={PROJECT_ID} episodeId={EPISODE_ID} storyboardRevisionId={STORYBOARD_REVISION_ID}
+      shotItems={frame('Ready')} selectedShotId={FRAME_ID} onSelectShotId={vi.fn()} port={readPort} t={t}
+      onCommitted={vi.fn(async () => {})} presentation="director" />)
+    await screen.findByText(zh.directorStaleDraft)
+    expect((screen.getByRole('button', { name: zh.promptIrCheckMethod }) as HTMLButtonElement).disabled).toBe(true)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try { fireEvent.click(screen.getByRole('button', { name: zh.directorRebase })) }
+    finally { confirm.mockRestore() }
+    fireEvent.click(screen.getByRole('button', { name: zh.promptIrCheckMethod }))
+    fireEvent.click(await screen.findByRole('button', { name: zh.promptIrPreparePreview }))
+    await waitFor(() => { expect(spies.proposePromptIr).toHaveBeenCalledTimes(1) })
+    expect(spies.proposePromptIr).toHaveBeenCalledWith(
+      expect.objectContaining({ baseDraftSnapshotSha256: CANDIDATE_SHA }), expect.any(AbortSignal),
+    )
+    expect(spies.selectPromptIr).not.toHaveBeenCalled()
+    expect(spies.commitPromptIrEdit).not.toHaveBeenCalled()
+  })
+
+  it('edits normal fields and restores only scoped unsaved text; source drift prevents saves', async () => {
+    const { port, spies } = createPort()
+    const props = { projectId: PROJECT_ID, episodeId: EPISODE_ID, storyboardRevisionId: STORYBOARD_REVISION_ID,
+      shotItems: frame('Ready'), selectedShotId: FRAME_ID, onSelectShotId: vi.fn(), port, t, onCommitted: vi.fn(async () => {}),
+      presentation: 'director' as const, onUnsavedChange: vi.fn() }
+    const view = render(<PromptIrWorkspace {...props} />)
+    const input = await screen.findByLabelText(zh.directorVideoPrompt)
+    fireEvent.change(input, { target: { value: '未保存的完整提示词' } })
+    await screen.findByText(zh.directorUnsaved)
+    view.unmount()
+    const restored = render(<PromptIrWorkspace {...props} />)
+    await waitFor(() => { expect((screen.getByLabelText(zh.directorVideoPrompt) as HTMLTextAreaElement).value).toBe('未保存的完整提示词') })
+    expect(spies.commitPromptIrEdit).not.toHaveBeenCalled()
+    restored.unmount()
+    spies.promptIr.mockResolvedValueOnce({ ...BASE_READ, baseSnapshotSha256: 'f'.repeat(64) })
+    render(<PromptIrWorkspace {...props} />)
+    await screen.findByText(zh.directorStaleDraft)
+    expect((screen.getByRole('button', { name: zh.promptIrCheckMethod }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByLabelText(zh.directorVideoPrompt) as HTMLTextAreaElement).value).toBe('未保存的完整提示词')
+  })
+
+  it('reads canonical saved Draft text separately from Ready and never offers promotion in director mode', async () => {
+    const { port } = createPort()
+    const saved = { status: 'current', reason: null,
+      subject: { ...BASE_READ.subject, status: 'Draft', promptIrId: DRAFT_ID, promptIrVersion: DRAFT_VERSION,
+        promptIrContentSha256: DRAFT_CONTENT_SHA, editableProjection: CANDIDATE_EDITABLE },
+      subjectSnapshotSha256: CANDIDATE_SHA, baseBinding: { id: BASE_ID, version: BASE_VERSION, contentSha256: BASE_CONTENT_SHA } }
+    const readPort = { ...port, promptIr: vi.fn(async () => ({ ...BASE_READ, draft: saved })) } as unknown as QingmuYimengPort
+    render(<PromptIrWorkspace projectId={PROJECT_ID} episodeId={EPISODE_ID} storyboardRevisionId={STORYBOARD_REVISION_ID}
+      shotItems={frame('Ready')} selectedShotId={FRAME_ID} onSelectShotId={vi.fn()} port={readPort} t={t}
+      onCommitted={vi.fn(async () => {})} presentation="director" />)
+    await waitFor(() => {
+      expect((screen.getByLabelText(zh.directorVideoPrompt) as HTMLTextAreaElement).value).toBe(CANDIDATE_EDITABLE.videoGenPrompt)
+    })
+    expect(screen.queryByRole('button', { name: zh.promptIrSelect })).toBeNull()
+    expect(screen.getByText(BASE_EDITABLE.videoGenPrompt)).toBeTruthy()
+    expect(sessionStorage.length).toBe(0)
+  })
+
   it('recovers unknown POSTs without resubmission and keeps Draft selectable after refresh', async () => {
     const { port, spies } = createPort()
     const onCommitted = vi.fn(async () => {})

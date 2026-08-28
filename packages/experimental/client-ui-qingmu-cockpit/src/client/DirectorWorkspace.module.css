@@ -1,0 +1,39 @@
+.workspace {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) 224px;
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.workspace h2, .workspace h3, .workspace h4 { margin: 0 0 8px; }
+.workspace p { margin: 6px 0 12px; }
+.workspace small { color: var(--dsw-alias-label-secondary); }
+.workspace details { border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; padding: 12px; }
+.workspace summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.workspace button:focus-visible, .workspace summary:focus-visible, .workspace textarea:focus-visible {
+  outline: 2px solid var(--qingmu-accent); outline-offset: 3px;
+}
+.workspace textarea { font-family: inherit; line-height: 1.65; }
+.shots { position: sticky; top: 0; min-width: 0; }
+.shots section { margin-bottom: 20px; }
+.shots button {
+  width: 100%; display: flex; flex-direction: column; gap: 4px; text-align: left;
+  padding: 12px; margin-bottom: 8px; min-height: 64px; border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary);
+  border: 1px solid var(--dsw-alias-border-l2); cursor: pointer; font: inherit;
+}
+.shots button[aria-pressed='true'] { border-color: var(--qingmu-accent); background: var(--qingmu-soft); }
+.content { min-width: 0; display: grid; gap: 16px; }
+.content header h2 { font-size: 23px; }
+.content header p { color: var(--dsw-alias-label-secondary); }
+.properties { min-width: 0; position: sticky; top: 0; overflow-wrap: anywhere; }
+.properties p { color: var(--dsw-alias-label-secondary); }
+@media (max-width: 1320px) { .workspace { grid-template-columns: 156px minmax(0, 1fr) 188px; gap: 12px; } }
+@media (max-width: 1000px) { .workspace { grid-template-columns: 150px minmax(0, 1fr); } .properties { grid-column: 2; position: static; } }
+@media (prefers-reduced-motion: reduce) { .workspace *, .workspace *::before, .workspace *::after { transition: none !important; animation: none !important; } }
+.fields { display: grid; gap: 16px; }
+.promptText, .diff pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.diff { grid-column: 1 / -1; border-left: 3px solid var(--qingmu-accent); padding-left: 14px; }

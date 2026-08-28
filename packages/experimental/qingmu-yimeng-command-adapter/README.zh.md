@@ -20,6 +20,12 @@ ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只
 
 回执恢复只会向易梦 `/api/qingmu/projects/{projectId}/episodes/{episodeId}/change-sets/{changeSetId}/command-receipt` 精确发送一次 `GET`；三类元素档案都使用对应的通用元素路由。两者都只使用原始 `Idempotency-Key` 请求头，不带请求体或 query。适配器只接受 `jason.qingmu-command-receipt-recovery.v1` wrapper，并重新核验其中原始提交回执的全部血缘；在接受 wrapper 的 `receiptSha256` 前，还会重算原始回执的 canonical JSON SHA-256；它绝不会重试 commit `POST`。
 
+## PromptIR Draft 来源绑定
+
+`proposePromptIr` 必须携带 `baseDraftSnapshotSha256`：读取适配器返回的最新 Draft 主体 SHA，或在没有 Draft 时明确为 `null`。易梦将此条件冻结到既有 ChangeSet，并在预览和编辑事务内与 Ready 来源一起重新比较。并发草稿编辑会失败关闭，不会替换较新的文字。编辑 Draft 不会提升 Ready 或选择 Take。
+
+回执恢复仍只发送 GET。结果未知时，导演工作区允许用户明确按原编辑命令、原幂等键重试；Host 不会自动重试。已成功的原回执在检查今天的 Draft 来源前重放。
+
 ## Take 普通评论
 
 `createTakeComment` 把精确的当前 Take 主体 SHA 绑定到所选 Take、时间码或帧锚点、评论正文和一个可见 ASCII 幂等键。它只向 `/api/qingmu/projects/{projectId}/episodes/{episodeId}/frames/{frameId}/take-comments` 发送一次 `POST`；请求体准确包含 `expectedTakeSubjectSha256`、`takeId`、`anchor`、`body` 和 `idempotencyKey`，路径 ID、actor、角色与 session 均来自路由和易梦认证。结果必须保留原意图，并把 `changed`、选择、技术通过、正式批准、单集验证、人工签收、Provider 调用与预算影响保持为 false 或零。

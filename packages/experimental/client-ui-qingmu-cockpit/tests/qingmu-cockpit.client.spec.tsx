@@ -327,6 +327,7 @@ const PROMPT_IR_WORKFLOW: YimengWorkflowProjection = {
 function promptIrRead(frameId: string) {
   const index = frameId === 'frame-2' ? 2 : 1
   return {
+    draft: null,
     schema: 'jason.qingmu-prompt-ir-subject-read.v1',
     subject: {
       schema: 'jason.qingmu-prompt-ir-subject.v1',
@@ -619,6 +620,7 @@ function shotRelationMethod(request: Parameters<QingmuYimengPort['shotRelationMe
 
 function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
   return {
+    takePreview: vi.fn(async () => { throw new Error('Preview requires the real media fixture') }),
     capabilityCatalog: vi.fn(async () => ({
       schema: 'jason.provider-capability-catalog.v1',
       productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
@@ -1005,6 +1007,7 @@ describe('QingmuCockpit journey', () => {
     const tabs = within(dialog).getAllByRole('tab')
     expect(tabs.map(tab => tab.textContent)).toEqual([
       zh.tabOverview,
+      zh.tabDirector,
       zh.tabAssets,
       zh.tabShots,
       zh.tabGeneration,

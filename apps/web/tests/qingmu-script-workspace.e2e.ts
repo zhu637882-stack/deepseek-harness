@@ -1045,6 +1045,7 @@ function promptIrReadFixture(selected: boolean) {
   const subject = promptIrSubject(selected)
   return {
     schema: 'jason.qingmu-prompt-ir-subject-read.v1',
+    draft: null,
     subject,
     baseRevision: subject.promptIrVersion,
     baseSnapshotSha256: canonicalSha256(subject),

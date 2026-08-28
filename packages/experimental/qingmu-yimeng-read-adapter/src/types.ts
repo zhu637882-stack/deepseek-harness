@@ -347,7 +347,7 @@ export interface YimengPromptIrEditableProjection extends YimengJsonObject {
 }
 
 /** Version-bound Yimeng PromptIR subject; status is fail-closed to the current Ready row. */
-export interface YimengPromptIrSubject extends YimengJsonObject {
+export interface YimengPromptIrSubject<Status extends 'Ready' | 'Draft' = 'Ready'> extends YimengJsonObject {
   readonly schema: 'jason.qingmu-prompt-ir-subject.v1'
   readonly projectId: string
   readonly episodeId: string
@@ -358,7 +358,7 @@ export interface YimengPromptIrSubject extends YimengJsonObject {
   readonly promptIrId: string
   readonly promptIrVersion: number
   readonly promptIrContentSha256: string
-  readonly status: 'Ready'
+  readonly status: Status
   readonly editableProjection: YimengPromptIrEditableProjection
 }
 
@@ -368,6 +368,14 @@ export interface YimengPromptIrResponse extends YimengJsonObject {
   readonly subject: YimengPromptIrSubject
   readonly baseRevision: number
   readonly baseSnapshotSha256: string
+  /** Latest persisted Draft, independently verified and never treated as effective Ready. */
+  readonly draft: null | {
+    readonly status: 'current' | 'stale'
+    readonly reason: null | 'prompt_ir_base_snapshot_conflict'
+    readonly subject: YimengPromptIrSubject<'Draft'>
+    readonly subjectSnapshotSha256: string
+    readonly baseBinding: { readonly id: string; readonly version: number; readonly contentSha256: string }
+  }
 }
 
 /** Read-only coordinates for the selected video on one canonical storyboard frame. */
@@ -440,6 +448,25 @@ export interface YimengSelectedVideoReviewResponse extends YimengSelectedVideoRe
 
 /** Exact Yimeng coordinates for one Shot's existing Take stack. */
 export type YimengTakeVersionRequest = YimengSelectedVideoReviewRequest
+
+/** Explicit read-only preview of an existing, hash-bound Take. */
+export interface YimengTakePreviewRequest extends YimengTakeVersionRequest {
+  readonly takeId: string
+  readonly expectedOutputSha256: string
+}
+
+/** Bounded local media bytes, validated by the Host before display. */
+export interface YimengTakePreviewResponse extends YimengTakeVersionRequest {
+  readonly schema: 'jason.qingmu-take-preview.v1'
+  readonly takeId: string
+  readonly outputSha256: string
+  readonly mimeType: 'video/mp4' | 'video/webm'
+  readonly bytes: number
+  readonly base64: string
+  readonly readOnly: true
+  readonly providerCalls: 0
+  readonly databaseWrites: 0
+}
 
 /** One existing video asset projected as a Take version; no second Take identity is created. */
 export interface YimengTakeVersion {
@@ -2132,6 +2159,7 @@ export interface YimengReadEndpointMap {
   readonly promptIr: YimengPromptIrResponse
   readonly selectedVideoReview: YimengSelectedVideoReviewResponse
   readonly takeVersions: YimengTakeVersionStackResponse
+  readonly takePreview: YimengTakePreviewResponse
   readonly takeComments: YimengTakeCommentFeedResponse
   readonly takeReviewAuthority: YimengTakeReviewAuthorityFeedResponse
   readonly takeAcceptance: YimengTakeAcceptanceResponse

@@ -34,6 +34,8 @@ import {
   type PromptIrSelectionRecoveryMarkerRead,
 } from './prompt-ir-recovery.ts'
 import css from './QingmuCockpit.module.css'
+import directorCss from './DirectorWorkspace.module.css'
+import { directorBufferKey, readDirectorBuffer, writeDirectorBuffer } from './director-edit-buffer.ts'
 
 const SHA256 = /^[0-9a-f]{64}$/
 const EDITABLE_FIELDS = [
@@ -62,6 +64,8 @@ interface PromptIrFrame extends PromptIrRecoveryCoordinates {
 
 /** Props for the bounded PromptIR editor mounted in the existing Script & Assets slot. */
 export interface PromptIrWorkspaceProps {
+  readonly presentation?: 'director'
+  readonly onUnsavedChange?: (dirty: boolean) => void
   readonly projectId: string
   readonly episodeId: string
   readonly shotItems: readonly unknown[]
@@ -456,7 +460,10 @@ export function PromptIrWorkspace({
   port,
   t,
   onCommitted,
+  presentation,
+  onUnsavedChange,
 }: PromptIrWorkspaceProps) {
+  const director = presentation === 'director'
   const frames = framesOf(projectId, episodeId, shotItems, storyboardRevisionId)
   const active = frames.find(frame => frame.shotId === selectedShotId)
   const [reload, setReload] = useState(0)
@@ -467,6 +474,7 @@ export function PromptIrWorkspace({
   const [proposal, setProposal] = useState<YimengProposePromptIrResponse>()
   const [preview, setPreview] = useState<YimengPreviewPromptIrResponse>()
   const [editReceipt, setEditReceipt] = useState<YimengCommitPromptIrEditResponse>()
+  const [historicalReceipt, setHistoricalReceipt] = useState<YimengCommitPromptIrEditResponse>()
   const [draftPromptIr, setDraftPromptIr] = useState<DraftPromptIr>()
   const [editVerified, setEditVerified] = useState(false)
   const [selectionReceipt, setSelectionReceipt] = useState<YimengSelectPromptIrResponse>()
@@ -476,6 +484,24 @@ export function PromptIrWorkspace({
   const [editRecovery, setEditRecovery] = useState<PromptIrEditRecoveryMarkerRead>({ status: 'none' })
   const [selectionRecovery, setSelectionRecovery] = useState<PromptIrSelectionRecoveryMarkerRead>({ status: 'none' })
   const abortRef = useRef<AbortController>()
+  const commitLock = useRef(false)
+  const [unsaved, setUnsaved] = useState(false)
+  const [bufferStale, setBufferStale] = useState(false)
+  const [staleRebased, setStaleRebased] = useState(false)
+  const sourceRef = useRef('')
+  const baselineRef = useRef('')
+  const bufferKey = directorBufferKey([projectId, episodeId, storyboardRevisionId, selectedShotId])
+  const dirtyCallback = useRef(onUnsavedChange)
+  dirtyCallback.current = onUnsavedChange
+
+  useEffect(() => {
+    dirtyCallback.current?.(unsaved)
+    const beforeUnload = (event: BeforeUnloadEvent): void => {
+      if (unsaved || commitLock.current) { event.preventDefault(); event.returnValue = '' }
+    }
+    window.addEventListener('beforeunload', beforeUnload)
+    return () => { window.removeEventListener('beforeunload', beforeUnload); dirtyCallback.current?.(false) }
+  }, [unsaved])
 
   useEffect(() => {
     abortRef.current?.abort()
@@ -485,6 +511,7 @@ export function PromptIrWorkspace({
     setProposal(undefined)
     setPreview(undefined)
     setEditReceipt(undefined)
+    setHistoricalReceipt(undefined)
     setDraftPromptIr(undefined)
     setEditVerified(false)
     setSelectionReceipt(undefined)
@@ -492,6 +519,7 @@ export function PromptIrWorkspace({
     setSelectionConfirmed(false)
     setError(undefined)
     setOperation('idle')
+    setStaleRebased(false)
     if (active === undefined) {
       setEditRecovery({ status: 'none' })
       setSelectionRecovery({ status: 'none' })
@@ -511,15 +539,31 @@ export function PromptIrWorkspace({
       if (controller.signal.aborted) return
       assertReadySnapshot(result, active)
       setSnapshot(result)
-      setDraft(JSON.stringify(result.subject.editableProjection, null, 2))
-      if (active.status === 'Draft') {
+      const saved = result.draft?.subject
+      const initial = JSON.stringify(saved?.editableProjection ?? result.subject.editableProjection, null, 2)
+      baselineRef.current = initial
+      sourceRef.current = `${result.baseSnapshotSha256}:${result.draft?.subjectSnapshotSha256 ?? 'none'}`
+      setDraft(initial)
+      setUnsaved(false)
+      setBufferStale(false)
+      if (director) {
+        try {
+          const buffer = readDirectorBuffer(bufferKey)
+          if (buffer !== null) {
+            setDraft(buffer.text)
+            setUnsaved(buffer.text !== initial)
+            setBufferStale(buffer.source !== sourceRef.current)
+          }
+        } catch (cause) { setError(messageOf(cause)) }
+      }
+      if (saved !== undefined) {
         setDraftPromptIr({
-          id: active.promptIrId,
-          version: active.promptIrVersion,
-          contentSha256: active.promptIrContentSha256,
+          id: saved.promptIrId,
+          version: saved.promptIrVersion,
+          contentSha256: saved.promptIrContentSha256,
           status: 'Draft',
         })
-        setEditVerified(true)
+        setEditVerified(result.draft?.status === 'current')
       }
     }).catch((cause: unknown) => {
       if (!controller.signal.aborted) setError(messageOf(cause))
@@ -538,6 +582,8 @@ export function PromptIrWorkspace({
     active?.storyboardRevisionId,
     port,
     reload,
+    director,
+    bufferKey,
   ])
 
   useEffect(() => () => { abortRef.current?.abort() }, [])
@@ -550,8 +596,39 @@ export function PromptIrWorkspace({
     setError(undefined)
   }
 
+  const changeDraft = (text: string): void => {
+    setDraft(text)
+    resetPreparedState()
+    if (!director) return
+    const dirty = text !== baselineRef.current
+    setUnsaved(dirty)
+    try { writeDirectorBuffer(bufferKey, dirty ? { source: sourceRef.current, text } : null) }
+    catch { setError(t('directorStorageError')) }
+  }
+
+  const discardBuffer = (): void => {
+    if (!window.confirm(t('directorDiscardConfirm'))) return
+    try { writeDirectorBuffer(bufferKey, null) } catch { setError(t('directorStorageError')); return }
+    setDraft(baselineRef.current)
+    setUnsaved(false)
+    setBufferStale(false)
+    resetPreparedState()
+  }
+
+  const rebaseOnReady = (): void => {
+    if (snapshot === undefined || !window.confirm(t('directorRebaseConfirm'))) return
+    // Keep the user's words, but require a fresh method check and exact Ready diff.
+    setBufferStale(false)
+    setStaleRebased(true)
+    setUnsaved(true)
+    resetPreparedState()
+    try { writeDirectorBuffer(bufferKey, { source: sourceRef.current, text: draft }) }
+    catch { setError(t('directorStorageError')) }
+  }
+
   const checkMethod = async (): Promise<void> => {
-    if (snapshot === undefined || active === undefined || operation !== 'idle') return
+    if (snapshot === undefined || active === undefined || operation !== 'idle' || bufferStale
+      || (director && snapshot.draft?.status === 'stale' && !staleRebased)) return
     setError(undefined)
     let candidate: EditableProjection
     let replacements: Partial<EditableProjection>
@@ -585,7 +662,9 @@ export function PromptIrWorkspace({
       setProposal(undefined)
       setPreview(undefined)
       setEditConfirmed(false)
-      setDraft(JSON.stringify(result.projection.normalized_candidate, null, 2))
+      const normalized = JSON.stringify(result.projection.normalized_candidate, null, 2)
+      setDraft(normalized)
+      if (director) writeDirectorBuffer(bufferKey, { source: sourceRef.current, text: normalized })
     } catch (cause) {
       if (!controller.signal.aborted) setError(messageOf(cause))
     } finally {
@@ -626,6 +705,7 @@ export function PromptIrWorkspace({
         basePromptIrId: snapshot.subject.promptIrId,
         baseVersion: snapshot.subject.promptIrVersion,
         baseContentSha256: snapshot.subject.promptIrContentSha256,
+        baseDraftSnapshotSha256: snapshot.draft?.subjectSnapshotSha256 ?? null,
         replacements,
       }, controller.signal)
       if (controller.signal.aborted) return
@@ -661,6 +741,45 @@ export function PromptIrWorkspace({
   ): Promise<void> => {
     assertEditReceipt(receipt, marker)
     if (controller.signal.aborted) return
+    if (director) {
+      const latest = await port.promptIr({ projectId: marker.projectId, episodeId: marker.episodeId,
+        storyboardRevisionId: marker.storyboardRevisionId, frameId: marker.frameId }, controller.signal)
+      if (controller.signal.aborted) return
+      if (latest.draft?.status !== 'current' || latest.draft.subject.promptIrId !== receipt.promptIr.id
+        || latest.draft.subject.promptIrVersion !== receipt.promptIr.version
+        || latest.draft.subject.promptIrContentSha256 !== receipt.promptIr.contentSha256) {
+        // The exact command succeeded, but its Draft is no longer current. Do not
+        // lock the editor in an unknown-result loop or overwrite retained text.
+        if (!clearPromptIrEditRecoveryMarker(marker)) throw new Error(t('promptIrRecoveryStorageFailed'))
+        setHistoricalReceipt(receipt)
+        setSnapshot(latest)
+        baselineRef.current = JSON.stringify(latest.draft?.subject.editableProjection ?? latest.subject.editableProjection, null, 2)
+        sourceRef.current = `${latest.baseSnapshotSha256}:${latest.draft?.subjectSnapshotSha256 ?? 'none'}`
+        setBufferStale(true)
+        setUnsaved(true)
+        setEditRecovery({ status: 'none' })
+        setEditReceipt(undefined)
+        setDraftPromptIr(undefined)
+        setEditVerified(false)
+        setPreview(undefined)
+        setProposal(undefined)
+        setMethod(undefined)
+        await Promise.allSettled([onCommitted()])
+        return
+      }
+      setSnapshot(latest)
+      setHistoricalReceipt(undefined)
+      const saved = JSON.stringify(latest.draft.subject.editableProjection, null, 2)
+      baselineRef.current = saved
+      sourceRef.current = `${latest.baseSnapshotSha256}:${latest.draft.subjectSnapshotSha256}`
+      setDraft(saved)
+      writeDirectorBuffer(bufferKey, null)
+      if (!clearPromptIrEditRecoveryMarker(marker)) throw new Error(t('promptIrRecoveryStorageFailed'))
+      setUnsaved(false)
+      setPreview(undefined)
+      setProposal(undefined)
+      setMethod(undefined)
+    }
     setEditRecovery({ status: 'none' })
     setEditReceipt(receipt)
     setDraftPromptIr(receipt.promptIr)
@@ -678,7 +797,13 @@ export function PromptIrWorkspace({
       || operation !== 'idle'
       || editRecovery.status !== 'none'
       || selectionRecovery.status !== 'none'
+      || commitLock.current
+      || bufferStale
     ) return
+    commitLock.current = true
+    const controller = new AbortController()
+    abortRef.current = controller
+    setOperation('committing')
     setError(undefined)
     let marker: PromptIrEditRecoveryMarker
     try {
@@ -686,6 +811,7 @@ export function PromptIrWorkspace({
         proposal.changeSet.id,
         proposal.changeSet.payloadSha256,
       )
+      if (controller.signal.aborted) { commitLock.current = false; return }
       marker = createPromptIrEditRecoveryMarker({
         changeSetId: proposal.changeSet.id,
         projectId: active.projectId,
@@ -707,13 +833,11 @@ export function PromptIrWorkspace({
       }
       if (!writePromptIrEditRecoveryMarker(marker)) throw new Error(t('promptIrRecoveryStorageFailed'))
     } catch (cause) {
-      setError(messageOf(cause))
+      if (!controller.signal.aborted) { setError(messageOf(cause)); setOperation('idle') }
+      commitLock.current = false
       return
     }
     setEditRecovery({ status: 'ready', marker })
-    const controller = new AbortController()
-    abortRef.current = controller
-    setOperation('committing')
     let commandReceiptReceived = false
     try {
       const receipt = await port.commitPromptIrEdit(editCommandRequest(marker), controller.signal)
@@ -729,6 +853,7 @@ export function PromptIrWorkspace({
         setError(commandReceiptReceived ? message : `${message} · ${t('promptIrUnknownEditResult')}`)
       }
     } finally {
+      commitLock.current = false
       if (!controller.signal.aborted) setOperation('idle')
     }
   }
@@ -748,6 +873,38 @@ export function PromptIrWorkspace({
     } catch (cause) {
       if (!controller.signal.aborted) setError(messageOf(cause))
     } finally {
+      if (!controller.signal.aborted) setOperation('idle')
+    }
+  }
+
+  const retryOriginalEdit = async (): Promise<void> => {
+    if (!director || editRecovery.status !== 'ready' || operation !== 'idle' || commitLock.current) return
+    if (!window.confirm(t('directorRetryConfirm'))) return
+    commitLock.current = true
+    const marker = editRecovery.marker
+    const controller = new AbortController()
+    abortRef.current = controller
+    setOperation('committing')
+    setError(undefined)
+    try {
+      const receipt = await port.commitPromptIrEdit(editCommandRequest(marker), controller.signal)
+      if (controller.signal.aborted) return
+      assertEditReceipt(receipt, marker)
+      const recovery = await port.recoverPromptIrEditCommit(editCommandRequest(marker), controller.signal)
+      if (!controller.signal.aborted) await finishEdit(assertEditRecovery(recovery, marker), marker, controller)
+    } catch (cause) {
+      if (controller.signal.aborted) return
+      const message = messageOf(cause)
+      // The canonical commit checks an existing receipt before these terminal CAS conflicts.
+      // A same-key replay can no longer commit this version; retain text and reload the source.
+      if (/\bprompt_ir_(base_snapshot|draft_version)_conflict\b/u.test(message)
+        && clearPromptIrEditRecoveryMarker(marker)) {
+        setEditRecovery({ status: 'none' })
+        setReload(value => value + 1)
+      }
+      setError(`${message} · ${t('directorErrorHelp')}`)
+    } finally {
+      commitLock.current = false
       if (!controller.signal.aborted) setOperation('idle')
     }
   }
@@ -868,19 +1025,33 @@ export function PromptIrWorkspace({
   const busy = operation !== 'idle'
   const locked = editRecovery.status !== 'none' || selectionRecovery.status !== 'none'
   const methodProjection = method?.projection
+  let fields: EditableProjection | undefined
+  try { fields = parseDraft(draft) } catch { /* Advanced JSON errors remain visible to the method checker. */ }
+  const blocked = busy || locked || snapshot === undefined || bufferStale
+    || (director ? snapshot?.draft?.status === 'stale' && !staleRebased : draftPromptIr !== undefined)
+  const fieldLabels: Record<EditableField, QingmuCockpitKey> = {
+    imageGenPrompt: 'directorImagePrompt', lastFrameImagePrompt: 'directorLastFramePrompt',
+    videoGenPrompt: 'directorVideoPrompt', motionPrompt: 'directorMotionPrompt', negativePrompt: 'directorNegativePrompt',
+  }
   return (
     <section className={css.scriptWorkspace} aria-label={t('promptIrWorkspaceTitle')}>
       <div className={css.scriptWorkspaceHead}>
         <div>
           <h3>{t('promptIrWorkspaceTitle')}</h3>
-          <p>{t('promptIrWorkspaceBoundary')}</p>
+          <p>{t(director ? 'directorBoundary' : 'promptIrWorkspaceBoundary')}</p>
         </div>
-        <button type="button" disabled={busy} onClick={() => { setReload(value => value + 1) }}>
+        <button type="button" disabled={busy} onClick={() => {
+          if (director && unsaved) {
+            try { writeDirectorBuffer(bufferKey, { source: sourceRef.current, text: draft }) }
+            catch { setError(t('directorStorageError')); return }
+          }
+          setReload(value => value + 1)
+        }}>
           {t('promptIrReload')}
         </button>
       </div>
 
-      <label className={css.scriptEditor}>
+      {!director && <label className={css.scriptEditor}>
         <span>{t('promptIrFrame')}</span>
         <select
           aria-label={t('promptIrFrame')}
@@ -890,26 +1061,61 @@ export function PromptIrWorkspace({
         >
           {frames.map(frame => <option key={frame.shotId} value={frame.shotId}>{frame.label} · {frame.status}</option>)}
         </select>
-      </label>
+      </label>}
 
-      <dl className={css.scriptMeta}>
-        <div><dt>{t('promptIrStatus')}</dt><dd>{snapshot?.subject.status ?? active?.status ?? t('unknown')}</dd></div>
-        <div><dt>{t('promptIrVersion')}</dt><dd>{snapshot?.subject.promptIrVersion ?? active?.promptIrVersion ?? t('unknown')}</dd></div>
-        <div><dt>{t('promptIrContentHash')}</dt><dd>{snapshot?.subject.promptIrContentSha256 ?? active?.promptIrContentSha256 ?? t('unknown')}</dd></div>
-      </dl>
+      <details open={!director}><summary>{t('directorSourceDetails')}</summary>
+        <dl className={css.scriptMeta}>
+          <div><dt>{t('promptIrStatus')}</dt><dd>{snapshot?.subject.status ?? active?.status ?? t('unknown')}</dd></div>
+          <div><dt>{t('promptIrVersion')}</dt><dd>{snapshot?.subject.promptIrVersion ?? active?.promptIrVersion ?? t('unknown')}</dd></div>
+          <div><dt>{t('promptIrContentHash')}</dt><dd>{snapshot?.subject.promptIrContentSha256 ?? active?.promptIrContentSha256 ?? t('unknown')}</dd></div>
+        </dl>
+      </details>
+      {director && <>
+        <p role="status">{t('directorEditingDraft')} · {t('directorEffectiveReady')} v{snapshot?.subject.promptIrVersion ?? '—'}
+          {draftPromptIr !== undefined && ` · Draft v${draftPromptIr.version}`}</p>
+        <p>{unsaved ? t('directorUnsaved') : snapshot?.draft ? t('directorSavedDraft') : t('directorNoDraft')}</p>
+        {(bufferStale || (snapshot?.draft?.status === 'stale' && !staleRebased)) && <>
+          <p role="alert">{t('directorStaleDraft')}</p>
+          <button type="button" disabled={busy || locked} onClick={rebaseOnReady}>{t('directorRebase')}</button>
+        </>}
+        {(unsaved || bufferStale) && <button type="button" disabled={busy || locked} onClick={discardBuffer}>{t('directorDiscard')}</button>}
+        {fields !== undefined && <div className={directorCss.fields}>
+          {EDITABLE_FIELDS.map(field => <label key={field} className={css.scriptEditor}>
+            <span>{t(fieldLabels[field])}</span>
+            <textarea aria-label={t(fieldLabels[field])} value={fields?.[field] ?? ''}
+              rows={field === 'videoGenPrompt' || field === 'imageGenPrompt' ? 4 : 2} disabled={blocked}
+              onChange={(event) => { changeDraft(JSON.stringify({ ...fields, [field]: event.target.value }, null, 2)) }} />
+          </label>)}
+        </div>}
+        <details><summary>{t('directorEffectivePrompt')}</summary>
+          {EDITABLE_FIELDS.map(field => <div key={field}><h4>{t(fieldLabels[field])}</h4>
+            <p className={directorCss.promptText}>{snapshot?.subject.editableProjection[field] || '—'}</p></div>)}
+        </details>
+      </>}
+
+      {historicalReceipt !== undefined && <section role="status">
+        <p>{t('directorHistoricalCommitted')}</p>
+        <details><summary>{t('directorSourceDetails')}</summary>
+          <p>{t('receiptId')}: {historicalReceipt.commandReceiptId}</p>
+          <p>{t('promptIrDraftId')}: {historicalReceipt.promptIr.id} · v{historicalReceipt.promptIr.version}</p>
+        </details>
+      </section>}
 
       {editRecovery.status === 'ready' && (
         <section className={css.recoveryDock} aria-label={t('promptIrEditRecoveryTitle')}>
           <div><h4>{t('promptIrEditRecoveryTitle')}</h4><p>{t('promptIrEditRecoveryBody')}</p></div>
-          <dl>
-            <div><dt>{t('changeSet')}</dt><dd>{editRecovery.marker.changeSetId}</dd></div>
-            <div><dt>{t('promptIrFrame')}</dt><dd>{editRecovery.marker.frameId}</dd></div>
-            <div><dt>{t('payloadHash')}</dt><dd>{editRecovery.marker.expectedPayloadSha256}</dd></div>
-          </dl>
+          <details open={!director}><summary>{t('directorSourceDetails')}</summary>
+            <dl>
+              <div><dt>{t('changeSet')}</dt><dd>{editRecovery.marker.changeSetId}</dd></div>
+              <div><dt>{t('promptIrFrame')}</dt><dd>{editRecovery.marker.frameId}</dd></div>
+              <div><dt>{t('payloadHash')}</dt><dd>{editRecovery.marker.expectedPayloadSha256}</dd></div>
+            </dl>
+          </details>
           <div className={css.recoveryActions}>
             <button type="button" className={css.primaryAction} disabled={busy} onClick={() => { void recoverEdit() }}>
               {operation === 'recovering-edit' ? t('promptIrRecoveringEdit') : t('promptIrRecoverEdit')}
             </button>
+            {director && <button type="button" disabled={busy} onClick={() => { void retryOriginalEdit() }}>{t('directorRetryOriginal')}</button>}
           </div>
         </section>
       )}
@@ -938,27 +1144,26 @@ export function PromptIrWorkspace({
         </div>
       )}
 
-      <label className={css.scriptEditor}>
-        <span>{t('promptIrDraftLabel')}</span>
-        <textarea
-          aria-label={t('promptIrDraftLabel')}
-          value={draft}
-          rows={16}
-          spellCheck={false}
-          disabled={busy || locked || snapshot === undefined || draftPromptIr !== undefined}
-          onChange={(event) => {
-            setDraft(event.target.value)
-            resetPreparedState()
-          }}
-        />
-        <small>{t('promptIrDraftHint')}</small>
-      </label>
+      <details open={!director}><summary>{t('directorAdvancedJson')}</summary>
+        <label className={css.scriptEditor}>
+          <span>{t('promptIrDraftLabel')}</span>
+          <textarea
+            aria-label={t('promptIrDraftLabel')}
+            value={draft}
+            rows={16}
+            spellCheck={false}
+            disabled={blocked}
+            onChange={(event) => { changeDraft(event.target.value) }}
+          />
+          <small>{t('promptIrDraftHint')}</small>
+        </label>
+      </details>
 
       <div className={css.scriptActions}>
         <button
           type="button"
           className={css.primaryAction}
-          disabled={busy || locked || snapshot === undefined || draftPromptIr !== undefined}
+          disabled={blocked || (director && !unsaved)}
           onClick={() => { void checkMethod() }}
         >
           {operation === 'checking' ? t('promptIrCheckingMethod') : t('promptIrCheckMethod')}
@@ -1020,12 +1225,20 @@ export function PromptIrWorkspace({
           <div className={css.previewHead}>
             <div><h4>{t('promptIrPreviewTitle')}</h4><p>{t('promptIrPreviewDraftOnly')}</p></div>
           </div>
-          <dl className={css.previewMeta}>
-            <div><dt>{t('changeSet')}</dt><dd>{proposal.changeSet.id}</dd></div>
-            <div><dt>{t('promptIrDraftId')}</dt><dd>{preview.candidatePromptIr.id}</dd></div>
-            <div><dt>{t('promptIrVersion')}</dt><dd>{preview.basePromptIr.version} → {preview.candidatePromptIr.version}</dd></div>
-            <div><dt>{t('payloadHash')}</dt><dd>{proposal.changeSet.payloadSha256}</dd></div>
-          </dl>
+          {director && EDITABLE_FIELDS.filter(field => preview.promptDiff.before[field] !== preview.promptDiff.after[field]).map(field => (
+            <div key={field} className={directorCss.diff}><strong>{t(fieldLabels[field])}</strong>
+              <p>{t('directorBefore')}</p><pre>{preview.promptDiff.before[field] || '—'}</pre>
+              <p>{t('directorAfter')}</p><pre>{preview.promptDiff.after[field] || '—'}</pre>
+            </div>
+          ))}
+          <details open={!director}><summary>{t('directorSourceDetails')}</summary>
+            <dl className={css.previewMeta}>
+              <div><dt>{t('changeSet')}</dt><dd>{proposal.changeSet.id}</dd></div>
+              <div><dt>{t('promptIrDraftId')}</dt><dd>{preview.candidatePromptIr.id}</dd></div>
+              <div><dt>{t('promptIrVersion')}</dt><dd>{preview.basePromptIr.version} → {preview.candidatePromptIr.version}</dd></div>
+              <div><dt>{t('payloadHash')}</dt><dd>{proposal.changeSet.payloadSha256}</dd></div>
+            </dl>
+          </details>
           <div className={css.previewColumns}>
             <div>
               <strong>{t('changedPaths')}</strong>
@@ -1058,13 +1271,15 @@ export function PromptIrWorkspace({
       {draftPromptIr !== undefined && (
         <section className={css.commitReceipt} role="status">
           <h4>{t('promptIrDraftCommitted')}</h4>
-          <dl>
-            {editReceipt !== undefined && <div><dt>{t('receiptId')}</dt><dd>{editReceipt.commandReceiptId}</dd></div>}
-            <div><dt>{t('promptIrDraftId')}</dt><dd>{draftPromptIr.id}</dd></div>
-            <div><dt>{t('promptIrStatus')}</dt><dd>{draftPromptIr.status}</dd></div>
-            <div><dt>{t('promptIrContentHash')}</dt><dd>{draftPromptIr.contentSha256}</dd></div>
-          </dl>
-          {editVerified && selectionRecovery.status === 'none' && (
+          <details open={!director}><summary>{t('directorSourceDetails')}</summary>
+            <dl>
+              {editReceipt !== undefined && <div><dt>{t('receiptId')}</dt><dd>{editReceipt.commandReceiptId}</dd></div>}
+              <div><dt>{t('promptIrDraftId')}</dt><dd>{draftPromptIr.id}</dd></div>
+              <div><dt>{t('promptIrStatus')}</dt><dd>{draftPromptIr.status}</dd></div>
+              <div><dt>{t('promptIrContentHash')}</dt><dd>{draftPromptIr.contentSha256}</dd></div>
+            </dl>
+          </details>
+          {!director && editVerified && selectionRecovery.status === 'none' && (
             <div className={css.commitDock}>
               <label>
                 <input
@@ -1101,7 +1316,8 @@ export function PromptIrWorkspace({
         </section>
       )}
 
-      {error !== undefined && <div className={css.scriptError} role="alert"><strong>{t('promptIrError')}</strong><p>{error}</p></div>}
+      {error !== undefined && <div className={css.scriptError} role="alert"><strong>{t('promptIrError')}</strong><p>{error}</p>
+        {director && <p>{t('directorErrorHelp')}</p>}</div>}
     </section>
   )
 }

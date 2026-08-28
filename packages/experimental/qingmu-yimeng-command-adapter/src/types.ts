@@ -971,6 +971,8 @@ export interface YimengProposePromptIrRequest {
   readonly basePromptIrId: string
   readonly baseVersion: number
   readonly baseContentSha256: string
+  /** Exact latest Draft source; null asserts that no Draft existed when read. */
+  readonly baseDraftSnapshotSha256: string | null
   readonly replacements: YimengPromptIrReplacements
   readonly harnessSessionId?: string
   readonly references?: readonly YimengCommandJsonObject[]

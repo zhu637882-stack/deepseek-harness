@@ -26,15 +26,17 @@ import { GenerationGateAControlEvidence } from './GenerationGateAControlEvidence
 import { TakeVersionCompareView } from './TakeVersionCompareView.tsx'
 import { EpisodeEvidenceLedger } from './EpisodeEvidenceLedger.tsx'
 import css from './QingmuCockpit.module.css'
+import { DirectorWorkspace } from './DirectorWorkspace.tsx'
 
 export type QingmuCockpitProps = PropsRuntime<'sidebar.footer.action'>
   & InjectFace<QingmuCockpitFace>
   & PropsLocale<'qingmuCockpit'>
 
-type Tab = 'overview' | 'assets' | 'shots' | 'generation' | 'delivery'
+type Tab = 'overview' | 'director' | 'assets' | 'shots' | 'generation' | 'delivery'
 
 const TABS: readonly { readonly id: Tab; readonly label: QingmuCockpitKey }[] = [
   { id: 'overview', label: 'tabOverview' },
+  { id: 'director', label: 'tabDirector' },
   { id: 'assets', label: 'tabAssets' },
   { id: 'shots', label: 'tabShots' },
   { id: 'generation', label: 'tabGeneration' },
@@ -164,6 +166,9 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   const headingRef = useRef<HTMLHeadingElement>(null)
   const requestRef = useRef(0)
   const abortRef = useRef<AbortController>()
+  const directorDirty = useRef(false)
+  const onDirectorDirty = useCallback((dirty: boolean) => { directorDirty.current = dirty }, [])
+  const mayLeaveDirector = (): boolean => !directorDirty.current || window.confirm(t('directorLeaveConfirm'))
   const handleGenerationCatalog = useCallback((result: YimengCapabilityCatalogResponse | undefined) => {
     setGenerationCatalog(result)
   }, [])
@@ -227,6 +232,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   }
 
   const chooseProject = async (nextProjectId: string): Promise<void> => {
+    if (!mayLeaveDirector()) return
     setProjectId(nextProjectId)
     setEpisodeId('')
     setProjection(undefined)
@@ -252,6 +258,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   }
 
   const chooseEpisode = async (nextEpisodeId: string): Promise<void> => {
+    if (!mayLeaveDirector()) return
     setEpisodeId(nextEpisodeId)
     setProjection(undefined)
     setSelectedShotId('')
@@ -294,6 +301,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   }
 
   const close = (): void => {
+    if (!mayLeaveDirector()) return
     abortRef.current?.abort()
     requestRef.current += 1
     setLoading(false)
@@ -322,8 +330,10 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
     const trap = (event: KeyboardEvent): void => {
       if (event.key !== 'Tab') return
       const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
-      ) ?? [])].filter(node => !node.hidden)
+        'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, a[href], [tabindex]:not([tabindex="-1"])',
+      ) ?? [])].filter(node => !node.hidden && node.closest('[hidden]') === null
+        && [...(node.parentElement?.closest('details:not([open])') ? [node.parentElement.closest('details:not([open])')] : [])]
+          .every(detail => node.tagName === 'SUMMARY' && node.parentElement === detail))
       if (focusable.length === 0) return
       const first = focusable[0]
       const last = focusable.at(-1)
@@ -615,6 +625,9 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   )
 
   const panels: Record<Tab, ReactNode> = {
+    director: <DirectorWorkspace projectId={projectId} episodeId={episodeId} projection={projection}
+      shotItems={shotItems} selectedShotId={selectedShotId} onSelectShotId={(id) => { if (mayLeaveDirector()) setSelectedShotId(id) }}
+      onUnsavedChange={onDirectorDirty} port={port} t={t} onCommitted={refreshWorkflowProjectionAfterCommit} />,
     overview,
     assets: assetView,
     shots: shotView,
@@ -640,14 +653,14 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
         {wide && <span>{t('trigger')}</span>}
       </button>
       <Modal open={open} onClose={close} title={t('title')} headless className={css.dialog as string}>
-        <div ref={dialogRef} className={css.shell}>
+        <div ref={dialogRef} className={`${css.shell} ${tab === 'director' ? css.directorShell : ''}`}>
           <header className={css.header}>
             <div>
               <h2 ref={headingRef} tabIndex={-1}>{t('title')}</h2>
               <p>{t('subtitle')}</p>
             </div>
             <div className={css.headerActions}>
-              <button type="button" onClick={() => { void refresh() }} disabled={loading}>
+              <button type="button" onClick={() => { if (mayLeaveDirector()) void refresh() }} disabled={loading}>
                 <IconRefreshOutline16 size={16} />
                 <span>{loading ? t('refreshing') : t('refresh')}</span>
               </button>
@@ -735,7 +748,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
                 aria-selected={tab === item.id}
                 aria-controls={`qingmu-panel-${item.id}`}
                 tabIndex={tab === item.id ? 0 : -1}
-                onClick={() => { setTab(item.id) }}
+                onClick={() => { if (item.id === tab || mayLeaveDirector()) setTab(item.id) }}
                 onKeyDown={(event) => {
                   const index = TABS.findIndex(candidate => candidate.id === item.id)
                   let nextIndex: number | undefined
@@ -747,6 +760,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
                   event.preventDefault()
                   const next = TABS[nextIndex]
                   if (next === undefined) return
+                  if (next.id !== tab && !mayLeaveDirector()) return
                   setTab(next.id)
                   document.getElementById(`qingmu-tab-${next.id}`)?.focus()
                 }}

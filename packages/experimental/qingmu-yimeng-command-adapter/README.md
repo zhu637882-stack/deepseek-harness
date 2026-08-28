@@ -20,6 +20,12 @@ Every element proposal also requires the exact six-field `qingmu.imago-element-m
 
 Receipt recovery performs exactly one `GET` to the Yimeng `/api/qingmu/projects/{projectId}/episodes/{episodeId}/change-sets/{changeSetId}/command-receipt` endpoint for scripts, or the corresponding generic element route for all three element profiles, with the original `Idempotency-Key` header and no body or query. The adapter accepts only the `jason.qingmu-command-receipt-recovery.v1` wrapper, revalidates every lineage field on its nested original receipt, recomputes the canonical JSON SHA-256 of that receipt before accepting the wrapper's `receiptSha256`, and never retries the commit `POST`.
 
+## PromptIR Draft source binding
+
+`proposePromptIr` requires `baseDraftSnapshotSha256`: the exact latest Draft subject SHA returned by the read adapter, or explicit `null` if no Draft exists. Yimeng freezes this condition in the existing ChangeSet and compares it again inside preview and the edit transaction, alongside the Ready source. A concurrent Draft edit fails closed instead of replacing newer text. Draft editing neither promotes Ready nor selects a Take.
+
+Receipt recovery remains GET-only. The director workspace can explicitly retry the original edit command with the original idempotency key after an unknown result; the Host never retries automatically. A successful original receipt is replayed before testing today's Draft source.
+
 ## Ordinary Take comments
 
 `createTakeComment` binds an exact current Take-subject SHA to a chosen Take, a timecode or frame anchor, the comment body, and one visible-ASCII idempotency key. It sends exactly one `POST` to `/api/qingmu/projects/{projectId}/episodes/{episodeId}/frames/{frameId}/take-comments`; the body contains exactly `expectedTakeSubjectSha256`, `takeId`, `anchor`, `body`, and `idempotencyKey`, while path IDs, actor, role, and session come from the route and Yimeng authentication. The result must preserve the intent and report `changed`, selection, technical-pass, formal-approval, episode-verification, human-signoff, Provider-call, and budget impacts as false or zero.
