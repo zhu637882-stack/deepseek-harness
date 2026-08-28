@@ -6,6 +6,8 @@
 
 ## 投影与 ChangeSet 工作流
 
+本地会话错误提示指向[持久实例登录命令](../../../docs/cookbook/qingmu-local.zh.md)。登录更新 API 会话但不重放命令；保存结果未知时仍须恢复原回执。
+
 导演工作区的 Take 比较只在点击“载入画面”后读取媒体。鉴权 Host 核验已有 Take 范围及实际字节 SHA-256（MP4/WebM，每份最多 16 MiB，同时最多两份）；浏览器通过临时内存 Blob URL 播放。缺失、变化、超限或无权访问的文件保持为错误。不下载、转码、生成或选择素材；这个有界预览不是正式媒体流服务。
 
 驾驶舱从侧边栏打开，包含总览、导演工作区、剧本与资产、分镜与镜头、生成与质检、费用与交付。它通过仅限回环地址的 `/qingmu-yimeng` RPC 通道读取 `health`、`capabilityCatalog`、`costRehearsal`、`gateAControlEvidence`、`projects`、`episodes`、`script`、`workflow`、元素档案和权威参考素材候选。

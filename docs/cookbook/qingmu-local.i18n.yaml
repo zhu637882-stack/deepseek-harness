@@ -1,6 +1,6 @@
 # Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
-#   pnpm run verify-translation-pairing --write packages/experimental/client-ui-qingmu-cockpit/README.md
-README.md: c125558ee8cef200b39fa94ce2f706d3494d6138
-README.zh.md: 79d95a27bb0bf629213a729501dbfd35e1e1f7e2
+#   pnpm run verify-translation-pairing --write docs/cookbook/qingmu-local.md
+qingmu-local.md: 35eb8fb5c3a0c96284305fbf723645b558ddad4b
+qingmu-local.zh.md: 219f3a6458e352bc0bee4fc952a22e2a4f5babcb

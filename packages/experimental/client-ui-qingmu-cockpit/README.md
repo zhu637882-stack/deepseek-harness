@@ -6,6 +6,8 @@ This private experimental Client plugin adds the Qingmu OS production cockpit to
 
 ## Projection and ChangeSet workflow
 
+Local session errors point to the [persistent-instance login command](../../../docs/cookbook/qingmu-local.md). Login renews the API session without replaying a command; an unknown save still requires its original receipt recovery.
+
 Take comparison in the Director workspace loads media only after “Load preview.” The authenticated Host verifies the existing Take scope and actual SHA-256 bytes (MP4/WebM, at most 16 MiB each, two concurrent loads); the browser plays temporary in-memory Blob URLs. Missing, changed, oversized or inaccessible files remain errors. No download, transcode, generation or selection occurs. This bounded preview is not a production media streaming service.
 
 The cockpit opens from the sidebar into Overview, Director workspace, Script & Assets, Storyboard & Shots, Generation & QC, and Cost & Delivery. It reads `health`, `capabilityCatalog`, `costRehearsal`, `gateAControlEvidence`, `projects`, `episodes`, `script`, `workflow`, element profiles, and authoritative reference candidates over the loopback-only `/qingmu-yimeng` RPC channel.
