@@ -1157,6 +1157,108 @@ export interface YimengLsuPlanSourceResponse extends YimengProductionUnitsReques
   readonly reworkExecuted: false
 }
 
+/** Exact business coordinates plus the three current Core rule generations for one route source. */
+export interface YimengReworkRouteSourceRequest extends YimengSelectedVideoReviewRequest {
+  readonly findingId: string
+  readonly routeRulesSha256: string
+  readonly planRulesSha256: string
+  readonly lockRulesSha256: string
+}
+
+/** Immutable OPEN Finding facts retained in the bounded route subject. */
+export interface YimengReworkRouteFinding extends YimengShotFindingPayload {
+  readonly id: string
+  readonly eventId: string
+  readonly subjectSnapshotSha256: string
+  readonly status: 'OPEN'
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+}
+
+/** Exact current LSU membership that contains the Finding Shot once. */
+export interface YimengReworkRouteProductionUnit {
+  readonly unitId: string
+  readonly bindingRevision: number
+  readonly bindingSha256: string
+  readonly sourceSnapshotSha256: string
+  readonly source: YimengProductionUnitSource
+}
+
+/** Current sealed complete-scope plan and C5F lock lineage used by the route compiler. */
+export interface YimengReworkRouteSealedPlan {
+  readonly revision: number
+  readonly sealSha256: string
+  readonly subjectSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+  readonly lockRulesSha256: string
+  readonly subject: YimengLsuPlanSubject
+}
+
+/** Closed current authority chain for one non-executing bounded route. */
+export interface YimengReworkRouteSubject extends YimengJsonObject {
+  readonly schema: 'jason.qingmu-bounded-rework-route-subject.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly selectedVideo: YimengShotVideoSubject
+  readonly finding: YimengReworkRouteFinding
+  readonly productionUnit: YimengReworkRouteProductionUnit
+  readonly sealedPlan: YimengReworkRouteSealedPlan
+}
+
+/** Historical durable route result; it does not prove that the route is current. */
+export interface YimengReworkRouteResult extends YimengJsonObject {
+  readonly schema: 'jason.qingmu-bounded-rework-route-result.v1'
+  readonly route: YimengJsonObject & {
+    readonly projectId: string
+    readonly episodeId: string
+    readonly findingId: string
+    readonly revision: number
+    readonly subject: YimengReworkRouteSubject
+    readonly subjectSnapshotSha256: string
+    readonly definition: YimengJsonObject
+    readonly routeInstruction: YimengJsonObject
+    readonly methodProjectionSha256: string
+    readonly rulesSha256: string
+    readonly lockRulesSha256: string
+  }
+  readonly routeSha256: string
+  readonly receiptId: string
+  readonly outboxEventId: string
+  readonly routeRecorded: true
+  readonly findingClosed: false
+  readonly selectionChanged: false
+  readonly stageDecisionChanged: false
+  readonly lockInvalidated: false
+  readonly taskCreated: false
+  readonly providerCalls: 0
+  readonly reworkExecuted: false
+  readonly humanSignoffInferred: false
+}
+
+/** Fresh source feed; a historical route remains separate from current route authority. */
+export interface YimengReworkRouteSourceResponse extends YimengSelectedVideoReviewRequest {
+  readonly schema: 'jason.qingmu-bounded-rework-route-feed.v1'
+  readonly findingId: string
+  readonly capabilities: { readonly canRecordRoute: boolean }
+  readonly subject: YimengReworkRouteSubject | null
+  readonly subjectSnapshotSha256: string | null
+  readonly availability: { readonly status: 'available' | 'unavailable'; readonly reason: string | null }
+  readonly latestRoute: YimengReworkRouteResult | null
+  readonly latestRouteSourceCurrent: boolean
+  readonly currentRouteRulesSha256: string
+  readonly currentPlanRulesSha256: string
+  readonly currentLockRulesSha256: string
+  readonly findingClosed: false
+  readonly selectionChanged: false
+  readonly stageDecisionChanged: false
+  readonly lockInvalidated: false
+  readonly taskCreated: false
+  readonly providerCalls: 0
+  readonly reworkExecuted: false
+  readonly humanSignoffInferred: false
+}
+
 /** Result values exposed by each `/qingmu-yimeng` endpoint. */
 export interface YimengReadEndpointMap {
   readonly health: YimengHealth
@@ -1169,6 +1271,7 @@ export interface YimengReadEndpointMap {
   readonly productionUnits: YimengProductionUnitsResponse
   readonly stageSources: YimengStageSourcesResponse
   readonly lsuPlanSource: YimengLsuPlanSourceResponse
+  readonly reworkRouteSource: YimengReworkRouteSourceResponse
   readonly elementProfile: YimengElementProfileResponse
   readonly referenceCandidates: YimengReferenceCandidatesResponse
   readonly reviewEvents: YimengElementReviewFeedResponse

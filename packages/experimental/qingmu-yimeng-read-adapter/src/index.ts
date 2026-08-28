@@ -13,6 +13,7 @@ import { normalizeShotFindingFeed, parseShotFindingReadRequest } from './shot-fi
 import { normalizeProductionUnitsFeed, parseProductionUnitsReadRequest } from './production-units.ts'
 import { normalizeStageSourcesFeed, parseStageSourcesReadRequest } from './stage-sources.ts'
 import { normalizeLsuPlanSource, parseLsuPlanSourceRequest } from './lsu-plan.ts'
+import { normalizeReworkRouteSource, parseReworkRouteSourceRequest } from './rework-route.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -37,6 +38,7 @@ import type {
   YimengJsonObject,
   YimengProductionUnitsRequest,
   YimengLsuPlanSourceRequest,
+  YimengReworkRouteSourceRequest,
   YimengStageSourcesRequest,
   YimengProjectsRequest,
   YimengProjectsResponse,
@@ -158,6 +160,13 @@ export type {
   YimengLsuPlanSourceRequest,
   YimengLsuPlanSourceResponse,
   YimengLsuPlanSubject,
+  YimengReworkRouteFinding,
+  YimengReworkRouteProductionUnit,
+  YimengReworkRouteResult,
+  YimengReworkRouteSealedPlan,
+  YimengReworkRouteSourceRequest,
+  YimengReworkRouteSourceResponse,
+  YimengReworkRouteSubject,
   YimengStageSourcesRequest,
   YimengStageSourcesResponse,
   YimengStageSource,
@@ -212,7 +221,7 @@ const SHA256 = /^[0-9a-f]{64}$/
 const PROTECTED_ENDPOINTS = new Set([
   'projects', 'episodes', 'script', 'promptIr', 'elementProfile', 'referenceCandidates', 'reviewEvents',
   'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'shotFindings', 'productionUnits', 'stageSources',
-  'lsuPlanSource',
+  'lsuPlanSource', 'reworkRouteSource',
 ])
 const HUMAN_DECISION_VALUES = new Set<YimengHumanDecisionValue>([
   'approve', 'reject', 'request_changes',
@@ -589,6 +598,14 @@ function parseLsuPlanReadRequest(payload: unknown): YimengLsuPlanSourceRequest {
     return parseLsuPlanSourceRequest(payload)
   } catch {
     throw new InputError('lsuPlanSource accepts only canonical projectId, episodeId, and lockRulesSha256')
+  }
+}
+
+function parseReworkRouteReadRequest(payload: unknown): YimengReworkRouteSourceRequest {
+  try {
+    return parseReworkRouteSourceRequest(payload)
+  } catch {
+    throw new InputError('reworkRouteSource accepts only exact coordinates and current rule SHAs')
   }
 }
 
@@ -1820,7 +1837,7 @@ function normalizeShotRelationBlocker(value: unknown, index: number): YimengShot
     ...(shotId === undefined ? {} : { shotId }),
     ...(beatId === undefined ? {} : { beatId }),
     ...(elementId === undefined ? {} : { elementId }),
-    ...(elementKind === undefined ? {} : { elementKind: elementKind as YimengShotRelationElementKind }),
+    ...(elementKind === undefined ? {} : { elementKind }),
   }
 }
 
@@ -2632,6 +2649,19 @@ export function createYimengReadHandler(
         path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)
           + '/episodes/' + encodeURIComponent(request.episodeId) + `/lsu-plan/source?${query.toString()}`
         normalize = value => normalizeLsuPlanSource(value, request, canonicalJsonSha256)
+      } else if (endpoint === 'reworkRouteSource') {
+        const request = parseReworkRouteReadRequest(payload)
+        const query = new URLSearchParams({
+          routeRulesSha256: request.routeRulesSha256,
+          planRulesSha256: request.planRulesSha256,
+          lockRulesSha256: request.lockRulesSha256,
+        })
+        path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)
+          + '/episodes/' + encodeURIComponent(request.episodeId)
+          + '/shots/' + encodeURIComponent(request.frameId)
+          + '/findings/' + encodeURIComponent(request.findingId)
+          + `/rework-route/source?${query.toString()}`
+        normalize = value => normalizeReworkRouteSource(value, request, canonicalJsonSha256)
       } else if (endpoint === 'elementProfile') {
         const request = parseElementProfileRequest(payload)
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/elements/${encodeURIComponent(request.elementKind)}/${encodeURIComponent(request.targetId)}`

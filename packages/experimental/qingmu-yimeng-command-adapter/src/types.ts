@@ -1930,6 +1930,245 @@ export interface YimengLsuPlanAuthorityProbe {
   readonly reworkExecuted: false
 }
 
+/** Existing OPEN Finding carried into one bounded route subject. */
+export interface YimengReworkRouteFinding extends YimengCommandJsonObject {
+  readonly id: string
+  readonly eventId: string
+  readonly subjectSnapshotSha256: string
+  readonly timecode: string
+  readonly observation: string
+  readonly evidenceRefs: readonly string[]
+  readonly earliestOwner: string
+  readonly ownerReason: string
+  readonly severity: 'BLOCKER' | 'MAJOR' | 'MINOR'
+  readonly suggestion: string
+  readonly reworkScope: string
+  readonly status: 'OPEN'
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+}
+
+/** Current Production Unit containing the Finding's exact selected Shot. */
+export interface YimengReworkRouteProductionUnit extends YimengCommandJsonObject {
+  readonly unitId: string
+  readonly bindingRevision: number
+  readonly bindingSha256: string
+  readonly sourceSnapshotSha256: string
+  readonly source: YimengProductionUnitSource
+}
+
+/** Current sealed whole-episode LSU plan and C5F lock lineage. */
+export interface YimengReworkRouteSealedPlan extends YimengCommandJsonObject {
+  readonly revision: number
+  readonly sealSha256: string
+  readonly subjectSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+  readonly lockRulesSha256: string
+  readonly subject: YimengLsuPlanSubject
+}
+
+/** Exact current Yimeng authority chain for one bounded route. */
+export interface YimengReworkRouteSubject extends YimengCommandJsonObject {
+  readonly schema: 'jason.qingmu-bounded-rework-route-subject.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly selectedVideo: YimengShotVideoSubject
+  readonly finding: YimengReworkRouteFinding
+  readonly productionUnit: YimengReworkRouteProductionUnit
+  readonly sealedPlan: YimengReworkRouteSealedPlan
+}
+
+/** Evidence-only comparison; a rule change never expands the route. */
+export interface YimengReworkRouteRuleComparison extends YimengCommandJsonObject {
+  readonly recordedRulesSha256: string
+  readonly currentRulesSha256: string
+  readonly changed: boolean
+  readonly effect: 'evidence_only_no_scope_expansion'
+}
+
+/** Current Core route contract with every adjacent authority denied. */
+export interface YimengReworkRouteDefinition extends YimengCommandJsonObject {
+  readonly id: 'IMAGO-V6-BOUNDED-REWORK-ROUTE'
+  readonly version: string
+  readonly scope: 'per_finding'
+  readonly operation: 'record_bounded_rework_route'
+  readonly requiredFindingStatus: 'OPEN'
+  readonly oneEarliestOwnerPerFinding: true
+  readonly groupByEarliestOwner: true
+  readonly timecodeEvidenceAndScopeRequired: true
+  readonly findingRuleComparison: YimengReworkRouteRuleComparison
+  readonly findingClosureAllowed: false
+  readonly taskCreationAllowed: false
+  readonly selectionChangeAllowed: false
+  readonly stageDecisionChangeAllowed: false
+  readonly lockInvalidationAllowed: false
+  readonly reworkExecutionAllowed: false
+  readonly paidGenerationAuthorized: false
+  readonly automaticRetry: false
+  readonly providerChangeAuthorized: false
+  readonly unboundedRedoAuthorized: false
+  readonly completionReleaseAllowed: false
+  readonly providerCalls: 0
+}
+
+/** Finding facts frozen into the single bounded instruction. */
+export interface YimengReworkRouteBoundedItem extends YimengCommandJsonObject {
+  readonly timecode: string
+  readonly severity: 'BLOCKER' | 'MAJOR' | 'MINOR'
+  readonly observation: string
+  readonly evidenceRefs: readonly string[]
+  readonly ownerReason: string
+  readonly suggestion: string
+  readonly reworkScope: string
+}
+
+/** Non-executing instruction for the earliest current Owner. */
+export interface YimengReworkRouteInstruction extends YimengCommandJsonObject {
+  readonly state: 'BOUNDED_REWORK_ROUTED'
+  readonly outputSchema: 'IMAGO-V6-BoundedReworkRoute-v1'
+  readonly findingId: string
+  readonly findingEventId: string
+  readonly unitId: string
+  readonly earliestOwner: string
+  readonly ownerRoleId: string
+  readonly ownerScope: 'global' | 'per_lsu'
+  readonly ownerScopeInstance: string
+  readonly boundedItem: YimengReworkRouteBoundedItem
+  readonly scopeExpansionForbidden: true
+}
+
+/** Fresh Host-validated bounded route Method forwarded to Yimeng. */
+export interface YimengImagoReworkRouteMethodProjection extends YimengCommandJsonObject {
+  readonly schema: 'qingmu.imago-bounded-rework-route-method.v1'
+  readonly subject: YimengReworkRouteSubject
+  readonly subjectSnapshotSha256: string
+  readonly definition: YimengReworkRouteDefinition
+  readonly routeInstruction: YimengReworkRouteInstruction
+  readonly ruleBindings: Readonly<Record<string, string>>
+  readonly rulesSha256: string
+  readonly lockRuleBindings: Readonly<Record<string, string>>
+  readonly lockRulesSha256: string
+}
+
+/** Host-origin HMAC over the current route subject and Method projection. */
+export interface YimengImagoReworkRouteMethodAttestation extends YimengCommandJsonObject {
+  readonly schema: 'qingmu.imago-bounded-rework-route-method-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly subjectSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly signature: string
+}
+
+/** Browser-safe exact-CAS route intent; Method, actor, and session remain derived. */
+export interface YimengRecordReworkRouteRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly findingId: string
+  readonly expectedSubjectSha256: string
+  readonly expectedRouteRevision: number
+  readonly expectedRouteSha256: string | null
+  readonly idempotencyKey: string
+}
+
+/** Trusted Host command after the current Method has been recomputed. */
+export interface YimengForwardedRecordReworkRouteRequest extends YimengRecordReworkRouteRequest {
+  readonly methodProjection: YimengImagoReworkRouteMethodProjection
+  readonly methodProjectionSha256: string
+  readonly methodAttestation: YimengImagoReworkRouteMethodAttestation
+}
+
+/** Fresh authority-probe intent deliberately contains only business coordinates. */
+export type YimengProbeReworkRouteAuthorityRequest = Pick<
+  YimengRecordReworkRouteRequest,
+  'projectId' | 'episodeId' | 'frameId' | 'findingId'
+>
+
+/** Trusted Host probe after the current bounded route Method has been recomputed. */
+export interface YimengForwardedReworkRouteAuthorityProbeRequest
+  extends YimengProbeReworkRouteAuthorityRequest {
+  readonly methodProjection: YimengImagoReworkRouteMethodProjection
+  readonly methodProjectionSha256: string
+  readonly methodAttestation: YimengImagoReworkRouteMethodAttestation
+}
+
+/** Immutable route head retained in Yimeng's existing three-ledger journal. */
+export interface YimengReworkRouteRecord extends YimengCommandJsonObject {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly findingId: string
+  readonly revision: number
+  readonly subject: YimengReworkRouteSubject
+  readonly subjectSnapshotSha256: string
+  readonly definition: YimengReworkRouteDefinition
+  readonly routeInstruction: YimengReworkRouteInstruction
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+  readonly lockRulesSha256: string
+  readonly actorId: string
+  readonly actorNaturalPersonId: string
+  readonly authSessionId: string
+  readonly eventId: string
+  readonly changeSetId: string
+  readonly routedAt: string
+}
+
+/** Durable result of recording one bounded route and nothing adjacent. */
+export interface YimengReworkRouteResult {
+  readonly schema: 'jason.qingmu-bounded-rework-route-result.v1'
+  readonly route: YimengReworkRouteRecord
+  readonly routeSha256: string
+  readonly receiptId: string
+  readonly outboxEventId: string
+  readonly routeRecorded: true
+  readonly findingClosed: false
+  readonly selectionChanged: false
+  readonly stageDecisionChanged: false
+  readonly lockInvalidated: false
+  readonly taskCreated: false
+  readonly providerCalls: 0
+  readonly reworkExecuted: false
+  readonly humanSignoffInferred: false
+}
+
+/** Query-only lookup under the original exact CAS and idempotency coordinates. */
+export interface YimengReworkRouteRecovery {
+  readonly schema: 'jason.qingmu-bounded-rework-route-recovery.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly findingId: string
+  readonly expectedSubjectSha256: string
+  readonly expectedRouteRevision: number
+  readonly expectedRouteSha256: string | null
+  readonly idempotencyKey: string
+  readonly found: boolean
+  readonly result: YimengReworkRouteResult | null
+}
+
+/** Fresh qualification of a historical route under today's exact Core Method. */
+export interface YimengReworkRouteAuthorityProbe {
+  readonly schema: 'jason.qingmu-bounded-rework-route-authority-probe.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly findingId: string
+  readonly subjectSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+  readonly lockRulesSha256: string
+  readonly latestRoute: YimengReworkRouteResult | null
+  readonly currentRouteRecorded: boolean
+  readonly routeRecorded: boolean
+  readonly findingClosed: false
+  readonly selectionChanged: false
+  readonly stageDecisionChanged: false
+  readonly lockInvalidated: false
+  readonly taskCreated: false
+  readonly providerCalls: 0
+  readonly reworkExecuted: false
+  readonly humanSignoffInferred: false
+}
+
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
   readonly proposeScript: YimengProposeScriptResponse
@@ -1963,6 +2202,9 @@ export interface YimengCommandEndpointMap {
   readonly sealLsuPlan: YimengLsuPlanSealResult
   readonly recoverLsuPlanSeal: YimengLsuPlanSealRecovery
   readonly probeLsuPlanAuthority: YimengLsuPlanAuthorityProbe
+  readonly recordReworkRoute: YimengReworkRouteResult
+  readonly recoverReworkRoute: YimengReworkRouteRecovery
+  readonly probeReworkRouteAuthority: YimengReworkRouteAuthorityProbe
   readonly proposePromptIr: YimengProposePromptIrResponse
   readonly previewPromptIr: YimengPreviewPromptIrResponse
   readonly commitPromptIrEdit: YimengCommitPromptIrEditResponse

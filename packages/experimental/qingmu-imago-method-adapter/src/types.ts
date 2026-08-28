@@ -8,6 +8,8 @@ import type {
   YimengLsuPlanDefinition,
   YimengLsuPlanSubject,
   YimengLsuPlanSourceRequest,
+  YimengReworkRouteSourceRequest,
+  YimengReworkRouteSubject,
   YimengContinuityDeltaProjection,
   YimengContinuityPair,
   YimengShotRelationsStoryboardRevision,
@@ -952,6 +954,97 @@ export interface ImagoLsuPlanMethodResponse extends ImagoMethodJsonObject {
   readonly methodAttestation: ImagoLsuPlanMethodAttestation
 }
 
+/** Browser supplies only the four business coordinates; all source and rules remain Host-derived. */
+export type ImagoReworkRouteMethodRequest = Pick<
+  YimengReworkRouteSourceRequest,
+  'projectId' | 'episodeId' | 'frameId' | 'findingId'
+>
+
+/** Exact current authority chain passed to the stateless Core compiler. */
+export interface ImagoReworkRouteMethodSnapshot extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.rework-route-method-snapshot.v1'
+  readonly subject: YimengReworkRouteSubject
+  readonly subjectSnapshotSha256: string
+}
+
+/** Evidence-only comparison of the historical Finding rule generation with current rules. */
+export interface ImagoReworkRouteRuleComparison extends ImagoMethodJsonObject {
+  readonly recordedRulesSha256: string
+  readonly currentRulesSha256: string
+  readonly changed: boolean
+  readonly effect: 'evidence_only_no_scope_expansion'
+}
+
+/** Current non-executing bounded route contract. */
+export interface ImagoReworkRouteMethodDefinition extends ImagoMethodJsonObject {
+  readonly id: 'IMAGO-V6-BOUNDED-REWORK-ROUTE'
+  readonly version: string
+  readonly scope: 'per_finding'
+  readonly operation: 'record_bounded_rework_route'
+  readonly requiredFindingStatus: 'OPEN'
+  readonly oneEarliestOwnerPerFinding: true
+  readonly groupByEarliestOwner: true
+  readonly timecodeEvidenceAndScopeRequired: true
+  readonly findingRuleComparison: ImagoReworkRouteRuleComparison
+  readonly findingClosureAllowed: false
+  readonly taskCreationAllowed: false
+  readonly selectionChangeAllowed: false
+  readonly stageDecisionChangeAllowed: false
+  readonly lockInvalidationAllowed: false
+  readonly reworkExecutionAllowed: false
+  readonly paidGenerationAuthorized: false
+  readonly automaticRetry: false
+  readonly providerChangeAuthorized: false
+  readonly unboundedRedoAuthorized: false
+  readonly completionReleaseAllowed: false
+  readonly providerCalls: 0
+}
+
+/** Exact bounded route instruction; it is not a task or rework execution. */
+export interface ImagoReworkRouteInstruction extends ImagoMethodJsonObject {
+  readonly state: 'BOUNDED_REWORK_ROUTED'
+  readonly outputSchema: 'IMAGO-V6-BoundedReworkRoute-v1'
+  readonly findingId: string
+  readonly findingEventId: string
+  readonly unitId: string
+  readonly earliestOwner: string
+  readonly ownerRoleId: string
+  readonly ownerScope: 'global' | 'per_lsu'
+  readonly ownerScopeInstance: string
+  readonly boundedItem: ImagoMethodJsonObject
+  readonly scopeExpansionForbidden: true
+}
+
+/** Stateless current-rule projection over one existing Finding/Stage/Lock/LSU chain. */
+export interface ImagoReworkRouteMethodProjection extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-bounded-rework-route-method.v1'
+  readonly subject: YimengReworkRouteSubject
+  readonly subjectSnapshotSha256: string
+  readonly definition: ImagoReworkRouteMethodDefinition
+  readonly routeInstruction: ImagoReworkRouteInstruction
+  readonly ruleBindings: Readonly<Record<string, string>>
+  readonly rulesSha256: string
+  readonly lockRuleBindings: Readonly<Record<string, string>>
+  readonly lockRulesSha256: string
+}
+
+/** Host-origin proof only; Yimeng still owns owner authentication and durable CAS. */
+export interface ImagoReworkRouteMethodAttestation extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-bounded-rework-route-method-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly subjectSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly signature: string
+}
+
+/** Fresh bounded route Method without recording or executing a rework. */
+export interface ImagoReworkRouteMethodResponse extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-bounded-rework-route-method-adapter-result.v1'
+  readonly projection: ImagoReworkRouteMethodProjection
+  readonly projectionSha256: string
+  readonly methodAttestation: ImagoReworkRouteMethodAttestation
+}
+
 /** Browser supplies coordinates only; the Host obtains the full-script source digest. */
 export interface ImagoStageSourceMethodRequest extends YimengStageSourcesRequest {
   readonly stageId: 'A1S'
@@ -1110,6 +1203,7 @@ export interface ImagoMethodEndpointMap {
   readonly shotFindingMethod: ImagoShotFindingMethodResponse
   readonly productionUnitMethod: ImagoProductionUnitMethodResponse
   readonly lsuPlanMethod: ImagoLsuPlanMethodResponse
+  readonly reworkRouteMethod: ImagoReworkRouteMethodResponse
   readonly stageSourceMethod: ImagoStageSourceMethodResponse
   readonly stageArtifactMethod: ImagoStageArtifactMethodResponse
 }

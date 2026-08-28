@@ -16,6 +16,7 @@ import {
 } from './stage-artifact.ts'
 import { prepareStageSourceCommand } from './stage-source.ts'
 import { prepareCurrentLsuPlanMethodRequest, prepareLsuPlanCommand } from './lsu-plan.ts'
+import { prepareCurrentReworkRouteMethodRequest, prepareReworkRouteCommand } from './rework-route.ts'
 import type {
   YimengChangeSet,
   YimengChangeSetBase,
@@ -245,6 +246,24 @@ export type {
   YimengLsuPlanSubject,
   YimengProbeLsuPlanAuthorityRequest,
   YimengSealLsuPlanRequest,
+  YimengForwardedRecordReworkRouteRequest,
+  YimengForwardedReworkRouteAuthorityProbeRequest,
+  YimengImagoReworkRouteMethodAttestation,
+  YimengImagoReworkRouteMethodProjection,
+  YimengProbeReworkRouteAuthorityRequest,
+  YimengRecordReworkRouteRequest,
+  YimengReworkRouteAuthorityProbe,
+  YimengReworkRouteBoundedItem,
+  YimengReworkRouteDefinition,
+  YimengReworkRouteFinding,
+  YimengReworkRouteInstruction,
+  YimengReworkRouteProductionUnit,
+  YimengReworkRouteRecord,
+  YimengReworkRouteRecovery,
+  YimengReworkRouteResult,
+  YimengReworkRouteRuleComparison,
+  YimengReworkRouteSealedPlan,
+  YimengReworkRouteSubject,
   YimengStageSource,
   YimengStageSourceDefinition,
   YimengStageSourceBinding,
@@ -348,6 +367,11 @@ export interface YimengCommandAdapterDependencies {
   ) => Promise<RpcResult<unknown>>
   /** Trusted Host call that recompiles the complete current LSU scope and rule generation. */
   readonly runLsuPlanMethod?: (
+    payload: unknown,
+    signal: AbortSignal,
+  ) => Promise<RpcResult<unknown>>
+  /** Trusted Host call that recompiles one bounded route from current Core and Yimeng authority. */
+  readonly runReworkRouteMethod?: (
     payload: unknown,
     signal: AbortSignal,
   ) => Promise<RpcResult<unknown>>
@@ -781,7 +805,7 @@ function normalizeReferenceRightsRecordWith(
     humanDeclaration: {
       state: humanDeclaration.state,
       text: declarationText,
-    } as YimengReferenceRightsRecord['humanDeclaration'],
+    },
     contentCredentials: normalizeRightsScalar(rights.contentCredentials, `${field}.contentCredentials`, error),
   }
 }
@@ -4954,6 +4978,20 @@ export function createYimengCommandHandler(
         if (!methodResult.ok) return methodResult
         currentLsuPlanMethod = methodResult.value
       }
+      let currentReworkRouteMethod: unknown
+      let currentReworkRouteToken: string | undefined
+      if (endpoint === 'recordReworkRoute' || endpoint === 'probeReworkRouteAuthority') {
+        const methodPayload = prepareCurrentReworkRouteMethodRequest(endpoint, payload, stageArtifactHelpers)
+        currentReworkRouteToken = normalizeToken(dependencies.readToken())
+        if (currentReworkRouteToken === undefined) return internalError('YIMENG_API_TOKEN is not configured')
+        if (dependencies.runReworkRouteMethod === undefined) {
+          return internalError('current IMAGO bounded route Method is unavailable')
+        }
+        const methodResult = await dependencies.runReworkRouteMethod(methodPayload, signal)
+        if (signal.aborted) return cancelled()
+        if (!methodResult.ok) return methodResult
+        currentReworkRouteMethod = methodResult.value
+      }
       let path: string
       let requestInit: FetchJsonRequest
       let normalize: (value: unknown, token: string) => unknown
@@ -4964,20 +5002,25 @@ export function createYimengCommandHandler(
         || endpoint === 'commitStageArtifactDecision' || endpoint === 'recoverStageArtifactDecision'
         || endpoint === 'probeStageArtifactAuthority'
         || endpoint === 'sealLsuPlan' || endpoint === 'recoverLsuPlanSeal'
-        || endpoint === 'probeLsuPlanAuthority') {
+        || endpoint === 'probeLsuPlanAuthority'
+        || endpoint === 'recordReworkRoute' || endpoint === 'recoverReworkRoute'
+        || endpoint === 'probeReworkRouteAuthority') {
         const helpers = stageArtifactHelpers
-        const prepared = endpoint === 'sealLsuPlan' || endpoint === 'recoverLsuPlanSeal'
+        const prepared = endpoint === 'recordReworkRoute' || endpoint === 'recoverReworkRoute'
+          || endpoint === 'probeReworkRouteAuthority'
+          ? prepareReworkRouteCommand(endpoint, payload, helpers, currentReworkRouteMethod)
+          : endpoint === 'sealLsuPlan' || endpoint === 'recoverLsuPlanSeal'
           || endpoint === 'probeLsuPlanAuthority'
-          ? prepareLsuPlanCommand(endpoint, payload, helpers, currentLsuPlanMethod)
-          : endpoint === 'registerStageArtifact' || endpoint === 'recoverStageArtifactRegistration'
+            ? prepareLsuPlanCommand(endpoint, payload, helpers, currentLsuPlanMethod)
+            : endpoint === 'registerStageArtifact' || endpoint === 'recoverStageArtifactRegistration'
           || endpoint === 'commitStageArtifactDecision' || endpoint === 'recoverStageArtifactDecision'
           || endpoint === 'probeStageArtifactAuthority'
-            ? prepareStageArtifactCommand(endpoint, payload, helpers, currentStageArtifactMethod)
-            : endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
-              ? prepareProductionUnitCommand(endpoint, payload, helpers)
-              : endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
-                ? prepareStageSourceCommand(endpoint, payload, helpers)
-                : prepareShotFindingCommand(endpoint, payload, helpers)
+              ? prepareStageArtifactCommand(endpoint, payload, helpers, currentStageArtifactMethod)
+              : endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
+                ? prepareProductionUnitCommand(endpoint, payload, helpers)
+                : endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
+                  ? prepareStageSourceCommand(endpoint, payload, helpers)
+                  : prepareShotFindingCommand(endpoint, payload, helpers)
         path = prepared.path
         requestInit = {
           method: prepared.request.method,
@@ -5283,7 +5326,8 @@ export function createYimengCommandHandler(
         throw new InputError(`unknown Yimeng command endpoint: ${endpoint}`)
       }
 
-      const token = currentStageArtifactToken ?? currentLsuPlanToken ?? normalizeToken(dependencies.readToken())
+      const token = currentStageArtifactToken ?? currentLsuPlanToken ?? currentReworkRouteToken
+        ?? normalizeToken(dependencies.readToken())
       if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
       const isStageArtifactCommand = endpoint === 'registerStageArtifact'
         || endpoint === 'recoverStageArtifactRegistration'
@@ -5293,6 +5337,9 @@ export function createYimengCommandHandler(
         || endpoint === 'sealLsuPlan'
         || endpoint === 'recoverLsuPlanSeal'
         || endpoint === 'probeLsuPlanAuthority'
+        || endpoint === 'recordReworkRoute'
+        || endpoint === 'recoverReworkRoute'
+        || endpoint === 'probeReworkRouteAuthority'
       const response = await fetchJson(
         dependencies,
         `${baseUrl}${path}`,
@@ -5341,6 +5388,12 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
       return method === undefined
         ? internalError('current IMAGO LSU plan Method is unavailable')
         : await method('lsuPlanMethod', payload, signal)
+    },
+    runReworkRouteMethod: async (payload, signal) => {
+      const method = ctx.get('qingmuImagoMethod')
+      return method === undefined
+        ? internalError('current IMAGO bounded route Method is unavailable')
+        : await method('reworkRouteMethod', payload, signal)
     },
   }), { authority: 'loopback' })
 }
