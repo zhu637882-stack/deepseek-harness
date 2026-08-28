@@ -30,6 +30,9 @@ import type {
   YimengCapabilitySnapshot,
   YimengCostRehearsalRequest,
   YimengCostRehearsalResponse,
+  YimengGateAControlEvidenceResponse,
+  YimengGateAControlScenario,
+  YimengGateAControlScenarioId,
   YimengElementProfileReference,
   YimengElementProfileRequest,
   YimengElementProfileResponse,
@@ -104,6 +107,10 @@ export type {
   YimengCostRehearsalRequest,
   YimengCostRehearsalResponse,
   YimengCostRehearsalSubject,
+  YimengGateAControlEvidenceResponse,
+  YimengGateAControlScenario,
+  YimengGateAControlScenarioId,
+  YimengGateAControlSourceBinding,
   YimengContinuityAudit,
   YimengContinuityCurrentBinding,
   YimengContinuityDeltaProjection,
@@ -235,7 +242,8 @@ const ELEMENT_REVIEW_FEED_SCHEMA = 'jason.qingmu-element-review-feed.v1'
 const REFERENCE_RIGHTS_EXCEPTION_RELEASE_FEED_SCHEMA = 'jason.qingmu-reference-rights-exception-release-feed.v1'
 const SHA256 = /^[0-9a-f]{64}$/
 const PROTECTED_ENDPOINTS = new Set([
-  'projects', 'episodes', 'script', 'promptIr', 'capabilityCatalog', 'costRehearsal', 'elementProfile',
+  'projects', 'episodes', 'script', 'promptIr', 'capabilityCatalog', 'costRehearsal',
+  'gateAControlEvidence', 'elementProfile',
   'referenceCandidates', 'reviewEvents',
   'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'shotFindings', 'productionUnits', 'stageSources',
   'lsuPlanSource', 'reworkRouteSource',
@@ -1600,6 +1608,195 @@ function normalizeCostRehearsal(
     webhookRegistered: false,
     paidGenerationAuthorized: false,
   }
+}
+
+const GATE_A_ENVIRONMENT = {
+  database: 'temporary_sqlite',
+  networkEgressAllowed: false,
+  provider: 'scripted_fake',
+  productionCredentialsLoaded: false,
+  temporaryDatabaseWrites: true,
+} as const
+
+const GATE_A_ASSERTIONS = {
+  externalProviderCalls: 0,
+  productionDatabaseWrites: 0,
+  formalBudgetLedgerWrites: 0,
+  duplicatePaidSubmissions: 0,
+  unknownAutomaticResubmits: 0,
+  maximumAutomaticSubmitAttemptsPerDispatch: 1,
+  networkEgressAttempts: 0,
+  truncatedDownloadsAccepted: 0,
+  reconciliationProviderCalls: 0,
+  pollRecoveryResubmits: 0,
+  downloadRecoveryResubmits: 0,
+} as const
+
+const GATE_A_SCENARIO_SPECS = [
+  {
+    id: 'unauthorized_request_blocked',
+    values: { providerSubmitAttempts: 0, budgetReserved: false },
+  },
+  {
+    id: 'duplicate_ack_replay',
+    values: { providerSubmitAttempts: 1, duplicateAckReplays: 1, duplicatePaidSubmissions: 0 },
+  },
+  {
+    id: 'payload_sha_conflict',
+    values: { providerSubmitAttempts: 1, conflictingSubmitAttempts: 0 },
+  },
+  {
+    id: 'submission_unknown_quarantine',
+    values: {
+      providerSubmitAttempts: 1,
+      automaticResubmits: 0,
+      workerOutcomes: ['dispatch_state_unknown'],
+    },
+  },
+  {
+    id: 'simulated_reconciliation',
+    values: {
+      providerCalls: 0,
+      deduplicated: true,
+      simulatedOperatorDecision: true,
+      humanSignoffInferred: false,
+    },
+  },
+  {
+    id: 'poll_recovery',
+    values: {
+      providerSubmitAttempts: 1,
+      providerPollAttempts: 2,
+      automaticResubmits: 0,
+      workerOutcomes: ['dispatched', 'error', 'ingested', 'technical_quality_passed'],
+    },
+  },
+  {
+    id: 'download_timeout_recovery',
+    values: {
+      providerSubmitAttempts: 1,
+      providerPollAttempts: 1,
+      downloadAttempts: 2,
+      automaticResubmits: 0,
+      workerOutcomes: ['dispatched', 'download_timeout_retry', 'ingested', 'technical_quality_passed'],
+    },
+  },
+  {
+    id: 'truncated_download_rejected',
+    values: {
+      providerSubmitAttempts: 1,
+      providerPollAttempts: 1,
+      downloadAttempts: 1,
+      truncatedDownloadsAccepted: 0,
+    },
+  },
+] as const satisfies readonly {
+  readonly id: YimengGateAControlScenarioId
+  readonly values: YimengJsonObject
+}[]
+
+function normalizeGateAControlEvidence(value: unknown): YimengGateAControlEvidenceResponse {
+  const root = requireObject(value, 'gateAControlEvidence')
+  assertExactOutputKeys(root, [
+    'schema', 'productionStatus', 'gateAStatus', 'mode', 'snapshotPolicy', 'environment',
+    'scenarios', 'assertions', 'sourceBindings', 'externalProviderCalls', 'productionDatabaseWrites',
+    'formalBudgetLedgerWrites', 'simulatedProviderSubmitAttempts', 'paidGenerationAuthorized',
+    'humanSignoffInferred', 'evidenceSnapshotSha256',
+  ], 'gateAControlEvidence')
+  if (root.schema !== 'jason.qingmu-provider-gate-a-control-evidence.v1'
+    || root.productionStatus !== 'UNVERIFIED_FOR_PAID_PRODUCTION'
+    || root.gateAStatus !== 'PASSED_CONTROL_LOGIC_ONLY'
+    || root.mode !== 'offline_fault_injection'
+    || root.snapshotPolicy !== 'rfc8785-jcs-sha256-v1') {
+    throw new UpstreamContractError('Gate A control evidence identity mismatch')
+  }
+
+  const rawEnvironment = requireObject(root.environment, 'gateAControlEvidence.environment')
+  assertExactOutputKeys(rawEnvironment, Object.keys(GATE_A_ENVIRONMENT), 'gateAControlEvidence.environment')
+  if (!isDeepStrictEqual(rawEnvironment, GATE_A_ENVIRONMENT)) {
+    throw new UpstreamContractError('Gate A control evidence environment mismatch')
+  }
+
+  const rawScenarios = requireObjectItems(root.scenarios, 'gateAControlEvidence.scenarios')
+  if (rawScenarios.length !== GATE_A_SCENARIO_SPECS.length) {
+    throw new UpstreamContractError('Gate A control evidence scenario count mismatch')
+  }
+  const scenarios = GATE_A_SCENARIO_SPECS.map<YimengGateAControlScenario>((spec, index) => {
+    const raw = rawScenarios[index]
+    if (raw === undefined) throw new UpstreamContractError('Gate A control evidence scenario missing')
+    assertExactOutputKeys(raw, ['id', 'outcome', ...Object.keys(spec.values)], `gateAControlEvidence.scenarios[${String(index)}]`)
+    if (raw.id !== spec.id || raw.outcome !== 'passed') {
+      throw new UpstreamContractError('Gate A control evidence scenario identity mismatch')
+    }
+    for (const [field, expected] of Object.entries(spec.values)) {
+      if (!isDeepStrictEqual(raw[field], expected)) {
+        throw new UpstreamContractError(`Gate A control evidence scenario assertion mismatch: ${spec.id}.${field}`)
+      }
+    }
+    return { id: spec.id, outcome: 'passed', ...spec.values }
+  })
+
+  const rawAssertions = requireObject(root.assertions, 'gateAControlEvidence.assertions')
+  assertExactOutputKeys(rawAssertions, Object.keys(GATE_A_ASSERTIONS), 'gateAControlEvidence.assertions')
+  if (!isDeepStrictEqual(rawAssertions, GATE_A_ASSERTIONS)) {
+    throw new UpstreamContractError('Gate A control evidence assertions mismatch')
+  }
+
+  const seenPaths = new Set<string>()
+  const sourceBindings = requireObjectItems(root.sourceBindings, 'gateAControlEvidence.sourceBindings')
+    .map((raw, index) => {
+      assertExactOutputKeys(raw, ['path', 'sha256'], `gateAControlEvidence.sourceBindings[${String(index)}]`)
+      const path = requireString(raw.path, `gateAControlEvidence.sourceBindings[${String(index)}].path`)
+      const segments = path.split('/')
+      if (path.length === 0 || path.length > 500 || path.trim() !== path || path.startsWith('/')
+        || path.includes('\\') || segments.some(segment => segment === '' || segment === '.' || segment === '..')
+        || seenPaths.has(path)) {
+        throw new UpstreamContractError('Gate A control evidence source path is not a unique relative path')
+      }
+      seenPaths.add(path)
+      return {
+        path,
+        sha256: requireSha256(raw.sha256, `gateAControlEvidence.sourceBindings[${String(index)}].sha256`),
+      }
+    })
+  if (sourceBindings.length === 0
+    || !isDeepStrictEqual(sourceBindings, [...sourceBindings].sort((left, right) => (
+      compareUnicodeCodePoints(left.path, right.path)
+    )))) {
+    throw new UpstreamContractError('Gate A control evidence source bindings must use canonical path order')
+  }
+
+  if (root.externalProviderCalls !== 0 || root.productionDatabaseWrites !== 0
+    || root.formalBudgetLedgerWrites !== 0 || root.simulatedProviderSubmitAttempts !== 6
+    || root.paidGenerationAuthorized !== false || root.humanSignoffInferred !== false) {
+    throw new UpstreamContractError('Gate A control evidence authority boundary mismatch')
+  }
+
+  const identity = {
+    schema: 'jason.qingmu-provider-gate-a-control-evidence.v1',
+    productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+    gateAStatus: 'PASSED_CONTROL_LOGIC_ONLY',
+    mode: 'offline_fault_injection',
+    snapshotPolicy: 'rfc8785-jcs-sha256-v1',
+    environment: GATE_A_ENVIRONMENT,
+    scenarios,
+    assertions: GATE_A_ASSERTIONS,
+    sourceBindings,
+    externalProviderCalls: 0,
+    productionDatabaseWrites: 0,
+    formalBudgetLedgerWrites: 0,
+    simulatedProviderSubmitAttempts: 6,
+    paidGenerationAuthorized: false,
+    humanSignoffInferred: false,
+  } as const
+  const evidenceSnapshotSha256 = requireSha256(
+    root.evidenceSnapshotSha256,
+    'gateAControlEvidence.evidenceSnapshotSha256',
+  )
+  if (evidenceSnapshotSha256 !== jcsSha256(identity, 'gateAControlEvidence.identity')) {
+    throw new UpstreamContractError('Gate A control evidence snapshot SHA mismatch')
+  }
+  return { ...identity, evidenceSnapshotSha256 }
 }
 
 function normalizeProjects(value: unknown): YimengProjectsResponse {
@@ -3415,6 +3612,13 @@ export function createYimengReadHandler(
           + '/frames/' + encodeURIComponent(request.frameId)
           + `/cost-rehearsal?${query.toString()}`
         normalize = value => normalizeCostRehearsal(value, request)
+      } else if (endpoint === 'gateAControlEvidence') {
+        const input = requireInputObject(payload)
+        if (Object.keys(input).length !== 0) {
+          throw new InputError('gateAControlEvidence payload must be empty')
+        }
+        path = '/api/qingmu/provider-gate-a/control-evidence'
+        normalize = normalizeGateAControlEvidence
       } else if (endpoint === 'projects') {
         const request = parseProjectsRequest(payload)
         const query = new URLSearchParams({ page: String(request.page), page_size: String(request.pageSize) })

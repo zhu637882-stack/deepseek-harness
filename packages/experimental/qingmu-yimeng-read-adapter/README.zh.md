@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`capabilityCatalog`、`costRehearsal`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates`、`selectedVideoReview`、`shotFindings`、`productionUnits`、`lsuPlanSource`、`stageSources` 和 `workflow`；它不暴露任何写入端点。
+这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`capabilityCatalog`、`costRehearsal`、`gateAControlEvidence`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates`、`selectedVideoReview`、`shotFindings`、`productionUnits`、`lsuPlanSource`、`stageSources` 和 `workflow`；它不暴露任何写入端点。
 
 ## 约定
 
@@ -31,6 +31,12 @@
 `costRehearsal` 接受一个 canonical frame、模型、能力、已排序控制项、分辨率、候选数量、刚由 Host 校验过的完整目录投影，以及它的准确目录、请求、预检与能力快照四个 SHA-256。它向易梦发送一次带认证且无请求体的 GET，目录投影本身不会进入 URL。权威镜头时长、目录单价、候选上限及只读 ProviderGate 预算投影只归易梦所有。Host 再次核验目录投影的 canonical bytes，独立推导 eligibility、费率与候选上限，校验全部回执字段，使用 RFC 8785 JCS 重编主体和完整回执，并以整数微元重算费用恒等式与预算窗口算术。候选数量不得超过所选能力快照声明的输出上限。
 
 这只是预留提案演练，不是正式预留。正式预留 ID 为 `null`，正式预留金额与账本写入均为零，提交前实际费用不可用，项目/剧集额度明确保持 `NOT_CONFIGURED`；只投影既有全局 Provider 预算窗口。Provider、数据库、账本、任务、队列、提交、轮询、下载、Webhook 及付费权力字段只要不是字面零或 false，适配器就会失败关闭。Harness 不新增第二套预算账本、工作流状态、预留权力或业务真相。
+
+## 离线 Gate A 控制证据
+
+`gateAControlEvidence` 只接受空请求，并向易梦既有 `/api/qingmu/provider-gate-a/control-evidence` 端点发送一次带认证且无请求体的 GET。Host 要求未授权拦截、重复确认、载荷 SHA 冲突、`submission_unknown` 隔离、模拟对账、轮询恢复、下载恢复和截断下载拒绝这八个场景及其断言使用准确顺序；同时校验规范相对源码路径、每个源码 SHA-256、固定的临时 SQLite／脚本化 Fake 环境，以及 RFC 8785 内容寻址证据 SHA。
+
+这份回执只证明离线故障注入控制逻辑。外部 Provider 调用、正式数据库写入、预算账本写入、重复付费提交、未知状态自动重提、对账 Provider 调用、恢复重提、接受截断及网络外连必须保持字面零，否则适配器失败关闭。端点不能运行场景、对账任务、生成媒体、提交任务、授予付费权力或推断人工签收；真实付费生产仍为 `UNVERIFIED_FOR_PAID_PRODUCTION`。
 
 ## 连续性证据
 

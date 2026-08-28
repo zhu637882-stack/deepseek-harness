@@ -22,6 +22,7 @@ import { SelectedVideoReviewView } from './SelectedVideoReviewView.tsx'
 import { ProductionUnitView } from './ProductionUnitView.tsx'
 import { GenerationCapabilityCatalog } from './GenerationCapabilityCatalog.tsx'
 import { GenerationCostRehearsal } from './GenerationCostRehearsal.tsx'
+import { GenerationGateAControlEvidence } from './GenerationGateAControlEvidence.tsx'
 import css from './QingmuCockpit.module.css'
 
 export type QingmuCockpitProps = PropsRuntime<'sidebar.footer.action'>
@@ -544,6 +545,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
         port={port}
         t={t}
       />
+      <GenerationGateAControlEvidence enabled={generationEnabled} port={port} t={t} />
       <Card title={t('generationTitle')}>
         <div className={css.generationGrid}>
           <article>

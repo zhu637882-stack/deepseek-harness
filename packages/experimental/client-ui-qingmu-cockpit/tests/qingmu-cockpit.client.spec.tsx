@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type {
   YimengHealth,
+  YimengGateAControlEvidenceResponse,
   YimengHeroFrameStoryboardsProjection,
   YimengShotRelationsProjection,
   YimengWorkflowProjection,
@@ -34,6 +35,71 @@ const HEALTH: YimengHealth = {
   },
   build: { commit: 'build-commit' },
   hints: null,
+}
+
+const GATE_A_CONTROL_EVIDENCE: YimengGateAControlEvidenceResponse = {
+  schema: 'jason.qingmu-provider-gate-a-control-evidence.v1',
+  productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+  gateAStatus: 'PASSED_CONTROL_LOGIC_ONLY',
+  mode: 'offline_fault_injection',
+  snapshotPolicy: 'rfc8785-jcs-sha256-v1',
+  environment: {
+    database: 'temporary_sqlite',
+    networkEgressAllowed: false,
+    provider: 'scripted_fake',
+    productionCredentialsLoaded: false,
+    temporaryDatabaseWrites: true,
+  },
+  scenarios: [
+    { id: 'unauthorized_request_blocked', outcome: 'passed', providerSubmitAttempts: 0, budgetReserved: false },
+    {
+      id: 'duplicate_ack_replay', outcome: 'passed', providerSubmitAttempts: 1,
+      duplicateAckReplays: 1, duplicatePaidSubmissions: 0,
+    },
+    { id: 'payload_sha_conflict', outcome: 'passed', providerSubmitAttempts: 1, conflictingSubmitAttempts: 0 },
+    {
+      id: 'submission_unknown_quarantine', outcome: 'passed', providerSubmitAttempts: 1,
+      automaticResubmits: 0, workerOutcomes: ['dispatch_state_unknown'],
+    },
+    {
+      id: 'simulated_reconciliation', outcome: 'passed', providerCalls: 0,
+      deduplicated: true, simulatedOperatorDecision: true, humanSignoffInferred: false,
+    },
+    {
+      id: 'poll_recovery', outcome: 'passed', providerSubmitAttempts: 1, providerPollAttempts: 2,
+      automaticResubmits: 0, workerOutcomes: ['dispatched', 'error', 'ingested', 'technical_quality_passed'],
+    },
+    {
+      id: 'download_timeout_recovery', outcome: 'passed', providerSubmitAttempts: 1,
+      providerPollAttempts: 1, downloadAttempts: 2, automaticResubmits: 0,
+      workerOutcomes: ['dispatched', 'download_timeout_retry', 'ingested', 'technical_quality_passed'],
+    },
+    {
+      id: 'truncated_download_rejected', outcome: 'passed', providerSubmitAttempts: 1,
+      providerPollAttempts: 1, downloadAttempts: 1, truncatedDownloadsAccepted: 0,
+    },
+  ],
+  assertions: {
+    externalProviderCalls: 0,
+    productionDatabaseWrites: 0,
+    formalBudgetLedgerWrites: 0,
+    duplicatePaidSubmissions: 0,
+    unknownAutomaticResubmits: 0,
+    maximumAutomaticSubmitAttemptsPerDispatch: 1,
+    networkEgressAttempts: 0,
+    truncatedDownloadsAccepted: 0,
+    reconciliationProviderCalls: 0,
+    pollRecoveryResubmits: 0,
+    downloadRecoveryResubmits: 0,
+  },
+  sourceBindings: [{ path: 'scripts/qingmu_gate_a_evidence.py', sha256: 'a'.repeat(64) }],
+  externalProviderCalls: 0,
+  productionDatabaseWrites: 0,
+  formalBudgetLedgerWrites: 0,
+  simulatedProviderSubmitAttempts: 6,
+  paidGenerationAuthorized: false,
+  humanSignoffInferred: false,
+  evidenceSnapshotSha256: 'b'.repeat(64),
 }
 
 const SHOT_RELATIONS = {
@@ -564,6 +630,8 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
       request: { modelId: null, capability: null, requestedControls: [], dryRun: true },
       items: [], providerCalls: 0, databaseWrites: 0, paidGenerationAuthorized: false,
     } as const)),
+    costRehearsal: vi.fn(async () => { throw new Error('Cost rehearsal is not part of this fixture') }),
+    gateAControlEvidence: vi.fn(async () => GATE_A_CONTROL_EVIDENCE),
     health: vi.fn(async () => HEALTH),
     projects: vi.fn(async () => ({
       items: [{ id: 'project-1', name: '青木样片' }],
@@ -920,6 +988,8 @@ describe('QingmuCockpit journey', () => {
 
     fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabGeneration }))
     expect(within(dialog).getByRole('heading', { name: zh.generationTitle })).toBeTruthy()
+    expect(await within(dialog).findByRole('heading', { name: zh.gateAControlTitle })).toBeTruthy()
+    expect(within(dialog).getByText(zh.gateAControlPassed)).toBeTruthy()
 
     fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabDelivery }))
     expect(within(dialog).getByText(zh.budgetDisclaimer)).toBeTruthy()

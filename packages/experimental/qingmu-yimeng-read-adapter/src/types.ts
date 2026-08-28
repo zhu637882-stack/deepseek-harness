@@ -218,6 +218,69 @@ export interface YimengCostRehearsalResponse {
   readonly paidGenerationAuthorized: false
 }
 
+/** Closed set of offline Gate A fault-injection scenarios verified by Yimeng. */
+export type YimengGateAControlScenarioId =
+  | 'unauthorized_request_blocked'
+  | 'duplicate_ack_replay'
+  | 'payload_sha_conflict'
+  | 'submission_unknown_quarantine'
+  | 'simulated_reconciliation'
+  | 'poll_recovery'
+  | 'download_timeout_recovery'
+  | 'truncated_download_rejected'
+
+/** One exact passed scenario retained from the source-bound Yimeng evidence receipt. */
+export type YimengGateAControlScenario = YimengJsonObject & {
+  readonly id: YimengGateAControlScenarioId
+  readonly outcome: 'passed'
+}
+
+/** One Yimeng source file whose current bytes were verified before serving the receipt. */
+export interface YimengGateAControlSourceBinding {
+  readonly path: string
+  readonly sha256: string
+}
+
+/**
+ * Read-only proof of offline control behavior. It never authorizes or reports paid production.
+ */
+export interface YimengGateAControlEvidenceResponse {
+  readonly schema: 'jason.qingmu-provider-gate-a-control-evidence.v1'
+  readonly productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION'
+  readonly gateAStatus: 'PASSED_CONTROL_LOGIC_ONLY'
+  readonly mode: 'offline_fault_injection'
+  readonly snapshotPolicy: 'rfc8785-jcs-sha256-v1'
+  readonly environment: {
+    readonly database: 'temporary_sqlite'
+    readonly networkEgressAllowed: false
+    readonly provider: 'scripted_fake'
+    readonly productionCredentialsLoaded: false
+    readonly temporaryDatabaseWrites: true
+  }
+  readonly scenarios: readonly YimengGateAControlScenario[]
+  readonly assertions: {
+    readonly externalProviderCalls: 0
+    readonly productionDatabaseWrites: 0
+    readonly formalBudgetLedgerWrites: 0
+    readonly duplicatePaidSubmissions: 0
+    readonly unknownAutomaticResubmits: 0
+    readonly maximumAutomaticSubmitAttemptsPerDispatch: 1
+    readonly networkEgressAttempts: 0
+    readonly truncatedDownloadsAccepted: 0
+    readonly reconciliationProviderCalls: 0
+    readonly pollRecoveryResubmits: 0
+    readonly downloadRecoveryResubmits: 0
+  }
+  readonly sourceBindings: readonly YimengGateAControlSourceBinding[]
+  readonly externalProviderCalls: 0
+  readonly productionDatabaseWrites: 0
+  readonly formalBudgetLedgerWrites: 0
+  readonly simulatedProviderSubmitAttempts: 6
+  readonly paidGenerationAuthorized: false
+  readonly humanSignoffInferred: false
+  readonly evidenceSnapshotSha256: string
+}
+
 /** Validated request for the projects endpoint. */
 export interface YimengProjectsRequest {
   readonly page?: number
@@ -1465,6 +1528,7 @@ export interface YimengReadEndpointMap {
   readonly health: YimengHealth
   readonly capabilityCatalog: YimengCapabilityCatalogResponse
   readonly costRehearsal: YimengCostRehearsalResponse
+  readonly gateAControlEvidence: YimengGateAControlEvidenceResponse
   readonly projects: YimengProjectsResponse
   readonly episodes: YimengEpisodesResponse
   readonly script: YimengScriptResponse

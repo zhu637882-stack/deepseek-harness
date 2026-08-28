@@ -9,6 +9,7 @@ import {
   type YimengCapabilityCatalogResponse,
   type YimengCapabilitySnapshot,
   type YimengCostRehearsalResponse,
+  type YimengGateAControlEvidenceResponse,
   type YimengReadAdapterDependencies,
   type YimengWorkflowProjection,
 } from '../src/index.ts'
@@ -281,6 +282,83 @@ function rehashCostResponse(response: YimengCostRehearsalResponse): YimengCostRe
     difference: response.difference,
   }
   return { ...response, rehearsalSnapshotSha256: sha256(canonicalJson(identity)) }
+}
+
+function gateAControlEvidenceFixture(): YimengGateAControlEvidenceResponse {
+  const identity = {
+    schema: 'jason.qingmu-provider-gate-a-control-evidence.v1',
+    productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+    gateAStatus: 'PASSED_CONTROL_LOGIC_ONLY',
+    mode: 'offline_fault_injection',
+    snapshotPolicy: 'rfc8785-jcs-sha256-v1',
+    environment: {
+      database: 'temporary_sqlite',
+      networkEgressAllowed: false,
+      provider: 'scripted_fake',
+      productionCredentialsLoaded: false,
+      temporaryDatabaseWrites: true,
+    },
+    scenarios: [
+      { id: 'unauthorized_request_blocked', outcome: 'passed', providerSubmitAttempts: 0, budgetReserved: false },
+      {
+        id: 'duplicate_ack_replay', outcome: 'passed', providerSubmitAttempts: 1,
+        duplicateAckReplays: 1, duplicatePaidSubmissions: 0,
+      },
+      { id: 'payload_sha_conflict', outcome: 'passed', providerSubmitAttempts: 1, conflictingSubmitAttempts: 0 },
+      {
+        id: 'submission_unknown_quarantine', outcome: 'passed', providerSubmitAttempts: 1,
+        automaticResubmits: 0, workerOutcomes: ['dispatch_state_unknown'],
+      },
+      {
+        id: 'simulated_reconciliation', outcome: 'passed', providerCalls: 0, deduplicated: true,
+        simulatedOperatorDecision: true, humanSignoffInferred: false,
+      },
+      {
+        id: 'poll_recovery', outcome: 'passed', providerSubmitAttempts: 1, providerPollAttempts: 2,
+        automaticResubmits: 0, workerOutcomes: ['dispatched', 'error', 'ingested', 'technical_quality_passed'],
+      },
+      {
+        id: 'download_timeout_recovery', outcome: 'passed', providerSubmitAttempts: 1,
+        providerPollAttempts: 1, downloadAttempts: 2, automaticResubmits: 0,
+        workerOutcomes: ['dispatched', 'download_timeout_retry', 'ingested', 'technical_quality_passed'],
+      },
+      {
+        id: 'truncated_download_rejected', outcome: 'passed', providerSubmitAttempts: 1,
+        providerPollAttempts: 1, downloadAttempts: 1, truncatedDownloadsAccepted: 0,
+      },
+    ],
+    assertions: {
+      externalProviderCalls: 0,
+      productionDatabaseWrites: 0,
+      formalBudgetLedgerWrites: 0,
+      duplicatePaidSubmissions: 0,
+      unknownAutomaticResubmits: 0,
+      maximumAutomaticSubmitAttemptsPerDispatch: 1,
+      networkEgressAttempts: 0,
+      truncatedDownloadsAccepted: 0,
+      reconciliationProviderCalls: 0,
+      pollRecoveryResubmits: 0,
+      downloadRecoveryResubmits: 0,
+    },
+    sourceBindings: [
+      { path: 'backend/src/jason/apps/studio/asset_service.py', sha256: 'a'.repeat(64) },
+      { path: 'scripts/qingmu_gate_a_evidence.py', sha256: 'b'.repeat(64) },
+    ],
+    externalProviderCalls: 0,
+    productionDatabaseWrites: 0,
+    formalBudgetLedgerWrites: 0,
+    simulatedProviderSubmitAttempts: 6,
+    paidGenerationAuthorized: false,
+    humanSignoffInferred: false,
+  } as const
+  return { ...identity, evidenceSnapshotSha256: sha256(canonicalJson(identity)) }
+}
+
+function rehashGateAControlEvidence(
+  response: YimengGateAControlEvidenceResponse,
+): YimengGateAControlEvidenceResponse {
+  const { evidenceSnapshotSha256: _ignored, ...identity } = response
+  return { ...response, evidenceSnapshotSha256: sha256(canonicalJson(identity)) }
 }
 
 const PROMPT_IR_SUBJECT = {
@@ -741,6 +819,7 @@ describe('qingmu Yimeng read adapter', () => {
     for (const [endpoint, payload] of [
       ['capabilityCatalog', {}],
       ['costRehearsal', costRehearsalFixture().request],
+      ['gateAControlEvidence', {}],
       ['projects', {}],
       ['episodes', { projectId: 'project-1' }],
       ['script', { projectId: 'project-1', episodeId: 'episode-1' }],
@@ -842,6 +921,66 @@ describe('qingmu Yimeng read adapter', () => {
       webhookRegistered: false,
       paidGenerationAuthorized: false,
     } })
+  })
+
+  it('reads source-bound offline Gate A control evidence with no production authority', async () => {
+    let capturedUrl = ''
+    let capturedInit: RequestInit | undefined
+    const fixture = gateAControlEvidenceFixture()
+    const handler = createYimengReadHandler({}, dependencies(async (input, init) => {
+      capturedUrl = requestUrl(input)
+      capturedInit = init
+      return jsonResponse(fixture)
+    }, 'test-token'))
+
+    const result = await handler('gateAControlEvidence', {}, signal())
+
+    expect(result).toEqual({ ok: true, value: fixture })
+    expect(capturedUrl).toBe('http://127.0.0.1:8115/api/qingmu/provider-gate-a/control-evidence')
+    expect(new Headers(capturedInit?.headers).get('authorization')).toBe('Bearer test-token')
+    expect(capturedInit?.method).toBe('GET')
+    if (!result.ok) throw new Error(result.error.message)
+    expect(result.value).toMatchObject({
+      gateAStatus: 'PASSED_CONTROL_LOGIC_ONLY',
+      productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+      externalProviderCalls: 0,
+      productionDatabaseWrites: 0,
+      formalBudgetLedgerWrites: 0,
+      paidGenerationAuthorized: false,
+      humanSignoffInferred: false,
+    })
+  })
+
+  it('fails Gate A control evidence closed even when a forged receipt hash is recomputed', async () => {
+    const fixture = gateAControlEvidenceFixture()
+    const invalid = [
+      rehashGateAControlEvidence({
+        ...fixture,
+        assertions: { ...fixture.assertions, unknownAutomaticResubmits: 1 as 0 },
+      }),
+      rehashGateAControlEvidence({
+        ...fixture,
+        scenarios: fixture.scenarios.map(scenario => scenario.id === 'poll_recovery'
+          ? { ...scenario, automaticResubmits: 1 }
+          : scenario),
+      }),
+      rehashGateAControlEvidence({
+        ...fixture,
+        sourceBindings: [...fixture.sourceBindings].reverse(),
+      }),
+      { ...fixture, paidGenerationAuthorized: true },
+    ]
+    for (const response of invalid) {
+      const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(response), 'test-token'))
+      const result = await handler('gateAControlEvidence', {}, signal())
+      expect(result).toMatchObject({ ok: false, error: { code: 'internal' } })
+    }
+
+    const fetch = vi.fn<typeof globalThis.fetch>()
+    const handler = createYimengReadHandler({}, dependencies(fetch, 'test-token'))
+    const result = await handler('gateAControlEvidence', { authorizePaidGeneration: true }, signal())
+    expect(result).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   it('fails cost rehearsals closed on coordinate, formula, hash, or authority drift', async () => {

@@ -1,0 +1,100 @@
+- region "生成安全控制证据 · Gate A":
+  - heading "生成安全控制证据 · Gate A" [level=3]
+  - paragraph: 只读展示离线故障注入结果 · 临时数据库与脚本化 Fake Provider · 不连接外部 Provider
+  - button "重读控制证据"
+  - status:
+    - article:
+      - text: 控制逻辑
+      - strong: 已通过（仅离线故障注入）
+    - article:
+      - text: 真实付费生产
+      - strong: 未验证
+    - article:
+      - text: 故障场景
+      - strong: 8/8
+    - article:
+      - text: Fake 提交尝试
+      - strong: "6"
+  - heading "已通过的控制场景" [level=4]
+  - list:
+    - listitem:
+      - strong: 未授权请求被拦截
+      - code: unauthorized_request_blocked
+    - listitem:
+      - strong: 重复确认不重复提交
+      - code: duplicate_ack_replay
+    - listitem:
+      - strong: 载荷 SHA 冲突失败关闭
+      - code: payload_sha_conflict
+    - listitem:
+      - strong: 提交未知进入隔离
+      - code: submission_unknown_quarantine
+    - listitem:
+      - strong: 模拟人工对账与去重
+      - code: simulated_reconciliation
+    - listitem:
+      - strong: 只恢复轮询，不重提任务
+      - code: poll_recovery
+    - listitem:
+      - strong: 下载超时后只恢复下载
+      - code: download_timeout_recovery
+    - listitem:
+      - strong: 截断下载被拒绝
+      - code: truncated_download_rejected
+  - heading "必须保持为零" [level=4]
+  - term: 外部 Provider 调用
+  - definition: "0"
+  - term: 重复付费提交
+  - definition: "0"
+  - term: 未知状态自动重提
+  - definition: "0"
+  - term: 正式数据库写入
+  - definition: "0"
+  - term: 正式预算账本写入
+  - definition: "0"
+  - term: 网络外连尝试
+  - definition: "0"
+  - group:
+    - text: 运行环境、来源与内容寻址证据
+    - term: 验证模式
+    - definition:
+      - code: offline_fault_injection
+    - term: 数据库
+    - definition:
+      - code: temporary_sqlite
+    - term: Provider
+    - definition:
+      - code: scripted_fake
+    - term: 证据快照 SHA
+    - definition:
+      - code: 3b2f11004b63e172885e9bb374b3ecc8500d0c7b05bf3c2f721bd2748f1b5628
+    - heading "易梦已核验源码绑定" [level=4]
+    - list:
+      - listitem:
+        - code: backend/src/jason/apps/studio/asset_service.py
+        - code: 21e90418835691dd045bd5b1b96856359188d6786c6f57a6faafe7efb0e3cbe1
+      - listitem:
+        - code: backend/src/jason/apps/studio/provider_submission_reconciliation_service.py
+        - code: 408aab76af4843b80d9480614e172fcbe365bcf4acc2e8d36265bfd6f9490dc1
+      - listitem:
+        - code: backend/src/jason/apps/studio/provider_worker_service.py
+        - code: 6a14c2962a899abb1da6f73b62f6550d5f4a64aa4d308211cbda405ecb6a13ce
+      - listitem:
+        - code: backend/src/jason/apps/studio/result_ingest_service.py
+        - code: 5dc48b0bd5e6b8f0fc43eb88347712cce45a26c96deac1136a90cdfd6d9fd100
+      - listitem:
+        - code: backend/src/jason/domain/task_center.py
+        - code: e87c4272e6538dce68ec427fef1606e7728f0fb7dcd704d03ad4317f6f8e945b
+      - listitem:
+        - code: backend/src/jason/providers/gate.py
+        - code: 9ab0a3ef9251bbda2a33dc5a7fd45e54aa8959b62585d3b82509fa5f8ea75eec
+      - listitem:
+        - code: backend/src/jason/providers/gate_a_control_evidence.py
+        - code: cf07777be685213d7ed01b56ed306635069332b348726f3ec15a9909eb71631a
+      - listitem:
+        - code: backend/src/jason/providers/registry.py
+        - code: 3ef264a5c16c1cccbd4757165e3ad39c2417b5a403bff5c4507ba622cb06a6cc
+      - listitem:
+        - code: scripts/qingmu_gate_a_evidence.py
+        - code: 00b5de3ae3b0a27bfc6113a0a1d0909b501041a8a971fbdc64fe2f5bb1c90e49
+  - paragraph: 此证据只证明 Gate A 控制逻辑。它不授权付费生成，不代表真实 Provider 已验证，也不构成人工签收。

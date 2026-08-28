@@ -17,6 +17,7 @@ import type {
   YimengCommitStoryboardCanvasResponse,
   YimengCapabilityCatalogResponse,
   YimengCostRehearsalResponse,
+  YimengGateAControlEvidenceResponse,
   YimengElementProfileResponse, YimengEpisodesResponse, YimengHealth, YimengPreviewElementProfileResponse,
   YimengPreviewPromptIrResponse, YimengPreviewScriptResponse, YimengPreviewStoryboardCanvasResponse,
   YimengCreateCommentResponse, YimengCreateHumanDecisionResponse, YimengElementReviewFeedResponse,
@@ -53,6 +54,8 @@ export type {
   YimengCapabilityCatalogItem, YimengCapabilityCatalogRequest, YimengCapabilityCatalogResponse,
   YimengCapabilityEligibility, YimengCapabilityMutualExclusion, YimengCapabilitySnapshot,
   YimengCostRehearsalRequest, YimengCostRehearsalResponse, YimengCostRehearsalSubject,
+  YimengGateAControlEvidenceResponse, YimengGateAControlScenario, YimengGateAControlScenarioId,
+  YimengGateAControlSourceBinding,
   YimengElementProfileResponse, YimengEpisodesResponse, YimengHealth, YimengPreviewElementProfileResponse,
   YimengPreviewPromptIrResponse, YimengPreviewScriptResponse, YimengPreviewStoryboardCanvasResponse,
   YimengCreateCommentResponse, YimengCreateHumanDecisionResponse, YimengElementReviewFeedResponse,
@@ -93,6 +96,8 @@ export function apply(ctx: ClientContext): void {
       read<YimengCapabilityCatalogResponse>('capabilityCatalog', request, signal),
     costRehearsal: (request, signal) =>
       read<YimengCostRehearsalResponse>('costRehearsal', request, signal),
+    gateAControlEvidence: (request, signal) =>
+      read<YimengGateAControlEvidenceResponse>('gateAControlEvidence', request, signal),
     stageSources: (request, signal) => read<YimengStageSourcesResponse>('stageSources', request, signal),
     stageSourceMethod: (request, signal) => method<ImagoStageSourceMethodResponse>('stageSourceMethod', request, signal),
     bindStageSource: (request, signal) => command<YimengStageSourceResult>('bindStageSource', request, signal),

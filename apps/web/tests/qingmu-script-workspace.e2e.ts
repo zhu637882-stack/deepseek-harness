@@ -217,9 +217,11 @@ interface CapturedYimengRequest {
   readonly body: unknown
 }
 
-function isCapabilityCatalogRead(request: CapturedYimengRequest): boolean {
-  const endpoint = '/api/providers/capability-catalog'
-  return request.method === 'GET' && (request.path === endpoint || request.path.startsWith(`${endpoint}?`))
+function isReadOnlyProviderEvidenceRead(request: CapturedYimengRequest): boolean {
+  if (request.method !== 'GET') return false
+  const pathname = new URL(request.path, 'http://127.0.0.1').pathname
+  return pathname === '/api/providers/capability-catalog'
+    || pathname === '/api/qingmu/provider-gate-a/control-evidence'
 }
 
 interface StoryboardRevisionFixture {
@@ -453,6 +455,71 @@ function costRehearsalFixture(candidateCount: number) {
     queueEntered: false, submitAttempted: false, pollAttempted: false, downloadAttempted: false,
     webhookRegistered: false, paidGenerationAuthorized: false,
   } as const
+}
+
+function gateAControlEvidenceFixture() {
+  const environment = {
+    database: 'temporary_sqlite', networkEgressAllowed: false, provider: 'scripted_fake',
+    productionCredentialsLoaded: false, temporaryDatabaseWrites: true,
+  } as const
+  const scenarios = [
+    { id: 'unauthorized_request_blocked', outcome: 'passed', providerSubmitAttempts: 0, budgetReserved: false },
+    {
+      id: 'duplicate_ack_replay', outcome: 'passed', providerSubmitAttempts: 1,
+      duplicateAckReplays: 1, duplicatePaidSubmissions: 0,
+    },
+    { id: 'payload_sha_conflict', outcome: 'passed', providerSubmitAttempts: 1, conflictingSubmitAttempts: 0 },
+    {
+      id: 'submission_unknown_quarantine', outcome: 'passed', providerSubmitAttempts: 1,
+      automaticResubmits: 0, workerOutcomes: ['dispatch_state_unknown'],
+    },
+    {
+      id: 'simulated_reconciliation', outcome: 'passed', providerCalls: 0,
+      deduplicated: true, simulatedOperatorDecision: true, humanSignoffInferred: false,
+    },
+    {
+      id: 'poll_recovery', outcome: 'passed', providerSubmitAttempts: 1, providerPollAttempts: 2,
+      automaticResubmits: 0, workerOutcomes: ['dispatched', 'error', 'ingested', 'technical_quality_passed'],
+    },
+    {
+      id: 'download_timeout_recovery', outcome: 'passed', providerSubmitAttempts: 1,
+      providerPollAttempts: 1, downloadAttempts: 2, automaticResubmits: 0,
+      workerOutcomes: ['dispatched', 'download_timeout_retry', 'ingested', 'technical_quality_passed'],
+    },
+    {
+      id: 'truncated_download_rejected', outcome: 'passed', providerSubmitAttempts: 1,
+      providerPollAttempts: 1, downloadAttempts: 1, truncatedDownloadsAccepted: 0,
+    },
+  ] as const
+  const assertions = {
+    externalProviderCalls: 0, productionDatabaseWrites: 0, formalBudgetLedgerWrites: 0,
+    duplicatePaidSubmissions: 0, unknownAutomaticResubmits: 0,
+    maximumAutomaticSubmitAttemptsPerDispatch: 1, networkEgressAttempts: 0,
+    truncatedDownloadsAccepted: 0, reconciliationProviderCalls: 0,
+    pollRecoveryResubmits: 0, downloadRecoveryResubmits: 0,
+  } as const
+  const sourceBindings = [
+    { path: 'backend/src/jason/apps/studio/asset_service.py', sha256: '21e90418835691dd045bd5b1b96856359188d6786c6f57a6faafe7efb0e3cbe1' },
+    { path: 'backend/src/jason/apps/studio/provider_submission_reconciliation_service.py', sha256: '408aab76af4843b80d9480614e172fcbe365bcf4acc2e8d36265bfd6f9490dc1' },
+    { path: 'backend/src/jason/apps/studio/provider_worker_service.py', sha256: '6a14c2962a899abb1da6f73b62f6550d5f4a64aa4d308211cbda405ecb6a13ce' },
+    { path: 'backend/src/jason/apps/studio/result_ingest_service.py', sha256: '5dc48b0bd5e6b8f0fc43eb88347712cce45a26c96deac1136a90cdfd6d9fd100' },
+    { path: 'backend/src/jason/domain/task_center.py', sha256: 'e87c4272e6538dce68ec427fef1606e7728f0fb7dcd704d03ad4317f6f8e945b' },
+    { path: 'backend/src/jason/providers/gate.py', sha256: '9ab0a3ef9251bbda2a33dc5a7fd45e54aa8959b62585d3b82509fa5f8ea75eec' },
+    { path: 'backend/src/jason/providers/gate_a_control_evidence.py', sha256: 'cf07777be685213d7ed01b56ed306635069332b348726f3ec15a9909eb71631a' },
+    { path: 'backend/src/jason/providers/registry.py', sha256: '3ef264a5c16c1cccbd4757165e3ad39c2417b5a403bff5c4507ba622cb06a6cc' },
+    { path: 'scripts/qingmu_gate_a_evidence.py', sha256: '00b5de3ae3b0a27bfc6113a0a1d0909b501041a8a971fbdc64fe2f5bb1c90e49' },
+  ] as const
+  const identity = {
+    schema: 'jason.qingmu-provider-gate-a-control-evidence.v1',
+    productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+    gateAStatus: 'PASSED_CONTROL_LOGIC_ONLY',
+    mode: 'offline_fault_injection',
+    snapshotPolicy: 'rfc8785-jcs-sha256-v1',
+    environment, scenarios, assertions, sourceBindings,
+    externalProviderCalls: 0, productionDatabaseWrites: 0, formalBudgetLedgerWrites: 0,
+    simulatedProviderSubmitAttempts: 6, paidGenerationAuthorized: false, humanSignoffInferred: false,
+  } as const
+  return { ...identity, evidenceSnapshotSha256: jcsSha256(identity) }
 }
 
 function commandRecoveryVisualBaselineSha256(subject: Record<string, unknown>): string {
@@ -2016,6 +2083,10 @@ async function startYimengDouble(
         json(response, 200, costRehearsalFixture(Number(url.searchParams.get('candidate_count') ?? '0')))
         return
       }
+      if (request.method === 'GET' && url.pathname === '/api/qingmu/provider-gate-a/control-evidence') {
+        json(response, 200, gateAControlEvidenceFixture())
+        return
+      }
       if (
         request.method === 'GET'
         && url.pathname === `/api/qingmu/assets/${STORYBOARD_CANVAS_HERO_ASSET_ID}/content`
@@ -3538,6 +3609,7 @@ describe.skipIf(
           '/qingmu-yimeng/stageSources', '/qingmu-yimeng-command/bindStageSource',
           '/qingmu-yimeng-command/recoverStageSourceBinding',
           '/qingmu-yimeng/capabilityCatalog', '/qingmu-yimeng/costRehearsal',
+          '/qingmu-yimeng/gateAControlEvidence',
         ].includes(requestPath)) return
         browserRpcRequests.push({ path: requestPath, body: request.postDataJSON() as unknown })
       })
@@ -3675,6 +3747,7 @@ describe.skipIf(
               stageSourceMobile: process.env.QINGMU_E5_5_STAGE_SOURCE_MOBILE_SCREENSHOT,
               stageSourceHistorical: process.env.QINGMU_E5_5_STAGE_SOURCE_HISTORICAL_SCREENSHOT,
               costRehearsal: process.env.QINGMU_E6_2_COST_SCREENSHOT,
+              gateAControlEvidence: process.env.QINGMU_E6_3_GATE_A_SCREENSHOT,
               script: process.env.QINGMU_EVIDENCE_SCREENSHOT,
               actor: process.env.QINGMU_ACTOR_EVIDENCE_SCREENSHOT,
               scene: process.env.QINGMU_SCENE_EVIDENCE_SCREENSHOT,
@@ -3943,6 +4016,108 @@ describe.skipIf(
       await page.setViewportSize({ width: 1680, height: 1100 })
       await dialog.getByRole('tab', { name: '分镜与镜头', exact: true }).click()
       await dialog.getByRole('list', { name: '镜头选择' }).getByRole('button', { name: /frame-z/ }).click()
+      await dialog.getByRole('tab', { name: '总览', exact: true }).click()
+      await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
+      if (tracePath) await page.context().tracing.stop({ path: tracePath })
+    })
+
+    it('projects E6-3 offline Gate A recovery evidence without submit, reconcile, or production authority', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e6-3-gate-a-control-evidence'))
+      const consoleStart = browserConsoleErrors.length
+      const requestStart = capturedRequests.length
+      const rpcStart = browserRpcRequests.length
+      const tracePath = process.env.QINGMU_E6_3_TRACE_PATH?.trim()
+      if (tracePath) {
+        await mkdir(dirname(tracePath), { recursive: true })
+        await page.context().tracing.start({ screenshots: true, snapshots: true, sources: true })
+      }
+      const evidenceWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng/gateAControlEvidence')
+
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await dialog.getByRole('tab', { name: '生成与质检', exact: true }).click()
+
+      const evidenceWire = await (await evidenceWirePromise).json() as unknown
+      expect(evidenceWire).toMatchObject({ result: { ok: true, value: {
+        schema: 'jason.qingmu-provider-gate-a-control-evidence.v1',
+        productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+        gateAStatus: 'PASSED_CONTROL_LOGIC_ONLY',
+        mode: 'offline_fault_injection',
+        assertions: {
+          externalProviderCalls: 0, productionDatabaseWrites: 0, formalBudgetLedgerWrites: 0,
+          duplicatePaidSubmissions: 0, unknownAutomaticResubmits: 0,
+          maximumAutomaticSubmitAttemptsPerDispatch: 1, networkEgressAttempts: 0,
+          truncatedDownloadsAccepted: 0, reconciliationProviderCalls: 0,
+          pollRecoveryResubmits: 0, downloadRecoveryResubmits: 0,
+        },
+        externalProviderCalls: 0, productionDatabaseWrites: 0, formalBudgetLedgerWrites: 0,
+        simulatedProviderSubmitAttempts: 6, paidGenerationAuthorized: false, humanSignoffInferred: false,
+      } } })
+
+      const region = dialog.getByRole('region', { name: '生成安全控制证据 · Gate A', exact: true })
+      await region.getByText('已通过（仅离线故障注入）', { exact: true }).waitFor({ timeout: 20_000 })
+      await region.getByText('未验证', { exact: true }).waitFor()
+      await region.getByText('8/8', { exact: true }).waitFor()
+      for (const label of [
+        '未授权请求被拦截', '重复确认不重复提交', '载荷 SHA 冲突失败关闭', '提交未知进入隔离',
+        '模拟人工对账与去重', '只恢复轮询，不重提任务', '下载超时后只恢复下载', '截断下载被拒绝',
+      ]) await region.getByText(label, { exact: true }).waitFor()
+      expect(await region.getByText('0', { exact: true }).count()).toBe(6)
+      expect(await region.getByRole('button').allTextContents()).toEqual(['重读控制证据'])
+      await region.getByText(
+        '此证据只证明 Gate A 控制逻辑。它不授权付费生成，不代表真实 Provider 已验证，也不构成人工签收。',
+        { exact: true },
+      ).waitFor()
+      await region.locator('summary').click()
+      const fixture = gateAControlEvidenceFixture()
+      expect(fixture.evidenceSnapshotSha256).toBe('3b2f11004b63e172885e9bb374b3ecc8500d0c7b05bf3c2f721bd2748f1b5628')
+      await region.getByText(fixture.evidenceSnapshotSha256, { exact: true }).waitFor()
+      await region.getByText('scripts/qingmu_gate_a_evidence.py', { exact: true }).waitFor()
+
+      const upstream = capturedRequests.slice(requestStart)
+        .filter(request => new URL(request.path, 'http://127.0.0.1').pathname === '/api/qingmu/provider-gate-a/control-evidence')
+      expect(upstream).toEqual([expect.objectContaining({
+        method: 'GET',
+        path: '/api/qingmu/provider-gate-a/control-evidence',
+        authorization: `Bearer ${YIMENG_TOKEN}`,
+        cookie: undefined,
+        body: undefined,
+      })])
+      expect(capturedRequests.slice(requestStart).filter(request => request.method === 'POST')).toEqual([])
+      const rpc = browserRpcRequests.slice(rpcStart)
+        .filter(request => request.path === '/qingmu-yimeng/gateAControlEvidence')
+      expect(rpc).toHaveLength(1)
+      if (!isRecord(rpc[0]?.body)) throw new Error('missing gateAControlEvidence client request')
+      expect(rpc[0].body.type).toBe('client-request')
+      expect(rpc[0].body.method).toBe('gateAControlEvidence')
+      expect(rpc[0].body.payload).toEqual({})
+      expect(typeof rpc[0].body.rpcId).toBe('string')
+      expect(browserConsoleErrors.slice(consoleStart)).toEqual([])
+      expect(tripwire.pageErrors).toEqual([])
+      expect(await page.content()).not.toContain(YIMENG_TOKEN)
+      await expectNoVisibleTechnicalBrand(page)
+
+      const aria = await captureStableAria(
+        page,
+        'role=region[name="生成安全控制证据 · Gate A"]',
+        scaffold.workspaceCwd,
+      )
+      const goldenPath = join(REPO_ROOT, 'apps/web/tests/snapshots/qingmu-gate-a-control-evidence/ui.expected.md')
+      if (scaffold.mode === 'refresh') await mkdir(dirname(goldenPath), { recursive: true })
+      await compareOrRefreshGolden(goldenPath, aria, scaffold.mode)
+      const screenshotPath = process.env.QINGMU_E6_3_GATE_A_SCREENSHOT?.trim()
+      if (screenshotPath) {
+        await mkdir(dirname(screenshotPath), { recursive: true })
+        await region.getByRole('heading', { name: '生成安全控制证据 · Gate A', exact: true }).scrollIntoViewIfNeeded()
+        await page.screenshot({ path: screenshotPath })
+      }
+      await page.setViewportSize({ width: 390, height: 844 })
+      expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false)
+      expect(await region.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
+      expect((await region.getByRole('button', { name: '重读控制证据', exact: true }).boundingBox())?.height)
+        .toBeGreaterThanOrEqual(44)
+      await page.setViewportSize({ width: 1680, height: 1100 })
       await dialog.getByRole('tab', { name: '总览', exact: true }).click()
       await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
       if (tracePath) await page.context().tracing.stop({ path: tracePath })
@@ -6071,7 +6246,7 @@ describe.skipIf(
         }),
       ])
       expect(capturedRequests.filter(request =>
-        !isCapabilityCatalogRead(request) && /provider|worker/i.test(request.path))).toEqual([])
+        !isReadOnlyProviderEvidenceRead(request) && /provider|worker/i.test(request.path))).toEqual([])
       expect(capturedRequests.every(request => request.cookie === undefined)).toBe(true)
       expect(await page.content()).not.toContain(YIMENG_TOKEN)
       expect(await page.content()).not.toContain(IMAGO_ATTESTATION_KEY)
@@ -6303,7 +6478,7 @@ describe.skipIf(
       await refreshedExceptionRegion.getByText('recent-auth-session-e2e-1', { exact: true }).waitFor()
       await refreshedExceptionRegion.locator('strong').filter({ hasText: '当前有效' }).waitFor()
       expect(capturedRequests.filter(request =>
-        !isCapabilityCatalogRead(request) && /provider|worker/i.test(request.path))).toEqual([])
+        !isReadOnlyProviderEvidenceRead(request) && /provider|worker/i.test(request.path))).toEqual([])
       expect(capturedRequests.every(request => request.cookie === undefined)).toBe(true)
       expect(await page.content()).not.toContain(YIMENG_TOKEN)
       expect(await page.content()).not.toContain(IMAGO_ATTESTATION_KEY)
@@ -6639,7 +6814,7 @@ describe.skipIf(
         }),
       ])
       expect(capturedRequests.filter(request => request.path === recoveryPath)).toEqual([])
-      expect(capturedRequests.filter(request => !isCapabilityCatalogRead(request)
+      expect(capturedRequests.filter(request => !isReadOnlyProviderEvidenceRead(request)
         && /(?:provider|worker|generate|generation-job)/i.test(request.path))).toEqual([])
       expect(await page.locator('html').innerHTML()).not.toContain(IMAGO_ATTESTATION_KEY)
       expect(await page.content()).not.toContain(YIMENG_TOKEN)
@@ -6816,7 +6991,7 @@ describe.skipIf(
       const workflowStatuses = promptIrWorkflowStatuses.slice(workflowStatusStart)
       expect(workflowStatuses.length).toBeGreaterThan(0)
       expect(workflowStatuses.every(status => status === 'Ready')).toBe(true)
-      expect(capturedRequests.filter(request => !isCapabilityCatalogRead(request)
+      expect(capturedRequests.filter(request => !isReadOnlyProviderEvidenceRead(request)
         && /(?:provider|worker|generate|generation-job)/i.test(request.path))).toEqual([])
       expect(await page.locator('html').innerHTML()).not.toContain(IMAGO_ATTESTATION_KEY)
       expect(await page.content()).not.toContain(YIMENG_TOKEN)
@@ -7027,7 +7202,7 @@ describe.skipIf(
         .toBeGreaterThan(workflowReadStart + 1)
       expect(await page.evaluate(() => Object.keys(sessionStorage)
         .filter(key => key.startsWith('qingmu:storyboard-canvas-commit-recovery:v1:')))).toEqual([])
-      expect(capturedRequests.filter(request => !isCapabilityCatalogRead(request)
+      expect(capturedRequests.filter(request => !isReadOnlyProviderEvidenceRead(request)
         && /(?:provider|worker|generate|generation-job)/i.test(request.path))).toEqual([])
       expect(await page.locator('html').innerHTML()).not.toContain(IMAGO_ATTESTATION_KEY)
       expect(await page.content()).not.toContain(YIMENG_TOKEN)

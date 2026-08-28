@@ -39,6 +39,10 @@ import type {
   YimengCostRehearsalRequest,
   YimengCostRehearsalResponse,
   YimengCostRehearsalSubject,
+  YimengGateAControlEvidenceResponse,
+  YimengGateAControlScenario,
+  YimengGateAControlScenarioId,
+  YimengGateAControlSourceBinding,
   YimengStageSource,
   YimengStageSourceDefinition,
   YimengStageSourceBinding,
@@ -211,6 +215,10 @@ export type {
   YimengCostRehearsalRequest,
   YimengCostRehearsalResponse,
   YimengCostRehearsalSubject,
+  YimengGateAControlEvidenceResponse,
+  YimengGateAControlScenario,
+  YimengGateAControlScenarioId,
+  YimengGateAControlSourceBinding,
   YimengStageSource,
   YimengStageSourceDefinition,
   YimengStageSourceBinding,
@@ -355,6 +363,10 @@ export interface QingmuYimengReadPort {
     request: YimengCostRehearsalRequest,
     signal?: AbortSignal,
   ): Promise<YimengCostRehearsalResponse>
+  gateAControlEvidence(
+    request: Record<string, never>,
+    signal?: AbortSignal,
+  ): Promise<YimengGateAControlEvidenceResponse>
   stageSources(request: YimengStageSourcesRequest, signal?: AbortSignal): Promise<YimengStageSourcesResponse>
   productionUnits(request: YimengProductionUnitsRequest, signal?: AbortSignal): Promise<YimengProductionUnitsResponse>
   health(signal?: AbortSignal): Promise<YimengHealth>

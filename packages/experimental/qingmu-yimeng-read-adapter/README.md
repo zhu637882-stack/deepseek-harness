@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `capabilityCatalog`, `costRehearsal`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `shotFindings`, `productionUnits`, `lsuPlanSource`, `stageSources`, and `workflow`; it exposes no mutation endpoint.
+This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `capabilityCatalog`, `costRehearsal`, `gateAControlEvidence`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `shotFindings`, `productionUnits`, `lsuPlanSource`, `stageSources`, and `workflow`; it exposes no mutation endpoint.
 
 ## Contract
 
@@ -31,6 +31,12 @@ The projection fixes `UNVERIFIED_FOR_PAID_PRODUCTION`, `providerCalls: 0`, `data
 `costRehearsal` accepts one canonical frame, model, capability, sorted controls, resolution, candidate count, the complete freshly Host-validated catalog projection, and its exact catalog, request, preflight, and capability snapshot SHA-256 values. It sends one authenticated, body-free GET to Yimeng; the projection itself is never placed in the URL. Yimeng remains the sole owner of the authoritative frame duration, catalog rate, candidate limit, and read-only ProviderGate budget projection. The Host revalidates the projection's canonical bytes, independently derives eligibility, rate, and candidate limit, validates every receipt echo, recompiles the subject and full receipt with RFC 8785 JCS, and recomputes the integer micro-CNY identities and budget-window arithmetic. Candidate count must remain within the selected capability snapshot's declared output limit.
 
 This is a proposal rehearsal, not a reservation. The formal reservation ID is `null`, formally reserved money and ledger writes are zero, actual cost is unavailable before submit, and project/episode quotas remain explicitly `NOT_CONFIGURED`; only the existing global Provider budget window is projected. Every Provider, database, ledger, task, queue, submit, poll, download, webhook, and paid-authority field must remain at its literal zero or false value or the adapter fails closed. No second budget ledger, workflow state, reservation authority, or business truth is created in Harness.
+
+## Offline Gate A control evidence
+
+`gateAControlEvidence` accepts only an empty request and sends one authenticated, body-free GET to Yimeng's existing `/api/qingmu/provider-gate-a/control-evidence` endpoint. The Host requires the exact eight-scenario order and assertions for unauthorized blocking, duplicate acknowledgement, payload-SHA conflict, `submission_unknown` quarantine, simulated reconciliation, poll recovery, download recovery, and truncated-download rejection. It also validates canonical relative source paths, every source SHA-256, the fixed temporary-SQLite/scripted-fake environment, and the RFC 8785 content-addressed evidence SHA.
+
+This receipt proves only offline fault-injection control logic. External Provider calls, production-database writes, budget-ledger writes, duplicate paid submissions, unknown-state automatic resubmissions, reconciliation Provider calls, recovery resubmissions, accepted truncations, and network egress must remain literal zero or the adapter fails closed. The endpoint cannot run a scenario, reconcile a task, generate media, submit work, grant paid authority, or infer human signoff; real paid production remains `UNVERIFIED_FOR_PAID_PRODUCTION`.
 
 ## Continuity evidence
 

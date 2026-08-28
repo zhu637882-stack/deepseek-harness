@@ -6,7 +6,7 @@ This private experimental Client plugin adds the Qingmu OS production cockpit to
 
 ## Projection and ChangeSet workflow
 
-The cockpit opens from the sidebar into five tabs: Overview, Script & Assets, Storyboard & Shots, Generation & QC, and Cost & Delivery. It reads `health`, `capabilityCatalog`, `costRehearsal`, `projects`, `episodes`, `script`, `workflow`, element profiles, and authoritative reference candidates over the loopback-only `/qingmu-yimeng` RPC channel.
+The cockpit opens from the sidebar into five tabs: Overview, Script & Assets, Storyboard & Shots, Generation & QC, and Cost & Delivery. It reads `health`, `capabilityCatalog`, `costRehearsal`, `gateAControlEvidence`, `projects`, `episodes`, `script`, `workflow`, element profiles, and authoritative reference candidates over the loopback-only `/qingmu-yimeng` RPC channel.
 
 The Script & Assets tab formats the authoritative structured script into a draft and exposes one unified actor, environment, and prop workbench. It renders type-specific authoritative fields, a base/current/proposed three-way version comparison, and the seven exact impact groups with their canonical impact hash. Preparing a change creates an immutable ChangeSet and then fetches its server-side preview; neither step mutates the authoritative script or element profile. Commit remains disabled until the preview is committable and the user explicitly confirms the exact diff. For every element kind, the browser accepts only the exact six-field, lowercase-hex IMAGO method attestation and forwards it unchanged with the projection and projection hash. It never reads the attestation key or signs a proof. Conflicts fail closed and require reloading the new authority.
 
@@ -27,6 +27,12 @@ Loading preserves the card's layout and exposes an accessible busy status; error
 After selecting a shared canonical Shot, the Generation & QC tab can explicitly rehearse cost for one model, `video.visual` control set, declared resolution, and candidate count. The cockpit first requests a freshly filtered capability preflight, then passes that complete projection plus its exact catalog, request, preflight, and capability snapshot SHA-256 values to `costRehearsal`. The Host revalidates the projection before deriving eligibility, price, and candidate limit; the candidate selector is capped by the chosen capability snapshot. Browser state never supplies duration or pricing: Yimeng returns the authoritative frame duration, ProviderGate budget projection, and content-addressed receipt, while the Host independently validates and recomputes them.
 
 The result separates estimated maximum, proposed hold, formal reservation, actual cost, and budget scope. Formal reservation remains zero with no ID; actual cost stays unavailable before submit; global remaining budget is visible while project and episode quotas remain `NOT_CONFIGURED`. Blockers and the rehearsal SHA remain inspectable. The only operation is the explicit rehearsal button—there is no reserve, generate, submit, or approval control. Closing, switching scope, or an error invalidates stale output; a deferred-response test proves that an aborted older Shot response cannot replace a newer receipt. The surface creates no second ledger or workflow and preserves literal zero Provider calls, database/ledger writes, tasks, queue entries, submissions, polls, downloads, webhooks, and paid authority.
+
+## Read-only Gate A fault-injection evidence
+
+Generation & QC also lazily reads Yimeng's source-bound `gateAControlEvidence` receipt while the tab is visible. One card exposes all eight offline scenarios, the required zero counters, temporary-database and scripted-fake environment, evidence SHA, and source-file hashes. Harness rejects a changed field, scenario order, source binding, authority bit, or recomputed evidence hash before the browser can render it; disabled views discard late responses.
+
+The only control is “Reload control evidence.” The surface cannot run fault injection, reconcile, generate, submit, reserve funds, call a Provider, or approve content. “Passed” is labeled as offline control logic only, while real paid production remains visibly unverified and human signoff remains absent.
 
 ## Explicit saved-script source registration
 
