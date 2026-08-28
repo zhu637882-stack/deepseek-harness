@@ -1141,7 +1141,7 @@ export interface YimengShotVideoSubject {
 }
 
 /** Reviewer-authored problem details, retained without defaults or text rewriting. */
-export interface YimengShotFindingPayload {
+export interface YimengShotFindingPayload extends YimengCommandJsonObject {
   readonly timecode: string
   readonly observation: string
   readonly evidenceRefs: readonly string[]
@@ -1230,6 +1230,120 @@ export interface YimengShotFindingRecovery extends YimengRecoverShotFindingReque
   readonly schema: 'jason.qingmu-shot-finding-recovery.v1'
   readonly status: 'committed' | 'not_found'
   readonly result: YimengShotFindingResult | null
+}
+
+/** Exact existing Yimeng asset selected from one Shot's read-only version stack. */
+export interface YimengSelectTakeVersionRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly expectedStackSha256: string
+  readonly expectedSelectedTakeId: string | null
+  readonly candidateTakeId: string
+  readonly candidateVersionOrdinal: number
+  readonly candidateOutputSha256: string
+  readonly idempotencyKey: string
+}
+
+/** GET-only receipt lookup for an uncertain selection command. */
+export type YimengRecoverTakeVersionSelectionRequest = YimengSelectTakeVersionRequest
+
+/** Command-side copy of one Yimeng-owned Take projection. */
+export interface YimengTakeSelectionVersion {
+  readonly takeId: string
+  readonly versionOrdinal: number
+  readonly source: 'initial' | 'regenerate' | 'repair' | 'segment'
+  readonly role: string
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly durationSec: number | null
+  readonly estimatedCny: number | null
+  readonly selectionStatus: string
+  readonly isSelected: boolean
+  readonly qualityStatus: string
+  readonly qualityPassed: boolean | null
+  readonly qualityCheckCount: number
+  readonly blockers: readonly string[]
+  readonly recordedOutputSha256: string | null
+  readonly outputSha256: string | null
+  readonly outputBindingStatus:
+    | 'verified'
+    | 'recorded_sha_missing'
+    | 'materialized_file_missing'
+    | 'recorded_sha_mismatch'
+  readonly taskId: string | null
+  readonly provider: string | null
+  readonly model: string | null
+  readonly providerTaskId: string | null
+  readonly routeKey: string | null
+  readonly inputHash: string | null
+  readonly lineageComplete: boolean
+  readonly canAttemptSelection: boolean
+}
+
+/** Authoritative Yimeng readback returned by a committed selection. */
+export interface YimengTakeSelectionStackSubject {
+  readonly schema: 'jason.qingmu-take-version-stack-subject.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly frameNo: number
+  readonly storyboardRevision: number
+  readonly frameContentSha256: string
+  readonly selectionRevision: number
+  readonly selectedTakeId: string | null
+  readonly versions: readonly YimengTakeSelectionVersion[]
+}
+
+/** Verified human identity used by the Yimeng owner-selection command. */
+export interface YimengTakeSelectionIdentity {
+  readonly actorUserId: string
+  readonly actorNaturalPersonId: string
+  readonly actorRole: 'project_owner_selector'
+  readonly authSessionId: string
+}
+
+/** One durable selection receipt; Selected remains explicitly separate from Approval. */
+export interface YimengTakeVersionSelectionResult {
+  readonly schema: 'jason.qingmu-take-selection-result.v1'
+  readonly changeSetId: string
+  readonly commandReceiptId: string
+  readonly eventId: string
+  readonly eventType: 'TakeVersionSelected'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly selectedTake: {
+    readonly takeId: string
+    readonly versionOrdinal: number
+    readonly outputSha256: string
+  }
+  readonly selectionIdentity: YimengTakeSelectionIdentity
+  readonly baseStackSnapshotSha256: string
+  readonly authoritativeStack: YimengTakeSelectionStackSubject
+  readonly authoritativeStackSnapshotSha256: string
+  readonly provenanceTaskId: string
+  readonly taskMutation: {
+    readonly created: true
+    readonly kind: 'local_selection_provenance'
+    readonly taskId: string
+  }
+  readonly idempotencyKey: string
+  readonly deduplicated: boolean
+  readonly committedAt: string
+  readonly selectionChanged: true
+  readonly providerCalls: 0
+  readonly paidProviderAuthority: 'not_granted'
+  readonly budgetMutation: false
+  readonly humanApprovalInferred: false
+  readonly formalApprovalChanged: false
+}
+
+/** Historical receipt lookup; not_found never authorizes a retry by the adapter. */
+export interface YimengTakeVersionSelectionRecovery extends YimengRecoverTakeVersionSelectionRequest {
+  readonly schema: 'jason.qingmu-take-selection-recovery.v1'
+  readonly status: 'committed' | 'not_found'
+  readonly result: YimengTakeVersionSelectionResult | null
 }
 
 /** Native shot-group contents; group order never allocates an IMAGO unit ID. */
@@ -2190,6 +2304,8 @@ export interface YimengCommandEndpointMap {
   readonly recoverReferenceRightsExceptionRelease: YimengRecoverReferenceRightsExceptionReleaseResponse
   readonly recordShotFinding: YimengShotFindingResult
   readonly recoverShotFinding: YimengShotFindingRecovery
+  readonly selectTakeVersion: YimengTakeVersionSelectionResult
+  readonly recoverTakeVersionSelection: YimengTakeVersionSelectionRecovery
   readonly bindProductionUnit: YimengProductionUnitResult
   readonly recoverProductionUnitBinding: YimengProductionUnitRecovery
   readonly bindStageSource: YimengStageSourceResult

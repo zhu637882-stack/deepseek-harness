@@ -1,0 +1,255 @@
+.panel {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.header h3,
+.header p,
+.body p,
+.recovery p {
+  margin: 0;
+}
+
+.header h3 {
+  font-size: 15px;
+}
+
+.header p {
+  margin-top: 6px;
+  color: var(--dsw-alias-label-secondary);
+  line-height: 1.5;
+}
+
+.header button,
+.recovery button,
+.versionBar button,
+.select {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.header button:disabled,
+.recovery button:disabled,
+.select:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.notice,
+.receipt,
+.boundary,
+.recovery {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+.notice,
+.receipt,
+.boundary {
+  background: var(--qingmu-soft);
+}
+
+.receipt code {
+  overflow-wrap: anywhere;
+}
+
+.recovery {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+}
+
+.recovery details {
+  width: 100%;
+}
+
+.recovery summary,
+.take summary,
+.details summary {
+  min-height: 44px;
+  box-sizing: border-box;
+  cursor: pointer;
+  line-height: 44px;
+}
+
+.body {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.stackHeader {
+  display: grid;
+  grid-template-columns: minmax(160px, .8fr) minmax(120px, .5fr) minmax(0, 1.7fr);
+  gap: 8px;
+}
+
+.stackHeader > div {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+.stackHeader span,
+.compareHelp,
+.take dt {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+}
+
+.stackHeader code,
+.take code,
+.details code {
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+
+.versionBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.versionBar button[aria-pressed="true"] {
+  border-color: var(--qingmu-accent);
+  background: var(--qingmu-soft);
+  color: var(--qingmu-accent);
+  font-weight: 700;
+}
+
+.compareGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.take {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.take[data-selected="true"] {
+  border-color: var(--qingmu-accent);
+  box-shadow: inset 3px 0 var(--qingmu-accent);
+}
+
+.take header,
+.take header > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.take header {
+  justify-content: space-between;
+}
+
+.take header strong {
+  font-size: 18px;
+}
+
+.take mark {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: var(--qingmu-soft);
+  color: var(--qingmu-accent);
+  font-size: 11px;
+}
+
+.take dl,
+.details dl {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+}
+
+.take dl > div,
+.details dl > div {
+  display: grid;
+  grid-template-columns: minmax(105px, .6fr) minmax(0, 1fr);
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+.take dd,
+.details dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.blockers ul {
+  margin: 7px 0 0;
+  padding-left: 20px;
+}
+
+.select {
+  width: 100%;
+  border-color: var(--qingmu-accent);
+  background: var(--qingmu-accent);
+  color: var(--dsw-alias-label-inverse, white);
+  font-weight: 700;
+}
+
+.details {
+  min-width: 0;
+}
+
+.details p {
+  margin-bottom: 10px;
+}
+
+.header button:focus-visible,
+.recovery button:focus-visible,
+.recovery summary:focus-visible,
+.versionBar button:focus-visible,
+.take summary:focus-visible,
+.select:focus-visible,
+.details summary:focus-visible {
+  outline: 2px solid var(--qingmu-accent);
+  outline-offset: 3px;
+}
+
+@media (max-width: 840px) {
+  .stackHeader,
+  .compareGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .header {
+    flex-direction: column;
+  }
+
+  .header button {
+    width: 100%;
+  }
+}

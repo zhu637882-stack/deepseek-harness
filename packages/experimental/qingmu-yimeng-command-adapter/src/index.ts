@@ -8,6 +8,7 @@ import type {} from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import { prepareShotFindingCommand } from './shot-finding.ts'
+import { prepareTakeVersionCommand } from './take-version.ts'
 import { prepareProductionUnitCommand } from './production-unit.ts'
 import {
   prepareCurrentStageArtifactMethodRequest,
@@ -282,6 +283,13 @@ export type {
   YimengShotFindingRecovery,
   YimengShotFindingResult,
   YimengShotVideoSubject,
+  YimengSelectTakeVersionRequest,
+  YimengRecoverTakeVersionSelectionRequest,
+  YimengTakeSelectionIdentity,
+  YimengTakeSelectionStackSubject,
+  YimengTakeSelectionVersion,
+  YimengTakeVersionSelectionRecovery,
+  YimengTakeVersionSelectionResult,
 } from './types.ts'
 
 const CHANNEL = '/qingmu-yimeng-command'
@@ -4995,7 +5003,8 @@ export function createYimengCommandHandler(
       let path: string
       let requestInit: FetchJsonRequest
       let normalize: (value: unknown, token: string) => unknown
-      if (endpoint === 'recordShotFinding' || endpoint === 'recoverShotFinding'
+      if (endpoint === 'selectTakeVersion' || endpoint === 'recoverTakeVersionSelection'
+        || endpoint === 'recordShotFinding' || endpoint === 'recoverShotFinding'
         || endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
         || endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
         || endpoint === 'registerStageArtifact' || endpoint === 'recoverStageArtifactRegistration'
@@ -5006,21 +5015,23 @@ export function createYimengCommandHandler(
         || endpoint === 'recordReworkRoute' || endpoint === 'recoverReworkRoute'
         || endpoint === 'probeReworkRouteAuthority') {
         const helpers = stageArtifactHelpers
-        const prepared = endpoint === 'recordReworkRoute' || endpoint === 'recoverReworkRoute'
+        const prepared = endpoint === 'selectTakeVersion' || endpoint === 'recoverTakeVersionSelection'
+          ? prepareTakeVersionCommand(endpoint, payload, helpers)
+          : endpoint === 'recordReworkRoute' || endpoint === 'recoverReworkRoute'
           || endpoint === 'probeReworkRouteAuthority'
-          ? prepareReworkRouteCommand(endpoint, payload, helpers, currentReworkRouteMethod)
-          : endpoint === 'sealLsuPlan' || endpoint === 'recoverLsuPlanSeal'
+            ? prepareReworkRouteCommand(endpoint, payload, helpers, currentReworkRouteMethod)
+            : endpoint === 'sealLsuPlan' || endpoint === 'recoverLsuPlanSeal'
           || endpoint === 'probeLsuPlanAuthority'
-            ? prepareLsuPlanCommand(endpoint, payload, helpers, currentLsuPlanMethod)
-            : endpoint === 'registerStageArtifact' || endpoint === 'recoverStageArtifactRegistration'
+              ? prepareLsuPlanCommand(endpoint, payload, helpers, currentLsuPlanMethod)
+              : endpoint === 'registerStageArtifact' || endpoint === 'recoverStageArtifactRegistration'
           || endpoint === 'commitStageArtifactDecision' || endpoint === 'recoverStageArtifactDecision'
           || endpoint === 'probeStageArtifactAuthority'
-              ? prepareStageArtifactCommand(endpoint, payload, helpers, currentStageArtifactMethod)
-              : endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
-                ? prepareProductionUnitCommand(endpoint, payload, helpers)
-                : endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
-                  ? prepareStageSourceCommand(endpoint, payload, helpers)
-                  : prepareShotFindingCommand(endpoint, payload, helpers)
+                ? prepareStageArtifactCommand(endpoint, payload, helpers, currentStageArtifactMethod)
+                : endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
+                  ? prepareProductionUnitCommand(endpoint, payload, helpers)
+                  : endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
+                    ? prepareStageSourceCommand(endpoint, payload, helpers)
+                    : prepareShotFindingCommand(endpoint, payload, helpers)
         path = prepared.path
         requestInit = {
           method: prepared.request.method,

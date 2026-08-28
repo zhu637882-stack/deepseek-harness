@@ -1001,6 +1001,16 @@ export interface ImagoReworkRouteMethodDefinition extends ImagoMethodJsonObject 
 }
 
 /** Exact bounded route instruction; it is not a task or rework execution. */
+export interface ImagoReworkRouteBoundedItem extends ImagoMethodJsonObject {
+  readonly timecode: string
+  readonly severity: 'BLOCKER' | 'MAJOR' | 'MINOR'
+  readonly observation: string
+  readonly evidenceRefs: readonly string[]
+  readonly ownerReason: string
+  readonly suggestion: string
+  readonly reworkScope: string
+}
+
 export interface ImagoReworkRouteInstruction extends ImagoMethodJsonObject {
   readonly state: 'BOUNDED_REWORK_ROUTED'
   readonly outputSchema: 'IMAGO-V6-BoundedReworkRoute-v1'
@@ -1011,7 +1021,7 @@ export interface ImagoReworkRouteInstruction extends ImagoMethodJsonObject {
   readonly ownerRoleId: string
   readonly ownerScope: 'global' | 'per_lsu'
   readonly ownerScopeInstance: string
-  readonly boundedItem: ImagoMethodJsonObject
+  readonly boundedItem: ImagoReworkRouteBoundedItem
   readonly scopeExpansionForbidden: true
 }
 

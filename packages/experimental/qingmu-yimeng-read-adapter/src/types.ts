@@ -438,6 +438,68 @@ export interface YimengSelectedVideoReviewResponse extends YimengSelectedVideoRe
   readonly humanSignoffInferred: false
 }
 
+/** Exact Yimeng coordinates for one Shot's existing Take stack. */
+export type YimengTakeVersionRequest = YimengSelectedVideoReviewRequest
+
+/** One existing video asset projected as a Take version; no second Take identity is created. */
+export interface YimengTakeVersion {
+  readonly takeId: string
+  readonly versionOrdinal: number
+  readonly source: 'initial' | 'regenerate' | 'repair' | 'segment'
+  readonly role: string
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly durationSec: number | null
+  readonly estimatedCny: number | null
+  readonly selectionStatus: string
+  readonly isSelected: boolean
+  readonly qualityStatus: string
+  readonly qualityPassed: boolean | null
+  readonly qualityCheckCount: number
+  readonly blockers: readonly string[]
+  readonly recordedOutputSha256: string | null
+  readonly outputSha256: string | null
+  readonly outputBindingStatus: 'verified' | 'recorded_sha_missing' | 'materialized_file_missing' | 'recorded_sha_mismatch'
+  readonly taskId: string | null
+  readonly provider: string | null
+  readonly model: string | null
+  readonly providerTaskId: string | null
+  readonly routeKey: string | null
+  readonly inputHash: string | null
+  readonly lineageComplete: boolean
+  readonly canAttemptSelection: boolean
+}
+
+/** Content-addressed current stack built from Yimeng assets and selection state. */
+export interface YimengTakeVersionStackSubject extends YimengTakeVersionRequest {
+  readonly schema: 'jason.qingmu-take-version-stack-subject.v1'
+  readonly frameNo: number
+  readonly storyboardRevision: number
+  readonly frameContentSha256: string
+  readonly selectionRevision: number
+  readonly selectedTakeId: string | null
+  readonly versions: readonly YimengTakeVersion[]
+}
+
+/** Read-only stack contract; Selected remains separate from formal Approval. */
+export interface YimengTakeVersionStackResponse {
+  readonly schema: 'jason.qingmu-take-version-stack.v1'
+  readonly subject: YimengTakeVersionStackSubject
+  readonly stackSnapshotSha256: string
+  readonly capabilities: {
+    readonly canCompare: true
+    readonly canSelect: boolean
+  }
+  readonly boundaries: {
+    readonly takeIdAuthority: 'yimeng.assets.id'
+    readonly versionOrdinalPersistence: false
+    readonly versionOrdinalRule: 'created_at_then_asset_id_ascending'
+    readonly selectedIsApproval: false
+    readonly formalApprovalChanged: false
+    readonly providerAuthority: 'not_granted'
+  }
+}
+
 /** Exact selected-video bytes and canonical Shot revision owned by Yimeng. */
 export interface YimengShotVideoSubject extends YimengSelectedVideoReviewRequest {
   readonly schema: 'jason.qingmu-shot-video-subject.v1'
@@ -450,7 +512,7 @@ export interface YimengShotVideoSubject extends YimengSelectedVideoReviewRequest
 }
 
 /** Explicit reviewer attribution; no severity, Owner, or evidence is inferred. */
-export interface YimengShotFindingPayload {
+export interface YimengShotFindingPayload extends YimengJsonObject {
   readonly timecode: string
   readonly observation: string
   readonly evidenceRefs: readonly string[]
@@ -1440,7 +1502,7 @@ export interface YimengReworkRouteFinding extends YimengShotFindingPayload {
 }
 
 /** Exact current LSU membership that contains the Finding Shot once. */
-export interface YimengReworkRouteProductionUnit {
+export interface YimengReworkRouteProductionUnit extends YimengJsonObject {
   readonly unitId: string
   readonly bindingRevision: number
   readonly bindingSha256: string
@@ -1449,7 +1511,7 @@ export interface YimengReworkRouteProductionUnit {
 }
 
 /** Current sealed complete-scope plan and C5F lock lineage used by the route compiler. */
-export interface YimengReworkRouteSealedPlan {
+export interface YimengReworkRouteSealedPlan extends YimengJsonObject {
   readonly revision: number
   readonly sealSha256: string
   readonly subjectSnapshotSha256: string
@@ -1534,6 +1596,7 @@ export interface YimengReadEndpointMap {
   readonly script: YimengScriptResponse
   readonly promptIr: YimengPromptIrResponse
   readonly selectedVideoReview: YimengSelectedVideoReviewResponse
+  readonly takeVersions: YimengTakeVersionStackResponse
   readonly shotFindings: YimengShotFindingFeedResponse
   readonly productionUnits: YimengProductionUnitsResponse
   readonly stageSources: YimengStageSourcesResponse

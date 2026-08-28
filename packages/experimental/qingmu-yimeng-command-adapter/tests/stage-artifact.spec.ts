@@ -172,8 +172,10 @@ describe('Stage artifact registration and receipt recovery transport', () => {
       undefined,
       { 'pipeline/imago-os-current.json': 'b'.repeat(64) },
     )
-    const expected = stageArtifactAuthorityProbeResult(request, null, ['target_rules_not_current'])
-    expected.rulesSha256 = currentMethod.projection.rulesSha256
+    const expected = {
+      ...stageArtifactAuthorityProbeResult(request, null, ['target_rules_not_current']),
+      rulesSha256: currentMethod.projection.rulesSha256,
+    }
     const runStageArtifactMethod: StageArtifactMethodRunner = async () => ({ ok: true, value: currentMethod })
 
     expect(await handler(network(expected), () => TOKEN, runStageArtifactMethod)(

@@ -30,6 +30,8 @@ import type {
   YimengRecoverScriptCommitResponse, YimengRecoverStoryboardCanvasCommitResponse,
   YimengScriptResponse, YimengSelectPromptIrResponse,
   YimengSelectedVideoReviewResponse,
+  YimengTakeVersionStackResponse,
+  YimengTakeVersionSelectionResult, YimengTakeVersionSelectionRecovery,
   YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengWorkflowProjection,
 } from './contracts.ts'
@@ -68,6 +70,10 @@ export type {
   YimengRecoverScriptCommitResponse, YimengRecoverStoryboardCanvasCommitResponse,
   YimengScriptResponse, YimengSelectPromptIrResponse,
   YimengSelectedVideoReviewResponse,
+  YimengTakeVersion, YimengTakeVersionRequest, YimengTakeVersionStackResponse,
+  YimengTakeVersionStackSubject, YimengSelectTakeVersionRequest,
+  YimengRecoverTakeVersionSelectionRequest, YimengTakeSelectionIdentity,
+  YimengTakeVersionSelectionResult, YimengTakeVersionSelectionRecovery,
   YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengWorkflowProjection,
 } from './contracts.ts'
@@ -118,10 +124,15 @@ export function apply(ctx: ClientContext): void {
     script: (request, signal) => read<YimengScriptResponse>('script', request, signal),
     promptIr: (request, signal) => read<YimengPromptIrResponse>('promptIr', request, signal),
     selectedVideoReview: (request, signal) => read<YimengSelectedVideoReviewResponse>('selectedVideoReview', request, signal),
+    takeVersions: (request, signal) => read<YimengTakeVersionStackResponse>('takeVersions', request, signal),
     shotFindings: (request, signal) => read<YimengShotFindingFeedResponse>('shotFindings', request, signal),
     shotFindingMethod: (request, signal) => method<ImagoShotFindingMethodResponse>('shotFindingMethod', request, signal),
     recordShotFinding: (request, signal) => command<YimengShotFindingResult>('recordShotFinding', request, signal),
     recoverShotFinding: (request, signal) => command<YimengShotFindingRecovery>('recoverShotFinding', request, signal),
+    selectTakeVersion: (request, signal) =>
+      command<YimengTakeVersionSelectionResult>('selectTakeVersion', request, signal),
+    recoverTakeVersionSelection: (request, signal) =>
+      command<YimengTakeVersionSelectionRecovery>('recoverTakeVersionSelection', request, signal),
     reworkRouteSource: (request, signal) =>
       read<YimengReworkRouteSourceResponse>('reworkRouteSource', request, signal),
     reworkRouteMethod: (request, signal) =>

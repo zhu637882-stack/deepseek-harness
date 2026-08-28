@@ -86,6 +86,10 @@ import type {
   YimengSelectedVideoReviewRequest,
   YimengSelectedVideoReviewResponse,
   YimengSelectedVideoReviewStatus,
+  YimengTakeVersion,
+  YimengTakeVersionRequest,
+  YimengTakeVersionStackResponse,
+  YimengTakeVersionStackSubject,
   YimengShotFinding,
   YimengShotFindingPayload,
   YimengShotFindingFeedResponse,
@@ -173,6 +177,11 @@ import type {
   YimengReworkRouteRecovery,
   YimengProbeReworkRouteAuthorityRequest,
   YimengReworkRouteAuthorityProbe,
+  YimengSelectTakeVersionRequest,
+  YimengRecoverTakeVersionSelectionRequest,
+  YimengTakeSelectionIdentity,
+  YimengTakeVersionSelectionResult,
+  YimengTakeVersionSelectionRecovery,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 
 export type {
@@ -261,6 +270,10 @@ export type {
   YimengSelectedVideoReviewRequest,
   YimengSelectedVideoReviewResponse,
   YimengSelectedVideoReviewStatus,
+  YimengTakeVersion,
+  YimengTakeVersionRequest,
+  YimengTakeVersionStackResponse,
+  YimengTakeVersionStackSubject,
   YimengShotFinding,
   YimengShotFindingPayload,
   YimengShotFindingFeedResponse,
@@ -348,6 +361,11 @@ export type {
   YimengReworkRouteRecovery,
   YimengProbeReworkRouteAuthorityRequest,
   YimengReworkRouteAuthorityProbe,
+  YimengSelectTakeVersionRequest,
+  YimengRecoverTakeVersionSelectionRequest,
+  YimengTakeSelectionIdentity,
+  YimengTakeVersionSelectionResult,
+  YimengTakeVersionSelectionRecovery,
 }
 
 /** Open JSON object retained without inventing a stricter Yimeng business schema. */
@@ -382,6 +400,7 @@ export interface QingmuYimengReadPort {
   script(request: YimengScriptRequest, signal?: AbortSignal): Promise<YimengScriptResponse>
   promptIr(request: YimengPromptIrRequest, signal?: AbortSignal): Promise<YimengPromptIrResponse>
   selectedVideoReview(request: YimengSelectedVideoReviewRequest, signal?: AbortSignal): Promise<YimengSelectedVideoReviewResponse>
+  takeVersions(request: YimengTakeVersionRequest, signal?: AbortSignal): Promise<YimengTakeVersionStackResponse>
   shotFindings(request: YimengSelectedVideoReviewRequest, signal?: AbortSignal): Promise<YimengShotFindingFeedResponse>
   reworkRouteSource(request: YimengReworkRouteSourceRequest, signal?: AbortSignal): Promise<YimengReworkRouteSourceResponse>
   workflow(request: YimengWorkflowRequest, signal?: AbortSignal): Promise<YimengWorkflowProjection>
@@ -397,6 +416,14 @@ export interface QingmuYimengCommandPort {
   ): Promise<YimengProductionUnitRecovery>
   recordShotFinding(request: YimengRecordShotFindingRequest, signal?: AbortSignal): Promise<YimengShotFindingResult>
   recoverShotFinding(request: YimengRecoverShotFindingRequest, signal?: AbortSignal): Promise<YimengShotFindingRecovery>
+  selectTakeVersion(
+    request: YimengSelectTakeVersionRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengTakeVersionSelectionResult>
+  recoverTakeVersionSelection(
+    request: YimengRecoverTakeVersionSelectionRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengTakeVersionSelectionRecovery>
   recordReworkRoute(request: YimengRecordReworkRouteRequest, signal?: AbortSignal): Promise<YimengReworkRouteResult>
   recoverReworkRoute(request: YimengRecordReworkRouteRequest, signal?: AbortSignal): Promise<YimengReworkRouteRecovery>
   probeReworkRouteAuthority(

@@ -9,6 +9,7 @@ import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import { normalizeContinuityDelta } from './continuity.ts'
 import { normalizeSelectedVideoReview } from './selected-video-review.ts'
+import { normalizeTakeVersionStack, parseTakeVersionReadRequest } from './take-versions.ts'
 import { normalizeShotFindingFeed, parseShotFindingReadRequest } from './shot-findings.ts'
 import { normalizeProductionUnitsFeed, parseProductionUnitsReadRequest } from './production-units.ts'
 import { normalizeStageSourcesFeed, parseStageSourcesReadRequest } from './stage-sources.ts'
@@ -162,6 +163,10 @@ export type {
   YimengSelectedVideoReviewResponse,
   YimengSelectedVideoReviewAsset,
   YimengSelectedVideoReviewStatus,
+  YimengTakeVersion,
+  YimengTakeVersionRequest,
+  YimengTakeVersionStackResponse,
+  YimengTakeVersionStackSubject,
   YimengVideoReviewDefect,
   YimengVideoReviewRecord,
   YimengShotVideoSubject,
@@ -245,7 +250,7 @@ const PROTECTED_ENDPOINTS = new Set([
   'projects', 'episodes', 'script', 'promptIr', 'capabilityCatalog', 'costRehearsal',
   'gateAControlEvidence', 'elementProfile',
   'referenceCandidates', 'reviewEvents',
-  'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'shotFindings', 'productionUnits', 'stageSources',
+  'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'shotFindings', 'productionUnits', 'stageSources',
   'lsuPlanSource', 'reworkRouteSource',
 ])
 const HUMAN_DECISION_VALUES = new Set<YimengHumanDecisionValue>([
@@ -648,6 +653,14 @@ function parseShotFindingRequest(payload: unknown): YimengSelectedVideoReviewReq
     return parseShotFindingReadRequest(payload)
   } catch {
     throw new InputError('shotFindings accepts only canonical projectId, episodeId, and frameId')
+  }
+}
+
+function parseTakeVersionRequest(payload: unknown) {
+  try {
+    return parseTakeVersionReadRequest(payload)
+  } catch {
+    throw new InputError('takeVersions accepts only canonical projectId, episodeId, and frameId')
   }
 }
 
@@ -3663,6 +3676,12 @@ export function createYimengReadHandler(
         const request = parseSelectedVideoReviewRequest(payload)
         path = `/api/frames/${encodeURIComponent(request.frameId)}/video-candidates`
         normalize = value => normalizeSelectedVideoReview(value, request)
+      } else if (endpoint === 'takeVersions') {
+        const request = parseTakeVersionRequest(payload)
+        path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)
+          + '/episodes/' + encodeURIComponent(request.episodeId)
+          + '/frames/' + encodeURIComponent(request.frameId) + '/take-versions'
+        normalize = value => normalizeTakeVersionStack(value, request, jcsSha256)
       } else if (endpoint === 'shotFindings') {
         const request = parseShotFindingRequest(payload)
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/frames/${encodeURIComponent(request.frameId)}/findings`

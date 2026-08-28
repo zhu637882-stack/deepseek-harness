@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import { captureStableAria, compareOrRefreshGolden, launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts'
 import { REPO_ROOT, saveFailureShot, ZH_BROWSER_LOCALE } from './support.ts'
 import { continuityFixture, rebindContinuity } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/continuity-fixture.ts'
+import { takeVersionStackFixture as baseTakeVersionStackFixture } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/take-version-fixture.ts'
 import { videoCandidatesFixture } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/selected-video-review-fixture.ts'
 import { createShotFindingDouble } from './qingmu-shot-finding-fixture.ts'
 import { createReworkRouteDouble } from './qingmu-rework-route-fixture.ts'
@@ -1863,6 +1864,83 @@ function selectedVideoReviewFixture(frameId: string, revision: number, mode: Vid
   }
 }
 
+type TakeVersionStackFixture = ReturnType<typeof baseTakeVersionStackFixture>
+
+function takeVersionStackFixture(
+  revision: number,
+  selectedTakeId: 'asset-take-1' | 'asset-take-2' = 'asset-take-1',
+): TakeVersionStackFixture {
+  const base = baseTakeVersionStackFixture({
+    projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID,
+  })
+  const subject = {
+    ...base.subject,
+    frameNo: 12,
+    storyboardRevision: revision,
+    frameContentSha256: 'b'.repeat(64),
+    selectionRevision: selectedTakeId === 'asset-take-1' ? 0 : 1,
+    selectedTakeId,
+    versions: base.subject.versions.map((version) => {
+      if (version.takeId === selectedTakeId) {
+        return { ...version, selectionStatus: 'Selected', isSelected: true, canAttemptSelection: false }
+      }
+      if (selectedTakeId === 'asset-take-2' && version.takeId === 'asset-take-1') {
+        return { ...version, selectionStatus: 'Stale', isSelected: false, canAttemptSelection: false }
+      }
+      return { ...version, selectionStatus: 'Unselected', isSelected: false, canAttemptSelection: true }
+    }),
+  }
+  return { ...base, subject, stackSnapshotSha256: jcsSha256(subject) }
+}
+
+function takeVersionSelectionResultFixture(
+  request: Record<string, unknown>,
+  authoritativeStack: TakeVersionStackFixture['subject'],
+  deduplicated = false,
+) {
+  const idempotencyKey = String(request.idempotencyKey)
+  const suffix = createHash('sha256').update(idempotencyKey, 'utf8').digest('hex').slice(0, 16)
+  return {
+    schema: 'jason.qingmu-take-selection-result.v1',
+    changeSetId: `changeset-take-${suffix}`,
+    commandReceiptId: `receipt-take-${suffix}`,
+    eventId: `event-take-${suffix}`,
+    eventType: 'TakeVersionSelected',
+    projectId: 'project-1',
+    episodeId: 'episode-1',
+    frameId: PROMPT_IR_FRAME_ID,
+    selectedTake: {
+      takeId: request.candidateTakeId,
+      versionOrdinal: request.candidateVersionOrdinal,
+      outputSha256: request.candidateOutputSha256,
+    },
+    selectionIdentity: {
+      actorUserId: 'owner-1',
+      actorNaturalPersonId: 'owner-natural-person-1',
+      actorRole: 'project_owner_selector',
+      authSessionId: createHash('sha256').update(YIMENG_TOKEN, 'utf8').digest('hex'),
+    },
+    baseStackSnapshotSha256: request.expectedStackSha256,
+    authoritativeStack,
+    authoritativeStackSnapshotSha256: jcsSha256(authoritativeStack),
+    provenanceTaskId: `selection-provenance-${suffix}`,
+    taskMutation: {
+      created: true,
+      kind: 'local_selection_provenance',
+      taskId: `selection-provenance-${suffix}`,
+    },
+    idempotencyKey,
+    deduplicated,
+    committedAt: '2026-08-28T10:02:00.123456+00:00',
+    selectionChanged: true,
+    providerCalls: 0,
+    paidProviderAuthority: 'not_granted',
+    budgetMutation: false,
+    humanApprovalInferred: false,
+    formalApprovalChanged: false,
+  } as const
+}
+
 async function startYimengDouble(
   captured: CapturedYimengRequest[],
   scriptReadRevisions: number[],
@@ -1957,6 +2035,11 @@ async function startYimengDouble(
   let pendingStoryboardCanvasProof: StoryboardCanvasMethodProof | undefined
   let storyboardCanvasBaseSnapshotSha256: string | undefined
   let persistedStoryboardCanvasReceipt: ReturnType<typeof storyboardCanvasCommitReceiptFixture> | undefined
+  let takeSelectedId: 'asset-take-1' | 'asset-take-2' = 'asset-take-1'
+  const persistedTakeSelectionReceipts = new Map<
+    string,
+    ReturnType<typeof takeVersionSelectionResultFixture>
+  >()
   let publicBaseUrl = ''
   const reviewComments: Record<ElementKind, Array<Record<string, unknown>>> = { actor: [], scene: [], prop: [] }
   const reviewDecisions: Record<ElementKind, Array<Record<string, unknown>>> = { actor: [], scene: [], prop: [] }
@@ -2085,6 +2168,68 @@ async function startYimengDouble(
       }
       if (request.method === 'GET' && url.pathname === '/api/qingmu/provider-gate-a/control-evidence') {
         json(response, 200, gateAControlEvidenceFixture())
+        return
+      }
+      const takeVersionPath = `/api/qingmu/projects/project-1/episodes/episode-1/frames/${PROMPT_IR_FRAME_ID}/take-versions`
+      if (request.method === 'GET' && url.pathname === takeVersionPath) {
+        json(response, 200, takeVersionStackFixture(revision, takeSelectedId))
+        return
+      }
+      if (request.method === 'POST' && url.pathname === `${takeVersionPath}/selection`) {
+        if (!isRecord(body)) throw new Error('take selection body is missing')
+        const expectedKeys = [
+          'expectedStackSha256', 'expectedSelectedTakeId', 'candidateTakeId',
+          'candidateVersionOrdinal', 'candidateOutputSha256', 'idempotencyKey',
+        ].sort()
+        const currentStack = takeVersionStackFixture(revision, takeSelectedId)
+        const key = typeof body.idempotencyKey === 'string' ? body.idempotencyKey : ''
+        const replay = persistedTakeSelectionReceipts.get(key)
+        if (replay !== undefined) {
+          json(response, 200, { ...replay, deduplicated: true })
+          return
+        }
+        if (
+          Object.keys(body).sort().some((field, index) => field !== expectedKeys[index])
+          || Object.keys(body).length !== expectedKeys.length
+          || request.headers.authorization !== `Bearer ${YIMENG_TOKEN}`
+          || request.headers['idempotency-key'] !== key
+          || body.expectedStackSha256 !== currentStack.stackSnapshotSha256
+          || body.expectedSelectedTakeId !== takeSelectedId
+          || body.candidateTakeId !== 'asset-take-2'
+          || body.candidateVersionOrdinal !== 2
+          || body.candidateOutputSha256 !== '4'.repeat(64)
+        ) {
+          throw new Error('take selection contract mismatch')
+        }
+        takeSelectedId = 'asset-take-2'
+        const result = takeVersionSelectionResultFixture(
+          body,
+          takeVersionStackFixture(revision, takeSelectedId).subject,
+        )
+        persistedTakeSelectionReceipts.set(key, result)
+        json(response, 201, result)
+        return
+      }
+      if (request.method === 'GET' && url.pathname === `${takeVersionPath}/selection-command-receipt`) {
+        const key = typeof request.headers['idempotency-key'] === 'string'
+          ? request.headers['idempotency-key']
+          : ''
+        const result = persistedTakeSelectionReceipts.get(key) ?? null
+        const expectedSelectedTakeId = url.searchParams.get('expectedSelectedTakeId')
+        json(response, 200, {
+          schema: 'jason.qingmu-take-selection-recovery.v1',
+          projectId: 'project-1',
+          episodeId: 'episode-1',
+          frameId: PROMPT_IR_FRAME_ID,
+          expectedStackSha256: url.searchParams.get('expectedStackSha256'),
+          expectedSelectedTakeId,
+          candidateTakeId: url.searchParams.get('candidateTakeId'),
+          candidateVersionOrdinal: Number(url.searchParams.get('candidateVersionOrdinal')),
+          candidateOutputSha256: url.searchParams.get('candidateOutputSha256'),
+          idempotencyKey: key,
+          status: result === null ? 'not_found' : 'committed',
+          result,
+        })
         return
       }
       if (
@@ -3610,6 +3755,8 @@ describe.skipIf(
           '/qingmu-yimeng-command/recoverStageSourceBinding',
           '/qingmu-yimeng/capabilityCatalog', '/qingmu-yimeng/costRehearsal',
           '/qingmu-yimeng/gateAControlEvidence',
+          '/qingmu-yimeng/takeVersions', '/qingmu-yimeng-command/selectTakeVersion',
+          '/qingmu-yimeng-command/recoverTakeVersionSelection',
         ].includes(requestPath)) return
         browserRpcRequests.push({ path: requestPath, body: request.postDataJSON() as unknown })
       })
@@ -3694,6 +3841,11 @@ describe.skipIf(
                 operation: body.operation,
                 changeSetId: body.changeSetId,
                 baseRevision: body.baseRevision,
+                expectedStackSha256: body.expectedStackSha256,
+                expectedSelectedTakeId: body.expectedSelectedTakeId,
+                candidateTakeId: body.candidateTakeId,
+                candidateVersionOrdinal: body.candidateVersionOrdinal,
+                candidateOutputSha256: body.candidateOutputSha256,
                 methodId: methodDefinition?.id,
               },
             }
@@ -3748,6 +3900,7 @@ describe.skipIf(
               stageSourceHistorical: process.env.QINGMU_E5_5_STAGE_SOURCE_HISTORICAL_SCREENSHOT,
               costRehearsal: process.env.QINGMU_E6_2_COST_SCREENSHOT,
               gateAControlEvidence: process.env.QINGMU_E6_3_GATE_A_SCREENSHOT,
+              takeVersionSelection: process.env.QINGMU_E6_4_TAKE_SCREENSHOT,
               script: process.env.QINGMU_EVIDENCE_SCREENSHOT,
               actor: process.env.QINGMU_ACTOR_EVIDENCE_SCREENSHOT,
               scene: process.env.QINGMU_SCENE_EVIDENCE_SCREENSHOT,
@@ -4118,6 +4271,164 @@ describe.skipIf(
       expect((await region.getByRole('button', { name: '重读控制证据', exact: true }).boundingBox())?.height)
         .toBeGreaterThanOrEqual(44)
       await page.setViewportSize({ width: 1680, height: 1100 })
+      await dialog.getByRole('tab', { name: '总览', exact: true }).click()
+      await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
+      if (tracePath) await page.context().tracing.stop({ path: tracePath })
+    })
+
+    it('compares and selects one existing E6-4 Take through Yimeng authority without approval or Provider authority', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e6-4-take-version-select'))
+      const consoleStart = browserConsoleErrors.length
+      const requestStart = capturedRequests.length
+      const rpcStart = browserRpcRequests.length
+      const tracePath = process.env.QINGMU_E6_4_TAKE_TRACE_PATH?.trim()
+      if (tracePath) {
+        await mkdir(dirname(tracePath), { recursive: true })
+        await page.context().tracing.start({ screenshots: true, snapshots: true, sources: true })
+      }
+
+      await page.evaluate(() => {
+        for (const key of Object.keys(sessionStorage)) {
+          if (key.startsWith('qingmu:take-version-selection-recovery:v1:')) sessionStorage.removeItem(key)
+        }
+      })
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await dialog.getByRole('tab', { name: '分镜与镜头', exact: true }).click()
+      await dialog.getByRole('list', { name: '镜头选择' }).getByRole('button', { name: /frame-1/ }).click()
+      const firstStackWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng/takeVersions')
+      await dialog.getByRole('tab', { name: '生成与质检', exact: true }).click()
+      const firstStackWire = await (await firstStackWirePromise).json() as unknown
+      expect(firstStackWire).toMatchObject({ result: { ok: true, value: {
+        schema: 'jason.qingmu-take-version-stack.v1',
+        subject: {
+          projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID,
+          frameNo: 12, storyboardRevision: 3, selectionRevision: 0,
+          selectedTakeId: 'asset-take-1',
+        },
+        capabilities: { canCompare: true, canSelect: true },
+        boundaries: {
+          takeIdAuthority: 'yimeng.assets.id', versionOrdinalPersistence: false,
+          selectedIsApproval: false, formalApprovalChanged: false, providerAuthority: 'not_granted',
+        },
+      } } })
+
+      const region = dialog.getByRole('region', { name: 'Take 版本栈与双栏比较', exact: true })
+      await region.getByText('Selected ≠ Approval：选择只决定当前 Take，不改变正式审核或人工签收。', {
+        exact: true,
+      }).waitFor({ timeout: 20_000 })
+      expect(await region.getByRole('region', { name: 'Take 双栏比较', exact: true })
+        .getByRole('article').count()).toBe(2)
+      await region.getByText('5.25s', { exact: true }).waitFor()
+      await region.getByText('¥0.000001', { exact: true }).waitFor()
+      await region.getByText('identity_continuity', { exact: true }).waitFor()
+      expect(await region.locator('video, audio, img, iframe, source, a[href]').count()).toBe(0)
+      expect(await region.getByRole('button', { name: /^(批准|要求返修)$/ }).count()).toBe(0)
+      for (const detail of await region.locator('article details').all()) await detail.locator('summary').click()
+      await region.getByText('provider-task-1', { exact: true }).waitFor()
+      await region.getByText('provider-task-2', { exact: true }).waitFor()
+      await region.getByText('wan2.1-i2v-plus', { exact: true }).first().waitFor()
+      await region.getByText('4'.repeat(64), { exact: true }).waitFor()
+
+      const selectionWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng-command/selectTakeVersion')
+      await region.getByRole('button', { name: '选择为当前 Take（不等于批准）', exact: true }).click()
+      const selectionWire = await (await selectionWirePromise).json() as unknown
+      expect(selectionWire).toMatchObject({ result: { ok: true, value: {
+        schema: 'jason.qingmu-take-selection-result.v1',
+        eventType: 'TakeVersionSelected',
+        projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID,
+        selectedTake: { takeId: 'asset-take-2', versionOrdinal: 2, outputSha256: '4'.repeat(64) },
+        selectionIdentity: {
+          actorUserId: 'owner-1', actorNaturalPersonId: 'owner-natural-person-1',
+          actorRole: 'project_owner_selector',
+        },
+        authoritativeStack: { selectedTakeId: 'asset-take-2', selectionRevision: 1 },
+        taskMutation: { created: true, kind: 'local_selection_provenance' },
+        selectionChanged: true, providerCalls: 0, paidProviderAuthority: 'not_granted',
+        budgetMutation: false, humanApprovalInferred: false, formalApprovalChanged: false,
+      } } })
+      await region.getByText('已选择当前 Take，并已开始权威回读；这不等于批准。', { exact: true }).waitFor()
+      await region.getByRole('button', { name: 'v2 · 当前已选', exact: true }).waitFor()
+      await region.getByText(/易梦选择回执/).waitFor()
+
+      const takePath = `/api/qingmu/projects/project-1/episodes/episode-1/frames/${PROMPT_IR_FRAME_ID}/take-versions`
+      await expect.poll(() => capturedRequests.slice(requestStart)
+        .filter(request => new URL(request.path, 'http://127.0.0.1').pathname.startsWith(takePath)).length)
+        .toBe(3)
+      const upstream = capturedRequests.slice(requestStart)
+        .filter(request => new URL(request.path, 'http://127.0.0.1').pathname.startsWith(takePath))
+      expect(upstream.map(request => [request.method, new URL(request.path, 'http://127.0.0.1').pathname])).toEqual([
+        ['GET', takePath], ['POST', `${takePath}/selection`], ['GET', takePath],
+      ])
+      const selectionPost = upstream[1]
+      expect(selectionPost).toEqual(expect.objectContaining({
+        authorization: `Bearer ${YIMENG_TOKEN}`, cookie: undefined,
+      }))
+      expect(selectionPost?.idempotencyKey).toMatch(/^qingmu:take-select:v1:/)
+      if (!isRecord(selectionPost?.body)) throw new Error('Take selection POST body missing')
+      expect(Object.keys(selectionPost.body).sort()).toEqual([
+        'expectedStackSha256', 'expectedSelectedTakeId', 'candidateTakeId',
+        'candidateVersionOrdinal', 'candidateOutputSha256', 'idempotencyKey',
+      ].sort())
+      expect(selectionPost.body).toMatchObject({
+        expectedSelectedTakeId: 'asset-take-1', candidateTakeId: 'asset-take-2',
+        candidateVersionOrdinal: 2, candidateOutputSha256: '4'.repeat(64),
+      })
+      expect(selectionPost.body.expectedStackSha256).toMatch(/^[0-9a-f]{64}$/)
+      expect(selectionPost.body.idempotencyKey).toBe(selectionPost.idempotencyKey)
+      expect(JSON.stringify(selectionPost.body)).not.toMatch(/actor|session|approv|provider|budget/i)
+      expect(upstream.filter(request => request.path.includes('selection-command-receipt'))).toEqual([])
+
+      const rpc = browserRpcRequests.slice(rpcStart)
+        .filter(request => /takeVersions|selectTakeVersion|recoverTakeVersionSelection/.test(request.path))
+      expect(rpc.map(request => request.path)).toEqual([
+        '/qingmu-yimeng/takeVersions', '/qingmu-yimeng-command/selectTakeVersion',
+        '/qingmu-yimeng/takeVersions',
+      ])
+      const commandRpc = rpc[1]
+      if (!isRecord(commandRpc?.body) || !isRecord(commandRpc.body.payload)) {
+        throw new Error('Take selection browser command missing')
+      }
+      expect(Object.keys(commandRpc.body.payload).sort()).toEqual([
+        'projectId', 'episodeId', 'frameId', 'expectedStackSha256', 'expectedSelectedTakeId',
+        'candidateTakeId', 'candidateVersionOrdinal', 'candidateOutputSha256', 'idempotencyKey',
+      ].sort())
+      expect(JSON.stringify(commandRpc)).not.toMatch(/owner-natural-person|authSession|Bearer|approval/i)
+      expect(capturedRequests.slice(requestStart)
+        .filter(request => request.method === 'POST' && request !== selectionPost)).toEqual([])
+      expect(await page.evaluate(() => Object.keys(sessionStorage)
+        .filter(key => key.startsWith('qingmu:take-version-selection-recovery:v1:')))).toEqual([])
+      expect(browserConsoleErrors.slice(consoleStart)).toEqual([])
+      expect(tripwire.pageErrors).toEqual([])
+      expect(await page.content()).not.toContain(YIMENG_TOKEN)
+      await expectNoVisibleTechnicalBrand(page)
+
+      const aria = await captureStableAria(
+        page,
+        'role=region[name="Take 版本栈与双栏比较"]',
+        scaffold.workspaceCwd,
+      )
+      const goldenPath = join(REPO_ROOT, 'apps/web/tests/snapshots/qingmu-take-version-select/ui.expected.md')
+      if (scaffold.mode === 'refresh') await mkdir(dirname(goldenPath), { recursive: true })
+      await compareOrRefreshGolden(goldenPath, aria, scaffold.mode)
+      const screenshotPath = process.env.QINGMU_E6_4_TAKE_SCREENSHOT?.trim()
+      if (screenshotPath) {
+        await mkdir(dirname(screenshotPath), { recursive: true })
+        await region.getByRole('heading', { name: 'Take 版本栈与双栏比较', exact: true }).scrollIntoViewIfNeeded()
+        await page.screenshot({ path: screenshotPath })
+      }
+      await page.setViewportSize({ width: 390, height: 844 })
+      expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false)
+      expect(await region.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
+      expect((await region.getByRole('button', { name: '重读 Take 版本栈', exact: true }).boundingBox())?.height)
+        .toBeGreaterThanOrEqual(44)
+      expect((await region.getByRole('button', { name: '选择为当前 Take（不等于批准）', exact: true }).boundingBox())?.height)
+        .toBeGreaterThanOrEqual(44)
+      await page.setViewportSize({ width: 1680, height: 1100 })
+      await dialog.getByRole('tab', { name: '分镜与镜头', exact: true }).click()
+      await dialog.getByRole('list', { name: '镜头选择' }).getByRole('button', { name: /frame-z/ }).click()
       await dialog.getByRole('tab', { name: '总览', exact: true }).click()
       await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
       if (tracePath) await page.context().tracing.stop({ path: tracePath })

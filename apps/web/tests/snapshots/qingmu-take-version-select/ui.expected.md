@@ -1,0 +1,60 @@
+- region "Take 版本栈与双栏比较":
+  - heading "Take 版本栈与双栏比较" [level=3]
+  - paragraph: 沿用易梦资产与选择权威 · Take ID 即现有资产 ID · 不创建第二套版本状态
+  - button "重读 Take 版本栈"
+  - status: 已选择当前 Take，并已开始权威回读；这不等于批准。
+  - status:
+    - text: 易梦选择回执 ·
+    - code: receipt-take-0f280bcbdac3b076
+    - text: · v2
+  - strong: "Shot #12"
+  - code: frame-1
+  - text: 选择修订
+  - strong: "1"
+  - text: 版本栈 SHA
+  - code: 014e542dedaa5899f6972a9862e88117e8d94d4d40a6f4abebcc24682968e652
+  - paragraph: Selected ≠ Approval：选择只决定当前 Take，不改变正式审核或人工签收。
+  - button "v1" [pressed]
+  - button "v2 · 当前已选" [pressed]
+  - paragraph: 点选最多两个版本进行并排比较；版本序号由易梦现有资产按创建时间与资产 ID 投影，不持久化。
+  - region "Take 双栏比较":
+    - article:
+      - strong: v1
+      - text: initial
+      - term: Take / 资产 ID
+      - definition:
+        - code: asset-take-1
+      - term: 时长
+      - definition: {{duration}}
+      - term: 记录成本
+      - definition: ¥0.000001
+      - term: 机器质检 / 检查数
+      - definition: passed · 1
+      - term: 输出字节绑定
+      - definition: verified
+      - term: 生成血缘
+      - definition: 完整
+      - group: Provider、任务与哈希证据
+      - button "选择为当前 Take（不等于批准）" [disabled]
+    - article:
+      - strong: v2
+      - text: regenerate
+      - mark: 当前已选
+      - term: Take / 资产 ID
+      - definition:
+        - code: asset-take-2
+      - term: 时长
+      - definition: {{duration}}
+      - term: 记录成本
+      - definition: 未知
+      - term: 机器质检 / 检查数
+      - definition: failed · 2
+      - term: 输出字节绑定
+      - definition: verified
+      - term: 生成血缘
+      - definition: 完整
+      - strong: 阻塞项
+      - list:
+        - listitem: identity_continuity
+      - group: Provider、任务与哈希证据
+  - group: 权威边界与镜头绑定

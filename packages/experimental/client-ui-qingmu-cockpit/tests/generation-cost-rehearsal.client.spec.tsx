@@ -124,7 +124,7 @@ describe('Gate A cost rehearsal', () => {
 
     expect(port.capabilityCatalog).not.toHaveBeenCalled()
     expect(port.costRehearsal).not.toHaveBeenCalled()
-    expect(screen.getByLabelText(zh.costRehearsalCandidateCount).options).toHaveLength(2)
+    expect((screen.getByLabelText(zh.costRehearsalCandidateCount) as HTMLSelectElement).options).toHaveLength(2)
     fireEvent.change(screen.getByLabelText(zh.costRehearsalCandidateCount), { target: { value: '2' } })
     fireEvent.click(screen.getByRole('button', { name: zh.costRehearsalAction }))
 
