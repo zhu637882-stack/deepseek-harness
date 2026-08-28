@@ -803,6 +803,97 @@ export interface YimengTakeApprovalLifecycleFeedResponse
   }
 }
 
+/** Coordinates for the read-only episode evidence ledger and verification request. */
+export interface YimengEpisodeEvidenceRequest {
+  readonly projectId: string
+  readonly episodeId: string
+}
+
+/** Stored selected-Take acceptance facts that a ledger may read without rerunning media probes. */
+export interface YimengEpisodeEvidenceAcceptanceSource {
+  readonly schema: 'jason.qingmu-take-acceptance-source.v1'
+  readonly canonical: YimengJsonObject
+  readonly canonicalSha256: string
+}
+
+/** Immutable technical-QC records whose current binding remains unknown without a probe. */
+export interface YimengEpisodeEvidenceQcRecords {
+  readonly schema: 'jason.qingmu-take-qc-records.v1'
+  readonly records: readonly YimengJsonObject[]
+  readonly currentBinding: 'unknown_without_probe'
+}
+
+/** Immutable approval-lifecycle records whose current binding remains unknown without a probe. */
+export interface YimengEpisodeEvidenceLifecycleRecords {
+  readonly schema: 'jason.qingmu-take-approval-lifecycle-records.v1'
+  readonly records: readonly YimengJsonObject[]
+  readonly currentBinding: 'unknown_without_probe'
+}
+
+/** Existing evidence feeds and immutable records for one storyboard frame at one source revision. */
+export interface YimengEpisodeEvidenceFrame {
+  readonly frameId: string
+  readonly frameNo: number
+  readonly stack: YimengTakeVersionStackResponse
+  readonly comments: YimengTakeCommentFeedResponse
+  readonly review: YimengTakeReviewAuthorityFeedResponse
+  readonly acceptance: YimengEpisodeEvidenceAcceptanceSource | null
+  readonly qc: YimengEpisodeEvidenceQcRecords | null
+  readonly lifecycle: YimengEpisodeEvidenceLifecycleRecords | null
+  readonly verificationInput: YimengJsonObject
+}
+
+/** Content-addressed source assembled from existing Yimeng Take evidence. */
+export interface YimengEpisodeEvidenceSource extends YimengEpisodeEvidenceRequest {
+  readonly schema: 'jason.qingmu-episode-evidence-source.v1'
+  readonly frames: readonly YimengEpisodeEvidenceFrame[]
+  readonly verificationInputsSha256: string
+}
+
+/** Read-only episode ledger; it neither runs probes nor grants an approval. */
+export interface YimengEpisodeEvidenceLedgerResponse extends YimengEpisodeEvidenceRequest {
+  readonly schema: 'jason.qingmu-episode-evidence-ledger.v1'
+  readonly source: YimengEpisodeEvidenceSource
+  readonly sourceSnapshotSha256: string
+}
+
+/** Explicit verification request pinned to a previously read ledger source. */
+export interface YimengEpisodeVerificationRequest extends YimengEpisodeEvidenceRequest {
+  readonly sourceSnapshotSha256: string
+}
+
+/** Unmodified result fields returned by Yimeng's canonical `verify_episode`. */
+export interface YimengEpisodeVerificationReport {
+  readonly project_id: string
+  readonly episode_id: string
+  readonly ok: boolean
+  readonly errors: readonly string[]
+  readonly warnings: readonly string[]
+  readonly technical_errors: readonly string[]
+  readonly creative_errors: readonly string[]
+  readonly technical_ok: boolean
+  readonly creative_ok: boolean
+  readonly frame_count: number
+  readonly video_asset_count: number
+  readonly raw_video_asset_count: number
+  readonly unverified_video_asset_count: number
+  readonly duplicate_video_asset_count: number
+  readonly video_frame_coverage_count: number
+  readonly missing_video_frame_nos: readonly number[]
+  readonly dialogue_asr_required_count: number
+  readonly dialogue_asr_verified_count: number
+  readonly final_delivery_profile: string | null
+  readonly final_count: number
+}
+
+/** Verification result pinned to the exact source it inspected, not a release decision. */
+export interface YimengEpisodeVerificationResponse extends YimengEpisodeVerificationRequest {
+  readonly schema: 'jason.qingmu-episode-verification.v1'
+  readonly verification: YimengEpisodeVerificationReport
+  readonly verificationSha256: string
+  readonly verifiedAt: string
+}
+
 /** Exact Yimeng coordinates for the currently selected Take acceptance evidence. */
 export type YimengTakeAcceptanceRequest = YimengTakeVersionRequest
 
@@ -2046,6 +2137,8 @@ export interface YimengReadEndpointMap {
   readonly takeAcceptance: YimengTakeAcceptanceResponse
   readonly takeTechnicalQc: YimengTakeTechnicalQcFeedResponse
   readonly takeApprovalLifecycle: YimengTakeApprovalLifecycleFeedResponse
+  readonly evidenceLedger: YimengEpisodeEvidenceLedgerResponse
+  readonly verifyEpisode: YimengEpisodeVerificationResponse
   readonly shotFindings: YimengShotFindingFeedResponse
   readonly productionUnits: YimengProductionUnitsResponse
   readonly stageSources: YimengStageSourcesResponse

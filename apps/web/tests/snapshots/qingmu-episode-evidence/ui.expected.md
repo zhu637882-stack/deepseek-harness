@@ -1,0 +1,26 @@
+- region "整集证据与核验":
+  - heading "整集证据与核验" [level=3]
+  - paragraph: 只读易梦已有证据；查看或刷新不运行整集探测。核验不生成、不导出、不写入、不批准。
+  - button "刷新本集证据"
+  - button "核验本集"
+  - status: 已取得本次核验事实；不代表正式放行或人工签收。
+  - paragraph: "项目 / 剧集: project_<id> / episode_<id>"
+  - paragraph:
+    - text: "本次来源 SHA-256:"
+    - code: <sha256>
+  - paragraph: 选中 Take、技术 QC、内容审核、审批生命周期、整集核验与人工签收分别记录；本入口不代签。
+  - group: 镜头 1 · frame_<id>
+  - heading "canonical verify_episode 原始结果" [level=4]
+  - paragraph: 仅对应下列时间和来源 SHA；之后的外部变化不会自动刷新。刷新、切换对象或重试后，旧结果失效；不能据此批准或签收。
+  - term: 核验时间
+  - definition: <verified-at>
+  - term: 验证器 ok（不是放行）
+  - definition: "false"
+  - term: 验证器 technical_ok
+  - definition: "false"
+  - term: 验证器 creative_ok
+  - definition: "false"
+  - paragraph:
+    - text: "原始结果 SHA-256:"
+    - code: <sha256>
+  - text: "{ \"project_id\": \"project_<id>\", \"episode_id\": \"episode_<id>\", \"ok\": false, \"errors\": [ \"scene_fixture room_missing_scene_reference\", \"frame_1_native_video_audit_missing:asset_<id>\", \"frame_1_missing_first_frame_asset\", \"frame_1_missing_continuity_tail_frame_for_video_task:task_<id>\", \"frame_1_missing_video_quality_mid_frame_for_video_task:task_<id>\", \"frame_1_video_quality_status:planned\", \"missing_final_output\", \"creative_missing_creative_director_execution:frame=1\" ], \"warnings\": [], \"technical_errors\": [ \"scene_fixture room_missing_scene_reference\", \"frame_1_native_video_audit_missing:asset_<id>\", \"frame_1_missing_first_frame_asset\", \"frame_1_missing_continuity_tail_frame_for_video_task:task_<id>\", \"frame_1_missing_video_quality_mid_frame_for_video_task:task_<id>\", \"frame_1_video_quality_status:planned\", \"missing_final_output\" ], \"creative_errors\": [ \"creative_missing_creative_director_execution:frame=1\" ], \"technical_ok\": false, \"creative_ok\": false, \"frame_count\": 1, \"video_asset_count\": 1, \"raw_video_asset_count\": 1, \"unverified_video_asset_count\": 0, \"duplicate_video_asset_count\": 0, \"video_frame_coverage_count\": 1, \"missing_video_frame_nos\": [], \"dialogue_asr_required_count\": 0, \"dialogue_asr_verified_count\": 0, \"final_delivery_profile\": \"vertical-short-drama-compatible-v1\", \"final_count\": 0 }"

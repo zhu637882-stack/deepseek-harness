@@ -26,6 +26,12 @@ import { normalizeProductionUnitsFeed, parseProductionUnitsReadRequest } from '.
 import { normalizeStageSourcesFeed, parseStageSourcesReadRequest } from './stage-sources.ts'
 import { normalizeLsuPlanSource, parseLsuPlanSourceRequest } from './lsu-plan.ts'
 import { normalizeReworkRouteSource, parseReworkRouteSourceRequest } from './rework-route.ts'
+import {
+  normalizeEpisodeEvidenceLedger,
+  normalizeEpisodeVerification,
+  parseEpisodeEvidenceRequest,
+  parseEpisodeVerificationRequest,
+} from './episode-evidence.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -140,6 +146,16 @@ export type {
   YimengElementReviewSubject,
   YimengEpisodesRequest,
   YimengEpisodesResponse,
+  YimengEpisodeEvidenceAcceptanceSource,
+  YimengEpisodeEvidenceFrame,
+  YimengEpisodeEvidenceLifecycleRecords,
+  YimengEpisodeEvidenceQcRecords,
+  YimengEpisodeEvidenceRequest,
+  YimengEpisodeEvidenceLedgerResponse,
+  YimengEpisodeEvidenceSource,
+  YimengEpisodeVerificationReport,
+  YimengEpisodeVerificationRequest,
+  YimengEpisodeVerificationResponse,
   YimengHealth,
   YimengHumanDecision,
   YimengHumanDecisionValue,
@@ -273,6 +289,7 @@ export type {
 const CHANNEL = '/qingmu-yimeng'
 const DEFAULT_BASE_URL = 'http://127.0.0.1:8115'
 const DEFAULT_TIMEOUT_MS = 5_000
+const DEFAULT_VERIFICATION_TIMEOUT_MS = 55_000
 const MAX_TIMEOUT_MS = 60_000
 const MAX_ID_LENGTH = 256
 const MAX_SEARCH_LENGTH = 500
@@ -292,7 +309,7 @@ const PROTECTED_ENDPOINTS = new Set([
   'projects', 'episodes', 'script', 'promptIr', 'capabilityCatalog', 'costRehearsal',
   'gateAControlEvidence', 'elementProfile',
   'referenceCandidates', 'reviewEvents',
-  'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'takeComments', 'takeReviewAuthority', 'takeAcceptance', 'takeTechnicalQc', 'takeApprovalLifecycle', 'shotFindings', 'productionUnits', 'stageSources',
+  'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'takeComments', 'takeReviewAuthority', 'takeAcceptance', 'takeTechnicalQc', 'takeApprovalLifecycle', 'evidenceLedger', 'verifyEpisode', 'shotFindings', 'productionUnits', 'stageSources',
   'lsuPlanSource', 'reworkRouteSource',
 ])
 const HUMAN_DECISION_VALUES = new Set<YimengHumanDecisionValue>([
@@ -367,12 +384,15 @@ export interface YimengReadAdapterConfig {
   readonly baseUrl?: string
   /** Read deadline in milliseconds, from 100 through 60,000. */
   readonly timeoutMs?: number
+  /** Explicit episode-verification deadline in milliseconds, from 100 through 60,000. */
+  readonly verificationTimeoutMs?: number
 }
 
 /** Validated Cordis configuration for the adapter. */
 export const Config: z<YimengReadAdapterConfig> = z.object({
   baseUrl: z.string().default(DEFAULT_BASE_URL),
   timeoutMs: z.natural().min(100).default(DEFAULT_TIMEOUT_MS),
+  verificationTimeoutMs: z.natural().min(100).default(DEFAULT_VERIFICATION_TIMEOUT_MS),
 })
 
 /** Injectable host capabilities used by isolated tests. */
@@ -746,6 +766,22 @@ function parseTakeLifecycleRequest(payload: unknown) {
   }
 }
 
+function parseEvidenceLedgerRequest(payload: unknown) {
+  try {
+    return parseEpisodeEvidenceRequest(payload)
+  } catch {
+    throw new InputError('evidenceLedger accepts only canonical projectId and episodeId')
+  }
+}
+
+function parseVerifyEpisodeRequest(payload: unknown) {
+  try {
+    return parseEpisodeVerificationRequest(payload)
+  } catch {
+    throw new InputError('verifyEpisode accepts only canonical projectId, episodeId, and sourceSnapshotSha256')
+  }
+}
+
 function parseProductionUnitsRequest(payload: unknown): YimengProductionUnitsRequest {
   try {
     return parseProductionUnitsReadRequest(payload)
@@ -900,6 +936,38 @@ interface FetchJsonSuccess {
 
 type FetchJsonResult = FetchJsonSuccess | RpcResult<never>
 
+interface FetchJsonOptions {
+  readonly method?: 'GET' | 'POST'
+  readonly body?: string
+  readonly verificationError?: boolean
+}
+
+const VERIFICATION_ERROR_MESSAGES = new Map<string, string>([
+  ['project_not_found', 'EVIDENCE_PROJECT_UNAVAILABLE'],
+  ['episode_not_found', 'EVIDENCE_EPISODE_UNAVAILABLE'],
+  ['qingmu_project_episode_scope_mismatch', 'EVIDENCE_SCOPE_MISMATCH'],
+  ['qingmu_evidence_ledger_forbidden', 'EVIDENCE_FORBIDDEN'],
+  ['evidence_ledger_source_snapshot_conflict', 'SOURCE_SNAPSHOT_CONFLICT'],
+  ['evidence_ledger_source_drift', 'SOURCE_DRIFT'],
+  ['evidence_ledger_verify_busy', 'VERIFY_BUSY'],
+  ['evidence_ledger_verify_timeout', 'VERIFY_TIMEOUT'],
+  ['evidence_ledger_verify_unavailable', 'PROBE_UNAVAILABLE'],
+  ['evidence_ledger_frame_limit', 'EVIDENCE_FRAME_LIMIT'],
+  ['response_limit', 'EVIDENCE_RESPONSE_LIMIT'],
+  ['source_invalid', 'EVIDENCE_SOURCE_INVALID'],
+])
+
+async function verificationError(response: Response, scrubToken: string | undefined): Promise<RpcResult<never> | undefined> {
+  try {
+    const value = sanitizeUpstreamValue(await readBoundedJson(response, MAX_JSON_BYTES), scrubToken)
+    if (!isJsonObject(value) || !isJsonObject(value.detail) || typeof value.detail.code !== 'string') return undefined
+    const message = VERIFICATION_ERROR_MESSAGES.get(value.detail.code)
+    return message === undefined ? undefined : internalError(message)
+  } catch {
+    return undefined
+  }
+}
+
 async function fetchJson(
   deps: YimengReadAdapterDependencies,
   url: string,
@@ -908,6 +976,7 @@ async function fetchJson(
   timeoutMs: number,
   maxJsonBytes: number,
   signal: AbortSignal,
+  options: FetchJsonOptions = {},
 ): Promise<FetchJsonResult> {
   const controller = new AbortController()
   const timeoutReason = Object.freeze({ kind: 'qingmu-yimeng-read-timeout' })
@@ -920,9 +989,11 @@ async function fetchJson(
   try {
     const headers = new Headers({ accept: 'application/json' })
     if (authorizationToken !== undefined) headers.set('authorization', `Bearer ${authorizationToken}`)
+    if (options.body !== undefined) headers.set('content-type', 'application/json')
     const response = await deps.fetch(url, {
-      method: 'GET',
+      method: options.method ?? 'GET',
       headers,
+      ...(options.body === undefined ? {} : { body: options.body }),
       cache: 'no-store',
       redirect: 'error',
       signal: controller.signal,
@@ -930,7 +1001,10 @@ async function fetchJson(
     if (response.status === 401 || response.status === 403) {
       return internalError('Yimeng authentication failed')
     }
-    if (!response.ok) return internalError(`Yimeng service returned HTTP ${String(response.status)}`)
+    if (!response.ok) {
+      const mapped = options.verificationError ? await verificationError(response, scrubToken) : undefined
+      return mapped ?? internalError(`Yimeng service returned HTTP ${String(response.status)}`)
+    }
     try {
       const value = sanitizeUpstreamValue(await readBoundedJson(response, maxJsonBytes), scrubToken)
       return { ok: true, value }
@@ -3676,10 +3750,13 @@ export function createYimengReadHandler(
 ): ConnectionRpcHandler {
   const baseUrl = resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL)
   const timeoutMs = resolveTimeout(config.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+  const verificationTimeoutMs = resolveTimeout(config.verificationTimeoutMs ?? DEFAULT_VERIFICATION_TIMEOUT_MS)
+  let verificationInFlight = false
   return async (endpoint, payload, signal) => {
     try {
       let path: string
       let normalize: (value: unknown) => unknown
+      let verificationBody: string | undefined
       if (endpoint === 'health') {
         assertEmptyRequest(payload)
         path = '/api/health'
@@ -3799,6 +3876,17 @@ export function createYimengReadHandler(
           + '/episodes/' + encodeURIComponent(request.episodeId)
           + '/frames/' + encodeURIComponent(request.frameId) + '/take-approval-lifecycle'
         normalize = value => normalizeTakeApprovalLifecycleFeed(value, request, jcsSha256)
+      } else if (endpoint === 'evidenceLedger') {
+        const request = parseEvidenceLedgerRequest(payload)
+        path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)
+          + '/episodes/' + encodeURIComponent(request.episodeId) + '/evidence-ledger'
+        normalize = value => normalizeEpisodeEvidenceLedger(value, request, jcsSha256)
+      } else if (endpoint === 'verifyEpisode') {
+        const request = parseVerifyEpisodeRequest(payload)
+        path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)
+          + '/episodes/' + encodeURIComponent(request.episodeId) + '/verify-episode'
+        verificationBody = JSON.stringify({ sourceSnapshotSha256: request.sourceSnapshotSha256 })
+        normalize = value => normalizeEpisodeVerification(value, request, jcsSha256)
       } else if (endpoint === 'shotFindings') {
         const request = parseShotFindingRequest(payload)
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/frames/${encodeURIComponent(request.frameId)}/findings`
@@ -3858,15 +3946,32 @@ export function createYimengReadHandler(
         if (scrubToken === undefined) return internalError('YIMENG_API_TOKEN is not configured')
         authorizationToken = scrubToken
       }
-      const response = await fetchJson(
-        dependencies,
-        `${baseUrl}${path}`,
-        authorizationToken,
-        scrubToken,
-        timeoutMs,
-        endpoint === 'script' ? MAX_SCRIPT_JSON_BYTES : MAX_JSON_BYTES,
-        signal,
-      )
+      const verification = endpoint === 'verifyEpisode'
+      if (verification && verificationInFlight) return internalError('VERIFY_BUSY')
+      if (verification && verificationBody === undefined) return internalError('Yimeng adapter failed')
+      if (verification) verificationInFlight = true
+      const fetchOptions: FetchJsonOptions | undefined = verification
+        ? {
+          method: 'POST',
+          body: verificationBody as string,
+          verificationError: true,
+        }
+        : undefined
+      let response: FetchJsonResult
+      try {
+        response = await fetchJson(
+          dependencies,
+          `${baseUrl}${path}`,
+          authorizationToken,
+          scrubToken,
+          verification ? verificationTimeoutMs : timeoutMs,
+          endpoint === 'script' ? MAX_SCRIPT_JSON_BYTES : MAX_JSON_BYTES,
+          signal,
+          fetchOptions,
+        )
+      } finally {
+        if (verification) verificationInFlight = false
+      }
       if (!response.ok) return response
       try {
         return { ok: true, value: normalize(response.value) }

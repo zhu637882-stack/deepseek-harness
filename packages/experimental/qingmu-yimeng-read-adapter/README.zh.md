@@ -4,6 +4,14 @@
 
 这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`capabilityCatalog`、`costRehearsal`、`gateAControlEvidence`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates`、`selectedVideoReview`、`takeVersions`、`takeComments`、`takeAcceptance`、`takeReviewAuthority`、`takeTechnicalQc`、`takeApprovalLifecycle`、`shotFindings`、`productionUnits`、`lsuPlanSource`、`stageSources` 和 `workflow`；它不暴露任何写入端点。
 
+## 单集证据与显式核验
+
+`evidenceLedger` 读取 `/api/qingmu/projects/{projectId}/episodes/{episodeId}/evidence-ledger`；`verifyEpisode` 只把当前 `sourceSnapshotSha256` 显式 POST 到同级 `verify-episode` 路由。两者均不写业务状态。Host 校验 RFC 8785 来源与报告哈希、准确范围及 canonical Take/评论/审核绑定，原样保留核验器报告，包括为 false 的 `ok`。
+
+读取 Ledger 不执行探测。回执输入与已存 QC/生命周期记录分别呈现，不声称历史记录已通过当前探测绑定。缺失证据仍为缺失。易梦在读取和核验前后绑定数据库、媒体及探测 sidecar；短生命周期 DB/WAL 读取快照防止 SQLite 在业务目录创建辅助文件，不建立持久化 Ledger 数据库或导出。
+
+Host 同时只允许一个核验。`verificationTimeoutMs` 默认 55000 毫秒、上限 60000 毫秒，普通读取沿用原超时。易梦在 45 秒后终止核验进程组；一集最多 500 镜头，响应 JSON 最多 4 MiB，数据库镜像最多 256 MiB，每轮指纹限制为 10000 路径 / 8 GiB / 10 秒。超限、探测器缺失、来源过期与并发请求返回结构化错误。核验调用成功不代表正式放行或人工签收。
+
 ## 约定
 
 `health` 归一化匿名存活与运行身份字段。`projects` 归一化分页，`episodes` 返回经过校验的项目剧集列表，`script` 返回权威结构化分集剧本、乐观并发修订号和经 Host 验证的 `scriptSha256`，`elementProfile` 从 `/api/qingmu/projects/{projectId}/elements/{elementKind}/{targetId}` 读取人物、环境或道具，`referenceCandidates` 从同一元素路由的 `/reference-candidates` 子路由读取候选资产，`workflow` 要求准确的 `jason.episode-workflow-projection.v1` schema 及其强顶层字段，同时保留未知 JSON 字段。

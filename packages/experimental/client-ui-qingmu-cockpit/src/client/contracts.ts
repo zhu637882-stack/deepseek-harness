@@ -42,6 +42,10 @@ import type {
   ImagoWorksetProjection,
 } from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter/types'
 import type {
+  YimengEpisodeEvidenceRequest,
+  YimengEpisodeEvidenceLedgerResponse,
+  YimengEpisodeVerificationRequest,
+  YimengEpisodeVerificationResponse,
   YimengCapabilityCatalogItem,
   YimengCapabilityCatalogRequest,
   YimengCapabilityCatalogResponse,
@@ -290,6 +294,10 @@ export type {
 }
 export type {
   YimengCapabilityCatalogItem,
+  YimengEpisodeEvidenceRequest,
+  YimengEpisodeEvidenceLedgerResponse,
+  YimengEpisodeVerificationRequest,
+  YimengEpisodeVerificationResponse,
   YimengCapabilityCatalogRequest,
   YimengCapabilityCatalogResponse,
   YimengCapabilityEligibility,
@@ -497,6 +505,8 @@ export type JsonRecord = YimengJsonObject
 
 /** Read-only browser-facing methods exposed by the Qingmu Host adapter. */
 export interface QingmuYimengReadPort {
+  evidenceLedger(request: YimengEpisodeEvidenceRequest, signal?: AbortSignal): Promise<YimengEpisodeEvidenceLedgerResponse>
+  verifyEpisode(request: YimengEpisodeVerificationRequest, signal?: AbortSignal): Promise<YimengEpisodeVerificationResponse>
   capabilityCatalog(
     request: YimengCapabilityCatalogRequest,
     signal?: AbortSignal,

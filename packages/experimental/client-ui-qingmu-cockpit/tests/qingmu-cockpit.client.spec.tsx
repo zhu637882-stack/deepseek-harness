@@ -719,6 +719,8 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
       readOnly: true, providerCalls: 0, taskMutation: false, budgetMutation: false, humanSignoffInferred: false,
     } as const)),
     takeVersions: vi.fn(async () => { throw new Error('Take versions are not part of this fixture') }),
+    evidenceLedger: vi.fn(async () => { throw new Error('Episode evidence is not part of this fixture') }),
+    verifyEpisode: vi.fn(async () => { throw new Error('Episode verification is not part of this fixture') }),
     takeComments: vi.fn(async () => { throw new Error('Take comments are not part of this fixture') }),
     takeAcceptance: vi.fn(async () => { throw new Error('Take acceptance is not part of this fixture') }),
     takeAcceptanceMethod: vi.fn(async () => { throw new Error('Take acceptance method is not part of this fixture') }),
@@ -1263,6 +1265,20 @@ describe('QingmuCockpit journey', () => {
     expect(alert.textContent).toContain('令牌不会进入浏览器界面')
     expect(episodes).not.toHaveBeenCalled()
     expect(workflow).not.toHaveBeenCalled()
+  })
+
+  it('keeps independent evidence reads available when the workflow projection is invalid', async () => {
+    const evidenceLedger = vi.fn(async () => { throw new Error('isolated ledger failure') })
+    mount(makePort({ workflow: vi.fn(async () => { throw new Error('storyboard_revision_missing') }), evidenceLedger }))
+    fireEvent.click(screen.getByRole('button', { name: zh.trigger }))
+    const dialog = await screen.findByRole('dialog', { name: zh.title })
+    await screen.findByRole('alert')
+    fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabGeneration }))
+    const load = within(dialog).getByRole('button', { name: zh.evidenceLoad })
+    expect(load.hasAttribute('disabled')).toBe(false)
+    expect(evidenceLedger).not.toHaveBeenCalled()
+    fireEvent.click(load)
+    await waitFor(() => { expect(evidenceLedger).toHaveBeenCalledOnce() })
   })
 
   it('previews an immutable script ChangeSet and commits only after explicit confirmation', async () => {

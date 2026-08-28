@@ -19,6 +19,7 @@
     "apps/web/tests/live-interactions.e2e.ts",
     "apps/web/tests/question-composer.e2e.ts",
     "apps/web/tests/qingmu-script-workspace.e2e.ts",
+    "apps/web/tests/qingmu-episode-evidence.e2e.ts",
     "apps/web/tests/qingmu-shot-finding-fixture.ts",
     "apps/web/tests/qingmu-rework-route-fixture.ts",
     "apps/web/tests/qingmu-production-unit-fixture.ts",

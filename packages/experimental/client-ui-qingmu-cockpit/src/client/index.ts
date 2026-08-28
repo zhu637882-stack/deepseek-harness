@@ -5,6 +5,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { QingmuCockpit } from './QingmuCockpit.tsx'
 import type {
+  YimengEpisodeEvidenceLedgerResponse, YimengEpisodeVerificationResponse,
   ImagoStageSourceMethodResponse, YimengStageSourcesResponse, YimengStageSourceResult, YimengStageSourceRecovery,
   ImagoTakeAcceptanceMethodResponse,
   YimengTakeAcceptanceResponse, YimengTakeTechnicalQcFeedResponse,
@@ -50,6 +51,8 @@ import { en, NS, zh } from './locales.ts'
 
 export type { QingmuCockpitFace } from './slots.ts'
 export type {
+  YimengEpisodeEvidenceRequest, YimengEpisodeEvidenceLedgerResponse,
+  YimengEpisodeVerificationRequest, YimengEpisodeVerificationResponse,
   ImagoStageSourceMethodResponse, YimengStageSourcesResponse, YimengStageSourceResult, YimengStageSourceRecovery,
   ImagoTakeAcceptanceMethodRequest, ImagoTakeAcceptanceMethodResponse, ImagoTakeAcceptanceMethodProjection,
   ImagoTakeApprovalLifecycleAction, ImagoTakeApprovalLifecycleMethodRequest,
@@ -134,6 +137,8 @@ export function apply(ctx: ClientContext): void {
     unwrapRpc(await connection.rpc.call('/qingmu-imago-method', endpoint, payload, signal)) as T
 
   const port: QingmuYimengPort = {
+    evidenceLedger: (request, signal) => read<YimengEpisodeEvidenceLedgerResponse>('evidenceLedger', request, signal),
+    verifyEpisode: (request, signal) => read<YimengEpisodeVerificationResponse>('verifyEpisode', request, signal),
     capabilityCatalog: (request, signal) =>
       read<YimengCapabilityCatalogResponse>('capabilityCatalog', request, signal),
     costRehearsal: (request, signal) =>

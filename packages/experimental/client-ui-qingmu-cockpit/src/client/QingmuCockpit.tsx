@@ -24,6 +24,7 @@ import { GenerationCapabilityCatalog } from './GenerationCapabilityCatalog.tsx'
 import { GenerationCostRehearsal } from './GenerationCostRehearsal.tsx'
 import { GenerationGateAControlEvidence } from './GenerationGateAControlEvidence.tsx'
 import { TakeVersionCompareView } from './TakeVersionCompareView.tsx'
+import { EpisodeEvidenceLedger } from './EpisodeEvidenceLedger.tsx'
 import css from './QingmuCockpit.module.css'
 
 export type QingmuCockpitProps = PropsRuntime<'sidebar.footer.action'>
@@ -531,6 +532,14 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   const generationEnabled = open && tab === 'generation' && !loading && error === undefined
   const generationView = (
     <div className={css.stack}>
+      <EpisodeEvidenceLedger
+        projectId={projectId}
+        episodeId={episodeId}
+        projection={projection}
+        enabled={open && tab === 'generation' && !loading}
+        port={port}
+        t={t}
+      />
       <TakeVersionCompareView
         projectId={projectId}
         episodeId={episodeId}

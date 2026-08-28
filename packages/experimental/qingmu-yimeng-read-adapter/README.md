@@ -4,6 +4,14 @@ English | [中文](README.zh.md)
 
 This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `capabilityCatalog`, `costRehearsal`, `gateAControlEvidence`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `takeVersions`, `takeComments`, `takeAcceptance`, `takeReviewAuthority`, `takeTechnicalQc`, `takeApprovalLifecycle`, `shotFindings`, `productionUnits`, `lsuPlanSource`, `stageSources`, and `workflow`; it exposes no mutation endpoint.
 
+## Episode evidence and explicit verification
+
+`evidenceLedger` reads `/api/qingmu/projects/{projectId}/episodes/{episodeId}/evidence-ledger`. `verifyEpisode` explicitly POSTs only the current `sourceSnapshotSha256` to its `verify-episode` sibling. Neither operation writes business state. The Host verifies the RFC 8785 source and report hashes, exact scope and canonical Take/comment/review bindings; it preserves the canonical verifier report, including a false `ok`.
+
+Ledger reads never invoke probes. Receipt inputs and stored QC/lifecycle records remain separate; stored records are not asserted to have a current probed binding. Missing evidence stays missing. Yimeng binds database, media and probe-sidecar inputs before and after reads and verification. It uses short-lived DB/WAL read snapshots so SQLite cannot create auxiliary files in the business directory. No persistent Ledger database or export is created.
+
+The Host admits one verification at a time. `verificationTimeoutMs` defaults to 55000 ms and is capped at 60000 ms; ordinary reads keep their existing timeout. Yimeng terminates the verifier process group after 45 seconds, limits an episode to 500 frames, response JSON to 4 MiB, a database image to 256 MiB and fingerprint input to 10000 paths / 8 GiB / 10 seconds per pass. Oversize, missing probes, stale source and concurrent requests fail with structured errors. A successful verification call is not release permission or human signoff.
+
 ## Contract
 
 `health` normalizes anonymous liveness and runtime identity fields. `projects` normalizes pagination, `episodes` returns a validated project episode list, `script` returns the authoritative structured episode script with its optimistic revision and a Host-verified `scriptSha256`, `elementProfile` reads an actor, scene, or prop from `/api/qingmu/projects/{projectId}/elements/{elementKind}/{targetId}`, `referenceCandidates` reads the same element's candidates from the `/reference-candidates` child route, and `workflow` requires the exact `jason.episode-workflow-projection.v1` schema and its strong top-level fields while retaining unknown JSON fields.

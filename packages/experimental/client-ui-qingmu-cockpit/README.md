@@ -94,6 +94,12 @@ The technical-QC panel loads a fresh current Take subject and stateless method b
 
 The lifecycle panel displays only the actions legal for the exact current selected Take, Approver decision, QC assessment, and rules SHA. Approval drift is visible immediately; invalidation records the audit event. Rework records defect classes and the existing bounded route without executing it, the third same-class cycle requires method review, and a new Take revision never inherits the prior approval. The client stores a nine-field versioned session marker, but the RPC strips that local schema field and sends the exact eight-field browser intent. An uncertain transition is recovered with one GET-only lookup and never by repeating the POST.
 
+## Episode evidence and verification
+
+The generation/quality workspace offers separate explicit actions to view or refresh evidence and to verify the current episode. Opening the workspace or refreshing evidence never starts whole-episode probes. Duplicate clicks are blocked; scope changes, refresh failures and source drift retire old results. After verification the client independently refreshes the Ledger before displaying the source-bound report.
+
+The panel shows canonical Take, ordinary comments, review, receipt input, QC and lifecycle records separately. The canonical `ok`, technical and creative facts are unchanged, and the exact report remains inspectable. A point-in-time report is not live monitoring, formal approval, release or human signoff. This slice creates no export, business database, budget authority or approval record.
+
 ## Explicit production-unit scope registration
 
 The same Shot workspace reads existing Yimeng shot groups and their current or historical unit bindings. The user must select an existing group, enter an explicit unit ID, and confirm the displayed scope. A group's existing unit ID cannot be reassigned. Available groups must match the visible storyboard revision and canonical Shot IDs and display numbers; the workflow projection does not expose frame-content hashes, so the client does not invent them. The method comes from the existing IMAGO adapter, and a binding uses the existing command adapter with source SHA and binding-revision/SHA compare-and-swap.

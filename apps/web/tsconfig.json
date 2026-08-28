@@ -30,6 +30,7 @@
     "tests/live-interactions.e2e.ts",
     "tests/question-composer.e2e.ts",
     "tests/qingmu-script-workspace.e2e.ts",
+    "tests/qingmu-episode-evidence.e2e.ts",
     "tests/qingmu-shot-finding-fixture.ts",
     "tests/qingmu-rework-route-fixture.ts",
     "tests/qingmu-production-unit-fixture.ts",

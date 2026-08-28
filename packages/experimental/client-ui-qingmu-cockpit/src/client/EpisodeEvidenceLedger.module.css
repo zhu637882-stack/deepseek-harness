@@ -1,0 +1,52 @@
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.actions button {
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  font: inherit;
+}
+
+.actions button:disabled {
+  cursor: not-allowed;
+  opacity: .6;
+}
+
+.actions button:focus-visible {
+  outline: 2px solid var(--dsw-alias-label-primary);
+  outline-offset: 2px;
+}
+
+.note {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.hash,
+.report dd {
+  overflow-wrap: anywhere;
+}
+
+.json {
+  max-height: 360px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.report {
+  margin-top: 16px;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}

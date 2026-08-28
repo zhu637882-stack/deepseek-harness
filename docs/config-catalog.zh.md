@@ -670,10 +670,12 @@ export interface YimengReadAdapterConfig {
   readonly baseUrl?: string
   /** Read deadline in milliseconds, from 100 through 60,000. */
   readonly timeoutMs?: number
+  /** Explicit episode-verification deadline in milliseconds, from 100 through 60,000. */
+  readonly verificationTimeoutMs?: number
 }
 ```
 
-来源：[`packages/experimental/qingmu-yimeng-read-adapter/src/index.ts:365`](../packages/experimental/qingmu-yimeng-read-adapter/src/index.ts)
+来源：[`packages/experimental/qingmu-yimeng-read-adapter/src/index.ts:382`](../packages/experimental/qingmu-yimeng-read-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-tool-agent-team"></a>
 
