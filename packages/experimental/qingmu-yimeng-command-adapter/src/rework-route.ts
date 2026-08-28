@@ -688,7 +688,13 @@ function authorityResult(
   }
 }
 
-/** Derive the only exact Host Method request accepted for a route record or fresh authority probe. */
+/**
+ * Derive the only exact Host Method request accepted for a route record or fresh authority probe.
+ * @param endpoint - Command endpoint selected by the caller.
+ * @param payload - Untrusted command payload to validate.
+ * @param helpers - Canonicalization and digest helpers for command preparation.
+ * @returns Canonical method request for the current backend state.
+ */
 export function prepareCurrentReworkRouteMethodRequest(
   endpoint: 'recordReworkRoute' | 'probeReworkRouteAuthority', payload: unknown, helpers: Helpers,
 ): YimengCommandJsonObject {
@@ -699,7 +705,14 @@ export function prepareCurrentReworkRouteMethodRequest(
   }
 }
 
-/** Prepare one non-retried POST or one original-coordinate GET receipt lookup. */
+/**
+ * Prepare one non-retried POST or one original-coordinate GET receipt lookup.
+ * @param endpoint - Command endpoint selected by the caller.
+ * @param payload - Untrusted command payload to validate.
+ * @param helpers - Canonicalization and digest helpers for command preparation.
+ * @param currentMethodValue - Fresh method result used for command preparation.
+ * @returns Prepared command and recovery metadata.
+ */
 export function prepareReworkRouteCommand(
   endpoint: 'recordReworkRoute' | 'recoverReworkRoute' | 'probeReworkRouteAuthority',
   payload: unknown,

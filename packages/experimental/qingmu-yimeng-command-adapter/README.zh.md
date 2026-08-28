@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这个私有实验性 Host 插件通过仅限回环地址的 `/qingmu-yimeng-command` 通道，暴露易梦 `episode_script` 与人物、环境、道具 `element_profile` ChangeSet 的显式流程。剧本操作继续是 `proposeScript`、`previewScript`、`commitScript` 和只读的 `recoverScriptCommit`；元素操作是 `proposeElementProfile`、`proposeReferenceAsset`、`previewElementProfile`、`commitElementProfile` 和只读的 `recoverElementProfileCommit`。Take 普通评论使用 `createTakeComment` 和只读的 `recoverTakeComment`。所选视频 Finding 使用 `recordShotFinding` 和只读的 `recoverShotFinding`。通过机器校验的阶段工件使用 `registerStageArtifact`、`commitStageArtifactDecision`，以及只读的 `recoverStageArtifactRegistration` 和 `recoverStageArtifactDecision`。完整范围 LSU 计划使用 `sealLsuPlan`、只读的 `recoverLsuPlanSeal` 和 `probeLsuPlanAuthority`。
+这个私有实验性 Host 插件通过仅限回环地址的 `/qingmu-yimeng-command` 通道，暴露易梦 `episode_script` 与人物、环境、道具 `element_profile` ChangeSet 的显式流程。剧本操作继续是 `proposeScript`、`previewScript`、`commitScript` 和只读的 `recoverScriptCommit`；元素操作是 `proposeElementProfile`、`proposeReferenceAsset`、`previewElementProfile`、`commitElementProfile` 和只读的 `recoverElementProfileCommit`。Take 普通评论使用 `createTakeComment` 和只读的 `recoverTakeComment`。Take 审核权威使用 `createTakeReviewRecommendation`、`createTakeHumanDecision` 及各自的 GET-only 恢复操作。技术 QC 使用 `recordTakeTechnicalQc` 和 `recoverTakeTechnicalQc`。批准生命周期使用 `transitionTakeApprovalLifecycle` 和 `recoverTakeApprovalLifecycleTransition`。所选视频 Finding 使用 `recordShotFinding` 和只读的 `recoverShotFinding`。通过机器校验的阶段工件使用 `registerStageArtifact`、`commitStageArtifactDecision`，以及只读的 `recoverStageArtifactRegistration` 和 `recoverStageArtifactDecision`。完整范围 LSU 计划使用 `sealLsuPlan`、只读的 `recoverLsuPlanSeal` 和 `probeLsuPlanAuthority`。
 
 ## 命令边界
 
@@ -25,6 +25,18 @@ ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只
 `createTakeComment` 把精确的当前 Take 主体 SHA 绑定到所选 Take、时间码或帧锚点、评论正文和一个可见 ASCII 幂等键。它只向 `/api/qingmu/projects/{projectId}/episodes/{episodeId}/frames/{frameId}/take-comments` 发送一次 `POST`；请求体准确包含 `expectedTakeSubjectSha256`、`takeId`、`anchor`、`body` 和 `idempotencyKey`，路径 ID、actor、角色与 session 均来自路由和易梦认证。结果必须保留原意图，并把 `changed`、选择、技术通过、正式批准、单集验证、人工签收、Provider 调用与预算影响保持为 false 或零。
 
 `recoverTakeComment` 绝不重试 POST。它只向 `/command-receipt` 发送一次无正文 GET，在 query 中保留原 Take ID 与主体 SHA，在请求头中保留幂等键，随后校验原结果或严格的 `not_found`。两个操作都只使用 Host 持有的易梦 bearer token；凭据一旦反射进上游 JSON 就失败关闭。
+
+## Take Reviewer 与 Approver 记录
+
+`createTakeReviewRecommendation` 记录 Reviewer 推荐，`createTakeHumanDecision` 记录独立 Approver 决定。各自专用恢复操作只查询原回执，绝不重复 POST。Host 保留准确 Take 主体与推荐身份，但 actor、角色、session、生产者、参与者和自然人隔离只由易梦认证。切换角色或 session 不能把同一自然人变成合格 Approver。两种命令都不改变技术 QC、正式批准、选择、单集验证、Provider 或预算状态。
+
+## Take 技术 QC 记录
+
+`recordTakeTechnicalQc` 校验新鲜的 `takeTechnicalQcMethod`，随后发送一次评估 POST，只包含准确当前主体、固定宏观／微观检查、派生问题码、原因和幂等键。易梦重新校验回执证据、当前选择、规则和记录者权力。`recoverTakeTechnicalQc` 使用原坐标和原 key 执行 GET-only 回执恢复。通过的评估仍是技术证据，不是内容批准；两种操作都保持所有相邻权力字段为 false 或零。
+
+## Take 批准生命周期转换
+
+`transitionTakeApprovalLifecycle` 校验新鲜的 `takeApprovalLifecycleMethod`，使用原始八字段浏览器意图准确发送 `APPROVE`、`INVALIDATE`、`REQUEST_REWORK` 或 `RESUBMIT` 之一。批准绑定准确的当前已选 Take、Approver 决定、QC 评估和规则 SHA。漂移使批准失效；返修只记录缺陷类别和既有有界路线，不执行返修；同类第三次返修必须方法复审；新修订不能继承旧批准。`recoverTakeApprovalLifecycleTransition` 使用原坐标和幂等键发送一次无正文 GET，绝不重复转换 POST。
 
 ## 镜头视频 Finding
 

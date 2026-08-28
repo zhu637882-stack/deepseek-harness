@@ -66,7 +66,11 @@ function digest(value: unknown, serialize: Serialize, field = 'lsuPlanMethod'): 
   return createHash('sha256').update(serialize(value, field), 'utf8').digest('hex')
 }
 
-/** Accept only project and episode coordinates; the Host derives all source and rule facts. */
+/**
+ * Accept only project and episode coordinates; the Host derives all source and rule facts.
+ * @param payload - Untrusted command payload to validate.
+ * @returns Validated ImagoLsuPlanMethodRequest value.
+ */
 export function parseLsuPlanMethodRequest(payload: unknown): ImagoLsuPlanMethodRequest {
   try {
     const item = exact(payload, ['projectId', 'episodeId'])
@@ -120,7 +124,14 @@ function normalizeSubject(value: unknown, request: ImagoLsuPlanMethodRequest): Y
   }
 }
 
-/** Build the compiler snapshot only from an available fresh read bound to the current lock-rule digest. */
+/**
+ * Build the compiler snapshot only from an available fresh read bound to the current lock-rule digest.
+ * @param request - Request coordinates and payload to process.
+ * @param value - Untrusted value to validate and normalize.
+ * @param expectedLockRulesSha256 - Expected SHA-256 digest of the locked rules.
+ * @param serialize - Canonical serializer used for SHA-bound input.
+ * @returns Resulting ImagoLsuPlanMethodSnapshot value.
+ */
 export function buildLsuPlanSnapshot(
   request: ImagoLsuPlanMethodRequest,
   value: unknown,
@@ -170,7 +181,12 @@ function subset(hashes: Readonly<Record<string, string>>, paths: readonly string
   }))
 }
 
-/** Re-read the exact union of Core sources and cross-check both existing reviewed rule reconstructions. */
+/**
+ * Re-read the exact union of Core sources and cross-check both existing reviewed rule reconstructions.
+ * @param coreRoot - IMAGO Core root containing the current machine rules.
+ * @param serialize - Canonical serializer used for SHA-bound input.
+ * @returns Stored recovery marker state, including stale or absent results.
+ */
 export async function readLsuPlanRules(coreRoot: string, serialize: Serialize): Promise<LsuPlanRules> {
   try {
     const [production, lock, sources] = await Promise.all([
@@ -209,7 +225,15 @@ export async function readLsuPlanRules(coreRoot: string, serialize: Serialize): 
   }
 }
 
-/** Verify every compiler field and sign the exact current subject and two rule generations. */
+/**
+ * Verify every compiler field and sign the exact current subject and two rule generations.
+ * @param raw - Compiler output to validate.
+ * @param snapshot - Source snapshot bound to the compiler result.
+ * @param rules - Current rule sources bound to the result.
+ * @param serialize - Canonical serializer used for SHA-bound input.
+ * @param key - Host attestation key.
+ * @returns Resulting ImagoLsuPlanMethodResponse value.
+ */
 export function attestLsuPlanMethod(
   raw: unknown,
   snapshot: ImagoLsuPlanMethodSnapshot,

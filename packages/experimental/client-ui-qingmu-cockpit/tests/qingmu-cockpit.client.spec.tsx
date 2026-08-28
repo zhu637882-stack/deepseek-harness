@@ -748,6 +748,18 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     recoverTakeTechnicalQc: vi.fn(async () => {
       throw new Error('Take technical QC recovery is not part of this fixture')
     }),
+    takeApprovalLifecycle: vi.fn(async () => {
+      throw new Error('Take approval lifecycle is not part of this fixture')
+    }),
+    takeApprovalLifecycleMethod: vi.fn(async () => {
+      throw new Error('Take approval lifecycle method is not part of this fixture')
+    }),
+    transitionTakeApprovalLifecycle: vi.fn(async () => {
+      throw new Error('Take approval lifecycle transition is not part of this fixture')
+    }),
+    recoverTakeApprovalLifecycleTransition: vi.fn(async () => {
+      throw new Error('Take approval lifecycle recovery is not part of this fixture')
+    }),
     shotFindings: vi.fn(async (request: Parameters<QingmuYimengPort['shotFindings']>[0]) => ({
       schema: 'jason.qingmu-shot-finding-feed.v1', ...request, subject: null, snapshotSha256: null,
       availability: { status: 'unavailable', reason: 'selected_video_unavailable' },

@@ -462,7 +462,13 @@ function authorityResult(
   }
 }
 
-/** Derive the only exact Host Method request accepted for a seal or authority probe. */
+/**
+ * Derive the only exact Host Method request accepted for a seal or authority probe.
+ * @param endpoint - Command endpoint selected by the caller.
+ * @param payload - Untrusted command payload to validate.
+ * @param helpers - Canonicalization and digest helpers for command preparation.
+ * @returns Canonical method request for the current backend state.
+ */
 export function prepareCurrentLsuPlanMethodRequest(
   endpoint: 'sealLsuPlan' | 'probeLsuPlanAuthority', payload: unknown, helpers: Helpers,
 ): YimengCommandJsonObject {
@@ -470,7 +476,14 @@ export function prepareCurrentLsuPlanMethodRequest(
   return { projectId: request.projectId, episodeId: request.episodeId }
 }
 
-/** Prepare one non-retried POST or one original-coordinate GET receipt lookup. */
+/**
+ * Prepare one non-retried POST or one original-coordinate GET receipt lookup.
+ * @param endpoint - Command endpoint selected by the caller.
+ * @param payload - Untrusted command payload to validate.
+ * @param helpers - Canonicalization and digest helpers for command preparation.
+ * @param currentMethodValue - Fresh method result used for command preparation.
+ * @returns Prepared command and recovery metadata.
+ */
 export function prepareLsuPlanCommand(
   endpoint: 'sealLsuPlan' | 'recoverLsuPlanSeal' | 'probeLsuPlanAuthority',
   payload: unknown,

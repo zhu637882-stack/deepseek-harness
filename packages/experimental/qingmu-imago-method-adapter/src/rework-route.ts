@@ -72,7 +72,11 @@ function digest(value: unknown, serialize: Serialize, field: string): string {
   return createHash('sha256').update(serialize(value, field), 'utf8').digest('hex')
 }
 
-/** Accept only the four business coordinates; all source and rule facts are Host-derived. */
+/**
+ * Accept only the four business coordinates; all source and rule facts are Host-derived.
+ * @param payload - Untrusted command payload to validate.
+ * @returns Validated ImagoReworkRouteMethodRequest value.
+ */
 export function parseReworkRouteMethodRequest(payload: unknown): ImagoReworkRouteMethodRequest {
   try {
     const item = exact(payload, ['projectId', 'episodeId', 'frameId', 'findingId'], 'reworkRouteMethod')
@@ -188,7 +192,14 @@ function normalizeSubject(
   return JSON.parse(serialize(item, 'reworkRouteSubject')) as YimengReworkRouteSubject
 }
 
-/** Build the Core snapshot only from a fresh feed bound to all three current rule generations. */
+/**
+ * Build the Core snapshot only from a fresh feed bound to all three current rule generations.
+ * @param request - Request coordinates and payload to process.
+ * @param value - Untrusted value to validate and normalize.
+ * @param expected - Expected marker used for compare-and-clear behavior.
+ * @param serialize - Canonical serializer used for SHA-bound input.
+ * @returns Resulting ImagoReworkRouteMethodSnapshot value.
+ */
 export function buildReworkRouteSnapshot(
   request: ImagoReworkRouteMethodRequest,
   value: unknown,
@@ -261,7 +272,12 @@ function subset(hashes: Readonly<Record<string, string>>, paths: readonly string
   }))
 }
 
-/** Read the fixed Core source union before asking Yimeng for the SHA-bound project source. */
+/**
+ * Read the fixed Core source union before asking Yimeng for the SHA-bound project source.
+ * @param coreRoot - IMAGO Core root containing the current machine rules.
+ * @param serialize - Canonical serializer used for SHA-bound input.
+ * @returns Stored recovery marker state, including stale or absent results.
+ */
 export async function readReworkRouteRuleSources(
   coreRoot: string, serialize: Serialize,
 ): Promise<ReworkRouteRuleSources> {
@@ -311,7 +327,12 @@ export async function readReworkRouteRuleSources(
   }
 }
 
-/** Bind one fresh OPEN Finding to the already-read current Core source generation. */
+/**
+ * Bind one fresh OPEN Finding to the already-read current Core source generation.
+ * @param sources - Current rule sources to verify.
+ * @param subject - Subject coordinates to validate.
+ * @returns Resulting ReworkRouteRules value.
+ */
 export function bindReworkRouteRules(
   sources: ReworkRouteRuleSources, subject: YimengReworkRouteSubject,
 ): ReworkRouteRules {
@@ -351,14 +372,28 @@ export function bindReworkRouteRules(
   return { hashes: sources.hashes, lockHashes: sources.lockHashes, definition, routeInstruction }
 }
 
-/** Re-read the full Core source union and reconstruct the only bounded instruction for this Finding. */
+/**
+ * Re-read the full Core source union and reconstruct the only bounded instruction for this Finding.
+ * @param coreRoot - IMAGO Core root containing the current machine rules.
+ * @param subject - Subject coordinates to validate.
+ * @param serialize - Canonical serializer used for SHA-bound input.
+ * @returns Stored recovery marker state, including stale or absent results.
+ */
 export async function readReworkRouteRules(
   coreRoot: string, subject: YimengReworkRouteSubject, serialize: Serialize,
 ): Promise<ReworkRouteRules> {
   return bindReworkRouteRules(await readReworkRouteRuleSources(coreRoot, serialize), subject)
 }
 
-/** Verify all compiler fields and sign the exact subject and two current rule generations. */
+/**
+ * Verify all compiler fields and sign the exact subject and two current rule generations.
+ * @param raw - Compiler output to validate.
+ * @param snapshot - Source snapshot bound to the compiler result.
+ * @param rules - Current rule sources bound to the result.
+ * @param serialize - Canonical serializer used for SHA-bound input.
+ * @param key - Host attestation key.
+ * @returns Resulting ImagoReworkRouteMethodResponse value.
+ */
 export function attestReworkRouteMethod(
   raw: unknown,
   snapshot: ImagoReworkRouteMethodSnapshot,

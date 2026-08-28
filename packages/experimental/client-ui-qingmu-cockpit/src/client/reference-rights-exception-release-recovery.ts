@@ -31,7 +31,13 @@ const MARKER_KEYS = [
   'idempotencyKey',
 ] as const
 
+/**
+ * Element kinds supported by reference-rights exception recovery.
+ */
 export type ReferenceRightsExceptionElementKind = typeof ELEMENT_KINDS[number]
+/**
+ * Reference-rights fields that an exception may release.
+ */
 export type ReferenceRightsExceptionField = typeof REFERENCE_RIGHTS_EXCEPTION_FIELDS[number]
 
 /** Exact, finite scope sent to the exception-release command. */
@@ -61,6 +67,9 @@ export interface ReferenceRightsExceptionReleaseRecoveryMarker {
   readonly idempotencyKey: string
 }
 
+/**
+ * Result of reading a reference-rights exception release marker.
+ */
 export type ReferenceRightsExceptionReleaseRecoveryRead =
   | { readonly status: 'none' }
   | { readonly status: 'ready'; readonly marker: ReferenceRightsExceptionReleaseRecoveryMarker }
@@ -208,7 +217,11 @@ function sameMarker(
   return MARKER_KEYS.every(key => leftRecord[key] === rightRecord[key])
 }
 
-/** Normalize a finite scope and put its set-like rights fields into authoritative order. */
+/**
+ * Normalize a finite scope and put its set-like rights fields into authoritative order.
+ * @param value - Untrusted value to validate and normalize.
+ * @returns Validated ReferenceRightsExceptionScope value.
+ */
 export function normalizeReferenceRightsExceptionScope(value: unknown): ReferenceRightsExceptionScope {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error('异常放行范围不是对象')
@@ -247,7 +260,11 @@ export function normalizeReferenceRightsExceptionScope(value: unknown): Referenc
   }
 }
 
-/** Hash the exact trimmed reason without retaining it in recovery storage. */
+/**
+ * Hash the exact trimmed reason without retaining it in recovery storage.
+ * @param reason - Human-provided exception reason.
+ * @returns SHA-256 digest of the canonical value.
+ */
 export async function digestReferenceRightsExceptionReason(reason: string): Promise<string> {
   if (typeof reason !== 'string' || reason.length === 0 || reason !== reason.trim() || /\u0000/.test(reason)) {
     throw new Error('异常放行理由无效')
@@ -255,12 +272,20 @@ export async function digestReferenceRightsExceptionReason(reason: string): Prom
   return digestCanonical(reason)
 }
 
-/** Hash the normalized finite scope without retaining its body in recovery storage. */
+/**
+ * Hash the normalized finite scope without retaining its body in recovery storage.
+ * @param scope - Recovery or approval scope.
+ * @returns SHA-256 digest of the canonical value.
+ */
 export async function digestReferenceRightsExceptionScope(scope: unknown): Promise<string> {
   return digestCanonical(normalizeReferenceRightsExceptionScope(scope))
 }
 
-/** Derive one deterministic Host idempotency key from non-secret recovery coordinates. */
+/**
+ * Derive one deterministic Host idempotency key from non-secret recovery coordinates.
+ * @param input - Inputs used to create the recovery marker.
+ * @returns Stable idempotency key for the canonical operation.
+ */
 export async function deriveReferenceRightsExceptionIdempotencyKey(
   input: Omit<ReferenceRightsExceptionReleaseRecoveryMarker, 'idempotencyKey'>,
 ): Promise<string> {
@@ -276,14 +301,24 @@ export async function deriveReferenceRightsExceptionIdempotencyKey(
   return `qingmu:rights-exception:v1:${digest}`
 }
 
-/** Validate the exact marker before it is synchronously persisted. */
+/**
+ * Validate the exact marker before it is synchronously persisted.
+ * @param input - Inputs used to create the recovery marker.
+ * @returns Recovery marker bound to the requested operation.
+ */
 export function createReferenceRightsExceptionReleaseRecoveryMarker(
   input: ReferenceRightsExceptionReleaseRecoveryMarker,
 ): ReferenceRightsExceptionReleaseRecoveryMarker {
   return parseMarker(input, input.projectId, input.elementKind, input.targetId)
 }
 
-/** Read one subject-scoped marker without causing a command or server request. */
+/**
+ * Read one subject-scoped marker without causing a command or server request.
+ * @param projectId - Project identifier in the recovery scope.
+ * @param elementKind - Reference element kind in the recovery scope.
+ * @param targetId - Target identifier in the recovery scope.
+ * @returns Stored recovery marker state, including stale or absent results.
+ */
 export function readReferenceRightsExceptionReleaseRecoveryMarker(
   projectId: string,
   elementKind: ReferenceRightsExceptionElementKind,
@@ -301,7 +336,11 @@ export function readReferenceRightsExceptionReleaseRecoveryMarker(
   }
 }
 
-/** Synchronously write and read back the exact marker before any exception-release POST. */
+/**
+ * Synchronously write and read back the exact marker before any exception-release POST.
+ * @param marker - Recovery marker to persist or clear.
+ * @returns Whether the marker was stored successfully.
+ */
 export function writeReferenceRightsExceptionReleaseRecoveryMarker(
   marker: ReferenceRightsExceptionReleaseRecoveryMarker,
 ): boolean {
@@ -321,7 +360,11 @@ export function writeReferenceRightsExceptionReleaseRecoveryMarker(
   }
 }
 
-/** Clear only the still-identical marker after receipt and authoritative feed reconciliation. */
+/**
+ * Clear only the still-identical marker after receipt and authoritative feed reconciliation.
+ * @param marker - Recovery marker to persist or clear.
+ * @returns Whether a matching marker was removed.
+ */
 export function clearReferenceRightsExceptionReleaseRecoveryMarker(
   marker: ReferenceRightsExceptionReleaseRecoveryMarker,
 ): boolean {
@@ -343,7 +386,13 @@ export function clearReferenceRightsExceptionReleaseRecoveryMarker(
   }
 }
 
-/** Discard only local recovery coordinates; it cannot undo a server-side release. */
+/**
+ * Discard only local recovery coordinates; it cannot undo a server-side release.
+ * @param projectId - Project identifier in the recovery scope.
+ * @param elementKind - Reference element kind in the recovery scope.
+ * @param targetId - Target identifier in the recovery scope.
+ * @returns Whether a matching marker was removed.
+ */
 export function discardReferenceRightsExceptionReleaseRecoveryMarker(
   projectId: string,
   elementKind: ReferenceRightsExceptionElementKind,

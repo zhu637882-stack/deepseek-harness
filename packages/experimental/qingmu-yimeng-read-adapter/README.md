@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `capabilityCatalog`, `costRehearsal`, `gateAControlEvidence`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `takeVersions`, `takeComments`, `takeAcceptance`, `shotFindings`, `productionUnits`, `lsuPlanSource`, `stageSources`, and `workflow`; it exposes no mutation endpoint.
+This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `capabilityCatalog`, `costRehearsal`, `gateAControlEvidence`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `takeVersions`, `takeComments`, `takeAcceptance`, `takeReviewAuthority`, `takeTechnicalQc`, `takeApprovalLifecycle`, `shotFindings`, `productionUnits`, `lsuPlanSource`, `stageSources`, and `workflow`; it exposes no mutation endpoint.
 
 ## Contract
 
@@ -18,7 +18,7 @@ The `workflow.director.heroFrameStoryboards` sibling projection joins one-to-one
 
 The `workflow.director.shotRelations.shots` array projects Yimeng's canonical storyboard frames without adding a Shot authority. Each Shot carries `shotId`, the sole Shot ordering field `frameNo`, `durationSec`, and derived `dialogueRhythm`; it never carries a Shot-level `order`, `sortOrder`, or `sequence`. Each element carries `currentReferenceAvailability` plus either `currentReference: null` or the uniquely selected E4-3 reference's `assetId`, `sha256`, and lineage. The adapter does not choose references or persist Shot selection state.
 
-The package root exports the request and response types, including `YimengHealth`, `YimengCostRehearsalRequest`, `YimengCostRehearsalSubject`, `YimengCostRehearsalResponse`, `YimengProjectsResponse`, `YimengEpisodesResponse`, `YimengScriptResponse`, `YimengElementProfileRequest`, `YimengElementProfileResponse`, `YimengReferenceAssetCandidate`, `YimengReferenceCandidatesRequest`, `YimengReferenceCandidatesResponse`, `YimengTakeVersionStackResponse`, `YimengTakeCommentFeedResponse`, `YimengTakeAcceptanceResponse`, `YimengShotRelationShot`, `YimengShotDialogueCue`, `YimengShotDialogueRhythm`, `YimengShotCurrentReference`, `YimengShotCurrentReferenceLineage`, `YimengShotRelationsProjection`, `YimengHeroFrameStoryboardsProjection`, and `YimengWorkflowProjection`.
+The package root exports the request and response types, including `YimengHealth`, `YimengCostRehearsalRequest`, `YimengCostRehearsalSubject`, `YimengCostRehearsalResponse`, `YimengProjectsResponse`, `YimengEpisodesResponse`, `YimengScriptResponse`, `YimengElementProfileRequest`, `YimengElementProfileResponse`, `YimengReferenceAssetCandidate`, `YimengReferenceCandidatesRequest`, `YimengReferenceCandidatesResponse`, `YimengTakeVersionStackResponse`, `YimengTakeCommentFeedResponse`, `YimengTakeAcceptanceResponse`, `YimengTakeReviewAuthorityFeedResponse`, `YimengTakeTechnicalQcFeedResponse`, `YimengTakeApprovalLifecycleFeedResponse`, `YimengShotRelationShot`, `YimengShotDialogueCue`, `YimengShotDialogueRhythm`, `YimengShotCurrentReference`, `YimengShotCurrentReferenceLineage`, `YimengShotRelationsProjection`, `YimengHeroFrameStoryboardsProjection`, and `YimengWorkflowProjection`.
 
 ## Gate A capability catalog
 
@@ -61,6 +61,18 @@ Local media and QC may pass independently of Provider verification. The response
 `takeComments` accepts exactly `projectId`, `episodeId`, and canonical `frameId`, then sends one authenticated, body-free GET to `/api/qingmu/projects/{projectId}/episodes/{episodeId}/frames/{frameId}/take-comments`. The Host validates exact current Take-version subjects and their RFC 8785 SHA-256 identities, immutable ordinary comments, timecode or frame anchors, authenticated commenter roles, and the server-declared `currentBinding`; it returns current and historical comments without rebinding either kind.
 
 Yimeng remains the only comment journal and Take-subject authority. This read does not select a Take, create a Finding, change technical pass or formal approval, verify an episode, infer human signoff, call a Provider, or mutate a budget.
+
+## Reviewer and Approver authority
+
+`takeReviewAuthority` reads the current Take subjects, Reviewer recommendations, and Approver decisions together with their exact hashes, authenticated roles, and natural-person identities. The Approver cannot be the producer or a review participant for the same subject, and changing a role or session cannot bypass that identity separation. A recommendation is not a decision, and neither operation changes selection, technical QC, formal approval, episode verification, Provider, or budget state.
+
+## Take technical QC
+
+`takeTechnicalQc` reads immutable technical assessments for the current selected Take. The Host validates the fixed macro and micro issue-code taxonomy, strict media receipt and required checks, exact current-subject binding, assessment SHA, and current rules SHA. A technical pass requires a passing receipt and no macro or micro issue. It remains technical evidence only: this read cannot approve content, change selection, create a Finding, verify an episode, or infer human signoff.
+
+## Take approval lifecycle
+
+`takeApprovalLifecycle` reads the exact current selected Take, current Approver decision, current technical assessment, rule identity, and immutable approval transition history. The Host validates canonical source bytes, ordering, cross-record references, authenticated roles, method-review requirements, and current rules SHA. A prior approval remains audit history but becomes non-current immediately when any bound Take, decision, QC, or rule identity drifts. This read derives no new legal action and performs no mutation, rework execution, Provider call, Evidence-ledger write, episode verification, or human signoff.
 
 ## Shot Finding ledger
 

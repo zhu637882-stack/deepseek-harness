@@ -484,7 +484,12 @@ function normalizeResult(
   }
 }
 
-/** Build the only identity payload sent to the trusted current Core method. */
+/**
+ * Build the only identity payload sent to the trusted current Core method.
+ * @param payload - Untrusted command payload to validate.
+ * @param helpers - Canonicalization and digest helpers for command preparation.
+ * @returns Canonical method request for the current backend state.
+ */
 export function prepareCurrentTakeTechnicalQcMethodRequest(
   payload: unknown,
   helpers: Helpers,
@@ -497,7 +502,14 @@ export function prepareCurrentTakeTechnicalQcMethodRequest(
   }
 }
 
-/** Prepare one Host-derived POST or the original GET-only receipt recovery. */
+/**
+ * Prepare one Host-derived POST or the original GET-only receipt recovery.
+ * @param endpoint - Command endpoint selected by the caller.
+ * @param payload - Untrusted command payload to validate.
+ * @param helpers - Canonicalization and digest helpers for command preparation.
+ * @param currentMethodValue - Fresh method result used for command preparation.
+ * @returns Prepared command and recovery metadata.
+ */
 export function prepareTakeTechnicalQcCommand(
   endpoint: 'recordTakeTechnicalQc' | 'recoverTakeTechnicalQc',
   payload: unknown,

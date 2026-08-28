@@ -15,6 +15,10 @@ import {
   prepareCurrentTakeTechnicalQcMethodRequest,
   prepareTakeTechnicalQcCommand,
 } from './take-technical-qc.ts'
+import {
+  prepareCurrentTakeApprovalLifecycleMethodRequest,
+  prepareTakeApprovalLifecycleCommand,
+} from './take-approval-lifecycle.ts'
 import { prepareProductionUnitCommand } from './production-unit.ts'
 import {
   prepareCurrentStageArtifactMethodRequest,
@@ -322,6 +326,17 @@ export type {
   YimengTakeTechnicalQcRecovery,
   YimengTakeTechnicalQcResult,
   YimengTakeTechnicalQcSubject,
+  YimengImagoTakeApprovalLifecycleMethodAttestation,
+  YimengImagoTakeApprovalLifecycleMethodProjection,
+  YimengRecoverTakeApprovalLifecycleTransitionRequest,
+  YimengTakeApprovalLifecycleAction,
+  YimengTakeApprovalLifecycleDefinition,
+  YimengTakeApprovalLifecycleMethodTransition,
+  YimengTakeApprovalLifecycleRecovery,
+  YimengTakeApprovalLifecycleResult,
+  YimengTakeApprovalLifecycleState,
+  YimengTakeApprovalLifecycleTransition,
+  YimengTransitionTakeApprovalLifecycleRequest,
 } from './types.ts'
 
 const CHANNEL = '/qingmu-yimeng-command'
@@ -417,6 +432,11 @@ export interface YimengCommandAdapterDependencies {
   ) => Promise<RpcResult<unknown>>
   /** Trusted Host call that recompiles the current selected-Take QC method. */
   readonly runTakeTechnicalQcMethod?: (
+    payload: unknown,
+    signal: AbortSignal,
+  ) => Promise<RpcResult<unknown>>
+  /** Trusted Host call that recompiles the current Take approval lifecycle method. */
+  readonly runTakeApprovalLifecycleMethod?: (
     payload: unknown,
     signal: AbortSignal,
   ) => Promise<RpcResult<unknown>>
@@ -855,7 +875,12 @@ function normalizeReferenceRightsRecordWith(
   }
 }
 
-/** Normalize and strictly whitelist one browser-provided reference-rights record. */
+/**
+ * Normalize and strictly whitelist one browser-provided reference-rights record.
+ * @param value - Untrusted value to validate and normalize.
+ * @param field - Field path used in validation errors.
+ * @returns Validated YimengReferenceRightsRecord value.
+ */
 export function normalizeReferenceRightsRecord(value: unknown, field = 'rights'): YimengReferenceRightsRecord {
   return normalizeReferenceRightsRecordWith(value, field, message => new InputError(message))
 }
@@ -4992,6 +5017,25 @@ export function createYimengCommandHandler(
         readAttestationKey: readReferenceAttestationKey,
         requireTimestamp: requireRfc3339Timestamp,
       }
+      let currentTakeApprovalLifecycleMethod: unknown
+      let currentTakeApprovalLifecycleToken: string | undefined
+      if (endpoint === 'transitionTakeApprovalLifecycle') {
+        const methodPayload = prepareCurrentTakeApprovalLifecycleMethodRequest(
+          payload,
+          stageArtifactHelpers,
+        )
+        currentTakeApprovalLifecycleToken = normalizeToken(dependencies.readToken())
+        if (currentTakeApprovalLifecycleToken === undefined) {
+          return internalError('YIMENG_API_TOKEN is not configured')
+        }
+        if (dependencies.runTakeApprovalLifecycleMethod === undefined) {
+          return internalError('current IMAGO Take approval lifecycle Method is unavailable')
+        }
+        const methodResult = await dependencies.runTakeApprovalLifecycleMethod(methodPayload, signal)
+        if (signal.aborted) return cancelled()
+        if (!methodResult.ok) return methodResult
+        currentTakeApprovalLifecycleMethod = methodResult.value
+      }
       let currentTakeTechnicalQcMethod: unknown
       let currentTakeTechnicalQcToken: string | undefined
       if (endpoint === 'recordTakeTechnicalQc') {
@@ -5068,6 +5112,8 @@ export function createYimengCommandHandler(
         || endpoint === 'recoverTakeHumanDecision'
         || endpoint === 'recordTakeTechnicalQc'
         || endpoint === 'recoverTakeTechnicalQc'
+        || endpoint === 'transitionTakeApprovalLifecycle'
+        || endpoint === 'recoverTakeApprovalLifecycleTransition'
         || endpoint === 'recordShotFinding' || endpoint === 'recoverShotFinding'
         || endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
         || endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
@@ -5079,33 +5125,41 @@ export function createYimengCommandHandler(
         || endpoint === 'recordReworkRoute' || endpoint === 'recoverReworkRoute'
         || endpoint === 'probeReworkRouteAuthority') {
         const helpers = stageArtifactHelpers
-        const prepared = endpoint === 'recordTakeTechnicalQc'
+        const prepared = endpoint === 'transitionTakeApprovalLifecycle'
+          || endpoint === 'recoverTakeApprovalLifecycleTransition'
+          ? prepareTakeApprovalLifecycleCommand(
+            endpoint,
+            payload,
+            helpers,
+            currentTakeApprovalLifecycleMethod,
+          )
+          : endpoint === 'recordTakeTechnicalQc'
           || endpoint === 'recoverTakeTechnicalQc'
-          ? prepareTakeTechnicalQcCommand(endpoint, payload, helpers, currentTakeTechnicalQcMethod)
-          : endpoint === 'createTakeReviewRecommendation'
-          || endpoint === 'recoverTakeReviewRecommendation'
-          || endpoint === 'createTakeHumanDecision'
-          || endpoint === 'recoverTakeHumanDecision'
-            ? prepareTakeReviewCommand(endpoint, payload, helpers)
-            : endpoint === 'createTakeComment' || endpoint === 'recoverTakeComment'
-              ? prepareTakeCommentCommand(endpoint, payload, helpers)
-              : endpoint === 'selectTakeVersion' || endpoint === 'recoverTakeVersionSelection'
-                ? prepareTakeVersionCommand(endpoint, payload, helpers)
-                : endpoint === 'recordReworkRoute' || endpoint === 'recoverReworkRoute'
-                  || endpoint === 'probeReworkRouteAuthority'
-                  ? prepareReworkRouteCommand(endpoint, payload, helpers, currentReworkRouteMethod)
-                  : endpoint === 'sealLsuPlan' || endpoint === 'recoverLsuPlanSeal'
-                    || endpoint === 'probeLsuPlanAuthority'
-                    ? prepareLsuPlanCommand(endpoint, payload, helpers, currentLsuPlanMethod)
-                    : endpoint === 'registerStageArtifact' || endpoint === 'recoverStageArtifactRegistration'
-                      || endpoint === 'commitStageArtifactDecision' || endpoint === 'recoverStageArtifactDecision'
-                      || endpoint === 'probeStageArtifactAuthority'
-                      ? prepareStageArtifactCommand(endpoint, payload, helpers, currentStageArtifactMethod)
-                      : endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
-                        ? prepareProductionUnitCommand(endpoint, payload, helpers)
-                        : endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
-                          ? prepareStageSourceCommand(endpoint, payload, helpers)
-                          : prepareShotFindingCommand(endpoint, payload, helpers)
+            ? prepareTakeTechnicalQcCommand(endpoint, payload, helpers, currentTakeTechnicalQcMethod)
+            : endpoint === 'createTakeReviewRecommendation'
+            || endpoint === 'recoverTakeReviewRecommendation'
+            || endpoint === 'createTakeHumanDecision'
+            || endpoint === 'recoverTakeHumanDecision'
+              ? prepareTakeReviewCommand(endpoint, payload, helpers)
+              : endpoint === 'createTakeComment' || endpoint === 'recoverTakeComment'
+                ? prepareTakeCommentCommand(endpoint, payload, helpers)
+                : endpoint === 'selectTakeVersion' || endpoint === 'recoverTakeVersionSelection'
+                  ? prepareTakeVersionCommand(endpoint, payload, helpers)
+                  : endpoint === 'recordReworkRoute' || endpoint === 'recoverReworkRoute'
+                    || endpoint === 'probeReworkRouteAuthority'
+                    ? prepareReworkRouteCommand(endpoint, payload, helpers, currentReworkRouteMethod)
+                    : endpoint === 'sealLsuPlan' || endpoint === 'recoverLsuPlanSeal'
+                      || endpoint === 'probeLsuPlanAuthority'
+                      ? prepareLsuPlanCommand(endpoint, payload, helpers, currentLsuPlanMethod)
+                      : endpoint === 'registerStageArtifact' || endpoint === 'recoverStageArtifactRegistration'
+                        || endpoint === 'commitStageArtifactDecision' || endpoint === 'recoverStageArtifactDecision'
+                        || endpoint === 'probeStageArtifactAuthority'
+                        ? prepareStageArtifactCommand(endpoint, payload, helpers, currentStageArtifactMethod)
+                        : endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
+                          ? prepareProductionUnitCommand(endpoint, payload, helpers)
+                          : endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
+                            ? prepareStageSourceCommand(endpoint, payload, helpers)
+                            : prepareShotFindingCommand(endpoint, payload, helpers)
         path = prepared.path
         requestInit = {
           method: prepared.request.method,
@@ -5411,7 +5465,8 @@ export function createYimengCommandHandler(
         throw new InputError(`unknown Yimeng command endpoint: ${endpoint}`)
       }
 
-      const token = currentTakeTechnicalQcToken ?? currentStageArtifactToken
+      const token = currentTakeApprovalLifecycleToken ?? currentTakeTechnicalQcToken
+        ?? currentStageArtifactToken
         ?? currentLsuPlanToken ?? currentReworkRouteToken
         ?? normalizeToken(dependencies.readToken())
       if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
@@ -5434,6 +5489,8 @@ export function createYimengCommandHandler(
         || endpoint === 'recoverTakeHumanDecision'
         || endpoint === 'recordTakeTechnicalQc'
         || endpoint === 'recoverTakeTechnicalQc'
+        || endpoint === 'transitionTakeApprovalLifecycle'
+        || endpoint === 'recoverTakeApprovalLifecycleTransition'
       const response = await fetchJson(
         dependencies,
         `${baseUrl}${path}`,
@@ -5488,6 +5545,12 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
       return method === undefined
         ? internalError('current IMAGO Take technical-QC Method is unavailable')
         : await method('takeTechnicalQcMethod', payload, signal)
+    },
+    runTakeApprovalLifecycleMethod: async (payload, signal) => {
+      const method = ctx.get('qingmuImagoMethod')
+      return method === undefined
+        ? internalError('current IMAGO Take approval lifecycle Method is unavailable')
+        : await method('takeApprovalLifecycleMethod', payload, signal)
     },
     runReworkRouteMethod: async (payload, signal) => {
       const method = ctx.get('qingmuImagoMethod')

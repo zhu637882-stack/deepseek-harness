@@ -127,7 +127,11 @@ function canonicalTextList(value: unknown, field: string): string[] {
   return result
 }
 
-/** Accept only the three canonical selected-Take coordinates from the browser. */
+/**
+ * Accept only the three canonical selected-Take coordinates from the browser.
+ * @param payload - Untrusted command payload to validate.
+ * @returns Validated YimengTakeAcceptanceRequest value.
+ */
 export function parseTakeAcceptanceReadRequest(payload: unknown): YimengTakeAcceptanceRequest {
   return parseTakeVersionReadRequest(payload)
 }
@@ -361,7 +365,13 @@ function normalizeQuality(value: unknown): YimengTakeCandidateQuality {
   }
 }
 
-/** Validate evidence identity, JCS hash, strict decode, QC freshness, and authority separation. */
+/**
+ * Validate evidence identity, JCS hash, strict decode, QC freshness, and authority separation.
+ * @param value - Untrusted value to validate and normalize.
+ * @param request - Request coordinates and payload to process.
+ * @param digest - Expected SHA-256 digest for the canonical value.
+ * @returns Validated YimengTakeAcceptanceResponse value.
+ */
 export function normalizeTakeAcceptance(
   value: unknown,
   request: YimengTakeAcceptanceRequest,

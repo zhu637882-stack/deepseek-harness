@@ -209,14 +209,23 @@ async function sha256(value: string): Promise<string> {
   return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-/** Derive a bounded deterministic key for one exact PromptIR edit ChangeSet. */
+/**
+ * Derive a bounded deterministic key for one exact PromptIR edit ChangeSet.
+ * @param changeSetId - Stable identifier for the edit change set.
+ * @param payloadSha256 - SHA-256 digest of the canonical payload.
+ * @returns Stable idempotency key for the canonical operation.
+ */
 export async function derivePromptIrEditIdempotencyKey(changeSetId: string, payloadSha256: string): Promise<string> {
   if (!isIdentifier(changeSetId)) throw new Error('ChangeSet ID 无效，无法生成幂等键')
   if (!SHA256.test(payloadSha256)) throw new Error('Payload SHA-256 无效，无法生成幂等键')
   return `qingmu:prompt-ir:edit:v1:${await sha256(changeSetId)}:${payloadSha256}`
 }
 
-/** Derive a bounded deterministic key from pre-submit coordinates for one PromptIR selection. */
+/**
+ * Derive a bounded deterministic key from pre-submit coordinates for one PromptIR selection.
+ * @param request - Request coordinates and payload to process.
+ * @returns Stable idempotency key for the canonical operation.
+ */
 export async function derivePromptIrSelectionIdempotencyKey(
   request: PromptIrSelectionIdentity,
 ): Promise<string> {
@@ -236,21 +245,33 @@ export async function derivePromptIrSelectionIdempotencyKey(
   return `qingmu:prompt-ir:select:v1:${await sha256(identity)}`
 }
 
-/** Validate and attach the edit recovery marker schema before storage. */
+/**
+ * Validate and attach the edit recovery marker schema before storage.
+ * @param request - Request coordinates and payload to process.
+ * @returns Recovery marker bound to the requested operation.
+ */
 export function createPromptIrEditRecoveryMarker(
   request: YimengRecoverPromptIrEditCommitRequest,
 ): PromptIrEditRecoveryMarker {
   return parseEditMarker({ schema: EDIT_SCHEMA, ...request }, request)
 }
 
-/** Validate and attach the selection recovery marker schema before storage. */
+/**
+ * Validate and attach the selection recovery marker schema before storage.
+ * @param request - Request coordinates and payload to process.
+ * @returns Recovery marker bound to the requested operation.
+ */
 export function createPromptIrSelectionRecoveryMarker(
   request: YimengRecoverPromptIrSelectionRequest,
 ): PromptIrSelectionRecoveryMarker {
   return parseSelectionMarker({ schema: SELECTION_SCHEMA, ...request }, request)
 }
 
-/** Read only the edit marker for this exact storyboard frame. */
+/**
+ * Read only the edit marker for this exact storyboard frame.
+ * @param coordinates - Project and artifact coordinates for the operation.
+ * @returns Stored recovery marker state, including stale or absent results.
+ */
 export function readPromptIrEditRecoveryMarker(
   coordinates: PromptIrRecoveryCoordinates,
 ): PromptIrEditRecoveryMarkerRead {
@@ -263,7 +284,11 @@ export function readPromptIrEditRecoveryMarker(
   }
 }
 
-/** Read only the selection marker for this exact storyboard frame. */
+/**
+ * Read only the selection marker for this exact storyboard frame.
+ * @param coordinates - Project and artifact coordinates for the operation.
+ * @returns Stored recovery marker state, including stale or absent results.
+ */
 export function readPromptIrSelectionRecoveryMarker(
   coordinates: PromptIrRecoveryCoordinates,
 ): PromptIrSelectionRecoveryMarkerRead {
@@ -276,7 +301,11 @@ export function readPromptIrSelectionRecoveryMarker(
   }
 }
 
-/** Persist and synchronously verify an edit marker before the edit POST. */
+/**
+ * Persist and synchronously verify an edit marker before the edit POST.
+ * @param marker - Recovery marker to persist or clear.
+ * @returns Whether the marker was stored successfully.
+ */
 export function writePromptIrEditRecoveryMarker(marker: PromptIrEditRecoveryMarker): boolean {
   try {
     const validated = parseEditMarker(marker, marker)
@@ -293,7 +322,11 @@ export function writePromptIrEditRecoveryMarker(marker: PromptIrEditRecoveryMark
   }
 }
 
-/** Persist and synchronously verify a selection marker before the separate selection POST. */
+/**
+ * Persist and synchronously verify a selection marker before the separate selection POST.
+ * @param marker - Recovery marker to persist or clear.
+ * @returns Whether the marker was stored successfully.
+ */
 export function writePromptIrSelectionRecoveryMarker(marker: PromptIrSelectionRecoveryMarker): boolean {
   try {
     const validated = parseSelectionMarker(marker, marker)
@@ -312,7 +345,11 @@ export function writePromptIrSelectionRecoveryMarker(marker: PromptIrSelectionRe
   }
 }
 
-/** Clear only the identical edit marker after the separately selected Ready reread is verified. */
+/**
+ * Clear only the identical edit marker after the separately selected Ready reread is verified.
+ * @param marker - Recovery marker to persist or clear.
+ * @returns Whether a matching marker was removed.
+ */
 export function clearPromptIrEditRecoveryMarker(marker: PromptIrEditRecoveryMarker): boolean {
   try {
     const key = storageKey(EDIT_STORAGE_PREFIX, marker)
@@ -327,7 +364,11 @@ export function clearPromptIrEditRecoveryMarker(marker: PromptIrEditRecoveryMark
   }
 }
 
-/** Clear only the identical selection marker after the new Ready read is verified. */
+/**
+ * Clear only the identical selection marker after the new Ready read is verified.
+ * @param marker - Recovery marker to persist or clear.
+ * @returns Whether a matching marker was removed.
+ */
 export function clearPromptIrSelectionRecoveryMarker(marker: PromptIrSelectionRecoveryMarker): boolean {
   try {
     const key = storageKey(SELECTION_STORAGE_PREFIX, marker)

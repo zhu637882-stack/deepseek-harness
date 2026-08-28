@@ -30,9 +30,15 @@ export const TAKE_TECHNICAL_QC_RULE_PATHS = [
   'scripts/compile_qingmu_take_qc_method.py',
 ] as const
 
+/**
+ * Machine-readable macro-level Take technical-QC codes.
+ */
 export const TAKE_TECHNICAL_QC_MACRO_CODES = [
   'STORY_CAUSALITY', 'SHOT_ORDER', 'PACING', 'LOOK', 'ENDING_CHOICE',
 ] as const
+/**
+ * Machine-readable micro-level Take technical-QC codes.
+ */
 export const TAKE_TECHNICAL_QC_MICRO_CODES = [
   'IDENTITY', 'PROP_GEOMETRY', 'TOPOLOGY', 'EXACT_COUNT', 'CONTACT_TRANSFER',
   'LOCKED_DIALOGUE', 'TECHNICAL_RECEIPT',
@@ -63,7 +69,11 @@ function sha256(value: unknown, serialize: CanonicalSerialize, field: string): s
   return createHash('sha256').update(serialize(value, field), 'utf8').digest('hex')
 }
 
-/** Accept only coordinates; acceptance evidence is always reread through the Host. */
+/**
+ * Accept only coordinates; acceptance evidence is always reread through the Host.
+ * @param payload - Untrusted command payload to validate.
+ * @returns Validated ImagoTakeTechnicalQcMethodRequest value.
+ */
 export function parseTakeTechnicalQcMethodRequest(payload: unknown): ImagoTakeTechnicalQcMethodRequest {
   try {
     const request = exact(payload, ['projectId', 'episodeId', 'frameId'], 'request')
@@ -85,7 +95,12 @@ export function parseTakeTechnicalQcMethodRequest(payload: unknown): ImagoTakeTe
   }
 }
 
-/** Build the exact Core snapshot after reusing the fully strict E6-5 evidence validator. */
+/**
+ * Build the exact Core snapshot after reusing the fully strict E6-5 evidence validator.
+ * @param request - Request coordinates and payload to process.
+ * @param source - Rule source path to read.
+ * @returns Resulting ImagoTakeTechnicalQcMethodSnapshot value.
+ */
 export function buildTakeTechnicalQcSnapshot(
   request: ImagoTakeTechnicalQcMethodRequest,
   source: unknown,
@@ -131,7 +146,12 @@ export interface TakeTechnicalQcRules {
   readonly rulesSha256: string
 }
 
-/** Read all fixed sources and fail closed if the live policies no longer express the E7-3 contract. */
+/**
+ * Read all fixed sources and fail closed if the live policies no longer express the E7-3 contract.
+ * @param coreRoot - IMAGO Core root containing the current machine rules.
+ * @param serialize - Canonical serializer used for SHA-bound input.
+ * @returns Stored recovery marker state, including stale or absent results.
+ */
 export async function readTakeTechnicalQcRules(
   coreRoot: string,
   serialize: CanonicalSerialize,
@@ -185,7 +205,14 @@ export async function readTakeTechnicalQcRules(
   return { hashes, definition: definition(), rulesSha256: sha256(hashes, serialize, 'takeTechnicalQc.rules') }
 }
 
-/** Verify every compiler field before signing the method with the Host-only key. */
+/**
+ * Verify every compiler field before signing the method with the Host-only key.
+ * @param raw - Compiler output to validate.
+ * @param snapshot - Source snapshot bound to the compiler result.
+ * @param rules - Current rule sources bound to the result.
+ * @param key - Host attestation key.
+ * @returns Resulting ImagoTakeTechnicalQcMethodResponse value.
+ */
 export function attestTakeTechnicalQcMethod(
   raw: unknown,
   snapshot: ImagoTakeTechnicalQcMethodSnapshot,

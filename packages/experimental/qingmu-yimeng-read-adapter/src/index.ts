@@ -17,6 +17,10 @@ import {
 } from './take-review-authority.ts'
 import { normalizeTakeAcceptance, parseTakeAcceptanceReadRequest } from './take-acceptance.ts'
 import { normalizeTakeTechnicalQcFeed, parseTakeTechnicalQcRequest } from './take-technical-qc.ts'
+import {
+  normalizeTakeApprovalLifecycleFeed,
+  parseTakeApprovalLifecycleRequest,
+} from './take-approval-lifecycle.ts'
 import { normalizeShotFindingFeed, parseShotFindingReadRequest } from './shot-findings.ts'
 import { normalizeProductionUnitsFeed, parseProductionUnitsReadRequest } from './production-units.ts'
 import { normalizeStageSourcesFeed, parseStageSourcesReadRequest } from './stage-sources.ts'
@@ -199,6 +203,12 @@ export type {
   YimengTakeTechnicalQcFeedResponse,
   YimengTakeTechnicalQcRequest,
   YimengTakeTechnicalQcResult,
+  YimengTakeApprovalLifecycleAssessment,
+  YimengTakeApprovalLifecycleDecision,
+  YimengTakeApprovalLifecycleFeedResponse,
+  YimengTakeApprovalLifecycleRequest,
+  YimengTakeApprovalLifecycleSource,
+  YimengTakeApprovalLifecycleTransition,
   YimengVideoReviewDefect,
   YimengVideoReviewRecord,
   YimengShotVideoSubject,
@@ -282,7 +292,7 @@ const PROTECTED_ENDPOINTS = new Set([
   'projects', 'episodes', 'script', 'promptIr', 'capabilityCatalog', 'costRehearsal',
   'gateAControlEvidence', 'elementProfile',
   'referenceCandidates', 'reviewEvents',
-  'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'takeComments', 'takeReviewAuthority', 'takeAcceptance', 'takeTechnicalQc', 'shotFindings', 'productionUnits', 'stageSources',
+  'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'takeComments', 'takeReviewAuthority', 'takeAcceptance', 'takeTechnicalQc', 'takeApprovalLifecycle', 'shotFindings', 'productionUnits', 'stageSources',
   'lsuPlanSource', 'reworkRouteSource',
 ])
 const HUMAN_DECISION_VALUES = new Set<YimengHumanDecisionValue>([
@@ -725,6 +735,14 @@ function parseTakeQcRequest(payload: unknown) {
     return parseTakeTechnicalQcRequest(payload)
   } catch {
     throw new InputError('takeTechnicalQc accepts only canonical projectId, episodeId, and frameId')
+  }
+}
+
+function parseTakeLifecycleRequest(payload: unknown) {
+  try {
+    return parseTakeApprovalLifecycleRequest(payload)
+  } catch {
+    throw new InputError('takeApprovalLifecycle accepts only canonical projectId, episodeId, and frameId')
   }
 }
 
@@ -2101,7 +2119,12 @@ function normalizeRightsTimestamp(value: unknown, required: boolean, field: stri
   return `${match[1]}${fraction !== undefined && Number(fraction) !== 0 ? `.${fraction}` : ''}Z`
 }
 
-/** Strictly normalize one authoritative reference-rights record without retaining unknown fields. */
+/**
+ * Strictly normalize one authoritative reference-rights record without retaining unknown fields.
+ * @param value - Untrusted value to validate and normalize.
+ * @param field - Field path used in validation errors.
+ * @returns Validated YimengReferenceRightsRecord value.
+ */
 export function normalizeReferenceRightsRecord(value: unknown, field = 'rights'): YimengReferenceRightsRecord {
   const object = requireObject(value, field)
   requireExactKeys(object, [
@@ -3770,6 +3793,12 @@ export function createYimengReadHandler(
           + '/episodes/' + encodeURIComponent(request.episodeId)
           + '/frames/' + encodeURIComponent(request.frameId) + '/take-technical-qc'
         normalize = value => normalizeTakeTechnicalQcFeed(value, request, jcsSha256)
+      } else if (endpoint === 'takeApprovalLifecycle') {
+        const request = parseTakeLifecycleRequest(payload)
+        path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)
+          + '/episodes/' + encodeURIComponent(request.episodeId)
+          + '/frames/' + encodeURIComponent(request.frameId) + '/take-approval-lifecycle'
+        normalize = value => normalizeTakeApprovalLifecycleFeed(value, request, jcsSha256)
       } else if (endpoint === 'shotFindings') {
         const request = parseShotFindingRequest(payload)
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/frames/${encodeURIComponent(request.frameId)}/findings`

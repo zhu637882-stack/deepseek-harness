@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-This private experimental Host plugin exposes explicit Yimeng `episode_script` and actor, scene, and prop `element_profile` ChangeSet flows over the loopback-only `/qingmu-yimeng-command` channel. The script operations remain `proposeScript`, `previewScript`, `commitScript`, and the read-only `recoverScriptCommit`. Element operations are `proposeElementProfile`, `proposeReferenceAsset`, `previewElementProfile`, `commitElementProfile`, and the read-only `recoverElementProfileCommit`. Ordinary Take comments use `createTakeComment` and the read-only `recoverTakeComment`. Selected-video Findings use `recordShotFinding` and the read-only `recoverShotFinding`. Machine-validated Stage artifacts use `registerStageArtifact`, `commitStageArtifactDecision`, and the read-only `recoverStageArtifactRegistration` and `recoverStageArtifactDecision`. Complete-scope LSU plans use `sealLsuPlan`, the read-only `recoverLsuPlanSeal`, and `probeLsuPlanAuthority`.
+This private experimental Host plugin exposes explicit Yimeng `episode_script` and actor, scene, and prop `element_profile` ChangeSet flows over the loopback-only `/qingmu-yimeng-command` channel. The script operations remain `proposeScript`, `previewScript`, `commitScript`, and the read-only `recoverScriptCommit`. Element operations are `proposeElementProfile`, `proposeReferenceAsset`, `previewElementProfile`, `commitElementProfile`, and the read-only `recoverElementProfileCommit`. Ordinary Take comments use `createTakeComment` and the read-only `recoverTakeComment`. Take review authority uses `createTakeReviewRecommendation`, `createTakeHumanDecision`, and their GET-only recovery operations. Technical QC uses `recordTakeTechnicalQc` and `recoverTakeTechnicalQc`. The approval lifecycle uses `transitionTakeApprovalLifecycle` and `recoverTakeApprovalLifecycleTransition`. Selected-video Findings use `recordShotFinding` and the read-only `recoverShotFinding`. Machine-validated Stage artifacts use `registerStageArtifact`, `commitStageArtifactDecision`, and the read-only `recoverStageArtifactRegistration` and `recoverStageArtifactDecision`. Complete-scope LSU plans use `sealLsuPlan`, the read-only `recoverLsuPlanSeal`, and `probeLsuPlanAuthority`.
 
 ## Command boundary
 
@@ -25,6 +25,18 @@ Receipt recovery performs exactly one `GET` to the Yimeng `/api/qingmu/projects/
 `createTakeComment` binds an exact current Take-subject SHA to a chosen Take, a timecode or frame anchor, the comment body, and one visible-ASCII idempotency key. It sends exactly one `POST` to `/api/qingmu/projects/{projectId}/episodes/{episodeId}/frames/{frameId}/take-comments`; the body contains exactly `expectedTakeSubjectSha256`, `takeId`, `anchor`, `body`, and `idempotencyKey`, while path IDs, actor, role, and session come from the route and Yimeng authentication. The result must preserve the intent and report `changed`, selection, technical-pass, formal-approval, episode-verification, human-signoff, Provider-call, and budget impacts as false or zero.
 
 `recoverTakeComment` never retries the POST. It sends exactly one body-free GET to `/command-receipt`, preserving the original Take ID and subject SHA in the query and idempotency key in the header, then validates the original result or a strict `not_found`. Both operations require a Host-only Yimeng bearer token, and credential reflection into upstream JSON fails closed.
+
+## Take Reviewer and Approver records
+
+`createTakeReviewRecommendation` records a Reviewer recommendation, while `createTakeHumanDecision` records the independent Approver decision. Their dedicated recovery operations query only the original receipt and never repeat a POST. The Host preserves exact Take-subject and recommendation identities, but Yimeng alone authenticates actor, role, session, producer, participants, and natural-person separation. A role or session switch cannot turn the same natural person into an eligible Approver. Neither command changes technical QC, formal approval, selection, episode verification, Provider, or budget state.
+
+## Take technical-QC record
+
+`recordTakeTechnicalQc` validates a fresh `takeTechnicalQcMethod` and sends one assessment POST containing only the exact current subject, fixed macro and micro checks, derived issue codes, reason, and idempotency key. Yimeng rechecks receipt evidence, current selection, rules, and recorder authority. `recoverTakeTechnicalQc` performs GET-only receipt recovery with the original coordinates and key. A passing assessment remains technical evidence, not content approval, and both operations keep every adjacent authority flag false or zero.
+
+## Take approval lifecycle transition
+
+`transitionTakeApprovalLifecycle` validates a fresh `takeApprovalLifecycleMethod` and sends exactly one of `APPROVE`, `INVALIDATE`, `REQUEST_REWORK`, or `RESUBMIT` using the original eight-field browser intent. Approval binds the exact current selected Take, Approver decision, QC assessment, and rules SHA. Drift invalidates that approval; rework records defect classes and the existing bounded route but does not execute it; a third same-class rework requires method review; a new revision cannot inherit the old approval. `recoverTakeApprovalLifecycleTransition` performs one body-free GET using the original coordinates and idempotency key and never repeats the transition POST.
 
 ## Shot-video Findings
 

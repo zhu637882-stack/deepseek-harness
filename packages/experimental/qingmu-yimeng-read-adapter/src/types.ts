@@ -704,6 +704,105 @@ export interface YimengTakeTechnicalQcResult {
   readonly budgetMutation: false
 }
 
+/** One current Approver decision compacted for lifecycle derivation. */
+export interface YimengTakeApprovalLifecycleDecision {
+  readonly decisionId: string
+  readonly eventId: string
+  readonly takeId: string
+  readonly takeVersionOrdinal: number
+  readonly takeSubjectSha256: string
+  readonly decision: YimengTakeReviewAction
+  readonly actorId: string
+  readonly actorNaturalPersonId: string
+}
+
+/** One current technical assessment compacted for lifecycle derivation. */
+export interface YimengTakeApprovalLifecycleAssessment {
+  readonly assessmentId: string
+  readonly eventId: string
+  readonly takeId: string
+  readonly takeVersionOrdinal: number
+  readonly takeSubjectSha256: string
+  readonly evidenceSnapshotSha256: string
+  readonly technicalPass: boolean
+  readonly issueCodes: readonly string[]
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+}
+
+/** Immutable approval, invalidation, rework, or resubmission journal entry. */
+export interface YimengTakeApprovalLifecycleTransition {
+  readonly transitionId: string
+  readonly revision: number
+  readonly action: 'APPROVE' | 'INVALIDATE' | 'REQUEST_REWORK' | 'RESUBMIT'
+  readonly takeId: string
+  readonly takeVersionOrdinal: number
+  readonly takeSubjectSha256: string
+  readonly decisionId: string | null
+  readonly decisionEventId: string | null
+  readonly assessmentId: string | null
+  readonly assessmentEventId: string | null
+  readonly sourceApprovalId: string | null
+  readonly sourceReworkId: string | null
+  readonly defectClassCodes: readonly string[]
+  readonly reason: string
+  readonly actorId: string
+  readonly actorRole: 'approver' | 'director'
+  readonly actorNaturalPersonId: string
+  readonly authSessionId: string
+  readonly recordedAt: string
+  readonly eventId: string
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+}
+
+/** Current Yimeng source compiled by the stateless E7-4 lifecycle method. */
+export interface YimengTakeApprovalLifecycleSource extends YimengJsonObject {
+  readonly schema: 'jason.qingmu-take-approval-lifecycle-source.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly currentTake: {
+    readonly takeSubject: YimengTakeAcceptanceSubject
+    readonly takeSubjectSha256: string
+  }
+  readonly currentDecision: YimengTakeApprovalLifecycleDecision | null
+  readonly currentAssessment: YimengTakeApprovalLifecycleAssessment | null
+  readonly lifecycleHistory: readonly YimengTakeApprovalLifecycleTransition[]
+}
+
+/** Exact Shot coordinates accepted by the E7-4 source endpoint. */
+export type YimengTakeApprovalLifecycleRequest = YimengTakeVersionRequest
+
+/** Fresh lifecycle source; state remains unknown until current Core compilation. */
+export interface YimengTakeApprovalLifecycleFeedResponse
+  extends YimengTakeApprovalLifecycleRequest {
+  readonly schema: 'jason.qingmu-take-approval-lifecycle-feed.v1'
+  readonly source: YimengTakeApprovalLifecycleSource
+  readonly sourceSnapshotSha256: string
+  readonly capabilities: {
+    readonly canApprove: boolean
+    readonly canRecordInvalidation: boolean
+    readonly canRequestRework: boolean
+    readonly canResubmit: boolean
+  }
+  readonly boundaries: {
+    readonly stateRequiresCurrentImagoMethod: true
+    readonly technicalPassIsContentApproval: false
+    readonly commentIsApproval: false
+    readonly editIsApproval: false
+    readonly selectionChanged: false
+    readonly technicalPassChanged: false
+    readonly reviewDecisionChanged: false
+    readonly reworkExecuted: false
+    readonly providerCalls: 0
+    readonly budgetMutation: false
+    readonly episodeVerificationChanged: false
+    readonly humanSignoffInferred: false
+    readonly evidenceLedgerMutation: false
+  }
+}
+
 /** Exact Yimeng coordinates for the currently selected Take acceptance evidence. */
 export type YimengTakeAcceptanceRequest = YimengTakeVersionRequest
 
@@ -1225,6 +1324,9 @@ export interface YimengShotRelationScene {
   readonly snapshotSha256: string
 }
 
+/**
+ * Element kinds supported by shot-relation projections.
+ */
 export type YimengShotRelationElementKind = 'actor' | 'scene' | 'prop'
 
 /** Minimal immutable lineage for the one E4-3 current reference selection. */
@@ -1239,6 +1341,9 @@ export interface YimengShotCurrentReferenceLineage {
   readonly formalConsistencyCheckId: string
 }
 
+/**
+ * Current backend reference attached to a shot.
+ */
 export interface YimengShotCurrentReference {
   readonly assetId: string
   readonly sha256: string
@@ -1256,6 +1361,9 @@ export interface YimengShotRelationElement {
   readonly currentReference: YimengShotCurrentReference | null
 }
 
+/**
+ * One dialogue cue attached to a shot.
+ */
 export interface YimengShotDialogueCue {
   readonly schemaVersion: 'dialogue-cue-v2' | 'dialogue-cue-legacy-v1'
   readonly lineId: string | null
@@ -1267,6 +1375,9 @@ export interface YimengShotDialogueCue {
   readonly legacy: boolean
 }
 
+/**
+ * Dialogue-rhythm projection for a shot.
+ */
 export interface YimengShotDialogueRhythm {
   readonly cueCount: number
   readonly timedCueCount: number
@@ -1326,6 +1437,9 @@ export interface YimengStoryboardCanvasPoint {
   readonly y: number
 }
 
+/**
+ * Annotation kinds supported by the storyboard canvas.
+ */
 export type YimengStoryboardCanvasAnnotationKind = 'subject_region' | 'object_anchor' | 'motion_vector'
 
 /** One raw human-authored canvas annotation. It never becomes a Shot identity. */
@@ -1931,6 +2045,7 @@ export interface YimengReadEndpointMap {
   readonly takeReviewAuthority: YimengTakeReviewAuthorityFeedResponse
   readonly takeAcceptance: YimengTakeAcceptanceResponse
   readonly takeTechnicalQc: YimengTakeTechnicalQcFeedResponse
+  readonly takeApprovalLifecycle: YimengTakeApprovalLifecycleFeedResponse
   readonly shotFindings: YimengShotFindingFeedResponse
   readonly productionUnits: YimengProductionUnitsResponse
   readonly stageSources: YimengStageSourcesResponse

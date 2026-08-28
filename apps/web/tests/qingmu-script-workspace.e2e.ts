@@ -23,18 +23,23 @@ import type {
   TakeCommentSubject,
 } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/take-comment-fixture.ts'
 import type {
+  YimengTakeApprovalLifecycleFeedResponse,
+  YimengTakeApprovalLifecycleTransition as ReadTakeApprovalLifecycleTransition,
   YimengTakeHumanDecision as ReadTakeHumanDecision,
   YimengTakeReviewAuthorityFeedResponse,
   YimengTakeReviewRecommendation as ReadTakeReviewRecommendation,
   YimengTakeTechnicalQcFeedResponse,
 } from '../../../packages/experimental/qingmu-yimeng-read-adapter/src/types.ts'
 import type {
+  YimengImagoTakeApprovalLifecycleMethodProjection,
   YimengCreateTakeHumanDecisionRequest,
   YimengCreateTakeReviewRecommendationRequest,
   YimengRecordTakeTechnicalQcRequest,
+  YimengTakeApprovalLifecycleResult,
   YimengTakeHumanDecisionResult,
   YimengTakeReviewRecommendationResult,
   YimengTakeTechnicalQcResult,
+  YimengTransitionTakeApprovalLifecycleRequest,
 } from '../../../packages/experimental/qingmu-yimeng-command-adapter/src/types.ts'
 import { takeVersionStackFixture as baseTakeVersionStackFixture } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/take-version-fixture.ts'
 import { videoCandidatesFixture } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/selected-video-review-fixture.ts'
@@ -2280,6 +2285,183 @@ function takeTechnicalQcFeedFixture(
   }
 }
 
+function takeApprovalLifecycleFeedFixture(
+  revision: number,
+  selectedTakeId: 'asset-take-1' | 'asset-take-2',
+  decisions: readonly YimengTakeHumanDecisionResult[] = [],
+  assessments: readonly YimengTakeTechnicalQcResult[] = [],
+  transitions: readonly ReadTakeApprovalLifecycleTransition[] = [],
+): YimengTakeApprovalLifecycleFeedResponse {
+  const acceptance = takeAcceptanceFixture(revision, selectedTakeId)
+  const takeSubject = acceptance.evidence.subject
+  const takeSubjectSha256 = jcsSha256(takeSubject)
+  const currentDecisionRecord = takeReviewAuthorityFeedFixture(revision, [], decisions).decisions
+    .filter((decision) => {
+      const subject = decision.takeSubject
+      return subject.projectId === takeSubject.projectId
+        && subject.episodeId === takeSubject.episodeId
+        && subject.frameId === takeSubject.frameId
+        && subject.frameNo === takeSubject.frameNo
+        && subject.storyboardRevision === takeSubject.storyboardRevision
+        && subject.frameContentSha256 === takeSubject.frameContentSha256
+        && subject.takeId === selectedTakeId
+        && subject.versionOrdinal === takeSubject.versionOrdinal
+        && subject.outputSha256 === takeSubject.outputSha256
+    }).at(-1) ?? null
+  const currentAssessmentRecord = takeTechnicalQcFeedFixture(
+    revision,
+    selectedTakeId,
+    assessments,
+  ).currentAssessment
+  const source: YimengTakeApprovalLifecycleFeedResponse['source'] = {
+    schema: 'jason.qingmu-take-approval-lifecycle-source.v1',
+    projectId: 'project-1',
+    episodeId: 'episode-1',
+    frameId: PROMPT_IR_FRAME_ID,
+    currentTake: { takeSubject, takeSubjectSha256 },
+    currentDecision: currentDecisionRecord === null ? null : {
+      decisionId: currentDecisionRecord.decisionId,
+      eventId: currentDecisionRecord.eventId,
+      takeId: currentDecisionRecord.takeSubject.takeId,
+      takeVersionOrdinal: currentDecisionRecord.takeSubject.versionOrdinal,
+      takeSubjectSha256: currentDecisionRecord.takeSubjectSha256,
+      decision: currentDecisionRecord.decision,
+      actorId: currentDecisionRecord.actorId,
+      actorNaturalPersonId: currentDecisionRecord.actorNaturalPersonId,
+    },
+    currentAssessment: currentAssessmentRecord === null ? null : {
+      assessmentId: currentAssessmentRecord.assessmentId,
+      eventId: currentAssessmentRecord.eventId,
+      takeId: currentAssessmentRecord.takeSubject.takeId,
+      takeVersionOrdinal: currentAssessmentRecord.takeSubject.versionOrdinal,
+      takeSubjectSha256: currentAssessmentRecord.takeSubjectSha256,
+      evidenceSnapshotSha256: currentAssessmentRecord.evidenceSnapshotSha256,
+      technicalPass: currentAssessmentRecord.technicalPass,
+      issueCodes: currentAssessmentRecord.issueCodes,
+      methodProjectionSha256: currentAssessmentRecord.methodProjectionSha256,
+      rulesSha256: currentAssessmentRecord.rulesSha256,
+    },
+    lifecycleHistory: transitions,
+  }
+  return {
+    schema: 'jason.qingmu-take-approval-lifecycle-feed.v1',
+    projectId: 'project-1',
+    episodeId: 'episode-1',
+    frameId: PROMPT_IR_FRAME_ID,
+    source,
+    sourceSnapshotSha256: jcsSha256(source),
+    capabilities: {
+      canApprove: true,
+      canRecordInvalidation: true,
+      canRequestRework: true,
+      canResubmit: true,
+    },
+    boundaries: {
+      stateRequiresCurrentImagoMethod: true,
+      technicalPassIsContentApproval: false,
+      commentIsApproval: false,
+      editIsApproval: false,
+      selectionChanged: false,
+      technicalPassChanged: false,
+      reviewDecisionChanged: false,
+      reworkExecuted: false,
+      providerCalls: 0,
+      budgetMutation: false,
+      episodeVerificationChanged: false,
+      humanSignoffInferred: false,
+      evidenceLedgerMutation: false,
+    },
+  }
+}
+
+function takeApprovalLifecycleResultFixture(
+  revision: number,
+  selectedTakeId: 'asset-take-1' | 'asset-take-2',
+  input: YimengTransitionTakeApprovalLifecycleRequest,
+  methodProjection: YimengImagoTakeApprovalLifecycleMethodProjection,
+  methodProjectionSha256: string,
+  decisions: readonly YimengTakeHumanDecisionResult[],
+  assessments: readonly YimengTakeTechnicalQcResult[],
+  transitions: readonly ReadTakeApprovalLifecycleTransition[],
+): YimengTakeApprovalLifecycleResult {
+  const feed = takeApprovalLifecycleFeedFixture(
+    revision,
+    selectedTakeId,
+    decisions,
+    assessments,
+    transitions,
+  )
+  const current = feed.source.currentTake
+  const currentDecision = feed.source.currentDecision
+  const currentAssessment = feed.source.currentAssessment
+  const methodTransition = methodProjection.transition
+  if (input.takeId !== selectedTakeId
+    || input.expectedSourceSnapshotSha256 !== feed.sourceSnapshotSha256
+    || methodProjection.sourceSnapshotSha256 !== feed.sourceSnapshotSha256
+    || methodProjection.subjectSnapshotSha256 !== current.takeSubjectSha256
+    || methodProjection.subject.takeId !== selectedTakeId
+    || !methodTransition.legalActions.includes(input.action)) {
+    throw new Error('Take approval lifecycle result fixture binding mismatch')
+  }
+  const bindReview = input.action === 'APPROVE' || input.action === 'REQUEST_REWORK'
+  const sequence = transitions.length + 1
+  const transition: ReadTakeApprovalLifecycleTransition = {
+    transitionId: `take-approval-lifecycle-transition-${String(sequence).padStart(4, '0')}`,
+    revision: sequence,
+    action: input.action,
+    takeId: selectedTakeId,
+    takeVersionOrdinal: current.takeSubject.versionOrdinal,
+    takeSubjectSha256: current.takeSubjectSha256,
+    decisionId: bindReview ? currentDecision?.decisionId ?? null : null,
+    decisionEventId: bindReview ? currentDecision?.eventId ?? null : null,
+    assessmentId: bindReview ? currentAssessment?.assessmentId ?? null : null,
+    assessmentEventId: bindReview ? currentAssessment?.eventId ?? null : null,
+    sourceApprovalId: input.action === 'INVALIDATE' ? methodTransition.staleApprovalId : null,
+    sourceReworkId: input.action === 'RESUBMIT' ? methodTransition.resubmitSourceReworkId : null,
+    defectClassCodes: input.action === 'REQUEST_REWORK'
+      ? methodTransition.reworkClassCodes
+      : [],
+    reason: input.reason,
+    actorId: input.action === 'APPROVE' ? 'approver-user' : 'director-user',
+    actorRole: input.action === 'APPROVE' ? 'approver' : 'director',
+    actorNaturalPersonId: input.action === 'APPROVE' ? 'person-approver' : 'person-director',
+    authSessionId: '6'.repeat(64),
+    recordedAt: `2026-08-29T13:${String(sequence).padStart(2, '0')}:00.123456+00:00`,
+    eventId: `take-approval-lifecycle-event-${String(sequence).padStart(4, '0')}`,
+    methodProjectionSha256,
+    rulesSha256: methodProjection.rulesSha256,
+  }
+  const authoritative = takeApprovalLifecycleFeedFixture(
+    revision,
+    selectedTakeId,
+    decisions,
+    assessments,
+    [...transitions, transition],
+  )
+  return {
+    schema: 'jason.qingmu-take-approval-lifecycle-result.v1',
+    transition,
+    sourceSnapshotSha256: feed.sourceSnapshotSha256,
+    authoritativeSourceSnapshotSha256: authoritative.sourceSnapshotSha256,
+    methodReviewRequiredAfterRequest: methodTransition.methodReviewRequiredAfterRequest,
+    boundedFindingRouteRequired: methodTransition.boundedFindingRouteRequired,
+    changed: true,
+    formalApprovalChanged: input.action === 'APPROVE',
+    approvalInvalidated: input.action === 'INVALIDATE',
+    reworkRequested: input.action === 'REQUEST_REWORK',
+    resubmitted: input.action === 'RESUBMIT',
+    selectionChanged: false,
+    technicalPassChanged: false,
+    reviewDecisionChanged: false,
+    reworkExecuted: false,
+    providerCalls: 0,
+    budgetMutation: false,
+    episodeVerificationChanged: false,
+    humanSignoffInferred: false,
+    evidenceLedgerMutation: false,
+  }
+}
+
 function takeAcceptanceFixture(
   revision: number,
   selectedTakeId: 'asset-take-1' | 'asset-take-2' = 'asset-take-1',
@@ -2427,6 +2609,7 @@ async function startYimengDouble(
   readonly setContinuityMode: (mode: ContinuityMode) => void
   readonly setVideoReviewMode: (mode: VideoReviewMode) => void
   readonly setTakeSelectedId: (takeId: 'asset-take-1' | 'asset-take-2') => void
+  readonly ensureTakeApprovalPrerequisites: () => void
   readonly shotFindings: ReturnType<typeof createShotFindingDouble>
   readonly reworkRoutes: ReturnType<typeof createReworkRouteDouble>
   readonly productionUnits: ReturnType<typeof createProductionUnitDouble>
@@ -2500,6 +2683,49 @@ async function startYimengDouble(
   const persistedTakeHumanDecisions: YimengTakeHumanDecisionResult[] = []
   const persistedTakeTechnicalQcReceipts = new Map<string, YimengTakeTechnicalQcResult>()
   const persistedTakeTechnicalQcResults: YimengTakeTechnicalQcResult[] = []
+  const persistedTakeApprovalLifecycleReceipts = new Map<
+    string,
+    YimengTakeApprovalLifecycleResult
+  >()
+  const persistedTakeApprovalLifecycleResults: YimengTakeApprovalLifecycleResult[] = []
+  const ensureTakeApprovalPrerequisites = (): void => {
+    if (!persistedTakeHumanDecisions.some(result => result.decision.subjectId === 'asset-take-1'
+      && result.decision.decision === 'approve')) {
+      const subject = takeCommentSubjectFixture(revision, 'asset-take-1')
+      persistedTakeHumanDecisions.push(takeHumanDecisionResultFixture(revision, {
+        projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID,
+        expectedTakeSubjectSha256: jcsSha256(subject), takeId: 'asset-take-1',
+        decision: 'approve', reason: 'E7-4 独立浏览器夹具的当前正式通过决定。',
+        idempotencyKey: 'take-approval-lifecycle-prerequisite-decision',
+      }, persistedTakeHumanDecisions.length + 1))
+    }
+    if (!persistedTakeTechnicalQcResults.some(result =>
+      result.assessment.takeSubject.takeId === 'asset-take-1'
+      && result.assessment.technicalPass)) {
+      const acceptance = takeAcceptanceFixture(revision, 'asset-take-1')
+      const methodProjection = {
+        technicalReceiptStatus: 'PASS',
+        rulesSha256: '5'.repeat(64),
+      }
+      const methodProjectionSha256 = jcsSha256(methodProjection)
+      persistedTakeTechnicalQcResults.push(takeTechnicalQcResultFixture(
+        revision,
+        'asset-take-1',
+        {
+          projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID,
+          expectedEvidenceSnapshotSha256: acceptance.evidenceSnapshotSha256,
+          takeId: 'asset-take-1',
+          checks: TAKE_TECHNICAL_QC_CODES.map(code => ({
+            code, result: 'PASS', note: null, evidenceRefs: [],
+          })),
+          idempotencyKey: 'take-approval-lifecycle-prerequisite-qc',
+        },
+        methodProjection,
+        methodProjectionSha256,
+        persistedTakeTechnicalQcResults.length + 1,
+      ))
+    }
+  }
   let publicBaseUrl = ''
   const reviewComments: Record<ElementKind, Array<Record<string, unknown>>> = { actor: [], scene: [], prop: [] }
   const reviewDecisions: Record<ElementKind, Array<Record<string, unknown>>> = { actor: [], scene: [], prop: [] }
@@ -3033,6 +3259,141 @@ async function startYimengDouble(
           projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID,
           takeId,
           expectedEvidenceSnapshotSha256: evidenceSha,
+          idempotencyKey: key,
+          status: result === null ? 'not_found' : 'committed',
+          result,
+        })
+        return
+      }
+      const takeApprovalLifecyclePath = `/api/qingmu/projects/project-1/episodes/episode-1/frames/${PROMPT_IR_FRAME_ID}/take-approval-lifecycle`
+      if (request.method === 'GET' && url.pathname === takeApprovalLifecyclePath) {
+        if (request.headers.authorization !== `Bearer ${YIMENG_TOKEN}`) {
+          throw new Error('Take approval lifecycle read authorization mismatch')
+        }
+        json(response, 200, takeApprovalLifecycleFeedFixture(
+          revision,
+          takeSelectedId,
+          persistedTakeHumanDecisions,
+          persistedTakeTechnicalQcResults,
+          persistedTakeApprovalLifecycleResults.map(result => result.transition),
+        ))
+        return
+      }
+      if (request.method === 'POST'
+        && url.pathname === `${takeApprovalLifecyclePath}/transitions`) {
+        if (!isRecord(body) || !isRecord(body.methodProjection)
+          || !isRecord(body.methodAttestation)) {
+          throw new Error('Take approval lifecycle body is missing')
+        }
+        const expectedKeys = [
+          'expectedSourceSnapshotSha256', 'takeId', 'methodProjection',
+          'methodProjectionSha256', 'methodAttestation', 'action', 'reason', 'idempotencyKey',
+        ].sort()
+        const currentFeed = takeApprovalLifecycleFeedFixture(
+          revision,
+          takeSelectedId,
+          persistedTakeHumanDecisions,
+          persistedTakeTechnicalQcResults,
+          persistedTakeApprovalLifecycleResults.map(result => result.transition),
+        )
+        const key = typeof body.idempotencyKey === 'string' ? body.idempotencyKey : ''
+        const projectionSha256 = typeof body.methodProjectionSha256 === 'string'
+          ? body.methodProjectionSha256
+          : ''
+        const methodProjection = body.methodProjection as unknown as YimengImagoTakeApprovalLifecycleMethodProjection
+        const unsignedAttestation = {
+          schema: 'qingmu.imago-take-approval-lifecycle-method-attestation.v1',
+          algorithm: 'hmac-sha256',
+          sourceSnapshotSha256: currentFeed.sourceSnapshotSha256,
+          methodProjectionSha256: projectionSha256,
+        }
+        const expectedSignature = createHmac('sha256', IMAGO_ATTESTATION_KEY)
+          .update(canonicalJson(unsignedAttestation), 'utf8').digest('hex')
+        if (
+          Object.keys(body).sort().some((field, index) => field !== expectedKeys[index])
+          || Object.keys(body).length !== expectedKeys.length
+          || body.expectedSourceSnapshotSha256 !== currentFeed.sourceSnapshotSha256
+          || body.takeId !== takeSelectedId
+          || projectionSha256 !== jcsSha256(methodProjection)
+          || methodProjection.schema !== 'qingmu.imago-take-approval-lifecycle-method.v1'
+          || methodProjection.sourceSnapshotSha256 !== currentFeed.sourceSnapshotSha256
+          || methodProjection.subjectSnapshotSha256
+            !== currentFeed.source.currentTake.takeSubjectSha256
+          || canonicalJson(methodProjection.subject)
+            !== canonicalJson(currentFeed.source.currentTake.takeSubject)
+          || methodProjection.rulesSha256 !== jcsSha256(methodProjection.ruleBindings)
+          || !methodProjection.transition.legalActions.includes(body.action as never)
+          || canonicalJson(body.methodAttestation) !== canonicalJson({
+            ...unsignedAttestation,
+            signature: expectedSignature,
+          })
+          || !['APPROVE', 'INVALIDATE', 'REQUEST_REWORK', 'RESUBMIT'].includes(
+            typeof body.action === 'string' ? body.action : '',
+          )
+          || typeof body.reason !== 'string' || body.reason.trim() === ''
+          || key === ''
+          || request.headers.authorization !== `Bearer ${YIMENG_TOKEN}`
+          || request.headers['idempotency-key'] !== key
+        ) {
+          throw new Error('Take approval lifecycle command contract mismatch')
+        }
+        const replay = persistedTakeApprovalLifecycleReceipts.get(key)
+        if (replay !== undefined) {
+          json(response, 200, replay)
+          return
+        }
+        const input: YimengTransitionTakeApprovalLifecycleRequest = {
+          projectId: 'project-1',
+          episodeId: 'episode-1',
+          frameId: PROMPT_IR_FRAME_ID,
+          expectedSourceSnapshotSha256: currentFeed.sourceSnapshotSha256,
+          takeId: takeSelectedId,
+          action: body.action as YimengTransitionTakeApprovalLifecycleRequest['action'],
+          reason: body.reason,
+          idempotencyKey: key,
+        }
+        const result = takeApprovalLifecycleResultFixture(
+          revision,
+          takeSelectedId,
+          input,
+          methodProjection,
+          projectionSha256,
+          persistedTakeHumanDecisions,
+          persistedTakeTechnicalQcResults,
+          persistedTakeApprovalLifecycleResults.map(item => item.transition),
+        )
+        persistedTakeApprovalLifecycleResults.push(result)
+        persistedTakeApprovalLifecycleReceipts.set(key, result)
+        json(response, 201, result)
+        return
+      }
+      if (request.method === 'GET'
+        && url.pathname === `${takeApprovalLifecyclePath}/transitions/command-receipt`) {
+        const queryKeys = [...url.searchParams.keys()].sort()
+        const expectedQueryKeys = ['expectedSourceSnapshotSha256', 'takeId'].sort()
+        const key = typeof request.headers['idempotency-key'] === 'string'
+          ? request.headers['idempotency-key']
+          : ''
+        const expectedSourceSnapshotSha256 = url.searchParams.get(
+          'expectedSourceSnapshotSha256',
+        ) ?? ''
+        const takeId = url.searchParams.get('takeId') ?? ''
+        if (
+          queryKeys.length !== expectedQueryKeys.length
+          || queryKeys.some((field, index) => field !== expectedQueryKeys[index])
+          || key === '' || expectedSourceSnapshotSha256 === '' || takeId === ''
+          || request.headers.authorization !== `Bearer ${YIMENG_TOKEN}`
+        ) {
+          throw new Error('Take approval lifecycle recovery contract mismatch')
+        }
+        const result = persistedTakeApprovalLifecycleReceipts.get(key) ?? null
+        json(response, 200, {
+          schema: 'jason.qingmu-take-approval-lifecycle-recovery.v1',
+          projectId: 'project-1',
+          episodeId: 'episode-1',
+          frameId: PROMPT_IR_FRAME_ID,
+          takeId,
+          expectedSourceSnapshotSha256,
           idempotencyKey: key,
           status: result === null ? 'not_found' : 'committed',
           result,
@@ -4366,6 +4727,7 @@ async function startYimengDouble(
     setContinuityMode: (mode) => { continuityMode = mode },
     setVideoReviewMode: (mode) => { videoReviewMode = mode },
     setTakeSelectedId: (takeId: 'asset-take-1' | 'asset-take-2') => { takeSelectedId = takeId },
+    ensureTakeApprovalPrerequisites,
     shotFindings,
     reworkRoutes,
     productionUnits,
@@ -4445,6 +4807,7 @@ describe.skipIf(
     let setContinuityMode: ((mode: ContinuityMode) => void) | undefined
     let setVideoReviewMode: ((mode: VideoReviewMode) => void) | undefined
     let setTakeSelectedId: ((takeId: 'asset-take-1' | 'asset-take-2') => void) | undefined
+    let ensureTakeApprovalPrerequisites: (() => void) | undefined
     let shotFindingDouble: ReturnType<typeof createShotFindingDouble> | undefined
     let reworkRouteDouble: ReturnType<typeof createReworkRouteDouble> | undefined
     let productionUnitDouble: ReturnType<typeof createProductionUnitDouble> | undefined
@@ -4526,6 +4889,7 @@ describe.skipIf(
         throw new TypeError('Take selection fixture setter is missing')
       }
       setTakeSelectedId = takeSelectionSetter as typeof setTakeSelectedId
+      ensureTakeApprovalPrerequisites = yimeng.ensureTakeApprovalPrerequisites
       shotFindingDouble = yimeng.shotFindings
       reworkRouteDouble = yimeng.reworkRoutes
       productionUnitDouble = yimeng.productionUnits
@@ -4583,6 +4947,9 @@ describe.skipIf(
           '/qingmu-yimeng/takeTechnicalQc',
           '/qingmu-yimeng-command/recordTakeTechnicalQc',
           '/qingmu-yimeng-command/recoverTakeTechnicalQc',
+          '/qingmu-yimeng/takeApprovalLifecycle',
+          '/qingmu-yimeng-command/transitionTakeApprovalLifecycle',
+          '/qingmu-yimeng-command/recoverTakeApprovalLifecycleTransition',
         ].includes(requestPath)) return
         browserRpcRequests.push({ path: requestPath, body: request.postDataJSON() as unknown })
       })
@@ -6023,6 +6390,260 @@ describe.skipIf(
 
       await dialog.getByRole('tab', { name: '分镜与镜头', exact: true }).click()
       await dialog.getByRole('list', { name: '镜头选择' }).getByRole('button', { name: /frame-z/ }).click()
+      await dialog.getByRole('tab', { name: '总览', exact: true }).click()
+      await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
+      await page.evaluate((key) => { sessionStorage.removeItem(key) }, markerKey)
+    })
+
+    it('records and GET-only recovers the E7-4 approval lifecycle through the real Host', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e7-4-take-approval-lifecycle'))
+      if (setTakeSelectedId === undefined || ensureTakeApprovalPrerequisites === undefined) {
+        throw new Error('Take approval lifecycle fixture controls are missing')
+      }
+      setTakeSelectedId('asset-take-1')
+      ensureTakeApprovalPrerequisites()
+      const requestStart = capturedRequests.length
+      const rpcStart = browserRpcRequests.length
+      const consoleStart = browserConsoleErrors.length
+      const markerKey = [
+        'qingmu:take-approval-lifecycle-recovery:v1',
+        'project-1', 'episode-1', PROMPT_IR_FRAME_ID,
+      ].map(encodeURIComponent).join(':')
+      await page.evaluate((key) => { sessionStorage.removeItem(key) }, markerKey)
+
+      await page.setViewportSize({ width: 1680, height: 1100 })
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await dialog.getByRole('tab', { name: '分镜与镜头', exact: true }).click()
+      await dialog.getByRole('list', { name: '镜头选择' })
+        .getByRole('button', { name: /frame-1/ }).click()
+      const feedWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng/takeApprovalLifecycle')
+      const methodWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-imago-method/takeApprovalLifecycleMethod')
+      await dialog.getByRole('tab', { name: '生成与质检', exact: true }).click()
+      const feedWire = await (await feedWirePromise).json() as unknown
+      const methodWire = await (await methodWirePromise).json() as unknown
+      expect(feedWire).toMatchObject({ result: { ok: true, value: { source: {
+        currentDecision: { decision: 'approve', takeId: 'asset-take-1' },
+        currentAssessment: { technicalPass: true, takeId: 'asset-take-1' },
+      } } } })
+      expect(methodWire).toMatchObject({ result: { ok: true, value: { projection: {
+        transition: { state: 'READY_FOR_APPROVAL', legalActions: ['APPROVE'] },
+      } } } })
+
+      const lifecycle = dialog.getByRole('region', {
+        name: 'Take 批准与返修生命周期', exact: true,
+      })
+      await lifecycle.getByText('待批准', { exact: true }).waitFor({ timeout: 20_000 })
+      await lifecycle.getByText(
+        '易梦保存唯一业务事实，专业方法内核编译当前合法动作；青木只按鲜活绑定记录不可变转换。',
+        { exact: true },
+      ).waitFor()
+      await lifecycle.getByText('asset-take-1', { exact: true }).waitFor()
+      await lifecycle.getByText('approve', { exact: true }).waitFor()
+      await lifecycle.getByText('通过', { exact: true }).waitFor()
+      expect(await lifecycle.getByRole('button', { name: '批准当前 Take', exact: true }).count())
+        .toBe(1)
+      expect(await lifecycle.getByRole('button', { name: /记录批准失效|登记返修请求|重新送审/u }).count())
+        .toBe(0)
+      const readyAria = await captureStableAria(
+        page,
+        'role=region[name="Take 批准与返修生命周期"]',
+        scaffold.workspaceCwd,
+      )
+
+      await page.setViewportSize({ width: 390, height: 844 })
+      expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false)
+      expect(await lifecycle.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
+      expect((await lifecycle.getByRole('button', {
+        name: '批准当前 Take', exact: true,
+      }).boundingBox())?.height).toBeGreaterThanOrEqual(44)
+      await page.setViewportSize({ width: 1680, height: 1100 })
+
+      const approvalReason = '已核对当前 Selected Take、正式决定与技术 QC。'
+      await lifecycle.getByLabel('转换理由', { exact: true }).fill(approvalReason)
+      expect(await page.evaluate(key => sessionStorage.getItem(key), markerKey)).toBeNull()
+      const commandRequestPromise = page.waitForRequest(request =>
+        new URL(request.url()).pathname
+          === '/qingmu-yimeng-command/transitionTakeApprovalLifecycle')
+      const commandWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname
+          === '/qingmu-yimeng-command/transitionTakeApprovalLifecycle')
+      await lifecycle.getByRole('button', { name: '批准当前 Take', exact: true }).click()
+      await commandRequestPromise
+      expect(await page.evaluate(key => sessionStorage.getItem(key), markerKey)).not.toBeNull()
+      const commandWire = await (await commandWirePromise).json() as {
+        result: { ok: boolean; value: YimengTakeApprovalLifecycleResult }
+      }
+      expect(commandWire.result).toMatchObject({
+        ok: true,
+        value: {
+          schema: 'jason.qingmu-take-approval-lifecycle-result.v1',
+          changed: true,
+          formalApprovalChanged: true,
+          approvalInvalidated: false,
+          reworkRequested: false,
+          resubmitted: false,
+          selectionChanged: false,
+          technicalPassChanged: false,
+          reviewDecisionChanged: false,
+          reworkExecuted: false,
+          providerCalls: 0,
+          budgetMutation: false,
+          episodeVerificationChanged: false,
+          humanSignoffInferred: false,
+          evidenceLedgerMutation: false,
+          transition: {
+            action: 'APPROVE',
+            takeId: 'asset-take-1',
+            actorRole: 'approver',
+            actorNaturalPersonId: 'person-approver',
+            decisionId: 'take-human-decision-0001',
+            assessmentId: 'take-technical-qc-0001',
+          },
+        },
+      })
+      await lifecycle.getByText(
+        '生命周期转换已记录；当前状态将按易梦新快照重新编译。',
+        { exact: true },
+      ).waitFor()
+      await lifecycle.getByText('已批准', { exact: true }).waitFor({ timeout: 20_000 })
+      await lifecycle.getByText(approvalReason, { exact: true }).waitFor()
+      expect(await lifecycle.getByText(/approver · approver-user/u).count()).toBe(1)
+      expect(await page.evaluate(key => sessionStorage.getItem(key), markerKey)).toBeNull()
+      const approvedAria = await captureStableAria(
+        page,
+        'role=region[name="Take 批准与返修生命周期"]',
+        scaffold.workspaceCwd,
+      )
+      await compareOrRefreshGolden(
+        join(REPO_ROOT, 'apps/web/tests/snapshots/qingmu-take-approval-lifecycle/ui.expected.md'),
+        `## Ready for approval\n\n${readyAria}\n\n## Approved\n\n${approvedAria}`,
+        scaffold.mode,
+      )
+
+      const takeApprovalLifecyclePath = `/api/qingmu/projects/project-1/episodes/episode-1/frames/${PROMPT_IR_FRAME_ID}/take-approval-lifecycle`
+      const posts = capturedRequests.slice(requestStart).filter(request => request.method === 'POST'
+        && new URL(request.path, 'http://127.0.0.1').pathname
+          === `${takeApprovalLifecyclePath}/transitions`)
+      expect(posts).toHaveLength(1)
+      const post = posts[0]
+      if (!isRecord(post?.body)) throw new Error('Take approval lifecycle POST body missing')
+      expect(Object.keys(post.body).sort()).toEqual([
+        'expectedSourceSnapshotSha256', 'takeId', 'methodProjection',
+        'methodProjectionSha256', 'methodAttestation', 'action', 'reason', 'idempotencyKey',
+      ].sort())
+      expect(post).toEqual(expect.objectContaining({
+        authorization: `Bearer ${YIMENG_TOKEN}`,
+        idempotencyKey: post.body.idempotencyKey,
+        cookie: undefined,
+      }))
+      expect(JSON.stringify(post.body)).not.toMatch(
+        /actorId|actorRole|actorNaturalPersonId|authSessionId|recordedAt/iu,
+      )
+
+      const commandRpc = browserRpcRequests.slice(rpcStart).find(request =>
+        request.path === '/qingmu-yimeng-command/transitionTakeApprovalLifecycle')
+      if (!isRecord(commandRpc?.body) || !isRecord(commandRpc.body.payload)) {
+        throw new Error('Take approval lifecycle browser command missing')
+      }
+      expect(Object.keys(commandRpc.body.payload).sort()).toEqual([
+        'projectId', 'episodeId', 'frameId', 'expectedSourceSnapshotSha256',
+        'takeId', 'action', 'reason', 'idempotencyKey',
+      ].sort())
+      expect(JSON.stringify(commandRpc.body.payload)).not.toMatch(
+        /schema|actor|role|person|session|methodProjection|methodAttestation|signature/iu,
+      )
+      const methodRpcs = browserRpcRequests.slice(rpcStart).filter(request =>
+        request.path === '/qingmu-imago-method/takeApprovalLifecycleMethod')
+      expect(methodRpcs.length).toBeGreaterThanOrEqual(2)
+      for (const methodRpc of methodRpcs) {
+        if (!isRecord(methodRpc.body) || !isRecord(methodRpc.body.payload)) {
+          throw new Error('Take approval lifecycle Method browser request missing')
+        }
+        expect(methodRpc.body.payload).toEqual({
+          projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID,
+        })
+      }
+
+      const unresolvedMarker = {
+        schema: 'qingmu.take-approval-lifecycle-recovery-marker.v1',
+        projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID,
+        expectedSourceSnapshotSha256: commandWire.result.value.authoritativeSourceSnapshotSha256,
+        takeId: 'asset-take-1',
+        action: 'INVALIDATE',
+        reason: '原始未决的批准失效记录。',
+        idempotencyKey: `qingmu:take-approval-lifecycle:v1:${'d'.repeat(64)}`,
+      }
+      await page.evaluate(({ key, marker }) => {
+        sessionStorage.setItem(key, JSON.stringify(marker))
+      }, { key: markerKey, marker: unresolvedMarker })
+      await dialog.getByRole('tab', { name: '总览', exact: true }).click()
+      const recoveryWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname
+          === '/qingmu-yimeng-command/recoverTakeApprovalLifecycleTransition')
+      await dialog.getByRole('tab', { name: '生成与质检', exact: true }).click()
+      const recoveryWire = await (await recoveryWirePromise).json() as {
+        result: { ok: boolean; value: { status: string; idempotencyKey: string } }
+      }
+      expect(recoveryWire.result.ok).toBe(true)
+      expect(recoveryWire.result.value.status).toBe('not_found')
+      expect(recoveryWire.result.value.idempotencyKey).toBe(unresolvedMarker.idempotencyKey)
+      const recoveredLifecycle = dialog.getByRole('region', {
+        name: 'Take 批准与返修生命周期', exact: true,
+      })
+      await recoveredLifecycle.getByText(/原坐标已锁定，只允许 GET 回执恢复/u).waitFor()
+      expect(await page.evaluate(key => sessionStorage.getItem(key), markerKey)).not.toBeNull()
+      expect(capturedRequests.slice(requestStart).filter(request => request.method === 'POST'
+        && new URL(request.path, 'http://127.0.0.1').pathname
+          === `${takeApprovalLifecyclePath}/transitions`)).toHaveLength(1)
+
+      const recoveryReads = capturedRequests.slice(requestStart).filter(request =>
+        request.method === 'GET'
+        && new URL(request.path, 'http://127.0.0.1').pathname
+          === `${takeApprovalLifecyclePath}/transitions/command-receipt`)
+      expect(recoveryReads).toHaveLength(1)
+      const recoveryRead = recoveryReads[0]
+      expect(recoveryRead).toEqual(expect.objectContaining({
+        authorization: `Bearer ${YIMENG_TOKEN}`,
+        idempotencyKey: unresolvedMarker.idempotencyKey,
+        body: undefined,
+        cookie: undefined,
+      }))
+      const recoveryUrl = new URL(recoveryRead?.path ?? '', 'http://127.0.0.1')
+      expect([...recoveryUrl.searchParams.keys()].sort()).toEqual([
+        'expectedSourceSnapshotSha256', 'takeId',
+      ])
+      expect(recoveryUrl.searchParams.get('expectedSourceSnapshotSha256'))
+        .toBe(unresolvedMarker.expectedSourceSnapshotSha256)
+      expect(recoveryUrl.searchParams.get('takeId')).toBe(unresolvedMarker.takeId)
+      const recoveryRpc = browserRpcRequests.slice(rpcStart).find(request =>
+        request.path === '/qingmu-yimeng-command/recoverTakeApprovalLifecycleTransition')
+      if (!isRecord(recoveryRpc?.body) || !isRecord(recoveryRpc.body.payload)) {
+        throw new Error('Take approval lifecycle browser recovery missing')
+      }
+      expect(Object.keys(recoveryRpc.body.payload).sort()).toEqual([
+        'projectId', 'episodeId', 'frameId', 'expectedSourceSnapshotSha256',
+        'takeId', 'action', 'reason', 'idempotencyKey',
+      ].sort())
+      expect(JSON.stringify([commandRpc, recoveryRpc])).not.toMatch(
+        /Bearer|actorId|actorRole|actorNaturalPersonId|authSessionId|methodAttestation/iu,
+      )
+
+      expect(capturedRequests.slice(requestStart).filter(request => request.method === 'POST'
+        && new URL(request.path, 'http://127.0.0.1').pathname
+          !== `${takeApprovalLifecyclePath}/transitions`
+        && /selection|technical|decision|episode-verification|signoff|provider|budget|rework/iu
+          .test(request.path))).toEqual([])
+      expect(browserConsoleErrors.slice(consoleStart)).toEqual([])
+      expect(tripwire.pageErrors).toEqual([])
+      expect(await page.content()).not.toContain(YIMENG_TOKEN)
+      await expectNoVisibleTechnicalBrand(page)
+
+      await dialog.getByRole('tab', { name: '分镜与镜头', exact: true }).click()
+      await dialog.getByRole('list', { name: '镜头选择' })
+        .getByRole('button', { name: /frame-z/ }).click()
       await dialog.getByRole('tab', { name: '总览', exact: true }).click()
       await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
       await page.evaluate((key) => { sessionStorage.removeItem(key) }, markerKey)

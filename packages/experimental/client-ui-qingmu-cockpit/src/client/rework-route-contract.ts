@@ -7,6 +7,9 @@ import type {
 import type { ReworkRouteRecoveryMarker } from './rework-route-recovery.ts'
 import { digestShotFinding } from './shot-finding-contract.ts'
 
+/**
+ * Project and shot coordinates for a rework-route operation.
+ */
 export interface ReworkRouteCoordinates {
   readonly projectId: string
   readonly episodeId: string
@@ -14,6 +17,9 @@ export interface ReworkRouteCoordinates {
   readonly findingId: string
 }
 
+/**
+ * Fresh method and source authority required to route rework.
+ */
 export interface ReworkRouteAuthority {
   readonly method: ImagoReworkRouteMethodResponse
   readonly source: YimengReworkRouteSourceResponse
@@ -50,7 +56,12 @@ function findingPayloadMatches(route: Record<string, unknown>, finding: YimengSh
     && route.reworkScope === finding.reworkScope)
 }
 
-/** Validate the Host-derived Method against this exact current OPEN Finding and authority chain. */
+/**
+ * Validate the Host-derived Method against this exact current OPEN Finding and authority chain.
+ * @param method - Current IMAGO method result to verify.
+ * @param coordinates - Project and artifact coordinates for the operation.
+ * @param finding - Shot finding bound to the operation.
+ */
 export async function verifyReworkRouteMethod(
   method: ImagoReworkRouteMethodResponse,
   coordinates: ReworkRouteCoordinates,
@@ -151,7 +162,11 @@ async function verifyRouteResult(value: unknown, coordinates: ReworkRouteCoordin
   return result
 }
 
-/** Verify a single-POST receipt only as the original result, never as current display authority. */
+/**
+ * Verify a single-POST receipt only as the original result, never as current display authority.
+ * @param result - Command result to verify.
+ * @param marker - Recovery marker to persist or clear.
+ */
 export async function verifyReworkRouteReceipt(
   result: YimengReworkRouteResult,
   marker: ReworkRouteRecoveryMarker,
@@ -161,7 +176,12 @@ export async function verifyReworkRouteReceipt(
     && route.revision === marker.expectedRouteRevision + 1)
 }
 
-/** Validate GET-only recovery against every original CAS and idempotency coordinate. */
+/**
+ * Validate GET-only recovery against every original CAS and idempotency coordinate.
+ * @param recovery - Recovered backend result to verify.
+ * @param marker - Recovery marker to persist or clear.
+ * @returns Recovered result when it matches the marker, otherwise `null`.
+ */
 export async function verifyReworkRouteRecovery(
   recovery: YimengReworkRouteRecovery,
   marker: ReworkRouteRecoveryMarker,
@@ -181,7 +201,12 @@ export async function verifyReworkRouteRecovery(
   return recovery.result
 }
 
-/** Cross-check the fresh read and Host authority probe against one separately fetched current Method. */
+/**
+ * Cross-check the fresh read and Host authority probe against one separately fetched current Method.
+ * @param authority - Current authority record to verify.
+ * @param coordinates - Project and artifact coordinates for the operation.
+ * @param finding - Shot finding bound to the operation.
+ */
 export async function verifyReworkRouteAuthority(
   authority: ReworkRouteAuthority,
   coordinates: ReworkRouteCoordinates,

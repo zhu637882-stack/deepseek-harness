@@ -9,6 +9,8 @@ import type {
   ImagoTakeAcceptanceMethodResponse,
   YimengTakeAcceptanceResponse, YimengTakeTechnicalQcFeedResponse,
   YimengTakeTechnicalQcResult, YimengTakeTechnicalQcRecovery,
+  ImagoTakeApprovalLifecycleMethodResponse, YimengTakeApprovalLifecycleFeedResponse,
+  YimengTakeApprovalLifecycleResult, YimengTakeApprovalLifecycleRecovery,
   ImagoProductionUnitMethodResponse, YimengProductionUnitsResponse, YimengProductionUnitResult, YimengProductionUnitRecovery,
   ImagoContinuityMethodResponse,
   ImagoShotFindingMethodResponse, YimengShotFindingFeedResponse, YimengShotFindingResult, YimengShotFindingRecovery,
@@ -50,6 +52,9 @@ export type { QingmuCockpitFace } from './slots.ts'
 export type {
   ImagoStageSourceMethodResponse, YimengStageSourcesResponse, YimengStageSourceResult, YimengStageSourceRecovery,
   ImagoTakeAcceptanceMethodRequest, ImagoTakeAcceptanceMethodResponse, ImagoTakeAcceptanceMethodProjection,
+  ImagoTakeApprovalLifecycleAction, ImagoTakeApprovalLifecycleMethodRequest,
+  ImagoTakeApprovalLifecycleMethodResponse, ImagoTakeApprovalLifecycleMethodProjection,
+  ImagoTakeApprovalLifecycleState, ImagoTakeApprovalLifecycleTransition,
   ImagoProductionUnitMethodResponse, YimengProductionUnitsResponse, YimengProductionUnitResult, YimengProductionUnitRecovery,
   ImagoContinuityMethodResponse,
   ImagoShotFindingMethodResponse, YimengShotFindingFeedResponse, YimengShotFindingResult, YimengShotFindingRecovery,
@@ -86,6 +91,12 @@ export type {
   YimengTakeTechnicalQcFeedResponse, YimengTakeTechnicalQcRequest,
   YimengRecordTakeTechnicalQcRequest, YimengRecoverTakeTechnicalQcRequest,
   YimengTakeTechnicalQcResult, YimengTakeTechnicalQcRecovery,
+  YimengTakeApprovalLifecycleAssessment, YimengTakeApprovalLifecycleDecision,
+  YimengTakeApprovalLifecycleFeedResponse, YimengTakeApprovalLifecycleRequest,
+  YimengTakeApprovalLifecycleSource, YimengTakeApprovalLifecycleTransition,
+  YimengTakeApprovalLifecycleAction, YimengTransitionTakeApprovalLifecycleRequest,
+  YimengRecoverTakeApprovalLifecycleTransitionRequest,
+  YimengTakeApprovalLifecycleResult, YimengTakeApprovalLifecycleRecovery,
   YimengRecoverTakeVersionSelectionRequest, YimengTakeSelectionIdentity,
   YimengTakeVersionSelectionResult, YimengTakeVersionSelectionRecovery,
   YimengTakeComment, YimengTakeCommentAnchor, YimengTakeCommentFeedResponse,
@@ -156,8 +167,12 @@ export function apply(ctx: ClientContext): void {
     takeAcceptance: (request, signal) => read<YimengTakeAcceptanceResponse>('takeAcceptance', request, signal),
     takeTechnicalQc: (request, signal) =>
       read<YimengTakeTechnicalQcFeedResponse>('takeTechnicalQc', request, signal),
+    takeApprovalLifecycle: (request, signal) =>
+      read<YimengTakeApprovalLifecycleFeedResponse>('takeApprovalLifecycle', request, signal),
     takeAcceptanceMethod: (request, signal) =>
       method<ImagoTakeAcceptanceMethodResponse>('takeAcceptanceMethod', request, signal),
+    takeApprovalLifecycleMethod: (request, signal) =>
+      method<ImagoTakeApprovalLifecycleMethodResponse>('takeApprovalLifecycleMethod', request, signal),
     shotFindings: (request, signal) => read<YimengShotFindingFeedResponse>('shotFindings', request, signal),
     shotFindingMethod: (request, signal) => method<ImagoShotFindingMethodResponse>('shotFindingMethod', request, signal),
     recordShotFinding: (request, signal) => command<YimengShotFindingResult>('recordShotFinding', request, signal),
@@ -182,6 +197,10 @@ export function apply(ctx: ClientContext): void {
       command<YimengTakeTechnicalQcResult>('recordTakeTechnicalQc', request, signal),
     recoverTakeTechnicalQc: (request, signal) =>
       command<YimengTakeTechnicalQcRecovery>('recoverTakeTechnicalQc', request, signal),
+    transitionTakeApprovalLifecycle: (request, signal) =>
+      command<YimengTakeApprovalLifecycleResult>('transitionTakeApprovalLifecycle', request, signal),
+    recoverTakeApprovalLifecycleTransition: (request, signal) =>
+      command<YimengTakeApprovalLifecycleRecovery>('recoverTakeApprovalLifecycleTransition', request, signal),
     reworkRouteSource: (request, signal) =>
       read<YimengReworkRouteSourceResponse>('reworkRouteSource', request, signal),
     reworkRouteMethod: (request, signal) =>

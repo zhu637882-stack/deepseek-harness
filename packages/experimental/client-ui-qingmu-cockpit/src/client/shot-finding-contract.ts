@@ -17,6 +17,9 @@ export const SHOT_FINDING_OWNER_LABELS: Readonly<Record<string, QingmuCockpitKey
   C: 'findingOwnerDirector', C5: 'findingOwnerStoryboard', D: 'findingOwnerImagePrompt',
   DIMG: 'findingOwnerImage', E: 'findingOwnerVideoPrompt', F: 'findingOwnerVideo',
 }
+/**
+ * User-facing labels for each shot-finding severity.
+ */
 export const SHOT_FINDING_SEVERITY_LABELS = {
   BLOCKER: 'findingSeverityBlocker', MAJOR: 'findingSeverityMajor', MINOR: 'findingSeverityMinor',
 } as const
@@ -67,20 +70,33 @@ function canonicalJson(value: unknown): string {
   throw new Error('Finding digest requires well-formed canonical JSON and safe integers')
 }
 
-/** Python-compatible SHA of immutable coordinates; this does not attest current media bytes. */
+/**
+ * Python-compatible SHA of immutable coordinates; this does not attest current media bytes.
+ * @param value - Untrusted value to validate and normalize.
+ * @returns SHA-256 digest of the canonical value.
+ */
 export async function digestShotFinding(value: unknown): Promise<string> {
   const hash = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonicalJson(value)))
   return [...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-/** Preserve all eight author fields verbatim, including repeated evidence references. */
+/**
+ * Preserve all eight author fields verbatim, including repeated evidence references.
+ * @param value - Untrusted value to validate and normalize.
+ * @returns Resulting YimengShotFindingPayload value.
+ */
 export function shotFindingPayload(value: YimengShotFindingPayload): YimengShotFindingPayload {
   return { timecode: value.timecode, observation: value.observation, evidenceRefs: value.evidenceRefs,
     earliestOwner: value.earliestOwner, ownerReason: value.ownerReason, severity: value.severity,
     suggestion: value.suggestion, reworkScope: value.reworkScope }
 }
 
-/** Local input check only. Reviewer permission and HMAC are enforced by Host and Yimeng. */
+/**
+ * Local input check only. Reviewer permission and HMAC are enforced by Host and Yimeng.
+ * @param value - Untrusted value to validate and normalize.
+ * @param owners - Allowed finding owners.
+ * @returns Whether the value satisfies the required fields.
+ */
 export function validShotFindingPayload(value: YimengShotFindingPayload, owners: readonly string[]): boolean {
   return isText(value.timecode, 128) && isText(value.observation) && isText(value.ownerReason)
     && isText(value.suggestion) && isText(value.reworkScope) && owners.includes(value.earliestOwner)
@@ -109,7 +125,12 @@ async function verifyFinding(finding: YimengShotFinding, ids: YimengSelectedVide
   await verifySubject(finding.subject, finding.subjectSnapshotSha256, ids)
 }
 
-/** Reject cross-Shot or cross-revision UI responses; historical items retain their original binding. */
+/**
+ * Reject cross-Shot or cross-revision UI responses; historical items retain their original binding.
+ * @param feed - Fresh backend feed to verify.
+ * @param ids - Expected project and shot identifiers.
+ * @param visible - Whether the finding must remain visible.
+ */
 export async function verifyShotFindingFeed(
   feed: YimengShotFindingFeedResponse, ids: YimengSelectedVideoReviewRequest,
   visible: { readonly frameNo: number; readonly storyboardRevision: number },
@@ -136,7 +157,11 @@ export async function verifyShotFindingFeed(
   }
 }
 
-/** Check the bound form before displaying it. The browser never receives or verifies with the HMAC key. */
+/**
+ * Check the bound form before displaying it. The browser never receives or verifies with the HMAC key.
+ * @param method - Current IMAGO method result to verify.
+ * @param feed - Fresh backend feed to verify.
+ */
 export async function verifyShotFindingMethod(method: ImagoShotFindingMethodResponse, feed: YimengShotFindingFeedResponse): Promise<void> {
   const projection = method?.projection
   const definition = projection?.definition
@@ -170,7 +195,11 @@ export interface ShotFindingRecoveryMarker extends YimengSelectedVideoReviewRequ
   readonly methodProjectionSha256: string
 }
 
-/** Bind an original receipt to the stored intent, not today's selected video or authentication session. */
+/**
+ * Bind an original receipt to the stored intent, not today's selected video or authentication session.
+ * @param result - Command result to verify.
+ * @param marker - Recovery marker to persist or clear.
+ */
 export async function verifyShotFindingReceipt(result: YimengShotFindingResult, marker: ShotFindingRecoveryMarker): Promise<void> {
   requireContract(result?.schema === 'jason.qingmu-shot-finding-result.v1' && result.changed === false
     && result.providerCalls === 0 && result.selectionChanged === false && result.humanSignoffInferred === false

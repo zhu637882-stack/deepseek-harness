@@ -5,10 +5,16 @@ const KEYS = [
   'candidateTakeId', 'candidateVersionOrdinal', 'candidateOutputSha256', 'idempotencyKey',
 ] as const
 
+/**
+ * Browser recovery marker for an unconfirmed Take-version selection.
+ */
 export interface TakeVersionSelectionRecoveryMarker extends YimengSelectTakeVersionRequest {
   readonly schema: 'qingmu.take-version-selection-recovery-marker.v1'
 }
 
+/**
+ * Result of reading a Take-version selection recovery marker.
+ */
 export type TakeVersionSelectionRecoveryRead =
   | { readonly status: 'none' }
   | { readonly status: 'ready'; readonly marker: TakeVersionSelectionRecoveryMarker }
@@ -59,7 +65,11 @@ async function sha256(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-/** Deterministic for one exact selection intent; it contains no token, actor claim, or media URL. */
+/**
+ * Deterministic for one exact selection intent; it contains no token, actor claim, or media URL.
+ * @param input - Inputs used to create the recovery marker.
+ * @returns Recovery marker bound to the requested operation.
+ */
 export async function createTakeVersionSelectionMarker(
   input: Omit<YimengSelectTakeVersionRequest, 'idempotencyKey'>,
 ): Promise<TakeVersionSelectionRecoveryMarker> {
@@ -78,7 +88,11 @@ export async function createTakeVersionSelectionMarker(
   return parse({ ...coordinates, idempotencyKey }, input)
 }
 
-/** Read only the unresolved marker for this exact Project / Episode / Shot. */
+/**
+ * Read only the unresolved marker for this exact Project / Episode / Shot.
+ * @param scope - Recovery or approval scope.
+ * @returns Stored recovery marker state, including stale or absent results.
+ */
 export function readTakeVersionSelectionMarker(scope: YimengTakeVersionRequest): TakeVersionSelectionRecoveryRead {
   let serialized: string | null = null
   try {
@@ -91,7 +105,11 @@ export function readTakeVersionSelectionMarker(scope: YimengTakeVersionRequest):
   }
 }
 
-/** Persist and read back before POST; never overwrite a different unresolved selection. */
+/**
+ * Persist and read back before POST; never overwrite a different unresolved selection.
+ * @param marker - Recovery marker to persist or clear.
+ * @returns Whether the marker was stored successfully.
+ */
 export function writeTakeVersionSelectionMarker(marker: TakeVersionSelectionRecoveryMarker): boolean {
   try {
     parse(marker, marker)
@@ -105,7 +123,12 @@ export function writeTakeVersionSelectionMarker(marker: TakeVersionSelectionReco
   }
 }
 
-/** Compare-and-clear so stale receipts and stale discard actions cannot erase a newer intent. */
+/**
+ * Compare-and-clear so stale receipts and stale discard actions cannot erase a newer intent.
+ * @param scope - Recovery or approval scope.
+ * @param expected - Expected marker used for compare-and-clear behavior.
+ * @returns Whether a matching marker was removed.
+ */
 export function clearTakeVersionSelectionMarker(
   scope: YimengTakeVersionRequest,
   expected: TakeVersionSelectionRecoveryRead,

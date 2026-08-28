@@ -18,6 +18,8 @@ import type {
   YimengTakeAcceptanceEvidence,
   YimengTakeAcceptanceRequest,
   YimengTakeAcceptanceSubject,
+  YimengTakeApprovalLifecycleRequest,
+  YimengTakeApprovalLifecycleSource,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 
 /** JSON object retained from the stateless IMAGO method projection. */
@@ -986,6 +988,9 @@ export interface ImagoTakeTechnicalQcMethodSnapshot extends ImagoMethodJsonObjec
   readonly evidenceSnapshotSha256: string
 }
 
+/**
+ * Machine-readable IMAGO Take technical-QC code.
+ */
 export type ImagoTakeTechnicalQcCode =
   | 'STORY_CAUSALITY' | 'SHOT_ORDER' | 'PACING' | 'LOOK' | 'ENDING_CHOICE'
   | 'IDENTITY' | 'PROP_GEOMETRY' | 'TOPOLOGY' | 'EXACT_COUNT'
@@ -1051,6 +1056,109 @@ export interface ImagoTakeTechnicalQcMethodResponse extends ImagoMethodJsonObjec
   readonly projection: ImagoTakeTechnicalQcMethodProjection
   readonly projectionSha256: string
   readonly methodAttestation: ImagoTakeTechnicalQcMethodAttestation
+}
+
+/** Identity-only request; the Host resolves the fresh E7-4 lifecycle source. */
+export type ImagoTakeApprovalLifecycleMethodRequest = YimengTakeApprovalLifecycleRequest
+
+/** Exact Yimeng lifecycle source passed to the stateless current-Core compiler. */
+export interface ImagoTakeApprovalLifecycleMethodSnapshot extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.take-approval-lifecycle-method-snapshot.v1'
+  readonly source: YimengTakeApprovalLifecycleSource
+  readonly sourceSnapshotSha256: string
+}
+
+/** Explicit E7-4 lifecycle transitions; no action executes rework or Provider work. */
+export type ImagoTakeApprovalLifecycleAction =
+  | 'APPROVE' | 'INVALIDATE' | 'REQUEST_REWORK' | 'RESUBMIT'
+
+/** Current approval, invalidation, bounded-rework, and resubmission contract. */
+export interface ImagoTakeApprovalLifecycleMethodDefinition extends ImagoMethodJsonObject {
+  readonly mode: 'STATELESS_TAKE_APPROVAL_LIFECYCLE_METHOD'
+  readonly actions: readonly ImagoTakeApprovalLifecycleAction[]
+  readonly approvalRequires: readonly string[]
+  readonly invalidation: {
+    readonly sourceDriftIsImmediate: true
+    readonly auditableEventRequired: true
+    readonly oldApprovalMayNotBeInherited: true
+  }
+  readonly rework: {
+    readonly boundedFindingRouteRequired: true
+    readonly oneEarliestOwnerPerDefect: true
+    readonly executionAllowed: false
+    readonly paidGenerationAuthorized: false
+    readonly automaticRetry: false
+    readonly thirdSameClassRequiresMethodReview: true
+  }
+  readonly resubmission: {
+    readonly newTakeRevisionRequired: true
+    readonly editIsApproval: false
+    readonly approvalInherited: false
+  }
+  readonly boundaries: {
+    readonly businessTruth: 'yimeng'
+    readonly selectionChanged: false
+    readonly technicalPassChanged: false
+    readonly reviewDecisionChanged: false
+    readonly reworkExecuted: false
+    readonly providerCalls: 0
+    readonly budgetMutation: false
+    readonly episodeVerificationChanged: false
+    readonly humanSignoffInferred: false
+    readonly evidenceLedgerMutation: false
+  }
+}
+
+/** Current lifecycle state derived from fresh Yimeng truth and current Core rules. */
+export type ImagoTakeApprovalLifecycleState =
+  | 'READY_FOR_APPROVAL' | 'APPROVED' | 'APPROVAL_INVALIDATED_PENDING_EVENT'
+  | 'REWORK_REQUIRED' | 'REWORK_RECORDED' | 'READY_TO_RESUBMIT'
+  | 'IN_REVIEW' | 'METHOD_REVIEW_REQUIRED' | 'AWAITING_REVIEW'
+
+/** Legal next actions derived from current Yimeng truth and current Core rules. */
+export interface ImagoTakeApprovalLifecycleTransition extends ImagoMethodJsonObject {
+  readonly state: ImagoTakeApprovalLifecycleState
+  readonly legalActions: readonly ImagoTakeApprovalLifecycleAction[]
+  readonly currentApprovalId: string | null
+  readonly staleApprovalId: string | null
+  readonly invalidationReasons: readonly string[]
+  readonly reworkClassCodes: readonly string[]
+  readonly sameClassReworkCount: number
+  readonly sameClassCountAfterRequest: number
+  readonly methodReviewRequired: boolean
+  readonly methodReviewRequiredAfterRequest: boolean
+  readonly resubmitSourceReworkId: string | null
+  readonly approvalInherited: false
+  readonly boundedFindingRouteRequired: boolean
+}
+
+/** Current rule-bound lifecycle method; it records no transition by itself. */
+export interface ImagoTakeApprovalLifecycleMethodProjection extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-take-approval-lifecycle-method.v1'
+  readonly subject: YimengTakeAcceptanceSubject
+  readonly subjectSnapshotSha256: string
+  readonly sourceSnapshotSha256: string
+  readonly definition: ImagoTakeApprovalLifecycleMethodDefinition
+  readonly transition: ImagoTakeApprovalLifecycleTransition
+  readonly ruleBindings: Readonly<Record<string, string>>
+  readonly rulesSha256: string
+}
+
+/** Host-origin proof only; it grants no human approval or rework execution. */
+export interface ImagoTakeApprovalLifecycleMethodAttestation extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-take-approval-lifecycle-method-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly sourceSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly signature: string
+}
+
+/** Fresh, twice-read lifecycle projection and its Host-only HMAC proof. */
+export interface ImagoTakeApprovalLifecycleMethodResponse extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-take-approval-lifecycle-method-adapter-result.v1'
+  readonly projection: ImagoTakeApprovalLifecycleMethodProjection
+  readonly projectionSha256: string
+  readonly methodAttestation: ImagoTakeApprovalLifecycleMethodAttestation
 }
 
 /** Identity-only request; the Host resolves current native group membership. */
@@ -1194,6 +1302,9 @@ export interface ImagoReworkRouteBoundedItem extends ImagoMethodJsonObject {
   readonly reworkScope: string
 }
 
+/**
+ * One current-rule instruction in a rework-route method result.
+ */
 export interface ImagoReworkRouteInstruction extends ImagoMethodJsonObject {
   readonly state: 'BOUNDED_REWORK_ROUTED'
   readonly outputSchema: 'IMAGO-V6-BoundedReworkRoute-v1'
@@ -1396,6 +1507,7 @@ export interface ImagoMethodEndpointMap {
   readonly shotFindingMethod: ImagoShotFindingMethodResponse
   readonly takeAcceptanceMethod: ImagoTakeAcceptanceMethodResponse
   readonly takeTechnicalQcMethod: ImagoTakeTechnicalQcMethodResponse
+  readonly takeApprovalLifecycleMethod: ImagoTakeApprovalLifecycleMethodResponse
   readonly productionUnitMethod: ImagoProductionUnitMethodResponse
   readonly lsuPlanMethod: ImagoLsuPlanMethodResponse
   readonly reworkRouteMethod: ImagoReworkRouteMethodResponse

@@ -4,7 +4,7 @@
 
 这个私有实验性 Host 插件把当前 IMAGO OS 方法编译为浏览器安全指引。`elementMethod` 用于资料编辑，`referenceAssetMethod` 用于受限的参考资产动作与权利指引，`promptIrMethod` 用于供应商无关的 PromptIR 候选，`shotRelationMethod` 用于 canonical Scene/Shot/Shot 内局部 Beat/Element 关系图以及 Shot River 节奏与参考绑定，`heroFrameStoryboardMethod` 用于确定性编译一个已选 Hero Frame 及其 Shot 内画布标注。`worksetMethod` 重新读取分集工作流，返回当前 IMAGO 阶段定义与明确的权威可用性。上述输入快照方法在 Host 内构造各自的有界输入，并把按 Unicode code point 排序、无空格的 JSON 通过 stdin 交给已审核的 Core 编译器。对应编译器返回的 `input_snapshot_sha256` 必须匹配这组准确输入字节的 SHA-256。
 
-`shotFindingMethod`、`takeAcceptanceMethod`、`productionUnitMethod`、`stageSourceMethod`、`stageArtifactMethod` 与 `lsuPlanMethod` 使用下文各自的主体或证据哈希约定；旧方法的 `input_snapshot_sha256` 字段不属于这些 schema。
+`shotFindingMethod`、`takeAcceptanceMethod`、`takeTechnicalQcMethod`、`takeApprovalLifecycleMethod`、`productionUnitMethod`、`stageSourceMethod`、`stageArtifactMethod` 与 `lsuPlanMethod` 使用下文各自的主体或证据哈希约定；旧方法的 `input_snapshot_sha256` 字段不属于这些 schema。
 
 ## 证明边界
 
@@ -51,6 +51,14 @@ Host 对完整归一化工作流与完整 `sourceRevision` 计算哈希，保留
 Host 在编译前后独立读取七份固定 Core 来源。当前仅 V6 的活跃指针、路由验收合同、严格视频探针、已批准 E6-5 范围以及仍未激活的参考叠加 QC 合同必须一致。投影把整片解码和按帧数推导的实际平均帧率与宏观、微观 QC 分开，也把二者与 Provider outbox 回执分开；标称 `r_frame_rate` 绝不当作实际帧率。只有易梦当前必检集合声明对白音频 QC 时才要求该检查。
 
 本地技术证据和 QC 可以通过，而 Provider 回执仍是 bounded-local 或未验证。因此投影始终保留 `UNVERIFIED_FOR_PAID_PRODUCTION`、`formalAcceptanceAllowed: false`、`selectedIsApproval: false` 与 `gateBCompleted: false`，并且绝不激活参考叠加策略。Host 独立重建评估和规则哈希，拒绝证据或规则漂移，再用现有服务端 HMAC 密钥签署精确方法投影。本方法不执行写入、Provider 调用、Gate B 完成、正式验收或人工签收。
+
+## Take 技术 QC 方法
+
+`takeTechnicalQcMethod` 只接受三个 canonical Take 坐标。它读取新鲜的易梦当前技术 QC 来源，调用 `scripts/compile_qingmu_take_technical_qc_method.py`，并在编译后再次读取来源。Host 校验固定宏观／微观分类、回执与必检项通过规则、准确当前主体投影、当前规则哈希、投影 SHA 和服务端 HMAC 证明。投影只允许记录不可变技术评估；不能批准内容、改变选择、创建 Finding、验证单集、执行返修或调用 Provider。
+
+## Take 批准生命周期方法
+
+`takeApprovalLifecycleMethod` 只接受 canonical 项目、剧集和 frame 坐标。它在调用 `scripts/compile_qingmu_take_approval_lifecycle_method.py` 前后读取新鲜的易梦当前生命周期来源。Core 推导合法动作集合、当前批准与漂移状态、有界 Finding 到最早 Owner 的返修路线，以及同类第三次返修必须方法复审的要求。Host 重新校验全部来源、引用、规则、投影和证明身份。该方法无状态：既不写入生命周期，也不改变 Take 选择、审核决定、QC、Finding、单集验证、Provider、预算或人工签收状态。
 
 ## 制作单元绑定方法
 

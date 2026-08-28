@@ -50,7 +50,11 @@ function same(left: ReworkRouteRecoveryMarker, right: ReworkRouteRecoveryMarker)
   return MARKER_KEYS.every(key => left[key] === right[key])
 }
 
-/** Derive one stable idempotency key from the original subject and route-head CAS. */
+/**
+ * Derive one stable idempotency key from the original subject and route-head CAS.
+ * @param input - Inputs used to create the recovery marker.
+ * @returns Recovery marker bound to the requested operation.
+ */
 export async function createReworkRouteMarker(
   input: Omit<ReworkRouteRecoveryMarker, 'schema' | 'idempotencyKey'>,
 ): Promise<ReworkRouteRecoveryMarker> {
@@ -61,7 +65,11 @@ export async function createReworkRouteMarker(
   }, input)
 }
 
-/** Read only this tab's marker; this performs no network call. */
+/**
+ * Read only this tab's marker; this performs no network call.
+ * @param scope - Recovery or approval scope.
+ * @returns Stored recovery marker state, including stale or absent results.
+ */
 export function readReworkRouteMarker(scope: Scope): ReworkRouteRecoveryRead {
   let serialized: string | null = null
   try {
@@ -72,7 +80,11 @@ export function readReworkRouteMarker(scope: Scope): ReworkRouteRecoveryRead {
   } catch { return { status: 'invalid', serialized } }
 }
 
-/** Persist and synchronously read back before POST, without replacing another unresolved intent. */
+/**
+ * Persist and synchronously read back before POST, without replacing another unresolved intent.
+ * @param marker - Recovery marker to persist or clear.
+ * @returns Whether the marker was stored successfully.
+ */
 export function writeReworkRouteMarker(marker: ReworkRouteRecoveryMarker): boolean {
   try {
     parse(marker, marker)
@@ -84,7 +96,12 @@ export function writeReworkRouteMarker(marker: ReworkRouteRecoveryMarker): boole
   } catch { return false }
 }
 
-/** Compare-and-clear so a late result cannot erase a replacement intent. */
+/**
+ * Compare-and-clear so a late result cannot erase a replacement intent.
+ * @param scope - Recovery or approval scope.
+ * @param expected - Expected marker used for compare-and-clear behavior.
+ * @returns Whether a matching marker was removed.
+ */
 export function clearReworkRouteMarker(scope: Scope, expected: ReworkRouteRecoveryRead): boolean {
   try {
     const current = readReworkRouteMarker(scope)

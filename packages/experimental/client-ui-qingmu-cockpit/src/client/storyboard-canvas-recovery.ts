@@ -43,6 +43,9 @@ export interface StoryboardCanvasCommitRecoveryMarker extends StoryboardCanvasRe
 /** Browser-safe commit coordinates accepted when creating a recovery marker. */
 export type StoryboardCanvasCommitCoordinates = Omit<StoryboardCanvasCommitRecoveryMarker, 'schema'>
 
+/**
+ * Result of reading a storyboard-canvas recovery marker.
+ */
 export type StoryboardCanvasRecoveryMarkerRead =
   | { readonly status: 'none' }
   | { readonly status: 'ready'; readonly marker: StoryboardCanvasCommitRecoveryMarker }
@@ -160,7 +163,12 @@ async function sha256(value: string): Promise<string> {
   return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-/** Derive one deterministic key for the exact immutable canvas ChangeSet payload. */
+/**
+ * Derive one deterministic key for the exact immutable canvas ChangeSet payload.
+ * @param changeSetId - Stable identifier for the edit change set.
+ * @param payloadSha256 - SHA-256 digest of the canonical payload.
+ * @returns Stable idempotency key for the canonical operation.
+ */
 export async function deriveStoryboardCanvasIdempotencyKey(
   changeSetId: string,
   payloadSha256: string,
@@ -170,14 +178,22 @@ export async function deriveStoryboardCanvasIdempotencyKey(
   return `qingmu:storyboard-canvas:commit:v1:${await sha256(changeSetId)}:${payloadSha256}`
 }
 
-/** Validate and attach the marker schema before any commit POST is sent. */
+/**
+ * Validate and attach the marker schema before any commit POST is sent.
+ * @param coordinates - Project and artifact coordinates for the operation.
+ * @returns Recovery marker bound to the requested operation.
+ */
 export function createStoryboardCanvasRecoveryMarker(
   coordinates: StoryboardCanvasCommitCoordinates,
 ): StoryboardCanvasCommitRecoveryMarker {
   return parseMarker({ schema: SCHEMA, ...coordinates }, coordinates)
 }
 
-/** Discover the frame marker while retaining its originating revision and commit lineage. */
+/**
+ * Discover the frame marker while retaining its originating revision and commit lineage.
+ * @param coordinates - Project and artifact coordinates for the operation.
+ * @returns Stored recovery marker state, including stale or absent results.
+ */
 export function readStoryboardCanvasRecoveryMarker(
   coordinates: StoryboardCanvasRecoveryCoordinates,
 ): StoryboardCanvasRecoveryMarkerRead {
@@ -190,7 +206,11 @@ export function readStoryboardCanvasRecoveryMarker(
   }
 }
 
-/** Persist and synchronously verify the marker before the commit POST begins. */
+/**
+ * Persist and synchronously verify the marker before the commit POST begins.
+ * @param marker - Recovery marker to persist or clear.
+ * @returns Whether the marker was stored successfully.
+ */
 export function writeStoryboardCanvasRecoveryMarker(marker: StoryboardCanvasCommitRecoveryMarker): boolean {
   try {
     const validated = parseMarker(marker, marker)
@@ -206,7 +226,11 @@ export function writeStoryboardCanvasRecoveryMarker(marker: StoryboardCanvasComm
   }
 }
 
-/** Clear only the identical marker after authoritative refresh verifies the receipt. */
+/**
+ * Clear only the identical marker after authoritative refresh verifies the receipt.
+ * @param marker - Recovery marker to persist or clear.
+ * @returns Whether a matching marker was removed.
+ */
 export function clearStoryboardCanvasRecoveryMarker(marker: StoryboardCanvasCommitRecoveryMarker): boolean {
   try {
     const key = storageKey(marker)

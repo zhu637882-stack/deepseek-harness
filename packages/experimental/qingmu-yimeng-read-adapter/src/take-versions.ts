@@ -73,7 +73,11 @@ function optionalNumber(value: unknown, field: string): number | null {
   return value
 }
 
-/** Accept only the three canonical coordinates from the untrusted browser. */
+/**
+ * Accept only the three canonical coordinates from the untrusted browser.
+ * @param payload - Untrusted command payload to validate.
+ * @returns Validated YimengTakeVersionRequest value.
+ */
 export function parseTakeVersionReadRequest(payload: unknown): YimengTakeVersionRequest {
   const input = exact(payload, ['projectId', 'episodeId', 'frameId'], 'request')
   return {
@@ -179,7 +183,13 @@ function subject(value: unknown, request: YimengTakeVersionRequest): YimengTakeV
   }
 }
 
-/** Validate identity, content hash, authority boundaries, and every derived version flag. */
+/**
+ * Validate identity, content hash, authority boundaries, and every derived version flag.
+ * @param value - Untrusted value to validate and normalize.
+ * @param request - Request coordinates and payload to process.
+ * @param digest - Expected SHA-256 digest for the canonical value.
+ * @returns Validated YimengTakeVersionStackResponse value.
+ */
 export function normalizeTakeVersionStack(
   value: unknown,
   request: YimengTakeVersionRequest,

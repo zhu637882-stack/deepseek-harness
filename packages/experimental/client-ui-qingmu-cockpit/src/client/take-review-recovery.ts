@@ -5,11 +5,17 @@ import type {
   YimengTakeReviewAction,
 } from './contracts.ts'
 
+/**
+ * Browser recovery marker for an unconfirmed Take review recommendation.
+ */
 export interface TakeReviewRecommendationRecoveryMarker
   extends YimengCreateTakeReviewRecommendationRequest {
   readonly schema: 'qingmu.take-review-recommendation-recovery-marker.v1'
 }
 
+/**
+ * Browser recovery marker for an unconfirmed human Take decision.
+ */
 export interface TakeHumanDecisionRecoveryMarker extends YimengCreateTakeHumanDecisionRequest {
   readonly schema: 'qingmu.take-human-decision-recovery-marker.v1'
 }
@@ -33,6 +39,11 @@ const RECOMMENDATION_KEY = /^qingmu:take-review-recommendation:v1:[0-9a-f]{64}$/
 const DECISION_KEY = /^qingmu:take-human-decision:v1:[0-9a-f]{64}$/u
 const ACTIONS = new Set<YimengTakeReviewAction>(['approve', 'reject', 'request_changes'])
 
+/**
+ * Normalize text with Python-compatible trimming.
+ * @param value - Untrusted value to validate and normalize.
+ * @returns Text normalized with Python-compatible trimming.
+ */
 export function pythonStripTakeReviewText(value: string): string {
   return value.replace(/^[\p{White_Space}\u001c-\u001f]+|[\p{White_Space}\u001c-\u001f]+$/gu, '')
 }
@@ -78,10 +89,20 @@ function storageKey(prefix: string, scope: Scope): string {
     .map(encodeURIComponent).join(':')
 }
 
+/**
+ * Build the browser storage key for the take review recommendation recovery marker.
+ * @param scope - Recovery or approval scope.
+ * @returns Resulting string value.
+ */
 export function takeReviewRecommendationRecoveryKey(scope: Scope): string {
   return storageKey('qingmu:take-review-recommendation-recovery:v1', scope)
 }
 
+/**
+ * Build the browser storage key for the take human decision recovery marker.
+ * @param scope - Recovery or approval scope.
+ * @returns Resulting string value.
+ */
 export function takeHumanDecisionRecoveryKey(scope: Scope): string {
   return storageKey('qingmu:take-human-decision-recovery:v1', scope)
 }
@@ -101,12 +122,22 @@ function read<T>(key: string, scope: Scope, validate: (value: unknown) => value 
   }
 }
 
+/**
+ * Read the take review recommendation recovery marker from browser storage.
+ * @param scope - Recovery or approval scope.
+ * @returns Stored recovery marker state, including stale or absent results.
+ */
 export function readTakeReviewRecommendationRecoveryMarker(
   scope: Scope,
 ): TakeReviewRecommendationRecoveryMarker | undefined {
   return read(takeReviewRecommendationRecoveryKey(scope), scope, recommendationMarker)
 }
 
+/**
+ * Read the take human decision recovery marker from browser storage.
+ * @param scope - Recovery or approval scope.
+ * @returns Stored recovery marker state, including stale or absent results.
+ */
 export function readTakeHumanDecisionRecoveryMarker(
   scope: Scope,
 ): TakeHumanDecisionRecoveryMarker | undefined {
@@ -121,10 +152,20 @@ function has(key: string): boolean {
   }
 }
 
+/**
+ * Check whether browser storage contains the take review recommendation recovery marker.
+ * @param scope - Recovery or approval scope.
+ * @returns Whether a matching marker exists.
+ */
 export function hasTakeReviewRecommendationRecoveryMarker(scope: Scope): boolean {
   return has(takeReviewRecommendationRecoveryKey(scope))
 }
 
+/**
+ * Check whether browser storage contains the take human decision recovery marker.
+ * @param scope - Recovery or approval scope.
+ * @returns Whether a matching marker exists.
+ */
 export function hasTakeHumanDecisionRecoveryMarker(scope: Scope): boolean {
   return has(takeHumanDecisionRecoveryKey(scope))
 }
@@ -140,6 +181,11 @@ function write<T>(key: string, value: T, readBack: () => T | undefined): boolean
   }
 }
 
+/**
+ * Persist the take review recommendation recovery marker in browser storage.
+ * @param value - Untrusted value to validate and normalize.
+ * @returns Whether the marker was stored successfully.
+ */
 export function writeTakeReviewRecommendationRecoveryMarker(
   value: TakeReviewRecommendationRecoveryMarker,
 ): boolean {
@@ -150,6 +196,11 @@ export function writeTakeReviewRecommendationRecoveryMarker(
   )
 }
 
+/**
+ * Persist the take human decision recovery marker in browser storage.
+ * @param value - Untrusted value to validate and normalize.
+ * @returns Whether the marker was stored successfully.
+ */
 export function writeTakeHumanDecisionRecoveryMarker(
   value: TakeHumanDecisionRecoveryMarker,
 ): boolean {
@@ -171,12 +222,22 @@ function clear(key: string, value: unknown): boolean {
   }
 }
 
+/**
+ * Remove the take review recommendation recovery marker from browser storage when it still matches.
+ * @param value - Untrusted value to validate and normalize.
+ * @returns Whether a matching marker was removed.
+ */
 export function clearTakeReviewRecommendationRecoveryMarker(
   value: TakeReviewRecommendationRecoveryMarker,
 ): boolean {
   return clear(takeReviewRecommendationRecoveryKey(value), value)
 }
 
+/**
+ * Remove the take human decision recovery marker from browser storage when it still matches.
+ * @param value - Untrusted value to validate and normalize.
+ * @returns Whether a matching marker was removed.
+ */
 export function clearTakeHumanDecisionRecoveryMarker(
   value: TakeHumanDecisionRecoveryMarker,
 ): boolean {
@@ -189,10 +250,18 @@ function randomHex(): string {
   return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
+/**
+ * Derive the stable idempotency key for take review recommendation.
+ * @returns Stable idempotency key for the canonical operation.
+ */
 export function createTakeReviewRecommendationIdempotencyKey(): string {
   return `qingmu:take-review-recommendation:v1:${randomHex()}`
 }
 
+/**
+ * Derive the stable idempotency key for take human decision.
+ * @returns Stable idempotency key for the canonical operation.
+ */
 export function createTakeHumanDecisionIdempotencyKey(): string {
   return `qingmu:take-human-decision:v1:${randomHex()}`
 }

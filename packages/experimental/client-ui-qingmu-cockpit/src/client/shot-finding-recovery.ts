@@ -33,7 +33,11 @@ function same(left: ShotFindingRecoveryMarker, right: ShotFindingRecoveryMarker)
   return KEYS.every(key => left[key] === right[key])
 }
 
-/** Deterministic for the exact intent; reloading cannot silently mint a new duplicate command. */
+/**
+ * Deterministic for the exact intent; reloading cannot silently mint a new duplicate command.
+ * @param input - Inputs used to create the recovery marker.
+ * @returns Recovery marker bound to the requested operation.
+ */
 export async function createShotFindingMarker(
   input: Omit<ShotFindingRecoveryMarker, 'schema' | 'idempotencyKey'>,
 ): Promise<ShotFindingRecoveryMarker> {
@@ -42,7 +46,11 @@ export async function createShotFindingMarker(
   return parse(marker, input)
 }
 
-/** Read only this tab's exact Shot marker. No network calls or automatic commands. */
+/**
+ * Read only this tab's exact Shot marker. No network calls or automatic commands.
+ * @param scope - Recovery or approval scope.
+ * @returns Stored recovery marker state, including stale or absent results.
+ */
 export function readShotFindingMarker(scope: Scope): ShotFindingRecoveryRead {
   let serialized: string | null = null
   try {
@@ -51,7 +59,11 @@ export function readShotFindingMarker(scope: Scope): ShotFindingRecoveryRead {
   } catch { return { status: 'invalid', serialized } }
 }
 
-/** Persist and read back before POST, without overwriting a different unresolved intent. */
+/**
+ * Persist and read back before POST, without overwriting a different unresolved intent.
+ * @param marker - Recovery marker to persist or clear.
+ * @returns Whether the marker was stored successfully.
+ */
 export function writeShotFindingMarker(marker: ShotFindingRecoveryMarker): boolean {
   try {
     parse(marker, marker)
@@ -63,7 +75,12 @@ export function writeShotFindingMarker(marker: ShotFindingRecoveryMarker): boole
   } catch { return false }
 }
 
-/** Compare-and-clear: neither a late receipt nor a stale discard can erase another intent. */
+/**
+ * Compare-and-clear: neither a late receipt nor a stale discard can erase another intent.
+ * @param scope - Recovery or approval scope.
+ * @param expected - Expected marker used for compare-and-clear behavior.
+ * @returns Whether a matching marker was removed.
+ */
 export function clearShotFindingMarker(scope: Scope, expected: ShotFindingRecoveryRead): boolean {
   try {
     const current = readShotFindingMarker(scope)

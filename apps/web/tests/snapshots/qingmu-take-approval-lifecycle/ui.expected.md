@@ -1,0 +1,52 @@
+## Ready for approval
+
+- region "Take 批准与返修生命周期":
+  - heading "Take 批准与返修生命周期" [level=4]
+  - paragraph: 易梦保存唯一业务事实，专业方法内核编译当前合法动作；青木只按鲜活绑定记录不可变转换。
+  - strong: 待批准
+  - paragraph: 批准事件 ≠ Selected 切换 ≠ 技术通过 ≠ 整集验收；返修请求不会执行生成，也不授予费用或 Provider 权限。
+  - text: 当前 Selected Take
+  - strong: asset-take-1
+  - text: v1 当前 Approver 决定
+  - strong: approve
+  - text: approver-user 当前技术 QC
+  - strong: 通过
+  - text: take-technical-qc-0001 同类返修次数
+  - strong: "0"
+  - text: "本次记账后: 0"
+  - form "当前 Take 生命周期转换表单":
+    - text: 转换理由
+    - textbox "转换理由"
+    - button "批准当前 Take"
+  - strong: 生命周期历史
+  - paragraph: 尚无批准、失效、返修或重提事件。
+
+## Approved
+
+- region "Take 批准与返修生命周期":
+  - heading "Take 批准与返修生命周期" [level=4]
+  - paragraph: 易梦保存唯一业务事实，专业方法内核编译当前合法动作；青木只按鲜活绑定记录不可变转换。
+  - strong: 已批准
+  - paragraph: 批准事件 ≠ Selected 切换 ≠ 技术通过 ≠ 整集验收；返修请求不会执行生成，也不授予费用或 Provider 权限。
+  - text: 当前 Selected Take
+  - strong: asset-take-1
+  - text: v1 当前 Approver 决定
+  - strong: approve
+  - text: approver-user 当前技术 QC
+  - strong: 通过
+  - text: take-technical-qc-0001 同类返修次数
+  - strong: "0"
+  - text: "本次记账后: 0"
+  - term: 当前有效批准
+  - definition:
+    - code: take-approval-lifecycle-transition-0001
+  - paragraph: 当前方法没有开放可执行动作；请先补齐审片、技术 QC 或方法复核条件。
+  - form "当前 Take 生命周期转换表单":
+    - text: 转换理由
+    - textbox "转换理由"
+    - status: 生命周期转换已记录；当前状态将按易梦新快照重新编译。
+  - strong: 生命周期历史
+  - list:
+    - listitem:
+      - strong: "#1"
+      - text: · 批准当前 Take 已核对当前 Selected Take、正式决定与技术 QC。 approver · approver-user · 2026-08-29T{{clock}}+{{clock}} take-approval-lifecycle-transition-0001

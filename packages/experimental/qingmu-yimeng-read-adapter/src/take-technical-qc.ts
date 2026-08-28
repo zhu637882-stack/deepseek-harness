@@ -13,13 +13,22 @@ import { parseTakeVersionReadRequest } from './take-versions.ts'
 type Digest = (value: unknown, field: string) => string
 type JsonObject = Record<string, unknown>
 
+/**
+ * Machine-readable macro-level Take technical-QC codes.
+ */
 export const TAKE_TECHNICAL_QC_MACRO_CODES = [
   'STORY_CAUSALITY', 'SHOT_ORDER', 'PACING', 'LOOK', 'ENDING_CHOICE',
 ] as const
+/**
+ * Machine-readable micro-level Take technical-QC codes.
+ */
 export const TAKE_TECHNICAL_QC_MICRO_CODES = [
   'IDENTITY', 'PROP_GEOMETRY', 'TOPOLOGY', 'EXACT_COUNT', 'CONTACT_TRANSFER',
   'LOCKED_DIALOGUE', 'TECHNICAL_RECEIPT',
 ] as const
+/**
+ * All machine-readable Take technical-QC codes.
+ */
 export const TAKE_TECHNICAL_QC_CODES = [
   ...TAKE_TECHNICAL_QC_MACRO_CODES, ...TAKE_TECHNICAL_QC_MICRO_CODES,
 ] as const
@@ -123,7 +132,11 @@ function sortedUniqueText(
   return result
 }
 
-/** Accept only canonical Shot coordinates from the browser. */
+/**
+ * Accept only canonical Shot coordinates from the browser.
+ * @param payload - Untrusted command payload to validate.
+ * @returns Validated YimengTakeTechnicalQcRequest value.
+ */
 export function parseTakeTechnicalQcRequest(payload: unknown): YimengTakeTechnicalQcRequest {
   return parseTakeVersionReadRequest(payload)
 }
@@ -223,7 +236,13 @@ function assessment(
   }
 }
 
-/** Validate the exact E7-3 feed and derive its current assessment independently. */
+/**
+ * Validate the exact E7-3 feed and derive its current assessment independently.
+ * @param value - Untrusted value to validate and normalize.
+ * @param request - Request coordinates and payload to process.
+ * @param digest - Expected SHA-256 digest for the canonical value.
+ * @returns Validated YimengTakeTechnicalQcFeedResponse value.
+ */
 export function normalizeTakeTechnicalQcFeed(
   value: unknown,
   request: YimengTakeTechnicalQcRequest,
@@ -288,7 +307,14 @@ export function normalizeTakeTechnicalQcFeed(
   }
 }
 
-/** Validate the immutable POST result without trusting server-derived flags. */
+/**
+ * Validate the immutable POST result without trusting server-derived flags.
+ * @param value - Untrusted value to validate and normalize.
+ * @param request - Request coordinates and payload to process.
+ * @param digest - Expected SHA-256 digest for the canonical value.
+ * @param currentAcceptance - Current acceptance record used for consistency checks.
+ * @returns Validated YimengTakeTechnicalQcResult value.
+ */
 export function normalizeTakeTechnicalQcResult(
   value: unknown,
   request: YimengTakeTechnicalQcRequest,

@@ -350,7 +350,13 @@ function normalizeResult(
   }
 }
 
-/** Prepare one exact POST or the only allowed GET receipt recovery coordinate. */
+/**
+ * Prepare one exact POST or the only allowed GET receipt recovery coordinate.
+ * @param endpoint - Command endpoint selected by the caller.
+ * @param payload - Untrusted command payload to validate.
+ * @param helpers - Canonicalization and digest helpers for command preparation.
+ * @returns Prepared command and recovery metadata.
+ */
 export function prepareTakeReviewCommand(
   endpoint:
     | 'createTakeReviewRecommendation'

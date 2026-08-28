@@ -1,6 +1,9 @@
 /** Durable browser marker for one ordinary Take-comment intent. */
 import type { YimengCreateTakeCommentRequest, YimengTakeCommentAnchor } from './contracts.ts'
 
+/**
+ * Browser recovery marker for an unconfirmed Take comment.
+ */
 export interface TakeCommentRecoveryMarker extends YimengCreateTakeCommentRequest {
   readonly schema: 'qingmu.take-comment-recovery-marker.v1'
 }
@@ -44,7 +47,11 @@ function marker(value: unknown): value is TakeCommentRecoveryMarker {
     && typeof value.idempotencyKey === 'string' && IDEMPOTENCY_KEY.test(value.idempotencyKey)
 }
 
-/** Scope-specific marker key. Encoding prevents delimiter collisions between coordinates. */
+/**
+ * Scope-specific marker key. Encoding prevents delimiter collisions between coordinates.
+ * @param scope - Recovery or approval scope.
+ * @returns Resulting string value.
+ */
 export function takeCommentRecoveryKey(scope: {
   readonly projectId: string
   readonly episodeId: string
@@ -54,7 +61,11 @@ export function takeCommentRecoveryKey(scope: {
     .map(encodeURIComponent).join(':')
 }
 
-/** Read and strictly validate the one pending intent for this Shot. */
+/**
+ * Read and strictly validate the one pending intent for this Shot.
+ * @param scope - Recovery or approval scope.
+ * @returns Stored recovery marker state, including stale or absent results.
+ */
 export function readTakeCommentRecoveryMarker(scope: {
   readonly projectId: string
   readonly episodeId: string
@@ -72,7 +83,11 @@ export function readTakeCommentRecoveryMarker(scope: {
   }
 }
 
-/** Fail closed whenever this Shot already owns any unresolved browser coordinate. */
+/**
+ * Fail closed whenever this Shot already owns any unresolved browser coordinate.
+ * @param scope - Recovery or approval scope.
+ * @returns Whether a matching marker exists.
+ */
 export function hasTakeCommentRecoveryMarker(scope: {
   readonly projectId: string
   readonly episodeId: string
@@ -85,7 +100,11 @@ export function hasTakeCommentRecoveryMarker(scope: {
   }
 }
 
-/** Persist the full intent and verify the browser returned it unchanged before any POST. */
+/**
+ * Persist the full intent and verify the browser returned it unchanged before any POST.
+ * @param value - Untrusted value to validate and normalize.
+ * @returns Whether the marker was stored successfully.
+ */
 export function writeTakeCommentRecoveryMarker(value: TakeCommentRecoveryMarker): boolean {
   try {
     const key = takeCommentRecoveryKey(value)
@@ -98,7 +117,11 @@ export function writeTakeCommentRecoveryMarker(value: TakeCommentRecoveryMarker)
   }
 }
 
-/** Compare-and-clear so another tab's newer intent is never removed. */
+/**
+ * Compare-and-clear so another tab's newer intent is never removed.
+ * @param value - Untrusted value to validate and normalize.
+ * @returns Whether a matching marker was removed.
+ */
 export function clearTakeCommentRecoveryMarker(value: TakeCommentRecoveryMarker): boolean {
   try {
     const key = takeCommentRecoveryKey(value)
@@ -111,7 +134,10 @@ export function clearTakeCommentRecoveryMarker(value: TakeCommentRecoveryMarker)
   }
 }
 
-/** Generate a collision-resistant idempotency coordinate without sending browser identity. */
+/**
+ * Generate a collision-resistant idempotency coordinate without sending browser identity.
+ * @returns Stable idempotency key for the canonical operation.
+ */
 export function createTakeCommentIdempotencyKey(): string {
   const bytes = new Uint8Array(32)
   globalThis.crypto.getRandomValues(bytes)

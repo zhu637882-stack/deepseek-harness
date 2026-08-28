@@ -393,7 +393,13 @@ function normalizeResult(
   }
 }
 
-/** Prepare one selection POST or receipt GET. Neither path retries a write. */
+/**
+ * Prepare one selection POST or receipt GET. Neither path retries a write.
+ * @param endpoint - Command endpoint selected by the caller.
+ * @param payload - Untrusted command payload to validate.
+ * @param helpers - Canonicalization and digest helpers for command preparation.
+ * @returns Prepared command and recovery metadata.
+ */
 export function prepareTakeVersionCommand(
   endpoint: 'selectTakeVersion' | 'recoverTakeVersionSelection',
   payload: unknown,

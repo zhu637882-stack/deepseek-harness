@@ -776,6 +776,186 @@
   overflow-wrap: anywhere;
 }
 
+.approvalLifecycle {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--qingmu-accent) 42%, var(--dsw-alias-border-l2));
+  border-radius: 10px;
+  background: linear-gradient(145deg,
+    color-mix(in srgb, var(--qingmu-accent) 7%, var(--dsw-alias-bg-layer-1)),
+    var(--dsw-alias-bg-layer-1) 54%);
+}
+
+.approvalLifecycle > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.approvalLifecycle > header h4,
+.approvalLifecycle > header p,
+.approvalLifecycle > p,
+.lifecycleForm p,
+.lifecycleHistory p,
+.lifecycleHistory ol {
+  margin: 0;
+}
+
+.approvalLifecycle > header h4 {
+  font-size: 14px;
+}
+
+.approvalLifecycle > header p {
+  max-width: 680px;
+  margin-top: 5px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.approvalLifecycle > header > strong {
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--qingmu-accent) 40%, transparent);
+  border-radius: 999px;
+  color: var(--qingmu-accent);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.lifecycleSnapshot {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.lifecycleSnapshot > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-layer-1)) 78%, transparent);
+}
+
+.lifecycleSnapshot span,
+.lifecycleSnapshot small {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.lifecycleSnapshot strong {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.lifecycleBindings {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.lifecycleBindings > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.3fr) minmax(0, 1fr);
+  gap: 8px;
+  font-size: 11px;
+}
+
+.lifecycleBindings dt {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.lifecycleBindings dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.lifecycleRouteNotice {
+  padding: 9px 10px;
+  border-inline-start: 3px solid var(--qingmu-accent);
+  background: color-mix(in srgb, var(--qingmu-accent) 8%, transparent);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.lifecycleForm {
+  display: grid;
+  gap: 7px;
+}
+
+.lifecycleForm > label {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+}
+
+.lifecycleForm textarea {
+  min-height: 82px;
+  box-sizing: border-box;
+  padding: 9px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  resize: vertical;
+}
+
+.lifecycleActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lifecycleActions button {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--qingmu-accent);
+  border-radius: 8px;
+  background: var(--qingmu-accent);
+  color: var(--dsw-alias-label-inverse, white);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.lifecycleActions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.lifecycleHistory {
+  display: grid;
+  gap: 8px;
+}
+
+.lifecycleHistory ol {
+  display: grid;
+  gap: 7px;
+  padding: 0;
+  list-style: none;
+}
+
+.lifecycleHistory li {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.35fr) minmax(0, 1fr);
+  gap: 5px 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  font-size: 11px;
+}
+
+.lifecycleHistory small {
+  color: var(--dsw-alias-label-secondary);
+  overflow-wrap: anywhere;
+}
+
 .header button:focus-visible,
 .recovery button:focus-visible,
 .recovery summary:focus-visible,
@@ -810,12 +990,19 @@
   outline-offset: 3px;
 }
 
+.lifecycleForm textarea:focus-visible,
+.lifecycleActions button:focus-visible {
+  outline: 2px solid var(--qingmu-accent);
+  outline-offset: 3px;
+}
+
 @media (max-width: 840px) {
   .stackHeader,
   .compareGrid,
   .acceptanceGrid,
   .reviewGrid,
-  .technicalQcForm {
+  .technicalQcForm,
+  .lifecycleSnapshot {
     grid-template-columns: 1fr;
   }
 }
@@ -827,6 +1014,14 @@
 
   .acceptance > header {
     flex-direction: column;
+  }
+
+  .approvalLifecycle > header {
+    flex-direction: column;
+  }
+
+  .lifecycleActions button {
+    width: 100%;
   }
 
   .productionStatus {

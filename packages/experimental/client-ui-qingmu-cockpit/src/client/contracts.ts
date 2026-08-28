@@ -9,6 +9,12 @@ import type {
   ImagoTakeTechnicalQcMethodRequest,
   ImagoTakeTechnicalQcMethodResponse,
   ImagoTakeTechnicalQcMethodProjection,
+  ImagoTakeApprovalLifecycleAction,
+  ImagoTakeApprovalLifecycleMethodRequest,
+  ImagoTakeApprovalLifecycleMethodResponse,
+  ImagoTakeApprovalLifecycleMethodProjection,
+  ImagoTakeApprovalLifecycleState,
+  ImagoTakeApprovalLifecycleTransition,
   ImagoProductionUnitMethodRequest,
   ImagoProductionUnitMethodResponse,
   ImagoProductionUnitMethodProjection,
@@ -116,6 +122,12 @@ import type {
   YimengTakeTechnicalQcCode,
   YimengTakeTechnicalQcFeedResponse,
   YimengTakeTechnicalQcRequest,
+  YimengTakeApprovalLifecycleAssessment,
+  YimengTakeApprovalLifecycleDecision,
+  YimengTakeApprovalLifecycleFeedResponse,
+  YimengTakeApprovalLifecycleRequest,
+  YimengTakeApprovalLifecycleSource,
+  YimengTakeApprovalLifecycleTransition,
   YimengShotFinding,
   YimengShotFindingPayload,
   YimengShotFindingFeedResponse,
@@ -227,6 +239,11 @@ import type {
   YimengRecoverTakeTechnicalQcRequest,
   YimengTakeTechnicalQcRecovery,
   YimengTakeTechnicalQcResult,
+  YimengRecoverTakeApprovalLifecycleTransitionRequest,
+  YimengTakeApprovalLifecycleAction,
+  YimengTakeApprovalLifecycleRecovery,
+  YimengTakeApprovalLifecycleResult,
+  YimengTransitionTakeApprovalLifecycleRequest,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 
 export type {
@@ -239,6 +256,12 @@ export type {
   ImagoTakeTechnicalQcMethodRequest,
   ImagoTakeTechnicalQcMethodResponse,
   ImagoTakeTechnicalQcMethodProjection,
+  ImagoTakeApprovalLifecycleAction,
+  ImagoTakeApprovalLifecycleMethodRequest,
+  ImagoTakeApprovalLifecycleMethodResponse,
+  ImagoTakeApprovalLifecycleMethodProjection,
+  ImagoTakeApprovalLifecycleState,
+  ImagoTakeApprovalLifecycleTransition,
   ImagoProductionUnitMethodRequest,
   ImagoProductionUnitMethodResponse,
   ImagoProductionUnitMethodProjection,
@@ -345,6 +368,12 @@ export type {
   YimengTakeTechnicalQcCode,
   YimengTakeTechnicalQcFeedResponse,
   YimengTakeTechnicalQcRequest,
+  YimengTakeApprovalLifecycleAssessment,
+  YimengTakeApprovalLifecycleDecision,
+  YimengTakeApprovalLifecycleFeedResponse,
+  YimengTakeApprovalLifecycleRequest,
+  YimengTakeApprovalLifecycleSource,
+  YimengTakeApprovalLifecycleTransition,
   YimengShotFinding,
   YimengShotFindingPayload,
   YimengShotFindingFeedResponse,
@@ -456,6 +485,11 @@ export type {
   YimengRecoverTakeTechnicalQcRequest,
   YimengTakeTechnicalQcRecovery,
   YimengTakeTechnicalQcResult,
+  YimengRecoverTakeApprovalLifecycleTransitionRequest,
+  YimengTakeApprovalLifecycleAction,
+  YimengTakeApprovalLifecycleRecovery,
+  YimengTakeApprovalLifecycleResult,
+  YimengTransitionTakeApprovalLifecycleRequest,
 }
 
 /** Open JSON object retained without inventing a stricter Yimeng business schema. */
@@ -501,6 +535,10 @@ export interface QingmuYimengReadPort {
     request: YimengTakeTechnicalQcRequest,
     signal?: AbortSignal,
   ): Promise<YimengTakeTechnicalQcFeedResponse>
+  takeApprovalLifecycle(
+    request: YimengTakeApprovalLifecycleRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengTakeApprovalLifecycleFeedResponse>
   shotFindings(request: YimengSelectedVideoReviewRequest, signal?: AbortSignal): Promise<YimengShotFindingFeedResponse>
   reworkRouteSource(request: YimengReworkRouteSourceRequest, signal?: AbortSignal): Promise<YimengReworkRouteSourceResponse>
   workflow(request: YimengWorkflowRequest, signal?: AbortSignal): Promise<YimengWorkflowProjection>
@@ -556,6 +594,14 @@ export interface QingmuYimengCommandPort {
     request: YimengRecoverTakeTechnicalQcRequest,
     signal?: AbortSignal,
   ): Promise<YimengTakeTechnicalQcRecovery>
+  transitionTakeApprovalLifecycle(
+    request: YimengTransitionTakeApprovalLifecycleRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengTakeApprovalLifecycleResult>
+  recoverTakeApprovalLifecycleTransition(
+    request: YimengRecoverTakeApprovalLifecycleTransitionRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengTakeApprovalLifecycleRecovery>
   recordReworkRoute(request: YimengRecordReworkRouteRequest, signal?: AbortSignal): Promise<YimengReworkRouteResult>
   recoverReworkRoute(request: YimengRecordReworkRouteRequest, signal?: AbortSignal): Promise<YimengReworkRouteRecovery>
   probeReworkRouteAuthority(
@@ -643,6 +689,10 @@ export interface QingmuImagoMethodPort {
     request: ImagoTakeAcceptanceMethodRequest,
     signal?: AbortSignal,
   ): Promise<ImagoTakeAcceptanceMethodResponse>
+  takeApprovalLifecycleMethod(
+    request: ImagoTakeApprovalLifecycleMethodRequest,
+    signal?: AbortSignal,
+  ): Promise<ImagoTakeApprovalLifecycleMethodResponse>
 }
 
 /** Browser-facing Qingmu port. All three Host plugins remain independently pluggable. */

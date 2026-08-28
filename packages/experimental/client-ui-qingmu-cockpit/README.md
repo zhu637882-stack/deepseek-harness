@@ -82,6 +82,18 @@ The comparison workspace also reads Yimeng's current and historical ordinary-com
 
 Current bindings and historical comments remain visibly distinct. The panel has no playback, Finding, technical-pass, formal-approval, episode-verification, human-signoff, Provider, budget, or Take-selection control.
 
+## Reviewer and Approver separation
+
+The same Take workspace shows Reviewer recommendations and independent Approver decisions as different records. It exposes the authenticated role and natural-person separation facts supplied by Yimeng, never derives eligibility in the browser, and never treats a recommendation as a decision. Changing the visible role or session cannot bypass the natural-person rule. Review records do not change selection, technical QC, formal approval, episode verification, Provider, or budget state.
+
+## Macro and micro technical QC
+
+The technical-QC panel loads a fresh current Take subject and stateless method before it enables a record action. It renders the fixed macro and micro checks separately, derives the issue-code set from the explicit results, and requires one reason plus confirmation. The one POST is preceded by an exact non-secret recovery marker; uncertain responses can only use the original GET-only receipt lookup. A technical pass is never displayed as content approval and does not alter any adjacent authority.
+
+## Approval, invalidation, rework, and resubmission
+
+The lifecycle panel displays only the actions legal for the exact current selected Take, Approver decision, QC assessment, and rules SHA. Approval drift is visible immediately; invalidation records the audit event. Rework records defect classes and the existing bounded route without executing it, the third same-class cycle requires method review, and a new Take revision never inherits the prior approval. The client stores a nine-field versioned session marker, but the RPC strips that local schema field and sends the exact eight-field browser intent. An uncertain transition is recovered with one GET-only lookup and never by repeating the POST.
+
 ## Explicit production-unit scope registration
 
 The same Shot workspace reads existing Yimeng shot groups and their current or historical unit bindings. The user must select an existing group, enter an explicit unit ID, and confirm the displayed scope. A group's existing unit ID cannot be reassigned. Available groups must match the visible storyboard revision and canonical Shot IDs and display numbers; the workflow projection does not expose frame-content hashes, so the client does not invent them. The method comes from the existing IMAGO adapter, and a binding uses the existing command adapter with source SHA and binding-revision/SHA compare-and-swap.

@@ -87,7 +87,11 @@ function anchor(value: unknown, field: string): YimengTakeCommentAnchor {
   throw new Error(`take comments: ${field} is invalid`)
 }
 
-/** Accept only the three canonical coordinates from the browser. */
+/**
+ * Accept only the three canonical coordinates from the browser.
+ * @param payload - Untrusted command payload to validate.
+ * @returns Validated YimengTakeCommentRequest value.
+ */
 export function parseTakeCommentReadRequest(payload: unknown): YimengTakeCommentRequest {
   const input = exact(payload, ['projectId', 'episodeId', 'frameId'], 'request')
   return {
@@ -191,7 +195,13 @@ function comment(
   }
 }
 
-/** Validate exact subjects, RFC 8785 digests, immutable comments, and derived current binding. */
+/**
+ * Validate exact subjects, RFC 8785 digests, immutable comments, and derived current binding.
+ * @param value - Untrusted value to validate and normalize.
+ * @param request - Request coordinates and payload to process.
+ * @param digest - Expected SHA-256 digest for the canonical value.
+ * @returns Validated YimengTakeCommentFeedResponse value.
+ */
 export function normalizeTakeCommentFeed(
   value: unknown,
   request: YimengTakeCommentRequest,

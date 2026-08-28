@@ -5,6 +5,9 @@ import type {
   YimengTakeTechnicalQcCode,
 } from './contracts.ts'
 
+/**
+ * Browser recovery marker for an unconfirmed Take technical-QC command.
+ */
 export interface TakeTechnicalQcRecoveryMarker extends YimengRecordTakeTechnicalQcRequest {
   readonly schema: 'qingmu.take-technical-qc-recovery-marker.v1'
 }
@@ -29,6 +32,11 @@ const RESULTS = new Set(['PASS', 'FAIL', 'UNVERIFIED'])
 const SHA256 = /^[0-9a-f]{64}$/u
 const IDEMPOTENCY_KEY = /^qingmu:take-technical-qc:v1:[0-9a-f]{64}$/u
 
+/**
+ * Normalize text with Python-compatible trimming.
+ * @param value - Untrusted value to validate and normalize.
+ * @returns Text normalized with Python-compatible trimming.
+ */
 export function pythonStripTakeTechnicalQcText(value: string): string {
   return value.replace(/^[\p{White_Space}\u001c-\u001f]+|[\p{White_Space}\u001c-\u001f]+$/gu, '')
 }
@@ -80,11 +88,21 @@ function marker(value: unknown): value is TakeTechnicalQcRecoveryMarker {
   return CODES.every((code, index) => check(rawChecks[index], code))
 }
 
+/**
+ * Build the browser storage key for the take technical qc recovery marker.
+ * @param scope - Recovery or approval scope.
+ * @returns Resulting string value.
+ */
 export function takeTechnicalQcRecoveryKey(scope: Scope): string {
   return ['qingmu:take-technical-qc-recovery:v1', scope.projectId, scope.episodeId, scope.frameId]
     .map(encodeURIComponent).join(':')
 }
 
+/**
+ * Read the take technical qc recovery marker from browser storage.
+ * @param scope - Recovery or approval scope.
+ * @returns Stored recovery marker state, including stale or absent results.
+ */
 export function readTakeTechnicalQcRecoveryMarker(
   scope: Scope,
 ): TakeTechnicalQcRecoveryMarker | undefined {
@@ -100,6 +118,11 @@ export function readTakeTechnicalQcRecoveryMarker(
   }
 }
 
+/**
+ * Check whether browser storage contains the take technical qc recovery marker.
+ * @param scope - Recovery or approval scope.
+ * @returns Whether a matching marker exists.
+ */
 export function hasTakeTechnicalQcRecoveryMarker(scope: Scope): boolean {
   try {
     return globalThis.sessionStorage.getItem(takeTechnicalQcRecoveryKey(scope)) !== null
@@ -108,6 +131,11 @@ export function hasTakeTechnicalQcRecoveryMarker(scope: Scope): boolean {
   }
 }
 
+/**
+ * Persist the take technical qc recovery marker in browser storage.
+ * @param value - Untrusted value to validate and normalize.
+ * @returns Whether the marker was stored successfully.
+ */
 export function writeTakeTechnicalQcRecoveryMarker(value: TakeTechnicalQcRecoveryMarker): boolean {
   try {
     const key = takeTechnicalQcRecoveryKey(value)
@@ -119,6 +147,11 @@ export function writeTakeTechnicalQcRecoveryMarker(value: TakeTechnicalQcRecover
   }
 }
 
+/**
+ * Remove the take technical qc recovery marker from browser storage when it still matches.
+ * @param value - Untrusted value to validate and normalize.
+ * @returns Whether a matching marker was removed.
+ */
 export function clearTakeTechnicalQcRecoveryMarker(value: TakeTechnicalQcRecoveryMarker): boolean {
   try {
     const key = takeTechnicalQcRecoveryKey(value)
@@ -131,6 +164,10 @@ export function clearTakeTechnicalQcRecoveryMarker(value: TakeTechnicalQcRecover
   }
 }
 
+/**
+ * Derive the stable idempotency key for take technical qc.
+ * @returns Stable idempotency key for the canonical operation.
+ */
 export function createTakeTechnicalQcIdempotencyKey(): string {
   const bytes = new Uint8Array(32)
   globalThis.crypto.getRandomValues(bytes)

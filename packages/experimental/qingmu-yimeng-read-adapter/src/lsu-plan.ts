@@ -82,7 +82,12 @@ function normalizeBlueprintLock(value: unknown, field: string): YimengLsuPlanBlu
   }
 }
 
-/** Normalize one non-empty, sorted, current business subject and verify its canonical digest separately. */
+/**
+ * Normalize one non-empty, sorted, current business subject and verify its canonical digest separately.
+ * @param value - Untrusted value to validate and normalize.
+ * @param field - Field path used in validation errors.
+ * @returns Validated YimengLsuPlanSubject value.
+ */
 export function normalizeLsuPlanSubject(value: unknown, field: string): YimengLsuPlanSubject {
   const item = exact(value, [
     'schema', 'projectId', 'episodeId', 'productionUnits', 'productionBlueprintLock',
@@ -188,7 +193,13 @@ function normalizeSeal(value: unknown, field: string, digest: Digest): YimengLsu
   }
 }
 
-/** Validate one historical durable seal receipt. Current authority still requires a fresh probe. */
+/**
+ * Validate one historical durable seal receipt. Current authority still requires a fresh probe.
+ * @param value - Untrusted value to validate and normalize.
+ * @param field - Field path used in validation errors.
+ * @param digest - Expected SHA-256 digest for the canonical value.
+ * @returns Validated YimengLsuPlanSealResult value.
+ */
 export function normalizeLsuPlanSealResult(
   value: unknown, field: string, digest: Digest,
 ): YimengLsuPlanSealResult {
@@ -213,7 +224,11 @@ export function normalizeLsuPlanSealResult(
   }
 }
 
-/** Accept only the exact three source-read fields. */
+/**
+ * Accept only the exact three source-read fields.
+ * @param value - Untrusted value to validate and normalize.
+ * @returns Validated YimengLsuPlanSourceRequest value.
+ */
 export function parseLsuPlanSourceRequest(value: unknown): YimengLsuPlanSourceRequest {
   try {
     const item = exact(value, ['projectId', 'episodeId', 'lockRulesSha256'], 'lsuPlanSource')
@@ -227,7 +242,13 @@ export function parseLsuPlanSourceRequest(value: unknown): YimengLsuPlanSourceRe
   }
 }
 
-/** Normalize the read projection and keep historical seal state separate from current-source qualification. */
+/**
+ * Normalize the read projection and keep historical seal state separate from current-source qualification.
+ * @param value - Untrusted value to validate and normalize.
+ * @param request - Request coordinates and payload to process.
+ * @param digest - Expected SHA-256 digest for the canonical value.
+ * @returns Validated YimengLsuPlanSourceResponse value.
+ */
 export function normalizeLsuPlanSource(
   value: unknown, request: YimengLsuPlanSourceRequest, digest: Digest,
 ): YimengLsuPlanSourceResponse {

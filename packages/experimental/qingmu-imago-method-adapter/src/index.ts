@@ -33,6 +33,8 @@ import type {
   ImagoTakeAcceptanceMethodSnapshot,
   ImagoTakeTechnicalQcMethodRequest,
   ImagoTakeTechnicalQcMethodSnapshot,
+  ImagoTakeApprovalLifecycleMethodRequest,
+  ImagoTakeApprovalLifecycleMethodSnapshot,
   ImagoContinuityMethodResponse,
   ImagoContinuityMethodSnapshot,
   ImagoElementMethodProjection,
@@ -114,6 +116,11 @@ import {
   TakeTechnicalQcContractError, TakeTechnicalQcInputError,
 } from './take-technical-qc.ts'
 import {
+  attestTakeApprovalLifecycleMethod, buildTakeApprovalLifecycleSnapshot,
+  parseTakeApprovalLifecycleMethodRequest, readTakeApprovalLifecycleRules,
+  TakeApprovalLifecycleContractError, TakeApprovalLifecycleInputError,
+} from './take-approval-lifecycle.ts'
+import {
   attestProductionUnitMethod, buildProductionUnitSnapshot, parseProductionUnitMethodRequest, readProductionUnitRules,
   ProductionUnitContractError, ProductionUnitInputError,
 } from './production-unit.ts'
@@ -191,6 +198,15 @@ export type {
   ImagoTakeTechnicalQcMethodProjection,
   ImagoTakeTechnicalQcMethodAttestation,
   ImagoTakeTechnicalQcMethodResponse,
+  ImagoTakeApprovalLifecycleAction,
+  ImagoTakeApprovalLifecycleMethodRequest,
+  ImagoTakeApprovalLifecycleMethodSnapshot,
+  ImagoTakeApprovalLifecycleMethodDefinition,
+  ImagoTakeApprovalLifecycleState,
+  ImagoTakeApprovalLifecycleTransition,
+  ImagoTakeApprovalLifecycleMethodProjection,
+  ImagoTakeApprovalLifecycleMethodAttestation,
+  ImagoTakeApprovalLifecycleMethodResponse,
   ImagoContinuityCandidateFinding,
   ImagoContinuityChecklistItem,
   ImagoContinuityFieldHelp,
@@ -290,6 +306,7 @@ const LSU_PLAN_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_lsu_plan_method.
 const REWORK_ROUTE_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_rework_route_method.py'
 const TAKE_ACCEPTANCE_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_take_acceptance_method.py'
 const TAKE_TECHNICAL_QC_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_take_qc_method.py'
+const TAKE_APPROVAL_LIFECYCLE_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_take_approval_lifecycle_method.py'
 const COMMON_SOURCE_PATHS = [
   'pipeline/imago-os-current.json',
   'pipeline/workflow-channel-registry.json',
@@ -622,6 +639,16 @@ export interface ImagoMethodAdapterDependencies {
   /** Optional boundary for the stateless current-rule technical-QC compiler. */
   readonly runTakeTechnicalQcCompiler?: (
     snapshot: ImagoTakeTechnicalQcMethodSnapshot,
+    execution: ImagoMethodCompilerExecution,
+    signal: AbortSignal,
+  ) => Promise<unknown>
+  /** Fresh Yimeng E7-4 lifecycle feed; browser projections are never accepted. */
+  readonly readTakeApprovalLifecycle?: (
+    request: ImagoTakeApprovalLifecycleMethodRequest, signal: AbortSignal,
+  ) => Promise<RpcResult<unknown>>
+  /** Optional boundary for the stateless current-rule lifecycle compiler. */
+  readonly runTakeApprovalLifecycleCompiler?: (
+    snapshot: ImagoTakeApprovalLifecycleMethodSnapshot,
     execution: ImagoMethodCompilerExecution,
     signal: AbortSignal,
   ) => Promise<unknown>
@@ -3449,6 +3476,16 @@ async function runTakeTechnicalQcCompilerProcess(
   return await runCompilerSubprocess(snapshot, execution, signal, TAKE_TECHNICAL_QC_COMPILER_RELATIVE_PATH)
 }
 
+async function runTakeApprovalLifecycleCompilerProcess(
+  snapshot: ImagoTakeApprovalLifecycleMethodSnapshot,
+  execution: ImagoMethodCompilerExecution,
+  signal: AbortSignal,
+): Promise<unknown> {
+  return await runCompilerSubprocess(
+    snapshot, execution, signal, TAKE_APPROVAL_LIFECYCLE_COMPILER_RELATIVE_PATH,
+  )
+}
+
 async function runProductionUnitCompilerProcess(
   snapshot: ImagoProductionUnitMethodSnapshot, execution: ImagoMethodCompilerExecution, signal: AbortSignal,
 ): Promise<unknown> {
@@ -3489,6 +3526,7 @@ async function runCompilerSubprocess(
     || compilerRelativePath === REWORK_ROUTE_COMPILER_RELATIVE_PATH
     || compilerRelativePath === TAKE_ACCEPTANCE_COMPILER_RELATIVE_PATH
     || compilerRelativePath === TAKE_TECHNICAL_QC_COMPILER_RELATIVE_PATH
+    || compilerRelativePath === TAKE_APPROVAL_LIFECYCLE_COMPILER_RELATIVE_PATH
   return await new Promise((resolve, reject) => {
     const child = spawn(
       execution.pythonExecutable,
@@ -3566,6 +3604,7 @@ async function runCompilerSubprocess(
       ? e53CanonicalJson(snapshot, 'snapshot')
       : compilerRelativePath === TAKE_ACCEPTANCE_COMPILER_RELATIVE_PATH
         || compilerRelativePath === TAKE_TECHNICAL_QC_COMPILER_RELATIVE_PATH
+        || compilerRelativePath === TAKE_APPROVAL_LIFECYCLE_COMPILER_RELATIVE_PATH
         ? takeAcceptanceJcsJson(snapshot, 'snapshot')
         : compilerRelativePath === STAGE_ARTIFACT_COMPILER_RELATIVE_PATH
           ? stageArtifactCanonicalJson(snapshot, 'snapshot')
@@ -3594,6 +3633,7 @@ const DEFAULT_DEPENDENCIES: ImagoMethodAdapterDependencies = {
   runContinuityCompiler: runContinuityCompilerProcess,
   runTakeAcceptanceCompiler: runTakeAcceptanceCompilerProcess,
   runTakeTechnicalQcCompiler: runTakeTechnicalQcCompilerProcess,
+  runTakeApprovalLifecycleCompiler: runTakeApprovalLifecycleCompilerProcess,
 }
 
 /**
@@ -3620,6 +3660,7 @@ export function createImagoMethodHandler(
         && endpoint !== 'shotFindingMethod'
         && endpoint !== 'takeAcceptanceMethod'
         && endpoint !== 'takeTechnicalQcMethod'
+        && endpoint !== 'takeApprovalLifecycleMethod'
         && endpoint !== 'productionUnitMethod'
         && endpoint !== 'stageSourceMethod'
         && endpoint !== 'stageArtifactMethod'
@@ -3899,6 +3940,53 @@ export function createImagoMethodHandler(
         }
         return { ok: true, value: attestTakeTechnicalQcMethod(raw, snapshot, currentRules, attestationKey) }
       }
+      if (endpoint === 'takeApprovalLifecycleMethod') {
+        const request = parseTakeApprovalLifecycleMethodRequest(payload)
+        if (signal.aborted) return cancelled()
+        if (dependencies.readTakeApprovalLifecycle === undefined) {
+          return internalError('Yimeng read capability is unavailable')
+        }
+        const feed = await dependencies.readTakeApprovalLifecycle(request, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- source read can race cancellation.
+        if (signal.aborted) return cancelled()
+        if (!feed.ok) return feed
+        const snapshot = buildTakeApprovalLifecycleSnapshot(request, feed.value)
+        const beforeRules = await readTakeApprovalLifecycleRules(
+          execution.coreRoot, takeAcceptanceJcsJson,
+        )
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- rule reads are asynchronous.
+        if (signal.aborted) return cancelled()
+        const raw = await (
+          dependencies.runTakeApprovalLifecycleCompiler ?? runTakeApprovalLifecycleCompilerProcess
+        )(snapshot, execution, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- compiler can race cancellation.
+        if (signal.aborted) return cancelled()
+        const currentFeed = await dependencies.readTakeApprovalLifecycle(request, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- second read can be cancelled.
+        if (signal.aborted) return cancelled()
+        if (!currentFeed.ok) return currentFeed
+        if (!isDeepStrictEqual(
+          snapshot, buildTakeApprovalLifecycleSnapshot(request, currentFeed.value),
+        )) {
+          throw new TakeApprovalLifecycleContractError(
+            'current Take approval lifecycle source changed during compilation',
+          )
+        }
+        const currentRules = await readTakeApprovalLifecycleRules(
+          execution.coreRoot, takeAcceptanceJcsJson,
+        )
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- final rule reads are asynchronous.
+        if (signal.aborted) return cancelled()
+        if (!isDeepStrictEqual(beforeRules, currentRules)) {
+          throw new TakeApprovalLifecycleContractError(
+            'current Take approval lifecycle rules changed during compilation',
+          )
+        }
+        return {
+          ok: true,
+          value: attestTakeApprovalLifecycleMethod(raw, snapshot, currentRules, attestationKey),
+        }
+      }
       if (endpoint === 'shotFindingMethod') {
         const request = parseShotFindingMethodRequest(payload)
         if (signal.aborted) return cancelled()
@@ -4031,6 +4119,7 @@ export function createImagoMethodHandler(
       if (error instanceof InputError || error instanceof WorksetInputError
         || error instanceof ContinuityInputError || error instanceof ShotFindingInputError || error instanceof ProductionUnitInputError
         || error instanceof TakeAcceptanceInputError || error instanceof TakeTechnicalQcInputError
+        || error instanceof TakeApprovalLifecycleInputError
         || error instanceof StageSourceInputError || error instanceof StageArtifactInputError || error instanceof LsuPlanInputError
         || error instanceof ReworkRouteInputError) {
         return badRequest(error.message)
@@ -4040,6 +4129,7 @@ export function createImagoMethodHandler(
       if (error instanceof ProjectionContractError || error instanceof WorksetContractError
         || error instanceof ContinuityContractError || error instanceof ShotFindingContractError
         || error instanceof TakeAcceptanceContractError || error instanceof TakeTechnicalQcContractError
+        || error instanceof TakeApprovalLifecycleContractError
         || error instanceof ProductionUnitContractError || error instanceof StageSourceContractError
         || error instanceof StageArtifactContractError || error instanceof LsuPlanContractError
         || error instanceof ReworkRouteContractError) {
@@ -4089,6 +4179,12 @@ export function apply(ctx: Context, config: ImagoMethodAdapterConfig): void {
       return read === undefined
         ? internalError('Yimeng read capability is unavailable')
         : await read('takeAcceptance', request, signal)
+    },
+    readTakeApprovalLifecycle: async (request, signal) => {
+      const read = ctx.get('qingmuYimengRead')
+      return read === undefined
+        ? internalError('Yimeng read capability is unavailable')
+        : await read('takeApprovalLifecycle', request, signal)
     },
     readWorkflow: async (request, signal) => {
       const read = ctx.get('qingmuYimengRead')

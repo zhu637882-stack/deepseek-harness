@@ -16,6 +16,10 @@ import {
   type TakeTechnicalQcPort,
 } from './TakeTechnicalQcPanel.tsx'
 import {
+  TakeApprovalLifecyclePanel,
+  type TakeApprovalLifecyclePort,
+} from './TakeApprovalLifecyclePanel.tsx'
+import {
   clearTakeVersionSelectionMarker, createTakeVersionSelectionMarker,
   readTakeVersionSelectionMarker, writeTakeVersionSelectionMarker,
   type TakeVersionSelectionRecoveryMarker, type TakeVersionSelectionRecoveryRead,
@@ -33,6 +37,7 @@ interface TakeVersionCompareViewProps {
     'takeVersions' | 'takeAcceptance' | 'takeAcceptanceMethod'
     | 'selectTakeVersion' | 'recoverTakeVersionSelection'>
     & Partial<TakeCommentPort> & Partial<TakeReviewAuthorityPort> & Partial<TakeTechnicalQcPort>
+    & Partial<TakeApprovalLifecyclePort>
   readonly t: (key: QingmuCockpitKey) => string
 }
 
@@ -89,6 +94,15 @@ function hasTakeTechnicalQcPort(
   return typeof port.takeTechnicalQc === 'function'
     && typeof port.recordTakeTechnicalQc === 'function'
     && typeof port.recoverTakeTechnicalQc === 'function'
+}
+
+function hasTakeApprovalLifecyclePort(
+  port: TakeVersionCompareViewProps['port'],
+): port is typeof port & TakeApprovalLifecyclePort {
+  return typeof port.takeApprovalLifecycle === 'function'
+    && typeof port.takeApprovalLifecycleMethod === 'function'
+    && typeof port.transitionTakeApprovalLifecycle === 'function'
+    && typeof port.recoverTakeApprovalLifecycleTransition === 'function'
 }
 
 function requestFromMarker(marker: TakeVersionSelectionRecoveryMarker) {
@@ -678,6 +692,12 @@ function TakeVersionComparePanel({
       && hasTakeTechnicalQcPort(port)
       && <TakeTechnicalQcPanel
         key={`${projectId}:${episodeId}:${selectedShotId}:${stack.subject.selectedTakeId}`}
+        projectId={projectId} episodeId={episodeId} frameId={selectedShotId}
+        refresh={refresh} port={port} t={t} />}
+    {eligible && stack !== undefined && stack.subject.selectedTakeId !== null
+      && hasTakeApprovalLifecyclePort(port)
+      && <TakeApprovalLifecyclePanel
+        key={`${projectId}:${episodeId}:${selectedShotId}:${stack.subject.selectedTakeId}:approval-lifecycle`}
         projectId={projectId} episodeId={episodeId} frameId={selectedShotId}
         refresh={refresh} port={port} t={t} />}
   </section>

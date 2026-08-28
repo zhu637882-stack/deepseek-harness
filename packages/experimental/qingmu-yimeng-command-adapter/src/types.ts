@@ -862,6 +862,9 @@ export interface YimengStoryboardCanvasCommandSubject {
 /** Read-only technical preview. Passing preflight is not human approval. */
 export type YimengPreviewStoryboardCanvasRequest = YimengStoryboardCanvasCommandSubject
 
+/**
+ * Backend response for a storyboard-canvas preview.
+ */
 export interface YimengPreviewStoryboardCanvasResponse extends YimengCommandJsonObject {
   readonly schema: 'jason.qingmu-storyboard-canvas-preview.v1'
   readonly changeSetId: string
@@ -931,6 +934,9 @@ export interface YimengCommitStoryboardCanvasResponse extends YimengCommandJsonO
 /** Read-only lookup for a previously accepted Canvas replacement receipt. */
 export type YimengRecoverStoryboardCanvasCommitRequest = YimengCommitStoryboardCanvasRequest
 
+/**
+ * Backend response for storyboard-canvas commit recovery.
+ */
 export interface YimengRecoverStoryboardCanvasCommitResponse extends YimengCommandJsonObject {
   readonly schema: 'jason.qingmu-command-receipt-recovery.v1'
   readonly recovered: true
@@ -991,6 +997,9 @@ export interface YimengPromptIrCommandSubject {
   readonly baseSnapshotSha256: string
 }
 
+/**
+ * Request payload for a Prompt IR preview.
+ */
 export type YimengPreviewPromptIrRequest = YimengPromptIrCommandSubject
 
 /** PromptIR identity and editable projection returned by Yimeng. */
@@ -1070,8 +1079,14 @@ export interface YimengCommitPromptIrEditResponse extends YimengCommandJsonObjec
   readonly committedAt: string
 }
 
+/**
+ * Request payload for Prompt IR edit-commit recovery.
+ */
 export type YimengRecoverPromptIrEditCommitRequest = YimengCommitPromptIrEditRequest
 
+/**
+ * Backend response for Prompt IR edit-commit recovery.
+ */
 export interface YimengRecoverPromptIrEditCommitResponse extends YimengCommandJsonObject {
   readonly schema: 'jason.qingmu-command-receipt-recovery.v1'
   readonly recovered: true
@@ -1119,6 +1134,9 @@ export interface YimengSelectPromptIrResponse extends YimengCommandJsonObject {
 /** Read-only lookup for an accepted selection receipt using pre-submit lineage only. */
 export type YimengRecoverPromptIrSelectionRequest = YimengSelectPromptIrRequest
 
+/**
+ * Backend response for Prompt IR selection recovery.
+ */
 export interface YimengRecoverPromptIrSelectionResponse extends YimengCommandJsonObject {
   readonly schema: 'jason.qingmu-command-receipt-recovery.v1'
   readonly recovered: true
@@ -1442,8 +1460,14 @@ export interface YimengCreateTakeHumanDecisionRequest {
   readonly idempotencyKey: string
 }
 
+/**
+ * Request payload for Take review-recommendation recovery.
+ */
 export type YimengRecoverTakeReviewRecommendationRequest =
   YimengCreateTakeReviewRecommendationRequest
+/**
+ * Request payload for human Take-decision recovery.
+ */
 export type YimengRecoverTakeHumanDecisionRequest = YimengCreateTakeHumanDecisionRequest
 
 /** The exact subject contract carried by both immutable journal events. */
@@ -1461,6 +1485,9 @@ export interface YimengTakeReviewSubject {
   readonly durationMillis: number
 }
 
+/**
+ * Durable backend record for a Take review recommendation.
+ */
 export interface YimengTakeReviewRecommendationRecord {
   readonly id: string
   readonly takeSubject: YimengTakeReviewSubject
@@ -1475,6 +1502,9 @@ export interface YimengTakeReviewRecommendationRecord {
   readonly recommendedAt: string
 }
 
+/**
+ * Durable backend record for a human Take decision.
+ */
 export interface YimengTakeHumanDecisionRecord {
   readonly decisionId: string
   readonly subjectType: 'shot_take'
@@ -1508,6 +1538,9 @@ interface YimengTakeReviewImpactFlags {
   readonly budgetMutation: false
 }
 
+/**
+ * Command result for a Take review recommendation.
+ */
 export interface YimengTakeReviewRecommendationResult extends YimengTakeReviewImpactFlags {
   readonly schema: 'jason.qingmu-take-review-recommendation-result.v1'
   readonly recommendation: YimengTakeReviewRecommendationRecord
@@ -1515,6 +1548,9 @@ export interface YimengTakeReviewRecommendationResult extends YimengTakeReviewIm
   readonly recommendationOnly: true
 }
 
+/**
+ * Command result for a human Take decision.
+ */
 export interface YimengTakeHumanDecisionResult extends YimengTakeReviewImpactFlags {
   readonly schema: 'jason.qingmu-take-human-decision-result.v1'
   readonly decision: YimengTakeHumanDecisionRecord
@@ -1522,6 +1558,9 @@ export interface YimengTakeHumanDecisionResult extends YimengTakeReviewImpactFla
   readonly recommendationOnly: false
 }
 
+/**
+ * Recovery result for a Take review recommendation.
+ */
 export interface YimengTakeReviewRecommendationRecovery {
   readonly schema: 'jason.qingmu-take-review-command-recovery.v1'
   readonly commandType: 'qingmu.take_review.recommendation.record.v1'
@@ -1535,6 +1574,9 @@ export interface YimengTakeReviewRecommendationRecovery {
   readonly result: YimengTakeReviewRecommendationResult | null
 }
 
+/**
+ * Recovery result for a human Take decision.
+ */
 export interface YimengTakeHumanDecisionRecovery {
   readonly schema: 'jason.qingmu-take-review-command-recovery.v1'
   readonly commandType: 'qingmu.take_human_decision.record.v1'
@@ -1648,6 +1690,172 @@ export interface YimengTakeTechnicalQcRecovery {
   readonly idempotencyKey: string
   readonly status: 'committed' | 'not_found'
   readonly result: YimengTakeTechnicalQcResult | null
+}
+
+/** The only E7-4 approval lifecycle actions accepted from the browser. */
+export type YimengTakeApprovalLifecycleAction =
+  | 'APPROVE' | 'INVALIDATE' | 'REQUEST_REWORK' | 'RESUBMIT'
+
+/** Browser intent only; current source, Method evidence, and actor identity are Host-derived. */
+export interface YimengTransitionTakeApprovalLifecycleRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly expectedSourceSnapshotSha256: string
+  readonly takeId: string
+  readonly action: YimengTakeApprovalLifecycleAction
+  readonly reason: string
+  readonly idempotencyKey: string
+}
+
+/** Original immutable intent retained for GET-only lifecycle receipt recovery. */
+export type YimengRecoverTakeApprovalLifecycleTransitionRequest =
+  YimengTransitionTakeApprovalLifecycleRequest
+
+/** Current lifecycle states derived by the current Core Method. */
+export type YimengTakeApprovalLifecycleState =
+  | 'READY_FOR_APPROVAL' | 'APPROVED' | 'APPROVAL_INVALIDATED_PENDING_EVENT'
+  | 'REWORK_REQUIRED' | 'REWORK_RECORDED' | 'READY_TO_RESUBMIT'
+  | 'IN_REVIEW' | 'METHOD_REVIEW_REQUIRED' | 'AWAITING_REVIEW'
+
+/** Fixed E7-4 lifecycle policy compiled from the current Core sources. */
+export interface YimengTakeApprovalLifecycleDefinition extends YimengCommandJsonObject {
+  readonly mode: 'STATELESS_TAKE_APPROVAL_LIFECYCLE_METHOD'
+  readonly actions: readonly YimengTakeApprovalLifecycleAction[]
+  readonly approvalRequires: readonly string[]
+  readonly invalidation: {
+    readonly sourceDriftIsImmediate: true
+    readonly auditableEventRequired: true
+    readonly oldApprovalMayNotBeInherited: true
+  }
+  readonly rework: {
+    readonly boundedFindingRouteRequired: true
+    readonly oneEarliestOwnerPerDefect: true
+    readonly executionAllowed: false
+    readonly paidGenerationAuthorized: false
+    readonly automaticRetry: false
+    readonly thirdSameClassRequiresMethodReview: true
+  }
+  readonly resubmission: {
+    readonly newTakeRevisionRequired: true
+    readonly editIsApproval: false
+    readonly approvalInherited: false
+  }
+  readonly boundaries: {
+    readonly businessTruth: 'yimeng'
+    readonly selectionChanged: false
+    readonly technicalPassChanged: false
+    readonly reviewDecisionChanged: false
+    readonly reworkExecuted: false
+    readonly providerCalls: 0
+    readonly budgetMutation: false
+    readonly episodeVerificationChanged: false
+    readonly humanSignoffInferred: false
+    readonly evidenceLedgerMutation: false
+  }
+}
+
+/** Legal next actions bound to one fresh Yimeng source and current Core rules. */
+export interface YimengTakeApprovalLifecycleMethodTransition extends YimengCommandJsonObject {
+  readonly state: YimengTakeApprovalLifecycleState
+  readonly legalActions: readonly YimengTakeApprovalLifecycleAction[]
+  readonly currentApprovalId: string | null
+  readonly staleApprovalId: string | null
+  readonly invalidationReasons: readonly string[]
+  readonly reworkClassCodes: readonly string[]
+  readonly sameClassReworkCount: number
+  readonly sameClassCountAfterRequest: number
+  readonly methodReviewRequired: boolean
+  readonly methodReviewRequiredAfterRequest: boolean
+  readonly resubmitSourceReworkId: string | null
+  readonly approvalInherited: false
+  readonly boundedFindingRouteRequired: boolean
+}
+
+/** Host-verified current lifecycle projection; it records no transition by itself. */
+export interface YimengImagoTakeApprovalLifecycleMethodProjection
+  extends YimengCommandJsonObject {
+  readonly schema: 'qingmu.imago-take-approval-lifecycle-method.v1'
+  readonly subject: YimengTakeTechnicalQcSubject
+  readonly subjectSnapshotSha256: string
+  readonly sourceSnapshotSha256: string
+  readonly definition: YimengTakeApprovalLifecycleDefinition
+  readonly transition: YimengTakeApprovalLifecycleMethodTransition
+  readonly ruleBindings: Readonly<Record<string, string>>
+  readonly rulesSha256: string
+}
+
+/** Host-origin proof; it grants no human approval and no rework execution authority. */
+export interface YimengImagoTakeApprovalLifecycleMethodAttestation
+  extends YimengCommandJsonObject {
+  readonly schema: 'qingmu.imago-take-approval-lifecycle-method-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly sourceSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly signature: string
+}
+
+/** One immutable approval, invalidation, rework request, or resubmission journal entry. */
+export interface YimengTakeApprovalLifecycleTransition {
+  readonly transitionId: string
+  readonly revision: number
+  readonly action: YimengTakeApprovalLifecycleAction
+  readonly takeId: string
+  readonly takeVersionOrdinal: number
+  readonly takeSubjectSha256: string
+  readonly decisionId: string | null
+  readonly decisionEventId: string | null
+  readonly assessmentId: string | null
+  readonly assessmentEventId: string | null
+  readonly sourceApprovalId: string | null
+  readonly sourceReworkId: string | null
+  readonly defectClassCodes: readonly string[]
+  readonly reason: string
+  readonly actorId: string
+  readonly actorRole: 'approver' | 'director'
+  readonly actorNaturalPersonId: string
+  readonly authSessionId: string
+  readonly recordedAt: string
+  readonly eventId: string
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+}
+
+/** Durable E7-4 write receipt with all adjacent authority flags explicit. */
+export interface YimengTakeApprovalLifecycleResult {
+  readonly schema: 'jason.qingmu-take-approval-lifecycle-result.v1'
+  readonly transition: YimengTakeApprovalLifecycleTransition
+  readonly sourceSnapshotSha256: string
+  readonly authoritativeSourceSnapshotSha256: string
+  readonly methodReviewRequiredAfterRequest: boolean
+  readonly boundedFindingRouteRequired: boolean
+  readonly changed: true
+  readonly formalApprovalChanged: boolean
+  readonly approvalInvalidated: boolean
+  readonly reworkRequested: boolean
+  readonly resubmitted: boolean
+  readonly selectionChanged: false
+  readonly technicalPassChanged: false
+  readonly reviewDecisionChanged: false
+  readonly reworkExecuted: false
+  readonly providerCalls: 0
+  readonly budgetMutation: false
+  readonly episodeVerificationChanged: false
+  readonly humanSignoffInferred: false
+  readonly evidenceLedgerMutation: false
+}
+
+/** GET-only lookup for the original actor-scoped lifecycle command receipt. */
+export interface YimengTakeApprovalLifecycleRecovery {
+  readonly schema: 'jason.qingmu-take-approval-lifecycle-recovery.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly takeId: string
+  readonly expectedSourceSnapshotSha256: string
+  readonly idempotencyKey: string
+  readonly status: 'committed' | 'not_found'
+  readonly result: YimengTakeApprovalLifecycleResult | null
 }
 
 /** Native shot-group contents; group order never allocates an IMAGO unit ID. */
@@ -2618,6 +2826,8 @@ export interface YimengCommandEndpointMap {
   readonly recoverTakeHumanDecision: YimengTakeHumanDecisionRecovery
   readonly recordTakeTechnicalQc: YimengTakeTechnicalQcResult
   readonly recoverTakeTechnicalQc: YimengTakeTechnicalQcRecovery
+  readonly transitionTakeApprovalLifecycle: YimengTakeApprovalLifecycleResult
+  readonly recoverTakeApprovalLifecycleTransition: YimengTakeApprovalLifecycleRecovery
   readonly bindProductionUnit: YimengProductionUnitResult
   readonly recoverProductionUnitBinding: YimengProductionUnitRecovery
   readonly bindStageSource: YimengStageSourceResult

@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 This private experimental Host plugin compiles current IMAGO OS methods into browser-safe guidance. `elementMethod` covers profile editing, `referenceAssetMethod` covers bounded reference actions and rights guidance, `promptIrMethod` covers provider-neutral PromptIR candidates, `shotRelationMethod` covers the canonical Scene/Shot/Shot-local-Beat/Element graph plus Shot River rhythm and reference bindings, and `heroFrameStoryboardMethod` deterministically compiles one selected Hero Frame and its Shot-local canvas annotations. `worksetMethod` reads a fresh episode workflow and returns current IMAGO stage definitions with explicit authority availability. These input-snapshot methods build their own bounded input in the Host and invoke their reviewed Core compiler with Unicode-code-point-sorted, whitespace-free JSON on stdin. Their compiler's `input_snapshot_sha256` must match the SHA-256 of those exact input bytes.
 
-`shotFindingMethod`, `takeAcceptanceMethod`, `productionUnitMethod`, `stageSourceMethod`, `stageArtifactMethod`, and `lsuPlanMethod` use their subject or evidence hash contracts described below; the older methods' `input_snapshot_sha256` field is not part of these schemas.
+`shotFindingMethod`, `takeAcceptanceMethod`, `takeTechnicalQcMethod`, `takeApprovalLifecycleMethod`, `productionUnitMethod`, `stageSourceMethod`, `stageArtifactMethod`, and `lsuPlanMethod` use their subject or evidence hash contracts described below; the older methods' `input_snapshot_sha256` field is not part of these schemas.
 
 ## Attestation boundary
 
@@ -51,6 +51,14 @@ The projection binds the canonical current subject SHA, all eight required field
 The Host independently reads seven fixed Core sources before and after compilation. The active V6-only pointer, routing acceptance contract, strict video probe, approved E6-5 scope, and inactive reference-overlay QC contract must all agree. The projection separates full-video decode and frame-count-derived actual average frame rate from macro and micro QC, and separates both from the Provider outbox receipt. A nominal `r_frame_rate` is never treated as actual rate. Dialogue audio QC is required only when Yimeng declares it in the current required check set.
 
 Local technical and QC evidence may pass while the Provider receipt remains bounded-local or unverified. The projection therefore always retains `UNVERIFIED_FOR_PAID_PRODUCTION`, `formalAcceptanceAllowed: false`, `selectedIsApproval: false`, and `gateBCompleted: false`; it never activates the reference overlay. The Host independently reconstructs the evaluation and rule hashes, rejects evidence or rule drift, and signs the exact method projection with the existing server-only HMAC key. This method performs no write, Provider call, Gate B completion, formal acceptance, or human signoff.
+
+## Take technical-QC method
+
+`takeTechnicalQcMethod` accepts only the three canonical Take coordinates. It freshly reads the current Yimeng technical-QC source, invokes `scripts/compile_qingmu_take_technical_qc_method.py`, and rereads the source after compilation. The Host verifies the fixed macro and micro taxonomy, receipt and required-check pass rule, exact current-subject projection, current rule hashes, projection SHA, and server-only HMAC attestation. The projection permits only recording an immutable technical assessment; it cannot approve content, change selection, create a Finding, verify an episode, execute rework, or call a Provider.
+
+## Take approval-lifecycle method
+
+`takeApprovalLifecycleMethod` accepts only the canonical project, episode, and frame coordinates. It freshly reads Yimeng's current lifecycle source before and after invoking `scripts/compile_qingmu_take_approval_lifecycle_method.py`. Core derives the legal action set, current approval and drift state, bounded Finding-to-earliest-Owner rework route, and the third-same-class method-review requirement. The Host rechecks all source, reference, rule, projection, and attestation identities. The method is stateless: it neither writes the lifecycle nor changes Take selection, review decisions, QC, Findings, episode verification, Provider, budget, or human-signoff state.
 
 ## Production-unit binding method
 

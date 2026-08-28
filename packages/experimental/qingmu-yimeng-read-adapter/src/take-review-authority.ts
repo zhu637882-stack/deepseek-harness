@@ -87,7 +87,11 @@ function action(value: unknown, field: string): YimengTakeReviewAction {
   return value as YimengTakeReviewAction
 }
 
-/** Accept only the canonical Shot coordinates from the browser. */
+/**
+ * Accept only the canonical Shot coordinates from the browser.
+ * @param payload - Untrusted command payload to validate.
+ * @returns Validated YimengTakeReviewAuthorityRequest value.
+ */
 export function parseTakeReviewAuthorityRequest(payload: unknown): YimengTakeReviewAuthorityRequest {
   const input = exact(payload, ['projectId', 'episodeId', 'frameId'], 'request')
   return {
@@ -251,7 +255,13 @@ function decision(
   }
 }
 
-/** Validate exact subjects, role-separated history, and the derived current decision. */
+/**
+ * Validate exact subjects, role-separated history, and the derived current decision.
+ * @param value - Untrusted value to validate and normalize.
+ * @param request - Request coordinates and payload to process.
+ * @param digest - Expected SHA-256 digest for the canonical value.
+ * @returns Validated YimengTakeReviewAuthorityFeedResponse value.
+ */
 export function normalizeTakeReviewAuthorityFeed(
   value: unknown,
   request: YimengTakeReviewAuthorityRequest,

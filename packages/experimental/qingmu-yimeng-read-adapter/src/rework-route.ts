@@ -203,7 +203,13 @@ function planSubject(
   }
 }
 
-/** Validate the exact current Finding, Shot, LSU, sealed-plan and lock chain. */
+/**
+ * Validate the exact current Finding, Shot, LSU, sealed-plan and lock chain.
+ * @param value - Untrusted value to validate and normalize.
+ * @param request - Request coordinates and payload to process.
+ * @param digest - Expected SHA-256 digest for the canonical value.
+ * @returns Validated YimengReworkRouteSubject value.
+ */
 export function normalizeReworkRouteSubject(
   value: unknown, request: YimengReworkRouteSourceRequest, digest: Digest,
 ): YimengReworkRouteSubject {
@@ -361,7 +367,11 @@ function normalizeRouteResult(
   }
 }
 
-/** Accept only exact source coordinates and Host-derived current rule SHAs. */
+/**
+ * Accept only exact source coordinates and Host-derived current rule SHAs.
+ * @param value - Untrusted value to validate and normalize.
+ * @returns Validated YimengReworkRouteSourceRequest value.
+ */
 export function parseReworkRouteSourceRequest(value: unknown): YimengReworkRouteSourceRequest {
   try {
     const item = exact(value, [
@@ -381,7 +391,13 @@ export function parseReworkRouteSourceRequest(value: unknown): YimengReworkRoute
   }
 }
 
-/** Normalize one fresh source feed while retaining a historical route as non-authoritative evidence. */
+/**
+ * Normalize one fresh source feed while retaining a historical route as non-authoritative evidence.
+ * @param value - Untrusted value to validate and normalize.
+ * @param request - Request coordinates and payload to process.
+ * @param digest - Expected SHA-256 digest for the canonical value.
+ * @returns Validated YimengReworkRouteSourceResponse value.
+ */
 export function normalizeReworkRouteSource(
   value: unknown, request: YimengReworkRouteSourceRequest, digest: Digest,
 ): YimengReworkRouteSourceResponse {

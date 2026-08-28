@@ -1,9 +1,21 @@
 import type { YimengReferenceRightsRecord } from './contracts.ts'
 
+/**
+ * Recorded knowledge states for one reference-rights answer.
+ */
 export type ReferenceRightsKnowledgeState = 'known' | 'unknown' | 'not_applicable'
+/**
+ * Recorded states for whether a reference contains the depicted element.
+ */
 export type ReferenceContainsState = 'yes' | 'no' | 'unknown'
+/**
+ * Recorded states for whether reference rights were declared.
+ */
 export type ReferenceDeclarationState = 'provided' | 'unknown' | 'not_applicable'
 
+/**
+ * Editable reference-rights values before canonical validation.
+ */
 export interface ReferenceRightsDraft {
   readonly sourceTypeState: ReferenceRightsKnowledgeState
   readonly sourceTypeValue: string
@@ -137,7 +149,12 @@ function timestampValue(value: unknown, field: string, required: boolean): strin
   return `${match[1]}${fraction !== undefined && Number(fraction) !== 0 ? `.${fraction}` : ''}Z`
 }
 
-/** Strictly normalize one full rights record using the same browser boundary as the command contract. */
+/**
+ * Strictly normalize one full rights record using the same browser boundary as the command contract.
+ * @param value - Untrusted value to validate and normalize.
+ * @param field - Field path used in validation errors.
+ * @returns Validated YimengReferenceRightsRecord value.
+ */
 export function normalizeReferenceRightsRecord(value: unknown, field = 'rights'): YimengReferenceRightsRecord {
   const rights = recordOf(value, RIGHTS_KEYS, field)
   if (rights.schema !== 'jason.qingmu-reference-rights-record.v1') throw new Error(`${field}.schema 不匹配`)
@@ -243,14 +260,24 @@ function canonicalJson(value: unknown): string {
   throw new Error('权利记录包含不可规范化的值')
 }
 
-/** Fail closed unless an authoritative read is already in exact canonical form. */
+/**
+ * Fail closed unless an authoritative read is already in exact canonical form.
+ * @param value - Untrusted value to validate and normalize.
+ * @param field - Field path used in validation errors.
+ * @returns Validated YimengReferenceRightsRecord value.
+ */
 export function assertCanonicalReferenceRightsRecord(value: unknown, field = 'rights'): YimengReferenceRightsRecord {
   const normalized = normalizeReferenceRightsRecord(value, field)
   if (canonicalJson(value) !== canonicalJson(normalized)) throw new Error(`${field} 不是规范化权利记录`)
   return normalized
 }
 
-/** Compare two already-normalizable rights records by their canonical JSON, independent of object key order. */
+/**
+ * Compare two already-normalizable rights records by their canonical JSON, independent of object key order.
+ * @param left - First canonical record to compare.
+ * @param right - Second canonical record to compare.
+ * @returns Whether both canonical records are equal.
+ */
 export function referenceRightsRecordsEqual(left: unknown, right: unknown): boolean {
   return canonicalJson(normalizeReferenceRightsRecord(left, 'leftRights'))
     === canonicalJson(normalizeReferenceRightsRecord(right, 'rightRights'))
@@ -268,7 +295,11 @@ function draftList(state: ReferenceRightsKnowledgeState, value: string) {
   return { state, values: state === 'known' ? lines(value) : [] }
 }
 
-/** Convert the controlled form draft into the exact command rights record. */
+/**
+ * Convert the controlled form draft into the exact command rights record.
+ * @param draft - Editable reference-rights values to normalize.
+ * @returns Validated YimengReferenceRightsRecord value.
+ */
 export function normalizeReferenceRightsDraft(draft: ReferenceRightsDraft): YimengReferenceRightsRecord {
   return normalizeReferenceRightsRecord({
     schema: 'jason.qingmu-reference-rights-record.v1',
@@ -307,7 +338,11 @@ export function normalizeReferenceRightsDraft(draft: ReferenceRightsDraft): Yime
   })
 }
 
-/** Initialize the structured editor from one authoritative rights record. */
+/**
+ * Initialize the structured editor from one authoritative rights record.
+ * @param value - Untrusted value to validate and normalize.
+ * @returns Resulting ReferenceRightsDraft value.
+ */
 export function createReferenceRightsDraft(value: unknown): ReferenceRightsDraft {
   const rights = assertCanonicalReferenceRightsRecord(value)
   return {
@@ -360,7 +395,11 @@ function getSubtleCrypto(): SubtleCrypto {
   return cryptoValue.subtle as SubtleCrypto
 }
 
-/** Digest the exact canonical rights body without persisting its sensitive text in session storage. */
+/**
+ * Digest the exact canonical rights body without persisting its sensitive text in session storage.
+ * @param value - Untrusted value to validate and normalize.
+ * @returns SHA-256 digest of the canonical value.
+ */
 export async function digestReferenceRightsRecord(value: unknown): Promise<string> {
   const rights = assertCanonicalReferenceRightsRecord(value)
   const digest = await getSubtleCrypto().digest('SHA-256', new TextEncoder().encode(canonicalJson(rights)))

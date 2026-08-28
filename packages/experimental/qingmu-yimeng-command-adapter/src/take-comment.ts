@@ -215,7 +215,13 @@ function normalizeResult(
   }
 }
 
-/** Prepare one exact five-field POST or one GET-only receipt lookup. */
+/**
+ * Prepare one exact five-field POST or one GET-only receipt lookup.
+ * @param endpoint - Command endpoint selected by the caller.
+ * @param payload - Untrusted command payload to validate.
+ * @param helpers - Canonicalization and digest helpers for command preparation.
+ * @returns Prepared command and recovery metadata.
+ */
 export function prepareTakeCommentCommand(
   endpoint: 'createTakeComment' | 'recoverTakeComment',
   payload: unknown,

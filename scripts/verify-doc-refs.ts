@@ -2,7 +2,7 @@
  * Verify root-relative documentation paths in repo-authored TypeScript. The
  * textual scan covers `docs/*.md` and `.agents/notes/*.md`, requires the
  * extension, checks matching string literals too, and excludes built
- * declarations and vendored source.
+ * declarations, vendored source, and declared external-owner references.
  */
 
 import { existsSync } from 'node:fs'
@@ -21,9 +21,18 @@ const isExcluded = (p: string): boolean =>
 /** Root-relative Markdown path token, excluding trailing prose. */
 const DOC_REF = /(?:\bdocs|\.agents\/notes)\/[A-Za-z0-9._/-]+\.md/g
 
+/** IMAGO Core-owned method source resolved below the deployment-specific Core root. */
+const EXTERNAL_OWNER_REFS = new Set(['docs/qingmu-os/report-source.md'])
+
 /** Find every broken root-relative documentation reference in one TypeScript file. */
 function findViolations(absPath: string): Violation[] {
-  return findReferenceViolations(root, absPath, DOC_REF, ref => ref, ref => !existsSync(resolve(root, ref)))
+  return findReferenceViolations(
+    root,
+    absPath,
+    DOC_REF,
+    ref => ref,
+    ref => !EXTERNAL_OWNER_REFS.has(ref) && !existsSync(resolve(root, ref)),
+  )
 }
 
 const files = uniqueRepoFiles(root, PATTERNS, isExcluded)
