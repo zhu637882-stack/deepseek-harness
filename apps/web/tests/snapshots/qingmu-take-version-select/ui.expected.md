@@ -1,7 +1,7 @@
 - region "Take 版本栈与双栏比较":
   - heading "Take 版本栈与双栏比较" [level=3]
   - paragraph: 沿用易梦资产与选择权威 · Take ID 即现有资产 ID · 不创建第二套版本状态
-  - button "重读 Take 版本栈"
+  - button "重读 Take 与验收证据"
   - status: 已选择当前 Take，并已开始权威回读；这不等于批准。
   - status:
     - text: 易梦选择回执 ·
@@ -14,6 +14,50 @@
   - text: 版本栈 SHA
   - code: 014e542dedaa5899f6972a9862e88117e8d94d4d40a6f4abebcc24682968e652
   - paragraph: Selected ≠ Approval：选择只决定当前 Take，不改变正式审核或人工签收。
+  - region "当前已选 Take 的验收证据":
+    - heading "当前已选 Take 的验收证据" [level=4]
+    - paragraph: 易梦只读证据 · IMAGO 无状态判定 · 青木只做绑定核对与展示
+    - strong: UNVERIFIED_FOR_PAID_PRODUCTION
+    - paragraph: UNVERIFIED_FOR_PAID_PRODUCTION · Selected ≠ Approved · Gate B 未完成 · 未推断人工签收
+    - article:
+      - heading "技术回执" [level=5]
+      - strong: PASS
+      - term: 整片严格解码
+      - definition: PASS
+      - term: 实际平均帧率
+      - definition: "24"
+      - term: 实际帧率依据
+      - definition: 帧数 ÷ 实测时长，并与 avg_frame_rate 交叉核对
+      - term: 标称 r_frame_rate
+      - definition: 24/1 · 仅标称，不作为实际帧率
+    - article:
+      - heading "宏观 QC" [level=5]
+      - strong: BLOCKED
+      - paragraph: creative_director_execution
+    - article:
+      - heading "微观 QC" [level=5]
+      - strong: PASS
+      - paragraph: real_vl_native_video_output
+    - article:
+      - heading "Provider 回执" [level=5]
+      - strong: bounded_local
+      - term: 证据模式
+      - definition: bounded_local
+      - term: 真实 Provider 回执已核验
+      - definition: 否
+    - group:
+      - text: 安全哈希与绑定证明
+      - term: 已选 Take ID
+      - definition:
+        - code: asset-take-2
+      - term: 易梦证据 SHA
+      - definition:
+        - code: f2564b89072c2702f01798992477467945435f420582495afd21d1ede8124205
+      - term: IMAGO 投影 SHA
+      - definition:
+        - code: 113df1288f2a17e2843cdc35b05e8ae3738b00ec76395781d4b523df1b19ed81
+      - term: Host 方法证明坐标
+      - definition: 已匹配证据 SHA 与投影 SHA
   - button "v1" [pressed]
   - button "v2 · 当前已选" [pressed]
   - paragraph: 点选最多两个版本进行并排比较；版本序号由易梦现有资产按创建时间与资产 ID 投影，不持久化。

@@ -70,6 +70,12 @@ The shared Shot also drives a metadata-only view of Yimeng's current selected vi
 
 The view checks the response's three IDs, asset/SHA binding, read-only markers, and review revision against the visible episode's storyboard revision. Shot, projection, port, refresh, closure, and source changes invalidate old responses. The only action is reload; there are no media elements, external links, selection controls, or approval commands. A missing selected asset stays missing even when another candidate is accepted.
 
+## Selected Take comparison and acceptance evidence
+
+The existing Take comparison surface reads the Yimeng version stack first. When the stack has a current Selected Take, it reads Yimeng acceptance evidence and the stateless IMAGO acceptance method in parallel. Those reads remain an independent fail-closed region: unavailable or drifted acceptance data never hides the version stack or resubmits a selection. A fresh stack after selection drives a fresh pair of acceptance reads.
+
+The browser recomputes the RFC 8785 evidence, rule-binding, and method-projection hashes and checks the Host attestation coordinates, selected asset and output lineage, storyboard/frame/selection revisions, and every fixed non-authority marker. It renders strict full-video decode and frame-count-derived actual average rate separately from nominal `r_frame_rate`, macro QC, micro QC, and the Provider receipt. No path, URL, or raw Provider response is rendered. The overall state remains `UNVERIFIED_FOR_PAID_PRODUCTION`; Selected is not Approved and Gate B remains incomplete.
+
 ## Explicit production-unit scope registration
 
 The same Shot workspace reads existing Yimeng shot groups and their current or historical unit bindings. The user must select an existing group, enter an explicit unit ID, and confirm the displayed scope. A group's existing unit ID cannot be reassigned. Available groups must match the visible storyboard revision and canonical Shot IDs and display numbers; the workflow projection does not expose frame-content hashes, so the client does not invent them. The method comes from the existing IMAGO adapter, and a binding uses the existing command adapter with source SHA and binding-revision/SHA compare-and-swap.

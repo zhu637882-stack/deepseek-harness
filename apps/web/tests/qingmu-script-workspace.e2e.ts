@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import { captureStableAria, compareOrRefreshGolden, launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts'
 import { REPO_ROOT, saveFailureShot, ZH_BROWSER_LOCALE } from './support.ts'
 import { continuityFixture, rebindContinuity } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/continuity-fixture.ts'
+import { takeAcceptanceFixture as baseTakeAcceptanceFixture } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/take-acceptance-fixture.ts'
 import { takeVersionStackFixture as baseTakeVersionStackFixture } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/take-version-fixture.ts'
 import { videoCandidatesFixture } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/selected-video-review-fixture.ts'
 import { createShotFindingDouble } from './qingmu-shot-finding-fixture.ts'
@@ -1893,6 +1894,67 @@ function takeVersionStackFixture(
   return { ...base, subject, stackSnapshotSha256: jcsSha256(subject) }
 }
 
+function takeAcceptanceFixture(
+  revision: number,
+  selectedTakeId: 'asset-take-1' | 'asset-take-2' = 'asset-take-1',
+) {
+  const request = { projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID }
+  const base = baseTakeAcceptanceFixture(request)
+  const stack = takeVersionStackFixture(revision, selectedTakeId)
+  const version = stack.subject.versions.find(item => item.takeId === selectedTakeId)
+  if (version === undefined || version.outputSha256 === null || version.inputHash === null
+    || version.durationSec === null) {
+    throw new Error('selected Take acceptance fixture requires complete lineage')
+  }
+  const macroPassed = selectedTakeId === 'asset-take-1'
+  const checks = base.evidence.candidateQuality.checks.map(check => check.checkType === 'creative_director_execution'
+    ? { ...check, passed: macroPassed }
+    : check)
+  const evidence = {
+    ...base.evidence,
+    subject: {
+      ...base.evidence.subject,
+      frameNo: stack.subject.frameNo,
+      storyboardRevision: stack.subject.storyboardRevision,
+      frameContentSha256: stack.subject.frameContentSha256,
+      selectionRevision: stack.subject.selectionRevision,
+      takeId: version.takeId,
+      versionOrdinal: version.versionOrdinal,
+      outputSha256: version.outputSha256,
+      taskId: version.taskId,
+      capability: 'video.generate',
+      routeKey: version.routeKey,
+      provider: version.provider,
+      model: version.model,
+      inputHash: version.inputHash,
+      submitId: version.providerTaskId,
+    },
+    providerReceipt: {
+      ...base.evidence.providerReceipt,
+      payloadSha256: version.inputHash,
+      providerTaskId: version.providerTaskId,
+    },
+    technicalReceipt: {
+      ...base.evidence.technicalReceipt,
+      media: { ...base.evidence.technicalReceipt.media, sha256: version.outputSha256 },
+      video: base.evidence.technicalReceipt.video === null ? null : {
+        ...base.evidence.technicalReceipt.video,
+        durationSeconds: version.durationSec,
+        nbFrames: Math.round(version.durationSec * 24),
+        videoStreamDurationSeconds: version.durationSec,
+        actualAverageFrameRate: 24,
+      },
+    },
+    candidateQuality: {
+      ...base.evidence.candidateQuality,
+      status: macroPassed ? 'PASS' as const : 'BLOCKED' as const,
+      checks,
+      failedOrStaleCheckTypes: macroPassed ? [] : ['creative_director_execution'],
+    },
+  }
+  return { ...base, evidence, evidenceSnapshotSha256: jcsSha256(evidence) }
+}
+
 function takeVersionSelectionResultFixture(
   request: Record<string, unknown>,
   authoritativeStack: TakeVersionStackFixture['subject'],
@@ -2173,6 +2235,10 @@ async function startYimengDouble(
       const takeVersionPath = `/api/qingmu/projects/project-1/episodes/episode-1/frames/${PROMPT_IR_FRAME_ID}/take-versions`
       if (request.method === 'GET' && url.pathname === takeVersionPath) {
         json(response, 200, takeVersionStackFixture(revision, takeSelectedId))
+        return
+      }
+      if (request.method === 'GET' && url.pathname === `${takeVersionPath}/acceptance`) {
+        json(response, 200, takeAcceptanceFixture(revision, takeSelectedId))
         return
       }
       if (request.method === 'POST' && url.pathname === `${takeVersionPath}/selection`) {
@@ -3755,7 +3821,8 @@ describe.skipIf(
           '/qingmu-yimeng-command/recoverStageSourceBinding',
           '/qingmu-yimeng/capabilityCatalog', '/qingmu-yimeng/costRehearsal',
           '/qingmu-yimeng/gateAControlEvidence',
-          '/qingmu-yimeng/takeVersions', '/qingmu-yimeng-command/selectTakeVersion',
+          '/qingmu-yimeng/takeVersions', '/qingmu-yimeng/takeAcceptance',
+          '/qingmu-yimeng-command/selectTakeVersion',
           '/qingmu-yimeng-command/recoverTakeVersionSelection',
         ].includes(requestPath)) return
         browserRpcRequests.push({ path: requestPath, body: request.postDataJSON() as unknown })
@@ -4276,8 +4343,8 @@ describe.skipIf(
       if (tracePath) await page.context().tracing.stop({ path: tracePath })
     })
 
-    it('compares and selects one existing E6-4 Take through Yimeng authority without approval or Provider authority', async () => {
-      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e6-4-take-version-select'))
+    it('compares and selects one Take while E6-5 acceptance stays read-only and unverified for paid production', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e6-5-take-acceptance'))
       const consoleStart = browserConsoleErrors.length
       const requestStart = capturedRequests.length
       const rpcStart = browserRpcRequests.length
@@ -4298,6 +4365,10 @@ describe.skipIf(
       await dialog.getByRole('list', { name: '镜头选择' }).getByRole('button', { name: /frame-1/ }).click()
       const firstStackWirePromise = page.waitForResponse(response =>
         new URL(response.url()).pathname === '/qingmu-yimeng/takeVersions')
+      const firstAcceptanceWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng/takeAcceptance')
+      const firstMethodWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-imago-method/takeAcceptanceMethod')
       await dialog.getByRole('tab', { name: '生成与质检', exact: true }).click()
       const firstStackWire = await (await firstStackWirePromise).json() as unknown
       expect(firstStackWire).toMatchObject({ result: { ok: true, value: {
@@ -4313,6 +4384,45 @@ describe.skipIf(
           selectedIsApproval: false, formalApprovalChanged: false, providerAuthority: 'not_granted',
         },
       } } })
+      const firstAcceptanceWire = await (await firstAcceptanceWirePromise).json() as unknown
+      expect(firstAcceptanceWire).toMatchObject({ result: { ok: true, value: {
+        schema: 'jason.qingmu-take-acceptance-evidence.v1',
+        productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+        evidence: {
+          subject: { takeId: 'asset-take-1', selectionRevision: 0, selectionStatus: 'Selected' },
+          providerReceipt: {
+            status: 'bounded_local', evidenceMode: 'bounded_local',
+            actualProviderReceiptVerified: false, requestDryRun: true,
+          },
+          technicalReceipt: {
+            status: 'PASS', fullVideoDecode: { required: true, status: 'PASS', returncode: 0 },
+            video: { actualAverageFrameRate: 24, rFrameRate: '24/1', nominalRFrameRateIsActual: false },
+          },
+          candidateQuality: { status: 'PASS', failedOrStaleCheckTypes: [] },
+        },
+        boundaries: {
+          readOnly: true, selectedIsApproval: false, providerCalls: 0, databaseWrites: 0,
+          paidProviderAuthority: 'not_granted', gateBCompleted: false,
+        },
+      } } })
+      const firstMethodWire = await (await firstMethodWirePromise).json() as unknown
+      expect(firstMethodWire).toMatchObject({ result: { ok: true, value: {
+        schema: 'qingmu.imago-take-acceptance-method-adapter-result.v1',
+        projection: {
+          schema: 'qingmu.imago-take-acceptance-method.v1',
+          subject: { takeId: 'asset-take-1', selectionRevision: 0 },
+          definition: { mode: 'READ_ONLY_STATELESS_PROJECTION' },
+          evaluation: {
+            technicalReceiptStatus: 'PASS', fullVideoDecodeStatus: 'PASS',
+            macroQc: { status: 'PASS' }, microQc: { status: 'PASS' },
+            providerReceipt: {
+              status: 'bounded_local', evidenceMode: 'bounded_local', actualProviderReceiptVerified: false,
+            },
+            productionVerificationStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+            formalAcceptanceAllowed: false, selectedIsApproval: false, gateBCompleted: false,
+          },
+        },
+      } } })
 
       const region = dialog.getByRole('region', { name: 'Take 版本栈与双栏比较', exact: true })
       await region.getByText('Selected ≠ Approval：选择只决定当前 Take，不改变正式审核或人工签收。', {
@@ -4323,6 +4433,24 @@ describe.skipIf(
       await region.getByText('5.25s', { exact: true }).waitFor()
       await region.getByText('¥0.000001', { exact: true }).waitFor()
       await region.getByText('identity_continuity', { exact: true }).waitFor()
+      const acceptanceRegion = dialog.getByRole('region', { name: '当前已选 Take 的验收证据', exact: true })
+      await expect.poll(async () => await acceptanceRegion.locator(':scope > header strong').textContent())
+        .toBe('UNVERIFIED_FOR_PAID_PRODUCTION')
+      await acceptanceRegion.getByText(
+        'UNVERIFIED_FOR_PAID_PRODUCTION · Selected ≠ Approved · Gate B 未完成 · 未推断人工签收',
+        { exact: true },
+      ).waitFor()
+      expect(await acceptanceRegion.getByText('PASS', { exact: true }).count()).toBe(4)
+      const providerCard = acceptanceRegion.getByRole('article').filter({ hasText: 'Provider 回执' })
+      await expect.poll(async () => await providerCard.locator(':scope > header strong').textContent())
+        .toBe('bounded_local')
+      await providerCard.getByRole('definition').filter({ hasText: 'bounded_local' }).waitFor()
+      await providerCard.getByText('否', { exact: true }).waitFor()
+      await acceptanceRegion.getByText('24', { exact: true }).waitFor()
+      await acceptanceRegion.getByText('24/1 · 仅标称，不作为实际帧率', { exact: true }).waitFor()
+      const acceptanceProof = acceptanceRegion.locator(':scope > details')
+      await acceptanceProof.locator('summary').click()
+      await acceptanceRegion.getByText('asset-take-1', { exact: true }).waitFor()
       expect(await region.locator('video, audio, img, iframe, source, a[href]').count()).toBe(0)
       expect(await region.getByRole('button', { name: /^(批准|要求返修)$/ }).count()).toBe(0)
       for (const detail of await region.locator('article details').all()) await detail.locator('summary').click()
@@ -4333,6 +4461,10 @@ describe.skipIf(
 
       const selectionWirePromise = page.waitForResponse(response =>
         new URL(response.url()).pathname === '/qingmu-yimeng-command/selectTakeVersion')
+      const secondAcceptanceWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng/takeAcceptance')
+      const secondMethodWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-imago-method/takeAcceptanceMethod')
       await region.getByRole('button', { name: '选择为当前 Take（不等于批准）', exact: true }).click()
       const selectionWire = await (await selectionWirePromise).json() as unknown
       expect(selectionWire).toMatchObject({ result: { ok: true, value: {
@@ -4352,17 +4484,56 @@ describe.skipIf(
       await region.getByText('已选择当前 Take，并已开始权威回读；这不等于批准。', { exact: true }).waitFor()
       await region.getByRole('button', { name: 'v2 · 当前已选', exact: true }).waitFor()
       await region.getByText(/易梦选择回执/).waitFor()
+      const secondAcceptanceWire = await (await secondAcceptanceWirePromise).json() as unknown
+      expect(secondAcceptanceWire).toMatchObject({ result: { ok: true, value: {
+        productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+        evidence: {
+          subject: { takeId: 'asset-take-2', selectionRevision: 1, selectionStatus: 'Selected' },
+          providerReceipt: {
+            status: 'bounded_local', evidenceMode: 'bounded_local', actualProviderReceiptVerified: false,
+          },
+          technicalReceipt: { status: 'PASS', fullVideoDecode: { status: 'PASS' } },
+          candidateQuality: { status: 'BLOCKED', failedOrStaleCheckTypes: ['creative_director_execution'] },
+        },
+      } } })
+      const secondMethodWire = await (await secondMethodWirePromise).json() as unknown
+      expect(secondMethodWire).toMatchObject({ result: { ok: true, value: { projection: {
+        subject: { takeId: 'asset-take-2', selectionRevision: 1 },
+        evaluation: {
+          technicalReceiptStatus: 'PASS', fullVideoDecodeStatus: 'PASS',
+          macroQc: { status: 'BLOCKED' }, microQc: { status: 'PASS' },
+          providerReceipt: {
+            status: 'bounded_local', evidenceMode: 'bounded_local', actualProviderReceiptVerified: false,
+          },
+          localControlStatus: 'BLOCKED',
+          productionVerificationStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+          formalAcceptanceAllowed: false, selectedIsApproval: false, gateBCompleted: false,
+        },
+      } } } })
+      await expect.poll(async () => await acceptanceRegion.getByText('BLOCKED', { exact: true }).count()).toBe(1)
+      expect(await acceptanceRegion.getByText('PASS', { exact: true }).count()).toBe(3)
+      if ((await acceptanceProof.getAttribute('open')) === null) await acceptanceProof.locator('summary').click()
+      await acceptanceRegion.getByText('asset-take-2', { exact: true }).waitFor()
+      await expect.poll(async () => await providerCard.locator(':scope > header strong').textContent())
+        .toBe('bounded_local')
+      await providerCard.getByText('否', { exact: true }).waitFor()
 
       const takePath = `/api/qingmu/projects/project-1/episodes/episode-1/frames/${PROMPT_IR_FRAME_ID}/take-versions`
       await expect.poll(() => capturedRequests.slice(requestStart)
         .filter(request => new URL(request.path, 'http://127.0.0.1').pathname.startsWith(takePath)).length)
-        .toBe(3)
+        .toBe(9)
       const upstream = capturedRequests.slice(requestStart)
         .filter(request => new URL(request.path, 'http://127.0.0.1').pathname.startsWith(takePath))
-      expect(upstream.map(request => [request.method, new URL(request.path, 'http://127.0.0.1').pathname])).toEqual([
-        ['GET', takePath], ['POST', `${takePath}/selection`], ['GET', takePath],
-      ])
-      const selectionPost = upstream[1]
+      const stackReads = upstream.filter(request => request.method === 'GET'
+        && new URL(request.path, 'http://127.0.0.1').pathname === takePath)
+      const acceptanceReads = upstream.filter(request => request.method === 'GET'
+        && new URL(request.path, 'http://127.0.0.1').pathname === `${takePath}/acceptance`)
+      const selectionPosts = upstream.filter(request => request.method === 'POST'
+        && new URL(request.path, 'http://127.0.0.1').pathname === `${takePath}/selection`)
+      expect(stackReads).toHaveLength(2)
+      expect(acceptanceReads).toHaveLength(6)
+      expect(selectionPosts).toHaveLength(1)
+      const selectionPost = selectionPosts[0]
       expect(selectionPost).toEqual(expect.objectContaining({
         authorization: `Bearer ${YIMENG_TOKEN}`, cookie: undefined,
       }))
@@ -4382,12 +4553,21 @@ describe.skipIf(
       expect(upstream.filter(request => request.path.includes('selection-command-receipt'))).toEqual([])
 
       const rpc = browserRpcRequests.slice(rpcStart)
-        .filter(request => /takeVersions|selectTakeVersion|recoverTakeVersionSelection/.test(request.path))
-      expect(rpc.map(request => request.path)).toEqual([
-        '/qingmu-yimeng/takeVersions', '/qingmu-yimeng-command/selectTakeVersion',
-        '/qingmu-yimeng/takeVersions',
-      ])
-      const commandRpc = rpc[1]
+        .filter(request => /takeVersions|takeAcceptance|selectTakeVersion|recoverTakeVersionSelection/.test(request.path))
+      expect(rpc.filter(request => request.path === '/qingmu-yimeng/takeVersions')).toHaveLength(2)
+      expect(rpc.filter(request => request.path === '/qingmu-yimeng/takeAcceptance')).toHaveLength(2)
+      expect(rpc.filter(request => request.path === '/qingmu-imago-method/takeAcceptanceMethod')).toHaveLength(2)
+      expect(rpc.filter(request => request.path === '/qingmu-yimeng-command/selectTakeVersion')).toHaveLength(1)
+      expect(rpc.filter(request => request.path === '/qingmu-yimeng-command/recoverTakeVersionSelection')).toHaveLength(0)
+      for (const readRpc of rpc.filter(request => /takeVersions|takeAcceptance/.test(request.path))) {
+        if (!isRecord(readRpc.body) || !isRecord(readRpc.body.payload)) {
+          throw new Error('Take read browser request missing')
+        }
+        expect(readRpc.body.payload).toEqual({
+          projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID,
+        })
+      }
+      const commandRpc = rpc.find(request => request.path === '/qingmu-yimeng-command/selectTakeVersion')
       if (!isRecord(commandRpc?.body) || !isRecord(commandRpc.body.payload)) {
         throw new Error('Take selection browser command missing')
       }
@@ -4422,10 +4602,13 @@ describe.skipIf(
       await page.setViewportSize({ width: 390, height: 844 })
       expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false)
       expect(await region.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
-      expect((await region.getByRole('button', { name: '重读 Take 版本栈', exact: true }).boundingBox())?.height)
+      expect((await region.getByRole('button', { name: '重读 Take 与验收证据', exact: true }).boundingBox())?.height)
         .toBeGreaterThanOrEqual(44)
       expect((await region.getByRole('button', { name: '选择为当前 Take（不等于批准）', exact: true }).boundingBox())?.height)
         .toBeGreaterThanOrEqual(44)
+      await page.setViewportSize({ width: 844, height: 390 })
+      expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false)
+      expect(await region.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
       await page.setViewportSize({ width: 1680, height: 1100 })
       await dialog.getByRole('tab', { name: '分镜与镜头', exact: true }).click()
       await dialog.getByRole('list', { name: '镜头选择' }).getByRole('button', { name: /frame-z/ }).click()

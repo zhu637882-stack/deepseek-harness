@@ -3,6 +3,9 @@ import type {
   ImagoStageSourceMethodRequest,
   ImagoStageSourceMethodResponse,
   ImagoStageSourceMethodProjection,
+  ImagoTakeAcceptanceMethodRequest,
+  ImagoTakeAcceptanceMethodResponse,
+  ImagoTakeAcceptanceMethodProjection,
   ImagoProductionUnitMethodRequest,
   ImagoProductionUnitMethodResponse,
   ImagoProductionUnitMethodProjection,
@@ -90,6 +93,10 @@ import type {
   YimengTakeVersionRequest,
   YimengTakeVersionStackResponse,
   YimengTakeVersionStackSubject,
+  YimengTakeAcceptanceRequest,
+  YimengTakeAcceptanceResponse,
+  YimengTakeAcceptanceEvidence,
+  YimengTakeAcceptanceSubject,
   YimengShotFinding,
   YimengShotFindingPayload,
   YimengShotFindingFeedResponse,
@@ -188,6 +195,9 @@ export type {
   ImagoStageSourceMethodRequest,
   ImagoStageSourceMethodResponse,
   ImagoStageSourceMethodProjection,
+  ImagoTakeAcceptanceMethodRequest,
+  ImagoTakeAcceptanceMethodResponse,
+  ImagoTakeAcceptanceMethodProjection,
   ImagoProductionUnitMethodRequest,
   ImagoProductionUnitMethodResponse,
   ImagoProductionUnitMethodProjection,
@@ -274,6 +284,10 @@ export type {
   YimengTakeVersionRequest,
   YimengTakeVersionStackResponse,
   YimengTakeVersionStackSubject,
+  YimengTakeAcceptanceRequest,
+  YimengTakeAcceptanceResponse,
+  YimengTakeAcceptanceEvidence,
+  YimengTakeAcceptanceSubject,
   YimengShotFinding,
   YimengShotFindingPayload,
   YimengShotFindingFeedResponse,
@@ -401,6 +415,7 @@ export interface QingmuYimengReadPort {
   promptIr(request: YimengPromptIrRequest, signal?: AbortSignal): Promise<YimengPromptIrResponse>
   selectedVideoReview(request: YimengSelectedVideoReviewRequest, signal?: AbortSignal): Promise<YimengSelectedVideoReviewResponse>
   takeVersions(request: YimengTakeVersionRequest, signal?: AbortSignal): Promise<YimengTakeVersionStackResponse>
+  takeAcceptance(request: YimengTakeAcceptanceRequest, signal?: AbortSignal): Promise<YimengTakeAcceptanceResponse>
   shotFindings(request: YimengSelectedVideoReviewRequest, signal?: AbortSignal): Promise<YimengShotFindingFeedResponse>
   reworkRouteSource(request: YimengReworkRouteSourceRequest, signal?: AbortSignal): Promise<YimengReworkRouteSourceResponse>
   workflow(request: YimengWorkflowRequest, signal?: AbortSignal): Promise<YimengWorkflowProjection>
@@ -507,6 +522,10 @@ export interface QingmuImagoMethodPort {
     request: ImagoHeroFrameStoryboardMethodRequest,
     signal?: AbortSignal,
   ): Promise<ImagoHeroFrameStoryboardMethodResponse>
+  takeAcceptanceMethod(
+    request: ImagoTakeAcceptanceMethodRequest,
+    signal?: AbortSignal,
+  ): Promise<ImagoTakeAcceptanceMethodResponse>
 }
 
 /** Browser-facing Qingmu port. All three Host plugins remain independently pluggable. */

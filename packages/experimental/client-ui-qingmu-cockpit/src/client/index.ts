@@ -6,6 +6,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { QingmuCockpit } from './QingmuCockpit.tsx'
 import type {
   ImagoStageSourceMethodResponse, YimengStageSourcesResponse, YimengStageSourceResult, YimengStageSourceRecovery,
+  ImagoTakeAcceptanceMethodResponse, YimengTakeAcceptanceResponse,
   ImagoProductionUnitMethodResponse, YimengProductionUnitsResponse, YimengProductionUnitResult, YimengProductionUnitRecovery,
   ImagoContinuityMethodResponse,
   ImagoShotFindingMethodResponse, YimengShotFindingFeedResponse, YimengShotFindingResult, YimengShotFindingRecovery,
@@ -42,6 +43,7 @@ import { en, NS, zh } from './locales.ts'
 export type { QingmuCockpitFace } from './slots.ts'
 export type {
   ImagoStageSourceMethodResponse, YimengStageSourcesResponse, YimengStageSourceResult, YimengStageSourceRecovery,
+  ImagoTakeAcceptanceMethodRequest, ImagoTakeAcceptanceMethodResponse, ImagoTakeAcceptanceMethodProjection,
   ImagoProductionUnitMethodResponse, YimengProductionUnitsResponse, YimengProductionUnitResult, YimengProductionUnitRecovery,
   ImagoContinuityMethodResponse,
   ImagoShotFindingMethodResponse, YimengShotFindingFeedResponse, YimengShotFindingResult, YimengShotFindingRecovery,
@@ -72,6 +74,8 @@ export type {
   YimengSelectedVideoReviewResponse,
   YimengTakeVersion, YimengTakeVersionRequest, YimengTakeVersionStackResponse,
   YimengTakeVersionStackSubject, YimengSelectTakeVersionRequest,
+  YimengTakeAcceptanceRequest, YimengTakeAcceptanceResponse, YimengTakeAcceptanceEvidence,
+  YimengTakeAcceptanceSubject,
   YimengRecoverTakeVersionSelectionRequest, YimengTakeSelectionIdentity,
   YimengTakeVersionSelectionResult, YimengTakeVersionSelectionRecovery,
   YimengRecoverReferenceRightsExceptionReleaseResponse,
@@ -125,6 +129,9 @@ export function apply(ctx: ClientContext): void {
     promptIr: (request, signal) => read<YimengPromptIrResponse>('promptIr', request, signal),
     selectedVideoReview: (request, signal) => read<YimengSelectedVideoReviewResponse>('selectedVideoReview', request, signal),
     takeVersions: (request, signal) => read<YimengTakeVersionStackResponse>('takeVersions', request, signal),
+    takeAcceptance: (request, signal) => read<YimengTakeAcceptanceResponse>('takeAcceptance', request, signal),
+    takeAcceptanceMethod: (request, signal) =>
+      method<ImagoTakeAcceptanceMethodResponse>('takeAcceptanceMethod', request, signal),
     shotFindings: (request, signal) => read<YimengShotFindingFeedResponse>('shotFindings', request, signal),
     shotFindingMethod: (request, signal) => method<ImagoShotFindingMethodResponse>('shotFindingMethod', request, signal),
     recordShotFinding: (request, signal) => command<YimengShotFindingResult>('recordShotFinding', request, signal),

@@ -719,6 +719,8 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
       readOnly: true, providerCalls: 0, taskMutation: false, budgetMutation: false, humanSignoffInferred: false,
     } as const)),
     takeVersions: vi.fn(async () => { throw new Error('Take versions are not part of this fixture') }),
+    takeAcceptance: vi.fn(async () => { throw new Error('Take acceptance is not part of this fixture') }),
+    takeAcceptanceMethod: vi.fn(async () => { throw new Error('Take acceptance method is not part of this fixture') }),
     selectTakeVersion: vi.fn(async () => { throw new Error('Take selection is not part of this fixture') }),
     recoverTakeVersionSelection: vi.fn(async () => { throw new Error('Take recovery is not part of this fixture') }),
     shotFindings: vi.fn(async (request: Parameters<QingmuYimengPort['shotFindings']>[0]) => ({
