@@ -90,6 +90,12 @@ The response is `qingmu.imago-stage-artifact-method-adapter-result.v1` with a SH
 
 The exact projection binds a non-empty sorted set of already registered `LSU[0-9]{2,}` units, the current independently approved `PRODUCTION_BLUEPRINT_LOCK`, the six current per-LSU Stage definitions, all compiler and rule bytes, and the lock-rule subset. The Host independently checks every field and signs the projection with its HMAC key. This stateless Method only permits an explicit Yimeng plan-seal transaction; it creates no Stage instance, approval, lock, rework, Provider call, worker, project state, or human signoff.
 
+## Director assets: static admission and assembly
+
+The [registry](src/director-assets/registry.ts) and [source inventory](DIRECTOR_ASSET_SBOM.json) pin eight selected repositories under `assets/director/<repo-id>/<full-commit>/`, with licenses, per-file SHA-256 ledgers, and admission/modification records. `verifyAllDirectorAssets` rejects missing or extra files, symbolic links, malformed or changed ledgers, and byte drift. The [third-party notices](../../../THIRD_PARTY_NOTICES.md) disclose these inactive sources. Regenerate the inventory with `pnpm exec tsx scripts/gen-director-asset-sbom.ts`; `--check` verifies freshness.
+
+The [static assembly](src/director-assets/assembly.ts) maps admitted files to candidate IMAGO stages and card kinds. Unknown stages return no cards. `loadDirectorAssetFile` verifies the complete package before returning inert UTF-8 source text. Neither API is connected to Host RPC, work orders, skills, or executable tools; stage coverage is not activation authority. The caller owns a stable local asset tree during verification and reading; this integrity check is not a process sandbox. BlueFish's unresolved-placeholder blocker remains recorded and its module cannot be activated until separately repaired and verified.
+
 ## Model Experience
 
 ### Private method RPCs
@@ -108,6 +114,7 @@ None. No model-facing tokens are added.
 
 ## Known Limitations and Deferred Work
 
+- Director asset `pure_module` dispositions describe intended adaptation, not verified purity or dependency closure. Some source candidates retain database helpers or unavailable imports; they remain inert until separately reviewed and isolated. Historical admission statements are preserved with their source bytes, not treated as current runtime evidence.
 - Shot relations accept only the bounded ID graph, rhythm, and reference bindings; Hero Frame Storyboard accepts its existing graph, lineage, and normalized integer annotations. Title editing, actual generation, selection execution, ChangeSet commit, comments, and creative review decisions remain outside this adapter.
 - Attestation proves Host validation and exact input binding. It does not grant paid Provider authority, asset selection, human approval, or production-state writes.
 - Key rotation and multi-key verification are not part of this bounded slice.

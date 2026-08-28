@@ -90,6 +90,12 @@ Host 在编译前后独立读取七份固定 Core 来源。当前仅 V6 的活�
 
 准确投影绑定非空且按序排列的已登记 `LSU[0-9]{2,}` 单元、当前已独立批准的 `PRODUCTION_BLUEPRINT_LOCK`、六个当前逐 LSU 阶段定义、全部编译器/规则字节及锁规则子集。Host 独立校验每个字段后用 HMAC 密钥签名。这个无状态 Method 只允许显式的易梦计划封存事务；它不创建 Stage 实例、批准、锁、返修、Provider 调用、Worker、项目状态或人工签收。
 
+## 导演资产：静态准入与装配
+
+[注册表](src/director-assets/registry.ts)与[来源清单](DIRECTOR_ASSET_SBOM.json)把八个选定仓库固定在 `assets/director/<repo-id>/<full-commit>/` 下，并保留许可证、逐文件 SHA-256 账本和准入/修改记录。`verifyAllDirectorAssets` 拒绝缺失或额外文件、符号链接、畸形或已变更账本以及字节漂移。[第三方声明](../../../THIRD_PARTY_NOTICES.md)披露这些未激活来源。使用 `pnpm exec tsx scripts/gen-director-asset-sbom.ts` 重新生成清单；`--check` 校验其是否与来源一致。
+
+[静态装配](src/director-assets/assembly.ts)把准入文件映射到候选 IMAGO 阶段和卡片类别。未知阶段不返回卡片。`loadDirectorAssetFile` 先校验完整资产包，再返回不执行的 UTF-8 源文本。这两个 API 均未接入 Host RPC、工作单、skill 或可执行工具；阶段覆盖不等于激活授权。调用方须在校验和读取期间保持本地资产树稳定；完整性检查不是进程沙箱。BlueFish 的未解析占位符阻塞仍被记录，其模块须另行修复并验证后才能激活。
+
 ## 模型体验
 
 ### 私有方法 RPC
@@ -108,6 +114,7 @@ Host 在编译前后独立读取七份固定 Core 来源。当前仅 V6 的活�
 
 ## 已知限制与延期工作
 
+- 导演资产的 `pure_module` 处置标签描述预期适配方式，不证明纯函数性质或依赖完整性。一些来源候选仍含数据库辅助逻辑或缺失导入；在另行审核和隔离前保持不执行。历史准入说明随来源字节保留，不作为当前运行时证据。
 - Shot 关系只接受受限 ID 图、节奏与参考绑定；Hero Frame Storyboard 接受原有关系图、血缘和归一化整数标注。标题编辑、实际生成、选择执行、ChangeSet 提交、评论和创意审核决定仍不属于本适配器。
 - 证明只表示 Host 校验及精确输入绑定，不授予付费 Provider、资产选择、人工批准或生产状态写入权。
 - 本次受限切片不包含密钥轮换或多密钥验证。

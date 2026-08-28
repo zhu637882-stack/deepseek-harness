@@ -1,0 +1,322 @@
+{
+  "schema": "qingmu.inactive-director-asset-sbom.v1",
+  "runtimeActivated": false,
+  "packages": [
+    {
+      "repoId": "director-skill-core",
+      "repository": "https://github.com/wuwangzhang1216/DirectorSKILL",
+      "commit": "47db7d9b951a9f27f7b4b727a6ca0e01ab56f7c6",
+      "license": "MIT",
+      "licenseFile": "assets/director/director-skill-core/47db7d9b951a9f27f7b4b727a6ca0e01ab56f7c6/LICENSE",
+      "admissionAndModifications": "assets/director/director-skill-core/47db7d9b951a9f27f7b4b727a6ca0e01ab56f7c6/ADMISSION.md",
+      "provenanceSha256": "55d46f34379777805c0d1e996834508400cfaacd538ed6c1f9cde3a39b9bb6b3",
+      "files": [
+        {
+          "path": "assets/director/director-skill-core/47db7d9b951a9f27f7b4b727a6ca0e01ab56f7c6/LICENSE",
+          "sha256": "63673a513b8c68736ef1a3652159e24f7b3329bacd89b4dfc078e0bd2af46977"
+        },
+        {
+          "path": "assets/director/director-skill-core/47db7d9b951a9f27f7b4b727a6ca0e01ab56f7c6/assets/beat-sheet-template.md",
+          "sha256": "dd403fe674e72162d17763808426389671b697b4ea29f0ba664833cd7181a457"
+        },
+        {
+          "path": "assets/director/director-skill-core/47db7d9b951a9f27f7b4b727a6ca0e01ab56f7c6/assets/director-book-template.md",
+          "sha256": "bc743a8e990978b885ceefc8e7437040c69f1cd7d44592be29bf950782385665"
+        },
+        {
+          "path": "assets/director/director-skill-core/47db7d9b951a9f27f7b4b727a6ca0e01ab56f7c6/assets/keyframe-prompt-template.md",
+          "sha256": "68eec71d238fadcc513f0d0f1483be901a47afc38a79780137179f90a19ea943"
+        },
+        {
+          "path": "assets/director/director-skill-core/47db7d9b951a9f27f7b4b727a6ca0e01ab56f7c6/assets/qc-checklist.md",
+          "sha256": "f553f610c57cdbdf368f11c530ab22f19c4e144504830dd73261e12279bc4b09"
+        },
+        {
+          "path": "assets/director/director-skill-core/47db7d9b951a9f27f7b4b727a6ca0e01ab56f7c6/assets/shot-plan-template.md",
+          "sha256": "5bedeb813d52e385d277d702d9b8a320366be1d6edbeb042d6c47f42c1077301"
+        },
+        {
+          "path": "assets/director/director-skill-core/47db7d9b951a9f27f7b4b727a6ca0e01ab56f7c6/assets/video-prompt-template.md",
+          "sha256": "9a0a501701c28334808a81c0e6dfba70a61dea6e93acaf82be79662c40855bae"
+        },
+        {
+          "path": "assets/director/director-skill-core/47db7d9b951a9f27f7b4b727a6ca0e01ab56f7c6/references/continuity-bible.md",
+          "sha256": "b4b3c22484a47b4c06d9cd6e82e08c1e526bb6c43b3a143bf32edab6cf791309"
+        },
+        {
+          "path": "assets/director/director-skill-core/47db7d9b951a9f27f7b4b727a6ca0e01ab56f7c6/references/failure-modes.md",
+          "sha256": "ea2434ae2bd049b2a80e6c5d2d05ae8d0f8a8955cef9488ca5602b56e59f9d16"
+        },
+        {
+          "path": "assets/director/director-skill-core/47db7d9b951a9f27f7b4b727a6ca0e01ab56f7c6/evals/evals.json",
+          "sha256": "3d655c0eafad1a9a8d5c5c8acc55753e42d8511d6b87c56833628489e514302c"
+        }
+      ]
+    },
+    {
+      "repoId": "storyboard-skill",
+      "repository": "https://github.com/Zhekinmaksim/Storyboard",
+      "commit": "76a78c55922d1b007b1478aafb6faaf672487e53",
+      "license": "MIT",
+      "licenseFile": "assets/director/storyboard-skill/76a78c55922d1b007b1478aafb6faaf672487e53/LICENSE",
+      "admissionAndModifications": "assets/director/storyboard-skill/76a78c55922d1b007b1478aafb6faaf672487e53/ADMISSION.md",
+      "provenanceSha256": "0fe528f7c9ddecbfd314abc76b6245f60ef83e30a00d0ef12f1670d93d670ba5",
+      "files": [
+        {
+          "path": "assets/director/storyboard-skill/76a78c55922d1b007b1478aafb6faaf672487e53/LICENSE",
+          "sha256": "36b2cd1f894cb35d51f47d4af4aa22946690d728b3ffe5116e616f523e36403a"
+        },
+        {
+          "path": "assets/director/storyboard-skill/76a78c55922d1b007b1478aafb6faaf672487e53/scripts/director_notes.py",
+          "sha256": "6a0ecbb185c3fc8623409390adf0b2e0a132b16431f4c007a75bec2ccf557f0b"
+        },
+        {
+          "path": "assets/director/storyboard-skill/76a78c55922d1b007b1478aafb6faaf672487e53/scripts/iterate.py",
+          "sha256": "dc3895d92aca8cef7de6a5873e7ded6233ad3a58784f03dbd8c1c3bf31047114"
+        },
+        {
+          "path": "assets/director/storyboard-skill/76a78c55922d1b007b1478aafb6faaf672487e53/scripts/packet.py",
+          "sha256": "0274c6aea21fc1e1b91dfc178bd3ab025602a24441bfe2b19405e65b2a18b98e"
+        },
+        {
+          "path": "assets/director/storyboard-skill/76a78c55922d1b007b1478aafb6faaf672487e53/scripts/render.py",
+          "sha256": "6fa4e52d98d89b37f3e4e87be4b3c46b8b3b0f2578deeca0cc9c616374817050"
+        },
+        {
+          "path": "assets/director/storyboard-skill/76a78c55922d1b007b1478aafb6faaf672487e53/scripts/scene.py",
+          "sha256": "0f3982b8b074af455ac983519af989a29748b2d7c1579db02142869a28e64fd9"
+        }
+      ]
+    },
+    {
+      "repoId": "jellyfish",
+      "repository": "https://github.com/Forget-C/Jellyfish",
+      "commit": "a9678194ddf2d9be3ccbe78d4287d87d5089e123",
+      "license": "Apache-2.0",
+      "licenseFile": "assets/director/jellyfish/a9678194ddf2d9be3ccbe78d4287d87d5089e123/LICENSE",
+      "admissionAndModifications": "assets/director/jellyfish/a9678194ddf2d9be3ccbe78d4287d87d5089e123/ADMISSION.md",
+      "provenanceSha256": "dd251b5a3450adb03815c6a6457e3c5a980e2408183b97f9abc269570086d251",
+      "files": [
+        {
+          "path": "assets/director/jellyfish/a9678194ddf2d9be3ccbe78d4287d87d5089e123/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        },
+        {
+          "path": "assets/director/jellyfish/a9678194ddf2d9be3ccbe78d4287d87d5089e123/backend/app/schemas/skills/script_processing.py",
+          "sha256": "21d36b4a911a2aa525b190a2472b50b75768ef1a67dc558b2765406fa10a9aec"
+        },
+        {
+          "path": "assets/director/jellyfish/a9678194ddf2d9be3ccbe78d4287d87d5089e123/backend/app/services/studio/shot_preparation_state.py",
+          "sha256": "5b0669d4cb31dba37240a47db9b9ff0115e5b08ce825db0ab084cf433da0b5fc"
+        },
+        {
+          "path": "assets/director/jellyfish/a9678194ddf2d9be3ccbe78d4287d87d5089e123/backend/app/services/studio/shot_video_prompt_pack.py",
+          "sha256": "f06c37aaf697a868c302ca286d92aa319b22867369704ed598d035d93e69c3ed"
+        },
+        {
+          "path": "assets/director/jellyfish/a9678194ddf2d9be3ccbe78d4287d87d5089e123/backend/app/services/studio/shot_video_readiness.py",
+          "sha256": "81f733de06e036b50f6b14dcf52adfb420136e98db9acca84a9f937446abfdcb"
+        }
+      ]
+    },
+    {
+      "repoId": "nautilus-studio",
+      "repository": "https://github.com/yeahdongcn/nautilus-studio",
+      "commit": "b9a30f02ffb5b00b8d1eb55da8e987504a2df9fa",
+      "license": "Apache-2.0",
+      "licenseFile": "assets/director/nautilus-studio/b9a30f02ffb5b00b8d1eb55da8e987504a2df9fa/LICENSE",
+      "admissionAndModifications": "assets/director/nautilus-studio/b9a30f02ffb5b00b8d1eb55da8e987504a2df9fa/ADMISSION.md",
+      "provenanceSha256": "f28e5b436978f1e5e53d6c1b3616589ed61eb3539e355ffb658646b7bb5e718f",
+      "files": [
+        {
+          "path": "assets/director/nautilus-studio/b9a30f02ffb5b00b8d1eb55da8e987504a2df9fa/LICENSE",
+          "sha256": "40183888941e583399c813badf47c9f589e437278121d16b03f9811a43553cbd"
+        },
+        {
+          "path": "assets/director/nautilus-studio/b9a30f02ffb5b00b8d1eb55da8e987504a2df9fa/src/long_video_studio/anchor_policy.py",
+          "sha256": "37b378e47c76dc5a5b156338ea00633392605081f7df259cf9d122c7942d3e5c"
+        },
+        {
+          "path": "assets/director/nautilus-studio/b9a30f02ffb5b00b8d1eb55da8e987504a2df9fa/src/long_video_studio/dialogue_harness.py",
+          "sha256": "cf923107effbaf30011d674b84b8d7280c4ccda33e103d8d3028977c0089fb1e"
+        },
+        {
+          "path": "assets/director/nautilus-studio/b9a30f02ffb5b00b8d1eb55da8e987504a2df9fa/src/long_video_studio/domain.py",
+          "sha256": "bcf385ed08e9ead705d2ca562cd69e49586becde24df35373648bba54ec8c007"
+        },
+        {
+          "path": "assets/director/nautilus-studio/b9a30f02ffb5b00b8d1eb55da8e987504a2df9fa/src/long_video_studio/estimator.py",
+          "sha256": "28cd66fd6d40a72f602f803f562a92521f86e3f41ab7a5d40924932ec10ad391"
+        }
+      ]
+    },
+    {
+      "repoId": "ai-visual-director",
+      "repository": "https://github.com/jijiutong/ai-visual-director",
+      "commit": "b47f664ca00c50539c5365109e9360f82170972d",
+      "license": "MIT",
+      "licenseFile": "assets/director/ai-visual-director/b47f664ca00c50539c5365109e9360f82170972d/LICENSE",
+      "admissionAndModifications": "assets/director/ai-visual-director/b47f664ca00c50539c5365109e9360f82170972d/ADMISSION.md",
+      "provenanceSha256": "0c8b25c072bc51d0207301bc99f24fa4a53a59f5dad6c8f80f020bd736b2b61b",
+      "files": [
+        {
+          "path": "assets/director/ai-visual-director/b47f664ca00c50539c5365109e9360f82170972d/LICENSE",
+          "sha256": "fc3ecc0d9c11c642af5d52ffdd2c3bfe5521e1f27ad27d01557db24e64874b91"
+        },
+        {
+          "path": "assets/director/ai-visual-director/b47f664ca00c50539c5365109e9360f82170972d/engines/consistency-engine.md",
+          "sha256": "675a593ee8ce16c9b2f76b5395cb0c748aaff61ca12d38afed4049654f1471ec"
+        },
+        {
+          "path": "assets/director/ai-visual-director/b47f664ca00c50539c5365109e9360f82170972d/engines/reference-anchor.md",
+          "sha256": "4c53da7df0006d0c6c4a06c88efd180660ff74b8992f4a75a275b1bd7bc104ab"
+        },
+        {
+          "path": "assets/director/ai-visual-director/b47f664ca00c50539c5365109e9360f82170972d/engines/shot-budget.md",
+          "sha256": "b307906cf66d480c3135069cf1365894f5c059be489982d7cc231a5e441204c1"
+        },
+        {
+          "path": "assets/director/ai-visual-director/b47f664ca00c50539c5365109e9360f82170972d/engines/video-prompt-assembly.md",
+          "sha256": "cac3243b9cbd1d71cc23f8c3568bac8dd0b11ec7ae60e2d5a1c9057ac1f13479"
+        },
+        {
+          "path": "assets/director/ai-visual-director/b47f664ca00c50539c5365109e9360f82170972d/rules/continuity-check.md",
+          "sha256": "e85ed56b16398d86cf0fa9b69e43252c9e4ea5fdb720bf8b0140b62f24ea492c"
+        },
+        {
+          "path": "assets/director/ai-visual-director/b47f664ca00c50539c5365109e9360f82170972d/rules/video-reference-assets.md",
+          "sha256": "d2ce12b098f687303042675a08cde2a57bb5e3de876c1946077ec5d1e829166f"
+        },
+        {
+          "path": "assets/director/ai-visual-director/b47f664ca00c50539c5365109e9360f82170972d/templates/character-sheet.md",
+          "sha256": "2d69c0e68f3c29cdae7ed5246ec79fae0694f1cff1d28ad78f35e250bdbd6b76"
+        },
+        {
+          "path": "assets/director/ai-visual-director/b47f664ca00c50539c5365109e9360f82170972d/templates/full-board.md",
+          "sha256": "533f6b6f275f9ac802d8bb4bc276ac7689d2c5daa6c5f2fedddc116ab6c364d0"
+        },
+        {
+          "path": "assets/director/ai-visual-director/b47f664ca00c50539c5365109e9360f82170972d/templates/scene-card.md",
+          "sha256": "c85801c32698473aa2dee59621635e3e30486ac515c44d2d94da62c5f9dfe6c6"
+        },
+        {
+          "path": "assets/director/ai-visual-director/b47f664ca00c50539c5365109e9360f82170972d/templates/sound-design-sheet.md",
+          "sha256": "33d6ab7960ec6b458f3117f50789c6fda9df750e38591d888a160b4d7600507e"
+        }
+      ]
+    },
+    {
+      "repoId": "director-skills-travel",
+      "repository": "https://github.com/kangarooking/director-skills",
+      "commit": "4a91b5c1a00dbea24063ce6202484cbcf45216f7",
+      "license": "MIT",
+      "licenseFile": "assets/director/director-skills-travel/4a91b5c1a00dbea24063ce6202484cbcf45216f7/LICENSE",
+      "admissionAndModifications": "assets/director/director-skills-travel/4a91b5c1a00dbea24063ce6202484cbcf45216f7/ADMISSION.md",
+      "provenanceSha256": "451f33a0f30c2a7b023dce7380423db7797daa9ca2bb1b8f99666872446daa65",
+      "files": [
+        {
+          "path": "assets/director/director-skills-travel/4a91b5c1a00dbea24063ce6202484cbcf45216f7/LICENSE",
+          "sha256": "e91e981b9112da53851e277230630a5d00dedf41c27154d52c58d4c804cf2036"
+        },
+        {
+          "path": "assets/director/director-skills-travel/4a91b5c1a00dbea24063ce6202484cbcf45216f7/travel-skill/SKILL.md",
+          "sha256": "125d105b200e1c74a57e4f8538d5648a5f9e63be3bfb15173a40905aab5baa1c"
+        },
+        {
+          "path": "assets/director/director-skills-travel/4a91b5c1a00dbea24063ce6202484cbcf45216f7/travel-skill/assets/templates/asset-register.csv",
+          "sha256": "cda01276eaaa2fe2be5c0da63892949bef5ac049cb3ba568f42707d2322bf8a3"
+        },
+        {
+          "path": "assets/director/director-skills-travel/4a91b5c1a00dbea24063ce6202484cbcf45216f7/travel-skill/assets/templates/generation-log.csv",
+          "sha256": "c76dbff89ce3a773f22230fa6cdba201b16766da8dd0317bd5563706b2f22780"
+        },
+        {
+          "path": "assets/director/director-skills-travel/4a91b5c1a00dbea24063ce6202484cbcf45216f7/travel-skill/assets/templates/project-brief.md",
+          "sha256": "3383f1c0e4bfe51d3fc8e23323a6d2690bc4c205c1519aeaeb259d4add7a88bd"
+        },
+        {
+          "path": "assets/director/director-skills-travel/4a91b5c1a00dbea24063ce6202484cbcf45216f7/travel-skill/assets/templates/qc-report.md",
+          "sha256": "b841fcf429301c24189629c004fb35fdb15a1ec302dd14065f741e3cc97c1b10"
+        },
+        {
+          "path": "assets/director/director-skills-travel/4a91b5c1a00dbea24063ce6202484cbcf45216f7/travel-skill/assets/templates/shot-manifest.yaml",
+          "sha256": "903ea8c8bb81f122203c0569b38025a5cad5081f36f17cbaabd31cd8e0c66e92"
+        },
+        {
+          "path": "assets/director/director-skills-travel/4a91b5c1a00dbea24063ce6202484cbcf45216f7/travel-skill/assets/templates/storyboard.md",
+          "sha256": "fc2ce754e8d174ff044e791e410fcf7afc8cad6f219f2b3dfd370974bf3ae2a7"
+        },
+        {
+          "path": "assets/director/director-skills-travel/4a91b5c1a00dbea24063ce6202484cbcf45216f7/travel-skill/scripts/build_generation_packet.py",
+          "sha256": "44068cf0f78091eab6255ad0819bb9e050580306c7454d7b121e935a54b21ca1"
+        },
+        {
+          "path": "assets/director/director-skills-travel/4a91b5c1a00dbea24063ce6202484cbcf45216f7/travel-skill/scripts/lint_prompt.py",
+          "sha256": "9fb80c4e88d47e910cdcd31dec9859cad41e71d8759bc0aff7b8005bd55798eb"
+        },
+        {
+          "path": "assets/director/director-skills-travel/4a91b5c1a00dbea24063ce6202484cbcf45216f7/travel-skill/scripts/lint_shot_manifest.py",
+          "sha256": "c7cab09394311871aafebeab4f3a779bbe034510e44eb705da7477f820a43de3"
+        },
+        {
+          "path": "assets/director/director-skills-travel/4a91b5c1a00dbea24063ce6202484cbcf45216f7/travel-skill/scripts/validate_timeline.py",
+          "sha256": "fc012aeb2ec972cfa8695a844d7b7d1cc8b6064bc2335d15671455f0e3af5756"
+        }
+      ]
+    },
+    {
+      "repoId": "arcreel",
+      "repository": "https://github.com/ArcReel/ArcReel",
+      "commit": "44d22bfaa5e270bb53df8becdfb3c441879d9312",
+      "license": "MIT",
+      "licenseFile": "assets/director/arcreel/44d22bfaa5e270bb53df8becdfb3c441879d9312/LICENSE",
+      "admissionAndModifications": "assets/director/arcreel/44d22bfaa5e270bb53df8becdfb3c441879d9312/ADMISSION.md",
+      "provenanceSha256": "8a4b90589d2f7c70b3e91ed12e307ac462f52d308a115bb9a07e21c9400505b0",
+      "files": [
+        {
+          "path": "assets/director/arcreel/44d22bfaa5e270bb53df8becdfb3c441879d9312/LICENSE",
+          "sha256": "8a058e663ef3cd86848341e38b5718fb1946cb94e248e72d78cfbb018ee42f58"
+        },
+        {
+          "path": "assets/director/arcreel/44d22bfaa5e270bb53df8becdfb3c441879d9312/skills/video-workflow/SKILL.md",
+          "sha256": "facd48c365274778893106af26cd57a20ecb379b4d0e490f9778bdf52fea7296"
+        },
+        {
+          "path": "assets/director/arcreel/44d22bfaa5e270bb53df8becdfb3c441879d9312/skills/video-workflow/references/generation-modes.md",
+          "sha256": "0a36b92574e5c90095825e3e619f9bc1358b0e4200b1bc5991396449c1da49ff"
+        },
+        {
+          "path": "assets/director/arcreel/44d22bfaa5e270bb53df8becdfb3c441879d9312/skills/video-workflow/references/generation-results.md",
+          "sha256": "fde9f66a386f9f2718e9ef5e3e1c40b102c77124eed6a4e8112e2d2d700c42e0"
+        },
+        {
+          "path": "assets/director/arcreel/44d22bfaa5e270bb53df8becdfb3c441879d9312/skills/video-workflow/references/plan-safety.md",
+          "sha256": "7a1cabd253a6bc42148dcaf2257417100b32e17884b8c6d85cf3a19309dc09a1"
+        }
+      ]
+    },
+    {
+      "repoId": "bluefish",
+      "repository": "https://github.com/bluefish2026/BlueFish",
+      "commit": "8b409c1332e46bc1211d2ffc6d45fe1f01492eca",
+      "license": "Apache-2.0",
+      "licenseFile": "assets/director/bluefish/8b409c1332e46bc1211d2ffc6d45fe1f01492eca/LICENSE",
+      "admissionAndModifications": "assets/director/bluefish/8b409c1332e46bc1211d2ffc6d45fe1f01492eca/ADMISSION.md",
+      "provenanceSha256": "e6f29242fd7cec131e797e67788b3f66a4b491f866d4f1589f4beb1f5c57bf5b",
+      "files": [
+        {
+          "path": "assets/director/bluefish/8b409c1332e46bc1211d2ffc6d45fe1f01492eca/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "path": "assets/director/bluefish/8b409c1332e46bc1211d2ffc6d45fe1f01492eca/bluefish-server/app/services/prompt_builder.py",
+          "sha256": "d66014250aa106a8eb4cd03ccd68ab03d083ec8b3a3e337077de9dc4d33ad820"
+        },
+        {
+          "path": "assets/director/bluefish/8b409c1332e46bc1211d2ffc6d45fe1f01492eca/bluefish-server/tests/test_prompt_builder.py",
+          "sha256": "7c07c889f097dc26a5ef9c705b41f136e8a941d43ca292aa3a5e96d1f48b086e"
+        }
+      ]
+    }
+  ]
+}

@@ -27,6 +27,9 @@ describe('THIRD_PARTY_NOTICES.md', () => {
   it('matches what the generator produces from the current manifests', () => {
     const generated = render()
     expect(generated).toContain('It depends on the third-party software listed below.')
+    expect(generated).toContain('## Inactive experimental director assets')
+    expect(generated).toContain('DIRECTOR_ASSET_SBOM.json')
+    expect(generated).toContain('its AGPL application is excluded')
     expect(readFileSync(resolve(root, 'THIRD_PARTY_NOTICES.md'), 'utf8'), 'stale notices — run `pnpm run gen-third-party-notices`').toBe(generated)
   })
 })
