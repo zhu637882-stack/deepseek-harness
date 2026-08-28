@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-This private experimental Host plugin exposes explicit Yimeng `episode_script` and actor, scene, and prop `element_profile` ChangeSet flows over the loopback-only `/qingmu-yimeng-command` channel. The script operations remain `proposeScript`, `previewScript`, `commitScript`, and the read-only `recoverScriptCommit`. Element operations are `proposeElementProfile`, `proposeReferenceAsset`, `previewElementProfile`, `commitElementProfile`, and the read-only `recoverElementProfileCommit`. Selected-video Findings use `recordShotFinding` and the read-only `recoverShotFinding`. Machine-validated Stage artifacts use `registerStageArtifact`, `commitStageArtifactDecision`, and the read-only `recoverStageArtifactRegistration` and `recoverStageArtifactDecision`. Complete-scope LSU plans use `sealLsuPlan`, the read-only `recoverLsuPlanSeal`, and `probeLsuPlanAuthority`.
+This private experimental Host plugin exposes explicit Yimeng `episode_script` and actor, scene, and prop `element_profile` ChangeSet flows over the loopback-only `/qingmu-yimeng-command` channel. The script operations remain `proposeScript`, `previewScript`, `commitScript`, and the read-only `recoverScriptCommit`. Element operations are `proposeElementProfile`, `proposeReferenceAsset`, `previewElementProfile`, `commitElementProfile`, and the read-only `recoverElementProfileCommit`. Ordinary Take comments use `createTakeComment` and the read-only `recoverTakeComment`. Selected-video Findings use `recordShotFinding` and the read-only `recoverShotFinding`. Machine-validated Stage artifacts use `registerStageArtifact`, `commitStageArtifactDecision`, and the read-only `recoverStageArtifactRegistration` and `recoverStageArtifactDecision`. Complete-scope LSU plans use `sealLsuPlan`, the read-only `recoverLsuPlanSeal`, and `probeLsuPlanAuthority`.
 
 ## Command boundary
 
@@ -19,6 +19,12 @@ Every element proposal also requires the exact six-field `qingmu.imago-element-m
 `selectReferenceAsset` records an explicit selection intent but is not human approval or signoff. `requestReferenceRegeneration` requires a non-empty `repairPrompt` and remains intent-only: accepted previews and receipts must report `providerCalls: 0`, `workerStarted: false`, and no inferred approval. Neither operation starts generation or silently chooses a candidate.
 
 Receipt recovery performs exactly one `GET` to the Yimeng `/api/qingmu/projects/{projectId}/episodes/{episodeId}/change-sets/{changeSetId}/command-receipt` endpoint for scripts, or the corresponding generic element route for all three element profiles, with the original `Idempotency-Key` header and no body or query. The adapter accepts only the `jason.qingmu-command-receipt-recovery.v1` wrapper, revalidates every lineage field on its nested original receipt, recomputes the canonical JSON SHA-256 of that receipt before accepting the wrapper's `receiptSha256`, and never retries the commit `POST`.
+
+## Ordinary Take comments
+
+`createTakeComment` binds an exact current Take-subject SHA to a chosen Take, a timecode or frame anchor, the comment body, and one visible-ASCII idempotency key. It sends exactly one `POST` to `/api/qingmu/projects/{projectId}/episodes/{episodeId}/frames/{frameId}/take-comments`; the body contains exactly `expectedTakeSubjectSha256`, `takeId`, `anchor`, `body`, and `idempotencyKey`, while path IDs, actor, role, and session come from the route and Yimeng authentication. The result must preserve the intent and report `changed`, selection, technical-pass, formal-approval, episode-verification, human-signoff, Provider-call, and budget impacts as false or zero.
+
+`recoverTakeComment` never retries the POST. It sends exactly one body-free GET to `/command-receipt`, preserving the original Take ID and subject SHA in the query and idempotency key in the header, then validates the original result or a strict `not_found`. Both operations require a Host-only Yimeng bearer token, and credential reflection into upstream JSON fails closed.
 
 ## Shot-video Findings
 

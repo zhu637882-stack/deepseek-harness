@@ -6,6 +6,7 @@ import type {
   YimengTakeVersion, YimengTakeVersionSelectionResult, YimengTakeVersionStackResponse, YimengWorkflowProjection,
 } from './contracts.ts'
 import type { QingmuCockpitKey } from './locales.ts'
+import { TakeCommentsPanel, type TakeCommentPort } from './TakeCommentsPanel.tsx'
 import {
   clearTakeVersionSelectionMarker, createTakeVersionSelectionMarker,
   readTakeVersionSelectionMarker, writeTakeVersionSelectionMarker,
@@ -23,6 +24,7 @@ interface TakeVersionCompareViewProps {
   readonly port: Pick<QingmuYimengPort,
     'takeVersions' | 'takeAcceptance' | 'takeAcceptanceMethod'
     | 'selectTakeVersion' | 'recoverTakeVersionSelection'>
+    & Partial<TakeCommentPort>
   readonly t: (key: QingmuCockpitKey) => string
 }
 
@@ -56,6 +58,11 @@ interface Busy {
 interface Notice {
   readonly key: QingmuCockpitKey
   readonly error: boolean
+}
+
+function hasTakeCommentPort(port: TakeVersionCompareViewProps['port']): port is typeof port & TakeCommentPort {
+  return typeof port.takeComments === 'function' && typeof port.createTakeComment === 'function'
+    && typeof port.recoverTakeComment === 'function'
 }
 
 function requestFromMarker(marker: TakeVersionSelectionRecoveryMarker) {
@@ -370,6 +377,7 @@ function TakeVersionComparePanel({
   const [busy, setBusy] = useState<Busy>()
   const [notice, setNotice] = useState<Notice>()
   const [receipt, setReceipt] = useState<YimengTakeVersionSelectionResult>()
+  const [commentPreferredTakeId, setCommentPreferredTakeId] = useState<string>()
   const runRef = useRef<Run>()
   const busyRef = useRef<Busy>()
   const autoRecoveryRef = useRef<string>()
@@ -468,6 +476,9 @@ function TakeVersionComparePanel({
           const second = stack.subject.versions.find(version => !selected.includes(version.takeId))
           return second === undefined ? selected : [...selected, second.takeId].slice(0, 2)
         })
+        setCommentPreferredTakeId(
+          stack.subject.selectedTakeId ?? stack.subject.versions[0]?.takeId,
+        )
         setState({ run, status: 'ready', stack })
         if (stack.subject.selectedTakeId === null) {
           setAcceptanceState({ run, status: 'none' })
@@ -631,6 +642,9 @@ function TakeVersionComparePanel({
           <div><dt>{t('takeVersionStoryboardRevision')}</dt><dd>{stack.subject.storyboardRevision}</dd></div></dl>
       </details>
     </div>}
+    {eligible && commentPreferredTakeId !== undefined && hasTakeCommentPort(port)
+      && <TakeCommentsPanel projectId={projectId} episodeId={episodeId} frameId={selectedShotId}
+        preferredTakeId={commentPreferredTakeId} refresh={refresh} port={port} t={t} />}
   </section>
 }
 

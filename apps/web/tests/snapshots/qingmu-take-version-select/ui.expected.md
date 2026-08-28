@@ -102,3 +102,31 @@
         - listitem: identity_continuity
       - group: Provider、任务与哈希证据
   - group: 权威边界与镜头绑定
+  - region "普通评论":
+    - heading "普通评论" [level=4]
+    - paragraph: 评论只绑定 Take 内容，不改变选择、技术状态、正式审核或人工签收。
+    - text: Take 版本
+    - combobox "Take 版本":
+      - option "v1 · asset-take-1" [selected]
+      - option "v2 · asset-take-2"
+    - group "评论锚点":
+      - text: 评论锚点
+      - radio "时间码" [checked]
+      - text: 时间码
+      - radio "帧号"
+    - text: 时间码（毫秒）
+    - spinbutton "时间码（毫秒）": "0"
+    - text: 范围：0–5250 毫秒 评论内容
+    - textbox "评论内容"
+    - button "提交评论" [disabled]
+    - list:
+      - listitem:
+        - strong: 当前绑定
+        - text: v2
+        - paragraph: 当前 Take 的眼神应在这一拍落到左侧角色。
+        - text: 时间码 · {{duration}}
+      - listitem:
+        - strong: 历史
+        - text: v1
+        - paragraph: 上一版第 36 帧构图需要调整。
+        - text: 帧号 · 36

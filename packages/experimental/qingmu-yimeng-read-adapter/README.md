@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `capabilityCatalog`, `costRehearsal`, `gateAControlEvidence`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `takeVersions`, `takeAcceptance`, `shotFindings`, `productionUnits`, `lsuPlanSource`, `stageSources`, and `workflow`; it exposes no mutation endpoint.
+This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `capabilityCatalog`, `costRehearsal`, `gateAControlEvidence`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `takeVersions`, `takeComments`, `takeAcceptance`, `shotFindings`, `productionUnits`, `lsuPlanSource`, `stageSources`, and `workflow`; it exposes no mutation endpoint.
 
 ## Contract
 
@@ -18,7 +18,7 @@ The `workflow.director.heroFrameStoryboards` sibling projection joins one-to-one
 
 The `workflow.director.shotRelations.shots` array projects Yimeng's canonical storyboard frames without adding a Shot authority. Each Shot carries `shotId`, the sole Shot ordering field `frameNo`, `durationSec`, and derived `dialogueRhythm`; it never carries a Shot-level `order`, `sortOrder`, or `sequence`. Each element carries `currentReferenceAvailability` plus either `currentReference: null` or the uniquely selected E4-3 reference's `assetId`, `sha256`, and lineage. The adapter does not choose references or persist Shot selection state.
 
-The package root exports the request and response types, including `YimengHealth`, `YimengCostRehearsalRequest`, `YimengCostRehearsalSubject`, `YimengCostRehearsalResponse`, `YimengProjectsResponse`, `YimengEpisodesResponse`, `YimengScriptResponse`, `YimengElementProfileRequest`, `YimengElementProfileResponse`, `YimengReferenceAssetCandidate`, `YimengReferenceCandidatesRequest`, `YimengReferenceCandidatesResponse`, `YimengTakeVersionStackResponse`, `YimengTakeAcceptanceResponse`, `YimengShotRelationShot`, `YimengShotDialogueCue`, `YimengShotDialogueRhythm`, `YimengShotCurrentReference`, `YimengShotCurrentReferenceLineage`, `YimengShotRelationsProjection`, `YimengHeroFrameStoryboardsProjection`, and `YimengWorkflowProjection`.
+The package root exports the request and response types, including `YimengHealth`, `YimengCostRehearsalRequest`, `YimengCostRehearsalSubject`, `YimengCostRehearsalResponse`, `YimengProjectsResponse`, `YimengEpisodesResponse`, `YimengScriptResponse`, `YimengElementProfileRequest`, `YimengElementProfileResponse`, `YimengReferenceAssetCandidate`, `YimengReferenceCandidatesRequest`, `YimengReferenceCandidatesResponse`, `YimengTakeVersionStackResponse`, `YimengTakeCommentFeedResponse`, `YimengTakeAcceptanceResponse`, `YimengShotRelationShot`, `YimengShotDialogueCue`, `YimengShotDialogueRhythm`, `YimengShotCurrentReference`, `YimengShotCurrentReferenceLineage`, `YimengShotRelationsProjection`, `YimengHeroFrameStoryboardsProjection`, and `YimengWorkflowProjection`.
 
 ## Gate A capability catalog
 
@@ -55,6 +55,12 @@ The normalized response preserves original defects, notes, and zero, fractional,
 `takeAcceptance` accepts exactly `projectId`, `episodeId`, and canonical `frameId`, then sends one authenticated, body-free GET to the selected Take's `/take-versions/acceptance` route. The Host validates the RFC 8785 evidence SHA, exact current selection identity, output SHA binding, strict full-video decode receipt, frame-count-based actual average frame rate, current macro/micro QC records, and either the real Provider outbox receipt or the explicitly bounded local dry-run state. Unknown fields fail closed, so local paths, media URLs, and raw Provider responses cannot cross into the browser.
 
 Local media and QC may pass independently of Provider verification. The response therefore keeps `UNVERIFIED_FOR_PAID_PRODUCTION`, `selectedIsApproval: false`, and `gateBCompleted: false` even when a historical Provider outbox receipt is fully verified. This read performs no Provider call, database write, selection, approval, budget mutation, or human signoff.
+
+## Take comments
+
+`takeComments` accepts exactly `projectId`, `episodeId`, and canonical `frameId`, then sends one authenticated, body-free GET to `/api/qingmu/projects/{projectId}/episodes/{episodeId}/frames/{frameId}/take-comments`. The Host validates exact current Take-version subjects and their RFC 8785 SHA-256 identities, immutable ordinary comments, timecode or frame anchors, authenticated commenter roles, and the server-declared `currentBinding`; it returns current and historical comments without rebinding either kind.
+
+Yimeng remains the only comment journal and Take-subject authority. This read does not select a Take, create a Finding, change technical pass or formal approval, verify an episode, infer human signoff, call a Provider, or mutate a budget.
 
 ## Shot Finding ledger
 

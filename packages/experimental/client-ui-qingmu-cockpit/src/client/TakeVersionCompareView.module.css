@@ -360,6 +360,150 @@
   margin-bottom: 10px;
 }
 
+.comments {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.comments > header h4,
+.comments > header p,
+.commentForm p,
+.commentList p {
+  margin: 0;
+}
+
+.comments > header h4 {
+  font-size: 14px;
+}
+
+.comments > header p {
+  margin-top: 5px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.commentForm {
+  display: grid;
+  gap: 10px;
+}
+
+.commentForm > label,
+.commentCoordinate > label {
+  display: grid;
+  gap: 6px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.commentForm select,
+.commentForm input[type="number"],
+.commentForm textarea {
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+}
+
+.commentForm textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.commentForm fieldset {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+.commentForm fieldset legend {
+  padding: 0 4px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+}
+
+.commentForm fieldset label,
+.commentForm fieldset span {
+  min-height: 32px;
+  line-height: 32px;
+}
+
+.commentForm fieldset input {
+  min-width: 20px;
+  min-height: 20px;
+}
+
+.commentCoordinate {
+  display: grid;
+  gap: 6px;
+}
+
+.commentCoordinate > span {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+}
+
+.commentForm > button {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--qingmu-accent);
+  border-radius: 8px;
+  background: var(--qingmu-accent);
+  color: var(--dsw-alias-label-inverse, white);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.commentForm > button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.commentList {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.commentList li {
+  display: grid;
+  gap: 7px;
+  padding: 11px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+.commentList header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.commentList header strong {
+  color: var(--qingmu-accent);
+}
+
+.commentList small {
+  color: var(--dsw-alias-label-secondary);
+}
+
 .header button:focus-visible,
 .recovery button:focus-visible,
 .recovery summary:focus-visible,
@@ -368,6 +512,14 @@
 .select:focus-visible,
 .details summary:focus-visible,
 .acceptanceProof summary:focus-visible {
+  outline: 2px solid var(--qingmu-accent);
+  outline-offset: 3px;
+}
+
+.commentForm select:focus-visible,
+.commentForm input:focus-visible,
+.commentForm textarea:focus-visible,
+.commentForm button:focus-visible {
   outline: 2px solid var(--qingmu-accent);
   outline-offset: 3px;
 }

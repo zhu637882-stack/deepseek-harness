@@ -1346,6 +1346,75 @@ export interface YimengTakeVersionSelectionRecovery extends YimengRecoverTakeVer
   readonly result: YimengTakeVersionSelectionResult | null
 }
 
+/** One exact anchor for an ordinary Take comment. */
+export type YimengTakeCommentAnchor =
+  | { readonly kind: 'timecode'; readonly timecodeMillis: number }
+  | { readonly kind: 'frame'; readonly frameNumber: number }
+
+/** Full browser intent. Scope is carried by the URL; only five comment fields enter the POST body. */
+export interface YimengCreateTakeCommentRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly expectedTakeSubjectSha256: string
+  readonly takeId: string
+  readonly anchor: YimengTakeCommentAnchor
+  readonly body: string
+  readonly idempotencyKey: string
+}
+
+/** GET-only lookup uses the original intent so a recovered receipt can be checked exactly. */
+export type YimengRecoverTakeCommentRequest = YimengCreateTakeCommentRequest
+
+/** Durable ordinary comment returned by the authenticated Yimeng service. */
+export interface YimengTakeCommentRecord {
+  readonly id: string
+  readonly takeId: string
+  readonly versionOrdinalAtComment: number
+  readonly outputSha256: string
+  readonly frameBinding: {
+    readonly frameId: string
+    readonly frameNo: number
+    readonly storyboardRevision: number
+    readonly frameContentSha256: string
+  }
+  readonly takeSubjectSha256: string
+  readonly anchor: YimengTakeCommentAnchor
+  readonly body: string
+  readonly actorId: string
+  readonly actorRole: 'commenter'
+  readonly authSessionId: string
+  readonly createdAt: string
+  readonly eventId: string
+}
+
+/** Comment receipt with every adjacent authority and impact flag fixed to zero/false. */
+export interface YimengTakeCommentResult {
+  readonly schema: 'jason.qingmu-take-comment-result.v1'
+  readonly comment: YimengTakeCommentRecord
+  readonly changed: false
+  readonly selectionChanged: false
+  readonly technicalPassChanged: false
+  readonly formalApprovalChanged: false
+  readonly episodeVerificationChanged: false
+  readonly humanSignoffInferred: false
+  readonly providerCalls: 0
+  readonly budgetMutation: false
+}
+
+/** Historical receipt lookup. A missing receipt never authorizes a second POST. */
+export interface YimengTakeCommentRecovery {
+  readonly schema: 'jason.qingmu-take-comment-recovery.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly takeId: string
+  readonly expectedTakeSubjectSha256: string
+  readonly idempotencyKey: string
+  readonly status: 'committed' | 'not_found'
+  readonly result: YimengTakeCommentResult | null
+}
+
 /** Native shot-group contents; group order never allocates an IMAGO unit ID. */
 export interface YimengProductionUnitSource {
   readonly schema: 'jason.qingmu-production-unit-source.v1'
@@ -2306,6 +2375,8 @@ export interface YimengCommandEndpointMap {
   readonly recoverShotFinding: YimengShotFindingRecovery
   readonly selectTakeVersion: YimengTakeVersionSelectionResult
   readonly recoverTakeVersionSelection: YimengTakeVersionSelectionRecovery
+  readonly createTakeComment: YimengTakeCommentResult
+  readonly recoverTakeComment: YimengTakeCommentRecovery
   readonly bindProductionUnit: YimengProductionUnitResult
   readonly recoverProductionUnitBinding: YimengProductionUnitRecovery
   readonly bindStageSource: YimengStageSourceResult

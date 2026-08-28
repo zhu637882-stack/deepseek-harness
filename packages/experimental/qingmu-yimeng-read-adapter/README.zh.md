@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`capabilityCatalog`、`costRehearsal`、`gateAControlEvidence`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates`、`selectedVideoReview`、`takeVersions`、`takeAcceptance`、`shotFindings`、`productionUnits`、`lsuPlanSource`、`stageSources` 和 `workflow`；它不暴露任何写入端点。
+这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`capabilityCatalog`、`costRehearsal`、`gateAControlEvidence`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates`、`selectedVideoReview`、`takeVersions`、`takeComments`、`takeAcceptance`、`shotFindings`、`productionUnits`、`lsuPlanSource`、`stageSources` 和 `workflow`；它不暴露任何写入端点。
 
 ## 约定
 
@@ -18,7 +18,7 @@
 
 `workflow.director.shotRelations.shots` 数组投影易梦权威故事板帧，不增加 Shot 真源。每个 Shot 携带 `shotId`、唯一 Shot 排序字段 `frameNo`、`durationSec` 和派生的 `dialogueRhythm`；它绝不携带 Shot 级 `order`、`sortOrder` 或 `sequence`。每个元素携带 `currentReferenceAvailability`，并携带 `currentReference: null` 或 E4-3 唯一当前已选参考的 `assetId`、`sha256` 与血缘。适配器不选择参考，也不持久化 Shot 选择状态。
 
-包根入口导出请求与响应类型，包括 `YimengHealth`、`YimengCostRehearsalRequest`、`YimengCostRehearsalSubject`、`YimengCostRehearsalResponse`、`YimengProjectsResponse`、`YimengEpisodesResponse`、`YimengScriptResponse`、`YimengElementProfileRequest`、`YimengElementProfileResponse`、`YimengReferenceAssetCandidate`、`YimengReferenceCandidatesRequest`、`YimengReferenceCandidatesResponse`、`YimengTakeVersionStackResponse`、`YimengTakeAcceptanceResponse`、`YimengShotRelationShot`、`YimengShotDialogueCue`、`YimengShotDialogueRhythm`、`YimengShotCurrentReference`、`YimengShotCurrentReferenceLineage`、`YimengShotRelationsProjection`、`YimengHeroFrameStoryboardsProjection` 和 `YimengWorkflowProjection`。
+包根入口导出请求与响应类型，包括 `YimengHealth`、`YimengCostRehearsalRequest`、`YimengCostRehearsalSubject`、`YimengCostRehearsalResponse`、`YimengProjectsResponse`、`YimengEpisodesResponse`、`YimengScriptResponse`、`YimengElementProfileRequest`、`YimengElementProfileResponse`、`YimengReferenceAssetCandidate`、`YimengReferenceCandidatesRequest`、`YimengReferenceCandidatesResponse`、`YimengTakeVersionStackResponse`、`YimengTakeCommentFeedResponse`、`YimengTakeAcceptanceResponse`、`YimengShotRelationShot`、`YimengShotDialogueCue`、`YimengShotDialogueRhythm`、`YimengShotCurrentReference`、`YimengShotCurrentReferenceLineage`、`YimengShotRelationsProjection`、`YimengHeroFrameStoryboardsProjection` 和 `YimengWorkflowProjection`。
 
 ## Gate A 能力目录
 
@@ -55,6 +55,12 @@
 `takeAcceptance` 只接受 `projectId`、`episodeId` 和 canonical `frameId`，随后向已选 Take 的 `/take-versions/acceptance` 路由发送一次认证且无正文的 GET。Host 会校验 RFC 8785 证据 SHA、准确当前选择身份、输出 SHA 绑定、严格整片解码回执、基于帧数的实际平均帧率、当前宏观／微观 QC 记录，以及真实 Provider outbox 回执或明确受限的本地 dry-run 状态。未知字段失败关闭，因此本地路径、媒体 URL 与 Provider 原始响应都不能进入浏览器。
 
 本地媒体和 QC 可以独立于 Provider 核验通过。因此即使历史 Provider outbox 回执已完全验证，响应仍保持 `UNVERIFIED_FOR_PAID_PRODUCTION`、`selectedIsApproval: false` 和 `gateBCompleted: false`。本读取不调用 Provider、不写数据库、不选择、不批准、不修改预算，也不推断人工签收。
+
+## Take 普通评论
+
+`takeComments` 只接受 `projectId`、`episodeId` 和 canonical `frameId`，随后向 `/api/qingmu/projects/{projectId}/episodes/{episodeId}/frames/{frameId}/take-comments` 发送一次认证且无正文的 GET。Host 会校验字段精确的当前 Take 版本主体及其 RFC 8785 SHA-256 身份、不可变普通评论、时间码或帧锚点、经认证的评论者角色和服务端声明的 `currentBinding`；当前评论与历史评论均原样返回，不重新绑定。
+
+易梦仍是唯一评论账本与 Take 主体权威。本读取不选择 Take、不创建 Finding、不改变技术通过或正式批准、不验证单集、不推断人工签收、不调用 Provider，也不修改预算。
 
 ## 镜头问题账本
 

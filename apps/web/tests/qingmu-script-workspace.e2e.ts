@@ -15,6 +15,13 @@ import { captureStableAria, compareOrRefreshGolden, launchWebScaffold, watchCons
 import { REPO_ROOT, saveFailureShot, ZH_BROWSER_LOCALE } from './support.ts'
 import { continuityFixture, rebindContinuity } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/continuity-fixture.ts'
 import { takeAcceptanceFixture as baseTakeAcceptanceFixture } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/take-acceptance-fixture.ts'
+import type {
+  TakeComment,
+  TakeCommentFeed,
+  TakeCommentRequest,
+  TakeCommentResult,
+  TakeCommentSubject,
+} from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/take-comment-fixture.ts'
 import { takeVersionStackFixture as baseTakeVersionStackFixture } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/take-version-fixture.ts'
 import { videoCandidatesFixture } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/selected-video-review-fixture.ts'
 import { createShotFindingDouble } from './qingmu-shot-finding-fixture.ts'
@@ -1894,6 +1901,146 @@ function takeVersionStackFixture(
   return { ...base, subject, stackSnapshotSha256: jcsSha256(subject) }
 }
 
+function takeCommentSubjectFixture(
+  revision: number,
+  takeId: 'asset-take-1' | 'asset-take-2',
+): TakeCommentSubject {
+  const stack = takeVersionStackFixture(revision)
+  const version = stack.subject.versions.find(candidate => candidate.takeId === takeId)
+  if (version === undefined || version.outputSha256 === null || version.durationSec === null) {
+    throw new Error('Take comment subject requires a complete version binding')
+  }
+  return {
+    schema: 'jason.qingmu-take-comment-subject.v1',
+    projectId: 'project-1',
+    episodeId: 'episode-1',
+    frameId: PROMPT_IR_FRAME_ID,
+    frameNo: stack.subject.frameNo,
+    storyboardRevision: stack.subject.storyboardRevision,
+    frameContentSha256: stack.subject.frameContentSha256,
+    takeId: version.takeId,
+    versionOrdinal: version.versionOrdinal,
+    outputSha256: version.outputSha256,
+    durationMillis: Math.round(version.durationSec * 1_000),
+  }
+}
+
+function takeCommentRequestFixture(
+  revision: number,
+  takeId: 'asset-take-1' | 'asset-take-2',
+  anchor: TakeCommentRequest['anchor'],
+  body: string,
+  idempotencyKey: string,
+): TakeCommentRequest {
+  const subject = takeCommentSubjectFixture(revision, takeId)
+  return {
+    projectId: subject.projectId,
+    episodeId: subject.episodeId,
+    frameId: subject.frameId,
+    expectedTakeSubjectSha256: jcsSha256(subject),
+    takeId,
+    anchor,
+    body,
+    idempotencyKey,
+  }
+}
+
+function takeCommentRecordFixture(
+  revision: number,
+  input: TakeCommentRequest,
+  sequence: number,
+): TakeComment {
+  const subject = takeCommentSubjectFixture(revision, input.takeId as 'asset-take-1' | 'asset-take-2')
+  return {
+    id: `take-comment-${String(sequence).padStart(4, '0')}`,
+    takeId: input.takeId,
+    versionOrdinalAtComment: subject.versionOrdinal,
+    outputSha256: subject.outputSha256,
+    frameBinding: {
+      frameId: subject.frameId,
+      frameNo: subject.frameNo,
+      storyboardRevision: subject.storyboardRevision,
+      frameContentSha256: subject.frameContentSha256,
+    },
+    takeSubjectSha256: input.expectedTakeSubjectSha256,
+    anchor: input.anchor,
+    body: input.body,
+    actorId: 'owner-1',
+    actorRole: 'commenter',
+    authSessionId: '8'.repeat(64),
+    createdAt: `2026-08-28T12:0${String(sequence)}:00.123456+00:00`,
+    eventId: `take-comment-event-${String(sequence).padStart(4, '0')}`,
+  }
+}
+
+function takeCommentResultFixture(
+  revision: number,
+  input: TakeCommentRequest,
+  sequence: number,
+): TakeCommentResult {
+  return {
+    schema: 'jason.qingmu-take-comment-result.v1',
+    comment: takeCommentRecordFixture(revision, input, sequence),
+    changed: false,
+    selectionChanged: false,
+    technicalPassChanged: false,
+    formalApprovalChanged: false,
+    episodeVerificationChanged: false,
+    humanSignoffInferred: false,
+    providerCalls: 0,
+    budgetMutation: false,
+  }
+}
+
+function takeCommentFeedFixture(
+  revision: number,
+  persisted: readonly TakeComment[] = [],
+): TakeCommentFeed {
+  const first = takeCommentSubjectFixture(revision, 'asset-take-1')
+  const second = takeCommentSubjectFixture(revision, 'asset-take-2')
+  const currentInput = takeCommentRequestFixture(
+    revision,
+    'asset-take-2',
+    { kind: 'timecode', timecodeMillis: 1_250 },
+    '当前 Take 的眼神应在这一拍落到左侧角色。',
+    'take-comment-existing-current',
+  )
+  const historicalInput = takeCommentRequestFixture(
+    revision,
+    'asset-take-1',
+    { kind: 'frame', frameNumber: 36 },
+    '上一版第 36 帧构图需要调整。',
+    'take-comment-existing-historical',
+  )
+  const historical = takeCommentRecordFixture(revision, historicalInput, 2)
+  return {
+    schema: 'jason.qingmu-take-comment-feed.v1',
+    projectId: 'project-1',
+    episodeId: 'episode-1',
+    frameId: PROMPT_IR_FRAME_ID,
+    versions: [
+      { takeSubject: first, takeSubjectSha256: jcsSha256(first) },
+      { takeSubject: second, takeSubjectSha256: jcsSha256(second) },
+    ],
+    capabilities: { canComment: true },
+    comments: [
+      { ...takeCommentRecordFixture(revision, currentInput, 1), currentBinding: true },
+      {
+        ...historical,
+        outputSha256: '3'.repeat(64),
+        frameBinding: {
+          ...historical.frameBinding,
+          storyboardRevision: revision - 1,
+          frameContentSha256: 'a'.repeat(64),
+        },
+        takeSubjectSha256: '9'.repeat(64),
+        currentBinding: false,
+      },
+      ...persisted.map(comment => ({ ...comment, currentBinding: true })),
+    ],
+  }
+}
+
 function takeAcceptanceFixture(
   revision: number,
   selectedTakeId: 'asset-take-1' | 'asset-take-2' = 'asset-take-1',
@@ -2040,6 +2187,7 @@ async function startYimengDouble(
   readonly releaseStoryboardCanvasCommitResponse: () => void
   readonly setContinuityMode: (mode: ContinuityMode) => void
   readonly setVideoReviewMode: (mode: VideoReviewMode) => void
+  readonly setTakeSelectedId: (takeId: 'asset-take-1' | 'asset-take-2') => void
   readonly shotFindings: ReturnType<typeof createShotFindingDouble>
   readonly reworkRoutes: ReturnType<typeof createReworkRouteDouble>
   readonly productionUnits: ReturnType<typeof createProductionUnitDouble>
@@ -2102,6 +2250,8 @@ async function startYimengDouble(
     string,
     ReturnType<typeof takeVersionSelectionResultFixture>
   >()
+  const persistedTakeCommentReceipts = new Map<string, TakeCommentResult>()
+  const persistedTakeComments: TakeComment[] = []
   let publicBaseUrl = ''
   const reviewComments: Record<ElementKind, Array<Record<string, unknown>>> = { actor: [], scene: [], prop: [] }
   const reviewDecisions: Record<ElementKind, Array<Record<string, unknown>>> = { actor: [], scene: [], prop: [] }
@@ -2292,6 +2442,108 @@ async function startYimengDouble(
           candidateTakeId: url.searchParams.get('candidateTakeId'),
           candidateVersionOrdinal: Number(url.searchParams.get('candidateVersionOrdinal')),
           candidateOutputSha256: url.searchParams.get('candidateOutputSha256'),
+          idempotencyKey: key,
+          status: result === null ? 'not_found' : 'committed',
+          result,
+        })
+        return
+      }
+      const takeCommentPath = `/api/qingmu/projects/project-1/episodes/episode-1/frames/${PROMPT_IR_FRAME_ID}/take-comments`
+      if (request.method === 'GET' && url.pathname === takeCommentPath) {
+        if (request.headers.authorization !== `Bearer ${YIMENG_TOKEN}`) {
+          throw new Error('Take comment read authorization mismatch')
+        }
+        json(response, 200, takeCommentFeedFixture(revision, persistedTakeComments))
+        return
+      }
+      if (request.method === 'POST' && url.pathname === takeCommentPath) {
+        if (!isRecord(body) || !isRecord(body.anchor)) {
+          throw new Error('Take comment body is missing')
+        }
+        const expectedKeys = [
+          'expectedTakeSubjectSha256', 'takeId', 'anchor', 'body', 'idempotencyKey',
+        ].sort()
+        const bodyKeys = Object.keys(body).sort()
+        const anchorKeys = Object.keys(body.anchor).sort()
+        const validAnchor = body.anchor.kind === 'timecode'
+          ? anchorKeys.length === 2
+            && anchorKeys[0] === 'kind'
+            && anchorKeys[1] === 'timecodeMillis'
+            && Number.isInteger(body.anchor.timecodeMillis)
+            && Number(body.anchor.timecodeMillis) >= 0
+          : body.anchor.kind === 'frame'
+            && anchorKeys.length === 2
+            && anchorKeys[0] === 'frameNumber'
+            && anchorKeys[1] === 'kind'
+            && Number.isInteger(body.anchor.frameNumber)
+            && Number(body.anchor.frameNumber) >= 1
+        const takeId = body.takeId
+        if (takeId !== 'asset-take-1' && takeId !== 'asset-take-2') {
+          throw new Error('Take comment takeId mismatch')
+        }
+        const expectedSubject = takeCommentSubjectFixture(revision, takeId)
+        const key = typeof body.idempotencyKey === 'string' ? body.idempotencyKey : ''
+        if (
+          bodyKeys.length !== expectedKeys.length
+          || bodyKeys.some((field, index) => field !== expectedKeys[index])
+          || !validAnchor
+          || typeof body.expectedTakeSubjectSha256 !== 'string'
+          || body.expectedTakeSubjectSha256 !== jcsSha256(expectedSubject)
+          || typeof body.body !== 'string'
+          || body.body.trim() === ''
+          || key === ''
+          || request.headers.authorization !== `Bearer ${YIMENG_TOKEN}`
+          || request.headers['idempotency-key'] !== key
+        ) {
+          throw new Error('Take comment command contract mismatch')
+        }
+        const input: TakeCommentRequest = {
+          projectId: 'project-1',
+          episodeId: 'episode-1',
+          frameId: PROMPT_IR_FRAME_ID,
+          expectedTakeSubjectSha256: body.expectedTakeSubjectSha256,
+          takeId,
+          anchor: body.anchor as TakeCommentRequest['anchor'],
+          body: body.body,
+          idempotencyKey: key,
+        }
+        const replay = persistedTakeCommentReceipts.get(key)
+        if (replay !== undefined) {
+          json(response, 200, replay)
+          return
+        }
+        const result = takeCommentResultFixture(revision, input, persistedTakeComments.length + 3)
+        persistedTakeComments.push(result.comment)
+        persistedTakeCommentReceipts.set(key, result)
+        json(response, 201, result)
+        return
+      }
+      if (request.method === 'GET' && url.pathname === `${takeCommentPath}/command-receipt`) {
+        const queryKeys = [...url.searchParams.keys()].sort()
+        const expectedQueryKeys = ['expectedTakeSubjectSha256', 'takeId'].sort()
+        const key = typeof request.headers['idempotency-key'] === 'string'
+          ? request.headers['idempotency-key']
+          : ''
+        const expectedTakeSubjectSha256 = url.searchParams.get('expectedTakeSubjectSha256') ?? ''
+        const takeId = url.searchParams.get('takeId') ?? ''
+        if (
+          queryKeys.length !== expectedQueryKeys.length
+          || queryKeys.some((field, index) => field !== expectedQueryKeys[index])
+          || key === ''
+          || expectedTakeSubjectSha256 === ''
+          || takeId === ''
+          || request.headers.authorization !== `Bearer ${YIMENG_TOKEN}`
+        ) {
+          throw new Error('Take comment recovery contract mismatch')
+        }
+        const result = persistedTakeCommentReceipts.get(key) ?? null
+        json(response, 200, {
+          schema: 'jason.qingmu-take-comment-recovery.v1',
+          projectId: 'project-1',
+          episodeId: 'episode-1',
+          frameId: PROMPT_IR_FRAME_ID,
+          takeId,
+          expectedTakeSubjectSha256,
           idempotencyKey: key,
           status: result === null ? 'not_found' : 'committed',
           result,
@@ -3624,6 +3876,7 @@ async function startYimengDouble(
     releaseStoryboardCanvasCommitResponse: () => resolveStoryboardCanvasCommitResponse?.(),
     setContinuityMode: (mode) => { continuityMode = mode },
     setVideoReviewMode: (mode) => { videoReviewMode = mode },
+    setTakeSelectedId: (takeId: 'asset-take-1' | 'asset-take-2') => { takeSelectedId = takeId },
     shotFindings,
     reworkRoutes,
     productionUnits,
@@ -3702,6 +3955,7 @@ describe.skipIf(
     let releaseStoryboardCanvasCommitResponse: (() => void) | undefined
     let setContinuityMode: ((mode: ContinuityMode) => void) | undefined
     let setVideoReviewMode: ((mode: VideoReviewMode) => void) | undefined
+    let setTakeSelectedId: ((takeId: 'asset-take-1' | 'asset-take-2') => void) | undefined
     let shotFindingDouble: ReturnType<typeof createShotFindingDouble> | undefined
     let reworkRouteDouble: ReturnType<typeof createReworkRouteDouble> | undefined
     let productionUnitDouble: ReturnType<typeof createProductionUnitDouble> | undefined
@@ -3778,6 +4032,11 @@ describe.skipIf(
       releaseStoryboardCanvasCommitResponse = yimeng.releaseStoryboardCanvasCommitResponse
       setContinuityMode = yimeng.setContinuityMode
       setVideoReviewMode = yimeng.setVideoReviewMode
+      const takeSelectionSetter: unknown = yimeng.setTakeSelectedId
+      if (typeof takeSelectionSetter !== 'function') {
+        throw new TypeError('Take selection fixture setter is missing')
+      }
+      setTakeSelectedId = takeSelectionSetter as typeof setTakeSelectedId
       shotFindingDouble = yimeng.shotFindings
       reworkRouteDouble = yimeng.reworkRoutes
       productionUnitDouble = yimeng.productionUnits
@@ -3822,8 +4081,11 @@ describe.skipIf(
           '/qingmu-yimeng/capabilityCatalog', '/qingmu-yimeng/costRehearsal',
           '/qingmu-yimeng/gateAControlEvidence',
           '/qingmu-yimeng/takeVersions', '/qingmu-yimeng/takeAcceptance',
+          '/qingmu-yimeng/takeComments',
           '/qingmu-yimeng-command/selectTakeVersion',
           '/qingmu-yimeng-command/recoverTakeVersionSelection',
+          '/qingmu-yimeng-command/createTakeComment',
+          '/qingmu-yimeng-command/recoverTakeComment',
         ].includes(requestPath)) return
         browserRpcRequests.push({ path: requestPath, body: request.postDataJSON() as unknown })
       })
@@ -3913,6 +4175,11 @@ describe.skipIf(
                 candidateTakeId: body.candidateTakeId,
                 candidateVersionOrdinal: body.candidateVersionOrdinal,
                 candidateOutputSha256: body.candidateOutputSha256,
+                expectedTakeSubjectSha256: body.expectedTakeSubjectSha256,
+                takeId: body.takeId,
+                anchor: body.anchor,
+                body: body.body,
+                idempotencyKey: body.idempotencyKey,
                 methodId: methodDefinition?.id,
               },
             }
@@ -3968,6 +4235,7 @@ describe.skipIf(
               costRehearsal: process.env.QINGMU_E6_2_COST_SCREENSHOT,
               gateAControlEvidence: process.env.QINGMU_E6_3_GATE_A_SCREENSHOT,
               takeVersionSelection: process.env.QINGMU_E6_4_TAKE_SCREENSHOT,
+              takeComments: process.env.QINGMU_E7_1_TAKE_COMMENT_SCREENSHOT,
               script: process.env.QINGMU_EVIDENCE_SCREENSHOT,
               actor: process.env.QINGMU_ACTOR_EVIDENCE_SCREENSHOT,
               scene: process.env.QINGMU_SCENE_EVIDENCE_SCREENSHOT,
@@ -4176,9 +4444,12 @@ describe.skipIf(
       const fixture = costRehearsalFixture(2)
       await region.getByText(fixture.rehearsalSnapshotSha256, { exact: true }).waitFor()
 
-      const upstream = capturedRequests.slice(requestStart)
+      const allUpstream = capturedRequests.slice(requestStart)
+      expect(allUpstream.every(request => request.method === 'GET' && request.body === undefined)).toBe(true)
+      const upstream = allUpstream.filter(request =>
+        request.path.startsWith('/api/providers/capability-catalog?')
+        || request.path.includes('/cost-rehearsal?'))
       expect(upstream).toHaveLength(2)
-      expect(upstream.every(request => request.method === 'GET' && request.body === undefined)).toBe(true)
       const catalogRead = upstream.find(request => request.path.startsWith('/api/providers/capability-catalog?'))
       const rehearsalRead = upstream.find(request => request.path.includes('/cost-rehearsal?'))
       expect(catalogRead).toEqual(expect.objectContaining({
@@ -4609,6 +4880,239 @@ describe.skipIf(
       await page.setViewportSize({ width: 844, height: 390 })
       expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false)
       expect(await region.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
+      await page.setViewportSize({ width: 1680, height: 1100 })
+      await dialog.getByRole('tab', { name: '分镜与镜头', exact: true }).click()
+      await dialog.getByRole('list', { name: '镜头选择' }).getByRole('button', { name: /frame-z/ }).click()
+      await dialog.getByRole('tab', { name: '总览', exact: true }).click()
+      await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
+      if (tracePath) await page.context().tracing.stop({ path: tracePath })
+    })
+
+    it('adds and recovers one E7-1 ordinary Take comment without changing any review authority', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e7-1-take-comment'))
+      if (setTakeSelectedId === undefined) throw new Error('Take selection fixture control is missing')
+      const tracePath = process.env.QINGMU_E7_1_TAKE_COMMENT_TRACE_PATH?.trim()
+      if (tracePath) {
+        await mkdir(dirname(tracePath), { recursive: true })
+        await page.context().tracing.start({ screenshots: true, snapshots: true, sources: true })
+      }
+      setTakeSelectedId('asset-take-2')
+      const consoleStart = browserConsoleErrors.length
+      const requestStart = capturedRequests.length
+      const rpcStart = browserRpcRequests.length
+      const markerStorageKey = [
+        'qingmu:take-comment-recovery:v1', 'project-1', 'episode-1', PROMPT_IR_FRAME_ID,
+      ].map(encodeURIComponent).join(':')
+      await page.setViewportSize({ width: 1680, height: 1100 })
+      await page.evaluate((key) => { sessionStorage.removeItem(key) }, markerStorageKey)
+
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await dialog.getByRole('tab', { name: '分镜与镜头', exact: true }).click()
+      await dialog.getByRole('list', { name: '镜头选择' }).getByRole('button', { name: /frame-1/ }).click()
+      const feedWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng/takeComments')
+      await dialog.getByRole('tab', { name: '生成与质检', exact: true }).click()
+      const feedWire = await (await feedWirePromise).json() as {
+        result: { ok: boolean; value: TakeCommentFeed }
+      }
+      expect(feedWire.result.ok).toBe(true)
+      const feed = feedWire.result.value
+      expect(Object.keys(feed).sort()).toEqual([
+        'schema', 'projectId', 'episodeId', 'frameId', 'versions', 'capabilities', 'comments',
+      ].sort())
+      expect(feed).toMatchObject({
+        schema: 'jason.qingmu-take-comment-feed.v1',
+        projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID,
+        capabilities: { canComment: true },
+      })
+      expect(feed.versions).toHaveLength(2)
+      for (const version of feed.versions) {
+        expect(Object.keys(version.takeSubject).sort()).toEqual([
+          'schema', 'projectId', 'episodeId', 'frameId', 'frameNo', 'storyboardRevision',
+          'frameContentSha256', 'takeId', 'versionOrdinal', 'outputSha256', 'durationMillis',
+        ].sort())
+        expect(version.takeSubjectSha256).toBe(jcsSha256(version.takeSubject))
+      }
+      expect(JSON.stringify(feed)).not.toMatch(
+        /selectedTakeId|selectionRevision|selectionStatus|isSelected|findings|decisions|approvals/iu,
+      )
+
+      const comments = dialog.getByRole('region', { name: '普通评论', exact: true })
+      await comments.getByText('当前 Take 的眼神应在这一拍落到左侧角色。', { exact: true })
+        .waitFor({ timeout: 20_000 })
+      await comments.getByText('上一版第 36 帧构图需要调整。', { exact: true }).waitFor()
+      expect(await comments.getByText('当前绑定', { exact: true }).count()).toBeGreaterThanOrEqual(1)
+      expect(await comments.getByText('历史', { exact: true }).count()).toBeGreaterThanOrEqual(1)
+      expect(await comments.locator('video, audio, iframe, source, track').count()).toBe(0)
+      expect(await comments.getByRole('button', { name: /批准|approve|技术\s*pass/iu }).count()).toBe(0)
+      expect(await comments.getByText(/^PASS$/iu).count()).toBe(0)
+
+      const versionSelector = comments.getByRole('combobox', { name: 'Take 版本', exact: true })
+      expect(await versionSelector.inputValue()).toBe('asset-take-2')
+      await versionSelector.selectOption('asset-take-1')
+      expect(await versionSelector.inputValue()).toBe('asset-take-1')
+      await versionSelector.selectOption('asset-take-2')
+      await comments.getByRole('radio', { name: '帧号', exact: true }).click()
+      await comments.getByLabel('帧号', { exact: true }).fill('48')
+      await comments.getByLabel('评论内容', { exact: true }).fill('第 48 帧右侧留白需要略微收紧。')
+      const createWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng-command/createTakeComment')
+      await comments.getByRole('button', { name: '提交评论', exact: true }).click()
+      const createWire = await (await createWirePromise).json() as {
+        result: { ok: boolean; value: TakeCommentResult }
+      }
+      expect(createWire.result.ok).toBe(true)
+      const result = createWire.result.value
+      expect(Object.keys(result).sort()).toEqual([
+        'schema', 'comment', 'changed', 'selectionChanged', 'technicalPassChanged',
+        'formalApprovalChanged', 'episodeVerificationChanged', 'humanSignoffInferred',
+        'providerCalls', 'budgetMutation',
+      ].sort())
+      expect(result).toMatchObject({
+        schema: 'jason.qingmu-take-comment-result.v1',
+        changed: false,
+        selectionChanged: false,
+        technicalPassChanged: false,
+        formalApprovalChanged: false,
+        episodeVerificationChanged: false,
+        humanSignoffInferred: false,
+        providerCalls: 0,
+        budgetMutation: false,
+        comment: {
+          takeId: 'asset-take-2', versionOrdinalAtComment: 2,
+          outputSha256: '4'.repeat(64), actorRole: 'commenter',
+          anchor: { kind: 'frame', frameNumber: 48 },
+          body: '第 48 帧右侧留白需要略微收紧。',
+        },
+      })
+      expect(result).not.toHaveProperty('idempotencyKey')
+      await comments.getByText('评论已提交', { exact: true }).waitFor()
+      await comments.getByText('第 48 帧右侧留白需要略微收紧。', { exact: true }).waitFor()
+
+      const commentPath = `/api/qingmu/projects/project-1/episodes/episode-1/frames/${PROMPT_IR_FRAME_ID}/take-comments`
+      await expect.poll(() => capturedRequests.slice(requestStart).filter(request =>
+        request.method === 'POST'
+        && new URL(request.path, 'http://127.0.0.1').pathname === commentPath).length).toBe(1)
+      const commentPost = capturedRequests.slice(requestStart).find(request =>
+        request.method === 'POST'
+        && new URL(request.path, 'http://127.0.0.1').pathname === commentPath)
+      if (!isRecord(commentPost?.body)) throw new Error('Take comment POST body missing')
+      expect(commentPost).toEqual(expect.objectContaining({
+        authorization: `Bearer ${YIMENG_TOKEN}`, cookie: undefined,
+      }))
+      expect(commentPost.idempotencyKey).toMatch(/^qingmu:take-comment:v1:[0-9a-f]{64}$/u)
+      expect(Object.keys(commentPost.body).sort()).toEqual([
+        'expectedTakeSubjectSha256', 'takeId', 'anchor', 'body', 'idempotencyKey',
+      ].sort())
+      expect(commentPost.body).toEqual({
+        expectedTakeSubjectSha256: jcsSha256(takeCommentSubjectFixture(3, 'asset-take-2')),
+        takeId: 'asset-take-2',
+        anchor: { kind: 'frame', frameNumber: 48 },
+        body: '第 48 帧右侧留白需要略微收紧。',
+        idempotencyKey: commentPost.idempotencyKey,
+      })
+      expect(JSON.stringify(commentPost.body)).not.toMatch(
+        /projectId|episodeId|frameId|selection|technical|approv|verification|signoff|provider|budget/iu,
+      )
+
+      const marker = {
+        schema: 'qingmu.take-comment-recovery-marker.v1',
+        projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID,
+        ...commentPost.body,
+      }
+      await page.evaluate(({ key, value }) => {
+        sessionStorage.setItem(key, JSON.stringify(value))
+      }, { key: markerStorageKey, value: marker })
+      await dialog.getByRole('tab', { name: '总览', exact: true }).click()
+      const recoveryWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng-command/recoverTakeComment')
+      await dialog.getByRole('tab', { name: '生成与质检', exact: true }).click()
+      const recoveryWire = await (await recoveryWirePromise).json() as {
+        result: { ok: boolean; value: { status: string; result: TakeCommentResult | null } }
+      }
+      expect(recoveryWire).toMatchObject({ result: { ok: true, value: {
+        schema: 'jason.qingmu-take-comment-recovery.v1',
+        projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID,
+        takeId: 'asset-take-2',
+        expectedTakeSubjectSha256: commentPost.body.expectedTakeSubjectSha256,
+        idempotencyKey: commentPost.idempotencyKey,
+        status: 'committed',
+        result,
+      } } })
+      const recoveredComments = dialog.getByRole('region', { name: '普通评论', exact: true })
+      await recoveredComments.getByText('评论已提交', { exact: true }).waitFor()
+      expect(await page.evaluate(key => sessionStorage.getItem(key), markerStorageKey)).toBeNull()
+      const screenshotPath = process.env.QINGMU_E7_1_TAKE_COMMENT_SCREENSHOT?.trim()
+      if (screenshotPath) {
+        await mkdir(dirname(screenshotPath), { recursive: true })
+        await recoveredComments.getByText('第 48 帧右侧留白需要略微收紧。', { exact: true })
+          .scrollIntoViewIfNeeded()
+        await page.screenshot({ path: screenshotPath })
+      }
+
+      const upstream = capturedRequests.slice(requestStart).filter(request =>
+        new URL(request.path, 'http://127.0.0.1').pathname.startsWith(commentPath))
+      const commentReads = upstream.filter(request => request.method === 'GET'
+        && new URL(request.path, 'http://127.0.0.1').pathname === commentPath)
+      const commentPosts = upstream.filter(request => request.method === 'POST'
+        && new URL(request.path, 'http://127.0.0.1').pathname === commentPath)
+      const recoveryReads = upstream.filter(request => request.method === 'GET'
+        && new URL(request.path, 'http://127.0.0.1').pathname === `${commentPath}/command-receipt`)
+      expect(commentReads).toHaveLength(4)
+      expect(commentPosts).toHaveLength(1)
+      expect(recoveryReads).toHaveLength(1)
+      const recoveryRead = recoveryReads[0]
+      expect(recoveryRead).toEqual(expect.objectContaining({
+        authorization: `Bearer ${YIMENG_TOKEN}`,
+        idempotencyKey: commentPost.idempotencyKey,
+        body: undefined,
+        cookie: undefined,
+      }))
+      const recoveryUrl = new URL(recoveryRead?.path ?? '', 'http://127.0.0.1')
+      expect([...recoveryUrl.searchParams.keys()].sort()).toEqual([
+        'expectedTakeSubjectSha256', 'takeId',
+      ])
+      expect(recoveryUrl.searchParams.get('expectedTakeSubjectSha256'))
+        .toBe(commentPost.body.expectedTakeSubjectSha256)
+      expect(recoveryUrl.searchParams.get('takeId')).toBe('asset-take-2')
+
+      const rpc = browserRpcRequests.slice(rpcStart).filter(request =>
+        /takeComments|createTakeComment|recoverTakeComment/.test(request.path))
+      expect(rpc.filter(request => request.path === '/qingmu-yimeng/takeComments')).toHaveLength(4)
+      expect(rpc.filter(request => request.path === '/qingmu-yimeng-command/createTakeComment')).toHaveLength(1)
+      expect(rpc.filter(request => request.path === '/qingmu-yimeng-command/recoverTakeComment')).toHaveLength(1)
+      const commandRpc = rpc.find(request => request.path === '/qingmu-yimeng-command/createTakeComment')
+      const recoveryRpc = rpc.find(request => request.path === '/qingmu-yimeng-command/recoverTakeComment')
+      if (!isRecord(commandRpc?.body) || !isRecord(commandRpc.body.payload)
+        || !isRecord(recoveryRpc?.body) || !isRecord(recoveryRpc.body.payload)) {
+        throw new Error('Take comment browser request missing')
+      }
+      expect(commandRpc.body.payload).toEqual(recoveryRpc.body.payload)
+      expect(Object.keys(commandRpc.body.payload).sort()).toEqual([
+        'projectId', 'episodeId', 'frameId', 'expectedTakeSubjectSha256',
+        'takeId', 'anchor', 'body', 'idempotencyKey',
+      ].sort())
+      expect(JSON.stringify([commandRpc, recoveryRpc])).not.toMatch(
+        /Bearer|authSession|actorId|actorRole|approval/iu,
+      )
+      expect(capturedRequests.slice(requestStart).filter(request =>
+        request.method === 'POST'
+        && new URL(request.path, 'http://127.0.0.1').pathname.endsWith('/take-versions/selection')))
+        .toEqual([])
+      expect(capturedRequests.slice(requestStart).filter(request =>
+        request.method === 'POST' && /approval|technical-pass|episode-verification|signoff/iu.test(request.path)))
+        .toEqual([])
+      expect(browserConsoleErrors.slice(consoleStart)).toEqual([])
+      expect(tripwire.pageErrors).toEqual([])
+      expect(await page.content()).not.toContain(YIMENG_TOKEN)
+      await expectNoVisibleTechnicalBrand(page)
+
+      await page.setViewportSize({ width: 390, height: 844 })
+      expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false)
+      expect(await recoveredComments.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
+      expect((await recoveredComments.getByRole('button', { name: '提交评论', exact: true }).boundingBox())?.height)
+        .toBeGreaterThanOrEqual(44)
       await page.setViewportSize({ width: 1680, height: 1100 })
       await dialog.getByRole('tab', { name: '分镜与镜头', exact: true }).click()
       await dialog.getByRole('list', { name: '镜头选择' }).getByRole('button', { name: /frame-z/ }).click()

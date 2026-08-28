@@ -500,6 +500,64 @@ export interface YimengTakeVersionStackResponse {
   }
 }
 
+/** One immutable anchor inside a Take. It carries no playback or approval authority. */
+export type YimengTakeCommentAnchor =
+  | { readonly kind: 'timecode'; readonly timecodeMillis: number }
+  | { readonly kind: 'frame'; readonly frameNumber: number }
+
+/** Selection-free, content-addressed subject used to bind ordinary comments. */
+export interface YimengTakeCommentSubject extends YimengTakeVersionRequest {
+  readonly schema: 'jason.qingmu-take-comment-subject.v1'
+  readonly frameNo: number
+  readonly storyboardRevision: number
+  readonly frameContentSha256: string
+  readonly takeId: string
+  readonly versionOrdinal: number
+  readonly outputSha256: string
+  readonly durationMillis: number
+}
+
+/** Current Take subject and its RFC 8785 digest. */
+export interface YimengTakeCommentVersion {
+  readonly takeSubject: YimengTakeCommentSubject
+  readonly takeSubjectSha256: string
+}
+
+/** One ordinary human comment. It is neither a Finding nor an approval decision. */
+export interface YimengTakeComment {
+  readonly id: string
+  readonly takeId: string
+  readonly versionOrdinalAtComment: number
+  readonly outputSha256: string
+  readonly frameBinding: {
+    readonly frameId: string
+    readonly frameNo: number
+    readonly storyboardRevision: number
+    readonly frameContentSha256: string
+  }
+  readonly takeSubjectSha256: string
+  readonly anchor: YimengTakeCommentAnchor
+  readonly body: string
+  readonly actorId: string
+  readonly actorRole: 'commenter'
+  readonly authSessionId: string
+  readonly createdAt: string
+  readonly eventId: string
+  /** Derived by the adapter from the exact current Take subject binding. */
+  readonly currentBinding: boolean
+}
+
+/** Exact coordinates for one Shot's ordinary-comment feed. */
+export type YimengTakeCommentRequest = YimengTakeVersionRequest
+
+/** Strict read-only ordinary-comment feed under one authoritative Take stack. */
+export interface YimengTakeCommentFeedResponse extends YimengTakeCommentRequest {
+  readonly schema: 'jason.qingmu-take-comment-feed.v1'
+  readonly versions: readonly YimengTakeCommentVersion[]
+  readonly capabilities: { readonly canComment: boolean }
+  readonly comments: readonly YimengTakeComment[]
+}
+
 /** Exact Yimeng coordinates for the currently selected Take acceptance evidence. */
 export type YimengTakeAcceptanceRequest = YimengTakeVersionRequest
 
@@ -1723,6 +1781,7 @@ export interface YimengReadEndpointMap {
   readonly promptIr: YimengPromptIrResponse
   readonly selectedVideoReview: YimengSelectedVideoReviewResponse
   readonly takeVersions: YimengTakeVersionStackResponse
+  readonly takeComments: YimengTakeCommentFeedResponse
   readonly takeAcceptance: YimengTakeAcceptanceResponse
   readonly shotFindings: YimengShotFindingFeedResponse
   readonly productionUnits: YimengProductionUnitsResponse

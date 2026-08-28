@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这个私有实验性 Host 插件通过仅限回环地址的 `/qingmu-yimeng-command` 通道，暴露易梦 `episode_script` 与人物、环境、道具 `element_profile` ChangeSet 的显式流程。剧本操作继续是 `proposeScript`、`previewScript`、`commitScript` 和只读的 `recoverScriptCommit`；元素操作是 `proposeElementProfile`、`proposeReferenceAsset`、`previewElementProfile`、`commitElementProfile` 和只读的 `recoverElementProfileCommit`。所选视频 Finding 使用 `recordShotFinding` 和只读的 `recoverShotFinding`。通过机器校验的阶段工件使用 `registerStageArtifact`、`commitStageArtifactDecision`，以及只读的 `recoverStageArtifactRegistration` 和 `recoverStageArtifactDecision`。完整范围 LSU 计划使用 `sealLsuPlan`、只读的 `recoverLsuPlanSeal` 和 `probeLsuPlanAuthority`。
+这个私有实验性 Host 插件通过仅限回环地址的 `/qingmu-yimeng-command` 通道，暴露易梦 `episode_script` 与人物、环境、道具 `element_profile` ChangeSet 的显式流程。剧本操作继续是 `proposeScript`、`previewScript`、`commitScript` 和只读的 `recoverScriptCommit`；元素操作是 `proposeElementProfile`、`proposeReferenceAsset`、`previewElementProfile`、`commitElementProfile` 和只读的 `recoverElementProfileCommit`。Take 普通评论使用 `createTakeComment` 和只读的 `recoverTakeComment`。所选视频 Finding 使用 `recordShotFinding` 和只读的 `recoverShotFinding`。通过机器校验的阶段工件使用 `registerStageArtifact`、`commitStageArtifactDecision`，以及只读的 `recoverStageArtifactRegistration` 和 `recoverStageArtifactDecision`。完整范围 LSU 计划使用 `sealLsuPlan`、只读的 `recoverLsuPlanSeal` 和 `probeLsuPlanAuthority`。
 
 ## 命令边界
 
@@ -19,6 +19,12 @@ ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只
 `selectReferenceAsset` 只记录用户明确的选择意图，不等于人工批准或签收。`requestReferenceRegeneration` 必须带非空 `repairPrompt`，并且只记录意图：成功预览和回执必须保持 `providerCalls: 0`、`workerStarted: false`，且不推断人工批准。两种操作都不会启动生成，也不会静默代选候选。
 
 回执恢复只会向易梦 `/api/qingmu/projects/{projectId}/episodes/{episodeId}/change-sets/{changeSetId}/command-receipt` 精确发送一次 `GET`；三类元素档案都使用对应的通用元素路由。两者都只使用原始 `Idempotency-Key` 请求头，不带请求体或 query。适配器只接受 `jason.qingmu-command-receipt-recovery.v1` wrapper，并重新核验其中原始提交回执的全部血缘；在接受 wrapper 的 `receiptSha256` 前，还会重算原始回执的 canonical JSON SHA-256；它绝不会重试 commit `POST`。
+
+## Take 普通评论
+
+`createTakeComment` 把精确的当前 Take 主体 SHA 绑定到所选 Take、时间码或帧锚点、评论正文和一个可见 ASCII 幂等键。它只向 `/api/qingmu/projects/{projectId}/episodes/{episodeId}/frames/{frameId}/take-comments` 发送一次 `POST`；请求体准确包含 `expectedTakeSubjectSha256`、`takeId`、`anchor`、`body` 和 `idempotencyKey`，路径 ID、actor、角色与 session 均来自路由和易梦认证。结果必须保留原意图，并把 `changed`、选择、技术通过、正式批准、单集验证、人工签收、Provider 调用与预算影响保持为 false 或零。
+
+`recoverTakeComment` 绝不重试 POST。它只向 `/command-receipt` 发送一次无正文 GET，在 query 中保留原 Take ID 与主体 SHA，在请求头中保留幂等键，随后校验原结果或严格的 `not_found`。两个操作都只使用 Host 持有的易梦 bearer token；凭据一旦反射进上游 JSON 就失败关闭。
 
 ## 镜头视频 Finding
 

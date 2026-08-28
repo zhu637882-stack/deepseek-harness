@@ -76,6 +76,12 @@ The existing Take comparison surface reads the Yimeng version stack first. When 
 
 The browser recomputes the RFC 8785 evidence, rule-binding, and method-projection hashes and checks the Host attestation coordinates, selected asset and output lineage, storyboard/frame/selection revisions, and every fixed non-authority marker. It renders strict full-video decode and frame-count-derived actual average rate separately from nominal `r_frame_rate`, macro QC, micro QC, and the Provider receipt. No path, URL, or raw Provider response is rendered. The overall state remains `UNVERIFIED_FOR_PAID_PRODUCTION`; Selected is not Approved and Gate B remains incomplete.
 
+## Ordinary comments on Take versions
+
+The comparison workspace also reads Yimeng's current and historical ordinary-comment feed. The form defaults to the Selected Take when one exists, otherwise the first current version; choosing another Take for a comment never changes Yimeng selection. A user explicitly chooses a timecode or frame anchor and enters the comment. Before the one POST, the browser stores and reads back the complete non-secret intent in a Shot-scoped `sessionStorage` marker. An uncertain response triggers only a GET receipt lookup with the original Take identity, subject SHA, anchor, body, and idempotency key; the POST is never retried, and only a matching result clears the marker and refreshes the authoritative feed.
+
+Current bindings and historical comments remain visibly distinct. The panel has no playback, Finding, technical-pass, formal-approval, episode-verification, human-signoff, Provider, budget, or Take-selection control.
+
 ## Explicit production-unit scope registration
 
 The same Shot workspace reads existing Yimeng shot groups and their current or historical unit bindings. The user must select an existing group, enter an explicit unit ID, and confirm the displayed scope. A group's existing unit ID cannot be reassigned. Available groups must match the visible storyboard revision and canonical Shot IDs and display numbers; the workflow projection does not expose frame-content hashes, so the client does not invent them. The method comes from the existing IMAGO adapter, and a binding uses the existing command adapter with source SHA and binding-revision/SHA compare-and-swap.
