@@ -10,6 +10,7 @@ import z from '@deepseek-ai/schemastery'
 import { prepareShotFindingCommand } from './shot-finding.ts'
 import { prepareTakeVersionCommand } from './take-version.ts'
 import { prepareTakeCommentCommand } from './take-comment.ts'
+import { prepareTakeReviewCommand } from './take-review-authority.ts'
 import { prepareProductionUnitCommand } from './production-unit.ts'
 import {
   prepareCurrentStageArtifactMethodRequest,
@@ -297,6 +298,18 @@ export type {
   YimengTakeCommentRecord,
   YimengTakeCommentRecovery,
   YimengTakeCommentResult,
+  YimengTakeReviewAction,
+  YimengCreateTakeReviewRecommendationRequest,
+  YimengRecoverTakeReviewRecommendationRequest,
+  YimengTakeReviewRecommendationRecord,
+  YimengTakeReviewRecommendationRecovery,
+  YimengTakeReviewRecommendationResult,
+  YimengCreateTakeHumanDecisionRequest,
+  YimengRecoverTakeHumanDecisionRequest,
+  YimengTakeHumanDecisionRecord,
+  YimengTakeHumanDecisionRecovery,
+  YimengTakeHumanDecisionResult,
+  YimengTakeReviewSubject,
 } from './types.ts'
 
 const CHANNEL = '/qingmu-yimeng-command'
@@ -4956,6 +4969,7 @@ export function createYimengCommandHandler(
     try {
       const stageArtifactHelpers = {
         canonicalJson,
+        canonicalJsonSha256,
         inputError: (message: string) => new InputError(message),
         responseError: (message: string) => new UpstreamContractError(message),
         readAttestationKey: readReferenceAttestationKey,
@@ -5012,6 +5026,10 @@ export function createYimengCommandHandler(
       let normalize: (value: unknown, token: string) => unknown
       if (endpoint === 'selectTakeVersion' || endpoint === 'recoverTakeVersionSelection'
         || endpoint === 'createTakeComment' || endpoint === 'recoverTakeComment'
+        || endpoint === 'createTakeReviewRecommendation'
+        || endpoint === 'recoverTakeReviewRecommendation'
+        || endpoint === 'createTakeHumanDecision'
+        || endpoint === 'recoverTakeHumanDecision'
         || endpoint === 'recordShotFinding' || endpoint === 'recoverShotFinding'
         || endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
         || endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
@@ -5023,25 +5041,30 @@ export function createYimengCommandHandler(
         || endpoint === 'recordReworkRoute' || endpoint === 'recoverReworkRoute'
         || endpoint === 'probeReworkRouteAuthority') {
         const helpers = stageArtifactHelpers
-        const prepared = endpoint === 'createTakeComment' || endpoint === 'recoverTakeComment'
-          ? prepareTakeCommentCommand(endpoint, payload, helpers)
-          : endpoint === 'selectTakeVersion' || endpoint === 'recoverTakeVersionSelection'
-            ? prepareTakeVersionCommand(endpoint, payload, helpers)
-            : endpoint === 'recordReworkRoute' || endpoint === 'recoverReworkRoute'
-              || endpoint === 'probeReworkRouteAuthority'
-              ? prepareReworkRouteCommand(endpoint, payload, helpers, currentReworkRouteMethod)
-              : endpoint === 'sealLsuPlan' || endpoint === 'recoverLsuPlanSeal'
-                || endpoint === 'probeLsuPlanAuthority'
-                ? prepareLsuPlanCommand(endpoint, payload, helpers, currentLsuPlanMethod)
-                : endpoint === 'registerStageArtifact' || endpoint === 'recoverStageArtifactRegistration'
-                  || endpoint === 'commitStageArtifactDecision' || endpoint === 'recoverStageArtifactDecision'
-                  || endpoint === 'probeStageArtifactAuthority'
-                  ? prepareStageArtifactCommand(endpoint, payload, helpers, currentStageArtifactMethod)
-                  : endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
-                    ? prepareProductionUnitCommand(endpoint, payload, helpers)
-                    : endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
-                      ? prepareStageSourceCommand(endpoint, payload, helpers)
-                      : prepareShotFindingCommand(endpoint, payload, helpers)
+        const prepared = endpoint === 'createTakeReviewRecommendation'
+          || endpoint === 'recoverTakeReviewRecommendation'
+          || endpoint === 'createTakeHumanDecision'
+          || endpoint === 'recoverTakeHumanDecision'
+          ? prepareTakeReviewCommand(endpoint, payload, helpers)
+          : endpoint === 'createTakeComment' || endpoint === 'recoverTakeComment'
+            ? prepareTakeCommentCommand(endpoint, payload, helpers)
+            : endpoint === 'selectTakeVersion' || endpoint === 'recoverTakeVersionSelection'
+              ? prepareTakeVersionCommand(endpoint, payload, helpers)
+              : endpoint === 'recordReworkRoute' || endpoint === 'recoverReworkRoute'
+                || endpoint === 'probeReworkRouteAuthority'
+                ? prepareReworkRouteCommand(endpoint, payload, helpers, currentReworkRouteMethod)
+                : endpoint === 'sealLsuPlan' || endpoint === 'recoverLsuPlanSeal'
+                  || endpoint === 'probeLsuPlanAuthority'
+                  ? prepareLsuPlanCommand(endpoint, payload, helpers, currentLsuPlanMethod)
+                  : endpoint === 'registerStageArtifact' || endpoint === 'recoverStageArtifactRegistration'
+                    || endpoint === 'commitStageArtifactDecision' || endpoint === 'recoverStageArtifactDecision'
+                    || endpoint === 'probeStageArtifactAuthority'
+                    ? prepareStageArtifactCommand(endpoint, payload, helpers, currentStageArtifactMethod)
+                    : endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
+                      ? prepareProductionUnitCommand(endpoint, payload, helpers)
+                      : endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
+                        ? prepareStageSourceCommand(endpoint, payload, helpers)
+                        : prepareShotFindingCommand(endpoint, payload, helpers)
         path = prepared.path
         requestInit = {
           method: prepared.request.method,
@@ -5363,6 +5386,10 @@ export function createYimengCommandHandler(
         || endpoint === 'probeReworkRouteAuthority'
       const requiresCredentialReflectionGuard = isStageArtifactCommand
         || endpoint === 'createTakeComment' || endpoint === 'recoverTakeComment'
+        || endpoint === 'createTakeReviewRecommendation'
+        || endpoint === 'recoverTakeReviewRecommendation'
+        || endpoint === 'createTakeHumanDecision'
+        || endpoint === 'recoverTakeHumanDecision'
       const response = await fetchJson(
         dependencies,
         `${baseUrl}${path}`,

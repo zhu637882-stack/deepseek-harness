@@ -8,6 +8,10 @@ import type {
 import type { QingmuCockpitKey } from './locales.ts'
 import { TakeCommentsPanel, type TakeCommentPort } from './TakeCommentsPanel.tsx'
 import {
+  TakeReviewAuthorityPanel,
+  type TakeReviewAuthorityPort,
+} from './TakeReviewAuthorityPanel.tsx'
+import {
   clearTakeVersionSelectionMarker, createTakeVersionSelectionMarker,
   readTakeVersionSelectionMarker, writeTakeVersionSelectionMarker,
   type TakeVersionSelectionRecoveryMarker, type TakeVersionSelectionRecoveryRead,
@@ -24,7 +28,7 @@ interface TakeVersionCompareViewProps {
   readonly port: Pick<QingmuYimengPort,
     'takeVersions' | 'takeAcceptance' | 'takeAcceptanceMethod'
     | 'selectTakeVersion' | 'recoverTakeVersionSelection'>
-    & Partial<TakeCommentPort>
+    & Partial<TakeCommentPort> & Partial<TakeReviewAuthorityPort>
   readonly t: (key: QingmuCockpitKey) => string
 }
 
@@ -63,6 +67,16 @@ interface Notice {
 function hasTakeCommentPort(port: TakeVersionCompareViewProps['port']): port is typeof port & TakeCommentPort {
   return typeof port.takeComments === 'function' && typeof port.createTakeComment === 'function'
     && typeof port.recoverTakeComment === 'function'
+}
+
+function hasTakeReviewAuthorityPort(
+  port: TakeVersionCompareViewProps['port'],
+): port is typeof port & TakeReviewAuthorityPort {
+  return typeof port.takeReviewAuthority === 'function'
+    && typeof port.createTakeReviewRecommendation === 'function'
+    && typeof port.recoverTakeReviewRecommendation === 'function'
+    && typeof port.createTakeHumanDecision === 'function'
+    && typeof port.recoverTakeHumanDecision === 'function'
 }
 
 function requestFromMarker(marker: TakeVersionSelectionRecoveryMarker) {
@@ -644,6 +658,9 @@ function TakeVersionComparePanel({
     </div>}
     {eligible && commentPreferredTakeId !== undefined && hasTakeCommentPort(port)
       && <TakeCommentsPanel projectId={projectId} episodeId={episodeId} frameId={selectedShotId}
+        preferredTakeId={commentPreferredTakeId} refresh={refresh} port={port} t={t} />}
+    {eligible && commentPreferredTakeId !== undefined && hasTakeReviewAuthorityPort(port)
+      && <TakeReviewAuthorityPanel projectId={projectId} episodeId={episodeId} frameId={selectedShotId}
         preferredTakeId={commentPreferredTakeId} refresh={refresh} port={port} t={t} />}
   </section>
 }

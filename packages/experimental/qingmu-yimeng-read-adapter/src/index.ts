@@ -11,6 +11,10 @@ import { normalizeContinuityDelta } from './continuity.ts'
 import { normalizeSelectedVideoReview } from './selected-video-review.ts'
 import { normalizeTakeVersionStack, parseTakeVersionReadRequest } from './take-versions.ts'
 import { normalizeTakeCommentFeed, parseTakeCommentReadRequest } from './take-comments.ts'
+import {
+  normalizeTakeReviewAuthorityFeed,
+  parseTakeReviewAuthorityRequest,
+} from './take-review-authority.ts'
 import { normalizeTakeAcceptance, parseTakeAcceptanceReadRequest } from './take-acceptance.ts'
 import { normalizeShotFindingFeed, parseShotFindingReadRequest } from './shot-findings.ts'
 import { normalizeProductionUnitsFeed, parseProductionUnitsReadRequest } from './production-units.ts'
@@ -175,6 +179,11 @@ export type {
   YimengTakeCommentRequest,
   YimengTakeCommentSubject,
   YimengTakeCommentVersion,
+  YimengTakeReviewAction,
+  YimengTakeReviewAuthorityFeedResponse,
+  YimengTakeReviewAuthorityRequest,
+  YimengTakeReviewRecommendation,
+  YimengTakeHumanDecision,
   YimengTakeAcceptanceRequest,
   YimengTakeAcceptanceSubject,
   YimengTakeProviderReceipt,
@@ -266,7 +275,7 @@ const PROTECTED_ENDPOINTS = new Set([
   'projects', 'episodes', 'script', 'promptIr', 'capabilityCatalog', 'costRehearsal',
   'gateAControlEvidence', 'elementProfile',
   'referenceCandidates', 'reviewEvents',
-  'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'takeComments', 'takeAcceptance', 'shotFindings', 'productionUnits', 'stageSources',
+  'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'takeComments', 'takeReviewAuthority', 'takeAcceptance', 'shotFindings', 'productionUnits', 'stageSources',
   'lsuPlanSource', 'reworkRouteSource',
 ])
 const HUMAN_DECISION_VALUES = new Set<YimengHumanDecisionValue>([
@@ -685,6 +694,14 @@ function parseTakeCommentRequest(payload: unknown) {
     return parseTakeCommentReadRequest(payload)
   } catch {
     throw new InputError('takeComments accepts only canonical projectId, episodeId, and frameId')
+  }
+}
+
+function parseTakeReviewRequest(payload: unknown) {
+  try {
+    return parseTakeReviewAuthorityRequest(payload)
+  } catch {
+    throw new InputError('takeReviewAuthority accepts only canonical projectId, episodeId, and frameId')
   }
 }
 
@@ -3720,6 +3737,12 @@ export function createYimengReadHandler(
           + '/episodes/' + encodeURIComponent(request.episodeId)
           + '/frames/' + encodeURIComponent(request.frameId) + '/take-comments'
         normalize = value => normalizeTakeCommentFeed(value, request, jcsSha256)
+      } else if (endpoint === 'takeReviewAuthority') {
+        const request = parseTakeReviewRequest(payload)
+        path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)
+          + '/episodes/' + encodeURIComponent(request.episodeId)
+          + '/frames/' + encodeURIComponent(request.frameId) + '/take-review-authority'
+        normalize = value => normalizeTakeReviewAuthorityFeed(value, request, jcsSha256)
       } else if (endpoint === 'takeAcceptance') {
         const request = parseTakeAcceptanceRequest(payload)
         path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)

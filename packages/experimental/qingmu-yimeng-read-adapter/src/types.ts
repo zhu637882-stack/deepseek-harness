@@ -558,6 +558,69 @@ export interface YimengTakeCommentFeedResponse extends YimengTakeCommentRequest 
   readonly comments: readonly YimengTakeComment[]
 }
 
+/** Reviewer advice and Approver decisions deliberately share values, not authority. */
+export type YimengTakeReviewAction = 'approve' | 'reject' | 'request_changes'
+
+/** One Reviewer recommendation. It can never stand in for a HumanDecision. */
+export interface YimengTakeReviewRecommendation {
+  readonly id: string
+  readonly takeSubject: YimengTakeCommentSubject
+  readonly takeSubjectSha256: string
+  readonly actorId: string
+  readonly actorRole: 'reviewer'
+  readonly actorNaturalPersonId: string
+  readonly authSessionId: string
+  readonly eventId: string
+  readonly recommendation: YimengTakeReviewAction
+  readonly reason: string
+  readonly recommendedAt: string
+  readonly currentBinding: boolean
+}
+
+/** One formal decision event. It records a decision without mutating Take state. */
+export interface YimengTakeHumanDecision {
+  readonly decisionId: string
+  readonly subjectType: 'shot_take'
+  readonly subjectId: string
+  readonly subjectRevision: number
+  readonly subjectSha256: string
+  readonly takeSubject: YimengTakeCommentSubject
+  readonly takeSubjectSha256: string
+  readonly actorId: string
+  readonly actorRole: 'approver'
+  readonly actorNaturalPersonId: string
+  readonly authSessionId: string
+  readonly eventId: string
+  readonly decision: YimengTakeReviewAction
+  readonly reason: string
+  readonly producerActorId: string
+  readonly producerNaturalPersonId: string
+  readonly participantNaturalPersonIds: readonly string[]
+  readonly decidedAt: string
+  readonly currentBinding: boolean
+}
+
+/** Exact coordinates for the separate recommendation/decision authority feed. */
+export type YimengTakeReviewAuthorityRequest = YimengTakeVersionRequest
+
+/** Strict read feed; recommendation authority and formal decision authority stay separate. */
+export interface YimengTakeReviewAuthorityFeedResponse extends YimengTakeReviewAuthorityRequest {
+  readonly schema: 'jason.qingmu-take-review-authority-feed.v1'
+  readonly capabilities: {
+    readonly canReview: boolean
+    readonly canDecide: boolean
+  }
+  readonly versions: readonly YimengTakeCommentVersion[]
+  readonly recommendations: readonly YimengTakeReviewRecommendation[]
+  readonly decisions: readonly YimengTakeHumanDecision[]
+  readonly currentDecision: YimengTakeHumanDecision | null
+  readonly boundaries: {
+    readonly reviewerRecommendationIsApproval: false
+    readonly decisionMutatesTakeState: false
+    readonly roleOrSessionSwitchCanBypassNaturalPersonSeparation: false
+  }
+}
+
 /** Exact Yimeng coordinates for the currently selected Take acceptance evidence. */
 export type YimengTakeAcceptanceRequest = YimengTakeVersionRequest
 
@@ -1782,6 +1845,7 @@ export interface YimengReadEndpointMap {
   readonly selectedVideoReview: YimengSelectedVideoReviewResponse
   readonly takeVersions: YimengTakeVersionStackResponse
   readonly takeComments: YimengTakeCommentFeedResponse
+  readonly takeReviewAuthority: YimengTakeReviewAuthorityFeedResponse
   readonly takeAcceptance: YimengTakeAcceptanceResponse
   readonly shotFindings: YimengShotFindingFeedResponse
   readonly productionUnits: YimengProductionUnitsResponse

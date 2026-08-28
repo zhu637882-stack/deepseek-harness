@@ -726,6 +726,19 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     recoverTakeVersionSelection: vi.fn(async () => { throw new Error('Take recovery is not part of this fixture') }),
     createTakeComment: vi.fn(async () => { throw new Error('Take comment creation is not part of this fixture') }),
     recoverTakeComment: vi.fn(async () => { throw new Error('Take comment recovery is not part of this fixture') }),
+    takeReviewAuthority: vi.fn(async () => { throw new Error('Take review authority is not part of this fixture') }),
+    createTakeReviewRecommendation: vi.fn(async () => {
+      throw new Error('Take recommendation creation is not part of this fixture')
+    }),
+    recoverTakeReviewRecommendation: vi.fn(async () => {
+      throw new Error('Take recommendation recovery is not part of this fixture')
+    }),
+    createTakeHumanDecision: vi.fn(async () => {
+      throw new Error('Take HumanDecision creation is not part of this fixture')
+    }),
+    recoverTakeHumanDecision: vi.fn(async () => {
+      throw new Error('Take HumanDecision recovery is not part of this fixture')
+    }),
     shotFindings: vi.fn(async (request: Parameters<QingmuYimengPort['shotFindings']>[0]) => ({
       schema: 'jason.qingmu-shot-finding-feed.v1', ...request, subject: null, snapshotSha256: null,
       availability: { status: 'unavailable', reason: 'selected_video_unavailable' },

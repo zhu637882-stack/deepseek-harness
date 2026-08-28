@@ -22,6 +22,17 @@ import type {
   TakeCommentResult,
   TakeCommentSubject,
 } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/take-comment-fixture.ts'
+import type {
+  YimengTakeHumanDecision as ReadTakeHumanDecision,
+  YimengTakeReviewAuthorityFeedResponse,
+  YimengTakeReviewRecommendation as ReadTakeReviewRecommendation,
+} from '../../../packages/experimental/qingmu-yimeng-read-adapter/src/types.ts'
+import type {
+  YimengCreateTakeHumanDecisionRequest,
+  YimengCreateTakeReviewRecommendationRequest,
+  YimengTakeHumanDecisionResult,
+  YimengTakeReviewRecommendationResult,
+} from '../../../packages/experimental/qingmu-yimeng-command-adapter/src/types.ts'
 import { takeVersionStackFixture as baseTakeVersionStackFixture } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/take-version-fixture.ts'
 import { videoCandidatesFixture } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/selected-video-review-fixture.ts'
 import { createShotFindingDouble } from './qingmu-shot-finding-fixture.ts'
@@ -2041,6 +2052,120 @@ function takeCommentFeedFixture(
   }
 }
 
+const TAKE_REVIEW_ZERO_IMPACT = {
+  changed: false,
+  selectionChanged: false,
+  technicalPassChanged: false,
+  formalApprovalChanged: false,
+  episodeVerificationChanged: false,
+  humanSignoffInferred: false,
+  providerCalls: 0,
+  budgetMutation: false,
+} as const
+
+function takeReviewRecommendationResultFixture(
+  revision: number,
+  input: YimengCreateTakeReviewRecommendationRequest,
+  sequence: number,
+): YimengTakeReviewRecommendationResult {
+  if (input.takeId !== 'asset-take-1' && input.takeId !== 'asset-take-2') {
+    throw new Error('Reviewer recommendation Take mismatch')
+  }
+  const takeSubject = takeCommentSubjectFixture(revision, input.takeId)
+  return {
+    schema: 'jason.qingmu-take-review-recommendation-result.v1',
+    recommendation: {
+      id: `take-review-recommendation-${String(sequence).padStart(4, '0')}`,
+      takeSubject,
+      takeSubjectSha256: input.expectedTakeSubjectSha256,
+      actorId: 'reviewer-user',
+      actorRole: 'reviewer',
+      actorNaturalPersonId: 'person-reviewer',
+      authSessionId: '8'.repeat(64),
+      eventId: `take-review-recommendation-event-${String(sequence).padStart(4, '0')}`,
+      recommendation: input.recommendation,
+      reason: input.reason,
+      recommendedAt: `2026-08-28T12:1${String(sequence)}:00.123456+00:00`,
+    },
+    decisionRecorded: false,
+    recommendationOnly: true,
+    ...TAKE_REVIEW_ZERO_IMPACT,
+  }
+}
+
+function takeHumanDecisionResultFixture(
+  revision: number,
+  input: YimengCreateTakeHumanDecisionRequest,
+  sequence: number,
+): YimengTakeHumanDecisionResult {
+  if (input.takeId !== 'asset-take-1' && input.takeId !== 'asset-take-2') {
+    throw new Error('Approver decision Take mismatch')
+  }
+  const takeSubject = takeCommentSubjectFixture(revision, input.takeId)
+  return {
+    schema: 'jason.qingmu-take-human-decision-result.v1',
+    decision: {
+      decisionId: `take-human-decision-${String(sequence).padStart(4, '0')}`,
+      subjectType: 'shot_take',
+      subjectId: input.takeId,
+      subjectRevision: takeSubject.versionOrdinal,
+      subjectSha256: input.expectedTakeSubjectSha256,
+      takeSubject,
+      takeSubjectSha256: input.expectedTakeSubjectSha256,
+      actorId: 'approver-user',
+      actorRole: 'approver',
+      actorNaturalPersonId: 'person-approver',
+      authSessionId: '9'.repeat(64),
+      eventId: `take-human-decision-event-${String(sequence).padStart(4, '0')}`,
+      decision: input.decision,
+      reason: input.reason,
+      producerActorId: 'producer-user',
+      producerNaturalPersonId: 'person-producer',
+      participantNaturalPersonIds: ['person-editor', 'person-producer'],
+      decidedAt: `2026-08-28T12:2${String(sequence)}:00.123456+00:00`,
+    },
+    decisionRecorded: true,
+    recommendationOnly: false,
+    ...TAKE_REVIEW_ZERO_IMPACT,
+  }
+}
+
+function takeReviewAuthorityFeedFixture(
+  revision: number,
+  recommendations: readonly YimengTakeReviewRecommendationResult[] = [],
+  decisions: readonly YimengTakeHumanDecisionResult[] = [],
+): YimengTakeReviewAuthorityFeedResponse {
+  const first = takeCommentSubjectFixture(revision, 'asset-take-1')
+  const second = takeCommentSubjectFixture(revision, 'asset-take-2')
+  const recommendationHistory: ReadTakeReviewRecommendation[] = recommendations.map(result => ({
+    ...result.recommendation,
+    currentBinding: true,
+  }))
+  const decisionHistory: ReadTakeHumanDecision[] = decisions.map(result => ({
+    ...result.decision,
+    currentBinding: true,
+  }))
+  return {
+    schema: 'jason.qingmu-take-review-authority-feed.v1',
+    projectId: 'project-1',
+    episodeId: 'episode-1',
+    frameId: PROMPT_IR_FRAME_ID,
+    capabilities: { canReview: true, canDecide: true },
+    versions: [
+      { takeSubject: first, takeSubjectSha256: jcsSha256(first) },
+      { takeSubject: second, takeSubjectSha256: jcsSha256(second) },
+    ],
+    recommendations: recommendationHistory,
+    decisions: decisionHistory,
+    currentDecision: decisionHistory.at(-1) ?? null,
+    boundaries: {
+      reviewerRecommendationIsApproval: false,
+      decisionMutatesTakeState: false,
+      roleOrSessionSwitchCanBypassNaturalPersonSeparation: false,
+    },
+  }
+}
+
 function takeAcceptanceFixture(
   revision: number,
   selectedTakeId: 'asset-take-1' | 'asset-take-2' = 'asset-take-1',
@@ -2252,6 +2377,13 @@ async function startYimengDouble(
   >()
   const persistedTakeCommentReceipts = new Map<string, TakeCommentResult>()
   const persistedTakeComments: TakeComment[] = []
+  const persistedTakeReviewRecommendationReceipts = new Map<
+    string,
+    YimengTakeReviewRecommendationResult
+  >()
+  const persistedTakeReviewRecommendations: YimengTakeReviewRecommendationResult[] = []
+  const persistedTakeHumanDecisionReceipts = new Map<string, YimengTakeHumanDecisionResult>()
+  const persistedTakeHumanDecisions: YimengTakeHumanDecisionResult[] = []
   let publicBaseUrl = ''
   const reviewComments: Record<ElementKind, Array<Record<string, unknown>>> = { actor: [], scene: [], prop: [] }
   const reviewDecisions: Record<ElementKind, Array<Record<string, unknown>>> = { actor: [], scene: [], prop: [] }
@@ -2539,6 +2671,135 @@ async function startYimengDouble(
         const result = persistedTakeCommentReceipts.get(key) ?? null
         json(response, 200, {
           schema: 'jason.qingmu-take-comment-recovery.v1',
+          projectId: 'project-1',
+          episodeId: 'episode-1',
+          frameId: PROMPT_IR_FRAME_ID,
+          takeId,
+          expectedTakeSubjectSha256,
+          idempotencyKey: key,
+          status: result === null ? 'not_found' : 'committed',
+          result,
+        })
+        return
+      }
+      const takeReviewPath = `/api/qingmu/projects/project-1/episodes/episode-1/frames/${PROMPT_IR_FRAME_ID}/take-review-authority`
+      if (request.method === 'GET' && url.pathname === takeReviewPath) {
+        if (request.headers.authorization !== `Bearer ${YIMENG_TOKEN}`) {
+          throw new Error('Take review authority read authorization mismatch')
+        }
+        json(response, 200, takeReviewAuthorityFeedFixture(
+          revision,
+          persistedTakeReviewRecommendations,
+          persistedTakeHumanDecisions,
+        ))
+        return
+      }
+      if (request.method === 'POST' && (
+        url.pathname === `${takeReviewPath}/recommendations`
+        || url.pathname === `${takeReviewPath}/decisions`
+      )) {
+        if (!isRecord(body)) throw new Error('Take review authority body is missing')
+        const isRecommendation = url.pathname.endsWith('/recommendations')
+        const actionField = isRecommendation ? 'recommendation' : 'decision'
+        const expectedKeys = [
+          'expectedTakeSubjectSha256', 'takeId', actionField, 'reason', 'idempotencyKey',
+        ].sort()
+        const bodyKeys = Object.keys(body).sort()
+        const takeId = body.takeId
+        if (takeId !== 'asset-take-1' && takeId !== 'asset-take-2') {
+          throw new Error('Take review authority takeId mismatch')
+        }
+        const expectedSubjectSha256 = jcsSha256(takeCommentSubjectFixture(revision, takeId))
+        const action = body[actionField]
+        const key = typeof body.idempotencyKey === 'string' ? body.idempotencyKey : ''
+        if (
+          bodyKeys.length !== expectedKeys.length
+          || bodyKeys.some((field, index) => field !== expectedKeys[index])
+          || body.expectedTakeSubjectSha256 !== expectedSubjectSha256
+          || (action !== 'approve' && action !== 'reject' && action !== 'request_changes')
+          || typeof body.reason !== 'string'
+          || body.reason.replace(/^[\p{White_Space}\u001c-\u001f]+|[\p{White_Space}\u001c-\u001f]+$/gu, '') === ''
+          || key === ''
+          || request.headers.authorization !== `Bearer ${YIMENG_TOKEN}`
+          || request.headers['idempotency-key'] !== key
+        ) {
+          throw new Error('Take review authority command contract mismatch')
+        }
+        if (isRecommendation) {
+          const replay = persistedTakeReviewRecommendationReceipts.get(key)
+          if (replay !== undefined) {
+            json(response, 200, replay)
+            return
+          }
+          const input: YimengCreateTakeReviewRecommendationRequest = {
+            projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID,
+            expectedTakeSubjectSha256: expectedSubjectSha256,
+            takeId,
+            recommendation: action,
+            reason: body.reason,
+            idempotencyKey: key,
+          }
+          const result = takeReviewRecommendationResultFixture(
+            revision,
+            input,
+            persistedTakeReviewRecommendations.length + 1,
+          )
+          persistedTakeReviewRecommendations.push(result)
+          persistedTakeReviewRecommendationReceipts.set(key, result)
+          json(response, 201, result)
+          return
+        }
+        const replay = persistedTakeHumanDecisionReceipts.get(key)
+        if (replay !== undefined) {
+          json(response, 200, replay)
+          return
+        }
+        const input: YimengCreateTakeHumanDecisionRequest = {
+          projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID,
+          expectedTakeSubjectSha256: expectedSubjectSha256,
+          takeId,
+          decision: action,
+          reason: body.reason,
+          idempotencyKey: key,
+        }
+        const result = takeHumanDecisionResultFixture(
+          revision,
+          input,
+          persistedTakeHumanDecisions.length + 1,
+        )
+        persistedTakeHumanDecisions.push(result)
+        persistedTakeHumanDecisionReceipts.set(key, result)
+        json(response, 201, result)
+        return
+      }
+      if (request.method === 'GET' && (
+        url.pathname === `${takeReviewPath}/recommendations/command-receipt`
+        || url.pathname === `${takeReviewPath}/decisions/command-receipt`
+      )) {
+        const queryKeys = [...url.searchParams.keys()].sort()
+        const expectedQueryKeys = ['expectedTakeSubjectSha256', 'takeId'].sort()
+        const key = typeof request.headers['idempotency-key'] === 'string'
+          ? request.headers['idempotency-key']
+          : ''
+        const expectedTakeSubjectSha256 = url.searchParams.get('expectedTakeSubjectSha256') ?? ''
+        const takeId = url.searchParams.get('takeId') ?? ''
+        if (
+          queryKeys.length !== expectedQueryKeys.length
+          || queryKeys.some((field, index) => field !== expectedQueryKeys[index])
+          || key === '' || expectedTakeSubjectSha256 === '' || takeId === ''
+          || request.headers.authorization !== `Bearer ${YIMENG_TOKEN}`
+        ) {
+          throw new Error('Take review authority recovery contract mismatch')
+        }
+        const isRecommendation = url.pathname.includes('/recommendations/')
+        const result = isRecommendation
+          ? persistedTakeReviewRecommendationReceipts.get(key) ?? null
+          : persistedTakeHumanDecisionReceipts.get(key) ?? null
+        json(response, 200, {
+          schema: 'jason.qingmu-take-review-command-recovery.v1',
+          commandType: isRecommendation
+            ? 'qingmu.take_review.recommendation.record.v1'
+            : 'qingmu.take_human_decision.record.v1',
           projectId: 'project-1',
           episodeId: 'episode-1',
           frameId: PROMPT_IR_FRAME_ID,
@@ -4086,6 +4347,11 @@ describe.skipIf(
           '/qingmu-yimeng-command/recoverTakeVersionSelection',
           '/qingmu-yimeng-command/createTakeComment',
           '/qingmu-yimeng-command/recoverTakeComment',
+          '/qingmu-yimeng/takeReviewAuthority',
+          '/qingmu-yimeng-command/createTakeReviewRecommendation',
+          '/qingmu-yimeng-command/recoverTakeReviewRecommendation',
+          '/qingmu-yimeng-command/createTakeHumanDecision',
+          '/qingmu-yimeng-command/recoverTakeHumanDecision',
         ].includes(requestPath)) return
         browserRpcRequests.push({ path: requestPath, body: request.postDataJSON() as unknown })
       })
@@ -5119,6 +5385,235 @@ describe.skipIf(
       await dialog.getByRole('tab', { name: '总览', exact: true }).click()
       await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
       if (tracePath) await page.context().tracing.stop({ path: tracePath })
+    })
+
+    it('keeps E7-2 Reviewer advice and Approver decisions separate through the real Host', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e7-2-take-review-authority'))
+      if (setTakeSelectedId === undefined) throw new Error('Take selection fixture control is missing')
+      setTakeSelectedId('asset-take-1')
+      const requestStart = capturedRequests.length
+      const rpcStart = browserRpcRequests.length
+      const consoleStart = browserConsoleErrors.length
+      const recommendationMarkerKey = [
+        'qingmu:take-review-recommendation-recovery:v1',
+        'project-1', 'episode-1', PROMPT_IR_FRAME_ID,
+      ].map(encodeURIComponent).join(':')
+      const decisionMarkerKey = [
+        'qingmu:take-human-decision-recovery:v1',
+        'project-1', 'episode-1', PROMPT_IR_FRAME_ID,
+      ].map(encodeURIComponent).join(':')
+      await page.evaluate(({ recommendationKey, decisionKey }) => {
+        sessionStorage.removeItem(recommendationKey)
+        sessionStorage.removeItem(decisionKey)
+      }, { recommendationKey: recommendationMarkerKey, decisionKey: decisionMarkerKey })
+
+      await page.setViewportSize({ width: 1680, height: 1100 })
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await dialog.getByRole('tab', { name: '分镜与镜头', exact: true }).click()
+      await dialog.getByRole('list', { name: '镜头选择' }).getByRole('button', { name: /frame-1/ }).click()
+      const initialFeedWire = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng/takeReviewAuthority')
+      await dialog.getByRole('tab', { name: '生成与质检', exact: true }).click()
+      expect((await (await initialFeedWire).json() as { result: { ok: boolean } }).result.ok).toBe(true)
+
+      const reviewer = dialog.getByRole('region', { name: 'Reviewer 建议（非批准）', exact: true })
+      const approver = dialog.getByRole('region', { name: 'Approver 决定', exact: true })
+      await reviewer.getByText('Reviewer 建议历史', { exact: true }).waitFor({ timeout: 20_000 })
+      const reviewerTake = reviewer.getByRole('combobox', { name: '精确 Take 版本', exact: true })
+      const approverTake = approver.getByRole('combobox', { name: '精确 Take 版本', exact: true })
+      expect(await reviewerTake.inputValue()).toBe('asset-take-1')
+      expect(await approverTake.inputValue()).toBe('asset-take-1')
+      await reviewerTake.selectOption('asset-take-2')
+      expect(await reviewerTake.inputValue()).toBe('asset-take-2')
+      expect(await approverTake.inputValue()).toBe('asset-take-1')
+
+      await reviewer.getByLabel('理由', { exact: true }).fill('第二版表演节奏更完整，建议要求返修。')
+      const recommendationWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng-command/createTakeReviewRecommendation')
+      await reviewer.getByRole('button', { name: '提交 Reviewer 建议（非批准）', exact: true }).click()
+      const recommendationWire = await (await recommendationWirePromise).json() as {
+        result: { ok: boolean; value: YimengTakeReviewRecommendationResult }
+      }
+      expect(recommendationWire.result).toMatchObject({
+        ok: true,
+        value: {
+          schema: 'jason.qingmu-take-review-recommendation-result.v1',
+          decisionRecorded: false,
+          recommendationOnly: true,
+          changed: false,
+          formalApprovalChanged: false,
+          recommendation: {
+            takeSubject: { takeId: 'asset-take-2' },
+            actorRole: 'reviewer',
+            actorNaturalPersonId: 'person-reviewer',
+          },
+        },
+      })
+      await reviewer.getByText('Reviewer 建议已记录；正式批准状态未改变。', { exact: true }).waitFor()
+
+      await approver.getByLabel('理由', { exact: true }).fill('第一版精确 Take 可以记录正式通过决定。')
+      const decisionWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng-command/createTakeHumanDecision')
+      await approver.getByRole('button', { name: '记录 Approver 正式决定', exact: true }).click()
+      const decisionWire = await (await decisionWirePromise).json() as {
+        result: { ok: boolean; value: YimengTakeHumanDecisionResult }
+      }
+      expect(decisionWire.result).toMatchObject({
+        ok: true,
+        value: {
+          schema: 'jason.qingmu-take-human-decision-result.v1',
+          decisionRecorded: true,
+          recommendationOnly: false,
+          changed: false,
+          formalApprovalChanged: false,
+          decision: {
+            subjectId: 'asset-take-1',
+            actorRole: 'approver',
+            actorNaturalPersonId: 'person-approver',
+            producerNaturalPersonId: 'person-producer',
+            participantNaturalPersonIds: ['person-editor', 'person-producer'],
+          },
+        },
+      })
+      await approver.getByText('Approver 正式决定事件已记录；Take 状态未被修改。', { exact: true }).waitFor()
+      await reviewer.getByText('操作自然人: person-reviewer', { exact: true }).waitFor()
+      await approver.getByText('操作自然人: person-approver', { exact: true }).waitFor()
+      await approver.getByText(/生成请求自然人: person-producer · 自然人独立校验通过/u).waitFor()
+
+      const takeReviewPath = `/api/qingmu/projects/project-1/episodes/episode-1/frames/${PROMPT_IR_FRAME_ID}/take-review-authority`
+      const recommendationPosts = capturedRequests.slice(requestStart).filter(request =>
+        request.method === 'POST'
+        && new URL(request.path, 'http://127.0.0.1').pathname === `${takeReviewPath}/recommendations`)
+      const decisionPosts = capturedRequests.slice(requestStart).filter(request =>
+        request.method === 'POST'
+        && new URL(request.path, 'http://127.0.0.1').pathname === `${takeReviewPath}/decisions`)
+      expect(recommendationPosts).toHaveLength(1)
+      expect(decisionPosts).toHaveLength(1)
+      const recommendationPost = recommendationPosts[0]
+      const decisionPost = decisionPosts[0]
+      if (!isRecord(recommendationPost?.body) || !isRecord(decisionPost?.body)) {
+        throw new Error('Take review authority POST bodies missing')
+      }
+      expect(Object.keys(recommendationPost.body).sort()).toEqual([
+        'expectedTakeSubjectSha256', 'takeId', 'recommendation', 'reason', 'idempotencyKey',
+      ].sort())
+      expect(Object.keys(decisionPost.body).sort()).toEqual([
+        'expectedTakeSubjectSha256', 'takeId', 'decision', 'reason', 'idempotencyKey',
+      ].sort())
+      for (const post of [recommendationPost, decisionPost]) {
+        expect(post).toEqual(expect.objectContaining({
+          authorization: `Bearer ${YIMENG_TOKEN}`,
+          cookie: undefined,
+        }))
+      }
+      expect(JSON.stringify([recommendationPost.body, decisionPost.body])).not.toMatch(
+        /actor|role|person|session|recommendedAt|decidedAt/iu,
+      )
+
+      const unresolvedDecision = {
+        schema: 'qingmu.take-human-decision-recovery-marker.v1',
+        projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID,
+        expectedTakeSubjectSha256: jcsSha256(takeCommentSubjectFixture(3, 'asset-take-2')),
+        takeId: 'asset-take-2',
+        decision: 'reject',
+        reason: '原始未决正式拒绝。',
+        idempotencyKey: `qingmu:take-human-decision:v1:${'d'.repeat(64)}`,
+      }
+      await page.evaluate(({ key, marker }) => {
+        sessionStorage.setItem(key, JSON.stringify(marker))
+      }, { key: decisionMarkerKey, marker: unresolvedDecision })
+      await dialog.getByRole('tab', { name: '总览', exact: true }).click()
+      const recoveryWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng-command/recoverTakeHumanDecision')
+      await dialog.getByRole('tab', { name: '生成与质检', exact: true }).click()
+      const recoveryWire = await (await recoveryWirePromise).json() as {
+        result: {
+          ok: boolean
+          value: {
+            status: string
+            takeId: string
+            expectedTakeSubjectSha256: string
+            idempotencyKey: string
+          }
+        }
+      }
+      expect(recoveryWire.result.ok).toBe(true)
+      expect(recoveryWire.result.value.status).toBe('not_found')
+      expect(recoveryWire.result.value.takeId).toBe('asset-take-2')
+      expect(recoveryWire.result.value.expectedTakeSubjectSha256)
+        .toBe(unresolvedDecision.expectedTakeSubjectSha256)
+      expect(recoveryWire.result.value.idempotencyKey).toBe(unresolvedDecision.idempotencyKey)
+
+      const recoveredReviewer = dialog.getByRole('region', {
+        name: 'Reviewer 建议（非批准）', exact: true,
+      })
+      const recoveredApprover = dialog.getByRole('region', { name: 'Approver 决定', exact: true })
+      await recoveredApprover.getByText(/已锁定原坐标，只允许回执恢复/u).waitFor()
+      expect(await recoveredApprover.getByRole('button', {
+        name: '记录 Approver 正式决定', exact: true,
+      }).isDisabled()).toBe(true)
+      expect(await recoveredReviewer.getByRole('button', {
+        name: '提交 Reviewer 建议（非批准）', exact: true,
+      }).isDisabled()).toBe(false)
+      await recoveredReviewer.getByRole('combobox', {
+        name: '精确 Take 版本', exact: true,
+      }).selectOption('asset-take-2')
+      expect(await recoveredReviewer.getByRole('combobox', {
+        name: '精确 Take 版本', exact: true,
+      }).inputValue()).toBe('asset-take-2')
+      await recoveredApprover.getByRole('form', { name: 'Approver 正式决定表单', exact: true })
+        .evaluate((form) => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
+      expect(capturedRequests.slice(requestStart).filter(request =>
+        request.method === 'POST'
+        && new URL(request.path, 'http://127.0.0.1').pathname === `${takeReviewPath}/decisions`))
+        .toHaveLength(1)
+      expect(await page.evaluate(key => sessionStorage.getItem(key), decisionMarkerKey)).not.toBeNull()
+      expect(await page.evaluate(key => sessionStorage.getItem(key), recommendationMarkerKey)).toBeNull()
+
+      const recoveryReads = capturedRequests.slice(requestStart).filter(request =>
+        request.method === 'GET'
+        && new URL(request.path, 'http://127.0.0.1').pathname
+          === `${takeReviewPath}/decisions/command-receipt`)
+      expect(recoveryReads).toHaveLength(1)
+      const recoveryRead = recoveryReads[0]
+      expect(recoveryRead).toEqual(expect.objectContaining({
+        authorization: `Bearer ${YIMENG_TOKEN}`,
+        idempotencyKey: unresolvedDecision.idempotencyKey,
+        body: undefined,
+        cookie: undefined,
+      }))
+      const recoveryUrl = new URL(recoveryRead?.path ?? '', 'http://127.0.0.1')
+      expect([...recoveryUrl.searchParams.keys()].sort()).toEqual([
+        'expectedTakeSubjectSha256', 'takeId',
+      ])
+      expect(recoveryUrl.searchParams.get('expectedTakeSubjectSha256'))
+        .toBe(unresolvedDecision.expectedTakeSubjectSha256)
+      expect(recoveryUrl.searchParams.get('takeId')).toBe('asset-take-2')
+
+      const rpc = browserRpcRequests.slice(rpcStart).filter(request =>
+        /takeReviewAuthority|TakeReviewRecommendation|TakeHumanDecision/u.test(request.path))
+      expect(rpc.filter(request =>
+        request.path === '/qingmu-yimeng-command/createTakeReviewRecommendation')).toHaveLength(1)
+      expect(rpc.filter(request =>
+        request.path === '/qingmu-yimeng-command/createTakeHumanDecision')).toHaveLength(1)
+      expect(rpc.filter(request =>
+        request.path === '/qingmu-yimeng-command/recoverTakeHumanDecision')).toHaveLength(1)
+      expect(JSON.stringify(rpc)).not.toMatch(/Bearer|actorId|actorRole|actorNaturalPersonId|authSessionId/iu)
+      expect(capturedRequests.slice(requestStart).filter(request =>
+        request.method === 'POST'
+        && /selection|technical-pass|episode-verification|signoff|provider|budget/iu.test(request.path)))
+        .toEqual([])
+      expect(browserConsoleErrors.slice(consoleStart)).toEqual([])
+      expect(tripwire.pageErrors).toEqual([])
+      expect(await page.content()).not.toContain(YIMENG_TOKEN)
+      await expectNoVisibleTechnicalBrand(page)
+
+      await dialog.getByRole('tab', { name: '分镜与镜头', exact: true }).click()
+      await dialog.getByRole('list', { name: '镜头选择' }).getByRole('button', { name: /frame-z/ }).click()
+      await dialog.getByRole('tab', { name: '总览', exact: true }).click()
+      await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
+      await page.evaluate((key) => { sessionStorage.removeItem(key) }, decisionMarkerKey)
     })
 
     it('compiles the E5-4 read-only workset through the real Host and Core without inventing stage authority', async () => {

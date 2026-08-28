@@ -99,6 +99,11 @@ import type {
   YimengTakeCommentRequest,
   YimengTakeCommentSubject,
   YimengTakeCommentVersion,
+  YimengTakeReviewAction,
+  YimengTakeReviewAuthorityFeedResponse,
+  YimengTakeReviewAuthorityRequest,
+  YimengTakeReviewRecommendation,
+  YimengTakeHumanDecision,
   YimengTakeAcceptanceRequest,
   YimengTakeAcceptanceResponse,
   YimengTakeAcceptanceEvidence,
@@ -200,6 +205,16 @@ import type {
   YimengTakeCommentRecord,
   YimengTakeCommentRecovery,
   YimengTakeCommentResult,
+  YimengCreateTakeReviewRecommendationRequest,
+  YimengRecoverTakeReviewRecommendationRequest,
+  YimengTakeReviewRecommendationRecord,
+  YimengTakeReviewRecommendationRecovery,
+  YimengTakeReviewRecommendationResult,
+  YimengCreateTakeHumanDecisionRequest,
+  YimengRecoverTakeHumanDecisionRequest,
+  YimengTakeHumanDecisionRecord,
+  YimengTakeHumanDecisionRecovery,
+  YimengTakeHumanDecisionResult,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 
 export type {
@@ -301,6 +316,11 @@ export type {
   YimengTakeCommentRequest,
   YimengTakeCommentSubject,
   YimengTakeCommentVersion,
+  YimengTakeReviewAction,
+  YimengTakeReviewAuthorityFeedResponse,
+  YimengTakeReviewAuthorityRequest,
+  YimengTakeReviewRecommendation,
+  YimengTakeHumanDecision,
   YimengTakeAcceptanceRequest,
   YimengTakeAcceptanceResponse,
   YimengTakeAcceptanceEvidence,
@@ -402,6 +422,16 @@ export type {
   YimengTakeCommentRecord,
   YimengTakeCommentRecovery,
   YimengTakeCommentResult,
+  YimengCreateTakeReviewRecommendationRequest,
+  YimengRecoverTakeReviewRecommendationRequest,
+  YimengTakeReviewRecommendationRecord,
+  YimengTakeReviewRecommendationRecovery,
+  YimengTakeReviewRecommendationResult,
+  YimengCreateTakeHumanDecisionRequest,
+  YimengRecoverTakeHumanDecisionRequest,
+  YimengTakeHumanDecisionRecord,
+  YimengTakeHumanDecisionRecovery,
+  YimengTakeHumanDecisionResult,
 }
 
 /** Open JSON object retained without inventing a stricter Yimeng business schema. */
@@ -438,6 +468,10 @@ export interface QingmuYimengReadPort {
   selectedVideoReview(request: YimengSelectedVideoReviewRequest, signal?: AbortSignal): Promise<YimengSelectedVideoReviewResponse>
   takeVersions(request: YimengTakeVersionRequest, signal?: AbortSignal): Promise<YimengTakeVersionStackResponse>
   takeComments(request: YimengTakeCommentRequest, signal?: AbortSignal): Promise<YimengTakeCommentFeedResponse>
+  takeReviewAuthority(
+    request: YimengTakeReviewAuthorityRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengTakeReviewAuthorityFeedResponse>
   takeAcceptance(request: YimengTakeAcceptanceRequest, signal?: AbortSignal): Promise<YimengTakeAcceptanceResponse>
   shotFindings(request: YimengSelectedVideoReviewRequest, signal?: AbortSignal): Promise<YimengShotFindingFeedResponse>
   reworkRouteSource(request: YimengReworkRouteSourceRequest, signal?: AbortSignal): Promise<YimengReworkRouteSourceResponse>
@@ -470,6 +504,22 @@ export interface QingmuYimengCommandPort {
     request: YimengRecoverTakeCommentRequest,
     signal?: AbortSignal,
   ): Promise<YimengTakeCommentRecovery>
+  createTakeReviewRecommendation(
+    request: YimengCreateTakeReviewRecommendationRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengTakeReviewRecommendationResult>
+  recoverTakeReviewRecommendation(
+    request: YimengRecoverTakeReviewRecommendationRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengTakeReviewRecommendationRecovery>
+  createTakeHumanDecision(
+    request: YimengCreateTakeHumanDecisionRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengTakeHumanDecisionResult>
+  recoverTakeHumanDecision(
+    request: YimengRecoverTakeHumanDecisionRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengTakeHumanDecisionRecovery>
   recordReworkRoute(request: YimengRecordReworkRouteRequest, signal?: AbortSignal): Promise<YimengReworkRouteResult>
   recoverReworkRoute(request: YimengRecordReworkRouteRequest, signal?: AbortSignal): Promise<YimengReworkRouteRecovery>
   probeReworkRouteAuthority(

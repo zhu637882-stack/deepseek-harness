@@ -34,6 +34,9 @@ import type {
   YimengTakeVersionStackResponse,
   YimengTakeVersionSelectionResult, YimengTakeVersionSelectionRecovery,
   YimengTakeCommentFeedResponse, YimengTakeCommentResult, YimengTakeCommentRecovery,
+  YimengTakeReviewAuthorityFeedResponse,
+  YimengTakeReviewRecommendationResult, YimengTakeReviewRecommendationRecovery,
+  YimengTakeHumanDecisionResult, YimengTakeHumanDecisionRecovery,
   YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengWorkflowProjection,
 } from './contracts.ts'
@@ -83,6 +86,13 @@ export type {
   YimengTakeCommentRequest, YimengTakeCommentSubject, YimengTakeCommentVersion,
   YimengCreateTakeCommentRequest, YimengRecoverTakeCommentRequest,
   YimengTakeCommentRecord, YimengTakeCommentResult, YimengTakeCommentRecovery,
+  YimengTakeReviewAction, YimengTakeReviewAuthorityFeedResponse, YimengTakeReviewAuthorityRequest,
+  YimengTakeReviewRecommendation, YimengTakeHumanDecision,
+  YimengCreateTakeReviewRecommendationRequest, YimengRecoverTakeReviewRecommendationRequest,
+  YimengTakeReviewRecommendationRecord, YimengTakeReviewRecommendationResult,
+  YimengTakeReviewRecommendationRecovery,
+  YimengCreateTakeHumanDecisionRequest, YimengRecoverTakeHumanDecisionRequest,
+  YimengTakeHumanDecisionRecord, YimengTakeHumanDecisionResult, YimengTakeHumanDecisionRecovery,
   YimengRecoverReferenceRightsExceptionReleaseResponse,
   YimengWorkflowProjection,
 } from './contracts.ts'
@@ -135,6 +145,8 @@ export function apply(ctx: ClientContext): void {
     selectedVideoReview: (request, signal) => read<YimengSelectedVideoReviewResponse>('selectedVideoReview', request, signal),
     takeVersions: (request, signal) => read<YimengTakeVersionStackResponse>('takeVersions', request, signal),
     takeComments: (request, signal) => read<YimengTakeCommentFeedResponse>('takeComments', request, signal),
+    takeReviewAuthority: (request, signal) =>
+      read<YimengTakeReviewAuthorityFeedResponse>('takeReviewAuthority', request, signal),
     takeAcceptance: (request, signal) => read<YimengTakeAcceptanceResponse>('takeAcceptance', request, signal),
     takeAcceptanceMethod: (request, signal) =>
       method<ImagoTakeAcceptanceMethodResponse>('takeAcceptanceMethod', request, signal),
@@ -150,6 +162,14 @@ export function apply(ctx: ClientContext): void {
       command<YimengTakeCommentResult>('createTakeComment', request, signal),
     recoverTakeComment: (request, signal) =>
       command<YimengTakeCommentRecovery>('recoverTakeComment', request, signal),
+    createTakeReviewRecommendation: (request, signal) =>
+      command<YimengTakeReviewRecommendationResult>('createTakeReviewRecommendation', request, signal),
+    recoverTakeReviewRecommendation: (request, signal) =>
+      command<YimengTakeReviewRecommendationRecovery>('recoverTakeReviewRecommendation', request, signal),
+    createTakeHumanDecision: (request, signal) =>
+      command<YimengTakeHumanDecisionResult>('createTakeHumanDecision', request, signal),
+    recoverTakeHumanDecision: (request, signal) =>
+      command<YimengTakeHumanDecisionRecovery>('recoverTakeHumanDecision', request, signal),
     reworkRouteSource: (request, signal) =>
       read<YimengReworkRouteSourceResponse>('reworkRouteSource', request, signal),
     reworkRouteMethod: (request, signal) =>

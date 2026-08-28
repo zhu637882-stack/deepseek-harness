@@ -1415,6 +1415,139 @@ export interface YimengTakeCommentRecovery {
   readonly result: YimengTakeCommentResult | null
 }
 
+/** Shared values do not merge Reviewer recommendation and Approver decision authority. */
+export type YimengTakeReviewAction = 'approve' | 'reject' | 'request_changes'
+
+/** Browser intent for Reviewer advice; authenticated identity stays server-side. */
+export interface YimengCreateTakeReviewRecommendationRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly expectedTakeSubjectSha256: string
+  readonly takeId: string
+  readonly recommendation: YimengTakeReviewAction
+  readonly reason: string
+  readonly idempotencyKey: string
+}
+
+/** Browser intent for a formal HumanDecision; no actor/session/person/time fields exist. */
+export interface YimengCreateTakeHumanDecisionRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly expectedTakeSubjectSha256: string
+  readonly takeId: string
+  readonly decision: YimengTakeReviewAction
+  readonly reason: string
+  readonly idempotencyKey: string
+}
+
+export type YimengRecoverTakeReviewRecommendationRequest =
+  YimengCreateTakeReviewRecommendationRequest
+export type YimengRecoverTakeHumanDecisionRequest = YimengCreateTakeHumanDecisionRequest
+
+/** The exact subject contract carried by both immutable journal events. */
+export interface YimengTakeReviewSubject {
+  readonly schema: 'jason.qingmu-take-comment-subject.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly frameNo: number
+  readonly storyboardRevision: number
+  readonly frameContentSha256: string
+  readonly takeId: string
+  readonly versionOrdinal: number
+  readonly outputSha256: string
+  readonly durationMillis: number
+}
+
+export interface YimengTakeReviewRecommendationRecord {
+  readonly id: string
+  readonly takeSubject: YimengTakeReviewSubject
+  readonly takeSubjectSha256: string
+  readonly actorId: string
+  readonly actorRole: 'reviewer'
+  readonly actorNaturalPersonId: string
+  readonly authSessionId: string
+  readonly eventId: string
+  readonly recommendation: YimengTakeReviewAction
+  readonly reason: string
+  readonly recommendedAt: string
+}
+
+export interface YimengTakeHumanDecisionRecord {
+  readonly decisionId: string
+  readonly subjectType: 'shot_take'
+  readonly subjectId: string
+  readonly subjectRevision: number
+  readonly subjectSha256: string
+  readonly takeSubject: YimengTakeReviewSubject
+  readonly takeSubjectSha256: string
+  readonly actorId: string
+  readonly actorRole: 'approver'
+  readonly actorNaturalPersonId: string
+  readonly authSessionId: string
+  readonly eventId: string
+  readonly decision: YimengTakeReviewAction
+  readonly reason: string
+  readonly producerActorId: string
+  readonly producerNaturalPersonId: string
+  readonly participantNaturalPersonIds: readonly string[]
+  readonly decidedAt: string
+}
+
+interface YimengTakeReviewImpactFlags {
+  readonly changed: false
+  readonly selectionChanged: false
+  readonly technicalPassChanged: false
+  /** False means no Take approval-state field was mutated; the event itself remains formal. */
+  readonly formalApprovalChanged: false
+  readonly episodeVerificationChanged: false
+  readonly humanSignoffInferred: false
+  readonly providerCalls: 0
+  readonly budgetMutation: false
+}
+
+export interface YimengTakeReviewRecommendationResult extends YimengTakeReviewImpactFlags {
+  readonly schema: 'jason.qingmu-take-review-recommendation-result.v1'
+  readonly recommendation: YimengTakeReviewRecommendationRecord
+  readonly decisionRecorded: false
+  readonly recommendationOnly: true
+}
+
+export interface YimengTakeHumanDecisionResult extends YimengTakeReviewImpactFlags {
+  readonly schema: 'jason.qingmu-take-human-decision-result.v1'
+  readonly decision: YimengTakeHumanDecisionRecord
+  readonly decisionRecorded: true
+  readonly recommendationOnly: false
+}
+
+export interface YimengTakeReviewRecommendationRecovery {
+  readonly schema: 'jason.qingmu-take-review-command-recovery.v1'
+  readonly commandType: 'qingmu.take_review.recommendation.record.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly takeId: string
+  readonly expectedTakeSubjectSha256: string
+  readonly idempotencyKey: string
+  readonly status: 'committed' | 'not_found'
+  readonly result: YimengTakeReviewRecommendationResult | null
+}
+
+export interface YimengTakeHumanDecisionRecovery {
+  readonly schema: 'jason.qingmu-take-review-command-recovery.v1'
+  readonly commandType: 'qingmu.take_human_decision.record.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly takeId: string
+  readonly expectedTakeSubjectSha256: string
+  readonly idempotencyKey: string
+  readonly status: 'committed' | 'not_found'
+  readonly result: YimengTakeHumanDecisionResult | null
+}
+
 /** Native shot-group contents; group order never allocates an IMAGO unit ID. */
 export interface YimengProductionUnitSource {
   readonly schema: 'jason.qingmu-production-unit-source.v1'
@@ -2377,6 +2510,10 @@ export interface YimengCommandEndpointMap {
   readonly recoverTakeVersionSelection: YimengTakeVersionSelectionRecovery
   readonly createTakeComment: YimengTakeCommentResult
   readonly recoverTakeComment: YimengTakeCommentRecovery
+  readonly createTakeReviewRecommendation: YimengTakeReviewRecommendationResult
+  readonly recoverTakeReviewRecommendation: YimengTakeReviewRecommendationRecovery
+  readonly createTakeHumanDecision: YimengTakeHumanDecisionResult
+  readonly recoverTakeHumanDecision: YimengTakeHumanDecisionRecovery
   readonly bindProductionUnit: YimengProductionUnitResult
   readonly recoverProductionUnitBinding: YimengProductionUnitRecovery
   readonly bindStageSource: YimengStageSourceResult

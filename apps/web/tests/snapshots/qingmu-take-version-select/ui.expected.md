@@ -130,3 +130,42 @@
         - text: v1
         - paragraph: 上一版第 36 帧构图需要调整。
         - text: 帧号 · 36
+  - region "审片建议与正式决定":
+    - heading "审片建议与正式决定" [level=4]
+    - paragraph: Reviewer 建议与 Approver 正式决定是两条独立权限链；两者都不修改 Take 选择、技术状态或人工签收。
+    - region "Reviewer 建议（非批准）":
+      - heading "Reviewer 建议（非批准）" [level=5]
+      - paragraph: Reviewer 可以建议批准、拒绝或返修，但建议永远不会自动变成正式批准。
+      - form "Reviewer 建议表单（非批准）":
+        - text: 精确 Take 版本
+        - combobox "精确 Take 版本":
+          - option "v1 · asset-take-1" [selected]
+          - option "v2 · asset-take-2"
+        - text: 建议
+        - combobox "建议":
+          - option "建议/决定：批准"
+          - option "建议/决定：拒绝"
+          - option "建议/决定：要求返修" [selected]
+        - text: 理由
+        - textbox "理由"
+        - button "提交 Reviewer 建议（非批准）"
+      - strong: Reviewer 建议历史
+      - paragraph: 尚无 Reviewer 建议。
+    - region "Approver 决定":
+      - heading "Approver 决定" [level=5]
+      - paragraph: Approver 记录绑定当前精确 Take 的正式决定事件；这不修改资产选择、机器质检或整集签收。
+      - form "Approver 正式决定表单":
+        - text: 精确 Take 版本
+        - combobox "精确 Take 版本":
+          - option "v1 · asset-take-1" [selected]
+          - option "v2 · asset-take-2"
+        - text: 正式决定
+        - combobox "正式决定":
+          - option "建议/决定：批准" [selected]
+          - option "建议/决定：拒绝"
+          - option "建议/决定：要求返修"
+        - text: 理由
+        - textbox "理由"
+        - button "记录 Approver 正式决定"
+      - strong: Approver 决定历史
+      - paragraph: 尚无 Approver 正式决定。
