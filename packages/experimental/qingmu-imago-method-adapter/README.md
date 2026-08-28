@@ -104,3 +104,7 @@ None. No model-facing tokens are added.
 - Attestation proves Host validation and exact input binding. It does not grant paid Provider authority, asset selection, human approval, or production-state writes.
 - Key rotation and multi-key verification are not part of this bounded slice.
 - Workset templates are not approved business stages. Named Stage/LSU authority must be supplied by a future explicit business contract before actual legal-work recommendations or shadow comparisons can be shown; no legacy status fallback is used.
+
+## Director Assets (H1 admission ledger)
+
+`src/director-assets/registry.ts` is the single admission registry for vendored third-party director assets under `assets/director/<repo-id>/<full-commit>/`. Each package carries its upstream `LICENSE`, a per-file `PROVENANCE.sha256` ledger, and an `ADMISSION.md` stating source, scope, blockers honored, and usage bounds. `verifyAllDirectorAssets` fails closed on any unlisted file, malformed provenance ledger, or byte mismatch. Admission covers `director-skill-core` (MIT, content), `storyboard-skill` (MIT, pure modules), and `jellyfish` (Apache-2.0, pure modules) from `imago-v6-director-open-source-asset-manifest-20260828.json`. Registration is an admission ledger only: no runtime activation, skill loading, or tool execution is implied or wired.
