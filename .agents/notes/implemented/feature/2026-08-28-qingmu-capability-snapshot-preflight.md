@@ -31,3 +31,9 @@ Backend tests use a temporary catalog to prove deterministic cross-runtime snaps
 Client tests cover display, refresh, adapter rejection, cancellation, and cockpit integration. A real Loader/Connection and Chromium composition uses an isolated loopback Yimeng double to prove the shipped Qingmu overlay, authenticated GET-only request, visible mutual-exclusion rule, version hash, desktop/mobile layout, and keyless ARIA snapshot. The double is not a production Provider or database.
 
 These checks do not authorize paid generation, validate a live provider account, change ProviderGate or model routing, approve content, deploy production, or push a branch.
+
+## Verification closure
+
+The repository-owned generator now records all 309 current explicit Yimeng backend routes. The external Qingmu Harness routes use exact method-and-path entries rather than a namespace wildcard, and metadata overrides fail closed on unknown fields or missing backend routes. Both normal and complete registry checks pass; the focused Yimeng suite passes 24 tests, the full frontend contract suite passes 309 tests, and the frozen dependency lock remains current. Independent review reports PASS with P0 through P3 all zero.
+
+This closes only the bounded-local E6-1 capability-catalog slice. E6-2 estimation, reservation, and difference handling remain separate work; no queue, submit, poll, download, webhook, live Provider, fee, production database, or load-bearing routing change is implied.

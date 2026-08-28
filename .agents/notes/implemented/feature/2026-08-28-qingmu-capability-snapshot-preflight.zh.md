@@ -31,3 +31,9 @@ Status: implemented
 客户端测试覆盖显示、刷新、适配器拒绝、取消及驾驶舱集成。真实 Loader/Connection 与 Chromium 组合使用隔离的回环易梦替身，证明出厂青木 overlay、带认证的纯 GET 请求、可见互斥规则、版本哈希、桌面/移动布局和无密钥 ARIA 快照。该替身不是正式供应商或数据库。
 
 这些检查不授权付费生成，不验证真实供应商账号，不修改 ProviderGate 或模型路由，不批准内容，不部署生产，也不 push 分支。
+
+## 验证收口
+
+仓库既定生成器现已登记易梦当前全部 309 条显式后端路由。外置青木 Harness 路由使用精确 method + path 条目，不使用命名空间通配；metadata override 遇到未知字段或不存在的后端路由会失败关闭。普通与完整 registry 检查均通过；易梦聚焦组合 24/24、完整前端合同 309/309，冻结依赖锁仍为当前状态。独立 Reviewer 裁决 PASS，P0 至 P3 均为 0。
+
+这只关闭 bounded-local E6-1 能力目录切片。E6-2 的估算、预留和差异仍是独立工作；不代表 queue、submit、poll、download、webhook、真实 Provider、费用、正式数据库或承重路由变更获准。
