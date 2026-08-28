@@ -40,6 +40,14 @@ describe('current bounded rework route source', () => {
     expect(await handler('reworkRouteSource', request, signal())).toEqual({ ok: true, value: feed })
   })
 
+  it('rejects historical route lineage when the outbox event differs from the route event', async () => {
+    const original = reworkRouteResult(request)
+    const latestRoute = { ...original, outboxEventId: 'event-route-other' }
+    const feed = { ...reworkRouteFeed(request), latestRoute, latestRouteSourceCurrent: true }
+    const { handler } = reader(feed)
+    expect(await handler('reworkRouteSource', request, signal())).toMatchObject({ ok: false })
+  })
+
   it.each([
     ['closed Finding claim', { findingClosed: true }],
     ['selection mutation claim', { selectionChanged: true }],

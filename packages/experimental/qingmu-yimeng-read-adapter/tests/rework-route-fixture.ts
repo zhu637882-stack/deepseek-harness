@@ -129,7 +129,7 @@ export function reworkRouteResult(
   }
   return {
     schema: 'jason.qingmu-bounded-rework-route-result.v1', route, routeSha256: reworkRouteSha(route),
-    receiptId: 'receipt-route-7', outboxEventId: 'outbox-route-7', routeRecorded: true,
+    receiptId: 'receipt-route-7', outboxEventId: route.eventId, routeRecorded: true,
     findingClosed: false, selectionChanged: false, stageDecisionChanged: false, lockInvalidated: false,
     taskCreated: false, providerCalls: 0, reworkExecuted: false, humanSignoffInferred: false,
   }

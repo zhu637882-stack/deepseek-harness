@@ -612,9 +612,11 @@ function routeResult(
   }
   const routeSha256 = sha(root.routeSha256, 'routeSha256', error)
   if (digest(route, helpers, 'reworkRouteRecord', error) !== routeSha256) throw error('bounded route SHA mismatch')
+  const outboxEventId = id(root.outboxEventId, 'outboxEventId', error)
+  if (outboxEventId !== route.eventId) throw error('bounded route event lineage mismatch')
   return {
     schema: 'jason.qingmu-bounded-rework-route-result.v1', route, routeSha256,
-    receiptId: id(root.receiptId, 'receiptId', error), outboxEventId: id(root.outboxEventId, 'outboxEventId', error),
+    receiptId: id(root.receiptId, 'receiptId', error), outboxEventId,
     routeRecorded: true, findingClosed: false, selectionChanged: false, stageDecisionChanged: false,
     lockInvalidated: false, taskCreated: false, providerCalls: 0, reworkExecuted: false, humanSignoffInferred: false,
   }

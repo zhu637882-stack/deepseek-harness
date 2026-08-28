@@ -102,7 +102,7 @@ export function reworkRouteCommandResult(
     route,
     routeSha256: reworkRouteSha(route),
     receiptId: 'receipt-route-record-1',
-    outboxEventId: 'outbox-route-record-1',
+    outboxEventId: route.eventId,
     routeRecorded: true,
     findingClosed: false,
     selectionChanged: false,

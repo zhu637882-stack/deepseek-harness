@@ -349,9 +349,13 @@ function normalizeRouteResult(
   if (digest(route, 'reworkRouteSource.latestRoute.route') !== routeSha256) {
     throw new ReworkRouteSourceContractError('historical route SHA mismatch')
   }
+  const outboxEventId = id(root.outboxEventId, 'route.outboxEventId')
+  if (outboxEventId !== route.eventId) {
+    throw new ReworkRouteSourceContractError('historical route event lineage mismatch')
+  }
   return {
     schema: 'jason.qingmu-bounded-rework-route-result.v1', route, routeSha256,
-    receiptId: id(root.receiptId, 'route.receiptId'), outboxEventId: id(root.outboxEventId, 'route.outboxEventId'),
+    receiptId: id(root.receiptId, 'route.receiptId'), outboxEventId,
     routeRecorded: true, findingClosed: false, selectionChanged: false, stageDecisionChanged: false,
     lockInvalidated: false, taskCreated: false, providerCalls: 0, reworkExecuted: false, humanSignoffInferred: false,
   }

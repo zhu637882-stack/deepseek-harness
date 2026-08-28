@@ -263,6 +263,16 @@ describe('bounded rework route record, receipt recovery, and authority probe', (
     )).toMatchObject({ ok: false })
   })
 
+  it('rejects an otherwise valid response whose outbox event differs from the route event', async () => {
+    const method = reworkRouteMethodResponse(KEY)
+    const request = reworkRouteRecordRequest(method)
+    const original = reworkRouteCommandResult(request, method, TOKEN)
+    const mismatched = { ...original, outboxEventId: 'event-route-record-other' }
+    expect(await handler(network(mismatched, 201))(
+      'recordReworkRoute', request, signal(),
+    )).toMatchObject({ ok: false })
+  })
+
   it('fails closed without token, Method, or attestation key and discards late Method cancellation', async () => {
     const method = reworkRouteMethodResponse(KEY)
     const request = reworkRouteRecordRequest(method)
