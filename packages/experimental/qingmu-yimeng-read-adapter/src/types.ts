@@ -500,6 +500,132 @@ export interface YimengTakeVersionStackResponse {
   }
 }
 
+/** Exact Yimeng coordinates for the currently selected Take acceptance evidence. */
+export type YimengTakeAcceptanceRequest = YimengTakeVersionRequest
+
+/** Selected Take identity bound to the current storyboard and generation lineage. */
+export interface YimengTakeAcceptanceSubject extends YimengTakeAcceptanceRequest {
+  readonly schema: 'jason.qingmu-take-acceptance-subject.v1'
+  readonly frameNo: number
+  readonly storyboardRevision: number
+  readonly frameContentSha256: string
+  readonly selectionRevision: number
+  readonly takeId: string
+  readonly versionOrdinal: number
+  readonly selectionStatus: 'Selected'
+  readonly outputSha256: string | null
+  readonly taskId: string | null
+  readonly capability: string | null
+  readonly routeKey: string | null
+  readonly provider: string | null
+  readonly model: string | null
+  readonly inputHash: string | null
+  readonly submitId: string | null
+}
+
+/** Provider outbox and downloaded-media evidence without URLs or raw responses. */
+export interface YimengTakeProviderReceipt {
+  readonly schema: 'jason.qingmu-provider-submission-receipt-evidence.v1'
+  readonly status: 'verified' | 'bounded_local' | 'missing' | 'invalid'
+  readonly evidenceMode: 'provider_receipt' | 'bounded_local' | 'unverified'
+  readonly actualProviderReceiptVerified: boolean
+  readonly requestDryRun: boolean | null
+  readonly taskRequestHashVerified: boolean
+  readonly outboxState: string | null
+  readonly dispatchEpoch: number
+  readonly dispatchDigest: string | null
+  readonly payloadSha256: string | null
+  readonly responseSha256: string | null
+  readonly providerTaskId: string | null
+  readonly providerStatus: string | null
+  readonly localStatus: string | null
+  readonly providerMediaBindingStatus: 'PASS' | 'BLOCKED'
+  readonly providerMediaRecordId: string | null
+  readonly blockers: readonly string[]
+}
+
+/** Full-video decode result bound to one materialized output. */
+export interface YimengTakeTechnicalReceipt {
+  readonly schema: 'jason.qingmu-technical-video-receipt.v1'
+  readonly imagoReceiptSchema: 'IMAGO-V6-TechnicalVideoReceipt-v1'
+  readonly status: 'PASS' | 'BLOCKED'
+  readonly media: { readonly bytes: number | null; readonly sha256: string | null }
+  readonly fullVideoDecode: {
+    readonly required: true
+    readonly commandProfile: 'ffmpeg -v error -xerror -map 0:v:0 -f null -'
+    readonly status: 'PASS' | 'BLOCKED' | 'TIMEOUT'
+    readonly returncode: number | null
+  }
+  readonly blockers: readonly string[]
+  readonly warnings: readonly string[]
+  readonly video: null | {
+    readonly durationSeconds: number | null
+    readonly width: number | null
+    readonly height: number | null
+    readonly codecName: string | null
+    readonly nbFrames: number | null
+    readonly avgFrameRate: string | null
+    readonly rFrameRate: string | null
+    readonly videoStreamDurationSeconds: number | null
+    readonly avgFrameRateDecimal: number | null
+    readonly rFrameRateDecimal: number | null
+    readonly actualAverageFrameRate: number | null
+    readonly actualFrameRateBasis: 'NB_FRAMES_OVER_MEASURED_DURATION_CROSSCHECK_AVG_FRAME_RATE'
+    readonly nominalRFrameRateIsActual: false
+  }
+  readonly audio: null | {
+    readonly codecName: string
+    readonly channels: number
+    readonly sampleRate: number
+  }
+}
+
+/** Latest current QC record for one required Yimeng check type. */
+export interface YimengTakeQualityCheck {
+  readonly checkId: string
+  readonly checkType: string
+  readonly passed: boolean
+  readonly createdAt: string
+  readonly current: boolean
+}
+
+/** Required macro/micro check set and its fail-closed derived state. */
+export interface YimengTakeCandidateQuality {
+  readonly schema: 'jason.qingmu-take-candidate-quality-evidence.v1'
+  readonly status: 'PASS' | 'BLOCKED'
+  readonly requiredCheckTypes: readonly string[]
+  readonly checks: readonly YimengTakeQualityCheck[]
+  readonly missingCheckTypes: readonly string[]
+  readonly failedOrStaleCheckTypes: readonly string[]
+}
+
+/** Hash-bound evidence supplied to the stateless IMAGO acceptance method. */
+export interface YimengTakeAcceptanceEvidence {
+  readonly subject: YimengTakeAcceptanceSubject
+  readonly providerReceipt: YimengTakeProviderReceipt
+  readonly technicalReceipt: YimengTakeTechnicalReceipt
+  readonly candidateQuality: YimengTakeCandidateQuality
+}
+
+/** Read-only selected Take evidence; it does not grant Gate B or human approval. */
+export interface YimengTakeAcceptanceResponse {
+  readonly schema: 'jason.qingmu-take-acceptance-evidence.v1'
+  readonly evidence: YimengTakeAcceptanceEvidence
+  readonly evidenceSnapshotSha256: string
+  readonly productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION'
+  readonly boundaries: {
+    readonly readOnly: true
+    readonly selectedIsApproval: false
+    readonly formalApprovalChanged: false
+    readonly providerCalls: 0
+    readonly databaseWrites: 0
+    readonly budgetMutation: false
+    readonly humanSignoffInferred: false
+    readonly paidProviderAuthority: 'not_granted'
+    readonly gateBCompleted: false
+  }
+}
+
 /** Exact selected-video bytes and canonical Shot revision owned by Yimeng. */
 export interface YimengShotVideoSubject extends YimengSelectedVideoReviewRequest {
   readonly schema: 'jason.qingmu-shot-video-subject.v1'
@@ -1597,6 +1723,7 @@ export interface YimengReadEndpointMap {
   readonly promptIr: YimengPromptIrResponse
   readonly selectedVideoReview: YimengSelectedVideoReviewResponse
   readonly takeVersions: YimengTakeVersionStackResponse
+  readonly takeAcceptance: YimengTakeAcceptanceResponse
   readonly shotFindings: YimengShotFindingFeedResponse
   readonly productionUnits: YimengProductionUnitsResponse
   readonly stageSources: YimengStageSourcesResponse

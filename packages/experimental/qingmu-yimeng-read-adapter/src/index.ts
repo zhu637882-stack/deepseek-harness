@@ -10,6 +10,7 @@ import z from '@deepseek-ai/schemastery'
 import { normalizeContinuityDelta } from './continuity.ts'
 import { normalizeSelectedVideoReview } from './selected-video-review.ts'
 import { normalizeTakeVersionStack, parseTakeVersionReadRequest } from './take-versions.ts'
+import { normalizeTakeAcceptance, parseTakeAcceptanceReadRequest } from './take-acceptance.ts'
 import { normalizeShotFindingFeed, parseShotFindingReadRequest } from './shot-findings.ts'
 import { normalizeProductionUnitsFeed, parseProductionUnitsReadRequest } from './production-units.ts'
 import { normalizeStageSourcesFeed, parseStageSourcesReadRequest } from './stage-sources.ts'
@@ -167,6 +168,14 @@ export type {
   YimengTakeVersionRequest,
   YimengTakeVersionStackResponse,
   YimengTakeVersionStackSubject,
+  YimengTakeAcceptanceRequest,
+  YimengTakeAcceptanceSubject,
+  YimengTakeProviderReceipt,
+  YimengTakeTechnicalReceipt,
+  YimengTakeQualityCheck,
+  YimengTakeCandidateQuality,
+  YimengTakeAcceptanceEvidence,
+  YimengTakeAcceptanceResponse,
   YimengVideoReviewDefect,
   YimengVideoReviewRecord,
   YimengShotVideoSubject,
@@ -250,7 +259,7 @@ const PROTECTED_ENDPOINTS = new Set([
   'projects', 'episodes', 'script', 'promptIr', 'capabilityCatalog', 'costRehearsal',
   'gateAControlEvidence', 'elementProfile',
   'referenceCandidates', 'reviewEvents',
-  'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'shotFindings', 'productionUnits', 'stageSources',
+  'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'takeAcceptance', 'shotFindings', 'productionUnits', 'stageSources',
   'lsuPlanSource', 'reworkRouteSource',
 ])
 const HUMAN_DECISION_VALUES = new Set<YimengHumanDecisionValue>([
@@ -661,6 +670,14 @@ function parseTakeVersionRequest(payload: unknown) {
     return parseTakeVersionReadRequest(payload)
   } catch {
     throw new InputError('takeVersions accepts only canonical projectId, episodeId, and frameId')
+  }
+}
+
+function parseTakeAcceptanceRequest(payload: unknown) {
+  try {
+    return parseTakeAcceptanceReadRequest(payload)
+  } catch {
+    throw new InputError('takeAcceptance accepts only canonical projectId, episodeId, and frameId')
   }
 }
 
@@ -3682,6 +3699,12 @@ export function createYimengReadHandler(
           + '/episodes/' + encodeURIComponent(request.episodeId)
           + '/frames/' + encodeURIComponent(request.frameId) + '/take-versions'
         normalize = value => normalizeTakeVersionStack(value, request, jcsSha256)
+      } else if (endpoint === 'takeAcceptance') {
+        const request = parseTakeAcceptanceRequest(payload)
+        path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)
+          + '/episodes/' + encodeURIComponent(request.episodeId)
+          + '/frames/' + encodeURIComponent(request.frameId) + '/take-versions/acceptance'
+        normalize = value => normalizeTakeAcceptance(value, request, jcsSha256)
       } else if (endpoint === 'shotFindings') {
         const request = parseShotFindingRequest(payload)
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/frames/${encodeURIComponent(request.frameId)}/findings`
