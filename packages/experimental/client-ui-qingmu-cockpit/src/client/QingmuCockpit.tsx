@@ -13,6 +13,7 @@ import type { QingmuCockpitKey } from './locales.ts'
 import { AssetWorkbench } from './AssetWorkbench.tsx'
 import { PromptIrWorkspace } from './PromptIrWorkspace.tsx'
 import { ScriptWorkspace } from './ScriptWorkspace.tsx'
+import { CreateProjectWorkspace, TextImportWorkspace } from './CreationWorkspace.tsx'
 import { ShotRelationsView } from './ShotRelationsView.tsx'
 import { ShotRelationMethodView } from './ShotRelationMethodView.tsx'
 import { HeroFrameStoryboardCanvas } from './HeroFrameStoryboardCanvas.tsx'
@@ -158,6 +159,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   const [episodes, setEpisodes] = useState<readonly JsonRecord[]>([])
   const [projectId, setProjectId] = useState('')
   const [episodeId, setEpisodeId] = useState('')
+  const [creating, setCreating] = useState(false)
   const [projection, setProjection] = useState<YimengWorkflowProjection>()
   const [selectedShotId, setSelectedShotId] = useState('')
   const [generationCatalog, setGenerationCatalog] = useState<YimengCapabilityCatalogResponse>()
@@ -183,7 +185,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
 
   const current = (id: number): boolean => id === requestRef.current
 
-  const refresh = async (): Promise<void> => {
+  const refresh = async (preferred?: { projectId: string; episodeId: string }): Promise<void> => {
     const request = begin()
     setLoading(true)
     setError(undefined)
@@ -198,8 +200,9 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
 
       const nextProjects = projectsResult.value.items
       setProjects(nextProjects)
-      const nextProjectId = nextProjects.some(item => stringOf(item.id) === projectId)
-        ? projectId
+      const desiredProjectId = preferred?.projectId ?? projectId
+      const nextProjectId = nextProjects.some(item => stringOf(item.id) === desiredProjectId)
+        ? desiredProjectId
         : stringOf(nextProjects[0]?.id) ?? ''
       setProjectId(nextProjectId)
       if (nextProjectId === '') {
@@ -213,8 +216,9 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
       const episodeResult = await port.episodes({ projectId: nextProjectId }, request.controller.signal)
       if (!current(request.id)) return
       setEpisodes(episodeResult.items)
-      const nextEpisodeId = episodeResult.items.some(item => stringOf(item.id) === episodeId)
-        ? episodeId
+      const desiredEpisodeId = preferred?.episodeId ?? episodeId
+      const nextEpisodeId = episodeResult.items.some(item => stringOf(item.id) === desiredEpisodeId)
+        ? desiredEpisodeId
         : stringOf(episodeResult.items[0]?.id) ?? ''
       setEpisodeId(nextEpisodeId)
       if (nextEpisodeId === '') {
@@ -417,14 +421,18 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
 
   const assetView = (
     <div className={css.stack}>
-      <ScriptWorkspace
-        key={`${projectId}:${episodeId}`}
-        projectId={projectId}
-        episodeId={episodeId}
-        port={port}
-        t={t}
-        onCommitted={refreshWorkflowAfterCommit}
-      />
+      {episodeId !== '' && <TextImportWorkspace key={`${projectId}:${episodeId}:text-import`} projectId={projectId} episodeId={episodeId}
+        port={port} onSaved={async () => { await refresh() }} />}
+      <details><summary>高级剧本 JSON 编辑与 ChangeSet</summary>
+        <ScriptWorkspace
+          key={`${projectId}:${episodeId}`}
+          projectId={projectId}
+          episodeId={episodeId}
+          port={port}
+          t={t}
+          onCommitted={refreshWorkflowAfterCommit}
+        />
+      </details>
       <PromptIrWorkspace
         key={`${projectId}:${episodeId}:prompt-ir`}
         projectId={projectId}
@@ -653,7 +661,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
         {wide && <span>{t('trigger')}</span>}
       </button>
       <Modal open={open} onClose={close} title={t('title')} headless className={css.dialog as string}>
-        <div ref={dialogRef} className={`${css.shell} ${tab === 'director' ? css.directorShell : ''}`}>
+        <div ref={dialogRef} className={`${css.shell} ${tab === 'director' || creating || projectId === '' || tab === 'assets' ? css.directorShell : ''}`}>
           <header className={css.header}>
             <div>
               <h2 ref={headingRef} tabIndex={-1}>{t('title')}</h2>
@@ -694,6 +702,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
           </section>
 
           <div className={css.toolbar}>
+            <button type="button" onClick={() => { if (mayLeaveDirector()) setCreating(true) }} disabled={loading}>新建项目</button>
             <label>
               <span>{t('project')}</span>
               <select
@@ -729,9 +738,12 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
           {error !== undefined && (
             <section className={css.error} role="alert">
               <div>
-                <strong>{t('errorTitle')}</strong>
-                <p>{error}</p>
-                <small>{t('errorRecovery')}</small>
+                <strong>{error.includes('storyboard_revision_missing') ? '分镜尚未建立' : t('errorTitle')}</strong>
+                <p>{error.includes('storyboard_revision_missing')
+                  ? '完整工作流投影暂不可用；可在“剧本与资产”导入并保存剧本。没有生成分镜、资产或媒体。' : error}</p>
+                {error.includes('storyboard_revision_missing')
+                  ? <details><summary>投影诊断</summary><p>{error}</p></details>
+                  : <small>{t('errorRecovery')}</small>}
               </div>
               <button type="button" onClick={() => { void refresh() }}>{t('retry')}</button>
             </section>
@@ -775,7 +787,10 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
               aria-labelledby={`qingmu-tab-${tab}`}
               tabIndex={0}
             >
-              {panels[tab]}
+              {creating || (!loading && projects.length === 0 && error === undefined)
+                ? <CreateProjectWorkspace port={port} onCreated={async (result) => { await refresh(result); setCreating(false); setTab('assets') }}
+                  onCancel={projects.length === 0 ? undefined : () => setCreating(false)} />
+                : panels[tab]}
             </main>
             <aside className={css.evidence} aria-label={t('evidence')}>
               <h3>{t('evidence')}</h3>

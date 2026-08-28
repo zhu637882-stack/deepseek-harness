@@ -139,6 +139,12 @@ export function apply(ctx: ClientContext): void {
     unwrapRpc(await connection.rpc.call('/qingmu-imago-method', endpoint, payload, signal)) as T
 
   const port: QingmuYimengPort = {
+    initializeProject: (request, signal) => command('initializeProject', request, signal),
+    recoverProjectInitialization: (request, signal) => command('recoverProjectInitialization', request, signal),
+    readTextImport: (request, signal) => command('readTextImport', request, signal),
+    createTextImport: (request, signal) => command('createTextImport', request, signal),
+    correctTextImport: (request, signal) => command('correctTextImport', request, signal),
+    confirmTextImport: (request, signal) => command('confirmTextImport', request, signal),
     evidenceLedger: (request, signal) => read<YimengEpisodeEvidenceLedgerResponse>('evidenceLedger', request, signal),
     verifyEpisode: (request, signal) => read<YimengEpisodeVerificationResponse>('verifyEpisode', request, signal),
     capabilityCatalog: (request, signal) =>

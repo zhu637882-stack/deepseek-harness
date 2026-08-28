@@ -646,6 +646,12 @@ export interface QingmuYimengCommandPort {
     signal?: AbortSignal,
   ): Promise<YimengRecoverReferenceRightsExceptionReleaseResponse>
   proposeScript(request: YimengProposeScriptRequest, signal?: AbortSignal): Promise<YimengProposeScriptResponse>
+  initializeProject(request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ProjectInitializationRequest, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ProjectInitializationResult>
+  recoverProjectInitialization(request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ProjectInitializationRecovery, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ProjectInitializationResult>
+  readTextImport(request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').TextImportReadRequest, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').TextImportState>
+  createTextImport(request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').TextImportRequest, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').TextImportDraft>
+  correctTextImport(request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').TextImportCorrection, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').TextImportDraft>
+  confirmTextImport(request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').TextImportConfirmationRequest, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').TextImportConfirmation>
   previewScript(request: YimengPreviewScriptRequest, signal?: AbortSignal): Promise<YimengPreviewScriptResponse>
   commitScript(request: YimengCommitScriptRequest, signal?: AbortSignal): Promise<YimengCommitScriptResponse>
   recoverScriptCommit(request: YimengRecoverScriptCommitRequest, signal?: AbortSignal): Promise<YimengRecoverScriptCommitResponse>

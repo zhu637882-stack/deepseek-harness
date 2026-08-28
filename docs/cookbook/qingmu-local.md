@@ -15,7 +15,16 @@ python3 scripts/qingmu-local.py login
 python3 scripts/qingmu-local.py status
 ```
 
-Open the `webUrl` printed by `status`, choose “进入青木 OS”, then “先以只读方式进入” on first use and “青木制作台”. The first-use option skips model setup, not the authenticated Draft command permissions. `ready: true` requires both owned processes, the API's exact database/storage identity, and the Host's loopback listener and page. Login is a separate status. An empty installation has no projects; the cockpit cannot yet create a new project. This is a persistent integration environment, not complete product acceptance.
+Open the `webUrl` printed by `status`, choose “进入青木 OS”, then “先以只读方式进入” on first use and “青木制作台”. The first-use option skips model setup, not authenticated editing permissions. `ready: true` requires both owned processes, the API's exact database/storage identity, and the Host's loopback listener and page. Login is a separate status. This is a persistent integration environment with a script creation path, not complete product acceptance.
+
+## Write the first script
+
+1. In the empty state, enter a project name and choose “新建项目与第 1 集”. Existing projects also have a “新建项目” button. Yimeng creates one project, first season and first episode atomically.
+2. In “剧本与资产”, paste text or select a UTF-8 `.txt` file (at most 128 KiB, 64000 characters, 1000 lines). Start each scene with “场景一：地点”; put actions and dialogue on separate lines.
+3. Choose “解析并保存预览草稿”. Check scene/action/dialogue classification and correct speakers with “保存校正”. This only saves the parsing draft.
+4. Choose “确认导入并保存剧本”. The saved script and version appear below. Refreshing or restarting reads the same server-side script. Assets, storyboards and Takes remain absent until separately created; this action starts no stage or generation and grants no content approval.
+
+If a reply is lost, use “读取创建恢复” or “读取恢复 / 刷新预览” first. Inputs remain in this browser; canonical drafts and scripts live in Yimeng. An explicit same-intent retry cannot duplicate the original operation. When the script version changed and the original import is confirmed absent, “保留文字，按当前版本重新准备” unlocks the retained text without submitting it. An unfinished draft index can be completed only by explicit same-key retry while it is still current. Browser recovery storage is not a backup; a new browser recovers saved data, not unsubmitted local text.
 
 ## Stop, restart and renew login
 

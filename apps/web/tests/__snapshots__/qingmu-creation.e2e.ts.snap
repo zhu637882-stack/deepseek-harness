@@ -1,0 +1,43 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`empty local creation path > creates once, corrects TXT, recovers lost confirmations and restores after restart in a fresh browser 1`] = `
+{
+  "authorityCounts": {
+    "agent_runs": 0,
+    "assets": 0,
+    "episode_production_step_receipts": 0,
+    "episode_release_authority": 0,
+    "prompt_irs": 0,
+    "step_runs": 0,
+    "workflow_runs": 0,
+  },
+  "commandTypes": [
+    "qingmu.project_bootstrap.create.v1",
+  ],
+  "events": [
+    "ProjectBootstrapped",
+  ],
+  "providerCounts": [
+    0,
+    0,
+    0,
+    0,
+    0,
+  ],
+  "savedScript": "已保存剧本 · 版本 1
+场景一：雨夜旧街
+
+（门缓缓打开）
+
+林小夏：请进。
+
+下一步：检查剧本内容，再进入导演台规划。当前尚未生成资产、分镜或 Take；本操作不会自动生成。",
+  "writes": [
+    "/qingmu-yimeng-command/initializeProject",
+    "/qingmu-yimeng-command/createTextImport",
+    "/qingmu-yimeng-command/createTextImport",
+    "/qingmu-yimeng-command/correctTextImport",
+    "/qingmu-yimeng-command/confirmTextImport",
+  ],
+}
+`;

@@ -1,6 +1,12 @@
 /** Loopback-only Host boundary for explicit Yimeng ChangeSet commands. */
 
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
+import { prepareCreationCommand } from './creation.ts'
+export type {
+  ProjectInitializationRequest, ProjectInitializationRecovery, ProjectInitializationResult,
+  CreationScope, TextImportReadRequest, TextImportRequest, TextImportLine, TextImportDraft,
+  TextImportState, TextImportCorrection, TextImportConfirmationRequest, TextImportConfirmation,
+} from './creation.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-client-connection'
@@ -5175,6 +5181,11 @@ export function createYimengCommandHandler(
           ...(prepared.request.idempotencyKey === undefined ? {} : { idempotencyKey: prepared.request.idempotencyKey }),
         }
         normalize = prepared.normalize
+      } else if (['initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)) {
+        const prepared = prepareCreationCommand(endpoint, payload, stageArtifactHelpers)
+        path = prepared.path
+        requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
+        normalize = prepared.normalize
       } else if (endpoint === 'proposeScript') {
         const request = parseProposeRequest(payload)
         path = `/api/qingmu/episodes/${encodeURIComponent(request.episodeId)}/script/change-sets`
@@ -5486,6 +5497,7 @@ export function createYimengCommandHandler(
         || endpoint === 'recoverReworkRoute'
         || endpoint === 'probeReworkRouteAuthority'
       const requiresCredentialReflectionGuard = isStageArtifactCommand
+        || ['initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)
         || endpoint === 'createTakeComment' || endpoint === 'recoverTakeComment'
         || endpoint === 'createTakeReviewRecommendation'
         || endpoint === 'recoverTakeReviewRecommendation'

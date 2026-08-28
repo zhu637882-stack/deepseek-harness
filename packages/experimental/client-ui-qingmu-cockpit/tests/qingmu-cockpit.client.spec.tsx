@@ -620,6 +620,12 @@ function shotRelationMethod(request: Parameters<QingmuYimengPort['shotRelationMe
 
 function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
   return {
+    initializeProject: vi.fn(async () => { throw new Error('Creation uses a separate fixture') }),
+    recoverProjectInitialization: vi.fn(async () => { throw new Error('Creation uses a separate fixture') }),
+    readTextImport: vi.fn(async request => ({ schema: 'jason.qingmu-text-import-state.v1' as const, ...request, scriptRevision: 0, script: null, draft: null })),
+    createTextImport: vi.fn(async () => { throw new Error('Creation uses a separate fixture') }),
+    correctTextImport: vi.fn(async () => { throw new Error('Creation uses a separate fixture') }),
+    confirmTextImport: vi.fn(async () => { throw new Error('Creation uses a separate fixture') }),
     takePreview: vi.fn(async () => { throw new Error('Preview requires the real media fixture') }),
     capabilityCatalog: vi.fn(async () => ({
       schema: 'jason.provider-capability-catalog.v1',

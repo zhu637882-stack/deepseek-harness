@@ -1,3 +1,10 @@
+/** Browser-safe creation contracts; importing this leaf never loads Host Context merges. */
+export type {
+  CreationScope, ProjectInitializationRequest, ProjectInitializationRecovery, ProjectInitializationResult,
+  TextImportReadRequest, TextImportRequest, TextImportLine, TextImportDraft, TextImportState,
+  TextImportCorrection, TextImportConfirmationRequest, TextImportConfirmation,
+} from './creation.ts'
+
 /** JSON object retained from a Yimeng command response. */
 export interface YimengCommandJsonObject {
   readonly [key: string]: unknown
@@ -2799,6 +2806,12 @@ export interface YimengReworkRouteAuthorityProbe {
 
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
+  readonly initializeProject: import('./creation.ts').ProjectInitializationResult
+  readonly recoverProjectInitialization: import('./creation.ts').ProjectInitializationResult
+  readonly readTextImport: import('./creation.ts').TextImportState
+  readonly createTextImport: import('./creation.ts').TextImportDraft
+  readonly correctTextImport: import('./creation.ts').TextImportDraft
+  readonly confirmTextImport: import('./creation.ts').TextImportConfirmation
   readonly proposeScript: YimengProposeScriptResponse
   readonly previewScript: YimengPreviewScriptResponse
   readonly commitScript: YimengCommitScriptResponse

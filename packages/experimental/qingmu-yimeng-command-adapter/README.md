@@ -6,6 +6,8 @@ This private experimental Host plugin exposes explicit Yimeng `episode_script` a
 
 ## Command boundary
 
+Project initialization and text import use six narrow operations defined in [the creation contracts](src/creation.ts). Yimeng atomically creates the project, first season, first episode and durable actor-scoped receipt in its existing journal. Recovery reads the original key and request digest; same-key changed input fails. UTF-8 TXT input is limited to 128 KiB, 64000 characters and 1000 lines, with SHA-256 computed from the actual bytes. TextImportService owns parse corrections, fingerprints, script revisions and confirmation. A read does not create or repair a draft; explicit same-key retry can finish an incomplete creation only while its source and predecessor remain current. The Host never retries a write automatically. Confirmation saves parsed text, not a stage, generated asset, Ready, Take selection or media approval.
+
 The adapter does not write a database itself. It validates browser input, obtains `YIMENG_API_TOKEN` only from the Host environment, and forwards the command to the Yimeng-owned HTTP API. Yimeng remains the authority for ownership, revision checks, durable ChangeSets, idempotent receipts, outbox events, and downstream invalidation.
 
 A ChangeSet proposal is not a commit. The Client must display the returned preview and may commit only after an explicit user confirmation while `canCommit` is true. A commit receipt is not human creative signoff and does not authorize a paid Provider call.
