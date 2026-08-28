@@ -15,7 +15,9 @@ import {
 } from './fixtures/shot-finding.client.ts'
 import { productionUnitsFeed } from '../../qingmu-yimeng-read-adapter/tests/production-unit-fixture.ts'
 
-type Port = Pick<QingmuYimengPort, 'shotFindings' | 'shotFindingMethod' | 'recordShotFinding' | 'recoverShotFinding'>
+type Port = Pick<QingmuYimengPort, 'shotFindings' | 'shotFindingMethod' | 'recordShotFinding' | 'recoverShotFinding'
+  | 'reworkRouteSource' | 'reworkRouteMethod' | 'recordReworkRoute' | 'recoverReworkRoute'
+  | 'probeReworkRouteAuthority'>
 const t = (key: QingmuCockpitKey) => zh[key]
 function props(port: Port, projection = shotFindingSource(), selectedShotId = 'frame-a') {
   return { projectId: projection.projectId, episodeId: projection.episodeId, projection, selectedShotId, enabled: true, port, t }
@@ -33,6 +35,11 @@ function makePort(feed = shotFindingFeed()) {
       return shotFindingResult(method, request.finding)
     }),
     recoverShotFinding: vi.fn<Port['recoverShotFinding']>(),
+    reworkRouteSource: vi.fn<Port['reworkRouteSource']>().mockRejectedValue(new Error('No route source')),
+    reworkRouteMethod: vi.fn<Port['reworkRouteMethod']>().mockRejectedValue(new Error('No route method')),
+    recordReworkRoute: vi.fn<Port['recordReworkRoute']>(),
+    recoverReworkRoute: vi.fn<Port['recoverReworkRoute']>(),
+    probeReworkRouteAuthority: vi.fn<Port['probeReworkRouteAuthority']>(),
   }
 }
 async function fill() {
@@ -295,12 +302,35 @@ describe('same-Shot Finding authoring', () => {
 })
 
 describe('Finding read-only rework preparation', () => {
-  const title = '返修准备 · 非正式路由'
+  const title = zh.findingReworkTitle
 
   async function openPreparation() {
     fireEvent.click(await screen.findByText(zh.findingRecordDetails))
-    return screen.getByRole('region', { name: title })
+    const preparation = screen.getByRole('region', { name: title })
+    await within(preparation).findByText(zh.findingRouteBoundary)
+    return preparation
   }
+
+  it('does not probe a collapsed Finding and aborts the route read when its details close', async () => {
+    const item = { ...shotFindingResult().finding, currentBinding: true }
+    const port = makePort({ ...shotFindingFeed(), items: [item] })
+    const request = pending<Awaited<ReturnType<Port['reworkRouteMethod']>>>()
+    port.reworkRouteMethod.mockReturnValue(request.promise)
+    render(<ShotFindingView {...props(port)} />)
+    await screen.findByRole('combobox', { name: zh.findingEarliestOwner })
+    expect(port.reworkRouteMethod).not.toHaveBeenCalled()
+    expect(port.reworkRouteSource).not.toHaveBeenCalled()
+    expect(port.probeReworkRouteAuthority).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByText(zh.findingRecordDetails))
+    await waitFor(() => { expect(port.reworkRouteMethod).toHaveBeenCalledOnce() })
+    const signal = port.reworkRouteMethod.mock.calls[0]?.[1]
+    expect(signal?.aborted).toBe(false)
+    fireEvent.click(screen.getByText(zh.findingRecordDetails))
+    await waitFor(() => { expect(signal?.aborted).toBe(true) })
+    expect(port.reworkRouteSource).not.toHaveBeenCalled()
+    expect(port.probeReworkRouteAuthority).not.toHaveBeenCalled()
+  })
 
   it.each([true, false])('shows exact unit scope evidence with current=%s without granting production authority', async (currentBinding) => {
     const item = { ...shotFindingResult().finding, currentBinding: true }
@@ -312,11 +342,14 @@ describe('Finding read-only rework preparation', () => {
     expect(within(preparation).getByText(currentBinding ? zh.findingUnitCurrent : zh.findingUnitHistorical, { exact: false })).toBeTruthy()
     expect(within(preparation).getByText(zh.findingUnitBoundary)).toBeTruthy()
     expect(within(preparation).getAllByText(zh.findingReworkNotProvided)).toHaveLength(4)
-    expect(within(preparation).getByText(zh.findingReworkRouteUnavailable)).toBeTruthy()
-    expect(preparation.querySelector('button, input, select, textarea')).toBeNull()
+    expect(await within(preparation).findByText(zh.findingRouteUnavailable)).toBeTruthy()
+    expect(within(preparation).getByText(zh.findingRouteBoundary)).toBeTruthy()
+    expect(within(preparation).getByRole('button', { name: zh.findingRouteRefresh })).toBeTruthy()
     expect(port.shotFindings).toHaveBeenCalledOnce()
     expect(port.recordShotFinding).not.toHaveBeenCalled()
     expect(port.recoverShotFinding).not.toHaveBeenCalled()
+    expect(port.recordReworkRoute).not.toHaveBeenCalled()
+    expect(port.recoverReworkRoute).not.toHaveBeenCalled()
   })
 
   it.each(['frameId', 'frameNo', 'frameContentSha256', 'storyboardRevision'] as const)(
@@ -385,14 +418,17 @@ describe('Finding read-only rework preparation', () => {
     ] as const) expect(within(history).getByText(label).nextElementSibling?.textContent).toBe(value)
     const references = within(history).getByText(zh.findingEvidenceRefs).nextElementSibling
     expect(Array.from(references?.querySelectorAll('li') ?? [], node => node.textContent)).toEqual(author.evidenceRefs)
-    expect(preparation.querySelector('button, a, input, select, textarea, video, audio, img')).toBeNull()
+    expect(preparation.querySelector('a, input, select, textarea, video, audio, img')).toBeNull()
+    expect(within(preparation).getByRole('button', { name: zh.findingRouteRefresh })).toBeTruthy()
     fireEvent.click(screen.getByText(zh.findingRecordDetails))
     fireEvent.click(screen.getByText(zh.findingRecordDetails))
-    expect(screen.getAllByRole('button')).toHaveLength(buttons)
+    expect(screen.getAllByRole('button')).toHaveLength(buttons + 1)
     expect(port.shotFindings).toHaveBeenCalledOnce()
     expect(port.shotFindingMethod).toHaveBeenCalledOnce()
     expect(port.recordShotFinding).not.toHaveBeenCalled()
     expect(port.recoverShotFinding).not.toHaveBeenCalled()
+    expect(port.recordReworkRoute).not.toHaveBeenCalled()
+    expect(port.recoverReworkRoute).not.toHaveBeenCalled()
     expect(storage).not.toHaveBeenCalled()
     expect(sessionStorage.length).toBe(0)
   })
@@ -476,11 +512,15 @@ describe('Finding read-only rework preparation', () => {
     }
     expect(within(preparation).getAllByText('当前读合同未提供')).toHaveLength(4)
     expect(within(preparation).getByText('未知，不能按责任岗位推断')).toBeTruthy()
-    expect(within(preparation).getByText('当前视图无正式路由证据；本视图不提供执行')).toBeTruthy()
+    expect(await within(preparation).findByText(zh.findingRouteUnavailable)).toBeTruthy()
+    expect(within(preparation).getByText(zh.findingRouteBoundary)).toBeTruthy()
     expect(within(preparation).getByText('以上仅说明证据提供情况，不表示系统不存在；单元实例不作为全局岗位的额外要求。')).toBeTruthy()
-    expect(preparation.querySelector('button, a, input, select, textarea')).toBeNull()
+    expect(preparation.querySelector('a, input, select, textarea')).toBeNull()
+    expect(within(preparation).getByRole('button', { name: zh.findingRouteRefresh })).toBeTruthy()
     expect(port.recordShotFinding).not.toHaveBeenCalled()
     expect(port.recoverShotFinding).not.toHaveBeenCalled()
+    expect(port.recordReworkRoute).not.toHaveBeenCalled()
+    expect(port.recoverReworkRoute).not.toHaveBeenCalled()
   })
 
   it.each(['source', 'port', 'refresh', 'shot', 'disable'] as const)('hides the previous preparation immediately after %s changes', async (change) => {

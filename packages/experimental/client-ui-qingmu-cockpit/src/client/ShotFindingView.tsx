@@ -4,6 +4,7 @@ import type {
   YimengShotFindingPayload, YimengShotFindingResult, YimengWorkflowProjection, YimengProductionUnitsResponse,
 } from './contracts.ts'
 import type { QingmuCockpitKey } from './locales.ts'
+import { ReworkRouteControl } from './ReworkRouteControl.tsx'
 import {
   digestShotFinding, SHOT_FINDING_OWNER_LABELS, SHOT_FINDING_SEVERITY_LABELS,
   shotFindingPayload, validShotFindingPayload, verifyShotFindingFeed, verifyShotFindingMethod,
@@ -22,7 +23,9 @@ interface ShotFindingViewProps {
   readonly selectedShotId: string
   readonly projection: YimengWorkflowProjection | undefined
   readonly enabled: boolean
-  readonly port: Pick<QingmuYimengPort, 'shotFindings' | 'shotFindingMethod' | 'recordShotFinding' | 'recoverShotFinding'>
+  readonly port: Pick<QingmuYimengPort, 'shotFindings' | 'shotFindingMethod' | 'recordShotFinding' | 'recoverShotFinding'
+    | 'reworkRouteSource' | 'reworkRouteMethod' | 'recordReworkRoute' | 'recoverReworkRoute'
+    | 'probeReworkRouteAuthority'>
   readonly productionUnits?: YimengProductionUnitsResponse | undefined
   readonly t: (key: QingmuCockpitKey) => string
 }
@@ -84,6 +87,7 @@ function ShotFindingPanel({ projectId, episodeId, selectedShotId, projection, en
   const [marker, setMarker] = useState<ShotFindingRecoveryRead>(() => readShotFindingMarker(scope))
   const [busy, setBusy] = useState<Busy>()
   const [notice, setNotice] = useState<Notice>()
+  const [expandedFindingIds, setExpandedFindingIds] = useState<readonly string[]>([])
   const runRef = useRef<Run | undefined>(undefined)
   const busyRef = useRef<Busy | undefined>(undefined)
   const evidenceHelpId = useId()
@@ -353,7 +357,13 @@ function ShotFindingPanel({ projectId, episodeId, selectedShotId, projection, en
             <div className={css.recordHeader}><strong>{t(item.currentBinding ? 'findingCurrent' : 'findingHistorical')}</strong><span>{t('findingOpen')}</span></div>
             <p>{item.timecode} · {t(SHOT_FINDING_SEVERITY_LABELS[item.severity])}</p>
             <p className={css.verbatim}>{item.observation}</p>
-            <details><summary>{t('findingRecordDetails')}</summary>
+            <details onToggle={(event) => {
+              if (event.target !== event.currentTarget) return
+              const open = event.currentTarget.open
+              setExpandedFindingIds(previous => open
+                ? previous.includes(item.id) ? previous : [...previous, item.id]
+                : previous.filter(id => id !== item.id))
+            }}><summary>{t('findingRecordDetails')}</summary>
               <dl className={css.evidence}>
                 <div><dt>{t('findingEarliestOwner')}</dt><dd>{ownerLabel(item.earliestOwner)}</dd></div>
                 <div><dt>{t('findingOwnerCode')}</dt><dd>{item.earliestOwner}</dd></div>
@@ -388,7 +398,10 @@ function ShotFindingPanel({ projectId, episodeId, selectedShotId, projection, en
                     <dt>{t(key)}</dt><dd>{t('findingReworkNotProvided')}</dd>
                   </div>)}
                   <div><dt>{t('findingReworkChangedLock')}</dt><dd>{t('findingReworkChangedLockUnknown')}</dd></div>
-                  <div><dt>{t('findingReworkRoute')}</dt><dd>{t('findingReworkRouteUnavailable')}</dd></div>
+                  <div><dt>{t('findingReworkRoute')}</dt><dd>{expandedFindingIds.includes(item.id)
+                    ? <ReworkRouteControl projectId={projectId} episodeId={episodeId} frameId={selectedShotId}
+                      findingId={item.id} finding={item} currentBinding={item.currentBinding} port={port} t={t} />
+                    : t('findingRouteOpenDetails')}</dd></div>
                 </dl>
                 <p className={css.hint}>{t('findingReworkEvidenceHelp')}</p>
               </section>

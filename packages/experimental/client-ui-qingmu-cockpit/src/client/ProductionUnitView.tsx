@@ -22,6 +22,8 @@ interface ProductionUnitViewProps {
   readonly projection: YimengWorkflowProjection | undefined
   readonly enabled: boolean
   readonly port: Pick<QingmuYimengPort, 'shotFindings' | 'shotFindingMethod' | 'recordShotFinding' | 'recoverShotFinding'
+    | 'reworkRouteSource' | 'reworkRouteMethod' | 'recordReworkRoute' | 'recoverReworkRoute'
+    | 'probeReworkRouteAuthority'
     | 'productionUnits' | 'productionUnitMethod' | 'bindProductionUnit' | 'recoverProductionUnitBinding'>
   readonly t: (key: QingmuCockpitKey) => string
 }

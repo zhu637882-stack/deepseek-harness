@@ -23,6 +23,8 @@ import type {
   ImagoShotRelationMethodResponse,
   ImagoShotFindingMethodRequest,
   ImagoShotFindingMethodResponse,
+  ImagoReworkRouteMethodRequest,
+  ImagoReworkRouteMethodResponse,
   ImagoWorksetMethodRequest,
   ImagoWorksetMethodResponse,
   ImagoWorksetProjection,
@@ -77,6 +79,8 @@ import type {
   YimengShotFindingResult,
   YimengShotFindingRecovery,
   YimengShotVideoSubject,
+  YimengReworkRouteSourceRequest,
+  YimengReworkRouteSourceResponse,
   YimengShotRelationBeat,
   YimengShotRelationElement,
   YimengShotRelationScene,
@@ -151,6 +155,11 @@ import type {
   YimengSelectPromptIrResponse,
   YimengRecordShotFindingRequest,
   YimengRecoverShotFindingRequest,
+  YimengRecordReworkRouteRequest,
+  YimengReworkRouteResult,
+  YimengReworkRouteRecovery,
+  YimengProbeReworkRouteAuthorityRequest,
+  YimengReworkRouteAuthorityProbe,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 
 export type {
@@ -177,6 +186,8 @@ export type {
   ImagoShotRelationMethodResponse,
   ImagoShotFindingMethodRequest,
   ImagoShotFindingMethodResponse,
+  ImagoReworkRouteMethodRequest,
+  ImagoReworkRouteMethodResponse,
   ImagoWorksetMethodRequest,
   ImagoWorksetMethodResponse,
   ImagoWorksetProjection,
@@ -230,6 +241,8 @@ export type {
   YimengShotFindingResult,
   YimengShotFindingRecovery,
   YimengShotVideoSubject,
+  YimengReworkRouteSourceRequest,
+  YimengReworkRouteSourceResponse,
   YimengShotRelationBeat,
   YimengShotRelationElement,
   YimengShotRelationScene,
@@ -304,6 +317,11 @@ export type {
   YimengSelectPromptIrResponse,
   YimengRecordShotFindingRequest,
   YimengRecoverShotFindingRequest,
+  YimengRecordReworkRouteRequest,
+  YimengReworkRouteResult,
+  YimengReworkRouteRecovery,
+  YimengProbeReworkRouteAuthorityRequest,
+  YimengReworkRouteAuthorityProbe,
 }
 
 /** Open JSON object retained without inventing a stricter Yimeng business schema. */
@@ -327,6 +345,7 @@ export interface QingmuYimengReadPort {
   promptIr(request: YimengPromptIrRequest, signal?: AbortSignal): Promise<YimengPromptIrResponse>
   selectedVideoReview(request: YimengSelectedVideoReviewRequest, signal?: AbortSignal): Promise<YimengSelectedVideoReviewResponse>
   shotFindings(request: YimengSelectedVideoReviewRequest, signal?: AbortSignal): Promise<YimengShotFindingFeedResponse>
+  reworkRouteSource(request: YimengReworkRouteSourceRequest, signal?: AbortSignal): Promise<YimengReworkRouteSourceResponse>
   workflow(request: YimengWorkflowRequest, signal?: AbortSignal): Promise<YimengWorkflowProjection>
 }
 
@@ -340,6 +359,12 @@ export interface QingmuYimengCommandPort {
   ): Promise<YimengProductionUnitRecovery>
   recordShotFinding(request: YimengRecordShotFindingRequest, signal?: AbortSignal): Promise<YimengShotFindingResult>
   recoverShotFinding(request: YimengRecoverShotFindingRequest, signal?: AbortSignal): Promise<YimengShotFindingRecovery>
+  recordReworkRoute(request: YimengRecordReworkRouteRequest, signal?: AbortSignal): Promise<YimengReworkRouteResult>
+  recoverReworkRoute(request: YimengRecordReworkRouteRequest, signal?: AbortSignal): Promise<YimengReworkRouteRecovery>
+  probeReworkRouteAuthority(
+    request: YimengProbeReworkRouteAuthorityRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengReworkRouteAuthorityProbe>
   proposeElementProfile(request: YimengProposeElementProfileRequest, signal?: AbortSignal): Promise<YimengProposeElementProfileResponse>
   proposeReferenceAsset(request: YimengProposeReferenceAssetRequest, signal?: AbortSignal): Promise<YimengProposeReferenceAssetResponse>
   previewElementProfile(request: YimengPreviewElementProfileRequest, signal?: AbortSignal): Promise<YimengPreviewElementProfileResponse>
@@ -406,6 +431,7 @@ export interface QingmuImagoMethodPort {
   stageSourceMethod(request: ImagoStageSourceMethodRequest, signal?: AbortSignal): Promise<ImagoStageSourceMethodResponse>
   productionUnitMethod(request: ImagoProductionUnitMethodRequest, signal?: AbortSignal): Promise<ImagoProductionUnitMethodResponse>
   shotFindingMethod(request: ImagoShotFindingMethodRequest, signal?: AbortSignal): Promise<ImagoShotFindingMethodResponse>
+  reworkRouteMethod(request: ImagoReworkRouteMethodRequest, signal?: AbortSignal): Promise<ImagoReworkRouteMethodResponse>
   continuityMethod(request: ImagoContinuityMethodRequest, signal?: AbortSignal): Promise<ImagoContinuityMethodResponse>
   worksetMethod(request: ImagoWorksetMethodRequest, signal?: AbortSignal): Promise<ImagoWorksetMethodResponse>
   elementMethod(request: ImagoElementMethodRequest, signal?: AbortSignal): Promise<ImagoElementMethodResponse>

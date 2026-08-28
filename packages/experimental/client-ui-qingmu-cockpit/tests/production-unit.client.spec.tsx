@@ -18,6 +18,8 @@ import { productionUnitDefinition } from '../../qingmu-yimeng-read-adapter/tests
 import { shotFindingFeed, shotFindingMethod, shotFindingResult, shotFindingSha, shotFindingSource } from './fixtures/shot-finding.client.ts'
 
 type Port = Pick<QingmuYimengPort, 'shotFindings' | 'shotFindingMethod' | 'recordShotFinding' | 'recoverShotFinding'
+  | 'reworkRouteSource' | 'reworkRouteMethod' | 'recordReworkRoute' | 'recoverReworkRoute'
+  | 'probeReworkRouteAuthority'
   | 'productionUnits' | 'productionUnitMethod' | 'bindProductionUnit' | 'recoverProductionUnitBinding'>
 const t = (key: QingmuCockpitKey) => zh[key]
 function feedFor(projection = shotFindingSource()): YimengProductionUnitsResponse {
@@ -70,6 +72,11 @@ function makePort(initial = feedFor(), projection = shotFindingSource()) {
     shotFindings: vi.fn<Port['shotFindings']>().mockImplementation(async request => shotFindingFeed(projection, request.frameId)),
     shotFindingMethod: vi.fn<Port['shotFindingMethod']>().mockImplementation(async request => shotFindingMethod(shotFindingFeed(projection, request.frameId))),
     recordShotFinding: vi.fn<Port['recordShotFinding']>(), recoverShotFinding: vi.fn<Port['recoverShotFinding']>(),
+    reworkRouteSource: vi.fn<Port['reworkRouteSource']>().mockRejectedValue(new Error('No route source')),
+    reworkRouteMethod: vi.fn<Port['reworkRouteMethod']>().mockRejectedValue(new Error('No route method')),
+    recordReworkRoute: vi.fn<Port['recordReworkRoute']>(),
+    recoverReworkRoute: vi.fn<Port['recoverReworkRoute']>(),
+    probeReworkRouteAuthority: vi.fn<Port['probeReworkRouteAuthority']>(),
   }
   return { port, setFeed: (feed: YimengProductionUnitsResponse) => { current = feed } }
 }

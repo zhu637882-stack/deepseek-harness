@@ -16,6 +16,7 @@ import { REPO_ROOT, saveFailureShot, ZH_BROWSER_LOCALE } from './support.ts'
 import { continuityFixture, rebindContinuity } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/continuity-fixture.ts'
 import { videoCandidatesFixture } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/selected-video-review-fixture.ts'
 import { createShotFindingDouble } from './qingmu-shot-finding-fixture.ts'
+import { createReworkRouteDouble } from './qingmu-rework-route-fixture.ts'
 import {
   createProductionUnitDouble, PRODUCTION_UNIT_BROWSER_GROUP_ID, PRODUCTION_UNIT_BROWSER_UNIT_ID,
   PRODUCTION_UNIT_BROWSER_RULE_PATHS,
@@ -1671,6 +1672,7 @@ async function startYimengDouble(
   readonly setContinuityMode: (mode: ContinuityMode) => void
   readonly setVideoReviewMode: (mode: VideoReviewMode) => void
   readonly shotFindings: ReturnType<typeof createShotFindingDouble>
+  readonly reworkRoutes: ReturnType<typeof createReworkRouteDouble>
   readonly productionUnits: ReturnType<typeof createProductionUnitDouble>
   readonly stageSources: ReturnType<typeof createStageSourceDouble>
 }> {
@@ -1683,6 +1685,13 @@ async function startYimengDouble(
   })
   const stageSources = createStageSourceDouble({
     token: YIMENG_TOKEN, attestationKey: IMAGO_ATTESTATION_KEY, canonicalJson, canonicalSha256,
+  })
+  const reworkRoutes = createReworkRouteDouble({
+    token: YIMENG_TOKEN,
+    attestationKey: IMAGO_ATTESTATION_KEY,
+    canonicalJson,
+    canonicalSha256,
+    getRecordedFindings: () => shotFindings.getRecordedResults(),
   })
   let continuityMode: ContinuityMode = 'omitted'
   let videoReviewMode: VideoReviewMode = 'none'
@@ -1888,6 +1897,7 @@ async function startYimengDouble(
       if (stageSources.handle(request, response, url, body, {
         revision, contentSha256: revision === 3 ? INITIAL_SCRIPT_SHA256 : AUTHORITATIVE_SNAPSHOT_SHA,
       })) return
+      if (reworkRoutes.handle(request, response, url, body)) return
       if (
         request.method === 'GET'
         && url.pathname === `/api/qingmu/projects/project-1/episodes/episode-1/storyboard-revisions/${PROMPT_IR_STORYBOARD_REVISION_ID}/frames/${PROMPT_IR_FRAME_ID}/prompt-ir`
@@ -3159,6 +3169,7 @@ async function startYimengDouble(
     setContinuityMode: (mode) => { continuityMode = mode },
     setVideoReviewMode: (mode) => { videoReviewMode = mode },
     shotFindings,
+    reworkRoutes,
     productionUnits,
     stageSources,
   }
@@ -3236,6 +3247,7 @@ describe.skipIf(
     let setContinuityMode: ((mode: ContinuityMode) => void) | undefined
     let setVideoReviewMode: ((mode: VideoReviewMode) => void) | undefined
     let shotFindingDouble: ReturnType<typeof createShotFindingDouble> | undefined
+    let reworkRouteDouble: ReturnType<typeof createReworkRouteDouble> | undefined
     let productionUnitDouble: ReturnType<typeof createProductionUnitDouble> | undefined
     let stageSourceDouble: ReturnType<typeof createStageSourceDouble> | undefined
     const capturedRequests: CapturedYimengRequest[] = []
@@ -3311,6 +3323,7 @@ describe.skipIf(
       setContinuityMode = yimeng.setContinuityMode
       setVideoReviewMode = yimeng.setVideoReviewMode
       shotFindingDouble = yimeng.shotFindings
+      reworkRouteDouble = yimeng.reworkRoutes
       productionUnitDouble = yimeng.productionUnits
       stageSourceDouble = yimeng.stageSources
       overlayRoot = await mkdtemp(join(tmpdir(), 'dsh-qingmu-script-e2e-'))
@@ -3344,6 +3357,8 @@ describe.skipIf(
         if (!requestPath.startsWith('/qingmu-imago-method/') && ![
           '/qingmu-yimeng/selectedVideoReview', '/qingmu-yimeng/shotFindings',
           '/qingmu-yimeng-command/recordShotFinding', '/qingmu-yimeng-command/recoverShotFinding',
+          '/qingmu-yimeng/reworkRouteSource', '/qingmu-yimeng-command/recordReworkRoute',
+          '/qingmu-yimeng-command/recoverReworkRoute', '/qingmu-yimeng-command/probeReworkRouteAuthority',
           '/qingmu-yimeng/productionUnits', '/qingmu-yimeng-command/bindProductionUnit',
           '/qingmu-yimeng-command/recoverProductionUnitBinding',
           '/qingmu-yimeng/stageSources', '/qingmu-yimeng-command/bindStageSource',
@@ -3941,10 +3956,13 @@ describe.skipIf(
       }
     }, 120_000)
 
-    it('records a bound E5-5 Finding, shows read-only rework preparation, and recovers its original receipt in Chromium', async () => {
+    it('records a bound E5-5 Finding, records and recovers its bounded route, and recovers a Finding receipt in Chromium', async () => {
       onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e5-5-finding'))
-      if (shotFindingDouble === undefined || setVideoReviewMode === undefined) throw new Error('Finding fixture controls missing')
+      if (shotFindingDouble === undefined || reworkRouteDouble === undefined || setVideoReviewMode === undefined) {
+        throw new Error('Finding or bounded-route fixture controls missing')
+      }
       const controls = shotFindingDouble
+      const routeControls = reworkRouteDouble
       const requestStart = capturedRequests.length
       const rpcStart = browserRpcRequests.length
       const consoleStart = browserConsoleErrors.length
@@ -3965,6 +3983,9 @@ describe.skipIf(
       }
       const markers = () => page.evaluate(() => Object.keys(sessionStorage)
         .filter(key => decodeURIComponent(key).startsWith('qingmu:shot-finding-recovery:v1:'))
+        .map(key => ({ key, value: sessionStorage.getItem(key) })))
+      const routeMarkers = () => page.evaluate(() => Object.keys(sessionStorage)
+        .filter(key => decodeURIComponent(key).startsWith('qingmu:rework-route-recovery:v1:'))
         .map(key => ({ key, value: sessionStorage.getItem(key) })))
       controls.setMode('available')
       setVideoReviewMode('pending')
@@ -4035,21 +4056,95 @@ describe.skipIf(
         const preparationRpcStart = browserRpcRequests.length
         const firstDetails = panel.getByRole('list', { name: '问题历史', exact: true })
           .getByRole('listitem').filter({ has: page.getByText(firstFinding.observation, { exact: true }) }).locator('details')
+        expect(capturedRequests.slice(preparationRequestStart).filter(request => request.path.includes('/rework-route/'))).toEqual([])
+        expect(browserRpcRequests.slice(preparationRpcStart).filter(request => /reworkRoute/.test(request.path))).toEqual([])
         await firstDetails.locator('summary').click()
-        const preparation = firstDetails.getByRole('region', { name: '返修准备 · 非正式路由', exact: true })
+        const preparation = firstDetails.getByRole('region', { name: '返修准备 · 有界路线', exact: true })
         await preparation.waitFor()
+        await preparation.getByText('当前尚无路线记录。', { exact: true }).waitFor()
         expect(await preparation.getByText('原记录与当前选中素材一致', { exact: true }).count()).toBe(1)
         expect(await preparation.getByText('视频生产 · 按制作单元', { exact: true }).count()).toBe(1)
         expect(await preparation.getByText('与记录时一致', { exact: true }).count()).toBe(1)
         expect(await preparation.getByText('当前读合同未提供', { exact: true }).count()).toBe(4)
         expect(await preparation.getByText('未知，不能按责任岗位推断', { exact: true }).count()).toBe(1)
-        expect(await preparation.getByText('当前视图无正式路由证据；本视图不提供执行', { exact: true }).count()).toBe(1)
-        expect(await preparation.locator('button, a, input, select, textarea').count()).toBe(0)
-        const currentPreparationAria = await captureStableAria(page, 'role=region[name="返修准备 · 非正式路由"]', scaffold.workspaceCwd)
+        expect(await preparation.getByText('只记录当前 Finding 的有界路线；不执行返修、不建任务、不关闭问题、不改素材、阶段或锁，也不调用 Provider。', { exact: true }).count()).toBe(1)
+        expect(await preparation.getByText('LSU07', { exact: true }).count()).toBe(1)
+        expect(await preparation.getByText('PRODUCTION_BLUEPRINT_LOCK · C5F', { exact: true }).count()).toBe(1)
+        const routeRecordButton = preparation.getByRole('button', { name: '只记录有界路线', exact: true })
+        expect(await routeRecordButton.isEnabled()).toBe(true)
+        const unrecordedPreparationAria = await captureStableAria(page, 'role=region[name="返修准备 · 有界路线"]', scaffold.workspaceCwd)
+        const routeActionRequestStart = capturedRequests.length
+        const routeActionRpcStart = browserRpcRequests.length
+        routeControls.loseNextRecordResponse()
+        const uncertainRouteWire = nextWire('/qingmu-yimeng-command/recordReworkRoute', SHOT_RIVER_FIRST_FRAME_ID)
+        await routeRecordButton.click()
+        expect(await readWire(uncertainRouteWire)).toMatchObject({ ok: false })
+        await preparation.getByText('路线记录结果未知；请只读恢复原回执，不要重复发送。', { exact: true }).waitFor()
+        const retainedRouteMarkers = await routeMarkers()
+        expect(retainedRouteMarkers).toHaveLength(1)
+        const retainedRoute = retainedRouteMarkers[0]
+        if (retainedRoute?.value === null || retainedRoute?.value === undefined) throw new Error('Route intent was not retained')
+        const routeIntent: unknown = JSON.parse(retainedRoute.value)
+        if (!isRecord(routeIntent)) throw new Error('Route intent is not an object')
+        expect(Object.keys(routeIntent)).toHaveLength(9)
+        expect(routeIntent.frameId).toBe(SHOT_RIVER_FIRST_FRAME_ID)
+        expect(routeIntent.findingId).toBe(controls.getRecordedResults()[0]?.finding.id)
+        expect(retainedRoute.value).not.toContain(firstFinding.observation)
+        expect(retainedRoute.value).not.toContain('signature')
+        const recoverRouteButton = preparation.getByRole('button', { name: '只读恢复原路线回执', exact: true })
+        const recoveredRouteWire = nextWire('/qingmu-yimeng-command/recoverReworkRoute', SHOT_RIVER_FIRST_FRAME_ID)
+        await recoverRouteButton.click()
+        const recoveredRoute = await readWire(recoveredRouteWire)
+        expect(recoveredRoute).toMatchObject({ ok: true, value: {
+          found: true,
+          projectId: 'project-1',
+          episodeId: 'episode-1',
+          findingId: routeIntent.findingId,
+          expectedSubjectSha256: routeIntent.expectedSubjectSha256,
+          expectedRouteRevision: 0,
+          expectedRouteSha256: null,
+          idempotencyKey: routeIntent.idempotencyKey,
+          result: {
+            routeRecorded: true, findingClosed: false, selectionChanged: false,
+            stageDecisionChanged: false, lockInvalidated: false, taskCreated: false,
+            providerCalls: 0, reworkExecuted: false, humanSignoffInferred: false,
+          },
+        } })
+        await preparation.getByText('路线回执已核验，并已重新回读当前权威；未执行返修。', { exact: true }).waitFor()
+        await preparation.getByText('权威回读：当前路线已记录；尚未执行返修。', { exact: true }).waitFor()
+        await expect.poll(routeMarkers).toEqual([])
+        const recordedRoutes = routeControls.getRecordedResults()
+        expect(recordedRoutes).toHaveLength(1)
+        expect(recordedRoutes[0]).toMatchObject({
+          route: {
+            findingId: routeIntent.findingId,
+            revision: 1,
+            subject: { productionUnit: { unitId: 'LSU07' } },
+          },
+          routeRecorded: true, findingClosed: false, selectionChanged: false,
+          stageDecisionChanged: false, lockInvalidated: false, taskCreated: false,
+          providerCalls: 0, reworkExecuted: false, humanSignoffInferred: false,
+        })
+        const routeActionRequests = capturedRequests.slice(routeActionRequestStart)
+        const routeRecordPosts = routeActionRequests.filter(request => request.method === 'POST' && request.path.endsWith('/rework-route/routes'))
+        const routeRecoveryGets = routeActionRequests.filter(request => request.method === 'GET' && request.path.includes('/rework-route/route-command-receipt?'))
+        const routeProbePosts = routeActionRequests.filter(request => request.method === 'POST' && request.path.endsWith('/rework-route/authority-probe'))
+        expect(routeRecordPosts).toHaveLength(1)
+        expect(routeRecoveryGets).toHaveLength(1)
+        expect(routeRecoveryGets[0]?.body).toBeUndefined()
+        expect(routeProbePosts.length).toBeGreaterThanOrEqual(1)
+        const routeActionRpc = browserRpcRequests.slice(routeActionRpcStart).filter(request => /reworkRoute/i.test(request.path))
+        expect(routeActionRpc.filter(request => request.path.endsWith('/recordReworkRoute'))).toHaveLength(1)
+        expect(routeActionRpc.filter(request => request.path.endsWith('/recoverReworkRoute'))).toHaveLength(1)
+        expect(routeActionRequests.filter(request => (
+          /provider|worker|generate|approval|select|task|close-finding|execute-rework/i.test(request.path)
+        ))).toEqual([])
+        const currentPreparationAria = await captureStableAria(page, 'role=region[name="返修准备 · 有界路线"]', scaffold.workspaceCwd)
         const preparationDesktopPath = process.env.QINGMU_E5_5_REWORK_SCREENSHOT?.trim()
         if (preparationDesktopPath) {
           await mkdir(dirname(preparationDesktopPath), { recursive: true })
-          await preparation.screenshot({ path: preparationDesktopPath })
+          await preparation.getByRole('heading', { name: '返修准备 · 有界路线', exact: true }).scrollIntoViewIfNeeded()
+          await page.screenshot({ path: preparationDesktopPath })
         }
         await page.setViewportSize({ width: 390, height: 844 })
         const preparationMobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
@@ -4058,20 +4153,26 @@ describe.skipIf(
         expect(preparationMobileOverflow).toBe(false)
         expect(preparationCardOverflow).toBe(false)
         expect(detailsControlHeight).toBeGreaterThanOrEqual(44)
-        const preparationMobileFields = await preparation.locator('h5, dt, dd, p').all()
+        expect((await preparation.getByRole('button', { name: '当前路线已记录', exact: true }).boundingBox())?.height)
+          .toBeGreaterThanOrEqual(44)
+        // The outer evidence <dd> owns the complete route control and is
+        // intentionally taller than the mobile scroll port. Verify the
+        // visible leaf fields, not that structural container.
+        const preparationMobileFields = await preparation.locator('h5, dt, dd:not(:has(div, dl, p)), p').all()
         for (const field of preparationMobileFields) {
           await field.scrollIntoViewIfNeeded()
+          const fieldLabel = await field.innerText()
           expect(await field.evaluate((element) => {
             const box = element.getBoundingClientRect()
             return element.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2))
-          })).toBe(true)
+          }), `mobile route field should be unobscured: ${JSON.stringify(fieldLabel)}`).toBe(true)
         }
         // The region is taller than the mobile dialog's scroll port. Capture
         // actual viewport positions, not a clipped tall element screenshot.
         const preparationMobilePath = process.env.QINGMU_E5_5_REWORK_MOBILE_SCREENSHOT?.trim()
         if (preparationMobilePath) {
           await mkdir(dirname(preparationMobilePath), { recursive: true })
-          await preparation.getByRole('heading', { name: '返修准备 · 非正式路由', exact: true }).scrollIntoViewIfNeeded()
+          await preparation.getByRole('heading', { name: '返修准备 · 有界路线', exact: true }).scrollIntoViewIfNeeded()
           await page.screenshot({ path: preparationMobilePath })
         }
         const preparationMobileEndPath = process.env.QINGMU_E5_5_REWORK_MOBILE_END_SCREENSHOT?.trim()
@@ -4081,9 +4182,10 @@ describe.skipIf(
           await page.screenshot({ path: preparationMobileEndPath })
         }
         await page.setViewportSize({ width: 1680, height: 1100 })
-        expect(capturedRequests.length - preparationRequestStart).toBe(0)
-        expect(browserRpcRequests.length - preparationRpcStart).toBe(0)
+        expect(capturedRequests.slice(preparationRequestStart).some(request => request.path.includes('/rework-route/source?'))).toBe(true)
+        expect(browserRpcRequests.slice(preparationRpcStart).some(request => request.path.endsWith('/reworkRouteMethod'))).toBe(true)
         expect(await markers()).toEqual([])
+        expect(await routeMarkers()).toEqual([])
         const secondMethodWire = nextWire('/qingmu-imago-method/shotFindingMethod', PROMPT_IR_FRAME_ID)
         await river.getByRole('button', { name: /frame-1/ }).click()
         expect(await readWire(secondMethodWire)).toMatchObject({ ok: true, value: { projection: {
@@ -4091,7 +4193,7 @@ describe.skipIf(
         } } })
         await panel.getByRole('combobox', { name: '最早责任岗位', exact: true }).waitFor()
         expect(await panel.getByText(firstFinding.observation, { exact: true }).count()).toBe(0)
-        expect(await panel.getByRole('region', { name: '返修准备 · 非正式路由', exact: true }).count()).toBe(0)
+        expect(await panel.getByRole('region', { name: '返修准备 · 有界路线', exact: true }).count()).toBe(0)
         const secondFinding = await fillFinding(PROMPT_IR_FRAME_ID, '人物转身时怀表短暂消失。')
         controls.loseNextRecordResponse()
         const uncertainWire = nextWire('/qingmu-yimeng-command/recordShotFinding', PROMPT_IR_FRAME_ID)
@@ -4139,34 +4241,41 @@ describe.skipIf(
         const recoveredDetails = panel.getByRole('list', { name: '问题历史', exact: true })
           .getByRole('listitem').filter({ has: page.getByText(secondFinding.observation, { exact: true }) }).locator('details')
         await recoveredDetails.locator('summary').click()
-        const unavailablePreparation = recoveredDetails.getByRole('region', { name: '返修准备 · 非正式路由', exact: true })
+        const unavailablePreparation = recoveredDetails.getByRole('region', { name: '返修准备 · 有界路线', exact: true })
         await unavailablePreparation.waitFor()
         expect(await unavailablePreparation.getByText('当前素材不可核验', { exact: true }).count()).toBe(1)
         expect(await unavailablePreparation.getByText('当前方法未提供匹配岗位，保留原归因', { exact: true }).count()).toBe(1)
         expect(await unavailablePreparation.getByText('当前规则不可核验', { exact: true }).count()).toBe(1)
         expect(await unavailablePreparation.getByText('当前读合同未提供', { exact: true }).count()).toBe(4)
-        expect(await unavailablePreparation.getByText('当前视图无正式路由证据；本视图不提供执行', { exact: true }).count()).toBe(1)
+        await unavailablePreparation.getByText(
+          '历史素材上的 Finding 只读；禁止记录当前路线。', { exact: true },
+        ).waitFor()
         expect(await unavailablePreparation.locator('button, a, input, select, textarea').count()).toBe(0)
-        const unavailablePreparationAria = await captureStableAria(page, 'role=region[name="返修准备 · 非正式路由"]', scaffold.workspaceCwd)
+        const unavailablePreparationAria = await captureStableAria(page, 'role=region[name="返修准备 · 有界路线"]', scaffold.workspaceCwd)
         const preparationGoldenPath = join(REPO_ROOT, 'apps/web/tests/snapshots/qingmu-shot-finding-rework/ui.expected.md')
         if (scaffold.mode === 'refresh') await mkdir(dirname(preparationGoldenPath), { recursive: true })
-        await compareOrRefreshGolden(preparationGoldenPath, `## Current binding\n\n${currentPreparationAria}\n\n## Current media unavailable\n\n${unavailablePreparationAria}`, scaffold.mode)
+        await compareOrRefreshGolden(preparationGoldenPath, `## Current binding before route\n\n${unrecordedPreparationAria}\n\n## Current binding after recovered route\n\n${currentPreparationAria}\n\n## Historical Finding with current media unavailable\n\n${unavailablePreparationAria}`, scaffold.mode)
         expect(capturedRequests.length - unavailablePreparationRequestStart).toBe(0)
         expect(browserRpcRequests.length - unavailablePreparationRpcStart).toBe(0)
         expect(await markers()).toEqual([])
+        expect(await routeMarkers()).toEqual([])
         const recoveryRequests = capturedRequests.slice(recoveryStart)
         expect(recoveryRequests.length).toBeGreaterThanOrEqual(2)
         expect(recoveryRequests.every(request => request.method === 'GET' && request.body === undefined)).toBe(true)
         const requests = capturedRequests.slice(requestStart)
         const posts = requests.filter(request => request.method === 'POST')
-        expect(posts).toHaveLength(2)
-        expect(posts.map(request => request.path)).toEqual([
+        const findingPosts = posts.filter(request => /\/frames\/(?:frame-z|frame-1)\/findings$/u.test(request.path))
+        expect(findingPosts).toHaveLength(2)
+        expect(findingPosts.map(request => request.path)).toEqual([
           `/api/qingmu/projects/project-1/episodes/episode-1/frames/${SHOT_RIVER_FIRST_FRAME_ID}/findings`,
           `/api/qingmu/projects/project-1/episodes/episode-1/frames/${PROMPT_IR_FRAME_ID}/findings`,
         ])
-        expect(posts[0]?.body).toMatchObject({ finding: firstFinding })
-        expect(posts[1]?.body).toMatchObject({ finding: secondFinding, idempotencyKey: intent.idempotencyKey })
-        expect(requests.filter(request => /provider|worker|generate|approval|select/i.test(request.path))).toEqual([])
+        expect(findingPosts[0]?.body).toMatchObject({ finding: firstFinding })
+        expect(findingPosts[1]?.body).toMatchObject({ finding: secondFinding, idempotencyKey: intent.idempotencyKey })
+        expect(posts.filter(request => request.path.endsWith('/rework-route/routes'))).toHaveLength(1)
+        expect(requests.filter(request => (
+          /provider|worker|generate|approval|select|task|close-finding|execute-rework/i.test(request.path)
+        ))).toEqual([])
         const recorded = controls.getRecordedResults()
         expect(recorded).toHaveLength(2)
         expect(recorded[0]?.finding.id).not.toBe(recorded[1]?.finding.id)
@@ -4193,13 +4302,18 @@ describe.skipIf(
         await expectNoVisibleTechnicalBrand(page)
         shotFindingBrowserEvidence = {
           schema: 'qingmu.e5-5-shot-finding-browser-evidence.v1', firstMethod, firstRecord, recovered,
-          recorded, findingRpc, postCount: posts.length, recoveryGetOnly: true, recoveryRequestCount: recoveryRequests.length,
+          recorded, findingRpc, findingPostCount: findingPosts.length, recoveryGetOnly: true, recoveryRequestCount: recoveryRequests.length,
           lostResponseRetainedAcrossReload: true, notFoundRetainedMarker: true, recoveryWithoutCurrentMedia: true,
           duplicateEvidencePreserved: true, sharedShotSelection: true, automaticPostRetryCount: 0,
           mobileOverflow, cardOverflow, recordControlHeight: recordBox?.height, mediaElementCount: 0,
           reworkPreparation: {
-            currentPreparationAria, unavailablePreparationAria, additionalUpstreamRequests: 0, additionalRpcRequests: 0,
-            sourceSwitchHidesPreparation: true, requiredEvidenceUnprovided: 4, interactiveControlCount: 0,
+            unrecordedPreparationAria, currentPreparationAria, unavailablePreparationAria,
+            collapsedAdditionalUpstreamRequests: 0, collapsedAdditionalRpcRequests: 0,
+            routeRecordPostCount: routeRecordPosts.length, routeRecoveryGetCount: routeRecoveryGets.length,
+            routeProbePostCount: routeProbePosts.length, recordedRoutes, lostResponseRecoveredGetOnly: true,
+            sourceSwitchHidesPreparation: true, historicalAdditionalUpstreamRequests: 0,
+            historicalAdditionalRpcRequests: 0, requiredEvidenceUnprovided: 4,
+            currentInteractiveControlCount: 1, historicalInteractiveControlCount: 0,
             mobileOverflow: preparationMobileOverflow, cardOverflow: preparationCardOverflow, detailsControlHeight,
             mobileUnobscuredFieldCount: preparationMobileFields.length,
           },

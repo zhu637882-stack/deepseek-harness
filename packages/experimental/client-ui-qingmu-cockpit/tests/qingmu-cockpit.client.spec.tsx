@@ -647,6 +647,11 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     shotFindingMethod: vi.fn(async () => { throw new Error('Finding method is not part of this fixture') }),
     recordShotFinding: vi.fn(async () => { throw new Error('Finding record is not part of this fixture') }),
     recoverShotFinding: vi.fn(async () => { throw new Error('Finding recovery is not part of this fixture') }),
+    reworkRouteSource: vi.fn(async () => { throw new Error('Rework route source is not part of this fixture') }),
+    reworkRouteMethod: vi.fn(async () => { throw new Error('Rework route method is not part of this fixture') }),
+    recordReworkRoute: vi.fn(async () => { throw new Error('Rework route record is not part of this fixture') }),
+    recoverReworkRoute: vi.fn(async () => { throw new Error('Rework route recovery is not part of this fixture') }),
+    probeReworkRouteAuthority: vi.fn(async () => { throw new Error('Rework route probe is not part of this fixture') }),
     productionUnits: vi.fn(async (request: Parameters<QingmuYimengPort['productionUnits']>[0]) => ({
       schema: 'jason.qingmu-production-unit-feed.v1', ...request,
       capabilities: { canBindUnit: false }, groups: [], bindings: [],

@@ -28,6 +28,7 @@
     "packages/experimental/qingmu-yimeng-read-adapter/tests/selected-video-review-fixture.ts",
     "packages/experimental/qingmu-yimeng-read-adapter/tests/shot-finding-fixture.ts",
     "packages/experimental/qingmu-yimeng-read-adapter/tests/production-unit-fixture.ts",
+    "packages/experimental/qingmu-yimeng-read-adapter/tests/rework-route-fixture.ts",
     // Client package outside packages/client with a local CSS module face.
     "packages/extensions/ui-cordis/src/css-modules.d.ts",
     "packages/client/tsdown.client.ts",

@@ -9,6 +9,8 @@ import type {
   ImagoProductionUnitMethodResponse, YimengProductionUnitsResponse, YimengProductionUnitResult, YimengProductionUnitRecovery,
   ImagoContinuityMethodResponse,
   ImagoShotFindingMethodResponse, YimengShotFindingFeedResponse, YimengShotFindingResult, YimengShotFindingRecovery,
+  ImagoReworkRouteMethodResponse, YimengReworkRouteSourceResponse, YimengReworkRouteResult,
+  YimengReworkRouteRecovery, YimengReworkRouteAuthorityProbe,
   ImagoElementMethodResponse, ImagoHeroFrameStoryboardMethodResponse, ImagoPromptIrMethodResponse,
   ImagoReferenceAssetMethodResponse, ImagoShotRelationMethodResponse, ImagoWorksetMethodResponse, QingmuYimengPort,
   YimengCommitElementProfileResponse, YimengCommitPromptIrEditResponse, YimengCommitScriptResponse,
@@ -38,6 +40,8 @@ export type {
   ImagoProductionUnitMethodResponse, YimengProductionUnitsResponse, YimengProductionUnitResult, YimengProductionUnitRecovery,
   ImagoContinuityMethodResponse,
   ImagoShotFindingMethodResponse, YimengShotFindingFeedResponse, YimengShotFindingResult, YimengShotFindingRecovery,
+  ImagoReworkRouteMethodResponse, YimengReworkRouteSourceResponse, YimengReworkRouteResult,
+  YimengReworkRouteRecovery, YimengReworkRouteAuthorityProbe,
   ImagoElementMethodResponse, ImagoHeroFrameStoryboardMethodResponse, ImagoPromptIrMethodResponse,
   ImagoReferenceAssetMethodResponse, ImagoShotRelationMethodResponse, ImagoWorksetMethodResponse,
   QingmuImagoMethodPort, QingmuYimengCommandPort,
@@ -104,6 +108,16 @@ export function apply(ctx: ClientContext): void {
     shotFindingMethod: (request, signal) => method<ImagoShotFindingMethodResponse>('shotFindingMethod', request, signal),
     recordShotFinding: (request, signal) => command<YimengShotFindingResult>('recordShotFinding', request, signal),
     recoverShotFinding: (request, signal) => command<YimengShotFindingRecovery>('recoverShotFinding', request, signal),
+    reworkRouteSource: (request, signal) =>
+      read<YimengReworkRouteSourceResponse>('reworkRouteSource', request, signal),
+    reworkRouteMethod: (request, signal) =>
+      method<ImagoReworkRouteMethodResponse>('reworkRouteMethod', request, signal),
+    recordReworkRoute: (request, signal) =>
+      command<YimengReworkRouteResult>('recordReworkRoute', request, signal),
+    recoverReworkRoute: (request, signal) =>
+      command<YimengReworkRouteRecovery>('recoverReworkRoute', request, signal),
+    probeReworkRouteAuthority: (request, signal) =>
+      command<YimengReworkRouteAuthorityProbe>('probeReworkRouteAuthority', request, signal),
     workflow: (request, signal) => read<YimengWorkflowProjection>('workflow', request, signal),
     worksetMethod: (request, signal) => method<ImagoWorksetMethodResponse>('worksetMethod', request, signal),
     continuityMethod: (request, signal) => method<ImagoContinuityMethodResponse>('continuityMethod', request, signal),

@@ -1,8 +1,8 @@
-## Current binding
+## Current binding before route
 
-- region "返修准备 · 非正式路由":
-  - heading "返修准备 · 非正式路由" [level=5]
-  - paragraph: 仅核对原记录与当前方法定义，保留记录者建议；不构成正式路由。
+- region "返修准备 · 有界路线":
+  - heading "返修准备 · 有界路线" [level=5]
+  - paragraph: 核对原记录与当前方法定义，保留记录者建议；路线记录仍需当前完整权威链。
   - term: 当前素材绑定
   - definition: 原记录与当前选中素材一致
   - term: 当前方法中的责任岗位
@@ -24,15 +24,76 @@
   - definition: 当前读合同未提供
   - term: 受影响锁
   - definition: 未知，不能按责任岗位推断
-  - term: 正式返修路由
-  - definition: 当前视图无正式路由证据；本视图不提供执行
+  - term: 有界返修路线
+  - definition:
+    - paragraph: 只记录当前 Finding 的有界路线；不执行返修、不建任务、不关闭问题、不改素材、阶段或锁，也不调用 Provider。
+    - term: 当前制作单元
+    - definition: LSU07
+    - term: 当前封存计划 SHA
+    - definition: 031e2158e480316312cfc9cb0b1911a9e4b14a1579c49beb86e7de76f9e60f34
+    - term: 当前批准锁
+    - definition: PRODUCTION_BLUEPRINT_LOCK · C5F
+    - term: 当前路线方法 SHA
+    - definition: 6145097e66b65880189cdbcb4010fd90a533905bf9bf8a1fda87ddd875338df5
+    - term: 当前锁规则 SHA
+    - definition: dbcbd0c376db32fdafdc1bcf7c4045b04fbdeac4805057a55f0f759b5238d228
+    - status: 当前尚无路线记录。
+    - button "只记录有界路线"
   - paragraph: 以上仅说明证据提供情况，不表示系统不存在；单元实例不作为全局岗位的额外要求。
 
-## Current media unavailable
+## Current binding after recovered route
 
-- region "返修准备 · 非正式路由":
-  - heading "返修准备 · 非正式路由" [level=5]
-  - paragraph: 仅核对原记录与当前方法定义，保留记录者建议；不构成正式路由。
+- region "返修准备 · 有界路线":
+  - heading "返修准备 · 有界路线" [level=5]
+  - paragraph: 核对原记录与当前方法定义，保留记录者建议；路线记录仍需当前完整权威链。
+  - term: 当前素材绑定
+  - definition: 原记录与当前选中素材一致
+  - term: 当前方法中的责任岗位
+  - definition: 视频生产 · 按制作单元
+  - term: 规则对照
+  - definition: 与记录时一致
+  - term: 当前方法规则 SHA
+  - definition: 3f6f1dba4ba866e0c556a198498c30fbf0af2323abdf5c3c1863898f6dc3cb63
+  - term: 制作单元范围绑定
+  - definition:
+    - paragraph: 尚无与此问题的镜头来源一致的范围绑定。
+  - term: 阶段实例
+  - definition: 当前读合同未提供
+  - term: 已封存计划中的单元实例
+  - definition: 当前读合同未提供
+  - term: 批准锁实例
+  - definition: 当前读合同未提供
+  - term: 独立正式决定
+  - definition: 当前读合同未提供
+  - term: 受影响锁
+  - definition: 未知，不能按责任岗位推断
+  - term: 有界返修路线
+  - definition:
+    - paragraph: 只记录当前 Finding 的有界路线；不执行返修、不建任务、不关闭问题、不改素材、阶段或锁，也不调用 Provider。
+    - status: 路线回执已核验，并已重新回读当前权威；未执行返修。
+    - term: 当前制作单元
+    - definition: LSU07
+    - term: 当前封存计划 SHA
+    - definition: 031e2158e480316312cfc9cb0b1911a9e4b14a1579c49beb86e7de76f9e60f34
+    - term: 当前批准锁
+    - definition: PRODUCTION_BLUEPRINT_LOCK · C5F
+    - term: 当前路线方法 SHA
+    - definition: 6145097e66b65880189cdbcb4010fd90a533905bf9bf8a1fda87ddd875338df5
+    - term: 当前锁规则 SHA
+    - definition: dbcbd0c376db32fdafdc1bcf7c4045b04fbdeac4805057a55f0f759b5238d228
+    - term: 最近路线修订
+    - definition: "1"
+    - term: 最近路线 SHA
+    - definition: 7847f2208f4beba91913d64aee02de5766cc96b75981ba7e2ac855200aa946fe
+    - status: 权威回读：当前路线已记录；尚未执行返修。
+    - button "当前路线已记录" [disabled]
+  - paragraph: 以上仅说明证据提供情况，不表示系统不存在；单元实例不作为全局岗位的额外要求。
+
+## Historical Finding with current media unavailable
+
+- region "返修准备 · 有界路线":
+  - heading "返修准备 · 有界路线" [level=5]
+  - paragraph: 核对原记录与当前方法定义，保留记录者建议；路线记录仍需当前完整权威链。
   - term: 当前素材绑定
   - definition: 当前素材不可核验
   - term: 当前方法中的责任岗位
@@ -52,6 +113,8 @@
   - definition: 当前读合同未提供
   - term: 受影响锁
   - definition: 未知，不能按责任岗位推断
-  - term: 正式返修路由
-  - definition: 当前视图无正式路由证据；本视图不提供执行
+  - term: 有界返修路线
+  - definition:
+    - paragraph: 只记录当前 Finding 的有界路线；不执行返修、不建任务、不关闭问题、不改素材、阶段或锁，也不调用 Provider。
+    - paragraph: 历史素材上的 Finding 只读；禁止记录当前路线。
   - paragraph: 以上仅说明证据提供情况，不表示系统不存在；单元实例不作为全局岗位的额外要求。
