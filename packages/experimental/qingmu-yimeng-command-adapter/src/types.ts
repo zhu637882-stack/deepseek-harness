@@ -1548,6 +1548,108 @@ export interface YimengTakeHumanDecisionRecovery {
   readonly result: YimengTakeHumanDecisionResult | null
 }
 
+/** Fixed E7-3 QC catalogue; the browser cannot invent a new issue code. */
+export type YimengTakeTechnicalQcCode =
+  | 'STORY_CAUSALITY' | 'SHOT_ORDER' | 'PACING' | 'LOOK' | 'ENDING_CHOICE'
+  | 'IDENTITY' | 'PROP_GEOMETRY' | 'TOPOLOGY' | 'EXACT_COUNT'
+  | 'CONTACT_TRANSFER' | 'LOCKED_DIALOGUE' | 'TECHNICAL_RECEIPT'
+
+/** One Reviewer result for a fixed macro or micro dimension. */
+export interface YimengTakeTechnicalQcCheck {
+  readonly code: YimengTakeTechnicalQcCode
+  readonly result: 'PASS' | 'FAIL' | 'UNVERIFIED'
+  readonly note: string | null
+  readonly evidenceRefs: readonly string[]
+}
+
+/** Browser intent; method evidence and actor identity are always Host-derived. */
+export interface YimengRecordTakeTechnicalQcRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly expectedEvidenceSnapshotSha256: string
+  readonly takeId: string
+  readonly checks: readonly YimengTakeTechnicalQcCheck[]
+  readonly idempotencyKey: string
+}
+
+/** Original immutable intent retained for GET-only receipt recovery. */
+export type YimengRecoverTakeTechnicalQcRequest = YimengRecordTakeTechnicalQcRequest
+
+/** Exact selected-Take identity retained in the immutable QC journal. */
+export interface YimengTakeTechnicalQcSubject {
+  readonly schema: 'jason.qingmu-take-acceptance-subject.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly frameNo: number
+  readonly storyboardRevision: number
+  readonly frameContentSha256: string
+  readonly selectionRevision: number
+  readonly takeId: string
+  readonly versionOrdinal: number
+  readonly selectionStatus: 'Selected'
+  readonly outputSha256: string | null
+  readonly taskId: string | null
+  readonly capability: string | null
+  readonly routeKey: string | null
+  readonly provider: string | null
+  readonly model: string | null
+  readonly inputHash: string | null
+  readonly submitId: string | null
+}
+
+/** Immutable technical-QC assessment. It is neither content approval nor selection. */
+export interface YimengTakeTechnicalQcAssessment {
+  readonly assessmentId: string
+  readonly takeSubject: YimengTakeTechnicalQcSubject
+  readonly takeSubjectSha256: string
+  readonly evidenceSnapshotSha256: string
+  readonly technicalReceiptStatus: 'PASS' | 'BLOCKED'
+  readonly checks: readonly YimengTakeTechnicalQcCheck[]
+  readonly issueCodes: readonly YimengTakeTechnicalQcCode[]
+  readonly technicalPass: boolean
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+  readonly actorId: string
+  readonly actorRole: 'reviewer'
+  readonly actorNaturalPersonId: string
+  readonly authSessionId: string
+  readonly recordedAt: string
+  readonly eventId: string
+}
+
+/** Durable write receipt with all adjacent authority flags fixed closed. */
+export interface YimengTakeTechnicalQcResult {
+  readonly schema: 'jason.qingmu-take-technical-qc-result.v1'
+  readonly assessment: YimengTakeTechnicalQcAssessment
+  readonly technicalQcRecorded: true
+  readonly technicalPass: boolean
+  readonly changed: false
+  readonly selectionChanged: false
+  readonly recommendationChanged: false
+  readonly decisionRecorded: false
+  readonly formalApprovalChanged: false
+  readonly technicalPassChanged: false
+  readonly episodeVerificationChanged: false
+  readonly humanSignoffInferred: false
+  readonly providerCalls: 0
+  readonly budgetMutation: false
+}
+
+/** GET-only lookup for the original actor-scoped QC command receipt. */
+export interface YimengTakeTechnicalQcRecovery {
+  readonly schema: 'jason.qingmu-take-technical-qc-recovery.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly takeId: string
+  readonly expectedEvidenceSnapshotSha256: string
+  readonly idempotencyKey: string
+  readonly status: 'committed' | 'not_found'
+  readonly result: YimengTakeTechnicalQcResult | null
+}
+
 /** Native shot-group contents; group order never allocates an IMAGO unit ID. */
 export interface YimengProductionUnitSource {
   readonly schema: 'jason.qingmu-production-unit-source.v1'
@@ -2514,6 +2616,8 @@ export interface YimengCommandEndpointMap {
   readonly recoverTakeReviewRecommendation: YimengTakeReviewRecommendationRecovery
   readonly createTakeHumanDecision: YimengTakeHumanDecisionResult
   readonly recoverTakeHumanDecision: YimengTakeHumanDecisionRecovery
+  readonly recordTakeTechnicalQc: YimengTakeTechnicalQcResult
+  readonly recoverTakeTechnicalQc: YimengTakeTechnicalQcRecovery
   readonly bindProductionUnit: YimengProductionUnitResult
   readonly recoverProductionUnitBinding: YimengProductionUnitRecovery
   readonly bindStageSource: YimengStageSourceResult

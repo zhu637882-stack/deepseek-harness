@@ -621,6 +621,89 @@ export interface YimengTakeReviewAuthorityFeedResponse extends YimengTakeReviewA
   }
 }
 
+/** Fixed E7-3 issue-code catalog; browser free text can never define a QC dimension. */
+export type YimengTakeTechnicalQcCode =
+  | 'STORY_CAUSALITY' | 'SHOT_ORDER' | 'PACING' | 'LOOK' | 'ENDING_CHOICE'
+  | 'IDENTITY' | 'PROP_GEOMETRY' | 'TOPOLOGY' | 'EXACT_COUNT'
+  | 'CONTACT_TRANSFER' | 'LOCKED_DIALOGUE' | 'TECHNICAL_RECEIPT'
+
+/** One macro/micro QC result bound to a fixed issue code. */
+export interface YimengTakeTechnicalQcCheck {
+  readonly code: YimengTakeTechnicalQcCode
+  readonly result: 'PASS' | 'FAIL' | 'UNVERIFIED'
+  readonly note: string | null
+  readonly evidenceRefs: readonly string[]
+}
+
+/** Immutable Reviewer technical-QC record; it is not a content approval. */
+export interface YimengTakeTechnicalQcAssessment {
+  readonly assessmentId: string
+  readonly takeSubject: YimengTakeAcceptanceSubject
+  readonly takeSubjectSha256: string
+  readonly evidenceSnapshotSha256: string
+  readonly technicalReceiptStatus: 'PASS' | 'BLOCKED'
+  readonly checks: readonly YimengTakeTechnicalQcCheck[]
+  readonly issueCodes: readonly string[]
+  readonly technicalPass: boolean
+  readonly methodProjectionSha256: string
+  readonly rulesSha256: string
+  readonly actorId: string
+  readonly actorRole: 'reviewer'
+  readonly actorNaturalPersonId: string
+  readonly authSessionId: string
+  readonly recordedAt: string
+  readonly eventId: string
+  readonly currentBinding: boolean
+}
+
+/** Exact Shot coordinates accepted by the E7-3 read endpoint. */
+export type YimengTakeTechnicalQcRequest = YimengTakeVersionRequest
+
+/** Strict technical-QC feed derived from immutable journal events. */
+export interface YimengTakeTechnicalQcFeedResponse extends YimengTakeTechnicalQcRequest {
+  readonly schema: 'jason.qingmu-take-technical-qc-feed.v1'
+  readonly capabilities: { readonly canRecordTechnicalQc: boolean }
+  readonly currentAcceptance: {
+    readonly takeSubject: YimengTakeAcceptanceSubject
+    readonly takeSubjectSha256: string
+    readonly evidenceSnapshotSha256: string
+    readonly technicalReceiptStatus: 'PASS' | 'BLOCKED'
+  }
+  readonly assessments: readonly YimengTakeTechnicalQcAssessment[]
+  readonly currentAssessment: YimengTakeTechnicalQcAssessment | null
+  readonly boundaries: {
+    readonly technicalQcOnly: true
+    readonly technicalPassIsContentApproval: false
+    readonly selectionChanged: false
+    readonly formalApprovalChanged: false
+    readonly episodeVerificationChanged: false
+    readonly humanSignoffInferred: false
+    readonly providerCalls: 0
+    readonly budgetMutation: false
+    readonly reworkExecutionAllowed: false
+    readonly approvalInvalidationAllowed: false
+    readonly evidenceLedgerMutation: false
+  }
+}
+
+/** Durable E7-3 command result; none of its flags grant content authority. */
+export interface YimengTakeTechnicalQcResult {
+  readonly schema: 'jason.qingmu-take-technical-qc-result.v1'
+  readonly assessment: Omit<YimengTakeTechnicalQcAssessment, 'currentBinding'>
+  readonly technicalQcRecorded: true
+  readonly technicalPass: boolean
+  readonly changed: false
+  readonly selectionChanged: false
+  readonly recommendationChanged: false
+  readonly decisionRecorded: false
+  readonly formalApprovalChanged: false
+  readonly technicalPassChanged: false
+  readonly episodeVerificationChanged: false
+  readonly humanSignoffInferred: false
+  readonly providerCalls: 0
+  readonly budgetMutation: false
+}
+
 /** Exact Yimeng coordinates for the currently selected Take acceptance evidence. */
 export type YimengTakeAcceptanceRequest = YimengTakeVersionRequest
 
@@ -1847,6 +1930,7 @@ export interface YimengReadEndpointMap {
   readonly takeComments: YimengTakeCommentFeedResponse
   readonly takeReviewAuthority: YimengTakeReviewAuthorityFeedResponse
   readonly takeAcceptance: YimengTakeAcceptanceResponse
+  readonly takeTechnicalQc: YimengTakeTechnicalQcFeedResponse
   readonly shotFindings: YimengShotFindingFeedResponse
   readonly productionUnits: YimengProductionUnitsResponse
   readonly stageSources: YimengStageSourcesResponse

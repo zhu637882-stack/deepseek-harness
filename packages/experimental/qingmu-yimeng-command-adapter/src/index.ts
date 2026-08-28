@@ -11,6 +11,10 @@ import { prepareShotFindingCommand } from './shot-finding.ts'
 import { prepareTakeVersionCommand } from './take-version.ts'
 import { prepareTakeCommentCommand } from './take-comment.ts'
 import { prepareTakeReviewCommand } from './take-review-authority.ts'
+import {
+  prepareCurrentTakeTechnicalQcMethodRequest,
+  prepareTakeTechnicalQcCommand,
+} from './take-technical-qc.ts'
 import { prepareProductionUnitCommand } from './production-unit.ts'
 import {
   prepareCurrentStageArtifactMethodRequest,
@@ -310,6 +314,14 @@ export type {
   YimengTakeHumanDecisionRecovery,
   YimengTakeHumanDecisionResult,
   YimengTakeReviewSubject,
+  YimengRecordTakeTechnicalQcRequest,
+  YimengRecoverTakeTechnicalQcRequest,
+  YimengTakeTechnicalQcAssessment,
+  YimengTakeTechnicalQcCheck,
+  YimengTakeTechnicalQcCode,
+  YimengTakeTechnicalQcRecovery,
+  YimengTakeTechnicalQcResult,
+  YimengTakeTechnicalQcSubject,
 } from './types.ts'
 
 const CHANNEL = '/qingmu-yimeng-command'
@@ -400,6 +412,11 @@ export interface YimengCommandAdapterDependencies {
   ) => Promise<RpcResult<unknown>>
   /** Trusted Host call that recompiles one bounded route from current Core and Yimeng authority. */
   readonly runReworkRouteMethod?: (
+    payload: unknown,
+    signal: AbortSignal,
+  ) => Promise<RpcResult<unknown>>
+  /** Trusted Host call that recompiles the current selected-Take QC method. */
+  readonly runTakeTechnicalQcMethod?: (
     payload: unknown,
     signal: AbortSignal,
   ) => Promise<RpcResult<unknown>>
@@ -4975,6 +4992,25 @@ export function createYimengCommandHandler(
         readAttestationKey: readReferenceAttestationKey,
         requireTimestamp: requireRfc3339Timestamp,
       }
+      let currentTakeTechnicalQcMethod: unknown
+      let currentTakeTechnicalQcToken: string | undefined
+      if (endpoint === 'recordTakeTechnicalQc') {
+        const methodPayload = prepareCurrentTakeTechnicalQcMethodRequest(
+          payload,
+          stageArtifactHelpers,
+        )
+        currentTakeTechnicalQcToken = normalizeToken(dependencies.readToken())
+        if (currentTakeTechnicalQcToken === undefined) {
+          return internalError('YIMENG_API_TOKEN is not configured')
+        }
+        if (dependencies.runTakeTechnicalQcMethod === undefined) {
+          return internalError('current IMAGO Take technical-QC Method is unavailable')
+        }
+        const methodResult = await dependencies.runTakeTechnicalQcMethod(methodPayload, signal)
+        if (signal.aborted) return cancelled()
+        if (!methodResult.ok) return methodResult
+        currentTakeTechnicalQcMethod = methodResult.value
+      }
       let currentStageArtifactMethod: unknown
       let currentStageArtifactToken: string | undefined
       if (endpoint === 'commitStageArtifactDecision' || endpoint === 'probeStageArtifactAuthority') {
@@ -5030,6 +5066,8 @@ export function createYimengCommandHandler(
         || endpoint === 'recoverTakeReviewRecommendation'
         || endpoint === 'createTakeHumanDecision'
         || endpoint === 'recoverTakeHumanDecision'
+        || endpoint === 'recordTakeTechnicalQc'
+        || endpoint === 'recoverTakeTechnicalQc'
         || endpoint === 'recordShotFinding' || endpoint === 'recoverShotFinding'
         || endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
         || endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
@@ -5041,30 +5079,33 @@ export function createYimengCommandHandler(
         || endpoint === 'recordReworkRoute' || endpoint === 'recoverReworkRoute'
         || endpoint === 'probeReworkRouteAuthority') {
         const helpers = stageArtifactHelpers
-        const prepared = endpoint === 'createTakeReviewRecommendation'
+        const prepared = endpoint === 'recordTakeTechnicalQc'
+          || endpoint === 'recoverTakeTechnicalQc'
+          ? prepareTakeTechnicalQcCommand(endpoint, payload, helpers, currentTakeTechnicalQcMethod)
+          : endpoint === 'createTakeReviewRecommendation'
           || endpoint === 'recoverTakeReviewRecommendation'
           || endpoint === 'createTakeHumanDecision'
           || endpoint === 'recoverTakeHumanDecision'
-          ? prepareTakeReviewCommand(endpoint, payload, helpers)
-          : endpoint === 'createTakeComment' || endpoint === 'recoverTakeComment'
-            ? prepareTakeCommentCommand(endpoint, payload, helpers)
-            : endpoint === 'selectTakeVersion' || endpoint === 'recoverTakeVersionSelection'
-              ? prepareTakeVersionCommand(endpoint, payload, helpers)
-              : endpoint === 'recordReworkRoute' || endpoint === 'recoverReworkRoute'
-                || endpoint === 'probeReworkRouteAuthority'
-                ? prepareReworkRouteCommand(endpoint, payload, helpers, currentReworkRouteMethod)
-                : endpoint === 'sealLsuPlan' || endpoint === 'recoverLsuPlanSeal'
-                  || endpoint === 'probeLsuPlanAuthority'
-                  ? prepareLsuPlanCommand(endpoint, payload, helpers, currentLsuPlanMethod)
-                  : endpoint === 'registerStageArtifact' || endpoint === 'recoverStageArtifactRegistration'
-                    || endpoint === 'commitStageArtifactDecision' || endpoint === 'recoverStageArtifactDecision'
-                    || endpoint === 'probeStageArtifactAuthority'
-                    ? prepareStageArtifactCommand(endpoint, payload, helpers, currentStageArtifactMethod)
-                    : endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
-                      ? prepareProductionUnitCommand(endpoint, payload, helpers)
-                      : endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
-                        ? prepareStageSourceCommand(endpoint, payload, helpers)
-                        : prepareShotFindingCommand(endpoint, payload, helpers)
+            ? prepareTakeReviewCommand(endpoint, payload, helpers)
+            : endpoint === 'createTakeComment' || endpoint === 'recoverTakeComment'
+              ? prepareTakeCommentCommand(endpoint, payload, helpers)
+              : endpoint === 'selectTakeVersion' || endpoint === 'recoverTakeVersionSelection'
+                ? prepareTakeVersionCommand(endpoint, payload, helpers)
+                : endpoint === 'recordReworkRoute' || endpoint === 'recoverReworkRoute'
+                  || endpoint === 'probeReworkRouteAuthority'
+                  ? prepareReworkRouteCommand(endpoint, payload, helpers, currentReworkRouteMethod)
+                  : endpoint === 'sealLsuPlan' || endpoint === 'recoverLsuPlanSeal'
+                    || endpoint === 'probeLsuPlanAuthority'
+                    ? prepareLsuPlanCommand(endpoint, payload, helpers, currentLsuPlanMethod)
+                    : endpoint === 'registerStageArtifact' || endpoint === 'recoverStageArtifactRegistration'
+                      || endpoint === 'commitStageArtifactDecision' || endpoint === 'recoverStageArtifactDecision'
+                      || endpoint === 'probeStageArtifactAuthority'
+                      ? prepareStageArtifactCommand(endpoint, payload, helpers, currentStageArtifactMethod)
+                      : endpoint === 'bindProductionUnit' || endpoint === 'recoverProductionUnitBinding'
+                        ? prepareProductionUnitCommand(endpoint, payload, helpers)
+                        : endpoint === 'bindStageSource' || endpoint === 'recoverStageSourceBinding'
+                          ? prepareStageSourceCommand(endpoint, payload, helpers)
+                          : prepareShotFindingCommand(endpoint, payload, helpers)
         path = prepared.path
         requestInit = {
           method: prepared.request.method,
@@ -5370,7 +5411,8 @@ export function createYimengCommandHandler(
         throw new InputError(`unknown Yimeng command endpoint: ${endpoint}`)
       }
 
-      const token = currentStageArtifactToken ?? currentLsuPlanToken ?? currentReworkRouteToken
+      const token = currentTakeTechnicalQcToken ?? currentStageArtifactToken
+        ?? currentLsuPlanToken ?? currentReworkRouteToken
         ?? normalizeToken(dependencies.readToken())
       if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
       const isStageArtifactCommand = endpoint === 'registerStageArtifact'
@@ -5390,6 +5432,8 @@ export function createYimengCommandHandler(
         || endpoint === 'recoverTakeReviewRecommendation'
         || endpoint === 'createTakeHumanDecision'
         || endpoint === 'recoverTakeHumanDecision'
+        || endpoint === 'recordTakeTechnicalQc'
+        || endpoint === 'recoverTakeTechnicalQc'
       const response = await fetchJson(
         dependencies,
         `${baseUrl}${path}`,
@@ -5438,6 +5482,12 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
       return method === undefined
         ? internalError('current IMAGO LSU plan Method is unavailable')
         : await method('lsuPlanMethod', payload, signal)
+    },
+    runTakeTechnicalQcMethod: async (payload, signal) => {
+      const method = ctx.get('qingmuImagoMethod')
+      return method === undefined
+        ? internalError('current IMAGO Take technical-QC Method is unavailable')
+        : await method('takeTechnicalQcMethod', payload, signal)
     },
     runReworkRouteMethod: async (payload, signal) => {
       const method = ctx.get('qingmuImagoMethod')

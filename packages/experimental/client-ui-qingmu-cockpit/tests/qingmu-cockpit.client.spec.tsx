@@ -739,6 +739,15 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     recoverTakeHumanDecision: vi.fn(async () => {
       throw new Error('Take HumanDecision recovery is not part of this fixture')
     }),
+    takeTechnicalQc: vi.fn(async () => {
+      throw new Error('Take technical QC is not part of this fixture')
+    }),
+    recordTakeTechnicalQc: vi.fn(async () => {
+      throw new Error('Take technical QC creation is not part of this fixture')
+    }),
+    recoverTakeTechnicalQc: vi.fn(async () => {
+      throw new Error('Take technical QC recovery is not part of this fixture')
+    }),
     shotFindings: vi.fn(async (request: Parameters<QingmuYimengPort['shotFindings']>[0]) => ({
       schema: 'jason.qingmu-shot-finding-feed.v1', ...request, subject: null, snapshotSha256: null,
       availability: { status: 'unavailable', reason: 'selected_video_unavailable' },

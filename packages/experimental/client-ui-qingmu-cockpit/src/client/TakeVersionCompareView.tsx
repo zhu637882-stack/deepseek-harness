@@ -12,6 +12,10 @@ import {
   type TakeReviewAuthorityPort,
 } from './TakeReviewAuthorityPanel.tsx'
 import {
+  TakeTechnicalQcPanel,
+  type TakeTechnicalQcPort,
+} from './TakeTechnicalQcPanel.tsx'
+import {
   clearTakeVersionSelectionMarker, createTakeVersionSelectionMarker,
   readTakeVersionSelectionMarker, writeTakeVersionSelectionMarker,
   type TakeVersionSelectionRecoveryMarker, type TakeVersionSelectionRecoveryRead,
@@ -28,7 +32,7 @@ interface TakeVersionCompareViewProps {
   readonly port: Pick<QingmuYimengPort,
     'takeVersions' | 'takeAcceptance' | 'takeAcceptanceMethod'
     | 'selectTakeVersion' | 'recoverTakeVersionSelection'>
-    & Partial<TakeCommentPort> & Partial<TakeReviewAuthorityPort>
+    & Partial<TakeCommentPort> & Partial<TakeReviewAuthorityPort> & Partial<TakeTechnicalQcPort>
   readonly t: (key: QingmuCockpitKey) => string
 }
 
@@ -77,6 +81,14 @@ function hasTakeReviewAuthorityPort(
     && typeof port.recoverTakeReviewRecommendation === 'function'
     && typeof port.createTakeHumanDecision === 'function'
     && typeof port.recoverTakeHumanDecision === 'function'
+}
+
+function hasTakeTechnicalQcPort(
+  port: TakeVersionCompareViewProps['port'],
+): port is typeof port & TakeTechnicalQcPort {
+  return typeof port.takeTechnicalQc === 'function'
+    && typeof port.recordTakeTechnicalQc === 'function'
+    && typeof port.recoverTakeTechnicalQc === 'function'
 }
 
 function requestFromMarker(marker: TakeVersionSelectionRecoveryMarker) {
@@ -662,6 +674,12 @@ function TakeVersionComparePanel({
     {eligible && commentPreferredTakeId !== undefined && hasTakeReviewAuthorityPort(port)
       && <TakeReviewAuthorityPanel projectId={projectId} episodeId={episodeId} frameId={selectedShotId}
         preferredTakeId={commentPreferredTakeId} refresh={refresh} port={port} t={t} />}
+    {eligible && stack !== undefined && stack.subject.selectedTakeId !== null
+      && hasTakeTechnicalQcPort(port)
+      && <TakeTechnicalQcPanel
+        key={`${projectId}:${episodeId}:${selectedShotId}:${stack.subject.selectedTakeId}`}
+        projectId={projectId} episodeId={episodeId} frameId={selectedShotId}
+        refresh={refresh} port={port} t={t} />}
   </section>
 }
 

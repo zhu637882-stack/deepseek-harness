@@ -26,12 +26,15 @@ import type {
   YimengTakeHumanDecision as ReadTakeHumanDecision,
   YimengTakeReviewAuthorityFeedResponse,
   YimengTakeReviewRecommendation as ReadTakeReviewRecommendation,
+  YimengTakeTechnicalQcFeedResponse,
 } from '../../../packages/experimental/qingmu-yimeng-read-adapter/src/types.ts'
 import type {
   YimengCreateTakeHumanDecisionRequest,
   YimengCreateTakeReviewRecommendationRequest,
+  YimengRecordTakeTechnicalQcRequest,
   YimengTakeHumanDecisionResult,
   YimengTakeReviewRecommendationResult,
+  YimengTakeTechnicalQcResult,
 } from '../../../packages/experimental/qingmu-yimeng-command-adapter/src/types.ts'
 import { takeVersionStackFixture as baseTakeVersionStackFixture } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/take-version-fixture.ts'
 import { videoCandidatesFixture } from '../../../packages/experimental/qingmu-yimeng-read-adapter/tests/selected-video-review-fixture.ts'
@@ -2166,6 +2169,117 @@ function takeReviewAuthorityFeedFixture(
   }
 }
 
+const TAKE_TECHNICAL_QC_CODES = [
+  'STORY_CAUSALITY', 'SHOT_ORDER', 'PACING', 'LOOK', 'ENDING_CHOICE',
+  'IDENTITY', 'PROP_GEOMETRY', 'TOPOLOGY', 'EXACT_COUNT', 'CONTACT_TRANSFER',
+  'LOCKED_DIALOGUE', 'TECHNICAL_RECEIPT',
+] as const
+
+function unicodeCodePointCompare(left: string, right: string): number {
+  const leftPoints = Array.from(left, character => character.codePointAt(0) ?? 0)
+  const rightPoints = Array.from(right, character => character.codePointAt(0) ?? 0)
+  for (let index = 0; index < Math.min(leftPoints.length, rightPoints.length); index += 1) {
+    const difference = (leftPoints[index] ?? 0) - (rightPoints[index] ?? 0)
+    if (difference !== 0) return difference
+  }
+  return leftPoints.length - rightPoints.length
+}
+
+function takeTechnicalQcResultFixture(
+  revision: number,
+  selectedTakeId: 'asset-take-1' | 'asset-take-2',
+  input: YimengRecordTakeTechnicalQcRequest,
+  methodProjection: Record<string, unknown>,
+  methodProjectionSha256: string,
+  sequence: number,
+): YimengTakeTechnicalQcResult {
+  const acceptance = takeAcceptanceFixture(revision, selectedTakeId)
+  if (input.takeId !== selectedTakeId
+    || input.expectedEvidenceSnapshotSha256 !== acceptance.evidenceSnapshotSha256
+    || methodProjection.technicalReceiptStatus !== 'PASS'
+    || typeof methodProjection.rulesSha256 !== 'string') {
+    throw new Error('Take technical-QC result fixture binding mismatch')
+  }
+  const issueCodes = input.checks.filter(check => check.result !== 'PASS').map(check => check.code)
+    .sort(unicodeCodePointCompare)
+  const technicalPass = issueCodes.length === 0
+  return {
+    schema: 'jason.qingmu-take-technical-qc-result.v1',
+    assessment: {
+      assessmentId: `take-technical-qc-${String(sequence).padStart(4, '0')}`,
+      takeSubject: acceptance.evidence.subject,
+      takeSubjectSha256: jcsSha256(acceptance.evidence.subject),
+      evidenceSnapshotSha256: acceptance.evidenceSnapshotSha256,
+      technicalReceiptStatus: 'PASS',
+      checks: input.checks,
+      issueCodes,
+      technicalPass,
+      methodProjectionSha256,
+      rulesSha256: methodProjection.rulesSha256,
+      actorId: 'reviewer-user',
+      actorRole: 'reviewer',
+      actorNaturalPersonId: 'person-reviewer-qc',
+      authSessionId: '7'.repeat(64),
+      recordedAt: `2026-08-29T12:${String(sequence).padStart(2, '0')}:00.123456+00:00`,
+      eventId: `take-technical-qc-event-${String(sequence).padStart(4, '0')}`,
+    },
+    technicalQcRecorded: true,
+    technicalPass,
+    changed: false,
+    selectionChanged: false,
+    recommendationChanged: false,
+    decisionRecorded: false,
+    formalApprovalChanged: false,
+    technicalPassChanged: false,
+    episodeVerificationChanged: false,
+    humanSignoffInferred: false,
+    providerCalls: 0,
+    budgetMutation: false,
+  }
+}
+
+function takeTechnicalQcFeedFixture(
+  revision: number,
+  selectedTakeId: 'asset-take-1' | 'asset-take-2',
+  results: readonly YimengTakeTechnicalQcResult[] = [],
+): YimengTakeTechnicalQcFeedResponse {
+  const acceptance = takeAcceptanceFixture(revision, selectedTakeId)
+  const takeSubjectSha256 = jcsSha256(acceptance.evidence.subject)
+  const assessments = results.map(result => ({
+    ...result.assessment,
+    currentBinding: result.assessment.takeSubjectSha256 === takeSubjectSha256
+      && result.assessment.evidenceSnapshotSha256 === acceptance.evidenceSnapshotSha256,
+  }))
+  return {
+    schema: 'jason.qingmu-take-technical-qc-feed.v1',
+    projectId: 'project-1',
+    episodeId: 'episode-1',
+    frameId: PROMPT_IR_FRAME_ID,
+    capabilities: { canRecordTechnicalQc: true },
+    currentAcceptance: {
+      takeSubject: acceptance.evidence.subject,
+      takeSubjectSha256,
+      evidenceSnapshotSha256: acceptance.evidenceSnapshotSha256,
+      technicalReceiptStatus: 'PASS',
+    },
+    assessments,
+    currentAssessment: assessments.filter(assessment => assessment.currentBinding).at(-1) ?? null,
+    boundaries: {
+      technicalQcOnly: true,
+      technicalPassIsContentApproval: false,
+      selectionChanged: false,
+      formalApprovalChanged: false,
+      episodeVerificationChanged: false,
+      humanSignoffInferred: false,
+      providerCalls: 0,
+      budgetMutation: false,
+      reworkExecutionAllowed: false,
+      approvalInvalidationAllowed: false,
+      evidenceLedgerMutation: false,
+    },
+  }
+}
+
 function takeAcceptanceFixture(
   revision: number,
   selectedTakeId: 'asset-take-1' | 'asset-take-2' = 'asset-take-1',
@@ -2384,6 +2498,8 @@ async function startYimengDouble(
   const persistedTakeReviewRecommendations: YimengTakeReviewRecommendationResult[] = []
   const persistedTakeHumanDecisionReceipts = new Map<string, YimengTakeHumanDecisionResult>()
   const persistedTakeHumanDecisions: YimengTakeHumanDecisionResult[] = []
+  const persistedTakeTechnicalQcReceipts = new Map<string, YimengTakeTechnicalQcResult>()
+  const persistedTakeTechnicalQcResults: YimengTakeTechnicalQcResult[] = []
   let publicBaseUrl = ''
   const reviewComments: Record<ElementKind, Array<Record<string, unknown>>> = { actor: [], scene: [], prop: [] }
   const reviewDecisions: Record<ElementKind, Array<Record<string, unknown>>> = { actor: [], scene: [], prop: [] }
@@ -2805,6 +2921,118 @@ async function startYimengDouble(
           frameId: PROMPT_IR_FRAME_ID,
           takeId,
           expectedTakeSubjectSha256,
+          idempotencyKey: key,
+          status: result === null ? 'not_found' : 'committed',
+          result,
+        })
+        return
+      }
+      const takeTechnicalQcPath = `/api/qingmu/projects/project-1/episodes/episode-1/frames/${PROMPT_IR_FRAME_ID}/take-technical-qc`
+      if (request.method === 'GET' && url.pathname === takeTechnicalQcPath) {
+        if (request.headers.authorization !== `Bearer ${YIMENG_TOKEN}`) {
+          throw new Error('Take technical-QC read authorization mismatch')
+        }
+        json(response, 200, takeTechnicalQcFeedFixture(
+          revision,
+          takeSelectedId,
+          persistedTakeTechnicalQcResults,
+        ))
+        return
+      }
+      if (request.method === 'POST' && url.pathname === `${takeTechnicalQcPath}/assessments`) {
+        if (!isRecord(body) || !isRecord(body.methodProjection)
+          || !isRecord(body.methodAttestation) || !Array.isArray(body.checks)) {
+          throw new Error('Take technical-QC body is missing')
+        }
+        const expectedKeys = [
+          'expectedEvidenceSnapshotSha256', 'takeId', 'methodProjection',
+          'methodProjectionSha256', 'methodAttestation', 'checks', 'idempotencyKey',
+        ].sort()
+        const acceptance = takeAcceptanceFixture(revision, takeSelectedId)
+        const key = typeof body.idempotencyKey === 'string' ? body.idempotencyKey : ''
+        const projectionSha256 = typeof body.methodProjectionSha256 === 'string'
+          ? body.methodProjectionSha256
+          : ''
+        const unsignedAttestation = {
+          schema: 'qingmu.imago-take-technical-qc-method-attestation.v1',
+          algorithm: 'hmac-sha256',
+          evidenceSnapshotSha256: acceptance.evidenceSnapshotSha256,
+          methodProjectionSha256: projectionSha256,
+        }
+        const expectedSignature = createHmac('sha256', IMAGO_ATTESTATION_KEY)
+          .update(canonicalJson(unsignedAttestation), 'utf8').digest('hex')
+        if (
+          Object.keys(body).sort().some((field, index) => field !== expectedKeys[index])
+          || Object.keys(body).length !== expectedKeys.length
+          || body.expectedEvidenceSnapshotSha256 !== acceptance.evidenceSnapshotSha256
+          || body.takeId !== takeSelectedId
+          || projectionSha256 !== jcsSha256(body.methodProjection)
+          || body.methodProjection.evidenceSnapshotSha256 !== acceptance.evidenceSnapshotSha256
+          || canonicalJson(body.methodProjection.subject) !== canonicalJson(acceptance.evidence.subject)
+          || body.methodProjection.technicalReceiptStatus !== 'PASS'
+          || canonicalJson(body.methodAttestation) !== canonicalJson({
+            ...unsignedAttestation,
+            signature: expectedSignature,
+          })
+          || body.checks.length !== TAKE_TECHNICAL_QC_CODES.length
+          || body.checks.some((check, index) => !isRecord(check)
+            || check.code !== TAKE_TECHNICAL_QC_CODES[index]
+            || check.result !== 'PASS' || check.note !== null
+            || !Array.isArray(check.evidenceRefs) || check.evidenceRefs.length !== 0)
+          || key === ''
+          || request.headers.authorization !== `Bearer ${YIMENG_TOKEN}`
+          || request.headers['idempotency-key'] !== key
+        ) {
+          throw new Error('Take technical-QC command contract mismatch')
+        }
+        const replay = persistedTakeTechnicalQcReceipts.get(key)
+        if (replay !== undefined) {
+          json(response, 200, replay)
+          return
+        }
+        const input: YimengRecordTakeTechnicalQcRequest = {
+          projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID,
+          expectedEvidenceSnapshotSha256: acceptance.evidenceSnapshotSha256,
+          takeId: takeSelectedId,
+          checks: body.checks,
+          idempotencyKey: key,
+        }
+        const result = takeTechnicalQcResultFixture(
+          revision,
+          takeSelectedId,
+          input,
+          body.methodProjection,
+          projectionSha256,
+          persistedTakeTechnicalQcResults.length + 1,
+        )
+        persistedTakeTechnicalQcResults.push(result)
+        persistedTakeTechnicalQcReceipts.set(key, result)
+        json(response, 201, result)
+        return
+      }
+      if (request.method === 'GET'
+        && url.pathname === `${takeTechnicalQcPath}/assessments/command-receipt`) {
+        const queryKeys = [...url.searchParams.keys()].sort()
+        const expectedQueryKeys = ['expectedEvidenceSnapshotSha256', 'takeId'].sort()
+        const key = typeof request.headers['idempotency-key'] === 'string'
+          ? request.headers['idempotency-key']
+          : ''
+        const evidenceSha = url.searchParams.get('expectedEvidenceSnapshotSha256') ?? ''
+        const takeId = url.searchParams.get('takeId') ?? ''
+        if (
+          queryKeys.length !== expectedQueryKeys.length
+          || queryKeys.some((field, index) => field !== expectedQueryKeys[index])
+          || key === '' || evidenceSha === '' || takeId === ''
+          || request.headers.authorization !== `Bearer ${YIMENG_TOKEN}`
+        ) {
+          throw new Error('Take technical-QC recovery contract mismatch')
+        }
+        const result = persistedTakeTechnicalQcReceipts.get(key) ?? null
+        json(response, 200, {
+          schema: 'jason.qingmu-take-technical-qc-recovery.v1',
+          projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID,
+          takeId,
+          expectedEvidenceSnapshotSha256: evidenceSha,
           idempotencyKey: key,
           status: result === null ? 'not_found' : 'committed',
           result,
@@ -4352,6 +4580,9 @@ describe.skipIf(
           '/qingmu-yimeng-command/recoverTakeReviewRecommendation',
           '/qingmu-yimeng-command/createTakeHumanDecision',
           '/qingmu-yimeng-command/recoverTakeHumanDecision',
+          '/qingmu-yimeng/takeTechnicalQc',
+          '/qingmu-yimeng-command/recordTakeTechnicalQc',
+          '/qingmu-yimeng-command/recoverTakeTechnicalQc',
         ].includes(requestPath)) return
         browserRpcRequests.push({ path: requestPath, body: request.postDataJSON() as unknown })
       })
@@ -5614,6 +5845,187 @@ describe.skipIf(
       await dialog.getByRole('tab', { name: '总览', exact: true }).click()
       await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
       await page.evaluate((key) => { sessionStorage.removeItem(key) }, decisionMarkerKey)
+    })
+
+    it('records and recovers E7-3 macro/micro technical QC through the real Host', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e7-3-take-technical-qc'))
+      if (setTakeSelectedId === undefined) throw new Error('Take selection fixture control is missing')
+      setTakeSelectedId('asset-take-1')
+      const requestStart = capturedRequests.length
+      const rpcStart = browserRpcRequests.length
+      const consoleStart = browserConsoleErrors.length
+      const markerKey = [
+        'qingmu:take-technical-qc-recovery:v1',
+        'project-1', 'episode-1', PROMPT_IR_FRAME_ID,
+      ].map(encodeURIComponent).join(':')
+      await page.evaluate((key) => { sessionStorage.removeItem(key) }, markerKey)
+
+      await page.setViewportSize({ width: 1680, height: 1100 })
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await dialog.getByRole('tab', { name: '分镜与镜头', exact: true }).click()
+      await dialog.getByRole('list', { name: '镜头选择' }).getByRole('button', { name: /frame-1/ }).click()
+      const initialFeedWire = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng/takeTechnicalQc')
+      await dialog.getByRole('tab', { name: '生成与质检', exact: true }).click()
+      expect((await (await initialFeedWire).json() as { result: { ok: boolean } }).result.ok).toBe(true)
+
+      const qc = dialog.getByRole('region', { name: '宏观 / 微观技术 QC', exact: true })
+      await qc.getByText('技术 QC 历史', { exact: true }).waitFor({ timeout: 20_000 })
+      await qc.getByText('宏观 QC（5 项）', { exact: true }).waitFor()
+      await qc.getByText('微观 QC（7 项）', { exact: true }).waitFor()
+      expect(await qc.locator('[data-qc-code]').count()).toBe(12)
+      expect(await qc.getByText(
+        '技术通过 ≠ 内容批准 ≠ Selected 切换 ≠ 整集验证；不推断人工签收。',
+        { exact: true },
+      ).count()).toBe(1)
+      expect(await qc.getByText(/(?:Stage|技能包|Provider)/iu).count()).toBe(0)
+
+      const resultSelectors = qc.getByRole('combobox', { name: '结果', exact: true })
+      expect(await resultSelectors.count()).toBe(12)
+      for (let index = 0; index < 12; index += 1) {
+        await resultSelectors.nth(index).selectOption('PASS')
+      }
+      expect(await page.evaluate(key => sessionStorage.getItem(key), markerKey)).toBeNull()
+      const rpcRequestPromise = page.waitForRequest(request =>
+        new URL(request.url()).pathname === '/qingmu-yimeng-command/recordTakeTechnicalQc')
+      const commandWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng-command/recordTakeTechnicalQc')
+      await qc.getByRole('button', { name: '记录技术 QC', exact: true }).click()
+      await rpcRequestPromise
+      expect(await page.evaluate(key => sessionStorage.getItem(key), markerKey)).not.toBeNull()
+      const commandWire = await (await commandWirePromise).json() as {
+        result: { ok: boolean; value: YimengTakeTechnicalQcResult }
+      }
+      expect(commandWire.result).toMatchObject({
+        ok: true,
+        value: {
+          schema: 'jason.qingmu-take-technical-qc-result.v1',
+          technicalQcRecorded: true,
+          technicalPass: true,
+          selectionChanged: false,
+          recommendationChanged: false,
+          decisionRecorded: false,
+          formalApprovalChanged: false,
+          episodeVerificationChanged: false,
+          humanSignoffInferred: false,
+          providerCalls: 0,
+          budgetMutation: false,
+          assessment: {
+            actorRole: 'reviewer',
+            actorNaturalPersonId: 'person-reviewer-qc',
+            issueCodes: [],
+            technicalPass: true,
+          },
+        },
+      })
+      await qc.getByText(
+        '技术 QC 评估已记录；内容批准、Take 选择和整集验证均未改变。',
+        { exact: true },
+      ).waitFor()
+      await qc.getByText('记录自然人: person-reviewer-qc', { exact: true }).waitFor()
+      expect(await page.evaluate(key => sessionStorage.getItem(key), markerKey)).toBeNull()
+
+      const takeTechnicalQcPath = `/api/qingmu/projects/project-1/episodes/episode-1/frames/${PROMPT_IR_FRAME_ID}/take-technical-qc`
+      const posts = capturedRequests.slice(requestStart).filter(request => request.method === 'POST'
+        && new URL(request.path, 'http://127.0.0.1').pathname
+          === `${takeTechnicalQcPath}/assessments`)
+      expect(posts).toHaveLength(1)
+      const post = posts[0]
+      if (!isRecord(post?.body)) throw new Error('Take technical-QC POST body missing')
+      expect(Object.keys(post.body).sort()).toEqual([
+        'expectedEvidenceSnapshotSha256', 'takeId', 'methodProjection',
+        'methodProjectionSha256', 'methodAttestation', 'checks', 'idempotencyKey',
+      ].sort())
+      expect(JSON.stringify(post.body)).not.toMatch(/actorId|actorRole|actorNaturalPersonId|authSessionId|recordedAt/iu)
+      expect(post).toEqual(expect.objectContaining({
+        authorization: `Bearer ${YIMENG_TOKEN}`,
+        cookie: undefined,
+      }))
+
+      const commandRpc = browserRpcRequests.slice(rpcStart).find(request =>
+        request.path === '/qingmu-yimeng-command/recordTakeTechnicalQc')
+      if (!isRecord(commandRpc?.body) || !isRecord(commandRpc.body.payload)) {
+        throw new Error('Take technical-QC browser command missing')
+      }
+      expect(Object.keys(commandRpc.body.payload).sort()).toEqual([
+        'projectId', 'episodeId', 'frameId', 'expectedEvidenceSnapshotSha256',
+        'takeId', 'checks', 'idempotencyKey',
+      ].sort())
+      expect(JSON.stringify(commandRpc.body.payload)).not.toMatch(
+        /actor|role|person|session|recordedAt|methodProjection|methodAttestation|signature/iu,
+      )
+      expect(browserRpcRequests.slice(rpcStart).filter(request =>
+        request.path.includes('takeTechnicalQcMethod'))).toEqual([])
+
+      const unresolvedAcceptance = takeAcceptanceFixture(3, 'asset-take-1')
+      const unresolvedMarker = {
+        schema: 'qingmu.take-technical-qc-recovery-marker.v1',
+        projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID,
+        expectedEvidenceSnapshotSha256: unresolvedAcceptance.evidenceSnapshotSha256,
+        takeId: 'asset-take-1',
+        checks: TAKE_TECHNICAL_QC_CODES.map(code => ({
+          code, result: 'PASS', note: null, evidenceRefs: [],
+        })),
+        idempotencyKey: `qingmu:take-technical-qc:v1:${'d'.repeat(64)}`,
+      }
+      await page.evaluate(({ key, marker }) => {
+        sessionStorage.setItem(key, JSON.stringify(marker))
+      }, { key: markerKey, marker: unresolvedMarker })
+      await dialog.getByRole('tab', { name: '总览', exact: true }).click()
+      const recoveryWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng-command/recoverTakeTechnicalQc')
+      await dialog.getByRole('tab', { name: '生成与质检', exact: true }).click()
+      const recoveryWire = await (await recoveryWirePromise).json() as {
+        result: { ok: boolean; value: { status: string; idempotencyKey: string } }
+      }
+      expect(recoveryWire.result.ok).toBe(true)
+      expect(recoveryWire.result.value.status).toBe('not_found')
+      expect(recoveryWire.result.value.idempotencyKey).toBe(unresolvedMarker.idempotencyKey)
+      const recoveredQc = dialog.getByRole('region', { name: '宏观 / 微观技术 QC', exact: true })
+      await recoveredQc.getByText(/原坐标已锁定，只允许 GET 回执恢复/u).waitFor()
+      expect(await recoveredQc.getByRole('button', { name: '记录技术 QC', exact: true }).isDisabled())
+        .toBe(true)
+      await recoveredQc.getByRole('form', { name: '当前 Selected Take 技术 QC 表单', exact: true })
+        .evaluate((form) => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
+      expect(capturedRequests.slice(requestStart).filter(request => request.method === 'POST'
+        && new URL(request.path, 'http://127.0.0.1').pathname
+          === `${takeTechnicalQcPath}/assessments`)).toHaveLength(1)
+
+      const recoveryReads = capturedRequests.slice(requestStart).filter(request => request.method === 'GET'
+        && new URL(request.path, 'http://127.0.0.1').pathname
+          === `${takeTechnicalQcPath}/assessments/command-receipt`)
+      expect(recoveryReads).toHaveLength(1)
+      const recoveryRead = recoveryReads[0]
+      expect(recoveryRead).toEqual(expect.objectContaining({
+        authorization: `Bearer ${YIMENG_TOKEN}`,
+        idempotencyKey: unresolvedMarker.idempotencyKey,
+        body: undefined,
+        cookie: undefined,
+      }))
+      const recoveryUrl = new URL(recoveryRead?.path ?? '', 'http://127.0.0.1')
+      expect([...recoveryUrl.searchParams.keys()].sort()).toEqual([
+        'expectedEvidenceSnapshotSha256', 'takeId',
+      ])
+      expect(recoveryUrl.searchParams.get('expectedEvidenceSnapshotSha256'))
+        .toBe(unresolvedMarker.expectedEvidenceSnapshotSha256)
+      expect(recoveryUrl.searchParams.get('takeId')).toBe(unresolvedMarker.takeId)
+      expect(JSON.stringify(browserRpcRequests.slice(rpcStart))).not.toMatch(
+        /Bearer|actorId|actorRole|actorNaturalPersonId|authSessionId/iu,
+      )
+      expect(capturedRequests.slice(requestStart).filter(request => request.method === 'POST'
+        && /selection|approval|decision|episode-verification|signoff|provider|budget|rework/iu.test(request.path)))
+        .toEqual([])
+      expect(browserConsoleErrors.slice(consoleStart)).toEqual([])
+      expect(tripwire.pageErrors).toEqual([])
+      expect(await page.content()).not.toContain(YIMENG_TOKEN)
+      await expectNoVisibleTechnicalBrand(page)
+
+      await dialog.getByRole('tab', { name: '分镜与镜头', exact: true }).click()
+      await dialog.getByRole('list', { name: '镜头选择' }).getByRole('button', { name: /frame-z/ }).click()
+      await dialog.getByRole('tab', { name: '总览', exact: true }).click()
+      await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
+      await page.evaluate((key) => { sessionStorage.removeItem(key) }, markerKey)
     })
 
     it('compiles the E5-4 read-only workset through the real Host and Core without inventing stage authority', async () => {

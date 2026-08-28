@@ -31,6 +31,8 @@ import type {
   ImagoShotFindingMethodSnapshot,
   ImagoTakeAcceptanceMethodRequest,
   ImagoTakeAcceptanceMethodSnapshot,
+  ImagoTakeTechnicalQcMethodRequest,
+  ImagoTakeTechnicalQcMethodSnapshot,
   ImagoContinuityMethodResponse,
   ImagoContinuityMethodSnapshot,
   ImagoElementMethodProjection,
@@ -107,6 +109,11 @@ import {
   readTakeAcceptanceRules, takeAcceptanceJcsJson, TakeAcceptanceContractError, TakeAcceptanceInputError,
 } from './take-acceptance.ts'
 import {
+  attestTakeTechnicalQcMethod, buildTakeTechnicalQcSnapshot,
+  parseTakeTechnicalQcMethodRequest, readTakeTechnicalQcRules,
+  TakeTechnicalQcContractError, TakeTechnicalQcInputError,
+} from './take-technical-qc.ts'
+import {
   attestProductionUnitMethod, buildProductionUnitSnapshot, parseProductionUnitMethodRequest, readProductionUnitRules,
   ProductionUnitContractError, ProductionUnitInputError,
 } from './production-unit.ts'
@@ -177,6 +184,13 @@ export type {
   ImagoTakeAcceptanceMethodProjection,
   ImagoTakeAcceptanceMethodAttestation,
   ImagoTakeAcceptanceMethodResponse,
+  ImagoTakeTechnicalQcCode,
+  ImagoTakeTechnicalQcMethodRequest,
+  ImagoTakeTechnicalQcMethodSnapshot,
+  ImagoTakeTechnicalQcMethodDefinition,
+  ImagoTakeTechnicalQcMethodProjection,
+  ImagoTakeTechnicalQcMethodAttestation,
+  ImagoTakeTechnicalQcMethodResponse,
   ImagoContinuityCandidateFinding,
   ImagoContinuityChecklistItem,
   ImagoContinuityFieldHelp,
@@ -275,6 +289,7 @@ const STAGE_ARTIFACT_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_stage_arti
 const LSU_PLAN_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_lsu_plan_method.py'
 const REWORK_ROUTE_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_rework_route_method.py'
 const TAKE_ACCEPTANCE_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_take_acceptance_method.py'
+const TAKE_TECHNICAL_QC_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_take_qc_method.py'
 const COMMON_SOURCE_PATHS = [
   'pipeline/imago-os-current.json',
   'pipeline/workflow-channel-registry.json',
@@ -599,6 +614,16 @@ export interface ImagoMethodAdapterDependencies {
   /** Optional boundary for the stateless current-rule Take acceptance compiler. */
   readonly runTakeAcceptanceCompiler?: (
     snapshot: ImagoTakeAcceptanceMethodSnapshot, execution: ImagoMethodCompilerExecution, signal: AbortSignal,
+  ) => Promise<unknown>
+  /** Fresh selected-Take evidence for the E7-3 technical-QC method. */
+  readonly readTakeTechnicalQcAcceptance?: (
+    request: ImagoTakeTechnicalQcMethodRequest, signal: AbortSignal,
+  ) => Promise<RpcResult<unknown>>
+  /** Optional boundary for the stateless current-rule technical-QC compiler. */
+  readonly runTakeTechnicalQcCompiler?: (
+    snapshot: ImagoTakeTechnicalQcMethodSnapshot,
+    execution: ImagoMethodCompilerExecution,
+    signal: AbortSignal,
   ) => Promise<unknown>
   readonly runCompiler: (
     snapshot: ImagoElementMethodSnapshot,
@@ -3416,6 +3441,14 @@ async function runTakeAcceptanceCompilerProcess(
   return await runCompilerSubprocess(snapshot, execution, signal, TAKE_ACCEPTANCE_COMPILER_RELATIVE_PATH)
 }
 
+async function runTakeTechnicalQcCompilerProcess(
+  snapshot: ImagoTakeTechnicalQcMethodSnapshot,
+  execution: ImagoMethodCompilerExecution,
+  signal: AbortSignal,
+): Promise<unknown> {
+  return await runCompilerSubprocess(snapshot, execution, signal, TAKE_TECHNICAL_QC_COMPILER_RELATIVE_PATH)
+}
+
 async function runProductionUnitCompilerProcess(
   snapshot: ImagoProductionUnitMethodSnapshot, execution: ImagoMethodCompilerExecution, signal: AbortSignal,
 ): Promise<unknown> {
@@ -3455,6 +3488,7 @@ async function runCompilerSubprocess(
     || compilerRelativePath === LSU_PLAN_COMPILER_RELATIVE_PATH
     || compilerRelativePath === REWORK_ROUTE_COMPILER_RELATIVE_PATH
     || compilerRelativePath === TAKE_ACCEPTANCE_COMPILER_RELATIVE_PATH
+    || compilerRelativePath === TAKE_TECHNICAL_QC_COMPILER_RELATIVE_PATH
   return await new Promise((resolve, reject) => {
     const child = spawn(
       execution.pythonExecutable,
@@ -3531,6 +3565,7 @@ async function runCompilerSubprocess(
     child.stdin.end(compilerRelativePath === SHOT_RELATION_COMPILER_RELATIVE_PATH
       ? e53CanonicalJson(snapshot, 'snapshot')
       : compilerRelativePath === TAKE_ACCEPTANCE_COMPILER_RELATIVE_PATH
+        || compilerRelativePath === TAKE_TECHNICAL_QC_COMPILER_RELATIVE_PATH
         ? takeAcceptanceJcsJson(snapshot, 'snapshot')
         : compilerRelativePath === STAGE_ARTIFACT_COMPILER_RELATIVE_PATH
           ? stageArtifactCanonicalJson(snapshot, 'snapshot')
@@ -3558,6 +3593,7 @@ const DEFAULT_DEPENDENCIES: ImagoMethodAdapterDependencies = {
   runWorksetCompiler: runWorksetCompilerProcess,
   runContinuityCompiler: runContinuityCompilerProcess,
   runTakeAcceptanceCompiler: runTakeAcceptanceCompilerProcess,
+  runTakeTechnicalQcCompiler: runTakeTechnicalQcCompilerProcess,
 }
 
 /**
@@ -3583,6 +3619,7 @@ export function createImagoMethodHandler(
         && endpoint !== 'continuityMethod'
         && endpoint !== 'shotFindingMethod'
         && endpoint !== 'takeAcceptanceMethod'
+        && endpoint !== 'takeTechnicalQcMethod'
         && endpoint !== 'productionUnitMethod'
         && endpoint !== 'stageSourceMethod'
         && endpoint !== 'stageArtifactMethod'
@@ -3828,6 +3865,40 @@ export function createImagoMethodHandler(
         }
         return { ok: true, value: attestTakeAcceptanceMethod(raw, snapshot, currentRules, attestationKey) }
       }
+      if (endpoint === 'takeTechnicalQcMethod') {
+        const request = parseTakeTechnicalQcMethodRequest(payload)
+        if (signal.aborted) return cancelled()
+        if (dependencies.readTakeTechnicalQcAcceptance === undefined) {
+          return internalError('Yimeng read capability is unavailable')
+        }
+        const feed = await dependencies.readTakeTechnicalQcAcceptance(request, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- cancellation can arrive during the evidence read.
+        if (signal.aborted) return cancelled()
+        if (!feed.ok) return feed
+        const snapshot = buildTakeTechnicalQcSnapshot(request, feed.value)
+        const beforeRules = await readTakeTechnicalQcRules(execution.coreRoot, takeAcceptanceJcsJson)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- fixed rule reads are asynchronous.
+        if (signal.aborted) return cancelled()
+        const raw = await (dependencies.runTakeTechnicalQcCompiler ?? runTakeTechnicalQcCompilerProcess)(
+          snapshot, execution, signal,
+        )
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- compiler completion can race cancellation.
+        if (signal.aborted) return cancelled()
+        const currentFeed = await dependencies.readTakeTechnicalQcAcceptance(request, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- second evidence read can be cancelled.
+        if (signal.aborted) return cancelled()
+        if (!currentFeed.ok) return currentFeed
+        if (!isDeepStrictEqual(snapshot, buildTakeTechnicalQcSnapshot(request, currentFeed.value))) {
+          throw new TakeTechnicalQcContractError('current Take acceptance evidence changed during compilation')
+        }
+        const currentRules = await readTakeTechnicalQcRules(execution.coreRoot, takeAcceptanceJcsJson)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- final fixed rule reads are asynchronous.
+        if (signal.aborted) return cancelled()
+        if (!isDeepStrictEqual(beforeRules, currentRules)) {
+          throw new TakeTechnicalQcContractError('current technical-QC rules changed during compilation')
+        }
+        return { ok: true, value: attestTakeTechnicalQcMethod(raw, snapshot, currentRules, attestationKey) }
+      }
       if (endpoint === 'shotFindingMethod') {
         const request = parseShotFindingMethodRequest(payload)
         if (signal.aborted) return cancelled()
@@ -3959,7 +4030,7 @@ export function createImagoMethodHandler(
     } catch (error) {
       if (error instanceof InputError || error instanceof WorksetInputError
         || error instanceof ContinuityInputError || error instanceof ShotFindingInputError || error instanceof ProductionUnitInputError
-        || error instanceof TakeAcceptanceInputError
+        || error instanceof TakeAcceptanceInputError || error instanceof TakeTechnicalQcInputError
         || error instanceof StageSourceInputError || error instanceof StageArtifactInputError || error instanceof LsuPlanInputError
         || error instanceof ReworkRouteInputError) {
         return badRequest(error.message)
@@ -3968,7 +4039,7 @@ export function createImagoMethodHandler(
       if (signal.aborted || error instanceof CompilerCancelledError) return cancelled()
       if (error instanceof ProjectionContractError || error instanceof WorksetContractError
         || error instanceof ContinuityContractError || error instanceof ShotFindingContractError
-        || error instanceof TakeAcceptanceContractError
+        || error instanceof TakeAcceptanceContractError || error instanceof TakeTechnicalQcContractError
         || error instanceof ProductionUnitContractError || error instanceof StageSourceContractError
         || error instanceof StageArtifactContractError || error instanceof LsuPlanContractError
         || error instanceof ReworkRouteContractError) {
@@ -4013,6 +4084,12 @@ export function apply(ctx: Context, config: ImagoMethodAdapterConfig): void {
         ? internalError('Yimeng read capability is unavailable')
         : await read('takeAcceptance', request, signal)
     },
+    readTakeTechnicalQcAcceptance: async (request, signal) => {
+      const read = ctx.get('qingmuYimengRead')
+      return read === undefined
+        ? internalError('Yimeng read capability is unavailable')
+        : await read('takeAcceptance', request, signal)
+    },
     readWorkflow: async (request, signal) => {
       const read = ctx.get('qingmuYimengRead')
       return read === undefined
@@ -4021,5 +4098,9 @@ export function apply(ctx: Context, config: ImagoMethodAdapterConfig): void {
     },
   })
   ctx.provide('qingmuImagoMethod', handler)
-  ctx.connection.rpc.handle(CHANNEL, handler, { authority: 'loopback' })
+  const browserHandler: ConnectionRpcHandler = async (endpoint, payload, signal) =>
+    endpoint === 'takeTechnicalQcMethod'
+      ? internalError('Take technical-QC Method is Host-internal')
+      : await handler(endpoint, payload, signal)
+  ctx.connection.rpc.handle(CHANNEL, browserHandler, { authority: 'loopback' })
 }

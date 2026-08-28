@@ -169,3 +169,148 @@
         - button "记录 Approver 正式决定"
       - strong: Approver 决定历史
       - paragraph: 尚无 Approver 正式决定。
+  - region "宏观 / 微观技术 QC":
+    - heading "宏观 / 微观技术 QC" [level=4]
+    - paragraph: 基于当前 Selected Take 与鲜活验收证据记录不可变技术评估；只允许 Reviewer 写入。
+    - strong: PASS
+    - paragraph: 技术通过 ≠ 内容批准 ≠ Selected 切换 ≠ 整集验证；不推断人工签收。
+    - form "当前 Selected Take 技术 QC 表单":
+      - group "宏观 QC（5 项）":
+        - text: 宏观 QC（5 项）
+        - code: STORY_CAUSALITY
+        - text: 结果
+        - combobox "结果":
+          - option "通过"
+          - option "失败"
+          - option "未验证" [selected]
+        - text: 备注
+        - textbox "备注"
+        - text: 证据引用
+        - textbox "证据引用":
+          - /placeholder: 每行一个可复核的证据引用
+        - code: SHOT_ORDER
+        - text: 结果
+        - combobox "结果":
+          - option "通过"
+          - option "失败"
+          - option "未验证" [selected]
+        - text: 备注
+        - textbox "备注"
+        - text: 证据引用
+        - textbox "证据引用":
+          - /placeholder: 每行一个可复核的证据引用
+        - code: PACING
+        - text: 结果
+        - combobox "结果":
+          - option "通过"
+          - option "失败"
+          - option "未验证" [selected]
+        - text: 备注
+        - textbox "备注"
+        - text: 证据引用
+        - textbox "证据引用":
+          - /placeholder: 每行一个可复核的证据引用
+        - code: LOOK
+        - text: 结果
+        - combobox "结果":
+          - option "通过"
+          - option "失败"
+          - option "未验证" [selected]
+        - text: 备注
+        - textbox "备注"
+        - text: 证据引用
+        - textbox "证据引用":
+          - /placeholder: 每行一个可复核的证据引用
+        - code: ENDING_CHOICE
+        - text: 结果
+        - combobox "结果":
+          - option "通过"
+          - option "失败"
+          - option "未验证" [selected]
+        - text: 备注
+        - textbox "备注"
+        - text: 证据引用
+        - textbox "证据引用":
+          - /placeholder: 每行一个可复核的证据引用
+      - group "微观 QC（7 项）":
+        - text: 微观 QC（7 项）
+        - code: IDENTITY
+        - text: 结果
+        - combobox "结果":
+          - option "通过"
+          - option "失败"
+          - option "未验证" [selected]
+        - text: 备注
+        - textbox "备注"
+        - text: 证据引用
+        - textbox "证据引用":
+          - /placeholder: 每行一个可复核的证据引用
+        - code: PROP_GEOMETRY
+        - text: 结果
+        - combobox "结果":
+          - option "通过"
+          - option "失败"
+          - option "未验证" [selected]
+        - text: 备注
+        - textbox "备注"
+        - text: 证据引用
+        - textbox "证据引用":
+          - /placeholder: 每行一个可复核的证据引用
+        - code: TOPOLOGY
+        - text: 结果
+        - combobox "结果":
+          - option "通过"
+          - option "失败"
+          - option "未验证" [selected]
+        - text: 备注
+        - textbox "备注"
+        - text: 证据引用
+        - textbox "证据引用":
+          - /placeholder: 每行一个可复核的证据引用
+        - code: EXACT_COUNT
+        - text: 结果
+        - combobox "结果":
+          - option "通过"
+          - option "失败"
+          - option "未验证" [selected]
+        - text: 备注
+        - textbox "备注"
+        - text: 证据引用
+        - textbox "证据引用":
+          - /placeholder: 每行一个可复核的证据引用
+        - code: CONTACT_TRANSFER
+        - text: 结果
+        - combobox "结果":
+          - option "通过"
+          - option "失败"
+          - option "未验证" [selected]
+        - text: 备注
+        - textbox "备注"
+        - text: 证据引用
+        - textbox "证据引用":
+          - /placeholder: 每行一个可复核的证据引用
+        - code: LOCKED_DIALOGUE
+        - text: 结果
+        - combobox "结果":
+          - option "通过"
+          - option "失败"
+          - option "未验证" [selected]
+        - text: 备注
+        - textbox "备注"
+        - text: 证据引用
+        - textbox "证据引用":
+          - /placeholder: 每行一个可复核的证据引用
+        - code: TECHNICAL_RECEIPT
+        - text: 结果
+        - combobox "结果":
+          - option "通过"
+          - option "失败"
+          - option "未验证" [selected]
+        - text: 备注
+        - textbox "备注"
+        - text: 证据引用
+        - textbox "证据引用":
+          - /placeholder: 每行一个可复核的证据引用
+      - button "记录技术 QC"
+    - strong: 技术 QC 历史
+    - paragraph: 尚无技术 QC 评估。

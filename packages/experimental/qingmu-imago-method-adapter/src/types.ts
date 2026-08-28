@@ -976,6 +976,83 @@ export interface ImagoTakeAcceptanceMethodResponse extends ImagoMethodJsonObject
   readonly methodAttestation: ImagoTakeAcceptanceMethodAttestation
 }
 
+/** Identity-only request; the Host resolves the fresh selected-Take evidence. */
+export type ImagoTakeTechnicalQcMethodRequest = YimengTakeAcceptanceRequest
+
+/** Exact E6-5 evidence passed to the stateless E7-3 compiler. */
+export interface ImagoTakeTechnicalQcMethodSnapshot extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.take-technical-qc-method-snapshot.v1'
+  readonly evidence: YimengTakeAcceptanceEvidence
+  readonly evidenceSnapshotSha256: string
+}
+
+export type ImagoTakeTechnicalQcCode =
+  | 'STORY_CAUSALITY' | 'SHOT_ORDER' | 'PACING' | 'LOOK' | 'ENDING_CHOICE'
+  | 'IDENTITY' | 'PROP_GEOMETRY' | 'TOPOLOGY' | 'EXACT_COUNT'
+  | 'CONTACT_TRANSFER' | 'LOCKED_DIALOGUE' | 'TECHNICAL_RECEIPT'
+
+/** Current Core macro/micro checklist without approval, rework, or Provider authority. */
+export interface ImagoTakeTechnicalQcMethodDefinition extends ImagoMethodJsonObject {
+  readonly mode: 'STATELESS_TECHNICAL_QC_METHOD'
+  readonly catalog: {
+    readonly macro: { readonly layer: 'MACRO_QC'; readonly codes: readonly ImagoTakeTechnicalQcCode[] }
+    readonly micro: { readonly layer: 'MICRO_QC'; readonly codes: readonly ImagoTakeTechnicalQcCode[] }
+  }
+  readonly resultOptions: readonly ['PASS', 'FAIL', 'UNVERIFIED']
+  readonly allCodesExactlyOnce: true
+  readonly nonPassRequires: { readonly note: true; readonly evidenceRefs: true }
+  readonly unverifiedIsNotPass: true
+  readonly technicalReceipt: {
+    readonly code: 'TECHNICAL_RECEIPT'
+    readonly machineEvidencePassRequiredForCheckPass: true
+    readonly machineEvidencePassRequiredForOverallPass: true
+  }
+  readonly boundaries: {
+    readonly businessTruth: 'yimeng'
+    readonly technicalQcOnly: true
+    readonly technicalPassIsContentApproval: false
+    readonly selectionChanged: false
+    readonly recommendationChanged: false
+    readonly decisionRecorded: false
+    readonly formalApprovalChanged: false
+    readonly episodeVerificationChanged: false
+    readonly humanSignoffInferred: false
+    readonly providerCalls: 0
+    readonly budgetMutation: false
+    readonly approvalInvalidationAllowed: false
+    readonly reworkExecutionAllowed: false
+    readonly evidenceLedgerMutation: false
+  }
+}
+
+/** Current Core method projection bound to one exact selected-Take evidence snapshot. */
+export interface ImagoTakeTechnicalQcMethodProjection extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-take-technical-qc-method.v1'
+  readonly subject: YimengTakeAcceptanceSubject
+  readonly evidenceSnapshotSha256: string
+  readonly technicalReceiptStatus: 'PASS' | 'BLOCKED'
+  readonly definition: ImagoTakeTechnicalQcMethodDefinition
+  readonly ruleBindings: Readonly<Record<string, string>>
+  readonly rulesSha256: string
+}
+
+/** Host-origin proof only; it grants neither Reviewer permission nor content approval. */
+export interface ImagoTakeTechnicalQcMethodAttestation extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-take-technical-qc-method-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly evidenceSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly signature: string
+}
+
+/** Fresh, twice-read QC method and its Host-only HMAC proof. */
+export interface ImagoTakeTechnicalQcMethodResponse extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-take-technical-qc-method-adapter-result.v1'
+  readonly projection: ImagoTakeTechnicalQcMethodProjection
+  readonly projectionSha256: string
+  readonly methodAttestation: ImagoTakeTechnicalQcMethodAttestation
+}
+
 /** Identity-only request; the Host resolves current native group membership. */
 export interface ImagoProductionUnitMethodRequest extends YimengProductionUnitsRequest {
   readonly groupId: string
@@ -1318,6 +1395,7 @@ export interface ImagoMethodEndpointMap {
   readonly continuityMethod: ImagoContinuityMethodResponse
   readonly shotFindingMethod: ImagoShotFindingMethodResponse
   readonly takeAcceptanceMethod: ImagoTakeAcceptanceMethodResponse
+  readonly takeTechnicalQcMethod: ImagoTakeTechnicalQcMethodResponse
   readonly productionUnitMethod: ImagoProductionUnitMethodResponse
   readonly lsuPlanMethod: ImagoLsuPlanMethodResponse
   readonly reworkRouteMethod: ImagoReworkRouteMethodResponse

@@ -6,7 +6,9 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { QingmuCockpit } from './QingmuCockpit.tsx'
 import type {
   ImagoStageSourceMethodResponse, YimengStageSourcesResponse, YimengStageSourceResult, YimengStageSourceRecovery,
-  ImagoTakeAcceptanceMethodResponse, YimengTakeAcceptanceResponse,
+  ImagoTakeAcceptanceMethodResponse,
+  YimengTakeAcceptanceResponse, YimengTakeTechnicalQcFeedResponse,
+  YimengTakeTechnicalQcResult, YimengTakeTechnicalQcRecovery,
   ImagoProductionUnitMethodResponse, YimengProductionUnitsResponse, YimengProductionUnitResult, YimengProductionUnitRecovery,
   ImagoContinuityMethodResponse,
   ImagoShotFindingMethodResponse, YimengShotFindingFeedResponse, YimengShotFindingResult, YimengShotFindingRecovery,
@@ -80,6 +82,10 @@ export type {
   YimengTakeVersionStackSubject, YimengSelectTakeVersionRequest,
   YimengTakeAcceptanceRequest, YimengTakeAcceptanceResponse, YimengTakeAcceptanceEvidence,
   YimengTakeAcceptanceSubject,
+  YimengTakeTechnicalQcAssessment, YimengTakeTechnicalQcCheck, YimengTakeTechnicalQcCode,
+  YimengTakeTechnicalQcFeedResponse, YimengTakeTechnicalQcRequest,
+  YimengRecordTakeTechnicalQcRequest, YimengRecoverTakeTechnicalQcRequest,
+  YimengTakeTechnicalQcResult, YimengTakeTechnicalQcRecovery,
   YimengRecoverTakeVersionSelectionRequest, YimengTakeSelectionIdentity,
   YimengTakeVersionSelectionResult, YimengTakeVersionSelectionRecovery,
   YimengTakeComment, YimengTakeCommentAnchor, YimengTakeCommentFeedResponse,
@@ -148,6 +154,8 @@ export function apply(ctx: ClientContext): void {
     takeReviewAuthority: (request, signal) =>
       read<YimengTakeReviewAuthorityFeedResponse>('takeReviewAuthority', request, signal),
     takeAcceptance: (request, signal) => read<YimengTakeAcceptanceResponse>('takeAcceptance', request, signal),
+    takeTechnicalQc: (request, signal) =>
+      read<YimengTakeTechnicalQcFeedResponse>('takeTechnicalQc', request, signal),
     takeAcceptanceMethod: (request, signal) =>
       method<ImagoTakeAcceptanceMethodResponse>('takeAcceptanceMethod', request, signal),
     shotFindings: (request, signal) => read<YimengShotFindingFeedResponse>('shotFindings', request, signal),
@@ -170,6 +178,10 @@ export function apply(ctx: ClientContext): void {
       command<YimengTakeHumanDecisionResult>('createTakeHumanDecision', request, signal),
     recoverTakeHumanDecision: (request, signal) =>
       command<YimengTakeHumanDecisionRecovery>('recoverTakeHumanDecision', request, signal),
+    recordTakeTechnicalQc: (request, signal) =>
+      command<YimengTakeTechnicalQcResult>('recordTakeTechnicalQc', request, signal),
+    recoverTakeTechnicalQc: (request, signal) =>
+      command<YimengTakeTechnicalQcRecovery>('recoverTakeTechnicalQc', request, signal),
     reworkRouteSource: (request, signal) =>
       read<YimengReworkRouteSourceResponse>('reworkRouteSource', request, signal),
     reworkRouteMethod: (request, signal) =>
