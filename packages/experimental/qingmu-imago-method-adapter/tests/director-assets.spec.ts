@@ -16,8 +16,9 @@ import {
 const assetsRoot = join(dirname(fileURLToPath(import.meta.url)), '../assets')
 
 describe('director asset registry', () => {
-  it('registers exactly the three H1 packages with pinned commits', () => {
-    expect(DIRECTOR_ASSET_ENTRIES.map(e => e.repoId)).toEqual(['director-skill-core', 'storyboard-skill', 'jellyfish'])
+  it('registers exactly the eight H1 packages with pinned commits', () => {
+    expect(DIRECTOR_ASSET_ENTRIES.map(e => e.repoId)).toEqual(['director-skill-core', 'storyboard-skill', 'jellyfish',
+      'nautilus-studio', 'ai-visual-director', 'director-skills-travel', 'arcreel', 'bluefish'])
     for (const entry of DIRECTOR_ASSET_ENTRIES) {
       expect(entry.commit).toMatch(/^[0-9a-f]{40}$/u)
       expect(entry.files).toContain('LICENSE')
@@ -32,7 +33,8 @@ describe('director asset registry', () => {
 
   it('verifies every checked-in package against its provenance ledger', async () => {
     const results = await verifyAllDirectorAssets(assetsRoot)
-    expect(results.map(r => r.repoId)).toEqual(['director-skill-core', 'storyboard-skill', 'jellyfish'])
+    expect(results.map(r => r.repoId)).toEqual(['director-skill-core', 'storyboard-skill', 'jellyfish',
+      'nautilus-studio', 'ai-visual-director', 'director-skills-travel', 'arcreel', 'bluefish'])
     for (const result of results) {
       expect(result.verifiedFiles.length).toBeGreaterThan(0)
     }

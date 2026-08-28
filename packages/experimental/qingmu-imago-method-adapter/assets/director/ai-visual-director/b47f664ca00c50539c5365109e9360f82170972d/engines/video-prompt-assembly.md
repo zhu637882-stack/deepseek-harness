@@ -1,0 +1,243 @@
+# 视频 Prompt 组装逻辑
+
+将故事板 + 角色卡 + 视频分镜图整合为一条完整视频 prompt，直接喂 Seedance/Runway/可灵等 AI 视频工具。
+
+---
+
+## 职责边界（新增）
+
+**本引擎只负责视频 prompt 的组装。角色卡、场景图、分镜图的 prompt 不由本引擎生成。**
+
+| 产出类型 | 由谁生成 | 读取模板 |
+|---------|---------|---------|
+| 角色卡 prompt | `/character` 子路由 | `templates/character-sheet.md` |
+| 场景图 prompt | `/scene` 子路由 | `templates/scene-card.md` |
+| 分镜图 prompt | `/storyboard` 子路由 | `templates/full-board.md` 或 `quick-board.md` |
+| 视频 prompt | **本引擎** | 本文档（4层结构） |
+
+> ⚠ `/create` 主链运行到 video-prompt-assembly 时，必须确认角色卡/场景图/分镜图 prompt 已由对应子路由生成完毕。如未生成 → 先调用子路由补全，再继续组装视频 prompt。
+
+---
+
+## 核心原则
+
+**故事板是主参考** — 视频的运镜/节奏/时间线/转场全部以故事板为准。
+**场景参考图是场景锚点** — 防止背景/天空/光线/阴影/环境细节跨帧跳变。
+**角色卡是角色锚点** — 防止角色面部/服装/武器变形跑偏。
+**视频分镜图是画面锚点** — 防止 AI 视频工具在长序列中偏离关键视觉。
+**@图数量 = 实际照片数** — 组装 prompt 前读取 `state/asset-map.md`，asset-map 里有几张 @图，prompt 里就写几张。不硬编码数量、不编造不存在的 @图引用。用户上传 N 张照片，prompt 就说「共 N 张」、引用 @图0 到 @图N-1。
+**🔴 语言强制规则** — 组装视频 prompt 前，必须读取 `api-config.template.env` 中的 `DEFAULT_LANGUAGE` 和目标平台的 `{PLATFORM}_SUPPORTS_CHINESE`。规则：
+  - `DEFAULT_LANGUAGE=zh` 且平台 `SUPPORTS_CHINESE=true` → **必须输出中文 prompt**，禁止输出英文
+  - `DEFAULT_LANGUAGE=zh` 但平台 `SUPPORTS_CHINESE=false` → 必须输出英文 prompt（如 Runway/Luma/Pika）
+  - `DEFAULT_LANGUAGE=en` → 必须输出英文 prompt
+  - **违反此规则 = 阻断**，不得以"英文效果更好"为由跨语言输出。这是硬约束，不是建议。
+
+---
+
+## Prompt 结构（4 层）
+
+### 第 1 层：视频基础信息
+```
+生成 [时长（从 state/variable-registry 读取，由 video-director 决策）] 电影级视频，主题《[片名]》。
+基于 [N] 帧故事板序列，按时间线完整呈现。
+参考图片：按 `state/asset-map.md` 动态映射，共 [M] 张参考图。
+  → M = asset-map 实际条目数。有几张写几张，不编造不存在的 @图。
+具体映射见 asset-map（@编号→类型→用途），组装时读取后填入。
+```
+
+### 第 2 层：故事板序列（主干）
+逐帧描述，每帧包含（全部从故事板技术参数栏读取）：
+- 帧号 + 阶段名称 + 时间范围
+- 画面内容（角色/环境/动作），只保留核心视觉信息，不超过 15 字
+- 景别 | 运镜 | 焦段 | 色彩 | 灯光 | 转场（用 `|` 分隔）
+
+格式：
+```
+帧1 [阶段名][时间]：[画面描述，≤15字]。[景别]|[运镜]|[焦段]|[色彩]|[灯光]|[转场]。
+帧2 [阶段名][时间]：[画面描述，≤15字]。[景别]|[运镜]|[焦段]|[色彩]|[灯光]|[转场]。
+...
+```
+
+> **帧描述 ≤15字约束**：保留核心视觉信息（角色动作+环境），删修辞/氛围/重复。此限制确保总 Prompt 不超平台上限。若帧阶段复杂可放宽至 ≤25字，但总字数不得超出。
+>
+> **Prompt 总字数上限**：从 api-config.template.env 读取目标平台的 `{PLATFORM}_MAX_PROMPT_CHARS`。超出则触发 prompt-compression。
+
+### 第 3 层：约束层（@图从 asset-map 动态读取）
+```
+约束：场景参考 @图(scene_reference) 锁死空间布局/主光方向/地面材质。
+角色参考 @图(character_sheet) 锁死面部/服装/武器/配饰。
+道具参考 @图(prop_card) 锁死武器形制/配饰纹路（如有）。
+首尾帧参考 @图(end_frame) 锁死帧1起始→帧N结束平滑过渡。
+画面锚点参考 @图(keyframe) 不偏离。
+运镜/景别/焦段/色彩/灯光/转场/时长严格按 @图(storyboard_board) 故事板执行。
+[如有台词] 台词：帧 N 口型同步「[内容]」[表演要求]。字幕：帧 N 底部中央「[内容]」。
+具体 @编号→用途对应关系见 `state/asset-map.md`，组装时动态读取。
+⚠ @图引用数量 = asset-map 实际条目数。asset-map 有 6 条就写 @图0-@图5，有 8 条就写 @图0-@图7。不硬编码。
+```
+
+### 第 4 层：风格收尾
+```
+风格：[VS编号. 风格名称]。色彩弧线：[起始色]→[阶段色]→[高潮色]→[回落色]→[收尾色]。
+cinematic [时长], follow storyboard via asset-map, character locked, scene locked, 8K, no watermark, no broken faces.
+```
+
+---
+
+## 完整示例
+
+> ⚠ 以下 @图编号是**示例**，基于 Seedance 5+3 张的特定资产配置。实际 @编号→用途映射以 `state/asset-map.md` 为准，组装时动态读取。
+
+```
+生成 15s 电影级视频，主题《一剑开天》。参考图片：@图0（场景参考图-悬崖乌云）@图1（角色设定卡-墨渊）@图2（故事板）@图3（蓄力竖举关键帧）@图4（劈天裂空关键帧）@图5（身后收剑台词关键帧）@图6（尾帧锚点）。
+
+帧1 蓄力0-2s：悬崖之巅武士背影，右手握剑蓄力，闪电隐隐。ELS|固定微推|24mm|暗蓝灰#2a3a4a|闪电侧光|匹配剪辑。
+帧2 竖举2-4s：武士转身双手握剑高举指天，闪电对位。MCU|低角度仰拍|50mm|冷灰#4a5568+剑光白|逆光勾勒|快切。
+帧3 竖劈4-7s：剑从头顶垂直劈落，长发散开碎石悬浮。CU|慢动作环绕|85mm|暗金#c9a84c|闪电正面光|快切。
+帧4 裂天7-10s：天空竖劈开中间纯黑虚无，边缘暗红光晕。LS|仰拍慢推|35mm|纯黑#0a0a0a+暗红|裂缝边缘光|叠化。
+帧5 身后10-12s：武士背影面对巨大竖裂缝占画面70%。FS|推轨微升|24mm|纯黑#0a0a0a+暗红|裂缝渗光|淡入。
+帧6 收剑12-14s：侧面收剑入鞘整理头发。MS|侧面固定|50mm|暖金#d4af37|侧逆光|淡入。
+帧7 台词14-15s：正面沉稳表情双眼自然睁开，台词「所有人感受。」沉稳语气不眯眼，底部字幕「所有人感受。」ECU|极慢推近|100mm|暗调#1a1a1a|正面柔光|淡出。
+
+约束：场景@图0锁死（悬崖乌云/主光方向）。角色@图1锁死（墨渊：黑衣/长发/暗金护腕/长剑断念）。故事板@图2控制镜头顺序/构图/运镜。关键帧@图3-5不偏离。尾帧@图6锁死（帧7正面沉稳定格）。台词：SH07口型同步「所有人感受。」说话者：墨渊。语气：低沉平静压迫感。字幕：SH07底部中央「所有人感受。」
+
+风格：VS5 暴力美学。色彩弧线：暗蓝灰#2a3a4a→冷灰#4a5568→暗金#c9a84c→纯黑#0a0a0a→暖金#d4af37→暗调#1a1a1a。
+no flickering, no morphing, no floating, no background shifting, no color shifts, no disappearing props, no body distortion, no face melting, no broken continuity, 8K, no watermark, no broken faces.
+```
+
+---
+
+## 详细模式（Runway/Sora/可灵）
+
+详细模式每帧展开为完整段落，沉浸式叙事，适合文生视频工具和导演阐述。
+
+### 结构（每帧）
+```
+【分镜 N】时间范围
+景别：「景别描述」
+画面内容：「完整叙事段落，环境+角色+动作+氛围细节展开描写」
+运镜方式：「运镜描述」
+画面构图：「构图策略」
+镜头切换：「转场方式」
+人物台词：「台词内容，如有」
+音效设计：「环境音+拟音+音乐 mood+特殊音效」
+```
+
+### 视频基础设定块（开头）
+```
+【视频基础设定】
+视频时长：[时长（从 state/variable-registry 读取）]
+视频比例：DEFAULT_ASPECT_RATIO（api-config.template.env）或用户指定
+视频风格：「VS编号.风格名称」+「渲染引擎关键词」+「氛围关键词」
+```
+
+### 约束层
+```
+约束：场景一致性参考 @图(scene_reference)。首尾帧动作锚点参考 @图(end_frame)。角色参考 @图(character_sheet)。画面锚点参考 @图(keyframe)。运镜/焦段/色彩/灯光/转场/时长严格按故事板执行。台词口型同步。字幕位置标注。
+具体 @编号→用途对应关系见 `state/asset-map.md`，组装时动态读取。
+```
+
+### 示例（详细模式，以一剑开天为例）
+```
+【视频基础设定】
+视频时长：15s | 视频比例：16:9
+视频风格：VS5 暴力美学 | 电影级CG | 超写实 | Unreal Engine 5 | 黑金硬核 | 高反差 | 东方玄幻
+
+【分镜 1】0s-2s 蓄力
+景别：ELS 极远景
+画面内容：漆黑天地之间，悬崖之巅伫立一个孤绝身影。厚重乌云遮蔽苍穹，闪电隐隐游走于云层之间。武士背影面朝无尽黑暗，右手握剑，拇指缓缓推出剑锷，剑身泛起幽微寒光。长发与衣袍在狂风中猎猎飞舞。镜头从远空缓缓推向悬崖，天地之间唯此一人。
+运镜方式：固定机位微推，24mm 广角收尽天地
+画面构图：武士位于画面中轴线下三分之一，乌云占画面二分之一，纵深透视极强
+镜头切换：匹配剪辑 — 闪电光与下一镜剑光呼应
+人物台词：无
+音效设计：狂风呼啸 | 低沉雷声轰鸣 | 剑锷推出金属摩擦声 | 空灵低频持续
+
+【分镜 2】2s-4s 竖举
+景别：MCU 中近景
+画面内容：武士猛然转身，双手握剑高举过顶直指天穹。低角度仰拍使剑身直插云霄，闪电与剑尖完美对位。剑身反射电光，照亮武士刚毅面容。云层以剑尖为中心开始缓慢旋转，天地灵气朝剑尖汇聚。
+运镜方式：低角度固定仰拍，50mm 焦段，微微镜头震动增强力量感
+画面构图：剑身垂直中轴线，天空占三分之二，武士自下而上充满力量感
+镜头切换：快切 — 转身瞬间切入，保持动作连贯
+人物台词：无
+音效设计：转身衣袂声 | 剑鸣破空 | 闪电炸裂近在咫尺 | 空间震动低频上升
+
+...（帧3-7 同上结构展开）...
+
+> ⚠ 以下 @图编号是**示例**，基于 Seedance 5+3 张的特定资产配置。实际 @编号→用途映射以 `state/asset-map.md` 为准。
+
+约束：场景参考 @图(scene_reference) 锁死（帧1背影蓄力→帧7正面沉稳定格）。角色参考 @图(character_sheet) 不变形。画面锚点参考 @图(keyframe) 不偏离。运镜/景别/焦段/色彩/灯光/转场/时长严格按故事板执行。台词：SH07口型同步「所有人感受。」说话者：墨渊。语气：低沉平静压迫感。字幕：SH07底部中央「所有人感受。」
+
+风格：VS5 暴力美学。
+no flickering, no morphing, no floating, no background shifting, no color shifts, no disappearing props, no body distortion, no broken continuity, 8K, no watermark, no broken faces.
+```
+
+---
+
+## 各平台适配
+
+| 平台 | Prompt 调整 |
+|------|-----------|
+| Seedance | 支持多图输入，故事板+角色卡+分镜图全部作为参考图输入 |
+| Runway Gen-3 | 单图输入为主，用故事板作为主图，角色卡作次要参考 |
+| 可灵 Kling | 支持图+文，故事板文字描述+角色卡参考图 |
+| Sora | 纯文本描述为主，将故事板逐帧描述写详细 |
+| Luma Dream Machine | 首帧图+文本描述，用帧 1 图+完整故事板文字描述 |
+
+---
+
+## video_safe 检查（新增）
+
+组装视频 prompt 前，检查 asset-map 中每张 @图的 `video_safe` 字段：
+
+```
+1. 读取 state/asset-map.md → 遍历所有 @图条目
+2. 检查 video_safe 列：
+   ├─ true → 正常用作视频锚点，@图引用写入 prompt
+   ├─ false → ⚠ 不推荐用于视频首帧锚点（如高密度角色圣经、HUD科技卡）
+   │         降级处理：从该 @图中提取角色DNA/场景DNA文字描述代替
+   └─ 未标注 → 默认角色卡/场景卡=true，海报/HUD卡=false
+3. video_safe=false 的图不进入 prompt 的 @图引用列表
+4. 如所有参考图都 video_safe=false → 纯 prompt 模式（无 @图引用，靠文字描述）
+```
+
+## 视觉干净度控制（新增）
+
+组装完成后，读取 `state/visual-control-state.md`，在 prompt 末尾追加：
+
+```
+读取 visual-control-state →
+  ├─ density_level + negative_noise_bans（基础）
+  ├─ genre_override.film_grain（genre 感知）
+  ├─ genre_override.skin_detail（皮肤质感）
+  └─ genre_override.lighting_style（光线风格）
+  ↓
+追加到 prompt：
+  ├─ density_level ≥ 3 时跳过基础干净词（允许丰富画面）
+  ├─ density_level ≤ 2 时追加基础控制词：
+  │    clean composition, controlled detail, no random grid artifacts,
+  │    no fake UI clutter, no over-detailed background, subject-first focus
+  └─ **始终追加 genre 特定词**（不受 density_level 限制）：
+       genre_override.positive_keywords → [追加]
+       genre_override.forbidden → 加入负面提示词
+       film_grain=cineatic/heavy → 追加 "cinematic film grain, natural texture"
+       skin_detail=natural_rosiness → 追加 "natural skin flush, subtle rosiness"
+       skin_detail=battle_worn → 追加 "visible skin texture, sweat sheen, natural blemishes"
+       lighting_style=chiaroscuro → 追加 "dramatic chiaroscuro, strong light shadow contrast"
+       lighting_style=warm_soft → 追加 "warm soft lighting, gentle glow"
+```
+
+---
+
+## 联动
+
+← 接收 `motion-physics` 的运动方案（每镜运动配对+修正）
+← 接收 `video-director` 的视频结构蓝图（镜号/阶段/梗概/节奏/EC）
+← 接收 `reference-anchor` 的平台校验结果（参考图策略+平台参数）
+← **读取 `state/asset-map.md`** 的动态 @图映射（@编号→类型→用途+video_safe+density，不硬编码）
+← **读取 `state/shot-state.md`** 的每镜状态（时间/景别/运镜/色彩/灯光/转场/end_state）
+← **读取 `state/dialogue-map.md`** 的台词映射（shot_id/speaker/text/delivery/subtitle）
+← **读取 `state/sound-map.md`** 的音效映射（sound_id/shot_id/type/sd_code/description/timing/volume）
+← **读取 `state/visual-control-state.md`**（density_level + negative_noise_bans + genre_override.film_grain/skin_detail/lighting_style → 控制 prompt 视觉干净度 + genre 特定质感）
+→ 检查 asset-map video_safe → 非安全资产降级为文字描述
+→ 追加 visual-control 约束词
+→ 组装完整视频 prompt
+→ 输出给 `prompt-scorer` 评分
