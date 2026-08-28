@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   IconCloseOutline16, IconDataOutline16, IconRefreshOutline16, Modal,
@@ -6,7 +6,7 @@ import {
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {
-  JsonRecord, YimengHealth, YimengWorkflowProjection,
+  JsonRecord, YimengCapabilityCatalogResponse, YimengHealth, YimengWorkflowProjection,
 } from './contracts.ts'
 import type { QingmuCockpitFace } from './slots.ts'
 import type { QingmuCockpitKey } from './locales.ts'
@@ -21,6 +21,7 @@ import { ContinuityDeltaView } from './ContinuityDeltaView.tsx'
 import { SelectedVideoReviewView } from './SelectedVideoReviewView.tsx'
 import { ProductionUnitView } from './ProductionUnitView.tsx'
 import { GenerationCapabilityCatalog } from './GenerationCapabilityCatalog.tsx'
+import { GenerationCostRehearsal } from './GenerationCostRehearsal.tsx'
 import css from './QingmuCockpit.module.css'
 
 export type QingmuCockpitProps = PropsRuntime<'sidebar.footer.action'>
@@ -154,11 +155,15 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   const [episodeId, setEpisodeId] = useState('')
   const [projection, setProjection] = useState<YimengWorkflowProjection>()
   const [selectedShotId, setSelectedShotId] = useState('')
+  const [generationCatalog, setGenerationCatalog] = useState<YimengCapabilityCatalogResponse>()
   const triggerRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
   const requestRef = useRef(0)
   const abortRef = useRef<AbortController>()
+  const handleGenerationCatalog = useCallback((result: YimengCapabilityCatalogResponse | undefined) => {
+    setGenerationCatalog(result)
+  }, [])
 
   const begin = (): { readonly id: number; readonly controller: AbortController } => {
     abortRef.current?.abort()
@@ -521,10 +526,21 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
     </div>
   )
 
+  const generationEnabled = open && tab === 'generation' && !loading && error === undefined
   const generationView = (
     <div className={css.stack}>
       <GenerationCapabilityCatalog
-        enabled={open && tab === 'generation' && !loading && error === undefined}
+        enabled={generationEnabled}
+        onCatalog={handleGenerationCatalog}
+        port={port}
+        t={t}
+      />
+      <GenerationCostRehearsal
+        projectId={projectId}
+        episodeId={episodeId}
+        selectedShotId={selectedShotId}
+        catalog={generationCatalog}
+        enabled={generationEnabled}
         port={port}
         t={t}
       />

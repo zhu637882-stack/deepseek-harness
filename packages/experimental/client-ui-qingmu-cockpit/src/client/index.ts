@@ -16,6 +16,7 @@ import type {
   YimengCommitElementProfileResponse, YimengCommitPromptIrEditResponse, YimengCommitScriptResponse,
   YimengCommitStoryboardCanvasResponse,
   YimengCapabilityCatalogResponse,
+  YimengCostRehearsalResponse,
   YimengElementProfileResponse, YimengEpisodesResponse, YimengHealth, YimengPreviewElementProfileResponse,
   YimengPreviewPromptIrResponse, YimengPreviewScriptResponse, YimengPreviewStoryboardCanvasResponse,
   YimengCreateCommentResponse, YimengCreateHumanDecisionResponse, YimengElementReviewFeedResponse,
@@ -51,6 +52,7 @@ export type {
   YimengCommitStoryboardCanvasResponse,
   YimengCapabilityCatalogItem, YimengCapabilityCatalogRequest, YimengCapabilityCatalogResponse,
   YimengCapabilityEligibility, YimengCapabilityMutualExclusion, YimengCapabilitySnapshot,
+  YimengCostRehearsalRequest, YimengCostRehearsalResponse, YimengCostRehearsalSubject,
   YimengElementProfileResponse, YimengEpisodesResponse, YimengHealth, YimengPreviewElementProfileResponse,
   YimengPreviewPromptIrResponse, YimengPreviewScriptResponse, YimengPreviewStoryboardCanvasResponse,
   YimengCreateCommentResponse, YimengCreateHumanDecisionResponse, YimengElementReviewFeedResponse,
@@ -89,6 +91,8 @@ export function apply(ctx: ClientContext): void {
   const port: QingmuYimengPort = {
     capabilityCatalog: (request, signal) =>
       read<YimengCapabilityCatalogResponse>('capabilityCatalog', request, signal),
+    costRehearsal: (request, signal) =>
+      read<YimengCostRehearsalResponse>('costRehearsal', request, signal),
     stageSources: (request, signal) => read<YimengStageSourcesResponse>('stageSources', request, signal),
     stageSourceMethod: (request, signal) => method<ImagoStageSourceMethodResponse>('stageSourceMethod', request, signal),
     bindStageSource: (request, signal) => command<YimengStageSourceResult>('bindStageSource', request, signal),

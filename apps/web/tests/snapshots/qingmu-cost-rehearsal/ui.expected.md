@@ -1,0 +1,65 @@
+- region "费用排练 · Gate A":
+  - heading "费用排练 · Gate A" [level=3]
+  - paragraph: 只计算最大费用、建议预留额与差额；不会正式预留、入队、提交或调用 Provider。
+  - text: 零费用排练 模型
+  - combobox "模型":
+    - option "Gate A Fake Video" [selected]
+  - text: 输入 / 控制
+  - combobox "输入 / 控制":
+    - option "video.continuation"
+    - option "video.first_frame"
+    - option "video.visual" [selected]
+  - text: 分辨率
+  - combobox "分辨率":
+    - option "720P" [selected]
+  - text: 候选数量
+  - combobox "候选数量":
+    - option "1"
+    - option "2" [selected]
+    - option "3"
+    - option "4"
+    - option "5"
+    - option "6"
+    - option "7"
+    - option "8"
+  - button "仅计算费用排练"
+  - status:
+    - strong: 预算排练可容纳
+    - text: 仅建议，尚未正式预留
+  - article:
+    - text: 最大费用估算
+    - strong: ¥3.000000
+  - article:
+    - text: 建议预留（未执行）
+    - strong: ¥3.000000
+  - article:
+    - text: 正式已预留
+    - strong: ¥0.000000
+  - article:
+    - text: 实际费用
+    - strong: 提交前不可用
+  - term: 易梦权威时长
+  - definition: 2.500 s
+  - term: 全局预算窗口剩余
+  - definition: ¥20.000000
+  - term: 项目额度
+  - definition: 未配置
+  - term: 单集额度
+  - definition: 未配置
+  - heading "阻塞项" [level=4]
+  - paragraph: 当前排练没有发现阻塞；仍不构成付费或正式预留授权。
+  - group:
+    - text: 费用排练证据与 SHA
+    - term: 镜头对象 SHA
+    - definition:
+      - code: aca63c36e06986dfc235d0f8b5eba4e1fda70f0eb45b52cfca07c4d05bcebbee
+    - term: 精确目录 SHA
+    - definition:
+      - code: 686f3dc64db2ab8a42bcba28150b0e17cde0f7287d5dba9db9ee4d1741f9f97c
+    - term: 能力快照 SHA
+    - definition:
+      - code: 069ba53a466a04a33ea8c79b8676c5d9e9b1aba39871385098e360d5f995ae77
+    - term: 费用排练回执 SHA
+    - definition:
+      - code: e72cc1d510d057f13773cae5d24a9150723a56631dcb4fb23c00ba555e586820
+  - paragraph: 零权限回执：Provider 调用 0 · 数据库写入 0 · 预算账本写入 0 · 正式预留 0 · 未入队 · 未提交 · 未轮询 · 未下载 · 未注册回调 · 付费授权 否。

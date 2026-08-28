@@ -36,6 +36,9 @@ import type {
   YimengCapabilityEligibility,
   YimengCapabilityMutualExclusion,
   YimengCapabilitySnapshot,
+  YimengCostRehearsalRequest,
+  YimengCostRehearsalResponse,
+  YimengCostRehearsalSubject,
   YimengStageSource,
   YimengStageSourceDefinition,
   YimengStageSourceBinding,
@@ -205,6 +208,9 @@ export type {
   YimengCapabilityEligibility,
   YimengCapabilityMutualExclusion,
   YimengCapabilitySnapshot,
+  YimengCostRehearsalRequest,
+  YimengCostRehearsalResponse,
+  YimengCostRehearsalSubject,
   YimengStageSource,
   YimengStageSourceDefinition,
   YimengStageSourceBinding,
@@ -345,6 +351,10 @@ export interface QingmuYimengReadPort {
     request: YimengCapabilityCatalogRequest,
     signal?: AbortSignal,
   ): Promise<YimengCapabilityCatalogResponse>
+  costRehearsal(
+    request: YimengCostRehearsalRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengCostRehearsalResponse>
   stageSources(request: YimengStageSourcesRequest, signal?: AbortSignal): Promise<YimengStageSourcesResponse>
   productionUnits(request: YimengProductionUnitsRequest, signal?: AbortSignal): Promise<YimengProductionUnitsResponse>
   health(signal?: AbortSignal): Promise<YimengHealth>

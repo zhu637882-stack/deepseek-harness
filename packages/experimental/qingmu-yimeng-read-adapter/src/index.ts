@@ -26,7 +26,10 @@ import type {
   YimengCapabilityCatalogRequest,
   YimengCapabilityCatalogResponse,
   YimengCapabilityCatalogItem,
+  YimengCapabilityEligibility,
   YimengCapabilitySnapshot,
+  YimengCostRehearsalRequest,
+  YimengCostRehearsalResponse,
   YimengElementProfileReference,
   YimengElementProfileRequest,
   YimengElementProfileResponse,
@@ -98,6 +101,9 @@ export type {
   YimengCapabilityEligibility,
   YimengCapabilityMutualExclusion,
   YimengCapabilitySnapshot,
+  YimengCostRehearsalRequest,
+  YimengCostRehearsalResponse,
+  YimengCostRehearsalSubject,
   YimengContinuityAudit,
   YimengContinuityCurrentBinding,
   YimengContinuityDeltaProjection,
@@ -229,7 +235,8 @@ const ELEMENT_REVIEW_FEED_SCHEMA = 'jason.qingmu-element-review-feed.v1'
 const REFERENCE_RIGHTS_EXCEPTION_RELEASE_FEED_SCHEMA = 'jason.qingmu-reference-rights-exception-release-feed.v1'
 const SHA256 = /^[0-9a-f]{64}$/
 const PROTECTED_ENDPOINTS = new Set([
-  'projects', 'episodes', 'script', 'promptIr', 'capabilityCatalog', 'elementProfile', 'referenceCandidates', 'reviewEvents',
+  'projects', 'episodes', 'script', 'promptIr', 'capabilityCatalog', 'costRehearsal', 'elementProfile',
+  'referenceCandidates', 'reviewEvents',
   'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'shotFindings', 'productionUnits', 'stageSources',
   'lsuPlanSource', 'reworkRouteSource',
 ])
@@ -946,6 +953,9 @@ function normalizeCapabilitySnapshot(value: unknown): YimengCapabilitySnapshot {
   const inputs = requireObject(root.inputs, 'capability snapshot inputs')
   const outputs = requireObject(root.outputs, 'capability snapshot outputs')
   const geometry = requireObject(root.geometry, 'capability snapshot geometry')
+  if (Object.prototype.hasOwnProperty.call(geometry, 'max_outputs')) {
+    requireInteger(geometry.max_outputs, 'capability snapshot geometry.max_outputs', 1)
+  }
   const cost = requireObject(root.cost, 'capability snapshot cost')
   const endpointsByCapability = requireObject(runtime.endpointsByCapability, 'capability endpoints')
   const paidDispatchByCapability = requireObject(compliance.paidDispatchByCapability, 'capability paid dispatch map')
@@ -1130,6 +1140,465 @@ function normalizeCapabilityCatalog(
     activeProfile, catalogSnapshotSha256, requestSnapshotSha256, preflightSnapshotSha256,
     request: normalizedRequest,
     items, providerCalls: 0, databaseWrites: 0, paidGenerationAuthorized: false,
+  }
+}
+
+function parseCostRehearsalRequest(payload: unknown): YimengCostRehearsalRequest {
+  const input = requireInputObject(payload)
+  assertOnlyInputKeys(input, [
+    'projectId', 'episodeId', 'frameId', 'modelId', 'capability', 'requestedControls',
+    'resolution', 'candidateCount', 'capabilityCatalog', 'catalogSnapshotSha256', 'requestSnapshotSha256',
+    'preflightSnapshotSha256', 'capabilitySnapshotSha256',
+  ])
+  if (!Array.isArray(input.requestedControls)) {
+    throw new InputError('requestedControls must be an array')
+  }
+  const requestedControls = [...new Set(input.requestedControls.map((value, index) => {
+    const control = parseIdentifier(value, `requestedControls[${String(index)}]`)
+    if (control.length > 128) throw new InputError('requested control must be at most 128 characters')
+    return control
+  }))].sort(compareUnicodeCodePoints)
+  if (requestedControls.length > 64) throw new InputError('requestedControls exceeds limit')
+  const capability = parseIdentifier(input.capability, 'capability')
+  if (capability.length > 128) throw new InputError('capability must be at most 128 characters')
+  const modelId = parseIdentifier(input.modelId, 'modelId')
+  const resolution = parseIdentifier(input.resolution, 'resolution').toUpperCase()
+  const candidateCount = requireInputInteger(input.candidateCount, 'candidateCount', 1, 8)
+  const inputSha256 = (field: keyof Pick<YimengCostRehearsalRequest,
+    'catalogSnapshotSha256' | 'requestSnapshotSha256' | 'preflightSnapshotSha256'
+    | 'capabilitySnapshotSha256'>): string => {
+    const value = parseIdentifier(input[field], field)
+    if (!SHA256.test(value)) throw new InputError(`${field} must be a lowercase SHA-256`)
+    return value
+  }
+  const catalogSnapshotSha256 = inputSha256('catalogSnapshotSha256')
+  const requestSnapshotSha256 = inputSha256('requestSnapshotSha256')
+  const preflightSnapshotSha256 = inputSha256('preflightSnapshotSha256')
+  const capabilitySnapshotSha256 = inputSha256('capabilitySnapshotSha256')
+  let capabilityCatalog: YimengCapabilityCatalogResponse
+  try {
+    capabilityCatalog = normalizeCapabilityCatalog(input.capabilityCatalog, {
+      modelId,
+      capability,
+      requestedControls,
+    })
+  } catch (error) {
+    if (error instanceof UpstreamContractError) {
+      throw new InputError(`capabilityCatalog failed Host validation: ${error.message}`)
+    }
+    throw error
+  }
+  const catalogItem = capabilityCatalog.items[0]
+  if (capabilityCatalog.items.length !== 1 || catalogItem === undefined
+    || catalogItem.snapshot.modelId !== modelId
+    || capabilityCatalog.catalogSnapshotSha256 !== catalogSnapshotSha256
+    || capabilityCatalog.requestSnapshotSha256 !== requestSnapshotSha256
+    || capabilityCatalog.preflightSnapshotSha256 !== preflightSnapshotSha256
+    || catalogItem.capabilitySnapshotSha256 !== capabilitySnapshotSha256) {
+    throw new InputError('cost rehearsal coordinates do not match capabilityCatalog')
+  }
+  const candidateLimit = Object.prototype.hasOwnProperty.call(catalogItem.snapshot.geometry, 'max_outputs')
+    ? Math.min(8, catalogItem.snapshot.geometry.max_outputs as number)
+    : 8
+  if (candidateCount > candidateLimit) {
+    throw new InputError('candidateCount exceeds capabilityCatalog maximum')
+  }
+  return {
+    projectId: parseIdentifier(input.projectId, 'projectId'),
+    episodeId: parseIdentifier(input.episodeId, 'episodeId'),
+    frameId: parseIdentifier(input.frameId, 'frameId'),
+    modelId,
+    capability,
+    requestedControls,
+    resolution,
+    candidateCount,
+    capabilityCatalog,
+    catalogSnapshotSha256,
+    requestSnapshotSha256,
+    preflightSnapshotSha256,
+    capabilitySnapshotSha256,
+  }
+}
+
+function normalizeCostEligibility(value: unknown): YimengCapabilityEligibility {
+  const root = requireObject(value, 'costRehearsal.capabilityBinding.eligibility')
+  assertExactOutputKeys(root, ['evaluated', 'eligible', 'errors'], 'costRehearsal.capabilityBinding.eligibility')
+  const result = {
+    evaluated: requireBoolean(root.evaluated, 'costRehearsal eligibility evaluated'),
+    eligible: requireBoolean(root.eligible, 'costRehearsal eligibility eligible'),
+    errors: requireCanonicalStringArray(root.errors, 'costRehearsal eligibility errors'),
+  }
+  if (!result.evaluated
+    || (result.eligible && result.errors.length > 0)
+    || (!result.eligible && result.errors.length === 0)) {
+    throw new UpstreamContractError('costRehearsal eligibility is inconsistent')
+  }
+  return result
+}
+
+function microsCny(value: number): string {
+  const micros = BigInt(value)
+  const whole = micros / 1_000_000n
+  const fraction = (micros % 1_000_000n).toString().padStart(6, '0')
+  return `${String(whole)}.${fraction}`
+}
+
+function safeBigIntNumber(value: bigint, field: string): number {
+  if (value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new UpstreamContractError(`${field} exceeds safe integer range`)
+  }
+  return Number(value)
+}
+
+function decimalCnyToMicros(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new UpstreamContractError(`${field} must be a non-negative finite number`)
+  }
+  const match = /^(\d+)(?:\.(\d*))?(?:e([+-]?\d+))?$/u.exec(String(value).toLowerCase())
+  if (match === null) throw new UpstreamContractError(`${field} has an invalid decimal form`)
+  const whole = match[1] ?? '0'
+  const fraction = match[2] ?? ''
+  const exponent = Number(match[3] ?? 0) - fraction.length + 6
+  let scaled = BigInt(`${whole}${fraction}`)
+  if (exponent >= 0) {
+    scaled *= 10n ** BigInt(exponent)
+  } else {
+    const divisor = 10n ** BigInt(-exponent)
+    scaled = (scaled + divisor / 2n) / divisor
+  }
+  return safeBigIntNumber(scaled, field)
+}
+
+function catalogCandidateLimit(snapshot: YimengCapabilitySnapshot): number {
+  return Object.prototype.hasOwnProperty.call(snapshot.geometry, 'max_outputs')
+    ? Math.min(8, requireInteger(snapshot.geometry.max_outputs, 'capability geometry.max_outputs', 1))
+    : 8
+}
+
+function catalogRateMicros(snapshot: YimengCapabilitySnapshot, resolution: string): number {
+  const cost = requireObject(snapshot.cost, 'capability cost')
+  const rates = requireObject(cost.by_resolution, 'capability cost.by_resolution')
+  if (cost.currency !== 'CNY' || cost.unit !== 'second'
+    || !Object.prototype.hasOwnProperty.call(rates, resolution)) {
+    throw new UpstreamContractError('capability cost does not declare the requested CNY/second resolution')
+  }
+  return decimalCnyToMicros(rates[resolution], `capability cost.by_resolution.${resolution}`)
+}
+
+function normalizeCostRehearsal(
+  value: unknown,
+  expected: YimengCostRehearsalRequest,
+): YimengCostRehearsalResponse {
+  const root = requireObject(value, 'costRehearsal')
+  assertExactOutputKeys(root, [
+    'schema', 'productionStatus', 'mode', 'snapshotPolicy', 'subject', 'capabilityBinding',
+    'costEstimate', 'budgetWindow', 'reservationRehearsal', 'difference',
+    'rehearsalSnapshotSha256', 'providerCalls', 'databaseWrites', 'budgetLedgerWrites',
+    'taskCreated', 'queueEntered', 'submitAttempted', 'pollAttempted', 'downloadAttempted',
+    'webhookRegistered', 'paidGenerationAuthorized',
+  ], 'costRehearsal')
+  if (root.schema !== 'jason.provider-cost-rehearsal.v1'
+    || root.productionStatus !== 'UNVERIFIED_FOR_PAID_PRODUCTION'
+    || root.mode !== 'dry_run'
+    || root.snapshotPolicy !== 'rfc8785-jcs-sha256-v1'
+    || root.providerCalls !== 0 || root.databaseWrites !== 0 || root.budgetLedgerWrites !== 0
+    || root.taskCreated !== false || root.queueEntered !== false || root.submitAttempted !== false
+    || root.pollAttempted !== false || root.downloadAttempted !== false
+    || root.webhookRegistered !== false || root.paidGenerationAuthorized !== false) {
+    throw new UpstreamContractError('costRehearsal identity or zero-authority boundary mismatch')
+  }
+  const catalogItem = expected.capabilityCatalog.items[0]
+  if (catalogItem === undefined || expected.capabilityCatalog.items.length !== 1) {
+    throw new UpstreamContractError('costRehearsal capabilityCatalog item is not unique')
+  }
+
+  const rawSubject = requireObject(root.subject, 'costRehearsal.subject')
+  assertExactOutputKeys(rawSubject, [
+    'projectId', 'episodeId', 'frameId', 'frameNumber', 'frameUpdatedAt',
+    'durationMillis', 'subjectSnapshotSha256',
+  ], 'costRehearsal.subject')
+  const subjectIdentity = {
+    projectId: requireIdentifier(rawSubject.projectId, 'costRehearsal.subject.projectId'),
+    episodeId: requireIdentifier(rawSubject.episodeId, 'costRehearsal.subject.episodeId'),
+    frameId: requireIdentifier(rawSubject.frameId, 'costRehearsal.subject.frameId'),
+    frameNumber: requireInteger(rawSubject.frameNumber, 'costRehearsal.subject.frameNumber', 0),
+    frameUpdatedAt: requireIdentifier(rawSubject.frameUpdatedAt, 'costRehearsal.subject.frameUpdatedAt'),
+    durationMillis: requireInteger(rawSubject.durationMillis, 'costRehearsal.subject.durationMillis', 1, 600_000),
+  }
+  if (subjectIdentity.projectId !== expected.projectId
+    || subjectIdentity.episodeId !== expected.episodeId
+    || subjectIdentity.frameId !== expected.frameId) {
+    throw new UpstreamContractError('costRehearsal subject echo mismatch')
+  }
+  const subject = {
+    ...subjectIdentity,
+    subjectSnapshotSha256: requireSha256(
+      rawSubject.subjectSnapshotSha256,
+      'costRehearsal.subject.subjectSnapshotSha256',
+    ),
+  }
+  if (subject.subjectSnapshotSha256 !== jcsSha256(subjectIdentity, 'costRehearsal.subjectIdentity')) {
+    throw new UpstreamContractError('costRehearsal subject SHA mismatch')
+  }
+
+  const rawBinding = requireObject(root.capabilityBinding, 'costRehearsal.capabilityBinding')
+  assertExactOutputKeys(rawBinding, [
+    'modelId', 'capability', 'requestedControls', 'resolution', 'catalogSnapshotSha256',
+    'requestSnapshotSha256', 'preflightSnapshotSha256', 'capabilitySnapshotId',
+    'capabilitySnapshotSha256', 'eligibility', 'paidDispatchAllowed',
+  ], 'costRehearsal.capabilityBinding')
+  const capabilitySnapshotSha256 = requireSha256(
+    rawBinding.capabilitySnapshotSha256,
+    'costRehearsal.capabilityBinding.capabilitySnapshotSha256',
+  )
+  const capabilityBinding = {
+    modelId: requireIdentifier(rawBinding.modelId, 'costRehearsal.capabilityBinding.modelId'),
+    capability: requireIdentifier(rawBinding.capability, 'costRehearsal.capabilityBinding.capability'),
+    requestedControls: requireCanonicalStringArray(
+      rawBinding.requestedControls,
+      'costRehearsal.capabilityBinding.requestedControls',
+    ),
+    resolution: requireIdentifier(rawBinding.resolution, 'costRehearsal.capabilityBinding.resolution'),
+    catalogSnapshotSha256: requireSha256(
+      rawBinding.catalogSnapshotSha256,
+      'costRehearsal.capabilityBinding.catalogSnapshotSha256',
+    ),
+    requestSnapshotSha256: requireSha256(
+      rawBinding.requestSnapshotSha256,
+      'costRehearsal.capabilityBinding.requestSnapshotSha256',
+    ),
+    preflightSnapshotSha256: requireSha256(
+      rawBinding.preflightSnapshotSha256,
+      'costRehearsal.capabilityBinding.preflightSnapshotSha256',
+    ),
+    capabilitySnapshotId: requireIdentifier(
+      rawBinding.capabilitySnapshotId,
+      'costRehearsal.capabilityBinding.capabilitySnapshotId',
+    ),
+    capabilitySnapshotSha256,
+    eligibility: normalizeCostEligibility(rawBinding.eligibility),
+    paidDispatchAllowed: false as const,
+  }
+  if (rawBinding.paidDispatchAllowed !== false
+    || capabilityBinding.modelId !== expected.modelId
+    || capabilityBinding.capability !== expected.capability
+    || capabilityBinding.resolution !== expected.resolution
+    || !isDeepStrictEqual(capabilityBinding.requestedControls, expected.requestedControls)
+    || capabilityBinding.catalogSnapshotSha256 !== expected.catalogSnapshotSha256
+    || capabilityBinding.requestSnapshotSha256 !== expected.requestSnapshotSha256
+    || capabilityBinding.preflightSnapshotSha256 !== expected.preflightSnapshotSha256
+    || capabilityBinding.capabilitySnapshotSha256 !== expected.capabilitySnapshotSha256
+    || capabilityBinding.capabilitySnapshotId !== catalogItem.capabilitySnapshotId
+    || !isDeepStrictEqual(capabilityBinding.eligibility, catalogItem.eligibility)
+    || capabilityBinding.paidDispatchAllowed !== catalogItem.snapshot.compliance.paidDispatchAllowed) {
+    throw new UpstreamContractError('costRehearsal capability binding mismatch')
+  }
+
+  const rawCost = requireObject(root.costEstimate, 'costRehearsal.costEstimate')
+  assertExactOutputKeys(rawCost, [
+    'currency', 'unit', 'formula', 'resolution', 'rateMicrosPerSecond', 'oneCandidateMicros',
+    'candidateCount', 'maximumAllowedCandidateCount', 'maximumCostMicros',
+    'oneCandidateCny', 'maximumCostCny',
+  ], 'costRehearsal.costEstimate')
+  const costEstimate = {
+    currency: 'CNY' as const,
+    unit: 'second' as const,
+    formula: 'duration_seconds_x_resolution_rate_x_candidates' as const,
+    resolution: requireIdentifier(rawCost.resolution, 'costRehearsal.costEstimate.resolution'),
+    rateMicrosPerSecond: requireInteger(rawCost.rateMicrosPerSecond, 'costRehearsal.rateMicrosPerSecond', 0),
+    oneCandidateMicros: requireInteger(rawCost.oneCandidateMicros, 'costRehearsal.oneCandidateMicros', 0),
+    candidateCount: requireInteger(rawCost.candidateCount, 'costRehearsal.candidateCount', 1, 8),
+    maximumAllowedCandidateCount: requireInteger(
+      rawCost.maximumAllowedCandidateCount,
+      'costRehearsal.maximumAllowedCandidateCount',
+      1,
+      8,
+    ),
+    maximumCostMicros: requireInteger(rawCost.maximumCostMicros, 'costRehearsal.maximumCostMicros', 0),
+    oneCandidateCny: requireString(rawCost.oneCandidateCny, 'costRehearsal.oneCandidateCny'),
+    maximumCostCny: requireString(rawCost.maximumCostCny, 'costRehearsal.maximumCostCny'),
+  }
+  const expectedOneCandidate = safeBigIntNumber(
+    (BigInt(costEstimate.rateMicrosPerSecond) * BigInt(subject.durationMillis) + 500n) / 1_000n,
+    'costRehearsal one-candidate estimate',
+  )
+  const expectedMaximum = safeBigIntNumber(
+    BigInt(costEstimate.oneCandidateMicros) * BigInt(costEstimate.candidateCount),
+    'costRehearsal maximum estimate',
+  )
+  const expectedRateMicros = catalogRateMicros(catalogItem.snapshot, expected.resolution)
+  const expectedMaximumAllowedCandidateCount = catalogCandidateLimit(catalogItem.snapshot)
+  if (rawCost.currency !== 'CNY' || rawCost.unit !== 'second'
+    || rawCost.formula !== 'duration_seconds_x_resolution_rate_x_candidates'
+    || costEstimate.resolution !== expected.resolution
+    || costEstimate.rateMicrosPerSecond !== expectedRateMicros
+    || costEstimate.candidateCount !== expected.candidateCount
+    || costEstimate.maximumAllowedCandidateCount !== expectedMaximumAllowedCandidateCount
+    || costEstimate.candidateCount > expectedMaximumAllowedCandidateCount
+    || costEstimate.oneCandidateMicros !== expectedOneCandidate
+    || costEstimate.maximumCostMicros !== expectedMaximum
+    || costEstimate.oneCandidateCny !== microsCny(costEstimate.oneCandidateMicros)
+    || costEstimate.maximumCostCny !== microsCny(costEstimate.maximumCostMicros)) {
+    throw new UpstreamContractError('costRehearsal estimate formula mismatch')
+  }
+
+  const rawBudget = requireObject(root.budgetWindow, 'costRehearsal.budgetWindow')
+  assertExactOutputKeys(rawBudget, [
+    'scope', 'projectQuotaStatus', 'episodeQuotaStatus', 'valid', 'errors', 'windowId',
+    'baselineMicros', 'allowanceMicros', 'effectiveCapMicros', 'lifetimeSpentMicros',
+    'windowSpentMicros', 'windowRemainingMicros',
+  ], 'costRehearsal.budgetWindow')
+  const budgetWindow = {
+    scope: 'global_provider_window' as const,
+    projectQuotaStatus: 'NOT_CONFIGURED' as const,
+    episodeQuotaStatus: 'NOT_CONFIGURED' as const,
+    valid: requireBoolean(rawBudget.valid, 'costRehearsal.budgetWindow.valid'),
+    errors: requireCanonicalStringArray(rawBudget.errors, 'costRehearsal.budgetWindow.errors'),
+    windowId: requireString(rawBudget.windowId, 'costRehearsal.budgetWindow.windowId'),
+    baselineMicros: requireInteger(rawBudget.baselineMicros, 'costRehearsal.budgetWindow.baselineMicros', 0),
+    allowanceMicros: requireInteger(rawBudget.allowanceMicros, 'costRehearsal.budgetWindow.allowanceMicros', 0),
+    effectiveCapMicros: requireInteger(rawBudget.effectiveCapMicros, 'costRehearsal.budgetWindow.effectiveCapMicros', 0),
+    lifetimeSpentMicros: requireInteger(rawBudget.lifetimeSpentMicros, 'costRehearsal.budgetWindow.lifetimeSpentMicros', 0),
+    windowSpentMicros: requireInteger(rawBudget.windowSpentMicros, 'costRehearsal.budgetWindow.windowSpentMicros', 0),
+    windowRemainingMicros: requireInteger(rawBudget.windowRemainingMicros, 'costRehearsal.budgetWindow.windowRemainingMicros', 0),
+  }
+  const expectedEffectiveCapMicros = safeBigIntNumber(
+    BigInt(budgetWindow.baselineMicros) + BigInt(budgetWindow.allowanceMicros),
+    'costRehearsal budget effective cap',
+  )
+  const expectedWindowSpentMicros = Math.max(
+    0,
+    budgetWindow.lifetimeSpentMicros - budgetWindow.baselineMicros,
+  )
+  const expectedWindowRemainingMicros = budgetWindow.valid
+    ? Math.max(0, expectedEffectiveCapMicros - budgetWindow.lifetimeSpentMicros)
+    : 0
+  if (rawBudget.scope !== 'global_provider_window'
+    || rawBudget.projectQuotaStatus !== 'NOT_CONFIGURED'
+    || rawBudget.episodeQuotaStatus !== 'NOT_CONFIGURED'
+    || budgetWindow.valid !== (budgetWindow.errors.length === 0)
+    || budgetWindow.effectiveCapMicros !== expectedEffectiveCapMicros
+    || budgetWindow.windowSpentMicros !== expectedWindowSpentMicros
+    || budgetWindow.windowRemainingMicros !== expectedWindowRemainingMicros) {
+    throw new UpstreamContractError('costRehearsal budget window mismatch')
+  }
+
+  const rawReservation = requireObject(root.reservationRehearsal, 'costRehearsal.reservationRehearsal')
+  assertExactOutputKeys(rawReservation, [
+    'status', 'blockers', 'proposedReservationMicros', 'formallyReservedMicros',
+    'formalReservationId', 'wouldFitBudget', 'remainingIfReservedMicros',
+    'exactAuthorizationRequired', 'formalReservationAllowed',
+  ], 'costRehearsal.reservationRehearsal')
+  const blockers = requireCanonicalStringArray(rawReservation.blockers, 'costRehearsal reservation blockers')
+  const wouldFitBudget = requireBoolean(rawReservation.wouldFitBudget, 'costRehearsal wouldFitBudget')
+  const remainingIfReservedMicros = rawReservation.remainingIfReservedMicros === null
+    ? null
+    : requireInteger(rawReservation.remainingIfReservedMicros, 'costRehearsal remainingIfReservedMicros', 0)
+  const status = rawReservation.status
+  if (status !== 'READY_NOT_RESERVED_DRY_RUN' && status !== 'BLOCKED_NOT_RESERVED_DRY_RUN') {
+    throw new UpstreamContractError('costRehearsal reservation status mismatch')
+  }
+  const reservationStatus: YimengCostRehearsalResponse['reservationRehearsal']['status'] = status
+  const reservationRehearsal = {
+    status: reservationStatus,
+    blockers,
+    proposedReservationMicros: requireInteger(
+      rawReservation.proposedReservationMicros,
+      'costRehearsal proposedReservationMicros',
+      0,
+    ),
+    formallyReservedMicros: 0 as const,
+    formalReservationId: null,
+    wouldFitBudget,
+    remainingIfReservedMicros,
+    exactAuthorizationRequired: true as const,
+    formalReservationAllowed: false as const,
+  }
+  const expectedWouldFit = budgetWindow.valid
+    && costEstimate.maximumCostMicros <= budgetWindow.windowRemainingMicros
+  if (rawReservation.formallyReservedMicros !== 0 || rawReservation.formalReservationId !== null
+    || rawReservation.exactAuthorizationRequired !== true || rawReservation.formalReservationAllowed !== false
+    || reservationRehearsal.proposedReservationMicros !== costEstimate.maximumCostMicros
+    || wouldFitBudget !== expectedWouldFit
+    || remainingIfReservedMicros !== (expectedWouldFit
+      ? budgetWindow.windowRemainingMicros - costEstimate.maximumCostMicros
+      : null)
+    || reservationStatus !== (blockers.length === 0
+      ? 'READY_NOT_RESERVED_DRY_RUN'
+      : 'BLOCKED_NOT_RESERVED_DRY_RUN')
+    || (!wouldFitBudget && budgetWindow.valid && !blockers.includes('budget:insufficient_remaining'))
+    || capabilityBinding.eligibility.errors.some(error => !blockers.includes(`capability:${error}`))
+    || budgetWindow.errors.some(error => !blockers.includes(`budget:${error}`))) {
+    throw new UpstreamContractError('costRehearsal reservation rehearsal mismatch')
+  }
+
+  const rawDifference = requireObject(root.difference, 'costRehearsal.difference')
+  assertExactOutputKeys(rawDifference, [
+    'estimateToProposedReservationMicros', 'estimateToFormalReservationMicros',
+    'actualCostMicros', 'actualVsProposedReservationMicros', 'releasedMicros',
+    'refundMicros', 'actualCostStatus',
+  ], 'costRehearsal.difference')
+  const difference = {
+    estimateToProposedReservationMicros: 0 as const,
+    estimateToFormalReservationMicros: requireInteger(
+      rawDifference.estimateToFormalReservationMicros,
+      'costRehearsal estimateToFormalReservationMicros',
+      0,
+    ),
+    actualCostMicros: null,
+    actualVsProposedReservationMicros: null,
+    releasedMicros: 0 as const,
+    refundMicros: null,
+    actualCostStatus: 'UNAVAILABLE_BEFORE_SUBMIT' as const,
+  }
+  if (rawDifference.estimateToProposedReservationMicros !== 0
+    || difference.estimateToFormalReservationMicros !== costEstimate.maximumCostMicros
+    || rawDifference.actualCostMicros !== null || rawDifference.actualVsProposedReservationMicros !== null
+    || rawDifference.releasedMicros !== 0 || rawDifference.refundMicros !== null
+    || rawDifference.actualCostStatus !== 'UNAVAILABLE_BEFORE_SUBMIT') {
+    throw new UpstreamContractError('costRehearsal difference mismatch')
+  }
+
+  const identity = {
+    schema: 'jason.provider-cost-rehearsal-snapshot.v1',
+    productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+    mode: 'dry_run',
+    subject,
+    capabilityBinding,
+    costEstimate,
+    budgetWindow,
+    reservationRehearsal,
+    difference,
+  }
+  const rehearsalSnapshotSha256 = requireSha256(
+    root.rehearsalSnapshotSha256,
+    'costRehearsal.rehearsalSnapshotSha256',
+  )
+  if (rehearsalSnapshotSha256 !== jcsSha256(identity, 'costRehearsal.identity')) {
+    throw new UpstreamContractError('costRehearsal snapshot SHA mismatch')
+  }
+  return {
+    schema: 'jason.provider-cost-rehearsal.v1',
+    productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+    mode: 'dry_run',
+    snapshotPolicy: 'rfc8785-jcs-sha256-v1',
+    subject,
+    capabilityBinding,
+    costEstimate,
+    budgetWindow,
+    reservationRehearsal,
+    difference,
+    rehearsalSnapshotSha256,
+    providerCalls: 0,
+    databaseWrites: 0,
+    budgetLedgerWrites: 0,
+    taskCreated: false,
+    queueEntered: false,
+    submitAttempted: false,
+    pollAttempted: false,
+    downloadAttempted: false,
+    webhookRegistered: false,
+    paidGenerationAuthorized: false,
   }
 }
 
@@ -2928,6 +3397,24 @@ export function createYimengReadHandler(
         }
         path = `/api/providers/capability-catalog${query.size === 0 ? '' : `?${query.toString()}`}`
         normalize = value => normalizeCapabilityCatalog(value, request)
+      } else if (endpoint === 'costRehearsal') {
+        const request = parseCostRehearsalRequest(payload)
+        const query = new URLSearchParams({
+          model_id: request.modelId,
+          capability: request.capability,
+          resolution: request.resolution,
+          candidate_count: String(request.candidateCount),
+          catalog_snapshot_sha256: request.catalogSnapshotSha256,
+          request_snapshot_sha256: request.requestSnapshotSha256,
+          preflight_snapshot_sha256: request.preflightSnapshotSha256,
+          capability_snapshot_sha256: request.capabilitySnapshotSha256,
+        })
+        for (const control of request.requestedControls) query.append('requested_control', control)
+        path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)
+          + '/episodes/' + encodeURIComponent(request.episodeId)
+          + '/frames/' + encodeURIComponent(request.frameId)
+          + `/cost-rehearsal?${query.toString()}`
+        normalize = value => normalizeCostRehearsal(value, request)
       } else if (endpoint === 'projects') {
         const request = parseProjectsRequest(payload)
         const query = new URLSearchParams({ page: String(request.page), page_size: String(request.pageSize) })

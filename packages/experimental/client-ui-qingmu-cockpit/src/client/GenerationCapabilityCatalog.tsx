@@ -8,6 +8,7 @@ import css from './GenerationCapabilityCatalog.module.css'
 
 interface GenerationCapabilityCatalogProps {
   readonly enabled: boolean
+  readonly onCatalog?: (result: YimengCapabilityCatalogResponse | undefined) => void
   readonly port: Pick<QingmuYimengReadPort, 'capabilityCatalog'>
   readonly t: (key: QingmuCockpitKey) => string
 }
@@ -79,22 +80,29 @@ function SnapshotCard({ snapshot, sha256, t }: {
 }
 
 /** Read-only Gate A capability inventory. It cannot submit, reserve, or authorize Provider work. */
-export function GenerationCapabilityCatalog({ enabled, port, t }: GenerationCapabilityCatalogProps) {
+export function GenerationCapabilityCatalog({ enabled, onCatalog, port, t }: GenerationCapabilityCatalogProps) {
   const [refresh, setRefresh] = useState(0)
   const [state, setState] = useState<CatalogState>()
 
   useEffect(() => {
-    if (!enabled) { setState(undefined); return }
+    if (!enabled) {
+      setState(undefined)
+      onCatalog?.(undefined)
+      return
+    }
     const controller = new AbortController()
     const identity = { port, refresh }
     setState({ ...identity, status: 'loading' })
+    onCatalog?.(undefined)
     void (async () => {
       try {
         const result = await port.capabilityCatalog({}, controller.signal)
         if (controller.signal.aborted) return
         setState({ ...identity, status: 'ready', result })
+        onCatalog?.(result)
       } catch (cause) {
         if (!controller.signal.aborted) {
+          onCatalog?.(undefined)
           setState({
             ...identity,
             status: 'error',
@@ -104,7 +112,7 @@ export function GenerationCapabilityCatalog({ enabled, port, t }: GenerationCapa
       }
     })()
     return () => { controller.abort() }
-  }, [enabled, port, refresh, t])
+  }, [enabled, onCatalog, port, refresh, t])
 
   const current = enabled && state?.port === port && state.refresh === refresh ? state : undefined
   const loading = enabled && (current === undefined || current.status === 'loading')

@@ -109,6 +109,115 @@ export interface YimengCapabilityCatalogResponse {
   readonly paidGenerationAuthorized: false
 }
 
+/** Immutable Gate A coordinates for one zero-fee cost rehearsal. */
+export interface YimengCostRehearsalRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly modelId: string
+  readonly capability: string
+  readonly requestedControls: readonly string[]
+  readonly resolution: string
+  readonly candidateCount: number
+  /** Exact E6-1 Host-validated snapshot used to independently anchor every derived field. */
+  readonly capabilityCatalog: YimengCapabilityCatalogResponse
+  readonly catalogSnapshotSha256: string
+  readonly requestSnapshotSha256: string
+  readonly preflightSnapshotSha256: string
+  readonly capabilitySnapshotSha256: string
+}
+
+/** Content-addressed storyboard subject used by the estimate. */
+export interface YimengCostRehearsalSubject {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly frameNumber: number
+  readonly frameUpdatedAt: string
+  readonly durationMillis: number
+  readonly subjectSnapshotSha256: string
+}
+
+/** Read-only estimate, proposed hold, and difference receipt. */
+export interface YimengCostRehearsalResponse {
+  readonly schema: 'jason.provider-cost-rehearsal.v1'
+  readonly productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION'
+  readonly mode: 'dry_run'
+  readonly snapshotPolicy: 'rfc8785-jcs-sha256-v1'
+  readonly subject: YimengCostRehearsalSubject
+  readonly capabilityBinding: {
+    readonly modelId: string
+    readonly capability: string
+    readonly requestedControls: readonly string[]
+    readonly resolution: string
+    readonly catalogSnapshotSha256: string
+    readonly requestSnapshotSha256: string
+    readonly preflightSnapshotSha256: string
+    readonly capabilitySnapshotId: string
+    readonly capabilitySnapshotSha256: string
+    readonly eligibility: YimengCapabilityEligibility
+    readonly paidDispatchAllowed: false
+  }
+  readonly costEstimate: {
+    readonly currency: 'CNY'
+    readonly unit: 'second'
+    readonly formula: 'duration_seconds_x_resolution_rate_x_candidates'
+    readonly resolution: string
+    readonly rateMicrosPerSecond: number
+    readonly oneCandidateMicros: number
+    readonly candidateCount: number
+    readonly maximumAllowedCandidateCount: number
+    readonly maximumCostMicros: number
+    readonly oneCandidateCny: string
+    readonly maximumCostCny: string
+  }
+  readonly budgetWindow: {
+    readonly scope: 'global_provider_window'
+    readonly projectQuotaStatus: 'NOT_CONFIGURED'
+    readonly episodeQuotaStatus: 'NOT_CONFIGURED'
+    readonly valid: boolean
+    readonly errors: readonly string[]
+    readonly windowId: string
+    readonly baselineMicros: number
+    readonly allowanceMicros: number
+    readonly effectiveCapMicros: number
+    readonly lifetimeSpentMicros: number
+    readonly windowSpentMicros: number
+    readonly windowRemainingMicros: number
+  }
+  readonly reservationRehearsal: {
+    readonly status: 'READY_NOT_RESERVED_DRY_RUN' | 'BLOCKED_NOT_RESERVED_DRY_RUN'
+    readonly blockers: readonly string[]
+    readonly proposedReservationMicros: number
+    readonly formallyReservedMicros: 0
+    readonly formalReservationId: null
+    readonly wouldFitBudget: boolean
+    readonly remainingIfReservedMicros: number | null
+    readonly exactAuthorizationRequired: true
+    readonly formalReservationAllowed: false
+  }
+  readonly difference: {
+    readonly estimateToProposedReservationMicros: 0
+    readonly estimateToFormalReservationMicros: number
+    readonly actualCostMicros: null
+    readonly actualVsProposedReservationMicros: null
+    readonly releasedMicros: 0
+    readonly refundMicros: null
+    readonly actualCostStatus: 'UNAVAILABLE_BEFORE_SUBMIT'
+  }
+  readonly rehearsalSnapshotSha256: string
+  readonly providerCalls: 0
+  readonly databaseWrites: 0
+  readonly budgetLedgerWrites: 0
+  readonly taskCreated: false
+  readonly queueEntered: false
+  readonly submitAttempted: false
+  readonly pollAttempted: false
+  readonly downloadAttempted: false
+  readonly webhookRegistered: false
+  readonly paidGenerationAuthorized: false
+}
+
 /** Validated request for the projects endpoint. */
 export interface YimengProjectsRequest {
   readonly page?: number
@@ -1355,6 +1464,7 @@ export interface YimengReworkRouteSourceResponse extends YimengSelectedVideoRevi
 export interface YimengReadEndpointMap {
   readonly health: YimengHealth
   readonly capabilityCatalog: YimengCapabilityCatalogResponse
+  readonly costRehearsal: YimengCostRehearsalResponse
   readonly projects: YimengProjectsResponse
   readonly episodes: YimengEpisodesResponse
   readonly script: YimengScriptResponse

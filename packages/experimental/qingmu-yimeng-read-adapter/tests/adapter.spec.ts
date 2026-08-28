@@ -7,6 +7,8 @@ import {
   createYimengReadHandler,
   normalizeReferenceRightsRecord,
   type YimengCapabilityCatalogResponse,
+  type YimengCapabilitySnapshot,
+  type YimengCostRehearsalResponse,
   type YimengReadAdapterDependencies,
   type YimengWorkflowProjection,
 } from '../src/index.ts'
@@ -78,14 +80,22 @@ const CAPABILITY_SNAPSHOT = {
   },
 } as const
 
-function capabilityCatalogFixture() {
-  const capabilitySnapshotCanonicalJson = canonicalJson(CAPABILITY_SNAPSHOT)
+const COST_CAPABILITY_SNAPSHOT = {
+  ...CAPABILITY_SNAPSHOT,
+  cost: { ...CAPABILITY_SNAPSHOT.cost, by_resolution: { '720P': 0.6 } },
+} as const
+
+function capabilityCatalogFixture(
+  requestedControls: readonly string[] = ['video.continuation', 'video.first_frame'],
+  snapshot: YimengCapabilitySnapshot = CAPABILITY_SNAPSHOT,
+) {
+  const capabilitySnapshotCanonicalJson = canonicalJson(snapshot)
   const capabilitySnapshotSha256 = sha256(capabilitySnapshotCanonicalJson)
   const capabilitySnapshotId = `capability-snapshot:sha256:${capabilitySnapshotSha256}`
   const request = {
     modelId: 'fake-video-v1',
     capability: 'video.visual',
-    requestedControls: ['video.continuation', 'video.first_frame'],
+    requestedControls: [...requestedControls],
     dryRun: true,
   } as const
   const identity = {
@@ -93,11 +103,13 @@ function capabilityCatalogFixture() {
     activeProfile: 'quality',
     items: [{ capabilitySnapshotId, capabilitySnapshotSha256 }],
   }
+  const mutualExclusion = requestedControls.includes('video.continuation')
+    && requestedControls.includes('video.first_frame')
   const eligibility = {
     evaluated: true,
-    eligible: false,
-    errors: ['mutual_exclusion:fake-first-frame-or-continuation'],
-  } as const
+    eligible: !mutualExclusion,
+    errors: mutualExclusion ? ['mutual_exclusion:fake-first-frame-or-continuation'] : [],
+  }
   const catalogSnapshotSha256 = sha256(canonicalJson(identity))
   const requestSnapshotSha256 = sha256(canonicalJson(request))
   const preflightIdentity = {
@@ -120,13 +132,155 @@ function capabilityCatalogFixture() {
       capabilitySnapshotSha256,
       capabilitySnapshotCanonicalJson,
       productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
-      snapshot: CAPABILITY_SNAPSHOT,
+      snapshot,
       eligibility,
     }],
     providerCalls: 0,
     databaseWrites: 0,
     paidGenerationAuthorized: false,
   } as const
+}
+
+function costRehearsalFixture() {
+  const catalog = capabilityCatalogFixture(['video.first_frame'], COST_CAPABILITY_SNAPSHOT)
+  const item = catalog.items[0]
+  const request = {
+    projectId: 'project-1',
+    episodeId: 'episode-1',
+    frameId: 'frame-1',
+    modelId: item.snapshot.modelId,
+    capability: 'video.visual',
+    requestedControls: ['video.first_frame'],
+    resolution: '720P',
+    candidateCount: 2,
+    capabilityCatalog: catalog,
+    catalogSnapshotSha256: catalog.catalogSnapshotSha256,
+    requestSnapshotSha256: catalog.requestSnapshotSha256,
+    preflightSnapshotSha256: catalog.preflightSnapshotSha256,
+    capabilitySnapshotSha256: item.capabilitySnapshotSha256,
+  } as const
+  const subjectIdentity = {
+    projectId: request.projectId,
+    episodeId: request.episodeId,
+    frameId: request.frameId,
+    frameNumber: 1,
+    frameUpdatedAt: '2026-08-28T10:00:00Z',
+    durationMillis: 3_000,
+  }
+  const subject = {
+    ...subjectIdentity,
+    subjectSnapshotSha256: sha256(canonicalJson(subjectIdentity)),
+  }
+  const capabilityBinding = {
+    modelId: request.modelId,
+    capability: request.capability,
+    requestedControls: request.requestedControls,
+    resolution: request.resolution,
+    catalogSnapshotSha256: request.catalogSnapshotSha256,
+    requestSnapshotSha256: request.requestSnapshotSha256,
+    preflightSnapshotSha256: request.preflightSnapshotSha256,
+    capabilitySnapshotId: item.capabilitySnapshotId,
+    capabilitySnapshotSha256: request.capabilitySnapshotSha256,
+    eligibility: item.eligibility,
+    paidDispatchAllowed: false,
+  } as const
+  const costEstimate = {
+    currency: 'CNY',
+    unit: 'second',
+    formula: 'duration_seconds_x_resolution_rate_x_candidates',
+    resolution: '720P',
+    rateMicrosPerSecond: 600_000,
+    oneCandidateMicros: 1_800_000,
+    candidateCount: 2,
+    maximumAllowedCandidateCount: 8,
+    maximumCostMicros: 3_600_000,
+    oneCandidateCny: '1.800000',
+    maximumCostCny: '3.600000',
+  } as const
+  const budgetWindow = {
+    scope: 'global_provider_window',
+    projectQuotaStatus: 'NOT_CONFIGURED',
+    episodeQuotaStatus: 'NOT_CONFIGURED',
+    valid: true,
+    errors: [],
+    windowId: 'gate-a-window',
+    baselineMicros: 2_000_000,
+    allowanceMicros: 10_000_000,
+    effectiveCapMicros: 12_000_000,
+    lifetimeSpentMicros: 2_000_000,
+    windowSpentMicros: 0,
+    windowRemainingMicros: 10_000_000,
+  } as const
+  const reservationRehearsal = {
+    status: 'READY_NOT_RESERVED_DRY_RUN',
+    blockers: [],
+    proposedReservationMicros: 3_600_000,
+    formallyReservedMicros: 0,
+    formalReservationId: null,
+    wouldFitBudget: true,
+    remainingIfReservedMicros: 6_400_000,
+    exactAuthorizationRequired: true,
+    formalReservationAllowed: false,
+  } as const
+  const difference = {
+    estimateToProposedReservationMicros: 0,
+    estimateToFormalReservationMicros: 3_600_000,
+    actualCostMicros: null,
+    actualVsProposedReservationMicros: null,
+    releasedMicros: 0,
+    refundMicros: null,
+    actualCostStatus: 'UNAVAILABLE_BEFORE_SUBMIT',
+  } as const
+  const identity = {
+    schema: 'jason.provider-cost-rehearsal-snapshot.v1',
+    productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+    mode: 'dry_run',
+    subject,
+    capabilityBinding,
+    costEstimate,
+    budgetWindow,
+    reservationRehearsal,
+    difference,
+  } as const
+  const response = {
+    schema: 'jason.provider-cost-rehearsal.v1',
+    productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
+    mode: 'dry_run',
+    snapshotPolicy: 'rfc8785-jcs-sha256-v1',
+    subject,
+    capabilityBinding,
+    costEstimate,
+    budgetWindow,
+    reservationRehearsal,
+    difference,
+    rehearsalSnapshotSha256: sha256(canonicalJson(identity)),
+    providerCalls: 0,
+    databaseWrites: 0,
+    budgetLedgerWrites: 0,
+    taskCreated: false,
+    queueEntered: false,
+    submitAttempted: false,
+    pollAttempted: false,
+    downloadAttempted: false,
+    webhookRegistered: false,
+    paidGenerationAuthorized: false,
+  } as const
+  return { request, response }
+}
+
+function rehashCostResponse(response: YimengCostRehearsalResponse): YimengCostRehearsalResponse {
+  const identity = {
+    schema: 'jason.provider-cost-rehearsal-snapshot.v1',
+    productionStatus: response.productionStatus,
+    mode: response.mode,
+    subject: response.subject,
+    capabilityBinding: response.capabilityBinding,
+    costEstimate: response.costEstimate,
+    budgetWindow: response.budgetWindow,
+    reservationRehearsal: response.reservationRehearsal,
+    difference: response.difference,
+  }
+  return { ...response, rehearsalSnapshotSha256: sha256(canonicalJson(identity)) }
 }
 
 const PROMPT_IR_SUBJECT = {
@@ -586,6 +740,7 @@ describe('qingmu Yimeng read adapter', () => {
 
     for (const [endpoint, payload] of [
       ['capabilityCatalog', {}],
+      ['costRehearsal', costRehearsalFixture().request],
       ['projects', {}],
       ['episodes', { projectId: 'project-1' }],
       ['script', { projectId: 'project-1', episodeId: 'episode-1' }],
@@ -639,6 +794,189 @@ describe('qingmu Yimeng read adapter', () => {
     expect(value.providerCalls).toBe(0)
     expect(value.databaseWrites).toBe(0)
     expect(value.paidGenerationAuthorized).toBe(false)
+  })
+
+  it('recomputes the Gate A cost rehearsal and preserves every zero-authority boundary', async () => {
+    let capturedUrl = ''
+    let capturedInit: RequestInit | undefined
+    const fixture = costRehearsalFixture()
+    const handler = createYimengReadHandler({}, dependencies(async (input, init) => {
+      capturedUrl = requestUrl(input)
+      capturedInit = init
+      return jsonResponse(fixture.response)
+    }, 'test-token'))
+
+    const result = await handler('costRehearsal', fixture.request, signal())
+
+    expect(result).toEqual({ ok: true, value: fixture.response })
+    const url = new URL(capturedUrl)
+    expect(url.pathname).toBe('/api/qingmu/projects/project-1/episodes/episode-1/frames/frame-1/cost-rehearsal')
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({
+      model_id: 'fake-video-v1',
+      capability: 'video.visual',
+      resolution: '720P',
+      candidate_count: '2',
+      catalog_snapshot_sha256: fixture.request.catalogSnapshotSha256,
+      request_snapshot_sha256: fixture.request.requestSnapshotSha256,
+      preflight_snapshot_sha256: fixture.request.preflightSnapshotSha256,
+      capability_snapshot_sha256: fixture.request.capabilitySnapshotSha256,
+      requested_control: 'video.first_frame',
+    })
+    expect(new Headers(capturedInit?.headers).get('authorization')).toBe('Bearer test-token')
+    expect(capturedInit?.method).toBe('GET')
+    if (!result.ok) throw new Error(result.error.message)
+    expect(result).toMatchObject({ ok: true, value: {
+      costEstimate: { maximumCostMicros: 3_600_000 },
+      reservationRehearsal: {
+        proposedReservationMicros: 3_600_000,
+        formallyReservedMicros: 0,
+        formalReservationId: null,
+      },
+      providerCalls: 0,
+      databaseWrites: 0,
+      budgetLedgerWrites: 0,
+      queueEntered: false,
+      submitAttempted: false,
+      pollAttempted: false,
+      downloadAttempted: false,
+      webhookRegistered: false,
+      paidGenerationAuthorized: false,
+    } })
+  })
+
+  it('fails cost rehearsals closed on coordinate, formula, hash, or authority drift', async () => {
+    const fixture = costRehearsalFixture()
+    const invalid = [
+      { ...fixture.response, providerCalls: 1 },
+      { ...fixture.response, queueEntered: true },
+      {
+        ...fixture.response,
+        subject: { ...fixture.response.subject, projectId: 'project-other' },
+      },
+      {
+        ...fixture.response,
+        costEstimate: { ...fixture.response.costEstimate, maximumCostMicros: 3_600_001 },
+      },
+      {
+        ...fixture.response,
+        reservationRehearsal: {
+          ...fixture.response.reservationRehearsal,
+          formallyReservedMicros: 1,
+        },
+      },
+      { ...fixture.response, rehearsalSnapshotSha256: 'f'.repeat(64) },
+    ]
+    for (const response of invalid) {
+      const handler = createYimengReadHandler({}, dependencies(
+        async () => jsonResponse(response),
+        'test-token',
+      ))
+      const result = await handler('costRehearsal', fixture.request, signal())
+      expect(result).toMatchObject({ ok: false, error: { code: 'internal' } })
+    }
+
+    const fetch = vi.fn<typeof globalThis.fetch>()
+    const handler = createYimengReadHandler({}, dependencies(fetch, 'test-token'))
+    const result = await handler('costRehearsal', {
+      ...fixture.request,
+      candidateCount: 0,
+    }, signal())
+    expect(result).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('rejects a semantically forged cost receipt even when every dependent field and final SHA agree', async () => {
+    const fixture = costRehearsalFixture()
+    const forged = rehashCostResponse({
+      ...fixture.response,
+      capabilityBinding: {
+        ...fixture.response.capabilityBinding,
+        eligibility: { evaluated: true, eligible: false, errors: ['forged-capability'] },
+      },
+      costEstimate: {
+        ...fixture.response.costEstimate,
+        rateMicrosPerSecond: 800_000,
+        oneCandidateMicros: 2_400_000,
+        maximumAllowedCandidateCount: 4,
+        maximumCostMicros: 4_800_000,
+        oneCandidateCny: '2.400000',
+        maximumCostCny: '4.800000',
+      },
+      reservationRehearsal: {
+        ...fixture.response.reservationRehearsal,
+        status: 'BLOCKED_NOT_RESERVED_DRY_RUN',
+        blockers: ['capability:forged-capability'],
+        proposedReservationMicros: 4_800_000,
+        remainingIfReservedMicros: 5_200_000,
+      },
+      difference: {
+        ...fixture.response.difference,
+        estimateToFormalReservationMicros: 4_800_000,
+      },
+    })
+    const handler = createYimengReadHandler({}, dependencies(
+      async () => jsonResponse(forged),
+      'test-token',
+    ))
+
+    const result = await handler('costRehearsal', fixture.request, signal())
+
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('forged capability receipt unexpectedly passed')
+    expect(result.error.code).toBe('internal')
+    expect(result.error.message).toContain('capability binding mismatch')
+  })
+
+  it('rejects forged budget arithmetic after recomputing reservation math and the final SHA', async () => {
+    const fixture = costRehearsalFixture()
+    const forged = rehashCostResponse({
+      ...fixture.response,
+      budgetWindow: {
+        ...fixture.response.budgetWindow,
+        effectiveCapMicros: 13_000_000,
+        windowRemainingMicros: 11_000_000,
+      },
+      reservationRehearsal: {
+        ...fixture.response.reservationRehearsal,
+        remainingIfReservedMicros: 7_400_000,
+      },
+    })
+    const handler = createYimengReadHandler({}, dependencies(
+      async () => jsonResponse(forged),
+      'test-token',
+    ))
+
+    const result = await handler('costRehearsal', fixture.request, signal())
+
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('forged budget receipt unexpectedly passed')
+    expect(result.error.code).toBe('internal')
+    expect(result.error.message).toContain('budget window mismatch')
+  })
+
+  it('rejects a malformed present catalog max_outputs before fetch', async () => {
+    const fixture = costRehearsalFixture()
+    const malformedCatalog = capabilityCatalogFixture(
+      ['video.first_frame'],
+      {
+        ...COST_CAPABILITY_SNAPSHOT,
+        geometry: { ...COST_CAPABILITY_SNAPSHOT.geometry, max_outputs: '1' },
+      },
+    )
+    const fetch = vi.fn<typeof globalThis.fetch>()
+    const handler = createYimengReadHandler({}, dependencies(fetch, 'test-token'))
+
+    const result = await handler('costRehearsal', {
+      ...fixture.request,
+      capabilityCatalog: malformedCatalog,
+      catalogSnapshotSha256: malformedCatalog.catalogSnapshotSha256,
+      requestSnapshotSha256: malformedCatalog.requestSnapshotSha256,
+      preflightSnapshotSha256: malformedCatalog.preflightSnapshotSha256,
+      capabilitySnapshotSha256: malformedCatalog.items[0].capabilitySnapshotSha256,
+    }, signal())
+
+    expect(result).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   it('fails capability-catalog reads closed on request, bytes, identity, or authority drift', async () => {

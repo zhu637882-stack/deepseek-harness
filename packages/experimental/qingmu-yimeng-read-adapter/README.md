@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `capabilityCatalog`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `shotFindings`, `productionUnits`, `lsuPlanSource`, `stageSources`, and `workflow`; it exposes no mutation endpoint.
+This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `capabilityCatalog`, `costRehearsal`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `shotFindings`, `productionUnits`, `lsuPlanSource`, `stageSources`, and `workflow`; it exposes no mutation endpoint.
 
 ## Contract
 
@@ -18,13 +18,19 @@ The `workflow.director.heroFrameStoryboards` sibling projection joins one-to-one
 
 The `workflow.director.shotRelations.shots` array projects Yimeng's canonical storyboard frames without adding a Shot authority. Each Shot carries `shotId`, the sole Shot ordering field `frameNo`, `durationSec`, and derived `dialogueRhythm`; it never carries a Shot-level `order`, `sortOrder`, or `sequence`. Each element carries `currentReferenceAvailability` plus either `currentReference: null` or the uniquely selected E4-3 reference's `assetId`, `sha256`, and lineage. The adapter does not choose references or persist Shot selection state.
 
-The package root exports the request and response types, including `YimengHealth`, `YimengProjectsResponse`, `YimengEpisodesResponse`, `YimengScriptResponse`, `YimengElementProfileRequest`, `YimengElementProfileResponse`, `YimengReferenceAssetCandidate`, `YimengReferenceCandidatesRequest`, `YimengReferenceCandidatesResponse`, `YimengShotRelationShot`, `YimengShotDialogueCue`, `YimengShotDialogueRhythm`, `YimengShotCurrentReference`, `YimengShotCurrentReferenceLineage`, `YimengShotRelationsProjection`, `YimengHeroFrameStoryboardsProjection`, and `YimengWorkflowProjection`.
+The package root exports the request and response types, including `YimengHealth`, `YimengCostRehearsalRequest`, `YimengCostRehearsalSubject`, `YimengCostRehearsalResponse`, `YimengProjectsResponse`, `YimengEpisodesResponse`, `YimengScriptResponse`, `YimengElementProfileRequest`, `YimengElementProfileResponse`, `YimengReferenceAssetCandidate`, `YimengReferenceCandidatesRequest`, `YimengReferenceCandidatesResponse`, `YimengShotRelationShot`, `YimengShotDialogueCue`, `YimengShotDialogueRhythm`, `YimengShotCurrentReference`, `YimengShotCurrentReferenceLineage`, `YimengShotRelationsProjection`, `YimengHeroFrameStoryboardsProjection`, and `YimengWorkflowProjection`.
 
 ## Gate A capability catalog
 
 `capabilityCatalog` accepts optional `modelId`, `capability`, and sorted, de-duplicated `requestedControls`, then sends one authenticated GET to Yimeng's existing model-catalog service. The Host independently recompiles every model snapshot with RFC 8785 JCS, validates its content-addressed ID, checks the exact request and catalog identities, and recomputes eligibility from the normalized request plus declared mutual-exclusion rules. One preflight SHA binds the catalog, request, item IDs, and recomputed decisions. Any byte, identity, request, field, ordering, decision, or authority drift fails closed.
 
 The projection fixes `UNVERIFIED_FOR_PAID_PRODUCTION`, `providerCalls: 0`, `databaseWrites: 0`, and `paidGenerationAuthorized: false`. Missing real-model mutual-exclusion declarations remain explicit errors; the adapter does not invent Provider facts or reinterpret a catalog's existing paid-dispatch fields as current authorization. A dry-run eligibility result only evaluates the requested capability and control combination. It creates no task, budget reservation, database row, Provider request, routing decision, or human signoff.
+
+## Gate A cost rehearsal
+
+`costRehearsal` accepts one canonical frame, model, capability, sorted controls, resolution, candidate count, the complete freshly Host-validated catalog projection, and its exact catalog, request, preflight, and capability snapshot SHA-256 values. It sends one authenticated, body-free GET to Yimeng; the projection itself is never placed in the URL. Yimeng remains the sole owner of the authoritative frame duration, catalog rate, candidate limit, and read-only ProviderGate budget projection. The Host revalidates the projection's canonical bytes, independently derives eligibility, rate, and candidate limit, validates every receipt echo, recompiles the subject and full receipt with RFC 8785 JCS, and recomputes the integer micro-CNY identities and budget-window arithmetic. Candidate count must remain within the selected capability snapshot's declared output limit.
+
+This is a proposal rehearsal, not a reservation. The formal reservation ID is `null`, formally reserved money and ledger writes are zero, actual cost is unavailable before submit, and project/episode quotas remain explicitly `NOT_CONFIGURED`; only the existing global Provider budget window is projected. Every Provider, database, ledger, task, queue, submit, poll, download, webhook, and paid-authority field must remain at its literal zero or false value or the adapter fails closed. No second budget ledger, workflow state, reservation authority, or business truth is created in Harness.
 
 ## Continuity evidence
 

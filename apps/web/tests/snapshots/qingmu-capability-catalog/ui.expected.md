@@ -11,7 +11,7 @@
     - strong: "1"
   - paragraph:
     - text: "目录快照 SHA:"
-    - code: e2ddbe17712149e61831a5731b481900ae637fd5f5f26f4ece55b7f12c9e73df
+    - code: 686f3dc64db2ab8a42bcba28150b0e17cde0f7287d5dba9db9ee4d1741f9f97c
   - article:
     - heading "Gate A Fake Video" [level=4]
     - paragraph:
@@ -25,7 +25,7 @@
     - definition: video_url
     - term: 几何与时长
     - definition:
-      - code: "{\"max_duration_sec\":8,\"min_duration_sec\":2,\"resolutions\":[\"720P\"]}"
+      - code: "{\"max_duration_sec\":8,\"max_outputs\":8,\"min_duration_sec\":2,\"resolutions\":[\"720P\"]}"
     - heading "声明能力" [level=5]
     - code: video.continuation
     - code: video.first_frame
@@ -39,11 +39,11 @@
       - text: 版本与来源证据
       - term: 能力快照 SHA
       - definition:
-        - code: dec586e77ec04900da0df89c80a9b96c6ddae82acc31eb5056881db5b93144c6
+        - code: 069ba53a466a04a33ea8c79b8676c5d9e9b1aba39871385098e360d5f995ae77
       - term: 部署范围
       - definition:
         - code: —
       - term: 目录成本声明
       - definition:
-        - code: "{\"by_resolution\":{\"720P\":0},\"currency\":\"CNY\",\"micro_unit\":0.000001,\"unit\":\"second\"}"
+        - code: "{\"by_resolution\":{\"720P\":0.6},\"currency\":\"CNY\",\"micro_unit\":0.000001,\"unit\":\"second\"}"
   - paragraph: 本次读取回执：Provider 调用 0 · 数据库写入 0 · 付费生成授权 否。

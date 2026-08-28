@@ -218,7 +218,8 @@ interface CapturedYimengRequest {
 }
 
 function isCapabilityCatalogRead(request: CapturedYimengRequest): boolean {
-  return request.method === 'GET' && request.path === '/api/providers/capability-catalog'
+  const endpoint = '/api/providers/capability-catalog'
+  return request.method === 'GET' && (request.path === endpoint || request.path.startsWith(`${endpoint}?`))
 }
 
 interface StoryboardRevisionFixture {
@@ -311,7 +312,7 @@ function jcsSha256(value: unknown): string {
   return createHash('sha256').update(jcsCanonicalJson(value), 'utf8').digest('hex')
 }
 
-function capabilityCatalogFixture() {
+function capabilityCatalogFixture(filtered = false) {
   const snapshot = {
     schema: 'jason.provider-capability-snapshot.v1',
     modelId: 'fake-video-v1',
@@ -321,7 +322,7 @@ function capabilityCatalogFixture() {
     enabled: true,
     inputs: { first_frame_url: 'url_optional', prompt: 'string', '😀': 'emoji-key', '\uE000': 'bmp-key' },
     outputs: { video_url: 'url' },
-    geometry: { max_duration_sec: 8, min_duration_sec: 2, resolutions: ['720P'] },
+    geometry: { max_duration_sec: 8, max_outputs: 8, min_duration_sec: 2, resolutions: ['720P'] },
     consistency: {
       capabilities: ['video.continuation', 'video.first_frame', 'video.visual'],
       referenceAware: true,
@@ -332,7 +333,7 @@ function capabilityCatalogFixture() {
       controls: ['video.continuation', 'video.first_frame'],
       maxSelected: 1,
     }],
-    cost: { by_resolution: { '720P': 0 }, currency: 'CNY', micro_unit: 0.000001, unit: 'second' },
+    cost: { by_resolution: { '720P': 0.6 }, currency: 'CNY', micro_unit: 0.000001, unit: 'second' },
     runtime: { deploymentScope: '', endpoint: '', endpointsByCapability: {}, region: '' },
     compliance: {
       docs: ['test://gate-a-fake'],
@@ -352,14 +353,18 @@ function capabilityCatalogFixture() {
   const capabilitySnapshotCanonicalJson = jcsCanonicalJson(snapshot)
   const capabilitySnapshotSha256 = jcsSha256(snapshot)
   const capabilitySnapshotId = `capability-snapshot:sha256:${capabilitySnapshotSha256}`
-  const request = { modelId: null, capability: null, requestedControls: [], dryRun: true } as const
+  const request = filtered
+    ? { modelId: 'fake-video-v1', capability: 'video.visual', requestedControls: ['video.visual'], dryRun: true } as const
+    : { modelId: null, capability: null, requestedControls: [], dryRun: true } as const
   const items = [{
     capabilitySnapshotId,
     capabilitySnapshotSha256,
     capabilitySnapshotCanonicalJson,
     productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',
     snapshot,
-    eligibility: { evaluated: false, eligible: false, errors: ['requirements_not_supplied'] },
+    eligibility: filtered
+      ? { evaluated: true, eligible: true, errors: [] }
+      : { evaluated: false, eligible: false, errors: ['requirements_not_supplied'] },
   }] as const
   const catalogIdentity = {
     schema: 'jason.provider-capability-catalog.v1',
@@ -387,6 +392,66 @@ function capabilityCatalogFixture() {
     providerCalls: 0,
     databaseWrites: 0,
     paidGenerationAuthorized: false,
+  } as const
+}
+
+function costRehearsalFixture(candidateCount: number) {
+  const exactCatalog = capabilityCatalogFixture(true)
+  const item = exactCatalog.items[0]
+  const subjectIdentity = {
+    projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID,
+    frameNumber: 12, frameUpdatedAt: '2026-08-28T01:02:03+00:00', durationMillis: 2500,
+  } as const
+  const subject = { ...subjectIdentity, subjectSnapshotSha256: jcsSha256(subjectIdentity) }
+  const capabilityBinding = {
+    modelId: 'fake-video-v1', capability: 'video.visual', requestedControls: ['video.visual'], resolution: '720P',
+    catalogSnapshotSha256: exactCatalog.catalogSnapshotSha256,
+    requestSnapshotSha256: exactCatalog.requestSnapshotSha256,
+    preflightSnapshotSha256: exactCatalog.preflightSnapshotSha256,
+    capabilitySnapshotId: item.capabilitySnapshotId,
+    capabilitySnapshotSha256: item.capabilitySnapshotSha256,
+    eligibility: item.eligibility,
+    paidDispatchAllowed: false,
+  } as const
+  const oneCandidateMicros = 1_500_000
+  const maximumCostMicros = oneCandidateMicros * candidateCount
+  const microsCny = (value: number) => `${String(Math.floor(value / 1_000_000))}.${String(value % 1_000_000).padStart(6, '0')}`
+  const costEstimate = {
+    currency: 'CNY', unit: 'second', formula: 'duration_seconds_x_resolution_rate_x_candidates',
+    resolution: '720P', rateMicrosPerSecond: 600_000, oneCandidateMicros, candidateCount,
+    maximumAllowedCandidateCount: 8, maximumCostMicros,
+    oneCandidateCny: microsCny(oneCandidateMicros), maximumCostCny: microsCny(maximumCostMicros),
+  } as const
+  const budgetWindow = {
+    scope: 'global_provider_window', projectQuotaStatus: 'NOT_CONFIGURED', episodeQuotaStatus: 'NOT_CONFIGURED',
+    valid: true, errors: [], windowId: 'e6-2-isolated-window', baselineMicros: 0, allowanceMicros: 20_000_000,
+    effectiveCapMicros: 20_000_000, lifetimeSpentMicros: 0, windowSpentMicros: 0,
+    windowRemainingMicros: 20_000_000,
+  } as const
+  const reservationRehearsal = {
+    status: 'READY_NOT_RESERVED_DRY_RUN', blockers: [], proposedReservationMicros: maximumCostMicros,
+    formallyReservedMicros: 0, formalReservationId: null, wouldFitBudget: true,
+    remainingIfReservedMicros: budgetWindow.windowRemainingMicros - maximumCostMicros,
+    exactAuthorizationRequired: true, formalReservationAllowed: false,
+  } as const
+  const difference = {
+    estimateToProposedReservationMicros: 0, estimateToFormalReservationMicros: maximumCostMicros,
+    actualCostMicros: null, actualVsProposedReservationMicros: null, releasedMicros: 0,
+    refundMicros: null, actualCostStatus: 'UNAVAILABLE_BEFORE_SUBMIT',
+  } as const
+  const identity = {
+    schema: 'jason.provider-cost-rehearsal-snapshot.v1',
+    productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION', mode: 'dry_run', subject,
+    capabilityBinding, costEstimate, budgetWindow, reservationRehearsal, difference,
+  } as const
+  return {
+    schema: 'jason.provider-cost-rehearsal.v1',
+    productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION', mode: 'dry_run',
+    snapshotPolicy: 'rfc8785-jcs-sha256-v1', subject, capabilityBinding, costEstimate,
+    budgetWindow, reservationRehearsal, difference, rehearsalSnapshotSha256: jcsSha256(identity),
+    providerCalls: 0, databaseWrites: 0, budgetLedgerWrites: 0, taskCreated: false,
+    queueEntered: false, submitAttempted: false, pollAttempted: false, downloadAttempted: false,
+    webhookRegistered: false, paidGenerationAuthorized: false,
   } as const
 }
 
@@ -1940,7 +2005,15 @@ async function startYimengDouble(
         return
       }
       if (request.method === 'GET' && url.pathname === '/api/providers/capability-catalog') {
-        json(response, 200, capabilityCatalogFixture())
+        const filtered = url.searchParams.has('model_id')
+        json(response, 200, capabilityCatalogFixture(filtered))
+        return
+      }
+      if (
+        request.method === 'GET'
+        && url.pathname === `/api/qingmu/projects/project-1/episodes/episode-1/frames/${PROMPT_IR_FRAME_ID}/cost-rehearsal`
+      ) {
+        json(response, 200, costRehearsalFixture(Number(url.searchParams.get('candidate_count') ?? '0')))
         return
       }
       if (
@@ -3464,7 +3537,7 @@ describe.skipIf(
           '/qingmu-yimeng-command/recoverProductionUnitBinding',
           '/qingmu-yimeng/stageSources', '/qingmu-yimeng-command/bindStageSource',
           '/qingmu-yimeng-command/recoverStageSourceBinding',
-          '/qingmu-yimeng/capabilityCatalog',
+          '/qingmu-yimeng/capabilityCatalog', '/qingmu-yimeng/costRehearsal',
         ].includes(requestPath)) return
         browserRpcRequests.push({ path: requestPath, body: request.postDataJSON() as unknown })
       })
@@ -3601,6 +3674,7 @@ describe.skipIf(
               stageSource: process.env.QINGMU_E5_5_STAGE_SOURCE_SCREENSHOT,
               stageSourceMobile: process.env.QINGMU_E5_5_STAGE_SOURCE_MOBILE_SCREENSHOT,
               stageSourceHistorical: process.env.QINGMU_E5_5_STAGE_SOURCE_HISTORICAL_SCREENSHOT,
+              costRehearsal: process.env.QINGMU_E6_2_COST_SCREENSHOT,
               script: process.env.QINGMU_EVIDENCE_SCREENSHOT,
               actor: process.env.QINGMU_ACTOR_EVIDENCE_SCREENSHOT,
               scene: process.env.QINGMU_SCENE_EVIDENCE_SCREENSHOT,
@@ -3666,7 +3740,7 @@ describe.skipIf(
       await region.locator('summary').click()
       const fixture = capabilityCatalogFixture()
       expect(fixture.items[0].capabilitySnapshotSha256).toBe(
-        'dec586e77ec04900da0df89c80a9b96c6ddae82acc31eb5056881db5b93144c6',
+        '069ba53a466a04a33ea8c79b8676c5d9e9b1aba39871385098e360d5f995ae77',
       )
       await region.getByText(fixture.items[0].capabilitySnapshotSha256, { exact: true }).waitFor()
       expect(await region.getByRole('button', { name: '重读能力目录', exact: true }).isEnabled()).toBe(true)
@@ -3712,6 +3786,163 @@ describe.skipIf(
       expect((await region.getByRole('button', { name: '重读能力目录', exact: true }).boundingBox())?.height)
         .toBeGreaterThanOrEqual(44)
       await page.setViewportSize({ width: 1680, height: 1100 })
+      await dialog.getByRole('tab', { name: '总览', exact: true }).click()
+      await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
+      if (tracePath) await page.context().tracing.stop({ path: tracePath })
+    })
+
+    it('rehearses E6-2 estimate, proposed hold, and difference with no reservation or Provider authority', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-e6-2-cost-rehearsal'))
+      const consoleStart = browserConsoleErrors.length
+      const tracePath = process.env.QINGMU_E6_2_TRACE_PATH?.trim()
+      if (tracePath) {
+        await mkdir(dirname(tracePath), { recursive: true })
+        await page.context().tracing.start({ screenshots: true, snapshots: true, sources: true })
+      }
+
+      await page.getByRole('button', { name: '青木制作台' }).click()
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await dialog.getByRole('tab', { name: '分镜与镜头', exact: true }).click()
+      const river = dialog.getByRole('list', { name: '镜头选择' })
+      await river.getByRole('button', { name: /frame-1/ }).click()
+      await dialog.getByRole('tab', { name: '生成与质检', exact: true }).click()
+      const catalogRegion = dialog.getByRole('region', { name: 'Provider 能力目录 · Gate A', exact: true })
+      await catalogRegion.getByText('Gate A Fake Video', { exact: true }).waitFor({ timeout: 20_000 })
+      const region = dialog.getByRole('region', { name: '费用排练 · Gate A', exact: true })
+      await region.getByRole('combobox', { name: '候选数量', exact: true }).selectOption('2')
+      expect(capturedRequests.filter(request => request.path.includes('/cost-rehearsal')).length).toBe(0)
+
+      const requestStart = capturedRequests.length
+      const rpcStart = browserRpcRequests.length
+      const exactCatalogWirePromise = page.waitForResponse((response) => {
+        if (new URL(response.url()).pathname !== '/qingmu-yimeng/capabilityCatalog') return false
+        try {
+          const body = response.request().postDataJSON() as unknown
+          return isRecord(body) && isRecord(body.payload) && body.payload.modelId === 'fake-video-v1'
+        } catch {
+          return false
+        }
+      })
+      const rehearsalWirePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng/costRehearsal').catch(() => undefined)
+      await region.getByRole('button', { name: '仅计算费用排练', exact: true }).click()
+
+      const exactCatalogWire = await (await exactCatalogWirePromise).json() as unknown
+      const exactCatalogResult = isRecord(exactCatalogWire) && isRecord(exactCatalogWire.result)
+        ? exactCatalogWire.result
+        : {}
+      if (exactCatalogResult.ok !== true) {
+        const upstreamTrace = capturedRequests.slice(requestStart).map(request => ({
+          method: request.method,
+          path: request.path,
+        }))
+        const rpcTrace = browserRpcRequests.slice(rpcStart)
+        throw new Error(`exact capability catalog Host response failed: ${JSON.stringify({
+          wire: exactCatalogWire,
+          upstreamTrace,
+          rpcTrace,
+        })}`)
+      }
+      expect(exactCatalogWire).toMatchObject({ result: { ok: true, value: {
+        schema: 'jason.provider-capability-catalog.v1',
+        request: {
+          modelId: 'fake-video-v1', capability: 'video.visual', requestedControls: ['video.visual'], dryRun: true,
+        },
+        providerCalls: 0, databaseWrites: 0, paidGenerationAuthorized: false,
+      } } })
+      const rehearsalResponse = await rehearsalWirePromise
+      if (rehearsalResponse === undefined) throw new Error('cost rehearsal Host response was not observed')
+      const rehearsalWire = await rehearsalResponse.json() as unknown
+      expect(rehearsalWire).toMatchObject({ result: { ok: true, value: {
+        schema: 'jason.provider-cost-rehearsal.v1', mode: 'dry_run',
+        subject: { projectId: 'project-1', episodeId: 'episode-1', frameId: PROMPT_IR_FRAME_ID, durationMillis: 2500 },
+        costEstimate: { candidateCount: 2, maximumCostMicros: 3_000_000, maximumCostCny: '3.000000' },
+        reservationRehearsal: {
+          status: 'READY_NOT_RESERVED_DRY_RUN', proposedReservationMicros: 3_000_000,
+          formallyReservedMicros: 0, formalReservationId: null,
+          exactAuthorizationRequired: true, formalReservationAllowed: false,
+        },
+        difference: {
+          estimateToProposedReservationMicros: 0, estimateToFormalReservationMicros: 3_000_000,
+          actualCostMicros: null, actualCostStatus: 'UNAVAILABLE_BEFORE_SUBMIT',
+        },
+        providerCalls: 0, databaseWrites: 0, budgetLedgerWrites: 0,
+        taskCreated: false, queueEntered: false, submitAttempted: false, pollAttempted: false,
+        downloadAttempted: false, webhookRegistered: false, paidGenerationAuthorized: false,
+      } } })
+
+      await expect.poll(() => region.getByText('¥3.000000', { exact: true }).count()).toBe(2)
+      await region.getByText('¥0.000000', { exact: true }).waitFor()
+      await region.getByText('提交前不可用', { exact: true }).waitFor()
+      expect(await region.getByText('未配置', { exact: true }).count()).toBe(2)
+      await region.getByText(
+        '零权限回执：Provider 调用 0 · 数据库写入 0 · 预算账本写入 0 · 正式预留 0 · 未入队 · 未提交 · 未轮询 · 未下载 · 未注册回调 · 付费授权 否。',
+        { exact: true },
+      ).waitFor()
+      await region.locator('summary').click()
+      const fixture = costRehearsalFixture(2)
+      await region.getByText(fixture.rehearsalSnapshotSha256, { exact: true }).waitFor()
+
+      const upstream = capturedRequests.slice(requestStart)
+      expect(upstream).toHaveLength(2)
+      expect(upstream.every(request => request.method === 'GET' && request.body === undefined)).toBe(true)
+      const catalogRead = upstream.find(request => request.path.startsWith('/api/providers/capability-catalog?'))
+      const rehearsalRead = upstream.find(request => request.path.includes('/cost-rehearsal?'))
+      expect(catalogRead).toEqual(expect.objectContaining({
+        authorization: `Bearer ${YIMENG_TOKEN}`, cookie: undefined,
+      }))
+      expect(rehearsalRead).toEqual(expect.objectContaining({
+        authorization: `Bearer ${YIMENG_TOKEN}`, cookie: undefined,
+      }))
+      const catalogUrl = new URL(catalogRead?.path ?? '', 'http://127.0.0.1')
+      expect(Object.fromEntries(catalogUrl.searchParams)).toEqual({
+        model_id: 'fake-video-v1', capability: 'video.visual', requested_control: 'video.visual',
+      })
+      const rehearsalUrl = new URL(rehearsalRead?.path ?? '', 'http://127.0.0.1')
+      expect(rehearsalUrl.pathname).toBe(
+        `/api/qingmu/projects/project-1/episodes/episode-1/frames/${PROMPT_IR_FRAME_ID}/cost-rehearsal`,
+      )
+      expect(Object.fromEntries(rehearsalUrl.searchParams)).toEqual(expect.objectContaining({
+        model_id: 'fake-video-v1', capability: 'video.visual', requested_control: 'video.visual',
+        resolution: '720P', candidate_count: '2',
+      }))
+      for (const key of [
+        'catalog_snapshot_sha256', 'request_snapshot_sha256', 'preflight_snapshot_sha256',
+        'capability_snapshot_sha256',
+      ]) expect(rehearsalUrl.searchParams.get(key)).toMatch(/^[0-9a-f]{64}$/)
+
+      const rpc = browserRpcRequests.slice(rpcStart)
+      expect(rpc.map(request => request.path)).toEqual([
+        '/qingmu-yimeng/capabilityCatalog', '/qingmu-yimeng/costRehearsal',
+      ])
+      expect(capturedRequests.slice(requestStart).filter(request => request.method === 'POST')).toEqual([])
+      expect(browserConsoleErrors.slice(consoleStart)).toEqual([])
+      expect(tripwire.pageErrors).toEqual([])
+      expect(await page.content()).not.toContain(YIMENG_TOKEN)
+      await expectNoVisibleTechnicalBrand(page)
+
+      const aria = await captureStableAria(
+        page,
+        'role=region[name="费用排练 · Gate A"]',
+        scaffold.workspaceCwd,
+      )
+      const goldenPath = join(REPO_ROOT, 'apps/web/tests/snapshots/qingmu-cost-rehearsal/ui.expected.md')
+      if (scaffold.mode === 'refresh') await mkdir(dirname(goldenPath), { recursive: true })
+      await compareOrRefreshGolden(goldenPath, aria, scaffold.mode)
+      const screenshotPath = process.env.QINGMU_E6_2_COST_SCREENSHOT?.trim()
+      if (screenshotPath) {
+        await mkdir(dirname(screenshotPath), { recursive: true })
+        await region.getByRole('heading', { name: '费用排练 · Gate A', exact: true }).scrollIntoViewIfNeeded()
+        await page.screenshot({ path: screenshotPath })
+      }
+      await page.setViewportSize({ width: 390, height: 844 })
+      expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false)
+      expect(await region.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
+      expect((await region.getByRole('button', { name: '仅计算费用排练', exact: true }).boundingBox())?.height)
+        .toBeGreaterThanOrEqual(44)
+      await page.setViewportSize({ width: 1680, height: 1100 })
+      await dialog.getByRole('tab', { name: '分镜与镜头', exact: true }).click()
+      await dialog.getByRole('list', { name: '镜头选择' }).getByRole('button', { name: /frame-z/ }).click()
       await dialog.getByRole('tab', { name: '总览', exact: true }).click()
       await dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
       if (tracePath) await page.context().tracing.stop({ path: tracePath })

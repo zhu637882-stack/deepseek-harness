@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`capabilityCatalog`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates`、`selectedVideoReview`、`shotFindings`、`productionUnits`、`lsuPlanSource`、`stageSources` 和 `workflow`；它不暴露任何写入端点。
+这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`capabilityCatalog`、`costRehearsal`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates`、`selectedVideoReview`、`shotFindings`、`productionUnits`、`lsuPlanSource`、`stageSources` 和 `workflow`；它不暴露任何写入端点。
 
 ## 约定
 
@@ -18,13 +18,19 @@
 
 `workflow.director.shotRelations.shots` 数组投影易梦权威故事板帧，不增加 Shot 真源。每个 Shot 携带 `shotId`、唯一 Shot 排序字段 `frameNo`、`durationSec` 和派生的 `dialogueRhythm`；它绝不携带 Shot 级 `order`、`sortOrder` 或 `sequence`。每个元素携带 `currentReferenceAvailability`，并携带 `currentReference: null` 或 E4-3 唯一当前已选参考的 `assetId`、`sha256` 与血缘。适配器不选择参考，也不持久化 Shot 选择状态。
 
-包根入口导出请求与响应类型，包括 `YimengHealth`、`YimengProjectsResponse`、`YimengEpisodesResponse`、`YimengScriptResponse`、`YimengElementProfileRequest`、`YimengElementProfileResponse`、`YimengReferenceAssetCandidate`、`YimengReferenceCandidatesRequest`、`YimengReferenceCandidatesResponse`、`YimengShotRelationShot`、`YimengShotDialogueCue`、`YimengShotDialogueRhythm`、`YimengShotCurrentReference`、`YimengShotCurrentReferenceLineage`、`YimengShotRelationsProjection`、`YimengHeroFrameStoryboardsProjection` 和 `YimengWorkflowProjection`。
+包根入口导出请求与响应类型，包括 `YimengHealth`、`YimengCostRehearsalRequest`、`YimengCostRehearsalSubject`、`YimengCostRehearsalResponse`、`YimengProjectsResponse`、`YimengEpisodesResponse`、`YimengScriptResponse`、`YimengElementProfileRequest`、`YimengElementProfileResponse`、`YimengReferenceAssetCandidate`、`YimengReferenceCandidatesRequest`、`YimengReferenceCandidatesResponse`、`YimengShotRelationShot`、`YimengShotDialogueCue`、`YimengShotDialogueRhythm`、`YimengShotCurrentReference`、`YimengShotCurrentReferenceLineage`、`YimengShotRelationsProjection`、`YimengHeroFrameStoryboardsProjection` 和 `YimengWorkflowProjection`。
 
 ## Gate A 能力目录
 
 `capabilityCatalog` 接受可选的 `modelId`、`capability` 以及排序去重后的 `requestedControls`，随后向易梦现有模型目录服务发送一次认证 GET。Host 使用 RFC 8785 JCS 独立重编每个模型快照，校验内容寻址 ID 和准确请求/目录身份，并根据规范请求与已声明互斥规则重新计算 eligibility。单一预检 SHA 绑定目录、请求、条目 ID 与重算结果。字节、身份、请求、字段、顺序、决定或权力边界任何漂移都会失败关闭。
 
 投影固定为 `UNVERIFIED_FOR_PAID_PRODUCTION`、`providerCalls: 0`、`databaseWrites: 0` 和 `paidGenerationAuthorized: false`。真实模型缺少互斥声明时保留为明确错误；适配器不补造 Provider 事实，也不把目录中既有付费调度字段解释为当前授权。dry-run eligibility 只核对所请求的能力与控制组合，不创建任务、预算预留、数据库记录、Provider 请求、路由决定或人工签收。
+
+## Gate A 费用演练
+
+`costRehearsal` 接受一个 canonical frame、模型、能力、已排序控制项、分辨率、候选数量、刚由 Host 校验过的完整目录投影，以及它的准确目录、请求、预检与能力快照四个 SHA-256。它向易梦发送一次带认证且无请求体的 GET，目录投影本身不会进入 URL。权威镜头时长、目录单价、候选上限及只读 ProviderGate 预算投影只归易梦所有。Host 再次核验目录投影的 canonical bytes，独立推导 eligibility、费率与候选上限，校验全部回执字段，使用 RFC 8785 JCS 重编主体和完整回执，并以整数微元重算费用恒等式与预算窗口算术。候选数量不得超过所选能力快照声明的输出上限。
+
+这只是预留提案演练，不是正式预留。正式预留 ID 为 `null`，正式预留金额与账本写入均为零，提交前实际费用不可用，项目/剧集额度明确保持 `NOT_CONFIGURED`；只投影既有全局 Provider 预算窗口。Provider、数据库、账本、任务、队列、提交、轮询、下载、Webhook 及付费权力字段只要不是字面零或 false，适配器就会失败关闭。Harness 不新增第二套预算账本、工作流状态、预留权力或业务真相。
 
 ## 连续性证据
 
