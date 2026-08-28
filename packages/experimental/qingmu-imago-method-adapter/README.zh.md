@@ -4,7 +4,7 @@
 
 这个私有实验性 Host 插件把当前 IMAGO OS 方法编译为浏览器安全指引。`elementMethod` 用于资料编辑，`referenceAssetMethod` 用于受限的参考资产动作与权利指引，`promptIrMethod` 用于供应商无关的 PromptIR 候选，`shotRelationMethod` 用于 canonical Scene/Shot/Shot 内局部 Beat/Element 关系图以及 Shot River 节奏与参考绑定，`heroFrameStoryboardMethod` 用于确定性编译一个已选 Hero Frame 及其 Shot 内画布标注。`worksetMethod` 重新读取分集工作流，返回当前 IMAGO 阶段定义与明确的权威可用性。上述输入快照方法在 Host 内构造各自的有界输入，并把按 Unicode code point 排序、无空格的 JSON 通过 stdin 交给已审核的 Core 编译器。对应编译器返回的 `input_snapshot_sha256` 必须匹配这组准确输入字节的 SHA-256。
 
-`shotFindingMethod`、`productionUnitMethod`、`stageSourceMethod`、`stageArtifactMethod` 与 `lsuPlanMethod` 使用下文各自的主体哈希约定；旧方法的 `input_snapshot_sha256` 字段不属于这些 schema。
+`shotFindingMethod`、`takeAcceptanceMethod`、`productionUnitMethod`、`stageSourceMethod`、`stageArtifactMethod` 与 `lsuPlanMethod` 使用下文各自的主体或证据哈希约定；旧方法的 `input_snapshot_sha256` 字段不属于这些 schema。
 
 ## 证明边界
 
@@ -43,6 +43,14 @@ Host 对完整归一化工作流与完整 `sourceRevision` 计算哈希，保留
 `shotFindingMethod` 只接受易梦的三个 ID：`projectId`、`episodeId` 和 canonical `frameId`。它通过已配置的可插拔只读能力重新读取 `shotFindings`；浏览器主体、Owner、严重度不进入 Core。它运行 `scripts/compile_qingmu_shot_finding_method.py`，并独立重算固定 18 份当前来源。当前工作流、阶段合同、角色定义、QC Owner 字面规则、供应商中立审核策略和实施方案必须一致。只提供当前活跃工作流中的 Owner，排除仅为兼容保留的岗位。
 
 输出绑定规范主体 SHA、八个必填字段、三种严重度、当前 Owner 选项、规则 SHA，以及固定的 `OPEN`、不批准、不执行返修边界。此 schema 使用 `subjectSnapshotSha256`，不同于旧 schema 的 `input_snapshot_sha256`。Host 只用现有服务端 HMAC 密钥签署已校验的方法坐标；不记录 Finding，不代做归因、批准、建任务、选素材或付费生成。媒体缺失、读取插件卸载、规则不可用、来源字节变化或密钥缺失只禁用本方法，不影响无关方法。
+
+## 已选 Take 验收证据方法
+
+`takeAcceptanceMethod` 只接受 `projectId`、`episodeId` 与 canonical `frameId`。它在编译前后通过已配置的易梦能力读取当前已选 Take 的规范化 `takeAcceptance` 证据。浏览器不能提供回执、QC、Provider、规则、批准或媒体位置字段。证据采用 RFC 8785 JSON Canonicalization Scheme 哈希，包括 ECMAScript 数字渲染与 UTF-16 属性排序；Host 在调用 `scripts/compile_qingmu_take_acceptance_method.py` 前验证该哈希。
+
+Host 在编译前后独立读取七份固定 Core 来源。当前仅 V6 的活跃指针、路由验收合同、严格视频探针、已批准 E6-5 范围以及仍未激活的参考叠加 QC 合同必须一致。投影把整片解码和按帧数推导的实际平均帧率与宏观、微观 QC 分开，也把二者与 Provider outbox 回执分开；标称 `r_frame_rate` 绝不当作实际帧率。只有易梦当前必检集合声明对白音频 QC 时才要求该检查。
+
+本地技术证据和 QC 可以通过，而 Provider 回执仍是 bounded-local 或未验证。因此投影始终保留 `UNVERIFIED_FOR_PAID_PRODUCTION`、`formalAcceptanceAllowed: false`、`selectedIsApproval: false` 与 `gateBCompleted: false`，并且绝不激活参考叠加策略。Host 独立重建评估和规则哈希，拒绝证据或规则漂移，再用现有服务端 HMAC 密钥签署精确方法投影。本方法不执行写入、Provider 调用、Gate B 完成、正式验收或人工签收。
 
 ## 制作单元绑定方法
 

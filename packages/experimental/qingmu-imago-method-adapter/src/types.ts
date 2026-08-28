@@ -15,6 +15,9 @@ import type {
   YimengShotRelationsStoryboardRevision,
   YimengSelectedVideoReviewRequest,
   YimengShotVideoSubject,
+  YimengTakeAcceptanceEvidence,
+  YimengTakeAcceptanceRequest,
+  YimengTakeAcceptanceSubject,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 
 /** JSON object retained from the stateless IMAGO method projection. */
@@ -870,6 +873,109 @@ export interface ImagoShotFindingMethodResponse extends ImagoMethodJsonObject {
   readonly methodAttestation: ImagoShotFindingMethodAttestation
 }
 
+/** Identity-only request; current evidence is always resolved through Yimeng. */
+export type ImagoTakeAcceptanceMethodRequest = YimengTakeAcceptanceRequest
+
+/** Exact hash-bound Yimeng evidence supplied to the stateless IMAGO compiler. */
+export interface ImagoTakeAcceptanceMethodSnapshot extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.take-acceptance-method-snapshot.v1'
+  readonly evidence: YimengTakeAcceptanceEvidence
+  readonly evidenceSnapshotSha256: string
+}
+
+/** Current technical receipt and macro/micro QC method, without acceptance authority. */
+export interface ImagoTakeAcceptanceMethodDefinition {
+  readonly mode: 'READ_ONLY_STATELESS_PROJECTION'
+  readonly technicalReceipt: {
+    readonly requiredVideoFields: readonly string[]
+    readonly fullVideoDecodeRequired: true
+    readonly fullVideoDecodeCommandProfile: 'ffmpeg -v error -xerror -map 0:v:0 -f null -'
+    readonly actualFrameRateBasis: 'NB_FRAMES_OVER_MEASURED_DURATION_CROSSCHECK_AVG_FRAME_RATE'
+    readonly nominalRFrameRateIsActual: false
+  }
+  readonly qualityLayers: {
+    readonly macro: {
+      readonly required: true
+      readonly dimensions: readonly string[]
+      readonly yimengCheckTypes: readonly ['creative_director_execution']
+    }
+    readonly micro: {
+      readonly required: true
+      readonly dimensions: readonly string[]
+      readonly yimengBaseCheckTypes: readonly ['real_vl_native_video_output']
+      readonly conditionalDialogueCheckType: 'creative_dialogue_audio'
+      readonly technicalReceiptRequired: true
+    }
+  }
+  readonly boundaries: {
+    readonly businessTruth: 'yimeng'
+    readonly selectedIsApproval: false
+    readonly formalAcceptanceAllowed: false
+    readonly providerCalls: 0
+    readonly projectMutation: false
+    readonly humanSignoffInferred: false
+    readonly paidProviderAuthority: 'not_granted'
+    readonly gateBCompleted: false
+    readonly inactiveReferenceOverlayActivated: false
+  }
+}
+
+/** Independently recomputed receipt/QC result; paid production remains unverified. */
+export interface ImagoTakeAcceptanceMethodEvaluation {
+  readonly technicalReceiptStatus: 'PASS' | 'BLOCKED'
+  readonly fullVideoDecodeStatus: 'PASS' | 'BLOCKED' | 'TIMEOUT'
+  readonly macroQc: {
+    readonly status: 'PASS' | 'BLOCKED'
+    readonly checkTypes: readonly string[]
+    readonly blockers: readonly string[]
+  }
+  readonly microQc: {
+    readonly status: 'PASS' | 'BLOCKED'
+    readonly checkTypes: readonly string[]
+    readonly blockers: readonly string[]
+  }
+  readonly providerReceipt: {
+    readonly status: 'verified' | 'bounded_local' | 'missing' | 'invalid'
+    readonly evidenceMode: 'provider_receipt' | 'bounded_local' | 'unverified'
+    readonly actualProviderReceiptVerified: boolean
+    readonly blockers: readonly string[]
+  }
+  readonly localControlStatus: 'PASS' | 'BLOCKED'
+  readonly localBlockers: readonly string[]
+  readonly productionVerificationStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION'
+  readonly formalAcceptanceAllowed: false
+  readonly selectedIsApproval: false
+  readonly gateBCompleted: false
+}
+
+/** Stateless current-rule method bound to one selected Take evidence revision. */
+export interface ImagoTakeAcceptanceMethodProjection extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-take-acceptance-method.v1'
+  readonly subject: YimengTakeAcceptanceSubject
+  readonly evidenceSnapshotSha256: string
+  readonly definition: ImagoTakeAcceptanceMethodDefinition
+  readonly evaluation: ImagoTakeAcceptanceMethodEvaluation
+  readonly ruleBindings: Readonly<Record<string, string>>
+  readonly rulesSha256: string
+}
+
+/** Host method-origin proof only; it grants neither Gate B nor human approval. */
+export interface ImagoTakeAcceptanceMethodAttestation {
+  readonly schema: 'qingmu.imago-take-acceptance-method-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly evidenceSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly signature: string
+}
+
+/** Hash-bound method response safe for the Qingmu comparison surface. */
+export interface ImagoTakeAcceptanceMethodResponse extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-take-acceptance-method-adapter-result.v1'
+  readonly projection: ImagoTakeAcceptanceMethodProjection
+  readonly projectionSha256: string
+  readonly methodAttestation: ImagoTakeAcceptanceMethodAttestation
+}
+
 /** Identity-only request; the Host resolves current native group membership. */
 export interface ImagoProductionUnitMethodRequest extends YimengProductionUnitsRequest {
   readonly groupId: string
@@ -1211,6 +1317,7 @@ export interface ImagoMethodEndpointMap {
   readonly worksetMethod: ImagoWorksetMethodResponse
   readonly continuityMethod: ImagoContinuityMethodResponse
   readonly shotFindingMethod: ImagoShotFindingMethodResponse
+  readonly takeAcceptanceMethod: ImagoTakeAcceptanceMethodResponse
   readonly productionUnitMethod: ImagoProductionUnitMethodResponse
   readonly lsuPlanMethod: ImagoLsuPlanMethodResponse
   readonly reworkRouteMethod: ImagoReworkRouteMethodResponse

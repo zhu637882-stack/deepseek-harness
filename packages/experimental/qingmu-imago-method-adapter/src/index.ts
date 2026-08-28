@@ -29,6 +29,8 @@ import type {
   ImagoReworkRouteMethodSnapshot,
   ImagoShotFindingMethodRequest,
   ImagoShotFindingMethodSnapshot,
+  ImagoTakeAcceptanceMethodRequest,
+  ImagoTakeAcceptanceMethodSnapshot,
   ImagoContinuityMethodResponse,
   ImagoContinuityMethodSnapshot,
   ImagoElementMethodProjection,
@@ -101,6 +103,10 @@ import {
   ShotFindingContractError, ShotFindingInputError,
 } from './shot-finding.ts'
 import {
+  attestTakeAcceptanceMethod, buildTakeAcceptanceSnapshot, parseTakeAcceptanceMethodRequest,
+  readTakeAcceptanceRules, takeAcceptanceJcsJson, TakeAcceptanceContractError, TakeAcceptanceInputError,
+} from './take-acceptance.ts'
+import {
   attestProductionUnitMethod, buildProductionUnitSnapshot, parseProductionUnitMethodRequest, readProductionUnitRules,
   ProductionUnitContractError, ProductionUnitInputError,
 } from './production-unit.ts'
@@ -164,6 +170,13 @@ export type {
   ImagoShotFindingMethodProjection,
   ImagoShotFindingMethodAttestation,
   ImagoShotFindingMethodResponse,
+  ImagoTakeAcceptanceMethodRequest,
+  ImagoTakeAcceptanceMethodSnapshot,
+  ImagoTakeAcceptanceMethodDefinition,
+  ImagoTakeAcceptanceMethodEvaluation,
+  ImagoTakeAcceptanceMethodProjection,
+  ImagoTakeAcceptanceMethodAttestation,
+  ImagoTakeAcceptanceMethodResponse,
   ImagoContinuityCandidateFinding,
   ImagoContinuityChecklistItem,
   ImagoContinuityFieldHelp,
@@ -261,6 +274,7 @@ const STAGE_SOURCE_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_stage_source
 const STAGE_ARTIFACT_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_stage_artifact_method.py'
 const LSU_PLAN_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_lsu_plan_method.py'
 const REWORK_ROUTE_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_rework_route_method.py'
+const TAKE_ACCEPTANCE_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_take_acceptance_method.py'
 const COMMON_SOURCE_PATHS = [
   'pipeline/imago-os-current.json',
   'pipeline/workflow-channel-registry.json',
@@ -577,6 +591,14 @@ export interface ImagoMethodAdapterDependencies {
   /** Optional injectable boundary for the stateless, current-rule Finding compiler. */
   readonly runShotFindingCompiler?: (
     snapshot: ImagoShotFindingMethodSnapshot, execution: ImagoMethodCompilerExecution, signal: AbortSignal,
+  ) => Promise<unknown>
+  /** Fresh selected-Take receipt/QC evidence; absence disables only the acceptance method. */
+  readonly readTakeAcceptance?: (
+    request: ImagoTakeAcceptanceMethodRequest, signal: AbortSignal,
+  ) => Promise<RpcResult<unknown>>
+  /** Optional boundary for the stateless current-rule Take acceptance compiler. */
+  readonly runTakeAcceptanceCompiler?: (
+    snapshot: ImagoTakeAcceptanceMethodSnapshot, execution: ImagoMethodCompilerExecution, signal: AbortSignal,
   ) => Promise<unknown>
   readonly runCompiler: (
     snapshot: ImagoElementMethodSnapshot,
@@ -3388,6 +3410,12 @@ async function runShotFindingCompilerProcess(
   return await runCompilerSubprocess(snapshot, execution, signal, 'scripts/compile_qingmu_shot_finding_method.py')
 }
 
+async function runTakeAcceptanceCompilerProcess(
+  snapshot: ImagoTakeAcceptanceMethodSnapshot, execution: ImagoMethodCompilerExecution, signal: AbortSignal,
+): Promise<unknown> {
+  return await runCompilerSubprocess(snapshot, execution, signal, TAKE_ACCEPTANCE_COMPILER_RELATIVE_PATH)
+}
+
 async function runProductionUnitCompilerProcess(
   snapshot: ImagoProductionUnitMethodSnapshot, execution: ImagoMethodCompilerExecution, signal: AbortSignal,
 ): Promise<unknown> {
@@ -3426,6 +3454,7 @@ async function runCompilerSubprocess(
     || compilerRelativePath === STAGE_ARTIFACT_COMPILER_RELATIVE_PATH
     || compilerRelativePath === LSU_PLAN_COMPILER_RELATIVE_PATH
     || compilerRelativePath === REWORK_ROUTE_COMPILER_RELATIVE_PATH
+    || compilerRelativePath === TAKE_ACCEPTANCE_COMPILER_RELATIVE_PATH
   return await new Promise((resolve, reject) => {
     const child = spawn(
       execution.pythonExecutable,
@@ -3501,9 +3530,11 @@ async function runCompilerSubprocess(
     child.stdin.once('error', () => {})
     child.stdin.end(compilerRelativePath === SHOT_RELATION_COMPILER_RELATIVE_PATH
       ? e53CanonicalJson(snapshot, 'snapshot')
-      : compilerRelativePath === STAGE_ARTIFACT_COMPILER_RELATIVE_PATH
-        ? stageArtifactCanonicalJson(snapshot, 'snapshot')
-        : canonicalJson(snapshot, 'snapshot'), 'utf8')
+      : compilerRelativePath === TAKE_ACCEPTANCE_COMPILER_RELATIVE_PATH
+        ? takeAcceptanceJcsJson(snapshot, 'snapshot')
+        : compilerRelativePath === STAGE_ARTIFACT_COMPILER_RELATIVE_PATH
+          ? stageArtifactCanonicalJson(snapshot, 'snapshot')
+          : canonicalJson(snapshot, 'snapshot'), 'utf8')
     if (waitForCloseOnCancel && signal.aborted) abort()
   })
 }
@@ -3526,6 +3557,7 @@ const DEFAULT_DEPENDENCIES: ImagoMethodAdapterDependencies = {
   runHeroFrameStoryboardCompiler: runHeroFrameStoryboardCompilerProcess,
   runWorksetCompiler: runWorksetCompilerProcess,
   runContinuityCompiler: runContinuityCompilerProcess,
+  runTakeAcceptanceCompiler: runTakeAcceptanceCompilerProcess,
 }
 
 /**
@@ -3550,6 +3582,7 @@ export function createImagoMethodHandler(
         && endpoint !== 'worksetMethod'
         && endpoint !== 'continuityMethod'
         && endpoint !== 'shotFindingMethod'
+        && endpoint !== 'takeAcceptanceMethod'
         && endpoint !== 'productionUnitMethod'
         && endpoint !== 'stageSourceMethod'
         && endpoint !== 'stageArtifactMethod'
@@ -3763,6 +3796,38 @@ export function createImagoMethodHandler(
         if (!isDeepStrictEqual(beforeRules, currentRules)) throw new ProductionUnitContractError('current rules changed during compilation')
         return { ok: true, value: attestProductionUnitMethod(raw, snapshot, currentRules, canonicalJson, attestationKey) }
       }
+      if (endpoint === 'takeAcceptanceMethod') {
+        const request = parseTakeAcceptanceMethodRequest(payload)
+        if (signal.aborted) return cancelled()
+        if (dependencies.readTakeAcceptance === undefined) return internalError('Yimeng read capability is unavailable')
+        const feed = await dependencies.readTakeAcceptance(request, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- cancellation can arrive during the evidence read.
+        if (signal.aborted) return cancelled()
+        if (!feed.ok) return feed
+        const snapshot = buildTakeAcceptanceSnapshot(request, feed.value)
+        const beforeRules = await readTakeAcceptanceRules(execution.coreRoot, canonicalJson)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- fixed rule reads are asynchronous.
+        if (signal.aborted) return cancelled()
+        const raw = await (dependencies.runTakeAcceptanceCompiler ?? runTakeAcceptanceCompilerProcess)(
+          snapshot, execution, signal,
+        )
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- the compiler can finish after cancellation.
+        if (signal.aborted) return cancelled()
+        const currentFeed = await dependencies.readTakeAcceptance(request, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- the second evidence read can be cancelled.
+        if (signal.aborted) return cancelled()
+        if (!currentFeed.ok) return currentFeed
+        if (!isDeepStrictEqual(snapshot, buildTakeAcceptanceSnapshot(request, currentFeed.value))) {
+          throw new TakeAcceptanceContractError('current Take acceptance evidence changed during compilation')
+        }
+        const currentRules = await readTakeAcceptanceRules(execution.coreRoot, canonicalJson)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- final fixed rule reads are asynchronous.
+        if (signal.aborted) return cancelled()
+        if (!isDeepStrictEqual(beforeRules, currentRules)) {
+          throw new TakeAcceptanceContractError('current Take acceptance rules changed during compilation')
+        }
+        return { ok: true, value: attestTakeAcceptanceMethod(raw, snapshot, currentRules, attestationKey) }
+      }
       if (endpoint === 'shotFindingMethod') {
         const request = parseShotFindingMethodRequest(payload)
         if (signal.aborted) return cancelled()
@@ -3894,6 +3959,7 @@ export function createImagoMethodHandler(
     } catch (error) {
       if (error instanceof InputError || error instanceof WorksetInputError
         || error instanceof ContinuityInputError || error instanceof ShotFindingInputError || error instanceof ProductionUnitInputError
+        || error instanceof TakeAcceptanceInputError
         || error instanceof StageSourceInputError || error instanceof StageArtifactInputError || error instanceof LsuPlanInputError
         || error instanceof ReworkRouteInputError) {
         return badRequest(error.message)
@@ -3902,6 +3968,7 @@ export function createImagoMethodHandler(
       if (signal.aborted || error instanceof CompilerCancelledError) return cancelled()
       if (error instanceof ProjectionContractError || error instanceof WorksetContractError
         || error instanceof ContinuityContractError || error instanceof ShotFindingContractError
+        || error instanceof TakeAcceptanceContractError
         || error instanceof ProductionUnitContractError || error instanceof StageSourceContractError
         || error instanceof StageArtifactContractError || error instanceof LsuPlanContractError
         || error instanceof ReworkRouteContractError) {
@@ -3939,6 +4006,12 @@ export function apply(ctx: Context, config: ImagoMethodAdapterConfig): void {
     readShotFindings: async (request, signal) => {
       const read = ctx.get('qingmuYimengRead')
       return read === undefined ? internalError('Yimeng read capability is unavailable') : await read('shotFindings', request, signal)
+    },
+    readTakeAcceptance: async (request, signal) => {
+      const read = ctx.get('qingmuYimengRead')
+      return read === undefined
+        ? internalError('Yimeng read capability is unavailable')
+        : await read('takeAcceptance', request, signal)
     },
     readWorkflow: async (request, signal) => {
       const read = ctx.get('qingmuYimengRead')
