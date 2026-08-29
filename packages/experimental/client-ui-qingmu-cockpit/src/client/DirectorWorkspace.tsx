@@ -1,11 +1,12 @@
 /** Single-scene composition of canonical shot context, PromptIR editing and Take comparison. */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { QingmuYimengPort, YimengWorkflowProjection } from './contracts.ts'
 import type { QingmuCockpitKey } from './locales.ts'
 import { HeroFrameStoryboardCanvas } from './HeroFrameStoryboardCanvas.tsx'
 import { PromptIrWorkspace } from './PromptIrWorkspace.tsx'
 import { TakeVersionCompareView } from './TakeVersionCompareView.tsx'
 import css from './DirectorWorkspace.module.css'
+import { ScenePlanningWorkspace } from './ScenePlanningWorkspace.tsx'
 
 /** Props retain Yimeng's scene/frame identities; no director state is persisted here. */
 export interface DirectorWorkspaceProps {
@@ -26,6 +27,23 @@ export interface DirectorWorkspaceProps {
  * @returns Scoped director workspace.
  */
 export function DirectorWorkspace(props: DirectorWorkspaceProps) {
+  const [productionMounted, setProductionMounted] = useState(false)
+  const [planningDirty, setPlanningDirty] = useState(false)
+  const [promptDirty, setPromptDirty] = useState(false)
+  useEffect(() => {
+    props.onUnsavedChange(planningDirty || promptDirty)
+    return () => { props.onUnsavedChange(false) }
+  }, [planningDirty, promptDirty, props.onUnsavedChange])
+  return <>
+    <ScenePlanningWorkspace key={`${props.projectId}:${props.episodeId}`} {...props} onUnsavedChange={setPlanningDirty} />
+    <details onToggle={(event) => { if (event.currentTarget.open) setProductionMounted(true) }}>
+      <summary>已有提示词、Take 与高级分镜</summary>
+      {productionMounted && <ExistingDirectorWorkspace {...props} onUnsavedChange={setPromptDirty} />}
+    </details>
+  </>
+}
+
+function ExistingDirectorWorkspace(props: DirectorWorkspaceProps) {
   const { projection, selectedShotId, onSelectShotId, t } = props
   const [showTakes, setShowTakes] = useState(true)
   const [showCanvas, setShowCanvas] = useState(false)

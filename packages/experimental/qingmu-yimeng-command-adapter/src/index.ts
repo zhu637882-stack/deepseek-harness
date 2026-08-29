@@ -2,6 +2,7 @@
 
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { prepareCreationCommand } from './creation.ts'
+import { prepareScenePlanning } from './scene-planning.ts'
 export type {
   ProjectInitializationRequest, ProjectInitializationRecovery, ProjectInitializationResult,
   CreationScope, TextImportReadRequest, TextImportRequest, TextImportLine, TextImportDraft,
@@ -5181,6 +5182,11 @@ export function createYimengCommandHandler(
           ...(prepared.request.idempotencyKey === undefined ? {} : { idempotencyKey: prepared.request.idempotencyKey }),
         }
         normalize = prepared.normalize
+      } else if (['readScenePlanning', 'saveScenePlanning', 'recoverScenePlanning'].includes(endpoint)) {
+        const prepared = prepareScenePlanning(endpoint, payload, stageArtifactHelpers)
+        path = prepared.path
+        requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
+        normalize = prepared.normalize
       } else if (['initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)) {
         const prepared = prepareCreationCommand(endpoint, payload, stageArtifactHelpers)
         path = prepared.path
@@ -5497,6 +5503,7 @@ export function createYimengCommandHandler(
         || endpoint === 'recoverReworkRoute'
         || endpoint === 'probeReworkRouteAuthority'
       const requiresCredentialReflectionGuard = isStageArtifactCommand
+        || ['readScenePlanning', 'saveScenePlanning', 'recoverScenePlanning'].includes(endpoint)
         || ['initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)
         || endpoint === 'createTakeComment' || endpoint === 'recoverTakeComment'
         || endpoint === 'createTakeReviewRecommendation'

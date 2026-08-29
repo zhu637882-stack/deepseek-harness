@@ -1,0 +1,37 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`real scene planning entry > creates text and scene from empty UI, recovers lost save, edits and restores persistent IDs in a fresh browser 1`] = `
+{
+  "counts": {
+    "actors": 2,
+    "agent_runs": 0,
+    "assets": 0,
+    "command_receipts": 3,
+    "episode_production_step_receipts": 0,
+    "episode_release_authority": 0,
+    "episodes": 1,
+    "generation_tasks": 0,
+    "projects": 1,
+    "prompt_irs": 0,
+    "provider_authorization_reservations": 0,
+    "provider_budget_events": 0,
+    "provider_preflights": 0,
+    "provider_submission_outbox": 0,
+    "scenes": 1,
+    "step_runs": 0,
+    "storyboard_frames": 2,
+    "storyboard_revisions": 2,
+    "workflow_runs": 0,
+  },
+  "freshBrowserAfterRestart": true,
+  "inputRestored": true,
+  "lostReplyRecovered": true,
+  "missingReferences": true,
+  "noPromptIr": true,
+  "sourceUnchanged": true,
+  "titles": [
+    "雨夜相遇 · 修改后",
+    "回应邀请",
+  ],
+}
+`;

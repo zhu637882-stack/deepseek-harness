@@ -6,6 +6,8 @@ This private experimental Client plugin adds the Qingmu OS production cockpit to
 
 ## Projection and ChangeSet workflow
 
+The Director workspace starts with one saved-script scene and up to eight editable planning shots. Source text remains read-only; named fields, dialogue assignment and an explicit impact preview precede saving real Yimeng scene/actor/frame identities. The first structural Ready snapshot is not content approval or a usable PromptIR. Unknown results retain the original intent for GET recovery; conflicts retain input, and a competing initialization requires explicitly loading the winner with a local input copy. Existing prompt/Take tools are expandable without discarding RAM-only edits. See [scene planning](../../../docs/cookbook/qingmu-local.md#plan-one-scene).
+
 The empty state provides project naming and first-episode creation. Script & Assets opens a plain-text/TXT editor, line-type and speaker correction, explicit “确认导入并保存剧本”, and canonical saved-script readback; raw JSON and hashes are collapsed. Unsubmitted text and original recovery coordinates survive workspace re-entry in browser storage. Unknown outcomes query the original server record before any explicit retry. A rejected stale intent can be explicitly prepared again with the current revision after a read confirms it did not persist. This creates no production task or content approval. See the [local user path](../../../docs/cookbook/qingmu-local.md#write-the-first-script).
 
 Local session errors point to the [persistent-instance login command](../../../docs/cookbook/qingmu-local.md). Login renews the API session without replaying a command; an unknown save still requires its original receipt recovery.

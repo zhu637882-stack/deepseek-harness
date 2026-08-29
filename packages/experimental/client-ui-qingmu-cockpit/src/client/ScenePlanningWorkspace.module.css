@@ -1,0 +1,27 @@
+.workspace { display: grid; grid-template-columns: 170px minmax(0, 1fr) 210px; gap: 20px; color: var(--dsw-alias-label-primary); line-height: 1.65; font-size: 14px; }
+.workspace h2 { font-size: 24px; margin: 4px 0; }
+.workspace h3 { font-size: 16px; }
+.workspace p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.workspace small { display: block; color: var(--dsw-alias-label-secondary); }
+.workspace button, .workspace input, .workspace select, .workspace textarea { font: inherit; color: inherit; background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--dsw-alias-border-l2); border-radius: 7px; padding: 8px 12px; box-sizing: border-box; min-height: 38px; min-width: 0; }
+.workspace button, .workspace summary { cursor: pointer; }
+.workspace :focus-visible { outline: 2px solid var(--qingmu-accent); outline-offset: 3px; }
+.workspace :disabled { opacity: .55; cursor: not-allowed; }
+.workspace details { padding: 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; }
+.workspace summary { min-height: 28px; font-weight: 600; }
+.workspace pre { font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.navigation, .properties { min-width: 0; align-self: start; position: sticky; top: 0; }
+.navigation button { width: 100%; text-align: left; margin-bottom: 8px; }
+.navigation button[aria-pressed='true'] { border-color: var(--qingmu-accent); background: var(--qingmu-soft); }
+.content { display: grid; gap: 16px; min-width: 0; }
+.editor { border: 0; padding: 0; min-width: 0; display: grid; gap: 12px; }
+.editor label { display: grid; gap: 6px; }
+.editor textarea { width: 100%; resize: vertical; }
+.editor .dialogue { grid-template-columns: minmax(0, 1fr) 90px; margin: 8px 0; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.notice { background: var(--qingmu-soft); padding: 16px; border-left: 3px solid var(--qingmu-accent); }
+.workspace .primary { background: var(--qingmu-accent-strong); border-color: var(--qingmu-accent); color: #fff; }
+.properties dt { color: var(--dsw-alias-label-secondary); }
+.properties dd { margin: 0 0 12px; }
+@media (max-width: 1320px) { .workspace { grid-template-columns: 148px minmax(0, 1fr) 176px; gap: 12px; } }
+@media (max-width: 1000px) { .workspace { grid-template-columns: 135px minmax(0, 1fr); } .properties { grid-column: 2; position: static; } }

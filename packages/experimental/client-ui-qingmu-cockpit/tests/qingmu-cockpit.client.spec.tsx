@@ -620,6 +620,10 @@ function shotRelationMethod(request: Parameters<QingmuYimengPort['shotRelationMe
 
 function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
   return {
+    readScenePlanning: vi.fn(async request => ({ schema: 'jason.qingmu-scene-planning-state.v1' as const, ...request,
+      scriptRevision: 0, scriptSha256: null, scenes: [], storyboard: null, planning: null })),
+    saveScenePlanning: vi.fn(async () => { throw new Error('Planning uses a separate fixture') }),
+    recoverScenePlanning: vi.fn(async () => { throw new Error('Planning uses a separate fixture') }),
     initializeProject: vi.fn(async () => { throw new Error('Creation uses a separate fixture') }),
     recoverProjectInitialization: vi.fn(async () => { throw new Error('Creation uses a separate fixture') }),
     readTextImport: vi.fn(async request => ({ schema: 'jason.qingmu-text-import-state.v1' as const, ...request, scriptRevision: 0, script: null, draft: null })),

@@ -4,6 +4,8 @@ export type {
   TextImportReadRequest, TextImportRequest, TextImportLine, TextImportDraft, TextImportState,
   TextImportCorrection, TextImportConfirmationRequest, TextImportConfirmation,
 } from './creation.ts'
+/** Browser-safe planning values; no runtime Host imports. */
+export type { PlanningShot, PlanningBase, PlanningOperation, ScenePlanningRequest, PlanningRevision, PlanningSource, PlanningScene, ScenePlanningState, ScenePlanningResult } from './scene-planning.ts'
 
 /** JSON object retained from a Yimeng command response. */
 export interface YimengCommandJsonObject {
@@ -2806,6 +2808,9 @@ export interface YimengReworkRouteAuthorityProbe {
 
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
+  readonly readScenePlanning: import('./scene-planning.ts').ScenePlanningState
+  readonly saveScenePlanning: import('./scene-planning.ts').ScenePlanningResult
+  readonly recoverScenePlanning: import('./scene-planning.ts').ScenePlanningResult
   readonly initializeProject: import('./creation.ts').ProjectInitializationResult
   readonly recoverProjectInitialization: import('./creation.ts').ProjectInitializationResult
   readonly readTextImport: import('./creation.ts').TextImportState

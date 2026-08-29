@@ -646,6 +646,9 @@ export interface QingmuYimengCommandPort {
     signal?: AbortSignal,
   ): Promise<YimengRecoverReferenceRightsExceptionReleaseResponse>
   proposeScript(request: YimengProposeScriptRequest, signal?: AbortSignal): Promise<YimengProposeScriptResponse>
+  readScenePlanning(request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').CreationScope, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ScenePlanningState>
+  saveScenePlanning(request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ScenePlanningRequest, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ScenePlanningResult>
+  recoverScenePlanning(request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ScenePlanningRequest, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ScenePlanningResult>
   initializeProject(request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ProjectInitializationRequest, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ProjectInitializationResult>
   recoverProjectInitialization(request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ProjectInitializationRecovery, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ProjectInitializationResult>
   readTextImport(request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').TextImportReadRequest, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').TextImportState>
