@@ -35,10 +35,13 @@ describe('local reference candidate Host contract', () => {
     expect(fetch.mock.calls[1]?.[0]).toContain(`requestSha256=${requestSha256}`)
   })
   it('lists only exact scoped unselected candidates', async () => {
-    const listing = { ...scope, schema: 'jason.qingmu-local-reference-candidates.v1', candidates: [result],
+    const recorded = { ...result, rightsStatus: 'recorded_unverified', rightsRecorded: true }
+    const listing = { ...scope, schema: 'jason.qingmu-local-reference-candidates.v1', candidates: [recorded],
       providerCalls: 0, stageStarted: false, approvalGranted: false, selectionGranted: false, rightsRecorded: false }
     const { handler } = setup(listing)
     expect(await handler('listLocalReferenceCandidates', scope, signal())).toEqual({ ok: true, value: listing })
+    expect(await setup({ ...listing, candidates: [{ ...recorded, rightsStatus: 'not_recorded' }] })
+      .handler('listLocalReferenceCandidates', scope, signal())).toMatchObject({ ok: false })
   })
   it('accepts the backend maximum of 100 candidates and rejects an oversized projection', async () => {
     const flags = { providerCalls: 0, stageStarted: false, approvalGranted: false, selectionGranted: false, rightsRecorded: false }

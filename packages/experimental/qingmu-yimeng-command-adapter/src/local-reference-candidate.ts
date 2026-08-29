@@ -22,7 +22,7 @@ export interface LocalReferenceContentRequest extends LocalReferenceScope {
   readonly assetId: string
   readonly expectedSha256: string
 }
-/** Fail-closed receipt for one unselected, unapproved local image candidate. */
+/** Fail-closed receipt or current projection for one unselected, unapproved local image candidate. */
 export interface LocalReferenceCandidateResult extends LocalReferenceScope {
   readonly schema: 'jason.qingmu-local-reference-candidate-result.v1'
   readonly assetId: string
@@ -38,7 +38,7 @@ export interface LocalReferenceCandidateResult extends LocalReferenceScope {
   readonly inputSha256: string
   readonly materializedSha256: string
   readonly sourceDeclaration: 'local_file_unverified'
-  readonly rightsStatus: 'not_recorded'
+  readonly rightsStatus: 'not_recorded' | 'recorded_unverified'
   readonly selectionStatus: 'Unselected'
   readonly isSelected: false
   readonly idempotencyKey: string
@@ -50,7 +50,7 @@ export interface LocalReferenceCandidateResult extends LocalReferenceScope {
   readonly stageStarted: false
   readonly approvalGranted: false
   readonly selectionGranted: false
-  readonly rightsRecorded: false
+  readonly rightsRecorded: boolean
 }
 /** Owner-scoped projection of existing candidates for one entity. */
 export interface LocalReferenceCandidateList extends LocalReferenceScope {
@@ -108,14 +108,22 @@ function scope(raw: Record<string, unknown>, fail: (message: string) => Error): 
   if (!['actor', 'scene', 'prop'].includes(elementKind)) throw fail('local reference element kind invalid')
   return { projectId: id(raw.projectId, fail), elementKind: elementKind as LocalReferenceElementKind, targetId: id(raw.targetId, fail) }
 }
-function flags(raw: Record<string, unknown>, fail: (message: string) => Error): void {
+function flags(raw: Record<string, unknown>, fail: (message: string) => Error, allowRecordedRights = false): void {
   if (raw.providerCalls !== 0 || raw.stageStarted !== false || raw.approvalGranted !== false
-    || raw.selectionGranted !== false || raw.rightsRecorded !== false) throw fail('local reference authority mismatch')
+    || raw.selectionGranted !== false
+    || (allowRecordedRights ? typeof raw.rightsRecorded !== 'boolean' : raw.rightsRecorded !== false)) {
+    throw fail('local reference authority mismatch')
+  }
 }
-function normalizeResult(value: unknown, expected: LocalReferenceScope, fail: (message: string) => Error): LocalReferenceCandidateResult {
+function normalizeResult(
+  value: unknown,
+  expected: LocalReferenceScope,
+  fail: (message: string) => Error,
+  allowRecordedRights = false,
+): LocalReferenceCandidateResult {
   const raw = object(value, fail)
   if (raw.schema !== 'jason.qingmu-local-reference-candidate-result.v1') throw fail('local reference result schema invalid')
-  flags(raw, fail)
+  flags(raw, fail, allowRecordedRights)
   const actual = scope(raw, fail)
   if (actual.projectId !== expected.projectId || actual.elementKind !== expected.elementKind || actual.targetId !== expected.targetId) throw fail('local reference result scope mismatch')
   for (const field of ['assetId', 'commandReceiptId', 'changeSetId', 'eventId']) id(raw[field], fail)
@@ -133,7 +141,10 @@ function normalizeResult(value: unknown, expected: LocalReferenceScope, fail: (m
   if (filename.trim() !== filename || /[\\/]/.test(filename)) throw fail('local reference filename invalid')
   const storageKey = text(raw.storageKey, fail, 512)
   if (storageKey.startsWith('/') || storageKey.includes('..') || storageKey.includes('\\')) throw fail('local reference storage key invalid')
-  if (raw.sourceDeclaration !== 'local_file_unverified' || raw.rightsStatus !== 'not_recorded'
+  const rightsStateValid = raw.rightsRecorded === true
+    ? raw.rightsStatus === 'recorded_unverified'
+    : raw.rightsStatus === 'not_recorded'
+  if (raw.sourceDeclaration !== 'local_file_unverified' || !rightsStateValid
     || raw.selectionStatus !== 'Unselected' || raw.isSelected !== false) throw fail('local reference state invalid')
   text(raw.idempotencyKey, fail, 128)
   return raw as unknown as LocalReferenceCandidateResult
@@ -164,7 +175,7 @@ export function prepareLocalReferenceCandidate(endpoint: string, value: unknown,
       const actual = scope(result, response)
       if (actual.projectId !== expected.projectId || actual.elementKind !== expected.elementKind || actual.targetId !== expected.targetId) throw response('local reference list scope mismatch')
       if (!Array.isArray(result.candidates) || result.candidates.length > 100) throw response('local reference candidate list invalid')
-      return { ...result, candidates: result.candidates.map(item => normalizeResult(item, expected, response)) }
+      return { ...result, candidates: result.candidates.map(item => normalizeResult(item, expected, response, true)) }
     } }
   }
   if (endpoint === 'readLocalReferenceCandidateContent') {

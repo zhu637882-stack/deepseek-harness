@@ -309,6 +309,19 @@ const REFERENCE_CANDIDATE = {
   decisionIdentity: '',
 } as const
 
+const LOCAL_RIGHTS_CANDIDATE = {
+  ...REFERENCE_CANDIDATE,
+  assetId: 'reference-1',
+  sha256: '1'.repeat(64),
+  materializedSha256: '1'.repeat(64),
+  localPath: 'qingmu/reference_candidates/project-1/reference-1.png',
+  qualityStatus: 'pending',
+  generationJobId: '',
+  sourceRevisionId: '',
+  formalConsistencyCheckId: '',
+  formalConsistencyPassed: false,
+} as const
+
 function referenceCandidates(
   candidate: YimengReferenceAssetCandidate = REFERENCE_CANDIDATE,
   profileRevision = 3,
@@ -911,7 +924,7 @@ function createRightsPort(options: {
       elementKind: 'prop',
       profileRevision: initialSnapshot.subject.profileRevision,
       elementSnapshotSha256: initialSnapshot.snapshotSha256,
-      candidates: [],
+      candidates: [LOCAL_RIGHTS_CANDIDATE],
       humanApprovalInferred: false,
     } as const)),
     reviewEvents: vi.fn()
@@ -1189,6 +1202,11 @@ describe('AssetWorkbench', () => {
     fireEvent.click(screen.getByRole('button', { name: zh.assetRightsCommit }))
 
     expect(await screen.findByRole('heading', { name: zh.assetRightsCommitSucceeded })).toBeTruthy()
+    expect(screen.getAllByText(zh.assetRightsRecorded).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(zh.assetRightsSourceUnverified).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(new RegExp(zh.assetRightsUnknownFields)).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(new RegExp(zh.assetReferenceBlockedFormalCheck)).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(new RegExp(zh.assetReferenceBlockedQuality)).length).toBeGreaterThan(0)
     expect(commitElementProfile).toHaveBeenCalledTimes(1)
     const commitRequest = commitElementProfile.mock.calls[0]?.[0]
     expect(commitRequest).toMatchObject({

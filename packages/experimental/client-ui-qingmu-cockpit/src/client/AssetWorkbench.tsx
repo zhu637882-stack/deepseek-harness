@@ -652,6 +652,53 @@ function referenceCandidateEligible(
     )
 }
 
+function referenceCandidateBlockers(
+  candidate: YimengReferenceAssetCandidate,
+  t: (key: QingmuCockpitKey) => string,
+): string[] {
+  const blockers: string[] = []
+  if (!candidate.bindingValid || candidate.sha256 !== candidate.materializedSha256) {
+    blockers.push(t('assetReferenceBlockedBinding'))
+  }
+  if (candidate.sourceRevisionId === '') blockers.push(t('assetReferenceBlockedSourceRevision'))
+  if (candidate.formalConsistencyCheckId === '') blockers.push(t('assetReferenceBlockedFormalCheck'))
+  else if (!candidate.formalConsistencyPassed) blockers.push(t('assetReferenceBlockedFormalPassed'))
+  if (candidate.qualityStatus !== 'passed') blockers.push(t('assetReferenceBlockedQuality'))
+  return blockers
+}
+
+function referenceRightsUnknownLabels(
+  rights: YimengReferenceRightsRecord,
+  t: (key: QingmuCockpitKey) => string,
+): string[] {
+  const unknown: string[] = []
+  const append = (isUnknown: boolean, key: QingmuCockpitKey): void => {
+    if (isUnknown) unknown.push(t(key))
+  }
+  append(rights.sourceType.state === 'unknown', 'assetRightsSourceType')
+  append(rights.rightsHolder.state === 'unknown', 'assetRightsHolder')
+  append(rights.authorizationScope.state === 'unknown', 'assetRightsAuthorizationScope')
+  append(rights.territory.state === 'unknown', 'assetRightsTerritory')
+  append(rights.term.state === 'unknown', 'assetRightsTerm')
+  append(rights.restrictions.state === 'unknown', 'assetRightsRestrictions')
+  append(Object.values(rights.contains).some(value => value === 'unknown'), 'assetRightsContains')
+  append(rights.providerTerms.state === 'unknown', 'assetRightsProviderTerms')
+  append(Object.values(rights.modelLicenses).some(value => value.state === 'unknown'), 'assetRightsModelLicenses')
+  append(rights.humanDeclaration.state === 'unknown', 'assetRightsHumanDeclaration')
+  append(rights.contentCredentials.state === 'unknown', 'assetRightsContentCredentials')
+  return unknown
+}
+
+function referenceSelectionStatusLabel(
+  status: string,
+  t: (key: QingmuCockpitKey) => string,
+): string {
+  if (status === 'Unselected' || status === 'Selected' || status === 'Rejected' || status === 'Stale') {
+    return t(REFERENCE_STATUS_LOCALE_KEY[status])
+  }
+  return status
+}
+
 function assertMethod(
   method: ImagoElementMethodResponse,
   snapshot: YimengElementProfileResponse,
@@ -2787,6 +2834,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
                   {candidateItems.map((candidate) => {
                     const eligible = referenceCandidateEligible(candidate, referenceOperation)
                     const status = t(REFERENCE_STATUS_LOCALE_KEY[candidate.selectionStatus])
+                    const blockers = referenceCandidateBlockers(candidate, t)
                     return (
                       <label key={`${candidate.assetId}:${candidate.sha256}`}>
                         <input
@@ -2806,6 +2854,9 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
                         <strong>{candidate.assetId}</strong>
                         <span>{status}</span>
                         <small>{candidate.sha256}</small>
+                        {!eligible && blockers.length > 0 && (
+                          <small>{t('assetReferenceBlockedPrefix')}{blockers.join(' · ')}</small>
+                        )}
                       </label>
                     )
                   })}
@@ -2821,6 +2872,12 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
                   <div className={css.methodGrid}>
                     {rightsReferences.map((reference) => {
                       const binding = referenceBinding(reference)
+                      const candidate = candidateItems.find(item => (
+                        item.assetId === reference.assetId && item.sha256 === reference.sha256
+                      ))
+                      const unknown = reference.rightsRecorded
+                        ? referenceRightsUnknownLabels(reference.rights, t)
+                        : []
                       return (
                         <label key={binding}>
                           <input
@@ -2839,6 +2896,16 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
                           />
                           <strong>{reference.assetId}</strong>
                           <span>{t(reference.rightsRecorded ? 'assetRightsRecorded' : 'assetRightsNotRecorded')}</span>
+                          {candidate?.sourceRevisionId === '' && <span>{t('assetRightsSourceUnverified')}</span>}
+                          <span>{referenceSelectionStatusLabel(reference.selectionStatus, t)} · {t('assetRightsNotApproved')}</span>
+                          {reference.rightsRecorded && (
+                            <small>{unknown.length > 0
+                              ? `${t('assetRightsUnknownFields')}${unknown.join(' · ')}`
+                              : t('assetRightsNoUnknownFields')}</small>
+                          )}
+                          {candidate !== undefined && !referenceCandidateEligible(candidate, 'selectReferenceAsset') && (
+                            <small>{t('assetReferenceBlockedPrefix')}{referenceCandidateBlockers(candidate, t).join(' · ')}</small>
+                          )}
                           <small>{reference.sha256}</small>
                         </label>
                       )

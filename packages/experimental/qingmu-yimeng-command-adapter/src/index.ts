@@ -487,6 +487,13 @@ function requireString(value: unknown, field: string): string {
   return value
 }
 
+function requireStringValue(value: unknown, field: string): string {
+  if (typeof value !== 'string') {
+    throw new UpstreamContractError(`${field} must be a string`)
+  }
+  return value
+}
+
 function requireRfc3339Timestamp(value: unknown, field: string): string {
   const timestamp = requireString(value, field)
   const match = RFC3339_TIMESTAMP.exec(timestamp)
@@ -3960,7 +3967,7 @@ function normalizeElementProfileSubject(
     return {
       ...common,
       actorId: requireString(subject.actorId, `${field}.actorId`),
-      visualIdentity: requireString(subject.visualIdentity, `${field}.visualIdentity`),
+      visualIdentity: requireStringValue(subject.visualIdentity, `${field}.visualIdentity`),
     }
   }
   if (elementKind === 'scene') {
@@ -3968,13 +3975,13 @@ function normalizeElementProfileSubject(
       ...common,
       sceneId: requireString(subject.sceneId, `${field}.sceneId`),
       sceneType: requireString(subject.sceneType, `${field}.sceneType`),
-      visualPrompt: requireString(subject.visualPrompt, `${field}.visualPrompt`),
+      visualPrompt: requireStringValue(subject.visualPrompt, `${field}.visualPrompt`),
     }
   }
   return {
     ...common,
     propId: requireString(subject.propId, `${field}.propId`),
-    visualPrompt: requireString(subject.visualPrompt, `${field}.visualPrompt`),
+    visualPrompt: requireStringValue(subject.visualPrompt, `${field}.visualPrompt`),
   }
 }
 

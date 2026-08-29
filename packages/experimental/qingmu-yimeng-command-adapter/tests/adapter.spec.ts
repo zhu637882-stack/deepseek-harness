@@ -1919,6 +1919,30 @@ describe('qingmu Yimeng command adapter', () => {
     })
   })
 
+  it('accepts a rights-only preview when the existing visual profile is still blank', async () => {
+    vi.stubEnv('QINGMU_IMAGO_ATTESTATION_KEY', ATTESTATION_KEY)
+    const rights = unknownReferenceRightsFixture()
+    const fixture = referenceRightsContractFixture({
+      rights,
+      baseSubject: { ...elementSubjectRightsFixture(false, rights), visualPrompt: '' },
+      changed: true,
+      referenceInvalidated: true,
+    })
+    const handler = createYimengCommandHandler({}, deps(async (input) => {
+      const url = requestUrl(input)
+      if (url.endsWith(':preview')) return jsonResponse(fixture.preview)
+      throw new Error(`unexpected URL: ${url}`)
+    }, 'test-token'))
+
+    expect(await handler('previewElementProfile', fixture.previewRequest, signal())).toMatchObject({
+      ok: true,
+      value: {
+        baseSubject: { visualPrompt: '' },
+        authoritativeCurrentSubject: { visualPrompt: '' },
+      },
+    })
+  })
+
   it('accepts an exact recorded-rights no-op without inventing a revision', async () => {
     vi.stubEnv('QINGMU_IMAGO_ATTESTATION_KEY', ATTESTATION_KEY)
     const rights = recordedReferenceRightsFixture()

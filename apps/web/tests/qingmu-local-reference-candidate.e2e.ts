@@ -19,15 +19,19 @@ interface DbState {
     selection_status: string
     is_selected: number
     local_path: string
+    quality_status: string
+    generation_job_id: string | null
   }[]
   receipts: { id: string; command_type: string; response_json: string }[]
+  rightsChangeSets: { id: string; status: string }[]
+  actorProfileRevision: number
 }
 
 describe.skipIf(!writer || !core || process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu')('real local reference candidate entry', () => {
-  it('uploads one Unselected actor candidate, recovers a lost reply, survives restart and fails closed on tampered bytes', async () => {
+  it('records unknown rights for one Unselected local candidate, recovers lost replies, survives restart and rejects post-preview byte drift', async () => {
     const parent = mkdtempSync('/private/tmp/qingmu-local-reference-browser-'), root = join(parent, 'instance')
     const image = join(parent, 'actor-reference.png')
-    writeFileSync(join(parent, 'ACCEPTANCE-ONLY'), 'Synthetic image upload by an authenticated test user. No rights or content approval. No Provider.\n')
+    writeFileSync(join(parent, 'ACCEPTANCE-ONLY'), 'Synthetic image and unknown/not-applicable rights record by an authenticated test user. No verified license, selection, content approval or Provider.\n')
     writeFileSync(image, PNG)
     const run = (op: string, args: string[] = []) => JSON.parse(execFileSync('python3', [join(REPO_ROOT, 'scripts/qingmu-local.py'), op, '--root', root, ...args],
       { cwd: REPO_ROOT, encoding: 'utf8', timeout: 90_000 })) as { ready: boolean; webUrl: string; dataPreserved: boolean }
@@ -36,7 +40,7 @@ import json,sqlite3,sys
 c=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); c.row_factory=sqlite3.Row
 tables={r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 wanted=['projects','episodes','actors','scenes','storyboard_frames','assets','prompt_irs','entity_reference_packs','human_review_decisions','generation_tasks','provider_preflights','provider_budget_events','provider_authorization_reservations','provider_submission_outbox','episode_release_authority','episode_production_step_receipts','stage_artifacts','agent_runs','workflow_runs','step_runs']
-print(json.dumps({'counts':{t:c.execute('SELECT count(*) FROM '+t).fetchone()[0] if t in tables else 0 for t in wanted},'selected':c.execute('SELECT count(*) FROM assets WHERE is_selected=1 OR selection_status="Selected"').fetchone()[0],'assets':[dict(r) for r in c.execute('SELECT id,owner_type,owner_id,sha256,selection_status,is_selected,local_path FROM assets ORDER BY id')],'receipts':[dict(r) for r in c.execute('SELECT id,command_type,response_json FROM command_receipts ORDER BY committed_at,id')]},ensure_ascii=False))
+print(json.dumps({'counts':{t:c.execute('SELECT count(*) FROM '+t).fetchone()[0] if t in tables else 0 for t in wanted},'selected':c.execute('SELECT count(*) FROM assets WHERE is_selected=1 OR selection_status="Selected"').fetchone()[0],'assets':[dict(r) for r in c.execute('SELECT id,owner_type,owner_id,sha256,selection_status,is_selected,local_path,quality_status,generation_job_id FROM assets ORDER BY id')],'receipts':[dict(r) for r in c.execute('SELECT id,command_type,response_json FROM command_receipts ORDER BY committed_at,id')],'rightsChangeSets':[dict(r) for r in c.execute('SELECT id,status FROM change_sets WHERE operations_json LIKE ?',('%replaceReferenceRights%',))],'actorProfileRevision':c.execute('SELECT COALESCE((SELECT profile_revision FROM actors ORDER BY id LIMIT 1),0)').fetchone()[0]},ensure_ascii=False))
 `, join(root, 'storage/jason.db')], { encoding: 'utf8' })) as DbState
     run('init', ['--yimeng-root', writer!, '--core-root', core!])
     expect(inspect().counts.projects).toBe(0)
@@ -50,9 +54,14 @@ print(json.dumps({'counts':{t:c.execute('SELECT count(*) FROM '+t).fetchone()[0]
       await target.getByRole('button', { name: '先以只读方式进入' }).click()
       await target.getByRole('button', { name: '青木制作台', exact: true }).click()
     }
-    const uploads: string[] = []
+    const uploads: string[] = [], rightsCommits: string[] = [], rpcEvents: string[] = []
     page.on('request', (request) => {
       if (request.url().endsWith('/qingmu-yimeng-command/uploadLocalReferenceCandidate')) uploads.push(request.postData() ?? '')
+      if (request.url().endsWith('/qingmu-yimeng-command/commitElementProfile')) rightsCommits.push(request.postData() ?? '')
+      if (request.url().includes('/qingmu-yimeng-command/')) rpcEvents.push(`request ${new URL(request.url()).pathname}`)
+    })
+    page.on('response', (response) => {
+      if (response.url().includes('/qingmu-yimeng-command/')) rpcEvents.push(`response ${response.status()} ${new URL(response.url()).pathname}`)
     })
     try {
       await enter(page, true)
@@ -86,49 +95,104 @@ print(json.dumps({'counts':{t:c.execute('SELECT count(*) FROM '+t).fetchone()[0]
       await upload.getByRole('button', { name: '读取原上传回执' }).click()
       await page.getByText('未选择 · 未批准', { exact: true }).first().waitFor()
       expect(uploads).toHaveLength(1)
-      const after = inspect()
-      expect(after.assets).toHaveLength(1); expect(after.selected).toBe(0)
-      expect(after.assets[0]).toMatchObject({ owner_type: 'actor', selection_status: 'Unselected', is_selected: 0 })
-      expect(after.receipts.filter(item => item.command_type === 'qingmu.local_reference_candidate.upload.v1')).toHaveLength(1)
-      for (const table of ['prompt_irs','entity_reference_packs','human_review_decisions','generation_tasks','provider_preflights','provider_budget_events','provider_authorization_reservations','provider_submission_outbox','episode_release_authority','episode_production_step_receipts','stage_artifacts','agent_runs','workflow_runs','step_runs']) expect(after.counts[table]).toBe(0)
       expect(await upload.getByText('本机文件（来源未核验）', { exact: true }).count()).toBe(1)
       expect(await upload.getByText('未登记、未核验', { exact: true }).count()).toBe(1)
-      await upload.scrollIntoViewIfNeeded()
+
+      const reference = page.getByRole('region', { name: '参考素材选择与返修' })
+      await reference.getByRole('button', { name: '选择参考素材', exact: true }).click()
+      await reference.getByText(/暂不可选择：.*缺少来源版本.*缺少正式一致性检查.*质量检查尚未通过/).waitFor()
+      await reference.getByRole('button', { name: '维护参考素材权利', exact: true }).click()
+      const candidateId = inspect().assets[0]!.id
+      await reference.getByRole('radio', { name: new RegExp(candidateId) }).click()
+      await reference.getByLabel('人工声明', { exact: true }).selectOption('not_applicable')
+      await reference.getByRole('button', { name: '生成权利变更预览', exact: true }).click()
+      await page.getByRole('heading', { name: '参考素材权利 ChangeSet 预览' }).waitFor()
+      let rightsComplete!: () => void
+      const rightsLost = new Promise<void>((resolve) => { rightsComplete = resolve })
+      await page.route('**/qingmu-yimeng-command/commitElementProfile', async (route) => {
+        const response = await route.fetch(); expect(response.status()).toBe(200)
+        await route.abort('failed'); rightsComplete()
+      })
+      await page.getByRole('checkbox', { name: /我已核对完整权利记录/ }).click()
+      await page.getByRole('button', { name: '确认提交权利记录', exact: true }).dblclick()
+      await rightsLost; await page.unroute('**/qingmu-yimeng-command/commitElementProfile')
+      await page.getByRole('button', { name: '查询并恢复原回执' }).waitFor()
+      await page.getByRole('button', { name: '查询并恢复原回执' }).click()
+      await page.getByRole('heading', { name: '已恢复原始提交回执' }).waitFor()
+      await page.getByText('权利记录已保存（法律事实未核验）', { exact: true }).first().waitFor()
+      expect(rightsCommits).toHaveLength(1)
+      const persistedBrowserState = await page.evaluate(() => JSON.stringify({
+        session: Object.fromEntries(Array.from({ length: sessionStorage.length }, (_, index) => {
+          const key = sessionStorage.key(index) ?? ''
+          return [key, sessionStorage.getItem(key)]
+        })),
+        local: Object.fromEntries(Array.from({ length: localStorage.length }, (_, index) => {
+          const key = localStorage.key(index) ?? ''
+          return [key, localStorage.getItem(key)]
+        })),
+      }))
+      expect(persistedBrowserState).not.toContain('humanDeclaration')
+      expect(persistedBrowserState).not.toContain('rightsHolder')
+      const after = inspect()
+      expect(after.assets).toHaveLength(1); expect(after.selected).toBe(0)
+      expect(after.assets[0]).toMatchObject({ owner_type: 'actor', selection_status: 'Unselected', is_selected: 0,
+        quality_status: 'pending', generation_job_id: null })
+      expect(after.receipts.filter(item => item.command_type === 'qingmu.local_reference_candidate.upload.v1')).toHaveLength(1)
+      expect(after.rightsChangeSets).toHaveLength(1)
+      expect(after.rightsChangeSets[0]).toMatchObject({ status: 'committed' })
+      expect(readFileSync(join(root, 'storage', after.assets[0]!.local_path))).toEqual(PNG)
+      for (const table of ['prompt_irs','entity_reference_packs','human_review_decisions','generation_tasks','provider_preflights','provider_budget_events','provider_authorization_reservations','provider_submission_outbox','episode_release_authority','episode_production_step_receipts','stage_artifacts','agent_runs','workflow_runs','step_runs']) expect(after.counts[table]).toBe(0)
+      await page.getByText('权利记录已保存（法律事实未核验）', { exact: true }).first().scrollIntoViewIfNeeded()
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-      await page.screenshot({ path: join(parent, 'candidate-1440.png') })
+      await page.screenshot({ path: join(parent, 'rights-1440.png') })
       await page.reload({ waitUntil: 'load' })
       await page.getByRole('button', { name: '先以只读方式进入' }).click()
       await page.getByRole('button', { name: '青木制作台', exact: true }).click()
       await page.getByRole('tab', { name: '剧本与资产', exact: true }).click()
-      await page.getByText('未选择 · 未批准', { exact: true }).first().waitFor()
+      await page.getByText('权利记录已保存（法律事实未核验）', { exact: true }).first().waitFor()
       await page.context().close()
       expect(run('stop').dataPreserved).toBe(true); expect(run('start').ready).toBe(true)
       page = await browser.newPage({ viewport: { width: 1280, height: 800 }, locale: 'zh-CN' })
       page.setDefaultTimeout(20_000)
       await enter(page); await page.getByRole('tab', { name: '剧本与资产', exact: true }).click()
-      await page.getByText('未选择 · 未批准', { exact: true }).first().waitFor()
+      await page.getByText('权利记录已保存（法律事实未核验）', { exact: true }).first().waitFor()
+      await page.getByText('本机文件（来源未核验）', { exact: true }).first().waitFor()
       expect(inspect()).toEqual(after)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-      await page.getByRole('region', { name: '上传本地参考候选' }).scrollIntoViewIfNeeded()
-      await page.screenshot({ path: join(parent, 'candidate-restored-1280.png') })
-      await page.context().close(); expect(run('stop').dataPreserved).toBe(true)
+      const restoredReference = page.getByRole('region', { name: '参考素材选择与返修' })
+      await restoredReference.getByRole('button', { name: '维护参考素材权利', exact: true }).click()
+      await page.getByText('权利记录已保存（法律事实未核验）', { exact: true }).first().scrollIntoViewIfNeeded()
+      await page.screenshot({ path: join(parent, 'rights-restored-1280.png') })
+      await restoredReference.getByRole('radio', { name: new RegExp(after.assets[0]!.id) }).click()
+      await restoredReference.getByLabel('人工声明', { exact: true }).selectOption('unknown')
+      await restoredReference.getByRole('button', { name: '生成权利变更预览', exact: true }).click()
+      await page.getByRole('heading', { name: '参考素材权利 ChangeSet 预览' }).waitFor()
       const materialized = join(root, 'storage', after.assets[0]!.local_path)
       const original = readFileSync(materialized); writeFileSync(materialized, Buffer.concat([original, Buffer.from([0])]))
-      expect(run('start').ready).toBe(true)
-      page = await browser.newPage({ viewport: { width: 1280, height: 800 }, locale: 'zh-CN' }); page.setDefaultTimeout(20_000)
-      await enter(page); await page.getByRole('tab', { name: '剧本与资产', exact: true }).click()
-      await page.getByRole('region', { name: '上传本地参考候选' }).getByRole('alert').filter({ hasText: 'tampered' }).waitFor()
-      await page.context().close(); expect(run('stop').dataPreserved).toBe(true)
-      writeFileSync(materialized, original); expect(run('start').ready).toBe(true)
-      page = await browser.newPage({ viewport: { width: 1280, height: 800 }, locale: 'zh-CN' }); page.setDefaultTimeout(20_000)
-      await enter(page); await page.getByRole('tab', { name: '剧本与资产', exact: true }).click()
-      await page.getByText('未选择 · 未批准', { exact: true }).first().waitFor()
-      writeFileSync(join(parent, 'result.json'), JSON.stringify({ root, webUrl: initial.webUrl, after,
-        uploadPosts: uploads.length, refreshReadback: true, freshBrowserAfterRestart: true,
-        tamperFailedClosed: true, restoredAfterTamperProbe: true }, null, 2))
-      console.log('Qingmu local reference evidence:', parent)
+      await page.getByRole('checkbox', { name: /我已核对完整权利记录/ }).click()
+      await page.getByRole('button', { name: '确认提交权利记录', exact: true }).click()
+      await page.getByRole('alert').filter({ hasText: 'reference_asset_materialization_changed' }).waitFor()
+      const afterTamper = inspect()
+      expect(afterTamper.assets).toEqual(after.assets)
+      expect(afterTamper.counts).toEqual(after.counts)
+      expect(afterTamper.receipts).toEqual(after.receipts)
+      expect(afterTamper.selected).toBe(0)
+      expect(afterTamper.actorProfileRevision).toBe(after.actorProfileRevision)
+      expect(afterTamper.rightsChangeSets.filter(item => item.status === 'committed')).toEqual(after.rightsChangeSets)
+      expect(afterTamper.rightsChangeSets.filter(item => item.status === 'draft')).toHaveLength(1)
+      writeFileSync(materialized, original)
+      await page.reload({ waitUntil: 'load' }); await page.getByRole('button', { name: '先以只读方式进入' }).click()
+      await page.getByRole('button', { name: '青木制作台', exact: true }).click()
+      await page.getByRole('tab', { name: '剧本与资产', exact: true }).click()
+      await page.getByText('权利记录已保存（法律事实未核验）', { exact: true }).first().waitFor()
+      writeFileSync(join(parent, 'result.json'), JSON.stringify({ root, webUrl: initial.webUrl, after, afterTamper,
+        uploadPosts: uploads.length, rightsCommitPosts: rightsCommits.length, refreshReadback: true,
+        freshBrowserAfterRestart: true, postPreviewByteDriftFailedClosed: true,
+        restoredAfterTamperProbe: true }, null, 2))
+      console.log('Qingmu reference rights evidence:', parent)
     } catch (error) {
       writeFileSync(join(parent, 'browser-failure.txt'), await page.locator('body').innerText())
+      writeFileSync(join(parent, 'rpc-events.json'), JSON.stringify(rpcEvents, null, 2))
       await page.screenshot({ path: join(parent, 'failure.png') }); throw error
     } finally { await browser.close(); run('stop') }
   }, 240_000)
