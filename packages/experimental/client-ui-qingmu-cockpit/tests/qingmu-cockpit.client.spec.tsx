@@ -628,6 +628,7 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     readScenePlanning: vi.fn(async (request: CreationScope) => ({ schema: 'jason.qingmu-scene-planning-state.v1' as const, ...request,
       scriptRevision: 0, scriptSha256: null, scenes: [], storyboard: null, planning: null })),
     requestDirectorProposal: vi.fn(async () => { throw new Error('Director replay uses a separate fixture') }),
+    checkDirectorProposalFreshness: vi.fn(async () => { throw new Error('Director freshness uses a separate fixture') }),
     saveScenePlanning: vi.fn(async () => { throw new Error('Planning uses a separate fixture') }),
     recoverScenePlanning: vi.fn(async () => { throw new Error('Planning uses a separate fixture') }),
     initializeProject: vi.fn(async () => { throw new Error('Creation uses a separate fixture') }),

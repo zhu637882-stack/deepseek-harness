@@ -4,12 +4,20 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { prepareCreationCommand } from './creation.ts'
 import { prepareScenePlanning } from './scene-planning.ts'
 import { prepareLocalReferenceCandidate } from './local-reference-candidate.ts'
+import type { DirectorProposalFreshnessResult } from './director-proposal.ts'
+export { executeDirectorProviderPermit } from './director-provider-execution.ts'
+export type {
+  DirectorProviderDispatchPermit, DirectorProviderExecutionReceipt,
+  DirectorProviderExecutionResult, DirectorProviderTransport, DirectorProviderTransportResult,
+} from './director-provider-execution.ts'
 import {
   buildDirectorReplayProposal,
   directorWorkOrderRequest,
   normalizeDirectorContext,
+  normalizeDirectorProposalFreshness,
   normalizeDirectorReplayMethod,
   normalizeDirectorWorkOrder,
+  parseDirectorProposalFreshnessRequest,
   parseDirectorProposalRequest,
 } from './director-proposal.ts'
 export type {
@@ -18,6 +26,8 @@ export type {
   DirectorProposalField,
   DirectorProposalItem,
   DirectorProposalRequest,
+  DirectorProposalFreshnessRequest,
+  DirectorProposalFreshnessResult,
   DirectorReplayProposal,
   DirectorSuggestionType,
 } from './director-proposal.ts'
@@ -5099,6 +5109,52 @@ export function createYimengCommandHandler(
         const freshContext = normalizeDirectorContext(freshResult.value, request, stageArtifactHelpers)
         return { ok: true, value: buildDirectorReplayProposal(
           request, context, freshContext, workOrder, method, stageArtifactHelpers,
+        ) }
+      }
+      if (endpoint === 'checkDirectorProposalFreshness') {
+        const request = parseDirectorProposalFreshnessRequest(payload, stageArtifactHelpers)
+        const token = normalizeToken(dependencies.readToken())
+        if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
+        if (dependencies.runDirectorReplayMethod === undefined) {
+          return internalError('current IMAGO director replay Method is unavailable')
+        }
+        const methodResult = await dependencies.runDirectorReplayMethod(
+          { purpose: 'bounded_director_suggestion' }, signal,
+        )
+        if (signal.aborted) return cancelled()
+        if (!methodResult.ok) return methodResult
+        const method = normalizeDirectorReplayMethod(methodResult.value, stageArtifactHelpers)
+        if (method.version !== request.methodPackageVersion
+          || method.methodPackageSha256 !== request.methodPackageSha256) {
+          const { projectId: _projectId, episodeId: _episodeId, ...binding } = request
+          const staleBody = {
+            schema: 'jason.qingmu-director-proposal-freshness.v1' as const,
+            projectId: request.projectId, episodeId: request.episodeId, fresh: false as const,
+            staleReasons: ['director_method_changed'] as const,
+            binding,
+            currentContextSnapshotSha256: request.contextSnapshotSha256,
+            providerCalls: 0 as const, costAmountCny: '0' as const,
+            businessStateChanged: false as const, humanDecisionInferred: false as const,
+            formalQcInferred: false as const, selectionGranted: false as const, readyGranted: false as const,
+          }
+          return { ok: true, value: {
+            ...staleBody,
+            freshnessSha256: canonicalJsonSha256(staleBody, 'director proposal method drift'),
+          } satisfies DirectorProposalFreshnessResult }
+        }
+        const result = await fetchJson(
+          dependencies,
+          `${baseUrl}/api/qingmu/projects/${encodeURIComponent(request.projectId)}`
+            + `/episodes/${encodeURIComponent(request.episodeId)}/director-inference/freshness`,
+          token,
+          { method: 'POST', body: serializeBody(Object.fromEntries(Object.entries(request)
+            .filter(([key]) => key !== 'projectId' && key !== 'episodeId'))) },
+          timeoutMs,
+          signal,
+        )
+        if (!result.ok) return result
+        return { ok: true, value: normalizeDirectorProposalFreshness(
+          result.value, request, stageArtifactHelpers,
         ) }
       }
       let currentTakeApprovalLifecycleMethod: unknown

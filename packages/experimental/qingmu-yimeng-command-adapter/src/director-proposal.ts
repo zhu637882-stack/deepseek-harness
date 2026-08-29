@@ -46,8 +46,11 @@ export interface DirectorInferenceWorkOrder extends CreationScope {
   readonly shotId: string
   readonly purpose: 'bounded_director_suggestion'
   readonly suggestionType: DirectorSuggestionType
-  readonly expectedModel: 'deepseek-v4-pro' | 'deepseek-v4-flash-vision-exp'
+  readonly methodCapability: 'director.text.proposal' | 'director.visual.finding'
+  readonly outputSchema: 'qingmu.director-proposal.v1' | 'qingmu.visual-review-proposal.v1'
+  readonly executionProfile: 'deterministic_replay_fixture_v1'
   readonly inputSha256: string
+  readonly promptSha256: string
   readonly methodPackage: { readonly version: string; readonly sha256: string }
   readonly idempotencyKey: string
   readonly budget: { readonly mode: 'replay'; readonly currency: 'CNY'; readonly maximumAmount: '0'; readonly providerCalls: 0 }
@@ -83,7 +86,7 @@ export interface DirectorReplayProposal extends CreationScope {
   readonly methodPackage: ImagoDirectorReplayMethodResponse
   readonly execution: {
     readonly mode: 'deterministic_replay_fixture'
-    readonly declaredModel: 'deepseek-v4-pro' | 'deepseek-v4-flash-vision-exp'
+    readonly providerResult: false
     readonly networkUsed: false
     readonly providerCalls: 0
     readonly costAmountCny: '0'
@@ -100,6 +103,38 @@ export interface DirectorReplayProposal extends CreationScope {
   readonly selectionGranted: false
   readonly readyGranted: false
   readonly humanDecisionInferred: false
+}
+
+/** Exact immutable coordinates used for a read-only pre-save freshness check. */
+export interface DirectorProposalFreshnessRequest extends CreationScope {
+  readonly sceneId: string
+  readonly shotId: string
+  readonly contextSnapshotSha256: string
+  readonly methodPackageVersion: string
+  readonly methodPackageSha256: string
+  readonly workOrderId: string
+  readonly workOrderSha256: string
+  readonly promptSha256: string
+  readonly proposalId: string
+  readonly proposalSha256: string
+  readonly outputSha256: string
+}
+
+/** Zero-cost freshness result; checking it never executes inference. */
+export interface DirectorProposalFreshnessResult extends CreationScope {
+  readonly schema: 'jason.qingmu-director-proposal-freshness.v1'
+  readonly fresh: boolean
+  readonly staleReasons: readonly string[]
+  readonly binding: Omit<DirectorProposalFreshnessRequest, 'projectId' | 'episodeId'>
+  readonly currentContextSnapshotSha256: string
+  readonly freshnessSha256: string
+  readonly providerCalls: 0
+  readonly costAmountCny: '0'
+  readonly businessStateChanged: false
+  readonly humanDecisionInferred: false
+  readonly formalQcInferred: false
+  readonly selectionGranted: false
+  readonly readyGranted: false
 }
 
 interface Helpers {
@@ -279,13 +314,14 @@ export function directorWorkOrderRequest(
   method: ImagoDirectorReplayMethodResponse,
   helpers: Helpers,
 ): Record<string, unknown> {
-  const expectedModel = method.suggestionTypes[request.suggestionType].expectedModel
+  const suggestion = method.suggestionTypes[request.suggestionType]
   const identity = {
     sceneId: request.sceneId,
     shotId: request.shotId,
     purpose: 'bounded_director_suggestion',
     suggestionType: request.suggestionType,
-    expectedModel,
+    methodCapability: suggestion.capability,
+    outputSchema: suggestion.outputSchema,
     methodPackageVersion: method.version,
     methodPackageSha256: method.methodPackageSha256,
     expectedContextSnapshotSha256: context.contextSnapshotSha256,
@@ -314,11 +350,14 @@ export function normalizeDirectorWorkOrder(
     || root.projectId !== request.projectId || root.episodeId !== request.episodeId
     || root.sceneId !== request.sceneId || root.shotId !== request.shotId
     || root.purpose !== 'bounded_director_suggestion' || root.suggestionType !== request.suggestionType
-    || root.expectedModel !== method.suggestionTypes[request.suggestionType].expectedModel
+    || root.methodCapability !== method.suggestionTypes[request.suggestionType].capability
+    || root.outputSchema !== method.suggestionTypes[request.suggestionType].outputSchema
+    || root.executionProfile !== 'deterministic_replay_fixture_v1'
     || root.inputSha256 !== context.contextSnapshotSha256) {
     throw helpers.responseError('director work order lineage mismatch')
   }
   zeroAuthority(root, helpers.responseError, 'director work order')
+  digest(root.promptSha256, helpers.responseError, 'director work order prompt SHA')
   digest(root.workOrderSha256, helpers.responseError, 'director work order SHA')
   const workOrderBody = { ...root }
   Reflect.deleteProperty(workOrderBody, 'workOrderSha256')
@@ -393,7 +432,7 @@ export function buildDirectorReplayProposal(
     methodPackage: method,
     execution: {
       mode: 'deterministic_replay_fixture' as const,
-      declaredModel: workOrder.expectedModel,
+      providerResult: false as const,
       networkUsed: false as const,
       providerCalls: 0 as const,
       costAmountCny: '0' as const,
@@ -413,4 +452,73 @@ export function buildDirectorReplayProposal(
   const proposalIdentity = { ...body, outputSha256 }
   const proposalSha256 = directorJcsSha256(proposalIdentity, 'director proposal', helpers.responseError)
   return { ...proposalIdentity, proposalId: `director_proposal_${proposalSha256.slice(0, 32)}`, proposalSha256 }
+}
+
+/**
+ * Parse the exact immutable proposal coordinates used by the pre-save freshness check.
+ * @param value Untrusted Host request payload.
+ * @param helpers Adapter-specific validation error constructors.
+ * @returns Validated immutable freshness coordinates.
+ */
+export function parseDirectorProposalFreshnessRequest(
+  value: unknown,
+  helpers: Helpers,
+): DirectorProposalFreshnessRequest {
+  const root = object(value, helpers.inputError, 'director proposal freshness request')
+  const keys = ['projectId', 'episodeId', 'sceneId', 'shotId', 'contextSnapshotSha256',
+    'methodPackageVersion', 'methodPackageSha256', 'workOrderId', 'workOrderSha256',
+    'promptSha256', 'proposalId', 'proposalSha256', 'outputSha256'] as const
+  exact(root, keys, helpers.inputError, 'director proposal freshness request')
+  return {
+    projectId: id(root.projectId, helpers.inputError, 'projectId'),
+    episodeId: id(root.episodeId, helpers.inputError, 'episodeId'),
+    sceneId: id(root.sceneId, helpers.inputError, 'sceneId'),
+    shotId: id(root.shotId, helpers.inputError, 'shotId'),
+    contextSnapshotSha256: digest(root.contextSnapshotSha256, helpers.inputError, 'contextSnapshotSha256'),
+    methodPackageVersion: id(root.methodPackageVersion, helpers.inputError, 'methodPackageVersion'),
+    methodPackageSha256: digest(root.methodPackageSha256, helpers.inputError, 'methodPackageSha256'),
+    workOrderId: id(root.workOrderId, helpers.inputError, 'workOrderId'),
+    workOrderSha256: digest(root.workOrderSha256, helpers.inputError, 'workOrderSha256'),
+    promptSha256: digest(root.promptSha256, helpers.inputError, 'promptSha256'),
+    proposalId: id(root.proposalId, helpers.inputError, 'proposalId'),
+    proposalSha256: digest(root.proposalSha256, helpers.inputError, 'proposalSha256'),
+    outputSha256: digest(root.outputSha256, helpers.inputError, 'outputSha256'),
+  }
+}
+
+/**
+ * Validate a read-only freshness response and every echoed source coordinate.
+ * @param value Untrusted Writer response payload.
+ * @param request Original immutable freshness coordinates.
+ * @param helpers Adapter-specific validation error constructors.
+ * @returns Validated freshness result bound to the original request.
+ */
+export function normalizeDirectorProposalFreshness(
+  value: unknown,
+  request: DirectorProposalFreshnessRequest,
+  helpers: Helpers,
+): DirectorProposalFreshnessResult {
+  const root = object(value, helpers.responseError, 'director proposal freshness')
+  if (root.schema !== 'jason.qingmu-director-proposal-freshness.v1'
+    || root.projectId !== request.projectId || root.episodeId !== request.episodeId
+    || typeof root.fresh !== 'boolean' || !Array.isArray(root.staleReasons)) {
+    throw helpers.responseError('director proposal freshness identity mismatch')
+  }
+  zeroAuthority(root, helpers.responseError, 'director proposal freshness')
+  const binding = object(root.binding, helpers.responseError, 'director proposal freshness binding')
+  const expectedBinding = { ...request } as Record<string, unknown>
+  Reflect.deleteProperty(expectedBinding, 'projectId')
+  Reflect.deleteProperty(expectedBinding, 'episodeId')
+  if (directorJcsJson(binding, 'director proposal freshness binding', helpers.responseError)
+    !== directorJcsJson(expectedBinding, 'expected director proposal freshness binding', helpers.responseError)) {
+    throw helpers.responseError('director proposal freshness binding mismatch')
+  }
+  digest(root.currentContextSnapshotSha256, helpers.responseError, 'currentContextSnapshotSha256')
+  digest(root.freshnessSha256, helpers.responseError, 'freshnessSha256')
+  const body = { ...root }
+  Reflect.deleteProperty(body, 'freshnessSha256')
+  if (directorJcsSha256(body, 'director proposal freshness', helpers.responseError) !== root.freshnessSha256) {
+    throw helpers.responseError('director proposal freshness SHA mismatch')
+  }
+  return value as DirectorProposalFreshnessResult
 }

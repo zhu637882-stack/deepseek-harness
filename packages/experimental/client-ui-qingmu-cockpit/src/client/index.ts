@@ -140,6 +140,7 @@ export function apply(ctx: ClientContext): void {
 
   const port: QingmuYimengPort = {
     requestDirectorProposal: (request, signal) => command('requestDirectorProposal', request, signal),
+    checkDirectorProposalFreshness: (request, signal) => command('checkDirectorProposalFreshness', request, signal),
     listLocalReferenceCandidates: (request, signal) => command('listLocalReferenceCandidates', request, signal),
     uploadLocalReferenceCandidate: (request, signal) => command('uploadLocalReferenceCandidate', request, signal),
     recoverLocalReferenceCandidate: (request, signal) => command('recoverLocalReferenceCandidate', request, signal),

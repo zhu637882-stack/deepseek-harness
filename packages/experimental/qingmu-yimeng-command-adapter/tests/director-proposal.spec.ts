@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import { createYimengCommandHandler } from '../src/index.ts'
+import type { DirectorReplayProposal } from '../src/director-proposal.ts'
 
 const canonical = (value: unknown): string => {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
@@ -19,8 +20,12 @@ const methodBody = {
   schema: 'qingmu.imago-director-replay-method-package.v1', version: 'qingmu.director-replay.v1',
   sourceBindings: [{ path: 'knowledge/methods/plan.md', sha256: 'a'.repeat(64) }],
   integrationCoordinates: ['H2', 'H3-precondition-replay'],
-  suggestionTypes: { text_director_proposal: { expectedModel: 'deepseek-v4-pro' },
-    visual_finding: { expectedModel: 'deepseek-v4-flash-vision-exp' } },
+  suggestionTypes: {
+    text_director_proposal: { capability: 'director.text.proposal', outputSchema: 'qingmu.director-proposal.v1',
+      limits: { advisoryOnly: true, maxShots: 1 } },
+    visual_finding: { capability: 'director.visual.finding', outputSchema: 'qingmu.visual-review-proposal.v1',
+      limits: { advisoryOnly: true, maxShots: 1, pixelReview: false } },
+  },
   authority: { businessTruth: 'yimeng', methodSource: 'imago_os', inferenceHost: 'harness_dsh',
     replayOnly: true, providerCalls: 0, maximumCostCny: '0', humanDecisionInferred: false,
     formalQcInferred: false, selectionGranted: false, readyGranted: false },
@@ -48,7 +53,13 @@ function setup(stale = false) {
     const body = { schema: 'jason.qingmu-director-inference-work-order.v1',
       workOrderId: `director_work_order_${String(request.idempotencyKey).slice(0, 32)}`, ...scope,
       purpose: 'bounded_director_suggestion', suggestionType: request.suggestionType,
-      expectedModel: request.expectedModel, inputSha256: request.expectedContextSnapshotSha256,
+      methodCapability: request.methodCapability, outputSchema: request.outputSchema,
+      executionProfile: 'deterministic_replay_fixture_v1',
+      inputSha256: request.expectedContextSnapshotSha256,
+      promptSha256: sha({ purpose: 'bounded_director_suggestion', suggestionType: request.suggestionType,
+        capability: request.methodCapability, outputSchema: request.outputSchema,
+        contextSnapshotSha256: request.expectedContextSnapshotSha256,
+        methodPackageSha256: request.methodPackageSha256 }),
       methodPackage: { version: request.methodPackageVersion, sha256: request.methodPackageSha256 },
       idempotencyKey: request.idempotencyKey, budget: { mode: 'replay', currency: 'CNY', maximumAmount: '0', providerCalls: 0 },
       sourceTime: '2026-08-29T00:00:00+00:00', staleWhen: ['context_changed'], providerCalls: 0,
@@ -71,11 +82,63 @@ describe('Host-only director replay proposal', () => {
     expect(second).toEqual(first)
     expect(first).toMatchObject({ ok: true, value: { schema: 'qingmu.director-replay-proposal.v1',
       proposalKind: 'DirectorProposal', stale: false, advisoryOnly: true,
-      execution: { mode: 'deterministic_replay_fixture', declaredModel: 'deepseek-v4-pro', networkUsed: false, providerCalls: 0, costAmountCny: '0' },
+      execution: { mode: 'deterministic_replay_fixture', providerResult: false, networkUsed: false, providerCalls: 0, costAmountCny: '0' },
       formalQcInferred: false, selectionGranted: false, readyGranted: false, humanDecisionInferred: false } })
     expect(runDirectorReplayMethod).toHaveBeenCalledTimes(2)
     expect(fetch).toHaveBeenCalledTimes(6)
     expect(fetch.mock.calls.every(([url]) => requestUrl(url).startsWith('http://127.0.0.1:49123/api/qingmu/'))).toBe(true)
+  })
+
+  it('checks all original proposal coordinates without executing replay a second time', async () => {
+    const { handler, fetch, runDirectorReplayMethod } = setup()
+    const proposalResult = await handler('requestDirectorProposal',
+      { ...scope, suggestionType: 'text_director_proposal' }, new AbortController().signal)
+    expect(proposalResult.ok).toBe(true)
+    if (!proposalResult.ok) return
+    const proposal = proposalResult.value as DirectorReplayProposal
+    const freshnessRequest = { ...scope, contextSnapshotSha256: proposal.inputSha256,
+      methodPackageVersion: proposal.methodPackage.version,
+      methodPackageSha256: proposal.methodPackage.methodPackageSha256,
+      workOrderId: proposal.workOrder.workOrderId, workOrderSha256: proposal.workOrder.workOrderSha256,
+      promptSha256: proposal.workOrder.promptSha256, proposalId: proposal.proposalId,
+      proposalSha256: proposal.proposalSha256, outputSha256: proposal.outputSha256 }
+    const binding = { ...freshnessRequest } as Record<string, unknown>
+    delete binding.projectId; delete binding.episodeId
+    const body = { schema: 'jason.qingmu-director-proposal-freshness.v1', projectId: scope.projectId,
+      episodeId: scope.episodeId, fresh: true, staleReasons: [], binding,
+      currentContextSnapshotSha256: proposal.inputSha256, providerCalls: 0, costAmountCny: '0',
+      businessStateChanged: false, humanDecisionInferred: false, formalQcInferred: false,
+      selectionGranted: false, readyGranted: false }
+    fetch.mockResolvedValueOnce(Response.json({ ...body, freshnessSha256: sha(body) }))
+    const result = await handler('checkDirectorProposalFreshness', freshnessRequest, new AbortController().signal)
+    expect(result).toMatchObject({ ok: true, value: { fresh: true, binding } })
+    expect(fetch).toHaveBeenCalledTimes(4)
+    expect(runDirectorReplayMethod).toHaveBeenCalledTimes(2)
+  })
+
+  it('fails freshness closed on an independent method package SHA drift without a Writer call', async () => {
+    const setupResult = setup()
+    const changedMethodBody = { ...methodBody,
+      sourceBindings: [{ path: 'knowledge/methods/plan.md', sha256: 'f'.repeat(64) }] as const }
+    setupResult.runDirectorReplayMethod.mockResolvedValueOnce({ ok: true as const, value: method })
+      .mockResolvedValueOnce({ ok: true as const, value: {
+        ...changedMethodBody, methodPackageSha256: sha(changedMethodBody),
+      } })
+    const proposalResult = await setupResult.handler('requestDirectorProposal',
+      { ...scope, suggestionType: 'text_director_proposal' }, new AbortController().signal)
+    expect(proposalResult.ok).toBe(true)
+    if (!proposalResult.ok) return
+    const proposal = proposalResult.value as DirectorReplayProposal
+    const before = setupResult.fetch.mock.calls.length
+    const result = await setupResult.handler('checkDirectorProposalFreshness', { ...scope,
+      contextSnapshotSha256: proposal.inputSha256, methodPackageVersion: proposal.methodPackage.version,
+      methodPackageSha256: proposal.methodPackage.methodPackageSha256,
+      workOrderId: proposal.workOrder.workOrderId, workOrderSha256: proposal.workOrder.workOrderSha256,
+      promptSha256: proposal.workOrder.promptSha256, proposalId: proposal.proposalId,
+      proposalSha256: proposal.proposalSha256, outputSha256: proposal.outputSha256,
+    }, new AbortController().signal)
+    expect(result).toMatchObject({ ok: true, value: { fresh: false, staleReasons: ['director_method_changed'] } })
+    expect(setupResult.fetch).toHaveBeenCalledTimes(before)
   })
 
   it('marks a proposal stale when the post-inference source read drifts', async () => {
@@ -93,7 +156,12 @@ describe('Host-only director replay proposal', () => {
       const body = { schema: 'jason.qingmu-director-inference-work-order.v1',
         workOrderId: `director_work_order_${String(request.idempotencyKey).slice(0, 32)}`, ...scope,
         purpose: 'bounded_director_suggestion', suggestionType: request.suggestionType,
-        expectedModel: request.expectedModel, inputSha256: request.expectedContextSnapshotSha256,
+        methodCapability: request.methodCapability, outputSchema: request.outputSchema,
+        executionProfile: 'deterministic_replay_fixture_v1', inputSha256: request.expectedContextSnapshotSha256,
+        promptSha256: sha({ purpose: 'bounded_director_suggestion', suggestionType: request.suggestionType,
+          capability: request.methodCapability, outputSchema: request.outputSchema,
+          contextSnapshotSha256: request.expectedContextSnapshotSha256,
+          methodPackageSha256: request.methodPackageSha256 }),
         methodPackage: { version: request.methodPackageVersion, sha256: request.methodPackageSha256 },
         idempotencyKey: request.idempotencyKey, budget: { mode: 'replay', currency: 'CNY', maximumAmount: '0', providerCalls: 0 },
         sourceTime: '2026-08-29T00:00:00+00:00', staleWhen: ['context_changed'], providerCalls: 0,

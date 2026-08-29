@@ -40,7 +40,7 @@ function errorText(error: unknown): string {
 export function ScenePlanningWorkspace({ projectId, episodeId, port, onUnsavedChange, onCommitted, onSelectShotId }: {
   readonly projectId: string
   readonly episodeId: string
-  readonly port: Pick<QingmuYimengPort, 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning' | 'requestDirectorProposal'>
+  readonly port: Pick<QingmuYimengPort, 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning' | 'requestDirectorProposal' | 'checkDirectorProposalFreshness'>
   readonly onUnsavedChange: (dirty: boolean) => void
   readonly onCommitted: () => Promise<unknown>
   readonly onSelectShotId: (id: string) => void
@@ -118,7 +118,7 @@ export function ScenePlanningWorkspace({ projectId, episodeId, port, onUnsavedCh
       if (!isLive()) return
       setProposal(result); setIgnoredProposalItems([]); setAdoptedProposalItems([])
     } catch (e) {
-      if (isLive()) setError(`AI 建议暂不可用；人工编辑不受影响。${errorText(e)}`)
+      if (isLive()) setError(`演练建议暂不可用；人工编辑不受影响。${errorText(e)}`)
     } finally { if (isLive()) setProposalBusy(false) }
   }
   const adoptProposalItem = (item: DirectorProposalItem) => {
@@ -163,9 +163,16 @@ export function ScenePlanningWorkspace({ projectId, episodeId, port, onUnsavedCh
         const shotId = local.shotIds[index]
         if (local.shotIds.length > 0 && !shotId) throw new Error('当前镜头身份缺失，请读取恢复。')
         if (shotId && proposal && adoptedProposalItems.length > 0) {
-          const freshProposal = await port.requestDirectorProposal({ projectId, episodeId,
-            sceneId: proposal.sceneId, shotId, suggestionType: 'text_director_proposal' }, controller.current.signal)
-          if (freshProposal.stale || freshProposal.proposalSha256 !== proposal.proposalSha256) {
+          const freshness = await port.checkDirectorProposalFreshness({ projectId, episodeId,
+            sceneId: proposal.sceneId, shotId, contextSnapshotSha256: proposal.inputSha256,
+            methodPackageVersion: proposal.methodPackage.version,
+            methodPackageSha256: proposal.methodPackage.methodPackageSha256,
+            workOrderId: proposal.workOrder.workOrderId,
+            workOrderSha256: proposal.workOrder.workOrderSha256,
+            promptSha256: proposal.workOrder.promptSha256,
+            proposalId: proposal.proposalId, proposalSha256: proposal.proposalSha256,
+            outputSha256: proposal.outputSha256 }, controller.current.signal)
+          if (!freshness.fresh) {
             throw new Error('409 director_proposal_stale')
           }
         }
@@ -258,17 +265,17 @@ export function ScenePlanningWorkspace({ projectId, episodeId, port, onUnsavedCh
         }}>增加镜头（最多 8 个）</button>}
         <button type="button" disabled={!local.dirty || local.shots.some(s => !s.title.trim() || s.durationSec < 0.5 || s.durationSec > 30)} onClick={() => { setPreview(true) }}>预览保存影响</button>
       </fieldset>}
-      {local?.shotIds[index] && current && <section className={css.proposal} aria-label="受控导演建议">
-        <header><div><small>Harness/DSh · replay-only</small><h3>受控导演建议</h3></div>
+      {local?.shotIds[index] && current && <section className={css.proposal} aria-label="演练建议（非模型生成）">
+        <header><div><small>Harness/DSh · replay-only · 非模型生成</small><h3>演练建议（非模型生成）</h3></div>
           <button type="button" disabled={proposalBusy || busy || Boolean(local.pending) || local.dirty}
-            onClick={() => { void requestProposal() }}>{proposalBusy ? '正在读取…' : '读取零费用建议'}</button></header>
+            onClick={() => { void requestProposal() }}>{proposalBusy ? '正在读取…' : '读取演练建议'}</button></header>
         <p>建议只作创意参考，尚未成为正式质检、参考选择、Ready 或人工决定。人工编辑始终可用。</p>
         {local.dirty && proposal === null && <p>请先保存或恢复当前草稿，再基于同一来源版本读取建议。</p>}
         {proposal?.stale && <p role="alert">来源已变化，这份建议已过期，不能采用。请保存或恢复后重新读取。</p>}
         {proposal?.items.filter(item => !ignoredProposalItems.includes(item.id)).map(item =>
           <article key={item.id} className={css.proposalCard}>
             <dl><dt>原值</dt><dd>{String(item.originalValue) || '（空）'}</dd>
-              <dt>AI 建议</dt><dd>{String(item.proposedValue) || '（空）'}</dd>
+              <dt>演练建议</dt><dd>{String(item.proposedValue) || '（空）'}</dd>
               <dt>影响</dt><dd>{item.impact}</dd></dl>
             <div className={css.actions}>
               <button type="button" disabled={proposal.stale || adoptedProposalItems.includes(item.id)}
@@ -281,7 +288,7 @@ export function ScenePlanningWorkspace({ projectId, episodeId, port, onUnsavedCh
           setProposal(null); setAdoptedProposalItems([]); setIgnoredProposalItems([])
           setError('已保留当前文字并转为人工草稿；后续保存不再沿用这份 replay 建议证明。')
         }}>保留文字，转为人工草稿</button>}
-        {proposal && <details><summary>方法、模型声明与 SHA</summary><pre>{JSON.stringify({
+        {proposal && <details><summary>方法、演练声明与 SHA</summary><pre>{JSON.stringify({
           proposalId: proposal.proposalId, execution: proposal.execution, sourceTime: proposal.sourceTime,
           inputSha256: proposal.inputSha256, outputSha256: proposal.outputSha256,
           proposalSha256: proposal.proposalSha256, workOrder: proposal.workOrder,

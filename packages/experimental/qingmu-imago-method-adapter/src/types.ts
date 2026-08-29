@@ -34,8 +34,16 @@ export interface ImagoDirectorReplayMethodResponse extends ImagoMethodJsonObject
   readonly sourceBindings: readonly [{ readonly path: string; readonly sha256: string }]
   readonly integrationCoordinates: readonly ['H2', 'H3-precondition-replay']
   readonly suggestionTypes: {
-    readonly text_director_proposal: { readonly expectedModel: 'deepseek-v4-pro' }
-    readonly visual_finding: { readonly expectedModel: 'deepseek-v4-flash-vision-exp' }
+    readonly text_director_proposal: {
+      readonly capability: 'director.text.proposal'
+      readonly outputSchema: 'qingmu.director-proposal.v1'
+      readonly limits: { readonly advisoryOnly: true; readonly maxShots: 1 }
+    }
+    readonly visual_finding: {
+      readonly capability: 'director.visual.finding'
+      readonly outputSchema: 'qingmu.visual-review-proposal.v1'
+      readonly limits: { readonly advisoryOnly: true; readonly maxShots: 1; readonly pixelReview: false }
+    }
   }
   readonly authority: {
     readonly businessTruth: 'yimeng'

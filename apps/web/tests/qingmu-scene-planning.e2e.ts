@@ -36,8 +36,12 @@ describe.skipIf(!writer || !core || process.env.DSH_CLIENT_BUILD_PROFILE !== 'qi
       await page.getByRole('button', { name: '青木制作台', exact: true }).click()
     }
     const planning = () => page.getByRole('region', { name: '场景与镜头规划' })
-    const commands: string[] = []
-    const watch = () => { page.on('request', (r) => { if (r.url().endsWith('/qingmu-yimeng-command/saveScenePlanning')) commands.push(r.postData() ?? '') }) }
+    const commands: string[] = [], proposalRequests: string[] = [], freshnessChecks: string[] = []
+    const watch = () => { page.on('request', (r) => {
+      if (r.url().endsWith('/qingmu-yimeng-command/saveScenePlanning')) commands.push(r.postData() ?? '')
+      if (r.url().endsWith('/qingmu-yimeng-command/requestDirectorProposal')) proposalRequests.push(r.postData() ?? '')
+      if (r.url().endsWith('/qingmu-yimeng-command/checkDirectorProposalFreshness')) freshnessChecks.push(r.postData() ?? '')
+    }) }
     watch()
     try {
       await enter(true)
@@ -83,7 +87,8 @@ describe.skipIf(!writer || !core || process.env.DSH_CLIENT_BUILD_PROFILE !== 'qi
         storyboard_frames: 2, storyboard_revisions: 1, command_receipts: 2 })
       expect(commands).toHaveLength(1)
       await planning().getByRole('button', { name: /01 · 雨夜相遇/ }).click()
-      await planning().getByRole('button', { name: '读取零费用建议' }).click()
+      await planning().getByRole('button', { name: '读取演练建议' }).click()
+      await planning().getByRole('region', { name: '演练建议（非模型生成）' }).waitFor()
       await planning().getByText('建议只作创意参考，尚未成为正式质检、参考选择、Ready 或人工决定。人工编辑始终可用。').waitFor()
       expect(inspect()).toEqual(first)
       await planning().getByText('原值', { exact: true }).first().scrollIntoViewIfNeeded()
@@ -94,6 +99,7 @@ describe.skipIf(!writer || !core || process.env.DSH_CLIENT_BUILD_PROFILE !== 'qi
       await planning().getByRole('button', { name: '预览保存影响' }).click()
       await planning().getByRole('button', { name: '确认保存规划' }).click()
       await planning().getByRole('status').filter({ hasText: '结构版本 2' }).waitFor()
+      expect(proposalRequests).toHaveLength(1); expect(freshnessChecks).toHaveLength(1)
       const after = inspect()
       expect(after.frames[1]).toEqual(first.frames[1]); expect(after.entities).toEqual(first.entities)
       expect(after.script).toEqual(before.script)
@@ -111,7 +117,7 @@ describe.skipIf(!writer || !core || process.env.DSH_CLIENT_BUILD_PROFILE !== 'qi
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
       await page.getByRole('button', { name: '刷新只读投影', exact: true }).waitFor()
       expect(await page.getByText('只读连接未完成', { exact: true }).count()).toBe(0)
-      await planning().getByRole('button', { name: '读取零费用建议' }).click()
+      await planning().getByRole('button', { name: '读取演练建议' }).click()
       await planning().getByText('原值', { exact: true }).first().scrollIntoViewIfNeeded()
       expect(inspect()).toEqual(after)
       await page.screenshot({ path: join(parent, 'proposal-restored-1280.png') })

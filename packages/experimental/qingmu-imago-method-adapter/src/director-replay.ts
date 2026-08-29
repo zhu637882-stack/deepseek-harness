@@ -36,8 +36,16 @@ export async function loadDirectorReplayMethod(
     }] as const,
     integrationCoordinates: ['H2', 'H3-precondition-replay'] as const,
     suggestionTypes: {
-      text_director_proposal: { expectedModel: 'deepseek-v4-pro' as const },
-      visual_finding: { expectedModel: 'deepseek-v4-flash-vision-exp' as const },
+      text_director_proposal: {
+        capability: 'director.text.proposal' as const,
+        outputSchema: 'qingmu.director-proposal.v1' as const,
+        limits: { advisoryOnly: true as const, maxShots: 1 as const },
+      },
+      visual_finding: {
+        capability: 'director.visual.finding' as const,
+        outputSchema: 'qingmu.visual-review-proposal.v1' as const,
+        limits: { advisoryOnly: true as const, maxShots: 1 as const, pixelReview: false as const },
+      },
     },
     authority: {
       businessTruth: 'yimeng' as const,

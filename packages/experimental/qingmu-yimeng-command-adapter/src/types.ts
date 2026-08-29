@@ -9,8 +9,15 @@ export type { PlanningShot, PlanningBase, PlanningOperation, ScenePlanningReques
 /** Replay-only director suggestions; adopting them still uses planning commands. */
 export type {
   DirectorContextSnapshot, DirectorInferenceWorkOrder, DirectorProposalField,
-  DirectorProposalItem, DirectorProposalRequest, DirectorReplayProposal, DirectorSuggestionType,
+  DirectorProposalItem, DirectorProposalRequest, DirectorProposalFreshnessRequest,
+  DirectorProposalFreshnessResult, DirectorReplayProposal, DirectorSuggestionType,
 } from './director-proposal.ts'
+/** Host execution receipt types; no provider credentials or routing are exported. */
+export type {
+  DirectorProviderDispatchPermit, DirectorProviderExecutionReceipt,
+  DirectorProviderExecutionResult, DirectorProviderProposal, DirectorProviderProposalItem,
+  DirectorProviderTransport, DirectorProviderTransportResult,
+} from './director-provider-execution.ts'
 /** Browser-safe local candidate values; none confer selection or rights authority. */
 export type {
   LocalReferenceCandidateContent, LocalReferenceCandidateList, LocalReferenceCandidateResult,
@@ -2820,6 +2827,7 @@ export interface YimengReworkRouteAuthorityProbe {
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
   readonly requestDirectorProposal: import('./director-proposal.ts').DirectorReplayProposal
+  readonly checkDirectorProposalFreshness: import('./director-proposal.ts').DirectorProposalFreshnessResult
   readonly listLocalReferenceCandidates: import('./local-reference-candidate.ts').LocalReferenceCandidateList
   readonly uploadLocalReferenceCandidate: import('./local-reference-candidate.ts').LocalReferenceCandidateResult
   readonly recoverLocalReferenceCandidate: import('./local-reference-candidate.ts').LocalReferenceCandidateResult

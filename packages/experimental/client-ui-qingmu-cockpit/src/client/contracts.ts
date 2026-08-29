@@ -563,6 +563,10 @@ export interface QingmuYimengCommandPort {
     request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').DirectorProposalRequest,
     signal?: AbortSignal,
   ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').DirectorReplayProposal>
+  checkDirectorProposalFreshness(
+    request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').DirectorProposalFreshnessRequest,
+    signal?: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').DirectorProposalFreshnessResult>
   listLocalReferenceCandidates(
     request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceScope,
     signal?: AbortSignal,
