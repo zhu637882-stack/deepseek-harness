@@ -24,6 +24,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 DEFAULT_ROOT = Path.home() / "Library/Application Support/QingmuOS"
@@ -162,6 +163,29 @@ def available_port(preferred: int = 0) -> int:
         return probe.getsockname()[1]
 
 
+def require_http_loopback_origin(value: str) -> str:
+    """Validate the isolated C0 mock origin before any Host process starts."""
+    try:
+        parsed = urllib.parse.urlparse(value)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError as exc:
+        raise RuntimeError("director DSh mock endpoint must be HTTP loopback") from exc
+    if (
+        parsed.scheme != "http"
+        or hostname not in {"127.0.0.1", "::1"}
+        or port is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise RuntimeError("director DSh mock endpoint must be HTTP loopback")
+    return value.rstrip("/")
+
+
 def mark_lifecycle(root: Path, config: dict, state: str) -> None:
     write_json(root / "private/lifecycle.json", {"instanceId": config["instanceId"], "state": state})
 
@@ -244,14 +268,35 @@ class Supervisor:
             if adapter == "command":
                 fixture = self.config.get("directorExecutionFixture") or {}
                 if fixture.get("taskId"):
-                    overlay += (
-                        "    directorFixtureTaskId: " + json.dumps(fixture["taskId"]) + "\n"
-                        "    directorFixtureMethodVersion: " + json.dumps(fixture["methodPackageVersion"]) + "\n"
-                        "    directorFixtureMethodSha256: " + json.dumps(fixture["methodPackageSha256"]) + "\n"
-                        "    directorFixtureResultJson: "
-                        + json.dumps(json.dumps(fixture["transportResult"], ensure_ascii=False, separators=(",", ":")))
-                        + "\n"
-                    )
+                    if fixture.get("transportMode") == "dsh-one-shot-mock":
+                        mock_base_url = require_http_loopback_origin(str(fixture.get("mockBaseUrl") or ""))
+                        overlay += (
+                            "    directorDshTransportEnabled: true\n"
+                            "    directorDshTaskId: " + json.dumps(fixture["taskId"]) + "\n"
+                            "    directorDshMethodVersion: " + json.dumps(fixture["methodPackageVersion"]) + "\n"
+                            "    directorDshMethodSha256: " + json.dumps(fixture["methodPackageSha256"]) + "\n"
+                            "    directorDshMockBaseUrl: " + json.dumps(mock_base_url) + "\n"
+                        )
+                    else:
+                        overlay += (
+                            "    directorFixtureTaskId: " + json.dumps(fixture["taskId"]) + "\n"
+                            "    directorFixtureMethodVersion: " + json.dumps(fixture["methodPackageVersion"]) + "\n"
+                            "    directorFixtureMethodSha256: " + json.dumps(fixture["methodPackageSha256"]) + "\n"
+                            "    directorFixtureResultJson: "
+                            + json.dumps(json.dumps(fixture["transportResult"], ensure_ascii=False, separators=(",", ":")))
+                            + "\n"
+                        )
+        fixture = self.config.get("directorExecutionFixture") or {}
+        if fixture.get("transportMode") == "dsh-one-shot-mock":
+            mock_base_url = require_http_loopback_origin(str(fixture.get("mockBaseUrl") or ""))
+            overlay += (
+                "\n- id: llm-deepseek\n  config:\n"
+                "    baseURL: " + json.dumps(mock_base_url) + "\n"
+                "    apiKeyEnv: QINGMU_C0_DEEPSEEK_KEY\n"
+                "    thinking: disabled\n"
+                "    reasoningEffort: off\n"
+                "    retryPolicy:\n      mode: normal\n      maxRetries: 0\n"
+            )
         overlay += "\n- id: qingmu-imago-method-adapter\n  config:\n    coreRoot: " + json.dumps(self.config["coreRoot"]) + "\n"
         overlay_path = self.root / "private/local.patch.yml"
         overlay_path.write_text(overlay)

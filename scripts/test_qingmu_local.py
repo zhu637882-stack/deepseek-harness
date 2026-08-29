@@ -68,6 +68,21 @@ class OwnershipTests(unittest.TestCase):
         self.assertNotIn("OPENAI_API_KEY", env)
         self.assertEqual(env["HOME"], "/isolated/home")
 
+    def test_director_mock_origin_is_http_loopback_only(self):
+        self.assertEqual(
+            local.require_http_loopback_origin("http://127.0.0.1:49152"),
+            "http://127.0.0.1:49152",
+        )
+        for value in (
+            "https://127.0.0.1:49152",
+            "http://example.invalid:49152",
+            "http://127.0.0.1:49152/v1",
+            "http://user:secret@127.0.0.1:49152",
+            "http://127.0.0.1",
+        ):
+            with self.subTest(value=value), self.assertRaisesRegex(RuntimeError, "HTTP loopback"):
+                local.require_http_loopback_origin(value)
+
     def test_stale_pid_is_not_a_signal_target(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

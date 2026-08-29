@@ -1,14 +1,24 @@
 import { createHash } from 'node:crypto'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import LlmRuntime from '@deepseek-ai/dsh-llm'
+import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
+import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
 import {
   executeDirectorProviderPermit,
   type DirectorProviderDispatchPermit,
 } from '../src/director-provider-execution.ts'
 import {
   createDeepSeekDirectorTransport,
+  createDshDeepSeekDirectorTransport,
   executeDirectorTaskOnce,
   type DirectorExecutionBinding,
 } from '../src/director-execution-host.ts'
+import { mockServer } from '../../../llm/llm-deepseek/tests/mock-server.ts'
+import type { Behavior } from '../../../llm/llm-deepseek/tests/mock-server.ts'
 
 const canonical = (value: unknown): string => {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
@@ -38,6 +48,29 @@ const permit = (): DirectorProviderDispatchPermit => ({
   payload: { messages: [] },
 })
 
+const deepSeekPermit = (): DirectorProviderDispatchPermit => {
+  const base = permit()
+  const unsigned = {
+    ...base.workOrder,
+    provider: 'deepseek-official', model: 'deepseek-v4-pro', routeKey: 'test.director.deepseek',
+  } as Record<string, unknown>
+  delete unsigned.workOrderSha256
+  return {
+    ...base,
+    provider: 'deepseek-official', model: 'deepseek-v4-pro',
+    workOrder: { ...unsigned, workOrderSha256: sha(unsigned) } as unknown as DirectorProviderDispatchPermit['workOrder'],
+    payload: {
+      project_id: 'project_1', episode_id: 'episode_1', _requested_by_user_id: 'user_1',
+      body: {
+        model: 'deepseek-v4-pro',
+        messages: [{ role: 'user', content: '{"schema":"jason.qingmu-director-text-prompt.v1"}' }],
+        max_completion_tokens: 512, enable_thinking: false,
+        estimated_input_tokens: 2048, estimated_output_tokens: 512,
+      },
+    },
+  }
+}
+
 const binding = (): DirectorExecutionBinding => {
   const value = permit()
   const payloadSha256 = sha(value.payload)
@@ -49,6 +82,31 @@ const binding = (): DirectorExecutionBinding => {
     provider: 'fake', model: 'model_1', methodPackageSha256: 'c'.repeat(64),
     pricingSnapshotSha256: 'f'.repeat(64), dispatchKey: '', dispatchEpoch: 0,
     claimToken: '', claimEpoch: 0, exclusiveExecutionLane: 'qingmu_director_host_permit_v1',
+  }
+}
+
+const deepSeekBinding = (): DirectorExecutionBinding => {
+  const value = deepSeekPermit()
+  const payloadSha256 = sha(value.payload)
+  return {
+    taskId: value.generationTaskId,
+    workOrderSha256: value.workOrder.workOrderSha256,
+    contextSnapshotSha256: value.inputSha256,
+    promptSha256: value.promptSha256,
+    requestSha256: sha({
+      capability: value.workOrder.providerCapability,
+      routeKey: value.workOrder.routeKey,
+      provider: value.provider,
+      model: value.model,
+      payloadSha256,
+    }),
+    payloadSha256,
+    provider: value.provider,
+    model: value.model,
+    methodPackageSha256: value.workOrder.methodPackage.sha256,
+    pricingSnapshotSha256: value.workOrder.pricingSnapshot.sha256,
+    dispatchKey: '', dispatchEpoch: 0, claimToken: '', claimEpoch: 0,
+    exclusiveExecutionLane: 'qingmu_director_host_permit_v1',
   }
 }
 
@@ -83,6 +141,157 @@ describe('Director provider Host execution seam', () => {
     expect(result.state).toBe('provider_result')
     expect(chatCompletions).toHaveBeenCalledOnce()
     expect(chatCompletions.mock.calls[0]?.[0]).toMatchObject({ maxRetries: 0, provider: 'fake', model: 'model_1' })
+  })
+
+  it('uses the real DSh prepareCall and llm-deepseek stream exactly once', async () => {
+    const response = JSON.stringify(transportResult().proposal)
+    const server = await mockServer([{ kind: 'sse', headers: { 'x-request-id': 'request-real-1' }, events: [
+      JSON.stringify({ id: 'completion-real-1', choices: [{ delta: { content: response } }] }),
+      JSON.stringify({ id: 'completion-real-1', choices: [{ delta: { content: '' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 20, completion_tokens: 10, prompt_cache_hit_tokens: 5 } }),
+      '[DONE]',
+    ] }])
+    const home = await mkdtemp(join(tmpdir(), 'qingmu-director-c0-'))
+    const credentialsPath = join(home, '.credentials.env')
+    await writeFile(credentialsPath, 'version: 1\nrefs:\n  C0_DEEPSEEK_KEY: isolated-mock-key\n', { mode: 0o600 })
+    vi.stubEnv('DSH_HOME', home)
+    vi.stubEnv('DEEPSEEK_API_KEY', '')
+    const ctx = new Context()
+    await ctx.plugin(LocalCredentialProvider, { path: credentialsPath, watch: false })
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmDeepSeek, {
+      baseURL: server.url, apiKeyEnv: 'C0_DEEPSEEK_KEY', thinking: 'disabled', reasoningEffort: 'off',
+      retryPolicy: { mode: 'normal', maxRetries: 0 },
+    })
+    try {
+      const result = await executeDirectorProviderPermit(
+        deepSeekPermit(), createDshDeepSeekDirectorTransport(ctx.llm, { mockBaseUrl: server.url }),
+        new AbortController().signal,
+      )
+      expect(result).toMatchObject({ state: 'provider_result', receipt: {
+        providerCompletionId: 'completion-real-1', providerRequestId: 'request-real-1',
+        finishReason: 'stop', usage: { promptTokens: 20, cacheTokens: 5, completionTokens: 10, totalTokens: 30 },
+      } })
+      expect(server.requests).toHaveLength(1)
+      expect(server.requests[0]).toMatchObject({
+        model: 'deepseek-v4-pro', response_format: { type: 'json_object' },
+        stream: true,
+      })
+      expect(server.requests[0]).not.toHaveProperty('tools')
+    } finally {
+      await server.close()
+      await rm(home, { recursive: true, force: true })
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('allows only one of two concurrent Hosts to reach the real adapter POST', async () => {
+    const response = JSON.stringify(transportResult().proposal)
+    const server = await mockServer([{ kind: 'sse', headers: { 'x-request-id': 'request-concurrent-1' }, events: [
+      JSON.stringify({ id: 'completion-concurrent-1', choices: [{ delta: { content: response } }] }),
+      JSON.stringify({ id: 'completion-concurrent-1', choices: [{ finish_reason: 'stop' }],
+        usage: { prompt_tokens: 20, completion_tokens: 10, prompt_cache_hit_tokens: 5 } }),
+      '[DONE]',
+    ] }])
+    vi.stubEnv('DEEPSEEK_API_KEY', 'isolated-concurrent-mock-key')
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmDeepSeek, {
+      baseURL: server.url, thinking: 'disabled', reasoningEffort: 'off',
+      retryPolicy: { mode: 'normal', maxRetries: 0 },
+    })
+    let claimed = false
+    const fetchImpl = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString())
+      if (url.pathname.endsWith('/binding')) return Response.json(deepSeekBinding())
+      if (url.pathname.endsWith('/prepare')) {
+        if (claimed) return new Response('{"detail":"not claimable"}', { status: 409 })
+        claimed = true
+        return Response.json(deepSeekPermit())
+      }
+      if (url.pathname.endsWith('/complete')) {
+        return Response.json({ state: 'settled', generationTaskId: 'task_1', executionReceipt: { id: 'same' } })
+      }
+      throw new Error('unexpected request')
+    }) as typeof fetch
+    const execute = () => executeDirectorTaskOnce({
+      baseUrl: 'http://127.0.0.1:49999',
+      executionKey: 'execution-key-material-is-at-least-32-bytes',
+      transport: createDshDeepSeekDirectorTransport(ctx.llm, { mockBaseUrl: server.url }),
+      fetch: fetchImpl,
+    }, 'task_1', 'director-paid.v1', 'c'.repeat(64), new AbortController().signal)
+    try {
+      const results = await Promise.allSettled([execute(), execute()])
+      expect(results.filter(item => item.status === 'fulfilled')).toHaveLength(1)
+      expect(results.filter(item => item.status === 'rejected')).toHaveLength(1)
+      expect(server.requests).toHaveLength(1)
+    } finally {
+      await server.close()
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it.each([
+    ['missing request id', { kind: 'sse', events: [
+      '{"id":"completion-missing-header","choices":[{"delta":{"content":"{}"}}]}',
+      '{"id":"completion-missing-header","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
+      '[DONE]',
+    ] }],
+    ['invalid JSON', { kind: 'sse', headers: { 'x-request-id': 'request-invalid-json' }, events: [
+      '{"id":"completion-invalid-json","choices":[{"delta":{"content":"not-json"}}]}',
+      '{"id":"completion-invalid-json","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
+      '[DONE]',
+    ] }],
+    ['missing completion id', { kind: 'sse', headers: { 'x-request-id': 'request-missing-completion' }, events: [
+      '{"choices":[{"delta":{"content":"{}"}}]}',
+      '{"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
+      '[DONE]',
+    ] }],
+    ['missing usage', { kind: 'sse', headers: { 'x-request-id': 'request-missing-usage' }, events: [
+      '{"id":"completion-missing-usage","choices":[{"delta":{"content":"{}"}}]}',
+      '{"id":"completion-missing-usage","choices":[{"finish_reason":"stop"}]}',
+      '[DONE]',
+    ] }],
+    ['completion id drift', { kind: 'sse', headers: { 'x-request-id': 'request-drift' }, events: [
+      '{"id":"completion-a","choices":[{"delta":{"content":"{}"}}]}',
+      '{"id":"completion-b","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
+      '[DONE]',
+    ] }],
+    ['redirect', { kind: 'http-error', status: 302, body: '', headers: { location: 'https://example.invalid/chat/completions' } }],
+    ['transient 5xx', { kind: 'http-error', status: 503, body: '{"error":{"message":"later"}}' }],
+    ['interrupted stream', { kind: 'close-early', events: [
+      '{"id":"completion-interrupted","choices":[{"delta":{"content":"{"}}]}',
+    ] }],
+  ] satisfies ReadonlyArray<readonly [string, Behavior]>)('fails %s closed after at most one real adapter POST', async (_name, behavior) => {
+    const server = await mockServer([behavior])
+    vi.stubEnv('DEEPSEEK_API_KEY', 'isolated-mock-key')
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmDeepSeek, {
+      baseURL: server.url, thinking: 'disabled', reasoningEffort: 'off',
+      retryPolicy: { mode: 'normal', maxRetries: 0 },
+    })
+    try {
+      const result = await executeDirectorProviderPermit(
+        deepSeekPermit(), createDshDeepSeekDirectorTransport(ctx.llm, { mockBaseUrl: server.url }),
+        new AbortController().signal,
+      )
+      expect(result).toMatchObject({ state: 'submission_unknown', automaticRetry: false })
+      expect(server.requests).toHaveLength(1)
+    } finally {
+      await server.close()
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('rejects non-loopback mock endpoints before preparing or fetching', () => {
+    const prepareCall = vi.fn()
+    const llm: Pick<LlmRuntime, 'prepareCall'> = { prepareCall }
+    expect(() => createDshDeepSeekDirectorTransport(
+      llm,
+      { mockBaseUrl: 'https://api.deepseek.com' },
+    )).toThrow('must be HTTP loopback')
+    expect(prepareCall).not.toHaveBeenCalled()
   })
 
   it('signs Host-only requests and recovers terminal response loss without a second inference', async () => {

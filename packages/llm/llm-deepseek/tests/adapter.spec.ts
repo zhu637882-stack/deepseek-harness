@@ -184,6 +184,64 @@ describe('DeepSeekAdapter against a mock server', () => {
     expect(server.headers[0]).not.toHaveProperty('x-deepseek-harness-compact')
   })
 
+  it('preserves successful completion and request ids as replay metadata', async () => {
+    const server = await mockServer([{ kind: 'sse', headers: { 'x-request-id': 'request-success-1' }, events: [
+      '{"id":"completion-success-1","choices":[{"delta":{"content":"{\\"ok\\":true}"}}]}',
+      '{"id":"completion-success-1","choices":[{"delta":{"content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":4,"prompt_cache_hit_tokens":3}}',
+      '[DONE]',
+    ] }])
+    const ctx = await harness(server.url, { retryPolicy: { mode: 'normal', maxRetries: 0 } })
+    const prepared = await ctx.llm.prepareCall({
+      provider: 'deepseek-official', model: 'deepseek-v4-pro',
+      reasoningEffort: ReasoningEffortId('off'), maxTokens: 512,
+    })
+    const chunks = []
+    const request = {
+      ...prepared.config,
+      messages: [createUserMessage({
+        content: [{ type: 'text' as const, text: 'json only' }],
+        source: { kind: 'plugin' as const, plugin: 'test' },
+      })],
+      purpose: 'director-proposal' as const,
+    }
+    for await (const chunk of prepared.stream(request)) chunks.push(chunk)
+    expect(server.requests).toHaveLength(1)
+    expect(server.requests[0]).toMatchObject({ response_format: { type: 'json_object' } })
+    expect(chunks.at(-1)).toMatchObject({
+      type: 'finish', reason: { kind: 'stop' }, replayState: { response: {
+        providerRequestId: 'request-success-1', providerCompletionId: 'completion-success-1', finishReason: 'stop',
+      } },
+    })
+    await expect(async () => {
+      for await (const _chunk of prepared.stream(request)) { /* one-shot assertion */ }
+    }).rejects.toMatchObject({ code: 'INVALID_PREPARED_CALL' })
+    expect(server.requests).toHaveLength(1)
+  })
+
+  it('fails closed when streamed completion id changes', async () => {
+    const server = await mockServer([{ kind: 'sse', headers: { 'x-request-id': 'request-drift-1' }, events: [
+      '{"id":"completion-a","choices":[{"delta":{"content":"partial"},"finish_reason":"length"}]}',
+      '{"id":"completion-b","choices":[{"delta":{"content":"later"},"finish_reason":"stop"}]}',
+      '[DONE]',
+    ] }])
+    const ctx = await harness(server.url, { retryPolicy: { mode: 'normal', maxRetries: 0 } })
+    const result = await assemble(ctx, { model: 'deepseek-v4-pro', messages: [] })
+    expect(result.finish).toMatchObject({ kind: 'error', failure: { code: 'MALFORMED_RESPONSE' } })
+    expect(server.requests).toHaveLength(1)
+  })
+
+  it('fails closed when streamed finish reason changes', async () => {
+    const server = await mockServer([{ kind: 'sse', headers: { 'x-request-id': 'request-finish-drift-1' }, events: [
+      '{"id":"completion-stable","choices":[{"delta":{"content":"partial"},"finish_reason":"length"}]}',
+      '{"id":"completion-stable","choices":[{"delta":{"content":"later"},"finish_reason":"stop"}]}',
+      '[DONE]',
+    ] }])
+    const ctx = await harness(server.url, { retryPolicy: { mode: 'normal', maxRetries: 0 } })
+    const result = await assemble(ctx, { model: 'deepseek-v4-pro', messages: [] })
+    expect(result.finish).toMatchObject({ kind: 'error', failure: { code: 'MALFORMED_RESPONSE' } })
+    expect(server.requests).toHaveLength(1)
+  })
+
   it('uploads a durable image once and sends only its Files API id to the vision model', async () => {
     const server = await mockServer([{ kind: 'sse', events: textEvents }])
     const signalSeen: (AbortSignal | undefined)[] = []
@@ -2006,6 +2064,32 @@ describe('plugin registration and config', () => {
     expect(resolveApiKey).toHaveBeenCalledTimes(1)
     expect(resolveUserId).toHaveBeenCalledTimes(1)
     expect(server.headers[0]?.authorization).toBe('Bearer per-request-key')
+  })
+
+  it('binds settings and credential generations before a prepared stream dispatches', async () => {
+    const first = await mockServer([{ kind: 'sse', events: textEvents }])
+    const second = await mockServer([{ kind: 'sse', events: textEvents }])
+    let baseURL = first.url
+    let key = 'prepared-key'
+    const adapter = new DeepSeekAdapter({
+      options: () => resolveAdapterOptions({ baseURL }),
+      resolveApiKey: () => Promise.resolve(key),
+      resolveUserId: () => TEST_USER_ID,
+    })
+    try {
+      const prepared = await adapter.prepareCall('deepseek-official', 'deepseek-v4-pro')
+      baseURL = second.url
+      key = 'later-key'
+      for await (const _chunk of prepared.stream({
+        provider: 'deepseek-official', model: 'deepseek-v4-pro', messages: [],
+      })) { /* drain */ }
+      expect(first.requests).toHaveLength(1)
+      expect(first.headers[0]?.authorization).toBe('Bearer prepared-key')
+      expect(second.requests).toHaveLength(0)
+    } finally {
+      await first.close()
+      await second.close()
+    }
   })
 
   it('rejects invalid idle watchdog bounds for direct and plugin composition', async () => {

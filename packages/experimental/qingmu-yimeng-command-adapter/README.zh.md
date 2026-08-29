@@ -14,6 +14,8 @@
 
 适配器自身不写数据库。它校验浏览器输入，只从 Host 环境获取 `YIMENG_API_TOKEN`，并把命令转发给易梦拥有的 HTTP API。项目归属、修订检查、持久 ChangeSet、幂等回执、outbox 事件和下游失效仍由易梦掌权。
 
+导演 Provider 执行接缝仅属于 Host，且默认禁用。隔离部署可以显式配置 `directorDshTransportEnabled`、一个已签发任务、其方法绑定和一个不含凭据的精确 HTTP loopback mock origin；launcher 与 prepared transport 都会拒绝远程地址、端点漂移和重定向。Host 随后保持既有 binding → prepare → transport → complete/unknown 顺序，通过一个 `ctx.llm.prepareCall()` handle 和严格一次 `prepared.stream()` 执行已签名的 `deepseek-v4-pro` 纯文本 payload。该调用要求适配器的 normal 重试策略且 `maxRetries: 0`，使用 JSON Output，不包含工具、图像、文件、附件、Agent、Session 或工具循环，并且只接受 `qingmu.director-proposal.v1`。成功结果必须携带稳定的真实 completion id 与 finish reason、响应 request id、token/cache 用量及输入输出谱系；任一事实缺失、漂移或非法都转为 submission-unknown，且不重试。该接缝不注册生产 route，不向浏览器 RPC 暴露执行密钥、claim、permit 或 Provider payload，也不创建第二份任务或费用账本。
+
 ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只有当 `canCommit` 为 true 且用户明确确认后才可提交。提交回执不等于人工创意签收，也不授权付费 Provider 调用。
 
 元素命令使用通用的 `/api/qingmu/projects/{projectId}/elements/{elementKind}/{targetId}` 路由族。运行时只接受准确的 `actor`、`scene` 和 `prop`，其他类型全部失败关闭。预览与提交校验把 ChangeSet、subject 坐标、修订号、snapshot 与 payload 哈希、operation，以及不授予权力的 preflight 标记绑定到原始浏览器请求。

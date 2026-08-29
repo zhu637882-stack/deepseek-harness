@@ -13,6 +13,13 @@ import type { ContentBlock, FinishReason, StreamChunk, TokenUsage } from '@deeps
 import { DONE } from './sse.ts'
 import type { WireChunk, WireUsage } from './types.ts'
 
+/** Response facts preserved from a successful DeepSeek Chat Completions stream. */
+export interface DeepSeekSuccessMetadata {
+  readonly providerRequestId?: string
+  readonly providerCompletionId?: string
+  readonly finishReason?: string
+}
+
 /** One open block under assembly. */
 interface OpenBlock {
   index: number
@@ -79,11 +86,15 @@ function closeBlock(block: OpenBlock): ContentBlock {
  * Consume SSE data payloads (ending with `[DONE]`) and yield StreamChunks.
  * Malformed JSON payloads abort the stream with `MALFORMED_RESPONSE`.
  * @param payloads - SSE data payloads from {@link parseSse}, `[DONE]`-terminated.
+ * @param responseMetadata - Validated response-header facts captured by the adapter for successful replay metadata.
  * @returns deltas as they arrive; `block-end`s, `usage`, and `finish` are all deferred to the `[DONE]` sentinel.
  *   A `stop` (or absent) finish with no opened blocks is a degenerate provider completion and maps to an
  *   `EMPTY_RESPONSE` error finish instead of a successful empty message.
  */
-export async function* translate(payloads: AsyncIterable<string>): AsyncGenerator<StreamChunk> {
+export async function* translate(
+  payloads: AsyncIterable<string>,
+  responseMetadata: Pick<DeepSeekSuccessMetadata, 'providerRequestId'> = {},
+): AsyncGenerator<StreamChunk> {
   let nextIndex = 0
   let textBlock: OpenBlock | undefined
   let reasoningBlock: OpenBlock | undefined
@@ -91,6 +102,8 @@ export async function* translate(payloads: AsyncIterable<string>): AsyncGenerato
   const order: OpenBlock[] = []
   let pendingFinish: FinishReason | undefined
   let pendingUsage: TokenUsage | undefined
+  let providerCompletionId: string | undefined
+  let nativeFinishReason: string | undefined
 
   function open(kind: OpenBlock['kind']): OpenBlock {
     const block: OpenBlock = { index: nextIndex++, kind, text: '' }
@@ -113,6 +126,15 @@ export async function* translate(payloads: AsyncIterable<string>): AsyncGenerato
             failure: { message: 'model returned a completed response with no content', code: EMPTY_RESPONSE_CODE },
           }
           : reason,
+        replayState: {
+          response: {
+            ...responseMetadata.providerRequestId === undefined ? {} : {
+              providerRequestId: responseMetadata.providerRequestId,
+            },
+            ...providerCompletionId === undefined ? {} : { providerCompletionId },
+            ...nativeFinishReason === undefined ? {} : { finishReason: nativeFinishReason },
+          } satisfies DeepSeekSuccessMetadata,
+        },
       }
       return
     }
@@ -122,6 +144,15 @@ export async function* translate(payloads: AsyncIterable<string>): AsyncGenerato
       chunk = JSON.parse(payload) as WireChunk
     } catch {
       throw new LlmError(`malformed SSE payload: ${payload.slice(0, 120)}`, 'MALFORMED_RESPONSE')
+    }
+    if (chunk.id !== undefined) {
+      if (typeof chunk.id !== 'string' || chunk.id.length === 0) {
+        throw new LlmError('DeepSeek stream returned an invalid completion id', 'MALFORMED_RESPONSE')
+      }
+      if (providerCompletionId !== undefined && providerCompletionId !== chunk.id) {
+        throw new LlmError('DeepSeek stream changed completion id', 'MALFORMED_RESPONSE')
+      }
+      providerCompletionId = chunk.id
     }
 
     for (const choice of chunk.choices ?? []) {
@@ -170,6 +201,10 @@ export async function* translate(payloads: AsyncIterable<string>): AsyncGenerato
       }
 
       if (typeof choice.finish_reason === 'string') {
+        if (nativeFinishReason !== undefined && nativeFinishReason !== choice.finish_reason) {
+          throw new LlmError('DeepSeek stream changed finish reason', 'MALFORMED_RESPONSE')
+        }
+        nativeFinishReason = choice.finish_reason
         pendingFinish = mapFinishReason(choice.finish_reason)
       }
     }

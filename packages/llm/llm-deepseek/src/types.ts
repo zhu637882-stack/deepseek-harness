@@ -27,6 +27,8 @@ export interface WireRequest {
    * produces any one of these strings. Mapped from `GenerateOptions.stop`.
    */
   stop?: string[]
+  /** Provider JSON mode used only by the bounded DirectorProposal one-shot call. */
+  response_format?: { type: 'json_object' }
 }
 
 /** System-role message: a single string of instructions. */
@@ -117,6 +119,8 @@ export interface WireTool {
 
 /** One parsed SSE `data:` payload (a chat.completion.chunk). */
 export interface WireChunk {
+  /** Provider completion id repeated on streamed chunks. */
+  id?: string
   choices?: WireChoice[]
   /** Arrives attached to the finish chunk and/or as a trailing usage-only chunk. */
   usage?: WireUsage | null

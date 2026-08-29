@@ -10,6 +10,7 @@
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
     { "path": "../../client/connection/tsconfig.host.json" },
+    { "path": "../../llm/llm" },
     { "path": "../../host/apiproxy" },
     { "path": "../qingmu-imago-method-adapter" },
     { "path": "../../runtime-diagnostics/invariants" }

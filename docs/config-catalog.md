@@ -658,10 +658,20 @@ export interface YimengCommandAdapterConfig {
   readonly directorFixtureMethodSha256?: string
   /** JSON fake ChatCompletions result; never a production Provider registration. */
   readonly directorFixtureResultJson?: string
+  /** Explicit Host-private enablement for the one-shot DSh transport; disabled by default. */
+  readonly directorDshTransportEnabled?: boolean
+  /** Exact isolated task executed by the one-shot DSh transport. */
+  readonly directorDshTaskId?: string
+  /** Exact method version already bound to the isolated DSh task. */
+  readonly directorDshMethodVersion?: string
+  /** Exact lowercase SHA-256 of the method package bound to the isolated DSh task. */
+  readonly directorDshMethodSha256?: string
+  /** Exact HTTP loopback origin of the isolated Chat Completions mock. */
+  readonly directorDshMockBaseUrl?: string
 }
 ```
 
-Source: [`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:458`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
+Source: [`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:461`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-qingmu-yimeng-read-adapter"></a>
 
@@ -1053,7 +1063,7 @@ export interface DeepSeekCatalogModel {
 
 Depends on: [`ModelModality`](../packages/llm/llm/src/index.ts) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts)
 
-Source: [`packages/llm/llm-deepseek/src/index.ts:106`](../packages/llm/llm-deepseek/src/index.ts)
+Source: [`packages/llm/llm-deepseek/src/index.ts:107`](../packages/llm/llm-deepseek/src/index.ts)
 
 <a id="deepseek-aidsh-llm-pi-ai"></a>
 

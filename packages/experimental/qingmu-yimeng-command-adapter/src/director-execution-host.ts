@@ -1,5 +1,7 @@
 /** Private Host client for the Yimeng DirectorInference execution plane. */
 import { createHash, createHmac, randomBytes } from 'node:crypto'
+import type { LlmRuntime, TokenUsage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type {
   DirectorProviderDispatchPermit,
   DirectorProviderExecutionResult,
@@ -51,6 +53,140 @@ export function createDeepSeekDirectorTransport(
   return {
     execute: async (request, signal) => {
       return await adapter.chatCompletions({ ...request, maxRetries: 0 }, signal)
+    },
+  }
+}
+
+interface DeepSeekResponseMetadata {
+  readonly providerRequestId?: unknown
+  readonly providerCompletionId?: unknown
+  readonly finishReason?: unknown
+}
+
+const loopbackMockBaseUrl = (value: string): string => {
+  let parsed: URL
+  try { parsed = new URL(value) } catch { throw new Error('director DSh mock endpoint invalid') }
+  const hostname = parsed.hostname.toLowerCase()
+  if (parsed.protocol !== 'http:' || parsed.username !== '' || parsed.password !== ''
+    || parsed.pathname !== '/' || parsed.search !== '' || parsed.hash !== ''
+    || (hostname !== '127.0.0.1' && hostname !== '[::1]' && hostname !== '::1')) {
+    throw new Error('director DSh mock endpoint must be HTTP loopback')
+  }
+  return parsed.href.replace(/\/$/, '')
+}
+
+const directorBody = (payload: Readonly<Record<string, unknown>>, provider: string, model: string): {
+  prompt: string
+  maxTokens: number
+} => {
+  if (provider !== 'deepseek-official' || model !== 'deepseek-v4-pro') {
+    throw new Error('director DSh route is not allowed')
+  }
+  const body = payload.body
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    throw new Error('director DSh payload invalid')
+  }
+  const request = body as Record<string, unknown>
+  const allowed = new Set([
+    'model', 'messages', 'max_completion_tokens', 'enable_thinking',
+    'estimated_input_tokens', 'estimated_output_tokens',
+  ])
+  if (Object.keys(request).some(key => !allowed.has(key))
+    || request.model !== model || request.enable_thinking !== false
+    || !Number.isSafeInteger(request.max_completion_tokens)
+    || Number(request.max_completion_tokens) < 1 || Number(request.max_completion_tokens) > 512
+    || !Array.isArray(request.messages) || request.messages.length !== 1) {
+    throw new Error('director DSh payload invalid')
+  }
+  const message: unknown = request.messages[0]
+  if (typeof message !== 'object' || message === null || Array.isArray(message)
+    || Object.keys(message).sort().join('\0') !== 'content\0role'
+    || (message as Record<string, unknown>).role !== 'user'
+    || typeof (message as Record<string, unknown>).content !== 'string') {
+    throw new Error('director DSh payload invalid')
+  }
+  const prompt = (message as Record<string, unknown>).content as string
+  if (Buffer.byteLength(prompt) === 0 || Buffer.byteLength(prompt) > 64 * 1024) {
+    throw new Error('director DSh prompt invalid')
+  }
+  return { prompt, maxTokens: Number(request.max_completion_tokens) }
+}
+
+/**
+ * Bind the Host-only DirectorProposal seam to the real DSh LLM runtime.
+ * The prepared handle is consumed exactly once and must advertise zero retries.
+ * @param llm - Host-private DSh LLM runtime used to prepare the signed provider/model route.
+ * @param options - Exact HTTP loopback mock origin allowed for this isolated transport.
+ * @returns A single-attempt Director transport that fails closed on incomplete provider facts.
+ */
+export function createDshDeepSeekDirectorTransport(
+  llm: Pick<LlmRuntime, 'prepareCall'>,
+  options: Readonly<{ mockBaseUrl: string }>,
+): DirectorProviderTransport {
+  const expectedMockBaseUrl = loopbackMockBaseUrl(options.mockBaseUrl)
+  return {
+    execute: async ({ provider, model, payload }, signal) => {
+      const { prompt, maxTokens } = directorBody(payload, provider, model)
+      const prepared = await llm.prepareCall({
+        provider, model, reasoningEffort: ReasoningEffortId('off'), maxTokens,
+      }, signal)
+      if (typeof prepared.transport?.baseURL !== 'string'
+        || loopbackMockBaseUrl(prepared.transport.baseURL) !== expectedMockBaseUrl) {
+        throw new Error('director DSh prepared endpoint mismatch')
+      }
+      if (prepared.retryPolicy.mode !== 'normal' || prepared.retryPolicy.maxRetries !== 0) {
+        throw new Error('director DSh adapter retries are not disabled')
+      }
+      let text = ''
+      let usage: TokenUsage | undefined
+      let metadata: DeepSeekResponseMetadata | undefined
+      let finishReason: string | undefined
+      const request = {
+        ...prepared.config,
+        messages: [createUserMessage({
+          content: [{ type: 'text' as const, text: prompt }],
+          source: { kind: 'plugin' as const, plugin: 'qingmu-director-one-shot' },
+        })],
+        purpose: 'director-proposal' as const,
+        signal,
+      }
+      for await (const chunk of prepared.stream(request)) {
+        if (chunk.type === 'text-delta') {
+          text += chunk.text
+          if (Buffer.byteLength(text) > 64 * 1024) throw new Error('director DSh response exceeds limit')
+        } else if (chunk.type === 'reasoning-delta' || chunk.type === 'tool-call-delta') {
+          throw new Error('director DSh response content invalid')
+        } else if (chunk.type === 'usage') {
+          usage = chunk.usage
+        } else if (chunk.type === 'finish') {
+          if (chunk.reason.kind !== 'stop') throw new Error('director DSh response did not stop successfully')
+          finishReason = chunk.reason.kind
+          metadata = chunk.replayState?.response as DeepSeekResponseMetadata | undefined
+        }
+      }
+      if (usage === undefined || metadata === undefined
+        || typeof metadata.providerCompletionId !== 'string'
+        || typeof metadata.providerRequestId !== 'string'
+        || typeof metadata.finishReason !== 'string'
+        || metadata.finishReason !== finishReason) {
+        throw new Error('director DSh provider receipt incomplete')
+      }
+      let proposal: unknown
+      try { proposal = JSON.parse(text) } catch { throw new Error('director DSh response JSON invalid') }
+      const cacheTokens = usage.cacheReadTokens ?? 0
+      const promptTokens = usage.inputTokens + cacheTokens + (usage.cacheWriteTokens ?? 0)
+      return {
+        providerCompletionId: metadata.providerCompletionId,
+        providerRequestId: metadata.providerRequestId,
+        finishReason: metadata.finishReason,
+        usage: {
+          promptTokens,
+          cacheTokens,
+          completionTokens: usage.outputTokens,
+          totalTokens: promptTokens + usage.outputTokens,
+        },
+        proposal: proposal as DirectorProviderTransportResult['proposal'],
+      }
     },
   }
 }

@@ -164,6 +164,8 @@ export interface PreparedLlmCall {
   readonly inputModalities?: readonly ModelModality[]
   /** Config fields materialized by the captured adapter rather than proposed by the caller. */
   readonly adapterDefaults: LlmCallConfigAdapterDefaults
+  /** Non-secret transport facts captured with the adapter generation. */
+  readonly transport?: Readonly<{ baseURL?: string }>
   /**
    * Dispatch this call once through the registration captured during
    * preparation. The request's call-config fields must match {@link config};
@@ -178,6 +180,8 @@ export interface PreparedLlmCall {
 export interface PreparedAdapterCall {
   /** Exact model metadata from the same adapter generation as {@link stream}. */
   readonly model: LlmResolvedModelInfo
+  /** Non-secret transport facts captured with this adapter generation. */
+  readonly transport?: Readonly<{ baseURL?: string }>
   /** Dispatch through that generation without re-reading dynamic connection facts. */
   stream(options: GenerateOptions): AsyncIterable<StreamChunk>
 }
@@ -838,11 +842,15 @@ export class LlmRuntime extends Service {
         ? { maxTokens: true }
         : {},
     })
+    const transport = adapterCall.transport === undefined
+      ? undefined
+      : deepFreeze(structuredClone(adapterCall.transport))
     let dispatched = false
     return Object.freeze({
       config: resolvedConfig,
       retryPolicy: registration.retryPolicy,
       adapterDefaults,
+      ...transport === undefined ? {} : { transport },
       ...context === undefined ? {} : { context },
       ...modelInfo.inputModalities === undefined
         ? {}

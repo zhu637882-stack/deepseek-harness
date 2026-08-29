@@ -6,6 +6,7 @@ import { prepareScenePlanning } from './scene-planning.ts'
 import { prepareLocalReferenceCandidate } from './local-reference-candidate.ts'
 import type { DirectorProposalFreshnessResult } from './director-proposal.ts'
 import {
+  createDshDeepSeekDirectorTransport,
   createDeepSeekDirectorTransport,
   executeDirectorTaskOnce,
 } from './director-execution-host.ts'
@@ -17,7 +18,9 @@ import {
   parseDirectorPaidWorkOrderStatusRequest,
 } from './director-paid-work-order.ts'
 export { executeDirectorProviderPermit } from './director-provider-execution.ts'
-export { createDeepSeekDirectorTransport, executeDirectorTaskOnce } from './director-execution-host.ts'
+export {
+  createDeepSeekDirectorTransport, createDshDeepSeekDirectorTransport, executeDirectorTaskOnce,
+} from './director-execution-host.ts'
 export type {
   DirectorProviderDispatchPermit, DirectorProviderExecutionReceipt,
   DirectorProviderExecutionResult, DirectorProviderTransport, DirectorProviderTransportResult,
@@ -468,6 +471,16 @@ export interface YimengCommandAdapterConfig {
   readonly directorFixtureMethodSha256?: string
   /** JSON fake ChatCompletions result; never a production Provider registration. */
   readonly directorFixtureResultJson?: string
+  /** Explicit Host-private enablement for the one-shot DSh transport; disabled by default. */
+  readonly directorDshTransportEnabled?: boolean
+  /** Exact isolated task executed by the one-shot DSh transport. */
+  readonly directorDshTaskId?: string
+  /** Exact method version already bound to the isolated DSh task. */
+  readonly directorDshMethodVersion?: string
+  /** Exact lowercase SHA-256 of the method package bound to the isolated DSh task. */
+  readonly directorDshMethodSha256?: string
+  /** Exact HTTP loopback origin of the isolated Chat Completions mock. */
+  readonly directorDshMockBaseUrl?: string
 }
 
 /** Validated Cordis configuration for the command adapter. */
@@ -478,6 +491,11 @@ export const Config: z<YimengCommandAdapterConfig> = z.object({
   directorFixtureMethodVersion: z.string().default(''),
   directorFixtureMethodSha256: z.string().default(''),
   directorFixtureResultJson: z.string().default(''),
+  directorDshTransportEnabled: z.boolean().default(false),
+  directorDshTaskId: z.string().default(''),
+  directorDshMethodVersion: z.string().default(''),
+  directorDshMethodSha256: z.string().default(''),
+  directorDshMockBaseUrl: z.string().default(''),
 })
 
 /** Injectable Host capabilities used by isolated tests. */
@@ -5837,5 +5855,33 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
         controller.abort()
       }
     }, 'qingmu director execution fixture')
+  }
+  if (config.directorDshTransportEnabled && config.directorDshTaskId) {
+    const executionKey = process.env.QINGMU_DIRECTOR_EXECUTION_KEY ?? ''
+    const controller = new AbortController()
+    ctx.effect(() => {
+      void (async () => {
+        try {
+          const llm = ctx.get('llm')
+          if (llm === undefined) throw new Error('DSh LLM runtime unavailable')
+          await executeDirectorTaskOnce(
+            {
+              baseUrl: config.baseUrl ?? DEFAULT_BASE_URL,
+              executionKey,
+              transport: createDshDeepSeekDirectorTransport(llm, {
+                mockBaseUrl: config.directorDshMockBaseUrl ?? '',
+              }),
+            },
+            config.directorDshTaskId ?? '',
+            config.directorDshMethodVersion ?? '',
+            config.directorDshMethodSha256 ?? '',
+            controller.signal,
+          )
+        } catch {
+          ctx.logger.error('isolated Director DSh one-shot execution failed')
+        }
+      })()
+      return () => { controller.abort() }
+    }, 'qingmu director DSh one-shot execution')
   }
 }

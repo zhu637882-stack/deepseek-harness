@@ -418,12 +418,18 @@ export class DeepSeekAdapter extends LlmAdapter {
     }
   }
 
-  override prepareCall(provider: string, model: string, _signal?: AbortSignal): Promise<PreparedAdapterCall> {
+  override async prepareCall(
+    provider: string,
+    model: string,
+    _signal?: AbortSignal,
+  ): Promise<PreparedAdapterCall> {
     const connection = this.config.options()
-    return Promise.resolve({
+    const apiKey = await this.config.resolveApiKey(connection)
+    return {
       model: this.modelInfoFor(connection, provider, model),
-      stream: options => this.streamWithConnection(options, connection),
-    })
+      transport: { baseURL: connection.baseURL },
+      stream: options => this.streamWithConnection(options, connection, apiKey),
+    }
   }
 
   stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
@@ -433,12 +439,12 @@ export class DeepSeekAdapter extends LlmAdapter {
   private async * streamWithConnection(
     options: GenerateOptions,
     connection: DeepSeekConnectionOptions,
+    preparedApiKey?: string,
   ): AsyncIterable<StreamChunk> {
-    // One resolution per stream call: connection facts and the credential
-    // freeze here and hold for this whole request, so an in-flight stream
-    // never observes a configuration change and the next call re-resolves.
-    // The key resolves *from this snapshot*, so an endpoint and the secret
-    // sent to it can never come from different configuration generations.
+    // Direct streams resolve once here. A prepared call supplies the key that
+    // was captured with its connection facts, so neither settings nor a
+    // credential-store generation can change the eventual request. In both
+    // paths endpoint and secret always come from one operation snapshot.
     const hasImages = options.messages.some(message => contentHasImage(message.content))
     let attachments: AttachmentStore | undefined
     if (hasImages) {
@@ -457,7 +463,7 @@ export class DeepSeekAdapter extends LlmAdapter {
         )
       }
     }
-    const apiKey = await this.config.resolveApiKey(connection)
+    const apiKey = preparedApiKey ?? await this.config.resolveApiKey(connection)
     const userId = this.config.resolveUserId()
     const consumer = new AbortController()
     const upstream = options.signal === undefined
@@ -606,6 +612,7 @@ export class DeepSeekAdapter extends LlmAdapter {
       try {
         response = await fetch(`${connection.baseURL}/chat/completions`, {
           method: 'POST',
+          redirect: 'error',
           headers,
           body: payload,
           signal,
@@ -659,7 +666,10 @@ export class DeepSeekAdapter extends LlmAdapter {
         throw new LlmError('DeepSeek API returned no response body', 'EMPTY_RESPONSE')
       }
 
-      yield* translate(parseSse(response.body, onActivity))
+      const successfulRequestId = requestId(response.headers)
+      yield* translate(parseSse(response.body, onActivity), successfulRequestId === undefined
+        ? {}
+        : { providerRequestId: successfulRequestId })
       return
     }
   }

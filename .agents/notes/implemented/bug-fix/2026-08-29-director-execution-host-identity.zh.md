@@ -14,6 +14,8 @@ Status: implemented
 
 只有 Host 持有执行密钥。它先取得私有绑定，准备一次独占 dispatch，再以 `maxRetries=0` 执行注入的 transport，最后提交 Provider 回执或 unknown 结果。浏览器不会收到密钥、claim token、Provider payload 或 dispatch permit。Host 错误日志不包含执行响应细节。
 
+可选 DSh 导演 transport 保持禁用，除非私有 Host 配置明确指定一个已签发任务、其方法绑定和精确 HTTP loopback mock origin。launcher 校验与 prepared transport 元数据都会拒绝远程端点、端点漂移、URL 内凭据和重定向。启用时，它使用真实 `ctx.llm.prepareCall()` 接缝，并且只用一次 `stream()` 消费返回的 prepared handle。准备会同时捕获已解析连接事实与凭据值，因此后续 settings 或凭据存储世代无法改变该唯一 dispatch。请求限于纯文本 `deepseek-v4-pro`，关闭推理和重试，请求严格 JSON Output，不接受附件、文件、图像、工具、Agent、Session 或工具循环。只有当适配器从真实流中保留稳定的响应 request id、Chat Completions completion id、原生 finish reason 和 token/cache 用量时，Host 才接受成功；任一事实缺失、漂移或非法都会转为 unknown，且不再调用。该 transport 不注册生产 Provider route，也不拥有任务、预留、outbox 或计费状态。
+
 执行前，易梦会重算已存储的请求、Provider payload、工作单、上下文快照、提示词、方法、价格和不可变 preflight 的哈希。Host 在调用 transport 前，再独立重算 permit 的 payload、请求和工作单哈希并与签名绑定核对。即使 active route 已移除，settled 和 submission-unknown 结果仍从持久 task、outbox、receipt 与费用事实恢复；Host 既有 binding→prepare 顺序直接返回该终态，不进入 transport。queued 任务首次 prepare 仍要求 active route，未配置时失败关闭。公开签发与状态归一化使用显式字段白名单，不透传未知上游字段。
 
 完全绑定的建议类 Provider 确认现在会在原有 generation task 中原子推进到 `Succeeded`，同时结算 submission outbox。这个 finalizer 只记录技术 schema 与谱系完成，不创建质检、选择、Ready 状态、PromptIR、ChangeSet、发布权威或人工决定。预留仍与已发生请求关联，表示预留上限；实际费用继续为 unknown，等待账单对账。unknown 提交状态保留预留，不能成为终态成功，也不能触发自动重试。
@@ -30,8 +32,8 @@ Status: implemented
 
 ## Verification
 
-聚焦 API 与服务测试覆盖密钥缺失、过短、错误、过期和签名篡改，存储任务与 payload 篡改，用户拒绝、同键并发、回执重放、unknown 提交、无 route 的终态恢复、无 route 的 queued 拒绝、漂移检查及单次技术终态化。Host 测试覆盖 permit 到 binding 的完整性校验、一次注入适配器调用、`maxRetries=0`、完成响应丢失、settled 与 unknown 终态无 transport 重放，以及浏览器安全的签发和状态响应。一条隔离 launcher、FastAPI、构建 Host、SQLite 与 Chromium 路径验证签发、私有 fake 执行、移除 active route 后重启恢复 settled，以及零外部网络调用。
+聚焦 API 与服务测试覆盖密钥缺失、过短、错误、过期和签名篡改，存储任务与 payload 篡改，用户拒绝、同键并发、回执重放、unknown 提交、无 route 的终态恢复、无 route 的 queued 拒绝、漂移检查及单次技术终态化。Host 测试覆盖 permit 到 binding 的完整性校验、一次注入适配器调用、`maxRetries=0`、完成响应丢失、settled 与 unknown 终态无 transport 重放，以及浏览器安全的签发和状态响应。直接适配器测试和 loopback mock Chat Completions 服务覆盖真实成功 metadata、严格 JSON、已消费 prepared handle、短暂故障、流中断、非法输出和回执事实缺失，并且最多只产生一次 POST。一条隔离 launcher、FastAPI、构建 Host、SQLite 与 Chromium 路径验证签发、私有 DSh 执行、一次本地 mock 请求、Writer 结算、移除 active route 后重启恢复，以及零非 loopback 请求。
 
 ## Consequences
 
-除非隔离部署显式提供执行密钥和允许路由，否则可付费导演执行保持休眠。没有新密钥的旧实例继续保留回放、人工编辑、签发与公开状态行为，但私有执行失败关闭。已确认的建议输出不再悬挂于 ingesting 状态，并可在不第二次调用 Provider 的情况下恢复。实际 Provider 账单仍保持 unknown，直到既有账单对账路径提供权威数据。
+除非隔离部署显式提供执行密钥、允许路由和 Host-only DSh transport 绑定，否则可付费导演执行保持休眠。没有这些私有事实的旧实例继续保留回放、人工编辑、签发与公开状态行为，但私有执行失败关闭。已确认的建议输出不再悬挂于 ingesting 状态，并可在不第二次调用 Provider 的情况下恢复。实际 Provider 账单仍保持 unknown，直到既有账单对账路径提供权威数据。生产 DeepSeek catalog 注册、凭据迁移和付费 canary 仍是独立决策。

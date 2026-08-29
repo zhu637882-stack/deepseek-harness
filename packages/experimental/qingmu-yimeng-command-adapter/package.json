@@ -30,11 +30,13 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-client-connection": "workspace:^",
+    "@deepseek-ai/dsh-credentials-local": "workspace:^",
     "@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter": "workspace:^",
     "@deepseek-ai/dsh-host-apiproxy": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^"
@@ -49,6 +51,7 @@
     "@deepseek-ai/dsh-client-connection": "workspace:^",
     "@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter": "workspace:^",
     "@deepseek-ai/dsh-host-apiproxy": "workspace:^",
+    "@deepseek-ai/dsh-llm-deepseek": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^"
   }
 }

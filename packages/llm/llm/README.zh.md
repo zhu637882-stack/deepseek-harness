@@ -25,7 +25,7 @@
 - `ctx.llm.listModels(provider: string): Promise<LlmModelInfo[]>` 发现某个已注册提供方当前公布的模型。
 - `ctx.llm.resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo>` 从拥有该精确路由的适配器中，解析并校验确切模型身份，以及可用上下文、输出默认值和推理（reasoning）元数据；异步适配器可选地支持取消。
 - `ctx.llm.resolveCallConfig(config: LlmCallConfig, signal?: AbortSignal): Promise<LlmCallConfig>` 校验显式推理强度，并填入适配器配置的调用默认值，但不自动调整。
-- `ctx.llm.prepareCall(config: LlmCallConfig, signal?: AbortSignal): Promise<PreparedLlmCall>` 在一次精确模型查询中解析配置、脱耦的上下文与模态元数据以及标明哪些字段由适配器默认值填入的标记，再把适配器匹配的分发世代和不可变重试策略捕获为一次可取消、一次性调用。
+- `ctx.llm.prepareCall(config: LlmCallConfig, signal?: AbortSignal): Promise<PreparedLlmCall>` 在一次精确模型查询中解析配置、脱耦的上下文、模态与非秘密 transport 元数据，以及标明哪些字段由适配器默认值填入的标记，再把适配器匹配的分发世代和不可变重试策略捕获为一次可取消、一次性调用。
 - `ctx.llm.stream(options: GenerateOptions): AsyncIterable<StreamChunk>` 将一次模型调用流式输出为原始分片（token 级增量）。消费方使用 `BlockAssembler` 将分片组装为块／消息。
 
 `LlmRuntime` 将最终适配器选择、同步分发、迭代器构造和迭代期间的失败，统一转换为流协议唯一的终止形式：`finish { kind: 'error' | 'aborted', failure }`。部分增量输出后发生失败时，内容块可能仍未闭合；消费方会丢弃这些不完整输出。`llm/stream` middleware、嵌套调用、适配器清理和下游消费方的错误仍会抛出，因为它们属于插件或消费方失败，而非模型请求结果。已准备调用会暴露随其确切适配器注册一同捕获的不可变重试策略；完全由 middleware 处理的路由没有服务策略。
@@ -64,6 +64,8 @@
 ### 调用配置（`call-config.ts`）
 
 `LlmCallConfig` 记录一个会话的模型请求所使用的提供方、模型、由适配器定义的可选推理强度，以及采样参数（`provider`、`model`、`reasoningEffort`、`temperature`、`maxTokens`、`stop`，分别与同名 `GenerateOptions` 字段一一对应）。它是作为请求标头一部分记录在会话日志中的每会话状态（见 dsh-session `request/header` 事件），绝不是可静默调整的每次调用旋钮：`agent/request` waterfall 会提议替换，`prepareCall()` 在轮次 signal 控制下校验它并填入适配器默认值，loop 随后记录生效值以及标明哪些字段由适配器默认值填入的标记，再使用已准备调用中与注册绑定的流。下一次提议会省略带标记的默认值，使变更后的路由解析自身的值；未带标记的显式字段会保留。`callConfigEquals(a, b)` 是逐字段真实变更检测器；`deepFreeze(value)` 是 loop 使用的请求所有权辅助函数：每个构造完成的请求都会在分发前深度冻结；`llm/stream` 监听器和适配器只能读取，绝不能改写。`markAgentLoopRequest()` 将该精确对象标记为由进程本地 agent loop 创建，`isAgentLoopRequest()` 让观测方可以将其与同样可能冻结并关联会话、但独立记录的辅助调用区分。`GenerateOptions.purpose` 会对已记录的辅助压缩和会话标题调用进行分类，使适配器可以按调用目的应用不同的传输策略，而不改变普通会话请求。
+
+`director-proposal` 目的是同类的显式辅助分类。它允许私有 Host 通过已准备调用请求提供方专用的严格 JSON 行为，但不会把该调用变成 agent loop，也不改变普通会话语义。
 
 <a id="app-attribution-attributionts"></a>
 

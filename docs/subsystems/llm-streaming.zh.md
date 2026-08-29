@@ -539,7 +539,7 @@ interface GenerateOptions {
    * map the purpose to model-hidden transport metadata or purpose-specific
    * generation policy. Ordinary conversation requests leave it unset.
    */
-  purpose?: 'compaction' | 'session-title'
+  purpose?: 'compaction' | 'session-title' | 'director-proposal'
 }
 ```
 
@@ -685,6 +685,8 @@ interface PreparedLlmCall {
   readonly inputModalities?: readonly ModelModality[]
   /** Config fields materialized by the captured adapter rather than proposed by the caller. */
   readonly adapterDefaults: LlmCallConfigAdapterDefaults
+  /** Non-secret transport facts captured with the adapter generation. */
+  readonly transport?: Readonly<{ baseURL?: string }>
   /**
    * Dispatch this call once through the registration captured during
    * preparation. The request's call-config fields must match {@link config};
