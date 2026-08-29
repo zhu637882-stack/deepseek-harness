@@ -652,10 +652,18 @@ export interface YimengCommandAdapterConfig {
   readonly baseUrl?: string
   /** Command deadline in milliseconds, from 100 through 60,000. */
   readonly timeoutMs?: number
+  /** Isolated acceptance task; empty in every ordinary instance. */
+  readonly directorFixtureTaskId?: string
+  /** Exact method version bound to the isolated acceptance task. */
+  readonly directorFixtureMethodVersion?: string
+  /** Exact method SHA bound to the isolated acceptance task. */
+  readonly directorFixtureMethodSha256?: string
+  /** JSON fake ChatCompletions result; never a production Provider registration. */
+  readonly directorFixtureResultJson?: string
 }
 ```
 
-来源：[`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:436`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
+来源：[`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:458`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-qingmu-yimeng-read-adapter"></a>
 

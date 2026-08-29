@@ -88,7 +88,8 @@ def initialize(root: Path, writer: Path, core: Path | None = None) -> dict:
     config = {"version": 1, "instanceId": secrets.token_hex(16), "root": str(root),
               "harnessRoot": str(HARNESS), "yimengRoot": str(writer), "coreRoot": str(core.resolve(strict=True)) if core else None,
               "node": shutil.which("node"), "jwtSecret": secrets.token_urlsafe(48),
-              "attestationKey": secrets.token_urlsafe(48), "controlKey": secrets.token_urlsafe(48)}
+              "attestationKey": secrets.token_urlsafe(48), "controlKey": secrets.token_urlsafe(48),
+              "directorExecutionKey": secrets.token_urlsafe(48)}
     write_json(root / "private/instance.json", config)
     write_json(root / "private/login.json", {"username": "qingmu-local", "password": secrets.token_urlsafe(32)})
     write_json(root / "dsh/profiles/qingmu/package.json", {
@@ -240,11 +241,26 @@ class Supervisor:
                 "name: " + json.dumps((HARNESS / "packages/experimental" / name / "lib/index.js").as_uri()))
         for adapter in ("read", "command"):
             overlay += f"\n- id: qingmu-yimeng-{adapter}-adapter\n  config:\n    baseUrl: {json.dumps(self.ports['apiUrl'])}\n"
+            if adapter == "command":
+                fixture = self.config.get("directorExecutionFixture") or {}
+                if fixture.get("taskId"):
+                    overlay += (
+                        "    directorFixtureTaskId: " + json.dumps(fixture["taskId"]) + "\n"
+                        "    directorFixtureMethodVersion: " + json.dumps(fixture["methodPackageVersion"]) + "\n"
+                        "    directorFixtureMethodSha256: " + json.dumps(fixture["methodPackageSha256"]) + "\n"
+                        "    directorFixtureResultJson: "
+                        + json.dumps(json.dumps(fixture["transportResult"], ensure_ascii=False, separators=(",", ":")))
+                        + "\n"
+                    )
         overlay += "\n- id: qingmu-imago-method-adapter\n  config:\n    coreRoot: " + json.dumps(self.config["coreRoot"]) + "\n"
         overlay_path = self.root / "private/local.patch.yml"
         overlay_path.write_text(overlay)
         env = safe_env(self.root)
         env["QINGMU_IMAGO_ATTESTATION_KEY"] = self.config["attestationKey"]
+        # No compatibility fallback: pre-B instances without this field keep
+        # Director paid execution disabled until restored into a new root.
+        if self.config.get("directorExecutionKey"):
+            env["QINGMU_DIRECTOR_EXECUTION_KEY"] = self.config["directorExecutionKey"]
         session = self.root / "private/session.json"
         if session.exists():
             env["YIMENG_API_TOKEN"] = json.loads(session.read_text())["token"]
@@ -443,7 +459,12 @@ def restore(source: Path, target: Path) -> dict:
     shutil.copy2(source / "identity.json", target / "identity.json")
     for name in ("logs", "home", "work", "backups", "audit"):
         (target / name).mkdir(mode=0o700)
-    config.update(root=str(target), instanceId=secrets.token_hex(16), controlKey=secrets.token_urlsafe(48))
+    config.update(
+        root=str(target),
+        instanceId=secrets.token_hex(16),
+        controlKey=secrets.token_urlsafe(48),
+        directorExecutionKey=secrets.token_urlsafe(48),
+    )
     write_json(target / "private/instance.json", config)
     mark_lifecycle(target, config, "clean")
     for name in ("session.json", "ports.json", "local.patch.yml"):

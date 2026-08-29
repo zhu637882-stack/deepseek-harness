@@ -15,6 +15,26 @@ spec.loader.exec_module(local)
 
 
 class OwnershipTests(unittest.TestCase):
+    def test_new_instance_has_distinct_private_director_execution_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "instance"
+            writer = parent / "writer"
+            (writer / "scripts").mkdir(parents=True)
+            (writer / "scripts/qingmu_local_api.py").touch()
+            completed = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout='{"userId":"user_1","username":"qingmu-local"}\n', stderr=""
+            )
+            with patch("subprocess.run", return_value=completed):
+                local.initialize(root, writer)
+            config = json.loads((root / "private/instance.json").read_text())
+            self.assertGreaterEqual(len(config["directorExecutionKey"].encode()), 32)
+            self.assertNotIn(
+                config["directorExecutionKey"],
+                {config["jwtSecret"], config["attestationKey"], config["controlKey"]},
+            )
+            self.assertEqual((root / "private/instance.json").stat().st_mode & 0o777, 0o600)
+
     def test_existing_directory_is_never_initialized(self):
         with tempfile.TemporaryDirectory() as directory:
             writer = Path(directory) / "writer"

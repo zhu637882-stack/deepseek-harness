@@ -13,8 +13,11 @@ export interface DirectorProviderDispatchPermit {
   readonly requestPolicy: { readonly maxAttempts: 1; readonly maxRetries: 0 }
   readonly workOrder: {
     readonly workOrderId: string
+    readonly workOrderSha256: string
     readonly provider: string
     readonly model: string
+    readonly routeKey: string
+    readonly providerCapability: 'chat.agent'
     readonly inputSha256: string
     readonly promptSha256: string
     readonly outputSchema: 'qingmu.director-proposal.v1'
@@ -23,6 +26,7 @@ export interface DirectorProviderDispatchPermit {
     readonly sceneId: string
     readonly shotId: string
     readonly methodPackage: { readonly version: string; readonly sha256: string }
+    readonly pricingSnapshot: { readonly sha256: string }
   }
   readonly dispatch: Readonly<Record<string, unknown>>
   readonly payload: Readonly<Record<string, unknown>>

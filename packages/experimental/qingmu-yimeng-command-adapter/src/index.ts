@@ -5,11 +5,33 @@ import { prepareCreationCommand } from './creation.ts'
 import { prepareScenePlanning } from './scene-planning.ts'
 import { prepareLocalReferenceCandidate } from './local-reference-candidate.ts'
 import type { DirectorProposalFreshnessResult } from './director-proposal.ts'
+import {
+  createDeepSeekDirectorTransport,
+  executeDirectorTaskOnce,
+} from './director-execution-host.ts'
+import type { DirectorProviderTransportResult } from './director-provider-execution.ts'
+import {
+  normalizeDirectorPaidWorkOrder,
+  normalizeDirectorPaidWorkOrderStatus,
+  parseDirectorPaidWorkOrderRequest,
+  parseDirectorPaidWorkOrderStatusRequest,
+} from './director-paid-work-order.ts'
 export { executeDirectorProviderPermit } from './director-provider-execution.ts'
+export { createDeepSeekDirectorTransport, executeDirectorTaskOnce } from './director-execution-host.ts'
 export type {
   DirectorProviderDispatchPermit, DirectorProviderExecutionReceipt,
   DirectorProviderExecutionResult, DirectorProviderTransport, DirectorProviderTransportResult,
 } from './director-provider-execution.ts'
+export type {
+  DeepSeekDirectorChatAdapter, DirectorExecutionBinding, DirectorExecutionHostOptions,
+  DirectorExecutionHostResult,
+} from './director-execution-host.ts'
+export type {
+  DirectorPaidWorkOrder,
+  DirectorPaidWorkOrderRequest,
+  DirectorPaidWorkOrderStatus,
+  DirectorPaidWorkOrderStatusRequest,
+} from './director-paid-work-order.ts'
 import {
   buildDirectorReplayProposal,
   directorWorkOrderRequest,
@@ -438,12 +460,24 @@ export interface YimengCommandAdapterConfig {
   readonly baseUrl?: string
   /** Command deadline in milliseconds, from 100 through 60,000. */
   readonly timeoutMs?: number
+  /** Isolated acceptance task; empty in every ordinary instance. */
+  readonly directorFixtureTaskId?: string
+  /** Exact method version bound to the isolated acceptance task. */
+  readonly directorFixtureMethodVersion?: string
+  /** Exact method SHA bound to the isolated acceptance task. */
+  readonly directorFixtureMethodSha256?: string
+  /** JSON fake ChatCompletions result; never a production Provider registration. */
+  readonly directorFixtureResultJson?: string
 }
 
 /** Validated Cordis configuration for the command adapter. */
 export const Config: z<YimengCommandAdapterConfig> = z.object({
   baseUrl: z.string().default(DEFAULT_BASE_URL),
   timeoutMs: z.natural().min(100).default(DEFAULT_TIMEOUT_MS),
+  directorFixtureTaskId: z.string().default(''),
+  directorFixtureMethodVersion: z.string().default(''),
+  directorFixtureMethodSha256: z.string().default(''),
+  directorFixtureResultJson: z.string().default(''),
 })
 
 /** Injectable Host capabilities used by isolated tests. */
@@ -5111,6 +5145,58 @@ export function createYimengCommandHandler(
           request, context, freshContext, workOrder, method, stageArtifactHelpers,
         ) }
       }
+      if (endpoint === 'issueDirectorProviderWorkOrder') {
+        let paidRequest
+        try {
+          paidRequest = parseDirectorPaidWorkOrderRequest(payload)
+        } catch (error) {
+          throw new InputError(error instanceof Error ? error.message : 'director paid work order request invalid')
+        }
+        const token = normalizeToken(dependencies.readToken())
+        if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
+        const { projectId, episodeId, ...body } = paidRequest
+        const result = await fetchJson(
+          dependencies,
+          `${baseUrl}/api/qingmu/projects/${encodeURIComponent(projectId)}`
+            + `/episodes/${encodeURIComponent(episodeId)}/director-inference/provider-work-orders`,
+          token,
+          { method: 'POST', body: serializeBody(body) },
+          timeoutMs,
+          signal,
+        )
+        if (!result.ok) return result
+        try {
+          return { ok: true, value: normalizeDirectorPaidWorkOrder(result.value, paidRequest) }
+        } catch (error) {
+          throw new UpstreamContractError(error instanceof Error ? error.message : 'director paid work order invalid')
+        }
+      }
+      if (endpoint === 'readDirectorProviderWorkOrderStatus') {
+        let statusRequest
+        try {
+          statusRequest = parseDirectorPaidWorkOrderStatusRequest(payload)
+        } catch (error) {
+          throw new InputError(error instanceof Error ? error.message : 'director paid status request invalid')
+        }
+        const token = normalizeToken(dependencies.readToken())
+        if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
+        const result = await fetchJson(
+          dependencies,
+          `${baseUrl}/api/qingmu/projects/${encodeURIComponent(statusRequest.projectId)}`
+            + `/episodes/${encodeURIComponent(statusRequest.episodeId)}/director-inference/provider-work-orders/`
+            + encodeURIComponent(statusRequest.generationTaskId),
+          token,
+          { method: 'GET' },
+          timeoutMs,
+          signal,
+        )
+        if (!result.ok) return result
+        try {
+          return { ok: true, value: normalizeDirectorPaidWorkOrderStatus(result.value, statusRequest) }
+        } catch (error) {
+          throw new UpstreamContractError(error instanceof Error ? error.message : 'director paid status invalid')
+        }
+      }
       if (endpoint === 'checkDirectorProposalFreshness') {
         const request = parseDirectorProposalFreshnessRequest(payload, stageArtifactHelpers)
         const token = normalizeToken(dependencies.readToken())
@@ -5723,4 +5809,33 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
         : await method('reworkRouteMethod', payload, signal)
     },
   }), { authority: 'loopback' })
+  if (config.directorFixtureTaskId) {
+    const executionKey = process.env.QINGMU_DIRECTOR_EXECUTION_KEY ?? ''
+    const controller = new AbortController()
+    ctx.effect(() => {
+      void (async () => {
+        try {
+          const result = JSON.parse(config.directorFixtureResultJson ?? '') as DirectorProviderTransportResult
+          const transport = createDeepSeekDirectorTransport({
+            chatCompletions: (request) => {
+              if (request.provider !== 'fake') throw new Error('fixture provider mismatch')
+              return Promise.resolve(result)
+            },
+          })
+          await executeDirectorTaskOnce(
+            { baseUrl: config.baseUrl ?? DEFAULT_BASE_URL, executionKey, transport },
+            config.directorFixtureTaskId ?? '',
+            config.directorFixtureMethodVersion ?? '',
+            config.directorFixtureMethodSha256 ?? '',
+            controller.signal,
+          )
+        } catch {
+          ctx.logger.error('isolated Director execution fixture failed')
+        }
+      })()
+      return () => {
+        controller.abort()
+      }
+    }, 'qingmu director execution fixture')
+  }
 }

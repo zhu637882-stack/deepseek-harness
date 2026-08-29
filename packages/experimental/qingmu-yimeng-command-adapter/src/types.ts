@@ -2827,6 +2827,8 @@ export interface YimengReworkRouteAuthorityProbe {
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
   readonly requestDirectorProposal: import('./director-proposal.ts').DirectorReplayProposal
+  readonly issueDirectorProviderWorkOrder: import('./director-paid-work-order.ts').DirectorPaidWorkOrder
+  readonly readDirectorProviderWorkOrderStatus: import('./director-paid-work-order.ts').DirectorPaidWorkOrderStatus
   readonly checkDirectorProposalFreshness: import('./director-proposal.ts').DirectorProposalFreshnessResult
   readonly listLocalReferenceCandidates: import('./local-reference-candidate.ts').LocalReferenceCandidateList
   readonly uploadLocalReferenceCandidate: import('./local-reference-candidate.ts').LocalReferenceCandidateResult
