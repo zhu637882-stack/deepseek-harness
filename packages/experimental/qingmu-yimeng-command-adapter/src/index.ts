@@ -4,6 +4,23 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { prepareCreationCommand } from './creation.ts'
 import { prepareScenePlanning } from './scene-planning.ts'
 import { prepareLocalReferenceCandidate } from './local-reference-candidate.ts'
+import {
+  buildDirectorReplayProposal,
+  directorWorkOrderRequest,
+  normalizeDirectorContext,
+  normalizeDirectorReplayMethod,
+  normalizeDirectorWorkOrder,
+  parseDirectorProposalRequest,
+} from './director-proposal.ts'
+export type {
+  DirectorContextSnapshot,
+  DirectorInferenceWorkOrder,
+  DirectorProposalField,
+  DirectorProposalItem,
+  DirectorProposalRequest,
+  DirectorReplayProposal,
+  DirectorSuggestionType,
+} from './director-proposal.ts'
 export type {
   ProjectInitializationRequest, ProjectInitializationRecovery, ProjectInitializationResult,
   CreationScope, TextImportReadRequest, TextImportRequest, TextImportLine, TextImportDraft,
@@ -423,6 +440,11 @@ export const Config: z<YimengCommandAdapterConfig> = z.object({
 export interface YimengCommandAdapterDependencies {
   readonly fetch: typeof globalThis.fetch
   readonly readToken: () => string | undefined
+  /** Host-only stateless package mapped to the existing Qingmu integration plan. */
+  readonly runDirectorReplayMethod?: (
+    payload: unknown,
+    signal: AbortSignal,
+  ) => Promise<RpcResult<unknown>>
   /** Trusted Host call that recompiles one exact Stage artifact against current Core rules. */
   readonly runStageArtifactMethod?: (
     payload: unknown,
@@ -5035,6 +5057,50 @@ export function createYimengCommandHandler(
         readAttestationKey: readReferenceAttestationKey,
         requireTimestamp: requireRfc3339Timestamp,
       }
+      if (endpoint === 'requestDirectorProposal') {
+        const request = parseDirectorProposalRequest(payload, stageArtifactHelpers)
+        const token = normalizeToken(dependencies.readToken())
+        if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
+        if (dependencies.runDirectorReplayMethod === undefined) {
+          return internalError('current IMAGO director replay Method is unavailable')
+        }
+        const methodResult = await dependencies.runDirectorReplayMethod(
+          { purpose: 'bounded_director_suggestion' }, signal,
+        )
+        if (signal.aborted) return cancelled()
+        if (!methodResult.ok) return methodResult
+        const method = normalizeDirectorReplayMethod(methodResult.value, stageArtifactHelpers)
+        const contextPath = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}`
+          + `/episodes/${encodeURIComponent(request.episodeId)}/director-inference/context?`
+          + new URLSearchParams({ sceneId: request.sceneId, shotId: request.shotId }).toString()
+        const contextResult = await fetchJson(
+          dependencies, `${baseUrl}${contextPath}`, token, { method: 'GET' }, timeoutMs, signal,
+        )
+        if (!contextResult.ok) return contextResult
+        const context = normalizeDirectorContext(contextResult.value, request, stageArtifactHelpers)
+        const workOrderPayload = directorWorkOrderRequest(request, context, method, stageArtifactHelpers)
+        const workOrderResult = await fetchJson(
+          dependencies,
+          `${baseUrl}/api/qingmu/projects/${encodeURIComponent(request.projectId)}`
+            + `/episodes/${encodeURIComponent(request.episodeId)}/director-inference/work-orders`,
+          token,
+          { method: 'POST', body: serializeBody(workOrderPayload) },
+          timeoutMs,
+          signal,
+        )
+        if (!workOrderResult.ok) return workOrderResult
+        const workOrder = normalizeDirectorWorkOrder(
+          workOrderResult.value, request, context, method, stageArtifactHelpers,
+        )
+        const freshResult = await fetchJson(
+          dependencies, `${baseUrl}${contextPath}`, token, { method: 'GET' }, timeoutMs, signal,
+        )
+        if (!freshResult.ok) return freshResult
+        const freshContext = normalizeDirectorContext(freshResult.value, request, stageArtifactHelpers)
+        return { ok: true, value: buildDirectorReplayProposal(
+          request, context, freshContext, workOrder, method, stageArtifactHelpers,
+        ) }
+      }
       let currentTakeApprovalLifecycleMethod: unknown
       let currentTakeApprovalLifecycleToken: string | undefined
       if (endpoint === 'transitionTakeApprovalLifecycle') {
@@ -5564,6 +5630,12 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
   ctx.connection.rpc.handle(CHANNEL, createYimengCommandHandler(config, {
     fetch: globalThis.fetch,
     readToken: () => process.env.YIMENG_API_TOKEN,
+    runDirectorReplayMethod: async (payload, signal) => {
+      const method = ctx.get('qingmuImagoMethod')
+      return method === undefined
+        ? internalError('current IMAGO director replay Method is unavailable')
+        : await method('directorReplayMethod', payload, signal)
+    },
     runStageArtifactMethod: async (payload, signal) => {
       const method = ctx.get('qingmuImagoMethod')
       return method === undefined

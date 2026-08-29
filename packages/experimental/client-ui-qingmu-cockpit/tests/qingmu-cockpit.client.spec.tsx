@@ -8,6 +8,11 @@ import type {
   YimengShotRelationsProjection,
   YimengWorkflowProjection,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
+import type {
+  CreationScope,
+  LocalReferenceScope,
+  TextImportReadRequest,
+} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import { QingmuCockpit, type QingmuCockpitProps } from '../src/client/QingmuCockpit.tsx'
 import { buildHeroFrameRelationRequest, buildShotRelationMethodRequest } from '../src/client/ShotRelationMethodView.tsx'
 import { ShotRelationsView } from '../src/client/ShotRelationsView.tsx'
@@ -620,13 +625,21 @@ function shotRelationMethod(request: Parameters<QingmuYimengPort['shotRelationMe
 
 function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
   return {
-    readScenePlanning: vi.fn(async request => ({ schema: 'jason.qingmu-scene-planning-state.v1' as const, ...request,
+    readScenePlanning: vi.fn(async (request: CreationScope) => ({ schema: 'jason.qingmu-scene-planning-state.v1' as const, ...request,
       scriptRevision: 0, scriptSha256: null, scenes: [], storyboard: null, planning: null })),
+    requestDirectorProposal: vi.fn(async () => { throw new Error('Director replay uses a separate fixture') }),
     saveScenePlanning: vi.fn(async () => { throw new Error('Planning uses a separate fixture') }),
     recoverScenePlanning: vi.fn(async () => { throw new Error('Planning uses a separate fixture') }),
     initializeProject: vi.fn(async () => { throw new Error('Creation uses a separate fixture') }),
     recoverProjectInitialization: vi.fn(async () => { throw new Error('Creation uses a separate fixture') }),
-    readTextImport: vi.fn(async request => ({ schema: 'jason.qingmu-text-import-state.v1' as const, ...request, scriptRevision: 0, script: null, draft: null })),
+    readTextImport: vi.fn(async (request: TextImportReadRequest) => ({
+      schema: 'jason.qingmu-text-import-state.v1' as const,
+      ...request,
+      scriptRevision: 0,
+      script: null,
+      draft: null,
+      draftActive: false,
+    })),
     createTextImport: vi.fn(async () => { throw new Error('Creation uses a separate fixture') }),
     correctTextImport: vi.fn(async () => { throw new Error('Creation uses a separate fixture') }),
     confirmTextImport: vi.fn(async () => { throw new Error('Creation uses a separate fixture') }),
@@ -653,7 +666,7 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
       items: [{ id: 'episode-1', projectId: 'project-1', episodeNumber: 1, name: '雨夜' }],
     })),
     elementProfile: vi.fn(async () => ACTOR_PROFILE),
-    listLocalReferenceCandidates: vi.fn(async request => ({
+    listLocalReferenceCandidates: vi.fn(async (request: LocalReferenceScope) => ({
       schema: 'jason.qingmu-local-reference-candidates.v1' as const,
       ...request,
       candidates: [],

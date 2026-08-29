@@ -27,6 +27,31 @@ export interface ImagoMethodJsonObject {
   readonly [key: string]: unknown
 }
 
+/** Stateless replay package mapped to the existing Qingmu integration plan. */
+export interface ImagoDirectorReplayMethodResponse extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-director-replay-method-package.v1'
+  readonly version: 'qingmu.director-replay.v1'
+  readonly sourceBindings: readonly [{ readonly path: string; readonly sha256: string }]
+  readonly integrationCoordinates: readonly ['H2', 'H3-precondition-replay']
+  readonly suggestionTypes: {
+    readonly text_director_proposal: { readonly expectedModel: 'deepseek-v4-pro' }
+    readonly visual_finding: { readonly expectedModel: 'deepseek-v4-flash-vision-exp' }
+  }
+  readonly authority: {
+    readonly businessTruth: 'yimeng'
+    readonly methodSource: 'imago_os'
+    readonly inferenceHost: 'harness_dsh'
+    readonly replayOnly: true
+    readonly providerCalls: 0
+    readonly maximumCostCny: '0'
+    readonly humanDecisionInferred: false
+    readonly formalQcInferred: false
+    readonly selectionGranted: false
+    readonly readyGranted: false
+  }
+  readonly methodPackageSha256: string
+}
+
 /** Element kinds with an explicit current IMAGO profile-editing method. */
 export type ImagoElementKind = 'actor' | 'scene' | 'prop'
 
@@ -1497,6 +1522,7 @@ export interface ImagoStageArtifactMethodResponse extends ImagoMethodJsonObject 
 
 /** Result values exposed by `/qingmu-imago-method`. */
 export interface ImagoMethodEndpointMap {
+  readonly directorReplayMethod: ImagoDirectorReplayMethodResponse
   readonly elementMethod: ImagoElementMethodResponse
   readonly referenceAssetMethod: ImagoReferenceAssetMethodResponse
   readonly promptIrMethod: ImagoPromptIrMethodResponse

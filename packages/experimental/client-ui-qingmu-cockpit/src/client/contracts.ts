@@ -559,6 +559,10 @@ export interface QingmuYimengReadPort {
 
 /** Explicit ChangeSet commands exposed through the separate Host-only command channel. */
 export interface QingmuYimengCommandPort {
+  requestDirectorProposal(
+    request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').DirectorProposalRequest,
+    signal?: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').DirectorReplayProposal>
   listLocalReferenceCandidates(
     request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceScope,
     signal?: AbortSignal,

@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
+import { loadDirectorReplayMethod } from './director-replay.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -19,6 +20,7 @@ declare module '@deepseek-ai/cordis' {
 }
 import type {
   ImagoStageArtifactMethodSnapshot,
+  ImagoDirectorReplayMethodResponse,
   ImagoStageSourceMethodRequest,
   ImagoStageSourceMethodSnapshot,
   ImagoProductionUnitMethodRequest,
@@ -3651,6 +3653,7 @@ export function createImagoMethodHandler(
     try {
       if (
         endpoint !== 'elementMethod'
+        && endpoint !== 'directorReplayMethod'
         && endpoint !== 'referenceAssetMethod'
         && endpoint !== 'promptIrMethod'
         && endpoint !== 'shotRelationMethod'
@@ -3668,6 +3671,22 @@ export function createImagoMethodHandler(
         && endpoint !== 'reworkRouteMethod'
       ) {
         throw new InputError(`unknown IMAGO method endpoint: ${endpoint}`)
+      }
+      if (endpoint === 'directorReplayMethod') {
+        if (
+          payload === null
+          || typeof payload !== 'object'
+          || Array.isArray(payload)
+        ) {
+          throw new InputError('director replay method request is invalid')
+        }
+        const request = payload as Record<string, unknown>
+        if (Object.keys(request).length !== 1 || request.purpose !== 'bounded_director_suggestion') {
+          throw new InputError('director replay method request is invalid')
+        }
+        if (signal.aborted) return cancelled()
+        const value: ImagoDirectorReplayMethodResponse = await loadDirectorReplayMethod(execution.coreRoot)
+        return { ok: true, value }
       }
       if (endpoint === 'continuityMethod') {
         const request = parseContinuityMethodRequest(payload)
@@ -4195,8 +4214,8 @@ export function apply(ctx: Context, config: ImagoMethodAdapterConfig): void {
   })
   ctx.provide('qingmuImagoMethod', handler)
   const browserHandler: ConnectionRpcHandler = async (endpoint, payload, signal) =>
-    endpoint === 'takeTechnicalQcMethod'
-      ? internalError('Take technical-QC Method is Host-internal')
+    endpoint === 'takeTechnicalQcMethod' || endpoint === 'directorReplayMethod'
+      ? internalError('Requested IMAGO Method is Host-internal')
       : await handler(endpoint, payload, signal)
   ctx.connection.rpc.handle(CHANNEL, browserHandler, { authority: 'loopback' })
 }

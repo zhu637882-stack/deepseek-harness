@@ -20,8 +20,16 @@
 .editor .dialogue { grid-template-columns: minmax(0, 1fr) 90px; margin: 8px 0; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .notice { background: var(--qingmu-soft); padding: 16px; border-left: 3px solid var(--qingmu-accent); }
+.proposal { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--qingmu-accent); border-radius: 10px; background: color-mix(in srgb, var(--qingmu-soft) 70%, transparent); }
+.proposal > header { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.proposal > header h3 { margin: 2px 0; }
+.proposalCard { padding: 14px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-2); }
+.proposalCard dl { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 8px 12px; margin: 0 0 12px; }
+.proposalCard dt { color: var(--dsw-alias-label-secondary); }
+.proposalCard dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .workspace .primary { background: var(--qingmu-accent-strong); border-color: var(--qingmu-accent); color: #fff; }
 .properties dt { color: var(--dsw-alias-label-secondary); }
 .properties dd { margin: 0 0 12px; }
 @media (max-width: 1320px) { .workspace { grid-template-columns: 148px minmax(0, 1fr) 176px; gap: 12px; } }
 @media (max-width: 1000px) { .workspace { grid-template-columns: 135px minmax(0, 1fr); } .properties { grid-column: 2; position: static; } }
+@media (max-width: 720px) { .proposal > header { display: grid; } .proposalCard dl { grid-template-columns: 1fr; } }

@@ -6,6 +6,11 @@ export type {
 } from './creation.ts'
 /** Browser-safe planning values; no runtime Host imports. */
 export type { PlanningShot, PlanningBase, PlanningOperation, ScenePlanningRequest, PlanningRevision, PlanningSource, PlanningScene, ScenePlanningState, ScenePlanningResult } from './scene-planning.ts'
+/** Replay-only director suggestions; adopting them still uses planning commands. */
+export type {
+  DirectorContextSnapshot, DirectorInferenceWorkOrder, DirectorProposalField,
+  DirectorProposalItem, DirectorProposalRequest, DirectorReplayProposal, DirectorSuggestionType,
+} from './director-proposal.ts'
 /** Browser-safe local candidate values; none confer selection or rights authority. */
 export type {
   LocalReferenceCandidateContent, LocalReferenceCandidateList, LocalReferenceCandidateResult,
@@ -2814,6 +2819,7 @@ export interface YimengReworkRouteAuthorityProbe {
 
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
+  readonly requestDirectorProposal: import('./director-proposal.ts').DirectorReplayProposal
   readonly listLocalReferenceCandidates: import('./local-reference-candidate.ts').LocalReferenceCandidateList
   readonly uploadLocalReferenceCandidate: import('./local-reference-candidate.ts').LocalReferenceCandidateResult
   readonly recoverLocalReferenceCandidate: import('./local-reference-candidate.ts').LocalReferenceCandidateResult
