@@ -6,6 +6,12 @@ export type {
 } from './creation.ts'
 /** Browser-safe planning values; no runtime Host imports. */
 export type { PlanningShot, PlanningBase, PlanningOperation, ScenePlanningRequest, PlanningRevision, PlanningSource, PlanningScene, ScenePlanningState, ScenePlanningResult } from './scene-planning.ts'
+/** Browser-safe local candidate values; none confer selection or rights authority. */
+export type {
+  LocalReferenceCandidateContent, LocalReferenceCandidateList, LocalReferenceCandidateResult,
+  LocalReferenceContentRequest, LocalReferenceElementKind, LocalReferenceScope,
+  LocalReferenceUploadRequest,
+} from './local-reference-candidate.ts'
 
 /** JSON object retained from a Yimeng command response. */
 export interface YimengCommandJsonObject {
@@ -2808,6 +2814,10 @@ export interface YimengReworkRouteAuthorityProbe {
 
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
+  readonly listLocalReferenceCandidates: import('./local-reference-candidate.ts').LocalReferenceCandidateList
+  readonly uploadLocalReferenceCandidate: import('./local-reference-candidate.ts').LocalReferenceCandidateResult
+  readonly recoverLocalReferenceCandidate: import('./local-reference-candidate.ts').LocalReferenceCandidateResult
+  readonly readLocalReferenceCandidateContent: import('./local-reference-candidate.ts').LocalReferenceCandidateContent
   readonly readScenePlanning: import('./scene-planning.ts').ScenePlanningState
   readonly saveScenePlanning: import('./scene-planning.ts').ScenePlanningResult
   readonly recoverScenePlanning: import('./scene-planning.ts').ScenePlanningResult

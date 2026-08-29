@@ -28,6 +28,7 @@ import type {
   YimengRecoverReferenceRightsExceptionReleaseResponse,
 } from './contracts.ts'
 import type { QingmuCockpitKey } from './locales.ts'
+import { LocalReferenceCandidateUpload } from './LocalReferenceCandidateUpload.tsx'
 import { ReferenceRightsEditor, ReferenceRightsSummary } from './ReferenceRightsEditor.tsx'
 import {
   assertCanonicalReferenceRightsRecord,
@@ -2618,6 +2619,19 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
           <div><dt>{t('assetSnapshotHash')}</dt><dd>{snapshot.snapshotSha256}</dd></div>
           <div><dt>{t('scriptState')}</dt><dd>{t(PHASE_LOCALE_KEY[phase])}</dd></div>
         </dl>
+      )}
+
+      {snapshot !== undefined && targetId !== '' && (
+        <LocalReferenceCandidateUpload
+          key={`${projectId}:${elementKind}:${targetId}`}
+          projectId={projectId}
+          elementKind={elementKind}
+          targetId={targetId}
+          targetName={choices.find(choice => choice.id === targetId)?.name ?? targetId}
+          port={port}
+          t={t}
+          onStored={loadSnapshot}
+        />
       )}
 
       {recovery.status === 'ready' && (

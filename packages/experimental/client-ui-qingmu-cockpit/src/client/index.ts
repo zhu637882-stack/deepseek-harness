@@ -139,6 +139,10 @@ export function apply(ctx: ClientContext): void {
     unwrapRpc(await connection.rpc.call('/qingmu-imago-method', endpoint, payload, signal)) as T
 
   const port: QingmuYimengPort = {
+    listLocalReferenceCandidates: (request, signal) => command('listLocalReferenceCandidates', request, signal),
+    uploadLocalReferenceCandidate: (request, signal) => command('uploadLocalReferenceCandidate', request, signal),
+    recoverLocalReferenceCandidate: (request, signal) => command('recoverLocalReferenceCandidate', request, signal),
+    readLocalReferenceCandidateContent: (request, signal) => command('readLocalReferenceCandidateContent', request, signal),
     readScenePlanning: (request, signal) => command('readScenePlanning', request, signal),
     saveScenePlanning: (request, signal) => command('saveScenePlanning', request, signal),
     recoverScenePlanning: (request, signal) => command('recoverScenePlanning', request, signal),

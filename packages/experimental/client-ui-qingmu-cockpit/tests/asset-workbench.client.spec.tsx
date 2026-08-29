@@ -35,6 +35,25 @@ const CHANGE_SET_ID = 'changeset-prop-1'
 const IDEMPOTENCY_KEY = `qingmu:element:v4:faa0d4311297d15a4287746d5c19fd928688d2dde43ff3db8eb2dab86740b2cb:${PAYLOAD_SHA}`
 
 const t = (key: keyof typeof zh) => zh[key]
+const emptyLocalReferencePort = () => ({
+  listLocalReferenceCandidates: vi.fn(async (request: {
+    readonly projectId: string
+    readonly elementKind: 'actor' | 'scene' | 'prop'
+    readonly targetId: string
+  }) => ({
+    schema: 'jason.qingmu-local-reference-candidates.v1' as const,
+    ...request,
+    candidates: [],
+    providerCalls: 0 as const,
+    stageStarted: false as const,
+    approvalGranted: false as const,
+    selectionGranted: false as const,
+    rightsRecorded: false as const,
+  })),
+  uploadLocalReferenceCandidate: vi.fn(),
+  recoverLocalReferenceCandidate: vi.fn(),
+  readLocalReferenceCandidateContent: vi.fn(),
+})
 
 const UNKNOWN_RIGHTS = {
   schema: 'jason.qingmu-reference-rights-record.v1',
@@ -538,6 +557,7 @@ function createExceptionReleasePort(options: {
   })
   const createHumanDecision = vi.fn()
   const port = {
+    ...emptyLocalReferencePort(),
     elementProfile: vi.fn(async () => RIGHTS_RECORDED_SNAPSHOT),
     referenceCandidates: vi.fn(async () => ({
       schema: 'jason.qingmu-reference-asset-candidates.v1',
@@ -881,6 +901,7 @@ function createRightsPort(options: {
     })
   const createHumanDecision = vi.fn()
   const port = {
+    ...emptyLocalReferencePort(),
     elementProfile,
     referenceCandidates: vi.fn(async () => ({
       schema: 'jason.qingmu-reference-asset-candidates.v1',
@@ -938,6 +959,7 @@ function createPort(options: { readonly commit?: () => Promise<typeof COMMIT> } 
     nextAction: 'preview',
   } as const))
   const port = {
+    ...emptyLocalReferencePort(),
     elementProfile,
     referenceCandidates: vi.fn(async () => ({
       schema: 'jason.qingmu-reference-asset-candidates.v1',
@@ -998,6 +1020,7 @@ function createReferencePort(
     idempotencyKey: request.idempotencyKey,
   }))
   const port = {
+    ...emptyLocalReferencePort(),
     elementProfile,
     referenceCandidates: candidates,
     reviewEvents: vi.fn()
@@ -1473,6 +1496,7 @@ describe('AssetWorkbench', () => {
       readonly targetId: string
     }) => referenceRightsExceptionFeed({ targetId: request.targetId, elementKind: request.elementKind }))
     const port = {
+      ...emptyLocalReferencePort(),
       elementProfile,
       elementMethod,
       referenceCandidates,

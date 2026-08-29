@@ -6,6 +6,8 @@
 
 ## 命令边界
 
+[本地参考候选操作](src/local-reference-candidate.ts)可列出、上传、恢复或读取一个实际存在的人物、环境或道具图片候选。Host 只接受一张不超过 3 MiB 的严格 PNG/JPEG/WebP，计算真实字节 SHA-256，结果未知时只用 GET 查询原回执。易梦拥有鉴权实体范围、图片解码校验、原子本地落盘、canonical `assets` 记录、ChangeSet/outbox 和回执。任何成功结果都保持 `Unselected`、未批准且没有权利记录；这些操作绝不调用参考选择、PromptIR、Provider 或制作阶段。
+
 [场景规划操作](src/scene-planning.ts)读取、保存或恢复一场导入剧本的规划结构。Host 绑定剧本版本/完整 SHA、分镜版本/SHA 和准确请求摘要。易梦原子保存文本实体、镜头、真实结构快照及既有 ChangeSet/outbox/回执记录。恢复返回原 ID，不再次 POST。只有分镜不存在时可初始化；已有规划镜头使用 canonical Edit 修改。不创建提示词、参考媒体、批准或制作阶段。[决策记录](../../../.agents/notes/implemented/feature/2026-08-29-qingmu-scene-entry.zh.md)解释结构 Ready 的区别。
 
 项目初始化与文本导入使用[创作约定](src/creation.ts)中的六个窄操作。易梦在既有事务日志中原子创建项目、第一季、首集及按操作者作用域持久保存的回执。恢复查询原幂等键与请求摘要；同键异参会失败。UTF-8 TXT 限制为 128 KiB、64000 字及 1000 行，SHA-256 取自真实输入字节。TextImportService 拥有解析校正、指纹、剧本版本和确认记录。读取不创建或修复草稿；只有来源和前序索引仍为当前状态时，显式同键重试才可补齐未完成创建。Host 绝不自动重试写入。确认只保存解析文本，不启动阶段、不生成资产、不提升 Ready、不选择 Take、不批准媒体。

@@ -653,6 +653,25 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
       items: [{ id: 'episode-1', projectId: 'project-1', episodeNumber: 1, name: '雨夜' }],
     })),
     elementProfile: vi.fn(async () => ACTOR_PROFILE),
+    listLocalReferenceCandidates: vi.fn(async request => ({
+      schema: 'jason.qingmu-local-reference-candidates.v1' as const,
+      ...request,
+      candidates: [],
+      providerCalls: 0 as const,
+      stageStarted: false as const,
+      approvalGranted: false as const,
+      selectionGranted: false as const,
+      rightsRecorded: false as const,
+    })),
+    uploadLocalReferenceCandidate: vi.fn(async () => {
+      throw new Error('Local reference upload is not part of this fixture')
+    }),
+    recoverLocalReferenceCandidate: vi.fn(async () => {
+      throw new Error('Local reference recovery is not part of this fixture')
+    }),
+    readLocalReferenceCandidateContent: vi.fn(async () => {
+      throw new Error('Local reference content is not part of this fixture')
+    }),
     referenceCandidates: vi.fn(async (request: Parameters<QingmuYimengPort['referenceCandidates']>[0]) => ({
       schema: 'jason.qingmu-reference-asset-candidates.v1',
       projectId: request.projectId,

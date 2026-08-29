@@ -559,6 +559,22 @@ export interface QingmuYimengReadPort {
 
 /** Explicit ChangeSet commands exposed through the separate Host-only command channel. */
 export interface QingmuYimengCommandPort {
+  listLocalReferenceCandidates(
+    request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceScope,
+    signal?: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceCandidateList>
+  uploadLocalReferenceCandidate(
+    request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceUploadRequest,
+    signal?: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceCandidateResult>
+  recoverLocalReferenceCandidate(
+    request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceUploadRequest,
+    signal?: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceCandidateResult>
+  readLocalReferenceCandidateContent(
+    request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceContentRequest,
+    signal?: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceCandidateContent>
   bindStageSource(request: YimengBindStageSourceRequest, signal?: AbortSignal): Promise<YimengStageSourceResult>
   recoverStageSourceBinding(request: YimengRecoverStageSourceBindingRequest, signal?: AbortSignal): Promise<YimengStageSourceRecovery>
   bindProductionUnit(request: YimengBindProductionUnitRequest, signal?: AbortSignal): Promise<YimengProductionUnitResult>

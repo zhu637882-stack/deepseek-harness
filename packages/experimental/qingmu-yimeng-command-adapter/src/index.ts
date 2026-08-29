@@ -3,6 +3,7 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { prepareCreationCommand } from './creation.ts'
 import { prepareScenePlanning } from './scene-planning.ts'
+import { prepareLocalReferenceCandidate } from './local-reference-candidate.ts'
 export type {
   ProjectInitializationRequest, ProjectInitializationRecovery, ProjectInitializationResult,
   CreationScope, TextImportReadRequest, TextImportRequest, TextImportLine, TextImportDraft,
@@ -5184,6 +5185,11 @@ export function createYimengCommandHandler(
         normalize = prepared.normalize
       } else if (['readScenePlanning', 'saveScenePlanning', 'recoverScenePlanning'].includes(endpoint)) {
         const prepared = prepareScenePlanning(endpoint, payload, stageArtifactHelpers)
+        path = prepared.path
+        requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
+        normalize = prepared.normalize
+      } else if (['listLocalReferenceCandidates', 'uploadLocalReferenceCandidate', 'recoverLocalReferenceCandidate', 'readLocalReferenceCandidateContent'].includes(endpoint)) {
+        const prepared = prepareLocalReferenceCandidate(endpoint, payload, stageArtifactHelpers)
         path = prepared.path
         requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
         normalize = prepared.normalize
