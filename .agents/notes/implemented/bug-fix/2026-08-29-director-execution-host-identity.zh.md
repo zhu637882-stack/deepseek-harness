@@ -14,7 +14,7 @@ Status: implemented
 
 只有 Host 持有执行密钥。它先取得私有绑定，准备一次独占 dispatch，再以 `maxRetries=0` 执行注入的 transport，最后提交 Provider 回执或 unknown 结果。浏览器不会收到密钥、claim token、Provider payload 或 dispatch permit。Host 错误日志不包含执行响应细节。
 
-执行前，易梦会重算已存储的请求、Provider payload、工作单、上下文快照、提示词、方法、价格和不可变 preflight 的哈希。Host 在调用 transport 前，再独立重算 permit 的 payload、请求和工作单哈希并与签名绑定核对。已结算回执优先于 freshness 检查恢复，因此终态响应丢失后，即使后续发生编辑漂移，也能读取原结果而不会重开执行。公开签发与状态归一化使用显式字段白名单，不透传未知上游字段。
+执行前，易梦会重算已存储的请求、Provider payload、工作单、上下文快照、提示词、方法、价格和不可变 preflight 的哈希。Host 在调用 transport 前，再独立重算 permit 的 payload、请求和工作单哈希并与签名绑定核对。即使 active route 已移除，settled 和 submission-unknown 结果仍从持久 task、outbox、receipt 与费用事实恢复；Host 既有 binding→prepare 顺序直接返回该终态，不进入 transport。queued 任务首次 prepare 仍要求 active route，未配置时失败关闭。公开签发与状态归一化使用显式字段白名单，不透传未知上游字段。
 
 完全绑定的建议类 Provider 确认现在会在原有 generation task 中原子推进到 `Succeeded`，同时结算 submission outbox。这个 finalizer 只记录技术 schema 与谱系完成，不创建质检、选择、Ready 状态、PromptIR、ChangeSet、发布权威或人工决定。预留仍与已发生请求关联，表示预留上限；实际费用继续为 unknown，等待账单对账。unknown 提交状态保留预留，不能成为终态成功，也不能触发自动重试。
 
@@ -30,7 +30,7 @@ Status: implemented
 
 ## Verification
 
-聚焦 API 与服务测试覆盖密钥缺失、过短、错误、过期和签名篡改，存储任务与 payload 篡改，用户拒绝、同键并发、回执重放、unknown 提交、漂移检查及单次技术终态化。Host 测试覆盖 permit 到 binding 的完整性校验、一次注入适配器调用、`maxRetries=0`、完成响应丢失、终态重放，以及浏览器安全的签发和状态响应。一条隔离 launcher、FastAPI、构建 Host、SQLite 与 Chromium 路径验证签发、私有 fake 执行、重启后的 settled 恢复和零外部网络调用。
+聚焦 API 与服务测试覆盖密钥缺失、过短、错误、过期和签名篡改，存储任务与 payload 篡改，用户拒绝、同键并发、回执重放、unknown 提交、无 route 的终态恢复、无 route 的 queued 拒绝、漂移检查及单次技术终态化。Host 测试覆盖 permit 到 binding 的完整性校验、一次注入适配器调用、`maxRetries=0`、完成响应丢失、settled 与 unknown 终态无 transport 重放，以及浏览器安全的签发和状态响应。一条隔离 launcher、FastAPI、构建 Host、SQLite 与 Chromium 路径验证签发、私有 fake 执行、移除 active route 后重启恢复 settled，以及零外部网络调用。
 
 ## Consequences
 

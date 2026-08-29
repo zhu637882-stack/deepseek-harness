@@ -45,10 +45,11 @@ scope={"projectId":one("SELECT id FROM projects"),"episodeId":one("SELECT id FRO
 tables=["generation_tasks","provider_preflights","provider_budget_events","provider_authorization_reservations","provider_submission_outbox","assets","prompt_irs","entity_reference_packs","episode_release_authority","episode_production_step_receipts","agent_runs","workflow_runs","step_runs"]
 print(json.dumps({"scope":scope,"counts":{t:one("SELECT count(*) FROM "+t) for t in tables},"tasks":c.execute("SELECT id,local_status,provider_status,dispatch_epoch FROM generation_tasks").fetchall(),"outbox":c.execute("SELECT dispatch_digest,state,terminal_outcome,response_json FROM provider_submission_outbox").fetchall(),"reservations":c.execute("SELECT dispatch_digest,released,amount_cny FROM provider_authorization_reservations").fetchall()}))`,
         join(root, 'storage/jason.db')], { encoding: 'utf8' })) as DbState
-      const patchConfig = (fixture: Record<string, unknown>) => {
+      const patchConfig = (fixture: Record<string, unknown> | null) => {
         const path = join(root, 'private/instance.json')
         const config = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
-        config.directorExecutionFixture = fixture
+        if (fixture === null) delete config.directorExecutionFixture
+        else config.directorExecutionFixture = fixture
         writeFileSync(path, JSON.stringify(config, null, 2) + '\n')
         chmodSync(path, 0o600)
       }
@@ -162,7 +163,9 @@ print(json.dumps({"scope":scope,"counts":{t:one("SELECT count(*) FROM "+t) for t
           'episode_release_authority', 'episode_production_step_receipts', 'agent_runs', 'workflow_runs', 'step_runs']) {
           expect(settled.counts[table]).toBe(0)
         }
-        expect(run('stop').dataPreserved).toBe(true); expect(run('start').ready).toBe(true); run('login')
+        expect(run('stop').dataPreserved).toBe(true)
+        patchConfig(null)
+        expect(run('start').ready).toBe(true); run('login')
         await page.context().close()
         page = await browser.newPage({ viewport: { width: 1280, height: 800 }, locale: 'zh-CN' }); watch()
         await enter(initial.webUrl)
@@ -177,7 +180,8 @@ print(json.dumps({"scope":scope,"counts":{t:one("SELECT count(*) FROM "+t) for t
         })).toBe(true)
         writeFileSync(join(parent, 'result.json'), JSON.stringify({ root, webUrl: initial.webUrl,
           taskId: order.generationTaskId, status: recovered.state, provider: order.provider,
-          fakeTransportOnly: true, browserRequestsLoopbackOnly: true, settled }, null, 2))
+          activePaidRouteAfterRestart: false, fakeTransportOnly: true,
+          browserRequestsLoopbackOnly: true, settled }, null, 2))
         console.log('Qingmu Director execution evidence:', parent)
       } catch (error) {
         writeFileSync(join(parent, 'browser-failure.txt'), await page.locator('body').innerText())

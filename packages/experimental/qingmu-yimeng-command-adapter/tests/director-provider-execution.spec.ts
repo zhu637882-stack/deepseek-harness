@@ -124,6 +124,35 @@ describe('Director provider Host execution seam', () => {
     expect(calls.filter(path => path.endsWith('/complete'))).toHaveLength(1)
   })
 
+  it('recovers submission_unknown through binding then prepare without transport', async () => {
+    const calls: string[] = []
+    const fetchImpl = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString())
+      calls.push(url.pathname)
+      if (url.pathname.endsWith('/binding')) return Response.json(binding())
+      if (url.pathname.endsWith('/prepare')) {
+        return Response.json({
+          state: 'submission_unknown', generationTaskId: 'task_1', permit: null,
+        })
+      }
+      throw new Error('unexpected request')
+    }) as typeof fetch
+    const chatCompletions = vi.fn(async () => transportResult())
+    const recovered = await executeDirectorTaskOnce({
+      baseUrl: 'http://127.0.0.1:49999',
+      executionKey: 'execution-key-material-is-at-least-32-bytes',
+      transport: createDeepSeekDirectorTransport({ chatCompletions }),
+      fetch: fetchImpl,
+    }, 'task_1', 'inactive-route-must-not-rebind', 'f'.repeat(64), new AbortController().signal)
+
+    expect(recovered).toMatchObject({ state: 'submission_unknown', generationTaskId: 'task_1' })
+    expect(calls).toEqual([
+      '/internal/qingmu/director-inference/tasks/task_1/binding',
+      '/internal/qingmu/director-inference/tasks/task_1/prepare',
+    ])
+    expect(chatCompletions).not.toHaveBeenCalled()
+  })
+
   it('rejects a permit payload that no longer matches the signed binding before transport', async () => {
     const fetchImpl = vi.fn(async (input: URL | RequestInfo) => {
       const url = new URL(input instanceof Request ? input.url : input.toString())
