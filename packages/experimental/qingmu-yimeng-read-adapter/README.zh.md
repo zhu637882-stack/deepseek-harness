@@ -112,6 +112,8 @@ Host 同时只允许一个核验。`verificationTimeoutMs` 默认 55000 毫秒�
 
 `promptIrBootstrap` 为精确的项目、剧集、分镜修订和帧读取一份已认证且受 owner 限定的状态。Host 校验当前上下文 SHA、必需的已选参考绑定、可选的已存 Draft 及方法谱系，以及使 Provider 调用、选择推断、批准和签收保持 false 的边界标志。只有已存方法 SHA 与当前来源绑定仍可核验时才返回 Draft，同时返回绑定其精确身份与哈希的短时 Writer 签名选择 challenge。详见[首个 PromptIR Agent Note](../../../.agents/notes/implemented/feature/2026-08-31-qingmu-first-prompt-ir-bootstrap.zh.md)。
 
+Ready PromptIR 的 `firstFrameQuote` 还返回一次服务端重算、按当前修订与 SHA 绑定的首帧授权草案。Host 会拒绝失败的阿里规则检查、非阿里官方 HTTPS 规则来源，以及目标、方法、价格、素材或草案哈希漂移。素材地址检查是零网络的静态条件：通过不代表 Provider 已实际下载；本机、私网和非 HTTPS 地址保持阻断。草案始终保持未授权、未建任务、未提交、未扣费。
+
 ## 安全边界
 
 `promptIr` 保留实际生效 Ready 主体，并额外验证最新已存 Draft 的完整主体 SHA 与基础绑定。不存在 Draft 时返回 `null`；血缘损坏报错。基于另一个 Ready 的 Draft 明确标为过期，读取器不会提升其状态。根工作流 blocker 必须有非空 `reason`；易梦在此边界前归一 stage `reasonCode` 和 release blocker，保留诊断字段。

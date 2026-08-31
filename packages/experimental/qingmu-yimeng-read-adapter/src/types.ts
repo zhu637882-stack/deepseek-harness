@@ -420,6 +420,81 @@ export interface YimengFirstFrameQuoteRequest extends YimengPromptIrRequest {
   readonly promptIrContentSha256: string
 }
 
+/** One server-authored reason why a first-frame authorization must not proceed yet. */
+export interface YimengFirstFrameAuthorizationBlocker {
+  readonly code: string
+  readonly category:
+    | 'content_human_decision'
+    | 'provenance_rights'
+    | 'provider_accessible_media'
+    | 'catalog_route_pricing'
+    | 'runtime_config'
+    | 'budget_unknown_fee'
+    | 'session_permission'
+  readonly userAction: string
+  readonly technicalDetail: string
+}
+
+/** Read-only server reconstruction of the facts needed for one later authorization. */
+export interface YimengFirstFrameAuthorizationDraft extends YimengJsonObject {
+  readonly schema: 'jason.qingmu-ready-prompt-ir-first-frame-authorization-draft.v1'
+  readonly target: {
+    readonly projectId: string
+    readonly episodeId: string
+    readonly storyboardRevisionId: string
+    readonly frameId: string
+    readonly frameTitle: string
+  }
+  readonly sourceBindings: {
+    readonly authoritySnapshotSha256: string
+    readonly contextSnapshotSha256: string
+    readonly promptIrId: string
+    readonly promptIrVersion: number
+    readonly promptIrContentSha256: string
+    readonly promptSha256: string
+    readonly methodSha256: string
+    readonly costSourceLockSha256: string | null
+    readonly referenceMaterializedSha256s: readonly string[]
+    readonly executionBindingSha256: string | null
+  }
+  readonly route: {
+    readonly provider: string | null
+    readonly model: string | null
+    readonly capability: string | null
+    readonly routeKey: string | null
+    readonly calls: 1 | null
+  }
+  readonly cost: {
+    readonly currency: 'CNY'
+    readonly estimatedCny: number | null
+    readonly maximumReservationCny: number | null
+    readonly instanceBudgetWindow: null | {
+      readonly valid: boolean
+      readonly windowId: string
+      readonly effectiveCapCny: number
+      readonly lifetimeSpentCny: number
+      readonly windowRemainingCny: number
+      readonly errors: readonly string[]
+    }
+    readonly crossInstanceCumulativeKnown: false
+    readonly crossInstanceCumulativeCny: null
+  }
+  readonly providerMedia: {
+    readonly referenceCount: number
+    readonly status: 'not_required' | 'public_https_static_pass' | 'blocked'
+    readonly staticConditionPassed: boolean
+    readonly downloadVerified: false
+    readonly blockerCode: string | null
+  }
+  readonly blockers: readonly YimengFirstFrameAuthorizationBlocker[]
+  readonly authorizationRecorded: false
+  readonly taskCreated: false
+  readonly submitted: false
+  readonly charged: false
+  readonly providerCalls: 0
+  readonly draftSha256: string
+}
+
 /** Content-addressed, zero-dispatch quote for one Ready PromptIR first frame. */
 export interface YimengFirstFrameQuoteResponse extends YimengJsonObject {
   readonly schema: 'jason.qingmu-ready-prompt-ir-first-frame-quote.v1'
@@ -517,6 +592,7 @@ export interface YimengFirstFrameQuoteResponse extends YimengJsonObject {
     readonly executionBlockers: readonly string[]
     readonly executionBinding: YimengJsonObject | null
   }
+  readonly authorizationDraft: YimengFirstFrameAuthorizationDraft
   readonly scope: { readonly frameCount: 1; readonly imagesPerFrame: 1; readonly resolution: '720P' }
   readonly quote: null | {
     readonly frameId: string
@@ -538,6 +614,8 @@ export interface YimengFirstFrameQuoteResponse extends YimengJsonObject {
   readonly mediaMutation: false
   readonly submitted: false
   readonly charged: false
+  readonly authorizationRecorded: false
+  readonly taskCreated: false
   readonly projectionSha256: string
 }
 

@@ -2303,9 +2303,10 @@ function normalizeFirstFrameQuote(
   requireExactKeys(root, [
     'schema', 'projectId', 'episodeId', 'storyboardRevisionId', 'frameId',
     'authoritySnapshot', 'authoritySnapshotSha256', 'costSourceLock',
-    'costSourceLockSha256', 'promptBinding', 'scope', 'quote', 'quoteReady',
+    'costSourceLockSha256', 'promptBinding', 'authorizationDraft', 'scope', 'quote', 'quoteReady',
     'blockers', 'readOnly', 'providerCalls', 'budgetMutation', 'taskMutation',
-    'mediaMutation', 'submitted', 'charged', 'projectionSha256',
+    'mediaMutation', 'submitted', 'charged', 'authorizationRecorded', 'taskCreated',
+    'projectionSha256',
   ], 'firstFrameQuote')
   if (root.schema !== 'jason.qingmu-ready-prompt-ir-first-frame-quote.v1'
     || root.projectId !== expected.projectId || root.episodeId !== expected.episodeId
@@ -2742,12 +2743,16 @@ function normalizeFirstFrameQuote(
     for (const [index, check] of checks.entries()) {
       requireExactKeys(check, ['rule', 'passed', 'evidence'],
         `firstFrameQuote.executionBinding.providerSnapshotContract.aliRuleValidation.checks[${String(index)}]`)
-      requireString(check.rule,
+      if (!requireString(check.rule,
         `firstFrameQuote.executionBinding.providerSnapshotContract.aliRuleValidation.checks[${String(index)}].rule`)
-      requireBoolean(check.passed,
-        `firstFrameQuote.executionBinding.providerSnapshotContract.aliRuleValidation.checks[${String(index)}].passed`)
-      requireString(check.evidence,
+        .trim()) throw new UpstreamContractError('firstFrameQuote Ali rule name is empty')
+      if (!requireBoolean(check.passed,
+        `firstFrameQuote.executionBinding.providerSnapshotContract.aliRuleValidation.checks[${String(index)}].passed`)) {
+        throw new UpstreamContractError('firstFrameQuote Ali rule check failed')
+      }
+      if (!requireString(check.evidence,
         `firstFrameQuote.executionBinding.providerSnapshotContract.aliRuleValidation.checks[${String(index)}].evidence`)
+        .trim()) throw new UpstreamContractError('firstFrameQuote Ali rule evidence is empty')
     }
     const violations = Array.isArray(aliRuleValidation.violations)
       ? aliRuleValidation.violations.map((item, index) => requireString(
@@ -2780,7 +2785,21 @@ function normalizeFirstFrameQuote(
       || aliRuleValidation.model !== binding.model
       || aliRuleValidation.capability !== binding.capability
       || aliRuleValidation.officialOnly !== true
-      || sourceUrls.length === 0 || checks.length === 0 || violations.length !== 0) {
+      || sourceUrls.length === 0
+      || sourceUrls.some((sourceUrl) => {
+        try {
+          const parsed = new URL(sourceUrl)
+          return parsed.protocol !== 'https:'
+            || !['help.aliyun.com', 'www.alibabacloud.com'].includes(parsed.hostname)
+            || parsed.username !== '' || parsed.password !== ''
+            || !['', '443'].includes(parsed.port)
+            || !parsed.pathname.startsWith('/zh/model-studio/')
+        }
+        catch {
+          return true
+        }
+      })
+      || checks.length === 0 || violations.length !== 0) {
       throw new UpstreamContractError('firstFrameQuote execution binding provider semantics mismatch')
     }
     if (root.quote !== null) {
@@ -2856,6 +2875,180 @@ function normalizeFirstFrameQuote(
   )) {
     throw new UpstreamContractError('firstFrameQuote execution binding quote mismatch')
   }
+  const authorizationDraft = requireObject(root.authorizationDraft, 'firstFrameQuote.authorizationDraft')
+  requireExactKeys(authorizationDraft, [
+    'schema', 'target', 'sourceBindings', 'route', 'cost', 'providerMedia',
+    'blockers', 'authorizationRecorded', 'taskCreated', 'submitted', 'charged',
+    'providerCalls', 'draftSha256',
+  ], 'firstFrameQuote.authorizationDraft')
+  const authorizationTarget = requireObject(authorizationDraft.target, 'firstFrameQuote.authorizationDraft.target')
+  requireExactKeys(authorizationTarget, [
+    'projectId', 'episodeId', 'storyboardRevisionId', 'frameId', 'frameTitle',
+  ], 'firstFrameQuote.authorizationDraft.target')
+  if (authorizationDraft.schema !== 'jason.qingmu-ready-prompt-ir-first-frame-authorization-draft.v1'
+    || authorizationTarget.projectId !== expected.projectId
+    || authorizationTarget.episodeId !== expected.episodeId
+    || authorizationTarget.storyboardRevisionId !== expected.storyboardRevisionId
+    || authorizationTarget.frameId !== expected.frameId
+    || authorizationTarget.frameTitle !== normalizedFrame.title) {
+    throw new UpstreamContractError('firstFrameQuote authorization target mismatch')
+  }
+  const authorizationSources = requireObject(
+    authorizationDraft.sourceBindings,
+    'firstFrameQuote.authorizationDraft.sourceBindings',
+  )
+  requireExactKeys(authorizationSources, [
+    'authoritySnapshotSha256', 'contextSnapshotSha256', 'promptIrId', 'promptIrVersion',
+    'promptIrContentSha256', 'promptSha256', 'methodSha256', 'costSourceLockSha256',
+    'referenceMaterializedSha256s', 'executionBindingSha256',
+  ], 'firstFrameQuote.authorizationDraft.sourceBindings')
+  const authorizationReferenceShas = Array.isArray(authorizationSources.referenceMaterializedSha256s)
+    ? authorizationSources.referenceMaterializedSha256s.map((item, index) => requireSha256(
+      item,
+      `firstFrameQuote.authorizationDraft.referenceMaterializedSha256s[${String(index)}]`,
+    ))
+    : (() => { throw new UpstreamContractError('firstFrameQuote authorization reference SHAs must be an array') })()
+  const expectedExecutionBindingSha = executionBinding === null
+    ? null
+    : requireSha256(executionBinding.bindingSha256, 'firstFrameQuote.executionBinding.bindingSha256')
+  if (authorizationSources.authoritySnapshotSha256 !== authoritySnapshotSha256
+    || authorizationSources.contextSnapshotSha256 !== contextSnapshotSha256
+    || authorizationSources.promptIrId !== promptIr.id
+    || authorizationSources.promptIrVersion !== promptIr.version
+    || authorizationSources.promptIrContentSha256 !== promptIr.contentSha256
+    || authorizationSources.promptSha256 !== promptIr.imagePromptSha256
+    || authorizationSources.methodSha256 !== method.methodSha256
+    || authorizationSources.costSourceLockSha256 !== costSourceLockSha256
+    || authorizationSources.executionBindingSha256 !== expectedExecutionBindingSha
+    || !isDeepStrictEqual(authorizationReferenceShas, references.map(item => item.materializedSha256))) {
+    throw new UpstreamContractError('firstFrameQuote authorization sources mismatch')
+  }
+  const authorizationRoute = requireObject(authorizationDraft.route, 'firstFrameQuote.authorizationDraft.route')
+  requireExactKeys(authorizationRoute, [
+    'provider', 'model', 'capability', 'routeKey', 'calls',
+  ], 'firstFrameQuote.authorizationDraft.route')
+  const expectedRoute = quote === null
+    ? { provider: null, model: null, capability: null, routeKey: null, calls: null }
+    : { provider: quote.provider, model: quote.model, capability: quote.capability,
+      routeKey: quote.routeKey, calls: 1 }
+  if (!isDeepStrictEqual(authorizationRoute, expectedRoute)) {
+    throw new UpstreamContractError('firstFrameQuote authorization route mismatch')
+  }
+  const authorizationCost = requireObject(authorizationDraft.cost, 'firstFrameQuote.authorizationDraft.cost')
+  requireExactKeys(authorizationCost, [
+    'currency', 'estimatedCny', 'maximumReservationCny', 'instanceBudgetWindow',
+    'crossInstanceCumulativeKnown', 'crossInstanceCumulativeCny',
+  ], 'firstFrameQuote.authorizationDraft.cost')
+  const estimatedCny = authorizationCost.estimatedCny
+  const maximumReservationCny = authorizationCost.maximumReservationCny
+  if (authorizationCost.currency !== 'CNY'
+    || estimatedCny !== (quote?.estimatedCny ?? null)
+    || (maximumReservationCny !== null
+      && (typeof maximumReservationCny !== 'number' || !Number.isFinite(maximumReservationCny)
+        || maximumReservationCny < (quote?.estimatedCny ?? 0)))
+    || authorizationCost.crossInstanceCumulativeKnown !== false
+    || authorizationCost.crossInstanceCumulativeCny !== null) {
+    throw new UpstreamContractError('firstFrameQuote authorization cost mismatch')
+  }
+  if (authorizationCost.instanceBudgetWindow !== null) {
+    const budget = requireObject(
+      authorizationCost.instanceBudgetWindow,
+      'firstFrameQuote.authorizationDraft.cost.instanceBudgetWindow',
+    )
+    requireExactKeys(budget, [
+      'valid', 'windowId', 'effectiveCapCny', 'lifetimeSpentCny',
+      'windowRemainingCny', 'errors',
+    ], 'firstFrameQuote.authorizationDraft.cost.instanceBudgetWindow')
+    requireBoolean(budget.valid, 'firstFrameQuote.authorizationDraft.cost.instanceBudgetWindow.valid')
+    requireString(budget.windowId, 'firstFrameQuote.authorizationDraft.cost.instanceBudgetWindow.windowId')
+    for (const key of ['effectiveCapCny', 'lifetimeSpentCny', 'windowRemainingCny'] as const) {
+      if (typeof budget[key] !== 'number' || !Number.isFinite(budget[key]) || budget[key] < 0) {
+        throw new UpstreamContractError('firstFrameQuote authorization budget amount invalid')
+      }
+    }
+    if (!Array.isArray(budget.errors)) {
+      throw new UpstreamContractError('firstFrameQuote authorization budget errors must be an array')
+    }
+    budget.errors.forEach((item, index) => requireString(
+      item,
+      `firstFrameQuote.authorizationDraft.cost.instanceBudgetWindow.errors[${String(index)}]`,
+    ))
+  }
+  const providerMedia = requireObject(
+    authorizationDraft.providerMedia,
+    'firstFrameQuote.authorizationDraft.providerMedia',
+  )
+  requireExactKeys(providerMedia, [
+    'referenceCount', 'status', 'staticConditionPassed', 'downloadVerified', 'blockerCode',
+  ], 'firstFrameQuote.authorizationDraft.providerMedia')
+  const referenceCount = requireInteger(
+    providerMedia.referenceCount,
+    'firstFrameQuote.authorizationDraft.providerMedia.referenceCount',
+    0,
+  )
+  const mediaStatus = requireString(
+    providerMedia.status,
+    'firstFrameQuote.authorizationDraft.providerMedia.status',
+  )
+  const staticConditionPassed = requireBoolean(
+    providerMedia.staticConditionPassed,
+    'firstFrameQuote.authorizationDraft.providerMedia.staticConditionPassed',
+  )
+  const mediaBlockerCode = requireNullableString(
+    providerMedia.blockerCode,
+    'firstFrameQuote.authorizationDraft.providerMedia.blockerCode',
+  )
+  if (referenceCount !== references.length || providerMedia.downloadVerified !== false
+    || !['not_required', 'public_https_static_pass', 'blocked'].includes(mediaStatus)
+    || staticConditionPassed !== (mediaStatus !== 'blocked')
+    || (mediaStatus === 'not_required') !== (referenceCount === 0)
+    || (mediaStatus === 'blocked') !== (mediaBlockerCode !== null)) {
+    throw new UpstreamContractError('firstFrameQuote provider media condition mismatch')
+  }
+  const authorizationBlockers = requireObjectItems(
+    authorizationDraft.blockers,
+    'firstFrameQuote.authorizationDraft.blockers',
+  )
+  const allowedCategories = new Set([
+    'content_human_decision', 'provenance_rights', 'provider_accessible_media',
+    'catalog_route_pricing', 'runtime_config', 'budget_unknown_fee', 'session_permission',
+  ])
+  const authorizationBlockerCodes = authorizationBlockers.map((blocker, index) => {
+    requireExactKeys(blocker, [
+      'code', 'category', 'userAction', 'technicalDetail',
+    ], `firstFrameQuote.authorizationDraft.blockers[${String(index)}]`)
+    const code = requireString(blocker.code, `firstFrameQuote.authorizationDraft.blockers[${String(index)}].code`).trim()
+    const category = requireString(
+      blocker.category,
+      `firstFrameQuote.authorizationDraft.blockers[${String(index)}].category`,
+    )
+    if (!code || !allowedCategories.has(category)
+      || !requireString(blocker.userAction, `firstFrameQuote.authorizationDraft.blockers[${String(index)}].userAction`).trim()
+      || blocker.technicalDetail !== code) {
+      throw new UpstreamContractError('firstFrameQuote authorization blocker invalid')
+    }
+    return code
+  })
+  if (new Set(authorizationBlockerCodes).size !== authorizationBlockerCodes.length
+    || executionBlockers.some(code => !authorizationBlockerCodes.includes(code))
+    || (mediaBlockerCode !== null && !authorizationBlockerCodes.includes(mediaBlockerCode))
+    || !authorizationBlockerCodes.includes('budget_cross_instance_cumulative_unknown')
+    || authorizationDraft.authorizationRecorded !== false
+    || authorizationDraft.taskCreated !== false
+    || authorizationDraft.submitted !== false
+    || authorizationDraft.charged !== false
+    || authorizationDraft.providerCalls !== 0) {
+    throw new UpstreamContractError('firstFrameQuote authorization flags mismatch')
+  }
+  const authorizationDraftSha256 = requireSha256(
+    authorizationDraft.draftSha256,
+    'firstFrameQuote.authorizationDraft.draftSha256',
+  )
+  const unsignedAuthorizationDraft = { ...authorizationDraft }
+  delete unsignedAuthorizationDraft.draftSha256
+  if (jcsSha256(unsignedAuthorizationDraft, 'firstFrameQuote.authorizationDraft') !== authorizationDraftSha256) {
+    throw new UpstreamContractError('firstFrameQuote authorization draft hash mismatch')
+  }
   const quoteReady = requireBoolean(root.quoteReady, 'firstFrameQuote.quoteReady')
   if (quoteReady !== (quote !== null && quote.pricingVerified && blockers.length === 0)
     || (quoteReady && (normalizedCostSourceLock === null || costSourceLockSha256 === null))
@@ -2863,7 +3056,8 @@ function normalizeFirstFrameQuote(
     || (dispatchCompatible && !quoteReady)
     || root.readOnly !== true || root.providerCalls !== 0 || root.budgetMutation !== false
     || root.taskMutation !== false || root.mediaMutation !== false
-    || root.submitted !== false || root.charged !== false) {
+    || root.submitted !== false || root.charged !== false
+    || root.authorizationRecorded !== false || root.taskCreated !== false) {
     throw new UpstreamContractError('firstFrameQuote authority flags mismatch')
   }
   const projectionSha256 = requireSha256(root.projectionSha256, 'firstFrameQuote.projectionSha256')
@@ -2905,6 +3099,7 @@ function normalizeFirstFrameQuote(
       executionBlockers,
       executionBinding,
     },
+    authorizationDraft: authorizationDraft as unknown as YimengFirstFrameQuoteResponse['authorizationDraft'],
     scope: { frameCount: 1, imagesPerFrame: 1, resolution: '720P' },
     quote,
     quoteReady,
@@ -2916,6 +3111,8 @@ function normalizeFirstFrameQuote(
     mediaMutation: false,
     submitted: false,
     charged: false,
+    authorizationRecorded: false,
+    taskCreated: false,
     projectionSha256,
   }
 }

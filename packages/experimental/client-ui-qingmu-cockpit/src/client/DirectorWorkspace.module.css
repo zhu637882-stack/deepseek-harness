@@ -31,8 +31,14 @@
 .content header p { color: var(--dsw-alias-label-secondary); }
 .properties { min-width: 0; position: sticky; top: 0; overflow-wrap: anywhere; }
 .properties p { color: var(--dsw-alias-label-secondary); }
-@media (max-width: 1320px) { .workspace { grid-template-columns: 156px minmax(0, 1fr) 188px; gap: 12px; } }
-@media (max-width: 1000px) { .workspace { grid-template-columns: 150px minmax(0, 1fr); } .properties { grid-column: 2; position: static; } }
+@media (max-width: 1320px) {
+  .workspace { grid-template-columns: 156px minmax(0, 1fr); gap: 12px; }
+  .properties { grid-column: 2; position: static; }
+}
+@media (max-width: 1000px) {
+  .workspace { grid-template-columns: minmax(0, 1fr); }
+  .shots, .properties { grid-column: 1; position: static; }
+}
 @media (prefers-reduced-motion: reduce) { .workspace *, .workspace *::before, .workspace *::after { transition: none !important; animation: none !important; } }
 .fields { display: grid; gap: 16px; }
 .promptText, .diff pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }

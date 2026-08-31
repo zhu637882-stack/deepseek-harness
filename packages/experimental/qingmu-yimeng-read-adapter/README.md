@@ -112,6 +112,8 @@ The latest durable seal remains historical evidence. `latestSealSourceCurrent` m
 
 `promptIrBootstrap` reads one authenticated, owner-scoped state for an exact project, episode, storyboard revision, and frame. The Host validates the current context SHA, required selected reference bindings, optional persisted Draft and method provenance, and the boundary flags that keep Provider calls, selection inference, approval, and signoff false. A Draft is returned only when its stored method SHA and current source bindings remain verifiable, together with a short-lived Writer-signed selection challenge bound to its exact identity and hashes. See the [first-PromptIR Agent Note](../../../.agents/notes/implemented/feature/2026-08-31-qingmu-first-prompt-ir-bootstrap.md).
 
+For a Ready PromptIR, `firstFrameQuote` also returns a server-recomputed first-frame authorization draft bound to current revisions and SHAs. The Host rejects failed Alibaba rule checks, non-official HTTPS rule sources, and target, method, pricing, media, or draft hash drift. Media-address inspection is a zero-network static condition: passing it does not prove Provider download; loopback, private, and non-HTTPS addresses stay blocked. The draft always remains unauthorized, without a task, submission, or charge.
+
 ## Security boundary
 
 `promptIr` retains the effective Ready subject and additionally verifies the latest persisted Draft's complete subject SHA and base binding. No Draft is `null`; malformed provenance is an error. A Draft based on another Ready is explicitly stale, never promoted by the reader. Root workflow blockers must contain a non-empty `reason`; Yimeng normalizes stage `reasonCode` and release blockers before this boundary, preserving diagnostic fields.

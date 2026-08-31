@@ -336,6 +336,28 @@ function createPort(options: { readonly editPostSucceeds?: boolean } = {}) {
       legacyExecutorPrompt: '当前执行器编译提示词', legacyExecutorPromptSha256: '8'.repeat(64),
       legacyExecutorMatchesReadyPromptIr: false, executorUsesReadyPromptIr: true,
       dispatchCompatible: true, executionBlockers: [], executionBinding: {} },
+    authorizationDraft: {
+      schema: 'jason.qingmu-ready-prompt-ir-first-frame-authorization-draft.v1',
+      target: { projectId: PROJECT_ID, episodeId: EPISODE_ID,
+        storyboardRevisionId: STORYBOARD_REVISION_ID, frameId: FRAME_ID, frameTitle: '镜头一' },
+      sourceBindings: { authoritySnapshotSha256: '7'.repeat(64), contextSnapshotSha256: 'c'.repeat(64),
+        promptIrId: BASE_ID, promptIrVersion: BASE_VERSION, promptIrContentSha256: BASE_CONTENT_SHA,
+        promptSha256: 'd'.repeat(64), methodSha256: 'f'.repeat(64), costSourceLockSha256: null,
+        referenceMaterializedSha256s: ['4'.repeat(64)], executionBindingSha256: 'a'.repeat(64) },
+      route: { provider: 'dashscope', model: 'wan2.2-t2i-flash', capability: 'image.generate',
+        routeKey: 'b4.first_frame_generation', calls: 1 },
+      cost: { currency: 'CNY', estimatedCny: 0.2, maximumReservationCny: 0.3,
+        instanceBudgetWindow: { valid: true, windowId: 'fixture', effectiveCapCny: 1,
+          lifetimeSpentCny: 0, windowRemainingCny: 1, errors: [] },
+        crossInstanceCumulativeKnown: false, crossInstanceCumulativeCny: null },
+      providerMedia: { referenceCount: 1, status: 'public_https_static_pass',
+        staticConditionPassed: true, downloadVerified: false, blockerCode: null },
+      blockers: [{ code: 'budget_cross_instance_cumulative_unknown', category: 'budget_unknown_fee',
+        userAction: '请先核对易梦费用账本与本次预算窗口，再单独授权。',
+        technicalDetail: 'budget_cross_instance_cumulative_unknown' }],
+      authorizationRecorded: false, taskCreated: false, submitted: false, charged: false,
+      providerCalls: 0, draftSha256: 'b'.repeat(64),
+    },
     scope: { frameCount: 1, imagesPerFrame: 1, resolution: '720P' },
     quote: { frameId: FRAME_ID, frameNo: 1, calls: 1, estimatedCny: 0.2, capability: 'image.generate',
       routeKey: 'b4.first_frame_generation', provider: 'dashscope', model: 'wan2.2-t2i-flash', pricingVerified: true },
@@ -348,6 +370,8 @@ function createPort(options: { readonly editPostSucceeds?: boolean } = {}) {
     mediaMutation: false,
     submitted: false,
     charged: false,
+    authorizationRecorded: false,
+    taskCreated: false,
     projectionSha256: QUOTE_PROJECTION_SHA,
   } as const))
 
@@ -399,7 +423,10 @@ describe('PromptIrWorkspace vertical slice', () => {
     fireEvent.click(screen.getByRole('button', { name: zh.firstFrameQuoteAction }))
     await screen.findByText('dashscope / wan2.2-t2i-flash')
     expect(screen.getByText('¥0.2000')).toBeTruthy()
-    expect(screen.getByText(zh.firstFrameQuoteExecutorBound)).toBeTruthy()
+    expect(screen.getByText('¥0.3000')).toBeTruthy()
+    expect(screen.getByText(zh.firstFrameAuthorizationFlags)).toBeTruthy()
+    expect(screen.getByText(zh.firstFrameProviderMediaStaticPass)).toBeTruthy()
+    expect(screen.getByText('请先核对易梦费用账本与本次预算窗口，再单独授权。')).toBeTruthy()
     expect(screen.queryByText(zh.firstFrameQuoteExecutorBlocked)).toBeNull()
     expect(screen.getByText('当前执行器编译提示词')).toBeTruthy()
     expect(screen.getByText(zh.firstFrameQuoteNotSubmitted)).toBeTruthy()

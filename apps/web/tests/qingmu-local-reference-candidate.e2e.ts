@@ -214,17 +214,29 @@ print(json.dumps({'counts':{t:c.execute('SELECT count(*) FROM '+t).fetchone()[0]
       await firstFrameQuote.getByRole('button', { name: '检查首帧生成条件（不调用模型）' }).click()
       await firstFrameQuote.getByText('未提交、未扣费。', { exact: true }).waitFor()
       await firstFrameQuote.getByText(
-        '执行器已支持精确 Ready PromptIR 绑定；当前页面只读，尚未授权提交。',
+        '本次只做服务端重算和静态检查，不会创建任务或调用 Provider。',
+        { exact: true },
+      ).waitFor()
+      await firstFrameQuote.getByText(
+        '参考素材当前不是 Provider 可访问的公开 HTTPS 地址；生成保持阻断。',
         { exact: true },
       ).waitFor()
       await firstFrameQuote.getByText(
         '执行来源合同当前被真实阻断；本页只读，尚未授权提交。',
         { exact: true },
       ).waitFor()
+      await firstFrameQuote.getByText(
+        '授权记录 false · 任务 false · 提交 false · 扣费 false',
+        { exact: true },
+      ).waitFor()
+      await firstFrameQuote.getByText(
+        '请配置不含私网地址的公开 HTTPS 素材入口，再重新检查。',
+        { exact: true },
+      ).waitFor()
       await firstFrameQuote.getByText(/dashscope \/ /).waitFor()
-      await firstFrameQuote.getByText('b4.first_frame_generation', { exact: true }).waitFor()
+      await firstFrameQuote.getByText(/b4\.first_frame_generation/).waitFor()
       const firstQuoteProjection = await firstFrameQuote.textContent()
-      expect(firstQuoteProjection).toContain('pricingVerified')
+      expect(firstQuoteProjection).toContain('Authorization draft SHA')
       expect(inspect()).toEqual(beforeQuote)
 
       const persistedBrowserState = await page.evaluate(() => JSON.stringify({
@@ -276,6 +288,10 @@ print(json.dumps({'counts':{t:c.execute('SELECT count(*) FROM '+t).fetchone()[0]
       const restoredQuote = restoredReady.getByRole('region', { name: '首帧生成条件' })
       await restoredQuote.getByRole('button', { name: '检查首帧生成条件（不调用模型）' }).click()
       await restoredQuote.getByText('未提交、未扣费。', { exact: true }).waitFor()
+      await restoredQuote.getByText(
+        '授权记录 false · 任务 false · 提交 false · 扣费 false',
+        { exact: true },
+      ).waitFor()
       expect(await restoredQuote.textContent()).toBe(firstQuoteProjection)
       expect(inspect()).toEqual(after)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)

@@ -500,6 +500,7 @@ function ReadyPromptIrWorkspace({
   useEffect(() => {
     dirtyCallback.current?.(unsaved)
     const beforeUnload = (event: BeforeUnloadEvent): void => {
+      // oxlint-disable-next-line typescript/no-deprecated -- Safari still needs returnValue for beforeunload.
       if (unsaved || commitLock.current) { event.preventDefault(); event.returnValue = '' }
     }
     window.addEventListener('beforeunload', beforeUnload)
@@ -1113,32 +1114,48 @@ function ReadyPromptIrWorkspace({
           {operation === 'quoting-first-frame' ? t('firstFrameQuoteLoading') : t('firstFrameQuoteAction')}
         </button>
         {firstFrameQuote !== undefined && <div role="status">
-          <p><strong>{t('firstFrameQuoteScope')}</strong>：1 个镜头 × n=1</p>
+          <div className={css.authorizationSummary}>
+            <p><strong>{t('firstFrameAuthorizationDraft')}</strong></p>
+            <p>{firstFrameQuote.authorizationDraft.target.frameTitle} · 1 个镜头 × n=1</p>
+          </div>
           {firstFrameQuote.quote === null
             ? <p role="alert">{t('firstFrameQuoteUnavailable')}</p>
             : <dl>
               <div><dt>Provider / Model</dt><dd>{firstFrameQuote.quote.provider} / {firstFrameQuote.quote.model}</dd></div>
-              <div><dt>Route</dt><dd>{firstFrameQuote.quote.routeKey}</dd></div>
-              <div><dt>pricingVerified</dt><dd>{String(firstFrameQuote.quote.pricingVerified)}</dd></div>
+              <div><dt>Capability / Route</dt><dd>{firstFrameQuote.quote.capability}<br />{firstFrameQuote.quote.routeKey}</dd></div>
               <div><dt>{t('firstFrameQuoteEstimate')}</dt><dd>¥{firstFrameQuote.quote.estimatedCny.toFixed(4)}</dd></div>
+              <div><dt>{t('firstFrameAuthorizationCap')}</dt><dd>
+                {firstFrameQuote.authorizationDraft.cost.maximumReservationCny === null
+                  ? t('unknown')
+                  : `¥${firstFrameQuote.authorizationDraft.cost.maximumReservationCny.toFixed(4)}`}
+              </dd></div>
             </dl>}
-          <details open><summary>{t('firstFrameQuotePrompt')}</summary>
+          <p role="status"><strong>{t('firstFrameAuthorizationStaticOnly')}</strong></p>
+          <p>{firstFrameQuote.authorizationDraft.providerMedia.staticConditionPassed
+            ? t('firstFrameProviderMediaStaticPass')
+            : t('firstFrameProviderMediaBlocked')}</p>
+          {!firstFrameQuote.promptBinding.dispatchCompatible && <p role="alert">
+            <strong>{t('firstFrameQuoteExecutorBlocked')}</strong>
+          </p>}
+          {firstFrameQuote.authorizationDraft.blockers.length > 0 && <div role="alert" className={css.authorizationBlockers}>
+            <strong>{t('firstFrameAuthorizationBlockers')}</strong>
+            <ul>{firstFrameQuote.authorizationDraft.blockers.map(blocker => <li key={blocker.code}>
+              <span>{blocker.category}</span>
+              <strong>{blocker.userAction}</strong>
+            </li>)}</ul>
+          </div>}
+          <p className={css.authorizationFlags}><strong>{t('firstFrameAuthorizationFlags')}</strong></p>
+          <details><summary>{t('firstFrameAdvanced')}</summary>
+            <h5>{t('firstFrameQuotePrompt')}</h5>
             <p className={directorCss.promptText}>{firstFrameQuote.authoritySnapshot.promptIr.imagePrompt}</p>
-            <p>SHA-256: {firstFrameQuote.authoritySnapshot.promptIr.imagePromptSha256}</p>
-          </details>
-          <details open><summary>{t('firstFrameQuoteExecutorPrompt')}</summary>
+            <p>Prompt SHA-256: {firstFrameQuote.authoritySnapshot.promptIr.imagePromptSha256}</p>
+            <h5>{t('firstFrameQuoteExecutorPrompt')}</h5>
             {firstFrameQuote.promptBinding.legacyExecutorPrompt === null
               ? <p role="alert">{t('firstFrameQuoteExecutorUnavailable')}</p>
               : <>
                 <p className={directorCss.promptText}>{firstFrameQuote.promptBinding.legacyExecutorPrompt}</p>
-                <p>SHA-256: {firstFrameQuote.promptBinding.legacyExecutorPromptSha256}</p>
+                <p>Executor SHA-256: {firstFrameQuote.promptBinding.legacyExecutorPromptSha256}</p>
               </>}
-          </details>
-          <p role="status"><strong>{t('firstFrameQuoteExecutorBound')}</strong></p>
-          {!firstFrameQuote.promptBinding.dispatchCompatible && <p role="alert">
-            <strong>{t('firstFrameQuoteExecutorBlocked')}</strong>
-          </p>}
-          <details><summary>{t('firstFrameQuoteLocks')}</summary>
             <p>PromptIR: {firstFrameQuote.authoritySnapshot.promptIr.id} · v{firstFrameQuote.authoritySnapshot.promptIr.version}</p>
             <p>PromptIR SHA: {firstFrameQuote.authoritySnapshot.promptIr.contentSha256}</p>
             <p>Method SHA: {firstFrameQuote.authoritySnapshot.method.methodSha256}</p>
@@ -1152,6 +1169,10 @@ function ReadyPromptIrWorkspace({
             {firstFrameQuote.promptBinding.executionBlockers.map(blocker => <p key={blocker}>
               Execution blocker: {blocker}
             </p>)}
+            {firstFrameQuote.authorizationDraft.blockers.map(blocker => <p key={`technical-${blocker.code}`}>
+              {blocker.category}: {blocker.technicalDetail}
+            </p>)}
+            <p>Authorization draft SHA: {firstFrameQuote.authorizationDraft.draftSha256}</p>
             <p>Projection SHA: {firstFrameQuote.projectionSha256}</p>
           </details>
           {firstFrameQuote.blockers.length > 0 && <div role="alert">

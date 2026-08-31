@@ -723,6 +723,49 @@
   background: var(--dsw-alias-bg-layer-1);
 }
 
+.authorizationSummary {
+  padding: 12px;
+  border-left: 4px solid var(--qingmu-accent);
+  border-radius: 9px;
+  background: var(--qingmu-soft);
+}
+
+.authorizationSummary p,
+.authorizationFlags {
+  margin: 0;
+}
+
+.authorizationFlags {
+  padding: 10px 12px;
+  border: 1px solid var(--qingmu-accent);
+  border-radius: 9px;
+  color: var(--dsw-alias-label-primary);
+  overflow-wrap: anywhere;
+}
+
+.authorizationBlockers ul {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.authorizationBlockers li {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.authorizationBlockers li span {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
 .recoveryDock {
   display: grid;
   gap: 12px;
