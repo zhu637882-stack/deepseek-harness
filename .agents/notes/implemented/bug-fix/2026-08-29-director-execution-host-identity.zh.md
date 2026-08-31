@@ -16,6 +16,8 @@ Status: implemented
 
 可选 DSh 导演 transport 保持禁用，除非私有 Host 配置明确指定一个已签发任务及其方法绑定。mock 配置只接受不含凭据的精确 HTTP loopback origin。独立的 production-capable 配置固定使用 `deepseek-official`、`deepseek-v4-pro`、`https://api.deepseek.com/chat/completions`、关闭推理、不使用工具或文件、适配器零重试，并限制输入／输出 token；fixture 与 production-capable 配置互斥。禁用的 production-capable 配置可以签发不可变易梦任务，并为提交前锁读取其私有 binding，但不会领取 dispatch、创建预留或 submission outbox、挂载或读取外部凭据文件，也不会调用 transport。工作单绑定实际 UTF-8 提示词字节数和保守的 16,000 token 上界；Writer 完整性校验与 Host transport 都会拒绝字节数超过该上界的提示词。启用时，transport 使用真实 `ctx.llm.prepareCall()` seam，并且只用一次 `stream()` 消费返回的 prepared handle。准备会同时捕获已解析连接事实与凭据值，因此后续 settings 或凭据存储世代无法改变该唯一 dispatch。只有当适配器从真实流中保留稳定的响应 request id、Chat Completions completion id、原生 finish reason 和 token/cache 用量时，Host 才接受成功；任一事实缺失、漂移或非法都会转为 unknown，且不再调用。该 transport 不拥有任务、预留、outbox 或计费状态。
 
+本地 launcher 只通过 `director-submit-once` 暴露 production-capable 激活入口。默认调用是不进入 transport 的预检：实例必须已停止；传入的公开锁路径与 SHA 必须绑定仅 owner 可读的私有 binding；Writer 的 immutable 核验必须仍报告完全一致的任务、来源、摘要、价格上限、零 dispatch epoch、一个 preflight，以及零 reservation/outbox；当前 IMAGO 方法包还必须从权威来源字节物化为锁定版本与 SHA；DSh 则必须把已配置凭据解析成未消费的 `prepareCall()` handle。launcher 只报告是否可用，绝不输出凭据值、长度、哈希或来源。production 执行还要求精确确认值，在启动前以 exclusive create 写入仅 owner 可读的尝试审计，并把私有瞬时 production override 只交给自有 API 和 Host 进程，不修改 `instance.json`。尝试审计会进入冷备与恢复，在崩溃后仍保留，并在 epoch、unknown、settled 或恢复出的提交前 fence 之后阻止任何再次执行；自有子进程停止后，瞬时 override 会被移除。隐藏的仅 loopback 测试模式用合成凭据和本地 mock 走同一 Writer 与 Host 顺序，且不能选择 production transport。
+
 执行前，易梦会重算已存储的请求、Provider payload、工作单、上下文快照、提示词、方法、价格和不可变 preflight 的哈希。Host 在调用 transport 前，再独立重算 permit 的 payload、请求和工作单哈希并与签名绑定核对。即使 active route 已移除，settled 和 submission-unknown 结果仍从持久 task、outbox、receipt 与费用事实恢复；Host 既有 binding→prepare 顺序直接返回该终态，不进入 transport。queued 任务首次 prepare 仍要求 active route，未配置时失败关闭。公开签发与状态归一化使用显式字段白名单，不透传未知上游字段。
 
 完全绑定的建议类 Provider 确认现在会在原有 generation task 中原子推进到 `Succeeded`，同时结算 submission outbox。这个 finalizer 只记录技术 schema 与谱系完成，不创建质检、选择、Ready 状态、PromptIR、ChangeSet、发布权威或人工决定。预留仍与已发生请求关联，表示预留上限；实际费用继续为 unknown，等待账单对账。unknown 提交状态保留预留，不能成为终态成功，也不能触发自动重试。
@@ -36,4 +38,4 @@ Status: implemented
 
 ## Consequences
 
-除非隔离部署显式提供执行密钥、允许路由、外部凭据路径和 Host-only DSh transport 绑定，否则可付费导演执行保持休眠。仅有提交前锁并不授权任何 Provider 请求。没有这些私有事实的旧实例继续保留回放、人工编辑、签发与公开状态行为，但私有执行失败关闭。已确认的建议输出不再悬挂于 ingesting 状态，并可在不第二次调用 Provider 的情况下恢复。实际 Provider 账单仍保持 unknown，直到既有账单对账路径提供权威数据。激活生产 route、读取真实凭据和执行付费 canary 仍是相互独立的决定。
+除非隔离部署显式提供执行密钥、允许路由、外部凭据路径和 Host-only DSh transport 绑定，否则可付费导演执行保持休眠。仅有提交前锁与凭据可用性预检并不授权任何 Provider 请求。没有这些私有事实的旧实例继续保留回放、人工编辑、签发与公开状态行为，但私有执行失败关闭。已确认的建议输出不再悬挂于 ingesting 状态，并可在不第二次调用 Provider 的情况下恢复。实际 Provider 账单仍保持 unknown，直到既有账单对账路径提供权威数据。运行精确 production 确认值并执行付费 canary 仍是单独决定。

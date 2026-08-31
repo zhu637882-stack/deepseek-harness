@@ -635,7 +635,7 @@ export interface ImagoMethodAdapterConfig {
 }
 ```
 
-Source: [`packages/experimental/qingmu-imago-method-adapter/src/index.ts:559`](../packages/experimental/qingmu-imago-method-adapter/src/index.ts)
+Source: [`packages/experimental/qingmu-imago-method-adapter/src/index.ts:561`](../packages/experimental/qingmu-imago-method-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-qingmu-yimeng-command-adapter"></a>
 

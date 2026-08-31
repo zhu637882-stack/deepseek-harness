@@ -12,6 +12,8 @@ import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import { loadDirectorReplayMethod } from './director-replay.ts'
 
+export { loadDirectorReplayMethod } from './director-replay.ts'
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** The same configured stateless Method handler exposed on the private Connection channel. */

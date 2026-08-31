@@ -5,8 +5,10 @@ from pathlib import Path
 import socket
 import sqlite3
 import subprocess
+import shutil
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("qingmu_local", Path(__file__).with_name("qingmu-local.py"))
@@ -15,6 +17,114 @@ spec.loader.exec_module(local)
 
 
 class OwnershipTests(unittest.TestCase):
+    def director_submit_world(self, parent: Path):
+        root = parent / "instance"
+        for part in ("private", "storage", "logs", "home", "dsh", "work", "audit"):
+            (root / part).mkdir(parents=True, exist_ok=True)
+        production = {
+            "productionOnly": True,
+            "provider": "deepseek-official",
+            "model": "deepseek-v4-pro",
+            "baseUrl": "https://api.deepseek.com",
+            "endpoint": "/chat/completions",
+            "routeKey": "qingmu.director.text.proposal.c1",
+            "projectId": "project-1",
+            "episodeId": "episode-1",
+            "methodPackageVersion": "method.v1",
+            "methodPackageSha256": "a" * 64,
+            "maxPaidCny": 0.16,
+            "maxInputTokens": 16000,
+            "maxOutputTokens": 512,
+            "thinking": "disabled",
+            "images": False,
+            "files": False,
+            "tools": False,
+            "credentialFile": str(local.DEEPSEEK_PRODUCTION_CREDENTIAL_FILE),
+            "transportEnabled": False,
+            "taskId": "task-1",
+        }
+        config = {
+            "instanceId": "instance-1", "root": str(root), "harnessRoot": str(local.HARNESS),
+            "yimengRoot": str(parent / "writer"), "node": "/usr/bin/node",
+            "coreRoot": str(parent / "core"),
+            "directorProductionExecution": production,
+        }
+        binding = {
+            "taskId": "task-1", "workOrderSha256": "b" * 64,
+            "contextSnapshotSha256": "c" * 64, "promptSha256": "d" * 64,
+            "requestSha256": "e" * 64, "payloadSha256": "f" * 64,
+            "provider": "deepseek-official", "model": "deepseek-v4-pro",
+            "routeKey": production["routeKey"],
+            "inputPolicy": {"unit": "utf8_bytes_upper_bound", "promptUtf8Bytes": 100,
+                            "maxInputTokens": 16000},
+            "methodPackageSha256": "a" * 64, "pricingSnapshotSha256": "1" * 64,
+            "dispatchKey": "", "dispatchEpoch": 0, "claimToken": "", "claimEpoch": 0,
+            "exclusiveExecutionLane": "qingmu_director_host_permit_v1",
+        }
+        inspection = {
+            **binding, "schema": "jason.qingmu-director-submit-inspection.v1",
+            "projectId": "project-1", "episodeId": "episode-1", "sceneId": "scene-1",
+            "shotId": "shot-1", "methodPackageVersion": "method.v1",
+            "localStatus": "dispatch_pending", "providerStatus": "PENDING_DISPATCH",
+            "kernelStatus": "DispatchPending", "maxAttempts": 1,
+            "preflightAllowed": True, "preflightDryRun": False,
+            "estimatedCny": 0.157824, "authorizationCapCny": 0.16,
+            "counts": {"generation_tasks": 1, "provider_preflights": 1,
+                "provider_authorization_reservations": 0,
+                "provider_submission_outbox": 0, "assets": 0, "prompt_irs": 0,
+                "entity_reference_packs": 0, "episode_release_authority": 0,
+                "episode_production_step_receipts": 0, "agent_runs": 0,
+                "workflow_runs": 0, "step_runs": 0},
+            "sourceSnapshots": {
+                "scriptRevision": 1, "scriptSha256": "2" * 64,
+                "storyboardId": "storyboard-1", "storyboardVersion": 1,
+                "storyboardSha256": "3" * 64,
+                "selectedReferenceSnapshotSha256": "4" * 64,
+                "contextSnapshotSha256": "c" * 64,
+            },
+        }
+        private_lock = root / "private/c1-pre-submit-lock.json"
+        local.write_json(private_lock, binding)
+        lock = (
+            Path(config["coreRoot"])
+            / "docs/qingmu-os/evidence/2026-08-31-director-deepseek-text-canary-c1-phase1"
+            / "c1-phase1-lock-pack.json"
+        )
+        lock.parent.mkdir(parents=True)
+        lock.write_text(json.dumps({
+            "schema": "qingmu.c1-deepseek-text-pre-submit-lock.v1",
+            "canary": {"root": str(root), "instanceId": "instance-1",
+                       "database": str(root / "storage/jason.db"),
+                       "isolatedSyntheticProject": True, "humanContentSignoff": False},
+            "scope": {"projectId": "project-1", "episodeId": "episode-1",
+                      "sceneId": "scene-1", "shotId": "shot-1"},
+            "sourceSnapshots": inspection["sourceSnapshots"],
+            "methodPackage": {"version": "method.v1", "sha256": "a" * 64},
+            "workOrder": {"taskId": "task-1", "routeKey": production["routeKey"],
+                          "workOrderSha256": binding["workOrderSha256"],
+                          "promptSha256": binding["promptSha256"],
+                          "inputSha256": binding["contextSnapshotSha256"],
+                          "inputPolicy": binding["inputPolicy"],
+                          "requestSha256": binding["requestSha256"],
+                          "payloadSha256": binding["payloadSha256"],
+                          "pricingSnapshotSha256": binding["pricingSnapshotSha256"],
+                          "dispatchEpoch": 0,
+                          "privateBindingSha256": local.hashlib.sha256(private_lock.read_bytes()).hexdigest()},
+            "productionRoute": {"provider": production["provider"], "model": production["model"],
+                "baseUrl": production["baseUrl"], "endpoint": production["endpoint"],
+                "maxInputTokens": production["maxInputTokens"],
+                "maxOutputTokens": production["maxOutputTokens"], "thinking": "disabled",
+                "images": False, "files": False, "tools": False, "maxAttempts": 1,
+                "maxRetries": 0, "credentialFileMetadataOnly": production["credentialFile"],
+                "transportEnabled": False},
+            "pricing": {"snapshotDate": "2026-08-31", "currency": "CNY",
+                "inputCacheMissCnyPerMillion": 9, "outputCnyPerMillion": 27,
+                "reservedUpperBoundCny": 0.16, "estimatedReservationCny": 0.157824,
+                "actualCostCny": 0},
+            "persistedCounts": inspection["counts"],
+        }))
+        return root, config, lock, local.hashlib.sha256(lock.read_bytes()).hexdigest(), inspection
+
     def test_new_instance_has_distinct_private_director_execution_key(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)
@@ -206,6 +316,117 @@ class OwnershipTests(unittest.TestCase):
             (root / "storage").symlink_to("/unrelated")
             with self.assertRaisesRegex(ValueError, "符号链接"):
                 local.read_config(root)
+
+    def test_director_submit_preflight_binds_lock_state_price_and_credential_without_transport(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, config, lock, digest, inspection = self.director_submit_world(Path(directory))
+            with patch.object(local, "_writer_submit_inspection", return_value=inspection), \
+                 patch.object(local, "_probe_director_method", return_value={
+                     "version": "method.v1", "methodPackageSha256": "a" * 64,
+                     "sourceBindings": [],
+                 }) as method_probe, \
+                 patch.object(local, "_probe_director_credential", return_value={"available": True}) as probe:
+                result = local.director_submit_preflight(
+                    root, config, task_id="task-1", lock_pack=lock, lock_sha256=digest,
+                    credential_file=Path(directory) / "credential",
+                )
+            self.assertTrue(result["ready"])
+            self.assertEqual(result["providerHttpRequests"], 0)
+            self.assertFalse(result["transportConsumed"])
+            probe.assert_called_once()
+            method_probe.assert_called_once()
+            self.assertFalse((root / "audit/director-submit-once-task-1.json").exists())
+
+    def test_director_submit_preflight_fails_closed_on_lock_state_and_existing_attempt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, config, lock, digest, inspection = self.director_submit_world(Path(directory))
+            with patch.object(local, "_probe_director_credential", return_value={"available": True}):
+                with patch.object(local, "_writer_submit_inspection", return_value={**inspection, "dispatchEpoch": 1}):
+                    with self.assertRaisesRegex(ValueError, "锁与易梦"):
+                        local.director_submit_preflight(
+                            root, config, task_id="task-1", lock_pack=lock, lock_sha256=digest
+                        )
+                with patch.object(local, "_writer_submit_inspection", return_value=inspection), \
+                     patch.object(local, "_probe_director_method", return_value={
+                         "version": "method.v1", "methodPackageSha256": "9" * 64,
+                         "sourceBindings": [],
+                     }):
+                    with self.assertRaisesRegex(ValueError, "方法当前物化已漂移"):
+                        local.director_submit_preflight(
+                            root, config, task_id="task-1", lock_pack=lock, lock_sha256=digest
+                        )
+                local.write_json(root / "audit/director-submit-once-task-1.json", {"state": "unknown"})
+                with patch.object(local, "_writer_submit_inspection", return_value=inspection):
+                    with self.assertRaisesRegex(ValueError, "已有提交尝试"):
+                        local.director_submit_preflight(
+                            root, config, task_id="task-1", lock_pack=lock, lock_sha256=digest
+                        )
+
+    def test_director_submit_attempt_fence_has_one_global_winner(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "attempt.json"
+
+            def arm(index):
+                try:
+                    local._write_exclusive_json(path, {"attempt": index})
+                    return "armed"
+                except FileExistsError:
+                    return "rejected"
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                results = list(pool.map(arm, range(8)))
+            self.assertEqual(results.count("armed"), 1)
+            self.assertEqual(results.count("rejected"), 7)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_backup_restore_preserves_director_attempt_fence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "instance"
+            root.mkdir(mode=0o700)
+            root.chmod(0o700)
+            for part in ("private", "storage", "dsh", "logs", "home", "work", "audit", "backups"):
+                (root / part).mkdir(parents=True, mode=0o700, exist_ok=True)
+            config = {
+                "root": str(root), "harnessRoot": str(local.HARNESS),
+                "instanceId": "instance-1", "controlKey": "control",
+                "directorExecutionKey": "director", "jwtSecret": "jwt",
+                "attestationKey": "attestation",
+            }
+            local.write_json(root / "private/instance.json", config)
+            local.write_json(root / "identity.json", {"kind": "test"})
+            local.mark_lifecycle(root, config, "clean")
+            with sqlite3.connect(root / "storage/jason.db") as connection:
+                connection.execute("CREATE TABLE sample (id INTEGER)")
+            fence = root / "audit/director-submit-once-task-1.json"
+            local._write_exclusive_json(fence, {"state": "armed_no_replay"})
+            saved = local.backup(root)
+            manifest = json.loads((Path(saved["backup"]) / "manifest.json").read_text())
+            self.assertIn("audit/director-submit-once-task-1.json", manifest["sha256"])
+            restored = parent / "restored"
+            local.restore(Path(saved["backup"]), restored)
+            restored_fence = restored / "audit/director-submit-once-task-1.json"
+            self.assertEqual(restored_fence.read_bytes(), fence.read_bytes())
+            with self.assertRaises(FileExistsError):
+                local._write_exclusive_json(restored_fence, {"state": "armed_again"})
+
+    def test_director_credential_probe_uses_prepared_dsh_call_without_transport(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "instance"
+            for part in ("home", "dsh"):
+                (root / part).mkdir(parents=True, exist_ok=True)
+            credential = Path(directory) / "credential.yaml"
+            credential.write_text(
+                "version: 1\nrefs:\n  DEEPSEEK_API_KEY: isolated-probe-only\n"
+            )
+            credential.chmod(0o600)
+            result = local._probe_director_credential(
+                root,
+                {"node": shutil.which("node")},
+                credential,
+            )
+            self.assertTrue(result["available"])
+            self.assertFalse(result["transportConsumed"])
 
 
 if __name__ == "__main__":

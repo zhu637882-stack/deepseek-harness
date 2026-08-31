@@ -26,6 +26,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from typing import Any
 
 DEFAULT_ROOT = Path.home() / "Library/Application Support/QingmuOS"
 HARNESS = Path(__file__).resolve().parents[1]
@@ -75,8 +76,11 @@ def safe_env(root: Path) -> dict[str, str]:
 
 def backend_command(config: dict) -> list[str]:
     writer = Path(config["yimengRoot"])
-    return [str(writer / ".venv/bin/python"), "-B", str(writer / "scripts/qingmu_local_api.py"),
-            "--root", config["root"]]
+    command = [str(writer / ".venv/bin/python"), "-B", str(writer / "scripts/qingmu_local_api.py"),
+               "--root", config["root"]]
+    if config.get("_directorProductionOverridePath"):
+        command.extend(["--director-production-override", config["_directorProductionOverridePath"]])
+    return command
 
 
 def backend_env(root: Path, config: dict) -> dict[str, str]:
@@ -331,12 +335,21 @@ class Supervisor:
                         )
                 production = self.config.get("directorProductionExecution") or {}
                 if production.get("transportEnabled"):
+                    mock_base_url = self.config.get("_directorSubmitMockBaseUrl")
                     overlay += (
-                        "    directorProductionTransportEnabled: true\n"
-                        "    directorProductionTaskId: " + json.dumps(production["taskId"]) + "\n"
-                        "    directorProductionMethodVersion: " + json.dumps(production["methodPackageVersion"]) + "\n"
-                        "    directorProductionMethodSha256: " + json.dumps(production["methodPackageSha256"]) + "\n"
+                        ("    directorDshTransportEnabled: true\n" if mock_base_url else
+                         "    directorProductionTransportEnabled: true\n")
+                        + ("    directorDshTaskId: " if mock_base_url else
+                           "    directorProductionTaskId: ") + json.dumps(production["taskId"]) + "\n"
+                        + ("    directorDshMethodVersion: " if mock_base_url else
+                           "    directorProductionMethodVersion: ")
+                        + json.dumps(production["methodPackageVersion"]) + "\n"
+                        + ("    directorDshMethodSha256: " if mock_base_url else
+                           "    directorProductionMethodSha256: ")
+                        + json.dumps(production["methodPackageSha256"]) + "\n"
                     )
+                    if mock_base_url:
+                        overlay += "    directorDshMockBaseUrl: " + json.dumps(mock_base_url) + "\n"
         fixture = self.config.get("directorExecutionFixture") or {}
         if fixture.get("transportMode") == "dsh-one-shot-mock":
             mock_base_url = require_http_loopback_origin(str(fixture.get("mockBaseUrl") or ""))
@@ -350,17 +363,29 @@ class Supervisor:
             )
         production = self.config.get("directorProductionExecution") or {}
         if production.get("transportEnabled"):
-            overlay += (
-                "\n- id: credentials\n  config:\n"
-                "    path: " + json.dumps(production["credentialFile"]) + "\n"
-                "    watch: false\n"
-                "\n- id: llm-deepseek\n  config:\n"
-                "    baseURL: " + json.dumps(DEEPSEEK_PRODUCTION_BASE_URL) + "\n"
-                "    thinking: disabled\n"
-                "    reasoningEffort: off\n"
-                "    maxTokens: 512\n"
-                "    retryPolicy:\n      mode: normal\n      maxRetries: 0\n"
-            )
+            mock_base_url = self.config.get("_directorSubmitMockBaseUrl")
+            if mock_base_url:
+                overlay += (
+                    "\n- id: llm-deepseek\n  config:\n"
+                    "    baseURL: " + json.dumps(mock_base_url) + "\n"
+                    "    apiKeyEnv: QINGMU_C1_LOCAL_MOCK_KEY\n"
+                    "    thinking: disabled\n"
+                    "    reasoningEffort: off\n"
+                    "    maxTokens: 512\n"
+                    "    retryPolicy:\n      mode: normal\n      maxRetries: 0\n"
+                )
+            else:
+                overlay += (
+                    "\n- id: credentials\n  config:\n"
+                    "    path: " + json.dumps(production["credentialFile"]) + "\n"
+                    "    watch: false\n"
+                    "\n- id: llm-deepseek\n  config:\n"
+                    "    baseURL: " + json.dumps(DEEPSEEK_PRODUCTION_BASE_URL) + "\n"
+                    "    thinking: disabled\n"
+                    "    reasoningEffort: off\n"
+                    "    maxTokens: 512\n"
+                    "    retryPolicy:\n      mode: normal\n      maxRetries: 0\n"
+                )
         overlay += "\n- id: qingmu-imago-method-adapter\n  config:\n    coreRoot: " + json.dumps(self.config["coreRoot"]) + "\n"
         overlay_path = self.root / "private/local.patch.yml"
         overlay_path.write_text(overlay)
@@ -370,6 +395,8 @@ class Supervisor:
         # Director paid execution disabled until restored into a new root.
         if self.config.get("directorExecutionKey"):
             env["QINGMU_DIRECTOR_EXECUTION_KEY"] = self.config["directorExecutionKey"]
+        if self.config.get("_directorSubmitMockBaseUrl"):
+            env["QINGMU_C1_LOCAL_MOCK_KEY"] = "isolated-local-mock-only"
         session = self.root / "private/session.json"
         if session.exists():
             env["YIMENG_API_TOKEN"] = json.loads(session.read_text())["token"]
@@ -519,7 +546,7 @@ def backup(root: Path) -> dict:
         require_clean(root, read_config(root))
         target = root / "backups" / (time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(4))
         target.mkdir(mode=0o700)
-        for name in ("storage", "private", "dsh", "identity.json"):
+        for name in ("storage", "private", "dsh", "audit", "identity.json"):
             source = root / name
             if source.is_dir():
                 shutil.copytree(source, target / name, symlinks=True)
@@ -528,8 +555,13 @@ def backup(root: Path) -> dict:
         integrity = cold_integrity(target / "storage/jason.db")
         if integrity != "ok":
             raise RuntimeError("备份数据库完整性检查失败")
-        hashes = {str(file.relative_to(target)): hashlib.sha256(file.read_bytes()).hexdigest()
-                  for file in (target / "storage").rglob("*") if file.is_file()}
+        hashes = {
+            str(file.relative_to(target)): hashlib.sha256(file.read_bytes()).hexdigest()
+            for directory in (target / "storage", target / "audit")
+            if directory.is_dir()
+            for file in directory.rglob("*")
+            if file.is_file()
+        }
         write_json(target / "manifest.json", {"root": str(root), "integrity": integrity, "sha256": hashes})
         return {"backup": str(target), "integrity": integrity, "files": len(hashes), "overwritten": False}
 
@@ -544,6 +576,375 @@ def cold_integrity(database: Path) -> str:
         return db.execute("PRAGMA integrity_check").fetchone()[0]
 
 
+DIRECTOR_PRODUCTION_CONFIRMATION = "QINGMU_C1_ONE_PROVIDER_POST_MAX_CNY_0_16"
+DIRECTOR_LOCK_FIELDS = (
+    "taskId", "workOrderSha256", "contextSnapshotSha256", "promptSha256",
+    "requestSha256", "payloadSha256", "provider", "model", "routeKey",
+    "inputPolicy", "methodPackageSha256", "pricingSnapshotSha256", "dispatchKey",
+    "dispatchEpoch", "claimToken", "claimEpoch", "exclusiveExecutionLane",
+)
+
+
+def _private_regular_file(path: Path, *, owner_only: bool = True) -> Path:
+    path = path.expanduser().absolute()
+    if path.is_symlink() or not path.is_file() or path.stat().st_uid != os.getuid():
+        raise ValueError("导演提交文件必须是当前用户拥有的普通文件")
+    if owner_only and path.stat().st_mode & 0o077:
+        raise ValueError("导演提交私密文件权限必须为0600")
+    return path
+
+
+def _writer_submit_inspection(root: Path, config: dict, task_id: str) -> dict:
+    result = subprocess.run(
+        [*backend_command(config), "--inspect-director-submit-task", task_id],
+        cwd=root / "work",
+        env=backend_env(root, config),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode:
+        raise RuntimeError("易梦只读提交核验失败")
+    try:
+        value = json.loads(result.stdout.strip().splitlines()[-1])
+    except (IndexError, json.JSONDecodeError) as exc:
+        raise RuntimeError("易梦只读提交核验响应无效") from exc
+    if value.get("schema") != "jason.qingmu-director-submit-inspection.v1":
+        raise RuntimeError("易梦只读提交核验合同无效")
+    return value
+
+
+def _probe_director_credential(root: Path, config: dict, credential_file: Path) -> dict:
+    credential_file = _private_regular_file(credential_file)
+    result = subprocess.run(
+        [config["node"], str(HARNESS / "scripts/qingmu-director-credential-probe.mjs"),
+         str(credential_file), DEEPSEEK_PRODUCTION_BASE_URL],
+        cwd=HARNESS,
+        env=safe_env(root),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode:
+        stage = "unknown"
+        try:
+            reported = json.loads(result.stderr.strip())
+            if reported.get("stage") in {
+                "credentials", "llm-runtime", "deepseek-adapter", "prepare-call", "binding"
+            }:
+                stage = reported["stage"]
+        except json.JSONDecodeError:
+            pass
+        raise RuntimeError(f"DeepSeek 导演凭据不可用（{stage}）；未发起 Provider 请求")
+    try:
+        value = json.loads(result.stdout.strip())
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("DeepSeek 导演凭据核验响应无效") from exc
+    if value != {
+        "available": True,
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-pro",
+        "baseUrl": DEEPSEEK_PRODUCTION_BASE_URL,
+        "maxRetries": 0,
+        "transportConsumed": False,
+    }:
+        raise RuntimeError("DeepSeek 导演凭据绑定不符；未发起 Provider 请求")
+    return value
+
+
+def _probe_director_method(root: Path, config: dict) -> dict:
+    result = subprocess.run(
+        [config["node"], str(HARNESS / "scripts/qingmu-director-method-probe.mjs"),
+         config["coreRoot"]],
+        cwd=HARNESS,
+        env=safe_env(root),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode:
+        raise RuntimeError("IMAGO 导演方法当前物化失败；未发起 Provider 请求")
+    try:
+        value = json.loads(result.stdout.strip())
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("IMAGO 导演方法当前物化响应无效") from exc
+    if (
+        set(value) != {"version", "methodPackageSha256", "sourceBindings"}
+        or not isinstance(value["version"], str)
+        or not isinstance(value["methodPackageSha256"], str)
+        or len(value["methodPackageSha256"]) != 64
+        or not isinstance(value["sourceBindings"], list)
+    ):
+        raise RuntimeError("IMAGO 导演方法当前物化合同无效")
+    return value
+
+
+def director_submit_preflight(
+    root: Path,
+    config: dict,
+    *,
+    task_id: str,
+    lock_pack: Path,
+    lock_sha256: str,
+    credential_file: Path | None = None,
+) -> dict:
+    """Fail closed before any dispatch mutation or Provider transport exists."""
+    if len(lock_sha256) != 64 or any(character not in "0123456789abcdef" for character in lock_sha256):
+        raise ValueError("导演提交锁 SHA-256 无效")
+    lock_pack = _private_regular_file(lock_pack, owner_only=False)
+    if hashlib.sha256(lock_pack.read_bytes()).hexdigest() != lock_sha256:
+        raise ValueError("导演提交锁路径或 SHA-256 不匹配")
+    production = validate_director_production_config(config.get("directorProductionExecution"))
+    if production is None or production["transportEnabled"] is not False:
+        raise ValueError("导演 production 配置必须存在且保持默认禁用")
+    if production.get("taskId") != task_id:
+        raise ValueError("导演提交任务与私密配置不匹配")
+    inspection = _writer_submit_inspection(root, config, task_id)
+    locked_pack = json.loads(lock_pack.read_text())
+    private_lock = _private_regular_file(root / "private/c1-pre-submit-lock.json")
+    locked = json.loads(private_lock.read_text())
+    expected_route = {
+        "provider": production["provider"],
+        "model": production["model"],
+        "baseUrl": production["baseUrl"],
+        "endpoint": production["endpoint"],
+        "maxInputTokens": production["maxInputTokens"],
+        "maxOutputTokens": production["maxOutputTokens"],
+        "thinking": production["thinking"],
+        "images": production["images"],
+        "files": production["files"],
+        "tools": production["tools"],
+        "maxAttempts": 1,
+        "maxRetries": 0,
+        "credentialFileMetadataOnly": production["credentialFile"],
+        "transportEnabled": False,
+    }
+    expected_pricing = locked_pack.get("pricing", {})
+    if (
+        locked_pack.get("schema") != "qingmu.c1-deepseek-text-pre-submit-lock.v1"
+        or locked_pack.get("canary") != {
+            "root": str(root),
+            "instanceId": config["instanceId"],
+            "database": str(root / "storage/jason.db"),
+            "isolatedSyntheticProject": True,
+            "humanContentSignoff": False,
+        }
+        or locked_pack.get("scope") != {
+            "projectId": inspection.get("projectId"),
+            "episodeId": inspection.get("episodeId"),
+            "sceneId": inspection.get("sceneId"),
+            "shotId": inspection.get("shotId"),
+        }
+        or locked_pack.get("sourceSnapshots") != inspection.get("sourceSnapshots")
+        or locked_pack.get("methodPackage") != {
+            "version": inspection.get("methodPackageVersion"),
+            "sha256": inspection.get("methodPackageSha256"),
+        }
+        or locked_pack.get("workOrder", {}).get("taskId") != task_id
+        or locked_pack.get("workOrder", {}).get("routeKey") != inspection.get("routeKey")
+        or locked_pack.get("workOrder", {}).get("workOrderSha256") != inspection.get("workOrderSha256")
+        or locked_pack.get("workOrder", {}).get("promptSha256") != inspection.get("promptSha256")
+        or locked_pack.get("workOrder", {}).get("inputSha256") != inspection.get("contextSnapshotSha256")
+        or locked_pack.get("workOrder", {}).get("inputPolicy") != inspection.get("inputPolicy")
+        or locked_pack.get("workOrder", {}).get("requestSha256") != inspection.get("requestSha256")
+        or locked_pack.get("workOrder", {}).get("payloadSha256") != inspection.get("payloadSha256")
+        or locked_pack.get("workOrder", {}).get("pricingSnapshotSha256")
+        != inspection.get("pricingSnapshotSha256")
+        or locked_pack.get("workOrder", {}).get("dispatchEpoch") != inspection.get("dispatchEpoch")
+        or locked_pack.get("workOrder", {}).get("privateBindingSha256")
+        != hashlib.sha256(private_lock.read_bytes()).hexdigest()
+        or locked_pack.get("productionRoute") != expected_route
+        or set(expected_pricing) != {
+            "snapshotDate", "currency", "inputCacheMissCnyPerMillion",
+            "outputCnyPerMillion", "reservedUpperBoundCny",
+            "estimatedReservationCny", "actualCostCny",
+        }
+        or expected_pricing.get("currency") != "CNY"
+        or expected_pricing.get("reservedUpperBoundCny") != production["maxPaidCny"]
+        or not isinstance(expected_pricing.get("estimatedReservationCny"), (int, float))
+        or not isinstance(inspection.get("estimatedCny"), (int, float))
+        or abs(expected_pricing["estimatedReservationCny"] - inspection["estimatedCny"]) > 1e-12
+        or expected_pricing.get("actualCostCny") != 0
+        or locked_pack.get("persistedCounts") != inspection.get("counts")
+        or locked != {field: inspection.get(field) for field in DIRECTOR_LOCK_FIELDS}
+    ):
+        raise ValueError("导演提交锁与易梦持久事实不匹配")
+    if (
+        inspection.get("provider") != production["provider"]
+        or inspection.get("model") != production["model"]
+        or inspection.get("routeKey") != production["routeKey"]
+        or inspection.get("projectId") != production["projectId"]
+        or inspection.get("episodeId") != production["episodeId"]
+        or inspection.get("methodPackageVersion") != production["methodPackageVersion"]
+        or inspection.get("methodPackageSha256") != production["methodPackageSha256"]
+        or inspection.get("inputPolicy") != {
+            "unit": "utf8_bytes_upper_bound",
+            "promptUtf8Bytes": inspection.get("inputPolicy", {}).get("promptUtf8Bytes"),
+            "maxInputTokens": production["maxInputTokens"],
+        }
+        or inspection.get("maxAttempts") != 1
+        or inspection.get("localStatus") != "dispatch_pending"
+        or inspection.get("providerStatus") != "PENDING_DISPATCH"
+        or inspection.get("kernelStatus") != "DispatchPending"
+        or inspection.get("dispatchEpoch") != 0
+        or inspection.get("dispatchKey") != ""
+        or inspection.get("claimToken") != ""
+        or inspection.get("preflightAllowed") is not True
+        or inspection.get("preflightDryRun") is not False
+        or inspection.get("estimatedCny", 1) > production["maxPaidCny"]
+        or inspection.get("authorizationCapCny") != production["maxPaidCny"]
+        or inspection.get("counts", {}).get("generation_tasks") != 1
+        or inspection.get("counts", {}).get("provider_preflights") != 1
+        or inspection.get("counts", {}).get("provider_authorization_reservations") != 0
+        or inspection.get("counts", {}).get("provider_submission_outbox") != 0
+    ):
+        raise ValueError("导演提交任务状态、来源或费用绑定不满足单次提交前置条件")
+    audit_path = root / "audit" / f"director-submit-once-{task_id}.json"
+    if audit_path.exists() or audit_path.is_symlink():
+        raise ValueError("导演任务已有提交尝试记录；拒绝再次执行")
+    materialized_method = _probe_director_method(root, config)
+    if (
+        materialized_method["version"] != inspection["methodPackageVersion"]
+        or materialized_method["methodPackageSha256"] != inspection["methodPackageSha256"]
+    ):
+        raise ValueError("IMAGO 导演方法当前物化已漂移；拒绝提交")
+    credential = credential_file or Path(production["credentialFile"])
+    availability = _probe_director_credential(root, config, credential)
+    return {
+        "schema": "qingmu.director-submit-once-preflight.v1",
+        "ready": True,
+        "root": str(root),
+        "taskId": task_id,
+        "lockSha256": lock_sha256,
+        "provider": production["provider"],
+        "model": production["model"],
+        "routeKey": production["routeKey"],
+        "estimatedCny": inspection["estimatedCny"],
+        "maxPaidCny": production["maxPaidCny"],
+        "dispatchEpoch": 0,
+        "reservationCount": 0,
+        "outboxCount": 0,
+        "credentialAvailable": availability["available"],
+        "transportConsumed": False,
+        "providerHttpRequests": 0,
+    }
+
+
+def _write_exclusive_json(path: Path, value: dict) -> None:
+    with path.open("x", encoding="utf-8") as stream:
+        os.chmod(path, 0o600)
+        json.dump(value, stream, ensure_ascii=False, indent=2)
+        stream.flush()
+        os.fsync(stream.fileno())
+    directory = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def _runtime_director_state(database: Path, task_id: str) -> dict:
+    with sqlite3.connect(database) as connection:
+        connection.row_factory = sqlite3.Row
+        task = connection.execute(
+            "SELECT local_status, provider_status, kernel_status, dispatch_epoch, provider_task_id "
+            "FROM generation_tasks WHERE id = ?", (task_id,)
+        ).fetchone()
+        outbox = connection.execute(
+            "SELECT state, terminal_outcome FROM provider_submission_outbox "
+            "WHERE generation_task_id = ? ORDER BY created_at", (task_id,)
+        ).fetchall()
+    if task is None:
+        raise RuntimeError("导演提交任务在执行期间消失")
+    return {**dict(task), "outbox": [dict(row) for row in outbox]}
+
+
+def execute_director_submit_once(
+    root: Path,
+    config: dict,
+    preflight: dict,
+    *,
+    mock_base_url: str | None = None,
+) -> dict:
+    """Arm one durable attempt before booting the only Host allowed to submit it."""
+    task_id = preflight["taskId"]
+    audit_path = root / "audit" / f"director-submit-once-{task_id}.json"
+    production = {**config["directorProductionExecution"], "transportEnabled": True}
+    override_path = root / "private" / f"director-submit-once-{task_id}.json"
+    armed = {
+        "schema": "qingmu.director-submit-once-audit.v1",
+        "taskId": task_id,
+        "lockSha256": preflight["lockSha256"],
+        "provider": preflight["provider"],
+        "model": preflight["model"],
+        "routeKey": preflight["routeKey"],
+        "maxPaidCny": preflight["maxPaidCny"],
+        "state": "armed_no_replay",
+        "mockOnly": bool(mock_base_url),
+    }
+    _write_exclusive_json(audit_path, armed)
+    _write_exclusive_json(override_path, production)
+    runtime_config: dict[str, Any] = {
+        **config,
+        "directorProductionExecution": production,
+        "_directorProductionOverridePath": str(override_path),
+    }
+    if mock_base_url:
+        runtime_config["_directorSubmitMockBaseUrl"] = require_http_loopback_origin(mock_base_url)
+    supervisor = Supervisor(root, runtime_config)
+    final: dict = {}
+    try:
+        mark_lifecycle(root, config, "dirty")
+        api_port, web_port = available_port(), available_port()
+        while web_port == api_port:
+            web_port = available_port()
+        supervisor.ports = {
+            "apiPort": api_port,
+            "webPort": web_port,
+            "apiUrl": f"http://127.0.0.1:{api_port}",
+            "webUrl": f"http://127.0.0.1:{web_port}",
+        }
+        supervisor.api = supervisor.launch(
+            [*backend_command(runtime_config), "--port", str(api_port)],
+            backend_env(root, runtime_config),
+            "director-submit-api",
+        )
+        supervisor.wait_ready(supervisor.api, supervisor.api_identity)
+        supervisor.start_host()
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            final = _runtime_director_state(root / "storage/jason.db", task_id)
+            outbox_states = {item["state"] for item in final["outbox"]}
+            if final["kernel_status"] == "Succeeded" or outbox_states & {"unknown", "settled"}:
+                break
+            if supervisor.api.poll() is not None or supervisor.host.poll() is not None:
+                raise RuntimeError("导演提交子进程提前退出；原尝试已锁定，禁止重发")
+            time.sleep(0.1)
+        else:
+            raise RuntimeError("导演提交终态未知；原尝试已锁定，禁止重发")
+        result = {
+            "taskId": task_id,
+            "state": "settled" if final["kernel_status"] == "Succeeded" else "submission_unknown",
+            "dispatchEpoch": final["dispatch_epoch"],
+            "providerTaskRecorded": bool(final["provider_task_id"]),
+            "transportMode": "local_mock" if mock_base_url else "production_once",
+            "automaticRetry": False,
+        }
+        write_json(audit_path, {**armed, **result})
+        return result
+    except Exception:
+        write_json(audit_path, {**armed, "state": "execution_unknown_no_replay"})
+        raise
+    finally:
+        stop_child(supervisor.host)
+        stop_child(supervisor.api)
+        mark_lifecycle(root, config, "clean")
+        for log in supervisor.logs:
+            log.close()
+        override_path.unlink(missing_ok=True)
+        (root / "private/local.patch.yml").unlink(missing_ok=True)
+
+
 def restore(source: Path, target: Path) -> dict:
     """Restore into an absent directory, never over an active or existing instance."""
     source = source.resolve(strict=True)
@@ -551,12 +952,21 @@ def restore(source: Path, target: Path) -> dict:
     config = json.loads((source / "private/instance.json").read_text())
     if config["root"] != manifest["root"] or config["harnessRoot"] != str(HARNESS):
         raise ValueError("备份来源绑定不符")
-    actual_files = {str(file.relative_to(source)) for file in (source / "storage").rglob("*") if file.is_file()}
+    actual_files = {
+        str(file.relative_to(source))
+        for directory in (source / "storage", source / "audit")
+        if directory.is_dir()
+        for file in directory.rglob("*")
+        if file.is_file()
+    }
     if set(manifest["sha256"]) != actual_files or "storage/jason.db" not in actual_files:
         raise ValueError("备份SHA清单必须覆盖全部storage文件与数据库")
     for relative, digest in manifest["sha256"].items():
         file = source / relative
-        if not file.resolve().is_relative_to(source / "storage") or not file.is_file():
+        if (
+            not file.is_file()
+            or not any(file.resolve().is_relative_to(source / directory) for directory in ("storage", "audit"))
+        ):
             raise ValueError("备份媒体路径无效")
         if hashlib.sha256(file.read_bytes()).hexdigest() != digest:
             raise ValueError("备份SHA不符；未创建恢复目录")
@@ -565,8 +975,12 @@ def restore(source: Path, target: Path) -> dict:
     target.mkdir(mode=0o700, parents=False, exist_ok=False)
     for name in ("storage", "private", "dsh"):
         shutil.copytree(source / name, target / name, symlinks=True)
+    if (source / "audit").is_dir():
+        shutil.copytree(source / "audit", target / "audit", symlinks=True)
+    else:
+        (target / "audit").mkdir(mode=0o700)
     shutil.copy2(source / "identity.json", target / "identity.json")
-    for name in ("logs", "home", "work", "backups", "audit"):
+    for name in ("logs", "home", "work", "backups"):
         (target / name).mkdir(mode=0o700)
     config.update(
         root=str(target),
@@ -586,11 +1000,16 @@ def restore(source: Path, target: Path) -> dict:
 def main() -> None:
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["init", "start", "status", "stop", "login", "backup", "restore", "_supervise"])
+    parser.add_argument("command", choices=["init", "start", "status", "stop", "login", "backup", "restore",
+                                            "director-submit-once", "_supervise"])
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--yimeng-root", type=Path)
     parser.add_argument("--core-root", type=Path)
     parser.add_argument("--backup", type=Path)
+    parser.add_argument("--task-id")
+    parser.add_argument("--lock-pack", type=Path)
+    parser.add_argument("--lock-sha256")
+    parser.add_argument("--execute-production-once")
     args = parser.parse_args()
     # Do not resolve an existing root symlink into an unrelated target.
     root = args.root.expanduser().absolute()
@@ -611,7 +1030,28 @@ def main() -> None:
                 signal.signal(signal.SIGINT, lambda *_: setattr(supervisor, "stopping", True))
                 supervisor.run()
                 return
-            if args.command == "start":
+            if args.command == "director-submit-once":
+                if not args.task_id or args.lock_pack is None or not args.lock_sha256:
+                    raise ValueError("director-submit-once 必须明确 task-id、lock-pack 与 lock-sha256")
+                production_requested = args.execute_production_once is not None
+                if production_requested and args.execute_production_once != DIRECTOR_PRODUCTION_CONFIRMATION:
+                    raise ValueError("production 单次提交确认值不匹配")
+                with instance_lock(root):
+                    require_clean(root, config)
+                    result = director_submit_preflight(
+                        root,
+                        config,
+                        task_id=args.task_id,
+                        lock_pack=args.lock_pack.expanduser().absolute(),
+                        lock_sha256=args.lock_sha256,
+                    )
+                    if production_requested:
+                        result = execute_director_submit_once(
+                            root,
+                            config,
+                            result,
+                        )
+            elif args.command == "start":
                 result = start(root, config)
             elif args.command == "backup":
                 result = backup(root)
