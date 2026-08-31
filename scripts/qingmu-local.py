@@ -721,7 +721,7 @@ def director_submit_preflight(
     }
     expected_pricing = locked_pack.get("pricing", {})
     if (
-        locked_pack.get("schema") != "qingmu.c1-deepseek-text-pre-submit-lock.v2"
+        locked_pack.get("schema") != "qingmu.c1-deepseek-text-pre-submit-lock.v3"
         or locked_pack.get("status") != "active"
         or locked_pack.get("submitAllowed") is not True
         or locked_pack.get("canary") != {

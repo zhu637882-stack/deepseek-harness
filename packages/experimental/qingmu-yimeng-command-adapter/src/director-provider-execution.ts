@@ -18,10 +18,19 @@ export interface DirectorProposalOutputContract {
     readonly fieldRules: Readonly<Record<string, Readonly<Record<string, unknown>>>>
   }
   readonly relations: { readonly uniqueItemFields: readonly string[] }
+  readonly stringLength: { readonly unit: string }
   readonly nullAndUnknown: {
     readonly nullAllowed: boolean
     readonly unknownPlaceholderAllowed: boolean
     readonly noSuggestionAction: string
+    readonly exactPlaceholderPolicy: {
+      readonly normalizedValues: readonly string[]
+      readonly normalization: {
+        readonly trim: string
+        readonly case: string
+        readonly unicodeNormalization: string
+      }
+    }
   }
 }
 
@@ -130,6 +139,25 @@ const canonical = (value: unknown): string => {
   return `{${Object.keys(item).sort().map(key => `${JSON.stringify(key)}:${canonical(item[key])}`).join(',')}}`
 }
 const sha = (value: unknown): string => createHash('sha256').update(canonical(value)).digest('hex')
+const unicodeCodePointLength = (value: string): number => Array.from(value).length
+const normalizePlaceholder = (value: string): string => value
+  .replace(/^[\u0009-\u000d\u0020]+|[\u0009-\u000d\u0020]+$/g, '')
+  .replace(/[A-Z]/g, character => character.toLowerCase())
+
+const proposalPlaceholderValues = (contract: DirectorProposalOutputContract): ReadonlySet<string> => {
+  const policy = contract.nullAndUnknown.exactPlaceholderPolicy
+  const values = policy.normalizedValues
+  if (contract.stringLength.unit !== 'unicode_code_points'
+    || policy.normalization.trim !== 'ascii_whitespace'
+    || policy.normalization.case !== 'ascii_lower'
+    || policy.normalization.unicodeNormalization !== 'none'
+    || values.length === 0
+    || values.some(value => value.length === 0 || normalizePlaceholder(value) !== value)
+    || new Set(values).size !== values.length) {
+    throw new Error('director provider output contract invalid')
+  }
+  return new Set(values)
+}
 
 const identifier = (value: unknown, field: string): string => {
   if (typeof value !== 'string' || value.length === 0 || value.length > 256
@@ -158,6 +186,7 @@ const proposal = (
     || contract.nullAndUnknown.noSuggestionAction !== 'omit_item') {
     throw new Error('director provider output contract invalid')
   }
+  const placeholders = proposalPlaceholderValues(contract)
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error('director provider proposal invalid')
   }
@@ -211,13 +240,15 @@ const proposal = (
         throw new Error('director provider proposal value invalid')
       }
     } else if (typeof proposed !== 'string' || proposed.trim().length === 0
-      || proposed.length < Number(typedValueRule.minLength)
-      || proposed.length > Number(typedValueRule.maxLength)) {
+      || unicodeCodePointLength(proposed) < Number(typedValueRule.minLength)
+      || unicodeCodePointLength(proposed) > Number(typedValueRule.maxLength)
+      || placeholders.has(normalizePlaceholder(proposed))) {
       throw new Error('director provider proposal value invalid')
     }
     if (typeof item.impact !== 'string' || item.impact.trim().length === 0
-      || item.impact.length < Number(impactRule.minLength)
-      || item.impact.length > Number(impactRule.maxLength)) {
+      || unicodeCodePointLength(item.impact) < Number(impactRule.minLength)
+      || unicodeCodePointLength(item.impact) > Number(impactRule.maxLength)
+      || placeholders.has(normalizePlaceholder(item.impact))) {
       throw new Error('director provider proposal impact invalid')
     }
     ids.add(itemId); fields.add(String(field))

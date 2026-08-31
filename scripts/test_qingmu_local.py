@@ -88,12 +88,12 @@ class OwnershipTests(unittest.TestCase):
         local.write_json(private_lock, binding)
         lock = (
             Path(config["coreRoot"])
-            / "docs/qingmu-os/evidence/2026-08-31-director-json-contract-c1-phase1-6"
-            / "c1-phase1-6-lock-pack.json"
+            / "docs/qingmu-os/evidence/2026-08-31-director-output-semantics-phase1-7"
+            / "c1-phase1-7-lock-pack.json"
         )
         lock.parent.mkdir(parents=True)
         lock.write_text(json.dumps({
-            "schema": "qingmu.c1-deepseek-text-pre-submit-lock.v2",
+            "schema": "qingmu.c1-deepseek-text-pre-submit-lock.v3",
             "status": "active",
             "submitAllowed": True,
             "canary": {"root": str(root), "instanceId": "instance-1",
@@ -346,18 +346,23 @@ class OwnershipTests(unittest.TestCase):
             root, config, lock, digest, inspection = self.director_submit_world(Path(directory))
             with patch.object(local, "_probe_director_credential", return_value={"available": True}):
                 current = json.loads(lock.read_text())
-                old = dict(current)
-                old["schema"] = "qingmu.c1-deepseek-text-pre-submit-lock.v1"
-                old.pop("status")
-                old.pop("submitAllowed")
-                lock.write_text(json.dumps(old))
-                old_digest = local.hashlib.sha256(lock.read_bytes()).hexdigest()
-                with patch.object(local, "_writer_submit_inspection", return_value=inspection):
-                    with self.assertRaisesRegex(ValueError, "锁与易梦"):
-                        local.director_submit_preflight(
-                            root, config, task_id="task-1", lock_pack=lock,
-                            lock_sha256=old_digest,
-                        )
+                for old_schema in (
+                    "qingmu.c1-deepseek-text-pre-submit-lock.v1",
+                    "qingmu.c1-deepseek-text-pre-submit-lock.v2",
+                ):
+                    old = dict(current)
+                    old["schema"] = old_schema
+                    if old_schema.endswith(".v1"):
+                        old.pop("status")
+                        old.pop("submitAllowed")
+                    lock.write_text(json.dumps(old))
+                    old_digest = local.hashlib.sha256(lock.read_bytes()).hexdigest()
+                    with patch.object(local, "_writer_submit_inspection", return_value=inspection):
+                        with self.assertRaisesRegex(ValueError, "锁与易梦"):
+                            local.director_submit_preflight(
+                                root, config, task_id="task-1", lock_pack=lock,
+                                lock_sha256=old_digest,
+                            )
                 lock.write_text(json.dumps(current))
                 digest = local.hashlib.sha256(lock.read_bytes()).hexdigest()
                 with patch.object(local, "_writer_submit_inspection", return_value={**inspection, "dispatchEpoch": 1}):

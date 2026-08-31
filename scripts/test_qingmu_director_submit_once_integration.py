@@ -104,9 +104,9 @@ class DirectorSubmitOnceIntegration(unittest.TestCase):
             ).hexdigest(),
             "contextSnapshotSha256": context["contextSnapshotSha256"],
         }
-        self.lock_pack = self.root / "c1-phase1-6-lock-pack.json"
+        self.lock_pack = self.root / "c1-phase1-7-lock-pack.json"
         self.lock_pack.write_text(json.dumps({
-            "schema": "qingmu.c1-deepseek-text-pre-submit-lock.v2",
+            "schema": "qingmu.c1-deepseek-text-pre-submit-lock.v3",
             "status": "active",
             "submitAllowed": True,
             "canary": {"root": str(self.root), "instanceId": config["instanceId"],

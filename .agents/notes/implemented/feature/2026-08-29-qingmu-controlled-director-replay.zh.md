@@ -14,7 +14,7 @@ Host 从既有青木三方融合总案加载 SHA 绑定的方法包。IMAGO 只�
 
 导演台只在用户明确点击后读取建议，统一标记为非模型生成的演练建议，并展示原值、建议值和影响。采用某项只修改既有场景规划的本地草稿。在进入既有预览和人工确认保存前，Host 对原 context、方法、工作单、prompt、proposal 和 output SHA 做零费用 freshness 校验，绝不再次执行推理。如果 replay 接缝不可用，用户可以保留文字并转成普通人工草稿。
 
-另设一份独立、版本化且默认关闭的易梦付费能力合同。它只能经易梦现有 generation task、ProviderGate、预留、持久 submission outbox、ack/unknown 与 reconcile 链签发 Provider/model/pricing 绑定工作单。Host 只执行已签发 permit，最多一次请求且 adapter 零重试；结果不明停在 `submission_unknown`。
+另设一份独立、版本化且默认关闭的易梦付费能力合同。它只能经易梦现有 generation task、ProviderGate、预留、持久 submission outbox、ack/unknown 与 reconcile 链签发 Provider/model/pricing 绑定工作单。其已签输出规则定义 Unicode code point 字符串长度，以及唯一准确的占位符规范化与拒绝集合；Writer 与 Host 共同消费这些规则。Host 只执行已签发 permit，最多一次请求且 adapter 零重试；结果不明停在 `submission_unknown`。
 
 ## Alternatives considered
 

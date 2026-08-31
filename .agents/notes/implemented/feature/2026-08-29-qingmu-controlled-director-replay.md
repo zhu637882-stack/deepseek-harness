@@ -14,7 +14,7 @@ The Host loads a SHA-bound method package from the existing Qingmu three-party i
 
 The director workspace requests a proposal only after an explicit click and labels it as a non-model replay suggestion while showing original value, proposed value, and impact. Adopting an item changes only the existing local scene-planning draft. Before the established preview and human-confirmed save, the Host performs a zero-cost freshness check over the original context, method, work-order, prompt, proposal, and output SHA. It never executes inference a second time. A user can retain the words as an ordinary manual draft if the replay seam is unavailable.
 
-A separate, versioned paid-capable contract is Yimeng-owned and disabled by default. It can only issue a Provider/model/pricing-bound work order through Yimeng's existing generation task, ProviderGate, reservation, durable submission outbox, acknowledgement/unknown, and reconciliation chain. The Host executes only a signed permit with one attempt and zero adapter retries; ambiguous results stop as `submission_unknown`.
+A separate, versioned paid-capable contract is Yimeng-owned and disabled by default. It can only issue a Provider/model/pricing-bound work order through Yimeng's existing generation task, ProviderGate, reservation, durable submission outbox, acknowledgement/unknown, and reconciliation chain. Its signed output rules define Unicode code-point string lengths and one exact placeholder normalization and rejection set; Writer and Host consume those same rules. The Host executes only a signed permit with one attempt and zero adapter retries; ambiguous results stop as `submission_unknown`.
 
 ## Alternatives considered
 

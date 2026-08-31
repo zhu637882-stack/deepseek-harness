@@ -1,4 +1,4 @@
-// C1 Phase 1.6 acceptance: JSON-contract-bound work order and private permit, with zero Provider calls.
+// C1 Phase 1.7 acceptance: output-semantics-bound work order and private permit, with zero Provider calls.
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { chmodSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -11,7 +11,7 @@ import { REPO_ROOT } from './support.ts'
 const writer = process.env.QINGMU_LOCAL_YIMENG_ROOT
 const core = process.env.IMAGO_OS_CORE_ROOT
 const root = process.env.QINGMU_C1_PHASE1_ROOT
-const expectedRoot = '/Users/a1234/Library/Application Support/QingmuOS-Canary/c1-deepseek-text-20260831-r2'
+const expectedRoot = '/Users/a1234/Library/Application Support/QingmuOS-Canary/c1-deepseek-text-20260831-r3'
 const credentialFile = '/Users/a1234/Library/Application Support/QingmuOS/dsh/.credentials.yaml'
 
 const canonical = (value: unknown): string => {
@@ -220,9 +220,9 @@ print(json.dumps({"projectId":one("SELECT id FROM projects"),"episodeId":one("SE
         expect(state.reservations).toHaveLength(0)
 
         const lockPack = {
-          schema: 'qingmu.c1-deepseek-text-pre-submit-lock.v2', status: 'active', submitAllowed: true,
-          phase: 'phase1_6_json_contract_zero_call',
-          task: 'QINGMU_C1_DEEPSEEK_TEXT_CANARY_20260831_R2', createdAt: new Date().toISOString(),
+          schema: 'qingmu.c1-deepseek-text-pre-submit-lock.v3', status: 'active', submitAllowed: true,
+          phase: 'phase1_7_output_semantics_zero_call',
+          task: 'QINGMU_C1_DEEPSEEK_TEXT_CANARY_20260831_R3', createdAt: new Date().toISOString(),
           canary: { root: expectedRoot, instanceId: started.instanceId,
             database: join(expectedRoot, 'storage/jason.db'), isolatedSyntheticProject: true,
             humanContentSignoff: false },
@@ -257,7 +257,7 @@ print(json.dumps({"projectId":one("SELECT id FROM projects"),"episodeId":one("SE
             taskState: state.tasks[0], outboxState: null,
             readyOrSelectedOrApprovedInferred: false },
         }
-        const lockPath = join(expectedRoot, 'c1-phase1-6-lock-pack.json')
+        const lockPath = join(expectedRoot, 'c1-phase1-7-lock-pack.json')
         writeFileSync(lockPath, JSON.stringify(lockPack, null, 2) + '\n', { mode: 0o600 })
         chmodSync(lockPath, 0o600)
 

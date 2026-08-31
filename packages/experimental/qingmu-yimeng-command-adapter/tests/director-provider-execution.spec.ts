@@ -59,8 +59,14 @@ const outputContract = () => ({
     },
   },
   relations: { uniqueItemFields: ['id', 'field'] },
+  stringLength: { unit: 'unicode_code_points' as const },
   nullAndUnknown: { nullAllowed: false as const, unknownPlaceholderAllowed: false as const,
-    noSuggestionAction: 'omit_item' as const },
+    noSuggestionAction: 'omit_item' as const,
+    exactPlaceholderPolicy: {
+      normalizedValues: ['unknown', '未知', '不确定', 'n/a', 'tbd', 'null', 'none'],
+      normalization: { trim: 'ascii_whitespace' as const, case: 'ascii_lower' as const,
+        unicodeNormalization: 'none' as const },
+    } },
 })
 const workOrder = (): DirectorProviderDispatchPermit['workOrder'] => {
   const contract = outputContract()
@@ -227,6 +233,38 @@ describe('Director provider Host execution seam', () => {
     )
     expect(result).toMatchObject({ state: 'submission_unknown', automaticRetry: false })
     expect(execute).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    'unknown', 'UNKNOWN', ' unknown ', '未知', ' 不确定 ', 'N/A', ' n/a ', 'TBD', 'null', 'none', null,
+  ])('rejects signed unknown placeholder %j in proposedValue and impact', async (placeholder) => {
+    for (const fieldName of ['proposedValue', 'impact'] as const) {
+      const item = { ...transportResult().proposal.items[0], [fieldName]: placeholder }
+      const execute = vi.fn(async () => ({ ...transportResult(), proposal: {
+        ...transportResult().proposal, items: [item],
+      } }))
+      const result = await executeDirectorProviderPermit(
+        permit(), { execute: execute as never }, new AbortController().signal,
+      )
+      expect(result).toMatchObject({ state: 'submission_unknown', automaticRetry: false })
+      expect(execute).toHaveBeenCalledOnce()
+    }
+  })
+
+  it.each([
+    ['proposedValue', '😀'.repeat(2000), '😀'.repeat(2001)],
+    ['impact', '😀'.repeat(500), '😀'.repeat(501)],
+    ['proposedValue', 'e\u0301'.repeat(1000), `${'e\u0301'.repeat(1000)}x`],
+  ] as const)('counts %s limits in Unicode code points', async (fieldName, accepted, rejected) => {
+    const baseItem = transportResult().proposal.items[0]!
+    const executeWith = async (value: string) => executeDirectorProviderPermit(
+      permit(), { execute: async () => ({ ...transportResult(), proposal: {
+        ...transportResult().proposal,
+        items: [{ ...baseItem, [fieldName]: value }],
+      } }) }, new AbortController().signal,
+    )
+    expect((await executeWith(accepted)).state).toBe('provider_result')
+    expect(await executeWith(rejected)).toMatchObject({ state: 'submission_unknown', automaticRetry: false })
   })
 
   it('uses the real DSh prepareCall and llm-deepseek stream exactly once', async () => {
