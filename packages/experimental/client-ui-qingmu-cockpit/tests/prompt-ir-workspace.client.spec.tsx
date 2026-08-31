@@ -26,6 +26,7 @@ const SELECTED_SNAPSHOT_SHA = '5'.repeat(64)
 const PROJECTION_SHA = '6'.repeat(64)
 const CANDIDATE_SHA = '7'.repeat(64)
 const RECEIPT_SHA = '8'.repeat(64)
+const QUOTE_PROJECTION_SHA = 'a'.repeat(64)
 
 const COORDINATES = {
   projectId: PROJECT_ID,
@@ -295,6 +296,56 @@ function createPort(options: { readonly editPostSucceeds?: boolean } = {}) {
       receipt: selectionReceipt(request),
     } as const
   })
+  const firstFrameQuote = vi.fn(async () => ({
+    schema: 'jason.qingmu-ready-prompt-ir-first-frame-quote.v1',
+    projectId: PROJECT_ID,
+    episodeId: EPISODE_ID,
+    storyboardRevisionId: STORYBOARD_REVISION_ID,
+    frameId: FRAME_ID,
+    authoritySnapshot: {
+      projectId: PROJECT_ID,
+      episodeId: EPISODE_ID,
+      contextSchema: 'jason.qingmu-prompt-ir-bootstrap-context.v1',
+      storyboard: { id: STORYBOARD_REVISION_ID, version: 7, sourceHash: 'b'.repeat(64) },
+      frame: { id: FRAME_ID, title: '镜头一', narrative: '人物等待', visual: '雨夜月台',
+        action: '人物抬头', durationSec: 4, dialogueLineIds: [], sceneId: 'scene-1',
+        contentSha256: '9'.repeat(64) },
+      contextSnapshotSha256: 'c'.repeat(64),
+      promptIr: { id: BASE_ID, version: BASE_VERSION, contentSha256: BASE_CONTENT_SHA, status: 'Ready',
+        imagePrompt: BASE_EDITABLE.imageGenPrompt, imagePromptSha256: 'd'.repeat(64) },
+      method: { rootPromptIrId: BASE_ID, methodProjectionSha256: 'e'.repeat(64), methodSha256: 'f'.repeat(64),
+        methodSourceBindings: [{ kind: 'method', path: 'imago/method.json', sha256: '0'.repeat(64) }],
+        bootstrapContextSnapshotSha256: '1'.repeat(64) },
+      references: [{ referencePackId: 'pack-1', referencePackSha256: '2'.repeat(64), role: 'scene',
+        elementKind: 'scene', elementId: 'scene-1', assetId: 'asset-1', assetSha256: '3'.repeat(64),
+        materializedSha256: '4'.repeat(64), selectionIdentity: 'selection-1', sourceRevisionId: 'source-1',
+        qualificationCheckId: 'qualification-1', qualificationKind: 'local_file_integrity',
+        rightsRecordSha256: '5'.repeat(64), profileRevision: 1, profileSnapshotSha256: '6'.repeat(64) }],
+      firstFramePreparation: { frameId: FRAME_ID, frameNo: 1, currentAssetId: null,
+        generationRequired: true, auditRequired: true,
+        auditReason: 'generated_candidate_requires_formal_audit', humanSelectionRequired: true },
+    },
+    authoritySnapshotSha256: '7'.repeat(64),
+    costSourceLock: null,
+    costSourceLockSha256: null,
+    promptBinding: { readyPromptIrImagePromptSha256: 'd'.repeat(64),
+      legacyExecutorPrompt: '当前执行器编译提示词', legacyExecutorPromptSha256: '8'.repeat(64),
+      legacyExecutorMatchesReadyPromptIr: false, executorUsesReadyPromptIr: false,
+      dispatchCompatible: false, executionBlockers: ['first_frame_ready_prompt_ir_executor_binding_missing'] },
+    scope: { frameCount: 1, imagesPerFrame: 1, resolution: '720P' },
+    quote: { frameId: FRAME_ID, frameNo: 1, calls: 1, estimatedCny: 0.2, capability: 'image.generate',
+      routeKey: 'b4.first_frame_generation', provider: 'dashscope', model: 'wan2.2-t2i-flash', pricingVerified: true },
+    quoteReady: true,
+    blockers: [],
+    readOnly: true,
+    providerCalls: 0,
+    budgetMutation: false,
+    taskMutation: false,
+    mediaMutation: false,
+    submitted: false,
+    charged: false,
+    projectionSha256: QUOTE_PROJECTION_SHA,
+  } as const))
 
   return {
     port: {
@@ -307,6 +358,7 @@ function createPort(options: { readonly editPostSucceeds?: boolean } = {}) {
       workflow,
       selectPromptIr,
       recoverPromptIrSelection,
+      firstFrameQuote,
     } as unknown as QingmuYimengPort,
     spies: {
       promptIr,
@@ -318,6 +370,7 @@ function createPort(options: { readonly editPostSucceeds?: boolean } = {}) {
       workflow,
       selectPromptIr,
       recoverPromptIrSelection,
+      firstFrameQuote,
     },
   }
 }
@@ -333,6 +386,31 @@ afterEach(() => {
 })
 
 describe('PromptIrWorkspace vertical slice', () => {
+  it('shows one Ready-bound first-frame quote without offering submission', async () => {
+    const { port, spies } = createPort()
+    render(<PromptIrWorkspace projectId={PROJECT_ID} episodeId={EPISODE_ID} storyboardRevisionId={STORYBOARD_REVISION_ID}
+      shotItems={frame('Ready')} selectedShotId={FRAME_ID} onSelectShotId={vi.fn()} port={port} t={t}
+      onCommitted={vi.fn(async () => {})} presentation="director" />)
+    await screen.findByLabelText(zh.directorVideoPrompt)
+    fireEvent.click(screen.getByRole('button', { name: zh.firstFrameQuoteAction }))
+    await screen.findByText('dashscope / wan2.2-t2i-flash')
+    expect(screen.getByText('¥0.2000')).toBeTruthy()
+    expect(screen.getByText(zh.firstFrameQuoteExecutorBlocked)).toBeTruthy()
+    expect(screen.getByText('当前执行器编译提示词')).toBeTruthy()
+    expect(screen.getByText(zh.firstFrameQuoteNotSubmitted)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /确认生成|提交首帧|付费生成/ })).toBeNull()
+    expect(spies.firstFrameQuote).toHaveBeenCalledWith({
+      projectId: PROJECT_ID,
+      episodeId: EPISODE_ID,
+      storyboardRevisionId: STORYBOARD_REVISION_ID,
+      frameId: FRAME_ID,
+      promptIrId: BASE_ID,
+      promptIrVersion: BASE_VERSION,
+      promptIrContentSha256: BASE_CONTENT_SHA,
+    }, expect.any(AbortSignal))
+    expect(spies.firstFrameQuote).toHaveBeenCalledTimes(1)
+  })
+
   it('unlocks a proven historical commit when a newer Draft is current, retaining text for explicit rebase', async () => {
     const { port, spies } = createPort()
     render(<PromptIrWorkspace projectId={PROJECT_ID} episodeId={EPISODE_ID} storyboardRevisionId={STORYBOARD_REVISION_ID}

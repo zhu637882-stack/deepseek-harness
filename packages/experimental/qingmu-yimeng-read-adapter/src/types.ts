@@ -413,6 +413,123 @@ export interface YimengPromptIrBootstrapResponse extends YimengJsonObject {
   readonly selectionExecuted: false
 }
 
+/** Exact Ready PromptIR identity selected for a read-only first-frame quote. */
+export interface YimengFirstFrameQuoteRequest extends YimengPromptIrRequest {
+  readonly promptIrId: string
+  readonly promptIrVersion: number
+  readonly promptIrContentSha256: string
+}
+
+/** Content-addressed, zero-dispatch quote for one Ready PromptIR first frame. */
+export interface YimengFirstFrameQuoteResponse extends YimengJsonObject {
+  readonly schema: 'jason.qingmu-ready-prompt-ir-first-frame-quote.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly storyboardRevisionId: string
+  readonly frameId: string
+  readonly authoritySnapshot: YimengJsonObject & {
+    readonly contextSchema: 'jason.qingmu-prompt-ir-bootstrap-context.v1'
+    readonly storyboard: {
+      readonly id: string
+      readonly version: number
+      readonly sourceHash: string
+    }
+    readonly frame: {
+      readonly id: string
+      readonly title: string
+      readonly narrative: string
+      readonly visual: string
+      readonly action: string
+      readonly durationSec: number
+      readonly dialogueLineIds: readonly string[]
+      readonly sceneId: string
+      readonly contentSha256: string
+    }
+    readonly contextSnapshotSha256: string
+    readonly promptIr: {
+      readonly id: string
+      readonly version: number
+      readonly contentSha256: string
+      readonly status: 'Ready'
+      readonly imagePrompt: string
+      readonly imagePromptSha256: string
+    }
+    readonly method: {
+      readonly rootPromptIrId: string
+      readonly methodProjectionSha256: string
+      readonly methodSha256: string
+      readonly methodSourceBindings: readonly YimengJsonObject[]
+      readonly bootstrapContextSnapshotSha256: string
+    }
+    readonly references: readonly (YimengJsonObject & {
+      readonly referencePackId: string
+      readonly referencePackSha256: string
+      readonly role: string
+      readonly elementKind: string
+      readonly elementId: string
+      readonly assetId: string
+      readonly assetSha256: string
+      readonly materializedSha256: string
+      readonly selectionIdentity: string
+      readonly sourceRevisionId: string
+      readonly qualificationCheckId: string
+      readonly qualificationKind: string
+      readonly rightsRecordSha256: string
+      readonly profileRevision: number
+      readonly profileSnapshotSha256: string
+    })[]
+    readonly firstFramePreparation: {
+      readonly frameId: string
+      readonly frameNo: number
+      readonly currentAssetId: string | null
+      readonly generationRequired: boolean
+      readonly auditRequired: boolean
+      readonly auditReason: string | null
+      readonly humanSelectionRequired: boolean
+    }
+  }
+  readonly authoritySnapshotSha256: string
+  readonly costSourceLock: null | {
+    readonly scriptRevision: number
+    readonly scriptSha256: string
+    readonly storyContractSha256: string
+    readonly storyboardRevision: number
+    readonly storyboardCreativeSha256: string
+  }
+  readonly costSourceLockSha256: null | string
+  readonly promptBinding: {
+    readonly readyPromptIrImagePromptSha256: string
+    readonly legacyExecutorPrompt: string | null
+    readonly legacyExecutorPromptSha256: string | null
+    readonly legacyExecutorMatchesReadyPromptIr: boolean
+    readonly executorUsesReadyPromptIr: false
+    readonly dispatchCompatible: false
+    readonly executionBlockers: readonly string[]
+  }
+  readonly scope: { readonly frameCount: 1; readonly imagesPerFrame: 1; readonly resolution: '720P' }
+  readonly quote: null | {
+    readonly frameId: string
+    readonly frameNo: number
+    readonly calls: 1
+    readonly estimatedCny: number
+    readonly capability: 'image.generate'
+    readonly routeKey: 'b4.first_frame_generation'
+    readonly provider: string
+    readonly model: string
+    readonly pricingVerified: boolean
+  }
+  readonly quoteReady: boolean
+  readonly blockers: readonly string[]
+  readonly readOnly: true
+  readonly providerCalls: 0
+  readonly budgetMutation: false
+  readonly taskMutation: false
+  readonly mediaMutation: false
+  readonly submitted: false
+  readonly charged: false
+  readonly projectionSha256: string
+}
+
 /** Read-only coordinates for the selected video on one canonical storyboard frame. */
 export interface YimengSelectedVideoReviewRequest {
   readonly projectId: string
@@ -2225,6 +2342,7 @@ export interface YimengReadEndpointMap {
   readonly script: YimengScriptResponse
   readonly promptIr: YimengPromptIrResponse
   readonly promptIrBootstrap: YimengPromptIrBootstrapResponse
+  readonly firstFrameQuote: YimengFirstFrameQuoteResponse
   readonly selectedVideoReview: YimengSelectedVideoReviewResponse
   readonly takeVersions: YimengTakeVersionStackResponse
   readonly takePreview: YimengTakePreviewResponse

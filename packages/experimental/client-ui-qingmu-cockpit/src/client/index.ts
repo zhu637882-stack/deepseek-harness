@@ -25,6 +25,7 @@ import type {
   YimengCapabilityCatalogResponse,
   YimengCostRehearsalResponse,
   YimengGateAControlEvidenceResponse,
+  YimengFirstFrameQuoteResponse,
   YimengElementProfileResponse, YimengEpisodesResponse, YimengHealth, YimengPreviewElementProfileResponse,
   YimengPreviewPromptIrResponse, YimengPreviewScriptResponse, YimengPreviewStoryboardCanvasResponse,
   YimengCreateCommentResponse, YimengCreateHumanDecisionResponse, YimengElementReviewFeedResponse,
@@ -76,6 +77,7 @@ export type {
   YimengCostRehearsalRequest, YimengCostRehearsalResponse, YimengCostRehearsalSubject,
   YimengGateAControlEvidenceResponse, YimengGateAControlScenario, YimengGateAControlScenarioId,
   YimengGateAControlSourceBinding,
+  YimengFirstFrameQuoteRequest, YimengFirstFrameQuoteResponse,
   YimengElementProfileResponse, YimengEpisodesResponse, YimengHealth, YimengPreviewElementProfileResponse,
   YimengPreviewPromptIrResponse, YimengPreviewScriptResponse, YimengPreviewStoryboardCanvasResponse,
   YimengCreateCommentResponse, YimengCreateHumanDecisionResponse, YimengElementReviewFeedResponse,
@@ -248,6 +250,8 @@ export function apply(ctx: ClientContext): void {
       method<ImagoPromptIrBootstrapMethodResponse>('promptIrBootstrapMethod', request, signal),
     promptIrBootstrap: (request, signal) =>
       read<YimengPromptIrBootstrapResponse>('promptIrBootstrap', request, signal),
+    firstFrameQuote: (request, signal) =>
+      read<YimengFirstFrameQuoteResponse>('firstFrameQuote', request, signal),
     shotRelationMethod: (request, signal) =>
       method<ImagoShotRelationMethodResponse>('shotRelationMethod', request, signal),
     heroFrameStoryboardMethod: (request, signal) =>

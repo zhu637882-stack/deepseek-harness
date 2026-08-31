@@ -8,6 +8,7 @@ import type {
   YimengCommitPromptIrEditResponse,
   YimengPreviewPromptIrResponse,
   YimengPromptIrResponse,
+  YimengFirstFrameQuoteResponse,
   YimengProposePromptIrResponse,
   YimengRecoverPromptIrEditCommitRequest,
   YimengRecoverPromptIrEditCommitResponse,
@@ -51,7 +52,7 @@ type EditableField = typeof EDITABLE_FIELDS[number]
 type EditableProjection = YimengPromptIrResponse['subject']['editableProjection']
 type DraftPromptIr = Pick<YimengCommitPromptIrEditResponse['promptIr'], 'id' | 'version' | 'contentSha256' | 'status'>
 type Operation = 'idle' | 'loading' | 'checking' | 'previewing' | 'committing' | 'recovering-edit'
-  | 'selecting' | 'recovering-selection'
+  | 'selecting' | 'recovering-selection' | 'quoting-first-frame'
 
 interface PromptIrFrame extends PromptIrRecoveryCoordinates {
   readonly key: string
@@ -481,6 +482,7 @@ function ReadyPromptIrWorkspace({
   const [selectionReceipt, setSelectionReceipt] = useState<YimengSelectPromptIrResponse>()
   const [editConfirmed, setEditConfirmed] = useState(false)
   const [selectionConfirmed, setSelectionConfirmed] = useState(false)
+  const [firstFrameQuote, setFirstFrameQuote] = useState<YimengFirstFrameQuoteResponse>()
   const [error, setError] = useState<string>()
   const [editRecovery, setEditRecovery] = useState<PromptIrEditRecoveryMarkerRead>({ status: 'none' })
   const [selectionRecovery, setSelectionRecovery] = useState<PromptIrSelectionRecoveryMarkerRead>({ status: 'none' })
@@ -518,6 +520,7 @@ function ReadyPromptIrWorkspace({
     setSelectionReceipt(undefined)
     setEditConfirmed(false)
     setSelectionConfirmed(false)
+    setFirstFrameQuote(undefined)
     setError(undefined)
     setOperation('idle')
     setStaleRebased(false)
@@ -941,6 +944,7 @@ function ReadyPromptIrWorkspace({
     setEditVerified(false)
     setEditConfirmed(false)
     setSelectionConfirmed(false)
+    setFirstFrameQuote(undefined)
     await Promise.allSettled([onCommitted()])
   }
 
@@ -1018,6 +1022,31 @@ function ReadyPromptIrWorkspace({
     }
   }
 
+  const quoteFirstFrame = async (): Promise<void> => {
+    if (snapshot === undefined || active === undefined || operation !== 'idle') return
+    setError(undefined)
+    setFirstFrameQuote(undefined)
+    const controller = new AbortController()
+    abortRef.current = controller
+    setOperation('quoting-first-frame')
+    try {
+      const result = await port.firstFrameQuote({
+        projectId: active.projectId,
+        episodeId: active.episodeId,
+        storyboardRevisionId: active.storyboardRevisionId,
+        frameId: active.frameId,
+        promptIrId: snapshot.subject.promptIrId,
+        promptIrVersion: snapshot.subject.promptIrVersion,
+        promptIrContentSha256: snapshot.subject.promptIrContentSha256,
+      }, controller.signal)
+      if (!controller.signal.aborted) setFirstFrameQuote(result)
+    } catch (cause) {
+      if (!controller.signal.aborted) setError(messageOf(cause))
+    } finally {
+      if (!controller.signal.aborted) setOperation('idle')
+    }
+  }
+
   if (projectId === '' || episodeId === '') return <p className={css.empty}>{t('promptIrChooseEpisode')}</p>
   if (frames.length === 0) return <p className={css.empty}>{t('promptIrNoFrames')}</p>
   if (selectedShotId === '') return <p className={css.empty}>{t('promptIrChooseShot')}</p>
@@ -1071,6 +1100,67 @@ function ReadyPromptIrWorkspace({
           <div><dt>{t('promptIrContentHash')}</dt><dd>{snapshot?.subject.promptIrContentSha256 ?? active?.promptIrContentSha256 ?? t('unknown')}</dd></div>
         </dl>
       </details>
+
+      <section className={css.commitReceipt} aria-label={t('firstFrameQuoteTitle')}>
+        <h4>{t('firstFrameQuoteTitle')}</h4>
+        <p>{t('firstFrameQuoteBoundary')}</p>
+        <button
+          type="button"
+          className={css.primaryAction}
+          disabled={busy || locked || snapshot === undefined}
+          onClick={() => { void quoteFirstFrame() }}
+        >
+          {operation === 'quoting-first-frame' ? t('firstFrameQuoteLoading') : t('firstFrameQuoteAction')}
+        </button>
+        {firstFrameQuote !== undefined && <div role="status">
+          <p><strong>{t('firstFrameQuoteScope')}</strong>：1 个镜头 × n=1</p>
+          {firstFrameQuote.quote === null
+            ? <p role="alert">{t('firstFrameQuoteUnavailable')}</p>
+            : <dl>
+              <div><dt>Provider / Model</dt><dd>{firstFrameQuote.quote.provider} / {firstFrameQuote.quote.model}</dd></div>
+              <div><dt>Route</dt><dd>{firstFrameQuote.quote.routeKey}</dd></div>
+              <div><dt>pricingVerified</dt><dd>{String(firstFrameQuote.quote.pricingVerified)}</dd></div>
+              <div><dt>{t('firstFrameQuoteEstimate')}</dt><dd>¥{firstFrameQuote.quote.estimatedCny.toFixed(4)}</dd></div>
+            </dl>}
+          <details open><summary>{t('firstFrameQuotePrompt')}</summary>
+            <p className={directorCss.promptText}>{firstFrameQuote.authoritySnapshot.promptIr.imagePrompt}</p>
+            <p>SHA-256: {firstFrameQuote.authoritySnapshot.promptIr.imagePromptSha256}</p>
+          </details>
+          <details open><summary>{t('firstFrameQuoteExecutorPrompt')}</summary>
+            {firstFrameQuote.promptBinding.legacyExecutorPrompt === null
+              ? <p role="alert">{t('firstFrameQuoteExecutorUnavailable')}</p>
+              : <>
+                <p className={directorCss.promptText}>{firstFrameQuote.promptBinding.legacyExecutorPrompt}</p>
+                <p>SHA-256: {firstFrameQuote.promptBinding.legacyExecutorPromptSha256}</p>
+              </>}
+          </details>
+          {!firstFrameQuote.promptBinding.dispatchCompatible && <p role="alert">
+            <strong>{t('firstFrameQuoteExecutorBlocked')}</strong>
+          </p>}
+          <details><summary>{t('firstFrameQuoteLocks')}</summary>
+            <p>PromptIR: {firstFrameQuote.authoritySnapshot.promptIr.id} · v{firstFrameQuote.authoritySnapshot.promptIr.version}</p>
+            <p>PromptIR SHA: {firstFrameQuote.authoritySnapshot.promptIr.contentSha256}</p>
+            <p>Method SHA: {firstFrameQuote.authoritySnapshot.method.methodSha256}</p>
+            {firstFrameQuote.costSourceLockSha256 !== null
+              && <p>Cost source lock SHA: {firstFrameQuote.costSourceLockSha256}</p>}
+            {firstFrameQuote.authoritySnapshot.references.map(reference => <p key={reference.referencePackId}>
+              {reference.elementKind}/{reference.elementId} · asset {reference.assetId}<br />
+              materialized SHA: {reference.materializedSha256}<br />
+              pack SHA: {reference.referencePackSha256}
+            </p>)}
+            {firstFrameQuote.promptBinding.executionBlockers.map(blocker => <p key={blocker}>
+              Execution blocker: {blocker}
+            </p>)}
+            <p>Projection SHA: {firstFrameQuote.projectionSha256}</p>
+          </details>
+          {firstFrameQuote.blockers.length > 0 && <div role="alert">
+            <strong>{t('firstFrameQuoteBlockers')}</strong>
+            <ul>{firstFrameQuote.blockers.map(blocker => <li key={blocker}>{blocker}</li>)}</ul>
+          </div>}
+          <p>{firstFrameQuote.quoteReady ? t('firstFrameQuoteReady') : t('firstFrameQuoteBlocked')}</p>
+          <p><strong>{t('firstFrameQuoteNotSubmitted')}</strong></p>
+        </div>}
+      </section>
       {director && <>
         <p role="status">{t('directorEditingDraft')} · {t('directorEffectiveReady')} v{snapshot?.subject.promptIrVersion ?? '—'}
           {draftPromptIr !== undefined && ` · Draft v${draftPromptIr.version}`}</p>

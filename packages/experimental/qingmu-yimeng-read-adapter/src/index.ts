@@ -61,6 +61,8 @@ import type {
   YimengElementReviewSubject,
   YimengEpisodesRequest,
   YimengEpisodesResponse,
+  YimengFirstFrameQuoteRequest,
+  YimengFirstFrameQuoteResponse,
   YimengHealth,
   YimengHumanDecision,
   YimengHumanDecisionValue,
@@ -311,7 +313,7 @@ const ELEMENT_REVIEW_FEED_SCHEMA = 'jason.qingmu-element-review-feed.v1'
 const REFERENCE_RIGHTS_EXCEPTION_RELEASE_FEED_SCHEMA = 'jason.qingmu-reference-rights-exception-release-feed.v1'
 const SHA256 = /^[0-9a-f]{64}$/
 const PROTECTED_ENDPOINTS = new Set([
-  'projects', 'episodes', 'script', 'promptIr', 'promptIrBootstrap', 'capabilityCatalog', 'costRehearsal',
+  'projects', 'episodes', 'script', 'promptIr', 'promptIrBootstrap', 'firstFrameQuote', 'capabilityCatalog', 'costRehearsal',
   'gateAControlEvidence', 'elementProfile',
   'referenceCandidates', 'reviewEvents',
   'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'takeComments', 'takeReviewAuthority', 'takeAcceptance', 'takeTechnicalQc', 'takeApprovalLifecycle', 'evidenceLedger', 'verifyEpisode', 'shotFindings', 'productionUnits', 'stageSources',
@@ -706,6 +708,26 @@ function parsePromptIrRequest(payload: unknown): YimengPromptIrRequest {
     episodeId: parseIdentifier(input.episodeId, 'episodeId'),
     storyboardRevisionId: parseIdentifier(input.storyboardRevisionId, 'storyboardRevisionId'),
     frameId: parseIdentifier(input.frameId, 'frameId'),
+  }
+}
+
+function parseFirstFrameQuoteRequest(payload: unknown): YimengFirstFrameQuoteRequest {
+  const input = requireInputObject(payload)
+  assertOnlyInputKeys(input, [
+    'projectId', 'episodeId', 'storyboardRevisionId', 'frameId',
+    'promptIrId', 'promptIrVersion', 'promptIrContentSha256',
+  ])
+  return {
+    projectId: parseIdentifier(input.projectId, 'projectId'),
+    episodeId: parseIdentifier(input.episodeId, 'episodeId'),
+    storyboardRevisionId: parseIdentifier(input.storyboardRevisionId, 'storyboardRevisionId'),
+    frameId: parseIdentifier(input.frameId, 'frameId'),
+    promptIrId: parseIdentifier(input.promptIrId, 'promptIrId'),
+    promptIrVersion: requireInputInteger(input.promptIrVersion, 'promptIrVersion', 1),
+    promptIrContentSha256: typeof input.promptIrContentSha256 === 'string'
+      && SHA256.test(input.promptIrContentSha256)
+      ? input.promptIrContentSha256
+      : (() => { throw new InputError('promptIrContentSha256 must be a lowercase SHA-256') })(),
   }
 }
 
@@ -2270,6 +2292,373 @@ function normalizePromptIrBootstrap(
     schema: 'jason.qingmu-prompt-ir-bootstrap-state.v1', context, contextSnapshotSha256,
     referenceNames, draft, draftMethodSha256, selectionChallenge, ready, providerCalls: 0, workerStarted: false,
     humanApprovalInferred: false, humanSignoff: false, selectionExecuted: false,
+  }
+}
+
+function normalizeFirstFrameQuote(
+  value: unknown,
+  expected: YimengFirstFrameQuoteRequest,
+): YimengFirstFrameQuoteResponse {
+  const root = requireObject(value, 'firstFrameQuote')
+  requireExactKeys(root, [
+    'schema', 'projectId', 'episodeId', 'storyboardRevisionId', 'frameId',
+    'authoritySnapshot', 'authoritySnapshotSha256', 'costSourceLock',
+    'costSourceLockSha256', 'promptBinding', 'scope', 'quote', 'quoteReady',
+    'blockers', 'readOnly', 'providerCalls', 'budgetMutation', 'taskMutation',
+    'mediaMutation', 'submitted', 'charged', 'projectionSha256',
+  ], 'firstFrameQuote')
+  if (root.schema !== 'jason.qingmu-ready-prompt-ir-first-frame-quote.v1'
+    || root.projectId !== expected.projectId || root.episodeId !== expected.episodeId
+    || root.storyboardRevisionId !== expected.storyboardRevisionId || root.frameId !== expected.frameId) {
+    throw new UpstreamContractError('firstFrameQuote scope mismatch')
+  }
+  const authority = requireObject(root.authoritySnapshot, 'firstFrameQuote.authoritySnapshot')
+  requireExactKeys(authority, [
+    'projectId', 'episodeId', 'storyboard', 'frame', 'contextSchema',
+    'contextSnapshotSha256', 'promptIr', 'method', 'references',
+    'firstFramePreparation',
+  ], 'firstFrameQuote.authoritySnapshot')
+  if (authority.projectId !== expected.projectId || authority.episodeId !== expected.episodeId) {
+    throw new UpstreamContractError('firstFrameQuote authority scope mismatch')
+  }
+  const storyboard = requireObject(authority.storyboard, 'firstFrameQuote.authoritySnapshot.storyboard')
+  requireExactKeys(storyboard, ['id', 'version', 'sourceHash'], 'firstFrameQuote.authoritySnapshot.storyboard')
+  const frame = requireObject(authority.frame, 'firstFrameQuote.authoritySnapshot.frame')
+  requireExactKeys(frame, [
+    'id', 'title', 'narrative', 'visual', 'action', 'durationSec',
+    'dialogueLineIds', 'sceneId', 'contentSha256',
+  ], 'firstFrameQuote.authoritySnapshot.frame')
+  if (storyboard.id !== expected.storyboardRevisionId || frame.id !== expected.frameId) {
+    throw new UpstreamContractError('firstFrameQuote authority frame mismatch')
+  }
+  const normalizedStoryboard = {
+    id: requireIdentifier(storyboard.id, 'firstFrameQuote.storyboard.id'),
+    version: requireInteger(storyboard.version, 'firstFrameQuote.storyboard.version', 1),
+    sourceHash: requireSha256(storyboard.sourceHash, 'firstFrameQuote.storyboard.sourceHash'),
+  }
+  const durationSec = frame.durationSec
+  if (typeof durationSec !== 'number' || !Number.isFinite(durationSec) || durationSec <= 0) {
+    throw new UpstreamContractError('firstFrameQuote.frame.durationSec invalid')
+  }
+  const dialogueLineIds = Array.isArray(frame.dialogueLineIds)
+    ? frame.dialogueLineIds.map((item, index) => requireIdentifier(
+      item,
+      `firstFrameQuote.frame.dialogueLineIds[${String(index)}]`,
+    ))
+    : (() => { throw new UpstreamContractError('firstFrameQuote frame dialogueLineIds must be an array') })()
+  const normalizedFrame = {
+    id: requireIdentifier(frame.id, 'firstFrameQuote.frame.id'),
+    title: requireString(frame.title, 'firstFrameQuote.frame.title'),
+    narrative: requireString(frame.narrative, 'firstFrameQuote.frame.narrative'),
+    visual: requireString(frame.visual, 'firstFrameQuote.frame.visual'),
+    action: requireString(frame.action, 'firstFrameQuote.frame.action'),
+    durationSec,
+    dialogueLineIds,
+    sceneId: requireIdentifier(frame.sceneId, 'firstFrameQuote.frame.sceneId'),
+  }
+  const frameContentSha256 = requireSha256(frame.contentSha256, 'firstFrameQuote.frame.contentSha256')
+  if (jcsSha256(normalizedFrame, 'firstFrameQuote.frame') !== frameContentSha256) {
+    throw new UpstreamContractError('firstFrameQuote frame content hash mismatch')
+  }
+  const promptIr = requireObject(authority.promptIr, 'firstFrameQuote.authoritySnapshot.promptIr')
+  requireExactKeys(promptIr, [
+    'id', 'version', 'contentSha256', 'status', 'imagePrompt', 'imagePromptSha256',
+  ], 'firstFrameQuote.authoritySnapshot.promptIr')
+  const imagePrompt = requireString(promptIr.imagePrompt, 'firstFrameQuote.imagePrompt')
+  if (promptIr.id !== expected.promptIrId
+    || promptIr.version !== expected.promptIrVersion
+    || promptIr.contentSha256 !== expected.promptIrContentSha256
+    || promptIr.status !== 'Ready'
+    || requireSha256(promptIr.imagePromptSha256, 'firstFrameQuote.imagePromptSha256')
+      !== createHash('sha256').update(imagePrompt, 'utf8').digest('hex')) {
+    throw new UpstreamContractError('firstFrameQuote PromptIR binding mismatch')
+  }
+  const method = requireObject(authority.method, 'firstFrameQuote.authoritySnapshot.method')
+  requireExactKeys(method, [
+    'rootPromptIrId', 'methodProjectionSha256', 'methodSha256',
+    'methodSourceBindings', 'bootstrapContextSnapshotSha256',
+  ], 'firstFrameQuote.authoritySnapshot.method')
+  requireIdentifier(method.rootPromptIrId, 'firstFrameQuote.method.rootPromptIrId')
+  requireSha256(method.methodProjectionSha256, 'firstFrameQuote.method.methodProjectionSha256')
+  requireSha256(method.methodSha256, 'firstFrameQuote.method.methodSha256')
+  requireSha256(method.bootstrapContextSnapshotSha256, 'firstFrameQuote.method.bootstrapContextSnapshotSha256')
+  const methodSourceBindings = requireObjectItems(
+    method.methodSourceBindings,
+    'firstFrameQuote.method.methodSourceBindings',
+  )
+  if (methodSourceBindings.length === 0) {
+    throw new UpstreamContractError('firstFrameQuote method source bindings are empty')
+  }
+  for (const [index, binding] of methodSourceBindings.entries()) {
+    requireExactKeys(binding, ['kind', 'path', 'sha256'], `firstFrameQuote.methodSourceBindings[${String(index)}]`)
+    requireIdentifier(binding.kind, `firstFrameQuote.methodSourceBindings[${String(index)}].kind`)
+    if (!requireString(binding.path, `firstFrameQuote.methodSourceBindings[${String(index)}].path`).trim()) {
+      throw new UpstreamContractError('firstFrameQuote method source binding path is empty')
+    }
+    requireSha256(binding.sha256, `firstFrameQuote.methodSourceBindings[${String(index)}].sha256`)
+  }
+  const references = requireObjectItems(authority.references, 'firstFrameQuote.authoritySnapshot.references')
+  for (const [index, reference] of references.entries()) {
+    requireExactKeys(reference, [
+      'referencePackId', 'referencePackSha256', 'role', 'elementKind', 'elementId',
+      'assetId', 'assetSha256', 'materializedSha256', 'selectionIdentity',
+      'sourceRevisionId', 'qualificationCheckId', 'qualificationKind',
+      'rightsRecordSha256', 'profileRevision', 'profileSnapshotSha256',
+    ], `firstFrameQuote.reference[${String(index)}]`)
+    requireIdentifier(reference.referencePackId, `firstFrameQuote.reference[${String(index)}].referencePackId`)
+    for (const key of [
+      'referencePackSha256', 'assetSha256', 'materializedSha256',
+      'rightsRecordSha256', 'profileSnapshotSha256',
+    ] as const) requireSha256(reference[key], `firstFrameQuote.reference[${String(index)}].${key}`)
+    for (const key of [
+      'role', 'elementKind', 'elementId', 'assetId', 'selectionIdentity',
+      'sourceRevisionId', 'qualificationCheckId', 'qualificationKind',
+    ] as const) requireIdentifier(reference[key], `firstFrameQuote.reference[${String(index)}].${key}`)
+    requireInteger(reference.profileRevision, `firstFrameQuote.reference[${String(index)}].profileRevision`, 1)
+  }
+  const contextSchema = requireString(authority.contextSchema, 'firstFrameQuote.contextSchema')
+  if (contextSchema !== 'jason.qingmu-prompt-ir-bootstrap-context.v1') {
+    throw new UpstreamContractError('firstFrameQuote context schema mismatch')
+  }
+  const contextReferences = references.map((reference) => {
+    const { referencePackId: _referencePackId, referencePackSha256: _referencePackSha256, ...binding } = reference
+    return binding
+  })
+  const reconstructedContext = {
+    schema: contextSchema,
+    projectId: expected.projectId,
+    episodeId: expected.episodeId,
+    storyboard: normalizedStoryboard,
+    frame: { ...normalizedFrame, contentSha256: frameContentSha256 },
+    requiredReferences: contextReferences,
+  }
+  const contextSnapshotSha256 = requireSha256(
+    authority.contextSnapshotSha256,
+    'firstFrameQuote.contextSnapshotSha256',
+  )
+  if (jcsSha256(reconstructedContext, 'firstFrameQuote.context') !== contextSnapshotSha256) {
+    throw new UpstreamContractError('firstFrameQuote context snapshot hash mismatch')
+  }
+  const firstFramePreparation = requireObject(
+    authority.firstFramePreparation,
+    'firstFrameQuote.authoritySnapshot.firstFramePreparation',
+  )
+  requireExactKeys(firstFramePreparation, [
+    'frameId', 'frameNo', 'currentAssetId', 'generationRequired',
+    'auditRequired', 'auditReason', 'humanSelectionRequired',
+  ], 'firstFrameQuote.authoritySnapshot.firstFramePreparation')
+  const currentAssetId = requireNullableString(
+    firstFramePreparation.currentAssetId,
+    'firstFrameQuote.firstFramePreparation.currentAssetId',
+  )
+  if (currentAssetId !== null) {
+    requireIdentifier(currentAssetId, 'firstFrameQuote.firstFramePreparation.currentAssetId')
+  }
+  const auditReason = requireNullableString(
+    firstFramePreparation.auditReason,
+    'firstFrameQuote.firstFramePreparation.auditReason',
+  )
+  if (auditReason !== null) {
+    requireIdentifier(auditReason, 'firstFrameQuote.firstFramePreparation.auditReason')
+  }
+  const normalizedFirstFramePreparation = {
+    frameId: requireIdentifier(firstFramePreparation.frameId, 'firstFrameQuote.firstFramePreparation.frameId'),
+    frameNo: requireInteger(firstFramePreparation.frameNo, 'firstFrameQuote.firstFramePreparation.frameNo', 1),
+    currentAssetId,
+    generationRequired: requireBoolean(
+      firstFramePreparation.generationRequired,
+      'firstFrameQuote.firstFramePreparation.generationRequired',
+    ),
+    auditRequired: requireBoolean(
+      firstFramePreparation.auditRequired,
+      'firstFrameQuote.firstFramePreparation.auditRequired',
+    ),
+    auditReason,
+    humanSelectionRequired: requireBoolean(
+      firstFramePreparation.humanSelectionRequired,
+      'firstFrameQuote.firstFramePreparation.humanSelectionRequired',
+    ),
+  }
+  if (normalizedFirstFramePreparation.frameId !== expected.frameId) {
+    throw new UpstreamContractError('firstFrameQuote first-frame preparation mismatch')
+  }
+  const authoritySnapshotSha256 = requireSha256(
+    root.authoritySnapshotSha256,
+    'firstFrameQuote.authoritySnapshotSha256',
+  )
+  if (jcsSha256(authority, 'firstFrameQuote.authoritySnapshot') !== authoritySnapshotSha256) {
+    throw new UpstreamContractError('firstFrameQuote authority snapshot hash mismatch')
+  }
+  let normalizedCostSourceLock: YimengFirstFrameQuoteResponse['costSourceLock'] = null
+  let costSourceLockSha256: string | null = null
+  if (root.costSourceLock !== null || root.costSourceLockSha256 !== null) {
+    const costSourceLock = requireObject(root.costSourceLock, 'firstFrameQuote.costSourceLock')
+    requireExactKeys(costSourceLock, [
+      'scriptRevision', 'scriptSha256', 'storyContractSha256',
+      'storyboardRevision', 'storyboardCreativeSha256',
+    ], 'firstFrameQuote.costSourceLock')
+    normalizedCostSourceLock = {
+      scriptRevision: requireInteger(costSourceLock.scriptRevision, 'firstFrameQuote.scriptRevision', 0),
+      scriptSha256: requireSha256(costSourceLock.scriptSha256, 'firstFrameQuote.scriptSha256'),
+      storyContractSha256: requireSha256(
+        costSourceLock.storyContractSha256,
+        'firstFrameQuote.storyContractSha256',
+      ),
+      storyboardRevision: requireInteger(
+        costSourceLock.storyboardRevision,
+        'firstFrameQuote.storyboardRevision',
+        0,
+      ),
+      storyboardCreativeSha256: requireSha256(
+        costSourceLock.storyboardCreativeSha256,
+        'firstFrameQuote.storyboardCreativeSha256',
+      ),
+    }
+    costSourceLockSha256 = requireSha256(
+      root.costSourceLockSha256,
+      'firstFrameQuote.costSourceLockSha256',
+    )
+    if (jcsSha256(costSourceLock, 'firstFrameQuote.costSourceLock') !== costSourceLockSha256) {
+      throw new UpstreamContractError('firstFrameQuote cost source lock hash mismatch')
+    }
+  }
+  const promptBinding = requireObject(root.promptBinding, 'firstFrameQuote.promptBinding')
+  requireExactKeys(promptBinding, [
+    'readyPromptIrImagePromptSha256', 'legacyExecutorPrompt',
+    'legacyExecutorPromptSha256', 'legacyExecutorMatchesReadyPromptIr',
+    'executorUsesReadyPromptIr', 'dispatchCompatible', 'executionBlockers',
+  ], 'firstFrameQuote.promptBinding')
+  const readyPromptIrImagePromptSha256 = requireSha256(
+    promptBinding.readyPromptIrImagePromptSha256,
+    'firstFrameQuote.promptBinding.readyPromptIrImagePromptSha256',
+  )
+  const legacyExecutorPrompt = requireNullableString(
+    promptBinding.legacyExecutorPrompt,
+    'firstFrameQuote.promptBinding.legacyExecutorPrompt',
+  )
+  const legacyExecutorPromptSha256 = promptBinding.legacyExecutorPromptSha256 === null
+    ? null
+    : requireSha256(
+      promptBinding.legacyExecutorPromptSha256,
+      'firstFrameQuote.promptBinding.legacyExecutorPromptSha256',
+    )
+  const executionBlockers = Array.isArray(promptBinding.executionBlockers)
+    ? promptBinding.executionBlockers.map((item, index) => requireIdentifier(
+      item,
+      `firstFrameQuote.promptBinding.executionBlockers[${String(index)}]`,
+    ))
+    : (() => { throw new UpstreamContractError('firstFrameQuote executionBlockers must be an array') })()
+  const legacyExecutorMatchesReadyPromptIr = requireBoolean(
+    promptBinding.legacyExecutorMatchesReadyPromptIr,
+    'firstFrameQuote.promptBinding.legacyExecutorMatchesReadyPromptIr',
+  )
+  if (readyPromptIrImagePromptSha256 !== promptIr.imagePromptSha256
+    || promptBinding.executorUsesReadyPromptIr !== false
+    || promptBinding.dispatchCompatible !== false
+    || !executionBlockers.includes('first_frame_ready_prompt_ir_executor_binding_missing')
+    || (legacyExecutorPrompt === null) !== (legacyExecutorPromptSha256 === null)
+    || (legacyExecutorPrompt !== null
+      && createHash('sha256').update(legacyExecutorPrompt, 'utf8').digest('hex') !== legacyExecutorPromptSha256)
+    || legacyExecutorMatchesReadyPromptIr !== (
+      legacyExecutorPrompt !== null && legacyExecutorPrompt === imagePrompt
+    )) {
+    throw new UpstreamContractError('firstFrameQuote prompt binding mismatch')
+  }
+  const scope = requireObject(root.scope, 'firstFrameQuote.scope')
+  requireExactKeys(scope, ['frameCount', 'imagesPerFrame', 'resolution'], 'firstFrameQuote.scope')
+  if (scope.frameCount !== 1 || scope.imagesPerFrame !== 1 || scope.resolution !== '720P') {
+    throw new UpstreamContractError('firstFrameQuote scope must be one 720P image')
+  }
+  const blockers = Array.isArray(root.blockers)
+    ? root.blockers.map((item, index) => requireString(item, `firstFrameQuote.blockers[${String(index)}]`))
+    : (() => { throw new UpstreamContractError('firstFrameQuote blockers must be an array') })()
+  let quote: YimengFirstFrameQuoteResponse['quote'] = null
+  if (root.quote !== null) {
+    const item = requireObject(root.quote, 'firstFrameQuote.quote')
+    requireExactKeys(item, [
+      'frameId', 'frameNo', 'calls', 'estimatedCny', 'capability', 'routeKey',
+      'provider', 'model', 'pricingVerified',
+    ], 'firstFrameQuote.quote')
+    if (item.frameId !== expected.frameId || item.calls !== 1
+      || item.capability !== 'image.generate' || item.routeKey !== 'b4.first_frame_generation') {
+      throw new UpstreamContractError('firstFrameQuote quote binding mismatch')
+    }
+    const estimatedCny = item.estimatedCny
+    if (typeof estimatedCny !== 'number' || !Number.isFinite(estimatedCny) || estimatedCny < 0) {
+      throw new UpstreamContractError('firstFrameQuote estimatedCny invalid')
+    }
+    quote = {
+      frameId: expected.frameId,
+      frameNo: requireInteger(item.frameNo, 'firstFrameQuote.frameNo', 1),
+      calls: 1,
+      estimatedCny,
+      capability: 'image.generate',
+      routeKey: 'b4.first_frame_generation',
+      provider: requireIdentifier(item.provider, 'firstFrameQuote.provider'),
+      model: requireIdentifier(item.model, 'firstFrameQuote.model'),
+      pricingVerified: requireBoolean(item.pricingVerified, 'firstFrameQuote.pricingVerified'),
+    }
+  }
+  if ((quote !== null) !== normalizedFirstFramePreparation.generationRequired) {
+    throw new UpstreamContractError('firstFrameQuote quote and generation requirement mismatch')
+  }
+  const quoteReady = requireBoolean(root.quoteReady, 'firstFrameQuote.quoteReady')
+  if (quoteReady !== (quote !== null && quote.pricingVerified && blockers.length === 0)
+    || (quoteReady && (normalizedCostSourceLock === null || costSourceLockSha256 === null))
+    || root.readOnly !== true || root.providerCalls !== 0 || root.budgetMutation !== false
+    || root.taskMutation !== false || root.mediaMutation !== false
+    || root.submitted !== false || root.charged !== false) {
+    throw new UpstreamContractError('firstFrameQuote authority flags mismatch')
+  }
+  const projectionSha256 = requireSha256(root.projectionSha256, 'firstFrameQuote.projectionSha256')
+  const unsigned = { ...root }
+  delete unsigned.projectionSha256
+  if (jcsSha256(unsigned, 'firstFrameQuote') !== projectionSha256) {
+    throw new UpstreamContractError('firstFrameQuote projection hash mismatch')
+  }
+  return {
+    ...(root as unknown as YimengFirstFrameQuoteResponse),
+    authoritySnapshot: {
+      ...authority,
+      contextSchema,
+      storyboard: normalizedStoryboard,
+      frame: { ...normalizedFrame, contentSha256: frameContentSha256 },
+      contextSnapshotSha256,
+      promptIr: promptIr as unknown as YimengFirstFrameQuoteResponse['authoritySnapshot']['promptIr'],
+      method: {
+        rootPromptIrId: method.rootPromptIrId as string,
+        methodProjectionSha256: method.methodProjectionSha256 as string,
+        methodSha256: method.methodSha256 as string,
+        methodSourceBindings,
+        bootstrapContextSnapshotSha256: method.bootstrapContextSnapshotSha256 as string,
+      },
+      references: references as unknown as YimengFirstFrameQuoteResponse['authoritySnapshot']['references'],
+      firstFramePreparation: normalizedFirstFramePreparation,
+    },
+    authoritySnapshotSha256,
+    costSourceLock: normalizedCostSourceLock,
+    costSourceLockSha256,
+    promptBinding: {
+      readyPromptIrImagePromptSha256,
+      legacyExecutorPrompt,
+      legacyExecutorPromptSha256,
+      legacyExecutorMatchesReadyPromptIr,
+      executorUsesReadyPromptIr: false,
+      dispatchCompatible: false,
+      executionBlockers,
+    },
+    scope: { frameCount: 1, imagesPerFrame: 1, resolution: '720P' },
+    quote,
+    quoteReady,
+    blockers,
+    readOnly: true,
+    providerCalls: 0,
+    budgetMutation: false,
+    taskMutation: false,
+    mediaMutation: false,
+    submitted: false,
+    charged: false,
+    projectionSha256,
   }
 }
 
@@ -4094,6 +4483,15 @@ export function createYimengReadHandler(
         const request = parsePromptIrRequest(payload)
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/storyboard-revisions/${encodeURIComponent(request.storyboardRevisionId)}/frames/${encodeURIComponent(request.frameId)}/prompt-ir-bootstrap`
         normalize = value => normalizePromptIrBootstrap(value, request)
+      } else if (endpoint === 'firstFrameQuote') {
+        const request = parseFirstFrameQuoteRequest(payload)
+        const query = new URLSearchParams({
+          promptIrId: request.promptIrId,
+          promptIrVersion: String(request.promptIrVersion),
+          promptIrContentSha256: request.promptIrContentSha256,
+        })
+        path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/storyboard-revisions/${encodeURIComponent(request.storyboardRevisionId)}/frames/${encodeURIComponent(request.frameId)}/first-frame-quote?${query.toString()}`
+        normalize = value => normalizeFirstFrameQuote(value, request)
       } else if (endpoint === 'selectedVideoReview') {
         const request = parseSelectedVideoReviewRequest(payload)
         path = `/api/frames/${encodeURIComponent(request.frameId)}/video-candidates`

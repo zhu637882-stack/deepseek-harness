@@ -1340,6 +1340,113 @@ describe('qingmu Yimeng read adapter', () => {
     expect(await staleChallenge('promptIrBootstrap', request, signal())).toMatchObject({ ok: false, error: { code: 'internal' } })
   })
 
+  it('reads one content-addressed Ready PromptIR first-frame quote and rejects tampering', async () => {
+    const request = { projectId: 'project-1', episodeId: 'episode-1', storyboardRevisionId: 'storyboard-1',
+      frameId: 'frame-1', promptIrId: 'prompt-ready-1', promptIrVersion: 3, promptIrContentSha256: '1'.repeat(64) }
+    const imagePrompt = '雨夜旧车站空月台；严格绑定场景参考。'
+    const storyboard = { id: request.storyboardRevisionId, version: 1, sourceHash: '2'.repeat(64) }
+    const frameWithoutHash = { id: request.frameId, title: '镜头一', narrative: '人物等待',
+      visual: '雨夜旧车站空月台', action: '人物抬头', durationSec: 4,
+      dialogueLineIds: ['line-1'], sceneId: 'scene-1' }
+    const frame = { ...frameWithoutHash, contentSha256: sha256(canonicalJson(frameWithoutHash)) }
+    const reference = { referencePackId: 'pack-1', referencePackSha256: '8'.repeat(64), role: 'scene',
+      elementKind: 'scene', elementId: 'scene-1', assetId: 'asset-1', assetSha256: '9'.repeat(64),
+      materializedSha256: 'a'.repeat(64), selectionIdentity: 'selection-1', sourceRevisionId: 'source-1',
+      qualificationCheckId: 'qualification-1', qualificationKind: 'local_file_integrity',
+      rightsRecordSha256: 'b'.repeat(64), profileRevision: 1, profileSnapshotSha256: 'c'.repeat(64) }
+    const { referencePackId: _referencePackId, referencePackSha256: _referencePackSha256, ...contextReference } = reference
+    const contextSchema = 'jason.qingmu-prompt-ir-bootstrap-context.v1'
+    const contextSnapshotSha256 = sha256(canonicalJson({ schema: contextSchema,
+      projectId: request.projectId, episodeId: request.episodeId, storyboard, frame,
+      requiredReferences: [contextReference] }))
+    const authoritySnapshot = {
+      projectId: request.projectId,
+      episodeId: request.episodeId,
+      storyboard,
+      frame,
+      contextSchema,
+      contextSnapshotSha256,
+      promptIr: { id: request.promptIrId, version: request.promptIrVersion,
+        contentSha256: request.promptIrContentSha256, status: 'Ready', imagePrompt,
+        imagePromptSha256: sha256(imagePrompt) },
+      method: { rootPromptIrId: 'prompt-root-1', methodProjectionSha256: '4'.repeat(64),
+        methodSha256: '5'.repeat(64), methodSourceBindings: [{ kind: 'method', path: 'imago/method.json',
+          sha256: '6'.repeat(64) }], bootstrapContextSnapshotSha256: '7'.repeat(64) },
+      references: [reference],
+      firstFramePreparation: { frameId: request.frameId, frameNo: 1, currentAssetId: null,
+        generationRequired: true, auditRequired: true,
+        auditReason: 'generated_candidate_requires_formal_audit', humanSelectionRequired: true },
+    }
+    const unsigned = {
+      schema: 'jason.qingmu-ready-prompt-ir-first-frame-quote.v1',
+      projectId: request.projectId,
+      episodeId: request.episodeId,
+      storyboardRevisionId: request.storyboardRevisionId,
+      frameId: request.frameId,
+      authoritySnapshot,
+      authoritySnapshotSha256: sha256(canonicalJson(authoritySnapshot)),
+      costSourceLock: { scriptRevision: 1, scriptSha256: 'd'.repeat(64),
+        storyContractSha256: 'e'.repeat(64), storyboardRevision: 1,
+        storyboardCreativeSha256: 'f'.repeat(64) },
+      costSourceLockSha256: sha256(canonicalJson({ scriptRevision: 1, scriptSha256: 'd'.repeat(64),
+        storyContractSha256: 'e'.repeat(64), storyboardRevision: 1,
+        storyboardCreativeSha256: 'f'.repeat(64) })),
+      promptBinding: { readyPromptIrImagePromptSha256: sha256(imagePrompt),
+        legacyExecutorPrompt: '现行执行器编译提示词', legacyExecutorPromptSha256: sha256('现行执行器编译提示词'),
+        legacyExecutorMatchesReadyPromptIr: false, executorUsesReadyPromptIr: false,
+        dispatchCompatible: false, executionBlockers: ['first_frame_ready_prompt_ir_executor_binding_missing'] },
+      scope: { frameCount: 1, imagesPerFrame: 1, resolution: '720P' },
+      quote: { frameId: request.frameId, frameNo: 1, calls: 1, estimatedCny: 0.2,
+        capability: 'image.generate', routeKey: 'b4.first_frame_generation', provider: 'dashscope',
+        model: 'wan2.2-t2i-flash', pricingVerified: true },
+      quoteReady: true,
+      blockers: [],
+      readOnly: true,
+      providerCalls: 0,
+      budgetMutation: false,
+      taskMutation: false,
+      mediaMutation: false,
+      submitted: false,
+      charged: false,
+    }
+    const response = { ...unsigned, projectionSha256: sha256(canonicalJson(unsigned)) }
+    let capturedUrl = ''
+    const handler = createYimengReadHandler({}, dependencies(async (input) => {
+      capturedUrl = requestUrl(input)
+      return jsonResponse(response)
+    }, 'test-token'))
+    expect(await handler('firstFrameQuote', request, signal())).toMatchObject({ ok: true, value: {
+      quoteReady: true, quote: { calls: 1, provider: 'dashscope', model: 'wan2.2-t2i-flash' },
+      readOnly: true, providerCalls: 0, submitted: false, charged: false,
+    } })
+    expect(capturedUrl).toContain('/first-frame-quote?promptIrId=prompt-ready-1&promptIrVersion=3')
+    const tampered = createYimengReadHandler({}, dependencies(async () => jsonResponse({
+      ...response,
+      authoritySnapshot: { ...authoritySnapshot, promptIr: { ...authoritySnapshot.promptIr, imagePrompt: '被篡改' } },
+    }), 'test-token'))
+    expect(await tampered('firstFrameQuote', request, signal())).toMatchObject({ ok: false, error: { code: 'internal' } })
+    const tamperedFrame = { ...frame, visual: '被篡改但只重算外层哈希' }
+    const tamperedAuthority = { ...authoritySnapshot, frame: tamperedFrame }
+    const tamperedUnsigned = { ...unsigned, authoritySnapshot: tamperedAuthority,
+      authoritySnapshotSha256: sha256(canonicalJson(tamperedAuthority)) }
+    const selfConsistentOuterTamper = createYimengReadHandler({}, dependencies(async () => jsonResponse({
+      ...tamperedUnsigned, projectionSha256: sha256(canonicalJson(tamperedUnsigned)),
+    }), 'test-token'))
+    expect(await selfConsistentOuterTamper('firstFrameQuote', request, signal()))
+      .toMatchObject({ ok: false, error: { code: 'internal' } })
+    const inconsistentPreparationAuthority = { ...authoritySnapshot,
+      firstFramePreparation: { ...authoritySnapshot.firstFramePreparation, generationRequired: false } }
+    const inconsistentPreparationUnsigned = { ...unsigned,
+      authoritySnapshot: inconsistentPreparationAuthority,
+      authoritySnapshotSha256: sha256(canonicalJson(inconsistentPreparationAuthority)) }
+    const inconsistentPreparation = createYimengReadHandler({}, dependencies(async () => jsonResponse({
+      ...inconsistentPreparationUnsigned,
+      projectionSha256: sha256(canonicalJson(inconsistentPreparationUnsigned)),
+    }), 'test-token'))
+    expect(await inconsistentPreparation('firstFrameQuote', request, signal()))
+      .toMatchObject({ ok: false, error: { code: 'internal' } })
+  })
+
   it('consumes normalized stage, legacy-reason and release blockers without hiding real business failures', async () => {
     // Same producer cases pinned by Yimeng test_qingmu_workflow_blocker_contract.py.
     const blockers = [

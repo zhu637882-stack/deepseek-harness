@@ -61,6 +61,8 @@ import type {
   YimengGateAControlScenario,
   YimengGateAControlScenarioId,
   YimengGateAControlSourceBinding,
+  YimengFirstFrameQuoteRequest,
+  YimengFirstFrameQuoteResponse,
   YimengStageSource,
   YimengStageSourceDefinition,
   YimengStageSourceBinding,
@@ -320,6 +322,8 @@ export type {
   YimengGateAControlScenario,
   YimengGateAControlScenarioId,
   YimengGateAControlSourceBinding,
+  YimengFirstFrameQuoteRequest,
+  YimengFirstFrameQuoteResponse,
   YimengStageSource,
   YimengStageSourceDefinition,
   YimengStageSourceBinding,
@@ -550,6 +554,10 @@ export interface QingmuYimengReadPort {
   script(request: YimengScriptRequest, signal?: AbortSignal): Promise<YimengScriptResponse>
   promptIr(request: YimengPromptIrRequest, signal?: AbortSignal): Promise<YimengPromptIrResponse>
   promptIrBootstrap(request: YimengPromptIrRequest, signal?: AbortSignal): Promise<YimengPromptIrBootstrapResponse>
+  firstFrameQuote(
+    request: YimengFirstFrameQuoteRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengFirstFrameQuoteResponse>
   selectedVideoReview(request: YimengSelectedVideoReviewRequest, signal?: AbortSignal): Promise<YimengSelectedVideoReviewResponse>
   takeVersions(request: YimengTakeVersionRequest, signal?: AbortSignal): Promise<YimengTakeVersionStackResponse>
   takePreview(request: YimengTakePreviewRequest, signal?: AbortSignal): Promise<YimengTakePreviewResponse>

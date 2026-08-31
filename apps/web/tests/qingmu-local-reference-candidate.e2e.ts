@@ -209,6 +209,19 @@ print(json.dumps({'counts':{t:c.execute('SELECT count(*) FROM '+t).fetchone()[0]
       await readyWorkspace.getByText(/Ready v1/).waitFor()
       await readyWorkspace.getByText('Ready 只表示当前生效的提示词版本，不代表内容、权利、正式一致性或发布批准。', { exact: true }).waitFor()
       expect(selectionPosts).toHaveLength(1)
+      const beforeQuote = inspect()
+      const firstFrameQuote = readyWorkspace.getByRole('region', { name: '首帧生成条件' })
+      await firstFrameQuote.getByRole('button', { name: '检查首帧生成条件（不调用模型）' }).click()
+      await firstFrameQuote.getByText('未提交、未扣费。', { exact: true }).waitFor()
+      await firstFrameQuote.getByText(
+        '当前执行链尚未消费 Ready PromptIR；本报价只核对价格事实，不能提交。',
+        { exact: true },
+      ).waitFor()
+      await firstFrameQuote.getByText(/dashscope \/ /).waitFor()
+      await firstFrameQuote.getByText('b4.first_frame_generation', { exact: true }).waitFor()
+      const firstQuoteProjection = await firstFrameQuote.textContent()
+      expect(firstQuoteProjection).toContain('pricingVerified')
+      expect(inspect()).toEqual(beforeQuote)
 
       const persistedBrowserState = await page.evaluate(() => JSON.stringify({
         session: Object.fromEntries(Array.from({ length: sessionStorage.length }, (_, index) => {
@@ -256,6 +269,10 @@ print(json.dumps({'counts':{t:c.execute('SELECT count(*) FROM '+t).fetchone()[0]
       const restoredReady = page.getByRole('region', { name: 'PromptIR 五字段变更台' })
       await restoredReady.getByText(/Ready v1/).waitFor()
       await restoredReady.getByText('Ready 只表示当前生效的提示词版本，不代表内容、权利、正式一致性或发布批准。', { exact: true }).waitFor()
+      const restoredQuote = restoredReady.getByRole('region', { name: '首帧生成条件' })
+      await restoredQuote.getByRole('button', { name: '检查首帧生成条件（不调用模型）' }).click()
+      await restoredQuote.getByText('未提交、未扣费。', { exact: true }).waitFor()
+      expect(await restoredQuote.textContent()).toBe(firstQuoteProjection)
       expect(inspect()).toEqual(after)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
       await restoredReady.scrollIntoViewIfNeeded()
@@ -264,7 +281,8 @@ print(json.dumps({'counts':{t:c.execute('SELECT count(*) FROM '+t).fetchone()[0]
         uploadPosts: uploads.length, qualificationPosts: qualificationPosts.length,
         commitPosts: rightsCommits.length, bootstrapPosts: bootstrapPosts.length,
         selectionPosts: selectionPosts.length, byteDriftFailedClosed: true,
-        freshBrowserAfterRestart: true, selectedNotApproved: true, promptIrReadyNotApproved: true }, null, 2))
+        freshBrowserAfterRestart: true, selectedNotApproved: true, promptIrReadyNotApproved: true,
+        firstFrameQuoteReadOnly: true, firstFrameQuoteStableAfterRestart: true }, null, 2))
       console.log('Qingmu local reference qualification evidence:', parent)
     } catch (error) {
       writeFileSync(join(parent, 'browser-failure.txt'), await page.locator('body').innerText())
