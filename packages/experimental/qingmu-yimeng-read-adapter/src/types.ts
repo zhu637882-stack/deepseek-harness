@@ -464,6 +464,15 @@ export interface YimengFirstFrameQuoteResponse extends YimengJsonObject {
     readonly references: readonly (YimengJsonObject & {
       readonly referencePackId: string
       readonly referencePackSha256: string
+      readonly entityDraftId: string
+      readonly entityDraftStatus: string
+      readonly humanReview: null | {
+        readonly status: string
+        readonly source: string
+        readonly reviewIdentity: string
+        readonly reviewedAt: string
+        readonly reviewerUserId: string
+      }
       readonly role: string
       readonly elementKind: string
       readonly elementId: string
@@ -478,6 +487,7 @@ export interface YimengFirstFrameQuoteResponse extends YimengJsonObject {
       readonly profileRevision: number
       readonly profileSnapshotSha256: string
     })[]
+    readonly referenceExecutionBlockers: readonly string[]
     readonly firstFramePreparation: {
       readonly frameId: string
       readonly frameNo: number
@@ -502,9 +512,10 @@ export interface YimengFirstFrameQuoteResponse extends YimengJsonObject {
     readonly legacyExecutorPrompt: string | null
     readonly legacyExecutorPromptSha256: string | null
     readonly legacyExecutorMatchesReadyPromptIr: boolean
-    readonly executorUsesReadyPromptIr: false
-    readonly dispatchCompatible: false
+    readonly executorUsesReadyPromptIr: true
+    readonly dispatchCompatible: boolean
     readonly executionBlockers: readonly string[]
+    readonly executionBinding: YimengJsonObject | null
   }
   readonly scope: { readonly frameCount: 1; readonly imagesPerFrame: 1; readonly resolution: '720P' }
   readonly quote: null | {

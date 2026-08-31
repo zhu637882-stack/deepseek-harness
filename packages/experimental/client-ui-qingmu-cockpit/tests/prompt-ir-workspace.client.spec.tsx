@@ -316,11 +316,15 @@ function createPort(options: { readonly editPostSucceeds?: boolean } = {}) {
       method: { rootPromptIrId: BASE_ID, methodProjectionSha256: 'e'.repeat(64), methodSha256: 'f'.repeat(64),
         methodSourceBindings: [{ kind: 'method', path: 'imago/method.json', sha256: '0'.repeat(64) }],
         bootstrapContextSnapshotSha256: '1'.repeat(64) },
-      references: [{ referencePackId: 'pack-1', referencePackSha256: '2'.repeat(64), role: 'scene',
+      references: [{ referencePackId: 'pack-1', referencePackSha256: '2'.repeat(64),
+        entityDraftId: 'draft-1', entityDraftStatus: 'Accepted',
+        humanReview: { status: 'Accepted', source: 'independent_human_review', reviewIdentity: 'review-1',
+          reviewedAt: '2026-09-01T00:00:00Z', reviewerUserId: 'reviewer-1' }, role: 'scene',
         elementKind: 'scene', elementId: 'scene-1', assetId: 'asset-1', assetSha256: '3'.repeat(64),
         materializedSha256: '4'.repeat(64), selectionIdentity: 'selection-1', sourceRevisionId: 'source-1',
         qualificationCheckId: 'qualification-1', qualificationKind: 'local_file_integrity',
         rightsRecordSha256: '5'.repeat(64), profileRevision: 1, profileSnapshotSha256: '6'.repeat(64) }],
+      referenceExecutionBlockers: [],
       firstFramePreparation: { frameId: FRAME_ID, frameNo: 1, currentAssetId: null,
         generationRequired: true, auditRequired: true,
         auditReason: 'generated_candidate_requires_formal_audit', humanSelectionRequired: true },
@@ -330,8 +334,8 @@ function createPort(options: { readonly editPostSucceeds?: boolean } = {}) {
     costSourceLockSha256: null,
     promptBinding: { readyPromptIrImagePromptSha256: 'd'.repeat(64),
       legacyExecutorPrompt: '当前执行器编译提示词', legacyExecutorPromptSha256: '8'.repeat(64),
-      legacyExecutorMatchesReadyPromptIr: false, executorUsesReadyPromptIr: false,
-      dispatchCompatible: false, executionBlockers: ['first_frame_ready_prompt_ir_executor_binding_missing'] },
+      legacyExecutorMatchesReadyPromptIr: false, executorUsesReadyPromptIr: true,
+      dispatchCompatible: true, executionBlockers: [], executionBinding: {} },
     scope: { frameCount: 1, imagesPerFrame: 1, resolution: '720P' },
     quote: { frameId: FRAME_ID, frameNo: 1, calls: 1, estimatedCny: 0.2, capability: 'image.generate',
       routeKey: 'b4.first_frame_generation', provider: 'dashscope', model: 'wan2.2-t2i-flash', pricingVerified: true },
@@ -395,7 +399,8 @@ describe('PromptIrWorkspace vertical slice', () => {
     fireEvent.click(screen.getByRole('button', { name: zh.firstFrameQuoteAction }))
     await screen.findByText('dashscope / wan2.2-t2i-flash')
     expect(screen.getByText('¥0.2000')).toBeTruthy()
-    expect(screen.getByText(zh.firstFrameQuoteExecutorBlocked)).toBeTruthy()
+    expect(screen.getByText(zh.firstFrameQuoteExecutorBound)).toBeTruthy()
+    expect(screen.queryByText(zh.firstFrameQuoteExecutorBlocked)).toBeNull()
     expect(screen.getByText('当前执行器编译提示词')).toBeTruthy()
     expect(screen.getByText(zh.firstFrameQuoteNotSubmitted)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /确认生成|提交首帧|付费生成/ })).toBeNull()

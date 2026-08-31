@@ -214,7 +214,11 @@ print(json.dumps({'counts':{t:c.execute('SELECT count(*) FROM '+t).fetchone()[0]
       await firstFrameQuote.getByRole('button', { name: '检查首帧生成条件（不调用模型）' }).click()
       await firstFrameQuote.getByText('未提交、未扣费。', { exact: true }).waitFor()
       await firstFrameQuote.getByText(
-        '当前执行链尚未消费 Ready PromptIR；本报价只核对价格事实，不能提交。',
+        '执行器已支持精确 Ready PromptIR 绑定；当前页面只读，尚未授权提交。',
+        { exact: true },
+      ).waitFor()
+      await firstFrameQuote.getByText(
+        '执行来源合同当前被真实阻断；本页只读，尚未授权提交。',
         { exact: true },
       ).waitFor()
       await firstFrameQuote.getByText(/dashscope \/ /).waitFor()

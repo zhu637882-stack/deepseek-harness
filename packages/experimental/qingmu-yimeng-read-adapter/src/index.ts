@@ -2316,7 +2316,7 @@ function normalizeFirstFrameQuote(
   requireExactKeys(authority, [
     'projectId', 'episodeId', 'storyboard', 'frame', 'contextSchema',
     'contextSnapshotSha256', 'promptIr', 'method', 'references',
-    'firstFramePreparation',
+    'referenceExecutionBlockers', 'firstFramePreparation',
   ], 'firstFrameQuote.authoritySnapshot')
   if (authority.projectId !== expected.projectId || authority.episodeId !== expected.episodeId) {
     throw new UpstreamContractError('firstFrameQuote authority scope mismatch')
@@ -2401,11 +2401,25 @@ function normalizeFirstFrameQuote(
   for (const [index, reference] of references.entries()) {
     requireExactKeys(reference, [
       'referencePackId', 'referencePackSha256', 'role', 'elementKind', 'elementId',
+      'entityDraftId', 'entityDraftStatus', 'humanReview',
       'assetId', 'assetSha256', 'materializedSha256', 'selectionIdentity',
       'sourceRevisionId', 'qualificationCheckId', 'qualificationKind',
       'rightsRecordSha256', 'profileRevision', 'profileSnapshotSha256',
     ], `firstFrameQuote.reference[${String(index)}]`)
     requireIdentifier(reference.referencePackId, `firstFrameQuote.reference[${String(index)}].referencePackId`)
+    requireIdentifier(reference.entityDraftId, `firstFrameQuote.reference[${String(index)}].entityDraftId`)
+    if (!requireString(reference.entityDraftStatus, `firstFrameQuote.reference[${String(index)}].entityDraftStatus`).trim()) {
+      throw new UpstreamContractError('firstFrameQuote reference entityDraftStatus is empty')
+    }
+    if (reference.humanReview !== null) {
+      const review = requireObject(reference.humanReview, `firstFrameQuote.reference[${String(index)}].humanReview`)
+      requireExactKeys(review, [
+        'status', 'source', 'reviewIdentity', 'reviewedAt', 'reviewerUserId',
+      ], `firstFrameQuote.reference[${String(index)}].humanReview`)
+      for (const key of ['status', 'source', 'reviewIdentity', 'reviewedAt', 'reviewerUserId'] as const) {
+        requireString(review[key], `firstFrameQuote.reference[${String(index)}].humanReview.${key}`)
+      }
+    }
     for (const key of [
       'referencePackSha256', 'assetSha256', 'materializedSha256',
       'rightsRecordSha256', 'profileSnapshotSha256',
@@ -2421,7 +2435,14 @@ function normalizeFirstFrameQuote(
     throw new UpstreamContractError('firstFrameQuote context schema mismatch')
   }
   const contextReferences = references.map((reference) => {
-    const { referencePackId: _referencePackId, referencePackSha256: _referencePackSha256, ...binding } = reference
+    const {
+      referencePackId: _referencePackId,
+      referencePackSha256: _referencePackSha256,
+      entityDraftId: _entityDraftId,
+      entityDraftStatus: _entityDraftStatus,
+      humanReview: _humanReview,
+      ...binding
+    } = reference
     return binding
   })
   const reconstructedContext = {
@@ -2439,6 +2460,12 @@ function normalizeFirstFrameQuote(
   if (jcsSha256(reconstructedContext, 'firstFrameQuote.context') !== contextSnapshotSha256) {
     throw new UpstreamContractError('firstFrameQuote context snapshot hash mismatch')
   }
+  const referenceExecutionBlockers = Array.isArray(authority.referenceExecutionBlockers)
+    ? authority.referenceExecutionBlockers.map((item, index) => requireIdentifier(
+      item,
+      `firstFrameQuote.referenceExecutionBlockers[${String(index)}]`,
+    ))
+    : (() => { throw new UpstreamContractError('firstFrameQuote referenceExecutionBlockers must be an array') })()
   const firstFramePreparation = requireObject(
     authority.firstFramePreparation,
     'firstFrameQuote.authoritySnapshot.firstFramePreparation',
@@ -2526,7 +2553,7 @@ function normalizeFirstFrameQuote(
   requireExactKeys(promptBinding, [
     'readyPromptIrImagePromptSha256', 'legacyExecutorPrompt',
     'legacyExecutorPromptSha256', 'legacyExecutorMatchesReadyPromptIr',
-    'executorUsesReadyPromptIr', 'dispatchCompatible', 'executionBlockers',
+    'executorUsesReadyPromptIr', 'dispatchCompatible', 'executionBlockers', 'executionBinding',
   ], 'firstFrameQuote.promptBinding')
   const readyPromptIrImagePromptSha256 = requireSha256(
     promptBinding.readyPromptIrImagePromptSha256,
@@ -2552,10 +2579,230 @@ function normalizeFirstFrameQuote(
     promptBinding.legacyExecutorMatchesReadyPromptIr,
     'firstFrameQuote.promptBinding.legacyExecutorMatchesReadyPromptIr',
   )
+  const dispatchCompatible = requireBoolean(
+    promptBinding.dispatchCompatible,
+    'firstFrameQuote.promptBinding.dispatchCompatible',
+  )
+  let executionBinding: YimengJsonObject | null = null
+  if (promptBinding.executionBinding !== null) {
+    const binding = requireObject(promptBinding.executionBinding, 'firstFrameQuote.promptBinding.executionBinding')
+    requireExactKeys(binding, [
+      'schema', 'actor', 'projectId', 'episodeId', 'storyboardRevisionId', 'frameId',
+      'authoritySnapshot', 'authoritySnapshotSha256', 'costSourceLock', 'costSourceLockSha256',
+      'provider', 'model', 'capability', 'routeKey', 'pricingSnapshot', 'pricingSnapshotSha256',
+      'referenceSnapshotBindings', 'providerSnapshotContract', 'providerSnapshotContractSha256',
+      'output', 'prompt', 'promptSha256',
+      'advisoryOnly', 'selectAsOfficial', 'maxAttempts', 'bindingSha256',
+    ], 'firstFrameQuote.promptBinding.executionBinding')
+    if (binding.schema !== 'jason.qingmu-ready-prompt-ir-first-frame-execution-binding.v1'
+      || !requireString(binding.actor, 'firstFrameQuote.executionBinding.actor').trim()
+      || binding.projectId !== expected.projectId || binding.episodeId !== expected.episodeId
+      || binding.storyboardRevisionId !== expected.storyboardRevisionId || binding.frameId !== expected.frameId
+      || binding.authoritySnapshotSha256 !== authoritySnapshotSha256
+      || jcsSha256(binding.authoritySnapshot, 'firstFrameQuote.executionBinding.authoritySnapshot') !== authoritySnapshotSha256
+      || binding.costSourceLockSha256 !== costSourceLockSha256
+      || jcsSha256(binding.costSourceLock, 'firstFrameQuote.executionBinding.costSourceLock') !== costSourceLockSha256
+      || !isDeepStrictEqual(binding.costSourceLock, normalizedCostSourceLock)
+      || binding.prompt !== imagePrompt || binding.promptSha256 !== promptIr.imagePromptSha256
+      || binding.advisoryOnly !== false || binding.selectAsOfficial !== false || binding.maxAttempts !== 1) {
+      throw new UpstreamContractError('firstFrameQuote execution binding mismatch')
+    }
+    for (const key of ['provider', 'model', 'capability', 'routeKey'] as const) {
+      requireIdentifier(binding[key], `firstFrameQuote.executionBinding.${key}`)
+    }
+    const pricingSnapshot = requireObject(
+      binding.pricingSnapshot,
+      'firstFrameQuote.executionBinding.pricingSnapshot',
+    )
+    const pricingSnapshotSha256 = requireSha256(
+      binding.pricingSnapshotSha256,
+      'firstFrameQuote.executionBinding.pricingSnapshotSha256',
+    )
+    if (jcsSha256(pricingSnapshot, 'firstFrameQuote.executionBinding.pricingSnapshot') !== pricingSnapshotSha256) {
+      throw new UpstreamContractError('firstFrameQuote execution binding pricing mismatch')
+    }
+    const referenceSnapshotBindings = requireObjectItems(
+      binding.referenceSnapshotBindings,
+      'firstFrameQuote.executionBinding.referenceSnapshotBindings',
+    )
+    if (referenceSnapshotBindings.length !== references.length) {
+      throw new UpstreamContractError('firstFrameQuote execution binding reference snapshot mismatch')
+    }
+    for (const [index, snapshotBinding] of referenceSnapshotBindings.entries()) {
+      requireExactKeys(snapshotBinding, [
+        'assetId', 'materializedSha256', 'transportPlaceholder',
+      ], `firstFrameQuote.executionBinding.referenceSnapshotBindings[${String(index)}]`)
+      const reference = references[index]
+      const assetId = requireIdentifier(
+        snapshotBinding.assetId,
+        `firstFrameQuote.executionBinding.referenceSnapshotBindings[${String(index)}].assetId`,
+      )
+      const materializedSha256 = requireSha256(
+        snapshotBinding.materializedSha256,
+        `firstFrameQuote.executionBinding.referenceSnapshotBindings[${String(index)}].materializedSha256`,
+      )
+      if (reference === undefined
+        || assetId !== reference.assetId || materializedSha256 !== reference.materializedSha256
+        || snapshotBinding.transportPlaceholder !== `qingmu-reference://${assetId}/${materializedSha256}`) {
+        throw new UpstreamContractError('firstFrameQuote execution binding reference snapshot mismatch')
+      }
+    }
+    const providerSnapshotContract = requireObject(
+      binding.providerSnapshotContract,
+      'firstFrameQuote.executionBinding.providerSnapshotContract',
+    )
+    requireExactKeys(providerSnapshotContract, [
+      'method', 'url', 'body', 'notes', 'aliRuleValidation',
+    ], 'firstFrameQuote.executionBinding.providerSnapshotContract')
+    const providerSnapshotContractSha256 = requireSha256(
+      binding.providerSnapshotContractSha256,
+      'firstFrameQuote.executionBinding.providerSnapshotContractSha256',
+    )
+    const actualProviderSnapshotContractSha256 = jcsSha256(
+      providerSnapshotContract,
+      'firstFrameQuote.executionBinding.providerSnapshotContract',
+    )
+    if (actualProviderSnapshotContractSha256 !== providerSnapshotContractSha256) {
+      throw new UpstreamContractError('firstFrameQuote execution binding provider snapshot mismatch')
+    }
+    const providerBody = requireObject(
+      providerSnapshotContract.body,
+      'firstFrameQuote.executionBinding.providerSnapshotContract.body',
+    )
+    requireExactKeys(providerBody, [
+      'model', 'input', 'parameters',
+    ], 'firstFrameQuote.executionBinding.providerSnapshotContract.body')
+    const providerInput = requireObject(
+      providerBody.input,
+      'firstFrameQuote.executionBinding.providerSnapshotContract.body.input',
+    )
+    requireExactKeys(providerInput, [
+      'messages',
+    ], 'firstFrameQuote.executionBinding.providerSnapshotContract.body.input')
+    const messages = requireObjectItems(
+      providerInput.messages,
+      'firstFrameQuote.executionBinding.providerSnapshotContract.body.input.messages',
+    )
+    const providerMessage = messages[0]
+    const content = providerMessage === undefined ? [] : requireObjectItems(
+      providerMessage.content,
+      'firstFrameQuote.executionBinding.providerSnapshotContract.body.input.messages[0].content',
+    )
+    const expectedContent = [
+      ...referenceSnapshotBindings.map(item => ({ image: item.transportPlaceholder })),
+      { text: imagePrompt },
+    ]
+    const output = requireObject(binding.output, 'firstFrameQuote.executionBinding.output')
+    requireExactKeys(output, ['size', 'n'], 'firstFrameQuote.executionBinding.output')
+    const outputSize = requireString(output.size, 'firstFrameQuote.executionBinding.output.size').trim()
+    if (!outputSize || output.n !== 1) {
+      throw new UpstreamContractError('firstFrameQuote execution binding output mismatch')
+    }
+    const providerUrl = requireString(
+      providerSnapshotContract.url,
+      'firstFrameQuote.executionBinding.providerSnapshotContract.url',
+    )
+    let parsedProviderUrl: URL
+    try {
+      parsedProviderUrl = new URL(providerUrl)
+    }
+    catch {
+      throw new UpstreamContractError('firstFrameQuote execution binding provider URL mismatch')
+    }
+    const providerParameters = requireObject(
+      providerBody.parameters,
+      'firstFrameQuote.executionBinding.providerSnapshotContract.body.parameters',
+    )
+    requireExactKeys(providerParameters, [
+      'size', 'n', 'watermark',
+    ], 'firstFrameQuote.executionBinding.providerSnapshotContract.body.parameters')
+    const notes = Array.isArray(providerSnapshotContract.notes)
+      ? providerSnapshotContract.notes.map((item, index) => requireString(
+        item,
+        `firstFrameQuote.executionBinding.providerSnapshotContract.notes[${String(index)}]`,
+      ))
+      : []
+    const aliRuleValidation = requireObject(
+      providerSnapshotContract.aliRuleValidation,
+      'firstFrameQuote.executionBinding.providerSnapshotContract.aliRuleValidation',
+    )
+    requireExactKeys(aliRuleValidation, [
+      'provider', 'model', 'capability', 'officialOnly', 'sourceUrls', 'checks', 'violations',
+    ], 'firstFrameQuote.executionBinding.providerSnapshotContract.aliRuleValidation')
+    const sourceUrls = Array.isArray(aliRuleValidation.sourceUrls)
+      ? aliRuleValidation.sourceUrls.map((item, index) => requireString(
+        item,
+        `firstFrameQuote.executionBinding.providerSnapshotContract.aliRuleValidation.sourceUrls[${String(index)}]`,
+      ))
+      : []
+    const checks = requireObjectItems(
+      aliRuleValidation.checks,
+      'firstFrameQuote.executionBinding.providerSnapshotContract.aliRuleValidation.checks',
+    )
+    for (const [index, check] of checks.entries()) {
+      requireExactKeys(check, ['rule', 'passed', 'evidence'],
+        `firstFrameQuote.executionBinding.providerSnapshotContract.aliRuleValidation.checks[${String(index)}]`)
+      requireString(check.rule,
+        `firstFrameQuote.executionBinding.providerSnapshotContract.aliRuleValidation.checks[${String(index)}].rule`)
+      requireBoolean(check.passed,
+        `firstFrameQuote.executionBinding.providerSnapshotContract.aliRuleValidation.checks[${String(index)}].passed`)
+      requireString(check.evidence,
+        `firstFrameQuote.executionBinding.providerSnapshotContract.aliRuleValidation.checks[${String(index)}].evidence`)
+    }
+    const violations = Array.isArray(aliRuleValidation.violations)
+      ? aliRuleValidation.violations.map((item, index) => requireString(
+        item,
+        `firstFrameQuote.executionBinding.providerSnapshotContract.aliRuleValidation.violations[${String(index)}]`,
+      ))
+      : []
+    if (providerSnapshotContract.method !== 'POST'
+      || parsedProviderUrl.protocol !== 'https:'
+      || parsedProviderUrl.pathname !== '/api/v1/services/aigc/multimodal-generation/generation'
+      || providerBody.model !== binding.model
+      || messages.length !== 1 || providerMessage?.role !== 'user'
+      || !isDeepStrictEqual(content, expectedContent)) {
+      throw new UpstreamContractError('firstFrameQuote execution binding provider payload mismatch')
+    }
+    requireExactKeys(providerMessage, [
+      'role', 'content',
+    ], 'firstFrameQuote.executionBinding.providerSnapshotContract.body.input.messages[0]')
+    for (const [index, item] of content.entries()) {
+      requireExactKeys(item, index === content.length - 1 ? ['text'] : ['image'],
+        `firstFrameQuote.executionBinding.providerSnapshotContract.body.input.messages[0].content[${String(index)}]`)
+    }
+    if (providerParameters.size !== outputSize || providerParameters.n !== 1
+      || providerParameters.watermark !== false
+      || !isDeepStrictEqual(notes, [
+        'sync_response', 'wan2.7_image_generation', 'result_url_ttl_24h',
+        'ali_official_rules_validated',
+      ])
+      || aliRuleValidation.provider !== 'dashscope'
+      || aliRuleValidation.model !== binding.model
+      || aliRuleValidation.capability !== binding.capability
+      || aliRuleValidation.officialOnly !== true
+      || sourceUrls.length === 0 || checks.length === 0 || violations.length !== 0) {
+      throw new UpstreamContractError('firstFrameQuote execution binding provider semantics mismatch')
+    }
+    if (root.quote !== null) {
+      const quoteBinding = requireObject(root.quote, 'firstFrameQuote.quote')
+      if (binding.provider !== quoteBinding.provider || binding.model !== quoteBinding.model
+        || binding.capability !== quoteBinding.capability || binding.routeKey !== quoteBinding.routeKey) {
+        throw new UpstreamContractError('firstFrameQuote execution binding route mismatch')
+      }
+    }
+    const bindingSha256 = requireSha256(binding.bindingSha256, 'firstFrameQuote.executionBinding.bindingSha256')
+    const unsignedBinding = { ...binding }
+    delete unsignedBinding.bindingSha256
+    if (jcsSha256(unsignedBinding, 'firstFrameQuote.executionBinding') !== bindingSha256) {
+      throw new UpstreamContractError('firstFrameQuote execution binding hash mismatch')
+    }
+    executionBinding = binding
+  }
   if (readyPromptIrImagePromptSha256 !== promptIr.imagePromptSha256
-    || promptBinding.executorUsesReadyPromptIr !== false
-    || promptBinding.dispatchCompatible !== false
-    || !executionBlockers.includes('first_frame_ready_prompt_ir_executor_binding_missing')
+    || promptBinding.executorUsesReadyPromptIr !== true
+    || dispatchCompatible !== (executionBlockers.length === 0)
+    || (executionBinding !== null) !== (root.quote !== null && normalizedCostSourceLock !== null)
+    || referenceExecutionBlockers.some(blocker => !executionBlockers.includes(blocker))
     || (legacyExecutorPrompt === null) !== (legacyExecutorPromptSha256 === null)
     || (legacyExecutorPrompt !== null
       && createHash('sha256').update(legacyExecutorPrompt, 'utf8').digest('hex') !== legacyExecutorPromptSha256)
@@ -2602,9 +2849,18 @@ function normalizeFirstFrameQuote(
   if ((quote !== null) !== normalizedFirstFramePreparation.generationRequired) {
     throw new UpstreamContractError('firstFrameQuote quote and generation requirement mismatch')
   }
+  if (executionBinding !== null && (
+    quote === null
+    || !isDeepStrictEqual(executionBinding.pricingSnapshot, quote)
+    || executionBinding.pricingSnapshotSha256 !== jcsSha256(quote, 'firstFrameQuote.quote')
+  )) {
+    throw new UpstreamContractError('firstFrameQuote execution binding quote mismatch')
+  }
   const quoteReady = requireBoolean(root.quoteReady, 'firstFrameQuote.quoteReady')
   if (quoteReady !== (quote !== null && quote.pricingVerified && blockers.length === 0)
     || (quoteReady && (normalizedCostSourceLock === null || costSourceLockSha256 === null))
+    || blockers.some(blocker => !executionBlockers.includes(blocker))
+    || (dispatchCompatible && !quoteReady)
     || root.readOnly !== true || root.providerCalls !== 0 || root.budgetMutation !== false
     || root.taskMutation !== false || root.mediaMutation !== false
     || root.submitted !== false || root.charged !== false) {
@@ -2633,6 +2889,7 @@ function normalizeFirstFrameQuote(
         bootstrapContextSnapshotSha256: method.bootstrapContextSnapshotSha256 as string,
       },
       references: references as unknown as YimengFirstFrameQuoteResponse['authoritySnapshot']['references'],
+      referenceExecutionBlockers,
       firstFramePreparation: normalizedFirstFramePreparation,
     },
     authoritySnapshotSha256,
@@ -2643,9 +2900,10 @@ function normalizeFirstFrameQuote(
       legacyExecutorPrompt,
       legacyExecutorPromptSha256,
       legacyExecutorMatchesReadyPromptIr,
-      executorUsesReadyPromptIr: false,
-      dispatchCompatible: false,
+      executorUsesReadyPromptIr: true,
+      dispatchCompatible,
       executionBlockers,
+      executionBinding,
     },
     scope: { frameCount: 1, imagesPerFrame: 1, resolution: '720P' },
     quote,

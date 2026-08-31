@@ -1134,6 +1134,7 @@ function ReadyPromptIrWorkspace({
                 <p>SHA-256: {firstFrameQuote.promptBinding.legacyExecutorPromptSha256}</p>
               </>}
           </details>
+          <p role="status"><strong>{t('firstFrameQuoteExecutorBound')}</strong></p>
           {!firstFrameQuote.promptBinding.dispatchCompatible && <p role="alert">
             <strong>{t('firstFrameQuoteExecutorBlocked')}</strong>
           </p>}

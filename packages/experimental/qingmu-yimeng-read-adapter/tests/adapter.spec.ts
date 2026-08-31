@@ -1349,12 +1349,17 @@ describe('qingmu Yimeng read adapter', () => {
       visual: '雨夜旧车站空月台', action: '人物抬头', durationSec: 4,
       dialogueLineIds: ['line-1'], sceneId: 'scene-1' }
     const frame = { ...frameWithoutHash, contentSha256: sha256(canonicalJson(frameWithoutHash)) }
-    const reference = { referencePackId: 'pack-1', referencePackSha256: '8'.repeat(64), role: 'scene',
+    const reference = { referencePackId: 'pack-1', referencePackSha256: '8'.repeat(64),
+      entityDraftId: 'draft-1', entityDraftStatus: 'Accepted',
+      humanReview: { status: 'Accepted', source: 'independent_human_review', reviewIdentity: 'review-1',
+        reviewedAt: '2026-09-01T00:00:00Z', reviewerUserId: 'reviewer-1' }, role: 'scene',
       elementKind: 'scene', elementId: 'scene-1', assetId: 'asset-1', assetSha256: '9'.repeat(64),
       materializedSha256: 'a'.repeat(64), selectionIdentity: 'selection-1', sourceRevisionId: 'source-1',
       qualificationCheckId: 'qualification-1', qualificationKind: 'local_file_integrity',
       rightsRecordSha256: 'b'.repeat(64), profileRevision: 1, profileSnapshotSha256: 'c'.repeat(64) }
-    const { referencePackId: _referencePackId, referencePackSha256: _referencePackSha256, ...contextReference } = reference
+    const { referencePackId: _referencePackId, referencePackSha256: _referencePackSha256,
+      entityDraftId: _entityDraftId, entityDraftStatus: _entityDraftStatus,
+      humanReview: _humanReview, ...contextReference } = reference
     const contextSchema = 'jason.qingmu-prompt-ir-bootstrap-context.v1'
     const contextSnapshotSha256 = sha256(canonicalJson({ schema: contextSchema,
       projectId: request.projectId, episodeId: request.episodeId, storyboard, frame,
@@ -1373,10 +1378,45 @@ describe('qingmu Yimeng read adapter', () => {
         methodSha256: '5'.repeat(64), methodSourceBindings: [{ kind: 'method', path: 'imago/method.json',
           sha256: '6'.repeat(64) }], bootstrapContextSnapshotSha256: '7'.repeat(64) },
       references: [reference],
+      referenceExecutionBlockers: [],
       firstFramePreparation: { frameId: request.frameId, frameNo: 1, currentAssetId: null,
         generationRequired: true, auditRequired: true,
         auditReason: 'generated_candidate_requires_formal_audit', humanSelectionRequired: true },
     }
+    const costSourceLock = { scriptRevision: 1, scriptSha256: 'd'.repeat(64),
+      storyContractSha256: 'e'.repeat(64), storyboardRevision: 1,
+      storyboardCreativeSha256: 'f'.repeat(64) }
+    const quote = { frameId: request.frameId, frameNo: 1, calls: 1, estimatedCny: 0.2,
+      capability: 'image.generate', routeKey: 'b4.first_frame_generation', provider: 'dashscope',
+      model: 'wan2.2-t2i-flash', pricingVerified: true }
+    const referenceSnapshotBindings = [{ assetId: reference.assetId,
+      materializedSha256: reference.materializedSha256,
+      transportPlaceholder: `qingmu-reference://${reference.assetId}/${reference.materializedSha256}` }]
+    const providerSnapshotContract = { method: 'POST',
+      url: 'https://fixture.invalid/api/v1/services/aigc/multimodal-generation/generation',
+      body: { model: quote.model, input: { messages: [{ role: 'user', content: [
+        { image: referenceSnapshotBindings[0]!.transportPlaceholder }, { text: imagePrompt },
+      ] }] }, parameters: { size: '720*1280', n: 1, watermark: false } },
+      notes: ['sync_response', 'wan2.7_image_generation', 'result_url_ttl_24h',
+        'ali_official_rules_validated'],
+      aliRuleValidation: { provider: 'dashscope', model: quote.model, capability: quote.capability,
+        officialOnly: true, sourceUrls: ['https://help.aliyun.com/fixture'],
+        checks: [{ rule: 'fixture', passed: true, evidence: 'fixture' }], violations: [] } }
+    const executionBindingBody = {
+      schema: 'jason.qingmu-ready-prompt-ir-first-frame-execution-binding.v1', actor: 'user-1',
+      projectId: request.projectId, episodeId: request.episodeId,
+      storyboardRevisionId: request.storyboardRevisionId, frameId: request.frameId,
+      authoritySnapshot, authoritySnapshotSha256: sha256(canonicalJson(authoritySnapshot)),
+      costSourceLock, costSourceLockSha256: sha256(canonicalJson(costSourceLock)),
+      provider: quote.provider, model: quote.model, capability: quote.capability, routeKey: quote.routeKey,
+      pricingSnapshot: quote, pricingSnapshotSha256: sha256(canonicalJson(quote)),
+      referenceSnapshotBindings, providerSnapshotContract,
+      providerSnapshotContractSha256: sha256(canonicalJson(providerSnapshotContract)),
+      output: { size: '720*1280', n: 1 }, prompt: imagePrompt, promptSha256: sha256(imagePrompt),
+      advisoryOnly: false, selectAsOfficial: false, maxAttempts: 1,
+    }
+    const executionBinding = { ...executionBindingBody,
+      bindingSha256: sha256(canonicalJson(executionBindingBody)) }
     const unsigned = {
       schema: 'jason.qingmu-ready-prompt-ir-first-frame-quote.v1',
       projectId: request.projectId,
@@ -1385,20 +1425,14 @@ describe('qingmu Yimeng read adapter', () => {
       frameId: request.frameId,
       authoritySnapshot,
       authoritySnapshotSha256: sha256(canonicalJson(authoritySnapshot)),
-      costSourceLock: { scriptRevision: 1, scriptSha256: 'd'.repeat(64),
-        storyContractSha256: 'e'.repeat(64), storyboardRevision: 1,
-        storyboardCreativeSha256: 'f'.repeat(64) },
-      costSourceLockSha256: sha256(canonicalJson({ scriptRevision: 1, scriptSha256: 'd'.repeat(64),
-        storyContractSha256: 'e'.repeat(64), storyboardRevision: 1,
-        storyboardCreativeSha256: 'f'.repeat(64) })),
+      costSourceLock,
+      costSourceLockSha256: sha256(canonicalJson(costSourceLock)),
       promptBinding: { readyPromptIrImagePromptSha256: sha256(imagePrompt),
         legacyExecutorPrompt: '现行执行器编译提示词', legacyExecutorPromptSha256: sha256('现行执行器编译提示词'),
-        legacyExecutorMatchesReadyPromptIr: false, executorUsesReadyPromptIr: false,
-        dispatchCompatible: false, executionBlockers: ['first_frame_ready_prompt_ir_executor_binding_missing'] },
+        legacyExecutorMatchesReadyPromptIr: false, executorUsesReadyPromptIr: true,
+        dispatchCompatible: true, executionBlockers: [], executionBinding },
       scope: { frameCount: 1, imagesPerFrame: 1, resolution: '720P' },
-      quote: { frameId: request.frameId, frameNo: 1, calls: 1, estimatedCny: 0.2,
-        capability: 'image.generate', routeKey: 'b4.first_frame_generation', provider: 'dashscope',
-        model: 'wan2.2-t2i-flash', pricingVerified: true },
+      quote,
       quoteReady: true,
       blockers: [],
       readOnly: true,
@@ -1415,7 +1449,8 @@ describe('qingmu Yimeng read adapter', () => {
       capturedUrl = requestUrl(input)
       return jsonResponse(response)
     }, 'test-token'))
-    expect(await handler('firstFrameQuote', request, signal())).toMatchObject({ ok: true, value: {
+    const firstFrameResult = await handler('firstFrameQuote', request, signal())
+    expect(firstFrameResult).toMatchObject({ ok: true, value: {
       quoteReady: true, quote: { calls: 1, provider: 'dashscope', model: 'wan2.2-t2i-flash' },
       readOnly: true, providerCalls: 0, submitted: false, charged: false,
     } })
@@ -1444,6 +1479,41 @@ describe('qingmu Yimeng read adapter', () => {
       projectionSha256: sha256(canonicalJson(inconsistentPreparationUnsigned)),
     }), 'test-token'))
     expect(await inconsistentPreparation('firstFrameQuote', request, signal()))
+      .toMatchObject({ ok: false, error: { code: 'internal' } })
+    const omittedHardBlockerUnsigned = { ...unsigned, blockers: ['commercial_quality:blocked'],
+      quoteReady: false }
+    const omittedHardBlocker = createYimengReadHandler({}, dependencies(async () => jsonResponse({
+      ...omittedHardBlockerUnsigned,
+      projectionSha256: sha256(canonicalJson(omittedHardBlockerUnsigned)),
+    }), 'test-token'))
+    expect(await omittedHardBlocker('firstFrameQuote', request, signal()))
+      .toMatchObject({ ok: false, error: { code: 'internal' } })
+    const tamperedCostLock = { ...costSourceLock, scriptRevision: 2 }
+    const nestedCostBody = { ...executionBindingBody, costSourceLock: tamperedCostLock }
+    const nestedCostBinding = { ...nestedCostBody,
+      bindingSha256: sha256(canonicalJson(nestedCostBody)) }
+    const nestedCostUnsigned = { ...unsigned, promptBinding: { ...unsigned.promptBinding,
+      executionBinding: nestedCostBinding } }
+    const nestedCostTamper = createYimengReadHandler({}, dependencies(async () => jsonResponse({
+      ...nestedCostUnsigned, projectionSha256: sha256(canonicalJson(nestedCostUnsigned)),
+    }), 'test-token'))
+    expect(await nestedCostTamper('firstFrameQuote', request, signal()))
+      .toMatchObject({ ok: false, error: { code: 'internal' } })
+    const tamperedProviderContract = { ...providerSnapshotContract,
+      body: { ...providerSnapshotContract.body,
+        parameters: { ...providerSnapshotContract.body.parameters, size: '1440*2560' } } }
+    const tamperedProviderBindingBody = { ...executionBindingBody,
+      providerSnapshotContract: tamperedProviderContract,
+      providerSnapshotContractSha256: sha256(canonicalJson(tamperedProviderContract)) }
+    const tamperedProviderBinding = { ...tamperedProviderBindingBody,
+      bindingSha256: sha256(canonicalJson(tamperedProviderBindingBody)) }
+    const tamperedProviderUnsigned = { ...unsigned, promptBinding: { ...unsigned.promptBinding,
+      executionBinding: tamperedProviderBinding } }
+    const selfConsistentProviderTamper = createYimengReadHandler({}, dependencies(async () => jsonResponse({
+      ...tamperedProviderUnsigned,
+      projectionSha256: sha256(canonicalJson(tamperedProviderUnsigned)),
+    }), 'test-token'))
+    expect(await selfConsistentProviderTamper('firstFrameQuote', request, signal()))
       .toMatchObject({ ok: false, error: { code: 'internal' } })
   })
 
