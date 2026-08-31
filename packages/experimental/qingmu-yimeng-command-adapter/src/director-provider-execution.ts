@@ -107,6 +107,13 @@ export interface DirectorProviderTransportFacts {
   readonly rawOutputUtf8Bytes?: number
 }
 
+export const DIRECTOR_PROVIDER_ERROR_CODES = {
+  providerResponseInvalid: 'director_provider_response_invalid',
+  submissionUnknown: 'director_provider_submission_unknown',
+} as const
+
+export type DirectorProviderErrorCode = typeof DIRECTOR_PROVIDER_ERROR_CODES[keyof typeof DIRECTOR_PROVIDER_ERROR_CODES]
+
 /** Complete transport result. Raw provider text never crosses this boundary. */
 export type DirectorProviderTransportResult =
   | {
@@ -117,7 +124,7 @@ export type DirectorProviderTransportResult =
   | {
     readonly state: 'provider_response_invalid'
     readonly automaticRetry: false
-    readonly reason: string
+    readonly errorCode: 'director_provider_response_invalid'
     readonly transportFacts: DirectorProviderTransportFacts
   }
 
@@ -155,10 +162,14 @@ export type DirectorProviderExecutionResult =
   | {
     readonly state: 'provider_response_invalid'
     readonly automaticRetry: false
-    readonly reason: string
+    readonly errorCode: 'director_provider_response_invalid'
     readonly transportFacts: DirectorProviderTransportFacts
   }
-  | { readonly state: 'submission_unknown'; readonly automaticRetry: false; readonly reason: string }
+  | {
+    readonly state: 'submission_unknown'
+    readonly automaticRetry: false
+    readonly errorCode: 'director_provider_submission_unknown'
+  }
 
 const canonical = (value: unknown): string => {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
@@ -378,7 +389,11 @@ export async function executeDirectorProviderPermit(
     const facts = transportFacts(result.transportFacts)
     completedFacts = facts
     if (result.state === 'provider_response_invalid') {
-      return { ...result, transportFacts: facts }
+      return {
+        state: 'provider_response_invalid', automaticRetry: false,
+        errorCode: DIRECTOR_PROVIDER_ERROR_CODES.providerResponseInvalid,
+        transportFacts: facts,
+      }
     }
     const normalizedProposal = proposal(result.proposal, permit.workOrder)
     const receipt: DirectorProviderExecutionReceipt = {
@@ -390,19 +405,17 @@ export async function executeDirectorProviderPermit(
       providerResult: true, proposal: normalizedProposal,
     }
     return { state: 'provider_result', receipt }
-  } catch (error) {
-    const reason = typeof error === 'object' && error !== null && 'message' in error
-      ? String(error.message)
-      : String(error)
+  } catch {
     if (completedFacts !== undefined) {
       return {
-        state: 'provider_response_invalid', automaticRetry: false, reason,
+        state: 'provider_response_invalid', automaticRetry: false,
+        errorCode: DIRECTOR_PROVIDER_ERROR_CODES.providerResponseInvalid,
         transportFacts: completedFacts,
       }
     }
     return {
       state: 'submission_unknown', automaticRetry: false,
-      reason,
+      errorCode: DIRECTOR_PROVIDER_ERROR_CODES.submissionUnknown,
     }
   }
 }

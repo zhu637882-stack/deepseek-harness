@@ -430,12 +430,15 @@ describe('Director provider Host execution seam', () => {
       '[DONE]',
     ] }],
     ['redirect', { kind: 'http-error', status: 302, body: '', headers: { location: 'https://example.invalid/chat/completions' } }],
-    ['transient 5xx', { kind: 'http-error', status: 503, body: '{"error":{"message":"later"}}' }],
+    ['transient 5xx', { kind: 'http-error', status: 503,
+      body: '{"error":{"message":"PROVIDER_SECRET_SENTINEL_http_503"}}' }],
     ['interrupted stream', { kind: 'close-early', events: [
       '{"id":"completion-interrupted","choices":[{"delta":{"content":"{"}}]}',
     ] }],
   ] satisfies ReadonlyArray<readonly [string, Behavior]>)('fails %s closed after at most one real adapter POST', async (_name, behavior) => {
     const server = await mockServer([behavior])
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const warnLog = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     vi.stubEnv('DEEPSEEK_API_KEY', 'isolated-mock-key')
     const ctx = new Context()
     await ctx.plugin(LlmRuntime)
@@ -450,10 +453,16 @@ describe('Director provider Host execution seam', () => {
       )
       expect(['submission_unknown', 'provider_response_invalid']).toContain(result.state)
       expect(result).toMatchObject({ automaticRetry: false })
+      expect(JSON.stringify(result)).not.toContain('PROVIDER_SECRET_SENTINEL')
+      expect(JSON.stringify([errorLog.mock.calls, warnLog.mock.calls])).not.toContain(
+        'PROVIDER_SECRET_SENTINEL',
+      )
       expect(server.requests).toHaveLength(1)
     } finally {
       await server.close()
       vi.unstubAllEnvs()
+      errorLog.mockRestore()
+      warnLog.mockRestore()
     }
   })
 
@@ -479,7 +488,7 @@ describe('Director provider Host execution seam', () => {
       )
       expect(result).toEqual({
         state: 'provider_response_invalid', automaticRetry: false,
-        reason: 'director DSh response JSON invalid',
+        errorCode: 'director_provider_response_invalid',
         transportFacts: {
           schema: 'qingmu.director-provider-transport-facts.v1',
           providerCompletionId: 'completion-invalid-facts',
@@ -685,6 +694,7 @@ describe('Director provider Host execution seam', () => {
     expect(result.state).toBe('submission_unknown')
     expect(unknownBody).toMatchObject({
       classification: 'provider_response_invalid',
+      errorCode: 'director_provider_response_invalid',
       transportFacts: transportResult().transportFacts,
     })
     expect(JSON.stringify(unknownBody)).not.toContain(JSON.stringify(invalid.proposal))
@@ -710,11 +720,16 @@ describe('Director provider Host execution seam', () => {
     expect(chatCompletions).not.toHaveBeenCalled()
   })
 
-  it('turns timeout or missing receipts into submission_unknown without retry', async () => {
-    const execute = vi.fn(async () => { throw new Error('timeout after submit') })
+  it('turns timeout or missing receipts into a sanitized submission_unknown without retry', async () => {
+    const sentinel = 'PROVIDER_SECRET_SENTINEL_timeout_after_submit'
+    const execute = vi.fn(async () => { throw new Error(sentinel) })
     const result = await executeDirectorProviderPermit(permit(), { execute }, new AbortController().signal)
     expect(execute).toHaveBeenCalledOnce()
-    expect(result).toEqual({ state: 'submission_unknown', automaticRetry: false, reason: 'timeout after submit' })
+    expect(result).toEqual({
+      state: 'submission_unknown', automaticRetry: false,
+      errorCode: 'director_provider_submission_unknown',
+    })
+    expect(JSON.stringify(result)).not.toContain(sentinel)
   })
 
   it('signs the canonical null transport facts for a transport-unknown Host terminalization', async () => {
@@ -733,14 +748,18 @@ describe('Director provider Host execution seam', () => {
     const result = await executeDirectorTaskOnce({
       baseUrl: 'http://127.0.0.1:49999',
       executionKey: 'execution-key-material-is-at-least-32-bytes',
-      transport: { execute: async () => { throw new Error('timeout after submit') } },
+      transport: { execute: async () => {
+        throw new Error('TRANSPORT_SECRET_SENTINEL_must_not_cross_host')
+      } },
       fetch: fetchImpl,
     }, 'task_1', 'director-paid.v1', 'c'.repeat(64), new AbortController().signal)
     expect(result.state).toBe('submission_unknown')
     expect(unknownBody).toMatchObject({
       classification: 'submission_unknown',
+      errorCode: 'director_provider_submission_unknown',
       transportFacts: null,
     })
+    expect(JSON.stringify(unknownBody)).not.toContain('TRANSPORT_SECRET_SENTINEL')
   })
 
   it('rejects provider, model or SHA drift before transport', async () => {

@@ -9,7 +9,10 @@ import type {
   DirectorProviderTransportResult,
   DirectorProviderTransportFacts,
 } from './director-provider-execution.ts'
-import { executeDirectorProviderPermit } from './director-provider-execution.ts'
+import {
+  DIRECTOR_PROVIDER_ERROR_CODES,
+  executeDirectorProviderPermit,
+} from './director-provider-execution.ts'
 
 const DOMAIN = 'qingmu-director-execution.v1'
 const DEEPSEEK_PRODUCTION_BASE_URL = 'https://api.deepseek.com'
@@ -207,7 +210,8 @@ const createDshDirectorTransport = (
     try { proposal = JSON.parse(text) } catch {
       return {
         state: 'provider_response_invalid', automaticRetry: false,
-        reason: 'director DSh response JSON invalid', transportFacts: facts,
+        errorCode: DIRECTOR_PROVIDER_ERROR_CODES.providerResponseInvalid,
+        transportFacts: facts,
       }
     }
     return {
@@ -431,7 +435,7 @@ export async function executeDirectorTaskOnce(
   return await post<DirectorExecutionHostResult>(
     options.baseUrl, options.executionKey, root + '/unknown',
     {
-      binding: finalBinding, dispatch: prepared.dispatch, error: result.reason,
+      binding: finalBinding, dispatch: prepared.dispatch, errorCode: result.errorCode,
       classification: result.state,
       transportFacts: result.state === 'provider_response_invalid'
         ? result.transportFacts
