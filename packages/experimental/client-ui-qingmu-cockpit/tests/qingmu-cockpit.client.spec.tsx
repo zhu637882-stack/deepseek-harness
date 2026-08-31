@@ -625,6 +625,11 @@ function shotRelationMethod(request: Parameters<QingmuYimengPort['shotRelationMe
 
 function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
   return {
+    promptIrBootstrap: vi.fn(async () => { throw new Error('PromptIR bootstrap uses a separate fixture') }),
+    promptIrBootstrapMethod: vi.fn(async () => { throw new Error('PromptIR bootstrap method uses a separate fixture') }),
+    bootstrapPromptIr: vi.fn(async () => { throw new Error('PromptIR bootstrap command uses a separate fixture') }),
+    recoverPromptIrBootstrap: vi.fn(async () => { throw new Error('PromptIR bootstrap recovery uses a separate fixture') }),
+    selectBootstrapPromptIr: vi.fn(async () => { throw new Error('PromptIR bootstrap selection uses a separate fixture') }),
     readScenePlanning: vi.fn(async (request: CreationScope) => ({ schema: 'jason.qingmu-scene-planning-state.v1' as const, ...request,
       scriptRevision: 0, scriptSha256: null, scenes: [], storyboard: null, planning: null })),
     requestDirectorProposal: vi.fn(async () => { throw new Error('Director replay uses a separate fixture') }),

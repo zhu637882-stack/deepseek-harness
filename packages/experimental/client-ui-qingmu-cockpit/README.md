@@ -136,6 +136,10 @@ This control records only the bounded route. It does not execute rework, close t
 
 Separately, before the single Finding-record POST, the client stores and reads back an exact eight-field, non-secret recovery marker. It contains hashes and original operation coordinates, not free-text evidence, credentials, or the method signature. An uncertain response offers an explicit GET-only lookup of that original receipt, including after a page reload or when current media becomes unavailable. A missing or mismatched receipt retains the marker; recovery never resubmits the record or rewrites its subject. Clearing the local marker is a separate warned action and cannot undo a server record. Recording a Finding does not execute rework or infer human signoff.
 
+## First PromptIR bootstrap
+
+For a Ready storyboard frame with no PromptIR lineage, the Director workspace exposes a separate first-Draft workbench. It shows the exact scene, shot, selected qualified references, method identity, and five editable prompt fields before any write. Saving creates only a Draft; a second checked owner action uses a fresh Writer challenge and Host method proof to select that exact Draft as Ready. Unknown results retain bounded hash-only recovery coordinates, and reload or restart reads Yimeng again. Ready means the effective prompt version only, not rights verification, formal consistency, approval, generation, release, or human signoff. See the [first-PromptIR Agent Note](../../../.agents/notes/implemented/feature/2026-08-31-qingmu-first-prompt-ir-bootstrap.md).
+
 ## Security boundary
 
 `YIMENG_API_TOKEN` and `QINGMU_IMAGO_ATTESTATION_KEY` belong only to Qingmu Host processes. The browser plugin does not read environment variables, `localStorage`, `JWT_SECRET`, or cookies, and it never receives or renders either secret. Its only persistence is the bounded non-secret receipt-recovery marker in the current tab's `sessionStorage`. Read and command channels are separate Host plugins, both limited to loopback upstreams. If the token is absent, the cockpit shows a recovery instruction to configure the Host and restart the local instance.

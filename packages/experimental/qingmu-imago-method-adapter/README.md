@@ -96,6 +96,10 @@ The [registry](src/director-assets/registry.ts) and [source inventory](DIRECTOR_
 
 The [static assembly](src/director-assets/assembly.ts) maps admitted files to candidate IMAGO stages and card kinds. Unknown stages return no cards. `loadDirectorAssetFile` verifies the complete package before returning inert UTF-8 source text. Neither API is connected to Host RPC, work orders, skills, or executable tools; stage coverage is not activation authority. The caller owns a stable local asset tree during verification and reading; this integrity check is not a process sandbox. BlueFish's unresolved-placeholder blocker remains recorded and its module cannot be activated until separately repaired and verified.
 
+## First PromptIR bootstrap method
+
+`promptIrBootstrap` invokes the versioned Core compiler with the exact Yimeng context snapshot and validates its attestation, method SHA, stable ordered references, advisory-only flags, and five-field output. For Draft selection, the Host first verifies the short-lived Writer challenge, recompiles once, and signs a domain-separated freshness proof bound to that challenge and projection. The method declares how to prepare a Draft; it owns no business state, Provider route, selection, approval, or execution authority. A scene reference is mandatory, while actor and prop references appear only when the shot context requires them. See the [first-PromptIR Agent Note](../../../.agents/notes/implemented/feature/2026-08-31-qingmu-first-prompt-ir-bootstrap.md).
+
 ## Model Experience
 
 ### Private method RPCs

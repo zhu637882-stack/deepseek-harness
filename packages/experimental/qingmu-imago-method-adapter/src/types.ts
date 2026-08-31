@@ -325,6 +325,98 @@ export interface ImagoPromptIrMethodResponse extends ImagoMethodJsonObject {
   readonly methodAttestation: ImagoPromptIrMethodAttestation
 }
 
+/** Exact current Yimeng frame/reference context for the first PromptIR Draft. */
+export interface ImagoPromptIrBootstrapMethodRequest {
+  readonly context: ImagoMethodJsonObject
+  readonly contextSnapshotSha256: string
+  readonly selectionChallenge?: ImagoPromptIrBootstrapSelectionChallenge
+}
+
+/** Writer-signed, short-lived binding for one exact bootstrap Draft selection. */
+export interface ImagoPromptIrBootstrapSelectionChallenge extends ImagoMethodJsonObject {
+  readonly schema: 'jason.qingmu-prompt-ir-bootstrap-selection-challenge.v1'
+  readonly actorId: string
+  readonly projectId: string
+  readonly episodeId: string
+  readonly storyboardRevisionId: string
+  readonly frameId: string
+  readonly draftPromptIrId: string
+  readonly draftVersion: number
+  readonly draftContentSha256: string
+  readonly contextSnapshotSha256: string
+  readonly methodProjectionSha256: string
+  readonly methodSha256: string
+  readonly candidateSha256: string
+  readonly nonce: string
+  readonly issuedAtUnix: number
+  readonly expiresAtUnix: number
+  readonly signature: string
+}
+
+/** Host-constructed zero-execution compiler input for one current frame. */
+export interface ImagoPromptIrBootstrapMethodSnapshot extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.prompt-ir-bootstrap-method-snapshot.v1'
+  readonly context: ImagoMethodJsonObject
+  readonly contextSnapshotSha256: string
+  readonly authority: {
+    readonly business_truth: 'yimeng'
+    readonly method_source: 'imago_os_current'
+    readonly human_approval: 'not_granted'
+    readonly paid_provider_authority: 'not_granted'
+  }
+}
+
+/** Stateless current-method proposal; it can only be persisted as a Draft. */
+export interface ImagoPromptIrBootstrapMethodProjection extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-prompt-ir-bootstrap-method-projection.v1'
+  readonly input_snapshot_sha256: string
+  readonly context: ImagoMethodJsonObject
+  readonly context_snapshot_sha256: string
+  readonly candidate: ImagoMethodJsonObject
+  readonly candidate_sha256: string
+  readonly method_definition: ImagoMethodJsonObject
+  readonly source_bindings: readonly ImagoMethodJsonObject[]
+  readonly work_order_projection: ImagoMethodJsonObject
+  readonly project_state_persisted: false
+  readonly providerCalls: 0
+  readonly workerStarted: false
+  readonly selection_executed: false
+  readonly human_approval_inferred: false
+  readonly human_signoff_inferred: false
+}
+
+/** Host-only method provenance proof; never human approval. */
+export interface ImagoPromptIrBootstrapMethodAttestation extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-prompt-ir-bootstrap-method-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly projectionSha256: string
+  readonly contextSnapshotSha256: string
+  readonly methodSha256: string
+  readonly candidateSha256: string
+  readonly signature: string
+}
+
+/** Host proof that this projection was compiled against the current Writer challenge. */
+export interface ImagoPromptIrBootstrapSelectionFreshnessAttestation extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-prompt-ir-bootstrap-selection-freshness-attestation.v1'
+  readonly algorithm: 'hmac-sha256'
+  readonly challengeSha256: string
+  readonly projectionSha256: string
+  readonly contextSnapshotSha256: string
+  readonly methodSha256: string
+  readonly candidateSha256: string
+  readonly signature: string
+}
+
+/** Validated first-Draft method projection and exact Host attestation. */
+export interface ImagoPromptIrBootstrapMethodResponse extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-prompt-ir-bootstrap-method-adapter-result.v1'
+  readonly projectionSha256: string
+  readonly projection: ImagoPromptIrBootstrapMethodProjection
+  readonly methodAttestation: ImagoPromptIrBootstrapMethodAttestation
+  readonly selectionFreshnessAttestation?: ImagoPromptIrBootstrapSelectionFreshnessAttestation
+}
+
 /** Canonical Scene relation submitted to the read-only Shot relation compiler. */
 export interface ImagoShotRelationScene extends ImagoMethodJsonObject {
   readonly sceneId: string
@@ -1553,6 +1645,7 @@ export interface ImagoMethodEndpointMap {
   readonly elementMethod: ImagoElementMethodResponse
   readonly referenceAssetMethod: ImagoReferenceAssetMethodResponse
   readonly promptIrMethod: ImagoPromptIrMethodResponse
+  readonly promptIrBootstrapMethod: ImagoPromptIrBootstrapMethodResponse
   readonly shotRelationMethod: ImagoShotRelationMethodResponse
   readonly heroFrameStoryboardMethod: ImagoHeroFrameStoryboardMethodResponse
   readonly worksetMethod: ImagoWorksetMethodResponse

@@ -1,7 +1,7 @@
 /** Loopback-only Host BFF for stateless, SHA-bound IMAGO method projections. */
 
 import { spawn } from 'node:child_process'
-import { createHash, createHmac } from 'node:crypto'
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { isAbsolute, join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
@@ -63,6 +63,13 @@ import type {
   ImagoPromptIrMethodRequest,
   ImagoPromptIrMethodResponse,
   ImagoPromptIrMethodSnapshot,
+  ImagoPromptIrBootstrapMethodAttestation,
+  ImagoPromptIrBootstrapMethodProjection,
+  ImagoPromptIrBootstrapMethodRequest,
+  ImagoPromptIrBootstrapMethodResponse,
+  ImagoPromptIrBootstrapSelectionChallenge,
+  ImagoPromptIrBootstrapSelectionFreshnessAttestation,
+  ImagoPromptIrBootstrapMethodSnapshot,
   ImagoE53ShotRelationElement,
   ImagoE53ShotRelationShot,
   ImagoShotCurrentReference,
@@ -299,6 +306,7 @@ const REFERENCE_ASSET_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_reference
 const REFERENCE_RIGHTS_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_reference_rights_method.py'
 const REFERENCE_RIGHTS_EXCEPTION_RELEASE_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_reference_rights_exception_release_method.py'
 const PROMPT_IR_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_prompt_ir_method.py'
+const PROMPT_IR_BOOTSTRAP_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_prompt_ir_bootstrap_method.py'
 const SHOT_RELATION_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_shot_relation_method.py'
 const HERO_FRAME_STORYBOARD_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_hero_frame_storyboard_method.py'
 const WORKSET_COMPILER_RELATIVE_PATH = 'scripts/compile_qingmu_imago_workset_v2.py'
@@ -682,6 +690,12 @@ export interface ImagoMethodAdapterDependencies {
   /** Optional injectable boundary for the provider-neutral PromptIR method compiler. */
   readonly runPromptIrCompiler?: (
     snapshot: ImagoPromptIrMethodSnapshot,
+    execution: ImagoMethodCompilerExecution,
+    signal: AbortSignal,
+  ) => Promise<unknown>
+  /** Optional compiler boundary for a first, current-frame PromptIR Draft. */
+  readonly runPromptIrBootstrapCompiler?: (
+    snapshot: ImagoPromptIrBootstrapMethodSnapshot,
     execution: ImagoMethodCompilerExecution,
     signal: AbortSignal,
   ) => Promise<unknown>
@@ -1629,6 +1643,52 @@ function parsePromptIrRequest(payload: unknown): ImagoPromptIrMethodRequest {
   return request
 }
 
+function parsePromptIrBootstrapRequest(payload: unknown): ImagoPromptIrBootstrapMethodRequest {
+  const input = parseInputObject(payload)
+  assertOnlyInputKeys(input, ['context', 'contextSnapshotSha256', 'selectionChallenge'])
+  if (!isJsonObject(input.context)) throw new InputError('context must be an object')
+  assertSafeJsonNumbers(input.context, 'context')
+  const contextSnapshotSha256 = parseInputSha256(
+    input.contextSnapshotSha256,
+    'contextSnapshotSha256',
+  )
+  if (e53CanonicalSha256(input.context, 'context') !== contextSnapshotSha256) {
+    throw new InputError('contextSnapshotSha256 does not match context')
+  }
+  if (input.selectionChallenge === undefined) return { context: input.context, contextSnapshotSha256 }
+  const raw = parseInputObject(input.selectionChallenge)
+  const challengeKeys = [
+    'schema', 'actorId', 'projectId', 'episodeId', 'storyboardRevisionId', 'frameId',
+    'draftPromptIrId', 'draftVersion', 'draftContentSha256', 'contextSnapshotSha256',
+    'methodProjectionSha256', 'methodSha256', 'candidateSha256', 'nonce',
+    'issuedAtUnix', 'expiresAtUnix', 'signature',
+  ] as const
+  if (!isDeepStrictEqual(Object.keys(raw).sort(), [...challengeKeys].sort())) {
+    throw new InputError('selectionChallenge fields mismatch')
+  }
+  const selectionChallenge: ImagoPromptIrBootstrapSelectionChallenge = {
+    schema: raw.schema === 'jason.qingmu-prompt-ir-bootstrap-selection-challenge.v1'
+      ? raw.schema : (() => { throw new InputError('selectionChallenge.schema mismatch') })(),
+    actorId: parseIdentifier(raw.actorId, 'selectionChallenge.actorId'),
+    projectId: parseIdentifier(raw.projectId, 'selectionChallenge.projectId'),
+    episodeId: parseIdentifier(raw.episodeId, 'selectionChallenge.episodeId'),
+    storyboardRevisionId: parseIdentifier(raw.storyboardRevisionId, 'selectionChallenge.storyboardRevisionId'),
+    frameId: parseIdentifier(raw.frameId, 'selectionChallenge.frameId'),
+    draftPromptIrId: parseIdentifier(raw.draftPromptIrId, 'selectionChallenge.draftPromptIrId'),
+    draftVersion: parseInputPositiveInteger(raw.draftVersion, 'selectionChallenge.draftVersion'),
+    draftContentSha256: parseInputSha256(raw.draftContentSha256, 'selectionChallenge.draftContentSha256'),
+    contextSnapshotSha256: parseInputSha256(raw.contextSnapshotSha256, 'selectionChallenge.contextSnapshotSha256'),
+    methodProjectionSha256: parseInputSha256(raw.methodProjectionSha256, 'selectionChallenge.methodProjectionSha256'),
+    methodSha256: parseInputSha256(raw.methodSha256, 'selectionChallenge.methodSha256'),
+    candidateSha256: parseInputSha256(raw.candidateSha256, 'selectionChallenge.candidateSha256'),
+    nonce: parseInputSha256(raw.nonce, 'selectionChallenge.nonce'),
+    issuedAtUnix: parseInputPositiveInteger(raw.issuedAtUnix, 'selectionChallenge.issuedAtUnix'),
+    expiresAtUnix: parseInputPositiveInteger(raw.expiresAtUnix, 'selectionChallenge.expiresAtUnix'),
+    signature: parseInputSha256(raw.signature, 'selectionChallenge.signature'),
+  }
+  return { context: input.context, contextSnapshotSha256, selectionChallenge }
+}
+
 function buildSnapshot(request: ImagoElementMethodRequest): ImagoElementMethodSnapshot {
   return {
     schema: 'qingmu.element-method-snapshot.v1',
@@ -1690,6 +1750,22 @@ function buildPromptIrSnapshot(request: ImagoPromptIrMethodRequest): ImagoPrompt
     target,
     baseEditableProjection,
     candidateEditableProjection,
+    authority: {
+      business_truth: 'yimeng',
+      method_source: 'imago_os_current',
+      human_approval: 'not_granted',
+      paid_provider_authority: 'not_granted',
+    },
+  }
+}
+
+function buildPromptIrBootstrapSnapshot(
+  request: ImagoPromptIrBootstrapMethodRequest,
+): ImagoPromptIrBootstrapMethodSnapshot {
+  return {
+    schema: 'qingmu.prompt-ir-bootstrap-method-snapshot.v1',
+    context: request.context,
+    contextSnapshotSha256: request.contextSnapshotSha256,
     authority: {
       business_truth: 'yimeng',
       method_source: 'imago_os_current',
@@ -2058,6 +2134,96 @@ function createPromptIrMethodAttestation(
     ...unsigned,
     signature: createHmac('sha256', key)
       .update(canonicalJson(unsigned, 'methodAttestation'), 'utf8')
+      .digest('hex'),
+  }
+}
+
+function createPromptIrBootstrapMethodAttestation(
+  key: string,
+  projection: ImagoPromptIrBootstrapMethodProjection,
+  snapshot: ImagoPromptIrBootstrapMethodSnapshot,
+): ImagoPromptIrBootstrapMethodAttestation {
+  const definition = requireObject(projection.method_definition, 'projection.method_definition')
+  const unsigned = {
+    schema: 'qingmu.imago-prompt-ir-bootstrap-method-attestation.v1',
+    algorithm: 'hmac-sha256',
+    projectionSha256: e53CanonicalSha256(projection, 'projection'),
+    contextSnapshotSha256: snapshot.contextSnapshotSha256,
+    methodSha256: requireSha256(definition.sha256, 'projection.method_definition.sha256'),
+    candidateSha256: projection.candidate_sha256,
+  } as const
+  return {
+    ...unsigned,
+    signature: createHmac('sha256', key)
+      .update(e53CanonicalJson(unsigned, 'methodAttestation'), 'utf8')
+      .digest('hex'),
+  }
+}
+
+function verifyPromptIrBootstrapSelectionChallenge(
+  key: string,
+  request: ImagoPromptIrBootstrapMethodRequest,
+): ImagoPromptIrBootstrapSelectionChallenge | undefined {
+  const challenge = request.selectionChallenge
+  if (challenge === undefined) return undefined
+  const context = requireObject(request.context, 'context')
+  const storyboard = requireObject(context.storyboard, 'context.storyboard')
+  const frame = requireObject(context.frame, 'context.frame')
+  if (
+    challenge.projectId !== context.projectId
+    || challenge.episodeId !== context.episodeId
+    || challenge.storyboardRevisionId !== storyboard.id
+    || challenge.frameId !== frame.id
+    || challenge.contextSnapshotSha256 !== request.contextSnapshotSha256
+  ) throw new InputError('selectionChallenge context binding mismatch')
+  const now = Math.floor(Date.now() / 1000)
+  if (
+    challenge.expiresAtUnix <= challenge.issuedAtUnix
+    || challenge.expiresAtUnix - challenge.issuedAtUnix > 300
+    || challenge.issuedAtUnix > now + 30
+    || challenge.expiresAtUnix < now
+  ) throw new InputError('selectionChallenge expired or has an invalid time window')
+  const { signature, ...unsigned } = challenge
+  const expected = createHmac('sha256', key)
+    .update('qingmu.prompt-ir-bootstrap.selection-challenge.v1\0', 'utf8')
+    .update(e53CanonicalJson(unsigned, 'selectionChallenge'), 'utf8')
+    .digest()
+  const actual = Buffer.from(signature, 'hex')
+  if (actual.byteLength !== expected.byteLength || !timingSafeEqual(actual, expected)) {
+    throw new InputError('selectionChallenge signature mismatch')
+  }
+  return challenge
+}
+
+function createPromptIrBootstrapSelectionFreshnessAttestation(
+  key: string,
+  challenge: ImagoPromptIrBootstrapSelectionChallenge,
+  projection: ImagoPromptIrBootstrapMethodProjection,
+  projectionSha256: string,
+): ImagoPromptIrBootstrapSelectionFreshnessAttestation {
+  const definition = requireObject(projection.method_definition, 'projection.method_definition')
+  const methodSha256 = requireSha256(definition.sha256, 'projection.method_definition.sha256')
+  const candidateSha256 = requireSha256(projection.candidate_sha256, 'projection.candidate_sha256')
+  if (
+    challenge.methodProjectionSha256 !== projectionSha256
+    || challenge.methodSha256 !== methodSha256
+    || challenge.candidateSha256 !== candidateSha256
+    || challenge.contextSnapshotSha256 !== projection.context_snapshot_sha256
+  ) throw new InputError('selectionChallenge method projection binding mismatch')
+  const unsigned = {
+    schema: 'qingmu.imago-prompt-ir-bootstrap-selection-freshness-attestation.v1',
+    algorithm: 'hmac-sha256',
+    challengeSha256: e53CanonicalSha256(challenge, 'selectionChallenge'),
+    projectionSha256,
+    contextSnapshotSha256: challenge.contextSnapshotSha256,
+    methodSha256,
+    candidateSha256,
+  } as const
+  return {
+    ...unsigned,
+    signature: createHmac('sha256', key)
+      .update('qingmu.prompt-ir-bootstrap.selection-freshness.v1\0', 'utf8')
+      .update(e53CanonicalJson(unsigned, 'selectionFreshnessAttestation'), 'utf8')
       .digest('hex'),
   }
 }
@@ -2855,6 +3021,91 @@ function normalizePromptIrProjection(
   return root as ImagoPromptIrMethodProjection
 }
 
+function normalizePromptIrBootstrapProjection(
+  value: unknown,
+  snapshot: ImagoPromptIrBootstrapMethodSnapshot,
+): ImagoPromptIrBootstrapMethodProjection {
+  e53CanonicalJson(value, 'projection')
+  const root = requireExactObject(value, [
+    'schema', 'input_snapshot_sha256', 'context', 'context_snapshot_sha256',
+    'candidate', 'candidate_sha256', 'method_definition', 'source_bindings',
+    'work_order_projection', 'project_state_persisted', 'providerCalls',
+    'workerStarted', 'selection_executed', 'human_approval_inferred',
+    'human_signoff_inferred',
+  ], 'projection')
+  if (root.schema !== 'qingmu.imago-prompt-ir-bootstrap-method-projection.v1') {
+    throw new ProjectionContractError('bootstrap projection.schema mismatch')
+  }
+  if (
+    requireSha256(root.input_snapshot_sha256, 'projection.input_snapshot_sha256')
+      !== e53CanonicalSha256(snapshot, 'snapshot')
+    || !isDeepStrictEqual(root.context, snapshot.context)
+    || requireSha256(root.context_snapshot_sha256, 'projection.context_snapshot_sha256')
+      !== snapshot.contextSnapshotSha256
+  ) {
+    throw new ProjectionContractError('bootstrap projection context lineage mismatch')
+  }
+  const candidate = requireExactObject(
+    root.candidate,
+    ['editableProjection', 'subjectArray', 'advisoryOnly', 'status'],
+    'projection.candidate',
+  )
+  normalizePromptIrEditableProjection(candidate.editableProjection, 'projection.candidate.editableProjection')
+  requireObjectArray(candidate.subjectArray, 'projection.candidate.subjectArray')
+  if (candidate.advisoryOnly !== true || candidate.status !== 'Draft') {
+    throw new ProjectionContractError('bootstrap candidate authority mismatch')
+  }
+  const candidateSha256 = requireSha256(root.candidate_sha256, 'projection.candidate_sha256')
+  if (candidateSha256 !== e53CanonicalSha256(candidate, 'projection.candidate')) {
+    throw new ProjectionContractError('bootstrap candidate hash mismatch')
+  }
+  const definition = requireExactObject(root.method_definition, [
+    'id', 'version', 'sha256', 'stage_contract_sha256', 'role_capability_sha256',
+    'prompt_ir_schema', 'agent_path', 'skill_path',
+  ], 'projection.method_definition')
+  if (
+    definition.id !== 'imago-v6-e-first-prompt-ir-bootstrap-method'
+    || requireInteger(definition.version, 'projection.method_definition.version', 1) !== 1
+    || definition.prompt_ir_schema !== 'IMAGO-V6-VideoPromptIR-v1'
+    || definition.agent_path !== PROMPT_IR_SOURCE_PATHS[5]
+    || definition.skill_path !== PROMPT_IR_SOURCE_PATHS[6]
+  ) {
+    throw new ProjectionContractError('bootstrap method definition mismatch')
+  }
+  for (const field of ['sha256', 'stage_contract_sha256', 'role_capability_sha256']) {
+    requireSha256(definition[field], `projection.method_definition.${field}`)
+  }
+  const bindings = requireObjectArray(root.source_bindings, 'projection.source_bindings')
+  if (bindings.length !== PROMPT_IR_SOURCE_PATHS.length) {
+    throw new ProjectionContractError('bootstrap source bindings mismatch')
+  }
+  bindings.forEach((bindingValue, index) => {
+    const binding = requireExactObject(bindingValue, ['kind', 'path', 'sha256'], `projection.source_bindings[${String(index)}]`)
+    if (binding.kind !== PROMPT_IR_SOURCE_KINDS[index] || binding.path !== PROMPT_IR_SOURCE_PATHS[index]) {
+      throw new ProjectionContractError('bootstrap source bindings mismatch')
+    }
+    requireSha256(binding.sha256, `projection.source_bindings[${String(index)}].sha256`)
+  })
+  const workOrder = requireExactObject(root.work_order_projection, [
+    'operation', 'allowed_mutations', 'required_read_set', 'providerCalls', 'workerStarted',
+  ], 'projection.work_order_projection')
+  if (workOrder.operation !== 'compileFirstPromptIrDraft') {
+    throw new ProjectionContractError('bootstrap work order operation mismatch')
+  }
+  requireExactArray(workOrder.allowed_mutations, [], 'projection.work_order_projection.allowed_mutations')
+  if (workOrder.providerCalls !== 0 || workOrder.workerStarted !== false) {
+    throw new ProjectionContractError('bootstrap work order execution boundary mismatch')
+  }
+  if (
+    root.project_state_persisted !== false || root.providerCalls !== 0 || root.workerStarted !== false
+    || root.selection_executed !== false || root.human_approval_inferred !== false
+    || root.human_signoff_inferred !== false
+  ) {
+    throw new ProjectionContractError('bootstrap authority or execution boundary mismatch')
+  }
+  return root as ImagoPromptIrBootstrapMethodProjection
+}
+
 function normalizeShotRelationProjection(
   value: unknown,
   snapshot: ImagoShotRelationMethodSnapshot,
@@ -3459,6 +3710,14 @@ async function runPromptIrCompilerProcess(
   return await runCompilerSubprocess(snapshot, execution, signal, PROMPT_IR_COMPILER_RELATIVE_PATH)
 }
 
+async function runPromptIrBootstrapCompilerProcess(
+  snapshot: ImagoPromptIrBootstrapMethodSnapshot,
+  execution: ImagoMethodCompilerExecution,
+  signal: AbortSignal,
+): Promise<unknown> {
+  return await runCompilerSubprocess(snapshot, execution, signal, PROMPT_IR_BOOTSTRAP_COMPILER_RELATIVE_PATH)
+}
+
 async function runShotRelationCompilerProcess(
   snapshot: ImagoShotRelationMethodSnapshot,
   execution: ImagoMethodCompilerExecution,
@@ -3636,6 +3895,7 @@ async function runCompilerSubprocess(
     })
     child.stdin.once('error', () => {})
     child.stdin.end(compilerRelativePath === SHOT_RELATION_COMPILER_RELATIVE_PATH
+      || compilerRelativePath === PROMPT_IR_BOOTSTRAP_COMPILER_RELATIVE_PATH
       ? e53CanonicalJson(snapshot, 'snapshot')
       : compilerRelativePath === TAKE_ACCEPTANCE_COMPILER_RELATIVE_PATH
         || compilerRelativePath === TAKE_TECHNICAL_QC_COMPILER_RELATIVE_PATH
@@ -3662,6 +3922,7 @@ const DEFAULT_DEPENDENCIES: ImagoMethodAdapterDependencies = {
   runReferenceRightsCompiler: runReferenceRightsCompilerProcess,
   runReferenceRightsExceptionReleaseCompiler: runReferenceRightsExceptionReleaseCompilerProcess,
   runPromptIrCompiler: runPromptIrCompilerProcess,
+  runPromptIrBootstrapCompiler: runPromptIrBootstrapCompilerProcess,
   runShotRelationCompiler: runShotRelationCompilerProcess,
   runHeroFrameStoryboardCompiler: runHeroFrameStoryboardCompilerProcess,
   runWorksetCompiler: runWorksetCompilerProcess,
@@ -3689,6 +3950,7 @@ export function createImagoMethodHandler(
         && endpoint !== 'directorReplayMethod'
         && endpoint !== 'referenceAssetMethod'
         && endpoint !== 'promptIrMethod'
+        && endpoint !== 'promptIrBootstrapMethod'
         && endpoint !== 'shotRelationMethod'
         && endpoint !== 'heroFrameStoryboardMethod'
         && endpoint !== 'worksetMethod'
@@ -4105,6 +4367,31 @@ export function createImagoMethodHandler(
           projectionSha256: methodAttestation.projectionSha256,
           projection,
           methodAttestation,
+        }
+        return { ok: true, value }
+      }
+      if (endpoint === 'promptIrBootstrapMethod') {
+        const request = parsePromptIrBootstrapRequest(payload)
+        const selectionChallenge = verifyPromptIrBootstrapSelectionChallenge(attestationKey, request)
+        const snapshot = buildPromptIrBootstrapSnapshot(request)
+        if (signal.aborted) return cancelled()
+        if (dependencies.runPromptIrBootstrapCompiler === undefined) throw new CompilerExecutionError()
+        const rawProjection = await dependencies.runPromptIrBootstrapCompiler(snapshot, execution, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- abort may happen while awaited.
+        if (signal.aborted) return cancelled()
+        const projection = normalizePromptIrBootstrapProjection(rawProjection, snapshot)
+        const methodAttestation = createPromptIrBootstrapMethodAttestation(attestationKey, projection, snapshot)
+        const selectionFreshnessAttestation = selectionChallenge === undefined
+          ? undefined
+          : createPromptIrBootstrapSelectionFreshnessAttestation(
+            attestationKey, selectionChallenge, projection, methodAttestation.projectionSha256,
+          )
+        const value: ImagoPromptIrBootstrapMethodResponse = {
+          schema: 'qingmu.imago-prompt-ir-bootstrap-method-adapter-result.v1',
+          projectionSha256: methodAttestation.projectionSha256,
+          projection,
+          methodAttestation,
+          ...(selectionFreshnessAttestation === undefined ? {} : { selectionFreshnessAttestation }),
         }
         return { ok: true, value }
       }

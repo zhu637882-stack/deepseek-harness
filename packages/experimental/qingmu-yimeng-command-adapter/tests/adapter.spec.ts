@@ -2910,4 +2910,62 @@ describe('qingmu Yimeng command adapter', () => {
     expect(() => createYimengCommandHandler({ baseUrl: 'https://[::1]:8115' })).not.toThrow()
     expect(() => createYimengCommandHandler({ baseUrl: 'http://127.42.0.1:8115' })).not.toThrow()
   })
+
+  it('binds first-PromptIR Draft commit, read-only recovery, and bootstrap selection routes', async () => {
+    const contextSha = '1'.repeat(64)
+    const projectionSha = '2'.repeat(64)
+    const methodSha = '3'.repeat(64)
+    const request = {
+      projectId: 'project-1', episodeId: 'episode-1', storyboardRevisionId: 'storyboard-revision-1', frameId: 'frame-1',
+      idempotencyKey: 'prompt-ir-bootstrap-1', expectedContextSnapshotSha256: contextSha,
+      methodProjection: { schema: 'qingmu.imago-prompt-ir-bootstrap-method-projection.v1' },
+      methodProjectionSha256: projectionSha,
+      methodAttestation: { schema: 'qingmu.imago-prompt-ir-bootstrap-method-attestation.v1' },
+    }
+    const response = {
+      schema: 'jason.qingmu-prompt-ir-bootstrap-result.v1', projectId: request.projectId, episodeId: request.episodeId,
+      storyboardRevisionId: request.storyboardRevisionId, frameId: request.frameId,
+      contextSnapshotSha256: contextSha, methodSha256: methodSha, candidateSha256: '4'.repeat(64),
+      promptIr: { schema: 'jason.qingmu-prompt-ir-subject.v1', projectId: request.projectId, episodeId: request.episodeId,
+        targetType: 'prompt_ir', targetId: `${request.storyboardRevisionId}:${request.frameId}`,
+        storyboardRevisionId: request.storyboardRevisionId, frameId: request.frameId,
+        promptIrId: PROMPT_IR_SELECT_REQUEST.draftPromptIrId, promptIrVersion: PROMPT_IR_SELECT_REQUEST.draftVersion,
+        promptIrContentSha256: PROMPT_IR_SELECT_REQUEST.draftContentSha256, status: 'Draft', editableProjection: PROMPT_IR_AFTER },
+      referencePackIds: ['pack-1'], changeSetId: 'bootstrap-change', commandReceiptId: 'bootstrap-receipt', eventId: 'bootstrap-event',
+      idempotencyKey: request.idempotencyKey, requestSha256: '5'.repeat(64), deduplicated: false,
+      committedAt: '2026-08-31T00:00:00Z', providerCalls: 0, workerStarted: false,
+      humanApprovalInferred: false, humanSignoff: false, selectionExecuted: false,
+    }
+    const calls: { url: string; init?: RequestInit }[] = []
+    const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push(init === undefined ? { url: requestUrl(input) } : { url: requestUrl(input), init })
+      if (calls.length === 1) return jsonResponse(response)
+      if (calls.length === 2) return jsonResponse({ ...response, deduplicated: true })
+      return jsonResponse(promptIrSelectionFixture())
+    })
+    const handler = createYimengCommandHandler({}, deps(fetch, 'test-token'))
+    expect(await handler('bootstrapPromptIr', request, signal())).toMatchObject({ ok: true, value: { deduplicated: false } })
+    expect(await handler('recoverPromptIrBootstrap', {
+      projectId: request.projectId, episodeId: request.episodeId, storyboardRevisionId: request.storyboardRevisionId,
+      frameId: request.frameId, idempotencyKey: request.idempotencyKey,
+      expectedContextSnapshotSha256: contextSha, methodProjectionSha256: projectionSha,
+    }, signal())).toMatchObject({ ok: true, value: { deduplicated: true } })
+    expect(calls[1]?.url).toContain(`expectedContextSnapshotSha256=${contextSha}`)
+    expect(calls[1]?.url).toContain(`methodProjectionSha256=${projectionSha}`)
+    expect(calls[1]?.url).not.toContain('requestSha256')
+    expect(await handler('selectBootstrapPromptIr', {
+      ...PROMPT_IR_SELECT_REQUEST, bootstrapMethodSha256: methodSha,
+      methodProjection: request.methodProjection,
+      methodProjectionSha256: projectionSha,
+      methodAttestation: request.methodAttestation,
+      selectionChallenge: { schema: 'challenge', signature: '6'.repeat(64) },
+      selectionFreshnessAttestation: { schema: 'freshness', signature: '7'.repeat(64) },
+    }, signal())).toMatchObject({ ok: true, value: { selectedPromptIr: { status: 'Ready' }, providerCall: false } })
+    expect(requestJsonBody(calls[2]?.init)).toMatchObject({
+      bootstrapMethodSha256: methodSha,
+      methodProjectionSha256: projectionSha,
+      selectionChallenge: { schema: 'challenge' },
+      selectionFreshnessAttestation: { schema: 'freshness' },
+    })
+  })
 })

@@ -378,6 +378,41 @@ export interface YimengPromptIrResponse extends YimengJsonObject {
   }
 }
 
+/** Current-frame bootstrap state before or after the first PromptIR selection. */
+export interface YimengPromptIrBootstrapResponse extends YimengJsonObject {
+  readonly schema: 'jason.qingmu-prompt-ir-bootstrap-state.v1'
+  readonly context: YimengJsonObject
+  readonly contextSnapshotSha256: string
+  readonly referenceNames: readonly string[]
+  readonly draft: YimengPromptIrSubject<'Draft'> | null
+  readonly draftMethodSha256: string | null
+  readonly selectionChallenge: null | {
+    readonly schema: 'jason.qingmu-prompt-ir-bootstrap-selection-challenge.v1'
+    readonly actorId: string
+    readonly projectId: string
+    readonly episodeId: string
+    readonly storyboardRevisionId: string
+    readonly frameId: string
+    readonly draftPromptIrId: string
+    readonly draftVersion: number
+    readonly draftContentSha256: string
+    readonly contextSnapshotSha256: string
+    readonly methodProjectionSha256: string
+    readonly methodSha256: string
+    readonly candidateSha256: string
+    readonly nonce: string
+    readonly issuedAtUnix: number
+    readonly expiresAtUnix: number
+    readonly signature: string
+  }
+  readonly ready: YimengPromptIrSubject | null
+  readonly providerCalls: 0
+  readonly workerStarted: false
+  readonly humanApprovalInferred: false
+  readonly humanSignoff: false
+  readonly selectionExecuted: false
+}
+
 /** Read-only coordinates for the selected video on one canonical storyboard frame. */
 export interface YimengSelectedVideoReviewRequest {
   readonly projectId: string
@@ -2189,6 +2224,7 @@ export interface YimengReadEndpointMap {
   readonly episodes: YimengEpisodesResponse
   readonly script: YimengScriptResponse
   readonly promptIr: YimengPromptIrResponse
+  readonly promptIrBootstrap: YimengPromptIrBootstrapResponse
   readonly selectedVideoReview: YimengSelectedVideoReviewResponse
   readonly takeVersions: YimengTakeVersionStackResponse
   readonly takePreview: YimengTakePreviewResponse

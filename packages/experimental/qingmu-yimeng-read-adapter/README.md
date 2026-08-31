@@ -108,6 +108,10 @@ The latest durable seal remains historical evidence. `latestSealSourceCurrent` m
 
 `latestBinding` retains the original source-reference receipt even when the script is missing or changed. `currentBinding` may only be that latest receipt with an exact match to the current source and subject SHA; an older matching record cannot replace it. `canBind` reports existing owner permission independently of source availability. A source reference is not a `SCREENPLAY_PACKAGE`, a completed stage, an approved artifact, a lock, or workset authority. The root and `/types` export `YimengStageSourcesRequest`, `YimengStageSourcesResponse`, `YimengStageSource`, `YimengStageSourceDefinition`, `YimengStageSourceBinding`, and `YimengStageSourceResult`.
 
+## First PromptIR bootstrap state
+
+`promptIrBootstrap` reads one authenticated, owner-scoped state for an exact project, episode, storyboard revision, and frame. The Host validates the current context SHA, required selected reference bindings, optional persisted Draft and method provenance, and the boundary flags that keep Provider calls, selection inference, approval, and signoff false. A Draft is returned only when its stored method SHA and current source bindings remain verifiable, together with a short-lived Writer-signed selection challenge bound to its exact identity and hashes. See the [first-PromptIR Agent Note](../../../.agents/notes/implemented/feature/2026-08-31-qingmu-first-prompt-ir-bootstrap.md).
+
 ## Security boundary
 
 `promptIr` retains the effective Ready subject and additionally verifies the latest persisted Draft's complete subject SHA and base binding. No Draft is `null`; malformed provenance is an error. A Draft based on another Ready is explicitly stale, never promoted by the reader. Root workflow blockers must contain a non-empty `reason`; Yimeng normalizes stage `reasonCode` and release blockers before this boundary, preserving diagnostic fields.

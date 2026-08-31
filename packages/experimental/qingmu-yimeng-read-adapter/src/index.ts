@@ -72,6 +72,7 @@ import type {
   YimengProjectsRequest,
   YimengProjectsResponse,
   YimengPromptIrEditableProjection,
+  YimengPromptIrBootstrapResponse,
   YimengPromptIrRequest,
   YimengPromptIrResponse,
   YimengPromptIrSubject,
@@ -165,6 +166,7 @@ export type {
   YimengProjectsRequest,
   YimengProjectsResponse,
   YimengPromptIrEditableProjection,
+  YimengPromptIrBootstrapResponse,
   YimengPromptIrRequest,
   YimengPromptIrResponse,
   YimengPromptIrSubject,
@@ -309,7 +311,7 @@ const ELEMENT_REVIEW_FEED_SCHEMA = 'jason.qingmu-element-review-feed.v1'
 const REFERENCE_RIGHTS_EXCEPTION_RELEASE_FEED_SCHEMA = 'jason.qingmu-reference-rights-exception-release-feed.v1'
 const SHA256 = /^[0-9a-f]{64}$/
 const PROTECTED_ENDPOINTS = new Set([
-  'projects', 'episodes', 'script', 'promptIr', 'capabilityCatalog', 'costRehearsal',
+  'projects', 'episodes', 'script', 'promptIr', 'promptIrBootstrap', 'capabilityCatalog', 'costRehearsal',
   'gateAControlEvidence', 'elementProfile',
   'referenceCandidates', 'reviewEvents',
   'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'takeComments', 'takeReviewAuthority', 'takeAcceptance', 'takeTechnicalQc', 'takeApprovalLifecycle', 'evidenceLedger', 'verifyEpisode', 'shotFindings', 'productionUnits', 'stageSources',
@@ -2159,6 +2161,118 @@ function normalizePromptIr(value: unknown, expected: YimengPromptIrRequest): Yim
   }
 }
 
+function normalizePromptIrBootstrapSubject<Status extends 'Draft' | 'Ready'>(
+  value: unknown,
+  expected: YimengPromptIrRequest,
+  status: Status,
+): YimengPromptIrSubject<Status> {
+  const raw = requireObject(value, `promptIrBootstrap.${status.toLowerCase()}`)
+  if (raw.status !== status) throw new UpstreamContractError(`promptIrBootstrap ${status} status mismatch`)
+  const readyShape = { ...raw, status: 'Ready' }
+  const subject = normalizePromptIr({
+    schema: 'jason.qingmu-prompt-ir-subject-read.v1',
+    subject: readyShape,
+    baseRevision: raw.promptIrVersion,
+    baseSnapshotSha256: canonicalJsonSha256(readyShape, 'promptIrBootstrap.subject'),
+    draft: null,
+  }, expected).subject
+  return { ...subject, status }
+}
+
+function normalizePromptIrBootstrap(
+  value: unknown,
+  expected: YimengPromptIrRequest,
+): YimengPromptIrBootstrapResponse {
+  const root = requireObject(value, 'promptIrBootstrap')
+  requireExactKeys(root, [
+    'schema', 'context', 'contextSnapshotSha256', 'referenceNames', 'draft', 'draftMethodSha256', 'ready',
+    'selectionChallenge',
+    'providerCalls', 'workerStarted', 'humanApprovalInferred', 'humanSignoff', 'selectionExecuted',
+  ], 'promptIrBootstrap')
+  if (root.schema !== 'jason.qingmu-prompt-ir-bootstrap-state.v1') {
+    throw new UpstreamContractError('promptIrBootstrap.schema mismatch')
+  }
+  const context = requireObject(root.context, 'promptIrBootstrap.context')
+  const contextSnapshotSha256 = requireSha256(root.contextSnapshotSha256, 'promptIrBootstrap.contextSnapshotSha256')
+  if (
+    jcsSha256(context, 'promptIrBootstrap.context') !== contextSnapshotSha256
+    || context.projectId !== expected.projectId
+    || context.episodeId !== expected.episodeId
+  ) {
+    throw new UpstreamContractError('promptIrBootstrap context lineage mismatch')
+  }
+  const storyboard = requireObject(context.storyboard, 'promptIrBootstrap.context.storyboard')
+  const frame = requireObject(context.frame, 'promptIrBootstrap.context.frame')
+  if (storyboard.id !== expected.storyboardRevisionId || frame.id !== expected.frameId) {
+    throw new UpstreamContractError('promptIrBootstrap frame lineage mismatch')
+  }
+  const referenceNames = Array.isArray(root.referenceNames)
+    ? root.referenceNames.map((item, index) => requireString(item, `promptIrBootstrap.referenceNames[${String(index)}]`))
+    : (() => { throw new UpstreamContractError('promptIrBootstrap.referenceNames must be an array') })()
+  const draft = root.draft === null ? null : normalizePromptIrBootstrapSubject(root.draft, expected, 'Draft')
+  const draftMethodSha256 = root.draftMethodSha256 === null
+    ? null
+    : requireSha256(root.draftMethodSha256, 'promptIrBootstrap.draftMethodSha256')
+  const selectionChallenge = root.selectionChallenge === null ? null : (() => {
+    const challenge = requireObject(root.selectionChallenge, 'promptIrBootstrap.selectionChallenge')
+    requireExactKeys(challenge, [
+      'schema', 'actorId', 'projectId', 'episodeId', 'storyboardRevisionId', 'frameId',
+      'draftPromptIrId', 'draftVersion', 'draftContentSha256', 'contextSnapshotSha256',
+      'methodProjectionSha256', 'methodSha256', 'candidateSha256', 'nonce',
+      'issuedAtUnix', 'expiresAtUnix', 'signature',
+    ], 'promptIrBootstrap.selectionChallenge')
+    if (challenge.schema !== 'jason.qingmu-prompt-ir-bootstrap-selection-challenge.v1') {
+      throw new UpstreamContractError('promptIrBootstrap selection challenge schema mismatch')
+    }
+    const normalized = {
+      schema: 'jason.qingmu-prompt-ir-bootstrap-selection-challenge.v1' as const,
+      actorId: requireIdentifier(challenge.actorId, 'promptIrBootstrap.selectionChallenge.actorId'),
+      projectId: requireIdentifier(challenge.projectId, 'promptIrBootstrap.selectionChallenge.projectId'),
+      episodeId: requireIdentifier(challenge.episodeId, 'promptIrBootstrap.selectionChallenge.episodeId'),
+      storyboardRevisionId: requireIdentifier(challenge.storyboardRevisionId, 'promptIrBootstrap.selectionChallenge.storyboardRevisionId'),
+      frameId: requireIdentifier(challenge.frameId, 'promptIrBootstrap.selectionChallenge.frameId'),
+      draftPromptIrId: requireIdentifier(challenge.draftPromptIrId, 'promptIrBootstrap.selectionChallenge.draftPromptIrId'),
+      draftVersion: requireInteger(challenge.draftVersion, 'promptIrBootstrap.selectionChallenge.draftVersion', 1),
+      draftContentSha256: requireSha256(challenge.draftContentSha256, 'promptIrBootstrap.selectionChallenge.draftContentSha256'),
+      contextSnapshotSha256: requireSha256(challenge.contextSnapshotSha256, 'promptIrBootstrap.selectionChallenge.contextSnapshotSha256'),
+      methodProjectionSha256: requireSha256(challenge.methodProjectionSha256, 'promptIrBootstrap.selectionChallenge.methodProjectionSha256'),
+      methodSha256: requireSha256(challenge.methodSha256, 'promptIrBootstrap.selectionChallenge.methodSha256'),
+      candidateSha256: requireSha256(challenge.candidateSha256, 'promptIrBootstrap.selectionChallenge.candidateSha256'),
+      nonce: requireSha256(challenge.nonce, 'promptIrBootstrap.selectionChallenge.nonce'),
+      issuedAtUnix: requireInteger(challenge.issuedAtUnix, 'promptIrBootstrap.selectionChallenge.issuedAtUnix', 1),
+      expiresAtUnix: requireInteger(challenge.expiresAtUnix, 'promptIrBootstrap.selectionChallenge.expiresAtUnix', 1),
+      signature: requireSha256(challenge.signature, 'promptIrBootstrap.selectionChallenge.signature'),
+    } as const
+    if (
+      draft === null
+      || normalized.projectId !== expected.projectId
+      || normalized.episodeId !== expected.episodeId
+      || normalized.storyboardRevisionId !== expected.storyboardRevisionId
+      || normalized.frameId !== expected.frameId
+      || normalized.draftPromptIrId !== draft.promptIrId
+      || normalized.draftVersion !== draft.promptIrVersion
+      || normalized.draftContentSha256 !== draft.promptIrContentSha256
+      || normalized.contextSnapshotSha256 !== contextSnapshotSha256
+      || normalized.methodSha256 !== draftMethodSha256
+      || normalized.expiresAtUnix <= normalized.issuedAtUnix
+      || normalized.expiresAtUnix - normalized.issuedAtUnix > 300
+    ) throw new UpstreamContractError('promptIrBootstrap selection challenge binding mismatch')
+    return normalized
+  })()
+  const ready = root.ready === null ? null : normalizePromptIrBootstrapSubject(root.ready, expected, 'Ready')
+  if ((draft !== null && ready !== null) || (draft === null) !== (draftMethodSha256 === null)
+    || (draft === null) !== (selectionChallenge === null)
+    || root.providerCalls !== 0 || root.workerStarted !== false
+    || root.humanApprovalInferred !== false || root.humanSignoff !== false || root.selectionExecuted !== false) {
+    throw new UpstreamContractError('promptIrBootstrap state authority mismatch')
+  }
+  return {
+    schema: 'jason.qingmu-prompt-ir-bootstrap-state.v1', context, contextSnapshotSha256,
+    referenceNames, draft, draftMethodSha256, selectionChallenge, ready, providerCalls: 0, workerStarted: false,
+    humanApprovalInferred: false, humanSignoff: false, selectionExecuted: false,
+  }
+}
+
 function requireExactKeys(value: YimengJsonObject, keys: readonly string[], field: string): void {
   const actual = Object.keys(value).sort()
   const expected = [...keys].sort()
@@ -2575,16 +2689,16 @@ function normalizeReferenceCandidate(
     && sourceEpisodeId !== '' && generationJobId !== '' && sourceRevisionId !== ''
     && qualificationIdentity === '' && uploadCommandReceiptId === '' && rightsBindingValid
   const localQualificationValid = qualificationKind === 'local_file_integrity'
-    && qualificationCheckId !== '' && qualificationPassed === true
+    && qualificationCheckId !== '' && qualificationPassed
     && qualificationIdentity !== '' && uploadCommandReceiptId !== ''
-    && rightsRecorded === true && rightsRecordSha256 !== ''
+    && rightsRecorded && rightsRecordSha256 !== ''
     && sourceRevisionId !== '' && sourceEpisodeId === '' && generationJobId === ''
-    && formalConsistencyCheckId === '' && formalConsistencyPassed === false
+    && formalConsistencyCheckId === '' && !formalConsistencyPassed
   const noQualificationValid = qualificationKind === 'none'
-    && qualificationCheckId === '' && qualificationPassed === false
+    && qualificationCheckId === '' && !qualificationPassed
     && qualificationIdentity === ''
     && sourceRevisionId === ''
-    && formalConsistencyCheckId === '' && formalConsistencyPassed === false
+    && formalConsistencyCheckId === '' && !formalConsistencyPassed
     && (uploadCommandReceiptId === '' || (sourceEpisodeId === '' && generationJobId === ''))
     && rightsBindingValid
   if (!providerQualificationValid && !localQualificationValid && !noQualificationValid) {
@@ -3976,6 +4090,10 @@ export function createYimengReadHandler(
         const request = parsePromptIrRequest(payload)
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/storyboard-revisions/${encodeURIComponent(request.storyboardRevisionId)}/frames/${encodeURIComponent(request.frameId)}/prompt-ir`
         normalize = value => normalizePromptIr(value, request)
+      } else if (endpoint === 'promptIrBootstrap') {
+        const request = parsePromptIrRequest(payload)
+        path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/storyboard-revisions/${encodeURIComponent(request.storyboardRevisionId)}/frames/${encodeURIComponent(request.frameId)}/prompt-ir-bootstrap`
+        normalize = value => normalizePromptIrBootstrap(value, request)
       } else if (endpoint === 'selectedVideoReview') {
         const request = parseSelectedVideoReviewRequest(payload)
         path = `/api/frames/${encodeURIComponent(request.frameId)}/video-candidates`

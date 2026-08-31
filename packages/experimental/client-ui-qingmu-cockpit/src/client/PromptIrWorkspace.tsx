@@ -36,6 +36,7 @@ import {
 import css from './QingmuCockpit.module.css'
 import directorCss from './DirectorWorkspace.module.css'
 import { directorBufferKey, readDirectorBuffer, writeDirectorBuffer } from './director-edit-buffer.ts'
+import { hasPromptIrBootstrapFrame, PromptIrBootstrapWorkspace } from './PromptIrBootstrapWorkspace.tsx'
 
 const SHA256 = /^[0-9a-f]{64}$/
 const EDITABLE_FIELDS = [
@@ -450,7 +451,7 @@ function selectionCommandRequest(marker: PromptIrSelectionRecoveryMarker): Yimen
 }
 
 /** Human-operated five-field PromptIR check, Draft commit, and separate Ready selection. */
-export function PromptIrWorkspace({
+function ReadyPromptIrWorkspace({
   projectId,
   episodeId,
   shotItems,
@@ -1073,6 +1074,7 @@ export function PromptIrWorkspace({
       {director && <>
         <p role="status">{t('directorEditingDraft')} · {t('directorEffectiveReady')} v{snapshot?.subject.promptIrVersion ?? '—'}
           {draftPromptIr !== undefined && ` · Draft v${draftPromptIr.version}`}</p>
+        <p>Ready 只表示当前生效的提示词版本，不代表内容、权利、正式一致性或发布批准。</p>
         <p>{unsaved ? t('directorUnsaved') : snapshot?.draft ? t('directorSavedDraft') : t('directorNoDraft')}</p>
         {(bufferStale || (snapshot?.draft?.status === 'stale' && !staleRebased)) && <>
           <p role="alert">{t('directorStaleDraft')}</p>
@@ -1320,4 +1322,12 @@ export function PromptIrWorkspace({
         {director && <p>{t('directorErrorHelp')}</p>}</div>}
     </section>
   )
+}
+
+/** Route a real storyboard frame without PromptIR lineage into the bounded first-Draft flow. */
+export function PromptIrWorkspace(props: PromptIrWorkspaceProps) {
+  const frames = framesOf(props.projectId, props.episodeId, props.shotItems, props.storyboardRevisionId)
+  const hasReadyLineage = frames.some(frame => frame.shotId === props.selectedShotId)
+  if (!hasReadyLineage && hasPromptIrBootstrapFrame(props)) return <PromptIrBootstrapWorkspace {...props} />
+  return <ReadyPromptIrWorkspace {...props} />
 }

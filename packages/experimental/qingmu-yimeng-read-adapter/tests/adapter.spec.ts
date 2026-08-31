@@ -1304,6 +1304,42 @@ describe('qingmu Yimeng read adapter', () => {
     }
   })
 
+  it('reads first-PromptIR bootstrap state with an exact Draft method binding', async () => {
+    const context = { schema: 'jason.qingmu-prompt-ir-bootstrap-context.v1', projectId: 'project-1', episodeId: 'episode-1',
+      storyboard: { id: 'storyboard-1', version: 1, sourceHash: 'c'.repeat(64) },
+      frame: { id: 'frame-1' }, requiredReferences: [] }
+    const contextSnapshotSha256 = sha256(canonicalJson(context))
+    const draft = { ...PROMPT_IR_SUBJECT, promptIrId: 'draft-1', promptIrVersion: 1, status: 'Draft' }
+    const selectionChallenge = {
+      schema: 'jason.qingmu-prompt-ir-bootstrap-selection-challenge.v1', actorId: 'owner',
+      projectId: 'project-1', episodeId: 'episode-1', storyboardRevisionId: 'storyboard-1', frameId: 'frame-1',
+      draftPromptIrId: 'draft-1', draftVersion: 1, draftContentSha256: draft.promptIrContentSha256,
+      contextSnapshotSha256, methodProjectionSha256: 'e'.repeat(64), methodSha256: 'd'.repeat(64),
+      candidateSha256: 'f'.repeat(64), nonce: '1'.repeat(64), issuedAtUnix: 1_788_134_400,
+      expiresAtUnix: 1_788_134_700, signature: '2'.repeat(64),
+    }
+    const response = { schema: 'jason.qingmu-prompt-ir-bootstrap-state.v1', context, contextSnapshotSha256,
+      referenceNames: [], draft, draftMethodSha256: 'd'.repeat(64), selectionChallenge, ready: null,
+      providerCalls: 0, workerStarted: false, humanApprovalInferred: false, humanSignoff: false, selectionExecuted: false }
+    const request = { projectId: 'project-1', episodeId: 'episode-1', storyboardRevisionId: 'storyboard-1', frameId: 'frame-1' }
+    let capturedAuthorization: string | null = null
+    const handler = createYimengReadHandler({}, dependencies(async (_input, init) => {
+      capturedAuthorization = new Headers(init?.headers).get('authorization')
+      return jsonResponse(response)
+    }, 'test-token'))
+    const result = await handler('promptIrBootstrap', request, signal())
+    expect(result).toMatchObject({ ok: true, value: { contextSnapshotSha256, draftMethodSha256: 'd'.repeat(64),
+      selectionChallenge: { draftPromptIrId: 'draft-1', methodProjectionSha256: 'e'.repeat(64) },
+      draft: { status: 'Draft' }, ready: null, providerCalls: 0 } })
+    expect(capturedAuthorization).toBe('Bearer test-token')
+    const invalid = createYimengReadHandler({}, dependencies(
+      async () => jsonResponse({ ...response, draftMethodSha256: null }), 'test-token'))
+    expect(await invalid('promptIrBootstrap', request, signal())).toMatchObject({ ok: false, error: { code: 'internal' } })
+    const staleChallenge = createYimengReadHandler({}, dependencies(
+      async () => jsonResponse({ ...response, selectionChallenge: { ...selectionChallenge, draftPromptIrId: 'other' } }), 'test-token'))
+    expect(await staleChallenge('promptIrBootstrap', request, signal())).toMatchObject({ ok: false, error: { code: 'internal' } })
+  })
+
   it('consumes normalized stage, legacy-reason and release blockers without hiding real business failures', async () => {
     // Same producer cases pinned by Yimeng test_qingmu_workflow_blocker_contract.py.
     const blockers = [

@@ -136,6 +136,10 @@
 
 另：在唯一一次 Finding 原记录 POST 前，客户端存入并读回核对精确八字段、非秘密的恢复标记。标记只含哈希和原操作坐标，不含自由文本证据、凭据或方法签名。响应不确定时，只提供显式 GET 查询原回执；页面重载或当前媒体不可用后仍可查询。回执缺失或错配会保留标记；恢复不重新提交记录，也不改写原主体。清除本地标记是独立且带警告的操作，不能撤销服务端记录。记录 Finding 不会执行返修，也不推断人工签收。
 
+## 首个 PromptIR 引导
+
+对于尚无 PromptIR 血缘的 Ready 分镜帧，导演工作区提供独立的首 Draft 工作台。写入前展示精确场景、镜头、已选且通过资格检查的参考、方法身份和五个可编辑提示词字段。保存只创建 Draft；第二个经勾选的 owner 操作必须使用新鲜 Writer challenge 与 Host 方法证明，才把该精确 Draft 选为 Ready。结果不确定时保留有界、仅哈希的恢复坐标，重载或重启后再次读取易梦。Ready 只表示当前生效提示词版本，不表示权利核验、正式一致性、批准、生成、发布或人工签收。详见[首个 PromptIR Agent Note](../../../.agents/notes/implemented/feature/2026-08-31-qingmu-first-prompt-ir-bootstrap.zh.md)。
+
 ## 安全边界
 
 `YIMENG_API_TOKEN` 与 `QINGMU_IMAGO_ATTESTATION_KEY` 只属于青木 Host 进程。浏览器插件不读取环境变量、`localStorage`、`JWT_SECRET` 或 Cookie，也绝不会接收或渲染这两个秘密。它唯一持久化的是当前标签页 `sessionStorage` 中有界、非秘密的回执恢复标记。只读与命令通道由两个独立 Host 插件承载，并且都只允许回环地址上游。令牌缺失时，驾驶舱会提示用户配置 Host 并重启本地实例。

@@ -108,6 +108,10 @@ Host 同时只允许一个核验。`verificationTimeoutMs` 默认 55000 毫秒�
 
 剧本缺失或变化时，`latestBinding` 仍保留原来源引用回执。`currentBinding` 只能是与当前来源及主体 SHA 精确一致的最新回执；不能用更早的相符记录替代。`canBind` 独立报告已有的所有者权限，不与来源可用性混为一谈。来源引用不等于 `SCREENPLAY_PACKAGE`、阶段完成、工件批准、锁或工作集权威。根入口和 `/types` 导出 `YimengStageSourcesRequest`、`YimengStageSourcesResponse`、`YimengStageSource`、`YimengStageSourceDefinition`、`YimengStageSourceBinding` 与 `YimengStageSourceResult`。
 
+## 首个 PromptIR 引导状态
+
+`promptIrBootstrap` 为精确的项目、剧集、分镜修订和帧读取一份已认证且受 owner 限定的状态。Host 校验当前上下文 SHA、必需的已选参考绑定、可选的已存 Draft 及方法谱系，以及使 Provider 调用、选择推断、批准和签收保持 false 的边界标志。只有已存方法 SHA 与当前来源绑定仍可核验时才返回 Draft，同时返回绑定其精确身份与哈希的短时 Writer 签名选择 challenge。详见[首个 PromptIR Agent Note](../../../.agents/notes/implemented/feature/2026-08-31-qingmu-first-prompt-ir-bootstrap.zh.md)。
+
 ## 安全边界
 
 `promptIr` 保留实际生效 Ready 主体，并额外验证最新已存 Draft 的完整主体 SHA 与基础绑定。不存在 Draft 时返回 `null`；血缘损坏报错。基于另一个 Ready 的 Draft 明确标为过期，读取器不会提升其状态。根工作流 blocker 必须有非空 `reason`；易梦在此边界前归一 stage `reasonCode` 和 release blocker，保留诊断字段。

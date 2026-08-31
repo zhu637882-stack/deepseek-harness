@@ -29,6 +29,8 @@ import type {
   ImagoHeroFrameStoryboardPoint,
   ImagoPromptIrMethodRequest,
   ImagoPromptIrMethodResponse,
+  ImagoPromptIrBootstrapMethodRequest,
+  ImagoPromptIrBootstrapMethodResponse,
   ImagoReferenceAssetMethodRequest,
   ImagoReferenceAssetMethodResponse,
   ImagoShotRelationMethodRequest,
@@ -88,6 +90,7 @@ import type {
   YimengProjectsResponse,
   YimengPromptIrRequest,
   YimengPromptIrResponse,
+  YimengPromptIrBootstrapResponse,
   YimengReferenceCandidatesRequest,
   YimengReferenceCandidatesResponse,
   YimengReferenceAssetCandidate,
@@ -205,6 +208,10 @@ import type {
   YimengRecoverPromptIrEditCommitResponse,
   YimengRecoverPromptIrSelectionRequest,
   YimengRecoverPromptIrSelectionResponse,
+  YimengBootstrapPromptIrRequest,
+  YimengBootstrapPromptIrResponse,
+  YimengRecoverPromptIrBootstrapRequest,
+  YimengSelectBootstrapPromptIrRequest,
   YimengRecoverScriptCommitRequest,
   YimengRecoverScriptCommitResponse,
   YimengRecoverStoryboardCanvasCommitRequest,
@@ -281,6 +288,8 @@ export type {
   ImagoHeroFrameStoryboardPoint,
   ImagoPromptIrMethodRequest,
   ImagoPromptIrMethodResponse,
+  ImagoPromptIrBootstrapMethodRequest,
+  ImagoPromptIrBootstrapMethodResponse,
   ImagoReferenceAssetMethodRequest,
   ImagoReferenceAssetMethodResponse,
   ImagoShotRelationMethodRequest,
@@ -338,6 +347,7 @@ export type {
   YimengProjectsRequest,
   YimengProjectsResponse,
   YimengPromptIrRequest,
+  YimengPromptIrBootstrapResponse,
   YimengPromptIrResponse,
   YimengReferenceCandidatesRequest,
   YimengReferenceCandidatesResponse,
@@ -456,6 +466,10 @@ export type {
   YimengRecoverPromptIrEditCommitResponse,
   YimengRecoverPromptIrSelectionRequest,
   YimengRecoverPromptIrSelectionResponse,
+  YimengBootstrapPromptIrRequest,
+  YimengBootstrapPromptIrResponse,
+  YimengRecoverPromptIrBootstrapRequest,
+  YimengSelectBootstrapPromptIrRequest,
   YimengRecoverScriptCommitRequest,
   YimengRecoverScriptCommitResponse,
   YimengRecoverStoryboardCanvasCommitRequest,
@@ -535,6 +549,7 @@ export interface QingmuYimengReadPort {
   ): Promise<YimengReferenceRightsExceptionReleaseFeedResponse>
   script(request: YimengScriptRequest, signal?: AbortSignal): Promise<YimengScriptResponse>
   promptIr(request: YimengPromptIrRequest, signal?: AbortSignal): Promise<YimengPromptIrResponse>
+  promptIrBootstrap(request: YimengPromptIrRequest, signal?: AbortSignal): Promise<YimengPromptIrBootstrapResponse>
   selectedVideoReview(request: YimengSelectedVideoReviewRequest, signal?: AbortSignal): Promise<YimengSelectedVideoReviewResponse>
   takeVersions(request: YimengTakeVersionRequest, signal?: AbortSignal): Promise<YimengTakeVersionStackResponse>
   takePreview(request: YimengTakePreviewRequest, signal?: AbortSignal): Promise<YimengTakePreviewResponse>
@@ -705,6 +720,15 @@ export interface QingmuYimengCommandPort {
     request: YimengRecoverPromptIrSelectionRequest,
     signal?: AbortSignal,
   ): Promise<YimengRecoverPromptIrSelectionResponse>
+  bootstrapPromptIr(request: YimengBootstrapPromptIrRequest, signal?: AbortSignal): Promise<YimengBootstrapPromptIrResponse>
+  recoverPromptIrBootstrap(
+    request: YimengRecoverPromptIrBootstrapRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengBootstrapPromptIrResponse>
+  selectBootstrapPromptIr(
+    request: YimengSelectBootstrapPromptIrRequest,
+    signal?: AbortSignal,
+  ): Promise<YimengSelectPromptIrResponse>
   proposeStoryboardCanvas(
     request: YimengProposeStoryboardCanvasRequest,
     signal?: AbortSignal,
@@ -734,6 +758,10 @@ export interface QingmuImagoMethodPort {
   elementMethod(request: ImagoElementMethodRequest, signal?: AbortSignal): Promise<ImagoElementMethodResponse>
   referenceAssetMethod(request: ImagoReferenceAssetMethodRequest, signal?: AbortSignal): Promise<ImagoReferenceAssetMethodResponse>
   promptIrMethod(request: ImagoPromptIrMethodRequest, signal?: AbortSignal): Promise<ImagoPromptIrMethodResponse>
+  promptIrBootstrapMethod(
+    request: ImagoPromptIrBootstrapMethodRequest,
+    signal?: AbortSignal,
+  ): Promise<ImagoPromptIrBootstrapMethodResponse>
   shotRelationMethod(request: ImagoShotRelationMethodRequest, signal?: AbortSignal): Promise<ImagoShotRelationMethodResponse>
   heroFrameStoryboardMethod(
     request: ImagoHeroFrameStoryboardMethodRequest,

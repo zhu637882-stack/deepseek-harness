@@ -18,6 +18,7 @@ import type {
   ImagoReworkRouteMethodResponse, YimengReworkRouteSourceResponse, YimengReworkRouteResult,
   YimengReworkRouteRecovery, YimengReworkRouteAuthorityProbe,
   ImagoElementMethodResponse, ImagoHeroFrameStoryboardMethodResponse, ImagoPromptIrMethodResponse,
+  ImagoPromptIrBootstrapMethodResponse,
   ImagoReferenceAssetMethodResponse, ImagoShotRelationMethodResponse, ImagoWorksetMethodResponse, QingmuYimengPort,
   YimengCommitElementProfileResponse, YimengCommitPromptIrEditResponse, YimengCommitScriptResponse,
   YimengCommitStoryboardCanvasResponse,
@@ -30,7 +31,7 @@ import type {
   YimengCreateReferenceRightsExceptionReleaseResponse, YimengReferenceRightsExceptionReleaseFeedResponse,
   YimengProjectsResponse, YimengProposeElementProfileResponse, YimengProposeReferenceAssetResponse,
   YimengProposePromptIrResponse, YimengProposeScriptResponse, YimengProposeStoryboardCanvasResponse,
-  YimengPromptIrResponse,
+  YimengPromptIrResponse, YimengPromptIrBootstrapResponse, YimengBootstrapPromptIrResponse,
   YimengReferenceCandidatesResponse, YimengRecoverElementProfileCommitResponse,
   YimengRecoverPromptIrEditCommitResponse, YimengRecoverPromptIrSelectionResponse,
   YimengRecoverScriptCommitResponse, YimengRecoverStoryboardCanvasCommitResponse,
@@ -243,6 +244,10 @@ export function apply(ctx: ClientContext): void {
     referenceAssetMethod: (request, signal) =>
       method<ImagoReferenceAssetMethodResponse>('referenceAssetMethod', request, signal),
     promptIrMethod: (request, signal) => method<ImagoPromptIrMethodResponse>('promptIrMethod', request, signal),
+    promptIrBootstrapMethod: (request, signal) =>
+      method<ImagoPromptIrBootstrapMethodResponse>('promptIrBootstrapMethod', request, signal),
+    promptIrBootstrap: (request, signal) =>
+      read<YimengPromptIrBootstrapResponse>('promptIrBootstrap', request, signal),
     shotRelationMethod: (request, signal) =>
       method<ImagoShotRelationMethodResponse>('shotRelationMethod', request, signal),
     heroFrameStoryboardMethod: (request, signal) =>
@@ -285,6 +290,12 @@ export function apply(ctx: ClientContext): void {
     selectPromptIr: (request, signal) => command<YimengSelectPromptIrResponse>('selectPromptIr', request, signal),
     recoverPromptIrSelection: (request, signal) =>
       command<YimengRecoverPromptIrSelectionResponse>('recoverPromptIrSelection', request, signal),
+    bootstrapPromptIr: (request, signal) =>
+      command<YimengBootstrapPromptIrResponse>('bootstrapPromptIr', request, signal),
+    recoverPromptIrBootstrap: (request, signal) =>
+      command<YimengBootstrapPromptIrResponse>('recoverPromptIrBootstrap', request, signal),
+    selectBootstrapPromptIr: (request, signal) =>
+      command<YimengSelectPromptIrResponse>('selectBootstrapPromptIr', request, signal),
     proposeStoryboardCanvas: (request, signal) =>
       command<YimengProposeStoryboardCanvasResponse>('proposeStoryboardCanvas', request, signal),
     previewStoryboardCanvas: (request, signal) =>

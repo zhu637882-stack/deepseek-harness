@@ -1173,6 +1173,66 @@ export interface YimengRecoverPromptIrSelectionResponse extends YimengCommandJso
   readonly receipt: YimengSelectPromptIrResponse
 }
 
+/** Persist the exact Host-attested first PromptIR Draft for one current frame. */
+export interface YimengBootstrapPromptIrRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly storyboardRevisionId: string
+  readonly frameId: string
+  readonly idempotencyKey: string
+  readonly expectedContextSnapshotSha256: string
+  readonly methodProjection: YimengCommandJsonObject
+  readonly methodProjectionSha256: string
+  readonly methodAttestation: YimengCommandJsonObject
+}
+
+/** Durable zero-Provider first-Draft receipt. */
+export interface YimengBootstrapPromptIrResponse extends YimengCommandJsonObject {
+  readonly schema: 'jason.qingmu-prompt-ir-bootstrap-result.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly storyboardRevisionId: string
+  readonly frameId: string
+  readonly contextSnapshotSha256: string
+  readonly methodSha256: string
+  readonly candidateSha256: string
+  readonly promptIr: YimengCommandJsonObject
+  readonly referencePackIds: readonly string[]
+  readonly changeSetId: string
+  readonly commandReceiptId: string
+  readonly eventId: string
+  readonly idempotencyKey: string
+  readonly requestSha256: string
+  readonly deduplicated: boolean
+  readonly committedAt: string
+  readonly providerCalls: 0
+  readonly workerStarted: false
+  readonly humanApprovalInferred: false
+  readonly humanSignoff: false
+  readonly selectionExecuted: false
+}
+
+/** Read-only recovery coordinates; no command is resent. */
+export interface YimengRecoverPromptIrBootstrapRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly storyboardRevisionId: string
+  readonly frameId: string
+  readonly idempotencyKey: string
+  readonly expectedContextSnapshotSha256: string
+  readonly methodProjectionSha256: string
+}
+
+/** Authenticated selection adds the exact bootstrap method binding. */
+export interface YimengSelectBootstrapPromptIrRequest extends YimengSelectPromptIrRequest {
+  readonly bootstrapMethodSha256: string
+  readonly methodProjection: YimengCommandJsonObject
+  readonly methodProjectionSha256: string
+  readonly methodAttestation: YimengCommandJsonObject
+  readonly selectionChallenge: YimengCommandJsonObject
+  readonly selectionFreshnessAttestation: YimengCommandJsonObject
+}
+
 /** Exact Yimeng-selected video bytes and canonical Shot revision. */
 export interface YimengShotVideoSubject {
   readonly schema: 'jason.qingmu-shot-video-subject.v1'
@@ -2897,6 +2957,9 @@ export interface YimengCommandEndpointMap {
   readonly recoverPromptIrEditCommit: YimengRecoverPromptIrEditCommitResponse
   readonly selectPromptIr: YimengSelectPromptIrResponse
   readonly recoverPromptIrSelection: YimengRecoverPromptIrSelectionResponse
+  readonly bootstrapPromptIr: YimengBootstrapPromptIrResponse
+  readonly recoverPromptIrBootstrap: YimengBootstrapPromptIrResponse
+  readonly selectBootstrapPromptIr: YimengSelectPromptIrResponse
 }
 
 /** Endpoint names accepted by `/qingmu-yimeng-command`. */

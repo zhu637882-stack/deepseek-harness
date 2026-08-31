@@ -124,6 +124,9 @@ import type {
   YimengPreviewElementProfileResponse,
   YimengPreviewPromptIrRequest,
   YimengPreviewPromptIrResponse,
+  YimengBootstrapPromptIrRequest,
+  YimengBootstrapPromptIrResponse,
+  YimengRecoverPromptIrBootstrapRequest,
   YimengPreviewScriptRequest,
   YimengPreviewScriptResponse,
   YimengPreviewStoryboardCanvasRequest,
@@ -172,6 +175,7 @@ import type {
   YimengReferenceRightsScalar,
   YimengSelectPromptIrRequest,
   YimengSelectPromptIrResponse,
+  YimengSelectBootstrapPromptIrRequest,
   YimengStoryboardCanvas,
   YimengStoryboardFrameChangeSet,
   YimengStoryboardRevisionCoordinate,
@@ -214,6 +218,9 @@ export type {
   YimengPreviewElementProfileResponse,
   YimengPreviewPromptIrRequest,
   YimengPreviewPromptIrResponse,
+  YimengBootstrapPromptIrRequest,
+  YimengBootstrapPromptIrResponse,
+  YimengRecoverPromptIrBootstrapRequest,
   YimengPreviewScriptRequest,
   YimengPreviewScriptResponse,
   YimengPreviewStoryboardCanvasRequest,
@@ -266,6 +273,7 @@ export type {
   YimengReferenceRightsScalar,
   YimengSelectPromptIrRequest,
   YimengSelectPromptIrResponse,
+  YimengSelectBootstrapPromptIrRequest,
   YimengVisualCommitElementProfileResponse,
   YimengVisualPreviewElementProfileResponse,
   YimengScriptChangeSet,
@@ -1279,6 +1287,71 @@ function parseRecoverPromptIrSelectionRequest(
   payload: unknown,
 ): YimengRecoverPromptIrSelectionRequest {
   return parseSelectPromptIrRequest(payload)
+}
+
+function parseBootstrapPromptIrRequest(payload: unknown): YimengBootstrapPromptIrRequest {
+  const input = requireInputObject(payload)
+  assertOnlyInputKeys(input, [
+    'projectId', 'episodeId', 'storyboardRevisionId', 'frameId', 'idempotencyKey',
+    'expectedContextSnapshotSha256', 'methodProjection', 'methodProjectionSha256', 'methodAttestation',
+  ])
+  if (!isJsonObject(input.methodProjection) || !isJsonObject(input.methodAttestation)) {
+    throw new InputError('bootstrap method projection and attestation must be objects')
+  }
+  return {
+    projectId: parseIdentifier(input.projectId, 'projectId'),
+    episodeId: parseIdentifier(input.episodeId, 'episodeId'),
+    storyboardRevisionId: parseIdentifier(input.storyboardRevisionId, 'storyboardRevisionId'),
+    frameId: parseIdentifier(input.frameId, 'frameId'),
+    idempotencyKey: parseReviewIdempotencyKey(input.idempotencyKey),
+    expectedContextSnapshotSha256: parseInputSha256(input.expectedContextSnapshotSha256, 'expectedContextSnapshotSha256'),
+    methodProjection: input.methodProjection,
+    methodProjectionSha256: parseInputSha256(input.methodProjectionSha256, 'methodProjectionSha256'),
+    methodAttestation: input.methodAttestation,
+  }
+}
+
+function parseRecoverPromptIrBootstrapRequest(payload: unknown): YimengRecoverPromptIrBootstrapRequest {
+  const input = requireInputObject(payload)
+  assertOnlyInputKeys(input, [
+    'projectId', 'episodeId', 'storyboardRevisionId', 'frameId', 'idempotencyKey',
+    'expectedContextSnapshotSha256', 'methodProjectionSha256',
+  ])
+  return {
+    projectId: parseIdentifier(input.projectId, 'projectId'),
+    episodeId: parseIdentifier(input.episodeId, 'episodeId'),
+    storyboardRevisionId: parseIdentifier(input.storyboardRevisionId, 'storyboardRevisionId'),
+    frameId: parseIdentifier(input.frameId, 'frameId'),
+    idempotencyKey: parseReviewIdempotencyKey(input.idempotencyKey),
+    expectedContextSnapshotSha256: parseInputSha256(
+      input.expectedContextSnapshotSha256,
+      'expectedContextSnapshotSha256',
+    ),
+    methodProjectionSha256: parseInputSha256(input.methodProjectionSha256, 'methodProjectionSha256'),
+  }
+}
+
+function parseSelectBootstrapPromptIrRequest(payload: unknown): YimengSelectBootstrapPromptIrRequest {
+  const input = requireInputObject(payload)
+  assertOnlyInputKeys(input, [
+    'projectId', 'episodeId', 'storyboardRevisionId', 'frameId', 'draftPromptIrId',
+    'draftVersion', 'draftContentSha256', 'bootstrapMethodSha256', 'methodProjection',
+    'methodProjectionSha256', 'methodAttestation', 'selectionChallenge',
+    'selectionFreshnessAttestation', 'idempotencyKey',
+  ])
+  if (!isJsonObject(input.methodProjection) || !isJsonObject(input.methodAttestation)
+    || !isJsonObject(input.selectionChallenge) || !isJsonObject(input.selectionFreshnessAttestation)) {
+    throw new InputError('bootstrap selection method projection, challenge, and attestations must be objects')
+  }
+  return {
+    ...parseSelectPromptIrInput(input),
+    bootstrapMethodSha256: parseInputSha256(input.bootstrapMethodSha256, 'bootstrapMethodSha256'),
+    methodProjection: input.methodProjection,
+    methodProjectionSha256: parseInputSha256(input.methodProjectionSha256, 'methodProjectionSha256'),
+    methodAttestation: input.methodAttestation,
+    selectionChallenge: input.selectionChallenge,
+    selectionFreshnessAttestation: input.selectionFreshnessAttestation,
+  }
 }
 
 function parseInputSha256(value: unknown, field: string): string {
@@ -3973,6 +4046,69 @@ function normalizePromptIrSelection(
   return result
 }
 
+function normalizePromptIrBootstrapResult(
+  value: unknown,
+  expected: Pick<YimengBootstrapPromptIrRequest, 'projectId' | 'episodeId' | 'storyboardRevisionId' | 'frameId' | 'idempotencyKey' | 'expectedContextSnapshotSha256'>,
+): YimengBootstrapPromptIrResponse {
+  const root = requireObject(value, 'promptIrBootstrap')
+  assertExactOutputKeys(root, [
+    'schema', 'projectId', 'episodeId', 'storyboardRevisionId', 'frameId',
+    'contextSnapshotSha256', 'methodSha256', 'candidateSha256', 'promptIr',
+    'referencePackIds', 'changeSetId', 'commandReceiptId', 'eventId',
+    'idempotencyKey', 'requestSha256', 'deduplicated', 'committedAt',
+    'providerCalls', 'workerStarted', 'humanApprovalInferred', 'humanSignoff', 'selectionExecuted',
+  ], 'promptIrBootstrap')
+  if (root.schema !== 'jason.qingmu-prompt-ir-bootstrap-result.v1') {
+    throw new UpstreamContractError('promptIrBootstrap.schema mismatch')
+  }
+  const promptIr = requireObject(root.promptIr, 'promptIrBootstrap.promptIr')
+  assertExactOutputKeys(promptIr, [
+    'schema', 'projectId', 'episodeId', 'targetType', 'targetId', 'storyboardRevisionId',
+    'frameId', 'promptIrId', 'promptIrVersion', 'promptIrContentSha256', 'status', 'editableProjection',
+  ], 'promptIrBootstrap.promptIr')
+  if (
+    promptIr.schema !== 'jason.qingmu-prompt-ir-subject.v1' || promptIr.targetType !== 'prompt_ir'
+    || promptIr.status !== 'Draft'
+  ) throw new UpstreamContractError('promptIrBootstrap PromptIR status mismatch')
+  normalizePromptIrEditableProjection(promptIr.editableProjection, 'promptIrBootstrap.promptIr.editableProjection')
+  const result: YimengBootstrapPromptIrResponse = {
+    schema: 'jason.qingmu-prompt-ir-bootstrap-result.v1',
+    projectId: requireString(root.projectId, 'promptIrBootstrap.projectId'),
+    episodeId: requireString(root.episodeId, 'promptIrBootstrap.episodeId'),
+    storyboardRevisionId: requireString(root.storyboardRevisionId, 'promptIrBootstrap.storyboardRevisionId'),
+    frameId: requireString(root.frameId, 'promptIrBootstrap.frameId'),
+    contextSnapshotSha256: requireSha256(root.contextSnapshotSha256, 'promptIrBootstrap.contextSnapshotSha256'),
+    methodSha256: requireSha256(root.methodSha256, 'promptIrBootstrap.methodSha256'),
+    candidateSha256: requireSha256(root.candidateSha256, 'promptIrBootstrap.candidateSha256'),
+    promptIr,
+    referencePackIds: requireStringArray(root.referencePackIds, 'promptIrBootstrap.referencePackIds'),
+    changeSetId: requireString(root.changeSetId, 'promptIrBootstrap.changeSetId'),
+    commandReceiptId: requireString(root.commandReceiptId, 'promptIrBootstrap.commandReceiptId'),
+    eventId: requireString(root.eventId, 'promptIrBootstrap.eventId'),
+    idempotencyKey: requireString(root.idempotencyKey, 'promptIrBootstrap.idempotencyKey'),
+    requestSha256: requireSha256(root.requestSha256, 'promptIrBootstrap.requestSha256'),
+    deduplicated: requireBoolean(root.deduplicated, 'promptIrBootstrap.deduplicated'),
+    committedAt: requireString(root.committedAt, 'promptIrBootstrap.committedAt'),
+    providerCalls: 0, workerStarted: false, humanApprovalInferred: false,
+    humanSignoff: false, selectionExecuted: false,
+  }
+  if (
+    root.providerCalls !== 0 || root.workerStarted !== false || root.humanApprovalInferred !== false
+    || root.humanSignoff !== false || root.selectionExecuted !== false
+    || result.projectId !== expected.projectId || result.episodeId !== expected.episodeId
+    || result.storyboardRevisionId !== expected.storyboardRevisionId || result.frameId !== expected.frameId
+    || result.contextSnapshotSha256 !== expected.expectedContextSnapshotSha256
+    || result.idempotencyKey !== expected.idempotencyKey
+    || promptIr.projectId !== expected.projectId || promptIr.episodeId !== expected.episodeId
+    || promptIr.storyboardRevisionId !== expected.storyboardRevisionId || promptIr.frameId !== expected.frameId
+    || promptIr.targetId !== `${expected.storyboardRevisionId}:${expected.frameId}`
+  ) throw new UpstreamContractError('promptIrBootstrap lineage or authority mismatch')
+  requireString(promptIr.promptIrId, 'promptIrBootstrap.promptIr.promptIrId')
+  parsePromptIrVersion(promptIr.promptIrVersion, 'promptIrBootstrap.promptIr.promptIrVersion')
+  requireSha256(promptIr.promptIrContentSha256, 'promptIrBootstrap.promptIr.promptIrContentSha256')
+  return result
+}
+
 function normalizePromptIrSelectionRecovery(
   value: unknown,
   expected: YimengRecoverPromptIrSelectionRequest,
@@ -5541,6 +5677,49 @@ export function createYimengCommandHandler(
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/storyboard-revisions/${encodeURIComponent(request.storyboardRevisionId)}/frames/${encodeURIComponent(request.frameId)}/storyboard-canvas/change-sets/${encodeURIComponent(request.changeSetId)}/command-receipt`
         requestInit = { method: 'GET', idempotencyKey: request.idempotencyKey }
         normalize = value => normalizeStoryboardCanvasRecovery(value, request)
+      } else if (endpoint === 'bootstrapPromptIr') {
+        const request = parseBootstrapPromptIrRequest(payload)
+        path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/storyboard-revisions/${encodeURIComponent(request.storyboardRevisionId)}/frames/${encodeURIComponent(request.frameId)}/prompt-ir-bootstrap/commands`
+        requestInit = { method: 'POST', body: serializeBody({
+          idempotencyKey: request.idempotencyKey,
+          expectedContextSnapshotSha256: request.expectedContextSnapshotSha256,
+          methodProjection: request.methodProjection,
+          methodProjectionSha256: request.methodProjectionSha256,
+          methodAttestation: request.methodAttestation,
+        }) }
+        normalize = value => normalizePromptIrBootstrapResult(value, request)
+      } else if (endpoint === 'recoverPromptIrBootstrap') {
+        const request = parseRecoverPromptIrBootstrapRequest(payload)
+        const query = new URLSearchParams({
+          idempotencyKey: request.idempotencyKey,
+          expectedContextSnapshotSha256: request.expectedContextSnapshotSha256,
+          methodProjectionSha256: request.methodProjectionSha256,
+        })
+        path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/storyboard-revisions/${encodeURIComponent(request.storyboardRevisionId)}/frames/${encodeURIComponent(request.frameId)}/prompt-ir-bootstrap/receipt?${query.toString()}`
+        requestInit = { method: 'GET' }
+        normalize = (value) => {
+          const result = normalizePromptIrBootstrapResult(value, request)
+          if (!result.deduplicated) {
+            throw new UpstreamContractError('promptIrBootstrap recovery mismatch')
+          }
+          return result
+        }
+      } else if (endpoint === 'selectBootstrapPromptIr') {
+        const request = parseSelectBootstrapPromptIrRequest(payload)
+        path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/storyboard-revisions/${encodeURIComponent(request.storyboardRevisionId)}/frames/${encodeURIComponent(request.frameId)}/prompt-ir-bootstrap:select`
+        requestInit = { method: 'POST', body: serializeBody({
+          draftPromptIrId: request.draftPromptIrId,
+          draftVersion: request.draftVersion,
+          draftContentSha256: request.draftContentSha256,
+          bootstrapMethodSha256: request.bootstrapMethodSha256,
+          methodProjection: request.methodProjection,
+          methodProjectionSha256: request.methodProjectionSha256,
+          methodAttestation: request.methodAttestation,
+          selectionChallenge: request.selectionChallenge,
+          selectionFreshnessAttestation: request.selectionFreshnessAttestation,
+          idempotencyKey: request.idempotencyKey,
+        }) }
+        normalize = value => normalizePromptIrSelection(value, request)
       } else if (endpoint === 'proposePromptIr') {
         const request = parseProposePromptIrRequest(payload)
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/storyboard-revisions/${encodeURIComponent(request.storyboardRevisionId)}/frames/${encodeURIComponent(request.frameId)}/prompt-ir/change-sets`

@@ -635,7 +635,7 @@ export interface ImagoMethodAdapterConfig {
 }
 ```
 
-Source: [`packages/experimental/qingmu-imago-method-adapter/src/index.ts:561`](../packages/experimental/qingmu-imago-method-adapter/src/index.ts)
+Source: [`packages/experimental/qingmu-imago-method-adapter/src/index.ts:569`](../packages/experimental/qingmu-imago-method-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-qingmu-yimeng-command-adapter"></a>
 
@@ -679,7 +679,7 @@ export interface YimengCommandAdapterConfig {
 }
 ```
 
-Source: [`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:464`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
+Source: [`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:472`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-qingmu-yimeng-read-adapter"></a>
 
@@ -699,7 +699,7 @@ export interface YimengReadAdapterConfig {
 }
 ```
 
-Source: [`packages/experimental/qingmu-yimeng-read-adapter/src/index.ts:389`](../packages/experimental/qingmu-yimeng-read-adapter/src/index.ts)
+Source: [`packages/experimental/qingmu-yimeng-read-adapter/src/index.ts:391`](../packages/experimental/qingmu-yimeng-read-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-tool-agent-team"></a>
 

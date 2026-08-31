@@ -96,6 +96,10 @@ Host 在编译前后独立读取七份固定 Core 来源。当前仅 V6 的活�
 
 [静态装配](src/director-assets/assembly.ts)把准入文件映射到候选 IMAGO 阶段和卡片类别。未知阶段不返回卡片。`loadDirectorAssetFile` 先校验完整资产包，再返回不执行的 UTF-8 源文本。这两个 API 均未接入 Host RPC、工作单、skill 或可执行工具；阶段覆盖不等于激活授权。调用方须在校验和读取期间保持本地资产树稳定；完整性检查不是进程沙箱。BlueFish 的未解析占位符阻塞仍被记录，其模块须另行修复并验证后才能激活。
 
+## 首个 PromptIR 引导方法
+
+`promptIrBootstrap` 用精确的易梦上下文快照调用带版本的 Core 编译器，并校验其签证、方法 SHA、稳定有序参考、仅建议标志和五字段输出。选择 Draft 时，Host 先校验短时 Writer challenge，只重新编译一次，再签发绑定该 challenge 和投影的域分离新鲜度证明。方法只声明如何准备 Draft；它不拥有业务状态、Provider 路由、选择、批准或执行权。环境参考必需，人物与道具参考只在镜头上下文要求时出现。详见[首个 PromptIR Agent Note](../../../.agents/notes/implemented/feature/2026-08-31-qingmu-first-prompt-ir-bootstrap.zh.md)。
+
 ## 模型体验
 
 ### 私有方法 RPC

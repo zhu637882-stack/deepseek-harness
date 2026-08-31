@@ -25,12 +25,14 @@ interface DbState {
   receipts: { id: string; command_type: string; response_json: string }[]
   rightsChangeSets: { id: string; status: string }[]
   qualificationChecks: { id: string; asset_id: string; passed: number }[]
+  promptIrs: { id: string; version: number; status: string; content_sha256: string }[]
+  referencePacks: { id: string; status: string; owner_id: string; canonical_asset_id: string; pack_sha256: string }[]
 }
 
 describe.skipIf(!writer || !core || process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu')('real local reference candidate entry', () => {
   it('qualifies and explicitly selects one local scene reference, recovers lost replies, survives restart and rejects byte drift', async () => {
     const parent = mkdtempSync('/private/tmp/qingmu-local-reference-browser-'), root = join(parent, 'instance')
-    const image = join(parent, 'actor-reference.png')
+    const image = join(parent, 'scene-reference.png')
     writeFileSync(join(parent, 'ACCEPTANCE-ONLY'), 'Synthetic image and unknown/not-applicable rights record by an authenticated test user. No verified license, selection, content approval or Provider.\n')
     writeFileSync(image, PNG)
     const run = (op: string, args: string[] = []) => JSON.parse(execFileSync('python3', [join(REPO_ROOT, 'scripts/qingmu-local.py'), op, '--root', root, ...args],
@@ -40,7 +42,7 @@ import json,sqlite3,sys
 c=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); c.row_factory=sqlite3.Row
 tables={r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 wanted=['projects','episodes','actors','scenes','storyboard_frames','assets','prompt_irs','entity_reference_packs','human_review_decisions','generation_tasks','provider_preflights','provider_budget_events','provider_authorization_reservations','provider_submission_outbox','episode_release_authority','episode_production_step_receipts','stage_artifacts','agent_runs','workflow_runs','step_runs']
-print(json.dumps({'counts':{t:c.execute('SELECT count(*) FROM '+t).fetchone()[0] if t in tables else 0 for t in wanted},'selected':c.execute('SELECT count(*) FROM assets WHERE is_selected=1 OR selection_status="Selected"').fetchone()[0],'assets':[dict(r) for r in c.execute('SELECT id,owner_type,owner_id,sha256,selection_status,is_selected,local_path,quality_status,generation_job_id FROM assets ORDER BY id')],'receipts':[dict(r) for r in c.execute('SELECT id,command_type,response_json FROM command_receipts ORDER BY committed_at,id')],'rightsChangeSets':[dict(r) for r in c.execute('SELECT id,status FROM change_sets WHERE operations_json LIKE ?',('%replaceReferenceRights%',))],'qualificationChecks':[dict(r) for r in c.execute('SELECT id,asset_id,passed FROM consistency_checks WHERE check_type="local_reference_integrity" ORDER BY id')]},ensure_ascii=False))
+print(json.dumps({'counts':{t:c.execute('SELECT count(*) FROM '+t).fetchone()[0] if t in tables else 0 for t in wanted},'selected':c.execute('SELECT count(*) FROM assets WHERE is_selected=1 OR selection_status="Selected"').fetchone()[0],'assets':[dict(r) for r in c.execute('SELECT id,owner_type,owner_id,sha256,selection_status,is_selected,local_path,quality_status,generation_job_id FROM assets ORDER BY id')],'receipts':[dict(r) for r in c.execute('SELECT id,command_type,response_json FROM command_receipts ORDER BY committed_at,id')],'rightsChangeSets':[dict(r) for r in c.execute('SELECT id,status FROM change_sets WHERE operations_json LIKE ?',('%replaceReferenceRights%',))],'qualificationChecks':[dict(r) for r in c.execute('SELECT id,asset_id,passed FROM consistency_checks WHERE check_type="local_reference_integrity" ORDER BY id')],'promptIrs':[dict(r) for r in c.execute('SELECT id,version,status,content_sha256 FROM prompt_irs ORDER BY version,id')],'referencePacks':[dict(r) for r in c.execute('SELECT id,status,owner_id,canonical_asset_id,pack_sha256 FROM entity_reference_packs ORDER BY id')]},ensure_ascii=False))
 `, join(root, 'storage/jason.db')], { encoding: 'utf8' })) as DbState
     run('init', ['--yimeng-root', writer!, '--core-root', core!])
     expect(inspect().counts.projects).toBe(0)
@@ -54,11 +56,14 @@ print(json.dumps({'counts':{t:c.execute('SELECT count(*) FROM '+t).fetchone()[0]
       await target.getByRole('button', { name: '先以只读方式进入' }).click()
       await target.getByRole('button', { name: '青木制作台', exact: true }).click()
     }
-    const uploads: string[] = [], qualificationPosts: string[] = [], rightsCommits: string[] = [], rpcEvents: string[] = []
+    const uploads: string[] = [], qualificationPosts: string[] = [], rightsCommits: string[] = []
+    const bootstrapPosts: string[] = [], selectionPosts: string[] = [], rpcEvents: string[] = []
     page.on('request', (request) => {
       if (request.url().endsWith('/qingmu-yimeng-command/uploadLocalReferenceCandidate')) uploads.push(request.postData() ?? '')
       if (request.url().endsWith('/qingmu-yimeng-command/qualifyLocalReferenceCandidate')) qualificationPosts.push(request.postData() ?? '')
       if (request.url().endsWith('/qingmu-yimeng-command/commitElementProfile')) rightsCommits.push(request.postData() ?? '')
+      if (request.url().endsWith('/qingmu-yimeng-command/bootstrapPromptIr')) bootstrapPosts.push(request.postData() ?? '')
+      if (request.url().endsWith('/qingmu-yimeng-command/selectBootstrapPromptIr')) selectionPosts.push(request.postData() ?? '')
       if (request.url().includes('/qingmu-yimeng-command/')) rpcEvents.push(`request ${new URL(request.url()).pathname}`)
     })
     page.on('response', (response) => {
@@ -68,7 +73,7 @@ print(json.dumps({'counts':{t:c.execute('SELECT count(*) FROM '+t).fetchone()[0]
       await enter(page, true)
       await page.getByLabel('项目名称', { exact: true }).fill('本地参考候选隔离样本 · 未经内容签收')
       await page.getByRole('button', { name: '新建项目与第 1 集' }).click()
-      await page.getByLabel('剧本文字', { exact: true }).fill('场景一：雨夜旧街\n动作：门缓缓打开。\n林夏：请进。\n阿明：谢谢。')
+      await page.getByLabel('剧本文字', { exact: true }).fill('场景一：雨夜旧街\n动作：空镜中，门缓缓打开。')
       await page.getByRole('button', { name: '解析并保存预览草稿' }).click()
       await page.getByRole('button', { name: '确认导入并保存剧本', exact: true }).click()
       await page.getByRole('region', { name: '已保存剧本' }).waitFor()
@@ -76,7 +81,7 @@ print(json.dumps({'counts':{t:c.execute('SELECT count(*) FROM '+t).fetchone()[0]
       const planning = page.getByRole('region', { name: '场景与镜头规划' })
       await planning.getByRole('button', { name: '建立本场镜头' }).click()
       await planning.getByLabel('镜头名称', { exact: true }).fill('雨夜入场')
-      await planning.getByLabel('叙事目的', { exact: true }).fill('建立人物关系')
+      await planning.getByLabel('叙事目的', { exact: true }).fill('建立环境与空间')
       await planning.getByRole('button', { name: '预览保存影响' }).click()
       await planning.getByRole('button', { name: '确认保存规划' }).click()
       await planning.getByRole('status').filter({ hasText: '结构版本 1' }).waitFor()
@@ -174,6 +179,37 @@ print(json.dumps({'counts':{t:c.execute('SELECT count(*) FROM '+t).fetchone()[0]
       await page.getByRole('button', { name: '确认记录参考素材选择', exact: true }).click()
       await page.getByText('参考素材选择已记录；这不代表人工签收。', { exact: true }).waitFor()
 
+      await page.getByRole('tab', { name: '导演工作区', exact: true }).click()
+      await page.getByText('已有提示词、Take 与高级分镜', { exact: true }).click()
+      const bootstrap = page.getByRole('region', { name: '首个 PromptIR 引导' })
+      await bootstrap.getByRole('button', { name: '生成首个 Draft 预览' }).click()
+      await bootstrap.getByRole('heading', { name: '方法生成的 Draft 预览' }).waitFor()
+      let draftComplete!: () => void
+      const draftLost = new Promise<void>((resolve) => { draftComplete = resolve })
+      await page.route('**/qingmu-yimeng-command/bootstrapPromptIr', async (route) => {
+        const response = await route.fetch(); expect(response.status()).toBe(200)
+        await route.abort('failed'); draftComplete()
+      })
+      await bootstrap.getByRole('button', { name: '保存首个 PromptIR Draft' }).dblclick()
+      await draftLost; await page.unroute('**/qingmu-yimeng-command/bootstrapPromptIr')
+      await bootstrap.getByRole('button', { name: '恢复原 Draft 回执' }).click()
+      await bootstrap.getByRole('heading', { name: 'PromptIR Draft 已保存' }).waitFor()
+      expect(bootstrapPosts).toHaveLength(1)
+      await bootstrap.getByRole('checkbox', { name: /我确认把这个 Draft 选为当前 Ready/ }).click()
+      let selectionComplete!: () => void
+      const selectionLost = new Promise<void>((resolve) => { selectionComplete = resolve })
+      await page.route('**/qingmu-yimeng-command/selectBootstrapPromptIr', async (route) => {
+        const response = await route.fetch(); expect(response.status()).toBe(200)
+        await route.abort('failed'); selectionComplete()
+      })
+      await bootstrap.getByRole('button', { name: '选为首个 Ready' }).dblclick()
+      await selectionLost; await page.unroute('**/qingmu-yimeng-command/selectBootstrapPromptIr')
+      await bootstrap.getByRole('button', { name: '恢复原选择结果' }).click()
+      const readyWorkspace = page.getByRole('region', { name: 'PromptIR 五字段变更台' })
+      await readyWorkspace.getByText(/Ready v1/).waitFor()
+      await readyWorkspace.getByText('Ready 只表示当前生效的提示词版本，不代表内容、权利、正式一致性或发布批准。', { exact: true }).waitFor()
+      expect(selectionPosts).toHaveLength(1)
+
       const persistedBrowserState = await page.evaluate(() => JSON.stringify({
         session: Object.fromEntries(Array.from({ length: sessionStorage.length }, (_, index) => {
           const key = sessionStorage.key(index) ?? ''
@@ -195,10 +231,16 @@ print(json.dumps({'counts':{t:c.execute('SELECT count(*) FROM '+t).fetchone()[0]
       expect(after.rightsChangeSets).toHaveLength(1)
       expect(after.rightsChangeSets[0]).toMatchObject({ status: 'committed' })
       expect(readFileSync(materialized)).toEqual(PNG)
-      for (const table of ['prompt_irs','entity_reference_packs','human_review_decisions','generation_tasks','provider_preflights','provider_budget_events','provider_authorization_reservations','provider_submission_outbox','episode_release_authority','episode_production_step_receipts','stage_artifacts','agent_runs','workflow_runs','step_runs']) expect(after.counts[table]).toBe(0)
+      expect(after.promptIrs).toHaveLength(1)
+      expect(after.promptIrs[0]?.status).toBe('Ready')
+      expect(after.referencePacks).toHaveLength(1)
+      expect(after.referencePacks[0]).toMatchObject({ status: 'Ready', canonical_asset_id: candidateId })
+      expect(after.receipts.filter(item => item.command_type === 'qingmu.prompt_ir.bootstrap.v1')).toHaveLength(1)
+      expect(after.receipts.filter(item => item.command_type === 'qingmu.prompt_ir.select.v1')).toHaveLength(1)
+      for (const table of ['human_review_decisions','generation_tasks','provider_preflights','provider_budget_events','provider_authorization_reservations','provider_submission_outbox','episode_release_authority','episode_production_step_receipts','stage_artifacts','workflow_runs','step_runs']) expect(after.counts[table]).toBe(0)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-      await page.getByText('已选择（未签收）', { exact: true }).first().scrollIntoViewIfNeeded()
-      await page.screenshot({ path: join(parent, 'selected-1440.png') })
+      await readyWorkspace.scrollIntoViewIfNeeded()
+      await page.screenshot({ path: join(parent, 'prompt-ir-selected-1440.png') })
 
       await page.context().close()
       expect(run('stop').dataPreserved).toBe(true); expect(run('start').ready).toBe(true)
@@ -209,14 +251,20 @@ print(json.dumps({'counts':{t:c.execute('SELECT count(*) FROM '+t).fetchone()[0]
         .getByRole('button', { name: '环境', exact: true }).click()
       await page.getByText('已选择（未签收）', { exact: true }).first().waitFor()
       await page.getByText('本机文件（来源未核验）', { exact: false }).first().waitFor()
+      await page.getByRole('tab', { name: '导演工作区', exact: true }).click()
+      await page.getByText('已有提示词、Take 与高级分镜', { exact: true }).click()
+      const restoredReady = page.getByRole('region', { name: 'PromptIR 五字段变更台' })
+      await restoredReady.getByText(/Ready v1/).waitFor()
+      await restoredReady.getByText('Ready 只表示当前生效的提示词版本，不代表内容、权利、正式一致性或发布批准。', { exact: true }).waitFor()
       expect(inspect()).toEqual(after)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-      await page.getByText('已选择（未签收）', { exact: true }).first().scrollIntoViewIfNeeded()
-      await page.screenshot({ path: join(parent, 'selected-restored-1280.png') })
+      await restoredReady.scrollIntoViewIfNeeded()
+      await page.screenshot({ path: join(parent, 'prompt-ir-restored-1280.png') })
       writeFileSync(join(parent, 'result.json'), JSON.stringify({ root, webUrl: initial.webUrl, qualified, afterTamper, after,
         uploadPosts: uploads.length, qualificationPosts: qualificationPosts.length,
-        commitPosts: rightsCommits.length, byteDriftFailedClosed: true,
-        freshBrowserAfterRestart: true, selectedNotApproved: true }, null, 2))
+        commitPosts: rightsCommits.length, bootstrapPosts: bootstrapPosts.length,
+        selectionPosts: selectionPosts.length, byteDriftFailedClosed: true,
+        freshBrowserAfterRestart: true, selectedNotApproved: true, promptIrReadyNotApproved: true }, null, 2))
       console.log('Qingmu local reference qualification evidence:', parent)
     } catch (error) {
       writeFileSync(join(parent, 'browser-failure.txt'), await page.locator('body').innerText())

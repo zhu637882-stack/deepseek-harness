@@ -102,6 +102,10 @@ ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只
 
 回执绑定下一修订、完整主体、Method/规则 SHA、认证所有者与会话、事件及 ChangeSet。它只授予 `planSealed: true`；Stage 批准、锁激活、Provider 调用、推断签收和返修仍为 false 或零。结果不确定的 POST 绝不重试。`recoverLsuPlanSeal` 使用原主体 SHA、计划 CAS 坐标和幂等键发送一次无正文 GET，不要求今日 Method 密钥或历史 bearer 会话仍相同。`probeLsuPlanAuthority` 每次都重编新鲜 Method，并让易梦判断最新历史封存是否仍匹配今日完整主体和两组规则代际；普通来源读取和旧回执都不授予当前权威。
 
+## 首个 PromptIR Draft 与选择
+
+`bootstrapPromptIr` 和 `recoverPromptIrBootstrap` 提交或恢复精确 Draft 意图，其中包含上下文、方法投影、候选内容与参考绑定。`selectBootstrapPromptIr` 是针对该精确 Draft 的独立认证 owner 选择，并要求当前 Writer challenge 与对应 Host 新鲜度证明。适配器只转发严格类型请求；它不编译方法、不存储业务状态、不调用 Provider，也不推断批准。两个操作都是幂等的，恢复使用原坐标和哈希且不重发选择。详见[首个 PromptIR Agent Note](../../../.agents/notes/implemented/feature/2026-08-31-qingmu-first-prompt-ir-bootstrap.zh.md)。
+
 ## 安全边界
 
 上游必须是回环 HTTP(S)。适配器绝不返回 Host bearer 凭据、不发送 Cookie、拒绝重定向、限制载荷大小和请求时长，并且不会把非成功响应正文反射到错误中。成功的阶段登记与恢复响应会保持完整，直到整份业务 schema 校验结束，因此名为 `token` 的合法回执字段不会被通用秘密脱敏误删。校验后，任意键或字符串只要包含当前实际 bearer 凭据，就会用静态错误失败关闭。合同失败仍只返回静态安全错误。浏览器只接收经过校验的命令数据和持久回执标识。
