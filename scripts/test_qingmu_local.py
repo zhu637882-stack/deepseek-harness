@@ -83,6 +83,35 @@ class OwnershipTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaisesRegex(RuntimeError, "HTTP loopback"):
                 local.require_http_loopback_origin(value)
 
+    def test_production_config_is_exact_separate_and_default_disabled(self):
+        self.assertIsNone(local.validate_director_production_config(None))
+        value = {
+            "productionOnly": True,
+            "provider": "deepseek-official",
+            "model": "deepseek-v4-pro",
+            "baseUrl": "https://api.deepseek.com",
+            "endpoint": "/chat/completions",
+            "routeKey": "qingmu.director.text.proposal.c1",
+            "projectId": "project-1",
+            "episodeId": "episode-1",
+            "methodPackageVersion": "method.v1",
+            "methodPackageSha256": "a" * 64,
+            "maxPaidCny": 0.16,
+            "maxInputTokens": 16000,
+            "maxOutputTokens": 512,
+            "thinking": "disabled",
+            "images": False,
+            "files": False,
+            "tools": False,
+            "credentialFile": str(local.DEEPSEEK_PRODUCTION_CREDENTIAL_FILE),
+            "transportEnabled": False,
+        }
+        self.assertEqual(local.validate_director_production_config(value), value)
+        with self.assertRaisesRegex(ValueError, "production 配置无效"):
+            local.validate_director_production_config({**value, "baseUrl": "http://127.0.0.1:1"})
+        with self.assertRaisesRegex(ValueError, "production 配置无效"):
+            local.validate_director_production_config({**value, "transportEnabled": True})
+
     def test_stale_pid_is_not_a_signal_target(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

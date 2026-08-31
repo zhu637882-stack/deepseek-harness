@@ -670,10 +670,18 @@ export interface YimengCommandAdapterConfig {
   readonly directorDshMethodSha256?: string
   /** Exact HTTP loopback origin of the isolated Chat Completions mock. */
   readonly directorDshMockBaseUrl?: string
+  /** Explicit Host-private production transport enablement; disabled by default. */
+  readonly directorProductionTransportEnabled?: boolean
+  /** Exact pre-issued production task; never populated by browser RPC. */
+  readonly directorProductionTaskId?: string
+  /** Method version already locked into the production task. */
+  readonly directorProductionMethodVersion?: string
+  /** Method SHA already locked into the production task. */
+  readonly directorProductionMethodSha256?: string
 }
 ```
 
-来源：[`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:461`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
+来源：[`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:464`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-qingmu-yimeng-read-adapter"></a>
 

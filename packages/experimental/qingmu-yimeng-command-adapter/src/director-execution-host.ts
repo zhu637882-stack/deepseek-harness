@@ -11,6 +11,7 @@ import type {
 import { executeDirectorProviderPermit } from './director-provider-execution.ts'
 
 const DOMAIN = 'qingmu-director-execution.v1'
+const DEEPSEEK_PRODUCTION_BASE_URL = 'https://api.deepseek.com'
 
 /** Immutable Yimeng task and dispatch values covered by the Host request signature. */
 export interface DirectorExecutionBinding {
@@ -22,6 +23,12 @@ export interface DirectorExecutionBinding {
   readonly payloadSha256: string
   readonly provider: string
   readonly model: string
+  readonly routeKey: string
+  readonly inputPolicy: {
+    readonly unit: 'utf8_bytes_upper_bound'
+    readonly promptUtf8Bytes: number
+    readonly maxInputTokens: number
+  }
   readonly methodPackageSha256: string
   readonly pricingSnapshotSha256: string
   readonly dispatchKey: string
@@ -95,6 +102,9 @@ const directorBody = (payload: Readonly<Record<string, unknown>>, provider: stri
     || request.model !== model || request.enable_thinking !== false
     || !Number.isSafeInteger(request.max_completion_tokens)
     || Number(request.max_completion_tokens) < 1 || Number(request.max_completion_tokens) > 512
+    || !Number.isSafeInteger(request.estimated_input_tokens)
+    || Number(request.estimated_input_tokens) < 1 || Number(request.estimated_input_tokens) > 16_000
+    || request.estimated_output_tokens !== request.max_completion_tokens
     || !Array.isArray(request.messages) || request.messages.length !== 1) {
     throw new Error('director DSh payload invalid')
   }
@@ -106,11 +116,93 @@ const directorBody = (payload: Readonly<Record<string, unknown>>, provider: stri
     throw new Error('director DSh payload invalid')
   }
   const prompt = (message as Record<string, unknown>).content as string
-  if (Buffer.byteLength(prompt) === 0 || Buffer.byteLength(prompt) > 64 * 1024) {
+  const promptUtf8Bytes = Buffer.byteLength(prompt)
+  if (promptUtf8Bytes === 0
+    || promptUtf8Bytes > Number(request.estimated_input_tokens)) {
     throw new Error('director DSh prompt invalid')
   }
   return { prompt, maxTokens: Number(request.max_completion_tokens) }
 }
+
+const productionBaseUrl = (value: string): string => {
+  let parsed: URL
+  try { parsed = new URL(value) } catch { throw new Error('director DSh production endpoint invalid') }
+  if (parsed.href !== DEEPSEEK_PRODUCTION_BASE_URL + '/') {
+    throw new Error('director DSh production endpoint mismatch')
+  }
+  return DEEPSEEK_PRODUCTION_BASE_URL
+}
+
+const createDshDirectorTransport = (
+  llm: Pick<LlmRuntime, 'prepareCall'>,
+  expectedBaseUrl: string,
+  normalizeBaseUrl: (value: string) => string,
+): DirectorProviderTransport => ({
+  execute: async ({ provider, model, payload }, signal) => {
+    const { prompt, maxTokens } = directorBody(payload, provider, model)
+    const prepared = await llm.prepareCall({
+      provider, model, reasoningEffort: ReasoningEffortId('off'), maxTokens,
+    }, signal)
+    if (typeof prepared.transport?.baseURL !== 'string'
+      || normalizeBaseUrl(prepared.transport.baseURL) !== expectedBaseUrl
+      || prepared.config.model !== model) {
+      throw new Error('director DSh prepared endpoint mismatch')
+    }
+    if (prepared.retryPolicy.mode !== 'normal' || prepared.retryPolicy.maxRetries !== 0) {
+      throw new Error('director DSh adapter retries are not disabled')
+    }
+    let text = ''
+    let usage: TokenUsage | undefined
+    let metadata: DeepSeekResponseMetadata | undefined
+    let finishReason: string | undefined
+    const request = {
+      ...prepared.config,
+      messages: [createUserMessage({
+        content: [{ type: 'text' as const, text: prompt }],
+        source: { kind: 'plugin' as const, plugin: 'qingmu-director-one-shot' },
+      })],
+      purpose: 'director-proposal' as const,
+      signal,
+    }
+    for await (const chunk of prepared.stream(request)) {
+      if (chunk.type === 'text-delta') {
+        text += chunk.text
+        if (Buffer.byteLength(text) > 64 * 1024) throw new Error('director DSh response exceeds limit')
+      } else if (chunk.type === 'reasoning-delta' || chunk.type === 'tool-call-delta') {
+        throw new Error('director DSh response content invalid')
+      } else if (chunk.type === 'usage') {
+        usage = chunk.usage
+      } else if (chunk.type === 'finish') {
+        if (chunk.reason.kind !== 'stop') throw new Error('director DSh response did not stop successfully')
+        finishReason = chunk.reason.kind
+        metadata = chunk.replayState?.response as DeepSeekResponseMetadata | undefined
+      }
+    }
+    if (usage === undefined || metadata === undefined
+      || typeof metadata.providerCompletionId !== 'string'
+      || typeof metadata.providerRequestId !== 'string'
+      || typeof metadata.finishReason !== 'string'
+      || metadata.finishReason !== finishReason) {
+      throw new Error('director DSh provider receipt incomplete')
+    }
+    let proposal: unknown
+    try { proposal = JSON.parse(text) } catch { throw new Error('director DSh response JSON invalid') }
+    const cacheTokens = usage.cacheReadTokens ?? 0
+    const promptTokens = usage.inputTokens + cacheTokens + (usage.cacheWriteTokens ?? 0)
+    return {
+      providerCompletionId: metadata.providerCompletionId,
+      providerRequestId: metadata.providerRequestId,
+      finishReason: metadata.finishReason,
+      usage: {
+        promptTokens,
+        cacheTokens,
+        completionTokens: usage.outputTokens,
+        totalTokens: promptTokens + usage.outputTokens,
+      },
+      proposal: proposal as DirectorProviderTransportResult['proposal'],
+    }
+  },
+})
 
 /**
  * Bind the Host-only DirectorProposal seam to the real DSh LLM runtime.
@@ -124,71 +216,19 @@ export function createDshDeepSeekDirectorTransport(
   options: Readonly<{ mockBaseUrl: string }>,
 ): DirectorProviderTransport {
   const expectedMockBaseUrl = loopbackMockBaseUrl(options.mockBaseUrl)
-  return {
-    execute: async ({ provider, model, payload }, signal) => {
-      const { prompt, maxTokens } = directorBody(payload, provider, model)
-      const prepared = await llm.prepareCall({
-        provider, model, reasoningEffort: ReasoningEffortId('off'), maxTokens,
-      }, signal)
-      if (typeof prepared.transport?.baseURL !== 'string'
-        || loopbackMockBaseUrl(prepared.transport.baseURL) !== expectedMockBaseUrl) {
-        throw new Error('director DSh prepared endpoint mismatch')
-      }
-      if (prepared.retryPolicy.mode !== 'normal' || prepared.retryPolicy.maxRetries !== 0) {
-        throw new Error('director DSh adapter retries are not disabled')
-      }
-      let text = ''
-      let usage: TokenUsage | undefined
-      let metadata: DeepSeekResponseMetadata | undefined
-      let finishReason: string | undefined
-      const request = {
-        ...prepared.config,
-        messages: [createUserMessage({
-          content: [{ type: 'text' as const, text: prompt }],
-          source: { kind: 'plugin' as const, plugin: 'qingmu-director-one-shot' },
-        })],
-        purpose: 'director-proposal' as const,
-        signal,
-      }
-      for await (const chunk of prepared.stream(request)) {
-        if (chunk.type === 'text-delta') {
-          text += chunk.text
-          if (Buffer.byteLength(text) > 64 * 1024) throw new Error('director DSh response exceeds limit')
-        } else if (chunk.type === 'reasoning-delta' || chunk.type === 'tool-call-delta') {
-          throw new Error('director DSh response content invalid')
-        } else if (chunk.type === 'usage') {
-          usage = chunk.usage
-        } else if (chunk.type === 'finish') {
-          if (chunk.reason.kind !== 'stop') throw new Error('director DSh response did not stop successfully')
-          finishReason = chunk.reason.kind
-          metadata = chunk.replayState?.response as DeepSeekResponseMetadata | undefined
-        }
-      }
-      if (usage === undefined || metadata === undefined
-        || typeof metadata.providerCompletionId !== 'string'
-        || typeof metadata.providerRequestId !== 'string'
-        || typeof metadata.finishReason !== 'string'
-        || metadata.finishReason !== finishReason) {
-        throw new Error('director DSh provider receipt incomplete')
-      }
-      let proposal: unknown
-      try { proposal = JSON.parse(text) } catch { throw new Error('director DSh response JSON invalid') }
-      const cacheTokens = usage.cacheReadTokens ?? 0
-      const promptTokens = usage.inputTokens + cacheTokens + (usage.cacheWriteTokens ?? 0)
-      return {
-        providerCompletionId: metadata.providerCompletionId,
-        providerRequestId: metadata.providerRequestId,
-        finishReason: metadata.finishReason,
-        usage: {
-          promptTokens,
-          cacheTokens,
-          completionTokens: usage.outputTokens,
-          totalTokens: promptTokens + usage.outputTokens,
-        },
-        proposal: proposal as DirectorProviderTransportResult['proposal'],
-      }
-    },
-  }
+  return createDshDirectorTransport(llm, expectedMockBaseUrl, loopbackMockBaseUrl)
+}
+
+/**
+ * Bind an already-authorized task to the exact public DeepSeek production origin.
+ * This factory performs no request until its returned transport is executed.
+ * @param llm Host-private DSh LLM runtime.
+ * @returns A single-attempt production transport with origin and retry locks.
+ */
+export function createDshDeepSeekProductionDirectorTransport(
+  llm: Pick<LlmRuntime, 'prepareCall'>,
+): DirectorProviderTransport {
+  return createDshDirectorTransport(llm, DEEPSEEK_PRODUCTION_BASE_URL, productionBaseUrl)
 }
 
 const canonical = (value: unknown): string => {
@@ -258,6 +298,8 @@ const assertPermitBinding = (
     || sha(unsignedWorkOrder) !== binding.workOrderSha256
     || workOrder.methodPackage.sha256 !== binding.methodPackageSha256
     || workOrder.pricingSnapshot.sha256 !== binding.pricingSnapshotSha256
+    || workOrder.routeKey !== binding.routeKey
+    || sha(workOrder.inputPolicy) !== sha(binding.inputPolicy)
     || payloadSha256 !== binding.payloadSha256
     || requestSha256 !== binding.requestSha256) {
     throw new Error('director execution permit binding mismatch')
@@ -270,6 +312,60 @@ export interface DirectorExecutionHostOptions {
   readonly executionKey: string
   readonly transport: DirectorProviderTransport
   readonly fetch?: typeof fetch
+}
+
+/** Host-private pre-submit facts; this value contains a claim and must never cross browser RPC. */
+export interface DirectorExecutionPreparedLock {
+  readonly binding: DirectorExecutionBinding
+  readonly permit: DirectorProviderDispatchPermit
+}
+
+/**
+ * Read the immutable Host-private task binding without claiming a dispatch.
+ * @param options Host-private API and signing key.
+ * @param taskId Exact Yimeng generation task identifier.
+ * @param signal Cancellation signal.
+ * @returns The current signed-task lineage; this call creates no permit or Provider submission.
+ */
+export async function readDirectorTaskBinding(
+  options: Omit<DirectorExecutionHostOptions, 'transport'>,
+  taskId: string,
+  signal: AbortSignal,
+): Promise<DirectorExecutionBinding> {
+  const fetchImpl = options.fetch ?? globalThis.fetch
+  const root = '/internal/qingmu/director-inference/tasks/' + encodeURIComponent(taskId)
+  return post<DirectorExecutionBinding>(
+    options.baseUrl, options.executionKey, root + '/binding', { taskId }, fetchImpl, signal,
+  )
+}
+
+/**
+ * Prepare and validate one immutable Director dispatch without invoking its transport.
+ * @param options Host-private API and signing key. The transport member is ignored.
+ * @param taskId Exact Yimeng generation task identifier.
+ * @param methodPackageVersion Current materialized method version.
+ * @param methodPackageSha256 Current materialized method digest.
+ * @param signal Cancellation signal.
+ * @returns A claim-bearing private lock, or the original terminal result when no dispatch is permitted.
+ */
+export async function prepareDirectorTaskLock(
+  options: Omit<DirectorExecutionHostOptions, 'transport'>,
+  taskId: string,
+  methodPackageVersion: string,
+  methodPackageSha256: string,
+  signal: AbortSignal,
+): Promise<DirectorExecutionPreparedLock | DirectorExecutionHostResult> {
+  const fetchImpl = options.fetch ?? globalThis.fetch
+  const root = '/internal/qingmu/director-inference/tasks/' + encodeURIComponent(taskId)
+  const binding = await readDirectorTaskBinding(options, taskId, signal)
+  const prepared = await post<DirectorProviderDispatchPermit | DirectorExecutionHostResult>(
+    options.baseUrl, options.executionKey, root + '/prepare',
+    { binding, currentMethodPackageVersion: methodPackageVersion, currentMethodPackageSha256: methodPackageSha256 },
+    fetchImpl, signal,
+  )
+  if (prepared.state !== 'dispatch_permitted') return prepared
+  assertPermitBinding(binding, prepared)
+  return { binding, permit: prepared }
 }
 
 /** Recoverable technical outcome returned by the Yimeng execution plane. */
@@ -295,16 +391,11 @@ export async function executeDirectorTaskOnce(
 ): Promise<DirectorExecutionHostResult> {
   const fetchImpl = options.fetch ?? globalThis.fetch
   const root = '/internal/qingmu/director-inference/tasks/' + encodeURIComponent(taskId)
-  const binding = await post<DirectorExecutionBinding>(
-    options.baseUrl, options.executionKey, root + '/binding', { taskId }, fetchImpl, signal,
+  const lock = await prepareDirectorTaskLock(
+    options, taskId, methodPackageVersion, methodPackageSha256, signal,
   )
-  const prepared = await post<DirectorProviderDispatchPermit | DirectorExecutionHostResult>(
-    options.baseUrl, options.executionKey, root + '/prepare',
-    { binding, currentMethodPackageVersion: methodPackageVersion, currentMethodPackageSha256: methodPackageSha256 },
-    fetchImpl, signal,
-  )
-  if (prepared.state !== 'dispatch_permitted') return prepared
-  assertPermitBinding(binding, prepared)
+  if (!('binding' in lock)) return lock
+  const { binding, permit: prepared } = lock
   const result: DirectorProviderExecutionResult = await executeDirectorProviderPermit(
     prepared, options.transport, signal,
   )

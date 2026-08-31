@@ -27,6 +27,11 @@ export interface DirectorProviderDispatchPermit {
     readonly shotId: string
     readonly methodPackage: { readonly version: string; readonly sha256: string }
     readonly pricingSnapshot: { readonly sha256: string }
+    readonly inputPolicy: {
+      readonly unit: 'utf8_bytes_upper_bound'
+      readonly promptUtf8Bytes: number
+      readonly maxInputTokens: number
+    }
   }
   readonly dispatch: Readonly<Record<string, unknown>>
   readonly payload: Readonly<Record<string, unknown>>

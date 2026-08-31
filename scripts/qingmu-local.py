@@ -29,6 +29,10 @@ import urllib.request
 
 DEFAULT_ROOT = Path.home() / "Library/Application Support/QingmuOS"
 HARNESS = Path(__file__).resolve().parents[1]
+DEEPSEEK_PRODUCTION_BASE_URL = "https://api.deepseek.com"
+DEEPSEEK_PRODUCTION_CREDENTIAL_FILE = Path(
+    "/Users/a1234/Library/Application Support/QingmuOS/dsh/.credentials.yaml"
+)
 
 
 def write_json(path: Path, value: dict) -> None:
@@ -57,6 +61,9 @@ def read_config(root: Path) -> dict:
     config = json.loads((root / "private/instance.json").read_text())
     if config["root"] != str(root) or config["harnessRoot"] != str(HARNESS):
         raise ValueError("实例目录或 Harness 来源绑定不符；拒绝使用")
+    validate_director_production_config(config.get("directorProductionExecution"))
+    if config.get("directorExecutionFixture") is not None and config.get("directorProductionExecution") is not None:
+        raise ValueError("导演 fixture 与 production 配置不能同时启用")
     return config
 
 
@@ -186,6 +193,42 @@ def require_http_loopback_origin(value: str) -> str:
     return value.rstrip("/")
 
 
+def validate_director_production_config(value: object) -> dict | None:
+    """Validate the private C1 production route without reading its credential."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("导演 production 配置无效")
+    required = {
+        "productionOnly", "provider", "model", "baseUrl", "endpoint", "routeKey",
+        "projectId", "episodeId", "methodPackageVersion", "methodPackageSha256",
+        "maxPaidCny", "maxInputTokens", "maxOutputTokens", "thinking", "images",
+        "files", "tools", "credentialFile", "transportEnabled",
+    }
+    if set(value) - (required | {"taskId"}) or not required.issubset(value):
+        raise ValueError("导演 production 配置无效")
+    if (
+        value["productionOnly"] is not True
+        or value["provider"] != "deepseek-official"
+        or value["model"] != "deepseek-v4-pro"
+        or value["baseUrl"] != DEEPSEEK_PRODUCTION_BASE_URL
+        or value["endpoint"] != "/chat/completions"
+        or value["maxPaidCny"] != 0.16
+        or value["maxInputTokens"] != 16000
+        or value["maxOutputTokens"] != 512
+        or value["thinking"] != "disabled"
+        or any(value[name] is not False for name in ("images", "files", "tools"))
+        or value["credentialFile"] != str(DEEPSEEK_PRODUCTION_CREDENTIAL_FILE)
+        or not isinstance(value["transportEnabled"], bool)
+        or not all(isinstance(value.get(name), str) and value[name].strip() for name in (
+            "routeKey", "projectId", "episodeId", "methodPackageVersion", "methodPackageSha256"
+        ))
+        or (value["transportEnabled"] and not str(value.get("taskId") or "").strip())
+    ):
+        raise ValueError("导演 production 配置无效")
+    return value
+
+
 def mark_lifecycle(root: Path, config: dict, state: str) -> None:
     write_json(root / "private/lifecycle.json", {"instanceId": config["instanceId"], "state": state})
 
@@ -286,6 +329,14 @@ class Supervisor:
                             + json.dumps(json.dumps(fixture["transportResult"], ensure_ascii=False, separators=(",", ":")))
                             + "\n"
                         )
+                production = self.config.get("directorProductionExecution") or {}
+                if production.get("transportEnabled"):
+                    overlay += (
+                        "    directorProductionTransportEnabled: true\n"
+                        "    directorProductionTaskId: " + json.dumps(production["taskId"]) + "\n"
+                        "    directorProductionMethodVersion: " + json.dumps(production["methodPackageVersion"]) + "\n"
+                        "    directorProductionMethodSha256: " + json.dumps(production["methodPackageSha256"]) + "\n"
+                    )
         fixture = self.config.get("directorExecutionFixture") or {}
         if fixture.get("transportMode") == "dsh-one-shot-mock":
             mock_base_url = require_http_loopback_origin(str(fixture.get("mockBaseUrl") or ""))
@@ -295,6 +346,19 @@ class Supervisor:
                 "    apiKeyEnv: QINGMU_C0_DEEPSEEK_KEY\n"
                 "    thinking: disabled\n"
                 "    reasoningEffort: off\n"
+                "    retryPolicy:\n      mode: normal\n      maxRetries: 0\n"
+            )
+        production = self.config.get("directorProductionExecution") or {}
+        if production.get("transportEnabled"):
+            overlay += (
+                "\n- id: credentials\n  config:\n"
+                "    path: " + json.dumps(production["credentialFile"]) + "\n"
+                "    watch: false\n"
+                "\n- id: llm-deepseek\n  config:\n"
+                "    baseURL: " + json.dumps(DEEPSEEK_PRODUCTION_BASE_URL) + "\n"
+                "    thinking: disabled\n"
+                "    reasoningEffort: off\n"
+                "    maxTokens: 512\n"
                 "    retryPolicy:\n      mode: normal\n      maxRetries: 0\n"
             )
         overlay += "\n- id: qingmu-imago-method-adapter\n  config:\n    coreRoot: " + json.dumps(self.config["coreRoot"]) + "\n"

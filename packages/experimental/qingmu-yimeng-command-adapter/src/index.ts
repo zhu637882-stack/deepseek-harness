@@ -7,6 +7,7 @@ import { prepareLocalReferenceCandidate } from './local-reference-candidate.ts'
 import type { DirectorProposalFreshnessResult } from './director-proposal.ts'
 import {
   createDshDeepSeekDirectorTransport,
+  createDshDeepSeekProductionDirectorTransport,
   createDeepSeekDirectorTransport,
   executeDirectorTaskOnce,
 } from './director-execution-host.ts'
@@ -19,7 +20,9 @@ import {
 } from './director-paid-work-order.ts'
 export { executeDirectorProviderPermit } from './director-provider-execution.ts'
 export {
-  createDeepSeekDirectorTransport, createDshDeepSeekDirectorTransport, executeDirectorTaskOnce,
+  createDeepSeekDirectorTransport, createDshDeepSeekDirectorTransport,
+  createDshDeepSeekProductionDirectorTransport, executeDirectorTaskOnce, prepareDirectorTaskLock,
+  readDirectorTaskBinding,
 } from './director-execution-host.ts'
 export type {
   DirectorProviderDispatchPermit, DirectorProviderExecutionReceipt,
@@ -27,7 +30,7 @@ export type {
 } from './director-provider-execution.ts'
 export type {
   DeepSeekDirectorChatAdapter, DirectorExecutionBinding, DirectorExecutionHostOptions,
-  DirectorExecutionHostResult,
+  DirectorExecutionHostResult, DirectorExecutionPreparedLock,
 } from './director-execution-host.ts'
 export type {
   DirectorPaidWorkOrder,
@@ -481,6 +484,14 @@ export interface YimengCommandAdapterConfig {
   readonly directorDshMethodSha256?: string
   /** Exact HTTP loopback origin of the isolated Chat Completions mock. */
   readonly directorDshMockBaseUrl?: string
+  /** Explicit Host-private production transport enablement; disabled by default. */
+  readonly directorProductionTransportEnabled?: boolean
+  /** Exact pre-issued production task; never populated by browser RPC. */
+  readonly directorProductionTaskId?: string
+  /** Method version already locked into the production task. */
+  readonly directorProductionMethodVersion?: string
+  /** Method SHA already locked into the production task. */
+  readonly directorProductionMethodSha256?: string
 }
 
 /** Validated Cordis configuration for the command adapter. */
@@ -496,6 +507,10 @@ export const Config: z<YimengCommandAdapterConfig> = z.object({
   directorDshMethodVersion: z.string().default(''),
   directorDshMethodSha256: z.string().default(''),
   directorDshMockBaseUrl: z.string().default(''),
+  directorProductionTransportEnabled: z.boolean().default(false),
+  directorProductionTaskId: z.string().default(''),
+  directorProductionMethodVersion: z.string().default(''),
+  directorProductionMethodSha256: z.string().default(''),
 })
 
 /** Injectable Host capabilities used by isolated tests. */
@@ -5883,5 +5898,31 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
       })()
       return () => { controller.abort() }
     }, 'qingmu director DSh one-shot execution')
+  }
+  if (config.directorProductionTransportEnabled && config.directorProductionTaskId) {
+    const executionKey = process.env.QINGMU_DIRECTOR_EXECUTION_KEY ?? ''
+    const controller = new AbortController()
+    ctx.effect(() => {
+      void (async () => {
+        try {
+          const llm = ctx.get('llm')
+          if (llm === undefined) throw new Error('DSh LLM runtime unavailable')
+          await executeDirectorTaskOnce(
+            {
+              baseUrl: config.baseUrl ?? DEFAULT_BASE_URL,
+              executionKey,
+              transport: createDshDeepSeekProductionDirectorTransport(llm),
+            },
+            config.directorProductionTaskId ?? '',
+            config.directorProductionMethodVersion ?? '',
+            config.directorProductionMethodSha256 ?? '',
+            controller.signal,
+          )
+        } catch {
+          ctx.logger.error('Director production one-shot execution failed')
+        }
+      })()
+      return () => { controller.abort() }
+    }, 'qingmu Director production one-shot execution')
   }
 }

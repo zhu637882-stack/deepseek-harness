@@ -14,7 +14,7 @@
 
 适配器自身不写数据库。它校验浏览器输入，只从 Host 环境获取 `YIMENG_API_TOKEN`，并把命令转发给易梦拥有的 HTTP API。项目归属、修订检查、持久 ChangeSet、幂等回执、outbox 事件和下游失效仍由易梦掌权。
 
-导演 Provider 执行接缝仅属于 Host，且默认禁用。隔离部署可以显式配置 `directorDshTransportEnabled`、一个已签发任务、其方法绑定和一个不含凭据的精确 HTTP loopback mock origin；launcher 与 prepared transport 都会拒绝远程地址、端点漂移和重定向。Host 随后保持既有 binding → prepare → transport → complete/unknown 顺序，通过一个 `ctx.llm.prepareCall()` handle 和严格一次 `prepared.stream()` 执行已签名的 `deepseek-v4-pro` 纯文本 payload。该调用要求适配器的 normal 重试策略且 `maxRetries: 0`，使用 JSON Output，不包含工具、图像、文件、附件、Agent、Session 或工具循环，并且只接受 `qingmu.director-proposal.v1`。成功结果必须携带稳定的真实 completion id 与 finish reason、响应 request id、token/cache 用量及输入输出谱系；任一事实缺失、漂移或非法都转为 submission-unknown，且不重试。该接缝不注册生产 route，不向浏览器 RPC 暴露执行密钥、claim、permit 或 Provider payload，也不创建第二份任务或费用账本。
+导演 Provider 执行 seam 仅属于 Host，且默认禁用。隔离部署可以选择不含凭据的 loopback mock transport，或单独校验的 production-capable transport，二者不能同时启用。production-capable 配置固定使用 `deepseek-official`、`deepseek-v4-pro`、`https://api.deepseek.com/chat/completions`、关闭推理、不使用工具或文件、`maxRetries: 0`，并限制输入／输出 token；只有私有配置显式启用一个已签发任务及其方法绑定后，它才会运行。禁用状态仍可签发不可变的易梦工作单，并为提交前锁读取其私有 binding，但不会领取 dispatch、创建预留或 submission outbox、挂载或读取外部凭据文件，也不会调用 transport。保守输入上界使用 UTF-8 提示词字节数作为 token 数上界，写入工作单，并在 `prepareCall` 前再次校验。transport 启用后，Host 保持既有 binding → prepare → transport → complete/unknown 顺序，通过一个 `ctx.llm.prepareCall()` handle 和严格一次 `prepared.stream()` 执行。成功结果必须携带稳定的真实 completion id 与 finish reason、响应 request id、token/cache 用量及输入输出谱系；任一事实缺失、漂移或非法都转为 submission-unknown，且不重试。该 seam 不向浏览器 RPC 暴露执行密钥、claim、permit、Provider payload 或凭据，也不创建第二份任务或费用账本。
 
 ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只有当 `canCommit` 为 true 且用户明确确认后才可提交。提交回执不等于人工创意签收，也不授权付费 Provider 调用。
 

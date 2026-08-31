@@ -14,7 +14,10 @@ import {
 import {
   createDeepSeekDirectorTransport,
   createDshDeepSeekDirectorTransport,
+  createDshDeepSeekProductionDirectorTransport,
   executeDirectorTaskOnce,
+  prepareDirectorTaskLock,
+  readDirectorTaskBinding,
   type DirectorExecutionBinding,
 } from '../src/director-execution-host.ts'
 import { mockServer } from '../../../llm/llm-deepseek/tests/mock-server.ts'
@@ -34,7 +37,8 @@ const workOrder = (): DirectorProviderDispatchPermit['workOrder'] => {
     outputSchema: 'qingmu.director-proposal.v1' as const, projectId: 'project_1', episodeId: 'episode_1',
     sceneId: 'scene_1', shotId: 'shot_1',
     methodPackage: { version: 'director-paid.v1', sha256: 'c'.repeat(64) },
-    pricingSnapshot: { sha256: 'f'.repeat(64) } }
+    pricingSnapshot: { sha256: 'f'.repeat(64) },
+    inputPolicy: { unit: 'utf8_bytes_upper_bound' as const, promptUtf8Bytes: 48, maxInputTokens: 2048 } }
   return { ...body, workOrderSha256: sha(body) }
 }
 
@@ -79,7 +83,8 @@ const binding = (): DirectorExecutionBinding => {
     contextSnapshotSha256: 'a'.repeat(64), promptSha256: 'b'.repeat(64),
     requestSha256: sha({ capability: 'chat.agent', routeKey: value.workOrder.routeKey,
       provider: 'fake', model: 'model_1', payloadSha256 }), payloadSha256,
-    provider: 'fake', model: 'model_1', methodPackageSha256: 'c'.repeat(64),
+    provider: 'fake', model: 'model_1', routeKey: value.workOrder.routeKey,
+    inputPolicy: value.workOrder.inputPolicy, methodPackageSha256: 'c'.repeat(64),
     pricingSnapshotSha256: 'f'.repeat(64), dispatchKey: '', dispatchEpoch: 0,
     claimToken: '', claimEpoch: 0, exclusiveExecutionLane: 'qingmu_director_host_permit_v1',
   }
@@ -103,6 +108,8 @@ const deepSeekBinding = (): DirectorExecutionBinding => {
     payloadSha256,
     provider: value.provider,
     model: value.model,
+    routeKey: value.workOrder.routeKey,
+    inputPolicy: value.workOrder.inputPolicy,
     methodPackageSha256: value.workOrder.methodPackage.sha256,
     pricingSnapshotSha256: value.workOrder.pricingSnapshot.sha256,
     dispatchKey: '', dispatchEpoch: 0, claimToken: '', claimEpoch: 0,
@@ -292,6 +299,94 @@ describe('Director provider Host execution seam', () => {
       { mockBaseUrl: 'https://api.deepseek.com' },
     )).toThrow('must be HTTP loopback')
     expect(prepareCall).not.toHaveBeenCalled()
+  })
+
+  it('rejects prepared endpoint drift before consuming the stream', async () => {
+    const stream = vi.fn(async function* () { yield { type: 'text-delta', text: '{}' } })
+    const prepareCall = vi.fn(async () => ({
+      transport: { baseURL: 'https://api.deepseek.com' },
+      config: { model: 'deepseek-v4-pro' },
+      retryPolicy: { mode: 'normal', maxRetries: 0 },
+      stream,
+    }))
+    const result = await executeDirectorProviderPermit(
+      deepSeekPermit(),
+      createDshDeepSeekDirectorTransport(
+        { prepareCall } as unknown as Pick<LlmRuntime, 'prepareCall'>,
+        { mockBaseUrl: 'http://127.0.0.1:49152' },
+      ),
+      new AbortController().signal,
+    )
+    expect(result).toMatchObject({ state: 'submission_unknown', automaticRetry: false })
+    expect(prepareCall).toHaveBeenCalledOnce()
+    expect(stream).not.toHaveBeenCalled()
+  })
+
+  it('keeps the production transport inactive until execute and rejects non-production prepared origin', async () => {
+    const stream = vi.fn(async function* () { yield { type: 'text-delta', text: '{}' } })
+    const prepareCall = vi.fn(async () => ({
+      transport: { baseURL: 'http://127.0.0.1:49152' },
+      config: { model: 'deepseek-v4-pro' },
+      retryPolicy: { mode: 'normal', maxRetries: 0 },
+      stream,
+    }))
+    const transport = createDshDeepSeekProductionDirectorTransport(
+      { prepareCall } as unknown as Pick<LlmRuntime, 'prepareCall'>,
+    )
+    expect(prepareCall).not.toHaveBeenCalled()
+    const result = await executeDirectorProviderPermit(
+      deepSeekPermit(), transport, new AbortController().signal,
+    )
+    expect(result).toMatchObject({ state: 'submission_unknown', automaticRetry: false })
+    expect(prepareCall).toHaveBeenCalledOnce()
+    expect(stream).not.toHaveBeenCalled()
+  })
+
+  it('rejects a prompt above its conservative input-token byte bound before prepareCall', async () => {
+    const permit = deepSeekPermit()
+    const payload = permit.payload as { body: { estimated_input_tokens: number } }
+    payload.body.estimated_input_tokens = 1
+    const prepareCall = vi.fn()
+    const result = await executeDirectorProviderPermit(
+      permit,
+      createDshDeepSeekProductionDirectorTransport(
+        { prepareCall },
+      ),
+      new AbortController().signal,
+    )
+    expect(result).toMatchObject({ state: 'submission_unknown', automaticRetry: false })
+    expect(prepareCall).not.toHaveBeenCalled()
+  })
+
+  it('prepares a private lock without running a provider transport', async () => {
+    const fetchImpl = vi.fn(async (input: URL | RequestInfo) => {
+      const path = new URL(input instanceof Request ? input.url : input.toString()).pathname
+      if (path.endsWith('/binding')) return Response.json(deepSeekBinding())
+      if (path.endsWith('/prepare')) return Response.json(deepSeekPermit())
+      throw new Error('unexpected request')
+    }) as typeof fetch
+    const lock = await prepareDirectorTaskLock({
+      baseUrl: 'http://127.0.0.1:49999',
+      executionKey: 'execution-key-material-is-at-least-32-bytes',
+      fetch: fetchImpl,
+    }, 'task_1', 'director-paid.v1', 'c'.repeat(64), new AbortController().signal)
+    expect(lock).toMatchObject({ binding: { taskId: 'task_1' }, permit: { state: 'dispatch_permitted' } })
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
+  it('reads a pre-submit binding without claiming a dispatch permit', async () => {
+    const fetchImpl = vi.fn(async (input: URL | RequestInfo) => {
+      const path = new URL(input instanceof Request ? input.url : input.toString()).pathname
+      if (path.endsWith('/binding')) return Response.json(deepSeekBinding())
+      throw new Error('unexpected request')
+    }) as typeof fetch
+    const binding = await readDirectorTaskBinding({
+      baseUrl: 'http://127.0.0.1:49999',
+      executionKey: 'execution-key-material-is-at-least-32-bytes',
+      fetch: fetchImpl,
+    }, 'task_1', new AbortController().signal)
+    expect(binding).toMatchObject({ taskId: 'task_1', dispatchEpoch: 0, claimToken: '' })
+    expect(fetchImpl).toHaveBeenCalledOnce()
   })
 
   it('signs Host-only requests and recovers terminal response loss without a second inference', async () => {
