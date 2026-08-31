@@ -52,6 +52,7 @@ class OwnershipTests(unittest.TestCase):
         binding = {
             "taskId": "task-1", "workOrderSha256": "b" * 64,
             "contextSnapshotSha256": "c" * 64, "promptSha256": "d" * 64,
+            "outputContractSha256": "5" * 64,
             "requestSha256": "e" * 64, "payloadSha256": "f" * 64,
             "provider": "deepseek-official", "model": "deepseek-v4-pro",
             "routeKey": production["routeKey"],
@@ -87,12 +88,14 @@ class OwnershipTests(unittest.TestCase):
         local.write_json(private_lock, binding)
         lock = (
             Path(config["coreRoot"])
-            / "docs/qingmu-os/evidence/2026-08-31-director-deepseek-text-canary-c1-phase1"
-            / "c1-phase1-lock-pack.json"
+            / "docs/qingmu-os/evidence/2026-08-31-director-json-contract-c1-phase1-6"
+            / "c1-phase1-6-lock-pack.json"
         )
         lock.parent.mkdir(parents=True)
         lock.write_text(json.dumps({
-            "schema": "qingmu.c1-deepseek-text-pre-submit-lock.v1",
+            "schema": "qingmu.c1-deepseek-text-pre-submit-lock.v2",
+            "status": "active",
+            "submitAllowed": True,
             "canary": {"root": str(root), "instanceId": "instance-1",
                        "database": str(root / "storage/jason.db"),
                        "isolatedSyntheticProject": True, "humanContentSignoff": False},
@@ -103,6 +106,7 @@ class OwnershipTests(unittest.TestCase):
             "workOrder": {"taskId": "task-1", "routeKey": production["routeKey"],
                           "workOrderSha256": binding["workOrderSha256"],
                           "promptSha256": binding["promptSha256"],
+                          "outputContractSha256": binding["outputContractSha256"],
                           "inputSha256": binding["contextSnapshotSha256"],
                           "inputPolicy": binding["inputPolicy"],
                           "requestSha256": binding["requestSha256"],
@@ -341,6 +345,21 @@ class OwnershipTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root, config, lock, digest, inspection = self.director_submit_world(Path(directory))
             with patch.object(local, "_probe_director_credential", return_value={"available": True}):
+                current = json.loads(lock.read_text())
+                old = dict(current)
+                old["schema"] = "qingmu.c1-deepseek-text-pre-submit-lock.v1"
+                old.pop("status")
+                old.pop("submitAllowed")
+                lock.write_text(json.dumps(old))
+                old_digest = local.hashlib.sha256(lock.read_bytes()).hexdigest()
+                with patch.object(local, "_writer_submit_inspection", return_value=inspection):
+                    with self.assertRaisesRegex(ValueError, "锁与易梦"):
+                        local.director_submit_preflight(
+                            root, config, task_id="task-1", lock_pack=lock,
+                            lock_sha256=old_digest,
+                        )
+                lock.write_text(json.dumps(current))
+                digest = local.hashlib.sha256(lock.read_bytes()).hexdigest()
                 with patch.object(local, "_writer_submit_inspection", return_value={**inspection, "dispatchEpoch": 1}):
                     with self.assertRaisesRegex(ValueError, "锁与易梦"):
                         local.director_submit_preflight(

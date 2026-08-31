@@ -1,6 +1,30 @@
 /** Host-only execution of a Yimeng-signed DirectorProposal permit. */
 import { createHash } from 'node:crypto'
 
+/** Writer-owned, content-addressed rules for one Director proposal JSON object. */
+export interface DirectorProposalOutputContract {
+  readonly schema: string
+  readonly responseInstruction: string
+  readonly root: {
+    readonly requiredFields: readonly string[]
+    readonly optionalFields: readonly string[]
+    readonly additionalFieldsAllowed: boolean
+    readonly fieldRules: Readonly<Record<string, Readonly<Record<string, unknown>>>>
+  }
+  readonly item: {
+    readonly requiredFields: readonly string[]
+    readonly optionalFields: readonly string[]
+    readonly additionalFieldsAllowed: boolean
+    readonly fieldRules: Readonly<Record<string, Readonly<Record<string, unknown>>>>
+  }
+  readonly relations: { readonly uniqueItemFields: readonly string[] }
+  readonly nullAndUnknown: {
+    readonly nullAllowed: boolean
+    readonly unknownPlaceholderAllowed: boolean
+    readonly noSuggestionAction: string
+  }
+}
+
 /** The only paid-capable permit accepted by the Host seam. */
 export interface DirectorProviderDispatchPermit {
   readonly schema: 'jason.qingmu-director-provider-dispatch-permit.v1'
@@ -21,6 +45,8 @@ export interface DirectorProviderDispatchPermit {
     readonly inputSha256: string
     readonly promptSha256: string
     readonly outputSchema: 'qingmu.director-proposal.v1'
+    readonly outputContract: DirectorProposalOutputContract
+    readonly outputContractSha256: string
     readonly projectId: string
     readonly episodeId: string
     readonly sceneId: string
@@ -59,7 +85,7 @@ export interface DirectorProviderProposal {
 /** Minimal provider result required before the UI may call a proposal an AI result. */
 export interface DirectorProviderTransportResult {
   readonly providerCompletionId: string
-  readonly providerRequestId: string
+  readonly providerRequestId: string | null
   readonly finishReason: string
   readonly usage: {
     readonly promptTokens: number
@@ -120,40 +146,78 @@ const proposal = (
   value: unknown,
   workOrder: DirectorProviderDispatchPermit['workOrder'],
 ): DirectorProviderProposal => {
+  const contract = workOrder.outputContract
+  if (contract.schema !== 'jason.qingmu-director-proposal-output-contract.v1'
+    || sha(contract) !== workOrder.outputContractSha256
+    || contract.root.optionalFields.length !== 0
+    || contract.root.additionalFieldsAllowed
+    || contract.item.optionalFields.length !== 0
+    || contract.item.additionalFieldsAllowed
+    || contract.nullAndUnknown.nullAllowed
+    || contract.nullAndUnknown.unknownPlaceholderAllowed
+    || contract.nullAndUnknown.noSuggestionAction !== 'omit_item') {
+    throw new Error('director provider output contract invalid')
+  }
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error('director provider proposal invalid')
   }
   const root = value as Record<string, unknown>
-  const keys = ['schema', 'projectId', 'episodeId', 'sceneId', 'shotId', 'advisoryOnly', 'items']
-  if (Object.keys(root).sort().join('\0') !== [...keys].sort().join('\0')
-    || root.schema !== workOrder.outputSchema || root.projectId !== workOrder.projectId
-    || root.episodeId !== workOrder.episodeId || root.sceneId !== workOrder.sceneId
-    || root.shotId !== workOrder.shotId || root.advisoryOnly !== true
-    || !Array.isArray(root.items) || root.items.length < 1 || root.items.length > 8) {
+  const rootRules = contract.root.fieldRules
+  const itemsRule = rootRules.items as Record<string, unknown>
+  if (Object.keys(root).sort().join('\0') !== [...contract.root.requiredFields].sort().join('\0')
+    || root.schema !== (rootRules.schema as Record<string, unknown>).const
+    || root.projectId !== (rootRules.projectId as Record<string, unknown>).const
+    || root.episodeId !== (rootRules.episodeId as Record<string, unknown>).const
+    || root.sceneId !== (rootRules.sceneId as Record<string, unknown>).const
+    || root.shotId !== (rootRules.shotId as Record<string, unknown>).const
+    || root.advisoryOnly !== (rootRules.advisoryOnly as Record<string, unknown>).const
+    || !Array.isArray(root.items)
+    || root.items.length < Number(itemsRule.minItems)
+    || root.items.length > Number(itemsRule.maxItems)) {
     throw new Error('director provider proposal invalid')
   }
+  const itemRules = contract.item.fieldRules
+  const idRule = itemRules.id as Record<string, unknown>
+  const fieldRule = itemRules.field as Record<string, unknown>
+  const proposedRule = itemRules.proposedValue as Record<string, unknown>
+  const dependentTypes = proposedRule.dependentTypes as Record<string, unknown>
+  const impactRule = itemRules.impact as Record<string, unknown>
   const ids = new Set<string>(), fields = new Set<string>()
   for (const rawItem of root.items) {
     if (typeof rawItem !== 'object' || rawItem === null || Array.isArray(rawItem)) {
       throw new Error('director provider proposal item invalid')
     }
     const item = rawItem as Record<string, unknown>
-    if (Object.keys(item).sort().join('\0') !== ['field', 'id', 'impact', 'proposedValue'].join('\0')) {
+    if (Object.keys(item).sort().join('\0') !== [...contract.item.requiredFields].sort().join('\0')) {
       throw new Error('director provider proposal item invalid')
     }
     const itemId = identifier(item.id, 'proposal item id')
+    if (itemId.length < Number(idRule.minLength) || itemId.length > Number(idRule.maxLength)
+      || !(new RegExp(String(idRule.pattern))).test(itemId)) {
+      throw new Error('director provider proposal item invalid')
+    }
     const field = item.field
-    if (!['narrative', 'visual', 'action', 'durationSec'].includes(String(field))
+    if (!Array.isArray(fieldRule.enum) || !fieldRule.enum.includes(field)
       || ids.has(itemId) || fields.has(String(field))) throw new Error('director provider proposal item invalid')
     const proposed = item.proposedValue
-    if (field === 'durationSec') {
-      if (typeof proposed !== 'number' || !Number.isFinite(proposed) || proposed < 0.5 || proposed > 30) {
-        throw new Error('director provider proposal value invalid')
-      }
-    } else if (typeof proposed !== 'string' || proposed.trim().length === 0 || proposed.length > 2000) {
+    const valueRule = dependentTypes[String(field)]
+    if (typeof valueRule !== 'object' || valueRule === null) {
       throw new Error('director provider proposal value invalid')
     }
-    if (typeof item.impact !== 'string' || item.impact.trim().length === 0 || item.impact.length > 500) {
+    const typedValueRule = valueRule as Record<string, unknown>
+    if (field === 'durationSec') {
+      if (typeof proposed !== 'number' || !Number.isFinite(proposed)
+        || proposed < Number(typedValueRule.minimum) || proposed > Number(typedValueRule.maximum)) {
+        throw new Error('director provider proposal value invalid')
+      }
+    } else if (typeof proposed !== 'string' || proposed.trim().length === 0
+      || proposed.length < Number(typedValueRule.minLength)
+      || proposed.length > Number(typedValueRule.maxLength)) {
+      throw new Error('director provider proposal value invalid')
+    }
+    if (typeof item.impact !== 'string' || item.impact.trim().length === 0
+      || item.impact.length < Number(impactRule.minLength)
+      || item.impact.length > Number(impactRule.maxLength)) {
       throw new Error('director provider proposal impact invalid')
     }
     ids.add(itemId); fields.add(String(field))
@@ -199,6 +263,12 @@ export async function executeDirectorProviderPermit(
   const inputSha256 = digest(permit.inputSha256, 'inputSha256')
   const promptSha256 = digest(permit.promptSha256, 'promptSha256')
   const workOrderId = identifier(permit.workOrder.workOrderId, 'workOrderId')
+  const outputContractSha256 = digest(
+    permit.workOrder.outputContractSha256, 'outputContractSha256',
+  )
+  if (sha(permit.workOrder.outputContract) !== outputContractSha256) {
+    throw new Error('director provider output contract mismatch')
+  }
   try {
     const result = await transport.execute({ provider, model, payload: permit.payload, maxRetries: 0 }, signal)
     const usage = result.usage
@@ -213,7 +283,9 @@ export async function executeDirectorProviderPermit(
       provider, model, inputSha256, promptSha256,
       outputSha256: sha(normalizedProposal),
       providerCompletionId: identifier(result.providerCompletionId, 'providerCompletionId'),
-      providerRequestId: identifier(result.providerRequestId, 'providerRequestId'),
+      providerRequestId: result.providerRequestId === null
+        ? null
+        : identifier(result.providerRequestId, 'providerRequestId'),
       usage, finishReason: identifier(result.finishReason, 'finishReason'),
       providerResult: true, proposal: normalizedProposal,
     }

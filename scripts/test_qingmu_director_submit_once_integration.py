@@ -104,9 +104,11 @@ class DirectorSubmitOnceIntegration(unittest.TestCase):
             ).hexdigest(),
             "contextSnapshotSha256": context["contextSnapshotSha256"],
         }
-        self.lock_pack = self.root / "c1-phase1-lock-pack.json"
+        self.lock_pack = self.root / "c1-phase1-6-lock-pack.json"
         self.lock_pack.write_text(json.dumps({
-            "schema": "qingmu.c1-deepseek-text-pre-submit-lock.v1",
+            "schema": "qingmu.c1-deepseek-text-pre-submit-lock.v2",
+            "status": "active",
+            "submitAllowed": True,
             "canary": {"root": str(self.root), "instanceId": config["instanceId"],
                 "database": str(self.root / "storage/jason.db"),
                 "isolatedSyntheticProject": True, "humanContentSignoff": False},
@@ -117,6 +119,7 @@ class DirectorSubmitOnceIntegration(unittest.TestCase):
             "workOrder": {"taskId": self.task_id, "routeKey": binding["routeKey"],
                 "workOrderSha256": binding["workOrderSha256"],
                 "promptSha256": binding["promptSha256"],
+                "outputContractSha256": binding["outputContractSha256"],
                 "inputSha256": binding["contextSnapshotSha256"],
                 "inputPolicy": binding["inputPolicy"],
                 "requestSha256": binding["requestSha256"],

@@ -98,7 +98,7 @@ DeepSeek 请求身份独立于应用归因。凭据解析成功后，每个提�
 - **推理回传规则**：每个携带推理内容的 assistant 轮次都会将 `reasoning_content` 序列化回历史。思考模式在工具调用轮次上必需它；DeepSeek 在其他轮次上会忽略它，而将该对话重新编码转发给其他厂商的网关，要靠对回传原文取哈希来恢复该轮次上游的思考签名。
 - 支持图片的 user 消息会保留文本／图片顺序。Tool role 内容仍为字符串；连续工具结果中的图片会用 `Attached image(s) from tool result:` 汇总到随后一条 user 消息。
 - Cache 计量：`cacheReadTokens` ← `prompt_cache_hit_tokens` / `prompt_tokens_details.cached_tokens`；DeepSeek 不报告 cache-write 指标。
-- `director-proposal` 请求仅支持文本，强制使用 `response_format: {type: 'json_object'}`，并将重试所有权保留给 Host 调用方。流成功时，finish 分片的 replay metadata 保留真实响应 `x-request-id` / `x-deepseek-request-id`、Chat Completions 响应正文 `id` 和原生 `finish_reason`；通用适配器为向后兼容保持这些字段可选，而可付费 Host 可在确认请求前要求它们全部存在。
+- `director-proposal` 请求仅支持文本，强制使用 `response_format: {type: 'json_object'}`，并将重试所有权保留给 Host 调用方。流成功时，finish 分片的 replay metadata 保留 Chat Completions 响应正文 `id`、原生 `finish_reason`，以及 Provider 确实返回时的 `x-request-id` / `x-deepseek-request-id`。青木要求正文 completion `id`；响应头保持可空元数据，绝不伪造。
 
 ## 错误
 

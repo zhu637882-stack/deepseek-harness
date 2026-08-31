@@ -218,6 +218,36 @@ describe('DeepSeekAdapter against a mock server', () => {
     expect(server.requests).toHaveLength(1)
   })
 
+  it('preserves a successful completion when the optional request id header is absent', async () => {
+    const server = await mockServer([{ kind: 'sse', events: [
+      '{"id":"completion-without-request-header","choices":[{"delta":{"content":"{\\"ok\\":true}"}}]}',
+      '{"id":"completion-without-request-header","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":2}}',
+      '[DONE]',
+    ] }])
+    const ctx = await harness(server.url, { retryPolicy: { mode: 'normal', maxRetries: 0 } })
+    const prepared = await ctx.llm.prepareCall({
+      provider: 'deepseek-official', model: 'deepseek-v4-pro',
+      reasoningEffort: ReasoningEffortId('off'), maxTokens: 512,
+    })
+    const chunks = []
+    for await (const chunk of prepared.stream({
+      ...prepared.config,
+      messages: [createUserMessage({
+        content: [{ type: 'text' as const, text: 'return JSON only' }],
+        source: { kind: 'plugin' as const, plugin: 'test' },
+      })],
+      purpose: 'director-proposal' as const,
+    })) chunks.push(chunk)
+    expect(chunks.at(-1)).toMatchObject({
+      type: 'finish', replayState: { response: {
+        providerCompletionId: 'completion-without-request-header', finishReason: 'stop',
+      } },
+    })
+    expect((chunks.at(-1) as { replayState?: { response?: object } }).replayState?.response)
+      .not.toHaveProperty('providerRequestId')
+    expect(server.requests).toHaveLength(1)
+  })
+
   it('fails closed when streamed completion id changes', async () => {
     const server = await mockServer([{ kind: 'sse', headers: { 'x-request-id': 'request-drift-1' }, events: [
       '{"id":"completion-a","choices":[{"delta":{"content":"partial"},"finish_reason":"length"}]}',

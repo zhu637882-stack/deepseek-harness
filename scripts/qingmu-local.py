@@ -579,7 +579,7 @@ def cold_integrity(database: Path) -> str:
 DIRECTOR_PRODUCTION_CONFIRMATION = "QINGMU_C1_ONE_PROVIDER_POST_MAX_CNY_0_16"
 DIRECTOR_LOCK_FIELDS = (
     "taskId", "workOrderSha256", "contextSnapshotSha256", "promptSha256",
-    "requestSha256", "payloadSha256", "provider", "model", "routeKey",
+    "outputContractSha256", "requestSha256", "payloadSha256", "provider", "model", "routeKey",
     "inputPolicy", "methodPackageSha256", "pricingSnapshotSha256", "dispatchKey",
     "dispatchEpoch", "claimToken", "claimEpoch", "exclusiveExecutionLane",
 )
@@ -721,7 +721,9 @@ def director_submit_preflight(
     }
     expected_pricing = locked_pack.get("pricing", {})
     if (
-        locked_pack.get("schema") != "qingmu.c1-deepseek-text-pre-submit-lock.v1"
+        locked_pack.get("schema") != "qingmu.c1-deepseek-text-pre-submit-lock.v2"
+        or locked_pack.get("status") != "active"
+        or locked_pack.get("submitAllowed") is not True
         or locked_pack.get("canary") != {
             "root": str(root),
             "instanceId": config["instanceId"],
@@ -744,6 +746,8 @@ def director_submit_preflight(
         or locked_pack.get("workOrder", {}).get("routeKey") != inspection.get("routeKey")
         or locked_pack.get("workOrder", {}).get("workOrderSha256") != inspection.get("workOrderSha256")
         or locked_pack.get("workOrder", {}).get("promptSha256") != inspection.get("promptSha256")
+        or locked_pack.get("workOrder", {}).get("outputContractSha256")
+        != inspection.get("outputContractSha256")
         or locked_pack.get("workOrder", {}).get("inputSha256") != inspection.get("contextSnapshotSha256")
         or locked_pack.get("workOrder", {}).get("inputPolicy") != inspection.get("inputPolicy")
         or locked_pack.get("workOrder", {}).get("requestSha256") != inspection.get("requestSha256")

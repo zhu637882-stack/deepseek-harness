@@ -24,6 +24,7 @@ export interface DirectorPaidWorkOrder {
   readonly model: string
   readonly inputSha256: string
   readonly promptSha256: string
+  readonly outputContractSha256: string
   readonly workOrderSha256: string
   readonly methodPackage: { readonly version: string; readonly sha256: string }
   readonly pricingSnapshot: { readonly sha256: string }
@@ -107,7 +108,8 @@ export function normalizeDirectorPaidWorkOrder(
     throw new Error('director paid work order authority mismatch')
   }
   for (const [field, item] of Object.entries({ inputSha256: root.inputSha256, promptSha256: root.promptSha256,
-    workOrderSha256: root.workOrderSha256, pricingSnapshotSha256: pricing.sha256 })) digest(item, field)
+    outputContractSha256: root.outputContractSha256, workOrderSha256: root.workOrderSha256,
+    pricingSnapshotSha256: pricing.sha256 })) digest(item, field)
   for (const field of ['workOrderId', 'generationTaskId', 'provider', 'model', 'dispatchState']) id(root[field], field)
   return {
     schema: 'jason.qingmu-director-provider-work-order.v1',
@@ -121,6 +123,7 @@ export function normalizeDirectorPaidWorkOrder(
     model: id(root.model, 'model'),
     inputSha256: digest(root.inputSha256, 'inputSha256'),
     promptSha256: digest(root.promptSha256, 'promptSha256'),
+    outputContractSha256: digest(root.outputContractSha256, 'outputContractSha256'),
     workOrderSha256: digest(root.workOrderSha256, 'workOrderSha256'),
     methodPackage: {
       version: id(method.version, 'methodPackage.version'),

@@ -98,7 +98,7 @@ DeepSeek request identity is separate from app attribution. After credential res
 - **Reasoning passback rule**: every assistant turn that carried reasoning serializes `reasoning_content` back in history. Thinking mode requires it on tool-call turns; DeepSeek ignores it elsewhere, while a gateway re-encoding the conversation for another vendor recovers that turn's upstream thinking signature by hashing the replayed text.
 - Image-capable user messages preserve text/image order. Tool-role content remains a string; consecutive tool-result images are grouped into the following user message with `Attached image(s) from tool result:`.
 - Cache accounting: `cacheReadTokens` ← `prompt_cache_hit_tokens` / `prompt_tokens_details.cached_tokens`; DeepSeek reports no cache-write metric.
-- A `director-proposal` request is text-only, forces `response_format: {type: 'json_object'}`, and leaves retry ownership with its Host caller. On a successful stream, the finish chunk's replay metadata preserves the actual response `x-request-id` / `x-deepseek-request-id`, Chat Completions body `id`, and native `finish_reason`; the generic adapter keeps these fields optional for backward compatibility, while a paid-capable Host may require all of them before acknowledging a request.
+- A `director-proposal` request is text-only, forces `response_format: {type: 'json_object'}`, and leaves retry ownership with its Host caller. On a successful stream, the finish chunk's replay metadata preserves the Chat Completions body `id`, native `finish_reason`, and the actual response `x-request-id` / `x-deepseek-request-id` when the provider supplies one. Qingmu requires the completion body `id`; the response header remains nullable metadata and is never fabricated.
 
 ## Errors
 

@@ -81,7 +81,7 @@ describe('Host-only director replay proposal', () => {
     const response = { schema: 'jason.qingmu-director-provider-work-order.v1',
       workOrderId: 'work_order_1', generationTaskId: 'task_1', ...scope,
       provider: 'fake', model: 'model_1', inputSha256: paidRequest.expectedContextSnapshotSha256,
-      promptSha256: 'a'.repeat(64), workOrderSha256: 'b'.repeat(64),
+      promptSha256: 'a'.repeat(64), outputContractSha256: '9'.repeat(64), workOrderSha256: 'b'.repeat(64),
       methodPackage: { version: paidRequest.methodPackageVersion, sha256: paidRequest.methodPackageSha256 },
       pricingSnapshot: { sha256: 'c'.repeat(64) }, requestPolicy: { maxAttempts: 1, maxRetries: 0 },
       dispatchState: 'DispatchPending', internalDebug: 'must-not-cross-the-Host-boundary' }

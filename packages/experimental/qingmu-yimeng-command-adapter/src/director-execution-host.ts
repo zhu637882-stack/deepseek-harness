@@ -19,6 +19,7 @@ export interface DirectorExecutionBinding {
   readonly workOrderSha256: string
   readonly contextSnapshotSha256: string
   readonly promptSha256: string
+  readonly outputContractSha256: string
   readonly requestSha256: string
   readonly payloadSha256: string
   readonly provider: string
@@ -180,7 +181,7 @@ const createDshDirectorTransport = (
     }
     if (usage === undefined || metadata === undefined
       || typeof metadata.providerCompletionId !== 'string'
-      || typeof metadata.providerRequestId !== 'string'
+      || (metadata.providerRequestId !== undefined && typeof metadata.providerRequestId !== 'string')
       || typeof metadata.finishReason !== 'string'
       || metadata.finishReason !== finishReason) {
       throw new Error('director DSh provider receipt incomplete')
@@ -191,7 +192,7 @@ const createDshDirectorTransport = (
     const promptTokens = usage.inputTokens + cacheTokens + (usage.cacheWriteTokens ?? 0)
     return {
       providerCompletionId: metadata.providerCompletionId,
-      providerRequestId: metadata.providerRequestId,
+      providerRequestId: metadata.providerRequestId ?? null,
       finishReason: metadata.finishReason,
       usage: {
         promptTokens,
@@ -296,6 +297,8 @@ const assertPermitBinding = (
     || permit.promptSha256 !== binding.promptSha256
     || workOrder.workOrderSha256 !== binding.workOrderSha256
     || sha(unsignedWorkOrder) !== binding.workOrderSha256
+    || workOrder.outputContractSha256 !== binding.outputContractSha256
+    || sha(workOrder.outputContract) !== binding.outputContractSha256
     || workOrder.methodPackage.sha256 !== binding.methodPackageSha256
     || workOrder.pricingSnapshot.sha256 !== binding.pricingSnapshotSha256
     || workOrder.routeKey !== binding.routeKey

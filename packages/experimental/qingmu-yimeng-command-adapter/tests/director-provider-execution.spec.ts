@@ -30,11 +30,45 @@ const canonical = (value: unknown): string => {
   return `{${Object.keys(item).sort().map(key => `${JSON.stringify(key)}:${canonical(item[key])}`).join(',')}}`
 }
 const sha = (value: unknown): string => createHash('sha256').update(canonical(value)).digest('hex')
+const outputContract = () => ({
+  schema: 'jason.qingmu-director-proposal-output-contract.v1' as const,
+  responseInstruction: '只输出一个合法 JSON 对象；不得输出 Markdown、代码围栏、解释、前后缀文本或任何额外键。',
+  root: {
+    requiredFields: ['schema', 'projectId', 'episodeId', 'sceneId', 'shotId', 'advisoryOnly', 'items'],
+    optionalFields: [], additionalFieldsAllowed: false as const,
+    fieldRules: {
+      schema: { type: 'string', const: 'qingmu.director-proposal.v1' },
+      projectId: { type: 'string', const: 'project_1' }, episodeId: { type: 'string', const: 'episode_1' },
+      sceneId: { type: 'string', const: 'scene_1' }, shotId: { type: 'string', const: 'shot_1' },
+      advisoryOnly: { type: 'boolean', const: true }, items: { type: 'array', minItems: 1, maxItems: 8 },
+    },
+  },
+  item: {
+    requiredFields: ['id', 'field', 'proposedValue', 'impact'], optionalFields: [],
+    additionalFieldsAllowed: false as const,
+    fieldRules: {
+      id: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.:-]+$' },
+      field: { type: 'string', enum: ['narrative', 'visual', 'action', 'durationSec'] },
+      proposedValue: { dependentTypes: {
+        narrative: { type: 'string', minLength: 1, maxLength: 2000, nonBlank: true },
+        visual: { type: 'string', minLength: 1, maxLength: 2000, nonBlank: true },
+        action: { type: 'string', minLength: 1, maxLength: 2000, nonBlank: true },
+        durationSec: { type: 'number', minimum: 0.5, maximum: 30 },
+      } },
+      impact: { type: 'string', minLength: 1, maxLength: 500, nonBlank: true },
+    },
+  },
+  relations: { uniqueItemFields: ['id', 'field'] },
+  nullAndUnknown: { nullAllowed: false as const, unknownPlaceholderAllowed: false as const,
+    noSuggestionAction: 'omit_item' as const },
+})
 const workOrder = (): DirectorProviderDispatchPermit['workOrder'] => {
+  const contract = outputContract()
   const body = { workOrderId: 'work_order_1', provider: 'fake', model: 'model_1',
     routeKey: 'fake.director', providerCapability: 'chat.agent' as const,
     inputSha256: 'a'.repeat(64), promptSha256: 'b'.repeat(64),
     outputSchema: 'qingmu.director-proposal.v1' as const, projectId: 'project_1', episodeId: 'episode_1',
+    outputContract: contract, outputContractSha256: sha(contract),
     sceneId: 'scene_1', shotId: 'shot_1',
     methodPackage: { version: 'director-paid.v1', sha256: 'c'.repeat(64) },
     pricingSnapshot: { sha256: 'f'.repeat(64) },
@@ -54,22 +88,32 @@ const permit = (): DirectorProviderDispatchPermit => ({
 
 const deepSeekPermit = (): DirectorProviderDispatchPermit => {
   const base = permit()
+  const prompt = {
+    schema: 'jason.qingmu-director-text-prompt.v1', purpose: 'director_text_proposal_canary',
+    responseInstruction: base.workOrder.outputContract.responseInstruction,
+    contextSnapshot: { contextSnapshotSha256: 'a'.repeat(64) },
+    methodPackage: base.workOrder.methodPackage, outputSchema: base.workOrder.outputSchema,
+    outputContract: base.workOrder.outputContract,
+    outputContractSha256: base.workOrder.outputContractSha256,
+  }
   const unsigned = {
     ...base.workOrder,
     provider: 'deepseek-official', model: 'deepseek-v4-pro', routeKey: 'test.director.deepseek',
+    promptSha256: sha(prompt),
   } as Record<string, unknown>
   delete unsigned.workOrderSha256
   return {
     ...base,
     provider: 'deepseek-official', model: 'deepseek-v4-pro',
+    promptSha256: sha(prompt),
     workOrder: { ...unsigned, workOrderSha256: sha(unsigned) } as unknown as DirectorProviderDispatchPermit['workOrder'],
     payload: {
       project_id: 'project_1', episode_id: 'episode_1', _requested_by_user_id: 'user_1',
       body: {
         model: 'deepseek-v4-pro',
-        messages: [{ role: 'user', content: '{"schema":"jason.qingmu-director-text-prompt.v1"}' }],
+        messages: [{ role: 'user', content: canonical(prompt) }],
         max_completion_tokens: 512, enable_thinking: false,
-        estimated_input_tokens: 2048, estimated_output_tokens: 512,
+        estimated_input_tokens: 16000, estimated_output_tokens: 512,
       },
     },
   }
@@ -81,6 +125,7 @@ const binding = (): DirectorExecutionBinding => {
   return {
     taskId: 'task_1', workOrderSha256: value.workOrder.workOrderSha256,
     contextSnapshotSha256: 'a'.repeat(64), promptSha256: 'b'.repeat(64),
+    outputContractSha256: value.workOrder.outputContractSha256,
     requestSha256: sha({ capability: 'chat.agent', routeKey: value.workOrder.routeKey,
       provider: 'fake', model: 'model_1', payloadSha256 }), payloadSha256,
     provider: 'fake', model: 'model_1', routeKey: value.workOrder.routeKey,
@@ -98,6 +143,7 @@ const deepSeekBinding = (): DirectorExecutionBinding => {
     workOrderSha256: value.workOrder.workOrderSha256,
     contextSnapshotSha256: value.inputSha256,
     promptSha256: value.promptSha256,
+    outputContractSha256: value.workOrder.outputContractSha256,
     requestSha256: sha({
       capability: value.workOrder.providerCapability,
       routeKey: value.workOrder.routeKey,
@@ -150,6 +196,39 @@ describe('Director provider Host execution seam', () => {
     expect(chatCompletions.mock.calls[0]?.[0]).toMatchObject({ maxRetries: 0, provider: 'fake', model: 'model_1' })
   })
 
+  it('accepts the full four-field proposal allowed by the signed output contract', async () => {
+    const full = {
+      ...transportResult(),
+      proposal: {
+        ...transportResult().proposal,
+        items: [
+          { id: 'item_narrative', field: 'narrative' as const, proposedValue: '叙事建议', impact: '叙事影响' },
+          { id: 'item_visual', field: 'visual' as const, proposedValue: '画面建议', impact: '画面影响' },
+          { id: 'item_action', field: 'action' as const, proposedValue: '动作建议', impact: '动作影响' },
+          { id: 'item_duration', field: 'durationSec' as const, proposedValue: 4.5, impact: '时长影响' },
+        ],
+      },
+    }
+    const result = await executeDirectorProviderPermit(
+      permit(), { execute: async () => full }, new AbortController().signal,
+    )
+    expect(result).toMatchObject({ state: 'provider_result', receipt: { proposal: { items: full.proposal.items } } })
+  })
+
+  it.each([
+    ['missing root field', (() => { const value = { ...transportResult().proposal } as Record<string, unknown>; delete value.shotId; return value })()],
+    ['extra root field', { ...transportResult().proposal, extra: true }],
+    ['bad item', { ...transportResult().proposal,
+      items: [{ id: 'item_bad', field: 'durationSec', proposedValue: 31, impact: '越界' }] }],
+  ])('fails %s closed under the signed output contract', async (_name, invalidProposal) => {
+    const execute = vi.fn(async () => ({ ...transportResult(), proposal: invalidProposal }))
+    const result = await executeDirectorProviderPermit(
+      permit(), { execute: execute as never }, new AbortController().signal,
+    )
+    expect(result).toMatchObject({ state: 'submission_unknown', automaticRetry: false })
+    expect(execute).toHaveBeenCalledOnce()
+  })
+
   it('uses the real DSh prepareCall and llm-deepseek stream exactly once', async () => {
     const response = JSON.stringify(transportResult().proposal)
     const server = await mockServer([{ kind: 'sse', headers: { 'x-request-id': 'request-real-1' }, events: [
@@ -188,6 +267,36 @@ describe('Director provider Host execution seam', () => {
     } finally {
       await server.close()
       await rm(home, { recursive: true, force: true })
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('settles with the required completion id when the optional request header is absent', async () => {
+    const response = JSON.stringify(transportResult().proposal)
+    const server = await mockServer([{ kind: 'sse', events: [
+      JSON.stringify({ id: 'completion-no-request-header', choices: [{ delta: { content: response } }] }),
+      JSON.stringify({ id: 'completion-no-request-header', choices: [{ finish_reason: 'stop' }],
+        usage: { prompt_tokens: 20, completion_tokens: 10, prompt_cache_hit_tokens: 5 } }),
+      '[DONE]',
+    ] }])
+    vi.stubEnv('DEEPSEEK_API_KEY', 'isolated-mock-key')
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmDeepSeek, {
+      baseURL: server.url, thinking: 'disabled', reasoningEffort: 'off',
+      retryPolicy: { mode: 'normal', maxRetries: 0 },
+    })
+    try {
+      const result = await executeDirectorProviderPermit(
+        deepSeekPermit(), createDshDeepSeekDirectorTransport(ctx.llm, { mockBaseUrl: server.url }),
+        new AbortController().signal,
+      )
+      expect(result).toMatchObject({ state: 'provider_result', receipt: {
+        providerCompletionId: 'completion-no-request-header', providerRequestId: null,
+      } })
+      expect(server.requests).toHaveLength(1)
+    } finally {
+      await server.close()
       vi.unstubAllEnvs()
     }
   })
@@ -239,9 +348,14 @@ describe('Director provider Host execution seam', () => {
   })
 
   it.each([
-    ['missing request id', { kind: 'sse', events: [
-      '{"id":"completion-missing-header","choices":[{"delta":{"content":"{}"}}]}',
-      '{"id":"completion-missing-header","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
+    ['Markdown fenced JSON', { kind: 'sse', headers: { 'x-request-id': 'request-markdown' }, events: [
+      '{"id":"completion-markdown","choices":[{"delta":{"content":"```json\\n{}\\n```"}}]}',
+      '{"id":"completion-markdown","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
+      '[DONE]',
+    ] }],
+    ['blank response', { kind: 'sse', headers: { 'x-request-id': 'request-blank' }, events: [
+      '{"id":"completion-blank","choices":[{"delta":{"content":"   "}}]}',
+      '{"id":"completion-blank","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
       '[DONE]',
     ] }],
     ['invalid JSON', { kind: 'sse', headers: { 'x-request-id': 'request-invalid-json' }, events: [
@@ -488,6 +602,19 @@ describe('Director provider Host execution seam', () => {
     const execute = vi.fn()
     await expect(executeDirectorProviderPermit({ ...permit(), model: 'drifted' }, { execute }, new AbortController().signal))
       .rejects.toThrow('permit mismatch')
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it('rejects output-contract SHA drift before transport', async () => {
+    const execute = vi.fn()
+    const original = permit()
+    const drifted = {
+      ...original,
+      workOrder: { ...original.workOrder, outputContractSha256: '9'.repeat(64) },
+    }
+    await expect(executeDirectorProviderPermit(
+      drifted, { execute }, new AbortController().signal,
+    )).rejects.toThrow('output contract mismatch')
     expect(execute).not.toHaveBeenCalled()
   })
 
