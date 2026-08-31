@@ -1380,6 +1380,12 @@ export type YimengReferenceCandidateQualityStatus = 'pending' | 'passed' | 'fail
 /** The active decision source recorded for a reference candidate. */
 export type YimengReferenceCandidateDecisionKind = 'none' | 'referenceSelection' | 'humanReview'
 
+/** The sole qualification producer that made a candidate structurally selectable. */
+export type YimengReferenceCandidateQualificationKind =
+  | 'none'
+  | 'provider_formal_consistency'
+  | 'local_file_integrity'
+
 /** A reference candidate bound to one authoritative element profile. */
 export interface YimengReferenceAssetCandidate {
   readonly assetId: string
@@ -1399,6 +1405,13 @@ export interface YimengReferenceAssetCandidate {
   readonly sourceRevisionId: string
   readonly formalConsistencyCheckId: string
   readonly formalConsistencyPassed: boolean
+  readonly qualificationKind: YimengReferenceCandidateQualificationKind
+  readonly qualificationCheckId: string
+  readonly qualificationPassed: boolean
+  readonly qualificationIdentity: string
+  readonly uploadCommandReceiptId: string
+  readonly rightsRecorded: boolean
+  readonly rightsRecordSha256: string
   readonly qualityProjectionSha256: string
   readonly decisionKind: YimengReferenceCandidateDecisionKind
   readonly decisionIdentity: string
@@ -1447,8 +1460,8 @@ export interface YimengShotRelationScene {
  */
 export type YimengShotRelationElementKind = 'actor' | 'scene' | 'prop'
 
-/** Minimal immutable lineage for the one E4-3 current reference selection. */
-export interface YimengShotCurrentReferenceLineage {
+/** Immutable Provider-produced lineage for one current reference selection. */
+export interface YimengShotProviderCurrentReferenceLineage {
   readonly projectId: string
   readonly sourceEpisodeId: string
   readonly ownerType: YimengShotRelationElementKind
@@ -1458,6 +1471,25 @@ export interface YimengShotCurrentReferenceLineage {
   readonly sourceRevisionId: string
   readonly formalConsistencyCheckId: string
 }
+
+/** Immutable local-file qualification lineage for one current reference selection. */
+export interface YimengShotLocalCurrentReferenceLineage {
+  readonly projectId: string
+  readonly ownerType: YimengShotRelationElementKind
+  readonly ownerId: string
+  readonly role: string
+  readonly sourceRevisionId: string
+  readonly qualificationKind: 'local_file_integrity'
+  readonly qualificationCheckId: string
+  readonly qualificationIdentity: string
+  readonly uploadCommandReceiptId: string
+  readonly rightsRecordSha256: string
+}
+
+/** Exact immutable lineage for either qualified reference production path. */
+export type YimengShotCurrentReferenceLineage =
+  | YimengShotProviderCurrentReferenceLineage
+  | YimengShotLocalCurrentReferenceLineage
 
 /**
  * Current backend reference attached to a shot.

@@ -686,6 +686,12 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     readLocalReferenceCandidateContent: vi.fn(async () => {
       throw new Error('Local reference content is not part of this fixture')
     }),
+    qualifyLocalReferenceCandidate: vi.fn(async () => {
+      throw new Error('Local reference qualification is not part of this fixture')
+    }),
+    recoverLocalReferenceQualification: vi.fn(async () => {
+      throw new Error('Local reference qualification recovery is not part of this fixture')
+    }),
     referenceCandidates: vi.fn(async (request: Parameters<QingmuYimengPort['referenceCandidates']>[0]) => ({
       schema: 'jason.qingmu-reference-asset-candidates.v1',
       projectId: request.projectId,

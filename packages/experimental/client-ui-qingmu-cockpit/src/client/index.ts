@@ -145,6 +145,8 @@ export function apply(ctx: ClientContext): void {
     uploadLocalReferenceCandidate: (request, signal) => command('uploadLocalReferenceCandidate', request, signal),
     recoverLocalReferenceCandidate: (request, signal) => command('recoverLocalReferenceCandidate', request, signal),
     readLocalReferenceCandidateContent: (request, signal) => command('readLocalReferenceCandidateContent', request, signal),
+    qualifyLocalReferenceCandidate: (request, signal) => command('qualifyLocalReferenceCandidate', request, signal),
+    recoverLocalReferenceQualification: (request, signal) => command('recoverLocalReferenceQualification', request, signal),
     readScenePlanning: (request, signal) => command('readScenePlanning', request, signal),
     saveScenePlanning: (request, signal) => command('saveScenePlanning', request, signal),
     recoverScenePlanning: (request, signal) => command('recoverScenePlanning', request, signal),

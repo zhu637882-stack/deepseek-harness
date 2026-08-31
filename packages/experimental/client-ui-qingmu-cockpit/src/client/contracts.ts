@@ -583,6 +583,14 @@ export interface QingmuYimengCommandPort {
     request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceContentRequest,
     signal?: AbortSignal,
   ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceCandidateContent>
+  qualifyLocalReferenceCandidate(
+    request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceQualificationRequest,
+    signal?: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceQualificationResult>
+  recoverLocalReferenceQualification(
+    request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceQualificationRequest,
+    signal?: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceQualificationResult>
   bindStageSource(request: YimengBindStageSourceRequest, signal?: AbortSignal): Promise<YimengStageSourceResult>
   recoverStageSourceBinding(request: YimengRecoverStageSourceBindingRequest, signal?: AbortSignal): Promise<YimengStageSourceRecovery>
   bindProductionUnit(request: YimengBindProductionUnitRequest, signal?: AbortSignal): Promise<YimengProductionUnitResult>

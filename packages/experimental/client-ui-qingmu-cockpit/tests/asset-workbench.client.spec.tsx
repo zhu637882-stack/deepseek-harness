@@ -53,6 +53,8 @@ const emptyLocalReferencePort = () => ({
   uploadLocalReferenceCandidate: vi.fn(),
   recoverLocalReferenceCandidate: vi.fn(),
   readLocalReferenceCandidateContent: vi.fn(),
+  qualifyLocalReferenceCandidate: vi.fn(),
+  recoverLocalReferenceQualification: vi.fn(),
 })
 
 const UNKNOWN_RIGHTS = {
@@ -304,6 +306,13 @@ const REFERENCE_CANDIDATE = {
   sourceRevisionId: 'revision-reference-2',
   formalConsistencyCheckId: 'check-reference-2',
   formalConsistencyPassed: true,
+  qualificationKind: 'provider_formal_consistency',
+  qualificationCheckId: 'check-reference-2',
+  qualificationPassed: true,
+  qualificationIdentity: '4'.repeat(64),
+  uploadCommandReceiptId: '',
+  rightsRecorded: false,
+  rightsRecordSha256: '',
   qualityProjectionSha256: '5'.repeat(64),
   decisionKind: 'none',
   decisionIdentity: '',
@@ -320,6 +329,13 @@ const LOCAL_RIGHTS_CANDIDATE = {
   sourceRevisionId: '',
   formalConsistencyCheckId: '',
   formalConsistencyPassed: false,
+  qualificationKind: 'none',
+  qualificationCheckId: '',
+  qualificationPassed: false,
+  qualificationIdentity: '',
+  uploadCommandReceiptId: 'receipt-local-reference-1',
+  rightsRecorded: true,
+  rightsRecordSha256: '2'.repeat(64),
 } as const
 
 function referenceCandidates(
@@ -913,20 +929,24 @@ function createRightsPort(options: {
       currentDecision: null,
     })
   const createHumanDecision = vi.fn()
+  const initialCandidate = noOp
+    ? LOCAL_RIGHTS_CANDIDATE
+    : { ...LOCAL_RIGHTS_CANDIDATE, rightsRecorded: false, rightsRecordSha256: '' } as const
+  const referenceCandidatesRead = vi.fn()
+    .mockResolvedValueOnce(referenceCandidates(
+      initialCandidate,
+      initialSnapshot.subject.profileRevision,
+      initialSnapshot.snapshotSha256,
+    ))
+    .mockResolvedValue(referenceCandidates(
+      LOCAL_RIGHTS_CANDIDATE,
+      postSnapshot.subject.profileRevision,
+      postSnapshot.snapshotSha256,
+    ))
   const port = {
     ...emptyLocalReferencePort(),
     elementProfile,
-    referenceCandidates: vi.fn(async () => ({
-      schema: 'jason.qingmu-reference-asset-candidates.v1',
-      projectId: PROJECT_ID,
-      targetType: 'element_profile',
-      targetId: TARGET_ID,
-      elementKind: 'prop',
-      profileRevision: initialSnapshot.subject.profileRevision,
-      elementSnapshotSha256: initialSnapshot.snapshotSha256,
-      candidates: [LOCAL_RIGHTS_CANDIDATE],
-      humanApprovalInferred: false,
-    } as const)),
+    referenceCandidates: referenceCandidatesRead,
     reviewEvents: vi.fn()
       .mockResolvedValueOnce(initialFeed)
       .mockResolvedValue(postFeed),
@@ -956,6 +976,7 @@ function createRightsPort(options: {
     commitElementProfile,
     recoverElementProfileCommit,
     createHumanDecision,
+    referenceCandidatesRead,
     markerDuringCommit: () => markerDuringCommit,
   }
 }
@@ -1160,6 +1181,7 @@ describe('AssetWorkbench', () => {
       proposeReferenceAsset,
       commitElementProfile,
       createHumanDecision,
+      referenceCandidatesRead,
       markerDuringCommit,
     } = createRightsPort()
     mount(port)
@@ -1205,7 +1227,7 @@ describe('AssetWorkbench', () => {
     expect(screen.getAllByText(zh.assetRightsRecorded).length).toBeGreaterThan(0)
     expect(screen.getAllByText(zh.assetRightsSourceUnverified).length).toBeGreaterThan(0)
     expect(screen.getAllByText(new RegExp(zh.assetRightsUnknownFields)).length).toBeGreaterThan(0)
-    expect(screen.getAllByText(new RegExp(zh.assetReferenceBlockedFormalCheck)).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(new RegExp(zh.assetReferenceBlockedLocalQualification)).length).toBeGreaterThan(0)
     expect(screen.getAllByText(new RegExp(zh.assetReferenceBlockedQuality)).length).toBeGreaterThan(0)
     expect(commitElementProfile).toHaveBeenCalledTimes(1)
     const commitRequest = commitElementProfile.mock.calls[0]?.[0]
@@ -1229,6 +1251,9 @@ describe('AssetWorkbench', () => {
     })
     expect(createHumanDecision).not.toHaveBeenCalled()
     expect(elementProfile).toHaveBeenCalledTimes(2)
+    expect(referenceCandidatesRead).toHaveBeenCalledTimes(2)
+    fireEvent.click(screen.getByRole('button', { name: zh.assetReferenceSelectOperation }))
+    expect(screen.getByRole('button', { name: zh.assetReferenceQualificationAction })).toBeTruthy()
     await waitFor(() => {
       expect(readCommandCommitRecoveryMarker(PROJECT_ID, 'prop', TARGET_ID).status).toBe('none')
     })
@@ -1960,6 +1985,102 @@ describe('AssetWorkbench', () => {
     }), expect.any(AbortSignal))
     expect(elementProfile).toHaveBeenCalledTimes(2)
     expect(candidates).toHaveBeenCalledTimes(2)
+  })
+
+  it('qualifies one rights-recorded local candidate without selecting or approving it', async () => {
+    const qualifiedSha = '3'.repeat(64)
+    const qualifiedSnapshot = {
+      ...RIGHTS_RECORDED_SNAPSHOT,
+      subject: { ...RIGHTS_RECORDED_SNAPSHOT.subject, profileRevision: 4 },
+      canonicalSnapshot: { ...RIGHTS_RECORDED_SNAPSHOT.canonicalSnapshot, profileRevision: 4 },
+      snapshotSha256: qualifiedSha,
+    } as const
+    const qualifiedCandidate = {
+      ...LOCAL_RIGHTS_CANDIDATE,
+      qualityStatus: 'passed',
+      sourceRevisionId: 'source_localref_reference_1',
+      qualificationKind: 'local_file_integrity',
+      qualificationCheckId: 'check_localref_reference_1',
+      qualificationPassed: true,
+      qualificationIdentity: '4'.repeat(64),
+    } as const
+    const candidates = vi.fn()
+      .mockResolvedValueOnce(referenceCandidates(LOCAL_RIGHTS_CANDIDATE))
+      .mockResolvedValue(referenceCandidates(qualifiedCandidate, 4, qualifiedSha))
+    const qualifyLocalReferenceCandidate = vi.fn(async (
+      request: Parameters<QingmuYimengPort['qualifyLocalReferenceCandidate']>[0],
+    ) => ({
+      schema: 'jason.qingmu-local-reference-qualification-result.v1',
+      projectId: PROJECT_ID,
+      elementKind: 'prop',
+      targetId: TARGET_ID,
+      assetId: request.assetId,
+      assetSha256: request.assetSha256,
+      profileRevision: 4,
+      baseSnapshotSha256: request.baseSnapshotSha256,
+      elementSnapshotSha256: qualifiedSha,
+      uploadCommandReceiptId: LOCAL_RIGHTS_CANDIDATE.uploadCommandReceiptId,
+      sourceRevisionId: qualifiedCandidate.sourceRevisionId,
+      qualificationKind: 'local_file_integrity',
+      qualificationCheckId: qualifiedCandidate.qualificationCheckId,
+      qualificationPassed: true,
+      qualificationIdentity: qualifiedCandidate.qualificationIdentity,
+      rightsRecordSha256: LOCAL_RIGHTS_CANDIDATE.rightsRecordSha256,
+      rightsRecorded: true,
+      rightsVerified: false,
+      formalConsistencyPassed: false,
+      selectionStatus: 'Unselected',
+      isSelected: false,
+      idempotencyKey: request.idempotencyKey,
+      requestSha256: '5'.repeat(64),
+      commandReceiptId: 'receipt-local-qualification-1',
+      changeSetId: 'changeset-local-qualification-1',
+      eventId: 'event-local-qualification-1',
+      providerCalls: 0,
+      stageStarted: false,
+      approvalGranted: false,
+      selectionGranted: false,
+    } as const))
+    const port = {
+      ...emptyLocalReferencePort(),
+      elementProfile: vi.fn()
+        .mockResolvedValueOnce(RIGHTS_RECORDED_SNAPSHOT)
+        .mockResolvedValue(qualifiedSnapshot),
+      referenceCandidates: candidates,
+      reviewEvents: vi.fn()
+        .mockResolvedValueOnce(reviewFeed())
+        .mockResolvedValue(reviewFeed({ revision: 4, sha256: qualifiedSha })),
+      referenceRightsExceptionReleases: vi.fn()
+        .mockResolvedValueOnce(referenceRightsExceptionFeed())
+        .mockResolvedValue(referenceRightsExceptionFeed({ revision: 4, sha256: qualifiedSha })),
+      elementMethod: vi.fn(async (request: Parameters<typeof methodResponse>[0]) => methodResponse(request)),
+      qualifyLocalReferenceCandidate,
+      recoverLocalReferenceQualification: vi.fn(),
+    } as unknown as QingmuYimengPort
+    mount(port)
+
+    const qualification = await screen.findByRole('button', { name: zh.assetReferenceQualificationAction })
+    expect(
+      screen.getAllByText(new RegExp(zh.assetReferenceBlockedLocalQualification)).length,
+    ).toBeGreaterThan(0)
+    fireEvent.click(qualification)
+
+    expect(await screen.findByText(zh.assetReferenceQualificationSaved)).toBeTruthy()
+    expect(screen.getByText(`${zh.assetUploadSourceValue} · ${zh.assetReferenceQualificationSaved}`)).toBeTruthy()
+    expect(qualifyLocalReferenceCandidate).toHaveBeenCalledTimes(1)
+    expect(qualifyLocalReferenceCandidate).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: PROJECT_ID,
+      elementKind: 'prop',
+      targetId: TARGET_ID,
+      assetId: LOCAL_RIGHTS_CANDIDATE.assetId,
+      assetSha256: LOCAL_RIGHTS_CANDIDATE.sha256,
+      baseRevision: 3,
+      baseSnapshotSha256: BASE_SHA,
+    }), expect.any(AbortSignal))
+    const referenceRegion = screen.getByRole('region', { name: zh.assetReferenceTitle })
+    expect(within(referenceRegion).getByRole('radio', { name: new RegExp(LOCAL_RIGHTS_CANDIDATE.assetId) }))
+      .toHaveProperty('disabled', false)
+    expect(port).not.toHaveProperty('referenceAssetMethod')
   })
 
   it('keeps the recovery marker and hides success when selection post-state is malformed', async () => {

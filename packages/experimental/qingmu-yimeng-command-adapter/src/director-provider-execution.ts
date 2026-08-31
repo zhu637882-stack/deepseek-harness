@@ -107,11 +107,13 @@ export interface DirectorProviderTransportFacts {
   readonly rawOutputUtf8Bytes?: number
 }
 
+/** Stable closed error codes exposed by the Director provider transport. */
 export const DIRECTOR_PROVIDER_ERROR_CODES = {
   providerResponseInvalid: 'director_provider_response_invalid',
   submissionUnknown: 'director_provider_submission_unknown',
 } as const
 
+/** One stable error code emitted by the Director provider transport. */
 export type DirectorProviderErrorCode = typeof DIRECTOR_PROVIDER_ERROR_CODES[keyof typeof DIRECTOR_PROVIDER_ERROR_CODES]
 
 /** Complete transport result. Raw provider text never crosses this boundary. */

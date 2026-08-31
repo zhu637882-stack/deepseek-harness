@@ -66,6 +66,15 @@ import {
   type ReferenceRightsExceptionReleaseRecoveryRead,
   type ReferenceRightsExceptionScope,
 } from './reference-rights-exception-release-recovery.ts'
+import {
+  clearLocalReferenceQualificationRecovery,
+  readLocalReferenceQualificationRecovery,
+  writeLocalReferenceQualificationRecovery,
+} from './local-reference-qualification-recovery.ts'
+import type {
+  LocalReferenceQualificationRequest,
+  LocalReferenceQualificationResult,
+} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import css from './QingmuCockpit.module.css'
 
 const SHA256 = /^[0-9a-f]{64}$/
@@ -512,6 +521,11 @@ function createReviewIdempotencyKey(lane: 'comment' | 'decision'): string {
   return `qingmu:element-review:${lane}:${nonce}`
 }
 
+function createQualificationIdempotencyKey(): string {
+  const nonce = globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+  return `qingmu:local-reference-qualification:${nonce}`
+}
+
 function assertReferenceCandidates(
   candidates: YimengReferenceCandidatesResponse,
   snapshot: YimengElementProfileResponse,
@@ -544,6 +558,15 @@ function assertReferenceCandidates(
     const qualityStatus = stringOf(candidate.qualityStatus)
     const selectionStatus = stringOf(candidate.selectionStatus)
     const decisionKind = stringOf(candidate.decisionKind)
+    const qualificationKind = stringOf(candidate.qualificationKind)
+    const qualificationCheckId = typeof candidate.qualificationCheckId === 'string'
+      ? candidate.qualificationCheckId : undefined
+    const qualificationIdentity = typeof candidate.qualificationIdentity === 'string'
+      ? candidate.qualificationIdentity : undefined
+    const uploadCommandReceiptId = typeof candidate.uploadCommandReceiptId === 'string'
+      ? candidate.uploadCommandReceiptId : undefined
+    const rightsRecordSha256 = typeof candidate.rightsRecordSha256 === 'string'
+      ? candidate.rightsRecordSha256 : undefined
     if (
       candidate.projectId !== projectId
       || candidate.ownerType !== elementKind
@@ -564,8 +587,39 @@ function assertReferenceCandidates(
       || typeof candidate.bindingValid !== 'boolean'
       || typeof candidate.isSelected !== 'boolean'
       || typeof candidate.formalConsistencyPassed !== 'boolean'
+      || qualificationKind === undefined
+      || !['none', 'provider_formal_consistency', 'local_file_integrity'].includes(qualificationKind)
+      || qualificationCheckId === undefined
+      || qualificationIdentity === undefined
+      || uploadCommandReceiptId === undefined
+      || typeof candidate.qualificationPassed !== 'boolean'
+      || typeof candidate.rightsRecorded !== 'boolean'
+      || rightsRecordSha256 === undefined
     ) {
       throw new Error('易梦参考素材候选血缘与当前元素不一致')
+    }
+    const providerQualificationValid = qualificationKind === 'provider_formal_consistency'
+      && qualificationCheckId !== ''
+      && candidate.qualificationPassed
+      && qualificationIdentity !== ''
+      && candidate.formalConsistencyCheckId === qualificationCheckId
+      && candidate.formalConsistencyPassed
+      && uploadCommandReceiptId === ''
+    const localQualificationValid = qualificationKind === 'local_file_integrity'
+      && qualificationCheckId !== ''
+      && candidate.qualificationPassed
+      && qualificationIdentity !== ''
+      && candidate.formalConsistencyCheckId === ''
+      && !candidate.formalConsistencyPassed
+      && uploadCommandReceiptId !== ''
+      && candidate.rightsRecorded
+      && SHA256.test(rightsRecordSha256)
+    const unqualifiedValid = qualificationKind === 'none'
+      && qualificationCheckId === ''
+      && !candidate.qualificationPassed
+      && qualificationIdentity === ''
+    if (!providerQualificationValid && !localQualificationValid && !unqualifiedValid) {
+      throw new Error('易梦参考素材资格投影不一致')
     }
   }
 }
@@ -635,21 +689,36 @@ function referenceCandidateEligible(
     !candidate.bindingValid
     || candidate.sha256 !== candidate.materializedSha256
     || candidate.sourceRevisionId === ''
-    || candidate.formalConsistencyCheckId === ''
+    || candidate.qualificationCheckId === ''
+    || !candidate.qualificationPassed
+    || candidate.qualificationIdentity === ''
   ) return false
   if (operation === 'selectReferenceAsset') {
-    return candidate.selectionStatus === 'Unselected'
+    let qualificationValid = false
+    if (candidate.qualificationKind === 'provider_formal_consistency') {
+      qualificationValid = candidate.formalConsistencyCheckId === candidate.qualificationCheckId
+        && candidate.formalConsistencyPassed
+    } else if (candidate.qualificationKind === 'local_file_integrity') {
+      qualificationValid = candidate.formalConsistencyCheckId === ''
+        && !candidate.formalConsistencyPassed
+        && candidate.uploadCommandReceiptId !== ''
+        && candidate.rightsRecorded
+        && SHA256.test(candidate.rightsRecordSha256)
+    }
+    return qualificationValid
+      && candidate.selectionStatus === 'Unselected'
       && !candidate.isSelected
       && candidate.qualityStatus === 'passed'
-      && candidate.formalConsistencyPassed
   }
-  return candidate.selectionStatus === 'Rejected'
+  return candidate.qualificationKind === 'provider_formal_consistency'
+    && candidate.formalConsistencyPassed
+    && (candidate.selectionStatus === 'Rejected'
     || (
       candidate.selectionStatus === 'Selected'
       && candidate.isSelected
       && (candidate.decisionKind === 'referenceSelection' || candidate.decisionKind === 'humanReview')
       && candidate.decisionIdentity !== ''
-    )
+    ))
 }
 
 function referenceCandidateBlockers(
@@ -661,8 +730,22 @@ function referenceCandidateBlockers(
     blockers.push(t('assetReferenceBlockedBinding'))
   }
   if (candidate.sourceRevisionId === '') blockers.push(t('assetReferenceBlockedSourceRevision'))
-  if (candidate.formalConsistencyCheckId === '') blockers.push(t('assetReferenceBlockedFormalCheck'))
-  else if (!candidate.formalConsistencyPassed) blockers.push(t('assetReferenceBlockedFormalPassed'))
+  if (candidate.qualificationKind === 'local_file_integrity') {
+    if (!candidate.rightsRecorded || !SHA256.test(candidate.rightsRecordSha256)) {
+      blockers.push(t('assetReferenceBlockedRights'))
+    }
+    if (candidate.qualificationCheckId === '' || !candidate.qualificationPassed) {
+      blockers.push(t('assetReferenceBlockedLocalQualificationStale'))
+    }
+  } else if (candidate.qualificationKind === 'none' && candidate.uploadCommandReceiptId !== '') {
+    if (!candidate.rightsRecorded || !SHA256.test(candidate.rightsRecordSha256)) {
+      blockers.push(t('assetReferenceBlockedRights'))
+    }
+    blockers.push(t('assetReferenceBlockedLocalQualification'))
+  } else {
+    if (candidate.formalConsistencyCheckId === '') blockers.push(t('assetReferenceBlockedFormalCheck'))
+    else if (!candidate.formalConsistencyPassed) blockers.push(t('assetReferenceBlockedFormalPassed'))
+  }
   if (candidate.qualityStatus !== 'passed') blockers.push(t('assetReferenceBlockedQuality'))
   return blockers
 }
@@ -1377,6 +1460,11 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
   const [repairPrompt, setRepairPrompt] = useState('')
   const [referenceError, setReferenceError] = useState<string>()
   const [referenceProposalLineage, setReferenceProposalLineage] = useState<ReferenceProposalLineage>()
+  const [qualificationRecovery, setQualificationRecovery] =
+    useState<LocalReferenceQualificationRequest>()
+  const [qualificationBusy, setQualificationBusy] = useState(false)
+  const [qualificationReceipt, setQualificationReceipt] =
+    useState<LocalReferenceQualificationResult>()
   const [reviewFeed, setReviewFeed] = useState<YimengElementReviewFeedResponse>()
   const [reviewError, setReviewError] = useState<string>()
   const [reviewBusy, setReviewBusy] = useState<'comment' | 'decision'>()
@@ -1430,6 +1518,10 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
     setExceptionRecovery(targetId === ''
       ? { status: 'none' }
       : readReferenceRightsExceptionReleaseRecoveryMarker(projectId, elementKind, targetId))
+    setQualificationRecovery(targetId === ''
+      ? undefined
+      : readLocalReferenceQualificationRecovery(projectId, elementKind, targetId))
+    setQualificationReceipt(undefined)
   }, [elementKind, projectId, targetId])
 
   useEffect(() => {
@@ -1572,6 +1664,63 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
     void loadSnapshot()
     return () => { abortRef.current?.abort() }
   }, [loadSnapshot])
+
+  const qualifyLocalReference = async (candidate: YimengReferenceAssetCandidate): Promise<void> => {
+    if (snapshot === undefined || qualificationBusy) return
+    const subject = recordOf(snapshot.subject)
+    const pending = qualificationRecovery
+    if (pending !== undefined && (pending.assetId !== candidate.assetId || pending.assetSha256 !== candidate.sha256)) {
+      setReferenceError(t('assetReferenceQualificationOtherPending'))
+      return
+    }
+    const request: LocalReferenceQualificationRequest = pending ?? {
+      projectId,
+      elementKind,
+      targetId,
+      assetId: candidate.assetId,
+      assetSha256: candidate.sha256,
+      baseRevision: subject.profileRevision as number,
+      baseSnapshotSha256: snapshot.snapshotSha256,
+      idempotencyKey: createQualificationIdempotencyKey(),
+    }
+    writeLocalReferenceQualificationRecovery(request)
+    setQualificationRecovery(request)
+    setQualificationBusy(true)
+    setQualificationReceipt(undefined)
+    setReferenceError(undefined)
+    const controller = new AbortController()
+    abortRef.current?.abort()
+    abortRef.current = controller
+    try {
+      const result = pending === undefined
+        ? await port.qualifyLocalReferenceCandidate(request, controller.signal)
+        : await port.recoverLocalReferenceQualification(request, controller.signal)
+      if (
+        result.assetId !== request.assetId
+        || result.assetSha256 !== request.assetSha256
+        || result.baseSnapshotSha256 !== request.baseSnapshotSha256
+        || result.qualificationKind !== 'local_file_integrity'
+        || !result.qualificationPassed
+        || result.formalConsistencyPassed
+        || result.rightsVerified
+        || result.selectionStatus !== 'Unselected'
+        || result.isSelected
+        || result.providerCalls !== 0
+        || result.selectionGranted
+        || result.approvalGranted
+      ) throw new Error(t('assetReferenceQualificationMismatch'))
+      if (isSignalAborted(controller.signal)) return
+      clearLocalReferenceQualificationRecovery(projectId, elementKind, targetId)
+      setQualificationRecovery(undefined)
+      setQualificationReceipt(result)
+      setQualificationBusy(false)
+      await loadSnapshot()
+    } catch (cause) {
+      if (!isSignalAborted(controller.signal)) setReferenceError(messageOf(cause))
+    } finally {
+      setQualificationBusy(false)
+    }
+  }
 
   const recoveryPending = recovery.status !== 'none' || exceptionRecovery.status !== 'none'
 
@@ -1885,7 +2034,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
     }
     const [snapshotResult, candidatesResult, reviewResult, exceptionResult, workflowResult] = await Promise.allSettled([
       port.elementProfile({ projectId, elementKind, targetId }, controller.signal),
-      referenceActionMarker
+      referenceBoundMarker
         ? port.referenceCandidates({ projectId, elementKind, targetId }, controller.signal)
         : Promise.resolve(undefined),
       port.reviewEvents({ projectId, elementKind, targetId }, controller.signal),
@@ -1907,17 +2056,20 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
         if (authoritativeReadSucceeded) {
           setSnapshot(snapshotResult.value)
           setDraft(elementVisualValue(subject, elementKind))
-          if (referenceActionMarker && candidatesResult.status === 'fulfilled' && candidatesResult.value !== undefined) {
+          if (referenceBoundMarker && candidatesResult.status === 'fulfilled' && candidatesResult.value !== undefined) {
             try {
               assertReferenceCandidates(candidatesResult.value, snapshotResult.value, projectId, targetId, elementKind)
-              assertReferenceCandidatePostState(candidatesResult.value, marker)
+              if (referenceActionMarker) assertReferenceCandidatePostState(candidatesResult.value, marker)
               setReferenceCandidates(candidatesResult.value)
-              setSelectedCandidateId('')
-              setRepairPrompt('')
+              if (referenceActionMarker) {
+                setSelectedCandidateId('')
+                setRepairPrompt('')
+              }
               referenceReadSucceeded = true
             } catch (cause) {
               referenceReadError = messageOf(cause)
               setReferenceError(referenceReadError)
+              referenceReadSucceeded = false
             }
           }
           if (referenceRightsMarker) {
@@ -1929,10 +2081,10 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
               ) throw new Error('权利记录提交后的权威视觉资料摘要不一致')
               setSelectedRightsReference(referenceBinding(authoritativeReference))
               setRightsDraft(createReferenceRightsDraft(authoritativeReference.rights))
-              referenceReadSucceeded = true
             } catch (cause) {
               referenceReadError = messageOf(cause)
               setReferenceError(referenceReadError)
+              referenceReadSucceeded = false
             }
           }
           if (reviewResult.status === 'fulfilled') {
@@ -2022,7 +2174,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
     const warnings = [
       ...(!authoritativeReadSucceeded ? [t('assetRecoverySnapshotMismatch')] : []),
       ...(snapshotResult.status === 'rejected' ? [messageOf(snapshotResult.reason)] : []),
-      ...(referenceActionMarker && candidatesResult.status === 'rejected' ? [messageOf(candidatesResult.reason)] : []),
+      ...(referenceBoundMarker && candidatesResult.status === 'rejected' ? [messageOf(candidatesResult.reason)] : []),
       ...(workflowResult.status === 'rejected' ? [messageOf(workflowResult.reason)] : []),
       ...(methodWarning !== undefined ? [methodWarning] : []),
       ...(authoritativeReadSucceeded && !markerCleared ? [t('receiptRecoveryClearWarning')] : []),
@@ -2551,6 +2703,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
     || phase === 'recovering'
     || reviewBusy !== undefined
     || exceptionBusy !== undefined
+    || qualificationBusy
   const subject = recordOf(snapshot?.subject)
   const fieldHints = arrayOf(method?.projection.field_hints)
   const checklist = arrayOf(method?.projection.checklist)
@@ -2835,34 +2988,74 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
                     const eligible = referenceCandidateEligible(candidate, referenceOperation)
                     const status = t(REFERENCE_STATUS_LOCALE_KEY[candidate.selectionStatus])
                     const blockers = referenceCandidateBlockers(candidate, t)
+                    const qualificationPending = qualificationRecovery?.assetId === candidate.assetId
+                      && qualificationRecovery.assetSha256 === candidate.sha256
+                    const canQualify = candidate.uploadCommandReceiptId !== ''
+                      && candidate.bindingValid
+                      && candidate.sha256 === candidate.materializedSha256
+                      && candidate.selectionStatus === 'Unselected'
+                      && !candidate.isSelected
+                      && candidate.rightsRecorded
+                      && SHA256.test(candidate.rightsRecordSha256)
+                      && (candidate.qualificationKind === 'none' || qualificationPending)
                     return (
-                      <label key={`${candidate.assetId}:${candidate.sha256}`}>
-                        <input
-                          type="radio"
-                          name={`reference-candidate-${projectId}-${elementKind}-${targetId}`}
-                          checked={selectedCandidateId === candidate.assetId}
-                          disabled={!eligible}
-                          onChange={() => {
-                            setSelectedCandidateId(candidate.assetId)
-                            setPreview(undefined)
-                            setReferenceProposalLineage(undefined)
-                            setConfirmed(false)
-                            setReferenceError(undefined)
-                            setPhase('draft')
-                          }}
-                        />
-                        <strong>{candidate.assetId}</strong>
-                        <span>{status}</span>
-                        <small>{candidate.sha256}</small>
-                        {!eligible && blockers.length > 0 && (
-                          <small>{t('assetReferenceBlockedPrefix')}{blockers.join(' · ')}</small>
+                      <section key={`${candidate.assetId}:${candidate.sha256}`}>
+                        <label>
+                          <input
+                            type="radio"
+                            name={`reference-candidate-${projectId}-${elementKind}-${targetId}`}
+                            checked={selectedCandidateId === candidate.assetId}
+                            disabled={!eligible}
+                            onChange={() => {
+                              setSelectedCandidateId(candidate.assetId)
+                              setPreview(undefined)
+                              setReferenceProposalLineage(undefined)
+                              setConfirmed(false)
+                              setReferenceError(undefined)
+                              setPhase('draft')
+                            }}
+                          />
+                          <strong>{candidate.assetId}</strong>
+                          <span>{status}</span>
+                          <small>{candidate.sha256}</small>
+                          {candidate.uploadCommandReceiptId !== '' && (
+                            <small>{t('assetUploadSourceValue')} · {candidate.qualificationKind === 'local_file_integrity'
+                              && candidate.qualificationPassed
+                              ? t('assetReferenceQualificationSaved')
+                              : t('assetReferenceBlockedLocalQualification')}</small>
+                          )}
+                          {!eligible && blockers.length > 0 && (
+                            <small>{t('assetReferenceBlockedPrefix')}{blockers.join(' · ')}</small>
+                          )}
+                        </label>
+                        {canQualify && (
+                          <div className={css.scriptActions}>
+                            <button
+                              type="button"
+                              className={css.primaryAction}
+                              disabled={busy || (qualificationRecovery !== undefined && !qualificationPending)}
+                              onClick={() => { void qualifyLocalReference(candidate) }}
+                            >
+                              {qualificationPending
+                                ? t('assetReferenceQualificationRecover')
+                                : t('assetReferenceQualificationAction')}
+                            </button>
+                            <span>{t('assetReferenceQualificationBoundary')}</span>
+                          </div>
                         )}
-                      </label>
+                      </section>
                     )
                   })}
                 </div>
               )}
             </fieldset>
+          )}
+          {qualificationReceipt !== undefined && (
+            <div className={css.impactSummary} role="status" aria-live="polite">
+              <strong>{t('assetReferenceQualificationSaved')}</strong>
+              <p>{t('assetReferenceQualificationSavedBoundary')}</p>
+              <small>{qualificationReceipt.qualificationCheckId} · {qualificationReceipt.assetSha256}</small>
+            </div>
           )}
           {referenceOperation === 'replaceReferenceRights' && (
             <>

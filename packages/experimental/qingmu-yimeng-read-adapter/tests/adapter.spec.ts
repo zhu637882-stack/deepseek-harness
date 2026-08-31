@@ -403,6 +403,13 @@ const REFERENCE_CANDIDATE = {
   sourceRevisionId: 'revision-1',
   formalConsistencyCheckId: 'check-1',
   formalConsistencyPassed: true,
+  qualificationKind: 'provider_formal_consistency',
+  qualificationCheckId: 'check-1',
+  qualificationPassed: true,
+  qualificationIdentity: '',
+  uploadCommandReceiptId: '',
+  rightsRecorded: false,
+  rightsRecordSha256: '',
   qualityProjectionSha256: 'b'.repeat(64),
   decisionKind: 'none',
   decisionIdentity: '',
@@ -1510,6 +1517,65 @@ describe('qingmu Yimeng read adapter', () => {
     expect(capturedInit?.redirect).toBe('error')
   })
 
+  it('accepts a rights-bound local integrity qualification without inferring formal review', async () => {
+    const local = {
+      ...REFERENCE_CANDIDATE,
+      sourceEpisodeId: '',
+      generationJobId: '',
+      sourceRevisionId: 'localref_source_1',
+      formalConsistencyCheckId: '',
+      formalConsistencyPassed: false,
+      qualificationKind: 'local_file_integrity',
+      qualificationCheckId: 'check_localref_1',
+      qualificationPassed: true,
+      qualificationIdentity: 'd'.repeat(64),
+      uploadCommandReceiptId: 'receipt_upload_1',
+      rightsRecorded: true,
+      rightsRecordSha256: 'e'.repeat(64),
+    }
+    const response = { ...REFERENCE_CANDIDATES_FIXTURE, candidates: [local] }
+    const handler = createYimengReadHandler({}, dependencies(
+      async () => jsonResponse(response),
+      'test-token',
+    ))
+    expect(await handler('referenceCandidates', {
+      projectId: 'project-1', elementKind: 'prop', targetId: 'prop-1',
+    }, signal())).toEqual({ ok: true, value: response })
+    const drifted = createYimengReadHandler({}, dependencies(
+      async () => jsonResponse({ ...response, candidates: [{ ...local, rightsRecordSha256: '' }] }),
+      'test-token',
+    ))
+    expect(await drifted('referenceCandidates', {
+      projectId: 'project-1', elementKind: 'prop', targetId: 'prop-1',
+    }, signal())).toMatchObject({ ok: false })
+  })
+
+  it('accepts a receipt-bound local upload before qualification without treating it as qualified', async () => {
+    const local = {
+      ...REFERENCE_CANDIDATE,
+      sourceEpisodeId: '',
+      generationJobId: '',
+      sourceRevisionId: '',
+      formalConsistencyCheckId: '',
+      formalConsistencyPassed: false,
+      qualificationKind: 'none',
+      qualificationCheckId: '',
+      qualificationPassed: false,
+      qualificationIdentity: '',
+      uploadCommandReceiptId: 'receipt_upload_1',
+      rightsRecorded: true,
+      rightsRecordSha256: 'e'.repeat(64),
+    }
+    const response = { ...REFERENCE_CANDIDATES_FIXTURE, candidates: [local] }
+    const handler = createYimengReadHandler({}, dependencies(
+      async () => jsonResponse(response),
+      'test-token',
+    ))
+    expect(await handler('referenceCandidates', {
+      projectId: 'project-1', elementKind: 'prop', targetId: 'prop-1',
+    }, signal())).toEqual({ ok: true, value: response })
+  })
+
   it('fails reference-candidate reads closed on invalid fields and forged request bindings', async () => {
     const invalidResponses: Array<{ expected: string; value: Record<string, unknown> }> = [
       {
@@ -2091,6 +2157,45 @@ describe('qingmu Yimeng read adapter', () => {
       if (result.ok) throw new Error('forged E5-3 Shot relation must fail closed')
       expect(result.error.message).toMatch(/workflow\.director\.shotRelations/)
     }
+  })
+
+  it('accepts exact local-file qualification lineage in a current scene reference', async () => {
+    const upstream = structuredClone(workflowFixture())
+    const director = upstream.director as Record<string, unknown>
+    const relations = director.shotRelations as Record<string, unknown>
+    const shot = (relations.shots as Array<Record<string, unknown>>)[0]
+    if (shot === undefined) throw new Error('fixture Shot is missing')
+    const scene = (shot.elements as Array<Record<string, unknown>>)[0]
+    if (scene === undefined) throw new Error('fixture Scene element is missing')
+    scene.currentReferenceAvailability = 'available'
+    scene.currentReference = {
+      assetId: 'asset-scene-local-1',
+      sha256: 'd'.repeat(64),
+      lineage: {
+        projectId: 'project-1',
+        ownerType: 'scene',
+        ownerId: 'scene-1',
+        role: 'scene_reference',
+        sourceRevisionId: 'source-local-scene-1',
+        qualificationKind: 'local_file_integrity',
+        qualificationCheckId: 'check-local-scene-1',
+        qualificationIdentity: 'e'.repeat(64),
+        uploadCommandReceiptId: 'receipt-local-scene-1',
+        rightsRecordSha256: 'f'.repeat(64),
+      },
+    }
+    const heroFrameStoryboards = director.heroFrameStoryboards as Record<string, unknown>
+    heroFrameStoryboards.shotRelationsSha256 = createHash('sha256')
+      .update(canonicalJson(relations), 'utf8')
+      .digest('hex')
+    const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(upstream), 'test-token'))
+
+    const result = await handler('workflow', { projectId: 'project-1', episodeId: 'episode-1' }, signal())
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error(result.error.message)
+    const actual = (result.value as YimengWorkflowProjection).director.shotRelations.shots[0]?.elements[0]
+    expect(actual?.currentReference).toEqual(scene.currentReference)
   })
 
   it('enforces the canonical current-reference role for each E5-3 element kind', async () => {

@@ -120,11 +120,11 @@ export function ShotRelationsView({ relations, selectedShotId, onSelectShotId, t
                   {element.currentReference === null ? null : <>
                     <small>{t('shotRelationReferenceAssetId')}: {element.currentReference.assetId}</small>
                     <small>{t('shotRelationReferenceSha')}: {element.currentReference.sha256}</small>
-                    <small>{t('shotRelationReferenceSubject')}: <code>{element.currentReference.lineage.projectId} · {element.currentReference.lineage.sourceEpisodeId ?? t('empty')} · {element.currentReference.lineage.ownerType}:{element.currentReference.lineage.ownerId}</code></small>
+                    <small>{t('shotRelationReferenceSubject')}: <code>{element.currentReference.lineage.projectId} · {'qualificationKind' in element.currentReference.lineage ? t('empty') : element.currentReference.lineage.sourceEpisodeId} · {element.currentReference.lineage.ownerType}:{element.currentReference.lineage.ownerId}</code></small>
                     <small>{t('shotRelationReferenceRole')}: {element.currentReference.lineage.role}</small>
-                    <small>{t('shotRelationReferenceGenerationJob')}: <code>{element.currentReference.lineage.generationJobId ?? t('empty')}</code></small>
-                    <small>{t('shotRelationReferenceSourceRevision')}: <code>{element.currentReference.lineage.sourceRevisionId ?? t('empty')}</code></small>
-                    <small>{t('shotRelationReferenceConsistencyCheck')}: <code>{element.currentReference.lineage.formalConsistencyCheckId ?? t('empty')}</code></small>
+                    <small>{t('shotRelationReferenceGenerationJob')}: <code>{'qualificationKind' in element.currentReference.lineage ? t('empty') : element.currentReference.lineage.generationJobId}</code></small>
+                    <small>{t('shotRelationReferenceSourceRevision')}: <code>{element.currentReference.lineage.sourceRevisionId}</code></small>
+                    <small>{t('shotRelationReferenceConsistencyCheck')}: <code>{'qualificationKind' in element.currentReference.lineage ? element.currentReference.lineage.qualificationCheckId : element.currentReference.lineage.formalConsistencyCheckId}</code></small>
                   </>}
                 </li>
               ))}</ul>

@@ -1135,7 +1135,8 @@ function parseShotCurrentReference(
 ): ImagoShotCurrentReference {
   const reference = parseExactInputObject(value, ['assetId', 'sha256', 'lineage'], field)
   const lineageField = `${field}.lineage`
-  const lineage = parseExactInputObject(reference.lineage, [
+  const lineageValue = parseInputObject(reference.lineage)
+  const providerKeys = [
     'projectId',
     'sourceEpisodeId',
     'ownerType',
@@ -1144,23 +1145,53 @@ function parseShotCurrentReference(
     'generationJobId',
     'sourceRevisionId',
     'formalConsistencyCheckId',
-  ], lineageField)
+  ] as const
+  const localKeys = [
+    'projectId',
+    'ownerType',
+    'ownerId',
+    'role',
+    'sourceRevisionId',
+    'qualificationKind',
+    'qualificationCheckId',
+    'qualificationIdentity',
+    'uploadCommandReceiptId',
+    'rightsRecordSha256',
+  ] as const
+  const local = Object.hasOwn(lineageValue, 'qualificationKind')
+  const lineage = parseExactInputObject(reference.lineage, local ? localKeys : providerKeys, lineageField)
   if (lineage.ownerType !== 'actor' && lineage.ownerType !== 'scene' && lineage.ownerType !== 'prop') {
     throw new InputError(`${lineageField}.ownerType must be actor, scene, or prop`)
   }
-  const normalizedLineage: ImagoShotCurrentReference['lineage'] = {
+  const ownerType: ImagoElementKind = lineage.ownerType
+  if (local && lineage.qualificationKind !== 'local_file_integrity') {
+    throw new InputError(`${lineageField}.qualificationKind must be local_file_integrity`)
+  }
+  const common = {
     projectId: parseIdentifier(lineage.projectId, `${lineageField}.projectId`),
-    sourceEpisodeId: parseIdentifier(lineage.sourceEpisodeId, `${lineageField}.sourceEpisodeId`),
-    ownerType: lineage.ownerType,
+    ownerType,
     ownerId: parseIdentifier(lineage.ownerId, `${lineageField}.ownerId`),
     role: parseIdentifier(lineage.role, `${lineageField}.role`),
-    generationJobId: parseIdentifier(lineage.generationJobId, `${lineageField}.generationJobId`),
     sourceRevisionId: parseIdentifier(lineage.sourceRevisionId, `${lineageField}.sourceRevisionId`),
-    formalConsistencyCheckId: parseIdentifier(
-      lineage.formalConsistencyCheckId,
-      `${lineageField}.formalConsistencyCheckId`,
-    ),
   }
+  const normalizedLineage: ImagoShotCurrentReference['lineage'] = local
+    ? {
+      ...common,
+      qualificationKind: 'local_file_integrity',
+      qualificationCheckId: parseIdentifier(lineage.qualificationCheckId, `${lineageField}.qualificationCheckId`),
+      qualificationIdentity: parseInputSha256(lineage.qualificationIdentity, `${lineageField}.qualificationIdentity`),
+      uploadCommandReceiptId: parseIdentifier(lineage.uploadCommandReceiptId, `${lineageField}.uploadCommandReceiptId`),
+      rightsRecordSha256: parseInputSha256(lineage.rightsRecordSha256, `${lineageField}.rightsRecordSha256`),
+    }
+    : {
+      ...common,
+      sourceEpisodeId: parseIdentifier(lineage.sourceEpisodeId, `${lineageField}.sourceEpisodeId`),
+      generationJobId: parseIdentifier(lineage.generationJobId, `${lineageField}.generationJobId`),
+      formalConsistencyCheckId: parseIdentifier(
+        lineage.formalConsistencyCheckId,
+        `${lineageField}.formalConsistencyCheckId`,
+      ),
+    }
   if (
     normalizedLineage.projectId !== projectId
     || normalizedLineage.ownerType !== element.elementKind

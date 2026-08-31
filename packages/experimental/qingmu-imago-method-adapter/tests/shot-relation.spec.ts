@@ -507,6 +507,42 @@ describe('qingmu Shot relation method adapter', () => {
     expect(observedSha256).toHaveLength(lineageVariants.length + 1)
   })
 
+  it('preserves exact local-file qualification lineage in the method snapshot', async () => {
+    const localReference = {
+      assetId: 'asset-scene-local-1',
+      sha256: '7'.repeat(64),
+      lineage: {
+        projectId: 'project-1',
+        ownerType: 'scene' as const,
+        ownerId: 'scene-element-1',
+        role: 'scene_reference',
+        sourceRevisionId: 'source-local-scene-1',
+        qualificationKind: 'local_file_integrity' as const,
+        qualificationCheckId: 'check-local-scene-1',
+        qualificationIdentity: '8'.repeat(64),
+        uploadCommandReceiptId: 'receipt-local-scene-1',
+        rightsRecordSha256: '9'.repeat(64),
+      },
+    }
+    const request: ImagoShotRelationMethodRequest = {
+      ...REQUEST,
+      elements: REQUEST.elements.map((element, index) => index === 1
+        ? { ...element, currentReferenceAvailability: 'available', currentReference: localReference }
+        : element),
+    }
+    const handler = createImagoMethodHandler(
+      { coreRoot: '/opt/imago-os-core' },
+      dependencies(async snapshot => projection(snapshot)),
+    )
+
+    const result = await handler('shotRelationMethod', request, signal())
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error(result.error.message)
+    const value = result.value as ImagoShotRelationMethodResponse
+    expect(value.projection.relationship_projection.elements[1]?.currentReference).toEqual(localReference)
+  })
+
   it('rejects browser-supplied authority, duplicate IDs, dangling relations, and unknown selected Shots before Core', async () => {
     const runShotRelationCompiler = vi.fn()
     const handler = createImagoMethodHandler(

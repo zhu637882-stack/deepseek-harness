@@ -77,6 +77,7 @@ import type {
   YimengPromptIrSubject,
   YimengReferenceAssetCandidate,
   YimengReferenceCandidateDecisionKind,
+  YimengReferenceCandidateQualificationKind,
   YimengReferenceCandidateQualityStatus,
   YimengReferenceCandidateSelectionStatus,
   YimengReferenceCandidatesResponse,
@@ -326,6 +327,9 @@ const REFERENCE_QUALITY_STATUSES = new Set<YimengReferenceCandidateQualityStatus
 ])
 const REFERENCE_DECISION_KINDS = new Set<YimengReferenceCandidateDecisionKind>([
   'none', 'referenceSelection', 'humanReview',
+])
+const REFERENCE_QUALIFICATION_KINDS = new Set<YimengReferenceCandidateQualificationKind>([
+  'none', 'provider_formal_consistency', 'local_file_integrity',
 ])
 const SHOT_CURRENT_REFERENCE_ROLES = {
   actor: [
@@ -2494,6 +2498,17 @@ function requireReferenceDecisionKind(
   return kind as YimengReferenceCandidateDecisionKind
 }
 
+function requireReferenceQualificationKind(
+  value: unknown,
+  field: string,
+): YimengReferenceCandidateQualificationKind {
+  const kind = requireString(value, field)
+  if (!REFERENCE_QUALIFICATION_KINDS.has(kind as YimengReferenceCandidateQualificationKind)) {
+    throw new UpstreamContractError(`${field} must be none, provider_formal_consistency, or local_file_integrity`)
+  }
+  return kind as YimengReferenceCandidateQualificationKind
+}
+
 function normalizeReferenceCandidate(
   value: unknown,
   index: number,
@@ -2513,13 +2528,75 @@ function normalizeReferenceCandidate(
   if ((decisionKind === 'none') !== (decisionIdentity === '')) {
     throw new UpstreamContractError(`${field}.decisionIdentity does not match decisionKind`)
   }
+  const qualificationKind = requireReferenceQualificationKind(
+    candidate.qualificationKind,
+    `${field}.qualificationKind`,
+  )
+  const qualificationCheckId = requireIdentifier(
+    candidate.qualificationCheckId,
+    `${field}.qualificationCheckId`,
+    true,
+  )
+  const qualificationPassed = requireBoolean(
+    candidate.qualificationPassed,
+    `${field}.qualificationPassed`,
+  )
+  const qualificationIdentity = requireIdentifier(
+    candidate.qualificationIdentity,
+    `${field}.qualificationIdentity`,
+    true,
+  )
+  const uploadCommandReceiptId = requireIdentifier(
+    candidate.uploadCommandReceiptId,
+    `${field}.uploadCommandReceiptId`,
+    true,
+  )
+  const rightsRecorded = requireBoolean(candidate.rightsRecorded, `${field}.rightsRecorded`)
+  const rightsRecordSha256 = requireOptionalSha256(
+    candidate.rightsRecordSha256,
+    `${field}.rightsRecordSha256`,
+  )
+  const sourceEpisodeId = requireIdentifier(candidate.sourceEpisodeId, `${field}.sourceEpisodeId`, true)
+  const generationJobId = requireIdentifier(candidate.generationJobId, `${field}.generationJobId`, true)
+  const sourceRevisionId = requireIdentifier(candidate.sourceRevisionId, `${field}.sourceRevisionId`, true)
+  const formalConsistencyCheckId = requireIdentifier(
+    candidate.formalConsistencyCheckId,
+    `${field}.formalConsistencyCheckId`,
+    true,
+  )
+  const formalConsistencyPassed = requireBoolean(
+    candidate.formalConsistencyPassed,
+    `${field}.formalConsistencyPassed`,
+  )
+  const rightsBindingValid = rightsRecorded ? rightsRecordSha256 !== '' : rightsRecordSha256 === ''
+  const providerQualificationValid = qualificationKind === 'provider_formal_consistency'
+    && qualificationCheckId !== '' && qualificationCheckId === formalConsistencyCheckId
+    && qualificationPassed === formalConsistencyPassed
+    && sourceEpisodeId !== '' && generationJobId !== '' && sourceRevisionId !== ''
+    && qualificationIdentity === '' && uploadCommandReceiptId === '' && rightsBindingValid
+  const localQualificationValid = qualificationKind === 'local_file_integrity'
+    && qualificationCheckId !== '' && qualificationPassed === true
+    && qualificationIdentity !== '' && uploadCommandReceiptId !== ''
+    && rightsRecorded === true && rightsRecordSha256 !== ''
+    && sourceRevisionId !== '' && sourceEpisodeId === '' && generationJobId === ''
+    && formalConsistencyCheckId === '' && formalConsistencyPassed === false
+  const noQualificationValid = qualificationKind === 'none'
+    && qualificationCheckId === '' && qualificationPassed === false
+    && qualificationIdentity === ''
+    && sourceRevisionId === ''
+    && formalConsistencyCheckId === '' && formalConsistencyPassed === false
+    && (uploadCommandReceiptId === '' || (sourceEpisodeId === '' && generationJobId === ''))
+    && rightsBindingValid
+  if (!providerQualificationValid && !localQualificationValid && !noQualificationValid) {
+    throw new UpstreamContractError(`${field} qualification lineage mismatch`)
+  }
   return {
     assetId: requireIdentifier(candidate.assetId, `${field}.assetId`),
     sha256: requireSha256(candidate.sha256, `${field}.sha256`),
     materializedSha256,
     bindingValid: requireBoolean(candidate.bindingValid, `${field}.bindingValid`),
     projectId,
-    sourceEpisodeId: requireIdentifier(candidate.sourceEpisodeId, `${field}.sourceEpisodeId`, true),
+    sourceEpisodeId,
     ownerType: expected.elementKind,
     ownerId,
     role: requireString(candidate.role, `${field}.role`),
@@ -2527,17 +2604,17 @@ function normalizeReferenceCandidate(
     qualityStatus: requireReferenceQualityStatus(candidate.qualityStatus, `${field}.qualityStatus`),
     selectionStatus: requireReferenceSelectionStatus(candidate.selectionStatus, `${field}.selectionStatus`),
     isSelected: requireBoolean(candidate.isSelected, `${field}.isSelected`),
-    generationJobId: requireIdentifier(candidate.generationJobId, `${field}.generationJobId`, true),
-    sourceRevisionId: requireIdentifier(candidate.sourceRevisionId, `${field}.sourceRevisionId`, true),
-    formalConsistencyCheckId: requireIdentifier(
-      candidate.formalConsistencyCheckId,
-      `${field}.formalConsistencyCheckId`,
-      true,
-    ),
-    formalConsistencyPassed: requireBoolean(
-      candidate.formalConsistencyPassed,
-      `${field}.formalConsistencyPassed`,
-    ),
+    generationJobId,
+    sourceRevisionId,
+    formalConsistencyCheckId,
+    formalConsistencyPassed,
+    qualificationKind,
+    qualificationCheckId,
+    qualificationPassed,
+    qualificationIdentity,
+    uploadCommandReceiptId,
+    rightsRecorded,
+    rightsRecordSha256,
     qualityProjectionSha256: requireSha256(
       candidate.qualityProjectionSha256,
       `${field}.qualityProjectionSha256`,
@@ -3077,37 +3154,63 @@ function normalizeShotCurrentReference(
   assertExactOutputKeys(reference, ['assetId', 'sha256', 'lineage'], field)
   const lineageField = `${field}.lineage`
   const lineage = requireObject(reference.lineage, lineageField)
-  assertExactOutputKeys(
-    lineage,
-    [
-      'projectId',
-      'sourceEpisodeId',
-      'ownerType',
-      'ownerId',
-      'role',
-      'generationJobId',
-      'sourceRevisionId',
-      'formalConsistencyCheckId',
-    ],
-    lineageField,
-  )
+  const providerKeys = [
+    'projectId',
+    'sourceEpisodeId',
+    'ownerType',
+    'ownerId',
+    'role',
+    'generationJobId',
+    'sourceRevisionId',
+    'formalConsistencyCheckId',
+  ] as const
+  const localKeys = [
+    'projectId',
+    'ownerType',
+    'ownerId',
+    'role',
+    'sourceRevisionId',
+    'qualificationKind',
+    'qualificationCheckId',
+    'qualificationIdentity',
+    'uploadCommandReceiptId',
+    'rightsRecordSha256',
+  ] as const
+  const local = Object.hasOwn(lineage, 'qualificationKind')
+  assertExactOutputKeys(lineage, local ? localKeys : providerKeys, lineageField)
   const ownerType = lineage.ownerType
   if (ownerType !== 'actor' && ownerType !== 'scene' && ownerType !== 'prop') {
     throw new UpstreamContractError(`${lineageField}.ownerType is invalid`)
   }
-  const normalizedLineage: YimengShotCurrentReferenceLineage = {
+  const normalizedOwnerType: YimengShotRelationElementKind = ownerType
+  if (local && lineage.qualificationKind !== 'local_file_integrity') {
+    throw new UpstreamContractError(`${lineageField}.qualificationKind is invalid`)
+  }
+  const common = {
     projectId: requireIdentifier(lineage.projectId, `${lineageField}.projectId`),
-    sourceEpisodeId: requireIdentifier(lineage.sourceEpisodeId, `${lineageField}.sourceEpisodeId`),
-    ownerType,
+    ownerType: normalizedOwnerType,
     ownerId: requireIdentifier(lineage.ownerId, `${lineageField}.ownerId`),
     role: requireIdentifier(lineage.role, `${lineageField}.role`),
-    generationJobId: requireIdentifier(lineage.generationJobId, `${lineageField}.generationJobId`),
     sourceRevisionId: requireIdentifier(lineage.sourceRevisionId, `${lineageField}.sourceRevisionId`),
-    formalConsistencyCheckId: requireIdentifier(
-      lineage.formalConsistencyCheckId,
-      `${lineageField}.formalConsistencyCheckId`,
-    ),
   }
+  const normalizedLineage: YimengShotCurrentReferenceLineage = local
+    ? {
+      ...common,
+      qualificationKind: 'local_file_integrity',
+      qualificationCheckId: requireIdentifier(lineage.qualificationCheckId, `${lineageField}.qualificationCheckId`),
+      qualificationIdentity: requireSha256(lineage.qualificationIdentity, `${lineageField}.qualificationIdentity`),
+      uploadCommandReceiptId: requireIdentifier(lineage.uploadCommandReceiptId, `${lineageField}.uploadCommandReceiptId`),
+      rightsRecordSha256: requireSha256(lineage.rightsRecordSha256, `${lineageField}.rightsRecordSha256`),
+    }
+    : {
+      ...common,
+      sourceEpisodeId: requireIdentifier(lineage.sourceEpisodeId, `${lineageField}.sourceEpisodeId`),
+      generationJobId: requireIdentifier(lineage.generationJobId, `${lineageField}.generationJobId`),
+      formalConsistencyCheckId: requireIdentifier(
+        lineage.formalConsistencyCheckId,
+        `${lineageField}.formalConsistencyCheckId`,
+      ),
+    }
   if (
     normalizedLineage.projectId !== projectId
     || normalizedLineage.ownerType !== elementKind

@@ -22,6 +22,44 @@ export interface LocalReferenceContentRequest extends LocalReferenceScope {
   readonly assetId: string
   readonly expectedSha256: string
 }
+/** Explicit local-integrity qualification intent bound to the current element snapshot. */
+export interface LocalReferenceQualificationRequest extends LocalReferenceScope {
+  readonly idempotencyKey: string
+  readonly assetId: string
+  readonly assetSha256: string
+  readonly baseRevision: number
+  readonly baseSnapshotSha256: string
+}
+/** Zero-Provider qualification receipt; it grants neither selection nor approval. */
+export interface LocalReferenceQualificationResult extends LocalReferenceScope {
+  readonly schema: 'jason.qingmu-local-reference-qualification-result.v1'
+  readonly assetId: string
+  readonly assetSha256: string
+  readonly profileRevision: number
+  readonly baseSnapshotSha256: string
+  readonly elementSnapshotSha256: string
+  readonly uploadCommandReceiptId: string
+  readonly sourceRevisionId: string
+  readonly qualificationKind: 'local_file_integrity'
+  readonly qualificationCheckId: string
+  readonly qualificationPassed: true
+  readonly qualificationIdentity: string
+  readonly rightsRecordSha256: string
+  readonly rightsRecorded: true
+  readonly rightsVerified: false
+  readonly formalConsistencyPassed: false
+  readonly selectionStatus: 'Unselected'
+  readonly isSelected: false
+  readonly idempotencyKey: string
+  readonly requestSha256: string
+  readonly commandReceiptId: string
+  readonly changeSetId: string
+  readonly eventId: string
+  readonly providerCalls: 0
+  readonly stageStarted: false
+  readonly approvalGranted: false
+  readonly selectionGranted: false
+}
 /** Fail-closed receipt or current projection for one unselected, unapproved local image candidate. */
 export interface LocalReferenceCandidateResult extends LocalReferenceScope {
   readonly schema: 'jason.qingmu-local-reference-candidate-result.v1'
@@ -150,6 +188,48 @@ function normalizeResult(
   return raw as unknown as LocalReferenceCandidateResult
 }
 
+function normalizeQualificationResult(
+  value: unknown,
+  expected: LocalReferenceQualificationRequest,
+  requestSha256: string,
+  fail: (message: string) => Error,
+): LocalReferenceQualificationResult {
+  const raw = object(value, fail)
+  const exactKeys = [
+    'approvalGranted', 'assetId', 'assetSha256', 'baseSnapshotSha256', 'changeSetId',
+    'commandReceiptId', 'elementKind', 'elementSnapshotSha256', 'eventId',
+    'formalConsistencyPassed', 'idempotencyKey', 'isSelected', 'profileRevision',
+    'projectId', 'providerCalls', 'qualificationCheckId', 'qualificationIdentity',
+    'qualificationKind', 'qualificationPassed', 'requestSha256', 'rightsRecorded',
+    'rightsRecordSha256', 'rightsVerified', 'schema', 'selectionGranted',
+    'selectionStatus', 'sourceRevisionId', 'stageStarted', 'targetId',
+    'uploadCommandReceiptId',
+  ].sort()
+  if (Object.keys(raw).sort().join() !== exactKeys.join()) {
+    throw fail('local reference qualification result fields invalid')
+  }
+  if (raw.schema !== 'jason.qingmu-local-reference-qualification-result.v1') throw fail('local reference qualification schema invalid')
+  const actual = scope(raw, fail)
+  if (actual.projectId !== expected.projectId || actual.elementKind !== expected.elementKind || actual.targetId !== expected.targetId) throw fail('local reference qualification scope mismatch')
+  for (const field of ['assetId', 'uploadCommandReceiptId', 'sourceRevisionId', 'qualificationCheckId', 'commandReceiptId', 'changeSetId', 'eventId']) id(raw[field], fail)
+  for (const field of ['assetSha256', 'baseSnapshotSha256', 'elementSnapshotSha256', 'qualificationIdentity', 'rightsRecordSha256', 'requestSha256']) digest(raw[field], fail)
+  if (raw.assetId !== expected.assetId || raw.assetSha256 !== expected.assetSha256
+    || raw.baseSnapshotSha256 !== expected.baseSnapshotSha256
+    || raw.idempotencyKey !== expected.idempotencyKey || raw.requestSha256 !== requestSha256) {
+    throw fail('local reference qualification receipt mismatch')
+  }
+  if (typeof raw.profileRevision !== 'number' || !Number.isSafeInteger(raw.profileRevision)
+    || raw.profileRevision <= expected.baseRevision) throw fail('local reference qualification revision invalid')
+  if (raw.qualificationKind !== 'local_file_integrity' || raw.qualificationPassed !== true
+    || raw.rightsRecorded !== true || raw.rightsVerified !== false
+    || raw.formalConsistencyPassed !== false || raw.selectionStatus !== 'Unselected'
+    || raw.isSelected !== false || raw.providerCalls !== 0 || raw.stageStarted !== false
+    || raw.approvalGranted !== false || raw.selectionGranted !== false) {
+    throw fail('local reference qualification authority mismatch')
+  }
+  return raw as unknown as LocalReferenceQualificationResult
+}
+
 /**
  * Build one allowlisted local candidate request and validate the fail-closed response.
  * @param endpoint - Exact Host RPC operation selected by the caller.
@@ -190,6 +270,48 @@ export function prepareLocalReferenceCandidate(endpoint: string, value: unknown,
       if (!['image/png', 'image/jpeg', 'image/webp'].includes(String(result.mimeType))) throw response('local reference content MIME invalid')
       return result
     } }
+  }
+  if (['qualifyLocalReferenceCandidate', 'recoverLocalReferenceQualification'].includes(endpoint)) {
+    if (Object.keys(raw).sort().join() !== ['assetId', 'assetSha256', 'baseRevision', 'baseSnapshotSha256', 'elementKind', 'idempotencyKey', 'projectId', 'targetId'].join()) throw input('local reference qualification fields invalid')
+    const qualification = {
+      ...expected,
+      assetId: id(raw.assetId, input),
+      assetSha256: digest(raw.assetSha256, input),
+      baseRevision: raw.baseRevision,
+      baseSnapshotSha256: digest(raw.baseSnapshotSha256, input),
+      idempotencyKey: text(raw.idempotencyKey, input, 128),
+    }
+    if (typeof qualification.baseRevision !== 'number' || !Number.isSafeInteger(qualification.baseRevision)
+      || qualification.baseRevision < 0 || !/^[A-Za-z0-9._:-]{8,128}$/.test(qualification.idempotencyKey)) {
+      throw input('local reference qualification intent invalid')
+    }
+    const identity = {
+      projectId: qualification.projectId,
+      elementKind: qualification.elementKind,
+      targetId: qualification.targetId,
+      assetId: qualification.assetId,
+      assetSha256: qualification.assetSha256,
+      baseRevision: qualification.baseRevision,
+      baseSnapshotSha256: qualification.baseSnapshotSha256,
+    }
+    const requestSha256 = createHash('sha256').update(helpers.canonicalJson(identity, 'local reference qualification identity')).digest('hex')
+    const recover = endpoint === 'recoverLocalReferenceQualification'
+    const suffix = `/${encodeURIComponent(qualification.assetId)}/qualification`
+    const path = recover
+      ? `${prefix}${suffix}/receipt?${new URLSearchParams({ idempotencyKey: qualification.idempotencyKey, requestSha256 }).toString()}`
+      : `${prefix}${suffix}`
+    const body = recover ? undefined : {
+      idempotencyKey: qualification.idempotencyKey,
+      assetSha256: qualification.assetSha256,
+      baseRevision: qualification.baseRevision,
+      baseSnapshotSha256: qualification.baseSnapshotSha256,
+    }
+    return {
+      path,
+      method: recover ? 'GET' : 'POST',
+      ...(body === undefined ? {} : { body }),
+      normalize: value => normalizeQualificationResult(value, qualification as LocalReferenceQualificationRequest, requestSha256, response),
+    }
   }
   if (!['uploadLocalReferenceCandidate', 'recoverLocalReferenceCandidate'].includes(endpoint)) throw input('unknown local reference operation')
   if (Object.keys(raw).sort().join() !== ['contentBase64', 'elementKind', 'idempotencyKey', 'originalFileName', 'projectId', 'sourceDeclaration', 'targetId'].join()) throw input('local reference upload fields invalid')

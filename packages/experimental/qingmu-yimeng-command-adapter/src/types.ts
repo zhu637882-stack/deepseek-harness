@@ -22,7 +22,7 @@ export type {
 export type {
   LocalReferenceCandidateContent, LocalReferenceCandidateList, LocalReferenceCandidateResult,
   LocalReferenceContentRequest, LocalReferenceElementKind, LocalReferenceScope,
-  LocalReferenceUploadRequest,
+  LocalReferenceQualificationRequest, LocalReferenceQualificationResult, LocalReferenceUploadRequest,
 } from './local-reference-candidate.ts'
 
 /** JSON object retained from a Yimeng command response. */
@@ -2834,6 +2834,8 @@ export interface YimengCommandEndpointMap {
   readonly uploadLocalReferenceCandidate: import('./local-reference-candidate.ts').LocalReferenceCandidateResult
   readonly recoverLocalReferenceCandidate: import('./local-reference-candidate.ts').LocalReferenceCandidateResult
   readonly readLocalReferenceCandidateContent: import('./local-reference-candidate.ts').LocalReferenceCandidateContent
+  readonly qualifyLocalReferenceCandidate: import('./local-reference-candidate.ts').LocalReferenceQualificationResult
+  readonly recoverLocalReferenceQualification: import('./local-reference-candidate.ts').LocalReferenceQualificationResult
   readonly readScenePlanning: import('./scene-planning.ts').ScenePlanningState
   readonly saveScenePlanning: import('./scene-planning.ts').ScenePlanningResult
   readonly recoverScenePlanning: import('./scene-planning.ts').ScenePlanningResult

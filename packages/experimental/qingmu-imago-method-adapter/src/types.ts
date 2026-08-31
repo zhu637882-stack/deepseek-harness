@@ -384,8 +384,8 @@ export interface ImagoShotRelationElement extends ImagoMethodJsonObject {
   readonly snapshotSha256: string
 }
 
-/** Exact immutable coordinates of the one E4-3 current reference selection. */
-export interface ImagoShotCurrentReferenceLineage extends ImagoMethodJsonObject {
+/** Exact immutable coordinates of a Provider-qualified current reference. */
+export interface ImagoShotProviderCurrentReferenceLineage extends ImagoMethodJsonObject {
   readonly projectId: string
   readonly sourceEpisodeId: string
   readonly ownerType: ImagoElementKind
@@ -395,6 +395,25 @@ export interface ImagoShotCurrentReferenceLineage extends ImagoMethodJsonObject 
   readonly sourceRevisionId: string
   readonly formalConsistencyCheckId: string
 }
+
+/** Exact immutable coordinates of a local-file-qualified current reference. */
+export interface ImagoShotLocalCurrentReferenceLineage extends ImagoMethodJsonObject {
+  readonly projectId: string
+  readonly ownerType: ImagoElementKind
+  readonly ownerId: string
+  readonly role: string
+  readonly sourceRevisionId: string
+  readonly qualificationKind: 'local_file_integrity'
+  readonly qualificationCheckId: string
+  readonly qualificationIdentity: string
+  readonly uploadCommandReceiptId: string
+  readonly rightsRecordSha256: string
+}
+
+/** Exact immutable coordinates of either qualified current-reference path. */
+export type ImagoShotCurrentReferenceLineage =
+  | ImagoShotProviderCurrentReferenceLineage
+  | ImagoShotLocalCurrentReferenceLineage
 
 /** Read-only E4-3 reference binding exposed to the E5-3 method. */
 export interface ImagoShotCurrentReference extends ImagoMethodJsonObject {
