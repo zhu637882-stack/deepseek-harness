@@ -625,6 +625,7 @@ function shotRelationMethod(request: Parameters<QingmuYimengPort['shotRelationMe
 
 function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
   return {
+    editorialHandoff: vi.fn(async () => { throw new Error('Editorial handoff uses a separate fixture') }),
     firstFrameQuote: vi.fn(async () => { throw new Error('First-frame quote uses a separate fixture') }),
     promptIrBootstrap: vi.fn(async () => { throw new Error('PromptIR bootstrap uses a separate fixture') }),
     promptIrBootstrapMethod: vi.fn(async () => { throw new Error('PromptIR bootstrap method uses a separate fixture') }),

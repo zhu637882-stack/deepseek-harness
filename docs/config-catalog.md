@@ -699,7 +699,7 @@ export interface YimengReadAdapterConfig {
 }
 ```
 
-Source: [`packages/experimental/qingmu-yimeng-read-adapter/src/index.ts:393`](../packages/experimental/qingmu-yimeng-read-adapter/src/index.ts)
+Source: [`packages/experimental/qingmu-yimeng-read-adapter/src/index.ts:398`](../packages/experimental/qingmu-yimeng-read-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-tool-agent-team"></a>
 

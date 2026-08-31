@@ -142,6 +142,12 @@ For a Ready storyboard frame with no PromptIR lineage, the Director workspace ex
 
 After Ready, the “first-frame generation conditions” card only reads one server-recomputed, single-shot authorization draft. Its primary layer shows the target, unique Alibaba route, one-call estimate, maximum reservation cap, structured blockers, and next actions; prompts, SHAs, and raw contracts stay in the advanced disclosure. It offers no submit action and explicitly keeps authorization, task creation, submission, and charging false.
 
+## Editorial handoff
+
+The Delivery workspace includes a read-only editorial handoff draft. It presents canonical shot order, persisted selected-Take media records, duration and frame geometry, authoritative-audio coverage, QC/approval blockers, and separate Aoki-production versus Yimeng-release readiness. Media is not probed again by this read; technical SHA details are collapsed by default, and the panel exposes no submit or approval action.
+
+The OTIO media-package button is semantically disabled while Yimeng reports any blocker. In the current runtime, the missing verified OpenTimelineIO adapter is shown as the explicit recovery blocker rather than a fake download. Refreshing issues one bounded GET and never starts verification, generation, or a Provider call.
+
 ## Security boundary
 
 `YIMENG_API_TOKEN` and `QINGMU_IMAGO_ATTESTATION_KEY` belong only to Qingmu Host processes. The browser plugin does not read environment variables, `localStorage`, `JWT_SECRET`, or cookies, and it never receives or renders either secret. Its only persistence is the bounded non-secret receipt-recovery marker in the current tab's `sessionStorage`. Read and command channels are separate Host plugins, both limited to loopback upstreams. If the token is absent, the cockpit shows a recovery instruction to configure the Host and restart the local instance.

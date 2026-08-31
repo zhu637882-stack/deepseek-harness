@@ -1,0 +1,30 @@
+.panel { display: grid; gap: 16px; min-width: 0; }
+.header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.header h3, .header p, .exportBox p { margin: 0; }
+.header p { margin-top: 6px; color: var(--dsw-alias-label-secondary); max-width: 72ch; }
+.header button, .exportBox button { min-height: 40px; white-space: nowrap; }
+.readiness { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.readiness span { padding: 10px 12px; border: 1px solid #93594f; border-radius: 8px; background: #291916; color: #ffe1da; }
+.metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.metrics span { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-2); }
+.metrics strong { color: var(--qingmu-accent); font-size: 1.08rem; }
+.shots { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.shots > li { min-width: 0; padding: 14px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--dsw-alias-bg-layer-2); }
+.shots header { display: flex; justify-content: space-between; gap: 12px; }
+.shots dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; margin: 12px 0; }
+.shots dl > div { min-width: 0; }
+.shots dt { color: var(--dsw-alias-label-secondary); font-size: .78rem; }
+.shots dd { margin: 3px 0 0; overflow-wrap: anywhere; }
+.blockers { margin: 10px 0; padding-left: 20px; color: #ffd08a; }
+.warning, .error { color: #ffd08a; }
+.exportBox { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: color-mix(in srgb, var(--qingmu-accent) 5%, transparent); }
+.empty { color: var(--dsw-alias-label-secondary); }
+details p { overflow-wrap: anywhere; }
+@media (max-width: 1100px) {
+  .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .header, .exportBox { align-items: stretch; flex-direction: column; }
+  .readiness, .metrics, .shots dl { grid-template-columns: 1fr; }
+  .header button, .exportBox button { width: 100%; }
+}

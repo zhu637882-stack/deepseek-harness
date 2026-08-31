@@ -64,6 +64,19 @@ interface PromptIrFrame extends PromptIrRecoveryCoordinates {
   readonly label: string
 }
 
+const FIRST_FRAME_ACTION_KEYS: Record<
+  YimengFirstFrameQuoteResponse['authorizationDraft']['blockers'][number]['category'],
+  QingmuCockpitKey
+> = {
+  content_human_decision: 'firstFrameActionContentDecision',
+  provenance_rights: 'firstFrameActionProvenance',
+  provider_accessible_media: 'firstFrameActionProviderMedia',
+  catalog_route_pricing: 'firstFrameActionCatalog',
+  runtime_config: 'firstFrameActionRuntime',
+  budget_unknown_fee: 'firstFrameActionBudget',
+  session_permission: 'firstFrameActionSession',
+}
+
 /** Props for the bounded PromptIR editor mounted in the existing Script & Assets slot. */
 export interface PromptIrWorkspaceProps {
   readonly presentation?: 'director'
@@ -1141,7 +1154,7 @@ function ReadyPromptIrWorkspace({
             <strong>{t('firstFrameAuthorizationBlockers')}</strong>
             <ul>{firstFrameQuote.authorizationDraft.blockers.map(blocker => <li key={blocker.code}>
               <span>{blocker.category}</span>
-              <strong>{blocker.userAction}</strong>
+              <strong>{t(FIRST_FRAME_ACTION_KEYS[blocker.category])}</strong>
             </li>)}</ul>
           </div>}
           <p className={css.authorizationFlags}><strong>{t('firstFrameAuthorizationFlags')}</strong></p>

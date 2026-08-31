@@ -26,6 +26,7 @@ import { GenerationCostRehearsal } from './GenerationCostRehearsal.tsx'
 import { GenerationGateAControlEvidence } from './GenerationGateAControlEvidence.tsx'
 import { TakeVersionCompareView } from './TakeVersionCompareView.tsx'
 import { EpisodeEvidenceLedger } from './EpisodeEvidenceLedger.tsx'
+import { EditorialHandoff } from './EditorialHandoff.tsx'
 import css from './QingmuCockpit.module.css'
 import { DirectorWorkspace } from './DirectorWorkspace.tsx'
 
@@ -629,6 +630,9 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
         <strong>{boolOf(release.releaseReady) === true ? t('releaseReady') : t('releaseNotReady')}</strong>
         <p className={css.boundary}>{t('releaseDisclaimer')}</p>
       </Card>
+      <Card title={t('handoffCardTitle')}>
+        <EditorialHandoff projectId={projectId} episodeId={episodeId} port={port} t={t} />
+      </Card>
     </div>
   )
 
@@ -789,7 +793,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
             >
               {creating || (!loading && projects.length === 0 && error === undefined)
                 ? <CreateProjectWorkspace port={port} onCreated={async (result) => { await refresh(result); setCreating(false); setTab('assets') }}
-                  onCancel={projects.length === 0 ? undefined : () => setCreating(false)} />
+                  onCancel={projects.length === 0 ? undefined : () => { setCreating(false) }} />
                 : panels[tab]}
             </main>
             <aside className={css.evidence} aria-label={t('evidence')}>

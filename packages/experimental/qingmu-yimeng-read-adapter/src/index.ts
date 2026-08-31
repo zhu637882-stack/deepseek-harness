@@ -33,6 +33,7 @@ import {
   parseEpisodeEvidenceRequest,
   parseEpisodeVerificationRequest,
 } from './episode-evidence.ts'
+import { normalizeEditorialHandoff } from './editorial-handoff.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -161,6 +162,10 @@ export type {
   YimengEpisodeVerificationReport,
   YimengEpisodeVerificationRequest,
   YimengEpisodeVerificationResponse,
+  YimengEditorialHandoffMedia,
+  YimengEditorialHandoffRequest,
+  YimengEditorialHandoffResponse,
+  YimengEditorialHandoffShot,
   YimengHealth,
   YimengHumanDecision,
   YimengHumanDecisionValue,
@@ -316,7 +321,7 @@ const PROTECTED_ENDPOINTS = new Set([
   'projects', 'episodes', 'script', 'promptIr', 'promptIrBootstrap', 'firstFrameQuote', 'capabilityCatalog', 'costRehearsal',
   'gateAControlEvidence', 'elementProfile',
   'referenceCandidates', 'reviewEvents',
-  'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'takeComments', 'takeReviewAuthority', 'takeAcceptance', 'takeTechnicalQc', 'takeApprovalLifecycle', 'evidenceLedger', 'verifyEpisode', 'shotFindings', 'productionUnits', 'stageSources',
+  'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'takeComments', 'takeReviewAuthority', 'takeAcceptance', 'takeTechnicalQc', 'takeApprovalLifecycle', 'evidenceLedger', 'editorialHandoff', 'verifyEpisode', 'shotFindings', 'productionUnits', 'stageSources',
   'lsuPlanSource', 'reworkRouteSource',
   'takePreview',
 ])
@@ -980,6 +985,8 @@ const VERIFICATION_ERROR_MESSAGES = new Map<string, string>([
   ['qingmu_evidence_ledger_forbidden', 'EVIDENCE_FORBIDDEN'],
   ['evidence_ledger_source_snapshot_conflict', 'SOURCE_SNAPSHOT_CONFLICT'],
   ['evidence_ledger_source_drift', 'SOURCE_DRIFT'],
+  ['editorial_handoff_source_drift', 'SOURCE_DRIFT'],
+  ['editorial_handoff_source_invalid', 'EVIDENCE_SOURCE_INVALID'],
   ['evidence_ledger_verify_busy', 'VERIFY_BUSY'],
   ['evidence_ledger_verify_timeout', 'VERIFY_TIMEOUT'],
   ['evidence_ledger_verify_unavailable', 'PROBE_UNAVAILABLE'],
@@ -2295,6 +2302,35 @@ function normalizePromptIrBootstrap(
   }
 }
 
+const FIRST_FRAME_AUTHORIZATION_ACTIONS = {
+  content_human_decision: '请由具备权限的人完成对应内容决定，再重新检查。',
+  provenance_rights: '请修复当前来源、权利或版本绑定，再重新检查。',
+  provider_accessible_media: '请配置不含私网地址的公开 HTTPS 素材入口，再重新检查。',
+  catalog_route_pricing: '请修复易梦当前模型目录、路由或价格快照，再重新检查。',
+  runtime_config: '请由运行实例管理员绑定本项目的付费运行配置。',
+  budget_unknown_fee: '请先核对易梦费用账本与本次预算窗口，再单独授权。',
+  session_permission: '请在所有硬阻塞清除后，由当前认证用户单独确认一次生成授权。',
+} as const
+
+type FirstFrameAuthorizationCategory = keyof typeof FIRST_FRAME_AUTHORIZATION_ACTIONS
+
+function firstFrameAuthorizationCategory(code: string): FirstFrameAuthorizationCategory | null {
+  if (code === 'first_frame_reference_human_decision_not_accepted'
+    || code.startsWith('commercial_quality:')) return 'content_human_decision'
+  if (code.startsWith('first_frame_reference_provider_url_')) return 'provider_accessible_media'
+  if (code.includes('budget')) return 'budget_unknown_fee'
+  if (['paid_api_disabled', 'provider_paid_scope_project_mismatch',
+    'provider_paid_scope_episode_mismatch'].includes(code)) return 'runtime_config'
+  if (code === 'operator_paid_confirmation_required') return 'session_permission'
+  if (code.includes('catalog') || code.includes('pricing') || code.includes('route')) {
+    return 'catalog_route_pricing'
+  }
+  if (['first_frame_reference_entity_draft_missing', 'first_frame_execution_quote_not_ready',
+    'first_frame_quote_unavailable', 'first_frame_quote_call_count_invalid',
+    'first_frame_quote_source_lock_unavailable'].includes(code)) return 'provenance_rights'
+  return null
+}
+
 function normalizeFirstFrameQuote(
   value: unknown,
   expected: YimengFirstFrameQuoteRequest,
@@ -2950,6 +2986,8 @@ function normalizeFirstFrameQuote(
     || authorizationCost.crossInstanceCumulativeCny !== null) {
     throw new UpstreamContractError('firstFrameQuote authorization cost mismatch')
   }
+  let instanceBudgetErrors: string[] = []
+  let instanceBudgetRemainingCny: number | null = null
   if (authorizationCost.instanceBudgetWindow !== null) {
     const budget = requireObject(
       authorizationCost.instanceBudgetWindow,
@@ -2969,10 +3007,11 @@ function normalizeFirstFrameQuote(
     if (!Array.isArray(budget.errors)) {
       throw new UpstreamContractError('firstFrameQuote authorization budget errors must be an array')
     }
-    budget.errors.forEach((item, index) => requireString(
+    instanceBudgetErrors = budget.errors.map((item, index) => requireString(
       item,
       `firstFrameQuote.authorizationDraft.cost.instanceBudgetWindow.errors[${String(index)}]`,
     ))
+    instanceBudgetRemainingCny = budget.windowRemainingCny as number
   }
   const providerMedia = requireObject(
     authorizationDraft.providerMedia,
@@ -3009,10 +3048,6 @@ function normalizeFirstFrameQuote(
     authorizationDraft.blockers,
     'firstFrameQuote.authorizationDraft.blockers',
   )
-  const allowedCategories = new Set([
-    'content_human_decision', 'provenance_rights', 'provider_accessible_media',
-    'catalog_route_pricing', 'runtime_config', 'budget_unknown_fee', 'session_permission',
-  ])
   const authorizationBlockerCodes = authorizationBlockers.map((blocker, index) => {
     requireExactKeys(blocker, [
       'code', 'category', 'userAction', 'technicalDetail',
@@ -3022,17 +3057,37 @@ function normalizeFirstFrameQuote(
       blocker.category,
       `firstFrameQuote.authorizationDraft.blockers[${String(index)}].category`,
     )
-    if (!code || !allowedCategories.has(category)
-      || !requireString(blocker.userAction, `firstFrameQuote.authorizationDraft.blockers[${String(index)}].userAction`).trim()
+    const expectedCategory = firstFrameAuthorizationCategory(code)
+    if (!code || expectedCategory === null || category !== expectedCategory
+      || requireString(blocker.userAction, `firstFrameQuote.authorizationDraft.blockers[${String(index)}].userAction`)
+        !== FIRST_FRAME_AUTHORIZATION_ACTIONS[expectedCategory]
       || blocker.technicalDetail !== code) {
       throw new UpstreamContractError('firstFrameQuote authorization blocker invalid')
     }
     return code
   })
+  const knownSourceCodes = new Set([
+    ...executionBlockers,
+    ...(mediaBlockerCode === null ? [] : [mediaBlockerCode]),
+    'budget_cross_instance_cumulative_unknown',
+    ...(authorizationCost.instanceBudgetWindow === null ? ['first_frame_budget_window_unavailable'] : []),
+    ...(maximumReservationCny === null ? ['first_frame_reservation_cap_unavailable'] : []),
+    'paid_api_disabled', 'provider_paid_scope_project_mismatch',
+    'provider_paid_scope_episode_mismatch', 'operator_paid_confirmation_required',
+    ...instanceBudgetErrors.map(error => `budget_window:${error}`),
+    ...(instanceBudgetRemainingCny !== null && maximumReservationCny !== null
+      && instanceBudgetRemainingCny + Number.EPSILON < maximumReservationCny
+      ? ['paid_budget_below_authorization_cap'] : []),
+  ])
   if (new Set(authorizationBlockerCodes).size !== authorizationBlockerCodes.length
+    || authorizationBlockerCodes.some(code => !knownSourceCodes.has(code))
     || executionBlockers.some(code => !authorizationBlockerCodes.includes(code))
     || (mediaBlockerCode !== null && !authorizationBlockerCodes.includes(mediaBlockerCode))
     || !authorizationBlockerCodes.includes('budget_cross_instance_cumulative_unknown')
+    || (authorizationCost.instanceBudgetWindow === null
+      && !authorizationBlockerCodes.includes('first_frame_budget_window_unavailable'))
+    || (maximumReservationCny === null
+      && !authorizationBlockerCodes.includes('first_frame_reservation_cap_unavailable'))
     || authorizationDraft.authorizationRecorded !== false
     || authorizationDraft.taskCreated !== false
     || authorizationDraft.submitted !== false
@@ -4997,6 +5052,11 @@ export function createYimengReadHandler(
         path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)
           + '/episodes/' + encodeURIComponent(request.episodeId) + '/evidence-ledger'
         normalize = value => normalizeEpisodeEvidenceLedger(value, request, jcsSha256)
+      } else if (endpoint === 'editorialHandoff') {
+        const request = parseEvidenceLedgerRequest(payload)
+        path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)
+          + '/episodes/' + encodeURIComponent(request.episodeId) + '/editorial-handoff'
+        normalize = value => normalizeEditorialHandoff(value, request, jcsSha256)
       } else if (endpoint === 'verifyEpisode') {
         const request = parseVerifyEpisodeRequest(payload)
         path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)
@@ -5069,10 +5129,11 @@ export function createYimengReadHandler(
       if (verification && verificationBody === undefined) return internalError('Yimeng adapter failed')
       if (verification) verificationInFlight = true
       if (preview) previewsInFlight++
-      const fetchOptions: FetchJsonOptions | undefined = verification
+      const mapsSourceErrors = verification || endpoint === 'editorialHandoff'
+      const fetchOptions: FetchJsonOptions | undefined = mapsSourceErrors
         ? {
-          method: 'POST',
-          body: verificationBody as string,
+          method: verification ? 'POST' : 'GET',
+          ...(verification ? { body: verificationBody as string } : {}),
           verificationError: true,
         }
         : undefined

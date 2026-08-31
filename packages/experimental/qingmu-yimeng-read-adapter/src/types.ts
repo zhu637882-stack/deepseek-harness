@@ -1125,6 +1125,79 @@ export interface YimengEpisodeEvidenceLedgerResponse extends YimengEpisodeEviden
   readonly sourceSnapshotSha256: string
 }
 
+/** One server-authored editorial handoff read request; callers cannot supply paths or order. */
+export type YimengEditorialHandoffRequest = YimengEpisodeEvidenceRequest
+
+/** Selected canonical Take media exposed without a local filesystem path. */
+export interface YimengEditorialHandoffMedia {
+  readonly assetId: string
+  readonly assetRevision: number
+  readonly sha256: string
+  readonly recordedOutputSha256: string | null
+  readonly outputBindingStatus: 'verified' | 'recorded_sha_missing' | 'materialized_file_missing' | 'recorded_sha_mismatch'
+  readonly mimeType: string | null
+  readonly durationSec: number | null
+  readonly fps: number | null
+  readonly width: number | null
+  readonly height: number | null
+  readonly aspectRatio: string | null
+  readonly selectionStatus: 'Selected'
+  readonly qualityStatus: string
+  readonly lineageComplete: boolean
+}
+
+/** One canonical storyboard row and its selected editorial source facts. */
+export interface YimengEditorialHandoffShot extends YimengJsonObject {
+  readonly frameId: string
+  readonly frameNo: number
+  readonly sceneId: string | null
+  readonly title: string
+  readonly frameContentSha256: string
+  readonly stackSnapshotSha256: string
+  readonly selectedTake: YimengEditorialHandoffMedia | null
+  readonly audio: { readonly status: 'not_authoritatively_bound'; readonly asset: null }
+  readonly comments: YimengTakeCommentFeedResponse
+  readonly review: YimengTakeReviewAuthorityFeedResponse
+  readonly qc: YimengEpisodeEvidenceQcRecords | null
+  readonly approval: YimengEpisodeEvidenceLifecycleRecords | null
+  readonly blockers: readonly string[]
+}
+
+/** Read-only, SHA-bound handoff draft; false readiness flags are never approvals. */
+export interface YimengEditorialHandoffResponse extends YimengEpisodeEvidenceRequest {
+  readonly schema: 'jason.qingmu-editorial-handoff-draft.v1'
+  readonly source: YimengJsonObject & {
+    readonly schema: 'jason.qingmu-editorial-handoff-source.v1'
+    readonly projectId: string
+    readonly episodeId: string
+    readonly evidenceSourceSnapshotSha256: string
+    readonly verificationInputsSha256: string
+    readonly shots: readonly YimengEditorialHandoffShot[]
+    readonly audioPolicy: 'only_authoritatively_bound_assets'
+  }
+  readonly sourceSnapshotSha256: string
+  readonly summary: {
+    readonly shotCount: number
+    readonly selectedTakeCount: number
+    readonly authoritativeAudioCount: 0
+    readonly totalDurationSec: number
+    readonly unresolvedCount: number
+  }
+  readonly unresolved: readonly { readonly frameId: string | null; readonly code: string }[]
+  readonly blockers: readonly { readonly scope: 'shot' | 'export'; readonly frameId: string | null; readonly code: string }[]
+  readonly download: {
+    readonly available: false
+    readonly format: 'otio-zip'
+    readonly blockerCode: 'editorial_handoff_otio_dependency_unavailable' | 'editorial_handoff_otio_adapter_unverified'
+  }
+  readonly aokiVideoProductionHandoffReady: false
+  readonly yimengEpisodeReleaseReady: false
+  readonly readOnly: true
+  readonly providerCalls: 0
+  readonly businessMutations: 0
+  readonly projectionSha256: string
+}
+
 /** Explicit verification request pinned to a previously read ledger source. */
 export interface YimengEpisodeVerificationRequest extends YimengEpisodeEvidenceRequest {
   readonly sourceSnapshotSha256: string
@@ -2441,6 +2514,7 @@ export interface YimengReadEndpointMap {
   readonly takeTechnicalQc: YimengTakeTechnicalQcFeedResponse
   readonly takeApprovalLifecycle: YimengTakeApprovalLifecycleFeedResponse
   readonly evidenceLedger: YimengEpisodeEvidenceLedgerResponse
+  readonly editorialHandoff: YimengEditorialHandoffResponse
   readonly verifyEpisode: YimengEpisodeVerificationResponse
   readonly shotFindings: YimengShotFindingFeedResponse
   readonly productionUnits: YimengProductionUnitsResponse

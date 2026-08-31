@@ -48,6 +48,8 @@ import type {
   YimengEpisodeEvidenceLedgerResponse,
   YimengEpisodeVerificationRequest,
   YimengEpisodeVerificationResponse,
+  YimengEditorialHandoffRequest,
+  YimengEditorialHandoffResponse,
   YimengCapabilityCatalogItem,
   YimengCapabilityCatalogRequest,
   YimengCapabilityCatalogResponse,
@@ -310,6 +312,8 @@ export type {
   YimengEpisodeEvidenceLedgerResponse,
   YimengEpisodeVerificationRequest,
   YimengEpisodeVerificationResponse,
+  YimengEditorialHandoffRequest,
+  YimengEditorialHandoffResponse,
   YimengCapabilityCatalogRequest,
   YimengCapabilityCatalogResponse,
   YimengCapabilityEligibility,
@@ -526,6 +530,7 @@ export type JsonRecord = YimengJsonObject
 /** Read-only browser-facing methods exposed by the Qingmu Host adapter. */
 export interface QingmuYimengReadPort {
   evidenceLedger(request: YimengEpisodeEvidenceRequest, signal?: AbortSignal): Promise<YimengEpisodeEvidenceLedgerResponse>
+  editorialHandoff(request: YimengEditorialHandoffRequest, signal?: AbortSignal): Promise<YimengEditorialHandoffResponse>
   verifyEpisode(request: YimengEpisodeVerificationRequest, signal?: AbortSignal): Promise<YimengEpisodeVerificationResponse>
   capabilityCatalog(
     request: YimengCapabilityCatalogRequest,

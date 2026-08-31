@@ -114,6 +114,12 @@ The latest durable seal remains historical evidence. `latestSealSourceCurrent` m
 
 For a Ready PromptIR, `firstFrameQuote` also returns a server-recomputed first-frame authorization draft bound to current revisions and SHAs. The Host rejects failed Alibaba rule checks, non-official HTTPS rule sources, and target, method, pricing, media, or draft hash drift. Media-address inspection is a zero-network static condition: passing it does not prove Provider download; loopback, private, and non-HTTPS addresses stay blocked. The draft always remains unauthorized, without a task, submission, or charge.
 
+## Editorial handoff draft
+
+`editorialHandoff` reads one authenticated project/episode projection assembled by Yimeng from the canonical storyboard, selected Take stack, materialized media SHA, QC, comments, review, and approval-lifecycle evidence. Media metadata comes from persisted records and is not probed again by this read. The Host strictly normalizes nested evidence, rebuilds the fixed blocker set from selected-media binding, lineage, quality, QC, and approval records, and validates exact scope, order, hashes, plus the two independent false readiness flags. No local path, caller-defined order, approval claim, or release claim reaches the browser.
+
+The download contract is GET-only and remains fail-closed when the runtime has no pinned, verified OpenTimelineIO adapter. That state is reported as a stable blocker; the adapter does not fabricate OTIO JSON, install dependencies, or turn selected media into editorial approval. Reading or refreshing this draft performs zero Provider calls and zero business mutations.
+
 ## Security boundary
 
 `promptIr` retains the effective Ready subject and additionally verifies the latest persisted Draft's complete subject SHA and base binding. No Draft is `null`; malformed provenance is an error. A Draft based on another Ready is explicitly stale, never promoted by the reader. Root workflow blockers must contain a non-empty `reason`; Yimeng normalizes stage `reasonCode` and release blockers before this boundary, preserving diagnostic fields.

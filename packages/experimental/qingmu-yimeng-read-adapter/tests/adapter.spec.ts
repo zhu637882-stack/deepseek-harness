@@ -1495,6 +1495,34 @@ describe('qingmu Yimeng read adapter', () => {
         cost: { maximumReservationCny: 0.3 } },
     } })
     expect(capturedUrl).toContain('/first-frame-quote?promptIrId=prompt-ready-1&promptIrVersion=3')
+    const responseWithAuthorizationDraft = (nextDraftBody: typeof authorizationDraftBody) => {
+      const nextDraft = { ...nextDraftBody, draftSha256: sha256(canonicalJson(nextDraftBody)) }
+      const nextUnsigned = { ...unsigned, authorizationDraft: nextDraft }
+      return { ...nextUnsigned, projectionSha256: sha256(canonicalJson(nextUnsigned)) }
+    }
+    const firstAuthorizationBlocker = authorizationDraftBody.blockers[0]
+    if (firstAuthorizationBlocker === undefined) throw new Error('fixture blocker is required')
+    const forgedBlockers: Array<typeof authorizationDraftBody.blockers> = [
+      [{ ...firstAuthorizationBlocker, category: 'runtime_config' }],
+      [{ ...firstAuthorizationBlocker, userAction: '请直接点击继续。' }],
+      [...authorizationDraftBody.blockers, { code: 'forged_extra_blocker',
+        category: 'provenance_rights', userAction: '请修复当前来源、权利或版本绑定，再重新检查。',
+        technicalDetail: 'forged_extra_blocker' }],
+      [...authorizationDraftBody.blockers, firstAuthorizationBlocker],
+    ]
+    for (const nextBlockers of forgedBlockers) {
+      const forged = createYimengReadHandler({}, dependencies(async () => jsonResponse(
+        responseWithAuthorizationDraft({ ...authorizationDraftBody, blockers: nextBlockers }),
+      ), 'test-token'))
+      expect(await forged('firstFrameQuote', request, signal()))
+        .toMatchObject({ ok: false, error: { code: 'internal' } })
+    }
+    const missingBudgetBlocker = createYimengReadHandler({}, dependencies(async () => jsonResponse(
+      responseWithAuthorizationDraft({ ...authorizationDraftBody,
+        cost: { ...authorizationDraftBody.cost, instanceBudgetWindow: null } } as unknown as typeof authorizationDraftBody),
+    ), 'test-token'))
+    expect(await missingBudgetBlocker('firstFrameQuote', request, signal()))
+      .toMatchObject({ ok: false, error: { code: 'internal' } })
     const tampered = createYimengReadHandler({}, dependencies(async () => jsonResponse({
       ...response,
       authoritySnapshot: { ...authoritySnapshot, promptIr: { ...authoritySnapshot.promptIr, imagePrompt: '被篡改' } },
