@@ -237,6 +237,42 @@ def mark_lifecycle(root: Path, config: dict, state: str) -> None:
     write_json(root / "private/lifecycle.json", {"instanceId": config["instanceId"], "state": state})
 
 
+def write_stopped_runtime(root: Path, config: dict) -> None:
+    """Persist listener/process truth after owned children are confirmed stopped."""
+    previous_path = root / "runtime.json"
+    ports_path = root / "private/ports.json"
+    try:
+        previous = json.loads(previous_path.read_text()) if previous_path.is_file() else {}
+    except (OSError, ValueError):
+        previous = {}
+    try:
+        ports = json.loads(ports_path.read_text()) if ports_path.is_file() else {}
+    except (OSError, ValueError):
+        ports = {}
+    coordinates = {
+        key: ports.get(key, previous.get(key))
+        for key in ("apiPort", "webPort", "apiUrl", "webUrl")
+        if ports.get(key, previous.get(key)) is not None
+    }
+    write_json(
+        previous_path,
+        {
+            "instanceId": config["instanceId"],
+            "root": str(root),
+            "supervisorPid": None,
+            "apiPid": None,
+            "hostPid": None,
+            **coordinates,
+            "apiProcessAlive": False,
+            "hostProcessAlive": False,
+            "apiIdentityAndStorageVerified": False,
+            "hostListenerAndHttpVerified": False,
+            "ready": False,
+            "session": "实例已停止；数据保留，重新启动后再验证会话",
+        },
+    )
+
+
 def require_clean(root: Path, config: dict) -> None:
     marker = root / "private/lifecycle.json"
     value = json.loads(marker.read_text()) if marker.is_file() and not marker.is_symlink() else {}
@@ -512,6 +548,7 @@ class Supervisor:
                 finally:
                     stop_child(self.host)
                     stop_child(self.api)
+                    write_stopped_runtime(self.root, self.config)
                     mark_lifecycle(self.root, self.config, "clean")
                     control_path.unlink(missing_ok=True)
                     for log in self.logs:
@@ -942,6 +979,7 @@ def execute_director_submit_once(
     finally:
         stop_child(supervisor.host)
         stop_child(supervisor.api)
+        write_stopped_runtime(root, config)
         mark_lifecycle(root, config, "clean")
         for log in supervisor.logs:
             log.close()

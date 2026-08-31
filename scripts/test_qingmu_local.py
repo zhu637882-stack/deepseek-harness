@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 import shutil
 import tempfile
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
@@ -258,8 +259,80 @@ class OwnershipTests(unittest.TestCase):
                 self.assertIsNotNone(child.poll())
                 self.assertFalse((root / "control.sock").exists())
                 local.require_clean(root, supervisor.config)
+                runtime = json.loads((root / "runtime.json").read_text())
+                self.assertFalse(runtime["ready"])
+                self.assertIsNone(runtime["supervisorPid"])
+                self.assertIsNone(runtime["apiPid"])
+                self.assertIsNone(runtime["hostPid"])
+                self.assertFalse(runtime["apiProcessAlive"])
+                self.assertFalse(runtime["hostListenerAndHttpVerified"])
             finally:
                 local.stop_child(child)
+
+    def test_stopped_runtime_replaces_stale_listener_truth_without_signalling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "private").mkdir()
+            config = {"instanceId": "unit-stopped", "root": str(root)}
+            local.write_json(root / "private/ports.json", {
+                "apiPort": 49899, "webPort": 49900,
+                "apiUrl": "http://127.0.0.1:49899", "webUrl": "http://127.0.0.1:49900",
+            })
+            local.write_json(root / "runtime.json", {
+                "instanceId": "unit-stopped", "ready": True,
+                "supervisorPid": 999999, "apiPid": 999998, "hostPid": 999997,
+                "apiProcessAlive": True, "hostProcessAlive": True,
+                "apiIdentityAndStorageVerified": True, "hostListenerAndHttpVerified": True,
+            })
+            with patch("os.kill", side_effect=AssertionError("must not signal persisted PID")):
+                local.write_stopped_runtime(root, config)
+            runtime = json.loads((root / "runtime.json").read_text())
+            self.assertEqual(runtime["webUrl"], "http://127.0.0.1:49900")
+            self.assertFalse(runtime["ready"])
+            self.assertEqual(
+                [runtime["supervisorPid"], runtime["apiPid"], runtime["hostPid"]],
+                [None, None, None],
+            )
+
+    def test_ordinary_control_stop_persists_stopped_runtime_after_owned_children_exit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for part in ("private", "logs", "work"):
+                (root / part).mkdir()
+            config = {"instanceId": "unit-control-stop", "root": str(root),
+                      "yimengRoot": str(root), "controlKey": "unit-control-key"}
+            local.mark_lifecycle(root, config, "clean")
+            supervisor = local.Supervisor(root, config)
+            api = subprocess.Popen(["/bin/sleep", "30"])
+            host = subprocess.Popen(["/bin/sleep", "30"])
+            try:
+                def start_host():
+                    supervisor.host = host
+
+                with patch.object(supervisor, "launch", return_value=api), \
+                     patch.object(supervisor, "wait_ready"), \
+                     patch.object(supervisor, "start_host", side_effect=start_host):
+                    with ThreadPoolExecutor(max_workers=1) as pool:
+                        running = pool.submit(supervisor.run)
+                        result = None
+                        for _ in range(100):
+                            try:
+                                result = local.control(root, config, "stop")
+                                break
+                            except (FileNotFoundError, ConnectionRefusedError):
+                                time.sleep(0.01)
+                        self.assertEqual(result["stopped"], True)
+                        running.result(timeout=5)
+                self.assertIsNotNone(api.poll())
+                self.assertIsNotNone(host.poll())
+                runtime = json.loads((root / "runtime.json").read_text())
+                self.assertFalse(runtime["ready"])
+                self.assertFalse(runtime["apiProcessAlive"])
+                self.assertFalse(runtime["hostProcessAlive"])
+                local.require_clean(root, config)
+            finally:
+                local.stop_child(api)
+                local.stop_child(host)
 
     def test_tampered_backup_is_rejected_before_creation(self):
         with tempfile.TemporaryDirectory() as directory:

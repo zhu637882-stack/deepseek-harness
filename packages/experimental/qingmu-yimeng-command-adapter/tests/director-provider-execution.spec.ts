@@ -169,19 +169,28 @@ const deepSeekBinding = (): DirectorExecutionBinding => {
   }
 }
 
-const transportResult = () => ({ providerCompletionId: 'completion_1', providerRequestId: 'request_1',
-  finishReason: 'stop', usage: { promptTokens: 20, cacheTokens: 5, completionTokens: 10, totalTokens: 30 },
-  proposal: { schema: 'qingmu.director-proposal.v1' as const, projectId: 'project_1',
-    episodeId: 'episode_1', sceneId: 'scene_1', shotId: 'shot_1', advisoryOnly: true as const,
-    items: [{ id: 'item_1', field: 'narrative' as const, proposedValue: '建议', impact: '仅进入人工草稿' }] } })
+const providerProposal = () => ({ schema: 'qingmu.director-proposal.v1' as const, projectId: 'project_1',
+  episodeId: 'episode_1', sceneId: 'scene_1', shotId: 'shot_1', advisoryOnly: true as const,
+  items: [{ id: 'item_1', field: 'narrative' as const, proposedValue: '建议', impact: '仅进入人工草稿' }] })
+const transportResult = () => {
+  const proposal = providerProposal()
+  const raw = JSON.stringify(proposal)
+  return {
+    state: 'provider_response' as const,
+    transportFacts: {
+      schema: 'qingmu.director-provider-transport-facts.v1' as const,
+      providerCompletionId: 'completion_1', providerRequestId: 'request_1', finishReason: 'stop',
+      usage: { promptTokens: 20, cacheTokens: 5, completionTokens: 10, totalTokens: 30 },
+      rawOutputSha256: createHash('sha256').update(raw).digest('hex'),
+      rawOutputUtf8Bytes: Buffer.byteLength(raw),
+    },
+    proposal,
+  }
+}
 
 describe('Director provider Host execution seam', () => {
   it('executes one signed request once with retries disabled and emits a complete provider receipt', async () => {
-    const execute = vi.fn(async () => ({ providerCompletionId: 'completion_1', providerRequestId: 'request_1',
-      finishReason: 'stop', usage: { promptTokens: 20, cacheTokens: 5, completionTokens: 10, totalTokens: 30 },
-      proposal: { schema: 'qingmu.director-proposal.v1' as const, projectId: 'project_1',
-        episodeId: 'episode_1', sceneId: 'scene_1', shotId: 'shot_1', advisoryOnly: true as const,
-        items: [{ id: 'item_1', field: 'narrative' as const, proposedValue: '建议', impact: '仅进入人工草稿' }] } }))
+    const execute = vi.fn(async () => transportResult())
     const result = await executeDirectorProviderPermit(permit(), { execute }, new AbortController().signal)
     expect(execute).toHaveBeenCalledOnce()
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({ provider: 'fake', model: 'model_1', maxRetries: 0 }), expect.any(AbortSignal))
@@ -191,6 +200,9 @@ describe('Director provider Host execution seam', () => {
       providerCompletionId: 'completion_1', providerRequestId: 'request_1', providerResult: true,
       usage: { promptTokens: 20, cacheTokens: 5, completionTokens: 10, totalTokens: 30 }, finishReason: 'stop',
     } })
+    if (result.state !== 'provider_result') throw new Error('expected provider result')
+    expect(result.receipt.rawOutputSha256).not.toBe(result.receipt.outputSha256)
+    expect(result.receipt.transportFacts.rawOutputSha256).toBe(result.receipt.rawOutputSha256)
   })
 
   it('uses the unregistered llm-deepseek conformance adapter once with maxRetries zero', async () => {
@@ -231,7 +243,8 @@ describe('Director provider Host execution seam', () => {
     const result = await executeDirectorProviderPermit(
       permit(), { execute: execute as never }, new AbortController().signal,
     )
-    expect(result).toMatchObject({ state: 'submission_unknown', automaticRetry: false })
+    expect(result).toMatchObject({ state: 'provider_response_invalid', automaticRetry: false,
+      transportFacts: { schema: 'qingmu.director-provider-transport-facts.v1' } })
     expect(execute).toHaveBeenCalledOnce()
   })
 
@@ -246,7 +259,7 @@ describe('Director provider Host execution seam', () => {
       const result = await executeDirectorProviderPermit(
         permit(), { execute: execute as never }, new AbortController().signal,
       )
-      expect(result).toMatchObject({ state: 'submission_unknown', automaticRetry: false })
+      expect(result).toMatchObject({ state: 'provider_response_invalid', automaticRetry: false })
       expect(execute).toHaveBeenCalledOnce()
     }
   })
@@ -264,7 +277,7 @@ describe('Director provider Host execution seam', () => {
       } }) }, new AbortController().signal,
     )
     expect((await executeWith(accepted)).state).toBe('provider_result')
-    expect(await executeWith(rejected)).toMatchObject({ state: 'submission_unknown', automaticRetry: false })
+    expect(await executeWith(rejected)).toMatchObject({ state: 'provider_response_invalid', automaticRetry: false })
   })
 
   it('uses the real DSh prepareCall and llm-deepseek stream exactly once', async () => {
@@ -435,7 +448,48 @@ describe('Director provider Host execution seam', () => {
         deepSeekPermit(), createDshDeepSeekDirectorTransport(ctx.llm, { mockBaseUrl: server.url }),
         new AbortController().signal,
       )
-      expect(result).toMatchObject({ state: 'submission_unknown', automaticRetry: false })
+      expect(['submission_unknown', 'provider_response_invalid']).toContain(result.state)
+      expect(result).toMatchObject({ automaticRetry: false })
+      expect(server.requests).toHaveLength(1)
+    } finally {
+      await server.close()
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('captures complete malformed response facts without retaining raw text', async () => {
+    const raw = 'not-json-with-private-content'
+    const server = await mockServer([{ kind: 'sse', headers: { 'x-request-id': 'request-invalid-facts' }, events: [
+      JSON.stringify({ id: 'completion-invalid-facts', choices: [{ delta: { content: raw } }] }),
+      JSON.stringify({ id: 'completion-invalid-facts', choices: [{ finish_reason: 'stop' }],
+        usage: { prompt_tokens: 4, completion_tokens: 2, prompt_cache_hit_tokens: 1 } }),
+      '[DONE]',
+    ] }])
+    vi.stubEnv('DEEPSEEK_API_KEY', 'isolated-mock-key')
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmDeepSeek, {
+      baseURL: server.url, thinking: 'disabled', reasoningEffort: 'off',
+      retryPolicy: { mode: 'normal', maxRetries: 0 },
+    })
+    try {
+      const result = await executeDirectorProviderPermit(
+        deepSeekPermit(), createDshDeepSeekDirectorTransport(ctx.llm, { mockBaseUrl: server.url }),
+        new AbortController().signal,
+      )
+      expect(result).toEqual({
+        state: 'provider_response_invalid', automaticRetry: false,
+        reason: 'director DSh response JSON invalid',
+        transportFacts: {
+          schema: 'qingmu.director-provider-transport-facts.v1',
+          providerCompletionId: 'completion-invalid-facts',
+          providerRequestId: 'request-invalid-facts', finishReason: 'stop',
+          usage: { promptTokens: 4, cacheTokens: 1, completionTokens: 2, totalTokens: 6 },
+          rawOutputSha256: createHash('sha256').update(raw).digest('hex'),
+          rawOutputUtf8Bytes: Buffer.byteLength(raw),
+        },
+      })
+      expect(JSON.stringify(result)).not.toContain(raw)
       expect(server.requests).toHaveLength(1)
     } finally {
       await server.close()
@@ -609,6 +663,33 @@ describe('Director provider Host execution seam', () => {
     expect(chatCompletions).not.toHaveBeenCalled()
   })
 
+  it('reports complete invalid-response facts to the Host endpoint without raw output', async () => {
+    let unknownBody: Record<string, unknown> | undefined
+    const fetchImpl = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const path = new URL(input instanceof Request ? input.url : input.toString()).pathname
+      if (path.endsWith('/binding')) return Response.json(binding())
+      if (path.endsWith('/prepare')) return Response.json(permit())
+      if (path.endsWith('/unknown')) {
+        if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+        unknownBody = JSON.parse(init.body) as Record<string, unknown>
+        return Response.json({ state: 'submission_unknown', generationTaskId: 'task_1', automaticRetry: false })
+      }
+      throw new Error('unexpected request')
+    }) as typeof fetch
+    const invalid = { ...transportResult(), proposal: { ...providerProposal(), projectId: 'wrong' } }
+    const result = await executeDirectorTaskOnce({
+      baseUrl: 'http://127.0.0.1:49999',
+      executionKey: 'execution-key-material-is-at-least-32-bytes',
+      transport: { execute: async () => invalid }, fetch: fetchImpl,
+    }, 'task_1', 'director-paid.v1', 'c'.repeat(64), new AbortController().signal)
+    expect(result.state).toBe('submission_unknown')
+    expect(unknownBody).toMatchObject({
+      classification: 'provider_response_invalid',
+      transportFacts: transportResult().transportFacts,
+    })
+    expect(JSON.stringify(unknownBody)).not.toContain(JSON.stringify(invalid.proposal))
+  })
+
   it('rejects a permit payload that no longer matches the signed binding before transport', async () => {
     const fetchImpl = vi.fn(async (input: URL | RequestInfo) => {
       const url = new URL(input instanceof Request ? input.url : input.toString())
@@ -636,6 +717,32 @@ describe('Director provider Host execution seam', () => {
     expect(result).toEqual({ state: 'submission_unknown', automaticRetry: false, reason: 'timeout after submit' })
   })
 
+  it('signs the canonical null transport facts for a transport-unknown Host terminalization', async () => {
+    let unknownBody: Record<string, unknown> | undefined
+    const fetchImpl = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString())
+      if (url.pathname.endsWith('/binding')) return Response.json(binding())
+      if (url.pathname.endsWith('/prepare')) return Response.json(permit())
+      if (url.pathname.endsWith('/unknown')) {
+        if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+        unknownBody = JSON.parse(init.body) as Record<string, unknown>
+        return Response.json({ state: 'submission_unknown', automaticRetry: false })
+      }
+      throw new Error('unexpected request')
+    }) as typeof fetch
+    const result = await executeDirectorTaskOnce({
+      baseUrl: 'http://127.0.0.1:49999',
+      executionKey: 'execution-key-material-is-at-least-32-bytes',
+      transport: { execute: async () => { throw new Error('timeout after submit') } },
+      fetch: fetchImpl,
+    }, 'task_1', 'director-paid.v1', 'c'.repeat(64), new AbortController().signal)
+    expect(result.state).toBe('submission_unknown')
+    expect(unknownBody).toMatchObject({
+      classification: 'submission_unknown',
+      transportFacts: null,
+    })
+  })
+
   it('rejects provider, model or SHA drift before transport', async () => {
     const execute = vi.fn()
     await expect(executeDirectorProviderPermit({ ...permit(), model: 'drifted' }, { execute }, new AbortController().signal))
@@ -657,14 +764,14 @@ describe('Director provider Host execution seam', () => {
   })
 
   it('quarantines an invalid or cross-scope proposal without retry', async () => {
-    const execute = vi.fn(async () => ({ providerCompletionId: 'completion_1', providerRequestId: 'request_1',
-      finishReason: 'stop', usage: { promptTokens: 20, cacheTokens: 0, completionTokens: 10, totalTokens: 30 },
-      proposal: { schema: 'qingmu.director-proposal.v1', projectId: 'wrong', episodeId: 'episode_1',
-        sceneId: 'scene_1', shotId: 'shot_1', advisoryOnly: true, items: [] } }))
+    const execute = vi.fn(async () => ({ ...transportResult(), proposal: {
+      ...providerProposal(), projectId: 'wrong', items: [],
+    } }))
     const result = await executeDirectorProviderPermit(
-      permit(), { execute: execute as never }, new AbortController().signal,
+      permit(), { execute }, new AbortController().signal,
     )
     expect(execute).toHaveBeenCalledOnce()
-    expect(result).toMatchObject({ state: 'submission_unknown', automaticRetry: false })
+    expect(result).toMatchObject({ state: 'provider_response_invalid', automaticRetry: false,
+      transportFacts: { rawOutputSha256: transportResult().transportFacts.rawOutputSha256 } })
   })
 })

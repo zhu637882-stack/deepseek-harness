@@ -16,6 +16,8 @@ The director workspace requests a proposal only after an explicit click and labe
 
 A separate, versioned paid-capable contract is Yimeng-owned and disabled by default. It can only issue a Provider/model/pricing-bound work order through Yimeng's existing generation task, ProviderGate, reservation, durable submission outbox, acknowledgement/unknown, and reconciliation chain. Its signed output rules define Unicode code-point string lengths and one exact placeholder normalization and rejection set; Writer and Host consume those same rules. The Host executes only a signed permit with one attempt and zero adapter retries; ambiguous results stop as `submission_unknown`.
 
+The one-shot transport records complete Provider facts before parsing the advisory proposal. A complete but schema-invalid response is durably classified as `provider_response_invalid` with content SHA, byte count, completion/request identifiers, finish reason, and usage; raw model text is not retained. An incomplete transport remains `submission_unknown`. Both classifications retain the original reservation and recover through the canonical outbox and task projection without another Provider request. Launcher cleanup writes a truthful stopped runtime snapshot after owned processes exit.
+
 ## Alternatives considered
 
 **A second director database or workflow.** This would compete with Yimeng's canonical objects, transaction journal, ProviderGate, fees, and human decisions. The replay seam therefore persists no proposal state and writes only through the existing planning command.
@@ -26,4 +28,4 @@ A separate, versioned paid-capable contract is Yimeng-owned and disabled by defa
 
 ## Consequences
 
-The slice maps to H2's bounded UI vertical and the replay precondition for H3. Real DeepSeek text/vision pricing and budget binding, legal reference qualification, PromptIR readiness, Alibaba execution, visual comparison, and human content acceptance remain separate work.
+The slice maps to H2's bounded UI vertical and the replay precondition for H3. The Phase 2.1 repair adds durable, non-retry incident facts and truthful stopped-runtime state; it does not repair or rerun the immutable r3 canary. Real DeepSeek text/vision pricing and budget binding, legal reference qualification, PromptIR readiness, Alibaba execution, visual comparison, and human content acceptance remain separate work.

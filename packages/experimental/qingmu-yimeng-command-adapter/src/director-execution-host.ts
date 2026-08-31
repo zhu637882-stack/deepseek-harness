@@ -7,6 +7,7 @@ import type {
   DirectorProviderExecutionResult,
   DirectorProviderTransport,
   DirectorProviderTransportResult,
+  DirectorProviderTransportFacts,
 } from './director-provider-execution.ts'
 import { executeDirectorProviderPermit } from './director-provider-execution.ts'
 
@@ -186,11 +187,10 @@ const createDshDirectorTransport = (
       || metadata.finishReason !== finishReason) {
       throw new Error('director DSh provider receipt incomplete')
     }
-    let proposal: unknown
-    try { proposal = JSON.parse(text) } catch { throw new Error('director DSh response JSON invalid') }
     const cacheTokens = usage.cacheReadTokens ?? 0
     const promptTokens = usage.inputTokens + cacheTokens + (usage.cacheWriteTokens ?? 0)
-    return {
+    const facts: DirectorProviderTransportFacts = {
+      schema: 'qingmu.director-provider-transport-facts.v1',
       providerCompletionId: metadata.providerCompletionId,
       providerRequestId: metadata.providerRequestId ?? null,
       finishReason: metadata.finishReason,
@@ -200,7 +200,19 @@ const createDshDirectorTransport = (
         completionTokens: usage.outputTokens,
         totalTokens: promptTokens + usage.outputTokens,
       },
-      proposal: proposal as DirectorProviderTransportResult['proposal'],
+      rawOutputSha256: createHash('sha256').update(text).digest('hex'),
+      rawOutputUtf8Bytes: Buffer.byteLength(text),
+    }
+    let proposal: unknown
+    try { proposal = JSON.parse(text) } catch {
+      return {
+        state: 'provider_response_invalid', automaticRetry: false,
+        reason: 'director DSh response JSON invalid', transportFacts: facts,
+      }
+    }
+    return {
+      state: 'provider_response', transportFacts: facts,
+      proposal: proposal as Extract<DirectorProviderTransportResult, { state: 'provider_response' }>['proposal'],
     }
   },
 })
@@ -418,7 +430,13 @@ export async function executeDirectorTaskOnce(
   }
   return await post<DirectorExecutionHostResult>(
     options.baseUrl, options.executionKey, root + '/unknown',
-    { binding: finalBinding, dispatch: prepared.dispatch, error: result.reason },
+    {
+      binding: finalBinding, dispatch: prepared.dispatch, error: result.reason,
+      classification: result.state,
+      transportFacts: result.state === 'provider_response_invalid'
+        ? result.transportFacts
+        : null,
+    },
     fetchImpl, signal,
   )
 }

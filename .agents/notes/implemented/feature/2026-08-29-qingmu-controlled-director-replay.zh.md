@@ -16,6 +16,8 @@ Host 从既有青木三方融合总案加载 SHA 绑定的方法包。IMAGO 只�
 
 另设一份独立、版本化且默认关闭的易梦付费能力合同。它只能经易梦现有 generation task、ProviderGate、预留、持久 submission outbox、ack/unknown 与 reconcile 链签发 Provider/model/pricing 绑定工作单。其已签输出规则定义 Unicode code point 字符串长度，以及唯一准确的占位符规范化与拒绝集合；Writer 与 Host 共同消费这些规则。Host 只执行已签发 permit，最多一次请求且 adapter 零重试；结果不明停在 `submission_unknown`。
 
+单次 transport 会在解析仅建议提案前记录完整 Provider 事实。响应完整但 schema 非法时，以 `provider_response_invalid` 持久分类，并保留内容 SHA、字节数、completion/request 标识、finish reason 与 usage；不保留模型原文。transport 未取得完整事实时仍为 `submission_unknown`。两种分类都保留原预留，并通过唯一 outbox 与任务投影恢复，不再发起 Provider 请求。launcher 清理会在自有进程退出后写入真实的 stopped runtime 快照。
+
 ## Alternatives considered
 
 **第二套导演数据库或工作流。** 这会与易梦的 canonical 对象、事务日志、ProviderGate、费用和人工决定竞争。因此 replay 接缝不持久化提案状态，只能通过既有规划命令写入。
@@ -26,4 +28,4 @@ Host 从既有青木三方融合总案加载 SHA 绑定的方法包。IMAGO 只�
 
 ## Consequences
 
-本片对应 H2 的有界 UI 纵切和 H3 的 replay 前置。真实 DeepSeek 文本/视觉价格与预算绑定、合法参考资格、PromptIR 就绪、阿里执行、视觉比较和人工内容签收仍是后续独立工作。
+本片对应 H2 的有界 UI 纵切和 H3 的 replay 前置。Phase 2.1 修复新增持久、不可重试的事故事实和真实 stopped-runtime 状态；不会修补或重跑不可变的 r3 canary。真实 DeepSeek 文本/视觉价格与预算绑定、合法参考资格、PromptIR 就绪、阿里执行、视觉比较和人工内容签收仍是后续独立工作。

@@ -91,8 +91,9 @@ export interface DirectorProviderProposal {
   readonly items: readonly DirectorProviderProposalItem[]
 }
 
-/** Minimal provider result required before the UI may call a proposal an AI result. */
-export interface DirectorProviderTransportResult {
+/** Provider facts captured from one complete response before proposal parsing. */
+export interface DirectorProviderTransportFacts {
+  readonly schema: 'qingmu.director-provider-transport-facts.v1'
   readonly providerCompletionId: string
   readonly providerRequestId: string | null
   readonly finishReason: string
@@ -102,11 +103,31 @@ export interface DirectorProviderTransportResult {
     readonly completionTokens: number
     readonly totalTokens: number
   }
+  readonly rawOutputSha256: string
+  readonly rawOutputUtf8Bytes?: number
+}
+
+/** Complete transport result. Raw provider text never crosses this boundary. */
+export type DirectorProviderTransportResult =
+  | {
+    readonly state: 'provider_response'
+    readonly transportFacts: DirectorProviderTransportFacts
+    readonly proposal: DirectorProviderProposal
+  }
+  | {
+    readonly state: 'provider_response_invalid'
+    readonly automaticRetry: false
+    readonly reason: string
+    readonly transportFacts: DirectorProviderTransportFacts
+  }
+
+/** Minimal provider result required before the UI may call a proposal an AI result. */
+export interface DirectorProviderValidatedResult extends DirectorProviderTransportFacts {
   readonly proposal: DirectorProviderProposal
 }
 
 /** Canonical Yimeng execution receipt; it is not a second task or cost ledger. */
-export interface DirectorProviderExecutionReceipt extends DirectorProviderTransportResult {
+export interface DirectorProviderExecutionReceipt extends Omit<DirectorProviderValidatedResult, 'schema'> {
   readonly schema: 'qingmu.director-provider-execution-receipt.v1'
   readonly workOrderId: string
   readonly provider: string
@@ -115,6 +136,7 @@ export interface DirectorProviderExecutionReceipt extends DirectorProviderTransp
   readonly promptSha256: string
   readonly outputSha256: string
   readonly providerResult: true
+  readonly transportFacts: DirectorProviderTransportFacts
 }
 
 /** Transport injected only by the Host; production transport is intentionally not registered here. */
@@ -130,6 +152,12 @@ export interface DirectorProviderTransport {
 /** Fail-closed outcome of one Host-side provider execution attempt. */
 export type DirectorProviderExecutionResult =
   | { readonly state: 'provider_result'; readonly receipt: DirectorProviderExecutionReceipt }
+  | {
+    readonly state: 'provider_response_invalid'
+    readonly automaticRetry: false
+    readonly reason: string
+    readonly transportFacts: DirectorProviderTransportFacts
+  }
   | { readonly state: 'submission_unknown'; readonly automaticRetry: false; readonly reason: string }
 
 const canonical = (value: unknown): string => {
@@ -168,6 +196,50 @@ const identifier = (value: unknown, field: string): string => {
 const digest = (value: unknown, field: string): string => {
   if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)) throw new Error(`${field} invalid`)
   return value
+}
+
+const transportFacts = (value: unknown): DirectorProviderTransportFacts => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('director provider transport facts invalid')
+  }
+  const facts = value as Record<string, unknown>
+  const allowed = new Set([
+    'schema', 'providerCompletionId', 'providerRequestId', 'finishReason', 'usage',
+    'rawOutputSha256', 'rawOutputUtf8Bytes',
+  ])
+  if (Object.keys(facts).some(key => !allowed.has(key))
+    || facts.schema !== 'qingmu.director-provider-transport-facts.v1') {
+    throw new Error('director provider transport facts invalid')
+  }
+  const usage = facts.usage
+  if (typeof usage !== 'object' || usage === null || Array.isArray(usage)
+    || Object.keys(usage).sort().join('\0') !== 'cacheTokens\0completionTokens\0promptTokens\0totalTokens') {
+    throw new Error('director provider usage invalid')
+  }
+  const normalizedUsage = usage as DirectorProviderTransportFacts['usage']
+  if (![normalizedUsage.promptTokens, normalizedUsage.cacheTokens,
+    normalizedUsage.completionTokens, normalizedUsage.totalTokens]
+    .every(item => Number.isSafeInteger(item) && item >= 0)
+    || normalizedUsage.totalTokens !== normalizedUsage.promptTokens + normalizedUsage.completionTokens) {
+    throw new Error('director provider usage invalid')
+  }
+  if (facts.rawOutputUtf8Bytes !== undefined
+    && (!Number.isSafeInteger(facts.rawOutputUtf8Bytes) || Number(facts.rawOutputUtf8Bytes) < 0)) {
+    throw new Error('director provider raw output bytes invalid')
+  }
+  return {
+    schema: 'qingmu.director-provider-transport-facts.v1',
+    providerCompletionId: identifier(facts.providerCompletionId, 'providerCompletionId'),
+    providerRequestId: facts.providerRequestId === null
+      ? null
+      : identifier(facts.providerRequestId, 'providerRequestId'),
+    finishReason: identifier(facts.finishReason, 'finishReason'),
+    usage: normalizedUsage,
+    rawOutputSha256: digest(facts.rawOutputSha256, 'rawOutputSha256'),
+    ...(facts.rawOutputUtf8Bytes === undefined
+      ? {}
+      : { rawOutputUtf8Bytes: Number(facts.rawOutputUtf8Bytes) }),
+  }
 }
 
 const proposal = (
@@ -300,24 +372,21 @@ export async function executeDirectorProviderPermit(
   if (sha(permit.workOrder.outputContract) !== outputContractSha256) {
     throw new Error('director provider output contract mismatch')
   }
+  let completedFacts: DirectorProviderTransportFacts | undefined
   try {
     const result = await transport.execute({ provider, model, payload: permit.payload, maxRetries: 0 }, signal)
-    const usage = result.usage
-    if (![usage.promptTokens, usage.cacheTokens, usage.completionTokens, usage.totalTokens]
-      .every(value => Number.isSafeInteger(value) && value >= 0)
-      || usage.totalTokens !== usage.promptTokens + usage.completionTokens) {
-      throw new Error('director provider usage invalid')
+    const facts = transportFacts(result.transportFacts)
+    completedFacts = facts
+    if (result.state === 'provider_response_invalid') {
+      return { ...result, transportFacts: facts }
     }
     const normalizedProposal = proposal(result.proposal, permit.workOrder)
     const receipt: DirectorProviderExecutionReceipt = {
+      ...facts,
       schema: 'qingmu.director-provider-execution-receipt.v1', workOrderId,
       provider, model, inputSha256, promptSha256,
       outputSha256: sha(normalizedProposal),
-      providerCompletionId: identifier(result.providerCompletionId, 'providerCompletionId'),
-      providerRequestId: result.providerRequestId === null
-        ? null
-        : identifier(result.providerRequestId, 'providerRequestId'),
-      usage, finishReason: identifier(result.finishReason, 'finishReason'),
+      transportFacts: facts,
       providerResult: true, proposal: normalizedProposal,
     }
     return { state: 'provider_result', receipt }
@@ -325,6 +394,12 @@ export async function executeDirectorProviderPermit(
     const reason = typeof error === 'object' && error !== null && 'message' in error
       ? String(error.message)
       : String(error)
+    if (completedFacts !== undefined) {
+      return {
+        state: 'provider_response_invalid', automaticRetry: false, reason,
+        transportFacts: completedFacts,
+      }
+    }
     return {
       state: 'submission_unknown', automaticRetry: false,
       reason,
