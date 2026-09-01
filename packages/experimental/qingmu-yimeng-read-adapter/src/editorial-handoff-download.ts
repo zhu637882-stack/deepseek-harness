@@ -44,6 +44,7 @@ const RC1_PREVIEW_PATH = '/api/qingmu/editorial-handoff/rc1-preview'
 const RC1_CONFIRM_PATH = '/api/qingmu/editorial-handoff/rc1'
 const FINAL_CONTENT_DECISION_PATH = '/api/qingmu/editorial-handoff/final-content-decision'
 const NATURAL_PERSON_IDENTITY_PATH = '/api/qingmu/editorial-handoff/natural-person-identity'
+const HUMAN_SESSION_PATH = '/api/qingmu/editorial-handoff/human-session'
 const FINAL_MEDIA_PATH = '/api/qingmu/editorial-handoff/final-media'
 const RC1_EVIDENCE_PATH = '/api/qingmu/editorial-handoff/rc1-evidence.zip'
 const SHA256 = /^[0-9a-f]{64}$/
@@ -2580,6 +2581,56 @@ async function writerProjectRequest(
   } catch { return undefined }
 }
 
+function humanBrowserHeaders(
+  req: IncomingMessage, upstream: URL, cookieRequired = true,
+): Headers | undefined {
+  const host = req.headers.host
+  const origin = req.headers.origin
+  const authorization = req.headers.authorization
+  const cookieHeader = req.headers.cookie
+  if (typeof host !== 'string' || typeof origin !== 'string'
+    || origin !== `http://${host}` || authorization !== undefined) return undefined
+  const tokenCookie = typeof cookieHeader === 'string'
+    ? cookieHeader.split(';').map(item => item.trim()).find(item => item.startsWith('jason_token='))
+    : undefined
+  if (cookieRequired && tokenCookie === undefined) return undefined
+  if (tokenCookie !== undefined && (tokenCookie.length > 8192 || /[\r\n]/.test(tokenCookie))) return undefined
+  // This Host is a same-origin BFF: validate the browser hop above, then use
+  // the real Writer origin on the second hop. The browser cookie remains the
+  // only human credential; no launcher Bearer is added on this path.
+  const headers = new Headers({ accept: 'application/json', origin: upstream.origin,
+    host: upstream.host })
+  if (tokenCookie !== undefined) headers.set('cookie', tokenCookie)
+  return headers
+}
+
+async function writerHumanRequest(
+  dependencies: EditorialHandoffDownloadDependencies,
+  req: IncomingMessage,
+  upstream: URL,
+  init: RequestInit,
+): Promise<{ readonly response: Response; readonly raw: unknown } | undefined> {
+  const headers = humanBrowserHeaders(req, upstream)
+  if (headers === undefined) return undefined
+  for (const [name, value] of new Headers(init.headers)) headers.set(name, value)
+  try {
+    const response = await dependencies.fetch(upstream, {
+      ...init, redirect: 'error', headers,
+    })
+    const bytes = Buffer.from(await response.arrayBuffer())
+    if (bytes.length > 256 * 1024) return undefined
+    return { response, raw: JSON.parse(bytes.toString('utf8')) as unknown }
+  } catch { return undefined }
+}
+
+function humanIntentProof(value: unknown, action: string): string | undefined {
+  const item = safeSelectionPayload(value)
+  if (item?.schema !== 'jason.qingmu-human-authority-intent.v1'
+    || item.action !== action || typeof item.proof !== 'string'
+    || item.proof.length < 100 || item.proof.length > 8192) return undefined
+  return item.proof
+}
+
 function normalizeNaturalPersonIdentity(
   value: unknown, projectId: string, userId: string,
 ): Record<string, unknown> | undefined {
@@ -3385,19 +3436,52 @@ export function registerEditorialHandoffDownload(
       }
     },
   })
+  const disposeHumanSession = webServer.register({
+    kind: 'exact', path: HUMAN_SESSION_PATH, handler: async (req, res) => {
+      const upstream = new URL('/api/auth/login', dependencies.baseUrl)
+      const headers = humanBrowserHeaders(req, upstream, false)
+      if (req.method !== 'POST' || !isTrustedApiRequest(req, []) || headers === undefined) {
+        json(res, 403, { code: 'human_session_origin_forbidden' }); return
+      }
+      try {
+        const item = safeSelectionPayload(await readBoundedJsonBody(req, 4096))
+        if (item === undefined || Object.keys(item).length !== 2
+          || typeof item.username !== 'string' || item.username.length < 1 || item.username.length > 120
+          || typeof item.password !== 'string' || item.password.length < 1 || item.password.length > 1024) {
+          throw new Error('human_session_request_invalid')
+        }
+        headers.set('content-type', 'application/json')
+        const response = await dependencies.fetch(upstream, {
+          method: 'POST', redirect: 'error', headers,
+          body: JSON.stringify({ username: item.username, password: item.password }),
+        })
+        const bytes = Buffer.from(await response.arrayBuffer())
+        const raw = bytes.length <= 64 * 1024
+          ? safeSelectionPayload(JSON.parse(bytes.toString('utf8'))) : undefined
+        const setCookie = response.headers.get('set-cookie')
+        if (!response.ok || raw === undefined || typeof raw.token !== 'string'
+          || typeof raw.user !== 'object' || raw.user === null
+          || typeof setCookie !== 'string' || !setCookie.startsWith('jason_token=')
+          || !/;\s*HttpOnly/i.test(setCookie) || !/;\s*Path=\/api(?:;|$)/i.test(setCookie)
+          || !/;\s*SameSite=(?:Lax|Strict)(?:;|$)/i.test(setCookie)
+          || /[\r\n]/.test(setCookie)) throw new Error('human_session_login_failed')
+        res.setHeader('Set-Cookie', setCookie)
+        json(res, 200, { ok: true, user: raw.user })
+      } catch (error) {
+        const bad = error instanceof Error && error.message === 'human_session_request_invalid'
+        json(res, bad ? 400 : 401, { code: bad ? 'human_session_request_invalid' : 'human_session_login_failed' })
+      }
+    },
+  })
   const disposeNaturalPersonIdentity = webServer.register({
     kind: 'exact', path: NATURAL_PERSON_IDENTITY_PATH, handler: async (req, res) => {
       if (!['GET', 'POST'].includes(req.method ?? '') || !isTrustedApiRequest(req, [])) {
         json(res, 403, { code: 'natural_person_identity_forbidden' }); return
       }
       const scope = scopeAccess(query(req))
-      const token = validToken(dependencies.readToken())
-      const userId = scope === undefined || token === undefined ? undefined
-        : await authenticatedUserId(dependencies, token)
-      if (scope === undefined || token === undefined || userId === undefined) {
-        json(res, scope === undefined ? 400 : 403, { code: 'natural_person_identity_forbidden' }); return
+      if (scope === undefined) {
+        json(res, 400, { code: 'natural_person_identity_forbidden' }); return
       }
-      let init: RequestInit = { method: req.method as 'GET' | 'POST' }
       if (req.method === 'POST') {
         try {
           const item = safeSelectionPayload(await readBoundedJsonBody(req, 4096))
@@ -3405,13 +3489,50 @@ export function registerEditorialHandoffDownload(
             || typeof item.idempotencyKey !== 'string' || !IDENTIFIER.test(item.idempotencyKey)) {
             throw new Error('natural_person_identity_request_invalid')
           }
-          init = { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(item) }
-        } catch {
-          json(res, 400, { code: 'natural_person_identity_request_invalid' }); return
+          const body = JSON.stringify(item)
+          const base = `/api/qingmu/projects/${encodeURIComponent(scope.projectId)}/natural-person-identity`
+          const issued = await writerHumanRequest(
+            dependencies, req, new URL(`${base}/intent`, dependencies.baseUrl),
+            { method: 'POST', headers: { 'content-type': 'application/json' }, body },
+          )
+          const proof = issued?.response.ok === true
+            ? humanIntentProof(issued.raw, 'natural_person_identity.enroll') : undefined
+          if (proof === undefined) throw new Error('natural_person_identity_reauthentication_required')
+          const submitted = await writerHumanRequest(
+            dependencies, req, new URL(base, dependencies.baseUrl), {
+              method: 'POST', headers: {
+                'content-type': 'application/json', 'x-qingmu-human-intent': proof,
+              }, body,
+            },
+          )
+          const candidate = safeSelectionPayload(submitted?.raw)
+          const actor = typeof candidate?.actorUserId === 'string' ? candidate.actorUserId : ''
+          const identity = submitted?.response.ok === true
+            ? normalizeNaturalPersonIdentity(submitted.raw, scope.projectId, actor) : undefined
+          if (identity === undefined) {
+            if (submitted?.response.status === 401 || submitted?.response.status === 403) {
+              throw new Error('natural_person_identity_reauthentication_required')
+            }
+            throw new Error('natural_person_identity_commit_failed')
+          }
+          json(res, 200, identity); return
+        } catch (error) {
+          const reauthenticationRequired = error instanceof Error
+            && error.message === 'natural_person_identity_reauthentication_required'
+          json(res, reauthenticationRequired ? 401 : 409, {
+            code: reauthenticationRequired
+              ? 'natural_person_identity_relogin_required'
+              : 'natural_person_identity_unknown_or_failed',
+          }); return
         }
       }
+      const token = validToken(dependencies.readToken())
+      const userId = token === undefined ? undefined : await authenticatedUserId(dependencies, token)
+      if (token === undefined || userId === undefined) {
+        json(res, 403, { code: 'natural_person_identity_forbidden' }); return
+      }
       const outcome = await writerProjectRequest(
-        dependencies, token, scope.projectId, 'natural-person-identity', init,
+        dependencies, token, scope.projectId, 'natural-person-identity', { method: 'GET' },
       )
       const identity = outcome?.response.ok === true
         ? normalizeNaturalPersonIdentity(outcome.raw, scope.projectId, userId) : undefined
@@ -3561,9 +3682,22 @@ export function registerEditorialHandoffDownload(
           note: item.note,
         }
         const requestSha = createHash('sha256').update(canonicalJson(requestBody)).digest('hex')
-        const submitted = await writerSelectionRequest(
-          dependencies, token, scope.projectId, scope.episodeId, 'final-content-decision', {
-            method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(item),
+        const body = JSON.stringify(item)
+        const base = `/api/qingmu/projects/${encodeURIComponent(scope.projectId)}`
+          + `/episodes/${encodeURIComponent(scope.episodeId)}/editorial-handoff/final-content-decision`
+        const issued = await writerHumanRequest(
+          dependencies, req, new URL(`${base}/intent`, dependencies.baseUrl), {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body,
+          },
+        )
+        const proof = issued?.response.ok === true
+          ? humanIntentProof(issued.raw, 'episode_final_content_decision.record') : undefined
+        if (proof === undefined) throw new Error('content_decision_intent_failed')
+        const submitted = await writerHumanRequest(
+          dependencies, req, new URL(base, dependencies.baseUrl), {
+            method: 'POST', headers: {
+              'content-type': 'application/json', 'x-qingmu-human-intent': proof,
+            }, body,
           },
         )
         let result = submitted?.response.ok === true ? safeSelectionPayload(submitted.raw) : undefined
@@ -3586,8 +3720,10 @@ export function registerEditorialHandoffDownload(
         json(res, 200, result)
       } catch (error) {
         const bad = error instanceof Error && error.message === 'content_decision_request_invalid'
+        const intentFailed = error instanceof Error && error.message === 'content_decision_intent_failed'
         json(res, bad ? 400 : 409, { code: bad ? 'final_content_decision_request_invalid'
-          : 'final_content_decision_unknown_or_failed' })
+          : intentFailed ? 'final_content_decision_reauthentication_required'
+            : 'final_content_decision_unknown_or_failed' })
       }
     },
   })
@@ -3797,6 +3933,7 @@ export function registerEditorialHandoffDownload(
     },
   })
   return () => {
+    disposeHumanSession()
     disposeNaturalPersonIdentity()
     disposeRc1Evidence()
     disposeFinalMedia()

@@ -257,9 +257,67 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
         () => dialog.getByText('本次完整播放进度: 100%').isVisible(),
         { timeout: 15_000 },
       ).toBe(true)
+      const binding = await page.evaluate(async ({ projectId, episodeId }) => {
+        const params = new URLSearchParams({ projectId, episodeId })
+        const response = await fetch(`/api/qingmu/editorial-handoff/rc1-status?${params.toString()}`)
+        const body = await response.json() as { contentReview: { binding: Record<string, unknown> } }
+        return body.contentReview.binding
+      }, { projectId: fixture.projectId, episodeId: fixture.episodeId })
+      const forbiddenBody = {
+        decision: 'rejected', binding, playedCoverage: 1,
+        checks: { picture_and_timing_reviewed: false, dialogue_and_audio_reviewed: true,
+          continuity_and_content_reviewed: true },
+        secondConfirmed: false, reason: 'picture_or_timing', note: 'must not be written',
+        idempotencyKey: 'forbidden-host-decision-12345678',
+      }
+      const hostWithoutCookie = await page.evaluate(async ({ projectId, episodeId, body }) => {
+        const params = new URLSearchParams({ projectId, episodeId })
+        const response = await fetch(
+          `/api/qingmu/editorial-handoff/final-content-decision?${params.toString()}`,
+          { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
+        )
+        return response.status
+      }, { projectId: fixture.projectId, episodeId: fixture.episodeId, body: forbiddenBody })
+      expect(hostWithoutCookie).toBe(409)
+      const writerRoute = `${fixture.baseUrl}/api/qingmu/projects/${fixture.projectId}`
+        + `/episodes/${fixture.episodeId}/editorial-handoff/final-content-decision`
+      const bearerIntent = await fetch(`${writerRoute}/intent`, { method: 'POST', headers: {
+        authorization: `Bearer ${fixture.token}`, 'content-type': 'application/json',
+      }, body: JSON.stringify(forbiddenBody) })
+      const bearerWrite = await fetch(writerRoute, { method: 'POST', headers: {
+        authorization: `Bearer ${fixture.token}`, 'content-type': 'application/json',
+      }, body: JSON.stringify(forbiddenBody) })
+      expect([bearerIntent.status, bearerWrite.status]).toEqual([403, 403])
+      const beforeLogin = await execFile(join(writerRoot, '.venv/bin/python'), ['-c', [
+        'import sqlite3,sys',
+        'c=sqlite3.connect(sys.argv[1])',
+        'print(c.execute("SELECT count(*) FROM command_receipts WHERE command_type=?",("episode.final_content_decision.record.v1",)).fetchone()[0])',
+      ].join('\n'), fixture.sqlitePath], { env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: '1' } })
+      expect(beforeLogin.stdout.trim()).toBe('0')
+      decisionPosts.length = 0
+
+      await dialog.getByLabel('账号').fill('ledger-fixture')
+      await dialog.getByLabel('密码').fill('fixture-password')
+      await dialog.getByRole('button', { name: '验证本人会话', exact: true }).click()
+      await expect.poll(() => dialog.getByText(
+        '已建立最近的本人浏览器会话；后端仍会逐次核对对象和版本。',
+      ).isVisible()).toBe(true)
       await dialog.getByLabel('给本次内容决定的备注（可选）').fill('隔离自动化：画面节奏需返修。')
       await dialog.getByLabel('退回修改原因').selectOption('picture_or_timing')
+      const submitted = page.waitForResponse(response => response.request().method() === 'POST'
+        && new URL(response.url()).pathname === '/api/qingmu/editorial-handoff/final-content-decision')
       await dialog.getByRole('button', { name: '退回修改', exact: true }).click()
+      const submittedResponse = await submitted
+      if (submittedResponse.status() !== 200) {
+        const committed = await execFile(join(writerRoot, '.venv/bin/python'), ['-c', [
+          'import sqlite3,sys',
+          'c=sqlite3.connect(sys.argv[1])',
+          'print(c.execute("SELECT count(*) FROM command_receipts WHERE command_type=?",("episode.final_content_decision.record.v1",)).fetchone()[0])',
+        ].join('\n'), fixture.sqlitePath], { env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: '1' } })
+        throw new Error(
+          `human rejection failed ${String(submittedResponse.status())}; committed=${committed.stdout.trim()}`,
+        )
+      }
       await expect.poll(
         () => dialog.getByText('当前成片已退回修改，不得进入组织发布。').isVisible(),
       ).toBe(true)

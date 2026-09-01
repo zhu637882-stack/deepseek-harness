@@ -446,6 +446,9 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   const [contentNote, setContentNote] = useState('')
   const [identitySaving, setIdentitySaving] = useState(false)
   const [identityError, setIdentityError] = useState<string>()
+  const [humanUsername, setHumanUsername] = useState('')
+  const [humanPassword, setHumanPassword] = useState('')
+  const [humanSessionState, setHumanSessionState] = useState<'idle' | 'saving' | 'ready' | 'failed'>('idle')
   const generation = useRef(0)
   const downloadGeneration = useRef(0)
   const importGeneration = useRef(0)
@@ -1433,8 +1436,26 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     }
   }, [episodeId, loadRc1Status, projectId, rc1Preview, rc1State])
 
+  const authenticateHumanSession = useCallback(async () => {
+    if (humanSessionState === 'saving' || humanUsername.trim() === '' || humanPassword === '') return
+    setHumanSessionState('saving')
+    try {
+      const response = await fetch('/api/qingmu/editorial-handoff/human-session', {
+        method: 'POST', cache: 'no-store', credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: humanUsername.trim(), password: humanPassword }),
+      })
+      if (!response.ok) throw new Error('human_session_login_failed')
+      setHumanPassword('')
+      setHumanSessionState('ready')
+    } catch {
+      setHumanSessionState('failed')
+    }
+  }, [humanPassword, humanSessionState, humanUsername])
+
   const enrollNaturalPersonIdentity = useCallback(async () => {
-    if (identitySaving || rc1Status?.contentReview.identity?.canEnroll !== true) return
+    if (identitySaving || humanSessionState !== 'ready'
+      || rc1Status?.contentReview.identity?.canEnroll !== true) return
     if (identityEnrollmentKey.current === '') {
       identityEnrollmentKey.current = `natural-person-${globalThis.crypto.randomUUID()}`
     }
@@ -1454,17 +1475,19 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       identityEnrollmentKey.current = ''
       await loadRc1Status()
     } catch (cause) {
-      setIdentityError(cause instanceof Error
-        ? cause.message : 'natural_person_identity_unknown_or_failed')
+      const failure = cause instanceof Error
+        ? cause.message : 'natural_person_identity_unknown_or_failed'
+      if (failure === 'natural_person_identity_relogin_required') setHumanSessionState('idle')
+      setIdentityError(failure)
       await loadRc1Status()
     } finally {
       setIdentitySaving(false)
     }
-  }, [episodeId, identitySaving, loadRc1Status, projectId, rc1Status])
+  }, [episodeId, humanSessionState, identitySaving, loadRc1Status, projectId, rc1Status])
 
   const decideFinalContent = useCallback(async (decision: 'accepted' | 'rejected') => {
     const binding = rc1Status?.contentReview.binding
-    if (binding === undefined || rc1Status?.contentReview.currentDecision !== null
+    if (humanSessionState !== 'ready' || binding === undefined || rc1Status?.contentReview.currentDecision !== null
       || rc1State === 'deciding') return
     if (contentDecisionKey.current === '') {
       const nonce = globalThis.crypto.randomUUID()
@@ -1487,19 +1510,25 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
           note: contentNote.trim() === '' ? null : contentNote.trim(),
           idempotencyKey: contentDecisionKey.current }),
       })
-      if (!response.ok) throw new Error('final_content_decision_unknown_or_failed')
+      if (!response.ok) {
+        const failure = await response.json().catch(() => undefined) as { code?: unknown } | undefined
+        throw new Error(typeof failure?.code === 'string'
+          ? failure.code : 'final_content_decision_unknown_or_failed')
+      }
       if (current === rc1Generation.current) await loadRc1Status()
     } catch (cause) {
       if (current === rc1Generation.current && !controller.signal.aborted) {
-        setRc1Error(cause instanceof Error ? cause.message : 'final_content_decision_unknown_or_failed')
+        const failure = cause instanceof Error ? cause.message : 'final_content_decision_unknown_or_failed'
+        if (failure === 'final_content_decision_reauthentication_required') setHumanSessionState('idle')
         setRc1State('previewed')
         await loadRc1Status()
+        setRc1Error(failure)
       }
     } finally {
       if (current === rc1Generation.current) rc1Controller.current = undefined
     }
   }, [contentChecks, contentNote, contentRejectReason, contentSecondConfirmed,
-    episodeId, loadRc1Status, playedCoverage, projectId, rc1State, rc1Status])
+    episodeId, humanSessionState, loadRc1Status, playedCoverage, projectId, rc1State, rc1Status])
 
   if (projectId === '' || episodeId === '') return <p className={css.empty}>{t('handoffChooseEpisode')}</p>
   const blockerLabel = (code: string) => t(BLOCKER_KEYS[code] ?? 'handoffBlockerUnknown')
@@ -1964,13 +1993,33 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
           {rc1Status?.contentReview.binding === undefined
             ? <p className={css.warning}>{t('handoffContentReviewNeedsRc1')}</p>
             : <>
+              <div className={humanSessionState === 'ready' ? css.success : css.warning}>
+                <p>{humanSessionState === 'ready'
+                  ? t('handoffHumanSessionReady') : t('handoffHumanSessionRequired')}</p>
+                {humanSessionState !== 'ready' && <>
+                  <label className={css.formField}><span>{t('handoffHumanUsername')}</span>
+                    <input autoComplete="username" value={humanUsername} maxLength={120}
+                      onChange={(event) => { setHumanUsername(event.currentTarget.value) }} /></label>
+                  <label className={css.formField}><span>{t('handoffHumanPassword')}</span>
+                    <input type="password" autoComplete="current-password" value={humanPassword}
+                      onChange={(event) => { setHumanPassword(event.currentTarget.value) }} /></label>
+                  <button type="button" disabled={humanSessionState === 'saving'
+                    || humanUsername.trim() === '' || humanPassword === ''}
+                  onClick={() => { void authenticateHumanSession() }}>
+                    {humanSessionState === 'saving'
+                      ? t('handoffHumanSessionSaving') : t('handoffHumanSessionLogin')}
+                  </button>
+                  {humanSessionState === 'failed'
+                    && <p role="alert" className={css.error}>{t('handoffHumanSessionFailed')}</p>}
+                </>}
+              </div>
               {rc1Status.contentReview.identity.state === 'bound'
                 ? <p className={css.success}>{t('handoffIdentityBound')}</p>
                 : <div className={css.warning} role="status">
                   <p>{rc1Status.contentReview.identity.state === 'unbound'
                     ? t('handoffIdentityUnbound') : t('handoffIdentityInvalid')}</p>
                   {rc1Status.contentReview.identity.canEnroll && <button type="button"
-                    disabled={identitySaving}
+                    disabled={identitySaving || humanSessionState !== 'ready'}
                     onClick={() => { void enrollNaturalPersonIdentity() }}>
                     {identitySaving ? t('handoffIdentitySaving') : t('handoffIdentityEnroll')}
                   </button>}
@@ -2026,11 +2075,13 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
               <div className={css.decisionActions}>
                 <button type="button" disabled={playedCoverage !== 1 || !contentSecondConfirmed
                   || Object.values(contentChecks).some(value => !value)
+                  || humanSessionState !== 'ready'
                   || rc1Status.contentReview.identity.state !== 'bound'
                   || rc1Status.contentReview.currentDecision !== null || rc1State === 'deciding'}
                 onClick={() => { void decideFinalContent('accepted') }}>{t('handoffContentAccept')}</button>
                 <button type="button" className={css.rejectButton}
                   disabled={playedCoverage !== 1
+                    || humanSessionState !== 'ready'
                     || rc1Status.contentReview.identity.state !== 'bound'
                     || rc1Status.contentReview.currentDecision !== null
                     || rc1State === 'deciding'}

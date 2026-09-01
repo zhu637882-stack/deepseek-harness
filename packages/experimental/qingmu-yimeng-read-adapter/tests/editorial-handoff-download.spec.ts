@@ -93,6 +93,65 @@ function downloadUrl(base: string, access: { readonly requestId: string; readonl
 }
 
 describe('editorial handoff Host download bridge', () => {
+  it('creates a same-origin browser session without exposing the Writer token', async () => {
+    const fetchUpstream = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(input instanceof URL ? input.href
+        : typeof input === 'string' ? input : input.url)
+      expect(url.pathname).toBe('/api/auth/login')
+      const headers = new Headers(init?.headers)
+      expect(headers.get('authorization')).toBeNull()
+      expect(headers.get('origin')).toBe('http://127.0.0.1:18815')
+      expect(headers.get('host')).toBe('127.0.0.1:18815')
+      if (typeof init?.body !== 'string') throw new Error('login request body missing')
+      expect(JSON.parse(init.body)).toEqual({ username: 'owner', password: 'secret' })
+      return new Response(JSON.stringify({
+        token: 'writer-jwt-must-not-reach-browser', user: { id: 'writer-user', username: 'owner' },
+      }), { status: 200, headers: {
+        'content-type': 'application/json',
+        'set-cookie': 'jason_token=cookie-value; Path=/api; HttpOnly; SameSite=lax',
+      } })
+    }) as unknown as typeof globalThis.fetch
+    const { base } = await host(fetchUpstream)
+    const path = `${base}/api/qingmu/editorial-handoff/human-session`
+
+    expect((await fetch(path, { method: 'POST', headers: {
+      'content-type': 'application/json', authorization: 'Bearer launcher-token', origin: base,
+    }, body: JSON.stringify({ username: 'owner', password: 'secret' }) })).status).toBe(403)
+    const response = await fetch(path, { method: 'POST', headers: {
+      'content-type': 'application/json', origin: base,
+    }, body: JSON.stringify({ username: 'owner', password: 'secret' }) })
+    const result = await response.json() as Record<string, unknown>
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('set-cookie')).toContain('jason_token=')
+    expect(JSON.stringify(result)).not.toContain('writer-jwt')
+    expect(result).toEqual({ ok: true, user: { id: 'writer-user', username: 'owner' } })
+    expect(fetchUpstream).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns a safe reauthentication result when the human identity intent expires', async () => {
+    const fetchUpstream = vi.fn(async (input: string | URL | Request) => {
+      const target = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      expect(new URL(target).pathname).toBe('/api/qingmu/projects/project-e8/natural-person-identity/intent')
+      return new Response(JSON.stringify({ detail: { code: 'human_authority_intent_reauthentication_required' } }), {
+        status: 401, headers: { 'content-type': 'application/json' },
+      })
+    }) as unknown as typeof globalThis.fetch
+    const { base } = await host(fetchUpstream)
+    const scope = new URLSearchParams({ projectId: 'project-e8', episodeId: 'episode-e8' })
+    const response = await fetch(
+      `${base}/api/qingmu/editorial-handoff/natural-person-identity?${scope.toString()}`,
+      { method: 'POST', headers: { 'content-type': 'application/json', origin: base,
+        cookie: 'jason_token=cookie-test' }, body: JSON.stringify({
+        confirmed: true, idempotencyKey: 'identity-reauth-12345678',
+      }) },
+    )
+
+    expect(response.status).toBe(401)
+    expect(await response.json()).toEqual({ code: 'natural_person_identity_relogin_required' })
+    expect(fetchUpstream).toHaveBeenCalledTimes(1)
+  })
+
   it('streams one authenticated package and exposes only verified status facts', async () => {
     const bytes = Buffer.from('deterministic-otio-package')
     const digest = createHash('sha256').update(bytes).digest('hex')
@@ -984,8 +1043,9 @@ describe('editorial handoff Host download bridge', () => {
     let rc1Posts = 0
     let rc1Recoveries = 0
     let decisionPosts = 0
+    let intentPosts = 0
     let decisionRecoveries = 0
-    const fetchUpstream = vi.fn(async (input: string | URL | Request) => {
+    const fetchUpstream = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const target = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
       const url = new URL(target)
       if (url.pathname.endsWith('/rc1')) {
@@ -1004,6 +1064,18 @@ describe('editorial handoff Host download bridge', () => {
         return new Response(JSON.stringify(packageResult), {
           status: 200, headers: { 'content-type': 'application/json' },
         })
+      }
+      if (url.pathname.endsWith('/final-content-decision/intent')) {
+        intentPosts += 1
+        const headers = new Headers(init?.headers)
+        expect(headers.get('authorization')).toBeNull()
+        expect(headers.get('cookie')).toBe('jason_token=cookie-test')
+        expect(headers.get('origin')).toBe('http://127.0.0.1:18815')
+        expect(headers.get('host')).toBe('127.0.0.1:18815')
+        return new Response(JSON.stringify({
+          schema: 'jason.qingmu-human-authority-intent.v1',
+          action: 'episode_final_content_decision.record', proof: 'p'.repeat(160),
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
       }
       if (url.pathname.endsWith('/final-content-decision')) {
         decisionPosts += 1
@@ -1043,7 +1115,8 @@ describe('editorial handoff Host download bridge', () => {
 
     const content = await fetch(
       `${base}/api/qingmu/editorial-handoff/final-content-decision?${scope.toString()}`,
-      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+      { method: 'POST', headers: { 'content-type': 'application/json', origin: base,
+        cookie: 'jason_token=cookie-test' }, body: JSON.stringify({
         decision: 'rejected', binding, playedCoverage: 1,
         checks: { picture_and_timing_reviewed: false, dialogue_and_audio_reviewed: true,
           continuity_and_content_reviewed: true },
@@ -1058,7 +1131,8 @@ describe('editorial handoff Host download bridge', () => {
 
     const mismatch = await fetch(
       `${base}/api/qingmu/editorial-handoff/final-content-decision?${scope.toString()}`,
-      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+      { method: 'POST', headers: { 'content-type': 'application/json', origin: base,
+        cookie: 'jason_token=cookie-test' }, body: JSON.stringify({
         decision: 'rejected', binding, playedCoverage: 1,
         checks: { picture_and_timing_reviewed: false, dialogue_and_audio_reviewed: true,
           continuity_and_content_reviewed: true },
@@ -1067,8 +1141,8 @@ describe('editorial handoff Host download bridge', () => {
       }) },
     )
     expect(mismatch.status).toBe(409)
-    expect({ rc1Posts, rc1Recoveries, decisionPosts, decisionRecoveries }).toEqual({
-      rc1Posts: 1, rc1Recoveries: 1, decisionPosts: 2, decisionRecoveries: 1,
+    expect({ rc1Posts, rc1Recoveries, intentPosts, decisionPosts, decisionRecoveries }).toEqual({
+      rc1Posts: 1, rc1Recoveries: 1, intentPosts: 2, decisionPosts: 2, decisionRecoveries: 1,
     })
   })
 

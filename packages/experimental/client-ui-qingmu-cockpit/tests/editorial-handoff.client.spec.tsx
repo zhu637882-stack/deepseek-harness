@@ -116,6 +116,13 @@ function reportPlayback(video: HTMLVideoElement, ranges: readonly (readonly [num
   fireEvent.timeUpdate(video)
 }
 
+async function authenticateHumanSession() {
+  fireEvent.change(screen.getByLabelText(zh.handoffHumanUsername), { target: { value: 'owner' } })
+  fireEvent.change(screen.getByLabelText(zh.handoffHumanPassword), { target: { value: 'secret' } })
+  fireEvent.click(screen.getByRole('button', { name: zh.handoffHumanSessionLogin }))
+  await waitFor(() => { expect(screen.getByText(zh.handoffHumanSessionReady)).toBeTruthy() })
+}
+
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
@@ -998,6 +1005,7 @@ describe('editorial handoff panel', () => {
     const posts: Record<string, unknown>[] = []
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = fetchUrl(input)
+      if (url.includes('/human-session')) return new Response(JSON.stringify({ ok: true }), { status: 200 })
       if (url.includes('/rc1-status?')) {
         return new Response(JSON.stringify({
           schema: 'jason.qingmu-editorial-handoff-rc1-status.v1', ...SCOPE,
@@ -1036,6 +1044,7 @@ describe('editorial handoff panel', () => {
     await waitFor(() => { expect(screen.getByRole('button', { name: zh.handoffRefresh })).toBeTruthy() })
     fireEvent.click(screen.getByRole('button', { name: zh.handoffRefresh }))
     await waitFor(() => { expect(document.querySelector('video')).toBeTruthy() })
+    await authenticateHumanSession()
     expect(screen.getByText(zh.handoffMachineEvidenceTitle)).toBeTruthy()
     expect(screen.getByText(zh.handoffReleaseSignoffTitle)).toBeTruthy()
     expect(screen.getByText(zh.handoffReleaseSignoffMissing)).toBeTruthy()
@@ -1061,6 +1070,58 @@ describe('editorial handoff panel', () => {
     expect(localStorage.getItem('isolated rejection note')).toBeNull()
   })
 
+  it('returns to the human login form when identity enrollment requires recent authentication', async () => {
+    const editorialHandoff = vi.fn().mockResolvedValue(handoff())
+    const port = { editorialHandoff } as unknown as QingmuYimengReadPort
+    const binding = {
+      ...SCOPE, contentReviewToken: 'a'.repeat(64), finalOutputId: 'final-rc1',
+      finalAssetId: 'asset-rc1', finalSha256: 'b'.repeat(64), finalBytes: 2048,
+      materializedSha256: 'b'.repeat(64), verifyEvidenceSha256: 'c'.repeat(64),
+      rc1PackageId: 'evidence-rc1', rc1ManifestSha256: 'd'.repeat(64),
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = fetchUrl(input)
+      if (url.includes('/human-session')) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 })
+      }
+      if (url.includes('/rc1-status?')) {
+        return new Response(JSON.stringify({
+          schema: 'jason.qingmu-editorial-handoff-rc1-status.v1', ...SCOPE,
+          rc1Package: { packageLevel: 'RC1', currentPackage: null, preview: {
+            schema: 'jason.qingmu-canonical-evidence-freeze-preview.v1', ...SCOPE,
+            subject: { packageLevel: 'RC1', buildIdentity: { commit: 'e'.repeat(40) } },
+            previewSha256: '1'.repeat(64), idempotencyKey: 'rc1-preview-12345678',
+            canConfirm: false, hardBlockers: ['fixture_rc1_not_frozen'],
+          } },
+          contentReview: { schema: 'jason.episode-final-content-decision-status.v1', binding,
+            currentDecision: null, canDecide: false,
+            identity: { schema: 'jason.qingmu-natural-person-identity-status.v1',
+              projectId: SCOPE.projectId, actorUserId: 'owner', state: 'unbound',
+              naturalPersonId: null, canEnroll: true,
+              legalIdentityVerified: false, humanSignoffGranted: false },
+            releaseSignoffGranted: false, publishReady: false },
+          releaseSignoff: { granted: false, readOnly: true, blockers: [] },
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('/natural-person-identity?') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ code: 'natural_person_identity_relogin_required' }), {
+          status: 401, headers: { 'content-type': 'application/json' },
+        })
+      }
+      return new Response('{}', { status: 404 })
+    }))
+
+    render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
+    fireEvent.click(await screen.findByRole('button', { name: zh.handoffRefresh }))
+    await waitFor(() => { expect(screen.getByText(zh.handoffIdentityUnbound)).toBeTruthy() })
+    await authenticateHumanSession()
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffIdentityEnroll }))
+
+    await waitFor(() => { expect(screen.getByText(zh.handoffIdentityRelogin)).toBeTruthy() })
+    expect(screen.getByLabelText(zh.handoffHumanPassword)).toBeTruthy()
+    expect(screen.getByRole('button', { name: zh.handoffHumanSessionLogin })).toBeTruthy()
+  })
+
   it('rotates the decision idempotency key when the episode binding changes', async () => {
     const secondScope = { projectId: 'project-e8-next', episodeId: 'episode-e8-next' }
     const editorialHandoff = vi.fn().mockImplementation(async () => handoff())
@@ -1068,6 +1129,9 @@ describe('editorial handoff panel', () => {
     const keys: string[] = []
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(fetchUrl(input), 'http://localhost')
+      if (url.pathname.endsWith('/human-session')) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 })
+      }
       const scope = {
         projectId: url.searchParams.get('projectId') ?? '',
         episodeId: url.searchParams.get('episodeId') ?? '',
@@ -1116,9 +1180,11 @@ describe('editorial handoff panel', () => {
     }))
 
     const view = render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
+    let authenticated = false
     for (const scope of [SCOPE, secondScope]) {
       fireEvent.click(await screen.findByRole('button', { name: zh.handoffRefresh }))
       await waitFor(() => { expect(document.querySelector('video')).toBeTruthy() })
+      if (!authenticated) { await authenticateHumanSession(); authenticated = true }
       reportPlayback(document.querySelector('video') as HTMLVideoElement, [[0, 10]])
       fireEvent.click(screen.getByRole('button', { name: zh.handoffContentReject }))
       await waitFor(() => { expect(keys).toHaveLength(scope === SCOPE ? 1 : 2) })
@@ -1135,6 +1201,9 @@ describe('editorial handoff panel', () => {
     const keys: string[] = []
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(fetchUrl(input), 'http://localhost')
+      if (url.pathname.endsWith('/human-session')) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 })
+      }
       const binding = {
         ...SCOPE, contentReviewToken: (bindingVersion === 0 ? 'a' : 'f').repeat(64),
         finalOutputId: 'final-same-episode', finalAssetId: 'asset-same-episode',
@@ -1174,6 +1243,7 @@ describe('editorial handoff panel', () => {
       expect(player).toBeTruthy()
       return player as HTMLVideoElement
     })
+    await authenticateHumanSession()
     reportPlayback(firstPlayer, [[0, 10]])
     fireEvent.click(screen.getByLabelText(zh.handoffContentCheckPicture))
     fireEvent.click(screen.getByLabelText(zh.handoffContentCheckAudio))
