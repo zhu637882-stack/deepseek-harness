@@ -961,7 +961,7 @@ describe('editorial handoff Host download bridge', () => {
       eventId: 'event_rc1', committedAt: '2026-09-01T00:00:03Z', ...flags,
     }
     const binding = {
-      projectId: 'project-e8', episodeId: 'episode-e8', authorityRevision: 4,
+      projectId: 'project-e8', episodeId: 'episode-e8',
       contentReviewToken: 'd'.repeat(64), finalOutputId: 'final_rc1', finalAssetId: 'asset_rc1',
       finalSha256: '3'.repeat(64), finalBytes: 2048, materializedSha256: '3'.repeat(64),
       verifyEvidenceSha256: 'e'.repeat(64), rc1PackageId: 'evidence_rc1',
@@ -971,6 +971,14 @@ describe('editorial handoff Host download bridge', () => {
       schema: 'jason.episode-final-content-decision.v1', projectId: 'project-e8',
       episodeId: 'episode-e8', decision: 'rejected', reason: 'picture_or_timing',
       idempotencyKey: 'content-decision-12345678', binding,
+      requestSha256: 'f'.repeat(64), commandReceiptId: 'receipt-content-decision',
+      changeSetId: 'changeset-content-decision', eventId: 'event-content-decision',
+      actorUserId: 'user-owner', actorNaturalPersonId: 'natural-person-owner',
+      decidedAt: '2026-09-01T00:00:04Z', note: 'test rejection', playedCoverage: 1,
+      playbackAttestation: { schema: 'jason.owner-declared-playback-coverage.v1', coverage: 1,
+        continuousFromStart: true, declaredByOwner: true, unforgeableTelemetry: false },
+      checks: { picture_and_timing_reviewed: false, dialogue_and_audio_reviewed: true,
+        continuity_and_content_reviewed: true }, secondConfirmed: false,
       releaseSignoffGranted: false, publishReady: false,
     }
     let rc1Posts = 0
@@ -1044,7 +1052,9 @@ describe('editorial handoff Host download bridge', () => {
       }) },
     )
     expect(content.status).toBe(200)
-    expect((await content.json()) as Record<string, unknown>).toMatchObject(decision)
+    const recoveredDecision = (await content.json()) as Record<string, unknown>
+    expect(recoveredDecision).toMatchObject({ ...decision, requestSha256: recoveredDecision.requestSha256 })
+    expect(recoveredDecision.requestSha256).toMatch(/^[0-9a-f]{64}$/)
 
     const mismatch = await fetch(
       `${base}/api/qingmu/editorial-handoff/final-content-decision?${scope.toString()}`,
@@ -1060,6 +1070,53 @@ describe('editorial handoff Host download bridge', () => {
     expect({ rc1Posts, rc1Recoveries, decisionPosts, decisionRecoveries }).toEqual({
       rc1Posts: 1, rc1Recoveries: 1, decisionPosts: 2, decisionRecoveries: 1,
     })
+  })
+
+  it('proxies only exact RC1 artifact bindings and preserves media ranges', async () => {
+    const media = Buffer.from('0123456789')
+    const evidence = Buffer.from('canonical-rc1-evidence')
+    const fetchUpstream = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const target = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const url = new URL(target)
+      if (url.pathname.endsWith('/final-media')) {
+        expect(url.searchParams.get('sha256')).toBe('a'.repeat(64))
+        expect(new Headers(init?.headers).get('range')).toBe('bytes=2-5')
+        return new Response(media.subarray(2, 6), {
+          status: 206, headers: {
+            'content-type': 'video/mp4', 'content-length': '4',
+            'content-range': 'bytes 2-5/10',
+          },
+        })
+      }
+      expect(url.pathname.endsWith('/rc1-evidence.zip')).toBe(true)
+      expect(url.searchParams.get('packageId')).toBe('evidence_rc1')
+      expect(url.searchParams.get('manifestSha256')).toBe('b'.repeat(64))
+      return new Response(evidence, { status: 200, headers: {
+        'content-type': 'application/zip', 'content-length': String(evidence.length),
+      } })
+    }) as unknown as typeof globalThis.fetch
+    const { base } = await host(fetchUpstream)
+    const scope = new URLSearchParams({ projectId: 'project-e8', episodeId: 'episode-e8' })
+
+    const final = await fetch(
+      `${base}/api/qingmu/editorial-handoff/final-media?${scope.toString()}&sha256=${'a'.repeat(64)}`,
+      { headers: { range: 'bytes=2-5' } },
+    )
+    expect(final.status).toBe(206)
+    expect(final.headers.get('content-range')).toBe('bytes 2-5/10')
+    expect(Buffer.from(await final.arrayBuffer())).toEqual(media.subarray(2, 6))
+
+    const packageResponse = await fetch(
+      `${base}/api/qingmu/editorial-handoff/rc1-evidence.zip?${scope.toString()}&packageId=evidence_rc1&manifestSha256=${'b'.repeat(64)}`,
+    )
+    expect(packageResponse.status).toBe(200)
+    expect(Buffer.from(await packageResponse.arrayBuffer())).toEqual(evidence)
+
+    const extra = await fetch(
+      `${base}/api/qingmu/editorial-handoff/final-media?${scope.toString()}&sha256=${'a'.repeat(64)}&extra=forbidden`,
+    )
+    expect(extra.status).toBe(400)
+    expect(fetchUpstream).toHaveBeenCalledTimes(2)
   })
 
   it('writes every upload byte when the spool writer reports partial progress', async () => {

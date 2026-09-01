@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { EditorialHandoff } from '../src/client/EditorialHandoff.tsx'
+import { EditorialHandoff, continuousPlayedCoverage } from '../src/client/EditorialHandoff.tsx'
 import type { QingmuYimengReadPort, YimengEditorialHandoffResponse } from '../src/client/contracts.ts'
 import { zh, type QingmuCockpitKey } from '../src/client/locales.ts'
 
@@ -102,6 +102,20 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
+function playedRanges(ranges: readonly (readonly [number, number])[]): TimeRanges {
+  return {
+    length: ranges.length,
+    start: index => ranges[index]?.[0] ?? 0,
+    end: index => ranges[index]?.[1] ?? 0,
+  }
+}
+
+function reportPlayback(video: HTMLVideoElement, ranges: readonly (readonly [number, number])[]) {
+  Object.defineProperty(video, 'duration', { configurable: true, value: 10 })
+  Object.defineProperty(video, 'played', { configurable: true, value: playedRanges(ranges) })
+  fireEvent.timeUpdate(video)
+}
+
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
@@ -109,6 +123,13 @@ afterEach(() => {
 })
 
 describe('editorial handoff panel', () => {
+  it('does not treat a tail seek as playback but accepts continuous coverage', () => {
+    expect(continuousPlayedCoverage(playedRanges([[9, 10]]), 10)).toBe(0)
+    expect(continuousPlayedCoverage(playedRanges([[0, 4], [4.1, 10]]), 10)).toBe(1)
+    expect(continuousPlayedCoverage(
+      playedRanges([[0, 2], [2.1, 4], [4.1, 6], [6.1, 10]]), 10,
+    )).toBeLessThan(1)
+  })
   it('shows separate false readiness, authoritative media facts, and no write action', async () => {
     const { editorialHandoff } = mount()
     await waitFor(() => { expect(screen.getByText(/雨夜街口/u)).toBeTruthy() })
@@ -151,8 +172,10 @@ describe('editorial handoff panel', () => {
       { projectId: 'project-new', episodeId: 'episode-new' }, expect.any(AbortSignal),
     ) })
     oldRefresh.resolve(handoff())
+    const callsBeforeLateResolution = fetchMock.mock.calls.length
     await new Promise(resolve => window.setTimeout(resolve, 0))
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(callsBeforeLateResolution).toBe(2)
+    expect(fetchMock).toHaveBeenCalledTimes(callsBeforeLateResolution)
   })
 
   it('turns a Host source drift into a localized refresh action', async () => {
@@ -177,6 +200,9 @@ describe('editorial handoff panel', () => {
     let candidateReads = 0
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = fetchUrl(input)
+      if (url.includes('/rc1-status?')) {
+        return new Response('{}', { status: 404 })
+      }
       if (url.includes('returned-master-selection-status')) {
         return new Response(JSON.stringify({ code: 'selection_not_available' }), { status: 409 })
       }
@@ -198,7 +224,7 @@ describe('editorial handoff panel', () => {
     fireEvent.click(read)
     await waitFor(() => { expect(screen.queryByText(zh.handoffCandidateUnselected)).toBeNull() })
     expect(screen.getByText(/candidate_list_failed/u)).toBeTruthy()
-    expect(fetchMock).toHaveBeenCalledTimes(10)
+    expect(fetchMock.mock.calls.filter(call => fetchUrl(call[0]).includes('returned-master')).length).toBe(6)
   })
 
   it('rejects candidate rows from a different project scope', async () => {
@@ -581,9 +607,11 @@ describe('editorial handoff panel', () => {
   it('starts one Host download and displays its verified SHA and size', async () => {
     const editorialHandoff = vi.fn().mockResolvedValue(downloadableHandoff())
     const port = { editorialHandoff } as unknown as QingmuYimengReadPort
-    const fetchStatus = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      status: 'succeeded', sha256: '8'.repeat(64), size: 4096, errorCode: null,
-    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    const fetchStatus = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => fetchUrl(input).includes('/rc1-status?')
+      ? new Response('{}', { status: 404 })
+      : new Response(JSON.stringify({
+        status: 'succeeded', sha256: '8'.repeat(64), size: 4096, errorCode: null,
+      }), { status: 200, headers: { 'content-type': 'application/json' } }))
     vi.stubGlobal('fetch', fetchStatus)
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
@@ -592,7 +620,7 @@ describe('editorial handoff panel', () => {
     expect(click).toHaveBeenCalledTimes(1)
     await waitFor(() => { expect(screen.getByText(/SHA-256: 8888/u)).toBeTruthy() }, { timeout: 2000 })
     expect(screen.getByText(/4,096 bytes/u)).toBeTruthy()
-    expect(fetchStatus).toHaveBeenCalledTimes(1)
+    expect(fetchStatus.mock.calls.filter(call => fetchUrl(call[0]).includes('download-status')).length).toBe(1)
   })
 
   it('discards a late download status after refresh clears the projection', async () => {
@@ -633,6 +661,7 @@ describe('editorial handoff panel', () => {
       },
     }
     const fetchImport = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (fetchUrl(input).includes('/rc1-status?')) return new Response('{}', { status: 404 })
       const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
       return new Response(JSON.stringify(method === 'POST'
         ? result : { status: 'not_started', result: null, errorCode: null }), {
@@ -650,7 +679,7 @@ describe('editorial handoff panel', () => {
     expect(screen.getByText(zh.handoffImportValid)).toBeTruthy()
     expect(screen.getByText(/Picture · Video · 1/u)).toBeTruthy()
     expect(screen.getByText(/handoff\.otio\.zip/u)).toBeTruthy()
-    expect(fetchImport).toHaveBeenCalledTimes(3)
+    expect(fetchImport.mock.calls.filter(call => !fetchUrl(call[0]).includes('/rc1-status?')).length).toBe(3)
   })
 
   it('preflights one returned master only after package recovery and shows the exact boundary', async () => {
@@ -824,7 +853,10 @@ describe('editorial handoff panel', () => {
     const port = { editorialHandoff } as unknown as QingmuYimengReadPort
     const lateStatus = deferred<Response>()
     let statusSignal: AbortSignal | undefined
-    vi.stubGlobal('fetch', vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      if (fetchUrl(input).includes('/rc1-status?')) {
+        return Promise.resolve(new Response('{}', { status: 404 }))
+      }
       statusSignal = init?.signal ?? undefined
       return lateStatus.promise
     }))
@@ -861,15 +893,19 @@ describe('editorial handoff panel', () => {
       preview: { tracks: [{ name: 'Picture', kind: 'Video', clipCount: 0 }, { name: 'Dialogue', kind: 'Audio', clipCount: 0 }],
         orderedShots: [], media: [], unresolved: [] },
     }
-    const fetchStatus = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      status: 'succeeded', result, errorCode: null,
-    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    const fetchStatus = vi.fn(async (input: string | URL | Request) => fetchUrl(input).includes('/rc1-status?')
+      ? new Response('{}', { status: 404 })
+      : new Response(JSON.stringify({ status: 'succeeded', result, errorCode: null }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      }))
     vi.stubGlobal('fetch', fetchStatus)
     render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
     await waitFor(() => { expect(screen.getByText(zh.handoffImportCurrentMatched)).toBeTruthy() })
     expect(screen.getByText(zh.handoffImportPreviewOnly)).toBeTruthy()
-    expect(fetchStatus).toHaveBeenCalledTimes(1)
-    expect((fetchStatus.mock.calls[0]?.[1] as RequestInit | undefined)?.method).toBe('GET')
+    const importCalls = fetchStatus.mock.calls.filter(call => fetchUrl(call[0]).includes('import-status'))
+    expect(importCalls).toHaveLength(1)
+    const importCall = importCalls[0] as unknown as [string | URL | Request, RequestInit?]
+    expect(importCall[1]?.method).toBe('GET')
   })
 
   it('discards a late import POST response after the project scope changes', async () => {
@@ -942,7 +978,7 @@ describe('editorial handoff panel', () => {
     const editorialHandoff = vi.fn().mockResolvedValue(handoff())
     const port = { editorialHandoff } as unknown as QingmuYimengReadPort
     const binding = {
-      projectId: SCOPE.projectId, episodeId: SCOPE.episodeId, authorityRevision: 4,
+      projectId: SCOPE.projectId, episodeId: SCOPE.episodeId,
       contentReviewToken: 'a'.repeat(64), finalOutputId: 'final-rc1', finalAssetId: 'asset-rc1',
       finalSha256: 'b'.repeat(64), finalBytes: 2048, materializedSha256: 'b'.repeat(64),
       verifyEvidenceSha256: 'c'.repeat(64), rc1PackageId: 'evidence-rc1',
@@ -969,6 +1005,10 @@ describe('editorial handoff panel', () => {
           contentReview: {
             schema: 'jason.episode-final-content-decision-status.v1', binding,
             currentDecision: decision, canDecide: decision === null,
+            identity: { schema: 'jason.qingmu-natural-person-identity-status.v1',
+              projectId: SCOPE.projectId, actorUserId: 'owner', state: 'bound',
+              naturalPersonId: 'local-person-test', canEnroll: false,
+              legalIdentityVerified: false, humanSignoffGranted: false },
             releaseSignoffGranted: false, publishReady: false,
           },
           releaseSignoff: { granted: false, readOnly: true, blockers: ['organization_release_signoff_missing'] },
@@ -981,6 +1021,8 @@ describe('editorial handoff panel', () => {
           schema: 'jason.episode-final-content-decision.v1', ...SCOPE,
           decision: body.decision, reason: body.reason, binding,
           idempotencyKey: body.idempotencyKey, commandReceiptId: 'receipt-decision',
+          changeSetId: 'changeset-decision', requestSha256: '9'.repeat(64),
+          playedCoverage: 1, checks: body.checks, secondConfirmed: false,
           releaseSignoffGranted: false, publishReady: false,
         }
         return new Response(JSON.stringify(decision), {
@@ -1006,7 +1048,7 @@ describe('editorial handoff panel', () => {
     expect(accept.disabled).toBe(true)
     expect(reject.disabled).toBe(true)
 
-    fireEvent.ended(player as HTMLVideoElement)
+    reportPlayback(player as HTMLVideoElement, [[0, 10]])
     await waitFor(() => { expect(reject.disabled).toBe(false) })
     fireEvent.change(screen.getByLabelText(zh.handoffContentNote), {
       target: { value: 'isolated rejection note' },
@@ -1031,7 +1073,7 @@ describe('editorial handoff panel', () => {
         episodeId: url.searchParams.get('episodeId') ?? '',
       }
       const binding = {
-        ...scope, authorityRevision: scope.projectId === SCOPE.projectId ? 4 : 5,
+        ...scope,
         contentReviewToken: (scope.projectId === SCOPE.projectId ? 'a' : 'f').repeat(64),
         finalOutputId: `final-${scope.episodeId}`, finalAssetId: `asset-${scope.episodeId}`,
         finalSha256: 'b'.repeat(64), finalBytes: 2048, materializedSha256: 'b'.repeat(64),
@@ -1048,7 +1090,12 @@ describe('editorial handoff panel', () => {
             previewSha256: '1'.repeat(64), idempotencyKey: 'rc1-preview-12345678',
             canConfirm: false, hardBlockers: [] } },
           contentReview: { schema: 'jason.episode-final-content-decision-status.v1', binding,
-            currentDecision: null, canDecide: true, releaseSignoffGranted: false, publishReady: false },
+            currentDecision: null, canDecide: true,
+            identity: { schema: 'jason.qingmu-natural-person-identity-status.v1',
+              projectId: scope.projectId, actorUserId: 'owner', state: 'bound',
+              naturalPersonId: 'local-person-test', canEnroll: false,
+              legalIdentityVerified: false, humanSignoffGranted: false },
+            releaseSignoffGranted: false, publishReady: false },
           releaseSignoff: { granted: false, readOnly: true, blockers: [] },
         }), { status: 200, headers: { 'content-type': 'application/json' } })
       }
@@ -1058,6 +1105,10 @@ describe('editorial handoff panel', () => {
         return new Response(JSON.stringify({ schema: 'jason.episode-final-content-decision.v1',
           ...scope, decision: 'rejected', reason: 'picture_or_timing', binding,
           idempotencyKey: body.idempotencyKey, commandReceiptId: `receipt-${scope.episodeId}`,
+          changeSetId: `changeset-${scope.episodeId}`, requestSha256: '9'.repeat(64),
+          playedCoverage: 1, checks: { picture_and_timing_reviewed: false,
+            dialogue_and_audio_reviewed: false, continuity_and_content_reviewed: false },
+          secondConfirmed: false,
           releaseSignoffGranted: false, publishReady: false,
         }), { status: 200, headers: { 'content-type': 'application/json' } })
       }
@@ -1068,13 +1119,92 @@ describe('editorial handoff panel', () => {
     for (const scope of [SCOPE, secondScope]) {
       fireEvent.click(await screen.findByRole('button', { name: zh.handoffRefresh }))
       await waitFor(() => { expect(document.querySelector('video')).toBeTruthy() })
-      fireEvent.ended(document.querySelector('video') as HTMLVideoElement)
+      reportPlayback(document.querySelector('video') as HTMLVideoElement, [[0, 10]])
       fireEvent.click(screen.getByRole('button', { name: zh.handoffContentReject }))
       await waitFor(() => { expect(keys).toHaveLength(scope === SCOPE ? 1 : 2) })
       if (scope === SCOPE) view.rerender(
         <EditorialHandoff {...secondScope} port={port} t={t} />,
       )
     }
+    expect(keys[0]).not.toBe(keys[1])
+  })
+
+  it('clears the whole decision draft when the same episode binding drifts', async () => {
+    const port = { editorialHandoff: vi.fn().mockResolvedValue(handoff()) } as unknown as QingmuYimengReadPort
+    let bindingVersion = 0
+    const keys: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(fetchUrl(input), 'http://localhost')
+      const binding = {
+        ...SCOPE, contentReviewToken: (bindingVersion === 0 ? 'a' : 'f').repeat(64),
+        finalOutputId: 'final-same-episode', finalAssetId: 'asset-same-episode',
+        finalSha256: 'b'.repeat(64), finalBytes: 2048, materializedSha256: 'b'.repeat(64),
+        verifyEvidenceSha256: 'c'.repeat(64), rc1PackageId: 'evidence-same-episode',
+        rc1ManifestSha256: (bindingVersion === 0 ? 'd' : 'e').repeat(64),
+      }
+      if (url.pathname.endsWith('/rc1-status')) {
+        return new Response(JSON.stringify({
+          schema: 'jason.qingmu-editorial-handoff-rc1-status.v1', ...SCOPE,
+          rc1Package: { packageLevel: 'RC1', currentPackage: { packageLevel: 'RC1' }, preview: null },
+          contentReview: { schema: 'jason.episode-final-content-decision-status.v1', binding,
+            currentDecision: null, canDecide: true,
+            identity: { schema: 'jason.qingmu-natural-person-identity-status.v1',
+              projectId: SCOPE.projectId, actorUserId: 'owner', state: 'bound',
+              naturalPersonId: 'local-person-test', canEnroll: false,
+              legalIdentityVerified: false, humanSignoffGranted: false },
+            releaseSignoffGranted: false, publishReady: false },
+          releaseSignoff: { granted: false, readOnly: true, blockers: [] },
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.pathname.endsWith('/final-content-decision') && init?.method === 'POST') {
+        if (typeof init.body !== 'string') throw new Error('missing JSON body')
+        const body = JSON.parse(init.body) as Record<string, unknown>
+        keys.push(String(body.idempotencyKey))
+        return new Response(JSON.stringify({ schema: 'jason.episode-final-content-decision.v1',
+          ...SCOPE, binding, decision: 'rejected', reason: 'picture_or_timing',
+          idempotencyKey: body.idempotencyKey, releaseSignoffGranted: false, publishReady: false,
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      return new Response('{}', { status: 404 })
+    }))
+
+    render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
+    const firstPlayer = await waitFor(() => {
+      const player = document.querySelector('video')
+      expect(player).toBeTruthy()
+      return player as HTMLVideoElement
+    })
+    reportPlayback(firstPlayer, [[0, 10]])
+    fireEvent.click(screen.getByLabelText(zh.handoffContentCheckPicture))
+    fireEvent.click(screen.getByLabelText(zh.handoffContentCheckAudio))
+    fireEvent.click(screen.getByLabelText(zh.handoffContentCheckContinuity))
+    fireEvent.click(screen.getByLabelText(zh.handoffContentSecondConfirm))
+    fireEvent.change(screen.getByLabelText(zh.handoffContentNote), { target: { value: 'must reset' } })
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffContentReject }))
+    await waitFor(() => { expect(keys).toHaveLength(1) })
+
+    bindingVersion = 1
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffRefresh }))
+    await waitFor(() => {
+      expect(screen.getByText((_, element) => element?.tagName === 'P'
+        && element.textContent.includes(`${zh.handoffContentPlayback}: 0%`))).toBeTruthy()
+    })
+    const resetNote = screen.getByLabelText(zh.handoffContentNote)
+    if (!(resetNote instanceof HTMLTextAreaElement)) throw new Error('content note is not a textarea')
+    expect(resetNote.value).toBe('')
+    for (const label of [zh.handoffContentCheckPicture, zh.handoffContentCheckAudio,
+      zh.handoffContentCheckContinuity, zh.handoffContentSecondConfirm]) {
+      const resetCheck = screen.getByLabelText(label)
+      if (!(resetCheck instanceof HTMLInputElement)) throw new Error('review check is not an input')
+      expect(resetCheck.checked).toBe(false)
+    }
+    reportPlayback(document.querySelector('video') as HTMLVideoElement, [[0, 10]])
+    fireEvent.click(screen.getByLabelText(zh.handoffContentCheckPicture))
+    fireEvent.click(screen.getByLabelText(zh.handoffContentCheckAudio))
+    fireEvent.click(screen.getByLabelText(zh.handoffContentCheckContinuity))
+    fireEvent.click(screen.getByLabelText(zh.handoffContentSecondConfirm))
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffContentReject }))
+    await waitFor(() => { expect(keys).toHaveLength(2) })
     expect(keys[0]).not.toBe(keys[1])
   })
 })

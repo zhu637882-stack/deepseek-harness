@@ -43,6 +43,7 @@ const RC1_STATUS_PATH = '/api/qingmu/editorial-handoff/rc1-status'
 const RC1_PREVIEW_PATH = '/api/qingmu/editorial-handoff/rc1-preview'
 const RC1_CONFIRM_PATH = '/api/qingmu/editorial-handoff/rc1'
 const FINAL_CONTENT_DECISION_PATH = '/api/qingmu/editorial-handoff/final-content-decision'
+const NATURAL_PERSON_IDENTITY_PATH = '/api/qingmu/editorial-handoff/natural-person-identity'
 const FINAL_MEDIA_PATH = '/api/qingmu/editorial-handoff/final-media'
 const RC1_EVIDENCE_PATH = '/api/qingmu/editorial-handoff/rc1-evidence.zip'
 const SHA256 = /^[0-9a-f]{64}$/
@@ -2096,7 +2097,7 @@ function normalizeEvidenceFreezePreview(
 }
 
 function normalizeEvidenceFreezeStatus(
-  value: unknown, projectId: string, episodeId: string,
+  value: unknown, projectId: string, episodeId: string, expectedLevel?: 'RC1',
 ): Record<string, unknown> | undefined {
   const item = safeSelectionPayload(value)
   const preview = normalizeEvidenceFreezePreview(item?.preview, projectId, episodeId)
@@ -2133,6 +2134,13 @@ function normalizeEvidenceFreezeStatus(
   const currentMatchesLatest = current === undefined ? latest === undefined : latest !== undefined
     && ['packageId', 'manifestSha256', 'commandReceiptId', 'releaseAuthorityRevision']
       .every(field => current[field] === latest[field])
+  const levelMatches = expectedLevel === undefined || (
+    item?.packageLevel === expectedLevel
+    && subject?.packageLevel === expectedLevel
+    && (current === undefined || current.packageLevel === expectedLevel)
+    && records.every(record => record?.packageLevel === expectedLevel)
+    && pending.every(record => safeSelectionPayload(record)?.packageLevel === expectedLevel)
+  )
   if (item === undefined || item.schema !== 'jason.qingmu-canonical-evidence-freeze-status.v1'
     || item.projectId !== projectId || item.episodeId !== episodeId
     || preview === undefined || authorityRevision === undefined
@@ -2140,7 +2148,7 @@ function normalizeEvidenceFreezeStatus(
     || !(item.currentPackage === null || current !== undefined)
     || !Array.isArray(item.records) || item.records.length > 1000
     || records.some(record => record === undefined) || !recordsOrdered
-    || !currentMatchesLatest || pending.length > 1000
+    || !currentMatchesLatest || !levelMatches || pending.length > 1000
     || pending.some((record) => {
       const value = safeSelectionPayload(record)
       return value === undefined || value.state !== 'pending_finalize'
@@ -2157,15 +2165,14 @@ function normalizeEvidenceFreezeStatus(
 function contentBinding(value: unknown, projectId: string, episodeId: string): Record<string, unknown> | undefined {
   const item = safeSelectionPayload(value)
   const fields = [
-    'projectId', 'episodeId', 'authorityRevision', 'contentReviewToken', 'finalOutputId',
+    'projectId', 'episodeId', 'contentReviewToken', 'finalOutputId',
     'finalAssetId', 'finalSha256', 'finalBytes', 'materializedSha256',
     'verifyEvidenceSha256', 'rc1PackageId', 'rc1ManifestSha256',
   ]
   if (item === undefined || Object.keys(item).length !== fields.length
     || fields.some(field => !Object.hasOwn(item, field))
     || item.projectId !== projectId || item.episodeId !== episodeId
-    || typeof item.authorityRevision !== 'number' || !Number.isSafeInteger(item.authorityRevision)
-    || item.authorityRevision <= 0 || typeof item.finalBytes !== 'number'
+    || typeof item.finalBytes !== 'number'
     || !Number.isSafeInteger(item.finalBytes) || item.finalBytes <= 0
     || ['contentReviewToken', 'finalSha256', 'materializedSha256', 'verifyEvidenceSha256',
       'rc1ManifestSha256'].some(field => typeof item[field] !== 'string' || !SHA256.test(item[field]))
@@ -2175,15 +2182,78 @@ function contentBinding(value: unknown, projectId: string, episodeId: string): R
 }
 
 function normalizeRc1Status(
-  value: unknown, projectId: string, episodeId: string,
+  value: unknown, projectId: string, episodeId: string, userId: string,
 ): Record<string, unknown> | undefined {
   const item = safeSelectionPayload(value)
   const pkg = safeSelectionPayload(item?.rc1Package)
-  const normalizedPackage = normalizeEvidenceFreezeStatus(item?.rc1Package, projectId, episodeId)
+  const normalizedPackage = normalizeEvidenceFreezeStatus(
+    item?.rc1Package, projectId, episodeId, 'RC1',
+  )
   const review = safeSelectionPayload(item?.contentReview)
   const signoff = safeSelectionPayload(item?.releaseSignoff)
   const binding = review?.binding === undefined ? undefined
     : contentBinding(review.binding, projectId, episodeId)
+  const currentDecision = review?.currentDecision === null ? null
+    : safeSelectionPayload(review?.currentDecision)
+  const decisionBinding = currentDecision === null ? undefined
+    : contentBinding(currentDecision?.binding, projectId, episodeId)
+  const checks = currentDecision === null ? undefined : safeSelectionPayload(currentDecision?.checks)
+  const playbackAttestation = currentDecision === null ? undefined
+    : safeSelectionPayload(currentDecision?.playbackAttestation)
+  const identity = safeSelectionPayload(review?.identity)
+  const identityValid = identity !== undefined
+    && identity.schema === 'jason.qingmu-natural-person-identity-status.v1'
+    && identity.projectId === projectId
+    && identity.actorUserId === userId
+    && ['unbound', 'bound', 'invalid'].includes(String(identity.state))
+    && typeof identity.canEnroll === 'boolean'
+    && identity.legalIdentityVerified === false
+    && identity.humanSignoffGranted === false
+    && (identity.state !== 'bound' || safeIdentifier(
+      typeof identity.naturalPersonId === 'string' ? identity.naturalPersonId : null,
+    ))
+  const currentDecisionValid = currentDecision === null || (
+    currentDecision?.schema === 'jason.episode-final-content-decision.v1'
+    && currentDecision.projectId === projectId && currentDecision.episodeId === episodeId
+    && ['accepted', 'rejected'].includes(String(currentDecision.decision))
+    && decisionBinding !== undefined && binding !== undefined
+    && canonicalJson(decisionBinding) === canonicalJson(binding)
+    && currentDecision.playedCoverage === 1
+    && checks !== undefined
+    && Object.keys(checks).length === 3
+    && ['picture_and_timing_reviewed', 'dialogue_and_audio_reviewed',
+      'continuity_and_content_reviewed'].every(field => typeof checks[field] === 'boolean')
+    && playbackAttestation?.schema === 'jason.owner-declared-playback-coverage.v1'
+    && playbackAttestation.coverage === 1
+    && playbackAttestation.continuousFromStart === true
+    && playbackAttestation.declaredByOwner === true
+    && playbackAttestation.unforgeableTelemetry === false
+    && typeof currentDecision.secondConfirmed === 'boolean'
+    && currentDecision.actorUserId === userId
+    && safeIdentifier(typeof currentDecision.actorUserId === 'string'
+      ? currentDecision.actorUserId : null)
+    && safeIdentifier(typeof currentDecision.actorNaturalPersonId === 'string'
+      ? currentDecision.actorNaturalPersonId : null)
+    && safeIdentifier(typeof currentDecision.eventId === 'string'
+      ? currentDecision.eventId : null)
+    && typeof currentDecision.decidedAt === 'string' && currentDecision.decidedAt.length > 0
+    && (currentDecision.note === null || typeof currentDecision.note === 'string')
+    && ((currentDecision.decision === 'accepted' && currentDecision.reason === null)
+      || (currentDecision.decision === 'rejected'
+        && ['picture_or_timing', 'dialogue_or_audio', 'continuity_or_content', 'other']
+          .includes(String(currentDecision.reason))))
+    && (currentDecision.decision !== 'accepted'
+      || (currentDecision.secondConfirmed
+        && Object.values(checks).every(value => value)))
+    && typeof currentDecision.requestSha256 === 'string' && SHA256.test(currentDecision.requestSha256)
+    && safeIdentifier(typeof currentDecision.commandReceiptId === 'string'
+      ? currentDecision.commandReceiptId : null)
+    && safeIdentifier(typeof currentDecision.changeSetId === 'string'
+      ? currentDecision.changeSetId : null)
+    && safeIdentifier(typeof currentDecision.idempotencyKey === 'string'
+      ? currentDecision.idempotencyKey : null)
+    && currentDecision.releaseSignoffGranted === false && currentDecision.publishReady === false
+  )
   if (item === undefined || item.schema !== 'jason.qingmu-editorial-handoff-rc1-status.v1'
     || item.projectId !== projectId || item.episodeId !== episodeId
     || pkg === undefined || normalizedPackage === undefined
@@ -2191,7 +2261,8 @@ function normalizeRc1Status(
     || pkg.packageLevel !== 'RC1' || pkg.projectId !== projectId || pkg.episodeId !== episodeId
     || review === undefined || review.schema !== 'jason.episode-final-content-decision-status.v1'
     || review.projectId !== projectId || review.episodeId !== episodeId
-    || !(review.binding === undefined || binding !== undefined)
+    || !(review.binding === undefined || binding !== undefined) || !currentDecisionValid
+    || !identityValid
     || typeof review.canDecide !== 'boolean' || review.releaseSignoffGranted !== false
     || review.publishReady !== false || signoff === undefined || signoff.granted !== false
     || signoff.readOnly !== true || !safeQcStringList(signoff.blockers)) return undefined
@@ -2258,12 +2329,32 @@ const BINDING_PARAMS = [
 
 const IMPORT_PARAMS = ['projectId', 'episodeId', 'requestId', 'capability'] as const
 const SCOPE_PARAMS = ['projectId', 'episodeId'] as const
+const FINAL_MEDIA_PARAMS = ['projectId', 'episodeId', 'sha256'] as const
+const RC1_EVIDENCE_PARAMS = ['projectId', 'episodeId', 'packageId', 'manifestSha256'] as const
 
 function scopeAccess(params: URLSearchParams): { readonly projectId: string; readonly episodeId: string } | undefined {
   if (!exactParams(params, SCOPE_PARAMS)) return undefined
   const projectId = params.get('projectId')
   const episodeId = params.get('episodeId')
   return safeIdentifier(projectId) && safeIdentifier(episodeId) ? { projectId, episodeId } : undefined
+}
+
+function artifactScope(
+  params: URLSearchParams, suffix: 'final-media' | 'rc1-evidence.zip',
+): { readonly projectId: string; readonly episodeId: string } | undefined {
+  const expected = suffix === 'final-media' ? FINAL_MEDIA_PARAMS : RC1_EVIDENCE_PARAMS
+  if (!exactParams(params, expected)) return undefined
+  const projectId = params.get('projectId')
+  const episodeId = params.get('episodeId')
+  if (!safeIdentifier(projectId) || !safeIdentifier(episodeId)) return undefined
+  if (suffix === 'final-media') {
+    const sha256 = params.get('sha256')
+    return sha256 !== null && SHA256.test(sha256) ? { projectId, episodeId } : undefined
+  }
+  const packageId = params.get('packageId')
+  const manifestSha256 = params.get('manifestSha256')
+  return safeIdentifier(packageId) && manifestSha256 !== null && SHA256.test(manifestSha256)
+    ? { projectId, episodeId } : undefined
 }
 
 function importAccess(params: URLSearchParams): {
@@ -2465,6 +2556,45 @@ async function writerSelectionRequest(
     if (bytes.length > 256 * 1024) return undefined
     return { response, raw: JSON.parse(bytes.toString('utf8')) as unknown }
   } catch { return undefined }
+}
+
+async function writerProjectRequest(
+  dependencies: EditorialHandoffDownloadDependencies,
+  token: string,
+  projectId: string,
+  suffix: string,
+  init: RequestInit,
+): Promise<{ readonly response: Response; readonly raw: unknown } | undefined> {
+  const upstream = new URL(
+    `/api/qingmu/projects/${encodeURIComponent(projectId)}/${suffix}`,
+    dependencies.baseUrl,
+  )
+  try {
+    const headers = new Headers(init.headers)
+    headers.set('authorization', `Bearer ${token}`)
+    headers.set('accept', 'application/json')
+    const response = await dependencies.fetch(upstream, { ...init, redirect: 'error', headers })
+    const bytes = Buffer.from(await response.arrayBuffer())
+    if (bytes.length > 64 * 1024) return undefined
+    return { response, raw: JSON.parse(bytes.toString('utf8')) as unknown }
+  } catch { return undefined }
+}
+
+function normalizeNaturalPersonIdentity(
+  value: unknown, projectId: string, userId: string,
+): Record<string, unknown> | undefined {
+  const item = safeSelectionPayload(value)
+  if (item === undefined
+    || !['jason.qingmu-natural-person-identity-status.v1',
+      'jason.qingmu-natural-person-identity.v1'].includes(String(item.schema))
+    || item.projectId !== projectId
+    || item.actorUserId !== userId
+    || !['unbound', 'bound', 'invalid'].includes(String(item.state))
+    || item.legalIdentityVerified !== false || item.humanSignoffGranted !== false
+    || (item.state === 'bound' && !safeIdentifier(
+      typeof item.naturalPersonId === 'string' ? item.naturalPersonId : null,
+    ))) return undefined
+  return item
 }
 
 function candidateMatchesBinding(result: EditorialMasterCandidateResult, binding: CandidateBinding): boolean {
@@ -3255,6 +3385,46 @@ export function registerEditorialHandoffDownload(
       }
     },
   })
+  const disposeNaturalPersonIdentity = webServer.register({
+    kind: 'exact', path: NATURAL_PERSON_IDENTITY_PATH, handler: async (req, res) => {
+      if (!['GET', 'POST'].includes(req.method ?? '') || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'natural_person_identity_forbidden' }); return
+      }
+      const scope = scopeAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = scope === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (scope === undefined || token === undefined || userId === undefined) {
+        json(res, scope === undefined ? 400 : 403, { code: 'natural_person_identity_forbidden' }); return
+      }
+      let init: RequestInit = { method: req.method as 'GET' | 'POST' }
+      if (req.method === 'POST') {
+        try {
+          const item = safeSelectionPayload(await readBoundedJsonBody(req, 4096))
+          if (item === undefined || Object.keys(item).length !== 2 || item.confirmed !== true
+            || typeof item.idempotencyKey !== 'string' || !IDENTIFIER.test(item.idempotencyKey)) {
+            throw new Error('natural_person_identity_request_invalid')
+          }
+          init = { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(item) }
+        } catch {
+          json(res, 400, { code: 'natural_person_identity_request_invalid' }); return
+        }
+      }
+      const outcome = await writerProjectRequest(
+        dependencies, token, scope.projectId, 'natural-person-identity', init,
+      )
+      const identity = outcome?.response.ok === true
+        ? normalizeNaturalPersonIdentity(outcome.raw, scope.projectId, userId) : undefined
+      if (identity === undefined) {
+        json(res, outcome?.response.status === 401 ? 401 : 409, {
+          code: outcome?.response.status === 403
+            ? 'natural_person_identity_relogin_or_binding_required'
+            : 'natural_person_identity_unknown_or_failed',
+        }); return
+      }
+      json(res, 200, identity)
+    },
+  })
   const disposeRc1Status = webServer.register({
     kind: 'exact', path: RC1_STATUS_PATH, handler: async (req, res) => {
       if (req.method !== 'GET' || !isTrustedApiRequest(req, [])) {
@@ -3271,7 +3441,7 @@ export function registerEditorialHandoffDownload(
         dependencies, token, scope.projectId, scope.episodeId, 'rc1-status', { method: 'GET' },
       )
       const status = outcome?.response.ok === true
-        ? normalizeRc1Status(outcome.raw, scope.projectId, scope.episodeId) : undefined
+        ? normalizeRc1Status(outcome.raw, scope.projectId, scope.episodeId, userId) : undefined
       if (status === undefined) {
         json(res, 502, { code: 'rc1_content_review_status_failed' }); return
       }
@@ -3422,13 +3592,14 @@ export function registerEditorialHandoffDownload(
     },
   })
   const proxyBoundArtifact = async (
-    req: IncomingMessage, res: ServerResponse, suffix: string, contentType: string,
+    req: IncomingMessage, res: ServerResponse,
+    suffix: 'final-media' | 'rc1-evidence.zip', contentType: string,
   ): Promise<void> => {
     if (req.method !== 'GET' || !isTrustedApiRequest(req, [])) {
       json(res, 403, { code: 'rc1_artifact_forbidden' }); return
     }
     const params = query(req)
-    const scope = scopeAccess(params)
+    const scope = artifactScope(params, suffix)
     const token = validToken(dependencies.readToken())
     const userId = scope === undefined || token === undefined ? undefined
       : await authenticatedUserId(dependencies, token)
@@ -3626,6 +3797,7 @@ export function registerEditorialHandoffDownload(
     },
   })
   return () => {
+    disposeNaturalPersonIdentity()
     disposeRc1Evidence()
     disposeFinalMedia()
     disposeFinalContentDecision()

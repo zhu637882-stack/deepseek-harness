@@ -249,7 +249,6 @@ interface EvidenceFreezeStatus {
 interface FinalContentBinding {
   readonly projectId: string
   readonly episodeId: string
-  readonly authorityRevision: number
   readonly contentReviewToken: string
   readonly finalOutputId: string
   readonly finalAssetId: string
@@ -276,11 +275,42 @@ interface FinalContentDecisionResult {
 
 function finalContentBindingIdentity(binding: FinalContentBinding): string {
   return JSON.stringify([
-    binding.projectId, binding.episodeId, binding.authorityRevision,
+    binding.projectId, binding.episodeId,
     binding.contentReviewToken, binding.finalOutputId, binding.finalAssetId,
     binding.finalSha256, binding.finalBytes, binding.materializedSha256,
     binding.verifyEvidenceSha256, binding.rc1PackageId, binding.rc1ManifestSha256,
   ])
+}
+
+interface NaturalPersonIdentityStatus {
+  readonly schema: 'jason.qingmu-natural-person-identity-status.v1'
+  readonly projectId: string
+  readonly state: 'unbound' | 'bound' | 'invalid'
+  readonly naturalPersonId: string | null
+  readonly canEnroll: boolean
+  readonly legalIdentityVerified: false
+  readonly humanSignoffGranted: false
+}
+
+export function continuousPlayedCoverage(
+  played: Pick<TimeRanges, 'length' | 'start' | 'end'>,
+  duration: number,
+  toleranceSec = 0.25,
+): number {
+  if (!Number.isFinite(duration) || duration <= 0 || played.length === 0) return 0
+  let continuousEnd = 0
+  let missingDuration = 0
+  for (let index = 0; index < played.length; index += 1) {
+    const start = played.start(index)
+    const end = played.end(index)
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue
+    if (start > continuousEnd) missingDuration += start - continuousEnd
+    if (missingDuration > toleranceSec) break
+    continuousEnd = Math.max(continuousEnd, end)
+  }
+  missingDuration += Math.max(0, duration - continuousEnd)
+  if (missingDuration <= toleranceSec) return 1
+  return Math.max(0, Math.min(1, continuousEnd / duration))
 }
 
 interface Rc1Status {
@@ -294,6 +324,7 @@ interface Rc1Status {
     readonly currentDecision: FinalContentDecisionResult | null
     readonly canDecide: boolean
     readonly blockers?: readonly string[]
+    readonly identity: NaturalPersonIdentityStatus
     readonly releaseSignoffGranted: false
     readonly publishReady: false
   }
@@ -413,6 +444,8 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   const [contentSecondConfirmed, setContentSecondConfirmed] = useState(false)
   const [contentRejectReason, setContentRejectReason] = useState('picture_or_timing')
   const [contentNote, setContentNote] = useState('')
+  const [identitySaving, setIdentitySaving] = useState(false)
+  const [identityError, setIdentityError] = useState<string>()
   const generation = useRef(0)
   const downloadGeneration = useRef(0)
   const importGeneration = useRef(0)
@@ -432,7 +465,21 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   const rc1Controller = useRef<AbortController>()
   const contentDecisionKey = useRef('')
   const contentDecisionBinding = useRef('')
+  const identityEnrollmentKey = useRef('')
   const importErrorRef = useRef<HTMLDivElement>(null)
+
+  const resetContentReviewDraft = useCallback(() => {
+    contentDecisionKey.current = ''
+    setPlayedCoverage(0)
+    setContentChecks({
+      picture_and_timing_reviewed: false,
+      dialogue_and_audio_reviewed: false,
+      continuity_and_content_reviewed: false,
+    })
+    setContentSecondConfirmed(false)
+    setContentRejectReason('picture_or_timing')
+    setContentNote('')
+  }, [])
 
   const loadCandidates = useCallback(async () => {
     if (projectId === '' || episodeId === '') return
@@ -592,7 +639,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
           ? `${projectId}:${episodeId}:no-current-binding`
           : finalContentBindingIdentity(status.contentReview.binding)
         if (contentDecisionBinding.current !== bindingIdentity) {
-          contentDecisionKey.current = ''
+          resetContentReviewDraft()
           contentDecisionBinding.current = bindingIdentity
         }
         setRc1Status(status)
@@ -609,7 +656,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     } finally {
       if (current === rc1Generation.current) rc1Controller.current = undefined
     }
-  }, [episodeId, projectId])
+  }, [episodeId, projectId, resetContentReviewDraft])
 
   const refreshReturnedMasterState = useCallback(async () => {
     const scopeGeneration = generation.current
@@ -670,13 +717,12 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     setEvidenceFreezeState('idle')
     setEvidenceFreezeError(undefined)
     setRc1Status(undefined)
-    contentDecisionKey.current = ''
+    resetContentReviewDraft()
     contentDecisionBinding.current = ''
     setRc1Preview(undefined)
     setRc1State('idle')
     setRc1Error(undefined)
-    setPlayedCoverage(0)
-    setContentSecondConfirmed(false)
+    setIdentityError(undefined)
     try {
       const value = await port.editorialHandoff({ projectId, episodeId }, controller.signal)
       if (current === generation.current) {
@@ -707,11 +753,13 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       }
     }
     return current === generation.current && !controller.signal.aborted
-  }, [episodeId, port, projectId, t])
+  }, [episodeId, port, projectId, resetContentReviewDraft, t])
 
   useEffect(() => {
     setProjection(undefined)
-    void load()
+    void (async () => {
+      if (await load()) await loadRc1Status()
+    })()
     return () => {
       generation.current += 1
       downloadGeneration.current += 1
@@ -739,7 +787,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       evidenceFreezeController.current = undefined
       rc1Controller.current = undefined
     }
-  }, [load])
+  }, [load, loadRc1Status])
 
   useEffect(() => {
     if (importAccess === undefined) return
@@ -1385,6 +1433,35 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     }
   }, [episodeId, loadRc1Status, projectId, rc1Preview, rc1State])
 
+  const enrollNaturalPersonIdentity = useCallback(async () => {
+    if (identitySaving || rc1Status?.contentReview.identity?.canEnroll !== true) return
+    if (identityEnrollmentKey.current === '') {
+      identityEnrollmentKey.current = `natural-person-${globalThis.crypto.randomUUID()}`
+    }
+    setIdentitySaving(true)
+    setIdentityError(undefined)
+    try {
+      const params = new URLSearchParams({ projectId, episodeId })
+      const response = await fetch(
+        `/api/qingmu/editorial-handoff/natural-person-identity?${params.toString()}`,
+        {
+          method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ confirmed: true, idempotencyKey: identityEnrollmentKey.current }),
+        },
+      )
+      if (!response.ok) throw new Error(response.status === 401
+        ? 'natural_person_identity_relogin_required' : 'natural_person_identity_unknown_or_failed')
+      identityEnrollmentKey.current = ''
+      await loadRc1Status()
+    } catch (cause) {
+      setIdentityError(cause instanceof Error
+        ? cause.message : 'natural_person_identity_unknown_or_failed')
+      await loadRc1Status()
+    } finally {
+      setIdentitySaving(false)
+    }
+  }, [episodeId, identitySaving, loadRc1Status, projectId, rc1Status])
+
   const decideFinalContent = useCallback(async (decision: 'accepted' | 'rejected') => {
     const binding = rc1Status?.contentReview.binding
     if (binding === undefined || rc1Status?.contentReview.currentDecision !== null
@@ -1887,17 +1964,29 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
           {rc1Status?.contentReview.binding === undefined
             ? <p className={css.warning}>{t('handoffContentReviewNeedsRc1')}</p>
             : <>
+              {rc1Status.contentReview.identity.state === 'bound'
+                ? <p className={css.success}>{t('handoffIdentityBound')}</p>
+                : <div className={css.warning} role="status">
+                  <p>{rc1Status.contentReview.identity.state === 'unbound'
+                    ? t('handoffIdentityUnbound') : t('handoffIdentityInvalid')}</p>
+                  {rc1Status.contentReview.identity.canEnroll && <button type="button"
+                    disabled={identitySaving}
+                    onClick={() => { void enrollNaturalPersonIdentity() }}>
+                    {identitySaving ? t('handoffIdentitySaving') : t('handoffIdentityEnroll')}
+                  </button>}
+                </div>}
+              {identityError !== undefined && <p role="alert" className={css.error}>
+                {identityError === 'natural_person_identity_relogin_required'
+                  ? t('handoffIdentityRelogin') : t('handoffIdentityUnknown')}
+              </p>}
               <video className={css.finalPlayer} controls preload="none"
                 src={`/api/qingmu/editorial-handoff/final-media?${new URLSearchParams({
                   projectId, episodeId, sha256: rc1Status.contentReview.binding.finalSha256,
                 }).toString()}`}
                 onTimeUpdate={(event) => {
                   const media = event.currentTarget
-                  if (Number.isFinite(media.duration) && media.duration > 0) {
-                    setPlayedCoverage(previous => Math.max(previous, Math.min(1, media.currentTime / media.duration)))
-                  }
-                }}
-                onEnded={() => { setPlayedCoverage(1) }} />
+                  setPlayedCoverage(continuousPlayedCoverage(media.played, media.duration))
+                }} />
               <p className={playedCoverage === 1 ? css.success : css.warning}>
                 {t('handoffContentPlayback')}: {(playedCoverage * 100).toFixed(0)}%
               </p>
@@ -1909,7 +1998,10 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
                   ['continuity_and_content_reviewed', 'handoffContentCheckContinuity'],
                 ] as const).map(([key, label]) => <label key={key}>
                   <input type="checkbox" checked={contentChecks[key] === true}
-                    onChange={(event) => { setContentChecks(current => ({ ...current, [key]: event.currentTarget.checked })) }} />
+                    onChange={(event) => {
+                      const checked = event.currentTarget.checked
+                      setContentChecks(current => ({ ...current, [key]: checked }))
+                    }} />
                   <span>{t(label)}</span>
                 </label>)}
               </fieldset>
@@ -1934,10 +2026,13 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
               <div className={css.decisionActions}>
                 <button type="button" disabled={playedCoverage !== 1 || !contentSecondConfirmed
                   || Object.values(contentChecks).some(value => !value)
+                  || rc1Status.contentReview.identity.state !== 'bound'
                   || rc1Status.contentReview.currentDecision !== null || rc1State === 'deciding'}
                 onClick={() => { void decideFinalContent('accepted') }}>{t('handoffContentAccept')}</button>
                 <button type="button" className={css.rejectButton}
-                  disabled={playedCoverage !== 1 || rc1Status.contentReview.currentDecision !== null
+                  disabled={playedCoverage !== 1
+                    || rc1Status.contentReview.identity.state !== 'bound'
+                    || rc1Status.contentReview.currentDecision !== null
                     || rc1State === 'deciding'}
                   onClick={() => { void decideFinalContent('rejected') }}>{t('handoffContentReject')}</button>
               </div>
