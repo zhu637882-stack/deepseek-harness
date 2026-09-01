@@ -756,6 +756,9 @@ describe('editorial handoff Host download bridge', () => {
       outcome: 'passed', qualityStatus: 'passed',
     }
     const subject = {
+      projectId: 'project-e8', episodeId: 'episode-e8',
+      releaseAuthority: { revision: 2 },
+      machineReadinessSha256: '0'.repeat(64),
       buildIdentity: {
         commit: 'c'.repeat(40), sourceClean: true, appEnv: 'production',
         runtimeMode: 'real', isRealRun: true, isDryRun: false,
@@ -787,6 +790,7 @@ describe('editorial handoff Host download bridge', () => {
       packageId: 'evidence_12345678', manifestSha256: 'a'.repeat(64),
       zipSha256: 'b'.repeat(64), zipBytes: 4096, verified: true, packageVerified: true,
       requestSha256, subjectSha256: readyPreview.subjectSha256, technicalQc,
+      machineReadinessSha256: '0'.repeat(64),
       buildIdentity: subject.buildIdentity, releaseAuthorityRevisionBefore: 2,
       releaseAuthorityRevision: 3, releaseSignoffGranted: false, releaseReady: false,
       releaseBlockers: ['human_signoff_missing', 'release_check_required'],
@@ -796,14 +800,18 @@ describe('editorial handoff Host download bridge', () => {
     let previewPayload: unknown = blockedPreview
     let confirmPosts = 0
     let recoveryGets = 0
+    let confirmStatus = 200
+    let statusCurrent: unknown = null
+    let statusRecords: unknown[] = []
     const fetchUpstream = vi.fn(async (input: string | URL | Request) => {
       const target = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
       const url = new URL(target)
       if (url.pathname.endsWith('/canonical-evidence-freeze-status')) {
         return new Response(JSON.stringify({
           schema: 'jason.qingmu-canonical-evidence-freeze-status.v1',
-          projectId: 'project-e8', episodeId: 'episode-e8', currentPackage: null,
-          records: [], preview: previewPayload, releaseSignoffGranted: false,
+          projectId: 'project-e8', episodeId: 'episode-e8', currentPackage: statusCurrent,
+          records: statusRecords, pendingPackages: [], preview: previewPayload,
+          releaseSignoffGranted: false,
           releaseReady: false, ...flags,
         }), { status: 200, headers: { 'content-type': 'application/json' } })
       }
@@ -814,6 +822,11 @@ describe('editorial handoff Host download bridge', () => {
       }
       if (url.pathname.endsWith('/canonical-evidence-freeze')) {
         confirmPosts += 1
+        if (confirmStatus !== 200) {
+          return new Response(JSON.stringify({ detail: { code: 'deterministic_conflict' } }), {
+            status: confirmStatus, headers: { 'content-type': 'application/json' },
+          })
+        }
         const response = new Response(JSON.stringify(result), {
           status: 200, headers: { 'content-type': 'application/json' },
         })
@@ -859,6 +872,40 @@ describe('editorial handoff Host download bridge', () => {
     expect(confirmPosts).toBe(1)
     expect(recoveryGets).toBe(1)
 
+    confirmStatus = 409
+    const deterministicConflict = await fetch(
+      `${base}/api/qingmu/editorial-handoff/canonical-evidence-freeze?${scope.toString()}`,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+        previewSha256, buildCommit: subject.buildIdentity.commit,
+        idempotencyKey: 'e8-evidence-freeze-conflict',
+      }) },
+    )
+    expect(deterministicConflict.status).toBe(409)
+    expect(recoveryGets).toBe(1)
+
+    statusCurrent = result
+    statusRecords = []
+    const orphanCurrent = await fetch(
+      `${base}/api/qingmu/editorial-handoff/canonical-evidence-freeze-status?${scope.toString()}`,
+    )
+    expect(orphanCurrent.status).toBe(502)
+
+    previewPayload = {
+      ...readyPreview,
+      subject: { ...subject, releaseAuthority: { revision: 3 } },
+    }
+    statusRecords = [result]
+    const committedCurrent = await fetch(
+      `${base}/api/qingmu/editorial-handoff/canonical-evidence-freeze-status?${scope.toString()}`,
+    )
+    expect(committedCurrent.status).toBe(200)
+
+    statusCurrent = { ...result, projectId: 'different-project' }
+    const crossScopeCurrent = await fetch(
+      `${base}/api/qingmu/editorial-handoff/canonical-evidence-freeze-status?${scope.toString()}`,
+    )
+    expect(crossScopeCurrent.status).toBe(502)
+
     const malformed = await fetch(
       `${base}/api/qingmu/editorial-handoff/canonical-evidence-freeze?${scope.toString()}`,
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
@@ -867,7 +914,7 @@ describe('editorial handoff Host download bridge', () => {
       }) },
     )
     expect(malformed.status).toBe(400)
-    expect(confirmPosts).toBe(1)
+    expect(confirmPosts).toBe(2)
   })
 
   it('writes every upload byte when the spool writer reports partial progress', async () => {

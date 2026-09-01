@@ -2006,15 +2006,20 @@ function validEvidenceFreezeFlags(item: Record<string, unknown>): boolean {
     && item.published === false && item.humanSignoffInferred === false
 }
 
-function normalizeEvidenceFreezeResult(value: unknown): Record<string, unknown> | undefined {
+function normalizeEvidenceFreezeResult(
+  value: unknown, projectId?: string, episodeId?: string,
+): Record<string, unknown> | undefined {
   const item = safeSelectionPayload(value)
   const qc = safeSelectionPayload(item?.technicalQc)
   const build = safeSelectionPayload(item?.buildIdentity)
   if (item === undefined || item.schema !== 'jason.qingmu-canonical-evidence-freeze-result.v1'
     || !safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
     || !safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
+    || (projectId !== undefined && item.projectId !== projectId)
+    || (episodeId !== undefined && item.episodeId !== episodeId)
     || !safeIdentifier(typeof item.packageId === 'string' ? item.packageId : null)
-    || ['manifestSha256', 'zipSha256', 'requestSha256', 'subjectSha256']
+    || ['manifestSha256', 'zipSha256', 'requestSha256', 'subjectSha256',
+      'machineReadinessSha256']
       .some(field => typeof item[field] !== 'string' || !SHA256.test(item[field]))
     || typeof item.zipBytes !== 'number' || !Number.isSafeInteger(item.zipBytes) || item.zipBytes <= 0
     || item.verified !== true || item.packageVerified !== true
@@ -2038,7 +2043,9 @@ function normalizeEvidenceFreezeResult(value: unknown): Record<string, unknown> 
   return item
 }
 
-function normalizeEvidenceFreezePreview(value: unknown): Record<string, unknown> | undefined {
+function normalizeEvidenceFreezePreview(
+  value: unknown, projectId?: string, episodeId?: string,
+): Record<string, unknown> | undefined {
   const item = safeSelectionPayload(value)
   const subject = safeSelectionPayload(item?.subject)
   const build = safeSelectionPayload(subject?.buildIdentity)
@@ -2052,6 +2059,9 @@ function normalizeEvidenceFreezePreview(value: unknown): Record<string, unknown>
   if (item === undefined || item.schema !== 'jason.qingmu-canonical-evidence-freeze-preview.v1'
     || !safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
     || !safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
+    || (projectId !== undefined && item.projectId !== projectId)
+    || (episodeId !== undefined && item.episodeId !== episodeId)
+    || subject?.projectId !== item.projectId || subject?.episodeId !== item.episodeId
     || subject === undefined || build === undefined
     || !(hasBuildIdentity || unavailableBuildIsBlocked)
     || typeof build.sourceClean !== 'boolean'
@@ -2067,18 +2077,60 @@ function normalizeEvidenceFreezePreview(value: unknown): Record<string, unknown>
   return item
 }
 
-function normalizeEvidenceFreezeStatus(value: unknown): Record<string, unknown> | undefined {
+function normalizeEvidenceFreezeStatus(
+  value: unknown, projectId: string, episodeId: string,
+): Record<string, unknown> | undefined {
   const item = safeSelectionPayload(value)
-  const preview = normalizeEvidenceFreezePreview(item?.preview)
+  const preview = normalizeEvidenceFreezePreview(item?.preview, projectId, episodeId)
+  const subject = safeSelectionPayload(preview?.subject)
+  const authority = safeSelectionPayload(subject?.releaseAuthority)
   const current = item?.currentPackage === null ? undefined
-    : normalizeEvidenceFreezeResult(item?.currentPackage)
-  const records = Array.isArray(item?.records) ? item.records.map(normalizeEvidenceFreezeResult) : []
+    : normalizeEvidenceFreezeResult(item?.currentPackage, projectId, episodeId)
+  const records = Array.isArray(item?.records)
+    ? item.records.map(record => normalizeEvidenceFreezeResult(record, projectId, episodeId)) : []
+  const pending = Array.isArray(item?.pendingPackages) ? item.pendingPackages : []
+  const authorityRevision = typeof authority?.revision === 'number'
+    && Number.isSafeInteger(authority.revision) && authority.revision >= 0
+    ? authority.revision : undefined
+  const machineReadinessSha256 = typeof subject?.machineReadinessSha256 === 'string'
+    && SHA256.test(subject.machineReadinessSha256) ? subject.machineReadinessSha256 : undefined
+  const currentRecords = authorityRevision === undefined || machineReadinessSha256 === undefined
+    ? [] : records.filter(
+      record => record !== undefined && record.releaseAuthorityRevision === authorityRevision
+        && record.machineReadinessSha256 === machineReadinessSha256,
+    )
+  const recordSortKey = (record: Record<string, unknown> | undefined): string | undefined => {
+    if (record === undefined || typeof record.committedAt !== 'string'
+      || typeof record.commandReceiptId !== 'string') return undefined
+    return `${record.committedAt}\u0000${record.commandReceiptId}`
+  }
+  const recordsOrdered = records.every((record, index) => {
+    const currentKey = recordSortKey(record)
+    if (currentKey === undefined) return false
+    if (index === 0) return true
+    const previousKey = recordSortKey(records[index - 1])
+    return previousKey !== undefined && previousKey <= currentKey
+  })
+  const latest = currentRecords.length > 0 ? currentRecords[currentRecords.length - 1] : undefined
+  const currentMatchesLatest = current === undefined ? latest === undefined : latest !== undefined
+    && ['packageId', 'manifestSha256', 'commandReceiptId', 'releaseAuthorityRevision']
+      .every(field => current[field] === latest[field])
   if (item === undefined || item.schema !== 'jason.qingmu-canonical-evidence-freeze-status.v1'
-    || !safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
-    || !safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
-    || preview === undefined || !(item.currentPackage === null || current !== undefined)
+    || item.projectId !== projectId || item.episodeId !== episodeId
+    || preview === undefined || authorityRevision === undefined
+    || machineReadinessSha256 === undefined
+    || !(item.currentPackage === null || current !== undefined)
     || !Array.isArray(item.records) || item.records.length > 1000
-    || records.some(record => record === undefined)
+    || records.some(record => record === undefined) || !recordsOrdered
+    || !currentMatchesLatest || pending.length > 1000
+    || pending.some((record) => {
+      const value = safeSelectionPayload(record)
+      return value === undefined || value.state !== 'pending_finalize'
+        || !safeIdentifier(typeof value.packageId === 'string' ? value.packageId : null)
+        || !safeIdentifier(typeof value.idempotencyKey === 'string' ? value.idempotencyKey : null)
+        || typeof value.requestSha256 !== 'string' || !SHA256.test(value.requestSha256)
+        || typeof value.subjectSha256 !== 'string' || !SHA256.test(value.subjectSha256)
+    })
     || item.releaseSignoffGranted !== false || item.releaseReady !== false
     || !validEvidenceFreezeFlags(item)) return undefined
   return item
@@ -3050,7 +3102,7 @@ export function registerEditorialHandoffDownload(
         'canonical-evidence-freeze-status', { method: 'GET' },
       )
       const status = outcome?.response.ok === true
-        ? normalizeEvidenceFreezeStatus(outcome.raw) : undefined
+        ? normalizeEvidenceFreezeStatus(outcome.raw, scope.projectId, scope.episodeId) : undefined
       if (status === undefined || status.projectId !== scope.projectId
         || status.episodeId !== scope.episodeId) {
         json(res, 502, { code: 'canonical_evidence_freeze_status_failed' }); return
@@ -3075,7 +3127,7 @@ export function registerEditorialHandoffDownload(
         'canonical-evidence-freeze-preview', { method: 'POST' },
       )
       const preview = outcome?.response.ok === true
-        ? normalizeEvidenceFreezePreview(outcome.raw) : undefined
+        ? normalizeEvidenceFreezePreview(outcome.raw, scope.projectId, scope.episodeId) : undefined
       if (preview === undefined || preview.projectId !== scope.projectId
         || preview.episodeId !== scope.episodeId) {
         json(res, 409, { code: 'canonical_evidence_freeze_preview_failed' }); return
@@ -3116,14 +3168,15 @@ export function registerEditorialHandoffDownload(
           },
         )
         let result = submitted?.response.ok === true
-          ? normalizeEvidenceFreezeResult(submitted.raw) : undefined
-        if (result === undefined) {
+          ? normalizeEvidenceFreezeResult(submitted.raw, scope.projectId, scope.episodeId) : undefined
+        if (result === undefined
+          && (submitted === undefined || submitted.response.status >= 500)) {
           const suffix = `canonical-evidence-freezes/${encodeURIComponent(idempotencyKey)}?requestSha256=${requestSha}`
           const recovered = await writerSelectionRequest(
             dependencies, token, scope.projectId, scope.episodeId, suffix, { method: 'GET' },
           )
           result = recovered?.response.ok === true
-            ? normalizeEvidenceFreezeResult(recovered.raw) : undefined
+            ? normalizeEvidenceFreezeResult(recovered.raw, scope.projectId, scope.episodeId) : undefined
         }
         if (result === undefined || result.projectId !== scope.projectId
           || result.episodeId !== scope.episodeId || result.requestSha256 !== requestSha) {
