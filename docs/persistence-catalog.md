@@ -533,6 +533,30 @@ Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/
 
 Source: [`packages/plan/plan-mode/src/index.ts:53`](../packages/plan/plan-mode/src/index.ts)
 
+### `qingmu/*`
+
+<a id="qingmudirector-proposal-receipt--log-only"></a>
+
+#### `qingmu/director-proposal-receipt` — log-only
+
+```ts persistence-catalog
+/** Informational proposal receipt; proposal content remains outside the session log. */
+'qingmu/director-proposal-receipt': QingmuDirectorProposalReceipt
+```
+
+Source: [`packages/experimental/qingmu-project-context/src/types.ts:104`](../packages/experimental/qingmu-project-context/src/types.ts)
+
+<a id="qingmuproject-context--log-only"></a>
+
+#### `qingmu/project-context` — log-only
+
+```ts persistence-catalog
+/** Whole-value context state reconstructed by folding the latest event. */
+'qingmu/project-context': QingmuProjectContextEvent
+```
+
+Source: [`packages/experimental/qingmu-project-context/src/types.ts:102`](../packages/experimental/qingmu-project-context/src/types.ts)
+
 ### `request/*`
 
 <a id="requestcontext--log-only"></a>

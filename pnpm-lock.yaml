@@ -4254,6 +4254,33 @@ importers:
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
 
+  packages/experimental/qingmu-project-context:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-client-connection':
+        specifier: workspace:^
+        version: link:../../client/connection
+      '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter':
+        specifier: workspace:^
+        version: link:../qingmu-imago-method-adapter
+      '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter':
+        specifier: workspace:^
+        version: link:../qingmu-yimeng-read-adapter
+      '@deepseek-ai/dsh-host-apiproxy':
+        specifier: workspace:^
+        version: link:../../host/apiproxy
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../../core/session
+      '@deepseek-ai/dsh-session-persistence-jsonl':
+        specifier: workspace:^
+        version: link:../../session/session-persistence-jsonl
+
   packages/experimental/qingmu-web:
     dependencies:
       '@deepseek-ai/dsh-experimental-client-ui-brand-qingmu':

@@ -38,6 +38,8 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'llm/retry-started',
   'permission/preset',
   'plan/mode',
+  'qingmu/director-proposal-receipt',
+  'qingmu/project-context',
   'request/context',
   'request/header',
   'sandbox/mode',

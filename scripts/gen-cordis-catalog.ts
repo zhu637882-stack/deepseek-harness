@@ -143,6 +143,7 @@ export const SERVICE_WALK_EXEMPTIONS: Record<string, string> = {
   launchEnvironment: 'not a service: launcher-provided root accessor value (LaunchEnvironmentSnapshot | undefined) — packages/util/launch-environment/README.md owns this launcher contract',
   connection: 'interface-typed (HostConnectionHandle); implementing class HostConnectionService is declared in rpc-host.ts — packages/client/connection/README.md owns the API',
   qingmuImagoMethod: 'interface-typed private Host handler (ConnectionRpcHandler), resolved by trusted Qingmu commands — packages/experimental/qingmu-imago-method-adapter/README.md owns the API',
+  qingmuProjectContext: 'interface-typed private Host handler (ConnectionRpcHandler) — packages/experimental/qingmu-project-context/README.md owns the API',
   qingmuYimengRead: 'interface-typed private Host handler (ConnectionRpcHandler), resolved optionally by the Qingmu method adapter — packages/experimental/qingmu-yimeng-read-adapter/README.md owns the API',
   uiRenderer: 'client-side interface-typed browser service — packages/client/ui-renderer/README.md owns the API',
   settingsSchema: 'client-side schema introspection service — packages/client/ui-settings/README.md owns the API',
