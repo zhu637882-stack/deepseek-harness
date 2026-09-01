@@ -124,6 +124,8 @@ Ready PromptIR 的 `firstFrameQuote` 还返回一次服务端重算、按当前�
 
 只有成功的包消费预览才能派生回传母版预检 capability。浏览器把一份 MP4、MOV 或 WebM 候选流式传给 Host；Host 在 owner-only 暂存目录中计算哈希，并把精确的母版 SHA／大小以及原下载、导入、包、来源和投影坐标签名后交给 Writer。Writer 再把字节流写入当前实例的私有暂存目录，执行只读容器与 ffprobe 检查。canonical 状态可在刷新或重启后恢复而不再次上传，capability 轮换后旧值立即失效。结果只暴露技术事实与阻塞：不会导入媒体、记录剪辑师消费、授予发布权威或推断人工签收。详见[回传母版预检 Agent Note](../../../.agents/notes/implemented/feature/2026-09-01-editorial-master-return-preflight.zh.md)。
 
+回传母版预检成功后，同一认证 owner 可以显式把这些精确字节保存为一条 episode-scoped 剪辑母版候选。Host 从不可变的下载、导入、预检、包、来源、投影、母版 SHA 和稳定回执坐标派生一次性提交 capability；Writer 核验域分离签名与当前来源后，把字节复制到内容寻址的私有存储，并创建 canonical asset、回执、ChangeSet 和 outbox 记录。响应不明时只读取原回执恢复，绝不会再次上传字节。该资产始终保持 `Unselected`、质量 pending、未批准且未发布；此路径不创建 final output、Ready、Provider 调用、发布权威或人工签收。详见[回传母版候选 Agent Note](../../../.agents/notes/implemented/feature/2026-09-01-returned-master-candidate-ingest.zh.md)。
+
 ## 安全边界
 
 `promptIr` 保留实际生效 Ready 主体，并额外验证最新已存 Draft 的完整主体 SHA 与基础绑定。不存在 Draft 时返回 `null`；血缘损坏报错。基于另一个 Ready 的 Draft 明确标为过期，读取器不会提升其状态。根工作流 blocker 必须有非空 `reason`；易梦在此边界前归一 stage `reasonCode` 和 release blocker，保留诊断字段。

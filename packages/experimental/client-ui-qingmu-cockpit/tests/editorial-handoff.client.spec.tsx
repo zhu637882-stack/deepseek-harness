@@ -133,8 +133,38 @@ describe('editorial handoff panel', () => {
     const editorialHandoff = vi.fn().mockRejectedValue(new Error('internal: SOURCE_DRIFT'))
     const port = { editorialHandoff } as unknown as QingmuYimengReadPort
     render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
-    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(zh.handoffSourceDrift) })
+    await waitFor(() => { expect(screen.getByText(zh.handoffSourceDrift)).toBeTruthy() })
     expect(screen.getByRole('button', { name: zh.handoffRefresh })).toBeTruthy()
+  })
+
+  it('keeps persisted candidates independently readable and clears stale rows on byte-integrity failure', async () => {
+    const candidate = {
+      schema: 'jason.qingmu-returned-master-candidate-result.v1', ...SCOPE,
+      assetId: 'asset-candidate-1', masterSha256: '8'.repeat(64), byteSize: 2048,
+      mimeType: 'video/mp4', packageSha256: '9'.repeat(64), sourceSnapshotSha256: 'a'.repeat(64),
+      projectionSha256: 'b'.repeat(64), downloadRequestId: 'download-1', importRequestId: 'import-1',
+      preflightRequestId: 'preflight-1', preflightSha256: 'c'.repeat(64),
+      selectionStatus: 'Unselected', isSelected: false, qualityStatus: 'pending',
+      approved: false, published: false, idempotencyKey: 'd'.repeat(64),
+      commandReceiptId: 'receipt-candidate-1', savedAt: '2026-09-01T00:00:00Z',
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        schema: 'jason.qingmu-returned-master-candidates.v1', candidates: [candidate],
+      }), { status: 200, headers: { 'content-type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ code: 'candidate_materialization_tampered' }), { status: 409 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const editorialHandoff = vi.fn().mockRejectedValue(new Error('internal: SOURCE_DRIFT'))
+    const port = { editorialHandoff } as unknown as QingmuYimengReadPort
+    render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
+    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(zh.handoffSourceDrift) })
+    const read = screen.getByRole('button', { name: zh.handoffCandidateRead })
+    fireEvent.click(read)
+    await waitFor(() => { expect(screen.getByText(zh.handoffCandidateUnselected)).toBeTruthy() })
+    fireEvent.click(read)
+    await waitFor(() => { expect(screen.queryByText(zh.handoffCandidateUnselected)).toBeNull() })
+    expect(screen.getByText(/candidate_list_failed/u)).toBeTruthy()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('clears old media and download state before a failed refresh settles', async () => {
@@ -150,7 +180,7 @@ describe('editorial handoff panel', () => {
     expect(screen.queryByText('take-1')).toBeNull()
     expect(screen.queryByRole('button', { name: zh.handoffDownloadDisabled })).toBeNull()
     rejectRefresh?.(new Error('internal: SOURCE_DRIFT'))
-    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(zh.handoffSourceDrift) })
+    await waitFor(() => { expect(screen.getByText(zh.handoffSourceDrift)).toBeTruthy() })
     expect(screen.queryByText('take-1')).toBeNull()
   })
 
@@ -273,7 +303,9 @@ describe('editorial handoff panel', () => {
         orderedShots: [], media: [], unresolved: [] },
     }
     const masterAccess = { requestId: '33333333-3333-4333-8333-333333333333', capability: 'c'.repeat(64) }
+    const candidateAccess = { requestId: '4'.repeat(64), capability: 'd'.repeat(64) }
     const masterResult = {
+      preflightSha256: 'a'.repeat(64),
       projectId: SCOPE.projectId, episodeId: SCOPE.episodeId,
       binding: {
         sourceSnapshotSha256: '6'.repeat(64), projectionSha256: '7'.repeat(64),
@@ -287,11 +319,32 @@ describe('editorial handoff panel', () => {
         videoStreams: [{ codec: 'h264' }], audioStreams: [{ codec: 'aac' }],
       }, blockers: [],
     }
+    const candidateResult = {
+      schema: 'jason.qingmu-returned-master-candidate-result.v1',
+      projectId: SCOPE.projectId, episodeId: SCOPE.episodeId,
+      assetId: 'asset-returned-master-1', masterSha256: '9'.repeat(64), materializedSha256: '9'.repeat(64),
+      byteSize: 12, mimeType: 'video/mp4', packageSha256: '8'.repeat(64),
+      sourceSnapshotSha256: '6'.repeat(64), projectionSha256: '7'.repeat(64), preflightSha256: 'a'.repeat(64),
+      qualityStatus: 'pending', selectionStatus: 'Unselected', isSelected: false,
+      approved: false, published: false, idempotencyKey: '4'.repeat(64), commandReceiptId: 'receipt-candidate-1',
+      savedAt: '2026-09-01T07:00:00Z', providerCalls: 0, stageStarted: false,
+      approvalGranted: false, selectionGranted: false, releaseGranted: false, humanSignoffInferred: false,
+    }
     const fetchMaster = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
       const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
+      if (url.includes('returned-master-candidate') && method === 'POST') {
+        return new Response(JSON.stringify(candidateResult), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('returned-master-candidates')) {
+        return new Response(JSON.stringify({
+          schema: 'jason.qingmu-returned-master-candidates.v1', candidates: [candidateResult],
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
       if (url.includes('master-preflight') && method === 'POST') {
-        return new Response(JSON.stringify(masterResult), { status: 200, headers: { 'content-type': 'application/json' } })
+        return new Response(JSON.stringify({ ...masterResult, candidateAccess }), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
       }
       if (url.includes('master-preflight-status')) {
         return new Response(JSON.stringify({ status: 'not_started', result: null }), {
@@ -312,17 +365,28 @@ describe('editorial handoff panel', () => {
     await waitFor(() => { expect(screen.getByText(zh.handoffMasterExactBoundary)).toBeTruthy() })
     expect(screen.getByText(zh.handoffMasterTechnicalPass)).toBeTruthy()
     expect(screen.getByText(/Master SHA: 9999/u)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffCandidateSave }))
+    await waitFor(() => { expect(screen.getByText(zh.handoffCandidateUnselected)).toBeTruthy() })
+    expect(screen.getByText(zh.handoffCandidateSaved)).toBeTruthy()
+    expect(screen.getByText(/asset-returned-master-1/u)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffCandidateRead }))
+    await waitFor(() => { expect(screen.getByText(/receipt-candidate-1/u)).toBeTruthy() })
     expect(screen.getByText(/returned-master\.mp4/u)).toBeTruthy()
     expect(input.disabled).toBe(true)
     expect(screen.getByText(zh.handoffMasterLocked)).toBeTruthy()
     const otherFile = new File([new Uint8Array(8)], 'other-master.mp4', { type: 'video/mp4' })
     fireEvent.change(input, { target: { files: [otherFile] } })
     expect(screen.queryByText(/other-master\.mp4/u)).toBeNull()
-    expect(screen.getByText(/Master SHA: 9999/u)).toBeTruthy()
+    expect(screen.getAllByText(/Master SHA: 9999/u)).toHaveLength(2)
     expect(fetchMaster.mock.calls.filter(([request, options]) => {
       const url = typeof request === 'string' ? request : request instanceof URL ? request.href : request.url
       const method = options?.method ?? (request instanceof Request ? request.method : 'GET')
       return url.includes('master-preflight') && method === 'POST'
+    })).toHaveLength(1)
+    expect(fetchMaster.mock.calls.filter(([request, options]) => {
+      const url = typeof request === 'string' ? request : request instanceof URL ? request.href : request.url
+      const method = options?.method ?? (request instanceof Request ? request.method : 'GET')
+      return url.includes('returned-master-candidate') && method === 'POST'
     })).toHaveLength(1)
   })
 

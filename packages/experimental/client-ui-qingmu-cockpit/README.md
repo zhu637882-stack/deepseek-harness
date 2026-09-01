@@ -152,6 +152,8 @@ After a successful download, the user may reselect that local ZIP for a read-onl
 
 After that preview succeeds, the same panel accepts one local MP4, MOV, or WebM returned-master candidate. It displays byte SHA and size, container, duration, resolution, frame rate, audio-stream count, original package/source binding, and structured blockers. Errors are announced with a recovery action and retain the chosen local file. The result is deliberately labelled “preflight only”: it is not imported, released, signed off, or evidence that an NLE or editor consumed the package.
 
+When that preflight succeeds, the panel exposes a separate explicit “Save as returned candidate” action. The browser sends a one-use Host capability, not a Writer credential; an unknown response can only poll the original receipt and cannot send the master again. The canonical shelf is read back from Writer and labels every saved result “Unselected · Unapproved · Unpublished” together with its exact master, package, preflight, source, projection, and receipt hashes. Saving does not select the asset, pass quality, create a final output, authorize release, or infer human sign-off.
+
 ## Security boundary
 
 `YIMENG_API_TOKEN` and `QINGMU_IMAGO_ATTESTATION_KEY` belong only to Qingmu Host processes. The browser plugin does not read environment variables, `localStorage`, `JWT_SECRET`, or cookies, and it never receives or renders either secret. Its only persistence is the bounded non-secret receipt-recovery marker in the current tab's `sessionStorage`. Read and command channels are separate Host plugins, both limited to loopback upstreams. If the token is absent, the cockpit shows a recovery instruction to configure the Host and restart the local instance.

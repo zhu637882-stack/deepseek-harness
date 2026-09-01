@@ -27,6 +27,9 @@ const IMPORT_PATH = '/api/qingmu/editorial-handoff/import'
 const IMPORT_STATUS_PATH = '/api/qingmu/editorial-handoff/import-status'
 const MASTER_PATH = '/api/qingmu/editorial-handoff/master-preflight'
 const MASTER_STATUS_PATH = '/api/qingmu/editorial-handoff/master-preflight-status'
+const CANDIDATE_PATH = '/api/qingmu/editorial-handoff/returned-master-candidate'
+const CANDIDATE_STATUS_PATH = '/api/qingmu/editorial-handoff/returned-master-candidate-status'
+const CANDIDATE_LIST_PATH = '/api/qingmu/editorial-handoff/returned-master-candidates'
 const SHA256 = /^[0-9a-f]{64}$/
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/
 const REQUEST_ID = /^[a-f0-9-]{16,80}$/
@@ -36,6 +39,7 @@ const MAX_MASTER_BYTES = 32 * 1024 * 1024 * 1024
 const STATUS_TTL_MS = 24 * 60 * 60_000
 const EDITORIAL_IMPORT_DOMAIN = 'qingmu-editorial-handoff-import.v1'
 const EDITORIAL_MASTER_DOMAIN = 'qingmu-editorial-master-preflight.v1'
+const EDITORIAL_MASTER_CANDIDATE_DOMAIN = 'qingmu-editorial-master-candidate-commit.v1'
 
 interface DownloadBinding {
   readonly authenticatedUserId: string
@@ -89,8 +93,31 @@ type MasterStatus =
   | { readonly state: 'failed'; readonly createdAt: number; readonly errorCode: string }
 
 interface PersistedMaster extends MasterBinding {
+  /** Stable receipt lineage; unlike requestId it is not rotated with browser recovery capability. */
+  readonly receiptRequestId: string
   readonly capabilitySha256: string
   readonly status: MasterStatus
+}
+
+interface CandidateBinding extends Omit<MasterBinding, 'requestId'> {
+  readonly requestId: string
+  readonly preflightRequestId: string
+  readonly preflightSha256: string
+  readonly masterSha256: string
+  readonly masterSize: number
+  readonly mimeType: 'video/mp4' | 'video/quicktime' | 'video/webm'
+}
+
+type CandidateStatus =
+  | { readonly state: 'authorized'; readonly createdAt: number }
+  | { readonly state: 'running'; readonly createdAt: number }
+  | { readonly state: 'unknown'; readonly createdAt: number; readonly errorCode: string }
+  | { readonly state: 'succeeded'; readonly createdAt: number; readonly result: EditorialMasterCandidateResult }
+  | { readonly state: 'failed'; readonly createdAt: number; readonly errorCode: string }
+
+interface PersistedCandidate extends CandidateBinding {
+  readonly capabilitySha256: string
+  readonly status: CandidateStatus
 }
 
 /** One-use Host capability for reselecting an exact successful download. */
@@ -105,9 +132,16 @@ export interface EditorialMasterPreflightAccess {
   readonly capability: string
 }
 
+/** One-use Host capability for explicitly saving the exact successful preflight bytes. */
+export interface EditorialMasterCandidateAccess {
+  readonly requestId: string
+  readonly capability: string
+}
+
 /** Strict read-only Writer result for one local returned-master technical preflight. */
 export interface EditorialMasterPreflightResult {
   readonly schema: 'jason.qingmu-editorial-master-preflight.v1'
+  readonly preflightSha256: string
   readonly projectId: string
   readonly episodeId: string
   readonly binding: {
@@ -150,6 +184,47 @@ export interface EditorialMasterPreflightResult {
     readonly releaseReady: false
     readonly humanSignoffInferred: false
   }
+}
+
+/** Strict Writer receipt for one unselected returned-master candidate. */
+export interface EditorialMasterCandidateResult {
+  readonly schema: 'jason.qingmu-returned-master-candidate-result.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly assetId: string
+  readonly storageKey: string
+  readonly masterSha256: string
+  readonly materializedSha256: string
+  readonly byteSize: number
+  readonly mimeType: 'video/mp4' | 'video/quicktime' | 'video/webm'
+  readonly durationSec: number
+  readonly width: number
+  readonly height: number
+  readonly fps: number
+  readonly packageSha256: string
+  readonly sourceSnapshotSha256: string
+  readonly projectionSha256: string
+  readonly downloadRequestId: string
+  readonly importRequestId: string
+  readonly preflightRequestId: string
+  readonly preflightSha256: string
+  readonly qualityStatus: 'pending'
+  readonly selectionStatus: 'Unselected'
+  readonly isSelected: false
+  readonly approved: false
+  readonly published: false
+  readonly idempotencyKey: string
+  readonly requestSha256: string
+  readonly commandReceiptId: string
+  readonly changeSetId: string
+  readonly eventId: string
+  readonly savedAt: string
+  readonly providerCalls: 0
+  readonly stageStarted: false
+  readonly approvalGranted: false
+  readonly selectionGranted: false
+  readonly releaseGranted: false
+  readonly humanSignoffInferred: false
 }
 
 /** Strict read-only Writer result exposed as an editorial consumption preview. */
@@ -200,11 +275,13 @@ export class EditorialHandoffDownloadAuthorizer {
   readonly #entries = new Map<string, PersistedDownload>()
   readonly #imports = new Map<string, PersistedImport>()
   readonly #masters = new Map<string, PersistedMaster>()
+  readonly #candidates = new Map<string, PersistedCandidate>()
 
   public constructor(private readonly stateFile: string) {
     this.#load()
     this.#loadImports()
     this.#loadMasters()
+    this.#loadCandidates()
   }
 
   /**
@@ -365,6 +442,7 @@ export class EditorialHandoffDownloadAuthorizer {
       sourceSnapshotSha256: source.sourceSnapshotSha256,
       projectionSha256: source.projectionSha256,
       requestId,
+      receiptRequestId: requestId,
       downloadRequestId: source.downloadRequestId,
       importRequestId: source.requestId,
       packageSha256: source.packageSha256,
@@ -394,7 +472,12 @@ export class EditorialHandoffDownloadAuthorizer {
     if (entry?.status.state !== 'authorized') return undefined
     this.#masters.set(requestId, { ...entry, status: { state: 'running', createdAt: entry.status.createdAt } })
     this.#persistMasters()
-    const { capabilitySha256: _capabilitySha256, status: _status, ...binding } = entry
+    const {
+      capabilitySha256: _capabilitySha256,
+      receiptRequestId: _receiptRequestId,
+      status: _status,
+      ...binding
+    } = entry
     return binding
   }
 
@@ -428,6 +511,146 @@ export class EditorialHandoffDownloadAuthorizer {
     if (entry === undefined || !sameMasterBinding(entry, binding)) return
     this.#masters.set(binding.requestId, { ...entry, status })
     this.#persistMasters()
+  }
+
+  /**
+   * Issue a separate one-use save capability only for one blocker-free preflight.
+   * @param authenticatedUserId - Current Writer-authenticated user identifier.
+   * @param projectId - Project bound to the preflight.
+   * @param episodeId - Episode bound to the preflight.
+   * @param preflightRequestId - Returned-master preflight access identifier.
+   * @param preflightCapability - Secret capability paired with the preflight access.
+   * @returns Stable candidate access, or `undefined` when the preflight cannot authorize a save.
+   */
+  public issueCandidate(
+    authenticatedUserId: string, projectId: string, episodeId: string,
+    preflightRequestId: string, preflightCapability: string,
+  ): EditorialMasterCandidateAccess | undefined {
+    this.#sweep()
+    const master = this.#authenticatedMaster(
+      authenticatedUserId, projectId, episodeId, preflightRequestId, preflightCapability,
+    )
+    if (master?.status.state !== 'succeeded') return undefined
+    const result = master.status.result
+    if (result.blockers.length > 0 || result.master.mimeType === null
+      || result.master.durationSec === null || result.master.width === null
+      || result.master.height === null || result.master.fps === null) return undefined
+    const requestId = createHash('sha256').update([
+      'qingmu-returned-master-candidate.v1', authenticatedUserId, projectId, episodeId,
+      master.receiptRequestId, result.preflightSha256, result.master.sha256,
+    ].join('\n')).digest('hex')
+    const recovered = this.#candidates.get(requestId)
+    if (recovered?.status.state === 'running') return undefined
+    // Derive the child capability from the already authenticated preflight
+    // capability so polling/recovering the same successful preflight returns
+    // the same child authority instead of silently invalidating the value the
+    // browser already holds. A rotated preflight capability still rotates this
+    // child authority, and only the Host ever performs the derivation.
+    const capability = createHmac('sha256', Buffer.from(preflightCapability, 'utf8'))
+      .update(`qingmu-returned-master-candidate-capability.v1\n${requestId}`)
+      .digest('hex')
+    const binding: CandidateBinding = {
+      authenticatedUserId, projectId, episodeId,
+      sourceSnapshotSha256: master.sourceSnapshotSha256,
+      projectionSha256: master.projectionSha256,
+      requestId, downloadRequestId: master.downloadRequestId,
+      importRequestId: master.importRequestId, preflightRequestId: master.receiptRequestId,
+      packageSha256: master.packageSha256, packageSize: master.packageSize,
+      preflightSha256: result.preflightSha256,
+      masterSha256: result.master.sha256, masterSize: result.master.size,
+      mimeType: result.master.mimeType as CandidateBinding['mimeType'],
+    }
+    this.#candidates.set(requestId, {
+      ...binding,
+      capabilitySha256: createHash('sha256').update(capability).digest('hex'),
+      status: recovered?.status.state === 'failed'
+        ? { state: 'authorized', createdAt: Date.now() }
+        : recovered?.status ?? { state: 'authorized', createdAt: Date.now() },
+    })
+    this.#persistCandidates()
+    return { requestId, capability }
+  }
+
+  /**
+   * Atomically consume one candidate capability before sending the stored master once.
+   * @param authenticatedUserId - Current Writer-authenticated user identifier.
+   * @param projectId - Project bound to the candidate.
+   * @param episodeId - Episode bound to the candidate.
+   * @param requestId - Stable candidate receipt identifier.
+   * @param capability - Secret capability paired with the candidate request.
+   * @returns Immutable candidate binding, or `undefined` when consumption is not allowed.
+   */
+  public startCandidate(
+    authenticatedUserId: string, projectId: string, episodeId: string,
+    requestId: string, capability: string,
+  ): CandidateBinding | undefined {
+    this.#sweep()
+    const entry = this.#authenticatedCandidate(
+      authenticatedUserId, projectId, episodeId, requestId, capability,
+    )
+    if (entry?.status.state !== 'authorized') return undefined
+    this.#candidates.set(requestId, {
+      ...entry, status: { state: 'running', createdAt: entry.status.createdAt },
+    })
+    this.#persistCandidates()
+    const { capabilitySha256: _capabilitySha256, status: _status, ...binding } = entry
+    return binding
+  }
+
+  /**
+   * Read candidate submission state without resending the master bytes.
+   * @param authenticatedUserId - Current Writer-authenticated user identifier.
+   * @param projectId - Project bound to the candidate.
+   * @param episodeId - Episode bound to the candidate.
+   * @param requestId - Stable candidate receipt identifier.
+   * @param capability - Secret capability paired with the candidate request.
+   * @returns Canonical candidate state, or `undefined` when the scope is not authorized.
+   */
+  public candidateStatus(
+    authenticatedUserId: string, projectId: string, episodeId: string,
+    requestId: string, capability: string,
+  ): CandidateStatus | undefined {
+    this.#sweep()
+    return this.#authenticatedCandidate(
+      authenticatedUserId, projectId, episodeId, requestId, capability,
+    )?.status
+  }
+
+  /**
+   * Return the immutable persisted binding for read-only receipt recovery.
+   * @param authenticatedUserId - Current Writer-authenticated user identifier.
+   * @param projectId - Project bound to the candidate.
+   * @param episodeId - Episode bound to the candidate.
+   * @param requestId - Stable candidate receipt identifier.
+   * @param capability - Secret capability paired with the candidate request.
+   * @returns Immutable candidate binding, or `undefined` when the scope is not authorized.
+   */
+  public candidateBinding(
+    authenticatedUserId: string, projectId: string, episodeId: string,
+    requestId: string, capability: string,
+  ): CandidateBinding | undefined {
+    this.#sweep()
+    const entry = this.#authenticatedCandidate(
+      authenticatedUserId, projectId, episodeId, requestId, capability,
+    )
+    if (entry === undefined) return undefined
+    const { capabilitySha256: _capabilitySha256, status: _status, ...binding } = entry
+    return binding
+  }
+
+  /**
+   * Persist one terminal or ambiguous candidate outcome for restart-safe recovery.
+   * @param binding - Immutable candidate binding returned by `startCandidate`.
+   * @param status - Strict Writer result, stable failure, or ambiguous submission state.
+   */
+  public finishCandidate(
+    binding: CandidateBinding,
+    status: Extract<CandidateStatus, { state: 'succeeded' | 'failed' | 'unknown' }>,
+  ): void {
+    const entry = this.#candidates.get(binding.requestId)
+    if (entry === undefined || !sameCandidateBinding(entry, binding)) return
+    this.#candidates.set(binding.requestId, { ...entry, status })
+    this.#persistCandidates()
   }
 
   #rotateMaster(recovered: PersistedMaster): EditorialMasterPreflightAccess {
@@ -519,6 +742,19 @@ export class EditorialHandoffDownloadAuthorizer {
     return actual.length === expected.length && timingSafeEqual(actual, expected) ? entry : undefined
   }
 
+  #authenticatedCandidate(
+    authenticatedUserId: string, projectId: string, episodeId: string,
+    requestId: string, capability: string,
+  ): PersistedCandidate | undefined {
+    if (!REQUEST_ID.test(requestId) || !CAPABILITY.test(capability)) return undefined
+    const entry = this.#candidates.get(requestId)
+    if (entry === undefined || entry.authenticatedUserId !== authenticatedUserId
+      || entry.projectId !== projectId || entry.episodeId !== episodeId) return undefined
+    const actual = Buffer.from(createHash('sha256').update(capability).digest('hex'))
+    const expected = Buffer.from(entry.capabilitySha256)
+    return actual.length === expected.length && timingSafeEqual(actual, expected) ? entry : undefined
+  }
+
   #authenticated(binding: DownloadBinding, capability: string): PersistedDownload | undefined {
     if (!CAPABILITY.test(capability)) return undefined
     const entry = this.#entries.get(binding.requestId)
@@ -533,6 +769,7 @@ export class EditorialHandoffDownloadAuthorizer {
     let downloadsChanged = false
     let importsChanged = false
     let mastersChanged = false
+    let candidatesChanged = false
     for (const [id, entry] of this.#entries) {
       if (entry.status.createdAt < threshold) {
         this.#entries.delete(id)
@@ -551,9 +788,16 @@ export class EditorialHandoffDownloadAuthorizer {
         mastersChanged = true
       }
     }
+    for (const [id, entry] of this.#candidates) {
+      if (entry.status.createdAt < threshold) {
+        this.#candidates.delete(id)
+        candidatesChanged = true
+      }
+    }
     if (downloadsChanged) this.#persist()
     if (importsChanged) this.#persistImports()
     if (mastersChanged) this.#persistMasters()
+    if (candidatesChanged) this.#persistCandidates()
   }
 
   #load(): void {
@@ -561,7 +805,7 @@ export class EditorialHandoffDownloadAuthorizer {
     const raw = JSON.parse(readFileSync(this.stateFile, 'utf8')) as unknown
     if (!Array.isArray(raw)) throw new Error('editorial handoff: download state is invalid')
     let recoveredRunning = false
-    for (const value of raw) {
+    for (const value of raw as unknown[]) {
       if (!validPersisted(value)) throw new Error('editorial handoff: download state is invalid')
       if (value.status.state === 'running') {
         recoveredRunning = true
@@ -636,10 +880,15 @@ export class EditorialHandoffDownloadAuthorizer {
     let changed = false
     const canonical = new Map<string, PersistedMaster>()
     for (const value of raw) {
-      if (!validPersistedMaster(value)) throw new Error('editorial handoff: master state is invalid')
-      const recovered = value.status.state === 'running'
-        ? { ...value, status: { state: 'failed' as const, createdAt: Date.now(), errorCode: 'host_restarted' } }
-        : value
+      const item = typeof value === 'object' && value !== null
+        ? value as Record<string, unknown> : undefined
+      const migrated = item !== undefined && item.receiptRequestId === undefined
+        && typeof item.requestId === 'string'
+        ? { ...item, receiptRequestId: item.requestId } : value
+      if (!validPersistedMaster(migrated)) throw new Error('editorial handoff: master state is invalid')
+      const recovered = migrated.status.state === 'running'
+        ? { ...migrated, status: { state: 'failed' as const, createdAt: Date.now(), errorCode: 'host_restarted' } }
+        : migrated
       if (recovered !== value) changed = true
       const identity = packageReceiptIdentity(recovered)
       const previous = canonical.get(identity)
@@ -660,6 +909,40 @@ export class EditorialHandoffDownloadAuthorizer {
     try { writeFileSync(descriptor, JSON.stringify([...this.#masters.values()]), 'utf8') } finally { closeSync(descriptor) }
     renameSync(temporary, masterFile)
     chmodSync(masterFile, 0o600)
+  }
+
+  #loadCandidates(): void {
+    const candidateFile = `${this.stateFile}.candidates`
+    if (!existsSync(candidateFile)) return
+    const raw = JSON.parse(readFileSync(candidateFile, 'utf8')) as unknown
+    if (!Array.isArray(raw)) throw new Error('editorial handoff: candidate state is invalid')
+    let changed = false
+    for (const value of raw) {
+      if (!validPersistedCandidate(value)) throw new Error('editorial handoff: candidate state is invalid')
+      const recovered = value.status.state === 'running'
+        ? { ...value, status: {
+          state: 'unknown' as const, createdAt: Date.now(), errorCode: 'host_restarted_after_commit_start',
+        } }
+        : value
+      if (recovered !== value) changed = true
+      const previous = this.#candidates.get(recovered.requestId)
+      if (previous === undefined || recovered.status.createdAt >= previous.status.createdAt) {
+        this.#candidates.set(recovered.requestId, recovered)
+      }
+    }
+    if (changed) this.#persistCandidates()
+    this.#sweep()
+  }
+
+  #persistCandidates(): void {
+    const candidateFile = `${this.stateFile}.candidates`
+    const parent = dirname(candidateFile)
+    mkdirSync(parent, { recursive: true, mode: 0o700 })
+    const temporary = `${candidateFile}.${process.pid.toString()}.${randomUUID()}.tmp`
+    const descriptor = openSync(temporary, 'wx', 0o600)
+    try { writeFileSync(descriptor, JSON.stringify([...this.#candidates.values()]), 'utf8') } finally { closeSync(descriptor) }
+    renameSync(temporary, candidateFile)
+    chmodSync(candidateFile, 0o600)
   }
 }
 
@@ -725,6 +1008,32 @@ function editorialMasterHeaders(
   }
 }
 
+function editorialCandidateHeaders(
+  binding: CandidateBinding, path: string, key: string,
+): Record<string, string> | undefined {
+  if (Buffer.byteLength(key) < 32) return undefined
+  const timestamp = Math.floor(Date.now() / 1000).toString()
+  const nonce = randomBytes(24).toString('base64url')
+  const message = [
+    EDITORIAL_MASTER_CANDIDATE_DOMAIN, 'POST', path,
+    binding.masterSha256, String(binding.masterSize), binding.packageSha256,
+    String(binding.packageSize), binding.authenticatedUserId, binding.projectId,
+    binding.episodeId, binding.sourceSnapshotSha256, binding.projectionSha256,
+    binding.downloadRequestId, binding.importRequestId, binding.preflightRequestId,
+    binding.preflightSha256, binding.requestId, timestamp, nonce,
+  ].join('\n')
+  return {
+    'x-qingmu-download-request-id': binding.downloadRequestId,
+    'x-qingmu-import-request-id': binding.importRequestId,
+    'x-qingmu-preflight-request-id': binding.preflightRequestId,
+    'x-qingmu-preflight-sha256': binding.preflightSha256,
+    'x-qingmu-idempotency-key': binding.requestId,
+    'x-qingmu-editorial-timestamp': timestamp,
+    'x-qingmu-editorial-nonce': nonce,
+    'x-qingmu-editorial-signature': createHmac('sha256', key).update(message).digest('hex'),
+  }
+}
+
 function sameBinding(left: DownloadBinding, right: DownloadBinding): boolean {
   return left.authenticatedUserId === right.authenticatedUserId
     && left.projectId === right.projectId && left.episodeId === right.episodeId
@@ -757,6 +1066,17 @@ function sameMasterBinding(left: MasterBinding, right: MasterBinding): boolean {
     && left.downloadRequestId === right.downloadRequestId
     && left.importRequestId === right.importRequestId
     && left.packageSha256 === right.packageSha256 && left.packageSize === right.packageSize
+}
+
+function sameCandidateBinding(left: CandidateBinding, right: CandidateBinding): boolean {
+  return sameProjectionBinding(left, right) && left.requestId === right.requestId
+    && left.downloadRequestId === right.downloadRequestId
+    && left.importRequestId === right.importRequestId
+    && left.preflightRequestId === right.preflightRequestId
+    && left.packageSha256 === right.packageSha256 && left.packageSize === right.packageSize
+    && left.preflightSha256 === right.preflightSha256
+    && left.masterSha256 === right.masterSha256 && left.masterSize === right.masterSize
+    && left.mimeType === right.mimeType
 }
 
 function sameMasterReceipt(entry: PersistedMaster, source: PersistedImport): boolean {
@@ -854,6 +1174,7 @@ function validPersistedMaster(value: unknown): value is PersistedMaster {
     && typeof item.packageSha256 === 'string' && SHA256.test(item.packageSha256)
     && typeof item.packageSize === 'number' && Number.isSafeInteger(item.packageSize) && item.packageSize > 0
     && typeof item.requestId === 'string' && REQUEST_ID.test(item.requestId)
+    && typeof item.receiptRequestId === 'string' && REQUEST_ID.test(item.receiptRequestId)
     && typeof item.downloadRequestId === 'string' && REQUEST_ID.test(item.downloadRequestId)
     && typeof item.importRequestId === 'string' && REQUEST_ID.test(item.importRequestId)
     && typeof item.capabilitySha256 === 'string' && SHA256.test(item.capabilitySha256)
@@ -862,6 +1183,34 @@ function validPersistedMaster(value: unknown): value is PersistedMaster {
     && ((status.state === 'authorized' || status.state === 'running') && Object.keys(status).length === 2
       || (status.state === 'failed' && typeof status.errorCode === 'string' && status.errorCode.length > 0)
       || (status.state === 'succeeded' && normalizeMasterResult(status.result) !== undefined))
+}
+
+function validPersistedCandidate(value: unknown): value is PersistedCandidate {
+  if (typeof value !== 'object' || value === null) return false
+  const item = value as Record<string, unknown>
+  const status = item.status as Record<string, unknown> | undefined
+  return safeIdentifier(typeof item.authenticatedUserId === 'string' ? item.authenticatedUserId : null)
+    && safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
+    && safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
+    && typeof item.sourceSnapshotSha256 === 'string' && SHA256.test(item.sourceSnapshotSha256)
+    && typeof item.projectionSha256 === 'string' && SHA256.test(item.projectionSha256)
+    && typeof item.packageSha256 === 'string' && SHA256.test(item.packageSha256)
+    && typeof item.preflightSha256 === 'string' && SHA256.test(item.preflightSha256)
+    && typeof item.masterSha256 === 'string' && SHA256.test(item.masterSha256)
+    && typeof item.packageSize === 'number' && Number.isSafeInteger(item.packageSize) && item.packageSize > 0
+    && typeof item.masterSize === 'number' && Number.isSafeInteger(item.masterSize) && item.masterSize > 0
+    && ['video/mp4', 'video/quicktime', 'video/webm'].includes(String(item.mimeType))
+    && typeof item.requestId === 'string' && REQUEST_ID.test(item.requestId)
+    && typeof item.downloadRequestId === 'string' && REQUEST_ID.test(item.downloadRequestId)
+    && typeof item.importRequestId === 'string' && REQUEST_ID.test(item.importRequestId)
+    && typeof item.preflightRequestId === 'string' && REQUEST_ID.test(item.preflightRequestId)
+    && typeof item.capabilitySha256 === 'string' && SHA256.test(item.capabilitySha256)
+    && status !== undefined && typeof status.createdAt === 'number'
+    && Number.isSafeInteger(status.createdAt) && status.createdAt >= 0
+    && ((status.state === 'authorized' || status.state === 'running') && Object.keys(status).length === 2
+      || ((status.state === 'failed' || status.state === 'unknown')
+        && typeof status.errorCode === 'string' && status.errorCode.length > 0)
+      || (status.state === 'succeeded' && normalizeCandidateResult(status.result) !== undefined))
 }
 
 function normalizeImportResult(value: unknown): EditorialHandoffImportResult | undefined {
@@ -951,6 +1300,7 @@ function normalizeMasterResult(value: unknown): EditorialMasterPreflightResult |
   const stringList = (input: unknown): input is string[] => Array.isArray(input)
     && input.length <= 100 && input.every(entry => typeof entry === 'string' && safeIdentifier(entry))
   if (item.schema !== 'jason.qingmu-editorial-master-preflight.v1'
+    || typeof item.preflightSha256 !== 'string' || !SHA256.test(item.preflightSha256)
     || !safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
     || !safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
     || item.readOnly !== true || item.businessMutations !== 0 || item.providerCalls !== 0
@@ -985,6 +1335,64 @@ function normalizeMasterResult(value: unknown): EditorialMasterPreflightResult |
   if (serialized.length > 4 * 1024 * 1024 || serialized.includes('/Users/')
     || serialized.includes('Bearer ') || serialized.includes('local_path')) return undefined
   return value as EditorialMasterPreflightResult
+}
+
+function normalizeCandidateResult(value: unknown): EditorialMasterCandidateResult | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const item = value as Record<string, unknown>
+  const exactFalse = [
+    'isSelected', 'approved', 'published', 'stageStarted', 'approvalGranted',
+    'selectionGranted', 'releaseGranted', 'humanSignoffInferred',
+  ].every(field => item[field] === false)
+  const positive = (field: string): boolean => {
+    const number = item[field]
+    return typeof number === 'number' && Number.isFinite(number) && number > 0
+  }
+  const safeStorageKey = typeof item.storageKey === 'string'
+    && item.storageKey.startsWith('qingmu/editorial-master-candidates/')
+    && !item.storageKey.includes('..') && !item.storageKey.includes('\\')
+    && !item.storageKey.startsWith('/') && !item.storageKey.includes('\0')
+  if (item.schema !== 'jason.qingmu-returned-master-candidate-result.v1'
+    || !safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
+    || !safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
+    || !safeIdentifier(typeof item.assetId === 'string' ? item.assetId : null)
+    || !safeStorageKey
+    || typeof item.masterSha256 !== 'string' || !SHA256.test(item.masterSha256)
+    || item.materializedSha256 !== item.masterSha256
+    || typeof item.packageSha256 !== 'string' || !SHA256.test(item.packageSha256)
+    || typeof item.sourceSnapshotSha256 !== 'string' || !SHA256.test(item.sourceSnapshotSha256)
+    || typeof item.projectionSha256 !== 'string' || !SHA256.test(item.projectionSha256)
+    || typeof item.preflightSha256 !== 'string' || !SHA256.test(item.preflightSha256)
+    || typeof item.requestSha256 !== 'string' || !SHA256.test(item.requestSha256)
+    || !positive('byteSize') || !Number.isSafeInteger(item.byteSize)
+    || !positive('durationSec') || !positive('width') || !Number.isSafeInteger(item.width)
+    || !positive('height') || !Number.isSafeInteger(item.height) || !positive('fps')
+    || !['video/mp4', 'video/quicktime', 'video/webm'].includes(String(item.mimeType))
+    || !REQUEST_ID.test(String(item.downloadRequestId)) || !REQUEST_ID.test(String(item.importRequestId))
+    || !REQUEST_ID.test(String(item.preflightRequestId)) || !REQUEST_ID.test(String(item.idempotencyKey))
+    || !safeIdentifier(typeof item.commandReceiptId === 'string' ? item.commandReceiptId : null)
+    || !safeIdentifier(typeof item.changeSetId === 'string' ? item.changeSetId : null)
+    || !safeIdentifier(typeof item.eventId === 'string' ? item.eventId : null)
+    || typeof item.savedAt !== 'string' || item.savedAt.length < 10 || item.savedAt.length > 64
+    || item.qualityStatus !== 'pending' || item.selectionStatus !== 'Unselected'
+    || item.providerCalls !== 0 || !exactFalse) return undefined
+  const serialized = JSON.stringify(value)
+  if (serialized.length > 128 * 1024 || serialized.includes('/Users/')
+    || serialized.includes('Bearer ') || serialized.includes('local_path')) return undefined
+  return value as EditorialMasterCandidateResult
+}
+
+function normalizeCandidateList(value: unknown): readonly EditorialMasterCandidateResult[] | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const item = value as Record<string, unknown>
+  if (item.schema !== 'jason.qingmu-returned-master-candidates.v1'
+    || !Array.isArray(item.candidates) || item.candidates.length > 1000
+    || item.providerCalls !== 0 || item.stageStarted !== false || item.approvalGranted !== false
+    || item.selectionGranted !== false || item.releaseGranted !== false
+    || item.humanSignoffInferred !== false) return undefined
+  const candidates = item.candidates.map(normalizeCandidateResult)
+  return candidates.every((entry): entry is EditorialMasterCandidateResult => entry !== undefined)
+    ? candidates : undefined
 }
 
 function safePackageMediaPath(value: string): boolean {
@@ -1046,6 +1454,14 @@ const BINDING_PARAMS = [
 ] as const
 
 const IMPORT_PARAMS = ['projectId', 'episodeId', 'requestId', 'capability'] as const
+const SCOPE_PARAMS = ['projectId', 'episodeId'] as const
+
+function scopeAccess(params: URLSearchParams): { readonly projectId: string; readonly episodeId: string } | undefined {
+  if (!exactParams(params, SCOPE_PARAMS)) return undefined
+  const projectId = params.get('projectId')
+  const episodeId = params.get('episodeId')
+  return safeIdentifier(projectId) && safeIdentifier(episodeId) ? { projectId, episodeId } : undefined
+}
 
 function importAccess(params: URLSearchParams): {
   readonly projectId: string
@@ -1134,10 +1550,11 @@ function statusBody(status: DownloadStatus | undefined): Record<string, unknown>
   return { status: 'failed', sha256: null, size: null, errorCode: status.errorCode }
 }
 
-function resultStatusBody(status: ImportStatus | MasterStatus | undefined): Record<string, unknown> {
+function resultStatusBody(status: ImportStatus | MasterStatus | CandidateStatus | undefined): Record<string, unknown> {
   if (status === undefined) return { status: 'not_found', result: null, errorCode: null }
   if (status.state === 'authorized') return { status: 'not_started', result: null, errorCode: null }
   if (status.state === 'running') return { status: 'running', result: null, errorCode: null }
+  if (status.state === 'unknown') return { status: 'unknown', result: null, errorCode: status.errorCode }
   if (status.state === 'succeeded') return { status: 'succeeded', result: status.result, errorCode: null }
   return { status: 'failed', result: null, errorCode: status.errorCode }
 }
@@ -1146,7 +1563,7 @@ function cleanupImportSpools(root: string): void {
   mkdirSync(root, { recursive: true, mode: 0o700 })
   chmodSync(root, 0o700)
   for (const name of readdirSync(root)) {
-    if (/^(?:qingmu-otio-import|qingmu-editorial-master)-[A-Za-z0-9_-]+$/u.test(name)) {
+    if (/^(?:qingmu-otio-import|qingmu-editorial-master|qingmu-editorial-candidate)-[A-Za-z0-9_-]+$/u.test(name)) {
       rmSync(join(root, name), { recursive: true, force: true })
     }
   }
@@ -1173,6 +1590,46 @@ export async function writeAllSpoolBytes(
     }
     offset += written.bytesWritten
   }
+}
+
+async function readWriterCandidateList(
+  dependencies: EditorialHandoffDownloadDependencies,
+  token: string,
+  projectId: string,
+  episodeId: string,
+): Promise<{ readonly raw: unknown; readonly candidates: readonly EditorialMasterCandidateResult[] } | undefined> {
+  const upstream = new URL(
+    `/api/qingmu/projects/${encodeURIComponent(projectId)}/episodes/${encodeURIComponent(episodeId)}/editorial-handoff/returned-master-candidates`,
+    dependencies.baseUrl,
+  )
+  try {
+    const response = await dependencies.fetch(upstream, {
+      method: 'GET', redirect: 'error', headers: {
+        authorization: `Bearer ${token}`, accept: 'application/json',
+      },
+    })
+    const bytes = Buffer.from(await response.arrayBuffer())
+    if (!response.ok || bytes.length > 4 * 1024 * 1024) return undefined
+    const raw = JSON.parse(bytes.toString('utf8')) as unknown
+    const candidates = normalizeCandidateList(raw)
+    if (candidates === undefined) return undefined
+    const item = raw as Record<string, unknown>
+    return item.projectId === projectId && item.episodeId === episodeId ? { raw, candidates } : undefined
+  } catch { return undefined }
+}
+
+function candidateMatchesBinding(result: EditorialMasterCandidateResult, binding: CandidateBinding): boolean {
+  return result.projectId === binding.projectId && result.episodeId === binding.episodeId
+    && result.idempotencyKey === binding.requestId
+    && result.masterSha256 === binding.masterSha256 && result.materializedSha256 === binding.masterSha256
+    && result.byteSize === binding.masterSize && result.mimeType === binding.mimeType
+    && result.packageSha256 === binding.packageSha256
+    && result.sourceSnapshotSha256 === binding.sourceSnapshotSha256
+    && result.projectionSha256 === binding.projectionSha256
+    && result.downloadRequestId === binding.downloadRequestId
+    && result.importRequestId === binding.importRequestId
+    && result.preflightRequestId === binding.preflightRequestId
+    && result.preflightSha256 === binding.preflightSha256
 }
 
 /**
@@ -1475,7 +1932,13 @@ export function registerEditorialHandoffDownload(
         userId, access.projectId, access.episodeId, access.requestId, access.capability,
       )
       if (status === undefined) { json(res, 403, { code: 'editorial_master_preflight_forbidden' }); return }
-      json(res, 200, resultStatusBody(status))
+      const candidateAccess = status.state === 'succeeded'
+        ? dependencies.authorizer.issueCandidate(
+          userId, access.projectId, access.episodeId, access.requestId, access.capability,
+        ) : undefined
+      json(res, 200, {
+        ...resultStatusBody(status), ...(candidateAccess === undefined ? {} : { candidateAccess }),
+      })
     },
   })
   const disposeMaster = webServer.register({
@@ -1569,7 +2032,10 @@ export function registerEditorialHandoffDownload(
           throw new Error('writer_preflight_contract_failed')
         }
         dependencies.authorizer.finishMaster(binding, { state: 'succeeded', createdAt: Date.now(), result })
-        json(res, 200, result)
+        const candidateAccess = dependencies.authorizer.issueCandidate(
+          userId, access.projectId, access.episodeId, access.requestId, access.capability,
+        )
+        json(res, 200, { ...result, ...(candidateAccess === undefined ? {} : { candidateAccess }) })
       } catch (error) {
         const code = error instanceof Error && error.message === 'master_contract_invalid'
           ? 'master_contract_invalid'
@@ -1585,7 +2051,171 @@ export function registerEditorialHandoffDownload(
       }
     },
   })
+  const disposeCandidateList = webServer.register({
+    kind: 'exact', path: CANDIDATE_LIST_PATH, handler: async (req, res) => {
+      if (req.method !== 'GET' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'editorial_master_candidate_forbidden' }); return
+      }
+      const scope = scopeAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = scope === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (scope === undefined || token === undefined || userId === undefined) {
+        json(res, scope === undefined ? 400 : 403, { code: 'editorial_master_candidate_forbidden' }); return
+      }
+      const listing = await readWriterCandidateList(
+        dependencies, token, scope.projectId, scope.episodeId,
+      )
+      if (listing === undefined) {
+        json(res, 502, { code: 'editorial_master_candidate_list_failed' }); return
+      }
+      json(res, 200, listing.raw)
+    },
+  })
+  const disposeCandidateStatus = webServer.register({
+    kind: 'exact', path: CANDIDATE_STATUS_PATH, handler: async (req, res) => {
+      if (req.method !== 'GET' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'editorial_master_candidate_forbidden' }); return
+      }
+      const access = importAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = access === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (access === undefined || token === undefined || userId === undefined) {
+        json(res, access === undefined ? 400 : 403, { code: 'editorial_master_candidate_forbidden' }); return
+      }
+      let status = dependencies.authorizer.candidateStatus(
+        userId, access.projectId, access.episodeId, access.requestId, access.capability,
+      )
+      if (status === undefined) {
+        json(res, 403, { code: 'editorial_master_candidate_forbidden' }); return
+      }
+      if (status.state === 'unknown') {
+        const listing = await readWriterCandidateList(
+          dependencies, token, access.projectId, access.episodeId,
+        )
+        const result = listing?.candidates.find(item => item.idempotencyKey === access.requestId)
+        if (result !== undefined) {
+          const current = dependencies.authorizer.candidateBinding(
+            userId, access.projectId, access.episodeId, access.requestId, access.capability,
+          )
+          if (current !== undefined && candidateMatchesBinding(result, current)) {
+            dependencies.authorizer.finishCandidate(current, {
+              state: 'succeeded', createdAt: Date.now(), result,
+            })
+            status = dependencies.authorizer.candidateStatus(
+              userId, access.projectId, access.episodeId, access.requestId, access.capability,
+            )
+          }
+        }
+      }
+      json(res, 200, resultStatusBody(status))
+    },
+  })
+  const disposeCandidate = webServer.register({
+    kind: 'exact', path: CANDIDATE_PATH, handler: async (req, res) => {
+      if (req.method !== 'POST' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'editorial_master_candidate_forbidden' }); return
+      }
+      const access = importAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = access === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (access === undefined || userId === undefined) {
+        json(res, access === undefined ? 400 : 403, { code: 'editorial_master_candidate_forbidden' }); return
+      }
+      const binding = dependencies.authorizer.startCandidate(
+        userId, access.projectId, access.episodeId, access.requestId, access.capability,
+      )
+      if (binding === undefined) {
+        const existing = dependencies.authorizer.candidateStatus(
+          userId, access.projectId, access.episodeId, access.requestId, access.capability,
+        )
+        if (existing?.state === 'succeeded') json(res, 200, existing.result)
+        else json(res, existing === undefined ? 403 : 409, {
+          code: existing === undefined ? 'editorial_master_candidate_forbidden'
+            : existing.state === 'unknown' ? 'editorial_master_candidate_submission_unknown'
+              : 'editorial_master_candidate_request_reused',
+        })
+        return
+      }
+      let temporaryDirectory: string | undefined
+      let submitted = false
+      try {
+        const contentType = req.headers['content-type']?.split(';', 1)[0]?.trim()
+        const declaredLength = Number(req.headers['content-length'] ?? '')
+        if (![binding.mimeType, 'application/octet-stream'].includes(contentType ?? '')
+          || declaredLength !== binding.masterSize) throw new Error('candidate_contract_invalid')
+        temporaryDirectory = await mkdtemp(join(temporaryRoot, 'qingmu-editorial-candidate-'))
+        const temporaryPath = join(temporaryDirectory, 'master.media')
+        const output = await open(temporaryPath, 'wx', 0o600)
+        const digest = createHash('sha256')
+        let size = 0
+        try {
+          for await (const raw of req) {
+            const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw)
+            size += chunk.byteLength
+            if (size > binding.masterSize || size > MAX_MASTER_BYTES) throw new Error('candidate_size_mismatch')
+            digest.update(chunk)
+            await writeAllSpoolBytes(output, chunk)
+          }
+        } finally { await output.close() }
+        if (size !== binding.masterSize || digest.digest('hex') !== binding.masterSha256) {
+          throw new Error('candidate_bytes_mismatch')
+        }
+        const upstream = new URL(
+          `/api/qingmu/projects/${encodeURIComponent(binding.projectId)}/episodes/${encodeURIComponent(binding.episodeId)}/editorial-handoff/returned-master-candidates`,
+          dependencies.baseUrl,
+        )
+        const hostHeaders = editorialCandidateHeaders(
+          binding, upstream.pathname, dependencies.readEditorialHandoffKey() ?? '',
+        )
+        if (hostHeaders === undefined) throw new Error('host_service_unavailable')
+        submitted = true
+        const response = await dependencies.fetch(upstream, {
+          method: 'POST', redirect: 'error', headers: {
+            authorization: `Bearer ${token}`, accept: 'application/json',
+            'content-type': 'application/octet-stream', 'content-length': String(binding.masterSize),
+            'x-qingmu-authenticated-user-id': binding.authenticatedUserId,
+            'x-qingmu-master-sha256': binding.masterSha256,
+            'x-qingmu-master-size': String(binding.masterSize),
+            'x-qingmu-package-sha256': binding.packageSha256,
+            'x-qingmu-package-size': String(binding.packageSize),
+            'x-qingmu-source-snapshot-sha256': binding.sourceSnapshotSha256,
+            'x-qingmu-projection-sha256': binding.projectionSha256,
+            ...hostHeaders,
+          }, body: createReadStream(temporaryPath), duplex: 'half',
+        } as unknown as RequestInit & { duplex: 'half' })
+        const bytes = Buffer.from(await response.arrayBuffer())
+        if (!response.ok) {
+          submitted = false
+          throw new Error(response.status === 409 ? 'candidate_writer_conflict' : 'candidate_writer_failed')
+        }
+        const result = bytes.length <= 4 * 1024 * 1024
+          ? normalizeCandidateResult(JSON.parse(bytes.toString('utf8'))) : undefined
+        if (result === undefined || !candidateMatchesBinding(result, binding)) {
+          throw new Error('candidate_writer_contract_invalid')
+        }
+        dependencies.authorizer.finishCandidate(binding, { state: 'succeeded', createdAt: Date.now(), result })
+        json(res, 200, result)
+      } catch (error) {
+        const unknown = submitted
+        dependencies.authorizer.finishCandidate(binding, unknown
+          ? { state: 'unknown', createdAt: Date.now(), errorCode: 'candidate_submission_unknown' }
+          : { state: 'failed', createdAt: Date.now(), errorCode: error instanceof Error ? error.message : 'candidate_save_failed' })
+        if (!res.headersSent) json(res, unknown ? 502 : 409, {
+          code: unknown ? 'editorial_master_candidate_submission_unknown' : 'editorial_master_candidate_save_failed',
+        })
+        else res.destroy()
+      } finally {
+        if (temporaryDirectory !== undefined) await rm(temporaryDirectory, { recursive: true, force: true })
+      }
+    },
+  })
   return () => {
+    disposeCandidate()
+    disposeCandidateStatus()
+    disposeCandidateList()
     disposeMaster()
     disposeMasterStatus()
     disposeImport()

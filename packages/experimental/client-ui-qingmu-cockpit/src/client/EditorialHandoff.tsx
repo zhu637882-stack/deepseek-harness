@@ -8,6 +8,7 @@ import css from './EditorialHandoff.module.css'
 
 interface ImportAccess { readonly requestId: string; readonly capability: string }
 interface MasterAccess { readonly requestId: string; readonly capability: string }
+interface CandidateAccess { readonly requestId: string; readonly capability: string }
 interface ImportResult {
   readonly projectId: string
   readonly episodeId: string
@@ -32,6 +33,7 @@ interface ImportResult {
 }
 
 interface MasterResult {
+  readonly preflightSha256: string
   readonly projectId: string
   readonly episodeId: string
   readonly binding: {
@@ -56,6 +58,35 @@ interface MasterResult {
     readonly audioStreams: readonly Record<string, unknown>[]
   }
   readonly blockers: readonly string[]
+}
+
+interface CandidateResult {
+  readonly schema: 'jason.qingmu-returned-master-candidate-result.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly assetId: string
+  readonly masterSha256: string
+  readonly materializedSha256: string
+  readonly byteSize: number
+  readonly mimeType: 'video/mp4' | 'video/quicktime' | 'video/webm'
+  readonly packageSha256: string
+  readonly sourceSnapshotSha256: string
+  readonly projectionSha256: string
+  readonly preflightSha256: string
+  readonly qualityStatus: 'pending'
+  readonly selectionStatus: 'Unselected'
+  readonly isSelected: false
+  readonly approved: false
+  readonly published: false
+  readonly idempotencyKey: string
+  readonly commandReceiptId: string
+  readonly savedAt: string
+  readonly providerCalls: 0
+  readonly stageStarted: false
+  readonly approvalGranted: false
+  readonly selectionGranted: false
+  readonly releaseGranted: false
+  readonly humanSignoffInferred: false
 }
 
 interface Props {
@@ -107,7 +138,7 @@ const MASTER_BLOCKER_KEYS: Readonly<Record<string, QingmuCockpitKey>> = {
   editorial_master_fps_invalid: 'handoffMasterBlockerFps',
 }
 
-/** Read-only E8 editorial handoff draft. No button on this panel writes business state. */
+/** E8 editorial handoff plus one explicit, unselected returned-master candidate commit. */
 export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   const [projection, setProjection] = useState<YimengEditorialHandoffResponse>()
   const [loading, setLoading] = useState(false)
@@ -128,14 +159,50 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   const [masterState, setMasterState] = useState<'idle' | 'running' | 'succeeded' | 'failed'>('idle')
   const [masterResult, setMasterResult] = useState<MasterResult>()
   const [masterError, setMasterError] = useState<string>()
+  const [candidateAccess, setCandidateAccess] = useState<CandidateAccess>()
+  const [candidateState, setCandidateState] = useState<'idle' | 'running' | 'unknown' | 'succeeded' | 'failed'>('idle')
+  const [candidates, setCandidates] = useState<readonly CandidateResult[]>([])
+  const [candidateError, setCandidateError] = useState<string>()
   const generation = useRef(0)
   const downloadGeneration = useRef(0)
   const importGeneration = useRef(0)
   const masterGeneration = useRef(0)
+  const candidateGeneration = useRef(0)
   const activeController = useRef<AbortController>()
   const importController = useRef<AbortController>()
   const masterController = useRef<AbortController>()
+  const candidateController = useRef<AbortController>()
   const importErrorRef = useRef<HTMLDivElement>(null)
+
+  const loadCandidates = useCallback(async () => {
+    if (projectId === '' || episodeId === '') return
+    const current = ++candidateGeneration.current
+    candidateController.current?.abort()
+    const controller = new AbortController()
+    candidateController.current = controller
+    try {
+      const params = new URLSearchParams({ projectId, episodeId })
+      const response = await fetch(`/api/qingmu/editorial-handoff/returned-master-candidates?${params.toString()}`, {
+        method: 'GET', cache: 'no-store', signal: controller.signal,
+      })
+      if (!response.ok) throw new Error('candidate_list_failed')
+      const body = await response.json() as { schema?: string; candidates?: readonly CandidateResult[] }
+      if (body.schema !== 'jason.qingmu-returned-master-candidates.v1' || !Array.isArray(body.candidates)) {
+        throw new Error('candidate_list_contract_invalid')
+      }
+      if (current === candidateGeneration.current) {
+        setCandidates(body.candidates)
+        setCandidateError(undefined)
+      }
+    } catch (cause) {
+      if (current === candidateGeneration.current && !controller.signal.aborted) {
+        setCandidates([])
+        setCandidateError(cause instanceof Error ? cause.message : 'candidate_list_failed')
+      }
+    } finally {
+      if (current === candidateGeneration.current) candidateController.current = undefined
+    }
+  }, [episodeId, projectId])
 
   const load = useCallback(async () => {
     if (projectId === '' || episodeId === '') return
@@ -144,8 +211,10 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     downloadGeneration.current += 1
     importGeneration.current += 1
     masterGeneration.current += 1
+    candidateGeneration.current += 1
     importController.current?.abort()
     masterController.current?.abort()
+    candidateController.current?.abort()
     importController.current = undefined
     const controller = new AbortController()
     activeController.current = controller
@@ -153,6 +222,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     setDownload({ status: 'idle' })
     setLoading(true)
     setError(undefined)
+    setCandidates([])
     try {
       const value = await port.editorialHandoff({ projectId, episodeId }, controller.signal)
       if (current === generation.current) {
@@ -165,6 +235,9 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
         setMasterResult(undefined)
         setMasterState('idle')
         setMasterError(undefined)
+        setCandidateAccess(undefined)
+        setCandidateState('idle')
+        setCandidateError(undefined)
       }
     } catch (cause) {
       if (current === generation.current) {
@@ -189,12 +262,15 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       downloadGeneration.current += 1
       importGeneration.current += 1
       masterGeneration.current += 1
+      candidateGeneration.current += 1
       activeController.current?.abort()
       importController.current?.abort()
       masterController.current?.abort()
+      candidateController.current?.abort()
       activeController.current = undefined
       importController.current = undefined
       masterController.current = undefined
+      candidateController.current = undefined
     }
   }, [load])
 
@@ -242,12 +318,17 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       method: 'GET', cache: 'no-store', signal: controller.signal,
     }).then(async (response) => {
       if (!response.ok) return
-      const body = await response.json() as { status?: string; result?: MasterResult | null }
+      const body = await response.json() as {
+        status?: string
+        result?: MasterResult | null
+        candidateAccess?: CandidateAccess
+      }
       if (current === masterGeneration.current && body.status === 'succeeded'
         && body.result !== undefined && body.result !== null
         && body.result.projectId === projectId && body.result.episodeId === episodeId) {
         setMasterResult(body.result)
         setMasterState('succeeded')
+        setCandidateAccess(body.candidateAccess)
       }
     }).catch(() => undefined)
     return () => {
@@ -405,22 +486,28 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
         setMasterState('failed')
         return
       }
-      const result = await response.json() as MasterResult
+      const result = await response.json() as MasterResult & { readonly candidateAccess?: CandidateAccess }
       if (current !== masterGeneration.current) return
       if (result.projectId !== projectId || result.episodeId !== episodeId) throw new Error('scope_mismatch')
       setMasterResult(result)
       setMasterState('succeeded')
+      setCandidateAccess(result.candidateAccess)
       return
     } catch {
       if (current !== masterGeneration.current || controller.signal.aborted) return
       for (let attempt = 0; attempt < 12; attempt += 1) {
         try {
           const response = await fetch(statusUrl, { method: 'GET', cache: 'no-store', signal: controller.signal })
-          const body = await response.json() as { status?: string; result?: MasterResult | null; errorCode?: string | null }
+          const body = await response.json() as {
+            status?: string
+            result?: MasterResult | null
+            errorCode?: string | null
+            candidateAccess?: CandidateAccess
+          }
           if (current !== masterGeneration.current) return
           if (body.status === 'succeeded' && body.result !== null && body.result !== undefined
             && body.result.projectId === projectId && body.result.episodeId === episodeId) {
-            setMasterResult(body.result); setMasterState('succeeded'); return
+            setMasterResult(body.result); setMasterState('succeeded'); setCandidateAccess(body.candidateAccess); return
           }
           if (body.status === 'failed') {
             setMasterError(body.errorCode ?? 'master_preflight_failed'); setMasterState('failed'); return
@@ -439,6 +526,81 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     }
   }, [episodeId, masterAccess, masterState, projectId, selectedMaster])
 
+  const saveCandidate = useCallback(async () => {
+    if (selectedMaster === undefined || masterResult === undefined || candidateAccess === undefined
+      || masterResult.blockers.length > 0 || candidateState === 'running') return
+    const current = ++candidateGeneration.current
+    candidateController.current?.abort()
+    const controller = new AbortController()
+    candidateController.current = controller
+    const params = new URLSearchParams({ projectId, episodeId, ...candidateAccess })
+    const url = `/api/qingmu/editorial-handoff/returned-master-candidate?${params.toString()}`
+    const statusUrl = `/api/qingmu/editorial-handoff/returned-master-candidate-status?${params.toString()}`
+    setCandidateState('running')
+    setCandidateError(undefined)
+    const accept = (value: unknown): value is CandidateResult => {
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+      const result = value as Record<string, unknown>
+      return result.schema === 'jason.qingmu-returned-master-candidate-result.v1'
+        && result.projectId === projectId && result.episodeId === episodeId
+        && result.masterSha256 === masterResult.master.sha256
+        && result.materializedSha256 === result.masterSha256
+        && result.packageSha256 === masterResult.binding.packageSha256
+        && result.preflightSha256 === masterResult.preflightSha256
+        && result.selectionStatus === 'Unselected' && result.qualityStatus === 'pending'
+        && result.isSelected === false && result.approved === false && result.published === false
+        && result.providerCalls === 0 && result.stageStarted === false
+        && result.approvalGranted === false && result.selectionGranted === false
+        && result.releaseGranted === false && result.humanSignoffInferred === false
+    }
+    const complete = (result: unknown) => {
+      if (current !== candidateGeneration.current || !accept(result)) return false
+      setCandidateState('succeeded')
+      setCandidates(existing => [result, ...existing.filter(item => item.assetId !== result.assetId)])
+      return true
+    }
+    try {
+      const response = await fetch(url, {
+        method: 'POST', cache: 'no-store',
+        headers: { 'content-type': selectedMaster.type || 'application/octet-stream' },
+        body: selectedMaster, signal: controller.signal,
+      })
+      if (!response.ok) throw new Error('candidate_save_unconfirmed')
+      const result = await response.json() as CandidateResult
+      if (!complete(result)) throw new Error('candidate_receipt_mismatch')
+      return
+    } catch {
+      if (current !== candidateGeneration.current || controller.signal.aborted) return
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        try {
+          const response = await fetch(statusUrl, { method: 'GET', cache: 'no-store', signal: controller.signal })
+          const body = await response.json() as {
+            status?: string
+            result?: CandidateResult | null
+            errorCode?: string | null
+          }
+          if (current !== candidateGeneration.current) return
+          if (body.status === 'succeeded' && body.result !== null && body.result !== undefined) {
+            if (complete(body.result)) return
+            setCandidateError('candidate_receipt_mismatch'); setCandidateState('failed'); return
+          }
+          if (body.status === 'failed') {
+            setCandidateError(body.errorCode ?? 'candidate_save_failed'); setCandidateState('failed'); return
+          }
+        } catch {
+          if (current !== candidateGeneration.current) return
+          /* Recover only by the original Host receipt; never resubmit the media. */
+        }
+        await new Promise(resolve => window.setTimeout(resolve, 250))
+      }
+      if (current !== candidateGeneration.current) return
+      setCandidateError('candidate_submission_unknown')
+      setCandidateState('unknown')
+    } finally {
+      if (current === candidateGeneration.current) candidateController.current = undefined
+    }
+  }, [candidateAccess, candidateState, episodeId, masterResult, projectId, selectedMaster])
+
   if (projectId === '' || episodeId === '') return <p className={css.empty}>{t('handoffChooseEpisode')}</p>
   const blockerLabel = (code: string) => t(BLOCKER_KEYS[code] ?? 'handoffBlockerUnknown')
   const masterBlockerLabel = (code: string) => t(MASTER_BLOCKER_KEYS[code] ?? 'handoffMasterBlockerUnknown')
@@ -448,7 +610,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
         <h3 id="qingmu-editorial-handoff-title">{t('handoffTitle')}</h3>
         <p>{t('handoffBoundary')}</p>
       </div>
-      <button type="button" disabled={loading} onClick={() => { void load() }}>
+      <button type="button" disabled={loading} onClick={() => { void load(); void loadCandidates() }}>
         {loading ? t('handoffLoading') : t('handoffRefresh')}
       </button>
     </header>
@@ -521,8 +683,10 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
                 const file = event.currentTarget.files?.[0]
                 importGeneration.current += 1
                 masterGeneration.current += 1
+                candidateGeneration.current += 1
                 importController.current?.abort()
                 masterController.current?.abort()
+                candidateController.current?.abort()
                 importController.current = undefined
                 masterController.current = undefined
                 const consumedPackageAccess = importState !== 'idle' || importResult !== undefined
@@ -537,6 +701,9 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
                 setMasterResult(undefined)
                 setMasterError(undefined)
                 setMasterState('idle')
+                setCandidateAccess(undefined)
+                setCandidateError(undefined)
+                setCandidateState('idle')
               }} />
           </label>
           {selectedPackage !== undefined && <p>{selectedPackage.name} · {selectedPackage.size.toLocaleString()} bytes</p>}
@@ -591,6 +758,9 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
                 setMasterResult(undefined)
                 setMasterError(undefined)
                 setMasterState('idle')
+                setCandidateAccess(undefined)
+                setCandidateError(undefined)
+                setCandidateState('idle')
               }} />
           </label>
           {selectedMaster !== undefined && <p>{selectedMaster.name} · {selectedMaster.type || '—'} · {selectedMaster.size.toLocaleString()} bytes</p>}
@@ -621,6 +791,21 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
             {masterResult.blockers.map(code => <li key={code}>{masterBlockerLabel(code)} <code>{code}</code></li>)}
           </ul></div>}
         <p className={css.warning}>{t('handoffMasterExactBoundary')}</p>
+        {masterResult.blockers.length === 0 && <div className={css.candidateCommit}>
+          <div><strong>{t('handoffCandidateCommitTitle')}</strong><p>{t('handoffCandidateCommitBoundary')}</p>
+            {candidateAccess === undefined && candidateState !== 'succeeded'
+              && <p className={css.warning}>{t('handoffCandidateCommitUnavailable')}</p>}
+            {candidateState === 'succeeded' && <p className={css.success}>{t('handoffCandidateSaved')}</p>}
+            {candidateState === 'unknown' && <p role="alert" className={css.warning}>{t('handoffCandidateUnknown')} ({candidateError})</p>}
+            {candidateState === 'failed' && <p role="alert" className={css.error}>{t('handoffCandidateFailed')} ({candidateError})</p>}
+          </div>
+          <button type="button"
+            disabled={candidateAccess === undefined || selectedMaster === undefined
+              || candidateState === 'running' || candidateState === 'unknown' || candidateState === 'succeeded'}
+            onClick={() => { void saveCandidate() }}>
+            {candidateState === 'running' ? t('handoffCandidateSaving') : t('handoffCandidateSave')}
+          </button>
+        </div>}
         <details><summary>{t('handoffAdvanced')}</summary>
           <p>Master SHA: {masterResult.master.sha256}</p>
           <p>{masterResult.master.size.toLocaleString()} bytes · {masterResult.master.mimeType ?? '—'} · {masterResult.master.formatName ?? '—'}</p>
@@ -634,5 +819,27 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
         <p>Projection SHA: {projection.projectionSha256}</p>
       </details>
     </>}
+    <section className={css.candidateShelf} aria-labelledby="handoff-candidate-shelf">
+      <header><div><strong id="handoff-candidate-shelf">{t('handoffCandidateShelfTitle')}</strong>
+        <p>{t('handoffCandidateShelfBoundary')}</p></div>
+      <button type="button" onClick={() => { void loadCandidates() }}>{t('handoffCandidateRead')}</button>
+      </header>
+      {candidateError !== undefined && candidateState !== 'unknown' && candidateState !== 'failed'
+        && <p role="alert" className={css.error}>{t('handoffCandidateListFailed')} ({candidateError})</p>}
+      {candidates.length === 0
+        ? <p className={css.warning}>{t('handoffCandidateEmpty')}</p>
+        : <ul>{candidates.map(candidate => <li key={candidate.assetId}>
+          <div><strong>{t('handoffCandidateStatus')}</strong><span>{t('handoffCandidateUnselected')}</span></div>
+          <p>{candidate.mimeType} · {candidate.byteSize.toLocaleString()} bytes · {candidate.savedAt}</p>
+          <details><summary>{t('handoffAdvanced')}</summary>
+            <p>Asset ID: {candidate.assetId}</p>
+            <p>Master SHA: {candidate.masterSha256}</p>
+            <p>Package SHA: {candidate.packageSha256}</p>
+            <p>Source SHA: {candidate.sourceSnapshotSha256}</p>
+            <p>Preflight SHA: {candidate.preflightSha256}</p>
+            <p>Receipt: {candidate.commandReceiptId}</p>
+          </details>
+        </li>)}</ul>}
+    </section>
   </section>
 }

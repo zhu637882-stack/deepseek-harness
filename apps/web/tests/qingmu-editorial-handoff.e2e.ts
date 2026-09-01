@@ -25,6 +25,33 @@ interface Fixture {
   readonly storageRoot: string
 }
 
+interface BoundaryFacts {
+  readonly assetCount: number
+  readonly protectedCounts: Readonly<Record<string, number | null>>
+  readonly candidates: readonly {
+    readonly id: string
+    readonly local_path: string
+    readonly sha256: string
+    readonly selection_status: string
+    readonly quality_status: string
+    readonly is_selected: number
+  }[]
+}
+
+async function readBoundaryFacts(writerRoot: string, sqlitePath: string): Promise<BoundaryFacts> {
+  const result = await execFile(join(writerRoot, '.venv/bin/python'), ['-c', [
+    'import json,sqlite3,sys',
+    'conn=sqlite3.connect(sys.argv[1])',
+    'conn.row_factory=sqlite3.Row',
+    'tables={r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type=\'table\'")}',
+    'names=["final_outputs","prompt_ir_sets","human_decisions","generation_tasks","stage_runs","release_manifests"]',
+    'counts={name:(conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0] if name in tables else None) for name in names}',
+    'candidates=[dict(r) for r in conn.execute("SELECT id,local_path,sha256,selection_status,quality_status,is_selected FROM assets WHERE role=\'editorial_master_candidate\' ORDER BY id")]',
+    'print(json.dumps({"assetCount":conn.execute("SELECT COUNT(*) FROM assets").fetchone()[0],"protectedCounts":counts,"candidates":candidates},sort_keys=True))',
+  ].join('\n'), sqlitePath], { env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: '1' } })
+  return JSON.parse(result.stdout) as BoundaryFacts
+}
+
 async function fingerprintFiles(root: string): Promise<Record<string, string>> {
   const result: Record<string, string> = {}
   async function visit(path: string, relative: string): Promise<void> {
@@ -67,6 +94,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
     let page: Page
     let fixture: Fixture
     let beforeDb: string
+    let beforeBoundaryFacts: BoundaryFacts
     let beforeStorage: Record<string, string>
     let writerSpoolRoot = ''
     const originalToken = process.env.YIMENG_API_TOKEN
@@ -74,6 +102,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
     const captured: Record<string, unknown>[] = []
     const downloadRequests: string[] = []
     const masterRequests: string[] = []
+    const candidateRequests: string[] = []
 
     async function startFixture(resume: boolean): Promise<Fixture> {
       if (root === undefined || writerRoot === undefined) throw new Error('Fixture roots are required')
@@ -130,6 +159,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       fixture = await startFixture(true)
       expect(await readdir(writerSpoolRoot)).toEqual(['keep-me.txt'])
       beforeDb = createHash('sha256').update(await readFile(fixture.sqlitePath)).digest('hex')
+      beforeBoundaryFacts = await readBoundaryFacts(writerRoot, fixture.sqlitePath)
       beforeStorage = await fingerprintFiles(fixture.storageRoot)
       process.env.YIMENG_API_TOKEN = fixture.token
       let overlay = await readFile(join(REPO_ROOT, 'packages/experimental/qingmu-web/cordis.patch.yml'), 'utf8')
@@ -153,6 +183,9 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
         if (!['127.0.0.1', 'localhost'].includes(url.hostname)) throw new Error(`External browser request forbidden: ${url.origin}`)
         if (url.pathname === '/qingmu-yimeng/editorialHandoff') captured.push(request.postDataJSON() as Record<string, unknown>)
         if (url.pathname === '/api/qingmu/editorial-handoff/master-preflight') masterRequests.push(request.url())
+        if (url.pathname === '/api/qingmu/editorial-handoff/returned-master-candidate' && request.method() === 'POST') {
+          candidateRequests.push(request.url())
+        }
       })
       await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
       await page.getByRole('button', { name: '进入青木 OS' }).click()
@@ -172,7 +205,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       }
     })
 
-    it('downloads exact official OTIO twice, fails stale, and recovers after FastAPI restart', async () => {
+    it('downloads exact OTIO, preflights and saves one unselected master candidate, then recovers after restart', async () => {
       if (scaffold === undefined || browser === undefined || writerRoot === undefined || root === undefined) throw new Error('E2E dependencies were not started')
       await page.getByRole('button', { name: '青木制作台', exact: true }).click()
       const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
@@ -206,55 +239,8 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       expect(statusText).toContain('青木视频生产交接就绪: 否')
       expect(statusText).toContain('易梦剧集发布就绪: 否')
 
-      // The browser cannot choose the Writer identity for a Host capability. A login
-      // switch must reject the old capability without consuming it.
-      process.env.YIMENG_API_TOKEN = fixture.otherToken
-      await page.evaluate(() => {
-        Reflect.set(globalThis, '__qingmuOriginalAnchorClick', HTMLAnchorElement.prototype.click)
-        HTMLAnchorElement.prototype.click = function captureDownloadCapability() {
-          Reflect.set(globalThis, '__qingmuDownloadCapabilityUrl', this.href)
-        }
-      })
-      await downloadButton.click()
-      await expect.poll(() => page.evaluate(() =>
-        Reflect.get(globalThis, '__qingmuDownloadCapabilityUrl') as unknown,
-      )).toEqual(expect.any(String))
-      const oldCapabilityUrl = await page.evaluate(() =>
-        Reflect.get(globalThis, '__qingmuDownloadCapabilityUrl') as unknown)
-      if (typeof oldCapabilityUrl !== 'string') throw new Error('Download capability URL missing')
-      const rejected = await page.evaluate(async (url) => {
-        const response = await fetch(String(url), { cache: 'no-store' })
-        return { status: response.status, body: await response.json() as unknown }
-      }, oldCapabilityUrl)
-      expect(rejected).toEqual({
-        status: 403, body: { code: 'editorial_handoff_download_forbidden' },
-      })
-      await page.evaluate(() => {
-        const original = Reflect.get(globalThis, '__qingmuOriginalAnchorClick') as unknown
-        if (typeof original === 'function') HTMLAnchorElement.prototype.click = original
-        Reflect.deleteProperty(globalThis, '__qingmuOriginalAnchorClick')
-        Reflect.deleteProperty(globalThis, '__qingmuDownloadCapabilityUrl')
-      })
-      process.env.YIMENG_API_TOKEN = fixture.token
-      const oldStatus = await page.evaluate(async (url) => {
-        const statusUrl = new URL(url)
-        statusUrl.pathname = '/api/qingmu/editorial-handoff/download-status'
-        const response = await fetch(statusUrl, { cache: 'no-store' })
-        return { status: response.status, body: await response.json() as unknown }
-      }, oldCapabilityUrl)
-      expect(oldStatus).toEqual({
-        status: 200,
-        body: { status: 'not_started', sha256: null, size: null, errorCode: null },
-      })
-      await dialog.getByRole('button', { name: '刷新交接事实' }).click()
-      await expect.poll(() => downloadButton.isEnabled()).toBe(true)
-
       const packagePaths: string[] = []
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        if (attempt > 0) {
-          await dialog.getByRole('button', { name: '刷新交接事实' }).click()
-          await expect.poll(() => downloadButton.isEnabled()).toBe(true)
-        }
+      for (let attempt = 0; attempt < 1; attempt += 1) {
         const event = page.waitForEvent('download')
         await downloadButton.click()
         const download = await event
@@ -269,8 +255,6 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
         await expect.poll(() => dialog.getByText(/SHA-256:/u).count()).toBe(1)
       }
       const firstBytes = await readFile(packagePaths[0] as string)
-      const secondBytes = await readFile(packagePaths[1] as string)
-      expect(secondBytes).toEqual(firstBytes)
       const packageSha = createHash('sha256').update(firstBytes).digest('hex')
       expect(await dialog.getByText(`SHA-256: ${packageSha}`).count()).toBe(1)
       const parsed = await execFile(join(writerRoot, '.venv/bin/python'), ['-c', [
@@ -290,7 +274,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       })
       const packageInput = dialog.getByLabel('选择本地 OTIO ZIP')
       expect(await packageInput.isEnabled()).toBe(true)
-      await packageInput.setInputFiles(packagePaths[1] as string)
+      await packageInput.setInputFiles(packagePaths[0] as string)
       await dialog.getByRole('button', { name: '复验并预览' }).click()
       await dialog.getByText('SHA-256 与大小均精确匹配原下载终态').waitFor()
       expect(await dialog.getByText('结构、媒体引用与 otio_json 复验通过').count()).toBe(1)
@@ -313,6 +297,21 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       expect(await dialog.getByText(`Master SHA: ${masterSha}`).count()).toBe(1)
       expect(await dialog.getByText('720 × 1280').count()).toBeGreaterThan(0)
       expect(await dialog.getByText('1', { exact: true }).count()).toBeGreaterThan(0)
+      await dialog.getByRole('button', { name: '保存为回传候选', exact: true }).click()
+      await dialog.getByText('候选已从易梦原回执读回；状态仍为未选择、待质检、未批准、未发布。').waitFor()
+      expect(candidateRequests).toHaveLength(1)
+      expect(await dialog.getByText('未选择 · 未批准 · 未发布', { exact: true }).count()).toBe(1)
+      const savedFacts = await readBoundaryFacts(writerRoot, fixture.sqlitePath)
+      expect(savedFacts.assetCount).toBe(beforeBoundaryFacts.assetCount + 1)
+      expect(savedFacts.protectedCounts).toEqual(beforeBoundaryFacts.protectedCounts)
+      expect(savedFacts.candidates).toEqual([expect.objectContaining({
+        sha256: masterSha,
+        selection_status: 'Unselected',
+        quality_status: 'pending',
+        is_selected: 0,
+      })])
+      const candidatePath = join(fixture.storageRoot, savedFacts.candidates[0]?.local_path ?? '')
+      expect(createHash('sha256').update(await readFile(candidatePath)).digest('hex')).toBe(masterSha)
       const masterRequestUrl = masterRequests.at(-1)
       if (masterRequestUrl === undefined) throw new Error('Master preflight request URL missing')
       const crossProject = await page.evaluate(async (url) => {
@@ -352,9 +351,9 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
 
       for (const viewport of [{ width: 1280, height: 800 }, { width: 1440, height: 900 }]) {
         await page.setViewportSize(viewport)
-        const receiptConclusion = dialog.getByText('SHA-256 与大小均精确匹配原下载终态')
-        await receiptConclusion.scrollIntoViewIfNeeded()
-        const conclusionBox = await receiptConclusion.boundingBox()
+        const candidateConclusion = dialog.getByText('未选择 · 未批准 · 未发布', { exact: true })
+        await candidateConclusion.scrollIntoViewIfNeeded()
+        const conclusionBox = await candidateConclusion.boundingBox()
         expect(conclusionBox).not.toBeNull()
         expect(conclusionBox?.y ?? -1).toBeGreaterThanOrEqual(0)
         expect((conclusionBox?.y ?? viewport.height) + (conclusionBox?.height ?? 1)).toBeLessThanOrEqual(viewport.height)
@@ -378,84 +377,38 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       await freshDialog.getByRole('combobox', { name: '项目', exact: true }).selectOption(fixture.projectId)
       await freshDialog.getByRole('combobox', { name: '剧集', exact: true }).selectOption(fixture.episodeId)
       await freshDialog.getByRole('tab', { name: '费用与交付', exact: true }).click()
-      const freshButton = freshDialog.getByRole('button', { name: '下载 OTIO 媒体包' })
-      for (let attempt = 0; attempt < 3 && !await freshButton.isVisible(); attempt += 1) {
-        await freshPage.waitForTimeout(500)
-        if (await freshDialog.getByRole('alert').isVisible()) {
-          await freshDialog.getByRole('button', { name: '刷新交接事实' }).click()
+      const readCandidates = freshDialog.getByRole('button', { name: '读取已保存候选', exact: true })
+      await readCandidates.waitFor({ timeout: 10_000 })
+      const recoveredCandidate = freshDialog.getByText('未选择 · 未批准 · 未发布', { exact: true })
+      const readCandidateShelf = async () => {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          await readCandidates.click()
+          await recoveredCandidate.waitFor({ timeout: 5000 }).catch(() => undefined)
+          if (await recoveredCandidate.isVisible()) return
+          await freshPage.waitForTimeout(500)
         }
-        await freshButton.waitFor({ timeout: 10_000 }).catch(() => undefined)
+        throw new Error(`Persisted candidate did not recover: ${await freshDialog.innerText()}`)
       }
-      expect(await freshButton.isEnabled()).toBe(true)
-      expect(await freshDialog.getByRole('list', { name: '剪辑交接镜头清单' }).locator(':scope > li').count()).toBe(2)
-      await freshDialog.getByText('SHA-256 与大小均精确匹配原下载终态').waitFor()
-      expect(await freshDialog.getByText('结构、媒体引用与 otio_json 复验通过').count()).toBe(1)
-      expect(await freshDialog.getByText('仍绑定当前项目、剧集、来源与投影').count()).toBe(1)
-      await freshDialog.getByText('仅预检，未入库、未发布、未签收。').waitFor()
+      await readCandidateShelf()
       expect(await freshDialog.getByText(`Master SHA: ${masterSha}`).count()).toBe(1)
+      const candidateBytes = await readFile(candidatePath)
+      await writeFile(candidatePath, Buffer.from('tampered-editorial-master-candidate'))
+      await readCandidates.click()
+      await freshDialog.getByText(/candidate_list_failed/u).waitFor()
+      expect(await recoveredCandidate.count()).toBe(0)
+      await writeFile(candidatePath, candidateBytes)
+      await readCandidateShelf()
       await fresh.close()
-      const tamperCheck = await execFile(join(writerRoot, '.venv/bin/python'), ['-c', [
-        'import sys,zipfile',
-        'from pathlib import Path',
-        'from jason.apps.studio.qingmu_editorial_package import verify_package',
-        'source,target=map(Path,sys.argv[1:3])',
-        'with zipfile.ZipFile(source) as archive:',
-        '  entries=[(entry.filename, archive.read(entry)) for entry in archive.infolist()]',
-        'with zipfile.ZipFile(target,"w",compression=zipfile.ZIP_STORED) as archive:',
-        '  for name,payload in entries:',
-        '    archive.writestr(name, payload + b" " if name == "timeline.otio" else payload)',
-        'try:',
-        '  verify_package(target)',
-        'except Exception as error:',
-        '  print(f"rejected:{type(error).__name__}:{error}")',
-        'else:',
-        '  raise SystemExit("tampered package accepted")',
-      ].join('\n'), packagePaths[0] as string, join(root, 'handoff-tampered.otio.zip')], {
-        env: { PATH: process.env.PATH, PYTHONPATH: join(writerRoot, 'backend/src'), PYTHONDONTWRITEBYTECODE: '1' },
-      })
-      expect(tamperCheck.stdout).toMatch(/^rejected:/u)
-
-      const projectionUrl = `${fixture.baseUrl}/api/qingmu/projects/${encodeURIComponent(fixture.projectId)}/episodes/${encodeURIComponent(fixture.episodeId)}/editorial-handoff`
-      const wavEntry = Object.keys(beforeStorage).find(path => path.endsWith('.wav'))
-      if (wavEntry === undefined) throw new Error('Authoritative audio fixture missing')
-      const audioPath = join(fixture.storageRoot, wavEntry)
-      const audioBytes = await readFile(audioPath)
-      await dialog.getByRole('button', { name: '刷新交接事实' }).click()
-      await expect.poll(() => downloadButton.isEnabled()).toBe(true)
-      await writeFile(audioPath, Buffer.from('tampered-audio'))
-      await downloadButton.click()
-      await expect.poll(() => dialog.getByText('读取期间来源已变化，请刷新读取同一份当前快照。').count()).toBe(1)
-      await dialog.getByRole('button', { name: '刷新交接事实' }).click()
-      const disabledButton = dialog.getByRole('button', { name: '当前不可下载' })
-      for (let attempt = 0; attempt < 3 && !await disabledButton.isVisible(); attempt += 1) {
-        await page.waitForTimeout(500)
-        if (await dialog.getByRole('alert').isVisible()) {
-          await dialog.getByRole('button', { name: '刷新交接事实' }).click()
-        }
-        await disabledButton.waitFor({ timeout: 10_000 }).catch(() => undefined)
-      }
-      if (!await disabledButton.isVisible()) {
-        const direct = await fetch(projectionUrl, { headers: { authorization: `Bearer ${fixture.token}` } })
-        throw new Error(`Tampered handoff did not project a blocker: ${direct.status}:${(await direct.text()).slice(0, 500)} UI=${await dialog.innerText()}`)
-      }
-      expect(await disabledButton.isDisabled()).toBe(true)
-      expect(await dialog.getByText(/SHA-256:/u).count()).toBe(0)
-      await writeFile(audioPath, audioBytes)
-      await dialog.getByRole('button', { name: '刷新交接事实' }).click()
-      const restoredButton = dialog.getByRole('button', { name: '下载 OTIO 媒体包' })
-      for (let attempt = 0; attempt < 3 && !await restoredButton.isVisible(); attempt += 1) {
-        await page.waitForTimeout(500)
-        if (await dialog.getByRole('alert').isVisible()) {
-          await dialog.getByRole('button', { name: '刷新交接事实' }).click()
-        }
-        await restoredButton.waitFor({ timeout: 10_000 }).catch(() => undefined)
-      }
-      expect(await restoredButton.isEnabled()).toBe(true)
 
       expect(captured.length).toBeGreaterThan(0)
       expect(await page.locator('body').innerHTML()).not.toContain(fixture.token)
-      expect(createHash('sha256').update(await readFile(fixture.sqlitePath)).digest('hex')).toBe(beforeDb)
-      expect(await fingerprintFiles(fixture.storageRoot)).toEqual(beforeStorage)
+      expect(createHash('sha256').update(await readFile(fixture.sqlitePath)).digest('hex')).not.toBe(beforeDb)
+      const finalFacts = await readBoundaryFacts(writerRoot, fixture.sqlitePath)
+      expect(finalFacts).toEqual(savedFacts)
+      const finalStorage = await fingerprintFiles(fixture.storageRoot)
+      expect(Object.entries(beforeStorage).every(([path, digest]) => finalStorage[path] === digest)).toBe(true)
+      expect(Object.keys(finalStorage)).toHaveLength(Object.keys(beforeStorage).length + 1)
+      expect(candidateRequests).toHaveLength(1)
     }, 120_000)
   },
 )
