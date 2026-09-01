@@ -262,6 +262,33 @@ class OwnershipTests(unittest.TestCase):
         self.assertIsNotNone(child.poll())
         local.stop_child(child)
 
+    def test_login_requires_reopening_the_single_entry_url(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "private").mkdir()
+            local.write_json(root / "private/login.json", {
+                "username": "qingmu-local", "password": "isolated-password",
+            })
+            supervisor = local.Supervisor(root, {"instanceId": "unit", "root": str(root)})
+            expected_entry = "http://127.0.0.1:49900/qingmu-runtime/local-session"
+            supervisor.ports = {
+                "apiUrl": "http://127.0.0.1:49899", "entryUrl": expected_entry,
+            }
+            with patch.object(supervisor, "api_identity"), \
+                 patch.object(local, "http", return_value={"token": "renewed-token"}), \
+                 patch.object(local, "stop_child"), \
+                 patch.object(supervisor, "start_host"), \
+                 patch.object(supervisor, "start_frontend"), \
+                 patch.object(supervisor, "status", return_value={"entryUrl": expected_entry}):
+                result = supervisor.login()
+            self.assertEqual(result["entryUrl"], expected_entry)
+            self.assertIn("重新打开 entryUrl", result["message"])
+            self.assertNotIn("刷新页面", result["message"])
+            self.assertEqual(
+                json.loads((root / "private/session.json").read_text())["token"],
+                "renewed-token",
+            )
+
     def test_partial_start_cleans_only_owned_child(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

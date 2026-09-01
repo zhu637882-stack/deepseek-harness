@@ -555,7 +555,7 @@ class Supervisor:
             identity = http(self.ports["apiUrl"] + "/api/auth/me", token=token)
             session = "已登录：" + identity["username"]
         except (OSError, ValueError):
-            session = "会话缺失或过期：运行 login，然后刷新页面；不会自动重发命令"
+            session = "会话缺失或过期：运行 login，然后重新打开 entryUrl；不会自动重发命令"
         return {"instanceId": self.config["instanceId"], "root": str(self.root),
                 "supervisorPid": os.getpid(), "apiPid": self.api.pid if self.api else None,
                 "hostPid": self.host.pid if self.host else None, **self.ports,
@@ -580,7 +580,7 @@ class Supervisor:
         stop_child(self.host)
         self.start_host()
         self.start_frontend()
-        return {**self.status(), "message": "会话已更新。刷新页面；未知提交结果请先恢复原回执，不要新建命令。"}
+        return {**self.status(), "message": "会话已更新。请重新打开 entryUrl；未知提交结果请先恢复原回执，不要新建命令。"}
 
     def run(self) -> None:
         with instance_lock(self.root):
