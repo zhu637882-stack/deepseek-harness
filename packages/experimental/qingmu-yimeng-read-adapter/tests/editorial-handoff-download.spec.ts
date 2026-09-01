@@ -917,6 +917,151 @@ describe('editorial handoff Host download bridge', () => {
     expect(confirmPosts).toBe(2)
   })
 
+  it('recovers RC1 and content-decision receipts without a second POST', async () => {
+    const previewSha256 = '1'.repeat(64)
+    const requestSha256 = createHash('sha256').update(JSON.stringify({
+      buildCommit: 'c'.repeat(40), previewSha256,
+    })).digest('hex')
+    const flags = {
+      providerCalls: 0, stageStarted: false, approvalGranted: false,
+      releaseGranted: false, published: false, humanSignoffInferred: false,
+    }
+    const technicalQc = {
+      commandReceiptId: 'receipt_qc_rc1', commandReceiptSha256: '2'.repeat(64),
+      masterSha256: '3'.repeat(64), sourceSnapshotSha256: '4'.repeat(64),
+      projectionSha256: '5'.repeat(64), selectionSourceSha256: '6'.repeat(64),
+      deliveryProfileSha256: '7'.repeat(64), canonicalResultSha256: '8'.repeat(64),
+      outcome: 'passed', qualityStatus: 'passed',
+    }
+    const subject = {
+      projectId: 'project-e8', episodeId: 'episode-e8', packageLevel: 'RC1',
+      releaseAuthority: { revision: 4 }, machineReadinessSha256: '0'.repeat(64),
+      buildIdentity: { commit: 'c'.repeat(40), sourceClean: true, appEnv: 'production',
+        runtimeMode: 'real', isRealRun: true, isDryRun: false },
+      final: { finalOutputId: 'final_rc1', assetId: 'asset_rc1', sha256: '3'.repeat(64), bytes: 2048 },
+    }
+    const preview = {
+      schema: 'jason.qingmu-canonical-evidence-freeze-preview.v1',
+      projectId: 'project-e8', episodeId: 'episode-e8', subject,
+      subjectSha256: '9'.repeat(64), previewSha256,
+      idempotencyKey: 'rc1-freeze-12345678', machineReady: true,
+      machineBlockers: [], releaseBlockers: [], technicalQc,
+      canConfirm: true, hardBlockers: [], ...flags,
+    }
+    const packageResult = {
+      schema: 'jason.qingmu-canonical-evidence-freeze-result.v1',
+      packageLevel: 'RC1', projectId: 'project-e8', episodeId: 'episode-e8',
+      packageId: 'evidence_rc1', manifestSha256: 'a'.repeat(64),
+      zipSha256: 'b'.repeat(64), zipBytes: 4096, verified: true, packageVerified: true,
+      requestSha256, subjectSha256: preview.subjectSha256,
+      machineReadinessSha256: subject.machineReadinessSha256, technicalQc,
+      buildIdentity: subject.buildIdentity, releaseAuthorityRevisionBefore: 3,
+      releaseAuthorityRevision: 4, releaseSignoffGranted: false, releaseReady: false,
+      releaseBlockers: ['human_signoff_missing'], commandReceiptId: 'receipt_rc1',
+      eventId: 'event_rc1', committedAt: '2026-09-01T00:00:03Z', ...flags,
+    }
+    const binding = {
+      projectId: 'project-e8', episodeId: 'episode-e8', authorityRevision: 4,
+      contentReviewToken: 'd'.repeat(64), finalOutputId: 'final_rc1', finalAssetId: 'asset_rc1',
+      finalSha256: '3'.repeat(64), finalBytes: 2048, materializedSha256: '3'.repeat(64),
+      verifyEvidenceSha256: 'e'.repeat(64), rc1PackageId: 'evidence_rc1',
+      rc1ManifestSha256: 'a'.repeat(64),
+    }
+    const decision = {
+      schema: 'jason.episode-final-content-decision.v1', projectId: 'project-e8',
+      episodeId: 'episode-e8', decision: 'rejected', reason: 'picture_or_timing',
+      idempotencyKey: 'content-decision-12345678', binding,
+      releaseSignoffGranted: false, publishReady: false,
+    }
+    let rc1Posts = 0
+    let rc1Recoveries = 0
+    let decisionPosts = 0
+    let decisionRecoveries = 0
+    const fetchUpstream = vi.fn(async (input: string | URL | Request) => {
+      const target = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const url = new URL(target)
+      if (url.pathname.endsWith('/rc1')) {
+        rc1Posts += 1
+        const response = new Response(JSON.stringify(packageResult), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+        Object.defineProperty(response, 'arrayBuffer', {
+          value: async () => { throw new Error('simulated RC1 response loss') },
+        })
+        return response
+      }
+      if (url.pathname.includes('/rc1-freezes/')) {
+        rc1Recoveries += 1
+        expect(url.searchParams.get('requestSha256')).toBe(requestSha256)
+        return new Response(JSON.stringify(packageResult), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url.pathname.endsWith('/final-content-decision')) {
+        decisionPosts += 1
+        if (decisionPosts > 1) {
+          return new Response(JSON.stringify({ detail: { code: 'idempotency_key_payload_mismatch' } }), {
+            status: 409, headers: { 'content-type': 'application/json' },
+          })
+        }
+        const response = new Response(JSON.stringify(decision), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+        Object.defineProperty(response, 'arrayBuffer', {
+          value: async () => { throw new Error('simulated decision response loss') },
+        })
+        return response
+      }
+      if (url.pathname.includes('/final-content-decisions/')) {
+        decisionRecoveries += 1
+        const requestSha256 = url.searchParams.get('requestSha256')
+        expect(requestSha256).toMatch(/^[0-9a-f]{64}$/)
+        return new Response(JSON.stringify({ ...decision, requestSha256 }), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+      }
+      return new Response('{}', { status: 404 })
+    }) as unknown as typeof globalThis.fetch
+    const { base } = await host(fetchUpstream)
+    const scope = new URLSearchParams({ projectId: 'project-e8', episodeId: 'episode-e8' })
+
+    const rc1 = await fetch(`${base}/api/qingmu/editorial-handoff/rc1?${scope.toString()}`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+        previewSha256, buildCommit: subject.buildIdentity.commit, idempotencyKey: preview.idempotencyKey,
+      }),
+    })
+    expect(rc1.status).toBe(200)
+    expect((await rc1.json()) as unknown).toEqual(packageResult)
+
+    const content = await fetch(
+      `${base}/api/qingmu/editorial-handoff/final-content-decision?${scope.toString()}`,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+        decision: 'rejected', binding, playedCoverage: 1,
+        checks: { picture_and_timing_reviewed: false, dialogue_and_audio_reviewed: true,
+          continuity_and_content_reviewed: true },
+        secondConfirmed: false, reason: 'picture_or_timing', note: 'fixture rejection',
+        idempotencyKey: decision.idempotencyKey,
+      }) },
+    )
+    expect(content.status).toBe(200)
+    expect((await content.json()) as Record<string, unknown>).toMatchObject(decision)
+
+    const mismatch = await fetch(
+      `${base}/api/qingmu/editorial-handoff/final-content-decision?${scope.toString()}`,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+        decision: 'rejected', binding, playedCoverage: 1,
+        checks: { picture_and_timing_reviewed: false, dialogue_and_audio_reviewed: true,
+          continuity_and_content_reviewed: true },
+        secondConfirmed: false, reason: 'picture_or_timing', note: 'different payload',
+        idempotencyKey: decision.idempotencyKey,
+      }) },
+    )
+    expect(mismatch.status).toBe(409)
+    expect({ rc1Posts, rc1Recoveries, decisionPosts, decisionRecoveries }).toEqual({
+      rc1Posts: 1, rc1Recoveries: 1, decisionPosts: 2, decisionRecoveries: 1,
+    })
+  })
+
   it('writes every upload byte when the spool writer reports partial progress', async () => {
     const stored: number[] = []
     const writer = {

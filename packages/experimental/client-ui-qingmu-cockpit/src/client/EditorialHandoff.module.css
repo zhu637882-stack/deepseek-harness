@@ -51,13 +51,32 @@
 .candidateShelf li p { color: #b9d0c1; overflow-wrap: anywhere; }
 .confirmation { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid #4b7f63; border-radius: 8px; background: #0d1d16; color: #e8fff1; }
 .confirmation input { flex: 0 0 auto; margin-top: 3px; accent-color: var(--qingmu-accent); }
+.rc1Grid { display: grid; grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(260px, 1fr)); gap: 12px; }
+.rc1Card { display: grid; align-content: start; gap: 12px; min-width: 0; padding: 16px; border: 1px solid #315f47; border-radius: 10px; background: #0b1711; color: #e8fff1; }
+.rc1Card header p { margin: 6px 0 0; color: #b9d0c1; }
+.rc1Card button, .downloadLink { min-height: 40px; }
+.finalPlayer { display: block; width: 100%; max-height: 420px; border: 1px solid #315f47; border-radius: 8px; background: #000; }
+.reviewChecks { display: grid; gap: 8px; margin: 0; padding: 12px; border: 1px solid #315f47; border-radius: 8px; }
+.reviewChecks label { display: flex; gap: 9px; align-items: flex-start; }
+.reviewChecks input { margin-top: 3px; accent-color: var(--qingmu-accent); }
+.formField { display: grid; gap: 6px; color: #b9d0c1; }
+.formField textarea, .formField select { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid #315f47; border-radius: 7px; background: #07110c; color: #e8fff1; padding: 10px; }
+.formField textarea { min-height: 84px; resize: vertical; }
+.decisionActions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.rejectButton { border-color: #9b5c4b; color: #ffd8cd; }
+.downloadLink { display: inline-flex; align-items: center; justify-content: center; padding: 0 14px; border: 1px solid var(--qingmu-accent); border-radius: 7px; color: var(--qingmu-accent); text-decoration: none; }
+.downloadLink:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .empty { color: var(--dsw-alias-label-secondary); }
 details p { overflow-wrap: anywhere; }
 @media (max-width: 1100px) {
   .metrics, .masterFacts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .rc1Grid { grid-template-columns: 1fr 1fr; }
+  .rc1Card:first-child { grid-column: 1 / -1; }
 }
 @media (max-width: 760px) {
   .header, .exportBox, .importBox, .candidateCommit, .candidateShelf > header { align-items: stretch; flex-direction: column; }
   .readiness, .metrics, .shots dl, .conclusions, .previewGrid, .masterFacts { grid-template-columns: 1fr; }
   .header button, .exportBox button, .importBox button, .candidateCommit button, .candidateShelf header button { width: 100%; }
+  .rc1Grid, .decisionActions { grid-template-columns: 1fr; }
+  .rc1Card:first-child { grid-column: auto; }
 }

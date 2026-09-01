@@ -246,6 +246,64 @@ interface EvidenceFreezeStatus {
   readonly preview: EvidenceFreezePreview
 }
 
+interface FinalContentBinding {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly authorityRevision: number
+  readonly contentReviewToken: string
+  readonly finalOutputId: string
+  readonly finalAssetId: string
+  readonly finalSha256: string
+  readonly finalBytes: number
+  readonly materializedSha256: string
+  readonly verifyEvidenceSha256: string
+  readonly rc1PackageId: string
+  readonly rc1ManifestSha256: string
+}
+
+interface FinalContentDecisionResult {
+  readonly schema: 'jason.episode-final-content-decision.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly decision: 'accepted' | 'rejected'
+  readonly reason: string | null
+  readonly binding: FinalContentBinding
+  readonly idempotencyKey: string
+  readonly commandReceiptId: string
+  readonly releaseSignoffGranted: false
+  readonly publishReady: false
+}
+
+function finalContentBindingIdentity(binding: FinalContentBinding): string {
+  return JSON.stringify([
+    binding.projectId, binding.episodeId, binding.authorityRevision,
+    binding.contentReviewToken, binding.finalOutputId, binding.finalAssetId,
+    binding.finalSha256, binding.finalBytes, binding.materializedSha256,
+    binding.verifyEvidenceSha256, binding.rc1PackageId, binding.rc1ManifestSha256,
+  ])
+}
+
+interface Rc1Status {
+  readonly schema: 'jason.qingmu-editorial-handoff-rc1-status.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly rc1Package: EvidenceFreezeStatus & { readonly packageLevel: 'RC1' }
+  readonly contentReview: {
+    readonly schema: 'jason.episode-final-content-decision-status.v1'
+    readonly binding?: FinalContentBinding
+    readonly currentDecision: FinalContentDecisionResult | null
+    readonly canDecide: boolean
+    readonly blockers?: readonly string[]
+    readonly releaseSignoffGranted: false
+    readonly publishReady: false
+  }
+  readonly releaseSignoff: {
+    readonly granted: false
+    readonly readOnly: true
+    readonly blockers: readonly string[]
+  }
+}
+
 type UntrustedEvidenceFreezePayload<T extends { schema: string }> = Omit<T, 'schema'> & {
   schema: string
 }
@@ -342,6 +400,19 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   const [evidenceFreezeConfirmed, setEvidenceFreezeConfirmed] = useState(false)
   const [evidenceFreezeState, setEvidenceFreezeState] = useState<'idle' | 'previewing' | 'previewed' | 'saving' | 'succeeded' | 'failed'>('idle')
   const [evidenceFreezeError, setEvidenceFreezeError] = useState<string>()
+  const [rc1Status, setRc1Status] = useState<Rc1Status>()
+  const [rc1Preview, setRc1Preview] = useState<EvidenceFreezePreview>()
+  const [rc1State, setRc1State] = useState<'idle' | 'loading' | 'previewed' | 'saving' | 'deciding'>('idle')
+  const [rc1Error, setRc1Error] = useState<string>()
+  const [playedCoverage, setPlayedCoverage] = useState(0)
+  const [contentChecks, setContentChecks] = useState<Record<string, boolean>>({
+    picture_and_timing_reviewed: false,
+    dialogue_and_audio_reviewed: false,
+    continuity_and_content_reviewed: false,
+  })
+  const [contentSecondConfirmed, setContentSecondConfirmed] = useState(false)
+  const [contentRejectReason, setContentRejectReason] = useState('picture_or_timing')
+  const [contentNote, setContentNote] = useState('')
   const generation = useRef(0)
   const downloadGeneration = useRef(0)
   const importGeneration = useRef(0)
@@ -350,6 +421,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   const selectionGeneration = useRef(0)
   const technicalQcGeneration = useRef(0)
   const evidenceFreezeGeneration = useRef(0)
+  const rc1Generation = useRef(0)
   const activeController = useRef<AbortController>()
   const importController = useRef<AbortController>()
   const masterController = useRef<AbortController>()
@@ -357,6 +429,9 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   const selectionController = useRef<AbortController>()
   const technicalQcController = useRef<AbortController>()
   const evidenceFreezeController = useRef<AbortController>()
+  const rc1Controller = useRef<AbortController>()
+  const contentDecisionKey = useRef('')
+  const contentDecisionBinding = useRef('')
   const importErrorRef = useRef<HTMLDivElement>(null)
 
   const loadCandidates = useCallback(async () => {
@@ -494,6 +569,48 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     }
   }, [episodeId, projectId])
 
+  const loadRc1Status = useCallback(async () => {
+    if (projectId === '' || episodeId === '') return
+    const current = ++rc1Generation.current
+    rc1Controller.current?.abort()
+    const controller = new AbortController()
+    rc1Controller.current = controller
+    setRc1State('loading')
+    try {
+      const params = new URLSearchParams({ projectId, episodeId })
+      const response = await fetch(`/api/qingmu/editorial-handoff/rc1-status?${params.toString()}`, {
+        method: 'GET', cache: 'no-store', signal: controller.signal,
+      })
+      if (!response.ok) throw new Error('rc1_status_failed')
+      const body = await response.json() as Partial<Rc1Status>
+      if (body.schema !== 'jason.qingmu-editorial-handoff-rc1-status.v1'
+        || body.projectId !== projectId || body.episodeId !== episodeId
+        || body.rc1Package?.packageLevel !== 'RC1') throw new Error('rc1_status_contract_invalid')
+      const status = body as Rc1Status
+      if (current === rc1Generation.current) {
+        const bindingIdentity = status.contentReview.binding === undefined
+          ? `${projectId}:${episodeId}:no-current-binding`
+          : finalContentBindingIdentity(status.contentReview.binding)
+        if (contentDecisionBinding.current !== bindingIdentity) {
+          contentDecisionKey.current = ''
+          contentDecisionBinding.current = bindingIdentity
+        }
+        setRc1Status(status)
+        setRc1Preview(status.rc1Package.preview)
+        setRc1State(status.rc1Package.currentPackage === null ? 'idle' : 'previewed')
+        setRc1Error(undefined)
+      }
+    } catch (cause) {
+      if (current === rc1Generation.current && !controller.signal.aborted) {
+        setRc1Status(undefined)
+        setRc1Error(cause instanceof Error ? cause.message : 'rc1_status_failed')
+        setRc1State('idle')
+      }
+    } finally {
+      if (current === rc1Generation.current) rc1Controller.current = undefined
+    }
+  }, [episodeId, projectId])
+
   const refreshReturnedMasterState = useCallback(async () => {
     const scopeGeneration = generation.current
     await loadCandidates()
@@ -503,7 +620,9 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     await loadTechnicalQcStatus()
     if (scopeGeneration !== generation.current) return
     await loadEvidenceFreezeStatus()
-  }, [loadCandidates, loadEvidenceFreezeStatus, loadSelectionStatus, loadTechnicalQcStatus])
+    if (scopeGeneration !== generation.current) return
+    await loadRc1Status()
+  }, [loadCandidates, loadEvidenceFreezeStatus, loadRc1Status, loadSelectionStatus, loadTechnicalQcStatus])
 
   const load = useCallback(async () => {
     if (projectId === '' || episodeId === '') return false
@@ -516,12 +635,14 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     selectionGeneration.current += 1
     technicalQcGeneration.current += 1
     evidenceFreezeGeneration.current += 1
+    rc1Generation.current += 1
     importController.current?.abort()
     masterController.current?.abort()
     candidateController.current?.abort()
     selectionController.current?.abort()
     technicalQcController.current?.abort()
     evidenceFreezeController.current?.abort()
+    rc1Controller.current?.abort()
     importController.current = undefined
     const controller = new AbortController()
     activeController.current = controller
@@ -548,6 +669,14 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     setEvidenceFreezeConfirmed(false)
     setEvidenceFreezeState('idle')
     setEvidenceFreezeError(undefined)
+    setRc1Status(undefined)
+    contentDecisionKey.current = ''
+    contentDecisionBinding.current = ''
+    setRc1Preview(undefined)
+    setRc1State('idle')
+    setRc1Error(undefined)
+    setPlayedCoverage(0)
+    setContentSecondConfirmed(false)
     try {
       const value = await port.editorialHandoff({ projectId, episodeId }, controller.signal)
       if (current === generation.current) {
@@ -592,6 +721,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       selectionGeneration.current += 1
       technicalQcGeneration.current += 1
       evidenceFreezeGeneration.current += 1
+      rc1Generation.current += 1
       activeController.current?.abort()
       importController.current?.abort()
       masterController.current?.abort()
@@ -599,6 +729,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       selectionController.current?.abort()
       technicalQcController.current?.abort()
       evidenceFreezeController.current?.abort()
+      rc1Controller.current?.abort()
       activeController.current = undefined
       importController.current = undefined
       masterController.current = undefined
@@ -606,6 +737,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       selectionController.current = undefined
       technicalQcController.current = undefined
       evidenceFreezeController.current = undefined
+      rc1Controller.current = undefined
     }
   }, [load])
 
@@ -1192,6 +1324,106 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     }
   }, [episodeId, evidenceFreezeConfirmed, evidenceFreezePreview, evidenceFreezeState, loadEvidenceFreezeStatus, projectId])
 
+  const previewRc1 = useCallback(async () => {
+    if (rc1State === 'loading' || rc1State === 'saving' || rc1State === 'deciding') return
+    const current = ++rc1Generation.current
+    rc1Controller.current?.abort()
+    const controller = new AbortController()
+    rc1Controller.current = controller
+    setRc1State('loading')
+    setRc1Error(undefined)
+    try {
+      const params = new URLSearchParams({ projectId, episodeId })
+      const response = await fetch(`/api/qingmu/editorial-handoff/rc1-preview?${params.toString()}`, {
+        method: 'POST', cache: 'no-store', signal: controller.signal,
+      })
+      if (!response.ok) throw new Error('rc1_package_preview_failed')
+      const body = await response.json() as Partial<EvidenceFreezePreview>
+      if (body.schema !== 'jason.qingmu-canonical-evidence-freeze-preview.v1'
+        || body.projectId !== projectId || body.episodeId !== episodeId) throw new Error('rc1_package_preview_invalid')
+      const preview = body as EvidenceFreezePreview
+      if (current === rc1Generation.current) {
+        setRc1Preview(preview)
+        setRc1State('previewed')
+      }
+    } catch (cause) {
+      if (current === rc1Generation.current && !controller.signal.aborted) {
+        setRc1Error(cause instanceof Error ? cause.message : 'rc1_package_preview_failed')
+        setRc1State('idle')
+      }
+    } finally {
+      if (current === rc1Generation.current) rc1Controller.current = undefined
+    }
+  }, [episodeId, projectId, rc1State])
+
+  const confirmRc1 = useCallback(async () => {
+    if (rc1Preview === undefined || !rc1Preview.canConfirm || rc1State === 'saving') return
+    const current = ++rc1Generation.current
+    const controller = new AbortController()
+    rc1Controller.current?.abort()
+    rc1Controller.current = controller
+    setRc1State('saving')
+    setRc1Error(undefined)
+    try {
+      const params = new URLSearchParams({ projectId, episodeId })
+      const response = await fetch(`/api/qingmu/editorial-handoff/rc1?${params.toString()}`, {
+        method: 'POST', cache: 'no-store', signal: controller.signal,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ previewSha256: rc1Preview.previewSha256,
+          buildCommit: rc1Preview.subject.buildIdentity.commit,
+          idempotencyKey: rc1Preview.idempotencyKey }),
+      })
+      if (!response.ok) throw new Error('rc1_package_commit_failed')
+      if (current === rc1Generation.current) await loadRc1Status()
+    } catch (cause) {
+      if (current === rc1Generation.current && !controller.signal.aborted) {
+        setRc1Error(cause instanceof Error ? cause.message : 'rc1_package_commit_failed')
+        setRc1State('previewed')
+      }
+    } finally {
+      if (current === rc1Generation.current) rc1Controller.current = undefined
+    }
+  }, [episodeId, loadRc1Status, projectId, rc1Preview, rc1State])
+
+  const decideFinalContent = useCallback(async (decision: 'accepted' | 'rejected') => {
+    const binding = rc1Status?.contentReview.binding
+    if (binding === undefined || rc1Status?.contentReview.currentDecision !== null
+      || rc1State === 'deciding') return
+    if (contentDecisionKey.current === '') {
+      const nonce = globalThis.crypto.randomUUID()
+      contentDecisionKey.current = `final-content-${nonce}`
+    }
+    const current = ++rc1Generation.current
+    const controller = new AbortController()
+    rc1Controller.current?.abort()
+    rc1Controller.current = controller
+    setRc1State('deciding')
+    setRc1Error(undefined)
+    try {
+      const params = new URLSearchParams({ projectId, episodeId })
+      const response = await fetch(`/api/qingmu/editorial-handoff/final-content-decision?${params.toString()}`, {
+        method: 'POST', cache: 'no-store', signal: controller.signal,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ decision, binding, playedCoverage,
+          checks: contentChecks, secondConfirmed: contentSecondConfirmed,
+          reason: decision === 'rejected' ? contentRejectReason : null,
+          note: contentNote.trim() === '' ? null : contentNote.trim(),
+          idempotencyKey: contentDecisionKey.current }),
+      })
+      if (!response.ok) throw new Error('final_content_decision_unknown_or_failed')
+      if (current === rc1Generation.current) await loadRc1Status()
+    } catch (cause) {
+      if (current === rc1Generation.current && !controller.signal.aborted) {
+        setRc1Error(cause instanceof Error ? cause.message : 'final_content_decision_unknown_or_failed')
+        setRc1State('previewed')
+        await loadRc1Status()
+      }
+    } finally {
+      if (current === rc1Generation.current) rc1Controller.current = undefined
+    }
+  }, [contentChecks, contentNote, contentRejectReason, contentSecondConfirmed,
+    episodeId, loadRc1Status, playedCoverage, projectId, rc1State, rc1Status])
+
   if (projectId === '' || episodeId === '') return <p className={css.empty}>{t('handoffChooseEpisode')}</p>
   const blockerLabel = (code: string) => t(BLOCKER_KEYS[code] ?? 'handoffBlockerUnknown')
   const masterBlockerLabel = (code: string) => t(MASTER_BLOCKER_KEYS[code] ?? 'handoffMasterBlockerUnknown')
@@ -1648,6 +1880,114 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
           && evidenceFreezeResult === undefined
           && <p className={css.success}>{t('handoffEvidenceFreezeRecovered')}</p>}
       </section>
+      <section className={css.rc1Grid} aria-label={t('handoffRc1Workspace')}>
+        <article className={css.rc1Card} aria-labelledby="handoff-content-review-title">
+          <header><div><strong id="handoff-content-review-title">{t('handoffContentReviewTitle')}</strong>
+            <p>{t('handoffContentReviewBoundary')}</p></div></header>
+          {rc1Status?.contentReview.binding === undefined
+            ? <p className={css.warning}>{t('handoffContentReviewNeedsRc1')}</p>
+            : <>
+              <video className={css.finalPlayer} controls preload="none"
+                src={`/api/qingmu/editorial-handoff/final-media?${new URLSearchParams({
+                  projectId, episodeId, sha256: rc1Status.contentReview.binding.finalSha256,
+                }).toString()}`}
+                onTimeUpdate={(event) => {
+                  const media = event.currentTarget
+                  if (Number.isFinite(media.duration) && media.duration > 0) {
+                    setPlayedCoverage(previous => Math.max(previous, Math.min(1, media.currentTime / media.duration)))
+                  }
+                }}
+                onEnded={() => { setPlayedCoverage(1) }} />
+              <p className={playedCoverage === 1 ? css.success : css.warning}>
+                {t('handoffContentPlayback')}: {(playedCoverage * 100).toFixed(0)}%
+              </p>
+              <fieldset className={css.reviewChecks} disabled={rc1Status.contentReview.currentDecision !== null}>
+                <legend>{t('handoffContentChecks')}</legend>
+                {([
+                  ['picture_and_timing_reviewed', 'handoffContentCheckPicture'],
+                  ['dialogue_and_audio_reviewed', 'handoffContentCheckAudio'],
+                  ['continuity_and_content_reviewed', 'handoffContentCheckContinuity'],
+                ] as const).map(([key, label]) => <label key={key}>
+                  <input type="checkbox" checked={contentChecks[key] === true}
+                    onChange={(event) => { setContentChecks(current => ({ ...current, [key]: event.currentTarget.checked })) }} />
+                  <span>{t(label)}</span>
+                </label>)}
+              </fieldset>
+              <label className={css.formField}><span>{t('handoffContentNote')}</span>
+                <textarea value={contentNote} maxLength={2000}
+                  disabled={rc1Status.contentReview.currentDecision !== null}
+                  onChange={(event) => { setContentNote(event.currentTarget.value) }} /></label>
+              <label className={css.formField}><span>{t('handoffContentRejectReason')}</span>
+                <select value={contentRejectReason} disabled={rc1Status.contentReview.currentDecision !== null}
+                  onChange={(event) => { setContentRejectReason(event.currentTarget.value) }}>
+                  <option value="picture_or_timing">{t('handoffContentRejectPicture')}</option>
+                  <option value="dialogue_or_audio">{t('handoffContentRejectAudio')}</option>
+                  <option value="continuity_or_content">{t('handoffContentRejectContinuity')}</option>
+                  <option value="other">{t('handoffContentRejectOther')}</option>
+                </select></label>
+              <label className={css.confirmation}>
+                <input type="checkbox" checked={contentSecondConfirmed}
+                  disabled={rc1Status.contentReview.currentDecision !== null}
+                  onChange={(event) => { setContentSecondConfirmed(event.currentTarget.checked) }} />
+                <span>{t('handoffContentSecondConfirm')}</span>
+              </label>
+              <div className={css.decisionActions}>
+                <button type="button" disabled={playedCoverage !== 1 || !contentSecondConfirmed
+                  || Object.values(contentChecks).some(value => !value)
+                  || rc1Status.contentReview.currentDecision !== null || rc1State === 'deciding'}
+                onClick={() => { void decideFinalContent('accepted') }}>{t('handoffContentAccept')}</button>
+                <button type="button" className={css.rejectButton}
+                  disabled={playedCoverage !== 1 || rc1Status.contentReview.currentDecision !== null
+                    || rc1State === 'deciding'}
+                  onClick={() => { void decideFinalContent('rejected') }}>{t('handoffContentReject')}</button>
+              </div>
+            </>}
+          {rc1Status?.contentReview.currentDecision !== null
+            && rc1Status?.contentReview.currentDecision !== undefined
+            && <p className={rc1Status.contentReview.currentDecision.decision === 'accepted'
+              ? css.success : css.warning} role="status">
+              {rc1Status.contentReview.currentDecision.decision === 'accepted'
+                ? t('handoffContentAccepted') : t('handoffContentRejected')}
+            </p>}
+        </article>
+        <article className={css.rc1Card} aria-labelledby="handoff-machine-evidence-title">
+          <header><div><strong id="handoff-machine-evidence-title">{t('handoffMachineEvidenceTitle')}</strong>
+            <p>{t('handoffMachineEvidenceBoundary')}</p></div></header>
+          {rc1Status?.rc1Package.currentPackage === null || rc1Status === undefined
+            ? <>
+              <p className={css.warning}>{t('handoffMachineEvidenceMissing')}</p>
+              <button type="button" onClick={() => { void previewRc1() }}
+                disabled={rc1State === 'loading' || rc1State === 'saving'}>{t('handoffMachineEvidencePrepare')}</button>
+              {rc1Preview !== undefined && <>
+                {rc1Preview.hardBlockers.length > 0 && <ul className={css.blockers}>
+                  {rc1Preview.hardBlockers.map(code => <li key={code}>{code}</li>)}</ul>}
+                <button type="button" onClick={() => { void confirmRc1() }}
+                  disabled={!rc1Preview.canConfirm || rc1State === 'saving'}>{t('handoffMachineEvidenceFreeze')}</button>
+              </>}
+            </>
+            : <>
+              <p className={css.success}>{t('handoffMachineEvidenceReady')}</p>
+              <a className={css.downloadLink} href={`/api/qingmu/editorial-handoff/rc1-evidence.zip?${new URLSearchParams({
+                projectId, episodeId,
+                packageId: rc1Status.rc1Package.currentPackage.packageId,
+                manifestSha256: rc1Status.rc1Package.currentPackage.manifestSha256,
+              }).toString()}`} download="qingmu-rc1-evidence.zip">{t('handoffMachineEvidenceDownload')}</a>
+              <details><summary>{t('handoffAdvanced')}</summary>
+                <p>Package: {rc1Status.rc1Package.currentPackage.packageId}</p>
+                <p>Manifest SHA: {rc1Status.rc1Package.currentPackage.manifestSha256}</p>
+                <p>ZIP SHA: {rc1Status.rc1Package.currentPackage.zipSha256}</p>
+              </details>
+            </>}
+        </article>
+        <article className={css.rc1Card} aria-labelledby="handoff-release-signoff-title">
+          <header><div><strong id="handoff-release-signoff-title">{t('handoffReleaseSignoffTitle')}</strong>
+            <p>{t('handoffReleaseSignoffBoundary')}</p></div></header>
+          <p className={css.warning}>{t('handoffReleaseSignoffMissing')}</p>
+          <ul className={css.blockers}>{(rc1Status?.releaseSignoff.blockers
+            ?? ['organization_release_signoff_missing']).map(code => <li key={code}>{code}</li>)}</ul>
+        </article>
+      </section>
+      {rc1Error !== undefined && <p className={css.error} role="alert">{rc1Error}</p>}
     </section>
   </section>
 }

@@ -39,6 +39,12 @@ const TECHNICAL_QC_CONFIRM_PATH = '/api/qingmu/editorial-handoff/returned-master
 const EVIDENCE_FREEZE_STATUS_PATH = '/api/qingmu/editorial-handoff/canonical-evidence-freeze-status'
 const EVIDENCE_FREEZE_PREVIEW_PATH = '/api/qingmu/editorial-handoff/canonical-evidence-freeze-preview'
 const EVIDENCE_FREEZE_CONFIRM_PATH = '/api/qingmu/editorial-handoff/canonical-evidence-freeze'
+const RC1_STATUS_PATH = '/api/qingmu/editorial-handoff/rc1-status'
+const RC1_PREVIEW_PATH = '/api/qingmu/editorial-handoff/rc1-preview'
+const RC1_CONFIRM_PATH = '/api/qingmu/editorial-handoff/rc1'
+const FINAL_CONTENT_DECISION_PATH = '/api/qingmu/editorial-handoff/final-content-decision'
+const FINAL_MEDIA_PATH = '/api/qingmu/editorial-handoff/final-media'
+const RC1_EVIDENCE_PATH = '/api/qingmu/editorial-handoff/rc1-evidence.zip'
 const SHA256 = /^[0-9a-f]{64}$/
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/
 const REQUEST_ID = /^[a-f0-9-]{16,80}$/
@@ -1647,6 +1653,18 @@ function safeSelectionPayload(value: unknown): Record<string, unknown> | undefin
   return value as Record<string, unknown>
 }
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (typeof value === 'object' && value !== null) {
+    const item = value as Record<string, unknown>
+    return `{${Object.keys(item).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(item[key])}`).join(',')}}`
+  }
+  if (value === null || ['string', 'boolean', 'number'].includes(typeof value)) {
+    return JSON.stringify(value)
+  }
+  throw new Error('canonical_json_invalid')
+}
+
 function safeNullableId(value: unknown): boolean {
   return value === null || safeIdentifier(typeof value === 'string' ? value : null)
 }
@@ -2133,6 +2151,50 @@ function normalizeEvidenceFreezeStatus(
     })
     || item.releaseSignoffGranted !== false || item.releaseReady !== false
     || !validEvidenceFreezeFlags(item)) return undefined
+  return item
+}
+
+function contentBinding(value: unknown, projectId: string, episodeId: string): Record<string, unknown> | undefined {
+  const item = safeSelectionPayload(value)
+  const fields = [
+    'projectId', 'episodeId', 'authorityRevision', 'contentReviewToken', 'finalOutputId',
+    'finalAssetId', 'finalSha256', 'finalBytes', 'materializedSha256',
+    'verifyEvidenceSha256', 'rc1PackageId', 'rc1ManifestSha256',
+  ]
+  if (item === undefined || Object.keys(item).length !== fields.length
+    || fields.some(field => !Object.hasOwn(item, field))
+    || item.projectId !== projectId || item.episodeId !== episodeId
+    || typeof item.authorityRevision !== 'number' || !Number.isSafeInteger(item.authorityRevision)
+    || item.authorityRevision <= 0 || typeof item.finalBytes !== 'number'
+    || !Number.isSafeInteger(item.finalBytes) || item.finalBytes <= 0
+    || ['contentReviewToken', 'finalSha256', 'materializedSha256', 'verifyEvidenceSha256',
+      'rc1ManifestSha256'].some(field => typeof item[field] !== 'string' || !SHA256.test(item[field]))
+    || ['finalOutputId', 'finalAssetId', 'rc1PackageId'].some(field =>
+      typeof item[field] !== 'string' || !safeIdentifier(item[field]))) return undefined
+  return item
+}
+
+function normalizeRc1Status(
+  value: unknown, projectId: string, episodeId: string,
+): Record<string, unknown> | undefined {
+  const item = safeSelectionPayload(value)
+  const pkg = safeSelectionPayload(item?.rc1Package)
+  const normalizedPackage = normalizeEvidenceFreezeStatus(item?.rc1Package, projectId, episodeId)
+  const review = safeSelectionPayload(item?.contentReview)
+  const signoff = safeSelectionPayload(item?.releaseSignoff)
+  const binding = review?.binding === undefined ? undefined
+    : contentBinding(review.binding, projectId, episodeId)
+  if (item === undefined || item.schema !== 'jason.qingmu-editorial-handoff-rc1-status.v1'
+    || item.projectId !== projectId || item.episodeId !== episodeId
+    || pkg === undefined || normalizedPackage === undefined
+    || pkg.schema !== 'jason.qingmu-canonical-evidence-freeze-status.v1'
+    || pkg.packageLevel !== 'RC1' || pkg.projectId !== projectId || pkg.episodeId !== episodeId
+    || review === undefined || review.schema !== 'jason.episode-final-content-decision-status.v1'
+    || review.projectId !== projectId || review.episodeId !== episodeId
+    || !(review.binding === undefined || binding !== undefined)
+    || typeof review.canDecide !== 'boolean' || review.releaseSignoffGranted !== false
+    || review.publishReady !== false || signoff === undefined || signoff.granted !== false
+    || signoff.readOnly !== true || !safeQcStringList(signoff.blockers)) return undefined
   return item
 }
 
@@ -3193,6 +3255,236 @@ export function registerEditorialHandoffDownload(
       }
     },
   })
+  const disposeRc1Status = webServer.register({
+    kind: 'exact', path: RC1_STATUS_PATH, handler: async (req, res) => {
+      if (req.method !== 'GET' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'rc1_content_review_forbidden' }); return
+      }
+      const scope = scopeAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = scope === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (scope === undefined || token === undefined || userId === undefined) {
+        json(res, scope === undefined ? 400 : 403, { code: 'rc1_content_review_forbidden' }); return
+      }
+      const outcome = await writerSelectionRequest(
+        dependencies, token, scope.projectId, scope.episodeId, 'rc1-status', { method: 'GET' },
+      )
+      const status = outcome?.response.ok === true
+        ? normalizeRc1Status(outcome.raw, scope.projectId, scope.episodeId) : undefined
+      if (status === undefined) {
+        json(res, 502, { code: 'rc1_content_review_status_failed' }); return
+      }
+      json(res, 200, status)
+    },
+  })
+  const disposeRc1Preview = webServer.register({
+    kind: 'exact', path: RC1_PREVIEW_PATH, handler: async (req, res) => {
+      if (req.method !== 'POST' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'rc1_content_review_forbidden' }); return
+      }
+      const scope = scopeAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = scope === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (scope === undefined || token === undefined || userId === undefined) {
+        json(res, scope === undefined ? 400 : 403, { code: 'rc1_content_review_forbidden' }); return
+      }
+      const outcome = await writerSelectionRequest(
+        dependencies, token, scope.projectId, scope.episodeId, 'rc1-preview', { method: 'POST' },
+      )
+      const preview = outcome?.response.ok === true
+        ? normalizeEvidenceFreezePreview(outcome.raw, scope.projectId, scope.episodeId) : undefined
+      const subject = safeSelectionPayload(preview?.subject)
+      if (preview === undefined || subject?.packageLevel !== 'RC1') {
+        json(res, 409, { code: 'rc1_package_preview_failed' }); return
+      }
+      json(res, 200, preview)
+    },
+  })
+  const disposeRc1Confirm = webServer.register({
+    kind: 'exact', path: RC1_CONFIRM_PATH, handler: async (req, res) => {
+      if (req.method !== 'POST' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'rc1_content_review_forbidden' }); return
+      }
+      const scope = scopeAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = scope === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (scope === undefined || token === undefined || userId === undefined) {
+        json(res, scope === undefined ? 400 : 403, { code: 'rc1_content_review_forbidden' }); return
+      }
+      try {
+        const item = safeSelectionPayload(await readBoundedJsonBody(req))
+        if (item === undefined || Object.keys(item).length !== 3
+          || typeof item.previewSha256 !== 'string' || !SHA256.test(item.previewSha256)
+          || typeof item.buildCommit !== 'string' || !/^[0-9a-f]{40,64}$/.test(item.buildCommit)
+          || typeof item.idempotencyKey !== 'string' || !IDENTIFIER.test(item.idempotencyKey)) {
+          throw new Error('rc1_request_invalid')
+        }
+        const commandBody = JSON.stringify({
+          buildCommit: item.buildCommit,
+          previewSha256: item.previewSha256,
+        })
+        const requestSha = createHash('sha256').update(commandBody).digest('hex')
+        const submitted = await writerSelectionRequest(
+          dependencies, token, scope.projectId, scope.episodeId, 'rc1', {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(item),
+          },
+        )
+        let result = submitted?.response.ok === true
+          ? normalizeEvidenceFreezeResult(submitted.raw, scope.projectId, scope.episodeId) : undefined
+        if (result === undefined
+          && (submitted === undefined || submitted.response.status >= 500)) {
+          const suffix = `rc1-freezes/${encodeURIComponent(item.idempotencyKey)}?requestSha256=${requestSha}`
+          const recovered = await writerSelectionRequest(
+            dependencies, token, scope.projectId, scope.episodeId, suffix, { method: 'GET' },
+          )
+          result = recovered?.response.ok === true
+            ? normalizeEvidenceFreezeResult(recovered.raw, scope.projectId, scope.episodeId) : undefined
+        }
+        if (result === undefined || result.packageLevel !== 'RC1'
+          || result.requestSha256 !== requestSha) throw new Error('rc1_commit_failed')
+        json(res, 200, result)
+      } catch (error) {
+        const bad = error instanceof Error && error.message === 'rc1_request_invalid'
+        json(res, bad ? 400 : 409, { code: bad ? 'rc1_package_request_invalid' : 'rc1_package_commit_failed' })
+      }
+    },
+  })
+  const disposeFinalContentDecision = webServer.register({
+    kind: 'exact', path: FINAL_CONTENT_DECISION_PATH, handler: async (req, res) => {
+      if (req.method !== 'POST' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'final_content_decision_forbidden' }); return
+      }
+      const scope = scopeAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = scope === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (scope === undefined || token === undefined || userId === undefined) {
+        json(res, scope === undefined ? 400 : 403, { code: 'final_content_decision_forbidden' }); return
+      }
+      try {
+        const item = safeSelectionPayload(await readBoundedJsonBody(req))
+        const binding = contentBinding(item?.binding, scope.projectId, scope.episodeId)
+        const checks = safeSelectionPayload(item?.checks)
+        const checkFields = ['picture_and_timing_reviewed', 'dialogue_and_audio_reviewed',
+          'continuity_and_content_reviewed']
+        if (item === undefined || Object.keys(item).length !== 8 || binding === undefined
+          || !['accepted', 'rejected'].includes(String(item.decision))
+          || typeof item.playedCoverage !== 'number' || item.playedCoverage < 0 || item.playedCoverage > 1
+          || checks === undefined || Object.keys(checks).length !== checkFields.length
+          || checkFields.some(field => typeof checks[field] !== 'boolean')
+          || typeof item.secondConfirmed !== 'boolean'
+          || !(item.reason === null || typeof item.reason === 'string')
+          || !(item.note === null || typeof item.note === 'string')
+          || typeof item.idempotencyKey !== 'string' || !IDENTIFIER.test(item.idempotencyKey)) {
+          throw new Error('content_decision_request_invalid')
+        }
+        const requestBody = {
+          decision: item.decision,
+          binding,
+          playedCoverage: item.playedCoverage,
+          checks,
+          secondConfirmed: item.secondConfirmed,
+          reason: item.reason,
+          note: item.note,
+        }
+        const requestSha = createHash('sha256').update(canonicalJson(requestBody)).digest('hex')
+        const submitted = await writerSelectionRequest(
+          dependencies, token, scope.projectId, scope.episodeId, 'final-content-decision', {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(item),
+          },
+        )
+        let result = submitted?.response.ok === true ? safeSelectionPayload(submitted.raw) : undefined
+        if (result === undefined && (submitted === undefined || submitted.response.status >= 500)) {
+          const suffix = `final-content-decisions/${encodeURIComponent(item.idempotencyKey)}`
+            + `?requestSha256=${requestSha}`
+          const recovered = await writerSelectionRequest(
+            dependencies, token, scope.projectId, scope.episodeId, suffix, { method: 'GET' },
+          )
+          result = recovered?.response.ok === true ? safeSelectionPayload(recovered.raw) : undefined
+        }
+        if (result === undefined || result.schema !== 'jason.episode-final-content-decision.v1'
+          || result.projectId !== scope.projectId || result.episodeId !== scope.episodeId
+          || result.idempotencyKey !== item.idempotencyKey || result.decision !== item.decision
+          || result.requestSha256 !== requestSha
+          || canonicalJson(result.binding) !== canonicalJson(binding)
+          || result.releaseSignoffGranted !== false || result.publishReady !== false) {
+          throw new Error('content_decision_commit_failed')
+        }
+        json(res, 200, result)
+      } catch (error) {
+        const bad = error instanceof Error && error.message === 'content_decision_request_invalid'
+        json(res, bad ? 400 : 409, { code: bad ? 'final_content_decision_request_invalid'
+          : 'final_content_decision_unknown_or_failed' })
+      }
+    },
+  })
+  const proxyBoundArtifact = async (
+    req: IncomingMessage, res: ServerResponse, suffix: string, contentType: string,
+  ): Promise<void> => {
+    if (req.method !== 'GET' || !isTrustedApiRequest(req, [])) {
+      json(res, 403, { code: 'rc1_artifact_forbidden' }); return
+    }
+    const params = query(req)
+    const scope = scopeAccess(params)
+    const token = validToken(dependencies.readToken())
+    const userId = scope === undefined || token === undefined ? undefined
+      : await authenticatedUserId(dependencies, token)
+    if (scope === undefined || token === undefined || userId === undefined) {
+      json(res, scope === undefined ? 400 : 403, { code: 'rc1_artifact_forbidden' }); return
+    }
+    const upstream = new URL(
+      `/api/qingmu/projects/${encodeURIComponent(scope.projectId)}/episodes/${encodeURIComponent(scope.episodeId)}/editorial-handoff/${suffix}`,
+      dependencies.baseUrl,
+    )
+    for (const [key, value] of params) {
+      if (key !== 'projectId' && key !== 'episodeId') upstream.searchParams.append(key, value)
+    }
+    const controller = new AbortController()
+    res.once('close', () => { if (!res.writableEnded) controller.abort() })
+    try {
+      const headers: Record<string, string> = { authorization: `Bearer ${token}`, accept: contentType }
+      if (typeof req.headers.range === 'string') headers.range = req.headers.range
+      const response = await dependencies.fetch(upstream, {
+        method: 'GET', redirect: 'error', signal: controller.signal, headers,
+      })
+      if (!response.ok || response.body === null
+        || response.headers.get('content-type')?.split(';', 1)[0]?.trim() !== contentType) {
+        json(res, response.status === 403 ? 403 : 409, { code: 'rc1_artifact_unavailable' }); return
+      }
+      const length = response.headers.get('content-length')
+      if (length === null || !Number.isSafeInteger(Number(length)) || Number(length) <= 0) {
+        json(res, 502, { code: 'rc1_artifact_contract_invalid' }); return
+      }
+      res.writeHead(response.status, privateHeaders({
+        'content-type': contentType, 'content-length': length, 'accept-ranges': 'bytes',
+        ...(response.headers.get('content-range') === null ? {}
+          : { 'content-range': response.headers.get('content-range') as string }),
+        ...(response.headers.get('content-disposition') === null ? {}
+          : { 'content-disposition': response.headers.get('content-disposition') as string }),
+      }))
+      const reader = response.body.getReader()
+      while (true) {
+        const chunk = await reader.read()
+        if (chunk.done) break
+        if (!res.write(chunk.value)) await once(res, 'drain')
+      }
+      res.end()
+    } catch {
+      if (!res.headersSent) json(res, 502, { code: 'rc1_artifact_unavailable' })
+      else res.destroy()
+    }
+  }
+  const disposeFinalMedia = webServer.register({
+    kind: 'exact', path: FINAL_MEDIA_PATH,
+    handler: async (req, res) => proxyBoundArtifact(req, res, 'final-media', 'video/mp4'),
+  })
+  const disposeRc1Evidence = webServer.register({
+    kind: 'exact', path: RC1_EVIDENCE_PATH,
+    handler: async (req, res) => proxyBoundArtifact(req, res, 'rc1-evidence.zip', 'application/zip'),
+  })
   const disposeCandidateStatus = webServer.register({
     kind: 'exact', path: CANDIDATE_STATUS_PATH, handler: async (req, res) => {
       if (req.method !== 'GET' || !isTrustedApiRequest(req, [])) {
@@ -3334,6 +3626,12 @@ export function registerEditorialHandoffDownload(
     },
   })
   return () => {
+    disposeRc1Evidence()
+    disposeFinalMedia()
+    disposeFinalContentDecision()
+    disposeRc1Confirm()
+    disposeRc1Preview()
+    disposeRc1Status()
     disposeEvidenceFreezeConfirm()
     disposeEvidenceFreezePreview()
     disposeEvidenceFreezeStatus()
