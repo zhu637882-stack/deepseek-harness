@@ -1,5 +1,5 @@
 /** Same-origin Host download bridge for the authenticated Writer OTIO package. */
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { once } from 'node:events'
 import { createReadStream } from 'node:fs'
 import {
@@ -9,7 +9,9 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs'
 import { mkdtemp, open, rm } from 'node:fs/promises'
@@ -21,12 +23,15 @@ import type { WebServer } from '@deepseek-ai/dsh-host-webserver'
 
 const DOWNLOAD_PATH = '/api/qingmu/editorial-handoff/download'
 const STATUS_PATH = '/api/qingmu/editorial-handoff/download-status'
+const IMPORT_PATH = '/api/qingmu/editorial-handoff/import'
+const IMPORT_STATUS_PATH = '/api/qingmu/editorial-handoff/import-status'
 const SHA256 = /^[0-9a-f]{64}$/
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/
 const REQUEST_ID = /^[a-f0-9-]{16,80}$/
 const CAPABILITY = /^[a-f0-9]{64}$/
 const MAX_PACKAGE_BYTES = 8 * 1024 * 1024 * 1024
 const STATUS_TTL_MS = 24 * 60 * 60_000
+const EDITORIAL_IMPORT_DOMAIN = 'qingmu-editorial-handoff-import.v1'
 
 interface DownloadBinding {
   readonly authenticatedUserId: string
@@ -50,18 +55,81 @@ interface PersistedDownload extends DownloadBinding {
   readonly status: DownloadStatus
 }
 
+interface ImportBinding extends Omit<DownloadBinding, 'requestId'> {
+  readonly requestId: string
+  readonly downloadRequestId: string
+  readonly packageSha256: string
+  readonly packageSize: number
+}
+
+type ImportStatus =
+  | { readonly state: 'authorized'; readonly createdAt: number }
+  | { readonly state: 'running'; readonly createdAt: number }
+  | { readonly state: 'succeeded'; readonly createdAt: number; readonly result: EditorialHandoffImportResult }
+  | { readonly state: 'failed'; readonly createdAt: number; readonly errorCode: string }
+
+interface PersistedImport extends ImportBinding {
+  readonly capabilitySha256: string
+  readonly status: ImportStatus
+}
+
+/** One-use Host capability for reselecting an exact successful download. */
+export interface EditorialHandoffImportAccess {
+  readonly requestId: string
+  readonly capability: string
+}
+
+/** Strict read-only Writer result exposed as an editorial consumption preview. */
+export interface EditorialHandoffImportResult {
+  readonly schema: 'jason.qingmu-editorial-package-consumption-preview.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly packageSha256: string
+  readonly packageSize: number
+  readonly receiptMatch: true
+  readonly internalValidity: true
+  readonly currentAuthority: {
+    readonly matches: boolean
+    readonly sourceSnapshotSha256: string | null
+    readonly projectionSha256: string | null
+    readonly errorCode: string | null
+  }
+  readonly packageBinding: {
+    readonly sourceSnapshotSha256: string
+    readonly projectionSha256: string
+  }
+  readonly preview: {
+    readonly tracks: readonly { readonly name: string; readonly kind: string; readonly clipCount: number }[]
+    readonly orderedShots: readonly Record<string, unknown>[]
+    readonly media: readonly { readonly kind: string; readonly path: string; readonly size: number; readonly sha256: string }[]
+    readonly unresolved: readonly Record<string, unknown>[]
+  }
+  readonly readOnly: true
+  readonly businessMutations: 0
+  readonly providerCalls: 0
+  readonly boundaries: {
+    readonly nleOpened: false
+    readonly productionComplete: false
+    readonly releaseReady: false
+    readonly humanSignoffInferred: false
+  }
+}
+
 /** Browser-visible, narrowly bound capability issued only with an authenticated read projection. */
 export interface EditorialHandoffDownloadAccess {
   readonly requestId: string
   readonly capability: string
+  readonly importAccess?: EditorialHandoffImportAccess
 }
 
 /** Durable Host-side capability and terminal-status store; it contains no Writer token. */
 export class EditorialHandoffDownloadAuthorizer {
   readonly #entries = new Map<string, PersistedDownload>()
+  readonly #imports = new Map<string, PersistedImport>()
 
   public constructor(private readonly stateFile: string) {
     this.#load()
+    this.#loadImports()
   }
 
   /**
@@ -71,6 +139,7 @@ export class EditorialHandoffDownloadAuthorizer {
    */
   public issue(binding: Omit<DownloadBinding, 'requestId'>): EditorialHandoffDownloadAccess {
     this.#sweep()
+    const importAccess = this.#issueImportForBinding(binding)
     const requestId = randomUUID()
     const capability = randomBytes(32).toString('hex')
     this.#entries.set(requestId, {
@@ -80,7 +149,7 @@ export class EditorialHandoffDownloadAuthorizer {
       status: { state: 'authorized', createdAt: Date.now() },
     })
     this.#persist()
-    return { requestId, capability }
+    return { requestId, capability, ...(importAccess === undefined ? {} : { importAccess }) }
   }
 
   /**
@@ -125,6 +194,131 @@ export class EditorialHandoffDownloadAuthorizer {
     this.#persist()
   }
 
+  /**
+   * Issue an import capability from one authenticated successful download terminal.
+   * @param binding - Exact authenticated download identity and source coordinates.
+   * @param capability - Clear download capability whose hash is persisted by Host.
+   * @returns A new one-use import capability, or undefined before download success.
+   */
+  public issueImport(binding: DownloadBinding, capability: string): EditorialHandoffImportAccess | undefined {
+    const entry = this.#authenticated(binding, capability)
+    return entry?.status.state === 'succeeded' ? this.#createImport(entry) : undefined
+  }
+
+  /**
+   * Atomically consume an import capability before reading browser bytes.
+   * @param authenticatedUserId - Current Writer-authenticated user identity.
+   * @param projectId - Current project scope.
+   * @param episodeId - Current episode scope.
+   * @param requestId - Import request identity.
+   * @param capability - Clear one-use import capability.
+   * @returns Immutable expected package binding, or undefined on mismatch or reuse.
+   */
+  public startImport(
+    authenticatedUserId: string, projectId: string, episodeId: string,
+    requestId: string, capability: string,
+  ): ImportBinding | undefined {
+    this.#sweep()
+    const entry = this.#authenticatedImport(authenticatedUserId, projectId, episodeId, requestId, capability)
+    if (entry?.status.state !== 'authorized') return undefined
+    this.#imports.set(requestId, { ...entry, status: { state: 'running', createdAt: entry.status.createdAt } })
+    this.#persistImports()
+    const { capabilitySha256: _capabilitySha256, status: _status, ...binding } = entry
+    return binding
+  }
+
+  /**
+   * Read an import's status without creating or resending verification work.
+   * @param authenticatedUserId - Current Writer-authenticated user identity.
+   * @param projectId - Current project scope.
+   * @param episodeId - Current episode scope.
+   * @param requestId - Import request identity.
+   * @param capability - Clear import capability.
+   * @returns Current import status, or undefined when authentication or binding fails.
+   */
+  public importStatus(
+    authenticatedUserId: string, projectId: string, episodeId: string,
+    requestId: string, capability: string,
+  ): ImportStatus | undefined {
+    return this.#authenticatedImport(authenticatedUserId, projectId, episodeId, requestId, capability)?.status
+  }
+
+  /**
+   * Persist one terminal import result for refresh and restart recovery.
+   * @param binding - Immutable package and authority binding returned by `startImport`.
+   * @param status - Strict Writer success result or stable failure code.
+   */
+  public finishImport(
+    binding: ImportBinding,
+    status: Extract<ImportStatus, { state: 'succeeded' | 'failed' }>,
+  ): void {
+    const entry = this.#imports.get(binding.requestId)
+    if (entry === undefined || !sameImportBinding(entry, binding)) return
+    this.#imports.set(binding.requestId, { ...entry, status })
+    this.#persistImports()
+  }
+
+  #issueImportForBinding(binding: Omit<DownloadBinding, 'requestId'>): EditorialHandoffImportAccess | undefined {
+    const recovered = [...this.#imports.values()].filter(entry => entry.status.state === 'succeeded'
+      && sameProjectionBinding(entry, binding)).sort((left, right) => right.status.createdAt - left.status.createdAt)[0]
+    if (recovered !== undefined) return this.#cloneImport(recovered)
+    const succeeded = [...this.#entries.values()].filter(entry => entry.status.state === 'succeeded'
+      && sameProjectionBinding(entry, binding)).sort((left, right) => right.status.createdAt - left.status.createdAt)[0]
+    return succeeded === undefined ? undefined : this.#createImport(succeeded)
+  }
+
+  #cloneImport(recovered: PersistedImport): EditorialHandoffImportAccess {
+    const requestId = randomUUID()
+    const capability = randomBytes(32).toString('hex')
+    this.#imports.set(requestId, {
+      ...recovered,
+      requestId,
+      capabilitySha256: createHash('sha256').update(capability).digest('hex'),
+    })
+    this.#persistImports()
+    return { requestId, capability }
+  }
+
+  #createImport(download: PersistedDownload): EditorialHandoffImportAccess {
+    if (download.status.state !== 'succeeded') throw new Error('editorial handoff: import source is not terminal')
+    const terminal = download.status
+    const recovered = [...this.#imports.values()].find(entry => entry.status.state === 'succeeded'
+      && entry.downloadRequestId === download.requestId
+      && sameProjectionBinding(entry, download)
+      && entry.packageSha256 === terminal.sha256
+      && entry.packageSize === terminal.size)
+    const requestId = randomUUID()
+    const capability = randomBytes(32).toString('hex')
+    this.#imports.set(requestId, {
+      authenticatedUserId: download.authenticatedUserId,
+      projectId: download.projectId,
+      episodeId: download.episodeId,
+      sourceSnapshotSha256: download.sourceSnapshotSha256,
+      projectionSha256: download.projectionSha256,
+      requestId,
+      downloadRequestId: download.requestId,
+      packageSha256: terminal.sha256,
+      packageSize: terminal.size,
+      capabilitySha256: createHash('sha256').update(capability).digest('hex'),
+      status: recovered?.status ?? { state: 'authorized', createdAt: Date.now() },
+    })
+    this.#persistImports()
+    return { requestId, capability }
+  }
+
+  #authenticatedImport(
+    authenticatedUserId: string, projectId: string, episodeId: string,
+    requestId: string, capability: string,
+  ): PersistedImport | undefined {
+    if (!REQUEST_ID.test(requestId) || !CAPABILITY.test(capability)) return undefined
+    const entry = this.#imports.get(requestId)
+    if (entry === undefined || entry.authenticatedUserId !== authenticatedUserId
+      || entry.projectId !== projectId || entry.episodeId !== episodeId) return undefined
+    const actual = Buffer.from(createHash('sha256').update(capability).digest('hex'))
+    const expected = Buffer.from(entry.capabilitySha256)
+    return actual.length === expected.length && timingSafeEqual(actual, expected) ? entry : undefined
+  }
+
   #authenticated(binding: DownloadBinding, capability: string): PersistedDownload | undefined {
     if (!CAPABILITY.test(capability)) return undefined
     const entry = this.#entries.get(binding.requestId)
@@ -143,7 +337,14 @@ export class EditorialHandoffDownloadAuthorizer {
         changed = true
       }
     }
+    for (const [id, entry] of this.#imports) {
+      if (entry.status.createdAt < threshold) {
+        this.#imports.delete(id)
+        changed = true
+      }
+    }
     if (changed) this.#persist()
+    if (changed) this.#persistImports()
   }
 
   #load(): void {
@@ -179,6 +380,35 @@ export class EditorialHandoffDownloadAuthorizer {
     renameSync(temporary, this.stateFile)
     chmodSync(this.stateFile, 0o600)
   }
+
+  #loadImports(): void {
+    const importFile = `${this.stateFile}.imports`
+    if (!existsSync(importFile)) return
+    const raw = JSON.parse(readFileSync(importFile, 'utf8')) as unknown
+    if (!Array.isArray(raw)) throw new Error('editorial handoff: import state is invalid')
+    let recoveredRunning = false
+    for (const value of raw) {
+      if (!validPersistedImport(value)) throw new Error('editorial handoff: import state is invalid')
+      if (value.status.state === 'running') {
+        recoveredRunning = true
+        this.#imports.set(value.requestId, { ...value, status: {
+          state: 'failed', createdAt: Date.now(), errorCode: 'host_restarted',
+        } })
+      } else this.#imports.set(value.requestId, value)
+    }
+    if (recoveredRunning) this.#persistImports()
+  }
+
+  #persistImports(): void {
+    const importFile = `${this.stateFile}.imports`
+    const parent = dirname(importFile)
+    mkdirSync(parent, { recursive: true, mode: 0o700 })
+    const temporary = `${importFile}.${process.pid.toString()}.${randomUUID()}.tmp`
+    const descriptor = openSync(temporary, 'wx', 0o600)
+    try { writeFileSync(descriptor, JSON.stringify([...this.#imports.values()]), 'utf8') } finally { closeSync(descriptor) }
+    renameSync(temporary, importFile)
+    chmodSync(importFile, 0o600)
+  }
 }
 
 /** Private dependencies supplied by the Host process for Writer package downloads. */
@@ -186,8 +416,38 @@ export interface EditorialHandoffDownloadDependencies {
   readonly baseUrl: string
   readonly fetch: typeof globalThis.fetch
   readonly readToken: () => string | undefined
+  readonly readEditorialHandoffKey: () => string | undefined
   readonly authorizer: EditorialHandoffDownloadAuthorizer
   readonly temporaryRoot?: string
+}
+
+function editorialImportHeaders(binding: ImportBinding, path: string, key: string): Record<string, string> | undefined {
+  if (Buffer.byteLength(key) < 32) return undefined
+  const timestamp = Math.floor(Date.now() / 1000).toString()
+  const nonce = randomBytes(24).toString('base64url')
+  const message = [
+    EDITORIAL_IMPORT_DOMAIN,
+    'POST',
+    path,
+    binding.packageSha256,
+    String(binding.packageSize),
+    binding.authenticatedUserId,
+    binding.projectId,
+    binding.episodeId,
+    binding.sourceSnapshotSha256,
+    binding.projectionSha256,
+    binding.downloadRequestId,
+    binding.requestId,
+    timestamp,
+    nonce,
+  ].join('\n')
+  return {
+    'x-qingmu-download-request-id': binding.downloadRequestId,
+    'x-qingmu-import-request-id': binding.requestId,
+    'x-qingmu-editorial-timestamp': timestamp,
+    'x-qingmu-editorial-nonce': nonce,
+    'x-qingmu-editorial-signature': createHmac('sha256', key).update(message).digest('hex'),
+  }
 }
 
 function sameBinding(left: DownloadBinding, right: DownloadBinding): boolean {
@@ -195,6 +455,18 @@ function sameBinding(left: DownloadBinding, right: DownloadBinding): boolean {
     && left.projectId === right.projectId && left.episodeId === right.episodeId
     && left.sourceSnapshotSha256 === right.sourceSnapshotSha256
     && left.projectionSha256 === right.projectionSha256 && left.requestId === right.requestId
+}
+
+function sameProjectionBinding(left: Omit<DownloadBinding, 'requestId'>, right: Omit<DownloadBinding, 'requestId'>): boolean {
+  return left.authenticatedUserId === right.authenticatedUserId && left.projectId === right.projectId
+    && left.episodeId === right.episodeId && left.sourceSnapshotSha256 === right.sourceSnapshotSha256
+    && left.projectionSha256 === right.projectionSha256
+}
+
+function sameImportBinding(left: ImportBinding, right: ImportBinding): boolean {
+  return sameProjectionBinding(left, right) && left.requestId === right.requestId
+    && left.downloadRequestId === right.downloadRequestId && left.packageSha256 === right.packageSha256
+    && left.packageSize === right.packageSize
 }
 
 function validPersisted(value: unknown): value is PersistedDownload {
@@ -217,6 +489,114 @@ function validPersisted(value: unknown): value is PersistedDownload {
       && typeof state.size === 'number' && Number.isSafeInteger(state.size) && state.size > 0
   }
   return state.state === 'failed' && typeof state.errorCode === 'string' && state.errorCode.length > 0
+}
+
+function validPersistedImport(value: unknown): value is PersistedImport {
+  if (typeof value !== 'object' || value === null) return false
+  const item = value as Record<string, unknown>
+  const status = item.status as Record<string, unknown> | undefined
+  return safeIdentifier(typeof item.authenticatedUserId === 'string' ? item.authenticatedUserId : null)
+    && safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
+    && safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
+    && typeof item.sourceSnapshotSha256 === 'string' && SHA256.test(item.sourceSnapshotSha256)
+    && typeof item.projectionSha256 === 'string' && SHA256.test(item.projectionSha256)
+    && typeof item.packageSha256 === 'string' && SHA256.test(item.packageSha256)
+    && typeof item.packageSize === 'number' && Number.isSafeInteger(item.packageSize) && item.packageSize > 0
+    && typeof item.requestId === 'string' && REQUEST_ID.test(item.requestId)
+    && typeof item.downloadRequestId === 'string' && REQUEST_ID.test(item.downloadRequestId)
+    && typeof item.capabilitySha256 === 'string' && SHA256.test(item.capabilitySha256)
+    && status !== undefined && typeof status.createdAt === 'number'
+    && Number.isSafeInteger(status.createdAt) && status.createdAt >= 0
+    && ((status.state === 'authorized' || status.state === 'running') && Object.keys(status).length === 2
+      || (status.state === 'failed' && typeof status.errorCode === 'string' && status.errorCode.length > 0)
+      || (status.state === 'succeeded' && normalizeImportResult(status.result) !== undefined))
+}
+
+function normalizeImportResult(value: unknown): EditorialHandoffImportResult | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const item = value as Record<string, unknown>
+  const current = item.currentAuthority as Record<string, unknown> | undefined
+  const binding = item.packageBinding as Record<string, unknown> | undefined
+  const preview = item.preview as Record<string, unknown> | undefined
+  const boundaries = item.boundaries as Record<string, unknown> | undefined
+  if (item.schema !== 'jason.qingmu-editorial-package-consumption-preview.v1'
+    || !safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
+    || !safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
+    || typeof item.packageSha256 !== 'string' || !SHA256.test(item.packageSha256)
+    || typeof item.packageSize !== 'number' || !Number.isSafeInteger(item.packageSize) || item.packageSize <= 0
+    || item.receiptMatch !== true || item.internalValidity !== true
+    || item.readOnly !== true || item.businessMutations !== 0 || item.providerCalls !== 0
+    || current === undefined || typeof current.matches !== 'boolean'
+    || !(current.sourceSnapshotSha256 === null
+      || (typeof current.sourceSnapshotSha256 === 'string' && SHA256.test(current.sourceSnapshotSha256)))
+    || !(current.projectionSha256 === null
+      || (typeof current.projectionSha256 === 'string' && SHA256.test(current.projectionSha256)))
+    || !(current.errorCode === null || typeof current.errorCode === 'string')
+    || binding === undefined || typeof binding.sourceSnapshotSha256 !== 'string'
+    || !SHA256.test(binding.sourceSnapshotSha256) || typeof binding.projectionSha256 !== 'string'
+    || !SHA256.test(binding.projectionSha256) || preview === undefined
+    || !Array.isArray(preview.tracks) || preview.tracks.length !== 2
+    || !Array.isArray(preview.orderedShots) || preview.orderedShots.length > 1000
+    || !Array.isArray(preview.media) || preview.media.length > 2000
+    || !Array.isArray(preview.unresolved) || preview.unresolved.length > 1000
+    || boundaries === undefined || boundaries.nleOpened !== false
+    || boundaries.productionComplete !== false || boundaries.releaseReady !== false
+    || boundaries.humanSignoffInferred !== false) return undefined
+  const serialized = JSON.stringify(value)
+  if (serialized.length > 4 * 1024 * 1024 || serialized.includes('/Users/')
+    || serialized.includes('Bearer ') || serialized.includes('local_path')) return undefined
+  const expectedTracks = [
+    { name: 'Picture', kind: 'Video' },
+    { name: 'Dialogue', kind: 'Audio' },
+  ] as const
+  for (const [index, track] of preview.tracks.entries()) {
+    if (typeof track !== 'object' || track === null || Array.isArray(track)) return undefined
+    const entry = track as Record<string, unknown>
+    if (entry.name !== expectedTracks[index]?.name || entry.kind !== expectedTracks[index]?.kind
+      || typeof entry.clipCount !== 'number' || !Number.isSafeInteger(entry.clipCount)
+      || entry.clipCount < 0 || entry.clipCount > 1000
+      || entry.clipCount !== preview.orderedShots.length) return undefined
+  }
+  for (const [index, shot] of preview.orderedShots.entries()) {
+    if (typeof shot !== 'object' || shot === null || Array.isArray(shot)) return undefined
+    const entry = shot as Record<string, unknown>
+    const videoRange = entry.videoRange as Record<string, unknown> | undefined
+    const audioRange = entry.audioRange as Record<string, unknown> | undefined
+    if (entry.order !== index + 1
+      || !safeIdentifier(typeof entry.sceneId === 'string' ? entry.sceneId : null)
+      || !safeIdentifier(typeof entry.frameId === 'string' ? entry.frameId : null)
+      || typeof entry.frameNo !== 'number' || !Number.isSafeInteger(entry.frameNo) || entry.frameNo <= 0
+      || typeof entry.videoPath !== 'string' || !safePackageMediaPath(entry.videoPath)
+      || typeof entry.audioPath !== 'string' || !safePackageMediaPath(entry.audioPath)
+      || !validPreviewRange(videoRange) || !validPreviewRange(audioRange)) return undefined
+  }
+  for (const media of preview.media) {
+    if (typeof media !== 'object' || media === null || Array.isArray(media)) return undefined
+    const entry = media as Record<string, unknown>
+    if ((entry.kind !== 'video' && entry.kind !== 'audio') || typeof entry.path !== 'string'
+      || !safePackageMediaPath(entry.path)
+      || typeof entry.size !== 'number' || !Number.isSafeInteger(entry.size) || entry.size < 0
+      || typeof entry.sha256 !== 'string' || !SHA256.test(entry.sha256)) return undefined
+  }
+  for (const unresolved of preview.unresolved) {
+    if (typeof unresolved !== 'object' || unresolved === null || Array.isArray(unresolved)) return undefined
+    const entry = unresolved as Record<string, unknown>
+    if (!safeIdentifier(typeof entry.frameId === 'string' ? entry.frameId : null)
+      || !safeIdentifier(typeof entry.code === 'string' ? entry.code : null)) return undefined
+  }
+  return value as EditorialHandoffImportResult
+}
+
+function safePackageMediaPath(value: string): boolean {
+  return value.startsWith('media/') && value.length <= 1024 && !value.includes('..')
+    && !value.includes('\\') && !value.includes('\0') && !value.includes('//')
+}
+
+function validPreviewRange(value: Record<string, unknown> | undefined): boolean {
+  return value !== undefined
+    && value.start === 0
+    && typeof value.durationSec === 'number' && Number.isFinite(value.durationSec) && value.durationSec > 0
+    && typeof value.rate === 'number' && Number.isFinite(value.rate) && value.rate > 0
 }
 
 function privateHeaders(extra: Record<string, string> = {}): Record<string, string> {
@@ -265,6 +645,25 @@ const BINDING_PARAMS = [
   'capability',
 ] as const
 
+const IMPORT_PARAMS = ['projectId', 'episodeId', 'requestId', 'capability'] as const
+
+function importAccess(params: URLSearchParams): {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly requestId: string
+  readonly capability: string
+} | undefined {
+  if (!exactParams(params, IMPORT_PARAMS)) return undefined
+  const projectId = params.get('projectId')
+  const episodeId = params.get('episodeId')
+  const requestId = params.get('requestId')
+  const capability = params.get('capability')
+  return safeIdentifier(projectId) && safeIdentifier(episodeId)
+    && requestId !== null && REQUEST_ID.test(requestId)
+    && capability !== null && CAPABILITY.test(capability)
+    ? { projectId, episodeId, requestId, capability } : undefined
+}
+
 function downloadBinding(params: URLSearchParams): {
   readonly binding: BrowserDownloadBinding
   readonly capability: string
@@ -311,6 +710,20 @@ async function authenticatedBinding(
   }
 }
 
+async function authenticatedUserId(
+  dependencies: EditorialHandoffDownloadDependencies,
+  token: string,
+): Promise<string | undefined> {
+  try {
+    const response = await dependencies.fetch(new URL('/api/auth/me', dependencies.baseUrl), {
+      method: 'GET', redirect: 'error', headers: { authorization: `Bearer ${token}`, accept: 'application/json' },
+    })
+    if (!response.ok) return undefined
+    const value = await response.json() as Record<string, unknown>
+    return typeof value.id === 'string' && safeIdentifier(value.id) ? value.id : undefined
+  } catch { return undefined }
+}
+
 function statusBody(status: DownloadStatus | undefined): Record<string, unknown> {
   if (status === undefined) return { status: 'not_found', sha256: null, size: null, errorCode: null }
   if (status.state === 'authorized') return { status: 'not_started', sha256: null, size: null, errorCode: null }
@@ -319,6 +732,24 @@ function statusBody(status: DownloadStatus | undefined): Record<string, unknown>
     return { status: 'succeeded', sha256: status.sha256, size: status.size, errorCode: null }
   }
   return { status: 'failed', sha256: null, size: null, errorCode: status.errorCode }
+}
+
+function importStatusBody(status: ImportStatus | undefined): Record<string, unknown> {
+  if (status === undefined) return { status: 'not_found', result: null, errorCode: null }
+  if (status.state === 'authorized') return { status: 'not_started', result: null, errorCode: null }
+  if (status.state === 'running') return { status: 'running', result: null, errorCode: null }
+  if (status.state === 'succeeded') return { status: 'succeeded', result: status.result, errorCode: null }
+  return { status: 'failed', result: null, errorCode: status.errorCode }
+}
+
+function cleanupImportSpools(root: string): void {
+  mkdirSync(root, { recursive: true, mode: 0o700 })
+  chmodSync(root, 0o700)
+  for (const name of readdirSync(root)) {
+    if (/^qingmu-otio-import-[A-Za-z0-9_-]+$/u.test(name)) {
+      rmSync(join(root, name), { recursive: true, force: true })
+    }
+  }
 }
 
 /**
@@ -332,6 +763,8 @@ export function registerEditorialHandoffDownload(
   webServer: WebServer,
   dependencies: EditorialHandoffDownloadDependencies,
 ): () => void {
+  const temporaryRoot = dependencies.temporaryRoot ?? tmpdir()
+  cleanupImportSpools(temporaryRoot)
   const disposeStatus = webServer.register({
     kind: 'exact', path: STATUS_PATH, handler: async (req, res) => {
       if (req.method !== 'GET' || !isTrustedApiRequest(req, [])) {
@@ -356,7 +789,11 @@ export function registerEditorialHandoffDownload(
         json(res, 403, { code: 'editorial_handoff_download_forbidden' })
         return
       }
-      json(res, 200, statusBody(status))
+      const nextAccess = status.state === 'succeeded'
+        ? dependencies.authorizer.issueImport(binding, access.capability) : undefined
+      json(res, 200, {
+        ...statusBody(status), ...(nextAccess === undefined ? {} : { importAccess: nextAccess }),
+      })
     },
   })
   const disposeDownload = webServer.register({
@@ -421,7 +858,7 @@ export function registerEditorialHandoffDownload(
           json(res, response.status === 409 ? 409 : 502, { code: 'editorial_handoff_download_failed' })
           return
         }
-        temporaryDirectory = await mkdtemp(join(dependencies.temporaryRoot ?? tmpdir(), 'qingmu-otio-'))
+        temporaryDirectory = await mkdtemp(join(temporaryRoot, 'qingmu-otio-'))
         const temporaryPath = join(temporaryDirectory, 'package.zip')
         const output = await open(temporaryPath, 'wx', 0o600)
         const digest = createHash('sha256')
@@ -474,7 +911,134 @@ export function registerEditorialHandoffDownload(
       }
     },
   })
+  const disposeImportStatus = webServer.register({
+    kind: 'exact', path: IMPORT_STATUS_PATH, handler: async (req, res) => {
+      if (req.method !== 'GET' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'editorial_handoff_import_forbidden' }); return
+      }
+      const access = importAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = access === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (access === undefined || userId === undefined) {
+        json(res, access === undefined ? 400 : 403, { code: 'editorial_handoff_import_forbidden' }); return
+      }
+      const status = dependencies.authorizer.importStatus(
+        userId, access.projectId, access.episodeId, access.requestId, access.capability,
+      )
+      if (status === undefined) { json(res, 403, { code: 'editorial_handoff_import_forbidden' }); return }
+      json(res, 200, importStatusBody(status))
+    },
+  })
+  const disposeImport = webServer.register({
+    kind: 'exact', path: IMPORT_PATH, handler: async (req, res) => {
+      if (req.method !== 'POST' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'editorial_handoff_import_forbidden' }); return
+      }
+      const access = importAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = access === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (access === undefined || userId === undefined) {
+        json(res, access === undefined ? 400 : 403, { code: 'editorial_handoff_import_forbidden' }); return
+      }
+      const binding = dependencies.authorizer.startImport(
+        userId, access.projectId, access.episodeId, access.requestId, access.capability,
+      )
+      if (binding === undefined) {
+        const existing = dependencies.authorizer.importStatus(
+          userId, access.projectId, access.episodeId, access.requestId, access.capability,
+        )
+        if (existing?.state === 'succeeded') json(res, 200, existing.result)
+        else json(res, existing === undefined ? 403 : 409, {
+          code: existing === undefined ? 'editorial_handoff_import_forbidden' : 'editorial_handoff_import_request_reused',
+        })
+        return
+      }
+      let temporaryDirectory: string | undefined
+      try {
+        const contentType = req.headers['content-type']?.split(';', 1)[0]?.trim()
+        const declaredLength = req.headers['content-length'] === undefined
+          ? undefined : Number(req.headers['content-length'])
+        if (contentType !== 'application/zip'
+          || (declaredLength !== undefined && declaredLength !== binding.packageSize)) {
+          throw new Error('import_contract_invalid')
+        }
+        temporaryDirectory = await mkdtemp(join(temporaryRoot, 'qingmu-otio-import-'))
+        const temporaryPath = join(temporaryDirectory, 'package.zip')
+        const output = await open(temporaryPath, 'wx', 0o600)
+        const digest = createHash('sha256')
+        let size = 0
+        try {
+          for await (const raw of req) {
+            const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw)
+            size += chunk.byteLength
+            if (size > binding.packageSize || size > MAX_PACKAGE_BYTES) throw new Error('import_size_mismatch')
+            digest.update(chunk)
+            await output.write(chunk)
+          }
+        } finally { await output.close() }
+        if (size !== binding.packageSize || digest.digest('hex') !== binding.packageSha256) {
+          throw new Error('import_receipt_mismatch')
+        }
+        const upstream = new URL(
+          `/api/qingmu/projects/${encodeURIComponent(binding.projectId)}/episodes/${encodeURIComponent(binding.episodeId)}/editorial-handoff/verify-downloaded-package`,
+          dependencies.baseUrl,
+        )
+        const hostHeaders = editorialImportHeaders(
+          binding, upstream.pathname, dependencies.readEditorialHandoffKey() ?? '',
+        )
+        if (hostHeaders === undefined) throw new Error('host_service_unavailable')
+        const response = await dependencies.fetch(upstream, {
+          method: 'POST', redirect: 'error',
+          headers: {
+            authorization: `Bearer ${token}`,
+            accept: 'application/json',
+            'content-type': 'application/zip',
+            'content-length': String(binding.packageSize),
+            'x-qingmu-authenticated-user-id': binding.authenticatedUserId,
+            'x-qingmu-package-sha256': binding.packageSha256,
+            'x-qingmu-package-size': String(binding.packageSize),
+            'x-qingmu-source-snapshot-sha256': binding.sourceSnapshotSha256,
+            'x-qingmu-projection-sha256': binding.projectionSha256,
+            ...hostHeaders,
+          },
+          body: createReadStream(temporaryPath),
+          duplex: 'half',
+        } as unknown as RequestInit & { duplex: 'half' })
+        const bytes = Buffer.from(await response.arrayBuffer())
+        if (!response.ok || bytes.length > 4 * 1024 * 1024) throw new Error('writer_verification_failed')
+        const result = normalizeImportResult(JSON.parse(bytes.toString('utf8')))
+        if (result === undefined || result.projectId !== binding.projectId
+          || result.episodeId !== binding.episodeId || result.packageSha256 !== binding.packageSha256
+          || result.packageSize !== binding.packageSize
+          || result.packageBinding.sourceSnapshotSha256 !== binding.sourceSnapshotSha256
+          || result.packageBinding.projectionSha256 !== binding.projectionSha256) {
+          throw new Error('writer_verification_contract_failed')
+        }
+        dependencies.authorizer.finishImport(binding, { state: 'succeeded', createdAt: Date.now(), result })
+        json(res, 200, result)
+      } catch (error) {
+        const code = error instanceof Error && error.message === 'import_receipt_mismatch'
+          ? 'package_receipt_mismatch'
+          : error instanceof Error && error.message === 'import_contract_invalid'
+            ? 'package_contract_invalid'
+            : error instanceof Error && error.message === 'host_service_unavailable'
+              ? 'host_service_unavailable' : 'package_verification_failed'
+        dependencies.authorizer.finishImport(binding, { state: 'failed', createdAt: Date.now(), errorCode: code })
+        if (!res.headersSent) json(res,
+          code === 'package_receipt_mismatch' || code === 'package_contract_invalid' ? 409 : 502,
+          { code },
+        )
+        else res.destroy()
+      } finally {
+        if (temporaryDirectory !== undefined) await rm(temporaryDirectory, { recursive: true, force: true })
+      }
+    },
+  })
   return () => {
+    disposeImport()
+    disposeImportStatus()
     disposeDownload()
     disposeStatus()
   }

@@ -130,7 +130,7 @@ class OwnershipTests(unittest.TestCase):
         }))
         return root, config, lock, local.hashlib.sha256(lock.read_bytes()).hexdigest(), inspection
 
-    def test_new_instance_has_distinct_private_director_execution_key(self):
+    def test_new_instance_has_distinct_private_service_keys(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)
             root = parent / "instance"
@@ -147,6 +147,12 @@ class OwnershipTests(unittest.TestCase):
             self.assertNotIn(
                 config["directorExecutionKey"],
                 {config["jwtSecret"], config["attestationKey"], config["controlKey"]},
+            )
+            self.assertGreaterEqual(len(config["editorialHandoffKey"].encode()), 32)
+            self.assertNotIn(
+                config["editorialHandoffKey"],
+                {config["jwtSecret"], config["attestationKey"], config["controlKey"],
+                 config["directorExecutionKey"]},
             )
             self.assertEqual((root / "private/instance.json").stat().st_mode & 0o777, 0o600)
 
@@ -502,6 +508,9 @@ class OwnershipTests(unittest.TestCase):
             self.assertIn("audit/director-submit-once-task-1.json", manifest["sha256"])
             restored = parent / "restored"
             local.restore(Path(saved["backup"]), restored)
+            restored_config = json.loads((restored / "private/instance.json").read_text())
+            self.assertGreaterEqual(len(restored_config["editorialHandoffKey"].encode()), 32)
+            self.assertNotEqual(restored_config["editorialHandoffKey"], config.get("editorialHandoffKey"))
             restored_fence = restored / "audit/director-submit-once-task-1.json"
             self.assertEqual(restored_fence.read_bytes(), fence.read_bytes())
             with self.assertRaises(FileExistsError):

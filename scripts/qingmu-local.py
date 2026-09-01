@@ -101,7 +101,8 @@ def initialize(root: Path, writer: Path, core: Path | None = None) -> dict:
               "harnessRoot": str(HARNESS), "yimengRoot": str(writer), "coreRoot": str(core.resolve(strict=True)) if core else None,
               "node": shutil.which("node"), "jwtSecret": secrets.token_urlsafe(48),
               "attestationKey": secrets.token_urlsafe(48), "controlKey": secrets.token_urlsafe(48),
-              "directorExecutionKey": secrets.token_urlsafe(48)}
+              "directorExecutionKey": secrets.token_urlsafe(48),
+              "editorialHandoffKey": secrets.token_urlsafe(48)}
     write_json(root / "private/instance.json", config)
     write_json(root / "private/login.json", {"username": "qingmu-local", "password": secrets.token_urlsafe(32)})
     write_json(root / "dsh/profiles/qingmu/package.json", {
@@ -431,6 +432,8 @@ class Supervisor:
         # Director paid execution disabled until restored into a new root.
         if self.config.get("directorExecutionKey"):
             env["QINGMU_DIRECTOR_EXECUTION_KEY"] = self.config["directorExecutionKey"]
+        if self.config.get("editorialHandoffKey"):
+            env["QINGMU_EDITORIAL_HANDOFF_KEY"] = self.config["editorialHandoffKey"]
         if self.config.get("_directorSubmitMockBaseUrl"):
             env["QINGMU_C1_LOCAL_MOCK_KEY"] = "isolated-local-mock-only"
         session = self.root / "private/session.json"
@@ -1029,6 +1032,7 @@ def restore(source: Path, target: Path) -> dict:
         instanceId=secrets.token_hex(16),
         controlKey=secrets.token_urlsafe(48),
         directorExecutionKey=secrets.token_urlsafe(48),
+        editorialHandoffKey=secrets.token_urlsafe(48),
     )
     write_json(target / "private/instance.json", config)
     mark_lifecycle(target, config, "clean")

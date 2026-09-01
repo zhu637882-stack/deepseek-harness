@@ -5228,7 +5228,9 @@ export function apply(ctx: Context, config: YimengReadAdapterConfig = {}): void 
       baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),
       fetch: dependencies.fetch,
       readToken: dependencies.readToken,
+      readEditorialHandoffKey: () => process.env.QINGMU_EDITORIAL_HANDOFF_KEY,
       authorizer,
+      temporaryRoot: join(dshHome as string, 'state', 'qingmu-editorial-spool'),
     }), 'qingmu-yimeng-read: editorial handoff download routes')
   }
 }

@@ -1250,6 +1250,10 @@ export interface YimengEditorialHandoffResponse extends YimengEpisodeEvidenceReq
     readonly hostAccess?: {
       readonly requestId: string
       readonly capability: string
+      readonly importAccess?: {
+        readonly requestId: string
+        readonly capability: string
+      }
     }
   }
   readonly aokiVideoProductionHandoffReady: false

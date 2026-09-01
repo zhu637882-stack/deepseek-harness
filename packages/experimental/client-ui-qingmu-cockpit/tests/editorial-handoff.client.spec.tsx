@@ -15,12 +15,14 @@ function handoff(): YimengEditorialHandoffResponse {
       schema: 'jason.qingmu-editorial-handoff-source.v1', ...SCOPE,
       evidenceSourceSnapshotSha256: '1'.repeat(64), verificationInputsSha256: '2'.repeat(64),
       audioPolicy: 'only_authoritatively_bound_assets',
+      scenes: [{ sceneId: 'scene-1', projectId: SCOPE.projectId, seriesId: 'series-1', name: '雨夜街口' }],
       shots: [{
         frameId: 'frame-1', frameNo: 1, sceneId: 'scene-1', title: '雨夜街口',
         frameContentSha256: '3'.repeat(64), stackSnapshotSha256: '4'.repeat(64),
         selectedTake: {
           assetId: 'take-1', assetRevision: 2, sha256: '5'.repeat(64),
           materializationStatus: 'available', mimeType: 'video/mp4',
+          containerTypeStatus: 'verified',
           durationSec: 4.25, fps: 24, width: 720, height: 1280, aspectRatio: '720:1280',
           recordedOutputSha256: '5'.repeat(64), outputBindingStatus: 'verified',
           size: 1024, packagePath: `media/${'5'.repeat(64)}.mp4`,
@@ -61,7 +63,7 @@ function handoff(): YimengEditorialHandoffResponse {
   }
 }
 
-function downloadableHandoff(): YimengEditorialHandoffResponse {
+function downloadableHandoff(withImport = false): YimengEditorialHandoffResponse {
   const value = handoff()
   return {
     ...value,
@@ -72,7 +74,12 @@ function downloadableHandoff(): YimengEditorialHandoffResponse {
       ...value.download,
       available: true,
       blockerCode: null,
-      hostAccess: { requestId: '12345678-1234-1234-1234-123456789abc', capability: 'a'.repeat(64) },
+      hostAccess: {
+        requestId: '12345678-1234-1234-1234-123456789abc', capability: 'a'.repeat(64),
+        ...(withImport ? { importAccess: {
+          requestId: '87654321-4321-4321-4321-cba987654321', capability: 'b'.repeat(64),
+        } } : {}),
+      },
     },
   }
 }
@@ -81,6 +88,16 @@ function mount() {
   const editorialHandoff = vi.fn().mockResolvedValue(handoff())
   const port = { editorialHandoff } as unknown as QingmuYimengReadPort
   return { editorialHandoff, ...render(<EditorialHandoff {...SCOPE} port={port} t={t} />) }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
 }
 
 afterEach(() => {
@@ -207,5 +224,128 @@ describe('editorial handoff panel', () => {
     await new Promise(resolve => window.setTimeout(resolve, 600))
     expect(screen.queryByText(/SHA-256:/u)).toBeNull()
     expect(screen.getByRole('button', { name: zh.handoffDownloadDisabled })).toBeTruthy()
+  })
+
+  it('keeps the selected ZIP and renders three independent consumption conclusions', async () => {
+    const editorialHandoff = vi.fn().mockResolvedValue(downloadableHandoff(true))
+    const port = { editorialHandoff } as unknown as QingmuYimengReadPort
+    const result = {
+      projectId: SCOPE.projectId, episodeId: SCOPE.episodeId,
+      packageSha256: '8'.repeat(64), packageSize: 4,
+      receiptMatch: true, internalValidity: true, currentAuthority: { matches: false },
+      preview: {
+        tracks: [{ name: 'Picture', kind: 'Video', clipCount: 1 }, { name: 'Dialogue', kind: 'Audio', clipCount: 1 }],
+        orderedShots: [{ order: 1, frameId: 'frame-1', frameNo: 1, videoRange: { durationSec: 4.25 },
+          videoPath: `media/${'5'.repeat(64)}.mp4`, audioPath: `media/${'6'.repeat(64)}.wav` }],
+        media: [{ kind: 'video', path: `media/${'5'.repeat(64)}.mp4`, size: 4, sha256: '5'.repeat(64) }],
+        unresolved: [],
+      },
+    }
+    const fetchImport = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
+      return new Response(JSON.stringify(method === 'POST'
+        ? result : { status: 'not_started', result: null, errorCode: null }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchImport)
+    render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
+    await waitFor(() => { expect(screen.getByLabelText(zh.handoffImportChoose)).toBeTruthy() })
+    const file = new File([new Uint8Array([1, 2, 3, 4])], 'handoff.otio.zip', { type: 'application/zip' })
+    fireEvent.change(screen.getByLabelText(zh.handoffImportChoose), { target: { files: [file] } })
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffImportVerify }))
+    await waitFor(() => { expect(screen.getByText(zh.handoffImportCurrentDrift)).toBeTruthy() })
+    expect(screen.getByText(zh.handoffImportMatched)).toBeTruthy()
+    expect(screen.getByText(zh.handoffImportValid)).toBeTruthy()
+    expect(screen.getByText(/Picture · Video · 1/u)).toBeTruthy()
+    expect(screen.getByText(/handoff\.otio\.zip/u)).toBeTruthy()
+    expect(fetchImport).toHaveBeenCalledTimes(2)
+  })
+
+  it('recovers an already verified preview from Host status without reuploading bytes', async () => {
+    const editorialHandoff = vi.fn().mockResolvedValue(downloadableHandoff(true))
+    const port = { editorialHandoff } as unknown as QingmuYimengReadPort
+    const result = {
+      projectId: SCOPE.projectId, episodeId: SCOPE.episodeId,
+      packageSha256: '8'.repeat(64), packageSize: 4,
+      receiptMatch: true, internalValidity: true, currentAuthority: { matches: true },
+      preview: { tracks: [{ name: 'Picture', kind: 'Video', clipCount: 0 }, { name: 'Dialogue', kind: 'Audio', clipCount: 0 }],
+        orderedShots: [], media: [], unresolved: [] },
+    }
+    const fetchStatus = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      status: 'succeeded', result, errorCode: null,
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchStatus)
+    render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
+    await waitFor(() => { expect(screen.getByText(zh.handoffImportCurrentMatched)).toBeTruthy() })
+    expect(screen.getByText(zh.handoffImportPreviewOnly)).toBeTruthy()
+    expect(fetchStatus).toHaveBeenCalledTimes(1)
+    expect((fetchStatus.mock.calls[0]?.[1] as RequestInit | undefined)?.method).toBe('GET')
+  })
+
+  it('discards a late import POST response after the project scope changes', async () => {
+    const editorialHandoff = vi.fn().mockResolvedValue(downloadableHandoff(true))
+    const port = { editorialHandoff } as unknown as QingmuYimengReadPort
+    const latePost = deferred<Response>()
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
+      if (method === 'POST') return latePost.promise
+      return Promise.resolve(new Response(JSON.stringify({ status: 'not_started', result: null }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      }))
+    }))
+    const view = render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
+    await waitFor(() => { expect(screen.getByLabelText(zh.handoffImportChoose)).toBeTruthy() })
+    fireEvent.change(screen.getByLabelText(zh.handoffImportChoose), {
+      target: { files: [new File([new Uint8Array([1])], 'old.otio.zip', { type: 'application/zip' })] },
+    })
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffImportVerify }))
+    await waitFor(() => { expect(screen.getByRole('button', { name: zh.handoffImportRunning })).toBeTruthy() })
+    view.rerender(<EditorialHandoff projectId="project-new" episodeId="episode-new" port={port} t={t} />)
+    latePost.resolve(new Response(JSON.stringify({
+      projectId: SCOPE.projectId, episodeId: SCOPE.episodeId,
+      packageSha256: '8'.repeat(64), packageSize: 1, receiptMatch: true, internalValidity: true,
+      currentAuthority: { matches: true }, preview: { tracks: [], orderedShots: [], media: [], unresolved: [] },
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    await waitFor(() => { expect(editorialHandoff).toHaveBeenCalledWith(
+      { projectId: 'project-new', episodeId: 'episode-new' }, expect.any(AbortSignal),
+    ) })
+    expect(screen.queryByText(zh.handoffImportMatched)).toBeNull()
+  })
+
+  it('discards a late recovery status after refresh invalidates the import', async () => {
+    const editorialHandoff = vi.fn()
+      .mockResolvedValueOnce(downloadableHandoff(true))
+      .mockResolvedValueOnce(handoff())
+    const port = { editorialHandoff } as unknown as QingmuYimengReadPort
+    const lateStatus = deferred<Response>()
+    let postSeen = false
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
+      if (method === 'POST') {
+        postSeen = true
+        return Promise.resolve(new Response('{}', { status: 503 }))
+      }
+      return postSeen ? lateStatus.promise : Promise.resolve(new Response(JSON.stringify({
+        status: 'not_started', result: null,
+      }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    }))
+    render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
+    await waitFor(() => { expect(screen.getByLabelText(zh.handoffImportChoose)).toBeTruthy() })
+    fireEvent.change(screen.getByLabelText(zh.handoffImportChoose), {
+      target: { files: [new File([new Uint8Array([1])], 'old.otio.zip', { type: 'application/zip' })] },
+    })
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffImportVerify }))
+    await waitFor(() => { expect(postSeen).toBe(true) })
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffRefresh }))
+    lateStatus.resolve(new Response(JSON.stringify({
+      status: 'succeeded', result: {
+        projectId: SCOPE.projectId, episodeId: SCOPE.episodeId,
+        packageSha256: '8'.repeat(64), packageSize: 1, receiptMatch: true, internalValidity: true,
+        currentAuthority: { matches: true }, preview: { tracks: [], orderedShots: [], media: [], unresolved: [] },
+      },
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    await waitFor(() => { expect(editorialHandoff).toHaveBeenCalledTimes(2) })
+    expect(screen.queryByText(zh.handoffImportMatched)).toBeNull()
   })
 })

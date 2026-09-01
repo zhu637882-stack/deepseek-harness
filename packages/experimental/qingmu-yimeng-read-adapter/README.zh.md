@@ -120,6 +120,8 @@ Ready PromptIR 的 `firstFrameQuote` 还返回一次服务端重算、按当前�
 
 下载合同只允许 GET。只有认证后的易梦投影确认每个镜头同时具有当前项目的 canonical 场景、当前已选视频、唯一权威 `audio/*` 对白音频、精确媒体 SHA、匹配时长、当前 QC 与自然人批准证据时，Host 才签发一次性下载 capability。该 capability 同时绑定 Writer 认证的用户、项目、剧集、来源 SHA 与投影 SHA；切换当前登录会拒绝旧 capability 且不消耗它。Host 先把完整响应写入私密临时文件，核验声明的外层包 SHA／大小后才向浏览器发送字节；私密 DSH home 只持久化 capability 哈希绑定和终态，原用户因此可在刷新或 Host 重启后恢复，无需再次向 Writer 下载。易梦用精确声明的条目集生成确定性 ZIP_STORED 包，并在返回前独立重新打开，核验每个条目的类型、大小和 SHA。Timeline 读写直接使用原生 OpenTimelineIO 0.18.1 `opentimelineio.adapters.otio_json`，锁定 0.18.1 schema map 并做原生往返；插件环境污染不会选中其他 adapter。这不代表青木生产、易梦发布或人工剪辑签收已经就绪。读取、刷新和下载均不调用 Provider，也不写业务状态。
 
+下载成功终态之后，Host 可以为同一认证用户和精确投影签发另一份一次性导入 capability。重新选择的本地 ZIP 经私有 0600 暂存流式处理，先与原终态 SHA 和大小比对，再通过专用、域分离的 Host HMAC 交给 Writer 只读包复验器。服务密钥由每个本地实例单独生成、restore 时轮换、不暴露给浏览器 RPC；缺失或过短时失败关闭且不影响公开读取。结果保持“回执字节一致”“原生 OTIO／包内有效”“当前业务来源仍匹配”三项独立结论。已复验终态可在刷新或重启后恢复，不会二次上传或重复调用 Writer 复验。详见[消费预览 Agent Note](../../../.agents/notes/implemented/feature/2026-09-01-editorial-handoff-consumption-preview.zh.md)。
+
 ## 安全边界
 
 `promptIr` 保留实际生效 Ready 主体，并额外验证最新已存 Draft 的完整主体 SHA 与基础绑定。不存在 Draft 时返回 `null`；血缘损坏报错。基于另一个 Ready 的 Draft 明确标为过期，读取器不会提升其状态。根工作流 blocker 必须有非空 `reason`；易梦在此边界前归一 stage `reasonCode` 和 release blocker，保留诊断字段。

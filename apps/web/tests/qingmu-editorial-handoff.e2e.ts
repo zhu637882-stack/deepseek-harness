@@ -12,6 +12,7 @@ import { launchWebScaffold, webSnapshotMode, type WebScaffold } from './scaffold
 import { REPO_ROOT, ZH_BROWSER_LOCALE } from './support.ts'
 
 const execFile = promisify(execFileCallback)
+const EDITORIAL_HANDOFF_KEY = 'e8-1c-editorial-handoff-host-fixture-key-0001'
 
 interface Fixture {
   readonly baseUrl: string
@@ -68,6 +69,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
     let beforeDb: string
     let beforeStorage: Record<string, string>
     const originalToken = process.env.YIMENG_API_TOKEN
+    const originalEditorialKey = process.env.QINGMU_EDITORIAL_HANDOFF_KEY
     const captured: Record<string, unknown>[] = []
 
     async function startFixture(resume: boolean): Promise<Fixture> {
@@ -79,7 +81,12 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       ]
       child = spawn(join(writerRoot, '.venv/bin/python'), args, {
         cwd: root,
-        env: { PATH: process.env.PATH, PYTHONPATH: join(writerRoot, 'backend/src'), PYTHONDONTWRITEBYTECODE: '1' },
+        env: {
+          PATH: process.env.PATH,
+          PYTHONPATH: join(writerRoot, 'backend/src'),
+          PYTHONDONTWRITEBYTECODE: '1',
+          QINGMU_EDITORIAL_HANDOFF_KEY: EDITORIAL_HANDOFF_KEY,
+        },
         stdio: ['ignore', 'pipe', 'pipe'],
       })
       const server = child
@@ -110,6 +117,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
     beforeAll(async () => {
       if (!writerRoot || webSnapshotMode() === 'record') throw new Error('Explicit isolated writer root and keyless snapshot mode are required')
       root = await realpath(await mkdtemp(join(tmpdir(), 'qingmu-e81b-handoff-')))
+      process.env.QINGMU_EDITORIAL_HANDOFF_KEY = EDITORIAL_HANDOFF_KEY
       fixture = await startFixture(false)
       beforeDb = createHash('sha256').update(await readFile(fixture.sqlitePath)).digest('hex')
       beforeStorage = await fingerprintFiles(fixture.storageRoot)
@@ -147,6 +155,8 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
         await stopFixture(child)
         if (originalToken === undefined) Reflect.deleteProperty(process.env, 'YIMENG_API_TOKEN')
         else process.env.YIMENG_API_TOKEN = originalToken
+        if (originalEditorialKey === undefined) Reflect.deleteProperty(process.env, 'QINGMU_EDITORIAL_HANDOFF_KEY')
+        else process.env.QINGMU_EDITORIAL_HANDOFF_KEY = originalEditorialKey
         if (root !== undefined) await rm(root, { recursive: true, force: true })
       }
     })
@@ -154,7 +164,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
     it('downloads exact official OTIO twice, fails stale, and recovers after FastAPI restart', async () => {
       if (scaffold === undefined || browser === undefined || writerRoot === undefined || root === undefined) throw new Error('E2E dependencies were not started')
       await page.getByRole('button', { name: '青木制作台', exact: true }).click()
-      let dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
       await dialog.getByRole('combobox', { name: '项目', exact: true }).selectOption(fixture.projectId)
       await dialog.getByRole('combobox', { name: '剧集', exact: true }).selectOption(fixture.episodeId)
       await dialog.getByRole('tab', { name: '费用与交付', exact: true }).click()
@@ -266,6 +276,59 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
         name: `Qingmu ${fixture.episodeId} editorial handoff`,
         tracks: ['Picture', 'Dialogue'], shots: 2, otio: '0.18.1', entriesOk: true,
       })
+      const packageInput = dialog.getByLabel('选择本地 OTIO ZIP')
+      expect(await packageInput.isEnabled()).toBe(true)
+      await packageInput.setInputFiles(packagePaths[1] as string)
+      await dialog.getByRole('button', { name: '复验并预览' }).click()
+      await dialog.getByText('SHA-256 与大小均精确匹配原下载终态').waitFor()
+      expect(await dialog.getByText('结构、媒体引用与 otio_json 复验通过').count()).toBe(1)
+      expect(await dialog.getByText('仍绑定当前项目、剧集、来源与投影').count()).toBe(1)
+      expect(await dialog.getByText('Picture · Video · 2').count()).toBe(1)
+      expect(await dialog.getByText('Dialogue · Audio · 2').count()).toBe(1)
+      expect(await dialog.getByText(/仅证明本地包可解析且与相应来源绑定/u).count()).toBe(1)
+      expect(await dialog.getByText(/^media\//u).count()).toBeGreaterThan(0)
+
+      for (const viewport of [{ width: 1280, height: 800 }, { width: 1440, height: 900 }]) {
+        await page.setViewportSize(viewport)
+        const receiptConclusion = dialog.getByText('SHA-256 与大小均精确匹配原下载终态')
+        await receiptConclusion.scrollIntoViewIfNeeded()
+        const conclusionBox = await receiptConclusion.boundingBox()
+        expect(conclusionBox).not.toBeNull()
+        expect(conclusionBox?.y ?? -1).toBeGreaterThanOrEqual(0)
+        expect((conclusionBox?.y ?? viewport.height) + (conclusionBox?.height ?? 1)).toBeLessThanOrEqual(viewport.height)
+        expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+        const artifactDir = process.env.QINGMU_E8_ARTIFACT_DIR
+        if (artifactDir !== undefined) {
+          await mkdir(artifactDir, { recursive: true })
+          await page.screenshot({ path: join(artifactDir, `editorial-handoff-${viewport.width}x${viewport.height}.png`) })
+        }
+      }
+
+      await stopFixture(child)
+      fixture = await startFixture(true)
+      process.env.YIMENG_API_TOKEN = fixture.token
+      const fresh = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: ZH_BROWSER_LOCALE })
+      const freshPage = await fresh.newPage()
+      await freshPage.goto(scaffold.baseUrl, { waitUntil: 'load' })
+      await freshPage.getByRole('button', { name: '青木制作台', exact: true }).click()
+      const freshDialog = freshPage.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await freshDialog.getByRole('combobox', { name: '项目', exact: true }).selectOption(fixture.projectId)
+      await freshDialog.getByRole('combobox', { name: '剧集', exact: true }).selectOption(fixture.episodeId)
+      await freshDialog.getByRole('tab', { name: '费用与交付', exact: true }).click()
+      const freshButton = freshDialog.getByRole('button', { name: '下载 OTIO 媒体包' })
+      for (let attempt = 0; attempt < 3 && !await freshButton.isVisible(); attempt += 1) {
+        await freshPage.waitForTimeout(500)
+        if (await freshDialog.getByRole('alert').isVisible()) {
+          await freshDialog.getByRole('button', { name: '刷新交接事实' }).click()
+        }
+        await freshButton.waitFor({ timeout: 10_000 }).catch(() => undefined)
+      }
+      expect(await freshButton.isEnabled()).toBe(true)
+      expect(await freshDialog.getByRole('list', { name: '剪辑交接镜头清单' }).locator(':scope > li').count()).toBe(2)
+      await freshDialog.getByText('SHA-256 与大小均精确匹配原下载终态').waitFor()
+      expect(await freshDialog.getByText('结构、媒体引用与 otio_json 复验通过').count()).toBe(1)
+      expect(await freshDialog.getByText('仍绑定当前项目、剧集、来源与投影').count()).toBe(1)
+      await fresh.close()
       const tamperCheck = await execFile(join(writerRoot, '.venv/bin/python'), ['-c', [
         'import sys,zipfile',
         'from pathlib import Path',
@@ -323,38 +386,6 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
         await restoredButton.waitFor({ timeout: 10_000 }).catch(() => undefined)
       }
       expect(await restoredButton.isEnabled()).toBe(true)
-
-      for (const viewport of [{ width: 1280, height: 800 }, { width: 1440, height: 900 }]) {
-        await page.setViewportSize(viewport)
-        expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
-        const artifactDir = process.env.QINGMU_E8_ARTIFACT_DIR
-        if (artifactDir !== undefined) {
-          await mkdir(artifactDir, { recursive: true })
-          await page.screenshot({ path: join(artifactDir, `editorial-handoff-${viewport.width}x${viewport.height}.png`) })
-        }
-      }
-
-      await stopFixture(child)
-      fixture = await startFixture(true)
-      const fresh = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: ZH_BROWSER_LOCALE })
-      const freshPage = await fresh.newPage()
-      await freshPage.goto(scaffold.baseUrl, { waitUntil: 'load' })
-      await freshPage.getByRole('button', { name: '青木制作台', exact: true }).click()
-      dialog = freshPage.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
-      await dialog.getByRole('combobox', { name: '项目', exact: true }).selectOption(fixture.projectId)
-      await dialog.getByRole('combobox', { name: '剧集', exact: true }).selectOption(fixture.episodeId)
-      await dialog.getByRole('tab', { name: '费用与交付', exact: true }).click()
-      const freshButton = dialog.getByRole('button', { name: '下载 OTIO 媒体包' })
-      for (let attempt = 0; attempt < 3 && !await freshButton.isVisible(); attempt += 1) {
-        await freshPage.waitForTimeout(500)
-        if (await dialog.getByRole('alert').isVisible()) {
-          await dialog.getByRole('button', { name: '刷新交接事实' }).click()
-        }
-        await freshButton.waitFor({ timeout: 10_000 }).catch(() => undefined)
-      }
-      expect(await freshButton.isEnabled()).toBe(true)
-      expect(await dialog.getByRole('list', { name: '剪辑交接镜头清单' }).locator(':scope > li').count()).toBe(2)
-      await fresh.close()
 
       expect(captured.length).toBeGreaterThan(0)
       expect(await page.locator('body').innerHTML()).not.toContain(fixture.token)

@@ -19,13 +19,28 @@
 .warning, .error { color: #ffd08a; }
 .success { color: var(--qingmu-accent); overflow-wrap: anywhere; }
 .exportBox { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: color-mix(in srgb, var(--qingmu-accent) 5%, transparent); }
+.importBox { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 14px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--dsw-alias-bg-layer-2); }
+.importBox p, .preview p { margin: 6px 0 0; }
+.importBox button { min-height: 40px; white-space: nowrap; }
+.fileField { display: grid; gap: 6px; margin-top: 12px; color: var(--dsw-alias-label-secondary); }
+.fileField input { max-width: 100%; color: var(--dsw-alias-label-primary); }
+.errorSummary { padding: 12px 14px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-2); }
+.preview { display: grid; gap: 14px; padding: 16px; border: 1px solid var(--qingmu-accent); border-radius: 10px; background: color-mix(in srgb, var(--qingmu-accent) 4%, var(--dsw-alias-bg-layer-2)); }
+.conclusions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.conclusions li { display: grid; gap: 6px; min-width: 0; padding: 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; }
+.conclusions li[data-state='pass'] strong { color: var(--qingmu-accent); }
+.conclusions li[data-state='stale'] strong { color: var(--dsw-alias-label-secondary); }
+.previewGrid { display: grid; grid-template-columns: minmax(0, .7fr) minmax(0, 1.3fr); gap: 12px; }
+.previewGrid > div { min-width: 0; padding: 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; }
+.previewGrid ul, .previewGrid ol, .preview details ul { margin-bottom: 0; padding-left: 20px; }
+.preview code { overflow-wrap: anywhere; }
 .empty { color: var(--dsw-alias-label-secondary); }
 details p { overflow-wrap: anywhere; }
 @media (max-width: 1100px) {
   .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 760px) {
-  .header, .exportBox { align-items: stretch; flex-direction: column; }
-  .readiness, .metrics, .shots dl { grid-template-columns: 1fr; }
-  .header button, .exportBox button { width: 100%; }
+  .header, .exportBox, .importBox { align-items: stretch; flex-direction: column; }
+  .readiness, .metrics, .shots dl, .conclusions, .previewGrid { grid-template-columns: 1fr; }
+  .header button, .exportBox button, .importBox button { width: 100%; }
 }
