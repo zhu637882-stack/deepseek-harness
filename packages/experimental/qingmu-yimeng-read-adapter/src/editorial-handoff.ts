@@ -19,6 +19,7 @@ const SHA256 = /^[0-9a-f]{64}$/u
 const OUTPUT_BINDING_STATUSES = [
   'verified', 'recorded_sha_missing', 'materialized_file_missing', 'recorded_sha_mismatch',
 ] as const
+const QUALITY_STATUSES = ['pending', 'passed', 'failed'] as const
 
 function exact(value: unknown, fields: readonly string[], field: string): JsonObject {
   if (typeof value !== 'object' || value === null || Array.isArray(value)
@@ -49,6 +50,12 @@ function optionalSha(value: unknown, field: string): string | null {
 function count(value: unknown, field: string): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) throw new Error(`editorial handoff: ${field} is invalid`)
   return value as number
+}
+
+function positiveCount(value: unknown, field: string): number {
+  const result = count(value, field)
+  if (result < 1) throw new Error(`editorial handoff: ${field} is invalid`)
+  return result
 }
 
 function finite(value: unknown, field: string, nullable = false): number | null {
@@ -102,10 +109,12 @@ function media(value: unknown, field: string): YimengEditorialHandoffMedia {
   const recordedSha = optionalSha(item.recordedOutputSha256, `${field}.recordedOutputSha256`)
   const outputBindingStatus = item.outputBindingStatus
   const mimeType = text(item.mimeType, `${field}.mimeType`, true)
+  const qualityStatus = item.qualityStatus
   if (item.selectionStatus !== 'Selected' || typeof item.lineageComplete !== 'boolean'
     || (materializationStatus !== 'available' && materializationStatus !== 'unavailable')
     || !OUTPUT_BINDING_STATUSES.includes(item.outputBindingStatus as typeof OUTPUT_BINDING_STATUSES[number])
     || (mimeType !== null && !mimeType.startsWith('video/'))
+    || !QUALITY_STATUSES.includes(qualityStatus as typeof QUALITY_STATUSES[number])
     || (width === null) !== (height === null) || (aspectRatio === null) !== (width === null)
     || (width !== null && aspectRatio !== `${String(width)}:${String(height)}`)
     || (materializationStatus === 'available') !== (materializedSha !== null)
@@ -120,7 +129,7 @@ function media(value: unknown, field: string): YimengEditorialHandoffMedia {
   }
   return {
     assetId: text(item.assetId, `${field}.assetId`) as string,
-    assetRevision: count(item.assetRevision, `${field}.assetRevision`),
+    assetRevision: positiveCount(item.assetRevision, `${field}.assetRevision`),
     sha256: materializedSha, recordedOutputSha256: recordedSha, materializationStatus,
     outputBindingStatus: outputBindingStatus as YimengEditorialHandoffMedia['outputBindingStatus'],
     mimeType,
@@ -128,7 +137,7 @@ function media(value: unknown, field: string): YimengEditorialHandoffMedia {
     fps: positiveFinite(item.fps, `${field}.fps`, true),
     width, height, aspectRatio,
     selectionStatus: 'Selected',
-    qualityStatus: text(item.qualityStatus, `${field}.qualityStatus`) as string,
+    qualityStatus: qualityStatus as YimengEditorialHandoffMedia['qualityStatus'],
     lineageComplete: item.lineageComplete,
   }
 }

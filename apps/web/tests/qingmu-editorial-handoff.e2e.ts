@@ -17,6 +17,8 @@ interface Fixture {
   readonly episodeId: string
   readonly sqlitePath: string
   readonly storageRoot: string
+  readonly handoffControlPath: string
+  readonly handoffControlAckPath: string
 }
 
 async function fingerprintFiles(root: string): Promise<Record<string, string>> {
@@ -61,7 +63,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       root = await realpath(await mkdtemp(join(tmpdir(), 'qingmu-e8-handoff-')))
       child = spawn(join(writerRoot, '.venv/bin/python'), [
         '-B', join(writerRoot, 'scripts/qingmu_evidence_ledger_fixture.py'),
-        '--root', join(root, 'yimeng'), '--handoff-two-shots',
+        '--root', join(root, 'yimeng'), '--handoff-two-shots', '--handoff-drift-control',
       ], {
         cwd: root,
         env: { PATH: process.env.PATH, PYTHONPATH: join(writerRoot, 'backend/src'), PYTHONDONTWRITEBYTECODE: '1' },
@@ -183,6 +185,19 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       const mediaBytes = await readFile(mediaPath)
       const firstShot = dialog.getByRole('list', { name: '剪辑交接镜头清单' }).locator(':scope > li').first()
       const oldMediaSha = await firstShot.getByText(/^Media SHA:/u).innerText()
+      await writeFile(fixture.handoffControlPath, 'drift')
+      await expect.poll(async () => readFile(fixture.handoffControlAckPath, 'utf8')).toBe('drift')
+      const handoffUrl = `${fixture.baseUrl}/api/qingmu/projects/${encodeURIComponent(fixture.projectId)}/episodes/${encodeURIComponent(fixture.episodeId)}/editorial-handoff`
+      expect((await fetch(handoffUrl, { headers: { authorization: `Bearer ${fixture.token}` } })).status).toBe(409)
+      await dialog.getByRole('button', { name: '刷新交接事实' }).click()
+      await expect.poll(() => dialog.getByRole('alert').innerText()).toContain('EVIDENCE_SOURCE_INVALID')
+      expect(await dialog.getByRole('list', { name: '剪辑交接镜头清单' }).count()).toBe(0)
+      expect(await dialog.getByRole('status').count()).toBe(0)
+      await writeFile(fixture.handoffControlPath, 'clean')
+      await expect.poll(async () => readFile(fixture.handoffControlAckPath, 'utf8')).toBe('clean')
+      expect((await fetch(handoffUrl, { headers: { authorization: `Bearer ${fixture.token}` } })).status).toBe(200)
+      await dialog.getByRole('button', { name: '刷新交接事实' }).click()
+      await expect.poll(() => dialog.getByRole('list', { name: '剪辑交接镜头清单' }).locator(':scope > li').count()).toBe(2)
       await rm(mediaPath)
       await dialog.getByRole('button', { name: '刷新交接事实' }).click()
       await expect.poll(() => captured.length).toBeGreaterThanOrEqual(2)

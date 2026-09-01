@@ -1143,7 +1143,7 @@ export interface YimengEditorialHandoffMedia {
   readonly height: number | null
   readonly aspectRatio: string | null
   readonly selectionStatus: 'Selected'
-  readonly qualityStatus: string
+  readonly qualityStatus: 'pending' | 'passed' | 'failed'
   readonly lineageComplete: boolean
 }
 

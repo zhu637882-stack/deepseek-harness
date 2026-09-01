@@ -40,7 +40,7 @@ function projection() {
       frameContentSha256: '3'.repeat(64), stackSnapshotSha256: '4'.repeat(64),
       selectedTake: {
         assetId: 'asset-1', assetRevision: 1, sha256: '5'.repeat(64) as string | null,
-        recordedOutputSha256: '5'.repeat(64), materializationStatus: 'available',
+        recordedOutputSha256: '5'.repeat(64) as string | null, materializationStatus: 'available',
         outputBindingStatus: 'verified', mimeType: 'video/mp4',
         durationSec: 5 as number | null, fps: 24 as number | null,
         width: 720 as number | null, height: 1280 as number | null,
@@ -266,6 +266,42 @@ describe('editorial handoff read adapter', () => {
     expect(() => normalizeEditorialHandoff(value, request, entry => sha(entry))).toThrow(
       'source.shots[].selectedTake binding is invalid',
     )
+  })
+
+  it.each([0, -1, 1.5])('rejects non-positive-integer asset revision %s after self-consistent rehash', (revision) => {
+    const value = projection()
+    const selected = value.source.shots[0]?.selectedTake
+    if (selected === null || selected === undefined) throw new Error('fixture selected Take is required')
+    selected.assetRevision = revision
+    rehash(value)
+    expect(() => normalizeEditorialHandoff(value, request, entry => sha(entry))).toThrow(
+      'source.shots[].selectedTake.assetRevision is invalid',
+    )
+  })
+
+  it('rejects an unknown quality status with self-consistent hashes', () => {
+    const value = projection()
+    const selected = value.source.shots[0]?.selectedTake
+    if (selected === null || selected === undefined) throw new Error('fixture selected Take is required')
+    selected.qualityStatus = 'ready'
+    rehash(value)
+    expect(() => normalizeEditorialHandoff(value, request, entry => sha(entry))).toThrow(
+      'source.shots[].selectedTake binding is invalid',
+    )
+  })
+
+  it('does not treat a passed asset quality flag as deep QC or lifecycle approval', () => {
+    const value = projection()
+    const shot = value.source.shots[0]
+    if (shot?.selectedTake === null || shot?.selectedTake === undefined) throw new Error('fixture selected Take is required')
+    expect(shot.selectedTake.qualityStatus).toBe('passed')
+    expect(shot.qc).toBeNull()
+    expect(shot.approval).toBeNull()
+    expect(shot.blockers).toEqual([
+      'editorial_handoff_approval_record_missing',
+      'editorial_handoff_qc_record_missing',
+    ])
+    expect(normalizeEditorialHandoff(value, request, entry => sha(entry))).toEqual(value)
   })
 
   it('rejects a forged total duration and shallow QC/lifecycle records after rehash', () => {
