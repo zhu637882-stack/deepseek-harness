@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-01-editorial-handoff-consumption-preview.md
-2026-09-01-editorial-handoff-consumption-preview.md: 156922fe17349b246f2ef1cf41aa65292ae3c5ce
-2026-09-01-editorial-handoff-consumption-preview.zh.md: 3b9148230ec929169bd231fa61b8c60896af0461
+2026-09-01-editorial-handoff-consumption-preview.md: 1522f07841f60391c10d9631cd62b09353653c81
+2026-09-01-editorial-handoff-consumption-preview.zh.md: 1d79d94b9e1637e0aaeaccab84b5ca3abaa86f70

@@ -201,6 +201,7 @@ export class EditorialHandoffDownloadAuthorizer {
    * @returns A new one-use import capability, or undefined before download success.
    */
   public issueImport(binding: DownloadBinding, capability: string): EditorialHandoffImportAccess | undefined {
+    this.#sweep()
     const entry = this.#authenticated(binding, capability)
     return entry?.status.state === 'succeeded' ? this.#createImport(entry) : undefined
   }
@@ -240,6 +241,7 @@ export class EditorialHandoffDownloadAuthorizer {
     authenticatedUserId: string, projectId: string, episodeId: string,
     requestId: string, capability: string,
   ): ImportStatus | undefined {
+    this.#sweep()
     return this.#authenticatedImport(authenticatedUserId, projectId, episodeId, requestId, capability)?.status
   }
 
@@ -259,34 +261,33 @@ export class EditorialHandoffDownloadAuthorizer {
   }
 
   #issueImportForBinding(binding: Omit<DownloadBinding, 'requestId'>): EditorialHandoffImportAccess | undefined {
-    const recovered = [...this.#imports.values()].filter(entry => entry.status.state === 'succeeded'
-      && sameProjectionBinding(entry, binding)).sort((left, right) => right.status.createdAt - left.status.createdAt)[0]
-    if (recovered !== undefined) return this.#cloneImport(recovered)
     const succeeded = [...this.#entries.values()].filter(entry => entry.status.state === 'succeeded'
       && sameProjectionBinding(entry, binding)).sort((left, right) => right.status.createdAt - left.status.createdAt)[0]
     return succeeded === undefined ? undefined : this.#createImport(succeeded)
   }
 
-  #cloneImport(recovered: PersistedImport): EditorialHandoffImportAccess {
+  #rotateImport(recovered: PersistedImport): EditorialHandoffImportAccess {
     const requestId = randomUUID()
     const capability = randomBytes(32).toString('hex')
+    this.#imports.delete(recovered.requestId)
     this.#imports.set(requestId, {
       ...recovered,
       requestId,
       capabilitySha256: createHash('sha256').update(capability).digest('hex'),
+      status: recovered.status.state === 'failed'
+        ? { state: 'authorized', createdAt: Date.now() }
+        : recovered.status,
     })
     this.#persistImports()
     return { requestId, capability }
   }
 
-  #createImport(download: PersistedDownload): EditorialHandoffImportAccess {
+  #createImport(download: PersistedDownload): EditorialHandoffImportAccess | undefined {
     if (download.status.state !== 'succeeded') throw new Error('editorial handoff: import source is not terminal')
     const terminal = download.status
-    const recovered = [...this.#imports.values()].find(entry => entry.status.state === 'succeeded'
-      && entry.downloadRequestId === download.requestId
-      && sameProjectionBinding(entry, download)
-      && entry.packageSha256 === terminal.sha256
-      && entry.packageSize === terminal.size)
+    const recovered = [...this.#imports.values()].find(entry => sameImportReceipt(entry, download))
+    if (recovered?.status.state === 'running') return undefined
+    if (recovered !== undefined) return this.#rotateImport(recovered)
     const requestId = randomUUID()
     const capability = randomBytes(32).toString('hex')
     this.#imports.set(requestId, {
@@ -300,7 +301,7 @@ export class EditorialHandoffDownloadAuthorizer {
       packageSha256: terminal.sha256,
       packageSize: terminal.size,
       capabilitySha256: createHash('sha256').update(capability).digest('hex'),
-      status: recovered?.status ?? { state: 'authorized', createdAt: Date.now() },
+      status: { state: 'authorized', createdAt: Date.now() },
     })
     this.#persistImports()
     return { requestId, capability }
@@ -330,21 +331,22 @@ export class EditorialHandoffDownloadAuthorizer {
 
   #sweep(): void {
     const threshold = Date.now() - STATUS_TTL_MS
-    let changed = false
+    let downloadsChanged = false
+    let importsChanged = false
     for (const [id, entry] of this.#entries) {
       if (entry.status.createdAt < threshold) {
         this.#entries.delete(id)
-        changed = true
+        downloadsChanged = true
       }
     }
     for (const [id, entry] of this.#imports) {
       if (entry.status.createdAt < threshold) {
         this.#imports.delete(id)
-        changed = true
+        importsChanged = true
       }
     }
-    if (changed) this.#persist()
-    if (changed) this.#persistImports()
+    if (downloadsChanged) this.#persist()
+    if (importsChanged) this.#persistImports()
   }
 
   #load(): void {
@@ -387,16 +389,25 @@ export class EditorialHandoffDownloadAuthorizer {
     const raw = JSON.parse(readFileSync(importFile, 'utf8')) as unknown
     if (!Array.isArray(raw)) throw new Error('editorial handoff: import state is invalid')
     let recoveredRunning = false
+    let compacted = false
+    const canonical = new Map<string, PersistedImport>()
     for (const value of raw) {
       if (!validPersistedImport(value)) throw new Error('editorial handoff: import state is invalid')
+      let recovered = value
       if (value.status.state === 'running') {
         recoveredRunning = true
-        this.#imports.set(value.requestId, { ...value, status: {
+        recovered = { ...value, status: {
           state: 'failed', createdAt: Date.now(), errorCode: 'host_restarted',
-        } })
-      } else this.#imports.set(value.requestId, value)
+        } }
+      }
+      const identity = importReceiptIdentity(recovered)
+      const previous = canonical.get(identity)
+      if (previous !== undefined) compacted = true
+      if (previous === undefined || preferImport(recovered, previous)) canonical.set(identity, recovered)
     }
-    if (recoveredRunning) this.#persistImports()
+    for (const value of canonical.values()) this.#imports.set(value.requestId, value)
+    if (recoveredRunning || compacted) this.#persistImports()
+    this.#sweep()
   }
 
   #persistImports(): void {
@@ -467,6 +478,36 @@ function sameImportBinding(left: ImportBinding, right: ImportBinding): boolean {
   return sameProjectionBinding(left, right) && left.requestId === right.requestId
     && left.downloadRequestId === right.downloadRequestId && left.packageSha256 === right.packageSha256
     && left.packageSize === right.packageSize
+}
+
+function sameImportReceipt(entry: PersistedImport, download: PersistedDownload): boolean {
+  return download.status.state === 'succeeded'
+    && entry.downloadRequestId === download.requestId
+    && sameProjectionBinding(entry, download)
+    && entry.packageSha256 === download.status.sha256
+    && entry.packageSize === download.status.size
+}
+
+function importReceiptIdentity(entry: PersistedImport): string {
+  return JSON.stringify([
+    entry.authenticatedUserId,
+    entry.projectId,
+    entry.episodeId,
+    entry.sourceSnapshotSha256,
+    entry.projectionSha256,
+    entry.downloadRequestId,
+    entry.packageSha256,
+    entry.packageSize,
+  ])
+}
+
+function preferImport(candidate: PersistedImport, current: PersistedImport): boolean {
+  const priority = (status: ImportStatus): number => status.state === 'succeeded'
+    ? 3 : status.state === 'failed' ? 2 : status.state === 'authorized' ? 1 : 0
+  const candidatePriority = priority(candidate.status)
+  const currentPriority = priority(current.status)
+  return candidatePriority > currentPriority
+    || (candidatePriority === currentPriority && candidate.status.createdAt >= current.status.createdAt)
 }
 
 function validPersisted(value: unknown): value is PersistedDownload {
@@ -753,6 +794,29 @@ function cleanupImportSpools(root: string): void {
 }
 
 /**
+ * Write one chunk completely even when the file handle reports a short write.
+ * @param output - Private spool handle receiving the bytes.
+ * @param bytes - Exact upload or download chunk to persist.
+ */
+export async function writeAllSpoolBytes(
+  output: {
+    write: (
+      bytes: Uint8Array, offset: number, length: number, position: null,
+    ) => Promise<{ bytesWritten: number }>
+  },
+  bytes: Uint8Array,
+): Promise<void> {
+  let offset = 0
+  while (offset < bytes.byteLength) {
+    const written = await output.write(bytes, offset, bytes.byteLength - offset, null)
+    if (written.bytesWritten <= 0 || written.bytesWritten > bytes.byteLength - offset) {
+      throw new Error('spool_partial_write_invalid')
+    }
+    offset += written.bytesWritten
+  }
+}
+
+/**
  * Register the private loopback download and status routes.
  *
  * @param webServer - Host-only loopback web server.
@@ -871,13 +935,7 @@ export function registerEditorialHandoffDownload(
             size += result.value.byteLength
             if (size > declaredSize || size > MAX_PACKAGE_BYTES) throw new Error('package_size_mismatch')
             digest.update(result.value)
-            let offset = 0
-            while (offset < result.value.byteLength) {
-              const written = await output.write(
-                result.value, offset, result.value.byteLength - offset, null,
-              )
-              offset += written.bytesWritten
-            }
+            await writeAllSpoolBytes(output, result.value)
           }
         } finally {
           await output.close()
@@ -975,7 +1033,7 @@ export function registerEditorialHandoffDownload(
             size += chunk.byteLength
             if (size > binding.packageSize || size > MAX_PACKAGE_BYTES) throw new Error('import_size_mismatch')
             digest.update(chunk)
-            await output.write(chunk)
+            await writeAllSpoolBytes(output, chunk)
           }
         } finally { await output.close() }
         if (size !== binding.packageSize || digest.digest('hex') !== binding.packageSha256) {

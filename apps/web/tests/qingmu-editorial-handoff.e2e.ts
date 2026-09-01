@@ -68,9 +68,11 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
     let fixture: Fixture
     let beforeDb: string
     let beforeStorage: Record<string, string>
+    let writerSpoolRoot = ''
     const originalToken = process.env.YIMENG_API_TOKEN
     const originalEditorialKey = process.env.QINGMU_EDITORIAL_HANDOFF_KEY
     const captured: Record<string, unknown>[] = []
+    const downloadRequests: string[] = []
 
     async function startFixture(resume: boolean): Promise<Fixture> {
       if (root === undefined || writerRoot === undefined) throw new Error('Fixture roots are required')
@@ -119,6 +121,13 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       root = await realpath(await mkdtemp(join(tmpdir(), 'qingmu-e81b-handoff-')))
       process.env.QINGMU_EDITORIAL_HANDOFF_KEY = EDITORIAL_HANDOFF_KEY
       fixture = await startFixture(false)
+      await stopFixture(child)
+      writerSpoolRoot = join(root, 'yimeng', 'storage', '.qingmu-editorial-import-spool')
+      await mkdir(writerSpoolRoot, { recursive: true, mode: 0o700 })
+      await writeFile(join(writerSpoolRoot, 'qingmu-editorial-import-abandoned.zip'), 'orphan')
+      await writeFile(join(writerSpoolRoot, 'keep-me.txt'), 'unrelated')
+      fixture = await startFixture(true)
+      expect(await readdir(writerSpoolRoot)).toEqual(['keep-me.txt'])
       beforeDb = createHash('sha256').update(await readFile(fixture.sqlitePath)).digest('hex')
       beforeStorage = await fingerprintFiles(fixture.storageRoot)
       process.env.YIMENG_API_TOKEN = fixture.token
@@ -251,6 +260,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
         if (failure !== null) {
           throw new Error(`Editorial download failed: ${failure}; UI=${await dialog.innerText()}`)
         }
+        downloadRequests.push(download.url())
         const packagePath = join(root, `handoff-${attempt + 1}.otio.zip`)
         await download.saveAs(packagePath)
         packagePaths.push(packagePath)
@@ -288,6 +298,28 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       expect(await dialog.getByText(/仅证明本地包可解析且与相应来源绑定/u).count()).toBe(1)
       expect(await dialog.getByText(/^media\//u).count()).toBeGreaterThan(0)
 
+      const successfulDownloadUrl = downloadRequests.at(-1)
+      if (successfulDownloadUrl === undefined || scaffold === undefined) throw new Error('Successful download URL missing')
+      const importStatePath = join(scaffold.harnessHome, 'state', 'qingmu-editorial-downloads.json.imports')
+      const importStateBefore = await readFile(importStatePath, 'utf8')
+      const repeatedStatus = await page.evaluate(async (url) => {
+        const statusUrl = new URL(url)
+        statusUrl.pathname = '/api/qingmu/editorial-handoff/download-status'
+        let latest: unknown
+        for (let index = 0; index < 100; index += 1) {
+          const response = await fetch(statusUrl, { cache: 'no-store' })
+          if (!response.ok) throw new Error(`status ${String(response.status)}`)
+          latest = await response.json()
+        }
+        return latest
+      }, successfulDownloadUrl) as { importAccess?: { requestId?: string } }
+      expect(repeatedStatus).toMatchObject({ importAccess: { requestId: expect.any(String) } })
+      const importStateAfter = await readFile(importStatePath, 'utf8')
+      expect(JSON.parse(importStateAfter)).toHaveLength(JSON.parse(importStateBefore).length)
+      expect(Buffer.byteLength(importStateAfter)).toBeLessThanOrEqual(Buffer.byteLength(importStateBefore) + 256)
+      expect(importStateAfter.match(/jason\.qingmu-editorial-package-consumption-preview\.v1/gu)).toHaveLength(1)
+      expect(await readdir(writerSpoolRoot)).toEqual(['keep-me.txt'])
+
       for (const viewport of [{ width: 1280, height: 800 }, { width: 1440, height: 900 }]) {
         await page.setViewportSize(viewport)
         const receiptConclusion = dialog.getByText('SHA-256 与大小均精确匹配原下载终态')
@@ -306,6 +338,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
 
       await stopFixture(child)
       fixture = await startFixture(true)
+      expect(await readdir(writerSpoolRoot)).toEqual(['keep-me.txt'])
       process.env.YIMENG_API_TOKEN = fixture.token
       const fresh = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: ZH_BROWSER_LOCALE })
       const freshPage = await fresh.newPage()

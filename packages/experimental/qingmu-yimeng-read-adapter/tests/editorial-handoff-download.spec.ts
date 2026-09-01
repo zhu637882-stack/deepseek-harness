@@ -9,6 +9,7 @@ import type { WebServer, WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import {
   EditorialHandoffDownloadAuthorizer,
   registerEditorialHandoffDownload,
+  writeAllSpoolBytes,
 } from '../src/editorial-handoff-download.ts'
 
 const SOURCE_SHA = '1'.repeat(64)
@@ -158,7 +159,7 @@ describe('editorial handoff Host download bridge', () => {
         'content-type': 'application/zip', 'content-length': String(bytes.length),
         'x-qingmu-package-sha256': digest, 'x-qingmu-package-size': String(bytes.length),
       } })) as unknown as typeof globalThis.fetch
-    const { base, access, authorizer } = await host(fetchUpstream)
+    const { base, access, authorizer, stateFile } = await host(fetchUpstream)
     expect((await fetch(downloadUrl(base, access))).status).toBe(200)
     const terminal = await (await fetch(downloadUrl(base, access).replace('/download?', '/download-status?'))).json() as {
       importAccess: { requestId: string; capability: string }
@@ -185,17 +186,119 @@ describe('editorial handoff Host download bridge', () => {
     expect(fetchUpstream).toHaveBeenCalledTimes(2)
     const recovered = await fetch(importUrl.replace('/import?', '/import-status?'))
     expect(await recovered.json()).toEqual({ status: 'succeeded', result, errorCode: null })
-    const refreshedAccess = authorizer.issue({
-      authenticatedUserId: 'writer-user', projectId: 'project-e8', episodeId: 'episode-e8',
-      sourceSnapshotSha256: SOURCE_SHA, projectionSha256: PROJECTION_SHA,
-    }).importAccess
+    const firstImportAccess = terminal.importAccess
+    const initialImportBytes = Buffer.byteLength(await readFile(`${stateFile}.imports`, 'utf8'))
+    let refreshedAccess = firstImportAccess
+    for (let index = 0; index < 100; index += 1) {
+      const response = await fetch(downloadUrl(base, access).replace('/download?', '/download-status?'))
+      const value = await response.json() as { importAccess: typeof firstImportAccess }
+      refreshedAccess = value.importAccess
+    }
+    for (let index = 0; index < 100; index += 1) {
+      refreshedAccess = authorizer.issue({
+        authenticatedUserId: 'writer-user', projectId: 'project-e8', episodeId: 'episode-e8',
+        sourceSnapshotSha256: SOURCE_SHA, projectionSha256: PROJECTION_SHA,
+      }).importAccess ?? refreshedAccess
+    }
     expect(refreshedAccess).toBeDefined()
+    const persistedImports = await readFile(`${stateFile}.imports`, 'utf8')
+    expect(Buffer.byteLength(persistedImports)).toBeLessThanOrEqual(initialImportBytes + 256)
+    expect(JSON.parse(persistedImports)).toHaveLength(1)
+    expect(persistedImports.match(/jason\.qingmu-editorial-package-consumption-preview\.v1/gu)).toHaveLength(1)
     const refreshedQuery = new URLSearchParams({
       projectId: 'project-e8', episodeId: 'episode-e8', ...refreshedAccess,
     })
     const refreshed = await fetch(`${base}/api/qingmu/editorial-handoff/import-status?${refreshedQuery.toString()}`)
     expect(await refreshed.json()).toEqual({ status: 'succeeded', result, errorCode: null })
+    const expiredQuery = new URLSearchParams({
+      projectId: 'project-e8', episodeId: 'episode-e8', ...firstImportAccess,
+    })
+    expect((await fetch(`${base}/api/qingmu/editorial-handoff/import-status?${expiredQuery.toString()}`)).status).toBe(403)
     expect(fetchUpstream).toHaveBeenCalledTimes(2)
+  })
+
+  it('writes every upload byte when the spool writer reports partial progress', async () => {
+    const stored: number[] = []
+    const writer = {
+      async write(bytes: Uint8Array, offset: number, length: number) {
+        const accepted = Math.min(2, length)
+        stored.push(...bytes.subarray(offset, offset + accepted))
+        return { bytesWritten: accepted, buffer: bytes }
+      },
+    }
+    const input = Buffer.from('partial-write-proof')
+    await writeAllSpoolBytes(writer, input)
+    expect(Buffer.from(stored)).toEqual(input)
+  })
+
+  it('keeps distinct package receipts in separate canonical import records', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'qingmu-import-receipts-'))
+    try {
+      const stateFile = join(root, 'downloads.json')
+      const authorizer = new EditorialHandoffDownloadAuthorizer(stateFile)
+      const binding = {
+        authenticatedUserId: 'writer-user', projectId: 'project-e8', episodeId: 'episode-e8',
+        sourceSnapshotSha256: SOURCE_SHA, projectionSha256: PROJECTION_SHA,
+      }
+      const first = authorizer.issue(binding)
+      const firstBinding = { ...binding, requestId: first.requestId }
+      expect(authorizer.start(firstBinding, first.capability)).toBe(true)
+      authorizer.finish(firstBinding, {
+        state: 'succeeded', createdAt: Date.now(), sha256: '3'.repeat(64), size: 3,
+      })
+      expect(authorizer.issueImport(firstBinding, first.capability)).toBeDefined()
+
+      const second = authorizer.issue(binding)
+      const secondBinding = { ...binding, requestId: second.requestId }
+      expect(authorizer.start(secondBinding, second.capability)).toBe(true)
+      authorizer.finish(secondBinding, {
+        state: 'succeeded', createdAt: Date.now() + 1, sha256: '4'.repeat(64), size: 4,
+      })
+      expect(authorizer.issueImport(secondBinding, second.capability)).toBeDefined()
+
+      const persisted = JSON.parse(await readFile(`${stateFile}.imports`, 'utf8')) as Array<{
+        packageSha256: string
+      }>
+      expect(persisted).toHaveLength(2)
+      expect(new Set(persisted.map(entry => entry.packageSha256))).toEqual(
+        new Set(['3'.repeat(64), '4'.repeat(64)]),
+      )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('expires import capabilities when only import status is read', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'qingmu-import-ttl-'))
+    try {
+      const stateFile = join(root, 'downloads.json')
+      const authorizer = new EditorialHandoffDownloadAuthorizer(stateFile)
+      const binding = {
+        authenticatedUserId: 'writer-user', projectId: 'project-e8', episodeId: 'episode-e8',
+        sourceSnapshotSha256: SOURCE_SHA, projectionSha256: PROJECTION_SHA,
+      }
+      const download = authorizer.issue(binding)
+      const downloadBinding = { ...binding, requestId: download.requestId }
+      expect(authorizer.start(downloadBinding, download.capability)).toBe(true)
+      authorizer.finish(downloadBinding, {
+        state: 'succeeded', createdAt: Date.now(), sha256: '5'.repeat(64), size: 5,
+      })
+      const access = authorizer.issueImport(downloadBinding, download.capability)
+      expect(access).toBeDefined()
+      const now = Date.now()
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 25 * 60 * 60_000)
+      try {
+        expect(authorizer.importStatus(
+          'writer-user', 'project-e8', 'episode-e8',
+          access?.requestId ?? '', access?.capability ?? '',
+        )).toBeUndefined()
+      } finally {
+        clock.mockRestore()
+      }
+      expect(JSON.parse(await readFile(`${stateFile}.imports`, 'utf8'))).toEqual([])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('fails closed before Writer verification when the private editorial Host key is absent', async () => {
