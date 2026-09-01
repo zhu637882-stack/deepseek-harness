@@ -62,6 +62,11 @@ def read_config(root: Path) -> dict:
     config = json.loads((root / "private/instance.json").read_text())
     if config["root"] != str(root) or config["harnessRoot"] != str(HARNESS):
         raise ValueError("实例目录或 Harness 来源绑定不符；拒绝使用")
+    frontend_node = config.get("frontendNode")
+    if not isinstance(frontend_node, str) or not frontend_node:
+        raise ValueError("旧实例缺少六阶段前端运行时绑定；请恢复到新目录，不能静默借用系统 Node")
+    if node20_executable(Path(frontend_node)) != frontend_node:
+        raise ValueError("六阶段前端 Node 绑定已漂移；拒绝启动")
     validate_director_production_config(config.get("directorProductionExecution"))
     if config.get("directorExecutionFixture") is not None and config.get("directorProductionExecution") is not None:
         raise ValueError("导演 fixture 与 production 配置不能同时启用")
@@ -87,11 +92,45 @@ def backend_env(root: Path, config: dict) -> dict[str, str]:
     return {**safe_env(root), "PYTHONPATH": str(Path(config["yimengRoot"]) / "backend/src")}
 
 
-def initialize(root: Path, writer: Path, core: Path | None = None) -> dict:
+def node20_executable(explicit: Path | None = None) -> str:
+    """Resolve an explicit or local Node 20 binary for the Yimeng frontend."""
+    candidates: list[Path] = [explicit.expanduser()] if explicit is not None else []
+    if explicit is None:
+        system_node = shutil.which("node")
+        if system_node:
+            candidates.append(Path(system_node))
+        candidates.extend(sorted((Path.home() / ".nvm/versions/node").glob("v20.*/bin/node"), reverse=True))
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve(strict=True)
+            result = subprocess.run(
+                [str(resolved), "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode == 0 and result.stdout.strip().startswith("v20."):
+            return str(resolved)
+    raise ValueError("易梦六阶段前端需要 Node 20；请用 --frontend-node 指定本机 Node 20")
+
+
+def initialize(
+    root: Path,
+    writer: Path,
+    core: Path | None = None,
+    frontend_node: Path | None = None,
+) -> dict:
     """Exclusive new-root initialization. Existing directories are never adopted."""
+    if root.exists() or root.is_symlink():
+        raise FileExistsError(root)
     writer = writer.resolve(strict=True)
     if not (writer / "scripts/qingmu_local_api.py").is_file():
         raise ValueError("易梦来源缺少 qingmu_local_api.py")
+    if not (writer / "frontend/package.json").is_file():
+        raise ValueError("易梦来源缺少六阶段前端")
     if core is not None and not (core / "pipeline/imago-os-current.json").is_file():
         raise ValueError("Core 来源缺少当前机器入口")
     root.mkdir(mode=0o700, parents=False, exist_ok=False)
@@ -100,6 +139,7 @@ def initialize(root: Path, writer: Path, core: Path | None = None) -> dict:
     config = {"version": 1, "instanceId": secrets.token_hex(16), "root": str(root),
               "harnessRoot": str(HARNESS), "yimengRoot": str(writer), "coreRoot": str(core.resolve(strict=True)) if core else None,
               "node": shutil.which("node"), "jwtSecret": secrets.token_urlsafe(48),
+              "frontendNode": node20_executable(frontend_node),
               "attestationKey": secrets.token_urlsafe(48), "controlKey": secrets.token_urlsafe(48),
               "directorExecutionKey": secrets.token_urlsafe(48),
               "editorialHandoffKey": secrets.token_urlsafe(48)}
@@ -252,7 +292,7 @@ def write_stopped_runtime(root: Path, config: dict) -> None:
         ports = {}
     coordinates = {
         key: ports.get(key, previous.get(key))
-        for key in ("apiPort", "webPort", "apiUrl", "webUrl")
+        for key in ("apiPort", "hostPort", "webPort", "apiUrl", "hostUrl", "webUrl", "entryUrl")
         if ports.get(key, previous.get(key)) is not None
     }
     write_json(
@@ -263,11 +303,14 @@ def write_stopped_runtime(root: Path, config: dict) -> None:
             "supervisorPid": None,
             "apiPid": None,
             "hostPid": None,
+            "frontendPid": None,
             **coordinates,
             "apiProcessAlive": False,
             "hostProcessAlive": False,
+            "frontendProcessAlive": False,
             "apiIdentityAndStorageVerified": False,
             "hostListenerAndHttpVerified": False,
+            "frontendListenerAndHttpVerified": False,
             "ready": False,
             "session": "实例已停止；数据保留，重新启动后再验证会话",
         },
@@ -298,14 +341,22 @@ class Supervisor:
         self.root, self.config = root, config
         self.api: subprocess.Popen | None = None
         self.host: subprocess.Popen | None = None
+        self.frontend: subprocess.Popen | None = None
         self.stopping = False
         self.ports: dict = {}
         self.logs: list = []
 
-    def launch(self, argv: list[str], env: dict, label: str) -> subprocess.Popen:
+    def launch(
+        self,
+        argv: list[str],
+        env: dict,
+        label: str,
+        *,
+        cwd: Path | None = None,
+    ) -> subprocess.Popen:
         log = (self.root / "logs" / (label + ".log")).open("ab")
         self.logs.append(log)
-        return subprocess.Popen(argv, cwd=self.root / "work", env=env, stdin=subprocess.DEVNULL,
+        return subprocess.Popen(argv, cwd=cwd or self.root / "work", env=env, stdin=subprocess.DEVNULL,
                                 stdout=log, stderr=log)
 
     def wait_ready(self, child: subprocess.Popen, probe) -> None:
@@ -333,12 +384,25 @@ class Supervisor:
     def host_healthy(self) -> bool:
         # The child identity is Popen-owned. Check the listening PID as well as HTTP.
         result = subprocess.run(["/usr/sbin/lsof", "-nP", "-a", "-p", str(self.host.pid),
+                                 "-iTCP:" + str(self.ports["hostPort"]), "-sTCP:LISTEN", "-Fn"],
+                                capture_output=True, text=True, timeout=3)
+        if f"n127.0.0.1:{self.ports['hostPort']}" not in result.stdout:
+            return False
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(self.ports["hostUrl"], timeout=3) as response:
+            return response.status == 200 and b"__DSH_BOOT__" in response.read(2_000_000)
+
+    def frontend_healthy(self) -> bool:
+        """Verify the owned Next process, listener and Qingmu-branded entry."""
+        result = subprocess.run(["/usr/sbin/lsof", "-nP", "-a", "-p", str(self.frontend.pid),
                                  "-iTCP:" + str(self.ports["webPort"]), "-sTCP:LISTEN", "-Fn"],
                                 capture_output=True, text=True, timeout=3)
         if f"n127.0.0.1:{self.ports['webPort']}" not in result.stdout:
             return False
-        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(self.ports["webUrl"], timeout=3) as response:
-            return response.status == 200 and b"__DSH_BOOT__" in response.read(2_000_000)
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+            self.ports["webUrl"] + "/login", timeout=3
+        ) as response:
+            body = response.read(2_000_000)
+            return response.status == 200 and "青木 OS".encode() in body
 
     def start_host(self) -> None:
         overlay = (HARNESS / "packages/experimental/qingmu-web/cordis.patch.yml").read_text()
@@ -441,17 +505,49 @@ class Supervisor:
             env["YIMENG_API_TOKEN"] = json.loads(session.read_text())["token"]
         self.host = self.launch([self.config["node"], str(HARNESS / "apps/cli/lib/bin.js"),
             "--profile", "qingmu", "--patch", str(overlay_path), "--host", "127.0.0.1",
-            "--port", str(self.ports["webPort"]), "--no-open"], env, "host")
+            "--port", str(self.ports["hostPort"]), "--no-open"], env, "host")
         self.wait_ready(self.host, self.host_healthy)
+
+    def start_frontend(self) -> None:
+        writer = Path(self.config["yimengRoot"])
+        frontend = writer / "frontend"
+        next_entry = frontend / "node_modules/next/dist/bin/next"
+        if not (frontend / ".next/BUILD_ID").is_file() or not next_entry.is_file():
+            raise RuntimeError("易梦六阶段前端尚未构建；请先在绑定的 frontend 目录运行 npm run build")
+        env = safe_env(self.root)
+        env.update({
+            "QINGMU_LOCAL_API_URL": self.ports["apiUrl"],
+            "QINGMU_DSH_HOST_URL": self.ports["hostUrl"],
+            "QINGMU_LOCAL_PUBLIC_ORIGIN": self.ports["webUrl"],
+        })
+        session = self.root / "private/session.json"
+        if session.exists():
+            env["QINGMU_LOCAL_SESSION_TOKEN"] = json.loads(session.read_text())["token"]
+        self.frontend = self.launch(
+            [self.config["frontendNode"], str(next_entry), "start", "-H", "127.0.0.1",
+             "-p", str(self.ports["webPort"])],
+            env,
+            "frontend",
+            cwd=frontend,
+        )
+        self.wait_ready(self.frontend, self.frontend_healthy)
 
     def status(self) -> dict:
         api_alive = self.api is not None and self.api.poll() is None
         host_alive = self.host is not None and self.host.poll() is None
-        api_verified = host_verified = False
+        frontend_alive = self.frontend is not None and self.frontend.poll() is None
+        api_verified = host_verified = frontend_verified = False
         try:
             api_verified = api_alive and bool(self.api_identity())
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+        try:
             host_verified = host_alive and self.host_healthy()
-        except (OSError, ValueError):
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+        try:
+            frontend_verified = frontend_alive and self.frontend_healthy()
+        except (OSError, ValueError, subprocess.SubprocessError):
             pass
         session = "未登录：运行 login"
         try:
@@ -463,9 +559,12 @@ class Supervisor:
         return {"instanceId": self.config["instanceId"], "root": str(self.root),
                 "supervisorPid": os.getpid(), "apiPid": self.api.pid if self.api else None,
                 "hostPid": self.host.pid if self.host else None, **self.ports,
+                "frontendPid": self.frontend.pid if self.frontend else None,
                 "apiProcessAlive": api_alive, "hostProcessAlive": host_alive,
+                "frontendProcessAlive": frontend_alive,
                 "apiIdentityAndStorageVerified": api_verified, "hostListenerAndHttpVerified": host_verified,
-                "ready": bool(api_verified and host_verified), "session": session}
+                "frontendListenerAndHttpVerified": frontend_verified,
+                "ready": bool(api_verified and host_verified and frontend_verified), "session": session}
 
     def login(self) -> dict:
         self.api_identity()
@@ -475,10 +574,12 @@ class Supervisor:
         except urllib.error.HTTPError as exc:
             raise RuntimeError("登录失败；凭据未改变，Draft 与回执仍保留") from exc
         write_json(self.root / "private/session.json", {"token": result["token"]})
-        # Explicit login restarts only our Host to refresh its environment token.
+        # Explicit login restarts only our Host and frontend to refresh their environment token.
         # It never replays an interrupted command; the existing receipt UI recovers it.
+        stop_child(self.frontend)
         stop_child(self.host)
         self.start_host()
+        self.start_frontend()
         return {**self.status(), "message": "会话已更新。刷新页面；未知提交结果请先恢复原回执，不要新建命令。"}
 
     def run(self) -> None:
@@ -501,19 +602,24 @@ class Supervisor:
                     preferred = json.loads(persisted.read_text()) if persisted.exists() else {}
                     # Preserve browser origin across restarts. Occupied ports fail closed.
                     api_port = available_port(preferred.get("apiPort", 0))
+                    host_port = available_port(preferred.get("hostPort", 0))
                     web_port = available_port(preferred.get("webPort", 0))
-                    while web_port == api_port:
-                        web_port = available_port()
-                    self.ports = {"apiPort": api_port, "webPort": web_port,
-                                  "apiUrl": f"http://127.0.0.1:{api_port}", "webUrl": f"http://127.0.0.1:{web_port}"}
+                    while len({api_port, host_port, web_port}) != 3:
+                        host_port, web_port = available_port(), available_port()
+                    self.ports = {"apiPort": api_port, "hostPort": host_port, "webPort": web_port,
+                                  "apiUrl": f"http://127.0.0.1:{api_port}",
+                                  "hostUrl": f"http://127.0.0.1:{host_port}",
+                                  "webUrl": f"http://127.0.0.1:{web_port}",
+                                  "entryUrl": f"http://127.0.0.1:{web_port}/qingmu-runtime/local-session"}
                     write_json(persisted, self.ports)
                     self.api = self.launch([*backend_command(self.config), "--port", str(api_port)],
                                            backend_env(self.root, self.config), "api")
                     self.wait_ready(self.api, self.api_identity)
                     self.start_host()
+                    self.start_frontend()
                     write_json(self.root / "runtime.json", self.status())
                     while not self.stopping:
-                        if self.api.poll() is not None or self.host.poll() is not None:
+                        if self.api.poll() is not None or self.host.poll() is not None or self.frontend.poll() is not None:
                             raise RuntimeError("本实例子进程退出，正在清理其余自有子进程")
                         try:
                             client, _ = server.accept()
@@ -535,6 +641,7 @@ class Supervisor:
                                     result = self.login()
                                 elif request["op"] == "stop":
                                     self.stopping = True
+                                    stop_child(self.frontend)
                                     stop_child(self.host)
                                     stop_child(self.api)
                                     result = {"stopped": True, "instanceId": self.config["instanceId"], "dataPreserved": True}
@@ -549,6 +656,7 @@ class Supervisor:
                             except OSError:
                                 pass
                 finally:
+                    stop_child(self.frontend)
                     stop_child(self.host)
                     stop_child(self.api)
                     write_stopped_runtime(self.root, self.config)
@@ -939,14 +1047,16 @@ def execute_director_submit_once(
     final: dict = {}
     try:
         mark_lifecycle(root, config, "dirty")
-        api_port, web_port = available_port(), available_port()
-        while web_port == api_port:
-            web_port = available_port()
+        api_port, host_port = available_port(), available_port()
+        while host_port == api_port:
+            host_port = available_port()
         supervisor.ports = {
             "apiPort": api_port,
-            "webPort": web_port,
+            "hostPort": host_port,
+            "webPort": host_port,
             "apiUrl": f"http://127.0.0.1:{api_port}",
-            "webUrl": f"http://127.0.0.1:{web_port}",
+            "hostUrl": f"http://127.0.0.1:{host_port}",
+            "webUrl": f"http://127.0.0.1:{host_port}",
         }
         supervisor.api = supervisor.launch(
             [*backend_command(runtime_config), "--port", str(api_port)],
@@ -1051,6 +1161,7 @@ def main() -> None:
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--yimeng-root", type=Path)
     parser.add_argument("--core-root", type=Path)
+    parser.add_argument("--frontend-node", type=Path)
     parser.add_argument("--backup", type=Path)
     parser.add_argument("--task-id")
     parser.add_argument("--lock-pack", type=Path)
@@ -1067,7 +1178,7 @@ def main() -> None:
         elif args.command == "init":
             if args.yimeng_root is None or args.core_root is None:
                 raise ValueError("init 必须明确 --yimeng-root 和 --core-root")
-            result = initialize(root, args.yimeng_root, args.core_root)
+            result = initialize(root, args.yimeng_root, args.core_root, args.frontend_node)
         else:
             config = read_config(root)
             if args.command == "_supervise":

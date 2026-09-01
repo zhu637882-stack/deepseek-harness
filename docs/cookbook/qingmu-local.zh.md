@@ -2,20 +2,20 @@
 
 [English](qingmu-local.md) | 中文
 
-本指南启动具有持久 SQLite 数据库的青木单用户专用实例，不升级其他易梦现场。前提：当前 Harness 已执行 `pnpm run build --profile qingmu`，具备 Node、Python 3、含 `.venv` 的易梦 Writer 工作区和 IMAGO Core。
+本指南启动具有持久 SQLite 数据库的青木单用户专用实例，不升级其他易梦现场。同一个启动器拥有易梦 API、DSh Host/导演服务和易梦六阶段前端。前提：当前 Harness 已按青木 profile 完成构建，具备 Node 20、Python 3、含 `.venv` 且已用 `QINGMU_LOCAL_RUNTIME_PROXY=1` 完成前端生产构建的易梦 Writer 工作区，以及 IMAGO Core。
 
 ## 初始化与打开
 
 在 Harness 目录执行。初始化拒绝任何已存在的目标目录。默认目录是 `~/Library/Application Support/QingmuOS`；自定义实例须在每条命令后加 `--root /absolute/new/path`。
 
 ```sh
-python3 scripts/qingmu-local.py init --yimeng-root /Users/a1234/yimeng-worktrees/qingmu-phase3-changeset-20260826 --core-root /Users/a1234/Downloads/imago-os-core
+python3 scripts/qingmu-local.py init --yimeng-root /absolute/path/to/yimeng-writer --core-root /absolute/path/to/imago-os-core --frontend-node /absolute/path/to/node20
 python3 scripts/qingmu-local.py start
 python3 scripts/qingmu-local.py login
 python3 scripts/qingmu-local.py status
 ```
 
-打开 `status` 输出的 `webUrl`，选择“进入青木 OS”，首次使用时选“先以只读方式进入”，再选“青木制作台”。首次选项跳过模型配置，不改变已认证的编辑权限。`ready: true` 要求两个自有进程、API 的精确数据库/媒体身份、Host 的 loopback 监听和页面均通过核验。登录状态单独显示。这是具有剧本创作入口的持久集成环境，不代表完整产品验收。
+打开 `status` 输出的唯一 `entryUrl`。它建立正常的 HttpOnly 本地会话并直接进入青木品牌的易梦项目工作区，不先展示通用 DSh 对话或额外青木弹窗。`ready: true` 要求三个自有进程、API 的精确数据库/媒体身份、DSh Host 监听/页面和六阶段前端监听/页面分别通过核验；状态字段保持分开，便于诊断。顶部会如实显示“导演服务已连接 · 面板待接入”：DSh 服务已纳入同一生命周期，但导演面板尚未嵌入六阶段页面。这是具有剧本创作入口的持久集成环境，不代表完整产品验收。
 
 <a id="write-the-first-script"></a>
 
@@ -48,7 +48,7 @@ python3 scripts/qingmu-local.py login
 
 停止保留数据，启动不重新播种项目。重启保持端口；已保存端口被占时失败，不停止占用者。重复启动返回同一存活实例。陈旧 PID 仅供诊断，命令绝不向其发信号。管理进程损坏或被外部强杀时会拒绝猜测，可能需操作员诊断其遗留子进程；不要按端口杀未知监听者。
 
-专用本地账号使用 `private/login.json` 中的随机密码，由当前 macOS 用户的私有目录保护。`login` 向既有 API 提交该凭据，更新正常 24 小时 JWT，仅重启本实例 Host，不改业务数据、不重放命令。随后刷新浏览器。保存结果未知时先查原回执再决定重试，不要新建第二条命令。设备本地身份不是人工内容批准证明。能访问此 macOS 账号或 loopback 服务的主体拥有本地用户能力。
+专用本地账号使用 `private/login.json` 中的随机密码，由当前 macOS 用户的私有目录保护。`login` 向既有 API 提交该凭据，更新正常 24 小时 JWT，仅重启本实例 Host 与前端，让两者取得更新后的私密会话；它不改业务数据、不重放命令。随后刷新浏览器。保存结果未知时先查原回执再决定重试，不要新建第二条命令。设备本地身份不是人工内容批准证明。能访问此 macOS 账号或 loopback 服务的主体拥有本地用户能力。
 
 ## 数据与备份参考
 

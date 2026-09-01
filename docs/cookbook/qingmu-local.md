@@ -2,20 +2,20 @@
 
 English | [中文](qingmu-local.zh.md)
 
-This guide starts a dedicated single-user Qingmu instance with a persistent SQLite database. It does not upgrade another Yimeng installation. Prerequisites: this Harness checkout built with `pnpm run build --profile qingmu`, Node, Python 3, the Yimeng Writer checkout with its `.venv`, and IMAGO Core.
+This guide starts a dedicated single-user Qingmu instance with a persistent SQLite database. It does not upgrade another Yimeng installation. The one launcher owns the Yimeng API, the DSh Host/director service, and the Yimeng six-stage frontend. Prerequisites: this Harness checkout built with the Qingmu profile, Node 20, Python 3, the Yimeng Writer checkout with its `.venv` and a production frontend build made with `QINGMU_LOCAL_RUNTIME_PROXY=1`, and IMAGO Core.
 
 ## Initialize and open
 
 Run from the Harness directory. Initialization refuses any existing destination directory. The default is `~/Library/Application Support/QingmuOS`; add `--root /absolute/new/path` to every command for a custom instance.
 
 ```sh
-python3 scripts/qingmu-local.py init --yimeng-root /Users/a1234/yimeng-worktrees/qingmu-phase3-changeset-20260826 --core-root /Users/a1234/Downloads/imago-os-core
+python3 scripts/qingmu-local.py init --yimeng-root /absolute/path/to/yimeng-writer --core-root /absolute/path/to/imago-os-core --frontend-node /absolute/path/to/node20
 python3 scripts/qingmu-local.py start
 python3 scripts/qingmu-local.py login
 python3 scripts/qingmu-local.py status
 ```
 
-Open the `webUrl` printed by `status`, choose “进入青木 OS”, then “先以只读方式进入” on first use and “青木制作台”. The first-use option skips model setup, not authenticated editing permissions. `ready: true` requires both owned processes, the API's exact database/storage identity, and the Host's loopback listener and page. Login is a separate status. This is a persistent integration environment with a script creation path, not complete product acceptance.
+Open the single `entryUrl` printed by `status`. It establishes the normal HttpOnly local session and goes directly to the Qingmu-branded Yimeng project workspace; there is no generic DSh chat or extra Qingmu modal first. `ready: true` requires all three owned processes, the API's exact database/storage identity, the DSh Host listener/page, and the six-stage frontend listener/page. Their status fields remain separate for diagnosis. The top bar truthfully says “导演服务已连接 · 面板待接入”: the DSh service shares the lifecycle, but its director panel is not yet embedded in the six-stage page. This is a persistent integration environment with a script creation path, not complete product acceptance.
 
 ## Write the first script
 
@@ -44,7 +44,7 @@ python3 scripts/qingmu-local.py login
 
 Stopping preserves data. Starting never reseeds projects. Ports remain stable across restarts; an occupied saved port fails without killing its owner. Repeated start reports the same live instance. A stale PID is diagnostic only; commands never signal it. A broken or externally killed supervisor fails closed and may need operator diagnosis of its orphaned children; do not kill an unknown listener by port.
 
-The dedicated local account uses a random password in `private/login.json`, protected by the current macOS user's private directory. `login` submits that credential to the existing API, renews its normal 24-hour JWT and restarts only this instance's Host. It neither changes business data nor replays commands. Refresh the browser afterward. If a save outcome is unknown, query its original receipt before retrying; do not create a second command. This device-local identity is not evidence of human content approval. Anyone with access to this macOS account or its loopback service has the local user's capabilities.
+The dedicated local account uses a random password in `private/login.json`, protected by the current macOS user's private directory. `login` submits that credential to the existing API, renews its normal 24-hour JWT and restarts only this instance's Host and frontend so both receive the renewed private session. It neither changes business data nor replays commands. Refresh the browser afterward. If a save outcome is unknown, query its original receipt before retrying; do not create a second command. This device-local identity is not evidence of human content approval. Anyone with access to this macOS account or its loopback service has the local user's capabilities.
 
 ## Data and backup reference
 

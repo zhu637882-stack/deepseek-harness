@@ -137,10 +137,13 @@ class OwnershipTests(unittest.TestCase):
             writer = parent / "writer"
             (writer / "scripts").mkdir(parents=True)
             (writer / "scripts/qingmu_local_api.py").touch()
+            (writer / "frontend").mkdir()
+            (writer / "frontend/package.json").write_text("{}")
             completed = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout='{"userId":"user_1","username":"qingmu-local"}\n', stderr=""
             )
-            with patch("subprocess.run", return_value=completed):
+            with patch("subprocess.run", return_value=completed), \
+                 patch.object(local, "node20_executable", return_value="/private/node20"):
                 local.initialize(root, writer)
             config = json.loads((root / "private/instance.json").read_text())
             self.assertGreaterEqual(len(config["directorExecutionKey"].encode()), 32)
@@ -163,6 +166,17 @@ class OwnershipTests(unittest.TestCase):
             (writer / "scripts/qingmu_local_api.py").touch()
             with self.assertRaises(FileExistsError):
                 local.initialize(Path(directory), writer)
+
+    def test_frontend_node_must_be_node20(self):
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="v20.20.2\n", stderr="")
+        with patch("subprocess.run", return_value=completed):
+            self.assertEqual(local.node20_executable(Path("/bin/sh")), str(Path("/bin/sh").resolve()))
+        wrong = subprocess.CompletedProcess(args=[], returncode=0, stdout="v26.7.0\n", stderr="")
+        with patch("subprocess.run", return_value=wrong), \
+             patch.object(local.shutil, "which", return_value=None), \
+             patch.object(local.Path, "glob", return_value=[]), \
+             self.assertRaisesRegex(ValueError, "Node 20"):
+            local.node20_executable(Path("/bin/sh"))
 
     def test_occupied_port_is_not_reused(self):
         with socket.socket() as listener:
@@ -283,6 +297,7 @@ class OwnershipTests(unittest.TestCase):
             local.write_json(root / "private/ports.json", {
                 "apiPort": 49899, "webPort": 49900,
                 "apiUrl": "http://127.0.0.1:49899", "webUrl": "http://127.0.0.1:49900",
+                "entryUrl": "http://127.0.0.1:49900/qingmu-runtime/local-session",
             })
             local.write_json(root / "runtime.json", {
                 "instanceId": "unit-stopped", "ready": True,
@@ -294,6 +309,7 @@ class OwnershipTests(unittest.TestCase):
                 local.write_stopped_runtime(root, config)
             runtime = json.loads((root / "runtime.json").read_text())
             self.assertEqual(runtime["webUrl"], "http://127.0.0.1:49900")
+            self.assertEqual(runtime["entryUrl"], "http://127.0.0.1:49900/qingmu-runtime/local-session")
             self.assertFalse(runtime["ready"])
             self.assertEqual(
                 [runtime["supervisorPid"], runtime["apiPid"], runtime["hostPid"]],
@@ -311,13 +327,18 @@ class OwnershipTests(unittest.TestCase):
             supervisor = local.Supervisor(root, config)
             api = subprocess.Popen(["/bin/sleep", "30"])
             host = subprocess.Popen(["/bin/sleep", "30"])
+            frontend = subprocess.Popen(["/bin/sleep", "30"])
             try:
                 def start_host():
                     supervisor.host = host
 
+                def start_frontend():
+                    supervisor.frontend = frontend
+
                 with patch.object(supervisor, "launch", return_value=api), \
                      patch.object(supervisor, "wait_ready"), \
-                     patch.object(supervisor, "start_host", side_effect=start_host):
+                     patch.object(supervisor, "start_host", side_effect=start_host), \
+                     patch.object(supervisor, "start_frontend", side_effect=start_frontend):
                     with ThreadPoolExecutor(max_workers=1) as pool:
                         running = pool.submit(supervisor.run)
                         result = None
@@ -331,14 +352,81 @@ class OwnershipTests(unittest.TestCase):
                         running.result(timeout=5)
                 self.assertIsNotNone(api.poll())
                 self.assertIsNotNone(host.poll())
+                self.assertIsNotNone(frontend.poll())
                 runtime = json.loads((root / "runtime.json").read_text())
                 self.assertFalse(runtime["ready"])
                 self.assertFalse(runtime["apiProcessAlive"])
                 self.assertFalse(runtime["hostProcessAlive"])
+                self.assertFalse(runtime["frontendProcessAlive"])
                 local.require_clean(root, config)
             finally:
                 local.stop_child(api)
                 local.stop_child(host)
+                local.stop_child(frontend)
+
+    def test_frontend_uses_bound_api_host_origin_and_private_session(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "instance"
+            writer = parent / "writer"
+            frontend = writer / "frontend"
+            for path in (root / "logs", root / "home", root / "work", root / "dsh", root / "private"):
+                path.mkdir(parents=True, exist_ok=True)
+            (frontend / ".next").mkdir(parents=True)
+            (frontend / ".next/BUILD_ID").write_text("build")
+            (frontend / "node_modules/next/dist/bin").mkdir(parents=True)
+            (frontend / "node_modules/next/dist/bin/next").write_text("entry")
+            local.write_json(root / "private/session.json", {"token": "private-session-token"})
+            config = {
+                "instanceId": "unit", "root": str(root), "yimengRoot": str(writer),
+                "frontendNode": "/private/node20",
+            }
+            supervisor = local.Supervisor(root, config)
+            supervisor.ports = {
+                "apiUrl": "http://127.0.0.1:41001",
+                "hostUrl": "http://127.0.0.1:41002",
+                "webUrl": "http://127.0.0.1:41003",
+                "webPort": 41003,
+            }
+            child = subprocess.Popen(["/bin/sleep", "30"])
+            try:
+                with patch.object(supervisor, "launch", return_value=child) as launch, \
+                     patch.object(supervisor, "wait_ready"):
+                    supervisor.start_frontend()
+                argv, env, label = launch.call_args.args
+                self.assertEqual(argv[:2], ["/private/node20", str(frontend / "node_modules/next/dist/bin/next")])
+                self.assertEqual(argv[-4:], ["-H", "127.0.0.1", "-p", "41003"])
+                self.assertEqual(label, "frontend")
+                self.assertEqual(env["QINGMU_LOCAL_API_URL"], supervisor.ports["apiUrl"])
+                self.assertEqual(env["QINGMU_DSH_HOST_URL"], supervisor.ports["hostUrl"])
+                self.assertEqual(env["QINGMU_LOCAL_PUBLIC_ORIGIN"], supervisor.ports["webUrl"])
+                self.assertEqual(env["QINGMU_LOCAL_SESSION_TOKEN"], "private-session-token")
+                self.assertEqual(launch.call_args.kwargs["cwd"], frontend)
+            finally:
+                local.stop_child(child)
+
+    def test_status_keeps_api_host_and_frontend_diagnostics_independent(self):
+        class Child:
+            def __init__(self, pid):
+                self.pid = pid
+
+            def poll(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "private").mkdir()
+            supervisor = local.Supervisor(root, {"instanceId": "unit"})
+            supervisor.ports = {"apiUrl": "http://127.0.0.1:1"}
+            supervisor.api, supervisor.host, supervisor.frontend = Child(1), Child(2), Child(3)
+            with patch.object(supervisor, "api_identity", side_effect=ValueError("api down")), \
+                 patch.object(supervisor, "host_healthy", return_value=True), \
+                 patch.object(supervisor, "frontend_healthy", return_value=True):
+                status = supervisor.status()
+            self.assertFalse(status["apiIdentityAndStorageVerified"])
+            self.assertTrue(status["hostListenerAndHttpVerified"])
+            self.assertTrue(status["frontendListenerAndHttpVerified"])
+            self.assertFalse(status["ready"])
 
     def test_tampered_backup_is_rejected_before_creation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -357,14 +445,19 @@ class OwnershipTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "private").mkdir()
-            config = {"instanceId": "orphan", "root": str(root), "harnessRoot": str(local.HARNESS), "controlKey": "unit"}
+            config = {
+                "instanceId": "orphan", "root": str(root),
+                "harnessRoot": str(local.HARNESS), "controlKey": "unit",
+                "frontendNode": "/private/node20",
+            }
             local.write_json(root / "private/instance.json", config)
             local.mark_lifecycle(root, config, "dirty")
             child = subprocess.Popen(["/bin/sleep", "30"])
             try:
-                for operation in (lambda: local.backup(root), lambda: local.start(root, config), lambda: local.require_clean(root, config)):
-                    with self.assertRaisesRegex(RuntimeError, "状态未知"):
-                        operation()
+                with patch.object(local, "node20_executable", return_value="/private/node20"):
+                    for operation in (lambda: local.backup(root), lambda: local.start(root, config), lambda: local.require_clean(root, config)):
+                        with self.assertRaisesRegex(RuntimeError, "状态未知"):
+                            operation()
                 self.assertIsNone(child.poll())
                 self.assertFalse((root / "backups").exists())
             finally:
@@ -495,6 +588,7 @@ class OwnershipTests(unittest.TestCase):
                 "instanceId": "instance-1", "controlKey": "control",
                 "directorExecutionKey": "director", "jwtSecret": "jwt",
                 "attestationKey": "attestation",
+                "frontendNode": "/private/node20",
             }
             local.write_json(root / "private/instance.json", config)
             local.write_json(root / "identity.json", {"kind": "test"})
@@ -503,11 +597,13 @@ class OwnershipTests(unittest.TestCase):
                 connection.execute("CREATE TABLE sample (id INTEGER)")
             fence = root / "audit/director-submit-once-task-1.json"
             local._write_exclusive_json(fence, {"state": "armed_no_replay"})
-            saved = local.backup(root)
+            with patch.object(local, "node20_executable", return_value="/private/node20"):
+                saved = local.backup(root)
             manifest = json.loads((Path(saved["backup"]) / "manifest.json").read_text())
             self.assertIn("audit/director-submit-once-task-1.json", manifest["sha256"])
             restored = parent / "restored"
-            local.restore(Path(saved["backup"]), restored)
+            with patch.object(local, "node20_executable", return_value="/private/node20"):
+                local.restore(Path(saved["backup"]), restored)
             restored_config = json.loads((restored / "private/instance.json").read_text())
             self.assertGreaterEqual(len(restored_config["editorialHandoffKey"].encode()), 32)
             self.assertNotEqual(restored_config["editorialHandoffKey"], config.get("editorialHandoffKey"))

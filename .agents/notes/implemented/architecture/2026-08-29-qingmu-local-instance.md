@@ -10,9 +10,9 @@ A temporary API fixture does not provide a persistent user installation. Ambient
 
 ## Decision
 
-The [launcher](../../../../scripts/qingmu-local.py) exclusively creates a private root and binds the normal Studio API and built CLI profile to it. The supervisor holds a lifecycle flock and the live child handles; a private Unix socket authenticates control requests. Status checks API identity/data binding and the Host listener separately from login. No persisted PID is a signal target.
+The [launcher](../../../../scripts/qingmu-local.py) exclusively creates a private root and binds the normal Studio API, built DSh Host/director profile, and built Yimeng six-stage frontend to it. The Yimeng frontend is the sole user workspace and business UI; the launcher adds only loopback hosting, a narrow API reverse proxy, and an HttpOnly session bootstrap. It does not copy Yimeng state or introduce a second cockpit. The supervisor holds a lifecycle flock and all three live child handles; a private Unix socket authenticates control requests. Status verifies API identity/data binding, DSh Host listener/page, and frontend listener/page separately from login. No persisted PID is a signal target.
 
-Explicit login uses the canonical API and restarts only the owned Host to update its environment token. The server's ordinary expiry remains enforced. Commands are never replayed by login or start. Cold backup and restore verify database/media integrity; restore writes an absent destination only.
+Explicit login uses the canonical API and restarts only the owned Host and frontend to update their private session environment. The server's ordinary expiry remains enforced. Commands are never replayed by login or start. Cold backup and restore verify database/media integrity; restore writes an absent destination only.
 
 ## Alternatives considered
 
@@ -24,4 +24,4 @@ Explicit login uses the canonical API and restarts only the owned Host to update
 
 ## Consequences
 
-The instance is loopback-only and trusts the local OS user. It does not support multi-user tenancy or automatic recovery of children orphaned by an external supervisor kill. Login briefly interrupts Host connectivity; existing receipt recovery handles unknown outcomes. An empty cockpit has no project-creation entry. The [guide](../../../../docs/cookbook/qingmu-local.md) states these limits. Focused ownership tests and the actual launcher/browser test pin process cleanup, expiry recovery and persistent Draft/receipt readback; synthetic Ready inputs remain acceptance data, not content approval.
+The instance is loopback-only and trusts the local OS user. It does not support multi-user tenancy or automatic recovery of children orphaned by an external supervisor kill. Login briefly interrupts Host and frontend connectivity; existing receipt recovery handles unknown outcomes. The single URL enters the real Yimeng project empty state and creation path. DSh director service health is visible, but its panel is not yet embedded; this must not be reported as complete director-workspace integration. The [guide](../../../../docs/cookbook/qingmu-local.md) states these limits. Focused ownership tests and the actual launcher/browser test pin process cleanup, restart persistence, session bootstrap, and the truthful empty state; synthetic inputs remain acceptance data, not content approval.
