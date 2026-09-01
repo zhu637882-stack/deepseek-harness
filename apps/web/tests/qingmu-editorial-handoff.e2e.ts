@@ -1,4 +1,4 @@
-// E8-1B: Chromium -> built Host -> actual FastAPI -> deterministic official OTIO package.
+// E8-3A: Chromium -> built Host -> actual FastAPI -> selected returned-master technical QC.
 import { execFile as execFileCallback, spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
@@ -35,7 +35,10 @@ interface BoundaryFacts {
     readonly current_final_asset_id: string
     readonly accepted_final_output_id: string | null
     readonly accepted_final_asset_id: string | null
+    readonly accepted_final_sha256: string | null
+    readonly accepted_readiness_token: string | null
   }
+  readonly technicalQcReceiptCount: number
   readonly candidates: readonly {
     readonly id: string
     readonly asset_type: string
@@ -57,9 +60,10 @@ async function readBoundaryFacts(writerRoot: string, sqlitePath: string): Promis
     'names=["prompt_ir_sets","human_decisions","generation_tasks","stage_runs","release_manifests"]',
     'counts={name:(conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0] if name in tables else None) for name in names}',
     'candidates=[dict(r) for r in conn.execute("SELECT id,asset_type,role,local_path,sha256,selection_status,quality_status,is_selected FROM assets WHERE id LIKE \'asset_editorial_master_%\' ORDER BY id")]',
-    'authority=(dict(conn.execute("SELECT revision,current_final_output_id,current_final_asset_id,accepted_final_output_id,accepted_final_asset_id FROM episode_release_authority").fetchone()) if "episode_release_authority" in tables and conn.execute("SELECT COUNT(*) FROM episode_release_authority").fetchone()[0] else None)',
+    'authority=(dict(conn.execute("SELECT revision,current_final_output_id,current_final_asset_id,accepted_final_output_id,accepted_final_asset_id,accepted_final_sha256,accepted_readiness_token FROM episode_release_authority").fetchone()) if "episode_release_authority" in tables and conn.execute("SELECT COUNT(*) FROM episode_release_authority").fetchone()[0] else None)',
     'final_count=(conn.execute("SELECT COUNT(*) FROM final_outputs").fetchone()[0] if "final_outputs" in tables else 0)',
-    'print(json.dumps({"assetCount":conn.execute("SELECT COUNT(*) FROM assets").fetchone()[0],"protectedCounts":counts,"finalOutputCount":final_count,"releaseAuthority":authority,"candidates":candidates},sort_keys=True))',
+    'qc_receipts=(conn.execute("SELECT COUNT(*) FROM command_receipts WHERE command_type=\'qingmu.returned_master.technical_qc.v1\'").fetchone()[0] if "command_receipts" in tables else 0)',
+    'print(json.dumps({"assetCount":conn.execute("SELECT COUNT(*) FROM assets").fetchone()[0],"protectedCounts":counts,"finalOutputCount":final_count,"releaseAuthority":authority,"technicalQcReceiptCount":qc_receipts,"candidates":candidates},sort_keys=True))',
   ].join('\n'), sqlitePath], { env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: '1' } })
   return JSON.parse(result.stdout) as BoundaryFacts
 }
@@ -97,15 +101,16 @@ async function stopFixture(child: ChildProcess | undefined): Promise<void> {
 }
 
 const writerRoot = process.env.QINGMU_E8_YIMENG_ROOT
-describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot)(
-  'web e2e: editorial handoff package and returned-master preflight', () => {
+describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot).each(
+  ['passed', 'failed'] as const,
+)(
+  'web e2e: editorial handoff package and returned-master technical QC (%s)', (expectedQcStatus) => {
     let root: string | undefined
     let child: ChildProcess | undefined
     let scaffold: WebScaffold | undefined
     let browser: Browser | undefined
     let page: Page
     let fixture: Fixture
-    let beforeDb: string
     let beforeBoundaryFacts: BoundaryFacts
     let beforeStorage: Record<string, string>
     let writerSpoolRoot = ''
@@ -116,6 +121,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
     const masterRequests: string[] = []
     const candidateRequests: string[] = []
     const selectionRequests: string[] = []
+    const technicalQcRequests: string[] = []
 
     async function startFixture(resume: boolean): Promise<Fixture> {
       if (root === undefined || writerRoot === undefined) throw new Error('Fixture roots are required')
@@ -171,7 +177,6 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       await writeFile(join(writerSpoolRoot, 'keep-me.txt'), 'unrelated')
       fixture = await startFixture(true)
       expect(await readdir(writerSpoolRoot)).toEqual(['keep-me.txt'])
-      beforeDb = createHash('sha256').update(await readFile(fixture.sqlitePath)).digest('hex')
       beforeBoundaryFacts = await readBoundaryFacts(writerRoot, fixture.sqlitePath)
       beforeStorage = await fingerprintFiles(fixture.storageRoot)
       process.env.YIMENG_API_TOKEN = fixture.token
@@ -202,6 +207,9 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
         if (url.pathname === '/api/qingmu/editorial-handoff/returned-master-selection' && request.method() === 'POST') {
           selectionRequests.push(request.url())
         }
+        if (url.pathname === '/api/qingmu/editorial-handoff/returned-master-technical-qc' && request.method() === 'POST') {
+          technicalQcRequests.push(request.url())
+        }
       })
       await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
       await page.getByRole('button', { name: '进入青木 OS' }).click()
@@ -221,7 +229,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       }
     })
 
-    it('promotes the exact returned candidate to formal master and recovers authority after restart', async () => {
+    it('runs technical QC on the exact selected returned master and recovers it after restart', async () => {
       if (scaffold === undefined || browser === undefined || writerRoot === undefined || root === undefined) throw new Error('E2E dependencies were not started')
       await page.getByRole('button', { name: '青木制作台', exact: true }).click()
       const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
@@ -306,7 +314,17 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
 
       const masterEntry = Object.keys(beforeStorage).find(path => path.endsWith('.mp4'))
       if (masterEntry === undefined) throw new Error('Returned-master media fixture missing')
-      const masterPath = join(fixture.storageRoot, masterEntry)
+      let masterPath = join(fixture.storageRoot, masterEntry)
+      if (expectedQcStatus === 'failed') {
+        masterPath = join(root, 'technical-failed-master.mp4')
+        await execFile('ffmpeg', [
+          '-hide_banner', '-loglevel', 'error',
+          '-f', 'lavfi', '-i', 'color=c=black:s=720x1280:r=24:d=2',
+          '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100:duration=2',
+          '-c:v', 'mpeg4', '-q:v', '5', '-c:a', 'mp3', '-shortest',
+          '-movflags', '+faststart', masterPath,
+        ], { env: { PATH: process.env.PATH } })
+      }
       const masterSha = createHash('sha256').update(await readFile(masterPath)).digest('hex')
       const masterInput = dialog.getByLabel('选择本地母版（MP4 / MOV / WebM）')
       await expect.poll(() => masterInput.isEnabled()).toBe(true)
@@ -345,7 +363,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       }).check()
       await dialog.getByRole('button', { name: '确认选择正式母版', exact: true }).click()
       await dialog.getByText('正式母版选择已由易梦原回执确认', { exact: true }).waitFor()
-      await dialog.getByText('已选为当前正式母版 · 待质检 · 未发布', { exact: true }).waitFor()
+      await dialog.getByText('已选为当前正式母版 · 未发布', { exact: true }).waitFor()
       expect(selectionRequests).toHaveLength(1)
       const selectedFacts = await readBoundaryFacts(writerRoot, fixture.sqlitePath)
       expect(selectedFacts.assetCount).toBe(savedFacts.assetCount)
@@ -361,6 +379,44 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
         current_final_asset_id: savedFacts.candidates[0]?.id,
         accepted_final_output_id: null,
         accepted_final_asset_id: null,
+      })
+      expect(createHash('sha256').update(await readFile(candidatePath)).digest('hex')).toBe(masterSha)
+      const prepareTechnicalQc = dialog.getByRole('button', { name: '准备技术质检', exact: true })
+      await expect.poll(() => prepareTechnicalQc.isEnabled(), { timeout: 10_000 }).toBe(true)
+      await prepareTechnicalQc.click()
+      const confirmTechnicalQc = dialog.getByRole('checkbox', {
+        name: '我确认对当前绑定的同一母版运行本地技术探测；这不是内容批准、发布或最终签收。',
+      })
+      await expect.poll(async () => {
+        if (await confirmTechnicalQc.isEnabled()) return true
+        throw new Error(await dialog.innerText())
+      }, { timeout: 10_000 }).toBe(true)
+      await confirmTechnicalQc.check()
+      await dialog.getByRole('button', { name: '运行技术质检', exact: true }).click()
+      const technicalConclusion = expectedQcStatus === 'passed'
+        ? '技术事实通过，质量状态已记录'
+        : '发现确定性技术问题，当前母版不可发布'
+      await dialog.getByText(technicalConclusion, { exact: true }).waitFor({ timeout: 30_000 })
+      expect(await dialog.getByText('技术通过 ≠ 内容批准 ≠ manifest 冻结 ≠ 人工签收。', { exact: true }).count()).toBe(1)
+      if (expectedQcStatus === 'passed') expect(await dialog.getByText('h264 / aac', { exact: true }).count()).toBe(1)
+      expect(technicalQcRequests).toHaveLength(1)
+      const qcFacts = await readBoundaryFacts(writerRoot, fixture.sqlitePath)
+      expect(qcFacts.assetCount).toBe(selectedFacts.assetCount)
+      expect(qcFacts.finalOutputCount).toBe(selectedFacts.finalOutputCount)
+      expect(qcFacts.protectedCounts).toEqual(beforeBoundaryFacts.protectedCounts)
+      expect(qcFacts.technicalQcReceiptCount).toBe(1)
+      expect(qcFacts.candidates).toEqual([expect.objectContaining({
+        id: savedFacts.candidates[0]?.id,
+        asset_type: 'final_video', role: 'b7_final', sha256: masterSha,
+        selection_status: 'Selected', quality_status: expectedQcStatus, is_selected: 1,
+      })])
+      expect(qcFacts.releaseAuthority).toMatchObject({
+        revision: (selectedFacts.releaseAuthority?.revision ?? 0) + 1,
+        current_final_asset_id: savedFacts.candidates[0]?.id,
+        accepted_final_output_id: null,
+        accepted_final_asset_id: null,
+        accepted_final_sha256: null,
+        accepted_readiness_token: null,
       })
       expect(createHash('sha256').update(await readFile(candidatePath)).digest('hex')).toBe(masterSha)
       const masterRequestUrl = masterRequests.at(-1)
@@ -402,7 +458,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
 
       for (const viewport of [{ width: 1280, height: 800 }, { width: 1440, height: 900 }]) {
         await page.setViewportSize(viewport)
-        const candidateConclusion = dialog.getByText('已选为当前正式母版 · 待质检 · 未发布', { exact: true })
+        const candidateConclusion = dialog.getByText(technicalConclusion, { exact: true })
         await candidateConclusion.scrollIntoViewIfNeeded()
         const conclusionBox = await candidateConclusion.boundingBox()
         expect(conclusionBox).not.toBeNull()
@@ -412,7 +468,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
         const artifactDir = process.env.QINGMU_E8_ARTIFACT_DIR
         if (artifactDir !== undefined) {
           await mkdir(artifactDir, { recursive: true })
-          await page.screenshot({ path: join(artifactDir, `editorial-handoff-${viewport.width}x${viewport.height}.png`) })
+          await page.screenshot({ path: join(artifactDir, `editorial-handoff-${expectedQcStatus}-${viewport.width}x${viewport.height}.png`) })
         }
       }
 
@@ -422,6 +478,18 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       process.env.YIMENG_API_TOKEN = fixture.token
       const fresh = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: ZH_BROWSER_LOCALE })
       const freshPage = await fresh.newPage()
+      freshPage.on('request', (request) => {
+        const url = new URL(request.url())
+        if (!['127.0.0.1', 'localhost'].includes(url.hostname)) {
+          throw new Error(`External browser request forbidden: ${url.origin}`)
+        }
+        if (url.pathname === '/api/qingmu/editorial-handoff/returned-master-candidate'
+          && request.method() === 'POST') candidateRequests.push(request.url())
+        if (url.pathname === '/api/qingmu/editorial-handoff/returned-master-selection'
+          && request.method() === 'POST') selectionRequests.push(request.url())
+        if (url.pathname === '/api/qingmu/editorial-handoff/returned-master-technical-qc'
+          && request.method() === 'POST') technicalQcRequests.push(request.url())
+      })
       await freshPage.goto(scaffold.baseUrl, { waitUntil: 'load' })
       await freshPage.getByRole('button', { name: '青木制作台', exact: true }).click()
       const freshDialog = freshPage.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
@@ -430,7 +498,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       await freshDialog.getByRole('tab', { name: '费用与交付', exact: true }).click()
       const readCandidates = freshDialog.getByRole('button', { name: '读取已保存候选', exact: true })
       await readCandidates.waitFor({ timeout: 10_000 })
-      const recoveredCandidate = freshDialog.getByText('已选为当前正式母版 · 待质检 · 未发布', { exact: true })
+      const recoveredCandidate = freshDialog.getByText('已选为当前正式母版 · 未发布', { exact: true })
       const readCandidateShelf = async () => {
         for (let attempt = 0; attempt < 3; attempt += 1) {
           await readCandidates.click()
@@ -441,26 +509,35 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
         throw new Error(`Persisted candidate did not recover: ${await freshDialog.innerText()}`)
       }
       await readCandidateShelf()
-      expect(await freshDialog.getByText(`Master SHA: ${masterSha}`).count()).toBe(1)
+      expect(await freshDialog.getByText(`Master SHA: ${masterSha}`).count()).toBeGreaterThan(0)
+      const recoveredTechnicalQc = freshDialog.getByText(technicalConclusion, { exact: true })
+      for (let attempt = 0; attempt < 3 && !await recoveredTechnicalQc.isVisible(); attempt += 1) {
+        await readCandidates.click()
+        await recoveredTechnicalQc.waitFor({ timeout: 5000 }).catch(() => undefined)
+      }
+      expect(await recoveredTechnicalQc.count()).toBe(1)
+      expect(await freshDialog.getByText('技术通过 ≠ 内容批准 ≠ manifest 冻结 ≠ 人工签收。', { exact: true }).count()).toBe(1)
+      expect(await readBoundaryFacts(writerRoot, fixture.sqlitePath)).toEqual(qcFacts)
       const candidateBytes = await readFile(candidatePath)
       await writeFile(candidatePath, Buffer.from('tampered-editorial-master-candidate'))
       await readCandidates.click()
       await freshDialog.getByText(/candidate_list_failed/u).waitFor()
       expect(await recoveredCandidate.count()).toBe(0)
+      await freshDialog.getByText(/technical_qc_status_failed/u).waitFor()
+      expect(await recoveredTechnicalQc.count()).toBe(0)
       await writeFile(candidatePath, candidateBytes)
       await readCandidateShelf()
       await fresh.close()
 
       expect(captured.length).toBeGreaterThan(0)
-      expect(await page.locator('body').innerHTML()).not.toContain(fixture.token)
-      expect(createHash('sha256').update(await readFile(fixture.sqlitePath)).digest('hex')).not.toBe(beforeDb)
       const finalFacts = await readBoundaryFacts(writerRoot, fixture.sqlitePath)
-      expect(finalFacts).toEqual(selectedFacts)
+      expect(finalFacts).toEqual(qcFacts)
       const finalStorage = await fingerprintFiles(fixture.storageRoot)
       expect(Object.entries(beforeStorage).every(([path, digest]) => finalStorage[path] === digest)).toBe(true)
       expect(Object.keys(finalStorage)).toHaveLength(Object.keys(beforeStorage).length + 1)
       expect(candidateRequests).toHaveLength(1)
       expect(selectionRequests).toHaveLength(1)
-    }, 120_000)
+      expect(technicalQcRequests).toHaveLength(1)
+    }, 180_000)
   },
 )

@@ -506,6 +506,187 @@ describe('editorial handoff Host download bridge', () => {
     expect(selectionPosts).toBe(1)
   })
 
+  it('runs technical QC through the bound formal master and recovers one committed receipt', async () => {
+    const previewSha256 = 'd'.repeat(64)
+    const idempotencyKey = `e8-master-qc-${'e'.repeat(32)}`
+    const releaseConditions = {
+      ready: false,
+      blockers: ['content_approval_missing', 'release_manifest_not_frozen', 'human_signoff_missing'],
+    }
+    const flags = {
+      providerCalls: 0, stageStarted: false, approvalGranted: false,
+      releaseGranted: false, manifestFrozen: false, humanSignoffInferred: false,
+    }
+    const releaseAuthority = {
+      schema: 'jason.episode-release-authority.v2', revision: 2,
+      currentFinalAssetId: 'asset_editorial_master_1', currentFinalOutputId: 'final_editorial_master_1',
+      acceptedFinalAssetId: null, acceptedFinalOutputId: null, acceptedFinalSha256: null,
+      acceptedReadinessToken: null,
+    }
+    const currentFormalMaster = {
+      projectId: 'project-e8', episodeId: 'episode-e8',
+      assetId: 'asset_editorial_master_1', finalOutputId: 'final_editorial_master_1',
+      assetRole: 'b7_final', selectionStatus: 'Selected', qualityStatus: 'passed',
+      masterSha256: 'a'.repeat(64), materializedSha256: 'a'.repeat(64),
+      sourceSnapshotSha256: SOURCE_SHA, projectionSha256: PROJECTION_SHA,
+      selectionSourceSha256: '3'.repeat(64), packageSha256: '4'.repeat(64),
+      preflightSha256: '5'.repeat(64), selectionReceiptId: 'receipt_selection_1',
+      selectionReceiptSha256: '7'.repeat(64), candidateReceiptId: 'receipt_candidate_1',
+      candidateReceiptSha256: '8'.repeat(64), releaseAuthority,
+    }
+    const previewMaster = {
+      ...currentFormalMaster, qualityStatus: 'pending',
+      releaseAuthority: { ...releaseAuthority, revision: 1 },
+    }
+    const preview = {
+      schema: 'jason.qingmu-returned-master-technical-qc-preview.v1',
+      projectId: 'project-e8', episodeId: 'episode-e8', currentFormalMaster: previewMaster,
+      previewSha256, idempotencyKey, canConfirm: true, hardBlockers: [], ...flags,
+    }
+    const requestSha256 = createHash('sha256')
+      .update(`{"previewSha256":"${previewSha256}"}`).digest('hex')
+    const result = {
+      schema: 'jason.qingmu-returned-master-technical-qc-result.v1',
+      projectId: 'project-e8', episodeId: 'episode-e8',
+      assetId: currentFormalMaster.assetId, finalOutputId: currentFormalMaster.finalOutputId,
+      masterSha256: currentFormalMaster.masterSha256, sourceSnapshotSha256: SOURCE_SHA,
+      projectionSha256: PROJECTION_SHA, selectionSourceSha256: '3'.repeat(64),
+      packageSha256: '4'.repeat(64), preflightSha256: '5'.repeat(64),
+      selectionReceiptId: 'receipt_selection_1', outcome: 'passed', qualityStatus: 'passed',
+      canonicalResultSha256: '6'.repeat(64), technicalFacts: {
+        container: 'mov,mp4,m4a,3gp,3g2,mj2', durationSec: 5, width: 720, height: 1280,
+        fps: '24/1', videoCodec: 'h264', pixelFormat: 'yuv420p', audioCodec: 'aac',
+        hasVideo: true, hasAudio: true, byteSize: 2048,
+        materializedSha256: currentFormalMaster.masterSha256,
+      }, checks: [], uncertainty: [],
+      probeTool: { kind: 'ffprobe', binary: 'ffprobe', service: 'MediaProbeService' },
+      releaseAuthorityRevisionAtStart: 1, releaseAuthorityRevision: 2,
+      releaseConditions, idempotencyKey, requestSha256,
+      commandReceiptId: 'receipt_qc_1', changeSetId: 'changeset_qc_1', eventId: 'event_qc_1',
+      recordedAt: '2026-09-01T00:00:02Z', ...flags,
+    }
+    const status = {
+      schema: 'jason.qingmu-returned-master-technical-qc-status.v1',
+      projectId: 'project-e8', episodeId: 'episode-e8', currentFormalMaster,
+      currentTechnicalQc: result, records: [result], hardBlockers: [], releaseConditions, ...flags,
+    }
+    let statusPayload: unknown = status
+    let confirmPosts = 0
+    let recoveryGets = 0
+    const fetchUpstream = vi.fn(async (input: string | URL | Request) => {
+      const target = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const url = new URL(target)
+      if (url.pathname.endsWith('/returned-master-technical-qc-status')) {
+        return new Response(JSON.stringify(statusPayload), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url.pathname.endsWith('/returned-master-technical-qc-preview')) {
+        return new Response(JSON.stringify(preview), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url.pathname.endsWith('/returned-master-technical-qc')) {
+        confirmPosts += 1
+        const response = new Response(JSON.stringify(result), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+        Object.defineProperty(response, 'arrayBuffer', {
+          value: async () => { throw new Error('simulated committed response loss') },
+        })
+        return response
+      }
+      if (url.pathname.includes('/returned-master-technical-qc/')) {
+        recoveryGets += 1
+        expect(url.searchParams.get('requestSha256')).toBe(requestSha256)
+        return new Response(JSON.stringify(result), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+      }
+      return new Response('{}', { status: 404 })
+    }) as unknown as typeof globalThis.fetch
+    const { base } = await host(fetchUpstream)
+    const scope = new URLSearchParams({ projectId: 'project-e8', episodeId: 'episode-e8' })
+
+    expect((await fetch(
+      `${base}/api/qingmu/editorial-handoff/returned-master-technical-qc-status?${scope.toString()}`,
+    )).status).toBe(200)
+    const previewResponse = await fetch(
+      `${base}/api/qingmu/editorial-handoff/returned-master-technical-qc-preview?${scope.toString()}`,
+      { method: 'POST' },
+    )
+    expect(previewResponse.status).toBe(200)
+    expect(await previewResponse.json()).toMatchObject({ previewSha256, canConfirm: true })
+    const confirm = await fetch(
+      `${base}/api/qingmu/editorial-handoff/returned-master-technical-qc?${scope.toString()}`,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+        previewSha256, idempotencyKey,
+      }) },
+    )
+    expect(confirm.status).toBe(200)
+    expect(await confirm.json()).toEqual(result)
+    expect(confirmPosts).toBe(1)
+    expect(recoveryGets).toBe(1)
+
+    statusPayload = {
+      ...status,
+      currentTechnicalQc: { ...result, projectId: 'project-cross-scope' },
+    }
+    expect((await fetch(
+      `${base}/api/qingmu/editorial-handoff/returned-master-technical-qc-status?${scope.toString()}`,
+    )).status).toBe(502)
+    statusPayload = {
+      ...status,
+      currentTechnicalQc: {
+        ...result,
+        technicalFacts: { ...result.technicalFacts, materializedSha256: '9'.repeat(64) },
+      },
+    }
+    expect((await fetch(
+      `${base}/api/qingmu/editorial-handoff/returned-master-technical-qc-status?${scope.toString()}`,
+    )).status).toBe(502)
+    statusPayload = {
+      ...status,
+      currentFormalMaster: {
+        ...currentFormalMaster,
+        releaseAuthority: {
+          ...releaseAuthority,
+          acceptedFinalAssetId: currentFormalMaster.assetId,
+        },
+      },
+    }
+    expect((await fetch(
+      `${base}/api/qingmu/editorial-handoff/returned-master-technical-qc-status?${scope.toString()}`,
+    )).status).toBe(502)
+    statusPayload = {
+      ...status,
+      currentFormalMaster: { ...currentFormalMaster, qualityStatus: 'failed' },
+    }
+    expect((await fetch(
+      `${base}/api/qingmu/editorial-handoff/returned-master-technical-qc-status?${scope.toString()}`,
+    )).status).toBe(502)
+    statusPayload = {
+      ...status,
+      currentFormalMaster: { ...currentFormalMaster, qualityStatus: 'failed' },
+      currentTechnicalQc: {
+        ...result, outcome: 'failed', qualityStatus: 'failed', checks: ['final_audio_stream_missing'],
+      },
+    }
+    expect((await fetch(
+      `${base}/api/qingmu/editorial-handoff/returned-master-technical-qc-status?${scope.toString()}`,
+    )).status).toBe(502)
+    statusPayload = status
+
+    const malformed = await fetch(
+      `${base}/api/qingmu/editorial-handoff/returned-master-technical-qc?${scope.toString()}`,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+        previewSha256,
+      }) },
+    )
+    expect(malformed.status).toBe(400)
+    expect(confirmPosts).toBe(1)
+  })
+
   it('writes every upload byte when the spool writer reports partial progress', async () => {
     const stored: number[] = []
     const writer = {
@@ -789,7 +970,7 @@ describe('editorial handoff Host download bridge', () => {
     const statusUrl = downloadUrl(base, access).replace('/download?', '/download-status?')
     await expect.poll(async () => {
       const terminal = await fetch(statusUrl)
-      return await terminal.json()
+      return await terminal.json() as unknown
     }).toMatchObject({ status: 'succeeded', sha256: digest })
     const recovered = new EditorialHandoffDownloadAuthorizer(stateFile)
     expect(recovered.status({

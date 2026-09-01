@@ -94,7 +94,7 @@ interface SelectionCandidate {
   readonly masterSha256: string
   readonly mimeType: 'video/mp4' | 'video/quicktime' | 'video/webm'
   readonly byteSize: number
-  readonly qualityStatus: 'pending'
+  readonly qualityStatus: 'pending' | 'passed' | 'failed'
   readonly selectionStatus: 'Unselected' | 'Selected' | 'Stale'
   readonly isSelected: boolean
   readonly finalOutputId: string | null
@@ -141,6 +141,58 @@ interface SelectionResult {
   readonly commandReceiptId: string
   readonly selectedBy: string
   readonly selectedAt: string
+  readonly releaseConditions: { readonly ready: false; readonly blockers: readonly string[] }
+}
+
+interface TechnicalQcResult {
+  readonly schema: 'jason.qingmu-returned-master-technical-qc-result.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly assetId: string
+  readonly finalOutputId: string
+  readonly masterSha256: string
+  readonly outcome: 'passed' | 'failed' | 'unknown'
+  readonly qualityStatus: 'pending' | 'passed' | 'failed'
+  readonly canonicalResultSha256: string
+  readonly technicalFacts: {
+    readonly container: string
+    readonly durationSec: number | null
+    readonly width: number | null
+    readonly height: number | null
+    readonly fps: string
+    readonly videoCodec: string
+    readonly audioCodec: string
+    readonly hasVideo: boolean
+    readonly hasAudio: boolean
+    readonly byteSize: number | null
+    readonly materializedSha256: string | null
+  }
+  readonly checks: readonly string[]
+  readonly uncertainty: readonly string[]
+  readonly releaseAuthorityRevisionAtStart: number
+  readonly releaseAuthorityRevision: number
+  readonly releaseConditions: { readonly ready: false; readonly blockers: readonly string[] }
+  readonly commandReceiptId: string
+  readonly recordedAt: string
+}
+
+interface TechnicalQcPreview {
+  readonly schema: 'jason.qingmu-returned-master-technical-qc-preview.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly currentFormalMaster: { readonly assetId?: string; readonly finalOutputId?: string; readonly masterSha256?: string }
+  readonly previewSha256: string
+  readonly idempotencyKey: string
+  readonly canConfirm: boolean
+  readonly hardBlockers: readonly string[]
+}
+
+interface TechnicalQcStatus {
+  readonly schema: 'jason.qingmu-returned-master-technical-qc-status.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly currentTechnicalQc: TechnicalQcResult | null
+  readonly hardBlockers: readonly string[]
   readonly releaseConditions: { readonly ready: false; readonly blockers: readonly string[] }
 }
 
@@ -224,17 +276,25 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   const [selectionConfirmed, setSelectionConfirmed] = useState(false)
   const [selectionState, setSelectionState] = useState<'idle' | 'previewing' | 'previewed' | 'saving' | 'succeeded' | 'failed'>('idle')
   const [selectionError, setSelectionError] = useState<string>()
+  const [technicalQcStatus, setTechnicalQcStatus] = useState<TechnicalQcStatus>()
+  const [technicalQcPreview, setTechnicalQcPreview] = useState<TechnicalQcPreview>()
+  const [technicalQcResult, setTechnicalQcResult] = useState<TechnicalQcResult>()
+  const [technicalQcConfirmed, setTechnicalQcConfirmed] = useState(false)
+  const [technicalQcState, setTechnicalQcState] = useState<'idle' | 'previewing' | 'previewed' | 'running' | 'succeeded' | 'failed'>('idle')
+  const [technicalQcError, setTechnicalQcError] = useState<string>()
   const generation = useRef(0)
   const downloadGeneration = useRef(0)
   const importGeneration = useRef(0)
   const masterGeneration = useRef(0)
   const candidateGeneration = useRef(0)
   const selectionGeneration = useRef(0)
+  const technicalQcGeneration = useRef(0)
   const activeController = useRef<AbortController>()
   const importController = useRef<AbortController>()
   const masterController = useRef<AbortController>()
   const candidateController = useRef<AbortController>()
   const selectionController = useRef<AbortController>()
+  const technicalQcController = useRef<AbortController>()
   const importErrorRef = useRef<HTMLDivElement>(null)
 
   const loadCandidates = useCallback(async () => {
@@ -264,6 +324,41 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       }
     } finally {
       if (current === candidateGeneration.current) candidateController.current = undefined
+    }
+  }, [episodeId, projectId])
+
+  const loadTechnicalQcStatus = useCallback(async () => {
+    if (projectId === '' || episodeId === '') return
+    const current = ++technicalQcGeneration.current
+    technicalQcController.current?.abort()
+    const controller = new AbortController()
+    technicalQcController.current = controller
+    try {
+      const params = new URLSearchParams({ projectId, episodeId })
+      const response = await fetch(
+        `/api/qingmu/editorial-handoff/returned-master-technical-qc-status?${params.toString()}`,
+        { method: 'GET', cache: 'no-store', signal: controller.signal },
+      )
+      if (!response.ok) throw new Error('technical_qc_status_failed')
+      const raw = await response.json() as Record<string, unknown>
+      if (raw.schema !== 'jason.qingmu-returned-master-technical-qc-status.v1'
+        || raw.projectId !== projectId || raw.episodeId !== episodeId) {
+        throw new Error('technical_qc_status_contract_invalid')
+      }
+      const body = raw as unknown as TechnicalQcStatus
+      if (current === technicalQcGeneration.current) {
+        setTechnicalQcStatus(body)
+        setTechnicalQcResult(body.currentTechnicalQc ?? undefined)
+        setTechnicalQcError(undefined)
+      }
+    } catch (cause) {
+      if (current === technicalQcGeneration.current && !controller.signal.aborted) {
+        setTechnicalQcStatus(undefined)
+        setTechnicalQcResult(undefined)
+        setTechnicalQcError(cause instanceof Error ? cause.message : 'technical_qc_status_failed')
+      }
+    } finally {
+      if (current === technicalQcGeneration.current) technicalQcController.current = undefined
     }
   }, [episodeId, projectId])
 
@@ -306,10 +401,12 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     masterGeneration.current += 1
     candidateGeneration.current += 1
     selectionGeneration.current += 1
+    technicalQcGeneration.current += 1
     importController.current?.abort()
     masterController.current?.abort()
     candidateController.current?.abort()
     selectionController.current?.abort()
+    technicalQcController.current?.abort()
     importController.current = undefined
     const controller = new AbortController()
     activeController.current = controller
@@ -324,6 +421,12 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     setSelectionConfirmed(false)
     setSelectionState('idle')
     setSelectionError(undefined)
+    setTechnicalQcStatus(undefined)
+    setTechnicalQcPreview(undefined)
+    setTechnicalQcResult(undefined)
+    setTechnicalQcConfirmed(false)
+    setTechnicalQcState('idle')
+    setTechnicalQcError(undefined)
     try {
       const value = await port.editorialHandoff({ projectId, episodeId }, controller.signal)
       if (current === generation.current) {
@@ -365,16 +468,19 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       masterGeneration.current += 1
       candidateGeneration.current += 1
       selectionGeneration.current += 1
+      technicalQcGeneration.current += 1
       activeController.current?.abort()
       importController.current?.abort()
       masterController.current?.abort()
       candidateController.current?.abort()
       selectionController.current?.abort()
+      technicalQcController.current?.abort()
       activeController.current = undefined
       importController.current = undefined
       masterController.current = undefined
       candidateController.current = undefined
       selectionController.current = undefined
+      technicalQcController.current = undefined
     }
   }, [load])
 
@@ -778,6 +884,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
         setSelectionState('succeeded')
         setSelectionConfirmed(false)
         await loadSelectionStatus()
+        await loadTechnicalQcStatus()
       }
     } catch (cause) {
       if (current === selectionGeneration.current && !controller.signal.aborted) {
@@ -787,7 +894,91 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     } finally {
       if (current === selectionGeneration.current) selectionController.current = undefined
     }
-  }, [episodeId, loadSelectionStatus, projectId, selectionConfirmed, selectionPreview, selectionState])
+  }, [episodeId, loadSelectionStatus, loadTechnicalQcStatus, projectId, selectionConfirmed, selectionPreview, selectionState])
+
+  const previewTechnicalQc = useCallback(async () => {
+    if (technicalQcState === 'previewing' || technicalQcState === 'running') return
+    const current = ++technicalQcGeneration.current
+    technicalQcController.current?.abort()
+    const controller = new AbortController()
+    technicalQcController.current = controller
+    setTechnicalQcState('previewing')
+    setTechnicalQcPreview(undefined)
+    setTechnicalQcConfirmed(false)
+    setTechnicalQcError(undefined)
+    try {
+      const params = new URLSearchParams({ projectId, episodeId })
+      const response = await fetch(
+        `/api/qingmu/editorial-handoff/returned-master-technical-qc-preview?${params.toString()}`,
+        { method: 'POST', cache: 'no-store', signal: controller.signal },
+      )
+      if (!response.ok) throw new Error('technical_qc_preview_failed')
+      const raw = await response.json() as Record<string, unknown>
+      if (raw.schema !== 'jason.qingmu-returned-master-technical-qc-preview.v1'
+        || raw.projectId !== projectId || raw.episodeId !== episodeId) {
+        throw new Error('technical_qc_preview_contract_invalid')
+      }
+      const body = raw as unknown as TechnicalQcPreview
+      if (current === technicalQcGeneration.current) {
+        setTechnicalQcPreview(body)
+        setTechnicalQcState('previewed')
+      }
+    } catch (cause) {
+      if (current === technicalQcGeneration.current && !controller.signal.aborted) {
+        setTechnicalQcError(cause instanceof Error ? cause.message : 'technical_qc_preview_failed')
+        setTechnicalQcState('failed')
+      }
+    } finally {
+      if (current === technicalQcGeneration.current) technicalQcController.current = undefined
+    }
+  }, [episodeId, projectId, technicalQcState])
+
+  const confirmTechnicalQc = useCallback(async () => {
+    if (technicalQcPreview === undefined || !technicalQcPreview.canConfirm || !technicalQcConfirmed
+      || technicalQcState === 'running') return
+    const current = ++technicalQcGeneration.current
+    technicalQcController.current?.abort()
+    const controller = new AbortController()
+    technicalQcController.current = controller
+    setTechnicalQcState('running')
+    setTechnicalQcError(undefined)
+    try {
+      const params = new URLSearchParams({ projectId, episodeId })
+      const response = await fetch(
+        `/api/qingmu/editorial-handoff/returned-master-technical-qc?${params.toString()}`,
+        {
+          method: 'POST', cache: 'no-store', signal: controller.signal,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            previewSha256: technicalQcPreview.previewSha256,
+            idempotencyKey: technicalQcPreview.idempotencyKey,
+          }),
+        },
+      )
+      if (!response.ok) throw new Error('technical_qc_commit_failed_or_unknown')
+      const raw = await response.json() as Record<string, unknown>
+      if (raw.schema !== 'jason.qingmu-returned-master-technical-qc-result.v1'
+        || raw.projectId !== projectId || raw.episodeId !== episodeId
+        || raw.assetId !== technicalQcPreview.currentFormalMaster.assetId) {
+        throw new Error('technical_qc_receipt_mismatch')
+      }
+      const body = raw as unknown as TechnicalQcResult
+      if (current === technicalQcGeneration.current) {
+        setTechnicalQcResult(body)
+        setTechnicalQcState('succeeded')
+        setTechnicalQcConfirmed(false)
+        await loadSelectionStatus()
+        await loadTechnicalQcStatus()
+      }
+    } catch (cause) {
+      if (current === technicalQcGeneration.current && !controller.signal.aborted) {
+        setTechnicalQcError(cause instanceof Error ? cause.message : 'technical_qc_commit_failed_or_unknown')
+        setTechnicalQcState('failed')
+      }
+    } finally {
+      if (current === technicalQcGeneration.current) technicalQcController.current = undefined
+    }
+  }, [episodeId, loadSelectionStatus, loadTechnicalQcStatus, projectId, technicalQcConfirmed, technicalQcPreview, technicalQcState])
 
   if (projectId === '' || episodeId === '') return <p className={css.empty}>{t('handoffChooseEpisode')}</p>
   const blockerLabel = (code: string) => t(BLOCKER_KEYS[code] ?? 'handoffBlockerUnknown')
@@ -799,7 +990,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
         <p>{t('handoffBoundary')}</p>
       </div>
       <button type="button" disabled={loading} onClick={() => {
-        void load(); void loadCandidates(); void loadSelectionStatus()
+        void load(); void loadCandidates(); void loadSelectionStatus(); void loadTechnicalQcStatus()
       }}>
         {loading ? t('handoffLoading') : t('handoffRefresh')}
       </button>
@@ -1012,7 +1203,9 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     <section className={css.candidateShelf} aria-labelledby="handoff-candidate-shelf">
       <header><div><strong id="handoff-candidate-shelf">{t('handoffCandidateShelfTitle')}</strong>
         <p>{t('handoffCandidateShelfBoundary')}</p></div>
-      <button type="button" onClick={() => { void loadCandidates(); void loadSelectionStatus() }}>
+      <button type="button" onClick={() => {
+        void loadCandidates(); void loadSelectionStatus(); void loadTechnicalQcStatus()
+      }}>
         {t('handoffCandidateRead')}
       </button>
       </header>
@@ -1097,6 +1290,77 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
           <p>Release blockers: {selectionResult.releaseConditions.blockers.join(', ')}</p>
         </details>
       </div>}
+      <section className={css.preview} aria-labelledby="handoff-technical-qc-title">
+        <header><div><strong id="handoff-technical-qc-title">{t('handoffTechnicalQcTitle')}</strong>
+          <p>{t('handoffTechnicalQcBoundary')}</p></div></header>
+        {selectionStatus?.currentFormalMaster === null || selectionStatus === undefined
+          ? <p className={css.warning}>{t('handoffTechnicalQcNeedsMaster')}</p>
+          : <div className={css.candidateCommit}>
+            <div><strong>{t('handoffTechnicalQcCurrent')}</strong>
+              <p>{selectionStatus.currentFormalMaster.assetId} · {selectionStatus.currentFormalMaster.qualityStatus}</p>
+            </div>
+            <button type="button" disabled={technicalQcState === 'previewing'
+              || technicalQcState === 'running'} onClick={() => { void previewTechnicalQc() }}>
+              {technicalQcState === 'previewing'
+                ? t('handoffTechnicalQcPreparing') : t('handoffTechnicalQcPrepare')}
+            </button>
+          </div>}
+        {technicalQcError !== undefined && <p role="alert" className={css.error}>
+          {t('handoffTechnicalQcFailed')} ({technicalQcError})
+        </p>}
+        {technicalQcPreview !== undefined && <div>
+          {technicalQcPreview.hardBlockers.length > 0 && <ul className={css.blockers}>
+            {technicalQcPreview.hardBlockers.map(code => <li key={code}>{code}</li>)}
+          </ul>}
+          <label className={css.confirmation}>
+            <input type="checkbox" checked={technicalQcConfirmed}
+              disabled={!technicalQcPreview.canConfirm || technicalQcState === 'running'}
+              onChange={(event) => { setTechnicalQcConfirmed(event.currentTarget.checked) }} />
+            <span>{t('handoffTechnicalQcConfirm')}</span>
+          </label>
+          <button type="button" disabled={!technicalQcPreview.canConfirm || !technicalQcConfirmed
+            || technicalQcState === 'running'} onClick={() => { void confirmTechnicalQc() }}>
+            {technicalQcState === 'running'
+              ? t('handoffTechnicalQcRunning') : t('handoffTechnicalQcRun')}
+          </button>
+          <details><summary>{t('handoffAdvanced')}</summary>
+            <p>Preview SHA: {technicalQcPreview.previewSha256}</p>
+            <p>Asset ID: {technicalQcPreview.currentFormalMaster.assetId ?? '—'}</p>
+            <p>Final output: {technicalQcPreview.currentFormalMaster.finalOutputId ?? '—'}</p>
+          </details>
+        </div>}
+        {technicalQcResult !== undefined && <div role="status">
+          <p className={technicalQcResult.outcome === 'passed' ? css.success : css.warning}>
+            <strong>{technicalQcResult.outcome === 'passed'
+              ? t('handoffTechnicalQcPassed')
+              : technicalQcResult.outcome === 'failed'
+                ? t('handoffTechnicalQcRejected') : t('handoffTechnicalQcUnknown')}</strong>
+          </p>
+          <div className={css.masterFacts}>
+            <span><strong>{technicalQcResult.technicalFacts.container || '—'}</strong>{t('handoffMasterContainer')}</span>
+            <span><strong>{technicalQcResult.technicalFacts.durationSec ?? '—'}s</strong>{t('handoffMasterDuration')}</span>
+            <span><strong>{technicalQcResult.technicalFacts.width ?? '—'} × {technicalQcResult.technicalFacts.height ?? '—'}</strong>{t('handoffMasterResolution')}</span>
+            <span><strong>{technicalQcResult.technicalFacts.fps || '—'}</strong>{t('handoffMasterFps')}</span>
+            <span><strong>{technicalQcResult.technicalFacts.videoCodec || '—'} / {technicalQcResult.technicalFacts.audioCodec || '—'}</strong>{t('handoffTechnicalQcCodecs')}</span>
+          </div>
+          {technicalQcResult.checks.length > 0 && <ul className={css.blockers}>
+            {technicalQcResult.checks.map(code => <li key={code}>{code}</li>)}
+          </ul>}
+          {technicalQcResult.uncertainty.length > 0 && <ul className={css.blockers}>
+            {technicalQcResult.uncertainty.map(code => <li key={code}>{code}</li>)}
+          </ul>}
+          <p className={css.warning}>{t('handoffTechnicalQcExactBoundary')}</p>
+          <details><summary>{t('handoffAdvanced')}</summary>
+            <p>Receipt: {technicalQcResult.commandReceiptId}</p>
+            <p>Result SHA: {technicalQcResult.canonicalResultSha256}</p>
+            <p>Master SHA: {technicalQcResult.masterSha256}</p>
+            <p>Authority: {technicalQcResult.releaseAuthorityRevisionAtStart} → {technicalQcResult.releaseAuthorityRevision}</p>
+            <p>Release blockers: {technicalQcResult.releaseConditions.blockers.join(', ')}</p>
+          </details>
+        </div>}
+        {technicalQcStatus !== undefined && technicalQcStatus.currentTechnicalQc === null
+          && <p className={css.warning}>{t('handoffTechnicalQcUnverified')}</p>}
+      </section>
     </section>
   </section>
 }

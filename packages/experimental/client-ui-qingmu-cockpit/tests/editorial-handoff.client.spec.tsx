@@ -174,7 +174,7 @@ describe('editorial handoff panel', () => {
     fireEvent.click(read)
     await waitFor(() => { expect(screen.queryByText(zh.handoffCandidateUnselected)).toBeNull() })
     expect(screen.getByText(/candidate_list_failed/u)).toBeTruthy()
-    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(fetchMock).toHaveBeenCalledTimes(6)
   })
 
   it('previews and explicitly selects the same returned candidate without implying QC or release', async () => {
@@ -256,6 +256,111 @@ describe('editorial handoff panel', () => {
     expect(screen.getByText(zh.handoffSelectionSavedBoundary)).toBeTruthy()
     await waitFor(() => { expect(screen.getByText(zh.handoffSelectionCurrent)).toBeTruthy() })
     expect(selectionPosts).toBe(1)
+  })
+
+  it('runs technical QC once and keeps the exact authority boundary visible', async () => {
+    const candidate = {
+      schema: 'jason.qingmu-returned-master-candidate-result.v1', ...SCOPE,
+      assetId: 'asset-candidate-1', masterSha256: '8'.repeat(64), byteSize: 2048,
+      mimeType: 'video/mp4', packageSha256: '9'.repeat(64), sourceSnapshotSha256: 'a'.repeat(64),
+      projectionSha256: 'b'.repeat(64), preflightSha256: 'c'.repeat(64),
+      selectionStatus: 'Selected', isSelected: true, qualityStatus: 'pending',
+      approved: false, published: false, idempotencyKey: 'd'.repeat(64),
+      commandReceiptId: 'receipt-candidate-1', savedAt: '2026-09-01T00:00:00Z',
+    }
+    const currentMaster = {
+      assetId: candidate.assetId, masterSha256: candidate.masterSha256,
+      mimeType: 'video/mp4', byteSize: candidate.byteSize, qualityStatus: 'pending',
+      selectionStatus: 'Selected', isSelected: true, finalOutputId: 'final-1',
+      selectionReceiptId: 'receipt-selection-1', selectedAt: '2026-09-01T00:00:01Z', current: true,
+    }
+    const releaseConditions = { ready: false, blockers: [
+      'content_approval_missing', 'release_manifest_not_frozen', 'human_signoff_missing',
+    ] }
+    const preview = {
+      schema: 'jason.qingmu-returned-master-technical-qc-preview.v1', ...SCOPE,
+      currentFormalMaster: currentMaster, previewSha256: 'e'.repeat(64),
+      idempotencyKey: `e8-master-qc-${'f'.repeat(32)}`, canConfirm: true, hardBlockers: [],
+    }
+    const result = {
+      schema: 'jason.qingmu-returned-master-technical-qc-result.v1', ...SCOPE,
+      assetId: candidate.assetId, finalOutputId: 'final-1', masterSha256: candidate.masterSha256,
+      outcome: 'passed', qualityStatus: 'passed', canonicalResultSha256: '1'.repeat(64),
+      technicalFacts: {
+        container: 'mov,mp4,m4a,3gp,3g2,mj2', durationSec: 5, width: 720, height: 1280,
+        fps: '24/1', videoCodec: 'h264', audioCodec: 'aac', hasVideo: true, hasAudio: true,
+        byteSize: 2048, materializedSha256: candidate.masterSha256,
+      },
+      checks: [], uncertainty: [], releaseAuthorityRevisionAtStart: 1,
+      releaseAuthorityRevision: 2, releaseConditions, commandReceiptId: 'receipt-qc-1',
+      recordedAt: '2026-09-01T00:00:02Z',
+    }
+    let qcDone = false
+    let qcPosts = 0
+    let qcStatusFails = false
+    const commit = deferred<Response>()
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = fetchUrl(input)
+      if (url.includes('returned-master-candidates')) {
+        return new Response(JSON.stringify({
+          schema: 'jason.qingmu-returned-master-candidates.v1', candidates: [candidate],
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('returned-master-selection-status')) {
+        return new Response(JSON.stringify({
+          schema: 'jason.qingmu-returned-master-selection-status.v1', ...SCOPE,
+          selectionRevision: 1,
+          currentFormalMaster: { ...currentMaster, qualityStatus: qcDone ? 'passed' : 'pending' },
+          candidates: [{ ...currentMaster, qualityStatus: qcDone ? 'passed' : 'pending' }],
+          releaseConditions,
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('returned-master-technical-qc-status')) {
+        if (qcStatusFails) return new Response('{}', { status: 502 })
+        return new Response(JSON.stringify({
+          schema: 'jason.qingmu-returned-master-technical-qc-status.v1', ...SCOPE,
+          currentTechnicalQc: qcDone ? result : null, hardBlockers: [], releaseConditions,
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('returned-master-technical-qc-preview')) {
+        return new Response(JSON.stringify(preview), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url.includes('returned-master-technical-qc') && init?.method === 'POST') {
+        qcPosts += 1
+        return commit.promise
+      }
+      return new Response('{}', { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const editorialHandoff = vi.fn().mockResolvedValue(handoff())
+    const port = { editorialHandoff } as unknown as QingmuYimengReadPort
+    render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
+    await waitFor(() => { expect(screen.getByText(/雨夜街口/u)).toBeTruthy() })
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffCandidateRead }))
+    await waitFor(() => { expect(screen.getByRole('button', { name: zh.handoffTechnicalQcPrepare })).toBeTruthy() })
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffTechnicalQcPrepare }))
+    await waitFor(() => { expect(screen.getByRole('checkbox', { name: zh.handoffTechnicalQcConfirm })).toBeTruthy() })
+    fireEvent.click(screen.getByRole('checkbox', { name: zh.handoffTechnicalQcConfirm }))
+    const run = screen.getByRole('button', { name: zh.handoffTechnicalQcRun })
+    fireEvent.click(run)
+    await waitFor(() => { expect(screen.getByRole('button', { name: zh.handoffTechnicalQcRunning })).toBeTruthy() })
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffTechnicalQcRunning }))
+    expect(qcPosts).toBe(1)
+    qcDone = true
+    commit.resolve(new Response(JSON.stringify(result), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }))
+    await waitFor(() => { expect(screen.getByText(zh.handoffTechnicalQcPassed)).toBeTruthy() })
+    expect(screen.getByText(zh.handoffTechnicalQcExactBoundary)).toBeTruthy()
+    expect(screen.getByText('720 × 1280')).toBeTruthy()
+    expect(screen.getByText('h264 / aac')).toBeTruthy()
+    expect(qcPosts).toBe(1)
+    qcStatusFails = true
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffCandidateRead }))
+    await waitFor(() => { expect(screen.getByText(/technical_qc_status_failed/u)).toBeTruthy() })
+    expect(screen.queryByText(zh.handoffTechnicalQcPassed)).toBeNull()
   })
 
   it('clears old media and download state before a failed refresh settles', async () => {

@@ -33,6 +33,9 @@ const CANDIDATE_LIST_PATH = '/api/qingmu/editorial-handoff/returned-master-candi
 const SELECTION_STATUS_PATH = '/api/qingmu/editorial-handoff/returned-master-selection-status'
 const SELECTION_PREVIEW_PATH = '/api/qingmu/editorial-handoff/returned-master-selection-preview'
 const SELECTION_CONFIRM_PATH = '/api/qingmu/editorial-handoff/returned-master-selection'
+const TECHNICAL_QC_STATUS_PATH = '/api/qingmu/editorial-handoff/returned-master-technical-qc-status'
+const TECHNICAL_QC_PREVIEW_PATH = '/api/qingmu/editorial-handoff/returned-master-technical-qc-preview'
+const TECHNICAL_QC_CONFIRM_PATH = '/api/qingmu/editorial-handoff/returned-master-technical-qc'
 const SHA256 = /^[0-9a-f]{64}$/
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/
 const REQUEST_ID = /^[a-f0-9-]{16,80}$/
@@ -248,7 +251,7 @@ export interface EditorialMasterSelectionCandidate {
   readonly importRequestId: string
   readonly preflightRequestId: string
   readonly preflightSha256: string
-  readonly qualityStatus: 'pending'
+  readonly qualityStatus: 'pending' | 'passed' | 'failed'
   readonly selectionStatus: 'Unselected' | 'Selected' | 'Stale'
   readonly isSelected: boolean
   readonly assetUpdatedAt: string
@@ -349,6 +352,95 @@ export interface EditorialMasterSelectionStatus {
   readonly stageStarted: false
   readonly approvalGranted: false
   readonly releaseGranted: false
+  readonly humanSignoffInferred: false
+}
+
+interface EditorialMasterTechnicalQcFacts {
+  readonly container: string
+  readonly durationSec: number | null
+  readonly width: number | null
+  readonly height: number | null
+  readonly fps: string
+  readonly videoCodec: string
+  readonly pixelFormat: string
+  readonly audioCodec: string
+  readonly hasVideo: boolean
+  readonly hasAudio: boolean
+  readonly byteSize: number | null
+  readonly materializedSha256: string | null
+}
+
+/** Durable Writer receipt for one source-bound returned-master technical inspection. */
+export interface EditorialMasterTechnicalQcResult {
+  readonly schema: 'jason.qingmu-returned-master-technical-qc-result.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly assetId: string
+  readonly finalOutputId: string
+  readonly masterSha256: string
+  readonly sourceSnapshotSha256: string
+  readonly projectionSha256: string
+  readonly selectionSourceSha256: string
+  readonly packageSha256: string
+  readonly preflightSha256: string
+  readonly selectionReceiptId: string
+  readonly outcome: 'passed' | 'failed' | 'unknown'
+  readonly qualityStatus: 'pending' | 'passed' | 'failed'
+  readonly canonicalResultSha256: string
+  readonly technicalFacts: EditorialMasterTechnicalQcFacts
+  readonly checks: readonly string[]
+  readonly uncertainty: readonly string[]
+  readonly probeTool: { readonly kind: 'ffprobe'; readonly binary: string; readonly service: 'MediaProbeService' }
+  readonly releaseAuthorityRevisionAtStart: number
+  readonly releaseAuthorityRevision: number
+  readonly releaseConditions: { readonly ready: false; readonly blockers: readonly string[] }
+  readonly idempotencyKey: string
+  readonly requestSha256: string
+  readonly commandReceiptId: string
+  readonly changeSetId: string
+  readonly eventId: string
+  readonly recordedAt: string
+  readonly providerCalls: 0
+  readonly stageStarted: false
+  readonly approvalGranted: false
+  readonly releaseGranted: false
+  readonly manifestFrozen: false
+  readonly humanSignoffInferred: false
+}
+
+/** Zero-write confirmation preview for the currently selected formal master. */
+export interface EditorialMasterTechnicalQcPreview {
+  readonly schema: 'jason.qingmu-returned-master-technical-qc-preview.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly currentFormalMaster: Record<string, unknown>
+  readonly previewSha256: string
+  readonly idempotencyKey: string
+  readonly canConfirm: boolean
+  readonly hardBlockers: readonly string[]
+  readonly providerCalls: 0
+  readonly stageStarted: false
+  readonly approvalGranted: false
+  readonly releaseGranted: false
+  readonly manifestFrozen: false
+  readonly humanSignoffInferred: false
+}
+
+/** Read-only projection of the current formal master and its technical-QC history. */
+export interface EditorialMasterTechnicalQcStatus {
+  readonly schema: 'jason.qingmu-returned-master-technical-qc-status.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly currentFormalMaster: Record<string, unknown> | null
+  readonly currentTechnicalQc: EditorialMasterTechnicalQcResult | null
+  readonly records: readonly EditorialMasterTechnicalQcResult[]
+  readonly hardBlockers: readonly string[]
+  readonly releaseConditions: { readonly ready: false; readonly blockers: readonly string[] }
+  readonly providerCalls: 0
+  readonly stageStarted: false
+  readonly approvalGranted: false
+  readonly releaseGranted: false
+  readonly manifestFrozen: false
   readonly humanSignoffInferred: false
 }
 
@@ -1559,7 +1651,7 @@ function normalizeSelectionCandidate(value: unknown): EditorialMasterSelectionCa
     || !positive('byteSize', true) || !positive('durationSec') || !positive('width', true)
     || !positive('height', true) || !positive('fps')
     || !['video/mp4', 'video/quicktime', 'video/webm'].includes(String(item.mimeType))
-    || item.qualityStatus !== 'pending'
+    || !['pending', 'passed', 'failed'].includes(String(item.qualityStatus))
     || !['Unselected', 'Selected', 'Stale'].includes(String(item.selectionStatus))
     || typeof item.isSelected !== 'boolean'
     || (item.isSelected !== (item.selectionStatus === 'Selected'))
@@ -1665,6 +1757,182 @@ function normalizeSelectionStatus(value: unknown): EditorialMasterSelectionStatu
     || !safeNullableId(authority.acceptedReadinessToken)
     || !validReleaseConditions(item.releaseConditions) || !validSelectionFlags(item)) return undefined
   return value as EditorialMasterSelectionStatus
+}
+
+function safeQcStringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length <= 100
+    && value.every(item => typeof item === 'string' && item.length > 0 && item.length <= 256)
+}
+
+function validQcReleaseConditions(value: unknown): boolean {
+  const item = typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown> : undefined
+  return item !== undefined && item.ready === false && safeQcStringList(item.blockers)
+    && item.blockers.includes('content_approval_missing')
+    && item.blockers.includes('release_manifest_not_frozen')
+    && item.blockers.includes('human_signoff_missing')
+}
+
+function normalizeTechnicalQcMaster(
+  value: unknown,
+  projectId: string,
+  episodeId: string,
+): Record<string, unknown> | undefined {
+  const item = safeSelectionPayload(value)
+  const authority = item?.releaseAuthority as Record<string, unknown> | undefined
+  if (item === undefined || item.projectId !== projectId || item.episodeId !== episodeId
+    || !safeIdentifier(typeof item.assetId === 'string' ? item.assetId : null)
+    || !safeIdentifier(typeof item.finalOutputId === 'string' ? item.finalOutputId : null)
+    || item.assetRole !== 'b7_final' || item.selectionStatus !== 'Selected'
+    || !['pending', 'passed', 'failed'].includes(String(item.qualityStatus))
+    || typeof item.masterSha256 !== 'string' || !SHA256.test(item.masterSha256)
+    || item.materializedSha256 !== item.masterSha256
+    || ['sourceSnapshotSha256', 'projectionSha256', 'selectionSourceSha256', 'packageSha256',
+      'preflightSha256', 'selectionReceiptSha256', 'candidateReceiptSha256']
+      .some(field => typeof item[field] !== 'string' || !SHA256.test(item[field]))
+    || !safeIdentifier(typeof item.selectionReceiptId === 'string' ? item.selectionReceiptId : null)
+    || !safeIdentifier(typeof item.candidateReceiptId === 'string' ? item.candidateReceiptId : null)
+    || authority === undefined || authority.schema !== 'jason.episode-release-authority.v2'
+    || typeof authority.revision !== 'number' || !Number.isSafeInteger(authority.revision)
+    || authority.revision <= 0
+    || authority.currentFinalAssetId !== item.assetId
+    || authority.currentFinalOutputId !== item.finalOutputId
+    || authority.acceptedFinalAssetId !== null || authority.acceptedFinalOutputId !== null
+    || authority.acceptedFinalSha256 !== null || authority.acceptedReadinessToken !== null) return undefined
+  return item
+}
+
+function technicalQcResultMatches(
+  result: EditorialMasterTechnicalQcResult,
+  projectId: string,
+  episodeId: string,
+  master?: Record<string, unknown>,
+): boolean {
+  const terminal = result.outcome !== 'unknown'
+  const blockers = result.releaseConditions.blockers
+  if (result.projectId !== projectId || result.episodeId !== episodeId
+    || (result.technicalFacts.materializedSha256 !== null
+      && result.technicalFacts.materializedSha256 !== result.masterSha256)
+    || (terminal && result.technicalFacts.materializedSha256 !== result.masterSha256)
+    || (terminal && result.releaseAuthorityRevision !== result.releaseAuthorityRevisionAtStart + 1)
+    || (!terminal && result.releaseAuthorityRevision !== result.releaseAuthorityRevisionAtStart)
+    || (result.outcome === 'passed' && (result.checks.length !== 0 || result.uncertainty.length !== 0))
+    || (result.outcome === 'failed' && (result.checks.length === 0 || result.uncertainty.length !== 0))
+    || (result.outcome === 'unknown' && result.uncertainty.length === 0)
+    || (result.outcome === 'passed'
+      && (blockers.includes('technical_qc_failed') || blockers.includes('technical_qc_unknown')))
+    || (result.outcome === 'failed'
+      && (!blockers.includes('technical_qc_failed') || blockers.includes('technical_qc_unknown')))
+    || (result.outcome === 'unknown'
+      && (!blockers.includes('technical_qc_unknown') || blockers.includes('technical_qc_failed')))) return false
+  if (master !== undefined && (result.assetId !== master.assetId
+    || result.finalOutputId !== master.finalOutputId || result.masterSha256 !== master.masterSha256
+    || result.sourceSnapshotSha256 !== master.sourceSnapshotSha256
+    || result.projectionSha256 !== master.projectionSha256
+    || result.selectionSourceSha256 !== master.selectionSourceSha256
+    || result.packageSha256 !== master.packageSha256
+    || result.preflightSha256 !== master.preflightSha256
+    || result.selectionReceiptId !== master.selectionReceiptId
+    || result.qualityStatus !== master.qualityStatus
+    || result.releaseAuthorityRevision !== (master.releaseAuthority as Record<string, unknown>).revision)) {
+    return false
+  }
+  return true
+}
+
+function normalizeTechnicalQcResult(value: unknown): EditorialMasterTechnicalQcResult | undefined {
+  const item = safeSelectionPayload(value)
+  if (item === undefined) return undefined
+  const facts = item.technicalFacts as Record<string, unknown> | undefined
+  const probe = item.probeTool as Record<string, unknown> | undefined
+  const nullablePositive = (input: unknown): boolean => input === null
+    || (typeof input === 'number' && Number.isFinite(input) && input > 0)
+  if (item.schema !== 'jason.qingmu-returned-master-technical-qc-result.v1'
+    || !safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
+    || !safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
+    || !safeIdentifier(typeof item.assetId === 'string' ? item.assetId : null)
+    || !safeIdentifier(typeof item.finalOutputId === 'string' ? item.finalOutputId : null)
+    || !safeIdentifier(typeof item.selectionReceiptId === 'string' ? item.selectionReceiptId : null)
+    || ['masterSha256', 'sourceSnapshotSha256', 'projectionSha256', 'selectionSourceSha256',
+      'packageSha256', 'preflightSha256', 'canonicalResultSha256', 'requestSha256']
+      .some(field => typeof item[field] !== 'string' || !SHA256.test(item[field]))
+    || !['passed', 'failed', 'unknown'].includes(String(item.outcome))
+    || !['pending', 'passed', 'failed'].includes(String(item.qualityStatus))
+    || (item.outcome === 'passed' && item.qualityStatus !== 'passed')
+    || (item.outcome === 'failed' && item.qualityStatus !== 'failed')
+    || (item.outcome === 'unknown' && item.qualityStatus !== 'pending')
+    || facts === undefined || typeof facts.container !== 'string' || facts.container.length > 256
+    || !nullablePositive(facts.durationSec) || !nullablePositive(facts.width)
+    || !nullablePositive(facts.height) || typeof facts.fps !== 'string' || facts.fps.length > 64
+    || typeof facts.videoCodec !== 'string' || facts.videoCodec.length > 64
+    || typeof facts.pixelFormat !== 'string' || facts.pixelFormat.length > 64
+    || typeof facts.audioCodec !== 'string' || facts.audioCodec.length > 64
+    || typeof facts.hasVideo !== 'boolean' || typeof facts.hasAudio !== 'boolean'
+    || !nullablePositive(facts.byteSize)
+    || !(facts.materializedSha256 === null || (typeof facts.materializedSha256 === 'string'
+      && SHA256.test(facts.materializedSha256)))
+    || !safeQcStringList(item.checks) || !safeQcStringList(item.uncertainty)
+    || probe === undefined || probe.kind !== 'ffprobe' || probe.service !== 'MediaProbeService'
+    || typeof probe.binary !== 'string' || probe.binary.length === 0 || probe.binary.length > 128
+    || typeof item.releaseAuthorityRevisionAtStart !== 'number'
+    || !Number.isSafeInteger(item.releaseAuthorityRevisionAtStart) || item.releaseAuthorityRevisionAtStart <= 0
+    || typeof item.releaseAuthorityRevision !== 'number'
+    || !Number.isSafeInteger(item.releaseAuthorityRevision) || item.releaseAuthorityRevision <= 0
+    || !validQcReleaseConditions(item.releaseConditions)
+    || !safeIdentifier(typeof item.idempotencyKey === 'string' ? item.idempotencyKey : null)
+    || !safeIdentifier(typeof item.commandReceiptId === 'string' ? item.commandReceiptId : null)
+    || !safeIdentifier(typeof item.changeSetId === 'string' ? item.changeSetId : null)
+    || !safeIdentifier(typeof item.eventId === 'string' ? item.eventId : null)
+    || typeof item.recordedAt !== 'string' || item.recordedAt.length < 10 || item.recordedAt.length > 64
+    || item.providerCalls !== 0 || item.stageStarted !== false || item.approvalGranted !== false
+    || item.releaseGranted !== false || item.manifestFrozen !== false
+    || item.humanSignoffInferred !== false) return undefined
+  const result = value as EditorialMasterTechnicalQcResult
+  return technicalQcResultMatches(result, result.projectId, result.episodeId) ? result : undefined
+}
+
+function normalizeTechnicalQcPreview(value: unknown): EditorialMasterTechnicalQcPreview | undefined {
+  const item = safeSelectionPayload(value)
+  if (item === undefined || item.schema !== 'jason.qingmu-returned-master-technical-qc-preview.v1'
+    || !safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
+    || !safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
+    || normalizeTechnicalQcMaster(item.currentFormalMaster, String(item.projectId), String(item.episodeId)) === undefined
+    || typeof item.previewSha256 !== 'string' || !SHA256.test(item.previewSha256)
+    || !safeIdentifier(typeof item.idempotencyKey === 'string' ? item.idempotencyKey : null)
+    || typeof item.canConfirm !== 'boolean' || !safeQcStringList(item.hardBlockers)
+    || item.canConfirm !== (item.hardBlockers.length === 0)
+    || item.providerCalls !== 0 || item.stageStarted !== false || item.approvalGranted !== false
+    || item.releaseGranted !== false || item.manifestFrozen !== false
+    || item.humanSignoffInferred !== false) return undefined
+  return value as EditorialMasterTechnicalQcPreview
+}
+
+function normalizeTechnicalQcStatus(value: unknown): EditorialMasterTechnicalQcStatus | undefined {
+  const item = safeSelectionPayload(value)
+  const projectId = typeof item?.projectId === 'string' ? item.projectId : ''
+  const episodeId = typeof item?.episodeId === 'string' ? item.episodeId : ''
+  const master = item?.currentFormalMaster === null ? undefined
+    : normalizeTechnicalQcMaster(item?.currentFormalMaster, projectId, episodeId)
+  const current = item?.currentTechnicalQc === null ? undefined
+    : normalizeTechnicalQcResult(item?.currentTechnicalQc)
+  const records = Array.isArray(item?.records)
+    ? item.records.map(normalizeTechnicalQcResult) : []
+  if (item === undefined || item.schema !== 'jason.qingmu-returned-master-technical-qc-status.v1'
+    || !safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
+    || !safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
+    || !(item.currentFormalMaster === null || master !== undefined)
+    || !(item.currentTechnicalQc === null || current !== undefined)
+    || !Array.isArray(item.records) || item.records.length > 1000
+    || records.some(record => record === undefined)
+    || records.some(record => record !== undefined
+      && !technicalQcResultMatches(record, projectId, episodeId))
+    || (current !== undefined && (master === undefined
+      || !technicalQcResultMatches(current, projectId, episodeId, master)))
+    || !safeQcStringList(item.hardBlockers) || !validQcReleaseConditions(item.releaseConditions)
+    || item.providerCalls !== 0 || item.stageStarted !== false || item.approvalGranted !== false
+    || item.releaseGranted !== false || item.manifestFrozen !== false
+    || item.humanSignoffInferred !== false) return undefined
+  return value as EditorialMasterTechnicalQcStatus
 }
 
 function safePackageMediaPath(value: string): boolean {
@@ -2516,6 +2784,105 @@ export function registerEditorialHandoffDownload(
       }
     },
   })
+  const disposeTechnicalQcStatus = webServer.register({
+    kind: 'exact', path: TECHNICAL_QC_STATUS_PATH, handler: async (req, res) => {
+      if (req.method !== 'GET' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'editorial_master_technical_qc_forbidden' }); return
+      }
+      const scope = scopeAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = scope === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (scope === undefined || token === undefined || userId === undefined) {
+        json(res, scope === undefined ? 400 : 403, { code: 'editorial_master_technical_qc_forbidden' }); return
+      }
+      const outcome = await writerSelectionRequest(
+        dependencies, token, scope.projectId, scope.episodeId,
+        'returned-master-technical-qc-status', { method: 'GET' },
+      )
+      const status = outcome?.response.ok === true ? normalizeTechnicalQcStatus(outcome.raw) : undefined
+      if (status === undefined || status.projectId !== scope.projectId || status.episodeId !== scope.episodeId) {
+        json(res, 502, { code: 'editorial_master_technical_qc_status_failed' }); return
+      }
+      json(res, 200, status)
+    },
+  })
+  const disposeTechnicalQcPreview = webServer.register({
+    kind: 'exact', path: TECHNICAL_QC_PREVIEW_PATH, handler: async (req, res) => {
+      if (req.method !== 'POST' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'editorial_master_technical_qc_forbidden' }); return
+      }
+      const scope = scopeAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = scope === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (scope === undefined || token === undefined || userId === undefined) {
+        json(res, scope === undefined ? 400 : 403, { code: 'editorial_master_technical_qc_forbidden' }); return
+      }
+      const outcome = await writerSelectionRequest(
+        dependencies, token, scope.projectId, scope.episodeId,
+        'returned-master-technical-qc-preview', { method: 'POST' },
+      )
+      const preview = outcome?.response.ok === true ? normalizeTechnicalQcPreview(outcome.raw) : undefined
+      if (preview === undefined || preview.projectId !== scope.projectId
+        || preview.episodeId !== scope.episodeId) {
+        json(res, 409, { code: 'editorial_master_technical_qc_preview_failed' }); return
+      }
+      json(res, 200, preview)
+    },
+  })
+  const disposeTechnicalQcConfirm = webServer.register({
+    kind: 'exact', path: TECHNICAL_QC_CONFIRM_PATH, handler: async (req, res) => {
+      if (req.method !== 'POST' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'editorial_master_technical_qc_forbidden' }); return
+      }
+      const scope = scopeAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = scope === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (scope === undefined || token === undefined || userId === undefined) {
+        json(res, scope === undefined ? 400 : 403, { code: 'editorial_master_technical_qc_forbidden' }); return
+      }
+      try {
+        const body = await readBoundedJsonBody(req)
+        const item = safeSelectionPayload(body)
+        const previewSha256 = item?.previewSha256
+        const idempotencyKey = item?.idempotencyKey
+        if (item === undefined || Object.keys(item).length !== 2
+          || typeof previewSha256 !== 'string' || !SHA256.test(previewSha256)
+          || typeof idempotencyKey !== 'string' || !IDENTIFIER.test(idempotencyKey)) {
+          throw new Error('technical_qc_request_invalid')
+        }
+        const requestBody = JSON.stringify({ previewSha256, idempotencyKey })
+        const commandBody = `{"previewSha256":"${previewSha256}"}`
+        const requestSha = createHash('sha256').update(commandBody).digest('hex')
+        const submitted = await writerSelectionRequest(
+          dependencies, token, scope.projectId, scope.episodeId,
+          'returned-master-technical-qc', {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: requestBody,
+          },
+        )
+        let result = submitted?.response.ok === true ? normalizeTechnicalQcResult(submitted.raw) : undefined
+        if (result === undefined) {
+          const recoverySuffix = `returned-master-technical-qc/${encodeURIComponent(idempotencyKey)}?requestSha256=${requestSha}`
+          const recovered = await writerSelectionRequest(
+            dependencies, token, scope.projectId, scope.episodeId, recoverySuffix, { method: 'GET' },
+          )
+          result = recovered?.response.ok === true ? normalizeTechnicalQcResult(recovered.raw) : undefined
+        }
+        if (result === undefined || result.projectId !== scope.projectId
+          || result.episodeId !== scope.episodeId || result.idempotencyKey !== idempotencyKey
+          || result.requestSha256 !== requestSha) throw new Error('technical_qc_commit_failed')
+        json(res, 200, result)
+      } catch (error) {
+        const badRequest = error instanceof Error && error.message === 'technical_qc_request_invalid'
+        json(res, badRequest ? 400 : 409, {
+          code: badRequest ? 'editorial_master_technical_qc_request_invalid'
+            : 'editorial_master_technical_qc_commit_unknown_or_failed',
+        })
+      }
+    },
+  })
   const disposeCandidateStatus = webServer.register({
     kind: 'exact', path: CANDIDATE_STATUS_PATH, handler: async (req, res) => {
       if (req.method !== 'GET' || !isTrustedApiRequest(req, [])) {
@@ -2657,6 +3024,9 @@ export function registerEditorialHandoffDownload(
     },
   })
   return () => {
+    disposeTechnicalQcConfirm()
+    disposeTechnicalQcPreview()
+    disposeTechnicalQcStatus()
     disposeSelectionConfirm()
     disposeSelectionPreview()
     disposeSelectionStatus()
