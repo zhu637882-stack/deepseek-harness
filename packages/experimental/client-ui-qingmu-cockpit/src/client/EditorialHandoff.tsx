@@ -7,6 +7,7 @@ import type { QingmuCockpitKey } from './locales.ts'
 import css from './EditorialHandoff.module.css'
 
 interface ImportAccess { readonly requestId: string; readonly capability: string }
+interface MasterAccess { readonly requestId: string; readonly capability: string }
 interface ImportResult {
   readonly projectId: string
   readonly episodeId: string
@@ -28,6 +29,33 @@ interface ImportResult {
     readonly media: readonly { readonly kind: string; readonly path: string; readonly size: number; readonly sha256: string }[]
     readonly unresolved: readonly Record<string, unknown>[]
   }
+}
+
+interface MasterResult {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly binding: {
+    readonly sourceSnapshotSha256: string
+    readonly projectionSha256: string
+    readonly downloadRequestId: string
+    readonly importRequestId: string
+    readonly packageSha256: string
+    readonly packageSize: number
+  }
+  readonly master: {
+    readonly sha256: string
+    readonly size: number
+    readonly mimeType: string | null
+    readonly container: string | null
+    readonly formatName: string | null
+    readonly durationSec: number | null
+    readonly width: number | null
+    readonly height: number | null
+    readonly fps: number | null
+    readonly videoStreams: readonly Record<string, unknown>[]
+    readonly audioStreams: readonly Record<string, unknown>[]
+  }
+  readonly blockers: readonly string[]
 }
 
 interface Props {
@@ -68,6 +96,17 @@ const BLOCKER_KEYS: Readonly<Record<string, QingmuCockpitKey>> = {
   editorial_handoff_otio_adapter_unverified: 'handoffBlockerOtioUnverified',
 }
 
+const MASTER_BLOCKER_KEYS: Readonly<Record<string, QingmuCockpitKey>> = {
+  editorial_master_container_invalid: 'handoffMasterBlockerContainer',
+  editorial_master_container_probe_mismatch: 'handoffMasterBlockerContainer',
+  editorial_master_probe_unavailable: 'handoffMasterBlockerProbe',
+  editorial_master_video_stream_missing: 'handoffMasterBlockerVideo',
+  editorial_master_audio_stream_missing: 'handoffMasterBlockerAudio',
+  editorial_master_duration_invalid: 'handoffMasterBlockerDuration',
+  editorial_master_resolution_invalid: 'handoffMasterBlockerResolution',
+  editorial_master_fps_invalid: 'handoffMasterBlockerFps',
+}
+
 /** Read-only E8 editorial handoff draft. No button on this panel writes business state. */
 export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   const [projection, setProjection] = useState<YimengEditorialHandoffResponse>()
@@ -84,11 +123,18 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   const [importState, setImportState] = useState<'idle' | 'running' | 'succeeded' | 'failed'>('idle')
   const [importResult, setImportResult] = useState<ImportResult>()
   const [importError, setImportError] = useState<string>()
+  const [masterAccess, setMasterAccess] = useState<MasterAccess>()
+  const [selectedMaster, setSelectedMaster] = useState<File>()
+  const [masterState, setMasterState] = useState<'idle' | 'running' | 'succeeded' | 'failed'>('idle')
+  const [masterResult, setMasterResult] = useState<MasterResult>()
+  const [masterError, setMasterError] = useState<string>()
   const generation = useRef(0)
   const downloadGeneration = useRef(0)
   const importGeneration = useRef(0)
+  const masterGeneration = useRef(0)
   const activeController = useRef<AbortController>()
   const importController = useRef<AbortController>()
+  const masterController = useRef<AbortController>()
   const importErrorRef = useRef<HTMLDivElement>(null)
 
   const load = useCallback(async () => {
@@ -97,7 +143,9 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     activeController.current?.abort()
     downloadGeneration.current += 1
     importGeneration.current += 1
+    masterGeneration.current += 1
     importController.current?.abort()
+    masterController.current?.abort()
     importController.current = undefined
     const controller = new AbortController()
     activeController.current = controller
@@ -113,6 +161,10 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
         setImportResult(undefined)
         setImportState('idle')
         setImportError(undefined)
+        setMasterAccess(undefined)
+        setMasterResult(undefined)
+        setMasterState('idle')
+        setMasterError(undefined)
       }
     } catch (cause) {
       if (current === generation.current) {
@@ -136,10 +188,13 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       generation.current += 1
       downloadGeneration.current += 1
       importGeneration.current += 1
+      masterGeneration.current += 1
       activeController.current?.abort()
       importController.current?.abort()
+      masterController.current?.abort()
       activeController.current = undefined
       importController.current = undefined
+      masterController.current = undefined
     }
   }, [load])
 
@@ -154,12 +209,17 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       method: 'GET', cache: 'no-store', signal: controller.signal,
     }).then(async (response) => {
       if (!response.ok) return
-      const body = await response.json() as { status?: string; result?: ImportResult | null }
+      const body = await response.json() as {
+        status?: string
+        result?: ImportResult | null
+        masterAccess?: MasterAccess
+      }
       if (current === importGeneration.current && body.status === 'succeeded'
         && body.result !== undefined && body.result !== null
         && body.result.projectId === projectId && body.result.episodeId === episodeId) {
         setImportResult(body.result)
         setImportState('succeeded')
+        setMasterAccess(body.masterAccess)
       }
     }).catch(() => undefined)
     return () => {
@@ -170,6 +230,34 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       }
     }
   }, [episodeId, importAccess, projectId])
+
+  useEffect(() => {
+    if (masterAccess === undefined) return
+    const current = ++masterGeneration.current
+    masterController.current?.abort()
+    const controller = new AbortController()
+    masterController.current = controller
+    const params = new URLSearchParams({ projectId, episodeId, ...masterAccess })
+    void fetch(`/api/qingmu/editorial-handoff/master-preflight-status?${params.toString()}`, {
+      method: 'GET', cache: 'no-store', signal: controller.signal,
+    }).then(async (response) => {
+      if (!response.ok) return
+      const body = await response.json() as { status?: string; result?: MasterResult | null }
+      if (current === masterGeneration.current && body.status === 'succeeded'
+        && body.result !== undefined && body.result !== null
+        && body.result.projectId === projectId && body.result.episodeId === episodeId) {
+        setMasterResult(body.result)
+        setMasterState('succeeded')
+      }
+    }).catch(() => undefined)
+    return () => {
+      controller.abort()
+      if (current === masterGeneration.current) {
+        masterGeneration.current += 1
+        masterController.current = undefined
+      }
+    }
+  }, [episodeId, masterAccess, projectId])
 
   useEffect(() => {
     if (importError !== undefined) importErrorRef.current?.focus()
@@ -253,17 +341,27 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       if (result.projectId !== projectId || result.episodeId !== episodeId) throw new Error('scope_mismatch')
       setImportResult(result)
       setImportState('succeeded')
+      const status = await fetch(statusUrl, { method: 'GET', cache: 'no-store', signal: controller.signal })
+      if (status.ok) {
+        const body = await status.json() as { masterAccess?: MasterAccess }
+        if (current === importGeneration.current) setMasterAccess(body.masterAccess)
+      }
       return
     } catch {
       if (current !== importGeneration.current || controller.signal.aborted) return
       for (let attempt = 0; attempt < 12; attempt += 1) {
         try {
           const response = await fetch(statusUrl, { method: 'GET', cache: 'no-store', signal: controller.signal })
-          const body = await response.json() as { status?: string; result?: ImportResult | null; errorCode?: string | null }
+          const body = await response.json() as {
+            status?: string
+            result?: ImportResult | null
+            errorCode?: string | null
+            masterAccess?: MasterAccess
+          }
           if (current !== importGeneration.current) return
           if (body.status === 'succeeded' && body.result !== null && body.result !== undefined
             && body.result.projectId === projectId && body.result.episodeId === episodeId) {
-            setImportResult(body.result); setImportState('succeeded'); return
+            setImportResult(body.result); setImportState('succeeded'); setMasterAccess(body.masterAccess); return
           }
           if (body.status === 'failed') {
             setImportError(body.errorCode ?? 'package_verification_failed'); setImportState('failed'); return
@@ -282,8 +380,68 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     }
   }, [episodeId, importAccess, importState, projectId, selectedPackage])
 
+  const verifyMaster = useCallback(async () => {
+    if (selectedMaster === undefined || masterAccess === undefined || masterState !== 'idle') return
+    const current = ++masterGeneration.current
+    masterController.current?.abort()
+    const controller = new AbortController()
+    masterController.current = controller
+    const params = new URLSearchParams({ projectId, episodeId, ...masterAccess })
+    const url = `/api/qingmu/editorial-handoff/master-preflight?${params.toString()}`
+    const statusUrl = `/api/qingmu/editorial-handoff/master-preflight-status?${params.toString()}`
+    setMasterState('running')
+    setMasterResult(undefined)
+    setMasterError(undefined)
+    try {
+      const response = await fetch(url, {
+        method: 'POST', cache: 'no-store',
+        headers: { 'content-type': selectedMaster.type || 'application/octet-stream' },
+        body: selectedMaster, signal: controller.signal,
+      })
+      if (!response.ok) {
+        const body = await response.json().catch(() => undefined) as { code?: string } | undefined
+        if (current !== masterGeneration.current) return
+        setMasterError(body?.code ?? 'master_preflight_failed')
+        setMasterState('failed')
+        return
+      }
+      const result = await response.json() as MasterResult
+      if (current !== masterGeneration.current) return
+      if (result.projectId !== projectId || result.episodeId !== episodeId) throw new Error('scope_mismatch')
+      setMasterResult(result)
+      setMasterState('succeeded')
+      return
+    } catch {
+      if (current !== masterGeneration.current || controller.signal.aborted) return
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        try {
+          const response = await fetch(statusUrl, { method: 'GET', cache: 'no-store', signal: controller.signal })
+          const body = await response.json() as { status?: string; result?: MasterResult | null; errorCode?: string | null }
+          if (current !== masterGeneration.current) return
+          if (body.status === 'succeeded' && body.result !== null && body.result !== undefined
+            && body.result.projectId === projectId && body.result.episodeId === episodeId) {
+            setMasterResult(body.result); setMasterState('succeeded'); return
+          }
+          if (body.status === 'failed') {
+            setMasterError(body.errorCode ?? 'master_preflight_failed'); setMasterState('failed'); return
+          }
+        } catch {
+          if (current !== masterGeneration.current) return
+          /* The original preflight request remains the only recovery coordinate. */
+        }
+        await new Promise(resolve => window.setTimeout(resolve, 250))
+      }
+      if (current !== masterGeneration.current) return
+      setMasterError('master_preflight_unknown')
+      setMasterState('failed')
+    } finally {
+      if (current === masterGeneration.current) masterController.current = undefined
+    }
+  }, [episodeId, masterAccess, masterState, projectId, selectedMaster])
+
   if (projectId === '' || episodeId === '') return <p className={css.empty}>{t('handoffChooseEpisode')}</p>
   const blockerLabel = (code: string) => t(BLOCKER_KEYS[code] ?? 'handoffBlockerUnknown')
+  const masterBlockerLabel = (code: string) => t(MASTER_BLOCKER_KEYS[code] ?? 'handoffMasterBlockerUnknown')
   return <section className={css.panel} aria-labelledby="qingmu-editorial-handoff-title">
     <header className={css.header}>
       <div>
@@ -364,6 +522,10 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
                 setImportResult(undefined)
                 setImportError(undefined)
                 setImportState('idle')
+                setMasterAccess(undefined)
+                setMasterResult(undefined)
+                setMasterError(undefined)
+                setMasterState('idle')
               }} />
           </label>
           {selectedPackage !== undefined && <p>{selectedPackage.name} · {selectedPackage.size.toLocaleString()} bytes</p>}
@@ -400,6 +562,60 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
         <p>{t('handoffImportUnresolved')}: {importResult.preview.unresolved.length}</p>
         <details><summary>{t('handoffAdvanced')}</summary>
           <p>Package SHA: {importResult.packageSha256}</p><p>{importResult.packageSize.toLocaleString()} bytes</p>
+        </details>
+      </section>}
+      <div className={css.importBox}>
+        <div>
+          <strong>{t('handoffMasterTitle')}</strong>
+          <p>{t('handoffMasterBoundary')}</p>
+          <label className={css.fileField}>
+            <span>{t('handoffMasterChoose')}</span>
+            <input type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm"
+              aria-describedby={masterError === undefined ? undefined : 'handoff-master-error'}
+              disabled={masterAccess === undefined || masterState !== 'idle'}
+              onChange={(event) => {
+                if (masterState !== 'idle') return
+                const file = event.currentTarget.files?.[0]
+                setSelectedMaster(file)
+                setMasterResult(undefined)
+                setMasterError(undefined)
+                setMasterState('idle')
+              }} />
+          </label>
+          {selectedMaster !== undefined && <p>{selectedMaster.name} · {selectedMaster.type || '—'} · {selectedMaster.size.toLocaleString()} bytes</p>}
+          {masterAccess === undefined && <p className={css.warning}>{t('handoffMasterNeedsImport')}</p>}
+          {masterState === 'succeeded' && <p className={css.warning}>{t('handoffMasterLocked')}</p>}
+        </div>
+        <button type="button" disabled={selectedMaster === undefined || masterAccess === undefined || masterState !== 'idle'}
+          onClick={() => { void verifyMaster() }}>
+          {masterState === 'running' ? t('handoffMasterRunning') : t('handoffMasterVerify')}
+        </button>
+      </div>
+      {masterError !== undefined && <div id="handoff-master-error" role="alert" className={css.errorSummary}>
+        <strong>{t('handoffMasterFailed')}</strong><p>{t('handoffMasterFailedHelp')} ({masterError})</p>
+      </div>}
+      {masterResult !== undefined && <section className={css.preview} aria-labelledby="handoff-master-result">
+        <header><div><strong id="handoff-master-result">{t('handoffMasterResult')}</strong>
+          <p>{t('handoffMasterPreviewOnly')}</p></div></header>
+        <div className={css.masterFacts}>
+          <span><strong>{masterResult.master.container ?? '—'}</strong>{t('handoffMasterContainer')}</span>
+          <span><strong>{masterResult.master.durationSec ?? '—'}s</strong>{t('handoffMasterDuration')}</span>
+          <span><strong>{masterResult.master.width ?? '—'} × {masterResult.master.height ?? '—'}</strong>{t('handoffMasterResolution')}</span>
+          <span><strong>{masterResult.master.fps ?? '—'}</strong>{t('handoffMasterFps')}</span>
+          <span><strong>{masterResult.master.audioStreams.length}</strong>{t('handoffMasterAudioStreams')}</span>
+        </div>
+        {masterResult.blockers.length === 0
+          ? <p className={css.success}>{t('handoffMasterTechnicalPass')}</p>
+          : <div role="status"><strong>{t('handoffMasterBlockers')}</strong><ul className={css.blockers}>
+            {masterResult.blockers.map(code => <li key={code}>{masterBlockerLabel(code)} <code>{code}</code></li>)}
+          </ul></div>}
+        <p className={css.warning}>{t('handoffMasterExactBoundary')}</p>
+        <details><summary>{t('handoffAdvanced')}</summary>
+          <p>Master SHA: {masterResult.master.sha256}</p>
+          <p>{masterResult.master.size.toLocaleString()} bytes · {masterResult.master.mimeType ?? '—'} · {masterResult.master.formatName ?? '—'}</p>
+          <p>Package SHA: {masterResult.binding.packageSha256}</p>
+          <p>Source SHA: {masterResult.binding.sourceSnapshotSha256}</p>
+          <p>Projection SHA: {masterResult.binding.projectionSha256}</p>
         </details>
       </section>}
       <details><summary>{t('handoffAdvancedProjection')}</summary>

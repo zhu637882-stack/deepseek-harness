@@ -59,7 +59,7 @@ async function stopFixture(child: ChildProcess | undefined): Promise<void> {
 
 const writerRoot = process.env.QINGMU_E8_YIMENG_ROOT
 describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot)(
-  'web e2e: official deterministic editorial handoff package', () => {
+  'web e2e: editorial handoff package and returned-master preflight', () => {
     let root: string | undefined
     let child: ChildProcess | undefined
     let scaffold: WebScaffold | undefined
@@ -73,6 +73,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
     const originalEditorialKey = process.env.QINGMU_EDITORIAL_HANDOFF_KEY
     const captured: Record<string, unknown>[] = []
     const downloadRequests: string[] = []
+    const masterRequests: string[] = []
 
     async function startFixture(resume: boolean): Promise<Fixture> {
       if (root === undefined || writerRoot === undefined) throw new Error('Fixture roots are required')
@@ -151,6 +152,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
         const url = new URL(request.url())
         if (!['127.0.0.1', 'localhost'].includes(url.hostname)) throw new Error(`External browser request forbidden: ${url.origin}`)
         if (url.pathname === '/qingmu-yimeng/editorialHandoff') captured.push(request.postDataJSON() as Record<string, unknown>)
+        if (url.pathname === '/api/qingmu/editorial-handoff/master-preflight') masterRequests.push(request.url())
       })
       await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
       await page.getByRole('button', { name: '进入青木 OS' }).click()
@@ -298,6 +300,33 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       expect(await dialog.getByText(/仅证明本地包可解析且与相应来源绑定/u).count()).toBe(1)
       expect(await dialog.getByText(/^media\//u).count()).toBeGreaterThan(0)
 
+      const masterEntry = Object.keys(beforeStorage).find(path => path.endsWith('.mp4'))
+      if (masterEntry === undefined) throw new Error('Returned-master media fixture missing')
+      const masterPath = join(fixture.storageRoot, masterEntry)
+      const masterSha = createHash('sha256').update(await readFile(masterPath)).digest('hex')
+      const masterInput = dialog.getByLabel('选择本地母版（MP4 / MOV / WebM）')
+      await expect.poll(() => masterInput.isEnabled()).toBe(true)
+      await masterInput.setInputFiles(masterPath)
+      await dialog.getByRole('button', { name: '预检本地母版' }).click()
+      await dialog.getByText('仅预检，未入库、未发布、未签收。').waitFor()
+      expect(await dialog.getByText('当前技术预检未发现结构阻塞；仍不是正式回传、发布 Ready 或人工签收。').count()).toBe(1)
+      expect(await dialog.getByText(`Master SHA: ${masterSha}`).count()).toBe(1)
+      expect(await dialog.getByText('720 × 1280').count()).toBeGreaterThan(0)
+      expect(await dialog.getByText('1', { exact: true }).count()).toBeGreaterThan(0)
+      const masterRequestUrl = masterRequests.at(-1)
+      if (masterRequestUrl === undefined) throw new Error('Master preflight request URL missing')
+      const crossProject = await page.evaluate(async (url) => {
+        const forged = new URL(url)
+        forged.searchParams.set('projectId', 'other-project')
+        const response = await fetch(forged, {
+          method: 'POST', headers: { 'content-type': 'video/mp4' }, body: new Uint8Array([1]),
+        })
+        return { status: response.status, body: await response.json() as unknown }
+      }, masterRequestUrl)
+      expect(crossProject).toEqual({
+        status: 403, body: { code: 'editorial_master_preflight_forbidden' },
+      })
+
       const successfulDownloadUrl = downloadRequests.at(-1)
       if (successfulDownloadUrl === undefined || scaffold === undefined) throw new Error('Successful download URL missing')
       const importStatePath = join(scaffold.harnessHome, 'state', 'qingmu-editorial-downloads.json.imports')
@@ -319,6 +348,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       expect(Buffer.byteLength(importStateAfter)).toBeLessThanOrEqual(Buffer.byteLength(importStateBefore) + 256)
       expect(importStateAfter.match(/jason\.qingmu-editorial-package-consumption-preview\.v1/gu)).toHaveLength(1)
       expect(await readdir(writerSpoolRoot)).toEqual(['keep-me.txt'])
+      expect(await readdir(join(scaffold.harnessHome, 'state', 'qingmu-editorial-spool'))).toEqual([])
 
       for (const viewport of [{ width: 1280, height: 800 }, { width: 1440, height: 900 }]) {
         await page.setViewportSize(viewport)
@@ -361,6 +391,8 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       await freshDialog.getByText('SHA-256 与大小均精确匹配原下载终态').waitFor()
       expect(await freshDialog.getByText('结构、媒体引用与 otio_json 复验通过').count()).toBe(1)
       expect(await freshDialog.getByText('仍绑定当前项目、剧集、来源与投影').count()).toBe(1)
+      await freshDialog.getByText('仅预检，未入库、未发布、未签收。').waitFor()
+      expect(await freshDialog.getByText(`Master SHA: ${masterSha}`).count()).toBe(1)
       await fresh.close()
       const tamperCheck = await execFile(join(writerRoot, '.venv/bin/python'), ['-c', [
         'import sys,zipfile',

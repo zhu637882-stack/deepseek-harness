@@ -122,6 +122,8 @@ Ready PromptIR 的 `firstFrameQuote` 还返回一次服务端重算、按当前�
 
 下载成功终态之后，Host 可以为同一认证用户和精确投影签发另一份一次性导入 capability。重新选择的本地 ZIP 经私有 0600 暂存流式处理，先与原终态 SHA 和大小比对，再通过专用、域分离的 Host HMAC 交给 Writer 只读包复验器。Writer 暂存目录位于当前实例的 storage 根目录下，仅 owner 可访问且权限为 0700；正常启动只清理该目录内本功能具名的孤儿文件。服务密钥由每个本地实例单独生成、restore 时轮换、不暴露给浏览器 RPC；缺失或过短时失败关闭且不影响公开读取。每份精确绑定认证身份的下载回执及包 SHA／大小只对应一条 canonical 导入结果。恢复会原位轮换 capability、使旧 capability 失效且不复制终态 payload；状态读取也会清扫过期记录。不同范围或下载回执仍保持分离。结果保持“回执字节一致”“原生 OTIO／包内有效”“当前业务来源仍匹配”三项独立结论。已复验终态可在刷新或重启后恢复，不会二次上传或重复调用 Writer 复验。详见[消费预览 Agent Note](../../../.agents/notes/implemented/feature/2026-09-01-editorial-handoff-consumption-preview.zh.md)。
 
+只有成功的包消费预览才能派生回传母版预检 capability。浏览器把一份 MP4、MOV 或 WebM 候选流式传给 Host；Host 在 owner-only 暂存目录中计算哈希，并把精确的母版 SHA／大小以及原下载、导入、包、来源和投影坐标签名后交给 Writer。Writer 再把字节流写入当前实例的私有暂存目录，执行只读容器与 ffprobe 检查。canonical 状态可在刷新或重启后恢复而不再次上传，capability 轮换后旧值立即失效。结果只暴露技术事实与阻塞：不会导入媒体、记录剪辑师消费、授予发布权威或推断人工签收。详见[回传母版预检 Agent Note](../../../.agents/notes/implemented/feature/2026-09-01-editorial-master-return-preflight.zh.md)。
+
 ## 安全边界
 
 `promptIr` 保留实际生效 Ready 主体，并额外验证最新已存 Draft 的完整主体 SHA 与基础绑定。不存在 Draft 时返回 `null`；血缘损坏报错。基于另一个 Ready 的 Draft 明确标为过期，读取器不会提升其状态。根工作流 blocker 必须有非空 `reason`；易梦在此边界前归一 stage `reasonCode` 和 release blocker，保留诊断字段。

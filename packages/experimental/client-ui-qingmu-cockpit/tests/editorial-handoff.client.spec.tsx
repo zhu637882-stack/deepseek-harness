@@ -259,7 +259,71 @@ describe('editorial handoff panel', () => {
     expect(screen.getByText(zh.handoffImportValid)).toBeTruthy()
     expect(screen.getByText(/Picture · Video · 1/u)).toBeTruthy()
     expect(screen.getByText(/handoff\.otio\.zip/u)).toBeTruthy()
-    expect(fetchImport).toHaveBeenCalledTimes(2)
+    expect(fetchImport).toHaveBeenCalledTimes(3)
+  })
+
+  it('preflights one returned master only after package recovery and shows the exact boundary', async () => {
+    const editorialHandoff = vi.fn().mockResolvedValue(downloadableHandoff(true))
+    const port = { editorialHandoff } as unknown as QingmuYimengReadPort
+    const packageResult = {
+      projectId: SCOPE.projectId, episodeId: SCOPE.episodeId,
+      packageSha256: '8'.repeat(64), packageSize: 4,
+      receiptMatch: true, internalValidity: true, currentAuthority: { matches: true },
+      preview: { tracks: [{ name: 'Picture', kind: 'Video', clipCount: 0 }, { name: 'Dialogue', kind: 'Audio', clipCount: 0 }],
+        orderedShots: [], media: [], unresolved: [] },
+    }
+    const masterAccess = { requestId: '33333333-3333-4333-8333-333333333333', capability: 'c'.repeat(64) }
+    const masterResult = {
+      projectId: SCOPE.projectId, episodeId: SCOPE.episodeId,
+      binding: {
+        sourceSnapshotSha256: '6'.repeat(64), projectionSha256: '7'.repeat(64),
+        downloadRequestId: '12345678-1234-1234-1234-123456789abc',
+        importRequestId: '87654321-4321-4321-4321-cba987654321',
+        packageSha256: '8'.repeat(64), packageSize: 4,
+      },
+      master: {
+        sha256: '9'.repeat(64), size: 12, mimeType: 'video/mp4', container: 'mp4',
+        formatName: 'mov,mp4,m4a,3gp,3g2,mj2', durationSec: 5, width: 720, height: 1280, fps: 24,
+        videoStreams: [{ codec: 'h264' }], audioStreams: [{ codec: 'aac' }],
+      }, blockers: [],
+    }
+    const fetchMaster = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
+      if (url.includes('master-preflight') && method === 'POST') {
+        return new Response(JSON.stringify(masterResult), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('master-preflight-status')) {
+        return new Response(JSON.stringify({ status: 'not_started', result: null }), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({
+        status: 'succeeded', result: packageResult, errorCode: null, masterAccess,
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMaster)
+    render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
+    const input = await screen.findByLabelText(zh.handoffMasterChoose) as HTMLInputElement
+    await waitFor(() => { expect(input.disabled).toBe(false) })
+    const file = new File([new Uint8Array(12)], 'returned-master.mp4', { type: 'video/mp4' })
+    fireEvent.change(input, { target: { files: [file] } })
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffMasterVerify }))
+    await waitFor(() => { expect(screen.getByText(zh.handoffMasterExactBoundary)).toBeTruthy() })
+    expect(screen.getByText(zh.handoffMasterTechnicalPass)).toBeTruthy()
+    expect(screen.getByText(/Master SHA: 9999/u)).toBeTruthy()
+    expect(screen.getByText(/returned-master\.mp4/u)).toBeTruthy()
+    expect(input.disabled).toBe(true)
+    expect(screen.getByText(zh.handoffMasterLocked)).toBeTruthy()
+    const otherFile = new File([new Uint8Array(8)], 'other-master.mp4', { type: 'video/mp4' })
+    fireEvent.change(input, { target: { files: [otherFile] } })
+    expect(screen.queryByText(/other-master\.mp4/u)).toBeNull()
+    expect(screen.getByText(/Master SHA: 9999/u)).toBeTruthy()
+    expect(fetchMaster.mock.calls.filter(([request, options]) => {
+      const url = typeof request === 'string' ? request : request instanceof URL ? request.href : request.url
+      const method = options?.method ?? (request instanceof Request ? request.method : 'GET')
+      return url.includes('master-preflight') && method === 'POST'
+    })).toHaveLength(1)
   })
 
   it('recovers an already verified preview from Host status without reuploading bytes', async () => {

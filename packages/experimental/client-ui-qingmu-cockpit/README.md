@@ -150,6 +150,8 @@ The OTIO media-package button remains semantically disabled while Yimeng reports
 
 After a successful download, the user may reselect that local ZIP for a read-only consumption preview. The panel reports exact terminal-byte equality, native OTIO/package validity, and current project/episode/source binding separately, then shows Picture and Dialogue tracks, ordered durations, relative media paths, and unresolved items. A terminal preview recovers after refresh or restart; a failed attempt retains the selected file for an explicit retry. This preview does not open an NLE or infer production completion, release readiness, or human sign-off.
 
+After that preview succeeds, the same panel accepts one local MP4, MOV, or WebM returned-master candidate. It displays byte SHA and size, container, duration, resolution, frame rate, audio-stream count, original package/source binding, and structured blockers. Errors are announced with a recovery action and retain the chosen local file. The result is deliberately labelled “preflight only”: it is not imported, released, signed off, or evidence that an NLE or editor consumed the package.
+
 ## Security boundary
 
 `YIMENG_API_TOKEN` and `QINGMU_IMAGO_ATTESTATION_KEY` belong only to Qingmu Host processes. The browser plugin does not read environment variables, `localStorage`, `JWT_SECRET`, or cookies, and it never receives or renders either secret. Its only persistence is the bounded non-secret receipt-recovery marker in the current tab's `sessionStorage`. Read and command channels are separate Host plugins, both limited to loopback upstreams. If the token is absent, the cockpit shows a recovery instruction to configure the Host and restart the local instance.

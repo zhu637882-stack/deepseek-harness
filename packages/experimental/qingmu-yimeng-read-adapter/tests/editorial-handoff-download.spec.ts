@@ -119,10 +119,16 @@ describe('editorial handoff Host download bridge', () => {
     } })
 
     const status = await fetch(downloadUrl(base, access).replace('/download?', '/download-status?'))
-    expect(await status.json()).toMatchObject({
-      status: 'succeeded', sha256: digest, size: bytes.length, errorCode: null,
-      importAccess: { requestId: expect.any(String), capability: expect.stringMatching(/^[0-9a-f]{64}$/) },
-    })
+    const statusBody = await status.json() as {
+      status: string
+      sha256: string
+      size: number
+      errorCode: null
+      importAccess: { requestId: string; capability: string }
+    }
+    expect(statusBody).toMatchObject({ status: 'succeeded', sha256: digest, size: bytes.length, errorCode: null })
+    expect(statusBody.importAccess.requestId).toMatch(/^[A-Za-z0-9_-]{16,80}$/)
+    expect(statusBody.importAccess.capability).toMatch(/^[0-9a-f]{64}$/)
     expect((await fetch(downloadUrl(base, access))).status).toBe(409)
     expect(fetchUpstream).toHaveBeenCalledTimes(1)
   })
@@ -153,12 +159,50 @@ describe('editorial handoff Host download bridge', () => {
       readOnly: true, businessMutations: 0, providerCalls: 0,
       boundaries: { nleOpened: false, productionComplete: false, releaseReady: false, humanSignoffInferred: false },
     }
-    const fetchUpstream = vi.fn(async (_input, init) => init?.method === 'POST'
-      ? new Response(JSON.stringify(result), { status: 200, headers: { 'content-type': 'application/json' } })
-      : new Response(bytes, { status: 200, headers: {
-        'content-type': 'application/zip', 'content-length': String(bytes.length),
-        'x-qingmu-package-sha256': digest, 'x-qingmu-package-size': String(bytes.length),
-      } })) as unknown as typeof globalThis.fetch
+    const masterBytes = Buffer.from('local-returned-master')
+    const masterDigest = createHash('sha256').update(masterBytes).digest('hex')
+    const masterResult = {
+      schema: 'jason.qingmu-editorial-master-preflight.v1',
+      projectId: 'project-e8', episodeId: 'episode-e8',
+      binding: {
+        sourceSnapshotSha256: SOURCE_SHA, projectionSha256: PROJECTION_SHA,
+        downloadRequestId: '', importRequestId: '', packageSha256: digest, packageSize: bytes.length,
+      },
+      master: {
+        sha256: masterDigest, size: masterBytes.length, mimeType: 'video/mp4', container: 'mp4',
+        formatName: 'mov,mp4,m4a,3gp,3g2,mj2', durationSec: 5, width: 720, height: 1280, fps: 24,
+        videoStreams: [{ codec: 'h264', width: 720, height: 1280, fps: 24 }],
+        audioStreams: [{ codec: 'aac', channels: 2, sampleRate: 48000 }], blockers: [],
+      },
+      checks: { currentAuthorityMatches: true, packageReceiptBound: true, containerVerified: true, probeSucceeded: true },
+      blockers: [], unresolved: [], readOnly: true, businessMutations: 0, providerCalls: 0,
+      boundaries: { nleOpened: false, editorConsumed: false, formalReturnRecorded: false,
+        releaseReady: false, humanSignoffInferred: false },
+    }
+    const fetchUpstream = vi.fn(async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const target = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const path = new URL(target).pathname
+      if (path.endsWith('/preflight-returned-master')) {
+        const headers = new Headers(init?.headers)
+        return new Response(JSON.stringify({
+          ...masterResult,
+          binding: {
+            ...masterResult.binding,
+            downloadRequestId: headers.get('x-qingmu-download-request-id'),
+            importRequestId: headers.get('x-qingmu-import-request-id'),
+          },
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      return init?.method === 'POST'
+        ? new Response(JSON.stringify(result), { status: 200, headers: { 'content-type': 'application/json' } })
+        : new Response(bytes, { status: 200, headers: {
+          'content-type': 'application/zip', 'content-length': String(bytes.length),
+          'x-qingmu-package-sha256': digest, 'x-qingmu-package-size': String(bytes.length),
+        } })
+    }) as unknown as typeof globalThis.fetch
     const { base, access, authorizer, stateFile } = await host(fetchUpstream)
     expect((await fetch(downloadUrl(base, access))).status).toBe(200)
     const terminal = await (await fetch(downloadUrl(base, access).replace('/download?', '/download-status?'))).json() as {
@@ -185,7 +229,36 @@ describe('editorial handoff Host download bridge', () => {
     })).status).toBe(200)
     expect(fetchUpstream).toHaveBeenCalledTimes(2)
     const recovered = await fetch(importUrl.replace('/import?', '/import-status?'))
-    expect(await recovered.json()).toEqual({ status: 'succeeded', result, errorCode: null })
+    const recoveredBody = await recovered.json() as {
+      status: string
+      result: unknown
+      errorCode: null
+      masterAccess: { requestId: string; capability: string }
+    }
+    expect(recoveredBody).toMatchObject({ status: 'succeeded', result, errorCode: null })
+    expect(recoveredBody.masterAccess.requestId).toMatch(/^[A-Za-z0-9_-]{16,80}$/)
+    expect(recoveredBody.masterAccess.capability).toMatch(/^[0-9a-f]{64}$/)
+    const masterQuery = new URLSearchParams({
+      projectId: 'project-e8', episodeId: 'episode-e8', ...recoveredBody.masterAccess,
+    })
+    const masterUrl = `${base}/api/qingmu/editorial-handoff/master-preflight?${masterQuery.toString()}`
+    const master = await fetch(masterUrl, {
+      method: 'POST', headers: { 'content-type': 'video/mp4' }, body: masterBytes,
+    })
+    expect(master.status).toBe(200)
+    expect(await master.json()).toMatchObject({
+      schema: 'jason.qingmu-editorial-master-preflight.v1',
+      master: { sha256: masterDigest, size: masterBytes.length },
+    })
+    expect(fetchUpstream).toHaveBeenCalledTimes(3)
+    expect((await fetch(masterUrl, {
+      method: 'POST', headers: { 'content-type': 'video/mp4' }, body: masterBytes,
+    })).status).toBe(409)
+    expect(fetchUpstream).toHaveBeenCalledTimes(3)
+    const recoveredMaster = await fetch(masterUrl.replace('/master-preflight?', '/master-preflight-status?'))
+    expect(await recoveredMaster.json()).toMatchObject({
+      status: 'succeeded', result: { master: { sha256: masterDigest } }, errorCode: null,
+    })
     const firstImportAccess = terminal.importAccess
     const initialImportBytes = Buffer.byteLength(await readFile(`${stateFile}.imports`, 'utf8'))
     let refreshedAccess = firstImportAccess
@@ -209,12 +282,27 @@ describe('editorial handoff Host download bridge', () => {
       projectId: 'project-e8', episodeId: 'episode-e8', ...refreshedAccess,
     })
     const refreshed = await fetch(`${base}/api/qingmu/editorial-handoff/import-status?${refreshedQuery.toString()}`)
-    expect(await refreshed.json()).toEqual({ status: 'succeeded', result, errorCode: null })
+    const refreshedBody = await refreshed.json() as {
+      status: string
+      result: unknown
+      errorCode: null
+      masterAccess: { requestId: string; capability: string }
+    }
+    expect(refreshedBody).toMatchObject({ status: 'succeeded', result, errorCode: null })
+    const refreshedMasterQuery = new URLSearchParams({
+      projectId: 'project-e8', episodeId: 'episode-e8', ...refreshedBody.masterAccess,
+    })
+    const refreshedMaster = await fetch(
+      `${base}/api/qingmu/editorial-handoff/master-preflight-status?${refreshedMasterQuery.toString()}`,
+    )
+    expect(await refreshedMaster.json()).toMatchObject({
+      status: 'succeeded', result: { master: { sha256: masterDigest } }, errorCode: null,
+    })
     const expiredQuery = new URLSearchParams({
       projectId: 'project-e8', episodeId: 'episode-e8', ...firstImportAccess,
     })
     expect((await fetch(`${base}/api/qingmu/editorial-handoff/import-status?${expiredQuery.toString()}`)).status).toBe(403)
-    expect(fetchUpstream).toHaveBeenCalledTimes(2)
+    expect(fetchUpstream).toHaveBeenCalledTimes(3)
   })
 
   it('writes every upload byte when the spool writer reports partial progress', async () => {
@@ -373,9 +461,11 @@ describe('editorial handoff Host download bridge', () => {
       'writer-user', 'project-e8', 'episode-e8', terminal.importAccess.requestId, terminal.importAccess.capability,
     )).toBeTruthy()
     const recovered = new EditorialHandoffDownloadAuthorizer(stateFile)
-    expect(recovered.importStatus(
+    const recoveredStatus = recovered.importStatus(
       'writer-user', 'project-e8', 'episode-e8', terminal.importAccess.requestId, terminal.importAccess.capability,
-    )).toEqual({ state: 'failed', createdAt: expect.any(Number), errorCode: 'host_restarted' })
+    )
+    expect(recoveredStatus).toMatchObject({ state: 'failed', errorCode: 'host_restarted' })
+    expect(typeof recoveredStatus?.createdAt).toBe('number')
   })
 
   it('fails a truncated upload and removes its private spool without contacting Writer', async () => {

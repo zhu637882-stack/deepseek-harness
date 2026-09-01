@@ -25,13 +25,17 @@ const DOWNLOAD_PATH = '/api/qingmu/editorial-handoff/download'
 const STATUS_PATH = '/api/qingmu/editorial-handoff/download-status'
 const IMPORT_PATH = '/api/qingmu/editorial-handoff/import'
 const IMPORT_STATUS_PATH = '/api/qingmu/editorial-handoff/import-status'
+const MASTER_PATH = '/api/qingmu/editorial-handoff/master-preflight'
+const MASTER_STATUS_PATH = '/api/qingmu/editorial-handoff/master-preflight-status'
 const SHA256 = /^[0-9a-f]{64}$/
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/
 const REQUEST_ID = /^[a-f0-9-]{16,80}$/
 const CAPABILITY = /^[a-f0-9]{64}$/
 const MAX_PACKAGE_BYTES = 8 * 1024 * 1024 * 1024
+const MAX_MASTER_BYTES = 32 * 1024 * 1024 * 1024
 const STATUS_TTL_MS = 24 * 60 * 60_000
 const EDITORIAL_IMPORT_DOMAIN = 'qingmu-editorial-handoff-import.v1'
+const EDITORIAL_MASTER_DOMAIN = 'qingmu-editorial-master-preflight.v1'
 
 interface DownloadBinding {
   readonly authenticatedUserId: string
@@ -73,10 +77,79 @@ interface PersistedImport extends ImportBinding {
   readonly status: ImportStatus
 }
 
+interface MasterBinding extends Omit<ImportBinding, 'requestId'> {
+  readonly requestId: string
+  readonly importRequestId: string
+}
+
+type MasterStatus =
+  | { readonly state: 'authorized'; readonly createdAt: number }
+  | { readonly state: 'running'; readonly createdAt: number }
+  | { readonly state: 'succeeded'; readonly createdAt: number; readonly result: EditorialMasterPreflightResult }
+  | { readonly state: 'failed'; readonly createdAt: number; readonly errorCode: string }
+
+interface PersistedMaster extends MasterBinding {
+  readonly capabilitySha256: string
+  readonly status: MasterStatus
+}
+
 /** One-use Host capability for reselecting an exact successful download. */
 export interface EditorialHandoffImportAccess {
   readonly requestId: string
   readonly capability: string
+}
+
+/** One-use Host capability for a returned-master preflight bound to one verified import receipt. */
+export interface EditorialMasterPreflightAccess {
+  readonly requestId: string
+  readonly capability: string
+}
+
+/** Strict read-only Writer result for one local returned-master technical preflight. */
+export interface EditorialMasterPreflightResult {
+  readonly schema: 'jason.qingmu-editorial-master-preflight.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly binding: {
+    readonly sourceSnapshotSha256: string
+    readonly projectionSha256: string
+    readonly downloadRequestId: string
+    readonly importRequestId: string
+    readonly packageSha256: string
+    readonly packageSize: number
+  }
+  readonly master: {
+    readonly sha256: string
+    readonly size: number
+    readonly mimeType: string | null
+    readonly container: string | null
+    readonly formatName: string | null
+    readonly durationSec: number | null
+    readonly width: number | null
+    readonly height: number | null
+    readonly fps: number | null
+    readonly videoStreams: readonly Record<string, unknown>[]
+    readonly audioStreams: readonly Record<string, unknown>[]
+    readonly blockers: readonly string[]
+  }
+  readonly checks: {
+    readonly currentAuthorityMatches: true
+    readonly packageReceiptBound: true
+    readonly containerVerified: boolean
+    readonly probeSucceeded: boolean
+  }
+  readonly blockers: readonly string[]
+  readonly unresolved: readonly string[]
+  readonly readOnly: true
+  readonly businessMutations: 0
+  readonly providerCalls: 0
+  readonly boundaries: {
+    readonly nleOpened: false
+    readonly editorConsumed: false
+    readonly formalReturnRecorded: false
+    readonly releaseReady: false
+    readonly humanSignoffInferred: false
+  }
 }
 
 /** Strict read-only Writer result exposed as an editorial consumption preview. */
@@ -126,10 +199,12 @@ export interface EditorialHandoffDownloadAccess {
 export class EditorialHandoffDownloadAuthorizer {
   readonly #entries = new Map<string, PersistedDownload>()
   readonly #imports = new Map<string, PersistedImport>()
+  readonly #masters = new Map<string, PersistedMaster>()
 
   public constructor(private readonly stateFile: string) {
     this.#load()
     this.#loadImports()
+    this.#loadMasters()
   }
 
   /**
@@ -260,6 +335,117 @@ export class EditorialHandoffDownloadAuthorizer {
     this.#persistImports()
   }
 
+  /**
+   * Issue or rotate one canonical returned-master capability from a successful import receipt.
+   * @param authenticatedUserId - Current Writer-authenticated user identifier.
+   * @param projectId - Project that owns the successful import receipt.
+   * @param episodeId - Episode that owns the successful import receipt.
+   * @param importRequestId - Canonical package-import request identifier.
+   * @param importCapability - Secret capability paired with the import request.
+   * @returns A rotated preflight capability, or `undefined` when the receipt is not eligible.
+   */
+  public issueMaster(
+    authenticatedUserId: string, projectId: string, episodeId: string,
+    importRequestId: string, importCapability: string,
+  ): EditorialMasterPreflightAccess | undefined {
+    this.#sweep()
+    const source = this.#authenticatedImport(
+      authenticatedUserId, projectId, episodeId, importRequestId, importCapability,
+    )
+    if (source?.status.state !== 'succeeded') return undefined
+    const recovered = [...this.#masters.values()].find(entry => sameMasterReceipt(entry, source))
+    if (recovered?.status.state === 'running') return undefined
+    if (recovered !== undefined) return this.#rotateMaster(recovered)
+    const requestId = randomUUID()
+    const capability = randomBytes(32).toString('hex')
+    this.#masters.set(requestId, {
+      authenticatedUserId: source.authenticatedUserId,
+      projectId: source.projectId,
+      episodeId: source.episodeId,
+      sourceSnapshotSha256: source.sourceSnapshotSha256,
+      projectionSha256: source.projectionSha256,
+      requestId,
+      downloadRequestId: source.downloadRequestId,
+      importRequestId: source.requestId,
+      packageSha256: source.packageSha256,
+      packageSize: source.packageSize,
+      capabilitySha256: createHash('sha256').update(capability).digest('hex'),
+      status: { state: 'authorized', createdAt: Date.now() },
+    })
+    this.#persistMasters()
+    return { requestId, capability }
+  }
+
+  /**
+   * Atomically consume one returned-master capability before reading browser bytes.
+   * @param authenticatedUserId - Current Writer-authenticated user identifier.
+   * @param projectId - Project bound to the capability.
+   * @param episodeId - Episode bound to the capability.
+   * @param requestId - Returned-master preflight request identifier.
+   * @param capability - Secret capability paired with the preflight request.
+   * @returns Immutable receipt binding, or `undefined` when consumption is not allowed.
+   */
+  public startMaster(
+    authenticatedUserId: string, projectId: string, episodeId: string,
+    requestId: string, capability: string,
+  ): MasterBinding | undefined {
+    this.#sweep()
+    const entry = this.#authenticatedMaster(authenticatedUserId, projectId, episodeId, requestId, capability)
+    if (entry?.status.state !== 'authorized') return undefined
+    this.#masters.set(requestId, { ...entry, status: { state: 'running', createdAt: entry.status.createdAt } })
+    this.#persistMasters()
+    const { capabilitySha256: _capabilitySha256, status: _status, ...binding } = entry
+    return binding
+  }
+
+  /**
+   * Read canonical returned-master preflight state without resending bytes.
+   * @param authenticatedUserId - Current Writer-authenticated user identifier.
+   * @param projectId - Project bound to the capability.
+   * @param episodeId - Episode bound to the capability.
+   * @param requestId - Returned-master preflight request identifier.
+   * @param capability - Secret capability paired with the preflight request.
+   * @returns Canonical preflight state, or `undefined` when the scope is not authorized.
+   */
+  public masterStatus(
+    authenticatedUserId: string, projectId: string, episodeId: string,
+    requestId: string, capability: string,
+  ): MasterStatus | undefined {
+    this.#sweep()
+    return this.#authenticatedMaster(authenticatedUserId, projectId, episodeId, requestId, capability)?.status
+  }
+
+  /**
+   * Persist one terminal returned-master result for refresh and restart recovery.
+   * @param binding - Immutable receipt and authority binding returned by `startMaster`.
+   * @param status - Strict Writer success result or stable failure code.
+   */
+  public finishMaster(
+    binding: MasterBinding,
+    status: Extract<MasterStatus, { state: 'succeeded' | 'failed' }>,
+  ): void {
+    const entry = this.#masters.get(binding.requestId)
+    if (entry === undefined || !sameMasterBinding(entry, binding)) return
+    this.#masters.set(binding.requestId, { ...entry, status })
+    this.#persistMasters()
+  }
+
+  #rotateMaster(recovered: PersistedMaster): EditorialMasterPreflightAccess {
+    const requestId = randomUUID()
+    const capability = randomBytes(32).toString('hex')
+    this.#masters.delete(recovered.requestId)
+    this.#masters.set(requestId, {
+      ...recovered,
+      requestId,
+      capabilitySha256: createHash('sha256').update(capability).digest('hex'),
+      status: recovered.status.state === 'failed'
+        ? { state: 'authorized', createdAt: Date.now() }
+        : recovered.status,
+    })
+    this.#persistMasters()
+    return { requestId, capability }
+  }
+
   #issueImportForBinding(binding: Omit<DownloadBinding, 'requestId'>): EditorialHandoffImportAccess | undefined {
     const succeeded = [...this.#entries.values()].filter(entry => entry.status.state === 'succeeded'
       && sameProjectionBinding(entry, binding)).sort((left, right) => right.status.createdAt - left.status.createdAt)[0]
@@ -320,6 +506,19 @@ export class EditorialHandoffDownloadAuthorizer {
     return actual.length === expected.length && timingSafeEqual(actual, expected) ? entry : undefined
   }
 
+  #authenticatedMaster(
+    authenticatedUserId: string, projectId: string, episodeId: string,
+    requestId: string, capability: string,
+  ): PersistedMaster | undefined {
+    if (!REQUEST_ID.test(requestId) || !CAPABILITY.test(capability)) return undefined
+    const entry = this.#masters.get(requestId)
+    if (entry === undefined || entry.authenticatedUserId !== authenticatedUserId
+      || entry.projectId !== projectId || entry.episodeId !== episodeId) return undefined
+    const actual = Buffer.from(createHash('sha256').update(capability).digest('hex'))
+    const expected = Buffer.from(entry.capabilitySha256)
+    return actual.length === expected.length && timingSafeEqual(actual, expected) ? entry : undefined
+  }
+
   #authenticated(binding: DownloadBinding, capability: string): PersistedDownload | undefined {
     if (!CAPABILITY.test(capability)) return undefined
     const entry = this.#entries.get(binding.requestId)
@@ -333,6 +532,7 @@ export class EditorialHandoffDownloadAuthorizer {
     const threshold = Date.now() - STATUS_TTL_MS
     let downloadsChanged = false
     let importsChanged = false
+    let mastersChanged = false
     for (const [id, entry] of this.#entries) {
       if (entry.status.createdAt < threshold) {
         this.#entries.delete(id)
@@ -345,8 +545,15 @@ export class EditorialHandoffDownloadAuthorizer {
         importsChanged = true
       }
     }
+    for (const [id, entry] of this.#masters) {
+      if (entry.status.createdAt < threshold) {
+        this.#masters.delete(id)
+        mastersChanged = true
+      }
+    }
     if (downloadsChanged) this.#persist()
     if (importsChanged) this.#persistImports()
+    if (mastersChanged) this.#persistMasters()
   }
 
   #load(): void {
@@ -400,7 +607,7 @@ export class EditorialHandoffDownloadAuthorizer {
           state: 'failed', createdAt: Date.now(), errorCode: 'host_restarted',
         } }
       }
-      const identity = importReceiptIdentity(recovered)
+      const identity = packageReceiptIdentity(recovered)
       const previous = canonical.get(identity)
       if (previous !== undefined) compacted = true
       if (previous === undefined || preferImport(recovered, previous)) canonical.set(identity, recovered)
@@ -419,6 +626,40 @@ export class EditorialHandoffDownloadAuthorizer {
     try { writeFileSync(descriptor, JSON.stringify([...this.#imports.values()]), 'utf8') } finally { closeSync(descriptor) }
     renameSync(temporary, importFile)
     chmodSync(importFile, 0o600)
+  }
+
+  #loadMasters(): void {
+    const masterFile = `${this.stateFile}.masters`
+    if (!existsSync(masterFile)) return
+    const raw = JSON.parse(readFileSync(masterFile, 'utf8')) as unknown
+    if (!Array.isArray(raw)) throw new Error('editorial handoff: master state is invalid')
+    let changed = false
+    const canonical = new Map<string, PersistedMaster>()
+    for (const value of raw) {
+      if (!validPersistedMaster(value)) throw new Error('editorial handoff: master state is invalid')
+      const recovered = value.status.state === 'running'
+        ? { ...value, status: { state: 'failed' as const, createdAt: Date.now(), errorCode: 'host_restarted' } }
+        : value
+      if (recovered !== value) changed = true
+      const identity = packageReceiptIdentity(recovered)
+      const previous = canonical.get(identity)
+      if (previous !== undefined) changed = true
+      if (previous === undefined || preferMaster(recovered, previous)) canonical.set(identity, recovered)
+    }
+    for (const value of canonical.values()) this.#masters.set(value.requestId, value)
+    if (changed) this.#persistMasters()
+    this.#sweep()
+  }
+
+  #persistMasters(): void {
+    const masterFile = `${this.stateFile}.masters`
+    const parent = dirname(masterFile)
+    mkdirSync(parent, { recursive: true, mode: 0o700 })
+    const temporary = `${masterFile}.${process.pid.toString()}.${randomUUID()}.tmp`
+    const descriptor = openSync(temporary, 'wx', 0o600)
+    try { writeFileSync(descriptor, JSON.stringify([...this.#masters.values()]), 'utf8') } finally { closeSync(descriptor) }
+    renameSync(temporary, masterFile)
+    chmodSync(masterFile, 0o600)
   }
 }
 
@@ -461,6 +702,29 @@ function editorialImportHeaders(binding: ImportBinding, path: string, key: strin
   }
 }
 
+function editorialMasterHeaders(
+  binding: MasterBinding, path: string, key: string, masterSha256: string, masterSize: number,
+): Record<string, string> | undefined {
+  if (Buffer.byteLength(key) < 32) return undefined
+  const timestamp = Math.floor(Date.now() / 1000).toString()
+  const nonce = randomBytes(24).toString('base64url')
+  const message = [
+    EDITORIAL_MASTER_DOMAIN, 'POST', path, masterSha256, String(masterSize),
+    binding.packageSha256, String(binding.packageSize), binding.authenticatedUserId,
+    binding.projectId, binding.episodeId, binding.sourceSnapshotSha256,
+    binding.projectionSha256, binding.downloadRequestId, binding.importRequestId,
+    binding.requestId, timestamp, nonce,
+  ].join('\n')
+  return {
+    'x-qingmu-download-request-id': binding.downloadRequestId,
+    'x-qingmu-import-request-id': binding.importRequestId,
+    'x-qingmu-preflight-request-id': binding.requestId,
+    'x-qingmu-editorial-timestamp': timestamp,
+    'x-qingmu-editorial-nonce': nonce,
+    'x-qingmu-editorial-signature': createHmac('sha256', key).update(message).digest('hex'),
+  }
+}
+
 function sameBinding(left: DownloadBinding, right: DownloadBinding): boolean {
   return left.authenticatedUserId === right.authenticatedUserId
     && left.projectId === right.projectId && left.episodeId === right.episodeId
@@ -488,7 +752,32 @@ function sameImportReceipt(entry: PersistedImport, download: PersistedDownload):
     && entry.packageSize === download.status.size
 }
 
-function importReceiptIdentity(entry: PersistedImport): string {
+function sameMasterBinding(left: MasterBinding, right: MasterBinding): boolean {
+  return sameProjectionBinding(left, right) && left.requestId === right.requestId
+    && left.downloadRequestId === right.downloadRequestId
+    && left.importRequestId === right.importRequestId
+    && left.packageSha256 === right.packageSha256 && left.packageSize === right.packageSize
+}
+
+function sameMasterReceipt(entry: PersistedMaster, source: PersistedImport): boolean {
+  return source.status.state === 'succeeded' && sameProjectionBinding(entry, source)
+    && entry.downloadRequestId === source.downloadRequestId
+    && entry.packageSha256 === source.packageSha256 && entry.packageSize === source.packageSize
+}
+
+function preferMaster(candidate: PersistedMaster, current: PersistedMaster): boolean {
+  const priority = (status: MasterStatus): number => status.state === 'succeeded'
+    ? 3 : status.state === 'failed' ? 2 : status.state === 'authorized' ? 1 : 0
+  const candidatePriority = priority(candidate.status)
+  const currentPriority = priority(current.status)
+  return candidatePriority > currentPriority
+    || (candidatePriority === currentPriority && candidate.status.createdAt >= current.status.createdAt)
+}
+
+function packageReceiptIdentity(entry: Pick<ImportBinding,
+  | 'authenticatedUserId' | 'projectId' | 'episodeId'
+  | 'sourceSnapshotSha256' | 'projectionSha256' | 'downloadRequestId'
+  | 'packageSha256' | 'packageSize'>): string {
   return JSON.stringify([
     entry.authenticatedUserId,
     entry.projectId,
@@ -551,6 +840,28 @@ function validPersistedImport(value: unknown): value is PersistedImport {
     && ((status.state === 'authorized' || status.state === 'running') && Object.keys(status).length === 2
       || (status.state === 'failed' && typeof status.errorCode === 'string' && status.errorCode.length > 0)
       || (status.state === 'succeeded' && normalizeImportResult(status.result) !== undefined))
+}
+
+function validPersistedMaster(value: unknown): value is PersistedMaster {
+  if (typeof value !== 'object' || value === null) return false
+  const item = value as Record<string, unknown>
+  const status = item.status as Record<string, unknown> | undefined
+  return safeIdentifier(typeof item.authenticatedUserId === 'string' ? item.authenticatedUserId : null)
+    && safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
+    && safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
+    && typeof item.sourceSnapshotSha256 === 'string' && SHA256.test(item.sourceSnapshotSha256)
+    && typeof item.projectionSha256 === 'string' && SHA256.test(item.projectionSha256)
+    && typeof item.packageSha256 === 'string' && SHA256.test(item.packageSha256)
+    && typeof item.packageSize === 'number' && Number.isSafeInteger(item.packageSize) && item.packageSize > 0
+    && typeof item.requestId === 'string' && REQUEST_ID.test(item.requestId)
+    && typeof item.downloadRequestId === 'string' && REQUEST_ID.test(item.downloadRequestId)
+    && typeof item.importRequestId === 'string' && REQUEST_ID.test(item.importRequestId)
+    && typeof item.capabilitySha256 === 'string' && SHA256.test(item.capabilitySha256)
+    && status !== undefined && typeof status.createdAt === 'number'
+    && Number.isSafeInteger(status.createdAt) && status.createdAt >= 0
+    && ((status.state === 'authorized' || status.state === 'running') && Object.keys(status).length === 2
+      || (status.state === 'failed' && typeof status.errorCode === 'string' && status.errorCode.length > 0)
+      || (status.state === 'succeeded' && normalizeMasterResult(status.result) !== undefined))
 }
 
 function normalizeImportResult(value: unknown): EditorialHandoffImportResult | undefined {
@@ -626,6 +937,54 @@ function normalizeImportResult(value: unknown): EditorialHandoffImportResult | u
       || !safeIdentifier(typeof entry.code === 'string' ? entry.code : null)) return undefined
   }
   return value as EditorialHandoffImportResult
+}
+
+function normalizeMasterResult(value: unknown): EditorialMasterPreflightResult | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const item = value as Record<string, unknown>
+  const binding = item.binding as Record<string, unknown> | undefined
+  const master = item.master as Record<string, unknown> | undefined
+  const checks = item.checks as Record<string, unknown> | undefined
+  const boundaries = item.boundaries as Record<string, unknown> | undefined
+  const optionalNumber = (input: unknown): boolean => input === null
+    || (typeof input === 'number' && Number.isFinite(input) && input > 0)
+  const stringList = (input: unknown): input is string[] => Array.isArray(input)
+    && input.length <= 100 && input.every(entry => typeof entry === 'string' && safeIdentifier(entry))
+  if (item.schema !== 'jason.qingmu-editorial-master-preflight.v1'
+    || !safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
+    || !safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
+    || item.readOnly !== true || item.businessMutations !== 0 || item.providerCalls !== 0
+    || binding === undefined
+    || typeof binding.sourceSnapshotSha256 !== 'string' || !SHA256.test(binding.sourceSnapshotSha256)
+    || typeof binding.projectionSha256 !== 'string' || !SHA256.test(binding.projectionSha256)
+    || typeof binding.downloadRequestId !== 'string' || !REQUEST_ID.test(binding.downloadRequestId)
+    || typeof binding.importRequestId !== 'string' || !REQUEST_ID.test(binding.importRequestId)
+    || typeof binding.packageSha256 !== 'string' || !SHA256.test(binding.packageSha256)
+    || typeof binding.packageSize !== 'number' || !Number.isSafeInteger(binding.packageSize) || binding.packageSize <= 0
+    || master === undefined || typeof master.sha256 !== 'string' || !SHA256.test(master.sha256)
+    || typeof master.size !== 'number' || !Number.isSafeInteger(master.size) || master.size <= 0
+    || !(master.mimeType === null || (typeof master.mimeType === 'string'
+      && ['video/mp4', 'video/quicktime', 'video/webm'].includes(master.mimeType)))
+    || !(master.container === null || (typeof master.container === 'string'
+      && ['mp4', 'quicktime', 'webm'].includes(master.container)))
+    || !(master.formatName === null || typeof master.formatName === 'string')
+    || !optionalNumber(master.durationSec) || !optionalNumber(master.width)
+    || !optionalNumber(master.height) || !optionalNumber(master.fps)
+    || !Array.isArray(master.videoStreams) || master.videoStreams.length > 16
+    || !Array.isArray(master.audioStreams) || master.audioStreams.length > 16
+    || !stringList(master.blockers) || !stringList(item.blockers) || !stringList(item.unresolved)
+    || JSON.stringify(master.blockers) !== JSON.stringify(item.blockers)
+    || JSON.stringify(item.blockers) !== JSON.stringify(item.unresolved)
+    || checks === undefined || checks.currentAuthorityMatches !== true
+    || checks.packageReceiptBound !== true || typeof checks.containerVerified !== 'boolean'
+    || typeof checks.probeSucceeded !== 'boolean'
+    || boundaries === undefined || boundaries.nleOpened !== false
+    || boundaries.editorConsumed !== false || boundaries.formalReturnRecorded !== false
+    || boundaries.releaseReady !== false || boundaries.humanSignoffInferred !== false) return undefined
+  const serialized = JSON.stringify(value)
+  if (serialized.length > 4 * 1024 * 1024 || serialized.includes('/Users/')
+    || serialized.includes('Bearer ') || serialized.includes('local_path')) return undefined
+  return value as EditorialMasterPreflightResult
 }
 
 function safePackageMediaPath(value: string): boolean {
@@ -775,7 +1134,7 @@ function statusBody(status: DownloadStatus | undefined): Record<string, unknown>
   return { status: 'failed', sha256: null, size: null, errorCode: status.errorCode }
 }
 
-function importStatusBody(status: ImportStatus | undefined): Record<string, unknown> {
+function resultStatusBody(status: ImportStatus | MasterStatus | undefined): Record<string, unknown> {
   if (status === undefined) return { status: 'not_found', result: null, errorCode: null }
   if (status.state === 'authorized') return { status: 'not_started', result: null, errorCode: null }
   if (status.state === 'running') return { status: 'running', result: null, errorCode: null }
@@ -787,7 +1146,7 @@ function cleanupImportSpools(root: string): void {
   mkdirSync(root, { recursive: true, mode: 0o700 })
   chmodSync(root, 0o700)
   for (const name of readdirSync(root)) {
-    if (/^qingmu-otio-import-[A-Za-z0-9_-]+$/u.test(name)) {
+    if (/^(?:qingmu-otio-import|qingmu-editorial-master)-[A-Za-z0-9_-]+$/u.test(name)) {
       rmSync(join(root, name), { recursive: true, force: true })
     }
   }
@@ -985,7 +1344,13 @@ export function registerEditorialHandoffDownload(
         userId, access.projectId, access.episodeId, access.requestId, access.capability,
       )
       if (status === undefined) { json(res, 403, { code: 'editorial_handoff_import_forbidden' }); return }
-      json(res, 200, importStatusBody(status))
+      const masterAccess = status.state === 'succeeded'
+        ? dependencies.authorizer.issueMaster(
+          userId, access.projectId, access.episodeId, access.requestId, access.capability,
+        ) : undefined
+      json(res, 200, {
+        ...resultStatusBody(status), ...(masterAccess === undefined ? {} : { masterAccess }),
+      })
     },
   })
   const disposeImport = webServer.register({
@@ -1094,7 +1459,135 @@ export function registerEditorialHandoffDownload(
       }
     },
   })
+  const disposeMasterStatus = webServer.register({
+    kind: 'exact', path: MASTER_STATUS_PATH, handler: async (req, res) => {
+      if (req.method !== 'GET' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'editorial_master_preflight_forbidden' }); return
+      }
+      const access = importAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = access === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (access === undefined || userId === undefined) {
+        json(res, access === undefined ? 400 : 403, { code: 'editorial_master_preflight_forbidden' }); return
+      }
+      const status = dependencies.authorizer.masterStatus(
+        userId, access.projectId, access.episodeId, access.requestId, access.capability,
+      )
+      if (status === undefined) { json(res, 403, { code: 'editorial_master_preflight_forbidden' }); return }
+      json(res, 200, resultStatusBody(status))
+    },
+  })
+  const disposeMaster = webServer.register({
+    kind: 'exact', path: MASTER_PATH, handler: async (req, res) => {
+      if (req.method !== 'POST' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'editorial_master_preflight_forbidden' }); return
+      }
+      const access = importAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = access === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (access === undefined || userId === undefined) {
+        json(res, access === undefined ? 400 : 403, { code: 'editorial_master_preflight_forbidden' }); return
+      }
+      const binding = dependencies.authorizer.startMaster(
+        userId, access.projectId, access.episodeId, access.requestId, access.capability,
+      )
+      if (binding === undefined) {
+        const existing = dependencies.authorizer.masterStatus(
+          userId, access.projectId, access.episodeId, access.requestId, access.capability,
+        )
+        json(res, existing === undefined ? 403 : 409, {
+          code: existing === undefined
+            ? 'editorial_master_preflight_forbidden'
+            : 'editorial_master_preflight_request_reused',
+        })
+        return
+      }
+      let temporaryDirectory: string | undefined
+      try {
+        const contentType = req.headers['content-type']?.split(';', 1)[0]?.trim()
+        const declaredLength = Number(req.headers['content-length'] ?? '')
+        if (!['video/mp4', 'video/quicktime', 'video/webm', 'application/octet-stream'].includes(contentType ?? '')
+          || !Number.isSafeInteger(declaredLength) || declaredLength <= 0 || declaredLength > MAX_MASTER_BYTES) {
+          throw new Error('master_contract_invalid')
+        }
+        temporaryDirectory = await mkdtemp(join(temporaryRoot, 'qingmu-editorial-master-'))
+        const temporaryPath = join(temporaryDirectory, 'master.media')
+        const output = await open(temporaryPath, 'wx', 0o600)
+        const digest = createHash('sha256')
+        let size = 0
+        try {
+          for await (const raw of req) {
+            const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw)
+            size += chunk.byteLength
+            if (size > declaredLength || size > MAX_MASTER_BYTES) throw new Error('master_size_mismatch')
+            digest.update(chunk)
+            await writeAllSpoolBytes(output, chunk)
+          }
+        } finally { await output.close() }
+        if (size !== declaredLength) throw new Error('master_size_mismatch')
+        const masterSha256 = digest.digest('hex')
+        const upstream = new URL(
+          `/api/qingmu/projects/${encodeURIComponent(binding.projectId)}/episodes/${encodeURIComponent(binding.episodeId)}/editorial-handoff/preflight-returned-master`,
+          dependencies.baseUrl,
+        )
+        const hostHeaders = editorialMasterHeaders(
+          binding, upstream.pathname, dependencies.readEditorialHandoffKey() ?? '', masterSha256, size,
+        )
+        if (hostHeaders === undefined) throw new Error('host_service_unavailable')
+        const response = await dependencies.fetch(upstream, {
+          method: 'POST', redirect: 'error',
+          headers: {
+            authorization: `Bearer ${token}`,
+            accept: 'application/json',
+            'content-type': 'application/octet-stream',
+            'content-length': String(size),
+            'x-qingmu-authenticated-user-id': binding.authenticatedUserId,
+            'x-qingmu-master-sha256': masterSha256,
+            'x-qingmu-master-size': String(size),
+            'x-qingmu-package-sha256': binding.packageSha256,
+            'x-qingmu-package-size': String(binding.packageSize),
+            'x-qingmu-source-snapshot-sha256': binding.sourceSnapshotSha256,
+            'x-qingmu-projection-sha256': binding.projectionSha256,
+            ...hostHeaders,
+          },
+          body: createReadStream(temporaryPath),
+          duplex: 'half',
+        } as unknown as RequestInit & { duplex: 'half' })
+        const bytes = Buffer.from(await response.arrayBuffer())
+        if (!response.ok || bytes.length > 4 * 1024 * 1024) throw new Error('writer_preflight_failed')
+        const result = normalizeMasterResult(JSON.parse(bytes.toString('utf8')))
+        if (result === undefined || result.projectId !== binding.projectId
+          || result.episodeId !== binding.episodeId || result.master.sha256 !== masterSha256
+          || result.master.size !== size || result.binding.sourceSnapshotSha256 !== binding.sourceSnapshotSha256
+          || result.binding.projectionSha256 !== binding.projectionSha256
+          || result.binding.downloadRequestId !== binding.downloadRequestId
+          || result.binding.importRequestId !== binding.importRequestId
+          || result.binding.packageSha256 !== binding.packageSha256
+          || result.binding.packageSize !== binding.packageSize) {
+          throw new Error('writer_preflight_contract_failed')
+        }
+        dependencies.authorizer.finishMaster(binding, { state: 'succeeded', createdAt: Date.now(), result })
+        json(res, 200, result)
+      } catch (error) {
+        const code = error instanceof Error && error.message === 'master_contract_invalid'
+          ? 'master_contract_invalid'
+          : error instanceof Error && error.message === 'master_size_mismatch'
+            ? 'master_size_mismatch'
+            : error instanceof Error && error.message === 'host_service_unavailable'
+              ? 'host_service_unavailable' : 'master_preflight_failed'
+        dependencies.authorizer.finishMaster(binding, { state: 'failed', createdAt: Date.now(), errorCode: code })
+        if (!res.headersSent) json(res, code === 'master_contract_invalid' || code === 'master_size_mismatch' ? 409 : 502, { code })
+        else res.destroy()
+      } finally {
+        if (temporaryDirectory !== undefined) await rm(temporaryDirectory, { recursive: true, force: true })
+      }
+    },
+  })
   return () => {
+    disposeMaster()
+    disposeMasterStatus()
     disposeImport()
     disposeImportStatus()
     disposeDownload()
