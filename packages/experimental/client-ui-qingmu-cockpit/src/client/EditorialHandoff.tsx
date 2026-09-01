@@ -80,6 +80,7 @@ interface CandidateResult {
   readonly published: false
   readonly idempotencyKey: string
   readonly commandReceiptId: string
+  readonly eventId: string
   readonly savedAt: string
   readonly providerCalls: 0
   readonly stageStarted: false
@@ -201,6 +202,54 @@ interface TechnicalQcStatus {
   readonly releaseConditions: { readonly ready: false; readonly blockers: readonly string[] }
 }
 
+interface EvidenceFreezeResult {
+  readonly schema: 'jason.qingmu-canonical-evidence-freeze-result.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly packageId: string
+  readonly manifestSha256: string
+  readonly zipSha256: string
+  readonly zipBytes: number
+  readonly requestSha256: string
+  readonly subjectSha256: string
+  readonly releaseAuthorityRevisionBefore: number
+  readonly releaseAuthorityRevision: number
+  readonly commandReceiptId: string
+  readonly committedAt: string
+  readonly releaseSignoffGranted: false
+  readonly releaseReady: false
+  readonly releaseBlockers: readonly string[]
+}
+
+interface EvidenceFreezePreview {
+  readonly schema: 'jason.qingmu-canonical-evidence-freeze-preview.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly subject: {
+    readonly buildIdentity: { readonly commit: string; readonly sourceClean: boolean; readonly appEnv: string }
+    readonly final: { readonly finalOutputId: string; readonly assetId: string; readonly sha256: string; readonly bytes: number }
+  }
+  readonly previewSha256: string
+  readonly idempotencyKey: string
+  readonly machineReady: boolean
+  readonly machineBlockers: readonly string[]
+  readonly releaseBlockers: readonly string[]
+  readonly canConfirm: boolean
+  readonly hardBlockers: readonly string[]
+}
+
+interface EvidenceFreezeStatus {
+  readonly schema: 'jason.qingmu-canonical-evidence-freeze-status.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly currentPackage: EvidenceFreezeResult | null
+  readonly preview: EvidenceFreezePreview
+}
+
+type UntrustedEvidenceFreezePayload<T extends { schema: string }> = Omit<T, 'schema'> & {
+  schema: string
+}
+
 interface Props {
   readonly projectId: string
   readonly episodeId: string
@@ -287,6 +336,12 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   const [technicalQcConfirmed, setTechnicalQcConfirmed] = useState(false)
   const [technicalQcState, setTechnicalQcState] = useState<'idle' | 'previewing' | 'previewed' | 'running' | 'succeeded' | 'failed'>('idle')
   const [technicalQcError, setTechnicalQcError] = useState<string>()
+  const [evidenceFreezeStatus, setEvidenceFreezeStatus] = useState<EvidenceFreezeStatus>()
+  const [evidenceFreezePreview, setEvidenceFreezePreview] = useState<EvidenceFreezePreview>()
+  const [evidenceFreezeResult, setEvidenceFreezeResult] = useState<EvidenceFreezeResult>()
+  const [evidenceFreezeConfirmed, setEvidenceFreezeConfirmed] = useState(false)
+  const [evidenceFreezeState, setEvidenceFreezeState] = useState<'idle' | 'previewing' | 'previewed' | 'saving' | 'succeeded' | 'failed'>('idle')
+  const [evidenceFreezeError, setEvidenceFreezeError] = useState<string>()
   const generation = useRef(0)
   const downloadGeneration = useRef(0)
   const importGeneration = useRef(0)
@@ -294,12 +349,14 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   const candidateGeneration = useRef(0)
   const selectionGeneration = useRef(0)
   const technicalQcGeneration = useRef(0)
+  const evidenceFreezeGeneration = useRef(0)
   const activeController = useRef<AbortController>()
   const importController = useRef<AbortController>()
   const masterController = useRef<AbortController>()
   const candidateController = useRef<AbortController>()
   const selectionController = useRef<AbortController>()
   const technicalQcController = useRef<AbortController>()
+  const evidenceFreezeController = useRef<AbortController>()
   const importErrorRef = useRef<HTMLDivElement>(null)
 
   const loadCandidates = useCallback(async () => {
@@ -400,6 +457,43 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     }
   }, [episodeId, projectId])
 
+  const loadEvidenceFreezeStatus = useCallback(async () => {
+    if (projectId === '' || episodeId === '') return
+    const current = ++evidenceFreezeGeneration.current
+    evidenceFreezeController.current?.abort()
+    const controller = new AbortController()
+    evidenceFreezeController.current = controller
+    try {
+      const params = new URLSearchParams({ projectId, episodeId })
+      const response = await fetch(
+        `/api/qingmu/editorial-handoff/canonical-evidence-freeze-status?${params.toString()}`,
+        { method: 'GET', cache: 'no-store', signal: controller.signal },
+      )
+      if (!response.ok) throw new Error('canonical_evidence_freeze_status_failed')
+      const body = await response.json() as UntrustedEvidenceFreezePayload<EvidenceFreezeStatus>
+      if (body.schema !== 'jason.qingmu-canonical-evidence-freeze-status.v1'
+        || body.projectId !== projectId || body.episodeId !== episodeId) {
+        throw new Error('canonical_evidence_freeze_status_invalid')
+      }
+      const status = body as EvidenceFreezeStatus
+      if (current === evidenceFreezeGeneration.current) {
+        setEvidenceFreezeStatus(status)
+        setEvidenceFreezeResult(status.currentPackage ?? undefined)
+        setEvidenceFreezePreview(status.preview)
+        setEvidenceFreezeState('previewed')
+        setEvidenceFreezeConfirmed(false)
+        setEvidenceFreezeError(undefined)
+      }
+    } catch (cause) {
+      if (current === evidenceFreezeGeneration.current && !controller.signal.aborted) {
+        setEvidenceFreezeStatus(undefined)
+        setEvidenceFreezeError(cause instanceof Error ? cause.message : 'canonical_evidence_freeze_status_failed')
+      }
+    } finally {
+      if (current === evidenceFreezeGeneration.current) evidenceFreezeController.current = undefined
+    }
+  }, [episodeId, projectId])
+
   const refreshReturnedMasterState = useCallback(async () => {
     const scopeGeneration = generation.current
     await loadCandidates()
@@ -407,7 +501,9 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     await loadSelectionStatus()
     if (scopeGeneration !== generation.current) return
     await loadTechnicalQcStatus()
-  }, [loadCandidates, loadSelectionStatus, loadTechnicalQcStatus])
+    if (scopeGeneration !== generation.current) return
+    await loadEvidenceFreezeStatus()
+  }, [loadCandidates, loadEvidenceFreezeStatus, loadSelectionStatus, loadTechnicalQcStatus])
 
   const load = useCallback(async () => {
     if (projectId === '' || episodeId === '') return false
@@ -419,11 +515,13 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     candidateGeneration.current += 1
     selectionGeneration.current += 1
     technicalQcGeneration.current += 1
+    evidenceFreezeGeneration.current += 1
     importController.current?.abort()
     masterController.current?.abort()
     candidateController.current?.abort()
     selectionController.current?.abort()
     technicalQcController.current?.abort()
+    evidenceFreezeController.current?.abort()
     importController.current = undefined
     const controller = new AbortController()
     activeController.current = controller
@@ -444,6 +542,12 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     setTechnicalQcConfirmed(false)
     setTechnicalQcState('idle')
     setTechnicalQcError(undefined)
+    setEvidenceFreezeStatus(undefined)
+    setEvidenceFreezePreview(undefined)
+    setEvidenceFreezeResult(undefined)
+    setEvidenceFreezeConfirmed(false)
+    setEvidenceFreezeState('idle')
+    setEvidenceFreezeError(undefined)
     try {
       const value = await port.editorialHandoff({ projectId, episodeId }, controller.signal)
       if (current === generation.current) {
@@ -487,18 +591,21 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       candidateGeneration.current += 1
       selectionGeneration.current += 1
       technicalQcGeneration.current += 1
+      evidenceFreezeGeneration.current += 1
       activeController.current?.abort()
       importController.current?.abort()
       masterController.current?.abort()
       candidateController.current?.abort()
       selectionController.current?.abort()
       technicalQcController.current?.abort()
+      evidenceFreezeController.current?.abort()
       activeController.current = undefined
       importController.current = undefined
       masterController.current = undefined
       candidateController.current = undefined
       selectionController.current = undefined
       technicalQcController.current = undefined
+      evidenceFreezeController.current = undefined
     }
   }, [load])
 
@@ -987,6 +1094,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
         setTechnicalQcConfirmed(false)
         await loadSelectionStatus()
         await loadTechnicalQcStatus()
+        await loadEvidenceFreezeStatus()
       }
     } catch (cause) {
       if (current === technicalQcGeneration.current && !controller.signal.aborted) {
@@ -996,7 +1104,93 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     } finally {
       if (current === technicalQcGeneration.current) technicalQcController.current = undefined
     }
-  }, [episodeId, loadSelectionStatus, loadTechnicalQcStatus, projectId, technicalQcConfirmed, technicalQcPreview, technicalQcState])
+  }, [
+    episodeId, loadEvidenceFreezeStatus, loadSelectionStatus, loadTechnicalQcStatus,
+    projectId, technicalQcConfirmed, technicalQcPreview, technicalQcState,
+  ])
+
+  const previewEvidenceFreeze = useCallback(async () => {
+    if (evidenceFreezeState === 'previewing' || evidenceFreezeState === 'saving') return
+    const current = ++evidenceFreezeGeneration.current
+    evidenceFreezeController.current?.abort()
+    const controller = new AbortController()
+    evidenceFreezeController.current = controller
+    setEvidenceFreezeState('previewing')
+    setEvidenceFreezePreview(undefined)
+    setEvidenceFreezeConfirmed(false)
+    setEvidenceFreezeError(undefined)
+    try {
+      const params = new URLSearchParams({ projectId, episodeId })
+      const response = await fetch(
+        `/api/qingmu/editorial-handoff/canonical-evidence-freeze-preview?${params.toString()}`,
+        { method: 'POST', cache: 'no-store', signal: controller.signal },
+      )
+      if (!response.ok) throw new Error('canonical_evidence_freeze_preview_failed')
+      const body = await response.json() as UntrustedEvidenceFreezePayload<EvidenceFreezePreview>
+      if (body.schema !== 'jason.qingmu-canonical-evidence-freeze-preview.v1'
+        || body.projectId !== projectId || body.episodeId !== episodeId) {
+        throw new Error('canonical_evidence_freeze_preview_invalid')
+      }
+      const preview = body as EvidenceFreezePreview
+      if (current === evidenceFreezeGeneration.current) {
+        setEvidenceFreezePreview(preview)
+        setEvidenceFreezeState('previewed')
+      }
+    } catch (cause) {
+      if (current === evidenceFreezeGeneration.current && !controller.signal.aborted) {
+        setEvidenceFreezeError(cause instanceof Error ? cause.message : 'canonical_evidence_freeze_preview_failed')
+        setEvidenceFreezeState('failed')
+      }
+    } finally {
+      if (current === evidenceFreezeGeneration.current) evidenceFreezeController.current = undefined
+    }
+  }, [episodeId, evidenceFreezeState, projectId])
+
+  const confirmEvidenceFreeze = useCallback(async () => {
+    if (evidenceFreezePreview === undefined || !evidenceFreezePreview.canConfirm
+      || !evidenceFreezeConfirmed || evidenceFreezeState === 'saving') return
+    const current = ++evidenceFreezeGeneration.current
+    evidenceFreezeController.current?.abort()
+    const controller = new AbortController()
+    evidenceFreezeController.current = controller
+    setEvidenceFreezeState('saving')
+    setEvidenceFreezeError(undefined)
+    try {
+      const params = new URLSearchParams({ projectId, episodeId })
+      const response = await fetch(
+        `/api/qingmu/editorial-handoff/canonical-evidence-freeze?${params.toString()}`,
+        {
+          method: 'POST', cache: 'no-store', signal: controller.signal,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            previewSha256: evidenceFreezePreview.previewSha256,
+            buildCommit: evidenceFreezePreview.subject.buildIdentity.commit,
+            idempotencyKey: evidenceFreezePreview.idempotencyKey,
+          }),
+        },
+      )
+      if (!response.ok) throw new Error('canonical_evidence_freeze_commit_failed_or_unknown')
+      const body = await response.json() as UntrustedEvidenceFreezePayload<EvidenceFreezeResult>
+      if (body.schema !== 'jason.qingmu-canonical-evidence-freeze-result.v1'
+        || body.projectId !== projectId || body.episodeId !== episodeId) {
+        throw new Error('canonical_evidence_freeze_result_invalid')
+      }
+      const result = body as EvidenceFreezeResult
+      if (current === evidenceFreezeGeneration.current) {
+        setEvidenceFreezeResult(result)
+        setEvidenceFreezeConfirmed(false)
+        setEvidenceFreezeState('succeeded')
+        await loadEvidenceFreezeStatus()
+      }
+    } catch (cause) {
+      if (current === evidenceFreezeGeneration.current && !controller.signal.aborted) {
+        setEvidenceFreezeError(cause instanceof Error ? cause.message : 'canonical_evidence_freeze_commit_failed_or_unknown')
+        setEvidenceFreezeState('failed')
+      }
+    } finally {
+      if (current === evidenceFreezeGeneration.current) evidenceFreezeController.current = undefined
+    }
+  }, [episodeId, evidenceFreezeConfirmed, evidenceFreezePreview, evidenceFreezeState, loadEvidenceFreezeStatus, projectId])
 
   if (projectId === '' || episodeId === '') return <p className={css.empty}>{t('handoffChooseEpisode')}</p>
   const blockerLabel = (code: string) => t(BLOCKER_KEYS[code] ?? 'handoffBlockerUnknown')
@@ -1385,6 +1579,74 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
           && <p className={css.warning}>
             {technicalQcStatus.staleTechnicalQc.code}: {technicalQcStatus.staleTechnicalQc.driftFields.join(', ')}
           </p>}
+      </section>
+      <section className={css.preview} aria-labelledby="handoff-evidence-freeze-title">
+        <header><div><strong id="handoff-evidence-freeze-title">{t('handoffEvidenceFreezeTitle')}</strong>
+          <p>{t('handoffEvidenceFreezeBoundary')}</p></div></header>
+        <div className={css.candidateCommit}>
+          <div>
+            <strong>{t('handoffEvidenceFreezeCurrent')}</strong>
+            <p>{selectionStatus?.currentFormalMaster === null || selectionStatus === undefined
+              ? t('handoffEvidenceFreezeNeedsMaster')
+              : `${selectionStatus.currentFormalMaster.assetId} · ${selectionStatus.currentFormalMaster.qualityStatus}`}</p>
+            <p>{technicalQcStatus?.currentTechnicalQc?.outcome === 'passed'
+              ? t('handoffEvidenceFreezeQcPassed') : t('handoffEvidenceFreezeNeedsQc')}</p>
+          </div>
+          <button type="button" disabled={evidenceFreezeState === 'previewing'
+            || evidenceFreezeState === 'saving'} onClick={() => { void previewEvidenceFreeze() }}>
+            {evidenceFreezeState === 'previewing'
+              ? t('handoffEvidenceFreezePreparing') : t('handoffEvidenceFreezePrepare')}
+          </button>
+        </div>
+        {evidenceFreezeError !== undefined && <p role="alert" className={css.error}>
+          {t('handoffEvidenceFreezeFailed')} ({evidenceFreezeError})
+        </p>}
+        {evidenceFreezePreview !== undefined && <div>
+          <div className={css.masterFacts}>
+            <span><strong>{evidenceFreezePreview.machineReady
+              ? t('handoffTrue') : t('handoffFalse')}</strong>{t('handoffEvidenceFreezeMachineReady')}</span>
+            <span><strong>{evidenceFreezePreview.subject.buildIdentity.sourceClean
+              ? t('handoffTrue') : t('handoffFalse')}</strong>{t('handoffEvidenceFreezeSourceClean')}</span>
+          </div>
+          {evidenceFreezePreview.hardBlockers.length > 0 && <div role="status">
+            <strong>{t('handoffEvidenceFreezeBlockers')}</strong>
+            <ul className={css.blockers}>{evidenceFreezePreview.hardBlockers.map(code =>
+              <li key={code}><code>{code}</code></li>)}</ul>
+          </div>}
+          <label className={css.confirmation}>
+            <input type="checkbox" checked={evidenceFreezeConfirmed}
+              disabled={!evidenceFreezePreview.canConfirm || evidenceFreezeState === 'saving'}
+              onChange={(event) => { setEvidenceFreezeConfirmed(event.currentTarget.checked) }} />
+            <span>{t('handoffEvidenceFreezeConfirm')}</span>
+          </label>
+          <button type="button" disabled={!evidenceFreezePreview.canConfirm || !evidenceFreezeConfirmed
+            || evidenceFreezeState === 'saving'} onClick={() => { void confirmEvidenceFreeze() }}>
+            {evidenceFreezeState === 'saving'
+              ? t('handoffEvidenceFreezeSaving') : t('handoffEvidenceFreezeSave')}
+          </button>
+          <details><summary>{t('handoffAdvanced')}</summary>
+            <p>Build: {evidenceFreezePreview.subject.buildIdentity.commit}</p>
+            <p>Preview SHA: {evidenceFreezePreview.previewSha256}</p>
+            <p>Master SHA: {evidenceFreezePreview.subject.final.sha256}</p>
+            <p>Machine blockers: {evidenceFreezePreview.machineBlockers.join(', ') || '—'}</p>
+            <p>Release blockers: {evidenceFreezePreview.releaseBlockers.join(', ') || '—'}</p>
+          </details>
+        </div>}
+        {evidenceFreezeResult !== undefined && <div className={css.success} role="status">
+          <strong>{t('handoffEvidenceFreezeSaved')}</strong>
+          <p>{t('handoffEvidenceFreezeSavedBoundary')}</p>
+          <p>{evidenceFreezeResult.packageId} · {evidenceFreezeResult.zipBytes.toLocaleString()} bytes</p>
+          <details><summary>{t('handoffAdvanced')}</summary>
+            <p>Manifest SHA: {evidenceFreezeResult.manifestSha256}</p>
+            <p>ZIP SHA: {evidenceFreezeResult.zipSha256}</p>
+            <p>Receipt: {evidenceFreezeResult.commandReceiptId}</p>
+            <p>Authority: {evidenceFreezeResult.releaseAuthorityRevisionBefore} → {evidenceFreezeResult.releaseAuthorityRevision}</p>
+          </details>
+        </div>}
+        {evidenceFreezeStatus?.currentPackage !== null
+          && evidenceFreezeStatus?.currentPackage !== undefined
+          && evidenceFreezeResult === undefined
+          && <p className={css.success}>{t('handoffEvidenceFreezeRecovered')}</p>}
       </section>
     </section>
   </section>

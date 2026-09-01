@@ -739,6 +739,137 @@ describe('editorial handoff Host download bridge', () => {
     expect(confirmPosts).toBe(2)
   })
 
+  it('proxies canonical evidence blockers and recovers one frozen package receipt', async () => {
+    const previewSha256 = '1'.repeat(64)
+    const requestSha256 = createHash('sha256').update(JSON.stringify({
+      buildCommit: 'c'.repeat(40), previewSha256,
+    })).digest('hex')
+    const flags = {
+      providerCalls: 0, stageStarted: false, approvalGranted: false,
+      releaseGranted: false, published: false, humanSignoffInferred: false,
+    }
+    const technicalQc = {
+      commandReceiptId: 'receipt_qc_1', commandReceiptSha256: '2'.repeat(64),
+      masterSha256: '3'.repeat(64), sourceSnapshotSha256: '4'.repeat(64),
+      projectionSha256: '5'.repeat(64), selectionSourceSha256: '6'.repeat(64),
+      deliveryProfileSha256: '7'.repeat(64), canonicalResultSha256: '8'.repeat(64),
+      outcome: 'passed', qualityStatus: 'passed',
+    }
+    const subject = {
+      buildIdentity: {
+        commit: 'c'.repeat(40), sourceClean: true, appEnv: 'production',
+        runtimeMode: 'real', isRealRun: true, isDryRun: false,
+      },
+      final: {
+        finalOutputId: 'final_editorial_master_1', assetId: 'asset_editorial_master_1',
+        sha256: '3'.repeat(64), bytes: 2048,
+      },
+    }
+    const readyPreview = {
+      schema: 'jason.qingmu-canonical-evidence-freeze-preview.v1',
+      projectId: 'project-e8', episodeId: 'episode-e8', subject,
+      subjectSha256: '9'.repeat(64), previewSha256,
+      idempotencyKey: 'e8-evidence-freeze-12345678', machineReady: true,
+      machineBlockers: [], releaseBlockers: ['formal_evidence_package_missing'],
+      technicalQc, canConfirm: true, hardBlockers: [], ...flags,
+    }
+    const blockedPreview = {
+      ...readyPreview,
+      subject: { ...subject, buildIdentity: { ...subject.buildIdentity, commit: '', sourceClean: false } },
+      technicalQc: null, machineReady: false, canConfirm: false,
+      machineBlockers: ['strict_verify_episode_failed'],
+      hardBlockers: ['strict_verify_episode_failed', 'canonical_evidence_machine_not_ready',
+        'canonical_evidence_build_identity_unavailable'],
+    }
+    const result = {
+      schema: 'jason.qingmu-canonical-evidence-freeze-result.v1',
+      projectId: 'project-e8', episodeId: 'episode-e8',
+      packageId: 'evidence_12345678', manifestSha256: 'a'.repeat(64),
+      zipSha256: 'b'.repeat(64), zipBytes: 4096, verified: true, packageVerified: true,
+      requestSha256, subjectSha256: readyPreview.subjectSha256, technicalQc,
+      buildIdentity: subject.buildIdentity, releaseAuthorityRevisionBefore: 2,
+      releaseAuthorityRevision: 3, releaseSignoffGranted: false, releaseReady: false,
+      releaseBlockers: ['human_signoff_missing', 'release_check_required'],
+      commandReceiptId: 'receipt_evidence_1', eventId: 'event_evidence_1',
+      committedAt: '2026-09-01T00:00:03Z', ...flags,
+    }
+    let previewPayload: unknown = blockedPreview
+    let confirmPosts = 0
+    let recoveryGets = 0
+    const fetchUpstream = vi.fn(async (input: string | URL | Request) => {
+      const target = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const url = new URL(target)
+      if (url.pathname.endsWith('/canonical-evidence-freeze-status')) {
+        return new Response(JSON.stringify({
+          schema: 'jason.qingmu-canonical-evidence-freeze-status.v1',
+          projectId: 'project-e8', episodeId: 'episode-e8', currentPackage: null,
+          records: [], preview: previewPayload, releaseSignoffGranted: false,
+          releaseReady: false, ...flags,
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.pathname.endsWith('/canonical-evidence-freeze-preview')) {
+        return new Response(JSON.stringify(previewPayload), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url.pathname.endsWith('/canonical-evidence-freeze')) {
+        confirmPosts += 1
+        const response = new Response(JSON.stringify(result), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+        Object.defineProperty(response, 'arrayBuffer', {
+          value: async () => { throw new Error('simulated committed response loss') },
+        })
+        return response
+      }
+      if (url.pathname.includes('/canonical-evidence-freezes/')) {
+        recoveryGets += 1
+        expect(url.searchParams.get('requestSha256')).toBe(requestSha256)
+        return new Response(JSON.stringify(result), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+      }
+      return new Response('{}', { status: 404 })
+    }) as unknown as typeof globalThis.fetch
+    const { base } = await host(fetchUpstream)
+    const scope = new URLSearchParams({ projectId: 'project-e8', episodeId: 'episode-e8' })
+
+    const blocked = await fetch(
+      `${base}/api/qingmu/editorial-handoff/canonical-evidence-freeze-preview?${scope.toString()}`,
+      { method: 'POST' },
+    )
+    expect(blocked.status).toBe(200)
+    const blockedBody: unknown = await blocked.json()
+    expect(blockedBody).toEqual(expect.objectContaining({ canConfirm: false }))
+    const hardBlockers = (blockedBody as { hardBlockers?: unknown }).hardBlockers
+    expect(Array.isArray(hardBlockers)).toBe(true)
+    expect(hardBlockers).toContain('canonical_evidence_machine_not_ready')
+    expect(confirmPosts).toBe(0)
+
+    previewPayload = readyPreview
+    const confirmed = await fetch(
+      `${base}/api/qingmu/editorial-handoff/canonical-evidence-freeze?${scope.toString()}`,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+        previewSha256, buildCommit: subject.buildIdentity.commit,
+        idempotencyKey: readyPreview.idempotencyKey,
+      }) },
+    )
+    expect(confirmed.status).toBe(200)
+    expect(await confirmed.json()).toEqual(result)
+    expect(confirmPosts).toBe(1)
+    expect(recoveryGets).toBe(1)
+
+    const malformed = await fetch(
+      `${base}/api/qingmu/editorial-handoff/canonical-evidence-freeze?${scope.toString()}`,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+        previewSha256, buildCommit: subject.buildIdentity.commit,
+        idempotencyKey: readyPreview.idempotencyKey, extra: 'forbidden',
+      }) },
+    )
+    expect(malformed.status).toBe(400)
+    expect(confirmPosts).toBe(1)
+  })
+
   it('writes every upload byte when the spool writer reports partial progress', async () => {
     const stored: number[] = []
     const writer = {

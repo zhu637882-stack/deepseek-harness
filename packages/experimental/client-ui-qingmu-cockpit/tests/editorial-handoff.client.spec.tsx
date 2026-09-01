@@ -198,7 +198,7 @@ describe('editorial handoff panel', () => {
     fireEvent.click(read)
     await waitFor(() => { expect(screen.queryByText(zh.handoffCandidateUnselected)).toBeNull() })
     expect(screen.getByText(/candidate_list_failed/u)).toBeTruthy()
-    expect(fetchMock).toHaveBeenCalledTimes(6)
+    expect(fetchMock).toHaveBeenCalledTimes(8)
   })
 
   it('rejects candidate rows from a different project scope', async () => {
@@ -413,6 +413,119 @@ describe('editorial handoff panel', () => {
     fireEvent.click(screen.getByRole('button', { name: zh.handoffCandidateRead }))
     await waitFor(() => { expect(screen.getByText(/technical_qc_status_failed/u)).toBeTruthy() })
     expect(screen.queryByText(zh.handoffTechnicalQcPassed)).toBeNull()
+  })
+
+  it('shows canonical machine blockers and keeps freeze separate from signoff', async () => {
+    const currentMaster = {
+      assetId: 'asset-master-1', masterSha256: '1'.repeat(64), mimeType: 'video/mp4',
+      byteSize: 2048, qualityStatus: 'passed', selectionStatus: 'Selected',
+      isSelected: true, finalOutputId: 'final-master-1', selectionReceiptId: 'receipt-selection-1',
+      selectedAt: '2026-09-01T00:00:01Z', current: true,
+    }
+    const qc = {
+      schema: 'jason.qingmu-returned-master-technical-qc-result.v1', ...SCOPE,
+      outcome: 'passed', qualityStatus: 'passed', commandReceiptId: 'receipt-qc-1',
+      technicalFacts: {
+        container: 'mov,mp4', durationSec: 5, width: 720, height: 1280, fps: '24/1',
+        videoCodec: 'h264', audioCodec: 'aac', hasVideo: true, hasAudio: true,
+        byteSize: 2048, materializedSha256: '1'.repeat(64),
+      },
+      checks: [], uncertainty: [], canonicalResultSha256: '7'.repeat(64),
+      masterSha256: '1'.repeat(64), releaseAuthorityRevisionAtStart: 1,
+      releaseAuthorityRevision: 2, releaseConditions: { ready: false, blockers: [] },
+    }
+    const subject = {
+      buildIdentity: { commit: 'c'.repeat(40), sourceClean: true, appEnv: 'production' },
+      final: { finalOutputId: 'final-master-1', assetId: 'asset-master-1',
+        sha256: '1'.repeat(64), bytes: 2048 },
+    }
+    const blockedPreview = {
+      schema: 'jason.qingmu-canonical-evidence-freeze-preview.v1', ...SCOPE, subject,
+      previewSha256: '2'.repeat(64), idempotencyKey: 'e8-evidence-freeze-12345678',
+      machineReady: false, machineBlockers: ['strict_verify_episode_failed'],
+      releaseBlockers: ['formal_evidence_package_missing'], canConfirm: false,
+      hardBlockers: ['strict_verify_episode_failed', 'canonical_evidence_machine_not_ready'],
+    }
+    const readyPreview = {
+      ...blockedPreview, machineReady: true, machineBlockers: [], canConfirm: true,
+      hardBlockers: [],
+    }
+    const result = {
+      schema: 'jason.qingmu-canonical-evidence-freeze-result.v1', ...SCOPE,
+      packageId: 'evidence-package-1', manifestSha256: '3'.repeat(64),
+      zipSha256: '4'.repeat(64), zipBytes: 4096, requestSha256: '5'.repeat(64),
+      subjectSha256: '6'.repeat(64), releaseAuthorityRevisionBefore: 2,
+      releaseAuthorityRevision: 3, commandReceiptId: 'receipt-evidence-1',
+      eventId: 'event-evidence-1', committedAt: '2026-09-01T00:00:02Z',
+      releaseSignoffGranted: false, releaseReady: false,
+      releaseBlockers: ['human_signoff_missing', 'release_check_required'],
+    }
+    let preview = blockedPreview
+    let currentPackage: typeof result | null = null
+    let confirmPosts = 0
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = fetchUrl(input)
+      if (url.includes('returned-master-candidates')) {
+        return new Response(JSON.stringify({
+          schema: 'jason.qingmu-returned-master-candidates.v1', candidates: [],
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('returned-master-selection-status')) {
+        return new Response(JSON.stringify({
+          schema: 'jason.qingmu-returned-master-selection-status.v1', ...SCOPE,
+          currentFormalMaster: currentMaster, candidates: [currentMaster],
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('returned-master-technical-qc-status')) {
+        return new Response(JSON.stringify({
+          schema: 'jason.qingmu-returned-master-technical-qc-status.v1', ...SCOPE,
+          currentTechnicalQc: qc, hardBlockers: [],
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('canonical-evidence-freeze-status')) {
+        return new Response(JSON.stringify({
+          schema: 'jason.qingmu-canonical-evidence-freeze-status.v1', ...SCOPE,
+          currentPackage, preview,
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('canonical-evidence-freeze-preview')) {
+        return new Response(JSON.stringify(preview), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url.includes('canonical-evidence-freeze') && init?.method === 'POST') {
+        confirmPosts += 1
+        currentPackage = result
+        return new Response(JSON.stringify(result), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+      }
+      return new Response('{}', { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const port = { editorialHandoff: vi.fn().mockResolvedValue(handoff()) } as unknown as QingmuYimengReadPort
+    render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
+    await screen.findByText(/雨夜街口/u)
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffCandidateRead }))
+    await waitFor(() => { expect(screen.getByText('strict_verify_episode_failed')).toBeTruthy() })
+    expect(screen.getByRole<HTMLInputElement>('checkbox', {
+      name: zh.handoffEvidenceFreezeConfirm,
+    }).disabled).toBe(true)
+    expect(confirmPosts).toBe(0)
+
+    preview = readyPreview
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffEvidenceFreezePrepare }))
+    await waitFor(() => {
+      expect(screen.getByRole<HTMLInputElement>('checkbox', {
+        name: zh.handoffEvidenceFreezeConfirm,
+      }).disabled).toBe(false)
+    })
+    fireEvent.click(screen.getByRole('checkbox', { name: zh.handoffEvidenceFreezeConfirm }))
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffEvidenceFreezeSave }))
+    await screen.findByText(zh.handoffEvidenceFreezeSaved)
+    expect(screen.getByText(zh.handoffEvidenceFreezeSavedBoundary)).toBeTruthy()
+    expect(screen.getByText(zh.handoffEvidenceFreezeBoundary)).toBeTruthy()
+    expect(confirmPosts).toBe(1)
   })
 
   it('clears old media and download state before a failed refresh settles', async () => {

@@ -126,6 +126,8 @@ Ready PromptIR 的 `firstFrameQuote` 还返回一次服务端重算、按当前�
 
 回传母版预检成功后，同一认证 owner 可以显式把这些精确字节保存为一条 episode-scoped 剪辑母版候选。Host 从不可变的下载、导入、预检、包、来源、投影、母版 SHA 和稳定回执坐标派生一次性提交 capability；Writer 核验域分离签名与当前来源后，把字节复制到内容寻址的私有存储，并创建 canonical asset、回执、ChangeSet 和 outbox 记录。响应不明时只读取原回执恢复，绝不会再次上传字节。该资产始终保持 `Unselected`、质量 pending、未批准且未发布；此路径不创建 final output、Ready、Provider 调用、发布权威或人工签收。详见[回传母版候选 Agent Note](../../../.agents/notes/implemented/feature/2026-09-01-returned-master-candidate-ingest.zh.md)。
 
+规范证据冻结端点是另一个独立的 owner 动作。状态和预览会暴露 Writer 当前的机器就绪阻塞；只有准确绑定预览、回传母版技术 QC 回执、来源身份和构建提交后才能确认。Host 重算请求 SHA，响应不明时从原回执恢复。Writer 独占规范证据包物化与字节核验，只推进一次证据权威，并持久保存 ChangeSet、outbox 事件和回执。冻结包仍只是机器证据：人工交付签收和发布检查单继续保持未完成。
+
 ## 安全边界
 
 `promptIr` 保留实际生效 Ready 主体，并额外验证最新已存 Draft 的完整主体 SHA 与基础绑定。不存在 Draft 时返回 `null`；血缘损坏报错。基于另一个 Ready 的 Draft 明确标为过期，读取器不会提升其状态。根工作流 blocker 必须有非空 `reason`；易梦在此边界前归一 stage `reasonCode` 和 release blocker，保留诊断字段。

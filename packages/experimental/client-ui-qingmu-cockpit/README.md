@@ -154,6 +154,8 @@ After that preview succeeds, the same panel accepts one local MP4, MOV, or WebM 
 
 When that preflight succeeds, the panel exposes a separate explicit “Save as returned candidate” action. The browser sends a one-use Host capability, not a Writer credential; an unknown response can only poll the original receipt and cannot send the master again. The canonical shelf is read back from Writer and labels every saved result “Unselected · Unapproved · Unpublished” together with its exact master, package, preflight, source, projection, and receipt hashes. Saving does not select the asset, pass quality, create a final output, authorize release, or infer human sign-off.
 
+The final evidence-freeze card first reads Writer's canonical status and blocker facts. A machine-ready episode can be previewed and then frozen only after an explicit checkbox confirmation; an unknown response is recovered from the original receipt instead of rebuilding the package. The resulting package ID, SHA, authority revision, technical-QC receipt, and still-open human-signoff/release-check blockers remain visible. Freezing machine evidence neither signs off content nor publishes the episode.
+
 ## Security boundary
 
 `YIMENG_API_TOKEN` and `QINGMU_IMAGO_ATTESTATION_KEY` belong only to Qingmu Host processes. The browser plugin does not read environment variables, `localStorage`, `JWT_SECRET`, or cookies, and it never receives or renders either secret. Its only persistence is the bounded non-secret receipt-recovery marker in the current tab's `sessionStorage`. Read and command channels are separate Host plugins, both limited to loopback upstreams. If the token is absent, the cockpit shows a recovery instruction to configure the Host and restart the local instance.

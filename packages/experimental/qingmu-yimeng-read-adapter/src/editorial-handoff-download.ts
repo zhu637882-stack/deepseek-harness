@@ -36,6 +36,9 @@ const SELECTION_CONFIRM_PATH = '/api/qingmu/editorial-handoff/returned-master-se
 const TECHNICAL_QC_STATUS_PATH = '/api/qingmu/editorial-handoff/returned-master-technical-qc-status'
 const TECHNICAL_QC_PREVIEW_PATH = '/api/qingmu/editorial-handoff/returned-master-technical-qc-preview'
 const TECHNICAL_QC_CONFIRM_PATH = '/api/qingmu/editorial-handoff/returned-master-technical-qc'
+const EVIDENCE_FREEZE_STATUS_PATH = '/api/qingmu/editorial-handoff/canonical-evidence-freeze-status'
+const EVIDENCE_FREEZE_PREVIEW_PATH = '/api/qingmu/editorial-handoff/canonical-evidence-freeze-preview'
+const EVIDENCE_FREEZE_CONFIRM_PATH = '/api/qingmu/editorial-handoff/canonical-evidence-freeze'
 const SHA256 = /^[0-9a-f]{64}$/
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/
 const REQUEST_ID = /^[a-f0-9-]{16,80}$/
@@ -1997,6 +2000,90 @@ function normalizeTechnicalQcStatus(value: unknown): EditorialMasterTechnicalQcS
   return value as EditorialMasterTechnicalQcStatus
 }
 
+function validEvidenceFreezeFlags(item: Record<string, unknown>): boolean {
+  return item.providerCalls === 0 && item.stageStarted === false
+    && item.approvalGranted === false && item.releaseGranted === false
+    && item.published === false && item.humanSignoffInferred === false
+}
+
+function normalizeEvidenceFreezeResult(value: unknown): Record<string, unknown> | undefined {
+  const item = safeSelectionPayload(value)
+  const qc = safeSelectionPayload(item?.technicalQc)
+  const build = safeSelectionPayload(item?.buildIdentity)
+  if (item === undefined || item.schema !== 'jason.qingmu-canonical-evidence-freeze-result.v1'
+    || !safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
+    || !safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
+    || !safeIdentifier(typeof item.packageId === 'string' ? item.packageId : null)
+    || ['manifestSha256', 'zipSha256', 'requestSha256', 'subjectSha256']
+      .some(field => typeof item[field] !== 'string' || !SHA256.test(item[field]))
+    || typeof item.zipBytes !== 'number' || !Number.isSafeInteger(item.zipBytes) || item.zipBytes <= 0
+    || item.verified !== true || item.packageVerified !== true
+    || item.releaseSignoffGranted !== false || item.releaseReady !== false
+    || !safeQcStringList(item.releaseBlockers)
+    || qc === undefined || qc.outcome !== 'passed' || qc.qualityStatus !== 'passed'
+    || !safeIdentifier(typeof qc.commandReceiptId === 'string' ? qc.commandReceiptId : null)
+    || ['commandReceiptSha256', 'masterSha256', 'sourceSnapshotSha256', 'projectionSha256',
+      'selectionSourceSha256', 'deliveryProfileSha256', 'canonicalResultSha256']
+      .some(field => typeof qc[field] !== 'string' || !SHA256.test(qc[field]))
+    || build === undefined || typeof build.commit !== 'string' || !/^[0-9a-f]{40,64}$/.test(build.commit)
+    || build.sourceClean !== true || build.isRealRun !== true || build.isDryRun !== false
+    || typeof item.releaseAuthorityRevisionBefore !== 'number'
+    || !Number.isSafeInteger(item.releaseAuthorityRevisionBefore)
+    || typeof item.releaseAuthorityRevision !== 'number'
+    || item.releaseAuthorityRevision !== item.releaseAuthorityRevisionBefore + 1
+    || !safeIdentifier(typeof item.commandReceiptId === 'string' ? item.commandReceiptId : null)
+    || !safeIdentifier(typeof item.eventId === 'string' ? item.eventId : null)
+    || typeof item.committedAt !== 'string' || item.committedAt.length < 10
+    || !validEvidenceFreezeFlags(item)) return undefined
+  return item
+}
+
+function normalizeEvidenceFreezePreview(value: unknown): Record<string, unknown> | undefined {
+  const item = safeSelectionPayload(value)
+  const subject = safeSelectionPayload(item?.subject)
+  const build = safeSelectionPayload(subject?.buildIdentity)
+  const qc = safeSelectionPayload(item?.technicalQc)
+  const hardBlockers = Array.isArray(item?.hardBlockers) ? item.hardBlockers : []
+  const buildCommit = typeof build?.commit === 'string' ? build.commit : ''
+  const hasBuildIdentity = /^[0-9a-f]{40,64}$/.test(buildCommit)
+  const unavailableBuildIsBlocked = item?.canConfirm === false && buildCommit === ''
+    && build?.sourceClean === false
+    && hardBlockers.includes('canonical_evidence_build_identity_unavailable')
+  if (item === undefined || item.schema !== 'jason.qingmu-canonical-evidence-freeze-preview.v1'
+    || !safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
+    || !safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
+    || subject === undefined || build === undefined
+    || !(hasBuildIdentity || unavailableBuildIsBlocked)
+    || typeof build.sourceClean !== 'boolean'
+    || typeof item.subjectSha256 !== 'string' || !SHA256.test(item.subjectSha256)
+    || typeof item.previewSha256 !== 'string' || !SHA256.test(item.previewSha256)
+    || !safeIdentifier(typeof item.idempotencyKey === 'string' ? item.idempotencyKey : null)
+    || typeof item.machineReady !== 'boolean' || typeof item.canConfirm !== 'boolean'
+    || !safeQcStringList(item.machineBlockers) || !safeQcStringList(item.releaseBlockers)
+    || !safeQcStringList(item.hardBlockers) || item.canConfirm !== (item.hardBlockers.length === 0)
+    || !(item.technicalQc === null || (qc !== undefined && qc.outcome === 'passed'))
+    || (item.canConfirm && (!hasBuildIdentity || !build.sourceClean))
+    || !validEvidenceFreezeFlags(item)) return undefined
+  return item
+}
+
+function normalizeEvidenceFreezeStatus(value: unknown): Record<string, unknown> | undefined {
+  const item = safeSelectionPayload(value)
+  const preview = normalizeEvidenceFreezePreview(item?.preview)
+  const current = item?.currentPackage === null ? undefined
+    : normalizeEvidenceFreezeResult(item?.currentPackage)
+  const records = Array.isArray(item?.records) ? item.records.map(normalizeEvidenceFreezeResult) : []
+  if (item === undefined || item.schema !== 'jason.qingmu-canonical-evidence-freeze-status.v1'
+    || !safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
+    || !safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
+    || preview === undefined || !(item.currentPackage === null || current !== undefined)
+    || !Array.isArray(item.records) || item.records.length > 1000
+    || records.some(record => record === undefined)
+    || item.releaseSignoffGranted !== false || item.releaseReady !== false
+    || !validEvidenceFreezeFlags(item)) return undefined
+  return item
+}
+
 function safePackageMediaPath(value: string): boolean {
   return value.startsWith('media/') && value.length <= 1024 && !value.includes('..')
     && !value.includes('\\') && !value.includes('\0') && !value.includes('//')
@@ -2946,6 +3033,113 @@ export function registerEditorialHandoffDownload(
       }
     },
   })
+  const disposeEvidenceFreezeStatus = webServer.register({
+    kind: 'exact', path: EVIDENCE_FREEZE_STATUS_PATH, handler: async (req, res) => {
+      if (req.method !== 'GET' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'canonical_evidence_freeze_forbidden' }); return
+      }
+      const scope = scopeAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = scope === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (scope === undefined || token === undefined || userId === undefined) {
+        json(res, scope === undefined ? 400 : 403, { code: 'canonical_evidence_freeze_forbidden' }); return
+      }
+      const outcome = await writerSelectionRequest(
+        dependencies, token, scope.projectId, scope.episodeId,
+        'canonical-evidence-freeze-status', { method: 'GET' },
+      )
+      const status = outcome?.response.ok === true
+        ? normalizeEvidenceFreezeStatus(outcome.raw) : undefined
+      if (status === undefined || status.projectId !== scope.projectId
+        || status.episodeId !== scope.episodeId) {
+        json(res, 502, { code: 'canonical_evidence_freeze_status_failed' }); return
+      }
+      json(res, 200, status)
+    },
+  })
+  const disposeEvidenceFreezePreview = webServer.register({
+    kind: 'exact', path: EVIDENCE_FREEZE_PREVIEW_PATH, handler: async (req, res) => {
+      if (req.method !== 'POST' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'canonical_evidence_freeze_forbidden' }); return
+      }
+      const scope = scopeAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = scope === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (scope === undefined || token === undefined || userId === undefined) {
+        json(res, scope === undefined ? 400 : 403, { code: 'canonical_evidence_freeze_forbidden' }); return
+      }
+      const outcome = await writerSelectionRequest(
+        dependencies, token, scope.projectId, scope.episodeId,
+        'canonical-evidence-freeze-preview', { method: 'POST' },
+      )
+      const preview = outcome?.response.ok === true
+        ? normalizeEvidenceFreezePreview(outcome.raw) : undefined
+      if (preview === undefined || preview.projectId !== scope.projectId
+        || preview.episodeId !== scope.episodeId) {
+        json(res, 409, { code: 'canonical_evidence_freeze_preview_failed' }); return
+      }
+      json(res, 200, preview)
+    },
+  })
+  const disposeEvidenceFreezeConfirm = webServer.register({
+    kind: 'exact', path: EVIDENCE_FREEZE_CONFIRM_PATH, handler: async (req, res) => {
+      if (req.method !== 'POST' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'canonical_evidence_freeze_forbidden' }); return
+      }
+      const scope = scopeAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = scope === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (scope === undefined || token === undefined || userId === undefined) {
+        json(res, scope === undefined ? 400 : 403, { code: 'canonical_evidence_freeze_forbidden' }); return
+      }
+      try {
+        const item = safeSelectionPayload(await readBoundedJsonBody(req))
+        const previewSha256 = item?.previewSha256
+        const buildCommit = item?.buildCommit
+        const idempotencyKey = item?.idempotencyKey
+        if (item === undefined || Object.keys(item).length !== 3
+          || typeof previewSha256 !== 'string' || !SHA256.test(previewSha256)
+          || typeof buildCommit !== 'string' || !/^[0-9a-f]{40,64}$/.test(buildCommit)
+          || typeof idempotencyKey !== 'string' || !IDENTIFIER.test(idempotencyKey)) {
+          throw new Error('evidence_freeze_request_invalid')
+        }
+        const requestBody = JSON.stringify({ previewSha256, buildCommit, idempotencyKey })
+        const commandBody = JSON.stringify({ buildCommit, previewSha256 })
+        const requestSha = createHash('sha256').update(commandBody).digest('hex')
+        const submitted = await writerSelectionRequest(
+          dependencies, token, scope.projectId, scope.episodeId,
+          'canonical-evidence-freeze', {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: requestBody,
+          },
+        )
+        let result = submitted?.response.ok === true
+          ? normalizeEvidenceFreezeResult(submitted.raw) : undefined
+        if (result === undefined) {
+          const suffix = `canonical-evidence-freezes/${encodeURIComponent(idempotencyKey)}?requestSha256=${requestSha}`
+          const recovered = await writerSelectionRequest(
+            dependencies, token, scope.projectId, scope.episodeId, suffix, { method: 'GET' },
+          )
+          result = recovered?.response.ok === true
+            ? normalizeEvidenceFreezeResult(recovered.raw) : undefined
+        }
+        if (result === undefined || result.projectId !== scope.projectId
+          || result.episodeId !== scope.episodeId || result.requestSha256 !== requestSha) {
+          throw new Error('evidence_freeze_commit_failed')
+        }
+        json(res, 200, result)
+      } catch (error) {
+        const badRequest = error instanceof Error
+          && error.message === 'evidence_freeze_request_invalid'
+        json(res, badRequest ? 400 : 409, {
+          code: badRequest ? 'canonical_evidence_freeze_request_invalid'
+            : 'canonical_evidence_freeze_commit_unknown_or_failed',
+        })
+      }
+    },
+  })
   const disposeCandidateStatus = webServer.register({
     kind: 'exact', path: CANDIDATE_STATUS_PATH, handler: async (req, res) => {
       if (req.method !== 'GET' || !isTrustedApiRequest(req, [])) {
@@ -3087,6 +3281,9 @@ export function registerEditorialHandoffDownload(
     },
   })
   return () => {
+    disposeEvidenceFreezeConfirm()
+    disposeEvidenceFreezePreview()
+    disposeEvidenceFreezeStatus()
     disposeTechnicalQcConfirm()
     disposeTechnicalQcPreview()
     disposeTechnicalQcStatus()
