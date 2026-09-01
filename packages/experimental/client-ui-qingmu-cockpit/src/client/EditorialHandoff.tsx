@@ -15,6 +15,8 @@ interface Props {
 
 const BLOCKER_KEYS: Readonly<Record<string, QingmuCockpitKey>> = {
   editorial_handoff_selected_take_missing: 'handoffBlockerSelectedTake',
+  editorial_handoff_selected_media_missing: 'handoffBlockerMediaMissing',
+  editorial_handoff_selected_media_sha_missing: 'handoffBlockerMediaShaMissing',
   editorial_handoff_selected_media_drift: 'handoffBlockerMediaDrift',
   editorial_handoff_selected_media_metadata_missing: 'handoffBlockerMediaMetadata',
   editorial_handoff_selected_take_lineage_incomplete: 'handoffBlockerLineageIncomplete',
@@ -41,6 +43,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     activeController.current?.abort()
     const controller = new AbortController()
     activeController.current = controller
+    setProjection(undefined)
     setLoading(true)
     setError(undefined)
     try {
@@ -114,7 +117,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
           <details><summary>{t('handoffAdvanced')}</summary>
             <p>Frame SHA: {shot.frameContentSha256}</p>
             <p>Stack SHA: {shot.stackSnapshotSha256}</p>
-            {shot.selectedTake !== null && <p>Media SHA: {shot.selectedTake.sha256}</p>}
+            {shot.selectedTake !== null && <p>Media SHA: {shot.selectedTake.sha256 ?? '—'}</p>}
           </details>
         </li>)}
       </ol>

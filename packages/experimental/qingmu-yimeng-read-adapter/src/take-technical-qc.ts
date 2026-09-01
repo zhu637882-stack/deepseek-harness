@@ -343,3 +343,30 @@ export function normalizeTakeTechnicalQcResult(
     providerCalls: 0, budgetMutation: false,
   }
 }
+
+/**
+ * Validate one immutable persisted QC assessment without claiming that it is current.
+ * @param value - Untrusted assessment read from an immutable command receipt.
+ * @param request - Canonical Shot coordinates.
+ * @param digest - RFC 8785 content digest helper.
+ * @returns The normalized receipt assessment without a derived current-binding flag.
+ */
+export function normalizePersistedTakeTechnicalQcAssessment(
+  value: unknown,
+  request: YimengTakeTechnicalQcRequest,
+  digest: Digest,
+): YimengTakeTechnicalQcResult['assessment'] {
+  const raw = exact(value, ASSESSMENT_FIELDS.filter(field => field !== 'currentBinding'), 'persistedAssessment')
+  const takeSubjectValue = exact(raw.takeSubject, SUBJECT_FIELDS, 'persistedAssessment.takeSubject')
+  const currentAcceptance = {
+    takeSubject: subject(takeSubjectValue, request, 'persistedAssessment.takeSubject'),
+    takeSubjectSha256: sha(raw.takeSubjectSha256, 'persistedAssessment.takeSubjectSha256'),
+    evidenceSnapshotSha256: sha(raw.evidenceSnapshotSha256, 'persistedAssessment.evidenceSnapshotSha256'),
+    technicalReceiptStatus: raw.technicalReceiptStatus as 'PASS' | 'BLOCKED',
+  }
+  const normalized = assessment(
+    { ...raw, currentBinding: true }, request, digest, 'persistedAssessment', currentAcceptance,
+  )
+  const { currentBinding: _currentBinding, ...result } = normalized
+  return result
+}

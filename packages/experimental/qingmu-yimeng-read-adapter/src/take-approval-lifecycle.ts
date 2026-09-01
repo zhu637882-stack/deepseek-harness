@@ -253,6 +253,38 @@ function transition(value: unknown, revision: number, field: string): YimengTake
 }
 
 /**
+ * Validate immutable persisted approval-lifecycle transitions and their references.
+ * @param value - Untrusted transition list read from command receipts.
+ * @returns Canonical transitions with contiguous revisions and valid backward references.
+ */
+export function normalizePersistedTakeApprovalLifecycleTransitions(
+  value: unknown,
+): readonly YimengTakeApprovalLifecycleTransition[] {
+  if (!Array.isArray(value) || value.length > 512) {
+    throw new Error('take approval lifecycle: persisted transitions are invalid')
+  }
+  const result = value.map((entry, index) =>
+    transition(entry, index + 1, `persistedTransitions[${String(index)}]`))
+  const byId = new Map(result.map(entry => [entry.transitionId, entry]))
+  if (byId.size !== result.length) {
+    throw new Error('take approval lifecycle: transition IDs must be unique')
+  }
+  for (const entry of result) {
+    const approval = entry.sourceApprovalId === null ? undefined : byId.get(entry.sourceApprovalId)
+    const rework = entry.sourceReworkId === null ? undefined : byId.get(entry.sourceReworkId)
+    if (entry.sourceApprovalId !== null
+      && (approval?.action !== 'APPROVE' || approval.revision >= entry.revision)) {
+      throw new Error('take approval lifecycle: invalid approval reference')
+    }
+    if (entry.sourceReworkId !== null
+      && (rework?.action !== 'REQUEST_REWORK' || rework.revision >= entry.revision)) {
+      throw new Error('take approval lifecycle: invalid rework reference')
+    }
+  }
+  return result
+}
+
+/**
  * Accept only canonical Shot coordinates from the browser.
  * @param payload - untrusted browser request.
  * @returns validated project, episode, and frame coordinates.
@@ -285,27 +317,7 @@ export function normalizeTakeApprovalLifecycleSource(
   if (digest(takeSubject, 'source.currentTake.takeSubject') !== takeSubjectSha256) {
     throw new Error('take approval lifecycle: current Take SHA mismatch')
   }
-  if (!Array.isArray(root.lifecycleHistory) || root.lifecycleHistory.length > 512) {
-    throw new Error('take approval lifecycle: source.lifecycleHistory is invalid')
-  }
-  const lifecycleHistory = root.lifecycleHistory.map((entry, index) =>
-    transition(entry, index + 1, `source.lifecycleHistory[${String(index)}]`))
-  const byId = new Map(lifecycleHistory.map(entry => [entry.transitionId, entry]))
-  if (byId.size !== lifecycleHistory.length) {
-    throw new Error('take approval lifecycle: transition IDs must be unique')
-  }
-  for (const entry of lifecycleHistory) {
-    const approval = entry.sourceApprovalId === null ? undefined : byId.get(entry.sourceApprovalId)
-    const rework = entry.sourceReworkId === null ? undefined : byId.get(entry.sourceReworkId)
-    if (entry.sourceApprovalId !== null
-      && (approval?.action !== 'APPROVE' || approval.revision >= entry.revision)) {
-      throw new Error('take approval lifecycle: invalid approval reference')
-    }
-    if (entry.sourceReworkId !== null
-      && (rework?.action !== 'REQUEST_REWORK' || rework.revision >= entry.revision)) {
-      throw new Error('take approval lifecycle: invalid rework reference')
-    }
-  }
+  const lifecycleHistory = normalizePersistedTakeApprovalLifecycleTransitions(root.lifecycleHistory)
   return {
     schema: 'jason.qingmu-take-approval-lifecycle-source.v1', ...request,
     currentTake: { takeSubject, takeSubjectSha256 },

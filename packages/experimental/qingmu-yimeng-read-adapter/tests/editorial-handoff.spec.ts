@@ -39,13 +39,18 @@ function projection() {
       frameId: 'frame-1', frameNo: 1, sceneId: 'scene-1', title: '镜头一',
       frameContentSha256: '3'.repeat(64), stackSnapshotSha256: '4'.repeat(64),
       selectedTake: {
-        assetId: 'asset-1', assetRevision: 1, sha256: '5'.repeat(64),
-        recordedOutputSha256: '5'.repeat(64), outputBindingStatus: 'verified', mimeType: 'video/mp4',
-        durationSec: 5, fps: 24, width: 720, height: 1280, aspectRatio: '720:1280',
+        assetId: 'asset-1', assetRevision: 1, sha256: '5'.repeat(64) as string | null,
+        recordedOutputSha256: '5'.repeat(64), materializationStatus: 'available',
+        outputBindingStatus: 'verified', mimeType: 'video/mp4',
+        durationSec: 5 as number | null, fps: 24 as number | null,
+        width: 720 as number | null, height: 1280 as number | null,
+        aspectRatio: '720:1280' as string | null,
         selectionStatus: 'Selected', qualityStatus: 'passed', lineageComplete: true,
       },
       audio: { status: 'not_authoritatively_bound', asset: null },
-      comments, review, qc: null, approval: null,
+      comments, review,
+      qc: null as null | { schema: string; records: Array<Record<string, unknown>>; currentBinding: string },
+      approval: null as null | { schema: string; records: Array<Record<string, unknown>>; currentBinding: string },
       blockers: ['editorial_handoff_approval_record_missing', 'editorial_handoff_qc_record_missing'],
     }],
     audioPolicy: 'only_authoritatively_bound_assets',
@@ -71,6 +76,13 @@ function projection() {
     readOnly: true, providerCalls: 0, businessMutations: 0,
   }
   return { ...body, projectionSha256: sha(body) }
+}
+
+function rehash(value: ReturnType<typeof projection>): void {
+  value.sourceSnapshotSha256 = sha(value.source)
+  value.projectionSha256 = sha(Object.fromEntries(
+    Object.entries(value).filter(([key]) => key !== 'projectionSha256'),
+  ))
 }
 
 describe('editorial handoff read adapter', () => {
@@ -152,6 +164,138 @@ describe('editorial handoff read adapter', () => {
     expect(() => normalizeEditorialHandoff(value, request, entry => sha(entry))).toThrow(
       'shot blockers do not match normalized source facts',
     )
+  })
+
+  it('accepts a readable unavailable selected Take and independently enforces its blockers', () => {
+    const value = projection()
+    const shot = value.source.shots[0]
+    if (shot?.selectedTake === null || shot?.selectedTake === undefined) throw new Error('fixture selected Take is required')
+    shot.selectedTake.sha256 = null
+    shot.selectedTake.materializationStatus = 'unavailable'
+    shot.selectedTake.outputBindingStatus = 'materialized_file_missing'
+    shot.selectedTake.durationSec = null
+    shot.selectedTake.fps = null
+    shot.selectedTake.width = null
+    shot.selectedTake.height = null
+    shot.selectedTake.aspectRatio = null
+    shot.selectedTake.lineageComplete = false
+    shot.comments.versions = []
+    shot.review.versions = []
+    shot.blockers.push('editorial_handoff_selected_take_lineage_incomplete')
+    shot.blockers.push('editorial_handoff_selected_media_metadata_missing')
+    shot.blockers.push('editorial_handoff_selected_media_missing')
+    shot.blockers.sort()
+    value.unresolved.splice(2, 0,
+      { frameId: 'frame-1', code: 'editorial_handoff_selected_media_metadata_missing' },
+      { frameId: 'frame-1', code: 'editorial_handoff_selected_media_missing' },
+      { frameId: 'frame-1', code: 'editorial_handoff_selected_take_lineage_incomplete' })
+    value.blockers.splice(2, 0,
+      { scope: 'shot', frameId: 'frame-1', code: 'editorial_handoff_selected_media_metadata_missing' },
+      { scope: 'shot', frameId: 'frame-1', code: 'editorial_handoff_selected_media_missing' },
+      { scope: 'shot', frameId: 'frame-1', code: 'editorial_handoff_selected_take_lineage_incomplete' })
+    value.summary.totalDurationSec = 0
+    value.summary.unresolvedCount += 3
+    rehash(value)
+    expect(normalizeEditorialHandoff(value, request, entry => sha(entry))).toEqual(value)
+
+    shot.blockers = shot.blockers.filter(code => code !== 'editorial_handoff_selected_media_missing')
+    value.unresolved = value.unresolved.filter(entry => entry.code !== 'editorial_handoff_selected_media_missing')
+    value.blockers = value.blockers.filter(entry => entry.code !== 'editorial_handoff_selected_media_missing')
+    value.summary.unresolvedCount -= 1
+    rehash(value)
+    expect(() => normalizeEditorialHandoff(value, request, entry => sha(entry))).toThrow(
+      'shot blockers do not match normalized source facts',
+    )
+  })
+
+  it('accepts Writer metadata-only incompleteness without requiring a canonical Take subject', () => {
+    const value = projection()
+    const shot = value.source.shots[0]
+    if (shot?.selectedTake === null || shot?.selectedTake === undefined) throw new Error('fixture selected Take is required')
+    shot.selectedTake.durationSec = null
+    shot.comments.versions = []
+    shot.review.versions = []
+    shot.blockers.push('editorial_handoff_selected_media_metadata_missing')
+    shot.blockers.sort()
+    value.unresolved.splice(2, 0,
+      { frameId: 'frame-1', code: 'editorial_handoff_selected_media_metadata_missing' })
+    value.blockers.splice(2, 0,
+      { scope: 'shot', frameId: 'frame-1', code: 'editorial_handoff_selected_media_metadata_missing' })
+    value.summary.totalDurationSec = 0
+    value.summary.unresolvedCount += 1
+    rehash(value)
+    expect(normalizeEditorialHandoff(value, request, entry => sha(entry))).toEqual(value)
+  })
+
+  it('accepts Writer media plus recorded-SHA absence as a blocked projection', () => {
+    const value = projection()
+    const shot = value.source.shots[0]
+    if (shot?.selectedTake === null || shot?.selectedTake === undefined) throw new Error('fixture selected Take is required')
+    shot.selectedTake.sha256 = null
+    shot.selectedTake.recordedOutputSha256 = null
+    shot.selectedTake.materializationStatus = 'unavailable'
+    shot.selectedTake.outputBindingStatus = 'recorded_sha_missing'
+    shot.selectedTake.lineageComplete = false
+    shot.comments.versions = []
+    shot.review.versions = []
+    shot.blockers.push(
+      'editorial_handoff_selected_media_missing',
+      'editorial_handoff_selected_media_sha_missing',
+      'editorial_handoff_selected_take_lineage_incomplete',
+    )
+    shot.blockers.sort()
+    value.unresolved = [
+      ...shot.blockers.map(code => ({ frameId: shot.frameId, code })),
+      { frameId: null, code: 'editorial_handoff_otio_dependency_unavailable' },
+    ]
+    value.blockers = [
+      ...shot.blockers.map(code => ({ scope: 'shot' as const, frameId: shot.frameId, code })),
+      { scope: 'export' as const, frameId: null, code: 'editorial_handoff_otio_dependency_unavailable' },
+    ]
+    value.summary.unresolvedCount = value.unresolved.length
+    rehash(value)
+    expect(normalizeEditorialHandoff(value, request, entry => sha(entry))).toEqual(value)
+  })
+
+  it('rejects a self-consistently rehashed non-video media type', () => {
+    const value = projection()
+    const selected = value.source.shots[0]?.selectedTake
+    if (selected === null || selected === undefined) throw new Error('fixture selected Take is required')
+    selected.mimeType = 'image/png'
+    rehash(value)
+    expect(() => normalizeEditorialHandoff(value, request, entry => sha(entry))).toThrow(
+      'source.shots[].selectedTake binding is invalid',
+    )
+  })
+
+  it('rejects a forged total duration and shallow QC/lifecycle records after rehash', () => {
+    const duration = projection()
+    duration.summary.totalDurationSec = 99
+    rehash(duration)
+    expect(() => normalizeEditorialHandoff(duration, request, entry => sha(entry))).toThrow('summary mismatch')
+
+    for (const kind of ['qc', 'approval'] as const) {
+      const value = projection()
+      const shot = value.source.shots[0]
+      if (shot === undefined) throw new Error('fixture shot is required')
+      if (kind === 'qc') {
+        shot.qc = { schema: 'jason.qingmu-take-qc-records.v1', records: [{}], currentBinding: 'unknown_without_probe' }
+        shot.blockers = ['editorial_handoff_approval_record_missing', 'editorial_handoff_qc_binding_unverified']
+      } else {
+        shot.approval = { schema: 'jason.qingmu-take-approval-lifecycle-records.v1', records: [{}], currentBinding: 'unknown_without_probe' }
+        shot.blockers = ['editorial_handoff_approval_binding_unverified', 'editorial_handoff_qc_record_missing']
+      }
+      value.unresolved = [
+        ...shot.blockers.map(code => ({ frameId: shot.frameId, code })),
+        { frameId: null, code: 'editorial_handoff_otio_dependency_unavailable' },
+      ]
+      value.blockers = [
+        ...shot.blockers.map(code => ({ scope: 'shot' as const, frameId: shot.frameId, code })),
+        { scope: 'export' as const, frameId: null, code: 'editorial_handoff_otio_dependency_unavailable' },
+      ]
+      rehash(value)
+      expect(() => normalizeEditorialHandoff(value, request, entry => sha(entry))).toThrow()
+    }
   })
 
   it('maps a source-drift response to a stable recoverable Host error', async () => {

@@ -2,6 +2,8 @@
 import { isDeepStrictEqual } from 'node:util'
 import { normalizeTakeCommentFeed } from './take-comments.ts'
 import { normalizeTakeReviewAuthorityFeed } from './take-review-authority.ts'
+import { normalizePersistedTakeTechnicalQcAssessment } from './take-technical-qc.ts'
+import { normalizePersistedTakeApprovalLifecycleTransitions } from './take-approval-lifecycle.ts'
 import type {
   YimengEpisodeEvidenceLifecycleRecords,
   YimengEpisodeEvidenceQcRecords,
@@ -57,6 +59,12 @@ function finite(value: unknown, field: string, nullable = false): number | null 
   return value
 }
 
+function positiveFinite(value: unknown, field: string, nullable = false): number | null {
+  const result = finite(value, field, nullable)
+  if (result !== null && result <= 0) throw new Error(`editorial handoff: ${field} is invalid`)
+  return result
+}
+
 function rejectPrivateData(value: unknown, field = 'response'): void {
   if (typeof value === 'string') {
     if (value.includes('/Users/') || value.startsWith('file://') || value.includes('Bearer ')) {
@@ -82,28 +90,42 @@ function rejectPrivateData(value: unknown, field = 'response'): void {
 
 function media(value: unknown, field: string): YimengEditorialHandoffMedia {
   const item = exact(value, [
-    'assetId', 'assetRevision', 'sha256', 'recordedOutputSha256', 'outputBindingStatus',
+    'assetId', 'assetRevision', 'sha256', 'recordedOutputSha256', 'materializationStatus', 'outputBindingStatus',
     'mimeType', 'durationSec', 'fps', 'width', 'height', 'aspectRatio', 'selectionStatus',
     'qualityStatus', 'lineageComplete',
   ], field)
-  const width = finite(item.width, `${field}.width`, true)
-  const height = finite(item.height, `${field}.height`, true)
+  const width = positiveFinite(item.width, `${field}.width`, true)
+  const height = positiveFinite(item.height, `${field}.height`, true)
   const aspectRatio = text(item.aspectRatio, `${field}.aspectRatio`, true)
+  const materializationStatus = item.materializationStatus
+  const materializedSha = optionalSha(item.sha256, `${field}.sha256`)
+  const recordedSha = optionalSha(item.recordedOutputSha256, `${field}.recordedOutputSha256`)
+  const outputBindingStatus = item.outputBindingStatus
+  const mimeType = text(item.mimeType, `${field}.mimeType`, true)
   if (item.selectionStatus !== 'Selected' || typeof item.lineageComplete !== 'boolean'
+    || (materializationStatus !== 'available' && materializationStatus !== 'unavailable')
     || !OUTPUT_BINDING_STATUSES.includes(item.outputBindingStatus as typeof OUTPUT_BINDING_STATUSES[number])
+    || (mimeType !== null && !mimeType.startsWith('video/'))
     || (width === null) !== (height === null) || (aspectRatio === null) !== (width === null)
-    || (width !== null && aspectRatio !== `${String(width)}:${String(height)}`)) {
+    || (width !== null && aspectRatio !== `${String(width)}:${String(height)}`)
+    || (materializationStatus === 'available') !== (materializedSha !== null)
+    || (item.lineageComplete && outputBindingStatus !== 'verified')
+    || (outputBindingStatus === 'verified' && (materializedSha === null || recordedSha !== materializedSha))
+    || (outputBindingStatus === 'recorded_sha_missing' && recordedSha !== null)
+    || (outputBindingStatus === 'materialized_file_missing'
+      && (materializedSha !== null || recordedSha === null))
+    || (outputBindingStatus === 'recorded_sha_mismatch'
+      && (materializedSha === null || recordedSha === null || recordedSha === materializedSha))) {
     throw new Error(`editorial handoff: ${field} binding is invalid`)
   }
   return {
     assetId: text(item.assetId, `${field}.assetId`) as string,
     assetRevision: count(item.assetRevision, `${field}.assetRevision`),
-    sha256: sha(item.sha256, `${field}.sha256`),
-    recordedOutputSha256: optionalSha(item.recordedOutputSha256, `${field}.recordedOutputSha256`),
-    outputBindingStatus: item.outputBindingStatus as YimengEditorialHandoffMedia['outputBindingStatus'],
-    mimeType: text(item.mimeType, `${field}.mimeType`, true),
-    durationSec: finite(item.durationSec, `${field}.durationSec`, true),
-    fps: finite(item.fps, `${field}.fps`, true),
+    sha256: materializedSha, recordedOutputSha256: recordedSha, materializationStatus,
+    outputBindingStatus: outputBindingStatus as YimengEditorialHandoffMedia['outputBindingStatus'],
+    mimeType,
+    durationSec: positiveFinite(item.durationSec, `${field}.durationSec`, true),
+    fps: positiveFinite(item.fps, `${field}.fps`, true),
     width, height, aspectRatio,
     selectionStatus: 'Selected',
     qualityStatus: text(item.qualityStatus, `${field}.qualityStatus`) as string,
@@ -115,24 +137,34 @@ function immutableRecords(
   value: unknown,
   schema: 'jason.qingmu-take-qc-records.v1',
   field: string,
+  request: YimengEditorialHandoffRequest & { readonly frameId: string },
+  digest: Digest,
 ): YimengEpisodeEvidenceQcRecords
 function immutableRecords(
   value: unknown,
   schema: 'jason.qingmu-take-approval-lifecycle-records.v1',
   field: string,
+  request: YimengEditorialHandoffRequest & { readonly frameId: string },
+  digest: Digest,
 ): YimengEpisodeEvidenceLifecycleRecords
 function immutableRecords(
   value: unknown,
   schema: 'jason.qingmu-take-qc-records.v1' | 'jason.qingmu-take-approval-lifecycle-records.v1',
   field: string,
+  request: YimengEditorialHandoffRequest & { readonly frameId: string },
+  digest: Digest,
 ): YimengEpisodeEvidenceQcRecords | YimengEpisodeEvidenceLifecycleRecords {
   const item = exact(value, ['schema', 'records', 'currentBinding'], field)
   if (item.schema !== schema || item.currentBinding !== 'unknown_without_probe'
-    || !Array.isArray(item.records)
-    || !item.records.every(record => typeof record === 'object' && record !== null && !Array.isArray(record))) {
+    || !Array.isArray(item.records)) {
     throw new Error(`editorial handoff: ${field} is invalid`)
   }
-  return { schema, records: item.records as readonly JsonObject[], currentBinding: 'unknown_without_probe' }
+  if (schema === 'jason.qingmu-take-qc-records.v1') {
+    return { schema, records: item.records.map(record =>
+      normalizePersistedTakeTechnicalQcAssessment(record, request, digest)), currentBinding: 'unknown_without_probe' }
+  }
+  return { schema, records: normalizePersistedTakeApprovalLifecycleTransitions(item.records).map(entry => ({ ...entry })),
+    currentBinding: 'unknown_without_probe' }
 }
 
 function expectedShotBlockers(
@@ -144,8 +176,13 @@ function expectedShotBlockers(
   if (selectedTake === null) {
     result.push('editorial_handoff_selected_take_missing')
   } else {
-    if (selectedTake.outputBindingStatus !== 'verified'
-      || selectedTake.recordedOutputSha256 !== selectedTake.sha256) {
+    if (selectedTake.materializationStatus === 'unavailable') {
+      result.push('editorial_handoff_selected_media_missing')
+    }
+    if (selectedTake.recordedOutputSha256 === null) {
+      result.push('editorial_handoff_selected_media_sha_missing')
+    }
+    if (selectedTake.outputBindingStatus === 'recorded_sha_mismatch') {
       result.push('editorial_handoff_selected_media_drift')
     }
     if (!selectedTake.lineageComplete) result.push('editorial_handoff_selected_take_lineage_incomplete')
@@ -199,16 +236,22 @@ function shot(
   const selectedTake = item.selectedTake === null ? null : media(item.selectedTake, 'source.shots[].selectedTake')
   if (selectedTake !== null) {
     const subject = comments.versions.find(entry => entry.takeSubject.takeId === selectedTake.assetId)?.takeSubject
-    if (subject === undefined || subject.versionOrdinal !== selectedTake.assetRevision
+    const durationMillis = selectedTake.durationSec === null ? null : selectedTake.durationSec * 1000
+    const canonicalSubjectRequired = selectedTake.sha256 !== null && durationMillis !== null
+      && Number.isSafeInteger(durationMillis) && durationMillis / 1000 === selectedTake.durationSec
+    const subjectMismatch = subject !== undefined && (
+      subject.versionOrdinal !== selectedTake.assetRevision
       || subject.outputSha256 !== selectedTake.sha256
-      || (selectedTake.durationSec !== null && subject.durationMillis !== selectedTake.durationSec * 1000)) {
+      || (selectedTake.durationSec !== null && subject.durationMillis !== selectedTake.durationSec * 1000)
+    )
+    if ((subject === undefined && canonicalSubjectRequired) || subjectMismatch) {
       throw new Error('editorial handoff: selected Take does not match the canonical feed')
     }
   }
   const qc = item.qc === null ? null
-    : immutableRecords(item.qc, 'jason.qingmu-take-qc-records.v1', 'source.shots[].qc')
+    : immutableRecords(item.qc, 'jason.qingmu-take-qc-records.v1', 'source.shots[].qc', coordinate, digest)
   const approval = item.approval === null ? null
-    : immutableRecords(item.approval, 'jason.qingmu-take-approval-lifecycle-records.v1', 'source.shots[].approval')
+    : immutableRecords(item.approval, 'jason.qingmu-take-approval-lifecycle-records.v1', 'source.shots[].approval', coordinate, digest)
   const blockers = codes(item.blockers, 'source.shots[].blockers')
   if (!isDeepStrictEqual(blockers, expectedShotBlockers(selectedTake, qc, approval))) {
     throw new Error('editorial handoff: shot blockers do not match normalized source facts')
@@ -311,13 +354,18 @@ export function normalizeEditorialHandoff(
     shotCount: count(summary.shotCount, 'summary.shotCount'),
     selectedTakeCount: count(summary.selectedTakeCount, 'summary.selectedTakeCount'),
     authoritativeAudioCount: 0 as const,
-    totalDurationSec: finite(summary.totalDurationSec, 'summary.totalDurationSec') as number,
+    totalDurationSec: Math.round(shots.reduce(
+      (total, item) => total + (item.selectedTake?.durationSec ?? 0), 0,
+    ) * 1_000_000) / 1_000_000,
     unresolvedCount: count(summary.unresolvedCount, 'summary.unresolvedCount'),
   }
   if (normalizedSummary.shotCount !== shots.length
     || normalizedSummary.selectedTakeCount !== shots.filter(item => item.selectedTake !== null).length
     || normalizedSummary.unresolvedCount !== unresolved.length
-    || blockers.length !== unresolved.length) throw new Error('editorial handoff: summary mismatch')
+    || blockers.length !== unresolved.length
+    || finite(summary.totalDurationSec, 'summary.totalDurationSec') !== normalizedSummary.totalDurationSec) {
+    throw new Error('editorial handoff: summary mismatch')
+  }
   const expectedUnresolved = [
     ...shots.flatMap(item => item.blockers.map(code => ({ frameId: item.frameId, code }))),
     { frameId: null, code: download.blockerCode as string },

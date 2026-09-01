@@ -1132,8 +1132,9 @@ export type YimengEditorialHandoffRequest = YimengEpisodeEvidenceRequest
 export interface YimengEditorialHandoffMedia {
   readonly assetId: string
   readonly assetRevision: number
-  readonly sha256: string
+  readonly sha256: string | null
   readonly recordedOutputSha256: string | null
+  readonly materializationStatus: 'available' | 'unavailable'
   readonly outputBindingStatus: 'verified' | 'recorded_sha_missing' | 'materialized_file_missing' | 'recorded_sha_mismatch'
   readonly mimeType: string | null
   readonly durationSec: number | null
