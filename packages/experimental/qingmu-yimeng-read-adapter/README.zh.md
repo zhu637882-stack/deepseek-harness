@@ -118,7 +118,7 @@ Ready PromptIR 的 `firstFrameQuote` 还返回一次服务端重算、按当前�
 
 `editorialHandoff` 读取由易梦从 canonical 分镜、已选 Take 版本栈、物化媒体 SHA、QC、评论、审核及批准生命周期证据组装的认证项目／剧集投影。媒体元数据来自持久记录，本次读取不重新探测。Host 严格归一化嵌套证据，并从已选媒体绑定、谱系、质量、QC 和批准记录重建固定阻塞集，同时校验精确范围、顺序、哈希及两个相互独立的 false 就绪标志。本地路径、调用方排序、批准声明和发布声明都不会进入浏览器。
 
-下载合同只允许 GET。只有认证后的易梦投影确认每个镜头同时具有当前已选视频、唯一权威对白音频、精确媒体 SHA、匹配时长、当前 QC 与自然人批准证据时，Host 才签发一次性下载 capability，并把它绑定到项目、剧集、来源 SHA 与投影 SHA。Host 先把完整响应写入私密临时文件，核验声明的包 SHA／大小后才向浏览器发送字节；私密 DSH home 只持久化 capability 哈希绑定和终态，因此刷新或 Host 重启无需再次向 Writer 下载即可恢复结果。易梦还会拒绝声明格式与实际容器字节不一致的媒体，并使用锁定的 OpenTimelineIO 0.18.1 `otio_json` 生成确定性 ZIP_STORED 包。这不代表青木生产、易梦发布或人工剪辑签收已经就绪。读取、刷新和下载均不调用 Provider，也不写业务状态。
+下载合同只允许 GET。只有认证后的易梦投影确认每个镜头同时具有当前项目的 canonical 场景、当前已选视频、唯一权威 `audio/*` 对白音频、精确媒体 SHA、匹配时长、当前 QC 与自然人批准证据时，Host 才签发一次性下载 capability。该 capability 同时绑定 Writer 认证的用户、项目、剧集、来源 SHA 与投影 SHA；切换当前登录会拒绝旧 capability 且不消耗它。Host 先把完整响应写入私密临时文件，核验声明的外层包 SHA／大小后才向浏览器发送字节；私密 DSH home 只持久化 capability 哈希绑定和终态，原用户因此可在刷新或 Host 重启后恢复，无需再次向 Writer 下载。易梦用精确声明的条目集生成确定性 ZIP_STORED 包，并在返回前独立重新打开，核验每个条目的类型、大小和 SHA。Timeline 读写直接使用原生 OpenTimelineIO 0.18.1 `opentimelineio.adapters.otio_json`，锁定 0.18.1 schema map 并做原生往返；插件环境污染不会选中其他 adapter。这不代表青木生产、易梦发布或人工剪辑签收已经就绪。读取、刷新和下载均不调用 Provider，也不写业务状态。
 
 ## 安全边界
 

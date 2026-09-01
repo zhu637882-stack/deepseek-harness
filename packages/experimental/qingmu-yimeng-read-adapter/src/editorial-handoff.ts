@@ -11,8 +11,14 @@ import type {
   YimengEditorialHandoffMedia,
   YimengEditorialHandoffRequest,
   YimengEditorialHandoffResponse,
+  YimengEditorialHandoffScene,
   YimengEditorialHandoffShot,
 } from './types.ts'
+
+/** Internal normalized projection. The authenticated user id is never returned to the browser. */
+export interface NormalizedEditorialHandoff extends YimengEditorialHandoffResponse {
+  readonly authenticatedUserId: string
+}
 
 type Digest = (value: unknown, field: string) => string
 type JsonObject = Record<string, unknown>
@@ -216,6 +222,7 @@ function audioMedia(value: unknown, field: string): YimengEditorialHandoffAudio 
       && result.containerTypeStatus !== 'unavailable')
     || typeof result.qualityEvidenceValid !== 'boolean' || typeof result.lineageComplete !== 'boolean'
     || typeof result.formalizationComplete !== 'boolean' || typeof result.sourceComplete !== 'boolean'
+    || (mimeType !== null && !mimeType.startsWith('audio/'))
     || (size !== null && actualSha === null)
     || (declaredPackagePath !== null && (recordedSha === null || mimeType === null
       || declaredPackagePath !== packagePath(recordedSha, mimeType)))) {
@@ -261,6 +268,7 @@ function immutableRecords(
 }
 
 function expectedShotBlockers(
+  sceneId: string | null,
   selectedTake: YimengEditorialHandoffMedia | null,
   audio: YimengEditorialHandoffAudio | null,
   audioCandidateCount: number,
@@ -269,6 +277,7 @@ function expectedShotBlockers(
   approval: YimengEpisodeEvidenceLifecycleRecords | null,
 ): readonly string[] {
   const result: string[] = []
+  if (sceneId === null) result.push('editorial_handoff_scene_missing')
   if (selectedTake === null) {
     result.push('editorial_handoff_selected_take_missing')
   } else {
@@ -353,6 +362,7 @@ function shot(
   request: YimengEditorialHandoffRequest,
   digest: Digest,
   previousFrameNo: number,
+  scenes: ReadonlyMap<string, YimengEditorialHandoffScene>,
 ): YimengEditorialHandoffShot {
   const item = exact(value, [
     'frameId', 'frameNo', 'sceneId', 'title', 'frameContentSha256', 'stackSnapshotSha256',
@@ -370,13 +380,17 @@ function shot(
   const audioScopeStatus = audioBinding.scopeStatus as 'valid' | 'cross_scope'
   const audioCandidateCount = count(audioBinding.candidateCount, 'source.shots[].audio.candidateCount')
   const audio = audioBinding.asset === null ? null : audioMedia(audioBinding.asset, 'source.shots[].audio.asset')
+  const sceneId = text(item.sceneId, 'source.shots[].sceneId', true)
+  if (sceneId !== null && !scenes.has(sceneId)) {
+    throw new Error('editorial handoff: shot scene binding is invalid')
+  }
   if ((audioScopeStatus === 'valid' && audio === null && audioCandidateCount === 1)
     || (audioScopeStatus === 'cross_scope' && (audio !== null || audioCandidateCount < 1))
     || (audio !== null && (audioCandidateCount !== 1 || audioScopeStatus !== 'valid'))) {
     throw new Error('editorial handoff: audio candidate count is invalid')
   }
   if ((audioBinding.status === 'available') !== (audio !== null && expectedShotBlockers(
-    null, audio, audioCandidateCount, audioScopeStatus, null, null,
+    sceneId, null, audio, audioCandidateCount, audioScopeStatus, null, null,
   ).every(code => !code.startsWith('editorial_handoff_selected_audio_')))) {
     throw new Error('editorial handoff: audio status is invalid')
   }
@@ -431,14 +445,14 @@ function shot(
   }
   const blockers = codes(item.blockers, 'source.shots[].blockers')
   if (!isDeepStrictEqual(blockers, expectedShotBlockers(
-    selectedTake, audio, audioCandidateCount, audioScopeStatus, qc, approval,
+    sceneId, selectedTake, audio, audioCandidateCount, audioScopeStatus, qc, approval,
   ))) {
     throw new Error('editorial handoff: shot blockers do not match normalized source facts')
   }
   return {
     frameId,
     frameNo,
-    sceneId: text(item.sceneId, 'source.shots[].sceneId', true),
+    sceneId,
     title: typeof item.title === 'string' && item.title.length <= 512 ? item.title : '',
     frameContentSha256: sha(item.frameContentSha256, 'source.shots[].frameContentSha256'),
     stackSnapshotSha256: sha(item.stackSnapshotSha256, 'source.shots[].stackSnapshotSha256'),
@@ -468,10 +482,10 @@ export function normalizeEditorialHandoff(
   value: unknown,
   request: YimengEditorialHandoffRequest,
   digest: Digest,
-): YimengEditorialHandoffResponse {
+): NormalizedEditorialHandoff {
   rejectPrivateData(value)
   const root = exact(value, [
-    'schema', 'projectId', 'episodeId', 'source', 'sourceSnapshotSha256', 'summary',
+    'schema', 'authenticatedUserId', 'projectId', 'episodeId', 'source', 'sourceSnapshotSha256', 'summary',
     'unresolved', 'blockers', 'download', 'aokiVideoProductionHandoffReady',
     'yimengEpisodeReleaseReady', 'readOnly', 'providerCalls', 'businessMutations',
     'projectionSha256',
@@ -484,16 +498,32 @@ export function normalizeEditorialHandoff(
   }
   const source = exact(root.source, [
     'schema', 'projectId', 'episodeId', 'evidenceSourceSnapshotSha256',
-    'verificationInputsSha256', 'shots', 'audioPolicy',
+    'verificationInputsSha256', 'scenes', 'shots', 'audioPolicy',
   ], 'source')
   if (source.schema !== 'jason.qingmu-editorial-handoff-source.v1'
     || source.projectId !== request.projectId || source.episodeId !== request.episodeId
-    || source.audioPolicy !== 'only_authoritatively_bound_assets' || !Array.isArray(source.shots)) {
+    || source.audioPolicy !== 'only_authoritatively_bound_assets'
+    || !Array.isArray(source.scenes) || !Array.isArray(source.shots)) {
     throw new Error('editorial handoff: source identity is invalid')
   }
+  const scenes = source.scenes.map((value, index): YimengEditorialHandoffScene => {
+    const item = exact(value, ['sceneId', 'projectId', 'seriesId', 'name'], `source.scenes[${String(index)}]`)
+    if (item.projectId !== request.projectId) throw new Error('editorial handoff: scene scope is invalid')
+    return {
+      sceneId: text(item.sceneId, `source.scenes[${String(index)}].sceneId`) as string,
+      projectId: request.projectId,
+      seriesId: text(item.seriesId, `source.scenes[${String(index)}].seriesId`, true),
+      name: text(item.name, `source.scenes[${String(index)}].name`) as string,
+    }
+  })
+  if (new Set(scenes.map(item => item.sceneId)).size !== scenes.length
+    || !isDeepStrictEqual(scenes.map(item => item.sceneId), scenes.map(item => item.sceneId).sort())) {
+    throw new Error('editorial handoff: scenes are duplicated or unsorted')
+  }
+  const sceneMap = new Map(scenes.map(item => [item.sceneId, item]))
   let previous = 0
   const shots = source.shots.map((item) => {
-    const result = shot(item, request, digest, previous)
+    const result = shot(item, request, digest, previous, sceneMap)
     previous = result.frameNo
     return result
   })
@@ -506,6 +536,7 @@ export function normalizeEditorialHandoff(
     episodeId: request.episodeId,
     evidenceSourceSnapshotSha256: sha(source.evidenceSourceSnapshotSha256, 'source.evidenceSourceSnapshotSha256'),
     verificationInputsSha256: sha(source.verificationInputsSha256, 'source.verificationInputsSha256'),
+    scenes,
     shots,
     audioPolicy: 'only_authoritatively_bound_assets' as const,
   }
@@ -585,6 +616,7 @@ export function normalizeEditorialHandoff(
   const projectionSha256 = sha(root.projectionSha256, 'projectionSha256')
   const normalized = {
     schema: 'jason.qingmu-editorial-handoff-draft.v1' as const,
+    authenticatedUserId: text(root.authenticatedUserId, 'authenticatedUserId') as string,
     ...request,
     source: normalizedSource,
     sourceSnapshotSha256,

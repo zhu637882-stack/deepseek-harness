@@ -36,6 +36,7 @@ import {
   parseEpisodeVerificationRequest,
 } from './episode-evidence.ts'
 import { normalizeEditorialHandoff } from './editorial-handoff.ts'
+import type { NormalizedEditorialHandoff } from './editorial-handoff.ts'
 import {
   EditorialHandoffDownloadAuthorizer,
   registerEditorialHandoffDownload,
@@ -70,7 +71,6 @@ import type {
   YimengEpisodesRequest,
   YimengEpisodesResponse,
   YimengEpisodeEvidenceRequest,
-  YimengEditorialHandoffResponse,
   YimengFirstFrameQuoteRequest,
   YimengFirstFrameQuoteResponse,
   YimengHealth,
@@ -425,6 +425,7 @@ export interface YimengReadAdapterDependencies {
   readonly fetch: typeof globalThis.fetch
   readonly readToken: () => string | undefined
   readonly issueEditorialHandoffDownload?: (binding: {
+    readonly authenticatedUserId: string
     readonly projectId: string
     readonly episodeId: string
     readonly sourceSnapshotSha256: string
@@ -5173,16 +5174,21 @@ export function createYimengReadHandler(
       if (!response.ok) return response
       try {
         const normalized = normalize(response.value)
-        if (editorialRequest !== undefined && dependencies.issueEditorialHandoffDownload !== undefined) {
-          const handoff = normalized as YimengEditorialHandoffResponse
-          if (handoff.download.available) {
+        if (editorialRequest !== undefined) {
+          const handoff = normalized as NormalizedEditorialHandoff
+          const { authenticatedUserId, ...publicHandoff } = handoff
+          if (handoff.download.available && dependencies.issueEditorialHandoffDownload !== undefined) {
             const hostAccess = dependencies.issueEditorialHandoffDownload({
+              authenticatedUserId,
               ...editorialRequest,
               sourceSnapshotSha256: handoff.sourceSnapshotSha256,
               projectionSha256: handoff.projectionSha256,
             })
-            return { ok: true, value: { ...handoff, download: { ...handoff.download, hostAccess } } }
+            return { ok: true, value: {
+              ...publicHandoff, download: { ...handoff.download, hostAccess },
+            } }
           }
+          return { ok: true, value: publicHandoff }
         }
         return { ok: true, value: normalized }
       } catch (error) {

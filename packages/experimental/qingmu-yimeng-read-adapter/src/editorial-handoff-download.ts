@@ -29,12 +29,15 @@ const MAX_PACKAGE_BYTES = 8 * 1024 * 1024 * 1024
 const STATUS_TTL_MS = 24 * 60 * 60_000
 
 interface DownloadBinding {
+  readonly authenticatedUserId: string
   readonly projectId: string
   readonly episodeId: string
   readonly sourceSnapshotSha256: string
   readonly projectionSha256: string
   readonly requestId: string
 }
+
+type BrowserDownloadBinding = Omit<DownloadBinding, 'authenticatedUserId'>
 
 type DownloadStatus =
   | { readonly state: 'authorized'; readonly createdAt: number }
@@ -188,7 +191,8 @@ export interface EditorialHandoffDownloadDependencies {
 }
 
 function sameBinding(left: DownloadBinding, right: DownloadBinding): boolean {
-  return left.projectId === right.projectId && left.episodeId === right.episodeId
+  return left.authenticatedUserId === right.authenticatedUserId
+    && left.projectId === right.projectId && left.episodeId === right.episodeId
     && left.sourceSnapshotSha256 === right.sourceSnapshotSha256
     && left.projectionSha256 === right.projectionSha256 && left.requestId === right.requestId
 }
@@ -197,7 +201,8 @@ function validPersisted(value: unknown): value is PersistedDownload {
   if (typeof value !== 'object' || value === null) return false
   const item = value as Record<string, unknown>
   const status = item.status
-  if (!safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
+  if (!safeIdentifier(typeof item.authenticatedUserId === 'string' ? item.authenticatedUserId : null)
+    || !safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
     || !safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
     || typeof item.sourceSnapshotSha256 !== 'string' || !SHA256.test(item.sourceSnapshotSha256)
     || typeof item.projectionSha256 !== 'string' || !SHA256.test(item.projectionSha256)
@@ -261,7 +266,7 @@ const BINDING_PARAMS = [
 ] as const
 
 function downloadBinding(params: URLSearchParams): {
-  readonly binding: DownloadBinding
+  readonly binding: BrowserDownloadBinding
   readonly capability: string
 } | undefined {
   if (!exactParams(params, BINDING_PARAMS)) return undefined
@@ -279,6 +284,30 @@ function downloadBinding(params: URLSearchParams): {
   return {
     binding: { projectId, episodeId, sourceSnapshotSha256, projectionSha256, requestId },
     capability,
+  }
+}
+
+async function authenticatedBinding(
+  dependencies: EditorialHandoffDownloadDependencies,
+  binding: BrowserDownloadBinding,
+  token: string,
+): Promise<DownloadBinding | undefined> {
+  try {
+    const response = await dependencies.fetch(new URL('/api/auth/me', dependencies.baseUrl), {
+      method: 'GET', redirect: 'error', headers: {
+        authorization: `Bearer ${token}`, accept: 'application/json',
+      },
+    })
+    if (!response.ok) return undefined
+    const length = Number(response.headers.get('content-length') ?? '0')
+    if (Number.isFinite(length) && length > 64 * 1024) return undefined
+    const value = await response.json() as unknown
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+    const authenticatedUserId = (value as Record<string, unknown>).id
+    if (typeof authenticatedUserId !== 'string' || !safeIdentifier(authenticatedUserId)) return undefined
+    return { ...binding, authenticatedUserId }
+  } catch {
+    return undefined
   }
 }
 
@@ -304,7 +333,7 @@ export function registerEditorialHandoffDownload(
   dependencies: EditorialHandoffDownloadDependencies,
 ): () => void {
   const disposeStatus = webServer.register({
-    kind: 'exact', path: STATUS_PATH, handler: (req, res) => {
+    kind: 'exact', path: STATUS_PATH, handler: async (req, res) => {
       if (req.method !== 'GET' || !isTrustedApiRequest(req, [])) {
         json(res, 403, { code: 'editorial_handoff_download_forbidden' })
         return
@@ -315,7 +344,14 @@ export function registerEditorialHandoffDownload(
         json(res, 400, { code: 'editorial_handoff_download_request_invalid' })
         return
       }
-      const status = dependencies.authorizer.status(access.binding, access.capability)
+      const token = validToken(dependencies.readToken())
+      const binding = token === undefined ? undefined
+        : await authenticatedBinding(dependencies, access.binding, token)
+      if (binding === undefined) {
+        json(res, 403, { code: 'editorial_handoff_download_forbidden' })
+        return
+      }
+      const status = dependencies.authorizer.status(binding, access.capability)
       if (status === undefined) {
         json(res, 403, { code: 'editorial_handoff_download_forbidden' })
         return
@@ -335,7 +371,14 @@ export function registerEditorialHandoffDownload(
         json(res, 400, { code: 'editorial_handoff_download_request_invalid' })
         return
       }
-      const { binding, capability } = access
+      const { capability } = access
+      const token = validToken(dependencies.readToken())
+      const binding = token === undefined ? undefined
+        : await authenticatedBinding(dependencies, access.binding, token)
+      if (binding === undefined) {
+        json(res, 403, { code: 'editorial_handoff_download_forbidden' })
+        return
+      }
       if (!dependencies.authorizer.start(binding, capability)) {
         const status = dependencies.authorizer.status(binding, capability)
         json(res, status === undefined ? 403 : 409, {
@@ -343,14 +386,6 @@ export function registerEditorialHandoffDownload(
             ? 'editorial_handoff_download_forbidden'
             : 'editorial_handoff_download_request_reused',
         })
-        return
-      }
-      const token = validToken(dependencies.readToken())
-      if (token === undefined) {
-        dependencies.authorizer.finish(binding, {
-          state: 'failed', createdAt: Date.now(), errorCode: 'authentication_required',
-        })
-        json(res, 503, { code: 'editorial_handoff_download_unavailable' })
         return
       }
       const upstream = new URL(
@@ -366,7 +401,11 @@ export function registerEditorialHandoffDownload(
       try {
         const response = await dependencies.fetch(upstream, {
           method: 'GET', redirect: 'error', signal: controller.signal,
-          headers: { authorization: `Bearer ${token}`, accept: 'application/zip' },
+          headers: {
+            authorization: `Bearer ${token}`,
+            accept: 'application/zip',
+            'x-qingmu-authenticated-user-id': binding.authenticatedUserId,
+          },
         })
         const declaredSha = response.headers.get('x-qingmu-package-sha256')
         const declaredSizeText = response.headers.get('x-qingmu-package-size')

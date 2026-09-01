@@ -16,6 +16,7 @@ const execFile = promisify(execFileCallback)
 interface Fixture {
   readonly baseUrl: string
   readonly token: string
+  readonly otherToken: string
   readonly projectId: string
   readonly episodeId: string
   readonly frameIds: readonly string[]
@@ -184,6 +185,49 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       expect(statusText).toContain('青木视频生产交接就绪: 否')
       expect(statusText).toContain('易梦剧集发布就绪: 否')
 
+      // The browser cannot choose the Writer identity for a Host capability. A login
+      // switch must reject the old capability without consuming it.
+      process.env.YIMENG_API_TOKEN = fixture.otherToken
+      await page.evaluate(() => {
+        Reflect.set(globalThis, '__qingmuOriginalAnchorClick', HTMLAnchorElement.prototype.click)
+        HTMLAnchorElement.prototype.click = function captureDownloadCapability() {
+          Reflect.set(globalThis, '__qingmuDownloadCapabilityUrl', this.href)
+        }
+      })
+      await downloadButton.click()
+      await expect.poll(() => page.evaluate(() =>
+        Reflect.get(globalThis, '__qingmuDownloadCapabilityUrl') as unknown,
+      )).toEqual(expect.any(String))
+      const oldCapabilityUrl = await page.evaluate(() =>
+        Reflect.get(globalThis, '__qingmuDownloadCapabilityUrl') as unknown)
+      if (typeof oldCapabilityUrl !== 'string') throw new Error('Download capability URL missing')
+      const rejected = await page.evaluate(async (url) => {
+        const response = await fetch(String(url), { cache: 'no-store' })
+        return { status: response.status, body: await response.json() as unknown }
+      }, oldCapabilityUrl)
+      expect(rejected).toEqual({
+        status: 403, body: { code: 'editorial_handoff_download_forbidden' },
+      })
+      await page.evaluate(() => {
+        const original = Reflect.get(globalThis, '__qingmuOriginalAnchorClick') as unknown
+        if (typeof original === 'function') HTMLAnchorElement.prototype.click = original
+        Reflect.deleteProperty(globalThis, '__qingmuOriginalAnchorClick')
+        Reflect.deleteProperty(globalThis, '__qingmuDownloadCapabilityUrl')
+      })
+      process.env.YIMENG_API_TOKEN = fixture.token
+      const oldStatus = await page.evaluate(async (url) => {
+        const statusUrl = new URL(url)
+        statusUrl.pathname = '/api/qingmu/editorial-handoff/download-status'
+        const response = await fetch(statusUrl, { cache: 'no-store' })
+        return { status: response.status, body: await response.json() as unknown }
+      }, oldCapabilityUrl)
+      expect(oldStatus).toEqual({
+        status: 200,
+        body: { status: 'not_started', sha256: null, size: null, errorCode: null },
+      })
+      await dialog.getByRole('button', { name: '刷新交接事实' }).click()
+      await expect.poll(() => downloadButton.isEnabled()).toBe(true)
+
       const packagePaths: string[] = []
       for (let attempt = 0; attempt < 2; attempt += 1) {
         if (attempt > 0) {
@@ -208,17 +252,40 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       const packageSha = createHash('sha256').update(firstBytes).digest('hex')
       expect(await dialog.getByText(`SHA-256: ${packageSha}`).count()).toBe(1)
       const parsed = await execFile(join(writerRoot, '.venv/bin/python'), ['-c', [
-        'import json,sys,zipfile',
-        'import opentimelineio as otio',
+        'import hashlib,json,sys,zipfile',
+        'from opentimelineio.adapters import otio_json',
         'with zipfile.ZipFile(sys.argv[1]) as z:',
-        '  timeline=otio.adapters.read_from_string(z.read("timeline.otio").decode(), adapter_name="otio_json")',
+        '  timeline=otio_json.read_from_string(z.read("timeline.otio").decode())',
         '  manifest=json.loads(z.read("manifest.json"))',
-        '  print(json.dumps({"name":timeline.name,"tracks":[t.name for t in timeline.tracks],"shots":len(manifest["orderedShots"]),"otio":manifest["otio"]["version"]}))',
+        '  actual={info.filename for info in z.infolist()}',
+        '  declared={"manifest.json", *(entry["path"] for entry in manifest["entries"])}',
+        '  entries_ok=actual == declared and all(len(z.read(entry["path"])) == entry["size"] and hashlib.sha256(z.read(entry["path"])).hexdigest() == entry["sha256"] for entry in manifest["entries"])',
+        '  print(json.dumps({"name":timeline.name,"tracks":[t.name for t in timeline.tracks],"shots":len(manifest["orderedShots"]),"otio":manifest["otio"]["version"],"entriesOk":entries_ok}))',
       ].join('\n'), packagePaths[0] as string], { env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: '1' } })
       expect(JSON.parse(parsed.stdout)).toEqual({
         name: `Qingmu ${fixture.episodeId} editorial handoff`,
-        tracks: ['Picture', 'Dialogue'], shots: 2, otio: '0.18.1',
+        tracks: ['Picture', 'Dialogue'], shots: 2, otio: '0.18.1', entriesOk: true,
       })
+      const tamperCheck = await execFile(join(writerRoot, '.venv/bin/python'), ['-c', [
+        'import sys,zipfile',
+        'from pathlib import Path',
+        'from jason.apps.studio.qingmu_editorial_package import verify_package',
+        'source,target=map(Path,sys.argv[1:3])',
+        'with zipfile.ZipFile(source) as archive:',
+        '  entries=[(entry.filename, archive.read(entry)) for entry in archive.infolist()]',
+        'with zipfile.ZipFile(target,"w",compression=zipfile.ZIP_STORED) as archive:',
+        '  for name,payload in entries:',
+        '    archive.writestr(name, payload + b" " if name == "timeline.otio" else payload)',
+        'try:',
+        '  verify_package(target)',
+        'except Exception as error:',
+        '  print(f"rejected:{type(error).__name__}:{error}")',
+        'else:',
+        '  raise SystemExit("tampered package accepted")',
+      ].join('\n'), packagePaths[0] as string, join(root, 'handoff-tampered.otio.zip')], {
+        env: { PATH: process.env.PATH, PYTHONPATH: join(writerRoot, 'backend/src'), PYTHONDONTWRITEBYTECODE: '1' },
+      })
+      expect(tamperCheck.stdout).toMatch(/^rejected:/u)
 
       const projectionUrl = `${fixture.baseUrl}/api/qingmu/projects/${encodeURIComponent(fixture.projectId)}/episodes/${encodeURIComponent(fixture.episodeId)}/editorial-handoff`
       const wavEntry = Object.keys(beforeStorage).find(path => path.endsWith('.wav'))

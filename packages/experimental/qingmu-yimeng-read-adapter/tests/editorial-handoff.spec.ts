@@ -35,6 +35,7 @@ function projection() {
   const source = {
     schema: 'jason.qingmu-editorial-handoff-source.v1', ...request,
     evidenceSourceSnapshotSha256: '1'.repeat(64), verificationInputsSha256: '2'.repeat(64),
+    scenes: [{ sceneId: 'scene-1', projectId: request.projectId, seriesId: 'series-1', name: '场景一' }],
     shots: [{
       frameId: 'frame-1', frameNo: 1, sceneId: 'scene-1', title: '镜头一',
       frameContentSha256: '3'.repeat(64), stackSnapshotSha256: '4'.repeat(64),
@@ -72,7 +73,8 @@ function projection() {
     { scope: 'shot', frameId: 'frame-1', code: 'editorial_handoff_selected_audio_missing' },
   ]
   const body = {
-    schema: 'jason.qingmu-editorial-handoff-draft.v1', ...request, source,
+    schema: 'jason.qingmu-editorial-handoff-draft.v1', authenticatedUserId: 'writer-user',
+    ...request, source,
     sourceSnapshotSha256: sha(source),
     summary: { shotCount: 1, selectedTakeCount: 1, authoritativeAudioCount: 0,
       totalDurationSec: 5, unresolvedCount: 3 },
@@ -111,6 +113,7 @@ describe('editorial handoff read adapter', () => {
       download: { available: false }, aokiVideoProductionHandoffReady: false,
       yimengEpisodeReleaseReady: false,
     } })
+    expect(JSON.stringify(result)).not.toContain('authenticatedUserId')
     expect(fetch).toHaveBeenCalledTimes(1)
     const calls = fetch.mock.calls as unknown as Array<[RequestInfo | URL, RequestInit?]>
     expect(calls[0]?.[0]).toBe(
@@ -304,6 +307,44 @@ describe('editorial handoff read adapter', () => {
     rehash(value)
     expect(() => normalizeEditorialHandoff(value, request, entry => sha(entry))).toThrow(
       'source.shots[].selectedTake binding is invalid',
+    )
+  })
+
+  it('rejects dangling or cross-project scenes and non-audio dialogue media', () => {
+    const dangling = projection()
+    dangling.source.shots[0]!.sceneId = 'scene-missing'
+    rehash(dangling)
+    expect(() => normalizeEditorialHandoff(dangling, request, entry => sha(entry))).toThrow(
+      'shot scene binding is invalid',
+    )
+
+    const cross = projection()
+    Reflect.set(cross.source.scenes[0]!, 'projectId', 'project-other')
+    rehash(cross)
+    expect(() => normalizeEditorialHandoff(cross, request, entry => sha(entry))).toThrow(
+      'scene scope is invalid',
+    )
+
+    const audio = projection()
+    const shot = audio.source.shots[0]!
+    Reflect.set(shot, 'audio', {
+      status: 'unavailable', scopeStatus: 'valid', candidateCount: 1,
+      asset: {
+        assetId: 'audio-1', sha256: '6'.repeat(64), recordedSha256: '6'.repeat(64), size: 14,
+        mimeType: 'video/webm', containerTypeStatus: 'verified', durationSec: 5,
+        packagePath: `media/${'6'.repeat(64)}.webm`, role: 'b6_dialogue_audio',
+        selectionStatus: 'Selected', qualityStatus: 'passed', materializationStatus: 'available',
+        qualityEvidenceValid: true, lineageComplete: true, formalizationComplete: true,
+        sourceComplete: true, source: {
+          taskId: 'task-audio', provider: 'fixture', model: 'fixture-voice',
+          providerTaskId: 'provider-audio', routeKey: 'sound.dialogue_tts',
+          inputHash: '7'.repeat(64), ownershipIntentSha256: '8'.repeat(64),
+        },
+      },
+    })
+    rehash(audio)
+    expect(() => normalizeEditorialHandoff(audio, request, entry => sha(entry))).toThrow(
+      'source.shots[].audio.asset binding is invalid',
     )
   })
 

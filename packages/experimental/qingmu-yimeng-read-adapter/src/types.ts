@@ -1201,6 +1201,14 @@ export interface YimengEditorialHandoffShot extends YimengJsonObject {
   readonly blockers: readonly string[]
 }
 
+/** Canonical Writer scene identity used to reject dangling storyboard bindings. */
+export interface YimengEditorialHandoffScene extends YimengJsonObject {
+  readonly sceneId: string
+  readonly projectId: string
+  readonly seriesId: string | null
+  readonly name: string
+}
+
 /** Read-only, SHA-bound handoff draft; false readiness flags are never approvals. */
 export interface YimengEditorialHandoffResponse extends YimengEpisodeEvidenceRequest {
   readonly schema: 'jason.qingmu-editorial-handoff-draft.v1'
@@ -1210,6 +1218,7 @@ export interface YimengEditorialHandoffResponse extends YimengEpisodeEvidenceReq
     readonly episodeId: string
     readonly evidenceSourceSnapshotSha256: string
     readonly verificationInputsSha256: string
+    readonly scenes: readonly YimengEditorialHandoffScene[]
     readonly shots: readonly YimengEditorialHandoffShot[]
     readonly audioPolicy: 'only_authoritatively_bound_assets'
   }

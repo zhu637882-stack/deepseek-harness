@@ -31,11 +31,16 @@ afterEach(async () => {
   }
 })
 
-async function host(fetchUpstream: typeof globalThis.fetch, token = 'host-token') {
+async function host(
+  fetchUpstream: typeof globalThis.fetch,
+  token = 'host-token',
+  readUserId: () => string = () => 'writer-user',
+) {
   temporaryRoot = await mkdtemp(join(tmpdir(), 'qingmu-download-test-'))
   const stateFile = join(temporaryRoot, 'state', 'downloads.json')
   const authorizer = new EditorialHandoffDownloadAuthorizer(stateFile)
   const access = authorizer.issue({
+    authenticatedUserId: 'writer-user',
     projectId: 'project-e8', episodeId: 'episode-e8',
     sourceSnapshotSha256: SOURCE_SHA, projectionSha256: PROJECTION_SHA,
   })
@@ -46,8 +51,18 @@ async function host(fetchUpstream: typeof globalThis.fetch, token = 'host-token'
       return () => { routes.delete(route.path) }
     },
   } as unknown as WebServer
+  const authenticatedFetch: typeof globalThis.fetch = async (input, init) => {
+    const url = input instanceof URL ? input
+      : new URL(typeof input === 'string' ? input : input.url)
+    if (url.pathname === '/api/auth/me') {
+      return new Response(JSON.stringify({ id: readUserId() }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      })
+    }
+    return fetchUpstream(input, init)
+  }
   disposeRoutes = registerEditorialHandoffDownload(registrar, {
-    baseUrl: 'http://127.0.0.1:18815', fetch: fetchUpstream, readToken: () => token,
+    baseUrl: 'http://127.0.0.1:18815', fetch: authenticatedFetch, readToken: () => token,
     authorizer, temporaryRoot,
   })
   server = createServer((req, res) => {
@@ -95,6 +110,7 @@ describe('editorial handoff Host download bridge', () => {
     expect(String(call?.[0])).toContain('/projects/project-e8/episodes/episode-e8/editorial-handoff/download')
     expect(call?.[1]).toMatchObject({ method: 'GET', headers: {
       authorization: 'Bearer host-token', accept: 'application/zip',
+      'x-qingmu-authenticated-user-id': 'writer-user',
     } })
 
     const status = await fetch(downloadUrl(base, access).replace('/download?', '/download-status?'))
@@ -117,7 +133,7 @@ describe('editorial handoff Host download bridge', () => {
   it('does not call Writer without a private Host read token', async () => {
     const fetchUpstream = vi.fn() as unknown as typeof globalThis.fetch
     const { base, access } = await host(fetchUpstream, '')
-    expect((await fetch(downloadUrl(base, access))).status).toBe(503)
+    expect((await fetch(downloadUrl(base, access))).status).toBe(403)
     expect(fetchUpstream).not.toHaveBeenCalled()
   })
 
@@ -156,6 +172,7 @@ describe('editorial handoff Host download bridge', () => {
     expect(JSON.parse(await readFile(stateFile, 'utf8'))).toHaveLength(1)
     const recovered = new EditorialHandoffDownloadAuthorizer(stateFile)
     expect(recovered.status({
+      authenticatedUserId: 'writer-user',
       projectId: 'project-e8', episodeId: 'episode-e8', requestId: access.requestId,
       sourceSnapshotSha256: SOURCE_SHA, projectionSha256: PROJECTION_SHA,
     }, access.capability)).toMatchObject({ state: 'succeeded', sha256: digest, size: bytes.length })
@@ -174,9 +191,37 @@ describe('editorial handoff Host download bridge', () => {
     const recovered = new EditorialHandoffDownloadAuthorizer(stateFile)
 
     expect(recovered.status({
+      authenticatedUserId: 'writer-user',
       projectId: 'project-e8', episodeId: 'episode-e8', requestId: access.requestId,
       sourceSnapshotSha256: SOURCE_SHA, projectionSha256: PROJECTION_SHA,
     }, access.capability)).toMatchObject({ state: 'failed', errorCode: 'host_restarted' })
     expect(fetchUpstream).not.toHaveBeenCalled()
+  })
+
+  it('binds capability consumption and terminal recovery to the Writer-authenticated user', async () => {
+    let userId = 'writer-user'
+    const bytes = Buffer.from('identity-bound-package')
+    const digest = createHash('sha256').update(bytes).digest('hex')
+    const fetchUpstream = vi.fn(async () => new Response(bytes, { status: 200, headers: {
+      'content-type': 'application/zip', 'content-length': String(bytes.length),
+      'x-qingmu-package-sha256': digest, 'x-qingmu-package-size': String(bytes.length),
+    } })) as unknown as typeof globalThis.fetch
+    const { base, access, stateFile } = await host(fetchUpstream, 'host-token', () => userId)
+    userId = 'different-user'
+    expect((await fetch(downloadUrl(base, access))).status).toBe(403)
+    expect((await fetch(downloadUrl(base, access).replace('/download?', '/download-status?'))).status).toBe(403)
+    expect(fetchUpstream).not.toHaveBeenCalled()
+    userId = 'writer-user'
+    const download = await fetch(downloadUrl(base, access))
+    expect(download.status).toBe(200)
+    expect(Buffer.from(await download.arrayBuffer())).toEqual(bytes)
+    const terminal = await fetch(downloadUrl(base, access).replace('/download?', '/download-status?'))
+    expect(await terminal.json()).toMatchObject({ status: 'succeeded', sha256: digest })
+    const recovered = new EditorialHandoffDownloadAuthorizer(stateFile)
+    expect(recovered.status({
+      authenticatedUserId: 'writer-user',
+      projectId: 'project-e8', episodeId: 'episode-e8', requestId: access.requestId,
+      sourceSnapshotSha256: SOURCE_SHA, projectionSha256: PROJECTION_SHA,
+    }, access.capability)).toMatchObject({ state: 'succeeded', sha256: digest })
   })
 })
