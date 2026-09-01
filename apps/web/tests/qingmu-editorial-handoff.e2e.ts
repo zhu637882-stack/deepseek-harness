@@ -272,13 +272,13 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
         const event = page.waitForEvent('download')
         await downloadButton.click()
         const download = await event
-        const failure = await download.failure()
-        if (failure !== null) {
-          throw new Error(`Editorial download failed: ${failure}; UI=${await dialog.innerText()}`)
+        const packagePath = join(root, `handoff-${attempt + 1}.otio.zip`)
+        try {
+          await download.saveAs(packagePath)
+        } catch (error) {
+          throw new Error(`Editorial download failed: ${String(error)}; UI=${await dialog.innerText()}`)
         }
         downloadRequests.push(download.url())
-        const packagePath = join(root, `handoff-${attempt + 1}.otio.zip`)
-        await download.saveAs(packagePath)
         packagePaths.push(packagePath)
         await expect.poll(() => dialog.getByText(/SHA-256:/u).count()).toBe(1)
       }
