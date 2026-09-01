@@ -387,6 +387,125 @@ describe('editorial handoff Host download bridge', () => {
     expect(fetchUpstream).toHaveBeenCalledTimes(5)
   })
 
+  it('previews and commits one formal master selection, then recovers a lost Writer response', async () => {
+    const assetId = 'asset_editorial_master_1'
+    const previewSha = '8'.repeat(64)
+    const idempotencyKey = `e8-master-select-${'9'.repeat(32)}`
+    const candidate = {
+      assetId, masterSha256: 'a'.repeat(64), materializedSha256: 'a'.repeat(64), byteSize: 2048,
+      mimeType: 'video/mp4', durationSec: 5, width: 720, height: 1280, fps: 24,
+      packageSha256: 'b'.repeat(64), sourceSnapshotSha256: SOURCE_SHA,
+      projectionSha256: PROJECTION_SHA, downloadRequestId: '1'.repeat(16),
+      importRequestId: '2'.repeat(16), preflightRequestId: '3'.repeat(16),
+      preflightSha256: 'c'.repeat(64), qualityStatus: 'pending', selectionStatus: 'Unselected',
+      isSelected: false, assetUpdatedAt: '2026-09-01T00:00:00Z', finalOutputId: null,
+      selectionReceiptId: null, selectedAt: null,
+    }
+    const releaseConditions = {
+      ready: false,
+      blockers: ['technical_qc_not_approved', 'content_approval_missing',
+        'release_manifest_not_frozen', 'human_signoff_missing'],
+    }
+    const flags = {
+      providerCalls: 0, stageStarted: false, approvalGranted: false,
+      releaseGranted: false, humanSignoffInferred: false,
+    }
+    const preview = {
+      schema: 'jason.qingmu-returned-master-selection-preview.v1',
+      projectId: 'project-e8', episodeId: 'episode-e8', candidate, currentFormalMaster: null,
+      selectionRevision: 0, previewSha256: previewSha, idempotencyKey, canConfirm: true,
+      hardBlockers: [], releaseConditions,
+      impact: {
+        promoteExistingCandidateInPlace: true, mediaCopies: 0,
+        revokePreviousFormalSelection: false, qualityApprovalGranted: false,
+        releaseGranted: false, humanSignoffInferred: false,
+      },
+      ...flags,
+    }
+    const requestSha = createHash('sha256').update(
+      `{"assetId":"${assetId}","previewSha256":"${previewSha}"}`,
+    ).digest('hex')
+    const result = {
+      schema: 'jason.qingmu-returned-master-selection-result.v1',
+      projectId: 'project-e8', episodeId: 'episode-e8', assetId,
+      finalOutputId: 'final_editorial_master_1', masterSha256: candidate.masterSha256,
+      sourceSnapshotSha256: SOURCE_SHA, projectionSha256: PROJECTION_SHA,
+      preflightSha256: candidate.preflightSha256, packageSha256: candidate.packageSha256,
+      selectionStatus: 'Selected', isSelected: true, qualityStatus: 'pending',
+      selectionRevision: 1, releaseAuthorityRevision: 1,
+      previousFormalAssetId: null, previousFinalOutputId: null, selectedBy: 'writer-user',
+      mediaCopies: 0, releaseConditions, idempotencyKey, requestSha256: requestSha,
+      commandReceiptId: 'receipt_selection_1', changeSetId: 'changeset_selection_1',
+      eventId: 'event_selection_1', selectedAt: '2026-09-01T00:00:01Z', ...flags,
+    }
+    let selectionPosts = 0
+    const fetchUpstream = vi.fn(async (input: string | URL | Request) => {
+      const target = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const url = new URL(target)
+      if (url.pathname.endsWith('/returned-master-selection-status')) {
+        return new Response(JSON.stringify({
+          schema: 'jason.qingmu-returned-master-selection-status.v1',
+          projectId: 'project-e8', episodeId: 'episode-e8', selectionRevision: 0,
+          releaseAuthority: {
+            schema: 'jason.episode-release-authority.v2', revision: 0,
+            currentFinalOutputId: null, currentFinalAssetId: null,
+            acceptedFinalOutputId: null, acceptedFinalAssetId: null,
+            acceptedFinalSha256: null, acceptedReadinessToken: null,
+          },
+          currentFormalMaster: null, candidates: [candidate], releaseConditions, ...flags,
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.pathname.endsWith('/returned-master-selection-preview')) {
+        return new Response(JSON.stringify(preview), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url.pathname.endsWith('/returned-master-selections')) {
+        selectionPosts += 1
+        const response = new Response(JSON.stringify(result), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+        Object.defineProperty(response, 'arrayBuffer', {
+          value: async () => { throw new Error('simulated committed response loss') },
+        })
+        return response
+      }
+      if (url.pathname.includes('/returned-master-selections/')) {
+        expect(url.searchParams.get('requestSha256')).toBe(requestSha)
+        return new Response(JSON.stringify(result), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+      }
+      return new Response('{}', { status: 404 })
+    }) as unknown as typeof globalThis.fetch
+    const { base } = await host(fetchUpstream)
+    const scope = new URLSearchParams({ projectId: 'project-e8', episodeId: 'episode-e8' })
+    const status = await fetch(`${base}/api/qingmu/editorial-handoff/returned-master-selection-status?${scope.toString()}`)
+    expect(status.status).toBe(200)
+    expect(await status.json()).toMatchObject({ currentFormalMaster: null, candidates: [{ assetId }] })
+    const previewResponse = await fetch(
+      `${base}/api/qingmu/editorial-handoff/returned-master-selection-preview?${scope.toString()}`,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ assetId }) },
+    )
+    expect(previewResponse.status).toBe(200)
+    expect(await previewResponse.json()).toMatchObject({ canConfirm: true, previewSha256: previewSha })
+    const confirm = await fetch(
+      `${base}/api/qingmu/editorial-handoff/returned-master-selection?${scope.toString()}`,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+        assetId, previewSha256: previewSha, idempotencyKey,
+      }) },
+    )
+    expect(confirm.status).toBe(200)
+    expect(await confirm.json()).toEqual(result)
+    expect(selectionPosts).toBe(1)
+    const malformed = await fetch(
+      `${base}/api/qingmu/editorial-handoff/returned-master-selection?${scope.toString()}`,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ assetId }) },
+    )
+    expect(malformed.status).toBe(400)
+    expect(selectionPosts).toBe(1)
+  })
+
   it('writes every upload byte when the spool writer reports partial progress', async () => {
     const stored: number[] = []
     const writer = {
@@ -667,8 +786,11 @@ describe('editorial handoff Host download bridge', () => {
     const download = await fetch(downloadUrl(base, access))
     expect(download.status).toBe(200)
     expect(Buffer.from(await download.arrayBuffer())).toEqual(bytes)
-    const terminal = await fetch(downloadUrl(base, access).replace('/download?', '/download-status?'))
-    expect(await terminal.json()).toMatchObject({ status: 'succeeded', sha256: digest })
+    const statusUrl = downloadUrl(base, access).replace('/download?', '/download-status?')
+    await expect.poll(async () => {
+      const terminal = await fetch(statusUrl)
+      return await terminal.json()
+    }).toMatchObject({ status: 'succeeded', sha256: digest })
     const recovered = new EditorialHandoffDownloadAuthorizer(stateFile)
     expect(recovered.status({
       authenticatedUserId: 'writer-user',

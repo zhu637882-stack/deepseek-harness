@@ -49,6 +49,8 @@
 .candidateShelf li > div { display: flex; justify-content: space-between; gap: 12px; }
 .candidateShelf li > div span { color: var(--qingmu-accent); font-weight: 700; }
 .candidateShelf li p { color: #b9d0c1; overflow-wrap: anywhere; }
+.confirmation { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid #4b7f63; border-radius: 8px; background: #0d1d16; color: #e8fff1; }
+.confirmation input { flex: 0 0 auto; margin-top: 3px; accent-color: var(--qingmu-accent); }
 .empty { color: var(--dsw-alias-label-secondary); }
 details p { overflow-wrap: anywhere; }
 @media (max-width: 1100px) {

@@ -7,6 +7,8 @@ import { zh, type QingmuCockpitKey } from '../src/client/locales.ts'
 
 const SCOPE = { projectId: 'project-e8', episodeId: 'episode-e8' }
 const t = (key: QingmuCockpitKey) => zh[key]
+const fetchUrl = (input: string | URL | Request): string => input instanceof Request
+  ? input.url : input instanceof URL ? input.href : input
 
 function handoff(): YimengEditorialHandoffResponse {
   return {
@@ -148,11 +150,19 @@ describe('editorial handoff panel', () => {
       approved: false, published: false, idempotencyKey: 'd'.repeat(64),
       commandReceiptId: 'receipt-candidate-1', savedAt: '2026-09-01T00:00:00Z',
     }
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        schema: 'jason.qingmu-returned-master-candidates.v1', candidates: [candidate],
-      }), { status: 200, headers: { 'content-type': 'application/json' } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ code: 'candidate_materialization_tampered' }), { status: 409 }))
+    let candidateReads = 0
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = fetchUrl(input)
+      if (url.includes('returned-master-selection-status')) {
+        return new Response(JSON.stringify({ code: 'selection_not_available' }), { status: 409 })
+      }
+      candidateReads += 1
+      return candidateReads === 1
+        ? new Response(JSON.stringify({
+          schema: 'jason.qingmu-returned-master-candidates.v1', candidates: [candidate],
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+        : new Response(JSON.stringify({ code: 'candidate_materialization_tampered' }), { status: 409 })
+    })
     vi.stubGlobal('fetch', fetchMock)
     const editorialHandoff = vi.fn().mockRejectedValue(new Error('internal: SOURCE_DRIFT'))
     const port = { editorialHandoff } as unknown as QingmuYimengReadPort
@@ -164,7 +174,88 @@ describe('editorial handoff panel', () => {
     fireEvent.click(read)
     await waitFor(() => { expect(screen.queryByText(zh.handoffCandidateUnselected)).toBeNull() })
     expect(screen.getByText(/candidate_list_failed/u)).toBeTruthy()
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+  })
+
+  it('previews and explicitly selects the same returned candidate without implying QC or release', async () => {
+    const candidate = {
+      schema: 'jason.qingmu-returned-master-candidate-result.v1', ...SCOPE,
+      assetId: 'asset-candidate-1', masterSha256: '8'.repeat(64), byteSize: 2048,
+      mimeType: 'video/mp4', packageSha256: '9'.repeat(64), sourceSnapshotSha256: 'a'.repeat(64),
+      projectionSha256: 'b'.repeat(64), preflightSha256: 'c'.repeat(64),
+      selectionStatus: 'Unselected', isSelected: false, qualityStatus: 'pending',
+      approved: false, published: false, idempotencyKey: 'd'.repeat(64),
+      commandReceiptId: 'receipt-candidate-1', savedAt: '2026-09-01T00:00:00Z',
+    }
+    const selectionCandidate = {
+      assetId: candidate.assetId, masterSha256: candidate.masterSha256,
+      mimeType: 'video/mp4', byteSize: candidate.byteSize, qualityStatus: 'pending',
+      selectionStatus: 'Unselected', isSelected: false, finalOutputId: null,
+      selectionReceiptId: null, selectedAt: null, current: false,
+    }
+    const releaseConditions = { ready: false, blockers: [
+      'technical_qc_not_approved', 'content_approval_missing',
+      'release_manifest_not_frozen', 'human_signoff_missing',
+    ] }
+    let selected = false
+    let selectionPosts = 0
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = fetchUrl(input)
+      if (url.includes('returned-master-candidates')) {
+        return new Response(JSON.stringify({
+          schema: 'jason.qingmu-returned-master-candidates.v1', candidates: [candidate],
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('returned-master-selection-status')) {
+        const current = selected ? {
+          ...selectionCandidate, selectionStatus: 'Selected', isSelected: true,
+          finalOutputId: 'final-1', selectionReceiptId: 'receipt-selection-1',
+          selectedAt: '2026-09-01T00:00:01Z', current: true,
+        } : selectionCandidate
+        return new Response(JSON.stringify({
+          schema: 'jason.qingmu-returned-master-selection-status.v1', ...SCOPE,
+          selectionRevision: selected ? 1 : 0,
+          currentFormalMaster: selected ? current : null, candidates: [current], releaseConditions,
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('returned-master-selection-preview')) {
+        return new Response(JSON.stringify({
+          schema: 'jason.qingmu-returned-master-selection-preview.v1', ...SCOPE,
+          candidate: selectionCandidate, currentFormalMaster: null,
+          previewSha256: 'e'.repeat(64), idempotencyKey: `e8-master-select-${'f'.repeat(32)}`,
+          canConfirm: true, hardBlockers: [], releaseConditions,
+          impact: { mediaCopies: 0, revokePreviousFormalSelection: false },
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('returned-master-selection') && init?.method === 'POST') {
+        selectionPosts += 1
+        selected = true
+        return new Response(JSON.stringify({
+          schema: 'jason.qingmu-returned-master-selection-result.v1', ...SCOPE,
+          assetId: candidate.assetId, finalOutputId: 'final-1', selectionStatus: 'Selected',
+          qualityStatus: 'pending', commandReceiptId: 'receipt-selection-1',
+          selectedBy: 'authenticated-test-user', selectedAt: '2026-09-01T00:00:01Z',
+          releaseConditions,
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      return new Response('{}', { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const editorialHandoff = vi.fn().mockResolvedValue(handoff())
+    const port = { editorialHandoff } as unknown as QingmuYimengReadPort
+    render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
+    await waitFor(() => { expect(screen.getByText(/雨夜街口/u)).toBeTruthy() })
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffCandidateRead }))
+    await waitFor(() => { expect(screen.getByRole('button', { name: zh.handoffSelectionPreview })).toBeTruthy() })
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffSelectionPreview }))
+    await waitFor(() => { expect(screen.getByText(zh.handoffSelectionPreviewTitle)).toBeTruthy() })
+    expect(screen.getByText(zh.handoffSelectionReleaseBlocked)).toBeTruthy()
+    fireEvent.click(screen.getByRole('checkbox', { name: zh.handoffSelectionConfirm }))
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffSelectionSave }))
+    await waitFor(() => { expect(screen.getByText(zh.handoffSelectionSaved)).toBeTruthy() })
+    expect(screen.getByText(zh.handoffSelectionSavedBoundary)).toBeTruthy()
+    await waitFor(() => { expect(screen.getByText(zh.handoffSelectionCurrent)).toBeTruthy() })
+    expect(selectionPosts).toBe(1)
   })
 
   it('clears old media and download state before a failed refresh settles', async () => {

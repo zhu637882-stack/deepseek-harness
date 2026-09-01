@@ -28,8 +28,18 @@ interface Fixture {
 interface BoundaryFacts {
   readonly assetCount: number
   readonly protectedCounts: Readonly<Record<string, number | null>>
+  readonly finalOutputCount: number
+  readonly releaseAuthority: null | {
+    readonly revision: number
+    readonly current_final_output_id: string
+    readonly current_final_asset_id: string
+    readonly accepted_final_output_id: string | null
+    readonly accepted_final_asset_id: string | null
+  }
   readonly candidates: readonly {
     readonly id: string
+    readonly asset_type: string
+    readonly role: string
     readonly local_path: string
     readonly sha256: string
     readonly selection_status: string
@@ -44,10 +54,12 @@ async function readBoundaryFacts(writerRoot: string, sqlitePath: string): Promis
     'conn=sqlite3.connect(sys.argv[1])',
     'conn.row_factory=sqlite3.Row',
     'tables={r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type=\'table\'")}',
-    'names=["final_outputs","prompt_ir_sets","human_decisions","generation_tasks","stage_runs","release_manifests"]',
+    'names=["prompt_ir_sets","human_decisions","generation_tasks","stage_runs","release_manifests"]',
     'counts={name:(conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0] if name in tables else None) for name in names}',
-    'candidates=[dict(r) for r in conn.execute("SELECT id,local_path,sha256,selection_status,quality_status,is_selected FROM assets WHERE role=\'editorial_master_candidate\' ORDER BY id")]',
-    'print(json.dumps({"assetCount":conn.execute("SELECT COUNT(*) FROM assets").fetchone()[0],"protectedCounts":counts,"candidates":candidates},sort_keys=True))',
+    'candidates=[dict(r) for r in conn.execute("SELECT id,asset_type,role,local_path,sha256,selection_status,quality_status,is_selected FROM assets WHERE id LIKE \'asset_editorial_master_%\' ORDER BY id")]',
+    'authority=(dict(conn.execute("SELECT revision,current_final_output_id,current_final_asset_id,accepted_final_output_id,accepted_final_asset_id FROM episode_release_authority").fetchone()) if "episode_release_authority" in tables and conn.execute("SELECT COUNT(*) FROM episode_release_authority").fetchone()[0] else None)',
+    'final_count=(conn.execute("SELECT COUNT(*) FROM final_outputs").fetchone()[0] if "final_outputs" in tables else 0)',
+    'print(json.dumps({"assetCount":conn.execute("SELECT COUNT(*) FROM assets").fetchone()[0],"protectedCounts":counts,"finalOutputCount":final_count,"releaseAuthority":authority,"candidates":candidates},sort_keys=True))',
   ].join('\n'), sqlitePath], { env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: '1' } })
   return JSON.parse(result.stdout) as BoundaryFacts
 }
@@ -103,6 +115,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
     const downloadRequests: string[] = []
     const masterRequests: string[] = []
     const candidateRequests: string[] = []
+    const selectionRequests: string[] = []
 
     async function startFixture(resume: boolean): Promise<Fixture> {
       if (root === undefined || writerRoot === undefined) throw new Error('Fixture roots are required')
@@ -186,6 +199,9 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
         if (url.pathname === '/api/qingmu/editorial-handoff/returned-master-candidate' && request.method() === 'POST') {
           candidateRequests.push(request.url())
         }
+        if (url.pathname === '/api/qingmu/editorial-handoff/returned-master-selection' && request.method() === 'POST') {
+          selectionRequests.push(request.url())
+        }
       })
       await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
       await page.getByRole('button', { name: '进入青木 OS' }).click()
@@ -205,7 +221,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       }
     })
 
-    it('downloads exact OTIO, preflights and saves one unselected master candidate, then recovers after restart', async () => {
+    it('promotes the exact returned candidate to formal master and recovers authority after restart', async () => {
       if (scaffold === undefined || browser === undefined || writerRoot === undefined || root === undefined) throw new Error('E2E dependencies were not started')
       await page.getByRole('button', { name: '青木制作台', exact: true }).click()
       const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
@@ -219,10 +235,14 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
         dialog.getByRole('alert').waitFor({ timeout: 30_000 }).then(() => 'retry' as const),
       ])
       if (firstRead === 'retry') {
-        for (let attempt = 0; attempt < 3 && !await shotList.isVisible(); attempt += 1) {
+        for (let attempt = 0; attempt < 12 && !await shotList.isVisible(); attempt += 1) {
           await page.waitForTimeout(500)
+          const response = page.waitForResponse(candidate => (
+            new URL(candidate.url()).pathname === '/qingmu-yimeng/editorialHandoff'
+          ), { timeout: 10_000 })
           await dialog.getByRole('button', { name: '刷新交接事实' }).click()
-          await shotList.waitFor({ timeout: 10_000 }).catch(() => undefined)
+          await (await response).finished()
+          await shotList.waitFor({ timeout: 1_000 }).catch(() => undefined)
         }
         if (!await shotList.isVisible()) {
           throw new Error(`Editorial handoff did not recover: ${await dialog.innerText()}`)
@@ -305,12 +325,43 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       expect(savedFacts.assetCount).toBe(beforeBoundaryFacts.assetCount + 1)
       expect(savedFacts.protectedCounts).toEqual(beforeBoundaryFacts.protectedCounts)
       expect(savedFacts.candidates).toEqual([expect.objectContaining({
+        asset_type: 'video',
+        role: 'editorial_master_candidate',
         sha256: masterSha,
         selection_status: 'Unselected',
         quality_status: 'pending',
         is_selected: 0,
       })])
       const candidatePath = join(fixture.storageRoot, savedFacts.candidates[0]?.local_path ?? '')
+      expect(createHash('sha256').update(await readFile(candidatePath)).digest('hex')).toBe(masterSha)
+      const selectPreview = dialog.getByRole('button', { name: '预览设为正式母版', exact: true })
+      await expect.poll(() => selectPreview.isEnabled(), { timeout: 10_000 }).toBe(true)
+      await selectPreview.click()
+      await dialog.getByText('正式母版选择预览', { exact: true }).waitFor()
+      expect(await dialog.getByText('同一资产与原始字节就地晋级，不创建第二份媒体。').count()).toBe(1)
+      expect(await dialog.getByText('选择后仍受技术质检、内容批准、发布清单与用户签收门禁阻断。').count()).toBe(1)
+      await dialog.getByRole('checkbox', {
+        name: '我确认选择这份候选作为当前正式母版；这不是内容批准、发布或最终签收。',
+      }).check()
+      await dialog.getByRole('button', { name: '确认选择正式母版', exact: true }).click()
+      await dialog.getByText('正式母版选择已由易梦原回执确认', { exact: true }).waitFor()
+      await dialog.getByText('已选为当前正式母版 · 待质检 · 未发布', { exact: true }).waitFor()
+      expect(selectionRequests).toHaveLength(1)
+      const selectedFacts = await readBoundaryFacts(writerRoot, fixture.sqlitePath)
+      expect(selectedFacts.assetCount).toBe(savedFacts.assetCount)
+      expect(selectedFacts.protectedCounts).toEqual(beforeBoundaryFacts.protectedCounts)
+      expect(selectedFacts.finalOutputCount).toBe(beforeBoundaryFacts.finalOutputCount + 1)
+      expect(selectedFacts.candidates).toEqual([expect.objectContaining({
+        id: savedFacts.candidates[0]?.id,
+        asset_type: 'final_video', role: 'b7_final', sha256: masterSha,
+        selection_status: 'Selected', quality_status: 'pending', is_selected: 1,
+      })])
+      expect(selectedFacts.releaseAuthority).toMatchObject({
+        revision: (beforeBoundaryFacts.releaseAuthority?.revision ?? 0) + 1,
+        current_final_asset_id: savedFacts.candidates[0]?.id,
+        accepted_final_output_id: null,
+        accepted_final_asset_id: null,
+      })
       expect(createHash('sha256').update(await readFile(candidatePath)).digest('hex')).toBe(masterSha)
       const masterRequestUrl = masterRequests.at(-1)
       if (masterRequestUrl === undefined) throw new Error('Master preflight request URL missing')
@@ -351,7 +402,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
 
       for (const viewport of [{ width: 1280, height: 800 }, { width: 1440, height: 900 }]) {
         await page.setViewportSize(viewport)
-        const candidateConclusion = dialog.getByText('未选择 · 未批准 · 未发布', { exact: true })
+        const candidateConclusion = dialog.getByText('已选为当前正式母版 · 待质检 · 未发布', { exact: true })
         await candidateConclusion.scrollIntoViewIfNeeded()
         const conclusionBox = await candidateConclusion.boundingBox()
         expect(conclusionBox).not.toBeNull()
@@ -379,7 +430,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       await freshDialog.getByRole('tab', { name: '费用与交付', exact: true }).click()
       const readCandidates = freshDialog.getByRole('button', { name: '读取已保存候选', exact: true })
       await readCandidates.waitFor({ timeout: 10_000 })
-      const recoveredCandidate = freshDialog.getByText('未选择 · 未批准 · 未发布', { exact: true })
+      const recoveredCandidate = freshDialog.getByText('已选为当前正式母版 · 待质检 · 未发布', { exact: true })
       const readCandidateShelf = async () => {
         for (let attempt = 0; attempt < 3; attempt += 1) {
           await readCandidates.click()
@@ -404,11 +455,12 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       expect(await page.locator('body').innerHTML()).not.toContain(fixture.token)
       expect(createHash('sha256').update(await readFile(fixture.sqlitePath)).digest('hex')).not.toBe(beforeDb)
       const finalFacts = await readBoundaryFacts(writerRoot, fixture.sqlitePath)
-      expect(finalFacts).toEqual(savedFacts)
+      expect(finalFacts).toEqual(selectedFacts)
       const finalStorage = await fingerprintFiles(fixture.storageRoot)
       expect(Object.entries(beforeStorage).every(([path, digest]) => finalStorage[path] === digest)).toBe(true)
       expect(Object.keys(finalStorage)).toHaveLength(Object.keys(beforeStorage).length + 1)
       expect(candidateRequests).toHaveLength(1)
+      expect(selectionRequests).toHaveLength(1)
     }, 120_000)
   },
 )

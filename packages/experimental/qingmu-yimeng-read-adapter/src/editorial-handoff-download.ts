@@ -30,6 +30,9 @@ const MASTER_STATUS_PATH = '/api/qingmu/editorial-handoff/master-preflight-statu
 const CANDIDATE_PATH = '/api/qingmu/editorial-handoff/returned-master-candidate'
 const CANDIDATE_STATUS_PATH = '/api/qingmu/editorial-handoff/returned-master-candidate-status'
 const CANDIDATE_LIST_PATH = '/api/qingmu/editorial-handoff/returned-master-candidates'
+const SELECTION_STATUS_PATH = '/api/qingmu/editorial-handoff/returned-master-selection-status'
+const SELECTION_PREVIEW_PATH = '/api/qingmu/editorial-handoff/returned-master-selection-preview'
+const SELECTION_CONFIRM_PATH = '/api/qingmu/editorial-handoff/returned-master-selection'
 const SHA256 = /^[0-9a-f]{64}$/
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/
 const REQUEST_ID = /^[a-f0-9-]{16,80}$/
@@ -223,6 +226,128 @@ export interface EditorialMasterCandidateResult {
   readonly stageStarted: false
   readonly approvalGranted: false
   readonly selectionGranted: false
+  readonly releaseGranted: false
+  readonly humanSignoffInferred: false
+}
+
+/** Exact returned-master candidate facts projected from Writer authority. */
+export interface EditorialMasterSelectionCandidate {
+  readonly assetId: string
+  readonly masterSha256: string
+  readonly materializedSha256: string
+  readonly byteSize: number
+  readonly mimeType: 'video/mp4' | 'video/quicktime' | 'video/webm'
+  readonly durationSec: number
+  readonly width: number
+  readonly height: number
+  readonly fps: number
+  readonly packageSha256: string
+  readonly sourceSnapshotSha256: string
+  readonly projectionSha256: string
+  readonly downloadRequestId: string
+  readonly importRequestId: string
+  readonly preflightRequestId: string
+  readonly preflightSha256: string
+  readonly qualityStatus: 'pending'
+  readonly selectionStatus: 'Unselected' | 'Selected' | 'Stale'
+  readonly isSelected: boolean
+  readonly assetUpdatedAt: string
+  readonly finalOutputId: string | null
+  readonly selectionReceiptId: string | null
+  readonly selectedAt: string | null
+  readonly current?: boolean
+}
+
+/** Fail-closed preview for promoting one existing candidate without copying media. */
+export interface EditorialMasterSelectionPreview {
+  readonly schema: 'jason.qingmu-returned-master-selection-preview.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly candidate: EditorialMasterSelectionCandidate
+  readonly currentFormalMaster: {
+    readonly finalOutputId: string
+    readonly assetId: string
+    readonly authorityRevision: number
+  } | null
+  readonly selectionRevision: number
+  readonly previewSha256: string
+  readonly idempotencyKey: string
+  readonly canConfirm: boolean
+  readonly hardBlockers: readonly string[]
+  readonly releaseConditions: { readonly ready: false; readonly blockers: readonly string[] }
+  readonly impact: {
+    readonly promoteExistingCandidateInPlace: true
+    readonly mediaCopies: 0
+    readonly revokePreviousFormalSelection: boolean
+    readonly qualityApprovalGranted: false
+    readonly releaseGranted: false
+    readonly humanSignoffInferred: false
+  }
+  readonly providerCalls: 0
+  readonly stageStarted: false
+  readonly approvalGranted: false
+  readonly releaseGranted: false
+  readonly humanSignoffInferred: false
+}
+
+/** Durable Writer receipt for the authenticated formal-master selection. */
+export interface EditorialMasterSelectionResult {
+  readonly schema: 'jason.qingmu-returned-master-selection-result.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly assetId: string
+  readonly finalOutputId: string
+  readonly masterSha256: string
+  readonly sourceSnapshotSha256: string
+  readonly projectionSha256: string
+  readonly preflightSha256: string
+  readonly packageSha256: string
+  readonly selectionStatus: 'Selected'
+  readonly isSelected: true
+  readonly qualityStatus: 'pending'
+  readonly selectionRevision: number
+  readonly releaseAuthorityRevision: number
+  readonly previousFormalAssetId: string | null
+  readonly previousFinalOutputId: string | null
+  readonly selectedBy: string
+  readonly mediaCopies: 0
+  readonly releaseConditions: { readonly ready: false; readonly blockers: readonly string[] }
+  readonly idempotencyKey: string
+  readonly requestSha256: string
+  readonly commandReceiptId: string
+  readonly changeSetId: string
+  readonly eventId: string
+  readonly selectedAt: string
+  readonly providerCalls: 0
+  readonly stageStarted: false
+  readonly approvalGranted: false
+  readonly releaseGranted: false
+  readonly humanSignoffInferred: false
+}
+
+/** Current and historical returned-master selection authority for one episode. */
+export interface EditorialMasterSelectionStatus {
+  readonly schema: 'jason.qingmu-returned-master-selection-status.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly selectionRevision: number
+  readonly releaseAuthority: {
+    readonly schema: 'jason.episode-release-authority.v2'
+    readonly revision: number
+    readonly currentFinalOutputId: string | null
+    readonly currentFinalAssetId: string | null
+    readonly acceptedFinalOutputId: string | null
+    readonly acceptedFinalAssetId: string | null
+    readonly acceptedFinalSha256: string | null
+    readonly acceptedReadinessToken: string | null
+    readonly updatedAt?: string
+  }
+  readonly currentFormalMaster: EditorialMasterSelectionCandidate | null
+  readonly candidates: readonly EditorialMasterSelectionCandidate[]
+  readonly releaseConditions: { readonly ready: false; readonly blockers: readonly string[] }
+  readonly providerCalls: 0
+  readonly stageStarted: false
+  readonly approvalGranted: false
   readonly releaseGranted: false
   readonly humanSignoffInferred: false
 }
@@ -877,9 +1002,10 @@ export class EditorialHandoffDownloadAuthorizer {
     if (!existsSync(masterFile)) return
     const raw = JSON.parse(readFileSync(masterFile, 'utf8')) as unknown
     if (!Array.isArray(raw)) throw new Error('editorial handoff: master state is invalid')
+    const values: unknown[] = raw
     let changed = false
     const canonical = new Map<string, PersistedMaster>()
-    for (const value of raw) {
+    for (const value of values) {
       const item = typeof value === 'object' && value !== null
         ? value as Record<string, unknown> : undefined
       const migrated = item !== undefined && item.receiptRequestId === undefined
@@ -1395,6 +1521,152 @@ function normalizeCandidateList(value: unknown): readonly EditorialMasterCandida
     ? candidates : undefined
 }
 
+function safeSelectionPayload(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const serialized = JSON.stringify(value)
+  if (serialized.length > 256 * 1024 || serialized.includes('/Users/')
+    || serialized.includes('Bearer ') || serialized.includes('local_path')
+    || serialized.includes('claimToken') || serialized.includes('storageKey')) return undefined
+  return value as Record<string, unknown>
+}
+
+function safeNullableId(value: unknown): boolean {
+  return value === null || safeIdentifier(typeof value === 'string' ? value : null)
+}
+
+function safeStringList(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.length <= 100
+    && value.every(entry => typeof entry === 'string' && safeIdentifier(entry))
+}
+
+function normalizeSelectionCandidate(value: unknown): EditorialMasterSelectionCandidate | undefined {
+  const item = safeSelectionPayload(value)
+  if (item === undefined) return undefined
+  const positive = (field: string, integer = false): boolean => {
+    const number = item[field]
+    return typeof number === 'number' && Number.isFinite(number) && number > 0
+      && (!integer || Number.isSafeInteger(number))
+  }
+  if (!safeIdentifier(typeof item.assetId === 'string' ? item.assetId : null)
+    || typeof item.masterSha256 !== 'string' || !SHA256.test(item.masterSha256)
+    || item.materializedSha256 !== item.masterSha256
+    || typeof item.packageSha256 !== 'string' || !SHA256.test(item.packageSha256)
+    || typeof item.sourceSnapshotSha256 !== 'string' || !SHA256.test(item.sourceSnapshotSha256)
+    || typeof item.projectionSha256 !== 'string' || !SHA256.test(item.projectionSha256)
+    || typeof item.preflightSha256 !== 'string' || !SHA256.test(item.preflightSha256)
+    || !REQUEST_ID.test(String(item.downloadRequestId)) || !REQUEST_ID.test(String(item.importRequestId))
+    || !REQUEST_ID.test(String(item.preflightRequestId))
+    || !positive('byteSize', true) || !positive('durationSec') || !positive('width', true)
+    || !positive('height', true) || !positive('fps')
+    || !['video/mp4', 'video/quicktime', 'video/webm'].includes(String(item.mimeType))
+    || item.qualityStatus !== 'pending'
+    || !['Unselected', 'Selected', 'Stale'].includes(String(item.selectionStatus))
+    || typeof item.isSelected !== 'boolean'
+    || (item.isSelected !== (item.selectionStatus === 'Selected'))
+    || typeof item.assetUpdatedAt !== 'string' || item.assetUpdatedAt.length < 10 || item.assetUpdatedAt.length > 64
+    || !safeNullableId(item.finalOutputId) || !safeNullableId(item.selectionReceiptId)
+    || !(item.selectedAt === null || (typeof item.selectedAt === 'string'
+      && item.selectedAt.length >= 10 && item.selectedAt.length <= 64))
+    || !(item.current === undefined || typeof item.current === 'boolean')) return undefined
+  return value as EditorialMasterSelectionCandidate
+}
+
+function validSelectionFlags(item: Record<string, unknown>): boolean {
+  return item.providerCalls === 0 && item.stageStarted === false
+    && item.approvalGranted === false && item.releaseGranted === false
+    && item.humanSignoffInferred === false
+}
+
+function validReleaseConditions(value: unknown): boolean {
+  const item = typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown> : undefined
+  return item !== undefined && item.ready === false && safeStringList(item.blockers)
+    && item.blockers.includes('technical_qc_not_approved')
+    && item.blockers.includes('human_signoff_missing')
+}
+
+function normalizeSelectionPreview(value: unknown): EditorialMasterSelectionPreview | undefined {
+  const item = safeSelectionPayload(value)
+  if (item === undefined) return undefined
+  const current = item.currentFormalMaster as Record<string, unknown> | null | undefined
+  const impact = item.impact as Record<string, unknown> | undefined
+  if (item.schema !== 'jason.qingmu-returned-master-selection-preview.v1'
+    || !safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
+    || !safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
+    || normalizeSelectionCandidate(item.candidate) === undefined
+    || typeof item.selectionRevision !== 'number' || !Number.isSafeInteger(item.selectionRevision)
+    || item.selectionRevision < 0 || typeof item.previewSha256 !== 'string' || !SHA256.test(item.previewSha256)
+    || typeof item.idempotencyKey !== 'string' || !IDENTIFIER.test(item.idempotencyKey)
+    || typeof item.canConfirm !== 'boolean' || !safeStringList(item.hardBlockers)
+    || item.canConfirm !== (item.hardBlockers.length === 0)
+    || !validReleaseConditions(item.releaseConditions) || !validSelectionFlags(item)
+    || !(current === null || (current !== undefined
+      && safeIdentifier(typeof current.finalOutputId === 'string' ? current.finalOutputId : null)
+      && safeIdentifier(typeof current.assetId === 'string' ? current.assetId : null)
+      && typeof current.authorityRevision === 'number' && Number.isSafeInteger(current.authorityRevision)
+      && current.authorityRevision > 0))
+    || impact === undefined || impact.promoteExistingCandidateInPlace !== true
+    || impact.mediaCopies !== 0 || typeof impact.revokePreviousFormalSelection !== 'boolean'
+    || impact.qualityApprovalGranted !== false || impact.releaseGranted !== false
+    || impact.humanSignoffInferred !== false) return undefined
+  return value as EditorialMasterSelectionPreview
+}
+
+function normalizeSelectionResult(value: unknown): EditorialMasterSelectionResult | undefined {
+  const item = safeSelectionPayload(value)
+  if (item === undefined) return undefined
+  const nullableIds = ['previousFormalAssetId', 'previousFinalOutputId']
+  if (item.schema !== 'jason.qingmu-returned-master-selection-result.v1'
+    || !safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
+    || !safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
+    || !safeIdentifier(typeof item.assetId === 'string' ? item.assetId : null)
+    || !safeIdentifier(typeof item.finalOutputId === 'string' ? item.finalOutputId : null)
+    || !safeIdentifier(typeof item.selectedBy === 'string' ? item.selectedBy : null)
+    || nullableIds.some(field => !safeNullableId(item[field]))
+    || typeof item.masterSha256 !== 'string' || !SHA256.test(item.masterSha256)
+    || typeof item.sourceSnapshotSha256 !== 'string' || !SHA256.test(item.sourceSnapshotSha256)
+    || typeof item.projectionSha256 !== 'string' || !SHA256.test(item.projectionSha256)
+    || typeof item.preflightSha256 !== 'string' || !SHA256.test(item.preflightSha256)
+    || typeof item.packageSha256 !== 'string' || !SHA256.test(item.packageSha256)
+    || typeof item.requestSha256 !== 'string' || !SHA256.test(item.requestSha256)
+    || item.selectionStatus !== 'Selected' || item.isSelected !== true || item.qualityStatus !== 'pending'
+    || typeof item.selectionRevision !== 'number' || !Number.isSafeInteger(item.selectionRevision)
+    || item.selectionRevision <= 0 || typeof item.releaseAuthorityRevision !== 'number'
+    || !Number.isSafeInteger(item.releaseAuthorityRevision) || item.releaseAuthorityRevision <= 0
+    || item.mediaCopies !== 0 || !validReleaseConditions(item.releaseConditions)
+    || !safeIdentifier(typeof item.idempotencyKey === 'string' ? item.idempotencyKey : null)
+    || !safeIdentifier(typeof item.commandReceiptId === 'string' ? item.commandReceiptId : null)
+    || !safeIdentifier(typeof item.changeSetId === 'string' ? item.changeSetId : null)
+    || !safeIdentifier(typeof item.eventId === 'string' ? item.eventId : null)
+    || typeof item.selectedAt !== 'string' || item.selectedAt.length < 10 || item.selectedAt.length > 64
+    || !validSelectionFlags(item)) return undefined
+  return value as EditorialMasterSelectionResult
+}
+
+function normalizeSelectionStatus(value: unknown): EditorialMasterSelectionStatus | undefined {
+  const item = safeSelectionPayload(value)
+  if (item === undefined) return undefined
+  const authority = item.releaseAuthority as Record<string, unknown> | undefined
+  if (item.schema !== 'jason.qingmu-returned-master-selection-status.v1'
+    || !safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
+    || !safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
+    || typeof item.selectionRevision !== 'number' || !Number.isSafeInteger(item.selectionRevision)
+    || item.selectionRevision < 0 || !Array.isArray(item.candidates) || item.candidates.length > 1000
+    || item.candidates.some(candidate => normalizeSelectionCandidate(candidate) === undefined)
+    || !(item.currentFormalMaster === null
+      || normalizeSelectionCandidate(item.currentFormalMaster) !== undefined)
+    || authority === undefined || authority.schema !== 'jason.episode-release-authority.v2'
+    || typeof authority.revision !== 'number' || !Number.isSafeInteger(authority.revision)
+    || authority.revision < 0
+    || ['currentFinalOutputId', 'currentFinalAssetId', 'acceptedFinalOutputId',
+      'acceptedFinalAssetId'].some(field => !safeNullableId(authority[field]))
+    || !(authority.acceptedFinalSha256 === null || (typeof authority.acceptedFinalSha256 === 'string'
+      && SHA256.test(authority.acceptedFinalSha256)))
+    || !safeNullableId(authority.acceptedReadinessToken)
+    || !validReleaseConditions(item.releaseConditions) || !validSelectionFlags(item)) return undefined
+  return value as EditorialMasterSelectionStatus
+}
+
 function safePackageMediaPath(value: string): boolean {
   return value.startsWith('media/') && value.length <= 1024 && !value.includes('..')
     && !value.includes('\\') && !value.includes('\0') && !value.includes('//')
@@ -1615,6 +1887,52 @@ async function readWriterCandidateList(
     if (candidates === undefined) return undefined
     const item = raw as Record<string, unknown>
     return item.projectId === projectId && item.episodeId === episodeId ? { raw, candidates } : undefined
+  } catch { return undefined }
+}
+
+async function readBoundedJsonBody(req: IncomingMessage, limit = 32 * 1024): Promise<unknown> {
+  const contentType = req.headers['content-type']?.split(';', 1)[0]?.trim()
+  if (contentType !== 'application/json') throw new Error('selection_request_invalid')
+  const declared = Number(req.headers['content-length'] ?? '')
+  if (!Number.isSafeInteger(declared) || declared <= 0 || declared > limit) {
+    throw new Error('selection_request_invalid')
+  }
+  const chunks: Uint8Array[] = []
+  let size = 0
+  for await (const raw of req) {
+    const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw)
+    size += chunk.byteLength
+    if (size > declared || size > limit) throw new Error('selection_request_invalid')
+    chunks.push(chunk)
+  }
+  if (size !== declared) throw new Error('selection_request_invalid')
+  return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
+}
+
+async function writerSelectionRequest(
+  dependencies: EditorialHandoffDownloadDependencies,
+  token: string,
+  projectId: string,
+  episodeId: string,
+  suffix: string,
+  init: RequestInit,
+): Promise<{ readonly response: Response; readonly raw: unknown } | undefined> {
+  const upstream = new URL(
+    `/api/qingmu/projects/${encodeURIComponent(projectId)}/episodes/${encodeURIComponent(episodeId)}/editorial-handoff/${suffix}`,
+    dependencies.baseUrl,
+  )
+  try {
+    const headers = new Headers(init.headers)
+    headers.set('authorization', `Bearer ${token}`)
+    headers.set('accept', 'application/json')
+    const response = await dependencies.fetch(upstream, {
+      ...init,
+      redirect: 'error',
+      headers,
+    })
+    const bytes = Buffer.from(await response.arrayBuffer())
+    if (bytes.length > 256 * 1024) return undefined
+    return { response, raw: JSON.parse(bytes.toString('utf8')) as unknown }
   } catch { return undefined }
 }
 
@@ -2072,6 +2390,132 @@ export function registerEditorialHandoffDownload(
       json(res, 200, listing.raw)
     },
   })
+  const disposeSelectionStatus = webServer.register({
+    kind: 'exact', path: SELECTION_STATUS_PATH, handler: async (req, res) => {
+      if (req.method !== 'GET' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'editorial_master_selection_forbidden' }); return
+      }
+      const scope = scopeAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = scope === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (scope === undefined || token === undefined || userId === undefined) {
+        json(res, scope === undefined ? 400 : 403, { code: 'editorial_master_selection_forbidden' }); return
+      }
+      const outcome = await writerSelectionRequest(
+        dependencies, token, scope.projectId, scope.episodeId,
+        'returned-master-selection-status', { method: 'GET' },
+      )
+      const status = outcome?.response.ok === true ? normalizeSelectionStatus(outcome.raw) : undefined
+      if (status === undefined || status.projectId !== scope.projectId || status.episodeId !== scope.episodeId) {
+        json(res, 502, { code: 'editorial_master_selection_status_failed' }); return
+      }
+      json(res, 200, status)
+    },
+  })
+  const disposeSelectionPreview = webServer.register({
+    kind: 'exact', path: SELECTION_PREVIEW_PATH, handler: async (req, res) => {
+      if (req.method !== 'POST' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'editorial_master_selection_forbidden' }); return
+      }
+      const scope = scopeAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = scope === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (scope === undefined || token === undefined || userId === undefined) {
+        json(res, scope === undefined ? 400 : 403, { code: 'editorial_master_selection_forbidden' }); return
+      }
+      try {
+        const body = await readBoundedJsonBody(req)
+        const item = safeSelectionPayload(body)
+        if (item === undefined || Object.keys(item).length !== 1
+          || !safeIdentifier(typeof item.assetId === 'string' ? item.assetId : null)) {
+          throw new Error('selection_request_invalid')
+        }
+        const serialized = JSON.stringify({ assetId: item.assetId })
+        const outcome = await writerSelectionRequest(
+          dependencies, token, scope.projectId, scope.episodeId,
+          'returned-master-selection-preview', {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: serialized,
+          },
+        )
+        const preview = outcome?.response.ok === true ? normalizeSelectionPreview(outcome.raw) : undefined
+        if (preview === undefined || preview.projectId !== scope.projectId
+          || preview.episodeId !== scope.episodeId || preview.candidate.assetId !== item.assetId) {
+          throw new Error('selection_preview_failed')
+        }
+        json(res, 200, preview)
+      } catch (error) {
+        const badRequest = error instanceof Error && error.message === 'selection_request_invalid'
+        json(res, badRequest ? 400 : 409, {
+          code: badRequest ? 'editorial_master_selection_request_invalid'
+            : 'editorial_master_selection_preview_failed',
+        })
+      }
+    },
+  })
+  const disposeSelectionConfirm = webServer.register({
+    kind: 'exact', path: SELECTION_CONFIRM_PATH, handler: async (req, res) => {
+      if (req.method !== 'POST' || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'editorial_master_selection_forbidden' }); return
+      }
+      const scope = scopeAccess(query(req))
+      const token = validToken(dependencies.readToken())
+      const userId = scope === undefined || token === undefined ? undefined
+        : await authenticatedUserId(dependencies, token)
+      if (scope === undefined || token === undefined || userId === undefined) {
+        json(res, scope === undefined ? 400 : 403, { code: 'editorial_master_selection_forbidden' }); return
+      }
+      try {
+        const body = await readBoundedJsonBody(req)
+        const item = safeSelectionPayload(body)
+        const assetId = item?.assetId
+        const previewSha256 = item?.previewSha256
+        const idempotencyKey = item?.idempotencyKey
+        if (item === undefined || Object.keys(item).length !== 3) {
+          throw new Error('selection_request_invalid')
+        }
+        if (typeof assetId !== 'string' || !safeIdentifier(assetId)
+          || typeof previewSha256 !== 'string' || !SHA256.test(previewSha256)
+          || typeof idempotencyKey !== 'string' || !IDENTIFIER.test(idempotencyKey)) {
+          throw new Error('selection_request_invalid')
+        }
+        const requestBody = JSON.stringify({
+          assetId,
+          previewSha256,
+          idempotencyKey,
+        })
+        const commandBody = `{"assetId":"${assetId}","previewSha256":"${previewSha256}"}`
+        const requestSha = createHash('sha256').update(commandBody).digest('hex')
+        const submitted = await writerSelectionRequest(
+          dependencies, token, scope.projectId, scope.episodeId,
+          'returned-master-selections', {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: requestBody,
+          },
+        )
+        let result = submitted?.response.ok === true ? normalizeSelectionResult(submitted.raw) : undefined
+        if (result === undefined) {
+          const recoverySuffix = `returned-master-selections/${encodeURIComponent(idempotencyKey)}?requestSha256=${requestSha}`
+          const recovered = await writerSelectionRequest(
+            dependencies, token, scope.projectId, scope.episodeId, recoverySuffix, { method: 'GET' },
+          )
+          result = recovered?.response.ok === true ? normalizeSelectionResult(recovered.raw) : undefined
+        }
+        if (result === undefined || result.projectId !== scope.projectId
+          || result.episodeId !== scope.episodeId || result.assetId !== item.assetId
+          || result.idempotencyKey !== item.idempotencyKey || result.requestSha256 !== requestSha) {
+          throw new Error('selection_commit_failed')
+        }
+        json(res, 200, result)
+      } catch (error) {
+        const badRequest = error instanceof Error && error.message === 'selection_request_invalid'
+        json(res, badRequest ? 400 : 409, {
+          code: badRequest ? 'editorial_master_selection_request_invalid'
+            : 'editorial_master_selection_commit_unknown_or_failed',
+        })
+      }
+    },
+  })
   const disposeCandidateStatus = webServer.register({
     kind: 'exact', path: CANDIDATE_STATUS_PATH, handler: async (req, res) => {
       if (req.method !== 'GET' || !isTrustedApiRequest(req, [])) {
@@ -2213,6 +2657,9 @@ export function registerEditorialHandoffDownload(
     },
   })
   return () => {
+    disposeSelectionConfirm()
+    disposeSelectionPreview()
+    disposeSelectionStatus()
     disposeCandidate()
     disposeCandidateStatus()
     disposeCandidateList()

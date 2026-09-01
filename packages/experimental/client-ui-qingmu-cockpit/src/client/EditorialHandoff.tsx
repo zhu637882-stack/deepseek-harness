@@ -89,6 +89,61 @@ interface CandidateResult {
   readonly humanSignoffInferred: false
 }
 
+interface SelectionCandidate {
+  readonly assetId: string
+  readonly masterSha256: string
+  readonly mimeType: 'video/mp4' | 'video/quicktime' | 'video/webm'
+  readonly byteSize: number
+  readonly qualityStatus: 'pending'
+  readonly selectionStatus: 'Unselected' | 'Selected' | 'Stale'
+  readonly isSelected: boolean
+  readonly finalOutputId: string | null
+  readonly selectionReceiptId: string | null
+  readonly selectedAt: string | null
+  readonly current: boolean
+}
+
+interface SelectionStatus {
+  readonly schema: 'jason.qingmu-returned-master-selection-status.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly selectionRevision: number
+  readonly currentFormalMaster: SelectionCandidate | null
+  readonly candidates: readonly SelectionCandidate[]
+  readonly releaseConditions: { readonly ready: false; readonly blockers: readonly string[] }
+}
+
+interface SelectionPreview {
+  readonly schema: 'jason.qingmu-returned-master-selection-preview.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly candidate: SelectionCandidate
+  readonly currentFormalMaster: { readonly assetId: string; readonly finalOutputId: string } | null
+  readonly previewSha256: string
+  readonly idempotencyKey: string
+  readonly canConfirm: boolean
+  readonly hardBlockers: readonly string[]
+  readonly releaseConditions: { readonly ready: false; readonly blockers: readonly string[] }
+  readonly impact: {
+    readonly mediaCopies: 0
+    readonly revokePreviousFormalSelection: boolean
+  }
+}
+
+interface SelectionResult {
+  readonly schema: 'jason.qingmu-returned-master-selection-result.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly assetId: string
+  readonly finalOutputId: string
+  readonly selectionStatus: 'Selected'
+  readonly qualityStatus: 'pending'
+  readonly commandReceiptId: string
+  readonly selectedBy: string
+  readonly selectedAt: string
+  readonly releaseConditions: { readonly ready: false; readonly blockers: readonly string[] }
+}
+
 interface Props {
   readonly projectId: string
   readonly episodeId: string
@@ -163,15 +218,23 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   const [candidateState, setCandidateState] = useState<'idle' | 'running' | 'unknown' | 'succeeded' | 'failed'>('idle')
   const [candidates, setCandidates] = useState<readonly CandidateResult[]>([])
   const [candidateError, setCandidateError] = useState<string>()
+  const [selectionStatus, setSelectionStatus] = useState<SelectionStatus>()
+  const [selectionPreview, setSelectionPreview] = useState<SelectionPreview>()
+  const [selectionResult, setSelectionResult] = useState<SelectionResult>()
+  const [selectionConfirmed, setSelectionConfirmed] = useState(false)
+  const [selectionState, setSelectionState] = useState<'idle' | 'previewing' | 'previewed' | 'saving' | 'succeeded' | 'failed'>('idle')
+  const [selectionError, setSelectionError] = useState<string>()
   const generation = useRef(0)
   const downloadGeneration = useRef(0)
   const importGeneration = useRef(0)
   const masterGeneration = useRef(0)
   const candidateGeneration = useRef(0)
+  const selectionGeneration = useRef(0)
   const activeController = useRef<AbortController>()
   const importController = useRef<AbortController>()
   const masterController = useRef<AbortController>()
   const candidateController = useRef<AbortController>()
+  const selectionController = useRef<AbortController>()
   const importErrorRef = useRef<HTMLDivElement>(null)
 
   const loadCandidates = useCallback(async () => {
@@ -204,6 +267,36 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     }
   }, [episodeId, projectId])
 
+  const loadSelectionStatus = useCallback(async () => {
+    if (projectId === '' || episodeId === '') return
+    const current = ++selectionGeneration.current
+    selectionController.current?.abort()
+    const controller = new AbortController()
+    selectionController.current = controller
+    try {
+      const params = new URLSearchParams({ projectId, episodeId })
+      const response = await fetch(
+        `/api/qingmu/editorial-handoff/returned-master-selection-status?${params.toString()}`,
+        { method: 'GET', cache: 'no-store', signal: controller.signal },
+      )
+      if (!response.ok) throw new Error('selection_status_failed')
+      const body = await response.json() as SelectionStatus
+      if (body.projectId !== projectId || body.episodeId !== episodeId
+        || !Array.isArray(body.candidates)) throw new Error('selection_status_contract_invalid')
+      if (current === selectionGeneration.current) {
+        setSelectionStatus(body)
+        setSelectionError(undefined)
+      }
+    } catch (cause) {
+      if (current === selectionGeneration.current && !controller.signal.aborted) {
+        setSelectionStatus(undefined)
+        setSelectionError(cause instanceof Error ? cause.message : 'selection_status_failed')
+      }
+    } finally {
+      if (current === selectionGeneration.current) selectionController.current = undefined
+    }
+  }, [episodeId, projectId])
+
   const load = useCallback(async () => {
     if (projectId === '' || episodeId === '') return
     const current = ++generation.current
@@ -212,9 +305,11 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     importGeneration.current += 1
     masterGeneration.current += 1
     candidateGeneration.current += 1
+    selectionGeneration.current += 1
     importController.current?.abort()
     masterController.current?.abort()
     candidateController.current?.abort()
+    selectionController.current?.abort()
     importController.current = undefined
     const controller = new AbortController()
     activeController.current = controller
@@ -223,6 +318,12 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     setLoading(true)
     setError(undefined)
     setCandidates([])
+    setSelectionStatus(undefined)
+    setSelectionPreview(undefined)
+    setSelectionResult(undefined)
+    setSelectionConfirmed(false)
+    setSelectionState('idle')
+    setSelectionError(undefined)
     try {
       const value = await port.editorialHandoff({ projectId, episodeId }, controller.signal)
       if (current === generation.current) {
@@ -263,14 +364,17 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       importGeneration.current += 1
       masterGeneration.current += 1
       candidateGeneration.current += 1
+      selectionGeneration.current += 1
       activeController.current?.abort()
       importController.current?.abort()
       masterController.current?.abort()
       candidateController.current?.abort()
+      selectionController.current?.abort()
       activeController.current = undefined
       importController.current = undefined
       masterController.current = undefined
       candidateController.current = undefined
+      selectionController.current = undefined
     }
   }, [load])
 
@@ -557,6 +661,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       if (current !== candidateGeneration.current || !accept(result)) return false
       setCandidateState('succeeded')
       setCandidates(existing => [result, ...existing.filter(item => item.assetId !== result.assetId)])
+      void loadSelectionStatus()
       return true
     }
     try {
@@ -599,7 +704,90 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     } finally {
       if (current === candidateGeneration.current) candidateController.current = undefined
     }
-  }, [candidateAccess, candidateState, episodeId, masterResult, projectId, selectedMaster])
+  }, [candidateAccess, candidateState, episodeId, loadSelectionStatus, masterResult, projectId, selectedMaster])
+
+  const previewSelection = useCallback(async (assetId: string) => {
+    if (selectionState === 'previewing' || selectionState === 'saving') return
+    const current = ++selectionGeneration.current
+    selectionController.current?.abort()
+    const controller = new AbortController()
+    selectionController.current = controller
+    setSelectionState('previewing')
+    setSelectionPreview(undefined)
+    setSelectionResult(undefined)
+    setSelectionConfirmed(false)
+    setSelectionError(undefined)
+    try {
+      const params = new URLSearchParams({ projectId, episodeId })
+      const response = await fetch(
+        `/api/qingmu/editorial-handoff/returned-master-selection-preview?${params.toString()}`,
+        {
+          method: 'POST', cache: 'no-store', signal: controller.signal,
+          headers: { 'content-type': 'application/json' }, body: JSON.stringify({ assetId }),
+        },
+      )
+      if (!response.ok) throw new Error('selection_preview_failed')
+      const body = await response.json() as SelectionPreview
+      if (body.projectId !== projectId || body.episodeId !== episodeId
+        || body.candidate.assetId !== assetId) throw new Error('selection_preview_contract_invalid')
+      if (current === selectionGeneration.current) {
+        setSelectionPreview(body)
+        setSelectionState('previewed')
+      }
+    } catch (cause) {
+      if (current === selectionGeneration.current && !controller.signal.aborted) {
+        setSelectionError(cause instanceof Error ? cause.message : 'selection_preview_failed')
+        setSelectionState('failed')
+      }
+    } finally {
+      if (current === selectionGeneration.current) selectionController.current = undefined
+    }
+  }, [episodeId, projectId, selectionState])
+
+  const confirmSelection = useCallback(async () => {
+    if (selectionPreview === undefined || !selectionPreview.canConfirm || !selectionConfirmed
+      || selectionState === 'saving') return
+    const current = ++selectionGeneration.current
+    selectionController.current?.abort()
+    const controller = new AbortController()
+    selectionController.current = controller
+    setSelectionState('saving')
+    setSelectionError(undefined)
+    try {
+      const params = new URLSearchParams({ projectId, episodeId })
+      const response = await fetch(
+        `/api/qingmu/editorial-handoff/returned-master-selection?${params.toString()}`,
+        {
+          method: 'POST', cache: 'no-store', signal: controller.signal,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            assetId: selectionPreview.candidate.assetId,
+            previewSha256: selectionPreview.previewSha256,
+            idempotencyKey: selectionPreview.idempotencyKey,
+          }),
+        },
+      )
+      if (!response.ok) throw new Error('selection_commit_failed_or_unknown')
+      const body = await response.json() as SelectionResult
+      if (body.projectId !== projectId || body.episodeId !== episodeId
+        || body.assetId !== selectionPreview.candidate.assetId) {
+        throw new Error('selection_receipt_mismatch')
+      }
+      if (current === selectionGeneration.current) {
+        setSelectionResult(body)
+        setSelectionState('succeeded')
+        setSelectionConfirmed(false)
+        await loadSelectionStatus()
+      }
+    } catch (cause) {
+      if (current === selectionGeneration.current && !controller.signal.aborted) {
+        setSelectionError(cause instanceof Error ? cause.message : 'selection_commit_failed_or_unknown')
+        setSelectionState('failed')
+      }
+    } finally {
+      if (current === selectionGeneration.current) selectionController.current = undefined
+    }
+  }, [episodeId, loadSelectionStatus, projectId, selectionConfirmed, selectionPreview, selectionState])
 
   if (projectId === '' || episodeId === '') return <p className={css.empty}>{t('handoffChooseEpisode')}</p>
   const blockerLabel = (code: string) => t(BLOCKER_KEYS[code] ?? 'handoffBlockerUnknown')
@@ -610,7 +798,9 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
         <h3 id="qingmu-editorial-handoff-title">{t('handoffTitle')}</h3>
         <p>{t('handoffBoundary')}</p>
       </div>
-      <button type="button" disabled={loading} onClick={() => { void load(); void loadCandidates() }}>
+      <button type="button" disabled={loading} onClick={() => {
+        void load(); void loadCandidates(); void loadSelectionStatus()
+      }}>
         {loading ? t('handoffLoading') : t('handoffRefresh')}
       </button>
     </header>
@@ -822,24 +1012,91 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     <section className={css.candidateShelf} aria-labelledby="handoff-candidate-shelf">
       <header><div><strong id="handoff-candidate-shelf">{t('handoffCandidateShelfTitle')}</strong>
         <p>{t('handoffCandidateShelfBoundary')}</p></div>
-      <button type="button" onClick={() => { void loadCandidates() }}>{t('handoffCandidateRead')}</button>
+      <button type="button" onClick={() => { void loadCandidates(); void loadSelectionStatus() }}>
+        {t('handoffCandidateRead')}
+      </button>
       </header>
       {candidateError !== undefined && candidateState !== 'unknown' && candidateState !== 'failed'
         && <p role="alert" className={css.error}>{t('handoffCandidateListFailed')} ({candidateError})</p>}
+      {selectionError !== undefined && <p role="alert" className={css.error}>
+        {t('handoffSelectionFailed')} ({selectionError})
+      </p>}
       {candidates.length === 0
         ? <p className={css.warning}>{t('handoffCandidateEmpty')}</p>
-        : <ul>{candidates.map(candidate => <li key={candidate.assetId}>
-          <div><strong>{t('handoffCandidateStatus')}</strong><span>{t('handoffCandidateUnselected')}</span></div>
-          <p>{candidate.mimeType} · {candidate.byteSize.toLocaleString()} bytes · {candidate.savedAt}</p>
-          <details><summary>{t('handoffAdvanced')}</summary>
-            <p>Asset ID: {candidate.assetId}</p>
-            <p>Master SHA: {candidate.masterSha256}</p>
-            <p>Package SHA: {candidate.packageSha256}</p>
-            <p>Source SHA: {candidate.sourceSnapshotSha256}</p>
-            <p>Preflight SHA: {candidate.preflightSha256}</p>
-            <p>Receipt: {candidate.commandReceiptId}</p>
-          </details>
-        </li>)}</ul>}
+        : <ul>{candidates.map((candidate) => {
+          const authority = selectionStatus?.candidates.find(item => item.assetId === candidate.assetId)
+          const statusLabel = authority?.current === true ? t('handoffSelectionCurrent')
+            : authority?.selectionStatus === 'Stale' ? t('handoffSelectionStale')
+              : t('handoffCandidateUnselected')
+          const selectable = authority !== undefined && authority.mimeType === 'video/mp4'
+            && (authority.selectionStatus === 'Unselected' || authority.selectionStatus === 'Stale')
+          return <li key={candidate.assetId}>
+            <div><strong>{t('handoffCandidateStatus')}</strong><span>{statusLabel}</span></div>
+            <p>{candidate.mimeType} · {candidate.byteSize.toLocaleString()} bytes · {candidate.savedAt}</p>
+            <p className={authority?.current === true ? css.success : css.warning}>
+              {authority?.current === true ? t('handoffSelectionCurrentBoundary') : t('handoffSelectionPendingBoundary')}
+            </p>
+            <button type="button" disabled={!selectable || selectionState === 'previewing'
+              || selectionState === 'saving'} onClick={() => { void previewSelection(candidate.assetId) }}>
+              {selectionState === 'previewing' && selectionPreview?.candidate.assetId === candidate.assetId
+                ? t('handoffSelectionPreviewing') : t('handoffSelectionPreview')}
+            </button>
+            <details><summary>{t('handoffAdvanced')}</summary>
+              <p>Asset ID: {candidate.assetId}</p>
+              <p>Master SHA: {candidate.masterSha256}</p>
+              <p>Package SHA: {candidate.packageSha256}</p>
+              <p>Source SHA: {candidate.sourceSnapshotSha256}</p>
+              <p>Preflight SHA: {candidate.preflightSha256}</p>
+              <p>Receipt: {candidate.commandReceiptId}</p>
+              <p>Selection receipt: {authority?.selectionReceiptId ?? '—'}</p>
+              <p>Final output: {authority?.finalOutputId ?? '—'}</p>
+            </details>
+          </li>})}</ul>}
+      {selectionPreview !== undefined && <section className={css.preview} aria-labelledby="handoff-selection-preview">
+        <header><div><strong id="handoff-selection-preview">{t('handoffSelectionPreviewTitle')}</strong>
+          <p>{t('handoffSelectionPreviewBoundary')}</p></div></header>
+        <div className={css.previewGrid}>
+          <div><strong>{t('handoffSelectionOriginal')}</strong>
+            <p>{selectionPreview.candidate.selectionStatus} · {selectionPreview.candidate.qualityStatus}</p>
+            <p>{selectionPreview.candidate.mimeType} · {selectionPreview.candidate.byteSize.toLocaleString()} bytes</p>
+          </div>
+          <div><strong>{t('handoffSelectionImpact')}</strong>
+            <p>{t('handoffSelectionImpactInPlace')}</p>
+            <p>{selectionPreview.impact.revokePreviousFormalSelection
+              ? t('handoffSelectionReplacesCurrent') : t('handoffSelectionFirstFormal')}</p>
+          </div>
+        </div>
+        {selectionPreview.hardBlockers.length > 0 && <ul className={css.blockers}>
+          {selectionPreview.hardBlockers.map(code => <li key={code}>{code}</li>)}
+        </ul>}
+        <p className={css.warning}>{t('handoffSelectionReleaseBlocked')}</p>
+        <label className={css.confirmation}>
+          <input type="checkbox" checked={selectionConfirmed}
+            disabled={!selectionPreview.canConfirm || selectionState === 'saving'}
+            onChange={(event) => { setSelectionConfirmed(event.currentTarget.checked) }} />
+          <span>{t('handoffSelectionConfirm')}</span>
+        </label>
+        <button type="button" disabled={!selectionPreview.canConfirm || !selectionConfirmed
+          || selectionState === 'saving'} onClick={() => { void confirmSelection() }}>
+          {selectionState === 'saving' ? t('handoffSelectionSaving') : t('handoffSelectionSave')}
+        </button>
+        <details><summary>{t('handoffAdvanced')}</summary>
+          <p>Preview SHA: {selectionPreview.previewSha256}</p>
+          <p>Asset ID: {selectionPreview.candidate.assetId}</p>
+          <p>Current formal: {selectionPreview.currentFormalMaster?.assetId ?? '—'}</p>
+          <p>Release blockers: {selectionPreview.releaseConditions.blockers.join(', ')}</p>
+        </details>
+      </section>}
+      {selectionResult !== undefined && <div className={css.success} role="status">
+        <strong>{t('handoffSelectionSaved')}</strong>
+        <p>{t('handoffSelectionSavedBoundary')}</p>
+        <p>{selectionResult.selectedBy} · {selectionResult.selectedAt}</p>
+        <details><summary>{t('handoffAdvanced')}</summary>
+          <p>Receipt: {selectionResult.commandReceiptId}</p>
+          <p>Final output: {selectionResult.finalOutputId}</p>
+          <p>Release blockers: {selectionResult.releaseConditions.blockers.join(', ')}</p>
+        </details>
+      </div>}
     </section>
   </section>
 }
