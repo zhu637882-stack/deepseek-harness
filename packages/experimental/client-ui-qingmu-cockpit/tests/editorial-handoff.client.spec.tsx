@@ -326,6 +326,106 @@ describe('editorial handoff panel', () => {
     })).toHaveLength(1)
   })
 
+  it('discards a deferred master result when the user selects another package', async () => {
+    const editorialHandoff = vi.fn().mockResolvedValue(downloadableHandoff(true))
+    const port = { editorialHandoff } as unknown as QingmuYimengReadPort
+    const lateMaster = deferred<Response>()
+    const packageResult = {
+      projectId: SCOPE.projectId, episodeId: SCOPE.episodeId,
+      packageSha256: '8'.repeat(64), packageSize: 4,
+      receiptMatch: true, internalValidity: true, currentAuthority: { matches: true },
+      preview: { tracks: [], orderedShots: [], media: [], unresolved: [] },
+    }
+    const masterAccess = { requestId: '33333333-3333-4333-8333-333333333333', capability: 'c'.repeat(64) }
+    let importStatusReads = 0
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
+      if (url.includes('master-preflight') && method === 'POST') return lateMaster.promise
+      if (url.includes('master-preflight-status')) {
+        return Promise.resolve(new Response(JSON.stringify({ status: 'not_started', result: null }), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        }))
+      }
+      if (url.includes('import-status')) {
+        importStatusReads += 1
+        return Promise.resolve(new Response(JSON.stringify(importStatusReads === 1
+          ? { status: 'not_started', result: null }
+          : { status: 'succeeded', result: packageResult, masterAccess }), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        }))
+      }
+      return Promise.resolve(new Response(JSON.stringify(packageResult), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      }))
+    }))
+    render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
+    const packageInput = await screen.findByLabelText(zh.handoffImportChoose)
+    fireEvent.change(packageInput, {
+      target: { files: [new File([new Uint8Array([1])], 'package-a.otio.zip', { type: 'application/zip' })] },
+    })
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffImportVerify }))
+    const masterInput = await screen.findByLabelText(zh.handoffMasterChoose) as HTMLInputElement
+    await waitFor(() => { expect(masterInput.disabled).toBe(false) })
+    fireEvent.change(masterInput, {
+      target: { files: [new File([new Uint8Array(12)], 'master-a.mp4', { type: 'video/mp4' })] },
+    })
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffMasterVerify }))
+    await waitFor(() => { expect(screen.getByRole('button', { name: zh.handoffMasterRunning })).toBeTruthy() })
+    fireEvent.change(packageInput, {
+      target: { files: [new File([new Uint8Array([2])], 'package-b.otio.zip', { type: 'application/zip' })] },
+    })
+    lateMaster.resolve(new Response(JSON.stringify({
+      projectId: SCOPE.projectId, episodeId: SCOPE.episodeId,
+      binding: {
+        sourceSnapshotSha256: '6'.repeat(64), projectionSha256: '7'.repeat(64),
+        downloadRequestId: '12345678-1234-1234-1234-123456789abc',
+        importRequestId: '87654321-4321-4321-4321-cba987654321',
+        packageSha256: '8'.repeat(64), packageSize: 4,
+      },
+      master: {
+        sha256: '9'.repeat(64), size: 12, mimeType: 'video/mp4', container: 'mp4',
+        formatName: 'mov,mp4', durationSec: 5, width: 720, height: 1280, fps: 24,
+        videoStreams: [{ codec: 'h264' }], audioStreams: [{ codec: 'aac' }],
+      }, blockers: [],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    await waitFor(() => { expect(screen.getByText(/package-b\.otio\.zip/u)).toBeTruthy() })
+    expect(screen.queryByText(/Master SHA: 9999/u)).toBeNull()
+    expect(screen.queryByText(zh.handoffMasterExactBoundary)).toBeNull()
+  })
+
+  it('does not inject master access from a deferred import status after package selection', async () => {
+    const editorialHandoff = vi.fn().mockResolvedValue(downloadableHandoff(true))
+    const port = { editorialHandoff } as unknown as QingmuYimengReadPort
+    const lateStatus = deferred<Response>()
+    let statusSignal: AbortSignal | undefined
+    vi.stubGlobal('fetch', vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      statusSignal = init?.signal ?? undefined
+      return lateStatus.promise
+    }))
+    render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
+    const packageInput = await screen.findByLabelText(zh.handoffImportChoose)
+    await waitFor(() => { expect(statusSignal).toBeDefined() })
+    fireEvent.change(packageInput, {
+      target: { files: [new File([new Uint8Array([2])], 'package-b.otio.zip', { type: 'application/zip' })] },
+    })
+    lateStatus.resolve(new Response(JSON.stringify({
+      status: 'succeeded',
+      result: {
+        projectId: SCOPE.projectId, episodeId: SCOPE.episodeId,
+        packageSha256: '8'.repeat(64), packageSize: 4,
+        receiptMatch: true, internalValidity: true, currentAuthority: { matches: true },
+        preview: { tracks: [], orderedShots: [], media: [], unresolved: [] },
+      },
+      masterAccess: { requestId: '33333333-3333-4333-8333-333333333333', capability: 'c'.repeat(64) },
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    await new Promise(resolve => window.setTimeout(resolve, 0))
+    expect(statusSignal?.aborted).toBe(true)
+    expect(screen.queryByText(zh.handoffImportMatched)).toBeNull()
+    expect(screen.getByLabelText<HTMLInputElement>(zh.handoffMasterChoose).disabled).toBe(true)
+    expect(screen.getByText(/package-b\.otio\.zip/u)).toBeTruthy()
+  })
+
   it('recovers an already verified preview from Host status without reuploading bytes', async () => {
     const editorialHandoff = vi.fn().mockResolvedValue(downloadableHandoff(true))
     const port = { editorialHandoff } as unknown as QingmuYimengReadPort

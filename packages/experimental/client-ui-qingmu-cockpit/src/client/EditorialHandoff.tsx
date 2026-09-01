@@ -515,14 +515,25 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
           <p>{t('handoffImportBoundary')}</p>
           <label className={css.fileField}>
             <span>{t('handoffImportChoose')}</span>
-            <input type="file" accept=".zip,application/zip" disabled={importAccess === undefined || importState === 'running'}
+            <input type="file" accept=".zip,application/zip"
+              disabled={importAccess === undefined || importState === 'running' || masterState === 'running'}
               onChange={(event) => {
                 const file = event.currentTarget.files?.[0]
+                importGeneration.current += 1
+                masterGeneration.current += 1
+                importController.current?.abort()
+                masterController.current?.abort()
+                importController.current = undefined
+                masterController.current = undefined
+                const consumedPackageAccess = importState !== 'idle' || importResult !== undefined
+                  || masterAccess !== undefined || masterState !== 'idle'
                 setSelectedPackage(file)
+                if (consumedPackageAccess) setImportAccess(undefined)
                 setImportResult(undefined)
                 setImportError(undefined)
                 setImportState('idle')
                 setMasterAccess(undefined)
+                setSelectedMaster(undefined)
                 setMasterResult(undefined)
                 setMasterError(undefined)
                 setMasterState('idle')
