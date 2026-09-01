@@ -533,6 +533,19 @@ Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/
 
 Source: [`packages/plan/plan-mode/src/index.ts:53`](../packages/plan/plan-mode/src/index.ts)
 
+### `qingmu-director-context/*`
+
+<a id="qingmu-director-contextstate--log-only"></a>
+
+#### `qingmu-director-context/state` — log-only
+
+```ts persistence-catalog
+/** Whole-value, log-only snapshot of the session's current Qingmu director binding. */
+'qingmu-director-context/state': DirectorContextBindingState
+```
+
+Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:122`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+
 ### `request/*`
 
 <a id="requestcontext--log-only"></a>

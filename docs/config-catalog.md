@@ -3353,6 +3353,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-cordis-client-runner` ([`packages/extensions/cordis-client-runner/src/index.ts`](../packages/extensions/cordis-client-runner/src/index.ts))
 - `@deepseek-ai/dsh-experimental-client-ui-brand-qingmu` ([`packages/experimental/client-ui-brand-qingmu/src/index.ts`](../packages/experimental/client-ui-brand-qingmu/src/index.ts))
 - `@deepseek-ai/dsh-experimental-client-ui-qingmu-cockpit` ([`packages/experimental/client-ui-qingmu-cockpit/src/index.ts`](../packages/experimental/client-ui-qingmu-cockpit/src/index.ts))
+- `@deepseek-ai/dsh-experimental-qingmu-director-context-bridge` — requires `sessionProjections` ([`packages/experimental/qingmu-director-context-bridge/src/index.ts`](../packages/experimental/qingmu-director-context-bridge/src/index.ts))
 - `@deepseek-ai/dsh-experimental-qingmu-web` ([`packages/experimental/qingmu-web/src/index.ts`](../packages/experimental/qingmu-web/src/index.ts))
 - `@deepseek-ai/dsh-fs-e2b` — requires `e2b` ([`packages/e2b/fs-e2b/src/index.ts`](../packages/e2b/fs-e2b/src/index.ts))
 - `@deepseek-ai/dsh-fs-observation-policy` ([`packages/fs/fs-observation-policy/src/index.ts`](../packages/fs/fs-observation-policy/src/index.ts))
