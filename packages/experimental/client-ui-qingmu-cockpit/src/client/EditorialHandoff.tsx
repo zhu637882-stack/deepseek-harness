@@ -192,6 +192,11 @@ interface TechnicalQcStatus {
   readonly projectId: string
   readonly episodeId: string
   readonly currentTechnicalQc: TechnicalQcResult | null
+  readonly staleTechnicalQc: {
+    readonly stale: true
+    readonly code: 'returned_master_qc_editorial_binding_drift'
+    readonly driftFields: readonly string[]
+  } | null
   readonly hardBlockers: readonly string[]
   readonly releaseConditions: { readonly ready: false; readonly blockers: readonly string[] }
 }
@@ -313,8 +318,11 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       if (body.schema !== 'jason.qingmu-returned-master-candidates.v1' || !Array.isArray(body.candidates)) {
         throw new Error('candidate_list_contract_invalid')
       }
+      const candidates = body.candidates as readonly CandidateResult[]
+      if (candidates.some(candidate => candidate.projectId !== projectId
+        || candidate.episodeId !== episodeId)) throw new Error('candidate_list_contract_invalid')
       if (current === candidateGeneration.current) {
-        setCandidates(body.candidates)
+        setCandidates(candidates)
         setCandidateError(undefined)
       }
     } catch (cause) {
@@ -392,8 +400,17 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     }
   }, [episodeId, projectId])
 
+  const refreshReturnedMasterState = useCallback(async () => {
+    const scopeGeneration = generation.current
+    await loadCandidates()
+    if (scopeGeneration !== generation.current) return
+    await loadSelectionStatus()
+    if (scopeGeneration !== generation.current) return
+    await loadTechnicalQcStatus()
+  }, [loadCandidates, loadSelectionStatus, loadTechnicalQcStatus])
+
   const load = useCallback(async () => {
-    if (projectId === '' || episodeId === '') return
+    if (projectId === '' || episodeId === '') return false
     const current = ++generation.current
     activeController.current?.abort()
     downloadGeneration.current += 1
@@ -456,6 +473,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
         setLoading(false)
       }
     }
+    return current === generation.current && !controller.signal.aborted
   }, [episodeId, port, projectId, t])
 
   useEffect(() => {
@@ -990,7 +1008,9 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
         <p>{t('handoffBoundary')}</p>
       </div>
       <button type="button" disabled={loading} onClick={() => {
-        void load(); void loadCandidates(); void loadSelectionStatus(); void loadTechnicalQcStatus()
+        void (async () => {
+          if (await load()) await refreshReturnedMasterState()
+        })()
       }}>
         {loading ? t('handoffLoading') : t('handoffRefresh')}
       </button>
@@ -1204,7 +1224,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       <header><div><strong id="handoff-candidate-shelf">{t('handoffCandidateShelfTitle')}</strong>
         <p>{t('handoffCandidateShelfBoundary')}</p></div>
       <button type="button" onClick={() => {
-        void loadCandidates(); void loadSelectionStatus(); void loadTechnicalQcStatus()
+        void refreshReturnedMasterState()
       }}>
         {t('handoffCandidateRead')}
       </button>
@@ -1360,6 +1380,11 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
         </div>}
         {technicalQcStatus !== undefined && technicalQcStatus.currentTechnicalQc === null
           && <p className={css.warning}>{t('handoffTechnicalQcUnverified')}</p>}
+        {technicalQcStatus?.staleTechnicalQc !== null
+          && technicalQcStatus?.staleTechnicalQc !== undefined
+          && <p className={css.warning}>
+            {technicalQcStatus.staleTechnicalQc.code}: {technicalQcStatus.staleTechnicalQc.driftFields.join(', ')}
+          </p>}
       </section>
     </section>
   </section>

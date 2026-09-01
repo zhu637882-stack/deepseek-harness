@@ -518,6 +518,26 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       expect(await recoveredTechnicalQc.count()).toBe(1)
       expect(await freshDialog.getByText('技术通过 ≠ 内容批准 ≠ manifest 冻结 ≠ 人工签收。', { exact: true }).count()).toBe(1)
       expect(await readBoundaryFacts(writerRoot, fixture.sqlitePath)).toEqual(qcFacts)
+      if (expectedQcStatus === 'passed') {
+        const requestsBeforeDrift = technicalQcRequests.length
+        await execFile(join(writerRoot, '.venv/bin/python'), ['-c', [
+          'import sqlite3,sys',
+          'conn=sqlite3.connect(sys.argv[1])',
+          'conn.execute("UPDATE storyboard_frames SET title=title || ? WHERE id=?",("（来源漂移）",sys.argv[2]))',
+          'conn.commit()',
+        ].join('\n'), fixture.sqlitePath, fixture.frameIds[0] as string], {
+          env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: '1' },
+        })
+        await readCandidates.click()
+        await freshDialog.getByText(/returned_master_qc_editorial_binding_drift/u)
+          .waitFor({ timeout: 10_000 })
+          .catch(async () => {
+            throw new Error(`Editorial drift did not surface: ${await freshDialog.innerText()}`)
+          })
+        expect(await recoveredTechnicalQc.count()).toBe(0)
+        expect(technicalQcRequests).toHaveLength(requestsBeforeDrift)
+        expect((await readBoundaryFacts(writerRoot, fixture.sqlitePath)).technicalQcReceiptCount).toBe(1)
+      }
       const candidateBytes = await readFile(candidatePath)
       await writeFile(candidatePath, Buffer.from('tampered-editorial-master-candidate'))
       await readCandidates.click()

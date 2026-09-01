@@ -131,6 +131,30 @@ describe('editorial handoff panel', () => {
     expect(editorialHandoff).toHaveBeenCalledTimes(2)
   })
 
+  it('does not continue an old-scope refresh after project and episode change', async () => {
+    const oldRefresh = deferred<YimengEditorialHandoffResponse>()
+    const editorialHandoff = vi.fn()
+      .mockResolvedValueOnce(handoff())
+      .mockImplementationOnce(() => oldRefresh.promise)
+      .mockResolvedValue(handoff())
+    const port = { editorialHandoff } as unknown as QingmuYimengReadPort
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', {
+      status: 409, headers: { 'content-type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const view = render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
+    await waitFor(() => { expect(editorialHandoff).toHaveBeenCalledTimes(1) })
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffRefresh }))
+    await waitFor(() => { expect(editorialHandoff).toHaveBeenCalledTimes(2) })
+    view.rerender(<EditorialHandoff projectId="project-new" episodeId="episode-new" port={port} t={t} />)
+    await waitFor(() => { expect(editorialHandoff).toHaveBeenCalledWith(
+      { projectId: 'project-new', episodeId: 'episode-new' }, expect.any(AbortSignal),
+    ) })
+    oldRefresh.resolve(handoff())
+    await new Promise(resolve => window.setTimeout(resolve, 0))
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('turns a Host source drift into a localized refresh action', async () => {
     const editorialHandoff = vi.fn().mockRejectedValue(new Error('internal: SOURCE_DRIFT'))
     const port = { editorialHandoff } as unknown as QingmuYimengReadPort
@@ -175,6 +199,34 @@ describe('editorial handoff panel', () => {
     await waitFor(() => { expect(screen.queryByText(zh.handoffCandidateUnselected)).toBeNull() })
     expect(screen.getByText(/candidate_list_failed/u)).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledTimes(6)
+  })
+
+  it('rejects candidate rows from a different project scope', async () => {
+    const candidate = {
+      schema: 'jason.qingmu-returned-master-candidate-result.v1',
+      projectId: 'project-other', episodeId: SCOPE.episodeId,
+      assetId: 'asset-cross-scope', masterSha256: '8'.repeat(64), byteSize: 2048,
+      mimeType: 'video/mp4', packageSha256: '9'.repeat(64), sourceSnapshotSha256: 'a'.repeat(64),
+      projectionSha256: 'b'.repeat(64), downloadRequestId: 'download-1', importRequestId: 'import-1',
+      preflightRequestId: 'preflight-1', preflightSha256: 'c'.repeat(64),
+      selectionStatus: 'Unselected', isSelected: false, qualityStatus: 'pending',
+      approved: false, published: false, idempotencyKey: 'd'.repeat(64),
+      commandReceiptId: 'receipt-candidate-cross', savedAt: '2026-09-01T00:00:00Z',
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = fetchUrl(input)
+      if (url.includes('returned-master-candidates')) {
+        return new Response(JSON.stringify({
+          schema: 'jason.qingmu-returned-master-candidates.v1', candidates: [candidate],
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ code: 'not_available' }), { status: 409 })
+    }))
+    const port = { editorialHandoff: vi.fn().mockResolvedValue(handoff()) } as unknown as QingmuYimengReadPort
+    render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
+    fireEvent.click(await screen.findByRole('button', { name: zh.handoffCandidateRead }))
+    await waitFor(() => { expect(screen.getByText(/candidate_list_contract_invalid/u)).toBeTruthy() })
+    expect(screen.queryByText('asset-cross-scope')).toBeNull()
   })
 
   it('previews and explicitly selects the same returned candidate without implying QC or release', async () => {

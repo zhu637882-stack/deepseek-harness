@@ -533,6 +533,13 @@ describe('editorial handoff Host download bridge', () => {
       preflightSha256: '5'.repeat(64), selectionReceiptId: 'receipt_selection_1',
       selectionReceiptSha256: '7'.repeat(64), candidateReceiptId: 'receipt_candidate_1',
       candidateReceiptSha256: '8'.repeat(64), releaseAuthority,
+      projectAspectRatio: '9:16',
+    }
+    const currentEditorialContract = {
+      sourceSnapshotSha256: '9'.repeat(64), projectionSha256: 'a'.repeat(64),
+      selectionSourceSha256: '3'.repeat(64), projectAspectRatio: '9:16',
+      deliveryProfileSha256: 'b'.repeat(64),
+      probeContractVersion: 'returned-master-technical-qc-probe-v1',
     }
     const previewMaster = {
       ...currentFormalMaster, qualityStatus: 'pending',
@@ -541,6 +548,7 @@ describe('editorial handoff Host download bridge', () => {
     const preview = {
       schema: 'jason.qingmu-returned-master-technical-qc-preview.v1',
       projectId: 'project-e8', episodeId: 'episode-e8', currentFormalMaster: previewMaster,
+      currentEditorialContract,
       previewSha256, idempotencyKey, canConfirm: true, hardBlockers: [], ...flags,
     }
     const requestSha256 = createHash('sha256')
@@ -551,6 +559,10 @@ describe('editorial handoff Host download bridge', () => {
       assetId: currentFormalMaster.assetId, finalOutputId: currentFormalMaster.finalOutputId,
       masterSha256: currentFormalMaster.masterSha256, sourceSnapshotSha256: SOURCE_SHA,
       projectionSha256: PROJECTION_SHA, selectionSourceSha256: '3'.repeat(64),
+      editorialSourceSnapshotSha256: currentEditorialContract.sourceSnapshotSha256,
+      editorialProjectionSha256: currentEditorialContract.projectionSha256,
+      projectAspectRatio: '9:16', deliveryProfileSha256: 'b'.repeat(64),
+      probeContractVersion: 'returned-master-technical-qc-probe-v1',
       packageSha256: '4'.repeat(64), preflightSha256: '5'.repeat(64),
       selectionReceiptId: 'receipt_selection_1', outcome: 'passed', qualityStatus: 'passed',
       canonicalResultSha256: '6'.repeat(64), technicalFacts: {
@@ -568,11 +580,13 @@ describe('editorial handoff Host download bridge', () => {
     const status = {
       schema: 'jason.qingmu-returned-master-technical-qc-status.v1',
       projectId: 'project-e8', episodeId: 'episode-e8', currentFormalMaster,
-      currentTechnicalQc: result, records: [result], hardBlockers: [], releaseConditions, ...flags,
+      currentTechnicalQc: result, currentEditorialContract, staleTechnicalQc: null,
+      records: [result], hardBlockers: [], releaseConditions, ...flags,
     }
     let statusPayload: unknown = status
     let confirmPosts = 0
     let recoveryGets = 0
+    let confirmMode: 'lost-response' | 'stale' = 'lost-response'
     const fetchUpstream = vi.fn(async (input: string | URL | Request) => {
       const target = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
       const url = new URL(target)
@@ -588,6 +602,11 @@ describe('editorial handoff Host download bridge', () => {
       }
       if (url.pathname.endsWith('/returned-master-technical-qc')) {
         confirmPosts += 1
+        if (confirmMode === 'stale') {
+          return new Response(JSON.stringify({
+            detail: { code: 'returned_master_qc_editorial_binding_drift' },
+          }), { status: 409, headers: { 'content-type': 'application/json' } })
+        }
         const response = new Response(JSON.stringify(result), {
           status: 200, headers: { 'content-type': 'application/json' },
         })
@@ -628,6 +647,17 @@ describe('editorial handoff Host download bridge', () => {
     expect(confirmPosts).toBe(1)
     expect(recoveryGets).toBe(1)
 
+    confirmMode = 'stale'
+    const staleReplay = await fetch(
+      `${base}/api/qingmu/editorial-handoff/returned-master-technical-qc?${scope.toString()}`,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+        previewSha256, idempotencyKey,
+      }) },
+    )
+    expect(staleReplay.status).toBe(409)
+    expect(confirmPosts).toBe(2)
+    expect(recoveryGets).toBe(1)
+
     statusPayload = {
       ...status,
       currentTechnicalQc: { ...result, projectId: 'project-cross-scope' },
@@ -660,6 +690,28 @@ describe('editorial handoff Host download bridge', () => {
     )).status).toBe(502)
     statusPayload = {
       ...status,
+      currentTechnicalQc: null,
+      staleTechnicalQc: {
+        stale: true,
+        code: 'returned_master_qc_editorial_binding_drift',
+        commandReceiptId: result.commandReceiptId,
+        driftFields: ['projectAspectRatio'],
+      },
+      currentEditorialContract: { ...currentEditorialContract, projectAspectRatio: '16:9' },
+      currentFormalMaster: { ...currentFormalMaster, projectAspectRatio: '16:9' },
+    }
+    expect((await fetch(
+      `${base}/api/qingmu/editorial-handoff/returned-master-technical-qc-status?${scope.toString()}`,
+    )).status).toBe(200)
+    statusPayload = {
+      ...status,
+      currentEditorialContract: { ...currentEditorialContract, deliveryProfileSha256: 'c'.repeat(64) },
+    }
+    expect((await fetch(
+      `${base}/api/qingmu/editorial-handoff/returned-master-technical-qc-status?${scope.toString()}`,
+    )).status).toBe(502)
+    statusPayload = {
+      ...status,
       currentFormalMaster: { ...currentFormalMaster, qualityStatus: 'failed' },
     }
     expect((await fetch(
@@ -684,7 +736,7 @@ describe('editorial handoff Host download bridge', () => {
       }) },
     )
     expect(malformed.status).toBe(400)
-    expect(confirmPosts).toBe(1)
+    expect(confirmPosts).toBe(2)
   })
 
   it('writes every upload byte when the spool writer reports partial progress', async () => {

@@ -370,6 +370,15 @@ interface EditorialMasterTechnicalQcFacts {
   readonly materializedSha256: string | null
 }
 
+interface EditorialMasterTechnicalQcContract {
+  readonly sourceSnapshotSha256: string
+  readonly projectionSha256: string
+  readonly selectionSourceSha256: string
+  readonly projectAspectRatio: string
+  readonly deliveryProfileSha256: string
+  readonly probeContractVersion: 'returned-master-technical-qc-probe-v1'
+}
+
 /** Durable Writer receipt for one source-bound returned-master technical inspection. */
 export interface EditorialMasterTechnicalQcResult {
   readonly schema: 'jason.qingmu-returned-master-technical-qc-result.v1'
@@ -381,6 +390,11 @@ export interface EditorialMasterTechnicalQcResult {
   readonly sourceSnapshotSha256: string
   readonly projectionSha256: string
   readonly selectionSourceSha256: string
+  readonly editorialSourceSnapshotSha256: string
+  readonly editorialProjectionSha256: string
+  readonly projectAspectRatio: string
+  readonly deliveryProfileSha256: string
+  readonly probeContractVersion: 'returned-master-technical-qc-probe-v1'
   readonly packageSha256: string
   readonly preflightSha256: string
   readonly selectionReceiptId: string
@@ -414,6 +428,7 @@ export interface EditorialMasterTechnicalQcPreview {
   readonly projectId: string
   readonly episodeId: string
   readonly currentFormalMaster: Record<string, unknown>
+  readonly currentEditorialContract: EditorialMasterTechnicalQcContract
   readonly previewSha256: string
   readonly idempotencyKey: string
   readonly canConfirm: boolean
@@ -433,6 +448,13 @@ export interface EditorialMasterTechnicalQcStatus {
   readonly episodeId: string
   readonly currentFormalMaster: Record<string, unknown> | null
   readonly currentTechnicalQc: EditorialMasterTechnicalQcResult | null
+  readonly currentEditorialContract: EditorialMasterTechnicalQcContract
+  readonly staleTechnicalQc: {
+    readonly stale: true
+    readonly code: 'returned_master_qc_editorial_binding_drift'
+    readonly commandReceiptId: string
+    readonly driftFields: readonly string[]
+  } | null
   readonly records: readonly EditorialMasterTechnicalQcResult[]
   readonly hardBlockers: readonly string[]
   readonly releaseConditions: { readonly ready: false; readonly blockers: readonly string[] }
@@ -1798,8 +1820,21 @@ function normalizeTechnicalQcMaster(
     || authority.currentFinalAssetId !== item.assetId
     || authority.currentFinalOutputId !== item.finalOutputId
     || authority.acceptedFinalAssetId !== null || authority.acceptedFinalOutputId !== null
-    || authority.acceptedFinalSha256 !== null || authority.acceptedReadinessToken !== null) return undefined
+    || authority.acceptedFinalSha256 !== null || authority.acceptedReadinessToken !== null
+    || typeof item.projectAspectRatio !== 'string' || item.projectAspectRatio.length === 0
+    || item.projectAspectRatio.length > 32) return undefined
   return item
+}
+
+function normalizeTechnicalQcContract(value: unknown): EditorialMasterTechnicalQcContract | undefined {
+  const item = safeSelectionPayload(value)
+  if (item === undefined
+    || ['sourceSnapshotSha256', 'projectionSha256', 'selectionSourceSha256',
+      'deliveryProfileSha256'].some(field => typeof item[field] !== 'string' || !SHA256.test(item[field]))
+    || typeof item.projectAspectRatio !== 'string' || item.projectAspectRatio.length === 0
+    || item.projectAspectRatio.length > 32
+    || item.probeContractVersion !== 'returned-master-technical-qc-probe-v1') return undefined
+  return value as EditorialMasterTechnicalQcContract
 }
 
 function technicalQcResultMatches(
@@ -1833,6 +1868,7 @@ function technicalQcResultMatches(
     || result.packageSha256 !== master.packageSha256
     || result.preflightSha256 !== master.preflightSha256
     || result.selectionReceiptId !== master.selectionReceiptId
+    || result.projectAspectRatio !== master.projectAspectRatio
     || result.qualityStatus !== master.qualityStatus
     || result.releaseAuthorityRevision !== (master.releaseAuthority as Record<string, unknown>).revision)) {
     return false
@@ -1854,8 +1890,12 @@ function normalizeTechnicalQcResult(value: unknown): EditorialMasterTechnicalQcR
     || !safeIdentifier(typeof item.finalOutputId === 'string' ? item.finalOutputId : null)
     || !safeIdentifier(typeof item.selectionReceiptId === 'string' ? item.selectionReceiptId : null)
     || ['masterSha256', 'sourceSnapshotSha256', 'projectionSha256', 'selectionSourceSha256',
+      'editorialSourceSnapshotSha256', 'editorialProjectionSha256', 'deliveryProfileSha256',
       'packageSha256', 'preflightSha256', 'canonicalResultSha256', 'requestSha256']
       .some(field => typeof item[field] !== 'string' || !SHA256.test(item[field]))
+    || typeof item.projectAspectRatio !== 'string' || item.projectAspectRatio.length === 0
+    || item.projectAspectRatio.length > 32
+    || item.probeContractVersion !== 'returned-master-technical-qc-probe-v1'
     || !['passed', 'failed', 'unknown'].includes(String(item.outcome))
     || !['pending', 'passed', 'failed'].includes(String(item.qualityStatus))
     || (item.outcome === 'passed' && item.qualityStatus !== 'passed')
@@ -1893,10 +1933,20 @@ function normalizeTechnicalQcResult(value: unknown): EditorialMasterTechnicalQcR
 
 function normalizeTechnicalQcPreview(value: unknown): EditorialMasterTechnicalQcPreview | undefined {
   const item = safeSelectionPayload(value)
+  const projectId = typeof item?.projectId === 'string' ? item.projectId : ''
+  const episodeId = typeof item?.episodeId === 'string' ? item.episodeId : ''
+  const contract = normalizeTechnicalQcContract(item?.currentEditorialContract)
+  const master = normalizeTechnicalQcMaster(
+    item?.currentFormalMaster,
+    projectId,
+    episodeId,
+  )
   if (item === undefined || item.schema !== 'jason.qingmu-returned-master-technical-qc-preview.v1'
     || !safeIdentifier(typeof item.projectId === 'string' ? item.projectId : null)
     || !safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
-    || normalizeTechnicalQcMaster(item.currentFormalMaster, String(item.projectId), String(item.episodeId)) === undefined
+    || master === undefined || contract === undefined
+    || contract.selectionSourceSha256 !== master.selectionSourceSha256
+    || contract.projectAspectRatio !== master.projectAspectRatio
     || typeof item.previewSha256 !== 'string' || !SHA256.test(item.previewSha256)
     || !safeIdentifier(typeof item.idempotencyKey === 'string' ? item.idempotencyKey : null)
     || typeof item.canConfirm !== 'boolean' || !safeQcStringList(item.hardBlockers)
@@ -1915,6 +1965,8 @@ function normalizeTechnicalQcStatus(value: unknown): EditorialMasterTechnicalQcS
     : normalizeTechnicalQcMaster(item?.currentFormalMaster, projectId, episodeId)
   const current = item?.currentTechnicalQc === null ? undefined
     : normalizeTechnicalQcResult(item?.currentTechnicalQc)
+  const contract = normalizeTechnicalQcContract(item?.currentEditorialContract)
+  const stale = safeSelectionPayload(item?.staleTechnicalQc)
   const records = Array.isArray(item?.records)
     ? item.records.map(normalizeTechnicalQcResult) : []
   if (item === undefined || item.schema !== 'jason.qingmu-returned-master-technical-qc-status.v1'
@@ -1922,12 +1974,22 @@ function normalizeTechnicalQcStatus(value: unknown): EditorialMasterTechnicalQcS
     || !safeIdentifier(typeof item.episodeId === 'string' ? item.episodeId : null)
     || !(item.currentFormalMaster === null || master !== undefined)
     || !(item.currentTechnicalQc === null || current !== undefined)
+    || contract === undefined
+    || !(item.staleTechnicalQc === null || (stale !== undefined && stale.stale === true
+      && stale.code === 'returned_master_qc_editorial_binding_drift'
+      && safeIdentifier(typeof stale.commandReceiptId === 'string' ? stale.commandReceiptId : null)
+      && safeQcStringList(stale.driftFields)))
+    || (current !== undefined && item.staleTechnicalQc !== null)
+    || (current === undefined && item.staleTechnicalQc !== null && stale === undefined)
     || !Array.isArray(item.records) || item.records.length > 1000
     || records.some(record => record === undefined)
     || records.some(record => record !== undefined
       && !technicalQcResultMatches(record, projectId, episodeId))
     || (current !== undefined && (master === undefined
       || !technicalQcResultMatches(current, projectId, episodeId, master)))
+    || (current !== undefined && (current.selectionSourceSha256 !== contract.selectionSourceSha256
+      || current.projectAspectRatio !== contract.projectAspectRatio
+      || current.deliveryProfileSha256 !== contract.deliveryProfileSha256))
     || !safeQcStringList(item.hardBlockers) || !validQcReleaseConditions(item.releaseConditions)
     || item.providerCalls !== 0 || item.stageStarted !== false || item.approvalGranted !== false
     || item.releaseGranted !== false || item.manifestFrozen !== false
@@ -2863,7 +2925,8 @@ export function registerEditorialHandoffDownload(
           },
         )
         let result = submitted?.response.ok === true ? normalizeTechnicalQcResult(submitted.raw) : undefined
-        if (result === undefined) {
+        if (result === undefined
+          && (submitted === undefined || submitted.response.status >= 500)) {
           const recoverySuffix = `returned-master-technical-qc/${encodeURIComponent(idempotencyKey)}?requestSha256=${requestSha}`
           const recovered = await writerSelectionRequest(
             dependencies, token, scope.projectId, scope.episodeId, recoverySuffix, { method: 'GET' },
