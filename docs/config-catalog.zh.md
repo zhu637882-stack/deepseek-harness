@@ -637,7 +637,7 @@ export interface ImagoMethodAdapterConfig {
 }
 ```
 
-来源：[`packages/experimental/qingmu-imago-method-adapter/src/index.ts:567`](../packages/experimental/qingmu-imago-method-adapter/src/index.ts)
+来源：[`packages/experimental/qingmu-imago-method-adapter/src/index.ts:569`](../packages/experimental/qingmu-imago-method-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-qingmu-yimeng-command-adapter"></a>
 
@@ -687,7 +687,7 @@ export interface YimengCommandAdapterConfig {
 
 ## `@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter`
 
-需要：`connection`
+需要：`connection` · `webServer`
 
 ```ts config-catalog
 /** Deployment-tunable upstream address and request deadline. */
@@ -701,7 +701,7 @@ export interface YimengReadAdapterConfig {
 }
 ```
 
-来源：[`packages/experimental/qingmu-yimeng-read-adapter/src/index.ts:391`](../packages/experimental/qingmu-yimeng-read-adapter/src/index.ts)
+来源：[`packages/experimental/qingmu-yimeng-read-adapter/src/index.ts:407`](../packages/experimental/qingmu-yimeng-read-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-tool-agent-team"></a>
 

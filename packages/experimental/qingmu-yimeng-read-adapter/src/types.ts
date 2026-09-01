@@ -1088,14 +1088,14 @@ export interface YimengEpisodeEvidenceAcceptanceSource {
 export interface YimengEpisodeEvidenceQcRecords {
   readonly schema: 'jason.qingmu-take-qc-records.v1'
   readonly records: readonly YimengJsonObject[]
-  readonly currentBinding: 'unknown_without_probe'
+  readonly currentBinding: 'unknown_without_probe' | 'current' | 'not_current'
 }
 
 /** Immutable approval-lifecycle records whose current binding remains unknown without a probe. */
 export interface YimengEpisodeEvidenceLifecycleRecords {
   readonly schema: 'jason.qingmu-take-approval-lifecycle-records.v1'
   readonly records: readonly YimengJsonObject[]
-  readonly currentBinding: 'unknown_without_probe'
+  readonly currentBinding: 'unknown_without_probe' | 'current' | 'not_current'
 }
 
 /** Existing evidence feeds and immutable records for one storyboard frame at one source revision. */
@@ -1133,10 +1133,12 @@ export interface YimengEditorialHandoffMedia {
   readonly assetId: string
   readonly assetRevision: number
   readonly sha256: string | null
+  readonly size: number | null
   readonly recordedOutputSha256: string | null
   readonly materializationStatus: 'available' | 'unavailable'
   readonly outputBindingStatus: 'verified' | 'recorded_sha_missing' | 'materialized_file_missing' | 'recorded_sha_mismatch'
   readonly mimeType: string | null
+  readonly containerTypeStatus: 'verified' | 'mismatch' | 'unavailable'
   readonly durationSec: number | null
   readonly fps: number | null
   readonly width: number | null
@@ -1145,6 +1147,36 @@ export interface YimengEditorialHandoffMedia {
   readonly selectionStatus: 'Selected'
   readonly qualityStatus: 'pending' | 'passed' | 'failed'
   readonly lineageComplete: boolean
+  readonly packagePath: string | null
+}
+
+/** Selected dialogue audio accepted by Writer as an editorial source. */
+export interface YimengEditorialHandoffAudio {
+  readonly assetId: string
+  readonly sha256: string | null
+  readonly recordedSha256: string | null
+  readonly size: number | null
+  readonly mimeType: string | null
+  readonly containerTypeStatus: 'verified' | 'mismatch' | 'unavailable'
+  readonly durationSec: number | null
+  readonly packagePath: string | null
+  readonly role: 'b6_dialogue_audio'
+  readonly selectionStatus: 'Selected'
+  readonly qualityStatus: 'pending' | 'passed' | 'failed'
+  readonly materializationStatus: 'available' | 'unavailable'
+  readonly qualityEvidenceValid: boolean
+  readonly lineageComplete: boolean
+  readonly formalizationComplete: boolean
+  readonly sourceComplete: boolean
+  readonly source: {
+    readonly taskId: string | null
+    readonly provider: string | null
+    readonly model: string | null
+    readonly providerTaskId: string | null
+    readonly routeKey: string | null
+    readonly inputHash: string | null
+    readonly ownershipIntentSha256: string | null
+  }
 }
 
 /** One canonical storyboard row and its selected editorial source facts. */
@@ -1156,7 +1188,12 @@ export interface YimengEditorialHandoffShot extends YimengJsonObject {
   readonly frameContentSha256: string
   readonly stackSnapshotSha256: string
   readonly selectedTake: YimengEditorialHandoffMedia | null
-  readonly audio: { readonly status: 'not_authoritatively_bound'; readonly asset: null }
+  readonly audio: {
+    readonly status: 'available' | 'unavailable'
+    readonly scopeStatus: 'valid' | 'cross_scope'
+    readonly candidateCount: number
+    readonly asset: YimengEditorialHandoffAudio | null
+  }
   readonly comments: YimengTakeCommentFeedResponse
   readonly review: YimengTakeReviewAuthorityFeedResponse
   readonly qc: YimengEpisodeEvidenceQcRecords | null
@@ -1180,16 +1217,31 @@ export interface YimengEditorialHandoffResponse extends YimengEpisodeEvidenceReq
   readonly summary: {
     readonly shotCount: number
     readonly selectedTakeCount: number
-    readonly authoritativeAudioCount: 0
+    readonly authoritativeAudioCount: number
     readonly totalDurationSec: number
     readonly unresolvedCount: number
   }
   readonly unresolved: readonly { readonly frameId: string | null; readonly code: string }[]
   readonly blockers: readonly { readonly scope: 'shot' | 'export'; readonly frameId: string | null; readonly code: string }[]
   readonly download: {
-    readonly available: false
+    readonly available: boolean
     readonly format: 'otio-zip'
-    readonly blockerCode: 'editorial_handoff_otio_dependency_unavailable' | 'editorial_handoff_otio_adapter_unverified'
+    readonly blockerCode: string | null
+    readonly packageSchema: 'jason.qingmu-editorial-otio-package.v1'
+    readonly otio: {
+      readonly distribution: 'OpenTimelineIO'
+      readonly version: '0.18.1'
+      readonly adapter: 'otio_json'
+      readonly schemaFamily: 'OTIO_CORE'
+      readonly schemaLabel: '0.18.1'
+    }
+    readonly rangePolicy: 'full-selected-asset-v1'
+    readonly audioEditorialRatePolicy: 'episode-canonical-video-fps-v1'
+    /** Short-lived Host capability bound to this exact authenticated projection. */
+    readonly hostAccess?: {
+      readonly requestId: string
+      readonly capability: string
+    }
   }
   readonly aokiVideoProductionHandoffReady: false
   readonly yimengEpisodeReleaseReady: false

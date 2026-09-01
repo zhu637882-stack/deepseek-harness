@@ -685,7 +685,7 @@ Source: [`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:472`]
 
 ## `@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter`
 
-Requires: `connection`
+Requires: `connection` · `webServer`
 
 ```ts config-catalog
 /** Deployment-tunable upstream address and request deadline. */
@@ -699,7 +699,7 @@ export interface YimengReadAdapterConfig {
 }
 ```
 
-Source: [`packages/experimental/qingmu-yimeng-read-adapter/src/index.ts:398`](../packages/experimental/qingmu-yimeng-read-adapter/src/index.ts)
+Source: [`packages/experimental/qingmu-yimeng-read-adapter/src/index.ts:407`](../packages/experimental/qingmu-yimeng-read-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-tool-agent-team"></a>
 

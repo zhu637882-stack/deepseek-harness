@@ -17,6 +17,7 @@
 .shots dd { margin: 3px 0 0; overflow-wrap: anywhere; }
 .blockers { margin: 10px 0; padding-left: 20px; color: #ffd08a; }
 .warning, .error { color: #ffd08a; }
+.success { color: var(--qingmu-accent); overflow-wrap: anywhere; }
 .exportBox { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: color-mix(in srgb, var(--qingmu-accent) 5%, transparent); }
 .empty { color: var(--dsw-alias-label-secondary); }
 details p { overflow-wrap: anywhere; }

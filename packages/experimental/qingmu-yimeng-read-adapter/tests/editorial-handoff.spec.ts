@@ -42,28 +42,34 @@ function projection() {
         assetId: 'asset-1', assetRevision: 1, sha256: '5'.repeat(64) as string | null,
         recordedOutputSha256: '5'.repeat(64) as string | null, materializationStatus: 'available',
         outputBindingStatus: 'verified', mimeType: 'video/mp4',
+        containerTypeStatus: 'verified',
+        size: 1024 as number | null, packagePath: `media/${'5'.repeat(64)}.mp4` as string | null,
         durationSec: 5 as number | null, fps: 24 as number | null,
         width: 720 as number | null, height: 1280 as number | null,
         aspectRatio: '720:1280' as string | null,
         selectionStatus: 'Selected', qualityStatus: 'passed', lineageComplete: true,
       },
-      audio: { status: 'not_authoritatively_bound', asset: null },
+      audio: { status: 'unavailable', scopeStatus: 'valid', candidateCount: 0, asset: null },
       comments, review,
       qc: null as null | { schema: string; records: Array<Record<string, unknown>>; currentBinding: string },
       approval: null as null | { schema: string; records: Array<Record<string, unknown>>; currentBinding: string },
-      blockers: ['editorial_handoff_approval_record_missing', 'editorial_handoff_qc_record_missing'],
+      blockers: [
+        'editorial_handoff_approval_record_missing',
+        'editorial_handoff_qc_record_missing',
+        'editorial_handoff_selected_audio_missing',
+      ],
     }],
     audioPolicy: 'only_authoritatively_bound_assets',
   }
   const unresolved = [
     { frameId: 'frame-1', code: 'editorial_handoff_approval_record_missing' },
     { frameId: 'frame-1', code: 'editorial_handoff_qc_record_missing' },
-    { frameId: null, code: 'editorial_handoff_otio_dependency_unavailable' },
+    { frameId: 'frame-1', code: 'editorial_handoff_selected_audio_missing' },
   ]
   const blockers = [
     { scope: 'shot', frameId: 'frame-1', code: 'editorial_handoff_approval_record_missing' },
     { scope: 'shot', frameId: 'frame-1', code: 'editorial_handoff_qc_record_missing' },
-    { scope: 'export', frameId: null, code: 'editorial_handoff_otio_dependency_unavailable' },
+    { scope: 'shot', frameId: 'frame-1', code: 'editorial_handoff_selected_audio_missing' },
   ]
   const body = {
     schema: 'jason.qingmu-editorial-handoff-draft.v1', ...request, source,
@@ -71,7 +77,12 @@ function projection() {
     summary: { shotCount: 1, selectedTakeCount: 1, authoritativeAudioCount: 0,
       totalDurationSec: 5, unresolvedCount: 3 },
     unresolved, blockers,
-    download: { available: false, format: 'otio-zip', blockerCode: 'editorial_handoff_otio_dependency_unavailable' },
+    download: {
+      available: false, format: 'otio-zip', blockerCode: 'editorial_handoff_approval_record_missing',
+      packageSchema: 'jason.qingmu-editorial-otio-package.v1',
+      otio: { distribution: 'OpenTimelineIO', version: '0.18.1', adapter: 'otio_json', schemaFamily: 'OTIO_CORE', schemaLabel: '0.18.1' },
+      rangePolicy: 'full-selected-asset-v1', audioEditorialRatePolicy: 'episode-canonical-video-fps-v1',
+    },
     aokiVideoProductionHandoffReady: false, yimengEpisodeReleaseReady: false,
     readOnly: true, providerCalls: 0, businessMutations: 0,
   }
@@ -123,8 +134,12 @@ describe('editorial handoff read adapter', () => {
 
   it('rejects duplicate or extra blockers even with recomputed hashes', () => {
     const value = projection()
-    value.unresolved.push({ frameId: null, code: 'forged_blocker' })
-    value.blockers.push({ scope: 'export', frameId: null, code: 'forged_blocker' })
+    ;(value.unresolved as Array<{ frameId: string | null; code: string }>).push(
+      { frameId: null, code: 'forged_blocker' },
+    )
+    ;(value.blockers as Array<{ scope: string; frameId: string | null; code: string }>).push(
+      { scope: 'export', frameId: null, code: 'forged_blocker' },
+    )
     value.summary.unresolvedCount += 1
     value.projectionSha256 = sha(Object.fromEntries(
       Object.entries(value).filter(([key]) => key !== 'projectionSha256'),
@@ -171,7 +186,10 @@ describe('editorial handoff read adapter', () => {
     const shot = value.source.shots[0]
     if (shot?.selectedTake === null || shot?.selectedTake === undefined) throw new Error('fixture selected Take is required')
     shot.selectedTake.sha256 = null
+    shot.selectedTake.size = null
+    shot.selectedTake.packagePath = null
     shot.selectedTake.materializationStatus = 'unavailable'
+    shot.selectedTake.containerTypeStatus = 'unavailable'
     shot.selectedTake.outputBindingStatus = 'materialized_file_missing'
     shot.selectedTake.durationSec = null
     shot.selectedTake.fps = null
@@ -185,14 +203,8 @@ describe('editorial handoff read adapter', () => {
     shot.blockers.push('editorial_handoff_selected_media_metadata_missing')
     shot.blockers.push('editorial_handoff_selected_media_missing')
     shot.blockers.sort()
-    value.unresolved.splice(2, 0,
-      { frameId: 'frame-1', code: 'editorial_handoff_selected_media_metadata_missing' },
-      { frameId: 'frame-1', code: 'editorial_handoff_selected_media_missing' },
-      { frameId: 'frame-1', code: 'editorial_handoff_selected_take_lineage_incomplete' })
-    value.blockers.splice(2, 0,
-      { scope: 'shot', frameId: 'frame-1', code: 'editorial_handoff_selected_media_metadata_missing' },
-      { scope: 'shot', frameId: 'frame-1', code: 'editorial_handoff_selected_media_missing' },
-      { scope: 'shot', frameId: 'frame-1', code: 'editorial_handoff_selected_take_lineage_incomplete' })
+    value.unresolved = shot.blockers.map(code => ({ frameId: shot.frameId, code }))
+    value.blockers = shot.blockers.map(code => ({ scope: 'shot' as const, frameId: shot.frameId, code }))
     value.summary.totalDurationSec = 0
     value.summary.unresolvedCount += 3
     rehash(value)
@@ -201,6 +213,33 @@ describe('editorial handoff read adapter', () => {
     shot.blockers = shot.blockers.filter(code => code !== 'editorial_handoff_selected_media_missing')
     value.unresolved = value.unresolved.filter(entry => entry.code !== 'editorial_handoff_selected_media_missing')
     value.blockers = value.blockers.filter(entry => entry.code !== 'editorial_handoff_selected_media_missing')
+    value.summary.unresolvedCount -= 1
+    rehash(value)
+    expect(() => normalizeEditorialHandoff(value, request, entry => sha(entry))).toThrow(
+      'shot blockers do not match normalized source facts',
+    )
+  })
+
+  it('accepts a canonical container mismatch only with its exact blocker', () => {
+    const value = projection()
+    const shot = value.source.shots[0]
+    if (shot?.selectedTake === null || shot?.selectedTake === undefined) {
+      throw new Error('fixture selected Take is required')
+    }
+    shot.selectedTake.containerTypeStatus = 'mismatch'
+    shot.blockers.push('editorial_handoff_selected_media_type_mismatch')
+    shot.blockers.sort()
+    value.unresolved = shot.blockers.map(code => ({ frameId: shot.frameId, code }))
+    value.blockers = shot.blockers.map(code => ({
+      scope: 'shot' as const, frameId: shot.frameId, code,
+    }))
+    value.summary.unresolvedCount += 1
+    rehash(value)
+    expect(normalizeEditorialHandoff(value, request, entry => sha(entry))).toEqual(value)
+
+    shot.blockers = shot.blockers.filter(code => code !== 'editorial_handoff_selected_media_type_mismatch')
+    value.unresolved = value.unresolved.filter(entry => entry.code !== 'editorial_handoff_selected_media_type_mismatch')
+    value.blockers = value.blockers.filter(entry => entry.code !== 'editorial_handoff_selected_media_type_mismatch')
     value.summary.unresolvedCount -= 1
     rehash(value)
     expect(() => normalizeEditorialHandoff(value, request, entry => sha(entry))).toThrow(
@@ -217,10 +256,8 @@ describe('editorial handoff read adapter', () => {
     shot.review.versions = []
     shot.blockers.push('editorial_handoff_selected_media_metadata_missing')
     shot.blockers.sort()
-    value.unresolved.splice(2, 0,
-      { frameId: 'frame-1', code: 'editorial_handoff_selected_media_metadata_missing' })
-    value.blockers.splice(2, 0,
-      { scope: 'shot', frameId: 'frame-1', code: 'editorial_handoff_selected_media_metadata_missing' })
+    value.unresolved = shot.blockers.map(code => ({ frameId: shot.frameId, code }))
+    value.blockers = shot.blockers.map(code => ({ scope: 'shot' as const, frameId: shot.frameId, code }))
     value.summary.totalDurationSec = 0
     value.summary.unresolvedCount += 1
     rehash(value)
@@ -233,24 +270,26 @@ describe('editorial handoff read adapter', () => {
     if (shot?.selectedTake === null || shot?.selectedTake === undefined) throw new Error('fixture selected Take is required')
     shot.selectedTake.sha256 = null
     shot.selectedTake.recordedOutputSha256 = null
+    shot.selectedTake.size = null
+    shot.selectedTake.packagePath = null
     shot.selectedTake.materializationStatus = 'unavailable'
+    shot.selectedTake.containerTypeStatus = 'unavailable'
     shot.selectedTake.outputBindingStatus = 'recorded_sha_missing'
     shot.selectedTake.lineageComplete = false
     shot.comments.versions = []
     shot.review.versions = []
     shot.blockers.push(
       'editorial_handoff_selected_media_missing',
+      'editorial_handoff_selected_media_metadata_missing',
       'editorial_handoff_selected_media_sha_missing',
       'editorial_handoff_selected_take_lineage_incomplete',
     )
     shot.blockers.sort()
     value.unresolved = [
       ...shot.blockers.map(code => ({ frameId: shot.frameId, code })),
-      { frameId: null, code: 'editorial_handoff_otio_dependency_unavailable' },
     ]
     value.blockers = [
       ...shot.blockers.map(code => ({ scope: 'shot' as const, frameId: shot.frameId, code })),
-      { scope: 'export' as const, frameId: null, code: 'editorial_handoff_otio_dependency_unavailable' },
     ]
     value.summary.unresolvedCount = value.unresolved.length
     rehash(value)
@@ -300,7 +339,58 @@ describe('editorial handoff read adapter', () => {
     expect(shot.blockers).toEqual([
       'editorial_handoff_approval_record_missing',
       'editorial_handoff_qc_record_missing',
+      'editorial_handoff_selected_audio_missing',
     ])
+    expect(normalizeEditorialHandoff(value, request, entry => sha(entry))).toEqual(value)
+  })
+
+  it('keeps a cross-scope selected audio binding readable but export-blocked', () => {
+    const value = projection()
+    const shot = value.source.shots[0]
+    if (shot === undefined) throw new Error('fixture shot is required')
+    shot.audio.scopeStatus = 'cross_scope'
+    shot.audio.candidateCount = 1
+    shot.blockers = shot.blockers.map(code => code === 'editorial_handoff_selected_audio_missing'
+      ? 'editorial_handoff_selected_audio_scope_invalid' : code).sort()
+    value.unresolved = shot.blockers.map(code => ({ frameId: shot.frameId, code }))
+    value.blockers = shot.blockers.map(code => ({ scope: 'shot' as const, frameId: shot.frameId, code }))
+    ;(value.download as { blockerCode: string | null }).blockerCode = shot.blockers[0] ?? null
+    rehash(value)
+    expect(normalizeEditorialHandoff(value, request, entry => sha(entry))).toEqual(value)
+
+    shot.audio.scopeStatus = 'valid'
+    rehash(value)
+    expect(() => normalizeEditorialHandoff(value, request, entry => sha(entry))).toThrow(
+      'audio candidate count is invalid',
+    )
+  })
+
+  it('accepts a tampered audio projection whose archive path remains bound to the recorded SHA', () => {
+    const value = projection()
+    const shot = value.source.shots[0]
+    if (shot === undefined) throw new Error('fixture shot is required')
+    Reflect.set(shot, 'audio', {
+      status: 'unavailable', scopeStatus: 'valid', candidateCount: 1,
+      asset: {
+        assetId: 'audio-1', sha256: '6'.repeat(64), recordedSha256: '5'.repeat(64), size: 14,
+        mimeType: 'audio/wav', containerTypeStatus: 'verified', durationSec: 5,
+        packagePath: `media/${'5'.repeat(64)}.wav`,
+        role: 'b6_dialogue_audio', selectionStatus: 'Selected', qualityStatus: 'passed',
+        materializationStatus: 'available', qualityEvidenceValid: true, lineageComplete: true,
+        formalizationComplete: true, sourceComplete: true,
+        source: {
+          taskId: 'task-audio', provider: 'fixture', model: 'fixture-voice',
+          providerTaskId: 'provider-audio', routeKey: 'sound.dialogue_tts',
+          inputHash: '7'.repeat(64), ownershipIntentSha256: '8'.repeat(64),
+        },
+      },
+    })
+    shot.blockers = shot.blockers.map(code => code === 'editorial_handoff_selected_audio_missing'
+      ? 'editorial_handoff_selected_audio_media_drift' : code).sort()
+    value.unresolved = shot.blockers.map(code => ({ frameId: shot.frameId, code }))
+    value.blockers = shot.blockers.map(code => ({ scope: 'shot' as const, frameId: shot.frameId, code }))
+    ;(value.download as { blockerCode: string | null }).blockerCode = shot.blockers[0] ?? null
+    rehash(value)
     expect(normalizeEditorialHandoff(value, request, entry => sha(entry))).toEqual(value)
   })
 
@@ -323,11 +413,9 @@ describe('editorial handoff read adapter', () => {
       }
       value.unresolved = [
         ...shot.blockers.map(code => ({ frameId: shot.frameId, code })),
-        { frameId: null, code: 'editorial_handoff_otio_dependency_unavailable' },
       ]
       value.blockers = [
         ...shot.blockers.map(code => ({ scope: 'shot' as const, frameId: shot.frameId, code })),
-        { scope: 'export' as const, frameId: null, code: 'editorial_handoff_otio_dependency_unavailable' },
       ]
       rehash(value)
       expect(() => normalizeEditorialHandoff(value, request, entry => sha(entry))).toThrow()

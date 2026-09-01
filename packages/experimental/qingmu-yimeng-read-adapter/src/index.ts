@@ -1,10 +1,12 @@
 /** Loopback-only Host BFF for read-only Yimeng production facts. */
 
 import { createHash } from 'node:crypto'
+import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-client-connection'
+import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import { normalizeContinuityDelta } from './continuity.ts'
@@ -34,6 +36,11 @@ import {
   parseEpisodeVerificationRequest,
 } from './episode-evidence.ts'
 import { normalizeEditorialHandoff } from './editorial-handoff.ts'
+import {
+  EditorialHandoffDownloadAuthorizer,
+  registerEditorialHandoffDownload,
+} from './editorial-handoff-download.ts'
+import type { EditorialHandoffDownloadAccess } from './editorial-handoff-download.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -62,6 +69,8 @@ import type {
   YimengElementReviewSubject,
   YimengEpisodesRequest,
   YimengEpisodesResponse,
+  YimengEpisodeEvidenceRequest,
+  YimengEditorialHandoffResponse,
   YimengFirstFrameQuoteRequest,
   YimengFirstFrameQuoteResponse,
   YimengHealth,
@@ -392,7 +401,7 @@ const SENSITIVE_RESPONSE_KEYS = new Set([
 /** Cordis plugin name. */
 export const name = 'experimental-qingmu-yimeng-read-adapter'
 /** Host Connection must exist before the adapter registers its private channel. */
-export const inject = ['connection']
+export const inject = ['connection', 'webServer']
 
 /** Deployment-tunable upstream address and request deadline. */
 export interface YimengReadAdapterConfig {
@@ -415,6 +424,12 @@ export const Config: z<YimengReadAdapterConfig> = z.object({
 export interface YimengReadAdapterDependencies {
   readonly fetch: typeof globalThis.fetch
   readonly readToken: () => string | undefined
+  readonly issueEditorialHandoffDownload?: (binding: {
+    readonly projectId: string
+    readonly episodeId: string
+    readonly sourceSnapshotSha256: string
+    readonly projectionSha256: string
+  }) => EditorialHandoffDownloadAccess
 }
 
 class InputError extends Error {}
@@ -4909,6 +4924,7 @@ export function createYimengReadHandler(
     try {
       let path: string
       let normalize: (value: unknown) => unknown
+      let editorialRequest: YimengEpisodeEvidenceRequest | undefined
       let verificationBody: string | undefined
       if (endpoint === 'health') {
         assertEmptyRequest(payload)
@@ -5054,6 +5070,7 @@ export function createYimengReadHandler(
         normalize = value => normalizeEpisodeEvidenceLedger(value, request, jcsSha256)
       } else if (endpoint === 'editorialHandoff') {
         const request = parseEvidenceLedgerRequest(payload)
+        editorialRequest = request
         path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)
           + '/episodes/' + encodeURIComponent(request.episodeId) + '/editorial-handoff'
         normalize = value => normalizeEditorialHandoff(value, request, jcsSha256)
@@ -5155,7 +5172,19 @@ export function createYimengReadHandler(
       }
       if (!response.ok) return response
       try {
-        return { ok: true, value: normalize(response.value) }
+        const normalized = normalize(response.value)
+        if (editorialRequest !== undefined && dependencies.issueEditorialHandoffDownload !== undefined) {
+          const handoff = normalized as YimengEditorialHandoffResponse
+          if (handoff.download.available) {
+            const hostAccess = dependencies.issueEditorialHandoffDownload({
+              ...editorialRequest,
+              sourceSnapshotSha256: handoff.sourceSnapshotSha256,
+              projectionSha256: handoff.projectionSha256,
+            })
+            return { ok: true, value: { ...handoff, download: { ...handoff.download, hostAccess } } }
+          }
+        }
+        return { ok: true, value: normalized }
       } catch (error) {
         if (error instanceof UpstreamContractError) {
           return internalError(`Yimeng response contract failed: ${error.message}`)
@@ -5175,7 +5204,25 @@ export function createYimengReadHandler(
  * @param config - loopback upstream and timeout settings.
  */
 export function apply(ctx: Context, config: YimengReadAdapterConfig = {}): void {
-  const handler = createYimengReadHandler(config)
+  const dshHome = process.env.DSH_HOME?.trim()
+  const authorizer = dshHome === undefined || dshHome === '' ? undefined
+    : new EditorialHandoffDownloadAuthorizer(join(dshHome, 'state', 'qingmu-editorial-downloads.json'))
+  const dependencies: YimengReadAdapterDependencies = {
+    fetch: globalThis.fetch,
+    readToken: () => process.env.YIMENG_API_TOKEN,
+    ...(authorizer === undefined ? {} : {
+      issueEditorialHandoffDownload: binding => authorizer.issue(binding),
+    }),
+  }
+  const handler = createYimengReadHandler(config, dependencies)
   ctx.provide('qingmuYimengRead', handler)
   ctx.connection.rpc.handle(CHANNEL, handler, { authority: 'loopback' })
+  if (authorizer !== undefined) {
+    ctx.effect(() => registerEditorialHandoffDownload(ctx.webServer, {
+      baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),
+      fetch: dependencies.fetch,
+      readToken: dependencies.readToken,
+      authorizer,
+    }), 'qingmu-yimeng-read: editorial handoff download routes')
+  }
 }

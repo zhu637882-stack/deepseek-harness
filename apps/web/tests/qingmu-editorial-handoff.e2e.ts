@@ -1,24 +1,26 @@
-// E8-1A blocked export path: Chromium -> built Host -> actual FastAPI -> isolated SQLite/media.
-import { spawn, type ChildProcess } from 'node:child_process'
+// E8-1B: Chromium -> built Host -> actual FastAPI -> deterministic official OTIO package.
+import { execFile as execFileCallback, spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
 import { chromium, type Browser, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { launchWebScaffold, webSnapshotMode, type WebScaffold } from './scaffold.ts'
 import { REPO_ROOT, ZH_BROWSER_LOCALE } from './support.ts'
 
+const execFile = promisify(execFileCallback)
+
 interface Fixture {
   readonly baseUrl: string
   readonly token: string
   readonly projectId: string
   readonly episodeId: string
+  readonly frameIds: readonly string[]
   readonly sqlitePath: string
   readonly storageRoot: string
-  readonly handoffControlPath: string
-  readonly handoffControlAckPath: string
 }
 
 async function fingerprintFiles(root: string): Promise<Record<string, string>> {
@@ -44,9 +46,18 @@ async function mountClient(scaffold: WebScaffold, name: string, path: string): P
   await scaffold.ctx.loader.create({ name })
 }
 
+async function stopFixture(child: ChildProcess | undefined): Promise<void> {
+  if (child === undefined || child.exitCode !== null) return
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => child.kill('SIGKILL'), 5000)
+    child.once('exit', () => { clearTimeout(timer); resolve() })
+    child.kill('SIGTERM')
+  })
+}
+
 const writerRoot = process.env.QINGMU_E8_YIMENG_ROOT
 describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot)(
-  'web e2e: real read-only editorial handoff', () => {
+  'web e2e: official deterministic editorial handoff package', () => {
     let root: string | undefined
     let child: ChildProcess | undefined
     let scaffold: WebScaffold | undefined
@@ -58,24 +69,23 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
     const originalToken = process.env.YIMENG_API_TOKEN
     const captured: Record<string, unknown>[] = []
 
-    beforeAll(async () => {
-      if (!writerRoot || webSnapshotMode() === 'record') throw new Error('Explicit isolated writer root and keyless snapshot mode are required')
-      root = await realpath(await mkdtemp(join(tmpdir(), 'qingmu-e8-handoff-')))
-      child = spawn(join(writerRoot, '.venv/bin/python'), [
+    async function startFixture(resume: boolean): Promise<Fixture> {
+      if (root === undefined || writerRoot === undefined) throw new Error('Fixture roots are required')
+      const args = [
         '-B', join(writerRoot, 'scripts/qingmu_evidence_ledger_fixture.py'),
-        '--root', join(root, 'yimeng'), '--handoff-two-shots', '--handoff-drift-control',
-      ], {
+        '--root', join(root, 'yimeng'),
+        ...(resume ? ['--resume'] : ['--handoff-complete-package']),
+      ]
+      child = spawn(join(writerRoot, '.venv/bin/python'), args, {
         cwd: root,
         env: { PATH: process.env.PATH, PYTHONPATH: join(writerRoot, 'backend/src'), PYTHONDONTWRITEBYTECODE: '1' },
         stdio: ['ignore', 'pipe', 'pipe'],
       })
       const server = child
-      fixture = await new Promise<Fixture>((resolve, reject) => {
+      return await new Promise<Fixture>((resolve, reject) => {
         let output = ''
         let stderr = ''
-        const timer = setTimeout(() => {
-          reject(new Error(`FastAPI fixture readiness timed out: ${stderr.slice(-2000)}`))
-        }, 30_000)
+        const timer = setTimeout(() => reject(new Error(`FastAPI fixture readiness timed out: ${stderr.slice(-2000)}`)), 30_000)
         server.stderr?.on('data', (chunk: Buffer) => { stderr = `${stderr}${chunk.toString()}`.slice(-4000) })
         server.once('error', (error) => { clearTimeout(timer); reject(error) })
         server.once('exit', (code) => { clearTimeout(timer); reject(new Error(`FastAPI fixture exited ${String(code)}: ${stderr.slice(-2000)}`)) })
@@ -94,6 +104,12 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
           }
         })
       })
+    }
+
+    beforeAll(async () => {
+      if (!writerRoot || webSnapshotMode() === 'record') throw new Error('Explicit isolated writer root and keyless snapshot mode are required')
+      root = await realpath(await mkdtemp(join(tmpdir(), 'qingmu-e81b-handoff-')))
+      fixture = await startFixture(false)
       beforeDb = createHash('sha256').update(await readFile(fixture.sqlitePath)).digest('hex')
       beforeStorage = await fingerprintFiles(fixture.storageRoot)
       process.env.YIMENG_API_TOKEN = fixture.token
@@ -108,25 +124,18 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       await mountClient(scaffold, '@deepseek-ai/dsh-experimental-client-ui-brand-qingmu', 'packages/experimental/client-ui-brand-qingmu')
       await mountClient(scaffold, '@deepseek-ai/dsh-experimental-client-ui-qingmu-cockpit', 'packages/experimental/client-ui-qingmu-cockpit')
       await scaffold.ctx.loader.await()
+      const readEntry = [...scaffold.ctx.loader.entries()].find(entry => entry.options.id === 'qingmu-yimeng-read-adapter')
+      expect(readEntry?.options.config).toMatchObject({ baseUrl: fixture.baseUrl })
       const executablePath = process.env.DSH_PLAYWRIGHT_EXECUTABLE_PATH
       browser = await chromium.launch(executablePath === undefined ? {} : { executablePath })
       page = await browser.newPage({ viewport: { width: 1280, height: 800 }, locale: ZH_BROWSER_LOCALE })
-      const bootErrors: string[] = []
-      page.on('console', (message) => { if (message.type() === 'error') bootErrors.push(message.text()) })
-      page.on('pageerror', (error) => { bootErrors.push(error.message) })
       page.on('request', (request) => {
-        if (new URL(request.url()).pathname === '/qingmu-yimeng/editorialHandoff') {
-          captured.push(request.postDataJSON() as Record<string, unknown>)
-        }
+        const url = new URL(request.url())
+        if (!['127.0.0.1', 'localhost'].includes(url.hostname)) throw new Error(`External browser request forbidden: ${url.origin}`)
+        if (url.pathname === '/qingmu-yimeng/editorialHandoff') captured.push(request.postDataJSON() as Record<string, unknown>)
       })
       await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
-      const enter = page.getByRole('button', { name: '进入青木 OS' })
-      try {
-        await enter.waitFor({ timeout: 5000 })
-      } catch {
-        throw new Error(`Qingmu welcome did not render: ${bootErrors.join(' | ')}; body=${(await page.locator('body').innerText()).slice(0, 1000)}`)
-      }
-      await enter.click()
+      await page.getByRole('button', { name: '进入青木 OS' }).click()
     })
 
     afterAll(async () => {
@@ -134,87 +143,156 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
         await browser?.close()
         await scaffold?.close()
       } finally {
-        if (child?.exitCode === null) {
-          const server = child
-          await new Promise<void>((resolve) => {
-            const timer = setTimeout(() => server.kill('SIGKILL'), 5000)
-            server.once('exit', () => { clearTimeout(timer); resolve() })
-            server.kill('SIGTERM')
-          })
-        }
+        await stopFixture(child)
         if (originalToken === undefined) Reflect.deleteProperty(process.env, 'YIMENG_API_TOKEN')
         else process.env.YIMENG_API_TOKEN = originalToken
         if (root !== undefined) await rm(root, { recursive: true, force: true })
       }
     })
 
-    it('renders two authoritative shots and a fail-closed OTIO download without writes', async () => {
-      if (scaffold === undefined) throw new Error('Host was not started')
+    it('downloads exact official OTIO twice, fails stale, and recovers after FastAPI restart', async () => {
+      if (scaffold === undefined || browser === undefined || writerRoot === undefined || root === undefined) throw new Error('E2E dependencies were not started')
       await page.getByRole('button', { name: '青木制作台', exact: true }).click()
-      const dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      let dialog = page.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
       await dialog.getByRole('combobox', { name: '项目', exact: true }).selectOption(fixture.projectId)
       await dialog.getByRole('combobox', { name: '剧集', exact: true }).selectOption(fixture.episodeId)
-      await expect.poll(() => dialog.getByRole('button', { name: '刷新只读投影', exact: true }).isEnabled()).toBe(true)
-      await page.waitForTimeout(500)
       await dialog.getByRole('tab', { name: '费用与交付', exact: true }).click()
       await dialog.getByRole('heading', { name: '剪辑交接草案' }).waitFor()
-      await expect.poll(() => captured.length).toBe(1)
-      await expect.poll(async () => (
-        await dialog.getByRole('status').count() + await dialog.getByRole('alert').count()
-      )).toBeGreaterThan(0)
-      if (await dialog.getByRole('alert').count() > 0) {
-        expect(await dialog.getByRole('alert').innerText()).toContain('读取期间来源已变化')
-        await dialog.getByRole('button', { name: '刷新交接事实' }).click()
-        await expect.poll(() => captured.length).toBe(2)
+      const shotList = dialog.getByRole('list', { name: '剪辑交接镜头清单' })
+      const firstRead = await Promise.race([
+        shotList.waitFor({ timeout: 30_000 }).then(() => 'loaded' as const),
+        dialog.getByRole('alert').waitFor({ timeout: 30_000 }).then(() => 'retry' as const),
+      ])
+      if (firstRead === 'retry') {
+        for (let attempt = 0; attempt < 3 && !await shotList.isVisible(); attempt += 1) {
+          await page.waitForTimeout(500)
+          await dialog.getByRole('button', { name: '刷新交接事实' }).click()
+          await shotList.waitFor({ timeout: 10_000 }).catch(() => undefined)
+        }
+        if (!await shotList.isVisible()) {
+          throw new Error(`Editorial handoff did not recover: ${await dialog.innerText()}`)
+        }
       }
-      await expect.poll(() => dialog.getByRole('status').innerText()).toContain('青木视频生产交接就绪: 否')
-      const statusText = await dialog.getByRole('status').innerText()
+      const downloadButton = dialog.getByRole('button', { name: /(?:下载 OTIO 媒体包|下载不可用)/u })
+      await expect.poll(async () => {
+        if (await downloadButton.isEnabled()) return true
+        throw new Error(await dialog.innerText())
+      }, { timeout: 30_000 }).toBe(true)
+      expect(await shotList.locator(':scope > li').count()).toBe(2)
+      expect(await dialog.getByText(/OpenTimelineIO 0\.18\.1/u).count()).toBeGreaterThan(0)
+      const statusText = await dialog.getByRole('status').filter({ hasText: '青木视频生产交接就绪' }).innerText()
       expect(statusText).toContain('青木视频生产交接就绪: 否')
       expect(statusText).toContain('易梦剧集发布就绪: 否')
-      expect(await dialog.getByRole('list', { name: '剪辑交接镜头清单' }).locator(':scope > li').count()).toBe(2)
-      expect(await dialog.getByText('Fixture local take', { exact: false }).count()).toBe(1)
-      expect(await dialog.getByText('Fixture unresolved take', { exact: false }).count()).toBe(1)
-      expect(await dialog.getByText('未绑定权威音频').count()).toBe(1)
-      expect(await dialog.getByText('当前镜头没有权威已选 Take。').count()).toBe(1)
-      const download = dialog.getByRole('button', { name: '当前不可下载' })
-      expect(await download.isDisabled()).toBe(true)
-      expect(await dialog.getByText(/OpenTimelineIO/u).count()).toBeGreaterThan(0)
-      const mediaEntries = Object.keys(beforeStorage).filter(path => path.endsWith('.mp4'))
-      expect(mediaEntries).toHaveLength(1)
-      const mediaPath = join(fixture.storageRoot, mediaEntries[0] as string)
-      const mediaBytes = await readFile(mediaPath)
-      const firstShot = dialog.getByRole('list', { name: '剪辑交接镜头清单' }).locator(':scope > li').first()
-      const oldMediaSha = await firstShot.getByText(/^Media SHA:/u).innerText()
-      await writeFile(fixture.handoffControlPath, 'drift')
-      await expect.poll(async () => readFile(fixture.handoffControlAckPath, 'utf8')).toBe('drift')
-      const handoffUrl = `${fixture.baseUrl}/api/qingmu/projects/${encodeURIComponent(fixture.projectId)}/episodes/${encodeURIComponent(fixture.episodeId)}/editorial-handoff`
-      expect((await fetch(handoffUrl, { headers: { authorization: `Bearer ${fixture.token}` } })).status).toBe(409)
+
+      const packagePaths: string[] = []
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        if (attempt > 0) {
+          await dialog.getByRole('button', { name: '刷新交接事实' }).click()
+          await expect.poll(() => downloadButton.isEnabled()).toBe(true)
+        }
+        const event = page.waitForEvent('download')
+        await downloadButton.click()
+        const download = await event
+        const failure = await download.failure()
+        if (failure !== null) {
+          throw new Error(`Editorial download failed: ${failure}; UI=${await dialog.innerText()}`)
+        }
+        const packagePath = join(root, `handoff-${attempt + 1}.otio.zip`)
+        await download.saveAs(packagePath)
+        packagePaths.push(packagePath)
+        await expect.poll(() => dialog.getByText(/SHA-256:/u).count()).toBe(1)
+      }
+      const firstBytes = await readFile(packagePaths[0] as string)
+      const secondBytes = await readFile(packagePaths[1] as string)
+      expect(secondBytes).toEqual(firstBytes)
+      const packageSha = createHash('sha256').update(firstBytes).digest('hex')
+      expect(await dialog.getByText(`SHA-256: ${packageSha}`).count()).toBe(1)
+      const parsed = await execFile(join(writerRoot, '.venv/bin/python'), ['-c', [
+        'import json,sys,zipfile',
+        'import opentimelineio as otio',
+        'with zipfile.ZipFile(sys.argv[1]) as z:',
+        '  timeline=otio.adapters.read_from_string(z.read("timeline.otio").decode(), adapter_name="otio_json")',
+        '  manifest=json.loads(z.read("manifest.json"))',
+        '  print(json.dumps({"name":timeline.name,"tracks":[t.name for t in timeline.tracks],"shots":len(manifest["orderedShots"]),"otio":manifest["otio"]["version"]}))',
+      ].join('\n'), packagePaths[0] as string], { env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: '1' } })
+      expect(JSON.parse(parsed.stdout)).toEqual({
+        name: `Qingmu ${fixture.episodeId} editorial handoff`,
+        tracks: ['Picture', 'Dialogue'], shots: 2, otio: '0.18.1',
+      })
+
+      const projectionUrl = `${fixture.baseUrl}/api/qingmu/projects/${encodeURIComponent(fixture.projectId)}/episodes/${encodeURIComponent(fixture.episodeId)}/editorial-handoff`
+      const wavEntry = Object.keys(beforeStorage).find(path => path.endsWith('.wav'))
+      if (wavEntry === undefined) throw new Error('Authoritative audio fixture missing')
+      const audioPath = join(fixture.storageRoot, wavEntry)
+      const audioBytes = await readFile(audioPath)
       await dialog.getByRole('button', { name: '刷新交接事实' }).click()
-      await expect.poll(() => dialog.getByRole('alert').innerText()).toContain('EVIDENCE_SOURCE_INVALID')
-      expect(await dialog.getByRole('list', { name: '剪辑交接镜头清单' }).count()).toBe(0)
-      expect(await dialog.getByRole('status').count()).toBe(0)
-      await writeFile(fixture.handoffControlPath, 'clean')
-      await expect.poll(async () => readFile(fixture.handoffControlAckPath, 'utf8')).toBe('clean')
-      expect((await fetch(handoffUrl, { headers: { authorization: `Bearer ${fixture.token}` } })).status).toBe(200)
+      await expect.poll(() => downloadButton.isEnabled()).toBe(true)
+      await writeFile(audioPath, Buffer.from('tampered-audio'))
+      await downloadButton.click()
+      await expect.poll(() => dialog.getByText('读取期间来源已变化，请刷新读取同一份当前快照。').count()).toBe(1)
       await dialog.getByRole('button', { name: '刷新交接事实' }).click()
-      await expect.poll(() => dialog.getByRole('list', { name: '剪辑交接镜头清单' }).locator(':scope > li').count()).toBe(2)
-      await rm(mediaPath)
+      const disabledButton = dialog.getByRole('button', { name: '当前不可下载' })
+      for (let attempt = 0; attempt < 3 && !await disabledButton.isVisible(); attempt += 1) {
+        await page.waitForTimeout(500)
+        if (await dialog.getByRole('alert').isVisible()) {
+          await dialog.getByRole('button', { name: '刷新交接事实' }).click()
+        }
+        await disabledButton.waitFor({ timeout: 10_000 }).catch(() => undefined)
+      }
+      if (!await disabledButton.isVisible()) {
+        const direct = await fetch(projectionUrl, { headers: { authorization: `Bearer ${fixture.token}` } })
+        throw new Error(`Tampered handoff did not project a blocker: ${direct.status}:${(await direct.text()).slice(0, 500)} UI=${await dialog.innerText()}`)
+      }
+      expect(await disabledButton.isDisabled()).toBe(true)
+      expect(await dialog.getByText(/SHA-256:/u).count()).toBe(0)
+      await writeFile(audioPath, audioBytes)
       await dialog.getByRole('button', { name: '刷新交接事实' }).click()
-      await expect.poll(() => captured.length).toBeGreaterThanOrEqual(2)
-      await expect.poll(() => dialog.getByText('已选媒体的本地字节缺失或不可读取。').count()).toBe(1)
-      await expect.poll(() => dialog.getByText('Media SHA: —').count()).toBe(1)
-      expect(await firstShot.getByText(oldMediaSha, { exact: true }).count()).toBe(0)
-      expect(await dialog.getByRole('button', { name: '当前不可下载' }).isDisabled()).toBe(true)
-      await writeFile(mediaPath, mediaBytes)
-      await dialog.getByRole('button', { name: '刷新交接事实' }).click()
-      await expect.poll(() => firstShot.getByText(/^Media SHA:/u).innerText()).toBe(oldMediaSha)
-      expect(await page.locator('body').innerHTML()).not.toContain(fixture.token)
+      const restoredButton = dialog.getByRole('button', { name: '下载 OTIO 媒体包' })
+      for (let attempt = 0; attempt < 3 && !await restoredButton.isVisible(); attempt += 1) {
+        await page.waitForTimeout(500)
+        if (await dialog.getByRole('alert').isVisible()) {
+          await dialog.getByRole('button', { name: '刷新交接事实' }).click()
+        }
+        await restoredButton.waitFor({ timeout: 10_000 }).catch(() => undefined)
+      }
+      expect(await restoredButton.isEnabled()).toBe(true)
+
       for (const viewport of [{ width: 1280, height: 800 }, { width: 1440, height: 900 }]) {
         await page.setViewportSize(viewport)
         expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+        const artifactDir = process.env.QINGMU_E8_ARTIFACT_DIR
+        if (artifactDir !== undefined) {
+          await mkdir(artifactDir, { recursive: true })
+          await page.screenshot({ path: join(artifactDir, `editorial-handoff-${viewport.width}x${viewport.height}.png`) })
+        }
       }
+
+      await stopFixture(child)
+      fixture = await startFixture(true)
+      const fresh = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: ZH_BROWSER_LOCALE })
+      const freshPage = await fresh.newPage()
+      await freshPage.goto(scaffold.baseUrl, { waitUntil: 'load' })
+      await freshPage.getByRole('button', { name: '青木制作台', exact: true }).click()
+      dialog = freshPage.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+      await dialog.getByRole('combobox', { name: '项目', exact: true }).selectOption(fixture.projectId)
+      await dialog.getByRole('combobox', { name: '剧集', exact: true }).selectOption(fixture.episodeId)
+      await dialog.getByRole('tab', { name: '费用与交付', exact: true }).click()
+      const freshButton = dialog.getByRole('button', { name: '下载 OTIO 媒体包' })
+      for (let attempt = 0; attempt < 3 && !await freshButton.isVisible(); attempt += 1) {
+        await freshPage.waitForTimeout(500)
+        if (await dialog.getByRole('alert').isVisible()) {
+          await dialog.getByRole('button', { name: '刷新交接事实' }).click()
+        }
+        await freshButton.waitFor({ timeout: 10_000 }).catch(() => undefined)
+      }
+      expect(await freshButton.isEnabled()).toBe(true)
+      expect(await dialog.getByRole('list', { name: '剪辑交接镜头清单' }).locator(':scope > li').count()).toBe(2)
+      await fresh.close()
+
+      expect(captured.length).toBeGreaterThan(0)
+      expect(await page.locator('body').innerHTML()).not.toContain(fixture.token)
       expect(createHash('sha256').update(await readFile(fixture.sqlitePath)).digest('hex')).toBe(beforeDb)
       expect(await fingerprintFiles(fixture.storageRoot)).toEqual(beforeStorage)
-    })
+    }, 120_000)
   },
 )
