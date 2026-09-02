@@ -636,6 +636,7 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
       contract: null, sourceText: null, message: '创作合同未配置' })),
     editorialHandoff: vi.fn(async () => { throw new Error('Editorial handoff uses a separate fixture') }),
     firstFrameQuote: vi.fn(async () => { throw new Error('First-frame quote uses a separate fixture') }),
+    videoQuote: vi.fn(async () => { throw new Error('Video quote uses a separate fixture') }),
     promptIrBootstrap: vi.fn(async () => { throw new Error('PromptIR bootstrap uses a separate fixture') }),
     promptIrBootstrapMethod: vi.fn(async () => { throw new Error('PromptIR bootstrap method uses a separate fixture') }),
     bootstrapPromptIr: vi.fn(async () => { throw new Error('PromptIR bootstrap command uses a separate fixture') }),

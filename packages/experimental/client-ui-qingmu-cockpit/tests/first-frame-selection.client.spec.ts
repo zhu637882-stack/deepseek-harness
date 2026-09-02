@@ -17,7 +17,8 @@ describe('first-frame browser selection bridge', () => {
     const fetcher = vi.fn(async () => response(receipt)) as unknown as typeof fetch
     await expect(createFirstFrameSelectionClient(fetcher).select(intent)).resolves.toMatchObject({ selectedAssetId: 'asset-1' })
     expect(fetcher).toHaveBeenCalledTimes(1)
-    expect((fetcher as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1]).toMatchObject({ method: 'POST', credentials: 'same-origin', redirect: 'error' })
+    const init = (fetcher as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]
+    expect(init).toMatchObject({ method: 'POST', credentials: 'same-origin', redirect: 'error' })
   })
   it('recovers only with a server request hash and rejects browser-outage guessing', async () => {
     const fetcher = vi.fn(async () => response(receipt)) as unknown as typeof fetch
