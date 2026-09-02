@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   loadDirectorStageCard,
+  loadDirectorStageCardBinding,
   loadDirectorStageCards,
 } from '../src/director-stage-cards.ts'
 import type {
@@ -39,6 +40,28 @@ describe('director stage cards method', () => {
     expect(card.schema).toBe('qingmu.imago-director-stage-card-content.v1')
     expect(card.content.length).toBeGreaterThan(0)
     expect(card.contentSha256).toMatch(/^[0-9a-f]{64}$/u)
+  })
+
+  it('binds a registered method card to its exact stage and provenance identities', async () => {
+    const binding = await loadDirectorStageCardBinding(
+      'D',
+      'director-skill-core',
+      'assets/keyframe-prompt-template.md',
+    )
+    expect(binding).toMatchObject({
+      kind: 'director_method_card',
+      stage_id: 'D',
+      repo_id: 'director-skill-core',
+      repository_commit: '47db7d9b951a9f27f7b4b727a6ca0e01ab56f7c6',
+      path: 'assets/keyframe-prompt-template.md',
+    })
+    expect(binding.sha256).toMatch(/^[0-9a-f]{64}$/u)
+    expect(binding.provenance_sha256).toMatch(/^[0-9a-f]{64}$/u)
+    await expect(loadDirectorStageCardBinding(
+      'E',
+      'director-skill-core',
+      'assets/keyframe-prompt-template.md',
+    )).rejects.toThrow('director_stage_card_mapping_mismatch')
   })
 
   it('rejects a card outside the registry', async () => {

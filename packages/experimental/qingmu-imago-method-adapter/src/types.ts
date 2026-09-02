@@ -252,6 +252,53 @@ export interface ImagoPromptIrEditableReplacements extends ImagoMethodJsonObject
   readonly negativePrompt?: string
 }
 
+/** Provenance-verified director method card bound to one PromptIR stage. */
+export interface ImagoPromptIrDirectorCardBinding extends ImagoMethodJsonObject {
+  readonly kind: 'director_method_card'
+  readonly stage_id: 'D' | 'E'
+  readonly repo_id: string
+  readonly repository_commit: string
+  readonly path: string
+  readonly sha256: string
+  readonly provenance_sha256: string
+}
+
+/** Current Core contract identity for one PromptIR-producing stage. */
+export interface ImagoPromptIrStageContractBinding extends ImagoMethodJsonObject {
+  readonly stage_id: 'D' | 'E'
+  readonly contract_sha256: string
+}
+
+/** Exact stage and method-card sources that constrain one editable PromptIR field. */
+export interface ImagoPromptIrFieldMappingEntry extends ImagoMethodJsonObject {
+  readonly field: ImagoPromptIrEditableField
+  readonly stage_ids: readonly ('D' | 'E')[]
+  readonly stage_contract_bindings: readonly ImagoPromptIrStageContractBinding[]
+  readonly method_sha256: string
+  readonly card_bindings: readonly ImagoPromptIrDirectorCardBinding[]
+}
+
+/** Versioned five-field director guidance mapping, hashed without its `sha256` member. */
+export interface ImagoPromptIrFieldMapping extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-prompt-ir-field-mapping.v1'
+  readonly version: 1
+  readonly fields: readonly ImagoPromptIrFieldMappingEntry[]
+  readonly sha256: string
+}
+
+/** Current Core method identity plus the Host-owned director-card field mapping. */
+export interface ImagoPromptIrMethodDefinition extends ImagoMethodJsonObject {
+  readonly id: 'imago-v6-e-provider-neutral-prompt-ir-edit-method'
+  readonly version: 1
+  readonly sha256: string
+  readonly stage_contract_sha256: string
+  readonly role_capability_sha256: string
+  readonly prompt_ir_schema: 'IMAGO-V6-VideoPromptIR-v1'
+  readonly field_mapping: ImagoPromptIrFieldMapping
+  readonly agent_path: string
+  readonly skill_path: string
+}
+
 /** Exact Yimeng authority and candidate input for one stateless PromptIR method compile. */
 export interface ImagoPromptIrMethodRequest {
   readonly projectId: string
@@ -290,7 +337,7 @@ export interface ImagoPromptIrMethodProjection extends ImagoMethodJsonObject {
   readonly changed_paths: readonly string[]
   readonly blockers: readonly string[]
   readonly warnings: readonly string[]
-  readonly method_definition: ImagoMethodJsonObject
+  readonly method_definition: ImagoPromptIrMethodDefinition
   readonly source_bindings: readonly ImagoMethodJsonObject[]
   readonly field_hints: readonly ImagoMethodJsonObject[]
   readonly checklist: readonly ImagoMethodJsonObject[]
@@ -299,6 +346,7 @@ export interface ImagoPromptIrMethodProjection extends ImagoMethodJsonObject {
   readonly project_state_persisted: false
   readonly providerCalls: 0
   readonly workerStarted: false
+  readonly maximumCostCny: '0'
   readonly selection_executed: false
   readonly human_approval_inferred: false
   readonly human_signoff_inferred: false

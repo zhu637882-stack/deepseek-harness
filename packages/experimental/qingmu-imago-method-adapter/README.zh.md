@@ -94,7 +94,15 @@ Host 在编译前后独立读取七份固定 Core 来源。当前仅 V6 的活�
 
 [注册表](src/director-assets/registry.ts)与[来源清单](DIRECTOR_ASSET_SBOM.json)把八个选定仓库固定在 `assets/director/<repo-id>/<full-commit>/` 下，并保留许可证、逐文件 SHA-256 账本和准入/修改记录。`verifyAllDirectorAssets` 拒绝缺失或额外文件、符号链接、畸形或已变更账本以及字节漂移。[第三方声明](../../../THIRD_PARTY_NOTICES.md)披露这些未激活来源。使用 `pnpm exec tsx scripts/gen-director-asset-sbom.ts` 重新生成清单；`--check` 校验其是否与来源一致。
 
-[静态装配](src/director-assets/assembly.ts)把准入文件映射到候选 IMAGO 阶段和卡片类别。未知阶段不返回卡片。`loadDirectorAssetFile` 先校验完整资产包，再返回不执行的 UTF-8 源文本。这两个 API 均未接入 Host RPC、工作单、skill 或可执行工具；阶段覆盖不等于激活授权。调用方须在校验和读取期间保持本地资产树稳定；完整性检查不是进程沙箱。BlueFish 的未解析占位符阻塞仍被记录，其模块须另行修复并验证后才能激活。
+[静态装配](src/director-assets/assembly.ts)把准入文件映射到候选 IMAGO 阶段和卡片类别。未知阶段不返回卡片。`loadDirectorAssetFile` 先校验完整资产包，再返回不执行的 UTF-8 源文本。调用方须在校验和读取期间保持本地资产树稳定；完整性检查不是进程沙箱。BlueFish 的未解析占位符阻塞仍被记录，其模块须另行修复并验证后才能激活。
+
+[阶段卡片旁路](src/director-stage-cards.ts)通过方法处理器提供两项严格校验的端点：`directorStageCardsMethod`（`{stageId}` → 卡片列表）与 `directorStageCardMethod`（`{repoId, path}` → 已核验谱系的内容）。响应携带只限指导的权威块（Provider 调用为零、费用为零、无选择或决策语义）；未登记或遭篡改的卡片失败关闭。这些端点不接触工作单、skill 或可执行工具。PromptIR 方法仅通过下述字段映射消费两个已登记的 D/E 文本方法卡片；不会激活工具模块。
+
+## PromptIR 导演字段映射
+
+最终 `promptIrMethod` 投影在 `method_definition.field_mapping` 中携带 schema `qingmu.imago-prompt-ir-field-mapping.v1`、版本 `1` 和规范映射 SHA-256。D 阶段关键帧卡片约束 `imageGenPrompt` 与 `lastFrameImagePrompt`；E 阶段视频卡片约束 `videoGenPrompt` 与 `motionPrompt`；`negativePrompt` 同时绑定两个阶段。每个字段条目都固定 Core 方法 SHA-256、每个适用阶段各自不同的合同 SHA-256，以及准确卡片内容、仓库提交和谱系哈希。同样两张卡片会追加到 `source_bindings`，五项字段提示均绑定映射 SHA-256 及其准确卡片哈希。
+
+字段条目缺失、多余、重排或放错阶段，以及任何方法、合同、卡片、谱系、来源绑定或提示漂移都会失败关闭。只有完整映射已经附加并重新校验后，方法才不再发出映射警告。该映射当前只属于 `promptIrMethod` 适配器投影；业务链消费仍是后续集成。这些指导仍然无状态且仅供建议：Provider 调用、Worker 和最高费用保持为零，不推断数据库写入、项目状态变更、选择、批准或人工签收。
 
 ## 首个 PromptIR 引导方法
 
