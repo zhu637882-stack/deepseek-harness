@@ -9,6 +9,7 @@ import shutil
 import tempfile
 import time
 import unittest
+import urllib.error
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
@@ -158,6 +159,12 @@ class OwnershipTests(unittest.TestCase):
                  config["directorExecutionKey"]},
             )
             self.assertEqual((root / "private/instance.json").stat().st_mode & 0o777, 0o600)
+            bridge = root / "dsh/profiles/node_modules/@deepseek-ai/dsh-experimental-qingmu-director-context-bridge"
+            self.assertTrue(bridge.is_symlink())
+            self.assertEqual(
+                bridge.resolve(),
+                local.HARNESS / "packages/experimental/qingmu-director-context-bridge",
+            )
 
     def test_existing_directory_is_never_initialized(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -202,6 +209,68 @@ class OwnershipTests(unittest.TestCase):
         self.assertNotIn("DATABASE_URL", env)
         self.assertNotIn("OPENAI_API_KEY", env)
         self.assertEqual(env["HOME"], "/isolated/home")
+
+    def test_qingmu_workspace_uses_correlated_canonical_host_rpc(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "work").mkdir()
+            expected = str((root / "work").resolve())
+            captured = {}
+
+            def rpc(url, *, token=None, payload=None):
+                captured.update({"url": url, "token": token, "payload": payload})
+                return {
+                    "type": "server-response",
+                    "rpcId": payload["rpcId"],
+                    "result": {"ok": True, "value": {
+                        "workspace": {"path": expected, "workspaceId": "workspace-1"},
+                        "created": True,
+                    }},
+                }
+
+            with patch.object(local, "http", side_effect=rpc):
+                workspace = local.ensure_qingmu_workspace(root, "http://127.0.0.1:49901")
+            self.assertEqual(workspace["workspaceId"], "workspace-1")
+            self.assertEqual(captured["url"], "http://127.0.0.1:49901/api/workspace.create")
+            self.assertIsNone(captured["token"])
+            self.assertEqual(captured["payload"]["method"], "workspace.create")
+            self.assertEqual(captured["payload"]["payload"], {"path": expected})
+
+    def test_qingmu_workspace_rejects_mismatched_response_and_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "work").mkdir()
+            with patch.object(local, "http", return_value={
+                "type": "server-response", "rpcId": "wrong", "result": {"ok": True, "value": {}},
+            }), self.assertRaisesRegex(RuntimeError, "响应身份不匹配"):
+                local.ensure_qingmu_workspace(root, "http://127.0.0.1:49901")
+
+    def test_qingmu_workspace_waits_for_host_api_composition(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "work").mkdir()
+            expected = str((root / "work").resolve())
+            calls = 0
+
+            def becoming_ready(_url, *, token=None, payload=None):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    raise urllib.error.HTTPError(_url, 404, "not ready", {}, None)
+                return {"type": "server-response", "rpcId": payload["rpcId"],
+                        "result": {"ok": True, "value": {"workspace": {"path": expected}}}}
+
+            with patch.object(local, "http", side_effect=becoming_ready), \
+                 patch.object(local.time, "sleep"):
+                local.ensure_qingmu_workspace(root, "http://127.0.0.1:49901")
+            self.assertEqual(calls, 2)
+
+            def wrong_path(_url, *, token=None, payload=None):
+                return {"type": "server-response", "rpcId": payload["rpcId"],
+                        "result": {"ok": True, "value": {"workspace": {"path": "/other"}}}}
+            with patch.object(local, "http", side_effect=wrong_path), \
+                 self.assertRaisesRegex(RuntimeError, "workspace 绑定不符"):
+                local.ensure_qingmu_workspace(root, "http://127.0.0.1:49901")
 
     def test_director_mock_origin_is_http_loopback_only(self):
         self.assertEqual(

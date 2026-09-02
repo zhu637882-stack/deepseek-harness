@@ -46,6 +46,7 @@ import {
   normalizeDirectorReplayMethod,
   normalizeDirectorWorkOrder,
   parseDirectorProposalFreshnessRequest,
+  parseDirectorContextRequest,
   parseDirectorProposalRequest,
 } from './director-proposal.ts'
 export type {
@@ -61,6 +62,7 @@ export type {
 } from './director-proposal.ts'
 export type {
   ProjectInitializationRequest, ProjectInitializationRecovery, ProjectInitializationResult,
+  CreativeContract, CreativeContractMethodRef, CreativeContractState,
   CreationScope, TextImportReadRequest, TextImportRequest, TextImportLine, TextImportDraft,
   TextImportState, TextImportCorrection, TextImportConfirmationRequest, TextImportConfirmation,
 } from './creation.ts'
@@ -70,6 +72,13 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Host-only command handler reused by the director context bridge. */
+    qingmuYimengCommand: ConnectionRpcHandler
+  }
+}
 import { prepareShotFindingCommand } from './shot-finding.ts'
 import { prepareTakeVersionCommand } from './take-version.ts'
 import { prepareTakeCommentCommand } from './take-comment.ts'
@@ -5270,6 +5279,19 @@ export function createYimengCommandHandler(
         readAttestationKey: readReferenceAttestationKey,
         requireTimestamp: requireRfc3339Timestamp,
       }
+      if (endpoint === 'readDirectorContext') {
+        const request = parseDirectorContextRequest(payload, stageArtifactHelpers)
+        const token = normalizeToken(dependencies.readToken())
+        if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
+        const contextPath = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}`
+          + `/episodes/${encodeURIComponent(request.episodeId)}/director-inference/context?`
+          + new URLSearchParams({ sceneId: request.sceneId, shotId: request.shotId }).toString()
+        const contextResult = await fetchJson(
+          dependencies, `${baseUrl}${contextPath}`, token, { method: 'GET' }, timeoutMs, signal,
+        )
+        if (!contextResult.ok) return contextResult
+        return { ok: true, value: normalizeDirectorContext(contextResult.value, request, stageArtifactHelpers) }
+      }
       if (endpoint === 'requestDirectorProposal') {
         const request = parseDirectorProposalRequest(payload, stageArtifactHelpers)
         const token = normalizeToken(dependencies.readToken())
@@ -5577,7 +5599,7 @@ export function createYimengCommandHandler(
         path = prepared.path
         requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
         normalize = prepared.normalize
-      } else if (['initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)) {
+      } else if (['readCreativeContract', 'initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)) {
         const prepared = prepareCreationCommand(endpoint, payload, stageArtifactHelpers)
         path = prepared.path
         requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
@@ -5937,7 +5959,7 @@ export function createYimengCommandHandler(
         || endpoint === 'probeReworkRouteAuthority'
       const requiresCredentialReflectionGuard = isStageArtifactCommand
         || ['readScenePlanning', 'saveScenePlanning', 'recoverScenePlanning'].includes(endpoint)
-        || ['initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)
+        || ['readCreativeContract', 'initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)
         || endpoint === 'createTakeComment' || endpoint === 'recoverTakeComment'
         || endpoint === 'createTakeReviewRecommendation'
         || endpoint === 'recoverTakeReviewRecommendation'
@@ -5981,7 +6003,7 @@ export function createYimengCommandHandler(
 
 /** Register the command adapter on a loopback-only Host Connection channel. */
 export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): void {
-  ctx.connection.rpc.handle(CHANNEL, createYimengCommandHandler(config, {
+  const handler = createYimengCommandHandler(config, {
     fetch: globalThis.fetch,
     readToken: () => process.env.YIMENG_API_TOKEN,
     runDirectorReplayMethod: async (payload, signal) => {
@@ -6020,7 +6042,13 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
         ? internalError('current IMAGO bounded route Method is unavailable')
         : await method('reworkRouteMethod', payload, signal)
     },
-  }), { authority: 'loopback' })
+  })
+  ctx.provide('qingmuYimengCommand', handler)
+  const browserHandler: ConnectionRpcHandler = async (endpoint, payload, signal) =>
+    endpoint === 'readDirectorContext'
+      ? internalError('Requested Yimeng context is Host-internal')
+      : await handler(endpoint, payload, signal)
+  ctx.connection.rpc.handle(CHANNEL, browserHandler, { authority: 'loopback' })
   if (config.directorFixtureTaskId) {
     const executionKey = process.env.QINGMU_DIRECTOR_EXECUTION_KEY ?? ''
     const controller = new AbortController()

@@ -544,7 +544,7 @@ Source: [`packages/plan/plan-mode/src/index.ts:53`](../packages/plan/plan-mode/s
 'qingmu-director-context/state': DirectorContextBindingState
 ```
 
-Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:122`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:140`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
 
 ### `request/*`
 

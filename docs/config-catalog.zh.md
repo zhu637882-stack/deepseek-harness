@@ -681,7 +681,7 @@ export interface YimengCommandAdapterConfig {
 }
 ```
 
-来源：[`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:472`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
+来源：[`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:481`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-qingmu-yimeng-read-adapter"></a>
 

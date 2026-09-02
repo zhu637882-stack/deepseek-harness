@@ -116,6 +116,24 @@ export interface DirectorContextBridge {
   freshnessRequest(session: Session): DirectorProposalFreshnessRequest | null
 }
 
+/** Safe client-visible facade result; only scopes, SHAs and status cross the browser boundary. */
+export type DirectorContextBridgeRpcResult = DirectorContextEntryResult | DirectorContextRecoveryResult | {
+  readonly status: 'bound'
+  readonly state: DirectorContextBindingState
+  readonly manualWorkAllowed: true
+}
+
+/** Browser port for one current DSh session. */
+export interface DirectorContextClientPort {
+  enter(sessionId: string, scope: DirectorObjectScope, signal?: AbortSignal): Promise<DirectorContextEntryResult>
+  recover(sessionId: string, signal?: AbortSignal): Promise<DirectorContextRecoveryResult>
+  bindProposal(sessionId: string, proposal: DirectorReplayProposal, signal?: AbortSignal): Promise<{
+    readonly status: 'bound'
+    readonly state: DirectorContextBindingState
+    readonly manualWorkAllowed: true
+  }>
+}
+
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     /** Whole-value, log-only snapshot of the session's current Qingmu director binding. */

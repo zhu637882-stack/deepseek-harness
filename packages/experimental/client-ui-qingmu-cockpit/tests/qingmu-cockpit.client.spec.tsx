@@ -17,6 +17,11 @@ import { QingmuCockpit, type QingmuCockpitProps } from '../src/client/QingmuCock
 import { buildHeroFrameRelationRequest, buildShotRelationMethodRequest } from '../src/client/ShotRelationMethodView.tsx'
 import { ShotRelationsView } from '../src/client/ShotRelationsView.tsx'
 import type { QingmuYimengPort } from '../src/client/contracts.ts'
+import type {
+  DirectorContextClientPort,
+  DirectorObjectScope,
+} from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
+import { parseQingmuEntryScope, type QingmuEntryScope } from '../src/client/slots.ts'
 import { zh } from '../src/client/locales.ts'
 import { unavailableWorksetResponse } from './fixtures/workset-method.client.ts'
 import { continuityResponse } from './fixtures/continuity-method.client.ts'
@@ -625,6 +630,9 @@ function shotRelationMethod(request: Parameters<QingmuYimengPort['shotRelationMe
 
 function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
   return {
+    readCreativeContract: vi.fn<QingmuYimengPort['readCreativeContract']>(async request => ({ schema: 'jason.qingmu-creative-contract-state.v1' as const,
+      projectId: request.projectId, configured: false, locked: false, revision: null, sha256: null,
+      contract: null, sourceText: null, message: '创作合同未配置' })),
     editorialHandoff: vi.fn(async () => { throw new Error('Editorial handoff uses a separate fixture') }),
     firstFrameQuote: vi.fn(async () => { throw new Error('First-frame quote uses a separate fixture') }),
     promptIrBootstrap: vi.fn(async () => { throw new Error('PromptIR bootstrap uses a separate fixture') }),
@@ -876,12 +884,22 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
   }
 }
 
-function mount(port: QingmuYimengPort) {
+function mount(port: QingmuYimengPort, entryScope?: QingmuEntryScope | null) {
   const root = document.createElement('div')
   root.id = 'root'
   document.body.append(root)
+  const directorBridge: DirectorContextClientPort = {
+    enter: vi.fn(async (_sessionId: string, scope: DirectorObjectScope) => ({ status: 'current' as const, changed: true, manualWorkAllowed: true as const,
+      state: { version: 1 as const, binding: { scope, contextSnapshotSha256: 'd'.repeat(64) }, proposal: null,
+        transition: 'enter' as const } })),
+    recover: vi.fn(async () => ({ status: 'unbound' as const, manualWorkAllowed: true as const })),
+    bindProposal: vi.fn(async () => { throw new Error('proposal binding uses a separate fixture') }),
+  }
+  const useSessions = ((selector: (state: { current: string }) => unknown) => selector({ current: 'session_1' })) as never
+  const entryScopeProps = entryScope === undefined ? {} : { entryScope }
   return render(
-    <QingmuCockpit wide port={port} t={t} useSessions={neverHook} useWorkspaces={neverHook} />,
+    <QingmuCockpit wide port={port} directorBridge={directorBridge} {...entryScopeProps} t={t}
+      useSessions={useSessions} useWorkspaces={neverHook} />,
     { container: root },
   )
 }
@@ -894,6 +912,52 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+})
+
+describe('embedded Qingmu entry scope', () => {
+  it('decodes only a complete, bounded project and episode handoff', () => {
+    expect(parseQingmuEntryScope('http://127.0.0.1:49901/')).toBeUndefined()
+    expect(parseQingmuEntryScope('http://127.0.0.1:49901/?qingmuEmbedded=1&qingmuProjectId=project-2'))
+      .toBeNull()
+    expect(parseQingmuEntryScope('http://127.0.0.1:49901/?qingmuEmbedded=1&qingmuProjectId=project-2&qingmuEpisodeId=episode-3'))
+      .toEqual({ projectId: 'project-2', episodeId: 'episode-3' })
+  })
+
+  it('locks an embedded panel to the outer project and episode instead of selecting the first rows', async () => {
+    const projects = vi.fn(async () => ({ items: [
+      { id: 'project-1', name: '错误默认项目' }, { id: 'project-2', name: '外层当前项目' },
+    ], pagination: { page: 1, pageSize: 100, pages: 1, total: 2 } }))
+    const episodes = vi.fn(async (request: Parameters<QingmuYimengPort['episodes']>[0]) => ({
+      items: request.projectId === 'project-2'
+        ? [{ id: 'episode-3', projectId: 'project-2', episodeNumber: 1, name: '外层当前集' }]
+        : [{ id: 'episode-1', projectId: 'project-1', episodeNumber: 1, name: '错误默认集' }],
+    }))
+    const workflow = vi.fn(async (request: Parameters<QingmuYimengPort['workflow']>[0]) =>
+      workflowFor(request.projectId, request.episodeId, 'bound-shot', '绑定镜头'))
+    mount(makePort({ projects, episodes, workflow }), { projectId: 'project-2', episodeId: 'episode-3' })
+    fireEvent.click(screen.getByRole('button', { name: zh.trigger }))
+    const dialog = await screen.findByRole('dialog', { name: zh.title })
+    await waitFor(() => {
+      expect(workflow).toHaveBeenCalledWith(
+        { projectId: 'project-2', episodeId: 'episode-3' }, expect.any(AbortSignal),
+      )
+    })
+    expect(workflow).not.toHaveBeenCalledWith(
+      { projectId: 'project-1', episodeId: 'episode-1' }, expect.anything(),
+    )
+    expect(within(dialog).getByRole('combobox', { name: zh.project }).hasAttribute('disabled')).toBe(true)
+    expect(within(dialog).getByRole('combobox', { name: zh.episode }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('fails closed when the outer project is absent instead of falling back', async () => {
+    const episodes = vi.fn(async () => ({ items: [] }))
+    const workflow = vi.fn(async () => WORKFLOW)
+    mount(makePort({ episodes, workflow }), { projectId: 'project-missing', episodeId: 'episode-missing' })
+    fireEvent.click(screen.getByRole('button', { name: zh.trigger }))
+    expect((await screen.findByRole('alert')).textContent).toContain('拒绝回退到其他项目')
+    expect(episodes).not.toHaveBeenCalled()
+    expect(workflow).not.toHaveBeenCalled()
+  })
 })
 
 describe('buildShotRelationMethodRequest', () => {

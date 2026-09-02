@@ -587,6 +587,7 @@ export interface QingmuYimengReadPort {
 
 /** Explicit ChangeSet commands exposed through the separate Host-only command channel. */
 export interface QingmuYimengCommandPort {
+  readCreativeContract(request: { readonly projectId: string }, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').CreativeContractState>
   requestDirectorProposal(
     request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').DirectorProposalRequest,
     signal?: AbortSignal,

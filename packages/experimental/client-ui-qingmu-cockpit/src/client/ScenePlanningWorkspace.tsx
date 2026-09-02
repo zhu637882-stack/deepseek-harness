@@ -3,6 +3,11 @@ import { useEffect, useRef, useState } from 'react'
 import type { PlanningBase, PlanningShot, ScenePlanningRequest, ScenePlanningState, ScenePlanningResult } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { DirectorProposalItem, DirectorReplayProposal } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
+import type {
+  DirectorContextBindingState,
+  DirectorContextClientPort,
+  DirectorObjectScope,
+} from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import css from './ScenePlanningWorkspace.module.css'
 
 interface LocalPlan {
@@ -37,10 +42,15 @@ function errorText(error: unknown): string {
  * @param props - Canonical scope and existing Host command port.
  * @returns Three-column planning workspace; never creates prompts, media or approval.
  */
-export function ScenePlanningWorkspace({ projectId, episodeId, port, onUnsavedChange, onCommitted, onSelectShotId }: {
+export function ScenePlanningWorkspace({
+  projectId, episodeId, port, directorBridge, directorSessionId,
+  onUnsavedChange, onCommitted, onSelectShotId,
+}: {
   readonly projectId: string
   readonly episodeId: string
   readonly port: Pick<QingmuYimengPort, 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning' | 'requestDirectorProposal' | 'checkDirectorProposalFreshness'>
+  readonly directorBridge?: DirectorContextClientPort | undefined
+  readonly directorSessionId?: string | undefined
   readonly onUnsavedChange: (dirty: boolean) => void
   readonly onCommitted: () => Promise<unknown>
   readonly onSelectShotId: (id: string) => void
@@ -63,15 +73,19 @@ export function ScenePlanningWorkspace({ projectId, episodeId, port, onUnsavedCh
   const [ignoredProposalItems, setIgnoredProposalItems] = useState<readonly string[]>([])
   const [adoptedProposalItems, setAdoptedProposalItems] = useState<readonly string[]>([])
   const [proposalBusy, setProposalBusy] = useState(false)
+  const [directorBinding, setDirectorBinding] = useState<DirectorContextBindingState | null>(null)
+  const [directorStatus, setDirectorStatus] = useState<'unbound' | 'connecting' | 'current' | 'unavailable' | 'drifted'>('unbound')
   const [retryAllowed, setRetryAllowed] = useState(false)
   const [recoveryRead, setRecoveryRead] = useState(false)
   const lock = useRef(false)
   const live = useRef(true)
   const isLive = (): boolean => live.current
   const controller = useRef(new AbortController())
+  const proposalController = useRef<AbortController>()
+  const proposalEpoch = useRef(0)
   useEffect(() => {
     live.current = true; controller.current = new AbortController()
-    return () => { live.current = false; controller.current.abort() }
+    return () => { live.current = false; controller.current.abort(); proposalController.current?.abort() }
   }, [])
   const update = (next: LocalPlan | null) => {
     try {
@@ -99,6 +113,38 @@ export function ScenePlanningWorkspace({ projectId, episodeId, port, onUnsavedCh
   }, [local, onUnsavedChange])
   const scene = state?.scenes.find(s => s.sceneIndex === (local?.sceneIndex ?? sceneIndex))
   const current = local?.shots[index]
+  const currentShotId = local?.shotIds[index]
+  const directorScope: DirectorObjectScope | null = state?.planning && currentShotId ? {
+    projectId, episodeId, sceneId: state.planning.sceneId, shotId: currentShotId,
+  } : null
+  const clearProposal = () => {
+    proposalController.current?.abort()
+    proposalEpoch.current += 1
+    setProposal(null); setIgnoredProposalItems([]); setAdoptedProposalItems([]); setProposalBusy(false)
+  }
+  useEffect(() => {
+    clearProposal()
+    if (directorBridge === undefined || directorSessionId === undefined || directorScope === null) {
+      setDirectorBinding(null); setDirectorStatus('unbound')
+      return
+    }
+    const operation = new AbortController()
+    const epoch = proposalEpoch.current
+    setDirectorStatus('connecting')
+    void directorBridge.enter(directorSessionId, directorScope, operation.signal).then((result) => {
+      if (operation.signal.aborted || epoch !== proposalEpoch.current) return
+      if (result.status === 'current') {
+        setDirectorBinding(result.state); setDirectorStatus('current')
+      } else {
+        setDirectorBinding(result.state); setDirectorStatus('unavailable')
+      }
+    }).catch(() => {
+      if (!operation.signal.aborted && epoch === proposalEpoch.current) {
+        setDirectorBinding(null); setDirectorStatus('unavailable')
+      }
+    })
+    return () => { operation.abort() }
+  }, [directorBridge, directorSessionId, projectId, episodeId, directorScope?.sceneId, directorScope?.shotId])
   const begin = () => {
     if (!state || !scene) return
     const shots = [0, 1].map(i => ({ title: `镜头 ${i + 1}`, narrative: '', visual: '', action: i === 0 ? scene.actionDescription : '',
@@ -110,16 +156,30 @@ export function ScenePlanningWorkspace({ projectId, episodeId, port, onUnsavedCh
   }
   const requestProposal = async () => {
     const shotId = local?.shotIds[index]
-    if (!state?.planning || !shotId || proposalBusy) return
+    if (!state?.planning || !shotId || !directorScope || !directorBridge || !directorSessionId || proposalBusy) return
+    proposalController.current?.abort()
+    const operation = new AbortController()
+    proposalController.current = operation
+    const epoch = proposalEpoch.current + 1
+    proposalEpoch.current = epoch
     setProposalBusy(true); setError('')
     try {
+      const entry = await directorBridge.enter(directorSessionId, directorScope, operation.signal)
+      if (entry.status !== 'current') throw new Error('director_context_unavailable')
       const result = await port.requestDirectorProposal({ projectId, episodeId,
-        sceneId: state.planning.sceneId, shotId, suggestionType: 'text_director_proposal' }, controller.current.signal)
-      if (!isLive()) return
+        sceneId: state.planning.sceneId, shotId, suggestionType: 'text_director_proposal' }, operation.signal)
+      const bound = await directorBridge.bindProposal(directorSessionId, result, operation.signal)
+      if (!isLive() || operation.signal.aborted || epoch !== proposalEpoch.current) return
+      setDirectorBinding(bound.state); setDirectorStatus('current')
       setProposal(result); setIgnoredProposalItems([]); setAdoptedProposalItems([])
     } catch (e) {
-      if (isLive()) setError(`演练建议暂不可用；人工编辑不受影响。${errorText(e)}`)
-    } finally { if (isLive()) setProposalBusy(false) }
+      if (isLive() && !operation.signal.aborted && epoch === proposalEpoch.current) {
+        setDirectorStatus('unavailable')
+        setError(`演练建议暂不可用；人工编辑不受影响。${errorText(e)}`)
+      }
+    } finally {
+      if (isLive() && epoch === proposalEpoch.current) setProposalBusy(false)
+    }
   }
   const adoptProposalItem = (item: DirectorProposalItem) => {
     if (!local || !current || !proposal || proposal.stale) return
@@ -163,6 +223,16 @@ export function ScenePlanningWorkspace({ projectId, episodeId, port, onUnsavedCh
         const shotId = local.shotIds[index]
         if (local.shotIds.length > 0 && !shotId) throw new Error('当前镜头身份缺失，请读取恢复。')
         if (shotId && proposal && adoptedProposalItems.length > 0) {
+          if (directorBridge === undefined || directorSessionId === undefined) throw new Error('409 director_session_missing')
+          const recovered = await directorBridge.recover(directorSessionId, controller.current.signal)
+          if (recovered.status !== 'current'
+            || recovered.state.proposal?.proposalId !== proposal.proposalId
+            || recovered.state.proposal.proposalSha256 !== proposal.proposalSha256
+            || recovered.state.binding.contextSnapshotSha256 !== proposal.inputSha256) {
+            setDirectorBinding(recovered.status === 'unbound' ? null : recovered.state)
+            setDirectorStatus(recovered.status === 'drifted' ? 'drifted' : 'unavailable')
+            throw new Error('409 director_proposal_stale')
+          }
           const freshness = await port.checkDirectorProposalFreshness({ projectId, episodeId,
             sceneId: proposal.sceneId, shotId, contextSnapshotSha256: proposal.inputSha256,
             methodPackageVersion: proposal.methodPackage.version,
@@ -199,6 +269,7 @@ export function ScenePlanningWorkspace({ projectId, episodeId, port, onUnsavedCh
   }
   const select = (next: number) => {
     if (local?.shotIds.length && local.dirty) { setError('请先保存当前镜头再切换；当前修改已保留。'); return }
+    clearProposal()
     if (local) update({ ...local, activeIndex: next })
     setIndex(next); setPreview(false)
   }
@@ -267,8 +338,9 @@ export function ScenePlanningWorkspace({ projectId, episodeId, port, onUnsavedCh
       </fieldset>}
       {local?.shotIds[index] && current && <section className={css.proposal} aria-label="演练建议（非模型生成）">
         <header><div><small>Harness/DSh · replay-only · 非模型生成</small><h3>演练建议（非模型生成）</h3></div>
-          <button type="button" disabled={proposalBusy || busy || Boolean(local.pending) || local.dirty}
-            onClick={() => { void requestProposal() }}>{proposalBusy ? '正在读取…' : '读取演练建议'}</button></header>
+          <button type="button" disabled={proposalBusy || busy || Boolean(local.pending) || local.dirty
+          || directorSessionId === undefined || directorStatus !== 'current'}
+          onClick={() => { void requestProposal() }}>{proposalBusy ? '正在读取…' : '读取演练建议'}</button></header>
         <p>建议只作创意参考，尚未成为正式质检、参考选择、Ready 或人工决定。人工编辑始终可用。</p>
         {local.dirty && proposal === null && <p>请先保存或恢复当前草稿，再基于同一来源版本读取建议。</p>}
         {proposal?.stale && <p role="alert">来源已变化，这份建议已过期，不能采用。请保存或恢复后重新读取。</p>}
@@ -285,7 +357,7 @@ export function ScenePlanningWorkspace({ projectId, episodeId, port, onUnsavedCh
             </div>
           </article>)}
         {adoptedProposalItems.length > 0 && <button type="button" onClick={() => {
-          setProposal(null); setAdoptedProposalItems([]); setIgnoredProposalItems([])
+          clearProposal()
           setError('已保留当前文字并转为人工草稿；后续保存不再沿用这份 replay 建议证明。')
         }}>保留文字，转为人工草稿</button>}
         {proposal && <details><summary>方法、演练声明与 SHA</summary><pre>{JSON.stringify({
@@ -309,9 +381,22 @@ export function ScenePlanningWorkspace({ projectId, episodeId, port, onUnsavedCh
         storyboard: state?.storyboard, receipt, unsubmittedInput: local?.dirty ? local.shots : undefined }, null, 2)}</pre></details>
       {retained && <details><summary>冲突输入副本 · 仅本浏览器，未提交</summary><pre>{JSON.stringify(retained.shots, null, 2)}</pre></details>}
     </main>
-    <aside className={css.properties}><details open><summary>导演属性与缺口</summary><p>规划对象，不是已审内容。</p>
-      <dl><dt>当前镜头</dt><dd>{current?.title ?? '尚未建立'}</dd><dt>分镜结构版本</dt><dd>{state?.storyboard?.version ?? '尚无'}</dd>
-        <dt>参考媒体</dt><dd>本入口不创建参考；拍摄条件另行核验</dd><dt>PromptIR</dt><dd>本片不创建有效提示词</dd><dt>对白时序</dt><dd>未核验</dd></dl>
-      <p>未提交输入保留在本浏览器；已保存内容和回执由易梦持久化。清空浏览器只可恢复已提交内容。</p></details></aside>
+    <aside className={css.properties}>
+      <details open><summary>导演助理连接</summary>
+        <p role="status">{directorSessionId === undefined
+          ? '未选择 DSh 会话；人工编辑与保存仍可用。'
+          : directorStatus === 'current' ? '已绑定当前镜头上下文 · replay-only'
+            : directorStatus === 'connecting' ? '正在核对当前镜头上下文…'
+              : directorStatus === 'drifted' ? '来源已漂移；旧建议不能采用。人工草稿已保留。'
+                : '导演助理暂不可用；人工编辑与保存不受影响。'}</p>
+        <dl><dt>项目 / 集</dt><dd>{projectId} / {episodeId}</dd>
+          <dt>场景 / 镜头</dt><dd>{directorScope ? `${directorScope.sceneId} / ${directorScope.shotId}` : '尚未建立真实镜头'}</dd>
+          <dt>上下文 SHA</dt><dd>{directorBinding?.binding.contextSnapshotSha256 ?? '尚未绑定'}</dd></dl>
+        <p>这里只绑定易梦只读上下文和演练建议，不向浏览器暴露 Host 凭据、Provider payload 或执行许可。</p>
+      </details>
+      <details open><summary>导演属性与缺口</summary><p>规划对象，不是已审内容。</p>
+        <dl><dt>当前镜头</dt><dd>{current?.title ?? '尚未建立'}</dd><dt>分镜结构版本</dt><dd>{state?.storyboard?.version ?? '尚无'}</dd>
+          <dt>参考媒体</dt><dd>本入口不创建参考；拍摄条件另行核验</dd><dt>PromptIR</dt><dd>本片不创建有效提示词</dd><dt>对白时序</dt><dd>未核验</dd></dl>
+        <p>未提交输入保留在本浏览器；已保存内容和回执由易梦持久化。清空浏览器只可恢复已提交内容。</p></details></aside>
   </section>
 }

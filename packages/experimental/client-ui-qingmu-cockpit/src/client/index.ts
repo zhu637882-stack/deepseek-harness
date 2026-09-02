@@ -49,8 +49,14 @@ import type {
   YimengWorkflowProjection,
 } from './contracts.ts'
 import { unwrapRpc } from './contracts.ts'
-import type { QingmuCockpitFace } from './slots.ts'
+import { parseQingmuEntryScope, type QingmuCockpitFace } from './slots.ts'
 import { en, NS, zh } from './locales.ts'
+import type {
+  DirectorContextBridgeRpcResult,
+  DirectorContextClientPort,
+  DirectorContextEntryResult,
+  DirectorContextRecoveryResult,
+} from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 
 export type { QingmuCockpitFace } from './slots.ts'
 export type {
@@ -135,14 +141,25 @@ export function apply(ctx: ClientContext): void {
 
   const connection = ctx.get('connection') as ConnectionHandle | undefined
   if (connection === undefined) throw new Error('Qingmu cockpit requires an active Client Connection')
+  const entryScope = parseQingmuEntryScope(globalThis.location.href)
   const read = async <T>(endpoint: string, payload: unknown, signal?: AbortSignal): Promise<T> =>
     unwrapRpc(await connection.rpc.call('/qingmu-yimeng', endpoint, payload, signal)) as T
   const command = async <T>(endpoint: string, payload: unknown, signal?: AbortSignal): Promise<T> =>
     unwrapRpc(await connection.rpc.call('/qingmu-yimeng-command', endpoint, payload, signal)) as T
   const method = async <T>(endpoint: string, payload: unknown, signal?: AbortSignal): Promise<T> =>
     unwrapRpc(await connection.rpc.call('/qingmu-imago-method', endpoint, payload, signal)) as T
+  const director = async <T extends DirectorContextBridgeRpcResult>(
+    endpoint: string, payload: unknown, signal?: AbortSignal,
+  ): Promise<T> => unwrapRpc(await connection.rpc.call('/qingmu-director-context', endpoint, payload, signal)) as T
+
+  const directorBridge: DirectorContextClientPort = {
+    enter: (sessionId, scope, signal) => director<DirectorContextEntryResult>('enter', { sessionId, scope }, signal),
+    recover: (sessionId, signal) => director<DirectorContextRecoveryResult>('recover', { sessionId }, signal),
+    bindProposal: (sessionId, proposal, signal) => director('bindProposal', { sessionId, proposal }, signal),
+  }
 
   const port: QingmuYimengPort = {
+    readCreativeContract: (request, signal) => command('readCreativeContract', request, signal),
     requestDirectorProposal: (request, signal) => command('requestDirectorProposal', request, signal),
     checkDirectorProposalFreshness: (request, signal) => command('checkDirectorProposalFreshness', request, signal),
     listLocalReferenceCandidates: (request, signal) => command('listLocalReferenceCandidates', request, signal),
@@ -316,6 +333,8 @@ export function apply(ctx: ClientContext): void {
     name: 'sidebar.footer.action',
     id: 'qingmu-cockpit',
     locale: NS,
-    inject: (): QingmuCockpitFace => ({ port }),
+    inject: (): QingmuCockpitFace => entryScope === undefined
+      ? { port, directorBridge }
+      : { port, directorBridge, entryScope },
   }, QingmuCockpit))
 }

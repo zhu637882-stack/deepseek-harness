@@ -149,8 +149,11 @@ def initialize(
         "name": "qingmu-local-profile", "private": True,
         "dsh": {"profile": {"bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"]}}})
     # The private overlay uses built package URLs, preserving the actual bundle roster.
-    # Client-module package resolution also needs the two ordinary manifest names.
-    for name in ("client-ui-brand-qingmu", "client-ui-qingmu-cockpit"):
+    # Profile resolution needs the browser modules and Host bridge named by the
+    # bundle overlay. Server adapters use file URLs so an instance cannot fall
+    # back to an unrelated globally installed package.
+    for name in ("client-ui-brand-qingmu", "qingmu-director-context-bridge",
+                 "client-ui-qingmu-cockpit"):
         link = root / "dsh/profiles/node_modules/@deepseek-ai" / ("dsh-experimental-" + name)
         link.parent.mkdir(parents=True, exist_ok=True)
         link.symlink_to(HARNESS / "packages/experimental" / name, target_is_directory=True)
@@ -175,6 +178,43 @@ def http(url: str, *, token: str | None = None, payload: dict | None = None) -> 
     # Explicitly bypass ambient HTTP_PROXY even on loopback.
     with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=3) as response:
         return json.load(response)
+
+
+def host_rpc(host_url: str, method: str, payload: dict) -> dict:
+    """Call one loopback Host RPC and verify its correlated success envelope."""
+    rpc_id = "qingmu-launcher-" + secrets.token_hex(12)
+    response = http(
+        host_url + "/api/" + method,
+        payload={"type": "client-request", "rpcId": rpc_id, "method": method, "payload": payload},
+    )
+    if response.get("type") != "server-response" or response.get("rpcId") != rpc_id:
+        raise RuntimeError("青木 Host RPC 响应身份不匹配")
+    result = response.get("result")
+    if not isinstance(result, dict) or result.get("ok") is not True or not isinstance(result.get("value"), dict):
+        code = result.get("error", {}).get("code") if isinstance(result, dict) else None
+        raise RuntimeError("青木 Host RPC 失败" + ("：" + str(code) if code else ""))
+    return result["value"]
+
+
+def ensure_qingmu_workspace(root: Path, host_url: str, *, timeout: float = 10.0) -> dict:
+    """Idempotently register the work directory once the Host API composition is ready."""
+    expected = str((root / "work").resolve(strict=True))
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            value = host_rpc(host_url, "workspace.create", {"path": expected})
+            break
+        except urllib.error.HTTPError as exc:
+            # The static shell can answer before apiProxy finishes composing.
+            # Only that exact transient 404 is retryable; business failures and
+            # trust-fence errors stay fail-closed.
+            if exc.code != 404 or time.monotonic() >= deadline:
+                raise RuntimeError("青木 Host workspace 注册入口不可用") from exc
+            time.sleep(0.05)
+    workspace = value.get("workspace")
+    if not isinstance(workspace, dict) or workspace.get("path") != expected:
+        raise RuntimeError("青木 Host workspace 绑定不符；拒绝启动")
+    return workspace
 
 
 def control(root: Path, config: dict, operation: str) -> dict:
@@ -507,6 +547,10 @@ class Supervisor:
             "--profile", "qingmu", "--patch", str(overlay_path), "--host", "127.0.0.1",
             "--port", str(self.ports["hostPort"]), "--no-open"], env, "host")
         self.wait_ready(self.host, self.host_healthy)
+        # Register the instance-owned directory through the same durable Host
+        # contract used by the UI. The client startup policy can then create
+        # and select one real DSh Session; restart reuses this workspace.
+        ensure_qingmu_workspace(self.root, self.ports["hostUrl"])
 
     def start_frontend(self) -> None:
         writer = Path(self.config["yimengRoot"])

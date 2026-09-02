@@ -231,6 +231,24 @@ export function parseDirectorProposalRequest(value: unknown, helpers: Helpers): 
 }
 
 /**
+ * Parse the exact read-only context scope used by the Host bridge.
+ * @param value Untrusted Host request payload.
+ * @param helpers Adapter error factories and canonical JSON helper.
+ * @returns A validated scene and shot scoped context request.
+ */
+export function parseDirectorContextRequest(value: unknown, helpers: Helpers): DirectorProposalRequest {
+  const root = object(value, helpers.inputError, 'director context request')
+  exact(root, ['projectId', 'episodeId', 'sceneId', 'shotId'], helpers.inputError, 'director context request')
+  return {
+    projectId: id(root.projectId, helpers.inputError, 'projectId'),
+    episodeId: id(root.episodeId, helpers.inputError, 'episodeId'),
+    sceneId: id(root.sceneId, helpers.inputError, 'sceneId'),
+    shotId: id(root.shotId, helpers.inputError, 'shotId'),
+    suggestionType: 'text_director_proposal',
+  }
+}
+
+/**
  * Validate the IMAGO replay method identity, authority flags and package SHA.
  * @param value Untrusted Host method response.
  * @param helpers Adapter error factories.

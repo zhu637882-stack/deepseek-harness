@@ -14,7 +14,7 @@ This private experimental package binds one DSh session to one exact Yimeng `pro
 
 Async entry and recovery use a per-session generation plus binding-event compare-and-swap. A late result returns `superseded` and cannot overwrite a newer object choice or proposal attachment.
 
-The Cordis plugin registers the `qingmuDirectorContext` session projection for a future Qingmu UI mount. This slice does not modify or auto-load the current cockpit bundle.
+The Cordis plugin registers the `qingmuDirectorContext` session projection and a loopback-only browser facade. The Qingmu bundle mounts it before the cockpit, then the existing scene-planning workspace shows the current binding and uses it to validate replay proposal lineage. The facade never exposes the underlying Host command handler, token, Provider payload, or permit.
 
 ## Authority and side effects
 
@@ -38,6 +38,6 @@ Independent. Binding, switching, and recovery do not modify model requests.
 
 ## Known Limitations and Deferred Work
 
-- The actual cockpit mounting adapter is intentionally deferred; it must supply the existing read-only context port.
+- The mounted cockpit path remains replay-only. It does not enable a real model transport or Provider route.
 - Proposal method drift remains checked by the existing `checkDirectorProposalFreshness` command path. This bridge automatically handles context-SHA drift and preserves those freshness coordinates.
 - No real DeepSeek route, credential, external request, fee, or production canary is enabled by this package.

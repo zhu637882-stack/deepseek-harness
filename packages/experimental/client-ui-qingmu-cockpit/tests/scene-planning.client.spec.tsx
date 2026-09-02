@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ScenePlanningWorkspace } from '../src/client/ScenePlanningWorkspace.tsx'
 import type { DirectorProposalFreshnessResult, DirectorReplayProposal, ScenePlanningState, ScenePlanningResult } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import type { DirectorContextBindingState, DirectorContextClientPort, DirectorObjectScope } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 
 const state: ScenePlanningState = { schema: 'jason.qingmu-scene-planning-state.v1', projectId: 'project_1', episodeId: 'episode_1',
   scriptRevision: 1, scriptSha256: 'a'.repeat(64), storyboard: null, planning: null,
@@ -11,6 +12,41 @@ const state: ScenePlanningState = { schema: 'jason.qingmu-scene-planning-state.v
     dialogues: [{ character: '林夏', line: '请进。', sourceLineId: 'line_1' }] }] }
 const unavailableDirectorProposal = () => vi.fn(async () => { throw new Error('Director replay is not part of this fixture') })
 const unusedFreshness = () => vi.fn(async () => { throw new Error('Freshness is not part of this fixture') })
+function replayBridge(contextSnapshotSha256 = 'd'.repeat(64)): DirectorContextClientPort {
+  let bound: DirectorContextBindingState | null = null
+  return {
+    enter: vi.fn(async (_sessionId: string, scope: DirectorObjectScope) => {
+      bound = { version: 1, binding: { scope, contextSnapshotSha256 }, proposal: null, transition: 'enter' }
+      return { status: 'current' as const, state: bound, changed: true, manualWorkAllowed: true as const }
+    }),
+    bindProposal: vi.fn(async (_sessionId: string, proposal: DirectorReplayProposal, _signal?: AbortSignal) => {
+      if (bound === null) throw new Error('unbound')
+      bound = { ...bound, proposal: {
+        projectId: proposal.projectId, episodeId: proposal.episodeId, sceneId: proposal.sceneId, shotId: proposal.shotId,
+        contextSnapshotSha256: proposal.inputSha256, methodPackageVersion: proposal.methodPackage.version,
+        methodPackageSha256: proposal.methodPackage.methodPackageSha256, workOrderId: proposal.workOrder.workOrderId,
+        workOrderSha256: proposal.workOrder.workOrderSha256, promptSha256: proposal.workOrder.promptSha256,
+        proposalId: proposal.proposalId, proposalSha256: proposal.proposalSha256, outputSha256: proposal.outputSha256,
+      }, transition: 'proposal_attached' }
+      return { status: 'bound' as const, state: bound, manualWorkAllowed: true as const }
+    }),
+    recover: vi.fn(async (_sessionId: string, _signal?: AbortSignal) => bound === null
+      ? { status: 'unbound' as const, manualWorkAllowed: true as const }
+      : { status: 'current' as const, state: bound, manualWorkAllowed: true as const }),
+  }
+}
+function replayProposal(shotId = 'shot_1'): DirectorReplayProposal {
+  return { ...state, schema: 'qingmu.director-replay-proposal.v1', proposalId: `proposal_${shotId}`,
+    sceneId: 'scene_1', shotId, proposalKind: 'DirectorProposal', stale: false, staleReasons: [], advisoryOnly: true,
+    items: [{ id: 'narrative-focus', field: 'narrative', originalValue: '相遇', proposedValue: '相遇；明确本镜情绪落点。',
+      impact: '只修改当前镜头草稿。' }], execution: { mode: 'deterministic_replay_fixture', providerResult: false,
+      networkUsed: false, providerCalls: 0, costAmountCny: '0' }, sourceTime: '2026-08-29T00:00:00Z',
+    inputSha256: 'd'.repeat(64), outputSha256: 'e'.repeat(64), proposalSha256: 'f'.repeat(64),
+    formalQcInferred: false, selectionGranted: false, readyGranted: false, humanDecisionInferred: false,
+    methodPackage: { version: '1.0.0', methodPackageSha256: '1'.repeat(64) }, workOrder: {
+      workOrderId: 'work_order_1', workOrderSha256: '2'.repeat(64), promptSha256: '3'.repeat(64),
+    } } as unknown as DirectorReplayProposal
+}
 beforeEach(() => { localStorage.clear(); vi.stubGlobal('crypto', webcrypto) })
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 it('preserves text and original intent across double-click, disconnect and remount without resubmission', async () => {
@@ -106,20 +142,14 @@ it('keeps replay advice explicit and advisory until the human uses the existing 
     planning: { sceneId: 'scene_1', sceneIndex: 1, initialReceiptId: 'receipt_1', actorIds: {},
       source: { sceneIndex: 1, scriptRevision: 1, scriptSha256: state.scriptSha256!, inputSha256: 'c'.repeat(64), sourceLineIds: ['line_1'] },
       shots: [{ id: 'shot_1', title: '门口', narrative: '相遇', visual: '雨夜门口', action: '开门', durationSec: 3, dialogueLineIds: ['line_1'] }] } }
-  const proposal = { ...state, schema: 'qingmu.director-replay-proposal.v1', proposalId: 'proposal_1',
-    sceneId: 'scene_1', shotId: 'shot_1', proposalKind: 'DirectorProposal', stale: false, staleReasons: [], advisoryOnly: true,
-    items: [{ id: 'narrative-focus', field: 'narrative', originalValue: '相遇', proposedValue: '相遇；明确本镜情绪落点。',
-      impact: '只修改当前镜头草稿。' }], execution: { mode: 'deterministic_replay_fixture', providerResult: false,
-      networkUsed: false, providerCalls: 0, costAmountCny: '0' }, sourceTime: '2026-08-29T00:00:00Z',
-    inputSha256: 'd'.repeat(64), outputSha256: 'e'.repeat(64), proposalSha256: 'f'.repeat(64),
-    formalQcInferred: false, selectionGranted: false, readyGranted: false, humanDecisionInferred: false,
-    methodPackage: { methodPackageSha256: '1'.repeat(64) }, workOrder: {} } as unknown as DirectorReplayProposal
+  const proposal = replayProposal()
   const port = { readScenePlanning: vi.fn(async () => savedState),
     requestDirectorProposal: vi.fn(async () => proposal),
     checkDirectorProposalFreshness: vi.fn(async () => ({ fresh: true } as unknown as DirectorProposalFreshnessResult)),
     saveScenePlanning: vi.fn(async () => { throw new Error('disconnected after submit') }),
     recoverScenePlanning: vi.fn() }
-  render(<ScenePlanningWorkspace {...savedState} port={port} onCommitted={vi.fn(async () => {})}
+  render(<ScenePlanningWorkspace {...savedState} port={port} directorBridge={replayBridge()} directorSessionId="session_1"
+    onCommitted={vi.fn(async () => {})}
     onSelectShotId={vi.fn()} onUnsavedChange={vi.fn()} />)
   fireEvent.click(await screen.findByText('读取演练建议'))
   expect(await screen.findByText('建议只作创意参考，尚未成为正式质检、参考选择、Ready 或人工决定。人工编辑始终可用。')).toBeTruthy()
@@ -133,4 +163,24 @@ it('keeps replay advice explicit and advisory until the human uses the existing 
   await waitFor(() => { expect(port.saveScenePlanning).toHaveBeenCalledOnce() })
   expect(port.requestDirectorProposal).toHaveBeenCalledOnce()
   expect(port.checkDirectorProposalFreshness).toHaveBeenCalledOnce()
+})
+
+it('clears a shot-bound replay proposal before showing another shot', async () => {
+  const savedState: ScenePlanningState = { ...state,
+    storyboard: { id: 'revision_1', version: 1, sourceHash: 'b'.repeat(64), status: 'Ready' },
+    planning: { sceneId: 'scene_1', sceneIndex: 1, initialReceiptId: 'receipt_1', actorIds: {},
+      source: { sceneIndex: 1, scriptRevision: 1, scriptSha256: state.scriptSha256!, inputSha256: 'c'.repeat(64), sourceLineIds: ['line_1'] },
+      shots: [
+        { id: 'shot_1', title: '门口', narrative: '相遇', visual: '雨夜门口', action: '开门', durationSec: 3, dialogueLineIds: ['line_1'] },
+        { id: 'shot_2', title: '室内', narrative: '对峙', visual: '昏暗室内', action: '关门', durationSec: 4, dialogueLineIds: [] },
+      ] } }
+  const port = { readScenePlanning: vi.fn(async () => savedState), requestDirectorProposal: vi.fn(async () => replayProposal()),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() }
+  render(<ScenePlanningWorkspace {...savedState} port={port} directorBridge={replayBridge()} directorSessionId="session_1"
+    onCommitted={vi.fn(async () => {})} onSelectShotId={vi.fn()} onUnsavedChange={vi.fn()} />)
+  fireEvent.click(await screen.findByText('读取演练建议'))
+  expect(await screen.findByText('相遇；明确本镜情绪落点。')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: /02 · 室内/ }))
+  await waitFor(() => { expect(screen.queryByText('相遇；明确本镜情绪落点。')).toBeNull() })
+  expect(screen.getByLabelText<HTMLTextAreaElement>('叙事目的').value).toBe('对峙')
 })

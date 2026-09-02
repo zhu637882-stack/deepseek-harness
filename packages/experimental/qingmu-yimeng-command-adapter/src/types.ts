@@ -1,6 +1,7 @@
 /** Browser-safe creation contracts; importing this leaf never loads Host Context merges. */
 export type {
-  CreationScope, ProjectInitializationRequest, ProjectInitializationRecovery, ProjectInitializationResult,
+  CreationScope, CreativeContract, CreativeContractMethodRef, CreativeContractState,
+  ProjectInitializationRequest, ProjectInitializationRecovery, ProjectInitializationResult,
   TextImportReadRequest, TextImportRequest, TextImportLine, TextImportDraft, TextImportState,
   TextImportCorrection, TextImportConfirmationRequest, TextImportConfirmation,
 } from './creation.ts'
@@ -2886,6 +2887,9 @@ export interface YimengReworkRouteAuthorityProbe {
 
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
+  /** Host-only; the browser channel rejects this endpoint. */
+  readonly readDirectorContext: import('./director-proposal.ts').DirectorContextSnapshot
+  readonly readCreativeContract: import('./creation.ts').CreativeContractState
   readonly requestDirectorProposal: import('./director-proposal.ts').DirectorReplayProposal
   readonly issueDirectorProviderWorkOrder: import('./director-paid-work-order.ts').DirectorPaidWorkOrder
   readonly readDirectorProviderWorkOrderStatus: import('./director-paid-work-order.ts').DirectorPaidWorkOrderStatus

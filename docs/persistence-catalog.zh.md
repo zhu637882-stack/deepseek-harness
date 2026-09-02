@@ -546,7 +546,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'qingmu-director-context/state': DirectorContextBindingState
 ```
 
-来源：[`packages/experimental/qingmu-director-context-bridge/src/types.ts:122`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+来源：[`packages/experimental/qingmu-director-context-bridge/src/types.ts:140`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
 
 ### `request/*`
 

@@ -150,7 +150,7 @@ function errorMessage(error: unknown): string {
 }
 
 /** Qingmu production cockpit mounted in the generic sidebar footer. */
-export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
+export function QingmuCockpit({ wide, port, directorBridge, entryScope, t, useSessions }: QingmuCockpitProps) {
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<Tab>('overview')
   const [loading, setLoading] = useState(false)
@@ -164,6 +164,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   const [projection, setProjection] = useState<YimengWorkflowProjection>()
   const [selectedShotId, setSelectedShotId] = useState('')
   const [generationCatalog, setGenerationCatalog] = useState<YimengCapabilityCatalogResponse>()
+  const directorSessionId = useSessions(state => state.current)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
@@ -190,7 +191,16 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
     const request = begin()
     setLoading(true)
     setError(undefined)
+    const scopeLocked = entryScope !== undefined
+    const requestedScope = scopeLocked ? entryScope : preferred
+    if (scopeLocked) {
+      setProjectId('')
+      setEpisodeId('')
+      setProjection(undefined)
+      setSelectedShotId('')
+    }
     try {
+      if (requestedScope === null) throw new Error('外层项目与集绑定无效；导演工作区已拒绝载入。')
       const [healthResult, projectsResult] = await Promise.allSettled([
         port.health(request.controller.signal),
         port.projects({ page: 1, pageSize: 100 }, request.controller.signal),
@@ -201,10 +211,10 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
 
       const nextProjects = projectsResult.value.items
       setProjects(nextProjects)
-      const desiredProjectId = preferred?.projectId ?? projectId
-      const nextProjectId = nextProjects.some(item => stringOf(item.id) === desiredProjectId)
-        ? desiredProjectId
-        : stringOf(nextProjects[0]?.id) ?? ''
+      const desiredProjectId = requestedScope?.projectId ?? projectId
+      const projectExists = nextProjects.some(item => stringOf(item.id) === desiredProjectId)
+      if (scopeLocked && !projectExists) throw new Error('外层项目不属于当前登录用户；导演工作区已拒绝回退到其他项目。')
+      const nextProjectId = projectExists ? desiredProjectId : stringOf(nextProjects[0]?.id) ?? ''
       setProjectId(nextProjectId)
       if (nextProjectId === '') {
         setEpisodes([])
@@ -217,10 +227,10 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
       const episodeResult = await port.episodes({ projectId: nextProjectId }, request.controller.signal)
       if (!current(request.id)) return
       setEpisodes(episodeResult.items)
-      const desiredEpisodeId = preferred?.episodeId ?? episodeId
-      const nextEpisodeId = episodeResult.items.some(item => stringOf(item.id) === desiredEpisodeId)
-        ? desiredEpisodeId
-        : stringOf(episodeResult.items[0]?.id) ?? ''
+      const desiredEpisodeId = requestedScope?.episodeId ?? episodeId
+      const episodeExists = episodeResult.items.some(item => stringOf(item.id) === desiredEpisodeId)
+      if (scopeLocked && !episodeExists) throw new Error('外层集不属于当前项目；导演工作区已拒绝回退到其他集。')
+      const nextEpisodeId = episodeExists ? desiredEpisodeId : stringOf(episodeResult.items[0]?.id) ?? ''
       setEpisodeId(nextEpisodeId)
       if (nextEpisodeId === '') {
         setProjection(undefined)
@@ -237,6 +247,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   }
 
   const chooseProject = async (nextProjectId: string): Promise<void> => {
+    if (entryScope !== undefined) return
     if (!mayLeaveDirector()) return
     setProjectId(nextProjectId)
     setEpisodeId('')
@@ -263,6 +274,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   }
 
   const chooseEpisode = async (nextEpisodeId: string): Promise<void> => {
+    if (entryScope !== undefined) return
     if (!mayLeaveDirector()) return
     setEpisodeId(nextEpisodeId)
     setProjection(undefined)
@@ -639,7 +651,8 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   const panels: Record<Tab, ReactNode> = {
     director: <DirectorWorkspace projectId={projectId} episodeId={episodeId} projection={projection}
       shotItems={shotItems} selectedShotId={selectedShotId} onSelectShotId={(id) => { if (mayLeaveDirector()) setSelectedShotId(id) }}
-      onUnsavedChange={onDirectorDirty} port={port} t={t} onCommitted={refreshWorkflowProjectionAfterCommit} />,
+      onUnsavedChange={onDirectorDirty} port={port} directorBridge={directorBridge}
+      directorSessionId={directorSessionId} t={t} onCommitted={refreshWorkflowProjectionAfterCommit} />,
     overview,
     assets: assetView,
     shots: shotView,
@@ -706,13 +719,14 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
           </section>
 
           <div className={css.toolbar}>
-            <button type="button" onClick={() => { if (mayLeaveDirector()) setCreating(true) }} disabled={loading}>新建项目</button>
+            <button type="button" onClick={() => { if (mayLeaveDirector()) setCreating(true) }}
+              disabled={loading || entryScope !== undefined}>新建项目</button>
             <label>
               <span>{t('project')}</span>
               <select
                 value={projectId}
                 onChange={(event) => { void chooseProject(event.target.value) }}
-                disabled={loading || projects.length === 0}
+                disabled={loading || projects.length === 0 || entryScope !== undefined}
               >
                 <option value="">{projects.length === 0 ? t('noProjects') : t('chooseProject')}</option>
                 {projects.map(project => (
@@ -727,7 +741,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
               <select
                 value={episodeId}
                 onChange={(event) => { void chooseEpisode(event.target.value) }}
-                disabled={loading || episodes.length === 0}
+                disabled={loading || episodes.length === 0 || entryScope !== undefined}
               >
                 <option value="">{episodes.length === 0 ? t('noEpisodes') : t('chooseEpisode')}</option>
                 {episodes.map(episode => (

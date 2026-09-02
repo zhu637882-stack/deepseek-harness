@@ -14,7 +14,7 @@
 
 异步进入和恢复使用 Session 级操作代次与 binding 事件 CAS。迟到结果返回 `superseded`，不能覆盖较新的对象选择或 proposal 挂接。
 
-Cordis plugin 注册 `qingmuDirectorContext` Session projection，供未来青木 UI 挂载。本切片不修改、也不自动装载当前 cockpit bundle。
+Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopback 的浏览器 facade。青木 bundle 在 cockpit 之前挂载它，现有场景规划工作区显示当前绑定，并用它核验 replay proposal 谱系。facade 不会暴露底层 Host command handler、token、Provider payload 或 permit。
 
 ## 权威与副作用
 
@@ -38,6 +38,6 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection，供未来青�
 
 ## 已知限制与后续工作
 
-- 实际 cockpit 挂载 adapter 有意留到后续切片；它必须提供现有只读 context port。
+- 已挂载的 cockpit 路径仍为 replay-only，不启用真实模型 transport 或 Provider route。
 - proposal 的 method 漂移仍由现有 `checkDirectorProposalFreshness` command 路径检查。本桥自动处理 context SHA 漂移，并保留该 freshness 所需坐标。
 - 本包没有启用真实 DeepSeek 路由、凭据、外部请求、费用或生产 canary。
