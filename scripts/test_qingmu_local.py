@@ -19,6 +19,47 @@ spec.loader.exec_module(local)
 
 
 class OwnershipTests(unittest.TestCase):
+    def rotation_world(self, parent: Path):
+        root = parent / "instance"
+        for part in ("private", "storage", "audit", "logs", "home", "work", "dsh", "backups", "build-manifest"):
+            (root / part).mkdir(parents=True, mode=0o700, exist_ok=True)
+        root.chmod(0o700)
+        config = {
+            "version": 1,
+            "instanceId": "rotation-instance",
+            "root": str(root),
+            "harnessRoot": str(local.HARNESS),
+            "yimengRoot": str(parent / "writer"),
+            "coreRoot": str(parent / "core"),
+            "node": "/private/node",
+            "frontendNode": "/private/node20",
+            **{name: local.secrets.token_urlsafe(48) for name in local.PRIVATE_CREDENTIAL_FIELDS},
+            "futureNonSensitiveSetting": "preserved",
+        }
+        login = {"username": local.LOCAL_USERNAME, "password": local.secrets.token_urlsafe(32)}
+        session = {"token": local.secrets.token_urlsafe(48)}
+        local.write_json(root / "private/instance.json", config)
+        local.write_json(root / "private/login.json", login)
+        local.write_json(root / "private/session.json", session)
+        local.mark_lifecycle(root, config, "clean")
+        with sqlite3.connect(root / "storage/jason.db") as connection:
+            connection.execute("CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT NOT NULL, password_hash TEXT NOT NULL)")
+            connection.execute(
+                "INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)",
+                ("local-user", local.LOCAL_USERNAME, local._hash_local_password(login["password"])),
+            )
+        return root, config, login, session
+
+    def password_matches(self, password: str, stored: str) -> bool:
+        try:
+            _algorithm, raw_iterations, salt, expected = stored.split("$", 3)
+            actual = local.hashlib.pbkdf2_hmac(
+                "sha256", password.encode(), salt.encode("ascii"), int(raw_iterations)
+            ).hex()
+            return local.secrets.compare_digest(actual, expected)
+        except (TypeError, ValueError):
+            return False
+
     def build_manifest_world(self, parent: Path):
         root = parent / "instance"
         writer = parent / "writer"
@@ -456,6 +497,120 @@ class OwnershipTests(unittest.TestCase):
                 "renewed-token",
             )
 
+    def test_private_rotation_changes_all_credentials_login_and_session_without_secret_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, old_config, old_login, _old_session = self.rotation_world(Path(directory))
+            with patch.object(local, "node20_executable", return_value="/private/node20"):
+                context = local._rotate_private_state(root, "rotation-instance")
+            new_config = json.loads((root / "private/instance.json").read_text())
+            new_login = json.loads((root / "private/login.json").read_text())
+            changed = [
+                not local.secrets.compare_digest(old_config[name], new_config[name])
+                for name in local.PRIVATE_CREDENTIAL_FIELDS
+            ]
+            self.assertTrue(all(changed))
+            self.assertTrue(context["changed"] == dict(zip(local.PRIVATE_CREDENTIAL_FIELDS, changed)))
+            self.assertTrue(new_config["futureNonSensitiveSetting"] == "preserved")
+            self.assertTrue(not local.secrets.compare_digest(old_login["password"], new_login["password"]))
+            self.assertFalse((root / "private/session.json").exists())
+            with sqlite3.connect(root / "storage/jason.db") as connection:
+                stored = connection.execute(
+                    "SELECT password_hash FROM users WHERE username = ?", (local.LOCAL_USERNAME,)
+                ).fetchone()[0]
+            self.assertTrue(self.password_matches(new_login["password"], stored))
+            self.assertFalse(self.password_matches(old_login["password"], stored))
+            for name in ("instance.json", "login.json"):
+                self.assertEqual((root / "private" / name).stat().st_mode & 0o777, 0o600)
+            self.assertFalse((root / "private/credential-rotation.in-progress.json").exists())
+
+    def test_private_rotation_refuses_wrong_instance_and_running_owner_without_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, _config, _login, _session = self.rotation_world(Path(directory))
+            before_config = (root / "private/instance.json").read_bytes()
+            before_login = (root / "private/login.json").read_bytes()
+            with patch.object(local, "node20_executable", return_value="/private/node20"):
+                with self.assertRaisesRegex(ValueError, "身份不匹配"):
+                    local._rotate_private_state(root, "wrong-instance")
+                with local.instance_lock(root):
+                    with self.assertRaisesRegex(RuntimeError, "正在运行"):
+                        local._rotate_private_state(root, "rotation-instance")
+            self.assertTrue(local.secrets.compare_digest(before_config, (root / "private/instance.json").read_bytes()))
+            self.assertTrue(local.secrets.compare_digest(before_login, (root / "private/login.json").read_bytes()))
+
+    def test_private_rotation_partial_failure_restores_files_session_and_database(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, _config, old_login, _session = self.rotation_world(Path(directory))
+            before_config = (root / "private/instance.json").read_bytes()
+            before_login = (root / "private/login.json").read_bytes()
+            before_session = (root / "private/session.json").read_bytes()
+            with patch.object(local, "node20_executable", return_value="/private/node20"):
+                with self.assertRaisesRegex(RuntimeError, "已恢复原一致状态"):
+                    local._rotate_private_state(
+                        root, "rotation-instance", failure_stage="after_session"
+                    )
+            self.assertTrue(local.secrets.compare_digest(before_config, (root / "private/instance.json").read_bytes()))
+            self.assertTrue(local.secrets.compare_digest(before_login, (root / "private/login.json").read_bytes()))
+            self.assertTrue(local.secrets.compare_digest(before_session, (root / "private/session.json").read_bytes()))
+            with sqlite3.connect(root / "storage/jason.db") as connection:
+                stored = connection.execute(
+                    "SELECT password_hash FROM users WHERE username = ?", (local.LOCAL_USERNAME,)
+                ).fetchone()[0]
+            self.assertTrue(self.password_matches(old_login["password"], stored))
+            self.assertFalse((root / "private/credential-rotation.in-progress.json").exists())
+
+    def test_private_rotation_is_repeatable_and_rejects_unknown_secret_field(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, _config, _login, _session = self.rotation_world(Path(directory))
+            with patch.object(local, "node20_executable", return_value="/private/node20"):
+                first = local._rotate_private_state(root, "rotation-instance")
+                local.write_json(root / "private/session.json", {"token": local.secrets.token_urlsafe(48)})
+                second = local._rotate_private_state(root, "rotation-instance")
+                config = json.loads((root / "private/instance.json").read_text())
+                config["futureSigningToken"] = local.secrets.token_urlsafe(48)
+                local.write_json(root / "private/instance.json", config)
+                with self.assertRaisesRegex(ValueError, "未知私密字段"):
+                    local._rotate_private_state(root, "rotation-instance")
+            self.assertTrue(all(first["changed"].values()))
+            self.assertTrue(all(second["changed"].values()))
+
+    def test_private_rotation_runtime_verifies_old_auth_then_new_login_with_safe_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, old_config, old_login, old_session = self.rotation_world(Path(directory))
+            new_config = local._new_private_credentials(old_config)
+            context = {
+                "oldConfig": old_config,
+                "oldLogin": old_login,
+                "oldSession": old_session,
+                "newConfig": new_config,
+                "changed": {name: True for name in local.PRIVATE_CREDENTIAL_FIELDS},
+            }
+            runtime = {"apiUrl": "http://127.0.0.1:49001"}
+            logged_in = {
+                "instanceId": "rotation-instance", "ready": True,
+                "buildManifestMatches": True,
+                "session": "已登录：" + local.LOCAL_USERNAME,
+            }
+            local.write_json(root / "private/session.json", {"token": local.secrets.token_urlsafe(48)})
+            with patch.object(local, "_rotate_private_state", return_value=context), \
+                 patch.object(local, "record_build_manifest", return_value={
+                     "matches": True, "harnessCommit": "1" * 40,
+                 }), patch.object(local, "start", return_value=runtime), \
+                 patch.object(local, "_expect_http_unauthorized", return_value=True) as rejected, \
+                 patch.object(local, "control", return_value=logged_in):
+                receipt = local.rotate_private_credentials(root, "rotation-instance")
+            self.assertEqual(rejected.call_count, 2)
+            self.assertTrue(receipt["oldPasswordInvalid"])
+            self.assertTrue(receipt["oldSessionInvalid"])
+            self.assertTrue(receipt["newLoginVerified"])
+            serialized = json.dumps(receipt)
+            private_values = [
+                *(old_config[name] for name in local.PRIVATE_CREDENTIAL_FIELDS),
+                old_login["password"], old_session["token"],
+                *(new_config[name] for name in local.PRIVATE_CREDENTIAL_FIELDS),
+            ]
+            for item in private_values:
+                self.assertFalse(item in serialized)
+
     def test_partial_start_cleans_only_owned_child(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -649,9 +804,12 @@ class OwnershipTests(unittest.TestCase):
                 "yimengRoot": str(parent / "writer"), "coreRoot": str(parent / "core"),
                 "instanceId": "source-instance", "controlKey": "control",
                 "directorExecutionKey": "director", "jwtSecret": "jwt",
-                "attestationKey": "attestation", "frontendNode": "/private/node20",
+                "attestationKey": "attestation", "editorialHandoffKey": "editorial",
+                "frontendNode": "/private/node20",
             }
+            login = {"username": local.LOCAL_USERNAME, "password": local.secrets.token_urlsafe(32)}
             local.write_json(root / "private/instance.json", config)
+            local.write_json(root / "private/login.json", login)
             local.write_json(root / "identity.json", {"kind": "test"})
             local.write_json(root / "build-manifest/current.json", {
                 "schema": local.BUILD_MANIFEST_SCHEMA,
@@ -660,6 +818,11 @@ class OwnershipTests(unittest.TestCase):
             local.mark_lifecycle(root, config, "clean")
             with sqlite3.connect(root / "storage/jason.db") as connection:
                 connection.execute("CREATE TABLE sample (id INTEGER)")
+                connection.execute("CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT, password_hash TEXT)")
+                connection.execute(
+                    "INSERT INTO users VALUES (?, ?, ?)",
+                    ("local-user", local.LOCAL_USERNAME, local._hash_local_password(login["password"])),
+                )
             with patch.object(local, "node20_executable", return_value="/private/node20"):
                 saved = local.backup(root)
                 backup_root = Path(saved["backup"])
@@ -670,6 +833,20 @@ class OwnershipTests(unittest.TestCase):
                 restored = local.restore(backup_root, target)
             self.assertTrue((target / "build-manifest/current.json").is_file())
             self.assertFalse(restored["buildManifest"]["matches"])
+            restored_config = json.loads((target / "private/instance.json").read_text())
+            restored_login = json.loads((target / "private/login.json").read_text())
+            self.assertTrue(all(
+                not local.secrets.compare_digest(config[name], restored_config[name])
+                for name in local.PRIVATE_CREDENTIAL_FIELDS
+            ))
+            self.assertFalse(local.secrets.compare_digest(login["password"], restored_login["password"]))
+            with sqlite3.connect(target / "storage/jason.db") as connection:
+                stored = connection.execute(
+                    "SELECT password_hash FROM users WHERE username = ?", (local.LOCAL_USERNAME,)
+                ).fetchone()[0]
+            self.assertTrue(self.password_matches(restored_login["password"], stored))
+            self.assertFalse(self.password_matches(login["password"], stored))
+            self.assertFalse((target / "private/session.json").exists())
 
     def test_backup_reports_legacy_build_evidence_when_current_identity_is_unknown(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -842,14 +1019,21 @@ class OwnershipTests(unittest.TestCase):
                 "root": str(root), "harnessRoot": str(local.HARNESS),
                 "instanceId": "instance-1", "controlKey": "control",
                 "directorExecutionKey": "director", "jwtSecret": "jwt",
-                "attestationKey": "attestation",
+                "attestationKey": "attestation", "editorialHandoffKey": "editorial",
                 "frontendNode": "/private/node20",
             }
+            login = {"username": local.LOCAL_USERNAME, "password": local.secrets.token_urlsafe(32)}
             local.write_json(root / "private/instance.json", config)
+            local.write_json(root / "private/login.json", login)
             local.write_json(root / "identity.json", {"kind": "test"})
             local.mark_lifecycle(root, config, "clean")
             with sqlite3.connect(root / "storage/jason.db") as connection:
                 connection.execute("CREATE TABLE sample (id INTEGER)")
+                connection.execute("CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT, password_hash TEXT)")
+                connection.execute(
+                    "INSERT INTO users VALUES (?, ?, ?)",
+                    ("local-user", local.LOCAL_USERNAME, local._hash_local_password(login["password"])),
+                )
             fence = root / "audit/director-submit-once-task-1.json"
             local._write_exclusive_json(fence, {"state": "armed_no_replay"})
             with patch.object(local, "node20_executable", return_value="/private/node20"):

@@ -51,6 +51,20 @@ python3 scripts/qingmu-local.py login
 
 专用本地账号使用 `private/login.json` 中的随机密码，由当前 macOS 用户的私有目录保护。`login` 向既有 API 提交该凭据，更新正常 24 小时 JWT，仅重启本实例 Host 与前端，让两者取得更新后的私密会话；它不改业务数据、不重放命令。随后重新打开 `status` 输出的 `entryUrl`，让浏览器取得新的 HttpOnly Cookie；只刷新原项目地址会继续携带旧 Cookie。保存结果未知时先查原回执再决定重试，不要新建第二条命令。设备本地身份不是人工内容批准证明。能访问此 macOS 账号或 loopback 服务的主体拥有本地用户能力。
 
+## 轮换本机私密凭据
+
+怀疑本机实例凭据被暴露时，先正常停止并创建一次非覆盖 cold backup；确认当前 Harness/Writer 工作树干净后，用公开 `status` 中的精确实例 ID 执行：
+
+```sh
+python3 scripts/qingmu-local.py stop
+python3 scripts/qingmu-local.py backup
+python3 scripts/qingmu-local.py rotate-private-credentials --instance-id EXACT_INSTANCE_ID
+```
+
+轮换只允许在停止锁内运行。它一次性重生 JWT 签名、attestation、控制、导演执行、编辑交接五类本机密钥，更新 `qingmu-local` 的随机登录密码及数据库中该用户唯一一行的密码哈希，并清除旧 session。随后自动重绑当前构建身份、启动实例，在同一 launcher 进程内确认旧密码和既有旧 session 均返回未授权，再使用新密码登录。命令和 audit receipt 只报告类别、布尔、时间、权限和公开构建身份，不输出凭据或其哈希。实例 ID 不符、实例正在运行、账号不是精确一行、私密文件不是当前用户的 `0600` 普通文件、存在未知同类私密字段或任一步失败时均失败关闭；提交前的受控失败会恢复一致停止态。
+
+轮换完成后应再执行一次 `stop`、`start`、`status`，确认完整重启仍为 `ready: true` 且构建身份匹配。旧 cold backup 会保留，但 `restore` 现在总会为新目录重生上述五类凭据和本机登录密码、同步新数据库密码哈希并丢弃旧 session，因此不会让备份内的旧认证值重新生效。
+
 ## 数据与备份参考
 
 `storage/jason.db` 和 `storage/` 保存易梦数据与媒体；`dsh/` 为独立 Harness home/profile；`private/` 保存密钥、会话与配置；`logs/` 保存启动诊断。整个目录须保持私密，私密文件和备份均不得进入 Git。启动器清除继承凭据，不读取旧生产 `.env`，只绑定 `127.0.0.1`，付费 Provider 保持禁用。
@@ -64,6 +78,6 @@ python3 scripts/qingmu-local.py start --root /absolute/new/restore-path
 python3 scripts/qingmu-local.py login --root /absolute/new/restore-path
 ```
 
-备份要求已确认正常停机，每次新建带时间戳的目录，检查 SQLite 完整性以及 storage、audit 和 build manifest 的 SHA-256。构建身份缺失时只记录 `unknown_missing`，不进行推断。监督进程异常退出后，锁空闲不证明停机：持久 dirty 标记会阻止启动/备份并报告状态未知，需操作员诊断。恢复要求完整哈希清单，仅写不存在的新目录，保留来源实例并分配新进程身份；复制的构建身份会保持不匹配，直至 `record-build` 将其绑定到新目录。修改绑定的代码工作区前保留已验证备份。代码回滚需停止本实例并回到记录的来源提交；不自动回滚数据库 schema。
+备份要求已确认正常停机，每次新建带时间戳的目录，检查 SQLite 完整性以及 storage、audit 和 build manifest 的 SHA-256。构建身份缺失时只记录 `unknown_missing`，不进行推断。监督进程异常退出后，锁空闲不证明停机：持久 dirty 标记会阻止启动/备份并报告状态未知，需操作员诊断。恢复要求完整哈希清单，仅写不存在的新目录，保留来源实例并分配新进程身份；恢复过程会全量 rekey 本机私密凭据和登录认证，复制的构建身份会保持不匹配，直至 `record-build` 将其绑定到新目录。修改绑定的代码工作区前保留已验证备份。代码回滚需停止本实例并回到记录的来源提交；不自动回滚数据库 schema。
 
 启动器不安装系统自启动、不开放公网、不迁移正式数据、不运行 Provider 作业、不签收内容。详见[所有权决策](../../.agents/notes/implemented/architecture/2026-08-29-qingmu-local-instance.zh.md)。

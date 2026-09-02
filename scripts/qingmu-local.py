@@ -45,6 +45,18 @@ BUILD_MANIFEST_ARTIFACTS = (
     "packages/experimental/client-ui-qingmu-cockpit/lib/client.js",
     "packages/experimental/qingmu-web/lib/index.js",
 )
+LOCAL_USERNAME = "qingmu-local"
+LOCAL_PASSWORD_ITERATIONS = 600_000
+PRIVATE_CREDENTIAL_FIELDS = (
+    "jwtSecret",
+    "attestationKey",
+    "controlKey",
+    "directorExecutionKey",
+    "editorialHandoffKey",
+)
+PRIVATE_FIELD_MARKERS = (
+    "secret", "token", "password", "credential", "signature", "hmac",
+)
 
 
 def write_json(path: Path, value: dict) -> None:
@@ -63,6 +75,78 @@ def write_json(path: Path, value: dict) -> None:
         os.close(directory)
 
 
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _read_owner_only_json(path: Path, label: str) -> dict:
+    """Read one private JSON object after checking ownership and mode."""
+    if path.is_symlink() or not path.is_file() or path.stat().st_uid != os.getuid():
+        raise ValueError(label + "必须是当前用户拥有的普通文件")
+    if path.stat().st_mode & 0o077:
+        raise ValueError(label + "权限必须为0600")
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(label + "必须是JSON对象")
+    return value
+
+
+def _validate_private_credential_fields(config: dict, *, require_all: bool) -> None:
+    """Fail closed on unknown top-level credential fields."""
+    for name in config:
+        normalized = "".join(character for character in name.lower() if character.isalnum())
+        if name not in PRIVATE_CREDENTIAL_FIELDS and (
+            normalized.endswith("key")
+            or any(marker in normalized for marker in PRIVATE_FIELD_MARKERS)
+        ):
+            raise ValueError("实例配置含未知私密字段；需先显式纳入轮换策略")
+    if require_all and any(
+        not isinstance(config.get(name), str) or not config[name]
+        for name in PRIVATE_CREDENTIAL_FIELDS
+    ):
+        raise ValueError("实例缺少完整的本机认证、签名或控制凭据")
+
+
+def _new_private_credentials(config: dict) -> dict:
+    _validate_private_credential_fields(config, require_all=False)
+    result = dict(config)
+    result.update({name: secrets.token_urlsafe(48) for name in PRIVATE_CREDENTIAL_FIELDS})
+    return result
+
+
+def _new_local_login() -> dict:
+    return {"username": LOCAL_USERNAME, "password": secrets.token_urlsafe(32)}
+
+
+def _hash_local_password(password: str) -> str:
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt.encode("ascii"),
+        LOCAL_PASSWORD_ITERATIONS,
+    ).hex()
+    return f"pbkdf2_sha256${LOCAL_PASSWORD_ITERATIONS}${salt}${digest}"
+
+
+def _stage_local_password_hash(connection: sqlite3.Connection, password: str) -> None:
+    rows = connection.execute(
+        "SELECT id FROM users WHERE username = ?", (LOCAL_USERNAME,)
+    ).fetchall()
+    if len(rows) != 1:
+        raise RuntimeError("本机账号必须精确匹配一行；未修改认证数据")
+    cursor = connection.execute(
+        "UPDATE users SET password_hash = ? WHERE id = ?",
+        (_hash_local_password(password), rows[0][0]),
+    )
+    if cursor.rowcount != 1:
+        raise RuntimeError("本机账号密码哈希未精确更新一行")
+
+
 def read_config(root: Path) -> dict:
     if root.is_symlink() or root.stat().st_uid != os.getuid() or root.stat().st_mode & 0o077:
         raise ValueError("专用目录必须属于当前用户且权限为0700")
@@ -71,7 +155,8 @@ def read_config(root: Path) -> dict:
                      "storage/jason.db", "private/lifecycle.lock", "build-manifest/current.json"):
         if (root / relative).is_symlink():
             raise ValueError("实例数据/配置路径不能是符号链接：" + relative)
-    config = json.loads((root / "private/instance.json").read_text())
+    config = _read_owner_only_json(root / "private/instance.json", "实例私密配置")
+    _validate_private_credential_fields(config, require_all=False)
     if config["root"] != str(root) or config["harnessRoot"] != str(HARNESS):
         raise ValueError("实例目录或 Harness 来源绑定不符；拒绝使用")
     frontend_node = config.get("frontendNode")
@@ -335,7 +420,7 @@ def initialize(
               "directorExecutionKey": secrets.token_urlsafe(48),
               "editorialHandoffKey": secrets.token_urlsafe(48)}
     write_json(root / "private/instance.json", config)
-    write_json(root / "private/login.json", {"username": "qingmu-local", "password": secrets.token_urlsafe(32)})
+    write_json(root / "private/login.json", _new_local_login())
     write_json(root / "dsh/profiles/qingmu/package.json", {
         "name": "qingmu-local-profile", "private": True,
         "dsh": {"profile": {"bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"]}}})
@@ -946,6 +1031,207 @@ def start(root: Path, config: dict) -> dict:
     raise RuntimeError("启动尚未确认；运行 status 检查，不自动重复启动")
 
 
+def _remove_private_file(path: Path) -> None:
+    if path.exists() or path.is_symlink():
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("私密状态路径必须是普通文件")
+        path.unlink()
+        _fsync_directory(path.parent)
+
+
+def _rotate_private_state(
+    root: Path,
+    expected_instance_id: str,
+    *,
+    failure_stage: str | None = None,
+) -> dict:
+    """Rotate private files and one auth row while the instance is stopped.
+
+    The returned context is private to this process and must never be printed.
+    """
+    marker = root / "private/credential-rotation.in-progress.json"
+    database = root / "storage/jason.db"
+    with instance_lock(root):
+        require_clean(root, read_config(root))
+        if marker.exists() or marker.is_symlink():
+            raise RuntimeError("存在未完成的凭据轮换标记；实例保持停止，请先人工核验")
+        old_config = _read_owner_only_json(root / "private/instance.json", "实例私密配置")
+        _validate_private_credential_fields(old_config, require_all=True)
+        if old_config.get("instanceId") != expected_instance_id:
+            raise ValueError("实例身份不匹配；未轮换任何凭据")
+        old_login = _read_owner_only_json(root / "private/login.json", "本机登录凭据")
+        if set(old_login) != {"username", "password"} or old_login.get("username") != LOCAL_USERNAME \
+                or not isinstance(old_login.get("password"), str) or not old_login["password"]:
+            raise ValueError("本机登录凭据合同无效")
+        session_path = root / "private/session.json"
+        old_session = (
+            _read_owner_only_json(session_path, "本机会话")
+            if session_path.exists() or session_path.is_symlink()
+            else None
+        )
+        if old_session is not None and (
+            set(old_session) != {"token"}
+            or not isinstance(old_session.get("token"), str)
+            or not old_session["token"]
+        ):
+            raise ValueError("本机会话合同无效")
+        if database.is_symlink() or not database.is_file() or database.stat().st_uid != os.getuid():
+            raise ValueError("本机认证数据库必须是当前用户拥有的普通文件")
+
+        new_config = _new_private_credentials(old_config)
+        new_login = _new_local_login()
+        write_json(marker, {
+            "schema": "qingmu.private-credential-rotation-marker.v1",
+            "instanceId": expected_instance_id,
+            "startedAt": utc_timestamp(),
+            "state": "in_progress_stopped",
+        })
+        connection = sqlite3.connect(database, timeout=5, isolation_level=None)
+        committed = False
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            _stage_local_password_hash(connection, new_login["password"])
+            write_json(root / "private/instance.json", new_config)
+            if failure_stage == "after_config":
+                raise RuntimeError("injected rotation failure")
+            write_json(root / "private/login.json", new_login)
+            if failure_stage == "after_login":
+                raise RuntimeError("injected rotation failure")
+            _remove_private_file(session_path)
+            if failure_stage == "after_session":
+                raise RuntimeError("injected rotation failure")
+            connection.commit()
+            committed = True
+        except Exception as exc:
+            if not committed:
+                connection.rollback()
+                try:
+                    write_json(root / "private/instance.json", old_config)
+                    write_json(root / "private/login.json", old_login)
+                    if old_session is not None:
+                        write_json(session_path, old_session)
+                    else:
+                        _remove_private_file(session_path)
+                    _remove_private_file(marker)
+                except Exception as rollback_exc:
+                    raise RuntimeError("凭据轮换失败且回滚一致性未能确认；实例保持停止") from rollback_exc
+                raise RuntimeError("凭据轮换失败；已恢复原一致状态，实例保持停止") from exc
+            raise
+        finally:
+            connection.close()
+        _remove_private_file(marker)
+
+        changed = {
+            name: not secrets.compare_digest(old_config[name], new_config[name])
+            for name in PRIVATE_CREDENTIAL_FIELDS
+        }
+        return {
+            "oldConfig": old_config,
+            "oldLogin": old_login,
+            "oldSession": old_session,
+            "newConfig": new_config,
+            "changed": changed,
+        }
+
+
+def _expect_http_unauthorized(
+    url: str,
+    *,
+    token: str | None = None,
+    payload: dict | None = None,
+) -> bool:
+    try:
+        http(url, token=token, payload=payload)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            return True
+        raise RuntimeError("旧凭据失效核验返回非预期状态") from exc
+    raise RuntimeError("旧凭据仍可用；实例将停止")
+
+
+def _stop_rotated_instance(root: Path, config: dict) -> None:
+    try:
+        control(root, config, "stop")
+    except (FileNotFoundError, ConnectionRefusedError, RuntimeError):
+        return
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            with instance_lock(root):
+                require_clean(root, config)
+            return
+        except RuntimeError:
+            time.sleep(0.05)
+
+
+def rotate_private_credentials(root: Path, expected_instance_id: str) -> dict:
+    """Rotate, rebind, start, invalidate old auth, and log in with new auth."""
+    context = _rotate_private_state(root, expected_instance_id)
+    config = context["newConfig"]
+    old_login = context["oldLogin"]
+    old_session = context["oldSession"]
+    try:
+        manifest = record_build_manifest(root, config)
+        runtime = start(root, config)
+        api_url = runtime.get("apiUrl")
+        if not isinstance(api_url, str) or not api_url.startswith("http://127.0.0.1:"):
+            raise RuntimeError("轮换后 API loopback 身份缺失")
+        old_password_invalid = _expect_http_unauthorized(
+            api_url + "/api/auth/login",
+            payload={"username": LOCAL_USERNAME, "password": old_login["password"]},
+        )
+        old_session_invalid = None
+        if old_session is not None:
+            old_session_invalid = _expect_http_unauthorized(
+                api_url + "/api/auth/me", token=old_session["token"]
+            )
+        logged_in = control(root, config, "login")
+        if (
+            logged_in.get("instanceId") != expected_instance_id
+            or logged_in.get("ready") is not True
+            or logged_in.get("buildManifestMatches") is not True
+            or logged_in.get("session") != "已登录：" + LOCAL_USERNAME
+        ):
+            raise RuntimeError("轮换后新凭据登录或运行身份核验失败")
+    except Exception:
+        _stop_rotated_instance(root, config)
+        raise
+
+    receipt = {
+        "schema": "qingmu.private-credential-rotation-receipt.v1",
+        "instanceId": expected_instance_id,
+        "rotatedAt": utc_timestamp(),
+        "credentialCategories": list(PRIVATE_CREDENTIAL_FIELDS) + ["localLoginPassword", "session"],
+        "credentialFieldsChanged": context["changed"],
+        "allCredentialFieldsChanged": all(context["changed"].values()),
+        "loginPasswordChanged": True,
+        "oldPasswordInvalid": old_password_invalid,
+        "oldSessionWasPresent": old_session is not None,
+        "oldSessionInvalid": old_session_invalid,
+        "newLoginVerified": True,
+        "privateFileModes": {
+            name: format((root / "private" / name).stat().st_mode & 0o777, "04o")
+            for name in ("instance.json", "login.json", "session.json")
+        },
+        "databaseAuthRowsChanged": 1,
+        "businessRowsChangedByRotation": 0,
+        "providerHttpRequests": 0,
+        "paidCny": 0,
+        "buildManifest": {
+            "matches": manifest["matches"],
+            "harnessCommit": manifest["harnessCommit"],
+        },
+        "ready": True,
+    }
+    receipt_path = root / "audit" / (
+        "private-credential-rotation-"
+        + utc_timestamp().replace(":", "").replace("-", "")
+        + "-" + secrets.token_hex(4) + ".json"
+    )
+    write_json(receipt_path, receipt)
+    return {**receipt, "receipt": str(receipt_path)}
+
+
 def backup(root: Path) -> dict:
     """Cold, non-overwriting backup with SQLite integrity and media hashes."""
     with instance_lock(root):
@@ -1378,7 +1664,8 @@ def restore(source: Path, target: Path) -> dict:
     """Restore into an absent directory, never over an active or existing instance."""
     source = source.resolve(strict=True)
     manifest = json.loads((source / "manifest.json").read_text())
-    config = json.loads((source / "private/instance.json").read_text())
+    config = _read_owner_only_json(source / "private/instance.json", "备份实例私密配置")
+    _validate_private_credential_fields(config, require_all=False)
     if config["root"] != manifest["root"] or config["harnessRoot"] != str(HARNESS):
         raise ValueError("备份来源绑定不符")
     actual_files = {
@@ -1402,33 +1689,43 @@ def restore(source: Path, target: Path) -> dict:
             raise ValueError("备份SHA不符；未创建恢复目录")
     if cold_integrity(source / "storage/jason.db") != "ok":
         raise ValueError("备份数据库完整性不符")
+    source_login = _read_owner_only_json(source / "private/login.json", "备份本机登录凭据")
+    if set(source_login) != {"username", "password"} or source_login.get("username") != LOCAL_USERNAME:
+        raise ValueError("备份本机登录凭据合同无效")
     target.mkdir(mode=0o700, parents=False, exist_ok=False)
-    for name in ("storage", "private", "dsh"):
-        shutil.copytree(source / name, target / name, symlinks=True)
-    if (source / "audit").is_dir():
-        shutil.copytree(source / "audit", target / "audit", symlinks=True)
-    else:
-        (target / "audit").mkdir(mode=0o700)
-    if (source / "build-manifest").is_dir():
-        shutil.copytree(source / "build-manifest", target / "build-manifest", symlinks=True)
-    else:
-        (target / "build-manifest").mkdir(mode=0o700)
-    shutil.copy2(source / "identity.json", target / "identity.json")
-    for name in ("logs", "home", "work", "backups"):
-        (target / name).mkdir(mode=0o700)
-    config.update(
-        root=str(target),
-        instanceId=secrets.token_hex(16),
-        controlKey=secrets.token_urlsafe(48),
-        directorExecutionKey=secrets.token_urlsafe(48),
-        editorialHandoffKey=secrets.token_urlsafe(48),
-    )
-    write_json(target / "private/instance.json", config)
-    mark_lifecycle(target, config, "clean")
-    for name in ("session.json", "ports.json", "local.patch.yml"):
-        (target / "private" / name).unlink(missing_ok=True)
-    read_config(target)
+    try:
+        for name in ("storage", "private", "dsh"):
+            shutil.copytree(source / name, target / name, symlinks=True)
+        if (source / "audit").is_dir():
+            shutil.copytree(source / "audit", target / "audit", symlinks=True)
+        else:
+            (target / "audit").mkdir(mode=0o700)
+        if (source / "build-manifest").is_dir():
+            shutil.copytree(source / "build-manifest", target / "build-manifest", symlinks=True)
+        else:
+            (target / "build-manifest").mkdir(mode=0o700)
+        shutil.copy2(source / "identity.json", target / "identity.json")
+        for name in ("logs", "home", "work", "backups"):
+            (target / name).mkdir(mode=0o700)
+        config = _new_private_credentials(config)
+        config.update(root=str(target), instanceId=secrets.token_hex(16))
+        login = _new_local_login()
+        with sqlite3.connect(target / "storage/jason.db") as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            _stage_local_password_hash(connection, login["password"])
+            write_json(target / "private/instance.json", config)
+            write_json(target / "private/login.json", login)
+            connection.commit()
+        mark_lifecycle(target, config, "clean")
+        for name in ("session.json", "ports.json", "local.patch.yml", "credential-rotation.in-progress.json"):
+            _remove_private_file(target / "private" / name)
+        read_config(target)
+    except Exception:
+        shutil.rmtree(target)
+        raise
     return {"restored": str(target), "integrity": "ok", "overwritten": False,
+            "privateCredentialsRekeyed": list(PRIVATE_CREDENTIAL_FIELDS),
+            "localLoginRekeyed": True, "restoredSession": False,
             "buildManifest": build_manifest_status(target, config),
             "message": "恢复到新目录；原实例未改动。先运行 record-build 绑定新实例身份，再 start 和 login。"}
 
@@ -1437,7 +1734,7 @@ def main() -> None:
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["init", "record-build", "start", "status", "stop", "login", "backup", "restore",
-                                            "director-submit-once", "_supervise"])
+                                            "rotate-private-credentials", "director-submit-once", "_supervise"])
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--yimeng-root", type=Path)
     parser.add_argument("--core-root", type=Path)
@@ -1447,6 +1744,7 @@ def main() -> None:
     parser.add_argument("--lock-pack", type=Path)
     parser.add_argument("--lock-sha256")
     parser.add_argument("--execute-production-once")
+    parser.add_argument("--instance-id")
     args = parser.parse_args()
     # Do not resolve an existing root symlink into an unrelated target.
     root = args.root.expanduser().absolute()
@@ -1469,6 +1767,10 @@ def main() -> None:
                 return
             if args.command == "record-build":
                 result = record_build_manifest(root, config)
+            elif args.command == "rotate-private-credentials":
+                if not args.instance_id:
+                    raise ValueError("rotate-private-credentials 必须明确 --instance-id")
+                result = rotate_private_credentials(root, args.instance_id)
             elif args.command == "director-submit-once":
                 if not args.task_id or args.lock_pack is None or not args.lock_sha256:
                     raise ValueError("director-submit-once 必须明确 task-id、lock-pack 与 lock-sha256")
