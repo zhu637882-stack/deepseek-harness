@@ -71,6 +71,7 @@ export type {
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-client-connection'
+import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
@@ -84,6 +85,11 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 import { prepareShotFindingCommand } from './shot-finding.ts'
+import { registerEntityDraftReviewCommands } from './entity-draft-review.ts'
+export {
+  registerEntityDraftReviewCommands,
+  type EntityDraftReviewCommandDependencies,
+} from './entity-draft-review.ts'
 import { prepareTakeVersionCommand } from './take-version.ts'
 import { prepareTakeCommentCommand } from './take-comment.ts'
 import { prepareTakeReviewCommand } from './take-review-authority.ts'
@@ -480,7 +486,7 @@ const SENSITIVE_RESPONSE_KEYS = new Set([
 /** Cordis plugin name. */
 export const name = 'experimental-qingmu-yimeng-command-adapter'
 /** Host Connection must exist before the private command channel is registered. */
-export const inject = ['connection']
+export const inject = ['connection', 'webServer']
 
 /** Deployment-tunable loopback upstream and request deadline. */
 export interface YimengCommandAdapterConfig {
@@ -6127,6 +6133,10 @@ export function createYimengCommandHandler(
 
 /** Register the command adapter on a loopback-only Host Connection channel. */
 export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): void {
+  ctx.effect(() => registerEntityDraftReviewCommands(ctx.webServer, {
+    baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),
+    fetch: globalThis.fetch,
+  }), 'qingmu-yimeng-command: entity draft human review commands')
   const interactiveController = new AbortController()
   const activeInteractiveTasks = new Set<string>()
   const queueDirectorProductionTask = config.directorProductionInteractiveEnabled === true

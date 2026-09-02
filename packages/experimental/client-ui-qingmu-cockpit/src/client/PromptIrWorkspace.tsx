@@ -37,6 +37,7 @@ import css from './QingmuCockpit.module.css'
 import directorCss from './DirectorWorkspace.module.css'
 import { directorBufferKey, readDirectorBuffer, writeDirectorBuffer } from './director-edit-buffer.ts'
 import { hasPromptIrBootstrapFrame, PromptIrBootstrapWorkspace } from './PromptIrBootstrapWorkspace.tsx'
+import { EntityDraftHumanReview } from './EntityDraftHumanReview.tsx'
 import {
   assertProductionTakeResult,
   clearProductionTakeRecoveryMarker,
@@ -1190,6 +1191,15 @@ function ReadyPromptIrWorkspace({
           <div><dt>{t('promptIrContentHash')}</dt><dd>{snapshot?.subject.promptIrContentSha256 ?? active?.promptIrContentSha256 ?? t('unknown')}</dd></div>
         </dl>
       </details>
+
+      {snapshot !== undefined && <EntityDraftHumanReview
+        projectId={active.projectId}
+        episodeId={active.episodeId}
+        storyboardRevisionId={active.storyboardRevisionId}
+        frameId={active.frameId}
+        promptIrId={snapshot.subject.promptIrId}
+        t={t}
+      />}
 
       {!director && <section className={css.commitReceipt} aria-label={t('firstFrameQuoteTitle')}>
         <h4>{t('firstFrameQuoteTitle')}</h4>

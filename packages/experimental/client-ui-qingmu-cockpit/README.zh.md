@@ -2,11 +2,13 @@
 
 [English](README.md) | 中文
 
-这个私有实验性 Client 插件在 Harness 侧边栏中加入青木 OS 制作驾驶舱。它读取易梦投影，并为分集剧本以及人物、环境、道具档案提供严格收口、由人操作的 ChangeSet 流程。它绝不提交付费 Provider 请求，也不记录创意审核决定。
+这个私有实验性 Client 插件在 Harness 侧边栏中加入青木 OS 制作驾驶舱。它读取易梦投影，并为分集剧本以及人物、环境、道具档案提供严格收口、由人操作的 ChangeSet 流程。它绝不提交付费 Provider 请求。专用的 PromptIR 关联实体草稿面板只能通过易梦权威路径记录自然人明确作出的接受或拒绝。
 
 本地 DSh 入口仅在 iframe 携带准确项目与剧集坐标时，才会直接打开导演工作区，并把场景规划绑定到该作用域。坐标缺失或错配会失败关闭；客户端绝不选择首个可用项目或剧集。人工编辑或显式采纳建议完成保存后，必须先通过回执恢复与权威回读，iframe 才会向已校验的回环地址父页面发送 `deepseek.dsh.qingmu-scene-planning-saved.v1`。通知携带准确项目、剧集、场景、镜头、context SHA、回执、定位坐标，以及可选的、受方法证明绑定的采纳证据。稳定 event ID 用于去重；有界、无秘密的 outbox 只会在重载或重启后、当前绑定仍完全一致时重放。外层 Host 负责刷新和定位；这条通道不会绕过既有预览、确认、恢复或人工编辑路径。
 
 ## 投影与 ChangeSet 工作流
+
+只有导演工作区存在唯一精确的当前 Ready PromptIR 时，“剧本与资产”标签才会显示 PromptIR 关联实体草稿审核面板。自然人必须建立近期 Writer cookie 会话，检查绑定的 PromptIR、草稿、元素 profile、已选参考和参考包哈希，再明确确认接受或拒绝。浏览器不发送 actor、审核人、自然人或 session 身份。已完成的决定从易梦回读，并可在 Writer 重启后恢复；它不能批准提示词、媒体、单集、发布、Provider 费用或部署。参见[决策记录](../../../.agents/notes/implemented/feature/2026-09-02-qingmu-prompt-ir-entity-draft-human-review.zh.md)。
 
 导演工作区从已保存剧本中的一场戏开始，提供最多八个可编辑规划镜头。原文保持只读；具名字段、对白分配和明确的影响预览先于真实易梦场景/人物/镜头身份的保存。首个结构 Ready 快照不代表内容批准或可用 PromptIR。结果未知时保留原意图供 GET 恢复；冲突保留输入，初始化竞争须显式载入先保存的版本并留下本地输入副本。已有提示词/Take 工具可折叠，且不丢弃仅在内存中的编辑。详见[单场规划](../../../docs/cookbook/qingmu-local.zh.md#plan-one-scene)。
 
