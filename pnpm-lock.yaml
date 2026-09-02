@@ -4232,6 +4232,18 @@ importers:
         specifier: ^18.2.0
         version: 18.3.1(react@18.3.1)
 
+  packages/experimental/qingmu-creative-skill-catalog:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter':
+        specifier: workspace:^
+        version: link:../qingmu-imago-method-adapter
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+
   packages/experimental/qingmu-imago-method-adapter:
     dependencies:
       '@deepseek-ai/schemastery':

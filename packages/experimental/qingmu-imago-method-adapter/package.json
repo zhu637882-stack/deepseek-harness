@@ -19,6 +19,14 @@
       "types": "./lib/types/types.d.ts",
       "default": "./lib/types/types.js"
     },
+    "./director-assets/assembly": {
+      "types": "./lib/types/director-assets/assembly.d.ts",
+      "default": "./lib/types/director-assets/assembly.js"
+    },
+    "./director-assets/registry": {
+      "types": "./lib/types/director-assets/registry.d.ts",
+      "default": "./lib/types/director-assets/registry.js"
+    },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
