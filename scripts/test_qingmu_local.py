@@ -242,6 +242,12 @@ class OwnershipTests(unittest.TestCase):
                 {config["jwtSecret"], config["attestationKey"], config["controlKey"],
                  config["directorExecutionKey"]},
             )
+            self.assertGreaterEqual(len(config["assetActivationKey"].encode()), 32)
+            self.assertNotIn(
+                config["assetActivationKey"],
+                {config["jwtSecret"], config["attestationKey"], config["controlKey"],
+                 config["directorExecutionKey"], config["editorialHandoffKey"]},
+            )
             self.assertEqual((root / "private/instance.json").stat().st_mode & 0o777, 0o600)
             bridge = root / "dsh/profiles/node_modules/@deepseek-ai/dsh-experimental-qingmu-director-context-bridge"
             self.assertTrue(bridge.is_symlink())
@@ -249,6 +255,18 @@ class OwnershipTests(unittest.TestCase):
                 bridge.resolve(),
                 local.HARNESS / "packages/experimental/qingmu-director-context-bridge",
             )
+
+    def test_api_environment_only_receives_dedicated_asset_activation_control(self):
+        root = Path("/private/qingmu-instance")
+        env = local.backend_env(root, {
+            "yimengRoot": "/private/writer",
+            "controlKey": "supervisor-only",
+            "assetActivationKey": "api-activation-only",
+        })
+        self.assertEqual(env["QINGMU_ASSET_ACTIVATION_SOCKET"], "/private/qingmu-instance/private/asset-activation.sock")
+        self.assertEqual(env["QINGMU_ASSET_ACTIVATION_KEY"], "api-activation-only")
+        self.assertNotIn("controlKey", env)
+        self.assertNotIn("supervisor-only", env.values())
 
     def test_existing_directory_is_never_initialized(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -649,6 +667,22 @@ class OwnershipTests(unittest.TestCase):
             self.assertTrue(all(first["changed"].values()))
             self.assertTrue(all(second["changed"].values()))
 
+    def test_private_rotation_upgrades_legacy_missing_asset_activation_key_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, _config, _login, _session = self.rotation_world(Path(directory))
+            legacy = json.loads((root / "private/instance.json").read_text())
+            legacy.pop("assetActivationKey")
+            local.write_json(root / "private/instance.json", legacy)
+            with patch.object(local, "node20_executable", return_value="/private/node20"):
+                local._rotate_private_state(root, "rotation-instance")
+            upgraded = json.loads((root / "private/instance.json").read_text())
+            self.assertTrue(upgraded["assetActivationKey"])
+            upgraded.pop("jwtSecret")
+            local.write_json(root / "private/instance.json", upgraded)
+            with patch.object(local, "node20_executable", return_value="/private/node20"):
+                with self.assertRaisesRegex(ValueError, "缺少完整"):
+                    local._rotate_private_state(root, "rotation-instance")
+
     def test_private_rotation_runtime_verifies_old_auth_then_new_login_with_safe_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
             root, old_config, old_login, old_session = self.rotation_world(Path(directory))
@@ -878,7 +912,7 @@ class OwnershipTests(unittest.TestCase):
             finally:
                 local.stop_child(child)
 
-    def test_bound_worker_is_paid_but_exactly_project_episode_and_stage_scoped(self):
+    def test_bound_text_worker_is_parent_bound_and_never_uses_all_lane(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)
             root = parent / "instance"
@@ -902,6 +936,8 @@ class OwnershipTests(unittest.TestCase):
                 "maxTasksPerTick": 1,
                 "maxAttempts": 1,
                 "allowExistingProviderPoll": True,
+                "textFoundationParentTaskId": "text-parent-one",
+                "assetReferenceParentTaskId": None,
             }
             supervisor = local.Supervisor(root, {
                 "instanceId": "unit-worker",
@@ -931,7 +967,8 @@ class OwnershipTests(unittest.TestCase):
                     "--lane", "text",
                 ])
                 self.assertIn("--allow-existing-provider-poll", argv)
-                self.assertIn("--text-foundation-provider-children-only", argv)
+                self.assertEqual(argv[argv.index("--allowed-parent-task-id") + 1], "text-parent-one")
+                self.assertNotIn("--asset-reference-batch-only", argv)
                 self.assertEqual(argv[argv.index("--max-tasks") + 1], "1")
                 self.assertEqual(argv[argv.index("--max-attempts") + 1], "1")
                 self.assertEqual(argv[argv.index("--allowed-project-id") + 1], "project-one")
@@ -942,6 +979,304 @@ class OwnershipTests(unittest.TestCase):
                 )
             finally:
                 local.stop_child(child)
+
+    def test_asset_worker_is_exact_parent_bound_and_not_started_without_one(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "instance"
+            writer = parent / "writer"
+            credential_env = parent / "provider.env"
+            for part in ("logs", "home", "work", "dsh", "private", "storage", "audit", "build-manifest"):
+                (root / part).mkdir(parents=True, exist_ok=True)
+            (writer / ".venv/bin").mkdir(parents=True)
+            (writer / ".venv/bin/python").write_text("not executed")
+            credential_env.write_text("DASHSCOPE_API_KEY=not-read-by-this-test\n")
+            credential_env.chmod(0o600)
+            production = {
+                "productionOnly": True, "provider": "dashscope", "projectId": "project-one",
+                "episodeId": "episode-one", "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "allowedStages": list(local.TEXT_FOUNDATION_STAGES),
+                "credentialEnvFile": str(credential_env), "maxTasksPerTick": 1,
+                "maxAttempts": 1, "allowExistingProviderPoll": True,
+                "textFoundationParentTaskId": None,
+                "assetReferenceParentTaskId": "asset-parent-one",
+            }
+            supervisor = local.Supervisor(root, {
+                "instanceId": "unit-asset-worker", "root": str(root), "yimengRoot": str(writer),
+                "textFoundationProductionExecution": production,
+            })
+            child = subprocess.Popen(["/bin/sleep", "30"])
+            try:
+                with patch.object(local, "YIMENG_PROVIDER_ENV_FILE", credential_env), \
+                     patch.object(supervisor, "launch", return_value=child) as launch:
+                    supervisor.start_asset_worker()
+                argv, env, label = launch.call_args.args
+                self.assertEqual(label, "asset-worker")
+                self.assertEqual(argv[:6], [
+                    str(writer / ".venv/bin/python"), "-B", "-m",
+                    "jason.apps.studio.worker_cli", "--lane", "image",
+                ])
+                self.assertIn("--asset-reference-batch-only", argv)
+                self.assertEqual(
+                    argv[argv.index("--allowed-asset-reference-parent-task-id") + 1],
+                    "asset-parent-one",
+                )
+                self.assertNotIn("all", argv)
+                self.assertEqual(env["PROVIDER_PAID_SCOPE_PROJECT_ID"], "project-one")
+                supervisor.config["textFoundationProductionExecution"] = {
+                    **production, "assetReferenceParentTaskId": None,
+                }
+                supervisor.assetWorker = None
+                with patch.object(local, "YIMENG_PROVIDER_ENV_FILE", credential_env):
+                    supervisor.start_asset_worker()
+                self.assertIsNone(supervisor.assetWorker)
+            finally:
+                local.stop_child(child)
+
+    def test_asset_activation_rejects_wrong_parent_scope_without_starting_worker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "instance"
+            writer = parent / "writer"
+            credential_env = parent / "provider.env"
+            for part in ("logs", "home", "work", "dsh", "private", "storage", "audit", "build-manifest"):
+                (root / part).mkdir(parents=True, exist_ok=True)
+            credential_env.write_text("DASHSCOPE_API_KEY=not-read-by-this-test\n")
+            credential_env.chmod(0o600)
+            manifest = [{"role": "actor", "sourceAssetSha256": "a" * 64}]
+            manifest_hash = local.Supervisor._stable_json_sha256(manifest)
+            payload = {
+                "project_id": "project-one", "episode_id": "episode-one", "target_stage": "asset_reference_initial", "manifest": manifest,
+                "source_lock_hash": "e" * 64, "call_plan_hash": manifest_hash,
+            }
+            with sqlite3.connect(root / "storage/jason.db") as connection:
+                connection.execute(
+                    "CREATE TABLE generation_tasks (id TEXT, capability TEXT, route_key TEXT, model TEXT, local_status TEXT, request_payload_json TEXT)"
+                )
+                connection.execute(
+                    "INSERT INTO generation_tasks VALUES (?, ?, ?, ?, ?, ?)",
+                    ("parent-one", "workflow.asset_reference_batch", "pipeline.asset_reference_batch", "asset-reference-batch", "queued", json.dumps(payload)),
+                )
+            production = {
+                "productionOnly": True, "provider": "dashscope", "projectId": "project-one",
+                "episodeId": "episode-one", "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "allowedStages": list(local.TEXT_FOUNDATION_STAGES), "credentialEnvFile": str(credential_env),
+                "maxTasksPerTick": 1, "maxAttempts": 1, "allowExistingProviderPoll": True,
+                "textFoundationParentTaskId": None, "assetReferenceParentTaskId": None,
+            }
+            supervisor = local.Supervisor(root, {
+                "instanceId": "unit-activation", "root": str(root), "yimengRoot": str(writer),
+                "textFoundationProductionExecution": production,
+            })
+            request = {
+                "parentTaskId": "parent-one", "projectId": "wrong-project", "episodeId": "episode-one",
+                "manifestHash": manifest_hash, "callPlanHash": manifest_hash,
+            }
+            with patch.object(local, "YIMENG_PROVIDER_ENV_FILE", credential_env), \
+                 patch.object(supervisor, "start_asset_worker") as start_worker:
+                with self.assertRaisesRegex(ValueError, "范围"):
+                    supervisor.activate_asset_parent(request)
+            start_worker.assert_not_called()
+
+    def test_asset_activation_is_idempotent_and_refuses_different_active_parent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "instance"
+            writer = parent / "writer"
+            credential_env = parent / "provider.env"
+            for part in ("logs", "home", "work", "dsh", "private", "storage", "audit", "build-manifest"):
+                (root / part).mkdir(parents=True, exist_ok=True)
+            credential_env.write_text("DASHSCOPE_API_KEY=not-read-by-this-test\n")
+            credential_env.chmod(0o600)
+            manifest = [{"role": "scene", "sourceAssetSha256": "c" * 64}]
+            manifest_hash = local.Supervisor._stable_json_sha256(manifest)
+            payload = {
+                "project_id": "project-one", "episode_id": "episode-one", "target_stage": "asset_reference_audit", "manifest": manifest,
+                "source_lock_hash": "f" * 64, "call_plan_hash": manifest_hash,
+            }
+            with sqlite3.connect(root / "storage/jason.db") as connection:
+                connection.execute(
+                    "CREATE TABLE generation_tasks (id TEXT, capability TEXT, route_key TEXT, model TEXT, local_status TEXT, request_payload_json TEXT)"
+                )
+                for task_id in ("parent-one", "parent-two"):
+                    connection.execute(
+                        "INSERT INTO generation_tasks VALUES (?, ?, ?, ?, ?, ?)",
+                        (task_id, "workflow.asset_reference_batch", "pipeline.asset_reference_audit_batch", "asset-reference-audit-batch", "queued", json.dumps(payload)),
+                    )
+            production = {
+                "productionOnly": True, "provider": "dashscope", "projectId": "project-one",
+                "episodeId": "episode-one", "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "allowedStages": list(local.TEXT_FOUNDATION_STAGES), "credentialEnvFile": str(credential_env),
+                "maxTasksPerTick": 1, "maxAttempts": 1, "allowExistingProviderPoll": True,
+                "textFoundationParentTaskId": None, "assetReferenceParentTaskId": None,
+            }
+            config = {
+                "instanceId": "unit-activation", "root": str(root), "yimengRoot": str(writer),
+                "textFoundationProductionExecution": production,
+            }
+            supervisor = local.Supervisor(root, config)
+            request = {
+                "parentTaskId": "parent-one", "projectId": "project-one", "episodeId": "episode-one",
+                "manifestHash": manifest_hash, "callPlanHash": manifest_hash,
+            }
+            with patch.object(local, "YIMENG_PROVIDER_ENV_FILE", credential_env), \
+                 patch.object(local, "read_config", return_value=config), \
+                 patch.object(supervisor, "start_asset_worker") as start_worker:
+                first = supervisor.activate_asset_parent(request)
+                second = supervisor.activate_asset_parent(request)
+                with self.assertRaisesRegex(RuntimeError, "不同资产 parent"):
+                    supervisor.activate_asset_parent({**request, "parentTaskId": "parent-two"})
+            self.assertFalse(first["idempotent"])
+            self.assertTrue(second["idempotent"])
+            self.assertEqual(start_worker.call_count, 2)
+            self.assertNotIn("assetActivationKey", json.dumps(first))
+
+    def test_asset_activation_retry_accepts_running_and_terminal_same_parent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "instance"
+            writer = parent / "writer"
+            credential_env = parent / "provider.env"
+            for part in ("logs", "home", "work", "dsh", "private", "storage", "audit", "build-manifest"):
+                (root / part).mkdir(parents=True, exist_ok=True)
+            credential_env.write_text("DASHSCOPE_API_KEY=not-read-by-this-test\n")
+            credential_env.chmod(0o600)
+            manifest = [{"role": "scene", "sourceAssetSha256": "d" * 64}]
+            manifest_hash = local.Supervisor._stable_json_sha256(manifest)
+            payload = {
+                "project_id": "project-one", "episode_id": "episode-one",
+                "target_stage": "asset_reference_initial", "manifest": manifest,
+                "source_lock_hash": "f" * 64, "call_plan_hash": manifest_hash,
+            }
+            with sqlite3.connect(root / "storage/jason.db") as connection:
+                connection.execute(
+                    "CREATE TABLE generation_tasks (id TEXT, capability TEXT, route_key TEXT, model TEXT, local_status TEXT, provider_status TEXT, request_payload_json TEXT)"
+                )
+                connection.execute(
+                    "INSERT INTO generation_tasks VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    ("parent-one", "workflow.asset_reference_batch", "pipeline.asset_reference_batch", "asset-reference-batch", "queued", "QUEUED", json.dumps(payload)),
+                )
+            production = {
+                "productionOnly": True, "provider": "dashscope", "projectId": "project-one",
+                "episodeId": "episode-one", "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "allowedStages": list(local.TEXT_FOUNDATION_STAGES), "credentialEnvFile": str(credential_env),
+                "maxTasksPerTick": 1, "maxAttempts": 1, "allowExistingProviderPoll": True,
+                "textFoundationParentTaskId": None, "assetReferenceParentTaskId": None,
+            }
+            config = {
+                "instanceId": "unit-activation-retry", "root": str(root), "yimengRoot": str(writer),
+                "textFoundationProductionExecution": production,
+            }
+            supervisor = local.Supervisor(root, config)
+            request = {
+                "parentTaskId": "parent-one", "projectId": "project-one", "episodeId": "episode-one",
+                "manifestHash": manifest_hash, "callPlanHash": manifest_hash,
+            }
+            with patch.object(local, "YIMENG_PROVIDER_ENV_FILE", credential_env), \
+                 patch.object(local, "read_config", return_value=config), \
+                 patch.object(supervisor, "start_asset_worker") as start_worker:
+                first = supervisor.activate_asset_parent(request)
+                with sqlite3.connect(root / "storage/jason.db") as connection:
+                    connection.execute(
+                        "UPDATE generation_tasks SET local_status = 'running', provider_status = 'RUNNING' WHERE id = 'parent-one'"
+                    )
+                running_retry = supervisor.activate_asset_parent(request)
+                with sqlite3.connect(root / "storage/jason.db") as connection:
+                    connection.execute(
+                        "UPDATE generation_tasks SET local_status = 'failed', provider_status = 'submission_unknown' WHERE id = 'parent-one'"
+                    )
+                terminal_retry = supervisor.activate_asset_parent(request)
+            self.assertFalse(first["idempotent"])
+            self.assertTrue(running_retry["idempotent"])
+            self.assertTrue(terminal_retry["idempotent"])
+            self.assertEqual(start_worker.call_count, 2)
+            self.assertTrue(supervisor._asset_parent_locally_terminal(
+                local._read_owner_only_json(
+                    root / "private/asset-activation.json", "资产 parent 激活绑定"
+                )
+            ))
+            self.assertFalse(supervisor._asset_parent_terminal_for_rollover(
+                local._read_owner_only_json(
+                    root / "private/asset-activation.json", "资产 parent 激活绑定"
+                )
+            ))
+
+    def test_exited_asset_worker_is_reaped_only_after_bound_parent_terminal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "instance"
+            for part in ("private", "storage"):
+                (root / part).mkdir(parents=True, exist_ok=True)
+            config = {
+                "instanceId": "unit-terminal-reap",
+                "root": str(root),
+            }
+            binding = {
+                "schema": "qingmu.asset-parent-activation.v1",
+                "instanceId": config["instanceId"],
+                "parentTaskId": "parent-one",
+                "projectId": "project-one",
+                "episodeId": "episode-one",
+                "manifestHash": "a" * 64,
+                "callPlanHash": "a" * 64,
+            }
+            local.write_json(root / "private/asset-activation.json", binding)
+            with sqlite3.connect(root / "storage/jason.db") as connection:
+                connection.execute(
+                    "CREATE TABLE generation_tasks "
+                    "(id TEXT, capability TEXT, local_status TEXT)"
+                )
+                connection.execute(
+                    "INSERT INTO generation_tasks VALUES (?, ?, ?)",
+                    ("parent-one", "workflow.asset_reference_batch", "succeeded"),
+                )
+            supervisor = local.Supervisor(root, config)
+            supervisor.assetWorker = subprocess.Popen(
+                ["/usr/bin/true"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            supervisor.assetWorker.wait(timeout=5)
+
+            self.assertTrue(supervisor._reap_terminal_asset_worker())
+            self.assertIsNone(supervisor.assetWorker)
+
+            supervisor.assetWorker = subprocess.Popen(
+                ["/usr/bin/false"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            supervisor.assetWorker.wait(timeout=5)
+            self.assertFalse(supervisor._reap_terminal_asset_worker())
+            self.assertIsNotNone(supervisor.assetWorker)
+
+    def test_asset_activation_rolls_terminal_initial_parent_to_audit_parent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "instance"
+            writer = parent / "writer"
+            credential_env = parent / "provider.env"
+            for part in ("logs", "home", "work", "dsh", "private", "storage", "audit", "build-manifest"):
+                (root / part).mkdir(parents=True, exist_ok=True)
+            credential_env.write_text("DASHSCOPE_API_KEY=not-read-by-this-test\n")
+            credential_env.chmod(0o600)
+            manifest = [{"role": "actor", "sourceAssetSha256": "a" * 64}]
+            manifest_hash = local.Supervisor._stable_json_sha256(manifest)
+            initial = {"project_id": "project-one", "episode_id": "episode-one", "target_stage": "asset_reference_initial", "manifest": manifest, "source_lock_hash": "e" * 64, "call_plan_hash": manifest_hash}
+            audit = {**initial, "target_stage": "asset_reference_audit"}
+            with sqlite3.connect(root / "storage/jason.db") as connection:
+                connection.execute("CREATE TABLE generation_tasks (id TEXT, capability TEXT, route_key TEXT, model TEXT, local_status TEXT, provider_status TEXT, request_payload_json TEXT)")
+                connection.execute("INSERT INTO generation_tasks VALUES (?, ?, ?, ?, ?, ?, ?)", ("initial-parent", "workflow.asset_reference_batch", "pipeline.asset_reference_batch", "asset-reference-batch", "succeeded", "SUCCEEDED", json.dumps(initial)))
+                connection.execute("INSERT INTO generation_tasks VALUES (?, ?, ?, ?, ?, ?, ?)", ("audit-parent", "workflow.asset_reference_batch", "pipeline.asset_reference_audit_batch", "asset-reference-audit-batch", "queued", "QUEUED", json.dumps(audit)))
+            production = {"productionOnly": True, "provider": "dashscope", "projectId": "project-one", "episodeId": "episode-one", "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY, "allowedStages": list(local.TEXT_FOUNDATION_STAGES), "credentialEnvFile": str(credential_env), "maxTasksPerTick": 1, "maxAttempts": 1, "allowExistingProviderPoll": True, "textFoundationParentTaskId": None, "assetReferenceParentTaskId": "initial-parent"}
+            config = {"instanceId": "unit-rollover", "root": str(root), "yimengRoot": str(writer), "textFoundationProductionExecution": production}
+            local.write_json(root / "private/asset-activation.json", {"schema": "qingmu.asset-parent-activation.v1", "instanceId": "unit-rollover", "parentTaskId": "initial-parent", "projectId": "project-one", "episodeId": "episode-one", "manifestHash": manifest_hash, "callPlanHash": manifest_hash})
+            supervisor = local.Supervisor(root, config)
+            request = {"parentTaskId": "audit-parent", "projectId": "project-one", "episodeId": "episode-one", "manifestHash": manifest_hash, "callPlanHash": manifest_hash}
+            with patch.object(local, "YIMENG_PROVIDER_ENV_FILE", credential_env), patch.object(local, "read_config", return_value=config), patch.object(supervisor, "start_asset_worker") as start_worker:
+                result = supervisor.activate_asset_parent(request)
+            self.assertEqual(result["parentTaskId"], "audit-parent")
+            self.assertFalse(result["idempotent"])
+            self.assertEqual(start_worker.call_count, 1)
 
     def test_bind_project_runtime_writes_only_scoped_authority_and_audit(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -997,6 +1332,8 @@ class OwnershipTests(unittest.TestCase):
             probe.assert_called_once()
             saved = json.loads((root / "private/instance.json").read_text())
             self.assertEqual(saved["textFoundationProductionExecution"]["projectId"], "project-one")
+            self.assertIsNone(saved["textFoundationProductionExecution"]["textFoundationParentTaskId"])
+            self.assertIsNone(saved["textFoundationProductionExecution"]["assetReferenceParentTaskId"])
             self.assertEqual(saved["directorProductionExecution"]["episodeId"], "episode-one")
             self.assertNotIn("apiKey", json.dumps(saved))
             self.assertEqual(receipt["providerHttpRequests"], 0)
@@ -1097,6 +1434,7 @@ class OwnershipTests(unittest.TestCase):
                 "instanceId": "source-instance", "controlKey": "control",
                 "directorExecutionKey": "director", "jwtSecret": "jwt",
                 "attestationKey": "attestation", "editorialHandoffKey": "editorial",
+                "assetActivationKey": "asset-activation",
                 "frontendNode": "/private/node20",
             }
             login = {"username": local.LOCAL_USERNAME, "password": local.secrets.token_urlsafe(32)}
@@ -1329,7 +1667,10 @@ class OwnershipTests(unittest.TestCase):
             intent_path = root / "private/crash-recovery.json"
             self.assertTrue(intent_path.is_file())
             intent = json.loads(intent_path.read_text())
-            self.assertEqual(intent["recordedPids"], pids)
+            self.assertEqual(intent["recordedPids"], {
+                **pids,
+                "assetWorkerPid": None,
+            })
             self.assertEqual(
                 json.loads((root / "private/lifecycle.json").read_text())["state"],
                 "dirty",

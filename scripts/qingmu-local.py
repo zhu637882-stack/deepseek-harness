@@ -21,6 +21,7 @@ import shutil
 import signal
 import socket
 import sqlite3
+import select
 import subprocess
 import sys
 import time
@@ -47,7 +48,7 @@ TEXT_FOUNDATION_STAGES = (
 BUILD_MANIFEST_SCHEMA = "qingmu.local-build-manifest.v1"
 PROCESS_LEDGER_SCHEMA = "qingmu.local-process-ledger.v1"
 CRASH_RECOVERY_SCHEMA = "qingmu.local-crash-recovery.v2"
-OWNED_PROCESS_ROLES = ("api", "worker", "host", "frontend")
+OWNED_PROCESS_ROLES = ("api", "worker", "assetWorker", "host", "frontend")
 BUILD_MANIFEST_ARTIFACTS = (
     "apps/cli/lib/bin.js",
     "packages/experimental/qingmu-yimeng-command-adapter/lib/index.js",
@@ -65,6 +66,7 @@ PRIVATE_CREDENTIAL_FIELDS = (
     "controlKey",
     "directorExecutionKey",
     "editorialHandoffKey",
+    "assetActivationKey",
 )
 PRIVATE_FIELD_MARKERS = (
     "secret", "token", "password", "credential", "signature", "hmac",
@@ -107,7 +109,9 @@ def _read_owner_only_json(path: Path, label: str) -> dict:
     return value
 
 
-def _validate_private_credential_fields(config: dict, *, require_all: bool) -> None:
+def _validate_private_credential_fields(
+    config: dict, *, require_all: bool, allow_legacy_asset_activation_key: bool = False
+) -> None:
     """Fail closed on unknown top-level credential fields."""
     for name in config:
         normalized = "".join(character for character in name.lower() if character.isalnum())
@@ -116,9 +120,13 @@ def _validate_private_credential_fields(config: dict, *, require_all: bool) -> N
             or any(marker in normalized for marker in PRIVATE_FIELD_MARKERS)
         ):
             raise ValueError("实例配置含未知私密字段；需先显式纳入轮换策略")
+    required_fields = tuple(
+        name for name in PRIVATE_CREDENTIAL_FIELDS
+        if not (allow_legacy_asset_activation_key and name == "assetActivationKey")
+    )
     if require_all and any(
         not isinstance(config.get(name), str) or not config[name]
-        for name in PRIVATE_CREDENTIAL_FIELDS
+        for name in required_fields
     ):
         raise ValueError("实例缺少完整的本机认证、签名或控制凭据")
 
@@ -201,7 +209,14 @@ def backend_command(config: dict) -> list[str]:
 
 
 def backend_env(root: Path, config: dict) -> dict[str, str]:
-    return {**safe_env(root), "PYTHONPATH": str(Path(config["yimengRoot"]) / "backend/src")}
+    env = {**safe_env(root), "PYTHONPATH": str(Path(config["yimengRoot"]) / "backend/src")}
+    # This is intentionally not the supervisor control key and is the only
+    # launch-control credential made available to the API process.
+    activation_key = str(config.get("assetActivationKey") or "")
+    if activation_key:
+        env["QINGMU_ASSET_ACTIVATION_SOCKET"] = str(root / "private/asset-activation.sock")
+        env["QINGMU_ASSET_ACTIVATION_KEY"] = activation_key
+    return env
 
 
 def node20_executable(explicit: Path | None = None) -> str:
@@ -433,7 +448,8 @@ def initialize(
               "frontendNode": node20_executable(frontend_node),
               "attestationKey": secrets.token_urlsafe(48), "controlKey": secrets.token_urlsafe(48),
               "directorExecutionKey": secrets.token_urlsafe(48),
-              "editorialHandoffKey": secrets.token_urlsafe(48)}
+              "editorialHandoffKey": secrets.token_urlsafe(48),
+              "assetActivationKey": secrets.token_urlsafe(48)}
     write_json(root / "private/instance.json", config)
     write_json(root / "private/login.json", _new_local_login())
     write_json(root / "dsh/profiles/qingmu/package.json", {
@@ -632,7 +648,12 @@ def validate_text_foundation_production_config(value: object) -> dict | None:
         "maxAttempts",
         "allowExistingProviderPoll",
     }
-    if set(value) != required:
+    optional_lineage_fields = {
+        "textFoundationParentTaskId",
+        "assetReferenceParentTaskId",
+    }
+    keys = set(value)
+    if keys != required and keys != required | optional_lineage_fields:
         raise ValueError("易梦文本 production 配置无效")
     if (
         value["productionOnly"] is not True
@@ -647,6 +668,13 @@ def validate_text_foundation_production_config(value: object) -> dict | None:
         or value["maxTasksPerTick"] != 1
         or value["maxAttempts"] != 1
         or value["allowExistingProviderPoll"] is not True
+        or any(
+            item is not None and (not isinstance(item, str) or not item.strip())
+            for item in (
+                value.get("textFoundationParentTaskId"),
+                value.get("assetReferenceParentTaskId"),
+            )
+        )
     ):
         raise ValueError("易梦文本 production 配置无效")
     return value
@@ -681,11 +709,13 @@ def write_stopped_runtime(root: Path, config: dict) -> None:
             "supervisorPid": None,
             "apiPid": None,
             "workerPid": None,
+            "assetWorkerPid": None,
             "hostPid": None,
             "frontendPid": None,
             **coordinates,
             "apiProcessAlive": False,
             "workerProcessAlive": False,
+            "assetWorkerProcessAlive": False,
             "hostProcessAlive": False,
             "frontendProcessAlive": False,
             "apiIdentityAndStorageVerified": False,
@@ -746,16 +776,15 @@ def _validate_recorded_pids(value: dict, *, allow_empty_children: bool) -> dict:
         "supervisorPid",
         "apiPid",
         "workerPid",
+        "assetWorkerPid",
         "hostPid",
         "frontendPid",
     )
     recorded = {name: value.get(name) for name in fields}
     for name, pid in recorded.items():
-        if (
-            allow_empty_children
-            and name != "supervisorPid"
-            and pid is None
-        ):
+        if name == "assetWorkerPid" and pid is None:
+            continue
+        if allow_empty_children and name != "supervisorPid" and pid is None:
             continue
         if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
             raise RuntimeError("崩溃恢复缺少有效的历史进程标识")
@@ -1072,6 +1101,7 @@ class Supervisor:
         self.root, self.config = root, config
         self.api: subprocess.Popen | None = None
         self.worker: subprocess.Popen | None = None
+        self.assetWorker: subprocess.Popen | None = None
         self.host: subprocess.Popen | None = None
         self.frontend: subprocess.Popen | None = None
         self.stopping = False
@@ -1352,21 +1382,9 @@ class Supervisor:
         )
         self.wait_ready(self.frontend, self.frontend_healthy)
 
-    def start_worker(self) -> None:
-        """Start the local text-foundation lane against this instance only.
-
-        The ordinary API wrapper applies its environment inside its own Python
-        process.  A separately spawned Worker therefore needs the same explicit
-        database/storage binding, rather than inheriting a developer shell or
-        the API process environment.  Without an explicit production binding it
-        publishes liveness only.  With one, it is restricted to the bound
-        project, episode and five confirmed text-foundation stages.
-        """
-        writer = Path(self.config["yimengRoot"])
-        production = validate_text_foundation_production_config(
-            self.config.get("textFoundationProductionExecution")
-        )
-        env = {
+    def _worker_environment(self, writer: Path, production: dict | None) -> dict:
+        """Return a credential-scrubbed environment for one bounded Worker."""
+        return {
             **safe_env(self.root),
             "PYTHONPATH": str(writer / "backend/src"),
             "JASON_PROJECT_ROOT": str(self.root),
@@ -1384,9 +1402,6 @@ class Supervisor:
             "PUBLIC_REGISTRATION_ENABLED": "false",
             "ALLOW_PAID": "true" if production else "false",
             "MAX_PAID_CNY": str(production["maxPaidCny"] if production else 0),
-            # The Qingmu instance owns a fresh, isolated lifetime ledger.  Do
-            # not inherit an unrelated Yimeng operations-window baseline from
-            # the credential-only env file.
             "PROVIDER_BUDGET_BASELINE_CNY": "0",
             "PROVIDER_BUDGET_WINDOW_ID": "",
             "PROVIDER_PAID_SCOPE_REQUIRED": "true",
@@ -1395,6 +1410,24 @@ class Supervisor:
             "BUILD_MANIFEST_DIR": str(self.root / "build-manifest"),
             "OPERATOR_AUDIT_DIR": str(self.root / "audit"),
         }
+
+    def start_worker(self) -> None:
+        """Start only the exact bound text-foundation parent, or a safe heartbeat.
+
+        The ordinary API wrapper applies its environment inside its own Python
+        process.  A separately spawned Worker therefore needs the same explicit
+        database/storage binding, rather than inheriting a developer shell or
+        the API process environment.  A project/episode scope alone is never
+        Provider authority: this Worker receives one currently confirmed parent
+        id.  A missing id leaves the process in no-credential heartbeat mode.
+        """
+        writer = Path(self.config["yimengRoot"])
+        production = validate_text_foundation_production_config(
+            self.config.get("textFoundationProductionExecution")
+        )
+        parent_id = str((production or {}).get("textFoundationParentTaskId") or "").strip()
+        active_production = production if parent_id else None
+        env = self._worker_environment(writer, active_production)
         command = [
             str(writer / ".venv/bin/python"),
             "-B",
@@ -1403,7 +1436,7 @@ class Supervisor:
             "--lane",
             "text",
         ]
-        if production:
+        if active_production:
             _private_regular_file(Path(production["credentialEnvFile"]))
             command.extend([
                 "--max-tasks",
@@ -1411,7 +1444,8 @@ class Supervisor:
                 "--max-attempts",
                 str(production["maxAttempts"]),
                 "--allow-existing-provider-poll",
-                "--text-foundation-provider-children-only",
+                "--allowed-parent-task-id",
+                parent_id,
                 "--allowed-project-id",
                 production["projectId"],
                 "--allowed-episode-id",
@@ -1431,9 +1465,254 @@ class Supervisor:
         if self.worker.poll() is not None:
             raise RuntimeError("本机文本 Worker 启动即退出；查看本实例 logs/worker.log")
 
+    @staticmethod
+    def _stable_json_sha256(value: object) -> str:
+        return hashlib.sha256(
+            json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+    def _asset_activation_binding_path(self) -> Path:
+        return self.root / "private/asset-activation.json"
+
+    def _validate_asset_parent_activation(
+        self,
+        request: dict,
+        *,
+        allowed_local_statuses: frozenset[str] = frozenset({"queued"}),
+    ) -> dict:
+        """Validate one API-requested parent against this instance database.
+
+        The supervisor owns this check because the API must never receive the
+        control key or a Provider credential.  A parent is usable only while
+        its immutable request payload still agrees with the activation call.
+        """
+        production = validate_text_foundation_production_config(
+            self.config.get("textFoundationProductionExecution")
+        )
+        if production is None:
+            raise ValueError("本机未绑定文本/资产运行范围")
+        task_id = str(request.get("parentTaskId") or "").strip()
+        project_id = str(request.get("projectId") or "").strip()
+        episode_id = str(request.get("episodeId") or "").strip()
+        manifest_hash = str(request.get("manifestHash") or "").strip()
+        call_plan_hash = str(request.get("callPlanHash") or "").strip()
+        if (
+            not task_id
+            or len(manifest_hash) != 64
+            or len(call_plan_hash) != 64
+            or any(item != item.lower() or any(c not in "0123456789abcdef" for c in item)
+                   for item in (manifest_hash, call_plan_hash))
+            or project_id != production["projectId"]
+            or episode_id != production["episodeId"]
+        ):
+            raise ValueError("资产 parent 激活范围或哈希无效")
+        database = self.root / "storage/jason.db"
+        with sqlite3.connect(database) as connection:
+            row = connection.execute(
+                "SELECT capability, route_key, model, local_status, request_payload_json "
+                "FROM generation_tasks WHERE id = ?",
+                (task_id,),
+            ).fetchone()
+        if (
+            row is None
+            or row[0] != "workflow.asset_reference_batch"
+            or str(row[3] or "").strip().lower() not in allowed_local_statuses
+        ):
+            raise ValueError("资产 parent 不存在、能力不符或状态不可激活")
+        try:
+            payload = json.loads(row[4])
+            manifest = payload["manifest"]
+        except (TypeError, ValueError, KeyError) as exc:
+            raise ValueError("资产 parent 请求载荷无效") from exc
+        target_stage = str(payload.get("target_stage") or "")
+        expected_route_model = {
+            "asset_reference_initial": (
+                "pipeline.asset_reference_batch", "asset-reference-batch"
+            ),
+            "asset_reference_audit": (
+                "pipeline.asset_reference_audit_batch", "asset-reference-audit-batch"
+            ),
+        }.get(target_stage)
+        if (
+            expected_route_model is None
+            or (row[1], row[2]) != expected_route_model
+            or not isinstance(manifest, list)
+            or str(payload.get("project_id") or "") != project_id
+            or str(payload.get("episode_id") or "") != episode_id
+            or str(payload.get("call_plan_hash") or "") != call_plan_hash
+            or call_plan_hash != manifest_hash
+            or self._stable_json_sha256(manifest) != manifest_hash
+        ):
+            raise ValueError("资产 parent 清单或调用计划已漂移")
+        return {
+            "schema": "qingmu.asset-parent-activation.v1",
+            "instanceId": self.config["instanceId"],
+            "parentTaskId": task_id,
+            "projectId": project_id,
+            "episodeId": episode_id,
+            "manifestHash": manifest_hash,
+            "callPlanHash": call_plan_hash,
+        }
+
+    def _read_asset_activation_binding(self) -> dict | None:
+        path = self._asset_activation_binding_path()
+        if not path.exists():
+            return None
+        binding = _read_owner_only_json(path, "资产 parent 激活绑定")
+        if (
+            binding.get("schema") != "qingmu.asset-parent-activation.v1"
+            or binding.get("instanceId") != self.config["instanceId"]
+        ):
+            raise RuntimeError("资产 parent 激活绑定无效")
+        return binding
+
+    def _asset_parent_terminal_for_rollover(self, binding: dict) -> bool:
+        """Return whether one persisted parent can no longer dispatch work."""
+        with sqlite3.connect(self.root / "storage/jason.db") as connection:
+            try:
+                row = connection.execute(
+                    "SELECT capability, local_status, provider_status, request_payload_json "
+                    "FROM generation_tasks WHERE id = ?",
+                    (binding["parentTaskId"],),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                return False
+        if row is None or row[0] != "workflow.asset_reference_batch":
+            return False
+        try:
+            payload = json.loads(row[3])
+        except (TypeError, ValueError):
+            return False
+        return (
+            str(row[1]).lower() in {"succeeded", "failed", "blocked", "cancelled"}
+            and str(row[2] or "").lower() not in {"unknown", "submission_unknown"}
+            and str(payload.get("project_id") or "") == binding["projectId"]
+            and str(payload.get("episode_id") or "") == binding["episodeId"]
+        )
+
+    def _asset_parent_locally_terminal(self, binding: dict) -> bool:
+        """Return whether the bound parent needs no Worker, including unknown outcomes."""
+        try:
+            with sqlite3.connect(self.root / "storage/jason.db") as connection:
+                row = connection.execute(
+                    "SELECT capability, local_status FROM generation_tasks WHERE id = ?",
+                    (binding["parentTaskId"],),
+                ).fetchone()
+        except (KeyError, sqlite3.OperationalError):
+            return False
+        return bool(
+            row is not None
+            and row[0] == "workflow.asset_reference_batch"
+            and str(row[1] or "").strip().lower()
+            in {"succeeded", "failed", "blocked", "cancelled", "canceled"}
+        )
+
+    def _reap_terminal_asset_worker(self) -> bool:
+        """Forget an exited exact-parent Worker only after its parent is terminal."""
+        child = self.assetWorker
+        return_code = None if child is None else child.poll()
+        if child is None or return_code is None or return_code != 0:
+            return False
+        binding = self._read_asset_activation_binding()
+        if binding is None or not self._asset_parent_locally_terminal(binding):
+            return False
+        self.stop_owned("assetWorker")
+        return True
+
+    def activate_asset_parent(self, request: dict) -> dict:
+        """Persist and run precisely one confirmed asset-reference parent."""
+        existing = self._read_asset_activation_binding()
+        same_parent = bool(
+            existing is not None
+            and existing.get("parentTaskId") == str(request.get("parentTaskId") or "").strip()
+        )
+        allowed_statuses = (
+            frozenset({"queued", "running", "succeeded", "failed", "blocked", "cancelled", "canceled"})
+            if same_parent
+            else frozenset({"queued"})
+        )
+        expected = self._validate_asset_parent_activation(
+            request, allowed_local_statuses=allowed_statuses
+        )
+        if existing is not None and existing["parentTaskId"] != expected["parentTaskId"]:
+            if not self._asset_parent_terminal_for_rollover(existing):
+                raise RuntimeError("已有不同资产 parent 尚未终态；拒绝替换")
+            if self.assetWorker is not None and self.assetWorker.poll() is None:
+                self.stop_owned("assetWorker")
+        if existing is not None and existing != expected:
+            if existing["parentTaskId"] == expected["parentTaskId"]:
+                raise RuntimeError("已有资产 parent 激活绑定与当前清单不符")
+        if same_parent and self._asset_parent_locally_terminal(existing):
+            return {
+                "instanceId": self.config["instanceId"],
+                "parentTaskId": expected["parentTaskId"],
+                "activated": True,
+                "idempotent": True,
+            }
+        if existing is None or existing["parentTaskId"] != expected["parentTaskId"]:
+            write_json(self._asset_activation_binding_path(), expected)
+            execution = dict(self.config.get("textFoundationProductionExecution") or {})
+            execution["assetReferenceParentTaskId"] = expected["parentTaskId"]
+            updated = dict(self.config)
+            updated["textFoundationProductionExecution"] = execution
+            write_json(self.root / "private/instance.json", updated)
+            self.config = read_config(self.root)
+        if self.assetWorker is None or self.assetWorker.poll() is not None:
+            self.start_asset_worker()
+        return {
+            "instanceId": self.config["instanceId"],
+            "parentTaskId": expected["parentTaskId"],
+            "activated": True,
+            "idempotent": existing is not None and existing["parentTaskId"] == expected["parentTaskId"],
+        }
+
+    def start_asset_worker(self) -> None:
+        """Start only the exact bound asset-reference parent; never scan a scope."""
+        writer = Path(self.config["yimengRoot"])
+        production = validate_text_foundation_production_config(
+            self.config.get("textFoundationProductionExecution")
+        )
+        parent_id = str((production or {}).get("assetReferenceParentTaskId") or "").strip()
+        if not parent_id:
+            self.assetWorker = None
+            return
+        binding = self._read_asset_activation_binding()
+        if binding is None and self.config.get("assetActivationKey"):
+            raise RuntimeError("资产 Worker 缺少精确 parent 激活绑定")
+        if binding is not None:
+            if binding.get("parentTaskId") != parent_id:
+                raise RuntimeError("资产 Worker parent 激活绑定不匹配")
+            if self._asset_parent_locally_terminal(binding):
+                self.assetWorker = None
+                return
+            self._validate_asset_parent_activation(
+                binding, allowed_local_statuses=frozenset({"queued", "running"})
+            )
+        _private_regular_file(Path(production["credentialEnvFile"]))
+        command = [
+            str(writer / ".venv/bin/python"), "-B", "-m",
+            "jason.apps.studio.worker_cli", "--lane", "image",
+            "--asset-reference-batch-only",
+            "--allowed-asset-reference-parent-task-id", parent_id,
+            "--max-tasks", str(production["maxTasksPerTick"]),
+            "--max-attempts", str(production["maxAttempts"]),
+            "--allow-existing-provider-poll",
+            "--allowed-project-id", production["projectId"],
+            "--allowed-episode-id", production["episodeId"],
+            "--disable-durable-director-orchestration",
+        ]
+        self.assetWorker = self.launch_owned(
+            "assetWorker", command, self._worker_environment(writer, production), "asset-worker"
+        )
+        if self.assetWorker.poll() is not None:
+            raise RuntimeError("本机资产 Worker 启动即退出；查看本实例 logs/asset-worker.log")
+
     def status(self) -> dict:
         api_alive = self.api is not None and self.api.poll() is None
         worker_alive = self.worker is not None and self.worker.poll() is None
+        binding = self._read_asset_activation_binding()
+        asset_worker_required = bool(binding) and not self._asset_parent_locally_terminal(binding)
+        asset_worker_alive = self.assetWorker is not None and self.assetWorker.poll() is None
         host_alive = self.host is not None and self.host.poll() is None
         frontend_alive = self.frontend is not None and self.frontend.poll() is None
         api_verified = host_verified = frontend_verified = False
@@ -1460,16 +1739,21 @@ class Supervisor:
         return {"instanceId": self.config["instanceId"], "root": str(self.root),
                 "supervisorPid": os.getpid(), "apiPid": self.api.pid if self.api else None,
                 "workerPid": self.worker.pid if self.worker else None,
+                "assetWorkerPid": self.assetWorker.pid if self.assetWorker else None,
                 "hostPid": self.host.pid if self.host else None, **self.ports,
                 "frontendPid": self.frontend.pid if self.frontend else None,
                 "apiProcessAlive": api_alive, "workerProcessAlive": worker_alive,
+                "assetWorkerProcessAlive": asset_worker_alive,
                 "hostProcessAlive": host_alive,
                 "frontendProcessAlive": frontend_alive,
                 "apiIdentityAndStorageVerified": api_verified, "hostListenerAndHttpVerified": host_verified,
                 "frontendListenerAndHttpVerified": frontend_verified,
                 "buildManifest": manifest,
                 "buildManifestMatches": manifest["matches"],
-                "ready": bool(api_verified and worker_alive and host_verified and frontend_verified and manifest["matches"]),
+                "ready": bool(
+                    api_verified and worker_alive and (not asset_worker_required or asset_worker_alive)
+                    and host_verified and frontend_verified and manifest["matches"]
+                ),
                 "session": session}
 
     def login(self) -> dict:
@@ -1494,14 +1778,21 @@ class Supervisor:
         with instance_lock(self.root):
             require_clean(self.root, self.config)
             control_path = self.root / "control.sock"
+            activation_path = self.root / "private/asset-activation.sock"
             # The lock proves no live supervisor owns this exact socket.
             if control_path.exists() or control_path.is_symlink():
                 control_path.unlink()
-            with socket.socket(socket.AF_UNIX) as server:
+            if activation_path.exists() or activation_path.is_symlink():
+                activation_path.unlink()
+            with socket.socket(socket.AF_UNIX) as server, socket.socket(socket.AF_UNIX) as activation_server:
                 server.bind(str(control_path))
                 os.chmod(control_path, 0o600)
                 server.listen(4)
                 server.settimeout(0.5)
+                activation_server.bind(str(activation_path))
+                os.chmod(activation_path, 0o600)
+                activation_server.listen(2)
+                activation_server.settimeout(0.5)
                 try:
                     # A free flock does not prove orphaned children have exited.
                     # Persist before any spawn; only owned Popen waits clear it.
@@ -1531,20 +1822,22 @@ class Supervisor:
                     )
                     self.wait_ready(self.api, self.api_identity)
                     self.start_worker()
+                    self.start_asset_worker()
                     self.start_host()
                     self.start_frontend()
                     write_json(self.root / "runtime.json", self.status())
                     while not self.stopping:
+                        self._reap_terminal_asset_worker()
                         if any(
-                            getattr(self, role) is None
-                            or getattr(self, role).poll() is not None
-                            for role in OWNED_PROCESS_ROLES
-                        ):
+                            getattr(self, role) is None or getattr(self, role).poll() is not None
+                            for role in ("api", "worker", "host", "frontend")
+                        ) or (self.assetWorker is not None and self.assetWorker.poll() is not None):
                             raise RuntimeError("本实例子进程退出，正在清理其余自有子进程")
-                        try:
-                            client, _ = server.accept()
-                        except socket.timeout:
+                        readable, _, _ = select.select((server, activation_server), (), (), 0.5)
+                        if not readable:
                             continue
+                        listener = readable[0]
+                        client, _ = listener.accept()
                         with client:
                             client.settimeout(3)
                             try:
@@ -1555,14 +1848,24 @@ class Supervisor:
                                         raise ValueError("控制请求不完整")
                                     data += part
                                 request = json.loads(data)
-                                if not secrets.compare_digest(str(request.get("key", "")), self.config["controlKey"]):
+                                if listener is activation_server:
+                                    activation_key = str(self.config.get("assetActivationKey") or "")
+                                    if not activation_key or not secrets.compare_digest(
+                                        str(request.get("key", "")), activation_key
+                                    ):
+                                        raise ValueError("资产激活身份不符")
+                                    if request.get("op") != "activate_asset_parent":
+                                        raise ValueError("未知资产激活操作")
+                                    result = {"ok": True, **self.activate_asset_parent(request)}
+                                elif not secrets.compare_digest(str(request.get("key", "")), self.config["controlKey"]):
                                     raise ValueError("控制身份不符")
-                                if request["op"] == "login":
+                                elif request["op"] == "login":
                                     result = self.login()
                                 elif request["op"] == "stop":
                                     self.stopping = True
                                     self.stop_owned("frontend")
                                     self.stop_owned("host")
+                                    self.stop_owned("assetWorker")
                                     self.stop_owned("worker")
                                     self.stop_owned("api")
                                     result = {"stopped": True, "instanceId": self.config["instanceId"], "dataPreserved": True}
@@ -1571,7 +1874,11 @@ class Supervisor:
                                 else:
                                     raise ValueError("未知控制操作")
                             except Exception as exc:
-                                result = {"error": str(exc), "instanceId": self.config["instanceId"]}
+                                result = {
+                                    "ok": False,
+                                    "error": str(exc),
+                                    "instanceId": self.config["instanceId"],
+                                }
                             try:
                                 client.sendall(json.dumps(result, ensure_ascii=False).encode() + b"\n")
                             except OSError:
@@ -1585,6 +1892,7 @@ class Supervisor:
                         write_stopped_runtime(self.root, self.config)
                         mark_lifecycle(self.root, self.config, "clean")
                         control_path.unlink(missing_ok=True)
+                        activation_path.unlink(missing_ok=True)
                     finally:
                         for log in self.logs:
                             log.close()
@@ -1654,7 +1962,9 @@ def _rotate_private_state(
         if marker.exists() or marker.is_symlink():
             raise RuntimeError("存在未完成的凭据轮换标记；实例保持停止，请先人工核验")
         old_config = _read_owner_only_json(root / "private/instance.json", "实例私密配置")
-        _validate_private_credential_fields(old_config, require_all=True)
+        _validate_private_credential_fields(
+            old_config, require_all=True, allow_legacy_asset_activation_key=True
+        )
         if old_config.get("instanceId") != expected_instance_id:
             raise ValueError("实例身份不匹配；未轮换任何凭据")
         old_login = _read_owner_only_json(root / "private/login.json", "本机登录凭据")
@@ -1720,7 +2030,7 @@ def _rotate_private_state(
         _remove_private_file(marker)
 
         changed = {
-            name: not secrets.compare_digest(old_config[name], new_config[name])
+            name: name not in old_config or not secrets.compare_digest(old_config[name], new_config[name])
             for name in PRIVATE_CREDENTIAL_FIELDS
         }
         return {
@@ -2046,6 +2356,8 @@ def bind_project_runtime(
     project_id: str,
     episode_id: str,
     max_paid_cny: float,
+    text_foundation_parent_task_id: str | None = None,
+    asset_reference_parent_task_id: str | None = None,
 ) -> dict:
     """Bind the stopped local instance to one Yimeng + DSh production scope.
 
@@ -2058,6 +2370,10 @@ def bind_project_runtime(
         or not project_id.strip()
         or not episode_id.strip()
         or max_paid_cny != QINGMU_LOCAL_REMAINING_PAID_CNY
+        or any(
+            item is not None and not item.strip()
+            for item in (text_foundation_parent_task_id, asset_reference_parent_task_id)
+        )
     ):
         raise ValueError("本机运行绑定参数不匹配；未修改配置")
     with instance_lock(root):
@@ -2090,6 +2406,8 @@ def bind_project_runtime(
             "maxTasksPerTick": 1,
             "maxAttempts": 1,
             "allowExistingProviderPoll": True,
+            "textFoundationParentTaskId": text_foundation_parent_task_id or None,
+            "assetReferenceParentTaskId": asset_reference_parent_task_id or None,
         }
         director_execution = {
             "productionOnly": True,
@@ -2136,7 +2454,12 @@ def bind_project_runtime(
                 "maxPaidCny": QINGMU_LOCAL_REMAINING_PAID_CNY,
                 "maxTasksPerTick": 1,
                 "maxAttempts": 1,
+                "parentTaskId": text_foundation_parent_task_id or None,
                 "credentialAvailable": True,
+            },
+            "assetReference": {
+                "parentTaskId": asset_reference_parent_task_id or None,
+                "automaticScopeScan": False,
             },
             "director": {
                 "provider": credential["provider"],
@@ -2523,6 +2846,8 @@ def main() -> None:
     parser.add_argument("--project-id")
     parser.add_argument("--episode-id")
     parser.add_argument("--max-paid-cny", type=float)
+    parser.add_argument("--text-foundation-parent-task-id")
+    parser.add_argument("--asset-reference-parent-task-id")
     args = parser.parse_args()
     # Do not resolve an existing root symlink into an unrelated target.
     root = args.root.expanduser().absolute()
@@ -2566,6 +2891,8 @@ def main() -> None:
                     project_id=args.project_id,
                     episode_id=args.episode_id,
                     max_paid_cny=args.max_paid_cny,
+                    text_foundation_parent_task_id=args.text_foundation_parent_task_id,
+                    asset_reference_parent_task_id=args.asset_reference_parent_task_id,
                 )
             elif args.command == "recover-crash":
                 if not args.instance_id:
