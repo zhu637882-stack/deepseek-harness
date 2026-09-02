@@ -10,11 +10,11 @@ Status: implemented
 
 ## 决策
 
-浏览器只发送准确项目、剧集、故事板、镜头、Take 类型/编号和明确 Ready 确认。它绝不发送 owner、Ready、选择、批准、force、Provider、模型、路由、凭据、证明材料或 Writer 血缘。
+浏览器只发送准确项目、剧集、故事板、镜头、Take 类型/编号、明确 Ready 确认、人工首帧选择回执以及已报价的视频上限字段。它绝不发送 owner、Ready、批准、force、Provider、模型、路由、凭据、证明材料或 Writer 血缘。
 
-Host 重读当前 Ready PromptIR 与首帧报价，用 Ready 五字段基线加上合法的 `videoGenPrompt` 无变化 candidate 调用当前 PromptIR 方法，并且只接受已签名的 `qingmu.imago-prompt-ir-method-adapter-result.v1` 投影。Host 验证投影摘要与 HMAC、准确 D/E 字段顺序、独立阶段合同、导演卡及来源绑定、字段提示、空 warnings 和零执行边界。任何漂移都会在请求 Writer 前失败关闭。
+Host 重读当前 Ready PromptIR、首帧报价和四坐标 Writer 视频报价，用 Ready 五字段基线加上合法的 `videoGenPrompt` 无变化 candidate 调用当前 PromptIR 方法，并且只接受已签名的 `qingmu.imago-prompt-ir-method-adapter-result.v1` 投影。Host 验证投影摘要与 HMAC、准确 D/E 字段顺序、独立阶段合同、导演卡及来源绑定、字段提示、空 warnings 和零执行边界。视频报价必须已就绪、只保留操作人确认阻塞、准确匹配每个报价 SHA 与上限，且服务端原文确认文字必须和浏览器回显相同。任何漂移都会在请求 Writer 前失败关闭。
 
-随后 Host 才组装 Writer 的准确九字段请求。一个确定性幂等键绑定项目、剧集、镜头与 Take 编号。双击、丢响应、浏览器刷新或 Writer 服务重启后的重放因此仍是同一语义命令；Host 也只接受全部匹配的服务端回执。Take 1 是 `initial`，Take 2 是 `targeted_rework`；界面保持 Take 3 不可用，而伪造的 Take 3 意图会到达 Writer，使持久上限继续作为最终拒绝权威。
+随后 Host 才组装 Writer 请求，其中包含所选资产及其物化字节 SHA、选择回执 SHA、视频预检/投影 SHA、一次候选、一次尝试、非正式选择及服务端原文确认。一个确定性幂等键绑定项目、剧集、镜头与 Take 编号。双击、丢响应、浏览器刷新或 Writer 服务重启后的重放因此仍是同一语义命令；Host 也只接受选择、报价、上限、确认文字 SHA、PromptIR 与参考血缘均匹配的服务端回执。Take 1 是 `initial`，Take 2 是 `targeted_rework`；界面保持 Take 3 不可用，而伪造的 Take 3 意图会到达 Writer，使持久上限继续作为最终拒绝权威。
 
 界面在请求前保存有界、无秘密的恢复标记，成功后保存通过校验的 Writer 回执。排队任务只标为“已排队”，绝不写成“已生成”。生产链失败时，五字段人工导演编辑仍可使用。
 

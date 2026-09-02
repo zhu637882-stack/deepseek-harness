@@ -12,6 +12,9 @@ import type {
 
 const INTENT_FIELDS = [
   'projectId', 'episodeId', 'storyboardRevisionId', 'frameId', 'takeKind', 'takeOrdinal', 'confirmReady',
+  'firstFrameSelectionReceiptSha256', 'selectedFirstFrameAssetId', 'selectedFirstFrameMaterializedSha256',
+  'videoPreflightSha256', 'videoQuoteProjectionSha256', 'maximumReservationCny', 'candidateCount', 'maxAttempts',
+  'selectAsOfficial', 'paidConfirmed', 'paidConfirmationText',
 ] as const
 const EDITABLE_FIELDS = [
   'imageGenPrompt', 'lastFrameImagePrompt', 'videoGenPrompt', 'motionPrompt', 'negativePrompt',
@@ -84,7 +87,10 @@ const METHOD_ATTESTATION_FIELDS = [
 ] as const
 const RECEIPT_FIELDS = [
   'schema', 'projectId', 'episodeId', 'sceneId', 'shotId', 'storyboardRevisionId', 'promptIr',
-  'authoritySnapshotSha256', 'firstFrameQuoteProjectionSha256', 'referenceBindings', 'takeKind',
+  'authoritySnapshotSha256', 'firstFrameQuoteProjectionSha256', 'firstFrameSelectionReceiptSha256',
+  'selectedFirstFrameAssetId', 'selectedFirstFrameMaterializedSha256', 'videoPreflightSha256',
+  'videoQuoteProjectionSha256', 'maximumReservationCny', 'candidateCount', 'maxAttempts', 'selectAsOfficial',
+  'paidConfirmed', 'paidConfirmationTextSha256', 'referenceBindings', 'takeKind',
   'takeOrdinal', 'takeLimit', 'taskId', 'taskStatus', 'requestIdempotencyKey', 'idempotencyKey',
   'deduplicated', 'recovered', 'queued',
 ] as const
@@ -166,6 +172,14 @@ function boolean(value: unknown, field: string, error: ErrorFactory): boolean {
   return value
 }
 
+function nonEmptyTextArray(value: unknown, field: string, helpers: ProductionTakeHelpers): boolean {
+  if (!Array.isArray(value) || value.length === 0) return false
+  value.forEach((item, index) => {
+    text(item, `${field}[${String(index)}]`, helpers.responseError, 1_000)
+  })
+  return true
+}
+
 /**
  * Parse the complete browser intent. It contains no authority, readiness, Provider, or routing fields.
  * @param value - Untrusted browser payload.
@@ -189,6 +203,11 @@ export function parseQueueProductionTakeIntent(
   if (item.confirmReady !== true) {
     throw helpers.inputError('productionTakeIntent.confirmReady must be true')
   }
+  if (item.candidateCount !== 1 || item.maxAttempts !== 1 || item.selectAsOfficial !== false || item.paidConfirmed !== true
+    || typeof item.maximumReservationCny !== 'number' || !Number.isFinite(item.maximumReservationCny)
+    || item.maximumReservationCny < 0 || item.maximumReservationCny > 1_000) {
+    throw helpers.inputError('productionTakeIntent video quote confirmation invalid')
+  }
   return {
     projectId: text(item.projectId, 'productionTakeIntent.projectId', helpers.inputError),
     episodeId: text(item.episodeId, 'productionTakeIntent.episodeId', helpers.inputError),
@@ -199,6 +218,13 @@ export function parseQueueProductionTakeIntent(
     takeKind: takeKind as 'initial' | 'targeted_rework',
     takeOrdinal,
     confirmReady: true,
+    firstFrameSelectionReceiptSha256: sha(item.firstFrameSelectionReceiptSha256, 'productionTakeIntent.selectionReceipt', helpers.inputError),
+    selectedFirstFrameAssetId: text(item.selectedFirstFrameAssetId, 'productionTakeIntent.selectedFirstFrameAssetId', helpers.inputError),
+    selectedFirstFrameMaterializedSha256: sha(item.selectedFirstFrameMaterializedSha256, 'productionTakeIntent.selectedFirstFrameMaterializedSha256', helpers.inputError),
+    videoPreflightSha256: sha(item.videoPreflightSha256, 'productionTakeIntent.videoPreflightSha256', helpers.inputError),
+    videoQuoteProjectionSha256: sha(item.videoQuoteProjectionSha256, 'productionTakeIntent.videoQuoteProjectionSha256', helpers.inputError),
+    maximumReservationCny: item.maximumReservationCny, candidateCount: 1, maxAttempts: 1, selectAsOfficial: false,
+    paidConfirmed: true, paidConfirmationText: text(item.paidConfirmationText, 'productionTakeIntent.paidConfirmationText', helpers.inputError, 256),
   }
 }
 
@@ -429,16 +455,8 @@ function verifyMethod(
     || !isDeepStrictEqual(workOrder.allowed_mutations, [])
     || !isDeepStrictEqual(workOrder.editable_fields, EDITABLE_FIELDS)
     || !isDeepStrictEqual(workOrder.required_read_set, expectedReadSet)
-    || !Array.isArray(workOrder.before_compile) || workOrder.before_compile.length === 0
-    || !workOrder.before_compile.every((item, index) => {
-      text(item, `currentPromptIrMethod.workOrder.before[${String(index)}]`, helpers.responseError, 1_000)
-      return true
-    })
-    || !Array.isArray(workOrder.after_compile) || workOrder.after_compile.length === 0
-    || !workOrder.after_compile.every((item, index) => {
-      text(item, `currentPromptIrMethod.workOrder.after[${String(index)}]`, helpers.responseError, 1_000)
-      return true
-    })
+    || !nonEmptyTextArray(workOrder.before_compile, 'currentPromptIrMethod.workOrder.before', helpers)
+    || !nonEmptyTextArray(workOrder.after_compile, 'currentPromptIrMethod.workOrder.after', helpers)
     || workOrder.providerCalls !== 0 || workOrder.workerStarted !== false || workOrder.maximumCostCny !== '0') {
     throw helpers.responseError('current PromptIR Method work-order boundary mismatch')
   }
@@ -518,11 +536,50 @@ function currentQuote(
   }
 }
 
+function currentVideoQuote(
+  value: unknown,
+  intent: YimengQueueProductionTakeIntent,
+  helpers: ProductionTakeHelpers,
+) {
+  const quote = exact(value, [
+    'schema', 'preflightSha256', 'projectionSha256', 'maximumReservationCny', 'candidateCount', 'maxAttempts',
+    'selectAsOfficial', 'quoteReady', 'dispatchReady', 'quoteBlockers', 'dispatchBlockers',
+    'requiredPaidConfirmationText', 'requiredPaidConfirmationTextSha256',
+  ], 'currentVideoQuote', helpers.responseError)
+  const quoteBlockers = quote.quoteBlockers
+  const dispatchBlockers = quote.dispatchBlockers
+  if (quote.schema !== 'jason.qingmu-writer-video-quote.v1'
+    || quote.preflightSha256 !== intent.videoPreflightSha256
+    || quote.projectionSha256 !== intent.videoQuoteProjectionSha256
+    || quote.maximumReservationCny !== intent.maximumReservationCny
+    || quote.candidateCount !== 1 || quote.maxAttempts !== 1 || quote.selectAsOfficial !== false
+    || quote.quoteReady !== true || quote.dispatchReady !== false
+    || !Array.isArray(quoteBlockers) || !isDeepStrictEqual(quoteBlockers, [])
+    || !Array.isArray(dispatchBlockers) || !isDeepStrictEqual(dispatchBlockers, ['operator_paid_confirmation_required'])
+    || typeof quote.requiredPaidConfirmationText !== 'string'
+    || quote.requiredPaidConfirmationText !== intent.paidConfirmationText
+    || digest(quote.requiredPaidConfirmationText, helpers, 'currentVideoQuote.requiredPaidConfirmationText')
+      !== sha(quote.requiredPaidConfirmationTextSha256, 'currentVideoQuote.requiredPaidConfirmationTextSha256', helpers.responseError)) {
+    throw helpers.responseError('current video quote authority mismatch')
+  }
+  return {
+    preflightSha256: intent.videoPreflightSha256,
+    projectionSha256: intent.videoQuoteProjectionSha256,
+    maximumReservationCny: intent.maximumReservationCny,
+    paidConfirmationTextSha256: sha(
+      quote.requiredPaidConfirmationTextSha256,
+      'currentVideoQuote.requiredPaidConfirmationTextSha256',
+      helpers.responseError,
+    ),
+  }
+}
+
 function normalizeReceipt(
   value: unknown,
   intent: YimengQueueProductionTakeIntent,
   promptIr: ReturnType<typeof currentPromptIr>,
   quote: ReturnType<typeof currentQuote>,
+  videoQuote: ReturnType<typeof currentVideoQuote>,
   body: YimengCommandJsonObject,
   helpers: ProductionTakeHelpers,
 ): YimengProductionTakeReceipt {
@@ -538,12 +595,30 @@ function normalizeReceipt(
     || boundPrompt.contentSha256 !== promptIr.contentSha256
     || receipt.authoritySnapshotSha256 !== quote.authoritySnapshotSha256
     || receipt.firstFrameQuoteProjectionSha256 !== quote.projectionSha256
+    || receipt.firstFrameSelectionReceiptSha256 !== intent.firstFrameSelectionReceiptSha256
+    || receipt.selectedFirstFrameAssetId !== intent.selectedFirstFrameAssetId
+    || receipt.selectedFirstFrameMaterializedSha256 !== intent.selectedFirstFrameMaterializedSha256
+    || receipt.videoPreflightSha256 !== videoQuote.preflightSha256
+    || receipt.videoQuoteProjectionSha256 !== videoQuote.projectionSha256
+    || receipt.maximumReservationCny !== videoQuote.maximumReservationCny
+    || receipt.candidateCount !== 1 || receipt.maxAttempts !== 1 || receipt.selectAsOfficial !== false
+    || receipt.paidConfirmed !== true || receipt.paidConfirmationTextSha256 !== videoQuote.paidConfirmationTextSha256
     || !isDeepStrictEqual(receipt.referenceBindings, body.referenceBindings)) {
     throw helpers.responseError('Writer production-Take receipt lineage mismatch')
   }
   sha(boundPrompt.videoPromptSha256, 'productionTakeReceipt.videoPromptSha256', helpers.responseError)
   sha(receipt.authoritySnapshotSha256, 'productionTakeReceipt.authoritySnapshotSha256', helpers.responseError)
   sha(receipt.firstFrameQuoteProjectionSha256, 'productionTakeReceipt.quoteProjectionSha256', helpers.responseError)
+  sha(receipt.firstFrameSelectionReceiptSha256, 'productionTakeReceipt.selectionReceiptSha256', helpers.responseError)
+  text(receipt.selectedFirstFrameAssetId, 'productionTakeReceipt.selectedFirstFrameAssetId', helpers.responseError)
+  sha(receipt.selectedFirstFrameMaterializedSha256, 'productionTakeReceipt.selectedFirstFrameMaterializedSha256', helpers.responseError)
+  sha(receipt.videoPreflightSha256, 'productionTakeReceipt.videoPreflightSha256', helpers.responseError)
+  sha(receipt.videoQuoteProjectionSha256, 'productionTakeReceipt.videoQuoteProjectionSha256', helpers.responseError)
+  if (typeof receipt.maximumReservationCny !== 'number' || !Number.isFinite(receipt.maximumReservationCny)
+    || receipt.maximumReservationCny < 0 || receipt.maximumReservationCny > 1_000) {
+    throw helpers.responseError('Writer production-Take receipt maximum reservation invalid')
+  }
+  sha(receipt.paidConfirmationTextSha256, 'productionTakeReceipt.paidConfirmationTextSha256', helpers.responseError)
   text(receipt.taskId, 'productionTakeReceipt.taskId', helpers.responseError, 512)
   text(receipt.taskStatus, 'productionTakeReceipt.taskStatus', helpers.responseError, 128)
   text(receipt.idempotencyKey, 'productionTakeReceipt.idempotencyKey', helpers.responseError, 200)
@@ -595,6 +670,11 @@ export async function prepareProductionTakeCommand(
   }, signal)
   if (!quoteResult.ok) throw helpers.responseError('current first-frame authority is unavailable')
   const quote = currentQuote(quoteResult.value, intent, promptIr, helpers)
+  const videoQuoteResult = await dependencies.readYimeng('videoQuote', {
+    projectId: intent.projectId, episodeId: intent.episodeId, sceneId: quote.sceneId, shotId: intent.frameId,
+  }, signal)
+  if (!videoQuoteResult.ok) throw helpers.responseError('current video quote is unavailable')
+  const videoQuote = currentVideoQuote(videoQuoteResult.value, intent, helpers)
   const requestIdempotencyKey = `qwb-ui-v1-${createHash('sha256').update(helpers.canonicalJson({
     projectId: intent.projectId, episodeId: intent.episodeId, frameId: intent.frameId,
     takeOrdinal: intent.takeOrdinal,
@@ -608,6 +688,17 @@ export async function prepareProductionTakeCommand(
     authoritySnapshotSha256: quote.authoritySnapshotSha256,
     firstFrameQuoteProjectionSha256: quote.projectionSha256,
     referenceBindings: quote.referenceBindings,
+    firstFrameSelectionReceiptSha256: intent.firstFrameSelectionReceiptSha256,
+    selectedFirstFrameAssetId: intent.selectedFirstFrameAssetId,
+    selectedFirstFrameMaterializedSha256: intent.selectedFirstFrameMaterializedSha256,
+    videoPreflightSha256: intent.videoPreflightSha256,
+    videoQuoteProjectionSha256: intent.videoQuoteProjectionSha256,
+    maximumReservationCny: intent.maximumReservationCny,
+    candidateCount: 1,
+    maxAttempts: 1,
+    selectAsOfficial: false,
+    paidConfirmed: true,
+    paidConfirmationText: intent.paidConfirmationText,
     idempotencyKey: requestIdempotencyKey,
   }
   return {
@@ -617,7 +708,7 @@ export async function prepareProductionTakeCommand(
     idempotencyKey: requestIdempotencyKey,
     normalize: (value): YimengProductionTakeResult => ({
       schema: 'qingmu.production-take-host-result.v1', method,
-      receipt: normalizeReceipt(value, intent, promptIr, quote, body, helpers),
+      receipt: normalizeReceipt(value, intent, promptIr, quote, videoQuote, body, helpers),
       providerCalls: 0, workerStarted: false, maximumCostCny: '0',
     }),
   }

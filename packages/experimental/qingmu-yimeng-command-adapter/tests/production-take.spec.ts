@@ -11,6 +11,11 @@ const SHA = (character: string): string => character.repeat(64)
 const INTENT = {
   projectId: 'project-1', episodeId: 'episode-1', storyboardRevisionId: 'revision-1', frameId: 'shot-1',
   takeKind: 'initial', takeOrdinal: 1, confirmReady: true,
+  firstFrameSelectionReceiptSha256: SHA('d'), selectedFirstFrameAssetId: 'asset-first-frame-1',
+  selectedFirstFrameMaterializedSha256: SHA('e'), videoPreflightSha256: SHA('f'),
+  videoQuoteProjectionSha256: SHA('0'), maximumReservationCny: 0.3,
+  candidateCount: 1, maxAttempts: 1, selectAsOfficial: false, paidConfirmed: true,
+  paidConfirmationText: '我确认本次镜头视频生成最高费用为 0.3000 CNY。',
 } as const
 const EDITABLE = {
   imageGenPrompt: '雨夜街口，锁定人物造型。', lastFrameImagePrompt: '人物停在门前。',
@@ -203,28 +208,53 @@ function quote() {
   }
 }
 
+function videoQuote() {
+  const requiredPaidConfirmationText = INTENT.paidConfirmationText
+  return {
+    schema: 'jason.qingmu-writer-video-quote.v1', preflightSha256: INTENT.videoPreflightSha256,
+    projectionSha256: INTENT.videoQuoteProjectionSha256, maximumReservationCny: INTENT.maximumReservationCny,
+    candidateCount: 1, maxAttempts: 1, selectAsOfficial: false, quoteReady: true, dispatchReady: false,
+    quoteBlockers: [], dispatchBlockers: ['operator_paid_confirmation_required'], requiredPaidConfirmationText,
+    requiredPaidConfirmationTextSha256: digest(requiredPaidConfirmationText),
+  }
+}
+
 function receipt(key: string, deduplicated = false) {
   return {
     schema: 'jason.qingmu-writer-production-take.v1', projectId: INTENT.projectId, episodeId: INTENT.episodeId,
     sceneId: 'scene-1', shotId: INTENT.frameId, storyboardRevisionId: INTENT.storyboardRevisionId,
     promptIr: { id: 'prompt-ir-7', version: 7, contentSha256: SHA('b'), videoPromptSha256: SHA('c') },
     authoritySnapshotSha256: SHA('a'), firstFrameQuoteProjectionSha256: SHA('b'), referenceBindings: quote().authoritySnapshot.references,
+    firstFrameSelectionReceiptSha256: INTENT.firstFrameSelectionReceiptSha256,
+    selectedFirstFrameAssetId: INTENT.selectedFirstFrameAssetId,
+    selectedFirstFrameMaterializedSha256: INTENT.selectedFirstFrameMaterializedSha256,
+    videoPreflightSha256: INTENT.videoPreflightSha256, videoQuoteProjectionSha256: INTENT.videoQuoteProjectionSha256,
+    maximumReservationCny: INTENT.maximumReservationCny, candidateCount: 1, maxAttempts: 1, selectAsOfficial: false,
+    paidConfirmed: true, paidConfirmationTextSha256: digest(INTENT.paidConfirmationText),
     takeKind: 'initial', takeOrdinal: 1, takeLimit: 2, taskId: 'task-1', taskStatus: 'queued',
     requestIdempotencyKey: key, idempotencyKey: 'writer-take-1', deduplicated, recovered: deduplicated, queued: true,
   }
 }
 
-function dependencies(overrides: { method?: ReturnType<typeof methodResult>; quote?: ReturnType<typeof quote> } = {}) {
-  const readYimeng = vi.fn(async (endpoint: string) => ({ ok: true as const, value: endpoint === 'promptIr' ? promptIr() : (overrides.quote ?? quote()) }))
+function dependencies(overrides: {
+  method?: ReturnType<typeof methodResult>
+  quote?: ReturnType<typeof quote>
+  videoQuote?: ReturnType<typeof videoQuote>
+} = {}) {
+  const readYimeng = vi.fn(async (endpoint: string) => ({
+    ok: true as const,
+    value: endpoint === 'promptIr' ? promptIr() : endpoint === 'firstFrameQuote'
+      ? (overrides.quote ?? quote()) : (overrides.videoQuote ?? videoQuote()),
+  }))
   const runPromptIrMethod = vi.fn(async () => ({ ok: true as const, value: overrides.method ?? methodResult() }))
   return { readYimeng, runPromptIrMethod }
 }
 
 describe('production Take Host bridge', () => {
-  it('re-reads current authority and maps browser intent to the exact nine-field Writer request', async () => {
+  it('re-reads selected first-frame and current video quote authority before mapping the exact Writer request', async () => {
     const deps = dependencies()
     const prepared = await prepareProductionTakeCommand(INTENT, deps, helpers, new AbortController().signal)
-    expect(deps.readYimeng.mock.calls.map(call => call[0])).toEqual(['promptIr', 'firstFrameQuote'])
+    expect(deps.readYimeng.mock.calls.map(call => call[0])).toEqual(['promptIr', 'firstFrameQuote', 'videoQuote'])
     expect(deps.runPromptIrMethod).toHaveBeenCalledWith({
       projectId: INTENT.projectId,
       episodeId: INTENT.episodeId,
@@ -240,12 +270,23 @@ describe('production Take Host bridge', () => {
     expect(Object.keys(prepared.body).sort()).toEqual([
       'authoritySnapshotSha256', 'firstFrameQuoteProjectionSha256', 'idempotencyKey', 'promptIrContentSha256',
       'promptIrId', 'promptIrVersion', 'referenceBindings', 'storyboardRevisionId', 'takeKind',
+      'firstFrameSelectionReceiptSha256', 'selectedFirstFrameAssetId', 'selectedFirstFrameMaterializedSha256',
+      'videoPreflightSha256', 'videoQuoteProjectionSha256', 'maximumReservationCny', 'candidateCount', 'maxAttempts',
+      'selectAsOfficial', 'paidConfirmed', 'paidConfirmationText',
     ].sort())
     expect(prepared.path).toBe('/api/qingmu/projects/project-1/episodes/episode-1/scenes/scene-1/shots/shot-1/production-takes')
     expect(prepared.body).not.toHaveProperty('ownerId')
     expect(prepared.body).not.toHaveProperty('ready')
     expect(prepared.body).not.toHaveProperty('provider')
     expect(prepared.body).not.toHaveProperty('model')
+    expect(prepared.body).toMatchObject({
+      firstFrameSelectionReceiptSha256: INTENT.firstFrameSelectionReceiptSha256,
+      selectedFirstFrameAssetId: INTENT.selectedFirstFrameAssetId,
+      selectedFirstFrameMaterializedSha256: INTENT.selectedFirstFrameMaterializedSha256,
+      videoPreflightSha256: INTENT.videoPreflightSha256, videoQuoteProjectionSha256: INTENT.videoQuoteProjectionSha256,
+      maximumReservationCny: INTENT.maximumReservationCny, candidateCount: 1, maxAttempts: 1, selectAsOfficial: false,
+      paidConfirmed: true, paidConfirmationText: INTENT.paidConfirmationText,
+    })
     const normalized = prepared.normalize(receipt(prepared.idempotencyKey))
     expect(normalized).toMatchObject({ providerCalls: 0, workerStarted: false, maximumCostCny: '0', receipt: { queued: true } })
     expect(JSON.stringify(normalized)).not.toMatch(/"(?:provider|model|routeKey|secret)"/u)
@@ -256,6 +297,42 @@ describe('production Take Host bridge', () => {
     const afterRestart = await prepareProductionTakeCommand(structuredClone(INTENT), dependencies(), helpers, new AbortController().signal)
     expect(afterRestart.idempotencyKey).toBe(first.idempotencyKey)
     expect(afterRestart.normalize(receipt(first.idempotencyKey, true)).receipt).toMatchObject({ deduplicated: true, recovered: true })
+  })
+
+  it.each([
+    ['missing selection receipt', (() => { const { firstFrameSelectionReceiptSha256: _value, ...value } = INTENT; return value })()],
+    ['forged paid flag', { ...INTENT, paidConfirmed: false }],
+    ['wrong candidate count', { ...INTENT, candidateCount: 2 }],
+    ['noncanonical confirmation', { ...INTENT, paidConfirmationText: ' 我确认费用。' }],
+  ])('rejects an incomplete or forged browser %s', (_name, value) => {
+    expect(() => parseQueueProductionTakeIntent(value, helpers))
+      .toThrow(/(?:invalid fields|video quote confirmation invalid|paidConfirmationText)/u)
+  })
+
+  it.each([
+    ['selected first-frame receipt', (value: ReturnType<typeof receipt>) => { value.firstFrameSelectionReceiptSha256 = SHA('1') }],
+    ['selected first-frame asset', (value: ReturnType<typeof receipt>) => { value.selectedFirstFrameAssetId = 'asset-forged' }],
+    ['selected first-frame bytes', (value: ReturnType<typeof receipt>) => { value.selectedFirstFrameMaterializedSha256 = SHA('1') }],
+    ['video preflight', (value: ReturnType<typeof receipt>) => { value.videoPreflightSha256 = SHA('1') }],
+    ['video quote', (value: ReturnType<typeof receipt>) => { value.videoQuoteProjectionSha256 = SHA('1') }],
+    ['maximum reservation', (value: ReturnType<typeof receipt>) => { value.maximumReservationCny = 0.31 }],
+    ['paid confirmation digest', (value: ReturnType<typeof receipt>) => { value.paidConfirmationTextSha256 = SHA('1') }],
+  ])('rejects a recovered receipt with a forged %s binding', async (_name, mutate) => {
+    const prepared = await prepareProductionTakeCommand(INTENT, dependencies(), helpers, new AbortController().signal)
+    const forged = receipt(prepared.idempotencyKey, true)
+    mutate(forged)
+    expect(() => prepared.normalize(forged)).toThrow(/receipt lineage mismatch/u)
+  })
+
+  it.each([
+    ['confirmation text', (value: ReturnType<typeof videoQuote>) => { value.requiredPaidConfirmationText = '客户端伪造确认。' }],
+    ['confirmation digest', (value: ReturnType<typeof videoQuote>) => { value.requiredPaidConfirmationTextSha256 = SHA('1') }],
+    ['extra dispatch blocker', (value: ReturnType<typeof videoQuote>) => { value.dispatchBlockers.push('budget_blocked') }],
+  ])('rejects a stale or forged current video quote %s before POST', async (_name, mutate) => {
+    const forged = videoQuote()
+    mutate(forged)
+    await expect(prepareProductionTakeCommand(INTENT, dependencies({ videoQuote: forged }), helpers, new AbortController().signal))
+      .rejects.toThrow(/video quote authority mismatch/u)
   })
 
   it('rejects browser authority fields and tampered E1-B attestations before Writer', async () => {

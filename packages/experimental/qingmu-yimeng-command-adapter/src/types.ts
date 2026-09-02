@@ -41,6 +41,17 @@ export interface YimengQueueProductionTakeIntent {
   readonly takeOrdinal: 1 | 2 | 3
   /** Explicit user confirmation; this is intent only and never substitutes for Writer authority. */
   readonly confirmReady: true
+  readonly firstFrameSelectionReceiptSha256: string
+  readonly selectedFirstFrameAssetId: string
+  readonly selectedFirstFrameMaterializedSha256: string
+  readonly videoPreflightSha256: string
+  readonly videoQuoteProjectionSha256: string
+  readonly maximumReservationCny: number
+  readonly candidateCount: 1
+  readonly maxAttempts: 1
+  readonly selectAsOfficial: false
+  readonly paidConfirmed: true
+  readonly paidConfirmationText: string
 }
 
 /** SHA-only method evidence returned to the browser; no Provider route or credential is exposed. */
@@ -73,6 +84,17 @@ export interface YimengProductionTakeReceipt extends YimengCommandJsonObject {
   }
   readonly authoritySnapshotSha256: string
   readonly firstFrameQuoteProjectionSha256: string
+  readonly firstFrameSelectionReceiptSha256: string
+  readonly selectedFirstFrameAssetId: string
+  readonly selectedFirstFrameMaterializedSha256: string
+  readonly videoPreflightSha256: string
+  readonly videoQuoteProjectionSha256: string
+  readonly maximumReservationCny: number
+  readonly candidateCount: 1
+  readonly maxAttempts: 1
+  readonly selectAsOfficial: false
+  readonly paidConfirmed: true
+  readonly paidConfirmationTextSha256: string
   readonly referenceBindings: readonly YimengCommandJsonObject[]
   readonly takeKind: 'initial' | 'targeted_rework'
   readonly takeOrdinal: 1 | 2

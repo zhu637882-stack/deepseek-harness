@@ -809,7 +809,8 @@ describe('qingmu Yimeng read adapter', () => {
       _options: ConnectionRpcHandlerOptions,
     ) => async () => {})
     const provide = vi.fn()
-    const ctx = { provide, connection: { rpc: { handle } } } as unknown as Context
+    const effect = vi.fn()
+    const ctx = { provide, effect, connection: { rpc: { handle } } } as unknown as Context
 
     apply(ctx)
 
@@ -833,6 +834,7 @@ describe('qingmu Yimeng read adapter', () => {
       ['promptIr', {
         projectId: 'project-1', episodeId: 'episode-1', storyboardRevisionId: 'storyboard-1', frameId: 'frame-1',
       }],
+      ['videoQuote', { projectId: 'project-1', episodeId: 'episode-1', sceneId: 'scene-1', shotId: 'shot-1' }],
       ['workflow', { projectId: 'project-1', episodeId: 'episode-1' }],
       ['elementProfile', { projectId: 'project-1', elementKind: 'prop', targetId: 'prop-1' }],
       ['referenceCandidates', { projectId: 'project-1', elementKind: 'prop', targetId: 'prop-1' }],
@@ -848,6 +850,33 @@ describe('qingmu Yimeng read adapter', () => {
       })
     }
     expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('reads a four-coordinate video quote and rejects confirmation or field tampering', async () => {
+    const request = { projectId: 'project-1', episodeId: 'episode-1', sceneId: 'scene-1', shotId: 'shot-1' }
+    const requiredPaidConfirmationText = '我确认本次镜头视频生成最高费用为 0.3000 CNY。'
+    const response = {
+      schema: 'jason.qingmu-writer-video-quote.v1', preflightSha256: 'a'.repeat(64), projectionSha256: 'b'.repeat(64),
+      maximumReservationCny: 0.3, candidateCount: 1, maxAttempts: 1, selectAsOfficial: false,
+      quoteReady: true, dispatchReady: false, quoteBlockers: [], dispatchBlockers: ['operator_paid_confirmation_required'],
+      requiredPaidConfirmationText, requiredPaidConfirmationTextSha256: sha256(canonicalJson(requiredPaidConfirmationText)),
+    }
+    let capturedUrl = ''
+    const read = async (value: unknown) => createYimengReadHandler({}, dependencies(async (input) => {
+      capturedUrl = requestUrl(input)
+      return jsonResponse(value)
+    }, 'test-token'))('videoQuote', request, signal())
+
+    expect(await read(response)).toEqual({ ok: true, value: response })
+    expect(capturedUrl).toBe('http://127.0.0.1:8115/api/qingmu/projects/project-1/episodes/episode-1/scenes/scene-1/shots/shot-1/production-takes/video-quote')
+    expect(await read({ ...response, requiredPaidConfirmationText: '篡改确认文字。' }))
+      .toMatchObject({ ok: false, error: { code: 'internal' } })
+    expect(await read({ ...response, requiredPaidConfirmationTextSha256: 'c'.repeat(64) }))
+      .toMatchObject({ ok: false, error: { code: 'internal' } })
+    expect(await read({ ...response, extra: true }))
+      .toMatchObject({ ok: false, error: { code: 'internal' } })
+    const { dispatchReady: _dispatchReady, ...missing } = response
+    expect(await read(missing)).toMatchObject({ ok: false, error: { code: 'internal' } })
   })
 
   it('reads the exact Gate A capability snapshot and preserves zero-authority boundaries', async () => {
