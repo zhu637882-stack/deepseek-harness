@@ -1566,7 +1566,11 @@ def _inspect_project_episode_binding(
 ) -> dict:
     """Verify one exact project/episode pair without mutating the database."""
     database = _private_regular_file(database, owner_only=False).resolve(strict=True)
-    uri = database.as_uri() + "?mode=ro"
+    # The instance is required to be cleanly stopped before binding.  Open the
+    # confirmed cold database as immutable so macOS SQLite does not try to
+    # coordinate WAL/SHM files for this read-only inspection (notably under an
+    # ``Application Support`` path).
+    uri = database.as_uri() + "?mode=ro&immutable=1"
     with sqlite3.connect(uri, uri=True) as connection:
         connection.execute("PRAGMA query_only = ON")
         if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
