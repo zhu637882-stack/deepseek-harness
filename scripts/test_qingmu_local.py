@@ -674,8 +674,10 @@ class OwnershipTests(unittest.TestCase):
                 self.assertFalse(runtime["ready"])
                 self.assertIsNone(runtime["supervisorPid"])
                 self.assertIsNone(runtime["apiPid"])
+                self.assertIsNone(runtime["workerPid"])
                 self.assertIsNone(runtime["hostPid"])
                 self.assertFalse(runtime["apiProcessAlive"])
+                self.assertFalse(runtime["workerProcessAlive"])
                 self.assertFalse(runtime["hostListenerAndHttpVerified"])
             finally:
                 local.stop_child(child)
@@ -717,9 +719,13 @@ class OwnershipTests(unittest.TestCase):
             local.mark_lifecycle(root, config, "clean")
             supervisor = local.Supervisor(root, config)
             api = subprocess.Popen(["/bin/sleep", "30"])
+            worker = subprocess.Popen(["/bin/sleep", "30"])
             host = subprocess.Popen(["/bin/sleep", "30"])
             frontend = subprocess.Popen(["/bin/sleep", "30"])
             try:
+                def start_worker():
+                    supervisor.worker = worker
+
                 def start_host():
                     supervisor.host = host
 
@@ -729,6 +735,7 @@ class OwnershipTests(unittest.TestCase):
                 with patch.object(supervisor, "launch", return_value=api), \
                      patch.object(supervisor, "wait_ready"), \
                      patch.object(local, "mark_build_started"), \
+                     patch.object(supervisor, "start_worker", side_effect=start_worker), \
                      patch.object(supervisor, "start_host", side_effect=start_host), \
                      patch.object(supervisor, "start_frontend", side_effect=start_frontend):
                     with ThreadPoolExecutor(max_workers=1) as pool:
@@ -743,18 +750,180 @@ class OwnershipTests(unittest.TestCase):
                         self.assertEqual(result["stopped"], True)
                         running.result(timeout=5)
                 self.assertIsNotNone(api.poll())
+                self.assertIsNotNone(worker.poll())
                 self.assertIsNotNone(host.poll())
                 self.assertIsNotNone(frontend.poll())
                 runtime = json.loads((root / "runtime.json").read_text())
                 self.assertFalse(runtime["ready"])
                 self.assertFalse(runtime["apiProcessAlive"])
+                self.assertFalse(runtime["workerProcessAlive"])
                 self.assertFalse(runtime["hostProcessAlive"])
                 self.assertFalse(runtime["frontendProcessAlive"])
                 local.require_clean(root, config)
             finally:
                 local.stop_child(api)
+                local.stop_child(worker)
                 local.stop_child(host)
                 local.stop_child(frontend)
+
+    def test_unbound_worker_is_heartbeat_only_and_has_no_provider_authority(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "instance"
+            writer = parent / "writer"
+            for part in ("logs", "home", "work", "dsh", "private", "storage", "audit", "build-manifest"):
+                (root / part).mkdir(parents=True, exist_ok=True)
+            worker_python = writer / ".venv/bin/python"
+            worker_python.parent.mkdir(parents=True)
+            worker_python.write_text("not executed")
+            supervisor = local.Supervisor(root, {
+                "instanceId": "unit-worker", "root": str(root), "yimengRoot": str(writer),
+            })
+            child = subprocess.Popen(["/bin/sleep", "30"])
+            try:
+                with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "ambient-must-not-pass"}, clear=False), \
+                     patch.object(supervisor, "launch", return_value=child) as launch:
+                    supervisor.start_worker()
+                argv, env, label = launch.call_args.args
+                self.assertEqual(argv, [
+                    str(worker_python), "-B", "-m", "jason.apps.studio.worker_cli",
+                    "--lane", "text", "--heartbeat-only", "--max-tasks", "0",
+                    "--disable-durable-director-orchestration",
+                ])
+                self.assertEqual(label, "worker")
+                self.assertEqual(env["DATABASE_URL"], f"sqlite:///{root / 'storage/jason.db'}")
+                self.assertEqual(env["STORAGE_ROOT"], str(root / "storage"))
+                self.assertEqual(env["JASON_CONFIG_ROOT"], str(writer))
+                self.assertEqual(env["JASON_ENV_FILE"], str(root / "private/no-ambient.env"))
+                self.assertEqual(env["ALLOW_PAID"], "false")
+                self.assertEqual(env["MAX_PAID_CNY"], "0")
+                self.assertNotIn("DEEPSEEK_API_KEY", env)
+                self.assertNotIn("QINGMU_DIRECTOR_EXECUTION_KEY", env)
+            finally:
+                local.stop_child(child)
+
+    def test_bound_worker_is_paid_but_exactly_project_episode_and_stage_scoped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "instance"
+            writer = parent / "writer"
+            credential_env = parent / "provider.env"
+            for part in ("logs", "home", "work", "dsh", "private", "storage", "audit", "build-manifest"):
+                (root / part).mkdir(parents=True, exist_ok=True)
+            credential_env.write_text("DASHSCOPE_API_KEY=not-read-by-this-test\n")
+            credential_env.chmod(0o600)
+            worker_python = writer / ".venv/bin/python"
+            worker_python.parent.mkdir(parents=True)
+            worker_python.write_text("not executed")
+            production = {
+                "productionOnly": True,
+                "provider": "dashscope",
+                "projectId": "project-one",
+                "episodeId": "episode-one",
+                "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "allowedStages": list(local.TEXT_FOUNDATION_STAGES),
+                "credentialEnvFile": str(credential_env),
+                "maxTasksPerTick": 1,
+                "maxAttempts": 1,
+                "allowExistingProviderPoll": True,
+            }
+            supervisor = local.Supervisor(root, {
+                "instanceId": "unit-worker",
+                "root": str(root),
+                "yimengRoot": str(writer),
+                "textFoundationProductionExecution": production,
+            })
+            child = subprocess.Popen(["/bin/sleep", "30"])
+            try:
+                with patch.object(local, "YIMENG_PROVIDER_ENV_FILE", credential_env), \
+                     patch.dict("os.environ", {"DEEPSEEK_API_KEY": "ambient-must-not-pass"}, clear=False), \
+                     patch.object(supervisor, "launch", return_value=child) as launch:
+                    supervisor.start_worker()
+                argv, env, label = launch.call_args.args
+                self.assertEqual(label, "worker")
+                self.assertEqual(env["ALLOW_PAID"], "true")
+                self.assertEqual(env["MAX_PAID_CNY"], str(local.QINGMU_LOCAL_REMAINING_PAID_CNY))
+                self.assertEqual(env["JASON_ENV_FILE"], str(credential_env))
+                self.assertEqual(env["PROVIDER_PAID_SCOPE_PROJECT_ID"], "project-one")
+                self.assertEqual(env["PROVIDER_PAID_SCOPE_EPISODE_ID"], "episode-one")
+                self.assertNotIn("DEEPSEEK_API_KEY", env)
+                self.assertEqual(argv[:6], [
+                    str(worker_python), "-B", "-m", "jason.apps.studio.worker_cli",
+                    "--lane", "text",
+                ])
+                self.assertIn("--allow-existing-provider-poll", argv)
+                self.assertIn("--text-foundation-provider-children-only", argv)
+                self.assertEqual(argv[argv.index("--max-tasks") + 1], "1")
+                self.assertEqual(argv[argv.index("--max-attempts") + 1], "1")
+                self.assertEqual(argv[argv.index("--allowed-project-id") + 1], "project-one")
+                self.assertEqual(argv[argv.index("--allowed-episode-id") + 1], "episode-one")
+                self.assertEqual(
+                    [argv[index + 1] for index, value in enumerate(argv) if value == "--allowed-foundation-stage"],
+                    list(local.TEXT_FOUNDATION_STAGES),
+                )
+            finally:
+                local.stop_child(child)
+
+    def test_bind_project_runtime_writes_only_scoped_authority_and_audit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "instance"
+            credential_env = parent / "provider.env"
+            for part in ("private", "storage", "audit", "logs", "home", "work", "dsh", "build-manifest"):
+                (root / part).mkdir(parents=True, mode=0o700, exist_ok=True)
+            root.chmod(0o700)
+            credential_env.write_text("DASHSCOPE_API_KEY=not-read-by-this-test\n")
+            credential_env.chmod(0o600)
+            config = {
+                "version": 1,
+                "instanceId": "binding-instance",
+                "root": str(root),
+                "harnessRoot": str(local.HARNESS),
+                "yimengRoot": str(parent / "writer"),
+                "coreRoot": str(parent / "core"),
+                "node": "/private/node",
+                "frontendNode": "/private/node20",
+                **{name: local.secrets.token_urlsafe(48) for name in local.PRIVATE_CREDENTIAL_FIELDS},
+            }
+            local.write_json(root / "private/instance.json", config)
+            local.write_json(root / "private/login.json", {"username": local.LOCAL_USERNAME, "password": "unused"})
+            local.mark_lifecycle(root, config, "clean")
+            with sqlite3.connect(root / "storage/jason.db") as connection:
+                connection.execute("CREATE TABLE projects (id TEXT PRIMARY KEY, owner TEXT)")
+                connection.execute("CREATE TABLE episodes (id TEXT PRIMARY KEY, project_id TEXT)")
+                connection.execute("INSERT INTO projects VALUES (?, ?)", ("project-one", "owner-one"))
+                connection.execute("INSERT INTO episodes VALUES (?, ?)", ("episode-one", "project-one"))
+            method = {
+                "version": "method.v1",
+                "methodPackageSha256": "a" * 64,
+                "sourceBindings": [],
+            }
+            credential = {
+                "available": True,
+                "provider": "deepseek-official",
+                "model": "deepseek-v4-pro",
+            }
+            with patch.object(local, "YIMENG_PROVIDER_ENV_FILE", credential_env), \
+                 patch.object(local, "node20_executable", return_value="/private/node20"), \
+                 patch.object(local, "_probe_director_credential", return_value=credential) as probe, \
+                 patch.object(local, "_probe_director_method", return_value=method):
+                receipt = local.bind_project_runtime(
+                    root,
+                    config,
+                    expected_instance_id="binding-instance",
+                    project_id="project-one",
+                    episode_id="episode-one",
+                    max_paid_cny=local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                )
+            probe.assert_called_once()
+            saved = json.loads((root / "private/instance.json").read_text())
+            self.assertEqual(saved["textFoundationProductionExecution"]["projectId"], "project-one")
+            self.assertEqual(saved["directorProductionExecution"]["episodeId"], "episode-one")
+            self.assertNotIn("apiKey", json.dumps(saved))
+            self.assertEqual(receipt["providerHttpRequests"], 0)
+            self.assertEqual(receipt["businessDatabaseWrites"], 0)
+            self.assertEqual(receipt["scope"]["ownerPresent"], True)
+            self.assertTrue(Path(receipt["receipt"]).is_file())
 
     def test_frontend_uses_bound_api_host_origin_and_private_session(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -797,7 +966,7 @@ class OwnershipTests(unittest.TestCase):
             finally:
                 local.stop_child(child)
 
-    def test_status_keeps_api_host_and_frontend_diagnostics_independent(self):
+    def test_status_keeps_api_worker_host_and_frontend_diagnostics_independent(self):
         class Child:
             def __init__(self, pid):
                 self.pid = pid
@@ -810,12 +979,15 @@ class OwnershipTests(unittest.TestCase):
             (root / "private").mkdir()
             supervisor = local.Supervisor(root, {"instanceId": "unit"})
             supervisor.ports = {"apiUrl": "http://127.0.0.1:1"}
-            supervisor.api, supervisor.host, supervisor.frontend = Child(1), Child(2), Child(3)
+            supervisor.api, supervisor.worker, supervisor.host, supervisor.frontend = (
+                Child(1), Child(2), Child(3), Child(4)
+            )
             with patch.object(supervisor, "api_identity", side_effect=ValueError("api down")), \
                  patch.object(supervisor, "host_healthy", return_value=True), \
                  patch.object(supervisor, "frontend_healthy", return_value=True):
                 status = supervisor.status()
             self.assertFalse(status["apiIdentityAndStorageVerified"])
+            self.assertTrue(status["workerProcessAlive"])
             self.assertTrue(status["hostListenerAndHttpVerified"])
             self.assertTrue(status["frontendListenerAndHttpVerified"])
             self.assertFalse(status["ready"])

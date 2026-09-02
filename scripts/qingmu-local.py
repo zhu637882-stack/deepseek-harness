@@ -35,6 +35,15 @@ DEEPSEEK_PRODUCTION_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_PRODUCTION_CREDENTIAL_FILE = Path(
     "/Users/a1234/.dsh/.credentials.yaml"
 )
+YIMENG_PROVIDER_ENV_FILE = Path("/Users/a1234/jason-drama-runtime/.env")
+QINGMU_LOCAL_REMAINING_PAID_CNY = 999.709120
+TEXT_FOUNDATION_STAGES = (
+    "story_outline",
+    "story_episode",
+    "script",
+    "asset_contract",
+    "shot_plan",
+)
 BUILD_MANIFEST_SCHEMA = "qingmu.local-build-manifest.v1"
 BUILD_MANIFEST_ARTIFACTS = (
     "apps/cli/lib/bin.js",
@@ -165,6 +174,9 @@ def read_config(root: Path) -> dict:
     if node20_executable(Path(frontend_node)) != frontend_node:
         raise ValueError("六阶段前端 Node 绑定已漂移；拒绝启动")
     validate_director_production_config(config.get("directorProductionExecution"))
+    validate_text_foundation_production_config(
+        config.get("textFoundationProductionExecution")
+    )
     if config.get("directorExecutionFixture") is not None and config.get("directorProductionExecution") is not None:
         raise ValueError("导演 fixture 与 production 配置不能同时启用")
     return config
@@ -594,6 +606,49 @@ def validate_director_production_config(value: object) -> dict | None:
     return value
 
 
+def validate_text_foundation_production_config(value: object) -> dict | None:
+    """Validate the one-instance Yimeng text worker authority.
+
+    The value contains only scope and a credential-file reference.  Provider
+    credentials remain in the owner-only Yimeng environment file and are never
+    copied into the Qingmu instance JSON.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("易梦文本 production 配置无效")
+    required = {
+        "productionOnly",
+        "provider",
+        "projectId",
+        "episodeId",
+        "maxPaidCny",
+        "allowedStages",
+        "credentialEnvFile",
+        "maxTasksPerTick",
+        "maxAttempts",
+        "allowExistingProviderPoll",
+    }
+    if set(value) != required:
+        raise ValueError("易梦文本 production 配置无效")
+    if (
+        value["productionOnly"] is not True
+        or value["provider"] != "dashscope"
+        or not all(
+            isinstance(value.get(name), str) and value[name].strip()
+            for name in ("projectId", "episodeId")
+        )
+        or value["maxPaidCny"] != QINGMU_LOCAL_REMAINING_PAID_CNY
+        or value["allowedStages"] != list(TEXT_FOUNDATION_STAGES)
+        or value["credentialEnvFile"] != str(YIMENG_PROVIDER_ENV_FILE)
+        or value["maxTasksPerTick"] != 1
+        or value["maxAttempts"] != 1
+        or value["allowExistingProviderPoll"] is not True
+    ):
+        raise ValueError("易梦文本 production 配置无效")
+    return value
+
+
 def mark_lifecycle(root: Path, config: dict, state: str) -> None:
     write_json(root / "private/lifecycle.json", {"instanceId": config["instanceId"], "state": state})
 
@@ -622,10 +677,12 @@ def write_stopped_runtime(root: Path, config: dict) -> None:
             "root": str(root),
             "supervisorPid": None,
             "apiPid": None,
+            "workerPid": None,
             "hostPid": None,
             "frontendPid": None,
             **coordinates,
             "apiProcessAlive": False,
+            "workerProcessAlive": False,
             "hostProcessAlive": False,
             "frontendProcessAlive": False,
             "apiIdentityAndStorageVerified": False,
@@ -660,6 +717,7 @@ class Supervisor:
     def __init__(self, root: Path, config: dict):
         self.root, self.config = root, config
         self.api: subprocess.Popen | None = None
+        self.worker: subprocess.Popen | None = None
         self.host: subprocess.Popen | None = None
         self.frontend: subprocess.Popen | None = None
         self.stopping = False
@@ -869,8 +927,81 @@ class Supervisor:
         )
         self.wait_ready(self.frontend, self.frontend_healthy)
 
+    def start_worker(self) -> None:
+        """Start the local text-foundation lane against this instance only.
+
+        The ordinary API wrapper applies its environment inside its own Python
+        process.  A separately spawned Worker therefore needs the same explicit
+        database/storage binding, rather than inheriting a developer shell or
+        the API process environment.  Without an explicit production binding it
+        publishes liveness only.  With one, it is restricted to the bound
+        project, episode and five confirmed text-foundation stages.
+        """
+        writer = Path(self.config["yimengRoot"])
+        production = validate_text_foundation_production_config(
+            self.config.get("textFoundationProductionExecution")
+        )
+        env = {
+            **safe_env(self.root),
+            "PYTHONPATH": str(writer / "backend/src"),
+            "JASON_PROJECT_ROOT": str(self.root),
+            "JASON_CONFIG_ROOT": str(writer),
+            "JASON_ENV_FILE": (
+                production["credentialEnvFile"]
+                if production
+                else str(self.root / "private/no-ambient.env")
+            ),
+            "DATABASE_URL": f"sqlite:///{self.root / 'storage/jason.db'}",
+            "STORAGE_ROOT": str(self.root / "storage"),
+            "APP_ENV": "development",
+            "APP_HOST": "127.0.0.1",
+            "QINGMU_CHANGESET_ENABLED": "true",
+            "PUBLIC_REGISTRATION_ENABLED": "false",
+            "ALLOW_PAID": "true" if production else "false",
+            "MAX_PAID_CNY": str(production["maxPaidCny"] if production else 0),
+            "PROVIDER_PAID_SCOPE_PROJECT_ID": production["projectId"] if production else "",
+            "PROVIDER_PAID_SCOPE_EPISODE_ID": production["episodeId"] if production else "",
+            "BUILD_MANIFEST_DIR": str(self.root / "build-manifest"),
+            "OPERATOR_AUDIT_DIR": str(self.root / "audit"),
+        }
+        command = [
+            str(writer / ".venv/bin/python"),
+            "-B",
+            "-m",
+            "jason.apps.studio.worker_cli",
+            "--lane",
+            "text",
+        ]
+        if production:
+            _private_regular_file(Path(production["credentialEnvFile"]))
+            command.extend([
+                "--max-tasks",
+                str(production["maxTasksPerTick"]),
+                "--max-attempts",
+                str(production["maxAttempts"]),
+                "--allow-existing-provider-poll",
+                "--text-foundation-provider-children-only",
+                "--allowed-project-id",
+                production["projectId"],
+                "--allowed-episode-id",
+                production["episodeId"],
+            ])
+            for stage in production["allowedStages"]:
+                command.extend(["--allowed-foundation-stage", stage])
+        else:
+            command.extend(["--heartbeat-only", "--max-tasks", "0"])
+        command.append("--disable-durable-director-orchestration")
+        self.worker = self.launch(
+            command,
+            env,
+            "worker",
+        )
+        if self.worker.poll() is not None:
+            raise RuntimeError("本机文本 Worker 启动即退出；查看本实例 logs/worker.log")
+
     def status(self) -> dict:
         api_alive = self.api is not None and self.api.poll() is None
+        worker_alive = self.worker is not None and self.worker.poll() is None
         host_alive = self.host is not None and self.host.poll() is None
         frontend_alive = self.frontend is not None and self.frontend.poll() is None
         api_verified = host_verified = frontend_verified = False
@@ -896,15 +1027,17 @@ class Supervisor:
         manifest = build_manifest_status(self.root, self.config)
         return {"instanceId": self.config["instanceId"], "root": str(self.root),
                 "supervisorPid": os.getpid(), "apiPid": self.api.pid if self.api else None,
+                "workerPid": self.worker.pid if self.worker else None,
                 "hostPid": self.host.pid if self.host else None, **self.ports,
                 "frontendPid": self.frontend.pid if self.frontend else None,
-                "apiProcessAlive": api_alive, "hostProcessAlive": host_alive,
+                "apiProcessAlive": api_alive, "workerProcessAlive": worker_alive,
+                "hostProcessAlive": host_alive,
                 "frontendProcessAlive": frontend_alive,
                 "apiIdentityAndStorageVerified": api_verified, "hostListenerAndHttpVerified": host_verified,
                 "frontendListenerAndHttpVerified": frontend_verified,
                 "buildManifest": manifest,
                 "buildManifestMatches": manifest["matches"],
-                "ready": bool(api_verified and host_verified and frontend_verified and manifest["matches"]),
+                "ready": bool(api_verified and worker_alive and host_verified and frontend_verified and manifest["matches"]),
                 "session": session}
 
     def login(self) -> dict:
@@ -957,11 +1090,13 @@ class Supervisor:
                     self.api = self.launch([*backend_command(self.config), "--port", str(api_port)],
                                            backend_env(self.root, self.config), "api")
                     self.wait_ready(self.api, self.api_identity)
+                    self.start_worker()
                     self.start_host()
                     self.start_frontend()
                     write_json(self.root / "runtime.json", self.status())
                     while not self.stopping:
-                        if self.api.poll() is not None or self.host.poll() is not None or self.frontend.poll() is not None:
+                        if (self.api.poll() is not None or self.worker.poll() is not None
+                                or self.host.poll() is not None or self.frontend.poll() is not None):
                             raise RuntimeError("本实例子进程退出，正在清理其余自有子进程")
                         try:
                             client, _ = server.accept()
@@ -985,6 +1120,7 @@ class Supervisor:
                                     self.stopping = True
                                     stop_child(self.frontend)
                                     stop_child(self.host)
+                                    stop_child(self.worker)
                                     stop_child(self.api)
                                     result = {"stopped": True, "instanceId": self.config["instanceId"], "dataPreserved": True}
                                 elif request["op"] == "status":
@@ -1000,6 +1136,7 @@ class Supervisor:
                 finally:
                     stop_child(self.frontend)
                     stop_child(self.host)
+                    stop_child(self.worker)
                     stop_child(self.api)
                     write_stopped_runtime(self.root, self.config)
                     mark_lifecycle(self.root, self.config, "clean")
@@ -1421,6 +1558,160 @@ def _probe_director_method(root: Path, config: dict) -> dict:
     return value
 
 
+def _inspect_project_episode_binding(
+    database: Path,
+    *,
+    project_id: str,
+    episode_id: str,
+) -> dict:
+    """Verify one exact project/episode pair without mutating the database."""
+    database = _private_regular_file(database, owner_only=False).resolve(strict=True)
+    uri = database.as_uri() + "?mode=ro"
+    with sqlite3.connect(uri, uri=True) as connection:
+        connection.execute("PRAGMA query_only = ON")
+        if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+            raise ValueError("青木实例数据库完整性检查失败")
+        row = connection.execute(
+            """
+            SELECT p.id, p.owner, e.id
+            FROM projects AS p
+            JOIN episodes AS e ON e.project_id = p.id
+            WHERE p.id = ? AND e.id = ?
+            """,
+            (project_id, episode_id),
+        ).fetchall()
+    if len(row) != 1 or not str(row[0][1] or "").strip():
+        raise ValueError("项目与剧集绑定不匹配；未修改运行配置")
+    return {
+        "projectId": str(row[0][0]),
+        "episodeId": str(row[0][2]),
+        "ownerPresent": True,
+    }
+
+
+def bind_project_runtime(
+    root: Path,
+    config: dict,
+    *,
+    expected_instance_id: str,
+    project_id: str,
+    episode_id: str,
+    max_paid_cny: float,
+) -> dict:
+    """Bind the stopped local instance to one Yimeng + DSh production scope.
+
+    This operation validates both credential locations without revealing or
+    copying their values.  It performs no Provider HTTP request and no business
+    database write.
+    """
+    if (
+        config.get("instanceId") != expected_instance_id
+        or not project_id.strip()
+        or not episode_id.strip()
+        or max_paid_cny != QINGMU_LOCAL_REMAINING_PAID_CNY
+    ):
+        raise ValueError("本机运行绑定参数不匹配；未修改配置")
+    with instance_lock(root):
+        require_clean(root, config)
+        current = read_config(root)
+        if current.get("instanceId") != expected_instance_id:
+            raise ValueError("实例身份已漂移；未修改配置")
+        if current.get("directorExecutionFixture") is not None:
+            raise ValueError("导演 fixture 仍启用；未修改 production 配置")
+        scope = _inspect_project_episode_binding(
+            root / "storage/jason.db",
+            project_id=project_id,
+            episode_id=episode_id,
+        )
+        _private_regular_file(YIMENG_PROVIDER_ENV_FILE)
+        credential = _probe_director_credential(
+            root,
+            current,
+            DEEPSEEK_PRODUCTION_CREDENTIAL_FILE,
+        )
+        method = _probe_director_method(root, current)
+        text_execution = {
+            "productionOnly": True,
+            "provider": "dashscope",
+            "projectId": project_id,
+            "episodeId": episode_id,
+            "maxPaidCny": QINGMU_LOCAL_REMAINING_PAID_CNY,
+            "allowedStages": list(TEXT_FOUNDATION_STAGES),
+            "credentialEnvFile": str(YIMENG_PROVIDER_ENV_FILE),
+            "maxTasksPerTick": 1,
+            "maxAttempts": 1,
+            "allowExistingProviderPoll": True,
+        }
+        director_execution = {
+            "productionOnly": True,
+            "provider": "deepseek-official",
+            "model": "deepseek-v4-pro",
+            "baseUrl": DEEPSEEK_PRODUCTION_BASE_URL,
+            "endpoint": "/chat/completions",
+            "routeKey": "qingmu.director.text.proposal.production",
+            "projectId": project_id,
+            "episodeId": episode_id,
+            "methodPackageVersion": method["version"],
+            "methodPackageSha256": method["methodPackageSha256"],
+            "maxPaidCny": 0.30,
+            "maxInputTokens": 8000,
+            "maxOutputTokens": 2000,
+            "thinking": "disabled",
+            "images": False,
+            "files": False,
+            "tools": False,
+            "credentialFile": str(DEEPSEEK_PRODUCTION_CREDENTIAL_FILE),
+            "transportEnabled": False,
+            "interactiveEnabled": True,
+        }
+        validate_text_foundation_production_config(text_execution)
+        validate_director_production_config(director_execution)
+        updated = dict(current)
+        updated["textFoundationProductionExecution"] = text_execution
+        updated["directorProductionExecution"] = director_execution
+        write_json(root / "private/instance.json", updated)
+        validated = read_config(root)
+        if (
+            validated.get("textFoundationProductionExecution") != text_execution
+            or validated.get("directorProductionExecution") != director_execution
+        ):
+            raise RuntimeError("本机运行绑定写后核验失败")
+        receipt = {
+            "schema": "qingmu.local-project-runtime-binding.v1",
+            "instanceId": expected_instance_id,
+            "boundAt": utc_timestamp(),
+            "scope": scope,
+            "textFoundation": {
+                "provider": "dashscope",
+                "allowedStages": list(TEXT_FOUNDATION_STAGES),
+                "maxPaidCny": QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "maxTasksPerTick": 1,
+                "maxAttempts": 1,
+                "credentialAvailable": True,
+            },
+            "director": {
+                "provider": credential["provider"],
+                "model": credential["model"],
+                "methodPackageVersion": method["version"],
+                "methodPackageSha256": method["methodPackageSha256"],
+                "interactiveEnabled": True,
+                "transportEnabled": False,
+                "maxPaidCnyPerProposal": 0.30,
+                "credentialAvailable": credential["available"],
+            },
+            "providerHttpRequests": 0,
+            "paidCny": 0,
+            "businessDatabaseWrites": 0,
+        }
+        receipt_path = root / "audit" / (
+            "project-runtime-binding-"
+            + utc_timestamp().replace(":", "").replace("-", "")
+            + "-" + secrets.token_hex(4) + ".json"
+        )
+        write_json(receipt_path, receipt)
+    return {**receipt, "receipt": str(receipt_path)}
+
+
 def director_submit_preflight(
     root: Path,
     config: dict,
@@ -1768,7 +2059,8 @@ def main() -> None:
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["init", "record-build", "start", "status", "stop", "login", "backup", "restore",
-                                            "rotate-private-credentials", "director-submit-once", "_supervise"])
+                                            "rotate-private-credentials", "bind-project-runtime",
+                                            "director-submit-once", "_supervise"])
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--yimeng-root", type=Path)
     parser.add_argument("--core-root", type=Path)
@@ -1779,6 +2071,9 @@ def main() -> None:
     parser.add_argument("--lock-sha256")
     parser.add_argument("--execute-production-once")
     parser.add_argument("--instance-id")
+    parser.add_argument("--project-id")
+    parser.add_argument("--episode-id")
+    parser.add_argument("--max-paid-cny", type=float)
     args = parser.parse_args()
     # Do not resolve an existing root symlink into an unrelated target.
     root = args.root.expanduser().absolute()
@@ -1805,6 +2100,24 @@ def main() -> None:
                 if not args.instance_id:
                     raise ValueError("rotate-private-credentials 必须明确 --instance-id")
                 result = rotate_private_credentials(root, args.instance_id)
+            elif args.command == "bind-project-runtime":
+                if (
+                    not args.instance_id
+                    or not args.project_id
+                    or not args.episode_id
+                    or args.max_paid_cny is None
+                ):
+                    raise ValueError(
+                        "bind-project-runtime 必须明确 instance-id、project-id、episode-id 与 max-paid-cny"
+                    )
+                result = bind_project_runtime(
+                    root,
+                    config,
+                    expected_instance_id=args.instance_id,
+                    project_id=args.project_id,
+                    episode_id=args.episode_id,
+                    max_paid_cny=args.max_paid_cny,
+                )
             elif args.command == "director-submit-once":
                 if not args.task_id or args.lock_pack is None or not args.lock_sha256:
                     raise ValueError("director-submit-once 必须明确 task-id、lock-pack 与 lock-sha256")
