@@ -535,6 +535,19 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源：[`packages/plan/plan-mode/src/index.ts:53`](../packages/plan/plan-mode/src/index.ts)
 
+### `qingmu-director-context/*`
+
+<a id="qingmu-director-contextstate--log-only"></a>
+
+#### `qingmu-director-context/state` — 仅日志
+
+```ts persistence-catalog
+/** Whole-value, log-only snapshot of the session's current Qingmu director binding. */
+'qingmu-director-context/state': DirectorContextBindingState
+```
+
+来源：[`packages/experimental/qingmu-director-context-bridge/src/types.ts:122`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+
 ### `request/*`
 
 <a id="requestcontext--log-only"></a>

@@ -1,0 +1,15 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../core/session" },
+    { "path": "../../session/session-projection" },
+    { "path": "../qingmu-yimeng-command-adapter" },
+    { "path": "../../runtime-diagnostics/invariants" }
+  ]
+}
