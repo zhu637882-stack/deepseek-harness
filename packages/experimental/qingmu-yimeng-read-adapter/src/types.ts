@@ -420,6 +420,30 @@ export interface YimengFirstFrameQuoteRequest extends YimengPromptIrRequest {
   readonly promptIrContentSha256: string
 }
 
+/** Read-only, Writer-authored binding for one explicit initial-video queue action. */
+export interface YimengVideoQuoteRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly sceneId: string
+  readonly shotId: string
+}
+
+export interface YimengVideoQuoteResponse {
+  readonly schema: 'jason.qingmu-writer-video-quote.v1'
+  readonly preflightSha256: string
+  readonly projectionSha256: string
+  readonly maximumReservationCny: number
+  readonly candidateCount: 1
+  readonly maxAttempts: 1
+  readonly selectAsOfficial: false
+  readonly quoteReady: boolean
+  readonly dispatchReady: boolean
+  readonly quoteBlockers: readonly string[]
+  readonly dispatchBlockers: readonly string[]
+  readonly requiredPaidConfirmationText: string
+  readonly requiredPaidConfirmationTextSha256: string
+}
+
 /** One server-authored reason why a first-frame authorization must not proceed yet. */
 export interface YimengFirstFrameAuthorizationBlocker {
   readonly code: string
@@ -2571,6 +2595,7 @@ export interface YimengReadEndpointMap {
   readonly promptIr: YimengPromptIrResponse
   readonly promptIrBootstrap: YimengPromptIrBootstrapResponse
   readonly firstFrameQuote: YimengFirstFrameQuoteResponse
+  readonly videoQuote: YimengVideoQuoteResponse
   readonly selectedVideoReview: YimengSelectedVideoReviewResponse
   readonly takeVersions: YimengTakeVersionStackResponse
   readonly takePreview: YimengTakePreviewResponse

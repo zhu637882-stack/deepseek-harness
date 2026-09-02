@@ -78,6 +78,8 @@ import type {
   YimengEpisodeEvidenceRequest,
   YimengFirstFrameQuoteRequest,
   YimengFirstFrameQuoteResponse,
+  YimengVideoQuoteRequest,
+  YimengVideoQuoteResponse,
   YimengHealth,
   YimengHumanDecision,
   YimengHumanDecisionValue,
@@ -333,6 +335,7 @@ const REFERENCE_RIGHTS_EXCEPTION_RELEASE_FEED_SCHEMA = 'jason.qingmu-reference-r
 const SHA256 = /^[0-9a-f]{64}$/
 const PROTECTED_ENDPOINTS = new Set([
   'projects', 'episodes', 'script', 'promptIr', 'promptIrBootstrap', 'firstFrameQuote', 'capabilityCatalog', 'costRehearsal',
+  'videoQuote',
   'gateAControlEvidence', 'elementProfile',
   'referenceCandidates', 'reviewEvents',
   'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'takeComments', 'takeReviewAuthority', 'takeAcceptance', 'takeTechnicalQc', 'takeApprovalLifecycle', 'evidenceLedger', 'editorialHandoff', 'verifyEpisode', 'shotFindings', 'productionUnits', 'stageSources',
@@ -754,6 +757,15 @@ function parseFirstFrameQuoteRequest(payload: unknown): YimengFirstFrameQuoteReq
       && SHA256.test(input.promptIrContentSha256)
       ? input.promptIrContentSha256
       : (() => { throw new InputError('promptIrContentSha256 must be a lowercase SHA-256') })(),
+  }
+}
+
+function parseVideoQuoteRequest(payload: unknown): YimengVideoQuoteRequest {
+  const input = requireInputObject(payload)
+  assertOnlyInputKeys(input, ['projectId', 'episodeId', 'sceneId', 'shotId'])
+  return {
+    projectId: parseIdentifier(input.projectId, 'projectId'), episodeId: parseIdentifier(input.episodeId, 'episodeId'),
+    sceneId: parseIdentifier(input.sceneId, 'sceneId'), shotId: parseIdentifier(input.shotId, 'shotId'),
   }
 }
 
@@ -3193,6 +3205,26 @@ function normalizeFirstFrameQuote(
   }
 }
 
+function normalizeVideoQuote(value: unknown): YimengVideoQuoteResponse {
+  const root = requireObject(value, 'videoQuote')
+  requireExactKeys(root, ['schema', 'preflightSha256', 'projectionSha256', 'maximumReservationCny', 'candidateCount', 'maxAttempts', 'selectAsOfficial', 'quoteReady', 'dispatchReady', 'quoteBlockers', 'dispatchBlockers', 'requiredPaidConfirmationText', 'requiredPaidConfirmationTextSha256'], 'videoQuote')
+  if (root.schema !== 'jason.qingmu-writer-video-quote.v1' || root.candidateCount !== 1 || root.maxAttempts !== 1
+    || root.selectAsOfficial !== false || typeof root.maximumReservationCny !== 'number' || root.maximumReservationCny < 0
+    || typeof root.quoteReady !== 'boolean' || typeof root.dispatchReady !== 'boolean'
+    || !Array.isArray(root.quoteBlockers) || !root.quoteBlockers.every(item => typeof item === 'string')
+    || !Array.isArray(root.dispatchBlockers) || !root.dispatchBlockers.every(item => typeof item === 'string')) {
+    throw new UpstreamContractError('videoQuote contract mismatch')
+  }
+  if (typeof root.requiredPaidConfirmationText !== 'string' || !root.requiredPaidConfirmationText.trim()
+    || canonicalJsonSha256(root.requiredPaidConfirmationText, 'videoQuote.requiredPaidConfirmationText')
+      !== requireSha256(root.requiredPaidConfirmationTextSha256, 'videoQuote.requiredPaidConfirmationTextSha256')) {
+    throw new UpstreamContractError('videoQuote confirmation contract mismatch')
+  }
+  requireSha256(root.preflightSha256, 'videoQuote.preflightSha256')
+  requireSha256(root.projectionSha256, 'videoQuote.projectionSha256')
+  return root as unknown as YimengVideoQuoteResponse
+}
+
 function requireExactKeys(value: YimengJsonObject, keys: readonly string[], field: string): void {
   const actual = Object.keys(value).sort()
   const expected = [...keys].sort()
@@ -5024,6 +5056,11 @@ export function createYimengReadHandler(
         })
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/storyboard-revisions/${encodeURIComponent(request.storyboardRevisionId)}/frames/${encodeURIComponent(request.frameId)}/first-frame-quote?${query.toString()}`
         normalize = value => normalizeFirstFrameQuote(value, request)
+      } else if (endpoint === 'videoQuote') {
+        const request = parseVideoQuoteRequest(payload)
+        path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}`
+          + `/scenes/${encodeURIComponent(request.sceneId)}/shots/${encodeURIComponent(request.shotId)}/production-takes/video-quote`
+        normalize = value => normalizeVideoQuote(value)
       } else if (endpoint === 'selectedVideoReview') {
         const request = parseSelectedVideoReviewRequest(payload)
         path = `/api/frames/${encodeURIComponent(request.frameId)}/video-candidates`
