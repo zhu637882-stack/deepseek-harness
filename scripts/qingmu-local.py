@@ -959,6 +959,12 @@ class Supervisor:
             "PUBLIC_REGISTRATION_ENABLED": "false",
             "ALLOW_PAID": "true" if production else "false",
             "MAX_PAID_CNY": str(production["maxPaidCny"] if production else 0),
+            # The Qingmu instance owns a fresh, isolated lifetime ledger.  Do
+            # not inherit an unrelated Yimeng operations-window baseline from
+            # the credential-only env file.
+            "PROVIDER_BUDGET_BASELINE_CNY": "0",
+            "PROVIDER_BUDGET_WINDOW_ID": "",
+            "PROVIDER_PAID_SCOPE_REQUIRED": "true",
             "PROVIDER_PAID_SCOPE_PROJECT_ID": production["projectId"] if production else "",
             "PROVIDER_PAID_SCOPE_EPISODE_ID": production["episodeId"] if production else "",
             "BUILD_MANIFEST_DIR": str(self.root / "build-manifest"),
