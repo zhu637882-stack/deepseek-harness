@@ -5,10 +5,15 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { isTrustedApiRequest } from '@deepseek-ai/dsh-client-connection/src/api-request-trust.ts'
 import type { WebServer } from '@deepseek-ai/dsh-host-webserver'
 
+/** Same-origin route for byte-verified candidate previews. */
 export const FIRST_FRAME_SELECTION_MEDIA_PATH = '/api/qingmu/first-frame-selection/media'
+/** Same-origin route for the current Writer-owned candidate and selection state. */
 export const FIRST_FRAME_SELECTION_STATE_PATH = '/api/qingmu/first-frame-selection/state'
+/** Same-origin route for one explicit authenticated human selection. */
 export const FIRST_FRAME_SELECTION_DECISION_PATH = '/api/qingmu/first-frame-selection/decision'
+/** Same-origin route for recovering an already committed selection receipt. */
 export const FIRST_FRAME_SELECTION_RECEIPT_PATH = '/api/qingmu/first-frame-selection/receipt'
+/** Maximum candidate preview size accepted by the Host bridge. */
 export const MAX_FIRST_FRAME_PREVIEW_BYTES = 16 * 1024 * 1024
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/
@@ -183,27 +188,52 @@ function canonicalSha256(value: unknown): string | undefined {
   try { return createHash('sha256').update(canonicalJson(value), 'utf8').digest('hex') } catch { return undefined }
 }
 
-function receiptIsCurrent(value: unknown, expected: SelectionRequest, requestSha256?: string): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+const RECEIPT_KEYS = ['schema', 'selectionIdentity', 'actorUserId', 'naturalPersonId', 'projectId', 'episodeId', 'storyboardRevisionId',
+  'frameId', 'selectedAssetId', 'selectedAssetSha256', 'selectedMaterializedSha256', 'selectionStatus', 'idempotencyKey',
+  'requestSha256', 'intentSessionSha256', 'intentBindingSha256', 'binding', 'bindingSha256', 'selectedAt', 'receiptSha256'] as const
+const RECEIPT_TRANSPORT_KEYS = ['providerCalls', 'taskMutation', 'outboxEvents'] as const
+
+function receiptCore(value: unknown, requireTransportMetadata = false): Record<string, unknown> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   const item = value as Record<string, unknown>
-  const keys = ['schema', 'selectionIdentity', 'actorUserId', 'naturalPersonId', 'projectId', 'episodeId', 'storyboardRevisionId',
-    'frameId', 'selectedAssetId', 'selectedAssetSha256', 'selectedMaterializedSha256', 'selectionStatus', 'idempotencyKey',
-    'requestSha256', 'intentSessionSha256', 'intentBindingSha256', 'binding', 'bindingSha256', 'selectedAt', 'receiptSha256',
-    'providerCalls', 'taskMutation', 'outboxEvents']
-  return JSON.stringify(Object.keys(item).sort()) === JSON.stringify(keys.sort())
-    && item.schema === 'jason.qingmu-first-frame-selection-receipt.v1'
+  const keys = Object.keys(item).sort()
+  const receiptKeys = [...RECEIPT_KEYS].sort()
+  const wrappedKeys = [...RECEIPT_KEYS, ...RECEIPT_TRANSPORT_KEYS].sort()
+  const raw = JSON.stringify(keys) === JSON.stringify(receiptKeys)
+  const wrapped = JSON.stringify(keys) === JSON.stringify(wrappedKeys)
+  if ((!raw && !wrapped) || (requireTransportMetadata && !wrapped)) return undefined
+  if (wrapped && (item.providerCalls !== 0 || item.taskMutation !== false || item.outboxEvents !== 0)) return undefined
+  return Object.fromEntries(Object.entries(item).filter(([key]) =>
+    !RECEIPT_TRANSPORT_KEYS.includes(key as typeof RECEIPT_TRANSPORT_KEYS[number])))
+}
+
+function currentReceipt(
+  value: unknown,
+  expected: SelectionRequest,
+  requestSha256?: string,
+  requireTransportMetadata = false,
+): Record<string, unknown> | undefined {
+  const item = receiptCore(value, requireTransportMetadata)
+  if (item === undefined) return undefined
+  return item.schema === 'jason.qingmu-first-frame-selection-receipt.v1'
     && item.projectId === expected.projectId && item.episodeId === expected.episodeId
     && item.storyboardRevisionId === expected.storyboardRevisionId && item.frameId === expected.frameId
     && item.selectedAssetId === expected.assetId && item.selectedAssetSha256 === expected.expectedMaterializedSha256
     && item.selectedMaterializedSha256 === expected.expectedMaterializedSha256
     && item.selectionStatus === 'Selected' && item.idempotencyKey === expected.idempotencyKey
     && (requestSha256 === undefined || item.requestSha256 === requestSha256)
-    && ['selectionIdentity', 'selectedAssetSha256', 'selectedMaterializedSha256', 'requestSha256', 'intentSessionSha256',
+    && ['selectedAssetSha256', 'selectedMaterializedSha256', 'requestSha256', 'intentSessionSha256',
       'intentBindingSha256', 'bindingSha256', 'receiptSha256'].every(key => SHA256.test(String(item[key])))
-    && IDENTIFIER.test(String(item.actorUserId)) && IDENTIFIER.test(String(item.naturalPersonId))
-    && typeof item.selectedAt === 'string' && item.providerCalls === 0 && item.taskMutation === false && item.outboxEvents === 0
+    && IDENTIFIER.test(String(item.selectionIdentity)) && IDENTIFIER.test(String(item.actorUserId))
+    && IDENTIFIER.test(String(item.naturalPersonId))
+    && typeof item.selectedAt === 'string'
     && canonicalSha256(item.binding) === item.bindingSha256
     && canonicalSha256(Object.fromEntries(Object.entries(item).filter(([key]) => key !== 'receiptSha256'))) === item.receiptSha256
+    ? item : undefined
+}
+
+function receiptIsCurrent(value: unknown, expected: SelectionRequest, requestSha256?: string): boolean {
+  return currentReceipt(value, expected, requestSha256) !== undefined
 }
 
 async function jsonUpstream(
@@ -304,16 +334,19 @@ export function registerFirstFrameSelectionCommands(
       const submitted = await jsonUpstream(dependencies, req, upstream, {
         method: 'POST', headers: { 'content-type': 'application/json', 'x-qingmu-human-intent': issued.proof }, body: serialized,
       }, true)
-      let result = submitted?.response.ok === true && receiptIsCurrent(submitted.value, value, requestSha256)
-        ? submitted.value as Record<string, unknown> : undefined
+      let result = submitted?.response.ok === true
+        ? currentReceipt(submitted.value, value, requestSha256, true)
+        : undefined
       if (result === undefined && (submitted === undefined || submitted.response.status >= 500)) {
         const recoveryUrl = new URL(`${upstream.pathname}/receipt`, upstream)
         recoveryUrl.searchParams.set('idempotencyKey', value.idempotencyKey)
         recoveryUrl.searchParams.set('requestSha256', requestSha256)
         const recovered = await jsonUpstream(dependencies, req, recoveryUrl)
         const outer = recovered?.value as Record<string, unknown> | undefined
-        if (recovered?.response.ok === true && outer?.status === 'committed'
-          && receiptIsCurrent(outer.result, value, requestSha256)) result = outer.result as Record<string, unknown>
+        const recoveredResult = recovered?.response.ok === true && outer?.status === 'committed'
+          ? currentReceipt(outer.result, value, requestSha256, true)
+          : undefined
+        if (recoveredResult !== undefined) result = recoveredResult
       }
       if (result === undefined) {
         json(res, submitted?.response.status === 401 || submitted?.response.status === 403 ? 401 : 409, {
@@ -338,13 +371,16 @@ export function registerFirstFrameSelectionCommands(
       upstream.searchParams.set('requestSha256', requestSha256 ?? '')
       const recovered = await jsonUpstream(dependencies, req, upstream)
       const outer = recovered?.value as Record<string, unknown> | undefined
-      if (recovered?.response.ok !== true || outer?.status !== 'committed' || !receiptIsCurrent(outer.result, value, requestSha256 ?? undefined)) {
+      const result = recovered?.response.ok === true && outer?.status === 'committed'
+        ? currentReceipt(outer.result, value, requestSha256 ?? undefined, true)
+        : undefined
+      if (result === undefined) {
         json(res, recovered?.response.status === 401 || recovered?.response.status === 403 ? 401 : 404, {
           code: recovered?.response.status === 401 || recovered?.response.status === 403
             ? 'first_frame_selection_relogin_required' : 'first_frame_selection_receipt_not_found',
         }); return
       }
-      json(res, 200, outer.result)
+      json(res, 200, result)
     },
   })
   const disposeMedia = webServer.register({

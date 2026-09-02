@@ -311,11 +311,15 @@ describe('production Take Host bridge', () => {
 
   it.each([
     ['selected first-frame receipt', (value: ReturnType<typeof receipt>) => { value.firstFrameSelectionReceiptSha256 = SHA('1') }],
-    ['selected first-frame asset', (value: ReturnType<typeof receipt>) => { value.selectedFirstFrameAssetId = 'asset-forged' }],
+    ['selected first-frame asset', (value: ReturnType<typeof receipt>) => {
+      (value as { selectedFirstFrameAssetId: string }).selectedFirstFrameAssetId = 'asset-forged'
+    }],
     ['selected first-frame bytes', (value: ReturnType<typeof receipt>) => { value.selectedFirstFrameMaterializedSha256 = SHA('1') }],
     ['video preflight', (value: ReturnType<typeof receipt>) => { value.videoPreflightSha256 = SHA('1') }],
     ['video quote', (value: ReturnType<typeof receipt>) => { value.videoQuoteProjectionSha256 = SHA('1') }],
-    ['maximum reservation', (value: ReturnType<typeof receipt>) => { value.maximumReservationCny = 0.31 }],
+    ['maximum reservation', (value: ReturnType<typeof receipt>) => {
+      (value as { maximumReservationCny: number }).maximumReservationCny = 0.31
+    }],
     ['paid confirmation digest', (value: ReturnType<typeof receipt>) => { value.paidConfirmationTextSha256 = SHA('1') }],
   ])('rejects a recovered receipt with a forged %s binding', async (_name, mutate) => {
     const prepared = await prepareProductionTakeCommand(INTENT, dependencies(), helpers, new AbortController().signal)
@@ -325,7 +329,9 @@ describe('production Take Host bridge', () => {
   })
 
   it.each([
-    ['confirmation text', (value: ReturnType<typeof videoQuote>) => { value.requiredPaidConfirmationText = '客户端伪造确认。' }],
+    ['confirmation text', (value: ReturnType<typeof videoQuote>) => {
+      (value as { requiredPaidConfirmationText: string }).requiredPaidConfirmationText = '客户端伪造确认。'
+    }],
     ['confirmation digest', (value: ReturnType<typeof videoQuote>) => { value.requiredPaidConfirmationTextSha256 = SHA('1') }],
     ['extra dispatch blocker', (value: ReturnType<typeof videoQuote>) => { value.dispatchBlockers.push('budget_blocked') }],
   ])('rejects a stale or forged current video quote %s before POST', async (_name, mutate) => {

@@ -428,6 +428,7 @@ export interface YimengVideoQuoteRequest {
   readonly shotId: string
 }
 
+/** Writer-authored zero-dispatch quote and exact confirmation text for one video Take. */
 export interface YimengVideoQuoteResponse {
   readonly schema: 'jason.qingmu-writer-video-quote.v1'
   readonly preflightSha256: string

@@ -538,6 +538,8 @@ export interface YimengVideoQuoteRequest {
   readonly sceneId: string
   readonly shotId: string
 }
+
+/** Writer-authored zero-dispatch quote and exact confirmation text for one video Take. */
 export interface YimengVideoQuoteResponse {
   readonly schema: 'jason.qingmu-writer-video-quote.v1'
   readonly preflightSha256: string
@@ -553,6 +555,8 @@ export interface YimengVideoQuoteResponse {
   readonly requiredPaidConfirmationText: string
   readonly requiredPaidConfirmationTextSha256: string
 }
+
+/** Browser intent for queueing one bounded Take against a current selected first frame and quote. */
 export interface QingmuProductionTakeIntent extends Omit<YimengQueueProductionTakeIntent,
   'firstFrameSelectionReceiptSha256' | 'selectedFirstFrameAssetId' | 'selectedFirstFrameMaterializedSha256'
   | 'videoPreflightSha256' | 'videoQuoteProjectionSha256' | 'maximumReservationCny' | 'candidateCount'

@@ -47,6 +47,20 @@ Stopping preserves data. `record-build` requires a clean stopped instance and cl
 
 The dedicated local account uses a random password in `private/login.json`, protected by the current macOS user's private directory. `login` submits that credential to the existing API, renews its normal 24-hour JWT and restarts only this instance's Host and frontend so both receive the renewed private session. It neither changes business data nor replays commands. Open the `entryUrl` printed by `status` again so the browser receives the new HttpOnly cookie; refreshing an existing project URL keeps the old cookie. If a save outcome is unknown, query its original receipt before retrying; do not create a second command. This device-local identity is not evidence of human content approval. Anyone with access to this macOS account or its loopback service has the local user's capabilities.
 
+## Rotate local private credentials
+
+If local instance credentials may have been exposed, first stop normally and create a non-overwriting cold backup. After confirming that the current Harness and Writer worktrees are clean, use the exact instance ID from public `status` output:
+
+```sh
+python3 scripts/qingmu-local.py stop
+python3 scripts/qingmu-local.py backup
+python3 scripts/qingmu-local.py rotate-private-credentials --instance-id EXACT_INSTANCE_ID
+```
+
+Rotation runs only while holding the stopped-instance lock. It regenerates the five local credential classes—JWT signing, attestation, control, director execution and editing handoff—together, updates the random `qingmu-local` login password and the one matching database password hash, and clears the old session. It then automatically rebinds the current build identity, starts the instance, proves in the same launcher process that both the old password and prior session are unauthorized, and logs in with the new password. The command and audit receipt report only categories, booleans, timestamps, permissions and public build identity; they never print credentials or hashes. A mismatched instance ID, running instance, account count other than exactly one, private file that is not a `0600` regular file owned by the current user, unknown sibling secret field, or any failed step closes the operation. A controlled failure before commit restores a consistent stopped state.
+
+After rotation, run `stop`, `start` and `status` once more to confirm a full restart remains `ready: true` with a matching build identity. The old cold backup remains available, but `restore` now always regenerates all five credential classes and the local login password for the new directory, synchronizes the new database password hash and discards the old session, so restored data cannot reactivate old authentication values.
+
 ## Data and backup reference
 
 `storage/jason.db` and `storage/` hold Yimeng data/media; `dsh/` is the independent Harness home/profile; `private/` holds secrets/session/configuration; `logs/` holds startup diagnostics. Keep the whole root private. Neither private files nor backups belong in Git. The launcher scrubs inherited credentials, never reads an old production `.env`, binds only `127.0.0.1`, and leaves paid Provider access disabled.
@@ -60,6 +74,6 @@ python3 scripts/qingmu-local.py start --root /absolute/new/restore-path
 python3 scripts/qingmu-local.py login --root /absolute/new/restore-path
 ```
 
-Backup requires confirmed clean shutdown, creates a new timestamped directory, and checks SQLite integrity plus storage, audit and build-manifest SHA-256 values. A missing build identity is recorded as `unknown_missing`, not inferred. A free lock after an abnormal supervisor exit does not prove shutdown: a persistent dirty marker blocks start/backup and reports unknown status until operator diagnosis. Restore requires the complete hash inventory and writes only a nonexistent new directory; it preserves the source instance, allocates a new process identity and deliberately leaves the copied build identity mismatched until `record-build` binds the new root. Keep a verified backup before changing the bound source checkouts. Stop this instance and return to the recorded source commits to roll back code; database schema rollback is not automatic.
+Backup requires confirmed clean shutdown, creates a new timestamped directory, and checks SQLite integrity plus storage, audit and build-manifest SHA-256 values. A missing build identity is recorded as `unknown_missing`, not inferred. A free lock after an abnormal supervisor exit does not prove shutdown: a persistent dirty marker blocks start/backup and reports unknown status until operator diagnosis. Restore requires the complete hash inventory and writes only a nonexistent new directory; it preserves the source instance, allocates a new process identity, fully rekeys local private credentials and login authentication, and deliberately leaves the copied build identity mismatched until `record-build` binds the new root. Keep a verified backup before changing the bound source checkouts. Stop this instance and return to the recorded source commits to roll back code; database schema rollback is not automatic.
 
 The launcher does not install system autostart, expose a public server, migrate formal data, run Provider jobs, or sign off content. See the [ownership decision](../../.agents/notes/implemented/architecture/2026-08-29-qingmu-local-instance.md).

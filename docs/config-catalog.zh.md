@@ -689,7 +689,7 @@ export interface YimengCommandAdapterConfig {
 }
 ```
 
-来源：[`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:492`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
+来源：[`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:493`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-qingmu-yimeng-read-adapter"></a>
 
@@ -709,7 +709,7 @@ export interface YimengReadAdapterConfig {
 }
 ```
 
-来源：[`packages/experimental/qingmu-yimeng-read-adapter/src/index.ts:412`](../packages/experimental/qingmu-yimeng-read-adapter/src/index.ts)
+来源：[`packages/experimental/qingmu-yimeng-read-adapter/src/index.ts:415`](../packages/experimental/qingmu-yimeng-read-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-tool-agent-team"></a>
 
