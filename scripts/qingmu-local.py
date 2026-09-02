@@ -1008,9 +1008,17 @@ class Supervisor:
                         log.close()
 
 
-def start(root: Path, config: dict) -> dict:
+def start(
+    root: Path,
+    config: dict,
+    *,
+    return_owned_supervisor: bool = False,
+) -> dict | tuple[dict, subprocess.Popen]:
     try:
-        return control(root, config, "status")
+        existing = control(root, config, "status")
+        if return_owned_supervisor:
+            raise RuntimeError("轮换要求停止实例；检测到既有运行实例")
+        return existing
     except (FileNotFoundError, ConnectionRefusedError):
         pass
     with instance_lock(root):
@@ -1023,7 +1031,8 @@ def start(root: Path, config: dict) -> dict:
     deadline = time.monotonic() + 75
     while time.monotonic() < deadline:
         try:
-            return control(root, config, "status")
+            result = control(root, config, "status")
+            return (result, child) if return_owned_supervisor else result
         except (FileNotFoundError, ConnectionRefusedError):
             if child.poll() is not None:
                 raise RuntimeError("启动失败，见 logs/supervisor.log；未操作未知进程")
@@ -1149,11 +1158,27 @@ def _expect_http_unauthorized(
     raise RuntimeError("旧凭据仍可用；实例将停止")
 
 
-def _stop_rotated_instance(root: Path, config: dict) -> None:
+def _stop_rotated_instance(
+    root: Path,
+    config: dict,
+    owned_supervisor: subprocess.Popen | None,
+) -> None:
+    control_stopped = False
     try:
         control(root, config, "stop")
+        control_stopped = True
     except (FileNotFoundError, ConnectionRefusedError, RuntimeError):
-        return
+        pass
+    if owned_supervisor is not None and owned_supervisor.poll() is None:
+        if control_stopped:
+            try:
+                owned_supervisor.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                stop_child(owned_supervisor)
+        else:
+            # This is the exact supervisor Popen created by this rotation
+            # process, never a persisted PID or an unrelated listener.
+            stop_child(owned_supervisor)
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         try:
@@ -1162,6 +1187,7 @@ def _stop_rotated_instance(root: Path, config: dict) -> None:
             return
         except RuntimeError:
             time.sleep(0.05)
+    raise RuntimeError("轮换验证失败且实例停止未确认；禁止继续或自动重启")
 
 
 def rotate_private_credentials(root: Path, expected_instance_id: str) -> dict:
@@ -1170,9 +1196,10 @@ def rotate_private_credentials(root: Path, expected_instance_id: str) -> dict:
     config = context["newConfig"]
     old_login = context["oldLogin"]
     old_session = context["oldSession"]
+    owned_supervisor: subprocess.Popen | None = None
     try:
         manifest = record_build_manifest(root, config)
-        runtime = start(root, config)
+        runtime, owned_supervisor = start(root, config, return_owned_supervisor=True)
         api_url = runtime.get("apiUrl")
         if not isinstance(api_url, str) or not api_url.startswith("http://127.0.0.1:"):
             raise RuntimeError("轮换后 API loopback 身份缺失")
@@ -1194,7 +1221,7 @@ def rotate_private_credentials(root: Path, expected_instance_id: str) -> dict:
         ):
             raise RuntimeError("轮换后新凭据登录或运行身份核验失败")
     except Exception:
-        _stop_rotated_instance(root, config)
+        _stop_rotated_instance(root, config, owned_supervisor)
         raise
 
     receipt = {

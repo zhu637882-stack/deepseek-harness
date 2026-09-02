@@ -594,7 +594,7 @@ class OwnershipTests(unittest.TestCase):
             with patch.object(local, "_rotate_private_state", return_value=context), \
                  patch.object(local, "record_build_manifest", return_value={
                      "matches": True, "harnessCommit": "1" * 40,
-                 }), patch.object(local, "start", return_value=runtime), \
+                 }), patch.object(local, "start", return_value=(runtime, None)), \
                  patch.object(local, "_expect_http_unauthorized", return_value=True) as rejected, \
                  patch.object(local, "control", return_value=logged_in):
                 receipt = local.rotate_private_credentials(root, "rotation-instance")
@@ -610,6 +610,27 @@ class OwnershipTests(unittest.TestCase):
             ]
             for item in private_values:
                 self.assertFalse(item in serialized)
+
+    def test_rotation_failure_stops_the_exact_owned_supervisor_when_control_is_unavailable(self):
+        owned = subprocess.Popen(["/bin/sleep", "30"])
+        try:
+            with patch.object(local, "control", side_effect=ConnectionRefusedError), \
+                 patch.object(local, "stop_child", wraps=local.stop_child) as stop_owned, \
+                 patch.object(local, "instance_lock", return_value=local.contextlib.nullcontext()), \
+                 patch.object(local, "require_clean"):
+                local._stop_rotated_instance(Path("/unused"), {}, owned)
+            stop_owned.assert_called_once_with(owned)
+            self.assertIsNotNone(owned.poll())
+        finally:
+            local.stop_child(owned)
+
+    def test_rotation_failure_reports_when_stopped_state_cannot_be_confirmed(self):
+        with patch.object(local, "control", return_value={"stopped": True}), \
+             patch.object(local, "instance_lock", side_effect=RuntimeError("still owned")), \
+             patch.object(local.time, "monotonic", side_effect=[0.0, 0.0, 6.0]), \
+             patch.object(local.time, "sleep"):
+            with self.assertRaisesRegex(RuntimeError, "停止未确认"):
+                local._stop_rotated_instance(Path("/unused"), {}, None)
 
     def test_partial_start_cleans_only_owned_child(self):
         with tempfile.TemporaryDirectory() as directory:
