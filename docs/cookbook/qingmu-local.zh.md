@@ -15,7 +15,7 @@ python3 scripts/qingmu-local.py login
 python3 scripts/qingmu-local.py status
 ```
 
-打开 `status` 输出的唯一 `entryUrl`。它建立正常的 HttpOnly 本地会话并直接进入青木品牌的易梦项目工作区，不先展示通用 DSh 对话或额外青木弹窗。`ready: true` 要求三个自有进程、API 的精确数据库/媒体身份、DSh Host 监听/页面和六阶段前端监听/页面分别通过核验；状态字段保持分开，便于诊断。六阶段页面嵌入限定范围的导演工作区。规划保存或 GET-only 恢复后，外层页面只接受准确 iframe origin/source 和项目/剧集范围，重读 canonical 规划与导演上下文，刷新工作流投影，并定位已保存镜头。被拒绝或陈旧的通知保持可见，且不会制造假成功。这是持久集成环境，不代表完整产品验收。
+打开 `status` 输出的唯一 `entryUrl`。它建立正常的 HttpOnly 本地会话并直接进入青木品牌的易梦项目工作区，不先展示通用 DSh 对话或额外青木弹窗。`ready: true` 要求 API、限定范围的文本 Worker、DSh Host、前端四个自有子进程，以及 API 的精确数据库/媒体身份、DSh Host 监听/页面和六阶段前端监听/页面分别通过核验；状态字段保持分开，便于诊断。六阶段页面嵌入限定范围的导演工作区。规划保存或 GET-only 恢复后，外层页面只接受准确 iframe origin/source 和项目/剧集范围，重读 canonical 规划与导演上下文，刷新工作流投影，并定位已保存镜头。被拒绝或陈旧的通知保持可见，且不会制造假成功。这是持久集成环境，不代表完整产品验收。
 
 <a id="write-the-first-script"></a>
 
@@ -49,6 +49,12 @@ python3 scripts/qingmu-local.py login
 
 停止保留数据。`record-build` 要求实例正常停止且 Writer/Harness 工作树干净，然后在 `build-manifest/current.json` 中原子绑定两边提交、Core 工作区状态、frontend BUILD_ID、必要 Host 产物 SHA-256、端口和数据根；旧记录保留在 `build-manifest/history/`。启动和 `status` 会把该记录与磁盘实况对比；身份缺失或漂移时失败关闭。启动不重新播种项目。重启保持端口；已保存端口被占时失败，不停止占用者。重复启动返回同一存活实例。陈旧 PID 仅供诊断，命令绝不向其发信号。管理进程损坏或被外部强杀时会拒绝猜测，可能需操作员诊断其遗留子进程；不要按端口杀未知监听者。
 
+管理进程被外部中断后，只能在实例保持停止时，用公开状态中的精确实例 ID 执行 `recover-crash`。命令会持有生命周期锁，并核验带代际号的进程账本、所有已记录 PID、每个 loopback 端口、控制 socket、数据库/WAL 句柄和 immutable 完整性；它不发送信号，也不调用 Provider。持久恢复意图保证中断后可安全重复；只要意图尚未清理，启动和备份都会继续失败关闭，直至同一命令完成收尾。
+
+```sh
+python3 scripts/qingmu-local.py recover-crash --instance-id EXACT_INSTANCE_ID
+```
+
 专用本地账号使用 `private/login.json` 中的随机密码，由当前 macOS 用户的私有目录保护。`login` 向既有 API 提交该凭据，更新正常 24 小时 JWT，仅重启本实例 Host 与前端，让两者取得更新后的私密会话；它不改业务数据、不重放命令。随后重新打开 `status` 输出的 `entryUrl`，让浏览器取得新的 HttpOnly Cookie；只刷新原项目地址会继续携带旧 Cookie。保存结果未知时先查原回执再决定重试，不要新建第二条命令。设备本地身份不是人工内容批准证明。能访问此 macOS 账号或 loopback 服务的主体拥有本地用户能力。
 
 ## 轮换本机私密凭据
@@ -78,6 +84,6 @@ python3 scripts/qingmu-local.py start --root /absolute/new/restore-path
 python3 scripts/qingmu-local.py login --root /absolute/new/restore-path
 ```
 
-备份要求已确认正常停机，每次新建带时间戳的目录，检查 SQLite 完整性以及 storage、audit 和 build manifest 的 SHA-256。构建身份缺失时只记录 `unknown_missing`，不进行推断。监督进程异常退出后，锁空闲不证明停机：持久 dirty 标记会阻止启动/备份并报告状态未知，需操作员诊断。恢复要求完整哈希清单，仅写不存在的新目录，保留来源实例并分配新进程身份；恢复过程会全量 rekey 本机私密凭据和登录认证，复制的构建身份会保持不匹配，直至 `record-build` 将其绑定到新目录。修改绑定的代码工作区前保留已验证备份。代码回滚需停止本实例并回到记录的来源提交；不自动回滚数据库 schema。
+备份要求已确认正常停机，每次新建带时间戳的目录，检查 SQLite 完整性以及 storage、audit 和 build manifest 的 SHA-256。构建身份缺失时只记录 `unknown_missing`，不进行推断。监督进程异常退出后，锁空闲不证明停机：持久 dirty 标记会阻止启动/备份并报告状态未知，直至上述显式失败关闭恢复成功。恢复要求完整哈希清单，仅写不存在的新目录，保留来源实例并分配新进程身份；恢复过程会全量 rekey 本机私密凭据和登录认证，复制的构建身份会保持不匹配，直至 `record-build` 将其绑定到新目录。修改绑定的代码工作区前保留已验证备份。代码回滚需停止本实例并回到记录的来源提交；不自动回滚数据库 schema。
 
 启动器不安装系统自启动、不开放公网、不迁移正式数据、不运行 Provider 作业、不签收内容。详见[所有权决策](../../.agents/notes/implemented/architecture/2026-08-29-qingmu-local-instance.zh.md)。

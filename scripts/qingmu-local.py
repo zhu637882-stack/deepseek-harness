@@ -45,6 +45,9 @@ TEXT_FOUNDATION_STAGES = (
     "shot_plan",
 )
 BUILD_MANIFEST_SCHEMA = "qingmu.local-build-manifest.v1"
+PROCESS_LEDGER_SCHEMA = "qingmu.local-process-ledger.v1"
+CRASH_RECOVERY_SCHEMA = "qingmu.local-crash-recovery.v2"
+OWNED_PROCESS_ROLES = ("api", "worker", "host", "frontend")
 BUILD_MANIFEST_ARTIFACTS = (
     "apps/cli/lib/bin.js",
     "packages/experimental/qingmu-yimeng-command-adapter/lib/index.js",
@@ -699,6 +702,357 @@ def require_clean(root: Path, config: dict) -> None:
     value = json.loads(marker.read_text()) if marker.is_file() and not marker.is_symlink() else {}
     if value != {"instanceId": config["instanceId"], "state": "clean"}:
         raise RuntimeError("实例停止状态未知：监督进程可能异常退出。拒绝启动/冷备；未操作历史PID。请先人工核对本实例进程，勿删除运行标记")
+    recovery = root / "private/crash-recovery.json"
+    if recovery.exists() or recovery.is_symlink():
+        raise RuntimeError("崩溃恢复提交尚未收尾；拒绝启动/冷备。请用同一实例ID再次运行 recover-crash")
+
+
+def _persisted_process_exists(pid: object) -> bool:
+    """Return whether one diagnostic PID still names any live process."""
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
+        raise ValueError("崩溃恢复缺少有效的历史进程标识")
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _path_has_open_handle(path: Path) -> bool:
+    """Check one exact instance file without treating lsof output as ownership."""
+    if not path.exists():
+        return False
+    result = subprocess.run(
+        ["/usr/sbin/lsof", "-Fn", "--", str(path)],
+        capture_output=True,
+        timeout=10,
+        env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+    )
+    if result.returncode == 0:
+        return bool(result.stdout.strip())
+    if (
+        result.returncode == 1
+        and not result.stdout.strip()
+        and not result.stderr.strip()
+    ):
+        return False
+    raise RuntimeError("无法核对实例数据库打开句柄；保持崩溃锁定")
+
+
+def _validate_recorded_pids(value: dict, *, allow_empty_children: bool) -> dict:
+    fields = (
+        "supervisorPid",
+        "apiPid",
+        "workerPid",
+        "hostPid",
+        "frontendPid",
+    )
+    recorded = {name: value.get(name) for name in fields}
+    for name, pid in recorded.items():
+        if (
+            allow_empty_children
+            and name != "supervisorPid"
+            and pid is None
+        ):
+            continue
+        if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
+            raise RuntimeError("崩溃恢复缺少有效的历史进程标识")
+    return recorded
+
+
+def _validate_recorded_ports(value: dict) -> dict:
+    fields = ("apiPort", "hostPort", "webPort")
+    recorded = {name: value.get(name) for name in fields}
+    if any(
+        not isinstance(port, int)
+        or isinstance(port, bool)
+        or port <= 0
+        or port > 65535
+        for port in recorded.values()
+    ) or len(set(recorded.values())) != len(recorded):
+        raise RuntimeError("历史端口记录不完整或漂移；保持崩溃锁定")
+    return recorded
+
+
+def _verify_crash_recovery_facts(
+    root: Path,
+    recorded_pids: dict,
+    recorded_ports: dict,
+) -> str:
+    if any(
+        _persisted_process_exists(pid)
+        for pid in recorded_pids.values()
+        if pid is not None
+    ):
+        raise RuntimeError("历史进程标识仍存活；保持崩溃锁定且不发送信号")
+    try:
+        for port in recorded_ports.values():
+            available_port(port)
+    except OSError as exc:
+        raise RuntimeError("历史端口仍有监听者；保持崩溃锁定且不接管") from exc
+
+    control_path = root / "control.sock"
+    if control_path.exists() or control_path.is_symlink():
+        if control_path.is_symlink() or not control_path.is_socket():
+            raise RuntimeError("实例控制路径类型异常；保持崩溃锁定")
+        with socket.socket(socket.AF_UNIX) as probe:
+            probe.settimeout(1)
+            try:
+                probe.connect(str(control_path))
+            except (FileNotFoundError, ConnectionRefusedError):
+                pass
+            except OSError as exc:
+                raise RuntimeError("无法证明实例控制 socket 已失效；保持崩溃锁定") from exc
+            else:
+                raise RuntimeError("实例控制 socket 仍可连接；保持崩溃锁定")
+
+    database = root / "storage/jason.db"
+    database_paths = (
+        database,
+        database.with_name(database.name + "-wal"),
+        database.with_name(database.name + "-shm"),
+    )
+    if any(_path_has_open_handle(path) for path in database_paths):
+        raise RuntimeError("实例数据库仍有打开句柄；保持崩溃锁定")
+    integrity = cold_integrity(database)
+    if integrity != "ok":
+        raise RuntimeError("实例数据库完整性检查失败；保持崩溃锁定")
+    return integrity
+
+
+def _read_crash_recovery_intent(
+    root: Path,
+    expected_instance_id: str,
+    expected_ports: dict,
+) -> tuple[dict, dict, dict, Path]:
+    recovery = _read_owner_only_json(
+        root / "private/crash-recovery.json", "崩溃恢复意图"
+    )
+    if (
+        recovery.get("schema") != CRASH_RECOVERY_SCHEMA
+        or recovery.get("instanceId") != expected_instance_id
+        or recovery.get("state") != "verified"
+        or recovery.get("recordedPorts") != expected_ports
+        or recovery.get("ledgerSource") not in {
+            "process-ledger", "legacy-runtime"
+        }
+        or (
+            recovery.get("ledgerSource") == "process-ledger"
+            and (
+                not isinstance(recovery.get("ledgerGeneration"), int)
+                or isinstance(recovery.get("ledgerGeneration"), bool)
+                or recovery["ledgerGeneration"] < 1
+            )
+        )
+        or (
+            recovery.get("ledgerSource") == "legacy-runtime"
+            and recovery.get("ledgerGeneration") is not None
+        )
+        or recovery.get("databaseIntegrity") != "ok"
+        or recovery.get("signalsSent") is not False
+        or recovery.get("providerCalls") != 0
+        or not isinstance(recovery.get("verifiedAt"), str)
+        or not recovery["verifiedAt"]
+        or not isinstance(recovery.get("audit"), str)
+        or not recovery["audit"]
+    ):
+        raise RuntimeError("崩溃恢复意图无效；保持崩溃锁定")
+    recorded_pids = _validate_recorded_pids(
+        recovery.get("recordedPids") or {}, allow_empty_children=True
+    )
+    recorded_ports = recovery["recordedPorts"]
+    audit_path = Path(recovery["audit"])
+    if audit_path.parent != root / "audit" or audit_path.suffix != ".json":
+        raise RuntimeError("崩溃恢复审计路径越界；保持崩溃锁定")
+    return recovery, recorded_pids, recorded_ports, audit_path
+
+
+def _crash_recovery_audit(
+    expected_instance_id: str,
+    recovery: dict,
+    recorded_pids: dict,
+    recorded_ports: dict,
+    integrity: str,
+) -> dict:
+    return {
+        "schema": CRASH_RECOVERY_SCHEMA,
+        "instanceId": expected_instance_id,
+        "ledgerSource": recovery.get("ledgerSource"),
+        "ledgerGeneration": recovery.get("ledgerGeneration"),
+        "recordedPids": recorded_pids,
+        "recordedPorts": recorded_ports,
+        "databaseIntegrity": integrity,
+        "signalsSent": False,
+        "providerCalls": 0,
+        "recoveredAt": recovery.get("verifiedAt"),
+    }
+
+
+def recover_crashed_instance(root: Path, config: dict, expected_instance_id: str) -> dict:
+    """Confirm a fully dead recorded process set before clearing one dirty marker."""
+    if expected_instance_id != config["instanceId"]:
+        raise ValueError("崩溃恢复实例身份不匹配")
+    with instance_lock(root):
+        lifecycle = _read_owner_only_json(
+            root / "private/lifecycle.json", "实例生命周期标记"
+        )
+        recovery_path = root / "private/crash-recovery.json"
+        ports = _read_owner_only_json(root / "private/ports.json", "实例端口记录")
+        expected_ports = _validate_recorded_ports(ports)
+        if lifecycle == {"instanceId": expected_instance_id, "state": "clean"}:
+            if not (recovery_path.exists() or recovery_path.is_symlink()):
+                raise RuntimeError("实例不是可恢复的崩溃锁定状态；未修改")
+            recovery, recorded_pids, recorded_ports, audit_path = (
+                _read_crash_recovery_intent(
+                    root, expected_instance_id, expected_ports
+                )
+            )
+            integrity = _verify_crash_recovery_facts(
+                root, recorded_pids, recorded_ports
+            )
+            runtime = _read_owner_only_json(
+                root / "runtime.json", "实例停止运行状态"
+            )
+            if (
+                runtime.get("instanceId") != expected_instance_id
+                or runtime.get("ready") is not False
+                or any(
+                    runtime.get(name) is not None
+                    for name in (
+                        "supervisorPid", "apiPid", "workerPid",
+                        "hostPid", "frontendPid",
+                    )
+                )
+                or root.joinpath("control.sock").exists()
+                or root.joinpath("control.sock").is_symlink()
+            ):
+                raise RuntimeError("崩溃恢复提交状态不完整；拒绝启动并保留恢复意图")
+            audit = _crash_recovery_audit(
+                expected_instance_id,
+                recovery,
+                recorded_pids,
+                recorded_ports,
+                integrity,
+            )
+            if _read_owner_only_json(audit_path, "崩溃恢复审计") != audit:
+                raise RuntimeError("崩溃恢复审计漂移；拒绝启动并保留恢复意图")
+            _remove_private_file(recovery_path)
+            return {
+                "instanceId": expected_instance_id,
+                "recovered": True,
+                "commitFinalized": True,
+                "running": False,
+                "databaseIntegrity": integrity,
+                "signalsSent": False,
+                "providerCalls": 0,
+                "audit": str(audit_path),
+                "message": "已完成中断后的崩溃恢复提交；实例保持停止，可显式 start。",
+            }
+        if lifecycle != {"instanceId": expected_instance_id, "state": "dirty"}:
+            raise RuntimeError("实例不是可恢复的崩溃锁定状态；未修改")
+        if recovery_path.exists() or recovery_path.is_symlink():
+            recovery, recorded_pids, recorded_ports, audit_path = (
+                _read_crash_recovery_intent(
+                    root, expected_instance_id, expected_ports
+                )
+            )
+        else:
+            ledger_path = root / "private/process-ledger.json"
+            if ledger_path.exists() or ledger_path.is_symlink():
+                ledger = _read_owner_only_json(ledger_path, "实例进程账本")
+                if (
+                    ledger.get("schema") != PROCESS_LEDGER_SCHEMA
+                    or ledger.get("instanceId") != expected_instance_id
+                    or not isinstance(ledger.get("generation"), int)
+                    or isinstance(ledger.get("generation"), bool)
+                    or ledger["generation"] < 1
+                ):
+                    raise RuntimeError("实例进程账本无效；保持崩溃锁定")
+                recorded_pids = _validate_recorded_pids(
+                    ledger, allow_empty_children=True
+                )
+                recorded_ports = _validate_recorded_ports(ledger)
+                ledger_source = "process-ledger"
+                ledger_generation = ledger["generation"]
+            else:
+                runtime = _read_owner_only_json(
+                    root / "runtime.json", "实例历史运行状态"
+                )
+                if runtime.get("instanceId") != expected_instance_id:
+                    raise RuntimeError("历史运行状态与实例身份不符；保持崩溃锁定")
+                recorded_pids = _validate_recorded_pids(
+                    runtime, allow_empty_children=False
+                )
+                recorded_ports = _validate_recorded_ports(runtime)
+                ledger_source = "legacy-runtime"
+                ledger_generation = None
+            if recorded_ports != expected_ports:
+                raise RuntimeError("历史端口记录不完整或漂移；保持崩溃锁定")
+            integrity = _verify_crash_recovery_facts(
+                root, recorded_pids, recorded_ports
+            )
+            verified_at = utc_timestamp()
+            audit_path = root / "audit" / (
+                "crash-recovery-"
+                + verified_at.replace(":", "").replace("-", "")
+                + "-"
+                + secrets.token_hex(4)
+                + ".json"
+            )
+            recovery = {
+                "schema": CRASH_RECOVERY_SCHEMA,
+                "instanceId": expected_instance_id,
+                "state": "verified",
+                "ledgerSource": ledger_source,
+                "ledgerGeneration": ledger_generation,
+                "recordedPids": recorded_pids,
+                "recordedPorts": recorded_ports,
+                "databaseIntegrity": integrity,
+                "signalsSent": False,
+                "providerCalls": 0,
+                "verifiedAt": verified_at,
+                "audit": str(audit_path),
+            }
+            write_json(recovery_path, recovery)
+
+        integrity = _verify_crash_recovery_facts(
+            root, recorded_pids, recorded_ports
+        )
+        audit = _crash_recovery_audit(
+            expected_instance_id,
+            recovery,
+            recorded_pids,
+            recorded_ports,
+            integrity,
+        )
+        if audit_path.exists() or audit_path.is_symlink():
+            if _read_owner_only_json(audit_path, "崩溃恢复审计") != audit:
+                raise RuntimeError("崩溃恢复审计漂移；保持崩溃锁定")
+        else:
+            write_json(audit_path, audit)
+
+        # The durable intent above retains the original PID/port evidence if
+        # either mutation fails. A repeated command re-verifies those facts and
+        # resumes without trusting an already-replaced runtime.json.
+        write_stopped_runtime(root, config)
+        control_path = root / "control.sock"
+        if control_path.exists() or control_path.is_symlink():
+            control_path.unlink()
+            _fsync_directory(control_path.parent)
+        mark_lifecycle(root, config, "clean")
+        _remove_private_file(recovery_path)
+        return {
+            "instanceId": expected_instance_id,
+            "recovered": True,
+            "running": False,
+            "databaseIntegrity": "ok",
+            "signalsSent": False,
+            "providerCalls": 0,
+            "audit": str(audit_path),
+            "message": "已确认历史进程消失、端口空闲和数据库完整；实例保持停止，可显式 start。",
+        }
 
 
 def stop_child(child: subprocess.Popen | None) -> None:
@@ -723,6 +1077,7 @@ class Supervisor:
         self.stopping = False
         self.ports: dict = {}
         self.logs: list = []
+        self.process_ledger_active = False
 
     def launch(
         self,
@@ -736,6 +1091,70 @@ class Supervisor:
         self.logs.append(log)
         return subprocess.Popen(argv, cwd=cwd or self.root / "work", env=env, stdin=subprocess.DEVNULL,
                                 stdout=log, stderr=log)
+
+    def _persist_process_ledger(self) -> dict:
+        path = self.root / "private/process-ledger.json"
+        generation = 1
+        if path.exists() or path.is_symlink():
+            previous = _read_owner_only_json(path, "实例进程账本")
+            if (
+                previous.get("schema") != PROCESS_LEDGER_SCHEMA
+                or previous.get("instanceId") != self.config["instanceId"]
+                or not isinstance(previous.get("generation"), int)
+                or isinstance(previous.get("generation"), bool)
+                or previous["generation"] < 1
+            ):
+                raise RuntimeError("实例进程账本无效；拒绝继续启动")
+            generation = previous["generation"] + 1
+        ports = _validate_recorded_ports(self.ports)
+        value = {
+            "schema": PROCESS_LEDGER_SCHEMA,
+            "instanceId": self.config["instanceId"],
+            "generation": generation,
+            "recordedAt": utc_timestamp(),
+            "supervisorPid": os.getpid(),
+            **{
+                role + "Pid": getattr(self, role).pid
+                if getattr(self, role) is not None
+                else None
+                for role in OWNED_PROCESS_ROLES
+            },
+            **ports,
+        }
+        write_json(path, value)
+        return value
+
+    def _persist_process_ledger_if_active(self) -> None:
+        if self.process_ledger_active:
+            self._persist_process_ledger()
+
+    def launch_owned(
+        self,
+        role: str,
+        argv: list[str],
+        env: dict,
+        label: str,
+        *,
+        cwd: Path | None = None,
+    ) -> subprocess.Popen:
+        if role not in OWNED_PROCESS_ROLES:
+            raise ValueError("未知的实例子进程角色")
+        child = self.launch(argv, env, label, cwd=cwd)
+        setattr(self, role, child)
+        try:
+            self._persist_process_ledger_if_active()
+        except Exception:
+            stop_child(child)
+            setattr(self, role, None)
+            raise
+        return child
+
+    def stop_owned(self, role: str) -> None:
+        if role not in OWNED_PROCESS_ROLES:
+            raise ValueError("未知的实例子进程角色")
+        stop_child(getattr(self, role))
+        setattr(self, role, None)
+        self._persist_process_ledger_if_active()
 
     def wait_ready(self, child: subprocess.Popen, probe) -> None:
         deadline = time.monotonic() + 35
@@ -894,9 +1313,14 @@ class Supervisor:
         session = self.root / "private/session.json"
         if session.exists():
             env["YIMENG_API_TOKEN"] = json.loads(session.read_text())["token"]
-        self.host = self.launch([self.config["node"], str(HARNESS / "apps/cli/lib/bin.js"),
-            "--profile", "qingmu", "--patch", str(overlay_path), "--host", "127.0.0.1",
-            "--port", str(self.ports["hostPort"]), "--no-open"], env, "host")
+        self.host = self.launch_owned(
+            "host",
+            [self.config["node"], str(HARNESS / "apps/cli/lib/bin.js"),
+             "--profile", "qingmu", "--patch", str(overlay_path), "--host", "127.0.0.1",
+             "--port", str(self.ports["hostPort"]), "--no-open"],
+            env,
+            "host",
+        )
         self.wait_ready(self.host, self.host_healthy)
         # Register the instance-owned directory through the same durable Host
         # contract used by the UI. The client startup policy can then create
@@ -918,7 +1342,8 @@ class Supervisor:
         session = self.root / "private/session.json"
         if session.exists():
             env["QINGMU_LOCAL_SESSION_TOKEN"] = json.loads(session.read_text())["token"]
-        self.frontend = self.launch(
+        self.frontend = self.launch_owned(
+            "frontend",
             [self.config["frontendNode"], str(next_entry), "start", "-H", "127.0.0.1",
              "-p", str(self.ports["webPort"])],
             env,
@@ -997,7 +1422,8 @@ class Supervisor:
         else:
             command.extend(["--heartbeat-only", "--max-tasks", "0"])
         command.append("--disable-durable-director-orchestration")
-        self.worker = self.launch(
+        self.worker = self.launch_owned(
+            "worker",
             command,
             env,
             "worker",
@@ -1056,11 +1482,13 @@ class Supervisor:
         write_json(self.root / "private/session.json", {"token": result["token"]})
         # Explicit login restarts only our Host and frontend to refresh their environment token.
         # It never replays an interrupted command; the existing receipt UI recovers it.
-        stop_child(self.frontend)
-        stop_child(self.host)
+        self.stop_owned("frontend")
+        self.stop_owned("host")
         self.start_host()
         self.start_frontend()
-        return {**self.status(), "message": "会话已更新。请重新打开 entryUrl；未知提交结果请先恢复原回执，不要新建命令。"}
+        status = self.status()
+        write_json(self.root / "runtime.json", status)
+        return {**status, "message": "会话已更新。请重新打开 entryUrl；未知提交结果请先恢复原回执，不要新建命令。"}
 
     def run(self) -> None:
         with instance_lock(self.root):
@@ -1092,17 +1520,26 @@ class Supervisor:
                                   "webUrl": f"http://127.0.0.1:{web_port}",
                                   "entryUrl": f"http://127.0.0.1:{web_port}/qingmu-runtime/local-session"}
                     write_json(persisted, self.ports)
+                    self.process_ledger_active = True
+                    self._persist_process_ledger()
                     mark_build_started(self.root, self.config, self.ports)
-                    self.api = self.launch([*backend_command(self.config), "--port", str(api_port)],
-                                           backend_env(self.root, self.config), "api")
+                    self.api = self.launch_owned(
+                        "api",
+                        [*backend_command(self.config), "--port", str(api_port)],
+                        backend_env(self.root, self.config),
+                        "api",
+                    )
                     self.wait_ready(self.api, self.api_identity)
                     self.start_worker()
                     self.start_host()
                     self.start_frontend()
                     write_json(self.root / "runtime.json", self.status())
                     while not self.stopping:
-                        if (self.api.poll() is not None or self.worker.poll() is not None
-                                or self.host.poll() is not None or self.frontend.poll() is not None):
+                        if any(
+                            getattr(self, role) is None
+                            or getattr(self, role).poll() is not None
+                            for role in OWNED_PROCESS_ROLES
+                        ):
                             raise RuntimeError("本实例子进程退出，正在清理其余自有子进程")
                         try:
                             client, _ = server.accept()
@@ -1124,10 +1561,10 @@ class Supervisor:
                                     result = self.login()
                                 elif request["op"] == "stop":
                                     self.stopping = True
-                                    stop_child(self.frontend)
-                                    stop_child(self.host)
-                                    stop_child(self.worker)
-                                    stop_child(self.api)
+                                    self.stop_owned("frontend")
+                                    self.stop_owned("host")
+                                    self.stop_owned("worker")
+                                    self.stop_owned("api")
                                     result = {"stopped": True, "instanceId": self.config["instanceId"], "dataPreserved": True}
                                 elif request["op"] == "status":
                                     result = self.status()
@@ -1140,15 +1577,17 @@ class Supervisor:
                             except OSError:
                                 pass
                 finally:
-                    stop_child(self.frontend)
-                    stop_child(self.host)
-                    stop_child(self.worker)
-                    stop_child(self.api)
-                    write_stopped_runtime(self.root, self.config)
-                    mark_lifecycle(self.root, self.config, "clean")
-                    control_path.unlink(missing_ok=True)
-                    for log in self.logs:
-                        log.close()
+                    try:
+                        for role in reversed(OWNED_PROCESS_ROLES):
+                            stop_child(getattr(self, role))
+                            setattr(self, role, None)
+                        self._persist_process_ledger_if_active()
+                        write_stopped_runtime(self.root, self.config)
+                        mark_lifecycle(self.root, self.config, "clean")
+                        control_path.unlink(missing_ok=True)
+                    finally:
+                        for log in self.logs:
+                            log.close()
 
 
 def start(
@@ -2070,7 +2509,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["init", "record-build", "start", "status", "stop", "login", "backup", "restore",
                                             "rotate-private-credentials", "bind-project-runtime",
-                                            "director-submit-once", "_supervise"])
+                                            "recover-crash", "director-submit-once", "_supervise"])
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--yimeng-root", type=Path)
     parser.add_argument("--core-root", type=Path)
@@ -2128,6 +2567,10 @@ def main() -> None:
                     episode_id=args.episode_id,
                     max_paid_cny=args.max_paid_cny,
                 )
+            elif args.command == "recover-crash":
+                if not args.instance_id:
+                    raise ValueError("recover-crash 必须明确 --instance-id")
+                result = recover_crashed_instance(root, config, args.instance_id)
             elif args.command == "director-submit-once":
                 if not args.task_id or args.lock_pack is None or not args.lock_sha256:
                     raise ValueError("director-submit-once 必须明确 task-id、lock-pack 与 lock-sha256")

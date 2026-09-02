@@ -497,6 +497,82 @@ class OwnershipTests(unittest.TestCase):
                 "renewed-token",
             )
 
+    def test_login_replacement_is_persisted_and_crash_recovery_sees_new_pids(self):
+        class Child:
+            def __init__(self, pid):
+                self.pid = pid
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for part in ("private", "storage", "audit"):
+                (root / part).mkdir()
+            config = {"instanceId": "login-ledger", "root": str(root)}
+            ports = {
+                "apiPort": 49101,
+                "hostPort": 49102,
+                "webPort": 49103,
+                "apiUrl": "http://127.0.0.1:49101",
+                "hostUrl": "http://127.0.0.1:49102",
+                "webUrl": "http://127.0.0.1:49103",
+                "entryUrl": "http://127.0.0.1:49103/qingmu-runtime/local-session",
+            }
+            local.mark_lifecycle(root, config, "dirty")
+            local.write_json(root / "private/ports.json", ports)
+            local.write_json(root / "private/login.json", {
+                "username": local.LOCAL_USERNAME,
+                "password": "isolated-password",
+            })
+            supervisor = local.Supervisor(root, config)
+            supervisor.process_ledger_active = True
+            supervisor.ports = ports
+            supervisor.api = Child(930001)
+            supervisor.worker = Child(930002)
+            supervisor.host = Child(930003)
+            supervisor.frontend = Child(930004)
+            first = supervisor._persist_process_ledger()
+
+            def start_host():
+                supervisor.host = Child(930013)
+                supervisor._persist_process_ledger()
+
+            def start_frontend():
+                supervisor.frontend = Child(930014)
+                supervisor._persist_process_ledger()
+
+            current = {
+                "instanceId": config["instanceId"],
+                "supervisorPid": local.os.getpid(),
+                "apiPid": 930001,
+                "workerPid": 930002,
+                "hostPid": 930013,
+                "frontendPid": 930014,
+                **ports,
+                "ready": True,
+            }
+            with patch.object(supervisor, "api_identity"), \
+                 patch.object(local, "http", return_value={"token": "renewed-token"}), \
+                 patch.object(local, "stop_child"), \
+                 patch.object(supervisor, "start_host", side_effect=start_host), \
+                 patch.object(supervisor, "start_frontend", side_effect=start_frontend), \
+                 patch.object(supervisor, "status", return_value=current):
+                supervisor.login()
+
+            ledger = json.loads((root / "private/process-ledger.json").read_text())
+            self.assertGreater(ledger["generation"], first["generation"])
+            self.assertEqual(ledger["hostPid"], 930013)
+            self.assertEqual(ledger["frontendPid"], 930014)
+            runtime = json.loads((root / "runtime.json").read_text())
+            self.assertEqual(runtime["hostPid"], 930013)
+            self.assertEqual(runtime["frontendPid"], 930014)
+
+            with patch.object(
+                local,
+                "_persisted_process_exists",
+                side_effect=lambda pid: pid == 930014,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "历史进程标识仍存活"):
+                    local.recover_crashed_instance(root, config, config["instanceId"])
+
     def test_private_rotation_changes_all_credentials_login_and_session_without_secret_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
             root, old_config, old_login, _old_session = self.rotation_world(Path(directory))
@@ -1110,6 +1186,298 @@ class OwnershipTests(unittest.TestCase):
                 self.assertFalse((root / "backups").exists())
             finally:
                 local.stop_child(child)
+
+    def test_explicit_crash_recovery_requires_dead_recorded_processes_and_free_ports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "instance"
+            for part in ("private", "storage", "audit"):
+                (root / part).mkdir(parents=True, mode=0o700)
+            root.chmod(0o700)
+            config = {"instanceId": "crashed-instance", "root": str(root)}
+            local.mark_lifecycle(root, config, "dirty")
+            local.write_json(
+                root / "runtime.json",
+                {
+                    "instanceId": config["instanceId"],
+                    "supervisorPid": 900001,
+                    "apiPid": 900002,
+                    "workerPid": 900003,
+                    "hostPid": 900004,
+                    "frontendPid": 900005,
+                    "apiPort": 49001,
+                    "hostPort": 49002,
+                    "webPort": 49003,
+                },
+            )
+            local.write_json(
+                root / "private/ports.json",
+                {
+                    "apiPort": 49001,
+                    "hostPort": 49002,
+                    "webPort": 49003,
+                    "apiUrl": "http://127.0.0.1:49001",
+                    "hostUrl": "http://127.0.0.1:49002",
+                    "webUrl": "http://127.0.0.1:49003",
+                },
+            )
+            with sqlite3.connect(root / "storage/jason.db") as connection:
+                connection.execute("CREATE TABLE sample (id INTEGER)")
+            stale_control = socket.socket(socket.AF_UNIX)
+            stale_control.bind(str(root / "control.sock"))
+            stale_control.close()
+
+            with patch.object(local, "_persisted_process_exists", return_value=False), \
+                 patch.object(local, "available_port", side_effect=lambda port: port), \
+                 patch.object(local, "_path_has_open_handle", return_value=False):
+                result = local.recover_crashed_instance(
+                    root, config, config["instanceId"]
+                )
+
+            self.assertTrue(result["recovered"])
+            self.assertFalse(result["running"])
+            self.assertFalse(result["signalsSent"])
+            self.assertEqual(result["providerCalls"], 0)
+            local.require_clean(root, config)
+            runtime = json.loads((root / "runtime.json").read_text())
+            self.assertFalse(runtime["ready"])
+            self.assertIsNone(runtime["workerPid"])
+            audit = json.loads(Path(result["audit"]).read_text())
+            self.assertEqual(audit["databaseIntegrity"], "ok")
+            self.assertFalse(audit["signalsSent"])
+            self.assertFalse((root / "control.sock").exists())
+            self.assertFalse((root / "private/crash-recovery.json").exists())
+
+    def test_crash_recovery_refuses_live_pid_without_mutating_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "instance"
+            for part in ("private", "storage", "audit"):
+                (root / part).mkdir(parents=True, mode=0o700)
+            root.chmod(0o700)
+            config = {"instanceId": "still-live", "root": str(root)}
+            local.mark_lifecycle(root, config, "dirty")
+            local.write_json(
+                root / "runtime.json",
+                {
+                    "instanceId": config["instanceId"],
+                    "supervisorPid": 901001,
+                    "apiPid": 901002,
+                    "workerPid": 901003,
+                    "hostPid": 901004,
+                    "frontendPid": 901005,
+                    "apiPort": 49201,
+                    "hostPort": 49202,
+                    "webPort": 49203,
+                },
+            )
+            local.write_json(
+                root / "private/ports.json",
+                {"apiPort": 49201, "hostPort": 49202, "webPort": 49203},
+            )
+            with patch.object(local, "_persisted_process_exists", return_value=True):
+                with self.assertRaisesRegex(RuntimeError, "历史进程标识仍存活"):
+                    local.recover_crashed_instance(root, config, config["instanceId"])
+            self.assertEqual(
+                json.loads((root / "private/lifecycle.json").read_text())["state"],
+                "dirty",
+            )
+            self.assertEqual(list((root / "audit").iterdir()), [])
+
+    def test_open_handle_probe_fails_closed_on_lsof_stderr(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "jason.db"
+            target.touch()
+            completed = subprocess.CompletedProcess(
+                args=[], returncode=1, stdout=b"", stderr=b"lsof failed"
+            )
+            with patch.object(local.subprocess, "run", return_value=completed):
+                with self.assertRaisesRegex(RuntimeError, "打开句柄"):
+                    local._path_has_open_handle(target)
+
+    def test_crash_recovery_intent_survives_runtime_write_failure_and_retries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "instance"
+            for part in ("private", "storage", "audit"):
+                (root / part).mkdir(parents=True, mode=0o700)
+            root.chmod(0o700)
+            config = {"instanceId": "retry-recovery", "root": str(root)}
+            pids = {
+                "supervisorPid": 902001,
+                "apiPid": 902002,
+                "workerPid": 902003,
+                "hostPid": 902004,
+                "frontendPid": 902005,
+            }
+            ports = {"apiPort": 49301, "hostPort": 49302, "webPort": 49303}
+            local.mark_lifecycle(root, config, "dirty")
+            local.write_json(root / "runtime.json", {
+                "instanceId": config["instanceId"], **pids, **ports,
+            })
+            local.write_json(root / "private/ports.json", ports)
+            with sqlite3.connect(root / "storage/jason.db") as connection:
+                connection.execute("CREATE TABLE sample (id INTEGER)")
+
+            checks = (
+                patch.object(local, "_persisted_process_exists", return_value=False),
+                patch.object(local, "available_port", side_effect=lambda port: port),
+                patch.object(local, "_path_has_open_handle", return_value=False),
+            )
+            with checks[0], checks[1], checks[2], \
+                 patch.object(local, "write_stopped_runtime", side_effect=RuntimeError("disk full")):
+                with self.assertRaisesRegex(RuntimeError, "disk full"):
+                    local.recover_crashed_instance(root, config, config["instanceId"])
+
+            intent_path = root / "private/crash-recovery.json"
+            self.assertTrue(intent_path.is_file())
+            intent = json.loads(intent_path.read_text())
+            self.assertEqual(intent["recordedPids"], pids)
+            self.assertEqual(
+                json.loads((root / "private/lifecycle.json").read_text())["state"],
+                "dirty",
+            )
+            local.write_json(root / "runtime.json", {
+                "instanceId": config["instanceId"],
+                **{name: None for name in pids},
+                **ports,
+                "ready": False,
+            })
+            checked = []
+            with patch.object(
+                local,
+                "_persisted_process_exists",
+                side_effect=lambda pid: checked.append(pid) or False,
+            ), patch.object(local, "available_port", side_effect=lambda port: port), \
+                 patch.object(local, "_path_has_open_handle", return_value=False):
+                result = local.recover_crashed_instance(
+                    root, config, config["instanceId"]
+                )
+            self.assertTrue(result["recovered"])
+            self.assertEqual(set(checked), set(pids.values()))
+            self.assertFalse(intent_path.exists())
+            local.require_clean(root, config)
+
+    def test_recovery_cleanup_failure_blocks_start_then_finalizes_before_new_generation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "instance"
+            for part in ("private", "storage", "audit"):
+                (root / part).mkdir(parents=True, mode=0o700)
+            root.chmod(0o700)
+            config = {"instanceId": "cleanup-recovery", "root": str(root)}
+            old_pids = {
+                "supervisorPid": 904001,
+                "apiPid": 904002,
+                "workerPid": 904003,
+                "hostPid": 904004,
+                "frontendPid": 904005,
+            }
+            ports = {"apiPort": 49401, "hostPort": 49402, "webPort": 49403}
+            local.mark_lifecycle(root, config, "dirty")
+            local.write_json(root / "runtime.json", {
+                "instanceId": config["instanceId"], **old_pids, **ports,
+            })
+            local.write_json(root / "private/ports.json", ports)
+            with sqlite3.connect(root / "storage/jason.db") as connection:
+                connection.execute("CREATE TABLE sample (id INTEGER)")
+
+            with patch.object(local, "_persisted_process_exists", return_value=False), \
+                 patch.object(local, "available_port", side_effect=lambda port: port), \
+                 patch.object(local, "_path_has_open_handle", return_value=False), \
+                 patch.object(local, "_remove_private_file", side_effect=OSError("fsync failed")):
+                with self.assertRaisesRegex(OSError, "fsync failed"):
+                    local.recover_crashed_instance(root, config, config["instanceId"])
+
+            intent = root / "private/crash-recovery.json"
+            self.assertTrue(intent.is_file())
+            self.assertEqual(
+                json.loads((root / "private/lifecycle.json").read_text())["state"],
+                "clean",
+            )
+            with self.assertRaisesRegex(RuntimeError, "恢复提交尚未收尾"):
+                local.require_clean(root, config)
+
+            with patch.object(local, "_persisted_process_exists", return_value=False), \
+                 patch.object(local, "available_port", side_effect=lambda port: port), \
+                 patch.object(local, "_path_has_open_handle", return_value=False):
+                result = local.recover_crashed_instance(
+                    root, config, config["instanceId"]
+                )
+            self.assertTrue(result["commitFinalized"])
+            self.assertFalse(intent.exists())
+            local.require_clean(root, config)
+
+            new_pids = {
+                "supervisorPid": 905001,
+                "apiPid": 905002,
+                "workerPid": 905003,
+                "hostPid": 905004,
+                "frontendPid": 905005,
+            }
+            local.write_json(root / "private/process-ledger.json", {
+                "schema": local.PROCESS_LEDGER_SCHEMA,
+                "instanceId": config["instanceId"],
+                "generation": 99,
+                "recordedAt": local.utc_timestamp(),
+                **new_pids,
+                **ports,
+            })
+            local.mark_lifecycle(root, config, "dirty")
+            with patch.object(
+                local,
+                "_persisted_process_exists",
+                side_effect=lambda pid: pid == new_pids["frontendPid"],
+            ):
+                with self.assertRaisesRegex(RuntimeError, "历史进程标识仍存活"):
+                    local.recover_crashed_instance(root, config, config["instanceId"])
+
+    def test_crash_recovery_refuses_live_control_socket_and_occupied_port(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "instance"
+            for part in ("private", "storage", "audit"):
+                (root / part).mkdir(parents=True, mode=0o700)
+            root.chmod(0o700)
+            config = {"instanceId": "live-control", "root": str(root)}
+            listeners = [socket.socket(), socket.socket(), socket.socket()]
+            unix_server = socket.socket(socket.AF_UNIX)
+            try:
+                for listener in listeners:
+                    listener.bind(("127.0.0.1", 0))
+                ports = dict(zip(
+                    ("apiPort", "hostPort", "webPort"),
+                    (listener.getsockname()[1] for listener in listeners),
+                ))
+                pids = {
+                    "supervisorPid": 903001,
+                    "apiPid": 903002,
+                    "workerPid": 903003,
+                    "hostPid": 903004,
+                    "frontendPid": 903005,
+                }
+                local.mark_lifecycle(root, config, "dirty")
+                local.write_json(root / "runtime.json", {
+                    "instanceId": config["instanceId"], **pids, **ports,
+                })
+                local.write_json(root / "private/ports.json", ports)
+                with sqlite3.connect(root / "storage/jason.db") as connection:
+                    connection.execute("CREATE TABLE sample (id INTEGER)")
+                with patch.object(local, "_persisted_process_exists", return_value=False):
+                    with self.assertRaisesRegex(RuntimeError, "端口仍有监听者"):
+                        local.recover_crashed_instance(root, config, config["instanceId"])
+
+                for listener in listeners:
+                    listener.close()
+                unix_server.bind(str(root / "control.sock"))
+                unix_server.listen(1)
+                with patch.object(local, "_persisted_process_exists", return_value=False), \
+                     patch.object(local, "_path_has_open_handle", return_value=False):
+                    with self.assertRaisesRegex(RuntimeError, "socket 仍可连接"):
+                        local.recover_crashed_instance(root, config, config["instanceId"])
+                self.assertEqual(
+                    json.loads((root / "private/lifecycle.json").read_text())["state"],
+                    "dirty",
+                )
+            finally:
+                for listener in listeners:
+                    listener.close()
+                unix_server.close()
 
     def test_incomplete_backup_manifest_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
