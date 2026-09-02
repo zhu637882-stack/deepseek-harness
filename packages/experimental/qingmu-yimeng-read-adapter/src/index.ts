@@ -42,6 +42,11 @@ import {
   registerEditorialHandoffDownload,
 } from './editorial-handoff-download.ts'
 import type { EditorialHandoffDownloadAccess } from './editorial-handoff-download.ts'
+import { registerEntityDraftReviewRead } from './entity-draft-review.ts'
+export {
+  registerEntityDraftReviewRead,
+  type EntityDraftReviewReadDependencies,
+} from './entity-draft-review.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -5223,6 +5228,10 @@ export function apply(ctx: Context, config: YimengReadAdapterConfig = {}): void 
   const handler = createYimengReadHandler(config, dependencies)
   ctx.provide('qingmuYimengRead', handler)
   ctx.connection.rpc.handle(CHANNEL, handler, { authority: 'loopback' })
+  ctx.effect(() => registerEntityDraftReviewRead(ctx.webServer, {
+    baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),
+    fetch: dependencies.fetch,
+  }), 'qingmu-yimeng-read: entity draft human review state')
   if (authorizer !== undefined) {
     ctx.effect(() => registerEditorialHandoffDownload(ctx.webServer, {
       baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),

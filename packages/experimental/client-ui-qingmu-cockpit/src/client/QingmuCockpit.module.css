@@ -451,6 +451,49 @@
   background: var(--qingmu-accent-strong);
 }
 
+.entityReview {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.entityReview h4,
+.entityReview h5,
+.entityReview p { margin: 0; }
+
+.entityReviewLogin,
+.entityReviewCard { display: grid; gap: 10px; }
+
+.entityReviewLogin label { display: grid; gap: 5px; }
+
+.entityReviewLogin input {
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+}
+
+.entityReviewCard {
+  padding: 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 9px;
+}
+
+.entityReviewJson {
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .scriptMeta,
 .previewMeta,
 .commitReceipt dl {

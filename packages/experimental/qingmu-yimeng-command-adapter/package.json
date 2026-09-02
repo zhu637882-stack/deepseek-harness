@@ -39,6 +39,7 @@
     "@deepseek-ai/dsh-credentials-local": "workspace:^",
     "@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter": "workspace:^",
     "@deepseek-ai/dsh-host-apiproxy": "workspace:^",
+    "@deepseek-ai/dsh-host-webserver": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^"
   },
   "peerDependenciesMeta": {
@@ -51,6 +52,7 @@
     "@deepseek-ai/dsh-client-connection": "workspace:^",
     "@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter": "workspace:^",
     "@deepseek-ai/dsh-host-apiproxy": "workspace:^",
+    "@deepseek-ai/dsh-host-webserver": "workspace:^",
     "@deepseek-ai/dsh-llm-deepseek": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^"
   }

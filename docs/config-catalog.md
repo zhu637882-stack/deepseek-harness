@@ -641,7 +641,7 @@ Source: [`packages/experimental/qingmu-imago-method-adapter/src/index.ts:616`](.
 
 ## `@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter`
 
-Requires: `connection`
+Requires: `connection` · `webServer`
 
 ```ts config-catalog
 /** Deployment-tunable loopback upstream and request deadline. */
@@ -687,7 +687,7 @@ export interface YimengCommandAdapterConfig {
 }
 ```
 
-Source: [`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:486`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
+Source: [`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:492`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-qingmu-yimeng-read-adapter"></a>
 
@@ -707,7 +707,7 @@ export interface YimengReadAdapterConfig {
 }
 ```
 
-Source: [`packages/experimental/qingmu-yimeng-read-adapter/src/index.ts:407`](../packages/experimental/qingmu-yimeng-read-adapter/src/index.ts)
+Source: [`packages/experimental/qingmu-yimeng-read-adapter/src/index.ts:412`](../packages/experimental/qingmu-yimeng-read-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-tool-agent-team"></a>
 
