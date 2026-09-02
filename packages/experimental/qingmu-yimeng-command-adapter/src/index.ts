@@ -86,6 +86,7 @@ declare module '@deepseek-ai/cordis' {
 }
 import { prepareShotFindingCommand } from './shot-finding.ts'
 import { registerEntityDraftReviewCommands } from './entity-draft-review.ts'
+import { registerFirstFrameSelectionCommands } from './first-frame-selection.ts'
 export {
   registerEntityDraftReviewCommands,
   type EntityDraftReviewCommandDependencies,
@@ -6137,6 +6138,10 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
     baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),
     fetch: globalThis.fetch,
   }), 'qingmu-yimeng-command: entity draft human review commands')
+  ctx.effect(() => registerFirstFrameSelectionCommands(ctx.webServer, {
+    baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),
+    fetch: globalThis.fetch,
+  }), 'qingmu-yimeng-command: first-frame selection commands')
   const interactiveController = new AbortController()
   const activeInteractiveTasks = new Set<string>()
   const queueDirectorProductionTask = config.directorProductionInteractiveEnabled === true
