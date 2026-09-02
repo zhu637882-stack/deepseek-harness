@@ -11,8 +11,13 @@ import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import { loadDirectorReplayMethod } from './director-replay.ts'
+import { loadDirectorStageCard, loadDirectorStageCards } from './director-stage-cards.ts'
 
 export { loadDirectorReplayMethod } from './director-replay.ts'
+export {
+  loadDirectorStageCard,
+  loadDirectorStageCards,
+} from './director-stage-cards.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -3964,8 +3969,48 @@ export function createImagoMethodHandler(
         && endpoint !== 'stageArtifactMethod'
         && endpoint !== 'lsuPlanMethod'
         && endpoint !== 'reworkRouteMethod'
+        && endpoint !== 'directorStageCardsMethod'
+        && endpoint !== 'directorStageCardMethod'
       ) {
         throw new InputError(`unknown IMAGO method endpoint: ${endpoint}`)
+      }
+      if (endpoint === 'directorStageCardsMethod') {
+        if (signal.aborted) return cancelled()
+        if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+          throw new InputError('director stage cards request is invalid')
+        }
+        const request = payload as Record<string, unknown>
+        if (Object.keys(request).length !== 1 || typeof request.stageId !== 'string') {
+          throw new InputError('director stage cards request is invalid')
+        }
+        if (!/^[A-Z0-9]{1,12}$/u.test(request.stageId)) throw new InputError('director stage cards request is invalid')
+        const value = loadDirectorStageCards(request.stageId)
+        return { ok: true, value }
+      }
+      if (endpoint === 'directorStageCardMethod') {
+        if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+          throw new InputError('director stage card request is invalid')
+        }
+        const request = payload as Record<string, unknown>
+        if (Object.keys(request).length !== 2 || typeof request.repoId !== 'string' || typeof request.path !== 'string') {
+          throw new InputError('director stage card request is invalid')
+        }
+        if (request.repoId.trim() === '' || request.path.trim() === '') {
+          throw new InputError('director stage card request is invalid')
+        }
+        if (signal.aborted) return cancelled()
+        try {
+          const value = await loadDirectorStageCard(request.repoId, request.path)
+          // oxlint-disable-next-line typescript/no-unnecessary-condition -- file provenance verification is asynchronous.
+          if (signal.aborted) return cancelled()
+          return { ok: true, value }
+        } catch (error) {
+          const code = error instanceof Error ? error.message : 'director_stage_card_unavailable'
+          if (code.startsWith('director_asset_') || code === 'director_stage_card_not_registered') {
+            throw new InputError(code)
+          }
+          throw error
+        }
       }
       if (endpoint === 'directorReplayMethod') {
         if (
