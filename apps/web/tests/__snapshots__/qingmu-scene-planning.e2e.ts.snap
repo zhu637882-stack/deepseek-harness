@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`real scene planning entry > creates text and scene from empty UI, recovers lost save, edits and restores persistent IDs in a fresh browser 1`] = `
+exports[`real scene planning entry > creates text and scene from empty UI, refreshes canonically without stage authority, and restores persistent IDs 1`] = `
 {
   "counts": {
     "actors": 2,
@@ -25,16 +25,20 @@ exports[`real scene planning entry > creates text and scene from empty UI, recov
   },
   "creativeContractRestored": true,
   "directorContextRestored": true,
+  "duplicateReplayRejected": true,
   "forgedOriginRejected": true,
   "freshBrowserAfterRestart": true,
   "inputRestored": true,
   "lostReplyRecovered": true,
   "missingReferences": true,
   "noPromptIr": true,
+  "outerCanonicalRefreshBlockedWithoutStageAuthority": true,
   "sourceUnchanged": true,
+  "staleContextRejected": true,
   "titles": [
     "雨夜相遇",
     "回应邀请",
   ],
+  "wrongScopeRejected": true,
 }
 `;

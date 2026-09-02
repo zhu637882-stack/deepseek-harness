@@ -1,7 +1,7 @@
 /** Host-only deterministic replay proposal over a fresh Yimeng director snapshot. */
 import { createHash } from 'node:crypto'
 import type { ImagoDirectorReplayMethodResponse } from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter/types'
-import type { CreationScope } from './creation.ts'
+import { normalizeCreativeContract, type CreationScope, type CreativeContract } from './creation.ts'
 import type { PlanningShot } from './scene-planning.ts'
 
 /** Advisory proposal variants allowed by the replay-only seam. */
@@ -26,6 +26,11 @@ export interface DirectorContextSnapshot extends CreationScope {
   readonly sourceScene: Readonly<Record<string, unknown>>
   readonly storyboard: { readonly id: string; readonly version: number; readonly sourceHash: string; readonly status: 'Ready' }
   readonly shot: PlanningShot & { readonly id: string }
+  readonly creativeContract: {
+    readonly revision: 1
+    readonly sha256: string
+    readonly contract: CreativeContract
+  } | null
   readonly selectedReferences: readonly Readonly<Record<string, unknown>>[]
   readonly sourceTime: string
   readonly contextSnapshotSha256: string
@@ -289,7 +294,7 @@ export function normalizeDirectorContext(
 ): DirectorContextSnapshot {
   const root = object(value, helpers.responseError, 'director context')
   exact(root, ['schema', 'projectId', 'episodeId', 'sceneId', 'shotId', 'script', 'sceneSource', 'sourceScene',
-    'storyboard', 'shot', 'selectedReferences', 'sourceTime', 'contextSnapshotSha256', 'providerCalls',
+    'storyboard', 'shot', 'creativeContract', 'selectedReferences', 'sourceTime', 'contextSnapshotSha256', 'providerCalls',
     'costAmountCny', 'businessStateChanged', 'humanDecisionInferred', 'formalQcInferred', 'selectionGranted',
     'readyGranted'], helpers.responseError, 'director context')
   if (root.schema !== 'jason.qingmu-director-context-snapshot.v1'
@@ -314,6 +319,16 @@ export function normalizeDirectorContext(
   }
   if (!Array.isArray(shot.dialogueLineIds) || !Array.isArray(root.selectedReferences)) {
     throw helpers.responseError('director context arrays invalid')
+  }
+  if (root.creativeContract !== null) {
+    const binding = object(root.creativeContract, helpers.responseError, 'director creative contract')
+    exact(binding, ['revision', 'sha256', 'contract'], helpers.responseError, 'director creative contract')
+    if (binding.revision !== 1) throw helpers.responseError('director creative contract revision invalid')
+    const contract = normalizeCreativeContract(binding.contract, helpers.responseError, expected.projectId)
+    if (digest(binding.sha256, helpers.responseError, 'director creative contract SHA')
+      !== directorJcsSha256(contract, 'director creative contract', helpers.responseError)) {
+      throw helpers.responseError('director creative contract SHA mismatch')
+    }
   }
   return value as DirectorContextSnapshot
 }

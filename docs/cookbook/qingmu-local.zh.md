@@ -15,7 +15,7 @@ python3 scripts/qingmu-local.py login
 python3 scripts/qingmu-local.py status
 ```
 
-打开 `status` 输出的唯一 `entryUrl`。它建立正常的 HttpOnly 本地会话并直接进入青木品牌的易梦项目工作区，不先展示通用 DSh 对话或额外青木弹窗。`ready: true` 要求三个自有进程、API 的精确数据库/媒体身份、DSh Host 监听/页面和六阶段前端监听/页面分别通过核验；状态字段保持分开，便于诊断。顶部会如实显示“导演服务已连接 · 面板待接入”：DSh 服务已纳入同一生命周期，但导演面板尚未嵌入六阶段页面。这是具有剧本创作入口的持久集成环境，不代表完整产品验收。
+打开 `status` 输出的唯一 `entryUrl`。它建立正常的 HttpOnly 本地会话并直接进入青木品牌的易梦项目工作区，不先展示通用 DSh 对话或额外青木弹窗。`ready: true` 要求三个自有进程、API 的精确数据库/媒体身份、DSh Host 监听/页面和六阶段前端监听/页面分别通过核验；状态字段保持分开，便于诊断。六阶段页面嵌入限定范围的导演工作区。规划保存或 GET-only 恢复后，外层页面只接受准确 iframe origin/source 和项目/剧集范围，重读 canonical 规划与导演上下文，刷新工作流投影，并定位已保存镜头。被拒绝或陈旧的通知保持可见，且不会制造假成功。这是持久集成环境，不代表完整产品验收。
 
 <a id="write-the-first-script"></a>
 

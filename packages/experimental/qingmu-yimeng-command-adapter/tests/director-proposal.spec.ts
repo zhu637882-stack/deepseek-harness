@@ -31,12 +31,25 @@ const methodBody = {
     formalQcInferred: false, selectionGranted: false, readyGranted: false },
 } as const
 const method = { ...methodBody, methodPackageSha256: sha(methodBody) }
+const creativeContract = {
+  schema: 'qingmu.creative-contract.v2', revision: 1, locked: true,
+  identity: { projectId: scope.projectId },
+  source: { textSha256: '1'.repeat(64), textVersion: 'creation-text-v1' },
+  project: { mode: 'whole_series', creationType: 'story_idea', aspectRatio: '9:16', episodeCount: 1, duration: '1-2分钟' },
+  methods: {
+    visualStyle: { id: 'realistic', version: 'catalog-v1', sha256: '2'.repeat(64) },
+    stylePackId: { id: 'realistic_cinema', version: '1.0.0', sha256: '3'.repeat(64) },
+    writingSkills: [], directorSkills: [{ id: 'shot_blocking_director', version: '1.0.0', sha256: '4'.repeat(64) }],
+    cameraSkills: [], soundSkills: [],
+  },
+} as const
 const context = (narrative = '相遇') => {
   const body = { schema: 'jason.qingmu-director-context-snapshot.v1', ...scope,
     script: { revision: 1, sha256: 'b'.repeat(64) }, sceneSource: { sceneIndex: 1 },
     sourceScene: { sceneIndex: 1, title: '雨夜' },
     storyboard: { id: 'revision_1', version: 1, sourceHash: 'c'.repeat(64), status: 'Ready' },
     shot: { id: 'shot_1', title: '门口', narrative, visual: '雨夜门口', action: '开门', durationSec: 3.5, dialogueLineIds: ['line_1'] },
+    creativeContract: { revision: 1, sha256: sha(creativeContract), contract: creativeContract },
     selectedReferences: [], sourceTime: '2026-08-29T00:00:00+00:00', providerCalls: 0,
     costAmountCny: '0', businessStateChanged: false, humanDecisionInferred: false,
     formalQcInferred: false, selectionGranted: false, readyGranted: false }

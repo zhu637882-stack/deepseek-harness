@@ -23,10 +23,11 @@ export interface CreativeContractMethodRef {
 }
 /** Project-level creation contract. It locks sources and methods, not approval. */
 export interface CreativeContract {
-  readonly schema: 'qingmu.creative-contract.v1'
+  readonly schema: 'qingmu.creative-contract.v1' | 'qingmu.creative-contract.v2'
   readonly revision: 1
   readonly locked: true
-  readonly source: { readonly textSha256: string }
+  readonly identity?: { readonly projectId: string }
+  readonly source: { readonly textSha256: string; readonly textVersion?: 'creation-text-v1' }
   readonly project: {
     readonly mode: 'whole_series'
     readonly creationType: ProjectInitializationRequest['creationType']
@@ -187,13 +188,38 @@ function methodRef(value: unknown, error: ErrorFactory): CreativeContractMethodR
   const raw = exact(value, ['id', 'version', 'sha256'], error)
   return { id: text(raw.id, error), version: text(raw.version, error), sha256: sha(raw.sha256, error) }
 }
-function creativeContract(value: unknown, error: ErrorFactory): CreativeContract {
-  const raw = exact(value, ['schema', 'revision', 'locked', 'source', 'project', 'methods'], error)
-  if (raw.schema !== 'qingmu.creative-contract.v1' || raw.revision !== 1 || raw.locked !== true) {
+/**
+ * Validate and normalize one complete Writer-owned creative contract.
+ *
+ * @param value Candidate contract from the canonical project projection.
+ * @param error Static adapter error factory used for fail-closed validation.
+ * @param expectedProjectId Required project binding for the current v2 contract.
+ * @returns A detached, strictly validated v1 or v2 contract.
+ */
+export function normalizeCreativeContract(
+  value: unknown,
+  error: ErrorFactory,
+  expectedProjectId?: string,
+): CreativeContract {
+  const candidate = object(value, error)
+  const current = candidate.schema === 'qingmu.creative-contract.v2'
+  const raw = exact(value, current
+    ? ['schema', 'revision', 'locked', 'identity', 'source', 'project', 'methods']
+    : ['schema', 'revision', 'locked', 'source', 'project', 'methods'], error)
+  if (!['qingmu.creative-contract.v1', 'qingmu.creative-contract.v2'].includes(String(raw.schema))
+    || raw.revision !== 1 || raw.locked !== true) {
     throw error('creative contract identity invalid')
   }
-  const source = exact(raw.source, ['textSha256'], error)
+  if (current) {
+    const identity = exact(raw.identity, ['projectId'], error)
+    const projectId = identifier(identity.projectId, error)
+    if (expectedProjectId === undefined || projectId !== expectedProjectId) {
+      throw error('creative contract project binding invalid')
+    }
+  }
+  const source = exact(raw.source, current ? ['textSha256', 'textVersion'] : ['textSha256'], error)
   sha(source.textSha256, error)
+  if (current && source.textVersion !== 'creation-text-v1') throw error('creative contract text version invalid')
   const project = exact(raw.project, ['mode', 'creationType', 'aspectRatio', 'episodeCount', 'duration'], error)
   if (project.mode !== 'whole_series'
     || !['story_idea', 'novel_adapt', 'script_adapt', 'original_script'].includes(String(project.creationType))
@@ -206,6 +232,8 @@ function creativeContract(value: unknown, error: ErrorFactory): CreativeContract
     if (!Array.isArray(methods[field]) || methods[field].length > 64) throw error('creative contract methods invalid')
     for (const entry of methods[field]) methodRef(entry, error)
   }
+  if (current && (methods.stylePackId === null || !Array.isArray(methods.directorSkills)
+    || methods.directorSkills.length === 0)) throw error('creative contract current methods invalid')
   return raw as unknown as CreativeContract
 }
 function scope(raw: Record<string, unknown>, error: ErrorFactory): CreationScope {
@@ -267,7 +295,7 @@ export function prepareCreationCommand(endpoint: string, value: unknown, helpers
           || result.sourceText !== null) throw bad('creative contract absent state invalid')
       } else {
         if (!result.locked || result.revision !== 1) throw bad('creative contract lock invalid')
-        const contract = creativeContract(result.contract, bad)
+        const contract = normalizeCreativeContract(result.contract, bad, projectId)
         const contractSha = createHash('sha256').update(helpers.canonicalJson(contract, 'creative contract')).digest('hex')
         if (sha(result.sha256, bad) !== contractSha) throw bad('creative contract SHA invalid')
         const sourceText = storyText(result.sourceText, bad)
@@ -309,7 +337,7 @@ export function prepareCreationCommand(endpoint: string, value: unknown, helpers
         || result.providerCalls !== 0 || result.stageStarted !== false || result.approvalGranted !== false) throw bad('initialization receipt mismatch')
       for (const field of ['projectId', 'seriesId', 'episodeId', 'owner', 'commandReceiptId', 'eventId']) identifier(result[field], bad)
       if (!recover) {
-        const contract = creativeContract(result.creativeContract, bad)
+        const contract = normalizeCreativeContract(result.creativeContract, bad, identifier(result.projectId, bad))
         if (contract.source.textSha256 !== createHash('sha256').update(String(raw.textInput)).digest('hex')
           || contract.project.mode !== raw.mode || contract.project.creationType !== raw.creationType
           || contract.project.aspectRatio !== raw.aspectRatio || contract.project.episodeCount !== raw.episodeCount
@@ -318,7 +346,7 @@ export function prepareCreationCommand(endpoint: string, value: unknown, helpers
           throw bad('initialization creative contract mismatch')
         }
       } else {
-        const contract = creativeContract(result.creativeContract, bad)
+        const contract = normalizeCreativeContract(result.creativeContract, bad, identifier(result.projectId, bad))
         const contractSha = createHash('sha256').update(helpers.canonicalJson(contract, 'creative contract')).digest('hex')
         if (sha(result.creativeContractSha256, bad) !== contractSha) throw bad('initialization creative contract SHA invalid')
       }

@@ -16,7 +16,7 @@ interface DbState {
   entities: string[][]
 }
 describe.skipIf(!writer || !core || process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu')('real scene planning entry', () => {
-  it('creates text and scene from empty UI, recovers lost save, edits and restores persistent IDs in a fresh browser', async () => {
+  it('creates text and scene from empty UI, refreshes canonically without stage authority, and restores persistent IDs', async () => {
     const parent = mkdtempSync('/private/tmp/qingmu-scene-browser-'), root = join(parent, 'instance')
     const scriptSource = '场景一：雨夜旧街\n动作：门缓缓打开。\n林夏：请进。\n阿明：谢谢。\n场景二：清晨公园\n动作：天亮了。'
     writeFileSync(join(parent, 'ACCEPTANCE-ONLY'), 'Independent planning sample. No content/media approval. No Provider.\n')
@@ -38,48 +38,12 @@ describe.skipIf(!writer || !core || process.env.DSH_CLIENT_BUILD_PROFILE !== 'qi
     let page = await browser.newPage({ viewport: { width: 1440, height: 900 }, locale: 'zh-CN' })
     page.setDefaultTimeout(15_000)
     const host = () => page.frameLocator('iframe[title="青木导演工作区"]')
-    const installOuterSyncReceiver = async () => page.addInitScript(() => {
-      const target = window as unknown as { __qingmuHostSync?: {
-        seen: string[]
-        accepted: number
-        duplicates: number
-        rejected: number
-        sceneId: string | null
-        shotId: string | null
-        last: Record<string, unknown> | null
-      } }
-      target.__qingmuHostSync = { seen: [], accepted: 0, duplicates: 0, rejected: 0,
-        sceneId: null, shotId: null, last: null }
-      window.addEventListener('message', (event) => {
-        const state = target.__qingmuHostSync!
-        const iframe = document.querySelector<HTMLIFrameElement>('iframe[title="青木导演工作区"]')
-        const value = event.data as Record<string, unknown> | null
-        const scope = value?.scope as Record<string, unknown> | undefined
-        const receipt = value?.receipt as Record<string, unknown> | undefined
-        const locate = value?.locate as Record<string, unknown> | undefined
-        const expectedOrigin = iframe?.src ? new URL(iframe.src).origin : null
-        const valid = iframe !== null && event.source === iframe.contentWindow && event.origin === expectedOrigin
-          && value?.schema === 'deepseek.dsh.qingmu-scene-planning-saved.v1'
-          && value.type === 'qingmu:scene-planning-saved'
-          && typeof value.messageId === 'string' && receipt?.eventId === value.messageId
-          && typeof scope?.projectId === 'string' && typeof scope.episodeId === 'string'
-          && scope.projectId === new URL(iframe.src).searchParams.get('qingmuProjectId')
-          && scope.episodeId === new URL(iframe.src).searchParams.get('qingmuEpisodeId')
-          && typeof scope.sceneId === 'string' && typeof scope.shotId === 'string'
-          && locate?.stage === 'storyboard' && locate.sceneId === scope.sceneId && locate.shotId === scope.shotId
-        if (!valid) { state.rejected += 1; return }
-        if (state.seen.includes(value.messageId as string)) { state.duplicates += 1; return }
-        state.seen.push(value.messageId as string)
-        state.accepted += 1
-        // This acceptance receiver models the outer six-stage reaction: one
-        // receipt refresh and an exact locate, never a first-row fallback.
-        state.sceneId = scope.sceneId as string
-        state.shotId = scope.shotId as string
-        state.last = value
-        document.documentElement.dataset.qingmuRefreshCount = String(state.accepted)
-        document.documentElement.dataset.qingmuLocatedSceneId = state.sceneId
-        document.documentElement.dataset.qingmuLocatedShotId = state.shotId
-      })
+    // Evidence-only observer. It never validates, refreshes, locates or deduplicates;
+    // those behaviors must come from the real outer Writer receiver.
+    const installMessageObserver = async () => page.addInitScript(() => {
+      const target = window as unknown as { __qingmuObservedMessages?: unknown[] }
+      target.__qingmuObservedMessages = []
+      window.addEventListener('message', event => target.__qingmuObservedMessages?.push(event.data))
     })
     const settleEmbeddedHost = async () => {
       const frame = host()
@@ -97,11 +61,11 @@ describe.skipIf(!writer || !core || process.env.DSH_CLIENT_BUILD_PROFILE !== 'qi
       // rail behind the modal mask.
       await readOnly.waitFor({ state: 'visible', timeout: 8_000 }).catch(() => undefined)
       if (await readOnly.isVisible()) {
-        await readOnly.click()
-        try { await readOnly.waitFor({ state: 'hidden', timeout: 3_000 }) } catch {
-          await readOnly.click()
-          await readOnly.waitFor({ state: 'hidden' })
-        }
+        // Reload recovery can expose this button while the modal is still
+        // animating. Dispatch the native activation after visibility instead
+        // of making Playwright wait for geometry that the animation changes.
+        await readOnly.evaluate((button: HTMLButtonElement) => { button.click() })
+        await readOnly.waitFor({ state: 'hidden' })
       }
       await cockpit.waitFor()
       expect(await frame.getByRole('tab', { name: '导演工作区', exact: true }).getAttribute('aria-selected')).toBe('true')
@@ -114,25 +78,35 @@ describe.skipIf(!writer || !core || process.env.DSH_CLIENT_BUILD_PROFILE !== 'qi
     }
     const planning = () => host().getByRole('region', { name: '场景与镜头规划' })
     const commands: string[] = [], proposalRequests: string[] = [], freshnessChecks: string[] = []
+    const canonicalOuterRequests: string[] = []
     const browserDiagnostics: string[] = []
     const watch = () => {
       page.on('request', (request) => {
         if (request.url().endsWith('/qingmu-yimeng-command/saveScenePlanning')) commands.push(request.postData() ?? '')
         if (request.url().endsWith('/qingmu-yimeng-command/requestDirectorProposal')) proposalRequests.push(request.postData() ?? '')
         if (request.url().endsWith('/qingmu-yimeng-command/checkDirectorProposalFreshness')) freshnessChecks.push(request.postData() ?? '')
+        if (
+          request.url().includes('/api/qingmu/projects/')
+          && (request.url().includes('/scene-planning') || request.url().includes('/director-inference/context'))
+        ) canonicalOuterRequests.push(request.url())
       })
       page.on('console', message => browserDiagnostics.push(`console:${message.type()}:${message.text()}`))
       page.on('requestfailed', request => browserDiagnostics.push(`requestfailed:${request.url()}:${request.failure()?.errorText ?? 'unknown'}`))
     }
     watch()
-    await installOuterSyncReceiver()
+    await installMessageObserver()
     try {
       await page.goto(initial.entryUrl, { waitUntil: 'load' })
       await page.getByRole('button', { name: '新建项目' }).click()
       await page.getByLabel('项目名称', { exact: true }).fill('导演入场隔离样本 · 未经内容签收')
       await page.getByLabel('故事内容', { exact: true }).fill(scriptSource)
+      await page.locator('#creation-text-version').selectOption({ index: 1 })
       await page.getByRole('button', { name: '下一步' }).click()
       await page.locator('#creation-type').selectOption('original_script')
+      await page.getByRole('button', { name: '请选择风格' }).click()
+      await page.locator('button[title]').first().click()
+      await page.locator('#creation-style-pack').selectOption({ index: 1 })
+      await page.locator('#creation-director-skill').selectOption('shot_blocking_director')
       await page.getByRole('button', { name: '下一步' }).click()
       await page.getByRole('button', { name: '创建并锁定设定' }).click()
       await page.getByText(/创作设定已锁定/).waitFor()
@@ -140,7 +114,17 @@ describe.skipIf(!writer || !core || process.env.DSH_CLIENT_BUILD_PROFILE !== 'qi
       expect(before.projects).toHaveLength(1)
       expect(before.projects[0]![1]).toBe(1)
       expect(before.projects[0]![2]).toMatch(/^[a-f0-9]{64}$/u)
-      expect(JSON.parse(String(before.projects[0]![3]))).toMatchObject({ schema: 'qingmu.creative-contract.v1' })
+      const creativeContract = JSON.parse(String(before.projects[0]![3])) as {
+        schema?: unknown
+        identity?: { projectId?: unknown }
+        source?: { textVersion?: unknown }
+        methods?: { stylePackId?: { id?: unknown }; directorSkills?: Array<{ id?: unknown }> }
+      }
+      expect(creativeContract.schema).toBe('qingmu.creative-contract.v2')
+      expect(creativeContract.identity?.projectId).toBe(String(before.projects[0]![0]))
+      expect(typeof creativeContract.source?.textVersion).toBe('string')
+      expect(typeof creativeContract.methods?.stylePackId?.id).toBe('string')
+      expect(typeof creativeContract.methods?.directorSkills?.[0]?.id).toBe('string')
       await openDirectorWorkspace()
       const bootstrapReceipt = JSON.parse(String(before.receipts[0]![2])) as { projectId: string; episodeId: string }
       const embeddedSrc = await page.locator('iframe[title="青木导演工作区"]').getAttribute('src')
@@ -189,9 +173,15 @@ describe.skipIf(!writer || !core || process.env.DSH_CLIENT_BUILD_PROFILE !== 'qi
       await planning().getByRole('button', { name: '读取恢复', exact: true }).click()
       await planning().getByRole('status').filter({ hasText: '结构版本 1' }).waitFor()
       await expect.poll(async () => page.evaluate(() => (window as unknown as {
-        __qingmuHostSync: { accepted: number; rejected: number; last: { authority: { source: string } } }
-      }).__qingmuHostSync)).toMatchObject({ accepted: 1, rejected: 0,
-        last: { authority: { source: 'manual_edit' } } })
+        __qingmuObservedMessages: unknown[]
+      }).__qingmuObservedMessages), { timeout: 15_000 }).toHaveLength(1)
+      await page.getByRole('status').filter({ hasText: '保存已从易梦权威数据确认，但当前流程尚未允许进入镜头视频阶段' }).waitFor()
+      expect(new URL(page.url()).searchParams.get('stage')).toBe('story_outline')
+      expect(new URL(page.url()).searchParams.get('qingmuShot')).toBeNull()
+      const firstMessage = await page.evaluate(() => (window as unknown as {
+        __qingmuObservedMessages: Array<Record<string, unknown>>
+      }).__qingmuObservedMessages[0])
+      expect(firstMessage).toMatchObject({ authority: { source: 'manual_edit' } })
       const first = inspect()
       expect(first.script).toEqual(scriptSaved.script)
       expect(first.counts).toMatchObject({ projects: 1, episodes: 1, actors: 2, scenes: 1,
@@ -213,17 +203,20 @@ describe.skipIf(!writer || !core || process.env.DSH_CLIENT_BUILD_PROFILE !== 'qi
       await planning().getByRole('button', { name: '确认保存规划' }).click()
       await planning().getByRole('status').filter({ hasText: '结构版本 2' }).waitFor()
       await expect.poll(async () => page.evaluate(() => (window as unknown as {
-        __qingmuHostSync: {
-          accepted: number
-          rejected: number
-          sceneId: string
-          shotId: string
-          last: { method: { adoptedItemIds: string[] }; authority: { source: string } }
-        }
-      }).__qingmuHostSync)).toMatchObject({ accepted: 2, rejected: 0,
-        sceneId: String(first.frames[0]![1]), shotId: String(first.frames[0]![0]),
-        last: { method: { adoptedItemIds: ['narrative-focus'] },
-          authority: { source: 'adopted_replay_suggestion' } } })
+        __qingmuObservedMessages: unknown[]
+      }).__qingmuObservedMessages), { timeout: 15_000 }).toHaveLength(2)
+      await page.getByRole('status').filter({ hasText: '保存已从易梦权威数据确认，但当前流程尚未允许进入镜头视频阶段' }).waitFor()
+      expect(new URL(page.url()).searchParams.get('stage')).toBe('story_outline')
+      expect(new URL(page.url()).searchParams.get('qingmuScene')).toBeNull()
+      expect(new URL(page.url()).searchParams.get('qingmuShot')).toBeNull()
+      const replayMessage = await page.evaluate(() => (window as unknown as {
+        __qingmuObservedMessages: Array<Record<string, unknown>>
+      }).__qingmuObservedMessages[1])
+      expect(replayMessage).toMatchObject({
+        scope: { sceneId: String(first.frames[0]![1]), shotId: String(first.frames[0]![0]) },
+        method: { adoptedItemIds: ['narrative-focus'] },
+        authority: { source: 'adopted_replay_suggestion' },
+      })
       expect(proposalRequests).toHaveLength(1); expect(freshnessChecks).toHaveLength(1)
       const after = inspect()
       expect(after.frames[1]).toEqual(first.frames[1]); expect(after.entities).toEqual(first.entities)
@@ -234,13 +227,64 @@ describe.skipIf(!writer || !core || process.env.DSH_CLIENT_BUILD_PROFILE !== 'qi
       await embeddedFrame.evaluate((node: HTMLIFrameElement) => { node.src = node.src })
       await settleEmbeddedHost()
       await expect.poll(async () => page.evaluate(() => (window as unknown as {
-        __qingmuHostSync: { accepted: number; duplicates: number; sceneId: string; shotId: string }
-      }).__qingmuHostSync)).toMatchObject({ accepted: 2, duplicates: 1,
-        sceneId: String(first.frames[0]![1]), shotId: String(first.frames[0]![0]) })
+        __qingmuObservedMessages: unknown[]
+      }).__qingmuObservedMessages)).toHaveLength(3)
+      await page.getByRole('status').filter({ hasText: '重复保存通知已拦截' }).waitFor()
+
+      const writerOrigin = new URL(initial.webUrl).origin
+      const hostFrame = page.frames().find(frame => frame.url().startsWith(initial.hostUrl))
+      expect(hostFrame).not.toBeUndefined()
+      const messagesBeforeForgery = await page.evaluate(() => (window as unknown as {
+        __qingmuObservedMessages: unknown[]
+      }).__qingmuObservedMessages.length)
+      const canonicalRequestsBeforeForgery = canonicalOuterRequests.length
+      const urlBeforeForgery = page.url()
+      await page.evaluate(({ message, origin }) => {
+        const forged = document.createElement('iframe')
+        forged.srcdoc = `<script>parent.postMessage(${JSON.stringify(message)}, ${JSON.stringify(origin)})<\/script>`
+        document.body.append(forged)
+      }, { message: replayMessage, origin: writerOrigin })
+      await expect.poll(async () => page.evaluate(() => (window as unknown as {
+        __qingmuObservedMessages: unknown[]
+      }).__qingmuObservedMessages.length)).toBe(messagesBeforeForgery + 1)
+      await page.waitForTimeout(500)
+      expect(canonicalOuterRequests).toHaveLength(canonicalRequestsBeforeForgery)
+      expect(page.url()).toBe(urlBeforeForgery)
+
+      await hostFrame!.evaluate(({ message, origin }) => {
+        const source = message as Record<string, unknown> & {
+          receipt: Record<string, unknown>
+          scope: Record<string, unknown>
+        }
+        const wrongScope = {
+          ...source,
+          messageId: 'event_wrong_scope',
+          receipt: { ...source.receipt, eventId: 'event_wrong_scope' },
+          scope: { ...source.scope, projectId: 'project_wrong_scope' },
+        }
+        window.parent.postMessage(wrongScope, origin)
+      }, { message: replayMessage, origin: writerOrigin })
+      await page.getByRole('alert').filter({ hasText: '导演保存通知校验失败' }).waitFor()
+
+      await hostFrame!.evaluate(({ message, origin }) => {
+        const source = message as Record<string, unknown> & {
+          receipt: Record<string, unknown>
+          context: Record<string, unknown>
+        }
+        const stale = {
+          ...source,
+          messageId: 'event_stale_context',
+          receipt: { ...source.receipt, eventId: 'event_stale_context' },
+          context: { ...source.context, snapshotSha256: '0'.repeat(64) },
+        }
+        window.parent.postMessage(stale, origin)
+      }, { message: replayMessage, origin: writerOrigin })
+      await page.getByRole('alert').filter({ hasText: '易梦权威数据尚未确认这次保存' }).waitFor()
+      expect(new URL(page.url()).searchParams.get('qingmuShot')).toBeNull()
       expect(run('stop').dataPreserved).toBe(true); expect(run('start').ready).toBe(true)
       await page.context().close()
       page = await browser.newPage({ viewport: { width: 1280, height: 800 }, locale: 'zh-CN' }); page.setDefaultTimeout(15_000); watch()
-      await installOuterSyncReceiver()
+      await installMessageObserver()
       await page.goto(initial.entryUrl, { waitUntil: 'load' })
       await page.goto(new URL(`/projects/${String(after.projects[0]![0])}`, initial.webUrl).toString(), { waitUntil: 'load' })
       await page.getByText(/创作设定已锁定/).waitFor()
@@ -267,12 +311,16 @@ describe.skipIf(!writer || !core || process.env.DSH_CLIENT_BUILD_PROFILE !== 'qi
         sourceUnchanged: after.script[0]![2] === scriptSaved.script[0]![2],
         inputRestored: true, lostReplyRecovered: true, freshBrowserAfterRestart: true,
         creativeContractRestored: true, directorContextRestored: true,
-        forgedOriginRejected: true, missingReferences: true, noPromptIr: true }).toMatchSnapshot()
+        forgedOriginRejected: true, wrongScopeRejected: true, staleContextRejected: true,
+        outerCanonicalRefreshBlockedWithoutStageAuthority: true, duplicateReplayRejected: true,
+        missingReferences: true, noPromptIr: true }).toMatchSnapshot()
       writeFileSync(join(parent, 'result.json'), JSON.stringify({ root, entryUrl: initial.entryUrl,
         after, commandCount: commands.length,
         originalScriptUnchanged: true, unrelatedShotUnchanged: true, inputRestored: true,
         lostReplyRecovered: true, freshBrowserAfterRestart: true, creativeContractRestored: true,
-        directorContextRestored: true, forgedOriginRejected: true }, null, 2))
+        directorContextRestored: true, forgedOriginRejected: true, wrongScopeRejected: true,
+        staleContextRejected: true, outerCanonicalRefreshBlockedWithoutStageAuthority: true,
+        duplicateReplayRejected: true }, null, 2))
       console.log('Qingmu scene planning evidence:', parent)
     } catch (error) {
       let frameText = ''

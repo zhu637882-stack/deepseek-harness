@@ -20,6 +20,12 @@ const creativeContract = { schema: 'qingmu.creative-contract.v1', revision: 1, l
     duration: settings.duration }, methods: { visualStyle: method, stylePackId: null,
     writingSkills: [], directorSkills: [], cameraSkills: [], soundSkills: [] } }
 const creativeContractSha256 = digest(canonicalJson(creativeContract))
+const currentCreativeContract = { ...creativeContract, schema: 'qingmu.creative-contract.v2' as const,
+  identity: { projectId: 'project_1' }, source: { ...creativeContract.source, textVersion: 'creation-text-v1' as const },
+  methods: { ...creativeContract.methods,
+    stylePackId: { id: 'realistic_cinema', version: '1.0.0', sha256: '8'.repeat(64) },
+    directorSkills: [{ id: 'shot_blocking_director', version: '1.0.0', sha256: '9'.repeat(64) }] } }
+const currentCreativeContractSha256 = digest(canonicalJson(currentCreativeContract))
 const result = { schema: 'jason.qingmu-project-bootstrap-result.v1', projectId: 'project_1', seriesId: 'series_1', episodeId: 'episode_1',
   owner: 'user_1', requestSha256: digest(canonicalJson(settings)), idempotencyKey: request.idempotencyKey,
   commandReceiptId: 'receipt_1', eventId: 'event_1', createdAt: '2026-08-29T00:00:00Z', providerCalls: 0,
@@ -29,6 +35,16 @@ const setup = (value: unknown = result, status = 200) => {
   return { fetch, handler: createYimengCommandHandler({ baseUrl: 'http://127.0.0.1:49123' }, { fetch, readToken: () => 'private-session-token' }) }
 }
 describe('bounded creation Host contract', () => {
+  it('accepts a project-bound current contract and rejects a copied binding', async () => {
+    const state = { schema: 'jason.qingmu-creative-contract-state.v1', projectId: 'project_1', configured: true,
+      locked: true, revision: 1, sha256: currentCreativeContractSha256, contract: currentCreativeContract,
+      sourceText: settings.textInput, message: 'configured' }
+    expect(await setup(state).handler('readCreativeContract', { projectId: 'project_1' }, signal()))
+      .toMatchObject({ ok: true, value: { contract: { schema: 'qingmu.creative-contract.v2', identity: { projectId: 'project_1' } } } })
+    const copied = { ...state, contract: { ...currentCreativeContract, identity: { projectId: 'project_2' } } }
+    expect(await setup(copied).handler('readCreativeContract', { projectId: 'project_1' }, signal()))
+      .toMatchObject({ ok: false })
+  })
   it('creates and recovers an exact source digest without stage or generic path parameters', async () => {
     const { handler, fetch } = setup()
     expect(await handler('initializeProject', request, signal())).toEqual({ ok: true, value: result })

@@ -15,7 +15,7 @@ python3 scripts/qingmu-local.py login
 python3 scripts/qingmu-local.py status
 ```
 
-Open the single `entryUrl` printed by `status`. It establishes the normal HttpOnly local session and goes directly to the Qingmu-branded Yimeng project workspace; there is no generic DSh chat or extra Qingmu modal first. `ready: true` requires all three owned processes, the API's exact database/storage identity, the DSh Host listener/page, and the six-stage frontend listener/page. Their status fields remain separate for diagnosis. The top bar truthfully says “导演服务已连接 · 面板待接入”: the DSh service shares the lifecycle, but its director panel is not yet embedded in the six-stage page. This is a persistent integration environment with a script creation path, not complete product acceptance.
+Open the single `entryUrl` printed by `status`. It establishes the normal HttpOnly local session and goes directly to the Qingmu-branded Yimeng project workspace; there is no generic DSh chat or extra Qingmu modal first. `ready: true` requires all three owned processes, the API's exact database/storage identity, the DSh Host listener/page, and the six-stage frontend listener/page. Their status fields remain separate for diagnosis. The six-stage page embeds the scope-bound Director workspace. After a planning save or GET-only recovery, the outer page accepts only the exact iframe origin/source and project/episode scope, rereads canonical planning and Director context, refreshes the workflow projection and locates the saved shot. Rejected or stale notifications stay visible and do not create a false success. This is a persistent integration environment, not complete product acceptance.
 
 ## Write the first script
 
