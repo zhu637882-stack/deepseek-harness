@@ -1028,16 +1028,23 @@ def start(
     with log:
         child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "_supervise", "--root", str(root)],
             stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True, env=safe_env(root))
-    deadline = time.monotonic() + 75
-    while time.monotonic() < deadline:
-        try:
-            result = control(root, config, "status")
-            return (result, child) if return_owned_supervisor else result
-        except (FileNotFoundError, ConnectionRefusedError):
-            if child.poll() is not None:
-                raise RuntimeError("启动失败，见 logs/supervisor.log；未操作未知进程")
-            time.sleep(0.15)
-    raise RuntimeError("启动尚未确认；运行 status 检查，不自动重复启动")
+    try:
+        deadline = time.monotonic() + 75
+        while time.monotonic() < deadline:
+            try:
+                result = control(root, config, "status")
+                return (result, child) if return_owned_supervisor else result
+            except (FileNotFoundError, ConnectionRefusedError):
+                if child.poll() is not None:
+                    raise RuntimeError("启动失败，见 logs/supervisor.log；未操作未知进程")
+                time.sleep(0.15)
+        raise RuntimeError("启动尚未确认；运行 status 检查，不自动重复启动")
+    except Exception:
+        if return_owned_supervisor:
+            # Rotation owns this exact Popen.  If start cannot return it to the
+            # caller, it must discharge that ownership before propagating.
+            stop_child(child)
+        raise
 
 
 def _remove_private_file(path: Path) -> None:

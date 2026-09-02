@@ -624,6 +624,26 @@ class OwnershipTests(unittest.TestCase):
         finally:
             local.stop_child(owned)
 
+    def test_rotation_start_timeout_stops_child_before_raising(self):
+        owned = subprocess.Popen(["/bin/sleep", "30"])
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "logs").mkdir()
+                with patch.object(local, "control", side_effect=FileNotFoundError), \
+                     patch.object(local, "instance_lock", return_value=local.contextlib.nullcontext()), \
+                     patch.object(local, "require_clean"), \
+                     patch.object(local, "require_build_manifest_matches"), \
+                     patch.object(local.subprocess, "Popen", return_value=owned), \
+                     patch.object(local.time, "monotonic", side_effect=[0.0, 76.0]), \
+                     patch.object(local, "stop_child", wraps=local.stop_child) as stop_owned:
+                    with self.assertRaisesRegex(RuntimeError, "启动尚未确认"):
+                        local.start(root, {}, return_owned_supervisor=True)
+                stop_owned.assert_called_once_with(owned)
+                self.assertIsNotNone(owned.poll())
+        finally:
+            local.stop_child(owned)
+
     def test_rotation_failure_reports_when_stopped_state_cannot_be_confirmed(self):
         with patch.object(local, "control", return_value={"stopped": True}), \
              patch.object(local, "instance_lock", side_effect=RuntimeError("still owned")), \
