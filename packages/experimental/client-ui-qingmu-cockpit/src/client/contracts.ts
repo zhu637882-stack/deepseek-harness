@@ -531,6 +531,45 @@ export type {
 /** Open JSON object retained without inventing a stricter Yimeng business schema. */
 export type JsonRecord = YimengJsonObject
 
+/** Kept local until the workspace read-adapter declaration build is refreshed. */
+export interface YimengVideoQuoteRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly sceneId: string
+  readonly shotId: string
+}
+export interface YimengVideoQuoteResponse {
+  readonly schema: 'jason.qingmu-writer-video-quote.v1'
+  readonly preflightSha256: string
+  readonly projectionSha256: string
+  readonly maximumReservationCny: number
+  readonly candidateCount: 1
+  readonly maxAttempts: 1
+  readonly selectAsOfficial: false
+  readonly quoteReady: boolean
+  readonly dispatchReady: boolean
+  readonly quoteBlockers: readonly string[]
+  readonly dispatchBlockers: readonly string[]
+  readonly requiredPaidConfirmationText: string
+  readonly requiredPaidConfirmationTextSha256: string
+}
+export interface QingmuProductionTakeIntent extends Omit<YimengQueueProductionTakeIntent,
+  'firstFrameSelectionReceiptSha256' | 'selectedFirstFrameAssetId' | 'selectedFirstFrameMaterializedSha256'
+  | 'videoPreflightSha256' | 'videoQuoteProjectionSha256' | 'maximumReservationCny' | 'candidateCount'
+  | 'maxAttempts' | 'selectAsOfficial' | 'paidConfirmed' | 'paidConfirmationText'> {
+  readonly firstFrameSelectionReceiptSha256: string
+  readonly selectedFirstFrameAssetId: string
+  readonly selectedFirstFrameMaterializedSha256: string
+  readonly videoPreflightSha256: string
+  readonly videoQuoteProjectionSha256: string
+  readonly maximumReservationCny: number
+  readonly candidateCount: 1
+  readonly maxAttempts: 1
+  readonly selectAsOfficial: false
+  readonly paidConfirmed: true
+  readonly paidConfirmationText: string
+}
+
 /** Read-only browser-facing methods exposed by the Qingmu Host adapter. */
 export interface QingmuYimengReadPort {
   evidenceLedger(request: YimengEpisodeEvidenceRequest, signal?: AbortSignal): Promise<YimengEpisodeEvidenceLedgerResponse>
@@ -567,6 +606,7 @@ export interface QingmuYimengReadPort {
     request: YimengFirstFrameQuoteRequest,
     signal?: AbortSignal,
   ): Promise<YimengFirstFrameQuoteResponse>
+  videoQuote(request: YimengVideoQuoteRequest, signal?: AbortSignal): Promise<YimengVideoQuoteResponse>
   selectedVideoReview(request: YimengSelectedVideoReviewRequest, signal?: AbortSignal): Promise<YimengSelectedVideoReviewResponse>
   takeVersions(request: YimengTakeVersionRequest, signal?: AbortSignal): Promise<YimengTakeVersionStackResponse>
   takePreview(request: YimengTakePreviewRequest, signal?: AbortSignal): Promise<YimengTakePreviewResponse>
@@ -592,7 +632,7 @@ export interface QingmuYimengReadPort {
 /** Explicit ChangeSet commands exposed through the separate Host-only command channel. */
 export interface QingmuYimengCommandPort {
   queueProductionTake(
-    request: YimengQueueProductionTakeIntent,
+    request: QingmuProductionTakeIntent,
     signal?: AbortSignal,
   ): Promise<YimengProductionTakeResult>
   readCreativeContract(request: { readonly projectId: string }, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').CreativeContractState>

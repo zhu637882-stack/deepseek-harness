@@ -92,7 +92,12 @@ function frame(status: 'Ready' | 'Draft') {
   }]
 }
 
-function createPort(options: { readonly editPostSucceeds?: boolean; readonly productionFails?: boolean } = {}) {
+function createPort(options: {
+  readonly editPostSucceeds?: boolean
+  readonly productionFails?: boolean
+  readonly noFirstFrameCandidates?: boolean
+  readonly videoDispatchBlockers?: readonly string[]
+} = {}) {
   let selected = false
   let selectedReadyReads = 0
   const editReceipt = (request: Record<string, unknown>) => ({
@@ -394,6 +399,10 @@ function createPort(options: { readonly editPostSucceeds?: boolean; readonly pro
         sceneId: 'scene-1', shotId: FRAME_ID, storyboardRevisionId: STORYBOARD_REVISION_ID,
         promptIr: { id: BASE_ID, version: BASE_VERSION, contentSha256: BASE_CONTENT_SHA, videoPromptSha256: '7'.repeat(64) },
         authoritySnapshotSha256: '8'.repeat(64), firstFrameQuoteProjectionSha256: '9'.repeat(64),
+        firstFrameSelectionReceiptSha256: 'f'.repeat(64), selectedFirstFrameAssetId: 'asset-first-frame-1',
+        selectedFirstFrameMaterializedSha256: 'e'.repeat(64), videoPreflightSha256: 'd'.repeat(64),
+        videoQuoteProjectionSha256: 'c'.repeat(64), maximumReservationCny: 0.3, candidateCount: 1,
+        maxAttempts: 1, selectAsOfficial: false, paidConfirmed: true, paidConfirmationTextSha256: 'b'.repeat(64),
         referenceBindings: [{
           elementKind: 'scene', elementId: 'scene-1', assetId: 'asset-1', assetSha256: 'a'.repeat(64),
           materializedSha256: 'b'.repeat(64), selectionIdentity: 'selection-1', sourceRevisionId: 'source-1',
@@ -406,6 +415,24 @@ function createPort(options: { readonly editPostSucceeds?: boolean; readonly pro
       providerCalls: 0, workerStarted: false, maximumCostCny: '0',
     } as const
   })
+  const videoQuote = vi.fn(async () => ({
+    schema: 'jason.qingmu-writer-video-quote.v1', preflightSha256: 'd'.repeat(64), projectionSha256: 'c'.repeat(64),
+    maximumReservationCny: 0.3, candidateCount: 1, maxAttempts: 1, selectAsOfficial: false,
+    quoteReady: true, dispatchReady: false, quoteBlockers: [], dispatchBlockers: options.videoDispatchBlockers ?? ['operator_paid_confirmation_required'],
+    requiredPaidConfirmationText: '我确认本次镜头视频生成最高费用为 0.3000 CNY。', requiredPaidConfirmationTextSha256: 'b'.repeat(64),
+  } as const))
+  let firstFrameSelected = false
+  let firstFrameIdempotencyKey = 'first-frame-select-1'
+  const firstFrameReceipt = () => ({ schema: 'jason.qingmu-first-frame-selection-receipt.v1', selectionIdentity: 'selection-first-1', actorUserId: 'actor-1', naturalPersonId: 'person-1', projectId: PROJECT_ID, episodeId: EPISODE_ID, storyboardRevisionId: STORYBOARD_REVISION_ID, frameId: FRAME_ID, selectedAssetId: 'asset-first-frame-1', selectedAssetSha256: 'e'.repeat(64), selectedMaterializedSha256: 'e'.repeat(64), selectionStatus: 'Selected', idempotencyKey: firstFrameIdempotencyKey, requestSha256: 'a'.repeat(64), intentSessionSha256: 'b'.repeat(64), intentBindingSha256: 'c'.repeat(64), binding: {}, bindingSha256: 'd'.repeat(64), selectedAt: '2026-09-02T00:00:00Z', receiptSha256: 'f'.repeat(64), providerCalls: 0, taskMutation: false, outboxEvents: 0 } as const)
+  const firstFrameState = () => ({ schema: 'jason.qingmu-first-frame-selection-state.v1', projectId: PROJECT_ID, episodeId: EPISODE_ID, storyboardRevisionId: STORYBOARD_REVISION_ID, frameId: FRAME_ID, frameUpdatedAt: '2026-09-02T00:00:00Z', storyboardRevision: 7, identity: { state: 'bound' }, candidates: options.noFirstFrameCandidates ? [] : [{ assetId: 'asset-first-frame-1', assetSha256: 'e'.repeat(64), materializedSha256: 'e'.repeat(64), qualityStatus: 'passed', selectionStatus: firstFrameSelected ? 'Selected' : 'Unselected', isSelected: firstFrameSelected, assetUpdatedAt: '2026-09-02T00:00:00Z' }], selectedAssetId: firstFrameSelected ? 'asset-first-frame-1' : null, selectionReceipt: firstFrameSelected ? firstFrameReceipt() : null, blockers: [], providerCalls: 0, taskMutation: false, outboxEvents: 0 })
+  const browserFetch = vi.fn(async (input: RequestInfo | URL) => {
+    const url = input instanceof Request ? input.url : input instanceof URL ? input.href : input
+    if (url.includes('/decision?')) { firstFrameIdempotencyKey = new URL(url, 'http://localhost').searchParams.get('idempotencyKey') ?? ''; firstFrameSelected = true; return new Response(JSON.stringify(firstFrameReceipt()), { status: 200 }) }
+    if (url.includes('/receipt?')) return new Response(JSON.stringify(firstFrameReceipt()), { status: 200 })
+    if (url.includes('/media?')) return new Response(JSON.stringify({ projectId: PROJECT_ID, episodeId: EPISODE_ID, storyboardRevisionId: STORYBOARD_REVISION_ID, frameId: FRAME_ID, assetId: 'asset-first-frame-1', materializedSha256: 'e'.repeat(64), mimeType: 'image/png', base64: 'aGVsbG8=' }), { status: 200 })
+    return new Response(JSON.stringify(firstFrameState()), { status: 200 })
+  })
+  vi.stubGlobal('fetch', browserFetch)
 
   return {
     port: {
@@ -419,6 +446,7 @@ function createPort(options: { readonly editPostSucceeds?: boolean; readonly pro
       selectPromptIr,
       recoverPromptIrSelection,
       firstFrameQuote,
+      videoQuote,
       queueProductionTake,
     } as unknown as QingmuYimengPort,
     spies: {
@@ -432,12 +460,25 @@ function createPort(options: { readonly editPostSucceeds?: boolean; readonly pro
       selectPromptIr,
       recoverPromptIrSelection,
       firstFrameQuote,
+      videoQuote,
+      browserFetch,
       queueProductionTake,
     },
   }
 }
 
 const t = ((key: keyof typeof zh) => zh[key])
+
+async function prepareProductionTake(): Promise<void> {
+  fireEvent.click(screen.getByRole('button', { name: zh.firstFrameQuoteAction }))
+  await screen.findByText(zh.firstFrameCandidatesTitle)
+  fireEvent.click(screen.getByRole('checkbox', { name: zh.firstFrameCandidateConfirm }))
+  fireEvent.click(screen.getByRole('button', { name: zh.firstFrameSelect }))
+  await screen.findByText(new RegExp(zh.firstFrameSelectionReceipt))
+  fireEvent.click(screen.getByRole('button', { name: zh.videoQuoteRead }))
+  await screen.findByText(`${zh.videoPaidConfirmation}：我确认本次镜头视频生成最高费用为 0.3000 CNY。`)
+  fireEvent.click(screen.getByRole('checkbox', { name: '我确认本次镜头视频生成最高费用为 0.3000 CNY。' }))
+}
 
 beforeEach(() => {
   sessionStorage.clear()
@@ -476,6 +517,17 @@ describe('PromptIrWorkspace vertical slice', () => {
       promptIrContentSha256: BASE_CONTENT_SHA,
     }, expect.any(AbortSignal))
     expect(spies.firstFrameQuote).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the real no-candidate blocker without offering an implicit selection', async () => {
+    const { port } = createPort({ noFirstFrameCandidates: true })
+    render(<PromptIrWorkspace projectId={PROJECT_ID} episodeId={EPISODE_ID}
+      shotItems={frame('Ready')} storyboardRevisionId={STORYBOARD_REVISION_ID} selectedShotId={FRAME_ID}
+      onSelectShotId={vi.fn()} port={port} t={t} onCommitted={async () => {}} presentation="director" />)
+    await screen.findByLabelText(zh.directorVideoPrompt)
+    fireEvent.click(screen.getByRole('button', { name: zh.firstFrameQuoteAction }))
+    await screen.findByText(zh.firstFrameNoCandidates)
+    expect(screen.queryByRole('button', { name: zh.firstFrameSelect })).toBeNull()
   })
 
   it('unlocks a proven historical commit when a newer Draft is current, retaining text for explicit rebase', async () => {
@@ -776,31 +828,56 @@ describe('PromptIrWorkspace vertical slice', () => {
 
   it('requires explicit Ready confirmation, suppresses double-click, and stops at Take 2', async () => {
     const { port, spies } = createPort()
+    const onCommitted = vi.fn(async () => {})
     render(<PromptIrWorkspace projectId={PROJECT_ID} episodeId={EPISODE_ID}
       shotItems={frame('Ready')} storyboardRevisionId={STORYBOARD_REVISION_ID} selectedShotId={FRAME_ID}
-      onSelectShotId={vi.fn()} port={port} t={t} onCommitted={async () => {}} presentation="director" />)
+      onSelectShotId={vi.fn()} port={port} t={t} onCommitted={onCommitted} presentation="director" />)
     await screen.findByLabelText(zh.directorVideoPrompt)
     const takeOne = screen.getByRole('button', { name: zh.productionTakeOne }) as HTMLButtonElement
     expect(takeOne.disabled).toBe(true)
-    fireEvent.click(screen.getByRole('checkbox', { name: zh.productionTakeConfirmReady }))
+    await prepareProductionTake()
     fireEvent.click(takeOne)
     fireEvent.click(takeOne)
     await screen.findByText(zh.productionTakeQueued)
     expect(spies.queueProductionTake).toHaveBeenCalledTimes(1)
-    expect(spies.queueProductionTake).toHaveBeenCalledWith({
+    expect(onCommitted).toHaveBeenCalledExactlyOnceWith()
+    expect(spies.queueProductionTake).toHaveBeenCalledWith(expect.objectContaining({
       projectId: PROJECT_ID, episodeId: EPISODE_ID, storyboardRevisionId: STORYBOARD_REVISION_ID,
       frameId: FRAME_ID, takeKind: 'initial', takeOrdinal: 1, confirmReady: true,
-    }, expect.any(AbortSignal))
+      firstFrameSelectionReceiptSha256: 'f'.repeat(64), selectedFirstFrameAssetId: 'asset-first-frame-1',
+      selectedFirstFrameMaterializedSha256: 'e'.repeat(64), videoPreflightSha256: 'd'.repeat(64),
+      videoQuoteProjectionSha256: 'c'.repeat(64), maximumReservationCny: 0.3, candidateCount: 1,
+      maxAttempts: 1, selectAsOfficial: false, paidConfirmed: true,
+      paidConfirmationText: '我确认本次镜头视频生成最高费用为 0.3000 CNY。',
+    }), expect.any(AbortSignal))
     const browserIntent = spies.queueProductionTake.mock.calls[0]![0] as Record<string, unknown>
     for (const forbidden of ['ownerId', 'ready', 'selected', 'approved', 'force', 'provider', 'model', 'route']) {
       expect(browserIntent).not.toHaveProperty(forbidden)
     }
     expect((screen.getByRole('button', { name: zh.productionTakeThree }) as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.click(screen.getByRole('checkbox', { name: zh.productionTakeConfirmReady }))
+    fireEvent.click(screen.getByRole('checkbox', { name: '我确认本次镜头视频生成最高费用为 0.3000 CNY。' }))
     fireEvent.click(screen.getByRole('button', { name: zh.productionTakeTwo }))
     await screen.findByText('2 / 2')
     expect(spies.queueProductionTake).toHaveBeenCalledTimes(2)
     expect(screen.getByText(zh.productionTakeNotGenerated)).toBeTruthy()
+  })
+
+  it('keeps Production Take disabled when video dispatch has any blocker beyond the exact paid confirmation', async () => {
+    const { port, spies } = createPort({ videoDispatchBlockers: ['operator_paid_confirmation_required', 'reference_not_ready'] })
+    render(<PromptIrWorkspace projectId={PROJECT_ID} episodeId={EPISODE_ID}
+      shotItems={frame('Ready')} storyboardRevisionId={STORYBOARD_REVISION_ID} selectedShotId={FRAME_ID}
+      onSelectShotId={vi.fn()} port={port} t={t} onCommitted={async () => {}} presentation="director" />)
+    await screen.findByLabelText(zh.directorVideoPrompt)
+    fireEvent.click(screen.getByRole('button', { name: zh.firstFrameQuoteAction }))
+    await screen.findByText(zh.firstFrameCandidatesTitle)
+    fireEvent.click(screen.getByRole('checkbox', { name: zh.firstFrameCandidateConfirm }))
+    fireEvent.click(screen.getByRole('button', { name: zh.firstFrameSelect }))
+    await screen.findByText(new RegExp(zh.firstFrameSelectionReceipt))
+    fireEvent.click(screen.getByRole('button', { name: zh.videoQuoteRead }))
+    await screen.findByText(`${zh.videoDispatchBlockers}：operator_paid_confirmation_required, reference_not_ready`)
+    expect(screen.getByRole<HTMLInputElement>('checkbox', { name: '我确认本次镜头视频生成最高费用为 0.3000 CNY。' }).disabled).toBe(true)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: zh.productionTakeOne }).disabled).toBe(true)
+    expect(spies.queueProductionTake).not.toHaveBeenCalled()
   })
 
   it('keeps an unknown-result marker across refresh and recovers with the original intent', async () => {
@@ -810,7 +887,7 @@ describe('PromptIrWorkspace vertical slice', () => {
       t, onCommitted: async () => {}, presentation: 'director' as const }
     const first = render(<PromptIrWorkspace {...props} port={failed.port} />)
     await screen.findByLabelText(zh.directorVideoPrompt)
-    fireEvent.click(screen.getByRole('checkbox', { name: zh.productionTakeConfirmReady }))
+    await prepareProductionTake()
     fireEvent.click(screen.getByRole('button', { name: zh.productionTakeOne }))
     await screen.findByText('current PromptIR Method is unavailable')
     first.unmount()
@@ -820,10 +897,11 @@ describe('PromptIrWorkspace vertical slice', () => {
     await screen.findByRole('button', { name: zh.productionTakeRecover })
     fireEvent.click(screen.getByRole('button', { name: zh.productionTakeRecover }))
     await screen.findByText(zh.productionTakeQueued)
-    expect(recovered.spies.queueProductionTake).toHaveBeenCalledWith({
+    expect(recovered.spies.queueProductionTake).toHaveBeenCalledWith(expect.objectContaining({
       projectId: PROJECT_ID, episodeId: EPISODE_ID, storyboardRevisionId: STORYBOARD_REVISION_ID,
       frameId: FRAME_ID, takeKind: 'initial', takeOrdinal: 1, confirmReady: true,
-    }, expect.any(AbortSignal))
+      firstFrameSelectionReceiptSha256: 'f'.repeat(64), videoPreflightSha256: 'd'.repeat(64), paidConfirmed: true,
+    }), expect.any(AbortSignal))
     second.unmount()
 
     render(<PromptIrWorkspace {...props} port={createPort().port} />)

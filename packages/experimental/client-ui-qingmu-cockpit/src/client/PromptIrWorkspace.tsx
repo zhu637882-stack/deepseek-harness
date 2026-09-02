@@ -8,6 +8,7 @@ import type {
   YimengPromptIrResponse,
   YimengProductionTakeResult,
   YimengFirstFrameQuoteResponse,
+  YimengVideoQuoteResponse,
   YimengProposePromptIrResponse,
   YimengRecoverPromptIrEditCommitRequest,
   YimengRecoverPromptIrEditCommitResponse,
@@ -38,6 +39,14 @@ import directorCss from './DirectorWorkspace.module.css'
 import { directorBufferKey, readDirectorBuffer, writeDirectorBuffer } from './director-edit-buffer.ts'
 import { hasPromptIrBootstrapFrame, PromptIrBootstrapWorkspace } from './PromptIrBootstrapWorkspace.tsx'
 import { EntityDraftHumanReview } from './EntityDraftHumanReview.tsx'
+import { FirstFrameCandidatePreview } from './FirstFrameCandidatePreview.tsx'
+import {
+  createFirstFrameSelectionClient,
+  FirstFrameSelectionUnknownError,
+  type FirstFrameSelectionIntent,
+  type FirstFrameSelectionReceipt,
+  type FirstFrameSelectionState,
+} from './first-frame-selection.ts'
 import {
   assertProductionTakeResult,
   clearProductionTakeRecoveryMarker,
@@ -63,7 +72,7 @@ type EditableField = typeof EDITABLE_FIELDS[number]
 type EditableProjection = YimengPromptIrResponse['subject']['editableProjection']
 type DraftPromptIr = Pick<YimengCommitPromptIrEditResponse['promptIr'], 'id' | 'version' | 'contentSha256' | 'status'>
 type Operation = 'idle' | 'loading' | 'checking' | 'previewing' | 'committing' | 'recovering-edit'
-  | 'selecting' | 'recovering-selection' | 'quoting-first-frame' | 'queuing-production-take'
+  | 'selecting' | 'recovering-selection' | 'quoting-first-frame' | 'selecting-first-frame' | 'quoting-video' | 'queuing-production-take'
 
 interface PromptIrFrame extends PromptIrRecoveryCoordinates {
   readonly key: string
@@ -507,6 +516,12 @@ function ReadyPromptIrWorkspace({
   const [editConfirmed, setEditConfirmed] = useState(false)
   const [selectionConfirmed, setSelectionConfirmed] = useState(false)
   const [firstFrameQuote, setFirstFrameQuote] = useState<YimengFirstFrameQuoteResponse>()
+  const [firstFrameState, setFirstFrameState] = useState<FirstFrameSelectionState>()
+  const [firstFrameReceipt, setFirstFrameReceipt] = useState<FirstFrameSelectionReceipt>()
+  const [firstFrameCandidateId, setFirstFrameCandidateId] = useState<string>()
+  const [firstFrameConfirmed, setFirstFrameConfirmed] = useState(false)
+  const [firstFrameRecovery, setFirstFrameRecovery] = useState<(FirstFrameSelectionIntent & { readonly requestSha256: string })>()
+  const [videoQuote, setVideoQuote] = useState<YimengVideoQuoteResponse>()
   const [productionTake, setProductionTake] = useState<YimengProductionTakeResult>()
   const [productionConfirmed, setProductionConfirmed] = useState(false)
   const [productionRecovery, setProductionRecovery] = useState<ProductionTakeStoredRead<ProductionTakeRecoveryMarker>>({ status: 'none' })
@@ -549,6 +564,12 @@ function ReadyPromptIrWorkspace({
     setEditConfirmed(false)
     setSelectionConfirmed(false)
     setFirstFrameQuote(undefined)
+    setFirstFrameState(undefined)
+    setFirstFrameReceipt(undefined)
+    setFirstFrameCandidateId(undefined)
+    setFirstFrameConfirmed(false)
+    setFirstFrameRecovery(undefined)
+    setVideoQuote(undefined)
     setProductionConfirmed(false)
     setError(undefined)
     setOperation('idle')
@@ -1065,6 +1086,11 @@ function ReadyPromptIrWorkspace({
     if (snapshot === undefined || active === undefined || operation !== 'idle') return
     setError(undefined)
     setFirstFrameQuote(undefined)
+    setFirstFrameState(undefined)
+    setFirstFrameReceipt(undefined)
+    setFirstFrameCandidateId(undefined)
+    setFirstFrameConfirmed(false)
+    setVideoQuote(undefined)
     const controller = new AbortController()
     abortRef.current = controller
     setOperation('quoting-first-frame')
@@ -1078,12 +1104,92 @@ function ReadyPromptIrWorkspace({
         promptIrVersion: snapshot.subject.promptIrVersion,
         promptIrContentSha256: snapshot.subject.promptIrContentSha256,
       }, controller.signal)
-      if (!controller.signal.aborted) setFirstFrameQuote(result)
+      if (!controller.signal.aborted) {
+        const state = await createFirstFrameSelectionClient().state(active, controller.signal)
+        if (!controller.signal.aborted) {
+          setFirstFrameQuote(result)
+          setFirstFrameState(state)
+          setFirstFrameReceipt(state.selectionReceipt ?? undefined)
+        }
+      }
     } catch (cause) {
       if (!controller.signal.aborted) setError(messageOf(cause))
     } finally {
       if (!controller.signal.aborted) setOperation('idle')
     }
+  }
+
+  const selectFirstFrame = async (): Promise<void> => {
+    if (active === undefined || firstFrameState === undefined || firstFrameCandidateId === undefined || !firstFrameConfirmed || operation !== 'idle') return
+    const selected = firstFrameState.candidates.find(candidate => candidate.assetId === firstFrameCandidateId)
+    if (selected === undefined || selected.selectionStatus !== 'Unselected' || selected.isSelected) return
+    setError(undefined)
+    const controller = new AbortController(); abortRef.current = controller; setOperation('selecting-first-frame')
+    const idempotencyKey = `first-frame-${globalThis.crypto.randomUUID()}`
+    try {
+      const client = createFirstFrameSelectionClient()
+      const receipt = await client.select({
+        ...active,
+        assetId: selected.assetId,
+        expectedMaterializedSha256: selected.materializedSha256,
+        idempotencyKey,
+      }, controller.signal)
+      const state = await client.state(active, controller.signal)
+      if (state.selectedAssetId !== selected.assetId || state.selectionReceipt?.receiptSha256 !== receipt.receiptSha256) throw new Error('首帧选择回执与当前状态不一致')
+      if (!controller.signal.aborted) {
+        setFirstFrameState(state); setFirstFrameReceipt(receipt); setFirstFrameConfirmed(false)
+        setFirstFrameRecovery(undefined); setVideoQuote(undefined); setProductionConfirmed(false)
+      }
+    } catch (cause) {
+      if (!controller.signal.aborted) {
+        if (cause instanceof FirstFrameSelectionUnknownError) {
+          setFirstFrameRecovery({
+            ...active,
+            assetId: selected.assetId,
+            expectedMaterializedSha256: selected.materializedSha256,
+            idempotencyKey,
+            requestSha256: cause.recovery.requestSha256,
+          })
+          setError(t('firstFrameUnknownReceiptRecovery'))
+        } else setError(`${messageOf(cause)} · ${t('firstFrameUnknownRecovery')}`)
+      }
+    } finally { if (!controller.signal.aborted) setOperation('idle') }
+  }
+
+  const recoverFirstFrameSelection = async (): Promise<void> => {
+    if (active === undefined || firstFrameRecovery === undefined || operation !== 'idle') return
+    setError(undefined)
+    const controller = new AbortController(); abortRef.current = controller; setOperation('selecting-first-frame')
+    try {
+      const client = createFirstFrameSelectionClient()
+      const receipt = await client.receipt(firstFrameRecovery, controller.signal)
+      const state = await client.state(active, controller.signal)
+      if (state.selectedAssetId !== firstFrameRecovery.assetId
+        || state.selectionReceipt?.receiptSha256 !== receipt.receiptSha256) {
+        throw new Error('first-frame recovered receipt does not match current state')
+      }
+      if (!controller.signal.aborted) {
+        setFirstFrameState(state); setFirstFrameReceipt(receipt); setFirstFrameCandidateId(undefined)
+        setFirstFrameConfirmed(false); setFirstFrameRecovery(undefined); setVideoQuote(undefined); setProductionConfirmed(false)
+      }
+    } catch (cause) {
+      if (!controller.signal.aborted) setError(messageOf(cause))
+    } finally { if (!controller.signal.aborted) setOperation('idle') }
+  }
+
+  const quoteVideo = async (): Promise<void> => {
+    if (active === undefined || firstFrameQuote === undefined || firstFrameReceipt === undefined || operation !== 'idle') return
+    setError(undefined); setVideoQuote(undefined); setProductionConfirmed(false)
+    const controller = new AbortController(); abortRef.current = controller; setOperation('quoting-video')
+    try {
+      const result = await port.videoQuote({
+        projectId: active.projectId,
+        episodeId: active.episodeId,
+        sceneId: firstFrameQuote.authoritySnapshot.frame.sceneId,
+        shotId: active.frameId,
+      }, controller.signal)
+      if (!controller.signal.aborted) setVideoQuote(result)
+    } catch (cause) { if (!controller.signal.aborted) setError(messageOf(cause)) } finally { if (!controller.signal.aborted) setOperation('idle') }
   }
 
   const queueProductionTake = async (
@@ -1093,6 +1199,9 @@ function ReadyPromptIrWorkspace({
     if (!director || snapshot === undefined || active === undefined || operation !== 'idle'
       || unsaved || bufferStale || snapshot.draft?.status === 'stale'
       || (!productionConfirmed && recoveryMarker === undefined)
+      || (recoveryMarker === undefined && (firstFrameReceipt === undefined
+        || firstFrameState?.selectedAssetId === null || videoQuote === undefined
+        || !videoQuote.quoteReady || videoQuote.dispatchBlockers.length !== 1 || videoQuote.dispatchBlockers[0] !== 'operator_paid_confirmation_required'))
       || productionLock.current || productionRecovery.status === 'invalid') return
     productionLock.current = true
     setError(undefined)
@@ -1107,6 +1216,17 @@ function ReadyPromptIrWorkspace({
       takeKind: takeOrdinal === 1 ? 'initial' : 'targeted_rework',
       takeOrdinal,
       confirmReady: true,
+      firstFrameSelectionReceiptSha256: firstFrameReceipt?.receiptSha256 ?? '',
+      selectedFirstFrameAssetId: firstFrameState?.selectedAssetId ?? '',
+      selectedFirstFrameMaterializedSha256: firstFrameState?.candidates.find(candidate => candidate.assetId === firstFrameState.selectedAssetId)?.materializedSha256 ?? '',
+      videoPreflightSha256: videoQuote?.preflightSha256 ?? '',
+      videoQuoteProjectionSha256: videoQuote?.projectionSha256 ?? '',
+      maximumReservationCny: videoQuote?.maximumReservationCny ?? -1,
+      candidateCount: 1,
+      maxAttempts: 1,
+      selectAsOfficial: false,
+      paidConfirmed: true,
+      paidConfirmationText: videoQuote?.requiredPaidConfirmationText ?? '',
     })
     try {
       if (recoveryMarker === undefined) {
@@ -1123,6 +1243,17 @@ function ReadyPromptIrWorkspace({
         takeKind: marker.takeKind,
         takeOrdinal: marker.takeOrdinal,
         confirmReady: true,
+        firstFrameSelectionReceiptSha256: marker.firstFrameSelectionReceiptSha256,
+        selectedFirstFrameAssetId: marker.selectedFirstFrameAssetId,
+        selectedFirstFrameMaterializedSha256: marker.selectedFirstFrameMaterializedSha256,
+        videoPreflightSha256: marker.videoPreflightSha256,
+        videoQuoteProjectionSha256: marker.videoQuoteProjectionSha256,
+        maximumReservationCny: marker.maximumReservationCny,
+        candidateCount: marker.candidateCount,
+        maxAttempts: marker.maxAttempts,
+        selectAsOfficial: marker.selectAsOfficial,
+        paidConfirmed: marker.paidConfirmed,
+        paidConfirmationText: marker.paidConfirmationText,
       }, controller.signal), marker)
       if (controller.signal.aborted) return
       if (!writeProductionTakeReceipt(result, marker)) throw new Error(t('productionTakeStorageFailed'))
@@ -1130,6 +1261,7 @@ function ReadyPromptIrWorkspace({
       setProductionRecovery({ status: 'none' })
       setProductionTake(result)
       setProductionConfirmed(false)
+      await onCommitted()
     } catch (cause) {
       if (!controller.signal.aborted) setError(messageOf(cause))
     } finally {
@@ -1201,7 +1333,7 @@ function ReadyPromptIrWorkspace({
         t={t}
       />}
 
-      {!director && <section className={css.commitReceipt} aria-label={t('firstFrameQuoteTitle')}>
+      <section className={css.commitReceipt} aria-label={t('firstFrameQuoteTitle')}>
         <h4>{t('firstFrameQuoteTitle')}</h4>
         <p>{t('firstFrameQuoteBoundary')}</p>
         <button
@@ -1281,7 +1413,7 @@ function ReadyPromptIrWorkspace({
           <p>{firstFrameQuote.quoteReady ? t('firstFrameQuoteReady') : t('firstFrameQuoteBlocked')}</p>
           <p><strong>{t('firstFrameQuoteNotSubmitted')}</strong></p>
         </div>}
-      </section>}
+      </section>
       {director && <>
         <p role="status">{t('directorEditingDraft')} · {t('directorEffectiveReady')} v{snapshot?.subject.promptIrVersion ?? '—'}
           {draftPromptIr !== undefined && ` · Draft v${draftPromptIr.version}`}</p>
@@ -1532,6 +1664,26 @@ function ReadyPromptIrWorkspace({
       {director && <section className={css.commitReceipt} aria-label={t('productionTakeTitle')}>
         <h4>{t('productionTakeTitle')}</h4>
         <p>{t('productionTakeBoundary')}</p>
+        {firstFrameQuote === undefined && <p role="alert">{t('productionTakeRequiresFirstFrame')}</p>}
+        {firstFrameState !== undefined && <div role="status">
+          <h5>{t('firstFrameCandidatesTitle')}</h5>
+          {firstFrameState.candidates.length === 0 && <p role="alert">{t('firstFrameNoCandidates')}</p>}
+          {firstFrameState.candidates.map(candidate => <div key={candidate.assetId}>
+            <p>{candidate.assetId} · {t('firstFrameCandidateQuality')}: {candidate.qualityStatus} · {t('firstFrameCandidateSelection')}: {candidate.selectionStatus}<br />{t('firstFrameCandidateMaterializedSha')}: {candidate.materializedSha256}</p>
+            <FirstFrameCandidatePreview request={{ projectId: active.projectId, episodeId: active.episodeId, storyboardRevisionId: active.storyboardRevisionId, frameId: active.frameId, assetId: candidate.assetId, expectedMaterializedSha256: candidate.materializedSha256 }} load={createFirstFrameSelectionClient().preview} labels={{ load: t('firstFramePreviewLoad'), loading: t('firstFramePreviewLoading'), error: t('firstFramePreviewError'), ariaLabel: `${t('firstFrameCandidatesTitle')} ${candidate.assetId}` }} />
+            {candidate.selectionStatus === 'Unselected' && <label><input type="checkbox" checked={firstFrameCandidateId === candidate.assetId && firstFrameConfirmed} disabled={busy || firstFrameReceipt !== undefined} onChange={(event) => { setFirstFrameCandidateId(event.target.checked ? candidate.assetId : undefined); setFirstFrameConfirmed(event.target.checked); setVideoQuote(undefined); setProductionConfirmed(false) }} />{t('firstFrameCandidateConfirm')}</label>}
+          </div>)}
+          {firstFrameReceipt === undefined && firstFrameState.candidates.length > 0 && <button type="button" className={css.primaryAction} disabled={busy || firstFrameRecovery !== undefined || !firstFrameConfirmed || firstFrameCandidateId === undefined} onClick={() => { void selectFirstFrame() }}>{operation === 'selecting-first-frame' ? t('firstFrameSelecting') : t('firstFrameSelect')}</button>}
+          {firstFrameRecovery !== undefined && <div role="status">
+            <p>{t('firstFrameUnknownReceiptRecovery')}</p>
+            <button type="button" disabled={busy} onClick={() => { void recoverFirstFrameSelection() }}>{t('firstFrameRecoverSelection')}</button>
+          </div>}
+          {firstFrameReceipt !== undefined && <p>{t('firstFrameSelectionReceipt')}: {firstFrameReceipt.receiptSha256}；{t('firstFrameSelectionNotApproval')}</p>}
+        </div>}
+        {firstFrameReceipt !== undefined && <div role="status">
+          <button type="button" disabled={busy} onClick={() => { void quoteVideo() }}>{operation === 'quoting-video' ? t('videoQuoteLoading') : t('videoQuoteRead')}</button>
+          {videoQuote !== undefined && <><p>{t('videoQuoteCap')}：¥{videoQuote.maximumReservationCny.toFixed(4)}</p><p>{t('videoQuoteBlockers')}：{videoQuote.quoteBlockers.join(', ') || t('no')}</p><p>{t('videoDispatchBlockers')}：{videoQuote.dispatchBlockers.join(', ') || t('no')}</p><p>{t('videoPaidConfirmation')}：{videoQuote.requiredPaidConfirmationText}</p></>}
+        </div>}
         <ol className={directorCss.productionSteps}>
           <li data-state={snapshot === undefined ? 'pending' : 'ready'}>{t('productionTakeStepLock')}</li>
           <li data-state={productionTake === undefined ? 'pending' : 'ready'}>{t('productionTakeStepMethod')}</li>
@@ -1540,9 +1692,9 @@ function ReadyPromptIrWorkspace({
           <li data-state={productionTake === undefined ? 'pending' : 'ready'}>{t('productionTakeStepQueue')}</li>
         </ol>
         <label className={directorCss.productionConfirm}>
-          <input type="checkbox" checked={productionConfirmed} disabled={busy || productionRecovery.status === 'invalid'}
+          <input type="checkbox" checked={productionConfirmed} disabled={busy || productionRecovery.status === 'invalid' || videoQuote === undefined || !videoQuote.quoteReady || videoQuote.dispatchBlockers.length !== 1 || videoQuote.dispatchBlockers[0] !== 'operator_paid_confirmation_required'}
             onChange={(event) => { setProductionConfirmed(event.target.checked) }} />
-          <span>{t('productionTakeConfirmReady')}</span>
+          <span>{videoQuote?.requiredPaidConfirmationText ?? t('productionTakeRequiresFirstFrame')}</span>
         </label>
         {productionRecovery.status === 'ready' && <div className={directorCss.productionRecovery} role="status">
           <p><strong>{t('productionTakeUnknown')}</strong></p>
@@ -1555,14 +1707,14 @@ function ReadyPromptIrWorkspace({
         <div className={css.scriptActions}>
           <button type="button" className={css.primaryAction}
             disabled={busy || locked || snapshot === undefined || unsaved || bufferStale
-              || snapshot?.draft?.status === 'stale' || !productionConfirmed
+              || snapshot?.draft?.status === 'stale' || !productionConfirmed || videoQuote === undefined || !videoQuote.quoteReady || videoQuote.dispatchBlockers.length !== 1 || videoQuote.dispatchBlockers[0] !== 'operator_paid_confirmation_required'
               || productionRecovery.status !== 'none' || productionTake !== undefined}
             onClick={() => { void queueProductionTake(1) }}>
             {operation === 'queuing-production-take' ? t('productionTakeQueuing') : t('productionTakeOne')}
           </button>
           <button type="button"
             disabled={busy || locked || snapshot === undefined || unsaved || bufferStale
-              || snapshot?.draft?.status === 'stale' || !productionConfirmed
+              || snapshot?.draft?.status === 'stale' || !productionConfirmed || videoQuote === undefined || !videoQuote.quoteReady || videoQuote.dispatchBlockers.length !== 1 || videoQuote.dispatchBlockers[0] !== 'operator_paid_confirmation_required'
               || productionRecovery.status !== 'none' || productionTake?.receipt.takeOrdinal !== 1}
             onClick={() => { void queueProductionTake(2) }}>
             {t('productionTakeTwo')}

@@ -7,6 +7,7 @@ export const MAX_FIRST_FRAME_PREVIEW_BYTES = 16 * 1024 * 1024
 export interface FirstFrameCandidatePreviewRequest {
   readonly projectId: string
   readonly episodeId: string
+  readonly storyboardRevisionId: string
   readonly frameId: string
   readonly assetId: string
   readonly expectedMaterializedSha256: string
@@ -16,6 +17,7 @@ export interface FirstFrameCandidatePreviewRequest {
 export interface FirstFrameCandidatePreviewResponse {
   readonly projectId: string
   readonly episodeId: string
+  readonly storyboardRevisionId: string
   readonly frameId: string
   readonly assetId: string
   readonly materializedSha256: string
@@ -36,12 +38,13 @@ function sameScope(
   request: FirstFrameCandidatePreviewRequest,
 ): boolean {
   return result.projectId === request.projectId && result.episodeId === request.episodeId
+    && result.storyboardRevisionId === request.storyboardRevisionId
     && result.frameId === request.frameId && result.assetId === request.assetId
     && result.materializedSha256 === request.expectedMaterializedSha256
 }
 
 async function sha256(bytes: Uint8Array): Promise<string> {
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes)
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes.slice().buffer)
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
@@ -77,6 +80,7 @@ export function FirstFrameCandidatePreview({
   const requestKey = [
     request.projectId,
     request.episodeId,
+    request.storyboardRevisionId,
     request.frameId,
     request.assetId,
     request.expectedMaterializedSha256,
@@ -107,10 +111,8 @@ export function FirstFrameCandidatePreview({
       if (run.signal.aborted) return
       if (!sameScope(result, request)) throw new Error('first-frame preview source changed')
       const bytes = decodeCandidate(result)
-      if (await sha256(bytes) !== request.expectedMaterializedSha256 || run.signal.aborted) {
-        throw new Error('first-frame preview hash mismatch')
-      }
-      blob.current = URL.createObjectURL(new Blob([bytes], { type: result.mimeType }))
+      if (await sha256(bytes) !== request.expectedMaterializedSha256) throw new Error('first-frame preview hash mismatch')
+      blob.current = URL.createObjectURL(new Blob([bytes.slice().buffer], { type: result.mimeType }))
       setUrl(blob.current)
       setStatus('ready')
     } catch {

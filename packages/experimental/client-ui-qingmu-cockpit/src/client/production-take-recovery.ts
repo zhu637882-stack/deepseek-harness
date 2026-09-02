@@ -1,11 +1,11 @@
 import type {
   YimengProductionTakeResult,
-  YimengQueueProductionTakeIntent,
+  QingmuProductionTakeIntent,
 } from './contracts.ts'
 
-const MARKER_SCHEMA = 'qingmu.production-take-recovery-marker.v1'
-const MARKER_PREFIX = 'qingmu:production-take-recovery:v1'
-const RECEIPT_PREFIX = 'qingmu:production-take-receipt:v1'
+const MARKER_SCHEMA = 'qingmu.production-take-recovery-marker.v2'
+const MARKER_PREFIX = 'qingmu:production-take-recovery:v2'
+const RECEIPT_PREFIX = 'qingmu:production-take-receipt:v2'
 const SHA256 = /^[0-9a-f]{64}$/u
 const FIELDS = ['imageGenPrompt', 'lastFrameImagePrompt', 'videoGenPrompt', 'motionPrompt', 'negativePrompt'] as const
 const STAGES = [['D'], ['D'], ['E'], ['E'], ['D', 'E']] as const
@@ -23,7 +23,7 @@ export interface ProductionTakeCoordinates {
 }
 
 /** Durable, authority-free intent retained only while a Writer response is unknown. */
-export interface ProductionTakeRecoveryMarker extends Omit<YimengQueueProductionTakeIntent, 'takeOrdinal'> {
+export interface ProductionTakeRecoveryMarker extends Omit<QingmuProductionTakeIntent, 'takeOrdinal'> {
   readonly schema: typeof MARKER_SCHEMA
   readonly takeOrdinal: 1 | 2
 }
@@ -78,12 +78,20 @@ function assertCoordinates(value: Record<string, unknown>, expected: ProductionT
 function parseMarker(value: unknown, expected: ProductionTakeCoordinates): ProductionTakeRecoveryMarker {
   const item = exact(value, [
     'schema', 'projectId', 'episodeId', 'storyboardRevisionId', 'frameId', 'takeKind', 'takeOrdinal', 'confirmReady',
+    'firstFrameSelectionReceiptSha256', 'selectedFirstFrameAssetId', 'selectedFirstFrameMaterializedSha256',
+    'videoPreflightSha256', 'videoQuoteProjectionSha256', 'maximumReservationCny', 'candidateCount', 'maxAttempts',
+    'selectAsOfficial', 'paidConfirmed', 'paidConfirmationText',
   ], 'Production Take 恢复标记')
   if (item.schema !== MARKER_SCHEMA) throw new Error('Production Take 恢复标记版本不匹配')
   assertCoordinates(item, expected)
   if ((item.takeOrdinal !== 1 && item.takeOrdinal !== 2)
     || (item.takeOrdinal === 1 ? item.takeKind !== 'initial' : item.takeKind !== 'targeted_rework')
-    || item.confirmReady !== true) throw new Error('Production Take 恢复意图无效')
+    || item.confirmReady !== true || item.candidateCount !== 1 || item.maxAttempts !== 1
+    || item.selectAsOfficial !== false || item.paidConfirmed !== true
+    || typeof item.maximumReservationCny !== 'number' || !Number.isFinite(item.maximumReservationCny) || item.maximumReservationCny < 0 || item.maximumReservationCny > 1000
+    || typeof item.paidConfirmationText !== 'string' || item.paidConfirmationText.trim() === '' || item.paidConfirmationText.length > 256) throw new Error('Production Take 恢复意图无效')
+  for (const field of ['firstFrameSelectionReceiptSha256', 'selectedFirstFrameMaterializedSha256', 'videoPreflightSha256', 'videoQuoteProjectionSha256'] as const) sha(item[field], field)
+  identifier(item.selectedFirstFrameAssetId, 'selectedFirstFrameAssetId')
   return item as unknown as ProductionTakeRecoveryMarker
 }
 
@@ -122,6 +130,9 @@ export function assertProductionTakeResult(
     'authoritySnapshotSha256', 'firstFrameQuoteProjectionSha256', 'referenceBindings', 'takeKind',
     'takeOrdinal', 'takeLimit', 'taskId', 'taskStatus', 'requestIdempotencyKey', 'idempotencyKey',
     'deduplicated', 'recovered', 'queued',
+    'firstFrameSelectionReceiptSha256', 'selectedFirstFrameAssetId', 'selectedFirstFrameMaterializedSha256',
+    'videoPreflightSha256', 'videoQuoteProjectionSha256', 'maximumReservationCny', 'candidateCount', 'maxAttempts',
+    'selectAsOfficial', 'paidConfirmed', 'paidConfirmationTextSha256',
   ], 'Writer Production Take 回执')
   const promptIr = exact(receipt.promptIr, ['id', 'version', 'contentSha256', 'videoPromptSha256'], 'Writer PromptIR 回执')
   if (receipt.schema !== 'jason.qingmu-writer-production-take.v1'
@@ -149,6 +160,8 @@ export function assertProductionTakeResult(
   identifier(receipt.idempotencyKey, 'idempotencyKey')
   sha(receipt.authoritySnapshotSha256, 'authoritySnapshotSha256')
   sha(receipt.firstFrameQuoteProjectionSha256, 'firstFrameQuoteProjectionSha256')
+  for (const field of ['firstFrameSelectionReceiptSha256', 'selectedFirstFrameMaterializedSha256', 'videoPreflightSha256', 'videoQuoteProjectionSha256', 'paidConfirmationTextSha256'] as const) sha(receipt[field], field)
+  if (receipt.firstFrameSelectionReceiptSha256 !== expected.firstFrameSelectionReceiptSha256 || receipt.selectedFirstFrameAssetId !== expected.selectedFirstFrameAssetId || receipt.selectedFirstFrameMaterializedSha256 !== expected.selectedFirstFrameMaterializedSha256 || receipt.videoPreflightSha256 !== expected.videoPreflightSha256 || receipt.videoQuoteProjectionSha256 !== expected.videoQuoteProjectionSha256 || receipt.maximumReservationCny !== expected.maximumReservationCny || receipt.candidateCount !== 1 || receipt.maxAttempts !== 1 || receipt.selectAsOfficial !== false || receipt.paidConfirmed !== true) throw new Error('Writer Production Take 报价或首帧血缘不匹配')
   return root as unknown as YimengProductionTakeResult
 }
 
@@ -158,7 +171,7 @@ export function assertProductionTakeResult(
  * @returns The versioned recovery marker.
  */
 export function createProductionTakeRecoveryMarker(
-  intent: Omit<YimengQueueProductionTakeIntent, 'takeOrdinal'> & { readonly takeOrdinal: 1 | 2 },
+  intent: Omit<QingmuProductionTakeIntent, 'takeOrdinal'> & { readonly takeOrdinal: 1 | 2 },
 ): ProductionTakeRecoveryMarker {
   return parseMarker({ schema: MARKER_SCHEMA, ...intent }, intent)
 }
@@ -221,18 +234,9 @@ export function readProductionTakeReceipt(
     const raw = localStorage.getItem(key(RECEIPT_PREFIX, coordinates))
     if (raw === null) return { status: 'none' }
     const parsed = JSON.parse(raw) as unknown
-    const root = record(parsed, 'Production Take 本地回执')
-    const receipt = record(root.receipt, 'Production Take 本地 Writer 回执')
-    const ordinal = receipt.takeOrdinal
-    if (ordinal !== 1 && ordinal !== 2) throw new Error('Production Take 本地回执编号无效')
-    const marker = createProductionTakeRecoveryMarker({
-      projectId: coordinates.projectId,
-      episodeId: coordinates.episodeId,
-      storyboardRevisionId: coordinates.storyboardRevisionId,
-      frameId: coordinates.frameId,
-      takeOrdinal: ordinal,
-      takeKind: ordinal === 1 ? 'initial' : 'targeted_rework', confirmReady: true })
-    return { status: 'ready', value: assertProductionTakeResult(parsed, marker) }
+    const root = exact(parsed, ['marker', 'result'], 'Production Take 本地回执')
+    const marker = parseMarker(root.marker, coordinates)
+    return { status: 'ready', value: assertProductionTakeResult(root.result, marker) }
   } catch (cause) {
     return { status: 'invalid', error: cause instanceof Error ? cause.message : String(cause) }
   }
@@ -254,7 +258,7 @@ export function writeProductionTakeReceipt(
     const existing = readProductionTakeReceipt(marker)
     if (existing.status === 'invalid'
       || (existing.status === 'ready' && existing.value.receipt.takeOrdinal > verified.receipt.takeOrdinal)) return false
-    localStorage.setItem(storageKey, JSON.stringify(verified))
+    localStorage.setItem(storageKey, JSON.stringify({ marker, result: verified }))
     const readback = readProductionTakeReceipt(marker)
     return readback.status === 'ready'
       && readback.value.receipt.requestIdempotencyKey === verified.receipt.requestIdempotencyKey

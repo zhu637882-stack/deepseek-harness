@@ -11,10 +11,11 @@ import {
 const bytes = Buffer.from('first-frame-candidate')
 const sha = createHash('sha256').update(bytes).digest('hex')
 const request: FirstFrameCandidatePreviewRequest = {
-  projectId: 'project-1', episodeId: 'episode-1', frameId: 'frame-1', assetId: 'asset-1', expectedMaterializedSha256: sha,
+  projectId: 'project-1', episodeId: 'episode-1', storyboardRevisionId: 'storyboard-1', frameId: 'frame-1', assetId: 'asset-1', expectedMaterializedSha256: sha,
 }
 const response: FirstFrameCandidatePreviewResponse = {
-  projectId: request.projectId, episodeId: request.episodeId, frameId: request.frameId, assetId: request.assetId,
+  projectId: request.projectId, episodeId: request.episodeId,
+  storyboardRevisionId: request.storyboardRevisionId, frameId: request.frameId, assetId: request.assetId,
   materializedSha256: sha, mimeType: 'image/png', base64: bytes.toString('base64'),
 }
 const labels = { load: '查看首帧候选', loading: '正在验证候选', error: '首帧候选已变化，未显示', ariaLabel: '首帧候选 asset-1' }
