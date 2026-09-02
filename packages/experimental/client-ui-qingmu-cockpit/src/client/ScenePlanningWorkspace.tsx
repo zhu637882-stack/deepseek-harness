@@ -8,6 +8,11 @@ import type {
   DirectorContextClientPort,
   DirectorObjectScope,
 } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
+import {
+  createQingmuScenePlanningSavedMessage,
+  type QingmuAdvisorySaveProof,
+  type QingmuHostSync,
+} from './host-sync.ts'
 import css from './ScenePlanningWorkspace.module.css'
 
 interface LocalPlan {
@@ -18,6 +23,7 @@ interface LocalPlan {
   shotIds: string[]
   dirty: boolean
   pending?: ScenePlanningRequest
+  pendingAdvisory?: QingmuAdvisorySaveProof
 }
 const labels = { title: '镜头名称', narrative: '叙事目的', visual: '画面描述', action: '动作与表演' } as const
 function base(state: ScenePlanningState, sceneIndex: number): PlanningBase {
@@ -38,19 +44,76 @@ function errorText(error: unknown): string {
   return `未能确认结果。输入已保留，请先读取恢复。${message}`
 }
 
+function objectOf(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function validStoredShot(value: unknown): value is PlanningShot {
+  const shot = objectOf(value)
+  return shot !== null
+    && typeof shot.title === 'string'
+    && typeof shot.narrative === 'string'
+    && typeof shot.visual === 'string'
+    && typeof shot.action === 'string'
+    && typeof shot.durationSec === 'number'
+    && Number.isFinite(shot.durationSec)
+    && Array.isArray(shot.dialogueLineIds)
+    && shot.dialogueLineIds.every(id => typeof id === 'string')
+}
+
+/** Treat browser persistence as untrusted and bind a pending RPC to the current canonical object before I/O. */
+function validatedPendingIntent(
+  value: unknown,
+  currentState: ScenePlanningState | null,
+  projectId: string,
+  episodeId: string,
+): ScenePlanningRequest | null {
+  const intent = objectOf(value)
+  const request = objectOf(intent?.request)
+  if (currentState === null
+    || currentState.projectId !== projectId
+    || currentState.episodeId !== episodeId
+    || intent?.projectId !== projectId
+    || intent.episodeId !== episodeId
+    || typeof intent.idempotencyKey !== 'string'
+    || !/^[A-Za-z0-9._:-]{8,128}$/u.test(intent.idempotencyKey)
+    || request === null
+    || typeof request.sceneIndex !== 'number'
+    || !Number.isSafeInteger(request.sceneIndex)
+    || !currentState.scenes.some(scene => scene.sceneIndex === request.sceneIndex)) return null
+  if (request.action === 'edit') {
+    return typeof request.shotId === 'string'
+      && validStoredShot(request.shot)
+      && currentState.planning?.sceneIndex === request.sceneIndex
+      && currentState.planning.shots.some(shot => shot.id === request.shotId)
+      ? value as ScenePlanningRequest
+      : null
+  }
+  return request.action === 'initialize'
+    && Array.isArray(request.shots)
+    && request.shots.length >= 1
+    && request.shots.length <= 8
+    && request.shots.every(validStoredShot)
+    ? value as ScenePlanningRequest
+    : null
+}
+
 /** One source scene and bounded shot editor, with explicit structural-only save.
  * @param props - Canonical scope and existing Host command port.
  * @returns Three-column planning workspace; never creates prompts, media or approval.
  */
 export function ScenePlanningWorkspace({
   projectId, episodeId, port, directorBridge, directorSessionId,
-  onUnsavedChange, onCommitted, onSelectShotId,
+  hostSync, onUnsavedChange, onCommitted, onSelectShotId,
 }: {
   readonly projectId: string
   readonly episodeId: string
   readonly port: Pick<QingmuYimengPort, 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning' | 'requestDirectorProposal' | 'checkDirectorProposalFreshness'>
   readonly directorBridge?: DirectorContextClientPort | undefined
   readonly directorSessionId?: string | undefined
+  readonly hostSync?: QingmuHostSync | undefined
   readonly onUnsavedChange: (dirty: boolean) => void
   readonly onCommitted: () => Promise<unknown>
   readonly onSelectShotId: (id: string) => void
@@ -98,12 +161,34 @@ export function ScenePlanningWorkspace({
     let active = true
     void port.readScenePlanning({ projectId, episodeId }).then((next) => {
       if (!active) return
+      if (next.projectId !== projectId || next.episodeId !== episodeId) throw new Error('409 planning_read_scope_mismatch')
       setState(next)
-      if (local === null) { const plan = saved(next); setLocal(plan); setSceneIndex(plan?.sceneIndex ?? 1) }
+      if (local?.pending !== undefined
+        && validatedPendingIntent(local.pending, next, projectId, episodeId) === null) {
+        try { localStorage.removeItem(key) } catch { /* The invalid marker remains unusable in memory. */ }
+        const plan = saved(next)
+        setLocal(plan)
+        setSceneIndex(plan?.sceneIndex ?? 1)
+        setIndex(0)
+        setError('已拒绝损坏或跨作用域的恢复标记，并载入当前权威规划；未发送恢复或保存请求。')
+        return
+      }
+      if (local === null) {
+        const plan = saved(next)
+        const target = hostSync?.pendingTarget()
+        const targetIndex = plan !== null && target !== null && target !== undefined
+          && next.planning?.sceneId === target.sceneId
+          ? plan.shotIds.findIndex(id => id === target.shotId)
+          : -1
+        const activeIndex = targetIndex >= 0 ? targetIndex : 0
+        setLocal(plan === null ? null : { ...plan, activeIndex })
+        setSceneIndex(plan?.sceneIndex ?? 1)
+        setIndex(activeIndex)
+      }
     }).catch((e: unknown) => { if (active) setError(errorText(e)) })
     return () => { active = false }
     // Scope remounts this workspace; initial hydration must not replace local edits.
-  }, [projectId, episodeId, port])
+  }, [projectId, episodeId, port, hostSync])
   useEffect(() => {
     const dirty = Boolean(local?.dirty || local?.pending)
     onUnsavedChange(dirty)
@@ -134,7 +219,7 @@ export function ScenePlanningWorkspace({
     void directorBridge.enter(directorSessionId, directorScope, operation.signal).then((result) => {
       if (operation.signal.aborted || epoch !== proposalEpoch.current) return
       if (result.status === 'current') {
-        setDirectorBinding(result.state); setDirectorStatus('current')
+        setDirectorBinding(result.state); setDirectorStatus('current'); hostSync?.replay(result.state)
       } else {
         setDirectorBinding(result.state); setDirectorStatus('unavailable')
       }
@@ -144,7 +229,7 @@ export function ScenePlanningWorkspace({
       }
     })
     return () => { operation.abort() }
-  }, [directorBridge, directorSessionId, projectId, episodeId, directorScope?.sceneId, directorScope?.shotId])
+  }, [directorBridge, directorSessionId, hostSync, projectId, episodeId, directorScope?.sceneId, directorScope?.shotId])
   const begin = () => {
     if (!state || !scene) return
     const shots = [0, 1].map(i => ({ title: `镜头 ${i + 1}`, narrative: '', visual: '', action: i === 0 ? scene.actionDescription : '',
@@ -196,23 +281,86 @@ export function ScenePlanningWorkspace({
     }
     setAdoptedProposalItems(items => [...new Set([...items, item.id])])
   }
-  const finish = async (result: ScenePlanningResult) => {
+  const finish = async (
+    result: ScenePlanningResult,
+    advisory: QingmuAdvisorySaveProof | null,
+    intendedShotId?: string,
+  ) => {
     if (!isLive()) return
-    setReceipt(result)
     const next = await port.readScenePlanning({ projectId, episodeId }, controller.current.signal)
     if (!isLive()) return
-    setState(next); update(saved(next)); setRetryAllowed(false); setRecoveryRead(false)
-    await onCommitted()
+    const selected = intendedShotId ?? result.shotIds[index]
+    if (result.projectId !== projectId
+      || result.episodeId !== episodeId
+      || next.projectId !== projectId
+      || next.episodeId !== episodeId
+      || next.planning === null
+      || next.planning.sceneId !== result.sceneId
+      || selected === undefined
+      || !result.shotIds.includes(selected)
+      || !next.planning.shots.some(shot => shot.id === selected)
+      || next.storyboard?.id !== result.storyboard.id
+      || next.storyboard.version !== result.storyboard.version
+      || next.storyboard.sourceHash !== result.storyboard.sourceHash) {
+      throw new Error('409 planning_receipt_scope_mismatch')
+    }
+    setReceipt(result)
+    const nextPlan = saved(next)
+    const nextIndex = nextPlan?.shotIds.findIndex(id => id === selected) ?? -1
+    setState(next)
+    update(nextPlan === null ? null : { ...nextPlan, activeIndex: nextIndex >= 0 ? nextIndex : 0 })
+    if (nextIndex >= 0) setIndex(nextIndex)
+    setRetryAllowed(false); setRecoveryRead(false)
+    onSelectShotId(selected)
+    const warnings: string[] = []
+    try {
+      await onCommitted()
+    } catch {
+      if (!isLive()) return
+      warnings.push('内层工作流投影刷新失败；保存回执仍有效，外层通知不受影响。')
+    }
     if (!isLive()) return
-    const selected = result.shotIds[index]
-    if (selected) onSelectShotId(selected)
+    if (hostSync !== undefined) {
+      if (directorBridge === undefined || directorSessionId === undefined) {
+        warnings.push('当前 DSh 会话未绑定；未向外层发送刷新通知。请重新读取当前镜头。')
+      } else {
+        try {
+          const entered = await directorBridge.enter(directorSessionId, {
+            projectId, episodeId, sceneId: result.sceneId, shotId: selected,
+          }, controller.current.signal)
+          if (!isLive()) return
+          if (entered.status !== 'current') {
+            setDirectorBinding(entered.state); setDirectorStatus('unavailable')
+            warnings.push('保存后的镜头上下文未能重新核对；未向外层发送刷新通知。')
+          } else {
+            setDirectorBinding(entered.state); setDirectorStatus('current')
+            const message = createQingmuScenePlanningSavedMessage(result, entered.state, advisory)
+            if (message === null || !hostSync.publish(message)) {
+              warnings.push('外层刷新通知未确认发送；外层可安全手动刷新。')
+            }
+          }
+        } catch {
+          if (!isLive()) return
+          warnings.push('保存后的镜头上下文核对失败；未向外层发送刷新通知。')
+        }
+      }
+    }
+    if (warnings.length > 0) setError(`规划已保存。${warnings.join(' ')}`)
   }
   const run = async (recover: boolean) => {
     if (lock.current) return
     lock.current = true; setBusy(true); setError('')
     try {
       if (recover) {
-        if (local?.pending) await finish(await port.recoverScenePlanning(local.pending, controller.current.signal))
+        if (local?.pending) {
+          const intent = validatedPendingIntent(local.pending, state, projectId, episodeId)
+          if (intent === null) throw new Error('409 planning_pending_scope_mismatch')
+          await finish(
+            await port.recoverScenePlanning(intent, controller.current.signal),
+            local.pendingAdvisory ?? null,
+            intent.request.action === 'edit' ? intent.request.shotId : undefined,
+          )
+        }
         else {
           const next = await port.readScenePlanning({ projectId, episodeId }, controller.current.signal)
           if (!isLive()) return
@@ -221,6 +369,7 @@ export function ScenePlanningWorkspace({
         }
       } else if (local && current) {
         const shotId = local.shotIds[index]
+        let advisory: QingmuAdvisorySaveProof | null = local.pendingAdvisory ?? null
         if (local.shotIds.length > 0 && !shotId) throw new Error('当前镜头身份缺失，请读取恢复。')
         if (shotId && proposal && adoptedProposalItems.length > 0) {
           if (directorBridge === undefined || directorSessionId === undefined) throw new Error('409 director_session_missing')
@@ -245,14 +394,33 @@ export function ScenePlanningWorkspace({
           if (!freshness.fresh) {
             throw new Error('409 director_proposal_stale')
           }
+          advisory = {
+            proposalId: proposal.proposalId,
+            proposalSha256: proposal.proposalSha256,
+            outputSha256: proposal.outputSha256,
+            inputContextSnapshotSha256: proposal.inputSha256,
+            methodPackageVersion: proposal.methodPackage.version,
+            methodPackageSha256: proposal.methodPackage.methodPackageSha256,
+            workOrderId: proposal.workOrder.workOrderId,
+            workOrderSha256: proposal.workOrder.workOrderSha256,
+            promptSha256: proposal.workOrder.promptSha256,
+            adoptedItemIds: adoptedProposalItems,
+          }
         }
         const intent: ScenePlanningRequest = local.pending ?? { projectId, episodeId, idempotencyKey: crypto.randomUUID(),
           request: shotId ? { ...local.base, action: 'edit', shotId, shot: current }
             : { ...local.base, action: 'initialize', shots: local.shots } }
+        const scopedIntent = validatedPendingIntent(intent, state, projectId, episodeId)
+        if (scopedIntent === null) throw new Error('409 planning_pending_scope_mismatch')
         // Persist the exact intent before transmitting, so unknown outcomes are recoverable.
-        localStorage.setItem(key, JSON.stringify({ ...local, pending: intent }))
-        setLocal({ ...local, pending: intent })
-        await finish(await port.saveScenePlanning(intent, controller.current.signal))
+        const pending = { ...local, pending: scopedIntent, ...(advisory === null ? {} : { pendingAdvisory: advisory }) }
+        localStorage.setItem(key, JSON.stringify(pending))
+        setLocal(pending)
+        await finish(
+          await port.saveScenePlanning(scopedIntent, controller.current.signal),
+          advisory,
+          scopedIntent.request.action === 'edit' ? scopedIntent.request.shotId : undefined,
+        )
       }
     } catch (e) {
       if (!isLive()) return
@@ -289,7 +457,7 @@ export function ScenePlanningWorkspace({
       <header><small>导演入场 · 结构规划</small><h2>{scene?.title ?? '从已保存剧本建立镜头'}</h2>
         <p>只保存本场文本实体与规划镜头，不生成媒体，不批准内容。</p></header>
       {error && <p role="alert" className={css.notice}>{error}</p>}
-      <div className={css.actions}><button type="button" disabled={busy} onClick={() => { void run(true) }}>读取恢复</button>
+      <div className={css.actions}><button type="button" disabled={busy || state === null} onClick={() => { void run(true) }}>读取恢复</button>
         {local?.pending && retryAllowed && <button type="button" disabled={busy || canRebase} onClick={() => { void run(false) }}>重试原保存</button>}
         {canRebase && <button type="button" onClick={() => {
           if (!local || !state || !current) return

@@ -150,9 +150,9 @@ function errorMessage(error: unknown): string {
 }
 
 /** Qingmu production cockpit mounted in the generic sidebar footer. */
-export function QingmuCockpit({ wide, port, directorBridge, entryScope, t, useSessions }: QingmuCockpitProps) {
-  const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<Tab>('overview')
+export function QingmuCockpit({ wide, port, directorBridge, hostSync, entryScope, t, useSessions }: QingmuCockpitProps) {
+  const [open, setOpen] = useState(true)
+  const [tab, setTab] = useState<Tab>('director')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
   const [health, setHealth] = useState<YimengHealth>()
@@ -325,7 +325,11 @@ export function QingmuCockpit({ wide, port, directorBridge, entryScope, t, useSe
     setOpen(false)
   }
 
-  useEffect(() => () => { abortRef.current?.abort() }, [])
+  useEffect(() => {
+    void refresh()
+    return () => { abortRef.current?.abort() }
+    // The Qingmu build owns this entry and opens its exact cockpit scope once on mount.
+  }, [])
 
   const shotRelations = projection?.director.shotRelations
   useEffect(() => {
@@ -649,10 +653,12 @@ export function QingmuCockpit({ wide, port, directorBridge, entryScope, t, useSe
   )
 
   const panels: Record<Tab, ReactNode> = {
-    director: <DirectorWorkspace projectId={projectId} episodeId={episodeId} projection={projection}
-      shotItems={shotItems} selectedShotId={selectedShotId} onSelectShotId={(id) => { if (mayLeaveDirector()) setSelectedShotId(id) }}
-      onUnsavedChange={onDirectorDirty} port={port} directorBridge={directorBridge}
-      directorSessionId={directorSessionId} t={t} onCommitted={refreshWorkflowProjectionAfterCommit} />,
+    director: projectId !== '' && episodeId !== ''
+      ? <DirectorWorkspace projectId={projectId} episodeId={episodeId} projection={projection}
+        shotItems={shotItems} selectedShotId={selectedShotId} onSelectShotId={(id) => { if (mayLeaveDirector()) setSelectedShotId(id) }}
+        onUnsavedChange={onDirectorDirty} port={port} directorBridge={directorBridge}
+        directorSessionId={directorSessionId} hostSync={hostSync} t={t} onCommitted={refreshWorkflowProjectionAfterCommit} />
+      : <p role="status">导演工作区等待准确项目与剧集绑定；不会自动读取空作用域。</p>,
     overview,
     assets: assetView,
     shots: shotView,

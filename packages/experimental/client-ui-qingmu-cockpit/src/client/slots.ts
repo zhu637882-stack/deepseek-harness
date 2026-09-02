@@ -1,5 +1,6 @@
 import type { QingmuYimengPort } from './contracts.ts'
 import type { DirectorContextClientPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
+import type { QingmuHostSync } from './host-sync.ts'
 
 /** Exact project and episode selected by the outer Yimeng workspace. */
 export interface QingmuEntryScope {
@@ -28,6 +29,7 @@ export function parseQingmuEntryScope(href: string): QingmuEntryScope | null | u
 export interface QingmuCockpitFace {
   readonly port: QingmuYimengPort
   readonly directorBridge: DirectorContextClientPort
+  readonly hostSync?: QingmuHostSync | undefined
   /** Undefined is the standalone Host; null is an invalid embedded handoff. */
   readonly entryScope?: QingmuEntryScope | null
 }

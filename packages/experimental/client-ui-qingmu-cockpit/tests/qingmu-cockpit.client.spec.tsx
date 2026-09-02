@@ -934,7 +934,11 @@ describe('embedded Qingmu entry scope', () => {
     }))
     const workflow = vi.fn(async (request: Parameters<QingmuYimengPort['workflow']>[0]) =>
       workflowFor(request.projectId, request.episodeId, 'bound-shot', '绑定镜头'))
-    mount(makePort({ projects, episodes, workflow }), { projectId: 'project-2', episodeId: 'episode-3' })
+    const readScenePlanning = vi.fn(async (request: CreationScope) => ({
+      schema: 'jason.qingmu-scene-planning-state.v1' as const, ...request,
+      scriptRevision: 0, scriptSha256: null, scenes: [], storyboard: null, planning: null,
+    }))
+    mount(makePort({ projects, episodes, workflow, readScenePlanning }), { projectId: 'project-2', episodeId: 'episode-3' })
     fireEvent.click(screen.getByRole('button', { name: zh.trigger }))
     const dialog = await screen.findByRole('dialog', { name: zh.title })
     await waitFor(() => {
@@ -945,6 +949,10 @@ describe('embedded Qingmu entry scope', () => {
     expect(workflow).not.toHaveBeenCalledWith(
       { projectId: 'project-1', episodeId: 'episode-1' }, expect.anything(),
     )
+    await waitFor(() => {
+      expect(readScenePlanning).toHaveBeenCalledWith({ projectId: 'project-2', episodeId: 'episode-3' })
+    })
+    expect(readScenePlanning).not.toHaveBeenCalledWith({ projectId: '', episodeId: '' })
     expect(within(dialog).getByRole('combobox', { name: zh.project }).hasAttribute('disabled')).toBe(true)
     expect(within(dialog).getByRole('combobox', { name: zh.episode }).hasAttribute('disabled')).toBe(true)
   })
@@ -1101,14 +1109,11 @@ describe('ShotRelationsView', () => {
 })
 
 describe('QingmuCockpit journey', () => {
-  it('opens the five-tab projection, states authority boundaries, and restores trigger focus on close', async () => {
+  it('opens directly in the director workspace, retains all projections, and restores trigger focus on close', async () => {
     const workflow = vi.fn(async () => WORKFLOW)
     const port = makePort({ workflow })
     mount(port)
     const trigger = screen.getByRole('button', { name: zh.trigger })
-    trigger.focus()
-    fireEvent.click(trigger)
-
     const dialog = await screen.findByRole('dialog', { name: zh.title })
     await waitFor(() => {
       expect(workflow).toHaveBeenCalledWith(
@@ -1133,6 +1138,9 @@ describe('QingmuCockpit journey', () => {
       zh.tabGeneration,
       zh.tabDelivery,
     ])
+    expect(within(dialog).getByRole('tab', { name: zh.tabDirector }).getAttribute('aria-selected')).toBe('true')
+    expect(within(dialog).getByRole('region', { name: '场景与镜头规划' })).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabOverview }))
     expect(within(dialog).getByRole('heading', { name: zh.stages })).toBeTruthy()
 
     fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabAssets }))

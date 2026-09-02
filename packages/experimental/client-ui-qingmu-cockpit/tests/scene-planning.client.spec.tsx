@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { ScenePlanningWorkspace } from '../src/client/ScenePlanningWorkspace.tsx'
 import type { DirectorProposalFreshnessResult, DirectorReplayProposal, ScenePlanningState, ScenePlanningResult } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { DirectorContextBindingState, DirectorContextClientPort, DirectorObjectScope } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
+import type { QingmuHostSync, QingmuScenePlanningSavedMessage } from '../src/client/host-sync.ts'
 
 const state: ScenePlanningState = { schema: 'jason.qingmu-scene-planning-state.v1', projectId: 'project_1', episodeId: 'episode_1',
   scriptRevision: 1, scriptSha256: 'a'.repeat(64), storyboard: null, planning: null,
@@ -66,10 +67,59 @@ it('preserves text and original intent across double-click, disconnect and remou
   first.unmount()
   render(<ScenePlanningWorkspace {...props} />)
   expect(screen.getByLabelText<HTMLTextAreaElement>('叙事目的').value).toBe('用户填写的相遇意图')
+  await waitFor(() => { expect(port.readScenePlanning).toHaveBeenCalledTimes(2) })
   fireEvent.click(screen.getByText('读取恢复'))
   await waitFor(() => { expect(port.recoverScenePlanning).toHaveBeenCalledOnce() })
   expect(port.saveScenePlanning).toHaveBeenCalledOnce()
   expect(await screen.findByText('重试原保存')).toBeTruthy()
+})
+
+it('rejects a persisted cross-scope intent before any recover or save RPC', async () => {
+  localStorage.setItem('qingmu.scene-planning.v1:project_1:episode_1', JSON.stringify({
+    sceneIndex: 1,
+    shots: [{ title: '错误范围', narrative: '', visual: '', action: '', durationSec: 3, dialogueLineIds: [] }],
+    base: { sceneIndex: 1, expectedScriptRevision: 1, expectedScriptSha256: 'a'.repeat(64),
+      expectedStoryboardRevision: 0, expectedStoryboardSha256: null },
+    shotIds: [], dirty: true,
+    pending: { projectId: 'project_other', episodeId: 'episode_other', idempotencyKey: 'intent_other', request: {
+      action: 'initialize', sceneIndex: 1, expectedScriptRevision: 1, expectedScriptSha256: 'a'.repeat(64),
+      expectedStoryboardRevision: 0, expectedStoryboardSha256: null,
+      shots: [{ title: '错误范围', narrative: '', visual: '', action: '', durationSec: 3, dialogueLineIds: [] }],
+    } },
+  }))
+  const port = { readScenePlanning: vi.fn(async () => state), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() }
+  render(<ScenePlanningWorkspace {...state} port={port} onCommitted={vi.fn(async () => {})}
+    onSelectShotId={vi.fn()} onUnsavedChange={vi.fn()} />)
+  expect(await screen.findByText(/已拒绝损坏或跨作用域的恢复标记/)).toBeTruthy()
+  expect(port.recoverScenePlanning).not.toHaveBeenCalled()
+  expect(port.saveScenePlanning).not.toHaveBeenCalled()
+  expect(localStorage.getItem('qingmu.scene-planning.v1:project_1:episode_1')).toBeNull()
+})
+
+it('rejects a persisted edit for a non-canonical Shot before any RPC', async () => {
+  const canonical: ScenePlanningState = { ...state,
+    storyboard: { id: 'revision_1', version: 1, sourceHash: 'b'.repeat(64), status: 'Ready' },
+    planning: { sceneId: 'scene_1', sceneIndex: 1, initialReceiptId: 'receipt_1', actorIds: {},
+      source: { sceneIndex: 1, scriptRevision: 1, scriptSha256: state.scriptSha256!, inputSha256: 'c'.repeat(64), sourceLineIds: ['line_1'] },
+      shots: [{ id: 'shot_1', title: '门口', narrative: '', visual: '', action: '', durationSec: 3, dialogueLineIds: [] }] } }
+  const shot = { title: '错误镜头', narrative: '', visual: '', action: '', durationSec: 3, dialogueLineIds: [] }
+  localStorage.setItem('qingmu.scene-planning.v1:project_1:episode_1', JSON.stringify({
+    sceneIndex: 1, shots: [shot], base: { sceneIndex: 1, expectedScriptRevision: 1,
+      expectedScriptSha256: 'a'.repeat(64), expectedStoryboardRevision: 1, expectedStoryboardSha256: 'b'.repeat(64) },
+    shotIds: ['shot_other'], dirty: true,
+    pending: { projectId: 'project_1', episodeId: 'episode_1', idempotencyKey: 'intent_other', request: {
+      action: 'edit', shotId: 'shot_other', shot, sceneIndex: 1, expectedScriptRevision: 1,
+      expectedScriptSha256: 'a'.repeat(64), expectedStoryboardRevision: 1, expectedStoryboardSha256: 'b'.repeat(64),
+    } },
+  }))
+  const port = { readScenePlanning: vi.fn(async () => canonical), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() }
+  render(<ScenePlanningWorkspace {...canonical} port={port} onCommitted={vi.fn(async () => {})}
+    onSelectShotId={vi.fn()} onUnsavedChange={vi.fn()} />)
+  expect(await screen.findByText(/已拒绝损坏或跨作用域的恢复标记/)).toBeTruthy()
+  expect(port.recoverScenePlanning).not.toHaveBeenCalled()
+  expect(port.saveScenePlanning).not.toHaveBeenCalled()
 })
 
 it('ignores a late committed response after leaving the scope and retains the durable intent', async () => {
@@ -163,6 +213,55 @@ it('keeps replay advice explicit and advisory until the human uses the existing 
   await waitFor(() => { expect(port.saveScenePlanning).toHaveBeenCalledOnce() })
   expect(port.requestDirectorProposal).toHaveBeenCalledOnce()
   expect(port.checkDirectorProposalFreshness).toHaveBeenCalledOnce()
+  expect(localStorage.getItem('qingmu.scene-planning.v1:project_1:episode_1')).toContain('pendingAdvisory')
+})
+
+it('recovers an unknown adopted save and publishes its exact method-bound outer refresh', async () => {
+  const original: ScenePlanningState = { ...state,
+    storyboard: { id: 'revision_1', version: 1, sourceHash: 'b'.repeat(64), status: 'Ready' },
+    planning: { sceneId: 'scene_1', sceneIndex: 1, initialReceiptId: 'receipt_1', actorIds: {},
+      source: { sceneIndex: 1, scriptRevision: 1, scriptSha256: state.scriptSha256!, inputSha256: 'c'.repeat(64), sourceLineIds: ['line_1'] },
+      shots: [{ id: 'shot_1', title: '门口', narrative: '相遇', visual: '雨夜门口', action: '开门', durationSec: 3, dialogueLineIds: ['line_1'] }] } }
+  const committed: ScenePlanningState = { ...original,
+    storyboard: { id: 'revision_2', version: 2, sourceHash: '4'.repeat(64), status: 'Ready' },
+    planning: { ...original.planning!, shots: [{ ...original.planning!.shots[0]!, narrative: '相遇；明确本镜情绪落点。' }] } }
+  const result: ScenePlanningResult = {
+    schema: 'jason.qingmu-scene-planning-result.v1', projectId: state.projectId, episodeId: state.episodeId,
+    action: 'edit', sceneId: 'scene_1', seriesId: 'series_1', shotIds: ['shot_1'], actorIds: {},
+    source: committed.planning!.source, storyboard: committed.storyboard!, idempotencyKey: 'intent_1',
+    requestSha256: '5'.repeat(64), commandReceiptId: 'receipt_2', eventId: 'event_2',
+    providerCalls: 0, stageStarted: false, approvalGranted: false,
+  }
+  let serverCommitted = false
+  const port = {
+    readScenePlanning: vi.fn(async () => serverCommitted ? committed : original),
+    requestDirectorProposal: vi.fn(async () => replayProposal()),
+    checkDirectorProposalFreshness: vi.fn(async () => ({ fresh: true } as unknown as DirectorProposalFreshnessResult)),
+    saveScenePlanning: vi.fn(async () => { serverCommitted = true; throw new Error('disconnected after submit') }),
+    recoverScenePlanning: vi.fn(async () => result),
+  }
+  const publish = vi.fn((_message: QingmuScenePlanningSavedMessage) => true)
+  const hostSync: QingmuHostSync = { pendingTarget: () => null, replay: vi.fn(() => false), publish }
+  const onCommitted = vi.fn(async () => { throw new Error('workflow projection unavailable') })
+  render(<ScenePlanningWorkspace {...original} port={port} directorBridge={replayBridge()} directorSessionId="session_1"
+    hostSync={hostSync} onCommitted={onCommitted}
+    onSelectShotId={vi.fn()} onUnsavedChange={vi.fn()} />)
+  fireEvent.click(await screen.findByText('读取演练建议'))
+  fireEvent.click(await screen.findByText('采用到草稿'))
+  fireEvent.click(screen.getByText('预览保存影响')); fireEvent.click(screen.getByText('确认保存规划'))
+  await screen.findByRole('alert')
+  const pending = localStorage.getItem('qingmu.scene-planning.v1:project_1:episode_1')
+  expect(pending).toContain('pendingAdvisory'); expect(pending).toContain('narrative-focus')
+  fireEvent.click(screen.getByText('读取恢复'))
+  await waitFor(() => { expect(publish).toHaveBeenCalledOnce() })
+  const message = publish.mock.calls[0]![0]
+  expect(message.scope).toEqual({ projectId: 'project_1', episodeId: 'episode_1', sceneId: 'scene_1', shotId: 'shot_1' })
+  expect(message.method?.adoptedItemIds).toEqual(['narrative-focus'])
+  expect(message.receipt.storyboardVersion).toBe(2)
+  expect(message.authority).toEqual({ source: 'adopted_replay_suggestion', advisoryOnly: true,
+    providerCalls: 0, stageStarted: false, approvalGranted: false })
+  expect(onCommitted).toHaveBeenCalledOnce()
+  expect(await screen.findByText(/内层工作流投影刷新失败；保存回执仍有效，外层通知不受影响/)).toBeTruthy()
 })
 
 it('clears a shot-bound replay proposal before showing another shot', async () => {

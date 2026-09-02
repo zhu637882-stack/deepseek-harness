@@ -50,6 +50,7 @@ import type {
 } from './contracts.ts'
 import { unwrapRpc } from './contracts.ts'
 import { parseQingmuEntryScope, type QingmuCockpitFace } from './slots.ts'
+import { createQingmuHostSync } from './host-sync.ts'
 import { en, NS, zh } from './locales.ts'
 import type {
   DirectorContextBridgeRpcResult,
@@ -142,6 +143,14 @@ export function apply(ctx: ClientContext): void {
   const connection = ctx.get('connection') as ConnectionHandle | undefined
   if (connection === undefined) throw new Error('Qingmu cockpit requires an active Client Connection')
   const entryScope = parseQingmuEntryScope(globalThis.location.href)
+  const hostSync = createQingmuHostSync({
+    entryScope,
+    referrer: globalThis.document.referrer,
+    ancestorOrigin: globalThis.location.ancestorOrigins.item(0) ?? undefined,
+    parent: globalThis.parent,
+    self: globalThis,
+    storage: globalThis.localStorage,
+  }) ?? undefined
   const read = async <T>(endpoint: string, payload: unknown, signal?: AbortSignal): Promise<T> =>
     unwrapRpc(await connection.rpc.call('/qingmu-yimeng', endpoint, payload, signal)) as T
   const command = async <T>(endpoint: string, payload: unknown, signal?: AbortSignal): Promise<T> =>
@@ -335,6 +344,6 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     inject: (): QingmuCockpitFace => entryScope === undefined
       ? { port, directorBridge }
-      : { port, directorBridge, entryScope },
+      : { port, directorBridge, entryScope, hostSync },
   }, QingmuCockpit))
 }
