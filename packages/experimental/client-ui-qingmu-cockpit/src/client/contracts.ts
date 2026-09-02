@@ -260,6 +260,8 @@ import type {
   YimengTakeApprovalLifecycleRecovery,
   YimengTakeApprovalLifecycleResult,
   YimengTransitionTakeApprovalLifecycleRequest,
+  YimengProductionTakeResult,
+  YimengQueueProductionTakeIntent,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 
 export type {
@@ -522,6 +524,8 @@ export type {
   YimengTakeApprovalLifecycleRecovery,
   YimengTakeApprovalLifecycleResult,
   YimengTransitionTakeApprovalLifecycleRequest,
+  YimengProductionTakeResult,
+  YimengQueueProductionTakeIntent,
 }
 
 /** Open JSON object retained without inventing a stricter Yimeng business schema. */
@@ -587,6 +591,10 @@ export interface QingmuYimengReadPort {
 
 /** Explicit ChangeSet commands exposed through the separate Host-only command channel. */
 export interface QingmuYimengCommandPort {
+  queueProductionTake(
+    request: YimengQueueProductionTakeIntent,
+    signal?: AbortSignal,
+  ): Promise<YimengProductionTakeResult>
   readCreativeContract(request: { readonly projectId: string }, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').CreativeContractState>
   readDirectorProviderAvailability(
     request: { readonly projectId: string; readonly episodeId: string },

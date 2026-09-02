@@ -629,7 +629,8 @@ function shotRelationMethod(request: Parameters<QingmuYimengPort['shotRelationMe
 }
 
 function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
-  return {
+  return Object.assign({
+    queueProductionTake: vi.fn(async () => { throw new Error('Production Take uses a separate fixture') }),
     readCreativeContract: vi.fn<QingmuYimengPort['readCreativeContract']>(async request => ({ schema: 'jason.qingmu-creative-contract-state.v1' as const,
       projectId: request.projectId, configured: false, locked: false, revision: null, sha256: null,
       contract: null, sourceText: null, message: '创作合同未配置' })),
@@ -885,8 +886,7 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     previewStoryboardCanvas: vi.fn(async () => { throw new Error('storyboard canvas preview is not part of this fixture') }),
     commitStoryboardCanvas: vi.fn(async () => { throw new Error('storyboard canvas commit is not part of this fixture') }),
     recoverStoryboardCanvasCommit: vi.fn(async () => { throw new Error('storyboard canvas recovery is not part of this fixture') }),
-    ...overrides,
-  }
+  }, overrides)
 }
 
 function mount(port: QingmuYimengPort, entryScope?: QingmuEntryScope | null) {

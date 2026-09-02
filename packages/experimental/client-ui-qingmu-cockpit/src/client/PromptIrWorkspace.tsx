@@ -1,5 +1,3 @@
-/* oxlint-disable typescript/no-unnecessary-condition -- RPC values are revalidated before authority markers clear. */
-/* oxlint-disable typescript/no-unnecessary-boolean-literal-compare -- Literal flags are part of the runtime RPC boundary. */
 import { useEffect, useRef, useState } from 'react'
 import type {
   ImagoPromptIrMethodRequest,
@@ -8,6 +6,7 @@ import type {
   YimengCommitPromptIrEditResponse,
   YimengPreviewPromptIrResponse,
   YimengPromptIrResponse,
+  YimengProductionTakeResult,
   YimengFirstFrameQuoteResponse,
   YimengProposePromptIrResponse,
   YimengRecoverPromptIrEditCommitRequest,
@@ -38,6 +37,17 @@ import css from './QingmuCockpit.module.css'
 import directorCss from './DirectorWorkspace.module.css'
 import { directorBufferKey, readDirectorBuffer, writeDirectorBuffer } from './director-edit-buffer.ts'
 import { hasPromptIrBootstrapFrame, PromptIrBootstrapWorkspace } from './PromptIrBootstrapWorkspace.tsx'
+import {
+  assertProductionTakeResult,
+  clearProductionTakeRecoveryMarker,
+  createProductionTakeRecoveryMarker,
+  readProductionTakeReceipt,
+  readProductionTakeRecoveryMarker,
+  writeProductionTakeReceipt,
+  writeProductionTakeRecoveryMarker,
+  type ProductionTakeRecoveryMarker,
+  type ProductionTakeStoredRead,
+} from './production-take-recovery.ts'
 
 const SHA256 = /^[0-9a-f]{64}$/
 const EDITABLE_FIELDS = [
@@ -52,7 +62,7 @@ type EditableField = typeof EDITABLE_FIELDS[number]
 type EditableProjection = YimengPromptIrResponse['subject']['editableProjection']
 type DraftPromptIr = Pick<YimengCommitPromptIrEditResponse['promptIr'], 'id' | 'version' | 'contentSha256' | 'status'>
 type Operation = 'idle' | 'loading' | 'checking' | 'previewing' | 'committing' | 'recovering-edit'
-  | 'selecting' | 'recovering-selection' | 'quoting-first-frame'
+  | 'selecting' | 'recovering-selection' | 'quoting-first-frame' | 'queuing-production-take'
 
 interface PromptIrFrame extends PromptIrRecoveryCoordinates {
   readonly key: string
@@ -496,11 +506,15 @@ function ReadyPromptIrWorkspace({
   const [editConfirmed, setEditConfirmed] = useState(false)
   const [selectionConfirmed, setSelectionConfirmed] = useState(false)
   const [firstFrameQuote, setFirstFrameQuote] = useState<YimengFirstFrameQuoteResponse>()
+  const [productionTake, setProductionTake] = useState<YimengProductionTakeResult>()
+  const [productionConfirmed, setProductionConfirmed] = useState(false)
+  const [productionRecovery, setProductionRecovery] = useState<ProductionTakeStoredRead<ProductionTakeRecoveryMarker>>({ status: 'none' })
   const [error, setError] = useState<string>()
   const [editRecovery, setEditRecovery] = useState<PromptIrEditRecoveryMarkerRead>({ status: 'none' })
   const [selectionRecovery, setSelectionRecovery] = useState<PromptIrSelectionRecoveryMarkerRead>({ status: 'none' })
   const abortRef = useRef<AbortController>()
   const commitLock = useRef(false)
+  const productionLock = useRef(false)
   const [unsaved, setUnsaved] = useState(false)
   const [bufferStale, setBufferStale] = useState(false)
   const [staleRebased, setStaleRebased] = useState(false)
@@ -513,7 +527,6 @@ function ReadyPromptIrWorkspace({
   useEffect(() => {
     dirtyCallback.current?.(unsaved)
     const beforeUnload = (event: BeforeUnloadEvent): void => {
-      // oxlint-disable-next-line typescript/no-deprecated -- Safari still needs returnValue for beforeunload.
       if (unsaved || commitLock.current) { event.preventDefault(); event.returnValue = '' }
     }
     window.addEventListener('beforeunload', beforeUnload)
@@ -535,16 +548,26 @@ function ReadyPromptIrWorkspace({
     setEditConfirmed(false)
     setSelectionConfirmed(false)
     setFirstFrameQuote(undefined)
+    setProductionConfirmed(false)
     setError(undefined)
     setOperation('idle')
     setStaleRebased(false)
     if (active === undefined) {
       setEditRecovery({ status: 'none' })
       setSelectionRecovery({ status: 'none' })
+      setProductionRecovery({ status: 'none' })
+      setProductionTake(undefined)
       return
     }
     setEditRecovery(readPromptIrEditRecoveryMarker(active))
     setSelectionRecovery(readPromptIrSelectionRecoveryMarker(active))
+    setProductionRecovery(readProductionTakeRecoveryMarker(active))
+    const storedProductionTake = readProductionTakeReceipt(active)
+    if (storedProductionTake.status === 'ready') setProductionTake(storedProductionTake.value)
+    else {
+      setProductionTake(undefined)
+      if (storedProductionTake.status === 'invalid') setError(storedProductionTake.error)
+    }
     const controller = new AbortController()
     abortRef.current = controller
     setOperation('loading')
@@ -959,6 +982,7 @@ function ReadyPromptIrWorkspace({
     setEditConfirmed(false)
     setSelectionConfirmed(false)
     setFirstFrameQuote(undefined)
+    setProductionTake(undefined)
     await Promise.allSettled([onCommitted()])
   }
 
@@ -1061,6 +1085,58 @@ function ReadyPromptIrWorkspace({
     }
   }
 
+  const queueProductionTake = async (
+    takeOrdinal: 1 | 2,
+    recoveryMarker?: ProductionTakeRecoveryMarker,
+  ): Promise<void> => {
+    if (!director || snapshot === undefined || active === undefined || operation !== 'idle'
+      || unsaved || bufferStale || snapshot.draft?.status === 'stale'
+      || (!productionConfirmed && recoveryMarker === undefined)
+      || productionLock.current || productionRecovery.status === 'invalid') return
+    productionLock.current = true
+    setError(undefined)
+    const controller = new AbortController()
+    abortRef.current = controller
+    setOperation('queuing-production-take')
+    const marker = recoveryMarker ?? createProductionTakeRecoveryMarker({
+      projectId: active.projectId,
+      episodeId: active.episodeId,
+      storyboardRevisionId: active.storyboardRevisionId,
+      frameId: active.frameId,
+      takeKind: takeOrdinal === 1 ? 'initial' : 'targeted_rework',
+      takeOrdinal,
+      confirmReady: true,
+    })
+    try {
+      if (recoveryMarker === undefined) {
+        if (productionRecovery.status !== 'none' || !writeProductionTakeRecoveryMarker(marker)) {
+          throw new Error(t('productionTakeStorageFailed'))
+        }
+        setProductionRecovery({ status: 'ready', value: marker })
+      }
+      const result = assertProductionTakeResult(await port.queueProductionTake({
+        projectId: marker.projectId,
+        episodeId: marker.episodeId,
+        storyboardRevisionId: marker.storyboardRevisionId,
+        frameId: marker.frameId,
+        takeKind: marker.takeKind,
+        takeOrdinal: marker.takeOrdinal,
+        confirmReady: true,
+      }, controller.signal), marker)
+      if (controller.signal.aborted) return
+      if (!writeProductionTakeReceipt(result, marker)) throw new Error(t('productionTakeStorageFailed'))
+      if (!clearProductionTakeRecoveryMarker(marker)) throw new Error(t('productionTakeRecoveryClearFailed'))
+      setProductionRecovery({ status: 'none' })
+      setProductionTake(result)
+      setProductionConfirmed(false)
+    } catch (cause) {
+      if (!controller.signal.aborted) setError(messageOf(cause))
+    } finally {
+      productionLock.current = false
+      if (!controller.signal.aborted) setOperation('idle')
+    }
+  }
+
   if (projectId === '' || episodeId === '') return <p className={css.empty}>{t('promptIrChooseEpisode')}</p>
   if (frames.length === 0) return <p className={css.empty}>{t('promptIrNoFrames')}</p>
   if (selectedShotId === '') return <p className={css.empty}>{t('promptIrChooseShot')}</p>
@@ -1115,7 +1191,7 @@ function ReadyPromptIrWorkspace({
         </dl>
       </details>
 
-      <section className={css.commitReceipt} aria-label={t('firstFrameQuoteTitle')}>
+      {!director && <section className={css.commitReceipt} aria-label={t('firstFrameQuoteTitle')}>
         <h4>{t('firstFrameQuoteTitle')}</h4>
         <p>{t('firstFrameQuoteBoundary')}</p>
         <button
@@ -1195,7 +1271,7 @@ function ReadyPromptIrWorkspace({
           <p>{firstFrameQuote.quoteReady ? t('firstFrameQuoteReady') : t('firstFrameQuoteBlocked')}</p>
           <p><strong>{t('firstFrameQuoteNotSubmitted')}</strong></p>
         </div>}
-      </section>
+      </section>}
       {director && <>
         <p role="status">{t('directorEditingDraft')} · {t('directorEffectiveReady')} v{snapshot?.subject.promptIrVersion ?? '—'}
           {draftPromptIr !== undefined && ` · Draft v${draftPromptIr.version}`}</p>
@@ -1442,6 +1518,75 @@ function ReadyPromptIrWorkspace({
           <p>{t('promptIrSelectionNotApproval')}</p>
         </section>
       )}
+
+      {director && <section className={css.commitReceipt} aria-label={t('productionTakeTitle')}>
+        <h4>{t('productionTakeTitle')}</h4>
+        <p>{t('productionTakeBoundary')}</p>
+        <ol className={directorCss.productionSteps}>
+          <li data-state={snapshot === undefined ? 'pending' : 'ready'}>{t('productionTakeStepLock')}</li>
+          <li data-state={productionTake === undefined ? 'pending' : 'ready'}>{t('productionTakeStepMethod')}</li>
+          <li data-state={productionTake === undefined ? 'pending' : 'ready'}>{t('productionTakeStepFields')}</li>
+          <li data-state={productionConfirmed ? 'ready' : 'pending'}>{t('productionTakeStepReady')}</li>
+          <li data-state={productionTake === undefined ? 'pending' : 'ready'}>{t('productionTakeStepQueue')}</li>
+        </ol>
+        <label className={directorCss.productionConfirm}>
+          <input type="checkbox" checked={productionConfirmed} disabled={busy || productionRecovery.status === 'invalid'}
+            onChange={(event) => { setProductionConfirmed(event.target.checked) }} />
+          <span>{t('productionTakeConfirmReady')}</span>
+        </label>
+        {productionRecovery.status === 'ready' && <div className={directorCss.productionRecovery} role="status">
+          <p><strong>{t('productionTakeUnknown')}</strong></p>
+          <button type="button" disabled={busy}
+            onClick={() => { void queueProductionTake(productionRecovery.value.takeOrdinal, productionRecovery.value) }}>
+            {t('productionTakeRecover')}
+          </button>
+        </div>}
+        {productionRecovery.status === 'invalid' && <p role="alert">{t('productionTakeRecoveryInvalid')}: {productionRecovery.error}</p>}
+        <div className={css.scriptActions}>
+          <button type="button" className={css.primaryAction}
+            disabled={busy || locked || snapshot === undefined || unsaved || bufferStale
+              || snapshot?.draft?.status === 'stale' || !productionConfirmed
+              || productionRecovery.status !== 'none' || productionTake !== undefined}
+            onClick={() => { void queueProductionTake(1) }}>
+            {operation === 'queuing-production-take' ? t('productionTakeQueuing') : t('productionTakeOne')}
+          </button>
+          <button type="button"
+            disabled={busy || locked || snapshot === undefined || unsaved || bufferStale
+              || snapshot?.draft?.status === 'stale' || !productionConfirmed
+              || productionRecovery.status !== 'none' || productionTake?.receipt.takeOrdinal !== 1}
+            onClick={() => { void queueProductionTake(2) }}>
+            {t('productionTakeTwo')}
+          </button>
+          <button type="button" disabled aria-disabled="true">{t('productionTakeThree')}</button>
+        </div>
+        <p>{t('productionTakeRecovery')}</p>
+        {productionTake !== undefined && <div role="status">
+          <p><strong>{productionTake.receipt.queued
+            ? t('productionTakeQueued') : t('productionTakeNotQueued')}</strong></p>
+          <p><strong>{t('productionTakeNotGenerated')}</strong></p>
+          <dl>
+            <div><dt>{t('productionTakeOrdinal')}</dt><dd>{productionTake.receipt.takeOrdinal} / {productionTake.receipt.takeLimit}</dd></div>
+            <div><dt>{t('productionTakeKind')}</dt><dd>{productionTake.receipt.takeKind}</dd></div>
+            <div><dt>{t('productionTakeTask')}</dt><dd>{productionTake.receipt.taskId} · {productionTake.receipt.taskStatus}</dd></div>
+            <div><dt>{t('productionTakeRecovered')}</dt><dd>{productionTake.receipt.recovered || productionTake.receipt.deduplicated ? t('yes') : t('no')}</dd></div>
+          </dl>
+          <details><summary>{t('productionTakeEvidence')}</summary>
+            <p>Method projection SHA: {productionTake.method.projectionSha256}</p>
+            <p>Field mapping SHA: {productionTake.method.fieldMappingSha256}</p>
+            {productionTake.method.fields.map(field => <p key={field.field}>
+              {field.field}: {field.stageIds.join('+')}<br />
+              contract SHA: {field.contractSha256s.join(', ')}<br />
+              card SHA: {field.cardSha256s.join(', ')}<br />
+              source SHA: {field.sourceSha256s.join(', ')}<br />
+              hint SHA: {field.hintSha256}
+            </p>)}
+            <p>
+              Provider calls: {productionTake.providerCalls} · Worker started: {String(productionTake.workerStarted)}
+              {' '}· Maximum cost CNY: {productionTake.maximumCostCny}
+            </p>
+          </details>
+        </div>}
+      </section>}
 
       {error !== undefined && <div className={css.scriptError} role="alert"><strong>{t('promptIrError')}</strong><p>{error}</p>
         {director && <p>{t('directorErrorHelp')}</p>}</div>}

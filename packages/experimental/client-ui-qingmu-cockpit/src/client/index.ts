@@ -46,6 +46,7 @@ import type {
   YimengTakeReviewRecommendationResult, YimengTakeReviewRecommendationRecovery,
   YimengTakeHumanDecisionResult, YimengTakeHumanDecisionRecovery,
   YimengRecoverReferenceRightsExceptionReleaseResponse,
+  YimengProductionTakeResult,
   YimengWorkflowProjection,
 } from './contracts.ts'
 import { unwrapRpc } from './contracts.ts'
@@ -168,6 +169,8 @@ export function apply(ctx: ClientContext): void {
   }
 
   const port: QingmuYimengPort = {
+    queueProductionTake: (request, signal) =>
+      command<YimengProductionTakeResult>('queueProductionTake', request, signal),
     readCreativeContract: (request, signal) => command('readCreativeContract', request, signal),
     readDirectorProviderAvailability: (request, signal) => command('readDirectorProviderAvailability', request, signal),
     issueDirectorProviderWorkOrder: (request, signal) => command('issueDirectorProviderWorkOrder', request, signal),

@@ -31,6 +31,71 @@ export type {
   LocalReferenceQualificationRequest, LocalReferenceQualificationResult, LocalReferenceUploadRequest,
 } from './local-reference-candidate.ts'
 
+/** Browser intent for one numbered production-Take attempt; all authority is re-read by Host. */
+export interface YimengQueueProductionTakeIntent {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly storyboardRevisionId: string
+  readonly frameId: string
+  readonly takeKind: 'initial' | 'targeted_rework'
+  readonly takeOrdinal: 1 | 2 | 3
+  /** Explicit user confirmation; this is intent only and never substitutes for Writer authority. */
+  readonly confirmReady: true
+}
+
+/** SHA-only method evidence returned to the browser; no Provider route or credential is exposed. */
+export interface YimengProductionTakeMethodEvidence {
+  readonly projectionSha256: string
+  readonly fieldMappingSha256: string
+  readonly fields: readonly {
+    readonly field: 'imageGenPrompt' | 'lastFrameImagePrompt' | 'videoGenPrompt' | 'motionPrompt' | 'negativePrompt'
+    readonly stageIds: readonly ('D' | 'E')[]
+    readonly contractSha256s: readonly string[]
+    readonly cardSha256s: readonly string[]
+    readonly sourceSha256s: readonly string[]
+    readonly hintSha256: string
+  }[]
+}
+
+/** Strict Writer receipt retained behind the Host bridge. */
+export interface YimengProductionTakeReceipt extends YimengCommandJsonObject {
+  readonly schema: 'jason.qingmu-writer-production-take.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly sceneId: string
+  readonly shotId: string
+  readonly storyboardRevisionId: string
+  readonly promptIr: {
+    readonly id: string
+    readonly version: number
+    readonly contentSha256: string
+    readonly videoPromptSha256: string
+  }
+  readonly authoritySnapshotSha256: string
+  readonly firstFrameQuoteProjectionSha256: string
+  readonly referenceBindings: readonly YimengCommandJsonObject[]
+  readonly takeKind: 'initial' | 'targeted_rework'
+  readonly takeOrdinal: 1 | 2
+  readonly takeLimit: 2
+  readonly taskId: string
+  readonly taskStatus: string
+  readonly requestIdempotencyKey: string
+  readonly idempotencyKey: string
+  readonly deduplicated: boolean
+  readonly recovered: boolean
+  readonly queued: boolean
+}
+
+/** Browser-safe result of Host verification plus one Writer queue/recovery call. */
+export interface YimengProductionTakeResult {
+  readonly schema: 'qingmu.production-take-host-result.v1'
+  readonly method: YimengProductionTakeMethodEvidence
+  readonly receipt: YimengProductionTakeReceipt
+  readonly providerCalls: 0
+  readonly workerStarted: false
+  readonly maximumCostCny: '0'
+}
+
 /** JSON object retained from a Yimeng command response. */
 export interface YimengCommandJsonObject {
   readonly [key: string]: unknown
@@ -2970,6 +3035,7 @@ export interface YimengCommandEndpointMap {
   readonly bootstrapPromptIr: YimengBootstrapPromptIrResponse
   readonly recoverPromptIrBootstrap: YimengBootstrapPromptIrResponse
   readonly selectBootstrapPromptIr: YimengSelectPromptIrResponse
+  readonly queueProductionTake: YimengProductionTakeResult
 }
 
 /** Endpoint names accepted by `/qingmu-yimeng-command`. */

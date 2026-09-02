@@ -300,6 +300,8 @@ export interface LaunchOptions {
   remoteAuthority?: string
   /** Reuse an existing harness home so a second Host can verify user settings across origins. */
   harnessHome?: string
+  /** Bind a known loopback port when a scenario must prove same-origin browser recovery across a Host restart. */
+  webPort?: number
 }
 
 /** Dispose the booted tree and remove both owned temp roots, reporting every independent cleanup failure. */
@@ -465,7 +467,7 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
       },
     {
       id: 'webserver',
-      config: { host: '127.0.0.1', port: 0 },
+      config: { host: '127.0.0.1', port: options.webPort ?? 0 },
     },
     // The bundle's web-runtime row resolves the same built dist under test
     // (apps/web IS @deepseek-ai/dsh-web-frontend); native browser opening and the

@@ -1,0 +1,29 @@
+- region "正式生产 Take":
+  - heading "正式生产 Take" [level=4]
+  - paragraph: 浏览器只提交镜头与 Take 意图。Host 重新读取当前 Ready、方法证明和参考权威后，才向 Writer 排队；不向浏览器暴露 Provider、模型或执行路由。
+  - list:
+    - listitem: 创作锁：当前镜头与分镜修订已定位
+    - listitem: 导演方法：Host 点击后实时验证
+    - listitem: 五字段 PromptIR：D / E 来源逐项核对
+    - listitem: Ready 确认：必须由你明确勾选
+    - listitem: Production Take：只接受 Writer 服务端回执
+  - checkbox "我确认以当前镜头的 Ready PromptIR 请求这一次 Production Take"
+  - text: 我确认以当前镜头的 Ready PromptIR 请求这一次 Production Take
+  - button "排队 Take 1（初始）" [disabled]
+  - button "排队 Take 2（定向返工）" [disabled]
+  - button "Take 3 不可用（上限 2）" [disabled]
+  - paragraph: 重复点击、刷新、断线或重启后，使用同一镜头与 Take 编号会按 Writer 服务端回执恢复，不会创建第三个版本。
+  - status:
+    - paragraph:
+      - strong: Writer 已排队
+    - paragraph:
+      - strong: 排队不等于已生成；本回执不代表内容批准、人工签收或发布。
+    - term: Take 编号 / 上限
+    - definition: 2 / 2
+    - term: Take 类型
+    - definition: targeted_rework
+    - term: Writer 任务
+    - definition: task_<id> · DispatchPending
+    - term: 服务端回执恢复
+    - definition: 否
+    - group: 展开方法与来源 SHA 证据

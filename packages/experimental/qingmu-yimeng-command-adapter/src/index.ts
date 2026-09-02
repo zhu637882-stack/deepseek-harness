@@ -79,6 +79,8 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Host-only command handler reused by the director context bridge. */
     qingmuYimengCommand: ConnectionRpcHandler
+    /** Existing Host-only normalized read boundary reused by the production bridge. */
+    qingmuYimengRead: ConnectionRpcHandler
   }
 }
 import { prepareShotFindingCommand } from './shot-finding.ts'
@@ -102,6 +104,7 @@ import {
 import { prepareStageSourceCommand } from './stage-source.ts'
 import { prepareCurrentLsuPlanMethodRequest, prepareLsuPlanCommand } from './lsu-plan.ts'
 import { prepareCurrentReworkRouteMethodRequest, prepareReworkRouteCommand } from './rework-route.ts'
+import { parseQueueProductionTakeIntent, prepareProductionTakeCommand } from './production-take.ts'
 import type {
   YimengChangeSet,
   YimengChangeSetBase,
@@ -483,6 +486,8 @@ export const inject = ['connection']
 export interface YimengCommandAdapterConfig {
   /** Pathless loopback HTTP(S) origin of the authoritative Yimeng API. */
   readonly baseUrl?: string
+  /** Optional loopback Writer origin for the production-Take route only. */
+  readonly productionTakeBaseUrl?: string
   /** Command deadline in milliseconds, from 100 through 60,000. */
   readonly timeoutMs?: number
   /** Isolated acceptance task; empty in every ordinary instance. */
@@ -522,6 +527,7 @@ export interface YimengCommandAdapterConfig {
 /** Validated Cordis configuration for the command adapter. */
 export const Config: z<YimengCommandAdapterConfig> = z.object({
   baseUrl: z.string().default(DEFAULT_BASE_URL),
+  productionTakeBaseUrl: z.string().default(''),
   timeoutMs: z.natural().min(100).default(DEFAULT_TIMEOUT_MS),
   directorFixtureTaskId: z.string().default(''),
   directorFixtureMethodVersion: z.string().default(''),
@@ -578,6 +584,13 @@ export interface YimengCommandAdapterDependencies {
   ) => Promise<RpcResult<unknown>>
   /** Trusted Host call that recompiles the current Take approval lifecycle method. */
   readonly runTakeApprovalLifecycleMethod?: (
+    payload: unknown,
+    signal: AbortSignal,
+  ) => Promise<RpcResult<unknown>>
+  /** Existing normalized Host-only Yimeng read boundary. */
+  readonly readYimeng?: ConnectionRpcHandler
+  /** Trusted current E1-B PromptIR Method compiler. */
+  readonly runPromptIrMethod?: (
     payload: unknown,
     signal: AbortSignal,
   ) => Promise<RpcResult<unknown>>
@@ -5285,6 +5298,9 @@ export function createYimengCommandHandler(
   },
 ): ConnectionRpcHandler {
   const baseUrl = resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL)
+  const productionTakeBaseUrl = config.productionTakeBaseUrl === undefined || config.productionTakeBaseUrl === ''
+    ? baseUrl
+    : resolveBaseUrl(config.productionTakeBaseUrl)
   const timeoutMs = resolveTimeout(config.timeoutMs ?? DEFAULT_TIMEOUT_MS)
   const productionAvailability = (): DirectorPaidAvailability => {
     const methodSha = config.directorProductionMethodSha256 ?? ''
@@ -5318,6 +5334,44 @@ export function createYimengCommandHandler(
         responseError: (message: string) => new UpstreamContractError(message),
         readAttestationKey: readReferenceAttestationKey,
         requireTimestamp: requireRfc3339Timestamp,
+      }
+      if (endpoint === 'queueProductionTake') {
+        if (dependencies.readYimeng === undefined || dependencies.runPromptIrMethod === undefined) {
+          return internalError('current Writer production prerequisites are unavailable')
+        }
+        const token = normalizeToken(dependencies.readToken())
+        if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
+        const intent = parseQueueProductionTakeIntent(payload, stageArtifactHelpers)
+        let prepared
+        try {
+          prepared = await prepareProductionTakeCommand(intent, {
+            readYimeng: dependencies.readYimeng,
+            runPromptIrMethod: dependencies.runPromptIrMethod,
+          }, stageArtifactHelpers, signal)
+        } catch (error) {
+          if (error instanceof UpstreamContractError) {
+            return internalError(`Writer production prerequisite failed: ${error.message}`)
+          }
+          throw error
+        }
+        if (signal.aborted) return cancelled()
+        const response = await fetchJson(
+          dependencies,
+          `${productionTakeBaseUrl}${prepared.path}`,
+          token,
+          { method: 'POST', body: serializeBody(prepared.body), idempotencyKey: prepared.idempotencyKey },
+          timeoutMs,
+          signal,
+          true,
+        )
+        if (!response.ok) return response
+        try {
+          return { ok: true, value: prepared.normalize(response.value) }
+        } catch (error) {
+          return error instanceof UpstreamContractError
+            ? internalError(`Writer production receipt failed: ${error.message}`)
+            : internalError('Writer production receipt failed')
+        }
       }
       if (endpoint === 'readDirectorContext') {
         const request = parseDirectorContextRequest(payload, stageArtifactHelpers)
@@ -6144,6 +6198,18 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
       return method === undefined
         ? internalError('current IMAGO bounded route Method is unavailable')
         : await method('reworkRouteMethod', payload, signal)
+    },
+    readYimeng: async (endpoint, payload, signal) => {
+      const read = ctx.get('qingmuYimengRead')
+      return read === undefined
+        ? internalError('current Yimeng read boundary is unavailable')
+        : await read(endpoint, payload, signal)
+    },
+    runPromptIrMethod: async (payload, signal) => {
+      const method = ctx.get('qingmuImagoMethod')
+      return method === undefined
+        ? internalError('current IMAGO PromptIR Method is unavailable')
+        : await method('promptIrMethod', payload, signal)
     },
   })
   ctx.provide('qingmuYimengCommand', handler)

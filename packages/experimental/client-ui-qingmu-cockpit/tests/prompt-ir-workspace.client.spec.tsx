@@ -92,7 +92,7 @@ function frame(status: 'Ready' | 'Draft') {
   }]
 }
 
-function createPort(options: { readonly editPostSucceeds?: boolean } = {}) {
+function createPort(options: { readonly editPostSucceeds?: boolean; readonly productionFails?: boolean } = {}) {
   let selected = false
   let selectedReadyReads = 0
   const editReceipt = (request: Record<string, unknown>) => ({
@@ -374,6 +374,38 @@ function createPort(options: { readonly editPostSucceeds?: boolean } = {}) {
     taskCreated: false,
     projectionSha256: QUOTE_PROJECTION_SHA,
   } as const))
+  const queueProductionTake = vi.fn(async (request: {
+    readonly takeOrdinal: 1 | 2
+    readonly takeKind: 'initial' | 'targeted_rework'
+  }) => {
+    if (options.productionFails === true) throw new Error('current PromptIR Method is unavailable')
+    return {
+      schema: 'qingmu.production-take-host-result.v1',
+      method: {
+        projectionSha256: '1'.repeat(64), fieldMappingSha256: '2'.repeat(64),
+        fields: [
+          ['imageGenPrompt', ['D']], ['lastFrameImagePrompt', ['D']], ['videoGenPrompt', ['E']],
+          ['motionPrompt', ['E']], ['negativePrompt', ['D', 'E']],
+        ].map(([field, stageIds]) => ({ field, stageIds, contractSha256s: ['3'.repeat(64)],
+          cardSha256s: ['4'.repeat(64)], sourceSha256s: ['5'.repeat(64)], hintSha256: '6'.repeat(64) })),
+      },
+      receipt: {
+        schema: 'jason.qingmu-writer-production-take.v1', projectId: PROJECT_ID, episodeId: EPISODE_ID,
+        sceneId: 'scene-1', shotId: FRAME_ID, storyboardRevisionId: STORYBOARD_REVISION_ID,
+        promptIr: { id: BASE_ID, version: BASE_VERSION, contentSha256: BASE_CONTENT_SHA, videoPromptSha256: '7'.repeat(64) },
+        authoritySnapshotSha256: '8'.repeat(64), firstFrameQuoteProjectionSha256: '9'.repeat(64),
+        referenceBindings: [{
+          elementKind: 'scene', elementId: 'scene-1', assetId: 'asset-1', assetSha256: 'a'.repeat(64),
+          materializedSha256: 'b'.repeat(64), selectionIdentity: 'selection-1', sourceRevisionId: 'source-1',
+          referencePackSha256: 'c'.repeat(64),
+        }], takeKind: request.takeKind,
+        takeOrdinal: request.takeOrdinal, takeLimit: 2, taskId: `task-${request.takeOrdinal}`, taskStatus: 'queued',
+        requestIdempotencyKey: `request-${request.takeOrdinal}`, idempotencyKey: `writer-${request.takeOrdinal}`,
+        deduplicated: false, recovered: false, queued: true,
+      },
+      providerCalls: 0, workerStarted: false, maximumCostCny: '0',
+    } as const
+  })
 
   return {
     port: {
@@ -387,6 +419,7 @@ function createPort(options: { readonly editPostSucceeds?: boolean } = {}) {
       selectPromptIr,
       recoverPromptIrSelection,
       firstFrameQuote,
+      queueProductionTake,
     } as unknown as QingmuYimengPort,
     spies: {
       promptIr,
@@ -399,6 +432,7 @@ function createPort(options: { readonly editPostSucceeds?: boolean } = {}) {
       selectPromptIr,
       recoverPromptIrSelection,
       firstFrameQuote,
+      queueProductionTake,
     },
   }
 }
@@ -407,6 +441,7 @@ const t = ((key: keyof typeof zh) => zh[key])
 
 beforeEach(() => {
   sessionStorage.clear()
+  localStorage.clear()
 })
 
 afterEach(() => {
@@ -418,8 +453,8 @@ describe('PromptIrWorkspace vertical slice', () => {
     const { port, spies } = createPort()
     render(<PromptIrWorkspace projectId={PROJECT_ID} episodeId={EPISODE_ID} storyboardRevisionId={STORYBOARD_REVISION_ID}
       shotItems={frame('Ready')} selectedShotId={FRAME_ID} onSelectShotId={vi.fn()} port={port} t={t}
-      onCommitted={vi.fn(async () => {})} presentation="director" />)
-    await screen.findByLabelText(zh.directorVideoPrompt)
+      onCommitted={vi.fn(async () => {})} />)
+    await screen.findByLabelText(zh.promptIrDraftLabel)
     fireEvent.click(screen.getByRole('button', { name: zh.firstFrameQuoteAction }))
     await screen.findByText('dashscope / wan2.2-t2i-flash')
     expect(screen.getByText('¥0.2000')).toBeTruthy()
@@ -737,5 +772,63 @@ describe('PromptIrWorkspace vertical slice', () => {
 
     expect(await screen.findByText(zh.promptIrSelectedShotUnavailable)).toBeTruthy()
     expect(spies.promptIr).not.toHaveBeenCalled()
+  })
+
+  it('requires explicit Ready confirmation, suppresses double-click, and stops at Take 2', async () => {
+    const { port, spies } = createPort()
+    render(<PromptIrWorkspace projectId={PROJECT_ID} episodeId={EPISODE_ID}
+      shotItems={frame('Ready')} storyboardRevisionId={STORYBOARD_REVISION_ID} selectedShotId={FRAME_ID}
+      onSelectShotId={vi.fn()} port={port} t={t} onCommitted={async () => {}} presentation="director" />)
+    await screen.findByLabelText(zh.directorVideoPrompt)
+    const takeOne = screen.getByRole('button', { name: zh.productionTakeOne }) as HTMLButtonElement
+    expect(takeOne.disabled).toBe(true)
+    fireEvent.click(screen.getByRole('checkbox', { name: zh.productionTakeConfirmReady }))
+    fireEvent.click(takeOne)
+    fireEvent.click(takeOne)
+    await screen.findByText(zh.productionTakeQueued)
+    expect(spies.queueProductionTake).toHaveBeenCalledTimes(1)
+    expect(spies.queueProductionTake).toHaveBeenCalledWith({
+      projectId: PROJECT_ID, episodeId: EPISODE_ID, storyboardRevisionId: STORYBOARD_REVISION_ID,
+      frameId: FRAME_ID, takeKind: 'initial', takeOrdinal: 1, confirmReady: true,
+    }, expect.any(AbortSignal))
+    const browserIntent = spies.queueProductionTake.mock.calls[0]![0] as Record<string, unknown>
+    for (const forbidden of ['ownerId', 'ready', 'selected', 'approved', 'force', 'provider', 'model', 'route']) {
+      expect(browserIntent).not.toHaveProperty(forbidden)
+    }
+    expect((screen.getByRole('button', { name: zh.productionTakeThree }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('checkbox', { name: zh.productionTakeConfirmReady }))
+    fireEvent.click(screen.getByRole('button', { name: zh.productionTakeTwo }))
+    await screen.findByText('2 / 2')
+    expect(spies.queueProductionTake).toHaveBeenCalledTimes(2)
+    expect(screen.getByText(zh.productionTakeNotGenerated)).toBeTruthy()
+  })
+
+  it('keeps an unknown-result marker across refresh and recovers with the original intent', async () => {
+    const failed = createPort({ productionFails: true })
+    const props = { projectId: PROJECT_ID, episodeId: EPISODE_ID, shotItems: frame('Ready'),
+      storyboardRevisionId: STORYBOARD_REVISION_ID, selectedShotId: FRAME_ID, onSelectShotId: vi.fn(),
+      t, onCommitted: async () => {}, presentation: 'director' as const }
+    const first = render(<PromptIrWorkspace {...props} port={failed.port} />)
+    await screen.findByLabelText(zh.directorVideoPrompt)
+    fireEvent.click(screen.getByRole('checkbox', { name: zh.productionTakeConfirmReady }))
+    fireEvent.click(screen.getByRole('button', { name: zh.productionTakeOne }))
+    await screen.findByText('current PromptIR Method is unavailable')
+    first.unmount()
+
+    const recovered = createPort()
+    const second = render(<PromptIrWorkspace {...props} port={recovered.port} />)
+    await screen.findByRole('button', { name: zh.productionTakeRecover })
+    fireEvent.click(screen.getByRole('button', { name: zh.productionTakeRecover }))
+    await screen.findByText(zh.productionTakeQueued)
+    expect(recovered.spies.queueProductionTake).toHaveBeenCalledWith({
+      projectId: PROJECT_ID, episodeId: EPISODE_ID, storyboardRevisionId: STORYBOARD_REVISION_ID,
+      frameId: FRAME_ID, takeKind: 'initial', takeOrdinal: 1, confirmReady: true,
+    }, expect.any(AbortSignal))
+    second.unmount()
+
+    render(<PromptIrWorkspace {...props} port={createPort().port} />)
+    await screen.findByText(zh.productionTakeQueued)
+    expect(screen.queryByRole('button', { name: zh.productionTakeRecover })).toBeNull()
+    expect(screen.getByLabelText(zh.directorVideoPrompt)).toBeTruthy()
   })
 })

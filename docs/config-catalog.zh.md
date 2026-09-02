@@ -637,7 +637,7 @@ export interface ImagoMethodAdapterConfig {
 }
 ```
 
-来源：[`packages/experimental/qingmu-imago-method-adapter/src/index.ts:569`](../packages/experimental/qingmu-imago-method-adapter/src/index.ts)
+来源：[`packages/experimental/qingmu-imago-method-adapter/src/index.ts:616`](../packages/experimental/qingmu-imago-method-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-qingmu-yimeng-command-adapter"></a>
 
@@ -650,6 +650,8 @@ export interface ImagoMethodAdapterConfig {
 export interface YimengCommandAdapterConfig {
   /** Pathless loopback HTTP(S) origin of the authoritative Yimeng API. */
   readonly baseUrl?: string
+  /** Optional loopback Writer origin for the production-Take route only. */
+  readonly productionTakeBaseUrl?: string
   /** Command deadline in milliseconds, from 100 through 60,000. */
   readonly timeoutMs?: number
   /** Isolated acceptance task; empty in every ordinary instance. */
@@ -678,10 +680,16 @@ export interface YimengCommandAdapterConfig {
   readonly directorProductionMethodVersion?: string
   /** Method SHA already locked into the production task. */
   readonly directorProductionMethodSha256?: string
+  /** Browser may explicitly issue one paid advisory only when this Host-owned switch is true. */
+  readonly directorProductionInteractiveEnabled?: boolean
+  /** Exact project allowed by the interactive production switch. */
+  readonly directorProductionProjectId?: string
+  /** Exact episode allowed by the interactive production switch. */
+  readonly directorProductionEpisodeId?: string
 }
 ```
 
-来源：[`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:481`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
+来源：[`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:486`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-qingmu-yimeng-read-adapter"></a>
 
