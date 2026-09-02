@@ -169,6 +169,9 @@ export function apply(ctx: ClientContext): void {
 
   const port: QingmuYimengPort = {
     readCreativeContract: (request, signal) => command('readCreativeContract', request, signal),
+    readDirectorProviderAvailability: (request, signal) => command('readDirectorProviderAvailability', request, signal),
+    issueDirectorProviderWorkOrder: (request, signal) => command('issueDirectorProviderWorkOrder', request, signal),
+    readDirectorProviderWorkOrderStatus: (request, signal) => command('readDirectorProviderWorkOrderStatus', request, signal),
     requestDirectorProposal: (request, signal) => command('requestDirectorProposal', request, signal),
     checkDirectorProposalFreshness: (request, signal) => command('checkDirectorProposalFreshness', request, signal),
     listLocalReferenceCandidates: (request, signal) => command('listLocalReferenceCandidates', request, signal),

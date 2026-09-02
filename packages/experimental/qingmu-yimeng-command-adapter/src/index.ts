@@ -13,6 +13,7 @@ import {
 } from './director-execution-host.ts'
 import type { DirectorProviderTransportResult } from './director-provider-execution.ts'
 import {
+  type DirectorPaidAvailability,
   normalizeDirectorPaidWorkOrder,
   normalizeDirectorPaidWorkOrderStatus,
   parseDirectorPaidWorkOrderRequest,
@@ -33,6 +34,7 @@ export type {
   DirectorExecutionHostResult, DirectorExecutionPreparedLock,
 } from './director-execution-host.ts'
 export type {
+  DirectorPaidAvailability,
   DirectorPaidWorkOrder,
   DirectorPaidWorkOrderRequest,
   DirectorPaidWorkOrderStatus,
@@ -509,6 +511,12 @@ export interface YimengCommandAdapterConfig {
   readonly directorProductionMethodVersion?: string
   /** Method SHA already locked into the production task. */
   readonly directorProductionMethodSha256?: string
+  /** Browser may explicitly issue one paid advisory only when this Host-owned switch is true. */
+  readonly directorProductionInteractiveEnabled?: boolean
+  /** Exact project allowed by the interactive production switch. */
+  readonly directorProductionProjectId?: string
+  /** Exact episode allowed by the interactive production switch. */
+  readonly directorProductionEpisodeId?: string
 }
 
 /** Validated Cordis configuration for the command adapter. */
@@ -528,12 +536,21 @@ export const Config: z<YimengCommandAdapterConfig> = z.object({
   directorProductionTaskId: z.string().default(''),
   directorProductionMethodVersion: z.string().default(''),
   directorProductionMethodSha256: z.string().default(''),
+  directorProductionInteractiveEnabled: z.boolean().default(false),
+  directorProductionProjectId: z.string().default(''),
+  directorProductionEpisodeId: z.string().default(''),
 })
 
 /** Injectable Host capabilities used by isolated tests. */
 export interface YimengCommandAdapterDependencies {
   readonly fetch: typeof globalThis.fetch
   readonly readToken: () => string | undefined
+  /** Host-private scheduler; browser receives no credential, claim, or Provider payload. */
+  readonly queueDirectorProductionTask?: (
+    taskId: string,
+    methodPackageVersion: string,
+    methodPackageSha256: string,
+  ) => void
   /** Host-only stateless package mapped to the existing Qingmu integration plan. */
   readonly runDirectorReplayMethod?: (
     payload: unknown,
@@ -5269,6 +5286,29 @@ export function createYimengCommandHandler(
 ): ConnectionRpcHandler {
   const baseUrl = resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL)
   const timeoutMs = resolveTimeout(config.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+  const productionAvailability = (): DirectorPaidAvailability => {
+    const methodSha = config.directorProductionMethodSha256 ?? ''
+    const enabled = config.directorProductionInteractiveEnabled === true
+      && dependencies.queueDirectorProductionTask !== undefined
+      && Boolean(config.directorProductionProjectId)
+      && Boolean(config.directorProductionEpisodeId)
+      && Boolean(config.directorProductionMethodVersion)
+      && /^[a-f0-9]{64}$/.test(methodSha)
+    return {
+      enabled,
+      provider: enabled ? 'deepseek-official' : null,
+      model: enabled ? 'deepseek-v4-pro' : null,
+      maxPaidCny: enabled ? '0.30000000' : null,
+      maxInputTokens: enabled ? 8000 : null,
+      maxOutputTokens: enabled ? 2000 : null,
+      maxAttempts: enabled ? 1 : null,
+      maxRetries: enabled ? 0 : null,
+      projectId: enabled ? config.directorProductionProjectId ?? null : null,
+      episodeId: enabled ? config.directorProductionEpisodeId ?? null : null,
+      methodPackageVersion: enabled ? config.directorProductionMethodVersion ?? null : null,
+      methodPackageSha256: enabled ? methodSha : null,
+    }
+  }
   return async (endpoint, payload, signal) => {
     try {
       const stageArtifactHelpers = {
@@ -5336,12 +5376,36 @@ export function createYimengCommandHandler(
           request, context, freshContext, workOrder, method, stageArtifactHelpers,
         ) }
       }
+      if (endpoint === 'readDirectorProviderAvailability') {
+        const scope = requireObject(payload, 'director production availability request')
+        if (Object.keys(scope).sort().join('\0') !== 'episodeId\0projectId'
+          || typeof scope.projectId !== 'string' || typeof scope.episodeId !== 'string') {
+          throw new InputError('director production availability request invalid')
+        }
+        const availability = productionAvailability()
+        if (availability.enabled && (scope.projectId !== availability.projectId
+          || scope.episodeId !== availability.episodeId)) {
+          return { ok: true, value: { ...availability, enabled: false, provider: null, model: null,
+            maxPaidCny: null, maxInputTokens: null, maxOutputTokens: null, maxAttempts: null,
+            maxRetries: null, projectId: null, episodeId: null, methodPackageVersion: null,
+            methodPackageSha256: null } }
+        }
+        return { ok: true, value: availability }
+      }
       if (endpoint === 'issueDirectorProviderWorkOrder') {
         let paidRequest
         try {
           paidRequest = parseDirectorPaidWorkOrderRequest(payload)
         } catch (error) {
           throw new InputError(error instanceof Error ? error.message : 'director paid work order request invalid')
+        }
+        const availability = productionAvailability()
+        if (!availability.enabled
+          || paidRequest.projectId !== availability.projectId
+          || paidRequest.episodeId !== availability.episodeId
+          || paidRequest.methodPackageVersion !== availability.methodPackageVersion
+          || paidRequest.methodPackageSha256 !== availability.methodPackageSha256) {
+          return internalError('Director production suggestions are disabled for this scope')
         }
         const token = normalizeToken(dependencies.readToken())
         if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
@@ -5357,7 +5421,13 @@ export function createYimengCommandHandler(
         )
         if (!result.ok) return result
         try {
-          return { ok: true, value: normalizeDirectorPaidWorkOrder(result.value, paidRequest) }
+          const workOrder = normalizeDirectorPaidWorkOrder(result.value, paidRequest)
+          dependencies.queueDirectorProductionTask?.(
+            workOrder.generationTaskId,
+            paidRequest.methodPackageVersion,
+            paidRequest.methodPackageSha256,
+          )
+          return { ok: true, value: workOrder }
         } catch (error) {
           throw new UpstreamContractError(error instanceof Error ? error.message : 'director paid work order invalid')
         }
@@ -6003,9 +6073,42 @@ export function createYimengCommandHandler(
 
 /** Register the command adapter on a loopback-only Host Connection channel. */
 export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): void {
+  const interactiveController = new AbortController()
+  const activeInteractiveTasks = new Set<string>()
+  const queueDirectorProductionTask = config.directorProductionInteractiveEnabled === true
+    ? (taskId: string, methodPackageVersion: string, methodPackageSha256: string): void => {
+      if (methodPackageVersion !== config.directorProductionMethodVersion
+        || methodPackageSha256 !== config.directorProductionMethodSha256) {
+        throw new Error('Director production method scope mismatch')
+      }
+      const llm = ctx.get('llm')
+      if (llm === undefined) throw new Error('DSh LLM runtime unavailable')
+      if (activeInteractiveTasks.has(taskId)) return
+      activeInteractiveTasks.add(taskId)
+      void executeDirectorTaskOnce(
+        {
+          baseUrl: config.baseUrl ?? DEFAULT_BASE_URL,
+          executionKey: process.env.QINGMU_DIRECTOR_EXECUTION_KEY ?? '',
+          transport: config.directorDshMockBaseUrl
+            ? createDshDeepSeekDirectorTransport(llm, { mockBaseUrl: config.directorDshMockBaseUrl })
+            : createDshDeepSeekProductionDirectorTransport(llm),
+        },
+        taskId,
+        methodPackageVersion,
+        methodPackageSha256,
+        interactiveController.signal,
+      ).catch(() => {
+        ctx.logger.error('Director production interactive execution failed')
+      }).finally(() => {
+        activeInteractiveTasks.delete(taskId)
+      })
+    }
+    : undefined
+  ctx.effect(() => () => interactiveController.abort(), 'qingmu Director interactive execution lifetime')
   const handler = createYimengCommandHandler(config, {
     fetch: globalThis.fetch,
     readToken: () => process.env.YIMENG_API_TOKEN,
+    ...(queueDirectorProductionTask === undefined ? {} : { queueDirectorProductionTask }),
     runDirectorReplayMethod: async (payload, signal) => {
       const method = ctx.get('qingmuImagoMethod')
       return method === undefined

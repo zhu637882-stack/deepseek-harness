@@ -7,6 +7,11 @@ export type {
 } from './creation.ts'
 /** Browser-safe planning values; no runtime Host imports. */
 export type { PlanningShot, PlanningBase, PlanningOperation, ScenePlanningRequest, PlanningRevision, PlanningSource, PlanningScene, ScenePlanningState, ScenePlanningResult } from './scene-planning.ts'
+/** Browser-safe paid advisory projections; no claim, credential, or Provider payload. */
+export type {
+  DirectorPaidAvailability, DirectorPaidWorkOrder, DirectorPaidWorkOrderRequest,
+  DirectorPaidWorkOrderStatus, DirectorPaidWorkOrderStatusRequest,
+} from './director-paid-work-order.ts'
 /** Replay-only director suggestions; adopting them still uses planning commands. */
 export type {
   DirectorContextSnapshot, DirectorInferenceWorkOrder, DirectorProposalField,
@@ -2891,6 +2896,7 @@ export interface YimengCommandEndpointMap {
   readonly readDirectorContext: import('./director-proposal.ts').DirectorContextSnapshot
   readonly readCreativeContract: import('./creation.ts').CreativeContractState
   readonly requestDirectorProposal: import('./director-proposal.ts').DirectorReplayProposal
+  readonly readDirectorProviderAvailability: import('./director-paid-work-order.ts').DirectorPaidAvailability
   readonly issueDirectorProviderWorkOrder: import('./director-paid-work-order.ts').DirectorPaidWorkOrder
   readonly readDirectorProviderWorkOrderStatus: import('./director-paid-work-order.ts').DirectorPaidWorkOrderStatus
   readonly checkDirectorProposalFreshness: import('./director-proposal.ts').DirectorProposalFreshnessResult

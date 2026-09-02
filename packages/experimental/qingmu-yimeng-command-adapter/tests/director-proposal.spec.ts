@@ -88,19 +88,26 @@ function setup(stale = false) {
 
 describe('Host-only director replay proposal', () => {
   it('issues a browser-safe paid-capable work order without exposing Host claim or payload', async () => {
-    const paidRequest = { ...scope, purpose: 'director_text_proposal_canary' as const,
+    const paidRequest = { ...scope, purpose: 'bounded_director_suggestion' as const,
+      suggestionType: 'text_director_proposal' as const,
       methodPackageVersion: 'director-paid.v1', methodPackageSha256: 'd'.repeat(64),
       expectedContextSnapshotSha256: 'e'.repeat(64), idempotencyKey: 'f'.repeat(64) }
     const response = { schema: 'jason.qingmu-director-provider-work-order.v1',
       workOrderId: 'work_order_1', generationTaskId: 'task_1', ...scope,
-      provider: 'fake', model: 'model_1', inputSha256: paidRequest.expectedContextSnapshotSha256,
+      provider: 'deepseek-official', model: 'deepseek-v4-pro', inputSha256: paidRequest.expectedContextSnapshotSha256,
       promptSha256: 'a'.repeat(64), outputContractSha256: '9'.repeat(64), workOrderSha256: 'b'.repeat(64),
       methodPackage: { version: paidRequest.methodPackageVersion, sha256: paidRequest.methodPackageSha256 },
-      pricingSnapshot: { sha256: 'c'.repeat(64) }, requestPolicy: { maxAttempts: 1, maxRetries: 0 },
+      pricingSnapshot: { sha256: 'c'.repeat(64), currency: 'CNY', estimatedAmountCny: '0.13305600' },
+      requestPolicy: { maxAttempts: 1, maxRetries: 0 },
       dispatchState: 'DispatchPending', internalDebug: 'must-not-cross-the-Host-boundary' }
     const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(response))
+    const queueDirectorProductionTask = vi.fn()
     const handler = createYimengCommandHandler(
-      { baseUrl: 'http://127.0.0.1:49123' }, { fetch, readToken: () => 'private-token' },
+      { baseUrl: 'http://127.0.0.1:49123', directorProductionInteractiveEnabled: true,
+        directorProductionProjectId: scope.projectId, directorProductionEpisodeId: scope.episodeId,
+        directorProductionMethodVersion: paidRequest.methodPackageVersion,
+        directorProductionMethodSha256: paidRequest.methodPackageSha256 },
+      { fetch, readToken: () => 'private-token', queueDirectorProductionTask },
     )
     const result = await handler('issueDirectorProviderWorkOrder', paidRequest, new AbortController().signal)
     const publicResponse: Record<string, unknown> = { ...response }
@@ -108,6 +115,9 @@ describe('Host-only director replay proposal', () => {
     expect(result).toEqual({ ok: true, value: publicResponse })
     expect(JSON.stringify(result)).not.toContain('claimToken')
     expect(JSON.stringify(result)).not.toContain('messages')
+    expect(queueDirectorProductionTask).toHaveBeenCalledWith(
+      response.generationTaskId, paidRequest.methodPackageVersion, paidRequest.methodPackageSha256,
+    )
   })
 
   it('reads only the owning users browser-safe terminal status', async () => {
@@ -115,6 +125,7 @@ describe('Host-only director replay proposal', () => {
     const response = { state: 'settled', generationTaskId: request.generationTaskId,
       executionReceipt: { schema: 'qingmu.director-provider-execution-receipt.v1', outputSha256: 'a'.repeat(64) },
       costAccounting: { reservedUpperBoundCny: '0.01', actualAmountCny: null, billingReconciliation: 'pending' },
+      classification: null, errorCode: null, transportFacts: null,
       automaticRetry: false }
     const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(response))
     const handler = createYimengCommandHandler(
@@ -125,6 +136,37 @@ describe('Host-only director replay proposal', () => {
     expect(requestUrl(fetch.mock.calls[0]![0])).toContain(`/provider-work-orders/${request.generationTaskId}`)
     expect(JSON.stringify(result)).not.toContain('claimToken')
     expect(JSON.stringify(result)).not.toContain('payload')
+  })
+
+  it('keeps production issuance disabled by default and reports only exact enabled scope', async () => {
+    const signal = new AbortController().signal
+    const disabled = createYimengCommandHandler(
+      { baseUrl: 'http://127.0.0.1:49123' },
+      { fetch: vi.fn(), readToken: () => 'private-token' },
+    )
+    await expect(disabled('readDirectorProviderAvailability', {
+      projectId: scope.projectId, episodeId: scope.episodeId,
+    }, signal)).resolves.toMatchObject({ ok: true, value: { enabled: false, provider: null } })
+    const request = { ...scope, purpose: 'bounded_director_suggestion' as const,
+      suggestionType: 'text_director_proposal' as const,
+      methodPackageVersion: 'director-paid.v1', methodPackageSha256: 'd'.repeat(64),
+      expectedContextSnapshotSha256: 'e'.repeat(64), idempotencyKey: 'f'.repeat(64) }
+    await expect(disabled('issueDirectorProviderWorkOrder', request, signal))
+      .resolves.toMatchObject({ ok: false, error: { code: 'internal' } })
+
+    const scoped = createYimengCommandHandler(
+      { baseUrl: 'http://127.0.0.1:49123', directorProductionInteractiveEnabled: true,
+        directorProductionProjectId: scope.projectId, directorProductionEpisodeId: scope.episodeId,
+        directorProductionMethodVersion: request.methodPackageVersion,
+        directorProductionMethodSha256: request.methodPackageSha256 },
+      { fetch: vi.fn(), readToken: () => 'private-token', queueDirectorProductionTask: vi.fn() },
+    )
+    await expect(scoped('readDirectorProviderAvailability', {
+      projectId: 'project-other', episodeId: scope.episodeId,
+    }, signal)).resolves.toMatchObject({ ok: true, value: { enabled: false, provider: null } })
+    await expect(scoped('issueDirectorProviderWorkOrder', {
+      ...request, projectId: 'project-other',
+    }, signal)).resolves.toMatchObject({ ok: false, error: { code: 'internal' } })
   })
 
   it('returns one deterministic advisory proposal and never calls a network Provider', async () => {

@@ -16,6 +16,8 @@ Host 从既有青木三方融合总案加载 SHA 绑定的方法包。IMAGO 只�
 
 另设一份独立、版本化且默认关闭的易梦付费能力合同。它只能经易梦现有 generation task、ProviderGate、预留、持久 submission outbox、ack/unknown 与 reconcile 链签发 Provider/model/pricing 绑定工作单。其已签输出规则定义 Unicode code point 字符串长度，以及唯一准确的占位符规范化与拒绝集合；Writer 与 Host 共同消费这些规则。Host 只执行已签发 permit，最多一次请求且 adapter 零重试；结果不明停在 `submission_unknown`。
 
+D1 只允许用实例私有配置激活一条精确绑定项目、剧集、模型、方法包和人民币上限的 production 路由。交互界面仍须人工明确确认，易梦才签发未执行工单；随后 Host 才把这个精确任务排入同一条单次执行器。浏览器拿不到凭据、Provider payload、claim 材料或执行许可。仅为密闭验收保留的回环 transport 必须是本机 HTTP，否则直接拒绝。项目、剧集、场景、镜头或上下文 SHA 一旦变化，未完成读取立即中止，已展示的付费建议立即清空，旧建议不能跨作用域残留。
+
 单次 transport 会在解析仅建议提案前记录完整 Provider 事实。响应完整但 schema 非法时，以 `provider_response_invalid` 持久分类，并保留内容 SHA、字节数、completion/request 标识、finish reason 与 usage；不保留模型原文。transport 未取得完整事实时仍为 `submission_unknown`。两种分类都保留原预留，并通过唯一 outbox 与任务投影恢复，不再发起 Provider 请求。launcher 清理会在自有进程退出后写入真实的 stopped runtime 快照。
 
 ## Alternatives considered
@@ -24,8 +26,8 @@ Host 从既有青木三方融合总案加载 SHA 绑定的方法包。IMAGO 只�
 
 **模型直接保存。** 提案不能自行提交。既有预览、明确确认、CAS、ChangeSet、outbox 和回执恢复仍是唯一写入路径。
 
-**本片调用 DeepSeek。** 当前未绑定生产路由、模型注册、凭据、网络 Provider 或预算。fake transport 只证明未激活合同与回执形状，不证明模型质量。
+**把 mock 成功当成 canary 成功。** 密闭浏览器链只证明确认、签发工单、Host 排队、一次 HTTP 请求、持久化和仅建议展示；它不证明 Provider 可用性、响应有效性、账单或建议质量。
 
 ## Consequences
 
-本片对应 H2 的有界 UI 纵切和 H3 的 replay 前置。Phase 2.1 修复新增持久、不可重试的事故事实和真实 stopped-runtime 状态；不会修补或重跑不可变的 r3 canary。真实 DeepSeek 文本/视觉价格与预算绑定、合法参考资格、PromptIR 就绪、阿里执行、视觉比较和人工内容签收仍是后续独立工作。
+本片对应 H2 的有界 UI 纵切和 H3 的 replay 前置。D1 精确付费文本路由已经实现并完成本地验证，但获授权的真实 canary 在一个 dispatch epoch 后因完整响应不符合签名建议合同而停在 `submission_unknown`。没有建议被接纳，并且禁止自动重试。普通青木实例没有被替换或更新。真实视觉、合法参考资格、PromptIR 就绪、阿里执行、视觉比较、发布和人工内容签收仍是后续独立工作。

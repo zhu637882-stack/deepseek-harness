@@ -216,6 +216,54 @@ it('keeps replay advice explicit and advisory until the human uses the existing 
   expect(localStorage.getItem('qingmu.scene-planning.v1:project_1:episode_1')).toContain('pendingAdvisory')
 })
 
+it('requires an explicit paid confirmation and shows real Provider output separately without editing', async () => {
+  const savedState: ScenePlanningState = { ...state,
+    storyboard: { id: 'revision_1', version: 1, sourceHash: 'b'.repeat(64), status: 'Ready' },
+    planning: { sceneId: 'scene_1', sceneIndex: 1, initialReceiptId: 'receipt_1', actorIds: {},
+      source: { sceneIndex: 1, scriptRevision: 1, scriptSha256: state.scriptSha256!, inputSha256: 'c'.repeat(64), sourceLineIds: ['line_1'] },
+      shots: [{ id: 'shot_1', title: '门口', narrative: '相遇', visual: '雨夜门口', action: '开门', durationSec: 3, dialogueLineIds: ['line_1'] }] } }
+  const issue = vi.fn(async (_request: unknown) => ({
+    schema: 'jason.qingmu-director-provider-work-order.v1' as const,
+    workOrderId: 'work_order_paid_1', generationTaskId: 'task_paid_1', projectId: 'project_1',
+    episodeId: 'episode_1', sceneId: 'scene_1', shotId: 'shot_1', provider: 'deepseek-official',
+    model: 'deepseek-v4-pro', inputSha256: 'd'.repeat(64), promptSha256: '2'.repeat(64),
+    outputContractSha256: '3'.repeat(64), workOrderSha256: '4'.repeat(64),
+    methodPackage: { version: 'director-paid.v1', sha256: '1'.repeat(64) },
+    pricingSnapshot: { sha256: '5'.repeat(64), currency: 'CNY' as const, estimatedAmountCny: '0.13305600' },
+    requestPolicy: { maxAttempts: 1 as const, maxRetries: 0 as const }, dispatchState: 'DispatchPending',
+  }))
+  const status = vi.fn(async () => ({
+    state: 'settled', generationTaskId: 'task_paid_1', automaticRetry: false as const,
+    classification: null, errorCode: null, transportFacts: null,
+    costAccounting: { reservedUpperBoundCny: '0.13305600', actualAmountCny: null, billingReconciliation: 'pending' },
+    executionReceipt: { proposal: { items: [{ id: 'paid_item_1', field: 'narrative',
+      proposedValue: '真实模型建议', impact: '只供人工判断' }] }, usage: { promptTokens: 120, completionTokens: 20 } },
+  }))
+  const port = { readScenePlanning: vi.fn(async () => savedState),
+    requestDirectorProposal: unavailableDirectorProposal(), checkDirectorProposalFreshness: unusedFreshness(),
+    saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn(),
+    readDirectorProviderAvailability: vi.fn(async () => ({ enabled: true as const,
+      provider: 'deepseek-official' as const, model: 'deepseek-v4-pro' as const,
+      maxPaidCny: '0.30000000' as const, maxInputTokens: 8000 as const, maxOutputTokens: 2000 as const,
+      maxAttempts: 1 as const, maxRetries: 0 as const, projectId: 'project_1', episodeId: 'episode_1',
+      methodPackageVersion: 'director-paid.v1', methodPackageSha256: '1'.repeat(64) })),
+    issueDirectorProviderWorkOrder: issue, readDirectorProviderWorkOrderStatus: status }
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  render(<ScenePlanningWorkspace {...savedState} port={port} directorBridge={replayBridge()} directorSessionId="session_1"
+    onCommitted={vi.fn(async () => {})} onSelectShotId={vi.fn()} onUnsavedChange={vi.fn()} />)
+  const button = await screen.findByRole('button', { name: '请求真实 DeepSeek 导演建议（会产生费用）' })
+  await waitFor(() => { expect((button as HTMLButtonElement).disabled).toBe(false) })
+  fireEvent.click(button)
+  expect(await screen.findByText('真实模型建议')).toBeTruthy()
+  expect(screen.getByRole('region', { name: '真实 DeepSeek 导演建议（Provider 生成）' })).toBeTruthy()
+  expect(screen.getByRole('region', { name: '演练建议（非模型生成）' })).toBeTruthy()
+  expect(screen.getByLabelText<HTMLTextAreaElement>('叙事目的').value).toBe('相遇')
+  expect(port.saveScenePlanning).not.toHaveBeenCalled()
+  expect(issue).toHaveBeenCalledOnce(); expect(status).toHaveBeenCalledOnce()
+  expect(issue.mock.calls[0]![0]).toMatchObject({ purpose: 'bounded_director_suggestion',
+    suggestionType: 'text_director_proposal', expectedContextSnapshotSha256: 'd'.repeat(64) })
+})
+
 it('recovers an unknown adopted save and publishes its exact method-bound outer refresh', async () => {
   const original: ScenePlanningState = { ...state,
     storyboard: { id: 'revision_1', version: 1, sourceHash: 'b'.repeat(64), status: 'Ready' },
@@ -282,4 +330,55 @@ it('clears a shot-bound replay proposal before showing another shot', async () =
   fireEvent.click(screen.getByRole('button', { name: /02 · 室内/ }))
   await waitFor(() => { expect(screen.queryByText('相遇；明确本镜情绪落点。')).toBeNull() })
   expect(screen.getByLabelText<HTMLTextAreaElement>('叙事目的').value).toBe('对峙')
+})
+
+it('aborts and hides a paid proposal before showing another shot', async () => {
+  const savedState: ScenePlanningState = { ...state,
+    storyboard: { id: 'revision_1', version: 1, sourceHash: 'b'.repeat(64), status: 'Ready' },
+    planning: { sceneId: 'scene_1', sceneIndex: 1, initialReceiptId: 'receipt_1', actorIds: {},
+      source: { sceneIndex: 1, scriptRevision: 1, scriptSha256: state.scriptSha256!, inputSha256: 'c'.repeat(64), sourceLineIds: ['line_1'] },
+      shots: [
+        { id: 'shot_1', title: '门口', narrative: '相遇', visual: '雨夜门口', action: '开门', durationSec: 3, dialogueLineIds: ['line_1'] },
+        { id: 'shot_2', title: '室内', narrative: '对峙', visual: '昏暗室内', action: '关门', durationSec: 4, dialogueLineIds: [] },
+      ] } }
+  let statusSignal: AbortSignal | undefined
+  const port = { readScenePlanning: vi.fn(async () => savedState),
+    requestDirectorProposal: unavailableDirectorProposal(), checkDirectorProposalFreshness: unusedFreshness(),
+    saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn(),
+    readDirectorProviderAvailability: vi.fn(async () => ({ enabled: true as const,
+      provider: 'deepseek-official' as const, model: 'deepseek-v4-pro' as const,
+      maxPaidCny: '0.30000000' as const, maxInputTokens: 8000 as const, maxOutputTokens: 2000 as const,
+      maxAttempts: 1 as const, maxRetries: 0 as const, projectId: 'project_1', episodeId: 'episode_1',
+      methodPackageVersion: 'director-paid.v1', methodPackageSha256: '1'.repeat(64) })),
+    issueDirectorProviderWorkOrder: vi.fn(async () => ({
+      schema: 'jason.qingmu-director-provider-work-order.v1' as const,
+      workOrderId: 'work_order_paid_1', generationTaskId: 'task_paid_1', projectId: 'project_1',
+      episodeId: 'episode_1', sceneId: 'scene_1', shotId: 'shot_1', provider: 'deepseek-official',
+      model: 'deepseek-v4-pro', inputSha256: 'd'.repeat(64), promptSha256: '2'.repeat(64),
+      outputContractSha256: '3'.repeat(64), workOrderSha256: '4'.repeat(64),
+      methodPackage: { version: 'director-paid.v1', sha256: '1'.repeat(64) },
+      pricingSnapshot: { sha256: '5'.repeat(64), currency: 'CNY' as const, estimatedAmountCny: '0.13305600' },
+      requestPolicy: { maxAttempts: 1 as const, maxRetries: 0 as const }, dispatchState: 'DispatchPending',
+    })),
+    readDirectorProviderWorkOrderStatus: vi.fn(async (_request: unknown, signal: AbortSignal) => {
+      statusSignal = signal
+      return { state: 'settled', generationTaskId: 'task_paid_1', automaticRetry: false as const,
+        classification: null, errorCode: null, transportFacts: null,
+        costAccounting: { reservedUpperBoundCny: '0.13305600', actualAmountCny: null, billingReconciliation: 'pending' },
+        executionReceipt: { proposal: { items: [{ id: 'paid_item_1', field: 'narrative',
+          proposedValue: '只属于第一镜的真实建议', impact: '只供人工判断' }] } } }
+    }) }
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  render(<ScenePlanningWorkspace {...savedState} port={port} directorBridge={replayBridge()} directorSessionId="session_1"
+    onCommitted={vi.fn(async () => {})} onSelectShotId={vi.fn()} onUnsavedChange={vi.fn()} />)
+  const paid = await screen.findByRole('button', { name: '请求真实 DeepSeek 导演建议（会产生费用）' })
+  await waitFor(() => { expect((paid as HTMLButtonElement).disabled).toBe(false) })
+  fireEvent.click(paid)
+  expect(await screen.findByText('只属于第一镜的真实建议')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: /02 · 室内/ }))
+  await waitFor(() => { expect(screen.queryByText('只属于第一镜的真实建议')).toBeNull() })
+  expect(statusSignal?.aborted).toBe(true)
+  expect(screen.getByLabelText<HTMLTextAreaElement>('叙事目的').value).toBe('对峙')
+  expect(port.issueDirectorProviderWorkOrder).toHaveBeenCalledOnce()
+  expect(port.saveScenePlanning).not.toHaveBeenCalled()
 })

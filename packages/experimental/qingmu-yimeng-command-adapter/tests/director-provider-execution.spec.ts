@@ -95,7 +95,8 @@ const permit = (): DirectorProviderDispatchPermit => ({
 const deepSeekPermit = (): DirectorProviderDispatchPermit => {
   const base = permit()
   const prompt = {
-    schema: 'jason.qingmu-director-text-prompt.v1', purpose: 'director_text_proposal_canary',
+    schema: 'jason.qingmu-director-text-prompt.v1', purpose: 'bounded_director_suggestion',
+    suggestionType: 'text_director_proposal',
     responseInstruction: base.workOrder.outputContract.responseInstruction,
     contextSnapshot: { contextSnapshotSha256: 'a'.repeat(64) },
     methodPackage: base.workOrder.methodPackage, outputSchema: base.workOrder.outputSchema,
@@ -118,8 +119,8 @@ const deepSeekPermit = (): DirectorProviderDispatchPermit => {
       body: {
         model: 'deepseek-v4-pro',
         messages: [{ role: 'user', content: canonical(prompt) }],
-        max_completion_tokens: 512, enable_thinking: false,
-        estimated_input_tokens: 16000, estimated_output_tokens: 512,
+        max_completion_tokens: 2000, enable_thinking: false,
+        estimated_input_tokens: 8000, estimated_output_tokens: 2000,
       },
     },
   }

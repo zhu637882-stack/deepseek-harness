@@ -32,7 +32,7 @@ DEFAULT_ROOT = Path.home() / "Library/Application Support/QingmuOS"
 HARNESS = Path(__file__).resolve().parents[1]
 DEEPSEEK_PRODUCTION_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_PRODUCTION_CREDENTIAL_FILE = Path(
-    "/Users/a1234/Library/Application Support/QingmuOS/dsh/.credentials.yaml"
+    "/Users/a1234/.dsh/.credentials.yaml"
 )
 
 
@@ -279,7 +279,7 @@ def require_http_loopback_origin(value: str) -> str:
 
 
 def validate_director_production_config(value: object) -> dict | None:
-    """Validate the private C1 production route without reading its credential."""
+    """Validate the private D1 production route without reading its credential."""
     if value is None:
         return None
     if not isinstance(value, dict):
@@ -288,7 +288,7 @@ def validate_director_production_config(value: object) -> dict | None:
         "productionOnly", "provider", "model", "baseUrl", "endpoint", "routeKey",
         "projectId", "episodeId", "methodPackageVersion", "methodPackageSha256",
         "maxPaidCny", "maxInputTokens", "maxOutputTokens", "thinking", "images",
-        "files", "tools", "credentialFile", "transportEnabled",
+        "files", "tools", "credentialFile", "transportEnabled", "interactiveEnabled",
     }
     if set(value) - (required | {"taskId"}) or not required.issubset(value):
         raise ValueError("导演 production 配置无效")
@@ -298,13 +298,15 @@ def validate_director_production_config(value: object) -> dict | None:
         or value["model"] != "deepseek-v4-pro"
         or value["baseUrl"] != DEEPSEEK_PRODUCTION_BASE_URL
         or value["endpoint"] != "/chat/completions"
-        or value["maxPaidCny"] != 0.16
-        or value["maxInputTokens"] != 16000
-        or value["maxOutputTokens"] != 512
+        or value["maxPaidCny"] != 0.30
+        or value["maxInputTokens"] != 8000
+        or value["maxOutputTokens"] != 2000
         or value["thinking"] != "disabled"
         or any(value[name] is not False for name in ("images", "files", "tools"))
         or value["credentialFile"] != str(DEEPSEEK_PRODUCTION_CREDENTIAL_FILE)
         or not isinstance(value["transportEnabled"], bool)
+        or not isinstance(value["interactiveEnabled"], bool)
+        or (value["transportEnabled"] and value["interactiveEnabled"])
         or not all(isinstance(value.get(name), str) and value[name].strip() for name in (
             "routeKey", "projectId", "episodeId", "methodPackageVersion", "methodPackageSha256"
         ))
@@ -475,6 +477,19 @@ class Supervisor:
                             + "\n"
                         )
                 production = self.config.get("directorProductionExecution") or {}
+                if production.get("interactiveEnabled"):
+                    overlay += (
+                        "    directorProductionInteractiveEnabled: true\n"
+                        "    directorProductionProjectId: " + json.dumps(production["projectId"]) + "\n"
+                        "    directorProductionEpisodeId: " + json.dumps(production["episodeId"]) + "\n"
+                        "    directorProductionMethodVersion: "
+                        + json.dumps(production["methodPackageVersion"]) + "\n"
+                        "    directorProductionMethodSha256: "
+                        + json.dumps(production["methodPackageSha256"]) + "\n"
+                    )
+                    mock_base_url = self.config.get("_directorSubmitMockBaseUrl")
+                    if mock_base_url:
+                        overlay += "    directorDshMockBaseUrl: " + json.dumps(mock_base_url) + "\n"
                 if production.get("transportEnabled"):
                     mock_base_url = self.config.get("_directorSubmitMockBaseUrl")
                     overlay += (
@@ -503,16 +518,16 @@ class Supervisor:
                 "    retryPolicy:\n      mode: normal\n      maxRetries: 0\n"
             )
         production = self.config.get("directorProductionExecution") or {}
-        if production.get("transportEnabled"):
+        if production.get("transportEnabled") or production.get("interactiveEnabled"):
             mock_base_url = self.config.get("_directorSubmitMockBaseUrl")
             if mock_base_url:
                 overlay += (
                     "\n- id: llm-deepseek\n  config:\n"
                     "    baseURL: " + json.dumps(mock_base_url) + "\n"
-                    "    apiKeyEnv: QINGMU_C1_LOCAL_MOCK_KEY\n"
+                    "    apiKeyEnv: QINGMU_D1_LOCAL_MOCK_KEY\n"
                     "    thinking: disabled\n"
                     "    reasoningEffort: off\n"
-                    "    maxTokens: 512\n"
+                    "    maxTokens: 2000\n"
                     "    retryPolicy:\n      mode: normal\n      maxRetries: 0\n"
                 )
             else:
@@ -524,7 +539,7 @@ class Supervisor:
                     "    baseURL: " + json.dumps(DEEPSEEK_PRODUCTION_BASE_URL) + "\n"
                     "    thinking: disabled\n"
                     "    reasoningEffort: off\n"
-                    "    maxTokens: 512\n"
+                    "    maxTokens: 2000\n"
                     "    retryPolicy:\n      mode: normal\n      maxRetries: 0\n"
                 )
         overlay += "\n- id: qingmu-imago-method-adapter\n  config:\n    coreRoot: " + json.dumps(self.config["coreRoot"]) + "\n"
@@ -539,7 +554,7 @@ class Supervisor:
         if self.config.get("editorialHandoffKey"):
             env["QINGMU_EDITORIAL_HANDOFF_KEY"] = self.config["editorialHandoffKey"]
         if self.config.get("_directorSubmitMockBaseUrl"):
-            env["QINGMU_C1_LOCAL_MOCK_KEY"] = "isolated-local-mock-only"
+            env["QINGMU_D1_LOCAL_MOCK_KEY"] = "isolated-local-mock-only"
         session = self.root / "private/session.json"
         if session.exists():
             env["YIMENG_API_TOKEN"] = json.loads(session.read_text())["token"]
@@ -768,7 +783,7 @@ def cold_integrity(database: Path) -> str:
         return db.execute("PRAGMA integrity_check").fetchone()[0]
 
 
-DIRECTOR_PRODUCTION_CONFIRMATION = "QINGMU_C1_ONE_PROVIDER_POST_MAX_CNY_0_16"
+DIRECTOR_PRODUCTION_CONFIRMATION = "QINGMU_D1_ONE_PROVIDER_POST_MAX_CNY_0_30"
 DIRECTOR_LOCK_FIELDS = (
     "taskId", "workOrderSha256", "contextSnapshotSha256", "promptSha256",
     "outputContractSha256", "requestSha256", "payloadSha256", "provider", "model", "routeKey",
@@ -893,7 +908,7 @@ def director_submit_preflight(
         raise ValueError("导演提交任务与私密配置不匹配")
     inspection = _writer_submit_inspection(root, config, task_id)
     locked_pack = json.loads(lock_pack.read_text())
-    private_lock = _private_regular_file(root / "private/c1-pre-submit-lock.json")
+    private_lock = _private_regular_file(root / "private/d1-pre-submit-lock.json")
     locked = json.loads(private_lock.read_text())
     expected_route = {
         "provider": production["provider"],
@@ -913,7 +928,7 @@ def director_submit_preflight(
     }
     expected_pricing = locked_pack.get("pricing", {})
     if (
-        locked_pack.get("schema") != "qingmu.c1-deepseek-text-pre-submit-lock.v3"
+        locked_pack.get("schema") != "qingmu.d1-deepseek-text-pre-submit-lock.v4"
         or locked_pack.get("status") != "active"
         or locked_pack.get("submitAllowed") is not True
         or locked_pack.get("canary") != {
@@ -960,7 +975,7 @@ def director_submit_preflight(
         or not isinstance(expected_pricing.get("estimatedReservationCny"), (int, float))
         or not isinstance(inspection.get("estimatedCny"), (int, float))
         or abs(expected_pricing["estimatedReservationCny"] - inspection["estimatedCny"]) > 1e-12
-        or expected_pricing.get("actualCostCny") != 0
+        or expected_pricing.get("actualCostCny") is not None
         or locked_pack.get("persistedCounts") != inspection.get("counts")
         or locked != {field: inspection.get(field) for field in DIRECTOR_LOCK_FIELDS}
     ):

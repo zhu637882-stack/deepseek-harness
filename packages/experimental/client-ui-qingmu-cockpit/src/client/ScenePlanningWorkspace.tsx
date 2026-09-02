@@ -2,6 +2,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PlanningBase, PlanningShot, ScenePlanningRequest, ScenePlanningState, ScenePlanningResult } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { DirectorProposalItem, DirectorReplayProposal } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import type {
+  DirectorPaidAvailability,
+  DirectorPaidWorkOrder,
+  DirectorPaidWorkOrderStatus,
+} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
 import type {
   DirectorContextBindingState,
@@ -48,6 +53,29 @@ function objectOf(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  const object = value as Record<string, unknown>
+  return `{${Object.keys(object).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(object[key])}`).join(',')}}`
+}
+
+async function sha256(value: unknown): Promise<string> {
+  const bytes = new TextEncoder().encode(canonicalJson(value))
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function waitForStatus(signal: AbortSignal, milliseconds = 500): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(resolve, milliseconds)
+    signal.addEventListener('abort', () => {
+      window.clearTimeout(timer)
+      reject(new DOMException('aborted', 'AbortError'))
+    }, { once: true })
+  })
 }
 
 function validStoredShot(value: unknown): value is PlanningShot {
@@ -110,7 +138,10 @@ export function ScenePlanningWorkspace({
 }: {
   readonly projectId: string
   readonly episodeId: string
-  readonly port: Pick<QingmuYimengPort, 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning' | 'requestDirectorProposal' | 'checkDirectorProposalFreshness'>
+  readonly port: Pick<QingmuYimengPort, 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning'
+    | 'requestDirectorProposal' | 'checkDirectorProposalFreshness'>
+    & Partial<Pick<QingmuYimengPort, 'readDirectorProviderAvailability'
+      | 'issueDirectorProviderWorkOrder' | 'readDirectorProviderWorkOrderStatus'>>
   readonly directorBridge?: DirectorContextClientPort | undefined
   readonly directorSessionId?: string | undefined
   readonly hostSync?: QingmuHostSync | undefined
@@ -136,6 +167,10 @@ export function ScenePlanningWorkspace({
   const [ignoredProposalItems, setIgnoredProposalItems] = useState<readonly string[]>([])
   const [adoptedProposalItems, setAdoptedProposalItems] = useState<readonly string[]>([])
   const [proposalBusy, setProposalBusy] = useState(false)
+  const [paidAvailability, setPaidAvailability] = useState<DirectorPaidAvailability | null>(null)
+  const [paidWorkOrder, setPaidWorkOrder] = useState<DirectorPaidWorkOrder | null>(null)
+  const [paidStatus, setPaidStatus] = useState<DirectorPaidWorkOrderStatus | null>(null)
+  const [paidBusy, setPaidBusy] = useState(false)
   const [directorBinding, setDirectorBinding] = useState<DirectorContextBindingState | null>(null)
   const [directorStatus, setDirectorStatus] = useState<'unbound' | 'connecting' | 'current' | 'unavailable' | 'drifted'>('unbound')
   const [retryAllowed, setRetryAllowed] = useState(false)
@@ -145,11 +180,25 @@ export function ScenePlanningWorkspace({
   const isLive = (): boolean => live.current
   const controller = useRef(new AbortController())
   const proposalController = useRef<AbortController>()
+  const paidController = useRef<AbortController>()
   const proposalEpoch = useRef(0)
+  const clearPaidProposal = () => {
+    paidController.current?.abort()
+    setPaidWorkOrder(null); setPaidStatus(null); setPaidBusy(false)
+  }
   useEffect(() => {
     live.current = true; controller.current = new AbortController()
-    return () => { live.current = false; controller.current.abort(); proposalController.current?.abort() }
+    return () => { live.current = false; controller.current.abort(); proposalController.current?.abort(); paidController.current?.abort() }
   }, [])
+  useEffect(() => {
+    const operation = new AbortController()
+    setPaidAvailability(null); clearPaidProposal()
+    if (port.readDirectorProviderAvailability === undefined) return () => operation.abort()
+    void port.readDirectorProviderAvailability({ projectId, episodeId }, operation.signal)
+      .then((value) => { if (!operation.signal.aborted) setPaidAvailability(value) })
+      .catch(() => { if (!operation.signal.aborted) setPaidAvailability(null) })
+    return () => operation.abort()
+  }, [episodeId, port, projectId])
   const update = (next: LocalPlan | null) => {
     try {
       if (next === null) localStorage.removeItem(key)
@@ -202,6 +251,14 @@ export function ScenePlanningWorkspace({
   const directorScope: DirectorObjectScope | null = state?.planning && currentShotId ? {
     projectId, episodeId, sceneId: state.planning.sceneId, shotId: currentShotId,
   } : null
+  const paidScopeIsCurrent = paidWorkOrder !== null && directorScope !== null && directorBinding !== null
+    && paidWorkOrder.projectId === directorScope.projectId
+    && paidWorkOrder.episodeId === directorScope.episodeId
+    && paidWorkOrder.sceneId === directorScope.sceneId
+    && paidWorkOrder.shotId === directorScope.shotId
+    && paidWorkOrder.inputSha256 === directorBinding.binding.contextSnapshotSha256
+  const visiblePaidWorkOrder = paidScopeIsCurrent ? paidWorkOrder : null
+  const visiblePaidStatus = paidScopeIsCurrent ? paidStatus : null
   const clearProposal = () => {
     proposalController.current?.abort()
     proposalEpoch.current += 1
@@ -230,6 +287,9 @@ export function ScenePlanningWorkspace({
     })
     return () => { operation.abort() }
   }, [directorBridge, directorSessionId, hostSync, projectId, episodeId, directorScope?.sceneId, directorScope?.shotId])
+  useEffect(() => {
+    clearPaidProposal()
+  }, [directorScope?.sceneId, directorScope?.shotId, directorBinding?.binding.contextSnapshotSha256])
   const begin = () => {
     if (!state || !scene) return
     const shots = [0, 1].map(i => ({ title: `镜头 ${i + 1}`, narrative: '', visual: '', action: i === 0 ? scene.actionDescription : '',
@@ -264,6 +324,57 @@ export function ScenePlanningWorkspace({
       }
     } finally {
       if (isLive() && epoch === proposalEpoch.current) setProposalBusy(false)
+    }
+  }
+  const requestPaidProposal = async () => {
+    const shotId = local?.shotIds[index]
+    const issueWorkOrder = port.issueDirectorProviderWorkOrder
+    const readWorkOrderStatus = port.readDirectorProviderWorkOrderStatus
+    if (!state?.planning || !shotId || !directorBinding || directorStatus !== 'current'
+      || !paidAvailability?.enabled || paidBusy || issueWorkOrder === undefined
+      || readWorkOrderStatus === undefined) return
+    const confirmed = window.confirm(
+      '这会向真实 DeepSeek deepseek-v4-pro 发送一次纯文本导演建议请求。'
+      + '\n本次请求授权上限：¥0.30；最多 8000 输入 / 2000 输出 token；失败不自动重试。'
+      + '\n建议只展示，不会自动写入草稿、质检、Ready 或人工决定。是否继续？',
+    )
+    if (!confirmed) return
+    paidController.current?.abort()
+    const operation = new AbortController()
+    paidController.current = operation
+    setPaidBusy(true); setPaidWorkOrder(null); setPaidStatus(null); setError('')
+    try {
+      const identity = {
+        expectedContextSnapshotSha256: directorBinding.binding.contextSnapshotSha256,
+        methodPackageSha256: paidAvailability.methodPackageSha256 as string,
+        methodPackageVersion: paidAvailability.methodPackageVersion as string,
+        purpose: 'bounded_director_suggestion' as const,
+        sceneId: state.planning.sceneId,
+        shotId,
+        suggestionType: 'text_director_proposal' as const,
+      }
+      const workOrder = await issueWorkOrder({
+        projectId, episodeId, ...identity, idempotencyKey: await sha256(identity),
+      }, operation.signal)
+      if (!isLive() || operation.signal.aborted) return
+      setPaidWorkOrder(workOrder)
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        const status = await readWorkOrderStatus({
+          projectId, episodeId, generationTaskId: workOrder.generationTaskId,
+        }, operation.signal)
+        if (!isLive() || operation.signal.aborted) return
+        setPaidStatus(status)
+        if (status.state === 'settled' || status.state === 'submission_unknown'
+          || status.state === 'unknown' || status.state === 'failed') return
+        await waitForStatus(operation.signal)
+      }
+      setError('真实 DeepSeek 请求状态仍未收敛；没有重试 Provider。请稍后读取当前状态。')
+    } catch (e) {
+      if (isLive() && !operation.signal.aborted) {
+        setError(`真实 DeepSeek 建议未确认完成；没有自动重试。${errorText(e)}`)
+      }
+    } finally {
+      if (isLive()) setPaidBusy(false)
     }
   }
   const adoptProposalItem = (item: DirectorProposalItem) => {
@@ -437,7 +548,7 @@ export function ScenePlanningWorkspace({
   }
   const select = (next: number) => {
     if (local?.shotIds.length && local.dirty) { setError('请先保存当前镜头再切换；当前修改已保留。'); return }
-    clearProposal()
+    clearProposal(); clearPaidProposal()
     if (local) update({ ...local, activeIndex: next })
     setIndex(next); setPreview(false)
   }
@@ -533,6 +644,42 @@ export function ScenePlanningWorkspace({
           inputSha256: proposal.inputSha256, outputSha256: proposal.outputSha256,
           proposalSha256: proposal.proposalSha256, workOrder: proposal.workOrder,
           methodPackageSha256: proposal.methodPackage.methodPackageSha256,
+        }, null, 2)}</pre></details>}
+      </section>}
+      {local?.shotIds[index] && current && <section className={css.proposal} aria-label="真实 DeepSeek 导演建议（Provider 生成）">
+        <header><div><small>真实 Provider · DeepSeek · 纯文本 · 付费</small><h3>真实 DeepSeek 导演建议（Provider 生成）</h3></div>
+          <button type="button" disabled={!paidAvailability?.enabled || paidBusy || busy || Boolean(local.pending)
+          || local.dirty || directorStatus !== 'current'} onClick={() => { void requestPaidProposal() }}>
+            {paidBusy ? '正在等待真实 Provider…' : '请求真实 DeepSeek 导演建议（会产生费用）'}
+          </button></header>
+        <p>与上方 replay 演练严格分开。结果只作建议展示，不自动写草稿，不创建 PromptIR、媒体、正式质检、Ready 或人工决定。</p>
+        {!paidAvailability?.enabled && <p role="status">当前项目 / 集未启用真实 DeepSeek 导演建议；默认关闭。</p>}
+        {paidAvailability?.enabled && <dl><dt>模型</dt><dd>{paidAvailability.model}</dd>
+          <dt>单次授权上限</dt><dd>¥{paidAvailability.maxPaidCny}</dd>
+          <dt>请求边界</dt><dd>{paidAvailability.maxInputTokens} 输入 / {paidAvailability.maxOutputTokens} 输出 token；最多 1 次；0 重试</dd></dl>}
+        {visiblePaidWorkOrder && <dl><dt>本次预估</dt><dd>¥{visiblePaidWorkOrder.pricingSnapshot.estimatedAmountCny}</dd>
+          <dt>任务状态</dt><dd>{visiblePaidStatus?.state ?? visiblePaidWorkOrder.dispatchState}</dd>
+          <dt>实际账单</dt><dd>{String(objectOf(visiblePaidStatus?.costAccounting)?.actualAmountCny ?? '待 Provider 账单对账')}</dd></dl>}
+        {(() => {
+          const receipt = objectOf(visiblePaidStatus?.executionReceipt)
+          const providerProposal = objectOf(receipt?.proposal)
+          const items = Array.isArray(providerProposal?.items) ? providerProposal.items : []
+          return items.map((raw, itemIndex) => {
+            const item = objectOf(raw)
+            if (item === null || typeof item.field !== 'string') return null
+            const field = item.field as keyof PlanningShot
+            return <article key={typeof item.id === 'string' ? item.id : itemIndex} className={css.proposalCard}>
+              <dl><dt>当前原值</dt><dd>{String(current[field] ?? '') || '（空）'}</dd>
+                <dt>真实 Provider 建议</dt><dd>{String(item.proposedValue ?? '') || '（空）'}</dd>
+                <dt>影响</dt><dd>{String(item.impact ?? '')}</dd></dl>
+            </article>
+          })
+        })()}
+        {visiblePaidStatus?.state === 'submission_unknown' && <p role="alert">提交结果未知，已禁止自动重试；请按任务号核对 Provider 与本地账本。</p>}
+        {visiblePaidStatus && <details><summary>Provider 回执、usage 与 SHA</summary><pre>{JSON.stringify({
+          provider: visiblePaidWorkOrder?.provider, model: visiblePaidWorkOrder?.model,
+          workOrderId: visiblePaidWorkOrder?.workOrderId, generationTaskId: visiblePaidWorkOrder?.generationTaskId,
+          workOrderSha256: visiblePaidWorkOrder?.workOrderSha256, status: visiblePaidStatus,
         }, null, 2)}</pre></details>}
       </section>}
       {preview && local && <section className={css.notice} aria-label="规划保存预览"><h3>保存影响</h3>

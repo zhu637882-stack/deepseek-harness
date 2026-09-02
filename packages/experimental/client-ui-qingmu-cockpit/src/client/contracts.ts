@@ -588,6 +588,18 @@ export interface QingmuYimengReadPort {
 /** Explicit ChangeSet commands exposed through the separate Host-only command channel. */
 export interface QingmuYimengCommandPort {
   readCreativeContract(request: { readonly projectId: string }, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').CreativeContractState>
+  readDirectorProviderAvailability(
+    request: { readonly projectId: string; readonly episodeId: string },
+    signal?: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').DirectorPaidAvailability>
+  issueDirectorProviderWorkOrder(
+    request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').DirectorPaidWorkOrderRequest,
+    signal?: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').DirectorPaidWorkOrder>
+  readDirectorProviderWorkOrderStatus(
+    request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').DirectorPaidWorkOrderStatusRequest,
+    signal?: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').DirectorPaidWorkOrderStatus>
   requestDirectorProposal(
     request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').DirectorProposalRequest,
     signal?: AbortSignal,

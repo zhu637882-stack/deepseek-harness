@@ -16,6 +16,8 @@ The director workspace requests a proposal only after an explicit click and labe
 
 A separate, versioned paid-capable contract is Yimeng-owned and disabled by default. It can only issue a Provider/model/pricing-bound work order through Yimeng's existing generation task, ProviderGate, reservation, durable submission outbox, acknowledgement/unknown, and reconciliation chain. Its signed output rules define Unicode code-point string lengths and one exact placeholder normalization and rejection set; Writer and Host consume those same rules. The Host executes only a signed permit with one attempt and zero adapter retries; ambiguous results stop as `submission_unknown`.
 
+For D1, one exact production route can be activated only by an instance-private configuration bound to one project, episode, model, method package, and CNY cap. The interactive surface still requires an explicit confirmation before Yimeng issues the inactive work order. The Host then queues that exact task into the same one-attempt executor; browser code receives neither credentials, Provider payload, claim material, nor execution permission. A loopback-only transport option exists solely for hermetic acceptance and is rejected unless its origin is local HTTP. Switching project, episode, scene, shot, or context SHA aborts the outstanding read and clears the displayed paid proposal so stale advice cannot cross scopes.
+
 The one-shot transport records complete Provider facts before parsing the advisory proposal. A complete but schema-invalid response is durably classified as `provider_response_invalid` with content SHA, byte count, completion/request identifiers, finish reason, and usage; raw model text is not retained. An incomplete transport remains `submission_unknown`. Both classifications retain the original reservation and recover through the canonical outbox and task projection without another Provider request. Launcher cleanup writes a truthful stopped runtime snapshot after owned processes exit.
 
 ## Alternatives considered
@@ -24,8 +26,8 @@ The one-shot transport records complete Provider facts before parsing the adviso
 
 **A direct model-to-save action.** A proposal never commits itself. The existing preview, explicit confirmation, CAS, ChangeSet, outbox, and receipt recovery remain the only write path.
 
-**Calling DeepSeek during this slice.** No production route, model registration, credential, network Provider, or budget is bound. Fake transport proves the inactive contract and receipt shape, not model quality.
+**Treating a successful mock as a successful canary.** The hermetic browser path proves confirmation, work-order issuance, Host queuing, one HTTP request, persistence, and advisory-only display. It does not prove Provider availability, response validity, billing, or proposal quality.
 
 ## Consequences
 
-The slice maps to H2's bounded UI vertical and the replay precondition for H3. The Phase 2.1 repair adds durable, non-retry incident facts and truthful stopped-runtime state; it does not repair or rerun the immutable r3 canary. Real DeepSeek text/vision pricing and budget binding, legal reference qualification, PromptIR readiness, Alibaba execution, visual comparison, and human content acceptance remain separate work.
+The slice maps to H2's bounded UI vertical and the replay precondition for H3. D1's exact paid text route is now implemented and locally verified, but the authorized real canary ended in `submission_unknown` after one dispatch epoch because the complete response failed the signed proposal contract. No proposal was accepted and automatic retry is forbidden. The ordinary Qingmu instance was not replaced or updated. Real vision work, legal reference qualification, PromptIR readiness, Alibaba execution, visual comparison, release, and human content acceptance remain separate work.

@@ -19,6 +19,15 @@ spec.loader.exec_module(local)
 
 
 class OwnershipTests(unittest.TestCase):
+    def test_interactive_director_route_starts_without_one_shot_transport_override(self):
+        config = {
+            "root": "/private/tmp/qingmu-interactive-sample",
+            "yimengRoot": "/private/tmp/qingmu-writer-sample",
+            "directorProductionExecution": {"interactiveEnabled": True},
+        }
+        command = local.backend_command(config)
+        self.assertNotIn("--director-production-override", command)
+
     def director_submit_world(self, parent: Path):
         root = parent / "instance"
         for part in ("private", "storage", "logs", "home", "dsh", "work", "audit"):
@@ -29,20 +38,21 @@ class OwnershipTests(unittest.TestCase):
             "model": "deepseek-v4-pro",
             "baseUrl": "https://api.deepseek.com",
             "endpoint": "/chat/completions",
-            "routeKey": "qingmu.director.text.proposal.c1",
+            "routeKey": "qingmu.director.text.proposal.d1",
             "projectId": "project-1",
             "episodeId": "episode-1",
             "methodPackageVersion": "method.v1",
             "methodPackageSha256": "a" * 64,
-            "maxPaidCny": 0.16,
-            "maxInputTokens": 16000,
-            "maxOutputTokens": 512,
+            "maxPaidCny": 0.30,
+            "maxInputTokens": 8000,
+            "maxOutputTokens": 2000,
             "thinking": "disabled",
             "images": False,
             "files": False,
             "tools": False,
             "credentialFile": str(local.DEEPSEEK_PRODUCTION_CREDENTIAL_FILE),
             "transportEnabled": False,
+            "interactiveEnabled": False,
             "taskId": "task-1",
         }
         config = {
@@ -59,7 +69,7 @@ class OwnershipTests(unittest.TestCase):
             "provider": "deepseek-official", "model": "deepseek-v4-pro",
             "routeKey": production["routeKey"],
             "inputPolicy": {"unit": "utf8_bytes_upper_bound", "promptUtf8Bytes": 100,
-                            "maxInputTokens": 16000},
+                            "maxInputTokens": 8000},
             "methodPackageSha256": "a" * 64, "pricingSnapshotSha256": "1" * 64,
             "dispatchKey": "", "dispatchEpoch": 0, "claimToken": "", "claimEpoch": 0,
             "exclusiveExecutionLane": "qingmu_director_host_permit_v1",
@@ -71,7 +81,7 @@ class OwnershipTests(unittest.TestCase):
             "localStatus": "dispatch_pending", "providerStatus": "PENDING_DISPATCH",
             "kernelStatus": "DispatchPending", "maxAttempts": 1,
             "preflightAllowed": True, "preflightDryRun": False,
-            "estimatedCny": 0.157824, "authorizationCapCny": 0.16,
+            "estimatedCny": 0.133056, "authorizationCapCny": 0.30,
             "counts": {"generation_tasks": 1, "provider_preflights": 1,
                 "provider_authorization_reservations": 0,
                 "provider_submission_outbox": 0, "assets": 0, "prompt_irs": 0,
@@ -86,16 +96,16 @@ class OwnershipTests(unittest.TestCase):
                 "contextSnapshotSha256": "c" * 64,
             },
         }
-        private_lock = root / "private/c1-pre-submit-lock.json"
+        private_lock = root / "private/d1-pre-submit-lock.json"
         local.write_json(private_lock, binding)
         lock = (
             Path(config["coreRoot"])
             / "docs/qingmu-os/evidence/2026-08-31-director-output-semantics-phase1-7"
-            / "c1-phase1-7-lock-pack.json"
+            / "d1-one-shot-lock-pack.json"
         )
         lock.parent.mkdir(parents=True)
         lock.write_text(json.dumps({
-            "schema": "qingmu.c1-deepseek-text-pre-submit-lock.v3",
+            "schema": "qingmu.d1-deepseek-text-pre-submit-lock.v4",
             "status": "active",
             "submitAllowed": True,
             "canary": {"root": str(root), "instanceId": "instance-1",
@@ -123,10 +133,10 @@ class OwnershipTests(unittest.TestCase):
                 "images": False, "files": False, "tools": False, "maxAttempts": 1,
                 "maxRetries": 0, "credentialFileMetadataOnly": production["credentialFile"],
                 "transportEnabled": False},
-            "pricing": {"snapshotDate": "2026-08-31", "currency": "CNY",
-                "inputCacheMissCnyPerMillion": 9, "outputCnyPerMillion": 27,
-                "reservedUpperBoundCny": 0.16, "estimatedReservationCny": 0.157824,
-                "actualCostCny": 0},
+            "pricing": {"snapshotDate": "2026-08-16", "currency": "CNY",
+                "inputCacheMissCnyPerMillion": 9.504, "outputCnyPerMillion": 28.512,
+                "reservedUpperBoundCny": 0.30, "estimatedReservationCny": 0.133056,
+                "actualCostCny": None},
             "persistedCounts": inspection["counts"],
         }))
         return root, config, lock, local.hashlib.sha256(lock.read_bytes()).hexdigest(), inspection
@@ -295,20 +305,21 @@ class OwnershipTests(unittest.TestCase):
             "model": "deepseek-v4-pro",
             "baseUrl": "https://api.deepseek.com",
             "endpoint": "/chat/completions",
-            "routeKey": "qingmu.director.text.proposal.c1",
+            "routeKey": "qingmu.director.text.proposal.d1",
             "projectId": "project-1",
             "episodeId": "episode-1",
             "methodPackageVersion": "method.v1",
             "methodPackageSha256": "a" * 64,
-            "maxPaidCny": 0.16,
-            "maxInputTokens": 16000,
-            "maxOutputTokens": 512,
+            "maxPaidCny": 0.30,
+            "maxInputTokens": 8000,
+            "maxOutputTokens": 2000,
             "thinking": "disabled",
             "images": False,
             "files": False,
             "tools": False,
             "credentialFile": str(local.DEEPSEEK_PRODUCTION_CREDENTIAL_FILE),
             "transportEnabled": False,
+            "interactiveEnabled": False,
         }
         self.assertEqual(local.validate_director_production_config(value), value)
         with self.assertRaisesRegex(ValueError, "production 配置无效"):
@@ -615,8 +626,8 @@ class OwnershipTests(unittest.TestCase):
             with patch.object(local, "_probe_director_credential", return_value={"available": True}):
                 current = json.loads(lock.read_text())
                 for old_schema in (
-                    "qingmu.c1-deepseek-text-pre-submit-lock.v1",
-                    "qingmu.c1-deepseek-text-pre-submit-lock.v2",
+                    "qingmu.d1-deepseek-text-pre-submit-lock.v1",
+                    "qingmu.d1-deepseek-text-pre-submit-lock.v2",
                 ):
                     old = dict(current)
                     old["schema"] = old_schema
