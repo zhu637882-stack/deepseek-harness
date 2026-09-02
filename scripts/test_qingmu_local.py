@@ -19,6 +19,39 @@ spec.loader.exec_module(local)
 
 
 class OwnershipTests(unittest.TestCase):
+    def build_manifest_world(self, parent: Path):
+        root = parent / "instance"
+        writer = parent / "writer"
+        harness = parent / "harness"
+        core = parent / "core"
+        for path in (root / "private", root / "storage", root / "build-manifest"):
+            path.mkdir(parents=True, exist_ok=True)
+        frontend_build = writer / "frontend/.next/BUILD_ID"
+        frontend_build.parent.mkdir(parents=True)
+        frontend_build.write_text("unit-build-id\n")
+        for relative in local.BUILD_MANIFEST_ARTIFACTS:
+            artifact = harness / relative
+            artifact.parent.mkdir(parents=True, exist_ok=True)
+            artifact.write_text("built:" + relative)
+        config = {
+            "instanceId": "unit-build-instance",
+            "root": str(root),
+            "harnessRoot": str(harness),
+            "yimengRoot": str(writer),
+            "coreRoot": str(core),
+        }
+        local.mark_lifecycle(root, config, "clean")
+        identities = {
+            writer: {"root": str(writer), "commit": "1" * 40, "dirty": False,
+                     "changeCount": 0, "workingTreeStateSha256": "0" * 64, "changes": []},
+            harness: {"root": str(harness), "commit": "2" * 40, "dirty": False,
+                      "changeCount": 0, "workingTreeStateSha256": "0" * 64, "changes": []},
+            core: {"root": str(core), "commit": "3" * 40, "dirty": True,
+                   "changeCount": 1, "workingTreeStateSha256": "4" * 64,
+                   "changes": [" M AGENTS.md"]},
+        }
+        return root, config, identities
+
     def test_interactive_director_route_starts_without_one_shot_transport_override(self):
         config = {
             "root": "/private/tmp/qingmu-interactive-sample",
@@ -194,6 +227,60 @@ class OwnershipTests(unittest.TestCase):
              patch.object(local.Path, "glob", return_value=[]), \
              self.assertRaisesRegex(ValueError, "Node 20"):
             local.node20_executable(Path("/bin/sh"))
+
+    def test_recorded_build_manifest_binds_clean_sources_artifacts_and_instance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, config, identities = self.build_manifest_world(Path(directory))
+            with patch.object(local, "source_identity", side_effect=lambda path: identities[path]):
+                result = local.record_build_manifest(root, config)
+                status = local.build_manifest_status(root, config)
+            manifest_path = root / "build-manifest/current.json"
+            manifest = json.loads(manifest_path.read_text())
+            self.assertTrue(result["matches"])
+            self.assertTrue(status["matches"])
+            self.assertTrue(manifest["releaseSourcesClean"])
+            self.assertFalse(manifest["sources"]["writer"]["dirty"])
+            self.assertFalse(manifest["sources"]["harness"]["dirty"])
+            self.assertTrue(manifest["sources"]["core"]["dirty"])
+            self.assertEqual(manifest["artifacts"]["frontendBuildId"]["value"], "unit-build-id")
+            self.assertEqual(manifest_path.stat().st_mode & 0o777, 0o600)
+            serialized = manifest_path.read_text()
+            self.assertNotIn("controlKey", serialized)
+            self.assertNotIn("jwtSecret", serialized)
+
+    def test_build_manifest_detects_artifact_and_source_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, config, identities = self.build_manifest_world(Path(directory))
+            with patch.object(local, "source_identity", side_effect=lambda path: identities[path]):
+                local.record_build_manifest(root, config)
+                artifact = Path(config["harnessRoot"]) / local.BUILD_MANIFEST_ARTIFACTS[0]
+                artifact.write_text("drifted")
+                status = local.build_manifest_status(root, config)
+            self.assertEqual(status["state"], "drift")
+            self.assertFalse(status["matches"])
+            self.assertIn("artifacts", status["mismatches"])
+
+    def test_record_build_rejects_dirty_release_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, config, identities = self.build_manifest_world(Path(directory))
+            identities[Path(config["yimengRoot"])] = {
+                **identities[Path(config["yimengRoot"])], "dirty": True,
+                "changeCount": 1, "changes": [" M frontend/source.ts"],
+            }
+            with patch.object(local, "source_identity", side_effect=lambda path: identities[path]), \
+                 self.assertRaisesRegex(ValueError, "必须干净"):
+                local.record_build_manifest(root, config)
+            self.assertFalse((root / "build-manifest/current.json").exists())
+
+    def test_start_requires_matching_build_manifest_before_spawning(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "private").mkdir()
+            config = {"instanceId": "unit", "root": str(root), "controlKey": "unit"}
+            local.mark_lifecycle(root, config, "clean")
+            with patch.object(local, "control", side_effect=FileNotFoundError), \
+                 self.assertRaisesRegex(RuntimeError, "record-build"):
+                local.start(root, config)
 
     def test_occupied_port_is_not_reused(self):
         with socket.socket() as listener:
@@ -380,6 +467,7 @@ class OwnershipTests(unittest.TestCase):
             child = subprocess.Popen(["/bin/sleep", "30"])
             try:
                 with patch.object(supervisor, "launch", return_value=child), patch.object(supervisor, "wait_ready"), \
+                     patch.object(local, "mark_build_started"), \
                      patch.object(supervisor, "start_host", side_effect=RuntimeError("Host unavailable")):
                     with self.assertRaisesRegex(RuntimeError, "Host unavailable"):
                         supervisor.run()
@@ -444,6 +532,7 @@ class OwnershipTests(unittest.TestCase):
 
                 with patch.object(supervisor, "launch", return_value=api), \
                      patch.object(supervisor, "wait_ready"), \
+                     patch.object(local, "mark_build_started"), \
                      patch.object(supervisor, "start_host", side_effect=start_host), \
                      patch.object(supervisor, "start_frontend", side_effect=start_frontend):
                     with ThreadPoolExecutor(max_workers=1) as pool:
@@ -547,6 +636,65 @@ class OwnershipTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "SHA"):
                 local.restore(source, target)
             self.assertFalse(target.exists())
+
+    def test_backup_carries_build_manifest_and_restore_reports_new_binding_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "instance"
+            root.mkdir(mode=0o700)
+            for part in ("private", "storage", "dsh", "audit", "backups", "build-manifest"):
+                (root / part).mkdir(parents=True, mode=0o700, exist_ok=True)
+            config = {
+                "root": str(root), "harnessRoot": str(local.HARNESS),
+                "yimengRoot": str(parent / "writer"), "coreRoot": str(parent / "core"),
+                "instanceId": "source-instance", "controlKey": "control",
+                "directorExecutionKey": "director", "jwtSecret": "jwt",
+                "attestationKey": "attestation", "frontendNode": "/private/node20",
+            }
+            local.write_json(root / "private/instance.json", config)
+            local.write_json(root / "identity.json", {"kind": "test"})
+            local.write_json(root / "build-manifest/current.json", {
+                "schema": local.BUILD_MANIFEST_SCHEMA,
+                "instance": {"instanceId": "source-instance"},
+            })
+            local.mark_lifecycle(root, config, "clean")
+            with sqlite3.connect(root / "storage/jason.db") as connection:
+                connection.execute("CREATE TABLE sample (id INTEGER)")
+            with patch.object(local, "node20_executable", return_value="/private/node20"):
+                saved = local.backup(root)
+                backup_root = Path(saved["backup"])
+                manifest = json.loads((backup_root / "manifest.json").read_text())
+                self.assertEqual(manifest["buildManifest"]["state"], "captured")
+                self.assertIn("build-manifest/current.json", manifest["sha256"])
+                target = parent / "restored"
+                restored = local.restore(backup_root, target)
+            self.assertTrue((target / "build-manifest/current.json").is_file())
+            self.assertFalse(restored["buildManifest"]["matches"])
+
+    def test_backup_reports_legacy_build_evidence_when_current_identity_is_unknown(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "instance"
+            root.mkdir(mode=0o700)
+            for part in ("private", "storage", "dsh", "audit", "backups", "build-manifest"):
+                (root / part).mkdir(parents=True, mode=0o700, exist_ok=True)
+            config = {
+                "root": str(root), "harnessRoot": str(local.HARNESS),
+                "instanceId": "legacy-instance", "controlKey": "control",
+                "frontendNode": "/private/node20",
+            }
+            local.write_json(root / "private/instance.json", config)
+            local.write_json(root / "identity.json", {"kind": "test"})
+            local.write_json(root / "build-manifest/legacy-runtime.json", {"schema": "legacy-evidence"})
+            local.mark_lifecycle(root, config, "clean")
+            with sqlite3.connect(root / "storage/jason.db") as connection:
+                connection.execute("CREATE TABLE sample (id INTEGER)")
+            with patch.object(local, "node20_executable", return_value="/private/node20"):
+                saved = local.backup(root)
+            self.assertEqual(saved["buildManifest"]["state"], "unknown_missing")
+            self.assertEqual(
+                saved["buildManifest"]["evidence"],
+                ["build-manifest/legacy-runtime.json"],
+            )
 
     def test_orphan_uncertainty_refuses_cold_backup_and_restart(self):
         with tempfile.TemporaryDirectory() as directory:

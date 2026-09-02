@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
@@ -34,6 +35,16 @@ DEEPSEEK_PRODUCTION_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_PRODUCTION_CREDENTIAL_FILE = Path(
     "/Users/a1234/.dsh/.credentials.yaml"
 )
+BUILD_MANIFEST_SCHEMA = "qingmu.local-build-manifest.v1"
+BUILD_MANIFEST_ARTIFACTS = (
+    "apps/cli/lib/bin.js",
+    "packages/experimental/qingmu-yimeng-command-adapter/lib/index.js",
+    "packages/experimental/qingmu-yimeng-read-adapter/lib/index.js",
+    "packages/experimental/qingmu-imago-method-adapter/lib/index.js",
+    "packages/experimental/qingmu-director-context-bridge/lib/index.js",
+    "packages/experimental/client-ui-qingmu-cockpit/lib/client.js",
+    "packages/experimental/qingmu-web/lib/index.js",
+)
 
 
 def write_json(path: Path, value: dict) -> None:
@@ -55,8 +66,9 @@ def write_json(path: Path, value: dict) -> None:
 def read_config(root: Path) -> dict:
     if root.is_symlink() or root.stat().st_uid != os.getuid() or root.stat().st_mode & 0o077:
         raise ValueError("专用目录必须属于当前用户且权限为0700")
-    for relative in ("private", "storage", "dsh", "home", "work", "logs", "private/instance.json",
-                     "private/login.json", "private/session.json", "storage/jason.db", "private/lifecycle.lock"):
+    for relative in ("private", "storage", "dsh", "home", "work", "logs", "build-manifest",
+                     "private/instance.json", "private/login.json", "private/session.json",
+                     "storage/jason.db", "private/lifecycle.lock", "build-manifest/current.json"):
         if (root / relative).is_symlink():
             raise ValueError("实例数据/配置路径不能是符号链接：" + relative)
     config = json.loads((root / "private/instance.json").read_text())
@@ -117,6 +129,184 @@ def node20_executable(explicit: Path | None = None) -> str:
     raise ValueError("易梦六阶段前端需要 Node 20；请用 --frontend-node 指定本机 Node 20")
 
 
+def utc_timestamp(timestamp: float | None = None) -> str:
+    """Render one UTC timestamp for durable local release evidence."""
+    value = datetime.now(timezone.utc) if timestamp is None else datetime.fromtimestamp(timestamp, timezone.utc)
+    return value.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def file_sha256(path: Path) -> str:
+    """Hash one required regular build artifact."""
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("发布产物缺失或不是普通文件：" + str(path))
+    with path.open("rb") as stream:
+        digest = hashlib.sha256()
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def source_identity(source: Path) -> dict:
+    """Read one Git checkout identity without interpreting dirty paths."""
+    source = source.resolve(strict=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=source, capture_output=True, text=True, timeout=10
+    )
+    status = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+        cwd=source,
+        capture_output=True,
+        timeout=15,
+    )
+    if head.returncode or status.returncode:
+        raise ValueError("发布来源不是可核验的 Git checkout：" + str(source))
+    changes = status.stdout.decode("utf-8", errors="surrogateescape").splitlines()
+    return {
+        "root": str(source),
+        "commit": head.stdout.strip(),
+        "dirty": bool(changes),
+        "changeCount": len(changes),
+        "workingTreeStateSha256": hashlib.sha256(status.stdout).hexdigest(),
+        "changes": changes,
+    }
+
+
+def collect_build_manifest(root: Path, config: dict) -> dict:
+    """Bind clean release sources and built artifacts to one local instance."""
+    writer = Path(config["yimengRoot"])
+    harness = Path(config["harnessRoot"])
+    core = Path(config["coreRoot"])
+    sources = {
+        "writer": source_identity(writer),
+        "harness": source_identity(harness),
+        "core": source_identity(core),
+    }
+    if sources["writer"]["dirty"] or sources["harness"]["dirty"]:
+        raise ValueError("Writer/Harness 工作树必须干净才能记录发布身份")
+    frontend_build_id = writer / "frontend/.next/BUILD_ID"
+    build_id = frontend_build_id.read_text(encoding="utf-8").strip()
+    if not build_id or "\n" in build_id:
+        raise ValueError("易梦 frontend BUILD_ID 无效")
+    artifact_paths = [harness / relative for relative in BUILD_MANIFEST_ARTIFACTS]
+    artifacts = {
+        "frontendBuildId": {
+            "path": str(frontend_build_id),
+            "value": build_id,
+            "sha256": file_sha256(frontend_build_id),
+        },
+        "host": {
+            relative: {"path": str(path), "sha256": file_sha256(path)}
+            for relative, path in zip(BUILD_MANIFEST_ARTIFACTS, artifact_paths)
+        },
+    }
+    latest_mtime = max(path.stat().st_mtime for path in [frontend_build_id, *artifact_paths])
+    ports_path = root / "private/ports.json"
+    ports = json.loads(ports_path.read_text()) if ports_path.is_file() else None
+    return {
+        "schema": BUILD_MANIFEST_SCHEMA,
+        "instance": {
+            "instanceId": config["instanceId"],
+            "root": str(root),
+            "dataRoot": str(root / "storage"),
+            "database": str(root / "storage/jason.db"),
+            "ports": ports,
+        },
+        "sources": sources,
+        "releaseSourcesClean": True,
+        "artifacts": artifacts,
+        "builtAt": utc_timestamp(latest_mtime),
+        "recordedAt": utc_timestamp(),
+        "startedAt": None,
+    }
+
+
+def build_manifest_status(root: Path, config: dict) -> dict:
+    """Compare the recorded local release identity with source and artifact truth."""
+    path = root / "build-manifest/current.json"
+    if path.is_symlink() or not path.is_file():
+        return {"state": "unknown_missing", "matches": False, "path": str(path), "mismatches": ["manifest"]}
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        expected = collect_build_manifest(root, config)
+    except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        return {"state": "invalid", "matches": False, "path": str(path), "mismatches": [str(exc)]}
+    mismatches: list[str] = []
+    if manifest.get("schema") != BUILD_MANIFEST_SCHEMA:
+        mismatches.append("schema")
+    for field in ("instanceId", "root", "dataRoot", "database"):
+        if manifest.get("instance", {}).get(field) != expected["instance"][field]:
+            mismatches.append("instance." + field)
+    recorded_ports = manifest.get("instance", {}).get("ports")
+    if recorded_ports is not None and recorded_ports != expected["instance"]["ports"]:
+        mismatches.append("instance.ports")
+    if manifest.get("sources") != expected["sources"]:
+        mismatches.append("sources")
+    if manifest.get("releaseSourcesClean") is not True:
+        mismatches.append("releaseSourcesClean")
+    if manifest.get("artifacts") != expected["artifacts"]:
+        mismatches.append("artifacts")
+    return {
+        "state": "matches" if not mismatches else "drift",
+        "matches": not mismatches,
+        "path": str(path),
+        "sha256": file_sha256(path),
+        "writerCommit": manifest.get("sources", {}).get("writer", {}).get("commit"),
+        "harnessCommit": manifest.get("sources", {}).get("harness", {}).get("commit"),
+        "coreCommit": manifest.get("sources", {}).get("core", {}).get("commit"),
+        "frontendBuildId": manifest.get("artifacts", {}).get("frontendBuildId", {}).get("value"),
+        "builtAt": manifest.get("builtAt"),
+        "startedAt": manifest.get("startedAt"),
+        "mismatches": mismatches,
+    }
+
+
+def require_build_manifest_matches(root: Path, config: dict) -> dict:
+    """Fail closed unless the current release identity exactly matches disk."""
+    status = build_manifest_status(root, config)
+    if status["matches"] is not True:
+        raise RuntimeError("本地发布身份缺失或漂移；实例保持停止，请在完整构建后运行 record-build")
+    return status
+
+
+def record_build_manifest(root: Path, config: dict) -> dict:
+    """Atomically record one stopped build and retain the preceding manifest."""
+    with instance_lock(root):
+        require_clean(root, config)
+        manifest = collect_build_manifest(root, config)
+        directory = root / "build-manifest"
+        directory.mkdir(mode=0o700, exist_ok=True)
+        current = directory / "current.json"
+        previous = None
+        if current.exists() or current.is_symlink():
+            if current.is_symlink() or not current.is_file():
+                raise ValueError("当前发布身份不是普通文件")
+            digest = file_sha256(current)
+            history = directory / "history"
+            history.mkdir(mode=0o700, exist_ok=True)
+            previous = history / (
+                utc_timestamp().replace(":", "").replace("-", "")
+                + "-" + digest[:12] + "-" + secrets.token_hex(4) + ".json"
+            )
+            with previous.open("xb") as stream:
+                os.chmod(previous, 0o600)
+                stream.write(current.read_bytes())
+                stream.flush()
+                os.fsync(stream.fileno())
+        write_json(current, manifest)
+        status = require_build_manifest_matches(root, config)
+        return {"recorded": str(current), "previous": str(previous) if previous else None, **status}
+
+
+def mark_build_started(root: Path, config: dict, ports: dict) -> None:
+    """Persist the exact successful start coordinates without changing build identity."""
+    status = require_build_manifest_matches(root, config)
+    path = Path(status["path"])
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["instance"]["ports"] = ports
+    manifest["startedAt"] = utc_timestamp()
+    write_json(path, manifest)
+
+
 def initialize(
     root: Path,
     writer: Path,
@@ -134,7 +324,8 @@ def initialize(
     if core is not None and not (core / "pipeline/imago-os-current.json").is_file():
         raise ValueError("Core 来源缺少当前机器入口")
     root.mkdir(mode=0o700, parents=False, exist_ok=False)
-    for part in ("private", "storage", "logs", "home", "dsh/profiles/qingmu", "work", "audit", "backups"):
+    for part in ("private", "storage", "logs", "home", "dsh/profiles/qingmu", "work", "audit", "backups",
+                 "build-manifest"):
         (root / part).mkdir(mode=0o700, parents=True, exist_ok=True)
     config = {"version": 1, "instanceId": secrets.token_hex(16), "root": str(root),
               "harnessRoot": str(HARNESS), "yimengRoot": str(writer), "coreRoot": str(core.resolve(strict=True)) if core else None,
@@ -165,6 +356,8 @@ def initialize(
     identity = json.loads(result.stdout.strip().splitlines()[-1])
     write_json(root / "identity.json", {**identity, "kind": "device-local-user", "humanSignoff": False})
     mark_lifecycle(root, config, "clean")
+    if core is not None:
+        record_build_manifest(root, config)
     return {"initialized": True, "root": str(root), "identity": identity,
             "message": "独立空库已创建，未创建或批准项目。使用 start 启动，然后 login 更新会话。"}
 
@@ -615,6 +808,7 @@ class Supervisor:
             session = "已登录：" + identity["username"]
         except (OSError, ValueError):
             session = "会话缺失或过期：运行 login，然后重新打开 entryUrl；不会自动重发命令"
+        manifest = build_manifest_status(self.root, self.config)
         return {"instanceId": self.config["instanceId"], "root": str(self.root),
                 "supervisorPid": os.getpid(), "apiPid": self.api.pid if self.api else None,
                 "hostPid": self.host.pid if self.host else None, **self.ports,
@@ -623,7 +817,10 @@ class Supervisor:
                 "frontendProcessAlive": frontend_alive,
                 "apiIdentityAndStorageVerified": api_verified, "hostListenerAndHttpVerified": host_verified,
                 "frontendListenerAndHttpVerified": frontend_verified,
-                "ready": bool(api_verified and host_verified and frontend_verified), "session": session}
+                "buildManifest": manifest,
+                "buildManifestMatches": manifest["matches"],
+                "ready": bool(api_verified and host_verified and frontend_verified and manifest["matches"]),
+                "session": session}
 
     def login(self) -> dict:
         self.api_identity()
@@ -671,6 +868,7 @@ class Supervisor:
                                   "webUrl": f"http://127.0.0.1:{web_port}",
                                   "entryUrl": f"http://127.0.0.1:{web_port}/qingmu-runtime/local-session"}
                     write_json(persisted, self.ports)
+                    mark_build_started(self.root, self.config, self.ports)
                     self.api = self.launch([*backend_command(self.config), "--port", str(api_port)],
                                            backend_env(self.root, self.config), "api")
                     self.wait_ready(self.api, self.api_identity)
@@ -732,6 +930,7 @@ def start(root: Path, config: dict) -> dict:
         pass
     with instance_lock(root):
         require_clean(root, config)
+        require_build_manifest_matches(root, config)
     log = (root / "logs/supervisor.log").open("ab")
     with log:
         child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "_supervise", "--root", str(root)],
@@ -753,7 +952,7 @@ def backup(root: Path) -> dict:
         require_clean(root, read_config(root))
         target = root / "backups" / (time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(4))
         target.mkdir(mode=0o700)
-        for name in ("storage", "private", "dsh", "audit", "identity.json"):
+        for name in ("storage", "private", "dsh", "audit", "build-manifest", "identity.json"):
             source = root / name
             if source.is_dir():
                 shutil.copytree(source, target / name, symlinks=True)
@@ -764,13 +963,29 @@ def backup(root: Path) -> dict:
             raise RuntimeError("备份数据库完整性检查失败")
         hashes = {
             str(file.relative_to(target)): hashlib.sha256(file.read_bytes()).hexdigest()
-            for directory in (target / "storage", target / "audit")
+            for directory in (target / "storage", target / "audit", target / "build-manifest")
             if directory.is_dir()
             for file in directory.rglob("*")
             if file.is_file()
         }
-        write_json(target / "manifest.json", {"root": str(root), "integrity": integrity, "sha256": hashes})
-        return {"backup": str(target), "integrity": integrity, "files": len(hashes), "overwritten": False}
+        current_manifest = target / "build-manifest/current.json"
+        build_evidence = sorted(
+            str(file.relative_to(target))
+            for file in (target / "build-manifest").rglob("*")
+            if file.is_file() and file != current_manifest
+        ) if (target / "build-manifest").is_dir() else []
+        build_identity = {
+            "state": "captured" if current_manifest.is_file() else "unknown_missing",
+            "path": "build-manifest/current.json",
+            "sha256": file_sha256(current_manifest) if current_manifest.is_file() else None,
+            "evidence": build_evidence,
+        }
+        write_json(target / "manifest.json", {
+            "root": str(root), "integrity": integrity, "sha256": hashes,
+            "buildManifest": build_identity,
+        })
+        return {"backup": str(target), "integrity": integrity, "files": len(hashes),
+                "overwritten": False, "buildManifest": build_identity}
 
 
 def cold_integrity(database: Path) -> str:
@@ -1168,7 +1383,7 @@ def restore(source: Path, target: Path) -> dict:
         raise ValueError("备份来源绑定不符")
     actual_files = {
         str(file.relative_to(source))
-        for directory in (source / "storage", source / "audit")
+        for directory in (source / "storage", source / "audit", source / "build-manifest")
         if directory.is_dir()
         for file in directory.rglob("*")
         if file.is_file()
@@ -1179,7 +1394,8 @@ def restore(source: Path, target: Path) -> dict:
         file = source / relative
         if (
             not file.is_file()
-            or not any(file.resolve().is_relative_to(source / directory) for directory in ("storage", "audit"))
+            or not any(file.resolve().is_relative_to(source / directory)
+                       for directory in ("storage", "audit", "build-manifest"))
         ):
             raise ValueError("备份媒体路径无效")
         if hashlib.sha256(file.read_bytes()).hexdigest() != digest:
@@ -1193,6 +1409,10 @@ def restore(source: Path, target: Path) -> dict:
         shutil.copytree(source / "audit", target / "audit", symlinks=True)
     else:
         (target / "audit").mkdir(mode=0o700)
+    if (source / "build-manifest").is_dir():
+        shutil.copytree(source / "build-manifest", target / "build-manifest", symlinks=True)
+    else:
+        (target / "build-manifest").mkdir(mode=0o700)
     shutil.copy2(source / "identity.json", target / "identity.json")
     for name in ("logs", "home", "work", "backups"):
         (target / name).mkdir(mode=0o700)
@@ -1209,13 +1429,14 @@ def restore(source: Path, target: Path) -> dict:
         (target / "private" / name).unlink(missing_ok=True)
     read_config(target)
     return {"restored": str(target), "integrity": "ok", "overwritten": False,
-            "message": "恢复到新目录；原实例未改动。启动后重新 login。"}
+            "buildManifest": build_manifest_status(target, config),
+            "message": "恢复到新目录；原实例未改动。先运行 record-build 绑定新实例身份，再 start 和 login。"}
 
 
 def main() -> None:
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["init", "start", "status", "stop", "login", "backup", "restore",
+    parser.add_argument("command", choices=["init", "record-build", "start", "status", "stop", "login", "backup", "restore",
                                             "director-submit-once", "_supervise"])
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--yimeng-root", type=Path)
@@ -1246,7 +1467,9 @@ def main() -> None:
                 signal.signal(signal.SIGINT, lambda *_: setattr(supervisor, "stopping", True))
                 supervisor.run()
                 return
-            if args.command == "director-submit-once":
+            if args.command == "record-build":
+                result = record_build_manifest(root, config)
+            elif args.command == "director-submit-once":
                 if not args.task_id or args.lock_pack is None or not args.lock_sha256:
                     raise ValueError("director-submit-once 必须明确 task-id、lock-pack 与 lock-sha256")
                 production_requested = args.execute_production_once is not None
@@ -1289,7 +1512,9 @@ def main() -> None:
                     # A stale runtime.json is diagnostic only, never a kill target.
                     with instance_lock(root):
                         require_clean(root, config)
+                        manifest = build_manifest_status(root, config)
                         result = {"running": False, "root": str(root), "dataPreserved": True,
+                                  "buildManifest": manifest, "buildManifestMatches": manifest["matches"],
                                   "message": "未运行；未根据历史PID停止任何进程"}
         print(json.dumps(result, ensure_ascii=False, indent=2))
     except Exception as exc:
