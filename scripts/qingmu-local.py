@@ -653,7 +653,7 @@ def validate_text_foundation_production_config(value: object) -> dict | None:
         "assetReferenceParentTaskId",
     }
     keys = set(value)
-    if keys != required and keys != required | optional_lineage_fields:
+    if keys - (required | optional_lineage_fields) or not required.issubset(keys):
         raise ValueError("易梦文本 production 配置无效")
     if (
         value["productionOnly"] is not True
@@ -1652,6 +1652,9 @@ class Supervisor:
         if existing is None or existing["parentTaskId"] != expected["parentTaskId"]:
             write_json(self._asset_activation_binding_path(), expected)
             execution = dict(self.config.get("textFoundationProductionExecution") or {})
+            # Older local instances predate independent lineage fields.  Keep
+            # both names canonical while allowing either workflow to run alone.
+            execution.setdefault("textFoundationParentTaskId", None)
             execution["assetReferenceParentTaskId"] = expected["parentTaskId"]
             updated = dict(self.config)
             updated["textFoundationProductionExecution"] = execution

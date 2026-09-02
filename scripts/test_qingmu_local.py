@@ -1062,7 +1062,6 @@ class OwnershipTests(unittest.TestCase):
                 "episodeId": "episode-one", "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
                 "allowedStages": list(local.TEXT_FOUNDATION_STAGES), "credentialEnvFile": str(credential_env),
                 "maxTasksPerTick": 1, "maxAttempts": 1, "allowExistingProviderPoll": True,
-                "textFoundationParentTaskId": None, "assetReferenceParentTaskId": None,
             }
             supervisor = local.Supervisor(root, {
                 "instanceId": "unit-activation", "root": str(root), "yimengRoot": str(writer),
@@ -1130,6 +1129,15 @@ class OwnershipTests(unittest.TestCase):
             self.assertTrue(second["idempotent"])
             self.assertEqual(start_worker.call_count, 2)
             self.assertNotIn("assetActivationKey", json.dumps(first))
+            saved = json.loads((root / "private/instance.json").read_text())
+            saved_execution = saved["textFoundationProductionExecution"]
+            self.assertIsNone(saved_execution["textFoundationParentTaskId"])
+            self.assertEqual(saved_execution["assetReferenceParentTaskId"], "parent-one")
+            with patch.object(local, "YIMENG_PROVIDER_ENV_FILE", credential_env):
+                self.assertEqual(
+                    local.validate_text_foundation_production_config(saved_execution),
+                    saved_execution,
+                )
 
     def test_asset_activation_retry_accepts_running_and_terminal_same_parent(self):
         with tempfile.TemporaryDirectory() as directory:
