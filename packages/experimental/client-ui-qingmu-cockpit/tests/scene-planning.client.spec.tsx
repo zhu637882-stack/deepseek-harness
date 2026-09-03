@@ -50,6 +50,87 @@ function replayProposal(shotId = 'shot_1'): DirectorReplayProposal {
 }
 beforeEach(() => { localStorage.clear(); vi.stubGlobal('crypto', webcrypto) })
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
+function automaticReadState(): ScenePlanningState {
+  return { ...state, storyboard: { id: 'revision_10', version: 10, sourceHash: 'b'.repeat(64), status: 'Ready' },
+    scenes: [{ sceneIndex: 0, title: '自动雨夜', actionDescription: '角色走进雨夜街道', dialogues: [
+      { lineId: 'automatic_line_0', character: '林夏', line: '继续前进。' },
+    ] }],
+    canonicalStoryboard: { revision: 10, sourceHash: 'b'.repeat(64), shotCount: 10, origin: 'automatic' } }
+}
+function legacyLocalPlan(title: string, dirty: boolean, pending = false) {
+  const shot = { title, narrative: '不要丢失', visual: '', action: '', durationSec: 3, dialogueLineIds: [] }
+  const base = { sceneIndex: 1, expectedScriptRevision: 1, expectedScriptSha256: 'a'.repeat(64),
+    expectedStoryboardRevision: 0, expectedStoryboardSha256: null }
+  return { activeIndex: 0, sceneIndex: 1, dirty, shotIds: [], base, shots: [shot],
+    ...(pending ? { pending: { projectId: 'project_1', episodeId: 'episode_1', idempotencyKey: 'legacy-draft-1', request: {
+      action: 'initialize', ...base, shots: [shot],
+    } } } : {}) }
+}
+it('shows a canonical automatic storyboard as read-only without reviving the legacy planning editor', async () => {
+  const automatic = automaticReadState()
+  const port = { readScenePlanning: vi.fn(async () => automatic), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() }
+  const onSelectShotId = vi.fn()
+  render(<ScenePlanningWorkspace {...automatic} port={port} onCommitted={vi.fn(async () => {})}
+    onSelectShotId={onSelectShotId} onUnsavedChange={vi.fn()} />)
+  expect((await screen.findByRole('status', { name: '自动分镜已建立' })).textContent).toContain('青木已自动建立 10 个镜头')
+  expect(screen.getByText(/旧场景规划不适用/)).toBeTruthy()
+  expect(screen.getByText(/已有提示词、Take 与高级分镜/)).toBeTruthy()
+  expect(screen.queryByText('本集已有分镜；此入口不覆盖已有对象，请使用当前导演工作区。')).toBeNull()
+  expect(screen.queryByText('尚无可规划场景。请先到“剧本与资产”确认导入并保存剧本。')).toBeNull()
+  expect(screen.queryByText('尚未建立真实镜头')).toBeNull()
+  expect(port.saveScenePlanning).not.toHaveBeenCalled()
+  expect(onSelectShotId).not.toHaveBeenCalled()
+})
+it('retains a bounded legacy draft when a canonical automatic storyboard supersedes it, without recovery or save', async () => {
+  const automatic = automaticReadState()
+  localStorage.setItem('qingmu.scene-planning.v1:project_1:episode_1', JSON.stringify(legacyLocalPlan('保留的旧规划', true, true)))
+  const port = { readScenePlanning: vi.fn(async () => automatic), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() }
+  render(<ScenePlanningWorkspace {...automatic} port={port} onCommitted={vi.fn(async () => {})}
+    onSelectShotId={vi.fn()} onUnsavedChange={vi.fn()} />)
+  expect(await screen.findByRole('status', { name: '自动分镜已建立' })).toBeTruthy()
+  await waitFor(() => { expect(localStorage.getItem('qingmu.scene-planning.v1:project_1:episode_1')).toBeNull() })
+  expect(localStorage.getItem('qingmu.scene-planning.v1:project_1:episode_1:retained-input')).toContain('保留的旧规划')
+  expect(localStorage.getItem('qingmu.scene-planning.v1:project_1:episode_1:retained-input')).not.toContain('legacy-draft-1')
+  expect(screen.getByText(/已保留旧规划输入副本/)).toBeTruthy()
+  expect(port.recoverScenePlanning).not.toHaveBeenCalled()
+  expect(port.saveScenePlanning).not.toHaveBeenCalled()
+})
+it.each([
+  ['clean local draft', false, false],
+  ['dirty local draft', true, false],
+  ['pending local draft', true, true],
+])('retains a bounded %s and clears the active editor without any command', async (_label, dirty, pending) => {
+  const automatic = automaticReadState()
+  localStorage.setItem('qingmu.scene-planning.v1:project_1:episode_1', JSON.stringify(legacyLocalPlan('可恢复文字', dirty, pending)))
+  const port = { readScenePlanning: vi.fn(async () => automatic), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() }
+  render(<ScenePlanningWorkspace {...automatic} port={port} onCommitted={vi.fn(async () => {})}
+    onSelectShotId={vi.fn()} onUnsavedChange={vi.fn()} />)
+  await waitFor(() => { expect(localStorage.getItem('qingmu.scene-planning.v1:project_1:episode_1')).toBeNull() })
+  expect(localStorage.getItem('qingmu.scene-planning.v1:project_1:episode_1:retained-input')).toContain('可恢复文字')
+  expect(port.recoverScenePlanning).not.toHaveBeenCalled(); expect(port.saveScenePlanning).not.toHaveBeenCalled()
+})
+it.each([
+  ['malformed', '{"shots":"not-an-array"}'],
+  ['oversized', JSON.stringify(legacyLocalPlan('超大草稿', true)).replace('不要丢失', 'x'.repeat(100000))],
+])('does not replace a valid retained input with %s active browser data', async (_label, active) => {
+  const automatic = automaticReadState()
+  localStorage.setItem('qingmu.scene-planning.v1:project_1:episode_1:retained-input', JSON.stringify(legacyLocalPlan('先存副本', true)))
+  localStorage.setItem('qingmu.scene-planning.v1:project_1:episode_1', active)
+  const port = { readScenePlanning: vi.fn(async () => automatic), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() }
+  const first = render(<ScenePlanningWorkspace {...automatic} port={port} onCommitted={vi.fn(async () => {})}
+    onSelectShotId={vi.fn()} onUnsavedChange={vi.fn()} />)
+  await waitFor(() => { expect(localStorage.getItem('qingmu.scene-planning.v1:project_1:episode_1')).toBeNull() })
+  expect(localStorage.getItem('qingmu.scene-planning.v1:project_1:episode_1:retained-input')).toContain('先存副本')
+  first.unmount()
+  render(<ScenePlanningWorkspace {...automatic} port={port} onCommitted={vi.fn(async () => {})}
+    onSelectShotId={vi.fn()} onUnsavedChange={vi.fn()} />)
+  expect(await screen.findByText(/先存副本/)).toBeTruthy()
+  expect(port.recoverScenePlanning).not.toHaveBeenCalled(); expect(port.saveScenePlanning).not.toHaveBeenCalled()
+})
 it('preserves text and original intent across double-click, disconnect and remount without resubmission', async () => {
   const port = { readScenePlanning: vi.fn(async () => state),
     requestDirectorProposal: unavailableDirectorProposal(), checkDirectorProposalFreshness: unusedFreshness(),

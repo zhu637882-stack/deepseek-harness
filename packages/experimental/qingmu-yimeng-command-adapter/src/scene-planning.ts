@@ -32,6 +32,13 @@ export interface ScenePlanningRequest extends CreationScope {
 }
 /** Structural Ready means an immutable planning snapshot, never content approval. */
 export interface PlanningRevision { readonly id: string; readonly version: number; readonly sourceHash: string; readonly status: 'Ready' }
+/** Read-only automatic storyboard that replaces the legacy scene-planning editor for this episode. */
+export interface CanonicalStoryboard {
+  readonly revision: number
+  readonly sourceHash: string
+  readonly shotCount: number
+  readonly origin: 'automatic'
+}
 /** Original imported scene coordinates; sceneIndex is not a global entity ID. */
 export interface PlanningSource {
   readonly scriptRevision: number
@@ -48,13 +55,23 @@ export interface PlanningScene {
   readonly importSourceLineIds: readonly string[]
   readonly dialogues: readonly { readonly character: string; readonly line: string; readonly sourceLineId: string }[]
 }
+/** Automatic script scene shown only with a verified canonical storyboard, never submitted through legacy planning. */
+export interface AutomaticPlanningScene {
+  readonly sceneIndex: number
+  readonly title: string
+  readonly actionDescription: string
+  readonly dialogues: readonly { readonly character: string; readonly line: string; readonly lineId: string }[]
+}
+export type ScenePlanningScene = PlanningScene | AutomaticPlanningScene
 /** Existing rows projected for planning; no shadow database. */
 export interface ScenePlanningState extends CreationScope {
   readonly schema: 'jason.qingmu-scene-planning-state.v1'
   readonly scriptRevision: number
   readonly scriptSha256: string | null
-  readonly scenes: readonly PlanningScene[]
+  readonly scenes: readonly ScenePlanningScene[]
   readonly storyboard: PlanningRevision | null
+  /** Present only when the canonical automatic shot plan, rather than legacy planning rows, is authoritative. */
+  readonly canonicalStoryboard?: CanonicalStoryboard | null
   readonly planning: {
     readonly sceneId: string
     readonly sceneIndex: number
@@ -126,6 +143,12 @@ function revision(value: unknown, fail: Fail): void {
   id(r.id, fail); integer(r.version, fail, 1); digest(r.sourceHash, fail)
   if (r.status !== 'Ready') throw fail('planning structural revision untrusted')
 }
+function canonicalStoryboard(value: unknown, fail: Fail): void {
+  const storyboard = obj(value, fail)
+  integer(storyboard.revision, fail, 1); digest(storyboard.sourceHash, fail)
+  integer(storyboard.shotCount, fail, 1)
+  if (storyboard.origin !== 'automatic') throw fail('canonical storyboard origin invalid')
+}
 function source(value: unknown, fail: Fail): void {
   const s = obj(value, fail)
   integer(s.scriptRevision, fail, 1); integer(s.sceneIndex, fail, 1)
@@ -176,16 +199,29 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
       if (r.schema !== 'jason.qingmu-scene-planning-state.v1') throw b('planning state schema invalid')
       integer(r.scriptRevision, b)
       if (r.scriptSha256 !== null) digest(r.scriptSha256, b)
+      const automatic = r.canonicalStoryboard !== undefined && r.canonicalStoryboard !== null
       if (!Array.isArray(r.scenes) || r.scenes.length > 1000) throw b('planning scenes invalid')
       for (const item of r.scenes) {
         const s = obj(item, b)
-        integer(s.sceneIndex, b, 1); str(s.title, b, 64000); ids(s.importSourceLineIds, b)
+        integer(s.sceneIndex, b, automatic ? 0 : 1); str(s.title, b, 64000)
+        if (!automatic) ids(s.importSourceLineIds, b)
         if (typeof s.actionDescription !== 'string' || !Array.isArray(s.dialogues)) throw b('planning scene text invalid')
         for (const d of s.dialogues) {
-          const line = obj(d, b); id(line.sourceLineId, b); str(line.character, b, 80); str(line.line, b, 64000)
+          const line = obj(d, b); id(automatic ? line.lineId : line.sourceLineId, b)
+          str(line.character, b, 80); str(line.line, b, 64000)
         }
       }
       if (r.storyboard !== null) revision(r.storyboard, b)
+      if (r.canonicalStoryboard !== undefined && r.canonicalStoryboard !== null) {
+        canonicalStoryboard(r.canonicalStoryboard, b)
+        const canonical = obj(r.canonicalStoryboard, b)
+        const storyboard = r.storyboard === null ? null : obj(r.storyboard, b)
+        if (storyboard === null
+          || canonical.revision !== storyboard.version
+          || canonical.sourceHash !== storyboard.sourceHash
+          || r.planning !== null
+          || r.scenes.length === 0) throw b('canonical storyboard state mismatch')
+      }
       if (r.planning !== null) {
         const p = obj(r.planning, b)
         id(p.sceneId, b); integer(p.sceneIndex, b, 1); source(p.source, b); id(p.initialReceiptId, b)

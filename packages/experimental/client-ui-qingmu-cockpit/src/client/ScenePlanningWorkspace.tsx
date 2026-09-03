@@ -1,6 +1,6 @@
 /** Script-to-scene planning over canonical Yimeng reads and durable commands. */
 import { useEffect, useRef, useState } from 'react'
-import type { PlanningBase, PlanningShot, ScenePlanningRequest, ScenePlanningState, ScenePlanningResult } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import type { PlanningBase, PlanningScene, PlanningShot, ScenePlanningRequest, ScenePlanningState, ScenePlanningResult } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { DirectorProposalItem, DirectorReplayProposal } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type {
   DirectorPaidAvailability,
@@ -30,6 +30,7 @@ interface LocalPlan {
   pending?: ScenePlanningRequest
   pendingAdvisory?: QingmuAdvisorySaveProof
 }
+const retainedInputLimit = 98304
 const labels = { title: '镜头名称', narrative: '叙事目的', visual: '画面描述', action: '动作与表演' } as const
 function base(state: ScenePlanningState, sceneIndex: number): PlanningBase {
   if (state.scriptSha256 === null) throw new Error('请先保存剧本')
@@ -81,14 +82,63 @@ function waitForStatus(signal: AbortSignal, milliseconds = 500): Promise<void> {
 function validStoredShot(value: unknown): value is PlanningShot {
   const shot = objectOf(value)
   return shot !== null
-    && typeof shot.title === 'string'
-    && typeof shot.narrative === 'string'
-    && typeof shot.visual === 'string'
-    && typeof shot.action === 'string'
+    && typeof shot.title === 'string' && shot.title.length >= 1 && shot.title.length <= 120
+    && typeof shot.narrative === 'string' && shot.narrative.length <= 2000
+    && typeof shot.visual === 'string' && shot.visual.length <= 2000
+    && typeof shot.action === 'string' && shot.action.length <= 2000
     && typeof shot.durationSec === 'number'
     && Number.isFinite(shot.durationSec)
-    && Array.isArray(shot.dialogueLineIds)
+    && shot.durationSec >= 0.5 && shot.durationSec <= 30
+    && Array.isArray(shot.dialogueLineIds) && shot.dialogueLineIds.length <= 100
+    && new Set(shot.dialogueLineIds).size === shot.dialogueLineIds.length
     && shot.dialogueLineIds.every(id => typeof id === 'string')
+}
+
+function isPlanningScene(value: ScenePlanningState['scenes'][number] | undefined): value is PlanningScene {
+  return value !== undefined && 'importSourceLineIds' in value
+}
+
+function validPlanningBase(value: unknown): value is PlanningBase {
+  const candidate = objectOf(value)
+  return candidate !== null
+    && Number.isSafeInteger(candidate.sceneIndex) && (candidate.sceneIndex as number) >= 1
+    && Number.isSafeInteger(candidate.expectedScriptRevision) && (candidate.expectedScriptRevision as number) >= 1
+    && typeof candidate.expectedScriptSha256 === 'string' && /^[a-f0-9]{64}$/u.test(candidate.expectedScriptSha256)
+    && Number.isSafeInteger(candidate.expectedStoryboardRevision) && (candidate.expectedStoryboardRevision as number) >= 0
+    && ((candidate.expectedStoryboardRevision === 0 && candidate.expectedStoryboardSha256 === null)
+      || (typeof candidate.expectedStoryboardSha256 === 'string' && /^[a-f0-9]{64}$/u.test(candidate.expectedStoryboardSha256)))
+}
+
+/** Convert untrusted browser state into one bounded, non-resumable conflict copy. */
+function retainedInput(value: unknown): LocalPlan | null {
+  const candidate = objectOf(value)
+  if (candidate === null || !Number.isSafeInteger(candidate.sceneIndex) || (candidate.sceneIndex as number) < 1
+    || !validPlanningBase(candidate.base) || !Array.isArray(candidate.shots) || candidate.shots.length < 1 || candidate.shots.length > 8
+    || !candidate.shots.every(validStoredShot) || typeof candidate.dirty !== 'boolean') return null
+  if (candidate.activeIndex !== undefined
+    && (!Number.isSafeInteger(candidate.activeIndex) || (candidate.activeIndex as number) < 0
+      || (candidate.activeIndex as number) >= candidate.shots.length)) return null
+  if (!Array.isArray(candidate.shotIds) || candidate.shotIds.length > 8
+    || new Set(candidate.shotIds).size !== candidate.shotIds.length
+    || !candidate.shotIds.every(id => typeof id === 'string')) return null
+  let encoded: string
+  try { encoded = JSON.stringify(candidate) } catch { return null }
+  if (new TextEncoder().encode(encoded).byteLength > retainedInputLimit) return null
+  return {
+    ...(candidate.activeIndex === undefined ? {} : { activeIndex: candidate.activeIndex as number }),
+    sceneIndex: candidate.sceneIndex as number,
+    base: candidate.base,
+    shots: candidate.shots.map(shot => ({ ...shot, dialogueLineIds: [...shot.dialogueLineIds] })),
+    shotIds: [],
+    dirty: true,
+  }
+}
+
+function storedPlan(key: string): LocalPlan | null {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(key) ?? 'null')
+    return retainedInput(raw) === null ? null : raw as LocalPlan
+  } catch { return null }
 }
 
 /** Treat browser persistence as untrusted and bind a pending RPC to the current canonical object before I/O. */
@@ -151,12 +201,8 @@ export function ScenePlanningWorkspace({
 }) {
   const key = `qingmu.scene-planning.v1:${projectId}:${episodeId}`
   const [state, setState] = useState<ScenePlanningState | null>(null)
-  const [local, setLocal] = useState<LocalPlan | null>(() => {
-    try { return JSON.parse(localStorage.getItem(key) ?? 'null') as LocalPlan | null } catch { return null }
-  })
-  const [retained, setRetained] = useState<LocalPlan | null>(() => {
-    try { return JSON.parse(localStorage.getItem(`${key}:retained-input`) ?? 'null') as LocalPlan | null } catch { return null }
-  })
+  const [local, setLocal] = useState<LocalPlan | null>(() => storedPlan(key))
+  const [retained, setRetained] = useState<LocalPlan | null>(() => retainedInput(storedPlan(`${key}:retained-input`)))
   const [sceneIndex, setSceneIndex] = useState(local?.sceneIndex ?? 1)
   const [index, setIndex] = useState(local?.activeIndex ?? 0)
   const [preview, setPreview] = useState(false)
@@ -212,6 +258,19 @@ export function ScenePlanningWorkspace({
       if (!active) return
       if (next.projectId !== projectId || next.episodeId !== episodeId) throw new Error('409 planning_read_scope_mismatch')
       setState(next)
+      if (next.canonicalStoryboard !== null && next.canonicalStoryboard !== undefined) {
+        const retainedInputCopy = local === null ? null : retainedInput(local)
+        const priorRetained = retainedInput(storedPlan(`${key}:retained-input`))
+        const retainedCopy = retainedInputCopy ?? priorRetained
+        try {
+          localStorage.removeItem(key)
+          if (retainedCopy === null) localStorage.removeItem(`${key}:retained-input`)
+          else localStorage.setItem(`${key}:retained-input`, JSON.stringify(retainedCopy))
+        } catch { setError('自动分镜已建立，但浏览器无法保留旧规划输入；请先复制文字。') }
+        setRetained(retainedCopy); setLocal(null); setSceneIndex(0); setIndex(0); setPreview(false)
+        if (retainedCopy !== null) setError('已保留旧规划输入副本；自动分镜为当前权威来源，未发送恢复或保存请求。')
+        return
+      }
       if (local?.pending !== undefined
         && validatedPendingIntent(local.pending, next, projectId, episodeId) === null) {
         try { localStorage.removeItem(key) } catch { /* The invalid marker remains unusable in memory. */ }
@@ -246,8 +305,10 @@ export function ScenePlanningWorkspace({
     return () => { window.removeEventListener('beforeunload', prevent); onUnsavedChange(false) }
   }, [local, onUnsavedChange])
   const scene = state?.scenes.find(s => s.sceneIndex === (local?.sceneIndex ?? sceneIndex))
+  const planningScene = isPlanningScene(scene) ? scene : undefined
   const current = local?.shots[index]
   const currentShotId = local?.shotIds[index]
+  const canonicalStoryboard = state?.canonicalStoryboard ?? null
   const directorScope: DirectorObjectScope | null = state?.planning && currentShotId ? {
     projectId, episodeId, sceneId: state.planning.sceneId, shotId: currentShotId,
   } : null
@@ -291,9 +352,9 @@ export function ScenePlanningWorkspace({
     clearPaidProposal()
   }, [directorScope?.sceneId, directorScope?.shotId, directorBinding?.binding.contextSnapshotSha256])
   const begin = () => {
-    if (!state || !scene) return
-    const shots = [0, 1].map(i => ({ title: `镜头 ${i + 1}`, narrative: '', visual: '', action: i === 0 ? scene.actionDescription : '',
-      durationSec: 3, dialogueLineIds: scene.dialogues.filter((_, n) => n % 2 === i).map(d => d.sourceLineId) }))
+    if (!state || !planningScene) return
+    const shots = [0, 1].map(i => ({ title: `镜头 ${i + 1}`, narrative: '', visual: '', action: i === 0 ? planningScene.actionDescription : '',
+      durationSec: 3, dialogueLineIds: planningScene.dialogues.filter((_, n) => n % 2 === i).map(d => d.sourceLineId) }))
     update({ sceneIndex, shots, base: base(state, sceneIndex), shotIds: [], dirty: true })
   }
   const change = (shot: PlanningShot) => {
@@ -586,12 +647,17 @@ export function ScenePlanningWorkspace({
           setRetryAllowed(false); setRecoveryRead(false); setError('已载入现有镜头。原输入保留在下方“冲突输入副本”，未重发或覆盖服务器。')
         } catch { setError('无法保留冲突输入副本；未离开当前编辑。请先复制文字。') }
       }}>保留输入副本，载入已存在镜头</button>}
-      {!state?.scenes.length && <p>尚无可规划场景。请先到“剧本与资产”确认导入并保存剧本。</p>}
-      {scene && <details open={!local}><summary>已保存原文 · 只读对照</summary><p>{scene.actionDescription || '原文未提供动作描述'}</p>
-        {scene.dialogues.map(d => <p key={d.sourceLineId}><strong>{d.character}</strong>：{d.line}</p>)}</details>}
-      {scene && local === null && state?.storyboard === null && <><p>初始提供两个空白规划卡；动作来自原文，对白初始分配需你核对，其他字段由你填写。</p>
+      {canonicalStoryboard && <section className={css.notice} role="status" aria-label="自动分镜已建立">
+        <h3>青木已自动建立 {canonicalStoryboard.shotCount} 个镜头</h3>
+        <p>这 {canonicalStoryboard.shotCount} 个镜头来自当前权威自动分镜。本页的旧场景规划不适用；不会重置、保存或覆盖它们。</p>
+        <p>主镜头工作区在本页下方“已有提示词、Take 与高级分镜”中。旧场景规划不可写；后续动作仍受各自确认/门禁。</p>
+      </section>}
+      {!canonicalStoryboard && !state?.scenes.length && <p>尚无可规划场景。请先到“剧本与资产”确认导入并保存剧本。</p>}
+      {planningScene && <details open={!local}><summary>已保存原文 · 只读对照</summary><p>{planningScene.actionDescription || '原文未提供动作描述'}</p>
+        {planningScene.dialogues.map(d => <p key={d.sourceLineId}><strong>{d.character}</strong>：{d.line}</p>)}</details>}
+      {planningScene && local === null && state?.storyboard === null && <><p>初始提供两个空白规划卡；动作来自原文，对白初始分配需你核对，其他字段由你填写。</p>
         <button type="button" className={css.primary} onClick={begin}>建立本场镜头</button></>}
-      {state?.storyboard && local === null && <p>本集已有分镜；此入口不覆盖已有对象，请使用当前导演工作区。</p>}
+      {state?.storyboard && !canonicalStoryboard && local === null && <p>本集已有分镜；此入口不覆盖已有对象，请使用当前导演工作区。</p>}
       {local && current && <fieldset disabled={busy || Boolean(local.pending)} className={css.editor}>
         <legend>镜头 {index + 1} · {local.shotIds.length ? '编辑已保存规划' : '尚未保存'}</legend>
         {(Object.keys(labels) as (keyof typeof labels)[]).map(field => <label key={field}>{labels[field]}
@@ -600,7 +666,7 @@ export function ScenePlanningWorkspace({
         <label>规划时长（秒）<input aria-label="规划时长（秒）" type="number" min="0.5" max="30" step="0.5" value={current.durationSec}
           onChange={(e) => { change({ ...current, durationSec: Number(e.target.value) }) }} /></label>
         <div><h3>对白分配</h3><p>保留原文与来源行；此处未核验语音时序。</p>
-          {scene?.dialogues.map(d => <label key={d.sourceLineId} className={css.dialogue}>{d.character}：{d.line}
+          {planningScene?.dialogues.map(d => <label key={d.sourceLineId} className={css.dialogue}>{d.character}：{d.line}
             <select aria-label={`分配对白 ${d.character} ${d.line}`} value={local.shots.findIndex(s => s.dialogueLineIds.includes(d.sourceLineId))}
               disabled={local.shotIds.length > 0} onChange={(e) => {
                 const target = Number(e.target.value)
@@ -683,7 +749,7 @@ export function ScenePlanningWorkspace({
         }, null, 2)}</pre></details>}
       </section>}
       {preview && local && <section className={css.notice} aria-label="规划保存预览"><h3>保存影响</h3>
-        <p>{local.shotIds.length ? '仅修改当前镜头，生成新的结构快照；旧依赖按现有规则失效。' : `新建 1 个真实场景、${new Set(scene?.dialogues.map(d => d.character)).size} 个独立文本人物和 ${local.shots.length} 个规划镜头。不同场景的同名人物不会静默合并。`}</p>
+        <p>{local.shotIds.length ? '仅修改当前镜头，生成新的结构快照；旧依赖按现有规则失效。' : `新建 1 个真实场景、${new Set(planningScene?.dialogues.map(d => d.character)).size} 个独立文本人物和 ${local.shots.length} 个规划镜头。不同场景的同名人物不会静默合并。`}</p>
         {(local.shotIds.length ? [index] : local.shots.map((_, i) => i)).map(i => <article key={i}>
           <h4>{local.shots[i]?.title}</h4><p>{(Object.keys(labels) as (keyof typeof labels)[]).map(k =>
             `${labels[k]}：${state?.planning?.shots[i]?.[k] ?? '（无）'} → ${local.shots[i]?.[k] || '（未填写）'}`).join('\n')}</p>
@@ -705,7 +771,9 @@ export function ScenePlanningWorkspace({
               : directorStatus === 'drifted' ? '来源已漂移；旧建议不能采用。人工草稿已保留。'
                 : '导演助理暂不可用；人工编辑与保存不受影响。'}</p>
         <dl><dt>项目 / 集</dt><dd>{projectId} / {episodeId}</dd>
-          <dt>场景 / 镜头</dt><dd>{directorScope ? `${directorScope.sceneId} / ${directorScope.shotId}` : '尚未建立真实镜头'}</dd>
+          <dt>场景 / 镜头</dt><dd>{directorScope ? `${directorScope.sceneId} / ${directorScope.shotId}`
+            : canonicalStoryboard ? `自动分镜已建立 · ${canonicalStoryboard.shotCount} 个镜头（旧场景规划不可写；后续动作仍受各自确认/门禁）`
+              : '尚未建立真实镜头'}</dd>
           <dt>上下文 SHA</dt><dd>{directorBinding?.binding.contextSnapshotSha256 ?? '尚未绑定'}</dd></dl>
         <p>这里只绑定易梦只读上下文和演练建议，不向浏览器暴露 Host 凭据、Provider payload 或执行许可。</p>
       </details>
