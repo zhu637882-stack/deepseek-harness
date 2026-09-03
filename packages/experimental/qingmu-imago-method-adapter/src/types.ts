@@ -550,10 +550,27 @@ export interface ImagoShotLocalCurrentReferenceLineage extends ImagoMethodJsonOb
   readonly rightsRecordSha256: string
 }
 
-/** Exact immutable coordinates of either qualified current-reference path. */
+/** Exact immutable proof that the owner made the final creative decision. */
+export interface ImagoShotOwnerFinalCurrentReferenceLineage extends ImagoMethodJsonObject {
+  readonly projectId: string
+  readonly sourceEpisodeId: string
+  readonly ownerType: ImagoElementKind
+  readonly ownerId: string
+  readonly role: string
+  readonly sourceRevisionId: string
+  readonly qualificationKind: 'owner_human_finalization'
+  readonly finalizationReceiptIdentity: string
+  readonly humanReviewIdentity: string
+  readonly inheritedPrescreenReviewIdentity: string
+  /** Required only for an actor's canonical front-turnaround cohort. */
+  readonly actorCohortIdentity?: string
+}
+
+/** Exact immutable coordinates of every qualified current-reference path. */
 export type ImagoShotCurrentReferenceLineage =
   | ImagoShotProviderCurrentReferenceLineage
   | ImagoShotLocalCurrentReferenceLineage
+  | ImagoShotOwnerFinalCurrentReferenceLineage
 
 /** Read-only E4-3 reference binding exposed to the E5-3 method. */
 export interface ImagoShotCurrentReference extends ImagoMethodJsonObject {

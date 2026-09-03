@@ -410,6 +410,10 @@ const REFERENCE_CANDIDATE = {
   uploadCommandReceiptId: '',
   rightsRecorded: false,
   rightsRecordSha256: '',
+  ownerFinalizationReceiptIdentity: '',
+  ownerFinalizationHumanReviewIdentity: '',
+  ownerFinalizationInheritedPrescreenReviewIdentity: '',
+  ownerFinalizationActorCohortIdentity: '',
   qualityProjectionSha256: 'b'.repeat(64),
   decisionKind: 'none',
   decisionIdentity: '',
@@ -1914,6 +1918,100 @@ describe('qingmu Yimeng read adapter', () => {
     }, signal())).toEqual({ ok: true, value: response })
   })
 
+  it('accepts only receipt-bound owner-final reference qualifications', async () => {
+    const humanReviewIdentity = '1'.repeat(64)
+    const ownerFinal = {
+      ...REFERENCE_CANDIDATE,
+      assetId: 'asset-prop-owner-final-1',
+      selectionStatus: 'Selected',
+      isSelected: true,
+      qualityStatus: 'failed',
+      formalConsistencyCheckId: '',
+      formalConsistencyPassed: false,
+      qualificationKind: 'owner_human_finalization',
+      qualificationCheckId: '',
+      qualificationPassed: true,
+      qualificationIdentity: '',
+      decisionKind: 'humanReview',
+      decisionIdentity: humanReviewIdentity,
+      ownerFinalizationReceiptIdentity: '2'.repeat(64),
+      ownerFinalizationHumanReviewIdentity: humanReviewIdentity,
+      ownerFinalizationInheritedPrescreenReviewIdentity: '3'.repeat(64),
+      ownerFinalizationActorCohortIdentity: '',
+    }
+    const response = { ...REFERENCE_CANDIDATES_FIXTURE, candidates: [ownerFinal] }
+    const read = async (candidate: Record<string, unknown>) => createYimengReadHandler({}, dependencies(
+      async () => jsonResponse({ ...response, candidates: [candidate] }),
+      'test-token',
+    ))('referenceCandidates', {
+      projectId: 'project-1', elementKind: 'prop', targetId: 'prop-1',
+    }, signal())
+
+    expect(await read(ownerFinal)).toEqual({ ok: true, value: response })
+    for (const forged of [
+      { ...ownerFinal, qualificationPassed: false },
+      { ...ownerFinal, ownerFinalizationReceiptIdentity: '' },
+      { ...ownerFinal, decisionIdentity: '4'.repeat(64) },
+      { ...ownerFinal, formalConsistencyPassed: true },
+      { ...ownerFinal, ownerFinalizationActorCohortIdentity: '5'.repeat(64) },
+    ]) {
+      expect(await read(forged)).toMatchObject({ ok: false, error: { code: 'internal' } })
+    }
+  })
+
+  it('accepts only the canonical front-view actor owner qualification as downstream-ready', async () => {
+    const humanReviewIdentity = '6'.repeat(64)
+    const ownerActor = {
+      ...REFERENCE_CANDIDATE,
+      assetId: 'asset-actor-front-owner-final-1',
+      ownerType: 'actor',
+      ownerId: 'actor-1',
+      role: 'turnaround_front',
+      selectionStatus: 'Selected',
+      isSelected: true,
+      qualityStatus: 'failed',
+      formalConsistencyCheckId: '',
+      formalConsistencyPassed: false,
+      qualificationKind: 'owner_human_finalization',
+      qualificationCheckId: '',
+      qualificationPassed: true,
+      qualificationIdentity: '',
+      decisionKind: 'humanReview',
+      decisionIdentity: humanReviewIdentity,
+      ownerFinalizationReceiptIdentity: '7'.repeat(64),
+      ownerFinalizationHumanReviewIdentity: humanReviewIdentity,
+      ownerFinalizationInheritedPrescreenReviewIdentity: '8'.repeat(64),
+      ownerFinalizationActorCohortIdentity: '9'.repeat(64),
+    }
+    const actorFeed = {
+      ...REFERENCE_CANDIDATES_FIXTURE,
+      elementKind: 'actor',
+      targetId: 'actor-1',
+      candidates: [ownerActor],
+    }
+    const read = async (candidate: Record<string, unknown>) => createYimengReadHandler({}, dependencies(
+      async () => jsonResponse({ ...actorFeed, candidates: [candidate] }),
+      'test-token',
+    ))('referenceCandidates', {
+      projectId: 'project-1', elementKind: 'actor', targetId: 'actor-1',
+    }, signal())
+
+    expect(await read(ownerActor)).toEqual({ ok: true, value: actorFeed })
+    for (const forged of [
+      { ...ownerActor, role: 'identity_board' },
+      { ...ownerActor, ownerFinalizationActorCohortIdentity: '' },
+      { ...ownerActor, qualificationPassed: false },
+      {
+        ...ownerActor,
+        role: 'unrelated_actor_reference',
+        qualificationPassed: false,
+        ownerFinalizationActorCohortIdentity: '',
+      },
+    ]) {
+      expect(await read(forged)).toMatchObject({ ok: false, error: { code: 'internal' } })
+    }
+  })
+
   it('fails reference-candidate reads closed on invalid fields and forged request bindings', async () => {
     const invalidResponses: Array<{ expected: string; value: Record<string, unknown> }> = [
       {
@@ -1991,6 +2089,16 @@ describe('qingmu Yimeng read adapter', () => {
       {
         expected: 'referenceCandidates.candidates[0].formalConsistencyPassed must be a boolean',
         value: { ...REFERENCE_CANDIDATES_FIXTURE, candidates: [{ ...REFERENCE_CANDIDATE, formalConsistencyPassed: null }] },
+      },
+      {
+        expected: 'referenceCandidates.candidates[0] qualification lineage mismatch',
+        value: {
+          ...REFERENCE_CANDIDATES_FIXTURE,
+          candidates: [{
+            ...REFERENCE_CANDIDATE,
+            ownerFinalizationReceiptIdentity: '1'.repeat(64),
+          }],
+        },
       },
     ]
 
@@ -2534,6 +2642,106 @@ describe('qingmu Yimeng read adapter', () => {
     if (!result.ok) throw new Error(result.error.message)
     const actual = (result.value as YimengWorkflowProjection).director.shotRelations.shots[0]?.elements[0]
     expect(actual?.currentReference).toEqual(scene.currentReference)
+  })
+
+  it('accepts exact owner-final current references for scenes and canonical actor cohorts', async () => {
+    const upstream = structuredClone(workflowFixture())
+    const director = upstream.director as Record<string, unknown>
+    const relations = director.shotRelations as Record<string, unknown>
+    const shot = (relations.shots as Array<Record<string, unknown>>)[0]
+    if (shot === undefined) throw new Error('fixture Shot is missing')
+    const elements = shot.elements as Array<Record<string, unknown>>
+    const scene = elements[0]
+    const actor = elements[1]
+    if (scene === undefined || actor === undefined) throw new Error('fixture elements are missing')
+    const ownerProof = {
+      projectId: 'project-1',
+      sourceEpisodeId: 'episode-1',
+      sourceRevisionId: 'source-owner-final-1',
+      qualificationKind: 'owner_human_finalization',
+      finalizationReceiptIdentity: '1'.repeat(64),
+      humanReviewIdentity: '2'.repeat(64),
+      inheritedPrescreenReviewIdentity: '3'.repeat(64),
+    }
+    scene.currentReferenceAvailability = 'available'
+    scene.currentReference = {
+      assetId: 'asset-scene-owner-final-1',
+      sha256: '4'.repeat(64),
+      lineage: {
+        ...ownerProof,
+        ownerType: 'scene',
+        ownerId: 'scene-1',
+        role: 'scene_reference',
+      },
+    }
+    actor.currentReferenceAvailability = 'available'
+    actor.currentReference = {
+      assetId: 'asset-actor-owner-final-1',
+      sha256: '5'.repeat(64),
+      lineage: {
+        ...ownerProof,
+        ownerType: 'actor',
+        ownerId: 'actor-1',
+        role: 'turnaround_front',
+        actorCohortIdentity: '6'.repeat(64),
+      },
+    }
+    const heroFrameStoryboards = director.heroFrameStoryboards as Record<string, unknown>
+    heroFrameStoryboards.shotRelationsSha256 = createHash('sha256')
+      .update(canonicalJson(relations), 'utf8')
+      .digest('hex')
+    const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(upstream), 'test-token'))
+
+    const result = await handler('workflow', { projectId: 'project-1', episodeId: 'episode-1' }, signal())
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error(result.error.message)
+    const actual = (result.value as YimengWorkflowProjection).director.shotRelations.shots[0]?.elements
+    expect(actual?.[0]?.currentReference).toEqual(scene.currentReference)
+    expect(actual?.[1]?.currentReference).toEqual(actor.currentReference)
+  })
+
+  it('rejects incomplete or cross-kind owner-final current-reference proofs', async () => {
+    const mutations: Array<(lineage: Record<string, unknown>) => void> = [
+      (lineage) => { lineage.finalizationReceiptIdentity = '' },
+      (lineage) => { delete lineage.humanReviewIdentity },
+      (lineage) => { lineage.inheritedPrescreenReviewIdentity = 'bad-sha' },
+      (lineage) => { lineage.actorCohortIdentity = '7'.repeat(64) },
+      (lineage) => { lineage.sourceEpisodeId = 'episode-other' },
+    ]
+    for (const mutate of mutations) {
+      const upstream = structuredClone(workflowFixture())
+      const director = upstream.director as Record<string, unknown>
+      const relations = director.shotRelations as Record<string, unknown>
+      const shot = (relations.shots as Array<Record<string, unknown>>)[0]
+      if (shot === undefined) throw new Error('fixture Shot is missing')
+      const scene = (shot.elements as Array<Record<string, unknown>>)[0]
+      if (scene === undefined) throw new Error('fixture Scene element is missing')
+      const lineage: Record<string, unknown> = {
+        projectId: 'project-1',
+        sourceEpisodeId: 'episode-1',
+        ownerType: 'scene',
+        ownerId: 'scene-1',
+        role: 'scene_reference',
+        sourceRevisionId: 'source-owner-final-1',
+        qualificationKind: 'owner_human_finalization',
+        finalizationReceiptIdentity: '1'.repeat(64),
+        humanReviewIdentity: '2'.repeat(64),
+        inheritedPrescreenReviewIdentity: '3'.repeat(64),
+      }
+      mutate(lineage)
+      scene.currentReferenceAvailability = 'available'
+      scene.currentReference = { assetId: 'asset-scene-owner-final-1', sha256: '4'.repeat(64), lineage }
+      const heroFrameStoryboards = director.heroFrameStoryboards as Record<string, unknown>
+      heroFrameStoryboards.shotRelationsSha256 = createHash('sha256')
+        .update(canonicalJson(relations), 'utf8')
+        .digest('hex')
+      const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(upstream), 'test-token'))
+
+      expect(await handler('workflow', {
+        projectId: 'project-1', episodeId: 'episode-1',
+      }, signal())).toMatchObject({ ok: false, error: { code: 'internal' } })
+    }
   })
 
   it('enforces the canonical current-reference role for each E5-3 element kind', async () => {

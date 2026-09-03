@@ -1112,6 +1112,57 @@ describe('ShotRelationsView', () => {
     expect(onSelectShotId).toHaveBeenCalledOnce()
     expect(onSelectShotId).toHaveBeenCalledWith('shot-b')
   })
+
+  it('shows the exact owner-final receipt as the current-reference proof', () => {
+    const finalizationReceiptIdentity = '8'.repeat(64)
+    const ownerReference = {
+      assetId: 'asset-character-owner-final-1',
+      sha256: '7'.repeat(64),
+      lineage: {
+        projectId: 'project-1',
+        sourceEpisodeId: 'episode-1',
+        ownerType: 'actor' as const,
+        ownerId: 'character-1',
+        role: 'turnaround_front',
+        sourceRevisionId: 'revision-character-owner-final-1',
+        qualificationKind: 'owner_human_finalization' as const,
+        finalizationReceiptIdentity,
+        humanReviewIdentity: '9'.repeat(64),
+        inheritedPrescreenReviewIdentity: 'a'.repeat(64),
+        actorCohortIdentity: 'b'.repeat(64),
+      },
+    }
+    const relations: YimengShotRelationsProjection = {
+      ...structuredClone(SHOT_RELATIONS),
+      shots: SHOT_RELATIONS.shots.map((shot, shotIndex) => ({
+        ...structuredClone(shot),
+        elements: shot.elements.map((element, elementIndex) => (
+          shotIndex === 0 && elementIndex === 0
+            ? {
+              ...structuredClone(element),
+              currentReferenceAvailability: 'available' as const,
+              currentReference: ownerReference,
+            }
+            : structuredClone(element)
+        )),
+      })),
+    }
+
+    render(
+      <ShotRelationsView
+        relations={relations}
+        selectedShotId="frame-1"
+        onSelectShotId={vi.fn()}
+        t={t}
+      />,
+    )
+
+    const selected = document.querySelector('[data-shot-id="frame-1"]')
+    expect(selected).toBeTruthy()
+    if (!(selected instanceof HTMLElement)) throw new Error('Shot detail is missing')
+    expect(within(selected).getByText('project-1 · episode-1 · actor:character-1')).toBeTruthy()
+    expect(within(selected).getByText(finalizationReceiptIdentity)).toBeTruthy()
+  })
 })
 
 describe('QingmuCockpit journey', () => {

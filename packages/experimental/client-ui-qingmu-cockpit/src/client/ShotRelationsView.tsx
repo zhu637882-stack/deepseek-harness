@@ -1,4 +1,5 @@
 import type {
+  YimengShotCurrentReferenceLineage,
   YimengShotRelationElementKind,
   YimengShotRelationsProjection,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
@@ -17,6 +18,20 @@ const ELEMENT_LABELS = {
   scene: 'shotRelationSceneElement',
   prop: 'shotRelationProp',
 } as const satisfies Record<YimengShotRelationElementKind, QingmuCockpitKey>
+
+function referenceSourceEpisode(lineage: YimengShotCurrentReferenceLineage): string | null {
+  return 'sourceEpisodeId' in lineage ? lineage.sourceEpisodeId : null
+}
+
+function referenceGenerationJob(lineage: YimengShotCurrentReferenceLineage): string | null {
+  return 'generationJobId' in lineage ? lineage.generationJobId : null
+}
+
+function referenceQualificationProof(lineage: YimengShotCurrentReferenceLineage): string {
+  if ('formalConsistencyCheckId' in lineage) return lineage.formalConsistencyCheckId
+  if (lineage.qualificationKind === 'local_file_integrity') return lineage.qualificationCheckId
+  return lineage.finalizationReceiptIdentity
+}
 
 /** One transient selector over Yimeng's rebuildable relation projection. */
 export function ShotRelationsView({ relations, selectedShotId, onSelectShotId, t }: ShotRelationsViewProps) {
@@ -120,11 +135,11 @@ export function ShotRelationsView({ relations, selectedShotId, onSelectShotId, t
                   {element.currentReference === null ? null : <>
                     <small>{t('shotRelationReferenceAssetId')}: {element.currentReference.assetId}</small>
                     <small>{t('shotRelationReferenceSha')}: {element.currentReference.sha256}</small>
-                    <small>{t('shotRelationReferenceSubject')}: <code>{element.currentReference.lineage.projectId} · {'qualificationKind' in element.currentReference.lineage ? t('empty') : element.currentReference.lineage.sourceEpisodeId} · {element.currentReference.lineage.ownerType}:{element.currentReference.lineage.ownerId}</code></small>
+                    <small>{t('shotRelationReferenceSubject')}: <code>{element.currentReference.lineage.projectId} · {referenceSourceEpisode(element.currentReference.lineage) ?? t('empty')} · {element.currentReference.lineage.ownerType}:{element.currentReference.lineage.ownerId}</code></small>
                     <small>{t('shotRelationReferenceRole')}: {element.currentReference.lineage.role}</small>
-                    <small>{t('shotRelationReferenceGenerationJob')}: <code>{'qualificationKind' in element.currentReference.lineage ? t('empty') : element.currentReference.lineage.generationJobId}</code></small>
+                    <small>{t('shotRelationReferenceGenerationJob')}: <code>{referenceGenerationJob(element.currentReference.lineage) ?? t('empty')}</code></small>
                     <small>{t('shotRelationReferenceSourceRevision')}: <code>{element.currentReference.lineage.sourceRevisionId}</code></small>
-                    <small>{t('shotRelationReferenceConsistencyCheck')}: <code>{'qualificationKind' in element.currentReference.lineage ? element.currentReference.lineage.qualificationCheckId : element.currentReference.lineage.formalConsistencyCheckId}</code></small>
+                    <small>{t('shotRelationReferenceConsistencyCheck')}: <code>{referenceQualificationProof(element.currentReference.lineage)}</code></small>
                   </>}
                 </li>
               ))}</ul>

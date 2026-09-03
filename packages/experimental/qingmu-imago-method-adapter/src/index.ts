@@ -1197,6 +1197,7 @@ function parseShotCurrentReference(
   value: unknown,
   field: string,
   projectId: string,
+  episodeId: string,
   element: ImagoShotRelationElement,
 ): ImagoShotCurrentReference {
   const reference = parseExactInputObject(value, ['assetId', 'sha256', 'lineage'], field)
@@ -1224,13 +1225,30 @@ function parseShotCurrentReference(
     'uploadCommandReceiptId',
     'rightsRecordSha256',
   ] as const
-  const local = Object.hasOwn(lineageValue, 'qualificationKind')
-  const lineage = parseExactInputObject(reference.lineage, local ? localKeys : providerKeys, lineageField)
+  const ownerKeys = [
+    'projectId',
+    'sourceEpisodeId',
+    'ownerType',
+    'ownerId',
+    'role',
+    'sourceRevisionId',
+    'qualificationKind',
+    'finalizationReceiptIdentity',
+    'humanReviewIdentity',
+    'inheritedPrescreenReviewIdentity',
+  ] as const
+  const ownerActorKeys = [...ownerKeys, 'actorCohortIdentity'] as const
+  const qualified = Object.hasOwn(lineageValue, 'qualificationKind')
+  const ownerFinal = lineageValue.qualificationKind === 'owner_human_finalization'
+  const expectedKeys = ownerFinal
+    ? element.elementKind === 'actor' ? ownerActorKeys : ownerKeys
+    : qualified ? localKeys : providerKeys
+  const lineage = parseExactInputObject(reference.lineage, expectedKeys, lineageField)
   if (lineage.ownerType !== 'actor' && lineage.ownerType !== 'scene' && lineage.ownerType !== 'prop') {
     throw new InputError(`${lineageField}.ownerType must be actor, scene, or prop`)
   }
   const ownerType: ImagoElementKind = lineage.ownerType
-  if (local && lineage.qualificationKind !== 'local_file_integrity') {
+  if (qualified && !ownerFinal && lineage.qualificationKind !== 'local_file_integrity') {
     throw new InputError(`${lineageField}.qualificationKind must be local_file_integrity`)
   }
   const common = {
@@ -1240,29 +1258,59 @@ function parseShotCurrentReference(
     role: parseIdentifier(lineage.role, `${lineageField}.role`),
     sourceRevisionId: parseIdentifier(lineage.sourceRevisionId, `${lineageField}.sourceRevisionId`),
   }
-  const normalizedLineage: ImagoShotCurrentReference['lineage'] = local
+  const normalizedLineage: ImagoShotCurrentReference['lineage'] = ownerFinal
     ? {
       ...common,
-      qualificationKind: 'local_file_integrity',
-      qualificationCheckId: parseIdentifier(lineage.qualificationCheckId, `${lineageField}.qualificationCheckId`),
-      qualificationIdentity: parseInputSha256(lineage.qualificationIdentity, `${lineageField}.qualificationIdentity`),
-      uploadCommandReceiptId: parseIdentifier(lineage.uploadCommandReceiptId, `${lineageField}.uploadCommandReceiptId`),
-      rightsRecordSha256: parseInputSha256(lineage.rightsRecordSha256, `${lineageField}.rightsRecordSha256`),
-    }
-    : {
-      ...common,
       sourceEpisodeId: parseIdentifier(lineage.sourceEpisodeId, `${lineageField}.sourceEpisodeId`),
-      generationJobId: parseIdentifier(lineage.generationJobId, `${lineageField}.generationJobId`),
-      formalConsistencyCheckId: parseIdentifier(
-        lineage.formalConsistencyCheckId,
-        `${lineageField}.formalConsistencyCheckId`,
+      qualificationKind: 'owner_human_finalization',
+      finalizationReceiptIdentity: parseInputSha256(
+        lineage.finalizationReceiptIdentity,
+        `${lineageField}.finalizationReceiptIdentity`,
       ),
+      humanReviewIdentity: parseInputSha256(
+        lineage.humanReviewIdentity,
+        `${lineageField}.humanReviewIdentity`,
+      ),
+      inheritedPrescreenReviewIdentity: parseInputSha256(
+        lineage.inheritedPrescreenReviewIdentity,
+        `${lineageField}.inheritedPrescreenReviewIdentity`,
+      ),
+      ...(element.elementKind === 'actor'
+        ? { actorCohortIdentity: parseInputSha256(
+          lineage.actorCohortIdentity,
+          `${lineageField}.actorCohortIdentity`,
+        ) }
+        : {}),
     }
+    : qualified
+      ? {
+        ...common,
+        qualificationKind: 'local_file_integrity',
+        qualificationCheckId: parseIdentifier(lineage.qualificationCheckId, `${lineageField}.qualificationCheckId`),
+        qualificationIdentity: parseInputSha256(lineage.qualificationIdentity, `${lineageField}.qualificationIdentity`),
+        uploadCommandReceiptId: parseIdentifier(lineage.uploadCommandReceiptId, `${lineageField}.uploadCommandReceiptId`),
+        rightsRecordSha256: parseInputSha256(lineage.rightsRecordSha256, `${lineageField}.rightsRecordSha256`),
+      }
+      : {
+        ...common,
+        sourceEpisodeId: parseIdentifier(lineage.sourceEpisodeId, `${lineageField}.sourceEpisodeId`),
+        generationJobId: parseIdentifier(lineage.generationJobId, `${lineageField}.generationJobId`),
+        formalConsistencyCheckId: parseIdentifier(
+          lineage.formalConsistencyCheckId,
+          `${lineageField}.formalConsistencyCheckId`,
+        ),
+      }
   if (
     normalizedLineage.projectId !== projectId
     || normalizedLineage.ownerType !== element.elementKind
     || normalizedLineage.ownerId !== element.elementId
     || !SHOT_CURRENT_REFERENCE_ROLES[element.elementKind].has(normalizedLineage.role)
+    || ('qualificationKind' in normalizedLineage
+      && normalizedLineage.qualificationKind === 'owner_human_finalization'
+      && (
+        normalizedLineage.sourceEpisodeId !== episodeId
+        || (element.elementKind === 'actor' && normalizedLineage.role !== 'turnaround_front')
+      ))
   ) {
     throw new InputError(`${lineageField} subject mismatch`)
   }
@@ -1365,6 +1413,7 @@ function parseShotRelationRequest(payload: unknown): ImagoShotRelationMethodRequ
         rawElement.currentReference,
         `elements[${String(index)}].currentReference`,
         relations.projectId,
+        relations.episodeId,
         element,
       ),
     }
