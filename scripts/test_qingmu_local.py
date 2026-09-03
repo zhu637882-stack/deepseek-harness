@@ -1,6 +1,7 @@
 """Focused launcher ownership checks; no existing service or credentials used."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import socket
 import sqlite3
@@ -11,7 +12,7 @@ import time
 import unittest
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location("qingmu_local", Path(__file__).with_name("qingmu-local.py"))
 local = importlib.util.module_from_spec(spec)
@@ -887,7 +888,7 @@ class OwnershipTests(unittest.TestCase):
             worker_python.parent.mkdir(parents=True)
             worker_python.write_text("not executed")
             supervisor = local.Supervisor(root, {
-                "instanceId": "unit-worker", "root": str(root), "yimengRoot": str(writer),
+                "instanceId": "unit-worker", "root": str(root), "jwtSecret": "instance-signing-secret", "yimengRoot": str(writer),
             })
             child = subprocess.Popen(["/bin/sleep", "30"])
             try:
@@ -920,7 +921,7 @@ class OwnershipTests(unittest.TestCase):
             credential_env = parent / "provider.env"
             for part in ("logs", "home", "work", "dsh", "private", "storage", "audit", "build-manifest"):
                 (root / part).mkdir(parents=True, exist_ok=True)
-            credential_env.write_text("DASHSCOPE_API_KEY=not-read-by-this-test\n")
+            credential_env.write_text("DASHSCOPE_API_KEY=not-read-by-this-test\nJWT_SECRET=credential-file-secret\n")
             credential_env.chmod(0o600)
             worker_python = writer / ".venv/bin/python"
             worker_python.parent.mkdir(parents=True)
@@ -950,6 +951,7 @@ class OwnershipTests(unittest.TestCase):
             }
             supervisor = local.Supervisor(root, {
                 "instanceId": "unit-worker",
+                "jwtSecret": "instance-signing-secret",
                 "root": str(root),
                 "yimengRoot": str(writer),
                 "textFoundationProductionExecution": text_production,
@@ -957,7 +959,8 @@ class OwnershipTests(unittest.TestCase):
             })
             child = subprocess.Popen(["/bin/sleep", "30"])
             try:
-                with patch.object(local, "YIMENG_PROVIDER_ENV_FILE", credential_env), \
+                with patch.dict("os.environ", {"JWT_SECRET": "ambient-signing-secret"}), \
+                     patch.object(local, "YIMENG_PROVIDER_ENV_FILE", credential_env), \
                      patch.object(supervisor, "launch", return_value=child) as launch:
                     supervisor.start_worker()
                 argv, env, label = launch.call_args.args
@@ -973,6 +976,7 @@ class OwnershipTests(unittest.TestCase):
                 self.assertEqual(argv[argv.index("--allowed-episode-id") + 1], "episode-one")
                 self.assertIn("--allow-existing-provider-poll", argv)
                 self.assertNotIn("--allow-new-provider-dispatch", argv)
+                self.assertEqual(env["JWT_SECRET"], "instance-signing-secret")
                 self.assertEqual(env["APP_ENV"], "production")
                 self.assertEqual(env["WORKER_CREATIVE_FRESHNESS_ENFORCE"], "false")
                 self.assertEqual(env["ALLOW_PAID"], "true")
@@ -1001,6 +1005,124 @@ class OwnershipTests(unittest.TestCase):
                 self.assertTrue(status["ready"])
             finally:
                 local.stop_child(child)
+
+    @unittest.skipUnless(os.environ.get("QINGMU_WRITER_TEST_ROOT"), "requires Writer source and its Python environment")
+    def test_project_worker_dispatch_inlines_only_instance_signed_local_images(self):
+        writer = Path(os.environ["QINGMU_WRITER_TEST_ROOT"]).resolve()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            credential_env = root / "provider.env"
+            credential_env.write_text("JWT_SECRET=credential-file-secret\nAPP_PUBLIC_BASE_URL=https://relay.example.test\n")
+            credential_env.chmod(0o600)
+            production = {
+                "productionOnly": True, "provider": "dashscope", "projectId": "project-one",
+                "episodeId": "episode-one", "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "allowedStages": list(local.TEXT_FOUNDATION_STAGES), "credentialEnvFile": str(credential_env),
+                "maxTasksPerTick": 1, "maxAttempts": 1, "allowExistingProviderPoll": True,
+                "textFoundationParentTaskId": None, "assetReferenceParentTaskId": None,
+            }
+            config = {
+                "instanceId": "media-signature-test", "root": str(root), "yimengRoot": str(writer),
+                "jwtSecret": "instance-signing-secret", "textFoundationProductionExecution": production,
+                "projectProductionExecution": {
+                    "active": True, "projectId": "project-one", "episodeId": "episode-one",
+                    "maxTasksPerTick": 1, "maxAttempts": 1, "maxConcurrentDispatches": 1,
+                    "allowExistingProviderPoll": True,
+                },
+            }
+            supervisor = local.Supervisor(root, config)
+            with patch.dict("os.environ", {"JWT_SECRET": "ambient-signing-secret"}), \
+                 patch.object(local, "YIMENG_PROVIDER_ENV_FILE", credential_env), \
+                 patch.object(supervisor, "launch_owned", return_value=Mock(poll=lambda: None)) as launch:
+                supervisor.start_worker()
+            _role, argv, env, _label = launch.call_args.args
+            # Probe the captured production launch environment in a fresh interpreter.
+            # Only generated images and in-memory metadata exist; sockets are forbidden.
+            probe = r'''
+import copy, hashlib, json, socket
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+def deny_network(*args, **kwargs):
+    raise AssertionError("network forbidden in media-signature regression")
+socket.socket.connect = deny_network
+socket.create_connection = deny_network
+from PIL import Image
+from jason.config import get_settings
+from jason.apps.studio.provider_media_access import provider_media_url
+from jason.apps.studio.provider_worker_service import ProviderWorkerService
+from jason.providers.dashscope_payloads import DashScopePayloadBuilder
+
+settings = get_settings()
+storage = Path(settings.storage_root)
+(storage / "assets").mkdir(parents=True)
+assets, media, references = [], {}, []
+for index, size in enumerate([(256, 384), (384, 256)]):
+    path = storage / "assets" / f"{index}.png"
+    Image.new("RGBA", size, (20 + index, 40, 60, 254)).save(path)
+    asset_id, media_id = f"asset-{index}", f"media-{index}"
+    local_path = f"storage/assets/{index}.png"
+    assets.append({"id": asset_id, "project_id": "project-one", "episode_id": "episode-one",
+        "asset_type": "image", "mime_type": "image/png", "local_path": local_path,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
+    media[asset_id] = [{"id": media_id, "asset_id": asset_id, "media_kind": "image_generation",
+        "local_path": local_path}]
+    references.append(provider_media_url("https://relay.example.test", media_id,
+        "instance-signing-secret", 900))
+store = SimpleNamespace(list_assets=lambda project_id: [a for a in assets if a["project_id"] == project_id],
+    list_provider_media=lambda *, asset_id: media[asset_id])
+worker = ProviderWorkerService.__new__(ProviderWorkerService)
+worker.registry = SimpleNamespace(settings=settings)
+worker.video_service = SimpleNamespace(store=store, storage_root=storage)
+payload = {"project_id": "project-one", "episode_id": "episode-one", "snapshot":
+    DashScopePayloadBuilder(settings).build(capability="image.generate", model="wan2.7-image-pro",
+        payload={"prompt": "synthetic driving portrait", "size": "1152*2048", "n": 1,
+            "reference_urls": references})}
+original = copy.deepcopy(payload)
+refreshed = worker._refresh_internal_media_urls_for_dispatch(payload, image_reference_variant="provider-image-ref-v1")
+envelope = worker._final_dashscope_image_transport_envelope(
+    {"provider": "dashscope", "capability": "image.generate"}, refreshed)
+assert [i["scheme"] for i in envelope["images"]] == ["data", "data"], "signed references remained HTTPS"
+assert settings.jwt_secret == "instance-signing-secret", "Worker did not use the instance secret"
+assert [(i["width"], i["height"]) for i in envelope["images"]] == [(256, 384), (384, 256)]
+assert [i["mimeType"] for i in envelope["images"]] == ["image/jpeg", "image/jpeg"]
+assert payload == original, "durable input changed during transport compilation"
+for invalid in ["ambient-signing-secret", "credential-file-secret"]:
+    forged = copy.deepcopy(payload)
+    for i in range(2):
+        forged["snapshot"]["body"]["input"]["messages"][0]["content"][i]["image"] = provider_media_url(
+            "https://relay.example.test", f"media-{i}", invalid, 900)
+    # A rejected signature must not even enter local asset resolution.
+    with patch.object(
+            worker, "_local_reference_image_data_url", side_effect=AssertionError("untrusted local read")):
+        assert worker._refresh_internal_media_urls_for_dispatch(forged) == forged
+for field, value, expected in [("project_id", "other-project", "local_reference_media_scope_not_found"),
+                               ("episode_id", "other-episode", "local_reference_media_scope_mismatch")]:
+    wrong_scope = {**payload, field: value}
+    try:
+        worker._refresh_internal_media_urls_for_dispatch(wrong_scope)
+    except ValueError as error:
+        assert str(error) == expected
+    else:
+        raise AssertionError("out-of-scope asset accepted")
+assets[0]["sha256"] = "0" * 64
+try:
+    worker._refresh_internal_media_urls_for_dispatch(payload)
+except ValueError as error:
+    assert str(error) == "local_reference_image_sha_drift"
+else:
+    raise AssertionError("asset SHA drift accepted")
+print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
+    "invalidSignaturesUnchanged": True, "scopeAndShaChecksPreserved": True, "networkCalls": 0}))
+'''
+            result = subprocess.run([argv[0], "-B", "-c", probe], env=env, cwd=root,
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout), {
+                "instanceSecretUsed": True, "validImagesInlined": 2,
+                "invalidSignaturesUnchanged": True, "scopeAndShaChecksPreserved": True, "networkCalls": 0,
+            })
 
     def test_project_production_validator_rejects_broader_or_malformed_authority(self):
         valid = {
@@ -1052,7 +1174,7 @@ class OwnershipTests(unittest.TestCase):
             supervisor = local.Supervisor(root, {
                 "instanceId": "unit-worker",
                 "root": str(root),
-                "yimengRoot": str(writer),
+                "jwtSecret": "instance-signing-secret", "yimengRoot": str(writer),
                 "textFoundationProductionExecution": production,
             })
             child = subprocess.Popen(["/bin/sleep", "30"])
@@ -1124,7 +1246,7 @@ class OwnershipTests(unittest.TestCase):
                     })),
                 )
             supervisor = local.Supervisor(root, {
-                "instanceId": "unit-terminal-text", "root": str(root), "yimengRoot": str(writer),
+                "instanceId": "unit-terminal-text", "root": str(root), "jwtSecret": "instance-signing-secret", "yimengRoot": str(writer),
                 "textFoundationProductionExecution": production,
             })
             child = subprocess.Popen(["/bin/sleep", "30"])
@@ -1180,7 +1302,7 @@ class OwnershipTests(unittest.TestCase):
                     })),
                 )
             supervisor = local.Supervisor(root, {
-                "instanceId": "unit-terminal-text", "root": str(root), "yimengRoot": str(writer),
+                "instanceId": "unit-terminal-text", "root": str(root), "jwtSecret": "instance-signing-secret", "yimengRoot": str(writer),
                 "textFoundationProductionExecution": production,
             })
             completed = subprocess.Popen(["/usr/bin/true"])
@@ -1271,7 +1393,7 @@ class OwnershipTests(unittest.TestCase):
                 "assetReferenceParentTaskId": "asset-parent-one",
             }
             supervisor = local.Supervisor(root, {
-                "instanceId": "unit-asset-worker", "root": str(root), "yimengRoot": str(writer),
+                "instanceId": "unit-asset-worker", "root": str(root), "jwtSecret": "instance-signing-secret", "yimengRoot": str(writer),
                 "textFoundationProductionExecution": production,
             })
             child = subprocess.Popen(["/bin/sleep", "30"])

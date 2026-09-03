@@ -1437,7 +1437,11 @@ class Supervisor:
         *,
         project_production_active: bool = False,
     ) -> dict:
-        """Return a credential-scrubbed environment for one bounded Worker."""
+        """Bind Worker media verification to the same instance secret as the API.
+
+        Provider credentials may come from the scoped env file, but its JWT
+        secret and ambient shell secrets cannot replace the instance identity.
+        """
         environment = {
             **safe_env(self.root),
             "PYTHONPATH": str(writer / "backend/src"),
@@ -1450,6 +1454,7 @@ class Supervisor:
             ),
             "DATABASE_URL": f"sqlite:///{self.root / 'storage/jason.db'}",
             "STORAGE_ROOT": str(self.root / "storage"),
+            "JWT_SECRET": self.config["jwtSecret"],
             "APP_ENV": "production" if project_production_active else "development",
             "APP_HOST": "127.0.0.1",
             "QINGMU_CHANGESET_ENABLED": "true",
