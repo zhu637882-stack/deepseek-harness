@@ -185,9 +185,18 @@ def read_config(root: Path) -> dict:
     if node20_executable(Path(frontend_node)) != frontend_node:
         raise ValueError("六阶段前端 Node 绑定已漂移；拒绝启动")
     validate_director_production_config(config.get("directorProductionExecution"))
-    validate_text_foundation_production_config(
+    project_production = validate_project_production_config(
+        config.get("projectProductionExecution")
+    )
+    text_production = validate_text_foundation_production_config(
         config.get("textFoundationProductionExecution")
     )
+    if project_production is not None and (
+        text_production is None
+        or project_production["projectId"] != text_production["projectId"]
+        or project_production["episodeId"] != text_production["episodeId"]
+    ):
+        raise ValueError("项目 production 配置与易梦 Provider 范围不匹配")
     if config.get("directorExecutionFixture") is not None and config.get("directorProductionExecution") is not None:
         raise ValueError("导演 fixture 与 production 配置不能同时启用")
     return config
@@ -680,6 +689,43 @@ def validate_text_foundation_production_config(value: object) -> dict | None:
     return value
 
 
+def validate_project_production_config(value: object) -> dict | None:
+    """Validate explicit authority for the full scoped production Worker."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("项目 production 配置无效")
+    required = {
+        "active",
+        "projectId",
+        "episodeId",
+        "maxTasksPerTick",
+        "maxAttempts",
+        "maxConcurrentDispatches",
+        "allowExistingProviderPoll",
+    }
+    if set(value) != required or (
+        not isinstance(value["active"], bool)
+        or not all(
+            isinstance(value.get(name), str) and value[name].strip()
+            for name in ("projectId", "episodeId")
+        )
+        or any(
+            not isinstance(value[name], int)
+            or isinstance(value[name], bool)
+            or value[name] != 1
+            for name in (
+                "maxTasksPerTick",
+                "maxAttempts",
+                "maxConcurrentDispatches",
+            )
+        )
+        or value["allowExistingProviderPoll"] is not True
+    ):
+        raise ValueError("项目 production 配置无效")
+    return value
+
+
 def mark_lifecycle(root: Path, config: dict, state: str) -> None:
     write_json(root / "private/lifecycle.json", {"instanceId": config["instanceId"], "state": state})
 
@@ -1102,6 +1148,7 @@ class Supervisor:
         self.api: subprocess.Popen | None = None
         self.worker: subprocess.Popen | None = None
         self._text_worker_heartbeat_only = False
+        self._project_production_active = False
         self.assetWorker: subprocess.Popen | None = None
         self.host: subprocess.Popen | None = None
         self.frontend: subprocess.Popen | None = None
@@ -1383,9 +1430,15 @@ class Supervisor:
         )
         self.wait_ready(self.frontend, self.frontend_healthy)
 
-    def _worker_environment(self, writer: Path, production: dict | None) -> dict:
+    def _worker_environment(
+        self,
+        writer: Path,
+        production: dict | None,
+        *,
+        project_production_active: bool = False,
+    ) -> dict:
         """Return a credential-scrubbed environment for one bounded Worker."""
-        return {
+        environment = {
             **safe_env(self.root),
             "PYTHONPATH": str(writer / "backend/src"),
             "JASON_PROJECT_ROOT": str(self.root),
@@ -1397,7 +1450,7 @@ class Supervisor:
             ),
             "DATABASE_URL": f"sqlite:///{self.root / 'storage/jason.db'}",
             "STORAGE_ROOT": str(self.root / "storage"),
-            "APP_ENV": "development",
+            "APP_ENV": "production" if project_production_active else "development",
             "APP_HOST": "127.0.0.1",
             "QINGMU_CHANGESET_ENABLED": "true",
             "PUBLIC_REGISTRATION_ENABLED": "false",
@@ -1411,9 +1464,12 @@ class Supervisor:
             "BUILD_MANIFEST_DIR": str(self.root / "build-manifest"),
             "OPERATOR_AUDIT_DIR": str(self.root / "audit"),
         }
+        if project_production_active:
+            environment["WORKER_CREATIVE_FRESHNESS_ENFORCE"] = "false"
+        return environment
 
     def start_worker(self) -> None:
-        """Start only the exact bound text-foundation parent, or a safe heartbeat.
+        """Start an explicitly scoped production Worker or the safe text mode.
 
         The ordinary API wrapper applies its environment inside its own Python
         process.  A separately spawned Worker therefore needs the same explicit
@@ -1426,6 +1482,49 @@ class Supervisor:
         production = validate_text_foundation_production_config(
             self.config.get("textFoundationProductionExecution")
         )
+        project_production = validate_project_production_config(
+            self.config.get("projectProductionExecution")
+        )
+        self._project_production_active = bool(
+            project_production and project_production["active"]
+        )
+        if self._project_production_active:
+            if production is None or (
+                project_production["projectId"] != production["projectId"]
+                or project_production["episodeId"] != production["episodeId"]
+            ):
+                raise RuntimeError("项目 production 激活范围与 Provider 配置不匹配")
+            _private_regular_file(Path(production["credentialEnvFile"]))
+            self._text_worker_heartbeat_only = False
+            env = self._worker_environment(
+                writer,
+                production,
+                project_production_active=True,
+            )
+            command = [
+                str(writer / ".venv/bin/python"),
+                "-B",
+                "-m",
+                "jason.apps.studio.worker_cli",
+                "--lane",
+                "all",
+                "--max-tasks",
+                str(project_production["maxTasksPerTick"]),
+                "--max-attempts",
+                str(project_production["maxAttempts"]),
+                "--max-concurrent-dispatches",
+                str(project_production["maxConcurrentDispatches"]),
+                "--allow-existing-provider-poll",
+                "--allowed-project-id",
+                project_production["projectId"],
+                "--allowed-episode-id",
+                project_production["episodeId"],
+                "--disable-durable-director-orchestration",
+            ]
+            self.worker = self.launch_owned("worker", command, env, "worker")
+            if self.worker.poll() is not None:
+                raise RuntimeError("本机项目生产 Worker 启动即退出；查看本实例 logs/worker.log")
+            return
         parent_id = str((production or {}).get("textFoundationParentTaskId") or "").strip()
         # The bound id remains in the instance configuration as audit evidence.
         # A completed, exact parent has no remaining text work, so its Worker
@@ -1512,6 +1611,8 @@ class Supervisor:
 
     def _reap_terminal_text_worker(self) -> bool:
         """Replace one normally exited exact-parent text Worker with heartbeat only."""
+        if self._project_production_active:
+            return False
         child = self.worker
         return_code = None if child is None else child.poll()
         if (
@@ -1736,6 +1837,12 @@ class Supervisor:
 
     def start_asset_worker(self) -> None:
         """Start only the exact bound asset-reference parent; never scan a scope."""
+        project_production = validate_project_production_config(
+            self.config.get("projectProductionExecution")
+        )
+        if project_production is not None and project_production["active"]:
+            self.assetWorker = None
+            return
         writer = Path(self.config["yimengRoot"])
         production = validate_text_foundation_production_config(
             self.config.get("textFoundationProductionExecution")
@@ -1779,7 +1886,17 @@ class Supervisor:
         api_alive = self.api is not None and self.api.poll() is None
         worker_alive = self.worker is not None and self.worker.poll() is None
         binding = self._read_asset_activation_binding()
-        asset_worker_required = bool(binding) and not self._asset_parent_locally_terminal(binding)
+        project_production = validate_project_production_config(
+            self.config.get("projectProductionExecution")
+        )
+        full_worker_owns_asset_lane = bool(
+            project_production is not None and project_production["active"]
+        )
+        asset_worker_required = (
+            not full_worker_owns_asset_lane
+            and bool(binding)
+            and not self._asset_parent_locally_terminal(binding)
+        )
         asset_worker_alive = self.assetWorker is not None and self.assetWorker.poll() is None
         host_alive = self.host is not None and self.host.poll() is None
         frontend_alive = self.frontend is not None and self.frontend.poll() is None
@@ -2500,16 +2617,28 @@ def bind_project_runtime(
             "transportEnabled": False,
             "interactiveEnabled": True,
         }
+        project_execution = {
+            "active": False,
+            "projectId": project_id,
+            "episodeId": episode_id,
+            "maxTasksPerTick": 1,
+            "maxAttempts": 1,
+            "maxConcurrentDispatches": 1,
+            "allowExistingProviderPoll": True,
+        }
         validate_text_foundation_production_config(text_execution)
         validate_director_production_config(director_execution)
+        validate_project_production_config(project_execution)
         updated = dict(current)
         updated["textFoundationProductionExecution"] = text_execution
         updated["directorProductionExecution"] = director_execution
+        updated["projectProductionExecution"] = project_execution
         write_json(root / "private/instance.json", updated)
         validated = read_config(root)
         if (
             validated.get("textFoundationProductionExecution") != text_execution
             or validated.get("directorProductionExecution") != director_execution
+            or validated.get("projectProductionExecution") != project_execution
         ):
             raise RuntimeError("本机运行绑定写后核验失败")
         receipt = {
@@ -2530,6 +2659,13 @@ def bind_project_runtime(
                 "parentTaskId": asset_reference_parent_task_id or None,
                 "automaticScopeScan": False,
             },
+            "projectProduction": {
+                "active": False,
+                "maxTasksPerTick": 1,
+                "maxAttempts": 1,
+                "maxConcurrentDispatches": 1,
+                "allowExistingProviderPoll": True,
+            },
             "director": {
                 "provider": credential["provider"],
                 "model": credential["model"],
@@ -2546,6 +2682,87 @@ def bind_project_runtime(
         }
         receipt_path = root / "audit" / (
             "project-runtime-binding-"
+            + utc_timestamp().replace(":", "").replace("-", "")
+            + "-" + secrets.token_hex(4) + ".json"
+        )
+        write_json(receipt_path, receipt)
+    return {**receipt, "receipt": str(receipt_path)}
+
+
+def set_project_production_activation(
+    root: Path,
+    config: dict,
+    *,
+    expected_instance_id: str,
+    project_id: str,
+    episode_id: str,
+    active: bool,
+) -> dict:
+    """Enable or disable one stopped instance's exact production Worker scope."""
+    if (
+        config.get("instanceId") != expected_instance_id
+        or not project_id.strip()
+        or not episode_id.strip()
+    ):
+        raise ValueError("项目 production 激活参数不匹配；未修改配置")
+    with instance_lock(root):
+        require_clean(root, config)
+        current = read_config(root)
+        if current.get("instanceId") != expected_instance_id:
+            raise ValueError("实例身份已漂移；未修改配置")
+        text_execution = validate_text_foundation_production_config(
+            current.get("textFoundationProductionExecution")
+        )
+        if text_execution is None or (
+            text_execution["projectId"] != project_id
+            or text_execution["episodeId"] != episode_id
+        ):
+            raise ValueError("项目 production 激活范围与 Provider 配置不匹配")
+        _inspect_project_episode_binding(
+            root / "storage/jason.db",
+            project_id=project_id,
+            episode_id=episode_id,
+        )
+        _private_regular_file(Path(text_execution["credentialEnvFile"]))
+        target = {
+            "active": active,
+            "projectId": project_id,
+            "episodeId": episode_id,
+            "maxTasksPerTick": 1,
+            "maxAttempts": 1,
+            "maxConcurrentDispatches": 1,
+            "allowExistingProviderPoll": True,
+        }
+        validate_project_production_config(target)
+        previous = validate_project_production_config(
+            current.get("projectProductionExecution")
+        )
+        if previous != target:
+            updated = dict(current)
+            updated["projectProductionExecution"] = target
+            write_json(root / "private/instance.json", updated)
+            validated = read_config(root)
+            if validated.get("projectProductionExecution") != target:
+                raise RuntimeError("项目 production 激活写后核验失败")
+        receipt = {
+            "schema": "qingmu.local-project-production-activation.v1",
+            "instanceId": expected_instance_id,
+            "recordedAt": utc_timestamp(),
+            "projectId": project_id,
+            "episodeId": episode_id,
+            "active": active,
+            "idempotent": previous == target,
+            "workerLane": "all" if active else "heartbeat_or_bound_text",
+            "maxTasksPerTick": 1,
+            "maxAttempts": 1,
+            "maxConcurrentDispatches": 1,
+            "allowExistingProviderPoll": True,
+            "providerHttpRequests": 0,
+            "businessDatabaseWrites": 0,
+        }
+        receipt_path = root / "audit" / (
+            "project-production-"
+            + ("activated-" if active else "deactivated-")
             + utc_timestamp().replace(":", "").replace("-", "")
             + "-" + secrets.token_hex(4) + ".json"
         )
@@ -2901,6 +3118,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["init", "record-build", "start", "status", "stop", "login", "backup", "restore",
                                             "rotate-private-credentials", "bind-project-runtime",
+                                            "activate-project-production", "deactivate-project-production",
                                             "recover-crash", "director-submit-once", "_supervise"])
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--yimeng-root", type=Path)
@@ -2962,6 +3180,22 @@ def main() -> None:
                     max_paid_cny=args.max_paid_cny,
                     text_foundation_parent_task_id=args.text_foundation_parent_task_id,
                     asset_reference_parent_task_id=args.asset_reference_parent_task_id,
+                )
+            elif args.command in {
+                "activate-project-production",
+                "deactivate-project-production",
+            }:
+                if not args.instance_id or not args.project_id or not args.episode_id:
+                    raise ValueError(
+                        args.command + " 必须明确 instance-id、project-id 与 episode-id"
+                    )
+                result = set_project_production_activation(
+                    root,
+                    config,
+                    expected_instance_id=args.instance_id,
+                    project_id=args.project_id,
+                    episode_id=args.episode_id,
+                    active=args.command == "activate-project-production",
                 )
             elif args.command == "recover-crash":
                 if not args.instance_id:

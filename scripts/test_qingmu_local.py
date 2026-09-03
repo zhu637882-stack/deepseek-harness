@@ -912,6 +912,116 @@ class OwnershipTests(unittest.TestCase):
             finally:
                 local.stop_child(child)
 
+    def test_active_project_worker_uses_exact_all_lane_and_production_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "instance"
+            writer = parent / "writer"
+            credential_env = parent / "provider.env"
+            for part in ("logs", "home", "work", "dsh", "private", "storage", "audit", "build-manifest"):
+                (root / part).mkdir(parents=True, exist_ok=True)
+            credential_env.write_text("DASHSCOPE_API_KEY=not-read-by-this-test\n")
+            credential_env.chmod(0o600)
+            worker_python = writer / ".venv/bin/python"
+            worker_python.parent.mkdir(parents=True)
+            worker_python.write_text("not executed")
+            text_production = {
+                "productionOnly": True,
+                "provider": "dashscope",
+                "projectId": "project-one",
+                "episodeId": "episode-one",
+                "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "allowedStages": list(local.TEXT_FOUNDATION_STAGES),
+                "credentialEnvFile": str(credential_env),
+                "maxTasksPerTick": 1,
+                "maxAttempts": 1,
+                "allowExistingProviderPoll": True,
+                "textFoundationParentTaskId": None,
+                "assetReferenceParentTaskId": None,
+            }
+            project_production = {
+                "active": True,
+                "projectId": "project-one",
+                "episodeId": "episode-one",
+                "maxTasksPerTick": 1,
+                "maxAttempts": 1,
+                "maxConcurrentDispatches": 1,
+                "allowExistingProviderPoll": True,
+            }
+            supervisor = local.Supervisor(root, {
+                "instanceId": "unit-worker",
+                "root": str(root),
+                "yimengRoot": str(writer),
+                "textFoundationProductionExecution": text_production,
+                "projectProductionExecution": project_production,
+            })
+            child = subprocess.Popen(["/bin/sleep", "30"])
+            try:
+                with patch.object(local, "YIMENG_PROVIDER_ENV_FILE", credential_env), \
+                     patch.object(supervisor, "launch", return_value=child) as launch:
+                    supervisor.start_worker()
+                argv, env, label = launch.call_args.args
+                self.assertEqual(label, "worker")
+                self.assertEqual(argv[:6], [
+                    str(worker_python), "-B", "-m", "jason.apps.studio.worker_cli",
+                    "--lane", "all",
+                ])
+                self.assertEqual(argv[argv.index("--max-tasks") + 1], "1")
+                self.assertEqual(argv[argv.index("--max-attempts") + 1], "1")
+                self.assertEqual(argv[argv.index("--max-concurrent-dispatches") + 1], "1")
+                self.assertEqual(argv[argv.index("--allowed-project-id") + 1], "project-one")
+                self.assertEqual(argv[argv.index("--allowed-episode-id") + 1], "episode-one")
+                self.assertIn("--allow-existing-provider-poll", argv)
+                self.assertNotIn("--allow-new-provider-dispatch", argv)
+                self.assertEqual(env["APP_ENV"], "production")
+                self.assertEqual(env["WORKER_CREATIVE_FRESHNESS_ENFORCE"], "false")
+                self.assertEqual(env["ALLOW_PAID"], "true")
+                self.assertTrue(supervisor._project_production_active)
+                supervisor.start_asset_worker()
+                self.assertIsNone(supervisor.assetWorker)
+                local.write_json(
+                    supervisor._asset_activation_binding_path(),
+                    {
+                        "schema": "qingmu.asset-parent-activation.v1",
+                        "instanceId": "unit-worker",
+                        "parentTaskId": "legacy-asset-parent",
+                    },
+                )
+                supervisor.api = child
+                supervisor.host = child
+                supervisor.frontend = child
+                supervisor.ports = {"apiUrl": "http://127.0.0.1:1"}
+                with patch.object(supervisor, "_asset_parent_locally_terminal", return_value=False), \
+                     patch.object(supervisor, "api_identity", return_value={"verified": True}), \
+                     patch.object(supervisor, "host_healthy", return_value=True), \
+                     patch.object(supervisor, "frontend_healthy", return_value=True), \
+                     patch.object(local, "build_manifest_status", return_value={"matches": True}):
+                    status = supervisor.status()
+                self.assertFalse(status["assetWorkerProcessAlive"])
+                self.assertTrue(status["ready"])
+            finally:
+                local.stop_child(child)
+
+    def test_project_production_validator_rejects_broader_or_malformed_authority(self):
+        valid = {
+            "active": False,
+            "projectId": "project-one",
+            "episodeId": "episode-one",
+            "maxTasksPerTick": 1,
+            "maxAttempts": 1,
+            "maxConcurrentDispatches": 1,
+            "allowExistingProviderPoll": True,
+        }
+        self.assertEqual(local.validate_project_production_config(valid), valid)
+        for invalid in (
+            {**valid, "maxTasksPerTick": 2},
+            {**valid, "maxTasksPerTick": True},
+            {**valid, "allowExistingProviderPoll": False},
+            {**valid, "extraScope": "all"},
+        ):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "项目 production"):
+                local.validate_project_production_config(invalid)
+
     def test_bound_text_worker_is_parent_bound_and_never_uses_all_lane(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)
@@ -1502,11 +1612,89 @@ class OwnershipTests(unittest.TestCase):
             self.assertIsNone(saved["textFoundationProductionExecution"]["textFoundationParentTaskId"])
             self.assertIsNone(saved["textFoundationProductionExecution"]["assetReferenceParentTaskId"])
             self.assertEqual(saved["directorProductionExecution"]["episodeId"], "episode-one")
+            self.assertEqual(saved["projectProductionExecution"], {
+                "active": False,
+                "projectId": "project-one",
+                "episodeId": "episode-one",
+                "maxTasksPerTick": 1,
+                "maxAttempts": 1,
+                "maxConcurrentDispatches": 1,
+                "allowExistingProviderPoll": True,
+            })
             self.assertNotIn("apiKey", json.dumps(saved))
             self.assertEqual(receipt["providerHttpRequests"], 0)
             self.assertEqual(receipt["businessDatabaseWrites"], 0)
             self.assertEqual(receipt["scope"]["ownerPresent"], True)
             self.assertTrue(Path(receipt["receipt"]).is_file())
+
+    def test_project_production_activation_is_stopped_scoped_and_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "instance"
+            credential_env = parent / "provider.env"
+            for part in ("private", "storage", "audit", "logs", "home", "work", "dsh", "build-manifest"):
+                (root / part).mkdir(parents=True, mode=0o700, exist_ok=True)
+            root.chmod(0o700)
+            credential_env.write_text("DASHSCOPE_API_KEY=not-read-by-this-test\n")
+            credential_env.chmod(0o600)
+            text_production = {
+                "productionOnly": True,
+                "provider": "dashscope",
+                "projectId": "project-one",
+                "episodeId": "episode-one",
+                "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "allowedStages": list(local.TEXT_FOUNDATION_STAGES),
+                "credentialEnvFile": str(credential_env),
+                "maxTasksPerTick": 1,
+                "maxAttempts": 1,
+                "allowExistingProviderPoll": True,
+                "textFoundationParentTaskId": None,
+                "assetReferenceParentTaskId": None,
+            }
+            config = {
+                "version": 1,
+                "instanceId": "activation-instance",
+                "root": str(root),
+                "harnessRoot": str(local.HARNESS),
+                "yimengRoot": str(parent / "writer"),
+                "coreRoot": str(parent / "core"),
+                "node": "/private/node",
+                "frontendNode": "/private/node20",
+                "textFoundationProductionExecution": text_production,
+                **{name: local.secrets.token_urlsafe(48) for name in local.PRIVATE_CREDENTIAL_FIELDS},
+            }
+            local.write_json(root / "private/instance.json", config)
+            local.mark_lifecycle(root, config, "clean")
+            with sqlite3.connect(root / "storage/jason.db") as connection:
+                connection.execute("CREATE TABLE projects (id TEXT PRIMARY KEY, owner TEXT)")
+                connection.execute("CREATE TABLE episodes (id TEXT PRIMARY KEY, project_id TEXT)")
+                connection.execute("INSERT INTO projects VALUES (?, ?)", ("project-one", "owner-one"))
+                connection.execute("INSERT INTO episodes VALUES (?, ?)", ("episode-one", "project-one"))
+            with patch.object(local, "YIMENG_PROVIDER_ENV_FILE", credential_env), \
+                 patch.object(local, "node20_executable", return_value="/private/node20"):
+                first = local.set_project_production_activation(
+                    root,
+                    config,
+                    expected_instance_id="activation-instance",
+                    project_id="project-one",
+                    episode_id="episode-one",
+                    active=True,
+                )
+                saved = json.loads((root / "private/instance.json").read_text())
+                second = local.set_project_production_activation(
+                    root,
+                    saved,
+                    expected_instance_id="activation-instance",
+                    project_id="project-one",
+                    episode_id="episode-one",
+                    active=True,
+                )
+            self.assertTrue(first["active"])
+            self.assertFalse(first["idempotent"])
+            self.assertTrue(second["idempotent"])
+            self.assertTrue(saved["projectProductionExecution"]["active"])
+            self.assertEqual(first["providerHttpRequests"], 0)
+            self.assertEqual(first["businessDatabaseWrites"], 0)
 
     def test_frontend_uses_bound_api_host_origin_and_private_session(self):
         with tempfile.TemporaryDirectory() as directory:

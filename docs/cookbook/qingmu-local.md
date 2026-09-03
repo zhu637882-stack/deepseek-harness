@@ -15,7 +15,7 @@ python3 scripts/qingmu-local.py login
 python3 scripts/qingmu-local.py status
 ```
 
-Open the single `entryUrl` printed by `status`. It establishes the normal HttpOnly local session and goes directly to the Qingmu-branded Yimeng project workspace; there is no generic DSh chat or extra Qingmu modal first. `ready: true` requires the API, scope-bound text worker, DSh Host and frontend, plus an asset worker only when the binding names its exact confirmed asset-reference parent. The API activates that parent through its dedicated owner-only Unix socket and activation credential; it never receives the supervisor control key or a Provider credential. The API's exact database/storage identity, the DSh Host listener/page, and the six-stage frontend listener/page remain independently verified. Their status fields remain separate for diagnosis. The six-stage page embeds the scope-bound Director workspace. After a planning save or GET-only recovery, the outer page accepts only the exact iframe origin/source and project/episode scope, rereads canonical planning and Director context, refreshes the workflow projection and locates the saved shot. Rejected or stale notifications stay visible and do not create a false success. This is a persistent integration environment, not complete product acceptance.
+Open the single `entryUrl` printed by `status`. It establishes the normal HttpOnly local session and goes directly to the Qingmu-branded Yimeng project workspace; there is no generic DSh chat or extra Qingmu modal first. `ready: true` requires the API, one scoped Worker, DSh Host and frontend. Without explicit project-production activation, the Worker retains the parent-bound text or heartbeat-only behavior and a separate asset Worker may run only for its exact confirmed parent. Activation replaces both with one full production Worker restricted to the bound project and episode, one task per lane tick, one attempt and one concurrent dispatch. The API's exact database/storage identity, the DSh Host listener/page, and the six-stage frontend listener/page remain independently verified. Their status fields remain separate for diagnosis. The six-stage page embeds the scope-bound Director workspace. After a planning save or GET-only recovery, the outer page accepts only the exact iframe origin/source and project/episode scope, rereads canonical planning and Director context, refreshes the workflow projection and locates the saved shot. Rejected or stale notifications stay visible and do not create a false success. This is a persistent integration environment, not complete product acceptance.
 
 ## Write the first script
 
@@ -33,6 +33,22 @@ If a reply is lost, use “读取创建恢复” or “读取恢复 / 刷新预�
 3. The saved scene, dialogue actors and shots have canonical Yimeng IDs and original source-line bindings. Select a shot, edit its fields and explicitly save a new structural version. Refresh or restart reads those same objects. Reference media and the first legal PromptIR remain separate prerequisites; structural Ready is not content approval.
 
 For an unknown result, choose “读取恢复” before retrying. A rejected intent can be explicitly prepared against the fresh unchanged script after its missing receipt is confirmed. If another session already initialized this scene, “保留输入副本，载入已存在镜头” keeps a browser-only copy and loads the existing objects without overwriting them. Changed script sources cannot be silently rebound. Unsubmitted text survives ordinary re-entry in this browser, not browser-storage deletion.
+
+## Activate one project's full production Worker
+
+Project-runtime binding records an inactive production scope. Activate it only while the instance is cleanly stopped and name the exact instance, project and episode. The command changes private launcher configuration and writes an audit receipt; it does not call a Provider or mutate business data. Starting the instance after activation lets the existing Yimeng workflow create, submit, poll, download and ingest eligible work only inside that scope. Each Provider task still passes ProviderGate and uses the existing task, budget and outbox ledgers. Deactivation restores the parent-bound text or heartbeat-only mode on the next start.
+
+```sh
+python3 scripts/qingmu-local.py stop
+python3 scripts/qingmu-local.py activate-project-production --instance-id EXACT_INSTANCE_ID --project-id EXACT_PROJECT_ID --episode-id EXACT_EPISODE_ID
+python3 scripts/qingmu-local.py start
+python3 scripts/qingmu-local.py login
+python3 scripts/qingmu-local.py status
+python3 scripts/qingmu-local.py stop
+python3 scripts/qingmu-local.py deactivate-project-production --instance-id EXACT_INSTANCE_ID --project-id EXACT_PROJECT_ID --episode-id EXACT_EPISODE_ID
+```
+
+An active Worker allows polling of already submitted tasks but never retries an unknown submission. Historical public-media freshness and submission-unknown findings remain visible for diagnosis; they do not block a newly confirmed, SHA-bound local project task. Disable production before changing the bound scope or source worktrees.
 
 ## Stop, restart and renew login
 
@@ -69,7 +85,7 @@ After rotation, run `stop`, `start` and `status` once more to confirm a full res
 
 ## Data and backup reference
 
-`storage/jason.db` and `storage/` hold Yimeng data/media; `dsh/` is the independent Harness home/profile; `private/` holds secrets/session/configuration; `logs/` holds startup diagnostics. Keep the whole root private. Neither private files nor backups belong in Git. The launcher scrubs inherited credentials, never reads an old production `.env`, and binds only `127.0.0.1`. An unbound instance keeps paid Provider access disabled. An explicit project-runtime binding supplies an owner-only credential file and one exact project/episode scope; starting the instance alone does not submit a Provider job, and each paid workflow action still requires its own preflight and confirmation.
+`storage/jason.db` and `storage/` hold Yimeng data/media; `dsh/` is the independent Harness home/profile; `private/` holds secrets/session/configuration; `logs/` holds startup diagnostics. Keep the whole root private. Neither private files nor backups belong in Git. The launcher scrubs inherited credentials and binds only `127.0.0.1`. An unbound or inactive instance keeps general paid production execution disabled. An explicit project-runtime binding supplies an owner-only credential file and one exact project/episode scope; activation plus start can process that scope, while each paid workflow action still requires its own preflight and recorded confirmation.
 
 ```sh
 python3 scripts/qingmu-local.py stop

@@ -62,6 +62,7 @@ export interface AutomaticPlanningScene {
   readonly actionDescription: string
   readonly dialogues: readonly { readonly character: string; readonly line: string; readonly lineId: string }[]
 }
+/** One canonical or manually imported scene accepted by the planning workspace. */
 export type ScenePlanningScene = PlanningScene | AutomaticPlanningScene
 /** Existing rows projected for planning; no shadow database. */
 export interface ScenePlanningState extends CreationScope {

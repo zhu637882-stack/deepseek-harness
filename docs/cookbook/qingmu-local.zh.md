@@ -15,7 +15,7 @@ python3 scripts/qingmu-local.py login
 python3 scripts/qingmu-local.py status
 ```
 
-打开 `status` 输出的唯一 `entryUrl`。它建立正常的 HttpOnly 本地会话并直接进入青木品牌的易梦项目工作区，不先展示通用 DSh 对话或额外青木弹窗。`ready: true` 要求 API、限定范围的文本 Worker、DSh Host、前端；仅当绑定写入精确且已确认的资产参考父任务时，才额外要求资产 Worker。API 通过独立、仅所有者可访问的 Unix socket 与激活凭据激活该父任务；它不会获得管理进程控制密钥或 Provider 凭据。API 的精确数据库/媒体身份、DSh Host 监听/页面和六阶段前端监听/页面分别通过核验；状态字段保持分开，便于诊断。六阶段页面嵌入限定范围的导演工作区。规划保存或 GET-only 恢复后，外层页面只接受准确 iframe origin/source 和项目/剧集范围，重读 canonical 规划与导演上下文，刷新工作流投影，并定位已保存镜头。被拒绝或陈旧的通知保持可见，且不会制造假成功。这是持久集成环境，不代表完整产品验收。
+打开 `status` 输出的唯一 `entryUrl`。它建立正常的 HttpOnly 本地会话并直接进入青木品牌的易梦项目工作区，不先展示通用 DSh 对话或额外青木弹窗。`ready: true` 要求 API、一个限定范围的 Worker、DSh Host 和前端。未显式激活项目生产时，Worker 保持按父任务限定的文本模式或仅心跳模式，独立资产 Worker 只可处理其精确且已确认的父任务。激活后，两者由一个完整生产 Worker 取代；该 Worker 只处理绑定的项目和剧集，每条 lane 每轮一个任务、一次尝试且只允许一个并发提交。API 的精确数据库/媒体身份、DSh Host 监听/页面和六阶段前端监听/页面分别通过核验；状态字段保持分开，便于诊断。六阶段页面嵌入限定范围的导演工作区。规划保存或 GET-only 恢复后，外层页面只接受准确 iframe origin/source 和项目/剧集范围，重读 canonical 规划与导演上下文，刷新工作流投影，并定位已保存镜头。被拒绝或陈旧的通知保持可见，且不会制造假成功。这是持久集成环境，不代表完整产品验收。
 
 <a id="write-the-first-script"></a>
 
@@ -37,6 +37,22 @@ python3 scripts/qingmu-local.py status
 3. 保存的场景、对白人物和镜头拥有真实易梦 ID 及原始来源行绑定。选择一个镜头，修改字段并显式保存新结构版本。刷新或重启读回同一对象。参考媒体和首个合法 PromptIR 仍是独立前提；结构 Ready 不是内容批准。
 
 结果未知时先选择“读取恢复”，再考虑重试。确认原回执不存在且新读取的剧本来源未变后，可显式按最新版本重新准备被拒意图。如果另一会话已初始化该场景，“保留输入副本，载入已存在镜头”留下仅本浏览器的副本，并载入已有对象，不覆盖它们。变化的剧本来源不能静默重新绑定。未提交文字可在同一浏览器普通重入后恢复，但不能在删除浏览器存储后恢复。
+
+## 激活一个项目的完整生产 Worker
+
+项目运行绑定只记录未激活的生产范围。实例正常停止后，使用精确实例、项目和剧集 ID 激活。该命令只修改私密启动配置并写审计回执，不调用 Provider、不写业务数据。激活后启动实例，既有易梦工作流才能在该范围内创建、提交、轮询、下载和入库任务。每个 Provider 任务仍通过 ProviderGate，并继续使用原任务、预算和 outbox 账本。停用会在下次启动时恢复按父任务限定的文本模式或仅心跳模式。
+
+```sh
+python3 scripts/qingmu-local.py stop
+python3 scripts/qingmu-local.py activate-project-production --instance-id EXACT_INSTANCE_ID --project-id EXACT_PROJECT_ID --episode-id EXACT_EPISODE_ID
+python3 scripts/qingmu-local.py start
+python3 scripts/qingmu-local.py login
+python3 scripts/qingmu-local.py status
+python3 scripts/qingmu-local.py stop
+python3 scripts/qingmu-local.py deactivate-project-production --instance-id EXACT_INSTANCE_ID --project-id EXACT_PROJECT_ID --episode-id EXACT_EPISODE_ID
+```
+
+激活的 Worker 可以继续轮询已经提交的任务，但不会重试结果未知的提交。历史公网媒体新鲜度和提交结果未知仍保留为诊断信息，不冻结新近由用户确认、且绑定本地素材 SHA 的项目任务。修改绑定范围或源码工作区前先停用生产。
 
 ## 停止、重启与更新登录
 
@@ -73,7 +89,7 @@ python3 scripts/qingmu-local.py rotate-private-credentials --instance-id EXACT_I
 
 ## 数据与备份参考
 
-`storage/jason.db` 和 `storage/` 保存易梦数据与媒体；`dsh/` 为独立 Harness home/profile；`private/` 保存密钥、会话与配置；`logs/` 保存启动诊断。整个目录须保持私密，私密文件和备份均不得进入 Git。启动器清除继承凭据，不读取旧生产 `.env`，只绑定 `127.0.0.1`。未绑定实例保持付费 Provider 禁用；显式项目运行绑定只使用仅所有者可读的凭据文件和一个精确项目/剧集范围。仅启动实例不会提交 Provider 作业，每项付费工作流动作仍须完成自己的预检和确认。
+`storage/jason.db` 和 `storage/` 保存易梦数据与媒体；`dsh/` 为独立 Harness home/profile；`private/` 保存密钥、会话与配置；`logs/` 保存启动诊断。整个目录须保持私密，私密文件和备份均不得进入 Git。启动器清除继承凭据，只绑定 `127.0.0.1`。未绑定或未激活的实例保持通用付费生产执行禁用；显式项目运行绑定只使用仅所有者可读的凭据文件和一个精确项目/剧集范围。激活后启动可以处理该范围，但每项付费工作流动作仍须完成自己的预检并留下确认记录。
 
 ```sh
 python3 scripts/qingmu-local.py stop
