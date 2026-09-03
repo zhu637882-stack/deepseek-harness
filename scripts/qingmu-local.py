@@ -1101,6 +1101,7 @@ class Supervisor:
         self.root, self.config = root, config
         self.api: subprocess.Popen | None = None
         self.worker: subprocess.Popen | None = None
+        self._text_worker_heartbeat_only = False
         self.assetWorker: subprocess.Popen | None = None
         self.host: subprocess.Popen | None = None
         self.frontend: subprocess.Popen | None = None
@@ -1426,7 +1427,16 @@ class Supervisor:
             self.config.get("textFoundationProductionExecution")
         )
         parent_id = str((production or {}).get("textFoundationParentTaskId") or "").strip()
-        active_production = production if parent_id else None
+        # The bound id remains in the instance configuration as audit evidence.
+        # A completed, exact parent has no remaining text work, so its Worker
+        # must run without credentials rather than exit normally and tear down
+        # the unrelated API/Host/frontend processes.
+        active_production = (
+            production
+            if parent_id and not self._text_parent_terminal_for_heartbeat(production)
+            else None
+        )
+        self._text_worker_heartbeat_only = active_production is None
         env = self._worker_environment(writer, active_production)
         command = [
             str(writer / ".venv/bin/python"),
@@ -1464,6 +1474,61 @@ class Supervisor:
         )
         if self.worker.poll() is not None:
             raise RuntimeError("本机文本 Worker 启动即退出；查看本实例 logs/worker.log")
+
+    def _text_parent_terminal_for_heartbeat(self, production: dict) -> bool:
+        """Return whether the one bound text parent may safely lose credentials.
+
+        This is an exact-id lookup, never a scope scan.  Any unreadable row,
+        unknown provider outcome, malformed request, or scope drift keeps the
+        normal bounded Worker path so the supervisor fails closed.
+        """
+        parent_id = str(production.get("textFoundationParentTaskId") or "").strip()
+        if not parent_id:
+            return False
+        try:
+            with sqlite3.connect(self.root / "storage/jason.db") as connection:
+                row = connection.execute(
+                    "SELECT capability, local_status, provider_status, request_payload_json "
+                    "FROM generation_tasks WHERE id = ?",
+                    (parent_id,),
+                ).fetchone()
+        except sqlite3.OperationalError:
+            return False
+        if row is None or row[0] != "workflow.text_foundation":
+            return False
+        try:
+            payload = json.loads(row[3])
+        except (TypeError, ValueError):
+            return False
+        return (
+            str(row[1] or "").strip().lower()
+            in {"succeeded", "failed", "blocked", "cancelled", "canceled"}
+            and str(row[2] or "").strip().lower()
+            not in {"unknown", "submission_unknown"}
+            and str(payload.get("project_id") or "") == production["projectId"]
+            and str(payload.get("episode_id") or "") == production["episodeId"]
+            and str(payload.get("target_stage") or "") in production["allowedStages"]
+        )
+
+    def _reap_terminal_text_worker(self) -> bool:
+        """Replace one normally exited exact-parent text Worker with heartbeat only."""
+        child = self.worker
+        return_code = None if child is None else child.poll()
+        if (
+            child is None
+            or return_code is None
+            or return_code != 0
+            or self._text_worker_heartbeat_only
+        ):
+            return False
+        production = validate_text_foundation_production_config(
+            self.config.get("textFoundationProductionExecution")
+        )
+        if production is None or not self._text_parent_terminal_for_heartbeat(production):
+            return False
+        self.stop_owned("worker")
+        self.start_worker()
+        return True
 
     @staticmethod
     def _stable_json_sha256(value: object) -> str:
@@ -1830,6 +1895,7 @@ class Supervisor:
                     self.start_frontend()
                     write_json(self.root / "runtime.json", self.status())
                     while not self.stopping:
+                        self._reap_terminal_text_worker()
                         self._reap_terminal_asset_worker()
                         if any(
                             getattr(self, role) is None or getattr(self, role).poll() is not None

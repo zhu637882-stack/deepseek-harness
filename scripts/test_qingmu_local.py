@@ -980,6 +980,165 @@ class OwnershipTests(unittest.TestCase):
             finally:
                 local.stop_child(child)
 
+    def test_terminal_bound_text_parent_starts_heartbeat_without_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "instance"
+            writer = parent / "writer"
+            credential_env = parent / "provider.env"
+            for part in ("logs", "home", "work", "dsh", "private", "storage", "audit", "build-manifest"):
+                (root / part).mkdir(parents=True, exist_ok=True)
+            worker_python = writer / ".venv/bin/python"
+            worker_python.parent.mkdir(parents=True)
+            worker_python.write_text("not executed")
+            credential_env.write_text("DASHSCOPE_API_KEY=not-read-by-this-test\n")
+            credential_env.chmod(0o600)
+            production = {
+                "productionOnly": True, "provider": "dashscope", "projectId": "project-one",
+                "episodeId": "episode-one", "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "allowedStages": list(local.TEXT_FOUNDATION_STAGES),
+                "credentialEnvFile": str(credential_env), "maxTasksPerTick": 1,
+                "maxAttempts": 1, "allowExistingProviderPoll": True,
+                "textFoundationParentTaskId": "text-parent-one", "assetReferenceParentTaskId": None,
+            }
+            with sqlite3.connect(root / "storage/jason.db") as connection:
+                connection.execute(
+                    "CREATE TABLE generation_tasks (id TEXT, capability TEXT, local_status TEXT, "
+                    "provider_status TEXT, request_payload_json TEXT)"
+                )
+                connection.execute(
+                    "INSERT INTO generation_tasks VALUES (?, ?, ?, ?, ?)",
+                    ("text-parent-one", "workflow.text_foundation", "succeeded", "SUCCEEDED", json.dumps({
+                        "project_id": "project-one", "episode_id": "episode-one",
+                        "target_stage": local.TEXT_FOUNDATION_STAGES[0],
+                    })),
+                )
+            supervisor = local.Supervisor(root, {
+                "instanceId": "unit-terminal-text", "root": str(root), "yimengRoot": str(writer),
+                "textFoundationProductionExecution": production,
+            })
+            child = subprocess.Popen(["/bin/sleep", "30"])
+            try:
+                with patch.object(local, "YIMENG_PROVIDER_ENV_FILE", credential_env), \
+                     patch.object(supervisor, "launch", return_value=child) as launch:
+                    supervisor.start_worker()
+                argv, env, label = launch.call_args.args
+                self.assertEqual(label, "worker")
+                self.assertIn("--heartbeat-only", argv)
+                self.assertNotIn("--allowed-parent-task-id", argv)
+                self.assertEqual(env["ALLOW_PAID"], "false")
+                self.assertEqual(env["JASON_ENV_FILE"], str(root / "private/no-ambient.env"))
+                self.assertTrue(supervisor._text_worker_heartbeat_only)
+                self.assertEqual(
+                    supervisor.config["textFoundationProductionExecution"]["textFoundationParentTaskId"],
+                    "text-parent-one",
+                )
+            finally:
+                local.stop_child(child)
+
+    def test_exited_terminal_text_worker_becomes_heartbeat_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "instance"
+            writer = parent / "writer"
+            credential_env = parent / "provider.env"
+            for part in ("logs", "home", "work", "dsh", "private", "storage", "audit", "build-manifest"):
+                (root / part).mkdir(parents=True, exist_ok=True)
+            worker_python = writer / ".venv/bin/python"
+            worker_python.parent.mkdir(parents=True)
+            worker_python.write_text("not executed")
+            credential_env.write_text("DASHSCOPE_API_KEY=not-read-by-this-test\n")
+            credential_env.chmod(0o600)
+            production = {
+                "productionOnly": True, "provider": "dashscope", "projectId": "project-one",
+                "episodeId": "episode-one", "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "allowedStages": list(local.TEXT_FOUNDATION_STAGES),
+                "credentialEnvFile": str(credential_env), "maxTasksPerTick": 1,
+                "maxAttempts": 1, "allowExistingProviderPoll": True,
+                "textFoundationParentTaskId": "text-parent-one", "assetReferenceParentTaskId": None,
+            }
+            with sqlite3.connect(root / "storage/jason.db") as connection:
+                connection.execute(
+                    "CREATE TABLE generation_tasks (id TEXT, capability TEXT, local_status TEXT, "
+                    "provider_status TEXT, request_payload_json TEXT)"
+                )
+                connection.execute(
+                    "INSERT INTO generation_tasks VALUES (?, ?, ?, ?, ?)",
+                    ("text-parent-one", "workflow.text_foundation", "succeeded", "SUCCEEDED", json.dumps({
+                        "project_id": "project-one", "episode_id": "episode-one",
+                        "target_stage": local.TEXT_FOUNDATION_STAGES[0],
+                    })),
+                )
+            supervisor = local.Supervisor(root, {
+                "instanceId": "unit-terminal-text", "root": str(root), "yimengRoot": str(writer),
+                "textFoundationProductionExecution": production,
+            })
+            completed = subprocess.Popen(["/usr/bin/true"])
+            completed.wait(timeout=5)
+            heartbeat = subprocess.Popen(["/bin/sleep", "30"])
+            supervisor.worker = completed
+            supervisor._text_worker_heartbeat_only = False
+            try:
+                with patch.object(local, "YIMENG_PROVIDER_ENV_FILE", credential_env), \
+                     patch.object(supervisor, "launch", return_value=heartbeat) as launch:
+                    self.assertTrue(supervisor._reap_terminal_text_worker())
+                argv, env, label = launch.call_args.args
+                self.assertEqual(label, "worker")
+                self.assertIn("--heartbeat-only", argv)
+                self.assertEqual(env["ALLOW_PAID"], "false")
+                self.assertIs(supervisor.worker, heartbeat)
+                self.assertTrue(supervisor._text_worker_heartbeat_only)
+            finally:
+                local.stop_child(heartbeat)
+
+    def test_text_worker_terminal_downgrade_rejects_unknown_or_scope_drift(self):
+        for capability, provider_status, payload in (
+            ("workflow.text_foundation", "UNKNOWN", {
+                "project_id": "project-one", "episode_id": "episode-one",
+                "target_stage": local.TEXT_FOUNDATION_STAGES[0],
+            }),
+            ("workflow.text_foundation", "SUCCEEDED", {
+                "project_id": "wrong-project", "episode_id": "episode-one",
+                "target_stage": local.TEXT_FOUNDATION_STAGES[0],
+            }),
+            ("workflow.other", "SUCCEEDED", {
+                "project_id": "project-one", "episode_id": "episode-one",
+                "target_stage": local.TEXT_FOUNDATION_STAGES[0],
+            }),
+        ):
+            with self.subTest(capability=capability, provider_status=provider_status, payload=payload), \
+                 tempfile.TemporaryDirectory() as directory:
+                    parent = Path(directory)
+                    root = parent / "instance"
+                    for part in ("private", "storage"):
+                        (root / part).mkdir(parents=True, exist_ok=True)
+                    production = {
+                        "productionOnly": True, "provider": "dashscope", "projectId": "project-one",
+                        "episodeId": "episode-one", "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                        "allowedStages": list(local.TEXT_FOUNDATION_STAGES),
+                        "credentialEnvFile": str(local.YIMENG_PROVIDER_ENV_FILE), "maxTasksPerTick": 1,
+                        "maxAttempts": 1, "allowExistingProviderPoll": True,
+                        "textFoundationParentTaskId": "text-parent-one", "assetReferenceParentTaskId": None,
+                    }
+                    with sqlite3.connect(root / "storage/jason.db") as connection:
+                        connection.execute(
+                            "CREATE TABLE generation_tasks (id TEXT, capability TEXT, local_status TEXT, "
+                            "provider_status TEXT, request_payload_json TEXT)"
+                        )
+                        connection.execute(
+                            "INSERT INTO generation_tasks VALUES (?, ?, ?, ?, ?)",
+                            ("text-parent-one", capability, "succeeded", provider_status, json.dumps(payload)),
+                        )
+                    supervisor = local.Supervisor(root, {
+                        "instanceId": "unit-text-fail-closed", "root": str(root),
+                        "textFoundationProductionExecution": production,
+                    })
+                    completed = subprocess.Popen(["/usr/bin/true"])
+                    completed.wait(timeout=5)
+                    supervisor.worker = completed
+                    self.assertFalse(supervisor._reap_terminal_text_worker())
+                    self.assertIs(supervisor.worker, completed)
+
     def test_asset_worker_is_exact_parent_bound_and_not_started_without_one(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)
