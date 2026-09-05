@@ -320,6 +320,23 @@ class OwnershipTests(unittest.TestCase):
             self.assertFalse(status["matches"])
             self.assertIn("artifacts", status["mismatches"])
 
+    def test_review_only_manifest_does_not_claim_host_artifacts_or_enable_full_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, config, identities = self.build_manifest_world(Path(directory))
+            with patch.object(local, "source_identity", side_effect=lambda path: identities[path]):
+                local.record_build_manifest(root, config, review_only=True)
+                review = local.build_manifest_status(root, config, review_only=True)
+                full = local.build_manifest_status(root, config)
+            manifest = json.loads((root / "build-manifest/current.json").read_text())
+            self.assertEqual(manifest["runtimeProfile"], "review-only")
+            self.assertEqual(manifest["artifacts"]["host"], {})
+            self.assertTrue(review["matches"])
+            self.assertFalse(full["matches"])
+            self.assertIn("runtimeProfile", full["mismatches"])
+            with patch.object(local, "source_identity", side_effect=lambda path: identities[path]), \
+                 self.assertRaisesRegex(RuntimeError, "record-build"):
+                local.require_build_manifest_matches(root, config)
+
     def test_record_build_rejects_dirty_release_source(self):
         with tempfile.TemporaryDirectory() as directory:
             root, config, identities = self.build_manifest_world(Path(directory))
@@ -1835,7 +1852,7 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
                 "instanceId": "unit", "root": str(root), "yimengRoot": str(writer),
                 "frontendNode": "/private/node20",
             }
-            supervisor = local.Supervisor(root, config)
+            supervisor = local.Supervisor(root, config, review_only=True)
             supervisor.ports = {
                 "apiUrl": "http://127.0.0.1:41001",
                 "hostUrl": "http://127.0.0.1:41002",
@@ -1855,9 +1872,165 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
                 self.assertEqual(env["QINGMU_DSH_HOST_URL"], supervisor.ports["hostUrl"])
                 self.assertEqual(env["QINGMU_LOCAL_PUBLIC_ORIGIN"], supervisor.ports["webUrl"])
                 self.assertEqual(env["QINGMU_LOCAL_SESSION_TOKEN"], "private-session-token")
+                self.assertEqual(env["QINGMU_REVIEW_ONLY"], "1")
+                self.assertEqual(env["QINGMU_DSH_HOST_DISABLED"], "1")
                 self.assertEqual(launch.call_args.kwargs["cwd"], frontend)
             finally:
                 local.stop_child(child)
+
+    def test_review_only_host_omits_dispatch_configuration_and_authority_if_called(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "instance"
+            harness = parent / "harness"
+            for path in (root / "private", root / "logs", root / "work"):
+                path.mkdir(parents=True, exist_ok=True)
+            patch_file = harness / "packages/experimental/qingmu-web/cordis.patch.yml"
+            patch_file.parent.mkdir(parents=True)
+            patch_file.write_text("plugins: []\n")
+            production = {
+                "interactiveEnabled": True,
+                "transportEnabled": True,
+                "projectId": "project-one",
+                "episodeId": "episode-one",
+                "taskId": "task-one",
+                "methodPackageVersion": "method.v1",
+                "methodPackageSha256": "a" * 64,
+                "credentialFile": "/private/credential-file",
+            }
+            supervisor = local.Supervisor(root, {
+                "instanceId": "unit", "root": str(root), "coreRoot": str(parent / "core"),
+                "node": "/private/node", "attestationKey": "attestation",
+                "directorExecutionKey": "dispatch-authority",
+                "editorialHandoffKey": "editorial-authority",
+                "directorProductionExecution": production,
+            }, review_only=True)
+            supervisor.ports = {"apiUrl": "http://127.0.0.1:41001", "hostUrl": "http://127.0.0.1:41002", "hostPort": 41002}
+            child = subprocess.Popen(["/bin/sleep", "30"])
+            try:
+                with patch.object(local, "HARNESS", harness), \
+                     patch.object(supervisor, "launch", return_value=child) as launch, \
+                     patch.object(supervisor, "wait_ready"), \
+                     patch.object(local, "ensure_qingmu_workspace"):
+                    supervisor.start_host()
+                _argv, env, _label = launch.call_args.args
+                overlay = (root / "private/local.patch.yml").read_text()
+                self.assertEqual(env["QINGMU_REVIEW_ONLY"], "1")
+                self.assertNotIn("QINGMU_DIRECTOR_EXECUTION_KEY", env)
+                self.assertNotIn("QINGMU_EDITORIAL_HANDOFF_KEY", env)
+                self.assertNotIn("directorProductionInteractiveEnabled", overlay)
+                self.assertNotIn("directorProductionTransportEnabled", overlay)
+                self.assertNotIn("credentials", overlay)
+            finally:
+                local.stop_child(child)
+
+    def test_review_only_run_starts_no_workers_or_host_and_marks_api_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for path in (root / "private", root / "logs", root / "work"):
+                path.mkdir(parents=True, exist_ok=True)
+            config = {
+                "instanceId": "unit-review", "root": str(root), "controlKey": "control-key",
+                "yimengRoot": str(root / "writer"), "assetActivationKey": "asset-key",
+            }
+            supervisor = local.Supervisor(root, config, review_only=True)
+            api = subprocess.Popen(["/bin/sleep", "30"])
+            frontend = subprocess.Popen(["/bin/sleep", "30"])
+            try:
+                def start_frontend():
+                    supervisor.frontend = frontend
+
+                with patch.object(supervisor, "launch", return_value=api) as launch, \
+                     patch.object(supervisor, "wait_ready"), \
+                     patch.object(supervisor, "start_worker", side_effect=AssertionError("worker must stay stopped")), \
+                     patch.object(supervisor, "start_asset_worker", side_effect=AssertionError("asset worker must stay stopped")), \
+                     patch.object(supervisor, "start_host", side_effect=AssertionError("host must stay stopped")), \
+                     patch.object(supervisor, "start_frontend", side_effect=start_frontend), \
+                     patch.object(supervisor, "status", return_value={"reviewOnly": True}), \
+                     patch.object(local, "require_clean"), \
+                     patch.object(local, "mark_lifecycle"), \
+                     patch.object(local, "mark_build_started"), \
+                     patch.object(local, "available_port", side_effect=[41001, 41002, 41003]):
+                    with ThreadPoolExecutor(max_workers=1) as pool:
+                        running = pool.submit(supervisor.run)
+                        result = None
+                        for _ in range(100):
+                            try:
+                                result = local.control(root, config, "stop")
+                                break
+                            except (FileNotFoundError, ConnectionRefusedError):
+                                time.sleep(0.01)
+                        self.assertEqual(result["stopped"], True)
+                        running.result(timeout=5)
+                _argv, api_env, _label = launch.call_args.args
+                self.assertEqual(api_env["QINGMU_REVIEW_ONLY"], "1")
+                self.assertNotIn("QINGMU_ASSET_ACTIVATION_SOCKET", api_env)
+                self.assertNotIn("QINGMU_ASSET_ACTIVATION_KEY", api_env)
+            finally:
+                local.stop_child(api)
+                local.stop_child(frontend)
+
+    def test_review_only_status_is_ready_without_workers(self):
+        class Child:
+            def __init__(self, pid):
+                self.pid = pid
+
+            def poll(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "private").mkdir()
+            supervisor = local.Supervisor(root, {"instanceId": "unit"}, review_only=True)
+            supervisor.ports = {"apiUrl": "http://127.0.0.1:1"}
+            supervisor.api, supervisor.frontend = Child(1), Child(4)
+            with patch.object(supervisor, "api_identity", return_value={"instanceId": "unit"}), \
+                 patch.object(supervisor, "host_healthy", return_value=True), \
+                 patch.object(supervisor, "frontend_healthy", return_value=True), \
+                 patch.object(local, "build_manifest_status", return_value={"matches": True}):
+                status = supervisor.status()
+            self.assertTrue(status["reviewOnly"])
+            self.assertTrue(status["dispatchWorkersDisabled"])
+            self.assertTrue(status["hostDisabledForReview"])
+            self.assertFalse(status["workerProcessAlive"])
+            self.assertTrue(status["ready"])
+
+    def test_review_only_login_restarts_frontend_without_host(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "private").mkdir()
+            local.write_json(root / "private/login.json", {
+                "username": local.LOCAL_USERNAME, "password": "isolated-password",
+            })
+            supervisor = local.Supervisor(root, {
+                "instanceId": "unit", "controlKey": "control", "root": str(root),
+            }, review_only=True)
+            supervisor.ports = {"apiUrl": "http://127.0.0.1:41001"}
+            with patch.object(supervisor, "api_identity"), \
+                 patch.object(local, "http", return_value={"token": "new-session"}), \
+                 patch.object(supervisor, "stop_owned") as stop_owned, \
+                 patch.object(supervisor, "start_host", side_effect=AssertionError("host must stay stopped")), \
+                 patch.object(supervisor, "start_frontend") as start_frontend, \
+                 patch.object(supervisor, "status", return_value={"reviewOnly": True}):
+                result = supervisor.login()
+            stop_owned.assert_called_once_with("frontend")
+            start_frontend.assert_called_once_with()
+            self.assertTrue(result["reviewOnly"])
+
+    def test_start_review_only_passes_private_supervisor_flag(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "logs").mkdir()
+            (root / "private").mkdir()
+            child = Mock()
+            child.poll.return_value = None
+            with patch.object(local, "control", side_effect=[FileNotFoundError, {"reviewOnly": True}]), \
+                 patch.object(local, "require_clean"), \
+                 patch.object(local, "require_build_manifest_matches"), \
+                 patch.object(local.subprocess, "Popen", return_value=child) as popen:
+                result = local.start(root, {"instanceId": "unit"}, review_only=True)
+            self.assertTrue(result["reviewOnly"])
+            self.assertIn("--review-only", popen.call_args.args[0])
 
     def test_status_keeps_api_worker_host_and_frontend_diagnostics_independent(self):
         class Child:

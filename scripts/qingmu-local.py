@@ -295,7 +295,7 @@ def source_identity(source: Path) -> dict:
     }
 
 
-def collect_build_manifest(root: Path, config: dict) -> dict:
+def collect_build_manifest(root: Path, config: dict, *, review_only: bool = False) -> dict:
     """Bind clean release sources and built artifacts to one local instance."""
     writer = Path(config["yimengRoot"])
     harness = Path(config["harnessRoot"])
@@ -311,7 +311,8 @@ def collect_build_manifest(root: Path, config: dict) -> dict:
     build_id = frontend_build_id.read_text(encoding="utf-8").strip()
     if not build_id or "\n" in build_id:
         raise ValueError("易梦 frontend BUILD_ID 无效")
-    artifact_paths = [harness / relative for relative in BUILD_MANIFEST_ARTIFACTS]
+    artifact_relatives = () if review_only else BUILD_MANIFEST_ARTIFACTS
+    artifact_paths = [harness / relative for relative in artifact_relatives]
     artifacts = {
         "frontendBuildId": {
             "path": str(frontend_build_id),
@@ -320,7 +321,7 @@ def collect_build_manifest(root: Path, config: dict) -> dict:
         },
         "host": {
             relative: {"path": str(path), "sha256": file_sha256(path)}
-            for relative, path in zip(BUILD_MANIFEST_ARTIFACTS, artifact_paths)
+            for relative, path in zip(artifact_relatives, artifact_paths)
         },
     }
     latest_mtime = max(path.stat().st_mtime for path in [frontend_build_id, *artifact_paths])
@@ -337,6 +338,7 @@ def collect_build_manifest(root: Path, config: dict) -> dict:
         },
         "sources": sources,
         "releaseSourcesClean": True,
+        "runtimeProfile": "review-only" if review_only else "full",
         "artifacts": artifacts,
         "builtAt": utc_timestamp(latest_mtime),
         "recordedAt": utc_timestamp(),
@@ -344,14 +346,14 @@ def collect_build_manifest(root: Path, config: dict) -> dict:
     }
 
 
-def build_manifest_status(root: Path, config: dict) -> dict:
+def build_manifest_status(root: Path, config: dict, *, review_only: bool = False) -> dict:
     """Compare the recorded local release identity with source and artifact truth."""
     path = root / "build-manifest/current.json"
     if path.is_symlink() or not path.is_file():
         return {"state": "unknown_missing", "matches": False, "path": str(path), "mismatches": ["manifest"]}
     try:
         manifest = json.loads(path.read_text(encoding="utf-8"))
-        expected = collect_build_manifest(root, config)
+        expected = collect_build_manifest(root, config, review_only=review_only)
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
         return {"state": "invalid", "matches": False, "path": str(path), "mismatches": [str(exc)]}
     mismatches: list[str] = []
@@ -367,6 +369,8 @@ def build_manifest_status(root: Path, config: dict) -> dict:
         mismatches.append("sources")
     if manifest.get("releaseSourcesClean") is not True:
         mismatches.append("releaseSourcesClean")
+    if manifest.get("runtimeProfile") != expected["runtimeProfile"]:
+        mismatches.append("runtimeProfile")
     if manifest.get("artifacts") != expected["artifacts"]:
         mismatches.append("artifacts")
     return {
@@ -384,19 +388,19 @@ def build_manifest_status(root: Path, config: dict) -> dict:
     }
 
 
-def require_build_manifest_matches(root: Path, config: dict) -> dict:
+def require_build_manifest_matches(root: Path, config: dict, *, review_only: bool = False) -> dict:
     """Fail closed unless the current release identity exactly matches disk."""
-    status = build_manifest_status(root, config)
+    status = build_manifest_status(root, config, review_only=review_only)
     if status["matches"] is not True:
         raise RuntimeError("本地发布身份缺失或漂移；实例保持停止，请在完整构建后运行 record-build")
     return status
 
 
-def record_build_manifest(root: Path, config: dict) -> dict:
+def record_build_manifest(root: Path, config: dict, *, review_only: bool = False) -> dict:
     """Atomically record one stopped build and retain the preceding manifest."""
     with instance_lock(root):
         require_clean(root, config)
-        manifest = collect_build_manifest(root, config)
+        manifest = collect_build_manifest(root, config, review_only=review_only)
         directory = root / "build-manifest"
         directory.mkdir(mode=0o700, exist_ok=True)
         current = directory / "current.json"
@@ -417,13 +421,13 @@ def record_build_manifest(root: Path, config: dict) -> dict:
                 stream.flush()
                 os.fsync(stream.fileno())
         write_json(current, manifest)
-        status = require_build_manifest_matches(root, config)
+        status = require_build_manifest_matches(root, config, review_only=review_only)
         return {"recorded": str(current), "previous": str(previous) if previous else None, **status}
 
 
-def mark_build_started(root: Path, config: dict, ports: dict) -> None:
+def mark_build_started(root: Path, config: dict, ports: dict, *, review_only: bool = False) -> None:
     """Persist the exact successful start coordinates without changing build identity."""
-    status = require_build_manifest_matches(root, config)
+    status = require_build_manifest_matches(root, config, review_only=review_only)
     path = Path(status["path"])
     manifest = json.loads(path.read_text(encoding="utf-8"))
     manifest["instance"]["ports"] = ports
@@ -1143,8 +1147,12 @@ def stop_child(child: subprocess.Popen | None) -> None:
 
 
 class Supervisor:
-    def __init__(self, root: Path, config: dict):
+    def __init__(self, root: Path, config: dict, *, review_only: bool = False):
         self.root, self.config = root, config
+        # Review startup deliberately owns only the read/review surface.  It
+        # must not inherit an enabled project, asset, or Director dispatch
+        # lane from the instance configuration.
+        self.review_only = review_only
         self.api: subprocess.Popen | None = None
         self.worker: subprocess.Popen | None = None
         self._text_worker_heartbeat_only = False
@@ -1288,7 +1296,7 @@ class Supervisor:
                 "name: " + json.dumps((HARNESS / "packages/experimental" / name / "lib/index.js").as_uri()))
         for adapter in ("read", "command"):
             overlay += f"\n- id: qingmu-yimeng-{adapter}-adapter\n  config:\n    baseUrl: {json.dumps(self.ports['apiUrl'])}\n"
-            if adapter == "command":
+            if adapter == "command" and not self.review_only:
                 fixture = self.config.get("directorExecutionFixture") or {}
                 if fixture.get("taskId"):
                     if fixture.get("transportMode") == "dsh-one-shot-mock":
@@ -1340,7 +1348,7 @@ class Supervisor:
                     if mock_base_url:
                         overlay += "    directorDshMockBaseUrl: " + json.dumps(mock_base_url) + "\n"
         fixture = self.config.get("directorExecutionFixture") or {}
-        if fixture.get("transportMode") == "dsh-one-shot-mock":
+        if not self.review_only and fixture.get("transportMode") == "dsh-one-shot-mock":
             mock_base_url = require_http_loopback_origin(str(fixture.get("mockBaseUrl") or ""))
             overlay += (
                 "\n- id: llm-deepseek\n  config:\n"
@@ -1351,7 +1359,7 @@ class Supervisor:
                 "    retryPolicy:\n      mode: normal\n      maxRetries: 0\n"
             )
         production = self.config.get("directorProductionExecution") or {}
-        if production.get("transportEnabled") or production.get("interactiveEnabled"):
+        if not self.review_only and (production.get("transportEnabled") or production.get("interactiveEnabled")):
             mock_base_url = self.config.get("_directorSubmitMockBaseUrl")
             if mock_base_url:
                 overlay += (
@@ -1380,13 +1388,18 @@ class Supervisor:
         overlay_path.write_text(overlay)
         env = safe_env(self.root)
         env["QINGMU_IMAGO_ATTESTATION_KEY"] = self.config["attestationKey"]
+        if self.review_only:
+            # The API and DSh host each receive an explicit fail-closed marker.
+            # Do not expose the Director dispatch or editorial authority keys
+            # to a process that only serves existing review material.
+            env["QINGMU_REVIEW_ONLY"] = "1"
         # No compatibility fallback: pre-B instances without this field keep
         # Director paid execution disabled until restored into a new root.
-        if self.config.get("directorExecutionKey"):
+        if not self.review_only and self.config.get("directorExecutionKey"):
             env["QINGMU_DIRECTOR_EXECUTION_KEY"] = self.config["directorExecutionKey"]
-        if self.config.get("editorialHandoffKey"):
+        if not self.review_only and self.config.get("editorialHandoffKey"):
             env["QINGMU_EDITORIAL_HANDOFF_KEY"] = self.config["editorialHandoffKey"]
-        if self.config.get("_directorSubmitMockBaseUrl"):
+        if not self.review_only and self.config.get("_directorSubmitMockBaseUrl"):
             env["QINGMU_D1_LOCAL_MOCK_KEY"] = "isolated-local-mock-only"
         session = self.root / "private/session.json"
         if session.exists():
@@ -1417,6 +1430,9 @@ class Supervisor:
             "QINGMU_DSH_HOST_URL": self.ports["hostUrl"],
             "QINGMU_LOCAL_PUBLIC_ORIGIN": self.ports["webUrl"],
         })
+        if self.review_only:
+            env["QINGMU_REVIEW_ONLY"] = "1"
+            env["QINGMU_DSH_HOST_DISABLED"] = "1"
         session = self.root / "private/session.json"
         if session.exists():
             env["QINGMU_LOCAL_SESSION_TOKEN"] = json.loads(session.read_text())["token"]
@@ -1890,18 +1906,21 @@ class Supervisor:
     def status(self) -> dict:
         api_alive = self.api is not None and self.api.poll() is None
         worker_alive = self.worker is not None and self.worker.poll() is None
-        binding = self._read_asset_activation_binding()
-        project_production = validate_project_production_config(
-            self.config.get("projectProductionExecution")
-        )
-        full_worker_owns_asset_lane = bool(
-            project_production is not None and project_production["active"]
-        )
-        asset_worker_required = (
-            not full_worker_owns_asset_lane
-            and bool(binding)
-            and not self._asset_parent_locally_terminal(binding)
-        )
+        if self.review_only:
+            asset_worker_required = False
+        else:
+            binding = self._read_asset_activation_binding()
+            project_production = validate_project_production_config(
+                self.config.get("projectProductionExecution")
+            )
+            full_worker_owns_asset_lane = bool(
+                project_production is not None and project_production["active"]
+            )
+            asset_worker_required = (
+                not full_worker_owns_asset_lane
+                and bool(binding)
+                and not self._asset_parent_locally_terminal(binding)
+            )
         asset_worker_alive = self.assetWorker is not None and self.assetWorker.poll() is None
         host_alive = self.host is not None and self.host.poll() is None
         frontend_alive = self.frontend is not None and self.frontend.poll() is None
@@ -1910,10 +1929,11 @@ class Supervisor:
             api_verified = api_alive and bool(self.api_identity())
         except (OSError, ValueError, subprocess.SubprocessError):
             pass
-        try:
-            host_verified = host_alive and self.host_healthy()
-        except (OSError, ValueError, subprocess.SubprocessError):
-            pass
+        if not self.review_only:
+            try:
+                host_verified = host_alive and self.host_healthy()
+            except (OSError, ValueError, subprocess.SubprocessError):
+                pass
         try:
             frontend_verified = frontend_alive and self.frontend_healthy()
         except (OSError, ValueError, subprocess.SubprocessError):
@@ -1925,7 +1945,7 @@ class Supervisor:
             session = "已登录：" + identity["username"]
         except (OSError, ValueError):
             session = "会话缺失或过期：运行 login，然后重新打开 entryUrl；不会自动重发命令"
-        manifest = build_manifest_status(self.root, self.config)
+        manifest = build_manifest_status(self.root, self.config, review_only=self.review_only)
         return {"instanceId": self.config["instanceId"], "root": str(self.root),
                 "supervisorPid": os.getpid(), "apiPid": self.api.pid if self.api else None,
                 "workerPid": self.worker.pid if self.worker else None,
@@ -1935,14 +1955,17 @@ class Supervisor:
                 "apiProcessAlive": api_alive, "workerProcessAlive": worker_alive,
                 "assetWorkerProcessAlive": asset_worker_alive,
                 "hostProcessAlive": host_alive,
+                "hostDisabledForReview": self.review_only,
                 "frontendProcessAlive": frontend_alive,
                 "apiIdentityAndStorageVerified": api_verified, "hostListenerAndHttpVerified": host_verified,
                 "frontendListenerAndHttpVerified": frontend_verified,
+                "reviewOnly": self.review_only,
+                "dispatchWorkersDisabled": self.review_only,
                 "buildManifest": manifest,
                 "buildManifestMatches": manifest["matches"],
                 "ready": bool(
-                    api_verified and worker_alive and (not asset_worker_required or asset_worker_alive)
-                    and host_verified and frontend_verified and manifest["matches"]
+                    api_verified and (self.review_only or (worker_alive and (not asset_worker_required or asset_worker_alive)))
+                    and (self.review_only or host_verified) and frontend_verified and manifest["matches"]
                 ),
                 "session": session}
 
@@ -1957,8 +1980,9 @@ class Supervisor:
         # Explicit login restarts only our Host and frontend to refresh their environment token.
         # It never replays an interrupted command; the existing receipt UI recovers it.
         self.stop_owned("frontend")
-        self.stop_owned("host")
-        self.start_host()
+        if not self.review_only:
+            self.stop_owned("host")
+            self.start_host()
         self.start_frontend()
         status = self.status()
         write_json(self.root / "runtime.json", status)
@@ -1979,10 +2003,11 @@ class Supervisor:
                 os.chmod(control_path, 0o600)
                 server.listen(4)
                 server.settimeout(0.5)
-                activation_server.bind(str(activation_path))
-                os.chmod(activation_path, 0o600)
-                activation_server.listen(2)
-                activation_server.settimeout(0.5)
+                if not self.review_only:
+                    activation_server.bind(str(activation_path))
+                    os.chmod(activation_path, 0o600)
+                    activation_server.listen(2)
+                    activation_server.settimeout(0.5)
                 try:
                     # A free flock does not prove orphaned children have exited.
                     # Persist before any spawn; only owned Popen waits clear it.
@@ -2003,28 +2028,38 @@ class Supervisor:
                     write_json(persisted, self.ports)
                     self.process_ledger_active = True
                     self._persist_process_ledger()
-                    mark_build_started(self.root, self.config, self.ports)
+                    mark_build_started(self.root, self.config, self.ports, review_only=self.review_only)
+                    api_env = backend_env(self.root, self.config)
+                    if self.review_only:
+                        # No activation control path is handed to an API that
+                        # is intentionally incapable of starting any worker.
+                        api_env["QINGMU_REVIEW_ONLY"] = "1"
+                        api_env.pop("QINGMU_ASSET_ACTIVATION_SOCKET", None)
+                        api_env.pop("QINGMU_ASSET_ACTIVATION_KEY", None)
                     self.api = self.launch_owned(
                         "api",
                         [*backend_command(self.config), "--port", str(api_port)],
-                        backend_env(self.root, self.config),
+                        api_env,
                         "api",
                     )
                     self.wait_ready(self.api, self.api_identity)
-                    self.start_worker()
-                    self.start_asset_worker()
-                    self.start_host()
+                    if not self.review_only:
+                        self.start_worker()
+                        self.start_asset_worker()
+                        self.start_host()
                     self.start_frontend()
                     write_json(self.root / "runtime.json", self.status())
                     while not self.stopping:
-                        self._reap_terminal_text_worker()
-                        self._reap_terminal_asset_worker()
+                        if not self.review_only:
+                            self._reap_terminal_text_worker()
+                            self._reap_terminal_asset_worker()
                         if any(
                             getattr(self, role) is None or getattr(self, role).poll() is not None
-                            for role in ("api", "worker", "host", "frontend")
-                        ) or (self.assetWorker is not None and self.assetWorker.poll() is not None):
+                            for role in (("api", "frontend") if self.review_only else ("api", "worker", "host", "frontend"))
+                        ) or (not self.review_only and self.assetWorker is not None and self.assetWorker.poll() is not None):
                             raise RuntimeError("本实例子进程退出，正在清理其余自有子进程")
-                        readable, _, _ = select.select((server, activation_server), (), (), 0.5)
+                        listeners = (server,) if self.review_only else (server, activation_server)
+                        readable, _, _ = select.select(listeners, (), (), 0.5)
                         if not readable:
                             continue
                         listener = readable[0]
@@ -2040,6 +2075,8 @@ class Supervisor:
                                     data += part
                                 request = json.loads(data)
                                 if listener is activation_server:
+                                    if self.review_only:
+                                        raise ValueError("审片模式禁止资产 Worker 激活")
                                     activation_key = str(self.config.get("assetActivationKey") or "")
                                     if not activation_key or not secrets.compare_digest(
                                         str(request.get("key", "")), activation_key
@@ -2094,6 +2131,7 @@ def start(
     config: dict,
     *,
     return_owned_supervisor: bool = False,
+    review_only: bool = False,
 ) -> dict | tuple[dict, subprocess.Popen]:
     try:
         existing = control(root, config, "status")
@@ -2104,10 +2142,13 @@ def start(
         pass
     with instance_lock(root):
         require_clean(root, config)
-        require_build_manifest_matches(root, config)
+        require_build_manifest_matches(root, config, review_only=review_only)
     log = (root / "logs/supervisor.log").open("ab")
     with log:
-        child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "_supervise", "--root", str(root)],
+        command = [sys.executable, str(Path(__file__).resolve()), "_supervise", "--root", str(root)]
+        if review_only:
+            command.append("--review-only")
+        child = subprocess.Popen(command,
             stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True, env=safe_env(root))
     try:
         deadline = time.monotonic() + 75
@@ -3140,6 +3181,7 @@ def main() -> None:
     parser.add_argument("--max-paid-cny", type=float)
     parser.add_argument("--text-foundation-parent-task-id")
     parser.add_argument("--asset-reference-parent-task-id")
+    parser.add_argument("--review-only", action="store_true")
     args = parser.parse_args()
     # Do not resolve an existing root symlink into an unrelated target.
     root = args.root.expanduser().absolute()
@@ -3155,13 +3197,13 @@ def main() -> None:
         else:
             config = read_config(root)
             if args.command == "_supervise":
-                supervisor = Supervisor(root, config)
+                supervisor = Supervisor(root, config, review_only=args.review_only)
                 signal.signal(signal.SIGTERM, lambda *_: setattr(supervisor, "stopping", True))
                 signal.signal(signal.SIGINT, lambda *_: setattr(supervisor, "stopping", True))
                 supervisor.run()
                 return
             if args.command == "record-build":
-                result = record_build_manifest(root, config)
+                result = record_build_manifest(root, config, review_only=args.review_only)
             elif args.command == "rotate-private-credentials":
                 if not args.instance_id:
                     raise ValueError("rotate-private-credentials 必须明确 --instance-id")
@@ -3228,7 +3270,7 @@ def main() -> None:
                             result,
                         )
             elif args.command == "start":
-                result = start(root, config)
+                result = start(root, config, review_only=args.review_only)
             elif args.command == "backup":
                 result = backup(root)
             else:
