@@ -20,6 +20,115 @@ spec.loader.exec_module(local)
 
 
 class OwnershipTests(unittest.TestCase):
+    def tail_supervisor(self):
+        scope = {"projectId": "project", "episodeId": "episode"}
+        with patch.object(local, "read_tail_audit_scope", return_value=(scope, "scope-sha")):
+            supervisor = local.Supervisor(Path('/unused'), {
+                "instanceId": "unit", "controlKey": "key", "yimengRoot": "/writer",
+            }, review_only=True, tail_audit=True)
+        return supervisor, scope
+
+    def test_tail_audit_requires_explicit_review_mode(self):
+        with self.assertRaisesRegex(ValueError, "requires_review_only"):
+            local.Supervisor(Path('/unused'), {}, tail_audit=True)
+        with self.assertRaisesRegex(ValueError, "requires_review_only"):
+            local.start(Path('/unused'), {}, tail_audit=True)
+        supervisor = local.Supervisor(Path('/unused'), {}, review_only=True)
+        with self.assertRaisesRegex(ValueError, "not_enabled"):
+            supervisor.tail_audit_tick({})
+
+    def test_tail_audit_start_refuses_scope_replacement(self):
+        for requested in (False, True):
+            with self.subTest(requested=requested), \
+                 patch.object(local, "read_tail_audit_scope", return_value=({}, "new")), \
+                 patch.object(local, "control", return_value={"reviewOnly": True, "tailAuditScopeSha256": "old"}), \
+                 patch.object(local.subprocess, "Popen") as popen:
+                with self.assertRaisesRegex(RuntimeError, "范围不同"):
+                    local.start(Path('/unused'), {}, review_only=True, tail_audit=requested)
+                popen.assert_not_called()
+
+    def test_tail_audit_api_requires_exact_scope_attestation(self):
+        supervisor, _ = self.tail_supervisor()
+        supervisor.api = Mock(pid=123)
+        supervisor.ports = {"apiUrl": "http://127.0.0.1:1"}
+        identity = {"instanceId": "unit", "pid": 123, "root": "/unused", "database": "/unused/storage/jason.db",
+                    "storage": "/unused/storage", "reviewOnly": True}
+        for digest in (None, "other", "scope-sha"):
+            with self.subTest(digest=digest), patch.object(local, "http", return_value={**identity, "tailAuditScopeSha256": digest}):
+                if digest == "scope-sha":
+                    self.assertEqual(supervisor.api_identity()['tailAuditScopeSha256'], digest)
+                else:
+                    with self.assertRaises(ValueError):
+                        supervisor.api_identity()
+
+    def test_tail_audit_tick_is_single_id_one_attempt_and_never_enables_general_lanes(self):
+        for action in ('dispatch', 'poll'):
+            supervisor, scope = self.tail_supervisor()
+            module = Mock()
+            module.inspect_task.return_value = {"taskId": "tail-task", "action": action}
+            production = {**scope, "credentialEnvFile": "/private/unit.env"}
+            with self.subTest(action=action), \
+                 patch.object(local, "read_tail_audit_scope", return_value=(scope, "scope-sha")), \
+                 patch.object(local, "tail_audit_module", return_value=module), \
+                 patch.object(local, "require_build_manifest_matches"), \
+                 patch.object(local, "validate_text_foundation_production_config", return_value=production), \
+                 patch.object(local, "validate_project_production_config", side_effect=AssertionError('general scope forbidden')), \
+                 patch.object(local, "_private_regular_file"), \
+                 patch.object(supervisor, "_worker_environment", return_value={}), \
+                 patch.object(supervisor, "launch_owned", return_value=Mock(pid=321)) as launch:
+                result = supervisor.tail_audit_tick({"key": "key", "op": "tail_audit_tick", "taskId": "tail-task", "action": action})
+            module.inspect_task.assert_called_once_with(Path('/unused/storage/jason.db'), scope, "tail-task", action)
+            role, command, environment, label = launch.call_args.args
+            self.assertEqual((role, label, result['pid']), ('worker', 'tail-audit-worker', 321))
+            for flag, value in (('--lane', 'qa'), ('--max-tasks', '1'), ('--max-attempts', '1'),
+                                ('--max-concurrent-dispatches', '1'), ('--allowed-task-id', 'tail-task'),
+                                ('--allowed-project-id', 'project'), ('--allowed-episode-id', 'episode')):
+                self.assertEqual(command[command.index(flag) + 1], value)
+            self.assertIn('--once', command)
+            self.assertIn('--disable-durable-director-orchestration', command)
+            self.assertEqual('--allow-new-provider-dispatch' in command, action == 'dispatch')
+            self.assertEqual('--allow-existing-provider-poll' in command, action == 'poll')
+            self.assertEqual(environment['WORKER_CREATIVE_FRESHNESS_ENFORCE'], 'true')
+
+    def test_tail_audit_tick_failures_never_launch(self):
+        for failure in ('changed', 'expired', 'busy', 'manifest', 'receipt', 'project', 'extra'):
+            supervisor, scope = self.tail_supervisor()
+            if failure == 'busy':
+                supervisor.worker = Mock()
+                supervisor.worker.poll.return_value = None
+            request = {"key": "key", "op": "tail_audit_tick", "taskId": "tail-task", "action": "dispatch"}
+            if failure == 'extra':
+                request['extra'] = True
+            module = Mock()
+            if failure == 'receipt':
+                module.inspect_task.side_effect = ValueError('receipt')
+            production = {**scope, "credentialEnvFile": "/private/unit.env"}
+            if failure == 'project':
+                production['projectId'] = 'other'
+            with self.subTest(failure=failure), \
+                 patch.object(local, "read_tail_audit_scope", return_value=(scope, 'changed' if failure == 'changed' else 'scope-sha'),
+                              side_effect=ValueError('expired') if failure == 'expired' else None), \
+                 patch.object(local, "require_build_manifest_matches", side_effect=ValueError('manifest') if failure == 'manifest' else None), \
+                 patch.object(local, "tail_audit_module", return_value=module), \
+                 patch.object(local, "validate_text_foundation_production_config", return_value=production), \
+                 patch.object(supervisor, "launch_owned") as launch:
+                with self.assertRaises(ValueError):
+                    supervisor.tail_audit_tick(request)
+                launch.assert_not_called()
+
+    def test_tail_audit_reaps_exit_without_retry(self):
+        supervisor, _ = self.tail_supervisor()
+        supervisor.worker = Mock()
+        supervisor.worker.poll.return_value = 1
+        supervisor.last_tail_audit_worker = {"taskId": "tail-task"}
+        with patch.object(local, 'stop_child') as stop, patch.object(supervisor, 'launch_owned') as launch:
+            supervisor.reap_tail_audit_worker()
+            supervisor.reap_tail_audit_worker()
+        self.assertIsNone(supervisor.worker)
+        self.assertEqual(supervisor.last_tail_audit_worker['exitCode'], 1)
+        self.assertEqual(stop.call_count, 1)
+        launch.assert_not_called()
+
     def rotation_world(self, parent: Path):
         root = parent / "instance"
         for part in ("private", "storage", "audit", "logs", "home", "work", "dsh", "backups", "build-manifest"):

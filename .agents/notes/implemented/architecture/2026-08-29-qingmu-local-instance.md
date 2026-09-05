@@ -18,6 +18,8 @@ An explicit crash-recovery command is the only path from an externally interrupt
 
 Explicit login uses the canonical API and restarts only the owned Host and frontend to update their private session environment. The server's ordinary expiry remains enforced. Commands are never replayed by login or start. Cold backup and restore verify database/media integrity; restore writes an absent destination only.
 
+Review-only startup keeps Host and ordinary workers stopped. Its explicit tail-audit exception requires an owner-only expiring scope bound to the instance, existing tail/source hashes, frame revision, next-frame content and one idempotency key. The API exposes only the existing audit quote/start/finalize handlers to that scope plus the private control key; normal user authentication and ownership still apply. Each authenticated supervisor tick rechecks the scope and build identity, verifies membership in the three-task receipt, and launches one QA task with one attempt and no automatic restart. Writer rechecks current media, authored inputs, the accepted quote and the shared CNY 0.50 cap before Provider dispatch and ingestion. The exception does not depend on full-production activation and cannot sign off media or resume an episode. A plain review-only restart removes the exception without discarding audit results.
+
 ## Alternatives considered
 
 **Permanent test fixture.** Rejected because fixture identities, disabled lifespan and reseeding are not user deployment semantics.

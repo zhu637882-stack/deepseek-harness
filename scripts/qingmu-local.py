@@ -13,6 +13,7 @@ import contextlib
 from datetime import datetime, timezone
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -539,11 +540,11 @@ def ensure_qingmu_workspace(root: Path, host_url: str, *, timeout: float = 10.0)
     return workspace
 
 
-def control(root: Path, config: dict, operation: str) -> dict:
+def control(root: Path, config: dict, operation: str, *, payload: dict | None = None) -> dict:
     with socket.socket(socket.AF_UNIX) as client:
         client.settimeout(45)
         client.connect(str(root / "control.sock"))
-        client.sendall(json.dumps({"key": config["controlKey"], "op": operation}).encode() + b"\n")
+        client.sendall(json.dumps({**(payload or {}), "key": config["controlKey"], "op": operation}).encode() + b"\n")
         data = b""
         while not data.endswith(b"\n"):
             part = client.recv(65536)
@@ -1146,13 +1147,34 @@ def stop_child(child: subprocess.Popen | None) -> None:
         child.wait(timeout=5)
 
 
+def tail_audit_module(config: dict):
+    """Load the Writer's pure scope reader, without importing its application."""
+    path = Path(config["yimengRoot"]) / "backend/src/jason/apps/studio/qingmu_tail_audit_scope.py"
+    spec = importlib.util.spec_from_file_location("qingmu_tail_audit_scope", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def read_tail_audit_scope(root: Path, config: dict) -> tuple[dict, str]:
+    """Only an owner-only, current scope can enable the bounded review exception."""
+    value = _read_owner_only_json(root / "private/tail-audit-scope.json", "尾帧补检范围")
+    module = tail_audit_module(config)
+    value = module.validate_scope(value, instance_id=config["instanceId"])
+    return value, module.scope_sha256(value)
+
+
 class Supervisor:
-    def __init__(self, root: Path, config: dict, *, review_only: bool = False):
+    def __init__(self, root: Path, config: dict, *, review_only: bool = False, tail_audit: bool = False):
         self.root, self.config = root, config
         # Review startup deliberately owns only the read/review surface.  It
         # must not inherit an enabled project, asset, or Director dispatch
         # lane from the instance configuration.
         self.review_only = review_only
+        if tail_audit and not review_only:
+            raise ValueError("tail_audit_requires_review_only")
+        self.tail_audit_scope, self.tail_audit_sha = read_tail_audit_scope(root, config) if tail_audit else (None, None)
+        self.last_tail_audit_worker: dict | None = None
         self.api: subprocess.Popen | None = None
         self.worker: subprocess.Popen | None = None
         self._text_worker_heartbeat_only = False
@@ -1262,6 +1284,8 @@ class Supervisor:
                     "storage": str(self.root / "storage")}
         if self.review_only:
             expected["reviewOnly"] = True
+        if self.tail_audit_scope:
+            expected["tailAuditScopeSha256"] = self.tail_audit_sha
         if value != expected:
             raise ValueError("API身份/数据目录绑定不符")
         return value
@@ -1490,6 +1514,47 @@ class Supervisor:
         if project_production_active:
             environment["WORKER_CREATIVE_FRESHNESS_ENFORCE"] = "false"
         return environment
+
+    def reap_tail_audit_worker(self) -> None:
+        if self.tail_audit_scope and self.worker is not None:
+            code = self.worker.poll()
+            if code is not None:
+                self.last_tail_audit_worker = {**(self.last_tail_audit_worker or {}), "exitCode": code,
+                                               "finishedAt": utc_timestamp()}
+                self.stop_owned("worker")
+
+    def tail_audit_tick(self, request: dict) -> dict:
+        """Launch one receipt-bound QA tick; never start the ordinary worker lanes."""
+        if not self.review_only or not self.tail_audit_scope:
+            raise ValueError("tail_audit_not_enabled")
+        if set(request) != {"key", "op", "taskId", "action"}:
+            raise ValueError("tail_audit_tick_invalid")
+        scope, digest = read_tail_audit_scope(self.root, self.config)
+        if digest != self.tail_audit_sha:
+            raise ValueError("tail_audit_activation_changed")
+        require_build_manifest_matches(self.root, self.config, review_only=True)
+        self.reap_tail_audit_worker()
+        if self.worker is not None:
+            raise ValueError("tail_audit_worker_busy")
+        inspected = tail_audit_module(self.config).inspect_task(
+            self.root / "storage/jason.db", scope, request["taskId"], request["action"])
+        production = validate_text_foundation_production_config(self.config.get("textFoundationProductionExecution"))
+        if (not production
+            or any(production[key] != scope[key] for key in ("projectId", "episodeId"))):
+            raise ValueError("tail_audit_project_binding_mismatch")
+        _private_regular_file(Path(production["credentialEnvFile"]))
+        writer = Path(self.config["yimengRoot"])
+        env = self._worker_environment(writer, production, project_production_active=True)
+        env["WORKER_CREATIVE_FRESHNESS_ENFORCE"] = "true"
+        command = [str(writer / ".venv/bin/python"), "-B", "-m", "jason.apps.studio.worker_cli",
+                   "--lane", "qa", "--once", "--max-tasks", "1", "--max-attempts", "1",
+                   "--max-concurrent-dispatches", "1", "--allowed-task-id", request["taskId"],
+                   "--allowed-project-id", scope["projectId"], "--allowed-episode-id", scope["episodeId"],
+                   "--disable-durable-director-orchestration",
+                   "--allow-new-provider-dispatch" if request["action"] == "dispatch" else "--allow-existing-provider-poll"]
+        child = self.launch_owned("worker", command, env, "tail-audit-worker")
+        self.last_tail_audit_worker = {**inspected, "pid": child.pid, "startedAt": utc_timestamp(), "exitCode": None}
+        return {"instanceId": self.config["instanceId"], "started": True, **self.last_tail_audit_worker}
 
     def start_worker(self) -> None:
         """Start an explicitly scoped production Worker or the safe text mode.
@@ -1962,7 +2027,10 @@ class Supervisor:
                 "apiIdentityAndStorageVerified": api_verified, "hostListenerAndHttpVerified": host_verified,
                 "frontendListenerAndHttpVerified": frontend_verified,
                 "reviewOnly": self.review_only,
-                "dispatchWorkersDisabled": self.review_only,
+                "dispatchWorkersDisabled": self.review_only and not self.tail_audit_scope,
+                "tailAuditEnabled": self.tail_audit_scope is not None,
+                "tailAuditScopeSha256": self.tail_audit_sha,
+                "lastTailAuditWorker": self.last_tail_audit_worker,
                 "buildManifest": manifest,
                 "buildManifestMatches": manifest["matches"],
                 "ready": bool(
@@ -2038,6 +2106,9 @@ class Supervisor:
                         api_env["QINGMU_REVIEW_ONLY"] = "1"
                         api_env.pop("QINGMU_ASSET_ACTIVATION_SOCKET", None)
                         api_env.pop("QINGMU_ASSET_ACTIVATION_KEY", None)
+                        if self.tail_audit_scope:
+                            api_env["QINGMU_TAIL_AUDIT_SCOPE_JSON"] = json.dumps(
+                                self.tail_audit_scope, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
                     self.api = self.launch_owned(
                         "api",
                         [*backend_command(self.config), "--port", str(api_port)],
@@ -2052,6 +2123,7 @@ class Supervisor:
                     self.start_frontend()
                     write_json(self.root / "runtime.json", self.status())
                     while not self.stopping:
+                        self.reap_tail_audit_worker()
                         if not self.review_only:
                             self._reap_terminal_text_worker()
                             self._reap_terminal_asset_worker()
@@ -2101,6 +2173,8 @@ class Supervisor:
                                     result = {"stopped": True, "instanceId": self.config["instanceId"], "dataPreserved": True}
                                 elif request["op"] == "status":
                                     result = self.status()
+                                elif request["op"] == "tail_audit_tick":
+                                    result = self.tail_audit_tick(request)
                                 else:
                                     raise ValueError("未知控制操作")
                             except Exception as exc:
@@ -2134,11 +2208,17 @@ def start(
     *,
     return_owned_supervisor: bool = False,
     review_only: bool = False,
+    tail_audit: bool = False,
 ) -> dict | tuple[dict, subprocess.Popen]:
+    if tail_audit and not review_only:
+        raise ValueError("tail_audit_requires_review_only")
+    requested_sha = read_tail_audit_scope(root, config)[1] if tail_audit else None
     try:
         existing = control(root, config, "status")
         if existing.get("reviewOnly", False) is not review_only:
             raise RuntimeError("已运行实例不是请求的启动模式；未停止或替换既有进程")
+        if existing.get("tailAuditScopeSha256") != requested_sha:
+            raise RuntimeError("已运行实例尾帧补检范围不同；未停止或替换既有进程")
         if return_owned_supervisor:
             raise RuntimeError("轮换要求停止实例；检测到既有运行实例")
         return existing
@@ -2152,6 +2232,8 @@ def start(
         command = [sys.executable, str(Path(__file__).resolve()), "_supervise", "--root", str(root)]
         if review_only:
             command.append("--review-only")
+        if tail_audit:
+            command.append("--tail-audit")
         child = subprocess.Popen(command,
             stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True, env=safe_env(root))
     try:
@@ -3169,7 +3251,7 @@ def main() -> None:
     parser.add_argument("command", choices=["init", "record-build", "start", "status", "stop", "login", "backup", "restore",
                                             "rotate-private-credentials", "bind-project-runtime",
                                             "activate-project-production", "deactivate-project-production",
-                                            "recover-crash", "director-submit-once", "_supervise"])
+                                            "recover-crash", "director-submit-once", "tail-audit-tick", "_supervise"])
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--yimeng-root", type=Path)
     parser.add_argument("--core-root", type=Path)
@@ -3186,6 +3268,8 @@ def main() -> None:
     parser.add_argument("--text-foundation-parent-task-id")
     parser.add_argument("--asset-reference-parent-task-id")
     parser.add_argument("--review-only", action="store_true")
+    parser.add_argument("--tail-audit", action="store_true")
+    parser.add_argument("--audit-action", choices=["dispatch", "poll"])
     args = parser.parse_args()
     # Do not resolve an existing root symlink into an unrelated target.
     root = args.root.expanduser().absolute()
@@ -3201,7 +3285,7 @@ def main() -> None:
         else:
             config = read_config(root)
             if args.command == "_supervise":
-                supervisor = Supervisor(root, config, review_only=args.review_only)
+                supervisor = Supervisor(root, config, review_only=args.review_only, tail_audit=args.tail_audit)
                 signal.signal(signal.SIGTERM, lambda *_: setattr(supervisor, "stopping", True))
                 signal.signal(signal.SIGINT, lambda *_: setattr(supervisor, "stopping", True))
                 supervisor.run()
@@ -3274,7 +3358,11 @@ def main() -> None:
                             result,
                         )
             elif args.command == "start":
-                result = start(root, config, review_only=args.review_only)
+                result = start(root, config, review_only=args.review_only, tail_audit=args.tail_audit)
+            elif args.command == "tail-audit-tick":
+                if not args.task_id or not args.audit_action:
+                    raise ValueError("tail-audit-tick requires --task-id and --audit-action")
+                result = control(root, config, "tail_audit_tick", payload={"taskId": args.task_id, "action": args.audit_action})
             elif args.command == "backup":
                 result = backup(root)
             else:
