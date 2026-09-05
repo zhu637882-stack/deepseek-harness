@@ -1164,17 +1164,39 @@ def read_tail_audit_scope(root: Path, config: dict) -> tuple[dict, str]:
     return value, module.scope_sha256(value)
 
 
+def single_shot_module(config: dict):
+    """Load the Writer's pure single-shot scope reader, without its application."""
+    path = Path(config["yimengRoot"]) / "backend/src/jason/apps/studio/qingmu_single_shot_scope.py"
+    spec = importlib.util.spec_from_file_location("qingmu_single_shot_scope", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def read_single_shot_scope(root: Path, config: dict) -> tuple[dict, str]:
+    """Read one owner-only, expiring single-shot authority scope."""
+    value = _read_owner_only_json(root / "private/single-shot-scope.json", "单镜执行范围")
+    module = single_shot_module(config)
+    value = module.validate_scope(value, instance_id=config["instanceId"])
+    return value, module.scope_sha256(value)
+
+
 class Supervisor:
-    def __init__(self, root: Path, config: dict, *, review_only: bool = False, tail_audit: bool = False):
+    def __init__(self, root: Path, config: dict, *, review_only: bool = False, tail_audit: bool = False,
+                 single_shot: bool = False):
         self.root, self.config = root, config
         # Review startup deliberately owns only the read/review surface.  It
         # must not inherit an enabled project, asset, or Director dispatch
         # lane from the instance configuration.
         self.review_only = review_only
-        if tail_audit and not review_only:
-            raise ValueError("tail_audit_requires_review_only")
+        if tail_audit and single_shot:
+            raise ValueError("scoped_review_exceptions_are_mutually_exclusive")
+        if (tail_audit or single_shot) and not review_only:
+            raise ValueError("scoped_review_exception_requires_review_only")
         self.tail_audit_scope, self.tail_audit_sha = read_tail_audit_scope(root, config) if tail_audit else (None, None)
+        self.single_shot_scope, self.single_shot_sha = read_single_shot_scope(root, config) if single_shot else (None, None)
         self.last_tail_audit_worker: dict | None = None
+        self.last_single_shot_worker: dict | None = None
         self.api: subprocess.Popen | None = None
         self.worker: subprocess.Popen | None = None
         self._text_worker_heartbeat_only = False
@@ -1286,6 +1308,8 @@ class Supervisor:
             expected["reviewOnly"] = True
         if self.tail_audit_scope:
             expected["tailAuditScopeSha256"] = self.tail_audit_sha
+        if self.single_shot_scope:
+            expected["singleShotScopeSha256"] = self.single_shot_sha
         if value != expected:
             raise ValueError("API身份/数据目录绑定不符")
         return value
@@ -1523,6 +1547,14 @@ class Supervisor:
                                                "finishedAt": utc_timestamp()}
                 self.stop_owned("worker")
 
+    def reap_single_shot_worker(self) -> None:
+        if self.single_shot_scope and self.worker is not None:
+            code = self.worker.poll()
+            if code is not None:
+                self.last_single_shot_worker = {**(self.last_single_shot_worker or {}), "exitCode": code,
+                                                "finishedAt": utc_timestamp()}
+                self.stop_owned("worker")
+
     def tail_audit_tick(self, request: dict) -> dict:
         """Launch one receipt-bound QA tick; never start the ordinary worker lanes."""
         if not self.review_only or not self.tail_audit_scope:
@@ -1555,6 +1587,63 @@ class Supervisor:
         child = self.launch_owned("worker", command, env, "tail-audit-worker")
         self.last_tail_audit_worker = {**inspected, "pid": child.pid, "startedAt": utc_timestamp(), "exitCode": None}
         return {"instanceId": self.config["instanceId"], "started": True, **self.last_tail_audit_worker}
+
+    def single_shot_tick(self, request: dict) -> dict:
+        """Launch exactly one inspected video or QA task without normal worker lanes."""
+        if not self.review_only or not self.single_shot_scope:
+            raise ValueError("single_shot_not_enabled")
+        if set(request) != {"key", "op", "taskId", "action"}:
+            raise ValueError("single_shot_tick_invalid")
+        scope, digest = read_single_shot_scope(self.root, self.config)
+        if digest != self.single_shot_sha:
+            raise ValueError("single_shot_activation_changed")
+        require_build_manifest_matches(self.root, self.config, review_only=True)
+        self.reap_single_shot_worker()
+        if any(
+            getattr(self, role) is not None and getattr(self, role).poll() is None
+            for role in ("worker", "assetWorker", "host")
+        ):
+            raise ValueError("single_shot_child_busy")
+        inspected = single_shot_module(self.config).inspect_task(
+            self.root / "storage/jason.db", scope, request["taskId"], request["action"])
+        if inspected.get("taskId") != request["taskId"] or inspected.get("action") != request["action"]:
+            raise ValueError("single_shot_inspection_mismatch")
+        if inspected.get("lane") not in {"video", "qa"}:
+            raise ValueError("single_shot_lane_invalid")
+        production = validate_text_foundation_production_config(
+            self.config.get("textFoundationProductionExecution")
+        )
+        if (
+            not production
+            or any(production[key] != scope[key] for key in ("projectId", "episodeId"))
+            or float(production["maxPaidCny"]) <= 0
+        ):
+            raise ValueError("single_shot_project_binding_mismatch")
+        _private_regular_file(Path(production["credentialEnvFile"]))
+        writer = Path(self.config["yimengRoot"])
+        env = self._worker_environment(writer, production, project_production_active=True)
+        # This child receives the requested single-shot cap, never a broad historical allowance.
+        env["MAX_PAID_CNY"] = str(scope["authorizationCapCny"])
+        env["QINGMU_SINGLE_SHOT_SCOPE_JSON"] = json.dumps(
+            scope, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        env["QINGMU_SINGLE_SHOT_TASK_ID"] = request["taskId"]
+        env["QINGMU_SINGLE_SHOT_REQUEST_HASH"] = inspected["requestHash"]
+        env["WORKER_CREATIVE_FRESHNESS_ENFORCE"] = "true"
+        command = [
+            str(writer / ".venv/bin/python"), "-B", "-m", "jason.apps.studio.worker_cli",
+            "--lane", inspected["lane"], "--once", "--max-tasks", "1", "--max-attempts", "1",
+            "--max-concurrent-dispatches", "1", "--allowed-task-id", request["taskId"],
+            "--allowed-project-id", scope["projectId"], "--allowed-episode-id", scope["episodeId"],
+            "--disable-durable-director-orchestration",
+            "--allow-new-provider-dispatch" if request["action"] == "dispatch"
+            else "--allow-existing-provider-poll",
+        ]
+        child = self.launch_owned("worker", command, env, "single-shot-worker")
+        self.last_single_shot_worker = {
+            **inspected, "pid": child.pid, "startedAt": utc_timestamp(), "exitCode": None,
+        }
+        return {"instanceId": self.config["instanceId"], "started": True, **self.last_single_shot_worker}
 
     def start_worker(self) -> None:
         """Start an explicitly scoped production Worker or the safe text mode.
@@ -2027,10 +2116,14 @@ class Supervisor:
                 "apiIdentityAndStorageVerified": api_verified, "hostListenerAndHttpVerified": host_verified,
                 "frontendListenerAndHttpVerified": frontend_verified,
                 "reviewOnly": self.review_only,
-                "dispatchWorkersDisabled": self.review_only and not self.tail_audit_scope,
+                "dispatchWorkersDisabled": self.review_only and not (self.tail_audit_scope or self.single_shot_scope),
+                "ordinaryDispatchWorkersDisabled": self.review_only,
                 "tailAuditEnabled": self.tail_audit_scope is not None,
                 "tailAuditScopeSha256": self.tail_audit_sha,
                 "lastTailAuditWorker": self.last_tail_audit_worker,
+                "singleShotEnabled": self.single_shot_scope is not None,
+                "singleShotScopeSha256": self.single_shot_sha,
+                "lastSingleShotWorker": self.last_single_shot_worker,
                 "buildManifest": manifest,
                 "buildManifestMatches": manifest["matches"],
                 "ready": bool(
@@ -2109,6 +2202,9 @@ class Supervisor:
                         if self.tail_audit_scope:
                             api_env["QINGMU_TAIL_AUDIT_SCOPE_JSON"] = json.dumps(
                                 self.tail_audit_scope, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                        if self.single_shot_scope:
+                            api_env["QINGMU_SINGLE_SHOT_SCOPE_JSON"] = json.dumps(
+                                self.single_shot_scope, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
                     self.api = self.launch_owned(
                         "api",
                         [*backend_command(self.config), "--port", str(api_port)],
@@ -2124,6 +2220,7 @@ class Supervisor:
                     write_json(self.root / "runtime.json", self.status())
                     while not self.stopping:
                         self.reap_tail_audit_worker()
+                        self.reap_single_shot_worker()
                         if not self.review_only:
                             self._reap_terminal_text_worker()
                             self._reap_terminal_asset_worker()
@@ -2175,6 +2272,8 @@ class Supervisor:
                                     result = self.status()
                                 elif request["op"] == "tail_audit_tick":
                                     result = self.tail_audit_tick(request)
+                                elif request["op"] == "single_shot_tick":
+                                    result = self.single_shot_tick(request)
                                 else:
                                     raise ValueError("未知控制操作")
                             except Exception as exc:
@@ -2209,16 +2308,22 @@ def start(
     return_owned_supervisor: bool = False,
     review_only: bool = False,
     tail_audit: bool = False,
+    single_shot: bool = False,
 ) -> dict | tuple[dict, subprocess.Popen]:
-    if tail_audit and not review_only:
-        raise ValueError("tail_audit_requires_review_only")
+    if tail_audit and single_shot:
+        raise ValueError("scoped_review_exceptions_are_mutually_exclusive")
+    if (tail_audit or single_shot) and not review_only:
+        raise ValueError("scoped_review_exception_requires_review_only")
     requested_sha = read_tail_audit_scope(root, config)[1] if tail_audit else None
+    requested_single_shot_sha = read_single_shot_scope(root, config)[1] if single_shot else None
     try:
         existing = control(root, config, "status")
         if existing.get("reviewOnly", False) is not review_only:
             raise RuntimeError("已运行实例不是请求的启动模式；未停止或替换既有进程")
         if existing.get("tailAuditScopeSha256") != requested_sha:
             raise RuntimeError("已运行实例尾帧补检范围不同；未停止或替换既有进程")
+        if existing.get("singleShotScopeSha256") != requested_single_shot_sha:
+            raise RuntimeError("已运行实例单镜执行范围不同；未停止或替换既有进程")
         if return_owned_supervisor:
             raise RuntimeError("轮换要求停止实例；检测到既有运行实例")
         return existing
@@ -2234,6 +2339,8 @@ def start(
             command.append("--review-only")
         if tail_audit:
             command.append("--tail-audit")
+        if single_shot:
+            command.append("--single-shot")
         child = subprocess.Popen(command,
             stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True, env=safe_env(root))
     try:
@@ -3251,7 +3358,7 @@ def main() -> None:
     parser.add_argument("command", choices=["init", "record-build", "start", "status", "stop", "login", "backup", "restore",
                                             "rotate-private-credentials", "bind-project-runtime",
                                             "activate-project-production", "deactivate-project-production",
-                                            "recover-crash", "director-submit-once", "tail-audit-tick", "_supervise"])
+                                            "recover-crash", "director-submit-once", "tail-audit-tick", "single-shot-tick", "_supervise"])
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--yimeng-root", type=Path)
     parser.add_argument("--core-root", type=Path)
@@ -3269,7 +3376,8 @@ def main() -> None:
     parser.add_argument("--asset-reference-parent-task-id")
     parser.add_argument("--review-only", action="store_true")
     parser.add_argument("--tail-audit", action="store_true")
-    parser.add_argument("--audit-action", choices=["dispatch", "poll"])
+    parser.add_argument("--single-shot", action="store_true")
+    parser.add_argument("--audit-action", choices=["dispatch", "poll", "quality"])
     args = parser.parse_args()
     # Do not resolve an existing root symlink into an unrelated target.
     root = args.root.expanduser().absolute()
@@ -3285,7 +3393,8 @@ def main() -> None:
         else:
             config = read_config(root)
             if args.command == "_supervise":
-                supervisor = Supervisor(root, config, review_only=args.review_only, tail_audit=args.tail_audit)
+                supervisor = Supervisor(root, config, review_only=args.review_only, tail_audit=args.tail_audit,
+                                        single_shot=args.single_shot)
                 signal.signal(signal.SIGTERM, lambda *_: setattr(supervisor, "stopping", True))
                 signal.signal(signal.SIGINT, lambda *_: setattr(supervisor, "stopping", True))
                 supervisor.run()
@@ -3358,11 +3467,16 @@ def main() -> None:
                             result,
                         )
             elif args.command == "start":
-                result = start(root, config, review_only=args.review_only, tail_audit=args.tail_audit)
+                result = start(root, config, review_only=args.review_only, tail_audit=args.tail_audit,
+                               single_shot=args.single_shot)
             elif args.command == "tail-audit-tick":
                 if not args.task_id or not args.audit_action:
                     raise ValueError("tail-audit-tick requires --task-id and --audit-action")
                 result = control(root, config, "tail_audit_tick", payload={"taskId": args.task_id, "action": args.audit_action})
+            elif args.command == "single-shot-tick":
+                if not args.task_id or not args.audit_action:
+                    raise ValueError("single-shot-tick requires --task-id and --audit-action")
+                result = control(root, config, "single_shot_tick", payload={"taskId": args.task_id, "action": args.audit_action})
             elif args.command == "backup":
                 result = backup(root)
             else:
