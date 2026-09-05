@@ -218,6 +218,28 @@ def backend_command(config: dict) -> list[str]:
     return command
 
 
+def _local_asr_env(credential_file: Path) -> dict[str, str]:
+    """Expose only the local ASR tool command to the API process.
+
+    Provider secrets stay worker-only; the API needs the command to answer
+    dialogue-shot preflight and review-freshness checks honestly. The worker
+    still re-verifies readiness before any paid dispatch.
+    """
+    values: dict[str, str] = {}
+    try:
+        text = credential_file.read_text(encoding="utf-8")
+    except OSError:
+        return values
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key.strip() in {"LOCAL_ASR_COMMAND_JSON", "LOCAL_ASR_TIMEOUT_SEC"}:
+            values[key.strip()] = value.strip().strip("'\"")
+    return values
+
+
 def backend_env(root: Path, config: dict) -> dict[str, str]:
     env = {**safe_env(root), "PYTHONPATH": str(Path(config["yimengRoot"]) / "backend/src")}
     # This is intentionally not the supervisor control key and is the only
@@ -226,6 +248,11 @@ def backend_env(root: Path, config: dict) -> dict[str, str]:
     if activation_key:
         env["QINGMU_ASSET_ACTIVATION_SOCKET"] = str(root / "private/asset-activation.sock")
         env["QINGMU_ASSET_ACTIVATION_KEY"] = activation_key
+    production = validate_text_foundation_production_config(
+        config.get("textFoundationProductionExecution")
+    )
+    if production:
+        env.update(_local_asr_env(Path(production["credentialEnvFile"])))
     return env
 
 
