@@ -2032,6 +2032,29 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
             self.assertTrue(result["reviewOnly"])
             self.assertIn("--review-only", popen.call_args.args[0])
 
+    def test_review_only_refuses_existing_full_instance_without_spawn_or_stop(self):
+        with patch.object(local, "control", return_value={"reviewOnly": False}) as control, \
+             patch.object(local.subprocess, "Popen") as popen:
+            with self.assertRaisesRegex(RuntimeError, "启动模式"):
+                local.start(Path('/unused'), {}, review_only=True)
+            popen.assert_not_called()
+            self.assertEqual(control.call_args.args[-1], 'status')
+            self.assertEqual(control.call_count, 1)
+
+    def test_review_only_requires_api_gate_attestation(self):
+        root = Path('/unused')
+        supervisor = local.Supervisor(root, {"instanceId": "unit", "controlKey": "key"}, review_only=True)
+        supervisor.api = Mock(pid=123)
+        supervisor.ports = {"apiUrl": "http://127.0.0.1:1"}
+        identity = {"instanceId": "unit", "pid": 123, "root": str(root),
+                    "database": str(root / 'storage/jason.db'), "storage": str(root / 'storage')}
+        for value in (identity, {**identity, "reviewOnly": False}):
+            with patch.object(local, "http", return_value=value):
+                with self.assertRaisesRegex(ValueError, "API身份"):
+                    supervisor.api_identity()
+        with patch.object(local, "http", return_value={**identity, "reviewOnly": True}):
+            self.assertTrue(supervisor.api_identity()['reviewOnly'])
+
     def test_status_keeps_api_worker_host_and_frontend_diagnostics_independent(self):
         class Child:
             def __init__(self, pid):

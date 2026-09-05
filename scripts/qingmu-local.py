@@ -1260,6 +1260,8 @@ class Supervisor:
         expected = {"instanceId": self.config["instanceId"], "pid": self.api.pid,
                     "root": str(self.root), "database": str(self.root / "storage/jason.db"),
                     "storage": str(self.root / "storage")}
+        if self.review_only:
+            expected["reviewOnly"] = True
         if value != expected:
             raise ValueError("API身份/数据目录绑定不符")
         return value
@@ -2135,6 +2137,8 @@ def start(
 ) -> dict | tuple[dict, subprocess.Popen]:
     try:
         existing = control(root, config, "status")
+        if existing.get("reviewOnly", False) is not review_only:
+            raise RuntimeError("已运行实例不是请求的启动模式；未停止或替换既有进程")
         if return_owned_supervisor:
             raise RuntimeError("轮换要求停止实例；检测到既有运行实例")
         return existing
