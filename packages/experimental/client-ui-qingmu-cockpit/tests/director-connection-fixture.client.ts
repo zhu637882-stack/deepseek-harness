@@ -1,6 +1,6 @@
 import type { HostDescriptionSource } from '@deepseek-ai/dsh-client-connection/client'
 
-/** One transport's handshake snapshots; reconnect publishes a fresh object. */
+/** Client transport handshake snapshots; reconnect publishes a fresh object. */
 export function directorConnectionFixture() {
   const listeners = new Set<() => void>()
   let snapshot: ReturnType<HostDescriptionSource['getSnapshot']> = {

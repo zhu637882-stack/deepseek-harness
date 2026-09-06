@@ -25,12 +25,12 @@ vi.mock('@deepseek-ai/dsh-app-boot', async original => ({
 }))
 
 let root: string
-let signals: Map<'SIGTERM' | 'SIGINT', ReturnType<typeof process.listeners>>
+let signals: Map<'SIGTERM' | 'SIGINT', NodeJS.SignalsListener[]>
 
 beforeEach(async () => {
   vi.clearAllMocks()
   root = await mkdtemp(join(tmpdir(), 'dsh-profile-preset-roots-'))
-  signals = new Map(['SIGTERM', 'SIGINT'].map(signal => [signal as 'SIGTERM' | 'SIGINT', process.listeners(signal)]))
+  signals = new Map((['SIGTERM', 'SIGINT'] as const).map(signal => [signal, process.listeners(signal)]))
 })
 
 afterEach(async () => {

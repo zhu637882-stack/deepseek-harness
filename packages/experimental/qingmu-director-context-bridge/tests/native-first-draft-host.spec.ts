@@ -107,8 +107,8 @@ it.skipIf(process.env.QINGMU_FULL_HOST_BROWSER !== '1' || !writerRoot || !coreRo
       const ctx = host.ctx
       class ScriptedModel extends LlmAdapter {
         requests: GenerateOptions[] = []
-        async listModels() { return [{ provider: 'qingmu-fixture', id: 'fixture', name: 'Isolated fixture' }] }
-        async resolveModel(provider: string, model: string) { return { provider, id: model, name: model, contextWindow: 128000 } }
+        override async listModels() { return [{ provider: 'qingmu-fixture', id: 'fixture', name: 'Isolated fixture' }] }
+        override async resolveModel(provider: string, model: string) { return { provider, id: model, name: model, contextWindow: 128000 } }
         async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
           const step = this.requests.push(options) - 1
           if (step > 4) throw new Error('Unexpected external model request')

@@ -6,7 +6,7 @@ import { ScenePlanningWorkspace } from '../src/client/ScenePlanningWorkspace.tsx
 import type { DirectorProposalFreshnessResult, DirectorReplayProposal, ScenePlanningState, ScenePlanningResult } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { DirectorContextBindingState, DirectorContextClientPort, DirectorObjectScope } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import type { QingmuHostSync, QingmuScenePlanningSavedMessage } from '../src/client/host-sync.ts'
-import { directorConnectionFixture } from './director-connection-fixture.ts'
+import { directorConnectionFixture } from './director-connection-fixture.client.ts'
 
 const state: ScenePlanningState = { schema: 'jason.qingmu-scene-planning-state.v1', projectId: 'project_1', episodeId: 'episode_1',
   scriptRevision: 1, scriptSha256: 'a'.repeat(64), storyboard: null, planning: null,

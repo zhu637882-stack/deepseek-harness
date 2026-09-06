@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import type { Vite } from 'vitest/node'
 
 /**
  * Exercise one synthetic project in Chrome against actual service handlers.
@@ -45,11 +46,11 @@ export async function runConnectedBrowser(root: string, boot: unknown, edited: s
           let body = ''
           for await (const chunk of request) { body += String(chunk); if (body.length > 2_000_000) throw new Error('Fixture body too large') }
           const [namespace, endpoint] = path.split('/')
-          const result = await handlers[namespace]!(endpoint!, JSON.parse(body), AbortSignal.timeout(20000))
+          const result = await handlers[namespace!]!(endpoint!, JSON.parse(body), AbortSignal.timeout(20000))
           response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify(result))
         } catch (error) { response.statusCode = 500; response.end(JSON.stringify({ ok: false, error: String(error) })) }
       })
-    } }],
+    } } satisfies Vite.Plugin],
   })
   try {
     await server.listen()

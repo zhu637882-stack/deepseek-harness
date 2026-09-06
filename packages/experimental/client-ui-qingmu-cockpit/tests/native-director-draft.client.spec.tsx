@@ -6,7 +6,7 @@ import { NativeDirectorDraft, mergeNativeDraft } from '../src/client/NativeDirec
 import { zh, type QingmuCockpitKey } from '../src/client/locales.ts'
 import { draftPrompt, draftScope } from '../../qingmu-director-context-bridge/examples/native-draft-fixture.ts'
 import type { YimengPromptIrResponse } from '../src/client/contracts.ts'
-import { directorConnectionFixture } from './director-connection-fixture.ts'
+import { directorConnectionFixture } from './director-connection-fixture.client.ts'
 
 afterEach(cleanup)
 const snapshot = draftPrompt as YimengPromptIrResponse

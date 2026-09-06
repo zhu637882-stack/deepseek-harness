@@ -23,12 +23,15 @@ function snapshot(hash = sha) {
   return {
     schema: 'jason.qingmu-director-context-snapshot.v1', ...objectScope,
     contextSnapshotSha256: hash,
-    shot: { id: 'h', narrative: '通知先振动，她再停住；不提前下结论。' },
-    sourceScene: { dialogue: '你刚才说的是谁？' },
+    script: { revision: 1, sha256: '0'.repeat(64) }, sceneSource: {}, sourceTime: '2026-09-07T00:00:00Z',
+    storyboard: { id: 'revision-1', version: 1, status: 'Ready' as const, sourceHash: 'b'.repeat(64) },
+    shot: { id: 'h', title: '通知', narrative: '通知先振动，她再停住；不提前下结论。', visual: '人物停在门口。',
+      action: '她听见振动。', durationSec: 4, dialogueLineIds: [] },
+    sourceScene: { dialogue: '你刚才说的是谁？' }, creativeContract: null,
     selectedReferences: [], providerCalls: 0, costAmountCny: '0',
     businessStateChanged: false, humanDecisionInferred: false, formalQcInferred: false,
     selectionGranted: false, readyGranted: false,
-  }
+  } satisfies DirectorContextSnapshot
 }
 
 function bind(session: Session, hash = sha, shotId = 'h') {
@@ -120,7 +123,7 @@ describe('native director read tools', () => {
     expect((await app.run('qingmu_read_bound_context')).isError).toBe(true)
     expect((await app.run('qingmu_get_imago_method', { capability: 'shot_design' })).isError).toBe(true)
     expect(calls).toBe(0)
-    finish({ ok: true, context: { ...snapshot(), ...scope } as DirectorContextSnapshot })
+    finish({ ok: true, context: { ...snapshot(), ...scope } })
     expect((await switching).status).toBe('current')
     expect(bridge.current(app.session)?.binding.scope).toEqual(scope)
   })

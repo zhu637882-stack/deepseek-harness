@@ -24,11 +24,14 @@ import { expect, it, vi } from 'vitest'
 import { createYimengReadHandler } from '../../qingmu-yimeng-read-adapter/src/index.ts'
 import { createYimengCommandHandler } from '../../qingmu-yimeng-command-adapter/src/index.ts'
 import { createImagoMethodHandler } from '../../qingmu-imago-method-adapter/src/index.ts'
+import type { ImagoPromptIrBootstrapMethodResponse } from '../../qingmu-imago-method-adapter/src/types.ts'
 import { normalizeDirectorContext, parseDirectorContextRequest } from '../../qingmu-yimeng-command-adapter/src/director-proposal.ts'
+import type { YimengBootstrapPromptIrResponse, YimengSelectPromptIrResponse } from '../../qingmu-yimeng-command-adapter/src/types.ts'
+import type { YimengPromptIrBootstrapResponse } from '../../qingmu-yimeng-read-adapter/src/types.ts'
 import * as ModelTools from '../src/model-tools.ts'
 import { createDirectorContextRpcHandler } from '../src/rpc.ts'
 import { toolValues } from '../src/native-draft.ts'
-import type { NativeFirstDraftInput, NativeFirstDraftProposal, DirectorObjectScope } from '../src/types.ts'
+import type { DirectorContextBridgeRpcResult, NativeFirstDraftInput, NativeFirstDraftProposal, NativeFirstDraftProposalResult, DirectorContextReadResult, DirectorObjectScope } from '../src/types.ts'
 import type { DirectorContextSnapshot } from '../../qingmu-yimeng-command-adapter/src/types.ts'
 import { runConnectedBrowser } from './connected-browser.ts'
 
@@ -48,6 +51,26 @@ interface Fixture {
   storyboardRevisionId: string
   attestationKey: string
   token: string
+}
+
+interface RpcSuccess<T> {
+  readonly ok: true
+  readonly value: T
+}
+
+function isRpcSuccess<T>(result: unknown): result is RpcSuccess<T> {
+  return result !== null && typeof result === 'object' && 'ok' in result && result.ok === true && 'value' in result
+}
+
+async function invoke<T>(
+  handler: (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<unknown>,
+  endpoint: string,
+  payload: unknown,
+  signal: AbortSignal,
+): Promise<T> {
+  const result = await handler(endpoint, payload, signal)
+  if (!isRpcSuccess<T>(result)) throw new Error(`RPC failed: ${endpoint}`)
+  return result.value
 }
 
 // Never silently skip a failed configured fixture. Missing opt-in alone skips it.
@@ -100,21 +123,16 @@ it.skipIf(!writerRoot || !coreRoot)('persists a native first draft through actua
       },
     })
     const method = createImagoMethodHandler({ coreRoot: coreRoot! })
-    const unwrap = async <T>(pending: Promise<{ ok: true; value: T } | { ok: false }>): Promise<T> => {
-      const result = await pending
-      if (!result.ok) throw new Error(JSON.stringify(result))
-      return result.value
-    }
     const frame = { projectId: fixture.scope.projectId, episodeId: fixture.scope.episodeId,
       storyboardRevisionId: fixture.storyboardRevisionId, frameId: fixture.scope.shotId }
-    const state = await unwrap(read('promptIrBootstrap', frame, signal))
+    const state = await invoke<YimengPromptIrBootstrapResponse>(read, 'promptIrBootstrap', frame, signal)
     const contextUrl = `${fixture.baseUrl}/api/qingmu/projects/${frame.projectId}/episodes/${frame.episodeId}/director-inference/context?`
       + new URLSearchParams({ sceneId: fixture.scope.sceneId, shotId: fixture.scope.shotId })
     const contextResponse = await fetch(contextUrl, { headers: { authorization: `Bearer ${token()}` } })
     expect(contextResponse.status).toBe(200)
     const helpers = { inputError: (message: string) => new Error(message), responseError: (message: string) => new Error(message) }
     normalizeDirectorContext(await contextResponse.json(), parseDirectorContextRequest(fixture.scope, helpers), helpers)
-    await unwrap(command('readDirectorContext', fixture.scope, signal))
+    await invoke<DirectorContextSnapshot>(command, 'readDirectorContext', fixture.scope, signal)
     expect(state).toMatchObject({ draft: null, ready: null })
     expect((await fetch(fixture.baseUrl + '/fixture/inspection').then(r => r.json())).counts.prompt_irs).toBe(0)
 
@@ -159,13 +177,16 @@ it.skipIf(!writerRoot || !coreRoot)('persists a native first draft through actua
       agentOptions: { provider: 'connected-scripted', model: 'fixture' }, meta: { agentPreset: 'qingmu-director' },
       setup: async agentCtx => void await ctx.agentPresets.mount(agentCtx, 'qingmu-director') })
     const bridge = createDirectorContextRpcHandler(ctx.sessions, {
-      readDirectorContext: async (scope, requestSignal) => {
+      readDirectorContext: async (scope, requestSignal): Promise<DirectorContextReadResult> => {
+        if (requestSignal === undefined) return { ok: false, reason: 'context_unavailable' }
         const result = await command('readDirectorContext', scope, requestSignal)
-        return result.ok ? { ok: true, context: result.value as DirectorContextSnapshot } : { ok: false, reason: 'unavailable' }
+        return isRpcSuccess<DirectorContextSnapshot>(result)
+          ? { ok: true, context: result.value }
+          : { ok: false, reason: 'context_unavailable' }
       },
     }, { prompt: read, method })
-    const bound = await unwrap(bridge('enter', { sessionId: handle.agent.session.id, scope: fixture.scope }, signal))
-    expect(bound.status).toBe('current')
+    const bound = await invoke<DirectorContextBridgeRpcResult>(bridge, 'enter', { sessionId: handle.agent.session.id, scope: fixture.scope }, signal)
+    if (bound.status !== 'current') throw new Error(`Context binding failed: ${bound.status}`)
     const idle = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('Native fixture turn timed out')), 20000)
       const dispose = ctx.on('agent/status', ({ agent, status }) => {
@@ -180,9 +201,9 @@ it.skipIf(!writerRoot || !coreRoot)('persists a native first draft through actua
     expect(receipt.bootstrap.contextSnapshotSha256).toBe(state.contextSnapshotSha256)
     expect(receipt.methods).toHaveLength(2)
     expect(JSON.stringify(model.requests[1]?.messages)).toContain('rough_final_feedback')
-    const current = await unwrap(bridge('readNativeFirstDraftProposal', { sessionId: handle.agent.session.id, scope: fixture.scope }, signal))
-    expect(current.status).toBe('current')
-    const suggestion = current.proposal as NativeFirstDraftProposal
+    const current = await invoke<NativeFirstDraftProposalResult>(bridge, 'readNativeFirstDraftProposal', { sessionId: handle.agent.session.id, scope: fixture.scope }, signal)
+    if (current.status !== 'current') throw new Error(`Native first draft unavailable: ${current.status}`)
+    const suggestion: NativeFirstDraftProposal = current.proposal
     expect(suggestion.editableProjection).toEqual(authored)
     // Browser opt-in performs adoption and editing in the actual component; API mode tests recovery contracts directly.
     const edited = { ...suggestion.editableProjection, imageGenPrompt: authored.imageGenPrompt + '远处站牌处于画面左侧。' }
@@ -190,36 +211,38 @@ it.skipIf(!writerRoot || !coreRoot)('persists a native first draft through actua
       await runConnectedBrowser(root, { frame, scope: fixture.scope, sessionId: handle.agent.session.id },
         edited.imageGenPrompt, { read, command, method, bridge })
     } else {
-      const compiled = await unwrap(method('promptIrBootstrapMethod', { context: state.context,
-        contextSnapshotSha256: state.contextSnapshotSha256, editableProjection: edited }, signal))
+      const compiled = await invoke<ImagoPromptIrBootstrapMethodResponse>(method, 'promptIrBootstrapMethod', { context: state.context,
+        contextSnapshotSha256: state.contextSnapshotSha256, editableProjection: edited }, signal)
       expect(compiled.projection.candidate.editableProjection).toEqual(edited)
       const marker = { ...frame, idempotencyKey: 'connected-first-draft-save',
         expectedContextSnapshotSha256: state.contextSnapshotSha256, methodProjectionSha256: compiled.projectionSha256 }
       expect(await command('bootstrapPromptIr', { ...marker, methodProjection: compiled.projection,
         methodAttestation: compiled.methodAttestation }, signal)).toMatchObject({ ok: false })
-      const recovered = await unwrap(command('recoverPromptIrBootstrap', marker, signal))
+      const recovered = await invoke<YimengBootstrapPromptIrResponse>(command, 'recoverPromptIrBootstrap', marker, signal)
       expect(recovered).toMatchObject({ deduplicated: true, promptIr: { status: 'Draft', editableProjection: edited } })
-      const persisted = await unwrap(read('promptIrBootstrap', frame, signal))
+      const persisted = await invoke<YimengPromptIrBootstrapResponse>(read, 'promptIrBootstrap', frame, signal)
+      if (persisted.draft === null) throw new Error('Expected recovered draft')
       expect(persisted.draft.editableProjection).toEqual(edited)
       expect(persisted.ready).toBeNull()
       expect(savePosts).toBe(1)
       expect(await command('recoverPromptIrBootstrap', { ...marker, methodProjectionSha256: '0'.repeat(64) }, signal)).toMatchObject({ ok: false })
-      const obsolete = await unwrap(bridge('readNativeFirstDraftProposal', { sessionId: handle.agent.session.id, scope: fixture.scope }, signal))
+      const obsolete = await invoke<NativeFirstDraftProposalResult>(bridge, 'readNativeFirstDraftProposal', { sessionId: handle.agent.session.id, scope: fixture.scope }, signal)
       expect(obsolete.status).not.toBe('current')
-      const fresh = await unwrap(method('promptIrBootstrapMethod', { context: persisted.context,
+      const fresh = await invoke<ImagoPromptIrBootstrapMethodResponse>(method, 'promptIrBootstrapMethod', { context: persisted.context,
         contextSnapshotSha256: persisted.contextSnapshotSha256, editableProjection: persisted.draft.editableProjection,
-        selectionChallenge: persisted.selectionChallenge }, signal))
+        selectionChallenge: persisted.selectionChallenge }, signal)
       const selection = { ...frame, draftPromptIrId: persisted.draft.promptIrId,
         draftVersion: persisted.draft.promptIrVersion, draftContentSha256: persisted.draft.promptIrContentSha256,
         bootstrapMethodSha256: recovered.methodSha256, methodProjection: fresh.projection,
         methodProjectionSha256: fresh.projectionSha256, methodAttestation: fresh.methodAttestation,
         selectionChallenge: persisted.selectionChallenge, selectionFreshnessAttestation: fresh.selectionFreshnessAttestation,
         idempotencyKey: 'connected-first-draft-select' }
-      await unwrap(command('selectBootstrapPromptIr', selection, signal))
+      await invoke<YimengSelectPromptIrResponse>(command, 'selectBootstrapPromptIr', selection, signal)
     }
     // A new reader represents the outer workspace refresh, not the save response.
     const refreshedReader = createYimengReadHandler({ baseUrl: fixture.baseUrl }, { fetch, readToken: token })
-    const refreshed = await unwrap(refreshedReader('promptIrBootstrap', frame, signal))
+    const refreshed = await invoke<YimengPromptIrBootstrapResponse>(refreshedReader, 'promptIrBootstrap', frame, signal)
+    if (refreshed.ready === null) throw new Error('Expected selected PromptIR')
     expect(refreshed.ready.editableProjection).toEqual(edited)
     expect(refreshed.ready.status).toBe('Ready')
     expect(refreshed.draft).toBeNull()

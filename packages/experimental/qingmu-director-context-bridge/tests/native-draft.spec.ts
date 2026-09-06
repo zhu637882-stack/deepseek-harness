@@ -1,12 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { CallId, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { CallId, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import type { DirectorContextSnapshot } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import * as ModelTools from '../src/model-tools.ts'
 import { draftContext, draftPrompt, draftMethod, draftScope, firstDraftBootstrap } from '../examples/native-draft-fixture.ts'
 import { createDirectorContextRpcHandler } from '../src/rpc.ts'
@@ -56,9 +55,9 @@ async function harness() {
     const index = step++; const callId = CallId(`call-${index}`)
     if (log) session.append('tool/call', { turn: 0, step: index, callId, name, arguments: JSON.stringify(args) })
     const result = await ctx.tools.execute({ callId, name, arguments: args, agent, signal })
-    if (log) session.append('tool/result', { turn: 0, step: index, message: {
-      role: 'tool', content: [{ type: 'tool-result', toolCallId: callId, content: result.content, isError: result.isError }],
-    } }, { surfaceOp: 'append' })
+    if (log) session.append('tool/result', { turn: 0, step: index,
+      message: createToolResultMessage({ callId, content: result.content, isError: result.isError }),
+    }, { surfaceOp: 'append' })
     return result
   }
   const proposal = async (receiptId?: string) => {
@@ -66,7 +65,7 @@ async function harness() {
     return run('qingmu_propose_prompt_edit', { receiptId: input, field: 'imageGenPrompt', replacement: '门在人物左侧，背面中景。', reason: '明确空间与可见性。' })
   }
   const rpc = createDirectorContextRpcHandler({ get: id => id === session.id ? session : undefined }, {
-    readDirectorContext: async () => ({ ok: true, context: current.context as DirectorContextSnapshot }),
+    readDirectorContext: async () => ({ ok: true, context: current.context }),
   }, { prompt: ctx.qingmuYimengRead, method: ctx.qingmuImagoMethod })
   const read = (scope = draftScope, signal = new AbortController().signal) => rpc('readNativeDraftProposal', { sessionId: session.id, scope }, signal)
   const readFirst = () => rpc('readNativeFirstDraftProposal', { sessionId: session.id, scope: draftScope }, new AbortController().signal)

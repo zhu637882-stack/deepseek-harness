@@ -102,6 +102,8 @@
     "examples/*/start.ts",
     "examples/*/tests/**/*.ts",
     "packages/*/*/tests/**/*.ts",
+    "packages/experimental/qingmu-director-context-bridge/examples/model-tools-keyless.ts",
+    "packages/experimental/qingmu-director-context-bridge/examples/native-draft-fixture.ts",
     "scripts/**/*.ts",
     "website/**/*.ts",
     "website/.vitepress/**/*.ts"

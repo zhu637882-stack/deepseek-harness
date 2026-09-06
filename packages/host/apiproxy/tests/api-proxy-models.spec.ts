@@ -24,6 +24,12 @@ import type { RpcRequest } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
 import { RpcId } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
 import { createApiProxy } from '../src/api-proxy.ts'
 
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    'test/extension-state': null | boolean | string | Record<string, never>
+  }
+}
+
 let nextRpc = 1
 function request<P>(payload: P): RpcRequest<P> {
   return { rpcId: RpcId(`models-${String(nextRpc++)}`), payload }
@@ -244,7 +250,7 @@ describe('Web session model selection', () => {
       defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
       cwd: '/tmp',
     })
-    agent.session.append('test/extension-state' as never, payload as never)
+    agent.session.append('test/extension-state', payload)
     agent.session.append('agent/inbox/spliced', {
       target: 'next-turn',
       start: 0,

@@ -19,6 +19,7 @@ import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import * as Persona from '@deepseek-ai/dsh-persona'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import * as ModelTools from '../src/model-tools.ts'
+import type { DirectorContextSnapshot } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 
 const roots: string[] = []
 const contexts: Context[] = []
@@ -39,11 +40,14 @@ const roughFinalFeedback = [
 function snapshot(contextSnapshotSha256 = sha) {
   return {
     schema: 'jason.qingmu-director-context-snapshot.v1', ...scope, contextSnapshotSha256,
-    shot: { id: scope.shotId, narrative: '铃声先响，她停在门口。' },
-    sourceScene: { dialogue: '谁在那里？' }, selectedReferences: [],
+    script: { revision: 1, sha256: '0'.repeat(64) }, sceneSource: {}, sourceTime: '2026-09-07T00:00:00Z',
+    storyboard: { id: 'revision-1', version: 1, status: 'Ready' as const, sourceHash: 'b'.repeat(64) },
+    shot: { id: scope.shotId, title: '门口', narrative: '铃声先响，她停在门口。', visual: '门口中景。',
+      action: '她停顿。', durationSec: 4, dialogueLineIds: [] },
+    sourceScene: { dialogue: '谁在那里？' }, creativeContract: null, selectedReferences: [],
     providerCalls: 0, costAmountCny: '0', businessStateChanged: false,
     humanDecisionInferred: false, formalQcInferred: false, selectionGranted: false, readyGranted: false,
-  }
+  } satisfies DirectorContextSnapshot
 }
 
 function bind(agent: Agent, contextSnapshotSha256 = sha): void {
@@ -62,8 +66,8 @@ function waitForIdle(ctx: Context, agent: Agent): Promise<void> {
 
 function resultText(events: readonly SessionEvent[], name: string): string {
   const call = events.find(item => item.type === 'tool/call' && item.data.name === name)
-  const event = call === undefined ? undefined : events.find(item =>
-    item.type === 'tool/result' && item.data.message.source.callId === call.data.callId)
+  if (call === undefined || call.type !== 'tool/call') throw new Error(`tool call missing: ${name}`)
+  const event = events.find(item => item.type === 'tool/result' && item.data.message.source.callId === call.data.callId)
   if (event === undefined || event.type !== 'tool/result') throw new Error(`tool result missing: ${name}`)
   return event.data.message.content.flatMap(part => part.content)
     .filter(block => block.type === 'text').map(block => block.text).join('')

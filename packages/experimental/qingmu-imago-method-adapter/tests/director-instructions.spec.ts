@@ -17,13 +17,13 @@ const C_PATHS = [
   'skill-package/imago-c-director-development/references/director-evidence-standard.md',
   'skill-package/imago-c-director-development/references/scene-performance-blocking-method.md',
   'skill-package/imago-c-director-development/references/coverage-media-review-method.md',
-]
+] as const
 const C5_PATHS = [
   'skill-package/imago-c5-execution-storyboard/SKILL.md',
   'skill-package/imago-c5-execution-storyboard/references/execution-closure-standard.md',
   'skill-package/imago-c5-execution-storyboard/references/shot-grammar-continuity-lsu-method.md',
   'skill-package/imago-c5-execution-storyboard/references/director-storyboard-production-loop.md',
-]
+] as const
 const C5_ADDITIONAL_PATH = 'skill-package/imago-c5-execution-storyboard/references/rough-final-feedback-closure-method.md'
 
 afterEach(async () => {

@@ -7,7 +7,7 @@ import type { DirectorContextClientPort, NativeDirectorReadiness } from '@deepse
 import { NativeDirectorSession } from '../src/client/NativeDirectorSession.tsx'
 import { NativeDirectorComposer } from '../src/client/NativeDirectorComposer.tsx'
 import { createNativeDirectorSessionPort } from '../src/client/native-director-session.ts'
-import { directorConnectionFixture } from './director-connection-fixture.ts'
+import { directorConnectionFixture } from './director-connection-fixture.client.ts'
 
 afterEach(() => { cleanup(); sessionStorage.clear() })
 const ok = <T,>(value: T) => ({ result: { ok: true as const, value } })

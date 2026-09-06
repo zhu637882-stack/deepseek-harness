@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { PromptIrWorkspace } from '../src/client/PromptIrWorkspace.tsx'
 import type { QingmuYimengPort } from '../src/client/contracts.ts'
 import { zh } from '../src/client/locales.ts'
-import { directorConnectionFixture } from './director-connection-fixture.ts'
+import { directorConnectionFixture } from './director-connection-fixture.client.ts'
 import type { DirectorContextClientPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 
 const PROJECT = 'project-1'

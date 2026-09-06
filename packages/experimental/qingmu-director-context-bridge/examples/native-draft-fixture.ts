@@ -1,14 +1,16 @@
 /** Keyless input examples: these are not user-project or Provider evidence. */
 export const draftScope = { projectId: 'example-project', episodeId: 'example-episode', sceneId: 'example-scene', shotId: 'example-shot' }
 export const draftContext = {
-  schema: 'jason.qingmu-director-context-snapshot.v1', ...draftScope, contextSnapshotSha256: 'a'.repeat(64),
-  storyboard: { id: 'revision-1', version: 1, status: 'Ready', sourceHash: 'b'.repeat(64) },
-  shot: { id: draftScope.shotId, narrative: '门铃响起，她停在门口。' }, sourceScene: {}, selectedReferences: [],
+  schema: 'jason.qingmu-director-context-snapshot.v1' as const, ...draftScope, contextSnapshotSha256: 'a'.repeat(64),
+  script: { revision: 1, sha256: '0'.repeat(64) }, sceneSource: {}, sourceTime: '2026-09-07T00:00:00Z',
+  storyboard: { id: 'revision-1', version: 1, status: 'Ready' as const, sourceHash: 'b'.repeat(64) },
+  shot: { id: draftScope.shotId, title: '门口停顿', narrative: '门铃响起，她停在门口。', visual: '门在画面左侧。',
+    action: '她停住并听铃声。', durationSec: 4, dialogueLineIds: [] }, sourceScene: {}, creativeContract: null, selectedReferences: [],
   episodeScenes: [{ sceneIndex: 1, title: '门口', current: true }],
   cast: [{ actorId: 'example-actor', name: '小雨', identity: '短发' }],
   adjacentShots: { previous: null, next: { id: 'example-shot-2', title: '反应', action: '停顿' } },
-  providerCalls: 0, costAmountCny: '0', businessStateChanged: false,
-  humanDecisionInferred: false, formalQcInferred: false, selectionGranted: false, readyGranted: false,
+  providerCalls: 0 as const, costAmountCny: '0' as const, businessStateChanged: false as const,
+  humanDecisionInferred: false as const, formalQcInferred: false as const, selectionGranted: false as const, readyGranted: false as const,
 }
 export const draftPrompt = {
   schema: 'jason.qingmu-prompt-ir-subject-read.v1', baseRevision: 1, baseSnapshotSha256: 'c'.repeat(64), draft: null,
