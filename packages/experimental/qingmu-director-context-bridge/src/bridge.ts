@@ -19,6 +19,7 @@ import type {
 
 const SHA256 = /^[0-9a-f]{64}$/u
 const sessionOperationEpochs = new WeakMap<Session, number>()
+const browserOwners = new WeakMap<Session, { ownerId: string; scope: DirectorObjectScope }>()
 
 interface SessionOperation {
   readonly epoch: number
@@ -75,7 +76,7 @@ function currentState(session: Session): DirectorContextBindingState | null {
   for (let index = session.events.length - 1; index >= 0; index -= 1) {
     const event = session.events[index]
     if (event?.type === 'qingmu-director-context/state') {
-      return directorContextBindingStateSchema.parse(event.data)
+      return event.data === null ? null : directorContextBindingStateSchema.parse(event.data)
     }
   }
   return null
@@ -173,21 +174,38 @@ export function createDirectorContextBridge(port: DirectorContextReadPort): Dire
       session: Session,
       scope: DirectorObjectScope,
       signal?: AbortSignal,
+      ownerId?: string,
     ): Promise<DirectorContextEntryResult> {
       assertScope(scope)
-      const operation = beginOperation(session)
       const previous = currentState(session)
+      if (signal?.aborted) {
+        return { status: 'unavailable', state: previous, changed: false,
+          reason: 'context_unavailable', manualWorkAllowed: true }
+      }
+      if (ownerId !== undefined) {
+        if (!/^[A-Za-z0-9_.:-]{1,256}$/u.test(ownerId)) throw new Error('invalid director binding owner')
+        browserOwners.set(session, { ownerId, scope: { ...scope } })
+      } else {
+        const owner = browserOwners.get(session)
+        if (owner !== undefined && !scopeEquals(owner.scope, scope)) browserOwners.delete(session)
+      }
+      const sameScope = previous !== null && scopeEquals(previous.binding.scope, scope)
+      // Invalidate before I/O so native tools cannot refresh the old shot while
+      // the newly selected object is loading. Null survives failed reads/replay.
+      const cleared = previous !== null && !sameScope
+      if (cleared) session.append('qingmu-director-context/state', null)
+      const operation = beginOperation(session)
       const result = await readContext(scope, signal)
       if (!isCurrentOperation(session, operation)) {
         return { status: 'superseded', state: currentState(session), changed: false, manualWorkAllowed: true }
       }
-      if (!result.ok) {
+      if (signal?.aborted || !result.ok) {
         return {
-          status: 'unavailable', state: previous, changed: false, reason: result.reason, manualWorkAllowed: true,
+          status: 'unavailable', state: currentState(session), changed: cleared,
+          reason: result.ok ? 'context_unavailable' : result.reason, manualWorkAllowed: true,
         }
       }
       assertContext(scope, result.context)
-      const sameScope = previous !== null && scopeEquals(previous.binding.scope, scope)
       const sameContext = sameScope
         && previous.binding.contextSnapshotSha256 === result.context.contextSnapshotSha256
       if (sameContext) {
@@ -206,12 +224,26 @@ export function createDirectorContextBridge(port: DirectorContextReadPort): Dire
       }
     },
 
+    /** Release only the matching browser lease; old-view cleanup cannot clear a new selection. */
+    clear(session, scope, ownerId) {
+      const owner = browserOwners.get(session)
+      const state = currentState(session)
+      if (owner?.ownerId !== ownerId || !scopeEquals(owner.scope, scope)
+        || (state !== null && !scopeEquals(state.binding.scope, scope))) {
+        return { status: 'superseded', state, changed: false, manualWorkAllowed: true }
+      }
+      supersedePendingOperations(session)
+      browserOwners.delete(session)
+      if (state !== null) session.append('qingmu-director-context/state', null)
+      return { status: 'cleared', state: null, changed: state !== null, manualWorkAllowed: true }
+    },
+
     /** Attach only an advisory proposal whose existing freshness coordinates match the active binding. */
     bindProposal(session: Session, proposal: DirectorReplayProposal): DirectorContextBindingState {
-      supersedePendingOperations(session)
       const state = currentState(session)
       if (state === null) throw new Error('cannot bind a director proposal to an unbound session')
       assertProposal(state, proposal)
+      supersedePendingOperations(session)
       return appendState(session, {
         ...state,
         proposal: freshnessBinding(proposal),
@@ -221,15 +253,19 @@ export function createDirectorContextBridge(port: DirectorContextReadPort): Dire
 
     /** Rebuild state from the durable log, reread context, and invalidate a proposal on SHA drift. */
     async recover(session: Session, signal?: AbortSignal): Promise<DirectorContextRecoveryResult> {
-      const operation = beginOperation(session)
       const state = currentState(session)
       if (state === null) return { status: 'unbound', manualWorkAllowed: true }
+      if (signal?.aborted) {
+        return { status: 'unavailable', state, reason: 'context_unavailable', manualWorkAllowed: true }
+      }
+      const operation = beginOperation(session)
       const result = await readContext(state.binding.scope, signal)
       if (!isCurrentOperation(session, operation)) {
         return { status: 'superseded', state: currentState(session), manualWorkAllowed: true }
       }
-      if (!result.ok) {
-        return { status: 'unavailable', state, reason: result.reason, manualWorkAllowed: true }
+      if (signal?.aborted || !result.ok) {
+        return { status: 'unavailable', state,
+          reason: result.ok ? 'context_unavailable' : result.reason, manualWorkAllowed: true }
       }
       assertContext(state.binding.scope, result.context)
       if (result.context.contextSnapshotSha256 === state.binding.contextSnapshotSha256) {

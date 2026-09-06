@@ -165,7 +165,10 @@ export function apply(ctx: ClientContext): void {
   ): Promise<T> => unwrapRpc(await connection.rpc.call('/qingmu-director-context', endpoint, payload, signal)) as T
 
   const directorBridge: DirectorContextClientPort = {
-    enter: (sessionId, scope, signal) => director<DirectorContextEntryResult>('enter', { sessionId, scope }, signal),
+    enter: (sessionId, scope, signal, ownerId) => director<DirectorContextEntryResult>('enter', {
+      sessionId, scope, ...(ownerId === undefined ? {} : { ownerId }),
+    }, signal),
+    clear: (sessionId, scope, ownerId, signal) => director('clear', { sessionId, scope, ownerId }, signal),
     recover: (sessionId, signal) => director<DirectorContextRecoveryResult>('recover', { sessionId }, signal),
     bindProposal: (sessionId, proposal, signal) => director('bindProposal', { sessionId, proposal }, signal),
   }

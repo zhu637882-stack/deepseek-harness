@@ -13,6 +13,7 @@
     { "path": "../../client/ui-primitives" },
     { "path": "../../client/ui-sidebar" },
     { "path": "../../client/ui-slots" },
+    { "path": "../qingmu-director-context-bridge" },
     { "path": "../qingmu-imago-method-adapter" },
     { "path": "../qingmu-yimeng-command-adapter" },
     { "path": "../qingmu-yimeng-read-adapter" }

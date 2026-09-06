@@ -63,7 +63,8 @@ export type DirectorContextEntryResult =
   | {
     readonly status: 'unavailable'
     readonly state: DirectorContextBindingState | null
-    readonly changed: false
+    /** True when switching objects cleared the previous binding before a failed read. */
+    readonly changed: boolean
     readonly reason: 'context_unavailable' | 'model_unavailable'
     readonly manualWorkAllowed: true
   }
@@ -103,13 +104,23 @@ export type DirectorContextRecoveryResult =
     readonly manualWorkAllowed: true
   }
 
+/** Clearing is conditional on the active browser binding lease, not a business mutation. */
+export interface DirectorContextClearResult {
+  readonly status: 'cleared' | 'superseded'
+  readonly state: DirectorContextBindingState | null
+  readonly changed: boolean
+  readonly manualWorkAllowed: true
+}
+
 /** Future UI and Host integration surface; every mutating method writes only the DSh session log. */
 export interface DirectorContextBridge {
   enter(
     session: Session,
     scope: DirectorObjectScope,
     signal?: AbortSignal,
+    ownerId?: string,
   ): Promise<DirectorContextEntryResult>
+  clear(session: Session, scope: DirectorObjectScope, ownerId: string): DirectorContextClearResult
   bindProposal(session: Session, proposal: DirectorReplayProposal): DirectorContextBindingState
   recover(session: Session, signal?: AbortSignal): Promise<DirectorContextRecoveryResult>
   current(session: Session): DirectorContextBindingState | null
@@ -117,7 +128,7 @@ export interface DirectorContextBridge {
 }
 
 /** Safe client-visible facade result; only scopes, SHAs and status cross the browser boundary. */
-export type DirectorContextBridgeRpcResult = DirectorContextEntryResult | DirectorContextRecoveryResult | {
+export type DirectorContextBridgeRpcResult = DirectorContextEntryResult | DirectorContextRecoveryResult | DirectorContextClearResult | {
   readonly status: 'bound'
   readonly state: DirectorContextBindingState
   readonly manualWorkAllowed: true
@@ -125,7 +136,8 @@ export type DirectorContextBridgeRpcResult = DirectorContextEntryResult | Direct
 
 /** Browser port for one current DSh session. */
 export interface DirectorContextClientPort {
-  enter(sessionId: string, scope: DirectorObjectScope, signal?: AbortSignal): Promise<DirectorContextEntryResult>
+  enter(sessionId: string, scope: DirectorObjectScope, signal?: AbortSignal, ownerId?: string): Promise<DirectorContextEntryResult>
+  clear(sessionId: string, scope: DirectorObjectScope, ownerId: string, signal?: AbortSignal): Promise<DirectorContextClearResult>
   recover(sessionId: string, signal?: AbortSignal): Promise<DirectorContextRecoveryResult>
   bindProposal(sessionId: string, proposal: DirectorReplayProposal, signal?: AbortSignal): Promise<{
     readonly status: 'bound'
@@ -136,8 +148,8 @@ export interface DirectorContextClientPort {
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
-    /** Whole-value, log-only snapshot of the session's current Qingmu director binding. */
-    'qingmu-director-context/state': DirectorContextBindingState
+    /** Whole-value, log-only binding; null clears an obsolete object before switch I/O. */
+    'qingmu-director-context/state': DirectorContextBindingState | null
   }
 }
 

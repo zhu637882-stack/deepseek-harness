@@ -540,11 +540,11 @@ Source: [`packages/plan/plan-mode/src/index.ts:53`](../packages/plan/plan-mode/s
 #### `qingmu-director-context/state` — log-only
 
 ```ts persistence-catalog
-/** Whole-value, log-only snapshot of the session's current Qingmu director binding. */
-'qingmu-director-context/state': DirectorContextBindingState
+/** Whole-value, log-only binding; null clears an obsolete object before switch I/O. */
+'qingmu-director-context/state': DirectorContextBindingState | null
 ```
 
-Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:140`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:152`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
 
 ### `request/*`
 

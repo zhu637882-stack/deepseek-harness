@@ -32,6 +32,13 @@ export interface DirectorWorkspaceProps {
  * @returns Scoped director workspace.
  */
 export function DirectorWorkspace(props: DirectorWorkspaceProps) {
+  const currentProjection = props.projection?.projectId === props.projectId
+    && props.projection.episodeId === props.episodeId ? props.projection : undefined
+  const selectedShot = currentProjection?.director.shotRelations.shots.find(shot => shot.shotId === props.selectedShotId)
+  const canonicalDirectorScope = selectedShot ? {
+    projectId: props.projectId, episodeId: props.episodeId,
+    sceneId: selectedShot.sceneId, shotId: selectedShot.shotId,
+  } : null
   const [productionMounted, setProductionMounted] = useState(false)
   const [planningDirty, setPlanningDirty] = useState(false)
   const [promptDirty, setPromptDirty] = useState(false)
@@ -40,7 +47,10 @@ export function DirectorWorkspace(props: DirectorWorkspaceProps) {
     return () => { props.onUnsavedChange(false) }
   }, [planningDirty, promptDirty, props.onUnsavedChange])
   return <>
-    <ScenePlanningWorkspace key={`${props.projectId}:${props.episodeId}`} {...props} onUnsavedChange={setPlanningDirty} />
+    <ScenePlanningWorkspace key={`${props.projectId}:${props.episodeId}`} {...props}
+      canonicalDirectorScope={canonicalDirectorScope}
+      canonicalDirectorRevision={JSON.stringify(currentProjection?.director.shotRelations.storyboardRevision)}
+      onUnsavedChange={setPlanningDirty} />
     <details onToggle={(event) => { if (event.currentTarget.open) setProductionMounted(true) }}>
       <summary>已有提示词、Take 与高级分镜</summary>
       {productionMounted && <ExistingDirectorWorkspace {...props} onUnsavedChange={setPromptDirty} />}

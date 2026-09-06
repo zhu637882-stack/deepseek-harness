@@ -6,15 +6,17 @@
 
 ## 挂载接口
 
-`createDirectorContextBridge(readPort)` 提供 `enter`、`bindProposal`、`recover`、`current` 和 `freshnessRequest`。read port 必须复用现有已规范化的 `director-inference/context` adapter 路径，不得创建 work order、调用模型、派发 Provider 或写易梦业务状态。
+`createDirectorContextBridge(readPort)` 提供 `enter`、`clear`、`bindProposal`、`recover`、`current` 和 `freshnessRequest`。read port 必须复用现有已规范化的 `director-inference/context` adapter 路径，不得创建 work order、调用模型、派发 Provider 或写易梦业务状态。
 
-`enter` 绑定或切换精确四级对象；切换时清空前一对象的 proposal。`bindProposal` 只接受现有 command adapter 返回、且 scope 和 input SHA 与当前绑定一致的 replay proposal。`freshnessRequest` 直接返回现有 command adapter 的 freshness 坐标，不另造合同。
+`enter` 绑定或切换精确四级对象。Host 接受尚未取消的不同对象进入请求后，先在 I/O 前追加空绑定事件，清除前一对象和 proposal。此后读取等待、失败或取消时，原生工具不能读取旧镜头；冷回放保持未绑定，直到成功进入新对象。若进入失败前清除了旧绑定，返回 `changed: true`。进入前已经取消的请求不读取、不写日志。`bindProposal` 只接受现有 command adapter 返回、且 scope 和 input SHA 与当前绑定一致的 replay proposal。`freshnessRequest` 直接返回现有 command adapter 的 freshness 坐标，不另造合同。
+
+浏览器每次视图绑定提供新的 `ownerId`。`clear(session, scope, ownerId)` 比较当前 owner 与 scope 后才清除绑定或取消待完成进入；旧清理回调不能清除较新视图，即使二者指向同一镜头。无 owner 的原生刷新保留同 scope 的浏览器 owner，进入不同对象则撤销它。owner 只是运行期清理租约，不是认证或业务权威。
 
 `recover` 先折叠持久 DSh 日志，再重新读取当前易梦 context。context SHA 发生变化时，自动追加新的完整绑定并清空旧 proposal。context 或模型能力不可用时，保留最后已知绑定并返回 `manualWorkAllowed: true`，不阻断普通人工编辑。
 
-异步进入和恢复使用 Session 级操作代次与 binding 事件 CAS。迟到结果返回 `superseded`，不能覆盖较新的对象选择或 proposal 挂接。
+异步进入和恢复使用 Session 级操作代次与 binding 事件 CAS。迟到结果返回 `superseded`，不能覆盖较新的对象选择或 proposal 挂接。未绑定时的恢复、被拒绝的 proposal 挂接不会取消正在等待的进入操作。投影状态仍为可空的版本 1；产生空事件之前，须一起交付更新后的事件读取器。
 
-Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopback 的浏览器 facade。青木 bundle 在 cockpit 之前挂载它，现有场景规划工作区显示当前绑定，并用它核验 replay proposal 谱系。facade 不会暴露底层 Host command handler、token、Provider payload 或 permit。
+Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopback 的浏览器 facade。青木 bundle 在 cockpit 之前挂载它。工作区把旧规划镜头或选中的权威自动分镜绑定到同一当前会话；自动分镜绑定不会启用旧规划保存。facade 不会暴露底层 Host command handler、token、Provider payload 或 permit。
 
 ## 权威与副作用
 
@@ -67,6 +69,7 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 
 ## 已知限制与后续工作
 
+- 运行期 owner 不跨 Host 重启保留。已持久化的成功绑定仍按原会话语义恢复，已持久化空值则保持未绑定。存活的浏览器须重新进入以取得新的清理租约。离线或被拒的清理不能保证解除绑定；界面仍挂载且没有新绑定时，会报告清理未确认。
 - 原生读取工具组合已通过 Loader 预设和脚本化模型传输验证。这不证明生产启用、真实模型创作质量、建议采用或生成已完成。
 - proposal 的 method 漂移仍由现有 `checkDirectorProposalFreshness` command 路径检查。本桥自动处理 context SHA 漂移，并保留该 freshness 所需坐标。
 - 本包没有启用真实 DeepSeek 路由、凭据、外部请求、费用或生产 canary。

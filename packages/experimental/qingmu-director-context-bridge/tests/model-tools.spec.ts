@@ -7,7 +7,10 @@ import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
+import type { DirectorContextSnapshot } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import * as ModelTools from '../src/model-tools.ts'
+import { createDirectorContextBridge } from '../src/bridge.ts'
+import type { DirectorContextReadResult } from '../src/types.ts'
 
 const contexts: Context[] = []
 afterEach(async () => {
@@ -104,6 +107,24 @@ describe('native director read tools', () => {
     expect(app.session.events).toEqual(before)
   })
 
+  it('cannot read the old shot or cancel a pending UI switch from a native tool', async () => {
+    let calls = 0
+    const app = await harness(async () => { calls += 1; return { ok: true, value: snapshot() } })
+    bind(app.session)
+    let finish!: (value: DirectorContextReadResult) => void
+    const read = new Promise<DirectorContextReadResult>((resolve) => { finish = resolve })
+    const bridge = createDirectorContextBridge({ readDirectorContext: () => read })
+    const scope = { ...objectScope, shotId: 'other-shot' }
+    const switching = bridge.enter(app.session, scope)
+
+    expect((await app.run('qingmu_read_bound_context')).isError).toBe(true)
+    expect((await app.run('qingmu_get_imago_method', { capability: 'shot_design' })).isError).toBe(true)
+    expect(calls).toBe(0)
+    finish({ ok: true, context: { ...snapshot(), ...scope } as DirectorContextSnapshot })
+    expect((await switching).status).toBe('current')
+    expect(bridge.current(app.session)?.binding.scope).toEqual(scope)
+  })
+
   it('rejects a late read after the user switches shots', async () => {
     let complete!: () => void
     const ready = new Promise<void>((resolve) => { complete = resolve })
@@ -157,7 +178,7 @@ describe('native director read tools', () => {
     expect(calls).toHaveLength(1)
   })
 
-  it.each(['switch', 'cancel'] as const)('rejects method results after a %s during the read', async (change) => {
+  it.each(['switch', 'clear', 'cancel'] as const)('rejects method results after a %s during the read', async (change) => {
     let complete!: () => void
     const ready = new Promise<void>((resolve) => { complete = resolve })
     let requested!: () => void
@@ -172,6 +193,7 @@ describe('native director read tools', () => {
     const result = app.run('qingmu_get_imago_method', { capability: 'shot_design' }, controller.signal)
     await started
     if (change === 'switch') bind(app.session, 'b'.repeat(64), 'other-shot')
+    else if (change === 'clear') app.session.append('qingmu-director-context/state', null)
     else controller.abort()
     complete()
     const settled = await result

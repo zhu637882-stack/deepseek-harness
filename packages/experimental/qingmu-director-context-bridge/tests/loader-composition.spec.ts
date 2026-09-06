@@ -69,6 +69,8 @@ describe('real Loader composition', () => {
 
     expect(loaded.sessionProjections.snapshot(session).values.qingmuDirectorContext)
       .toMatchObject({ binding: { scope: { projectId: 'p', sceneId: 's', shotId: 'h' } } })
+    session.append('qingmu-director-context/state', null)
+    expect(loaded.sessionProjections.snapshot(session).values.qingmuDirectorContext).toBeNull()
   })
 
   it('keeps the function-plugin namespace free of a default export', () => {

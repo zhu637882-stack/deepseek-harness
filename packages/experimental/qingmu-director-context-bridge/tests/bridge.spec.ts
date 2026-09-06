@@ -138,6 +138,105 @@ describe('Qingmu director context bridge', () => {
     expect(bridge.current(session)?.binding).toEqual({ scope: secondScope, contextSnapshotSha256: sha('2') })
   })
 
+  it('clears the old binding before a switch and keeps failed switches unbound after cold replay', async () => {
+    const session = Session.create(SessionId('failed-switch'))
+    const initial = createDirectorContextBridge(queuedPort({ ok: true, context: context(firstScope, sha('a')) }))
+    await initial.enter(session, firstScope)
+    initial.bindProposal(session, proposal(firstScope, sha('a')))
+    const read = deferred<DirectorContextReadResult>()
+    const bridge = createDirectorContextBridge({ readDirectorContext: () => read.promise })
+    const switching = bridge.enter(session, secondScope)
+
+    expect(bridge.current(session)).toBeNull()
+    expect(bridge.freshnessRequest(session)).toBeNull()
+    read.resolve({ ok: false, reason: 'context_unavailable' })
+    expect(await switching).toMatchObject({ status: 'unavailable', state: null, changed: true })
+    const resumed = Session.create(session.id, structuredClone(session.events))
+    expect(await initial.recover(resumed)).toEqual({ status: 'unbound', manualWorkAllowed: true })
+    expect(initial.current(resumed)).toBeNull()
+  })
+
+  it('does not let unbound recovery or rejected proposals cancel an in-flight switch', async () => {
+    const session = Session.create(SessionId('switch-recovery'))
+    const initial = createDirectorContextBridge(queuedPort({ ok: true, context: context(firstScope, sha('a')) }))
+    await initial.enter(session, firstScope)
+    const read = deferred<DirectorContextReadResult>()
+    const bridge = createDirectorContextBridge({ readDirectorContext: () => read.promise })
+    const switching = bridge.enter(session, secondScope)
+
+    expect(await bridge.recover(session)).toEqual({ status: 'unbound', manualWorkAllowed: true })
+    expect(() => bridge.bindProposal(session, proposal(firstScope, sha('a')))).toThrow(/unbound/u)
+    read.resolve({ ok: true, context: context(secondScope, sha('2')) })
+    expect((await switching).status).toBe('current')
+    expect(bridge.current(session)?.binding.scope).toEqual(secondScope)
+  })
+
+  it('releases a view lease after native refresh and cannot let old same-shot cleanup clear a new lease', async () => {
+    const bridge = createDirectorContextBridge({ readDirectorContext: async scope => ({ ok: true, context: context(scope, sha('a')) }) })
+    const session = Session.create(SessionId('view-leases'))
+    await bridge.enter(session, firstScope, undefined, 'old-view')
+    await bridge.enter(session, firstScope, undefined, 'new-view')
+    expect(bridge.clear(session, firstScope, 'old-view').status).toBe('superseded')
+    expect(bridge.clear(session, secondScope, 'new-view').status).toBe('superseded')
+    await bridge.enter(session, firstScope)
+    expect(bridge.clear(session, firstScope, 'new-view')).toEqual({
+      status: 'cleared', state: null, changed: true, manualWorkAllowed: true,
+    })
+    const resumed = Session.create(session.id, structuredClone(session.events))
+    expect(await bridge.recover(resumed)).toEqual({ status: 'unbound', manualWorkAllowed: true })
+
+    await bridge.enter(session, firstScope, undefined, 'another-view')
+    await bridge.enter(session, secondScope)
+    expect(bridge.clear(session, firstScope, 'another-view').status).toBe('superseded')
+    expect(bridge.current(session)?.binding.scope).toEqual(secondScope)
+  })
+
+  it('clears a pending selection without letting late success restore it', async () => {
+    const session = Session.create(SessionId('clear-pending'))
+    const initial = createDirectorContextBridge(queuedPort({ ok: true, context: context(firstScope, sha('a')) }))
+    await initial.enter(session, firstScope, undefined, 'old-view')
+    const read = deferred<DirectorContextReadResult>()
+    const bridge = createDirectorContextBridge({ readDirectorContext: () => read.promise })
+    const switching = bridge.enter(session, secondScope, undefined, 'new-view')
+    expect(bridge.clear(session, firstScope, 'old-view').status).toBe('superseded')
+    expect(bridge.clear(session, secondScope, 'new-view').status).toBe('cleared')
+    read.resolve({ ok: true, context: context(secondScope, sha('b')) })
+    expect((await switching).status).toBe('superseded')
+    expect(bridge.current(session)).toBeNull()
+  })
+
+  it('does not transfer ownership on a pre-aborted entry or honor pre-restart leases', async () => {
+    const session = Session.create(SessionId('lease-restart'))
+    const bridge = createDirectorContextBridge(queuedPort({ ok: true, context: context(firstScope, sha('a')) }))
+    await bridge.enter(session, firstScope, undefined, 'old-view')
+    await bridge.enter(session, secondScope, AbortSignal.abort(), 'aborted-view')
+    expect(bridge.clear(session, secondScope, 'aborted-view').status).toBe('superseded')
+    const resumed = Session.create(session.id, structuredClone(session.events))
+    // Restart restores the successful binding, not an old browser's runtime ownership.
+    expect(bridge.clear(resumed, firstScope, 'old-view').status).toBe('superseded')
+    expect(bridge.current(resumed)?.binding.scope).toEqual(firstScope)
+    expect(bridge.clear(session, firstScope, 'old-view').status).toBe('cleared')
+  })
+
+  it('ignores aborted entry before mutation and late success after a switch is cancelled', async () => {
+    const session = Session.create(SessionId('cancelled-switch'))
+    const initial = createDirectorContextBridge(queuedPort({ ok: true, context: context(firstScope, sha('a')) }))
+    await initial.enter(session, firstScope)
+    const read = deferred<DirectorContextReadResult>()
+    let reads = 0
+    const bridge = createDirectorContextBridge({ readDirectorContext: () => { reads += 1; return read.promise } })
+    await bridge.enter(session, secondScope, AbortSignal.abort())
+    expect(reads).toBe(0)
+    expect(bridge.current(session)?.binding.scope).toEqual(firstScope)
+
+    const controller = new AbortController()
+    const switching = bridge.enter(session, secondScope, controller.signal)
+    controller.abort()
+    read.resolve({ ok: true, context: context(secondScope, sha('2')) })
+    expect(await switching).toMatchObject({ status: 'unavailable', state: null, changed: true })
+    expect(bridge.current(session)).toBeNull()
+  })
+
   it('recovers the binding and proposal from a stopped session event log', async () => {
     const initialPort = queuedPort({ ok: true, context: context(firstScope, sha('a')) })
     const initialBridge = createDirectorContextBridge(initialPort)

@@ -895,6 +895,7 @@ function mount(port: QingmuYimengPort, entryScope?: QingmuEntryScope | null) {
   root.id = 'root'
   document.body.append(root)
   const directorBridge: DirectorContextClientPort = {
+    clear: vi.fn(async () => ({ status: 'cleared' as const, state: null, changed: true, manualWorkAllowed: true as const })),
     enter: vi.fn(async (_sessionId: string, scope: DirectorObjectScope) => ({ status: 'current' as const, changed: true, manualWorkAllowed: true as const,
       state: { version: 1 as const, binding: { scope, contextSnapshotSha256: 'd'.repeat(64) }, proposal: null,
         transition: 'enter' as const } })),

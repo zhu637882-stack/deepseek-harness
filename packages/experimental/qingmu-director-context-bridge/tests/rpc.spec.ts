@@ -20,6 +20,23 @@ const proposal = (): DirectorReplayProposal => ({
 } as unknown as DirectorReplayProposal)
 
 describe('loopback director context RPC facade', () => {
+  it('releases only the current browser owner and validates clear fields before mutation', async () => {
+    const session = Session.create(SessionId('session_1'))
+    const handler = createDirectorContextRpcHandler({ get: () => session }, {
+      readDirectorContext: async target => ({ ok: true, context: context(target) }),
+    })
+    const signal = new AbortController().signal
+    await handler('enter', { sessionId: 'session_1', scope, ownerId: 'old' }, signal)
+    await handler('enter', { sessionId: 'session_1', scope, ownerId: 'new' }, signal)
+    expect(await handler('clear', { sessionId: 'session_1', scope, ownerId: 'old' }, signal))
+      .toMatchObject({ ok: true, value: { status: 'superseded', changed: false } })
+    expect(await handler('clear', { sessionId: 'session_1', scope, ownerId: '../invalid' }, signal))
+      .toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    expect(await handler('clear', { sessionId: 'session_1', scope, ownerId: 'new', approve: true }, signal))
+      .toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    expect(await handler('clear', { sessionId: 'session_1', scope, ownerId: 'new' }, signal))
+      .toMatchObject({ ok: true, value: { status: 'cleared', state: null } })
+  })
   it('persists only safe scope/SHA bindings and invalidates a proposal on shot switch', async () => {
     const session = Session.create(SessionId('session_1'))
     const readDirectorContext = vi.fn(async (target: DirectorObjectScope) => ({ ok: true as const, context: context(target) }))

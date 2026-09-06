@@ -74,7 +74,7 @@ export const directorContextBindingProjectionDefinition: Omit<ProjectionDefiniti
   stateSchema: directorContextBindingStateSchema.nullable(),
   init: () => null,
   apply: (state, event) => event.type === 'qingmu-director-context/state'
-    ? directorContextBindingStateSchema.parse(event.data)
+    ? directorContextBindingStateSchema.nullable().parse(event.data)
     : state,
   wire: {
     viewSchema: directorContextBindingStateSchema.nullable(),

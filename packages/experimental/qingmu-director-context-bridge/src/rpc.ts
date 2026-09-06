@@ -50,10 +50,20 @@ export function createDirectorContextRpcHandler(
       const session = sessions.get(SessionId(raw.sessionId))
       if (session === undefined) return bad('director context session unavailable')
       if (endpoint === 'enter') {
-        if (!exact(raw, ['sessionId', 'scope'])) return bad('director context enter fields invalid')
+        if (!exact(raw, raw.ownerId === undefined ? ['sessionId', 'scope'] : ['sessionId', 'scope', 'ownerId'])
+          || (raw.ownerId !== undefined && id(raw.ownerId) === null)) return bad('director context enter fields invalid')
         const requested = scope(raw.scope)
         if (requested === null) return bad('director context scope invalid')
-        return { ok: true, value: await bridge.enter(session, requested, signal) }
+        return { ok: true, value: await bridge.enter(session, requested, signal, raw.ownerId as string | undefined) }
+      }
+      if (endpoint === 'clear') {
+        if (!exact(raw, ['sessionId', 'scope', 'ownerId']) || id(raw.ownerId) === null) {
+          return bad('director context clear fields invalid')
+        }
+        const requested = scope(raw.scope)
+        if (requested === null) return bad('director context scope invalid')
+        signal.throwIfAborted()
+        return { ok: true, value: bridge.clear(session, requested, raw.ownerId as string) }
       }
       if (endpoint === 'recover') {
         if (!exact(raw, ['sessionId'])) return bad('director context recover fields invalid')

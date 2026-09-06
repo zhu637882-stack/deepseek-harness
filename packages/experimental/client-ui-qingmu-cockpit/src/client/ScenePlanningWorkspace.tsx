@@ -184,7 +184,7 @@ function validatedPendingIntent(
  */
 export function ScenePlanningWorkspace({
   projectId, episodeId, port, directorBridge, directorSessionId,
-  hostSync, onUnsavedChange, onCommitted, onSelectShotId,
+  hostSync, onUnsavedChange, onCommitted, onSelectShotId, canonicalDirectorScope, canonicalDirectorRevision,
 }: {
   readonly projectId: string
   readonly episodeId: string
@@ -194,6 +194,9 @@ export function ScenePlanningWorkspace({
       | 'issueDirectorProviderWorkOrder' | 'readDirectorProviderWorkOrderStatus'>>
   readonly directorBridge?: DirectorContextClientPort | undefined
   readonly directorSessionId?: string | undefined
+  /** Resolved only from the current project's canonical shot relation projection. */
+  readonly canonicalDirectorScope?: DirectorObjectScope | null | undefined
+  readonly canonicalDirectorRevision?: string | undefined
   readonly hostSync?: QingmuHostSync | undefined
   readonly onUnsavedChange: (dirty: boolean) => void
   readonly onCommitted: () => Promise<unknown>
@@ -219,6 +222,7 @@ export function ScenePlanningWorkspace({
   const [paidStatus, setPaidStatus] = useState<DirectorPaidWorkOrderStatus | null>(null)
   const [paidBusy, setPaidBusy] = useState(false)
   const [directorBinding, setDirectorBinding] = useState<DirectorContextBindingState | null>(null)
+  const directorOwner = useRef<string | undefined>(undefined)
   const [directorStatus, setDirectorStatus] = useState<'unbound' | 'connecting' | 'current' | 'unavailable' | 'drifted'>('unbound')
   const [retryAllowed, setRetryAllowed] = useState(false)
   const [recoveryRead, setRecoveryRead] = useState(false)
@@ -310,9 +314,12 @@ export function ScenePlanningWorkspace({
   const current = local?.shots[index]
   const currentShotId = local?.shotIds[index]
   const canonicalStoryboard = state?.canonicalStoryboard ?? null
-  const directorScope: DirectorObjectScope | null = state?.planning && currentShotId ? {
-    projectId, episodeId, sceneId: state.planning.sceneId, shotId: currentShotId,
-  } : null
+  const directorScope: DirectorObjectScope | null = canonicalStoryboard
+    ? canonicalDirectorScope?.projectId === projectId && canonicalDirectorScope.episodeId === episodeId
+      ? canonicalDirectorScope : null
+    : state?.planning && currentShotId ? {
+      projectId, episodeId, sceneId: state.planning.sceneId, shotId: currentShotId,
+    } : null
   const paidScopeIsCurrent = paidWorkOrder !== null && directorScope !== null && directorBinding !== null
     && paidWorkOrder.projectId === directorScope.projectId
     && paidWorkOrder.episodeId === directorScope.episodeId
@@ -333,9 +340,11 @@ export function ScenePlanningWorkspace({
       return
     }
     const operation = new AbortController()
+    const ownerId = crypto.randomUUID()
+    directorOwner.current = ownerId
     const epoch = proposalEpoch.current
-    setDirectorStatus('connecting')
-    void directorBridge.enter(directorSessionId, directorScope, operation.signal).then((result) => {
+    setDirectorBinding(null); setDirectorStatus('connecting')
+    void directorBridge.enter(directorSessionId, directorScope, operation.signal, ownerId).then((result) => {
       if (operation.signal.aborted || epoch !== proposalEpoch.current) return
       if (result.status === 'current') {
         setDirectorBinding(result.state); setDirectorStatus('current'); hostSync?.replay(result.state)
@@ -347,8 +356,19 @@ export function ScenePlanningWorkspace({
         setDirectorBinding(null); setDirectorStatus('unavailable')
       }
     })
-    return () => { operation.abort() }
-  }, [directorBridge, directorSessionId, hostSync, projectId, episodeId, directorScope?.sceneId, directorScope?.shotId])
+    return () => {
+      operation.abort()
+      if (directorOwner.current === ownerId) directorOwner.current = undefined
+      // Cleanup uses its own lease: a late old view cannot clear a newer view,
+      // including a newer selection of the same shot. No business state is edited.
+      void directorBridge.clear(directorSessionId, directorScope, ownerId).catch(() => {
+        if (live.current && directorOwner.current === undefined) {
+          setError('导演上下文解除未确认；请重新选择镜头后再使用助手。人工编辑不受影响。')
+        }
+      })
+    }
+  }, [directorBridge, directorSessionId, hostSync, projectId, episodeId, directorScope?.sceneId, directorScope?.shotId,
+    canonicalDirectorRevision])
   useEffect(() => {
     clearPaidProposal()
   }, [directorScope?.sceneId, directorScope?.shotId, directorBinding?.binding.contextSnapshotSha256])
@@ -371,7 +391,7 @@ export function ScenePlanningWorkspace({
     proposalEpoch.current = epoch
     setProposalBusy(true); setError('')
     try {
-      const entry = await directorBridge.enter(directorSessionId, directorScope, operation.signal)
+      const entry = await directorBridge.enter(directorSessionId, directorScope, operation.signal, directorOwner.current)
       if (entry.status !== 'current') throw new Error('director_context_unavailable')
       const result = await port.requestDirectorProposal({ projectId, episodeId,
         sceneId: state.planning.sceneId, shotId, suggestionType: 'text_director_proposal' }, operation.signal)
@@ -510,7 +530,7 @@ export function ScenePlanningWorkspace({
         try {
           const entered = await directorBridge.enter(directorSessionId, {
             projectId, episodeId, sceneId: result.sceneId, shotId: selected,
-          }, controller.current.signal)
+          }, controller.current.signal, directorOwner.current)
           if (!isLive()) return
           if (entered.status !== 'current') {
             setDirectorBinding(entered.state); setDirectorStatus('unavailable')
@@ -827,7 +847,7 @@ export function ScenePlanningWorkspace({
       <details open><summary>导演助理连接</summary>
         <p role="status">{directorSessionId === undefined
           ? '未选择 DSh 会话；人工编辑与保存仍可用。'
-          : directorStatus === 'current' ? '已绑定当前镜头上下文 · replay-only'
+          : directorStatus === 'current' ? '最近一次镜头上下文同步成功；不代表生成或审核通过。'
             : directorStatus === 'connecting' ? '正在核对当前镜头上下文…'
               : directorStatus === 'drifted' ? '来源已漂移；旧建议不能采用。人工草稿已保留。'
                 : '导演助理暂不可用；人工编辑与保存不受影响。'}</p>
@@ -836,7 +856,7 @@ export function ScenePlanningWorkspace({
             : canonicalStoryboard ? `自动分镜已建立 · ${canonicalStoryboard.shotCount} 个镜头（旧场景规划不可写；后续动作仍受各自确认/门禁）`
               : '尚未建立真实镜头'}</dd>
           <dt>上下文 SHA</dt><dd>{directorBinding?.binding.contextSnapshotSha256 ?? '尚未绑定'}</dd></dl>
-        <p>这里只绑定易梦只读上下文和演练建议，不向浏览器暴露 Host 凭据、Provider payload 或执行许可。</p>
+        <p>上下文绑定供当前会话的青木导演工具使用；是否能调用工具取决于会话预设。不会因此自动生成、保存或签收。</p>
       </details>
       <details open><summary>导演属性与缺口</summary><p>规划对象，不是已审内容。</p>
         <dl><dt>当前镜头</dt><dd>{current?.title ?? '尚未建立'}</dd><dt>分镜结构版本</dt><dd>{state?.storyboard?.version ?? '尚无'}</dd>

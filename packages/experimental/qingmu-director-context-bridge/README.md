@@ -6,15 +6,17 @@ This private experimental package binds one DSh session to one exact Yimeng `pro
 
 ## Mount interface
 
-`createDirectorContextBridge(readPort)` exposes `enter`, `bindProposal`, `recover`, `current`, and `freshnessRequest`. The read port must use the existing normalized `director-inference/context` adapter path. It must not create a work order, invoke a model, dispatch a Provider, or write Yimeng business state.
+`createDirectorContextBridge(readPort)` exposes `enter`, `clear`, `bindProposal`, `recover`, `current`, and `freshnessRequest`. The read port must use the existing normalized `director-inference/context` adapter path. It must not create a work order, invoke a model, dispatch a Provider, or write Yimeng business state.
 
-`enter` binds or switches the exact four-level object. A switch clears any proposal from the previous object. `bindProposal` accepts only the existing command-adapter replay proposal whose scope and input SHA match the active binding. `freshnessRequest` returns the existing command-adapter freshness coordinates without inventing another contract.
+`enter` binds or switches the exact four-level object. Once the Host accepts a non-aborted entry for a different object, it appends a null binding event before I/O, clearing the previous object and proposal. Pending, failed or cancelled reads then cannot expose the old shot to native tools; cold replay remains unbound until a successful entry. Unavailable entry returns `changed: true` if it cleared the previous binding. An already-aborted entry performs no read or log mutation. `bindProposal` accepts only the existing command-adapter replay proposal whose scope and input SHA match the active binding. `freshnessRequest` returns the existing command-adapter freshness coordinates without inventing another contract.
+
+Browser entry supplies a new `ownerId` for each view binding. `clear(session, scope, ownerId)` compares the active owner and scope before clearing or cancelling a pending entry; late cleanup cannot clear a newer view, including one on the same shot. Ownerless native refresh preserves a same-scope browser owner, while ownerless entry to another object revokes it. The owner is a runtime-only cleanup lease, not authentication or business authority.
 
 `recover` first folds the durable DSh log, then rereads the current Yimeng context. A changed context SHA appends a new complete binding and clears the old proposal automatically. An unavailable context or model capability preserves the last known binding and returns `manualWorkAllowed: true`; manual editing remains independent.
 
-Async entry and recovery use a per-session generation plus binding-event compare-and-swap. A late result returns `superseded` and cannot overwrite a newer object choice or proposal attachment.
+Async entry and recovery use a per-session generation plus binding-event compare-and-swap. A late result returns `superseded` and cannot overwrite a newer object choice or proposal attachment. Unbound recovery and rejected proposal attachment do not cancel a pending entry. The projection state remains nullable version 1; updated event readers must ship together before null events are produced.
 
-The Cordis plugin registers the `qingmuDirectorContext` session projection and a loopback-only browser facade. The Qingmu bundle mounts it before the cockpit, then the existing scene-planning workspace shows the current binding and uses it to validate replay proposal lineage. The facade never exposes the underlying Host command handler, token, Provider payload, or permit.
+The Cordis plugin registers the `qingmuDirectorContext` session projection and a loopback-only browser facade. The Qingmu bundle mounts it before the cockpit. The workspace binds legacy planning shots or the selected canonical automatic-storyboard shot to the same current session; canonical binding does not enable legacy saves. The facade never exposes the underlying Host command handler, token, Provider payload, or permit.
 
 ## Authority and side effects
 
@@ -67,6 +69,7 @@ New results append to conversation history. Changed context or method text chang
 
 ## Known Limitations and Deferred Work
 
+- Runtime-only owners do not survive a Host restart. A persisted successful binding still recovers under existing session semantics, while a persisted null stays unbound. A surviving browser must re-enter to acquire a new cleanup lease. Offline or rejected cleanup cannot guarantee detachment; the UI reports an unconfirmed clear when still mounted without a newer binding.
 - Native read-tool composition is verified with a Loader preset and scripted model transport. This is not evidence of production activation, real-model creative quality, proposal adoption, or generation.
 - Proposal method drift remains checked by the existing `checkDirectorProposalFreshness` command path. This bridge automatically handles context-SHA drift and preserves those freshness coordinates.
 - No real DeepSeek route, credential, external request, fee, or production canary is enabled by this package.

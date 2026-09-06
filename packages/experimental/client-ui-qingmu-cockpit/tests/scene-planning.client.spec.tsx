@@ -13,12 +13,16 @@ const state: ScenePlanningState = { schema: 'jason.qingmu-scene-planning-state.v
     dialogues: [{ character: '林夏', line: '请进。', sourceLineId: 'line_1' }] }] }
 const unavailableDirectorProposal = () => vi.fn(async () => { throw new Error('Director replay is not part of this fixture') })
 const unusedFreshness = () => vi.fn(async () => { throw new Error('Freshness is not part of this fixture') })
-function replayBridge(contextSnapshotSha256 = 'd'.repeat(64)): DirectorContextClientPort {
+function replayBridge(contextSnapshotSha256 = 'd'.repeat(64)) {
   let bound: DirectorContextBindingState | null = null
   return {
-    enter: vi.fn(async (_sessionId: string, scope: DirectorObjectScope) => {
+    enter: vi.fn<DirectorContextClientPort['enter']>(async (_sessionId: string, scope: DirectorObjectScope) => {
       bound = { version: 1, binding: { scope, contextSnapshotSha256 }, proposal: null, transition: 'enter' }
       return { status: 'current' as const, state: bound, changed: true, manualWorkAllowed: true as const }
+    }),
+    clear: vi.fn<DirectorContextClientPort['clear']>(async () => {
+      bound = null
+      return { status: 'cleared', state: null, changed: true, manualWorkAllowed: true }
     }),
     bindProposal: vi.fn(async (_sessionId: string, proposal: DirectorReplayProposal, _signal?: AbortSignal) => {
       if (bound === null) throw new Error('unbound')
@@ -81,6 +85,78 @@ it('shows a canonical automatic storyboard as read-only without reviving the leg
   expect(screen.queryByText('尚未建立真实镜头')).toBeNull()
   expect(port.saveScenePlanning).not.toHaveBeenCalled()
   expect(onSelectShotId).not.toHaveBeenCalled()
+})
+it('binds canonical shot selection to the current session without opening the legacy planner', async () => {
+  const automatic = automaticReadState()
+  const port = { readScenePlanning: vi.fn(async () => automatic), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() }
+  const bridge = replayBridge()
+  const first = { projectId: automatic.projectId, episodeId: automatic.episodeId, sceneId: 'canonical_scene', shotId: 'canonical_1' }
+  const second = { ...first, shotId: 'canonical_2' }
+  const props = { ...automatic, port, directorBridge: bridge, directorSessionId: 'session_1',
+    onCommitted: vi.fn(async () => {}), onSelectShotId: vi.fn(), onUnsavedChange: vi.fn() }
+  const view = render(<ScenePlanningWorkspace {...props} canonicalDirectorScope={first} />)
+  await waitFor(() => { expect(bridge.enter).toHaveBeenLastCalledWith('session_1', first, expect.any(AbortSignal), expect.any(String)) })
+  expect(await screen.findByText('最近一次镜头上下文同步成功；不代表生成或审核通过。')).toBeTruthy()
+  view.rerender(<ScenePlanningWorkspace {...props} canonicalDirectorScope={second} />)
+  await waitFor(() => { expect(bridge.enter).toHaveBeenLastCalledWith('session_1', second, expect.any(AbortSignal), expect.any(String)) })
+  view.rerender(<ScenePlanningWorkspace {...props} directorSessionId="session_2" canonicalDirectorScope={second} />)
+  await waitFor(() => { expect(bridge.enter).toHaveBeenLastCalledWith('session_2', second, expect.any(AbortSignal), expect.any(String)) })
+  const lastOwner = vi.mocked(bridge.enter).mock.calls.at(-1)?.[3]
+  view.rerender(<ScenePlanningWorkspace {...props} directorSessionId="session_2" canonicalDirectorScope={null} />)
+  await waitFor(() => { expect(bridge.clear).toHaveBeenLastCalledWith('session_2', second, lastOwner) })
+  expect(screen.queryByRole('button', { name: '确认保存规划' })).toBeNull()
+  expect(port.saveScenePlanning).not.toHaveBeenCalled()
+  expect(port.recoverScenePlanning).not.toHaveBeenCalled()
+  expect(port.requestDirectorProposal).not.toHaveBeenCalled()
+})
+it('refreshes the same canonical shot when its source revision changes and clears its lease on unmount', async () => {
+  const automatic = automaticReadState()
+  const port = { readScenePlanning: vi.fn(async () => automatic), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() }
+  const bridge = replayBridge()
+  const scope = { projectId: automatic.projectId, episodeId: automatic.episodeId, sceneId: 'canonical_scene', shotId: 'canonical_1' }
+  const props = { ...automatic, port, directorBridge: bridge, directorSessionId: 'session_1', canonicalDirectorScope: scope,
+    onCommitted: vi.fn(async () => {}), onSelectShotId: vi.fn(), onUnsavedChange: vi.fn() }
+  const view = render(<ScenePlanningWorkspace {...props} canonicalDirectorRevision="revision1" />)
+  await waitFor(() => { expect(bridge.enter).toHaveBeenCalledOnce() })
+  const owner1 = bridge.enter.mock.calls[0]?.[3]
+  view.rerender(<ScenePlanningWorkspace {...props} canonicalDirectorRevision="revision2" />)
+  await waitFor(() => { expect(bridge.enter).toHaveBeenCalledTimes(2) })
+  expect(bridge.clear).toHaveBeenLastCalledWith('session_1', scope, owner1)
+  const owner2 = bridge.enter.mock.calls[1]?.[3]
+  expect(owner2).not.toBe(owner1)
+  view.unmount()
+  expect(bridge.clear).toHaveBeenLastCalledWith('session_1', scope, owner2)
+})
+it('hides the old context SHA during a canonical switch and rejects late binding responses', async () => {
+  const automatic = automaticReadState()
+  const port = { readScenePlanning: vi.fn(async () => automatic), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() }
+  const bridge = replayBridge()
+  const first = { projectId: automatic.projectId, episodeId: automatic.episodeId, sceneId: 'canonical_scene', shotId: 'canonical_1' }
+  const second = { ...first, shotId: 'canonical_2' }
+  const third = { ...first, shotId: 'canonical_3' }
+  const props = { ...automatic, port, directorBridge: bridge, directorSessionId: 'session_1',
+    onCommitted: vi.fn(async () => {}), onSelectShotId: vi.fn(), onUnsavedChange: vi.fn() }
+  const view = render(<ScenePlanningWorkspace {...props} canonicalDirectorScope={first} />)
+  expect(await screen.findByText('d'.repeat(64))).toBeTruthy()
+  let finish!: (result: Awaited<ReturnType<DirectorContextClientPort['enter']>>) => void
+  const pending = new Promise<Awaited<ReturnType<DirectorContextClientPort['enter']>>>((resolve) => { finish = resolve })
+  vi.mocked(bridge.enter).mockReturnValueOnce(pending).mockResolvedValueOnce({
+    status: 'unavailable', state: null, changed: true, reason: 'context_unavailable', manualWorkAllowed: true,
+  })
+  view.rerender(<ScenePlanningWorkspace {...props} canonicalDirectorScope={second} />)
+  expect(await screen.findByText('正在核对当前镜头上下文…')).toBeTruthy()
+  expect(screen.queryByText('d'.repeat(64))).toBeNull()
+  view.rerender(<ScenePlanningWorkspace {...props} canonicalDirectorScope={third} />)
+  expect(await screen.findByText('导演助理暂不可用；人工编辑与保存不受影响。')).toBeTruthy()
+  await act(async () => { finish({ status: 'current', changed: true, manualWorkAllowed: true, state: {
+    version: 1, binding: { scope: second, contextSnapshotSha256: 'e'.repeat(64) }, proposal: null, transition: 'switch',
+  } }); await pending })
+  expect(screen.queryByText('e'.repeat(64))).toBeNull()
+  expect(screen.getByText(`${third.sceneId} / ${third.shotId}`)).toBeTruthy()
+  expect(port.saveScenePlanning).not.toHaveBeenCalled()
 })
 it('retains a bounded legacy draft when a canonical automatic storyboard supersedes it, without recovery or save', async () => {
   const automatic = automaticReadState()
