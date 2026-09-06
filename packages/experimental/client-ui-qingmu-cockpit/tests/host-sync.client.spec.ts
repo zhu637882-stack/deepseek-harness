@@ -87,7 +87,8 @@ describe('Qingmu Host save sync', () => {
     const forged = { ...message!, authority: { ...message!.authority, source: 'adopted_replay_suggestion' as const } }
     expect(sync?.publish(forged)).toBe(false)
     // Legacy replay proofs without a source field stay valid and replay-labelled.
-    const legacyReplay = createQingmuScenePlanningSavedMessage(result, binding, { ...paidProof, source: undefined })
+    const { source: _omittedSource, ...legacyProof } = paidProof
+    const legacyReplay = createQingmuScenePlanningSavedMessage(result, binding, legacyProof)
     expect(legacyReplay?.authority.source).toBe('adopted_replay_suggestion')
     expect(sync?.publish(legacyReplay!)).toBe(true)
   })
