@@ -1,6 +1,7 @@
 import type { QingmuYimengPort } from './contracts.ts'
 import type { DirectorContextClientPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import type { QingmuHostSync } from './host-sync.ts'
+import type { NativeDirectorSessionPort } from './native-director-session.ts'
 
 /** Exact project and episode selected by the outer Yimeng workspace. */
 export interface QingmuEntryScope {
@@ -27,6 +28,7 @@ export function parseQingmuEntryScope(href: string): QingmuEntryScope | null | u
 
 /** Dependencies injected into the Qingmu cockpit's sidebar slot occupant. */
 export interface QingmuCockpitFace {
+  readonly nativeDirectorSession?: NativeDirectorSessionPort
   readonly port: QingmuYimengPort
   readonly directorBridge: DirectorContextClientPort
   readonly hostSync?: QingmuHostSync | undefined

@@ -19,6 +19,8 @@ import {
   type QingmuHostSync,
 } from './host-sync.ts'
 import css from './ScenePlanningWorkspace.module.css'
+import type { HostDescriptionSource } from '@deepseek-ai/dsh-client-connection/client'
+import { useDirectorConnection } from './native-director-session.ts'
 
 interface LocalPlan {
   activeIndex?: number
@@ -183,7 +185,7 @@ function validatedPendingIntent(
  * @returns Three-column planning workspace; never creates prompts, media or approval.
  */
 export function ScenePlanningWorkspace({
-  projectId, episodeId, port, directorBridge, directorSessionId,
+  projectId, episodeId, port, directorBridge, directorSessionId, directorConnection, directorRefresh,
   hostSync, onUnsavedChange, onCommitted, onSelectShotId, canonicalDirectorScope, canonicalDirectorRevision,
 }: {
   readonly projectId: string
@@ -194,6 +196,8 @@ export function ScenePlanningWorkspace({
       | 'issueDirectorProviderWorkOrder' | 'readDirectorProviderWorkOrderStatus'>>
   readonly directorBridge?: DirectorContextClientPort | undefined
   readonly directorSessionId?: string | undefined
+  readonly directorConnection?: HostDescriptionSource | undefined
+  readonly directorRefresh?: number | undefined
   /** Resolved only from the current project's canonical shot relation projection. */
   readonly canonicalDirectorScope?: DirectorObjectScope | null | undefined
   readonly canonicalDirectorRevision?: string | undefined
@@ -202,6 +206,7 @@ export function ScenePlanningWorkspace({
   readonly onCommitted: () => Promise<unknown>
   readonly onSelectShotId: (id: string) => void
 }) {
+  const connection = useDirectorConnection(directorConnection)
   const key = `qingmu.scene-planning.v1:${projectId}:${episodeId}`
   const [state, setState] = useState<ScenePlanningState | null>(null)
   const [local, setLocal] = useState<LocalPlan | null>(() => storedPlan(key))
@@ -339,6 +344,10 @@ export function ScenePlanningWorkspace({
       setDirectorBinding(null); setDirectorStatus('unbound')
       return
     }
+    if (!connection) {
+      setDirectorBinding(null); setDirectorStatus('unavailable')
+      return
+    }
     const operation = new AbortController()
     const ownerId = crypto.randomUUID()
     directorOwner.current = ownerId
@@ -361,6 +370,7 @@ export function ScenePlanningWorkspace({
       if (directorOwner.current === ownerId) directorOwner.current = undefined
       // Cleanup uses its own lease: a late old view cannot clear a newer view,
       // including a newer selection of the same shot. No business state is edited.
+      if (directorConnection && !directorConnection.getSnapshot()) return
       void directorBridge.clear(directorSessionId, directorScope, ownerId).catch(() => {
         if (live.current && directorOwner.current === undefined) {
           setError('导演上下文解除未确认；请重新选择镜头后再使用助手。人工编辑不受影响。')
@@ -368,7 +378,7 @@ export function ScenePlanningWorkspace({
       })
     }
   }, [directorBridge, directorSessionId, hostSync, projectId, episodeId, directorScope?.sceneId, directorScope?.shotId,
-    canonicalDirectorRevision])
+    canonicalDirectorRevision, connection, directorConnection, directorRefresh])
   useEffect(() => {
     clearPaidProposal()
   }, [directorScope?.sceneId, directorScope?.shotId, directorBinding?.binding.contextSnapshotSha256])

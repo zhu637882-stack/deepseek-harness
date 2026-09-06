@@ -6,6 +6,7 @@ import { NativeDirectorDraft, mergeNativeDraft } from '../src/client/NativeDirec
 import { zh, type QingmuCockpitKey } from '../src/client/locales.ts'
 import { draftPrompt, draftScope } from '../../qingmu-director-context-bridge/examples/native-draft-fixture.ts'
 import type { YimengPromptIrResponse } from '../src/client/contracts.ts'
+import { directorConnectionFixture } from './director-connection-fixture.ts'
 
 afterEach(cleanup)
 const snapshot = draftPrompt as YimengPromptIrResponse
@@ -29,6 +30,19 @@ it('changes only the proposed field and refuses to overwrite a manually changed 
   expect(() => mergeNativeDraft(proposal, snapshot, { ...base, imageGenPrompt: '我的文字' }, draftScope)).toThrow('conflict')
   expect(() => mergeNativeDraft(proposal, { ...snapshot, baseSnapshotSha256: 'b'.repeat(64) }, base, draftScope)).toThrow('stale')
   expect(() => mergeNativeDraft(proposal, snapshot, base, { ...draftScope, shotId: 'other' })).toThrow('stale')
+})
+it('removes pre-disconnect candidates without touching the editable draft and requires a new read after reconnect', async () => {
+  const app = setup()
+  const transport = directorConnectionFixture()
+  app.rerender(<NativeDirectorDraft {...app.props} context={{ ...app.props.context, connection: transport.source }} />)
+  fireEvent.click(screen.getByRole('button', { name: zh.nativeDraftRead }))
+  await screen.findByRole('button', { name: zh.nativeDraftAdopt })
+  act(() => { transport.publish(false) })
+  expect(screen.queryByRole('button', { name: zh.nativeDraftAdopt })).toBeNull()
+  expect((screen.getByRole('button', { name: zh.nativeDraftRead }) as HTMLButtonElement).disabled).toBe(true)
+  act(() => { transport.publish(true) })
+  expect(screen.queryByRole('button', { name: zh.nativeDraftAdopt })).toBeNull()
+  expect(app.read).toHaveBeenCalledTimes(1); expect(app.onAdopt).not.toHaveBeenCalled()
 })
 
 it.each(['stale', 'unavailable', 'none'] as const)('does not adopt when the latest Host result is %s', async (status) => {

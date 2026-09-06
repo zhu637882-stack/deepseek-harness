@@ -18,6 +18,8 @@ Async entry and recovery use a per-session generation plus binding-event compare
 
 The Cordis plugin registers the `qingmuDirectorContext` session projection and a loopback-only browser facade. The Qingmu bundle mounts it before the cockpit. The workspace binds legacy planning shots or the selected canonical automatic-storyboard shot to the same current session; canonical binding does not enable legacy saves. The facade never exposes the underlying Host command handler, token, Provider payload, or permit.
 
+`readNativeDirectorReadiness({ sessionId })` inspects the attached session's live agent and scoped tool registry without resuming it or loading a preset. It reports mounted, missing-tools, inactive or unavailable; neither the recorded preset label nor a successful shot binding can establish tool presence. The result is a point-in-time registration check, not execution, model availability, Writer health or creative approval. Missing optional native services preserve the binding facade.
+
 ## Authority and side effects
 
 Yimeng remains the sole source of business truth. Binding events contain only object coordinates, context SHA, and immutable proposal/freshness hashes. They contain no prompt text, reference media, content approval, selection, Ready state, Provider result, fee record, or general chat history. The optional model tools below do store creative context and method text in ordinary tool-result events. The package performs zero Provider calls and zero Yimeng business writes.

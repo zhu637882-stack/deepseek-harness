@@ -2,12 +2,12 @@
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import type { SessionStore } from '@deepseek-ai/dsh-session'
+import type { Session, SessionStore } from '@deepseek-ai/dsh-session'
 import type { DirectorReplayProposal } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import { createDirectorContextBridge } from './bridge.ts'
 import { latestNativeDraftProposal, readNativeDraftInput, type NativeDraftReaders } from './native-draft.ts'
 import type {
-  DirectorContextBridgeRpcResult, DirectorContextReadPort, DirectorObjectScope, NativeDraftProposalResult,
+  DirectorContextBridgeRpcResult, DirectorContextReadPort, DirectorObjectScope, NativeDraftProposalResult, NativeDirectorReadiness,
 } from './types.ts'
 
 const bad = (message: string): RpcResult<never> => ({
@@ -41,9 +41,11 @@ export function createDirectorContextRpcHandler(
   sessions: Pick<SessionStore, 'get'>,
   port: DirectorContextReadPort,
   draftReaders?: NativeDraftReaders,
+  readiness?: (session: Session) => NativeDirectorReadiness,
 ): ConnectionRpcHandler {
   const bridge = createDirectorContextBridge(port)
-  return async (endpoint, payload, signal): Promise<RpcResult<DirectorContextBridgeRpcResult | NativeDraftProposalResult>> => {
+  type Result = DirectorContextBridgeRpcResult | NativeDraftProposalResult | NativeDirectorReadiness
+  return async (endpoint, payload, signal): Promise<RpcResult<Result>> => {
     try {
       const raw = object(payload)
       if (raw === null || typeof raw.sessionId !== 'string' || id(raw.sessionId) === null) {
@@ -51,6 +53,12 @@ export function createDirectorContextRpcHandler(
       }
       const session = sessions.get(SessionId(raw.sessionId))
       if (session === undefined) return bad('director context session unavailable')
+      if (endpoint === 'readNativeDirectorReadiness') {
+        if (!exact(raw, ['sessionId'])) return bad('native readiness fields invalid')
+        signal.throwIfAborted()
+        return { ok: true, value: readiness?.(session)
+          ?? { status: 'unavailable', presetId: null, tools: [], missingTools: [] } }
+      }
       if (endpoint === 'readNativeDraftProposal') {
         if (!exact(raw, ['sessionId', 'scope'])) return bad('native draft fields invalid')
         const requested = scope(raw.scope)

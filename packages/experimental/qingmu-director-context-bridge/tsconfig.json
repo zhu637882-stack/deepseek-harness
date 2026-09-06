@@ -6,6 +6,8 @@
   },
   "include": ["src"],
   "references": [
+    { "path": "../../core/agent" },
+    { "path": "../../preset/agent-presets" },
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
     { "path": "../../core/tools" },

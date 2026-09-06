@@ -20,6 +20,8 @@ The experimental Qingmu bundle ships a `qingmu-director` preset with a complete 
 
 With the Host PromptIR reader available, a native tool acquires the current prompt draft, context and full C5 method. A separate tool proposes one field against the successful logged read receipt. Its result contains compact source coordinates and original/replacement text, not another copy of context and method bodies. The browser reads the logged suggestion, rechecks sources and explicitly adopts into its local draft. Existing method checking, preview, save and Writer reread remain the only persistence path; automatic storyboards do not use legacy scene-planning saves.
 
+The native entry control uses the existing session and preset APIs: select only a blank conversation, resume the same director ID/cwd, or obtain an empty conversation in the currently selected workspace. Started ordinary history is not recomposed. A separate read-only facade checks the live agent's actual scoped registrations; labels and successful bindings are insufficient. Shared-transport handshake changes retract status, discard pending suggestions and rebind the selected shot without remounting editors. Late entry completion never changes a newer navigation selection.
+
 ## Alternatives considered
 
 **Inject all skills into every system prompt.** This would increase tokens and hide which method was actually requested. Explicit, complete tool responses are replayable and let the agent read required references as needed.
@@ -27,6 +29,8 @@ With the Host PromptIR reader available, a native tool acquires the current prom
 **Expose generic filesystem or all Writer commands.** That would widen authority before the read boundary is proven. Fixed method IDs and the session binding provide the needed content without business mutation or arbitrary file access.
 
 **Build another orchestration loop.** DSh already persists tool calls and results. A parallel loop would duplicate recovery and make model input harder to inspect.
+
+**Automatically replace ordinary sessions or infer readiness from their preset names.** Existing history belongs to its original composition, and a label survives even when no agent is running. Explicit entry preserves that history; a scoped registration read reports only what is currently mounted, without claiming tool execution or Provider health.
 
 **Reuse deterministic replay proposals or duplicate full inputs in suggestion results.** Replay work orders would misrepresent native model output. Copying the context and methods into each suggestion would duplicate storage and model input; source receipts locate the original successful read instead.
 
@@ -38,4 +42,4 @@ Opted-in agents can receive actual Writer context and IMAGO method text. Root an
 
 The source loader bounds file reads and rejects outward symlinks; deployment must still keep the method tree stable during reads. A 512 KiB source package may exceed the consumer's default 256 KiB serialized-response limit, which fails without truncation. Full method text consumes tokens only when requested.
 
-The runnable keyless example and Loader-preset tests load the actual shipped director composition and use scripted external responses. They verify the persona, next model input, scoped catalog, logged native suggestion retrieval and cold log restoration; launcher tests verify bundle-only root composition. Component, bridge and RPC tests cover same-session binding transitions, stale-response rejection, manual-edit conflicts and adoption through the existing draft save/reread path. These checks cannot establish real-provider quality or live Writer persistence. First-Draft bootstrap, production activation, reconnect behavior and generated-media feedback require their own connected-flow verification. Suggestions target one field at a time and require an existing Ready baseline.
+The runnable keyless example and Loader-preset tests load the actual shipped director composition and use scripted external responses. They verify the persona, next model input, scoped catalog, logged native suggestion retrieval and cold log restoration; launcher tests verify bundle-only root composition. Component, bridge and RPC tests cover same-session binding transitions, stale-response rejection, manual-edit conflicts, native entry, connection generations and adoption through the existing draft save/reread path. These checks cannot establish real-provider quality or live Writer persistence. First-Draft bootstrap, production activation, real Host restart and generated-media feedback require their own connected-flow verification. Suggestions target one field at a time and require an existing Ready baseline.

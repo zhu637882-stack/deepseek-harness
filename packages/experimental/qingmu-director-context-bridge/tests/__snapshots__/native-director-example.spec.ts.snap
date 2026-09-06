@@ -6,8 +6,42 @@ exports[`runs the keyless shipped-preset example through the native loop 1`] = `
     "qingmu_read_bound_context",
     "qingmu_get_imago_method",
   ],
+  "inactiveReadiness": {
+    "missingTools": [
+      "qingmu_read_bound_context",
+      "qingmu_get_imago_method",
+      "qingmu_read_prompt_draft",
+      "qingmu_propose_prompt_edit",
+    ],
+    "presetId": null,
+    "status": "inactive",
+    "tools": [],
+  },
   "methodInNextRequest": true,
+  "ordinaryReadiness": {
+    "missingTools": [
+      "qingmu_read_bound_context",
+      "qingmu_get_imago_method",
+      "qingmu_read_prompt_draft",
+      "qingmu_propose_prompt_edit",
+    ],
+    "presetId": null,
+    "status": "missing-tools",
+    "tools": [],
+  },
   "preset": "qingmu-director",
+  "readiness": {
+    "missingTools": [
+      "qingmu_read_prompt_draft",
+      "qingmu_propose_prompt_edit",
+    ],
+    "presetId": "qingmu-director",
+    "status": "missing-tools",
+    "tools": [
+      "qingmu_read_bound_context",
+      "qingmu_get_imago_method",
+    ],
+  },
   "results": [
     "{"schema":"qingmu.native-director-context.v1","scope":{"projectId":"example-project","episodeId":"example-episode","sceneId":"example-scene","shotId":"example-shot"},"contextSnapshotSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contextSnapshot":{"schema":"jason.qingmu-director-context-snapshot.v1","projectId":"example-project","episodeId":"example-episode","sceneId":"example-scene","shotId":"example-shot","contextSnapshotSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","shot":{"id":"example-shot","narrative":"门铃响起，她停在门口。"},"sourceScene":{},"selectedReferences":[],"providerCalls":0,"costAmountCny":"0","businessStateChanged":false,"humanDecisionInferred":false,"formalQcInferred":false,"selectionGranted":false,"readyGranted":false},"authority":{"readOnly":true,"businessStateChanged":false,"humanApprovalGranted":false,"providerCalls":0},"guidance":"Base suggestions on this snapshot. Missing information is unknown, not permission to invent story facts or approve assets. Reread before applying changes."}",
     "{"schema":"qingmu.native-director-method.v1","scope":{"projectId":"example-project","episodeId":"example-episode","sceneId":"example-scene","shotId":"example-shot"},"contextSnapshotSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","method":{"schema":"qingmu.imago-director-instructions.v1","capability":"shot_design","requestedResourceId":"rough_final_feedback","sourceBindings":[{"resourceId":"rough_final_feedback","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],"sources":[{"resourceId":"rough_final_feedback","content":"第四参考：粗剪到终版反馈闭环。\\n逐镜比对锁定意图、表演、空间关系、声画线索和连续性。\\n证据不足时保留未知，回到人工创作决定。"}]},"authority":{"readOnly":true,"businessStateChanged":false,"humanApprovalGranted":false,"providerCalls":0},"guidance":"Use this method to prepare editable suggestions from the bound Writer context. Read any required additionalReferences with a follow-up tool call; listed source hashes are not proof that their content was read. This is not IMAGO project initialization, a completed stage, content approval, or permission to invoke a Provider."}",

@@ -51,6 +51,7 @@ import type {
   YimengWorkflowProjection,
 } from './contracts.ts'
 import { unwrapRpc } from './contracts.ts'
+import { createNativeDirectorSessionPort } from './native-director-session.ts'
 import { parseQingmuEntryScope, type QingmuCockpitFace } from './slots.ts'
 import { createQingmuHostSync } from './host-sync.ts'
 import { en, NS, zh } from './locales.ts'
@@ -165,6 +166,9 @@ export function apply(ctx: ClientContext): void {
   ): Promise<T> => unwrapRpc(await connection.rpc.call('/qingmu-director-context', endpoint, payload, signal)) as T
 
   const directorBridge: DirectorContextClientPort = {
+    readNativeDirectorReadiness: async (sessionId, signal) =>
+      unwrapRpc(await connection.rpc.call('/qingmu-director-context', 'readNativeDirectorReadiness', { sessionId }, signal)) as
+        import('@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types').NativeDirectorReadiness,
     readNativeDraftProposal: async (sessionId, scope, signal) =>
       unwrapRpc(await connection.rpc.call('/qingmu-director-context', 'readNativeDraftProposal', { sessionId, scope }, signal)) as
         import('@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types').NativeDraftProposalResult,
@@ -353,12 +357,13 @@ export function apply(ctx: ClientContext): void {
       command<YimengRecoverStoryboardCanvasCommitResponse>('recoverStoryboardCanvasCommit', request, signal),
   }
 
+  const nativeDirectorSession = createNativeDirectorSessionPort(ctx, connection)
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action',
     id: 'qingmu-cockpit',
     locale: NS,
     inject: (): QingmuCockpitFace => entryScope === undefined
-      ? { port, directorBridge }
-      : { port, directorBridge, entryScope, hostSync },
+      ? { port, directorBridge, nativeDirectorSession }
+      : { port, directorBridge, nativeDirectorSession, entryScope, hostSync },
   }, QingmuCockpit))
 }

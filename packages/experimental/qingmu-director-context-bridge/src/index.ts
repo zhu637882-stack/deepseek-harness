@@ -4,6 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import { directorContextBindingProjectionDefinition } from './projection.ts'
 import { createDirectorContextRpcHandler } from './rpc.ts'
+import { readNativeDirectorReadiness } from './native-readiness.ts'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter'
 
@@ -40,7 +41,8 @@ export function apply(ctx: Context): void {
       const prompt = host.get('qingmuYimengRead')
       const method = host.get('qingmuImagoMethod')
       return createDirectorContextRpcHandler(host.sessions, port,
-        prompt && method ? { prompt, method } : undefined)(endpoint, payload, signal)
+        prompt && method ? { prompt, method } : undefined,
+        session => readNativeDirectorReadiness(host, session))(endpoint, payload, signal)
     }
     host.connection.rpc.handle('/qingmu-director-context', handler, {
       authority: 'loopback',

@@ -18,6 +18,8 @@
 
 Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopback 的浏览器 facade。青木 bundle 在 cockpit 之前挂载它。工作区把旧规划镜头或选中的权威自动分镜绑定到同一当前会话；自动分镜绑定不会启用旧规划保存。facade 不会暴露底层 Host command handler、token、Provider payload 或 permit。
 
+`readNativeDirectorReadiness({ sessionId })` 检查已附着会话的运行中 agent（智能体）与作用域工具注册表，不恢复会话或加载预设。它返回 mounted、missing-tools、inactive 或 unavailable；记录中的预设名称和成功的镜头绑定都不能证明工具存在。结果只是某一时点的注册检查，不代表实际执行、模型可用、Writer 健康或创意批准。可选原生服务缺失时，绑定接口仍保留。
+
 ## 权威与副作用
 
 易梦仍是唯一业务真源。绑定事件只保存对象坐标、context SHA 和不可变 proposal/freshness 哈希，不保存提示词正文、参考媒体、内容签收、选择、Ready、Provider 结果、费用记录或通用聊天历史。下述可选模型工具会把创作上下文和方法正文保存在普通工具结果事件中。本包产生零 Provider 调用、零易梦业务写入。

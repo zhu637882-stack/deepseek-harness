@@ -3,12 +3,15 @@ import { useEffect, useRef, useState } from 'react'
 import type { DirectorContextClientPort, DirectorObjectScope, NativeDraftProposal } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import type { YimengPromptIrResponse } from './contracts.ts'
 import type { QingmuCockpitKey } from './locales.ts'
+import type { HostDescriptionSource } from '@deepseek-ai/dsh-client-connection/client'
+import { useDirectorConnection } from './native-director-session.ts'
 
 /** The active native session and canonical Writer shot, supplied by the workspace. */
 export interface NativeDirectorDraftContext {
   readonly bridge: DirectorContextClientPort
   readonly sessionId: string | undefined
   readonly scope: DirectorObjectScope
+  readonly connection?: HostDescriptionSource | undefined
 }
 
 /** Reject stale Writer baselines and preserve local edits, including changes made while checking freshness. */
@@ -37,29 +40,30 @@ export function NativeDirectorDraft({ context, disabled, sourceKey, onAdopt, t }
   readonly onAdopt: (proposal: NativeDraftProposal) => void
   readonly t: (key: QingmuCockpitKey) => string
 }) {
+  const connection = useDirectorConnection(context.connection)
   const [proposal, setProposal] = useState<NativeDraftProposal | null>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<QingmuCockpitKey | null>(null)
   const pending = useRef<AbortController | null>(null)
   const key = JSON.stringify([context.sessionId, context.scope, sourceKey])
-  const latest = useRef({ key, disabled, onAdopt })
-  latest.current = { key, disabled, onAdopt }
+  const latest = useRef({ key, connection, disabled, onAdopt })
+  latest.current = { key, connection, disabled, onAdopt }
   useEffect(() => {
     pending.current?.abort()
     pending.current = null
     setProposal(null); setBusy(false); setNotice(null)
     return () => { pending.current?.abort() }
-  }, [key])
+  }, [key, connection])
 
   async function read(adopt: boolean) {
     const readProposal = context.bridge.readNativeDraftProposal
-    if (!context.sessionId || !readProposal || disabled || pending.current) return
+    if (!connection || !context.sessionId || !readProposal || disabled || pending.current) return
     const controller = new AbortController()
     pending.current = controller
     setBusy(true); setNotice(null)
     try {
       const result = await readProposal(context.sessionId, context.scope, controller.signal)
-      if (controller.signal.aborted || latest.current.key !== key) return
+      if (controller.signal.aborted || latest.current.key !== key || latest.current.connection !== connection) return
       if (result.status !== 'current') {
         setProposal(null)
         setNotice(result.status === 'none' ? 'nativeDraftNone' : result.status === 'stale' ? 'nativeDraftStale' : 'nativeDraftUnavailable')
@@ -81,9 +85,9 @@ export function NativeDirectorDraft({ context, disabled, sourceKey, onAdopt, t }
 
   return <section aria-label={t('nativeDraftTitle')}>
     <h4>{t('nativeDraftTitle')}</h4><p>{t('nativeDraftHint')}</p>
-    <button type="button" disabled={disabled || busy || !context.sessionId || !context.bridge.readNativeDraftProposal}
+    <button type="button" disabled={!connection || disabled || busy || !context.sessionId || !context.bridge.readNativeDraftProposal}
       onClick={() => { void read(false) }}>{t(busy ? 'nativeDraftChecking' : 'nativeDraftRead')}</button>
-    {proposal && <div>
+    {connection && proposal && <div>
       <p>{proposal.reason}</p><p>{t('nativeDraftField')}: {proposal.field}</p>
       <details><summary>{t('nativeDraftBefore')}</summary><pre style={{ whiteSpace: 'pre-wrap' }}>{proposal.before}</pre></details>
       <h5>{t('nativeDraftAfter')}</h5><pre style={{ whiteSpace: 'pre-wrap' }}>{proposal.after}</pre>

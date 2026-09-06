@@ -20,6 +20,7 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as ModelTools from '../src/model-tools.ts'
 import { draftContext, draftPrompt, draftMethod } from './native-draft-fixture.ts'
 import { createDirectorContextRpcHandler } from '../src/rpc.ts'
+import { readNativeDirectorReadiness } from '../src/native-readiness.ts'
 import type { DirectorContextSnapshot } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 
 const scope = { projectId: 'example-project', episodeId: 'example-episode', sceneId: 'example-scene', shotId: 'example-shot' }
@@ -131,7 +132,12 @@ export async function runNativeDirectorExample(draftMode = false) {
     })
     handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: '看看当前镜头，参考导演方法给我建议。' }], source: { kind: 'user' } }))
     await idle
+    const ordinary = await ctx.agents.create({ sessionId: SessionId('ordinary-example'),
+      agentOptions: { provider: 'keyless', model: 'fixture' } })
+    const ordinaryReadiness = readNativeDirectorReadiness(ctx, ordinary.agent.session)
+    await ordinary.dispose()
     const result = {
+      readiness: readNativeDirectorReadiness(ctx, handle.agent.session), ordinaryReadiness,
       ...(draftMode ? { draftProposal: await createDirectorContextRpcHandler(ctx.sessions, {
         readDirectorContext: async () => ({ ok: true, context: draftContext as DirectorContextSnapshot }),
       }, { prompt: ctx.qingmuYimengRead, method: ctx.qingmuImagoMethod })('readNativeDraftProposal', {
@@ -147,7 +153,7 @@ export async function runNativeDirectorExample(draftMode = false) {
       rootTools: ctx.tools.schemas().map(tool => tool.name),
     }
     await handle.dispose()
-    return result
+    return { ...result, inactiveReadiness: readNativeDirectorReadiness(ctx, handle.agent.session) }
   } finally {
     await ctx.fiber.dispose()
   }

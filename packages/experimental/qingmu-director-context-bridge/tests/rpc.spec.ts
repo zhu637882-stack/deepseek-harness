@@ -20,6 +20,27 @@ const proposal = (): DirectorReplayProposal => ({
 } as unknown as DirectorReplayProposal)
 
 describe('loopback director context RPC facade', () => {
+  it('inspects only attached session tools and rejects malformed or cancelled reads without writing events', async () => {
+    const session = Session.create(SessionId('session_1'))
+    const readDirectorContext = vi.fn()
+    const inspect = vi.fn(() => ({ status: 'inactive' as const, presetId: null, tools: [], missingTools: [] }))
+    const handler = createDirectorContextRpcHandler({ get: id => String(id) === 'session_1' ? session : undefined },
+      { readDirectorContext }, undefined, inspect)
+    const signal = new AbortController().signal
+    expect(await handler('readNativeDirectorReadiness', { sessionId: 'session_1' }, signal))
+      .toMatchObject({ ok: true, value: { status: 'inactive' } })
+    expect(inspect).toHaveBeenCalledExactlyOnceWith(session)
+    expect(await handler('readNativeDirectorReadiness', { sessionId: 'missing' }, signal)).toMatchObject({ ok: false })
+    expect(await handler('readNativeDirectorReadiness', { sessionId: 'session_1', start: true }, signal)).toMatchObject({ ok: false })
+    const cancelled = new AbortController(); cancelled.abort()
+    expect(await handler('readNativeDirectorReadiness', { sessionId: 'session_1' }, cancelled.signal)).toMatchObject({ ok: false })
+    expect(inspect).toHaveBeenCalledTimes(1)
+    expect(readDirectorContext).not.toHaveBeenCalled()
+    expect(session.events).toHaveLength(0)
+    const legacy = createDirectorContextRpcHandler({ get: () => session }, { readDirectorContext })
+    expect(await legacy('readNativeDirectorReadiness', { sessionId: 'session_1' }, signal))
+      .toMatchObject({ ok: true, value: { status: 'unavailable' } })
+  })
   it('releases only the current browser owner and validates clear fields before mutation', async () => {
     const session = Session.create(SessionId('session_1'))
     const handler = createDirectorContextRpcHandler({ get: () => session }, {

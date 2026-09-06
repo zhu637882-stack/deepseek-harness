@@ -29,6 +29,7 @@ import { EpisodeEvidenceLedger } from './EpisodeEvidenceLedger.tsx'
 import { EditorialHandoff } from './EditorialHandoff.tsx'
 import css from './QingmuCockpit.module.css'
 import { DirectorWorkspace } from './DirectorWorkspace.tsx'
+import { NativeDirectorSession } from './NativeDirectorSession.tsx'
 
 export type QingmuCockpitProps = PropsRuntime<'sidebar.footer.action'>
   & InjectFace<QingmuCockpitFace>
@@ -150,7 +151,9 @@ function errorMessage(error: unknown): string {
 }
 
 /** Qingmu production cockpit mounted in the generic sidebar footer. */
-export function QingmuCockpit({ wide, port, directorBridge, hostSync, entryScope, t, useSessions }: QingmuCockpitProps) {
+export function QingmuCockpit({
+  wide, port, directorBridge, nativeDirectorSession, hostSync, entryScope, t, useSessions,
+}: QingmuCockpitProps) {
   const [open, setOpen] = useState(true)
   const [tab, setTab] = useState<Tab>('director')
   const [loading, setLoading] = useState(false)
@@ -165,6 +168,7 @@ export function QingmuCockpit({ wide, port, directorBridge, hostSync, entryScope
   const [selectedShotId, setSelectedShotId] = useState('')
   const [generationCatalog, setGenerationCatalog] = useState<YimengCapabilityCatalogResponse>()
   const directorSessionId = useSessions(state => state.current)
+  const [directorRefresh, setDirectorRefresh] = useState(0)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
@@ -653,12 +657,17 @@ export function QingmuCockpit({ wide, port, directorBridge, hostSync, entryScope
   )
 
   const panels: Record<Tab, ReactNode> = {
-    director: projectId !== '' && episodeId !== ''
-      ? <DirectorWorkspace projectId={projectId} episodeId={episodeId} projection={projection}
-        shotItems={shotItems} selectedShotId={selectedShotId} onSelectShotId={(id) => { if (mayLeaveDirector()) setSelectedShotId(id) }}
-        onUnsavedChange={onDirectorDirty} port={port} directorBridge={directorBridge}
-        directorSessionId={directorSessionId} hostSync={hostSync} t={t} onCommitted={refreshWorkflowProjectionAfterCommit} />
-      : <p role="status">导演工作区等待准确项目与剧集绑定；不会自动读取空作用域。</p>,
+    director: <>
+      {nativeDirectorSession && <NativeDirectorSession port={nativeDirectorSession} bridge={directorBridge}
+        sessionId={directorSessionId} onRefresh={() => { setDirectorRefresh(value => value + 1) }} />}
+      {projectId !== '' && episodeId !== ''
+        ? <DirectorWorkspace projectId={projectId} episodeId={episodeId} projection={projection}
+          shotItems={shotItems} selectedShotId={selectedShotId} onSelectShotId={(id) => { if (mayLeaveDirector()) setSelectedShotId(id) }}
+          onUnsavedChange={onDirectorDirty} port={port} directorBridge={directorBridge}
+          directorSessionId={directorSessionId} directorConnection={nativeDirectorSession?.connection} directorRefresh={directorRefresh}
+          hostSync={hostSync} t={t} onCommitted={refreshWorkflowProjectionAfterCommit} />
+        : <p role="status">导演工作区等待准确项目与剧集绑定；不会自动读取空作用域。</p>}
+    </>,
     overview,
     assets: assetView,
     shots: shotView,

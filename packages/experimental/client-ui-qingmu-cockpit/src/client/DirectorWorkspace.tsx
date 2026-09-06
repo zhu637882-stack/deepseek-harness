@@ -9,6 +9,7 @@ import css from './DirectorWorkspace.module.css'
 import { ScenePlanningWorkspace } from './ScenePlanningWorkspace.tsx'
 import type { DirectorContextClientPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import type { QingmuHostSync } from './host-sync.ts'
+import type { HostDescriptionSource } from '@deepseek-ai/dsh-client-connection/client'
 
 /** Props retain Yimeng's scene/frame identities; no director state is persisted here. */
 export interface DirectorWorkspaceProps {
@@ -23,6 +24,8 @@ export interface DirectorWorkspaceProps {
   readonly port: QingmuYimengPort
   readonly directorBridge: DirectorContextClientPort
   readonly directorSessionId: string | undefined
+  readonly directorConnection?: HostDescriptionSource | undefined
+  readonly directorRefresh?: number | undefined
   readonly hostSync?: QingmuHostSync | undefined
   readonly t: (key: QingmuCockpitKey) => string
 }
@@ -89,6 +92,7 @@ function ExistingDirectorWorkspace(props: DirectorWorkspaceProps) {
       </details>
       <PromptIrWorkspace {...props} storyboardRevisionId={relations.storyboardRevision.revisionId}
         {...(shot ? { nativeDirector: { bridge: props.directorBridge, sessionId: props.directorSessionId,
+          connection: props.directorConnection,
           scope: { projectId: props.projectId, episodeId: props.episodeId, sceneId: shot.sceneId, shotId: shot.shotId } } } : {})}
         presentation="director" onCommitted={async () => { await props.onCommitted() }} />
       <details onToggle={(event) => { setShowCanvas(event.currentTarget.open) }}>

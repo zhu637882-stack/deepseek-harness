@@ -174,8 +174,18 @@ export type DirectorContextBridgeRpcResult = DirectorContextEntryResult | Direct
   readonly manualWorkAllowed: true
 }
 
+/** Native registration evidence; no model request or business operation is performed. */
+export interface NativeDirectorReadiness {
+  readonly status: 'mounted' | 'missing-tools' | 'inactive' | 'unavailable'
+  readonly presetId: string | null
+  readonly tools: readonly string[]
+  readonly missingTools: readonly string[]
+}
+
 /** Browser port for one current DSh session. */
 export interface DirectorContextClientPort {
+  /** Inspect actual session-scoped tool registrations without resuming its agent. */
+  readNativeDirectorReadiness?(sessionId: string, signal?: AbortSignal): Promise<NativeDirectorReadiness>
   /** Optional when the Host has not installed native prompt tools; manual editing remains available. */
   readNativeDraftProposal?(sessionId: string, scope: DirectorObjectScope, signal?: AbortSignal): Promise<NativeDraftProposalResult>
   enter(sessionId: string, scope: DirectorObjectScope, signal?: AbortSignal, ownerId?: string): Promise<DirectorContextEntryResult>

@@ -6,6 +6,7 @@ import { ScenePlanningWorkspace } from '../src/client/ScenePlanningWorkspace.tsx
 import type { DirectorProposalFreshnessResult, DirectorReplayProposal, ScenePlanningState, ScenePlanningResult } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { DirectorContextBindingState, DirectorContextClientPort, DirectorObjectScope } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import type { QingmuHostSync, QingmuScenePlanningSavedMessage } from '../src/client/host-sync.ts'
+import { directorConnectionFixture } from './director-connection-fixture.ts'
 
 const state: ScenePlanningState = { schema: 'jason.qingmu-scene-planning-state.v1', projectId: 'project_1', episodeId: 'episode_1',
   scriptRevision: 1, scriptSha256: 'a'.repeat(64), storyboard: null, planning: null,
@@ -128,6 +129,52 @@ it('refreshes the same canonical shot when its source revision changes and clear
   expect(owner2).not.toBe(owner1)
   view.unmount()
   expect(bridge.clear).toHaveBeenLastCalledWith('session_1', scope, owner2)
+})
+it('rebinds after reconnect or explicit refresh without reviving stale replies or mutating business data', async () => {
+  const automatic = automaticReadState()
+  const port = { readScenePlanning: vi.fn(async () => automatic), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() }
+  const bridge = replayBridge()
+  const transport = directorConnectionFixture()
+  const scope = { projectId: automatic.projectId, episodeId: automatic.episodeId, sceneId: 'canonical_scene', shotId: 'canonical_1' }
+  const props = { ...automatic, port, directorBridge: bridge, directorSessionId: 'session_1', canonicalDirectorScope: scope,
+    directorConnection: transport.source, onCommitted: vi.fn(async () => {}), onSelectShotId: vi.fn(), onUnsavedChange: vi.fn() }
+  const view = render(<ScenePlanningWorkspace {...props} directorRefresh={0} />)
+  await screen.findByText('d'.repeat(64))
+  const firstOwner = bridge.enter.mock.calls[0]?.[3]
+  let finish!: (value: Awaited<ReturnType<DirectorContextClientPort['enter']>>) => void
+  bridge.enter.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+  view.rerender(<ScenePlanningWorkspace {...props} directorRefresh={1} />)
+  await screen.findByText('正在核对当前镜头上下文…')
+  const clearsBeforeOffline = bridge.clear.mock.calls.length
+  act(() => { transport.publish(false) })
+  await screen.findByText('导演助理暂不可用；人工编辑与保存不受影响。')
+  expect(bridge.clear).toHaveBeenCalledTimes(clearsBeforeOffline)
+  await act(async () => { finish({ status: 'current', changed: true, manualWorkAllowed: true, state: {
+    version: 1, binding: { scope, contextSnapshotSha256: 'e'.repeat(64) }, proposal: null, transition: 'enter',
+  } }) })
+  expect(screen.queryByText('e'.repeat(64))).toBeNull()
+  act(() => { transport.publish(true) })
+  await screen.findByText('d'.repeat(64))
+  expect(bridge.enter).toHaveBeenCalledTimes(3)
+  expect(bridge.enter.mock.calls[2]?.[3]).not.toBe(firstOwner)
+  expect(port.saveScenePlanning).not.toHaveBeenCalled(); expect(port.recoverScenePlanning).not.toHaveBeenCalled()
+  expect(port.requestDirectorProposal).not.toHaveBeenCalled()
+})
+it('preserves the same unsaved planning editor across connection generations', async () => {
+  const transport = directorConnectionFixture()
+  const port = { readScenePlanning: vi.fn(async () => state), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() }
+  render(<ScenePlanningWorkspace {...state} port={port} directorConnection={transport.source}
+    onCommitted={vi.fn(async () => {})} onSelectShotId={vi.fn()} onUnsavedChange={vi.fn()} />)
+  fireEvent.click(await screen.findByRole('button', { name: '建立本场镜头' }))
+  const field = screen.getByLabelText('镜头名称') as HTMLInputElement
+  fireEvent.change(field, { target: { value: '我未保存的分镜' } })
+  act(() => { transport.publish(false) })
+  act(() => { transport.publish(true) })
+  expect(screen.getByLabelText('镜头名称')).toBe(field)
+  expect(field.value).toBe('我未保存的分镜')
+  expect(port.saveScenePlanning).not.toHaveBeenCalled()
 })
 it('hides the old context SHA during a canonical switch and rejects late binding responses', async () => {
   const automatic = automaticReadState()
