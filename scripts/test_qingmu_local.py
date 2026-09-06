@@ -400,9 +400,11 @@ class OwnershipTests(unittest.TestCase):
     def test_recorded_build_manifest_binds_clean_sources_artifacts_and_instance(self):
         with tempfile.TemporaryDirectory() as directory:
             root, config, identities = self.build_manifest_world(Path(directory))
-            with patch.object(local, "source_identity", side_effect=lambda path: identities[path]):
+            with patch.object(local, "source_identity", side_effect=lambda path: identities[path]), \
+                 patch.object(local, "require_qingmu_client_build") as check:
                 result = local.record_build_manifest(root, config)
                 status = local.build_manifest_status(root, config)
+            check.assert_called_once_with(config, identities[Path(config["harnessRoot"])]["commit"])
             manifest_path = root / "build-manifest/current.json"
             manifest = json.loads(manifest_path.read_text())
             self.assertTrue(result["matches"])
@@ -417,10 +419,38 @@ class OwnershipTests(unittest.TestCase):
             self.assertNotIn("controlKey", serialized)
             self.assertNotIn("jwtSecret", serialized)
 
+    def test_record_build_refuses_invalid_client_before_replacing_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, config, identities = self.build_manifest_world(Path(directory))
+            current = root / "build-manifest/current.json"
+            current.write_text('{"previous":"preserve"}\n')
+            for error in (ValueError("client build invalid"), subprocess.TimeoutExpired("checker", 30)):
+                with self.subTest(error=type(error).__name__), \
+                     patch.object(local, "source_identity", side_effect=lambda path: identities[path]), \
+                     patch.object(local, "require_qingmu_client_build", side_effect=error) as check:
+                    with self.assertRaises(type(error)):
+                        local.record_build_manifest(root, config)
+                    check.assert_called_once()
+                    self.assertEqual(current.read_text(), '{"previous":"preserve"}\n')
+                    self.assertFalse((root / "build-manifest/history").exists())
+
+    def test_release_identity_includes_native_director_readers_and_build_record(self):
+        for relative in ("packages/client/runtime/lib/client.js", "packages/host/apiproxy/lib/index.js",
+                         "packages/boot/app-boot/lib/index.js",
+                         "packages/experimental/qingmu-director-context-bridge/lib/model-tools.js",
+                         "packages/experimental/client-ui-brand-qingmu/lib/client.js",
+                         "packages/experimental/qingmu-web/cordis.patch.yml",
+                         "packages/experimental/qingmu-web/agent-presets/qingmu-director/preset.yml",
+                         "packages/experimental/qingmu-web/agent-presets/qingmu-director/agent.cordis.yml",
+                         ".dsh-build/client-build-environment.json"):
+            with self.subTest(artifact=relative):
+                self.assertIn(relative, local.BUILD_MANIFEST_ARTIFACTS)
+
     def test_build_manifest_detects_artifact_and_source_drift(self):
         with tempfile.TemporaryDirectory() as directory:
             root, config, identities = self.build_manifest_world(Path(directory))
-            with patch.object(local, "source_identity", side_effect=lambda path: identities[path]):
+            with patch.object(local, "source_identity", side_effect=lambda path: identities[path]), \
+                 patch.object(local, "require_qingmu_client_build"):
                 local.record_build_manifest(root, config)
                 artifact = Path(config["harnessRoot"]) / local.BUILD_MANIFEST_ARTIFACTS[0]
                 artifact.write_text("drifted")
@@ -429,13 +459,53 @@ class OwnershipTests(unittest.TestCase):
             self.assertFalse(status["matches"])
             self.assertIn("artifacts", status["mismatches"])
 
+    def test_build_manifest_detects_new_reader_and_build_record_drift_without_rechecking_build(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, config, identities = self.build_manifest_world(Path(directory))
+            with patch.object(local, "source_identity", side_effect=lambda path: identities[path]), \
+                 patch.object(local, "require_qingmu_client_build") as check:
+                local.record_build_manifest(root, config)
+                check.reset_mock()
+                for relative in ("packages/client/runtime/lib/client.js", "packages/host/apiproxy/lib/index.js",
+                                 "packages/experimental/qingmu-director-context-bridge/lib/model-tools.js",
+                                 "packages/experimental/client-ui-brand-qingmu/lib/client.js",
+                                 ".dsh-build/client-build-environment.json"):
+                    with self.subTest(artifact=relative):
+                        artifact = Path(config["harnessRoot"]) / relative
+                        original = artifact.read_bytes()
+                        artifact.write_text("drifted")
+                        status = local.build_manifest_status(root, config)
+                        self.assertFalse(status["matches"])
+                        self.assertIn("artifacts", status["mismatches"])
+                        artifact.write_bytes(original)
+                check.assert_not_called()
+
+    def test_qingmu_client_build_checker_uses_bounded_scrubbed_subprocess(self):
+        config = {"harnessRoot": "/isolated/harness", "node": "/isolated/node"}
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="{}", stderr="")
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "must-not-pass", "NODE_OPTIONS": "must-not-pass"}), \
+             patch.object(local.subprocess, "run", return_value=completed) as run:
+            local.require_qingmu_client_build(config, "a" * 40)
+        self.assertEqual(run.call_args.args[0], ["/isolated/node", "--import", "tsx/esm",
+                         "/isolated/harness/scripts/qingmu-client-build-check.ts", "/isolated/harness", "a" * 40])
+        self.assertEqual(set(run.call_args.kwargs["env"]), {"PATH"})
+        self.assertEqual(run.call_args.kwargs["cwd"], Path("/isolated/harness"))
+        self.assertEqual(run.call_args.kwargs["timeout"], 30)
+        completed.returncode = 1
+        completed.stderr = "client artifacts differ"
+        with patch.object(local.subprocess, "run", return_value=completed), \
+             self.assertRaisesRegex(ValueError, "client artifacts differ"):
+            local.require_qingmu_client_build(config, "a" * 40)
+
     def test_review_only_manifest_does_not_claim_host_artifacts_or_enable_full_start(self):
         with tempfile.TemporaryDirectory() as directory:
             root, config, identities = self.build_manifest_world(Path(directory))
-            with patch.object(local, "source_identity", side_effect=lambda path: identities[path]):
+            with patch.object(local, "source_identity", side_effect=lambda path: identities[path]), \
+                 patch.object(local, "require_qingmu_client_build") as check:
                 local.record_build_manifest(root, config, review_only=True)
                 review = local.build_manifest_status(root, config, review_only=True)
                 full = local.build_manifest_status(root, config)
+            check.assert_not_called()
             manifest = json.loads((root / "build-manifest/current.json").read_text())
             self.assertEqual(manifest["runtimeProfile"], "review-only")
             self.assertEqual(manifest["artifacts"]["host"], {})
@@ -895,7 +965,7 @@ class OwnershipTests(unittest.TestCase):
             for part in ("private", "logs", "work"):
                 (root / part).mkdir()
             supervisor = local.Supervisor(root, {"instanceId": "unit", "root": str(root),
-                "yimengRoot": str(root), "controlKey": "unit"})
+                "yimengRoot": str(root), "controlKey": "unit", "jwtSecret": "unit-media-signing"})
             local.mark_lifecycle(root, supervisor.config, "clean")
             child = subprocess.Popen(["/bin/sleep", "30"])
             try:

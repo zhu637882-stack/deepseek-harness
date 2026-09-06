@@ -2,7 +2,7 @@
 
 [English](qingmu-local.md) | 中文
 
-本指南启动具有持久 SQLite 数据库的青木单用户专用实例，不升级其他易梦现场。同一个启动器拥有易梦 API、DSh Host/导演服务和易梦六阶段前端。前提：当前 Harness 已按青木 profile 完成构建，具备 Node 20、Python 3、含 `.venv` 且已用 `QINGMU_LOCAL_RUNTIME_PROXY=1` 完成前端生产构建的易梦 Writer 工作区，以及 IMAGO Core。初始化会记录首份本地构建身份；任一工作区或其产物变化后，须先停止实例、完成两边构建，再运行 `record-build`，然后才可再次启动。
+本指南启动具有持久 SQLite 数据库的青木单用户专用实例，不升级其他易梦现场。同一个启动器拥有易梦 API、DSh Host/导演服务和易梦六阶段前端。前提：当前 Harness 已按青木 profile 完成构建，前端使用 Node 20、Harness 使用其支持的 Node 运行时，具备 Python 3、含 `.venv` 且已用 `QINGMU_LOCAL_RUNTIME_PROXY=1` 完成前端生产构建的易梦 Writer 工作区，以及 IMAGO Core。初始化会记录首份本地构建身份；任一工作区或其产物变化后，须先停止实例、完成受影响的构建，再运行 `record-build`，然后才可再次启动。
 
 ## 初始化与打开
 
@@ -56,12 +56,18 @@ python3 scripts/qingmu-local.py deactivate-project-production --instance-id EXAC
 
 ## 停止、重启与更新登录
 
+更新前先检查待处理任务，并按上节停用已激活的生产范围。停用后仍可能存在明确绑定的文本或资产父任务，也须核对这些绑定。实例仍在加载或提供工作区文件时，不要原位构建。Harness 源码变更后应完成青木根构建；单独打包客户端不会注入所需 profile。Writer 前端未变化时，不必仅因后端 Python 变化而重建前端。
+
 ```sh
 python3 scripts/qingmu-local.py stop
+DSH_BUILD_CLIENT_PROFILE=qingmu pnpm run build
+node --import tsx/esm scripts/qingmu-client-build-check.ts "$PWD" "$(git rev-parse HEAD)"
 python3 scripts/qingmu-local.py record-build
 python3 scripts/qingmu-local.py start
 python3 scripts/qingmu-local.py login
 ```
+
+独立客户端检查只读。完整 `record-build` 在替换清单前再次执行检查：既有完整客户端构建记录必须匹配青木 profile、当前源码提交前缀及产物摘要。缺失、过期或错误 profile 的构建会被拒绝，原清单保持不变。发布身份还绑定原生导演 model-tools 入口、runtime 和附件读取器、两个青木客户端入口及随包预设文件。日常 `status` 只对比选定发布产物，不重复全客户端摘要，也不调用模型。仅审核模式刻意不登记 Host、不执行此检查。这些身份检查不能证明插件启动或真实模型完成业务操作；部署后须另行验证。清单历史只记录身份，不是可恢复的产物副本。
 
 停止保留数据。`record-build` 要求实例正常停止且 Writer/Harness 工作树干净，然后在 `build-manifest/current.json` 中原子绑定两边提交、Core 工作区状态、frontend BUILD_ID、必要 Host 产物 SHA-256、端口和数据根；旧记录保留在 `build-manifest/history/`。启动和 `status` 会把该记录与磁盘实况对比；身份缺失或漂移时失败关闭。启动不重新播种项目。重启保持端口；已保存端口被占时失败，不停止占用者。重复启动返回同一存活实例。陈旧 PID 仅供诊断，命令绝不向其发信号。管理进程损坏或被外部强杀时会拒绝猜测，可能需操作员诊断其遗留子进程；不要按端口杀未知监听者。
 

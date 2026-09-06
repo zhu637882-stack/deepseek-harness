@@ -52,12 +52,21 @@ CRASH_RECOVERY_SCHEMA = "qingmu.local-crash-recovery.v2"
 OWNED_PROCESS_ROLES = ("api", "worker", "assetWorker", "host", "frontend")
 BUILD_MANIFEST_ARTIFACTS = (
     "apps/cli/lib/bin.js",
+    "packages/boot/app-boot/lib/index.js",
+    "packages/client/runtime/lib/client.js",
+    "packages/host/apiproxy/lib/index.js",
     "packages/experimental/qingmu-yimeng-command-adapter/lib/index.js",
     "packages/experimental/qingmu-yimeng-read-adapter/lib/index.js",
     "packages/experimental/qingmu-imago-method-adapter/lib/index.js",
     "packages/experimental/qingmu-director-context-bridge/lib/index.js",
+    "packages/experimental/qingmu-director-context-bridge/lib/model-tools.js",
+    "packages/experimental/client-ui-brand-qingmu/lib/client.js",
     "packages/experimental/client-ui-qingmu-cockpit/lib/client.js",
     "packages/experimental/qingmu-web/lib/index.js",
+    "packages/experimental/qingmu-web/cordis.patch.yml",
+    "packages/experimental/qingmu-web/agent-presets/qingmu-director/preset.yml",
+    "packages/experimental/qingmu-web/agent-presets/qingmu-director/agent.cordis.yml",
+    ".dsh-build/client-build-environment.json",
 )
 LOCAL_USERNAME = "qingmu-local"
 LOCAL_PASSWORD_ITERATIONS = 600_000
@@ -428,11 +437,27 @@ def require_build_manifest_matches(root: Path, config: dict, *, review_only: boo
     return status
 
 
+def require_qingmu_client_build(config: dict, commit: str) -> None:
+    """Check the complete build once at release recording, never on routine status reads."""
+    harness = Path(config["harnessRoot"])
+    result = subprocess.run(
+        [config["node"], "--import", "tsx/esm", str(harness / "scripts/qingmu-client-build-check.ts"),
+         str(harness), commit],
+        cwd=harness, env={"PATH": os.environ.get("PATH", "")},
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode:
+        raise ValueError("青木客户端构建未通过：先以 DSH_BUILD_CLIENT_PROFILE=qingmu 完整构建，再 record-build。"
+                         + result.stderr[-2000:])
+
+
 def record_build_manifest(root: Path, config: dict, *, review_only: bool = False) -> dict:
     """Atomically record one stopped build and retain the preceding manifest."""
     with instance_lock(root):
         require_clean(root, config)
         manifest = collect_build_manifest(root, config, review_only=review_only)
+        if not review_only:
+            require_qingmu_client_build(config, manifest["sources"]["harness"]["commit"])
         directory = root / "build-manifest"
         directory.mkdir(mode=0o700, exist_ok=True)
         current = directory / "current.json"

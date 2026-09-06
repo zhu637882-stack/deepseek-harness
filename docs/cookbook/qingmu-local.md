@@ -2,7 +2,7 @@
 
 English | [中文](qingmu-local.zh.md)
 
-This guide starts a dedicated single-user Qingmu instance with a persistent SQLite database. It does not upgrade another Yimeng installation. The one launcher owns the Yimeng API, the DSh Host/director service, and the Yimeng six-stage frontend. Prerequisites: this Harness checkout built with the Qingmu profile, Node 20, Python 3, the Yimeng Writer checkout with its `.venv` and a production frontend build made with `QINGMU_LOCAL_RUNTIME_PROXY=1`, and IMAGO Core. Initialization records the first local build identity; after either checkout or its artifacts change, stop the instance, complete both builds, and run `record-build` before the next start.
+This guide starts a dedicated single-user Qingmu instance with a persistent SQLite database. It does not upgrade another Yimeng installation. The one launcher owns the Yimeng API, the DSh Host/director service, and the Yimeng six-stage frontend. Prerequisites: this Harness checkout built with the Qingmu profile, Node 20 for the frontend and a Harness-supported Node runtime, Python 3, the Yimeng Writer checkout with its `.venv` and a production frontend build made with `QINGMU_LOCAL_RUNTIME_PROXY=1`, and IMAGO Core. Initialization records the first local build identity; after either checkout or its artifacts change, stop the instance, complete the affected builds, and run `record-build` before the next start.
 
 ## Initialize and open
 
@@ -52,12 +52,18 @@ An active Worker allows polling of already submitted tasks but never retries an 
 
 ## Stop, restart and renew login
 
+Before updating, inspect pending tasks and disable an active production scope as described above. Deactivation can still leave an explicitly bound text or asset parent eligible, so check those bindings too. Do not rebuild a checkout while the instance is loading or serving its files. After a Harness source change, complete the Qingmu root build; a bare client bundle does not inject the required profile. An unchanged Writer frontend need not be rebuilt solely because backend Python changed.
+
 ```sh
 python3 scripts/qingmu-local.py stop
+DSH_BUILD_CLIENT_PROFILE=qingmu pnpm run build
+node --import tsx/esm scripts/qingmu-client-build-check.ts "$PWD" "$(git rev-parse HEAD)"
 python3 scripts/qingmu-local.py record-build
 python3 scripts/qingmu-local.py start
 python3 scripts/qingmu-local.py login
 ```
+
+The standalone client check is read-only. Full `record-build` repeats it before replacing any manifest: the existing complete client-build record must match the Qingmu profile, current source commit prefix and artifact digest. Missing, stale or wrong-profile builds are rejected without changing the preceding manifest. The release identity also binds the native director model-tools entry, runtime and attachment readers, both Qingmu client entries and shipped preset files. Routine `status` compares the selected release artifacts; it does not rerun the complete client digest or a model call. Review-only recording deliberately excludes the Host and this check. None of these identity checks proves that plugins started or a real model completed a business operation; verify those separately after deployment. Manifest history records identity, not recoverable artifact copies.
 
 Stopping preserves data. `record-build` requires a clean stopped instance and clean Writer/Harness worktrees, then atomically binds their commits, the Core checkout state, the frontend BUILD_ID, required Host artifact SHA-256 values, ports and data root in `build-manifest/current.json`; it retains any preceding record under `build-manifest/history/`. Starting and `status` compare that record with disk and fail closed on missing or drifted identity. Starting never reseeds projects. Ports remain stable across restarts; an occupied saved port fails without killing its owner. Repeated start reports the same live instance. A stale PID is diagnostic only; commands never signal it. A broken or externally killed supervisor fails closed and may need operator diagnosis of its orphaned children; do not kill an unknown listener by port.
 
