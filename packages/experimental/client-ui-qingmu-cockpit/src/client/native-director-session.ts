@@ -2,6 +2,7 @@
 import { useSyncExternalStore } from 'react'
 import type { ClientContext, ISessions, IWorkspaces } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ConnectionHandle, HostDescriptionSource } from '@deepseek-ai/dsh-client-connection/client'
+import type { NativeDirectorPromptTarget } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import { unwrapRpc } from './contracts.ts'
 
 /** Connection generations invalidate readiness and binding without remounting the editor. */
@@ -15,6 +16,8 @@ export interface NativeDirectorSessionPort {
   readonly connection: HostDescriptionSource
   /** Enter only after a user action; late completion never changes a newer navigation selection. */
   activate(expectedSessionId: string | undefined, signal: AbortSignal): Promise<void>
+  /** Queue one user turn in the selected director; acceptance does not imply completion. Never retries. */
+  prompt(target: NativeDirectorPromptTarget, text: string, signal: AbortSignal): Promise<void>
 }
 
 /**
@@ -70,5 +73,21 @@ export function createNativeDirectorSessionPort(ctx: ClientContext, connection: 
     }
     current()
     if (target) sessions.open(target)
+  }, async prompt(target, text, signal) {
+    signal.throwIfAborted()
+    const { sessionId } = target
+    const sessions = ctx.get('sessions') as unknown as ISessions | undefined
+    const list = sessions?.list.getSnapshot()
+    const selected = list?.ids.map(id => list.byId[id]).find(row => row?.id === sessionId)
+    if (!connection.hostDescription.getSnapshot() || list?.current !== sessionId
+      || selected?.agentPreset !== 'qingmu-director') {
+      throw new Error('当前导演会话已变化，请重新检查连接；没有发送。')
+    }
+    if (!text.trim() || text.length > 16000) throw new Error('请输入 1 至 16000 字的导演要求。')
+    const result = (await connection.api.sessions.prompt({ sessionId: selected.id, mode: 'queue',
+      content: [{ type: 'text', text: JSON.stringify(target) }, { type: 'text', text }],
+      clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    }, signal)).result
+    if (!result.ok) throw new Error(result.error.message)
   } }
 }

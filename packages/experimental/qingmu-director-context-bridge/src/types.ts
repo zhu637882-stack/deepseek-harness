@@ -84,6 +84,15 @@ export interface DirectorObjectScope {
   readonly shotId: string
 }
 
+/** Immutable restriction carried by one native user message, never authority to select an object. */
+export interface NativeDirectorPromptTarget {
+  readonly schema: 'qingmu.native-director-request.v1'
+  readonly sessionId: string
+  readonly scope: DirectorObjectScope
+  readonly contextSnapshotSha256: string
+  readonly ownerId: string
+}
+
 /** Context identity held in the DSh session log; Yimeng remains business truth. */
 export interface DirectorContextBinding {
   readonly scope: DirectorObjectScope

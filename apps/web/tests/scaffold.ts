@@ -23,9 +23,9 @@
 // (the plugin-row path discards the ReplayHandle; the direct install keeps
 // assertConsumed for the teardown fixture-consumption check).
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { Page } from 'playwright'
 import { expect } from 'vitest'
@@ -300,6 +300,8 @@ export interface LaunchOptions {
   remoteAuthority?: string
   /** Reuse an existing harness home so a second Host can verify user settings across origins. */
   harnessHome?: string
+  /** Fresh real package artifacts in the caller-owned test world, installed after fallback healing. */
+  builtPackages?: readonly { name: string; root: string }[]
   /** Bind a known loopback port when a scenario must prove same-origin browser recovery across a Host restart. */
   webPort?: number
 }
@@ -530,6 +532,20 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     // harness home, with bare plugin names resolving through the flat module
     // fallback the launcher heals under <home>/profiles.
     healProfilesModuleFallback(INSTALL_ANCHOR, harnessHome)
+    for (const pkg of options.builtPackages ?? []) {
+      if (!/^@deepseek-ai\/dsh-[a-z0-9-]+$/u.test(pkg.name) || !isAbsolute(pkg.root)) throw new Error('Invalid test package name or root')
+      const root = await realpath(pkg.root)
+      const manifest: unknown = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+      if (typeof manifest !== 'object' || manifest === null || !('name' in manifest) || manifest.name !== pkg.name) {
+        throw new Error('Test artifact package name does not match its manifest')
+      }
+      const link = join(harnessHome, 'profiles/node_modules', pkg.name)
+      await mkdir(join(harnessHome, 'profiles/node_modules/@deepseek-ai'), { recursive: true })
+      try { await unlink(link) } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
+      await symlink(root, link, 'dir')
+    }
     const profileDir = join(harnessHome, 'profiles', 'scaffold')
     await mkdir(profileDir, { recursive: true })
     const rootConfig = join(profileDir, 'cordis.yml')

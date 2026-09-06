@@ -5,10 +5,11 @@ import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type { DirectorContextClientPort, NativeDirectorReadiness } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import { NativeDirectorSession } from '../src/client/NativeDirectorSession.tsx'
+import { NativeDirectorComposer } from '../src/client/NativeDirectorComposer.tsx'
 import { createNativeDirectorSessionPort } from '../src/client/native-director-session.ts'
 import { directorConnectionFixture } from './director-connection-fixture.ts'
 
-afterEach(cleanup)
+afterEach(() => { cleanup(); sessionStorage.clear() })
 const ok = <T,>(value: T) => ({ result: { ok: true as const, value } })
 const mounted: NativeDirectorReadiness = { status: 'mounted', presetId: 'qingmu-director',
   tools: ['qingmu_read_bound_context', 'qingmu_get_imago_method', 'qingmu_read_prompt_draft', 'qingmu_propose_prompt_edit'], missingTools: [] }
@@ -20,10 +21,14 @@ function fixture(blank = true, preset = 'ordinary') {
   const workspaceState = { items: [{ workspaceId: 'w1', path: '/project', sessionIds: ['s1'] }], recentWorkspaceId: 'w1' }
   const workspaces = { list: { getSnapshot: () => workspaceState }, connectWorkspace: vi.fn(async () => 'new-empty') }
   const api = { agentPresets: { list: vi.fn(async () => ok({ presets: [{ id: 'qingmu-director', broken: false }] })),
-    select: vi.fn(async () => ok({ agentPreset: 'qingmu-director' })) }, sessions: { create: vi.fn(async () => ok({})) } }
+    select: vi.fn(async () => ok({ agentPreset: 'qingmu-director' })) }, sessions: {
+    create: vi.fn(async () => ok({})), prompt: vi.fn(async () => ok({})) } }
   const ctx = { get: (key: string) => key === 'sessions' ? sessions : key === 'workspaces' ? workspaces : undefined } as unknown as ClientContext
   const port = createNativeDirectorSessionPort(ctx, { api, hostDescription: transport.source } as unknown as ConnectionHandle)
-  return { transport, row, sessionState, sessions, workspaceState, workspaces, api, port }
+  const target = { schema: 'qingmu.native-director-request.v1' as const, sessionId: 's1',
+    scope: { projectId: 'project', episodeId: 'episode', sceneId: 'scene', shotId: 'shot1' },
+    contextSnapshotSha256: 'a'.repeat(64), ownerId: 'browser-1' }
+  return { transport, row, sessionState, sessions, workspaceState, workspaces, api, port, target }
 }
 
 it('selects the native preset for an empty session without creating a session or sending a model turn', async () => {
@@ -125,3 +130,99 @@ it('prevents duplicate entry and reports unavailable inspection instead of a fak
   await act(async () => { finish() })
   expect(onRefresh).toHaveBeenCalledTimes(1)
 })
+
+it('sends a user request to the exact selected native director without creating or switching sessions', async () => {
+  const f = fixture(false, 'qingmu-director')
+  const signal = new AbortController().signal
+  await f.port.prompt(f.target, '保持铁轨在右侧。', signal)
+  expect(f.api.sessions.prompt).toHaveBeenCalledExactlyOnceWith({ sessionId: 's1', mode: 'queue',
+    content: [{ type: 'text', text: JSON.stringify(f.target) }, { type: 'text', text: '保持铁轨在右侧。' }],
+    clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }, signal)
+  expect(f.sessions.open).not.toHaveBeenCalled()
+  expect(f.api.sessions.create).not.toHaveBeenCalled()
+  expect(f.api.agentPresets.select).not.toHaveBeenCalled()
+})
+it.each(['ordinary', 'missing', 'navigated', 'offline', 'aborted', 'empty', 'oversized'] as const)(
+  'does not dispatch a native director prompt when %s', async (reason) => {
+    const f = fixture(false, 'qingmu-director')
+    const abort = new AbortController()
+    if (reason === 'ordinary') f.row.agentPreset = 'ordinary'
+    if (reason === 'missing') f.sessionState.ids = []
+    if (reason === 'navigated') f.sessionState.current = 's2'
+    if (reason === 'offline') f.transport.publish(false)
+    if (reason === 'aborted') abort.abort()
+    const text = reason === 'empty' ? '  ' : reason === 'oversized' ? '字'.repeat(16001) : '保持铁轨在右侧。'
+    await expect(f.port.prompt(f.target, text, abort.signal)).rejects.toThrow()
+    expect(f.api.sessions.prompt).not.toHaveBeenCalled()
+  },
+)
+it('reports transport failure without retrying the possibly accepted native turn', async () => {
+  const f = fixture(false, 'qingmu-director')
+  f.api.sessions.prompt.mockRejectedValue(new Error('lost response'))
+  await expect(f.port.prompt(f.target, '保持铁轨在右侧。', new AbortController().signal)).rejects.toThrow('lost response')
+  expect(f.api.sessions.prompt).toHaveBeenCalledTimes(1)
+})
+it('submits once while pending and reports acceptance rather than creative completion', async () => {
+  const f = fixture(false, 'qingmu-director')
+  let finish!: () => void
+  const prompt = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
+  render(<NativeDirectorComposer port={{ ...f.port, prompt }} sessionId="s1" scopeKey="shot1" target={f.target} ready />)
+  const input = screen.getByRole('textbox', { name: '导演要求' }) as HTMLTextAreaElement
+  fireEvent.change(input, { target: { value: '保持铁轨在右侧。' } })
+  const button = screen.getByRole('button', { name: '发送给当前导演' })
+  fireEvent.click(button); fireEvent.click(button)
+  expect(prompt).toHaveBeenCalledExactlyOnceWith(f.target, '保持铁轨在右侧。', expect.any(AbortSignal))
+  expect(input.disabled).toBe(true)
+  await act(async () => { finish() })
+  expect(input.value).toBe('')
+  expect(screen.getByRole('status').textContent).toContain('尚未保存或生成')
+})
+it('keeps the request after an unknown send result and does not silently resend it', async () => {
+  const f = fixture(false, 'qingmu-director')
+  const prompt = vi.fn(async () => { throw new Error('lost response') })
+  const props = { port: { ...f.port, prompt }, sessionId: 's1', scopeKey: 'shot1', target: f.target, ready: true }
+  const view = render(<NativeDirectorComposer {...props} />)
+  const input = screen.getByRole('textbox', { name: '导演要求' }) as HTMLTextAreaElement
+  fireEvent.change(input, { target: { value: '保持铁轨在右侧。' } })
+  fireEvent.click(screen.getByRole('button', { name: '发送给当前导演' }))
+  await screen.findByText(/上次发送结果尚未确认/)
+  expect(input.value).toBe('保持铁轨在右侧。')
+  expect(screen.getByRole('button', { name: '发送给当前导演' })).toHaveProperty('disabled', true)
+  view.unmount()
+  render(<NativeDirectorComposer {...props} sessionId="s2" target={{ ...f.target, sessionId: 's2' }} />)
+  fireEvent.change(screen.getByRole('textbox', { name: '导演要求' }), { target: { value: '保持铁轨在右侧。' } })
+  expect(screen.getByRole('button', { name: '发送给当前导演' })).toHaveProperty('disabled', true)
+  fireEvent.click(screen.getByRole('button', { name: '发送给当前导演' }))
+  expect(prompt).toHaveBeenCalledTimes(1)
+})
+it.each(['scope', 'session', 'disconnect', 'reconnect', 'unmount'] as const)(
+  'ignores late acceptance and does not resend after %s', async (reason) => {
+    const f = fixture(false, 'qingmu-director')
+    let finish!: () => void
+    const prompt = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
+    const props = { port: { ...f.port, prompt }, sessionId: 's1', scopeKey: 'shot1', target: f.target, ready: true }
+    const view = render(<NativeDirectorComposer {...props} />)
+    fireEvent.change(screen.getByRole('textbox', { name: '导演要求' }), { target: { value: '保持铁轨在右侧。' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送给当前导演' }))
+    const signal = (prompt.mock.calls[0] as unknown as [unknown, string, AbortSignal])[2]
+    if (reason === 'scope') view.rerender(<NativeDirectorComposer {...props} scopeKey="shot2" />)
+    if (reason === 'session') view.rerender(<NativeDirectorComposer {...props} sessionId="s2" />)
+    if (reason === 'disconnect' || reason === 'reconnect') act(() => { f.transport.publish(false) })
+    if (reason === 'reconnect') act(() => { f.transport.publish(true) })
+    if (reason === 'unmount') view.unmount()
+    expect(signal.aborted).toBe(true)
+    await act(async () => { finish() })
+    expect(screen.queryByText(/要求已发送到当前导演会话/)).toBeNull()
+    if (reason !== 'unmount') {
+      expect(screen.getByRole('textbox', { name: '导演要求' })).toHaveProperty('value', '保持铁轨在右侧。')
+      view.unmount()
+    }
+    if (reason === 'disconnect') act(() => { f.transport.publish(true) })
+    render(<NativeDirectorComposer {...props} />)
+    fireEvent.change(screen.getByRole('textbox', { name: '导演要求' }), { target: { value: '保持铁轨在右侧。' } })
+    expect(screen.getByRole('button', { name: '发送给当前导演' })).toHaveProperty('disabled', true)
+    expect(screen.getByRole('status').textContent).toContain('上次发送结果尚未确认')
+    fireEvent.click(screen.getByRole('button', { name: '发送给当前导演' }))
+    expect(prompt).toHaveBeenCalledTimes(1)
+  },
+)

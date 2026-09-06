@@ -83,7 +83,10 @@ const SESSION_LOCATION = { kind: 'session' } as const
 const UNRESOLVED_LOCATION = { kind: 'unresolved' } as const
 
 function payloadCoordinates(event: SessionEvent): Coordinates {
-  const data = event.data as unknown as { turn?: unknown; step?: unknown }
+  // Extension events may clear their state with null or carry scalar values.
+  const payload: unknown = event.data
+  if (payload === null || typeof payload !== 'object') return {}
+  const data = payload as { turn?: unknown; step?: unknown }
   if (data.turn === null) return { session: true }
   const turn = Number.isSafeInteger(data.turn) && (data.turn as number) >= 0
     ? data.turn as number

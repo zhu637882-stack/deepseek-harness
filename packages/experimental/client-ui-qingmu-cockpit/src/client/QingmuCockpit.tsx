@@ -665,6 +665,7 @@ export function QingmuCockpit({
           shotItems={shotItems} selectedShotId={selectedShotId} onSelectShotId={(id) => { if (mayLeaveDirector()) setSelectedShotId(id) }}
           onUnsavedChange={onDirectorDirty} port={port} directorBridge={directorBridge}
           directorSessionId={directorSessionId} directorConnection={nativeDirectorSession?.connection} directorRefresh={directorRefresh}
+          nativeDirectorSession={nativeDirectorSession}
           hostSync={hostSync} t={t} onCommitted={refreshWorkflowProjectionAfterCommit} />
         : <p role="status">导演工作区等待准确项目与剧集绑定；不会自动读取空作用域。</p>}
     </>,

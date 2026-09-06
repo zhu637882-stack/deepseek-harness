@@ -8,6 +8,8 @@ When the local DSh entry is embedded with exact project and episode coordinates,
 
 ## Projection and ChangeSet workflow
 
+The in-workspace “导演要求” composer sends one queued turn to the selected native director without closing the shot view. It captures the confirmed binding and browser owner; scope, revision, session or connection changes disable stale sends. Unknown admission retains a tab-scoped copy and blocks resend across remounts until the user checks the original conversation and explicitly clears protection. Late acceptance after cancellation cannot clear that copy. Sending does not adopt, save, generate or approve; it adds the fixed-target header and original instruction to the existing model conversation.
+
 The Director tab independently checks actual session-scoped tool registrations. Its explicit native-entry action switches an empty session to `qingmu-director`, restores an existing director with its original ID and working directory, or uses the current workspace's native empty-session path for a started ordinary conversation. It neither sends a model turn nor recomposes started ordinary history. Missing presets or workspace membership produce an error rather than selecting another project. Late completion cannot navigate away from a newer user selection.
 
 The shared connection's handshake snapshot invalidates tool status and pending suggestions on disconnection. Reconnection and explicit refresh recheck tools and re-enter the selected canonical shot with a new cleanup lease, without remounting editors, saving drafts or submitting generation. Host restart can leave the agent inactive; the explicit entry action restores it. These checks report registration and the last context read, not continuous freshness or successful model execution.
@@ -184,15 +186,15 @@ The final evidence-freeze card first reads Writer's canonical status and blocker
 
 #### What the model sees
 
-Nothing. The `jason.episode-workflow-projection.v1` projection remains in the browser UI; this Client plugin registers no prompt, tool schema, tool result, or other model-visible context.
+The `jason.episode-workflow-projection.v1` projection remains in the browser UI. Explicitly sending a director requirement adds its fixed-target text block and original instruction to the existing native conversation; this plugin adds no tool schema or separate agent loop.
 
 #### Token effect
 
-Zero direct token effect because the projection remains in the browser UI.
+Browsing projections consumes no model tokens. Explicit director sends add the target header and instruction; subsequent native tools contribute their own context and method responses.
 
 #### KV Cache effect
 
-Independent. Opening, refreshing, or closing the cockpit does not change a model request or its reusable prefix.
+Opening, refreshing, or closing the cockpit does not rewrite the model prefix. An explicit director send appends a new turn, with its per-request target in that suffix.
 
 ## Known Limitations and Deferred Work
 

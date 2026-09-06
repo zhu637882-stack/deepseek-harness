@@ -10,6 +10,7 @@ import { ScenePlanningWorkspace } from './ScenePlanningWorkspace.tsx'
 import type { DirectorContextClientPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import type { QingmuHostSync } from './host-sync.ts'
 import type { HostDescriptionSource } from '@deepseek-ai/dsh-client-connection/client'
+import type { NativeDirectorSessionPort } from './native-director-session.ts'
 
 /** Props retain Yimeng's scene/frame identities; no director state is persisted here. */
 export interface DirectorWorkspaceProps {
@@ -26,6 +27,7 @@ export interface DirectorWorkspaceProps {
   readonly directorSessionId: string | undefined
   readonly directorConnection?: HostDescriptionSource | undefined
   readonly directorRefresh?: number | undefined
+  readonly nativeDirectorSession?: NativeDirectorSessionPort | undefined
   readonly hostSync?: QingmuHostSync | undefined
   readonly t: (key: QingmuCockpitKey) => string
 }

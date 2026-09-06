@@ -68,6 +68,14 @@ app = FastAPI()
 app.include_router(bootstrap_router)
 # Only mount the real read route; no paid work-order or generation endpoint exists.
 app.router.routes.extend(route for route in director_router.routes if route.path.endswith("/context"))
+if os.environ.get("QINGMU_CONNECTED_FULL_HOST") == "1":
+    from jason.apps.studio import api
+    from jason.apps.studio.api_routes.qingmu_scene_planning import router as planning_router
+    # Keep the real read endpoints, without the production lifespan or dispatch routes.
+    read_names = {"health", "list_projects", "list_episodes", "episode_workflow_projection", "get_qingmu_prompt_ir_subject"}
+    app.router.routes.extend(route for route in api.app.routes
+                             if getattr(getattr(route, "endpoint", None), "__name__", "") in read_names)
+    app.router.routes.extend(route for route in planning_router.routes if route.methods == {"GET"})
 auth = AuthService(store, jwt_secret=api_deps.settings.jwt_secret)
 registered = auth.register("connected-fixture", "13800000018", "fixture-password")
 with store._connect() as conn:

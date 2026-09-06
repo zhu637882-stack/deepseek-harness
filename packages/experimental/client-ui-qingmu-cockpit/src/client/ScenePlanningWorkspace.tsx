@@ -21,6 +21,8 @@ import {
 import css from './ScenePlanningWorkspace.module.css'
 import type { HostDescriptionSource } from '@deepseek-ai/dsh-client-connection/client'
 import { useDirectorConnection } from './native-director-session.ts'
+import type { NativeDirectorSessionPort } from './native-director-session.ts'
+import { NativeDirectorComposer } from './NativeDirectorComposer.tsx'
 
 interface LocalPlan {
   activeIndex?: number
@@ -185,7 +187,7 @@ function validatedPendingIntent(
  * @returns Three-column planning workspace; never creates prompts, media or approval.
  */
 export function ScenePlanningWorkspace({
-  projectId, episodeId, port, directorBridge, directorSessionId, directorConnection, directorRefresh,
+  projectId, episodeId, port, directorBridge, directorSessionId, directorConnection, directorRefresh, nativeDirectorSession,
   hostSync, onUnsavedChange, onCommitted, onSelectShotId, canonicalDirectorScope, canonicalDirectorRevision,
 }: {
   readonly projectId: string
@@ -198,6 +200,7 @@ export function ScenePlanningWorkspace({
   readonly directorSessionId?: string | undefined
   readonly directorConnection?: HostDescriptionSource | undefined
   readonly directorRefresh?: number | undefined
+  readonly nativeDirectorSession?: NativeDirectorSessionPort | undefined
   /** Resolved only from the current project's canonical shot relation projection. */
   readonly canonicalDirectorScope?: DirectorObjectScope | null | undefined
   readonly canonicalDirectorRevision?: string | undefined
@@ -227,6 +230,11 @@ export function ScenePlanningWorkspace({
   const [paidStatus, setPaidStatus] = useState<DirectorPaidWorkOrderStatus | null>(null)
   const [paidBusy, setPaidBusy] = useState(false)
   const [directorBinding, setDirectorBinding] = useState<DirectorContextBindingState | null>(null)
+  const [directorReadyIdentity, setDirectorReadyIdentity] = useState<{
+    key: string
+    connection: typeof connection
+    ownerId: string
+  } | null>(null)
   const directorOwner = useRef<string | undefined>(undefined)
   const [directorStatus, setDirectorStatus] = useState<'unbound' | 'connecting' | 'current' | 'unavailable' | 'drifted'>('unbound')
   const [retryAllowed, setRetryAllowed] = useState(false)
@@ -325,6 +333,12 @@ export function ScenePlanningWorkspace({
     : state?.planning && currentShotId ? {
       projectId, episodeId, sceneId: state.planning.sceneId, shotId: currentShotId,
     } : null
+  const directorIdentityKey = JSON.stringify([directorSessionId, directorScope, canonicalDirectorRevision, directorRefresh])
+  const nativeTarget = directorStatus === 'current' && directorBinding && directorSessionId
+    && directorReadyIdentity?.key === directorIdentityKey && directorReadyIdentity.connection === connection
+    ? { schema: 'qingmu.native-director-request.v1' as const, sessionId: directorSessionId,
+      scope: directorBinding.binding.scope, contextSnapshotSha256: directorBinding.binding.contextSnapshotSha256,
+      ownerId: directorReadyIdentity.ownerId } : undefined
   const paidScopeIsCurrent = paidWorkOrder !== null && directorScope !== null && directorBinding !== null
     && paidWorkOrder.projectId === directorScope.projectId
     && paidWorkOrder.episodeId === directorScope.episodeId
@@ -340,6 +354,7 @@ export function ScenePlanningWorkspace({
   }
   useEffect(() => {
     clearProposal()
+    setDirectorReadyIdentity(null)
     if (directorBridge === undefined || directorSessionId === undefined || directorScope === null) {
       setDirectorBinding(null); setDirectorStatus('unbound')
       return
@@ -356,6 +371,7 @@ export function ScenePlanningWorkspace({
     void directorBridge.enter(directorSessionId, directorScope, operation.signal, ownerId).then((result) => {
       if (operation.signal.aborted || epoch !== proposalEpoch.current) return
       if (result.status === 'current') {
+        setDirectorReadyIdentity({ key: directorIdentityKey, connection, ownerId })
         setDirectorBinding(result.state); setDirectorStatus('current'); hostSync?.replay(result.state)
       } else {
         setDirectorBinding(result.state); setDirectorStatus('unavailable')
@@ -378,7 +394,7 @@ export function ScenePlanningWorkspace({
       })
     }
   }, [directorBridge, directorSessionId, hostSync, projectId, episodeId, directorScope?.sceneId, directorScope?.shotId,
-    canonicalDirectorRevision, connection, directorConnection, directorRefresh])
+    canonicalDirectorRevision, connection, directorConnection, directorRefresh, directorIdentityKey])
   useEffect(() => {
     clearPaidProposal()
   }, [directorScope?.sceneId, directorScope?.shotId, directorBinding?.binding.contextSnapshotSha256])
@@ -854,6 +870,8 @@ export function ScenePlanningWorkspace({
       {retained && <details><summary>冲突输入副本 · 仅本浏览器，未提交</summary><pre>{JSON.stringify(retained.shots, null, 2)}</pre></details>}
     </main>
     <aside className={css.properties}>
+      {nativeDirectorSession && <NativeDirectorComposer port={nativeDirectorSession} sessionId={directorSessionId}
+        scopeKey={JSON.stringify(directorScope)} ready={nativeTarget !== undefined} target={nativeTarget} />}
       <details open><summary>导演助理连接</summary>
         <p role="status">{directorSessionId === undefined
           ? '未选择 DSh 会话；人工编辑与保存仍可用。'

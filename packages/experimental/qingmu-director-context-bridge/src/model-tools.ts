@@ -8,6 +8,7 @@ import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { DirectorContextSnapshot } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter'
 import { createDirectorContextBridge } from './bridge.ts'
+import { assertNativeTurnTarget } from './native-prompt-target.ts'
 import type { DirectorContextBindingState } from './types.ts'
 import type {} from './index.ts'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
@@ -76,6 +77,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     exec.signal.throwIfAborted()
     if (exec.agent === undefined) throw new Error('Qingmu director tool requires an owning agent session.')
     const session = exec.agent.session
+    assertNativeTurnTarget(session, exec.callId)
     let context: DirectorContextSnapshot | undefined
     let outputError: Error | undefined
     const bridge = createDirectorContextBridge({
@@ -99,6 +101,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     }
     const result = await bridge.enter(session, previous.binding.scope, exec.signal)
     exec.signal.throwIfAborted()
+    assertNativeTurnTarget(session, exec.callId)
     if (outputError !== undefined) throw outputError
     if (result.status !== 'current' || context === undefined) {
       throw new Error(result.status === 'superseded'
@@ -154,6 +157,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         : { capability: args.capability, resourceId: args.resourceId }
       const method = await ctx.qingmuImagoMethod('directorInstructions', payload, exec.signal)
       exec.signal.throwIfAborted()
+      assertNativeTurnTarget(current.session, exec.callId)
       if (bindingSeq(current.session) !== current.seq) {
         throw new Error('The selected Qingmu object changed while loading IMAGO methods. Read the current shot again.')
       }
@@ -178,6 +182,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         prompt: draftHost.qingmuYimengRead, method: ctx.qingmuImagoMethod,
       }, exec.signal)
       exec.signal.throwIfAborted()
+      assertNativeTurnTarget(current.session, exec.callId)
       if (bindingSeq(current.session) !== current.seq) throw new Error('The current shot changed; read the first-draft inputs again.')
       return input
     }
@@ -224,6 +229,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         prompt: draftHost.qingmuYimengRead, method: ctx.qingmuImagoMethod,
       }, exec.signal)
       exec.signal.throwIfAborted()
+      assertNativeTurnTarget(current.session, exec.callId)
       if (bindingSeq(current.session) !== current.seq) throw new Error('The current shot changed; read the draft again.')
       return input
     }

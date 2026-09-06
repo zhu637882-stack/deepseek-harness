@@ -14,12 +14,29 @@ import type {
   DirectorContextReadPort,
   DirectorContextRecoveryResult,
   DirectorObjectScope,
+  NativeDirectorPromptTarget,
   DirectorProposalBinding,
 } from './types.ts'
 
 const SHA256 = /^[0-9a-f]{64}$/u
 const sessionOperationEpochs = new WeakMap<Session, number>()
 const browserOwners = new WeakMap<Session, { ownerId: string; scope: DirectorObjectScope }>()
+
+/** Whether a browser currently owns this session's object selection. */
+export function hasBrowserDirectorOwner(session: Session): boolean {
+  return browserOwners.has(session)
+}
+
+/** Check a message's fixed target against the live binding; never rebind from message content. */
+export function assertNativePromptTarget(session: Session, target: NativeDirectorPromptTarget): void {
+  const owner = browserOwners.get(session)
+  const current = currentState(session)
+  if (target.sessionId !== session.id || !owner || owner.ownerId !== target.ownerId || !current
+    || !scopeEquals(owner.scope, target.scope) || !scopeEquals(current.binding.scope, target.scope)
+    || current.binding.contextSnapshotSha256 !== target.contextSnapshotSha256) {
+    throw new Error('This director request belongs to a previous shot selection. Return to the intended shot and send a new request; no other shot was read.')
+  }
+}
 
 interface SessionOperation {
   readonly epoch: number

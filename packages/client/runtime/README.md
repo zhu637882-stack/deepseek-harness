@@ -46,6 +46,8 @@ SlotRegistry gives the renderer separate bare observables for `useSessions` and 
 
 ## Conversation assembly
 
+Extension events may have null or scalar payloads. They supply no explicit Turn/Step coordinates and inherit the surrounding location just like an empty object; both live append and history rebuild preserve subsequent nodes. A null payload is distinct from an object containing `turn: null`, which explicitly belongs to the session.
+
 Each `Session` gives its contiguous event window to a `ConversationNodeAssembler`. Plugins register business Definitions that map one event to a stable `{kind, id}`, create State at the unique start event, fold correlated updates, and build final nodes for registered view targets. The assembler owns the Context index, read-only predecessor lookup, and a reference-stable Turn/Step Location index. A live append evaluates each Definition once and updates only the matched Context; loading an older page preserves existing Context and node identities, matches only the newly prepended events, and replays Contexts whose predecessor or Location facts changed. Full replacement is reserved for open, resync, and gap repair.
 
 Definition authors keep matching local to the current event, give every correlated event a stable business id, and make updates replayable by log `seq`; renderers consume final Node data and constrained Location values rather than scanning Session or Chat collections. The [Conversation Node cookbook](../../../docs/cookbook/adding-a-conversation-node.md) gives the complete registration and pagination path.

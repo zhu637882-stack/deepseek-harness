@@ -26,6 +26,8 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 
 ## 原生导演读取工具
 
+工作区输入框将规范化的 `qingmu.native-director-request.v1` 放在第一文本块，第二块保留用户要求。会话、对象、上下文 SHA 和浏览器 owner 将读取限制在实际消费要求的精确轮次。即使回到同一镜头，离开再进入也会使旧要求失效。有浏览器 owner 或历史限定对象记录的会话拒绝缺失或被编辑的标记；两者皆无的旧无界面会话保留原行为。这些坐标只限制已有绑定，不能选择数据或授予权威。
+
 可选的 `@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/model-tools` 插件挂载在青木 Agent 或预设作用域内，不能挂在 Host 根作用域。它依赖 `tools`、`qingmuYimengCommand` 与 `qingmuImagoMethod`。仅挂载现有绑定插件不会启用这些工具，本次源码改动也不会更新生产预设。
 
 - `qingmu_read_bound_context({})` 读取会话绑定对象的真实、已规范化 Writer 上下文。模型不能指定其他项目、镜头或会话。
@@ -80,6 +82,6 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 显式启用的 `tests/native-first-draft-connected.spec.ts` 在一次性合成数据上，将随包原生预设接到真实 Writer HTTP/SQLite 和真实 Core 编译器。将 `QINGMU_WRITER_TEST_ROOT` 和 `QINGMU_CORE_TEST_ROOT` 指向相应仓库后，运行 `node node_modules/vitest/vitest.mjs run packages/experimental/qingmu-director-context-bridge/tests/native-first-draft-connected.spec.ts`。Writer 需要 `.venv/bin/python` 的测试依赖。增加 `QINGMU_CONNECTED_BROWSER=1` 可验证实际引导组件的采用、编辑、保存、恢复、选择和刷新路径；还需 Python Playwright 和已安装的 Chrome（可用 `QINGMU_BROWSER_CHANNEL` 指定通道）。外部模型回复仍是脚本化响应。测试使用合成认证，不使用正式数据或凭据，零生成任务，不作内容签收；退出时移除自有进程和临时数据。浏览器测试壳转发真实业务处理器，但不加载完整生产 Host 或外层 Writer 页面。
 
 - 运行期 owner 不跨 Host 重启保留。已持久化的成功绑定仍按原会话语义恢复，已持久化空值则保持未绑定。存活的浏览器须重新进入以取得新的清理租约。离线或被拒的清理不能保证解除绑定；界面仍挂载且没有新绑定时，会报告清理未确认。
-- 原生组合及隔离的真实 Writer 持久化通过 Loader 预设和脚本化模型传输验证。这不证明生产启用、完整 Host/浏览器传输、真实模型创作质量或生成。
+- 使用相同 Writer/Core 路径，设置 `QINGMU_FULL_HOST_BROWSER=1` 并通过 Vitest 运行 `tests/native-first-draft-host.spec.ts`，验证随包完整 Host 和构建客户端。它使用真实服务和脚本化模型输出，覆盖原生传输、采用/编辑/保存/Ready/刷新及旧对象拒绝。runtime 和驾驶舱工件在一次性目录构建，与实际服务字节核对，共享安装包不改动。合成 Ready 选择不是人工内容签收、生产启用、真实模型创作质量或生成。
 - 旧回放建议仍由 `checkDirectorProposalFreshness` 检查漂移；原生提示词建议使用其已记录的读取回执和只读接口。
 - 本包没有启用真实 DeepSeek 路由、凭据、外部请求、费用或生产 canary。

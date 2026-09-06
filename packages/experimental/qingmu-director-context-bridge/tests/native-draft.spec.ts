@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { CallId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -10,7 +10,7 @@ import type { DirectorContextSnapshot } from '@deepseek-ai/dsh-experimental-qing
 import * as ModelTools from '../src/model-tools.ts'
 import { draftContext, draftPrompt, draftMethod, draftScope, firstDraftBootstrap } from '../examples/native-draft-fixture.ts'
 import { createDirectorContextRpcHandler } from '../src/rpc.ts'
-import type { NativeDraftInput, NativeFirstDraftInput } from '../src/types.ts'
+import type { NativeDraftInput, NativeFirstDraftInput, NativeDirectorPromptTarget } from '../src/types.ts'
 
 const contexts: Context[] = []
 afterEach(async () => { for (const ctx of contexts.splice(0)) await ctx.fiber.dispose() })
@@ -70,8 +70,72 @@ async function harness() {
   }, { prompt: ctx.qingmuYimengRead, method: ctx.qingmuImagoMethod })
   const read = (scope = draftScope, signal = new AbortController().signal) => rpc('readNativeDraftProposal', { sessionId: session.id, scope }, signal)
   const readFirst = () => rpc('readNativeFirstDraftProposal', { sessionId: session.id, scope: draftScope }, new AbortController().signal)
-  return { ctx, session, current, run, proposal, bind, read, calls, readFirst }
+  const enter = (ownerId = 'browser-1') => rpc('enter', { sessionId: session.id, scope: draftScope, ownerId }, new AbortController().signal)
+  const scopedMessage = (target: NativeDirectorPromptTarget, turn = 0, header = JSON.stringify(target)) => {
+    session.append('turn/start', { turn })
+    const message = createUserMessage({ source: { kind: 'user' }, content: [
+      { type: 'text', text: header }, { type: 'text', text: '保持铁轨在右侧。' },
+    ] })
+    session.append('user/message', message, { surfaceOp: 'append' })
+    return message
+  }
+  const target: NativeDirectorPromptTarget = { schema: 'qingmu.native-director-request.v1', sessionId: session.id,
+    scope: draftScope, contextSnapshotSha256: current.context.contextSnapshotSha256, ownerId: 'browser-1' }
+  return { ctx, session, current, run, proposal, bind, read, calls, readFirst, enter, scopedMessage, target }
 }
+
+describe('native prompt target restriction', () => {
+  it('does not mistake ordinary headless conversation text for a scoped admission', async () => {
+    const app = await harness()
+    app.session.append('turn/start', { turn: 0 })
+    app.session.append('user/message', createUserMessage({ source: { kind: 'user' }, content: [
+      { type: 'text', text: '请解释 qingmu.native-director-request.v1，再读取当前镜头。' },
+    ] }), { surfaceOp: 'append' })
+    expect((await app.run('qingmu_read_first_draft')).isError).toBe(false)
+    expect(new Set(app.calls)).toEqual(new Set(['readDirectorContext', 'promptIrBootstrap', 'directorInstructions']))
+  })
+  it('accepts one fixed target without changing the scope or gaining a write path', async () => {
+    const app = await harness(); await app.enter(); app.scopedMessage(app.target)
+    expect((await app.run('qingmu_read_first_draft')).isError).toBe(false)
+    expect(new Set(app.calls)).toEqual(new Set(['readDirectorContext', 'promptIrBootstrap', 'directorInstructions']))
+  })
+  it.each(['shot', 'revision', 'owner', 'session', 'malformed', 'duplicate', 'oversized'] as const)(
+    'rejects %s changes before reading Writer for a queued scoped turn', async (reason) => {
+      const app = await harness(); await app.enter()
+      const target = { ...app.target, ...(reason === 'session' ? { sessionId: 'another-session' } : {}) }
+      const header = reason === 'malformed' ? '{"schema":"qingmu.native-director-request.v1",'
+        : reason === 'oversized' ? JSON.stringify({ ...target, extra: 'x'.repeat(2100) }) : JSON.stringify(target)
+      const message = app.scopedMessage(target, 0, header)
+      if (reason === 'shot') app.bind('another-shot')
+      if (reason === 'revision') { app.current.context.contextSnapshotSha256 = 'f'.repeat(64); app.bind() }
+      if (reason === 'owner') await app.enter('browser-2')
+      if (reason === 'duplicate') app.session.append('user/message', createUserMessage({ source: { kind: 'user' }, content: message.content }), { surfaceOp: 'append' })
+      app.calls.length = 0
+      expect((await app.run('qingmu_read_first_draft')).isError).toBe(true)
+      expect(app.calls).toEqual([])
+    },
+  )
+  it('does not substitute a newer queued message for the current turn target', async () => {
+    const app = await harness(); await app.enter(); app.scopedMessage({ ...app.target, sessionId: 'wrong' })
+    app.session.append('agent/inbox/spliced', { target: 'next-turn', start: 0, inserted: [createUserMessage({
+      source: { kind: 'user' }, content: [{ type: 'text', text: JSON.stringify(app.target) }, { type: 'text', text: 'new request' }],
+    })] })
+    app.calls.length = 0
+    expect((await app.run('qingmu_read_first_draft')).isError).toBe(true)
+    expect(app.calls).toEqual([])
+  })
+  it.each(['browser', 'restored-admission'] as const)('rejects a removed target after %s instead of using legacy fallback', async (reason) => {
+    const app = await harness()
+    if (reason === 'browser') await app.enter()
+    else app.session.append('agent/inbox/spliced', { target: 'next-turn', start: 0, inserted: [createUserMessage({
+      source: { kind: 'user' }, content: [{ type: 'text', text: JSON.stringify(app.target) }, { type: 'text', text: 'original' }],
+    })] })
+    app.scopedMessage(app.target, 0, 'edited queued plain text')
+    app.bind('another-shot'); app.calls.length = 0
+    expect((await app.run('qingmu_read_first_draft')).isError).toBe(true)
+    expect(app.calls).toEqual([])
+  })
+})
 
 describe('native first prompt suggestions', () => {
   it('reads complete method content and records a five-field proposal without business writes', async () => {
