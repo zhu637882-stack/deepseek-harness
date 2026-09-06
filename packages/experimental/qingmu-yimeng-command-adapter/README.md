@@ -24,6 +24,8 @@ The Director provider execution seam is Host-only and disabled by default. An is
 
 The current Director context contains the complete canonical creative-contract revision, SHA and value, including the project-bound `qingmu.creative-contract.v2` shape where configured. The adapter rejects copied or mismatched project identity before issuing a proposal.
 
+Writer's `episodeScenes`, `cast`, and `adjacentShots` context extension is accepted only as a complete group and remains covered by the original full snapshot SHA. Legacy snapshots may omit the entire group. Partial groups, invalid container shapes, unknown outer fields, hash drift, and inferred authority are rejected; the adapter never strips the new context to make an old schema pass.
+
 A ChangeSet proposal is not a commit. The Client must display the returned preview and may commit only after an explicit user confirmation while `canCommit` is true. A commit receipt is not human creative signoff and does not authorize a paid Provider call.
 
 Element commands use the generic `/api/qingmu/projects/{projectId}/elements/{elementKind}/{targetId}` route family. Runtime validation accepts exactly `actor`, `scene`, and `prop`; every other kind fails closed. Preview and commit validation bind the ChangeSet, subject coordinates, revisions, snapshot and payload hashes, operation, and non-authority preflight markers to the original browser request.

@@ -24,6 +24,13 @@ export interface DirectorContextSnapshot extends CreationScope {
   readonly script: { readonly revision: number; readonly sha256: string }
   readonly sceneSource: Readonly<Record<string, unknown>>
   readonly sourceScene: Readonly<Record<string, unknown>>
+  /** Writer's complete context extension is absent only for legacy snapshots. */
+  readonly episodeScenes?: readonly Readonly<Record<string, unknown>>[]
+  readonly cast?: readonly Readonly<Record<string, unknown>>[]
+  readonly adjacentShots?: {
+    readonly previous: Readonly<Record<string, unknown>> | null
+    readonly next: Readonly<Record<string, unknown>> | null
+  }
   readonly storyboard: { readonly id: string; readonly version: number; readonly sourceHash: string; readonly status: 'Ready' }
   readonly shot: PlanningShot & { readonly id: string }
   readonly creativeContract: {
@@ -293,10 +300,12 @@ export function normalizeDirectorContext(
   helpers: Helpers,
 ): DirectorContextSnapshot {
   const root = object(value, helpers.responseError, 'director context')
+  const extended = ['episodeScenes', 'cast', 'adjacentShots']
+  const hasExtended = extended.some(key => Object.hasOwn(root, key))
   exact(root, ['schema', 'projectId', 'episodeId', 'sceneId', 'shotId', 'script', 'sceneSource', 'sourceScene',
     'storyboard', 'shot', 'creativeContract', 'selectedReferences', 'sourceTime', 'contextSnapshotSha256', 'providerCalls',
     'costAmountCny', 'businessStateChanged', 'humanDecisionInferred', 'formalQcInferred', 'selectionGranted',
-    'readyGranted'], helpers.responseError, 'director context')
+    'readyGranted', ...(hasExtended ? extended : [])], helpers.responseError, 'director context')
   if (root.schema !== 'jason.qingmu-director-context-snapshot.v1'
     || root.projectId !== expected.projectId || root.episodeId !== expected.episodeId
     || root.sceneId !== expected.sceneId || root.shotId !== expected.shotId) {
@@ -308,6 +317,20 @@ export function normalizeDirectorContext(
   Reflect.deleteProperty(contextBody, 'contextSnapshotSha256')
   if (directorJcsSha256(contextBody, 'director context', helpers.responseError) !== root.contextSnapshotSha256) {
     throw helpers.responseError('director context SHA mismatch')
+  }
+  if (hasExtended) {
+    for (const field of ['episodeScenes', 'cast']) {
+      if (!Array.isArray(root[field])) throw helpers.responseError(`director ${field} must be an array`)
+      for (const item of root[field]) object(item, helpers.responseError, `director ${field} item`)
+    }
+    const adjacent = object(root.adjacentShots, helpers.responseError, 'director adjacent shots')
+    exact(adjacent, ['previous', 'next'], helpers.responseError, 'director adjacent shots')
+    for (const field of ['previous', 'next']) {
+      if (adjacent[field] !== null) {
+        const neighbor = object(adjacent[field], helpers.responseError, `director adjacent ${field}`)
+        id(neighbor.id, helpers.responseError, `director adjacent ${field} id`)
+      }
+    }
   }
   const shot = object(root.shot, helpers.responseError, 'director shot')
   if (shot.id !== expected.shotId) throw helpers.responseError('director shot identity mismatch')

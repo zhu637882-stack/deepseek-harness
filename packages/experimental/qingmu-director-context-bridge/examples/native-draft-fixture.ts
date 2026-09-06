@@ -4,6 +4,9 @@ export const draftContext = {
   schema: 'jason.qingmu-director-context-snapshot.v1', ...draftScope, contextSnapshotSha256: 'a'.repeat(64),
   storyboard: { id: 'revision-1', version: 1, status: 'Ready', sourceHash: 'b'.repeat(64) },
   shot: { id: draftScope.shotId, narrative: '门铃响起，她停在门口。' }, sourceScene: {}, selectedReferences: [],
+  episodeScenes: [{ sceneIndex: 1, title: '门口', current: true }],
+  cast: [{ actorId: 'example-actor', name: '小雨', identity: '短发' }],
+  adjacentShots: { previous: null, next: { id: 'example-shot-2', title: '反应', action: '停顿' } },
   providerCalls: 0, costAmountCny: '0', businessStateChanged: false,
   humanDecisionInferred: false, formalQcInferred: false, selectionGranted: false, readyGranted: false,
 }

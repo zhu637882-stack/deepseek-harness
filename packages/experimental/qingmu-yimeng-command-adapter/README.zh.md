@@ -24,6 +24,8 @@
 
 当前导演上下文包含完整 canonical 创作合同修订、SHA 与值；配置 `qingmu.creative-contract.v2` 时还包含其项目身份绑定。适配器在签发建议前拒绝复制而来或不匹配的项目身份。
 
+Writer 的 `episodeScenes`、`cast` 和 `adjacentShots` 上下文扩展只按完整一组接收，并保留在原始完整快照 SHA 中。旧快照可以整组省略。部分扩展、错误容器结构、未知顶层字段、哈希漂移和推断权威均被拒绝；适配器不会删掉新上下文来勉强通过旧模式。
+
 ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只有当 `canCommit` 为 true 且用户明确确认后才可提交。提交回执不等于人工创意签收，也不授权付费 Provider 调用。
 
 元素命令使用通用的 `/api/qingmu/projects/{projectId}/elements/{elementKind}/{targetId}` 路由族。运行时只接受准确的 `actor`、`scene` 和 `prop`，其他类型全部失败关闭。预览与提交校验把 ChangeSet、subject 坐标、修订号、snapshot 与 payload 哈希、operation，以及不授予权力的 preflight 标记绑定到原始浏览器请求。

@@ -86,6 +86,43 @@ function setup(stale = false) {
   ) }
 }
 
+describe('Writer full director context compatibility', () => {
+  const extension = {
+    episodeScenes: [{ sceneIndex: 1, title: '雨夜', actionSummary: '相遇', current: true }],
+    cast: [{ role: '女主', actorId: 'actor_1', name: '小雨', identity: '短发' }],
+    adjacentShots: { previous: null, next: { id: 'shot_2', title: '反应', visual: '门内', action: '停顿' } },
+  }
+  const snapshot = (extra: Record<string, unknown>) => {
+    const { contextSnapshotSha256: _sha, ...body } = context()
+    const expanded = { ...body, ...extra }
+    return { ...expanded, contextSnapshotSha256: sha(expanded) }
+  }
+  async function read(value: unknown) {
+    const handler = createYimengCommandHandler({}, { fetch: async () => Response.json(value), readToken: () => 'test-only' })
+    return handler('readDirectorContext', scope, new AbortController().signal)
+  }
+  it('preserves all three Writer context layers and the exact digest, while accepting legacy snapshots', async () => {
+    const value = snapshot(extension)
+    expect(await read(value)).toEqual({ ok: true, value })
+    expect(await read(context())).toEqual({ ok: true, value: context() })
+  })
+  it('rejects partial extensions, invalid neighbors and unrecognized top-level fields', async () => {
+    for (const extra of [
+      { cast: extension.cast },
+      { ...extension, cast: {} },
+      { ...extension, episodeScenes: [null] },
+      { ...extension, adjacentShots: { previous: null, next: {} } },
+      { ...extension, adjacentShots: { previous: null, next: null, extra: true } },
+      { ...extension, approval: true },
+    ]) expect(await read(snapshot(extra))).toMatchObject({ ok: false })
+  })
+  it('rejects changed contextual content without a new digest and never infers authority', async () => {
+    const value = snapshot(extension)
+    expect(await read({ ...value, cast: [] })).toMatchObject({ ok: false })
+    expect(await read(snapshot({ ...extension, readyGranted: true }))).toMatchObject({ ok: false })
+  })
+})
+
 describe('Host-only director replay proposal', () => {
   it('issues a browser-safe paid-capable work order without exposing Host claim or payload', async () => {
     const paidRequest = { ...scope, purpose: 'bounded_director_suggestion' as const,
