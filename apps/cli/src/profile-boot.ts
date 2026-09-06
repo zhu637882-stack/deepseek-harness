@@ -161,7 +161,11 @@ function composeProfile(
       id: 'agent-presets',
       config: {
         ...(rows.get('agent-presets')?.config ?? {}) as Record<string, unknown>,
-        roots: [{ path: SHIPPED_PRESET_ROOT, trust: 'system' }],
+        roots: [
+          { path: SHIPPED_PRESET_ROOT, trust: 'system' },
+          ...profile.layers.flatMap(layer => layer.agentPresetRoot === undefined
+            ? [] : [{ path: layer.agentPresetRoot, trust: 'system' }]),
+        ],
       },
     })
   }

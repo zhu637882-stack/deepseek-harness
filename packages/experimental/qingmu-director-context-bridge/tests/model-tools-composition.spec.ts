@@ -1,9 +1,9 @@
 /** Real preset + loop composition for the session-bound Qingmu native tools. */
 
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
@@ -16,6 +16,7 @@ import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import AgentPresets from '@deepseek-ai/dsh-agent-presets'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as Persona from '@deepseek-ai/dsh-persona'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import * as ModelTools from '../src/model-tools.ts'
 
@@ -81,15 +82,7 @@ function includesExactString(value: unknown, expected: string): boolean {
 
 /** A real Loader preset: host capabilities stay root-owned; native tools mount only below the agent. */
 async function harness(adapter: MockAdapter, sessionRoot?: string): Promise<Context> {
-  const presetRoot = await mkdtemp(join(tmpdir(), 'qingmu-director-model-tools-preset-'))
-  roots.push(presetRoot)
-  const presetDirectory = join(presetRoot, 'qingmu')
-  await mkdir(presetDirectory)
-  await writeFile(join(presetDirectory, 'agent.cordis.yml'), [
-    '- id: qingmu-director-model-tools',
-    "  name: '@fixture/qingmu-director-model-tools'",
-    '',
-  ].join('\n'))
+  const presetRoot = fileURLToPath(new URL('../../qingmu-web/agent-presets/', import.meta.url))
 
   const ctx = new Context()
   contexts.push(ctx)
@@ -99,7 +92,8 @@ async function harness(adapter: MockAdapter, sessionRoot?: string): Promise<Cont
   ctx.loader.internal = {
     version: 'v2',
     async import(specifier: string) {
-      if (specifier === '@fixture/qingmu-director-model-tools') return ModelTools
+      if (specifier === '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/model-tools') return ModelTools
+      if (specifier === '@deepseek-ai/dsh-persona') return Persona
       throw new Error(`unexpected Loader import: ${specifier}`)
     },
   } as unknown as NonNullable<typeof ctx.loader.internal>
@@ -110,7 +104,7 @@ async function harness(adapter: MockAdapter, sessionRoot?: string): Promise<Cont
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
   if (sessionRoot !== undefined) await ctx.plugin(JsonlSessionPersistence, { root: sessionRoot, compression: 'none' })
-  await ctx.plugin(AgentPresets, { default: 'qingmu', roots: [{ path: presetRoot, trust: 'system' }], includeUserRoot: false })
+  await ctx.plugin(AgentPresets, { default: 'qingmu-director', roots: [{ path: presetRoot, trust: 'system' }], includeUserRoot: false })
   ctx.llm.registerAdapter(['mock'], adapter)
   ctx.provide('qingmuYimengCommand', async (endpoint, payload) => {
     if (endpoint !== 'readDirectorContext') throw new Error(`unexpected command ${endpoint}`)
@@ -137,7 +131,8 @@ async function harness(adapter: MockAdapter, sessionRoot?: string): Promise<Cont
 async function createQingmuAgent(ctx: Context, id: string): Promise<{ agent: Agent; dispose(): Promise<void> }> {
   return await ctx.agents.create({
     sessionId: SessionId(id), agentOptions: { provider: 'mock', model: 'mock' },
-    setup: async agentCtx => void await ctx.agentPresets.mount(agentCtx, 'qingmu'),
+    meta: { agentPreset: 'qingmu-director' },
+    setup: async agentCtx => void await ctx.agentPresets.mount(agentCtx, 'qingmu-director'),
   })
 }
 
@@ -174,6 +169,8 @@ describe('Qingmu model tools through a real preset and agent loop', () => {
     // The exact complete fourth reference, not a summary or title, reaches the following model request.
     expect(includesExactString(adapter.requests[3]?.messages, roughFinalFeedback)).toBe(true)
     expect(ctx.tools.schemas()).toEqual([])
+    expect(adapter.requests[0]?.system).toContain('你是青木的导演助手')
+    expect(adapter.requests[0]?.system).toMatchSnapshot('shipped director persona')
     await handle.dispose()
   })
 
@@ -221,7 +218,7 @@ describe('Qingmu model tools through a real preset and agent loop', () => {
     const resumed = await harness(adapter, sessionRoot)
     const handle = await resumed.agents.resume({
       resumeSessionId: SessionId('qingmu-cold'), agentOptions: { provider: 'mock', model: 'mock' },
-      setup: async agentCtx => void await resumed.agentPresets.mount(agentCtx, 'qingmu'),
+      setup: async agentCtx => void await resumed.agentPresets.mount(agentCtx, 'qingmu-director'),
     })
     expect(resumed.tools.schemas(handle.agent).map(tool => tool.name).sort())
       .toEqual(['qingmu_get_imago_method', 'qingmu_read_bound_context'])

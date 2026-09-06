@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-07-qingmu-native-director-reads.md
-2026-09-07-qingmu-native-director-reads.md: 2f12d34a0120251c74db8f52c699f147e4bdc703
-2026-09-07-qingmu-native-director-reads.zh.md: 7735b363f1cc264184be234ea83fc7de401caffd
+2026-09-07-qingmu-native-director-reads.md: 786d09e4d444d6cdfd28af9fef037404d318bf26
+2026-09-07-qingmu-native-director-reads.zh.md: 1d121aee8531ba38157f5b6e5ecfacc2ccf6765c

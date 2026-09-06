@@ -33,7 +33,7 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 
 工具通过原生工具注册表返回无损 JSON，不注入系统提示词，不新建事件日志、业务数据库或独立 Agent 循环。当前上下文是文本证据，不等于逐像素审图，也不代表已经具备全剧剧本。
 
-在 Harness 根目录用 `node --import tsx packages/experimental/qingmu-director-context-bridge/examples/model-tools-keyless.ts` 运行[免密钥示例](examples/model-tools-keyless.ts)。它用固定 Host 测试数据打印稳定的工具响应快照，不发起模型或网络请求；独立的组合测试覆盖真实 Loader 预设、Agent 循环和下一轮模型输入。
+在 Harness 根目录用 `node --import tsx packages/experimental/qingmu-director-context-bridge/examples/model-tools-keyless.ts` 运行[免密钥示例](examples/model-tools-keyless.ts)。它通过 Loader 加载随包青木导演预设，创建仅存内存的原生会话，并以脚本化外部响应驱动真实 Agent 循环。快照包含实际角色提示、作用域工具、持久事件格式以及进入下一轮模型请求的方法正文。不发起网络或付费 Provider 请求；独立组合测试还核验冷恢复。
 
 ## 模型体验
 

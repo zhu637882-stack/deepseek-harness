@@ -14,7 +14,9 @@ Add an opt-in, scoped `model-tools` entry to the director context bridge. It use
 
 Use the native tool registry and agent loop. Ordinary tool results preserve the exact returned JSON in the existing session log and next model request; binding events remain log-only. Refresh the current context before each read, reject late results after a scope switch, and retain manual editing on failure. Source hashes identify method bytes but confer no business or creative approval.
 
-Writer stays the business truth; Core stays the method source. No copied project, new database, controller, agent loop, or production preset is introduced. This implements a source-level read capability, not deployment or a complete creative workflow. IMAGO is used for scene intent, performance, blocking, continuity, and sound-picture reasoning, not reduced to a prompt-formatting library.
+Writer stays the business truth; Core stays the method source. No copied project, new database, controller or agent loop is introduced. This implements a source-level read capability, not deployment or a complete creative workflow. IMAGO is used for scene intent, performance, blocking, continuity, and sound-picture reasoning, not reduced to a prompt-formatting library.
+
+The experimental Qingmu bundle ships a `qingmu-director` preset with a complete creative persona and these two tools. The generic profile loader resolves an optional `dsh.bundle.agentPresets` directory inside each listed bundle; the CLI adds it after stock presets, without importing an experimental package from a release app. The Qingmu distribution default selects this mode, subject to native user settings. Existing sessions retain their recorded composition. The mode is read-only, separate from coding and system-editing presets; it does not turn creative instructions into arbitrary filesystem or execution authority.
 
 ## Alternatives considered
 
@@ -30,4 +32,4 @@ Opted-in agents can receive actual Writer context and IMAGO method text. Root an
 
 The source loader bounds file reads and rejects outward symlinks; deployment must still keep the method tree stable during reads. A 512 KiB source package may exceed the consumer's default 256 KiB serialized-response limit, which fails without truncation. Full method text consumes tokens only when requested.
 
-Loader-preset agent-loop tests use scripted external responses, verify the next model input and cold log restoration, and cannot establish real-provider quality. Proposal adoption, Writer persistence, PromptIR, generation, and production activation still require their own connected flow and runtime verification.
+The runnable keyless example and Loader-preset tests load the actual shipped director composition and use scripted external responses. They verify the persona, next model input, scoped catalog and cold log restoration; launcher tests verify bundle-only root composition. They cannot establish real-provider quality. Same-session browser binding, proposal adoption, Writer persistence, PromptIR, generation, and production activation still require their own connected flow and runtime verification.

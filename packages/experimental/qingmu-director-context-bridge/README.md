@@ -33,7 +33,7 @@ Each call refreshes the binding before returning content. A changed context SHA 
 
 The tools return lossless JSON through the native tool registry. They add no system-prompt injection, second event log, business database, or separate agent loop. The current context is textual evidence, not a pixel-level image review or a claim that the full screenplay is available.
 
-Run the [keyless example](examples/model-tools-keyless.ts) from the Harness root with `node --import tsx packages/experimental/qingmu-director-context-bridge/examples/model-tools-keyless.ts`. Its fixed Host fixtures print a stable tool-response snapshot without a model or network request; the separate composition test covers the actual Loader preset, agent loop, and next model input.
+Run the [keyless example](examples/model-tools-keyless.ts) from the Harness root with `node --import tsx packages/experimental/qingmu-director-context-bridge/examples/model-tools-keyless.ts`. It loads the shipped Qingmu director preset through Loader, creates a memory-only native session, and runs the real agent loop against scripted external responses. The snapshot includes the actual persona, scoped tools, durable event format and method text in the next model request. It makes no network or paid Provider request; the separate composition test also verifies cold restoration.
 
 ## Model Experience
 

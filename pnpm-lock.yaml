@@ -4280,6 +4280,9 @@ importers:
       '@deepseek-ai/dsh-llm':
         specifier: workspace:^
         version: link:../../llm/llm
+      '@deepseek-ai/dsh-persona':
+        specifier: workspace:^
+        version: link:../../preset/persona
       '@deepseek-ai/dsh-scope':
         specifier: workspace:^
         version: link:../../core/scope
@@ -4341,6 +4344,9 @@ importers:
       '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter':
         specifier: workspace:^
         version: link:../qingmu-yimeng-read-adapter
+      '@deepseek-ai/dsh-persona':
+        specifier: workspace:^
+        version: link:../../preset/persona
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^

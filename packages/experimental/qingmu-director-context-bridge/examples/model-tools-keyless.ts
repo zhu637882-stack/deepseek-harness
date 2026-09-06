@@ -1,15 +1,20 @@
 /**
- * Keyless local snapshot for the two session-bound Qingmu model tools.
+ * Keyless native director session using the shipped Qingmu preset and real agent loop.
  *
- * Run from the Harness root (no Provider, network, Writer DB, or preset file):
+ * Run from the Harness root (no Provider, network, or Writer DB):
  *   node --import tsx packages/experimental/qingmu-director-context-bridge/examples/model-tools-keyless.ts
  */
 
 import { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import { CallId } from '@deepseek-ai/dsh-llm'
-import { createScope } from '@deepseek-ai/dsh-scope'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import Loader from '@deepseek-ai/cordis-plugin-loader'
+import Include from '@deepseek-ai/cordis-plugin-include'
+import AgentRegistry from '@deepseek-ai/dsh-agent'
+import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import AgentPresets from '@deepseek-ai/dsh-agent-presets'
+import LlmRuntime, { CallId, createUserMessage, LlmAdapter, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import * as Persona from '@deepseek-ai/dsh-persona'
+import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as ModelTools from '../src/model-tools.ts'
@@ -22,11 +27,57 @@ const fourthReference = [
   '证据不足时保留未知，回到人工创作决定。',
 ].join('\n')
 
-async function main(): Promise<void> {
+/** Deterministic external model stand-in; every request still comes from the native loop. */
+class ExampleModel extends LlmAdapter {
+  readonly requests: GenerateOptions[] = []
+
+  async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    const step = this.requests.length
+    this.requests.push(options)
+    if (step < 2) {
+      const name = step === 0 ? 'qingmu_read_bound_context' : 'qingmu_get_imago_method'
+      const args = step === 0 ? {} : { capability: 'shot_design', resourceId: 'rough_final_feedback' }
+      yield { type: 'block-start', index: 0, blockType: 'tool-call' }
+      yield { type: 'block-end', index: 0, block: { type: 'tool-call', id: CallId(`read-${step}`), name, arguments: JSON.stringify(args) } }
+      yield { type: 'finish', reason: { kind: 'tool-calls' } }
+    } else {
+      yield { type: 'block-start', index: 0, blockType: 'text' }
+      yield { type: 'text-delta', index: 0, text: '建议保留门口的停顿，先听见铃声，再看她的反应。尚未保存或生成。' }
+      yield { type: 'block-end', index: 0, block: { type: 'text', text: '建议保留门口的停顿，先听见铃声，再看她的反应。尚未保存或生成。' } }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    }
+  }
+}
+
+/**
+ * Run an isolated, memory-only native session and return its model-visible evidence.
+ * @returns the actual composed persona, tools, logged calls/results and next-request method check.
+ * @throws if the shipped preset fails to load or the session cannot complete.
+ */
+export async function runNativeDirectorExample() {
   const ctx = new Context()
   try {
+    const presetRoot = fileURLToPath(new URL('../../qingmu-web/agent-presets/', import.meta.url))
+    ctx.baseUrl = pathToFileURL(presetRoot).href + '/'
+    await ctx.plugin(Loader)
+    ctx.loader.builtins.include = Include
+    ctx.loader.internal = {
+      version: 'v2',
+      async import(specifier: string) {
+        if (specifier === '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/model-tools') return ModelTools
+        if (specifier === '@deepseek-ai/dsh-persona') return Persona
+        throw new Error(`unexpected example plugin: ${specifier}`)
+      },
+    } as unknown as NonNullable<typeof ctx.loader.internal>
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(SessionStore)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    await ctx.plugin(AgentPresets, { default: 'qingmu-director', roots: [{ path: presetRoot, trust: 'system' }], includeUserRoot: false })
+    const model = new ExampleModel()
+    ctx.llm.registerAdapter(['keyless'], model)
     ctx.provide('qingmuYimengCommand', async (endpoint, payload) => {
       if (endpoint !== 'readDirectorContext' || JSON.stringify(payload) !== JSON.stringify(scope)) {
         throw new Error('example accepts only its session-bound context read')
@@ -48,25 +99,38 @@ async function main(): Promise<void> {
         sources: [{ resourceId: 'rough_final_feedback', content: fourthReference }],
       } }
     })
-    const session = Session.create(SessionId('keyless-model-tools-example'))
-    session.append('qingmu-director-context/state', {
+    const handle = await ctx.agents.create({
+      sessionId: SessionId('keyless-model-tools-example'), agentOptions: { provider: 'keyless', model: 'fixture' },
+      meta: { agentPreset: 'qingmu-director' },
+      setup: async agentCtx => void await ctx.agentPresets.mount(agentCtx, 'qingmu-director'),
+    })
+    handle.agent.session.append('qingmu-director-context/state', {
       version: 1, binding: { scope, contextSnapshotSha256 }, proposal: null, transition: 'enter',
     })
-    const agent = { id: session.id, session } as Agent
-    const scoped = createScope(ctx, agent)
-    await scoped.ctx.plugin(ModelTools)
-
-    const result = await ctx.tools.execute({
-      callId: CallId('keyless-c5-reference'), name: 'qingmu_get_imago_method',
-      arguments: { capability: 'shot_design', resourceId: 'rough_final_feedback' }, agent,
-      signal: new AbortController().signal,
+    const idle = new Promise<void>((resolve) => {
+      const dispose = ctx.on('agent/status', ({ agent, status }) => {
+        if (agent === handle.agent && status === 'idle') { dispose(); resolve() }
+      })
     })
-    if (result.isError) throw new Error(result.error.message)
-    console.log(JSON.stringify(result.value, null, 2))
-    await scoped.dispose()
+    handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: '看看当前镜头，参考导演方法给我建议。' }], source: { kind: 'user' } }))
+    await idle
+    const result = {
+      preset: ctx.agentPresets.composedPreset(handle.agent.ctx),
+      system: model.requests[0]?.system,
+      tools: model.requests[0]?.tools?.map(tool => tool.name).sort(),
+      calls: handle.agent.session.events.filter(event => event.type === 'tool/call').map(event => event.data.name),
+      results: handle.agent.session.events.filter(event => event.type === 'tool/result').map(event =>
+        event.data.message.content.flatMap(part => part.content).filter(block => block.type === 'text').map(block => block.text).join('')),
+      methodInNextRequest: JSON.stringify(model.requests[2]?.messages).includes('逐镜比对锁定意图'),
+      rootTools: ctx.tools.schemas().map(tool => tool.name),
+    }
+    await handle.dispose()
+    return result
   } finally {
     await ctx.fiber.dispose()
   }
 }
 
-await main()
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  console.log(JSON.stringify(await runNativeDirectorExample(), null, 2))
+}

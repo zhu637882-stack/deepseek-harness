@@ -10,16 +10,31 @@ The IMAGO method adapter resolves its Core root from a non-blank explicit Cordis
 
 The same Host also requires a raw, untrimmed `QINGMU_IMAGO_ATTESTATION_KEY` of at least 32 UTF-8 bytes. The key is environment-only: it is not a Cordis field or browser value, and this distribution patch contains neither a key nor a placeholder secret.
 
+## Native director sessions
+
+This bundle ships the `qingmu-director` agent preset, displayed as 青木导演, through `dsh.bundle.agentPresets`. The profile launcher registers its package-relative root alongside the stock modes; no installation path or copied user preset is needed. The Qingmu patch selects it as the profile default, subject to the native user default setting. Stock profiles and existing sessions keep their modes. Users can select this preset through the native mode picker for a new or blank session; populated conversations are not switched automatically.
+
+The preset composes a complete director persona and only the context bridge's [native read tools](../qingmu-director-context-bridge/README.md). It does not add shell, arbitrary filesystem, self-modification, Provider, adoption, save, or approval tools. The existing cockpit must bind the selected shot to that same session. If no shot is bound, the tool reports it rather than inventing a project. Read-only analysis is not the complete creative workflow.
+
 ## Model Experience
 
-None, as this distribution patch changes browser composition without registering model-facing behavior.
+### Qingmu director preset
+
+#### What the model sees
+
+Only `qingmu-director` sessions receive the stable Chinese persona in [agent.cordis.yml](agent-presets/qingmu-director/agent.cordis.yml) and the two native read-tool schemas. The persona asks for actual Writer context and complete IMAGO methods before directing, separates scene intent from shot design, and does not claim to save, generate, or approve content. Its exact model input is pinned through a keyless native-loop snapshot.
+
+#### Token effect
+
+The fixed persona and two schemas are present on each request from this preset. Full context and method bodies are requested on demand; no complete method library is injected at startup.
 
 #### KV Cache effect
 
-None. No model-facing tokens are added.
+The persona and schemas form a stable prefix for this preset. Requested context and method text enter ordinary tool results and consume tokens on demand; other modes receive no added text.
 
 ## Known Limitations and Deferred Work
 
 - The cockpit reads Yimeng's authoritative business projection and currently exposes the bounded `episode_script` flow plus the first `element_profile` vertical slice for props. Actor and scene editing remain deferred; neither flow authorizes a paid Provider or infers human signoff.
 - The separate stateless IMAGO adapter now projects prop field guidance, checklists, work orders, and review cards into the cockpit. It does not copy IMAGO state or expose a second Stage/DAG.
 - The source package stays private and experimental while the product distribution namespace is being established.
+- Existing populated sessions do not gain this preset, and a saved user default can override the distribution default. Read-tool tests do not prove browser binding, real-provider judgment, proposal adoption, or production deployment.

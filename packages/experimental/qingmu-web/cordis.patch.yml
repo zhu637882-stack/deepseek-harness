@@ -1,4 +1,8 @@
 # Qingmu OS distribution layer. Apply after dsh-base and dsh-web-app.
+- id: agent-presets
+  config:
+    default: qingmu-director
+
 - id: ui-brand-official
   disabled: true
 
