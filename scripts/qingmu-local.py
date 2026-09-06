@@ -223,7 +223,9 @@ def _local_asr_env(credential_file: Path) -> dict[str, str]:
 
     Provider secrets stay worker-only; the API needs the command to answer
     dialogue-shot preflight and review-freshness checks honestly. The worker
-    still re-verifies readiness before any paid dispatch.
+    still re-verifies readiness before any paid dispatch. The uv cache is
+    pinned to the machine-wide location: the isolated worker HOME would
+    otherwise rebuild (and silently fill) its own multi-GB cache.
     """
     values: dict[str, str] = {}
     try:
@@ -237,6 +239,8 @@ def _local_asr_env(credential_file: Path) -> dict[str, str]:
         key, value = line.split("=", 1)
         if key.strip() in {"LOCAL_ASR_COMMAND_JSON", "LOCAL_ASR_TIMEOUT_SEC"}:
             values[key.strip()] = value.strip().strip("'\"")
+    if "LOCAL_ASR_COMMAND_JSON" in values:
+        values.setdefault("UV_CACHE_DIR", "/Users/a1234/.cache/uv")
     return values
 
 
