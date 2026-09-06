@@ -18,6 +18,9 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as ModelTools from '../src/model-tools.ts'
+import { draftContext, draftPrompt, draftMethod } from './native-draft-fixture.ts'
+import { createDirectorContextRpcHandler } from '../src/rpc.ts'
+import type { DirectorContextSnapshot } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 
 const scope = { projectId: 'example-project', episodeId: 'example-episode', sceneId: 'example-scene', shotId: 'example-shot' }
 const contextSnapshotSha256 = 'a'.repeat(64)
@@ -30,13 +33,18 @@ const fourthReference = [
 /** Deterministic external model stand-in; every request still comes from the native loop. */
 class ExampleModel extends LlmAdapter {
   readonly requests: GenerateOptions[] = []
+  constructor(readonly draftMode = false) { super() }
 
   async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     const step = this.requests.length
     this.requests.push(options)
     if (step < 2) {
-      const name = step === 0 ? 'qingmu_read_bound_context' : 'qingmu_get_imago_method'
-      const args = step === 0 ? {} : { capability: 'shot_design', resourceId: 'rough_final_feedback' }
+      const name = this.draftMode ? (step === 0 ? 'qingmu_read_prompt_draft' : 'qingmu_propose_prompt_edit')
+        : step === 0 ? 'qingmu_read_bound_context' : 'qingmu_get_imago_method'
+      const receiptId = JSON.stringify(options.messages).match(/receiptId\\?":\\?"([a-f0-9]{64})/u)?.[1]
+      const args = this.draftMode ? (step === 0 ? {} : { receiptId, field: 'imageGenPrompt',
+        replacement: '她停在门口，门在画面左侧；背面中景，不要求正脸。', reason: '先明确门与人物位置，保留铃响后的停顿。' })
+        : step === 0 ? {} : { capability: 'shot_design', resourceId: 'rough_final_feedback' }
       yield { type: 'block-start', index: 0, blockType: 'tool-call' }
       yield { type: 'block-end', index: 0, block: { type: 'tool-call', id: CallId(`read-${step}`), name, arguments: JSON.stringify(args) } }
       yield { type: 'finish', reason: { kind: 'tool-calls' } }
@@ -54,7 +62,7 @@ class ExampleModel extends LlmAdapter {
  * @returns the actual composed persona, tools, logged calls/results and next-request method check.
  * @throws if the shipped preset fails to load or the session cannot complete.
  */
-export async function runNativeDirectorExample() {
+export async function runNativeDirectorExample(draftMode = false) {
   const ctx = new Context()
   try {
     const presetRoot = fileURLToPath(new URL('../../qingmu-web/agent-presets/', import.meta.url))
@@ -76,12 +84,13 @@ export async function runNativeDirectorExample() {
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(AgentLoop, { agents: [] })
     await ctx.plugin(AgentPresets, { default: 'qingmu-director', roots: [{ path: presetRoot, trust: 'system' }], includeUserRoot: false })
-    const model = new ExampleModel()
+    const model = new ExampleModel(draftMode)
     ctx.llm.registerAdapter(['keyless'], model)
     ctx.provide('qingmuYimengCommand', async (endpoint, payload) => {
       if (endpoint !== 'readDirectorContext' || JSON.stringify(payload) !== JSON.stringify(scope)) {
         throw new Error('example accepts only its session-bound context read')
       }
+      if (draftMode) return { ok: true, value: draftContext }
       return { ok: true, value: {
         schema: 'jason.qingmu-director-context-snapshot.v1', ...scope, contextSnapshotSha256,
         shot: { id: scope.shotId, narrative: '门铃响起，她停在门口。' }, sourceScene: {}, selectedReferences: [],
@@ -90,6 +99,10 @@ export async function runNativeDirectorExample() {
       } }
     })
     ctx.provide('qingmuImagoMethod', async (endpoint, payload) => {
+      if (draftMode) {
+        if (endpoint !== 'directorInstructions') throw new Error('No method write allowed')
+        return { ok: true, value: draftMethod((payload as { resourceId?: 'rough_final_feedback' }).resourceId ?? null) }
+      }
       if (endpoint !== 'directorInstructions' || JSON.stringify(payload) !== JSON.stringify({ capability: 'shot_design', resourceId: 'rough_final_feedback' })) {
         throw new Error('example accepts only the fixed C5 fourth-reference page')
       }
@@ -98,6 +111,10 @@ export async function runNativeDirectorExample() {
         requestedResourceId: 'rough_final_feedback', sourceBindings: [{ resourceId: 'rough_final_feedback', sha256: 'b'.repeat(64) }],
         sources: [{ resourceId: 'rough_final_feedback', content: fourthReference }],
       } }
+    })
+    if (draftMode) ctx.provide('qingmuYimengRead', async (endpoint) => {
+      if (endpoint !== 'promptIr') throw new Error('No business write allowed')
+      return { ok: true, value: draftPrompt }
     })
     const handle = await ctx.agents.create({
       sessionId: SessionId('keyless-model-tools-example'), agentOptions: { provider: 'keyless', model: 'fixture' },
@@ -115,6 +132,11 @@ export async function runNativeDirectorExample() {
     handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: '看看当前镜头，参考导演方法给我建议。' }], source: { kind: 'user' } }))
     await idle
     const result = {
+      ...(draftMode ? { draftProposal: await createDirectorContextRpcHandler(ctx.sessions, {
+        readDirectorContext: async () => ({ ok: true, context: draftContext as DirectorContextSnapshot }),
+      }, { prompt: ctx.qingmuYimengRead, method: ctx.qingmuImagoMethod })('readNativeDraftProposal', {
+        sessionId: handle.agent.session.id, scope,
+      }, new AbortController().signal) } : {}),
       preset: ctx.agentPresets.composedPreset(handle.agent.ctx),
       system: model.requests[0]?.system,
       tools: model.requests[0]?.tools?.map(tool => tool.name).sort(),

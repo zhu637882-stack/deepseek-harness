@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { PromptIrWorkspace } from '../src/client/PromptIrWorkspace.tsx'
 import type { QingmuYimengPort } from '../src/client/contracts.ts'
 import { zh } from '../src/client/locales.ts'
+import type { DirectorContextClientPort, NativeDraftProposal } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import {
   readPromptIrEditRecoveryMarker,
   readPromptIrSelectionRecoveryMarker,
@@ -490,6 +491,49 @@ afterEach(() => {
 })
 
 describe('PromptIrWorkspace vertical slice', () => {
+  it('adopts a native suggestion locally, then uses existing method/preview/commit and authoritative draft reread', async () => {
+    const { port, spies } = createPort({ editPostSucceeds: true })
+    const scope = { projectId: PROJECT_ID, episodeId: EPISODE_ID, sceneId: 'scene-1', shotId: FRAME_ID }
+    const suggestion = { schema: 'qingmu.native-draft-proposal.v1', field: 'videoGenPrompt',
+      before: BASE_EDITABLE.videoGenPrompt, after: CANDIDATE_EDITABLE.videoGenPrompt, reason: '按人物反应推进镜头。',
+      input: { receiptId: 'f'.repeat(64), scope, bindingSeq: 0, baseRevision: BASE_VERSION, baseSnapshotSha256: BASE_SNAPSHOT_SHA,
+        storyboardRevisionId: STORYBOARD_REVISION_ID, frameId: FRAME_ID, draftSnapshotSha256: null } } as NativeDraftProposal
+    const readNativeDraftProposal = vi.fn(async () => ({ status: 'current', proposal: suggestion }))
+    const bridge = { readNativeDraftProposal } as unknown as DirectorContextClientPort
+    let saved = false
+    const canonicalDraft = { status: 'current', reason: null,
+      subject: { ...BASE_READ.subject, status: 'Draft', promptIrId: DRAFT_ID, promptIrVersion: DRAFT_VERSION,
+        promptIrContentSha256: DRAFT_CONTENT_SHA, editableProjection: CANDIDATE_EDITABLE },
+      subjectSnapshotSha256: CANDIDATE_SHA, baseBinding: { id: BASE_ID, version: BASE_VERSION, contentSha256: BASE_CONTENT_SHA } }
+    const promptRead = vi.fn(async () => saved ? { ...BASE_READ, draft: canonicalDraft } : BASE_READ)
+    const livePort = { ...port, promptIr: promptRead, commitPromptIrEdit: async (...args: Parameters<QingmuYimengPort['commitPromptIrEdit']>) => {
+      const result = await port.commitPromptIrEdit(...args); saved = true; return result
+    } } as unknown as QingmuYimengPort
+    const onCommitted = vi.fn(async () => {})
+    render(<PromptIrWorkspace projectId={PROJECT_ID} episodeId={EPISODE_ID} storyboardRevisionId={STORYBOARD_REVISION_ID}
+      shotItems={frame('Ready')} selectedShotId={FRAME_ID} onSelectShotId={vi.fn()} port={livePort} t={t}
+      onCommitted={onCommitted} presentation="director" nativeDirector={{ bridge, sessionId: 'native-session', scope }} />)
+    await screen.findByLabelText(zh.directorVideoPrompt)
+    fireEvent.click(screen.getByRole('button', { name: zh.nativeDraftRead }))
+    fireEvent.click(await screen.findByRole('button', { name: zh.nativeDraftAdopt }))
+    await screen.findByText(zh.nativeDraftAdopted)
+    expect((screen.getByLabelText(zh.directorVideoPrompt) as HTMLTextAreaElement).value).toBe(CANDIDATE_EDITABLE.videoGenPrompt)
+    expect(readNativeDraftProposal).toHaveBeenCalledTimes(2)
+    expect(spies.commitPromptIrEdit).not.toHaveBeenCalled()
+    expect(spies.proposePromptIr).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: zh.promptIrCheckMethod }))
+    await screen.findByText(/描述镜头与表演/)
+    fireEvent.click(screen.getByRole('button', { name: zh.promptIrPreparePreview }))
+    await waitFor(() => { expect(spies.previewPromptIr).toHaveBeenCalledTimes(1) })
+    fireEvent.click(await screen.findByRole('checkbox', { name: zh.promptIrEditConfirm }))
+    fireEvent.click(screen.getByRole('button', { name: zh.promptIrCommitEdit }))
+    await waitFor(() => { expect(onCommitted).toHaveBeenCalledTimes(1) })
+    expect(promptRead).toHaveBeenCalledTimes(2)
+    expect(spies.commitPromptIrEdit).toHaveBeenCalledTimes(1)
+    expect(spies.queueProductionTake).not.toHaveBeenCalled()
+    expect(spies.selectPromptIr).not.toHaveBeenCalled()
+    expect((screen.getByLabelText(zh.directorVideoPrompt) as HTMLTextAreaElement).value).toBe(CANDIDATE_EDITABLE.videoGenPrompt)
+  })
   it('shows one Ready-bound first-frame quote without offering submission', async () => {
     const { port, spies } = createPort()
     render(<PromptIrWorkspace projectId={PROJECT_ID} episodeId={EPISODE_ID} storyboardRevisionId={STORYBOARD_REVISION_ID}

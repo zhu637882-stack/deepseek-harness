@@ -5,8 +5,9 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionStore } from '@deepseek-ai/dsh-session'
 import type { DirectorReplayProposal } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import { createDirectorContextBridge } from './bridge.ts'
+import { latestNativeDraftProposal, readNativeDraftInput, type NativeDraftReaders } from './native-draft.ts'
 import type {
-  DirectorContextBridgeRpcResult, DirectorContextReadPort, DirectorObjectScope,
+  DirectorContextBridgeRpcResult, DirectorContextReadPort, DirectorObjectScope, NativeDraftProposalResult,
 } from './types.ts'
 
 const bad = (message: string): RpcResult<never> => ({
@@ -39,9 +40,10 @@ function scope(value: unknown): DirectorObjectScope | null {
 export function createDirectorContextRpcHandler(
   sessions: Pick<SessionStore, 'get'>,
   port: DirectorContextReadPort,
+  draftReaders?: NativeDraftReaders,
 ): ConnectionRpcHandler {
   const bridge = createDirectorContextBridge(port)
-  return async (endpoint, payload, signal): Promise<RpcResult<DirectorContextBridgeRpcResult>> => {
+  return async (endpoint, payload, signal): Promise<RpcResult<DirectorContextBridgeRpcResult | NativeDraftProposalResult>> => {
     try {
       const raw = object(payload)
       if (raw === null || typeof raw.sessionId !== 'string' || id(raw.sessionId) === null) {
@@ -49,6 +51,32 @@ export function createDirectorContextRpcHandler(
       }
       const session = sessions.get(SessionId(raw.sessionId))
       if (session === undefined) return bad('director context session unavailable')
+      if (endpoint === 'readNativeDraftProposal') {
+        if (!exact(raw, ['sessionId', 'scope'])) return bad('native draft fields invalid')
+        const requested = scope(raw.scope)
+        if (requested === null) return bad('native draft scope invalid')
+        const proposal = latestNativeDraftProposal(session)
+        if (proposal === null) return { ok: true, value: { status: 'none' } }
+        const current = bridge.current(session)
+        const seq = session.events.findLast(event => event.type === 'qingmu-director-context/state')?.seq
+        const sameScope = (candidate: DirectorObjectScope) => Object.entries(requested).every(([key, value]) =>
+          candidate[key as keyof DirectorObjectScope] === value)
+        if (current === null || seq === undefined || !sameScope(current.binding.scope) || !sameScope(proposal.input.scope)) {
+          return { ok: true, value: { status: 'stale' } }
+        }
+        if (!draftReaders) return { ok: true, value: { status: 'unavailable' } }
+        try {
+          const context = await port.readDirectorContext(requested, signal)
+          if (!context.ok) return { ok: true, value: { status: 'unavailable' } }
+          const input = await readNativeDraftInput(context.context, requested, seq, draftReaders, signal)
+          signal.throwIfAborted()
+          const finalSeq = session.events.findLast(event => event.type === 'qingmu-director-context/state')?.seq
+          return { ok: true, value: finalSeq === seq && input.receiptId === proposal.input.receiptId
+            ? { status: 'current', proposal } : { status: 'stale' } }
+        } catch {
+          return { ok: true, value: { status: 'unavailable' } }
+        }
+      }
       if (endpoint === 'enter') {
         if (!exact(raw, raw.ownerId === undefined ? ['sessionId', 'scope'] : ['sessionId', 'scope', 'ownerId'])
           || (raw.ownerId !== undefined && id(raw.ownerId) === null)) return bad('director context enter fields invalid')

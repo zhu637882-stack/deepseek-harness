@@ -3,6 +3,17 @@ export const NS = 'qingmuCockpit'
 
 /** Simplified Chinese cockpit dictionary. */
 export const zh = {
+  nativeDraftTitle: '原生导演建议',
+  nativeDraftHint: '在当前“青木导演”会话中提出修改要求，助手读取本镜提示词与 IMAGO 方法后提交建议。这里每次采用一个字段；仅进入草稿，仍可编辑、检查与保存，不会生成或签收。',
+  nativeDraftRead: '读取当前会话的建议',
+  nativeDraftChecking: '正在核对当前来源…',
+  nativeDraftNone: '当前会话还没有可采用的原生提示词建议。请先让青木导演读取并提出修改。',
+  nativeDraftStale: '镜头、提示词或导演方法已变化，请让助手重新读取并调整建议。',
+  nativeDraftUnavailable: '暂时无法核对建议来源。请稍后重试；手工编辑仍可使用。',
+  nativeDraftChanged: '助手有了新的建议，请查看后再采用。',
+  nativeDraftConflict: '无法采用：该字段可能已被你修改，或来源检查未完成。已保留你的文字，请比较后手工合并或重试。',
+  nativeDraftAdopted: '已采用到草稿，尚未保存。可以继续编辑，然后检查、预览并保存。',
+  nativeDraftBefore: '原文', nativeDraftAfter: '建议内容', nativeDraftField: '修改字段', nativeDraftAdopt: '采用到草稿',
   directorHistoricalCommitted: '原命令已确认保存，但当前版本已变化。保留文字供比较；请基于当前来源重新检查，不要重复创建原稿。',
   directorRetryOriginal: '按原命令重试（相同幂等键）',
   directorRetryConfirm: '仅重试原命令和相同幂等键。已提交则返回原回执；未提交且来源仍有效才保存。继续？',
@@ -1654,6 +1665,17 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** English cockpit dictionary kept structurally paired with the Chinese source. */
 export const en = {
+  nativeDraftTitle: 'Native director suggestion',
+  nativeDraftHint: 'Ask the current Qingmu director session to read this shot’s prompts and IMAGO methods, then propose an edit. Adopt one field at a time into an editable draft. Checking and saving remain separate; nothing is generated or approved.',
+  nativeDraftRead: 'Read this session’s suggestion',
+  nativeDraftChecking: 'Checking current sources…',
+  nativeDraftNone: 'No native prompt suggestion in this session yet. Ask the Qingmu director to read and propose an edit first.',
+  nativeDraftStale: 'The shot, prompt or method changed. Ask the assistant to reread and reconsider.',
+  nativeDraftUnavailable: 'Cannot check the suggestion sources right now. Retry later; manual editing remains available.',
+  nativeDraftChanged: 'A newer suggestion is available. Review it before adopting.',
+  nativeDraftConflict: 'Cannot adopt: you may have edited this field, or source checking failed. Your text is preserved; compare and merge manually or retry.',
+  nativeDraftAdopted: 'Adopted into the draft, not saved. Continue editing, then check, preview and save.',
+  nativeDraftBefore: 'Original', nativeDraftAfter: 'Suggestion', nativeDraftField: 'Field', nativeDraftAdopt: 'Adopt into draft',
   directorHistoricalCommitted: 'The original command was saved, but the current version changed. Your text is retained for comparison; check against the current source instead of recreating the old draft.',
   directorRetryOriginal: 'Retry original command (same idempotency key)',
   directorRetryConfirm: 'Retry only the original command and key. An existing commit returns its receipt; an uncommitted valid source may save. Continue?',

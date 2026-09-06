@@ -6,6 +6,46 @@ import type {
   DirectorReplayProposal,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { Session } from '@deepseek-ai/dsh-session'
+import type { ImagoDirectorInstructionsResponse } from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter/types'
+import type { YimengPromptIrResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
+
+/** Complete model-visible source for a single-field prompt suggestion; no business write authority. */
+export interface NativeDraftInput {
+  readonly schema: 'qingmu.native-draft-input.v1'
+  readonly receiptId: string
+  readonly scope: DirectorObjectScope
+  readonly bindingSeq: number
+  readonly context: DirectorContextSnapshot
+  readonly prompt: YimengPromptIrResponse
+  readonly methods: readonly ImagoDirectorInstructionsResponse[]
+}
+
+/** Advisory tool result; adopting it only edits the browser's unsaved draft. */
+export interface NativeDraftProposal {
+  readonly schema: 'qingmu.native-draft-proposal.v1'
+  readonly input: NativeDraftSource
+  readonly field: keyof YimengPromptIrResponse['subject']['editableProjection']
+  readonly before: string
+  readonly after: string
+  readonly reason: string
+}
+
+/** Browser-safe source coordinates; context and method bodies stay in the original read result. */
+export interface NativeDraftSource {
+  readonly receiptId: string
+  readonly scope: DirectorObjectScope
+  readonly bindingSeq: number
+  readonly storyboardRevisionId: string
+  readonly frameId: string
+  readonly baseRevision: number
+  readonly baseSnapshotSha256: string
+  readonly draftSnapshotSha256: string | null
+}
+
+/** Freshness is checked on retrieval and again before adoption; unavailable never means current. */
+export type NativeDraftProposalResult =
+  | { readonly status: 'current'; readonly proposal: NativeDraftProposal }
+  | { readonly status: 'none' | 'stale' | 'unavailable' }
 
 /** Exact Yimeng object coordinates owned by one DSh director session. */
 export interface DirectorObjectScope {
@@ -136,6 +176,8 @@ export type DirectorContextBridgeRpcResult = DirectorContextEntryResult | Direct
 
 /** Browser port for one current DSh session. */
 export interface DirectorContextClientPort {
+  /** Optional when the Host has not installed native prompt tools; manual editing remains available. */
+  readNativeDraftProposal?(sessionId: string, scope: DirectorObjectScope, signal?: AbortSignal): Promise<NativeDraftProposalResult>
   enter(sessionId: string, scope: DirectorObjectScope, signal?: AbortSignal, ownerId?: string): Promise<DirectorContextEntryResult>
   clear(sessionId: string, scope: DirectorObjectScope, ownerId: string, signal?: AbortSignal): Promise<DirectorContextClearResult>
   recover(sessionId: string, signal?: AbortSignal): Promise<DirectorContextRecoveryResult>

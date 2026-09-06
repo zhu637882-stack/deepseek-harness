@@ -10,6 +10,8 @@ import type {} from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter'
 import { createDirectorContextBridge } from './bridge.ts'
 import type { DirectorContextBindingState } from './types.ts'
 import type {} from './index.ts'
+import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
+import { findNativeDraftInput, nativeDraftFields, nativeDraftSource, readNativeDraftInput } from './native-draft.ts'
 
 /** Opt-in native-agent consumer; the Host binding plugin remains independently usable. */
 export const name = 'qingmu-director-model-tools'
@@ -165,4 +167,55 @@ export function apply(ctx: Context, config: Config = {}): void {
       }, maxOutputBytes)
     },
   }))
+
+  // The two context tools remain available without the optional PromptIR reader.
+  ctx.inject(['qingmuYimengRead'], (draftHost) => {
+    async function readInput(exec: ToolRunContext) {
+      const current = await readBoundContext(exec)
+      if (current.seq === undefined) throw new Error('Current session binding is unavailable.')
+      const input = await readNativeDraftInput(current.context, current.state.binding.scope, current.seq, {
+        prompt: draftHost.qingmuYimengRead, method: ctx.qingmuImagoMethod,
+      }, exec.signal)
+      exec.signal.throwIfAborted()
+      if (bindingSeq(current.session) !== current.seq) throw new Error('The current shot changed; read the draft again.')
+      return input
+    }
+    draftHost.tools.register(defineTool({
+      name: 'qingmu_read_prompt_draft',
+      description: 'Read the bound shot context, current Ready/draft prompt fields and complete IMAGO C5 instructions before editing a prompt. Return receiptId to qingmu_propose_prompt_edit. This is read-only; missing facts remain unknown. It does not inspect image pixels, approve content or generate media.',
+      parameters: {},
+      output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
+      presentCall: () => ({ card: 'generic', kind: 'read', title: '读取当前提示词与 IMAGO 分镜方法' }),
+      async execute(args, exec) {
+        exactArgs(args, [])
+        return boundedJson(await readInput(exec), maxOutputBytes)
+      },
+    }))
+    draftHost.tools.register(defineTool({
+      name: 'qingmu_propose_prompt_edit',
+      description: 'Propose one editable prompt field using a receipt from qingmu_read_prompt_draft. Give the full replacement text and explain its directing purpose. The original text and scope come from the recorded read, not your arguments. The workspace can adopt it into an unsaved draft; this tool never saves, approves, generates or runs legacy scene planning. If stale, reread and reconsider rather than relabelling an old suggestion.',
+      parameters: {
+        receiptId: { type: 'string', required: true },
+        field: { type: 'string', required: true, enum: [...nativeDraftFields] },
+        replacement: { type: 'string', required: true },
+        reason: { type: 'string', required: true },
+      },
+      output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
+      presentCall: () => ({ card: 'generic', kind: 'read', title: '提交待采用的导演建议（未保存）' }),
+      async execute(args, exec) {
+        exactArgs(args, ['receiptId', 'field', 'replacement', 'reason'])
+        if (!exec.agent) throw new Error('A native director session is required.')
+        if (!args.reason.trim() || args.reason.length > 2000 || args.replacement.length > 30000) {
+          throw new Error('Explain the suggestion within 2000 characters; replacement limit is 30000 characters.')
+        }
+        const input = findNativeDraftInput(exec.agent.session, args.receiptId)
+        const current = await readInput(exec)
+        if (current.receiptId !== input.receiptId) throw new Error('The context, draft or IMAGO method changed. Read and reconsider the suggestion.')
+        const before = (input.prompt.draft?.subject ?? input.prompt.subject).editableProjection[args.field]
+        if (args.replacement === before) throw new Error('The proposed field is unchanged.')
+        return boundedJson({ schema: 'qingmu.native-draft-proposal.v1', input: nativeDraftSource(input), field: args.field,
+          before, after: args.replacement, reason: args.reason }, maxOutputBytes)
+      },
+    }))
+  })
 }

@@ -31,6 +31,10 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 
 每次调用在返回正文前刷新绑定。上下文 SHA 改变会使待处理建议失效；任一读取过程中切换对象，都会拒绝迟到结果。上下文或方法缺失、取消操作不会生成替代内容，也不阻断手工编辑。这个入口不包含采用建议、业务写入、批准或生成工具。
 
+作用域消费方还具有 `qingmuYimengRead` 时，会注册 `qingmu_read_prompt_draft` 和 `qingmu_propose_prompt_edit`。前者读取当前 Ready/草稿提示词、绑定上下文与完整 C5 方法，包括必读追加参考。建议使用成功配对的原生工具调用与结果中的读取回执，替换现有五个提示词字段之一。Host 返回建议前重新核对来源，不接受模型自填的原文基线或旧回放工作单。
+
+`readNativeDraftProposal` 是读取最新已记录原生建议的只读 loopback 接口。它重新核对 Writer 上下文、提示词基线、方法与会话绑定，区分 current、stale、unavailable 和没有建议。建议只包含来源坐标、回执 ID、原文/替换文字和理由；上下文与方法正文留在原始读取结果中。驾驶舱对照原文与建议，明确采用到未保存草稿；采用时再核对来源，并保留人工修改。既有方法检查、预览、保存和 Writer 权威回读仍独立执行，不引入场景规划保存、批准、生成、额外数据库或队列。单字段建议需要已有 Ready PromptIR；首份草稿仍走原工作区。
+
 `maxOutputBytes` 默认限制每份完整 JSON 响应为 262144 个 UTF-8 字节。超限时失败，不截断内容。IMAGO 来源加载器另设单文件 128 KiB、整包 512 KiB 上限，因此合规来源包仍可能超过本消费端的响应上限。须显式配置 Host 上限或读取固定追加参考，不能静默缩减方法。
 
 工具通过原生工具注册表返回无损 JSON，不注入系统提示词，不新建事件日志、业务数据库或独立 Agent 循环。当前上下文是文本证据，不等于逐像素审图，也不代表已经具备全剧剧本。
@@ -57,7 +61,7 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 
 #### 模型看到什么
 
-两个工具 schema，以及调用后带来源哈希与只读权威声明的绑定 Writer 上下文或完整所请求 IMAGO 正文。工具结果持久化到原有会话日志，并进入下一轮模型请求。必读追加参考需要另行调用读取。
+上下文与方法工具 schema，以及 PromptIR 读取器可用时的两个提示词建议工具。工具结果持久化到原有会话日志，并进入下一轮模型请求。单独读取方法时须另行补读必读参考；提示词草稿读取包含全部必读 C5 参考。建议结果只带精简来源坐标，不重复方法或上下文正文。
 
 #### Token 影响
 
@@ -70,6 +74,6 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 ## 已知限制与后续工作
 
 - 运行期 owner 不跨 Host 重启保留。已持久化的成功绑定仍按原会话语义恢复，已持久化空值则保持未绑定。存活的浏览器须重新进入以取得新的清理租约。离线或被拒的清理不能保证解除绑定；界面仍挂载且没有新绑定时，会报告清理未确认。
-- 原生读取工具组合已通过 Loader 预设和脚本化模型传输验证。这不证明生产启用、真实模型创作质量、建议采用或生成已完成。
-- proposal 的 method 漂移仍由现有 `checkDirectorProposalFreshness` command 路径检查。本桥自动处理 context SHA 漂移，并保留该 freshness 所需坐标。
+- 原生组合通过 Loader 预设和脚本化模型传输验证。本地组件测试覆盖建议采用到既有草稿保存/回读；这些不证明生产启用、真实 Writer 持久化、真实模型创作质量或生成。
+- 旧回放建议仍由 `checkDirectorProposalFreshness` 检查漂移；原生提示词建议使用其已记录的读取回执和只读接口。
 - 本包没有启用真实 DeepSeek 路由、凭据、外部请求、费用或生产 canary。

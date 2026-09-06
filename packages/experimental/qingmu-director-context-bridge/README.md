@@ -31,6 +31,10 @@ The opt-in `@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/model-t
 
 Each call refreshes the binding before returning content. A changed context SHA invalidates a pending proposal; an object switch during either read rejects the late result. Missing context, missing methods, and cancellation do not generate replacement content or block manual editing. There is no proposal-adoption, business-write, approval, or generation tool in this entry.
 
+When the scoped consumer also has `qingmuYimengRead`, it registers `qingmu_read_prompt_draft` and `qingmu_propose_prompt_edit`. The read loads the current Ready/draft prompt, bound context, and full C5 instructions including required supplementary references. The suggestion replaces one of the existing five prompt fields, using a receipt from a successfully paired native tool call/result. The Host rechecks the source before returning a suggestion. It never accepts a model-authored baseline or a legacy replay work order.
+
+`readNativeDraftProposal` is a read-only loopback facade for the latest logged native suggestion. It rechecks Writer context, prompt baseline, methods and session binding, distinguishing current, stale, unavailable and absent results. Suggestions contain only source coordinates, receipt ID, original/replacement text and rationale; context and method bodies remain in the original read result. The cockpit compares original and suggested text and explicitly adopts into an unsaved draft, rechecking freshness and preserving manual edits. Existing method checking, preview, save and authoritative Writer reread stay separate. No scene-planning save, approval, generation, additional database or queue is introduced. One-field suggestions require an existing Ready PromptIR; first-Draft bootstrap remains in its existing workspace.
+
 `maxOutputBytes` defaults to 262144 UTF-8 bytes for each complete JSON response. Oversized responses fail without truncation. The IMAGO source loader has separate 128 KiB per-file and 512 KiB package limits: an admissible source package can still exceed this consumer's response limit. Configure the Host limit explicitly or use the fixed follow-up resource; never silently shorten the method.
 
 The tools return lossless JSON through the native tool registry. They add no system-prompt injection, second event log, business database, or separate agent loop. The current context is textual evidence, not a pixel-level image review or a claim that the full screenplay is available.
@@ -57,7 +61,7 @@ Independent. Binding, switching, and recovery do not modify model requests.
 
 #### What the model sees
 
-The two tool schemas and, after a call, the bound Writer context or complete requested IMAGO texts with source hashes and read-only authority. Tool results persist in the existing session log and enter the next model request. Required follow-up references must be read separately.
+The context and method tool schemas, plus the two prompt-suggestion tools when the PromptIR reader is available. Tool results persist in the existing session log and enter the next model request. Standalone method reads require separate follow-up references; prompt-draft reads include all required C5 references. Suggestion results carry compact source coordinates, not repeated method or context bodies.
 
 #### Token effect
 
@@ -70,6 +74,6 @@ New results append to conversation history. Changed context or method text chang
 ## Known Limitations and Deferred Work
 
 - Runtime-only owners do not survive a Host restart. A persisted successful binding still recovers under existing session semantics, while a persisted null stays unbound. A surviving browser must re-enter to acquire a new cleanup lease. Offline or rejected cleanup cannot guarantee detachment; the UI reports an unconfirmed clear when still mounted without a newer binding.
-- Native read-tool composition is verified with a Loader preset and scripted model transport. This is not evidence of production activation, real-model creative quality, proposal adoption, or generation.
-- Proposal method drift remains checked by the existing `checkDirectorProposalFreshness` command path. This bridge automatically handles context-SHA drift and preserves those freshness coordinates.
+- Native composition is verified with a Loader preset and scripted model transport. Local component tests cover adoption through existing draft save/reread; these are not evidence of production activation, live Writer persistence, real-model creative quality or generation.
+- Legacy replay proposal drift remains checked by `checkDirectorProposalFreshness`; native prompt suggestions use their recorded read receipts and the read-only facade instead.
 - No real DeepSeek route, credential, external request, fee, or production canary is enabled by this package.

@@ -88,6 +88,8 @@ function ExistingDirectorWorkspace(props: DirectorWorkspaceProps) {
         {showTakes && <TakeVersionCompareView {...props} enabled readOnly />}
       </details>
       <PromptIrWorkspace {...props} storyboardRevisionId={relations.storyboardRevision.revisionId}
+        {...(shot ? { nativeDirector: { bridge: props.directorBridge, sessionId: props.directorSessionId,
+          scope: { projectId: props.projectId, episodeId: props.episodeId, sceneId: shot.sceneId, shotId: shot.shotId } } } : {})}
         presentation="director" onCommitted={async () => { await props.onCommitted() }} />
       <details onToggle={(event) => { setShowCanvas(event.currentTarget.open) }}>
         <summary>{t('directorStoryboard')}</summary>

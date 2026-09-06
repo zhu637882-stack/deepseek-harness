@@ -14,7 +14,7 @@ IMAGO 方法适配器优先从 Cordis 非空白的显式 `config.coreRoot` 解�
 
 本组合包通过 `dsh.bundle.agentPresets` 携带显示为“青木导演”的 `qingmu-director` Agent 预设。Profile 启动器将其包内相对根目录与原生模式一起注册，无须写入安装绝对路径或复制用户预设。青木 patch 将其选为 profile 默认值，但原生用户默认设置仍可覆盖。原生 profile 与已有会话保持原模式。用户可在新会话或空会话中通过原生模式选择器选用此预设；已有内容的会话不会自动切换。
 
-预设只组装完整导演角色提示与上下文桥的[原生读取工具](../qingmu-director-context-bridge/README.zh.md)。它不增加 shell、任意文件操作、自修改、Provider、采用、保存或批准工具。现有驾驶舱必须将所选镜头绑定到同一个会话。未绑定镜头时，工具如实报告，不编造项目。只读分析不等于完整创作流程。
+预设组装完整导演角色提示与上下文桥的[原生读取和建议工具](../qingmu-director-context-bridge/README.zh.md)。它不增加 shell、任意文件操作、自修改、Provider、采用、保存或批准工具。现有驾驶舱必须将所选镜头绑定到同一个会话。未绑定镜头时，工具如实报告，不编造项目。驾驶舱可将已记录提示词建议采用到可编辑草稿；这不等于完整创作流程。
 
 ## 模型体验
 
@@ -22,11 +22,11 @@ IMAGO 方法适配器优先从 Cordis 非空白的显式 `config.coreRoot` 解�
 
 #### 模型看到什么
 
-只有 `qingmu-director` 会话收到 [agent.cordis.yml](agent-presets/qingmu-director/agent.cordis.yml) 中的固定中文角色提示和两个原生读取工具 schema。角色提示要求先读取真实 Writer 上下文与完整 IMAGO 方法，再进行导演工作；区分场景意图与镜头设计，不声称保存、生成或批准内容。免密钥原生循环快照锁定其实际模型输入。
+只有 `qingmu-director` 会话收到 [agent.cordis.yml](agent-presets/qingmu-director/agent.cordis.yml) 中的固定中文角色提示和限定作用域的原生工具 schema。角色提示要求先读取真实 Writer 上下文与完整 IMAGO 方法，再进行导演工作；区分场景意图与镜头设计，PromptIR 读取器可用时可提出单字段完整替换建议，不声称保存、生成或批准内容。免密钥原生循环快照锁定其实际模型输入。
 
 #### Token 影响
 
-本预设的每次请求均包含固定角色提示与两个 schema。完整上下文和方法正文按需读取，不在启动时注入整套方法库。
+本预设每次请求携带固定角色提示与已可用的作用域工具 schema。完整上下文和方法正文按需读取，不在启动时注入整个方法库。建议引用原始读取回执，不重复这些正文。
 
 #### KV Cache 影响
 

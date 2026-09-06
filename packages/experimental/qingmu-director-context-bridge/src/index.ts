@@ -4,6 +4,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import { directorContextBindingProjectionDefinition } from './projection.ts'
 import { createDirectorContextRpcHandler } from './rpc.ts'
+import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
+import type {} from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter'
 
 export { createDirectorContextBridge } from './bridge.ts'
 export { createDirectorContextRpcHandler } from './rpc.ts'
@@ -34,7 +36,13 @@ export function apply(ctx: Context): void {
           : { ok: false as const, reason: 'context_unavailable' as const }
       },
     }
-    host.connection.rpc.handle('/qingmu-director-context', createDirectorContextRpcHandler(host.sessions, port), {
+    const handler: ConnectionRpcHandler = (endpoint, payload, signal) => {
+      const prompt = host.get('qingmuYimengRead')
+      const method = host.get('qingmuImagoMethod')
+      return createDirectorContextRpcHandler(host.sessions, port,
+        prompt && method ? { prompt, method } : undefined)(endpoint, payload, signal)
+    }
+    host.connection.rpc.handle('/qingmu-director-context', handler, {
       authority: 'loopback',
     })
   })

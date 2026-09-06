@@ -14,7 +14,7 @@ The same Host also requires a raw, untrimmed `QINGMU_IMAGO_ATTESTATION_KEY` of a
 
 This bundle ships the `qingmu-director` agent preset, displayed as 青木导演, through `dsh.bundle.agentPresets`. The profile launcher registers its package-relative root alongside the stock modes; no installation path or copied user preset is needed. The Qingmu patch selects it as the profile default, subject to the native user default setting. Stock profiles and existing sessions keep their modes. Users can select this preset through the native mode picker for a new or blank session; populated conversations are not switched automatically.
 
-The preset composes a complete director persona and only the context bridge's [native read tools](../qingmu-director-context-bridge/README.md). It does not add shell, arbitrary filesystem, self-modification, Provider, adoption, save, or approval tools. The existing cockpit must bind the selected shot to that same session. If no shot is bound, the tool reports it rather than inventing a project. Read-only analysis is not the complete creative workflow.
+The preset composes a complete director persona and the context bridge's [native read and suggestion tools](../qingmu-director-context-bridge/README.md). It does not add shell, arbitrary filesystem, self-modification, Provider, adoption, save, or approval tools. The existing cockpit must bind the selected shot to that same session. If no shot is bound, the tool reports it rather than inventing a project. The cockpit can adopt a logged prompt suggestion into an editable draft; this is not the complete creative workflow.
 
 ## Model Experience
 
@@ -22,11 +22,11 @@ The preset composes a complete director persona and only the context bridge's [n
 
 #### What the model sees
 
-Only `qingmu-director` sessions receive the stable Chinese persona in [agent.cordis.yml](agent-presets/qingmu-director/agent.cordis.yml) and the two native read-tool schemas. The persona asks for actual Writer context and complete IMAGO methods before directing, separates scene intent from shot design, and does not claim to save, generate, or approve content. Its exact model input is pinned through a keyless native-loop snapshot.
+Only `qingmu-director` sessions receive the stable Chinese persona in [agent.cordis.yml](agent-presets/qingmu-director/agent.cordis.yml) and scoped native tool schemas. The persona asks for actual Writer context and complete IMAGO methods before directing, separates scene intent from shot design, and can propose a single prompt-field replacement when the PromptIR reader is available. It does not claim to save, generate, or approve content. Its exact model input is pinned through a keyless native-loop snapshot.
 
 #### Token effect
 
-The fixed persona and two schemas are present on each request from this preset. Full context and method bodies are requested on demand; no complete method library is injected at startup.
+The fixed persona and available scoped schemas are present on each request from this preset. Full context and method bodies are requested on demand; no complete method library is injected at startup. Suggestions refer to their original read receipt without repeating those bodies.
 
 #### KV Cache effect
 

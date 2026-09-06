@@ -39,6 +39,7 @@ import directorCss from './DirectorWorkspace.module.css'
 import { directorBufferKey, readDirectorBuffer, writeDirectorBuffer } from './director-edit-buffer.ts'
 import { hasPromptIrBootstrapFrame, PromptIrBootstrapWorkspace } from './PromptIrBootstrapWorkspace.tsx'
 import { EntityDraftHumanReview } from './EntityDraftHumanReview.tsx'
+import { NativeDirectorDraft, mergeNativeDraft, type NativeDirectorDraftContext } from './NativeDirectorDraft.tsx'
 import { FirstFrameCandidatePreview } from './FirstFrameCandidatePreview.tsx'
 import {
   createFirstFrameSelectionClient,
@@ -99,6 +100,7 @@ const FIRST_FRAME_ACTION_KEYS: Record<
 
 /** Props for the bounded PromptIR editor mounted in the existing Script & Assets slot. */
 export interface PromptIrWorkspaceProps {
+  readonly nativeDirector?: NativeDirectorDraftContext
   readonly presentation?: 'director'
   readonly onUnsavedChange?: (dirty: boolean) => void
   readonly projectId: string
@@ -497,6 +499,7 @@ function ReadyPromptIrWorkspace({
   onCommitted,
   presentation,
   onUnsavedChange,
+  nativeDirector,
 }: PromptIrWorkspaceProps) {
   const director = presentation === 'director'
   const frames = framesOf(projectId, episodeId, shotItems, storyboardRevisionId)
@@ -1424,6 +1427,12 @@ function ReadyPromptIrWorkspace({
           <button type="button" disabled={busy || locked} onClick={rebaseOnReady}>{t('directorRebase')}</button>
         </>}
         {(unsaved || bufferStale) && <button type="button" disabled={busy || locked} onClick={discardBuffer}>{t('directorDiscard')}</button>}
+        {nativeDirector && <NativeDirectorDraft context={nativeDirector} disabled={blocked || fields === undefined}
+          sourceKey={`${snapshot?.baseSnapshotSha256 ?? ''}:${snapshot?.draft?.subjectSnapshotSha256 ?? ''}`}
+          t={t} onAdopt={(suggestion) => {
+            if (!snapshot || !fields || blocked) throw new Error('Editor unavailable')
+            changeDraft(JSON.stringify(mergeNativeDraft(suggestion, snapshot, fields, nativeDirector.scope), null, 2))
+          }} />}
         {fields !== undefined && <div className={directorCss.fields}>
           {EDITABLE_FIELDS.map(field => <label key={field} className={css.scriptEditor}>
             <span>{t(fieldLabels[field])}</span>
