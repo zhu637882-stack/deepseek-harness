@@ -7,7 +7,36 @@ import type {
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { Session } from '@deepseek-ai/dsh-session'
 import type { ImagoDirectorInstructionsResponse } from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter/types'
-import type { YimengPromptIrResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
+import type { YimengPromptIrResponse, YimengPromptIrBootstrapResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
+
+/** Full current upstream and C5 read before authoring the first prompt; no invented Ready baseline. */
+export interface NativeFirstDraftInput {
+  readonly schema: 'qingmu.native-first-draft-input.v1'
+  readonly receiptId: string
+  readonly scope: DirectorObjectScope
+  readonly bindingSeq: number
+  readonly context: DirectorContextSnapshot
+  readonly bootstrap: YimengPromptIrBootstrapResponse
+  readonly methods: readonly ImagoDirectorInstructionsResponse[]
+}
+
+/** Editable creative text only; asset selection, persistence and approval are excluded. */
+export interface NativeFirstDraftProposal {
+  readonly schema: 'qingmu.native-first-draft-proposal.v1'
+  readonly input: {
+    readonly receiptId: string
+    readonly scope: DirectorObjectScope
+    readonly contextSnapshotSha256: string
+    readonly storyboardRevisionId: string
+  }
+  readonly editableProjection: YimengPromptIrResponse['subject']['editableProjection']
+  readonly reason: string
+}
+
+/** Fresh native first draft or a non-actionable read outcome. */
+export type NativeFirstDraftProposalResult =
+  | { readonly status: 'current'; readonly proposal: NativeFirstDraftProposal }
+  | { readonly status: 'none' | 'stale' | 'unavailable' }
 
 /** Complete model-visible source for a single-field prompt suggestion; no business write authority. */
 export interface NativeDraftInput {
@@ -188,6 +217,10 @@ export interface DirectorContextClientPort {
   readNativeDirectorReadiness?(sessionId: string, signal?: AbortSignal): Promise<NativeDirectorReadiness>
   /** Optional when the Host has not installed native prompt tools; manual editing remains available. */
   readNativeDraftProposal?(sessionId: string, scope: DirectorObjectScope, signal?: AbortSignal): Promise<NativeDraftProposalResult>
+  /** Read the latest first-draft suggestion, rechecking upstream and complete method content. */
+  readNativeFirstDraftProposal?(
+    sessionId: string, scope: DirectorObjectScope, signal?: AbortSignal,
+  ): Promise<NativeFirstDraftProposalResult>
   enter(sessionId: string, scope: DirectorObjectScope, signal?: AbortSignal, ownerId?: string): Promise<DirectorContextEntryResult>
   clear(sessionId: string, scope: DirectorObjectScope, ownerId: string, signal?: AbortSignal): Promise<DirectorContextClearResult>
   recover(sessionId: string, signal?: AbortSignal): Promise<DirectorContextRecoveryResult>

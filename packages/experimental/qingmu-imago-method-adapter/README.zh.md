@@ -118,6 +118,8 @@ Host 在编译前后独立读取七份固定 Core 来源。当前仅 V6 的活�
 
 `promptIrBootstrap` 用精确的易梦上下文快照调用带版本的 Core 编译器，并校验其签证、方法 SHA、稳定有序参考、仅建议标志和五字段输出。选择 Draft 时，Host 先校验短时 Writer challenge，只重新编译一次，再签发绑定该 challenge 和投影的域分离新鲜度证明。方法只声明如何准备 Draft；它不拥有业务状态、Provider 路由、选择、批准或执行权。环境参考必需，人物与道具参考只在镜头上下文要求时出现。详见[首个 PromptIR Agent Note](../../../.agents/notes/implemented/feature/2026-08-31-qingmu-first-prompt-ir-bootstrap.zh.md)。
 
+引导请求可包含完整 `editableProjection`：严格限定为五个有长度上限的文本字段。Core 保留这些创作决定，同时仍负责参考绑定、Draft 状态和仅建议标志。选择时重新编译已保存文字。旧草稿若原始输入省略了这些字段，适配器只重构该省略输入的哈希，且必须让完整投影 SHA 匹配已验签的 Writer challenge 才接受。候选、方法、来源或上下文漂移仍失败；不进行第二次编译，也不降低为局部哈希比较。
+
 ## 模型体验
 
 ### 私有方法 RPC

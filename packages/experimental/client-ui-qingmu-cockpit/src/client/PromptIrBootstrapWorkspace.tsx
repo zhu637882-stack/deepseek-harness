@@ -6,6 +6,9 @@ import type {
   YimengSelectPromptIrResponse,
 } from './contracts.ts'
 import type { PromptIrWorkspaceProps } from './PromptIrWorkspace.tsx'
+import { NativeDirectorSuggestion } from './NativeDirectorDraft.tsx'
+import { useDirectorConnection } from './native-director-session.ts'
+import type { YimengPromptIrEditableProjection } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import css from './QingmuCockpit.module.css'
 import directorCss from './DirectorWorkspace.module.css'
 
@@ -279,6 +282,10 @@ export function hasPromptIrBootstrapFrame(props: PromptIrWorkspaceProps): boolea
 /** Two-step first PromptIR Draft materialization and authenticated Ready selection. */
 export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
   const frame = bootstrapFrameOf(props)
+  const canEdit = props.presentation === 'director' || props.nativeDirector !== undefined
+  const connection = useDirectorConnection(props.nativeDirector?.connection)
+  const frameKey = JSON.stringify(frame === undefined ? null : frameRequest(frame))
+  const [editor, setEditor] = useState<{ key: string; frameKey: string; fields: YimengPromptIrEditableProjection; dirty: boolean }>()
   const [state, setState] = useState<YimengPromptIrBootstrapResponse>()
   const [method, setMethod] = useState<ImagoPromptIrBootstrapMethodResponse>()
   const [draftReceipt, setDraftReceipt] = useState<YimengBootstrapPromptIrResponse>()
@@ -290,12 +297,30 @@ export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
   const [error, setError] = useState<string>()
   const [reload, setReload] = useState(0)
   const abortRef = useRef<AbortController>()
+  const editorKey = `${frameKey}:${state?.contextSnapshotSha256 ?? ''}`
+  const fields = editor?.key === editorKey ? editor.fields : undefined
+  const staleEditor = state !== undefined && editor?.frameKey === frameKey
+    && (editor.key !== editorKey || state.draft !== null || state.ready !== null)
+  const unsaved = editor?.frameKey === frameKey
+  const dirtyCallback = useRef(props.onUnsavedChange)
+  dirtyCallback.current = props.onUnsavedChange
+  useEffect(() => {
+    dirtyCallback.current?.(unsaved)
+    const beforeUnload = (event: BeforeUnloadEvent): void => {
+      if (unsaved || operation === 'committing' || operation === 'selecting') {
+        event.preventDefault(); event.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', beforeUnload)
+    return () => { window.removeEventListener('beforeunload', beforeUnload); dirtyCallback.current?.(false) }
+  }, [unsaved, operation])
 
   useEffect(() => {
     abortRef.current?.abort()
     setState(undefined); setMethod(undefined); setDraftReceipt(undefined); setSelectionReceipt(undefined)
+    setDraftMarker(undefined); setSelectionMarker(undefined)
     setConfirmed(false); setError(undefined)
-    if (frame === undefined) return
+    if (frame === undefined || !connection) { setOperation('idle'); return }
     try {
       setDraftMarker(readDraftMarker(markerKey(DRAFT_MARKER_PREFIX, frame), frame))
       setSelectionMarker(readSelectionMarker(markerKey(SELECT_MARKER_PREFIX, frame), frame))
@@ -307,30 +332,37 @@ export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
       if (controller.signal.aborted) return
       assertState(result, frame)
       setState(result)
+      const persisted = result.draft ?? result.ready
+      if (persisted) setEditor(current => current?.frameKey === frameKey
+        && EDITABLE_FIELDS.every(field => current.fields[field] === persisted.editableProjection[field]) ? undefined : current)
     }).catch((cause: unknown) => {
       if (!controller.signal.aborted) setError(messageOf(cause))
     }).finally(() => { if (!controller.signal.aborted) setOperation('idle') })
     return () => { controller.abort() }
-  }, [frame?.episodeId, frame?.frameId, frame?.projectId, frame?.storyboardRevisionId, props.port, reload])
+  }, [frame?.episodeId, frame?.frameId, frame?.projectId, frame?.storyboardRevisionId, props.port, reload, connection])
 
   if (props.projectId === '' || props.episodeId === '') return <p className={css.empty}>请先选择项目和集。</p>
   if (frame === undefined) return <p className={css.empty}>当前镜头没有可核验的真实分镜帧。</p>
-  const busy = operation !== 'idle'
+  const busy = operation !== 'idle' || !connection
   const draft = state?.draft
   const editable = draft?.editableProjection
 
   const compile = async (): Promise<void> => {
-    if (state === undefined || busy || state.draft !== null || state.ready !== null) return
+    if (state === undefined || busy || staleEditor || state.draft !== null || state.ready !== null) return
     const controller = new AbortController(); abortRef.current = controller
     setOperation('compiling'); setError(undefined)
     try {
       const result = await props.port.promptIrBootstrapMethod({
         context: state.context,
         contextSnapshotSha256: state.contextSnapshotSha256,
+        ...(fields === undefined ? {} : { editableProjection: fields }),
       }, controller.signal)
       if (controller.signal.aborted) return
       assertMethod(result, state)
       setMethod(result)
+      if (canEdit) setEditor({ key: editorKey, frameKey,
+        fields: result.projection.candidate.editableProjection as YimengPromptIrEditableProjection,
+        dirty: editor?.key === editorKey && editor.dirty })
     } catch (cause) { if (!controller.signal.aborted) setError(messageOf(cause)) }
     finally { if (!controller.signal.aborted) setOperation('idle') }
   }
@@ -342,6 +374,7 @@ export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
       const result = await props.port.recoverPromptIrBootstrap(requestWithoutSchema(marker), controller.signal)
       if (controller.signal.aborted) return
       assertDraftReceipt(result, marker)
+      setEditor(undefined)
       clearMarker(markerKey(DRAFT_MARKER_PREFIX, frame)); setDraftMarker(undefined); setDraftReceipt(result)
       setReload(value => value + 1); await props.onCommitted()
     } catch (cause) { if (!controller.signal.aborted) setError(messageOf(cause)) }
@@ -350,8 +383,17 @@ export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
 
   const commitDraft = async (): Promise<void> => {
     if (state === undefined || method === undefined || busy) return
-    const key = await idempotencyKey('draft', [frame.projectId, frame.episodeId, frame.storyboardRevisionId,
-      frame.frameId, state.contextSnapshotSha256, method.projectionSha256])
+    const controller = new AbortController(); abortRef.current = controller
+    setOperation('committing'); setError(undefined)
+    let key: string
+    try {
+      key = await idempotencyKey('draft', [frame.projectId, frame.episodeId, frame.storyboardRevisionId,
+        frame.frameId, state.contextSnapshotSha256, method.projectionSha256])
+    } catch (cause) {
+      if (!controller.signal.aborted) { setError(messageOf(cause)); setOperation('idle') }
+      return
+    }
+    if (controller.signal.aborted) return
     const marker: DraftRecoveryMarker = {
       schema: 'qingmu.prompt-ir-bootstrap-draft-recovery.v1',
       projectId: frame.projectId,
@@ -367,10 +409,9 @@ export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
       setDraftMarker(marker)
     } catch (cause) {
       setError(`无法安全保存 Draft 恢复标记：${messageOf(cause)}`)
+      setOperation('idle')
       return
     }
-    const controller = new AbortController(); abortRef.current = controller
-    setOperation('committing'); setError(undefined)
     try {
       const result = await props.port.bootstrapPromptIr({
         ...requestWithoutSchema(marker),
@@ -402,6 +443,7 @@ export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
           context: state.context,
           contextSnapshotSha256: state.contextSnapshotSha256,
           selectionChallenge,
+          editableProjection: draft.editableProjection,
         }, controller.signal)
         if (controller.signal.aborted) return
         assertMethod(freshness, state)
@@ -417,6 +459,7 @@ export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
           draft.promptIrId, draft.promptIrVersion, draft.promptIrContentSha256,
           methodSha256, freshness.projectionSha256,
         ])
+        if (controller.signal.aborted) return
         marker = {
           schema: 'qingmu.prompt-ir-bootstrap-selection-recovery.v1',
           projectId: frame.projectId, episodeId: frame.episodeId,
@@ -467,13 +510,46 @@ export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
       <p>基于当前 Ready 分镜、已选本地参考和版本化 IMAGO 方法，只创建 Draft；零 Provider。</p></div>
     <button type="button" disabled={busy} onClick={() => { setReload(value => value + 1) }}>刷新</button></div>
     <p role="status">{frame.label} · {frame.frameId}</p>
+    {!connection && <p role="status">连接已断开；未保存文字保留，恢复连接后重新核对上游。</p>}
     {state?.ready !== null && state?.ready !== undefined && <section className={css.commitReceipt} role="status">
       <h4>首个 Ready PromptIR 已选定</h4><p>Ready 只表示当前生效的提示词版本，不代表内容、权利、正式一致性或发布批准。</p>
       <p>v{state.ready.promptIrVersion} · {state.ready.promptIrContentSha256}</p></section>}
     {state !== undefined && state.draft === null && state.ready === null && <div className={css.scriptActions}>
-      <button type="button" className={css.primaryAction} disabled={busy || draftMarker !== undefined}
-        onClick={() => { void compile() }}>{operation === 'compiling' ? '正在核验方法…' : '生成首个 Draft 预览'}</button>
+      <button type="button" className={css.primaryAction} disabled={busy || staleEditor || draftMarker !== undefined}
+        onClick={() => { void compile() }}>{operation === 'compiling' ? '正在核验方法…' : fields === undefined ? '生成首个 Draft 预览' : '检查并预览首稿'}</button>
       <span>不会启动生成、选择参考或代替人工决定。</span></div>}
+    {state !== undefined && state.draft === null && state.ready === null && props.nativeDirector &&
+      <NativeDirectorSuggestion context={props.nativeDirector} disabled={busy || staleEditor || draftMarker !== undefined}
+        hint="在青木导演会话中要求起草本镜首稿。助手读取上游与 IMAGO 方法后提出完整五字段建议；采用后可手改、检查和保存，不会自动生成或签收。"
+        sourceKey={editorKey} t={props.t} readProposal={props.nativeDirector.bridge.readNativeFirstDraftProposal}
+        renderProposal={proposal => <><p>{proposal.reason}</p>{EDITABLE_FIELDS.map(field =>
+          <details key={field}><summary>{field}</summary>
+            <pre className={directorCss.promptText}>{proposal.editableProjection[field]}</pre></details>)}</>}
+        onAdopt={(proposal) => {
+          if (!props.nativeDirector || proposal.input.contextSnapshotSha256 !== state.contextSnapshotSha256
+            || proposal.input.storyboardRevisionId !== frame.storyboardRevisionId
+            || Object.entries(props.nativeDirector.scope).some(([key, value]) =>
+              proposal.input.scope[key as keyof typeof proposal.input.scope] !== value)
+            || (editor?.key === editorKey && editor.dirty)) throw new Error('当前上游或手工草稿已变化，不能覆盖。')
+          setEditor({ key: editorKey, frameKey, fields: proposal.editableProjection, dirty: false }); setMethod(undefined)
+        }} />}
+    {staleEditor && editor && <section aria-label="旧首稿保留" role="alert">
+      <p>上游内容或当前提示词版本已变化；旧首稿保留供核对，不会覆盖现有版本。请先复制需要的文字，再明确丢弃旧稿。</p>
+      {EDITABLE_FIELDS.map(field => <details key={field}><summary>{field}</summary><pre>{editor.fields[field]}</pre></details>)}
+      <button type="button" disabled={busy} onClick={() => { setEditor(undefined); setMethod(undefined) }}>丢弃这份本地旧稿</button>
+    </section>}
+    {canEdit && fields !== undefined && state?.draft === null && state.ready === null && <section aria-label="首稿编辑">
+      <h4>首稿编辑</h4><p>可直接修改；检查预览后才可保存，不会自动选为 Ready。</p>
+      {EDITABLE_FIELDS.map(field => <label key={field} className={directorCss.diff}>
+        <span>{({ imageGenPrompt: '首帧画面', lastFrameImagePrompt: '尾帧画面', videoGenPrompt: '视频与声音',
+          motionPrompt: '动作与运镜', negativePrompt: '避免出现' })[field]}</span>
+        <textarea value={fields[field]} disabled={busy || draftMarker !== undefined} rows={3}
+          onChange={(event) => {
+            setEditor({ key: editorKey, frameKey, fields: { ...fields, [field]: event.target.value }, dirty: true })
+            setMethod(undefined)
+          }} />
+      </label>)}
+    </section>}
     {method !== undefined && <section className={css.previewDock} aria-label="首版 PromptIR 预览">
       <h4>方法生成的 Draft 预览</h4><p>保存后仍是 Draft，不会成为 Ready。</p>
       {EDITABLE_FIELDS.map((field) => {

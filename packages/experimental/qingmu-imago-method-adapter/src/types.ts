@@ -437,6 +437,8 @@ export interface ImagoPromptIrMethodResponse extends ImagoMethodJsonObject {
 export interface ImagoPromptIrBootstrapMethodRequest {
   readonly context: ImagoMethodJsonObject
   readonly contextSnapshotSha256: string
+  /** Optional creative text; reference identities and Draft authority remain compiler-owned. */
+  readonly editableProjection?: ImagoMethodJsonObject
   readonly selectionChallenge?: ImagoPromptIrBootstrapSelectionChallenge
 }
 
@@ -466,6 +468,7 @@ export interface ImagoPromptIrBootstrapMethodSnapshot extends ImagoMethodJsonObj
   readonly schema: 'qingmu.prompt-ir-bootstrap-method-snapshot.v1'
   readonly context: ImagoMethodJsonObject
   readonly contextSnapshotSha256: string
+  readonly editableProjection?: ImagoMethodJsonObject
   readonly authority: {
     readonly business_truth: 'yimeng'
     readonly method_source: 'imago_os_current'

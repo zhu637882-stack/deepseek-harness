@@ -22,7 +22,7 @@ IMAGO 方法适配器优先从 Cordis 非空白的显式 `config.coreRoot` 解�
 
 #### 模型看到什么
 
-只有 `qingmu-director` 会话收到 [agent.cordis.yml](agent-presets/qingmu-director/agent.cordis.yml) 中的固定中文角色提示和限定作用域的原生工具 schema。角色提示要求先读取真实 Writer 上下文与完整 IMAGO 方法，再进行导演工作；区分场景意图与镜头设计，PromptIR 读取器可用时可提出单字段完整替换建议，不声称保存、生成或批准内容。免密钥原生循环快照锁定其实际模型输入。
+只有 `qingmu-director` 会话收到 [agent.cordis.yml](agent-presets/qingmu-director/agent.cordis.yml) 中的固定中文角色提示和限定作用域的原生工具 schema。角色提示要求先读取真实 Writer 上下文与完整 IMAGO 方法，再进行导演工作；区分场景意图与镜头设计，PromptIR 读取器可用时可提出单字段完整替换建议或完整首稿。首稿要求当前既无 Draft 也无 Ready。不声称保存、生成或批准内容。免密钥原生循环快照锁定其实际模型输入。
 
 #### Token 影响
 

@@ -1678,21 +1678,21 @@ function parsePromptText(value: unknown, field: string, allowEmpty = false): str
   return value
 }
 
-function parseCompletePromptIrProjection(value: unknown): ImagoPromptIrEditableProjection {
+function parseCompletePromptIrProjection(value: unknown, field = 'baseEditableProjection'): ImagoPromptIrEditableProjection {
   const input = parseInputObject(value)
   if (!isDeepStrictEqual(Object.keys(input).sort(), [...PROMPT_IR_EDITABLE_FIELDS].sort())) {
-    throw new InputError('baseEditableProjection must contain exactly the five canonical editable fields')
+    throw new InputError(`${field} must contain exactly the five canonical editable fields`)
   }
   return {
-    imageGenPrompt: parsePromptText(input.imageGenPrompt, 'baseEditableProjection.imageGenPrompt', true),
+    imageGenPrompt: parsePromptText(input.imageGenPrompt, `${field}.imageGenPrompt`, true),
     lastFrameImagePrompt: parsePromptText(
       input.lastFrameImagePrompt,
-      'baseEditableProjection.lastFrameImagePrompt',
+      `${field}.lastFrameImagePrompt`,
       true,
     ),
-    videoGenPrompt: parsePromptText(input.videoGenPrompt, 'baseEditableProjection.videoGenPrompt', true),
-    motionPrompt: parsePromptText(input.motionPrompt, 'baseEditableProjection.motionPrompt', true),
-    negativePrompt: parsePromptText(input.negativePrompt, 'baseEditableProjection.negativePrompt', true),
+    videoGenPrompt: parsePromptText(input.videoGenPrompt, `${field}.videoGenPrompt`, true),
+    motionPrompt: parsePromptText(input.motionPrompt, `${field}.motionPrompt`, true),
+    negativePrompt: parsePromptText(input.negativePrompt, `${field}.negativePrompt`, true),
   }
 }
 
@@ -1762,7 +1762,7 @@ function parsePromptIrRequest(payload: unknown): ImagoPromptIrMethodRequest {
 
 function parsePromptIrBootstrapRequest(payload: unknown): ImagoPromptIrBootstrapMethodRequest {
   const input = parseInputObject(payload)
-  assertOnlyInputKeys(input, ['context', 'contextSnapshotSha256', 'selectionChallenge'])
+  assertOnlyInputKeys(input, ['context', 'contextSnapshotSha256', 'selectionChallenge', 'editableProjection'])
   if (!isJsonObject(input.context)) throw new InputError('context must be an object')
   assertSafeJsonNumbers(input.context, 'context')
   const contextSnapshotSha256 = parseInputSha256(
@@ -1772,7 +1772,14 @@ function parsePromptIrBootstrapRequest(payload: unknown): ImagoPromptIrBootstrap
   if (e53CanonicalSha256(input.context, 'context') !== contextSnapshotSha256) {
     throw new InputError('contextSnapshotSha256 does not match context')
   }
-  if (input.selectionChallenge === undefined) return { context: input.context, contextSnapshotSha256 }
+  const edits = input.editableProjection === undefined ? {} : {
+    editableProjection: parseCompletePromptIrProjection(input.editableProjection, 'editableProjection'),
+  }
+  const editable = edits.editableProjection
+  if (editable !== undefined && PROMPT_IR_EDITABLE_FIELDS.some(field => editable[field].length > 30000)) {
+    throw new InputError('editableProjection text limit is 30000 characters per field')
+  }
+  if (input.selectionChallenge === undefined) return { context: input.context, contextSnapshotSha256, ...edits }
   const raw = parseInputObject(input.selectionChallenge)
   const challengeKeys = [
     'schema', 'actorId', 'projectId', 'episodeId', 'storyboardRevisionId', 'frameId',
@@ -1803,7 +1810,7 @@ function parsePromptIrBootstrapRequest(payload: unknown): ImagoPromptIrBootstrap
     expiresAtUnix: parseInputPositiveInteger(raw.expiresAtUnix, 'selectionChallenge.expiresAtUnix'),
     signature: parseInputSha256(raw.signature, 'selectionChallenge.signature'),
   }
-  return { context: input.context, contextSnapshotSha256, selectionChallenge }
+  return { context: input.context, contextSnapshotSha256, selectionChallenge, ...edits }
 }
 
 function buildSnapshot(request: ImagoElementMethodRequest): ImagoElementMethodSnapshot {
@@ -1883,6 +1890,7 @@ function buildPromptIrBootstrapSnapshot(
     schema: 'qingmu.prompt-ir-bootstrap-method-snapshot.v1',
     context: request.context,
     contextSnapshotSha256: request.contextSnapshotSha256,
+    ...(request.editableProjection === undefined ? {} : { editableProjection: request.editableProjection }),
     authority: {
       business_truth: 'yimeng',
       method_source: 'imago_os_current',
@@ -3354,6 +3362,9 @@ function normalizePromptIrBootstrapProjection(
     'projection.candidate',
   )
   normalizePromptIrEditableProjection(candidate.editableProjection, 'projection.candidate.editableProjection')
+  if (snapshot.editableProjection !== undefined && !isDeepStrictEqual(candidate.editableProjection, snapshot.editableProjection)) {
+    throw new ProjectionContractError('bootstrap compiler changed the supplied creative text')
+  }
   requireObjectArray(candidate.subjectArray, 'projection.candidate.subjectArray')
   if (candidate.advisoryOnly !== true || candidate.status !== 'Draft') {
     throw new ProjectionContractError('bootstrap candidate authority mismatch')
@@ -4746,7 +4757,15 @@ export function createImagoMethodHandler(
         const rawProjection = await dependencies.runPromptIrBootstrapCompiler(snapshot, execution, signal)
         // oxlint-disable-next-line typescript/no-unnecessary-condition -- abort may happen while awaited.
         if (signal.aborted) return cancelled()
-        const projection = normalizePromptIrBootstrapProjection(rawProjection, snapshot)
+        let projection = normalizePromptIrBootstrapProjection(rawProjection, snapshot)
+        // A saved template Draft predates optional text input. Recover its exact signed projection
+        // from the current compiler output; changed text or methods cannot match the complete hash.
+        if (selectionChallenge !== undefined && snapshot.editableProjection !== undefined
+          && e53CanonicalSha256(projection, 'projection') !== selectionChallenge.methodProjectionSha256) {
+          const { editableProjection: _edits, ...originalSnapshot } = snapshot
+          const original = { ...projection, input_snapshot_sha256: e53CanonicalSha256(originalSnapshot, 'snapshot') }
+          if (e53CanonicalSha256(original, 'projection') === selectionChallenge.methodProjectionSha256) projection = original
+        }
         const methodAttestation = createPromptIrBootstrapMethodAttestation(attestationKey, projection, snapshot)
         const selectionFreshnessAttestation = selectionChallenge === undefined
           ? undefined

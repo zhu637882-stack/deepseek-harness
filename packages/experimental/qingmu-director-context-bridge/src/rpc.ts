@@ -6,6 +6,8 @@ import type { Session, SessionStore } from '@deepseek-ai/dsh-session'
 import type { DirectorReplayProposal } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import { createDirectorContextBridge } from './bridge.ts'
 import { latestNativeDraftProposal, readNativeDraftInput, type NativeDraftReaders } from './native-draft.ts'
+import { latestNativeFirstDraftProposal, readNativeFirstDraftInput } from './native-first-draft.ts'
+import type { NativeFirstDraftProposalResult } from './types.ts'
 import type {
   DirectorContextBridgeRpcResult, DirectorContextReadPort, DirectorObjectScope, NativeDraftProposalResult, NativeDirectorReadiness,
 } from './types.ts'
@@ -44,7 +46,7 @@ export function createDirectorContextRpcHandler(
   readiness?: (session: Session) => NativeDirectorReadiness,
 ): ConnectionRpcHandler {
   const bridge = createDirectorContextBridge(port)
-  type Result = DirectorContextBridgeRpcResult | NativeDraftProposalResult | NativeDirectorReadiness
+  type Result = DirectorContextBridgeRpcResult | NativeDraftProposalResult | NativeFirstDraftProposalResult | NativeDirectorReadiness
   return async (endpoint, payload, signal): Promise<RpcResult<Result>> => {
     try {
       const raw = object(payload)
@@ -59,11 +61,12 @@ export function createDirectorContextRpcHandler(
         return { ok: true, value: readiness?.(session)
           ?? { status: 'unavailable', presetId: null, tools: [], missingTools: [] } }
       }
-      if (endpoint === 'readNativeDraftProposal') {
+      if (endpoint === 'readNativeDraftProposal' || endpoint === 'readNativeFirstDraftProposal') {
         if (!exact(raw, ['sessionId', 'scope'])) return bad('native draft fields invalid')
         const requested = scope(raw.scope)
         if (requested === null) return bad('native draft scope invalid')
-        const proposal = latestNativeDraftProposal(session)
+        const first = endpoint === 'readNativeFirstDraftProposal'
+        const proposal = first ? latestNativeFirstDraftProposal(session) : latestNativeDraftProposal(session)
         if (proposal === null) return { ok: true, value: { status: 'none' } }
         const current = bridge.current(session)
         const seq = session.events.findLast(event => event.type === 'qingmu-director-context/state')?.seq
@@ -76,11 +79,12 @@ export function createDirectorContextRpcHandler(
         try {
           const context = await port.readDirectorContext(requested, signal)
           if (!context.ok) return { ok: true, value: { status: 'unavailable' } }
-          const input = await readNativeDraftInput(context.context, requested, seq, draftReaders, signal)
+          const read = first ? readNativeFirstDraftInput : readNativeDraftInput
+          const input = await read(context.context, requested, seq, draftReaders, signal)
           signal.throwIfAborted()
           const finalSeq = session.events.findLast(event => event.type === 'qingmu-director-context/state')?.seq
-          return { ok: true, value: finalSeq === seq && input.receiptId === proposal.input.receiptId
-            ? { status: 'current', proposal } : { status: 'stale' } }
+          if (finalSeq !== seq || input.receiptId !== proposal.input.receiptId) return { ok: true, value: { status: 'stale' } }
+          return { ok: true, value: { status: 'current', proposal } as NativeDraftProposalResult | NativeFirstDraftProposalResult }
         } catch {
           return { ok: true, value: { status: 'unavailable' } }
         }

@@ -12,6 +12,7 @@ import type { DirectorContextBindingState } from './types.ts'
 import type {} from './index.ts'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import { findNativeDraftInput, nativeDraftFields, nativeDraftSource, readNativeDraftInput } from './native-draft.ts'
+import { findNativeFirstDraftInput, firstDraftSource, readNativeFirstDraftInput } from './native-first-draft.ts'
 
 /** Opt-in native-agent consumer; the Host binding plugin remains independently usable. */
 export const name = 'qingmu-director-model-tools'
@@ -170,6 +171,52 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   // The two context tools remain available without the optional PromptIR reader.
   ctx.inject(['qingmuYimengRead'], (draftHost) => {
+    async function readFirstInput(exec: ToolRunContext) {
+      const current = await readBoundContext(exec)
+      if (current.seq === undefined) throw new Error('Current session binding is unavailable.')
+      const input = await readNativeFirstDraftInput(current.context, current.state.binding.scope, current.seq, {
+        prompt: draftHost.qingmuYimengRead, method: ctx.qingmuImagoMethod,
+      }, exec.signal)
+      exec.signal.throwIfAborted()
+      if (bindingSeq(current.session) !== current.seq) throw new Error('The current shot changed; read the first-draft inputs again.')
+      return input
+    }
+    draftHost.tools.register(defineTool({
+      name: 'qingmu_read_first_draft',
+      description: 'When this shot has no PromptIR, read its current storyboard, selected references, directing context and full IMAGO C5 instructions. Preserve locked story, dialogue, acting, spatial and sound decisions; missing facts remain unknown. Return receiptId to qingmu_propose_first_draft. Read-only; does not inspect pixels or create a Draft.',
+      parameters: {},
+      output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
+      presentCall: () => ({ card: 'generic', kind: 'read', title: '读取首稿上游与 IMAGO 导演方法' }),
+      async execute(args, exec) {
+        exactArgs(args, [])
+        return boundedJson(await readFirstInput(exec), maxOutputBytes)
+      },
+    }))
+    draftHost.tools.register(defineTool({
+      name: 'qingmu_propose_first_draft',
+      description: 'Propose the first editable prompt from a qingmu_read_first_draft receipt. Supply all five creative text fields and a directing rationale. Image text describes the initial state; video/motion describe its change and inherited sound/dialogue. Do not invent identity, reference assets or approvals. This records a suggestion, never saves, selects Ready or generates media.',
+      parameters: {
+        receiptId: { type: 'string', required: true }, reason: { type: 'string', required: true },
+        imageGenPrompt: { type: 'string', required: true }, lastFrameImagePrompt: { type: 'string', required: true },
+        videoGenPrompt: { type: 'string', required: true }, motionPrompt: { type: 'string', required: true },
+        negativePrompt: { type: 'string', required: true },
+      },
+      output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
+      presentCall: () => ({ card: 'generic', kind: 'read', title: '提出首份导演草稿（未保存）' }),
+      async execute(args, exec) {
+        exactArgs(args, ['receiptId', 'reason', ...nativeDraftFields])
+        if (!exec.agent) throw new Error('A native director session is required.')
+        if (!args.reason.trim() || args.reason !== args.reason.trim() || args.reason.includes('\u0000') || args.reason.length > 2000 || nativeDraftFields.some(field =>
+          args[field].length > 30000 || args[field] !== args[field].trim() || args[field].includes('\u0000'))) {
+          throw new Error('Supply trimmed text without NUL, at most 30000 characters per field and a 2000-character rationale.')
+        }
+        const input = findNativeFirstDraftInput(exec.agent.session, args.receiptId)
+        if ((await readFirstInput(exec)).receiptId !== input.receiptId) throw new Error('Upstream or method changed; read and reconsider the first draft.')
+        const { receiptId: _receipt, reason, ...editableProjection } = args
+        return boundedJson({ schema: 'qingmu.native-first-draft-proposal.v1', input: firstDraftSource(input),
+          editableProjection, reason }, maxOutputBytes)
+      },
+    }))
     async function readInput(exec: ToolRunContext) {
       const current = await readBoundContext(exec)
       if (current.seq === undefined) throw new Error('Current session binding is unavailable.')

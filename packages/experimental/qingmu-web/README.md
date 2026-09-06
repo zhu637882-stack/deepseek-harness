@@ -22,7 +22,7 @@ The preset composes a complete director persona and the context bridge's [native
 
 #### What the model sees
 
-Only `qingmu-director` sessions receive the stable Chinese persona in [agent.cordis.yml](agent-presets/qingmu-director/agent.cordis.yml) and scoped native tool schemas. The persona asks for actual Writer context and complete IMAGO methods before directing, separates scene intent from shot design, and can propose a single prompt-field replacement when the PromptIR reader is available. It does not claim to save, generate, or approve content. Its exact model input is pinned through a keyless native-loop snapshot.
+Only `qingmu-director` sessions receive the stable Chinese persona in [agent.cordis.yml](agent-presets/qingmu-director/agent.cordis.yml) and scoped native tool schemas. The persona asks for actual Writer context and complete IMAGO methods before directing, separates scene intent from shot design, and can propose a single prompt-field replacement or a complete first draft when the PromptIR reader is available. First drafts require that no Draft or Ready already exists. It does not claim to save, generate, or approve content. Its exact model input is pinned through a keyless native-loop snapshot.
 
 #### Token effect
 

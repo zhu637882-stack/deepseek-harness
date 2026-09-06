@@ -8,9 +8,9 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { DirectorContextSnapshot } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import * as ModelTools from '../src/model-tools.ts'
-import { draftContext, draftPrompt, draftMethod, draftScope } from '../examples/native-draft-fixture.ts'
+import { draftContext, draftPrompt, draftMethod, draftScope, firstDraftBootstrap } from '../examples/native-draft-fixture.ts'
 import { createDirectorContextRpcHandler } from '../src/rpc.ts'
-import type { NativeDraftInput } from '../src/types.ts'
+import type { NativeDraftInput, NativeFirstDraftInput } from '../src/types.ts'
 
 const contexts: Context[] = []
 afterEach(async () => { for (const ctx of contexts.splice(0)) await ctx.fiber.dispose() })
@@ -19,6 +19,7 @@ async function harness() {
   const ctx = new Context(); contexts.push(ctx)
   await ctx.plugin(SystemPrompt); await ctx.plugin(ToolRuntime)
   const current = { context: structuredClone(draftContext), prompt: structuredClone(draftPrompt),
+    bootstrap: structuredClone(firstDraftBootstrap) as import('@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types').YimengPromptIrBootstrapResponse,
     methodSuffix: '', fail: false, wait: async () => {} }
   const calls: string[] = []
   ctx.provide('qingmuYimengCommand', async (endpoint) => {
@@ -29,6 +30,7 @@ async function harness() {
   ctx.provide('qingmuYimengRead', async (endpoint) => {
     calls.push(endpoint); await current.wait()
     if (current.fail) throw new Error('offline')
+    if (endpoint === 'promptIrBootstrap') return { ok: true, value: current.bootstrap }
     if (endpoint !== 'promptIr') throw new Error('Unexpected read')
     return { ok: true, value: current.prompt }
   })
@@ -67,8 +69,50 @@ async function harness() {
     readDirectorContext: async () => ({ ok: true, context: current.context as DirectorContextSnapshot }),
   }, { prompt: ctx.qingmuYimengRead, method: ctx.qingmuImagoMethod })
   const read = (scope = draftScope, signal = new AbortController().signal) => rpc('readNativeDraftProposal', { sessionId: session.id, scope }, signal)
-  return { ctx, session, current, run, proposal, bind, read, calls }
+  const readFirst = () => rpc('readNativeFirstDraftProposal', { sessionId: session.id, scope: draftScope }, new AbortController().signal)
+  return { ctx, session, current, run, proposal, bind, read, calls, readFirst }
 }
+
+describe('native first prompt suggestions', () => {
+  it('reads complete method content and records a five-field proposal without business writes', async () => {
+    const app = await harness()
+    const input = (await app.run('qingmu_read_first_draft')).value as unknown as NativeFirstDraftInput
+    expect(input.methods).toHaveLength(2)
+    expect(input.bootstrap.draft).toBe(null)
+    const result = await app.run('qingmu_propose_first_draft', { receiptId: input.receiptId, reason: '交代空间与声画',
+      ...draftPrompt.subject.editableProjection })
+    expect(result.isError).toBe(false)
+    expect(await app.readFirst()).toMatchObject({ ok: true, value: { status: 'current', proposal: {
+      editableProjection: draftPrompt.subject.editableProjection,
+    } } })
+    expect(new Set(app.calls)).toEqual(new Set(['readDirectorContext', 'promptIrBootstrap', 'directorInstructions']))
+  })
+
+  it.each(['method', 'context', 'binding', 'existing'] as const)('rejects first-draft adoption after %s changes', async (change) => {
+    const app = await harness()
+    const input = (await app.run('qingmu_read_first_draft')).value as unknown as NativeFirstDraftInput
+    await app.run('qingmu_propose_first_draft', { receiptId: input.receiptId, reason: '空间', ...draftPrompt.subject.editableProjection })
+    if (change === 'method') app.current.methodSuffix = 'changed'
+    if (change === 'context') app.current.context.shot.narrative = '剧情修改'
+    if (change === 'binding') app.bind('other')
+    if (change === 'existing') app.current.bootstrap = { ...app.current.bootstrap, ready: draftPrompt.subject as NativeDraftInput['prompt']['subject'] }
+    expect(await app.readFirst()).not.toMatchObject({ value: { status: 'current' } })
+    expect((await app.run('qingmu_propose_first_draft', { receiptId: input.receiptId, reason: '空间', ...draftPrompt.subject.editableProjection })).isError).toBe(true)
+  })
+
+  it('rejects invented receipts, missing fields and extra authority', async () => {
+    const app = await harness()
+    const args = { receiptId: 'a'.repeat(64), reason: '空间', ...draftPrompt.subject.editableProjection }
+    expect((await app.run('qingmu_propose_first_draft', args)).isError).toBe(true)
+    args.receiptId = ((await app.run('qingmu_read_first_draft')).value as unknown as NativeFirstDraftInput).receiptId
+    expect((await app.run('qingmu_propose_first_draft', { ...args, status: 'Ready' })).isError).toBe(true)
+    const { imageGenPrompt: _image, ...missing } = args
+    expect((await app.run('qingmu_propose_first_draft', missing)).isError).toBe(true)
+    for (const reason of [' padded ', 'nul\u0000text']) {
+      expect((await app.run('qingmu_propose_first_draft', { ...args, reason })).isError).toBe(true)
+    }
+  })
+})
 
 describe('native prompt suggestions', () => {
   it('requires a successfully logged actual read, not an invented or unlogged receipt', async () => {

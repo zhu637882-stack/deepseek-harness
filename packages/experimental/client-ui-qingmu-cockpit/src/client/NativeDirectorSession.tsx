@@ -55,7 +55,7 @@ export function NativeDirectorSession({ port, bridge, sessionId, onRefresh }: {
   return <section aria-label="青木原生导演会话">
     <p role="status">{!connection ? 'DSH 已断线；导演连接待恢复，人工草稿保留。'
       : !sessionId ? '尚未选择导演会话。'
-        : status?.status === 'mounted' ? '当前会话的 4 项青木导演工具已挂载。'
+        : status?.status === 'mounted' ? `当前会话的 ${status.tools.length} 项青木导演工具已挂载。`
           : status?.status === 'inactive' ? '当前会话尚未运行；可进入或恢复青木导演。'
             : status?.status === 'missing-tools' ? '当前会话缺少青木导演工具；镜头绑定不代表工具可用。'
               : status?.status === 'unavailable' || !bridge.readNativeDirectorReadiness ? '当前安装未提供工具状态检查。'

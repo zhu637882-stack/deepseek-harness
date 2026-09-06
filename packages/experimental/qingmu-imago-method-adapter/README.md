@@ -118,6 +118,8 @@ Missing, extra, reordered, or stage-misplaced entries, and any method, contract,
 
 `promptIrBootstrap` invokes the versioned Core compiler with the exact Yimeng context snapshot and validates its attestation, method SHA, stable ordered references, advisory-only flags, and five-field output. For Draft selection, the Host first verifies the short-lived Writer challenge, recompiles once, and signs a domain-separated freshness proof bound to that challenge and projection. The method declares how to prepare a Draft; it owns no business state, Provider route, selection, approval, or execution authority. A scene reference is mandatory, while actor and prop references appear only when the shot context requires them. See the [first-PromptIR Agent Note](../../../.agents/notes/implemented/feature/2026-08-31-qingmu-first-prompt-ir-bootstrap.md).
 
+The bootstrap request may include a complete `editableProjection`: exactly five bounded text fields. Core preserves these creative decisions while retaining ownership of reference bindings, Draft status and advisory flags. Selection recompiles the saved text. For legacy drafts whose original input omitted those fields, the adapter reconstructs only that omitted-input hash and accepts it only when the entire projection SHA matches the verified Writer challenge. Candidate, method, source or context drift still fails; no second compilation or weaker partial-hash comparison is used.
+
 ## Model Experience
 
 ### Private method RPCs

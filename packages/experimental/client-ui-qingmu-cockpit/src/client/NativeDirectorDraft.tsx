@@ -1,5 +1,5 @@
 /** A logged native suggestion can edit one local field, never save, select Ready or generate. */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { DirectorContextClientPort, DirectorObjectScope, NativeDraftProposal } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import type { YimengPromptIrResponse } from './contracts.ts'
 import type { QingmuCockpitKey } from './locales.ts'
@@ -32,16 +32,23 @@ export function mergeNativeDraft(
   return { ...draft, [proposal.field]: proposal.after }
 }
 
-/** Async replies are scoped to the current editor lifetime; adoption reruns Host freshness checks. */
-export function NativeDirectorDraft({ context, disabled, sourceKey, onAdopt, t }: {
+/** Async replies are scoped to the current editor lifetime; adoption reruns Host freshness checks.
+ * @param props Current session, scope, read facade and local adoption handler.
+ * @returns Read and explicit-adoption controls with stale-response protection.
+ */
+export function NativeDirectorSuggestion<P>({ context, disabled, sourceKey, onAdopt, t, readProposal, renderProposal, hint }: {
   readonly context: NativeDirectorDraftContext
   readonly disabled: boolean
   readonly sourceKey: string
-  readonly onAdopt: (proposal: NativeDraftProposal) => void
+  readonly onAdopt: (proposal: P) => void
+  readonly readProposal: ((sessionId: string, scope: DirectorObjectScope, signal?: AbortSignal) => Promise<
+    { status: 'current'; proposal: P } | { status: 'none' | 'stale' | 'unavailable' }>) | undefined
+  readonly renderProposal: (proposal: P) => ReactNode
+  readonly hint?: string
   readonly t: (key: QingmuCockpitKey) => string
 }) {
   const connection = useDirectorConnection(context.connection)
-  const [proposal, setProposal] = useState<NativeDraftProposal | null>(null)
+  const [proposal, setProposal] = useState<P | null>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<QingmuCockpitKey | null>(null)
   const pending = useRef<AbortController | null>(null)
@@ -56,7 +63,6 @@ export function NativeDirectorDraft({ context, disabled, sourceKey, onAdopt, t }
   }, [key, connection])
 
   async function read(adopt: boolean) {
-    const readProposal = context.bridge.readNativeDraftProposal
     if (!connection || !context.sessionId || !readProposal || disabled || pending.current) return
     const controller = new AbortController()
     pending.current = controller
@@ -84,15 +90,33 @@ export function NativeDirectorDraft({ context, disabled, sourceKey, onAdopt, t }
   }
 
   return <section aria-label={t('nativeDraftTitle')}>
-    <h4>{t('nativeDraftTitle')}</h4><p>{t('nativeDraftHint')}</p>
-    <button type="button" disabled={!connection || disabled || busy || !context.sessionId || !context.bridge.readNativeDraftProposal}
+    <h4>{t('nativeDraftTitle')}</h4><p>{hint ?? t('nativeDraftHint')}</p>
+    <button type="button" disabled={!connection || disabled || busy || !context.sessionId || !readProposal}
       onClick={() => { void read(false) }}>{t(busy ? 'nativeDraftChecking' : 'nativeDraftRead')}</button>
     {connection && proposal && <div>
-      <p>{proposal.reason}</p><p>{t('nativeDraftField')}: {proposal.field}</p>
-      <details><summary>{t('nativeDraftBefore')}</summary><pre style={{ whiteSpace: 'pre-wrap' }}>{proposal.before}</pre></details>
-      <h5>{t('nativeDraftAfter')}</h5><pre style={{ whiteSpace: 'pre-wrap' }}>{proposal.after}</pre>
+      {renderProposal(proposal)}
       <button type="button" disabled={disabled || busy} onClick={() => { void read(true) }}>{t('nativeDraftAdopt')}</button>
     </div>}
     {notice && <p role="status">{t(notice)}</p>}
   </section>
+}
+
+/** Existing-Ready single-field suggestion using the same cancellation and adoption behavior as first drafts.
+ * @param props Current session, source and local draft handler.
+ * @returns Single-field comparison and adoption controls.
+ */
+export function NativeDirectorDraft(props: {
+  readonly context: NativeDirectorDraftContext
+  readonly disabled: boolean
+  readonly sourceKey: string
+  readonly onAdopt: (proposal: NativeDraftProposal) => void
+  readonly t: (key: QingmuCockpitKey) => string
+}) {
+  const { t } = props
+  return <NativeDirectorSuggestion {...props} readProposal={props.context.bridge.readNativeDraftProposal}
+    renderProposal={proposal => <>
+      <p>{proposal.reason}</p><p>{t('nativeDraftField')}: {proposal.field}</p>
+      <details><summary>{t('nativeDraftBefore')}</summary><pre style={{ whiteSpace: 'pre-wrap' }}>{proposal.before}</pre></details>
+      <h5>{t('nativeDraftAfter')}</h5><pre style={{ whiteSpace: 'pre-wrap' }}>{proposal.after}</pre>
+    </>} />
 }

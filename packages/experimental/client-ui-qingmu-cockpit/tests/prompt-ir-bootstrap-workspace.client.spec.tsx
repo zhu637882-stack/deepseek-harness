@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { PromptIrWorkspace } from '../src/client/PromptIrWorkspace.tsx'
 import type { QingmuYimengPort } from '../src/client/contracts.ts'
 import { zh } from '../src/client/locales.ts'
+import { directorConnectionFixture } from './director-connection-fixture.ts'
+import type { DirectorContextClientPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 
 const PROJECT = 'project-1'
 const EPISODE = 'episode-1'
@@ -57,13 +59,17 @@ function port(options: { readonly loseDraftResponse?: boolean; readonly loseSele
   let persisted: 'empty' | 'draft' | 'ready' = 'empty'
   let draftAttempts = 0
   let selectionAttempts = 0
-  const promptIrBootstrap = vi.fn(async () => state(persisted))
+  let persistedFields = { ...EDITABLE } as Record<string, string>
+  const promptIrBootstrap = vi.fn(async () => {
+    const current = state(persisted)
+    return { ...current, draft: current.draft && { ...current.draft, editableProjection: persistedFields } }
+  })
   const promptIrBootstrapMethod = vi.fn(async (request: Record<string, unknown>) => ({
     schema: 'qingmu.imago-prompt-ir-bootstrap-method-adapter-result.v1', projectionSha256: PROJECTION_SHA,
     projection: {
       schema: 'qingmu.imago-prompt-ir-bootstrap-method-projection.v1', input_snapshot_sha256: '7'.repeat(64),
       context: CONTEXT, context_snapshot_sha256: CONTEXT_SHA,
-      candidate: { editableProjection: EDITABLE, subjectArray: [], advisoryOnly: true, status: 'Draft' },
+      candidate: { editableProjection: request.editableProjection ?? EDITABLE, subjectArray: [], advisoryOnly: true, status: 'Draft' },
       candidate_sha256: CANDIDATE_SHA,
       method_definition: { id: 'method', version: 1, sha256: METHOD_SHA }, source_bindings: [],
       work_order_projection: {}, project_state_persisted: false, providerCalls: 0, workerStarted: false,
@@ -90,6 +96,8 @@ function port(options: { readonly loseDraftResponse?: boolean; readonly loseSele
     committedAt: '2026-08-31T00:00:00Z', ...FLAGS,
   })
   const bootstrapPromptIr = vi.fn(async (request: Record<string, unknown>) => {
+    const projection = request.methodProjection as { candidate: { editableProjection: Record<string, string> } }
+    persistedFields = projection.candidate.editableProjection
     draftAttempts += 1; persisted = 'draft'
     if (options.loseDraftResponse === true && draftAttempts === 1) throw new Error('response lost')
     return draftResult(request, draftAttempts > 1)
@@ -125,13 +133,123 @@ const props = { projectId: PROJECT, episodeId: EPISODE, storyboardRevisionId: RE
   onSelectShotId: vi.fn(), t: ((key: keyof typeof zh) => zh[key]), onCommitted: vi.fn(async () => {}) }
 
 beforeEach(() => { sessionStorage.clear() })
-afterEach(() => { cleanup(); vi.clearAllMocks() })
+afterEach(() => { cleanup(); vi.clearAllMocks(); vi.restoreAllMocks() })
 
 describe('first PromptIR bootstrap workspace', () => {
+  it('adopts a native first draft, permits human edits and uses saved text for selection', async () => {
+    const harness = port()
+    const onUnsavedChange = vi.fn()
+    const scope = { projectId: PROJECT, episodeId: EPISODE, sceneId: 'scene-1', shotId: FRAME }
+    const readNativeFirstDraftProposal = vi.fn(async () => ({ status: 'current', proposal: {
+      schema: 'qingmu.native-first-draft-proposal.v1', input: { scope, receiptId: 'f'.repeat(64),
+        contextSnapshotSha256: CONTEXT_SHA, storyboardRevisionId: REVISION },
+      editableProjection: { ...EDITABLE, imageGenPrompt: '副驾后方机位，主角侧背。' }, reason: '交代视点',
+    } }))
+    render(<PromptIrWorkspace {...props} onUnsavedChange={onUnsavedChange} port={harness.port} nativeDirector={{ sessionId: 'director', scope,
+      bridge: { readNativeFirstDraftProposal } as unknown as DirectorContextClientPort }} />)
+    fireEvent.click(await screen.findByRole('button', { name: zh.nativeDraftRead }))
+    fireEvent.click(await screen.findByRole('button', { name: zh.nativeDraftAdopt }))
+    const image = await screen.findByRole('textbox', { name: '首帧画面' })
+    expect((image as HTMLTextAreaElement).value).toContain('副驾后方')
+    expect(onUnsavedChange).toHaveBeenLastCalledWith(true)
+    const leaving = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(leaving)
+    expect(leaving.defaultPrevented).toBe(true)
+    expect(harness.spies.bootstrapPromptIr).not.toHaveBeenCalled()
+    fireEvent.change(image, { target: { value: '人工修改：远处女主只见轮廓。' } })
+    fireEvent.click(screen.getByRole('button', { name: '检查并预览首稿' }))
+    fireEvent.click(await screen.findByRole('button', { name: '保存首个 PromptIR Draft' }))
+    await screen.findByText('PromptIR Draft 已保存')
+    expect(onUnsavedChange).toHaveBeenLastCalledWith(false)
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: '选为首个 Ready' }))
+    await screen.findByText('首个 Ready PromptIR 已选定')
+    expect(readNativeFirstDraftProposal).toHaveBeenCalledTimes(2)
+    expect(harness.spies.promptIrBootstrapMethod.mock.calls.map(([request]) => request.editableProjection))
+      .toEqual(Array(2).fill({ ...EDITABLE, imageGenPrompt: '人工修改：远处女主只见轮廓。' }))
+    expect(harness.spies.bootstrapPromptIr).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['draft', 'select'] as const)('cancels %s before dispatch if disconnected during idempotency hashing', async (kind) => {
+    const harness = port()
+    const connection = directorConnectionFixture()
+    render(<PromptIrWorkspace {...props} port={harness.port} nativeDirector={{ sessionId: 'director',
+      scope: { projectId: PROJECT, episodeId: EPISODE, sceneId: 'scene-1', shotId: FRAME },
+      bridge: {} as DirectorContextClientPort, connection: connection.source }} />)
+    fireEvent.click(await screen.findByRole('button', { name: '生成首个 Draft 预览' }))
+    await screen.findByRole('button', { name: '保存首个 PromptIR Draft' })
+    if (kind === 'select') {
+      fireEvent.click(screen.getByRole('button', { name: '保存首个 PromptIR Draft' }))
+      await screen.findByText('PromptIR Draft 已保存')
+      fireEvent.click(screen.getByRole('checkbox'))
+    }
+    let finish!: (value: ArrayBuffer) => void
+    const digest = vi.spyOn(crypto.subtle, 'digest').mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    fireEvent.click(screen.getByRole('button', { name: kind === 'draft' ? '保存首个 PromptIR Draft' : '选为首个 Ready' }))
+    await waitFor(() => { expect(digest).toHaveBeenCalledTimes(1) })
+    await act(async () => { connection.publish(false) })
+    await act(async () => { finish(new ArrayBuffer(32)) })
+    expect(harness.spies.bootstrapPromptIr).toHaveBeenCalledTimes(kind === 'draft' ? 0 : 1)
+    expect(harness.spies.selectBootstrapPromptIr).not.toHaveBeenCalled()
+    expect(sessionStorage.length).toBe(0)
+  })
+
+  it('invalidates preview on edit and preserves text across connection recovery', async () => {
+    const harness = port()
+    const connection = directorConnectionFixture()
+    render(<PromptIrWorkspace {...props} port={harness.port} nativeDirector={{ sessionId: 'director',
+      scope: { projectId: PROJECT, episodeId: EPISODE, sceneId: 'scene-1', shotId: FRAME },
+      bridge: {} as DirectorContextClientPort, connection: connection.source }} />)
+    fireEvent.click(await screen.findByRole('button', { name: '生成首个 Draft 预览' }))
+    const image = await screen.findByRole('textbox', { name: '首帧画面' })
+    fireEvent.change(image, { target: { value: '保留人工首稿' } })
+    expect(screen.queryByRole('button', { name: '保存首个 PromptIR Draft' })).toBeNull()
+    connection.publish(false)
+    await screen.findByText('连接已断开；未保存文字保留，恢复连接后重新核对上游。')
+    connection.publish(true)
+    expect((await screen.findByRole('textbox', { name: '首帧画面' }) as HTMLTextAreaElement).value).toBe('保留人工首稿')
+    expect(harness.spies.bootstrapPromptIr).not.toHaveBeenCalled()
+  })
+
+  it('keeps a stale first draft visible for copying and requires explicit discard before new compilation', async () => {
+    const harness = port()
+    const onUnsavedChange = vi.fn()
+    render(<PromptIrWorkspace {...props} presentation="director" onUnsavedChange={onUnsavedChange} port={harness.port} />)
+    fireEvent.click(await screen.findByRole('button', { name: '生成首个 Draft 预览' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '首帧画面' }), { target: { value: '旧稿需保留' } })
+    harness.spies.promptIrBootstrap.mockResolvedValueOnce({ ...state('empty'), contextSnapshotSha256: 'a'.repeat(64) })
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+    await screen.findByRole('alert', { name: '旧首稿保留' })
+    expect(screen.getByText('旧稿需保留')).toBeTruthy()
+    expect((screen.getByRole('button', { name: '生成首个 Draft 预览' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(onUnsavedChange).toHaveBeenLastCalledWith(true)
+    expect(harness.spies.promptIrBootstrapMethod).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: '丢弃这份本地旧稿' }))
+    expect(onUnsavedChange).toHaveBeenLastCalledWith(false)
+    expect((screen.getByRole('button', { name: '生成首个 Draft 预览' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+  it.each(['draft', 'ready'] as const)('preserves different local text when another session saves %s', async (status) => {
+    const harness = port()
+    const dirty = vi.fn()
+    render(<PromptIrWorkspace {...props} presentation="director" port={harness.port} onUnsavedChange={dirty} />)
+    fireEvent.click(await screen.findByRole('button', { name: '生成首个 Draft 预览' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '首帧画面' }), { target: { value: '尚未保存的个人修改' } })
+    harness.spies.promptIrBootstrap.mockResolvedValueOnce(state(status))
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+    await screen.findByRole('alert', { name: '旧首稿保留' })
+    expect(screen.getByText('尚未保存的个人修改')).toBeTruthy()
+    expect(dirty).toHaveBeenLastCalledWith(true)
+    expect(harness.spies.bootstrapPromptIr).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '丢弃这份本地旧稿' }))
+    expect(dirty).toHaveBeenLastCalledWith(false)
+  })
+
   it('persists one Draft and separately selects it as Ready without execution authority', async () => {
     const harness = port()
     render(<PromptIrWorkspace {...props} port={harness.port} />)
     fireEvent.click(await screen.findByRole('button', { name: '生成首个 Draft 预览' }))
+    await screen.findByRole('button', { name: '保存首个 PromptIR Draft' })
+    expect(screen.queryByRole('textbox', { name: '首帧画面' })).toBeNull()
     fireEvent.click(await screen.findByRole('button', { name: '保存首个 PromptIR Draft' }))
     await screen.findByText('PromptIR Draft 已保存')
     fireEvent.click(screen.getByRole('checkbox'))

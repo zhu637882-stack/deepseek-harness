@@ -24,8 +24,11 @@ export function nativeDraftSource(input: NativeDraftInput): NativeDraftSource {
     draftSnapshotSha256: input.prompt.draft?.subjectSnapshotSha256 ?? null }
 }
 
-/** Stable content identity; object property ordering does not invalidate an unchanged input. */
-function digest(value: unknown): string {
+/** Stable content identity; object property ordering does not invalidate an unchanged input.
+ * @param value JSON input to identify.
+ * @returns Canonical SHA-256.
+ */
+export function digest(value: unknown): string {
   const canonical = (input: unknown): unknown => Array.isArray(input) ? input.map(canonical)
     : typeof input === 'object' && input !== null
       ? Object.fromEntries(Object.entries(input).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)]))
@@ -55,6 +58,19 @@ export async function readNativeDraftInput(
   }
   const editable = prompt.draft?.subject.editableProjection ?? prompt.subject.editableProjection
   if (!nativeDraftFields.every(field => typeof editable[field] === 'string')) throw new Error('PromptIR editable fields are incomplete.')
+  const methods = await readNativeShotMethods(readers, signal)
+  const source = { scope, bindingSeq, context, prompt, methods }
+  return { schema: 'qingmu.native-draft-input.v1', receiptId: digest(source), ...source }
+}
+
+/** Read full C5 and its required references for both existing and first prompt drafts.
+ * @param readers Host-owned method reader.
+ * @param signal Cancellation for all required resource reads.
+ * @returns Complete primary and required supplementary method responses.
+ */
+export async function readNativeShotMethods(
+  readers: NativeDraftReaders, signal: AbortSignal,
+): Promise<ImagoDirectorInstructionsResponse[]> {
   const methods: ImagoDirectorInstructionsResponse[] = []
   async function method(resourceId?: 'rough_final_feedback'): Promise<void> {
     const result = await readers.method('directorInstructions', {
@@ -75,12 +91,15 @@ export async function readNativeDraftInput(
     if (reference.resourceId !== 'rough_final_feedback') throw new Error('Unsupported required IMAGO reference.')
     await method(reference.resourceId)
   }
-  const source = { scope, bindingSeq, context, prompt, methods }
-  return { schema: 'qingmu.native-draft-input.v1', receiptId: digest(source), ...source }
+  return methods
 }
 
-/** Read successful native tool results paired to actual calls; chat text and failed calls are not receipts. */
-function toolValues(session: Session, name: string): unknown[] {
+/** Read successful native tool results paired to actual calls; chat text and failed calls are not receipts.
+ * @param session Native log to inspect.
+ * @param name Exact tool name to match.
+ * @returns Parsed values from successful paired results, in log order.
+ */
+export function toolValues(session: Session, name: string): unknown[] {
   const calls = new Map<string, { turn: number; step: number }>()
   const results: unknown[] = []
   for (const event of session.events) {

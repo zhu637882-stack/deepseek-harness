@@ -166,6 +166,9 @@ export function apply(ctx: ClientContext): void {
   ): Promise<T> => unwrapRpc(await connection.rpc.call('/qingmu-director-context', endpoint, payload, signal)) as T
 
   const directorBridge: DirectorContextClientPort = {
+    readNativeFirstDraftProposal: async (sessionId, scope, signal) =>
+      unwrapRpc(await connection.rpc.call('/qingmu-director-context', 'readNativeFirstDraftProposal', { sessionId, scope }, signal)) as
+        import('@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types').NativeFirstDraftProposalResult,
     readNativeDirectorReadiness: async (sessionId, signal) =>
       unwrapRpc(await connection.rpc.call('/qingmu-director-context', 'readNativeDirectorReadiness', { sessionId }, signal)) as
         import('@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types').NativeDirectorReadiness,

@@ -27,3 +27,12 @@ export function draftMethod(resourceId: 'rough_final_feedback' | null = null) {
     authority: { readOnly: true, businessTruth: 'yimeng', methodSource: 'imago_os', providerCalls: 0,
       maximumCostCny: '0', approvalGranted: false, humanDecisionInferred: false, formalQcInferred: false, projectStateWrite: false } }
 }
+/** Empty first-prompt state served by the keyless Writer stand-in. */
+export const firstDraftBootstrap = {
+  schema: 'jason.qingmu-prompt-ir-bootstrap-state.v1',
+  context: { projectId: 'example-project', episodeId: 'example-episode',
+    storyboard: { id: 'revision-1' }, frame: { id: 'example-shot' } },
+  contextSnapshotSha256: 'c'.repeat(64), referenceNames: [], draft: null, ready: null,
+  draftMethodSha256: null, selectionChallenge: null, providerCalls: 0, workerStarted: false,
+  humanApprovalInferred: false, humanSignoff: false, selectionExecuted: false,
+} as const

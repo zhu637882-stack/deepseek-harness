@@ -39,6 +39,8 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 
 `maxOutputBytes` 默认限制每份完整 JSON 响应为 262144 个 UTF-8 字节。超限时失败，不截断内容。IMAGO 来源加载器另设单文件 128 KiB、整包 512 KiB 上限，因此合规来源包仍可能超过本消费端的响应上限。须显式配置 Host 上限或读取固定追加参考，不能静默缩减方法。
 
+镜头既无 Draft 也无 Ready 时，`qingmu_read_first_draft` 读取当前引导前置资料与完整 C5 方法。`qingmu_propose_first_draft` 接收已记录回执、完整五个可编辑字段及理由；重新读取来源，拒绝已有提示词、作用域漂移或虚构回执。`readNativeFirstDraftProposal` 向同一会话和作用域返回最新有效建议。采用只修改导演工作区的本地首稿；既有引导编译器与 Writer 保存/选择路径负责持久化。工具不设定参考、状态或批准权。就绪检查要求这两个工具和原有四个工具都存在。
+
 工具通过原生工具注册表返回无损 JSON，不注入系统提示词，不新建事件日志、业务数据库或独立 Agent 循环。当前上下文是文本证据，不等于逐像素审图，也不代表已经具备全剧剧本。
 
 在 Harness 根目录用 `node --import tsx packages/experimental/qingmu-director-context-bridge/examples/model-tools-keyless.ts` 运行[免密钥示例](examples/model-tools-keyless.ts)。它通过 Loader 加载随包青木导演预设，创建仅存内存的原生会话，并以脚本化外部响应驱动真实 Agent 循环。快照包含实际角色提示、作用域工具、持久事件格式以及进入下一轮模型请求的方法正文。不发起网络或付费 Provider 请求；独立组合测试还核验冷恢复。

@@ -18,7 +18,7 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as ModelTools from '../src/model-tools.ts'
-import { draftContext, draftPrompt, draftMethod } from './native-draft-fixture.ts'
+import { draftContext, draftPrompt, draftMethod, firstDraftBootstrap } from './native-draft-fixture.ts'
 import { createDirectorContextRpcHandler } from '../src/rpc.ts'
 import { readNativeDirectorReadiness } from '../src/native-readiness.ts'
 import type { DirectorContextSnapshot } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
@@ -34,18 +34,20 @@ const fourthReference = [
 /** Deterministic external model stand-in; every request still comes from the native loop. */
 class ExampleModel extends LlmAdapter {
   readonly requests: GenerateOptions[] = []
-  constructor(readonly draftMode = false) { super() }
+  constructor(readonly draftMode: boolean | 'first' = false) { super() }
 
   async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     const step = this.requests.length
     this.requests.push(options)
     if (step < 2) {
-      const name = this.draftMode ? (step === 0 ? 'qingmu_read_prompt_draft' : 'qingmu_propose_prompt_edit')
-        : step === 0 ? 'qingmu_read_bound_context' : 'qingmu_get_imago_method'
+      const name = this.draftMode === 'first' ? (step === 0 ? 'qingmu_read_first_draft' : 'qingmu_propose_first_draft')
+        : this.draftMode ? (step === 0 ? 'qingmu_read_prompt_draft' : 'qingmu_propose_prompt_edit')
+          : step === 0 ? 'qingmu_read_bound_context' : 'qingmu_get_imago_method'
       const receiptId = JSON.stringify(options.messages).match(/receiptId\\?":\\?"([a-f0-9]{64})/u)?.[1]
-      const args = this.draftMode ? (step === 0 ? {} : { receiptId, field: 'imageGenPrompt',
-        replacement: '她停在门口，门在画面左侧；背面中景，不要求正脸。', reason: '先明确门与人物位置，保留铃响后的停顿。' })
-        : step === 0 ? {} : { capability: 'shot_design', resourceId: 'rough_final_feedback' }
+      const args = this.draftMode === 'first' ? (step === 0 ? {} : { receiptId, reason: '先交代空间，再推进动作与铃声。', ...draftPrompt.subject.editableProjection })
+        : this.draftMode ? (step === 0 ? {} : { receiptId, field: 'imageGenPrompt',
+          replacement: '她停在门口，门在画面左侧；背面中景，不要求正脸。', reason: '先明确门与人物位置，保留铃响后的停顿。' })
+          : step === 0 ? {} : { capability: 'shot_design', resourceId: 'rough_final_feedback' }
       yield { type: 'block-start', index: 0, blockType: 'tool-call' }
       yield { type: 'block-end', index: 0, block: { type: 'tool-call', id: CallId(`read-${step}`), name, arguments: JSON.stringify(args) } }
       yield { type: 'finish', reason: { kind: 'tool-calls' } }
@@ -63,7 +65,7 @@ class ExampleModel extends LlmAdapter {
  * @returns the actual composed persona, tools, logged calls/results and next-request method check.
  * @throws if the shipped preset fails to load or the session cannot complete.
  */
-export async function runNativeDirectorExample(draftMode = false) {
+export async function runNativeDirectorExample(draftMode: boolean | 'first' = false) {
   const ctx = new Context()
   try {
     const presetRoot = fileURLToPath(new URL('../../qingmu-web/agent-presets/', import.meta.url))
@@ -114,6 +116,7 @@ export async function runNativeDirectorExample(draftMode = false) {
       } }
     })
     if (draftMode) ctx.provide('qingmuYimengRead', async (endpoint) => {
+      if (endpoint === 'promptIrBootstrap') return { ok: true, value: firstDraftBootstrap }
       if (endpoint !== 'promptIr') throw new Error('No business write allowed')
       return { ok: true, value: draftPrompt }
     })
@@ -140,7 +143,7 @@ export async function runNativeDirectorExample(draftMode = false) {
       readiness: readNativeDirectorReadiness(ctx, handle.agent.session), ordinaryReadiness,
       ...(draftMode ? { draftProposal: await createDirectorContextRpcHandler(ctx.sessions, {
         readDirectorContext: async () => ({ ok: true, context: draftContext as DirectorContextSnapshot }),
-      }, { prompt: ctx.qingmuYimengRead, method: ctx.qingmuImagoMethod })('readNativeDraftProposal', {
+      }, { prompt: ctx.qingmuYimengRead, method: ctx.qingmuImagoMethod })(draftMode === 'first' ? 'readNativeFirstDraftProposal' : 'readNativeDraftProposal', {
         sessionId: handle.agent.session.id, scope,
       }, new AbortController().signal) } : {}),
       preset: ctx.agentPresets.composedPreset(handle.agent.ctx),
