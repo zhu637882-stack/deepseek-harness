@@ -365,6 +365,117 @@ class OwnershipTests(unittest.TestCase):
                 bridge.resolve(),
                 local.HARNESS / "packages/experimental/qingmu-director-context-bridge",
             )
+            manifest = json.loads((root / "dsh/profiles/qingmu/package.json").read_text())
+            self.assertEqual(manifest["dsh"]["profile"]["bundles"], [
+                "@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app",
+                "@deepseek-ai/dsh-experimental-qingmu-web",
+            ])
+            bundle = root / "dsh/profiles/node_modules/@deepseek-ai/dsh-experimental-qingmu-web"
+            self.assertTrue(bundle.is_symlink())
+            self.assertEqual(bundle.resolve(), local.HARNESS / "packages/experimental/qingmu-web")
+
+    def test_native_director_requires_discovered_healthy_preset(self):
+        for presets, expected in (
+            ([], False),
+            ([{"id": "standard"}], False),
+            ([{"id": "qingmu-director", "broken": "missing composition"}], False),
+            ([{"id": "qingmu-director"}], True),
+        ):
+            with self.subTest(presets=presets), patch.object(local, "host_rpc", return_value={"presets": presets}) as rpc:
+                if expected:
+                    local.require_native_director_preset("http://127.0.0.1:41002")
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "青木导演预设"):
+                        local.require_native_director_preset("http://127.0.0.1:41002")
+                rpc.assert_called_once_with("http://127.0.0.1:41002", "agentPreset.list", {})
+
+    def test_local_profile_upgrades_legacy_and_rejects_drift_without_writes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / "dsh/profiles/qingmu/package.json"
+            manifest.parent.mkdir(parents=True)
+            local.write_json(manifest, {"dsh": {"profile": {"bundles": local.LOCAL_PROFILE_BUNDLES[:2]}}})
+            with self.assertRaisesRegex(ValueError, "bundle"):
+                local.local_director_profile(root)
+            local.local_director_profile(root, install=True)
+            local.local_director_profile(root)
+            before = manifest.read_bytes()
+            link = root / "dsh/profiles/node_modules/@deepseek-ai/dsh-experimental-qingmu-web"
+            link.unlink()
+            link.symlink_to(root / "wrong-source")
+            for install in (False, True):
+                with self.subTest(install=install), self.assertRaisesRegex(ValueError, "来源不符"):
+                    local.local_director_profile(root, install=install)
+                self.assertEqual(before, manifest.read_bytes())
+            link.unlink()
+            with self.assertRaisesRegex(ValueError, "链接缺失"):
+                local.local_director_profile(root)
+
+    def test_local_profile_refuses_external_parent_or_custom_bundles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "instance"
+            root.mkdir()
+            outside = parent / "outside"
+            outside.mkdir()
+            (root / "dsh").symlink_to(outside)
+            with self.assertRaisesRegex(ValueError, "越出"):
+                local.local_director_profile(root, install=True)
+            self.assertEqual(list(outside.iterdir()), [])
+            (root / "dsh").unlink()
+            manifest = root / "dsh/profiles/qingmu/package.json"
+            manifest.parent.mkdir(parents=True)
+            local.write_json(manifest, {"dsh": {"profile": {"bundles": ["custom"]}}})
+            before = manifest.read_bytes()
+            with self.assertRaisesRegex(ValueError, "自定义配置"):
+                local.local_director_profile(root, install=True)
+            self.assertEqual(before, manifest.read_bytes())
+
+    @unittest.skipUnless(os.environ.get("QINGMU_TEST_NATIVE_HOST") == "1", "requires built local Host")
+    def test_native_director_real_host_composition_without_model_turn(self):
+        """Real profile loader and session composition, with an empty private home."""
+        self.assertTrue((local.HARNESS / "apps/cli/lib/bin.js").is_file())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "instance"
+            for part in ("private", "work", "logs", "home", "dsh", "core"):
+                (root / part).mkdir(parents=True, exist_ok=True)
+            # Reproduce a restored pre-fix profile, then upgrade through the
+            # same helper used by initialize/restore. No Writer or production DB.
+            manifest = root / "dsh/profiles/qingmu/package.json"
+            manifest.parent.mkdir(parents=True)
+            local.write_json(manifest, {"name": "qingmu-local-profile", "private": True,
+                                       "dsh": {"profile": {"bundles": local.LOCAL_PROFILE_BUNDLES[:2]}}})
+            local.local_director_profile(root, install=True)
+            supervisor = local.Supervisor(root, {
+                "instanceId": "native-director-test", "root": str(root), "node": shutil.which("node"),
+                "harnessRoot": str(local.HARNESS), "coreRoot": str(root / "core"),
+                "attestationKey": "isolated-test-attestation",
+            }, review_only=True)
+            port = local.available_port()
+            supervisor.ports = {"apiUrl": "http://127.0.0.1:1", "hostPort": port,
+                                "hostUrl": f"http://127.0.0.1:{port}"}
+            try:
+                supervisor.start_host()
+                roster = local.host_rpc(supervisor.ports["hostUrl"], "agentPreset.list", {})
+                self.assertTrue(any(p.get("id") == "qingmu-director" and not p.get("broken")
+                                    for p in roster["presets"]))
+                session = local.host_rpc(supervisor.ports["hostUrl"], "session.create", {
+                    "cwd": str(root / "work"), "agentPreset": "qingmu-director"})
+                self.assertEqual(session["agentPreset"], "qingmu-director")
+                readiness = local.http(supervisor.ports["hostUrl"]
+                                       + "/qingmu-director-context/readNativeDirectorReadiness", payload={
+                    "type": "client-request", "rpcId": "native-readiness-test",
+                    "method": "readNativeDirectorReadiness", "payload": {"sessionId": session["sessionId"]}})
+                self.assertTrue(readiness["result"]["ok"])
+                self.assertEqual(readiness["result"]["value"]["status"], "mounted")
+                self.assertEqual(readiness["result"]["value"]["missingTools"], [])
+                self.assertEqual(len(readiness["result"]["value"]["tools"]), 6)
+            except Exception:
+                self.fail((root / "logs/host.log").read_text()[-10000:])
+            finally:
+                supervisor.stop_owned("host")
+                for log in supervisor.logs:
+                    log.close()
 
     def test_api_environment_only_receives_dedicated_asset_activation_control(self):
         root = Path("/private/qingmu-instance")
@@ -2090,7 +2201,9 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
                 with patch.object(local, "HARNESS", harness), \
                      patch.object(supervisor, "launch", return_value=child) as launch, \
                      patch.object(supervisor, "wait_ready"), \
+                     patch.object(local, "require_native_director_preset") as preset_check, \
                      patch.object(local, "ensure_qingmu_workspace"):
+                    local.local_director_profile(root, install=True)
                     supervisor.start_host()
                 _argv, env, _label = launch.call_args.args
                 overlay = (root / "private/local.patch.yml").read_text()
@@ -2100,6 +2213,8 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
                 self.assertNotIn("directorProductionInteractiveEnabled", overlay)
                 self.assertNotIn("directorProductionTransportEnabled", overlay)
                 self.assertNotIn("credentials", overlay)
+                self.assertNotIn("insert:", overlay)
+                preset_check.assert_called_once_with("http://127.0.0.1:41002")
             finally:
                 local.stop_child(child)
 
@@ -2293,6 +2408,9 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
             local.write_json(root / "private/instance.json", config)
             local.write_json(root / "private/login.json", login)
             local.write_json(root / "identity.json", {"kind": "test"})
+            legacy_profile = root / "dsh/profiles/qingmu/package.json"
+            legacy_profile.parent.mkdir(parents=True)
+            local.write_json(legacy_profile, {"dsh": {"profile": {"bundles": local.LOCAL_PROFILE_BUNDLES[:2]}}})
             local.write_json(root / "build-manifest/current.json", {
                 "schema": local.BUILD_MANIFEST_SCHEMA,
                 "instance": {"instanceId": "source-instance"},
@@ -2314,6 +2432,9 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
                 target = parent / "restored"
                 restored = local.restore(backup_root, target)
             self.assertTrue((target / "build-manifest/current.json").is_file())
+            local.local_director_profile(target)
+            self.assertEqual(json.loads(legacy_profile.read_text())["dsh"]["profile"]["bundles"],
+                             local.LOCAL_PROFILE_BUNDLES[:2])
             self.assertFalse(restored["buildManifest"]["matches"])
             restored_config = json.loads((target / "private/instance.json").read_text())
             restored_login = json.loads((target / "private/login.json").read_text())

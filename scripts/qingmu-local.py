@@ -492,6 +492,46 @@ def mark_build_started(root: Path, config: dict, ports: dict, *, review_only: bo
     write_json(path, manifest)
 
 
+LOCAL_PROFILE_BUNDLES = ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app",
+                         "@deepseek-ai/dsh-experimental-qingmu-web"]
+LOCAL_PROFILE_LINKS = ("qingmu-web", "client-ui-brand-qingmu", "qingmu-director-context-bridge",
+                       "client-ui-qingmu-cockpit", "qingmu-yimeng-read-adapter",
+                       "qingmu-imago-method-adapter", "qingmu-yimeng-command-adapter")
+
+
+def local_director_profile(root: Path, *, install: bool = False) -> None:
+    """Install in a new/restored instance; otherwise validate without mutation."""
+    manifest = root / "dsh/profiles/qingmu/package.json"
+    links = [(root / "dsh/profiles/node_modules/@deepseek-ai" / ("dsh-experimental-" + name),
+              HARNESS / "packages/experimental" / name) for name in LOCAL_PROFILE_LINKS]
+    for path in (manifest, *(link for link, _ in links)):
+        if not path.parent.resolve().is_relative_to(root.resolve()):
+            raise ValueError("青木 profile 路径越出实例目录")
+    if manifest.is_symlink():
+        raise ValueError("青木 profile 清单不可使用符号链接")
+    value = json.loads(manifest.read_text()) if manifest.exists() else {
+        "name": "qingmu-local-profile", "private": True, "dsh": {"profile": {"bundles": []}}}
+    bundles = value.get("dsh", {}).get("profile", {}).get("bundles")
+    allowed = ([], LOCAL_PROFILE_BUNDLES[:2], LOCAL_PROFILE_BUNDLES) if install else (LOCAL_PROFILE_BUNDLES,)
+    if bundles not in allowed:
+        raise ValueError("青木 profile bundle 不符；需要完整 qingmu-web bundle，拒绝覆盖自定义配置")
+    # Validate every link before changing any profile metadata.
+    for link, target in links:
+        if link.is_symlink():
+            if link.resolve() != target.resolve():
+                raise ValueError("青木 profile 模块来源不符：" + link.name)
+        elif link.exists() or not install:
+            raise ValueError("青木 profile 模块链接缺失或类型错误：" + link.name)
+    if install:
+        value["dsh"]["profile"]["bundles"] = list(LOCAL_PROFILE_BUNDLES)
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        write_json(manifest, value)
+        for link, target in links:
+            if not link.is_symlink():
+                link.parent.mkdir(parents=True, exist_ok=True)
+                link.symlink_to(target, target_is_directory=True)
+
+
 def initialize(
     root: Path,
     writer: Path,
@@ -522,18 +562,7 @@ def initialize(
               "assetActivationKey": secrets.token_urlsafe(48)}
     write_json(root / "private/instance.json", config)
     write_json(root / "private/login.json", _new_local_login())
-    write_json(root / "dsh/profiles/qingmu/package.json", {
-        "name": "qingmu-local-profile", "private": True,
-        "dsh": {"profile": {"bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"]}}})
-    # The private overlay uses built package URLs, preserving the actual bundle roster.
-    # Profile resolution needs the browser modules and Host bridge named by the
-    # bundle overlay. Server adapters use file URLs so an instance cannot fall
-    # back to an unrelated globally installed package.
-    for name in ("client-ui-brand-qingmu", "qingmu-director-context-bridge",
-                 "client-ui-qingmu-cockpit"):
-        link = root / "dsh/profiles/node_modules/@deepseek-ai" / ("dsh-experimental-" + name)
-        link.parent.mkdir(parents=True, exist_ok=True)
-        link.symlink_to(HARNESS / "packages/experimental" / name, target_is_directory=True)
+    local_director_profile(root, install=True)
     result = subprocess.run([*backend_command(config), "--initialize"], env=backend_env(root, config),
                             cwd=root / "work", capture_output=True, text=True, timeout=45)
     if result.returncode:
@@ -573,6 +602,14 @@ def host_rpc(host_url: str, method: str, payload: dict) -> dict:
         code = result.get("error", {}).get("code") if isinstance(result, dict) else None
         raise RuntimeError("青木 Host RPC 失败" + ("：" + str(code) if code else ""))
     return result["value"]
+
+
+def require_native_director_preset(host_url: str) -> None:
+    """Check actual Host discovery without opening a session or sending a model turn."""
+    roster = host_rpc(host_url, "agentPreset.list", {})
+    if not any(preset.get("id") == "qingmu-director" and not preset.get("broken")
+               for preset in roster.get("presets", [])):
+        raise RuntimeError("青木导演预设不可用；本机 profile 必须加载完整 qingmu-web bundle，不能只加载界面补丁")
 
 
 def ensure_qingmu_workspace(root: Path, host_url: str, *, timeout: float = 10.0) -> dict:
@@ -1394,12 +1431,11 @@ class Supervisor:
             return response.status == 200 and "青木 OS".encode() in body
 
     def start_host(self) -> None:
-        overlay = (HARNESS / "packages/experimental/qingmu-web/cordis.patch.yml").read_text()
-        # Browser seats retain manifest names so the ordinary modules plugin
-        # discovers their dsh.client declarations through the profile symlinks.
-        for name in ("qingmu-yimeng-read-adapter", "qingmu-imago-method-adapter", "qingmu-yimeng-command-adapter"):
-            overlay = overlay.replace(f"name: '@deepseek-ai/dsh-experimental-{name}'",
-                "name: " + json.dumps((HARNESS / "packages/experimental" / name / "lib/index.js").as_uri()))
+        local_director_profile(self.root)
+        # The profile loads the Qingmu bundle, including its native agent presets.
+        # This overlay only binds instance settings; replaying the bundle patch
+        # here would mount UI plugins without registering the bundle's presets.
+        overlay = ""
         for adapter in ("read", "command"):
             overlay += f"\n- id: qingmu-yimeng-{adapter}-adapter\n  config:\n    baseUrl: {json.dumps(self.ports['apiUrl'])}\n"
             if adapter == "command" and not self.review_only:
@@ -1523,6 +1559,7 @@ class Supervisor:
         # contract used by the UI. The client startup policy can then create
         # and select one real DSh Session; restart reuses this workspace.
         ensure_qingmu_workspace(self.root, self.ports["hostUrl"])
+        require_native_director_preset(self.ports["hostUrl"])
 
     def start_frontend(self) -> None:
         writer = Path(self.config["yimengRoot"])
@@ -3374,6 +3411,7 @@ def restore(source: Path, target: Path) -> dict:
     try:
         for name in ("storage", "private", "dsh"):
             shutil.copytree(source / name, target / name, symlinks=True)
+        local_director_profile(target, install=True)
         if (source / "audit").is_dir():
             shutil.copytree(source / "audit", target / "audit", symlinks=True)
         else:
