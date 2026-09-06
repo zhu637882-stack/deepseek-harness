@@ -8,13 +8,23 @@ This private experimental Host plugin compiles current IMAGO OS methods into bro
 
 ## Attestation boundary
 
-Except for the read-only `worksetMethod` and `continuityMethod`, endpoints read `QINGMU_IMAGO_ATTESTATION_KEY` only from the Host process environment. The raw environment string is the HMAC key: it is not trimmed and must contain at least 32 UTF-8 bytes. A missing, empty, or shorter key fails closed before those methods compile. The key is absent from Cordis configuration, compiler child-process environment, browser responses, logs, and error text. The two read-only methods neither require this key nor issue an approval proof.
+Attested endpoints read `QINGMU_IMAGO_ATTESTATION_KEY` only from the Host process environment. The raw environment string is the HMAC key: it is not trimmed and must contain at least 32 UTF-8 bytes. A missing, empty, or shorter key fails closed before those methods compile. The key is absent from Cordis configuration, compiler child-process environment, browser responses, logs, and error text. Read-only guidance such as `worksetMethod`, `continuityMethod`, and `directorInstructions` does not require this key or issue an approval proof.
 
 After validating a current Core projection for an attested method, the Host returns the projection, its SHA-256, and a method-specific proof. The Shot relation proof binds the exact compiler input, target, Host-derived `relationSnapshotSha256`, and selected canonical Shot, using the E5-3 hash projection described below. The Hero Frame Storyboard proof additionally binds the selected Shot SHA, the full Hero Frame lineage binding, the raw-annotation SHA, and the compiled-result SHA. The selected Shot remains the Yimeng storyboard frame ID, and Beat IDs remain local to their parent Shot. The browser may forward a proof but cannot issue or verify it without the server-only key.
 
 The Host derives the relation authority and selected Shot SHAs from the validated Yimeng relation input. For `heroFrameStoryboardMethod`, it also derives the Hero Frame binding and raw-annotation SHAs; the browser cannot supply those authority hashes or a second Shot identity. The Host requires exact target, graph, canvas, deterministic compiled result, source-binding, work-order, legal-work, and authority fields. The method may describe `replaceStoryboardCanvas` through a Yimeng ChangeSet, but this adapter never performs that write and rejects generation, selection, approval, signoff, Provider, or worker receipts. It creates no relation identity, canvas repository, database record, project state, or second state machine.
 
 The Core root remains deployment-specific. A non-blank `config.coreRoot` takes precedence; otherwise `IMAGO_OS_CORE_ROOT` is required. No machine-specific Core path is included in this package.
+
+## Read-only director instruction text
+
+The Host-only `directorInstructions` endpoint reads actual current Core Skill and reference text, not an architecture-plan excerpt or a list of registered capabilities. It accepts only `capability: director_development | shot_design` and the optional fixed C5 reference `resourceId: rough_final_feedback`. Browser RPCs cannot call it; requests cannot choose a Core root, filesystem path, project, or approval state.
+
+The C package supplies the director evidence, performance/blocking, and coverage/media-review methods. The C5 package supplies execution closure, shot grammar/continuity/LSU, and the director/storyboard/production loop. Both responses preserve the entire Skill and three direct references. C5 declares its fourth required feedback-closure reference in `additionalReferences`; a second request with its fixed resource ID returns that full text. Consumers must read the missing reference rather than treating its source hash as content.
+
+Every source is bound by relative path, raw-byte SHA-256, and byte length; the package digest binds the capability and complete source manifest. Reads stay inside the resolved Core root, reject outward symbolic links and invalid UTF-8, and bound allocation before reading each file. Limits are 128 KiB per file and 512 KiB for all package source bytes. Missing, oversized, or unavailable sources fail without a substitute method. The deployment must keep the local method tree stable while reads are in flight; this is not a sandbox against concurrent privileged filesystem replacement.
+
+This endpoint neither initializes an IMAGO project nor runs its controller, compiles a work order, approves a stage, writes business state, or invokes a Provider. The opt-in [native director tools](../qingmu-director-context-bridge/README.md) are its model consumer; this package alone does not register model tools. Writer remains the business truth and Core remains the method source.
 
 ## Shot River rhythm and reference contract
 
@@ -114,15 +124,15 @@ Missing, extra, reordered, or stage-misplaced entries, and any method, contract,
 
 #### What the model sees
 
-Nothing. Endpoints such as `shotRelationMethod` and `worksetMethod` are private browser RPCs, not model tools, prompt sections, or session events.
+By themselves, nothing. Endpoints such as `shotRelationMethod` and `worksetMethod` are private browser RPCs, not model tools, prompt sections, or session events. A separate native-tool consumer can put the Host-only `directorInstructions` result into its durable tool history.
 
 #### Token effect
 
-None. The RPC response remains outside model context.
+None for direct RPC use. An opted-in native consumer adds the requested method text and source metadata as tool-result tokens.
 
 #### KV Cache effect
 
-None. No model-facing tokens are added.
+None for direct RPC use. A native consumer appends a tool-result suffix; it does not inject these methods into an earlier system prompt.
 
 ## Known Limitations and Deferred Work
 

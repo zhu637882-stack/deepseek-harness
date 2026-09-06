@@ -13,12 +13,21 @@ import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import { loadDirectorReplayMethod } from './director-replay.ts'
 import {
+  DirectorInstructionsInputError,
+  loadDirectorInstructions,
+  parseDirectorInstructionsRequest,
+} from './director-instructions.ts'
+import {
   loadDirectorStageCard,
   loadDirectorStageCardBinding,
   loadDirectorStageCards,
 } from './director-stage-cards.ts'
 
 export { loadDirectorReplayMethod } from './director-replay.ts'
+export {
+  loadDirectorInstructions,
+  parseDirectorInstructionsRequest,
+} from './director-instructions.ts'
 export {
   loadDirectorStageCard,
   loadDirectorStageCardBinding,
@@ -34,6 +43,7 @@ declare module '@deepseek-ai/cordis' {
 }
 import type {
   ImagoStageArtifactMethodSnapshot,
+  ImagoDirectorInstructionsResponse,
   ImagoDirectorReplayMethodResponse,
   ImagoStageSourceMethodRequest,
   ImagoStageSourceMethodSnapshot,
@@ -171,6 +181,12 @@ import {
 
 export type {
   ImagoStageArtifact,
+  ImagoDirectorInstructionsCapability,
+  ImagoDirectorInstructionsAdditionalReference,
+  ImagoDirectorInstructionsRequest,
+  ImagoDirectorInstructionsResource,
+  ImagoDirectorInstructionsResponse,
+  ImagoDirectorInstructionsSourceBinding,
   ImagoStageArtifactMachineValidation,
   ImagoStageArtifactMethodAttestation,
   ImagoStageArtifactMethodDefinition,
@@ -4235,6 +4251,7 @@ export function createImagoMethodHandler(
     try {
       if (
         endpoint !== 'elementMethod'
+        && endpoint !== 'directorInstructions'
         && endpoint !== 'directorReplayMethod'
         && endpoint !== 'referenceAssetMethod'
         && endpoint !== 'promptIrMethod'
@@ -4294,6 +4311,14 @@ export function createImagoMethodHandler(
           }
           throw error
         }
+      }
+      if (endpoint === 'directorInstructions') {
+        const request = parseDirectorInstructionsRequest(payload)
+        if (signal.aborted) return cancelled()
+        const value: ImagoDirectorInstructionsResponse = await loadDirectorInstructions(execution.coreRoot, request, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- fixed source reads can complete after cancellation.
+        if (signal.aborted) return cancelled()
+        return { ok: true, value }
       }
       if (endpoint === 'directorReplayMethod') {
         if (
@@ -4797,7 +4822,7 @@ export function createImagoMethodHandler(
       }
       return { ok: true, value }
     } catch (error) {
-      if (error instanceof InputError || error instanceof WorksetInputError
+      if (error instanceof InputError || error instanceof DirectorInstructionsInputError || error instanceof WorksetInputError
         || error instanceof ContinuityInputError || error instanceof ShotFindingInputError || error instanceof ProductionUnitInputError
         || error instanceof TakeAcceptanceInputError || error instanceof TakeTechnicalQcInputError
         || error instanceof TakeApprovalLifecycleInputError
@@ -4876,7 +4901,7 @@ export function apply(ctx: Context, config: ImagoMethodAdapterConfig): void {
   })
   ctx.provide('qingmuImagoMethod', handler)
   const browserHandler: ConnectionRpcHandler = async (endpoint, payload, signal) =>
-    endpoint === 'takeTechnicalQcMethod' || endpoint === 'directorReplayMethod'
+    endpoint === 'takeTechnicalQcMethod' || endpoint === 'directorReplayMethod' || endpoint === 'directorInstructions'
       ? internalError('Requested IMAGO Method is Host-internal')
       : await handler(endpoint, payload, signal)
   ctx.connection.rpc.handle(CHANNEL, browserHandler, { authority: 'loopback' })

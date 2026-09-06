@@ -60,6 +60,66 @@ export interface ImagoDirectorReplayMethodResponse extends ImagoMethodJsonObject
   readonly methodPackageSha256: string
 }
 
+/** Fixed current-directing method capabilities available as paged Host-only text. */
+export type ImagoDirectorInstructionsCapability = 'director_development' | 'shot_design'
+
+/** Caller selects a fixed capability package, never a Core path or a project scope. */
+export interface ImagoDirectorInstructionsRequest {
+  readonly capability: ImagoDirectorInstructionsCapability
+  /** Fixed supplementary C5 reference; no arbitrary path is accepted. */
+  readonly resourceId?: 'rough_final_feedback'
+}
+
+/** One fixed source in the current capability package, without its body. */
+export interface ImagoDirectorInstructionsSourceBinding {
+  readonly resourceId: string
+  readonly path: string
+  readonly kind: 'skill' | 'direct_reference'
+  readonly sha256: string
+  readonly byteLength: number
+}
+
+/** One complete source page, never a truncated prefix. */
+export interface ImagoDirectorInstructionsResource extends ImagoDirectorInstructionsSourceBinding {
+  readonly content: string
+}
+
+/** A direct mandatory reference available through a fixed optional second read. */
+export interface ImagoDirectorInstructionsAdditionalReference {
+  readonly resourceId: 'rough_final_feedback'
+  readonly path: string
+  readonly required: true
+}
+
+/** Read-only full Skill text plus a bounded selected set of direct method references. */
+export interface ImagoDirectorInstructionsResponse extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-director-instructions.v1'
+  readonly capability: ImagoDirectorInstructionsCapability
+  readonly packagePath: string
+  readonly sourceBindings: readonly ImagoDirectorInstructionsSourceBinding[]
+  readonly sources: readonly ImagoDirectorInstructionsResource[]
+  /** Direct mandatory references available through a fixed optional second read. */
+  readonly additionalReferences: readonly ImagoDirectorInstructionsAdditionalReference[]
+  /** Exact capability boundary for the selected reference set. */
+  readonly methodScope: string
+  readonly maxResourceBytes: number
+  readonly maxPackageBytes: number
+  readonly packageSha256: string
+  /** Null returns the primary Skill plus selected references; otherwise one fixed additional reference. */
+  readonly requestedResourceId: 'rough_final_feedback' | null
+  readonly authority: {
+    readonly readOnly: true
+    readonly businessTruth: 'yimeng'
+    readonly methodSource: 'imago_os'
+    readonly providerCalls: 0
+    readonly maximumCostCny: '0'
+    readonly approvalGranted: false
+    readonly humanDecisionInferred: false
+    readonly formalQcInferred: false
+    readonly projectStateWrite: false
+  }
+}
+
 /** Element kinds with an explicit current IMAGO profile-editing method. */
 export type ImagoElementKind = 'actor' | 'scene' | 'prop'
 
@@ -1706,6 +1766,7 @@ export interface ImagoStageArtifactMethodResponse extends ImagoMethodJsonObject 
 
 /** Result values exposed by `/qingmu-imago-method`. */
 export interface ImagoMethodEndpointMap {
+  readonly directorInstructions: ImagoDirectorInstructionsResponse
   readonly directorReplayMethod: ImagoDirectorReplayMethodResponse
   readonly elementMethod: ImagoElementMethodResponse
   readonly referenceAssetMethod: ImagoReferenceAssetMethodResponse

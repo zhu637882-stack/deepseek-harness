@@ -7,6 +7,10 @@
   "include": ["src"],
   "references": [
     { "path": "../../../vendor/cordis" },
+    { "path": "../../../vendor/schemastery" },
+    { "path": "../../core/tools" },
+    { "path": "../../core/scope" },
+    { "path": "../qingmu-imago-method-adapter" },
     { "path": "../../core/session" },
     { "path": "../../session/session-projection" },
     { "path": "../qingmu-yimeng-command-adapter" },

@@ -8,13 +8,23 @@
 
 ## 证明边界
 
-除只读 `worksetMethod` 与 `continuityMethod` 外，各端点都只从 Host 进程环境读取 `QINGMU_IMAGO_ATTESTATION_KEY`。原始环境字符串就是 HMAC 密钥：不做 trim，并且必须至少包含 32 个 UTF-8 字节。缺失、空串或不足长度时，这些方法会在编译前失败关闭。密钥不会进入 Cordis 配置、编译器子进程环境、浏览器响应、日志或错误正文。两个只读方法既不需要该密钥，也不签发批准证明。
+带证明的端点只从 Host 进程环境读取 `QINGMU_IMAGO_ATTESTATION_KEY`。原始环境字符串就是 HMAC 密钥：不做 trim，并且必须至少包含 32 个 UTF-8 字节。缺失、空串或不足长度时，这些方法会在编译前失败关闭。密钥不会进入 Cordis 配置、编译器子进程环境、浏览器响应、日志或错误正文。`worksetMethod`、`continuityMethod`、`directorInstructions` 等只读指引既不需要该密钥，也不签发批准证明。
 
 对带证明的方法，Host 验证当前 Core 投影后，返回投影、投影 SHA-256，以及方法专用证明。Shot 关系证明通过下文的 E5-3 哈希投影，绑定准确的编译器输入、目标、Host 派生的 `relationSnapshotSha256` 和当前所选 canonical Shot。Hero Frame Storyboard 证明还绑定所选 Shot SHA、完整 Hero Frame 血缘绑定、原始标注 SHA 和编译结果 SHA。所选 Shot 始终是易梦故事板 frame ID，Beat ID 始终只在所属 Shot 内有效。浏览器只能转发证明，不能在缺少服务端密钥时签发或验证。
 
 Host 从已校验的易梦关系输入派生关系权威 SHA 和所选 Shot SHA。`heroFrameStoryboardMethod` 还由 Host 派生 Hero Frame 绑定 SHA 和原始标注 SHA；浏览器不能提供这些权威哈希，也不能提供第二套 Shot 身份。Host 要求目标、关系图、画布、确定性编译结果、来源绑定、工作单、合法工作集合和权威字段全部精确匹配。方法可以描述通过易梦 ChangeSet 执行 `replaceStoryboardCanvas`，但本适配器不执行该写入，并拒绝生成、选择、批准、签收、Provider 或 Worker 回执。它不创建关系身份、画布仓库、数据库记录、项目状态或第二状态机。
 
 Core 根目录继续由部署环境决定。非空白 `config.coreRoot` 优先，否则必须提供 `IMAGO_OS_CORE_ROOT`。本包不包含任何机器专属 Core 路径。
+
+## 只读导演方法正文
+
+Host 专属 `directorInstructions` 端点读取当前 Core 的真实 Skill 与参考正文，不是架构方案摘录或已注册能力清单。它只接受 `capability: director_development | shot_design` 和可选固定 C5 参考 `resourceId: rough_final_feedback`。浏览器 RPC 不能调用；请求不能指定 Core 根目录、文件路径、项目或批准状态。
+
+C 方法包提供导演证据、表演与调度、覆盖与媒体审看方法。C5 方法包提供执行闭合、镜头语法与连续性及 LSU、导演与分镜及生产循环。两个响应均保留完整 Skill 和三份直接参考。C5 在 `additionalReferences` 中声明第四份必读反馈闭合参考；第二次请求携带其固定资源 ID 时返回完整正文。消费端须实际补读，不能把来源哈希当作正文。
+
+每份来源绑定相对路径、原始字节 SHA-256 和字节长度；方法包摘要绑定能力与完整来源清单。读取限制在解析后的 Core 根目录内，拒绝指向根外的符号链接和非法 UTF-8，并在读取每个文件前限制分配大小。单文件上限为 128 KiB，整包全部来源字节上限为 512 KiB。来源缺失、超限或不可用时失败，不替造方法。部署方须在读取期间保持本地方法树稳定；这不是防御并发特权文件替换的沙箱。
+
+该端点不初始化 IMAGO 项目，不运行控制器，不编译工作单，不批准阶段，不写业务状态，也不调用 Provider。可选[原生导演工具](../qingmu-director-context-bridge/README.zh.md)是其模型消费端；本包自身不注册模型工具。Writer 仍是业务真源，Core 仍是方法来源。
 
 ## Shot River 节奏与参考约定
 
@@ -114,15 +124,15 @@ Host 在编译前后独立读取七份固定 Core 来源。当前仅 V6 的活�
 
 #### 模型看到的内容
 
-无。`shotRelationMethod` 和 `worksetMethod` 等端点是私有浏览器 RPC，不是模型工具、提示词段落或会话事件。
+单独使用时，无。`shotRelationMethod` 和 `worksetMethod` 等端点是私有浏览器 RPC，不是模型工具、提示词段落或会话事件。独立的原生工具消费端可以把 Host 专属 `directorInstructions` 结果写入其持久化工具历史。
 
 #### Token 影响
 
-无。RPC 响应不会进入模型上下文。
+直接使用 RPC 时无影响。显式启用的原生消费端会把所请求方法正文与来源元数据作为工具结果 token 加入。
 
 #### KV Cache 影响
 
-无。没有新增模型可见 token。
+直接使用 RPC 时无影响。原生消费端追加工具结果后缀，不把这些方法注入更早的系统提示词。
 
 ## 已知限制与延期工作
 
