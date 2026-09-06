@@ -212,6 +212,7 @@ export function ScenePlanningWorkspace({
   const [proposal, setProposal] = useState<DirectorReplayProposal | null>(null)
   const [ignoredProposalItems, setIgnoredProposalItems] = useState<readonly string[]>([])
   const [adoptedProposalItems, setAdoptedProposalItems] = useState<readonly string[]>([])
+  const [adoptedPaidItems, setAdoptedPaidItems] = useState<readonly string[]>([])
   const [proposalBusy, setProposalBusy] = useState(false)
   const [paidAvailability, setPaidAvailability] = useState<DirectorPaidAvailability | null>(null)
   const [paidWorkOrder, setPaidWorkOrder] = useState<DirectorPaidWorkOrder | null>(null)
@@ -230,7 +231,7 @@ export function ScenePlanningWorkspace({
   const proposalEpoch = useRef(0)
   const clearPaidProposal = () => {
     paidController.current?.abort()
-    setPaidWorkOrder(null); setPaidStatus(null); setPaidBusy(false)
+    setPaidWorkOrder(null); setPaidStatus(null); setPaidBusy(false); setAdoptedPaidItems([])
   }
   useEffect(() => {
     live.current = true; controller.current = new AbortController()
@@ -397,7 +398,7 @@ export function ScenePlanningWorkspace({
     const confirmed = window.confirm(
       '这会向真实 DeepSeek deepseek-v4-pro 发送一次纯文本导演建议请求。'
       + '\n本次请求授权上限：¥0.30；最多 8000 输入 / 2000 输出 token；失败不自动重试。'
-      + '\n建议只展示，不会自动写入草稿、质检、Ready 或人工决定。是否继续？',
+      + '\n建议默认只展示，可逐项采用到草稿并按真实来源保存；不会自动写入草稿、质检、Ready 或人工决定。是否继续？',
     )
     if (!confirmed) return
     paidController.current?.abort()
@@ -452,6 +453,16 @@ export function ScenePlanningWorkspace({
       change({ ...current, [item.field]: item.proposedValue })
     }
     setAdoptedProposalItems(items => [...new Set([...items, item.id])])
+  }
+  const adoptPaidProposalItem = (item: Record<string, unknown>) => {
+    if (!local || !current || paidStatus?.state !== 'settled') return
+    const id = item.id
+    const field = item.field
+    if (typeof id !== 'string' || typeof field !== 'string') return
+    if (field !== 'durationSec' && typeof item.proposedValue !== 'string') return
+    if (field === 'durationSec' && typeof item.proposedValue !== 'number') return
+    change({ ...current, [field]: item.proposedValue })
+    setAdoptedPaidItems(items => [...new Set([...items, id])])
   }
   const finish = async (
     result: ScenePlanningResult,
@@ -543,6 +554,9 @@ export function ScenePlanningWorkspace({
         const shotId = local.shotIds[index]
         let advisory: QingmuAdvisorySaveProof | null = local.pendingAdvisory ?? null
         if (local.shotIds.length > 0 && !shotId) throw new Error('当前镜头身份缺失，请读取恢复。')
+        if (adoptedProposalItems.length > 0 && adoptedPaidItems.length > 0) {
+          throw new Error('一次保存只允许一种建议来源（演练或真实 Provider）；请先取消其中一类的采用。')
+        }
         if (shotId && proposal && adoptedProposalItems.length > 0) {
           if (directorBridge === undefined || directorSessionId === undefined) throw new Error('409 director_session_missing')
           const recovered = await directorBridge.recover(directorSessionId, controller.current.signal)
@@ -577,6 +591,44 @@ export function ScenePlanningWorkspace({
             workOrderSha256: proposal.workOrder.workOrderSha256,
             promptSha256: proposal.workOrder.promptSha256,
             adoptedItemIds: adoptedProposalItems,
+          }
+        } else if (shotId && adoptedPaidItems.length > 0) {
+          // 真实 Provider 建议与演练建议共用同一新鲜度校验与保存链；
+          // 付费提案身份=工单，proposalSha=outputSha（服务端已校验 sha(proposal)），outputSha=rawOutputSha。
+          if (paidWorkOrder === null || paidStatus?.state !== 'settled') {
+            throw new Error('409 director_paid_proposal_unavailable')
+          }
+          const paidReceipt = objectOf(paidStatus.executionReceipt)
+          const proposalSha = typeof paidReceipt?.outputSha256 === 'string' ? paidReceipt.outputSha256 : ''
+          const rawSha = typeof paidReceipt?.rawOutputSha256 === 'string' ? paidReceipt.rawOutputSha256 : ''
+          if (!/^[a-f0-9]{64}$/.test(proposalSha) || !/^[a-f0-9]{64}$/.test(rawSha)) {
+            throw new Error('409 director_paid_proposal_unavailable')
+          }
+          const freshness = await port.checkDirectorProposalFreshness({ projectId, episodeId,
+            sceneId: paidWorkOrder.sceneId, shotId,
+            contextSnapshotSha256: paidWorkOrder.inputSha256,
+            methodPackageVersion: paidWorkOrder.methodPackage.version,
+            methodPackageSha256: paidWorkOrder.methodPackage.sha256,
+            workOrderId: paidWorkOrder.workOrderId,
+            workOrderSha256: paidWorkOrder.workOrderSha256,
+            promptSha256: paidWorkOrder.promptSha256,
+            proposalId: paidWorkOrder.workOrderId, proposalSha256: proposalSha,
+            outputSha256: rawSha }, controller.current.signal)
+          if (!freshness.fresh) {
+            throw new Error('409 director_proposal_stale')
+          }
+          advisory = {
+            source: 'provider',
+            proposalId: paidWorkOrder.workOrderId,
+            proposalSha256: proposalSha,
+            outputSha256: rawSha,
+            inputContextSnapshotSha256: paidWorkOrder.inputSha256,
+            methodPackageVersion: paidWorkOrder.methodPackage.version,
+            methodPackageSha256: paidWorkOrder.methodPackage.sha256,
+            workOrderId: paidWorkOrder.workOrderId,
+            workOrderSha256: paidWorkOrder.workOrderSha256,
+            promptSha256: paidWorkOrder.promptSha256,
+            adoptedItemIds: adoptedPaidItems,
           }
         }
         const intent: ScenePlanningRequest = local.pending ?? { projectId, episodeId, idempotencyKey: crypto.randomUUID(),
@@ -695,8 +747,9 @@ export function ScenePlanningWorkspace({
               <dt>演练建议</dt><dd>{String(item.proposedValue) || '（空）'}</dd>
               <dt>影响</dt><dd>{item.impact}</dd></dl>
             <div className={css.actions}>
-              <button type="button" disabled={proposal.stale || adoptedProposalItems.includes(item.id)}
-                onClick={() => { adoptProposalItem(item) }}>{adoptedProposalItems.includes(item.id) ? '已放入草稿' : '采用到草稿'}</button>
+              <button type="button" disabled={proposal.stale || adoptedProposalItems.includes(item.id)
+                || adoptedPaidItems.length > 0}
+              onClick={() => { adoptProposalItem(item) }}>{adoptedProposalItems.includes(item.id) ? '已放入草稿' : '采用到草稿'}</button>
               <button type="button" disabled={adoptedProposalItems.includes(item.id)}
                 onClick={() => { setIgnoredProposalItems(items => [...new Set([...items, item.id])]) }}>忽略</button>
             </div>
@@ -718,7 +771,9 @@ export function ScenePlanningWorkspace({
           || local.dirty || directorStatus !== 'current'} onClick={() => { void requestPaidProposal() }}>
             {paidBusy ? '正在等待真实 Provider…' : '请求真实 DeepSeek 导演建议（会产生费用）'}
           </button></header>
-        <p>与上方 replay 演练严格分开。结果只作建议展示，不自动写草稿，不创建 PromptIR、媒体、正式质检、Ready 或人工决定。</p>
+        <p>与上方 replay 演练严格分开、来源不互冒。结果默认只作建议展示；你可逐项采用到草稿，
+          保存时走与演练建议相同的新鲜度校验和正式保存链，并按「真实 Provider 来源」记录。
+          不自动写草稿，不创建 PromptIR、媒体、正式质检、Ready 或人工决定。</p>
         {!paidAvailability?.enabled && <p role="status">当前项目 / 集未启用真实 DeepSeek 导演建议；默认关闭。</p>}
         {paidAvailability?.enabled && <dl><dt>模型</dt><dd>{paidAvailability.model}</dd>
           <dt>单次授权上限</dt><dd>¥{paidAvailability.maxPaidCny}</dd>
@@ -738,6 +793,12 @@ export function ScenePlanningWorkspace({
               <dl><dt>当前原值</dt><dd>{String(current[field] ?? '') || '（空）'}</dd>
                 <dt>真实 Provider 建议</dt><dd>{String(item.proposedValue ?? '') || '（空）'}</dd>
                 <dt>影响</dt><dd>{String(item.impact ?? '')}</dd></dl>
+              <button type="button"
+                disabled={busy || paidBusy || !current || adoptedPaidItems.includes(String(item.id))
+                  || adoptedProposalItems.length > 0}
+                onClick={() => { adoptPaidProposalItem(item) }}>
+                {adoptedPaidItems.includes(String(item.id)) ? '已放入草稿' : '采用到草稿'}
+              </button>
             </article>
           })
         })()}

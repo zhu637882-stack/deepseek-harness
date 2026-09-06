@@ -11,8 +11,10 @@ export const QINGMU_SCENE_PLANNING_SAVED_SCHEMA = 'deepseek.dsh.qingmu-scene-pla
 /** Discriminant used by the outer Host message receiver. */
 export const QINGMU_SCENE_PLANNING_SAVED_TYPE = 'qingmu:scene-planning-saved' as const
 
-/** Replay method coordinates retained with a pending save and its recovered receipt. */
+/** Method coordinates retained with a pending save and its recovered receipt.
+ *  source 区分演练建议与真实 Provider 建议；两者走同一采用/新鲜度链，但来源不得互冒。 */
 export interface QingmuAdvisorySaveProof {
+  readonly source?: 'replay' | 'provider'
   readonly proposalId: string
   readonly proposalSha256: string
   readonly outputSha256: string
@@ -49,7 +51,7 @@ export interface QingmuScenePlanningSavedMessage {
   }
   readonly locate: { readonly stage: 'storyboard'; readonly sceneId: string; readonly shotId: string }
   readonly authority: {
-    readonly source: 'manual_edit' | 'adopted_replay_suggestion'
+    readonly source: 'manual_edit' | 'adopted_replay_suggestion' | 'adopted_provider_suggestion'
     readonly advisoryOnly: true
     readonly providerCalls: 0
     readonly stageStarted: false
@@ -94,6 +96,7 @@ function validDigest(value: unknown): value is string {
 function validProof(value: unknown): value is QingmuAdvisorySaveProof {
   const item = record(value)
   return item !== null
+    && (item.source === undefined || item.source === 'replay' || item.source === 'provider')
     && validIdentity(item.proposalId)
     && validDigest(item.proposalSha256)
     && validDigest(item.outputSha256)
@@ -148,7 +151,9 @@ export function isQingmuScenePlanningSavedMessage(
     && locate?.stage === 'storyboard'
     && locate.sceneId === scope.sceneId
     && locate.shotId === scope.shotId
-    && authority?.source === (item.method === null ? 'manual_edit' : 'adopted_replay_suggestion')
+    && authority?.source === (item.method === null
+      ? 'manual_edit'
+      : item.method.source === 'provider' ? 'adopted_provider_suggestion' : 'adopted_replay_suggestion')
     && authority.advisoryOnly === true
     && authority.providerCalls === 0
     && authority.stageStarted === false
@@ -192,7 +197,9 @@ export function createQingmuScenePlanningSavedMessage(
     },
     locate: { stage: 'storyboard', sceneId: scope.sceneId, shotId: scope.shotId },
     authority: {
-      source: method === null ? 'manual_edit' : 'adopted_replay_suggestion',
+      source: method === null
+        ? 'manual_edit'
+        : method.source === 'provider' ? 'adopted_provider_suggestion' : 'adopted_replay_suggestion',
       advisoryOnly: true,
       providerCalls: result.providerCalls,
       stageStarted: result.stageStarted,

@@ -67,6 +67,31 @@ describe('Qingmu Host save sync', () => {
       providerCalls: 0, stageStarted: false, approvalGranted: false })
   })
 
+  it('marks adopted provider suggestions with a distinct, non-replay authority source', () => {
+    const paidProof = {
+      source: 'provider' as const,
+      proposalId: 'work_order_paid_1', proposalSha256: 'a'.repeat(64), outputSha256: 'b'.repeat(64),
+      inputContextSnapshotSha256: 'c'.repeat(64), methodPackageVersion: 'qingmu.director-provider.v1',
+      methodPackageSha256: 'd'.repeat(64), workOrderId: 'work_order_paid_1', workOrderSha256: 'e'.repeat(64),
+      promptSha256: 'f'.repeat(64), adoptedItemIds: ['visual-tighten'],
+    }
+    const message = createQingmuScenePlanningSavedMessage(result, binding, paidProof)
+    expect(message?.method?.source).toBe('provider')
+    expect(message?.authority).toEqual({ source: 'adopted_provider_suggestion', advisoryOnly: true,
+      providerCalls: 0, stageStarted: false, approvalGranted: false })
+    const postMessage = vi.fn()
+    const sync = createQingmuHostSync({ entryScope: scope, referrer: 'http://127.0.0.1:49001/qingmu-runtime/local-session',
+      parent: { postMessage }, self: {}, storage: storage() })
+    expect(sync?.publish(message!)).toBe(true)
+    // A provider proof must never be re-labelled as replay provenance.
+    const forged = { ...message!, authority: { ...message!.authority, source: 'adopted_replay_suggestion' as const } }
+    expect(sync?.publish(forged)).toBe(false)
+    // Legacy replay proofs without a source field stay valid and replay-labelled.
+    const legacyReplay = createQingmuScenePlanningSavedMessage(result, binding, { ...paidProof, source: undefined })
+    expect(legacyReplay?.authority.source).toBe('adopted_replay_suggestion')
+    expect(sync?.publish(legacyReplay!)).toBe(true)
+  })
+
   it('fails closed for stale context, wrong scope, top-level use and an untrusted parent origin', () => {
     const local = storage(), parent = { postMessage: vi.fn() }
     const sync = createQingmuHostSync({ entryScope: scope, referrer: 'http://localhost:49001/entry',
