@@ -109,6 +109,7 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
   const [zoom, setZoom] = useState(false); const [scale, setScale] = useState(1); const [selectionError, setSelectionError] = useState('')
   const [offset, setOffset] = useState({ x: 0, y: 0 }); const [selecting, setSelecting] = useState(false)
   const [heroError, setHeroError] = useState(false)
+  const [imageBrowse, setImageBrowse] = useState<{ readonly key: string; readonly assetId: string }>()
   const mediaPaneKey = `qingmu:shooting-pane:${projectId}:${episodeId}:${current?.shotId ?? ''}`
   const [mediaPane, setMediaPane] = useState(() => ({ key: mediaPaneKey, pane: readMediaPane(mediaPaneKey) }))
   // A different shot must never mount the previous shot's generation panel, even for one render.
@@ -143,7 +144,8 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
   }, [onCommitted])
   const [frameHistory, setFrameHistory] = useState<{
     key: string
-    candidates: Readonly<Record<string, FirstFrameHistoryCandidate | undefined>>
+    /** Undefined is unread, null is a failed read, and an array is the settled candidate list. */
+    candidates: Readonly<Record<string, readonly FirstFrameHistoryCandidate[] | null | undefined>>
   }>()
   const historyCandidates = frameHistory?.key === historyScopeKey ? frameHistory.candidates : {}
   useEffect(() => {
@@ -158,13 +160,14 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
       while (index < ids.length && !controller.signal.aborted) {
         const frameId = ids[index++]
         if (!frameId) return
-        try {
-          const items = await frameClient.history({ projectId, episodeId, storyboardRevisionId, frameId }, controller.signal)
+        const settle = (items: readonly FirstFrameHistoryCandidate[] | null): void => {
           if (controller.signal.aborted) return
-          const candidate = items.at(-1)
           setFrameHistory(old => ({ key: historyScopeKey,
-            candidates: { ...(old?.key === historyScopeKey ? old.candidates : {}), [frameId]: candidate } }))
-        } catch { /* A failed history read is not evidence that no image exists. */ }
+            candidates: { ...(old?.key === historyScopeKey ? old.candidates : {}), [frameId]: items } }))
+        }
+        try {
+          settle(await frameClient.history({ projectId, episodeId, storyboardRevisionId, frameId }, controller.signal))
+        } catch { settle(null) }
       }
     }
     void read(); void read()
@@ -265,12 +268,15 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
   const heroUrl = localHeroUrl(heroFrame?.browserUrl, heroFrame?.assetId)
   const dialogue = (current.dialogueRhythm?.cues ?? []).map(cue => cue.verbatimText).filter(Boolean)
   const inspected = inspectedFrame?.key === mediaPaneKey ? inspectedFrame : undefined
+  const imageShotCandidates = historyCandidates[current.shotId] ?? []
+  const browsedImage = imageBrowse?.key === mediaPaneKey
+    ? imageShotCandidates.find(candidate => candidate.assetId === imageBrowse.assetId) : undefined
   const currentPaneLoadsFrame = historyOpen || (firstFrameOpen && inspected?.ownsImagePreview !== false)
     || (!firstFrameOpen && !usable(browsed) && !heroUrl && load === 'ready')
   const sourceUrl = currentPaneLoadsFrame ? inspected?.url : mediaUrl ?? heroMediaUrl
   const sourceIsVideo = !currentPaneLoadsFrame && mediaUrl !== undefined
   const hasFrameCandidate = inspected?.candidate !== undefined
-    || historyCandidates[current.shotId] !== undefined
+    || (historyCandidates[current.shotId]?.length ?? 0) > 0
     || (planningShots.find(item => item.id === current.shotId)?.firstFrameCandidateCount ?? 0) > 0
   const productionAction = shootingPrimary(
     Boolean(heroFrame) || hasFrameCandidate, Boolean(heroFrame), Boolean(visibleStack?.subject.selectedTakeId))
@@ -308,39 +314,52 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
       <aside className={css.shots} aria-label="镜头列表"><h2>镜头 <span>{shots.length}</span></h2>{shots.map((shot) => {
         const hero = projection?.director.heroFrameStoryboards?.shots.find(item => item.shotId === shot.shotId)?.heroFrame
         const viewed = shot.shotId === current.shotId && inspected?.url ? inspected : undefined
-        const candidate = viewed?.candidate ?? historyCandidates[shot.shotId]
+        const candidate = viewed?.candidate ?? historyCandidates[shot.shotId]?.at(-1)
         const thumb = viewed?.url ?? (!candidate || candidate.assetId === hero?.assetId
           ? localHeroUrl(hero?.browserUrl, hero?.assetId) : undefined)
         const summary = shot.shotId === current.shotId ? visibleStack ?? shotStacks[shot.shotId] : shotStacks[shot.shotId]
         const previewTake = shootingPosterVersion(summary)
         const planning = planningShots.find(item => item.id === shot.shotId)
-        const label = summary?.subject.selectedTakeId ? '有视频' : (summary?.subject.versions.length ?? 0) > 0 ? summary?.subject.versions.every(v => v.qualityStatus === 'failed' || v.outputBindingStatus !== 'verified') ? '旧视频未通过' : '待审' : candidate ? candidate.selectionStatus === 'Stale' || candidate.selectionStatus === 'Rejected' || candidate.qualityStatus === 'failed' ? '旧首帧，仅供对照' : candidate.isSelected ? '有首帧' : '首帧待审' : hero || (planning?.firstFrameCandidateCount ?? 0) > 0 ? '有首帧' : Object.hasOwn(historyCandidates, shot.shotId) ? '无有效首帧' : '正在读取'
+        const label = summary?.subject.selectedTakeId ? '有视频' : (summary?.subject.versions.length ?? 0) > 0 ? summary?.subject.versions.every(v => v.qualityStatus === 'failed' || v.outputBindingStatus !== 'verified') ? '旧视频未通过' : '待审' : candidate ? candidate.selectionStatus === 'Stale' || candidate.selectionStatus === 'Rejected' || candidate.qualityStatus === 'failed' ? '旧首帧，仅供对照' : candidate.isSelected ? '有首帧' : '首帧待审' : hero || (planning?.firstFrameCandidateCount ?? 0) > 0 ? '有首帧' : Object.hasOwn(historyCandidates, shot.shotId) ? historyCandidates[shot.shotId] === null ? '首帧状态未知' : '无有效首帧' : '正在读取'
         const title = shootingTitle(shot.title, planning)
-        return <button key={shot.shotId} type="button" aria-label={`镜 ${shot.frameNo} ${title}`} aria-current={shot.shotId === current.shotId} onClick={() => onSelectShotId(shot.shotId)}>{thumb ? <img className={css.shotThumb} src={thumb} loading="lazy" alt={`镜 ${shot.frameNo} 首帧缩略图`} /> : candidate && (shot.shotId !== current.shotId || !currentPaneLoadsFrame) ? <FirstFrameCandidatePreview key={`${historyScopeKey}:${shot.shotId}:${candidate.assetId}`} autoLoad thumbnailClassName={css.shotThumb ?? ''} request={{ projectId, episodeId, storyboardRevisionId, frameId: shot.shotId, assetId: candidate.assetId, expectedMaterializedSha256: candidate.materializedSha256 }} load={frameClient.historyPreview} labels={{ load: '查看首帧', loading: '正在读取首帧', error: '缩略图未载入', ariaLabel: `镜 ${shot.frameNo} 首帧缩略图` }} /> : !candidate && previewTake ? <TakeThumbnail request={{ projectId, episodeId, frameId: shot.shotId, takeId: previewTake.takeId, expectedOutputSha256: previewTake.outputSha256 }} load={port.takePreview} className={css.shotThumb} alt={`镜 ${shot.frameNo} 视频第一帧`} /> : <span className={css.shotThumb}>{candidate ? '首帧候选' : Object.hasOwn(historyCandidates, shot.shotId) ? '暂无首帧' : '正在读取'}</span>}<span className={css.shotText}><small>镜 {shot.frameNo}</small><strong title={title}>{title}</strong><small className={css.shotStatus} data-status={label}><i aria-hidden="true" />{label}</small></span></button>
+        return <button key={shot.shotId} type="button" aria-label={`镜 ${shot.frameNo} ${title}`} aria-current={shot.shotId === current.shotId} onClick={() => onSelectShotId(shot.shotId)}>{thumb ? <img className={css.shotThumb} src={thumb} loading="lazy" alt={`镜 ${shot.frameNo} 首帧缩略图`} /> : candidate && (shot.shotId !== current.shotId || !currentPaneLoadsFrame) ? <FirstFrameCandidatePreview key={`${historyScopeKey}:${shot.shotId}:${candidate.assetId}`} autoLoad thumbnailClassName={css.shotThumb ?? ''} request={{ projectId, episodeId, storyboardRevisionId, frameId: shot.shotId, assetId: candidate.assetId, expectedMaterializedSha256: candidate.materializedSha256 }} load={frameClient.historyPreview} labels={{ load: '查看首帧', loading: '正在读取首帧', error: '缩略图未载入', ariaLabel: `镜 ${shot.frameNo} 首帧缩略图` }} /> : !candidate && previewTake ? <TakeThumbnail request={{ projectId, episodeId, frameId: shot.shotId, takeId: previewTake.takeId, expectedOutputSha256: previewTake.outputSha256 }} load={port.takePreview} className={css.shotThumb} alt={`镜 ${shot.frameNo} 视频第一帧`} /> : <span className={css.shotThumb}>{candidate ? '首帧候选' : historyCandidates[shot.shotId] === null ? '状态未知' : Object.hasOwn(historyCandidates, shot.shotId) ? '暂无首帧' : '正在读取'}</span>}<span className={css.shotText}><small>镜 {shot.frameNo}</small><strong title={title}>{title}</strong><small className={css.shotStatus} data-status={label}><i aria-hidden="true" />{label}</small></span></button>
       })}</aside>
       <main className={css.stage}>
         <div className={css.stageHeading}>
           <div><span>镜 {String(current.frameNo).padStart(2, '0')}</span><h1>{shootingTitle(current.title, planningShots.find(item => item.id === current.shotId))}</h1></div>
-          {sourceUrl !== undefined && <button className={css.zoomButton} type="button" onClick={(event) => { zoomTrigger.current = event.currentTarget; resetZoom(); setZoom(true) }}>放大画面</button>}
+          {sourceUrl !== undefined && browsedImage === undefined && <button className={css.zoomButton} type="button" onClick={(event) => { zoomTrigger.current = event.currentTarget; resetZoom(); setZoom(true) }}>放大画面</button>}
         </div>
         <div className={css.media} data-state={testState ?? (load === 'loading' ? 'loading' : state)}>
           {historyOpen ? <ShootingFirstFrameHistory key={`${mediaPaneKey}:${projection?.director.shotRelations.storyboardRevision?.revisionId}`} scope={{ projectId, episodeId, frameId: current.shotId, storyboardRevisionId: projection?.director.shotRelations.storyboardRevision?.revisionId ?? '' }} onCommitted={refreshExistingMedia} onCandidatePreview={onCandidatePreview} /> : firstFrameOpen ? <ShootingFirstFrame key={mediaPaneKey}
             scope={{ projectId, episodeId, frameId: current.shotId }} onCommitted={refreshExistingMedia}
             onCandidatePreview={onCandidatePreview} />
-            : usable(browsed) ? <div className={css.player}><TakePreviewPlayer request={{
-              projectId, episodeId, frameId: current.shotId, takeId: browsed.takeId,
-              expectedOutputSha256: browsed.outputSha256,
-            }} load={port.takePreview} t={t} onPreviewReady={onPreviewReady} autoLoad /></div>
-              : heroUrl !== undefined ? <div className={css.frame}><span>已选首帧</span><img src={heroUrl} alt={`镜 ${current.frameNo} 已选首帧`} onLoad={() => { setHeroMediaUrl(heroUrl); setHeroError(false) }} onError={() => setHeroError(true)} />{heroError && <p role="alert">首帧暂时无法显示，请刷新后再试。</p>}</div>
-                : load === 'ready' && projection?.director.shotRelations.storyboardRevision?.revisionId ? <ShootingFirstFrameHistory key={`${mediaPaneKey}:${projection.director.shotRelations.storyboardRevision.revisionId}`} scope={{ projectId, episodeId, frameId: current.shotId, storyboardRevisionId: projection.director.shotRelations.storyboardRevision.revisionId }} onCommitted={refreshExistingMedia} onCandidatePreview={onCandidatePreview} />
-                  : <div className={css.canvas}><span>镜 {current.frameNo}</span><strong>{current.title}</strong>
-                    <small>{message(state, load)}</small></div>}
+            : browsedImage !== undefined ? <div className={css.frame}><span>候选浏览 · 不会改变选用</span>
+              <FirstFrameCandidatePreview autoLoad request={{ projectId, episodeId, storyboardRevisionId, frameId: current.shotId,
+                assetId: browsedImage.assetId,
+                expectedMaterializedSha256: browsedImage.materializedSha256 }} load={frameClient.historyPreview}
+              labels={{
+                load: '查看这张候选',
+                loading: '正在读取候选…',
+                error: '候选暂时无法读取，请刷新重试。',
+                ariaLabel: `镜 ${current.frameNo} 首帧候选`,
+              }} /></div>
+              : usable(browsed) ? <div className={css.player}><TakePreviewPlayer request={{
+                projectId, episodeId, frameId: current.shotId, takeId: browsed.takeId,
+                expectedOutputSha256: browsed.outputSha256,
+              }} load={port.takePreview} t={t} onPreviewReady={onPreviewReady} autoLoad /></div>
+                : heroUrl !== undefined ? <div className={css.frame}><span>已选首帧</span><img src={heroUrl} alt={`镜 ${current.frameNo} 已选首帧`} onLoad={() => { setHeroMediaUrl(heroUrl); setHeroError(false) }} onError={() => setHeroError(true)} />{heroError && <p role="alert">首帧暂时无法显示，请刷新后再试。</p>}</div>
+                  : load === 'ready' && projection?.director.shotRelations.storyboardRevision?.revisionId ? <ShootingFirstFrameHistory key={`${mediaPaneKey}:${projection.director.shotRelations.storyboardRevision.revisionId}`} scope={{ projectId, episodeId, frameId: current.shotId, storyboardRevisionId: projection.director.shotRelations.storyboardRevision.revisionId }} onCommitted={refreshExistingMedia} onCandidatePreview={onCandidatePreview} />
+                    : <div className={css.canvas}><span>镜 {current.frameNo}</span><strong>{current.title}</strong>
+                      <small>{message(state, load)}</small></div>}
           {!firstFrameOpen && !historyOpen && <>{testState !== undefined && <p className={css.mediaNotice} role="status">隔离演练状态，不代表真实任务，未提交生成。</p>}{load === 'loading' && <p className={css.mediaNotice} role="status">{message(state, load)}</p>}{load === 'failed' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}{state === 'failed' && load === 'ready' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}</>}
         </div>
         <div className={css.candidates} aria-label="候选画面">{(!historyOpen && !firstFrameOpen ? versions : []).map(version => <button key={version.takeId} type="button" aria-pressed={!firstFrameOpen && !historyOpen && version.takeId === browseId} onClick={() => { showMediaPane('takes'); setBrowseId(version.takeId); if (version.takeId !== browseId) setMediaUrl(undefined) }}>{usable(version) ? <TakeThumbnail request={{ projectId, episodeId, frameId: current.shotId, takeId: version.takeId, expectedOutputSha256: version.outputSha256 }} load={port.takePreview} className={css.candidateThumb} alt={`视频候选 v${version.versionOrdinal} · 视频第一帧`} /> : <span className={css.videoIcon}>素材尚不可用</span>}<span>视频候选 v{version.versionOrdinal}</span><strong>{version.isSelected ? '当前选用' : version.qualityStatus === 'failed' ? '检查未通过' : version.qualityStatus === 'passed' ? '待你审看' : '等待检查'}</strong></button>)}
-          {!firstFrameOpen && !historyOpen && versions.length === 0 && heroUrl && <button type="button" aria-pressed="true" onClick={() => showMediaPane('takes')}><img className={css.candidateThumb} src={heroUrl} alt="当前首帧候选" /><span>原选用首帧</span><strong>已选用</strong></button>}
+          {!firstFrameOpen && !historyOpen && imageShotCandidates.slice().reverse().map(candidate => <button key={candidate.assetId} type="button" aria-pressed={browsedImage?.assetId === candidate.assetId} onClick={() => { setBrowseId(''); setImageBrowse({ key: mediaPaneKey, assetId: candidate.assetId }) }}>
+            <FirstFrameCandidatePreview autoLoad thumbnailClassName={css.candidateThumb ?? ''} request={{ projectId, episodeId, storyboardRevisionId, frameId: current.shotId, assetId: candidate.assetId, expectedMaterializedSha256: candidate.materializedSha256 }} load={frameClient.historyPreview} labels={{ load: '查看候选', loading: '正在读取', error: '缩略图未载入', ariaLabel: `镜 ${current.frameNo} 首帧候选` }} />
+            <span>首帧候选</span><strong>{candidate.isSelected ? '已选用' : candidate.qualityStatus === 'failed' ? '检查未通过' : candidate.selectionStatus === 'Stale' || candidate.selectionStatus === 'Rejected' ? '仅供对照' : '待你审看'}</strong></button>)}
+          {!firstFrameOpen && !historyOpen && versions.length === 0 && heroUrl && !imageShotCandidates.some(candidate => candidate.isSelected) && <button type="button" aria-pressed="true" onClick={() => showMediaPane('takes')}><img className={css.candidateThumb} src={heroUrl} alt="当前首帧候选" /><span>原选用首帧</span><strong>已选用</strong></button>}
         </div>
-        {!firstFrameOpen && !historyOpen && <p className={css.browseNote} data-state={state}>{versions.length === 0 && load === 'ready' && testState === undefined ? '本镜尚无视频候选，已有首帧和要求仍保留。' : message(state, load)}<span>单击候选只切换中区媒体，不会改变选用。</span></p>}
+        {!firstFrameOpen && !historyOpen && <p className={css.browseNote} data-state={state}>{versions.length === 0 && load === 'ready' && testState === undefined ? (hasFrameCandidate ? '本镜尚无视频候选，已有首帧和要求仍保留。' : '本镜还没有首帧。点下方「生成首帧」开始；画面要求在右栏可改。') : message(state, load)}<span>单击候选只切换中区媒体，不会改变选用。</span></p>}
         {selectionError && <p role="alert">{selectionError}</p>}
         <div className={css.reworkActions} aria-label="本镜重做操作">
           {(firstFrameOpen || historyOpen) && <button type="button" onClick={() => showMediaPane('takes')}>返回候选审看</button>}
