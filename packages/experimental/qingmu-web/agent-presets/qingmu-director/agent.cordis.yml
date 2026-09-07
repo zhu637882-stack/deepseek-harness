@@ -19,3 +19,5 @@
 
 - id: qingmu-director-model-tools
   name: '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/model-tools'
+  config:
+    maxOutputBytes: 1048576

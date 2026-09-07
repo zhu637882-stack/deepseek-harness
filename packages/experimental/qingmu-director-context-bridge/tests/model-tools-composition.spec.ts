@@ -86,7 +86,7 @@ function includesExactString(value: unknown, expected: string): boolean {
 }
 
 /** A real Loader preset: host capabilities stay root-owned; native tools mount only below the agent. */
-async function harness(adapter: MockAdapter, sessionRoot?: string, dialogue = false): Promise<Context> {
+async function harness(adapter: MockAdapter, sessionRoot?: string, dialogue = false, sourceNotes = ''): Promise<Context> {
   const presetRoot = fileURLToPath(new URL('../../qingmu-web/agent-presets/', import.meta.url))
 
   const ctx = new Context()
@@ -133,7 +133,7 @@ async function harness(adapter: MockAdapter, sessionRoot?: string, dialogue = fa
   })
   if (dialogue) ctx.provide('qingmuYimengRead', async (endpoint) => {
     if (endpoint === 'script') return { ok: true, value: { found: true, projectId: scope.projectId, episodeId: scope.episodeId,
-      revision: 1, scriptSha256: '0'.repeat(64), script: { scenes: [{ title: '公路',
+      revision: 1, scriptSha256: '0'.repeat(64), script: { sourceNotes, scenes: [{ title: '公路',
         dialogues: [{ lineId: 'line-6', speakerId: 'lina', line: '有人吗？', verbatimText: '有人吗？' }] }] } } }
     if (endpoint !== 'workflow') throw new Error(`unexpected read ${endpoint}`)
     return { ok: true, value: { projectId: scope.projectId, episodeId: scope.episodeId, director: { shotRelations: {
@@ -157,6 +157,26 @@ async function createQingmuAgent(ctx: Context, id: string): Promise<{ agent: Age
 }
 
 describe('Qingmu model tools through a real preset and agent loop', () => {
+  it.each([350000, 1100000])('bounds full-episode dialogue reads without truncation (%i bytes)', async (bytes) => {
+    const adapter = new MockAdapter([toolCallResponse('read-dialogue', 'qingmu_read_dialogue', {}), textResponse('只读完成。')])
+    const notes = 'x'.repeat(bytes)
+    const ctx = await harness(adapter, undefined, true, notes)
+    const handle = await createQingmuAgent(ctx, `large-dialogue-${bytes}`)
+    bind(handle.agent)
+    handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: '读取当前台词。' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, handle.agent)
+    const result = resultText(handle.agent.session.events, 'qingmu_read_dialogue')
+    if (bytes < 1048576) {
+      expect(JSON.parse(result)).toMatchObject({ source: { script: { sourceNotes: notes } } })
+      expect(includesExactString(adapter.requests[1]?.messages, notes)).toBe(true)
+    } else {
+      expect(result).toContain('exceeds maxOutputBytes; no content was truncated')
+      expect(includesExactString(adapter.requests[1]?.messages, notes)).toBe(false)
+    }
+    expect(handle.agent.session.events.filter(event => event.type === 'tool/call').map(event => event.data.name))
+      .toEqual(['qingmu_read_dialogue'])
+    await handle.dispose()
+  })
   it('reads actual dialogue tool results and delivers the impact to the next native model request', async () => {
     const adapter = new MockAdapter([
       toolCallResponse('read-dialogue', 'qingmu_read_dialogue', {}),
