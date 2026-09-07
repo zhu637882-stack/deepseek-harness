@@ -9,7 +9,7 @@ import { isTrustedApiRequest } from '@deepseek-ai/dsh-client-connection/src/api-
  * @returns Route disposer.
  */
 export function registerShootingFirstFrame(server: WebServer, baseUrl: string, fetcher: typeof fetch = globalThis.fetch): () => void {
-  const routes = { preview: 'shooting-preview', submit: '', state: 'shooting-state' } as const
+  const routes = { preview: 'shooting-preview', submit: '', state: 'shooting-state', review: '', confirm: '' } as const
   const disposers = Object.entries(routes).map(([operation, suffix]) => server.register({
     kind: 'exact', path: `/api/qingmu/shooting-first-frame/${operation}`, handler: async (req, res) => {
       res.setHeader('cache-control', 'private, no-store')
@@ -17,18 +17,20 @@ export function registerShootingFirstFrame(server: WebServer, baseUrl: string, f
       const end = (status: number, value: unknown) => { res.statusCode = status; res.end(JSON.stringify(value)) }
       const cookie = req.headers.cookie?.split(';').map(item => item.trim()).find(item => item.startsWith('jason_token='))
       if (!isTrustedApiRequest(req, []) || req.headers.authorization || !cookie) { end(401, { detail: '请恢复青木登录会话' }); return }
-      if (req.method !== (operation === 'state' ? 'GET' : 'POST')) { end(405, { detail: 'method_not_allowed' }); return }
+      const read = operation === 'state' || operation === 'review'
+      if (req.method !== (read ? 'GET' : 'POST')) { end(405, { detail: 'method_not_allowed' }); return }
       const incoming = new URL(req.url ?? '', 'http://localhost')
       const upstream = new URL(`/api/pipeline/first-frames${suffix ? `/${suffix}` : ''}`, baseUrl)
-      if (operation === 'state') {
-        const keys = ['project_id', 'episode_id', 'frame_id', 'request_id']
-        if ([...incoming.searchParams.keys()].length !== 4 || keys.some(key => incoming.searchParams.getAll(key).length !== 1
+      if (read) {
+        const keys = ['project_id', 'episode_id', 'frame_id', ...(operation === 'state' ? ['request_id'] : [])]
+        if ([...incoming.searchParams.keys()].length !== keys.length || keys.some(key => incoming.searchParams.getAll(key).length !== 1
           || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(incoming.searchParams.get(key) ?? ''))) { end(400, { detail: 'invalid_scope' }); return }
-        upstream.search = incoming.search
+        if (operation === 'review') upstream.pathname = `/api/episodes/${incoming.searchParams.get('episode_id')}/storyboard-frames/${incoming.searchParams.get('frame_id')}/human-review`
+        else upstream.search = incoming.search
       } else if (incoming.search) { end(400, { detail: 'unexpected_query' }); return }
       let body: string | undefined
       try {
-        if (operation !== 'state') {
+        if (!read) {
           const parts: Buffer[] = []; let size = 0
           for await (const chunk of req) {
             const bytes = Buffer.from(chunk as Uint8Array); size += bytes.length
@@ -36,9 +38,17 @@ export function registerShootingFirstFrame(server: WebServer, baseUrl: string, f
             parts.push(bytes)
           }
           const value = JSON.parse(Buffer.concat(parts).toString('utf8')) as Record<string, unknown>
-          const keys = ['project_id', 'episode_id', 'frame_ids', ...(operation === 'submit' ? ['candidate_request_id', 'shooting_preflight_id', 'shooting_payload_hash'] : [])]
+          const keys = ['project_id', 'episode_id', 'frame_ids', ...(operation === 'submit' ? ['candidate_request_id', 'shooting_preflight_id', 'shooting_payload_hash'] : operation === 'confirm' ? ['expected_frame_digest', 'idempotency_key'] : [])]
           if (!value || Object.keys(value).sort().join() !== keys.sort().join() || !Array.isArray(value.frame_ids) || value.frame_ids.length !== 1) throw new Error('invalid_request')
-          body = JSON.stringify(value)
+          if (operation === 'confirm') {
+            const ids = [value.project_id, value.episode_id, value.frame_ids[0]]
+            if (ids.some(id => typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id))
+              || typeof value.expected_frame_digest !== 'string' || !/^[a-f0-9]{64}$/.test(value.expected_frame_digest)
+              || typeof value.idempotency_key !== 'string' || !/^[A-Za-z0-9._:-]{8,128}$/.test(value.idempotency_key)) throw new Error('invalid_review_binding')
+            upstream.pathname = `/api/episodes/${value.episode_id}/storyboard-frames/${value.frame_ids[0]}/human-review`
+            upstream.search = '?single_frame=true'
+            body = JSON.stringify({ expected_frame_digest: value.expected_frame_digest, idempotency_key: value.idempotency_key, decision: 'accepted' })
+          } else body = JSON.stringify(value)
         }
         const headers = new Headers({ cookie, accept: 'application/json', origin: upstream.origin, 'content-type': 'application/json' })
         const response = await fetcher(upstream, { method: req.method, headers, redirect: 'error', signal: AbortSignal.timeout(60_000), ...(body === undefined ? {} : { body }) })
