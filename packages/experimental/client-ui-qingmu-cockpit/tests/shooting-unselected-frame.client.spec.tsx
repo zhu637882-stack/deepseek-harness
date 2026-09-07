@@ -48,7 +48,7 @@ it('shows the existing unselected frame instead of an empty shot, without select
 it('lists every first-frame candidate in the strip and previews one on click without adopting', async () => {
   const p = props()
   render(<ShootingReviewWorkspace {...p} />)
-  const marker = await screen.findByText('待你审看')
+  const marker = await screen.findByText('等待检查')
   const card = marker.closest('button')
   expect(card).not.toBeNull()
   fireEvent.click(card!)
@@ -131,7 +131,7 @@ it('uses a newer unselected thumbnail even when an old hero is selected, on swit
   expect(shot5.getByRole('img').getAttribute('src')).toBe('blob:new-first-frame')
   expect(screen.queryByRole('img', { name: '当前首帧候选' })).toBeNull()
   expect(screen.getByText('已选用')).toBeTruthy()
-  expect(screen.getByText('待你审看')).toBeTruthy()
+  expect(screen.getByText('等待检查')).toBeTruthy()
   view.unmount(); render(<ShootingReviewWorkspace {...p} selectedShotId="f6" />)
   await waitFor(() => expect(screen.getByRole('img', { name: '镜 5 首帧缩略图' }).getAttribute('src')).toBe('blob:new-first-frame'))
   expect(api.historyPreview.mock.calls.every(([r]) => r.frameId === 'f5')).toBe(true)
