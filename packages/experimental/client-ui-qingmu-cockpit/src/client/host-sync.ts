@@ -173,6 +173,7 @@ export function createQingmuScenePlanningSavedMessage(
   binding: DirectorContextBindingState,
   method: QingmuAdvisorySaveProof | null,
 ): QingmuScenePlanningSavedMessage | null {
+  if (result.action === 'edit_automatic') return null
   const { scope } = binding.binding
   if (result.projectId !== scope.projectId
     || result.episodeId !== scope.episodeId

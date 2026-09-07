@@ -87,6 +87,83 @@ it('shows a canonical automatic storyboard as read-only without reviving the leg
   expect(port.saveScenePlanning).not.toHaveBeenCalled()
   expect(onSelectShotId).not.toHaveBeenCalled()
 })
+it('saves one automatic shot first-frame requirement, rereads it, and never treats it as generation or approval', async () => {
+  const automatic = { ...automaticReadState(), canonicalStoryboard: {
+    ...automaticReadState().canonicalStoryboard!, shots: [
+      { id: 'automatic_1', frameNo: 1, title: '雨夜入口', imagePromptCn: '原首帧要求' },
+      { id: 'automatic_2', frameNo: 2, title: '街道近景', imagePromptCn: '原近景要求' },
+    ],
+  } }
+  const current = { ...automatic, storyboard: { ...automatic.storyboard, version: 11, sourceHash: 'd'.repeat(64) },
+    canonicalStoryboard: { ...automatic.canonicalStoryboard, revision: 11, sourceHash: 'd'.repeat(64) } }
+  const result: ScenePlanningResult = { schema: 'jason.qingmu-scene-planning-result.v1', action: 'edit_automatic',
+    projectId: automatic.projectId, episodeId: automatic.episodeId, idempotencyKey: 'automatic-intent-1',
+    requestSha256: 'c'.repeat(64), commandReceiptId: 'receipt_automatic_1', eventId: 'event_automatic_1',
+    shotId: 'automatic_1', storyboard: current.storyboard, providerCalls: 0, stageStarted: false, approvalGranted: false }
+  const port = {
+    readScenePlanning: vi.fn().mockResolvedValueOnce(automatic).mockResolvedValueOnce(current),
+    requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(async () => result), recoverScenePlanning: vi.fn() }
+  const onCommitted = vi.fn(async () => {}), onSelectShotId = vi.fn(), onUnsavedChange = vi.fn()
+  render(<ScenePlanningWorkspace {...automatic} port={port} onCommitted={onCommitted}
+    onSelectShotId={onSelectShotId} onUnsavedChange={onUnsavedChange} />)
+  const field = await screen.findByLabelText('首帧画面要求') as HTMLTextAreaElement
+  fireEvent.change(field, { target: { value: '雨夜入口的低机位首帧' } })
+  await waitFor(() => { expect(onUnsavedChange).toHaveBeenLastCalledWith(true) })
+  fireEvent.click(screen.getByRole('button', { name: '保存首帧画面要求' }))
+  await waitFor(() => { expect(port.saveScenePlanning).toHaveBeenCalledOnce(); expect(port.readScenePlanning).toHaveBeenCalledTimes(2) })
+  expect(port.saveScenePlanning.mock.calls[0]?.[0].request).toEqual(expect.objectContaining({
+    action: 'edit_automatic', shotId: 'automatic_1', imagePromptCn: '雨夜入口的低机位首帧',
+  }))
+  expect(onCommitted).toHaveBeenCalledOnce(); expect(onSelectShotId).toHaveBeenCalledWith('automatic_1')
+  await waitFor(() => { expect(onUnsavedChange).toHaveBeenLastCalledWith(false) })
+  expect(screen.getByText(/不生成、不签收/)).toBeTruthy()
+})
+it('recovers an unknown automatic save against a newer current revision without resubmitting it', async () => {
+  const latest = { ...automaticReadState(), storyboard: { id: 'revision_12', version: 12, sourceHash: 'f'.repeat(64), status: 'Ready' as const },
+    canonicalStoryboard: { ...automaticReadState().canonicalStoryboard!, revision: 12, sourceHash: 'f'.repeat(64), shots: [
+      { id: 'automatic_1', frameNo: 1, title: '雨夜入口', imagePromptCn: '当前首帧要求' },
+    ] } }
+  const request = { action: 'edit_automatic', expectedScriptRevision: 1, expectedScriptSha256: 'a'.repeat(64),
+    expectedStoryboardRevision: 10, expectedStoryboardSha256: 'b'.repeat(64), shotId: 'automatic_1', imagePromptCn: '未知结果的首帧要求' }
+  localStorage.setItem('qingmu.scene-planning.v1:project_1:episode_1:automatic-frame', JSON.stringify({
+    shotId: 'automatic_1', imagePromptCn: request.imagePromptCn, dirty: true, pending: { projectId: 'project_1', episodeId: 'episode_1', idempotencyKey: 'automatic-unknown-1', request },
+  }))
+  const receipt: ScenePlanningResult = { schema: 'jason.qingmu-scene-planning-result.v1', action: 'edit_automatic',
+    projectId: 'project_1', episodeId: 'episode_1', idempotencyKey: 'automatic-unknown-1', requestSha256: 'e'.repeat(64),
+    commandReceiptId: 'receipt_automatic_2', eventId: 'event_automatic_2', shotId: 'automatic_1',
+    storyboard: { id: 'revision_11', version: 11, sourceHash: 'd'.repeat(64), status: 'Ready' }, providerCalls: 0, stageStarted: false, approvalGranted: false }
+  const port = { readScenePlanning: vi.fn().mockResolvedValue(latest), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn(async () => receipt) }
+  const onUnsavedChange = vi.fn()
+  render(<ScenePlanningWorkspace {...latest} port={port} onCommitted={vi.fn(async () => {})}
+    onSelectShotId={vi.fn()} onUnsavedChange={onUnsavedChange} />)
+  await waitFor(() => { expect(onUnsavedChange).toHaveBeenLastCalledWith(true) })
+  fireEvent.click(await screen.findByRole('button', { name: '读取同一保存回执' }))
+  await waitFor(() => { expect(port.recoverScenePlanning).toHaveBeenCalledOnce() })
+  expect(port.saveScenePlanning).not.toHaveBeenCalled()
+})
+it('rejects a same-revision automatic receipt with a different source hash and keeps its pending intent', async () => {
+  const automatic = { ...automaticReadState(), canonicalStoryboard: {
+    ...automaticReadState().canonicalStoryboard!, shots: [{ id: 'automatic_1', frameNo: 1, title: '雨夜入口', imagePromptCn: '原首帧要求' }],
+  } }
+  const current = { ...automatic, storyboard: { ...automatic.storyboard, version: 11, sourceHash: 'e'.repeat(64) },
+    canonicalStoryboard: { ...automatic.canonicalStoryboard!, revision: 11, sourceHash: 'e'.repeat(64) } }
+  const receipt: ScenePlanningResult = { schema: 'jason.qingmu-scene-planning-result.v1', action: 'edit_automatic',
+    projectId: 'project_1', episodeId: 'episode_1', idempotencyKey: 'mismatch-receipt-1', requestSha256: 'c'.repeat(64),
+    commandReceiptId: 'receipt_mismatch_1', eventId: 'event_mismatch_1', shotId: 'automatic_1',
+    storyboard: { id: 'revision_11', version: 11, sourceHash: 'd'.repeat(64), status: 'Ready' }, providerCalls: 0, stageStarted: false, approvalGranted: false }
+  const port = {
+    readScenePlanning: vi.fn().mockResolvedValueOnce(automatic).mockResolvedValueOnce(current),
+    requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(async () => receipt), recoverScenePlanning: vi.fn() }
+  render(<ScenePlanningWorkspace {...automatic} port={port} onCommitted={vi.fn(async () => {})}
+    onSelectShotId={vi.fn()} onUnsavedChange={vi.fn()} />)
+  fireEvent.change(await screen.findByLabelText('首帧画面要求'), { target: { value: '新首帧要求' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存首帧画面要求' }))
+  await screen.findByRole('alert')
+  expect(localStorage.getItem('qingmu.scene-planning.v1:project_1:episode_1:automatic-frame')).toContain('pending')
+})
 it('binds canonical shot selection to the current session without opening the legacy planner', async () => {
   const automatic = automaticReadState()
   const port = { readScenePlanning: vi.fn(async () => automatic), requestDirectorProposal: unavailableDirectorProposal(),

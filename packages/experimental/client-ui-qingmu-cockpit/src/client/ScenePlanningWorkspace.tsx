@@ -1,6 +1,6 @@
 /** Script-to-scene planning over canonical Yimeng reads and durable commands. */
 import { useEffect, useRef, useState } from 'react'
-import type { PlanningBase, PlanningScene, PlanningShot, ScenePlanningRequest, ScenePlanningState, ScenePlanningResult } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import type { AutomaticPlanningOperation, AutomaticScenePlanningResult, ImportedScenePlanningResult, PlanningBase, PlanningScene, PlanningShot, ScenePlanningRequest, ScenePlanningState, ScenePlanningResult } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { DirectorProposalItem, DirectorReplayProposal } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type {
   DirectorPaidAvailability,
@@ -33,6 +33,12 @@ interface LocalPlan {
   dirty: boolean
   pending?: ScenePlanningRequest
   pendingAdvisory?: QingmuAdvisorySaveProof
+}
+interface AutomaticLocalPlan {
+  shotId: string
+  imagePromptCn: string
+  dirty: boolean
+  pending?: ScenePlanningRequest
 }
 const retainedInputLimit = 98304
 const labels = { title: '镜头名称', narrative: '叙事目的', visual: '画面描述', action: '动作与表演' } as const
@@ -144,6 +150,17 @@ function storedPlan(key: string): LocalPlan | null {
     return retainedInput(raw) === null ? null : raw as LocalPlan
   } catch { return null }
 }
+function automaticDraft(value: unknown): AutomaticLocalPlan | null {
+  const draft = objectOf(value)
+  if (draft === null || typeof draft.shotId !== 'string' || !/^[A-Za-z0-9_.-]+$/u.test(draft.shotId)
+    || typeof draft.imagePromptCn !== 'string' || draft.imagePromptCn.length < 1 || draft.imagePromptCn.length > 20000
+    || typeof draft.dirty !== 'boolean') return null
+  return { shotId: draft.shotId, imagePromptCn: draft.imagePromptCn, dirty: draft.dirty,
+    ...(draft.pending === undefined ? {} : { pending: draft.pending as ScenePlanningRequest }) }
+}
+function storedAutomaticDraft(key: string): AutomaticLocalPlan | null {
+  try { return automaticDraft(JSON.parse(localStorage.getItem(key) ?? 'null')) } catch { return null }
+}
 
 /** Treat browser persistence as untrusted and bind a pending RPC to the current canonical object before I/O. */
 function validatedPendingIntent(
@@ -151,6 +168,7 @@ function validatedPendingIntent(
   currentState: ScenePlanningState | null,
   projectId: string,
   episodeId: string,
+  allowStaleAutomatic = false,
 ): ScenePlanningRequest | null {
   const intent = objectOf(value)
   const request = objectOf(intent?.request)
@@ -161,8 +179,24 @@ function validatedPendingIntent(
     || intent.episodeId !== episodeId
     || typeof intent.idempotencyKey !== 'string'
     || !/^[A-Za-z0-9._:-]{8,128}$/u.test(intent.idempotencyKey)
-    || request === null
-    || typeof request.sceneIndex !== 'number'
+    || request === null) return null
+  if (request.action === 'edit_automatic') {
+    const canonical = currentState.canonicalStoryboard
+    const formatted = typeof request.shotId === 'string'
+      && typeof request.imagePromptCn === 'string' && request.imagePromptCn.length >= 1 && request.imagePromptCn.length <= 20000
+      && typeof request.expectedScriptRevision === 'number' && Number.isSafeInteger(request.expectedScriptRevision) && request.expectedScriptRevision >= 1
+      && typeof request.expectedScriptSha256 === 'string' && /^[a-f0-9]{64}$/u.test(request.expectedScriptSha256)
+      && typeof request.expectedStoryboardRevision === 'number' && Number.isSafeInteger(request.expectedStoryboardRevision) && request.expectedStoryboardRevision >= 1
+      && typeof request.expectedStoryboardSha256 === 'string' && /^[a-f0-9]{64}$/u.test(request.expectedStoryboardSha256)
+    if (!formatted) return null
+    if (allowStaleAutomatic) return value as ScenePlanningRequest
+    return canonical?.shots?.some(shot => shot.id === request.shotId)
+      && request.expectedScriptRevision === currentState.scriptRevision
+      && request.expectedScriptSha256 === currentState.scriptSha256
+      && request.expectedStoryboardRevision === canonical.revision
+      && request.expectedStoryboardSha256 === canonical.sourceHash ? value as ScenePlanningRequest : null
+  }
+  if (typeof request.sceneIndex !== 'number'
     || !Number.isSafeInteger(request.sceneIndex)
     || !currentState.scenes.some(scene => scene.sceneIndex === request.sceneIndex)) return null
   if (request.action === 'edit') {
@@ -211,8 +245,10 @@ export function ScenePlanningWorkspace({
 }) {
   const connection = useDirectorConnection(directorConnection)
   const key = `qingmu.scene-planning.v1:${projectId}:${episodeId}`
+  const automaticKey = `${key}:automatic-frame`
   const [state, setState] = useState<ScenePlanningState | null>(null)
   const [local, setLocal] = useState<LocalPlan | null>(() => storedPlan(key))
+  const [automatic, setAutomatic] = useState<AutomaticLocalPlan | null>(() => storedAutomaticDraft(`${key}:automatic-frame`))
   const [retained, setRetained] = useState<LocalPlan | null>(() => retainedInput(storedPlan(`${key}:retained-input`)))
   const [sceneIndex, setSceneIndex] = useState(local?.sceneIndex ?? 1)
   const [index, setIndex] = useState(local?.activeIndex ?? 0)
@@ -270,6 +306,13 @@ export function ScenePlanningWorkspace({
       setLocal(next); setPreview(false)
     } catch { setError('浏览器不能保存恢复标记，请允许本地存储后再操作。') }
   }
+  const updateAutomatic = (next: AutomaticLocalPlan | null) => {
+    try {
+      if (next === null) localStorage.removeItem(automaticKey)
+      else localStorage.setItem(automaticKey, JSON.stringify(next))
+      setAutomatic(next)
+    } catch { setError('浏览器不能保存首帧画面要求，请允许本地存储后再操作。') }
+  }
   useEffect(() => {
     let active = true
     void port.readScenePlanning({ projectId, episodeId }).then((next) => {
@@ -316,12 +359,12 @@ export function ScenePlanningWorkspace({
     // Scope remounts this workspace; initial hydration must not replace local edits.
   }, [projectId, episodeId, port, hostSync])
   useEffect(() => {
-    const dirty = Boolean(local?.dirty || local?.pending)
+    const dirty = Boolean(local?.dirty || local?.pending || automatic?.dirty || automatic?.pending)
     onUnsavedChange(dirty)
     const prevent = (event: BeforeUnloadEvent) => { if (dirty) event.preventDefault() }
     window.addEventListener('beforeunload', prevent)
     return () => { window.removeEventListener('beforeunload', prevent); onUnsavedChange(false) }
-  }, [local, onUnsavedChange])
+  }, [automatic, local, onUnsavedChange])
   const scene = state?.scenes.find(s => s.sceneIndex === (local?.sceneIndex ?? sceneIndex))
   const planningScene = isPlanningScene(scene) ? scene : undefined
   const current = local?.shots[index]
@@ -511,7 +554,7 @@ export function ScenePlanningWorkspace({
     setAdoptedPaidItems(items => [...new Set([...items, id])])
   }
   const finish = async (
-    result: ScenePlanningResult,
+    result: ImportedScenePlanningResult,
     advisory: QingmuAdvisorySaveProof | null,
     intendedShotId?: string,
   ) => {
@@ -576,6 +619,52 @@ export function ScenePlanningWorkspace({
     }
     if (warnings.length > 0) setError(`规划已保存。${warnings.join(' ')}`)
   }
+  const finishAutomatic = async (result: AutomaticScenePlanningResult, intent: ScenePlanningRequest) => {
+    if (!isLive()) return
+    const next = await port.readScenePlanning({ projectId, episodeId }, controller.current.signal)
+    const canonical = next.canonicalStoryboard
+    if (!isLive() || result.projectId !== projectId || result.episodeId !== episodeId
+      || canonical === null || canonical === undefined || canonical.revision < result.storyboard.version) {
+      throw new Error('409 automatic_planning_receipt_scope_mismatch')
+    }
+    if (!canonical.shots?.some(shot => shot.id === result.shotId)
+      || (canonical.revision === result.storyboard.version && canonical.sourceHash !== result.storyboard.sourceHash)) {
+      throw new Error('409 automatic_planning_receipt_scope_mismatch')
+    }
+    setState(next); setReceipt(result)
+    setAutomatic((current) => {
+      if (current?.pending?.idempotencyKey !== intent.idempotencyKey || current.shotId !== result.shotId) return current
+      try { localStorage.removeItem(automaticKey) } catch { /* In-memory result remains scoped. */ }
+      return null
+    })
+    onSelectShotId(result.shotId)
+    await onCommitted()
+  }
+  const runAutomatic = async (recover: boolean, draftOverride?: AutomaticLocalPlan) => {
+    const draft = draftOverride ?? automatic
+    const currentState = state
+    const canonical = currentState?.canonicalStoryboard
+    if (lock.current || draft === null || currentState === null || canonical?.shots === undefined) return
+    lock.current = true; setBusy(true); setError('')
+    try {
+      const intent = draft.pending ?? (() => {
+        if (currentState.scriptSha256 === null) throw new Error('请先保存剧本')
+        const request: AutomaticPlanningOperation = { action: 'edit_automatic', expectedScriptRevision: currentState.scriptRevision,
+          expectedScriptSha256: currentState.scriptSha256, expectedStoryboardRevision: canonical.revision,
+          expectedStoryboardSha256: canonical.sourceHash, shotId: draft.shotId, imagePromptCn: draft.imagePromptCn }
+        return { projectId, episodeId, idempotencyKey: crypto.randomUUID(), request }
+      })()
+      if (validatedPendingIntent(intent, currentState, projectId, episodeId, recover) === null) throw new Error('409 automatic_planning_pending_scope_mismatch')
+      const pending = { ...draft, pending: intent }
+      updateAutomatic(pending)
+      const result = recover
+        ? await port.recoverScenePlanning(intent, controller.current.signal)
+        : await port.saveScenePlanning(intent, controller.current.signal)
+      if (result.action !== 'edit_automatic') throw new Error('409 automatic_planning_receipt_action_mismatch')
+      await finishAutomatic(result, intent)
+    } catch (e) { if (isLive()) setError(errorText(e)) }
+    finally { lock.current = false; if (isLive()) setBusy(false) }
+  }
   const run = async (recover: boolean) => {
     if (lock.current) return
     lock.current = true; setBusy(true); setError('')
@@ -584,11 +673,9 @@ export function ScenePlanningWorkspace({
         if (local?.pending) {
           const intent = validatedPendingIntent(local.pending, state, projectId, episodeId)
           if (intent === null) throw new Error('409 planning_pending_scope_mismatch')
-          await finish(
-            await port.recoverScenePlanning(intent, controller.current.signal),
-            local.pendingAdvisory ?? null,
-            intent.request.action === 'edit' ? intent.request.shotId : undefined,
-          )
+          const result = await port.recoverScenePlanning(intent, controller.current.signal)
+          if (result.action === 'edit_automatic') throw new Error('409 planning_receipt_action_mismatch')
+          await finish(result, local.pendingAdvisory ?? null, intent.request.action === 'edit' ? intent.request.shotId : undefined)
         }
         else {
           const next = await port.readScenePlanning({ projectId, episodeId }, controller.current.signal)
@@ -686,11 +773,9 @@ export function ScenePlanningWorkspace({
         const pending = { ...local, pending: scopedIntent, ...(advisory === null ? {} : { pendingAdvisory: advisory }) }
         localStorage.setItem(key, JSON.stringify(pending))
         setLocal(pending)
-        await finish(
-          await port.saveScenePlanning(scopedIntent, controller.current.signal),
-          advisory,
-          scopedIntent.request.action === 'edit' ? scopedIntent.request.shotId : undefined,
-        )
+        const result = await port.saveScenePlanning(scopedIntent, controller.current.signal)
+        if (result.action === 'edit_automatic') throw new Error('409 planning_receipt_action_mismatch')
+        await finish(result, advisory, scopedIntent.request.action === 'edit' ? scopedIntent.request.shotId : undefined)
       }
     } catch (e) {
       if (!isLive()) return
@@ -747,8 +832,34 @@ export function ScenePlanningWorkspace({
       }}>保留输入副本，载入已存在镜头</button>}
       {canonicalStoryboard && <section className={css.notice} role="status" aria-label="自动分镜已建立">
         <h3>青木已自动建立 {canonicalStoryboard.shotCount} 个镜头</h3>
-        <p>这 {canonicalStoryboard.shotCount} 个镜头来自当前权威自动分镜。本页的旧场景规划不适用；不会重置、保存或覆盖它们。</p>
-        <p>主镜头工作区在本页下方“已有提示词、Take 与高级分镜”中。旧场景规划不可写；后续动作仍受各自确认/门禁。</p>
+        <p>这 {canonicalStoryboard.shotCount} 个镜头来自当前权威自动分镜；旧场景规划不适用。这里只保存一个镜头的首帧画面要求；不生成、不签收，也不改 imported 场景规划。</p>
+        <p>已有提示词、Take 与高级分镜仍在其原工作区，后续动作仍受各自确认/门禁。</p>
+        {canonicalStoryboard.shots === undefined && <p>当前读取尚未提供镜头帧，不能编辑画面要求；请读取恢复。</p>}
+        {canonicalStoryboard.shots !== undefined && canonicalStoryboard.shots.length > 0 && ((shots) => {
+          const selected = shots.find(shot => shot.id === automatic?.shotId) ?? shots[0]
+          if (selected === undefined) return null
+          const selectedDraft = automatic !== null && automatic.shotId === selected.id ? automatic : null
+          const draft = selectedDraft === null ? selected.imagePromptCn : selectedDraft.imagePromptCn
+          const pending = selectedDraft?.pending
+          return <fieldset disabled={busy} className={css.editor}>
+            <legend>自动镜头首帧画面要求</legend>
+            <label>镜头<select aria-label="自动分镜镜头" value={selected.id} disabled={Boolean(pending)} onChange={(e) => {
+              const next = shots.find(shot => shot.id === e.target.value)
+              if (next) updateAutomatic({ shotId: next.id, imagePromptCn: next.imagePromptCn, dirty: false })
+            }}>{shots.map(shot => <option key={shot.id} value={shot.id}>{String(shot.frameNo).padStart(2, '0')} · {shot.title}</option>)}</select></label>
+            <label>首帧画面要求<textarea aria-label="首帧画面要求" rows={4} maxLength={20000} value={draft} disabled={Boolean(pending)} onChange={(e) => {
+              updateAutomatic({ shotId: selected.id, imagePromptCn: e.target.value, dirty: e.target.value !== selected.imagePromptCn,
+                ...(pending === undefined ? {} : { pending }) })
+            }} /></label>
+            <div className={css.actions}>
+              {pending && <button type="button" onClick={() => { void runAutomatic(true) }}>读取同一保存回执</button>}
+              <button type="button" className={css.primary} disabled={!selectedDraft?.dirty || !draft.trim() || draft.length > 20000 || Boolean(pending)} onClick={() => {
+                const next = { shotId: selected.id, imagePromptCn: draft, dirty: true }
+                updateAutomatic(next); void runAutomatic(false, next)
+              }}>保存首帧画面要求</button>
+            </div>
+          </fieldset>
+        })(canonicalStoryboard.shots)}
       </section>}
       {!canonicalStoryboard && !state?.scenes.length && <p>尚无可规划场景。请先到“剧本与资产”确认导入并保存剧本。</p>}
       {planningScene && <details open={!local}><summary>已保存原文 · 只读对照</summary><p>{planningScene.actionDescription || '原文未提供动作描述'}</p>

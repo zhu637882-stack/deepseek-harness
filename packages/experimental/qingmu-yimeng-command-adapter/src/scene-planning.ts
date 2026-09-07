@@ -25,10 +25,28 @@ export type PlanningOperation = PlanningBase & (
   { readonly action: 'initialize'; readonly shots: readonly PlanningShot[] } |
   { readonly action: 'edit'; readonly shotId: string; readonly shot: PlanningShot }
 )
+/** One editable first-frame requirement owned by an existing automatic shot. */
+export interface AutomaticPlanningShot {
+  readonly id: string
+  readonly frameNo: number
+  readonly title: string
+  readonly imagePromptCn: string
+}
+/** This command edits one automatic frame requirement; it never carries imported scene fields. */
+export interface AutomaticPlanningOperation {
+  readonly action: 'edit_automatic'
+  readonly expectedScriptRevision: number
+  readonly expectedScriptSha256: string
+  readonly expectedStoryboardRevision: number
+  readonly expectedStoryboardSha256: string
+  readonly shotId: string
+  readonly imagePromptCn: string
+}
+export type AnyPlanningOperation = PlanningOperation | AutomaticPlanningOperation
 /** A durable owner-scoped intent; recovery uses exactly this request. */
 export interface ScenePlanningRequest extends CreationScope {
   readonly idempotencyKey: string
-  readonly request: PlanningOperation
+  readonly request: AnyPlanningOperation
 }
 /** Structural Ready means an immutable planning snapshot, never content approval. */
 export interface PlanningRevision { readonly id: string; readonly version: number; readonly sourceHash: string; readonly status: 'Ready' }
@@ -38,6 +56,8 @@ export interface CanonicalStoryboard {
   readonly sourceHash: string
   readonly shotCount: number
   readonly origin: 'automatic'
+  /** Existing automatic frames; absence remains valid for older read projections. */
+  readonly shots?: readonly AutomaticPlanningShot[]
 }
 /** Original imported scene coordinates; sceneIndex is not a global entity ID. */
 export interface PlanningSource {
@@ -83,15 +103,8 @@ export interface ScenePlanningState extends CreationScope {
   } | null
 }
 /** Persisted IDs and the original receipt, without generation or approval. */
-export interface ScenePlanningResult extends CreationScope {
+interface ScenePlanningResultBase extends CreationScope {
   readonly schema: 'jason.qingmu-scene-planning-result.v1'
-  readonly action: 'initialize' | 'edit'
-  readonly sceneId: string
-  readonly seriesId: string
-  readonly shotIds: readonly string[]
-  readonly actorIds: Readonly<Record<string, string>>
-  readonly source: PlanningSource
-  readonly storyboard: PlanningRevision
   readonly idempotencyKey: string
   readonly requestSha256: string
   readonly commandReceiptId: string
@@ -100,6 +113,23 @@ export interface ScenePlanningResult extends CreationScope {
   readonly stageStarted: false
   readonly approvalGranted: false
 }
+/** Receipt for imported planning; its original fields remain unchanged. */
+export interface ImportedScenePlanningResult extends ScenePlanningResultBase {
+  readonly action: 'initialize' | 'edit'
+  readonly sceneId: string
+  readonly seriesId: string
+  readonly shotIds: readonly string[]
+  readonly actorIds: Readonly<Record<string, string>>
+  readonly source: PlanningSource
+  readonly storyboard: PlanningRevision
+}
+/** Receipt for one automatic-frame edit; it deliberately contains no imported planning fields. */
+export interface AutomaticScenePlanningResult extends ScenePlanningResultBase {
+  readonly action: 'edit_automatic'
+  readonly shotId: string
+  readonly storyboard: PlanningRevision
+}
+export type ScenePlanningResult = ImportedScenePlanningResult | AutomaticScenePlanningResult
 interface Helpers {
   readonly inputError: (message: string) => Error
   readonly responseError: (message: string) => Error
@@ -149,6 +179,16 @@ function canonicalStoryboard(value: unknown, fail: Fail): void {
   integer(storyboard.revision, fail, 1); digest(storyboard.sourceHash, fail)
   integer(storyboard.shotCount, fail, 1)
   if (storyboard.origin !== 'automatic') throw fail('canonical storyboard origin invalid')
+  if (storyboard.shots !== undefined) {
+    if (!Array.isArray(storyboard.shots) || storyboard.shots.length !== storyboard.shotCount) throw fail('canonical storyboard shots invalid')
+    const shotIds = new Set<string>()
+    for (const value of storyboard.shots) {
+      const frame = obj(value, fail); const shotId = id(frame.id, fail)
+      if (shotIds.has(shotId)) throw fail('canonical storyboard shot identity invalid')
+      shotIds.add(shotId); integer(frame.frameNo, fail, 1); str(frame.title, fail, 64000)
+      if (typeof frame.imagePromptCn !== 'string' || frame.imagePromptCn.length > 20000) throw fail('canonical storyboard image prompt invalid')
+    }
+  }
 }
 function source(value: unknown, fail: Fail): void {
   const s = obj(value, fail)
@@ -180,13 +220,20 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
     const key = str(raw.idempotencyKey, f, 128)
     if (!/^[A-Za-z0-9._:-]{8,128}$/.test(key)) throw f('planning intent invalid')
     const r = obj(raw.request, f)
-    integer(r.sceneIndex, f, 1); integer(r.expectedScriptRevision, f, 1); digest(r.expectedScriptSha256, f)
+    integer(r.expectedScriptRevision, f, 1); digest(r.expectedScriptSha256, f)
     integer(r.expectedStoryboardRevision, f)
-    if (r.expectedStoryboardSha256 !== null || r.expectedStoryboardRevision !== 0) digest(r.expectedStoryboardSha256, f)
+    if (r.action === 'edit_automatic') {
+      if (Object.keys(r).sort().join() !== ['action', 'expectedScriptRevision', 'expectedScriptSha256', 'expectedStoryboardRevision', 'expectedStoryboardSha256', 'imagePromptCn', 'shotId'].join()) throw f('automatic planning fields invalid')
+      if (typeof r.expectedStoryboardRevision !== 'number' || r.expectedStoryboardRevision < 1 || typeof r.expectedStoryboardSha256 !== 'string') throw f('automatic planning revision invalid')
+      digest(r.expectedStoryboardSha256, f); id(r.shotId, f); str(r.imagePromptCn, f, 20000)
+    } else {
+      integer(r.sceneIndex, f, 1)
+      if (r.expectedStoryboardSha256 !== null || r.expectedStoryboardRevision !== 0) digest(r.expectedStoryboardSha256, f)
+    }
     if (r.action === 'initialize') {
       if (!Array.isArray(r.shots) || r.shots.length < 1 || r.shots.length > 8) throw f('planning shot limit')
       for (const s of r.shots) shot(s, f)
-    } else if (r.action === 'edit') { id(r.shotId, f); shot(r.shot, f) } else throw f('planning action invalid')
+    } else if (r.action === 'edit') { id(r.shotId, f); shot(r.shot, f) } else if (r.action !== 'edit_automatic') throw f('planning action invalid')
     const encoded = helpers.canonicalJson(r, 'planning request')
     if (Buffer.byteLength(encoded) > 98304) throw f('planning payload too large')
     requestSha = createHash('sha256').update(encoded).digest('hex')
@@ -231,10 +278,21 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
       }
     } else {
       if (r.schema !== 'jason.qingmu-scene-planning-result.v1' || r.idempotencyKey !== raw.idempotencyKey || r.requestSha256 !== requestSha) throw b('planning receipt mismatch')
-      for (const k of ['sceneId', 'seriesId', 'commandReceiptId', 'eventId']) id(r[k], b)
-      ids(r.shotIds, b); source(r.source, b); revision(r.storyboard, b)
-      const s = obj(r.source, b), request = obj(raw.request, f)
-      if (r.action !== request.action || s.sceneIndex !== request.sceneIndex || s.scriptRevision !== request.expectedScriptRevision || s.scriptSha256 !== request.expectedScriptSha256) throw b('planning receipt source mismatch')
+      for (const k of ['commandReceiptId', 'eventId']) id(r[k], b)
+      const request = obj(raw.request, f)
+      if (r.action !== request.action) throw b('planning receipt action mismatch')
+      if (request.action === 'edit_automatic') {
+        if (Object.keys(r).sort().join() !== ['action', 'approvalGranted', 'commandReceiptId', 'episodeId', 'eventId', 'idempotencyKey', 'projectId', 'providerCalls', 'requestSha256', 'schema', 'shotId', 'stageStarted', 'storyboard'].join()) throw b('automatic planning receipt fields invalid')
+        if (r.shotId !== request.shotId) throw b('automatic planning receipt shot mismatch')
+        id(r.shotId, b); revision(r.storyboard, b)
+        const storyboard = obj(r.storyboard, b)
+        if (storyboard.version !== request.expectedStoryboardRevision + 1) throw b('automatic planning receipt revision mismatch')
+      } else {
+        for (const k of ['sceneId', 'seriesId']) id(r[k], b)
+        ids(r.shotIds, b); source(r.source, b); revision(r.storyboard, b)
+        const s = obj(r.source, b)
+        if (s.sceneIndex !== request.sceneIndex || s.scriptRevision !== request.expectedScriptRevision || s.scriptSha256 !== request.expectedScriptSha256) throw b('planning receipt source mismatch')
+      }
     }
     return r
   } }
