@@ -61,7 +61,7 @@ it('adopts a passed first-frame candidate directly from the strip without genera
   api.history.mockImplementation(async ({ frameId }) => frameId === 'f5' ? [{ ...image, qualityStatus: 'passed' }] : [])
   const p = props()
   render(<ShootingReviewWorkspace {...p} />)
-  const adopt = await screen.findByRole('button', { name: '设为首选' })
+  const adopt = await screen.findByRole('button', { name: '就用这张' })
   fireEvent.click(adopt)
   await waitFor(() => expect(api.select).toHaveBeenCalledTimes(1))
   expect(p.onProductionAction).not.toHaveBeenCalled()

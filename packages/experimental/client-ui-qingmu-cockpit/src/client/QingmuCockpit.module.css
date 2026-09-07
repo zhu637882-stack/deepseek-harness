@@ -1826,3 +1826,9 @@
     animation-iteration-count: 1 !important;
   }
 }
+
+.steps { display:flex; gap:4px; list-style:none; padding:0; margin:8px 0; }
+.steps li { flex:1; padding:6px 8px; border:1px solid var(--line); border-radius:4px; font-size:12px; color:var(--muted); text-align:center; }
+.steps li[data-state='done'] { border-color:var(--accent); color:var(--accent); }
+.steps li[data-state='doing'] { border-color:var(--muted); color:var(--text); }
+.steps li[data-state='blocked'] { border-color:#8a5a44; color:#d8a184; }

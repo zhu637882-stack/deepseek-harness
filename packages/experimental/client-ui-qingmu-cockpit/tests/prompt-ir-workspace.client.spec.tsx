@@ -423,7 +423,7 @@ function createPort(options: {
     quoteReady: true, dispatchReady: false, quoteBlockers: [], dispatchBlockers: options.videoDispatchBlockers ?? ['operator_paid_confirmation_required'],
     requiredPaidConfirmationText: '我确认本次镜头视频生成最高费用为 0.3000 CNY。', requiredPaidConfirmationTextSha256: 'b'.repeat(64),
   } as const))
-  let firstFrameSelected = false
+  let firstFrameSelected = options.firstFrameSelected === true
   let firstFrameIdempotencyKey = 'first-frame-select-1'
   const firstFrameReceipt = () => ({ schema: 'jason.qingmu-first-frame-selection-receipt.v1', selectionIdentity: 'selection-first-1', actorUserId: 'actor-1', naturalPersonId: 'person-1', projectId: PROJECT_ID, episodeId: EPISODE_ID, storyboardRevisionId: STORYBOARD_REVISION_ID, frameId: FRAME_ID, selectedAssetId: 'asset-first-frame-1', selectedAssetSha256: 'e'.repeat(64), selectedMaterializedSha256: 'e'.repeat(64), selectionStatus: 'Selected', idempotencyKey: firstFrameIdempotencyKey, requestSha256: 'a'.repeat(64), intentSessionSha256: 'b'.repeat(64), intentBindingSha256: 'c'.repeat(64), binding: {}, bindingSha256: 'd'.repeat(64), selectedAt: '2026-09-02T00:00:00Z', receiptSha256: 'f'.repeat(64) } as const)
   const firstFrameState = () => ({ schema: 'jason.qingmu-first-frame-selection-state.v1', projectId: PROJECT_ID, episodeId: EPISODE_ID, storyboardRevisionId: STORYBOARD_REVISION_ID, frameId: FRAME_ID, frameUpdatedAt: '2026-09-02T00:00:00Z', storyboardRevision: 7, identity: { state: 'bound' }, candidates: options.noFirstFrameCandidates ? [] : [{ assetId: 'asset-first-frame-1', assetSha256: 'e'.repeat(64), materializedSha256: 'e'.repeat(64), qualityStatus: 'passed', selectionStatus: firstFrameSelected ? 'Selected' : 'Unselected', isSelected: firstFrameSelected, assetUpdatedAt: '2026-09-02T00:00:00Z' }], selectedAssetId: firstFrameSelected ? 'asset-first-frame-1' : null, selectionReceipt: firstFrameSelected ? firstFrameReceipt() : null, blockers: [], providerCalls: 0, taskMutation: false, outboxEvents: 0 })
@@ -949,20 +949,16 @@ describe('PromptIrWorkspace vertical slice', () => {
   })
 
   it('native shooting rework uses Writer next ordinal, not initial or a cached receipt', async () => {
-    const { port, spies } = createPort({ completedVideo: true })
+    const { port, spies } = createPort({ completedVideo: true, firstFrameSelected: true })
     render(<PromptIrWorkspace projectId={PROJECT_ID} episodeId={EPISODE_ID}
       shotItems={frame('Ready')} storyboardRevisionId={STORYBOARD_REVISION_ID} selectedShotId={FRAME_ID}
       onSelectShotId={vi.fn()} port={port} t={t} onCommitted={async () => {}} presentation="shooting" />)
     await waitFor(() => expect(spies.promptIr).toHaveBeenCalled())
-    fireEvent.click(await screen.findByRole('button', { name: '检查本镜生成条件' }))
-    fireEvent.click(await screen.findByRole('radio'))
-    fireEvent.click(await screen.findByRole('checkbox', { name: '我已审看并认可这张首帧' }))
-    fireEvent.click(screen.getByRole('button', { name: '采用这张' }))
-    const button = await screen.findByRole('button', { name: /付费重新生成（最高 ¥/ })
+    const button = await screen.findByRole('button', { name: '重新生成视频' })
     fireEvent.click(button); fireEvent.click(button)
     await waitFor(() => expect(spies.queueProductionTake).toHaveBeenCalledTimes(1))
     expect(spies.queueProductionTake.mock.calls[0]![0]).toMatchObject({ takeOrdinal: 2, takeKind: 'targeted_rework' })
-    await waitFor(() => expect(screen.queryByRole('button', { name: /付费重新生成（最高 ¥/ })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('button', { name: '重新生成视频' })).toBeNull())
   })
 
   it('keeps an unknown-result marker across refresh and recovers with the original intent', async () => {

@@ -48,7 +48,7 @@ it('keeps the playing candidate across background workflow refreshes', async () 
 
 it('opens first-frame history directly, without preparing a video or requiring Ready PromptIR', async () => {
   const p = props(); render(<ShootingReviewWorkspace {...p} />)
-  fireEvent.click(screen.getByRole('button', { name: '查看与采用首帧' }))
+  fireEvent.click(screen.getByRole('button', { name: '全部首帧与采用' }))
   expect(screen.getByRole('region', { name: '本镜首帧候选' })).toBeTruthy()
   expect(p.onProductionAction).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole('button', { name: '返回候选审看' }))

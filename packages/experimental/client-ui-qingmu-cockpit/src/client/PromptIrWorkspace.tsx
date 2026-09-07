@@ -1316,33 +1316,33 @@ function ReadyPromptIrWorkspace({
     videoGenPrompt: 'directorVideoPrompt', motionPrompt: 'directorMotionPrompt', negativePrompt: 'directorNegativePrompt',
   }
   if (presentation === 'shooting') return <section aria-label="本镜生成与采用">
-    <h3>本镜生成与采用</h3><p>检查当前素材后再确认。浏览和检查不提交生成，也不改变选用。</p>
-    {!busy && <button type="button" onClick={() => { void quoteFirstFrame() }}>检查本镜生成条件</button>}
-    {busy && <p role="status">正在处理本镜请求…</p>}
+    <h3>本镜生成</h3>
+    <p>首帧确认后即可生成视频；生成过程自动完成检查，结果出现在下方候选里。</p>
+    <ol className={css.steps} aria-label="生成进度">
+      <li data-state={firstFrameReceipt !== undefined ? 'done' : busy ? 'doing' : 'todo'}>选定首帧</li>
+      <li data-state={videoQuote === undefined ? (busy ? 'doing' : 'todo') : videoQuote.quoteReady ? 'done' : 'blocked'}>生成条件{videoQuote !== undefined && !videoQuote.quoteReady ? '待修改' : ''}</li>
+      <li data-state={productionTake?.receipt.queued ? 'done' : productionRecovery.status === 'ready' ? 'doing' : 'todo'}>生成视频</li>
+    </ol>
+    {!busy && firstFrameQuote === undefined && <button type="button" onClick={() => { void quoteFirstFrame() }}>重新检查</button>}
+    {busy && <p role="status">正在准备…</p>}
     {firstFrameQuote && <>
       <ShootingVideoProgress key={active.frameId} scope={{
         projectId: active.projectId, episodeId: active.episodeId,
         frameId: active.frameId, sceneId: firstFrameQuote.authoritySnapshot.frame.sceneId,
       }} onState={setVideoExecution} onCommitted={onCommitted} />
       {firstFrameQuote.authorizationDraft.blockers.length > 0 && <ul role="alert">{firstFrameQuote.authorizationDraft.blockers.map(b => <li key={b.code}>{t(FIRST_FRAME_ACTION_KEYS[b.category])}</li>)}</ul>}
-      {firstFrameState?.candidates.map(candidate => <label key={candidate.assetId}>
-        <input type="radio" name="shooting-first-frame" checked={firstFrameCandidateId === candidate.assetId} onChange={() => { setFirstFrameCandidateId(candidate.assetId); setFirstFrameConfirmed(false) }} />
-        {candidate.isSelected ? '当前首帧' : '首帧候选'}
-        <FirstFrameCandidatePreview request={{ ...active, assetId: candidate.assetId, expectedMaterializedSha256: candidate.materializedSha256 }} load={createFirstFrameSelectionClient().preview} labels={{ load: '查看首帧', loading: '正在读取', error: '首帧暂时无法读取', ariaLabel: '首帧候选' }} />
-      </label>)}
-      {firstFrameCandidateId && !firstFrameState?.candidates.find(c => c.assetId === firstFrameCandidateId)?.isSelected && <><label><input type="checkbox" checked={firstFrameConfirmed} onChange={e => setFirstFrameConfirmed(e.target.checked)} />我已审看并认可这张首帧</label>{firstFrameConfirmed && !busy && <button onClick={() => { void selectFirstFrame() }}>采用这张</button>}</>}
-      {firstFrameReceipt && !videoQuote && !busy && <button onClick={() => { void quoteVideo() }}>检查视频生成条件</button>}
-      {!firstFrameReceipt && firstFrameState?.candidates.length === 0 && <p role="alert">本镜还没有可用首帧。请返回拍摄页点击“生成首帧”；此处检查不会提交或收费，已有素材保持不变。</p>}
+      {firstFrameReceipt === undefined && firstFrameState !== undefined && firstFrameState.candidates.length > 0
+        && <p>请先在候选里点「就用这张」选定首帧，再回来生成视频。</p>}
+      {!firstFrameReceipt && firstFrameState?.candidates.length === 0 && <p role="alert">本镜还没有可用首帧。请返回拍摄页点「生成首帧」。</p>}
     </>}
     {videoQuote && <>
-      {!videoQuote.quoteReady && <p role="alert">本镜的内容或素材检查尚未完成，暂不能生成。请回到当前要求修正后重新检查。</p>}
+      {!videoQuote.quoteReady && <><p role="alert">当前内容或素材还不满足生成条件，请在右栏修改要求后再试。</p><details><summary>待改项</summary><ul>{[...videoQuote.quoteBlockers, ...videoQuote.dispatchBlockers].map(item => <li key={item}>{item}</li>)}</ul></details></>}
       {videoQuote.quoteReady && videoQuote.dispatchBlockers.length === 1 && videoQuote.dispatchBlockers[0] === 'operator_paid_confirmation_required' && productionRecovery.status === 'none' && videoExecution?.nextTakeOrdinal && (!productionTake || videoExecution.takeCount >= productionTake.receipt.takeOrdinal) && <>
-        <p>生成条件已就绪。本次最高预留 ¥{videoQuote.maximumReservationCny.toFixed(2)}，实际以账本为准。</p>
-        {!blocked && !unsaved && !busy && <button className={css.primaryAction} type="button" onClick={() => { setProductionConfirmed(true); if (videoExecution.nextTakeOrdinal) void queueProductionTake(videoExecution.nextTakeOrdinal, undefined, true) }}>{videoExecution.nextTakeOrdinal === 2 ? `付费重新生成（最高 ¥${videoQuote.maximumReservationCny.toFixed(2)}）` : `付费生成（最高 ¥${videoQuote.maximumReservationCny.toFixed(2)}）`}</button>}
-        <details><summary>付费确认全文</summary><p>{videoQuote.requiredPaidConfirmationText}</p></details>
+        {!blocked && !unsaved && !busy && <button className={css.primaryAction} type="button" onClick={() => { setProductionConfirmed(true); if (videoExecution.nextTakeOrdinal) void queueProductionTake(videoExecution.nextTakeOrdinal, undefined, true) }}>{videoExecution.nextTakeOrdinal === 2 ? '重新生成视频' : '生成视频'}</button>}
+        <details><summary>本次生成详情</summary><p>{videoQuote.requiredPaidConfirmationText}</p></details>
       </>}
     </>}
-    {productionTake && <p role="status">{productionTake.receipt.queued ? '本镜请求已入队；实际执行进度见上方，不代表视频已生成。' : '任务未提交，请查看检查结果。'}</p>}
+    {productionTake && <p role="status">{productionTake.receipt.queued ? '已开始生成；完成后新视频会出现在候选里，请稍候回来查看。' : '任务未提交，请查看检查结果。'}</p>}
     {productionRecovery.status === 'ready' && <><p role="alert">已有提交等待核对，请勿重复生成。保留同一任务记录。</p>{!busy && <button onClick={() => { void queueProductionTake(productionRecovery.value.takeOrdinal, productionRecovery.value) }}>恢复同一任务</button>}</>}
     {productionRecovery.status === 'invalid' && <p role="alert">本机恢复记录不完整，已阻止再次提交。请核对原任务；不会丢弃记录或新建任务。</p>}
     {firstFrameRecovery && <button onClick={() => { void recoverFirstFrameSelection() }}>读取原采用结果</button>}
