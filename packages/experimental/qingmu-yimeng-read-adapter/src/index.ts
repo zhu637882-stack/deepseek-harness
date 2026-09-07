@@ -2469,14 +2469,21 @@ function normalizeFirstFrameQuote(
     requireSha256(binding.sha256, `firstFrameQuote.methodSourceBindings[${String(index)}].sha256`)
   }
   const references = requireObjectItems(authority.references, 'firstFrameQuote.authoritySnapshot.references')
+  // A human-finalized selection carries its signed proof alongside the common keys.
+  const referenceRequiredKeys = [
+    'referencePackId', 'referencePackSha256', 'role', 'elementKind', 'elementId',
+    'entityDraftId', 'entityDraftStatus', 'humanReview',
+    'assetId', 'assetSha256', 'materializedSha256', 'selectionIdentity',
+    'sourceRevisionId', 'qualificationCheckId', 'qualificationKind',
+    'rightsRecordSha256', 'profileRevision', 'profileSnapshotSha256',
+  ]
   for (const [index, reference] of references.entries()) {
-    requireExactKeys(reference, [
-      'referencePackId', 'referencePackSha256', 'role', 'elementKind', 'elementId',
-      'entityDraftId', 'entityDraftStatus', 'humanReview',
-      'assetId', 'assetSha256', 'materializedSha256', 'selectionIdentity',
-      'sourceRevisionId', 'qualificationCheckId', 'qualificationKind',
-      'rightsRecordSha256', 'profileRevision', 'profileSnapshotSha256',
-    ], `firstFrameQuote.reference[${String(index)}]`)
+    const referenceKeys = Object.keys(reference).sort().join(',')
+    const allowedKeys = [...referenceRequiredKeys, 'humanFinalDecision'].sort().join(',')
+    if (referenceKeys !== referenceRequiredKeys.slice().sort().join(',')
+      && referenceKeys !== allowedKeys) {
+      throw new UpstreamContractError(`firstFrameQuote.reference[${String(index)}] fields mismatch`)
+    }
     requireIdentifier(reference.referencePackId, `firstFrameQuote.reference[${String(index)}].referencePackId`)
     requireIdentifier(reference.entityDraftId, `firstFrameQuote.reference[${String(index)}].entityDraftId`)
     if (!requireString(reference.entityDraftStatus, `firstFrameQuote.reference[${String(index)}].entityDraftStatus`).trim()) {
