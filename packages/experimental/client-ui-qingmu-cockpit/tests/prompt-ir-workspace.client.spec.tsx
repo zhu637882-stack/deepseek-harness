@@ -97,6 +97,7 @@ function createPort(options: {
   readonly editPostSucceeds?: boolean
   readonly productionFails?: boolean
   readonly noFirstFrameCandidates?: boolean
+  readonly firstFrameSelected?: boolean
   readonly videoDispatchBlockers?: readonly string[]
   readonly completedVideo?: boolean
 } = {}) {
