@@ -24,8 +24,14 @@ def compose_dialogue_service(deps):
     """Install the one transaction decorator before API routes capture services."""
     from dialogue_changeset import DialogueChangeSets
     from video_frame_cas import install_video_frame_cas
+    from jason.apps.studio.qingmu_prompt_ir_bootstrap_service import automatic_storyboard_bootstrap_inputs
+    from functools import partial
     install_video_frame_cas(deps.video_service)
-    if isinstance(deps.qingmu_change_set_service, DialogueChangeSets):
+    wrapped = isinstance(deps.qingmu_change_set_service, DialogueChangeSets)
+    changes = deps.qingmu_change_set_service.service if wrapped else deps.qingmu_change_set_service
+    changes.prompt_ir_bootstrap_input_builder = partial(
+        automatic_storyboard_bootstrap_inputs, resolve_prop_names=deps.asset_service._shot_visible_prop_names)
+    if wrapped:
         return
     deps.qingmu_change_set_service = DialogueChangeSets(deps.qingmu_change_set_service)
 
@@ -33,10 +39,6 @@ def compose_dialogue_service(deps):
 def install_dialogue_capability(app):
     """Expose installed behavior to an authenticated Host, never a write shortcut."""
     from jason.apps.auth.auth_middleware import get_current_user
-    from dialogue_projection import install_current_dialogue_projection
-
-    install_current_dialogue_projection(app)
-
     def capability(user=Depends(get_current_user)):
         return {"schema": "qingmu.dialogue-transaction-capability.v1",
                 "referenceSchema": "qingmu.dialogue-edit-reference.v1",
