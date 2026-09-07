@@ -6,6 +6,13 @@ import type { DirectorObjectScope } from './types.ts'
 import { digest, readNativeShotMethods, toolValues, type NativeDraftReaders } from './native-draft.ts'
 import { prepareDialogueEdit } from './dialogue-edit.ts'
 
+// Signed delivery URLs rotate on each read. Asset identity/content/selection
+// and every creative field still participate in freshness and CAS checks.
+function inputIdentity(input: { context: DirectorContextSnapshot } & Record<string, unknown>): string {
+  return digest({ ...input, context: { ...input.context,
+    selectedReferences: input.context.selectedReferences.map(({ mediaUrl: _url, ...reference }) => reference) } })
+}
+
 /** Acquire linked lines from the selected shot without guessing IDs from prose.
  * @param context Fresh current-shot context.
  * @param scope Session-owned target.
@@ -38,7 +45,7 @@ export async function readNativeDialogueInput(context: DirectorContextSnapshot, 
   if (!shot || shot.sceneId !== scope.sceneId) throw new Error('当前镜头缺少可核验的场次关联。')
   const methods = await readNativeShotMethods(readers, signal)
   const input = { scope, context, source, relations, methods, editableLines: shot.dialogueRhythm.cues }
-  return { schema: 'qingmu.native-dialogue-input.v1' as const, receiptId: digest(input), ...input }
+  return { schema: 'qingmu.native-dialogue-input.v1' as const, receiptId: inputIdentity(input), ...input }
 }
 
 type DialogueInput = Awaited<ReturnType<typeof readNativeDialogueInput>>
@@ -81,7 +88,7 @@ export function findNativeDialogueInput(session: Session, receiptId: string): Di
       && (value as DialogueInput).receiptId === receiptId) as DialogueInput | undefined
   if (!input) throw new Error('请先读取当前台词与镜头关联。')
   const { schema: _schema, receiptId: _receipt, ...source } = input
-  if (digest(source) !== receiptId) throw new Error('台词来源记录不一致。')
+  if (inputIdentity(source) !== receiptId) throw new Error('台词来源记录不一致。')
   return input
 }
 

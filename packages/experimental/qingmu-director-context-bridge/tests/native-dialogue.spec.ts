@@ -137,6 +137,18 @@ describe('native dialogue impact', () => {
     app.current.source = { ...app.current.source, revision: 2 }
     expect((await app.run('qingmu_preview_dialogue_edit', { receiptId: input.receiptId, ...app.edit })).isError).toBe(true)
   })
+  it('ignores renewed delivery URLs but rejects changed reference identity', async () => {
+    const app = await harness()
+    app.current.context = { ...app.current.context, selectedReferences: [{ assetId: 'lina-reference',
+      sha256: '1'.repeat(64), mediaUrl: 'https://media.example.test/original-signed-url' }] }
+    const input = await app.read()
+    app.current.context = { ...app.current.context, selectedReferences: app.current.context.selectedReferences.map(reference =>
+      ({ ...reference, mediaUrl: 'https://media.example.test/renewed-signed-url' })) }
+    expect((await app.run('qingmu_preview_dialogue_edit', { receiptId: input.receiptId, ...app.edit })).isError).toBe(false)
+    app.current.context = { ...app.current.context, selectedReferences: app.current.context.selectedReferences.map(reference =>
+      ({ ...reference, assetId: 'different-asset' })) }
+    expect((await app.run('qingmu_preview_dialogue_edit', { receiptId: input.receiptId, ...app.edit })).isError).toBe(true)
+  })
   it('requires current IMAGO content instead of merely registered methods', async () => {
     const app = await harness(); app.current.failMethod = true
     expect((await app.run('qingmu_read_dialogue')).isError).toBe(true)
