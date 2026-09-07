@@ -121,6 +121,39 @@ describe('Writer full director context compatibility', () => {
     expect(await read({ ...value, cast: [] })).toMatchObject({ ok: false })
     expect(await read(snapshot({ ...extension, readyGranted: true }))).toMatchObject({ ok: false })
   })
+  it('accepts renewed Writer credentials without accepting changed creative or media identity', async () => {
+    const url = 'https://media.example/api/media/media_1'
+    const ref = { assetId: 'asset_1', assetSha256: 'a'.repeat(64), mediaUrl: `${url}?variant=thumbnail&other=a%20b` }
+    const value = snapshot({ ...extension, contextHashPolicy: 'writer-media-transport-v1', selectedReferences: [ref] })
+    const original = structuredClone(value)
+    for (const expires of [70, 80]) {
+      const renewed = { ...value, selectedReferences: [{ ...ref,
+        mediaUrl: `${url}?expires=${expires}&variant=thumbnail&signature=${'b'.repeat(64)}&other=a%20b` }] }
+      expect(await read(renewed)).toEqual({ ok: true, value: renewed })
+      for (const change of [{ assetId: 'asset_2' }, { assetSha256: 'b'.repeat(64) },
+        { mediaUrl: renewed.selectedReferences[0]!.mediaUrl.replace('media_1', 'media_2') },
+        { mediaUrl: renewed.selectedReferences[0]!.mediaUrl.replace('media.example', 'other.example') },
+        { mediaUrl: renewed.selectedReferences[0]!.mediaUrl.replace('thumbnail', 'full') },
+        { mediaUrl: renewed.selectedReferences[0]!.mediaUrl.replace('a%20b', 'a+b') }]) {
+        expect(await read({ ...renewed, selectedReferences: [{ ...ref, ...change }] })).toMatchObject({ ok: false })
+      }
+      expect(await read({ ...renewed, shot: { ...context().shot, visual: '车外' } })).toMatchObject({ ok: false })
+    }
+    expect(value).toEqual(original)
+    expect(await read(snapshot({ contextHashPolicy: 'unknown' }))).toMatchObject({ ok: false })
+    expect(await read(snapshot({ contextHashPolicy: null }))).toMatchObject({ ok: false })
+  })
+  it('fully hashes legacy, external and malformed URLs', async () => {
+    const url = `https://media.example/api/media/media_1?expires=1&signature=${'a'.repeat(64)}`
+    for (const mediaUrl of [null, url.replace('/api/media/media_1', '/image'), url.replace('expires=1', 'expires=1&expires=2'),
+      url.replace('signature=', 'signature=bad'), `${url}#fragment`, `${url}\n`]) {
+      const value = snapshot({ contextHashPolicy: 'writer-media-transport-v1', selectedReferences: [{ mediaUrl }] })
+      expect(await read(value)).toEqual({ ok: true, value })
+    }
+    const legacy = snapshot({ selectedReferences: [{ mediaUrl: url }] })
+    expect(await read(legacy)).toEqual({ ok: true, value: legacy })
+    expect(await read({ ...legacy, selectedReferences: [{ mediaUrl: url.replace('expires=1', 'expires=2') }] })).toMatchObject({ ok: false })
+  })
 })
 
 describe('Host-only director replay proposal', () => {

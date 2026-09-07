@@ -19,6 +19,8 @@ export interface DirectorProposalRequest extends CreationScope {
 /** SHA-bound read-only Yimeng context for one real scene-planning shot. */
 export interface DirectorContextSnapshot extends CreationScope {
   readonly schema: 'jason.qingmu-director-context-snapshot.v1'
+  /** Absent on persisted legacy contexts hashed with their complete media URLs. */
+  readonly contextHashPolicy?: 'writer-media-transport-v1'
   readonly sceneId: string
   readonly shotId: string
   readonly script: { readonly revision: number; readonly sha256: string }
@@ -305,7 +307,8 @@ export function normalizeDirectorContext(
   exact(root, ['schema', 'projectId', 'episodeId', 'sceneId', 'shotId', 'script', 'sceneSource', 'sourceScene',
     'storyboard', 'shot', 'creativeContract', 'selectedReferences', 'sourceTime', 'contextSnapshotSha256', 'providerCalls',
     'costAmountCny', 'businessStateChanged', 'humanDecisionInferred', 'formalQcInferred', 'selectionGranted',
-    'readyGranted', ...(hasExtended ? extended : [])], helpers.responseError, 'director context')
+    'readyGranted', ...(hasExtended ? extended : []),
+    ...(Object.hasOwn(root, 'contextHashPolicy') ? ['contextHashPolicy'] : [])], helpers.responseError, 'director context')
   if (root.schema !== 'jason.qingmu-director-context-snapshot.v1'
     || root.projectId !== expected.projectId || root.episodeId !== expected.episodeId
     || root.sceneId !== expected.sceneId || root.shotId !== expected.shotId) {
@@ -315,6 +318,16 @@ export function normalizeDirectorContext(
   digest(root.contextSnapshotSha256, helpers.responseError, 'director context SHA')
   const contextBody = { ...root }
   Reflect.deleteProperty(contextBody, 'contextSnapshotSha256')
+  if (Object.hasOwn(root, 'contextHashPolicy')) {
+    if (root.contextHashPolicy !== 'writer-media-transport-v1') {
+      throw helpers.responseError('director context hash policy invalid')
+    }
+    if (!Array.isArray(root.selectedReferences)) throw helpers.responseError('director context arrays invalid')
+    contextBody.selectedReferences = root.selectedReferences.map((value) => {
+      const ref = object(value, helpers.responseError, 'director reference')
+      return Object.hasOwn(ref, 'mediaUrl') ? { ...ref, mediaUrl: stableWriterMediaUrl(ref.mediaUrl) } : ref
+    })
+  }
   if (directorJcsSha256(contextBody, 'director context', helpers.responseError) !== root.contextSnapshotSha256) {
     throw helpers.responseError('director context SHA mismatch')
   }
@@ -354,6 +367,30 @@ export function normalizeDirectorContext(
     }
   }
   return value as DirectorContextSnapshot
+}
+
+/**
+ * Match Writer's raw URL projection without decoding or reordering query bytes.
+ * Only renewable signer fields are excluded from creative freshness; origin,
+ * media ID, variant and other query fields remain bound. Full paid prompt hashes
+ * still cover the actual URL, and this does not validate or extend access rights.
+ */
+function stableWriterMediaUrl(value: unknown): unknown {
+  if (typeof value !== 'string') return value
+  const match = /^(https?:\/\/[-A-Za-z0-9.:\[\]]+\/api\/media\/[A-Za-z0-9_.:-]+)\?([A-Za-z0-9._~!$'()*+,;=:@%&/?-]+)$/.exec(value)
+  if (!match || match[0] !== value) return value
+  const [, base, query] = match
+  if (base === undefined || query === undefined) return value
+  const parts = query.split('&')
+  const expires = parts.filter(part => part.startsWith('expires='))
+  const signatures = parts.filter(part => part.startsWith('signature='))
+  const [expiry] = expires
+  const [signature] = signatures
+  if (expires.length !== 1 || signatures.length !== 1
+    || expiry === undefined || signature === undefined
+    || !/^expires=[0-9]+$/.test(expiry) || !/^signature=[a-f0-9]{64}$/.test(signature)) return value
+  const remaining = parts.filter(part => part !== expiry && part !== signature)
+  return base + (remaining.length ? `?${remaining.join('&')}` : '')
 }
 
 /**
