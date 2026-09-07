@@ -104,6 +104,22 @@ function assertAttempt(value: unknown, scope: ShootingFrameScope, requestId: str
   }
   return value as unknown as Attempt
 }
+/** Describe the observed task stage without treating a queue receipt as Provider execution. */
+function attemptMessage(task: Attempt['task'] | undefined): string {
+  switch (task?.kernel_status) {
+    case 'DispatchPending':
+      return '首帧任务已排队，等待执行器接单；尚未提交供应商。请勿重复生成。'
+    case 'Failed': case 'Cancelled':
+      return '本次生成未完成，已停止，不自动重试。'
+    case 'QualityPending':
+      return '正在检查生成结果并准备候选，尚未人工认可。'
+    case 'Succeeded':
+      return '任务已结束，但候选尚未就绪，需要检查结果落盘；未重新生成。'
+    default:
+      return task ? '正在读取原任务进度；关闭或刷新页面不会重复提交。'
+        : '正在核对原提交结果；不会重复提交。'
+  }
+}
 /** Native image generation. Storyboard confirmation is explicit; media selection remains separate. */
 export function ShootingFirstFrame({ scope, onCommitted }: {
   readonly scope: ShootingFrameScope
@@ -209,7 +225,6 @@ export function ShootingFirstFrame({ scope, onCommitted }: {
     } catch (cause) { setError(String(cause)) }
     finally { confirmingLock.current = false; setConfirming(false) }
   }
-  const failed = ['Failed', 'Cancelled'].includes(attempt?.task?.kernel_status ?? '')
   const blocked = submissionBlocker(attempt) ?? submissionBlocker(preview)
   return <section aria-label="首帧生成" style={{ width: '100%', height: '100%', overflow: 'auto', padding: '16px', boxSizing: 'border-box' }}>
     {review && !review.accepted && <div aria-label="本镜分镜确认">
@@ -229,7 +244,7 @@ export function ShootingFirstFrame({ scope, onCommitted }: {
       <figure><img style={{ maxWidth: '100%', maxHeight: '54vh', objectFit: 'contain' }} src={attempt.candidate.browserUrl} alt="镜头新首帧 · 待你定版" /><figcaption>新首帧候选 · 待你审看，尚未采用</figcaption></figure>
       <div aria-label="首帧候选条"><button type="button" aria-pressed="true"><img width="72" src={attempt.candidate.browserUrl} alt="新首帧候选缩略图" />本次新首帧 · 待定版</button></div>
     </> : blocked ? <p role="alert">尚未进入生成，未创建本次任务。{blocked.message}</p>
-      : requestId ? <p role="status">{failed ? '本次生成未完成，已停止，不自动重试。' : attempt?.task ? '首帧正在生成，关闭或刷新页面会读取同一任务。' : '正在核对原提交结果；不会重复提交。'}</p>
+      : requestId ? <p role="status">{attemptMessage(attempt?.task)}</p>
         : busy ? <p role="status">正在编译最终提示词与检查生成条件…</p> : preview && <>
           {preview.blockers.length ? <p role="alert">生成条件未通过，未提交、未收费。</p> : review?.accepted === true && <button type="button" onClick={() => { void submit() }}>生成这张首帧（仅一次）</button>}
         </>}
