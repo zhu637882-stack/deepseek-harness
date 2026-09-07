@@ -23,6 +23,7 @@ import {
 import {
   clearTakeVersionSelectionMarker, createTakeVersionSelectionMarker,
   readTakeVersionSelectionMarker, writeTakeVersionSelectionMarker,
+  takeSelectionReceiptMatches,
   type TakeVersionSelectionRecoveryMarker, type TakeVersionSelectionRecoveryRead,
 } from './take-version-recovery.ts'
 import card from './QingmuCockpit.module.css'
@@ -120,19 +121,6 @@ function requestFromMarker(marker: TakeVersionSelectionRecoveryMarker) {
     candidateOutputSha256: marker.candidateOutputSha256,
     idempotencyKey: marker.idempotencyKey,
   }
-}
-
-function receiptMatches(result: YimengTakeVersionSelectionResult, marker: TakeVersionSelectionRecoveryMarker): boolean {
-  return result.schema === 'jason.qingmu-take-selection-result.v1'
-    && result.projectId === marker.projectId && result.episodeId === marker.episodeId
-    && result.frameId === marker.frameId && result.baseStackSnapshotSha256 === marker.expectedStackSha256
-    && result.idempotencyKey === marker.idempotencyKey && result.selectedTake.takeId === marker.candidateTakeId
-    && result.selectedTake.versionOrdinal === marker.candidateVersionOrdinal
-    && result.selectedTake.outputSha256 === marker.candidateOutputSha256
-    && result.authoritativeStack.selectedTakeId === marker.candidateTakeId
-    && result.selectionChanged === true && result.providerCalls === 0
-    && result.paidProviderAuthority === 'not_granted' && result.budgetMutation === false
-    && result.humanApprovalInferred === false && result.formalApprovalChanged === false
 }
 
 const SHA = /^[0-9a-f]{64}$/
@@ -453,7 +441,7 @@ function TakeVersionComparePanel({
     intent: TakeVersionSelectionRecoveryMarker,
     run: Run,
   ) {
-    if (!receiptMatches(result, intent)) throw new Error('Take selection receipt mismatch')
+    if (!takeSelectionReceiptMatches(result, intent)) throw new Error('Take selection receipt mismatch')
     if (!live(run)) return
     const expected = { status: 'ready' as const, marker: intent }
     const cleared = clearTakeVersionSelectionMarker(intent, expected)

@@ -5,13 +5,13 @@ import type { QingmuYimengPort } from './contracts.ts'
 interface Draft { readonly shotId: string; readonly imagePromptCn: string; readonly pending?: ScenePlanningRequest }
 type Port = Partial<Pick<QingmuYimengPort, 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning'>>
 function key(projectId: string, episodeId: string, shotId: string): string { return `qingmu.scene-planning.v1:${projectId}:${episodeId}:automatic-frame:${shotId}` }
-function pendingValid(value: ScenePlanningRequest | undefined, state: ScenePlanningState,
+function pendingValid(value: ScenePlanningRequest | undefined,
   projectId: string, episodeId: string, shotId: string): value is ScenePlanningRequest & { readonly request: AutomaticPlanningOperation } {
-  const canonical = state.canonicalStoryboard
   return value?.projectId === projectId && value.episodeId === episodeId && value.request.action === 'edit_automatic'
     && value.request.shotId === shotId && value.request.imagePromptCn.length <= 20000
-    && value.request.expectedScriptRevision === state.scriptRevision && value.request.expectedScriptSha256 === state.scriptSha256
-    && value.request.expectedStoryboardRevision === canonical?.revision && value.request.expectedStoryboardSha256 === canonical.sourceHash
+    && value.request.imagePromptCn.trim() !== '' && Number.isSafeInteger(value.request.expectedScriptRevision)
+    && typeof value.request.expectedScriptSha256 === 'string' && Number.isSafeInteger(value.request.expectedStoryboardRevision)
+    && typeof value.request.expectedStoryboardSha256 === 'string'
 }
 function stored(keyName: string): Draft | null { try { const value = JSON.parse(localStorage.getItem(keyName) ?? 'null') as Draft; return typeof value?.imagePromptCn === 'string' && typeof value?.shotId === 'string' ? value : null } catch { return null } }
 function sameScope(state: ScenePlanningState, projectId: string, episodeId: string, shotId: string): boolean {
@@ -28,20 +28,22 @@ export function AutomaticFrameRequirementsEditor({ projectId, episodeId, shotId,
   readonly onCommitted: () => Promise<unknown>
 }) {
   const [state, setState] = useState<ScenePlanningState | null>(null); const [draft, setDraft] = useState<Draft | null>(null)
-  const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const current = useRef<AbortController>(); const epoch = useRef(0)
+  const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [load, setLoad] = useState<'loading' | 'ready' | 'failed'>('loading'); const current = useRef<AbortController>(); const epoch = useRef(0)
   const storageKey = key(projectId, episodeId, shotId)
   useEffect(() => {
     const read = port.readScenePlanning
     if (read === undefined) return
-    const controller = new AbortController(); const currentEpoch = ++epoch.current; current.current = controller; setState(null); setError('')
+    const controller = new AbortController(); const currentEpoch = ++epoch.current; current.current = controller; setState(null); setError(''); setLoad('loading'); setBusy(false)
     void read({ projectId, episodeId }, controller.signal).then((value) => {
       if (!controller.signal.aborted && currentEpoch === epoch.current && sameScope(value, projectId, episodeId, shotId)) {
         setState(value); const saved = value.canonicalStoryboard?.shots?.find(shot => shot.id === shotId)
         const local = stored(storageKey)
-        setDraft(local?.shotId === shotId && pendingValid(local.pending, value, projectId, episodeId, shotId)
-          ? local : saved ? { shotId, imagePromptCn: saved.imagePromptCn } : null)
+        setDraft(local?.shotId === shotId && local.imagePromptCn.length > 0 && local.imagePromptCn.length <= 20000
+          && (local.pending === undefined || (pendingValid(local.pending, projectId, episodeId, shotId)
+            && local.imagePromptCn === local.pending.request.imagePromptCn))
+          ? local : saved ? { shotId, imagePromptCn: saved.imagePromptCn } : null); setLoad('ready')
       }
-    }).catch(() => { if (!controller.signal.aborted) setError('首帧要求暂不可读取；不会创建或替换素材。') })
+    }).catch(() => { if (!controller.signal.aborted && currentEpoch === epoch.current) { setError('首帧要求暂不可读取；不会创建或替换素材。'); setLoad('failed') } })
     return () => controller.abort()
   }, [episodeId, port, projectId, shotId, storageKey])
   const update = (next: Draft): void => { try { localStorage.setItem(storageKey, JSON.stringify(next)); setDraft(next) } catch { setError('浏览器无法保留本镜草稿；请复制文字后再保存。') } }
@@ -51,8 +53,9 @@ export function AutomaticFrameRequirementsEditor({ projectId, episodeId, shotId,
     const canonical = state.canonicalStoryboard
     if (canonical?.shots === undefined || state.scriptSha256 === null) return
     setBusy(true); setError('')
+    const runEpoch = epoch.current
     try {
-      if (recover && !pendingValid(draft.pending, state, projectId, episodeId, shotId)) throw new Error('pending scope mismatch')
+      if (recover && !pendingValid(draft.pending, projectId, episodeId, shotId)) throw new Error('pending scope mismatch')
       if (!recover && draft.pending !== undefined) throw new Error('recover existing receipt first')
       const pending = draft.pending ?? { projectId, episodeId, idempotencyKey: crypto.randomUUID(), request: {
         action: 'edit_automatic', expectedScriptRevision: state.scriptRevision, expectedScriptSha256: state.scriptSha256,
@@ -61,7 +64,9 @@ export function AutomaticFrameRequirementsEditor({ projectId, episodeId, shotId,
       } satisfies AutomaticPlanningOperation }
       update({ ...draft, pending })
       const result = recover ? await recoverSave(pending) : await save(pending)
+      if (runEpoch !== epoch.current) return
       const next = await read({ projectId, episodeId })
+      if (runEpoch !== epoch.current) return
       if (result.action !== 'edit_automatic' || result.projectId !== projectId || result.episodeId !== episodeId
         || result.shotId !== shotId || result.idempotencyKey !== pending.idempotencyKey || result.providerCalls !== 0
         || result.stageStarted || result.approvalGranted || next.canonicalStoryboard === null
@@ -72,13 +77,14 @@ export function AutomaticFrameRequirementsEditor({ projectId, episodeId, shotId,
       const saved = next.canonicalStoryboard?.shots?.find(shot => shot.id === shotId)
       if (saved === undefined) throw new Error('receipt shot missing')
       localStorage.removeItem(storageKey); setDraft({ shotId, imagePromptCn: saved.imagePromptCn }); setState(next); await onCommitted()
-    } catch { setError('保存结果尚未确认。草稿和同一幂等回执键已保留；请读取同一保存回执。') } finally { setBusy(false) }
+    } catch { if (runEpoch === epoch.current) setError('保存结果尚未确认。草稿和同一幂等回执键已保留；请读取同一保存回执。') } finally { if (runEpoch === epoch.current) setBusy(false) }
   }
   if (port.readScenePlanning === undefined || port.saveScenePlanning === undefined || port.recoverScenePlanning === undefined) {
     return <p>首帧编辑接口当前不可用；无法假装保存。</p>
   }
+  if (load === 'failed') return <p role="alert">{error}</p>
   if (state === null || draft === null) return <p role="status">正在读取本镜首帧要求…</p>
   const saved = state.canonicalStoryboard?.shots?.find(shot => shot.id === shotId)
   const dirty = saved !== undefined && draft.imagePromptCn !== saved.imagePromptCn
-  return <section><label>首帧画面要求<textarea aria-label="首帧画面要求" rows={5} maxLength={20000} value={draft.imagePromptCn} disabled={busy} onChange={event => update({ shotId, imagePromptCn: event.target.value })} /></label>{error && <p role="alert">{error}</p>}<button type="button" disabled={busy || Boolean(draft.pending) || !dirty || !draft.imagePromptCn.trim()} onClick={() => { void save(false) }}>保存首帧画面要求</button>{draft.pending && <button type="button" disabled={busy} onClick={() => { void save(true) }}>读取同一保存回执</button>}</section>
+  return <section><label>首帧画面要求<textarea aria-label="首帧画面要求" rows={5} maxLength={20000} value={draft.imagePromptCn} disabled={busy || draft.pending !== undefined} onChange={event => update({ shotId, imagePromptCn: event.target.value })} /></label>{error && <p role="alert">{error}</p>}<button type="button" disabled={busy || Boolean(draft.pending) || !dirty || !draft.imagePromptCn.trim()} onClick={() => { void save(false) }}>保存首帧画面要求</button>{draft.pending && <button type="button" disabled={busy} onClick={() => { void save(true) }}>读取同一保存回执</button>}</section>
 }

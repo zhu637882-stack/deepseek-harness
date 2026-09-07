@@ -81,6 +81,22 @@ function short(value: unknown): string {
   }
 }
 
+function shootingWorkspaceKey(projectId: string, episodeId: string, field: 'shot' | 'tab'): string {
+  return `qingmu:cockpit:shooting-workspace:v1:${encodeURIComponent(projectId)}:${encodeURIComponent(episodeId)}:${field}`
+}
+
+function storedShootingWorkspaceValue(projectId: string, episodeId: string, field: 'shot' | 'tab'): string | null {
+  try { return localStorage.getItem(shootingWorkspaceKey(projectId, episodeId, field)) } catch { return null }
+}
+
+function saveShootingWorkspaceValue(projectId: string, episodeId: string, field: 'shot' | 'tab', value: string): void {
+  try { localStorage.setItem(shootingWorkspaceKey(projectId, episodeId, field), value) } catch { /* optional browser restoration only */ }
+}
+
+function clearShootingWorkspaceValue(projectId: string, episodeId: string, field: 'shot' | 'tab'): void {
+  try { localStorage.removeItem(shootingWorkspaceKey(projectId, episodeId, field)) } catch { /* optional browser restoration only */ }
+}
+
 function projectLabel(project: JsonRecord, fallback: string): string {
   return stringOf(project.name) ?? stringOf(project.title) ?? stringOf(project.id) ?? fallback
 }
@@ -342,9 +358,28 @@ export function QingmuCockpit({
     setSelectedShotId(currentShotId => (
       relationShots.some(shot => shot.shotId === currentShotId)
         ? currentShotId
-        : relationShots[0]?.shotId ?? ''
+        : relationShots.some(shot => shot.shotId === storedShootingWorkspaceValue(projectId, episodeId, 'shot'))
+          ? storedShootingWorkspaceValue(projectId, episodeId, 'shot') ?? relationShots[0]?.shotId ?? ''
+          : relationShots[0]?.shotId ?? ''
     ))
   }, [projectId, episodeId, shotRelations])
+
+  useEffect(() => {
+    if (projectId === '' || episodeId === '' || selectedShotId === '') return
+    if (!shotRelations?.shots.some(shot => shot.shotId === selectedShotId)) return
+    saveShootingWorkspaceValue(projectId, episodeId, 'shot', selectedShotId)
+  }, [episodeId, projectId, selectedShotId, shotRelations])
+
+  useEffect(() => {
+    if (projectId === '' || episodeId === '') return
+    if (storedShootingWorkspaceValue(projectId, episodeId, 'tab') === 'shots') setTab('shots')
+  }, [episodeId, projectId])
+
+  useEffect(() => {
+    if (projectId === '' || episodeId === '') return
+    if (tab === 'shots') saveShootingWorkspaceValue(projectId, episodeId, 'tab', 'shots')
+    else clearShootingWorkspaceValue(projectId, episodeId, 'tab')
+  }, [episodeId, projectId, tab])
 
   useEffect(() => {
     if (!open) return

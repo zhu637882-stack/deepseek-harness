@@ -68,10 +68,12 @@ export function FirstFrameCandidatePreview({
   request,
   load,
   labels,
+  onPreviewReady,
 }: {
   readonly request: FirstFrameCandidatePreviewRequest
   readonly load: (request: FirstFrameCandidatePreviewRequest, signal?: AbortSignal) => Promise<FirstFrameCandidatePreviewResponse>
   readonly labels: FirstFrameCandidatePreviewLabels
+  readonly onPreviewReady?: (url: string | undefined) => void
 }) {
   const [url, setUrl] = useState<string>()
   const [status, setStatus] = useState<'idle' | 'loading' | 'error' | 'ready'>('idle')
@@ -93,14 +95,16 @@ export function FirstFrameCandidatePreview({
     if (blob.current !== undefined) URL.revokeObjectURL(blob.current)
     blob.current = undefined
     setUrl(undefined)
+    onPreviewReady?.(undefined)
     setStatus('idle')
     return () => {
       controller.current?.abort()
       controller.current = undefined
       if (blob.current !== undefined) URL.revokeObjectURL(blob.current)
       blob.current = undefined
+      onPreviewReady?.(undefined)
     }
-  }, [requestKey])
+  }, [onPreviewReady, requestKey])
   async function preview() {
     if (controller.current !== undefined || blob.current !== undefined) return
     const run = new AbortController()
@@ -114,6 +118,7 @@ export function FirstFrameCandidatePreview({
       if (await sha256(bytes) !== request.expectedMaterializedSha256) throw new Error('first-frame preview hash mismatch')
       blob.current = URL.createObjectURL(new Blob([bytes.slice().buffer], { type: result.mimeType }))
       setUrl(blob.current)
+      onPreviewReady?.(blob.current)
       setStatus('ready')
     } catch {
       if (!run.signal.aborted) setStatus('error')
