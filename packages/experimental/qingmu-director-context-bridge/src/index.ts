@@ -3,6 +3,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import { directorContextBindingProjectionDefinition } from './projection.ts'
+import { nativeDialogueProjection } from './dialogue-projection.ts'
 import { createDirectorContextRpcHandler } from './rpc.ts'
 import { readNativeDirectorReadiness } from './native-readiness.ts'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
@@ -28,6 +29,7 @@ declare module '@deepseek-ai/cordis' {
 /** Register the latest whole-value director binding projection. */
 export function apply(ctx: Context): void {
   ctx.sessionProjections.register(directorContextBindingProjectionDefinition)
+  ctx.sessionProjections.register(nativeDialogueProjection)
   ctx.inject(['connection', 'sessions', 'qingmuYimengCommand'], (host) => {
     const port = {
       readDirectorContext: async (scope: import('./types.ts').DirectorObjectScope, signal?: AbortSignal) => {

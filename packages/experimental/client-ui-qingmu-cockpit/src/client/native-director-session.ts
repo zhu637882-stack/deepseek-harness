@@ -14,6 +14,8 @@ export function useDirectorConnection(source?: HostDescriptionSource) {
 /** Native session entry leaves business data and the current conversation's content unchanged. */
 export interface NativeDirectorSessionPort {
   readonly connection: HostDescriptionSource
+  /** Observe durable Host progress; reconnecting never replays a business command. */
+  dialogueExecution?(sessionId: string): { subscribe: (listener: () => void) => () => void; getSnapshot: () => unknown } | undefined
   /** Enter only after a user action; late completion never changes a newer navigation selection. */
   activate(expectedSessionId: string | undefined, signal: AbortSignal): Promise<void>
   /** Queue one user turn in the selected director; acceptance does not imply completion. Never retries. */
@@ -27,7 +29,13 @@ export interface NativeDirectorSessionPort {
  * @returns A port which refuses to recompose a started ordinary conversation.
  */
 export function createNativeDirectorSessionPort(ctx: ClientContext, connection: ConnectionHandle): NativeDirectorSessionPort {
-  return { connection: connection.hostDescription, async activate(expectedSessionId, signal) {
+  return { connection: connection.hostDescription, dialogueExecution(sessionId) {
+    const sessions = ctx.get('sessions') as unknown as ISessions | undefined
+    const list = sessions?.list.getSnapshot()
+    const selected = list?.ids.map(id => list.byId[id]).find(row => row?.id === sessionId)
+    return selected?.agentPreset === 'qingmu-director'
+      ? sessions?.binding(selected.id)?.session.projections.faceOf('qingmuDialogueExecution') : undefined
+  }, async activate(expectedSessionId, signal) {
     // Host and browser share Cordis service names; this port is only installed by the browser runtime.
     const sessions = ctx.get('sessions') as unknown as ISessions | undefined
     const workspaces = ctx.get('workspaces') as IWorkspaces | undefined

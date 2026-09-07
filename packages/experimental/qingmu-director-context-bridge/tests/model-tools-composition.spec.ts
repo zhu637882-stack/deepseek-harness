@@ -20,6 +20,7 @@ import * as Persona from '@deepseek-ai/dsh-persona'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import * as ModelTools from '../src/model-tools.ts'
 import type { DirectorContextSnapshot } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import { draftMethod } from '../examples/native-draft-fixture.ts'
 
 const roots: string[] = []
 const contexts: Context[] = []
@@ -85,7 +86,7 @@ function includesExactString(value: unknown, expected: string): boolean {
 }
 
 /** A real Loader preset: host capabilities stay root-owned; native tools mount only below the agent. */
-async function harness(adapter: MockAdapter, sessionRoot?: string): Promise<Context> {
+async function harness(adapter: MockAdapter, sessionRoot?: string, dialogue = false): Promise<Context> {
   const presetRoot = fileURLToPath(new URL('../../qingmu-web/agent-presets/', import.meta.url))
 
   const ctx = new Context()
@@ -117,6 +118,7 @@ async function harness(adapter: MockAdapter, sessionRoot?: string): Promise<Cont
   })
   ctx.provide('qingmuImagoMethod', async (endpoint, payload) => {
     if (endpoint !== 'directorInstructions') throw new Error(`unexpected method ${endpoint}`)
+    if (dialogue) return { ok: true, value: draftMethod((payload as { resourceId?: 'rough_final_feedback' }).resourceId ?? null) }
     if (JSON.stringify(payload) === JSON.stringify({ capability: 'shot_design', resourceId: 'rough_final_feedback' })) {
       return { ok: true, value: {
         capability: 'shot_design', requestedResourceId: 'rough_final_feedback', sourceSha256: 'c'.repeat(64),
@@ -128,6 +130,20 @@ async function harness(adapter: MockAdapter, sessionRoot?: string): Promise<Cont
       capability: 'director_development', sourceSha256: 'b'.repeat(64),
       sources: [{ content: '先确认人物意图与场景阻力，再安排机位和声画。' }],
     } }
+  })
+  if (dialogue) ctx.provide('qingmuYimengRead', async (endpoint) => {
+    if (endpoint === 'script') return { ok: true, value: { found: true, projectId: scope.projectId, episodeId: scope.episodeId,
+      revision: 1, scriptSha256: '0'.repeat(64), script: { scenes: [{ title: '公路',
+        dialogues: [{ lineId: 'line-6', speakerId: 'lina', line: '有人吗？', verbatimText: '有人吗？' }] }] } } }
+    if (endpoint !== 'workflow') throw new Error(`unexpected read ${endpoint}`)
+    return { ok: true, value: { projectId: scope.projectId, episodeId: scope.episodeId, director: { shotRelations: {
+      projectId: scope.projectId, episodeId: scope.episodeId, valid: true, blockers: [],
+      storyboardRevision: { revisionId: 'revision-1' }, shots: [
+        { shotId: scope.shotId, sceneId: scope.sceneId, frameNo: 6, title: '呼喊', dialogueRhythm: {
+          cues: [{ lineId: 'line-6', verbatimText: '有人吗？' }] } },
+        { shotId: 'shot-7', sceneId: scope.sceneId, frameNo: 7, title: '反应', dialogueRhythm: { cues: [] } },
+      ],
+    } } } }
   })
   return ctx
 }
@@ -141,6 +157,31 @@ async function createQingmuAgent(ctx: Context, id: string): Promise<{ agent: Age
 }
 
 describe('Qingmu model tools through a real preset and agent loop', () => {
+  it('reads actual dialogue tool results and delivers the impact to the next native model request', async () => {
+    const adapter = new MockAdapter([
+      toolCallResponse('read-dialogue', 'qingmu_read_dialogue', {}),
+      () => {
+        const input = JSON.parse(resultText(agent.session.events, 'qingmu_read_dialogue')) as { receiptId: string }
+        return toolCallResponse('preview-dialogue', 'qingmu_preview_dialogue_edit', {
+          receiptId: input.receiptId, lineId: 'line-6', before: '有人吗？', after: '有人在吗？',
+        })
+      },
+      textResponse('直接修改镜6，镜7台词不变；还需判断声音和反应的影响。尚未保存或生成。'),
+    ])
+    const ctx = await harness(adapter, undefined, true)
+    const handle = await createQingmuAgent(ctx, 'dialogue-preset')
+    const agent = handle.agent
+    bind(agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: '把镜6的“有人吗？”改成“有人在吗？”。' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+    const preview = JSON.parse(resultText(agent.session.events, 'qingmu_preview_dialogue_edit'))
+    expect(preview).toMatchObject({ affectedShots: [{ frameNo: 6 }], unchangedDialogueShots: [{ frameNo: 7 }],
+      businessStateChanged: false })
+    expect(JSON.stringify(adapter.requests.at(-1)?.messages)).toContain('有人在吗？')
+    expect(includesExactString(adapter.requests[1]?.messages, draftMethod().sources[0]!.content)).toBe(true)
+    expect(ctx.tools.schemas()).toEqual([])
+    await handle.dispose()
+  })
   it('logs model tool calls/results and presents both real bounded bodies to the next model request', async () => {
     const adapter = new MockAdapter([
       toolCallResponse('read-context', 'qingmu_read_bound_context', {}),

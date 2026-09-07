@@ -11,6 +11,7 @@ import type { DirectorContextClientPort } from '@deepseek-ai/dsh-experimental-qi
 import type { QingmuHostSync } from './host-sync.ts'
 import type { HostDescriptionSource } from '@deepseek-ai/dsh-client-connection/client'
 import type { NativeDirectorSessionPort } from './native-director-session.ts'
+import { useNativeDialogueExecution } from './NativeDialogueProgress.tsx'
 
 /** Props retain Yimeng's scene/frame identities; no director state is persisted here. */
 export interface DirectorWorkspaceProps {
@@ -45,6 +46,14 @@ export function DirectorWorkspace(props: DirectorWorkspaceProps) {
     sceneId: selectedShot.sceneId, shotId: selectedShot.shotId,
   } : null
   const [productionMounted, setProductionMounted] = useState(false)
+  const [productionOpen, setProductionOpen] = useState(false)
+  const execution = useNativeDialogueExecution(props.nativeDirectorSession, props.directorSessionId)
+  const reviewReady = execution?.status === 'input_prepared' && canonicalDirectorScope
+    && Object.entries(canonicalDirectorScope).every(([key, value]) => execution.scope[key as keyof typeof execution.scope] === value)
+    ? `${props.directorSessionId}:${execution.commandReceiptId}` : null
+  useEffect(() => {
+    if (reviewReady) { setProductionMounted(true); setProductionOpen(true) }
+  }, [reviewReady])
   const [planningDirty, setPlanningDirty] = useState(false)
   const [promptDirty, setPromptDirty] = useState(false)
   useEffect(() => {
@@ -56,7 +65,10 @@ export function DirectorWorkspace(props: DirectorWorkspaceProps) {
       canonicalDirectorScope={canonicalDirectorScope}
       canonicalDirectorRevision={JSON.stringify(currentProjection?.director.shotRelations.storyboardRevision)}
       onUnsavedChange={setPlanningDirty} />
-    <details onToggle={(event) => { if (event.currentTarget.open) setProductionMounted(true) }}>
+    <details open={productionOpen} onToggle={(event) => {
+      setProductionOpen(event.currentTarget.open)
+      if (event.currentTarget.open) setProductionMounted(true)
+    }}>
       <summary>已有提示词、Take 与高级分镜</summary>
       {productionMounted && <ExistingDirectorWorkspace {...props} onUnsavedChange={setPromptDirty} />}
     </details>

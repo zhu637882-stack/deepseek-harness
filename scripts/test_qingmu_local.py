@@ -211,6 +211,8 @@ class OwnershipTests(unittest.TestCase):
         }
         command = local.backend_command(config)
         self.assertNotIn("--director-production-override", command)
+        self.assertEqual(command[2], str(local.HARNESS / "packages/experimental/qingmu-director-context-bridge/python/qingmu_api.py"))
+        self.assertEqual(command[0], "/private/tmp/qingmu-writer-sample/.venv/bin/python")
 
     def director_submit_world(self, parent: Path):
         root = parent / "instance"

@@ -2,7 +2,8 @@
 import { z } from 'zod'
 import type { Session } from '@deepseek-ai/dsh-session'
 import type { CallId } from '@deepseek-ai/dsh-llm'
-import { assertNativePromptTarget, hasBrowserDirectorOwner } from './bridge.ts'
+import { assertNativePromptTarget, assertNativePromptSelection, hasBrowserDirectorOwner, currentState } from './bridge.ts'
+import { toolValues } from './native-draft.ts'
 
 const schema = 'qingmu.native-director-request.v1'
 const id = z.string().regex(/^[A-Za-z0-9_.:-]{1,256}$/u)
@@ -12,7 +13,7 @@ const targetSchema = z.object({ schema: z.literal(schema), sessionId: id, ownerI
 }).strict()
 
 /** Recheck all scoped human inputs consumed in this turn, not newer still-queued messages. */
-export function assertNativeTurnTarget(session: Session, callId: CallId): void {
+export function assertNativeTurnTarget(session: Session, callId: CallId, recoveryOnly = false): void {
   const marked = (content: readonly { type: string; text?: string }[]) => content[0]?.type === 'text'
     && content[0].text?.startsWith(`{"schema":"${schema}"`) === true
   // Queue editing can replace content. The original durable admission still proves
@@ -41,7 +42,29 @@ export function assertNativeTurnTarget(session: Session, callId: CallId): void {
     const decoded: unknown = JSON.parse(first.text)
     if (JSON.stringify(decoded) !== first.text) throw new Error('Noncanonical Qingmu request target.')
     const target = targetSchema.parse(decoded)
-    assertNativePromptTarget(session, target)
+    if (recoveryOnly) { assertNativePromptSelection(session, target); continue }
+    // Only a successful Host-recorded save in THIS consumed turn can advance
+    // its context. A queued old request or chat-authored receipt cannot retarget.
+    let hash = target.contextSnapshotSha256
+    if (currentState(session)?.binding.contextSnapshotSha256 === hash) {
+      assertNativePromptTarget(session, target)
+      continue
+    }
+    const consumed = { events: session.events.filter(item => item.seq > start.seq && item.seq < call.seq) }
+    for (const value of toolValues(consumed, 'qingmu_commit_dialogue_edit')) {
+      const saved = value as {
+        schema?: string
+        scope?: unknown
+        result?: { recovered?: boolean }
+        continuation?: { before: string; after: string }
+      }
+      if (saved.schema === 'qingmu.native-dialogue-committed.v1'
+        && saved.result?.recovered === false
+        && saved.scope !== null && typeof saved.scope === 'object'
+        && Object.entries(target.scope).every(([key, value]) => (saved.scope as Record<string, unknown>)[key] === value)
+        && saved.continuation?.before === hash && /^[0-9a-f]{64}$/u.test(saved.continuation.after)) hash = saved.continuation.after
+    }
+    assertNativePromptTarget(session, { ...target, contextSnapshotSha256: hash })
   }
   if (!found) missing()
 }

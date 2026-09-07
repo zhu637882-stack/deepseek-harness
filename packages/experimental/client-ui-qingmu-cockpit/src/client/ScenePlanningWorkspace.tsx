@@ -987,7 +987,7 @@ export function ScenePlanningWorkspace({
     </main>
     <aside className={css.properties}>
       {nativeDirectorSession && <NativeDirectorComposer port={nativeDirectorSession} sessionId={directorSessionId}
-        scopeKey={JSON.stringify(directorScope)} ready={nativeTarget !== undefined} target={nativeTarget} />}
+        scopeKey={JSON.stringify(directorScope)} ready={nativeTarget !== undefined} target={nativeTarget} onCommitted={onCommitted} />}
       <details open><summary>导演助理连接</summary>
         <p role="status">{directorSessionId === undefined
           ? '未选择 DSh 会话；人工编辑与保存仍可用。'

@@ -17,7 +17,7 @@ function fixture(blank = true, preset = 'ordinary') {
   const transport = directorConnectionFixture()
   const row = { id: 's1', cwd: '/project', blank, agentPreset: preset }
   const sessionState = { current: 's1', ids: ['s1'], byId: { s1: row } }
-  const sessions = { list: { getSnapshot: () => sessionState }, noteAgentPreset: vi.fn(), open: vi.fn() }
+  const sessions = { list: { getSnapshot: () => sessionState }, binding: vi.fn(() => undefined), noteAgentPreset: vi.fn(), open: vi.fn() }
   const workspaceState = { items: [{ workspaceId: 'w1', path: '/project', sessionIds: ['s1'] }], recentWorkspaceId: 'w1' }
   const workspaces = { list: { getSnapshot: () => workspaceState }, connectWorkspace: vi.fn(async () => 'new-empty') }
   const api = { agentPresets: { list: vi.fn(async () => ok({ presets: [{ id: 'qingmu-director', broken: false }] })),
@@ -175,7 +175,7 @@ it('submits once while pending and reports acceptance rather than creative compl
   expect(input.disabled).toBe(true)
   await act(async () => { finish() })
   expect(input.value).toBe('')
-  expect(screen.getByRole('status').textContent).toContain('尚未保存或生成')
+  expect(screen.getByRole('status').textContent).toContain('要求已交给当前导演处理')
 })
 it('keeps the request after an unknown send result and does not silently resend it', async () => {
   const f = fixture(false, 'qingmu-director')

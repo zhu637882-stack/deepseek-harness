@@ -5735,6 +5735,19 @@ export function createYimengCommandHandler(
         path = prepared.path
         requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
         normalize = prepared.normalize
+      } else if (endpoint === 'readDialogueEditCapability') {
+        const request = requireInputObject(payload)
+        if (Object.keys(request).length) throw new Error('Dialogue capability takes no arguments.')
+        path = '/api/qingmu/dialogue-edit/capability'
+        requestInit = { method: 'GET' }
+        normalize = (value) => {
+          const body = requireObject(value, 'dialogue capability')
+          if (body.schema !== 'qingmu.dialogue-transaction-capability.v1'
+            || body.referenceSchema !== 'qingmu.dialogue-edit-reference.v1'
+            || body.atomicScriptAndFrames !== true) throw new Error('Dialogue transaction is not installed.')
+          return { schema: 'qingmu.dialogue-transaction-capability.v1' as const,
+            referenceSchema: 'qingmu.dialogue-edit-reference.v1' as const, atomicScriptAndFrames: true as const }
+        }
       } else if (endpoint === 'proposeScript') {
         const request = parseProposeRequest(payload)
         path = `/api/qingmu/episodes/${encodeURIComponent(request.episodeId)}/script/change-sets`

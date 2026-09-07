@@ -221,6 +221,17 @@ export interface NativeDirectorReadiness {
 }
 
 /** Browser port for one current DSh session. */
+export interface NativeDialogueExecution {
+  readonly scope: DirectorObjectScope
+  readonly before: string
+  readonly after: string
+  readonly affectedShots: readonly { readonly shotId: string; readonly frameNo: number; readonly title: string | null }[]
+  readonly unchangedShots: readonly { readonly shotId: string; readonly frameNo: number; readonly title: string | null }[]
+  readonly status: 'prepared' | 'saving' | 'saved' | 'uncertain' | 'input_prepared'
+  readonly commandReceiptId: string | null
+}
+
+/** Browser port for one current DSh session. */
 export interface DirectorContextClientPort {
   /** Inspect actual session-scoped tool registrations without resuming its agent. */
   readNativeDirectorReadiness?(sessionId: string, signal?: AbortSignal): Promise<NativeDirectorReadiness>
@@ -244,16 +255,20 @@ declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     /** Whole-value, log-only binding; null clears an obsolete object before switch I/O. */
     'qingmu-director-context/state': DirectorContextBindingState | null
+    /** A UI view of a native tool operation, never a second business ledger. */
+    'qingmu-director-dialogue/state': NativeDialogueExecution
   }
 }
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionStateMap {
     'qingmuDirectorContext': DirectorContextBindingState | null
+    'qingmuDialogueExecution': NativeDialogueExecution | null
   }
 
   interface SessionProjectionMap {
     /** Future Qingmu UI mount point; absent package capability is distinct from an unbound null value. */
     'qingmuDirectorContext': DirectorContextBindingProjection
+    'qingmuDialogueExecution': NativeDialogueExecution | null
   }
 }

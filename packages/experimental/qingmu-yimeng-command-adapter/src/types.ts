@@ -2979,6 +2979,11 @@ export interface YimengReworkRouteAuthorityProbe {
 
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
+  readonly readDialogueEditCapability: {
+    readonly schema: 'qingmu.dialogue-transaction-capability.v1'
+    readonly referenceSchema: 'qingmu.dialogue-edit-reference.v1'
+    readonly atomicScriptAndFrames: true
+  }
   /** Host-only; the browser channel rejects this endpoint. */
   readonly readDirectorContext: import('./director-proposal.ts').DirectorContextSnapshot
   readonly readCreativeContract: import('./creation.ts').CreativeContractState

@@ -29,11 +29,22 @@ export function hasBrowserDirectorOwner(session: Session): boolean {
 
 /** Check a message's fixed target against the live binding; never rebind from message content. */
 export function assertNativePromptTarget(session: Session, target: NativeDirectorPromptTarget): void {
+  assertNativePromptSelection(session, target)
+  if (currentState(session)?.binding.contextSnapshotSha256 !== target.contextSnapshotSha256) {
+    throw new Error('This director request context has changed. Read and assess the current shot before another write.')
+  }
+}
+
+/** Check owner and selected object even when recovering an already committed command.
+ * This does not authorize a fresh mutation under a changed context.
+ * @param session Owning live session.
+ * @param target Consumed, browser-scoped user request.
+ */
+export function assertNativePromptSelection(session: Session, target: NativeDirectorPromptTarget): void {
   const owner = browserOwners.get(session)
   const current = currentState(session)
   if (target.sessionId !== session.id || !owner || owner.ownerId !== target.ownerId || !current
-    || !scopeEquals(owner.scope, target.scope) || !scopeEquals(current.binding.scope, target.scope)
-    || current.binding.contextSnapshotSha256 !== target.contextSnapshotSha256) {
+    || !scopeEquals(owner.scope, target.scope) || !scopeEquals(current.binding.scope, target.scope)) {
     throw new Error('This director request belongs to a previous shot selection. Return to the intended shot and send a new request; no other shot was read.')
   }
 }
@@ -89,7 +100,11 @@ function currentBindingEventSeq(session: Session): number | null {
   return null
 }
 
-function currentState(session: Session): DirectorContextBindingState | null {
+/** Read the validated latest object binding without refreshing its revision.
+ * @param session Owning native event log.
+ * @returns Current binding, or null when the session has never selected an object.
+ */
+export function currentState(session: Session): DirectorContextBindingState | null {
   for (let index = session.events.length - 1; index >= 0; index -= 1) {
     const event = session.events[index]
     if (event?.type === 'qingmu-director-context/state') {

@@ -60,6 +60,10 @@ BUILD_MANIFEST_ARTIFACTS = (
     "packages/experimental/qingmu-imago-method-adapter/lib/index.js",
     "packages/experimental/qingmu-director-context-bridge/lib/index.js",
     "packages/experimental/qingmu-director-context-bridge/lib/model-tools.js",
+    "packages/experimental/qingmu-director-context-bridge/python/qingmu_api.py",
+    "packages/experimental/qingmu-director-context-bridge/python/dialogue_changeset.py",
+    "packages/experimental/qingmu-director-context-bridge/python/dialogue_projection.py",
+    "packages/experimental/qingmu-director-context-bridge/python/video_frame_cas.py",
     "packages/experimental/client-ui-brand-qingmu/lib/client.js",
     "packages/experimental/client-ui-qingmu-cockpit/lib/client.js",
     "packages/experimental/qingmu-web/lib/index.js",
@@ -220,7 +224,7 @@ def safe_env(root: Path) -> dict[str, str]:
 
 def backend_command(config: dict) -> list[str]:
     writer = Path(config["yimengRoot"])
-    command = [str(writer / ".venv/bin/python"), "-B", str(writer / "scripts/qingmu_local_api.py"),
+    command = [str(writer / ".venv/bin/python"), "-B", str(HARNESS / "packages/experimental/qingmu-director-context-bridge/python/qingmu_api.py"),
                "--root", config["root"]]
     if config.get("_directorProductionOverridePath"):
         command.extend(["--director-production-override", config["_directorProductionOverridePath"]])

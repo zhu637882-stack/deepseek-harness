@@ -99,7 +99,7 @@ export async function readNativeShotMethods(
  * @param name Exact tool name to match.
  * @returns Parsed values from successful paired results, in log order.
  */
-export function toolValues(session: Session, name: string): unknown[] {
+export function toolValues(session: Pick<Session, 'events'>, name: string): unknown[] {
   const calls = new Map<string, { turn: number; step: number }>()
   const results: unknown[] = []
   for (const event of session.events) {
