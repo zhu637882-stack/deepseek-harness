@@ -30,6 +30,7 @@ import { EditorialHandoff } from './EditorialHandoff.tsx'
 import css from './QingmuCockpit.module.css'
 import { DirectorWorkspace } from './DirectorWorkspace.tsx'
 import { NativeDirectorSession } from './NativeDirectorSession.tsx'
+import { ShootingReviewWorkspace } from './ShootingReviewWorkspace.tsx'
 
 export type QingmuCockpitProps = PropsRuntime<'sidebar.footer.action'>
   & InjectFace<QingmuCockpitFace>
@@ -502,6 +503,17 @@ export function QingmuCockpit({
 
   const shotView = (
     <div className={css.stack}>
+      <ShootingReviewWorkspace
+        projectName={projectLabel(selectedProject ?? {}, '未命名项目')}
+        episodeName={episodeLabel(selectedEpisode ?? {}, '未命名剧集')}
+        projection={projection}
+        selectedShotId={selectedShotId}
+        onSelectShotId={setSelectedShotId}
+        directorAssistant={nativeDirectorSession === undefined
+          ? <p role="status">原生导演助手当前不可用；不会回退到 iframe。</p>
+          : <NativeDirectorSession port={nativeDirectorSession} bridge={directorBridge} sessionId={directorSessionId}
+            onRefresh={() => { setDirectorRefresh(value => value + 1) }} />}
+      />
       <Card title={t('shotsTitle')}>
         <div className={css.metrics}>
           <Metric label={t('shotCount')} value={numberOf(shots.count) ?? 0} />
@@ -565,6 +577,17 @@ export function QingmuCockpit({
         port={port}
         t={t}
       />
+      <div id="qingmu-version-selection">
+        <TakeVersionCompareView
+          projectId={projectId}
+          episodeId={episodeId}
+          selectedShotId={selectedShotId}
+          projection={projection}
+          enabled={open && !loading && error === undefined}
+          port={port}
+          t={t}
+        />
+      </div>
     </div>
   )
 
