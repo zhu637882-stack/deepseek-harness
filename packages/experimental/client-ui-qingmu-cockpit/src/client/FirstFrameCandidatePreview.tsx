@@ -73,12 +73,14 @@ export function FirstFrameCandidatePreview({
   labels,
   onPreviewReady,
   autoLoad = false,
+  thumbnailClassName,
 }: {
   readonly request: FirstFrameCandidatePreviewRequest
   readonly load: (request: FirstFrameCandidatePreviewRequest, signal?: AbortSignal) => Promise<FirstFrameCandidatePreviewResponse>
   readonly labels: FirstFrameCandidatePreviewLabels
   readonly onPreviewReady?: (url: string | undefined) => void
   readonly autoLoad?: boolean
+  readonly thumbnailClassName?: string
 }) {
   const [url, setUrl] = useState<string>()
   const [status, setStatus] = useState<'idle' | 'loading' | 'error' | 'ready'>('idle')
@@ -134,6 +136,10 @@ export function FirstFrameCandidatePreview({
   }, [load, onPreviewReady, request.projectId, request.episodeId, request.storyboardRevisionId,
     request.frameId, request.assetId, request.expectedMaterializedSha256])
   useEffect(() => { if (autoLoad) void preview() }, [autoLoad, preview])
+  // A thumbnail lives inside the shot's navigation button; never nest an action button.
+  if (thumbnailClassName !== undefined) return url !== undefined
+    ? <img className={thumbnailClassName} src={url} alt={labels.ariaLabel} />
+    : <span className={thumbnailClassName}>{status === 'error' ? '缩略图未载入' : '正在读取首帧'}</span>
   return <div>
     {url === undefined
       ? <button type="button" disabled={status === 'loading'} onClick={() => { void preview() }}>

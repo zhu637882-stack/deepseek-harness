@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent, ReactNode } from 'react'
 import type { QingmuYimengPort, YimengTakeVersion, YimengTakeVersionStackResponse, YimengWorkflowProjection } from './contracts.ts'
 import type { QingmuCockpitKey } from './locales.ts'
@@ -7,7 +7,8 @@ import { TakePreviewPlayer } from './TakePreviewPlayer.tsx'
 import { TakeThumbnail } from './TakeThumbnail.tsx'
 import { ShootingFirstFrame } from './ShootingFirstFrame.tsx'
 import { ShootingFirstFrameHistory } from './ShootingFirstFrameHistory.tsx'
-import type { FirstFrameHistoryCandidate } from './first-frame-selection.ts'
+import { createFirstFrameSelectionClient, type FirstFrameHistoryCandidate } from './first-frame-selection.ts'
+import { FirstFrameCandidatePreview } from './FirstFrameCandidatePreview.tsx'
 import { AutomaticFrameRequirementsEditor } from './AutomaticFrameRequirementsEditor.tsx'
 import {
   clearTakeVersionSelectionMarker, createTakeVersionSelectionMarker, readTakeVersionSelectionMarker,
@@ -126,6 +127,48 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
   const loadedScope = useRef('')
   const [planningShots, setPlanningShots] = useState<readonly AutomaticPlanningShot[]>([])
   const [shotStacks, setShotStacks] = useState<Readonly<Record<string, YimengTakeVersionStackResponse>>>({})
+  const frameClient = useMemo(() => createFirstFrameSelectionClient(), [])
+  const storyboardRevisionId = projection?.director.shotRelations.storyboardRevision?.revisionId ?? ''
+  const historyScopeKey = `${projectId}:${episodeId}:${storyboardRevisionId}`
+  const historyFrameIds = shots.filter(shot =>
+    !projection?.director.heroFrameStoryboards?.shots.find(item => item.shotId === shot.shotId)?.heroFrame,
+  ).map(shot => shot.shotId).join('\u0000')
+  const [historyRefresh, setHistoryRefresh] = useState(0)
+  const refreshExistingMedia = useCallback(async () => {
+    await onCommitted()
+    setHistoryRefresh(value => value + 1)
+  }, [onCommitted])
+  const [frameHistory, setFrameHistory] = useState<{
+    key: string
+    candidates: Readonly<Record<string, FirstFrameHistoryCandidate | undefined>>
+  }>()
+  const historyCandidates = frameHistory?.key === historyScopeKey ? frameHistory.candidates : {}
+  useEffect(() => {
+    const controller = new AbortController()
+    setFrameHistory({ key: historyScopeKey, candidates: {} })
+    if (!storyboardRevisionId) return () => controller.abort()
+    // Selected hero frames already have thumbnails. For the others, inspect existing
+    // bytes independently of quality/adoption eligibility, including inactive shots.
+    const ids = historyFrameIds ? historyFrameIds.split('\u0000') : []
+    let index = 0
+    const read = async (): Promise<void> => {
+      while (index < ids.length && !controller.signal.aborted) {
+        const frameId = ids[index++]
+        if (!frameId) return
+        try {
+          const items = await frameClient.history({ projectId, episodeId, storyboardRevisionId, frameId }, controller.signal)
+          if (controller.signal.aborted) return
+          const candidate = items.find(item => item.isSelected) ?? items.filter(item =>
+            !['Stale', 'Rejected'].includes(item.selectionStatus) && item.qualityStatus !== 'failed',
+          ).at(-1) ?? items.at(-1)
+          setFrameHistory(old => ({ key: historyScopeKey,
+            candidates: { ...(old?.key === historyScopeKey ? old.candidates : {}), [frameId]: candidate } }))
+        } catch { /* A failed history read is not evidence that no image exists. */ }
+      }
+    }
+    void read(); void read()
+    return () => controller.abort()
+  }, [projectId, episodeId, storyboardRevisionId, historyScopeKey, historyFrameIds, historyRefresh, frameClient])
   useEffect(() => {
     const controller = new AbortController(); setShotStacks({})
     const ids = (projection?.director.shotRelations.shots ?? []).map(shot => shot.shotId)
@@ -223,6 +266,7 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
   const dialogue = (current.dialogueRhythm?.cues ?? []).map(cue => cue.verbatimText).filter(Boolean)
   const inspected = inspectedFrame?.key === mediaPaneKey ? inspectedFrame : undefined
   const hasFrameCandidate = inspected?.candidate !== undefined
+    || historyCandidates[current.shotId] !== undefined
     || (planningShots.find(item => item.id === current.shotId)?.firstFrameCandidateCount ?? 0) > 0
   const productionAction = shootingPrimary(
     Boolean(heroFrame) || hasFrameCandidate, Boolean(heroFrame), Boolean(visibleStack?.subject.selectedTakeId))
@@ -257,9 +301,10 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
         const summary = shot.shotId === current.shotId ? visibleStack ?? shotStacks[shot.shotId] : shotStacks[shot.shotId]
         const previewTake = shootingPosterVersion(summary)
         const planning = planningShots.find(item => item.id === shot.shotId)
-        const label = summary?.subject.selectedTakeId ? '有视频' : (summary?.subject.versions.length ?? 0) > 0 ? summary?.subject.versions.every(v => v.qualityStatus === 'failed' || v.outputBindingStatus !== 'verified') ? '旧视频未通过' : '待审' : hero ? '有首帧' : viewed?.candidate ? viewed.candidate.selectionStatus === 'Stale' || viewed.candidate.selectionStatus === 'Rejected' || viewed.candidate.qualityStatus === 'failed' ? '旧首帧，仅供对照' : '首帧待审' : (planning?.firstFrameCandidateCount ?? 0) > 0 ? '有首帧' : summary ? '无有效首帧' : '正在读取'
+        const candidate = viewed?.candidate ?? historyCandidates[shot.shotId]
+        const label = summary?.subject.selectedTakeId ? '有视频' : (summary?.subject.versions.length ?? 0) > 0 ? summary?.subject.versions.every(v => v.qualityStatus === 'failed' || v.outputBindingStatus !== 'verified') ? '旧视频未通过' : '待审' : hero ? '有首帧' : candidate ? candidate.selectionStatus === 'Stale' || candidate.selectionStatus === 'Rejected' || candidate.qualityStatus === 'failed' ? '旧首帧，仅供对照' : candidate.isSelected ? '有首帧' : '首帧待审' : (planning?.firstFrameCandidateCount ?? 0) > 0 ? '有首帧' : Object.hasOwn(historyCandidates, shot.shotId) ? '无有效首帧' : '正在读取'
         const title = shootingTitle(shot.title, planning)
-        return <button key={shot.shotId} type="button" aria-label={`镜 ${shot.frameNo} ${title}`} aria-current={shot.shotId === current.shotId} onClick={() => onSelectShotId(shot.shotId)}>{thumb ? <img className={css.shotThumb} src={thumb} loading="lazy" alt={`镜 ${shot.frameNo} 首帧缩略图`} /> : previewTake ? <TakeThumbnail request={{ projectId, episodeId, frameId: shot.shotId, takeId: previewTake.takeId, expectedOutputSha256: previewTake.outputSha256 }} load={port.takePreview} className={css.shotThumb} alt={`镜 ${shot.frameNo} 视频第一帧`} /> : <span className={css.shotThumb}>暂无首帧</span>}<span className={css.shotText}><small>镜 {shot.frameNo}</small><strong title={title}>{title}</strong><small className={css.shotStatus} data-status={label}><i aria-hidden="true" />{label}</small></span></button>
+        return <button key={shot.shotId} type="button" aria-label={`镜 ${shot.frameNo} ${title}`} aria-current={shot.shotId === current.shotId} onClick={() => onSelectShotId(shot.shotId)}>{thumb ? <img className={css.shotThumb} src={thumb} loading="lazy" alt={`镜 ${shot.frameNo} 首帧缩略图`} /> : previewTake ? <TakeThumbnail request={{ projectId, episodeId, frameId: shot.shotId, takeId: previewTake.takeId, expectedOutputSha256: previewTake.outputSha256 }} load={port.takePreview} className={css.shotThumb} alt={`镜 ${shot.frameNo} 视频第一帧`} /> : candidate && shot.shotId !== current.shotId ? <FirstFrameCandidatePreview key={`${historyScopeKey}:${shot.shotId}:${candidate.assetId}`} autoLoad thumbnailClassName={css.shotThumb ?? ''} request={{ projectId, episodeId, storyboardRevisionId, frameId: shot.shotId, assetId: candidate.assetId, expectedMaterializedSha256: candidate.materializedSha256 }} load={frameClient.historyPreview} labels={{ load: '查看首帧', loading: '正在读取首帧', error: '缩略图未载入', ariaLabel: `镜 ${shot.frameNo} 首帧缩略图` }} /> : <span className={css.shotThumb}>{candidate ? '首帧候选' : Object.hasOwn(historyCandidates, shot.shotId) ? '暂无首帧' : '正在读取'}</span>}<span className={css.shotText}><small>镜 {shot.frameNo}</small><strong title={title}>{title}</strong><small className={css.shotStatus} data-status={label}><i aria-hidden="true" />{label}</small></span></button>
       })}</aside>
       <main className={css.stage}>
         <div className={css.reworkActions} aria-label="本镜重做操作">
@@ -269,14 +314,14 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
           <button type="button" onClick={() => showMediaPane('history')}>查看与采用首帧</button>
         </div>
         <div className={css.media} data-state={testState ?? (load === 'loading' ? 'loading' : state)}>
-          {historyOpen ? <ShootingFirstFrameHistory key={`${mediaPaneKey}:${projection?.director.shotRelations.storyboardRevision?.revisionId}`} scope={{ projectId, episodeId, frameId: current.shotId, storyboardRevisionId: projection?.director.shotRelations.storyboardRevision?.revisionId ?? '' }} onCommitted={onCommitted} onCandidatePreview={onCandidatePreview} /> : firstFrameOpen ? <ShootingFirstFrame key={mediaPaneKey}
-            scope={{ projectId, episodeId, frameId: current.shotId }} onCommitted={onCommitted} />
+          {historyOpen ? <ShootingFirstFrameHistory key={`${mediaPaneKey}:${projection?.director.shotRelations.storyboardRevision?.revisionId}`} scope={{ projectId, episodeId, frameId: current.shotId, storyboardRevisionId: projection?.director.shotRelations.storyboardRevision?.revisionId ?? '' }} onCommitted={refreshExistingMedia} onCandidatePreview={onCandidatePreview} /> : firstFrameOpen ? <ShootingFirstFrame key={mediaPaneKey}
+            scope={{ projectId, episodeId, frameId: current.shotId }} onCommitted={refreshExistingMedia} />
             : usable(browsed) ? <div className={css.player}><TakePreviewPlayer request={{
               projectId, episodeId, frameId: current.shotId, takeId: browsed.takeId,
               expectedOutputSha256: browsed.outputSha256,
             }} load={port.takePreview} t={t} onPreviewReady={onPreviewReady} autoLoad /></div>
               : heroUrl !== undefined ? <div className={css.frame}><span>已选首帧</span><img src={heroUrl} alt={`镜 ${current.frameNo} 已选首帧`} onLoad={() => { setHeroMediaUrl(heroUrl); setHeroError(false) }} onError={() => setHeroError(true)} />{heroError && <p role="alert">首帧暂时无法显示，请刷新后再试。</p>}</div>
-                : load === 'ready' && projection?.director.shotRelations.storyboardRevision?.revisionId ? <ShootingFirstFrameHistory key={`${mediaPaneKey}:${projection.director.shotRelations.storyboardRevision.revisionId}`} scope={{ projectId, episodeId, frameId: current.shotId, storyboardRevisionId: projection.director.shotRelations.storyboardRevision.revisionId }} onCommitted={onCommitted} onCandidatePreview={onCandidatePreview} />
+                : load === 'ready' && projection?.director.shotRelations.storyboardRevision?.revisionId ? <ShootingFirstFrameHistory key={`${mediaPaneKey}:${projection.director.shotRelations.storyboardRevision.revisionId}`} scope={{ projectId, episodeId, frameId: current.shotId, storyboardRevisionId: projection.director.shotRelations.storyboardRevision.revisionId }} onCommitted={refreshExistingMedia} onCandidatePreview={onCandidatePreview} />
                   : <div className={css.canvas}><span>镜 {current.frameNo}</span><strong>{current.title}</strong>
                     <small>{message(state, load)}</small></div>}
           {!firstFrameOpen && !historyOpen && <>{testState !== undefined && <p className={css.mediaNotice} role="status">隔离演练状态，不代表真实任务，未提交生成。</p>}{load === 'loading' && <p className={css.mediaNotice} role="status">{message(state, load)}</p>}{load === 'failed' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}{state === 'failed' && load === 'ready' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}</>}

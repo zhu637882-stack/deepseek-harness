@@ -68,6 +68,25 @@ it('does not auto-retry or display an image whose bytes fail validation', async 
   expect(screen.queryByRole('img')).toBeNull()
 })
 
+it('renders a verified thumbnail without a nested button and releases its bytes on unmount', async () => {
+  const load = vi.fn(async () => response)
+  const view = render(<button type="button">镜头<FirstFrameCandidatePreview request={request} load={load} labels={labels} autoLoad thumbnailClassName="shot-thumb" /></button>)
+  expect(screen.getAllByRole('button')).toHaveLength(1)
+  expect((await screen.findByRole('img')).className).toBe('shot-thumb')
+  view.unmount()
+  expect(revokeUrl).toHaveBeenCalledExactlyOnceWith('blob:first-frame')
+})
+
+it('does not display or retry a thumbnail whose bytes drifted', async () => {
+  const load = vi.fn(async () => ({ ...response, base64: Buffer.from('drift').toString('base64') }))
+  const view = render(<FirstFrameCandidatePreview request={request} load={load} labels={labels} autoLoad thumbnailClassName="shot-thumb" />)
+  await screen.findByText('缩略图未载入')
+  view.rerender(<FirstFrameCandidatePreview request={{ ...request }} load={load} labels={labels} autoLoad thumbnailClassName="shot-thumb" />)
+  expect(load).toHaveBeenCalledTimes(1)
+  expect(screen.queryByRole('img')).toBeNull()
+  expect(createUrl).not.toHaveBeenCalled()
+})
+
 it.each([
   ['wrong scope', { ...response, assetId: 'asset-other' }],
   ['stale sha', { ...response, materializedSha256: '0'.repeat(64) }],
