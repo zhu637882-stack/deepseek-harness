@@ -428,7 +428,9 @@ export function registerFirstFrameSelectionCommands(
       const media = await mediaUpstream(
         dependencies,
         req,
-        new URL(`/api/media/${encodeURIComponent(value.assetId)}`, dependencies.baseUrl),
+        // Writer materializes asset_ingest_* as media_ingest_*; /api/media
+        // accepts the media identity, never the asset identity.
+        new URL(`/api/media/${encodeURIComponent(value.assetId.replace(/^asset_/, 'media_'))}`, dependencies.baseUrl),
       )
       if (media === undefined
         || createHash('sha256').update(media.bytes).digest('hex') !== value.expectedMaterializedSha256) {

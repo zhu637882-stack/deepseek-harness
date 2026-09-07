@@ -96,6 +96,27 @@ function selectedState() {
 }
 
 describe('first-frame selection Host media bridge', () => {
+  it.each([false, true])('resolves real materialized media IDs (history=%s)', async (history) => {
+    const current = state()
+    current.candidates[0]!.assetId = 'asset_ingest_1234'
+    const historical = { schema: 'jason.qingmu-first-frame-history.v1', ...coordinates,
+      candidates: [{ assetId: 'asset_ingest_1234', materializedSha256, qualityStatus: 'passed', selectionStatus: 'Stale', isSelected: false }],
+      providerCalls: 0, taskMutation: false, outboxEvents: 0 }
+    const upstream = vi.fn<typeof globalThis.fetch>(async (input) => {
+      const url = requestUrl(input)
+      if (url.pathname.startsWith('/api/media/')) return url.pathname === '/api/media/media_ingest_1234'
+        ? new Response(bytes, { headers: { 'content-type': 'image/png', 'content-length': String(bytes.length) } })
+        : new Response('', { status: 404 })
+      return Response.json(history ? historical : current)
+    })
+    const base = await host(upstream)
+    const path = history ? FIRST_FRAME_HISTORY_MEDIA_PATH : FIRST_FRAME_SELECTION_MEDIA_PATH
+    const query = new URLSearchParams({ ...coordinates, assetId: 'asset_ingest_1234', expectedMaterializedSha256: materializedSha256 })
+    const response = await fetch(`${base}${path}?${query}`, { headers: { cookie: 'jason_token=human-cookie' } })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ assetId: 'asset_ingest_1234', materializedSha256 })
+    expect(upstream.mock.calls.map(([input]) => requestUrl(input).pathname).at(-1)).toBe('/api/media/media_ingest_1234')
+  })
   it('browses stale history through read-only routes while keeping selection media strict', async () => {
     const history = { schema: 'jason.qingmu-first-frame-history.v1', ...coordinates,
       candidates: [{ assetId: 'asset-1', materializedSha256, qualityStatus: 'passed', selectionStatus: 'Stale', isSelected: false }],
