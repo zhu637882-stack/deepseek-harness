@@ -8,7 +8,7 @@ const result = { ...scope,schema:'qingmu.shooting-first-frame-state.v1',requestI
 const review = { ...scope, frameDigest:'d'.repeat(64),accepted:true,title:'驾驶视点',imagePromptCn:'当前分镜要求',preflight:{ technicalReady:true } }
 afterEach(() => { cleanup(); localStorage.clear(); vi.unstubAllGlobals() })
 it.each([
-  ['DispatchPending', '首帧任务已排队，等待执行器接单；尚未提交供应商。请勿重复生成。'],
+  ['DispatchPending', '首帧任务已入队，等待派发进度更新；请勿重复生成。'],
   ['QualityPending', '正在检查生成结果并准备候选，尚未人工认可。'],
   ['Succeeded', '任务已结束，但候选尚未就绪，需要检查结果落盘；未重新生成。'],
 ])('renders %s from the original receipt without claiming generation or resubmitting', async (kernel_status, message) => {
@@ -22,6 +22,16 @@ it.each([
   view.unmount(); render(<ShootingFirstFrame scope={scope} />)
   await screen.findByText(message)
   expect(fetcher.mock.calls.every(([path]) => path.includes('/state?') || path.includes('/review?'))).toBe(true)
+  expect(screen.queryByRole('button',{ name:'生成这张首帧（仅一次）' })).toBeNull()
+})
+it('does not claim an unsubmitted provider outcome while dispatch is in flight', async () => {
+  localStorage.setItem(`qingmu:shooting-first-frame:${scope.projectId}:${scope.episodeId}:${scope.frameId}`,
+    JSON.stringify({ preview, requestId:result.requestId }))
+  vi.stubGlobal('fetch',vi.fn(async (path:string) => ({ ok:true,json:async () => path.includes('/review?') ? review
+    : { ...result,task:{ id:'task-one',kernel_status:'DispatchPending',local_status:'dispatching',provider_status:'DISPATCHING' },candidate:null } })))
+  render(<ShootingFirstFrame scope={scope} />)
+  await screen.findByText('首帧任务已入队，等待派发进度更新；请勿重复生成。')
+  expect(screen.queryByText(/尚未提交供应商/)).toBeNull()
   expect(screen.queryByRole('button',{ name:'生成这张首帧（仅一次）' })).toBeNull()
 })
 it('shows full prompt, submits once and restores by GET after remount', async () => {

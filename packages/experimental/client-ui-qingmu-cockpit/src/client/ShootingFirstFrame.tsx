@@ -108,7 +108,7 @@ function assertAttempt(value: unknown, scope: ShootingFrameScope, requestId: str
 function attemptMessage(task: Attempt['task'] | undefined): string {
   switch (task?.kernel_status) {
     case 'DispatchPending':
-      return '首帧任务已排队，等待执行器接单；尚未提交供应商。请勿重复生成。'
+      return '首帧任务已入队，等待派发进度更新；请勿重复生成。'
     case 'Failed': case 'Cancelled':
       return '本次生成未完成，已停止，不自动重试。'
     case 'QualityPending':
