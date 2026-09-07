@@ -39,7 +39,9 @@ export function NativeDialogueProgress({ port, sessionId, target, onCommitted }:
   const refresh = useRef(onCommitted)
   refresh.current = onCommitted
   const [refreshFailed, setRefreshFailed] = useState(false)
-  const receipt = visible && ['saved', 'input_prepared'].includes(visible.status)
+  // Refreshing the parent replaces its browser selection lease. Keep the live
+  // save→prepare turn intact; refresh when it reaches the human-review boundary.
+  const receipt = visible && visible.status === 'input_prepared'
     && visible.commandReceiptId ? `${visible.status}:${visible.commandReceiptId}` : null
   useEffect(() => {
     if (!receipt || !refresh.current || refreshed.current === `${sessionId}:${receipt}`) return

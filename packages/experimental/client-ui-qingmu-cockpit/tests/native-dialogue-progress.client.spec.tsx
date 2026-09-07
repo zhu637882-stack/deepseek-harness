@@ -23,7 +23,7 @@ function fixture() {
     state = { ...state, ...patch }; listeners.forEach(listener => listener())
   } }
 }
-it('shows exact impact and refreshes the current project once after a durable save, never submits', async () => {
+it('shows the save immediately but preserves its live selection until input preparation completes, never submits', async () => {
   const f = fixture()
   const view = render(<NativeDialogueProgress {...f.props} />)
   expect(screen.getByText('更新：镜6')).toBeTruthy()
@@ -32,10 +32,13 @@ it('shows exact impact and refreshes the current project once after a durable sa
   act(() => f.publish({ status: 'saving' }))
   expect(screen.getByRole('status').textContent).toContain('正在保存')
   act(() => f.publish({ status: 'saved', commandReceiptId: 'receipt1' }))
+  expect(f.props.onCommitted).not.toHaveBeenCalled()
+  expect(screen.getByRole('status').textContent).toContain('视频尚未重新生成')
+  act(() => f.publish({ status: 'input_prepared', commandReceiptId: 'receipt1' }))
   await waitFor(() => expect(f.props.onCommitted).toHaveBeenCalledTimes(1))
   view.rerender(<NativeDialogueProgress {...f.props} />)
   expect(f.props.onCommitted).toHaveBeenCalledTimes(1)
-  expect(screen.getByRole('status').textContent).toContain('视频尚未重新生成')
+  expect(screen.getByRole('status').textContent).toContain('视频输入已准备')
   view.unmount()
   render(<NativeDialogueProgress {...f.props} />)
   await waitFor(() => expect(f.props.onCommitted).toHaveBeenCalledTimes(2))
@@ -43,7 +46,7 @@ it('shows exact impact and refreshes the current project once after a durable sa
 })
 it('never displays or refreshes another shot or session', () => {
   const f = fixture()
-  act(() => f.publish({ status: 'saved', commandReceiptId: 'receipt1' }))
+  act(() => f.publish({ status: 'input_prepared', commandReceiptId: 'receipt1' }))
   const view = render(<NativeDialogueProgress {...f.props} target={{ ...f.props.target,
     scope: { ...f.props.target.scope, shotId: 'f7' } }} />)
   expect(screen.queryByRole('status')).toBeNull()
@@ -54,7 +57,7 @@ it('never displays or refreshes another shot or session', () => {
 it('keeps a durable save distinct from a failed display refresh', async () => {
   const f = fixture()
   f.props.onCommitted.mockRejectedValue(new Error('offline'))
-  act(() => f.publish({ status: 'saved', commandReceiptId: 'receipt1' }))
+  act(() => f.publish({ status: 'input_prepared', commandReceiptId: 'receipt1' }))
   render(<NativeDialogueProgress {...f.props} />)
   expect((await screen.findByRole('alert')).textContent).toContain('修改已保存')
   expect(f.props.port.prompt).not.toHaveBeenCalled()
