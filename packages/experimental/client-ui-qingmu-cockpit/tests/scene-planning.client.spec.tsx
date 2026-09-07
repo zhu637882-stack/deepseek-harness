@@ -87,6 +87,26 @@ it('shows a canonical automatic storyboard as read-only without reviving the leg
   expect(port.saveScenePlanning).not.toHaveBeenCalled()
   expect(onSelectShotId).not.toHaveBeenCalled()
 })
+it('restores the visible automatic shot into the director selection on reload without a business write', async () => {
+  const automatic = { ...automaticReadState(), canonicalStoryboard: {
+    ...automaticReadState().canonicalStoryboard!, shots: [
+      { id: 'automatic_1', frameNo: 1, title: '雨夜入口', imagePromptCn: '原首帧要求' },
+      { id: 'automatic_6', frameNo: 6, title: '呼喊', imagePromptCn: '车旁' },
+    ],
+  } }
+  localStorage.setItem('qingmu.scene-planning.v1:project_1:episode_1:automatic-frame', JSON.stringify({
+    shotId: 'automatic_6', imagePromptCn: '车旁', dirty: false,
+  }))
+  const port = { readScenePlanning: vi.fn(async () => automatic), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() }
+  const onSelectShotId = vi.fn()
+  render(<ScenePlanningWorkspace {...automatic} port={port} onCommitted={vi.fn(async () => {})}
+    canonicalDirectorScope={{ projectId: 'project_1', episodeId: 'episode_1', sceneId: 'scene_1', shotId: 'automatic_1' }}
+    onSelectShotId={onSelectShotId} onUnsavedChange={vi.fn()} />)
+  expect((await screen.findByLabelText('自动分镜镜头') as HTMLSelectElement).value).toBe('automatic_6')
+  expect(onSelectShotId).toHaveBeenCalledExactlyOnceWith('automatic_6')
+  expect(port.saveScenePlanning).not.toHaveBeenCalled(); expect(port.recoverScenePlanning).not.toHaveBeenCalled()
+})
 it('saves one automatic shot first-frame requirement, rereads it, and never treats it as generation or approval', async () => {
   const automatic = { ...automaticReadState(), canonicalStoryboard: {
     ...automaticReadState().canonicalStoryboard!, shots: [
@@ -173,6 +193,27 @@ it('rejects a same-revision automatic receipt with a different source hash and k
   await screen.findByRole('alert')
   expect(localStorage.getItem('qingmu.scene-planning.v1:project_1:episode_1:automatic-frame')).toContain('pending')
 })
+it.each([undefined, [], [{ id: 'other_shot', frameNo: 2, title: '另一镜', imagePromptCn: '' }]])(
+  'cannot send to a bound shot when automatic visible rows are missing or disagree: %j', async (shots) => {
+    const automatic = automaticReadState()
+    if (shots !== undefined) automatic.canonicalStoryboard = { ...automatic.canonicalStoryboard!, shots }
+    const port = { readScenePlanning: vi.fn(async () => automatic), requestDirectorProposal: unavailableDirectorProposal(),
+      checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() }
+    const bridge = replayBridge()
+    const transport = directorConnectionFixture()
+    const native = { connection: transport.source, activate: vi.fn(), prompt: vi.fn(async () => {}) }
+    const scope = { projectId: automatic.projectId, episodeId: automatic.episodeId, sceneId: 'canonical_scene', shotId: 'canonical_1' }
+    render(<ScenePlanningWorkspace {...automatic} port={port} directorBridge={bridge} directorSessionId="session_1"
+      canonicalDirectorScope={scope} directorConnection={transport.source} nativeDirectorSession={native}
+      onCommitted={vi.fn(async () => {})} onSelectShotId={vi.fn()} onUnsavedChange={vi.fn()} />)
+    await screen.findByText('最近一次镜头上下文同步成功；不代表生成或审核通过。')
+    fireEvent.change(screen.getByLabelText('导演要求'), { target: { value: '修改这句台词' } })
+    const send = screen.getByRole('button', { name: '发送给当前导演' }) as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+    fireEvent.click(send)
+    expect(native.prompt).not.toHaveBeenCalled()
+    expect(port.saveScenePlanning).not.toHaveBeenCalled()
+  })
 it('binds canonical shot selection to the current session without opening the legacy planner', async () => {
   const automatic = automaticReadState()
   const port = { readScenePlanning: vi.fn(async () => automatic), requestDirectorProposal: unavailableDirectorProposal(),

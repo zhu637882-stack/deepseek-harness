@@ -322,6 +322,8 @@ export function ScenePlanningWorkspace({
       if (next.projectId !== projectId || next.episodeId !== episodeId) throw new Error('409 planning_read_scope_mismatch')
       setState(next)
       if (next.canonicalStoryboard !== null && next.canonicalStoryboard !== undefined) {
+        const restoredShot = next.canonicalStoryboard.shots?.find(shot => shot.id === automaticRef.current?.shotId)
+        if (restoredShot && restoredShot.id !== canonicalDirectorScope?.shotId) onSelectShotId(restoredShot.id)
         const retainedInputCopy = local === null ? null : retainedInput(local)
         const priorRetained = retainedInput(storedPlan(`${key}:retained-input`))
         const retainedCopy = retainedInputCopy ?? priorRetained
@@ -379,7 +381,10 @@ export function ScenePlanningWorkspace({
       projectId, episodeId, sceneId: state.planning.sceneId, shotId: currentShotId,
     } : null
   const directorIdentityKey = JSON.stringify([directorSessionId, directorScope, canonicalDirectorRevision, directorRefresh])
+  const visibleAutomaticShot = canonicalStoryboard?.shots?.find(shot => shot.id === automatic?.shotId)
+    ?? canonicalStoryboard?.shots?.[0]
   const nativeTarget = directorStatus === 'current' && directorBinding && directorSessionId
+    && (canonicalStoryboard === null || (visibleAutomaticShot !== undefined && visibleAutomaticShot.id === directorScope?.shotId))
     && directorReadyIdentity?.key === directorIdentityKey && directorReadyIdentity.connection === connection
     ? { schema: 'qingmu.native-director-request.v1' as const, sessionId: directorSessionId,
       scope: directorBinding.binding.scope, contextSnapshotSha256: directorBinding.binding.contextSnapshotSha256,
