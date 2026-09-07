@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent, ReactNode } from 'react'
 import type { QingmuYimengPort, YimengTakeVersion, YimengTakeVersionStackResponse, YimengWorkflowProjection } from './contracts.ts'
 import type { QingmuCockpitKey } from './locales.ts'
+import type { AutomaticPlanningShot } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import { TakePreviewPlayer } from './TakePreviewPlayer.tsx'
 import { AutomaticFrameRequirementsEditor } from './AutomaticFrameRequirementsEditor.tsx'
 import {
@@ -30,6 +31,7 @@ interface Props {
   readonly onNavigate: (destination: Destination) => void
   readonly onCommitted?: () => Promise<unknown>
   readonly directorAssistant: ReactNode
+  readonly onProductionAction?: (action: 'first-frame' | 'select-frame' | 'video', shotId: string) => void
   readonly port: Pick<QingmuYimengPort, 'takeVersions' | 'takePreview' | 'selectTakeVersion' | 'recoverTakeVersionSelection'>
     & Partial<Pick<QingmuYimengPort, 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning'>>
   readonly t: (key: QingmuCockpitKey) => string
@@ -65,9 +67,18 @@ function message(state: ShootingReviewState, load: 'loading' | 'ready' | 'failed
   if (state === 'pending-review') return '候选已就绪。浏览不改变选用，采用需要明确操作。'
   return '当前为已选版本。可浏览其它候选或修改当前要求。'
 }
+/** Display only storyboard prose, never manufacture a creative title. */
+export function shootingTitle(title: string | null, frame: AutomaticPlanningShot | undefined): string {
+  if (title && !/^(自动)?镜头\s*\d+$/.test(title.trim())) return title
+  const text = frame?.blocking || frame?.narrative || ''
+  return text.split(/[；;。]/)[0]?.slice(0,30) || '分镜内容待补充'
+}
+export function shootingPrimary(hasFrame: boolean, selectedFrame: boolean, selectedVideo: boolean): 'first-frame' | 'select-frame' | 'video' | undefined {
+  return selectedVideo ? undefined : !hasFrame ? 'first-frame' : !selectedFrame ? 'select-frame' : 'video'
+}
 /** Content-first view of existing Takes; it neither dispatches generation nor records human approval. */
 export function ShootingReviewWorkspace({ projectName, episodeName, projectId, episodeId, projection, selectedShotId,
-  onSelectShotId, onNavigate, onCommitted = async () => undefined, directorAssistant, port, t, testState }: Props) {
+  onSelectShotId, onNavigate, onCommitted = async () => undefined, directorAssistant, onProductionAction, port, t, testState }: Props) {
   const shots = projection?.director.shotRelations.shots ?? []
   const current = shots.find(shot => shot.shotId === selectedShotId) ?? shots[0]
   const [stack, setStack] = useState<YimengTakeVersionStackResponse>(); const [load, setLoad] = useState<'loading' | 'ready' | 'failed'>('loading')
@@ -76,6 +87,37 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
   const [zoom, setZoom] = useState(false); const [scale, setScale] = useState(1); const [selectionError, setSelectionError] = useState('')
   const [offset, setOffset] = useState({ x: 0, y: 0 }); const [selecting, setSelecting] = useState(false)
   const [heroError, setHeroError] = useState(false)
+  const [planningShots, setPlanningShots] = useState<readonly AutomaticPlanningShot[]>([])
+  const [shotStacks, setShotStacks] = useState<Readonly<Record<string, YimengTakeVersionStackResponse>>>({})
+  useEffect(() => {
+    const controller = new AbortController(); setShotStacks({})
+    const ids = (projection?.director.shotRelations.shots ?? []).map(shot => shot.shotId)
+    let index = 0
+    const read = async (): Promise<void> => {
+      while (index < ids.length && !controller.signal.aborted) {
+        const id = ids[index++]
+        if (!id) return
+        try {
+          const value = await port.takeVersions({ projectId, episodeId, frameId: id }, controller.signal)
+          if (!controller.signal.aborted && value.subject.projectId === projectId
+            && value.subject.episodeId === episodeId && value.subject.frameId === id) {
+            setShotStacks(old => ({ ...old, [id]: value }))
+          }
+        } catch { /* Unknown is not completion; retain the known first-frame state only. */ }
+      }
+    }
+    void read(); void read()
+    return () => controller.abort()
+  }, [projectId, episodeId, port, projection])
+  useEffect(() => {
+    const controller = new AbortController(); setPlanningShots([])
+    void port.readScenePlanning?.({ projectId, episodeId }, controller.signal).then((value) => {
+      if (!controller.signal.aborted && value.projectId === projectId && value.episodeId === episodeId) {
+        setPlanningShots(value.canonicalStoryboard?.shots ?? [])
+      }
+    }).catch(() => { /* The editor exposes read failures; never fabricate storyboard content. */ })
+    return () => controller.abort()
+  }, [projectId, episodeId, port, projection])
   useEffect(() => { setHeroMediaUrl(undefined); setHeroError(false) }, [current?.shotId, projection])
   const drag = useRef<{ x: number; y: number; offsetX: number; offsetY: number }>()
   const zoomTrigger = useRef<HTMLElement>()
@@ -83,7 +125,8 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
     if (current === undefined) { setStack(undefined); setLoad('failed'); return }
     const controller = new AbortController(); setLoad('loading'); setStack(undefined)
     void port.takeVersions({ projectId, episodeId, frameId: current.shotId }, controller.signal).then((value) => {
-      if (controller.signal.aborted || value.subject.frameId !== current.shotId) return
+      if (controller.signal.aborted || value.subject.projectId !== projectId
+        || value.subject.episodeId !== episodeId || value.subject.frameId !== current.shotId) return
       setStack(value); setBrowseId(value.subject.selectedTakeId ?? value.subject.versions[0]?.takeId ?? ''); setLoad('ready')
     }).catch(() => { if (!controller.signal.aborted) setLoad('failed') })
     return () => controller.abort()
@@ -131,11 +174,13 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
   const visibleStack = stack?.subject.projectId === projectId && stack.subject.episodeId === episodeId
     && stack.subject.frameId === current.shotId ? stack : undefined
   const versions = visibleStack?.subject.versions ?? []; const browsed = versions.find(version => version.takeId === browseId)
-  const state = testState ?? statusOf(visibleStack, browsed, load); const primary = usable(browsed) && visibleStack?.capabilities.canSelect === true && !browsed.isSelected && load === 'ready'
+  const state = testState ?? statusOf(visibleStack, browsed, load); const primary = usable(browsed) && !visibleStack?.subject.selectedTakeId && visibleStack?.capabilities.canSelect === true && !browsed.isSelected && load === 'ready'
   const sourceUrl = mediaUrl ?? heroMediaUrl
   const heroUrl = localHeroUrl(heroFrame?.browserUrl, heroFrame?.assetId)
   const dialogue = (current.dialogueRhythm?.cues ?? []).map(cue => cue.verbatimText).filter(Boolean)
-  const action = (current.beats ?? []).map(beat => beat.visualResponsibility).filter(Boolean)
+  const hasFrameCandidate = (planningShots.find(item => item.id === current.shotId)?.firstFrameCandidateCount ?? 0) > 0
+  const productionAction = shootingPrimary(
+    Boolean(heroFrame) || hasFrameCandidate, Boolean(heroFrame), Boolean(visibleStack?.subject.selectedTakeId))
   async function selectCurrent(): Promise<void> {
     if (!primary || visibleStack === undefined || browsed === undefined || !usable(browsed) || selecting) return
     setSelecting(true)
@@ -160,7 +205,15 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
   return <section className={css.workspace} aria-label="拍摄与审看">
     <header className={css.header}><div><strong>{projectName}</strong><span> / {episodeName}</span></div><nav aria-label="项目步骤"><button type="button" onClick={() => onNavigate('assets')}>故事</button><button type="button" onClick={() => onNavigate('director')}>角色与场景</button><button type="button" onClick={() => onNavigate('shots')}>分镜</button><strong>拍摄与审看</strong><button type="button" onClick={() => onNavigate('delivery')}>导出</button></nav></header>
     <div className={css.grid}>
-      <aside className={css.shots} aria-label="镜头列表"><h2>镜头</h2>{shots.map(shot => <button key={shot.shotId} type="button" aria-current={shot.shotId === current.shotId} onClick={() => onSelectShotId(shot.shotId)}><span>镜 {shot.frameNo}</span><small>{shot.title}</small></button>)}</aside>
+      <aside className={css.shots} aria-label="镜头列表"><h2>镜头</h2>{shots.map((shot) => {
+        const hero = projection?.director.heroFrameStoryboards?.shots.find(item => item.shotId === shot.shotId)?.heroFrame
+        const thumb = localHeroUrl(hero?.browserUrl, hero?.assetId)
+        const summary = shot.shotId === current.shotId ? visibleStack ?? shotStacks[shot.shotId] : shotStacks[shot.shotId]
+        const planning = planningShots.find(item => item.id === shot.shotId)
+        const label = summary?.subject.selectedTakeId ? '有视频' : (summary?.subject.versions.length ?? 0) > 0 ? summary?.subject.versions.every(v => v.qualityStatus === 'failed' || v.outputBindingStatus !== 'verified') ? '阻断' : '待审' : hero || (planning?.firstFrameCandidateCount ?? 0) > 0 ? '有首帧' : summary ? '无首帧' : '正在读取'
+        const title = shootingTitle(shot.title, planning)
+        return <button key={shot.shotId} type="button" aria-label={`镜 ${shot.frameNo} ${title}`} aria-current={shot.shotId === current.shotId} onClick={() => onSelectShotId(shot.shotId)}>{thumb ? <img className={css.shotThumb} src={thumb} loading="lazy" alt={`镜 ${shot.frameNo} 首帧缩略图`} /> : <span className={css.shotThumb}>暂无首帧</span>}<span className={css.shotText}><small>镜 {shot.frameNo}</small><strong title={title}>{title}</strong><small className={css.shotStatus} data-status={label}><i aria-hidden="true" />{label}</small></span></button>
+      })}</aside>
       <main className={css.stage}>
         <div className={css.media} data-state={testState ?? (load === 'loading' ? 'loading' : state)}>
           {usable(browsed) ? <div className={css.player}><TakePreviewPlayer request={{
@@ -172,12 +225,12 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
                 <small>{message(state, load)}</small></div>}
           {testState !== undefined && <p className={css.mediaNotice} role="status">隔离演练状态，不代表真实任务，未提交生成。</p>}{load === 'loading' && <p className={css.mediaNotice} role="status">{message(state, load)}</p>}{load === 'failed' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}{state === 'failed' && load === 'ready' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}
         </div>
-        <div className={css.candidates} aria-label="候选画面">{versions.map(version => <button key={version.takeId} type="button" aria-pressed={version.takeId === browseId} onClick={() => { setBrowseId(version.takeId); setMediaUrl(undefined) }}><span className={css.videoIcon}>视频候选</span><span>候选 v{version.versionOrdinal}</span><strong>{version.isSelected ? '当前选用' : version.qualityStatus === 'failed' ? '检查未通过' : version.qualityStatus === 'passed' ? '待你审看' : '等待检查'}</strong><small>{version.durationSec === null ? '时长未知' : `${version.durationSec} 秒`}</small></button>)}</div>
-        <p className={css.browseNote}>{versions.length === 0 && load === 'ready' && testState === undefined ? '本镜尚无视频候选，已有首帧和要求仍保留。' : message(state, load)} 单击候选只切换中区媒体，不会改变选用。</p>{selectionError && <p role="alert">{selectionError}</p>}<button className={css.primary} type="button" disabled={!primary || selecting} onClick={() => { void selectCurrent() }}>{primary ? (selecting ? '正在采用候选' : '采用这张') : browsed?.isSelected ? '当前已选用' : '候选不可采用'}</button>
+        <div className={css.candidates} aria-label="候选画面">{versions.map(version => <button key={version.takeId} type="button" aria-pressed={version.takeId === browseId} onClick={() => { setBrowseId(version.takeId); setMediaUrl(undefined) }}>{heroUrl ? <img className={css.candidateThumb} src={heroUrl} alt={`候选 v${version.versionOrdinal} · 本镜首帧`} /> : <span className={css.videoIcon}>首帧暂不可用</span>}<span>候选 v{version.versionOrdinal}</span><strong>{version.isSelected ? '当前选用' : version.qualityStatus === 'failed' ? '检查未通过' : version.qualityStatus === 'passed' ? '待你审看' : '等待检查'}</strong></button>)}{versions.length === 0 && heroUrl && <button type="button" aria-pressed="true"><img className={css.candidateThumb} src={heroUrl} alt="当前首帧候选" /><span>当前首帧</span><strong>已选用</strong></button>}</div>
+        <p className={css.browseNote}>{versions.length === 0 && load === 'ready' && testState === undefined ? '本镜尚无视频候选，已有首帧和要求仍保留。' : message(state, load)} 单击候选只切换中区媒体，不会改变选用。</p>{selectionError && <p role="alert">{selectionError}</p>}{primary ? <button className={css.primary} type="button" disabled={selecting} onClick={() => { void selectCurrent() }}>{selecting ? '正在采用候选' : '采用这张'}</button> : productionAction && load === 'ready' && onProductionAction && <button className={css.primary} type="button" onClick={() => onProductionAction(productionAction, current.shotId)}>{productionAction === 'first-frame' ? '生成首帧' : productionAction === 'select-frame' ? '采用这张' : '生成视频'}</button>}
         {sourceUrl !== undefined && <button className={css.zoomButton} type="button" onClick={(event) => { zoomTrigger.current = event.currentTarget; resetZoom(); setZoom(true) }}>放大画面</button>}
         {zoom && <div className={css.zoom} role="dialog" aria-modal="true" aria-label="放大画面"><div className={css.zoomToolbar}><button type="button" onClick={closeZoom}>关闭放大查看</button><button type="button" onClick={() => setScale(value => Math.min(3, value + 0.25))}>放大</button><button type="button" onClick={() => setScale(value => Math.max(1, value - 0.25))}>缩小</button></div><div className={css.zoomCanvas} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={() => { drag.current = undefined }} onPointerCancel={() => { drag.current = undefined }}>{mediaUrl !== undefined ? <video src={mediaUrl} controls autoPlay playsInline style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }} /> : heroMediaUrl !== undefined && <img src={heroMediaUrl} alt={`镜 ${current.frameNo} 已选首帧`} style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }} />}</div></div>}
       </main>
-      <aside className={css.inspector}><div className={css.switcher}><button type="button" aria-pressed={panel === 'requirements'} onClick={() => setPanel('requirements')}>当前要求</button><button type="button" aria-pressed={panel === 'assistant'} onClick={() => setPanel('assistant')}>原生导演助手</button></div>{panel === 'requirements' ? <div className={css.requirements}><h2>当前镜头要求</h2><h3>对白</h3><p>{dialogue.join(' / ') || '本镜暂无对白。'}</p><h3>动作</h3><p>{action.join(' / ') || '请在画面要求中说明动作。'}</p><h3>机位</h3><p>请在画面要求中说明拍摄位置和视角。</p><AutomaticFrameRequirementsEditor projectId={projectId} episodeId={episodeId} shotId={current.shotId} port={port} onCommitted={onCommitted} /></div> : directorAssistant}</aside>
+      <aside className={css.inspector}><div className={css.switcher}><button type="button" aria-pressed={panel === 'requirements'} onClick={() => setPanel('requirements')}>当前要求</button><button type="button" aria-pressed={panel === 'assistant'} onClick={() => setPanel('assistant')}>原生导演助手</button></div>{panel === 'requirements' ? <div className={css.requirements}><h2>当前镜头要求</h2><h3>对白</h3><p>{dialogue.join(' / ') || '本镜暂无对白。'}</p><AutomaticFrameRequirementsEditor projectId={projectId} episodeId={episodeId} shotId={current.shotId} port={port} onCommitted={onCommitted} /></div> : directorAssistant}</aside>
     </div>
   </section>
 }

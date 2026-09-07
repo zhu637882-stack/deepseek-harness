@@ -5319,7 +5319,7 @@ export function createYimengReadHandler(
           authorizationToken,
           scrubToken,
           verification ? verificationTimeoutMs : timeoutMs,
-          preview ? 24 * 1024 * 1024 : endpoint === 'script' ? MAX_SCRIPT_JSON_BYTES : MAX_JSON_BYTES,
+          preview ? 86 * 1024 * 1024 : endpoint === 'script' ? MAX_SCRIPT_JSON_BYTES : MAX_JSON_BYTES,
           signal,
           fetchOptions,
         )

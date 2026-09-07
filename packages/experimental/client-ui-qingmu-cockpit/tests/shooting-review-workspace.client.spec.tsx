@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { localHeroUrl, ShootingReviewWorkspace } from '../src/client/ShootingReviewWorkspace.tsx'
+import { localHeroUrl, shootingPrimary, shootingTitle, ShootingReviewWorkspace } from '../src/client/ShootingReviewWorkspace.tsx'
 import { AutomaticFrameRequirementsEditor } from '../src/client/AutomaticFrameRequirementsEditor.tsx'
 import { takeVersionSelectionRequestFromMarker } from '../src/client/take-version-recovery.ts'
 
@@ -20,7 +20,31 @@ const port = {
 } as never
 
 describe('ShootingReviewWorkspace', () => {
+  it('selects one primary action from real material state', () => {
+    expect(shootingPrimary(false, false, false)).toBe('first-frame')
+    expect(shootingPrimary(true, false, false)).toBe('select-frame')
+    expect(shootingPrimary(true, true, false)).toBe('video')
+    expect(shootingPrimary(true, true, true)).toBeUndefined()
+  })
+  it('uses storyboard prose instead of generic numbered titles', () => {
+    expect(shootingTitle('镜头 4', { id: 'f4', frameNo: 4, title: '镜头 4', imagePromptCn: '', blocking: '双手稳握方向盘；看见女主' })).toBe('双手稳握方向盘')
+    expect(shootingTitle('雨中相遇', undefined)).toBe('雨中相遇')
+  })
   afterEach(cleanup)
+  it('edits action and camera independently and preserves both on reload', async () => {
+    localStorage.clear()
+    const props = { projectId:'project_cd5eabc7582b', episodeId:'episode_cd4ffe357df9', shotId:'frame_34b3741b1f0a', onCommitted:async () => undefined,
+      port: { readScenePlanning: vi.fn(async () => ({ projectId:'project_cd5eabc7582b', episodeId:'episode_cd4ffe357df9', scriptRevision:1, scriptSha256:'a'.repeat(64), canonicalStoryboard:{ revision:1,sourceHash:'b'.repeat(64),shots:[{ id:'frame_34b3741b1f0a',imagePromptCn:'原始画面',blocking:'双手握盘',cameraAngle:'平视' }] } })), saveScenePlanning:vi.fn(), recoverScenePlanning:vi.fn() } as never }
+    const view = render(<AutomaticFrameRequirementsEditor {...props} />)
+    await screen.findByDisplayValue('双手握盘')
+    fireEvent.change(screen.getByRole('textbox',{ name:'动作' }),{ target:{ value:'缓慢抬头' } })
+    expect((screen.getByRole('textbox',{ name:'机位' }) as HTMLInputElement).value).toBe('平视')
+    fireEvent.change(screen.getByRole('textbox',{ name:'机位' }),{ target:{ value:'驾驶员视点' } })
+    view.unmount(); render(<AutomaticFrameRequirementsEditor {...props} />)
+    expect(await screen.findByDisplayValue('缓慢抬头')).toBeTruthy()
+    expect(screen.getByDisplayValue('驾驶员视点')).toBeTruthy()
+    expect(screen.getByDisplayValue('原始画面')).toBeTruthy()
+  })
   it('closes only the enlarged viewer on Escape and restores its trigger focus', () => {
     const parentClose = vi.fn()
     document.addEventListener('keydown', parentClose)
@@ -48,7 +72,7 @@ describe('ShootingReviewWorkspace', () => {
       selectedShotId="frame_34b3741b1f0a" onSelectShotId={onSelectShotId} onNavigate={vi.fn()} directorAssistant={<p>导演助手</p>} port={port} t={key => key} testState="pending-review" />)
     expect(onSelectShotId).not.toHaveBeenCalled()
     expect(screen.getByText(/单击候选只切换中区媒体，不会改变选用/)).toBeTruthy()
-    expect(screen.getByRole('button', { name: '候选不可采用' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '候选不可采用' })).toBeNull()
     expect(screen.getByText('已选首帧')).toBeTruthy()
   })
 

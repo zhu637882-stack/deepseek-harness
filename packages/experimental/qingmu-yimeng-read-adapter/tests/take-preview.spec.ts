@@ -25,7 +25,7 @@ it.each([
   { frameId: 'other' }, { outputSha256: 'a'.repeat(64) }, { base64: 'dGFtcGVy' },
   { bytes: data.length + 1 }, { base64: `${response.base64}\n` }, { mimeType: 'text/html' },
   { providerCalls: 1 }, { databaseWrites: 1 }, { readOnly: false }, { localPath: '/private' },
-  { bytes: 16 * 1024 * 1024 + 1 },
+  { bytes: 64 * 1024 * 1024 + 1 },
 ])('rejects mismatched/unsafe response %j', async (override) => {
   const handler = createYimengReadHandler({}, { fetch: async () => Response.json({ ...response, ...override }), readToken: () => 'fixture' })
   expect((await handler('takePreview', request, signal())).ok).toBe(false)
@@ -40,6 +40,14 @@ it('rejects missing credentials and malformed browser payload before transport',
     expect((await authenticated('takePreview', payload, signal())).ok).toBe(false)
   }
   expect(fetch).not.toHaveBeenCalled()
+})
+
+it('accepts a verified video larger than the old limit through the full transport', async () => {
+  const bytes = Buffer.alloc(17 * 1024 * 1024, 7)
+  const digest = createHash('sha256').update(bytes).digest('hex')
+  const large = { ...response, bytes: bytes.length, base64: bytes.toString('base64'), outputSha256: digest }
+  const handler = createYimengReadHandler({}, { fetch: async () => Response.json(large), readToken: () => 'fixture' })
+  expect((await handler('takePreview', { ...request, expectedOutputSha256: digest }, signal())).ok).toBe(true)
 })
 
 it('bounds concurrent explicit previews and releases slots after errors', async () => {

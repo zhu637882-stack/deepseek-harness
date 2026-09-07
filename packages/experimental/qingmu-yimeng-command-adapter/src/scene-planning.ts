@@ -31,6 +31,10 @@ export interface AutomaticPlanningShot {
   readonly frameNo: number
   readonly title: string
   readonly imagePromptCn: string
+  readonly blocking?: string
+  readonly cameraAngle?: string
+  readonly narrative?: string
+  readonly firstFrameCandidateCount?: number
 }
 /** This command edits one automatic frame requirement; it never carries imported scene fields. */
 export interface AutomaticPlanningOperation {
@@ -41,6 +45,8 @@ export interface AutomaticPlanningOperation {
   readonly expectedStoryboardSha256: string
   readonly shotId: string
   readonly imagePromptCn: string
+  readonly blocking?: string
+  readonly cameraAngle?: string
 }
 export type AnyPlanningOperation = PlanningOperation | AutomaticPlanningOperation
 /** A durable owner-scoped intent; recovery uses exactly this request. */
@@ -187,6 +193,10 @@ function canonicalStoryboard(value: unknown, fail: Fail): void {
       if (shotIds.has(shotId)) throw fail('canonical storyboard shot identity invalid')
       shotIds.add(shotId); integer(frame.frameNo, fail, 1); str(frame.title, fail, 64000)
       if (typeof frame.imagePromptCn !== 'string' || frame.imagePromptCn.length > 20000) throw fail('canonical storyboard image prompt invalid')
+      if (frame.firstFrameCandidateCount !== undefined) integer(frame.firstFrameCandidateCount, fail)
+      for (const field of ['blocking', 'cameraAngle', 'narrative']) {
+        if (frame[field] !== undefined && (typeof frame[field] !== 'string' || frame[field].length > 20000)) throw fail('canonical shooting field invalid')
+      }
     }
   }
 }
@@ -223,7 +233,11 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
     integer(r.expectedScriptRevision, f, 1); digest(r.expectedScriptSha256, f)
     integer(r.expectedStoryboardRevision, f)
     if (r.action === 'edit_automatic') {
-      if (Object.keys(r).sort().join() !== ['action', 'expectedScriptRevision', 'expectedScriptSha256', 'expectedStoryboardRevision', 'expectedStoryboardSha256', 'imagePromptCn', 'shotId'].join()) throw f('automatic planning fields invalid')
+      const required = ['action', 'expectedScriptRevision', 'expectedScriptSha256', 'expectedStoryboardRevision', 'expectedStoryboardSha256', 'imagePromptCn', 'shotId']
+      if (required.some(key => !(key in r)) || Object.keys(r).some(key => ![...required, 'blocking', 'cameraAngle'].includes(key))) throw f('automatic planning fields invalid')
+      for (const field of ['blocking', 'cameraAngle']) {
+        if (r[field] !== undefined && (typeof r[field] !== 'string' || r[field].length > 2000)) throw f('automatic shooting field invalid')
+      }
       if (typeof r.expectedStoryboardRevision !== 'number' || r.expectedStoryboardRevision < 1 || typeof r.expectedStoryboardSha256 !== 'string') throw f('automatic planning revision invalid')
       digest(r.expectedStoryboardSha256, f); id(r.shotId, f); str(r.imagePromptCn, f, 20000)
     } else {

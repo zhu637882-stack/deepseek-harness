@@ -924,6 +924,26 @@ describe('PromptIrWorkspace vertical slice', () => {
     expect(spies.queueProductionTake).not.toHaveBeenCalled()
   })
 
+  it('shooting recovery replays the original intent despite an unsaved local draft', async () => {
+    const failed = createPort({ productionFails: true })
+    const props = { projectId: PROJECT_ID, episodeId: EPISODE_ID, shotItems: frame('Ready'),
+      storyboardRevisionId: STORYBOARD_REVISION_ID, selectedShotId: FRAME_ID, onSelectShotId: vi.fn(),
+      t, onCommitted: async () => {} }
+    const view = render(<PromptIrWorkspace {...props} presentation="director" port={failed.port} />)
+    await screen.findByLabelText(zh.directorVideoPrompt)
+    await prepareProductionTake()
+    fireEvent.click(screen.getByRole('button', { name: zh.productionTakeOne }))
+    await screen.findByText('current PromptIR Method is unavailable')
+    const original = failed.spies.queueProductionTake.mock.calls[0]![0]
+    fireEvent.change(screen.getByLabelText(zh.directorVideoPrompt), { target: { value: '未提交的新要求，不能覆盖原任务' } })
+    const recovered = createPort()
+    view.rerender(<PromptIrWorkspace {...props} presentation="shooting" port={recovered.port} />)
+    fireEvent.click(await screen.findByRole('button', { name: '恢复同一任务' }))
+    await waitFor(() => expect(recovered.spies.queueProductionTake).toHaveBeenCalledTimes(1))
+    expect(recovered.spies.queueProductionTake.mock.calls[0]![0]).toEqual(original)
+    await waitFor(() => expect(screen.queryByRole('button', { name: '恢复同一任务' })).toBeNull())
+  })
+
   it('keeps an unknown-result marker across refresh and recovers with the original intent', async () => {
     const failed = createPort({ productionFails: true })
     const props = { projectId: PROJECT_ID, episodeId: EPISODE_ID, shotItems: frame('Ready'),

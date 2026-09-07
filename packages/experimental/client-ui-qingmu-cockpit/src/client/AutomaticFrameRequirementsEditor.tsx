@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import type { AutomaticPlanningOperation, ScenePlanningRequest, ScenePlanningState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
 
-interface Draft { readonly shotId: string; readonly imagePromptCn: string; readonly pending?: ScenePlanningRequest }
+interface Draft {
+  readonly shotId: string
+  readonly imagePromptCn: string
+  readonly blocking?: string
+  readonly cameraAngle?: string
+  readonly pending?: ScenePlanningRequest
+}
 type Port = Partial<Pick<QingmuYimengPort, 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning'>>
 function key(projectId: string, episodeId: string, shotId: string): string { return `qingmu.scene-planning.v1:${projectId}:${episodeId}:automatic-frame:${shotId}` }
 function pendingValid(value: ScenePlanningRequest | undefined,
@@ -39,9 +45,12 @@ export function AutomaticFrameRequirementsEditor({ projectId, episodeId, shotId,
         setState(value); const saved = value.canonicalStoryboard?.shots?.find(shot => shot.id === shotId)
         const local = stored(storageKey)
         setDraft(local?.shotId === shotId && local.imagePromptCn.length > 0 && local.imagePromptCn.length <= 20000
+          && (['blocking', 'cameraAngle'] as const).every(field => local[field] === undefined || (typeof local[field] === 'string' && local[field].length <= 2000))
           && (local.pending === undefined || (pendingValid(local.pending, projectId, episodeId, shotId)
-            && local.imagePromptCn === local.pending.request.imagePromptCn))
-          ? local : saved ? { shotId, imagePromptCn: saved.imagePromptCn } : null); setLoad('ready')
+            && local.imagePromptCn === local.pending.request.imagePromptCn
+            && (['blocking', 'cameraAngle'] as const).every(field => local.pending?.request.action === 'edit_automatic' && (local.pending.request[field] === undefined || local.pending.request[field] === local[field]))))
+          ? { blocking: saved?.blocking ?? '', cameraAngle: saved?.cameraAngle ?? '', ...local }
+          : saved ? { shotId, imagePromptCn: saved.imagePromptCn, blocking: saved.blocking ?? '', cameraAngle: saved.cameraAngle ?? '' } : null); setLoad('ready')
       }
     }).catch(() => { if (!controller.signal.aborted && currentEpoch === epoch.current) { setError('首帧要求暂不可读取；不会创建或替换素材。'); setLoad('failed') } })
     return () => controller.abort()
@@ -61,6 +70,8 @@ export function AutomaticFrameRequirementsEditor({ projectId, episodeId, shotId,
         action: 'edit_automatic', expectedScriptRevision: state.scriptRevision, expectedScriptSha256: state.scriptSha256,
         expectedStoryboardRevision: canonical.revision, expectedStoryboardSha256: canonical.sourceHash,
         shotId, imagePromptCn: draft.imagePromptCn,
+        ...(draft.blocking !== undefined && draft.blocking !== savedField('blocking') ? { blocking: draft.blocking } : {}),
+        ...(draft.cameraAngle !== undefined && draft.cameraAngle !== savedField('cameraAngle') ? { cameraAngle: draft.cameraAngle } : {}),
       } satisfies AutomaticPlanningOperation }
       update({ ...draft, pending })
       const result = recover ? await recoverSave(pending) : await save(pending)
@@ -76,7 +87,7 @@ export function AutomaticFrameRequirementsEditor({ projectId, episodeId, shotId,
         || !sameScope(next, projectId, episodeId, shotId)) throw new Error('receipt scope mismatch')
       const saved = next.canonicalStoryboard?.shots?.find(shot => shot.id === shotId)
       if (saved === undefined) throw new Error('receipt shot missing')
-      localStorage.removeItem(storageKey); setDraft({ shotId, imagePromptCn: saved.imagePromptCn }); setState(next); await onCommitted()
+      localStorage.removeItem(storageKey); setDraft({ shotId, imagePromptCn: saved.imagePromptCn, blocking: saved.blocking ?? '', cameraAngle: saved.cameraAngle ?? '' }); setState(next); await onCommitted()
     } catch { if (runEpoch === epoch.current) setError('保存结果尚未确认。草稿和同一幂等回执键已保留；请读取同一保存回执。') } finally { if (runEpoch === epoch.current) setBusy(false) }
   }
   if (port.readScenePlanning === undefined || port.saveScenePlanning === undefined || port.recoverScenePlanning === undefined) {
@@ -85,6 +96,7 @@ export function AutomaticFrameRequirementsEditor({ projectId, episodeId, shotId,
   if (load === 'failed') return <p role="alert">{error}</p>
   if (state === null || draft === null) return <p role="status">正在读取本镜首帧要求…</p>
   const saved = state.canonicalStoryboard?.shots?.find(shot => shot.id === shotId)
-  const dirty = saved !== undefined && draft.imagePromptCn !== saved.imagePromptCn
-  return <section><label>首帧画面要求<textarea aria-label="首帧画面要求" rows={5} maxLength={20000} value={draft.imagePromptCn} disabled={busy || draft.pending !== undefined} onChange={event => update({ shotId, imagePromptCn: event.target.value })} /></label>{error && <p role="alert">{error}</p>}<button type="button" disabled={busy || Boolean(draft.pending) || !dirty || !draft.imagePromptCn.trim()} onClick={() => { void save(false) }}>保存首帧画面要求</button>{draft.pending && <button type="button" disabled={busy} onClick={() => { void save(true) }}>读取同一保存回执</button>}</section>
+  function savedField(field: 'blocking' | 'cameraAngle'): string { return state?.canonicalStoryboard?.shots?.find(shot => shot.id === shotId)?.[field] ?? '' }
+  const dirty = saved !== undefined && (draft.imagePromptCn !== saved.imagePromptCn || (draft.blocking ?? '') !== savedField('blocking') || (draft.cameraAngle ?? '') !== savedField('cameraAngle'))
+  return <section>{(['blocking', 'cameraAngle'] as const).map(field => <label key={field}>{field === 'blocking' ? '动作' : '机位'}<input aria-label={field === 'blocking' ? '动作' : '机位'} maxLength={2000} value={draft[field] ?? ''} disabled={busy || draft.pending !== undefined} onChange={event => update({ ...draft, [field]: event.target.value })} /></label>)}<label>画面要求<textarea aria-label="画面要求" rows={5} maxLength={20000} value={draft.imagePromptCn} disabled={busy || draft.pending !== undefined} onChange={event => update({ ...draft, imagePromptCn: event.target.value })} /></label>{error && <p role="alert">{error}</p>}{(dirty || busy) && <button type="button" disabled={busy || Boolean(draft.pending) || !draft.imagePromptCn.trim()} onClick={() => { void save(false) }}>{busy ? '正在保存' : '保存当前要求'}</button>}{draft.pending && <button type="button" disabled={busy} onClick={() => { void save(true) }}>读取同一保存回执</button>}</section>
 }

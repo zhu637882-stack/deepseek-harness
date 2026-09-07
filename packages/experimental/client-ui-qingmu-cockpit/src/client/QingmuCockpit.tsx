@@ -173,6 +173,7 @@ export function QingmuCockpit({
 }: QingmuCockpitProps) {
   const [open, setOpen] = useState(true)
   const [tab, setTab] = useState<Tab>(() => new URLSearchParams(globalThis.location?.search ?? '').get('qingmuView') === 'shooting' ? 'shots' : 'director')
+  const [shootingAction, setShootingAction] = useState<string>()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
   const [health, setHealth] = useState<YimengHealth>()
@@ -548,6 +549,7 @@ export function QingmuCockpit({
         onSelectShotId={setSelectedShotId}
         onNavigate={setTab}
         onCommitted={refreshWorkflowProjectionAfterCommit}
+        onProductionAction={(_action, shotId) => { setSelectedShotId(shotId); setShootingAction(shotId) }}
         directorAssistant={nativeDirectorSession === undefined
           ? <p role="status">原生导演助手当前不可用；不会回退到 iframe。</p>
           : <NativeDirectorSession port={nativeDirectorSession} bridge={directorBridge} sessionId={directorSessionId}
@@ -555,6 +557,12 @@ export function QingmuCockpit({
         port={port}
         t={t}
       />
+      {shootingAction && <div className={css.shootingAction} role="dialog" aria-modal="true" aria-label="本镜操作">
+        <button type="button" onClick={() => setShootingAction(undefined)}>返回拍摄与审看</button>
+        <PromptIrWorkspace key={`${episodeId}:${shootingAction}:shooting-action`} presentation="shooting" projectId={projectId} episodeId={episodeId} shotItems={shotItems}
+          storyboardRevisionId={shotRelations?.storyboardRevision.revisionId ?? ''} selectedShotId={shootingAction} onSelectShotId={setShootingAction}
+          port={port} t={t} onCommitted={refreshWorkflowAfterCommit} />
+      </div>}
       <details className={css.developerLog}>
         <summary>开发日志</summary>
         <Card title={t('shotsTitle')}>

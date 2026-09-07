@@ -54,10 +54,10 @@ describe('bounded scene planning Host channel', () => {
     }] }
     expect(await setup(importedZeroBased).handler('readScenePlanning', scope, new AbortController().signal)).toMatchObject({ ok: false })
   })
-  it('sends one automatic frame requirement without imported scene fields and validates its exact receipt', async () => {
+  it.each([{}, { blocking:'缓慢抬头',cameraAngle:'驾驶员主观视角' }])('sends one automatic frame requirement with optional independent shooting fields %j', async (fields) => {
     const automaticRequest = { ...scope, idempotencyKey: 'automatic-1', request: { action: 'edit_automatic',
       expectedScriptRevision: 1, expectedScriptSha256: 'a'.repeat(64), expectedStoryboardRevision: 2,
-      expectedStoryboardSha256: 'c'.repeat(64), shotId: 'automatic_shot_1', imagePromptCn: '雨夜街道的近景首帧。' } }
+      expectedStoryboardSha256: 'c'.repeat(64), shotId: 'automatic_shot_1', imagePromptCn: '雨夜街道的近景首帧。', ...fields } }
     const encoded = JSON.stringify(automaticRequest.request, Object.keys(automaticRequest.request).sort())
     const requestSha256 = (await import('node:crypto')).createHash('sha256').update(encoded).digest('hex')
     const result = { ...scope, schema: 'jason.qingmu-scene-planning-result.v1', action: 'edit_automatic',

@@ -1,3 +1,7 @@
+.shootingAction { position:absolute; inset:32px; z-index:10; overflow:auto; padding:24px; background:#202827; color:#f3f1eb; border:1px solid #4a625b; border-radius:8px; }
+.shootingAction button { background:#6db69f; color:#10231c; border:0; padding:9px 14px; margin:8px 8px 8px 0; border-radius:4px; cursor:pointer; }
+.shootingAction label { display:block; margin:12px 0; }
+.shootingAction pre { white-space:pre-wrap; overflow-wrap:anywhere; }
 .trigger {
   display: flex;
   align-items: center;

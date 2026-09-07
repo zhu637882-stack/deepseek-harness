@@ -101,7 +101,7 @@ const FIRST_FRAME_ACTION_KEYS: Record<
 /** Props for the bounded PromptIR editor mounted in the existing Script & Assets slot. */
 export interface PromptIrWorkspaceProps {
   readonly nativeDirector?: NativeDirectorDraftContext
-  readonly presentation?: 'director'
+  readonly presentation?: 'director' | 'shooting'
   readonly onUnsavedChange?: (dirty: boolean) => void
   readonly projectId: string
   readonly episodeId: string
@@ -501,7 +501,7 @@ function ReadyPromptIrWorkspace({
   onUnsavedChange,
   nativeDirector,
 }: PromptIrWorkspaceProps) {
-  const director = presentation === 'director'
+  const director = presentation === 'director' || presentation === 'shooting'
   const frames = framesOf(projectId, episodeId, shotItems, storyboardRevisionId)
   const active = frames.find(frame => frame.shotId === selectedShotId)
   const [reload, setReload] = useState(0)
@@ -1199,13 +1199,17 @@ function ReadyPromptIrWorkspace({
     takeOrdinal: 1 | 2,
     recoveryMarker?: ProductionTakeRecoveryMarker,
   ): Promise<void> => {
-    if (!director || snapshot === undefined || active === undefined || operation !== 'idle'
-      || unsaved || bufferStale || snapshot.draft?.status === 'stale'
-      || (!productionConfirmed && recoveryMarker === undefined)
-      || (recoveryMarker === undefined && (firstFrameReceipt === undefined
-        || firstFrameState?.selectedAssetId === null || videoQuote === undefined
-        || !videoQuote.quoteReady || videoQuote.dispatchBlockers.length !== 1 || videoQuote.dispatchBlockers[0] !== 'operator_paid_confirmation_required'))
+    if (!director || active === undefined || operation !== 'idle'
       || productionLock.current || productionRecovery.status === 'invalid') return
+    // Recovery replays only the persisted intent; a newer local draft cannot replace it.
+    if (recoveryMarker !== undefined && (productionRecovery.status !== 'ready'
+      || recoveryMarker !== productionRecovery.value
+      || recoveryMarker.projectId !== active.projectId || recoveryMarker.episodeId !== active.episodeId
+      || recoveryMarker.frameId !== active.frameId || recoveryMarker.takeOrdinal !== takeOrdinal)) return
+    if (recoveryMarker === undefined && (snapshot === undefined || unsaved || bufferStale
+      || snapshot.draft?.status === 'stale' || !productionConfirmed || firstFrameReceipt === undefined
+        || firstFrameState?.selectedAssetId === null || videoQuote === undefined
+        || !videoQuote.quoteReady || videoQuote.dispatchBlockers.length !== 1 || videoQuote.dispatchBlockers[0] !== 'operator_paid_confirmation_required')) return
     productionLock.current = true
     setError(undefined)
     const controller = new AbortController()
@@ -1289,6 +1293,34 @@ function ReadyPromptIrWorkspace({
     imageGenPrompt: 'directorImagePrompt', lastFrameImagePrompt: 'directorLastFramePrompt',
     videoGenPrompt: 'directorVideoPrompt', motionPrompt: 'directorMotionPrompt', negativePrompt: 'directorNegativePrompt',
   }
+  if (presentation === 'shooting') return <section aria-label="本镜生成与采用">
+    <h3>本镜生成与采用</h3><p>检查当前素材后再确认。浏览和检查不提交生成，也不改变选用。</p>
+    {!busy && <button type="button" onClick={() => { void quoteFirstFrame() }}>检查本镜生成条件</button>}
+    {busy && <p role="status">正在处理本镜请求…</p>}
+    {firstFrameQuote && <>
+      {firstFrameQuote.authorizationDraft.blockers.length > 0 && <ul role="alert">{firstFrameQuote.authorizationDraft.blockers.map(b => <li key={b.code}>{t(FIRST_FRAME_ACTION_KEYS[b.category])}</li>)}</ul>}
+      {firstFrameState?.candidates.map(candidate => <label key={candidate.assetId}>
+        <input type="radio" name="shooting-first-frame" checked={firstFrameCandidateId === candidate.assetId} onChange={() => { setFirstFrameCandidateId(candidate.assetId); setFirstFrameConfirmed(false) }} />
+        {candidate.isSelected ? '当前首帧' : '首帧候选'}
+        <FirstFrameCandidatePreview request={{ ...active, assetId: candidate.assetId, expectedMaterializedSha256: candidate.materializedSha256 }} load={createFirstFrameSelectionClient().preview} labels={{ load: '查看首帧', loading: '正在读取', error: '首帧暂时无法读取', ariaLabel: '首帧候选' }} />
+      </label>)}
+      {firstFrameCandidateId && !firstFrameState?.candidates.find(c => c.assetId === firstFrameCandidateId)?.isSelected && <><label><input type="checkbox" checked={firstFrameConfirmed} onChange={e => setFirstFrameConfirmed(e.target.checked)} />我已审看并认可这张首帧</label>{firstFrameConfirmed && !busy && <button onClick={() => { void selectFirstFrame() }}>采用这张</button>}</>}
+      {firstFrameReceipt && !videoQuote && !busy && <button onClick={() => { void quoteVideo() }}>检查视频生成条件</button>}
+      {!firstFrameReceipt && firstFrameState?.candidates.length === 0 && <p role="alert">本镜还没有可用首帧。首帧提交能力尚未接通，本次不会提交或收费；已有素材保持不变。</p>}
+    </>}
+    {videoQuote && <>
+      {!videoQuote.quoteReady && <p role="alert">本镜的内容或素材检查尚未完成，暂不能生成。请回到当前要求修正后重新检查。</p>}
+      {videoQuote.quoteReady && videoQuote.dispatchBlockers.length === 1 && videoQuote.dispatchBlockers[0] === 'operator_paid_confirmation_required' && productionRecovery.status === 'none' && !productionTake && <><label><input type="checkbox" checked={productionConfirmed} onChange={e => setProductionConfirmed(e.target.checked)} />{videoQuote.requiredPaidConfirmationText}</label>{productionConfirmed && !blocked && !unsaved && !busy && <button onClick={() => { void queueProductionTake(1) }}>确认生成一条视频</button>}</>}
+    </>}
+    {productionTake && <p role="status">{productionTake.receipt.queued ? '本镜任务已提交，返回镜头页查看结果。' : '任务未提交，请查看检查结果。'}</p>}
+    {productionRecovery.status === 'ready' && <><p role="alert">已有提交等待核对，请勿重复生成。保留同一任务记录。</p>{!busy && <button onClick={() => { void queueProductionTake(productionRecovery.value.takeOrdinal, productionRecovery.value) }}>恢复同一任务</button>}</>}
+    {productionRecovery.status === 'invalid' && <p role="alert">本机恢复记录不完整，已阻止再次提交。请核对原任务；不会丢弃记录或新建任务。</p>}
+    {firstFrameRecovery && <button onClick={() => { void recoverFirstFrameSelection() }}>读取原采用结果</button>}
+    {error && <p role="alert">本镜操作尚未确认。请先核对当前素材和任务状态，不要重复提交。</p>}
+    <details><summary>开发日志</summary>
+      <pre>{JSON.stringify({ error, firstFrameQuote, videoQuote, recovery: productionRecovery.status }, null, 2)}</pre>
+    </details>
+  </section>
   return (
     <section className={css.scriptWorkspace} aria-label={t('promptIrWorkspaceTitle')}>
       <div className={css.scriptWorkspaceHead}>
