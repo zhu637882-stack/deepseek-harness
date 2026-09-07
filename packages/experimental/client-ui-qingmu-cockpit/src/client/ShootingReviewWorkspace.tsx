@@ -103,7 +103,16 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
       })
     }).catch(() => { /* retain exact marker; a later visit can only recover it */ })
   }, [current, episodeId, port, projectId])
-  useEffect(() => { const close = (event: KeyboardEvent): void => { if (event.key === 'Escape') setZoom(false) }; window.addEventListener('keydown', close); return () => window.removeEventListener('keydown', close) }, [])
+  useEffect(() => {
+    if (!zoom) return
+    const close = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      event.preventDefault(); event.stopImmediatePropagation(); setZoom(false)
+    }
+    // The enclosing cockpit is also a modal; Escape closes only this topmost viewer.
+    window.addEventListener('keydown', close, true)
+    return () => window.removeEventListener('keydown', close, true)
+  }, [zoom])
   useEffect(() => { if (!zoom) zoomTrigger.current?.focus() }, [zoom])
   const onPreviewReady = useCallback((url: string | undefined): void => setMediaUrl(url), [])
   const resetZoom = useCallback((): void => { setScale(1); setOffset({ x: 0, y: 0 }) }, [])

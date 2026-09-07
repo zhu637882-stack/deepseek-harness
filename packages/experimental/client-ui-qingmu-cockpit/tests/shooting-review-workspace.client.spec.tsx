@@ -21,6 +21,20 @@ const port = {
 
 describe('ShootingReviewWorkspace', () => {
   afterEach(cleanup)
+  it('closes only the enlarged viewer on Escape and restores its trigger focus', () => {
+    const parentClose = vi.fn()
+    document.addEventListener('keydown', parentClose)
+    try {
+      render(<ShootingReviewWorkspace projectName="落日公路" episodeName="第 1 集" projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" projection={projection} selectedShotId="frame_34b3741b1f0a" onSelectShotId={vi.fn()} onNavigate={vi.fn()} directorAssistant={null} port={port} t={key => key} />)
+      fireEvent.load(screen.getByAltText('镜 6 已选首帧'))
+      const trigger=screen.getByRole('button', { name: '放大画面' })
+      fireEvent.click(trigger)
+      fireEvent.keyDown(screen.getByRole('dialog', { name:'放大画面' }),{ key:'Escape' })
+      expect(screen.queryByRole('dialog', { name:'放大画面' })).toBeNull()
+      expect(parentClose).not.toHaveBeenCalled()
+      expect(document.activeElement).toBe(trigger)
+    } finally { document.removeEventListener('keydown',parentClose) }
+  })
   it('loads only signed local media matching the projected asset', () => {
     const valid = `http://127.0.0.1:65269/api/media/media_first_frame_6?expires=1788767261&signature=${'a'.repeat(64)}`
     expect(localHeroUrl(valid, 'asset_first_frame_6')).toBe(valid)

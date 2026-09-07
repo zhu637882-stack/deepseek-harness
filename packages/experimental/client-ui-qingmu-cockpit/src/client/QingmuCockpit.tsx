@@ -172,7 +172,7 @@ export function QingmuCockpit({
   wide, port, directorBridge, nativeDirectorSession, hostSync, entryScope, t, useSessions,
 }: QingmuCockpitProps) {
   const [open, setOpen] = useState(true)
-  const [tab, setTab] = useState<Tab>('director')
+  const [tab, setTab] = useState<Tab>(() => new URLSearchParams(globalThis.location?.search ?? '').get('qingmuView') === 'shooting' ? 'shots' : 'director')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
   const [health, setHealth] = useState<YimengHealth>()
@@ -759,7 +759,7 @@ export function QingmuCockpit({
             <div className={css.headerActions}>
               <button type="button" onClick={() => { if (mayLeaveDirector()) void refresh() }} disabled={loading}>
                 <IconRefreshOutline16 size={16} />
-                <span>{loading ? t('refreshing') : t('refresh')}</span>
+                <span>{tab === 'shots' ? (loading ? '正在刷新…' : '刷新页面') : loading ? t('refreshing') : t('refresh')}</span>
               </button>
               <button type="button" className={css.iconButton} aria-label={t('close')} onClick={close}>
                 <IconCloseOutline16 size={18} />
