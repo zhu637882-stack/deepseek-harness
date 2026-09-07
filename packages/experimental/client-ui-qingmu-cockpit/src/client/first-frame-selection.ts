@@ -150,6 +150,8 @@ async function json(fetcher: typeof fetch, input: RequestInfo | URL, init?: Requ
 }
 
 interface FirstFrameSelectionClient {
+  readonly history: (coordinates: FirstFrameSelectionCoordinates, signal?: AbortSignal) => Promise<readonly FirstFrameHistoryCandidate[]>
+  readonly historyPreview: (request: FirstFrameCandidatePreviewRequest, signal?: AbortSignal) => Promise<FirstFrameCandidatePreviewResponse>
   readonly state: (
     coordinates: FirstFrameSelectionCoordinates,
     signal?: AbortSignal,
@@ -168,6 +170,15 @@ interface FirstFrameSelectionClient {
   ) => Promise<FirstFrameSelectionReceipt>
 }
 
+/** Historical media may be inspected, but this type confers no selection authority. */
+export interface FirstFrameHistoryCandidate {
+  readonly assetId: string
+  readonly materializedSha256: string
+  readonly qualityStatus: string
+  readonly selectionStatus: string
+  readonly isSelected: boolean
+}
+
 /**
  * Create the same-origin browser client for preview, state, explicit selection, and receipt recovery.
  * @param fetcher Same-origin Fetch implementation.
@@ -179,17 +190,37 @@ export function createFirstFrameSelectionClient(fetcher: typeof fetch = globalTh
     const scope = scopeOf(coordinates)
     return assertFirstFrameState(await json(fetcher, query(STATE, scope), withSignal(signal)), scope)
   }
-  const preview = async (request: FirstFrameCandidatePreviewRequest, signal?: AbortSignal): Promise<FirstFrameCandidatePreviewResponse> => {
+  const history = async (
+    coordinates: FirstFrameSelectionCoordinates, signal?: AbortSignal,
+  ): Promise<readonly FirstFrameHistoryCandidate[]> => {
+    if (!validCoordinates(coordinates)) throw new Error('first-frame coordinates invalid')
+    const scope = scopeOf(coordinates)
+    const result = exact(await json(fetcher, query('/api/qingmu/first-frame-selection/history', scope), withSignal(signal)),
+      ['schema', 'projectId', 'episodeId', 'storyboardRevisionId', 'frameId', 'candidates', 'providerCalls', 'taskMutation', 'outboxEvents'], 'first-frame history')
+    if (result.schema !== 'jason.qingmu-first-frame-history.v1' || Object.entries(scope).some(([key, value]) => result[key] !== value)
+      || result.providerCalls !== 0 || result.taskMutation !== false || result.outboxEvents !== 0 || !Array.isArray(result.candidates)) throw new Error('first-frame history scope mismatch')
+    return result.candidates.map((value) => {
+      const item = exact(value, ['assetId', 'materializedSha256', 'qualityStatus', 'selectionStatus', 'isSelected'], 'first-frame history candidate')
+      if (typeof item.assetId !== 'string' || !IDENTIFIER.test(item.assetId) || typeof item.materializedSha256 !== 'string' || !SHA256.test(item.materializedSha256)
+        || typeof item.qualityStatus !== 'string' || typeof item.selectionStatus !== 'string' || typeof item.isSelected !== 'boolean') throw new Error('first-frame history candidate invalid')
+      return item as unknown as FirstFrameHistoryCandidate
+    })
+  }
+  const media = async (
+    path: string, request: FirstFrameCandidatePreviewRequest, signal?: AbortSignal,
+  ): Promise<FirstFrameCandidatePreviewResponse> => {
     if (!validCoordinates(request) || !IDENTIFIER.test(request.assetId) || !SHA256.test(request.expectedMaterializedSha256)) throw new Error('first-frame preview invalid')
     const exactRequest = {
       ...scopeOf(request),
       assetId: request.assetId,
       expectedMaterializedSha256: request.expectedMaterializedSha256,
     }
-    const result = await json(fetcher, query(MEDIA, exactRequest), withSignal(signal)) as FirstFrameCandidatePreviewResponse
+    const result = await json(fetcher, query(path, exactRequest), withSignal(signal)) as FirstFrameCandidatePreviewResponse
     if (result.projectId !== exactRequest.projectId || result.episodeId !== exactRequest.episodeId || result.storyboardRevisionId !== exactRequest.storyboardRevisionId || result.frameId !== exactRequest.frameId || result.assetId !== exactRequest.assetId || result.materializedSha256 !== exactRequest.expectedMaterializedSha256) throw new Error('first-frame preview scope mismatch')
     return result
   }
+  const preview = (request: FirstFrameCandidatePreviewRequest, signal?: AbortSignal) => media(MEDIA, request, signal)
+  const historyPreview = (request: FirstFrameCandidatePreviewRequest, signal?: AbortSignal) => media('/api/qingmu/first-frame-selection/history-media', request, signal)
   const select = async (intent: FirstFrameSelectionIntent, signal?: AbortSignal) => {
     if (!validCoordinates(intent) || !IDENTIFIER.test(intent.assetId) || !SHA256.test(intent.expectedMaterializedSha256) || !IDENTIFIER.test(intent.idempotencyKey)) throw new Error('first-frame selection invalid')
     const exactIntent = intentOf(intent)
@@ -201,5 +232,5 @@ export function createFirstFrameSelectionClient(fetcher: typeof fetch = globalTh
     const exactIntent = { ...intentOf(intent), requestSha256: intent.requestSha256 }
     return assertFirstFrameReceipt(await json(fetcher, query(RECEIPT, exactIntent), withSignal(signal)), exactIntent)
   }
-  return { state, preview, select, receipt }
+  return { state, preview, select, receipt, history, historyPreview }
 }

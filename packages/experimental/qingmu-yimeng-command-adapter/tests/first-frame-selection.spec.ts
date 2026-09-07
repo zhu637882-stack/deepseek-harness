@@ -7,6 +7,8 @@ import {
   FIRST_FRAME_SELECTION_DECISION_PATH,
   FIRST_FRAME_SELECTION_MEDIA_PATH,
   FIRST_FRAME_SELECTION_STATE_PATH,
+  FIRST_FRAME_HISTORY_PATH,
+  FIRST_FRAME_HISTORY_MEDIA_PATH,
   registerFirstFrameSelectionCommands,
 } from '../src/first-frame-selection.ts'
 
@@ -94,6 +96,25 @@ function selectedState() {
 }
 
 describe('first-frame selection Host media bridge', () => {
+  it('browses stale history through read-only routes while keeping selection media strict', async () => {
+    const history = { schema: 'jason.qingmu-first-frame-history.v1', ...coordinates,
+      candidates: [{ assetId: 'asset-1', materializedSha256, qualityStatus: 'passed', selectionStatus: 'Stale', isSelected: false }],
+      providerCalls: 0, taskMutation: false, outboxEvents: 0 }
+    const upstream = vi.fn<typeof globalThis.fetch>(async (input) => {
+      const url = requestUrl(input)
+      if (url.pathname === '/api/media/asset-1') return new Response(bytes, { headers: { 'content-type': 'image/png', 'content-length': String(bytes.length) } })
+      return Response.json(url.pathname.endsWith('/history') ? history : { ...state(), candidates: [] })
+    })
+    const base = await host(upstream)
+    const headers = { cookie: 'jason_token=human-cookie' }
+    const query = new URLSearchParams({ ...coordinates, assetId: 'asset-1', expectedMaterializedSha256: materializedSha256 })
+    expect((await fetch(`${base}${FIRST_FRAME_HISTORY_PATH}?${new URLSearchParams(coordinates)}`, { headers })).status).toBe(200)
+    expect((await fetch(`${base}${FIRST_FRAME_HISTORY_MEDIA_PATH}?${query}`, { headers })).status).toBe(200)
+    expect((await fetch(`${base}${FIRST_FRAME_SELECTION_MEDIA_PATH}?${query}`, { headers })).status).toBe(409)
+    expect(upstream.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true)
+    history.frameId = 'foreign'
+    expect((await fetch(`${base}${FIRST_FRAME_HISTORY_MEDIA_PATH}?${query}`, { headers })).status).toBe(409)
+  })
   it('returns only byte-verified media for the current scoped candidate', async () => {
     const upstream = vi.fn<typeof globalThis.fetch>(async (input) => {
       const url = requestUrl(input)

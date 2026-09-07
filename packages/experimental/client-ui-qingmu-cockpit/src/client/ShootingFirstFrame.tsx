@@ -19,6 +19,7 @@ interface Attempt extends ShootingFrameScope {
   readonly requestId: string
   readonly canRegenerate?: boolean
   readonly canActivate?: boolean
+  readonly execution?: { readonly taskId: string; readonly activated: boolean; readonly state: string }
   readonly task: null | {
     readonly id: string
     readonly kernel_status: string
@@ -134,6 +135,12 @@ export function ShootingFirstFrame({ scope, onCommitted }: {
   const confirmingLock = useRef(false)
   const lock = useRef(false); const notified = useRef('')
   const input = { project_id: scope.projectId, episode_id: scope.episodeId, frame_ids: [scope.frameId] }
+  const observeSubmission = (value: Attempt) => {
+    setAttempt(value)
+    if (!value.candidate && value.execution?.activated === false) {
+      setError('原任务已保留，但执行器尚未启动；没有新建任务。可稍后继续原任务，具体原因已保留在开发日志。')
+    }
+  }
   const reviewQuery = new URLSearchParams({ project_id: scope.projectId, episode_id: scope.episodeId, frame_id: scope.frameId })
   useEffect(() => {
     const controller = new AbortController()
@@ -194,7 +201,7 @@ export function ShootingFirstFrame({ scope, onCommitted }: {
       setRequestId(id)
       const value = assertAttempt(await request('submit', { ...input, candidate_request_id: id,
         shooting_preflight_id: preview.preflightId, shooting_payload_hash: preview.payloadHash }), scope, id)
-      setAttempt(value)
+      observeSubmission(value)
     } catch (cause) { setError(String(cause)) }
     finally { lock.current = false; setBusy(false) }
   }
@@ -204,7 +211,7 @@ export function ShootingFirstFrame({ scope, onCommitted }: {
     try {
       const value = assertAttempt(await request('submit', { ...input, candidate_request_id: requestId,
         shooting_preflight_id: preview.preflightId, shooting_payload_hash: preview.payloadHash }), scope, requestId)
-      setAttempt(value)
+      observeSubmission(value)
     } catch (cause) { setError(String(cause)) }
     finally { lock.current = false; setBusy(false) }
   }

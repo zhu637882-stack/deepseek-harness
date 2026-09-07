@@ -9,6 +9,9 @@ import type { WebServer } from '@deepseek-ai/dsh-host-webserver'
 export const FIRST_FRAME_SELECTION_MEDIA_PATH = '/api/qingmu/first-frame-selection/media'
 /** Same-origin route for the current Writer-owned candidate and selection state. */
 export const FIRST_FRAME_SELECTION_STATE_PATH = '/api/qingmu/first-frame-selection/state'
+/** Browsing history is separate from current selection eligibility. */
+export const FIRST_FRAME_HISTORY_PATH = '/api/qingmu/first-frame-selection/history'
+export const FIRST_FRAME_HISTORY_MEDIA_PATH = '/api/qingmu/first-frame-selection/history-media'
 /** Same-origin route for one explicit authenticated human selection. */
 export const FIRST_FRAME_SELECTION_DECISION_PATH = '/api/qingmu/first-frame-selection/decision'
 /** Same-origin route for recovering an already committed selection receipt. */
@@ -153,6 +156,23 @@ function stateIsCurrent(value: unknown, expected: Omit<Coordinates, 'assetId' | 
   }, String(receipt.requestSha256))
 }
 
+function historyIsCurrent(value: unknown, expected: Omit<Coordinates, 'assetId' | 'expectedMaterializedSha256'>): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const root = value as Record<string, unknown>
+  return root.schema === 'jason.qingmu-first-frame-history.v1'
+    && root.projectId === expected.projectId && root.episodeId === expected.episodeId
+    && root.storyboardRevisionId === expected.storyboardRevisionId && root.frameId === expected.frameId
+    && root.providerCalls === 0 && root.taskMutation === false && root.outboxEvents === 0
+    && Array.isArray(root.candidates) && root.candidates.every((item) => {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) return false
+    const candidate = item as Record<string, unknown>
+    return typeof candidate.assetId === 'string' && IDENTIFIER.test(candidate.assetId)
+        && typeof candidate.materializedSha256 === 'string' && SHA256.test(candidate.materializedSha256)
+        && typeof candidate.qualityStatus === 'string' && typeof candidate.selectionStatus === 'string'
+        && typeof candidate.isSelected === 'boolean'
+  })
+}
+
 async function requestBody(req: IncomingMessage): Promise<Record<string, unknown> | undefined> {
   if (req.headers['content-type']?.split(';', 1)[0] !== 'application/json') return undefined
   const declared = Number(req.headers['content-length'] ?? '')
@@ -285,15 +305,17 @@ export function registerFirstFrameSelectionCommands(
   webServer: WebServer,
   dependencies: FirstFrameSelectionCommandDependencies,
 ): () => void {
-  const disposeState = webServer.register({
-    kind: 'exact', path: FIRST_FRAME_SELECTION_STATE_PATH, handler: async (req, res) => {
+  const disposeStates = [false, true].map(history => webServer.register({
+    kind: 'exact', path: history ? FIRST_FRAME_HISTORY_PATH : FIRST_FRAME_SELECTION_STATE_PATH, handler: async (req, res) => {
       const value = stateCoordinates(req)
       if (req.method !== 'GET' || req.headers.authorization !== undefined
         || !isTrustedApiRequest(req, []) || value === undefined) {
         json(res, 400, { code: 'first_frame_selection_state_request_invalid' }); return
       }
-      const result = await jsonUpstream(dependencies, req, upstreamBase(dependencies.baseUrl, value as Coordinates))
-      if (result?.response.ok !== true || !stateIsCurrent(result.value, value)) {
+      const upstream = upstreamBase(dependencies.baseUrl, value as Coordinates)
+      if (history) upstream.pathname += '/history'
+      const result = await jsonUpstream(dependencies, req, upstream)
+      if (result?.response.ok !== true || !(history ? historyIsCurrent : stateIsCurrent)(result.value, value)) {
         json(res, result?.response.status === 401 || result?.response.status === 403 ? 401 : 409, {
           code: result?.response.status === 401 || result?.response.status === 403
             ? 'first_frame_selection_relogin_required' : 'first_frame_selection_state_invalid',
@@ -301,7 +323,7 @@ export function registerFirstFrameSelectionCommands(
       }
       json(res, 200, result.value)
     },
-  })
+  }))
   const disposeDecision = webServer.register({
     kind: 'exact', path: FIRST_FRAME_SELECTION_DECISION_PATH, handler: async (req, res) => {
       const value = selectionRequest(req)
@@ -383,16 +405,21 @@ export function registerFirstFrameSelectionCommands(
       json(res, 200, result)
     },
   })
-  const disposeMedia = webServer.register({
-    kind: 'exact', path: FIRST_FRAME_SELECTION_MEDIA_PATH, handler: async (req, res) => {
+  const disposeMedia = [false, true].map(history => webServer.register({
+    kind: 'exact', path: history ? FIRST_FRAME_HISTORY_MEDIA_PATH : FIRST_FRAME_SELECTION_MEDIA_PATH, handler: async (req, res) => {
       const value = coordinates(req)
       if (req.method !== 'GET' || req.headers.authorization !== undefined
         || !isTrustedApiRequest(req, []) || value === undefined) {
         json(res, 400, { code: 'first_frame_preview_request_invalid' }); return
       }
       const stateUrl = upstreamBase(dependencies.baseUrl, value)
+      if (history) stateUrl.pathname += '/history'
       const state = await jsonUpstream(dependencies, req, stateUrl)
-      if (state?.response.ok !== true || !candidateIsCurrent(state.value, value)) {
+      const eligible = history
+        ? historyIsCurrent(state?.value, value) && (state?.value as { candidates: Record<string, unknown>[] }).candidates.some(
+          candidate => candidate.assetId === value.assetId && candidate.materializedSha256 === value.expectedMaterializedSha256)
+        : candidateIsCurrent(state?.value, value)
+      if (state?.response.ok !== true || !eligible) {
         json(res, state?.response.status === 401 || state?.response.status === 403 ? 401 : 409, {
           code: state?.response.status === 401 || state?.response.status === 403
             ? 'first_frame_preview_relogin_required' : 'first_frame_preview_candidate_stale',
@@ -413,6 +440,8 @@ export function registerFirstFrameSelectionCommands(
         mimeType: media.mimeType, base64: media.bytes.toString('base64'),
       })
     },
-  })
-  return () => { disposeMedia(); disposeReceipt(); disposeDecision(); disposeState() }
+  }))
+  return () => {
+    disposeMedia.forEach(dispose => dispose()); disposeReceipt(); disposeDecision(); disposeStates.forEach(dispose => dispose())
+  }
 }

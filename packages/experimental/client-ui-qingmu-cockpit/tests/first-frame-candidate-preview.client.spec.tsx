@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import {
   FirstFrameCandidatePreview,
+  decodeCandidate,
   type FirstFrameCandidatePreviewRequest,
   type FirstFrameCandidatePreviewResponse,
 } from '../src/client/FirstFrameCandidatePreview.tsx'
@@ -21,6 +22,15 @@ const response: FirstFrameCandidatePreviewResponse = {
 const labels = { load: '查看首帧候选', loading: '正在验证候选', error: '首帧候选已变化，未显示', ariaLabel: '首帧候选 asset-1' }
 const createUrl = vi.fn(() => 'blob:first-frame')
 const revokeUrl = vi.fn()
+
+it('decodes a real-sized 4 MiB image without overflowing the regexp stack', () => {
+  const large = Buffer.alloc(4 * 1024 * 1024, 37)
+  expect(decodeCandidate({ ...response, base64: large.toString('base64') }).length).toBe(large.length)
+})
+
+it.each(['', 'AA=A', 'AAAA=', 'A===', 'AAAA\n', '!!!!'])('rejects malformed base64 %j', (base64) => {
+  expect(() => decodeCandidate({ ...response, base64 })).toThrow()
+})
 
 beforeEach(() => {
   vi.stubGlobal('crypto', webcrypto)

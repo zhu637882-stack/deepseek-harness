@@ -7,6 +7,7 @@ import { ShootingReviewWorkspace } from '../src/client/ShootingReviewWorkspace.t
 // Browser decoding belongs to the player tests; posters must not contend for it here.
 vi.mock('../src/client/TakeThumbnail.tsx', () => ({ TakeThumbnail: ({ alt }: { alt: string }) => <span>{alt}</span> }))
 vi.mock('../src/client/ShootingFirstFrame.tsx', () => ({ ShootingFirstFrame: () => <section aria-label="首帧生成">等待本人确认并生成</section> }))
+vi.mock('../src/client/ShootingFirstFrameHistory.tsx', () => ({ ShootingFirstFrameHistory: () => <section aria-label="本镜首帧候选">真实历史候选</section> }))
 const bytes = Buffer.from('existing video')
 const sha = createHash('sha256').update(bytes).digest('hex')
 const projection = {
@@ -42,6 +43,15 @@ it('keeps the playing candidate across background workflow refreshes', async () 
   view.rerender(<ShootingReviewWorkspace {...p} projection={structuredClone(projection) as never} />)
   await waitFor(() => expect(screen.getByRole('button', { name: /视频候选 v1.*检查未通过/ }).getAttribute('aria-pressed')).toBe('true'))
   expect(view.container.querySelector('video')).toBe(playing)
+})
+
+it('opens first-frame history directly, without preparing a video or requiring Ready PromptIR', async () => {
+  const p = props(); render(<ShootingReviewWorkspace {...p} />)
+  fireEvent.click(screen.getByRole('button', { name: '查看与采用首帧' }))
+  expect(screen.getByRole('region', { name: '本镜首帧候选' })).toBeTruthy()
+  expect(p.onProductionAction).not.toHaveBeenCalled()
+  fireEvent.click(await screen.findByRole('button', { name: /视频候选 v1.*检查未通过/ }))
+  expect(screen.queryByRole('region', { name: '本镜首帧候选' })).toBeNull()
 })
 
 it('exposes rework for every shot without selecting or generating, and candidate clicks exit first-frame mode', async () => {

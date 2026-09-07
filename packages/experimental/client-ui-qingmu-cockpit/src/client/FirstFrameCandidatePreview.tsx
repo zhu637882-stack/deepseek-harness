@@ -48,10 +48,13 @@ async function sha256(bytes: Uint8Array): Promise<string> {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-function decodeCandidate(result: FirstFrameCandidatePreviewResponse): Uint8Array {
+export function decodeCandidate(result: FirstFrameCandidatePreviewResponse): Uint8Array {
+  // Avoid repeated-group regexes: multi-megabyte real images exhaust the JS regexp stack.
+  const text = result.base64
+  const padding = text.endsWith('==') ? 2 : text.endsWith('=') ? 1 : 0
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(result.mimeType)
-    || result.base64.length > Math.ceil(MAX_FIRST_FRAME_PREVIEW_BYTES / 3) * 4
-    || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(result.base64)) {
+    || text.length === 0 || text.length > Math.ceil(MAX_FIRST_FRAME_PREVIEW_BYTES / 3) * 4
+    || text.length % 4 !== 0 || /[^A-Za-z0-9+/]/.test(text.slice(0, text.length - padding))) {
     throw new Error('first-frame preview media invalid')
   }
   const bytes = Uint8Array.from(atob(result.base64), char => char.charCodeAt(0))
@@ -116,6 +119,7 @@ export function FirstFrameCandidatePreview({
       if (!sameScope(result, request)) throw new Error('first-frame preview source changed')
       const bytes = decodeCandidate(result)
       if (await sha256(bytes) !== request.expectedMaterializedSha256) throw new Error('first-frame preview hash mismatch')
+      if (run.signal.aborted) return
       blob.current = URL.createObjectURL(new Blob([bytes.slice().buffer], { type: result.mimeType }))
       setUrl(blob.current)
       onPreviewReady?.(blob.current)

@@ -63,6 +63,17 @@ it('does not POST again after a lost submit response', async () => {
   await screen.findByText('本次生成未完成，已停止，不自动重试。')
   expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/submit'))).toHaveLength(1)
 })
+
+it('shows an activation rejection instead of pretending the pending job is running', async () => {
+  const pending = { ...result, candidate:null, canActivate:true, task:{ id:'task-one',kernel_status:'DispatchPending' } }
+  const fetcher = vi.fn(async (path:string) => ({ ok:true,json:async () => path.includes('/review?') ? review : path.endsWith('/preview') ? preview
+    : path.endsWith('/submit') ? { ...pending,execution:{ taskId:'task-one',activated:false,state:'activation_pending_verification' } } : pending }))
+  vi.stubGlobal('fetch',fetcher)
+  render(<ShootingFirstFrame scope={scope} />)
+  fireEvent.click(await screen.findByRole('button',{ name:'生成这张首帧（仅一次）' }))
+  expect((await screen.findByRole('alert')).textContent).toContain('执行器尚未启动')
+  expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/submit'))).toHaveLength(1)
+})
 it('blocks malformed, cross-frame or multi-attempt previews', () => {
   for (const patch of [{ frameId:'other' },{ maxAttempts:2 },{ n:2 },{ selectAsOfficial:true },{ payloadHash:'bad' }]) expect(() => assertShootingPreview({ ...preview,...patch },scope)).toThrow()
 })
