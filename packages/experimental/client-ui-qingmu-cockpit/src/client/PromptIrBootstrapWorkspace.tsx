@@ -282,7 +282,8 @@ export function hasPromptIrBootstrapFrame(props: PromptIrWorkspaceProps): boolea
 /** Two-step first PromptIR Draft materialization and authenticated Ready selection. */
 export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
   const frame = bootstrapFrameOf(props)
-  const canEdit = props.presentation === 'director' || props.nativeDirector !== undefined
+  const shooting = props.presentation === 'shooting'
+  const canEdit = props.presentation === 'director' || props.nativeDirector !== undefined || shooting
   const connection = useDirectorConnection(props.nativeDirector?.connection)
   const frameKey = JSON.stringify(frame === undefined ? null : frameRequest(frame))
   const [editor, setEditor] = useState<{ key: string; frameKey: string; fields: YimengPromptIrEditableProjection; dirty: boolean }>()
@@ -347,7 +348,7 @@ export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
   const draft = state?.draft
   const editable = draft?.editableProjection
 
-  const compile = async (): Promise<void> => {
+  const compile = async (save = false): Promise<void> => {
     if (state === undefined || busy || staleEditor || state.draft !== null || state.ready !== null) return
     const controller = new AbortController(); abortRef.current = controller
     setOperation('compiling'); setError(undefined)
@@ -360,9 +361,10 @@ export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
       if (controller.signal.aborted) return
       assertMethod(result, state)
       setMethod(result)
-      if (canEdit) setEditor({ key: editorKey, frameKey,
+      if (canEdit && !save) setEditor({ key: editorKey, frameKey,
         fields: result.projection.candidate.editableProjection as YimengPromptIrEditableProjection,
         dirty: editor?.key === editorKey && editor.dirty })
+      if (save) await commitDraft(result)
     } catch (cause) { if (!controller.signal.aborted) setError(messageOf(cause)) }
     finally { if (!controller.signal.aborted) setOperation('idle') }
   }
@@ -381,14 +383,14 @@ export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
     finally { if (!controller.signal.aborted) setOperation('idle') }
   }
 
-  const commitDraft = async (): Promise<void> => {
-    if (state === undefined || method === undefined || busy) return
+  const commitDraft = async (prepared = method): Promise<void> => {
+    if (state === undefined || prepared === undefined || busy) return
     const controller = new AbortController(); abortRef.current = controller
     setOperation('committing'); setError(undefined)
     let key: string
     try {
       key = await idempotencyKey('draft', [frame.projectId, frame.episodeId, frame.storyboardRevisionId,
-        frame.frameId, state.contextSnapshotSha256, method.projectionSha256])
+        frame.frameId, state.contextSnapshotSha256, prepared.projectionSha256])
     } catch (cause) {
       if (!controller.signal.aborted) { setError(messageOf(cause)); setOperation('idle') }
       return
@@ -402,7 +404,7 @@ export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
       frameId: frame.frameId,
       idempotencyKey: key,
       expectedContextSnapshotSha256: state.contextSnapshotSha256,
-      methodProjectionSha256: method.projectionSha256,
+      methodProjectionSha256: prepared.projectionSha256,
     }
     try {
       writeMarker(markerKey(DRAFT_MARKER_PREFIX, frame), marker)
@@ -415,8 +417,8 @@ export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
     try {
       const result = await props.port.bootstrapPromptIr({
         ...requestWithoutSchema(marker),
-        methodProjection: method.projection,
-        methodAttestation: method.methodAttestation,
+        methodProjection: prepared.projection,
+        methodAttestation: prepared.methodAttestation,
       }, controller.signal)
       if (controller.signal.aborted) return
       assertDraftReceipt(result, marker)
@@ -504,6 +506,36 @@ export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
       if (!controller.signal.aborted) setError(`${messageOf(cause)} · 可用同一选择回执恢复，不会创建第二版本。`)
     } finally { if (!controller.signal.aborted) setOperation('idle') }
   }
+
+  if (shooting) return <section className={css.scriptWorkspace} aria-label="准备本镜视频">
+    <h3>准备本镜视频</h3>
+    <p>根据当前分镜和参考素材准备生成要求。旧素材保留；准备过程不生成视频、不收费。</p>
+    {busy && <p role="status">正在核对并准备本镜要求…</p>}
+    {!busy && state?.draft === null && state.ready === null && draftMarker === undefined &&
+      <button type="button" className={css.primaryAction} onClick={() => { void compile(true) }}>准备本镜生成要求</button>}
+    {draft && <section aria-label="本镜生成要求">
+      <p>要求已保存，请核对后继续。确认要求不会自动签收首帧或视频。</p>
+      {EDITABLE_FIELDS.filter(field => editable?.[field]).map(field => <div key={field} className={directorCss.diff}>
+        <strong>{({ imageGenPrompt: '首帧画面', lastFrameImagePrompt: '尾帧画面', videoGenPrompt: '视频与声音',
+          motionPrompt: '动作与运镜', negativePrompt: '避免出现' })[field]}</strong>
+        <p>{editable?.[field]}</p>
+      </div>)}
+      {selectionMarker === undefined && <>
+        <label><input type="checkbox" checked={confirmed} disabled={busy}
+          onChange={(event) => { setConfirmed(event.target.checked) }} />我确认使用以上本镜生成要求</label>
+        {confirmed && !busy && <button type="button" className={css.primaryAction}
+          onClick={() => { void select() }}>使用这些要求并继续</button>}
+      </>}
+    </section>}
+    {draftMarker !== undefined && !busy && <><p role="status">保存结果待核对，不会另建草稿。</p>
+      <button type="button" onClick={() => { void recoverDraft(draftMarker) }}>恢复已保存的要求</button></>}
+    {selectionMarker !== undefined && !busy && <><p role="status">确认结果待核对，不会重复确认。</p>
+      <button type="button" onClick={() => { void select(selectionMarker) }}>恢复本次确认</button></>}
+    {state?.ready && !busy && <button type="button" onClick={() => { void props.onCommitted() }}>继续检查视频生成条件</button>}
+    {error && <p role="alert">本镜要求尚未准备完成，原素材未改变。请重新检查；已有保存记录时，先恢复原记录。</p>}
+    {!busy && error && <button type="button" onClick={() => { setReload(value => value + 1) }}>重新检查</button>}
+    <details><summary>开发日志</summary><pre>{JSON.stringify({ error, state, draftReceipt, selectionReceipt }, null, 2)}</pre></details>
+  </section>
 
   return <section className={css.scriptWorkspace} aria-label="首个 PromptIR 引导">
     <div className={css.scriptWorkspaceHead}><div><h3>首个 PromptIR 引导</h3>

@@ -1807,7 +1807,8 @@ function ReadyPromptIrWorkspace({
 /** Route a real storyboard frame without PromptIR lineage into the bounded first-Draft flow. */
 export function PromptIrWorkspace(props: PromptIrWorkspaceProps) {
   const frames = framesOf(props.projectId, props.episodeId, props.shotItems, props.storyboardRevisionId)
-  const hasReadyLineage = frames.some(frame => frame.shotId === props.selectedShotId)
+  const hasReadyLineage = frames.some(frame => frame.shotId === props.selectedShotId
+    && (props.presentation !== 'shooting' || frame.status === 'Ready'))
   if (!hasReadyLineage && hasPromptIrBootstrapFrame(props)) return <PromptIrBootstrapWorkspace {...props} />
   return <ReadyPromptIrWorkspace {...props} />
 }

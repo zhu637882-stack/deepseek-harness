@@ -136,6 +136,42 @@ beforeEach(() => { sessionStorage.clear() })
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.restoreAllMocks() })
 
 describe('first PromptIR bootstrap workspace', () => {
+  it('prepares shooting requirements once and retains the human confirmation step after refresh', async () => {
+    const harness = port()
+    const view = render(<PromptIrWorkspace {...props} port={harness.port} presentation="shooting" />)
+    fireEvent.click(await screen.findByRole('button', { name: '准备本镜生成要求' }))
+    await screen.findByRole('checkbox', { name: '我确认使用以上本镜生成要求' })
+    expect(harness.spies.bootstrapPromptIr).toHaveBeenCalledTimes(1)
+    expect(harness.spies.selectBootstrapPromptIr).not.toHaveBeenCalled()
+    const draftProps = { ...props, shotItems: [{ ...props.shotItems[0]!, promptLineage: {
+      id: SUBJECT.promptIrId, storyboardRevisionId: REVISION, version: 1,
+      contentSha256: CONTENT_SHA, status: 'Draft',
+    } }] }
+    view.rerender(<PromptIrWorkspace {...draftProps} port={harness.port} presentation="shooting" />)
+    expect(screen.getByRole('region', { name: '本镜生成要求' })).toBeTruthy()
+    view.unmount()
+    render(<PromptIrWorkspace {...draftProps} port={harness.port} presentation="shooting" />)
+    const confirmation = await screen.findByRole('checkbox', { name: '我确认使用以上本镜生成要求' })
+    expect((confirmation as HTMLInputElement).checked).toBe(false)
+    expect(harness.spies.bootstrapPromptIr).toHaveBeenCalledTimes(1)
+    expect(harness.spies.selectBootstrapPromptIr).not.toHaveBeenCalled()
+    fireEvent.click(confirmation)
+    fireEvent.click(await screen.findByRole('button', { name: '使用这些要求并继续' }))
+    await waitFor(() => { expect(harness.spies.selectBootstrapPromptIr).toHaveBeenCalledTimes(1) })
+    expect(harness.spies.promptIrBootstrapMethod.mock.calls.at(-1)?.[0].selectionChallenge).toEqual(SELECTION_CHALLENGE)
+  })
+
+  it('recovers a shooting draft with a lost response without creating a second draft', async () => {
+    const harness = port({ loseDraftResponse: true })
+    render(<PromptIrWorkspace {...props} port={harness.port} presentation="shooting" />)
+    fireEvent.click(await screen.findByRole('button', { name: '准备本镜生成要求' }))
+    fireEvent.click(await screen.findByRole('button', { name: '恢复已保存的要求' }))
+    await screen.findByRole('checkbox', { name: '我确认使用以上本镜生成要求' })
+    expect(harness.spies.bootstrapPromptIr).toHaveBeenCalledTimes(1)
+    expect(harness.spies.recoverPromptIrBootstrap).toHaveBeenCalledTimes(1)
+    expect(harness.spies.selectBootstrapPromptIr).not.toHaveBeenCalled()
+  })
+
   it('adopts a native first draft, permits human edits and uses saved text for selection', async () => {
     const harness = port()
     const onUnsavedChange = vi.fn()
