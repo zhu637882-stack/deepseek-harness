@@ -56,6 +56,13 @@ describe('ShootingReviewWorkspace', () => {
     expect(await screen.findByDisplayValue('本地未提交首帧要求')).toBeTruthy()
   })
 
+  it('does not display a pending receipt under different draft text', async () => {
+    localStorage.setItem('qingmu.scene-planning.v1:project_cd5eabc7582b:episode_cd4ffe357df9:automatic-frame:frame_34b3741b1f0a', JSON.stringify({ shotId: 'frame_34b3741b1f0a', imagePromptCn: '不同外层文案', pending: { projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', idempotencyKey: 'pending-key-123', request: { action: 'edit_automatic', shotId: 'frame_34b3741b1f0a', imagePromptCn: '回执原文', expectedScriptRevision: 1, expectedScriptSha256: 'a'.repeat(64), expectedStoryboardRevision: 1, expectedStoryboardSha256: 'b'.repeat(64) } } }))
+    render(<AutomaticFrameRequirementsEditor projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" shotId="frame_34b3741b1f0a" onCommitted={async () => undefined} port={{ readScenePlanning: vi.fn(async () => ({ projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', scriptRevision: 1, scriptSha256: 'a'.repeat(64), canonicalStoryboard: { revision: 1, sourceHash: 'b'.repeat(64), shots: [{ id: 'frame_34b3741b1f0a', imagePromptCn: '服务端要求' }] } })), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() } as never} />)
+    expect(await screen.findByDisplayValue('服务端要求')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '读取同一保存回执' })).toBeNull()
+  })
+
   it('strips recovery metadata before adapter selection DTO', () => {
     const request = takeVersionSelectionRequestFromMarker({ schema: 'qingmu.take-version-selection-recovery-marker.v1', projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', frameId: 'frame_34b3741b1f0a', expectedStackSha256: 'a'.repeat(64), expectedSelectedTakeId: null, candidateTakeId: 'take-1', candidateVersionOrdinal: 1, candidateOutputSha256: 'b'.repeat(64), idempotencyKey: 'qingmu:take-select:v1:12345678' })
     expect(request).not.toHaveProperty('schema')
