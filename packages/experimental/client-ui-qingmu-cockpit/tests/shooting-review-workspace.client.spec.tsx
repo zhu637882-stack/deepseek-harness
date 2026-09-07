@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { localHeroUrl, shootingPrimary, shootingTitle, ShootingReviewWorkspace } from '../src/client/ShootingReviewWorkspace.tsx'
+import { localHeroUrl, shootingPosterVersion, shootingPrimary, shootingTitle, ShootingReviewWorkspace } from '../src/client/ShootingReviewWorkspace.tsx'
 import { AutomaticFrameRequirementsEditor } from '../src/client/AutomaticFrameRequirementsEditor.tsx'
 import { takeVersionSelectionRequestFromMarker } from '../src/client/take-version-recovery.ts'
 
@@ -20,6 +20,13 @@ const port = {
 } as never
 
 describe('ShootingReviewWorkspace', () => {
+  it('never substitutes a historical candidate for the selected video poster', () => {
+    const older = { takeId:'old', outputSha256:'a'.repeat(64), outputBindingStatus:'verified' }
+    const selected = { takeId:'chosen', outputSha256:'b'.repeat(64), outputBindingStatus:'verified' }
+    expect(shootingPosterVersion({ subject: { selectedTakeId:'chosen', versions:[older, selected] } } as never)).toBe(selected)
+    expect(shootingPosterVersion({ subject: { selectedTakeId:'missing', versions:[older] } } as never)).toBeUndefined()
+    expect(shootingPosterVersion({ subject: { selectedTakeId:null, versions:[older] } } as never)).toBe(older)
+  })
   it('selects one primary action from real material state', () => {
     expect(shootingPrimary(false, false, false)).toBe('first-frame')
     expect(shootingPrimary(true, false, false)).toBe('select-frame')

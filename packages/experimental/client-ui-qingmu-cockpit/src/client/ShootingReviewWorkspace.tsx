@@ -77,6 +77,12 @@ export function shootingTitle(title: string | null, frame: AutomaticPlanningShot
 export function shootingPrimary(hasFrame: boolean, selectedFrame: boolean, selectedVideo: boolean): 'first-frame' | 'select-frame' | 'video' | undefined {
   return selectedVideo ? undefined : !hasFrame ? 'first-frame' : !selectedFrame ? 'select-frame' : 'video'
 }
+export function shootingPosterVersion(stack: YimengTakeVersionStackResponse | undefined) {
+  const candidate = stack?.subject.selectedTakeId
+    ? stack.subject.versions.find(version => version.takeId === stack.subject.selectedTakeId)
+    : stack?.subject.versions.find(usable)
+  return usable(candidate) ? candidate : undefined
+}
 /** Content-first view of existing Takes; it neither dispatches generation nor records human approval. */
 export function ShootingReviewWorkspace({ projectName, episodeName, projectId, episodeId, projection, selectedShotId,
   onSelectShotId, onNavigate, onCommitted = async () => undefined, directorAssistant, onProductionAction, port, t, testState }: Props) {
@@ -210,7 +216,7 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
         const hero = projection?.director.heroFrameStoryboards?.shots.find(item => item.shotId === shot.shotId)?.heroFrame
         const thumb = localHeroUrl(hero?.browserUrl, hero?.assetId)
         const summary = shot.shotId === current.shotId ? visibleStack ?? shotStacks[shot.shotId] : shotStacks[shot.shotId]
-        const previewTake = summary?.subject.versions.find(usable)
+        const previewTake = shootingPosterVersion(summary)
         const planning = planningShots.find(item => item.id === shot.shotId)
         const label = summary?.subject.selectedTakeId ? '有视频' : (summary?.subject.versions.length ?? 0) > 0 ? summary?.subject.versions.every(v => v.qualityStatus === 'failed' || v.outputBindingStatus !== 'verified') ? '阻断' : '待审' : hero || (planning?.firstFrameCandidateCount ?? 0) > 0 ? '有首帧' : summary ? '无首帧' : '正在读取'
         const title = shootingTitle(shot.title, planning)
