@@ -38,3 +38,22 @@ it('does not POST again after a lost submit response', async () => {
 it('blocks malformed, cross-frame or multi-attempt previews', () => {
   for (const patch of [{ frameId:'other' },{ maxAttempts:2 },{ n:2 },{ selectAsOfficial:true },{ payloadHash:'bad' }]) expect(() => assertShootingPreview({ ...preview,...patch },scope)).toThrow()
 })
+it('restores a rejected request as an explicit stage blocker without another POST', async () => {
+  localStorage.setItem(`qingmu:shooting-first-frame:${scope.projectId}:${scope.episodeId}:${scope.frameId}`,
+    JSON.stringify({ preview,requestId:result.requestId }))
+  const fetcher = vi.fn(async () => ({ ok:true,json:async () => ({ ...result,task:null,candidate:null,
+    submissionBlocker:{ code:'storyboard_human_review_required',message:'请先逐镜确认分镜内容和提示词，再开始生成。' } }) }))
+  vi.stubGlobal('fetch',fetcher)
+  render(<ShootingFirstFrame scope={scope} />)
+  await screen.findByText('尚未进入生成，未创建本次任务。请先逐镜确认分镜内容和提示词，再开始生成。')
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  expect(screen.queryByText('正在核对原提交结果；不会重复提交。')).toBeNull()
+  expect(screen.queryByRole('button',{ name:'生成这张首帧（仅一次）' })).toBeNull()
+})
+it('shows the original stage blocker during preview and never offers paid submit', async () => {
+  vi.stubGlobal('fetch',vi.fn(async () => ({ ok:true,json:async () => ({ ...preview,
+    blockers:['existing_stage_gate_blocked'],submissionBlocker:{ message:'分镜签收已过期' } }) })))
+  render(<ShootingFirstFrame scope={scope} />)
+  await screen.findByText('尚未进入生成，未创建本次任务。分镜签收已过期')
+  expect(screen.queryByRole('button',{ name:'生成这张首帧（仅一次）' })).toBeNull()
+})
