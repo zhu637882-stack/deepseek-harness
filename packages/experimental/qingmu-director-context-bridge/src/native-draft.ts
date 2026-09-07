@@ -1,6 +1,6 @@
 /** Native directing suggestions use logged read receipts, never replay work orders or business writes. */
 import { createHash } from 'node:crypto'
-import type { Session } from '@deepseek-ai/dsh-session'
+import type { JsonValue, Session } from '@deepseek-ai/dsh-session'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import type { DirectorContextSnapshot } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { ImagoDirectorInstructionsResponse } from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter/types'
@@ -101,19 +101,47 @@ export async function readNativeShotMethods(
  */
 export function toolValues(session: Pick<Session, 'events'>, name: string): unknown[] {
   const calls = new Map<string, { turn: number; step: number }>()
+  const receipts = new Map<string, { value: JsonValue; visibleSha256: string }>()
   const results: unknown[] = []
   for (const event of session.events) {
     if (event.type === 'tool/call' && event.data.name === name) calls.set(event.data.callId, event.data)
+    if (event.type === 'qingmu-director-dialogue/receipt' && event.data.toolName === name
+      && calls.has(event.data.callId)) receipts.set(event.data.callId, event.data)
     if (event.type !== 'tool/result' || event.data.error !== undefined) continue
     for (const part of event.data.message.content) {
       const call = calls.get(part.toolCallId)
       if (!call || call.turn !== event.data.turn || call.step !== event.data.step || part.isError) continue
       calls.delete(part.toolCallId)
       if (part.content.length !== 1 || part.content[0]?.type !== 'text') continue
-      try { results.push(JSON.parse(part.content[0].text)) } catch { /* A non-JSON result is not a receipt. */ }
+      let value: unknown
+      try { value = JSON.parse(part.content[0].text) } catch { continue /* A spilled or non-JSON result is not a receipt. */ }
+      const receipt = receipts.get(part.toolCallId)
+      if (receipt) {
+        if (digest(value) === receipt.visibleSha256
+          && (value as { nativeReceiptSha256?: string })?.nativeReceiptSha256 === digest(receipt.value)) results.push(receipt.value)
+      } else if (!(value as { nativeReceiptSha256?: string })?.nativeReceiptSha256) results.push(value)
     }
   }
   return results
+}
+
+/** Retain complete host data in the existing session; the model receives a bounded task-specific view.
+ * A pending, failed, spilled or mismatched result cannot unlock this stored input.
+ * @param session Owning native session.
+ * @param callId Actual executing tool call.
+ * @param toolName Exact registered tool.
+ * @param value Complete already-bounded host value.
+ * @param view Task-relevant content, not a second editable source.
+ * @returns Model-facing JSON with its full-input identity.
+ */
+export function retainNativeDialogueReceipt(session: Session, callId: string, toolName: string,
+  value: JsonValue, view: Record<string, unknown>) {
+  const visible = { ...view, nativeReceiptSha256: digest(value) }
+  if (Buffer.byteLength(JSON.stringify(visible), 'utf8') > 48000) {
+    throw new Error('本次台词的导演上下文过大，未截断输入或提交修改。请缩小到单个镜头。')
+  }
+  session.append('qingmu-director-dialogue/receipt', { callId, toolName, value, visibleSha256: digest(visible) })
+  return visible
 }
 
 /** Obtain a source the native model actually received; client/model-authored snapshots are rejected. */

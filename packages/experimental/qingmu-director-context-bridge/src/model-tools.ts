@@ -14,10 +14,10 @@ import type {} from './index.ts'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import { findNativeDraftInput, nativeDraftFields, nativeDraftSource, readNativeDraftInput } from './native-draft.ts'
 import { findNativeFirstDraftInput, firstDraftSource, readNativeFirstDraftInput } from './native-first-draft.ts'
-import { findNativeDialogueInput, previewNativeDialogueEdit, readNativeDialogueInput } from './native-dialogue.ts'
+import { dialogueInputView, dialoguePreviewView, findNativeDialogueInput, previewNativeDialogueEdit, readNativeDialogueInput } from './native-dialogue.ts'
 import { stageDialogueEdit, findStagedDialogue, commitStagedDialogue, dialogueContinuation } from './dialogue-command.ts'
 import { prepareDialogueVideo } from './dialogue-video.ts'
-import { toolValues } from './native-draft.ts'
+import { retainNativeDialogueReceipt, toolValues } from './native-draft.ts'
 
 /** Opt-in native-agent consumer; the Host binding plugin remains independently usable. */
 export const name = 'qingmu-director-model-tools'
@@ -191,13 +191,16 @@ export function apply(ctx: Context, config: Config = {}): void {
     }
     draftHost.tools.register(defineTool({
       name: 'qingmu_read_dialogue',
-      description: 'Read the current shot’s actual dialogue lines, the episode script, shot-to-line links and complete IMAGO shot-design methods before changing a line. Use an actual editableLines lineId and this receiptId for qingmu_preview_dialogue_edit. Read-only; never guess line IDs or claim media were updated.',
+      description: 'Read the current shot’s actual dialogue lines, selected-scene context, episode shot-to-line links and complete IMAGO shot-design methods before changing a line. The host retains the full episode script; this view omits its unrelated implementation fields. Use an actual editableLines lineId and this receiptId for qingmu_preview_dialogue_edit. Read-only; never guess line IDs or claim media were updated.',
       parameters: {},
       output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
       presentCall: () => ({ card: 'generic', kind: 'read', title: '读取台词与关联镜头' }),
       async execute(args, exec) {
         exactArgs(args, [])
-        return boundedJson(await readDialogueInput(exec), maxOutputBytes)
+        const input = await readDialogueInput(exec)
+        if (!exec.agent) throw new Error('A native director session is required.')
+        return boundedJson(retainNativeDialogueReceipt(exec.agent.session, exec.callId, 'qingmu_read_dialogue',
+          boundedJson(input, maxOutputBytes), dialogueInputView(input)), maxOutputBytes)
       },
     }))
     draftHost.tools.register(defineTool({
@@ -214,7 +217,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         if (!exec.agent) throw new Error('A native director session is required.')
         const input = findNativeDialogueInput(exec.agent.session, args.receiptId)
         if ((await readDialogueInput(exec)).receiptId !== input.receiptId) throw new Error('台词、镜头或方法已变化，请重新判断影响范围。')
-        return boundedJson(previewNativeDialogueEdit(input, args), maxOutputBytes)
+        return boundedJson(dialoguePreviewView(previewNativeDialogueEdit(input, args)), Math.min(maxOutputBytes, 48000))
       },
     }))
     draftHost.tools.register(defineTool({
@@ -231,7 +234,8 @@ export function apply(ctx: Context, config: Config = {}): void {
         if ((await readDialogueInput(exec)).receiptId !== input.receiptId) throw new Error('输入已变化，请重新判断修改范围。')
         const staged = await stageDialogueEdit(input, { lineId: args.lineId, before: args.before, after: args.after },
           ctx.qingmuYimengCommand, exec.agent.session.id, exec.signal)
-        const output = boundedJson(staged, maxOutputBytes)
+        const output = boundedJson(retainNativeDialogueReceipt(exec.agent.session, exec.callId, 'qingmu_stage_dialogue_edit',
+          boundedJson(staged, maxOutputBytes), { ...staged, preview: dialoguePreviewView(staged.preview) }), maxOutputBytes)
         exec.agent.session.append('qingmu-director-dialogue/state', { scope: staged.scope,
           before: args.before, after: args.after, affectedShots: staged.preview.affectedShots,
           unchangedShots: staged.preview.unchangedDialogueShots, status: 'prepared', commandReceiptId: null })

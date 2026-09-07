@@ -17,6 +17,9 @@ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import AgentPresets from '@deepseek-ai/dsh-agent-presets'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import * as Persona from '@deepseek-ai/dsh-persona'
+import * as SpillPolicy from '@deepseek-ai/dsh-spill-policy'
+import SpillLocal from '@deepseek-ai/dsh-spill-local'
+import { findNativeDialogueInput } from '../src/native-dialogue.ts'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import * as ModelTools from '../src/model-tools.ts'
 import type { DirectorContextSnapshot } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
@@ -86,7 +89,7 @@ function includesExactString(value: unknown, expected: string): boolean {
 }
 
 /** A real Loader preset: host capabilities stay root-owned; native tools mount only below the agent. */
-async function harness(adapter: MockAdapter, sessionRoot?: string, dialogue = false, sourceNotes = ''): Promise<Context> {
+async function harness(adapter: MockAdapter, sessionRoot?: string, dialogue = false, sourceNotes = '', commandCalls: string[] = []): Promise<Context> {
   const presetRoot = fileURLToPath(new URL('../../qingmu-web/agent-presets/', import.meta.url))
 
   const ctx = new Context()
@@ -106,12 +109,29 @@ async function harness(adapter: MockAdapter, sessionRoot?: string, dialogue = fa
   await ctx.plugin(SessionStore)
   await ctx.plugin(SystemPrompt, { persona: '' })
   await ctx.plugin(ToolRuntime)
+  const spillRoot = await mkdtemp(join(tmpdir(), 'qingmu-dialogue-spill-')); roots.push(spillRoot)
+  await ctx.plugin(SpillLocal, { root: spillRoot })
+  await ctx.plugin(SpillPolicy, { maxInlineBytes: 50000 })
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
   if (sessionRoot !== undefined) await ctx.plugin(JsonlSessionPersistence, { root: sessionRoot, compression: 'none' })
   await ctx.plugin(AgentPresets, { default: 'qingmu-director', roots: [{ path: presetRoot, trust: 'system' }], includeUserRoot: false })
   ctx.llm.registerAdapter(['mock'], adapter)
+  let committed = false
   ctx.provide('qingmuYimengCommand', async (endpoint, payload) => {
+    commandCalls.push(endpoint)
+    if (dialogue && endpoint === 'readDialogueEditCapability') return { ok: true, value: {} }
+    if (dialogue && endpoint === 'proposeScript') {
+      expect(payload).toMatchObject({ script: { sourceNotes, scenes: [{ dialogues: [{ line: '有人在吗？' }] }] } })
+      return { ok: true, value: { changeSet: { id: 'change-6', payloadSha256: 'c'.repeat(64) } } }
+    }
+    if (dialogue && endpoint === 'previewScript') return { ok: true, value: {
+      canCommit: true, revisionConflict: false, payloadSha256: 'c'.repeat(64) } }
+    const receipt = { changeSetId: 'change-6', commandReceiptId: 'saved-6', changed: true,
+      authoritativeRevision: 2, authoritativeSnapshotSha256: 'd'.repeat(64) }
+    if (dialogue && endpoint === 'recoverScriptCommit') return committed ? { ok: true, value: { receipt } }
+      : { ok: false, error: { code: 'internal', message: 'Yimeng rejected command (HTTP 404: command_receipt_not_found)' } }
+    if (dialogue && endpoint === 'commitScript') { committed = true; return { ok: true, value: receipt } }
     if (endpoint !== 'readDirectorContext') throw new Error(`unexpected command ${endpoint}`)
     if (JSON.stringify(payload) !== JSON.stringify(scope)) throw new Error('model supplied an out-of-session scope')
     return { ok: true, value: snapshot() }
@@ -157,6 +177,64 @@ async function createQingmuAgent(ctx: Context, id: string): Promise<{ agent: Age
 }
 
 describe('Qingmu model tools through a real preset and agent loop', () => {
+  it('loads a full dialogue receipt through real persistence after a cold restart', async () => {
+    const sessionRoot = await mkdtemp(join(tmpdir(), 'qingmu-dialogue-cold-')); roots.push(sessionRoot)
+    const notes = '大剧本正文'.repeat(30000)
+    const initial = await harness(new MockAdapter([
+      toolCallResponse('cold-read', 'qingmu_read_dialogue', {}), textResponse('已读取，尚未修改。'),
+    ]), sessionRoot, true, notes)
+    const handle = await createQingmuAgent(initial, 'dialogue-cold')
+    bind(handle.agent)
+    handle.agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: '读取这句台词。' }] }))
+    await waitForIdle(initial, handle.agent)
+    const view = JSON.parse(resultText(handle.agent.session.events, 'qingmu_read_dialogue'))
+    await initial.sessions.flush(handle.agent.session)
+    await initial.fiber.dispose(); contexts.splice(contexts.indexOf(initial), 1)
+    const calls: string[] = []
+    const resumed = await harness(new MockAdapter([
+      toolCallResponse('cold-preview', 'qingmu_preview_dialogue_edit', {
+        receiptId: view.receiptId, lineId: 'line-6', before: '有人吗？', after: '有人在吗？' }),
+      textResponse('恢复原输入并核对影响，尚未修改。'),
+    ]), sessionRoot, true, notes, calls)
+    const restored = await resumed.agents.resume({ resumeSessionId: SessionId('dialogue-cold'),
+      agentOptions: { provider: 'mock', model: 'mock' },
+      setup: async agentCtx => void await resumed.agentPresets.mount(agentCtx, 'qingmu-director') })
+    expect(findNativeDialogueInput(restored.agent.session, view.receiptId).source.script).toMatchObject({ sourceNotes: notes })
+    restored.agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: '继续核对原台词。' }] }))
+    await waitForIdle(resumed, restored.agent)
+    expect(JSON.parse(resultText(restored.agent.session.events, 'qingmu_preview_dialogue_edit'))).toMatchObject({
+      affectedShots: [{ frameNo: 6 }], unchangedDialogueShots: [{ frameNo: 7 }] })
+    expect(calls).not.toContain('proposeScript'); expect(calls).not.toContain('commitScript')
+    await restored.dispose()
+  })
+  it('stages a large script and recovers the successful Change Set without a second commit', async () => {
+    const edit = { lineId: 'line-6', before: '有人吗？', after: '有人在吗？' }
+    const adapter = new MockAdapter([
+      toolCallResponse('read-large', 'qingmu_read_dialogue', {}),
+      () => toolCallResponse('preview-large', 'qingmu_preview_dialogue_edit', {
+        receiptId: JSON.parse(resultText(agent.session.events, 'qingmu_read_dialogue')).receiptId, ...edit }),
+      () => toolCallResponse('stage-large', 'qingmu_stage_dialogue_edit', {
+        receiptId: JSON.parse(resultText(agent.session.events, 'qingmu_read_dialogue')).receiptId, ...edit }),
+      () => toolCallResponse('save-large', 'qingmu_commit_dialogue_edit', {
+        receiptId: JSON.parse(resultText(agent.session.events, 'qingmu_stage_dialogue_edit')).receiptId }),
+      () => toolCallResponse('recover-large', 'qingmu_commit_dialogue_edit', {
+        receiptId: JSON.parse(resultText(agent.session.events, 'qingmu_stage_dialogue_edit')).receiptId }),
+      textResponse('台词已保存，未提交视频。'),
+    ])
+    const calls: string[] = []
+    const ctx = await harness(adapter, undefined, true, 'x'.repeat(350000), calls)
+    const handle = await createQingmuAgent(ctx, 'large-script-commit'); const agent = handle.agent
+    bind(agent)
+    agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: '把有人吗？改成有人在吗？' }] }))
+    await waitForIdle(ctx, agent)
+    expect(calls.filter(name => name === 'commitScript')).toHaveLength(1)
+    expect(calls.filter(name => name === 'proposeScript')).toHaveLength(1)
+    const staged = JSON.parse(resultText(agent.session.events, 'qingmu_stage_dialogue_edit'))
+    expect(staged.preview).not.toHaveProperty('proposedScript')
+    expect(staged.preview).toMatchObject({ after: '有人在吗？', affectedShots: [{ frameNo: 6 }] })
+    expect(agent.session.events.filter(e => e.type === 'tool/result').every(e => !e.data.message.content.some(p => p.isError))).toBe(true)
+    await handle.dispose()
+  })
   it.each([350000, 1100000])('bounds full-episode dialogue reads without truncation (%i bytes)', async (bytes) => {
     const adapter = new MockAdapter([toolCallResponse('read-dialogue', 'qingmu_read_dialogue', {}), textResponse('只读完成。')])
     const notes = 'x'.repeat(bytes)
@@ -167,8 +245,11 @@ describe('Qingmu model tools through a real preset and agent loop', () => {
     await waitForIdle(ctx, handle.agent)
     const result = resultText(handle.agent.session.events, 'qingmu_read_dialogue')
     if (bytes < 1048576) {
-      expect(JSON.parse(result)).toMatchObject({ source: { script: { sourceNotes: notes } } })
-      expect(includesExactString(adapter.requests[1]?.messages, notes)).toBe(true)
+      const view = JSON.parse(result)
+      expect(view).toMatchObject({ source: { fullScriptRetainedByHost: true } })
+      expect(findNativeDialogueInput(handle.agent.session, view.receiptId).source.script).toMatchObject({ sourceNotes: notes })
+      expect(Buffer.byteLength(result)).toBeLessThan(48000)
+      expect(includesExactString(adapter.requests[1]?.messages, notes)).toBe(false)
     } else {
       expect(result).toContain('exceeds maxOutputBytes; no content was truncated')
       expect(includesExactString(adapter.requests[1]?.messages, notes)).toBe(false)
@@ -188,7 +269,7 @@ describe('Qingmu model tools through a real preset and agent loop', () => {
       },
       textResponse('直接修改镜6，镜7台词不变；还需判断声音和反应的影响。尚未保存或生成。'),
     ])
-    const ctx = await harness(adapter, undefined, true)
+    const ctx = await harness(adapter, undefined, true, 'x'.repeat(350000))
     const handle = await createQingmuAgent(ctx, 'dialogue-preset')
     const agent = handle.agent
     bind(agent)

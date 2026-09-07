@@ -43,6 +43,33 @@ export async function readNativeDialogueInput(context: DirectorContextSnapshot, 
 
 type DialogueInput = Awaited<ReturnType<typeof readNativeDialogueInput>>
 
+/** Present the selected scene, linked lines and full methods without resending the entire episode JSON.
+ * @param input Full verified input retained by the host.
+ * @returns Explicitly scoped model view; absent scene fields are not invented.
+ */
+export function dialogueInputView(input: DialogueInput): Record<string, unknown> {
+  const { sourceScene, shot, adjacentShots, episodeScenes, creativeContract } = input.context
+  const sceneKeys = ['title', 'sceneGoal', 'conflict', 'emotionalBeat', 'emotionalTurn', 'informationDelta',
+    'actionDescription', 'visualDescription', 'soundIntent', 'dialogues']
+  return { schema: input.schema, receiptId: input.receiptId, scope: input.scope,
+    source: { revision: input.source.revision, scriptSha256: input.source.scriptSha256, fullScriptRetainedByHost: true },
+    context: { shot, script: input.context.script, creativeContract,
+      ...(adjacentShots === undefined ? {} : { adjacentShots }), ...(episodeScenes === undefined ? {} : { episodeScenes }),
+      sourceScene: Object.fromEntries(sceneKeys.filter(key => key in sourceScene).map(key => [key, sourceScene[key]])) },
+    linkedShots: input.relations.shots.map(({ shotId, sceneId, frameNo, title, durationSec, dialogueRhythm }) =>
+      ({ shotId, sceneId, frameNo, title, ...(durationSec === undefined ? {} : { durationSec }), dialogueRhythm })),
+    methods: input.methods, editableLines: input.editableLines }
+}
+
+/** Show the exact line change and effects; the full proposed script remains host-owned.
+ * @param preview Pure validated replacement.
+ * @returns Compact impact result, without an editable script supplied by the model.
+ */
+export function dialoguePreviewView(preview: ReturnType<typeof prepareDialogueEdit>) {
+  const { proposedScript, ...impact } = preview
+  return { ...impact, proposedScriptSha256: digest(proposedScript) }
+}
+
 /** Recover only an actual successful tool result, not a model-authored script.
  * @param session Native durable event log.
  * @param receiptId Previously delivered input identity.

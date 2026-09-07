@@ -5,7 +5,7 @@ import type {
   DirectorProposalFreshnessRequest,
   DirectorReplayProposal,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
-import type { Session } from '@deepseek-ai/dsh-session'
+import type { JsonValue, Session } from '@deepseek-ai/dsh-session'
 import type { ImagoDirectorInstructionsResponse } from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter/types'
 import type { YimengPromptIrResponse, YimengPromptIrBootstrapResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 
@@ -257,6 +257,13 @@ declare module '@deepseek-ai/dsh-session/types' {
     'qingmu-director-context/state': DirectorContextBindingState | null
     /** A UI view of a native tool operation, never a second business ledger. */
     'qingmu-director-dialogue/state': NativeDialogueExecution
+    /** Full host input retained outside model context; usable only with its matching successful tool result. */
+    'qingmu-director-dialogue/receipt': {
+      readonly callId: string
+      readonly toolName: string
+      readonly value: JsonValue
+      readonly visibleSha256: string
+    }
   }
 }
 

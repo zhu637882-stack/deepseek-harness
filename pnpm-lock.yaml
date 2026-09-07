@@ -4298,6 +4298,12 @@ importers:
       '@deepseek-ai/dsh-session-projection':
         specifier: workspace:^
         version: link:../../session/session-projection
+      '@deepseek-ai/dsh-spill-local':
+        specifier: workspace:^
+        version: link:../../spill/spill-local
+      '@deepseek-ai/dsh-spill-policy':
+        specifier: workspace:^
+        version: link:../../spill/spill-policy
       '@deepseek-ai/dsh-system-prompt':
         specifier: workspace:^
         version: link:../../core/system-prompt
