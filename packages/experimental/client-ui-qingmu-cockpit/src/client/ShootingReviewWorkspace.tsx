@@ -55,6 +55,7 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
   const [zoom, setZoom] = useState(false); const [scale, setScale] = useState(1); const [selectionError, setSelectionError] = useState('')
   const [offset, setOffset] = useState({ x: 0, y: 0 }); const [selecting, setSelecting] = useState(false)
   const drag = useRef<{ x: number; y: number; offsetX: number; offsetY: number }>()
+  const zoomTrigger = useRef<HTMLElement>()
   useEffect(() => {
     if (current === undefined) { setStack(undefined); setLoad('failed'); return }
     const controller = new AbortController(); setLoad('loading'); setStack(undefined)
@@ -77,6 +78,7 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
     }).catch(() => { /* retain exact marker; a later visit can only recover it */ })
   }, [current, episodeId, port, projectId])
   useEffect(() => { const close = (event: KeyboardEvent): void => { if (event.key === 'Escape') setZoom(false) }; window.addEventListener('keydown', close); return () => window.removeEventListener('keydown', close) }, [])
+  useEffect(() => { if (!zoom) zoomTrigger.current?.focus() }, [zoom])
   const onPreviewReady = useCallback((url: string | undefined): void => setMediaUrl(url), [])
   const resetZoom = useCallback((): void => { setScale(1); setOffset({ x: 0, y: 0 }) }, [])
   const closeZoom = useCallback((): void => { setZoom(false); resetZoom() }, [resetZoom])
@@ -125,14 +127,14 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
             projectId, episodeId, frameId: current.shotId, takeId: browsed.takeId,
             expectedOutputSha256: browsed.outputSha256,
           }} load={port.takePreview} t={t} onPreviewReady={onPreviewReady} /></div>
-            : heroFrame !== undefined && heroFrame !== null ? <button type="button" className={css.frame} onClick={() => { resetZoom(); setZoom(true) }} aria-label={`放大查看镜 ${current.frameNo} 首帧`}><img src={heroFrame.browserUrl} alt={`镜 ${current.frameNo} 已选首帧`} /><span>已选首帧</span></button>
+            : heroFrame !== undefined && heroFrame !== null ? <button type="button" className={css.frame} onClick={(event) => { zoomTrigger.current = event.currentTarget; resetZoom(); setZoom(true) }} aria-label={`放大查看镜 ${current.frameNo} 首帧`}><img src={heroFrame.browserUrl} alt={`镜 ${current.frameNo} 已选首帧`} /><span>已选首帧</span></button>
               : <div className={css.canvas}><span>镜 {current.frameNo}</span><strong>{current.title}</strong>
                 <small>{message(state, load)}</small></div>}
           {load !== 'ready' && <p className={css.mediaNotice} role="status">{message(state, load)}</p>}{state === 'failed' && load === 'ready' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}
         </div>
         <div className={css.candidates} aria-label="候选画面">{versions.map(version => <button key={version.takeId} type="button" aria-pressed={version.takeId === browseId} onClick={() => { setBrowseId(version.takeId); setMediaUrl(undefined) }}><span className={css.videoIcon}>视频候选</span><span>候选 v{version.versionOrdinal}</span><strong>{version.isSelected ? '当前选用' : version.qualityStatus}</strong><small>{version.durationSec === null ? '时长未知' : `${version.durationSec} 秒`}</small></button>)}</div>
         <p className={css.browseNote}>{message(state, load)} 单击候选只切换中区媒体，不会改变选用。</p>{selectionError && <p role="alert">{selectionError}</p>}<button className={css.primary} type="button" disabled={!primary || selecting} onClick={() => { void selectCurrent() }}>{primary ? (selecting ? '正在采用候选' : '采用这张') : browsed?.isSelected ? '当前已选用' : '候选不可采用'}</button>
-        {sourceUrl !== undefined && <button className={css.zoomButton} type="button" onClick={() => { resetZoom(); setZoom(true) }}>放大画面</button>}
+        {sourceUrl !== undefined && <button className={css.zoomButton} type="button" onClick={(event) => { zoomTrigger.current = event.currentTarget; resetZoom(); setZoom(true) }}>放大画面</button>}
         {zoom && <div className={css.zoom} role="dialog" aria-modal="true" aria-label="放大画面"><div className={css.zoomToolbar}><button type="button" onClick={closeZoom}>关闭放大查看</button><button type="button" onClick={() => setScale(value => Math.min(3, value + 0.25))}>放大</button><button type="button" onClick={() => setScale(value => Math.max(1, value - 0.25))}>缩小</button></div><div className={css.zoomCanvas} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={() => { drag.current = undefined }} onPointerCancel={() => { drag.current = undefined }}>{mediaUrl !== undefined ? <video src={mediaUrl} controls autoPlay playsInline style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }} /> : heroFrame !== undefined && heroFrame !== null && <img src={heroFrame.browserUrl} alt={`镜 ${current.frameNo} 已选首帧`} style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }} />}</div></div>}
       </main>
       <aside className={css.inspector}><div className={css.switcher}><button type="button" aria-pressed={panel === 'requirements'} onClick={() => setPanel('requirements')}>当前要求</button><button type="button" aria-pressed={panel === 'assistant'} onClick={() => setPanel('assistant')}>原生导演助手</button></div>{panel === 'requirements' ? <div className={css.requirements}><h2>当前镜头要求</h2><h3>对白</h3><p>{dialogue.join(' / ') || '当前分镜未提供对白。'}</p><h3>动作</h3><p>{action.join(' / ') || '当前分镜未提供动作节拍。'}</p><h3>机位</h3><p>当前镜头关系投影未提供独立机位字段。</p><AutomaticFrameRequirementsEditor projectId={projectId} episodeId={episodeId} shotId={current.shotId} port={port} onCommitted={onCommitted} /></div> : directorAssistant}</aside>
