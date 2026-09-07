@@ -958,13 +958,11 @@ describe('PromptIrWorkspace vertical slice', () => {
     fireEvent.click(await screen.findByRole('radio'))
     fireEvent.click(await screen.findByRole('checkbox', { name: '我已审看并认可这张首帧' }))
     fireEvent.click(screen.getByRole('button', { name: '采用这张' }))
-    fireEvent.click(await screen.findByRole('button', { name: '检查视频生成条件' }))
-    fireEvent.click(await screen.findByRole('checkbox', { name: '我确认本次镜头视频生成最高费用为 0.3000 CNY。' }))
-    const button = await screen.findByRole('button', { name: '确认重新生成一条视频' })
+    const button = await screen.findByRole('button', { name: /付费重新生成（最高 ¥/ })
     fireEvent.click(button); fireEvent.click(button)
     await waitFor(() => expect(spies.queueProductionTake).toHaveBeenCalledTimes(1))
     expect(spies.queueProductionTake.mock.calls[0]![0]).toMatchObject({ takeOrdinal: 2, takeKind: 'targeted_rework' })
-    await waitFor(() => expect(screen.queryByRole('button', { name: '确认重新生成一条视频' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('button', { name: /付费重新生成（最高 ¥/ })).toBeNull())
   })
 
   it('keeps an unknown-result marker across refresh and recovers with the original intent', async () => {

@@ -657,6 +657,24 @@ function ReadyPromptIrWorkspace({
 
   useEffect(() => () => { abortRef.current?.abort() }, [])
 
+  // The shooting flow runs its own readiness checks once per shot; the operator
+  // only reviews the result and confirms the paid submission.
+  const autoCheckTried = useRef('')
+  const autoQuoteTried = useRef('')
+  useEffect(() => {
+    if (presentation !== 'shooting' || active === undefined || operation !== 'idle') return
+    if (firstFrameQuote === undefined && firstFrameRecovery === undefined && autoCheckTried.current !== active.frameId) {
+      autoCheckTried.current = active.frameId
+      void quoteFirstFrame()
+      return
+    }
+    if (firstFrameReceipt !== undefined && firstFrameQuote !== undefined && videoQuote === undefined
+      && autoQuoteTried.current !== active.frameId) {
+      autoQuoteTried.current = active.frameId
+      void quoteVideo()
+    }
+  }, [presentation, active?.frameId, operation, firstFrameQuote, firstFrameReceipt, firstFrameRecovery, videoQuote])
+
   const resetPreparedState = (): void => {
     setMethod(undefined)
     setProposal(undefined)
@@ -1201,6 +1219,7 @@ function ReadyPromptIrWorkspace({
   const queueProductionTake = async (
     takeOrdinal: 1 | 2,
     recoveryMarker?: ProductionTakeRecoveryMarker,
+    confirmNow = false,
   ): Promise<void> => {
     if (!director || active === undefined || operation !== 'idle'
       || productionLock.current || productionRecovery.status === 'invalid') return
@@ -1210,7 +1229,7 @@ function ReadyPromptIrWorkspace({
       || recoveryMarker.projectId !== active.projectId || recoveryMarker.episodeId !== active.episodeId
       || recoveryMarker.frameId !== active.frameId || recoveryMarker.takeOrdinal !== takeOrdinal)) return
     if (recoveryMarker === undefined && (snapshot === undefined || unsaved || bufferStale
-      || snapshot.draft?.status === 'stale' || !productionConfirmed || firstFrameReceipt === undefined
+      || snapshot.draft?.status === 'stale' || (!productionConfirmed && !confirmNow) || firstFrameReceipt === undefined
         || firstFrameState?.selectedAssetId === null || videoQuote === undefined
         || !videoQuote.quoteReady || videoQuote.dispatchBlockers.length !== 1 || videoQuote.dispatchBlockers[0] !== 'operator_paid_confirmation_required')) return
     productionLock.current = true
@@ -1317,7 +1336,11 @@ function ReadyPromptIrWorkspace({
     </>}
     {videoQuote && <>
       {!videoQuote.quoteReady && <p role="alert">本镜的内容或素材检查尚未完成，暂不能生成。请回到当前要求修正后重新检查。</p>}
-      {videoQuote.quoteReady && videoQuote.dispatchBlockers.length === 1 && videoQuote.dispatchBlockers[0] === 'operator_paid_confirmation_required' && productionRecovery.status === 'none' && videoExecution?.nextTakeOrdinal && (!productionTake || videoExecution.takeCount >= productionTake.receipt.takeOrdinal) && <><label><input type="checkbox" checked={productionConfirmed} onChange={e => setProductionConfirmed(e.target.checked)} />{videoQuote.requiredPaidConfirmationText}</label>{productionConfirmed && !blocked && !unsaved && !busy && <button onClick={() => { if (videoExecution.nextTakeOrdinal) void queueProductionTake(videoExecution.nextTakeOrdinal) }}>{videoExecution.nextTakeOrdinal === 2 ? '确认重新生成一条视频' : '确认生成一条视频'}</button>}</>}
+      {videoQuote.quoteReady && videoQuote.dispatchBlockers.length === 1 && videoQuote.dispatchBlockers[0] === 'operator_paid_confirmation_required' && productionRecovery.status === 'none' && videoExecution?.nextTakeOrdinal && (!productionTake || videoExecution.takeCount >= productionTake.receipt.takeOrdinal) && <>
+        <p>生成条件已就绪。本次最高预留 ¥{videoQuote.maximumReservationCny.toFixed(2)}，实际以账本为准。</p>
+        {!blocked && !unsaved && !busy && <button className={css.primaryAction} type="button" onClick={() => { setProductionConfirmed(true); if (videoExecution.nextTakeOrdinal) void queueProductionTake(videoExecution.nextTakeOrdinal, undefined, true) }}>{videoExecution.nextTakeOrdinal === 2 ? `付费重新生成（最高 ¥${videoQuote.maximumReservationCny.toFixed(2)}）` : `付费生成（最高 ¥${videoQuote.maximumReservationCny.toFixed(2)}）`}</button>}
+        <details><summary>付费确认全文</summary><p>{videoQuote.requiredPaidConfirmationText}</p></details>
+      </>}
     </>}
     {productionTake && <p role="status">{productionTake.receipt.queued ? '本镜请求已入队；实际执行进度见上方，不代表视频已生成。' : '任务未提交，请查看检查结果。'}</p>}
     {productionRecovery.status === 'ready' && <><p role="alert">已有提交等待核对，请勿重复生成。保留同一任务记录。</p>{!busy && <button onClick={() => { void queueProductionTake(productionRecovery.value.takeOrdinal, productionRecovery.value) }}>恢复同一任务</button>}</>}
