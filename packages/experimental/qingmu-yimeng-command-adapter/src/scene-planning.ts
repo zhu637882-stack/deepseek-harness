@@ -286,7 +286,8 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
         if (r.shotId !== request.shotId) throw b('automatic planning receipt shot mismatch')
         id(r.shotId, b); revision(r.storyboard, b)
         const storyboard = obj(r.storyboard, b)
-        if (storyboard.version !== request.expectedStoryboardRevision + 1) throw b('automatic planning receipt revision mismatch')
+        if (typeof request.expectedStoryboardRevision !== 'number'
+          || storyboard.version !== request.expectedStoryboardRevision + 1) throw b('automatic planning receipt revision mismatch')
       } else {
         for (const k of ['sceneId', 'seriesId']) id(r[k], b)
         ids(r.shotIds, b); source(r.source, b); revision(r.storyboard, b)
