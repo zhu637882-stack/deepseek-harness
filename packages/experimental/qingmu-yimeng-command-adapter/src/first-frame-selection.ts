@@ -27,6 +27,8 @@ const IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 export interface FirstFrameSelectionCommandDependencies {
   readonly baseUrl: string
   readonly fetch: typeof globalThis.fetch
+  /** Same service token the rpc channel uses; the native shell has no Writer cookie. */
+  readonly readToken: () => string | undefined
 }
 
 interface Coordinates {
@@ -87,12 +89,18 @@ function selectionRequest(req: IncomingMessage): SelectionRequest | undefined {
     && /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/.test(value.idempotencyKey) ? value : undefined
 }
 
-function browserHeaders(req: IncomingMessage, upstream: URL): Headers | undefined {
+function browserHeaders(req: IncomingMessage, upstream: URL, serviceToken: string | undefined): Headers | undefined {
   if (req.headers.authorization !== undefined) return undefined
   const cookie = req.headers.cookie?.split(';').map(item => item.trim())
     .find(item => item.startsWith('jason_token='))
-  if (cookie === undefined || cookie.length > 8192 || /[\r\n]/.test(cookie)) return undefined
-  return new Headers({ accept: 'application/json', cookie, origin: upstream.origin, host: upstream.host })
+  if (cookie !== undefined && cookie.length <= 8192 && !/[\r\n]/.test(cookie)) {
+    return new Headers({ accept: 'application/json', cookie, origin: upstream.origin, host: upstream.host })
+  }
+  // The native application shell serves the cockpit outside the Writer origin, so the
+  // request carries no jason_token cookie; fall back to the same service credential
+  // the loopback rpc channel already uses for this identical upstream.
+  return serviceToken === undefined ? undefined
+    : new Headers({ accept: 'application/json', authorization: `Bearer ${serviceToken}`, origin: upstream.origin, host: upstream.host })
 }
 
 function upstreamBase(baseUrl: string, value: Coordinates): URL {
@@ -256,6 +264,12 @@ function receiptIsCurrent(value: unknown, expected: SelectionRequest, requestSha
   return currentReceipt(value, expected, requestSha256) !== undefined
 }
 
+function serviceTokenOf(dependencies: FirstFrameSelectionCommandDependencies): string | undefined {
+  const token = dependencies.readToken()?.trim()
+  if (token === undefined || token.length === 0 || token.length > 16_384 || /[\r\n]/.test(token)) return undefined
+  return token
+}
+
 async function jsonUpstream(
   dependencies: FirstFrameSelectionCommandDependencies,
   req: IncomingMessage,
@@ -263,7 +277,7 @@ async function jsonUpstream(
   init: RequestInit = {},
   write = false,
 ): Promise<{ readonly response: Response; readonly value: unknown } | undefined> {
-  const headers = browserHeaders(req, upstream)
+  const headers = browserHeaders(req, upstream, serviceTokenOf(dependencies))
   const host = req.headers.host
   if (headers === undefined || (write && (typeof host !== 'string' || req.headers.origin !== `http://${host}`))) return undefined
   for (const [key, value] of new Headers(init.headers)) headers.set(key, value)
@@ -280,7 +294,7 @@ async function mediaUpstream(
   req: IncomingMessage,
   upstream: URL,
 ): Promise<{ readonly mimeType: string; readonly bytes: Buffer } | undefined> {
-  const headers = browserHeaders(req, upstream)
+  const headers = browserHeaders(req, upstream, serviceTokenOf(dependencies))
   if (headers === undefined) return undefined
   headers.set('accept', 'image/jpeg,image/png,image/webp')
   try {

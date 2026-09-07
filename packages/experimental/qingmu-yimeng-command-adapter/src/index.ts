@@ -6156,6 +6156,7 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
   ctx.effect(() => registerFirstFrameSelectionCommands(ctx.webServer, {
     baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),
     fetch: globalThis.fetch,
+    readToken: () => process.env.YIMENG_API_TOKEN,
   }), 'qingmu-yimeng-command: first-frame selection commands')
   const interactiveController = new AbortController()
   const activeInteractiveTasks = new Set<string>()

@@ -21,12 +21,12 @@ afterEach(async () => {
   if (server !== undefined) { server.close(); await once(server, 'close'); server = undefined }
 })
 
-async function host(fetchUpstream: typeof globalThis.fetch): Promise<string> {
+async function host(fetchUpstream: typeof globalThis.fetch, readToken: () => string | undefined = () => undefined): Promise<string> {
   const routes = new Map<string, WebRoute>()
   const webServer = {
     register(route: WebRoute) { routes.set(route.path, route); return () => { routes.delete(route.path) } },
   } as unknown as WebServer
-  dispose = registerFirstFrameSelectionCommands(webServer, { baseUrl: 'http://127.0.0.1:8115', fetch: fetchUpstream })
+  dispose = registerFirstFrameSelectionCommands(webServer, { baseUrl: 'http://127.0.0.1:8115', fetch: fetchUpstream, readToken })
   server = createServer((req, res) => {
     const route = routes.get(new URL(req.url ?? '/', 'http://host.invalid').pathname)
     if (route === undefined) { res.writeHead(404); res.end(); return }
@@ -136,6 +136,22 @@ describe('first-frame selection Host media bridge', () => {
     history.frameId = 'foreign'
     expect((await fetch(`${base}${FIRST_FRAME_HISTORY_MEDIA_PATH}?${query}`, { headers })).status).toBe(409)
   })
+  it('serves the tokenless native shell through the service token when no writer cookie exists', async () => {
+    const history = { schema: 'jason.qingmu-first-frame-history.v1', ...coordinates,
+      candidates: [{ assetId: 'asset-1', materializedSha256, qualityStatus: 'passed', selectionStatus: 'Stale', isSelected: false }],
+      providerCalls: 0, taskMutation: false, outboxEvents: 0 }
+    const upstream = vi.fn<typeof globalThis.fetch>(async (input) => {
+      const url = requestUrl(input)
+      if (url.pathname === '/api/media/asset-1') return new Response(bytes, { headers: { 'content-type': 'image/png', 'content-length': String(bytes.length) } })
+      return Response.json(url.pathname.endsWith('/history') ? history : { ...state(), candidates: [] })
+    })
+    const base = await host(upstream, () => 'service-token-1')
+    const query = new URLSearchParams({ ...coordinates, assetId: 'asset-1', expectedMaterializedSha256: materializedSha256 })
+    expect((await fetch(`${base}${FIRST_FRAME_HISTORY_PATH}?${new URLSearchParams(coordinates)}`)).status).toBe(200)
+    expect((await fetch(`${base}${FIRST_FRAME_HISTORY_MEDIA_PATH}?${query}`)).status).toBe(200)
+    expect(upstream.mock.calls.every(([, init]) => (init?.headers as Headers | undefined)?.get('authorization') === 'Bearer service-token-1')).toBe(true)
+  })
+
   it('returns only byte-verified media for the current scoped candidate', async () => {
     const upstream = vi.fn<typeof globalThis.fetch>(async (input) => {
       const url = requestUrl(input)
