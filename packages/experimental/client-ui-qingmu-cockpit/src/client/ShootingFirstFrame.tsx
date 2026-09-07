@@ -17,6 +17,8 @@ interface Preview extends ShootingFrameScope {
 interface Attempt extends ShootingFrameScope {
   readonly schema: 'qingmu.shooting-first-frame-state.v1'
   readonly requestId: string
+  readonly canRegenerate?: boolean
+  readonly canActivate?: boolean
   readonly task: null | {
     readonly id: string
     readonly kernel_status: string
@@ -146,10 +148,11 @@ export function ShootingFirstFrame({ scope, onCommitted }: {
       try {
         const saved = localStorage.getItem(key)
         if (saved !== null) {
-          const parsed = JSON.parse(saved) as { readonly preview: unknown; readonly requestId: string }
+          const parsed = JSON.parse(saved) as { readonly preview: unknown; readonly requestId: string; readonly stage?: string }
           const prior = assertShootingPreview(parsed.preview, scope)
           if (parsed.requestId !== `shooting-${prior.preflightId}`) throw new Error('原提交记录不完整，禁止创建新任务')
-          setPreview(prior); setRequestId(parsed.requestId); return
+          if (parsed.stage !== undefined && parsed.stage !== 'prepared' && parsed.stage !== 'submitted') throw new Error('原提交阶段不完整')
+          setPreview(prior); if (parsed.stage !== 'prepared') setRequestId(parsed.requestId); return
         }
         setBusy(true)
         const value = assertShootingPreview(await request('preview', input, controller.signal), scope)
@@ -193,19 +196,32 @@ export function ShootingFirstFrame({ scope, onCommitted }: {
         shooting_preflight_id: preview.preflightId, shooting_payload_hash: preview.payloadHash }), scope, id)
       setAttempt(value)
     } catch (cause) { setError(String(cause)) }
-    finally { setBusy(false) }
+    finally { lock.current = false; setBusy(false) }
   }
-  const prepareAgain = async () => {
-    const fresh = assertShootingPreview(await request('preview', input), scope)
+  const resume = async () => {
+    if (busy || lock.current || !requestId || !preview) return
+    lock.current = true; setBusy(true); setError('')
+    try {
+      const value = assertAttempt(await request('submit', { ...input, candidate_request_id: requestId,
+        shooting_preflight_id: preview.preflightId, shooting_payload_hash: preview.payloadHash }), scope, requestId)
+      setAttempt(value)
+    } catch (cause) { setError(String(cause)) }
+    finally { lock.current = false; setBusy(false) }
+  }
+  const prepareAgain = async (rework = false) => {
     if (requestId) {
       const query = new URLSearchParams({ ...Object.fromEntries(reviewQuery), request_id: requestId })
       const latest = assertAttempt(await request(`state?${query}`), scope, requestId)
       setAttempt(latest)
-      if (latest.task !== null) return // lost response: keep recovering the existing task
+      if (rework ? latest.canRegenerate !== true : latest.task !== null) return
     }
+    const fresh = assertShootingPreview(await request('preview', { ...input, ...(rework ? { candidate_request_id: requestId } : {}) }), scope)
+    const currentReview = assertFrameReview(await request(`review?${reviewQuery}`), scope.frameId)
     // Same inputs retain the same durable request ID; changed inputs make the
     // old preflight fail source validation. This never sends a generation POST.
-    localStorage.removeItem(key); setRequestId(''); setAttempt(undefined); lock.current = false; setPreview(fresh)
+    if (rework) localStorage.setItem(key, JSON.stringify({ preview: fresh, requestId: `shooting-${fresh.preflightId}`, stage: 'prepared' }))
+    else localStorage.removeItem(key)
+    setReview(currentReview); setRequestId(''); setAttempt(undefined); lock.current = false; setPreview(fresh)
   }
   const confirm = async () => {
     if (!review || review.accepted || !review.preflight.technicalReady || confirmingLock.current) return
@@ -227,6 +243,12 @@ export function ShootingFirstFrame({ scope, onCommitted }: {
   }
   const blocked = submissionBlocker(attempt) ?? submissionBlocker(preview)
   return <section aria-label="首帧生成" style={{ width: '100%', height: '100%', overflow: 'auto', padding: '16px', boxSizing: 'border-box' }}>
+    {attempt?.canActivate === true && !busy && <button type="button" onClick={() => { void resume() }}>继续原首帧任务</button>}
+    {attempt?.canRegenerate === true && !busy && <button type="button" onClick={() => {
+      if (lock.current) return
+      lock.current = true; setBusy(true); setError('')
+      void prepareAgain(true).catch(cause => setError(String(cause))).finally(() => { lock.current = false; setBusy(false) })
+    }}>重新生成首帧</button>}
     {review && !review.accepted && <div aria-label="本镜分镜确认">
       <h3>{review.title}</h3><p style={{ whiteSpace: 'pre-wrap' }}>{review.imagePromptCn}</p>
       {confirming ? <p role="status">正在保存你的本镜确认…</p>

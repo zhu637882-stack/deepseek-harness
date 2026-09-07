@@ -9,7 +9,7 @@ import { isTrustedApiRequest } from '@deepseek-ai/dsh-client-connection/src/api-
  * @returns Route disposer.
  */
 export function registerShootingFirstFrame(server: WebServer, baseUrl: string, fetcher: typeof fetch = globalThis.fetch): () => void {
-  const routes = { preview: 'shooting-preview', submit: '', state: 'shooting-state', review: '', confirm: '' } as const
+  const routes = { preview: 'shooting-preview', submit: '', state: 'shooting-state', review: '', confirm: '', 'video-state': '', 'video-resume': '' } as const
   const disposers = Object.entries(routes).map(([operation, suffix]) => server.register({
     kind: 'exact', path: `/api/qingmu/shooting-first-frame/${operation}`, handler: async (req, res) => {
       res.setHeader('cache-control', 'private, no-store')
@@ -17,15 +17,16 @@ export function registerShootingFirstFrame(server: WebServer, baseUrl: string, f
       const end = (status: number, value: unknown) => { res.statusCode = status; res.end(JSON.stringify(value)) }
       const cookie = req.headers.cookie?.split(';').map(item => item.trim()).find(item => item.startsWith('jason_token='))
       if (!isTrustedApiRequest(req, []) || req.headers.authorization || !cookie) { end(401, { detail: '请恢复青木登录会话' }); return }
-      const read = operation === 'state' || operation === 'review'
+      const read = operation === 'state' || operation === 'review' || operation === 'video-state'
       if (req.method !== (read ? 'GET' : 'POST')) { end(405, { detail: 'method_not_allowed' }); return }
       const incoming = new URL(req.url ?? '', 'http://localhost')
       const upstream = new URL(`/api/pipeline/first-frames${suffix ? `/${suffix}` : ''}`, baseUrl)
       if (read) {
-        const keys = ['project_id', 'episode_id', 'frame_id', ...(operation === 'state' ? ['request_id'] : [])]
+        const keys = ['project_id', 'episode_id', 'frame_id', ...(operation === 'state' ? ['request_id'] : operation === 'video-state' ? ['scene_id'] : [])]
         if ([...incoming.searchParams.keys()].length !== keys.length || keys.some(key => incoming.searchParams.getAll(key).length !== 1
           || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(incoming.searchParams.get(key) ?? ''))) { end(400, { detail: 'invalid_scope' }); return }
         if (operation === 'review') upstream.pathname = `/api/episodes/${incoming.searchParams.get('episode_id')}/storyboard-frames/${incoming.searchParams.get('frame_id')}/human-review`
+        else if (operation === 'video-state') upstream.pathname = `/api/qingmu/projects/${incoming.searchParams.get('project_id')}/episodes/${incoming.searchParams.get('episode_id')}/scenes/${incoming.searchParams.get('scene_id')}/shots/${incoming.searchParams.get('frame_id')}/production-takes/execution`
         else upstream.search = incoming.search
       } else if (incoming.search) { end(400, { detail: 'unexpected_query' }); return }
       let body: string | undefined
@@ -38,9 +39,13 @@ export function registerShootingFirstFrame(server: WebServer, baseUrl: string, f
             parts.push(bytes)
           }
           const value = JSON.parse(Buffer.concat(parts).toString('utf8')) as Record<string, unknown>
-          const keys = ['project_id', 'episode_id', 'frame_ids', ...(operation === 'submit' ? ['candidate_request_id', 'shooting_preflight_id', 'shooting_payload_hash'] : operation === 'confirm' ? ['expected_frame_digest', 'idempotency_key'] : [])]
+          const keys = ['project_id', 'episode_id', 'frame_ids', ...(operation === 'submit' ? ['candidate_request_id', 'shooting_preflight_id', 'shooting_payload_hash'] : operation === 'confirm' ? ['expected_frame_digest', 'idempotency_key'] : operation === 'video-resume' ? ['scene_id', 'task_id'] : operation === 'preview' && value?.candidate_request_id !== undefined ? ['candidate_request_id'] : [])]
           if (!value || Object.keys(value).sort().join() !== keys.sort().join() || !Array.isArray(value.frame_ids) || value.frame_ids.length !== 1) throw new Error('invalid_request')
-          if (operation === 'confirm') {
+          if (operation === 'video-resume') {
+            if ([value.project_id, value.episode_id, value.frame_ids[0], value.scene_id, value.task_id].some(id => typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id))) throw new Error('invalid_execution_scope')
+            upstream.pathname = `/api/qingmu/projects/${String(value.project_id)}/episodes/${String(value.episode_id)}/scenes/${String(value.scene_id)}/shots/${String(value.frame_ids[0])}/production-takes/execution`
+            body = JSON.stringify({ taskId: value.task_id })
+          } else if (operation === 'confirm') {
             const ids = [value.project_id, value.episode_id, value.frame_ids[0]]
             if (ids.some(id => typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id))
               || typeof value.expected_frame_digest !== 'string' || !/^[a-f0-9]{64}$/.test(value.expected_frame_digest)

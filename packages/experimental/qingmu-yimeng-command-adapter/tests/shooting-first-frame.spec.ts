@@ -57,3 +57,32 @@ it('never forwards Bearer or cross-origin review confirmation',async () => {
   }
   expect(upstream).not.toHaveBeenCalled()
 })
+
+it('transports video recovery as GET and explicit resume as one exact-task POST', async () => {
+  const upstream=vi.fn<typeof fetch>(async () => Response.json({ taskId:'original' }))
+  const base=await host(upstream)
+  const prefix=`${base}/api/qingmu/shooting-first-frame`
+  await fetch(`${prefix}/video-state?project_id=p&episode_id=e&scene_id=s&frame_id=f`,{ headers:{ cookie:'jason_token=test' } })
+  expect(upstream.mock.calls[0]![1]?.method).toBe('GET')
+  expect(String(upstream.mock.calls[0]![0])).toBe('http://127.0.0.1:8115/api/qingmu/projects/p/episodes/e/scenes/s/shots/f/production-takes/execution')
+  const payload={ project_id:'p',episode_id:'e',scene_id:'s',frame_ids:['f'],task_id:'original' }
+  const headers={ origin:base,cookie:'jason_token=test' }
+  await fetch(`${prefix}/video-resume`,{ method:'POST',headers,body:JSON.stringify(payload) })
+  expect(upstream).toHaveBeenCalledTimes(2)
+  expect(JSON.parse(String(upstream.mock.calls[1]![1]?.body))).toEqual({ taskId:'original' })
+  for (const changed of [{ ...payload,force:true },{ ...payload,frame_ids:['f','other'] },{ ...payload,scene_id:'../foreign' }]) {
+    await fetch(`${prefix}/video-resume`,{ method:'POST',headers,body:JSON.stringify(changed) })
+  }
+  await fetch(`${prefix}/video-resume`,{ method:'POST',headers:{ ...headers,origin:'https://foreign.test' },body:JSON.stringify(payload) })
+  expect(upstream).toHaveBeenCalledTimes(2)
+})
+
+it('passes a rework predecessor only to preview, without submitting a new paid task', async () => {
+  const upstream=vi.fn<typeof fetch>(async () => Response.json({ preflightId:'new' }))
+  const base=await host(upstream)
+  const response=await fetch(`${base}/api/qingmu/shooting-first-frame/preview`,{ method:'POST',headers:{ origin:base,cookie:'jason_token=test' },body:JSON.stringify({ project_id:'p',episode_id:'e',frame_ids:['f'],candidate_request_id:'shooting-old' }) })
+  expect(response.status).toBe(200)
+  expect(String(upstream.mock.calls[0]![0])).toContain('/shooting-preview')
+  expect(JSON.parse(String(upstream.mock.calls[0]![1]?.body)).candidate_request_id).toBe('shooting-old')
+  expect(upstream).toHaveBeenCalledTimes(1)
+})

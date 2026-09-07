@@ -17,6 +17,7 @@ import type {
   YimengSelectPromptIrResponse,
 } from './contracts.ts'
 import type { QingmuCockpitKey } from './locales.ts'
+import { ShootingVideoProgress, type ShootingVideoState } from './ShootingVideoProgress.tsx'
 import {
   clearPromptIrEditRecoveryMarker,
   clearPromptIrSelectionRecoveryMarker,
@@ -526,6 +527,7 @@ function ReadyPromptIrWorkspace({
   const [firstFrameRecovery, setFirstFrameRecovery] = useState<(FirstFrameSelectionIntent & { readonly requestSha256: string })>()
   const [videoQuote, setVideoQuote] = useState<YimengVideoQuoteResponse>()
   const [productionTake, setProductionTake] = useState<YimengProductionTakeResult>()
+  const [videoExecution, setVideoExecution] = useState<ShootingVideoState>()
   const [productionConfirmed, setProductionConfirmed] = useState(false)
   const [productionRecovery, setProductionRecovery] = useState<ProductionTakeStoredRead<ProductionTakeRecoveryMarker>>({ status: 'none' })
   const [error, setError] = useState<string>()
@@ -568,6 +570,7 @@ function ReadyPromptIrWorkspace({
     setSelectionConfirmed(false)
     setFirstFrameQuote(undefined)
     setFirstFrameState(undefined)
+    setVideoExecution(undefined)
     setFirstFrameReceipt(undefined)
     setFirstFrameCandidateId(undefined)
     setFirstFrameConfirmed(false)
@@ -1298,6 +1301,10 @@ function ReadyPromptIrWorkspace({
     {!busy && <button type="button" onClick={() => { void quoteFirstFrame() }}>检查本镜生成条件</button>}
     {busy && <p role="status">正在处理本镜请求…</p>}
     {firstFrameQuote && <>
+      <ShootingVideoProgress key={active.frameId} scope={{
+        projectId: active.projectId, episodeId: active.episodeId,
+        frameId: active.frameId, sceneId: firstFrameQuote.authoritySnapshot.frame.sceneId,
+      }} onState={setVideoExecution} onCommitted={onCommitted} />
       {firstFrameQuote.authorizationDraft.blockers.length > 0 && <ul role="alert">{firstFrameQuote.authorizationDraft.blockers.map(b => <li key={b.code}>{t(FIRST_FRAME_ACTION_KEYS[b.category])}</li>)}</ul>}
       {firstFrameState?.candidates.map(candidate => <label key={candidate.assetId}>
         <input type="radio" name="shooting-first-frame" checked={firstFrameCandidateId === candidate.assetId} onChange={() => { setFirstFrameCandidateId(candidate.assetId); setFirstFrameConfirmed(false) }} />
@@ -1310,9 +1317,9 @@ function ReadyPromptIrWorkspace({
     </>}
     {videoQuote && <>
       {!videoQuote.quoteReady && <p role="alert">本镜的内容或素材检查尚未完成，暂不能生成。请回到当前要求修正后重新检查。</p>}
-      {videoQuote.quoteReady && videoQuote.dispatchBlockers.length === 1 && videoQuote.dispatchBlockers[0] === 'operator_paid_confirmation_required' && productionRecovery.status === 'none' && !productionTake && <><label><input type="checkbox" checked={productionConfirmed} onChange={e => setProductionConfirmed(e.target.checked)} />{videoQuote.requiredPaidConfirmationText}</label>{productionConfirmed && !blocked && !unsaved && !busy && <button onClick={() => { void queueProductionTake(1) }}>确认生成一条视频</button>}</>}
+      {videoQuote.quoteReady && videoQuote.dispatchBlockers.length === 1 && videoQuote.dispatchBlockers[0] === 'operator_paid_confirmation_required' && productionRecovery.status === 'none' && videoExecution?.nextTakeOrdinal && (!productionTake || videoExecution.takeCount >= productionTake.receipt.takeOrdinal) && <><label><input type="checkbox" checked={productionConfirmed} onChange={e => setProductionConfirmed(e.target.checked)} />{videoQuote.requiredPaidConfirmationText}</label>{productionConfirmed && !blocked && !unsaved && !busy && <button onClick={() => { if (videoExecution.nextTakeOrdinal) void queueProductionTake(videoExecution.nextTakeOrdinal) }}>{videoExecution.nextTakeOrdinal === 2 ? '确认重新生成一条视频' : '确认生成一条视频'}</button>}</>}
     </>}
-    {productionTake && <p role="status">{productionTake.receipt.queued ? '本镜任务已提交，返回镜头页查看结果。' : '任务未提交，请查看检查结果。'}</p>}
+    {productionTake && <p role="status">{productionTake.receipt.queued ? '本镜请求已入队；实际执行进度见上方，不代表视频已生成。' : '任务未提交，请查看检查结果。'}</p>}
     {productionRecovery.status === 'ready' && <><p role="alert">已有提交等待核对，请勿重复生成。保留同一任务记录。</p>{!busy && <button onClick={() => { void queueProductionTake(productionRecovery.value.takeOrdinal, productionRecovery.value) }}>恢复同一任务</button>}</>}
     {productionRecovery.status === 'invalid' && <p role="alert">本机恢复记录不完整，已阻止再次提交。请核对原任务；不会丢弃记录或新建任务。</p>}
     {firstFrameRecovery && <button onClick={() => { void recoverFirstFrameSelection() }}>读取原采用结果</button>}

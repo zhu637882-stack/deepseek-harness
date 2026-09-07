@@ -140,6 +140,8 @@ Independent. Command requests do not modify a model request or reusable prefix.
 
 ## Known Limitations and Deferred Work
 
+Native shooting preview accepts an optional preceding first-frame request for explicit rework. Video execution reads use GET; explicit resume forwards only the authenticated shot scope and existing task ID. Writer retains scope, settlement, human review and single-attempt checks. After a valid queue command, Writer can request exact-task execution through the private launcher socket; this adapter does not hold Provider credentials or dispatch queues. The launcher records dispatch intent before spawning and recovers acknowledged tasks in poll-only mode, excluding whole-project and asset-parent execution.
+
 - This local adapter is not an Internet-facing gateway.
 - It implements the `episode_script` plus actor, scene, and prop `element_profile` ChangeSet vertical slices, including explicit reference selection and regeneration-request intents, records selected-video Findings, and registers production-unit scope, episode-script source references, machine-validated Stage artifacts, and complete-scope LSU plan seals. It also carries exact independent Stage decisions, read-only receipt recovery, and fresh signed current-authority probes, while Yimeng alone computes and persists dependency, lock, and current plan authority. Actual generation and automatic creative approval remain outside these operations; registration, approval, or plan sealing alone does not complete the production workflow.
 - It does not start an outbox dispatcher or transport events across processes.

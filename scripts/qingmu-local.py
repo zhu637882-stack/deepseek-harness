@@ -1304,6 +1304,87 @@ class Supervisor:
         self.ports: dict = {}
         self.logs: list = []
         self.process_ledger_active = False
+        self.shooting_binding = None
+        self.shooting_next_poll = 0.0
+
+    def _shooting_module(self):
+        spec = importlib.util.spec_from_file_location("qingmu_shooting_worker", Path(__file__).with_name("qingmu_shooting_worker.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def _save_shooting_binding(self):
+        write_json(self.root / "private/shooting-task-activation.json", self.shooting_binding)
+
+    def activate_shooting_task(self, request):
+        """Activate only the task named by an authenticated native submission."""
+        if self.review_only or self._project_production_active:
+            raise ValueError("shooting_activation_runtime_not_scoped")
+        production = validate_text_foundation_production_config(self.config.get("textFoundationProductionExecution"))
+        require_build_manifest_matches(self.root, self.config)
+        inspected = self._shooting_module().inspect_task(self.root / "storage/jason.db", request, production)
+        previous = self.shooting_binding
+        if previous and previous["request"] == request:
+            if previous.get("stopped") and inspected["action"] == "poll" and self.assetWorker is None:
+                previous.update(stopped=False, startedAtEpoch=time.time())
+                self._save_shooting_binding()
+                self._advance_shooting_task()
+            return {"taskId": request["taskId"], "activated": not previous.get("stopped", False), "idempotent": True}
+        if self.assetWorker is not None:
+            raise ValueError("shooting_activation_worker_busy")
+        if previous and not previous.get("stopped", False):
+            raise ValueError("shooting_activation_previous_unsettled")
+        if inspected["action"] in {"unknown", "finished"}:
+            return {"taskId": request["taskId"], "activated": False, "state": inspected["action"]}
+        self.shooting_binding = {"request": request, "dispatchStarted": False, "stopped": False, "startedAtEpoch": time.time()}
+        self._save_shooting_binding()
+        self._advance_shooting_task()
+        return {"taskId": request["taskId"], "activated": not self.shooting_binding["stopped"], "idempotent": False}
+
+    def _advance_shooting_task(self):
+        """Recover only an activated task; an ambiguous dispatch is never replayed."""
+        try:
+            return self._tick_shooting_task()
+        except Exception:
+            # Keep the creative UI available when the scoped executor fails.
+            # The durable intent survives; neither a new task nor a retry is made.
+            if self.assetWorker is not None:
+                self.stop_owned("assetWorker")
+            if self.shooting_binding:
+                self.shooting_binding.update(stopped=True, state="execution_blocked")
+                self._save_shooting_binding()
+            return False
+
+    def _tick_shooting_task(self):
+        binding = self.shooting_binding
+        if not binding or binding.get("stopped") or self.review_only or self._project_production_active:
+            return False
+        if self.assetWorker is not None:
+            if self.assetWorker.poll() is None:
+                return True
+            self.stop_owned("assetWorker")
+            self.shooting_next_poll = time.monotonic() + 4
+        if time.monotonic() < self.shooting_next_poll:
+            return True
+        production = validate_text_foundation_production_config(self.config.get("textFoundationProductionExecution"))
+        module = self._shooting_module()
+        inspected = module.inspect_task(self.root / "storage/jason.db", binding["request"], production)
+        action = inspected["action"]
+        if (action in {"unknown", "finished"} or action == "dispatch" and time.time() - binding["startedAtEpoch"] > 1800
+            or action == "dispatch" and binding["dispatchStarted"]):
+            binding.update(stopped=True, state=action if action != "dispatch" else "submission_unknown")
+            self._save_shooting_binding()
+            return False
+        require_build_manifest_matches(self.root, self.config)
+        writer = Path(self.config["yimengRoot"])
+        _private_regular_file(Path(production["credentialEnvFile"]))
+        env = self._worker_environment(writer, production, project_production_active=True)
+        env["WORKER_CREATIVE_FRESHNESS_ENFORCE"] = "true"
+        if action == "dispatch":
+            binding["dispatchStarted"] = True
+            self._save_shooting_binding()  # write before spawn; a crash cannot replay a paid attempt
+        self.launch_owned("assetWorker", module.worker_command(writer, inspected, action), env, "shooting-worker")
+        return True
 
     def launch(
         self,
@@ -2048,6 +2129,8 @@ class Supervisor:
 
     def _reap_terminal_asset_worker(self) -> bool:
         """Forget an exited exact-parent Worker only after its parent is terminal."""
+        if self.shooting_binding and not self.shooting_binding.get("stopped"):
+            return self._advance_shooting_task()
         child = self.assetWorker
         return_code = None if child is None else child.poll()
         if child is None or return_code is None or return_code != 0:
@@ -2058,8 +2141,17 @@ class Supervisor:
         self.stop_owned("assetWorker")
         return True
 
+    def _unexpected_asset_worker_exit(self) -> bool:
+        # A --once shooting worker can exit between reaping and the health check.
+        # Its durable task is inspected on the next tick, without stopping the UI.
+        if self.shooting_binding and not self.shooting_binding.get("stopped"):
+            return False
+        return self.assetWorker is not None and self.assetWorker.poll() is not None
+
     def activate_asset_parent(self, request: dict) -> dict:
         """Persist and run precisely one confirmed asset-reference parent."""
+        if self.shooting_binding and not self.shooting_binding.get("stopped"):
+            raise ValueError("shooting_activation_worker_busy")
         existing = self._read_asset_activation_binding()
         same_parent = bool(
             existing is not None
@@ -2116,6 +2208,11 @@ class Supervisor:
         if project_production is not None and project_production["active"]:
             self.assetWorker = None
             return
+        shooting_path = self.root / "private/shooting-task-activation.json"
+        if shooting_path.exists():
+            self.shooting_binding = _read_owner_only_json(shooting_path, "本镜执行绑定")
+            if self._advance_shooting_task():
+                return
         writer = Path(self.config["yimengRoot"])
         production = validate_text_foundation_production_config(
             self.config.get("textFoundationProductionExecution")
@@ -2323,7 +2420,7 @@ class Supervisor:
                         if any(
                             getattr(self, role) is None or getattr(self, role).poll() is not None
                             for role in (("api", "frontend") if self.review_only else ("api", "worker", "host", "frontend"))
-                        ) or (not self.review_only and self.assetWorker is not None and self.assetWorker.poll() is not None):
+                        ) or (not self.review_only and self._unexpected_asset_worker_exit()):
                             raise RuntimeError("本实例子进程退出，正在清理其余自有子进程")
                         listeners = (server,) if self.review_only else (server, activation_server)
                         readable, _, _ = select.select(listeners, (), (), 0.5)
@@ -2349,9 +2446,12 @@ class Supervisor:
                                         str(request.get("key", "")), activation_key
                                     ):
                                         raise ValueError("资产激活身份不符")
-                                    if request.get("op") != "activate_asset_parent":
+                                    if request.get("op") == "activate_shooting_task":
+                                        result = {"ok": True, **self.activate_shooting_task({k: v for k, v in request.items() if k not in {"key", "op"}})}
+                                    elif request.get("op") == "activate_asset_parent":
+                                        result = {"ok": True, **self.activate_asset_parent(request)}
+                                    else:
                                         raise ValueError("未知资产激活操作")
-                                    result = {"ok": True, **self.activate_asset_parent(request)}
                                 elif not secrets.compare_digest(str(request.get("key", "")), self.config["controlKey"]):
                                     raise ValueError("控制身份不符")
                                 elif request["op"] == "login":

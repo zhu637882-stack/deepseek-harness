@@ -66,6 +66,45 @@ it('does not POST again after a lost submit response', async () => {
 it('blocks malformed, cross-frame or multi-attempt previews', () => {
   for (const patch of [{ frameId:'other' },{ maxAttempts:2 },{ n:2 },{ selectAsOfficial:true },{ payloadHash:'bad' }]) expect(() => assertShootingPreview({ ...preview,...patch },scope)).toThrow()
 })
+it('prepares a distinct rework only after a click, persists it across refresh, and submits once', async () => {
+  const next = { ...preview, preflightId:'e'.repeat(64), attemptOrdinal:2 }
+  const nextId = `shooting-${next.preflightId}`
+  localStorage.setItem(`qingmu:shooting-first-frame:${scope.projectId}:${scope.episodeId}:${scope.frameId}`, JSON.stringify({ preview, requestId:result.requestId }))
+  const fetcher = vi.fn(async (path:string, init?:RequestInit) => {
+    if (path.endsWith('/preview')) expect(JSON.parse(String(init?.body)).candidate_request_id).toBe(result.requestId)
+    if (path.endsWith('/submit')) expect(JSON.parse(String(init?.body)).candidate_request_id).toBe(nextId)
+    return { ok:true,json:async () => path.includes('/review?') ? review : path.endsWith('/preview') ? next
+      : path.includes(nextId) || path.endsWith('/submit') ? { ...result,requestId:nextId,canRegenerate:false }
+        : { ...result,canRegenerate:true } }
+  })
+  vi.stubGlobal('fetch',fetcher)
+  const view = render(<ShootingFirstFrame scope={scope} />)
+  fireEvent.click(await screen.findByRole('button',{ name:'重新生成首帧' }))
+  await screen.findByRole('button',{ name:'生成这张首帧（仅一次）' })
+  expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/submit'))).toHaveLength(0)
+  view.unmount(); const second = render(<ShootingFirstFrame scope={scope} />)
+  const submit = await screen.findByRole('button',{ name:'生成这张首帧（仅一次）' })
+  fireEvent.click(submit); fireEvent.click(submit)
+  await screen.findByAltText('镜头新首帧 · 待你定版')
+  second.unmount(); render(<ShootingFirstFrame scope={scope} />)
+  await screen.findByAltText('镜头新首帧 · 待你定版')
+  expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/submit'))).toHaveLength(1)
+  expect(screen.queryByRole('button',{ name:'重新生成首帧' })).toBeNull()
+})
+it.each(['DispatchPending', 'ProviderPending', 'QualityPending'])('explicit %s resume preserves the original task identity and cannot prepare a new attempt', async (kernelStatus) => {
+  localStorage.setItem(`qingmu:shooting-first-frame:${scope.projectId}:${scope.episodeId}:${scope.frameId}`, JSON.stringify({ preview, requestId:result.requestId }))
+  const fetcher = vi.fn(async (path:string, init?:RequestInit) => {
+    if (path.endsWith('/submit')) expect(JSON.parse(String(init?.body)).candidate_request_id).toBe(result.requestId)
+    return { ok:true,json:async () => path.includes('/review?') ? review : { ...result,candidate:null,canRegenerate:false,canActivate:true,task:{ id:'original',kernel_status:kernelStatus } } }
+  })
+  vi.stubGlobal('fetch',fetcher)
+  render(<ShootingFirstFrame scope={scope} />)
+  const button = await screen.findByRole('button',{ name:'继续原首帧任务' })
+  expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/submit'))).toHaveLength(0)
+  fireEvent.click(button); fireEvent.click(button)
+  await waitFor(() => expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/submit'))).toHaveLength(1))
+  expect(screen.queryByRole('button',{ name:'重新生成首帧' })).toBeNull()
+})
 it('restores a rejected request as an explicit stage blocker without another POST', async () => {
   localStorage.setItem(`qingmu:shooting-first-frame:${scope.projectId}:${scope.episodeId}:${scope.frameId}`,
     JSON.stringify({ preview,requestId:result.requestId }))

@@ -98,6 +98,7 @@ function createPort(options: {
   readonly productionFails?: boolean
   readonly noFirstFrameCandidates?: boolean
   readonly videoDispatchBlockers?: readonly string[]
+  readonly completedVideo?: boolean
 } = {}) {
   let selected = false
   let selectedReadyReads = 0
@@ -428,6 +429,9 @@ function createPort(options: {
   const firstFrameState = () => ({ schema: 'jason.qingmu-first-frame-selection-state.v1', projectId: PROJECT_ID, episodeId: EPISODE_ID, storyboardRevisionId: STORYBOARD_REVISION_ID, frameId: FRAME_ID, frameUpdatedAt: '2026-09-02T00:00:00Z', storyboardRevision: 7, identity: { state: 'bound' }, candidates: options.noFirstFrameCandidates ? [] : [{ assetId: 'asset-first-frame-1', assetSha256: 'e'.repeat(64), materializedSha256: 'e'.repeat(64), qualityStatus: 'passed', selectionStatus: firstFrameSelected ? 'Selected' : 'Unselected', isSelected: firstFrameSelected, assetUpdatedAt: '2026-09-02T00:00:00Z' }], selectedAssetId: firstFrameSelected ? 'asset-first-frame-1' : null, selectionReceipt: firstFrameSelected ? firstFrameReceipt() : null, blockers: [], providerCalls: 0, taskMutation: false, outboxEvents: 0 })
   const browserFetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = input instanceof Request ? input.url : input instanceof URL ? input.href : input
+    if (url.includes('/video-state?')) return Response.json({ projectId: PROJECT_ID, episodeId: EPISODE_ID, frameId: FRAME_ID,
+      taskId: options.completedVideo ? 'historical-task' : null, kernelStatus: options.completedVideo ? 'Succeeded' : null,
+      takeCount: options.completedVideo ? 1 : 0, nextTakeOrdinal: options.completedVideo ? 2 : 1 })
     if (url.includes('/decision?')) { firstFrameIdempotencyKey = new URL(url, 'http://localhost').searchParams.get('idempotencyKey') ?? ''; firstFrameSelected = true; return new Response(JSON.stringify(firstFrameReceipt()), { status: 200 }) }
     if (url.includes('/receipt?')) return new Response(JSON.stringify(firstFrameReceipt()), { status: 200 })
     if (url.includes('/media?')) return new Response(JSON.stringify({ projectId: PROJECT_ID, episodeId: EPISODE_ID, storyboardRevisionId: STORYBOARD_REVISION_ID, frameId: FRAME_ID, assetId: 'asset-first-frame-1', materializedSha256: 'e'.repeat(64), mimeType: 'image/png', base64: 'aGVsbG8=' }), { status: 200 })
@@ -942,6 +946,25 @@ describe('PromptIrWorkspace vertical slice', () => {
     await waitFor(() => expect(recovered.spies.queueProductionTake).toHaveBeenCalledTimes(1))
     expect(recovered.spies.queueProductionTake.mock.calls[0]![0]).toEqual(original)
     await waitFor(() => expect(screen.queryByRole('button', { name: '恢复同一任务' })).toBeNull())
+  })
+
+  it('native shooting rework uses Writer next ordinal, not initial or a cached receipt', async () => {
+    const { port, spies } = createPort({ completedVideo: true })
+    render(<PromptIrWorkspace projectId={PROJECT_ID} episodeId={EPISODE_ID}
+      shotItems={frame('Ready')} storyboardRevisionId={STORYBOARD_REVISION_ID} selectedShotId={FRAME_ID}
+      onSelectShotId={vi.fn()} port={port} t={t} onCommitted={async () => {}} presentation="shooting" />)
+    await waitFor(() => expect(spies.promptIr).toHaveBeenCalled())
+    fireEvent.click(await screen.findByRole('button', { name: '检查本镜生成条件' }))
+    fireEvent.click(await screen.findByRole('radio'))
+    fireEvent.click(await screen.findByRole('checkbox', { name: '我已审看并认可这张首帧' }))
+    fireEvent.click(screen.getByRole('button', { name: '采用这张' }))
+    fireEvent.click(await screen.findByRole('button', { name: '检查视频生成条件' }))
+    fireEvent.click(await screen.findByRole('checkbox', { name: '我确认本次镜头视频生成最高费用为 0.3000 CNY。' }))
+    const button = await screen.findByRole('button', { name: '确认重新生成一条视频' })
+    fireEvent.click(button); fireEvent.click(button)
+    await waitFor(() => expect(spies.queueProductionTake).toHaveBeenCalledTimes(1))
+    expect(spies.queueProductionTake.mock.calls[0]![0]).toMatchObject({ takeOrdinal: 2, takeKind: 'targeted_rework' })
+    await waitFor(() => expect(screen.queryByRole('button', { name: '确认重新生成一条视频' })).toBeNull())
   })
 
   it('keeps an unknown-result marker across refresh and recovers with the original intent', async () => {
