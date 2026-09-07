@@ -68,6 +68,14 @@ export function ShootingFirstFrameHistory({ scope, onCommitted, onCandidatePrevi
     return () => onCandidatePreview?.(undefined, undefined)
   }, [current, previewUrl, onCandidatePreview])
   const eligible = selection?.candidates.find(item => item.assetId === activeId && item.materializedSha256 === current?.materializedSha256 && !item.isSelected && item.selectionStatus === 'Unselected')
+  async function refreshAfterSelection(): Promise<void> {
+    // Re-read authoritative metadata after a verified receipt; do not keep
+    // publishing the pre-adoption "unselected" preview to the workspace.
+    setPreviewUrl(undefined); setViewed(false); setSelection(undefined)
+    await readSelection()
+    setItems(await client.history(scope))
+    await onCommitted()
+  }
   async function adopt(): Promise<void> {
     if (!eligible || !viewed || busy || pending || lock.current) return
     lock.current = true
@@ -78,8 +86,8 @@ export function ShootingFirstFrameHistory({ scope, onCommitted, onCandidatePrevi
       const receipt = await client.select(marker)
       if (receipt.idempotencyKey !== marker.idempotencyKey || receipt.selectedAssetId !== marker.assetId
         || receipt.selectedMaterializedSha256 !== marker.expectedMaterializedSha256) throw new Error('receipt mismatch')
-      localStorage.removeItem(markerKey); setPending(false); setSelection(undefined); setViewed(false)
-      try { await readSelection(); await onCommitted() }
+      localStorage.removeItem(markerKey); setPending(false)
+      try { await refreshAfterSelection() }
       catch { setError('采用已保存，页面更新暂时失败；请刷新查看，不需再次采用。') }
     } catch (cause) { rememberUnknown(marker, cause) }
     finally { lock.current = false; setBusy(false) }
@@ -108,8 +116,8 @@ export function ShootingFirstFrameHistory({ scope, onCommitted, onCandidatePrevi
         : await client.select(marker)
       if (receipt.idempotencyKey !== marker.idempotencyKey || receipt.selectedAssetId !== marker.assetId
         || receipt.selectedMaterializedSha256 !== marker.expectedMaterializedSha256) throw new Error('receipt mismatch')
-      localStorage.removeItem(markerKey); setPending(false); setSelection(undefined); setViewed(false)
-      try { await readSelection(); await onCommitted() }
+      localStorage.removeItem(markerKey); setPending(false)
+      try { await refreshAfterSelection() }
       catch { setError('原采用已确认，页面更新暂时失败；请刷新查看，不需再次采用。') }
     } catch (cause) { if (marker) rememberUnknown(marker, cause); else setError('原采用记录不完整，未提交任何操作。') }
     finally { lock.current = false; setBusy(false) }

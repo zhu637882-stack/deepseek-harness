@@ -134,7 +134,8 @@ function attemptMessage(task: Attempt['task'] | undefined): string {
 export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview }: {
   readonly scope: ShootingFrameScope
   readonly onCommitted?: () => Promise<unknown>
-  readonly onCandidatePreview?: (candidate: FirstFrameHistoryCandidate | undefined, url: string | undefined) => void
+  readonly onCandidatePreview?: (candidate: FirstFrameHistoryCandidate | undefined,
+    url: string | undefined, ownsImagePreview?: boolean) => void
 }) {
   const key = `qingmu:shooting-first-frame:${scope.projectId}:${scope.episodeId}:${scope.frameId}`
   const [preview, setPreview] = useState<Preview>(); const [attempt, setAttempt] = useState<Attempt>()
@@ -146,11 +147,14 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview }: {
     qualityStatus: materialized.qualityStatus, isSelected: materialized.isSelected,
     selectionStatus: materialized.isSelected ? 'Selected' : 'Unselected',
   } : undefined, [materialized?.assetId, materialized?.sha256, materialized?.qualityStatus, materialized?.isSelected])
-  useEffect(() => {
-    onCandidatePreview?.(previewCandidate, loadedImage === imageKey ? materialized?.browserUrl : undefined)
-    return () => onCandidatePreview?.(undefined, undefined)
-  }, [previewCandidate, imageKey, loadedImage, materialized?.browserUrl, onCandidatePreview])
   const [requestId, setRequestId] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false)
+  // Prepared/failed attempts have no image to publish. Keep the existing history
+  // thumbnail available there; a materialized attempt shares its already-loaded URL.
+  const ownsImagePreview = Boolean(materialized) || (!attempt && !error && (!preview || Boolean(requestId)))
+  useEffect(() => {
+    onCandidatePreview?.(previewCandidate, loadedImage === imageKey ? materialized?.browserUrl : undefined, ownsImagePreview)
+    return () => onCandidatePreview?.(undefined, undefined)
+  }, [previewCandidate, imageKey, loadedImage, materialized?.browserUrl, ownsImagePreview, onCandidatePreview])
   const [review, setReview] = useState<FrameReview>(); const [confirming, setConfirming] = useState(false)
   const confirmingLock = useRef(false)
   const lock = useRef(false); const notified = useRef('')

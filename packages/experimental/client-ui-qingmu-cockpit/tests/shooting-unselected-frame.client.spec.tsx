@@ -172,3 +172,59 @@ it('reuses the newly generated image for the active thumbnail without loading an
   expect(fetcher.mock.calls.every(([path]) => path.includes('/state?') || path.includes('/review?'))).toBe(true)
   expect(api.select).not.toHaveBeenCalled()
 })
+
+it.each(['adopt', 'recover'])('removes stale unselected preview metadata after a verified %s receipt', async (operation) => {
+  sessionStorage.setItem('qingmu:shooting-pane:p:e:f5', 'history')
+  let adopted = false
+  const next = { ...image, assetId: 'asset_new', qualityStatus: 'passed' }
+  api.history.mockImplementation(async ({ frameId }) => frameId === 'f5'
+    ? [{ ...oldImage, isSelected: !adopted }, { ...next, isSelected: adopted, selectionStatus: adopted ? 'Selected' : 'Unselected' }] : [])
+  api.state.mockImplementation(async () => ({ candidates: [{ ...next, isSelected: adopted }], selectionReceipt: null }))
+  const receipt = async (intent: { idempotencyKey: string }) => {
+    adopted = true
+    return { idempotencyKey: intent.idempotencyKey, selectedAssetId: next.assetId, selectedMaterializedSha256: sha }
+  }
+  api.select.mockImplementation(receipt); api.receipt.mockImplementation(receipt)
+  if (operation === 'recover') localStorage.setItem('qingmu:first-frame-adopt:p:e:r:f5', JSON.stringify({
+    projectId: 'p', episodeId: 'e', storyboardRevisionId: 'r', frameId: 'f5',
+    assetId: next.assetId, expectedMaterializedSha256: sha, idempotencyKey: 'first-frame-original', requestSha256: 'c'.repeat(64),
+  }))
+  const p = { ...props(), projection: selectedProjection as never }
+  const nextProjection = { ...selectedProjection, director: { ...selectedProjection.director,
+    heroFrameStoryboards: { shots: [{ shotId: 'f5', heroFrame: { assetId: next.assetId, browserUrl: oldHeroUrl.replace('media_old', 'media_new') } }] },
+  } }
+  const onCommitted = vi.fn(async (): Promise<void> => {
+    view.rerender(<ShootingReviewWorkspace {...p} projection={nextProjection as never} onCommitted={onCommitted} />)
+  })
+  const view = render(<ShootingReviewWorkspace {...p} onCommitted={onCommitted} />)
+  await screen.findByRole('img', { name: '未采用首帧候选' })
+  fireEvent.click(await screen.findByRole('button', { name: operation === 'adopt' ? '认可并采用这张首帧' : '读取原采用结果' }))
+  await waitFor(() => expect(onCommitted).toHaveBeenCalledTimes(1))
+  expect(screen.queryByRole('img', { name: '未采用首帧候选' })).toBeNull()
+  expect(screen.queryByText('尚未采用')).toBeNull()
+  expect(screen.getByRole('img', { name: '当前首帧候选' }).getAttribute('src')).toContain('media_new')
+  expect(within(screen.getByRole('button', { name: '镜 5 查看手机' })).getByText('有首帧')).toBeTruthy()
+  expect(api.select).toHaveBeenCalledTimes(operation === 'adopt' ? 1 : 0)
+  expect(api.receipt).toHaveBeenCalledTimes(operation === 'recover' ? 1 : 0)
+  expect(p.onProductionAction).not.toHaveBeenCalled()
+})
+
+it('keeps the latest thumbnail when a rework is prepared but has not been submitted', async () => {
+  sessionStorage.setItem('qingmu:shooting-pane:p:e:f5', 'first-frame')
+  const scope = { projectId: 'p', episodeId: 'e', frameId: 'f5' }
+  const preview = { ...scope, schema: 'qingmu.shooting-first-frame-preview.v1', preflightId: 'a'.repeat(64),
+    payloadHash: 'b'.repeat(64), prompt: '当前镜头画面要求', povObserver: '', estimatedCny: .5,
+    blockers: [], maxAttempts: 1, n: 1, selectAsOfficial: false }
+  localStorage.setItem('qingmu:shooting-first-frame:p:e:f5', JSON.stringify({ preview, requestId: `shooting-${preview.preflightId}`, stage: 'prepared' }))
+  const fetcher = vi.fn(async () => ({ ok: true, json: async () => ({
+    frameId: 'f5', frameDigest: 'c'.repeat(64), accepted: true, title: '查看手机', imagePromptCn: '当前要求', preflight: { technicalReady: true },
+  }) }))
+  vi.stubGlobal('fetch', fetcher)
+  api.history.mockImplementation(async ({ frameId }) => frameId === 'f5' ? [oldImage, image] : [])
+  render(<ShootingReviewWorkspace {...props()} projection={selectedProjection as never} />)
+  await screen.findByRole('button', { name: '生成这张首帧（仅一次）' })
+  await waitFor(() => expect(screen.getByRole('img', { name: '镜 5 首帧缩略图' }).getAttribute('src')).toBe('blob:new-first-frame'))
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  expect(api.historyPreview).toHaveBeenCalledTimes(1)
+  expect(api.select).not.toHaveBeenCalled()
+})

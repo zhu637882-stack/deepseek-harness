@@ -120,9 +120,11 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
     key: string
     candidate: FirstFrameHistoryCandidate | undefined
     url: string | undefined
+    ownsImagePreview: boolean
   }>()
-  const onCandidatePreview = useCallback((candidate: FirstFrameHistoryCandidate | undefined, url: string | undefined) => {
-    setInspectedFrame({ key: mediaPaneKey, candidate, url })
+  const onCandidatePreview = useCallback((candidate: FirstFrameHistoryCandidate | undefined,
+    url: string | undefined, ownsImagePreview = true) => {
+    setInspectedFrame({ key: mediaPaneKey, candidate, url, ownsImagePreview })
   }, [mediaPaneKey])
   const loadedScope = useRef('')
   const [planningShots, setPlanningShots] = useState<readonly AutomaticPlanningShot[]>([])
@@ -261,7 +263,8 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
   const heroUrl = localHeroUrl(heroFrame?.browserUrl, heroFrame?.assetId)
   const dialogue = (current.dialogueRhythm?.cues ?? []).map(cue => cue.verbatimText).filter(Boolean)
   const inspected = inspectedFrame?.key === mediaPaneKey ? inspectedFrame : undefined
-  const currentPaneLoadsFrame = historyOpen || firstFrameOpen || (!usable(browsed) && !heroUrl && load === 'ready')
+  const currentPaneLoadsFrame = historyOpen || (firstFrameOpen && inspected?.ownsImagePreview !== false)
+    || (!firstFrameOpen && !usable(browsed) && !heroUrl && load === 'ready')
   const hasFrameCandidate = inspected?.candidate !== undefined
     || historyCandidates[current.shotId] !== undefined
     || (planningShots.find(item => item.id === current.shotId)?.firstFrameCandidateCount ?? 0) > 0
@@ -293,7 +296,7 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
     <div className={css.grid}>
       <aside className={css.shots} aria-label="镜头列表"><h2>镜头</h2>{shots.map((shot) => {
         const hero = projection?.director.heroFrameStoryboards?.shots.find(item => item.shotId === shot.shotId)?.heroFrame
-        const viewed = shot.shotId === current.shotId ? inspected : undefined
+        const viewed = shot.shotId === current.shotId && inspected?.url ? inspected : undefined
         const candidate = viewed?.candidate ?? historyCandidates[shot.shotId]
         const thumb = viewed?.url ?? (!candidate || candidate.assetId === hero?.assetId
           ? localHeroUrl(hero?.browserUrl, hero?.assetId) : undefined)
