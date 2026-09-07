@@ -62,7 +62,6 @@ BUILD_MANIFEST_ARTIFACTS = (
     "packages/experimental/qingmu-director-context-bridge/lib/model-tools.js",
     "packages/experimental/qingmu-director-context-bridge/python/qingmu_api.py",
     "packages/experimental/qingmu-director-context-bridge/python/dialogue_changeset.py",
-    "packages/experimental/qingmu-director-context-bridge/python/dialogue_projection.py",
     "packages/experimental/qingmu-director-context-bridge/python/video_frame_cas.py",
     "packages/experimental/client-ui-brand-qingmu/lib/client.js",
     "packages/experimental/client-ui-qingmu-cockpit/lib/client.js",

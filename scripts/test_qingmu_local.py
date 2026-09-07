@@ -548,6 +548,8 @@ class OwnershipTests(unittest.TestCase):
                     self.assertFalse((root / "build-manifest/history").exists())
 
     def test_release_identity_includes_native_director_readers_and_build_record(self):
+        self.assertNotIn("packages/experimental/qingmu-director-context-bridge/python/dialogue_projection.py",
+                         local.BUILD_MANIFEST_ARTIFACTS)
         for relative in ("packages/client/runtime/lib/client.js", "packages/host/apiproxy/lib/index.js",
                          "packages/boot/app-boot/lib/index.js",
                          "packages/experimental/qingmu-director-context-bridge/lib/model-tools.js",
