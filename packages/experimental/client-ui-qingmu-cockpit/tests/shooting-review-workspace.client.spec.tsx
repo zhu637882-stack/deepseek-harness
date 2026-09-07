@@ -14,6 +14,7 @@ const port = {
   takeVersions: vi.fn(() => new Promise(() => {})),
   takePreview: vi.fn(),
   selectTakeVersion: vi.fn(),
+  recoverTakeVersionSelection: vi.fn(),
 } as never
 
 describe('ShootingReviewWorkspace', () => {

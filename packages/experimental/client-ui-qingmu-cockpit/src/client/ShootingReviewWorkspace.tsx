@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { QingmuYimengPort, YimengTakeVersion, YimengTakeVersionStackResponse, YimengWorkflowProjection } from './contracts.ts'
 import { TakePreviewPlayer } from './TakePreviewPlayer.tsx'
+import {
+  clearTakeVersionSelectionMarker, createTakeVersionSelectionMarker, writeTakeVersionSelectionMarker,
+} from './take-version-recovery.ts'
 import css from './ShootingReviewWorkspace.module.css'
 
 export type ShootingReviewState = 'normal' | 'generating' | 'failed' | 'pending-review'
@@ -15,7 +18,8 @@ interface Props {
   readonly selectedShotId: string
   readonly onSelectShotId: (shotId: string) => void
   readonly directorAssistant: ReactNode
-  readonly port: Pick<QingmuYimengPort, 'takeVersions' | 'takePreview' | 'selectTakeVersion'>
+  readonly port: Pick<QingmuYimengPort,
+    'takeVersions' | 'takePreview' | 'selectTakeVersion' | 'recoverTakeVersionSelection'>
   /** Test-only visual state; production always derives this from the read stack. */
   readonly testState?: ShootingReviewState
 }
@@ -77,13 +81,22 @@ export function ShootingReviewWorkspace({
     if (!primary || stack === undefined || browsed === undefined || !usable(browsed) || selecting) return
     setSelecting(true)
     try {
-      const result = await port.selectTakeVersion({
+      const marker = await createTakeVersionSelectionMarker({
         projectId, episodeId, frameId: activeShot.shotId, expectedStackSha256: stack.stackSnapshotSha256,
         expectedSelectedTakeId: stack.subject.selectedTakeId, candidateTakeId: browsed.takeId,
         candidateVersionOrdinal: browsed.versionOrdinal, candidateOutputSha256: browsed.outputSha256,
-        idempotencyKey: crypto.randomUUID(),
       })
+      if (!writeTakeVersionSelectionMarker(marker)) throw new Error('selection recovery storage unavailable')
+      let result
+      try {
+        result = await port.selectTakeVersion(marker)
+      } catch {
+        const recovery = await port.recoverTakeVersionSelection(marker)
+        if (recovery.status !== 'committed' || recovery.result === null) throw new Error('selection recovery pending')
+        result = recovery.result
+      }
       if (result.providerCalls !== 0 || result.budgetMutation || result.humanApprovalInferred) throw new Error('unsafe selection receipt')
+      clearTakeVersionSelectionMarker(marker, { status: 'ready', marker })
       setStack(await port.takeVersions({ projectId, episodeId, frameId: activeShot.shotId }))
     } finally { setSelecting(false) }
   }
