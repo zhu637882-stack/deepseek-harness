@@ -1,0 +1,61 @@
+/** Same-origin transport to Writer's existing single-attempt image pipeline. */
+import type { WebServer } from '@deepseek-ai/dsh-host-webserver'
+import { isTrustedApiRequest } from '@deepseek-ai/dsh-client-connection/src/api-request-trust.ts'
+
+/** Register preview, submit and read-only recovery; no retries or authority conversion.
+ * @param server Host web server.
+ * @param baseUrl Configured Writer base URL.
+ * @param fetcher Upstream transport.
+ * @returns Route disposer.
+ */
+export function registerShootingFirstFrame(server: WebServer, baseUrl: string, fetcher: typeof fetch = globalThis.fetch): () => void {
+  const routes = { preview: 'shooting-preview', submit: '', state: 'shooting-state' } as const
+  const disposers = Object.entries(routes).map(([operation, suffix]) => server.register({
+    kind: 'exact', path: `/api/qingmu/shooting-first-frame/${operation}`, handler: async (req, res) => {
+      res.setHeader('cache-control', 'private, no-store')
+      res.setHeader('content-type', 'application/json; charset=utf-8')
+      const end = (status: number, value: unknown) => { res.statusCode = status; res.end(JSON.stringify(value)) }
+      const cookie = req.headers.cookie?.split(';').map(item => item.trim()).find(item => item.startsWith('jason_token='))
+      if (!isTrustedApiRequest(req, []) || req.headers.authorization || !cookie) { end(401, { detail: '请恢复青木登录会话' }); return }
+      if (req.method !== (operation === 'state' ? 'GET' : 'POST')) { end(405, { detail: 'method_not_allowed' }); return }
+      const incoming = new URL(req.url ?? '', 'http://localhost')
+      const upstream = new URL(`/api/pipeline/first-frames${suffix ? `/${suffix}` : ''}`, baseUrl)
+      if (operation === 'state') {
+        const keys = ['project_id', 'episode_id', 'frame_id', 'request_id']
+        if ([...incoming.searchParams.keys()].length !== 4 || keys.some(key => incoming.searchParams.getAll(key).length !== 1
+          || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(incoming.searchParams.get(key) ?? ''))) { end(400, { detail: 'invalid_scope' }); return }
+        upstream.search = incoming.search
+      } else if (incoming.search) { end(400, { detail: 'unexpected_query' }); return }
+      let body: string | undefined
+      try {
+        if (operation !== 'state') {
+          const parts: Buffer[] = []; let size = 0
+          for await (const chunk of req) {
+            const bytes = Buffer.from(chunk as Uint8Array); size += bytes.length
+            if (size > 8192) throw new Error('request_too_large')
+            parts.push(bytes)
+          }
+          const value = JSON.parse(Buffer.concat(parts).toString('utf8')) as Record<string, unknown>
+          const keys = ['project_id', 'episode_id', 'frame_ids', ...(operation === 'submit' ? ['candidate_request_id', 'shooting_preflight_id', 'shooting_payload_hash'] : [])]
+          if (!value || Object.keys(value).sort().join() !== keys.sort().join() || !Array.isArray(value.frame_ids) || value.frame_ids.length !== 1) throw new Error('invalid_request')
+          body = JSON.stringify(value)
+        }
+        const headers = new Headers({ cookie, accept: 'application/json', origin: upstream.origin, 'content-type': 'application/json' })
+        const response = await fetcher(upstream, { method: req.method, headers, redirect: 'error', signal: AbortSignal.timeout(60_000), ...(body === undefined ? {} : { body }) })
+        const text = await response.text()
+        if (Buffer.byteLength(text) > 512 * 1024) throw new Error('response_too_large')
+        const result = JSON.parse(text) as { candidate?: { browserUrl?: unknown } }
+        if (response.ok && result.candidate) {
+          const path = result.candidate.browserUrl
+          if (typeof path !== 'string' || !/^\/api\/media\/[A-Za-z0-9_-]+$/.test(path)) throw new Error('invalid_candidate_media')
+          result.candidate.browserUrl = new URL(path, upstream.origin).href
+        }
+        end(response.status, result)
+      } catch {
+        // A submit timeout is indeterminate. The client may only GET its original request ID.
+        end(502, { detail: operation === 'submit' ? '提交结果待核对；只读取原任务，不重新提交' : '当前请求未完成' })
+      }
+    },
+  }))
+  return () => { for (const dispose of disposers) dispose() }
+}

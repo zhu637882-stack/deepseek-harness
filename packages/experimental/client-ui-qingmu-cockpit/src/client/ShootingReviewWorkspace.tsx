@@ -5,6 +5,7 @@ import type { QingmuCockpitKey } from './locales.ts'
 import type { AutomaticPlanningShot } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import { TakePreviewPlayer } from './TakePreviewPlayer.tsx'
 import { TakeThumbnail } from './TakeThumbnail.tsx'
+import { ShootingFirstFrame } from './ShootingFirstFrame.tsx'
 import { AutomaticFrameRequirementsEditor } from './AutomaticFrameRequirementsEditor.tsx'
 import {
   clearTakeVersionSelectionMarker, createTakeVersionSelectionMarker, readTakeVersionSelectionMarker,
@@ -94,6 +95,11 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
   const [zoom, setZoom] = useState(false); const [scale, setScale] = useState(1); const [selectionError, setSelectionError] = useState('')
   const [offset, setOffset] = useState({ x: 0, y: 0 }); const [selecting, setSelecting] = useState(false)
   const [heroError, setHeroError] = useState(false)
+  const [firstFrameOpen, setFirstFrameOpen] = useState(false)
+  useEffect(() => {
+    try { setFirstFrameOpen(localStorage.getItem(`qingmu:shooting-first-frame:${projectId}:${episodeId}:${current?.shotId ?? ''}`) !== null) }
+    catch { setFirstFrameOpen(false) }
+  }, [projectId, episodeId, current?.shotId])
   const [planningShots, setPlanningShots] = useState<readonly AutomaticPlanningShot[]>([])
   const [shotStacks, setShotStacks] = useState<Readonly<Record<string, YimengTakeVersionStackResponse>>>({})
   useEffect(() => {
@@ -224,17 +230,19 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
       })}</aside>
       <main className={css.stage}>
         <div className={css.media} data-state={testState ?? (load === 'loading' ? 'loading' : state)}>
-          {usable(browsed) ? <div className={css.player}><TakePreviewPlayer request={{
-            projectId, episodeId, frameId: current.shotId, takeId: browsed.takeId,
-            expectedOutputSha256: browsed.outputSha256,
-          }} load={port.takePreview} t={t} onPreviewReady={onPreviewReady} /></div>
-            : heroUrl !== undefined ? <div className={css.frame}><span>已选首帧</span><img src={heroUrl} alt={`镜 ${current.frameNo} 已选首帧`} onLoad={() => { setHeroMediaUrl(heroUrl); setHeroError(false) }} onError={() => setHeroError(true)} />{heroError && <p role="alert">首帧暂时无法显示，请刷新后再试。</p>}</div>
-              : <div className={css.canvas}><span>镜 {current.frameNo}</span><strong>{current.title}</strong>
-                <small>{message(state, load)}</small></div>}
-          {testState !== undefined && <p className={css.mediaNotice} role="status">隔离演练状态，不代表真实任务，未提交生成。</p>}{load === 'loading' && <p className={css.mediaNotice} role="status">{message(state, load)}</p>}{load === 'failed' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}{state === 'failed' && load === 'ready' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}
+          {firstFrameOpen ? <ShootingFirstFrame key={current.shotId}
+            scope={{ projectId, episodeId, frameId: current.shotId }} onCommitted={onCommitted} />
+            : usable(browsed) ? <div className={css.player}><TakePreviewPlayer request={{
+              projectId, episodeId, frameId: current.shotId, takeId: browsed.takeId,
+              expectedOutputSha256: browsed.outputSha256,
+            }} load={port.takePreview} t={t} onPreviewReady={onPreviewReady} /></div>
+              : heroUrl !== undefined ? <div className={css.frame}><span>已选首帧</span><img src={heroUrl} alt={`镜 ${current.frameNo} 已选首帧`} onLoad={() => { setHeroMediaUrl(heroUrl); setHeroError(false) }} onError={() => setHeroError(true)} />{heroError && <p role="alert">首帧暂时无法显示，请刷新后再试。</p>}</div>
+                : <div className={css.canvas}><span>镜 {current.frameNo}</span><strong>{current.title}</strong>
+                  <small>{message(state, load)}</small></div>}
+          {!firstFrameOpen && <>{testState !== undefined && <p className={css.mediaNotice} role="status">隔离演练状态，不代表真实任务，未提交生成。</p>}{load === 'loading' && <p className={css.mediaNotice} role="status">{message(state, load)}</p>}{load === 'failed' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}{state === 'failed' && load === 'ready' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}</>}
         </div>
         <div className={css.candidates} aria-label="候选画面">{versions.map(version => <button key={version.takeId} type="button" aria-pressed={version.takeId === browseId} onClick={() => { setBrowseId(version.takeId); setMediaUrl(undefined) }}>{heroUrl ? <img className={css.candidateThumb} src={heroUrl} alt={`候选 v${version.versionOrdinal} · 本镜首帧`} /> : usable(version) ? <TakeThumbnail request={{ projectId, episodeId, frameId: current.shotId, takeId: version.takeId, expectedOutputSha256: version.outputSha256 }} load={port.takePreview} className={css.candidateThumb} alt={`候选 v${version.versionOrdinal} · 视频第一帧`} /> : <span className={css.videoIcon}>素材尚不可用</span>}<span>候选 v{version.versionOrdinal}</span><strong>{version.isSelected ? '当前选用' : version.qualityStatus === 'failed' ? '检查未通过' : version.qualityStatus === 'passed' ? '待你审看' : '等待检查'}</strong></button>)}{versions.length === 0 && heroUrl && <button type="button" aria-pressed="true"><img className={css.candidateThumb} src={heroUrl} alt="当前首帧候选" /><span>当前首帧</span><strong>已选用</strong></button>}</div>
-        <p className={css.browseNote}>{versions.length === 0 && load === 'ready' && testState === undefined ? '本镜尚无视频候选，已有首帧和要求仍保留。' : message(state, load)} 单击候选只切换中区媒体，不会改变选用。</p>{selectionError && <p role="alert">{selectionError}</p>}{primary ? <button className={css.primary} type="button" disabled={selecting} onClick={() => { void selectCurrent() }}>{selecting ? '正在采用候选' : '采用这张'}</button> : productionAction && load === 'ready' && onProductionAction && <button className={css.primary} type="button" onClick={() => onProductionAction(productionAction, current.shotId)}>{productionAction === 'first-frame' ? '生成首帧' : productionAction === 'select-frame' ? '采用这张' : '生成视频'}</button>}
+        {!firstFrameOpen && <><p className={css.browseNote}>{versions.length === 0 && load === 'ready' && testState === undefined ? '本镜尚无视频候选，已有首帧和要求仍保留。' : message(state, load)} 单击候选只切换中区媒体，不会改变选用。</p>{selectionError && <p role="alert">{selectionError}</p>}{primary ? <button className={css.primary} type="button" disabled={selecting} onClick={() => { void selectCurrent() }}>{selecting ? '正在采用候选' : '采用这张'}</button> : productionAction && load === 'ready' && onProductionAction && <button className={css.primary} type="button" onClick={() => productionAction === 'first-frame' ? setFirstFrameOpen(true) : onProductionAction(productionAction, current.shotId)}>{productionAction === 'first-frame' ? '生成首帧' : productionAction === 'select-frame' ? '采用这张' : '生成视频'}</button>}</>}
         {sourceUrl !== undefined && <button className={css.zoomButton} type="button" onClick={(event) => { zoomTrigger.current = event.currentTarget; resetZoom(); setZoom(true) }}>放大画面</button>}
         {zoom && <div className={css.zoom} role="dialog" aria-modal="true" aria-label="放大画面"><div className={css.zoomToolbar}><button type="button" onClick={closeZoom}>关闭放大查看</button><button type="button" onClick={() => setScale(value => Math.min(3, value + 0.25))}>放大</button><button type="button" onClick={() => setScale(value => Math.max(1, value - 0.25))}>缩小</button></div><div className={css.zoomCanvas} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={() => { drag.current = undefined }} onPointerCancel={() => { drag.current = undefined }}>{mediaUrl !== undefined ? <video src={mediaUrl} controls autoPlay playsInline style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }} /> : heroMediaUrl !== undefined && <img src={heroMediaUrl} alt={`镜 ${current.frameNo} 已选首帧`} style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }} />}</div></div>}
       </main>
