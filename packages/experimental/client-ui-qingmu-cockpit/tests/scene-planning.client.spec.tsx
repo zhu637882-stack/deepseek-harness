@@ -95,11 +95,13 @@ it('saves one automatic shot first-frame requirement, rereads it, and never trea
     ],
   } }
   const current = { ...automatic, storyboard: { id: 'revision_11', status: 'Ready' as const, version: 11, sourceHash: 'd'.repeat(64) },
-    canonicalStoryboard: { ...automatic.canonicalStoryboard, revision: 11, sourceHash: 'd'.repeat(64) } }
+    canonicalStoryboard: { ...automatic.canonicalStoryboard, revision: 11, sourceHash: 'd'.repeat(64),
+      shots: automatic.canonicalStoryboard.shots.map(shot => shot.id === 'automatic_2'
+        ? { ...shot, imagePromptCn: '已保存的街道近景首帧' } : shot) } }
   const result: ScenePlanningResult = { schema: 'jason.qingmu-scene-planning-result.v1', action: 'edit_automatic',
     projectId: automatic.projectId, episodeId: automatic.episodeId, idempotencyKey: 'automatic-intent-1',
     requestSha256: 'c'.repeat(64), commandReceiptId: 'receipt_automatic_1', eventId: 'event_automatic_1',
-    shotId: 'automatic_1', storyboard: current.storyboard, providerCalls: 0, stageStarted: false, approvalGranted: false }
+    shotId: 'automatic_2', storyboard: current.storyboard, providerCalls: 0, stageStarted: false, approvalGranted: false }
   const port = {
     readScenePlanning: vi.fn().mockResolvedValueOnce(automatic).mockResolvedValueOnce(current),
     requestDirectorProposal: unavailableDirectorProposal(),
@@ -107,16 +109,23 @@ it('saves one automatic shot first-frame requirement, rereads it, and never trea
   const onCommitted = vi.fn(async () => {}), onSelectShotId = vi.fn(), onUnsavedChange = vi.fn()
   render(<ScenePlanningWorkspace {...automatic} port={port} onCommitted={onCommitted}
     onSelectShotId={onSelectShotId} onUnsavedChange={onUnsavedChange} />)
-  const field = await screen.findByLabelText('首帧画面要求') as HTMLTextAreaElement
-  fireEvent.change(field, { target: { value: '雨夜入口的低机位首帧' } })
+  const selector = await screen.findByLabelText('自动分镜镜头') as HTMLSelectElement
+  fireEvent.change(selector, { target: { value: 'automatic_2' } })
+  expect(onSelectShotId).toHaveBeenCalledExactlyOnceWith('automatic_2')
+  const field = screen.getByLabelText('首帧画面要求') as HTMLTextAreaElement
+  fireEvent.change(field, { target: { value: '街道近景的低机位首帧' } })
   await waitFor(() => { expect(onUnsavedChange).toHaveBeenLastCalledWith(true) })
+  expect(selector.disabled).toBe(true)
+  expect(onSelectShotId).toHaveBeenCalledExactlyOnceWith('automatic_2')
   fireEvent.click(screen.getByRole('button', { name: '保存首帧画面要求' }))
   await waitFor(() => { expect(port.saveScenePlanning).toHaveBeenCalledOnce(); expect(port.readScenePlanning).toHaveBeenCalledTimes(2) })
   expect(port.saveScenePlanning).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({
-    action: 'edit_automatic', shotId: 'automatic_1', imagePromptCn: '雨夜入口的低机位首帧',
+    action: 'edit_automatic', shotId: 'automatic_2', imagePromptCn: '街道近景的低机位首帧',
   }) }), expect.anything())
-  expect(onCommitted).toHaveBeenCalledOnce(); expect(onSelectShotId).toHaveBeenCalledWith('automatic_1')
+  expect(onCommitted).toHaveBeenCalledOnce()
   await waitFor(() => { expect(onUnsavedChange).toHaveBeenLastCalledWith(false) })
+  expect(selector.value).toBe('automatic_2')
+  expect(field.value).toBe('已保存的街道近景首帧')
   expect(screen.getByText(/不生成、不签收/)).toBeTruthy()
 })
 it('recovers an unknown automatic save against a newer current revision without resubmitting it', async () => {

@@ -249,6 +249,7 @@ export function ScenePlanningWorkspace({
   const [state, setState] = useState<ScenePlanningState | null>(null)
   const [local, setLocal] = useState<LocalPlan | null>(() => storedPlan(key))
   const [automatic, setAutomatic] = useState<AutomaticLocalPlan | null>(() => storedAutomaticDraft(`${key}:automatic-frame`))
+  const automaticRef = useRef(automatic)
   const [retained, setRetained] = useState<LocalPlan | null>(() => retainedInput(storedPlan(`${key}:retained-input`)))
   const [sceneIndex, setSceneIndex] = useState(local?.sceneIndex ?? 1)
   const [index, setIndex] = useState(local?.activeIndex ?? 0)
@@ -310,6 +311,7 @@ export function ScenePlanningWorkspace({
     try {
       if (next === null) localStorage.removeItem(automaticKey)
       else localStorage.setItem(automaticKey, JSON.stringify(next))
+      automaticRef.current = next
       setAutomatic(next)
     } catch { setError('浏览器不能保存首帧画面要求，请允许本地存储后再操作。') }
   }
@@ -632,12 +634,11 @@ export function ScenePlanningWorkspace({
       throw new Error('409 automatic_planning_receipt_scope_mismatch')
     }
     setState(next); setReceipt(result)
-    setAutomatic((current) => {
-      if (current?.pending?.idempotencyKey !== intent.idempotencyKey || current.shotId !== result.shotId) return current
-      try { localStorage.removeItem(automaticKey) } catch { /* In-memory result remains scoped. */ }
-      return null
-    })
-    onSelectShotId(result.shotId)
+    const current = automaticRef.current
+    const savedShot = canonical.shots.find(shot => shot.id === result.shotId)
+    if (current?.pending?.idempotencyKey === intent.idempotencyKey && current.shotId === result.shotId && savedShot !== undefined) {
+      updateAutomatic({ shotId: savedShot.id, imagePromptCn: savedShot.imagePromptCn, dirty: false })
+    }
     await onCommitted()
   }
   const runAutomatic = async (recover: boolean, draftOverride?: AutomaticLocalPlan) => {
@@ -843,10 +844,14 @@ export function ScenePlanningWorkspace({
           const pending = selectedDraft?.pending
           return <fieldset disabled={busy} className={css.editor}>
             <legend>自动镜头首帧画面要求</legend>
-            <label>镜头<select aria-label="自动分镜镜头" value={selected.id} disabled={Boolean(pending)} onChange={(e) => {
-              const next = shots.find(shot => shot.id === e.target.value)
-              if (next) updateAutomatic({ shotId: next.id, imagePromptCn: next.imagePromptCn, dirty: false })
-            }}>{shots.map(shot => <option key={shot.id} value={shot.id}>{String(shot.frameNo).padStart(2, '0')} · {shot.title}</option>)}</select></label>
+            <label>镜头<select aria-label="自动分镜镜头" value={selected.id}
+              disabled={Boolean(pending) || Boolean(automatic?.dirty)} onChange={(e) => {
+                const next = shots.find(shot => shot.id === e.target.value)
+                if (next && !automatic?.dirty && automatic?.pending === undefined) {
+                  updateAutomatic({ shotId: next.id, imagePromptCn: next.imagePromptCn, dirty: false })
+                  onSelectShotId(next.id)
+                }
+              }}>{shots.map(shot => <option key={shot.id} value={shot.id}>{String(shot.frameNo).padStart(2, '0')} · {shot.title}</option>)}</select></label>
             <label>首帧画面要求<textarea aria-label="首帧画面要求" rows={4} maxLength={20000} value={draft} disabled={Boolean(pending)} onChange={(e) => {
               updateAutomatic({ shotId: selected.id, imagePromptCn: e.target.value, dirty: e.target.value !== selected.imagePromptCn,
                 ...(pending === undefined ? {} : { pending }) })
