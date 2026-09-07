@@ -653,6 +653,40 @@ class OwnershipTests(unittest.TestCase):
                  self.assertRaisesRegex(RuntimeError, "record-build"):
                 local.start(root, config)
 
+    def test_start_uses_writer_python_for_live_database_reads(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "private").mkdir()
+            (root / "logs").mkdir()
+            writer = root / "writer"
+            python = writer / ".venv/bin/python"
+            python.parent.mkdir(parents=True)
+            python.symlink_to(local.sys.executable)
+            config = {"instanceId": "unit", "root": str(root), "yimengRoot": str(writer)}
+            local.mark_lifecycle(root, config, "clean")
+            with patch.object(local, "control", side_effect=[FileNotFoundError(), {"ready": True}]), \
+                 patch.object(local, "require_build_manifest_matches"), \
+                 patch.object(local.subprocess, "Popen") as spawn:
+                self.assertEqual(local.start(root, config), {"ready": True})
+            argv = spawn.call_args.args[0]
+            self.assertEqual(argv[:2], [str(python), "-B"])
+            self.assertIn("_supervise", argv)
+            self.assertEqual(spawn.call_args.kwargs["env"], local.safe_env(root))
+            self.assertTrue(spawn.call_args.kwargs["start_new_session"])
+
+    def test_missing_writer_python_does_not_fall_back_to_system_python(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "private").mkdir()
+            config = {"instanceId": "unit", "root": str(root), "yimengRoot": str(root / "missing")}
+            local.mark_lifecycle(root, config, "clean")
+            with patch.object(local, "control", side_effect=FileNotFoundError), \
+                 patch.object(local, "require_build_manifest_matches"), \
+                 patch.object(local.subprocess, "Popen") as spawn, \
+                 self.assertRaisesRegex(RuntimeError, "Writer Python"):
+                local.start(root, config)
+            spawn.assert_not_called()
+
     def test_occupied_port_is_not_reused(self):
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))

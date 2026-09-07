@@ -2528,9 +2528,14 @@ def start(
     with instance_lock(root):
         require_clean(root, config)
         require_build_manifest_matches(root, config, review_only=review_only)
+    # The supervisor reads the same live SQLite database as Writer. Do not
+    # inherit macOS's system Python/SQLite from whoever invoked this CLI.
+    python = Path(config["yimengRoot"]) / ".venv/bin/python"
+    if not python.is_file() or not os.access(python, os.X_OK):
+        raise RuntimeError("Writer Python 运行时不可用；未启动实例")
     log = (root / "logs/supervisor.log").open("ab")
     with log:
-        command = [sys.executable, str(Path(__file__).resolve()), "_supervise", "--root", str(root)]
+        command = [str(python), "-B", str(Path(__file__).resolve()), "_supervise", "--root", str(root)]
         if review_only:
             command.append("--review-only")
         if tail_audit:
