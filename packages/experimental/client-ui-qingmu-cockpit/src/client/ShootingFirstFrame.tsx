@@ -1,5 +1,6 @@
 /** A single image attempt with durable browser recovery and no automatic POST replay. */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { FirstFrameHistoryCandidate } from './first-frame-selection.ts'
 
 export interface ShootingFrameScope { readonly projectId: string; readonly episodeId: string; readonly frameId: string }
 interface Preview extends ShootingFrameScope {
@@ -100,7 +101,8 @@ function assertAttempt(value: unknown, scope: ShootingFrameScope, requestId: str
   if (value.candidate !== null) {
     const candidate = value.candidate as Record<string, unknown>
     if (!candidate || typeof candidate.assetId !== 'string' || typeof candidate.sha256 !== 'string' || !sha.test(candidate.sha256)
-      || typeof candidate.browserUrl !== 'string' || typeof candidate.isSelected !== 'boolean') throw new Error('候选回执不完整')
+      || typeof candidate.browserUrl !== 'string' || typeof candidate.isSelected !== 'boolean'
+      || typeof candidate.qualityStatus !== 'string') throw new Error('候选回执不完整')
     const url = new URL(candidate.browserUrl, location.origin)
     if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || !['http:', 'https:'].includes(url.protocol)
       || !/^\/api\/media\/[A-Za-z0-9_-]+$/.test(url.pathname) || url.username || url.password || url.hash) throw new Error('候选地址不属于青木素材')
@@ -129,12 +131,25 @@ function attemptMessage(task: Attempt['task'] | undefined): string {
   }
 }
 /** Native image generation. Storyboard confirmation is explicit; media selection remains separate. */
-export function ShootingFirstFrame({ scope, onCommitted }: {
+export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview }: {
   readonly scope: ShootingFrameScope
   readonly onCommitted?: () => Promise<unknown>
+  readonly onCandidatePreview?: (candidate: FirstFrameHistoryCandidate | undefined, url: string | undefined) => void
 }) {
   const key = `qingmu:shooting-first-frame:${scope.projectId}:${scope.episodeId}:${scope.frameId}`
   const [preview, setPreview] = useState<Preview>(); const [attempt, setAttempt] = useState<Attempt>()
+  const [loadedImage, setLoadedImage] = useState<string>()
+  const materialized = attempt?.candidate
+  const imageKey = materialized ? `${key}:${materialized.assetId}:${materialized.sha256}:${materialized.browserUrl}` : undefined
+  const previewCandidate = useMemo<FirstFrameHistoryCandidate | undefined>(() => materialized ? {
+    assetId: materialized.assetId, materializedSha256: materialized.sha256,
+    qualityStatus: materialized.qualityStatus, isSelected: materialized.isSelected,
+    selectionStatus: materialized.isSelected ? 'Selected' : 'Unselected',
+  } : undefined, [materialized?.assetId, materialized?.sha256, materialized?.qualityStatus, materialized?.isSelected])
+  useEffect(() => {
+    onCandidatePreview?.(previewCandidate, loadedImage === imageKey ? materialized?.browserUrl : undefined)
+    return () => onCandidatePreview?.(undefined, undefined)
+  }, [previewCandidate, imageKey, loadedImage, materialized?.browserUrl, onCandidatePreview])
   const [requestId, setRequestId] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false)
   const [review, setReview] = useState<FrameReview>(); const [confirming, setConfirming] = useState(false)
   const confirmingLock = useRef(false)
@@ -277,7 +292,7 @@ export function ShootingFirstFrame({ scope, onCommitted }: {
         void prepareAgain().catch(cause => setError(String(cause))).finally(() => { lock.current = false; setBusy(false) })
       }}>重新检查本镜生成条件</button>}
     {attempt?.candidate ? <>
-      <figure><img style={{ maxWidth: '100%', maxHeight: '54vh', objectFit: 'contain' }} src={attempt.candidate.browserUrl} alt="镜头新首帧 · 待你定版" /><figcaption>新首帧候选 · 待你审看，尚未采用</figcaption></figure>
+      <figure><img style={{ maxWidth: '100%', maxHeight: '54vh', objectFit: 'contain' }} src={attempt.candidate.browserUrl} alt="镜头新首帧 · 待你定版" onLoad={() => setLoadedImage(imageKey)} onError={() => setLoadedImage(undefined)} /><figcaption>新首帧候选 · 待你审看，尚未采用</figcaption></figure>
       <div aria-label="首帧候选条"><button type="button" aria-pressed="true"><img width="72" src={attempt.candidate.browserUrl} alt="新首帧候选缩略图" />本次新首帧 · 待定版</button></div>
     </> : blocked ? <p role="alert">尚未进入生成，未创建本次任务。{blocked.message}</p>
       : requestId ? <p role="status">{attemptMessage(attempt?.task)}</p>

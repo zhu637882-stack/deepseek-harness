@@ -56,7 +56,7 @@ export function ShootingFirstFrameHistory({ scope, onCommitted, onCandidatePrevi
     const controller = new AbortController()
     void client.history(scope, controller.signal).then((values) => {
       if (controller.signal.aborted) return
-      setItems(values); setActiveId(values.find(item => item.isSelected)?.assetId ?? values.at(-1)?.assetId ?? '')
+      setItems(values); setActiveId(values.at(-1)?.assetId ?? '')
     }).catch(() => { if (!controller.signal.aborted) setError('首帧历史暂时无法读取，请重新打开。') })
     void readSelection(controller.signal).catch(() => { /* Inspection is independent of eligibility. */ })
     return () => controller.abort()

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createHash, webcrypto } from 'node:crypto'
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ShootingReviewWorkspace } from '../src/client/ShootingReviewWorkspace.tsx'
 
@@ -97,5 +97,78 @@ it('does not reread thumbnails or clear them for a semantically unchanged projec
   expect(api.history).toHaveBeenCalledTimes(reads)
   expect(api.historyPreview).toHaveBeenCalledTimes(1)
   expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+  expect(api.select).not.toHaveBeenCalled()
+})
+
+const oldHeroUrl = `http://127.0.0.1:65269/api/media/media_old?expires=9999999999&signature=${'a'.repeat(64)}`
+const oldImage = { ...image, assetId: 'asset_old', isSelected: true, selectionStatus: 'Selected', qualityStatus: 'passed' }
+const selectedProjection = { ...projection, director: { ...projection.director,
+  heroFrameStoryboards: { shots: [{ shotId: 'f5', heroFrame: { assetId: oldImage.assetId, browserUrl: oldHeroUrl } }] },
+} }
+
+it('uses a newer unselected thumbnail even when an old hero is selected, on switch and fresh visits', async () => {
+  api.history.mockImplementation(async ({ frameId }) => frameId === 'f5' ? [oldImage, image] : [])
+  const p = { ...props(), projection: selectedProjection as never }
+  const view = render(<ShootingReviewWorkspace {...p} selectedShotId="f6" />)
+  const shot5 = within(screen.getByRole('button', { name: '镜 5 查看手机' }))
+  await waitFor(() => expect(shot5.getByRole('img').getAttribute('src')).toBe('blob:new-first-frame'))
+  expect(shot5.getByText('首帧待审')).toBeTruthy()
+  view.rerender(<ShootingReviewWorkspace {...p} selectedShotId="f5" />)
+  await screen.findByRole('img', { name: '镜 5 已选首帧' })
+  expect(shot5.getByRole('img').getAttribute('src')).toBe('blob:new-first-frame')
+  expect(screen.getByRole('img', { name: '当前首帧候选' }).getAttribute('src')).toBe(oldHeroUrl)
+  view.unmount(); render(<ShootingReviewWorkspace {...p} selectedShotId="f6" />)
+  await waitFor(() => expect(screen.getByRole('img', { name: '镜 5 首帧缩略图' }).getAttribute('src')).toBe('blob:new-first-frame'))
+  expect(api.historyPreview.mock.calls.every(([r]) => r.assetId === image.assetId && r.frameId === 'f5')).toBe(true)
+  expect(api.select).not.toHaveBeenCalled()
+  expect(p.onProductionAction).not.toHaveBeenCalled()
+})
+
+it('opens the latest history candidate and distinguishes its preview from the adopted hero', async () => {
+  sessionStorage.setItem('qingmu:shooting-pane:p:e:f5', 'history')
+  api.history.mockImplementation(async ({ frameId }) => frameId === 'f5' ? [oldImage, image] : [])
+  const p = { ...props(), projection: selectedProjection as never }
+  render(<ShootingReviewWorkspace {...p} />)
+  await screen.findByRole('img', { name: '首帧候选 v2' })
+  expect(await screen.findByRole('img', { name: '未采用首帧候选' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: /原选用首帧/ }).getAttribute('aria-pressed')).toBe('false')
+  expect(screen.getByRole('button', { name: /正在查看的首帧/ }).textContent).toContain('尚未采用')
+  expect(api.historyPreview).toHaveBeenCalledTimes(1)
+  expect(api.historyPreview.mock.calls[0]?.[0].assetId).toBe(image.assetId)
+  fireEvent.click(screen.getByRole('button', { name: /首帧 v1\s*当前选用/ }))
+  await screen.findByRole('img', { name: '首帧候选 v1' })
+  expect(screen.queryByRole('img', { name: '未采用首帧候选' })).toBeNull()
+  expect(api.select).not.toHaveBeenCalled()
+  expect(p.onProductionAction).not.toHaveBeenCalled()
+})
+
+it('reuses the newly generated image for the active thumbnail without loading another copy or POST replay', async () => {
+  sessionStorage.setItem('qingmu:shooting-pane:p:e:f5', 'first-frame')
+  const scope = { projectId: 'p', episodeId: 'e', frameId: 'f5' }
+  const preview = { ...scope, schema: 'qingmu.shooting-first-frame-preview.v1', preflightId: 'a'.repeat(64),
+    payloadHash: 'b'.repeat(64), prompt: '当前镜头画面要求', povObserver: '', estimatedCny: .5,
+    blockers: [], maxAttempts: 1, n: 1, selectAsOfficial: false }
+  const requestId = `shooting-${preview.preflightId}`
+  const newUrl = `http://127.0.0.1:65269/api/media/media_new?expires=9999999999&signature=${'b'.repeat(64)}`
+  localStorage.setItem('qingmu:shooting-first-frame:p:e:f5', JSON.stringify({ preview, requestId }))
+  const fetcher = vi.fn(async (path: string) => ({ ok: true, json: async () => path.includes('/review?')
+    ? { frameId: 'f5', frameDigest: 'c'.repeat(64), accepted: true, title: '查看手机', imagePromptCn: '当前要求', preflight: { technicalReady: true } }
+    : { ...scope, schema: 'qingmu.shooting-first-frame-state.v1', requestId,
+      task: { id: 'original-task', kernel_status: 'Succeeded' },
+      candidate: { assetId: image.assetId, sha256: image.materializedSha256, browserUrl: newUrl, isSelected: false, qualityStatus: 'pending' } },
+  }))
+  vi.stubGlobal('fetch', fetcher)
+  api.history.mockImplementation(async ({ frameId }) => frameId === 'f5' ? [oldImage, image] : [])
+  const p = { ...props(), projection: selectedProjection as never }
+  const view = render(<ShootingReviewWorkspace {...p} />)
+  fireEvent.load(await screen.findByRole('img', { name: '镜头新首帧 · 待你定版' }))
+  await waitFor(() => expect(screen.getByRole('img', { name: '镜 5 首帧缩略图' }).getAttribute('src')).toBe(newUrl))
+  expect(screen.getByRole('img', { name: '未采用首帧候选' }).getAttribute('src')).toBe(newUrl)
+  expect(screen.getByRole('img', { name: '当前首帧候选' }).getAttribute('src')).toBe(oldHeroUrl)
+  view.unmount(); render(<ShootingReviewWorkspace {...p} />)
+  fireEvent.load(await screen.findByRole('img', { name: '镜头新首帧 · 待你定版' }))
+  await waitFor(() => expect(screen.getByRole('img', { name: '镜 5 首帧缩略图' }).getAttribute('src')).toBe(newUrl))
+  expect(api.historyPreview).not.toHaveBeenCalled()
+  expect(fetcher.mock.calls.every(([path]) => path.includes('/state?') || path.includes('/review?'))).toBe(true)
   expect(api.select).not.toHaveBeenCalled()
 })
