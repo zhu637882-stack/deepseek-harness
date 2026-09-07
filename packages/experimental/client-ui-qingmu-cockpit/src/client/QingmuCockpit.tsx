@@ -512,6 +512,7 @@ export function QingmuCockpit({
         selectedShotId={selectedShotId}
         onSelectShotId={setSelectedShotId}
         onNavigate={setTab}
+        onCommitted={refreshWorkflowProjectionAfterCommit}
         directorAssistant={nativeDirectorSession === undefined
           ? <p role="status">原生导演助手当前不可用；不会回退到 iframe。</p>
           : <NativeDirectorSession port={nativeDirectorSession} bridge={directorBridge} sessionId={directorSessionId}
