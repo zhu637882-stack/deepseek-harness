@@ -377,7 +377,9 @@ export function normalizeDirectorContext(
  */
 function stableWriterMediaUrl(value: unknown): unknown {
   if (typeof value !== 'string') return value
-  const match = /^(https?:\/\/[-A-Za-z0-9.:\[\]]+\/api\/media\/[A-Za-z0-9_.:-]+)\?([A-Za-z0-9._~!$'()*+,;=:@%&/?-]+)$/.exec(value)
+  const pattern =
+    /^(https?:\/\/[-A-Za-z0-9.:\[\]]+(?:\/[A-Za-z0-9._~%+-]+)*\/api\/media\/[A-Za-z0-9_.:-]+)\?([A-Za-z0-9._~!$'()*+,;=:@%&/?-]+)$/
+  const match = pattern.exec(value)
   if (!match || match[0] !== value) return value
   const [, base, query] = match
   if (base === undefined || query === undefined) return value

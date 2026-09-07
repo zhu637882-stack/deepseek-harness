@@ -121,8 +121,8 @@ describe('Writer full director context compatibility', () => {
     expect(await read({ ...value, cast: [] })).toMatchObject({ ok: false })
     expect(await read(snapshot({ ...extension, readyGranted: true }))).toMatchObject({ ok: false })
   })
-  it('accepts renewed Writer credentials without accepting changed creative or media identity', async () => {
-    const url = 'https://media.example/api/media/media_1'
+  it.each(['', '/yimeng-golden'])('accepts renewed Writer credentials under prefix %s without accepting changed identity', async (prefix) => {
+    const url = `https://media.example${prefix}/api/media/media_1`
     const ref = { assetId: 'asset_1', assetSha256: 'a'.repeat(64), mediaUrl: `${url}?variant=thumbnail&other=a%20b` }
     const value = snapshot({ ...extension, contextHashPolicy: 'writer-media-transport-v1', selectedReferences: [ref] })
     const original = structuredClone(value)
@@ -133,6 +133,7 @@ describe('Writer full director context compatibility', () => {
       for (const change of [{ assetId: 'asset_2' }, { assetSha256: 'b'.repeat(64) },
         { mediaUrl: renewed.selectedReferences[0]!.mediaUrl.replace('media_1', 'media_2') },
         { mediaUrl: renewed.selectedReferences[0]!.mediaUrl.replace('media.example', 'other.example') },
+        { mediaUrl: renewed.selectedReferences[0]!.mediaUrl.replace('/api/media/', '/different-prefix/api/media/') },
         { mediaUrl: renewed.selectedReferences[0]!.mediaUrl.replace('thumbnail', 'full') },
         { mediaUrl: renewed.selectedReferences[0]!.mediaUrl.replace('a%20b', 'a+b') }]) {
         expect(await read({ ...renewed, selectedReferences: [{ ...ref, ...change }] })).toMatchObject({ ok: false })
