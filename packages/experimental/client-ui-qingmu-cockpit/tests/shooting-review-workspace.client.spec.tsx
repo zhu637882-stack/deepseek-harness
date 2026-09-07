@@ -5,9 +5,9 @@ import { ShootingReviewWorkspace } from '../src/client/ShootingReviewWorkspace.t
 
 const projection = {
   director: { shotRelations: { shots: [
-    { shotId: 'frame_34b3741b1f0a', frameNo: 6, title: '落日公路', sceneId: 'scene-1' },
-    { shotId: 'frame-7', frameNo: 7, title: '车内回望', sceneId: 'scene-1' },
-  ] } },
+    { shotId: 'frame_34b3741b1f0a', frameNo: 6, title: '落日公路', sceneId: 'scene-1', beats: [], dialogueRhythm: { cues: [] } },
+    { shotId: 'frame-7', frameNo: 7, title: '车内回望', sceneId: 'scene-1', beats: [], dialogueRhythm: { cues: [] } },
+  ] }, heroFrameStoryboards: { shots: [{ shotId: 'frame_34b3741b1f0a', heroFrame: { browserUrl: '/first-frame-6.webp' } }] } },
 } as never
 
 const port = {
@@ -25,7 +25,8 @@ describe('ShootingReviewWorkspace', () => {
       selectedShotId="frame_34b3741b1f0a" onSelectShotId={onSelectShotId} directorAssistant={<p>导演助手</p>} port={port} testState="pending-review" />)
     expect(onSelectShotId).not.toHaveBeenCalled()
     expect(screen.getByText(/单击候选只切换中区媒体，不会改变选用/)).toBeTruthy()
-    expect(screen.getByRole('button', { name: '当前已选用' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '候选不可采用' })).toBeTruthy()
+    expect(screen.getByRole('img', { name: '镜 6 已选首帧' }).getAttribute('src')).toBe('/first-frame-6.webp')
   })
 
   it('changes the active Shot only through the Shot list and switches to the native assistant', () => {

@@ -65,6 +65,11 @@
 }
 .directorShell .truthStrip, .directorShell .evidence { display: none; }
 .directorShell .body { grid-template-columns: minmax(0, 1fr); }
+.shootingShell .truthStrip, .shootingShell .toolbar, .shootingShell .tabs, .shootingShell .evidence { display: none; }
+.shootingShell .body { display: block; }
+.shootingShell .body > main { height: 100%; padding: 0; overflow: hidden; }
+.developerLog { padding: 8px 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; }
+.developerLog > summary { cursor: pointer; color: var(--dsw-alias-label-secondary); }
 .directorShell .primaryAction { background: #1b6345; color: #f4fff8; }
 .directorShell textarea { font-family: inherit; font-size: 14px; line-height: 1.6; }
 .directorShell summary { cursor: pointer; min-height: 32px; padding: 6px 0; }

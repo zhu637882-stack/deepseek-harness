@@ -511,75 +511,80 @@ export function QingmuCockpit({
         projection={projection}
         selectedShotId={selectedShotId}
         onSelectShotId={setSelectedShotId}
+        onNavigate={setTab}
         directorAssistant={nativeDirectorSession === undefined
           ? <p role="status">原生导演助手当前不可用；不会回退到 iframe。</p>
           : <NativeDirectorSession port={nativeDirectorSession} bridge={directorBridge} sessionId={directorSessionId}
             onRefresh={() => { setDirectorRefresh(value => value + 1) }} />}
         port={port}
+        t={t}
       />
-      <Card title={t('shotsTitle')}>
-        <div className={css.metrics}>
-          <Metric label={t('shotCount')} value={numberOf(shots.count) ?? 0} />
-          <Metric label={t('groupCount')} value={numberOf(shots.shotGroupCount) ?? 0} />
-          <Metric label={t('segmentCount')} value={numberOf(shots.segmentCount) ?? 0} />
-          <Metric label={t('unresolvedAssets')} value={numberOf(shots.unresolvedAssetRefCount) ?? 0} />
-        </div>
-        {shotRelations === undefined
-          ? <p className={css.empty}>{t('noProjection')}</p>
-          : (
-            <ShotRelationsView
+      <details className={css.developerLog}>
+        <summary>开发日志</summary>
+        <Card title={t('shotsTitle')}>
+          <div className={css.metrics}>
+            <Metric label={t('shotCount')} value={numberOf(shots.count) ?? 0} />
+            <Metric label={t('groupCount')} value={numberOf(shots.shotGroupCount) ?? 0} />
+            <Metric label={t('segmentCount')} value={numberOf(shots.segmentCount) ?? 0} />
+            <Metric label={t('unresolvedAssets')} value={numberOf(shots.unresolvedAssetRefCount) ?? 0} />
+          </div>
+          {shotRelations === undefined
+            ? <p className={css.empty}>{t('noProjection')}</p>
+            : (
+              <ShotRelationsView
+                relations={shotRelations}
+                selectedShotId={selectedShotId}
+                onSelectShotId={setSelectedShotId}
+                t={t}
+              />
+            )}
+          {shotRelations !== undefined && (
+            <ShotRelationMethodView
               relations={shotRelations}
               selectedShotId={selectedShotId}
-              onSelectShotId={setSelectedShotId}
+              port={port}
               t={t}
             />
           )}
-        {shotRelations !== undefined && (
-          <ShotRelationMethodView
-            relations={shotRelations}
-            selectedShotId={selectedShotId}
-            port={port}
-            t={t}
-          />
-        )}
-        {shotRelations !== undefined && (
-          <HeroFrameStoryboardCanvas
-            relations={shotRelations}
-            heroFrameStoryboards={projection?.director.heroFrameStoryboards}
-            selectedShotId={selectedShotId}
-            port={port}
-            t={t}
-            onCommitted={refreshWorkflowProjectionAfterCommit}
-          />
-        )}
-      </Card>
-      <ContinuityDeltaView
-        projectId={projectId}
-        episodeId={episodeId}
-        selectedShotId={selectedShotId}
-        projection={projection}
-        enabled={open && !loading && error === undefined}
-        port={port}
-        t={t}
-      />
-      <SelectedVideoReviewView
-        projectId={projectId}
-        episodeId={episodeId}
-        selectedShotId={selectedShotId}
-        projection={projection}
-        enabled={open && !loading && error === undefined}
-        port={port}
-        t={t}
-      />
-      <ProductionUnitView
-        projectId={projectId}
-        episodeId={episodeId}
-        selectedShotId={selectedShotId}
-        projection={projection}
-        enabled={open && !loading && error === undefined}
-        port={port}
-        t={t}
-      />
+          {shotRelations !== undefined && (
+            <HeroFrameStoryboardCanvas
+              relations={shotRelations}
+              heroFrameStoryboards={projection?.director.heroFrameStoryboards}
+              selectedShotId={selectedShotId}
+              port={port}
+              t={t}
+              onCommitted={refreshWorkflowProjectionAfterCommit}
+            />
+          )}
+        </Card>
+        <ContinuityDeltaView
+          projectId={projectId}
+          episodeId={episodeId}
+          selectedShotId={selectedShotId}
+          projection={projection}
+          enabled={open && !loading && error === undefined}
+          port={port}
+          t={t}
+        />
+        <SelectedVideoReviewView
+          projectId={projectId}
+          episodeId={episodeId}
+          selectedShotId={selectedShotId}
+          projection={projection}
+          enabled={open && !loading && error === undefined}
+          port={port}
+          t={t}
+        />
+        <ProductionUnitView
+          projectId={projectId}
+          episodeId={episodeId}
+          selectedShotId={selectedShotId}
+          projection={projection}
+          enabled={open && !loading && error === undefined}
+          port={port}
+          t={t}
+        />
+      </details>
     </div>
   )
 
@@ -709,7 +714,7 @@ export function QingmuCockpit({
         {wide && <span>{t('trigger')}</span>}
       </button>
       <Modal open={open} onClose={close} title={t('title')} headless className={css.dialog as string}>
-        <div ref={dialogRef} className={`${css.shell} ${tab === 'director' || creating || projectId === '' || tab === 'assets' ? css.directorShell : ''}`}>
+        <div ref={dialogRef} className={`${css.shell} ${tab === 'director' || creating || projectId === '' || tab === 'assets' ? css.directorShell : ''} ${tab === 'shots' ? css.shootingShell : ''}`}>
           <header className={css.header}>
             <div>
               <h2 ref={headingRef} tabIndex={-1}>{t('title')}</h2>

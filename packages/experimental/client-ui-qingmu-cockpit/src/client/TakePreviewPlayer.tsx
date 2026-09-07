@@ -7,19 +7,33 @@ import css from './TakeVersionCompareView.module.css'
  * @param props - Immutable scope, authenticated Host port and translated labels.
  * @returns A read-only video player with bounded loading and recoverable errors.
  */
-export function TakePreviewPlayer({ request, load, t }: {
+export function TakePreviewPlayer({ request, load, t, onPreviewReady }: {
   readonly request: YimengTakePreviewRequest
   readonly load: QingmuYimengPort['takePreview']
   readonly t: (key: QingmuCockpitKey) => string
+  /** Receives only the verified in-memory object URL for an existing Take. */
+  readonly onPreviewReady?: (url: string | undefined) => void
 }) {
   const [url, setUrl] = useState<string>()
   const [status, setStatus] = useState<'idle' | 'loading' | 'error' | 'ready'>('idle')
   const controller = useRef<AbortController | undefined>(undefined)
   const blob = useRef<string | undefined>(undefined)
-  useEffect(() => () => {
+  const requestKey = [request.projectId, request.episodeId, request.frameId, request.takeId, request.expectedOutputSha256].join('\u0000')
+  useEffect(() => {
     controller.current?.abort()
+    controller.current = undefined
     if (blob.current !== undefined) URL.revokeObjectURL(blob.current)
-  }, [])
+    blob.current = undefined
+    setUrl(undefined)
+    setStatus('idle')
+    onPreviewReady?.(undefined)
+    return () => {
+      controller.current?.abort()
+      if (blob.current !== undefined) URL.revokeObjectURL(blob.current)
+      blob.current = undefined
+      onPreviewReady?.(undefined)
+    }
+  }, [onPreviewReady, requestKey])
   async function preview() {
     if (controller.current !== undefined || blob.current !== undefined) return
     const run = new AbortController()
@@ -37,6 +51,7 @@ export function TakePreviewPlayer({ request, load, t }: {
       if (digest !== request.expectedOutputSha256) throw new Error('preview hash mismatch')
       blob.current = URL.createObjectURL(new Blob([bytes], { type: result.mimeType }))
       setUrl(blob.current)
+      onPreviewReady?.(blob.current)
       setStatus('ready')
     } catch {
       if (!run.signal.aborted) setStatus('error')
