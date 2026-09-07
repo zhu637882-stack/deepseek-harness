@@ -3,11 +3,15 @@ import { useEffect, useRef, useState } from 'react'
 import type { NativeDirectorPromptTarget } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import { useDirectorConnection, type NativeDirectorSessionPort } from './native-director-session.ts'
 import { NativeDialogueProgress } from './NativeDialogueProgress.tsx'
+import css from './NativeDirectorComposer.module.css'
 
 const pendingKey = 'qingmu.native-director-unconfirmed.v1'
 const unknownNotice = '上次发送结果尚未确认，可能已进入原会话。请核对原会话后再解除发送保护，勿重复发送。'
 function retainedRequest(): string {
   try { return sessionStorage.getItem(pendingKey) ?? '' } catch { return '发送状态存储不可用' }
+}
+function storedDraft(key: string): string {
+  try { return (sessionStorage.getItem(key) ?? '').slice(0, 16000) } catch { return '' }
 }
 
 /** A user-initiated native turn, not a second provider client or business-write path. */
@@ -20,7 +24,9 @@ export function NativeDirectorComposer({ port, sessionId, scopeKey, ready, targe
   readonly onCommitted?: (() => Promise<unknown>) | undefined
 }) {
   const connection = useDirectorConnection(port.connection)
-  const [text, setText] = useState('')
+  const draftKey = `qingmu.director-text.v1:${sessionId ?? 'unbound'}:${scopeKey}`
+  const [draft, setDraft] = useState(() => ({ key: draftKey, text: storedDraft(draftKey) }))
+  const text = draft.key === draftKey ? draft.text : storedDraft(draftKey)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const [unconfirmed, setUnconfirmed] = useState(retainedRequest)
@@ -44,8 +50,9 @@ export function NativeDirectorComposer({ port, sessionId, scopeKey, ready, targe
     try {
       await port.prompt(target, text, request.signal)
       if (!request.signal.aborted && pending.current === request) {
+        sessionStorage.removeItem(draftKey)
         if (retainedRequest() === record) sessionStorage.removeItem(pendingKey)
-        setText('')
+        setDraft({ key: draftKey, text: '' })
         setNotice('要求已交给当前导演处理；下面显示实际进展。')
       }
     } catch (error) {
@@ -57,9 +64,17 @@ export function NativeDirectorComposer({ port, sessionId, scopeKey, ready, targe
       if (pending.current === request) { pending.current = undefined; setBusy(false) }
     }
   }
-  return <section aria-label="向当前镜头的导演提要求">
+  return <section className={css.composer} aria-label="向当前镜头的导演提要求">
     <label>导演要求<textarea aria-label="导演要求" value={text} maxLength={16000} disabled={busy}
-      onChange={(event) => { setText(event.target.value) }} placeholder="例如：保持铁轨在右侧，给本镜写首帧和视频提示词。" /></label>
+      onChange={(event) => {
+        const next = event.target.value
+        setDraft({ key: draftKey, text: next })
+        try {
+          if (next) sessionStorage.setItem(draftKey, next)
+          else sessionStorage.removeItem(draftKey)
+        }
+        catch { setNotice('当前文字尚在，但浏览器无法保留草稿；离开前请复制。') }
+      }} placeholder="例如：这句台词再自然一点，保留其他镜头。" /></label>
     <button type="button" disabled={!ready || !target || target.sessionId !== sessionId || !connection || !sessionId || busy || !!unconfirmed || !text.trim()}
       onClick={() => { void send() }}>{busy ? '正在发送…' : '发送给当前导演'}</button>
     <p>导演按你的要求处理修改；生成画面的认可仍由你决定。</p>

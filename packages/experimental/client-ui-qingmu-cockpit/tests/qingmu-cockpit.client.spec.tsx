@@ -890,7 +890,7 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
   }, overrides)
 }
 
-function mount(port: QingmuYimengPort, entryScope?: QingmuEntryScope | null) {
+function mount(port: QingmuYimengPort, entryScope?: QingmuEntryScope | null, applicationShell = false) {
   const root = document.createElement('div')
   root.id = 'root'
   document.body.append(root)
@@ -905,7 +905,7 @@ function mount(port: QingmuYimengPort, entryScope?: QingmuEntryScope | null) {
   const useSessions = ((selector: (state: { current: string }) => unknown) => selector({ current: 'session_1' })) as never
   const entryScopeProps = entryScope === undefined ? {} : { entryScope }
   return render(
-    <QingmuCockpit wide port={port} directorBridge={directorBridge} {...entryScopeProps} t={t}
+    <QingmuCockpit wide port={port} directorBridge={directorBridge} {...entryScopeProps} t={t} applicationShell={applicationShell}
       useSessions={useSessions} useWorkspaces={neverHook} />,
     { container: root },
   )
@@ -914,6 +914,8 @@ function mount(port: QingmuYimengPort, entryScope?: QingmuEntryScope | null) {
 beforeEach(() => {
   document.body.innerHTML = ''
   sessionStorage.clear()
+  localStorage.clear()
+  history.replaceState({}, '', '/')
 })
 
 afterEach(() => {
@@ -922,6 +924,36 @@ afterEach(() => {
 })
 
 describe('embedded Qingmu entry scope', () => {
+  it('occupies the application instead of opening a cockpit over the conversation', async () => {
+    const port = makePort()
+    mount(port, undefined, true)
+    const navigation = screen.getByRole('navigation', { name: '创作流程' })
+    expect(within(navigation).getAllByRole('button')).toHaveLength(5)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('button', { name: zh.trigger })).toBeNull()
+    await waitFor(() => { expect(port.workflow).toHaveBeenCalled() })
+    expect(document.getElementById('root')?.hasAttribute('inert')).toBe(false)
+    fireEvent.click(within(navigation).getByRole('button', { name: /故事/ }))
+    expect(await screen.findByRole('heading', { name: '故事' })).toBeTruthy()
+    expect(new URLSearchParams(location.search).get('qingmuView')).toBe('story')
+    fireEvent.click(within(navigation).getByRole('button', { name: /拍摄与审看/ }))
+    expect(screen.getByRole('navigation', { name: '创作流程' })).toBe(navigation)
+    expect(port.commitScript).not.toHaveBeenCalled()
+    expect(port.createHumanDecision).not.toHaveBeenCalled()
+    expect(port.selectTakeVersion).not.toHaveBeenCalled()
+  })
+
+  it('restores the chosen creative step on reload without adopting or submitting', async () => {
+    history.replaceState({}, '', '/?qingmuView=story')
+    const port = makePort()
+    mount(port, undefined, true)
+    expect(await screen.findByRole('heading', { name: '故事' })).toBeTruthy()
+    await waitFor(() => { expect(port.workflow).toHaveBeenCalled() })
+    expect(screen.getByRole('button', { name: /01故事/ }).getAttribute('aria-current')).toBe('step')
+    expect(port.commitScript).not.toHaveBeenCalled()
+    expect(port.createHumanDecision).not.toHaveBeenCalled()
+  })
+
   it('decodes only a complete, bounded project and episode handoff', () => {
     expect(parseQingmuEntryScope('http://127.0.0.1:49901/')).toBeUndefined()
     expect(parseQingmuEntryScope('http://127.0.0.1:49901/?qingmuEmbedded=1&qingmuProjectId=project-2'))
@@ -1206,7 +1238,7 @@ describe('QingmuCockpit journey', () => {
     expect(within(dialog).getByText(zh.humanPending)).toBeTruthy()
 
     fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabShots }))
-    expect(within(dialog).getByText('雨夜相遇')).toBeTruthy()
+    expect(within(dialog).getByRole('heading', { name: '雨夜相遇' })).toBeTruthy()
     expect(within(dialog).getAllByText('frame-1').length).toBeGreaterThanOrEqual(1)
     expect(within(dialog).getAllByText('scene-1').length).toBeGreaterThanOrEqual(1)
     expect(within(dialog).getByText('beat-1')).toBeTruthy()
@@ -1330,7 +1362,9 @@ describe('QingmuCockpit journey', () => {
     await waitFor(() => {
       expect(dialog.querySelector('[data-shot-id="frame-1"]')).toBeTruthy()
     })
-    expect(storageWrite).not.toHaveBeenCalled()
+    const scopedKeys = storageWrite.mock.calls.every(([key]) =>
+      /^qingmu:cockpit:shooting-workspace:v1:project-1:episode-1:(shot|tab)$/.test(String(key)))
+    expect(scopedKeys).toBe(true)
   })
 
   it('fails closed when the IMAGO relation method claims a project-state write', async () => {

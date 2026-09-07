@@ -5,7 +5,7 @@ import { ShootingFirstFrameHistory } from '../src/client/ShootingFirstFrameHisto
 const api = vi.hoisted(() => ({ history: vi.fn(), state: vi.fn(), historyPreview: vi.fn(), select: vi.fn(), receipt: vi.fn() }))
 vi.mock('../src/client/first-frame-selection.ts', async importOriginal => ({ ...await importOriginal<typeof import('../src/client/first-frame-selection.ts')>(), createFirstFrameSelectionClient: () => api }))
 import { FirstFrameSelectionUnknownError } from '../src/client/first-frame-selection.ts'
-vi.mock('../src/client/FirstFrameCandidatePreview.tsx', () => ({ FirstFrameCandidatePreview: ({ onPreviewReady }: { onPreviewReady: (url: string) => void }) => <button onClick={() => onPreviewReady('blob:viewed')}>读取真实候选</button> }))
+vi.mock('../src/client/FirstFrameCandidatePreview.tsx', () => ({ FirstFrameCandidatePreview: ({ onPreviewReady, thumbnailClassName }: { onPreviewReady: (url: string) => void; thumbnailClassName?: string }) => thumbnailClassName !== undefined ? <img alt="历史首帧缩略图" /> : <button onClick={() => onPreviewReady('blob:viewed')}>读取真实候选</button> }))
 const scope = { projectId: 'p', episodeId: 'e', storyboardRevisionId: 'r', frameId: 'f' }
 const image = { assetId: 'a', materializedSha256: 'a'.repeat(64), qualityStatus: 'passed', selectionStatus: 'Unselected', isSelected: false }
 const props = { scope, onCommitted: vi.fn(async () => undefined) }
@@ -26,6 +26,16 @@ it('requires actually viewing the identical bytes before adoption', async () => 
   expect(screen.queryByRole('button', { name: '认可并采用这张首帧' })).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: '读取真实候选' }))
   expect(await screen.findByRole('button', { name: '认可并采用这张首帧' })).toBeTruthy()
+  expect(api.select).not.toHaveBeenCalled()
+})
+
+it('offers a read-only retry for unavailable eligibility, never asks for another generation', async () => {
+  api.state.mockRejectedValueOnce(new Error('offline'))
+  render(<ShootingFirstFrameHistory {...props} />)
+  expect((await screen.findByRole('alert')).textContent).toContain('不必因此重新生成')
+  fireEvent.click(screen.getByRole('button', { name: '重新检查采用条件' }))
+  await waitFor(() => expect(api.state).toHaveBeenCalledTimes(2))
+  expect(screen.queryByRole('button', { name: '认可并采用这张首帧' })).toBeNull()
   expect(api.select).not.toHaveBeenCalled()
 })
 

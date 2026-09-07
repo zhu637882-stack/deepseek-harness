@@ -88,15 +88,28 @@ export function AutomaticFrameRequirementsEditor({ projectId, episodeId, shotId,
       const saved = next.canonicalStoryboard?.shots?.find(shot => shot.id === shotId)
       if (saved === undefined) throw new Error('receipt shot missing')
       localStorage.removeItem(storageKey); setDraft({ shotId, imagePromptCn: saved.imagePromptCn, blocking: saved.blocking ?? '', cameraAngle: saved.cameraAngle ?? '' }); setState(next); await onCommitted()
-    } catch { if (runEpoch === epoch.current) setError('保存结果尚未确认。草稿和同一幂等回执键已保留；请读取同一保存回执。') } finally { if (runEpoch === epoch.current) setBusy(false) }
+    } catch { if (runEpoch === epoch.current) setError('尚未确认是否保存成功。草稿已保留，请查看原保存结果，不要重复保存。') } finally { if (runEpoch === epoch.current) setBusy(false) }
   }
   if (port.readScenePlanning === undefined || port.saveScenePlanning === undefined || port.recoverScenePlanning === undefined) {
-    return <p>首帧编辑接口当前不可用；无法假装保存。</p>
+    return <p role="status">当前无法编辑要求，请刷新后再试。</p>
   }
   if (load === 'failed') return <p role="alert">{error}</p>
   if (state === null || draft === null) return <p role="status">正在读取本镜首帧要求…</p>
   const saved = state.canonicalStoryboard?.shots?.find(shot => shot.id === shotId)
   function savedField(field: 'blocking' | 'cameraAngle'): string { return state?.canonicalStoryboard?.shots?.find(shot => shot.id === shotId)?.[field] ?? '' }
   const dirty = saved !== undefined && (draft.imagePromptCn !== saved.imagePromptCn || (draft.blocking ?? '') !== savedField('blocking') || (draft.cameraAngle ?? '') !== savedField('cameraAngle'))
-  return <section>{(['blocking', 'cameraAngle'] as const).map(field => <label key={field}>{field === 'blocking' ? '动作' : '机位'}<input aria-label={field === 'blocking' ? '动作' : '机位'} maxLength={2000} value={draft[field] ?? ''} disabled={busy || draft.pending !== undefined} onChange={event => update({ ...draft, [field]: event.target.value })} /></label>)}<label>画面要求<textarea aria-label="画面要求" rows={5} maxLength={20000} value={draft.imagePromptCn} disabled={busy || draft.pending !== undefined} onChange={event => update({ ...draft, imagePromptCn: event.target.value })} /></label>{error && <p role="alert">{error}</p>}{(dirty || busy) && <button type="button" disabled={busy || Boolean(draft.pending) || !draft.imagePromptCn.trim()} onClick={() => { void save(false) }}>{busy ? '正在保存' : '保存当前要求'}</button>}{draft.pending && <button type="button" disabled={busy} onClick={() => { void save(true) }}>读取同一保存回执</button>}</section>
+  return <section aria-label="编辑当前要求">
+    {(['blocking', 'cameraAngle'] as const).map(field => <label key={field}>
+      {field === 'blocking' ? '动作' : '机位'}
+      <textarea aria-label={field === 'blocking' ? '动作' : '机位'} rows={field === 'blocking' ? 3 : 2}
+        maxLength={2000} value={draft[field] ?? ''} disabled={busy || draft.pending !== undefined}
+        onChange={event => update({ ...draft, [field]: event.target.value })} />
+    </label>)}
+    <label>画面要求<textarea aria-label="画面要求" rows={7} maxLength={20000} value={draft.imagePromptCn}
+      disabled={busy || draft.pending !== undefined} onChange={event => update({ ...draft, imagePromptCn: event.target.value })} /></label>
+    <p role="status">{draft.pending ? '正在核实上次保存，草稿已保留。' : dirty ? '有未保存修改 · 已保留在此浏览器' : '当前要求已保存'}</p>
+    {error && <p role="alert">{error}</p>}
+    {(dirty || busy) && !draft.pending && <button type="button" disabled={busy || !draft.imagePromptCn.trim()} onClick={() => { void save(false) }}>{busy ? '正在保存…' : '保存当前要求'}</button>}
+    {draft.pending && <button type="button" disabled={busy} onClick={() => { void save(true) }}>查看原保存结果</button>}
+  </section>
 }

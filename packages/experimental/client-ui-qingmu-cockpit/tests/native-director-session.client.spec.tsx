@@ -214,7 +214,8 @@ it.each(['scope', 'session', 'disconnect', 'reconnect', 'unmount'] as const)(
     await act(async () => { finish() })
     expect(screen.queryByText(/要求已发送到当前导演会话/)).toBeNull()
     if (reason !== 'unmount') {
-      expect(screen.getByRole('textbox', { name: '导演要求' })).toHaveProperty('value', '保持铁轨在右侧。')
+      expect(screen.getByRole('textbox', { name: '导演要求' })).toHaveProperty('value',
+        reason === 'scope' || reason === 'session' ? '' : '保持铁轨在右侧。')
       view.unmount()
     }
     if (reason === 'disconnect') act(() => { f.transport.publish(true) })
@@ -226,3 +227,15 @@ it.each(['scope', 'session', 'disconnect', 'reconnect', 'unmount'] as const)(
     expect(prompt).toHaveBeenCalledTimes(1)
   },
 )
+it('keeps unsent director text per shot across closing and reopening, without dispatching', () => {
+  const f = fixture(false, 'qingmu-director')
+  const props = { port: f.port, sessionId:'s1', scopeKey:'shot1', target:f.target, ready:true }
+  const view = render(<NativeDirectorComposer {...props} />)
+  fireEvent.change(screen.getByLabelText('导演要求'), { target:{ value:'保留车外的莉娜' } })
+  view.rerender(<NativeDirectorComposer {...props} scopeKey="shot2" />)
+  expect(screen.getByLabelText('导演要求')).toHaveProperty('value', '')
+  view.unmount()
+  render(<NativeDirectorComposer {...props} />)
+  expect(screen.getByLabelText('导演要求')).toHaveProperty('value', '保留车外的莉娜')
+  expect(f.api.sessions.prompt).not.toHaveBeenCalled()
+})

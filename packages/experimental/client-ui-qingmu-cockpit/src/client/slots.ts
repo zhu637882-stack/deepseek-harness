@@ -28,6 +28,8 @@ export function parseQingmuEntryScope(href: string): QingmuEntryScope | null | u
 
 /** Dependencies injected into the Qingmu cockpit's sidebar slot occupant. */
 export interface QingmuCockpitFace {
+  /** Product workspace entry; legacy embedded entry remains scope-compatible. */
+  readonly applicationShell?: boolean
   readonly nativeDirectorSession?: NativeDirectorSessionPort
   readonly port: QingmuYimengPort
   readonly directorBridge: DirectorContextClientPort

@@ -25,6 +25,7 @@ export function ShootingFirstFrameHistory({ scope, onCommitted, onCandidatePrevi
   const client = useMemo(() => createFirstFrameSelectionClient(), [])
   const [items, setItems] = useState<readonly FirstFrameHistoryCandidate[]>()
   const [selection, setSelection] = useState<FirstFrameSelectionState>()
+  const [selectionLoad, setSelectionLoad] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [activeId, setActiveId] = useState('')
   const [viewed, setViewed] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string>()
@@ -39,9 +40,11 @@ export function ShootingFirstFrameHistory({ scope, onCommitted, onCandidatePrevi
     try { return Boolean(readMarker(markerKey, scope)?.requestSha256) } catch { return false }
   })
   const readSelection = useCallback(async (signal?: AbortSignal) => {
+    setSelection(undefined); setSelectionLoad('loading')
     const current = await client.state(scope, signal)
     if (signal?.aborted) return
     setSelection(current)
+    setSelectionLoad('ready')
     // Refresh only recovers a matching receipt; it never repeats the adoption POST.
     try {
       const marker = readMarker(markerKey, scope)
@@ -58,7 +61,7 @@ export function ShootingFirstFrameHistory({ scope, onCommitted, onCandidatePrevi
       if (controller.signal.aborted) return
       setItems(values); setActiveId(values.at(-1)?.assetId ?? '')
     }).catch(() => { if (!controller.signal.aborted) setError('首帧历史暂时无法读取，请重新打开。') })
-    void readSelection(controller.signal).catch(() => { /* Inspection is independent of eligibility. */ })
+    void readSelection(controller.signal).catch(() => { if (!controller.signal.aborted) setSelectionLoad('failed') })
     return () => controller.abort()
   }, [client, readSelection])
   const onPreviewReady = useCallback((url: string | undefined) => { setViewed(url !== undefined); setPreviewUrl(url) }, [])
@@ -123,7 +126,7 @@ export function ShootingFirstFrameHistory({ scope, onCommitted, onCandidatePrevi
     finally { lock.current = false; setBusy(false) }
   }
   return <section className={css.history} aria-label="本镜首帧候选">
-    <header><strong>首帧候选</strong><span>查看不改变选用；旧版和未通过图片只供对照。</span></header>
+    <header><strong>首帧候选</strong><span>单击比较，采用另行确认</span></header>
     <div className={css.image}>
       {current && <FirstFrameCandidatePreview key={current.assetId} autoLoad
         request={{ ...scope, assetId: current.assetId, expectedMaterializedSha256: current.materializedSha256 }}
@@ -133,11 +136,17 @@ export function ShootingFirstFrameHistory({ scope, onCommitted, onCandidatePrevi
       {items?.length === 0 && <p>本镜还没有已落盘的首帧。</p>}
     </div>
     <div className={css.strip}>{items?.map((item, index) => <button type="button" key={item.assetId} aria-pressed={activeId === item.assetId} onClick={() => { if (item.assetId !== activeId) { setActiveId(item.assetId); setViewed(false); setPreviewUrl(undefined) } }}>
-      首帧 v{index + 1}<small>{item.isSelected ? '当前选用' : item.selectionStatus === 'Stale' ? '旧版，仅供对照' : item.selectionStatus === 'Rejected' || item.qualityStatus === 'failed' ? '未通过' : item.qualityStatus === 'passed' ? '待你审看' : '等待检查'}</small>
+      {activeId === item.assetId ? previewUrl ? <img className={css.thumbnail} src={previewUrl} alt={`首帧 v${index + 1} 缩略图`} /> : <span className={css.thumbnail}>读取中…</span> : <FirstFrameCandidatePreview autoLoad thumbnailClassName={css.thumbnail ?? ''}
+        request={{ ...scope, assetId: item.assetId, expectedMaterializedSha256: item.materializedSha256 }} load={client.historyPreview}
+        labels={{ load: '查看首帧', loading: '正在读取首帧', error: '缩略图未载入', ariaLabel: `首帧 v${index + 1} 缩略图` }} />}
+      <span>首帧 v{index + 1}</span><small>{item.isSelected ? '当前选用' : item.selectionStatus === 'Stale' ? '旧版，仅供对照' : item.selectionStatus === 'Rejected' || item.qualityStatus === 'failed' ? '未通过' : item.qualityStatus === 'passed' ? '待你审看' : '检查未就绪'}</small>
     </button>)}</div>
-    {eligible && viewed && !pending && <button type="button" disabled={busy} onClick={() => { void adopt() }}>认可并采用这张首帧</button>}
-    {current && !eligible && !current.isSelected && <p>这张历史图片当前不可采用。可返回修改要求、重新生成；不会自动替换已有素材。</p>}
-    {pending && <button type="button" disabled={busy} onClick={() => { void recover() }}>{canReadReceipt ? '读取原采用结果' : '继续原采用操作'}</button>}
-    {error && <p role="alert">{error}</p>}
+    <div className={css.footer}>
+      {eligible && viewed && !pending && <button className={css.primary} type="button" disabled={busy} onClick={() => { void adopt() }}>认可并采用这张首帧</button>}
+      {selectionLoad === 'failed' ? <div role="alert"><p>采用条件暂时无法读取。你可以继续比较候选，不必因此重新生成。</p><button type="button" onClick={() => { void readSelection().catch(() => setSelectionLoad('failed')) }}>重新检查采用条件</button></div>
+        : current && !eligible && !current.isSelected && <p role="status">{selectionLoad === 'loading' ? '正在读取采用条件…' : current.qualityStatus === 'pending' ? '这张图片的检查结果尚未就绪。可继续比较，暂不能采用。' : '这张图片不符合当前采用条件，仅供对照；现有选用不会改变。'}</p>}
+      {pending && <button type="button" disabled={busy} onClick={() => { void recover() }}>{canReadReceipt ? '读取原采用结果' : '继续原采用操作'}</button>}
+      {error && <p role="alert">{error}</p>}
+    </div>
   </section>
 }

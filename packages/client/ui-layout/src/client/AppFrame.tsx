@@ -20,7 +20,7 @@ import css from './AppFrame.module.css'
 /** Full composed props: runtime share + child-slot render share + store share. */
 export type AppFrameProps =
   & PropsRuntime<'root'>
-  & PropsRenderSlots<'sidebar' | 'conversation' | 'details' | 'shell.overlay'>
+  & PropsRenderSlots<'sidebar' | 'conversation' | 'details' | 'shell.overlay' | 'shell.workspace'>
   & PropsStore<ReturnType<typeof createLayoutStore>>
 
 /** Center column grid item (session-body building block). */
@@ -91,6 +91,13 @@ export function AppFrame({
   renderSlot,
 }: AppFrameProps) {
   const panels = useStore(s => s)
+  const [toolsOpen, setToolsOpen] = useState(false)
+  const toolsRef = useRef<HTMLButtonElement>(null)
+  const toolsTrigger = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    if (toolsOpen) toolsRef.current?.focus()
+    else { toolsTrigger.current?.focus(); toolsTrigger.current = null }
+  }, [toolsOpen])
   const detailsSession = useSessions((s) => {
     const current = s.current
     return current !== undefined && s.byId[current]?.blank === false ? current : undefined
@@ -125,7 +132,7 @@ export function AppFrame({
       observer.disconnect()
       if (raf !== null) cancelAnimationFrame(raf)
     }
-  }, [])
+  }, [toolsOpen])
 
   // Narrow viewports auto-collapse the sidebar; the store mirror keeps
   // toggleSidebar's semantics right (narrow toggles flip the manual
@@ -161,7 +168,7 @@ export function AppFrame({
     actions.setDetails(detailsBase.current - dx)
   }, [actions])
 
-  return (
+  const standardFrame = (
     <div
       ref={frameRef}
       className={css.frame}
@@ -198,4 +205,17 @@ export function AppFrame({
       {cols.details > 0 && <DragHandle side="details" left={viewport - cols.details} onStart={onDetailsStart} onDrag={onDetailsDrag} onEnd={onDragEnd} />}
     </div>
   )
+  // The layout keeps exclusive render authority over native slots. Products
+  // replace the primary workspace, not the session runtime or plugin services.
+  return <>
+    <div className={css.workspace} hidden={toolsOpen}>
+      {renderSlot('shell.workspace', { onOpenTools: () => {
+        toolsTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+        setToolsOpen(true)
+      } }, { fallback: standardFrame })}
+    </div>
+    {toolsOpen && <section className={css.tools} aria-label="系统设置与会话">
+      <header><strong>系统设置与会话</strong><button ref={toolsRef} type="button" onClick={() => setToolsOpen(false)}>返回创作</button></header>{standardFrame}
+    </section>}
+  </>
 }

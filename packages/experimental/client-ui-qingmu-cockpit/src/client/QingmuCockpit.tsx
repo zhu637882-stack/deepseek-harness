@@ -31,12 +31,18 @@ import css from './QingmuCockpit.module.css'
 import { DirectorWorkspace } from './DirectorWorkspace.tsx'
 import { NativeDirectorSession } from './NativeDirectorSession.tsx'
 import { ShootingReviewWorkspace } from './ShootingReviewWorkspace.tsx'
+import { QingmuApplicationFrame, creativeStepFromSearch, creativeStepLabel, type CreativeStep } from './QingmuApplicationFrame.tsx'
 
-export type QingmuCockpitProps = PropsRuntime<'sidebar.footer.action'>
+export type QingmuCockpitProps = PropsRuntime<'root'>
+  & { readonly wide?: boolean; readonly onOpenTools?: () => void }
   & InjectFace<QingmuCockpitFace>
   & PropsLocale<'qingmuCockpit'>
 
 type Tab = 'overview' | 'director' | 'assets' | 'shots' | 'generation' | 'delivery'
+const STEP_TABS: Record<CreativeStep, Tab> = { story: 'overview', assets: 'assets', storyboard: 'director', shooting: 'shots', delivery: 'delivery' }
+function creativeStepForTab(tab: Tab): CreativeStep {
+  return (Object.entries(STEP_TABS).find(([, value]) => value === tab)?.[0] ?? 'shooting') as CreativeStep
+}
 
 const TABS: readonly { readonly id: Tab; readonly label: QingmuCockpitKey }[] = [
   { id: 'overview', label: 'tabOverview' },
@@ -167,12 +173,14 @@ function errorMessage(error: unknown): string {
   return String(error)
 }
 
-/** Qingmu production cockpit mounted in the generic sidebar footer. */
+/** Qingmu product workspace; the unregistered modal branch supports older embedded callers. */
 export function QingmuCockpit({
-  wide, port, directorBridge, nativeDirectorSession, hostSync, entryScope, t, useSessions,
+  wide, port, directorBridge, nativeDirectorSession, hostSync, entryScope, t, useSessions, applicationShell, onOpenTools,
 }: QingmuCockpitProps) {
   const [open, setOpen] = useState(true)
-  const [tab, setTab] = useState<Tab>(() => new URLSearchParams(globalThis.location?.search ?? '').get('qingmuView') === 'shooting' ? 'shots' : 'director')
+  const [tab, setTab] = useState<Tab>(() => applicationShell
+    ? STEP_TABS[creativeStepFromSearch(globalThis.location?.search ?? '')]
+    : new URLSearchParams(globalThis.location?.search ?? '').get('qingmuView') === 'shooting' ? 'shots' : 'director')
   const [shootingAction, setShootingAction] = useState<string>()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
@@ -195,6 +203,21 @@ export function QingmuCockpit({
   const directorDirty = useRef(false)
   const onDirectorDirty = useCallback((dirty: boolean) => { directorDirty.current = dirty }, [])
   const mayLeaveDirector = (): boolean => !directorDirty.current || window.confirm(t('directorLeaveConfirm'))
+  useEffect(() => {
+    if (!applicationShell) return
+    const changed = () => {
+      if (mayLeaveDirector()) { setCreating(false); setTab(STEP_TABS[creativeStepFromSearch(location.search)]) }
+      else { const url = new URL(location.href); url.searchParams.set('qingmuView', creativeStepForTab(tab)); history.replaceState(history.state, '', url) }
+    }
+    window.addEventListener('popstate', changed)
+    return () => window.removeEventListener('popstate', changed)
+  }, [applicationShell, tab, t])
+  useEffect(() => {
+    if (!applicationShell) return
+    const url = new URL(location.href)
+    url.searchParams.set('qingmuView', creativeStepForTab(tab))
+    history.replaceState(history.state, '', url)
+  }, [applicationShell, tab])
   const handleGenerationCatalog = useCallback((result: YimengCapabilityCatalogResponse | undefined) => {
     setGenerationCatalog(result)
   }, [])
@@ -372,9 +395,9 @@ export function QingmuCockpit({
   }, [episodeId, projectId, selectedShotId, shotRelations])
 
   useEffect(() => {
-    if (projectId === '' || episodeId === '') return
+    if (applicationShell || projectId === '' || episodeId === '') return
     if (storedShootingWorkspaceValue(projectId, episodeId, 'tab') === 'shots') setTab('shots')
-  }, [episodeId, projectId])
+  }, [applicationShell, episodeId, projectId])
 
   useEffect(() => {
     if (projectId === '' || episodeId === '') return
@@ -383,7 +406,7 @@ export function QingmuCockpit({
   }, [episodeId, projectId, tab])
 
   useEffect(() => {
-    if (!open) return
+    if (applicationShell || !open) return
     const appRoot = document.getElementById('root')
     const previousInert = appRoot?.inert
     if (appRoot !== null) appRoot.inert = true
@@ -413,7 +436,7 @@ export function QingmuCockpit({
       if (appRoot !== null) appRoot.inert = previousInert ?? false
       queueMicrotask(() => { triggerRef.current?.focus() })
     }
-  }, [open])
+  }, [open, applicationShell])
 
   const projectionRecord = recordOf(projection)
   const stages = Object.entries(recordOf(projectionRecord.stages))
@@ -540,6 +563,13 @@ export function QingmuCockpit({
   const shotView = (
     <div className={css.stack}>
       <ShootingReviewWorkspace
+        hideHeader={applicationShell === true}
+        headerActions={<>
+          <button type="button" onClick={() => { if (mayLeaveDirector()) void refresh() }} disabled={loading} aria-label="刷新页面">
+            <IconRefreshOutline16 size={16} /><span>{loading ? '正在刷新…' : '刷新'}</span>
+          </button>
+          <button type="button" onClick={close} aria-label="返回对话">返回对话</button>
+        </>}
         projectName={projectLabel(selectedProject ?? {}, '未命名项目')}
         episodeName={episodeLabel(selectedEpisode ?? {}, '未命名剧集')}
         projectId={projectId}
@@ -552,8 +582,15 @@ export function QingmuCockpit({
         onProductionAction={(_action, shotId) => { setSelectedShotId(shotId); setShootingAction(shotId) }}
         directorAssistant={nativeDirectorSession === undefined
           ? <p role="status">原生导演助手当前不可用；不会回退到 iframe。</p>
-          : <NativeDirectorSession port={nativeDirectorSession} bridge={directorBridge} sessionId={directorSessionId}
-            onRefresh={() => { setDirectorRefresh(value => value + 1) }} />}
+          : <div className={css.inlineDirector}>
+            <NativeDirectorSession compact port={nativeDirectorSession} bridge={directorBridge} sessionId={directorSessionId}
+              onRefresh={() => { setDirectorRefresh(value => value + 1) }} />
+            <DirectorWorkspace presentation="assistant" projectId={projectId} episodeId={episodeId} projection={projection}
+              shotItems={shotItems} selectedShotId={selectedShotId} onSelectShotId={setSelectedShotId}
+              onUnsavedChange={onDirectorDirty} port={port} directorBridge={directorBridge}
+              directorSessionId={directorSessionId} directorConnection={nativeDirectorSession.connection} directorRefresh={directorRefresh}
+              nativeDirectorSession={nativeDirectorSession} hostSync={hostSync} t={t} onCommitted={refreshWorkflowProjectionAfterCommit} />
+          </div>}
         port={port}
         t={t}
       />
@@ -740,6 +777,45 @@ export function QingmuCockpit({
     delivery: deliveryView,
   }
 
+  if (applicationShell) {
+    const step = creativeStepForTab(tab)
+    const applicationPanels: Record<CreativeStep, ReactNode> = {
+      story: <div className={css.creativePage}><h1>故事</h1><p>把故事写清楚，再决定如何拍。</p>
+        {episodeId && <TextImportWorkspace key={`${projectId}:${episodeId}:story`} projectId={projectId} episodeId={episodeId} port={port} onSaved={refreshWorkflowAfterCommit} />}
+        <details><summary>精细编辑剧本</summary>
+          <ScriptWorkspace projectId={projectId} episodeId={episodeId} port={port} t={t} onCommitted={refreshWorkflowAfterCommit} />
+        </details>
+      </div>,
+      assets: <div className={css.creativePage}><h1>角色与场景</h1><p>确认人物与环境，后面的镜头沿用这些资产。</p>
+        <AssetWorkbench key={`${projectId}:application-assets`} projectId={projectId} semanticAssets={semanticAssets} port={port} t={t} onCommitted={refreshWorkflowAfterCommit} />
+      </div>,
+      storyboard: <div className={css.creativePage}><h1>分镜与导演</h1><p>理解当前故事，安排每个镜头的画面与动作。</p>{panels.director}</div>,
+      shooting: shotView,
+      delivery: <div className={css.creativePage}><h1>导出与交接</h1><p>查看已选用的视频与待完成的镜头，再交给后期。</p>
+        <EditorialHandoff projectId={projectId} episodeId={episodeId} port={port} t={t} />
+      </div>,
+    }
+    return <QingmuApplicationFrame projects={projects.map(p => ({ id: stringOf(p.id) ?? '', label: projectLabel(p, '未命名项目') }))}
+      episodes={episodes.map(e => ({ id: stringOf(e.id) ?? '', label: episodeLabel(e, '未命名剧集') }))}
+      projectId={projectId} episodeId={episodeId} step={step} loading={loading} scopeLocked={entryScope !== undefined}
+      onProject={(id) => { void chooseProject(id) }} onEpisode={(id) => { void chooseEpisode(id) }}
+      onStep={(next) => { if (mayLeaveDirector()) {
+        if (next !== step) { const url = new URL(location.href); url.searchParams.set('qingmuView', next); history.pushState(history.state, '', url) }
+        setCreating(false); setTab(STEP_TABS[next])
+      } }}
+      onCreate={() => { if (mayLeaveDirector()) setCreating(true) }}
+      onRefresh={() => { if (mayLeaveDirector()) void refresh() }} onOpenTools={onOpenTools}>
+      <div className={`${css.shell} ${step === 'shooting' && !creating ? css.shootingShell : ''}`}>
+        {error && <div role="alert" className={css.error}><p>当前项目暂时无法更新。已有素材保留，请刷新重试。</p><details><summary>开发日志</summary>{error}</details></div>}
+        <div className={css.body}><main aria-label={creating ? '新建项目' : `青木 · ${creativeStepLabel(step)}`}>
+          {creating || (!loading && projects.length === 0 && !error)
+            ? <CreateProjectWorkspace port={port} onCreated={async (result) => { await refresh(result); setCreating(false); setTab('overview') }} onCancel={projects.length ? () => setCreating(false) : undefined} />
+            : applicationPanels[step]}
+        </main></div>
+      </div>
+    </QingmuApplicationFrame>
+  }
+
   return (
     <>
       <button
@@ -757,11 +833,11 @@ export function QingmuCockpit({
         <IconDataOutline16 size={18} />
         {wide && <span>{t('trigger')}</span>}
       </button>
-      <Modal open={open} onClose={close} title={t('title')} headless className={css.dialog as string}>
+      <Modal open={open} onClose={close} title={t('title')} headless className={css.dialog ?? ''}>
         <div ref={dialogRef} className={`${css.shell} ${tab === 'director' || creating || projectId === '' || tab === 'assets' ? css.directorShell : ''} ${tab === 'shots' ? css.shootingShell : ''}`}>
           <header className={css.header}>
             <div>
-              <h2 ref={headingRef} tabIndex={-1}>{tab === 'shots' ? '青木 OS' : t('title')}</h2>
+              <h2 ref={headingRef} tabIndex={-1}>{t('title')}</h2>
               <p>{t('subtitle')}</p>
             </div>
             <div className={css.headerActions}>
@@ -838,7 +914,8 @@ export function QingmuCockpit({
               <div>
                 <strong>{error.includes('storyboard_revision_missing') ? '分镜尚未建立' : t('errorTitle')}</strong>
                 <p>{error.includes('storyboard_revision_missing')
-                  ? '完整工作流投影暂不可用；可在“剧本与资产”导入并保存剧本。没有生成分镜、资产或媒体。' : error}</p>
+                  ? '分镜暂不可用；请先在故事步骤保存剧本。' : tab === 'shots' ? '当前项目暂时无法更新。请刷新重试，已有素材和未提交草稿会保留。' : error}</p>
+                {tab === 'shots' && <details><summary>开发日志</summary><p>{error}</p></details>}
                 {error.includes('storyboard_revision_missing')
                   ? <details><summary>投影诊断</summary><p>{error}</p></details>
                   : <small>{t('errorRecovery')}</small>}

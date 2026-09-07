@@ -223,7 +223,9 @@ function validatedPendingIntent(
 export function ScenePlanningWorkspace({
   projectId, episodeId, port, directorBridge, directorSessionId, directorConnection, directorRefresh, nativeDirectorSession,
   hostSync, onUnsavedChange, onCommitted, onSelectShotId, canonicalDirectorScope, canonicalDirectorRevision,
+  presentation = 'planning',
 }: {
+  readonly presentation?: 'planning' | 'assistant' | undefined
   readonly projectId: string
   readonly episodeId: string
   readonly port: Pick<QingmuYimengPort, 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning'
@@ -247,8 +249,8 @@ export function ScenePlanningWorkspace({
   const key = `qingmu.scene-planning.v1:${projectId}:${episodeId}`
   const automaticKey = `${key}:automatic-frame`
   const [state, setState] = useState<ScenePlanningState | null>(null)
-  const [local, setLocal] = useState<LocalPlan | null>(() => storedPlan(key))
-  const [automatic, setAutomatic] = useState<AutomaticLocalPlan | null>(() => storedAutomaticDraft(`${key}:automatic-frame`))
+  const [local, setLocal] = useState<LocalPlan | null>(() => presentation === 'assistant' ? null : storedPlan(key))
+  const [automatic, setAutomatic] = useState<AutomaticLocalPlan | null>(() => presentation === 'assistant' ? null : storedAutomaticDraft(`${key}:automatic-frame`))
   const automaticRef = useRef(automatic)
   const [retained, setRetained] = useState<LocalPlan | null>(() => retainedInput(storedPlan(`${key}:retained-input`)))
   const [sceneIndex, setSceneIndex] = useState(local?.sceneIndex ?? 1)
@@ -294,12 +296,12 @@ export function ScenePlanningWorkspace({
   useEffect(() => {
     const operation = new AbortController()
     setPaidAvailability(null); clearPaidProposal()
-    if (port.readDirectorProviderAvailability === undefined) return () => operation.abort()
+    if (presentation === 'assistant' || port.readDirectorProviderAvailability === undefined) return () => operation.abort()
     void port.readDirectorProviderAvailability({ projectId, episodeId }, operation.signal)
       .then((value) => { if (!operation.signal.aborted) setPaidAvailability(value) })
       .catch(() => { if (!operation.signal.aborted) setPaidAvailability(null) })
     return () => operation.abort()
-  }, [episodeId, port, projectId])
+  }, [episodeId, port, projectId, presentation])
   const update = (next: LocalPlan | null) => {
     try {
       if (next === null) localStorage.removeItem(key)
@@ -321,6 +323,9 @@ export function ScenePlanningWorkspace({
       if (!active) return
       if (next.projectId !== projectId || next.episodeId !== episodeId) throw new Error('409 planning_read_scope_mismatch')
       setState(next)
+      // The shooting inspector reads the same source but must not restore a
+      // different planning selection, consume its draft, or invoke a write.
+      if (presentation === 'assistant') return
       if (next.canonicalStoryboard !== null && next.canonicalStoryboard !== undefined) {
         const restoredShot = next.canonicalStoryboard.shots?.find(shot => shot.id === automaticRef.current?.shotId)
         if (restoredShot && restoredShot.id !== canonicalDirectorScope?.shotId) onSelectShotId(restoredShot.id)
@@ -374,15 +379,23 @@ export function ScenePlanningWorkspace({
   const current = local?.shots[index]
   const currentShotId = local?.shotIds[index]
   const canonicalStoryboard = state?.canonicalStoryboard ?? null
-  const directorScope: DirectorObjectScope | null = canonicalStoryboard
-    ? canonicalDirectorScope?.projectId === projectId && canonicalDirectorScope.episodeId === episodeId
+  const assistantShotExists = canonicalStoryboard
+    ? canonicalStoryboard.shots?.some(shot => shot.id === canonicalDirectorScope?.shotId)
+    : state?.planning?.sceneId === canonicalDirectorScope?.sceneId
+      && state?.planning?.shots.some(shot => shot.id === canonicalDirectorScope?.shotId)
+  const directorScope: DirectorObjectScope | null = presentation === 'assistant'
+    ? assistantShotExists && canonicalDirectorScope?.projectId === projectId && canonicalDirectorScope.episodeId === episodeId
       ? canonicalDirectorScope : null
-    : state?.planning && currentShotId ? {
-      projectId, episodeId, sceneId: state.planning.sceneId, shotId: currentShotId,
-    } : null
+    : canonicalStoryboard
+      ? canonicalDirectorScope?.projectId === projectId && canonicalDirectorScope.episodeId === episodeId
+        ? canonicalDirectorScope : null
+      : state?.planning && currentShotId ? {
+        projectId, episodeId, sceneId: state.planning.sceneId, shotId: currentShotId,
+      } : null
   const directorIdentityKey = JSON.stringify([directorSessionId, directorScope, canonicalDirectorRevision, directorRefresh])
-  const visibleAutomaticShot = canonicalStoryboard?.shots?.find(shot => shot.id === automatic?.shotId)
-    ?? canonicalStoryboard?.shots?.[0]
+  const visibleAutomaticShot = presentation === 'assistant'
+    ? canonicalStoryboard?.shots?.find(shot => shot.id === directorScope?.shotId)
+    : canonicalStoryboard?.shots?.find(shot => shot.id === automatic?.shotId) ?? canonicalStoryboard?.shots?.[0]
   const nativeTarget = directorStatus === 'current' && directorBinding && directorSessionId
     && (canonicalStoryboard === null || (visibleAutomaticShot !== undefined && visibleAutomaticShot.id === directorScope?.shotId))
     && directorReadyIdentity?.key === directorIdentityKey && directorReadyIdentity.connection === connection
@@ -806,6 +819,16 @@ export function ScenePlanningWorkspace({
     && state.scriptSha256 === local.base.expectedScriptSha256
     && ((state.planning && local.shotIds[index] === state.planning.shots[index]?.id)
       || (state.storyboard === null && local.shotIds.length === 0)))
+  if (presentation === 'assistant') return <section className={css.assistant} aria-label="当前镜头导演助手">
+    <p>说出你想改的地方，导演会结合当前镜头处理。</p>
+    {nativeDirectorSession && <NativeDirectorComposer port={nativeDirectorSession} sessionId={directorSessionId}
+      scopeKey={JSON.stringify(canonicalDirectorScope)} ready={nativeTarget !== undefined}
+      target={nativeTarget} onCommitted={onCommitted} />}
+    {directorStatus !== 'current' && <p role="status">{directorStatus === 'connecting' ? '正在读取当前镜头…'
+      : !connection ? '连接已断开，恢复后可继续。' : '当前镜头尚未连接导演，请先进入或恢复导演。'}</p>}
+    <details><summary>开发日志</summary><p>{error}</p><pre>{JSON.stringify({ scope: directorScope,
+      contextSnapshotSha256: directorBinding?.binding.contextSnapshotSha256, status: directorStatus }, null, 2)}</pre></details>
+  </section>
   return <section className={css.workspace} aria-label="场景与镜头规划">
     <nav className={css.navigation} aria-label="剧本场景与规划镜头">
       <h3>场景与镜头</h3>

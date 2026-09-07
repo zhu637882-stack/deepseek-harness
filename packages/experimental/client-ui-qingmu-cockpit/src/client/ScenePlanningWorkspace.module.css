@@ -30,6 +30,10 @@
 .workspace .primary { background: var(--qingmu-accent-strong); border-color: var(--qingmu-accent); color: #fff; }
 .properties dt { color: var(--dsw-alias-label-secondary); }
 .properties dd { margin: 0 0 12px; }
+.assistant { min-width:0; font-size:14px; line-height:1.6; }
+.assistant > p { color:var(--dsw-alias-label-secondary); margin:12px 0 20px; }
+.assistant details { margin-top:20px; color:var(--dsw-alias-label-secondary); font-size:12px; }
+.assistant pre { white-space:pre-wrap; overflow-wrap:anywhere; }
 @media (max-width: 1320px) { .workspace { grid-template-columns: 148px minmax(0, 1fr) 176px; gap: 12px; } }
 @media (max-width: 1000px) { .workspace { grid-template-columns: 135px minmax(0, 1fr); } .properties { grid-column: 2; position: static; } }
 @media (max-width: 720px) { .proposal > header { display: grid; } .proposalCard dl { grid-template-columns: 1fr; } }

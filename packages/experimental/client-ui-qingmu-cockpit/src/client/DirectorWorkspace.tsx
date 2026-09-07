@@ -15,6 +15,7 @@ import { useNativeDialogueExecution } from './NativeDialogueProgress.tsx'
 
 /** Props retain Yimeng's scene/frame identities; no director state is persisted here. */
 export interface DirectorWorkspaceProps {
+  readonly presentation?: 'planning' | 'assistant' | undefined
   readonly projectId: string
   readonly episodeId: string
   readonly projection: YimengWorkflowProjection | undefined
@@ -65,13 +66,13 @@ export function DirectorWorkspace(props: DirectorWorkspaceProps) {
       canonicalDirectorScope={canonicalDirectorScope}
       canonicalDirectorRevision={JSON.stringify(currentProjection?.director.shotRelations.storyboardRevision)}
       onUnsavedChange={setPlanningDirty} />
-    <details open={productionOpen} onToggle={(event) => {
+    {props.presentation !== 'assistant' && <details open={productionOpen} onToggle={(event) => {
       setProductionOpen(event.currentTarget.open)
       if (event.currentTarget.open) setProductionMounted(true)
     }}>
       <summary>已有提示词、Take 与高级分镜</summary>
       {productionMounted && <ExistingDirectorWorkspace {...props} onUnsavedChange={setPromptDirty} />}
-    </details>
+    </details>}
   </>
 }
 

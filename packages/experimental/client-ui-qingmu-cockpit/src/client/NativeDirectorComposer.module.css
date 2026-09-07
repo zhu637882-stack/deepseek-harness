@@ -1,0 +1,9 @@
+.composer { display:flex; flex-direction:column; gap:12px; min-width:0; font-size:14px; }
+.composer label { color:var(--dsw-alias-label-secondary); }
+.composer textarea { display:block; width:100%; min-height:156px; margin-top:8px; padding:12px; resize:vertical; border:1px solid var(--dsw-alias-border-l2); border-radius:6px; background:var(--dsw-alias-bg-layer-1); color:var(--dsw-alias-label-primary); font:inherit; line-height:1.7; }
+.composer > button { min-height:40px; padding:8px 12px; border:1px solid var(--qingmu-accent); border-radius:5px; background:var(--qingmu-accent); color:#13271f; font:inherit; font-weight:550; cursor:pointer; }
+.composer > button:disabled { background:var(--dsw-alias-bg-layer-2); color:var(--dsw-alias-label-tertiary); border-color:var(--dsw-alias-border-l2); cursor:default; }
+.composer p { margin:0; color:var(--dsw-alias-label-secondary); line-height:1.6; }
+.composer > p { font-size:12px; }
+.composer section { display:grid; gap:8px; padding-top:12px; border-top:1px solid var(--dsw-alias-border-l2); }
+.composer pre { white-space:pre-wrap; overflow-wrap:anywhere; }

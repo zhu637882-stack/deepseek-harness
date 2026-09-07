@@ -4,11 +4,12 @@ import type { DirectorContextClientPort, NativeDirectorReadiness } from '@deepse
 import { useDirectorConnection, type NativeDirectorSessionPort } from './native-director-session.ts'
 
 /** Show mount evidence and explicit native entry; no automatic session mutation or model request. */
-export function NativeDirectorSession({ port, bridge, sessionId, onRefresh }: {
+export function NativeDirectorSession({ port, bridge, sessionId, onRefresh, compact = false }: {
   readonly port: NativeDirectorSessionPort
   readonly bridge: DirectorContextClientPort
   readonly sessionId: string | undefined
   readonly onRefresh: () => void
+  readonly compact?: boolean | undefined
 }) {
   const connection = useDirectorConnection(port.connection)
   const [snapshot, setSnapshot] = useState<{
@@ -52,6 +53,18 @@ export function NativeDirectorSession({ port, bridge, sessionId, onRefresh }: {
       if (operation.current === request) { operation.current = undefined; setBusy(false) }
     }
   }
+  if (compact) return <section aria-label="青木原生导演会话">
+    {(!connection || busy || status?.status !== 'mounted') && <>
+      <p role="status">{!connection ? '导演暂时离线。' : busy ? '正在进入导演…'
+        : sessionId ? '可以进入或恢复导演，再提出修改要求。' : '进入导演后，可以在这里提出创作要求。'}</p>
+      <button type="button" disabled={!connection || busy} onClick={() => { void activate() }}>进入 / 恢复青木导演</button>
+    </>}
+    {error && <p role="alert">导演连接暂未恢复，重新检查后再试。</p>}
+    <details><summary>开发日志 · 导演连接</summary>
+      <button type="button" disabled={!connection || busy} onClick={refresh}>重新检查连接</button>
+      <pre>{JSON.stringify({ status, error }, null, 2)}</pre>
+    </details>
+  </section>
   return <section aria-label="青木原生导演会话">
     <p role="status">{!connection ? 'DSH 已断线；导演连接待恢复，人工草稿保留。'
       : !sessionId ? '尚未选择导演会话。'

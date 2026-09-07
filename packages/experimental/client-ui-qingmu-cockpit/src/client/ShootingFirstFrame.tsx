@@ -1,6 +1,7 @@
 /** A single image attempt with durable browser recovery and no automatic POST replay. */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FirstFrameHistoryCandidate } from './first-frame-selection.ts'
+import css from './ShootingFirstFrame.module.css'
 
 export interface ShootingFrameScope { readonly projectId: string; readonly episodeId: string; readonly frameId: string }
 interface Preview extends ShootingFrameScope {
@@ -275,36 +276,46 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview }: {
     finally { confirmingLock.current = false; setConfirming(false) }
   }
   const blocked = submissionBlocker(attempt) ?? submissionBlocker(preview)
-  return <section aria-label="首帧生成" style={{ width: '100%', height: '100%', overflow: 'auto', padding: '16px', boxSizing: 'border-box' }}>
-    {attempt?.canActivate === true && !busy && <button type="button" onClick={() => { void resume() }}>继续原首帧任务</button>}
-    {attempt?.canRegenerate === true && !busy && <button type="button" onClick={() => {
-      if (lock.current) return
-      lock.current = true; setBusy(true); setError('')
-      void prepareAgain(true).catch(cause => setError(String(cause))).finally(() => { lock.current = false; setBusy(false) })
-    }}>重新生成首帧</button>}
-    {review && !review.accepted && <div aria-label="本镜分镜确认">
-      <h3>{review.title}</h3><p style={{ whiteSpace: 'pre-wrap' }}>{review.imagePromptCn}</p>
-      {confirming ? <p role="status">正在保存你的本镜确认…</p>
-        : review.preflight.technicalReady ? <button type="button" onClick={() => { void confirm() }}>确认本镜分镜</button>
-          : <p role="alert">本镜分镜存在输入矛盾，请先修改后确认。</p>}
-      <p>只确认当前分镜，不采用首帧，不启动付费生成。</p>
-    </div>}
-    {review?.accepted === true && requestId && attempt?.task === null && !busy && !confirming &&
+  return <section aria-label="首帧生成" className={css.generation} aria-busy={busy}>
+    <div className={css.preview}>
+      {attempt?.candidate && (!review || review.accepted) ? <figure>
+        <img src={attempt.candidate.browserUrl} alt="镜头新首帧 · 待你定版" onLoad={() => setLoadedImage(imageKey)} onError={() => setLoadedImage(undefined)} />
+        <figcaption>{attempt.candidate.isSelected ? '当前选用首帧' : '新首帧候选 · 待你审看，尚未采用'}</figcaption>
+      </figure> : <div className={css.preparation}>
+        {review && !review.accepted ? <div aria-label="本镜分镜确认">
+          <h3>先确认本镜分镜</h3><p>下面是本次生成使用的画面要求。确认只针对本镜，不会启动生成。</p>
+          <div className={css.reviewText}>{review.imagePromptCn}</div>
+          {!review.preflight.technicalReady && <p role="alert">本镜分镜存在输入矛盾，请先修改后确认。</p>}
+        </div> : blocked ? <div role="alert"><h3>还未开始生成</h3><p>本镜的生成条件尚未满足，请核对当前要求与分镜确认状态。未提交本次生成。</p></div>
+          : requestId ? <div role="status"><h3>{attemptMessage(attempt?.task)}</h3><p>你可以离开此页，返回后继续查看同一任务。</p></div>
+            : busy ? <div role="status"><h3>正在准备首帧</h3><p>正在编译提示词与检查当前要求，尚未提交生成。</p></div>
+              : preview && <div><h3>{preview.blockers.length ? '请先调整本镜要求' : '可以生成首帧了'}</h3><p>{preview.blockers.length ? '生成条件未通过，未提交、未收费。' : '使用右侧已保存的要求，生成一张新候选。原素材保持不变。'}</p></div>}
+      </div>}
+    </div>
+    {attempt?.candidate && <div className={css.candidate} aria-label="首帧候选条"><button type="button" aria-pressed="true"><img src={attempt.candidate.browserUrl} alt="新首帧候选缩略图" /><span>本次新首帧<small>{attempt.candidate.isSelected ? '已选用' : '待定版'}</small></span></button></div>}
+    <div className={css.actions}>
+      {attempt?.canActivate === true && !busy && <button type="button" onClick={() => { void resume() }}>继续原首帧任务</button>}
+      {attempt?.canRegenerate === true && !busy && <button type="button" onClick={() => {
+        if (lock.current) return
+        lock.current = true; setBusy(true); setError('')
+        void prepareAgain(true).catch(cause => setError(String(cause))).finally(() => { lock.current = false; setBusy(false) })
+      }}>重新生成首帧</button>}
+      {review && !review.accepted && <>
+        {confirming ? <p role="status">正在保存你的本镜确认…</p>
+          : review.preflight.technicalReady && <button className={css.primary} type="button" onClick={() => { void confirm() }}>确认本镜分镜</button>}
+      </>}
+      {review?.accepted === true && requestId && attempt?.task === null && !busy && !confirming &&
       <button type="button" onClick={() => {
         if (lock.current) return
         lock.current = true; setBusy(true)
         void prepareAgain().catch(cause => setError(String(cause))).finally(() => { lock.current = false; setBusy(false) })
       }}>重新检查本镜生成条件</button>}
-    {attempt?.candidate ? <>
-      <figure><img style={{ maxWidth: '100%', maxHeight: '54vh', objectFit: 'contain' }} src={attempt.candidate.browserUrl} alt="镜头新首帧 · 待你定版" onLoad={() => setLoadedImage(imageKey)} onError={() => setLoadedImage(undefined)} /><figcaption>新首帧候选 · 待你审看，尚未采用</figcaption></figure>
-      <div aria-label="首帧候选条"><button type="button" aria-pressed="true"><img width="72" src={attempt.candidate.browserUrl} alt="新首帧候选缩略图" />本次新首帧 · 待定版</button></div>
-    </> : blocked ? <p role="alert">尚未进入生成，未创建本次任务。{blocked.message}</p>
-      : requestId ? <p role="status">{attemptMessage(attempt?.task)}</p>
-        : busy ? <p role="status">正在编译最终提示词与检查生成条件…</p> : preview && <>
-          {preview.blockers.length ? <p role="alert">生成条件未通过，未提交、未收费。</p> : review?.accepted === true && <button type="button" onClick={() => { void submit() }}>生成这张首帧（仅一次）</button>}
-        </>}
-    {error && <p role="alert">{error}</p>}
-    <details><summary>开发日志</summary>
+      {!attempt?.candidate && !blocked && !requestId && !busy && preview?.blockers.length === 0 && review?.accepted === true && <button className={css.primary} type="button" onClick={() => { void submit() }}>生成这张首帧（仅一次）</button>}
+    </div>
+    {error && <p role="alert" className={css.error}>{error.includes('digest_mismatch') ? '分镜在确认前已发生变化，本次没有确认。请刷新，核对新的画面要求。'
+      : error.includes('执行器尚未启动') ? '原任务已保存，但执行器尚未启动。请查看原任务结果，不要重复生成。'
+        : '本次操作未确认完成。请保留当前候选，查看原任务结果；不要重复提交。详细原因已放入开发日志。'}</p>}
+    <details className={css.log}><summary>开发日志</summary>
       <h4>最终编译 prompt（提交前）</h4><pre style={{ whiteSpace: 'pre-wrap' }}>{preview?.prompt ?? '尚未取得完整预检'}</pre>
       <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify({ storyboardReview: review, preflightId: preview?.preflightId, payloadHash: preview?.payloadHash, estimatedCny: preview?.estimatedCny, blockers: preview?.blockers, submissionBlocker: blocked?.detail, requestId, attempt, error }, null, 2)}</pre>
     </details>

@@ -53,7 +53,7 @@ function replayProposal(shotId = 'shot_1'): DirectorReplayProposal {
       workOrderId: 'work_order_1', workOrderSha256: '2'.repeat(64), promptSha256: '3'.repeat(64),
     } } as unknown as DirectorReplayProposal
 }
-beforeEach(() => { localStorage.clear(); vi.stubGlobal('crypto', webcrypto) })
+beforeEach(() => { localStorage.clear(); sessionStorage.clear(); vi.stubGlobal('crypto', webcrypto) })
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 function automaticReadState(): ScenePlanningState {
   return { ...state, storyboard: { id: 'revision_10', version: 10, sourceHash: 'b'.repeat(64), status: 'Ready' },
@@ -216,6 +216,37 @@ it.each([undefined, [], [{ id: 'other_shot', frameNo: 2, title: '另一镜', ima
     expect(native.prompt).not.toHaveBeenCalled()
     expect(port.saveScenePlanning).not.toHaveBeenCalled()
   })
+it('uses the existing native composer inside shooting without consuming another shot planning draft', async () => {
+  const automatic = { ...automaticReadState(), canonicalStoryboard: { ...automaticReadState().canonicalStoryboard!, shots:[
+    { id:'automatic_1', frameNo:1, title:'入口', imagePromptCn:'开门' },
+    { id:'automatic_6', frameNo:6, title:'车旁', imagePromptCn:'原画面' },
+  ] } }
+  const key = 'qingmu.scene-planning.v1:project_1:episode_1:automatic-frame'
+  const retained = JSON.stringify({ shotId:'automatic_6', imagePromptCn:'未保存要求', dirty:true })
+  localStorage.setItem(key, retained)
+  const port = { readScenePlanning:vi.fn(async () => automatic), saveScenePlanning:vi.fn(), recoverScenePlanning:vi.fn(),
+    requestDirectorProposal:unavailableDirectorProposal(), checkDirectorProposalFreshness:unusedFreshness() }
+  const transport = directorConnectionFixture(), bridge = replayBridge()
+  const native = { connection:transport.source, activate:vi.fn(), prompt:vi.fn(async () => {}) }
+  const scope = { projectId:'project_1', episodeId:'episode_1', sceneId:'canonical_scene', shotId:'automatic_1' }
+  const onSelectShotId = vi.fn()
+  const props = { ...automatic, presentation:'assistant' as const, port, directorBridge:bridge, directorSessionId:'session_1',
+    directorConnection:transport.source, nativeDirectorSession:native, canonicalDirectorScope:scope,
+    onCommitted:vi.fn(async () => {}), onSelectShotId, onUnsavedChange:vi.fn() }
+  const view = render(<ScenePlanningWorkspace {...props} />)
+  fireEvent.change(screen.getByLabelText('导演要求'), { target:{ value:'把对白改得更自然' } })
+  await waitFor(() => expect(screen.getByRole('button',{ name:'发送给当前导演' })).toHaveProperty('disabled',false))
+  expect(onSelectShotId).not.toHaveBeenCalled()
+  expect(localStorage.getItem(key)).toBe(retained)
+  expect(screen.queryByLabelText('自动分镜镜头')).toBeNull()
+  expect(native.prompt).not.toHaveBeenCalled(); expect(native.activate).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button',{ name:'发送给当前导演' }))
+  await waitFor(() => expect(native.prompt).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ scope }), '把对白改得更自然', expect.any(AbortSignal)))
+  expect(port.saveScenePlanning).not.toHaveBeenCalled(); expect(port.recoverScenePlanning).not.toHaveBeenCalled()
+  view.rerender(<ScenePlanningWorkspace {...props} canonicalDirectorScope={{ ...scope,shotId:'not_in_storyboard' }} />)
+  expect(screen.getByRole('button',{ name:'发送给当前导演' })).toHaveProperty('disabled',true)
+  expect(bridge.clear).toHaveBeenCalled()
+})
 it('binds canonical shot selection to the current session without opening the legacy planner', async () => {
   const automatic = automaticReadState()
   const port = { readScenePlanning: vi.fn(async () => automatic), requestDirectorProposal: unavailableDirectorProposal(),

@@ -2,7 +2,7 @@
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import { QingmuCockpit } from './QingmuCockpit.tsx'
 import type {
   YimengEpisodeEvidenceLedgerResponse, YimengEpisodeVerificationResponse, YimengEditorialHandoffResponse,
@@ -146,11 +146,12 @@ export function apply(ctx: ClientContext): void {
 
   const connection = ctx.get('connection') as ConnectionHandle | undefined
   if (connection === undefined) throw new Error('Qingmu cockpit requires an active Client Connection')
-  const entryScope = parseQingmuEntryScope(globalThis.location.href)
-  const hostSync = createQingmuHostSync({
+  const location: Location | undefined = globalThis.location
+  const entryScope = location === undefined ? undefined : parseQingmuEntryScope(location.href)
+  const hostSync = location === undefined ? undefined : createQingmuHostSync({
     entryScope,
     referrer: globalThis.document.referrer,
-    ancestorOrigin: globalThis.location.ancestorOrigins.item(0) ?? undefined,
+    ancestorOrigin: location.ancestorOrigins.item(0) ?? undefined,
     parent: globalThis.parent,
     self: globalThis,
     storage: globalThis.localStorage,
@@ -361,12 +362,11 @@ export function apply(ctx: ClientContext): void {
   }
 
   const nativeDirectorSession = createNativeDirectorSessionPort(ctx, connection)
-  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
-    name: 'sidebar.footer.action',
-    id: 'qingmu-cockpit',
+  ctx.slots.inject('shell.workspace', () => ctx.slots.register({
+    name: 'shell.workspace',
     locale: NS,
     inject: (): QingmuCockpitFace => entryScope === undefined
-      ? { port, directorBridge, nativeDirectorSession }
-      : { port, directorBridge, nativeDirectorSession, entryScope, hostSync },
+      ? { port, directorBridge, nativeDirectorSession, applicationShell: true }
+      : { port, directorBridge, nativeDirectorSession, entryScope, hostSync, applicationShell: true },
   }, QingmuCockpit))
 }

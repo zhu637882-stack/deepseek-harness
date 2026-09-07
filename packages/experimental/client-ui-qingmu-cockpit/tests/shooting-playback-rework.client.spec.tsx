@@ -51,6 +51,7 @@ it('opens first-frame history directly, without preparing a video or requiring R
   fireEvent.click(screen.getByRole('button', { name: '查看与采用首帧' }))
   expect(screen.getByRole('region', { name: '本镜首帧候选' })).toBeTruthy()
   expect(p.onProductionAction).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '返回候选审看' }))
   fireEvent.click(await screen.findByRole('button', { name: /视频候选 v1.*检查未通过/ }))
   expect(screen.queryByRole('region', { name: '本镜首帧候选' })).toBeNull()
 })
@@ -83,6 +84,7 @@ it('exposes rework for every shot without selecting or generating, and candidate
     expect(p.onProductionAction).toHaveBeenLastCalledWith('video', `f${n}`)
     fireEvent.click(screen.getByRole('button', { name: '生成首帧' }))
     expect(screen.getByRole('region', { name: '首帧生成' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '返回候选审看' }))
     fireEvent.click(screen.getByRole('button', { name: /视频候选 v1.*检查未通过/ }))
     expect(screen.queryByRole('region', { name: '首帧生成' })).toBeNull()
   }

@@ -11,7 +11,7 @@
  * resizes are driven through the ResizeObserver stub.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, render } from '@testing-library/react'
+import { act, cleanup, render, fireEvent, screen } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import { AppFrame } from '@deepseek-ai/dsh-client-ui-layout/src/client/AppFrame.tsx'
 import type { AppFrameProps } from '@deepseek-ai/dsh-client-ui-layout/src/client/AppFrame.tsx'
@@ -52,12 +52,13 @@ function hookOf<T>(inst: { subscribe: (fn: () => void) => () => void; getSnapsho
   return function useSelector<S>(sel: (s: T) => S): S { return sel(useSyncExternalStore(inst.subscribe, inst.getSnapshot)) }
 }
 
-function mountFrame() {
+function mountFrame(customWorkspace = false) {
   window.innerWidth = frameWidth // first-render viewport source before the observer fires
   const instance = createLayoutStore().create()
   const slotCalls: { key: string; props: unknown }[] = []
-  const renderSlot = ((key: string, owner: object) => {
+  const renderSlot = ((key: string, owner: object, opts?: { fallback?: import('react').ReactNode }) => {
     slotCalls.push({ key, props: owner })
+    if (key === 'shell.workspace') return customWorkspace ? <section aria-label="Product workspace"><button onClick={(owner as { onOpenTools: () => void }).onOpenTools}>Tools</button></section> : opts?.fallback
     if (key === 'sidebar') return <div data-testid="sidebar-content" />
     if (key === 'conversation') return <div data-testid="center-content" />
     if (key === 'details') return <div data-testid="details-content" />
@@ -91,7 +92,7 @@ function mountFrame() {
     />
   )
   const utils = render(element())
-  const frame = utils.container.firstElementChild as HTMLElement
+  const frame = (utils.container.querySelector('[style*="grid-template-columns"]') ?? utils.container.firstElementChild) as HTMLElement
   return { instance, frame, slotCalls, rerenderFrame: () => { utils.rerender(element()) }, ...utils }
 }
 
@@ -137,6 +138,19 @@ afterEach(() => {
 })
 
 describe('AppFrame', () => {
+  it('a product workspace replaces the conversation frame and can open native tools without replacing runtime slots', () => {
+    const { queryByTestId, getByTestId } = mountFrame(true)
+    expect(screen.getByRole('region', { name: 'Product workspace' })).toBeTruthy()
+    expect(queryByTestId('center-content')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Tools' }))
+    expect(screen.getByRole('region', { name: '系统设置与会话' })).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Product workspace' })).toBeNull()
+    expect(screen.getByRole('button', { name: '返回创作' })).toBe(document.activeElement)
+    expect(getByTestId('center-content')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '返回创作' }))
+    expect(queryByTestId('center-content')).toBeNull()
+    expect(screen.getByRole('region', { name: 'Product workspace' })).toBeTruthy()
+  })
   it('renders three tracks from store state', () => {
     const { frame } = mountFrame()
     expect(tracks(frame)).toEqual([280, 0])
