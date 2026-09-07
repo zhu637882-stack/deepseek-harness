@@ -52,7 +52,7 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
   const [stack, setStack] = useState<YimengTakeVersionStackResponse>(); const [load, setLoad] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [browseId, setBrowseId] = useState('')
   const [panel, setPanel] = useState<'requirements' | 'assistant'>('requirements'); const [mediaUrl, setMediaUrl] = useState<string>()
-  const [zoom, setZoom] = useState(false); const [scale, setScale] = useState(1)
+  const [zoom, setZoom] = useState(false); const [scale, setScale] = useState(1); const [selectionError, setSelectionError] = useState('')
   const [offset, setOffset] = useState({ x: 0, y: 0 }); const [selecting, setSelecting] = useState(false)
   const drag = useRef<{ x: number; y: number; offsetX: number; offsetY: number }>()
   useEffect(() => {
@@ -111,6 +111,8 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
       let result; try { result = await port.selectTakeVersion(marker) } catch { const recovery = await port.recoverTakeVersionSelection(marker); if (recovery.status !== 'committed' || recovery.result === null) throw new Error('selection recovery pending'); result = recovery.result }
       if (result.providerCalls !== 0 || result.budgetMutation || result.humanApprovalInferred) throw new Error('unsafe selection receipt')
       clearTakeVersionSelectionMarker(marker, { status: 'ready', marker }); setStack(await port.takeVersions({ projectId, episodeId, frameId: activeShot.shotId }))
+    } catch {
+      setSelectionError('采用结果尚未确认；不会重发选择。请刷新后读取同一恢复回执。')
     } finally { setSelecting(false) }
   }
   return <section className={css.workspace} aria-label="拍摄与审看">
@@ -129,7 +131,7 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
           {load !== 'ready' && <p className={css.mediaNotice} role="status">{message(state, load)}</p>}{state === 'failed' && load === 'ready' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}
         </div>
         <div className={css.candidates} aria-label="候选画面">{versions.map(version => <button key={version.takeId} type="button" aria-pressed={version.takeId === browseId} onClick={() => { setBrowseId(version.takeId); setMediaUrl(undefined) }}><span className={css.videoIcon}>视频候选</span><span>候选 v{version.versionOrdinal}</span><strong>{version.isSelected ? '当前选用' : version.qualityStatus}</strong><small>{version.durationSec === null ? '时长未知' : `${version.durationSec} 秒`}</small></button>)}</div>
-        <p className={css.browseNote}>{message(state, load)} 单击候选只切换中区媒体，不会改变选用。</p><button className={css.primary} type="button" disabled={!primary || selecting} onClick={() => { void selectCurrent() }}>{primary ? (selecting ? '正在采用候选' : '采用这张') : browsed?.isSelected ? '当前已选用' : '候选不可采用'}</button>
+        <p className={css.browseNote}>{message(state, load)} 单击候选只切换中区媒体，不会改变选用。</p>{selectionError && <p role="alert">{selectionError}</p>}<button className={css.primary} type="button" disabled={!primary || selecting} onClick={() => { void selectCurrent() }}>{primary ? (selecting ? '正在采用候选' : '采用这张') : browsed?.isSelected ? '当前已选用' : '候选不可采用'}</button>
         {sourceUrl !== undefined && <button className={css.zoomButton} type="button" onClick={() => { resetZoom(); setZoom(true) }}>放大画面</button>}
         {zoom && <div className={css.zoom} role="dialog" aria-modal="true" aria-label="放大画面"><div className={css.zoomToolbar}><button type="button" onClick={closeZoom}>关闭放大查看</button><button type="button" onClick={() => setScale(value => Math.min(3, value + 0.25))}>放大</button><button type="button" onClick={() => setScale(value => Math.max(1, value - 0.25))}>缩小</button></div><div className={css.zoomCanvas} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={() => { drag.current = undefined }} onPointerCancel={() => { drag.current = undefined }}>{mediaUrl !== undefined ? <video src={mediaUrl} controls autoPlay playsInline style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }} /> : heroFrame !== undefined && heroFrame !== null && <img src={heroFrame.browserUrl} alt={`镜 ${current.frameNo} 已选首帧`} style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }} />}</div></div>}
       </main>
