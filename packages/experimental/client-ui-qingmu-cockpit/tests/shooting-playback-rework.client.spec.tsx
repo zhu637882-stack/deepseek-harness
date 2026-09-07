@@ -6,7 +6,8 @@ import { ShootingReviewWorkspace } from '../src/client/ShootingReviewWorkspace.t
 
 // Browser decoding belongs to the player tests; posters must not contend for it here.
 vi.mock('../src/client/TakeThumbnail.tsx', () => ({ TakeThumbnail: ({ alt }: { alt: string }) => <span>{alt}</span> }))
-vi.mock('../src/client/ShootingFirstFrame.tsx', () => ({ ShootingFirstFrame: () => <section aria-label="首帧生成">等待本人确认并生成</section> }))
+const firstFrameMount = vi.hoisted(() => vi.fn())
+vi.mock('../src/client/ShootingFirstFrame.tsx', () => ({ ShootingFirstFrame: ({ scope }: { scope: { frameId: string } }) => { firstFrameMount(scope.frameId); return <section aria-label="首帧生成">等待本人确认并生成</section> } }))
 vi.mock('../src/client/ShootingFirstFrameHistory.tsx', () => ({ ShootingFirstFrameHistory: () => <section aria-label="本镜首帧候选">真实历史候选</section> }))
 const bytes = Buffer.from('existing video')
 const sha = createHash('sha256').update(bytes).digest('hex')
@@ -61,8 +62,10 @@ it('restores the first-frame viewing panel after refresh without invoking a prod
   const second = render(<ShootingReviewWorkspace {...p} />)
   expect(await screen.findByRole('region', { name: '首帧生成' })).toBeTruthy()
   expect(p.onProductionAction).not.toHaveBeenCalled()
+  firstFrameMount.mockClear()
   second.rerender(<ShootingReviewWorkspace {...p} selectedShotId="f2" />)
   expect(screen.queryByRole('region', { name: '首帧生成' })).toBeNull()
+  expect(firstFrameMount).not.toHaveBeenCalled()
   second.rerender(<ShootingReviewWorkspace {...p} />)
   expect(await screen.findByRole('region', { name: '首帧生成' })).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: '返回候选审看' }))

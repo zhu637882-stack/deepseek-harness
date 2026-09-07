@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 /** Upper bound shared with the Host media bridge; first-frame preview must stay an in-memory image. */
 export const MAX_FIRST_FRAME_PREVIEW_BYTES = 16 * 1024 * 1024
@@ -63,7 +63,7 @@ export function decodeCandidate(result: FirstFrameCandidatePreviewResponse): Uin
 }
 
 /**
- * Load an existing candidate image only after an explicit user action and reject any scope or byte drift.
+ * Read an existing candidate and reject any scope or byte drift. Auto-loading is display-only.
  * @param props - Read-only scoped loader plus its content-addressed expected bytes.
  * @returns An in-memory image preview. It does not select, promote, or generate an asset.
  */
@@ -72,11 +72,13 @@ export function FirstFrameCandidatePreview({
   load,
   labels,
   onPreviewReady,
+  autoLoad = false,
 }: {
   readonly request: FirstFrameCandidatePreviewRequest
   readonly load: (request: FirstFrameCandidatePreviewRequest, signal?: AbortSignal) => Promise<FirstFrameCandidatePreviewResponse>
   readonly labels: FirstFrameCandidatePreviewLabels
   readonly onPreviewReady?: (url: string | undefined) => void
+  readonly autoLoad?: boolean
 }) {
   const [url, setUrl] = useState<string>()
   const [status, setStatus] = useState<'idle' | 'loading' | 'error' | 'ready'>('idle')
@@ -108,7 +110,7 @@ export function FirstFrameCandidatePreview({
       onPreviewReady?.(undefined)
     }
   }, [onPreviewReady, requestKey])
-  async function preview() {
+  const preview = useCallback(async () => {
     if (controller.current !== undefined || blob.current !== undefined) return
     const run = new AbortController()
     controller.current = run
@@ -129,7 +131,9 @@ export function FirstFrameCandidatePreview({
     } finally {
       if (controller.current === run) controller.current = undefined
     }
-  }
+  }, [load, onPreviewReady, request.projectId, request.episodeId, request.storyboardRevisionId,
+    request.frameId, request.assetId, request.expectedMaterializedSha256])
+  useEffect(() => { if (autoLoad) void preview() }, [autoLoad, preview])
   return <div>
     {url === undefined
       ? <button type="button" disabled={status === 'loading'} onClick={() => { void preview() }}>

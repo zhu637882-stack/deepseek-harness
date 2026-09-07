@@ -17,15 +17,17 @@ function readMarker(key: string, scope: FirstFrameSelectionCoordinates): Marker 
 }
 
 /** Browse independently of PromptIR readiness. Only the existing human selection API can adopt. */
-export function ShootingFirstFrameHistory({ scope, onCommitted }: {
+export function ShootingFirstFrameHistory({ scope, onCommitted, onCandidatePreview }: {
   readonly scope: FirstFrameSelectionCoordinates
   readonly onCommitted: () => Promise<unknown>
+  readonly onCandidatePreview?: (candidate: FirstFrameHistoryCandidate | undefined, url: string | undefined) => void
 }) {
   const client = useMemo(() => createFirstFrameSelectionClient(), [])
   const [items, setItems] = useState<readonly FirstFrameHistoryCandidate[]>()
   const [selection, setSelection] = useState<FirstFrameSelectionState>()
   const [activeId, setActiveId] = useState('')
   const [viewed, setViewed] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState<string>()
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const lock = useRef(false)
@@ -59,8 +61,12 @@ export function ShootingFirstFrameHistory({ scope, onCommitted }: {
     void readSelection(controller.signal).catch(() => { /* Inspection is independent of eligibility. */ })
     return () => controller.abort()
   }, [client, readSelection])
-  const onPreviewReady = useCallback((url: string | undefined) => setViewed(url !== undefined), [])
+  const onPreviewReady = useCallback((url: string | undefined) => { setViewed(url !== undefined); setPreviewUrl(url) }, [])
   const current = items?.find(item => item.assetId === activeId)
+  useEffect(() => {
+    onCandidatePreview?.(current, previewUrl)
+    return () => onCandidatePreview?.(undefined, undefined)
+  }, [current, previewUrl, onCandidatePreview])
   const eligible = selection?.candidates.find(item => item.assetId === activeId && item.materializedSha256 === current?.materializedSha256 && !item.isSelected && item.selectionStatus === 'Unselected')
   async function adopt(): Promise<void> {
     if (!eligible || !viewed || busy || pending || lock.current) return
@@ -111,14 +117,14 @@ export function ShootingFirstFrameHistory({ scope, onCommitted }: {
   return <section className={css.history} aria-label="本镜首帧候选">
     <header><strong>首帧候选</strong><span>查看不改变选用；旧版和未通过图片只供对照。</span></header>
     <div className={css.image}>
-      {current && <FirstFrameCandidatePreview key={current.assetId}
+      {current && <FirstFrameCandidatePreview key={current.assetId} autoLoad
         request={{ ...scope, assetId: current.assetId, expectedMaterializedSha256: current.materializedSha256 }}
         load={client.historyPreview} onPreviewReady={onPreviewReady}
         labels={{ load: '查看这张首帧', loading: '正在读取首帧', error: '这张首帧暂时无法读取，可再试一次。', ariaLabel: `首帧候选 v${(items?.indexOf(current) ?? 0) + 1}` }} />}
       {items === undefined && !error && <p role="status">正在读取首帧历史…</p>}
       {items?.length === 0 && <p>本镜还没有已落盘的首帧。</p>}
     </div>
-    <div className={css.strip}>{items?.map((item, index) => <button type="button" key={item.assetId} aria-pressed={activeId === item.assetId} onClick={() => { if (item.assetId !== activeId) { setActiveId(item.assetId); setViewed(false) } }}>
+    <div className={css.strip}>{items?.map((item, index) => <button type="button" key={item.assetId} aria-pressed={activeId === item.assetId} onClick={() => { if (item.assetId !== activeId) { setActiveId(item.assetId); setViewed(false); setPreviewUrl(undefined) } }}>
       首帧 v{index + 1}<small>{item.isSelected ? '当前选用' : item.selectionStatus === 'Stale' ? '旧版，仅供对照' : item.selectionStatus === 'Rejected' || item.qualityStatus === 'failed' ? '未通过' : item.qualityStatus === 'passed' ? '待你审看' : '等待检查'}</small>
     </button>)}</div>
     {eligible && viewed && !pending && <button type="button" disabled={busy} onClick={() => { void adopt() }}>认可并采用这张首帧</button>}

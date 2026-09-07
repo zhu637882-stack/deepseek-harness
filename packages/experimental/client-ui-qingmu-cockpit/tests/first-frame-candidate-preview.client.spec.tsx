@@ -49,6 +49,25 @@ it('loads only on an explicit click, verifies exact scope and bytes, and release
   expect(revokeUrl).toHaveBeenCalledExactlyOnceWith('blob:first-frame')
 })
 
+it('can display an existing image automatically with the same byte checks and no repeat read on rerender', async () => {
+  const load = vi.fn(async () => response)
+  const view = render(<FirstFrameCandidatePreview request={request} load={load} labels={labels} autoLoad />)
+  await screen.findByRole('img', { name: labels.ariaLabel })
+  view.rerender(<FirstFrameCandidatePreview request={{ ...request }} load={load} labels={labels} autoLoad />)
+  expect(load).toHaveBeenCalledTimes(1)
+  view.unmount()
+  expect(revokeUrl).toHaveBeenCalledExactlyOnceWith('blob:first-frame')
+})
+
+it('does not auto-retry or display an image whose bytes fail validation', async () => {
+  const load = vi.fn(async () => ({ ...response, base64: Buffer.from('wrong').toString('base64') }))
+  const view = render(<FirstFrameCandidatePreview request={request} load={load} labels={labels} autoLoad />)
+  await screen.findByRole('alert')
+  view.rerender(<FirstFrameCandidatePreview request={{ ...request }} load={load} labels={labels} autoLoad />)
+  expect(load).toHaveBeenCalledTimes(1)
+  expect(screen.queryByRole('img')).toBeNull()
+})
+
 it.each([
   ['wrong scope', { ...response, assetId: 'asset-other' }],
   ['stale sha', { ...response, materializedSha256: '0'.repeat(64) }],
