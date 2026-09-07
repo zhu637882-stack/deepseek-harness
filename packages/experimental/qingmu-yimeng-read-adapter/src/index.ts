@@ -317,7 +317,7 @@ export type {
 
 const CHANNEL = '/qingmu-yimeng'
 const DEFAULT_BASE_URL = 'http://127.0.0.1:8115'
-const DEFAULT_TIMEOUT_MS = 5_000
+const DEFAULT_TIMEOUT_MS = 20_000
 const DEFAULT_VERIFICATION_TIMEOUT_MS = 55_000
 const MAX_TIMEOUT_MS = 60_000
 const MAX_ID_LENGTH = 256
