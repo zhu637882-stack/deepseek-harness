@@ -506,6 +506,8 @@ export function QingmuCockpit({
       <ShootingReviewWorkspace
         projectName={projectLabel(selectedProject ?? {}, '未命名项目')}
         episodeName={episodeLabel(selectedEpisode ?? {}, '未命名剧集')}
+        projectId={projectId}
+        episodeId={episodeId}
         projection={projection}
         selectedShotId={selectedShotId}
         onSelectShotId={setSelectedShotId}
@@ -513,6 +515,7 @@ export function QingmuCockpit({
           ? <p role="status">原生导演助手当前不可用；不会回退到 iframe。</p>
           : <NativeDirectorSession port={nativeDirectorSession} bridge={directorBridge} sessionId={directorSessionId}
             onRefresh={() => { setDirectorRefresh(value => value + 1) }} />}
+        port={port}
       />
       <Card title={t('shotsTitle')}>
         <div className={css.metrics}>
@@ -577,17 +580,6 @@ export function QingmuCockpit({
         port={port}
         t={t}
       />
-      <div id="qingmu-version-selection">
-        <TakeVersionCompareView
-          projectId={projectId}
-          episodeId={episodeId}
-          selectedShotId={selectedShotId}
-          projection={projection}
-          enabled={open && !loading && error === undefined}
-          port={port}
-          t={t}
-        />
-      </div>
     </div>
   )
 
