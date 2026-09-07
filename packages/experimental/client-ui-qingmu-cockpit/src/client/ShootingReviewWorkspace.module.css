@@ -14,7 +14,7 @@
 .shotStatus i { width:6px; height:6px; border-radius:50%; background:#929d99; flex:none; }
 .shotStatus[data-status="有视频"] i,.shotStatus[data-status="有首帧"] i { background:#72b9a8; }
 .shotStatus[data-status="待审"] i { background:#ddbd7a; }
-.shotStatus[data-status="阻断"] i { background:#dc8d7c; }
+.shotStatus[data-status="阻断"] i,.shotStatus[data-status="旧视频未通过"] i { background:#dc8d7c; }
 .candidateThumb { width:100%; height:56px; object-fit:cover; border-radius:3px; display:block; margin-bottom:4px; }
 .requirements input { display:block; width:100%; margin:5px 0 14px; padding:9px; background:#191e1f; color:var(--text); border:1px solid var(--line); border-radius:4px; font:inherit; }
 .requirements input:focus-visible { outline:2px solid var(--accent); }
@@ -29,6 +29,10 @@
 .shots button { padding:9px 10px; margin-bottom:4px; }
 .shots small { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 .stage { min-height:0; padding:14px 16px; gap:10px; }
+.reworkActions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex:none; }
+.reworkActions button { min-height:44px; padding:8px 12px; border:1px solid var(--line); border-radius:5px; background:var(--panel); color:var(--text); font:inherit; cursor:pointer; }
+.reworkActions button:hover,.reworkActions button:focus-visible { border-color:var(--accent); outline:1px solid var(--accent); }
+.mediaNotice { top:10px; bottom:auto; pointer-events:none; }
 .media,.canvas,.frame,.player,.player > div,.player video { min-height:0; }
 .media { flex:1 1 0; }
 .frame { position:absolute; inset:0; }
@@ -45,7 +49,7 @@
 .candidates strong { font-weight:500; color:var(--muted); }
 .browseNote { flex:none; font-size:12px; line-height:1.5; }
 .primary,.zoomButton { flex:none; min-height:36px; padding:8px 14px; font:inherit; font-weight:600; }
-.zoomButton { position:absolute; top:24px; right:26px; z-index:1; font-size:12px; background:#171a1be8; }
+.zoomButton { align-self:flex-end; position:static; font-size:12px; background:#171a1be8; }
 .requirements { font-size:14px; line-height:1.6; }
 .requirements h2 { font-size:14px; margin-bottom:12px; }
 .requirements p { margin:5px 0 14px; color:#d6dcd9; }

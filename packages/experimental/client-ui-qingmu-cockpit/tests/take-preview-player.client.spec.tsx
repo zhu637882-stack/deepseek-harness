@@ -61,3 +61,25 @@ it('keeps failures explicit and permits a new explicit retry without generating 
   await waitFor(() => { expect(view.container.querySelector('video')).not.toBeNull() })
   expect(load).toHaveBeenCalledTimes(2)
 })
+
+it('auto-loads existing video once and preserves it across unrelated parent renders', async () => {
+  const load = vi.fn(async () => response)
+  const props = { request, load, t: (key: keyof typeof zh) => zh[key], autoLoad: true }
+  const view = render(<TakePreviewPlayer {...props} />)
+  await waitFor(() => expect(view.container.querySelector('video')?.src).toBe('blob:fixture'))
+  const video = view.container.querySelector('video')
+  view.rerender(<TakePreviewPlayer {...props} request={{ ...request }} />)
+  expect(view.container.querySelector('video')).toBe(video)
+  expect(load).toHaveBeenCalledTimes(1)
+  expect(revokeUrl).not.toHaveBeenCalled()
+})
+
+it('lets a human reload existing bytes after a browser decode error', async () => {
+  const load = vi.fn(async () => response)
+  const view = render(<TakePreviewPlayer request={request} load={load} t={key => zh[key]} autoLoad />)
+  await waitFor(() => expect(view.container.querySelector('video')).not.toBeNull())
+  fireEvent.error(view.container.querySelector('video')!)
+  fireEvent.click(screen.getByRole('button', { name: '重新载入视频' }))
+  await waitFor(() => expect(load).toHaveBeenCalledTimes(2))
+  expect(revokeUrl).toHaveBeenCalledExactlyOnceWith('blob:fixture')
+})

@@ -1306,7 +1306,7 @@ function ReadyPromptIrWorkspace({
       </label>)}
       {firstFrameCandidateId && !firstFrameState?.candidates.find(c => c.assetId === firstFrameCandidateId)?.isSelected && <><label><input type="checkbox" checked={firstFrameConfirmed} onChange={e => setFirstFrameConfirmed(e.target.checked)} />我已审看并认可这张首帧</label>{firstFrameConfirmed && !busy && <button onClick={() => { void selectFirstFrame() }}>采用这张</button>}</>}
       {firstFrameReceipt && !videoQuote && !busy && <button onClick={() => { void quoteVideo() }}>检查视频生成条件</button>}
-      {!firstFrameReceipt && firstFrameState?.candidates.length === 0 && <p role="alert">本镜还没有可用首帧。首帧提交能力尚未接通，本次不会提交或收费；已有素材保持不变。</p>}
+      {!firstFrameReceipt && firstFrameState?.candidates.length === 0 && <p role="alert">本镜还没有可用首帧。请返回拍摄页点击“生成首帧”；此处检查不会提交或收费，已有素材保持不变。</p>}
     </>}
     {videoQuote && <>
       {!videoQuote.quoteReady && <p role="alert">本镜的内容或素材检查尚未完成，暂不能生成。请回到当前要求修正后重新检查。</p>}

@@ -7,12 +7,14 @@ import css from './TakeVersionCompareView.module.css'
  * @param props - Immutable scope, authenticated Host port and translated labels.
  * @returns A read-only video player with bounded loading and recoverable errors.
  */
-export function TakePreviewPlayer({ request, load, t, onPreviewReady }: {
+export function TakePreviewPlayer({ request, load, t, onPreviewReady, autoLoad = false }: {
   readonly request: YimengTakePreviewRequest
   readonly load: QingmuYimengPort['takePreview']
   readonly t: (key: QingmuCockpitKey) => string
   /** Receives only the verified in-memory object URL for an existing Take. */
   readonly onPreviewReady?: (url: string | undefined) => void
+  /** Read existing bytes on shot selection, without autoplay or generation. */
+  readonly autoLoad?: boolean
 }) {
   const [url, setUrl] = useState<string>()
   const [status, setStatus] = useState<'idle' | 'loading' | 'error' | 'ready'>('idle')
@@ -59,6 +61,14 @@ export function TakePreviewPlayer({ request, load, t, onPreviewReady }: {
       if (controller.current === run) controller.current = undefined
     }
   }
+  useEffect(() => {
+    if (autoLoad) void preview()
+  }, [requestKey, load, autoLoad, onPreviewReady])
+  function retryPlayback() {
+    if (blob.current !== undefined) URL.revokeObjectURL(blob.current)
+    blob.current = undefined; setUrl(undefined); onPreviewReady?.(undefined)
+    void preview()
+  }
   return <div className={css.preview}>
     {url === undefined
       ? <button type="button" disabled={status === 'loading'} onClick={() => { void preview() }}>
@@ -66,6 +76,6 @@ export function TakePreviewPlayer({ request, load, t, onPreviewReady }: {
       </button>
       : <video src={url} controls playsInline preload="metadata" aria-label={`${t('takePreviewLabel')} ${request.takeId}`}
         onError={() => { setStatus('error') }} />}
-    {status === 'error' && <p role="alert">{t('takePreviewError')}</p>}
+    {status === 'error' && <><p role="alert">{t('takePreviewError')}</p>{url !== undefined && <button type="button" onClick={retryPlayback}>重新载入视频</button>}</>}
   </div>
 }

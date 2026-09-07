@@ -24,7 +24,9 @@ The empty state provides project naming and first-episode creation. Script & Ass
 
 Local session errors point to the [persistent-instance login command](../../../docs/cookbook/qingmu-local.md). Login renews the API session without replaying a command; an unknown save still requires its original receipt recovery.
 
-Take comparison in the Director workspace loads media only after “Load preview.” The authenticated Host verifies the existing Take scope and actual SHA-256 bytes (MP4/WebM, at most 16 MiB each, two concurrent loads); the browser plays temporary in-memory Blob URLs. Missing, changed, oversized or inaccessible files remain errors. No download, transcode, generation or selection occurs. This bounded preview is not a production media streaming service.
+Take comparison in the Director workspace loads media only after “Load preview.” The authenticated Host verifies the existing Take scope and actual SHA-256 bytes; the browser plays temporary in-memory Blob URLs. Missing, changed, oversized or inaccessible files remain errors. No transcode, generation or selection occurs. This bounded preview is not a production media streaming service.
+
+The shooting page loads existing video previews on shot selection, without autoplay, and preserves the browsed candidate during background refresh. Video candidate posters come from each actual video. Every shot keeps explicit first-frame and video rework entry points into the existing guarded production tools; opening one does not submit generation or sign content. Historical failed video candidates remain viewable and are labelled separately from generation blockers.
 
 The cockpit opens from the sidebar into Overview, Director workspace, Script & Assets, Storyboard & Shots, Generation & QC, and Cost & Delivery. It reads `health`, `capabilityCatalog`, `costRehearsal`, `gateAControlEvidence`, `projects`, `episodes`, `script`, `workflow`, element profiles, and authoritative reference candidates over the loopback-only `/qingmu-yimeng` RPC channel.
 
