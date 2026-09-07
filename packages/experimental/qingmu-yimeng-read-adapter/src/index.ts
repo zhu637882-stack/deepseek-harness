@@ -2501,11 +2501,19 @@ function normalizeFirstFrameQuote(
     for (const key of [
       'referencePackSha256', 'assetSha256', 'materializedSha256',
       'rightsRecordSha256', 'profileSnapshotSha256',
-    ] as const) requireSha256(reference[key], `firstFrameQuote.reference[${String(index)}].${key}`)
+    ] as const) {
+      // An unrecorded rights trail is an explicit state carried as an empty digest.
+      if (key === 'rightsRecordSha256' && reference[key] === '') continue
+      requireSha256(reference[key], `firstFrameQuote.reference[${String(index)}].${key}`)
+    }
     for (const key of [
       'role', 'elementKind', 'elementId', 'assetId', 'selectionIdentity',
       'sourceRevisionId', 'qualificationCheckId', 'qualificationKind',
-    ] as const) requireIdentifier(reference[key], `firstFrameQuote.reference[${String(index)}].${key}`)
+    ] as const) {
+      // An undecided selection or unchecked qualification is carried as an empty id.
+      if ((key === 'selectionIdentity' || key === 'qualificationCheckId') && reference[key] === '') continue
+      requireIdentifier(reference[key], `firstFrameQuote.reference[${String(index)}].${key}`)
+    }
     requireInteger(reference.profileRevision, `firstFrameQuote.reference[${String(index)}].profileRevision`, 1)
   }
   const contextSchema = requireString(authority.contextSchema, 'firstFrameQuote.contextSchema')
