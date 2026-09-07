@@ -94,7 +94,7 @@ it('saves one automatic shot first-frame requirement, rereads it, and never trea
       { id: 'automatic_2', frameNo: 2, title: '街道近景', imagePromptCn: '原近景要求' },
     ],
   } }
-  const current = { ...automatic, storyboard: { ...automatic.storyboard, version: 11, sourceHash: 'd'.repeat(64) },
+  const current = { ...automatic, storyboard: { id: 'revision_11', status: 'Ready' as const, version: 11, sourceHash: 'd'.repeat(64) },
     canonicalStoryboard: { ...automatic.canonicalStoryboard, revision: 11, sourceHash: 'd'.repeat(64) } }
   const result: ScenePlanningResult = { schema: 'jason.qingmu-scene-planning-result.v1', action: 'edit_automatic',
     projectId: automatic.projectId, episodeId: automatic.episodeId, idempotencyKey: 'automatic-intent-1',
@@ -112,9 +112,9 @@ it('saves one automatic shot first-frame requirement, rereads it, and never trea
   await waitFor(() => { expect(onUnsavedChange).toHaveBeenLastCalledWith(true) })
   fireEvent.click(screen.getByRole('button', { name: '保存首帧画面要求' }))
   await waitFor(() => { expect(port.saveScenePlanning).toHaveBeenCalledOnce(); expect(port.readScenePlanning).toHaveBeenCalledTimes(2) })
-  expect(port.saveScenePlanning.mock.calls[0]?.[0].request).toEqual(expect.objectContaining({
+  expect(port.saveScenePlanning).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({
     action: 'edit_automatic', shotId: 'automatic_1', imagePromptCn: '雨夜入口的低机位首帧',
-  }))
+  }) }), expect.anything())
   expect(onCommitted).toHaveBeenCalledOnce(); expect(onSelectShotId).toHaveBeenCalledWith('automatic_1')
   await waitFor(() => { expect(onUnsavedChange).toHaveBeenLastCalledWith(false) })
   expect(screen.getByText(/不生成、不签收/)).toBeTruthy()
