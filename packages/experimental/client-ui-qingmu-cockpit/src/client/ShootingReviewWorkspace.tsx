@@ -4,8 +4,6 @@ import type { QingmuYimengPort, YimengTakeVersion, YimengTakeVersionStackRespons
 import type { QingmuCockpitKey } from './locales.ts'
 import { TakePreviewPlayer } from './TakePreviewPlayer.tsx'
 import { AutomaticFrameRequirementsEditor } from './AutomaticFrameRequirementsEditor.tsx'
-import { FirstFrameCandidatePreview } from './FirstFrameCandidatePreview.tsx'
-import { createFirstFrameSelectionClient } from './first-frame-selection.ts'
 import {
   clearTakeVersionSelectionMarker, createTakeVersionSelectionMarker, readTakeVersionSelectionMarker,
   takeSelectionReceiptMatches, takeVersionSelectionRequestFromMarker, writeTakeVersionSelectionMarker,
@@ -41,6 +39,19 @@ interface Props {
 function usable(version: YimengTakeVersion | undefined): version is YimengTakeVersion & { readonly outputSha256: string } {
   return version !== undefined && version.outputSha256 !== null && version.outputBindingStatus === 'verified'
 }
+export function localHeroUrl(source: string | undefined, assetId: string | undefined): string | undefined {
+  try {
+    const url = new URL(source ?? '')
+    const mediaId = (assetId ?? '').replace(/^asset_/, 'media_')
+    return ['http:', 'https:'].includes(url.protocol)
+      && (url.hostname === 'localhost' || url.hostname === '[::1]' || /^127\.(?:\d+\.){2}\d+$/.test(url.hostname))
+      && !url.username && !url.password && !url.hash
+      && /^media_[A-Za-z0-9_-]+$/.test(mediaId) && url.pathname === `/api/media/${mediaId}`
+      && /^\d+$/.test(url.searchParams.get('expires') ?? '')
+      && /^[a-f0-9]{64}$/.test(url.searchParams.get('signature') ?? '')
+      && [...url.searchParams.keys()].sort().join(',') === 'expires,signature' ? url.href : undefined
+  } catch { return undefined }
+}
 function statusOf(stack: YimengTakeVersionStackResponse | undefined, current: YimengTakeVersion | undefined, load: 'loading' | 'ready' | 'failed'): ShootingReviewState {
   if (load === 'failed') return 'failed'
   if (current?.qualityStatus === 'failed' || (current !== undefined && current.outputBindingStatus !== 'verified')) return 'failed'
@@ -48,9 +59,9 @@ function statusOf(stack: YimengTakeVersionStackResponse | undefined, current: Yi
 }
 function message(state: ShootingReviewState, load: 'loading' | 'ready' | 'failed'): string {
   if (load === 'loading') return '正在读取已有候选媒体；读取不代表正在生成。'
-  if (load === 'failed') return '候选列表暂不可读取。请刷新只读投影后重试。'
+  if (load === 'failed') return '候选暂时无法读取，请刷新页面再试。'
   if (state === 'generating') return '测试状态：正在生成。正式任务状态必须由任务接口提供。'
-  if (state === 'failed') return '该候选的真实质量或媒体绑定状态不可用。请检查已有任务与媒体后重试。'
+  if (state === 'failed') return '这个候选尚未通过检查，请查看画面并调整当前要求。原有素材仍保留。'
   if (state === 'pending-review') return '候选已就绪。浏览不改变选用，采用需要明确操作。'
   return '当前为已选版本。可浏览其它候选或修改当前要求。'
 }
@@ -64,6 +75,8 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
   const [panel, setPanel] = useState<'requirements' | 'assistant'>('requirements'); const [mediaUrl, setMediaUrl] = useState<string>(); const [heroMediaUrl, setHeroMediaUrl] = useState<string>()
   const [zoom, setZoom] = useState(false); const [scale, setScale] = useState(1); const [selectionError, setSelectionError] = useState('')
   const [offset, setOffset] = useState({ x: 0, y: 0 }); const [selecting, setSelecting] = useState(false)
+  const [heroError, setHeroError] = useState(false)
+  useEffect(() => { setHeroMediaUrl(undefined); setHeroError(false) }, [current?.shotId, projection])
   const drag = useRef<{ x: number; y: number; offsetX: number; offsetY: number }>()
   const zoomTrigger = useRef<HTMLElement>()
   useEffect(() => {
@@ -93,7 +106,6 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
   useEffect(() => { const close = (event: KeyboardEvent): void => { if (event.key === 'Escape') setZoom(false) }; window.addEventListener('keydown', close); return () => window.removeEventListener('keydown', close) }, [])
   useEffect(() => { if (!zoom) zoomTrigger.current?.focus() }, [zoom])
   const onPreviewReady = useCallback((url: string | undefined): void => setMediaUrl(url), [])
-  const onHeroPreviewReady = useCallback((url: string | undefined): void => setHeroMediaUrl(url), [])
   const resetZoom = useCallback((): void => { setScale(1); setOffset({ x: 0, y: 0 }) }, [])
   const closeZoom = useCallback((): void => { setZoom(false); resetZoom() }, [resetZoom])
   const startDrag = (event: PointerEvent<HTMLDivElement>): void => {
@@ -112,7 +124,7 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
   const versions = visibleStack?.subject.versions ?? []; const browsed = versions.find(version => version.takeId === browseId)
   const state = testState ?? statusOf(visibleStack, browsed, load); const primary = usable(browsed) && visibleStack?.capabilities.canSelect === true && !browsed.isSelected && load === 'ready'
   const sourceUrl = mediaUrl ?? heroMediaUrl
-  const storyboardRevisionId = projection?.director.shotRelations.storyboardRevision?.revisionId
+  const heroUrl = localHeroUrl(heroFrame?.browserUrl, heroFrame?.assetId)
   const dialogue = (current.dialogueRhythm?.cues ?? []).map(cue => cue.verbatimText).filter(Boolean)
   const action = (current.beats ?? []).map(beat => beat.visualResponsibility).filter(Boolean)
   async function selectCurrent(): Promise<void> {
@@ -133,7 +145,7 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
       if (refreshed.subject.projectId !== projectId || refreshed.subject.episodeId !== episodeId || refreshed.subject.frameId !== activeShot.shotId) throw new Error('selection refresh scope mismatch')
       setStack(refreshed)
     } catch {
-      setSelectionError('采用结果尚未确认；不会重发选择。请刷新后读取同一恢复回执。')
+      setSelectionError('采用结果尚未确认。请刷新页面查看结果，不要重复采用。')
     } finally { setSelecting(false) }
   }
   return <section className={css.workspace} aria-label="拍摄与审看">
@@ -146,17 +158,17 @@ export function ShootingReviewWorkspace({ projectName, episodeName, projectId, e
             projectId, episodeId, frameId: current.shotId, takeId: browsed.takeId,
             expectedOutputSha256: browsed.outputSha256,
           }} load={port.takePreview} t={t} onPreviewReady={onPreviewReady} /></div>
-            : heroFrame !== undefined && heroFrame !== null && storyboardRevisionId !== undefined ? <div className={css.frame}><span>已选首帧</span><FirstFrameCandidatePreview request={{ projectId, episodeId, storyboardRevisionId, frameId: current.shotId, assetId: heroFrame.assetId, expectedMaterializedSha256: heroFrame.mediaSha256 }} load={createFirstFrameSelectionClient().preview} onPreviewReady={onHeroPreviewReady} labels={{ load: '加载并校验已选首帧', loading: '正在校验已选首帧…', error: '已选首帧未通过范围或字节校验', ariaLabel: `镜 ${current.frameNo} 已选首帧` }} /></div>
+            : heroUrl !== undefined ? <div className={css.frame}><span>已选首帧</span><img src={heroUrl} alt={`镜 ${current.frameNo} 已选首帧`} onLoad={() => { setHeroMediaUrl(heroUrl); setHeroError(false) }} onError={() => setHeroError(true)} />{heroError && <p role="alert">首帧暂时无法显示，请刷新后再试。</p>}</div>
               : <div className={css.canvas}><span>镜 {current.frameNo}</span><strong>{current.title}</strong>
                 <small>{message(state, load)}</small></div>}
           {testState !== undefined && <p className={css.mediaNotice} role="status">隔离演练状态，不代表真实任务，未提交生成。</p>}{load === 'loading' && <p className={css.mediaNotice} role="status">{message(state, load)}</p>}{load === 'failed' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}{state === 'failed' && load === 'ready' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}
         </div>
-        <div className={css.candidates} aria-label="候选画面">{versions.map(version => <button key={version.takeId} type="button" aria-pressed={version.takeId === browseId} onClick={() => { setBrowseId(version.takeId); setMediaUrl(undefined) }}><span className={css.videoIcon}>视频候选</span><span>候选 v{version.versionOrdinal}</span><strong>{version.isSelected ? '当前选用' : version.qualityStatus}</strong><small>{version.durationSec === null ? '时长未知' : `${version.durationSec} 秒`}</small></button>)}</div>
-        <p className={css.browseNote}>{message(state, load)} 单击候选只切换中区媒体，不会改变选用。</p>{selectionError && <p role="alert">{selectionError}</p>}<button className={css.primary} type="button" disabled={!primary || selecting} onClick={() => { void selectCurrent() }}>{primary ? (selecting ? '正在采用候选' : '采用这张') : browsed?.isSelected ? '当前已选用' : '候选不可采用'}</button>
+        <div className={css.candidates} aria-label="候选画面">{versions.map(version => <button key={version.takeId} type="button" aria-pressed={version.takeId === browseId} onClick={() => { setBrowseId(version.takeId); setMediaUrl(undefined) }}><span className={css.videoIcon}>视频候选</span><span>候选 v{version.versionOrdinal}</span><strong>{version.isSelected ? '当前选用' : version.qualityStatus === 'failed' ? '检查未通过' : version.qualityStatus === 'passed' ? '待你审看' : '等待检查'}</strong><small>{version.durationSec === null ? '时长未知' : `${version.durationSec} 秒`}</small></button>)}</div>
+        <p className={css.browseNote}>{versions.length === 0 && load === 'ready' && testState === undefined ? '本镜尚无视频候选，已有首帧和要求仍保留。' : message(state, load)} 单击候选只切换中区媒体，不会改变选用。</p>{selectionError && <p role="alert">{selectionError}</p>}<button className={css.primary} type="button" disabled={!primary || selecting} onClick={() => { void selectCurrent() }}>{primary ? (selecting ? '正在采用候选' : '采用这张') : browsed?.isSelected ? '当前已选用' : '候选不可采用'}</button>
         {sourceUrl !== undefined && <button className={css.zoomButton} type="button" onClick={(event) => { zoomTrigger.current = event.currentTarget; resetZoom(); setZoom(true) }}>放大画面</button>}
         {zoom && <div className={css.zoom} role="dialog" aria-modal="true" aria-label="放大画面"><div className={css.zoomToolbar}><button type="button" onClick={closeZoom}>关闭放大查看</button><button type="button" onClick={() => setScale(value => Math.min(3, value + 0.25))}>放大</button><button type="button" onClick={() => setScale(value => Math.max(1, value - 0.25))}>缩小</button></div><div className={css.zoomCanvas} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={() => { drag.current = undefined }} onPointerCancel={() => { drag.current = undefined }}>{mediaUrl !== undefined ? <video src={mediaUrl} controls autoPlay playsInline style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }} /> : heroMediaUrl !== undefined && <img src={heroMediaUrl} alt={`镜 ${current.frameNo} 已选首帧`} style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }} />}</div></div>}
       </main>
-      <aside className={css.inspector}><div className={css.switcher}><button type="button" aria-pressed={panel === 'requirements'} onClick={() => setPanel('requirements')}>当前要求</button><button type="button" aria-pressed={panel === 'assistant'} onClick={() => setPanel('assistant')}>原生导演助手</button></div>{panel === 'requirements' ? <div className={css.requirements}><h2>当前镜头要求</h2><h3>对白</h3><p>{dialogue.join(' / ') || '当前分镜未提供对白。'}</p><h3>动作</h3><p>{action.join(' / ') || '当前分镜未提供动作节拍。'}</p><h3>机位</h3><p>当前镜头关系投影未提供独立机位字段。</p><AutomaticFrameRequirementsEditor projectId={projectId} episodeId={episodeId} shotId={current.shotId} port={port} onCommitted={onCommitted} /></div> : directorAssistant}</aside>
+      <aside className={css.inspector}><div className={css.switcher}><button type="button" aria-pressed={panel === 'requirements'} onClick={() => setPanel('requirements')}>当前要求</button><button type="button" aria-pressed={panel === 'assistant'} onClick={() => setPanel('assistant')}>原生导演助手</button></div>{panel === 'requirements' ? <div className={css.requirements}><h2>当前镜头要求</h2><h3>对白</h3><p>{dialogue.join(' / ') || '本镜暂无对白。'}</p><h3>动作</h3><p>{action.join(' / ') || '请在画面要求中说明动作。'}</p><h3>机位</h3><p>请在画面要求中说明拍摄位置和视角。</p><AutomaticFrameRequirementsEditor projectId={projectId} episodeId={episodeId} shotId={current.shotId} port={port} onCommitted={onCommitted} /></div> : directorAssistant}</aside>
     </div>
   </section>
 }

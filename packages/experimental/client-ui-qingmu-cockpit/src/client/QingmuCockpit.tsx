@@ -753,7 +753,7 @@ export function QingmuCockpit({
         <div ref={dialogRef} className={`${css.shell} ${tab === 'director' || creating || projectId === '' || tab === 'assets' ? css.directorShell : ''} ${tab === 'shots' ? css.shootingShell : ''}`}>
           <header className={css.header}>
             <div>
-              <h2 ref={headingRef} tabIndex={-1}>{t('title')}</h2>
+              <h2 ref={headingRef} tabIndex={-1}>{tab === 'shots' ? '青木 OS' : t('title')}</h2>
               <p>{t('subtitle')}</p>
             </div>
             <div className={css.headerActions}>

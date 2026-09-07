@@ -68,6 +68,16 @@
 .shootingShell .truthStrip, .shootingShell .toolbar, .shootingShell .tabs, .shootingShell .evidence { display: none; }
 .shootingShell .body { display: block; }
 .shootingShell .body > main { height: 100%; padding: 0; overflow: hidden; }
+.shootingShell { background:#171a1b; color:#f3f1eb; color-scheme:dark; }
+.shootingShell > .header { min-height:48px; padding:4px 16px; background:#1d2223; border-color:#394142; }
+.shootingShell > .header h2 { font-size:14px; }
+.shootingShell > .header p { display:none; }
+.shootingShell > .header button { min-height:32px; color:#cbd4d0; border-color:#3a4541; background:transparent; border-radius:5px; }
+.shootingShell .body > main > .stack { height:100%; min-height:0; display:flex; flex-direction:column; gap:0; }
+.shootingShell .body { position:relative; min-height:0; }
+.shootingShell .developerLog { flex:0 0 auto; padding:6px 16px; border:0; border-top:1px solid #394142; border-radius:0; background:#1d2223; color:#cbd4d0; font-size:12px; }
+.shootingShell .developerLog > summary { color:#a5b2ad; }
+.shootingShell .developerLog[open] { position:absolute; z-index:10; right:0; bottom:0; width:min(680px,100%); height:80%; overflow:auto; border:1px solid #4b5954; box-shadow:-12px 0 30px #0005; }
 .developerLog { padding: 8px 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; }
 .developerLog > summary { cursor: pointer; color: var(--dsw-alias-label-secondary); }
 .directorShell .primaryAction { background: #1b6345; color: #f4fff8; }

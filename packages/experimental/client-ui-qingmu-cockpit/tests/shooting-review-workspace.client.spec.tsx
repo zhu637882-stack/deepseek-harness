@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ShootingReviewWorkspace } from '../src/client/ShootingReviewWorkspace.tsx'
+import { localHeroUrl, ShootingReviewWorkspace } from '../src/client/ShootingReviewWorkspace.tsx'
 import { AutomaticFrameRequirementsEditor } from '../src/client/AutomaticFrameRequirementsEditor.tsx'
 import { takeVersionSelectionRequestFromMarker } from '../src/client/take-version-recovery.ts'
 
@@ -9,7 +9,7 @@ const projection = {
   director: { shotRelations: { storyboardRevision: { revisionId: 'storyboard-r1' }, shots: [
     { shotId: 'frame_34b3741b1f0a', frameNo: 6, title: '落日公路', sceneId: 'scene-1', beats: [], dialogueRhythm: { cues: [] } },
     { shotId: 'frame-7', frameNo: 7, title: '车内回望', sceneId: 'scene-1', beats: [], dialogueRhythm: { cues: [] } },
-  ] }, heroFrameStoryboards: { shots: [{ shotId: 'frame_34b3741b1f0a', heroFrame: { browserUrl: '/first-frame-6.webp' } }] } },
+  ] }, heroFrameStoryboards: { shots: [{ shotId: 'frame_34b3741b1f0a', heroFrame: { assetId: 'asset_first_frame_6', browserUrl: `http://127.0.0.1:65269/api/media/media_first_frame_6?expires=1788767261&signature=${'a'.repeat(64)}` } }] } },
 } as never
 
 const port = {
@@ -21,6 +21,13 @@ const port = {
 
 describe('ShootingReviewWorkspace', () => {
   afterEach(cleanup)
+  it('loads only signed local media matching the projected asset', () => {
+    const valid = `http://127.0.0.1:65269/api/media/media_first_frame_6?expires=1788767261&signature=${'a'.repeat(64)}`
+    expect(localHeroUrl(valid, 'asset_first_frame_6')).toBe(valid)
+    for (const bad of [valid.replace('media_first_frame_6', 'media_other'), valid.split('?')[0], valid + '#hash', valid + '&signature=duplicate', valid.replace('http://', 'http://user:pass@'), valid.replace('127.0.0.1', 'remote.example')]) {
+      expect(localHeroUrl(bad, 'asset_first_frame_6')).toBeUndefined()
+    }
+  })
   it('browses candidates without changing the selected Shot and keeps adoption explicit', () => {
     const onSelectShotId = vi.fn()
     render(<ShootingReviewWorkspace projectName="落日公路" episodeName="第 1 集" projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" projection={projection}

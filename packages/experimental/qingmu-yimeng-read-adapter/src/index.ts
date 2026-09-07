@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import { normalizeContinuityDelta } from './continuity.ts'
+import { localMediaUrl } from './local-media-url.ts'
 import { normalizeSelectedVideoReview } from './selected-video-review.ts'
 import { normalizeTakeVersionStack, parseTakeVersionReadRequest } from './take-versions.ts'
 import { normalizeTakePreview, parseTakePreviewRequest } from './take-preview.ts'
@@ -5125,7 +5126,22 @@ export function createYimengReadHandler(
           if (result.projectId !== request.projectId || result.episodeId !== request.episodeId) {
             throw new UpstreamContractError('workflow project or episode subject mismatch')
           }
-          return result
+          return {
+            ...result,
+            director: {
+              ...result.director,
+              heroFrameStoryboards: {
+                ...result.director.heroFrameStoryboards,
+                shots: result.director.heroFrameStoryboards.shots.map(shot => ({
+                  ...shot,
+                  heroFrame: shot.heroFrame === null ? null : {
+                    ...shot.heroFrame,
+                    browserUrl: localMediaUrl(shot.heroFrame.browserUrl, shot.heroFrame.assetId, baseUrl),
+                  },
+                })),
+              },
+            },
+          }
         }
       } else if (endpoint === 'script') {
         const request = parseEpisodeRequest(payload)
