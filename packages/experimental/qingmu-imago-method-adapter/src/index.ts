@@ -1760,6 +1760,23 @@ function parsePromptIrRequest(payload: unknown): ImagoPromptIrMethodRequest {
   return request
 }
 
+/** Verify Writer's receipt projection before any method can attest user-supplied context. */
+function verifyBootstrapHumanDecisions(context: Readonly<Record<string, unknown>>, key: string): void {
+  const references = context.requiredReferences
+  if (!Array.isArray(references)) return // The compiler owns the complete reference schema.
+  for (const reference of references) {
+    if (!isJsonObject(reference) || reference.qualificationKind !== 'human_final_decision') continue
+    const proof = parseInputObject(reference.humanFinalDecision)
+    const signature = parseInputSha256(proof.signature, 'humanFinalDecision.signature')
+    const { signature: _signature, ...unsigned } = proof
+    const expected = createHmac('sha256', key).update('qingmu.bootstrap-human-final-decision.v1\0')
+      .update(e53CanonicalJson(unsigned, 'humanFinalDecision')).digest('hex')
+    if (!timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'))) {
+      throw new InputError('humanFinalDecision is not a verified Writer receipt')
+    }
+  }
+}
+
 function parsePromptIrBootstrapRequest(payload: unknown): ImagoPromptIrBootstrapMethodRequest {
   const input = parseInputObject(payload)
   assertOnlyInputKeys(input, ['context', 'contextSnapshotSha256', 'selectionChallenge', 'editableProjection'])
@@ -4750,6 +4767,7 @@ export function createImagoMethodHandler(
       }
       if (endpoint === 'promptIrBootstrapMethod') {
         const request = parsePromptIrBootstrapRequest(payload)
+        verifyBootstrapHumanDecisions(request.context, attestationKey)
         const selectionChallenge = verifyPromptIrBootstrapSelectionChallenge(attestationKey, request)
         const snapshot = buildPromptIrBootstrapSnapshot(request)
         if (signal.aborted) return cancelled()
