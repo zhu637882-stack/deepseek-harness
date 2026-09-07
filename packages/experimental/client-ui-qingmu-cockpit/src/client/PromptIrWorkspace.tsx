@@ -662,7 +662,7 @@ function ReadyPromptIrWorkspace({
   const autoCheckTried = useRef('')
   const autoQuoteTried = useRef('')
   useEffect(() => {
-    if (presentation !== 'shooting' || active === undefined || operation !== 'idle') return
+    if (presentation !== 'shooting' || active === undefined || operation !== 'idle' || snapshot === undefined) return
     if (firstFrameQuote === undefined && firstFrameRecovery === undefined && autoCheckTried.current !== active.frameId) {
       autoCheckTried.current = active.frameId
       void quoteFirstFrame()
@@ -673,7 +673,7 @@ function ReadyPromptIrWorkspace({
       autoQuoteTried.current = active.frameId
       void quoteVideo()
     }
-  }, [presentation, active?.frameId, operation, firstFrameQuote, firstFrameReceipt, firstFrameRecovery, videoQuote])
+  }, [presentation, active?.frameId, operation, snapshot, firstFrameQuote, firstFrameReceipt, firstFrameRecovery, videoQuote])
 
   const resetPreparedState = (): void => {
     setMethod(undefined)
