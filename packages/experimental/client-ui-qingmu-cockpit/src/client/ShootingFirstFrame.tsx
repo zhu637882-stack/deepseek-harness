@@ -111,7 +111,12 @@ function assertAttempt(value: unknown, scope: ShootingFrameScope, requestId: str
 function attemptMessage(task: Attempt['task'] | undefined): string {
   switch (task?.kernel_status) {
     case 'DispatchPending':
+      if (task.local_status === 'dispatching' || task.provider_status === 'DISPATCHING') {
+        return '正在提交原首帧请求，等待供应商回执；请勿重复生成。'
+      }
       return '首帧任务已入队，等待派发进度更新；请勿重复生成。'
+    case 'ProviderPending':
+      return '供应商正在处理原首帧任务；关闭或刷新页面不会重复提交。'
     case 'Failed': case 'Cancelled':
       return '本次生成未完成，已停止，不自动重试。'
     case 'QualityPending':
@@ -184,7 +189,9 @@ export function ShootingFirstFrame({ scope, onCommitted }: {
         if (value.candidate && notified.current !== value.candidate.assetId) {
           notified.current = value.candidate.assetId; await onCommitted?.()
         }
-        if (value.candidate || submissionBlocker(value) || ['Failed', 'Cancelled', 'Succeeded'].includes(value.task?.kernel_status ?? '')) return
+        // Materialization can precede quality completion. Keep reading the
+        // same task until terminal so its recovery/rework actions stay current.
+        if (submissionBlocker(value) || ['Failed', 'Cancelled', 'Succeeded'].includes(value.task?.kernel_status ?? '')) return
       } catch (cause) { if (!controller.signal.aborted) setError(String(cause)) }
       if (!controller.signal.aborted) timer = setTimeout(() => { void poll() }, 4000)
     }

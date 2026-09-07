@@ -29,7 +29,7 @@ const props = () => ({ projectName: '落日公路', episodeName: 'EP1', projectI
   } as never,
 })
 beforeEach(() => {
-  localStorage.clear(); vi.stubGlobal('crypto', webcrypto)
+  localStorage.clear(); sessionStorage.clear(); vi.stubGlobal('crypto', webcrypto)
   URL.createObjectURL = vi.fn(() => 'blob:video'); URL.revokeObjectURL = vi.fn()
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks() })
@@ -52,6 +52,23 @@ it('opens first-frame history directly, without preparing a video or requiring R
   expect(p.onProductionAction).not.toHaveBeenCalled()
   fireEvent.click(await screen.findByRole('button', { name: /视频候选 v1.*检查未通过/ }))
   expect(screen.queryByRole('region', { name: '本镜首帧候选' })).toBeNull()
+})
+
+it('restores the first-frame viewing panel after refresh without invoking a production action', async () => {
+  const p = props(); const view = render(<ShootingReviewWorkspace {...p} />)
+  fireEvent.click(screen.getByRole('button', { name: '生成首帧' }))
+  view.unmount()
+  const second = render(<ShootingReviewWorkspace {...p} />)
+  expect(await screen.findByRole('region', { name: '首帧生成' })).toBeTruthy()
+  expect(p.onProductionAction).not.toHaveBeenCalled()
+  second.rerender(<ShootingReviewWorkspace {...p} selectedShotId="f2" />)
+  expect(screen.queryByRole('region', { name: '首帧生成' })).toBeNull()
+  second.rerender(<ShootingReviewWorkspace {...p} />)
+  expect(await screen.findByRole('region', { name: '首帧生成' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '返回候选审看' }))
+  second.unmount()
+  render(<ShootingReviewWorkspace {...p} />)
+  expect(screen.queryByRole('region', { name: '首帧生成' })).toBeNull()
 })
 
 it('exposes rework for every shot without selecting or generating, and candidate clicks exit first-frame mode', async () => {

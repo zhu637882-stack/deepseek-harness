@@ -30,9 +30,25 @@ it('does not claim an unsubmitted provider outcome while dispatch is in flight',
   vi.stubGlobal('fetch',vi.fn(async (path:string) => ({ ok:true,json:async () => path.includes('/review?') ? review
     : { ...result,task:{ id:'task-one',kernel_status:'DispatchPending',local_status:'dispatching',provider_status:'DISPATCHING' },candidate:null } })))
   render(<ShootingFirstFrame scope={scope} />)
-  await screen.findByText('首帧任务已入队，等待派发进度更新；请勿重复生成。')
+  await screen.findByText('正在提交原首帧请求，等待供应商回执；请勿重复生成。')
   expect(screen.queryByText(/尚未提交供应商/)).toBeNull()
   expect(screen.queryByRole('button',{ name:'生成这张首帧（仅一次）' })).toBeNull()
+})
+it('keeps reading after the image arrives until the original task settles', async () => {
+  localStorage.setItem(`qingmu:shooting-first-frame:${scope.projectId}:${scope.episodeId}:${scope.frameId}`,
+    JSON.stringify({ preview, requestId:result.requestId }))
+  let settled = false
+  const fetcher = vi.fn(async (path:string) => ({ ok:true,json:async () => path.includes('/review?') ? review
+    : { ...result, canActivate:!settled,canRegenerate:settled,
+      task:{ id:'task-one',kernel_status:settled ? 'Succeeded' : 'QualityPending' } } }))
+  vi.stubGlobal('fetch',fetcher)
+  render(<ShootingFirstFrame scope={scope} />)
+  await screen.findByAltText('镜头新首帧 · 待你定版')
+  expect(screen.getByRole('button',{ name:'继续原首帧任务' })).toBeTruthy()
+  settled = true
+  await waitFor(() => expect(screen.getByRole('button',{ name:'重新生成首帧' })).toBeTruthy(), { timeout:5500 })
+  expect(screen.queryByRole('button',{ name:'继续原首帧任务' })).toBeNull()
+  expect(fetcher.mock.calls.every(([path]) => path.includes('/state?') || path.includes('/review?'))).toBe(true)
 })
 it('shows full prompt, submits once and restores by GET after remount', async () => {
   localStorage.clear()
