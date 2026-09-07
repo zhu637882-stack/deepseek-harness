@@ -195,8 +195,10 @@ it('rejects a same-revision automatic receipt with a different source hash and k
 })
 it.each([undefined, [], [{ id: 'other_shot', frameNo: 2, title: '另一镜', imagePromptCn: '' }]])(
   'cannot send to a bound shot when automatic visible rows are missing or disagree: %j', async (shots) => {
-    const automatic = automaticReadState()
-    if (shots !== undefined) automatic.canonicalStoryboard = { ...automatic.canonicalStoryboard!, shots }
+    const baseline = automaticReadState()
+    const automatic = { ...baseline, canonicalStoryboard: {
+      ...baseline.canonicalStoryboard!, ...(shots === undefined ? {} : { shots }),
+    } }
     const port = { readScenePlanning: vi.fn(async () => automatic), requestDirectorProposal: unavailableDirectorProposal(),
       checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() }
     const bridge = replayBridge()
