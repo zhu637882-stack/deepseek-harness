@@ -241,7 +241,7 @@ export function normalizeReferenceRightsRecord(value: unknown, field = 'rights')
     humanDeclaration: {
       state: declaration.state,
       text: declarationText,
-    } as YimengReferenceRightsRecord['humanDeclaration'],
+    },
     contentCredentials: scalarValue(rights.contentCredentials, `${field}.contentCredentials`),
   }
 }
@@ -252,7 +252,7 @@ function canonicalJson(value: unknown): string {
   if (typeof value === 'boolean') return value ? 'true' : 'false'
   if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value)
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
-  if (typeof value === 'object' && value !== null) {
+  if (typeof value === 'object') {
     const record = value as Record<string, unknown>
     const keys = Object.keys(record).sort(compareUnicodeCodePoints)
     return `{${keys.map(key => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`

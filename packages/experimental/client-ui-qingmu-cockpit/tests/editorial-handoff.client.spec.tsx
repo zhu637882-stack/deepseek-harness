@@ -581,12 +581,14 @@ describe('editorial handoff panel', () => {
     await screen.findByText(/雨夜街口/u)
     fireEvent.click(screen.getByRole('button', { name: zh.handoffCandidateRead }))
     await waitFor(() => { expect(screen.getByText('strict_verify_episode_failed')).toBeTruthy() })
+    // eslint-disable-next-line typescript/no-unnecessary-type-assertion -- tsc resolves getByRole as HTMLElement
     expect((screen.getByRole('button', { name: zh.handoffEvidenceFreezeSave }) as HTMLButtonElement).disabled).toBe(true)
     expect(confirmPosts).toBe(0)
 
     preview = readyPreview
     fireEvent.click(screen.getByRole('button', { name: zh.handoffEvidenceFreezePrepare }))
     await waitFor(() => {
+      // eslint-disable-next-line typescript/no-unnecessary-type-assertion -- tsc resolves getByRole as HTMLElement
       expect((screen.getByRole('button', { name: zh.handoffEvidenceFreezeSave }) as HTMLButtonElement).disabled).toBe(false)
     })
     fireEvent.click(screen.getByRole('button', { name: zh.handoffEvidenceFreezeSave }))

@@ -144,7 +144,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       return await new Promise<Fixture>((resolve, reject) => {
         let output = ''
         let stderr = ''
-        const timer = setTimeout(() => reject(new Error(`FastAPI fixture readiness timed out: ${stderr.slice(-2000)}`)), 30_000)
+        const timer = setTimeout(() => { reject(new Error(`FastAPI fixture readiness timed out: ${stderr.slice(-2000)}`)) }, 30_000)
         server.stderr?.on('data', (chunk: Buffer) => { stderr = `${stderr}${chunk.toString()}`.slice(-4000) })
         server.once('error', (error) => { clearTimeout(timer); reject(error) })
         server.once('exit', (code) => { clearTimeout(timer); reject(new Error(`FastAPI fixture exited ${String(code)}: ${stderr.slice(-2000)}`)) })
@@ -448,9 +448,9 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
         }
         return latest
       }, successfulDownloadUrl) as { importAccess?: { requestId?: string } }
-      expect(repeatedStatus).toMatchObject({ importAccess: { requestId: expect.any(String) } })
+      expect(repeatedStatus).toMatchObject({ importAccess: { requestId: expect.any(String) as unknown } })
       const importStateAfter = await readFile(importStatePath, 'utf8')
-      expect(JSON.parse(importStateAfter)).toHaveLength(JSON.parse(importStateBefore).length)
+      expect(JSON.parse(importStateAfter) as unknown[]).toHaveLength((JSON.parse(importStateBefore) as unknown[]).length)
       expect(Buffer.byteLength(importStateAfter)).toBeLessThanOrEqual(Buffer.byteLength(importStateBefore) + 256)
       expect(importStateAfter.match(/jason\.qingmu-editorial-package-consumption-preview\.v1/gu)).toHaveLength(1)
       expect(await readdir(writerSpoolRoot)).toEqual(['keep-me.txt'])

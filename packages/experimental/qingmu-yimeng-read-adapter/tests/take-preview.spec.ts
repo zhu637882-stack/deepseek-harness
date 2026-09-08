@@ -16,7 +16,7 @@ it('forwards only an authenticated GET and validates actual bytes', async () => 
   const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json(response))
   const handler = createYimengReadHandler({}, { fetch, readToken: () => 'fixture-token' })
   expect(await handler('takePreview', request, signal())).toEqual({ ok: true, value: response })
-  expect(String(fetch.mock.calls[0]?.[0])).toContain(`/frames/f/takes/t/preview?expectedOutputSha256=${sha}`)
+  expect(fetch.mock.calls[0]?.[0]).toContain(`/frames/f/takes/t/preview?expectedOutputSha256=${sha}`)
   expect(fetch.mock.calls[0]?.[1]?.method ?? 'GET').toBe('GET')
   expect(new Headers(fetch.mock.calls[0]?.[1]?.headers).get('Authorization')).toBe('Bearer fixture-token')
 })

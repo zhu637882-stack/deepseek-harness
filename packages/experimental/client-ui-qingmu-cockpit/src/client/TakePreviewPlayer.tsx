@@ -26,8 +26,9 @@ export function TakePreviewPlayer({ request, load, t }: {
     controller.current = run
     setStatus('loading')
     try {
-      const result = await load(request, run.signal)
-      if (run.signal.aborted) return
+      const signal = run.signal
+      const result = await load(request, signal)
+      if (signal.aborted) return
       if (result.projectId !== request.projectId || result.episodeId !== request.episodeId
         || result.frameId !== request.frameId || result.takeId !== request.takeId
         || result.outputSha256 !== request.expectedOutputSha256) throw new Error('preview source changed')

@@ -21,6 +21,7 @@
     "apps/web/tests/qingmu-script-workspace.e2e.ts",
     "apps/web/tests/qingmu-episode-evidence.e2e.ts",
     "apps/web/tests/qingmu-director-workspace.e2e.ts",
+    "apps/web/tests/qingmu-editorial-handoff.e2e.ts",
     "apps/web/tests/qingmu-rc1-content-decision.e2e.ts",
     "apps/web/tests/qingmu-shot-finding-fixture.ts",
     "apps/web/tests/qingmu-rework-route-fixture.ts",

@@ -1245,9 +1245,9 @@ describe('AssetWorkbench', () => {
     expect(markerDuringCommit()).not.toContain('authSessionId')
     expect(markerDuringCommit()).not.toContain('token')
     expect(markerDuringCommit()).not.toContain('proof')
-    expect(JSON.parse(markerDuringCommit() ?? '{}')).toMatchObject({
-      preCommitVisualBaselineSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
-      preCommitHumanDecisionsSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+    expect(JSON.parse(markerDuringCommit() ?? '{}') as unknown).toMatchObject({
+      preCommitVisualBaselineSha256: expect.stringMatching(/^[0-9a-f]{64}$/) as unknown,
+      preCommitHumanDecisionsSha256: expect.stringMatching(/^[0-9a-f]{64}$/) as unknown,
     })
     expect(createHumanDecision).not.toHaveBeenCalled()
     expect(elementProfile).toHaveBeenCalledTimes(2)
@@ -1271,7 +1271,7 @@ describe('AssetWorkbench', () => {
 
     expect(await screen.findByRole('heading', { name: zh.assetRightsCommitSucceeded })).toBeTruthy()
     expect(elementProfile).toHaveBeenCalledTimes(2)
-    const lastSnapshot = await elementProfile.mock.results[1]?.value
+    const lastSnapshot = await elementProfile.mock.results[1]?.value as { subject: { profileRevision: number }; snapshotSha256: string }
     expect(lastSnapshot.subject.profileRevision).toBe(3)
     expect(lastSnapshot.snapshotSha256).toBe(BASE_SHA)
   })
@@ -1455,7 +1455,7 @@ describe('AssetWorkbench', () => {
       screen.getByText(
         (_, element) =>
           element?.tagName === 'SMALL' &&
-          element.textContent?.includes(zh.assetReviewDecisionStale) === true,
+          element.textContent?.includes(zh.assetReviewDecisionStale),
       ),
     ).toBeTruthy()
     expect(reviewEvents).toHaveBeenCalledTimes(2)
@@ -1904,7 +1904,7 @@ describe('AssetWorkbench', () => {
       await screen.findByText(
         (_, element) =>
           element?.tagName === 'SMALL' &&
-          element.textContent?.includes(zh.assetReviewDecisionStale) === true,
+          element.textContent?.includes(zh.assetReviewDecisionStale),
       ),
     ).toBeTruthy()
     expect(screen.getByText(zh.assetReviewNoCurrentDecision)).toBeTruthy()
@@ -2354,7 +2354,7 @@ describe('AssetWorkbench', () => {
     expect(within(exceptionRegion).getByText('approver-user-1 · natural-person-approver-1')).toBeTruthy()
     expect(within(exceptionRegion).getByText(
       (_, element) => element?.tagName === 'STRONG'
-        && element.textContent?.includes(zh.assetRightsExceptionStale) === true,
+        && element.textContent?.includes(zh.assetRightsExceptionStale),
     )).toBeTruthy()
     expect(within(exceptionRegion).getByRole('radio', { name: /reference-1/ }).closest('fieldset'))
       .toHaveProperty('disabled', true)

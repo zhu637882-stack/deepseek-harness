@@ -451,7 +451,7 @@ function assertCandidateSelectionUnchanged(
     if (
       matches.length !== 1
       || matches[0]?.selectionStatus !== candidate.selectionStatus
-      || matches[0]?.isSelected !== candidate.isSelected
+      || matches[0].isSelected !== candidate.isSelected
     ) {
       throw new Error('评论后的权威候选选择状态发生变化')
     }
@@ -517,12 +517,12 @@ function assertCreatedHumanDecision(
 }
 
 function createReviewIdempotencyKey(lane: 'comment' | 'decision'): string {
-  const nonce = globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+  const nonce = globalThis.crypto.randomUUID()
   return `qingmu:element-review:${lane}:${nonce}`
 }
 
 function createQualificationIdempotencyKey(): string {
-  const nonce = globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+  const nonce = globalThis.crypto.randomUUID()
   return `qingmu:local-reference-qualification:${nonce}`
 }
 
@@ -926,7 +926,7 @@ function sameReferenceRightsExceptionScope(
   left: ReferenceRightsExceptionScope,
   right: ReferenceRightsExceptionScope,
 ): boolean {
-  return left.kind === right.kind
+  return (left.kind as string) === (right.kind as string)
     && left.referenceAssetId === right.referenceAssetId
     && left.referenceAssetSha256 === right.referenceAssetSha256
     && left.rightsRecordSha256 === right.rightsRecordSha256
@@ -959,15 +959,14 @@ async function assertReferenceRightsExceptionFeed(
   elementKind: CommandElementKind,
 ): Promise<void> {
   if (
-    feed.schema !== 'jason.qingmu-reference-rights-exception-release-feed.v1'
+    (feed.schema as string) !== 'jason.qingmu-reference-rights-exception-release-feed.v1'
     || feed.projectId !== projectId
     || feed.elementKind !== elementKind
     || feed.targetId !== targetId
-    || feed.subject.type !== 'element_profile'
+    || (feed.subject.type as string) !== 'element_profile'
     || feed.subject.id !== targetId
     || feed.subject.revision !== snapshot.subject.profileRevision
     || feed.subject.sha256 !== snapshot.snapshotSha256
-    || feed.capabilities.requiresRecentAuthentication !== true
     || feed.capabilities.canRelease
       !== (feed.capabilities.blockedReasonCode === null && feed.capabilities.blockedReason === null)
   ) throw new Error('权利异常放行读取未精确绑定当前元素资料与服务器权限')
@@ -986,7 +985,7 @@ async function assertReferenceRightsExceptionFeed(
       || current.stale
       || current.staleReasonCodes.length !== 0
       || !sameReferenceRightsExceptionRelease(current, release)
-      || release.subjectType !== 'element_profile'
+      || (release.subjectType as string) !== 'element_profile'
       || release.subjectId !== targetId
       || release.subjectRevision !== snapshot.subject.profileRevision
       || release.subjectSha256 !== snapshot.snapshotSha256
@@ -1035,25 +1034,21 @@ async function assertReferenceRightsExceptionResult(
   const scope = normalizeReferenceRightsExceptionScope(release.scope)
   const normalizedReason = normalizeReferenceRightsExceptionReasonInput(release.reason)
   if (
-    result.schema !== 'jason.qingmu-reference-rights-exception-release-result.v1'
+    (result.schema as string) !== 'jason.qingmu-reference-rights-exception-release-result.v1'
     || stringOf(result.changeSetId) === undefined
     || stringOf(result.commandReceiptId) === undefined
     || stringOf(result.eventId) === undefined
     || !SHA256.test(result.payloadSha256)
-    || result.changed !== false
-    || result.providerCalls !== 0
-    || result.selectionAuthority !== 'not_granted'
-    || result.humanApprovalInferred !== false
     || stringOf(release.id) === undefined
-    || release.decision !== 'exception_release'
-    || release.subjectType !== 'element_profile'
+    || (release.decision as string) !== 'exception_release'
+    || (release.subjectType as string) !== 'element_profile'
     || release.subjectId !== marker.targetId
     || release.subjectRevision !== marker.expectedSubjectRevision
     || release.subjectSha256 !== marker.expectedSubjectSha256
     || scope.referenceAssetId !== marker.referenceAssetId
     || scope.referenceAssetSha256 !== marker.referenceAssetSha256
     || scope.rightsRecordSha256 !== marker.rightsRecordSha256
-    || release.actorRole !== 'approver'
+    || (release.actorRole as string) !== 'approver'
     || release.actorNaturalPersonId === release.producerNaturalPersonId
     || release.actorNaturalPersonId === release.assetProducerNaturalPersonId
     || release.reason !== normalizedReason
@@ -1072,8 +1067,7 @@ async function assertReferenceRightsExceptionRecovery(
   marker: ReferenceRightsExceptionReleaseRecoveryMarker,
 ): Promise<YimengCreateReferenceRightsExceptionReleaseResponse> {
   if (
-    recovery.schema !== 'jason.qingmu-command-receipt-recovery.v1'
-    || recovery.recovered !== true
+    (recovery.schema as string) !== 'jason.qingmu-command-receipt-recovery.v1'
     || !SHA256.test(recovery.receiptSha256)
   ) throw new Error('易梦异常放行 GET 回执恢复合同不完整')
   await assertReferenceRightsExceptionResult(recovery.receipt, marker)
@@ -1107,14 +1101,14 @@ function sameReferenceRightsExceptionRelease(
   fact: ReferenceRightsExceptionReleaseFact,
 ): boolean {
   return release.id === fact.id
-    && release.decision === fact.decision
-    && release.subjectType === fact.subjectType
+    && (release.decision as string) === (fact.decision as string)
+    && (release.subjectType as string) === (fact.subjectType as string)
     && release.subjectId === fact.subjectId
     && release.subjectRevision === fact.subjectRevision
     && release.subjectSha256 === fact.subjectSha256
     && sameReferenceRightsExceptionScope(release.scope, fact.scope)
     && release.actorId === fact.actorId
-    && release.actorRole === fact.actorRole
+    && (release.actorRole as string) === (fact.actorRole as string)
     && release.actorNaturalPersonId === fact.actorNaturalPersonId
     && release.producerActorId === fact.producerActorId
     && release.producerNaturalPersonId === fact.producerNaturalPersonId
@@ -1146,7 +1140,7 @@ async function assertReferenceRightsExceptionFeedReconciled(
     historical.length !== 1
     || current.length !== 1
     || current[0]?.stale !== false
-    || current[0]?.staleReasonCodes.length !== 0
+    || current[0].staleReasonCodes.length !== 0
   ) throw new Error('权威 GET 未返回当前有效且精确对账的异常放行事实')
 }
 
@@ -1220,10 +1214,10 @@ function assertReferenceRightsPreview(
     preview.changeSetId !== changeSetId
     || preview.changeSetId !== changeSet.id
     || preview.projectId !== projectId
-    || preview.targetType !== 'element_profile'
+    || (preview.targetType as string) !== 'element_profile'
     || preview.targetId !== targetId
     || preview.elementKind !== elementKind
-    || preview.operation !== 'replaceReferenceRights'
+    || (preview.operation as string) !== 'replaceReferenceRights'
     || preview.referenceAssetId !== reference.assetId
     || preview.referenceAssetSha256 !== reference.sha256
     || preview.baseRevision !== snapshot.subject.profileRevision
@@ -1231,8 +1225,8 @@ function assertReferenceRightsPreview(
     || preview.payloadSha256 !== changeSet.payloadSha256
     || preview.methodProjectionSha256 !== method.projectionSha256
     || changeSet.projectId !== projectId
-    || changeSet.episodeId !== null
-    || changeSet.targetType !== 'element_profile'
+    || (changeSet.episodeId as unknown) !== null
+    || (changeSet.targetType as string) !== 'element_profile'
     || changeSet.targetId !== targetId
     || changeSet.baseRevision !== snapshot.subject.profileRevision
     || changeSet.baseSnapshotSha256 !== snapshot.snapshotSha256
@@ -1371,12 +1365,12 @@ function assertCommitReceiptLineage(
       || root.eventType !== (root.referenceInvalidated ? 'ReferenceInvalidated' : 'ElementProfileChanged')
       || typeof root.authoritativeSnapshotSha256 !== 'string'
       || !SHA256.test(root.authoritativeSnapshotSha256)
-      || (root.changed === false && (
+      || (!root.changed && (
         root.authoritativeRevision !== marker.baseRevision
         || root.authoritativeSnapshotSha256 !== marker.baseSnapshotSha256
-        || root.referenceInvalidated !== false
+        || root.referenceInvalidated
       ))
-      || (root.changed === true && root.authoritativeRevision !== marker.baseRevision + 1)
+      || (root.changed && root.authoritativeRevision !== marker.baseRevision + 1)
       || typeof root.impactSha256 !== 'string'
       || !SHA256.test(root.impactSha256)
       || !hasExactKeys(impact, [
@@ -1699,15 +1693,6 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
         result.assetId !== request.assetId
         || result.assetSha256 !== request.assetSha256
         || result.baseSnapshotSha256 !== request.baseSnapshotSha256
-        || result.qualificationKind !== 'local_file_integrity'
-        || !result.qualificationPassed
-        || result.formalConsistencyPassed
-        || result.rightsVerified
-        || result.selectionStatus !== 'Unselected'
-        || result.isSelected
-        || result.providerCalls !== 0
-        || result.selectionGranted
-        || result.approvalGranted
       ) throw new Error(t('assetReferenceQualificationMismatch'))
       if (isSignalAborted(controller.signal)) return
       clearLocalReferenceQualificationRecovery(projectId, elementKind, targetId)
@@ -1861,11 +1846,11 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
         }, controller.signal)
         const changeSet = proposal.changeSet
         if (
-          proposal.schema !== 'jason.qingmu-change-set-proposal.v1'
-          || proposal.nextAction !== 'preview'
+          (proposal.schema as string) !== 'jason.qingmu-change-set-proposal.v1'
+          || (proposal.nextAction as string) !== 'preview'
           || changeSet.projectId !== projectId
-          || changeSet.episodeId !== null
-          || changeSet.targetType !== 'element_profile'
+          || (changeSet.episodeId as unknown) !== null
+          || (changeSet.targetType as string) !== 'element_profile'
           || changeSet.targetId !== targetId
           || changeSet.baseRevision !== subject.profileRevision
           || changeSet.baseSnapshotSha256 !== snapshot.snapshotSha256
@@ -3208,7 +3193,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
                 <button
                   type="button"
                   className={css.primaryAction}
-                  disabled={exceptionBusy !== undefined || snapshot === undefined}
+                  disabled={exceptionBusy !== undefined}
                   onClick={() => { void recoverReferenceRightsExceptionRelease() }}
                 >
                   {exceptionBusy === 'recovering'

@@ -136,7 +136,7 @@ describe('element command commit recovery marker v4', () => {
     expect(serialized).not.toBeNull()
     expect(serialized).not.toContain('rightsHolder')
     expect(serialized).not.toContain('authorizationScope')
-    expect(Object.keys(JSON.parse(serialized ?? '{}')).sort()).toEqual([
+    expect(Object.keys(JSON.parse(serialized ?? '{}') as Record<string, unknown>).sort()).toEqual([
       'baseRevision',
       'baseSnapshotSha256',
       'changeSetId',

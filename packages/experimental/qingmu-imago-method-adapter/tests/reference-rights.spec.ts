@@ -228,7 +228,7 @@ describe('qingmu IMAGO reference rights method adapter', () => {
         target_id: 'prop-1',
         base_revision: 3,
         base_snapshot_sha256: 'a'.repeat(64),
-      }),
+      }) as unknown,
     }))
     expect(value.projection.method_definition.id).toBe('imago-v6-reference-rights-exception-release')
     expect(value.projection.work_order_projection).toEqual(expect.objectContaining({

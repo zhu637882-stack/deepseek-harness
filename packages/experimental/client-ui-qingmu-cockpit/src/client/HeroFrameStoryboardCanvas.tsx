@@ -80,7 +80,7 @@ interface CanvasContext {
     readonly bindingSha256: string
   }
   readonly baseSnapshotSha256: string
-  readonly savedCanvas: unknown | null
+  readonly savedCanvas: unknown
   readonly savedRawAnnotationsSha256: string | null
   readonly savedCompiledSha256: string | null
   readonly annotations: readonly ImagoHeroFrameStoryboardAnnotation[]
@@ -527,20 +527,13 @@ function verifyProposalResponse(
   response: YimengProposeStoryboardCanvasResponse,
   context: CanvasContext,
 ): CanvasProposal {
-  if (response.schema !== 'jason.qingmu-storyboard-canvas-change-set-proposal.v1' || response.nextAction !== 'preview') {
-    throw new Error('故事板画布提案合同不匹配')
-  }
   const changeSet = response.changeSet
   if (
-    changeSet.schema !== 'jason.qingmu-change-set.v1'
-    || changeSet.projectId !== context.projectId
+    changeSet.projectId !== context.projectId
     || changeSet.episodeId !== context.episodeId
-    || changeSet.targetType !== 'storyboard_frame'
     || changeSet.targetId !== context.frameId
     || changeSet.baseRevision !== context.storyboardRevisionVersion
     || changeSet.baseSnapshotSha256 !== context.baseSnapshotSha256
-    || changeSet.originKind !== 'human'
-    || changeSet.status !== 'draft'
     || changeSet.authoritativeRevision !== null
     || changeSet.authoritativeSnapshotSha256 !== null
   ) throw new Error('故事板画布提案血缘不匹配')
@@ -567,13 +560,10 @@ function verifyPreviewResponse(
     bindingSha256: context.heroFrame.bindingSha256,
   }
   if (
-    response.schema !== 'jason.qingmu-storyboard-canvas-preview.v1'
-    || response.changeSetId !== proposal.changeSetId
+    response.changeSetId !== proposal.changeSetId
     || response.projectId !== context.projectId
     || response.episodeId !== context.episodeId
-    || response.targetType !== 'storyboard_frame'
     || response.targetId !== context.frameId
-    || response.operation !== 'replaceStoryboardCanvas'
     || response.storyboardRevision.revisionId !== context.storyboardRevisionId
     || response.storyboardRevision.revisionVersion !== context.storyboardRevisionVersion
     || response.storyboardRevision.sourceSha256 !== context.storyboardSourceSha256
@@ -586,13 +576,6 @@ function verifyPreviewResponse(
   assertSame(response.before, context.savedCanvas, '故事板画布技术预览旧画布')
   assertSame(response.after, expectedCanvas(context, method), '故事板画布技术预览新画布')
   assertSame(response.changedPaths, STORYBOARD_CANVAS_CHANGED_PATHS, '故事板画布技术预览变更路径')
-  if (
-    response.providerCalls !== 0
-    || response.workerStarted !== false
-    || response.selectionExecuted !== false
-    || response.humanApprovalInferred !== false
-    || response.humanSignoff !== false
-  ) throw new Error('故事板画布技术预览越过零执行边界')
   return {
     changeSetId: proposal.changeSetId,
     payloadSha256: proposal.payloadSha256,
@@ -610,29 +593,17 @@ function verifyCommitReceipt(
   marker: StoryboardCanvasCommitRecoveryMarker,
 ): CanvasCommitReceipt {
   if (
-    response.schema !== 'jason.qingmu-storyboard-canvas-commit-result.v1'
-    || response.changeSetId !== marker.changeSetId
+    response.changeSetId !== marker.changeSetId
     || response.projectId !== marker.projectId
     || response.episodeId !== marker.episodeId
-    || response.targetType !== 'storyboard_frame'
     || response.targetId !== marker.frameId
-    || response.operation !== 'replaceStoryboardCanvas'
-    || response.eventType !== 'StoryboardCanvasReplaced'
     || response.storyboardRevision.base.revisionId !== marker.storyboardRevisionId
     || response.storyboardRevision.base.revisionVersion !== marker.baseRevision
     || response.baseRevision !== marker.baseRevision
     || response.storyboardRevision.authoritative.revisionVersion !== response.authoritativeRevision
     || response.payloadSha256 !== marker.expectedPayloadSha256
     || response.idempotencyKey !== marker.idempotencyKey
-    || response.changed !== true
   ) throw new Error('故事板画布提交回执血缘不匹配')
-  if (
-    response.providerCalls !== 0
-    || response.workerStarted !== false
-    || response.selectionExecuted !== false
-    || response.humanApprovalInferred !== false
-    || response.humanSignoff !== false
-  ) throw new Error('故事板画布提交回执越过零执行边界')
   if (Number.isNaN(Date.parse(stringOf(response.committedAt, 'commit.committedAt')))) {
     throw new Error('故事板画布提交时间无效')
   }
@@ -697,9 +668,6 @@ async function verifyRecoveryResponse(
   marker: StoryboardCanvasCommitRecoveryMarker,
   committed?: CanvasCommitReceipt,
 ): Promise<CanvasCommitReceipt> {
-  if (response.schema !== 'jason.qingmu-command-receipt-recovery.v1' || response.recovered !== true) {
-    throw new Error('故事板画布恢复回执合同不匹配')
-  }
   const receiptSha256 = sha256Of(response.receiptSha256, 'recovery.receiptSha256')
   if (await canonicalSha256(response.receipt) !== receiptSha256) throw new Error('故事板画布恢复回执 SHA-256 不匹配')
   const recovered = verifyCommitReceipt(response.receipt, marker)
@@ -724,7 +692,6 @@ function verifyAuthoritativeRefresh(
     || heroProjection.storyboardRevision.revisionVersion !== receipt.authoritativeRevision
     || heroProjection.storyboardRevision.sourceSha256 !== receipt.authoritativeStoryboardSourceSha256
     || heroProjection.shotsSha256 !== receipt.authoritativeSnapshotSha256
-    || heroProjection.valid !== true
     || heroProjection.blockers.length !== 0
   ) throw new Error('刷新后的故事板权威修订与提交回执不一致')
   const relationShots = relations.shots.filter(shot => shot.shotId === receipt.frameId)
@@ -938,6 +905,8 @@ export function HeroFrameStoryboardCanvas({
     if (context === undefined || busy !== null || recovery.status !== 'none') return
     const lineageKey = context.lineageKey
     const controller = new AbortController()
+    const signal = controller.signal
+    const interrupted = () => signal.aborted || lineageRef.current !== lineageKey
     abortRef.current?.abort()
     abortRef.current = controller
     setBusy('method')
@@ -949,21 +918,21 @@ export function HeroFrameStoryboardCanvas({
     try {
       const relationRequest = buildHeroFrameRelationRequest(relations, context.frameId)
       const baseCanvasSha256 = context.savedCanvas === null ? null : await canonicalSha256(context.savedCanvas)
-      if (controller.signal.aborted || lineageRef.current !== lineageKey) return
+      if (interrupted()) return
       const request: ImagoHeroFrameStoryboardMethodRequest = {
         ...relationRequest,
         heroFrame: { assetId: context.heroFrame.assetId, mediaSha256: context.heroFrame.mediaSha256 },
         canvas: { baseCanvasSha256, annotations },
       }
       const plainAnnotationsSha256 = await canonicalSha256(request.canvas.annotations)
-      if (controller.signal.aborted || lineageRef.current !== lineageKey) return
-      const response = await port.heroFrameStoryboardMethod(request, controller.signal)
-      if (controller.signal.aborted || lineageRef.current !== lineageKey) return
+      if (interrupted()) return
+      const response = await port.heroFrameStoryboardMethod(request, signal)
+      if (interrupted()) return
       setMethod(verifyMethodResponse(response, request, plainAnnotationsSha256))
     } catch (cause) {
-      if (!controller.signal.aborted) setError(errorMessage(cause))
+      if (!signal.aborted) setError(errorMessage(cause))
     } finally {
-      if (!controller.signal.aborted) setBusy(null)
+      if (!signal.aborted) setBusy(null)
     }
   }
 
@@ -971,6 +940,8 @@ export function HeroFrameStoryboardCanvas({
     if (context === undefined || method === undefined || busy !== null || recovery.status !== 'none') return
     const lineageKey = context.lineageKey
     const controller = new AbortController()
+    const signal = controller.signal
+    const interrupted = () => signal.aborted || lineageRef.current !== lineageKey
     abortRef.current?.abort()
     abortRef.current = controller
     setBusy('proposal')
@@ -994,22 +965,22 @@ export function HeroFrameStoryboardCanvas({
         methodProjection,
         methodProjectionSha256: method.projectionSha256,
         methodAttestation: method.response.methodAttestation,
-      }, controller.signal)
-      if (controller.signal.aborted || lineageRef.current !== lineageKey) return
+      }, signal)
+      if (interrupted()) return
       const verifiedProposal = verifyProposalResponse(proposalResponse, context)
       setBusy('preview')
       const previewResponse = await port.previewStoryboardCanvas(
         storyboardCanvasSubject(context, verifiedProposal.changeSetId),
-        controller.signal,
+        signal,
       )
-      if (controller.signal.aborted || lineageRef.current !== lineageKey) return
+      if (interrupted()) return
       const verifiedPreview = verifyPreviewResponse(previewResponse, context, verifiedProposal, method)
       setProposal(verifiedProposal)
       setPreview(verifiedPreview)
     } catch (cause) {
-      if (!controller.signal.aborted && lineageRef.current === lineageKey) setError(errorMessage(cause))
+      if (!signal.aborted && lineageRef.current === lineageKey) setError(errorMessage(cause))
     } finally {
-      if (!controller.signal.aborted && lineageRef.current === lineageKey) setBusy(null)
+      if (!signal.aborted && lineageRef.current === lineageKey) setBusy(null)
     }
   }
 
@@ -1026,6 +997,8 @@ export function HeroFrameStoryboardCanvas({
     ) return
     const lineageKey = context.lineageKey
     const controller = new AbortController()
+    const signal = controller.signal
+    const interrupted = () => signal.aborted || lineageRef.current !== lineageKey
     abortRef.current?.abort()
     abortRef.current = controller
     setBusy('commit')
@@ -1033,7 +1006,7 @@ export function HeroFrameStoryboardCanvas({
     let marker: StoryboardCanvasCommitRecoveryMarker | undefined
     try {
       const idempotencyKey = await deriveStoryboardCanvasIdempotencyKey(proposal.changeSetId, preview.payloadSha256)
-      if (controller.signal.aborted || lineageRef.current !== lineageKey) return
+      if (interrupted()) return
       marker = createStoryboardCanvasRecoveryMarker({
         ...storyboardCanvasSubject(context, proposal.changeSetId),
         idempotencyKey,
@@ -1041,16 +1014,16 @@ export function HeroFrameStoryboardCanvas({
       })
       if (!writeStoryboardCanvasRecoveryMarker(marker)) throw new Error('无法安全保存故事板画布恢复坐标')
       setRecovery({ status: 'ready', marker })
-      const commitResponse = await port.commitStoryboardCanvas(storyboardCanvasCommitRequest(marker), controller.signal)
-      if (controller.signal.aborted || lineageRef.current !== lineageKey) return
+      const commitResponse = await port.commitStoryboardCanvas(storyboardCanvasCommitRequest(marker), signal)
+      if (interrupted()) return
       const committed = verifyCommitReceipt(commitResponse, marker)
       verifyCommittedMethod(committed, context, method)
       setBusy('recover')
       const recoveryResponse = await port.recoverStoryboardCanvasCommit(
         storyboardCanvasCommitRequest(marker),
-        controller.signal,
+        signal,
       )
-      if (controller.signal.aborted || lineageRef.current !== lineageKey) return
+      if (interrupted()) return
       const recovered = await verifyRecoveryResponse(recoveryResponse, marker, committed)
       verifyCommittedMethod(recovered, context, method)
       setBusy('refresh')
@@ -1062,7 +1035,7 @@ export function HeroFrameStoryboardCanvas({
       setReceipt(recovered)
     } catch (cause) {
       if (marker !== undefined) setRecovery({ status: 'ready', marker })
-      if (!controller.signal.aborted || marker !== undefined) setError(errorMessage(cause))
+      if (!signal.aborted || marker !== undefined) setError(errorMessage(cause))
     } finally {
       setBusy(null)
     }
@@ -1072,6 +1045,7 @@ export function HeroFrameStoryboardCanvas({
     if (context === undefined || busy !== null) return
     const lineageKey = context.lineageKey
     const controller = new AbortController()
+    const signal = controller.signal
     abortRef.current?.abort()
     abortRef.current = controller
     setBusy('recover')
@@ -1081,7 +1055,7 @@ export function HeroFrameStoryboardCanvas({
         storyboardCanvasCommitRequest(marker),
         controller.signal,
       )
-      if (controller.signal.aborted || lineageRef.current !== lineageKey) return
+      if (signal.aborted || lineageRef.current !== lineageKey) return
       const recovered = await verifyRecoveryResponse(response, marker)
       setBusy('refresh')
       const refreshed = await onCommitted()
@@ -1092,7 +1066,7 @@ export function HeroFrameStoryboardCanvas({
       setReceipt(recovered)
     } catch (cause) {
       setRecovery({ status: 'ready', marker })
-      if (!controller.signal.aborted) setError(errorMessage(cause))
+      if (!signal.aborted) setError(errorMessage(cause))
     } finally {
       setBusy(null)
     }

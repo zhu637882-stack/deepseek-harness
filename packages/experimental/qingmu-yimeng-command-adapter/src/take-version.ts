@@ -142,7 +142,7 @@ function jcs(value: unknown, field: string, error: ErrorFactory, depth = 0): str
   if (Array.isArray(value)) {
     return `[${value.map((item, index) => jcs(item, `${field}[${String(index)}]`, error, depth + 1)).join(',')}]`
   }
-  if (typeof value === 'object' && value !== null) {
+  if (typeof value === 'object') {
     const item = value as Record<string, unknown>
     const keys = Object.keys(item).sort()
     if (keys.some(key => !key.isWellFormed())) throw error(`${field} contains an invalid key`)

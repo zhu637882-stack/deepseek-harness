@@ -126,7 +126,7 @@ describe('Take version selection command transport', () => {
     const headers = new Headers(init?.headers)
     expect(headers.get('authorization')).toBe(`Bearer ${TOKEN}`)
     expect(headers.get('Idempotency-Key')).toBe(input.idempotencyKey)
-    expect(JSON.parse(String(init?.body))).toEqual({
+    expect(JSON.parse(init?.body as string)).toEqual({
       expectedStackSha256: input.expectedStackSha256,
       expectedSelectedTakeId: input.expectedSelectedTakeId,
       candidateTakeId: input.candidateTakeId,
@@ -134,8 +134,8 @@ describe('Take version selection command transport', () => {
       candidateOutputSha256: input.candidateOutputSha256,
       idempotencyKey: input.idempotencyKey,
     })
-    expect(String(init?.body)).not.toContain('actorUserId')
-    expect(String(init?.body)).not.toContain('authSessionId')
+    expect(init?.body as string).not.toContain('actorUserId')
+    expect(init?.body as string).not.toContain('authSessionId')
   })
 
   it.each([true, false])('recovers by GET only; committed=%s does not bind to the current token', async (committed) => {
@@ -160,7 +160,7 @@ describe('Take version selection command transport', () => {
     const expected = recovery(input, false)
     const fetch = vi.fn<typeof globalThis.fetch>(async () => response(expected))
     expect(await handler(fetch)('recoverTakeVersionSelection', input, signal())).toEqual({ ok: true, value: expected })
-    expect(String(fetch.mock.calls[0]?.[0])).not.toContain('expectedSelectedTakeId')
+    expect(fetch.mock.calls[0]?.[0] as string).not.toContain('expectedSelectedTakeId')
   })
 
   it.each(['actorUserId', 'actorNaturalPersonId', 'authSessionId', 'approved', 'providerCall'])(

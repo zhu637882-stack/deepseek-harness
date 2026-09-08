@@ -8479,14 +8479,14 @@ describe.skipIf(
         expectedSubjectRevision: 4,
         expectedSubjectSha256: canonicalSha256(propSubject(4, PROP_UPDATED_PROMPT)),
         body: commentText,
-        idempotencyKey: expect.stringMatching(/^qingmu:element-review:comment:/),
+        idempotencyKey: expect.stringMatching(/^qingmu:element-review:comment:/) as unknown,
       })
       expect(decisionBody).toEqual({
         expectedSubjectRevision: 4,
         expectedSubjectSha256: canonicalSha256(propSubject(4, PROP_UPDATED_PROMPT)),
         decision: 'approve',
         reason: decisionReason,
-        idempotencyKey: expect.stringMatching(/^qingmu:element-review:decision:/),
+        idempotencyKey: expect.stringMatching(/^qingmu:element-review:decision:/) as unknown,
       })
       for (const requestBody of [commentBody, decisionBody]) {
         expect(requestBody).not.toHaveProperty('actorId')
@@ -8736,7 +8736,7 @@ describe.skipIf(
             rights: recordedRights,
             baseRevision: 4,
             baseSnapshotSha256: canonicalSha256(baselineSubject),
-          }),
+          }) as unknown,
         }),
       ])
       expect(validateReferenceRightsMethodProof(proposalBody, baselineSubject)).toBe(

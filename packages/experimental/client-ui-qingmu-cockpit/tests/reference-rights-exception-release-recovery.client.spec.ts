@@ -108,7 +108,7 @@ describe('reference-rights exception-release recovery marker v1', () => {
     const key = sessionStorage.key(0)
     expect(key).toBe('qingmu:reference-rights-exception-release-recovery:v1:project-1:prop:prop-1')
     const serialized = sessionStorage.getItem(key ?? '') ?? ''
-    expect(Object.keys(JSON.parse(serialized)).sort()).toEqual([
+    expect(Object.keys(JSON.parse(serialized) as Record<string, unknown>).sort()).toEqual([
       'projectId',
       'elementKind',
       'targetId',

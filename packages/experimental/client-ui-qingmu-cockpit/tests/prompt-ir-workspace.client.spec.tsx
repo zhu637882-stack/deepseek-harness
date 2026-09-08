@@ -497,6 +497,7 @@ describe('PromptIrWorkspace vertical slice', () => {
       shotItems={frame('Ready')} selectedShotId={FRAME_ID} onSelectShotId={vi.fn()} port={readPort} t={t}
       onCommitted={vi.fn(async () => {})} presentation="director" />)
     await screen.findByText(zh.directorStaleDraft)
+    // eslint-disable-next-line typescript/no-unnecessary-type-assertion -- tsc resolves Testing Library queries as HTMLElement
     expect((screen.getByRole('button', { name: zh.promptIrCheckMethod }) as HTMLButtonElement).disabled).toBe(true)
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     try { fireEvent.click(screen.getByRole('button', { name: zh.directorRebase })) }
@@ -522,13 +523,16 @@ describe('PromptIrWorkspace vertical slice', () => {
     await screen.findByText(zh.directorUnsaved)
     view.unmount()
     const restored = render(<PromptIrWorkspace {...props} />)
+    // eslint-disable-next-line typescript/no-unnecessary-type-assertion -- tsc resolves Testing Library queries as HTMLElement
     await waitFor(() => { expect((screen.getByLabelText(zh.directorVideoPrompt) as HTMLTextAreaElement).value).toBe('未保存的完整提示词') })
     expect(spies.commitPromptIrEdit).not.toHaveBeenCalled()
     restored.unmount()
     spies.promptIr.mockResolvedValueOnce({ ...BASE_READ, baseSnapshotSha256: 'f'.repeat(64) })
     render(<PromptIrWorkspace {...props} />)
     await screen.findByText(zh.directorStaleDraft)
+    // eslint-disable-next-line typescript/no-unnecessary-type-assertion -- tsc resolves Testing Library queries as HTMLElement
     expect((screen.getByRole('button', { name: zh.promptIrCheckMethod }) as HTMLButtonElement).disabled).toBe(true)
+    // eslint-disable-next-line typescript/no-unnecessary-type-assertion -- tsc resolves Testing Library queries as HTMLElement
     expect((screen.getByLabelText(zh.directorVideoPrompt) as HTMLTextAreaElement).value).toBe('未保存的完整提示词')
   })
 
@@ -543,6 +547,7 @@ describe('PromptIrWorkspace vertical slice', () => {
       shotItems={frame('Ready')} selectedShotId={FRAME_ID} onSelectShotId={vi.fn()} port={readPort} t={t}
       onCommitted={vi.fn(async () => {})} presentation="director" />)
     await waitFor(() => {
+      // eslint-disable-next-line typescript/no-unnecessary-type-assertion -- tsc resolves Testing Library queries as HTMLElement
       expect((screen.getByLabelText(zh.directorVideoPrompt) as HTMLTextAreaElement).value).toBe(CANDIDATE_EDITABLE.videoGenPrompt)
     })
     expect(screen.queryByRole('button', { name: zh.promptIrSelect })).toBeNull()

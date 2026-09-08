@@ -124,12 +124,12 @@ export function resolveClientBuildEnvironment(
   profile: string | undefined = environment[CLIENT_BUILD_PROFILE_SELECTOR],
 ): ClientBuildEnvironment {
   if (profile === undefined) return clientBuildEnvironment(environment)
+  if (!Object.hasOwn(NAMED_CLIENT_BUILD_ENVIRONMENTS, profile)) {
+    throw new Error(`unknown client build profile ${JSON.stringify(profile)}; expected "official" or "qingmu"`)
+  }
   const namedEnvironment = NAMED_CLIENT_BUILD_ENVIRONMENTS[
     profile as keyof typeof NAMED_CLIENT_BUILD_ENVIRONMENTS
   ]
-  if (namedEnvironment === undefined) {
-    throw new Error(`unknown client build profile ${JSON.stringify(profile)}; expected "official" or "qingmu"`)
-  }
   const commitHash = environment[CLIENT_COMMIT_HASH_VARIABLE]
   if (commitHash === undefined) {
     throw new Error(`${CLIENT_COMMIT_HASH_VARIABLE} is required for the ${profile} client build profile`)

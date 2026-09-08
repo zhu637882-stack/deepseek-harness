@@ -47,7 +47,7 @@ describe('Qingmu browser-brand plugin', () => {
   it('fails loud when loaded from a non-Qingmu client artifact', async () => {
     vi.stubEnv('DSH_CLIENT_BUILD_PROFILE', 'official')
     const official = await bench()
-    expect(() => { apply(official.ctx as never) }).toThrow(/requires a qingmu client artifact/)
+    expect(() => { apply(official.ctx) }).toThrow(/requires a qingmu client artifact/)
   })
 
   it('renders the public name and scalable original mark', () => {

@@ -1,5 +1,6 @@
 /* oxlint-disable typescript/no-unnecessary-condition -- Private RPC DTOs are untrusted at this runtime boundary. */
 /* oxlint-disable typescript/no-unnecessary-boolean-literal-compare -- Exact false/0 values deny adjacent authority. */
+/* oxlint-disable typescript/no-unnecessary-type-assertion -- Runtime DTO shapes are not fully captured by static types. */
 import type {
   ImagoReworkRouteMethodResponse, YimengReworkRouteAuthorityProbe, YimengReworkRouteRecovery,
   YimengReworkRouteResult, YimengReworkRouteSourceResponse, YimengShotFinding,

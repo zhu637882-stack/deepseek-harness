@@ -63,7 +63,7 @@ function canonicalJson(value: unknown): string {
     const record = value as Record<string, unknown>
     return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`
   }
-  return JSON.stringify(value) as string
+  return JSON.stringify(value)
 }
 
 function canonicalSha256(value: unknown): string {

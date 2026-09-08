@@ -122,7 +122,7 @@ function canonicalJson(value: unknown): string {
     return String(value)
   }
   if (Array.isArray(value)) return `[${value.map(item => canonicalJson(item)).join(',')}]`
-  if (typeof value === 'object' && value !== null) {
+  if (typeof value === 'object') {
     const record = value as Record<string, unknown>
     const keys = Object.keys(record).sort(compareUnicodeCodePoints)
     return `{${keys.map(key => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`
