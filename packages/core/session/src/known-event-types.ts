@@ -41,6 +41,8 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'qingmu-director-context/state',
   'qingmu-director-dialogue/receipt',
   'qingmu-director-dialogue/state',
+  'qingmu/director-proposal-receipt',
+  'qingmu/project-context',
   'request/context',
   'request/header',
   'sandbox/mode',

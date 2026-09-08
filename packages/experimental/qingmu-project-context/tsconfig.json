@@ -1,0 +1,18 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "types": ["node"]
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../client/connection/tsconfig.host.json" },
+    { "path": "../../core/session" },
+    { "path": "../../host/apiproxy" },
+    { "path": "../qingmu-imago-method-adapter" },
+    { "path": "../qingmu-yimeng-read-adapter" },
+    { "path": "../../runtime-diagnostics/invariants" }
+  ]
+}

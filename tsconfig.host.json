@@ -294,6 +294,7 @@
     { "path": "./packages/experimental/qingmu-web" },
     { "path": "./packages/experimental/qingmu-imago-method-adapter" },
     { "path": "./packages/experimental/qingmu-director-context-bridge" },
+    { "path": "./packages/experimental/qingmu-project-context" },
     { "path": "./packages/experimental/qingmu-yimeng-command-adapter" },
     { "path": "./packages/experimental/qingmu-yimeng-read-adapter" },
     { "path": "./packages/workflow/workflow" },

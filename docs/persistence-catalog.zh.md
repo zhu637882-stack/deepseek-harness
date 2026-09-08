@@ -577,6 +577,30 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源：[`packages/experimental/qingmu-director-context-bridge/src/types.ts:259`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
 
+### `qingmu/*`
+
+<a id="qingmudirector-proposal-receipt--log-only"></a>
+
+#### `qingmu/director-proposal-receipt` — 仅日志
+
+```ts persistence-catalog
+/** Informational proposal receipt; proposal content remains outside the session log. */
+'qingmu/director-proposal-receipt': QingmuDirectorProposalReceipt
+```
+
+来源：[`packages/experimental/qingmu-project-context/src/types.ts:104`](../packages/experimental/qingmu-project-context/src/types.ts)
+
+<a id="qingmuproject-context--log-only"></a>
+
+#### `qingmu/project-context` — 仅日志
+
+```ts persistence-catalog
+/** Whole-value context state reconstructed by folding the latest event. */
+'qingmu/project-context': QingmuProjectContextEvent
+```
+
+来源：[`packages/experimental/qingmu-project-context/src/types.ts:102`](../packages/experimental/qingmu-project-context/src/types.ts)
+
 ### `request/*`
 
 <a id="requestcontext--log-only"></a>
