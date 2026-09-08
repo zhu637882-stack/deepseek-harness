@@ -278,10 +278,10 @@ describe('current Take technical-QC method boundary', () => {
     const internal = ctx.get('qingmuImagoMethod')
     expect(typeof internal).toBe('function')
     expect(await internal?.('takeTechnicalQcMethod', request, signal()))
-      .not.toMatchObject({ error: { message: 'Take technical-QC Method is Host-internal' } })
+      .not.toMatchObject({ error: { message: 'Requested IMAGO Method is Host-internal' } })
     const browser = handle.mock.calls[0]?.[1]
     expect(await browser?.('takeTechnicalQcMethod', request, signal())).toMatchObject({
-      ok: false, error: { code: 'internal', message: 'Take technical-QC Method is Host-internal' },
+      ok: false, error: { code: 'internal', message: 'Requested IMAGO Method is Host-internal' },
     })
   })
 
