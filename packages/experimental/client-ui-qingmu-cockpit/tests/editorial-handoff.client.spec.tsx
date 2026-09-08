@@ -378,7 +378,6 @@ describe('editorial handoff panel', () => {
     fireEvent.click(screen.getByRole('button', { name: zh.handoffSelectionPreview }))
     await waitFor(() => { expect(screen.getByText(zh.handoffSelectionPreviewTitle)).toBeTruthy() })
     expect(screen.getByText(zh.handoffSelectionReleaseBlocked)).toBeTruthy()
-    fireEvent.click(screen.getByRole('checkbox', { name: zh.handoffSelectionConfirm }))
     fireEvent.click(screen.getByRole('button', { name: zh.handoffSelectionSave }))
     await waitFor(() => { expect(screen.getByText(zh.handoffSelectionSaved)).toBeTruthy() })
     expect(screen.getByText(zh.handoffSelectionSavedBoundary)).toBeTruthy()
@@ -469,9 +468,7 @@ describe('editorial handoff panel', () => {
     fireEvent.click(screen.getByRole('button', { name: zh.handoffCandidateRead }))
     await waitFor(() => { expect(screen.getByRole('button', { name: zh.handoffTechnicalQcPrepare })).toBeTruthy() })
     fireEvent.click(screen.getByRole('button', { name: zh.handoffTechnicalQcPrepare }))
-    await waitFor(() => { expect(screen.getByRole('checkbox', { name: zh.handoffTechnicalQcConfirm })).toBeTruthy() })
-    fireEvent.click(screen.getByRole('checkbox', { name: zh.handoffTechnicalQcConfirm }))
-    const run = screen.getByRole('button', { name: zh.handoffTechnicalQcRun })
+    const run = await screen.findByRole('button', { name: zh.handoffTechnicalQcRun })
     fireEvent.click(run)
     await waitFor(() => { expect(screen.getByRole('button', { name: zh.handoffTechnicalQcRunning })).toBeTruthy() })
     fireEvent.click(screen.getByRole('button', { name: zh.handoffTechnicalQcRunning }))
@@ -584,19 +581,14 @@ describe('editorial handoff panel', () => {
     await screen.findByText(/雨夜街口/u)
     fireEvent.click(screen.getByRole('button', { name: zh.handoffCandidateRead }))
     await waitFor(() => { expect(screen.getByText('strict_verify_episode_failed')).toBeTruthy() })
-    expect(screen.getByRole<HTMLInputElement>('checkbox', {
-      name: zh.handoffEvidenceFreezeConfirm,
-    }).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: zh.handoffEvidenceFreezeSave }) as HTMLButtonElement).disabled).toBe(true)
     expect(confirmPosts).toBe(0)
 
     preview = readyPreview
     fireEvent.click(screen.getByRole('button', { name: zh.handoffEvidenceFreezePrepare }))
     await waitFor(() => {
-      expect(screen.getByRole<HTMLInputElement>('checkbox', {
-        name: zh.handoffEvidenceFreezeConfirm,
-      }).disabled).toBe(false)
+      expect((screen.getByRole('button', { name: zh.handoffEvidenceFreezeSave }) as HTMLButtonElement).disabled).toBe(false)
     })
-    fireEvent.click(screen.getByRole('checkbox', { name: zh.handoffEvidenceFreezeConfirm }))
     fireEvent.click(screen.getByRole('button', { name: zh.handoffEvidenceFreezeSave }))
     await screen.findByText(zh.handoffEvidenceFreezeSaved)
     expect(screen.getByText(zh.handoffEvidenceFreezeSavedBoundary)).toBeTruthy()
@@ -1436,7 +1428,6 @@ describe('editorial handoff panel', () => {
     fireEvent.click(screen.getByLabelText(zh.handoffContentCheckPicture))
     fireEvent.click(screen.getByLabelText(zh.handoffContentCheckAudio))
     fireEvent.click(screen.getByLabelText(zh.handoffContentCheckContinuity))
-    fireEvent.click(screen.getByLabelText(zh.handoffContentSecondConfirm))
     fireEvent.change(screen.getByLabelText(zh.handoffContentNote), { target: { value: 'must reset' } })
     fireEvent.click(screen.getByRole('button', { name: zh.handoffContentReject }))
     await waitFor(() => { expect(keys).toHaveLength(1) })
@@ -1451,7 +1442,7 @@ describe('editorial handoff panel', () => {
     if (!(resetNote instanceof HTMLTextAreaElement)) throw new Error('content note is not a textarea')
     expect(resetNote.value).toBe('')
     for (const label of [zh.handoffContentCheckPicture, zh.handoffContentCheckAudio,
-      zh.handoffContentCheckContinuity, zh.handoffContentSecondConfirm]) {
+      zh.handoffContentCheckContinuity]) {
       const resetCheck = screen.getByLabelText(label)
       if (!(resetCheck instanceof HTMLInputElement)) throw new Error('review check is not an input')
       expect(resetCheck.checked).toBe(false)
@@ -1460,7 +1451,6 @@ describe('editorial handoff panel', () => {
     fireEvent.click(screen.getByLabelText(zh.handoffContentCheckPicture))
     fireEvent.click(screen.getByLabelText(zh.handoffContentCheckAudio))
     fireEvent.click(screen.getByLabelText(zh.handoffContentCheckContinuity))
-    fireEvent.click(screen.getByLabelText(zh.handoffContentSecondConfirm))
     fireEvent.click(screen.getByRole('button', { name: zh.handoffContentReject }))
     await waitFor(() => { expect(keys).toHaveLength(2) })
     expect(keys[0]).not.toBe(keys[1])

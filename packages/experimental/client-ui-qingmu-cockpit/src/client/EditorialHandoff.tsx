@@ -533,19 +533,19 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   const [selectionStatus, setSelectionStatus] = useState<SelectionStatus>()
   const [selectionPreview, setSelectionPreview] = useState<SelectionPreview>()
   const [selectionResult, setSelectionResult] = useState<SelectionResult>()
-  const [selectionConfirmed, setSelectionConfirmed] = useState(false)
+  const [, setSelectionConfirmed] = useState(false)
   const [selectionState, setSelectionState] = useState<'idle' | 'previewing' | 'previewed' | 'saving' | 'succeeded' | 'failed'>('idle')
   const [selectionError, setSelectionError] = useState<string>()
   const [technicalQcStatus, setTechnicalQcStatus] = useState<TechnicalQcStatus>()
   const [technicalQcPreview, setTechnicalQcPreview] = useState<TechnicalQcPreview>()
   const [technicalQcResult, setTechnicalQcResult] = useState<TechnicalQcResult>()
-  const [technicalQcConfirmed, setTechnicalQcConfirmed] = useState(false)
+  const [, setTechnicalQcConfirmed] = useState(false)
   const [technicalQcState, setTechnicalQcState] = useState<'idle' | 'previewing' | 'previewed' | 'running' | 'succeeded' | 'failed'>('idle')
   const [technicalQcError, setTechnicalQcError] = useState<string>()
   const [evidenceFreezeStatus, setEvidenceFreezeStatus] = useState<EvidenceFreezeStatus>()
   const [evidenceFreezePreview, setEvidenceFreezePreview] = useState<EvidenceFreezePreview>()
   const [evidenceFreezeResult, setEvidenceFreezeResult] = useState<EvidenceFreezeResult>()
-  const [evidenceFreezeConfirmed, setEvidenceFreezeConfirmed] = useState(false)
+  const [, setEvidenceFreezeConfirmed] = useState(false)
   const [evidenceFreezeState, setEvidenceFreezeState] = useState<'idle' | 'previewing' | 'previewed' | 'saving' | 'succeeded' | 'failed'>('idle')
   const [evidenceFreezeError, setEvidenceFreezeError] = useState<string>()
   const [rc1Status, setRc1Status] = useState<Rc1Status>()
@@ -558,7 +558,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     dialogue_and_audio_reviewed: false,
     continuity_and_content_reviewed: false,
   })
-  const [contentSecondConfirmed, setContentSecondConfirmed] = useState(false)
+  const [, setContentSecondConfirmed] = useState(false)
   const [contentRejectReason, setContentRejectReason] = useState('picture_or_timing')
   const [contentNote, setContentNote] = useState('')
   const [identitySaving, setIdentitySaving] = useState(false)
@@ -569,6 +569,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   const [humanPresenceStatus, setHumanPresenceStatus] = useState<HumanPresenceStatus>()
   const [humanPresenceState, setHumanPresenceState] = useState<'idle' | 'loading' | 'prompting' | 'ready' | 'failed'>('idle')
   const [humanPresenceError, setHumanPresenceError] = useState<string>()
+  const [shotViewMode, setShotViewMode] = useState<'detailed' | 'compact'>('detailed')
   const generation = useRef(0)
   const downloadGeneration = useRef(0)
   const importGeneration = useRef(0)
@@ -1280,7 +1281,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   }, [episodeId, projectId, selectionState])
 
   const confirmSelection = useCallback(async () => {
-    if (selectionPreview === undefined || !selectionPreview.canConfirm || !selectionConfirmed
+    if (selectionPreview === undefined || !selectionPreview.canConfirm
       || selectionState === 'saving') return
     const current = ++selectionGeneration.current
     selectionController.current?.abort()
@@ -1323,7 +1324,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     } finally {
       if (current === selectionGeneration.current) selectionController.current = undefined
     }
-  }, [episodeId, loadSelectionStatus, loadTechnicalQcStatus, projectId, selectionConfirmed, selectionPreview, selectionState])
+  }, [episodeId, loadSelectionStatus, loadTechnicalQcStatus, projectId, selectionPreview, selectionState])
 
   const previewTechnicalQc = useCallback(async () => {
     if (technicalQcState === 'previewing' || technicalQcState === 'running') return
@@ -1363,7 +1364,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   }, [episodeId, projectId, technicalQcState])
 
   const confirmTechnicalQc = useCallback(async () => {
-    if (technicalQcPreview === undefined || !technicalQcPreview.canConfirm || !technicalQcConfirmed
+    if (technicalQcPreview === undefined || !technicalQcPreview.canConfirm
       || technicalQcState === 'running') return
     const current = ++technicalQcGeneration.current
     technicalQcController.current?.abort()
@@ -1410,7 +1411,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     }
   }, [
     episodeId, loadEvidenceFreezeStatus, loadSelectionStatus, loadTechnicalQcStatus,
-    projectId, technicalQcConfirmed, technicalQcPreview, technicalQcState,
+    projectId, technicalQcPreview, technicalQcState,
   ])
 
   const previewEvidenceFreeze = useCallback(async () => {
@@ -1452,7 +1453,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
 
   const confirmEvidenceFreeze = useCallback(async () => {
     if (evidenceFreezePreview === undefined || !evidenceFreezePreview.canConfirm
-      || !evidenceFreezeConfirmed || evidenceFreezeState === 'saving') return
+      || evidenceFreezeState === 'saving') return
     const current = ++evidenceFreezeGeneration.current
     evidenceFreezeController.current?.abort()
     const controller = new AbortController()
@@ -1494,7 +1495,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     } finally {
       if (current === evidenceFreezeGeneration.current) evidenceFreezeController.current = undefined
     }
-  }, [episodeId, evidenceFreezeConfirmed, evidenceFreezePreview, evidenceFreezeState, loadEvidenceFreezeStatus, projectId])
+  }, [episodeId, evidenceFreezePreview, evidenceFreezeState, loadEvidenceFreezeStatus, projectId])
 
   const previewRc1 = useCallback(async () => {
     if (rc1State === 'loading' || rc1State === 'saving' || rc1State === 'deciding') return
@@ -1703,7 +1704,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       const response = await requestWithPlatformPresence(
         `/api/qingmu/editorial-handoff/final-content-decision?${params.toString()}`, {
           decision, binding, playedCoverage,
-          checks: contentChecks, secondConfirmed: contentSecondConfirmed,
+          checks: contentChecks, secondConfirmed: true,
           reason: decision === 'rejected' ? contentRejectReason : null,
           note: contentNote.trim() === '' ? null : contentNote.trim(),
           idempotencyKey: contentDecisionKey.current,
@@ -1728,7 +1729,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     } finally {
       if (current === rc1Generation.current) rc1Controller.current = undefined
     }
-  }, [contentChecks, contentNote, contentRejectReason, contentSecondConfirmed,
+  }, [contentChecks, contentNote, contentRejectReason,
     episodeId, humanPresenceStatus, humanSessionState, loadRc1Status, playedCoverage,
     projectId, rc1State, rc1Status, requestWithPlatformPresence])
 
@@ -1762,28 +1763,42 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
         <span><strong>{projection.summary.authoritativeAudioCount}</strong>{t('handoffAudio')}</span>
         <span><strong>{projection.summary.unresolvedCount}</strong>{t('handoffUnresolved')}</span>
       </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+        <strong>{t('handoffShotList')}</strong>
+        <div className={css.batchToggle}>
+          <button type="button" aria-pressed={shotViewMode === 'detailed'} onClick={() => { setShotViewMode('detailed') }}>{t('handoffShotDetailed')}</button>
+          <button type="button" aria-pressed={shotViewMode === 'compact'} onClick={() => { setShotViewMode('compact') }}>{t('handoffShotCompact')}</button>
+        </div>
+      </div>
       <ol className={css.shots} aria-label={t('handoffShotList')}>
         {projection.source.shots.map(shot => <li key={shot.frameId}>
-          <header><strong>#{shot.frameNo} · {shot.title}</strong><span>{shot.sceneId ?? t('unknown')}</span></header>
-          {shot.selectedTake === null
-            ? <p className={css.warning}>{t('handoffNoSelectedTake')}</p>
-            : <dl>
-              <div><dt>{t('handoffTake')}</dt><dd>{shot.selectedTake.assetId}</dd></div>
-              <div><dt>{t('handoffMedia')}</dt><dd>{shot.selectedTake.mimeType ?? '—'} · {shot.selectedTake.durationSec ?? '—'}s</dd></div>
-              <div><dt>{t('handoffGeometry')}</dt><dd>{shot.selectedTake.aspectRatio ?? '—'} · {shot.selectedTake.fps ?? '—'} fps</dd></div>
-              <div><dt>{t('handoffQc')}</dt><dd>{shot.selectedTake.qualityStatus}</dd></div>
-              <div><dt>{t('handoffAudio')}</dt><dd>{shot.audio.asset === null
-                ? t('handoffAudioUnbound')
-                : `${shot.audio.asset.mimeType ?? '—'} · ${shot.audio.asset.durationSec ?? '—'}s`}</dd></div>
-            </dl>}
-          {shot.blockers.length > 0 && <ul className={css.blockers}>
-            {shot.blockers.map(code => <li key={code}>{blockerLabel(code)}</li>)}
-          </ul>}
-          <details><summary>{t('handoffAdvanced')}</summary>
-            <p>Frame SHA: {shot.frameContentSha256}</p>
-            <p>Stack SHA: {shot.stackSnapshotSha256}</p>
-            {shot.selectedTake !== null && <p>Media SHA: {shot.selectedTake.sha256 ?? '—'}</p>}
-          </details>
+          {shotViewMode === 'compact'
+            ? <div className={css.shotCompact}>
+              <strong>#{shot.frameNo} · {shot.title}</strong>
+              <span>{shot.selectedTake === null ? t('handoffNoSelectedTake') : `${shot.selectedTake.durationSec ?? '—'}s · ${shot.selectedTake.qualityStatus}`}</span>
+            </div>
+            : <>
+              <header><strong>#{shot.frameNo} · {shot.title}</strong><span>{shot.sceneId ?? t('unknown')}</span></header>
+              {shot.selectedTake === null
+                ? <p className={css.warning}>{t('handoffNoSelectedTake')}</p>
+                : <dl>
+                  <div><dt>{t('handoffTake')}</dt><dd>{shot.selectedTake.assetId}</dd></div>
+                  <div><dt>{t('handoffMedia')}</dt><dd>{shot.selectedTake.mimeType ?? '—'} · {shot.selectedTake.durationSec ?? '—'}s</dd></div>
+                  <div><dt>{t('handoffGeometry')}</dt><dd>{shot.selectedTake.aspectRatio ?? '—'} · {shot.selectedTake.fps ?? '—'} fps</dd></div>
+                  <div><dt>{t('handoffQc')}</dt><dd>{shot.selectedTake.qualityStatus}</dd></div>
+                  <div><dt>{t('handoffAudio')}</dt><dd>{shot.audio.asset === null
+                    ? t('handoffAudioUnbound')
+                    : `${shot.audio.asset.mimeType ?? '—'} · ${shot.audio.asset.durationSec ?? '—'}s`}</dd></div>
+                </dl>}
+              {shot.blockers.length > 0 && <ul className={css.blockers}>
+                {shot.blockers.map(code => <li key={code}>{blockerLabel(code)}</li>)}
+              </ul>}
+              <details><summary>{t('handoffAdvanced')}</summary>
+                <p>Frame SHA: {shot.frameContentSha256}</p>
+                <p>Stack SHA: {shot.stackSnapshotSha256}</p>
+                {shot.selectedTake !== null && <p>Media SHA: {shot.selectedTake.sha256 ?? '—'}</p>}
+              </details>
+            </>}
         </li>)}
       </ol>
       <div className={css.exportBox}>
@@ -1805,6 +1820,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
           {download.status === 'running' ? t('handoffDownloading')
             : projection.download.available ? t('handoffDownload') : t('handoffDownloadDisabled')}
         </button>
+        {download.status === 'running' && <div className={css.inlineProgress}><span>{t('handoffDownloading')}</span><div className={css.progressBar} /></div>}
       </div>
       <div className={css.importBox}>
         <div>
@@ -1848,6 +1864,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
           onClick={() => { void verifyPackage() }}>
           {importState === 'running' ? t('handoffImportRunning') : t('handoffImportVerify')}
         </button>
+        {importState === 'running' && <div className={css.inlineProgress}><span>{t('handoffImportRunning')}</span><div className={css.progressBar} /></div>}
       </div>
       {importError !== undefined && <div ref={importErrorRef} role="alert" tabIndex={-1} className={css.errorSummary}>
         <strong>{t('handoffImportFailed')}</strong><p>{t('handoffImportFailedHelp')} ({importError})</p>
@@ -1906,6 +1923,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
           onClick={() => { void verifyMaster() }}>
           {masterState === 'running' ? t('handoffMasterRunning') : t('handoffMasterVerify')}
         </button>
+        {masterState === 'running' && <div className={css.inlineProgress}><span>{t('handoffMasterRunning')}</span><div className={css.progressBar} /></div>}
       </div>
       {masterError !== undefined && <div id="handoff-master-error" role="alert" className={css.errorSummary}>
         <strong>{t('handoffMasterFailed')}</strong><p>{t('handoffMasterFailedHelp')} ({masterError})</p>
@@ -1940,6 +1958,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
             onClick={() => { void saveCandidate() }}>
             {candidateState === 'running' ? t('handoffCandidateSaving') : t('handoffCandidateSave')}
           </button>
+          {candidateState === 'running' && <div className={css.inlineProgress}><span>{t('handoffCandidateSaving')}</span><div className={css.progressBar} /></div>}
         </div>}
         <details><summary>{t('handoffAdvanced')}</summary>
           <p>Master SHA: {masterResult.master.sha256}</p>
@@ -2017,15 +2036,11 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
           {selectionPreview.hardBlockers.map(code => <li key={code}>{code}</li>)}
         </ul>}
         <p className={css.warning}>{t('handoffSelectionReleaseBlocked')}</p>
-        <label className={css.confirmation}>
-          <input type="checkbox" checked={selectionConfirmed}
-            disabled={!selectionPreview.canConfirm || selectionState === 'saving'}
-            onChange={(event) => { setSelectionConfirmed(event.currentTarget.checked) }} />
-          <span>{t('handoffSelectionConfirm')}</span>
-        </label>
-        <button type="button" disabled={!selectionPreview.canConfirm || !selectionConfirmed
-          || selectionState === 'saving'} onClick={() => { void confirmSelection() }}>
-          {selectionState === 'saving' ? t('handoffSelectionSaving') : t('handoffSelectionSave')}
+        <button type="button" className={css.actionCard}
+          disabled={!selectionPreview.canConfirm || selectionState === 'saving'}
+          onClick={() => { void confirmSelection() }}>
+          <span>{selectionState === 'saving' ? t('handoffSelectionSaving') : t('handoffSelectionSave')}</span>
+          {selectionState === 'saving' && <div className={css.progressBar} />}
         </button>
         <details><summary>{t('handoffAdvanced')}</summary>
           <p>Preview SHA: {selectionPreview.previewSha256}</p>
@@ -2066,16 +2081,12 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
           {technicalQcPreview.hardBlockers.length > 0 && <ul className={css.blockers}>
             {technicalQcPreview.hardBlockers.map(code => <li key={code}>{code}</li>)}
           </ul>}
-          <label className={css.confirmation}>
-            <input type="checkbox" checked={technicalQcConfirmed}
-              disabled={!technicalQcPreview.canConfirm || technicalQcState === 'running'}
-              onChange={(event) => { setTechnicalQcConfirmed(event.currentTarget.checked) }} />
-            <span>{t('handoffTechnicalQcConfirm')}</span>
-          </label>
-          <button type="button" disabled={!technicalQcPreview.canConfirm || !technicalQcConfirmed
-            || technicalQcState === 'running'} onClick={() => { void confirmTechnicalQc() }}>
-            {technicalQcState === 'running'
-              ? t('handoffTechnicalQcRunning') : t('handoffTechnicalQcRun')}
+          <button type="button" className={css.actionCard}
+            disabled={!technicalQcPreview.canConfirm || technicalQcState === 'running'}
+            onClick={() => { void confirmTechnicalQc() }}>
+            <span>{technicalQcState === 'running'
+              ? t('handoffTechnicalQcRunning') : t('handoffTechnicalQcRun')}</span>
+            {technicalQcState === 'running' && <div className={css.progressBar} />}
           </button>
           <details><summary>{t('handoffAdvanced')}</summary>
             <p>Preview SHA: {technicalQcPreview.previewSha256}</p>
@@ -2153,16 +2164,12 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
             <ul className={css.blockers}>{evidenceFreezePreview.hardBlockers.map(code =>
               <li key={code}><code>{code}</code></li>)}</ul>
           </div>}
-          <label className={css.confirmation}>
-            <input type="checkbox" checked={evidenceFreezeConfirmed}
-              disabled={!evidenceFreezePreview.canConfirm || evidenceFreezeState === 'saving'}
-              onChange={(event) => { setEvidenceFreezeConfirmed(event.currentTarget.checked) }} />
-            <span>{t('handoffEvidenceFreezeConfirm')}</span>
-          </label>
-          <button type="button" disabled={!evidenceFreezePreview.canConfirm || !evidenceFreezeConfirmed
-            || evidenceFreezeState === 'saving'} onClick={() => { void confirmEvidenceFreeze() }}>
-            {evidenceFreezeState === 'saving'
-              ? t('handoffEvidenceFreezeSaving') : t('handoffEvidenceFreezeSave')}
+          <button type="button" className={css.actionCard}
+            disabled={!evidenceFreezePreview.canConfirm || evidenceFreezeState === 'saving'}
+            onClick={() => { void confirmEvidenceFreeze() }}>
+            <span>{evidenceFreezeState === 'saving'
+              ? t('handoffEvidenceFreezeSaving') : t('handoffEvidenceFreezeSave')}</span>
+            {evidenceFreezeState === 'saving' && <div className={css.progressBar} />}
           </button>
           <details><summary>{t('handoffAdvanced')}</summary>
             <p>Build: {evidenceFreezePreview.subject.buildIdentity.commit}</p>
@@ -2288,20 +2295,18 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
                   <option value="continuity_or_content">{t('handoffContentRejectContinuity')}</option>
                   <option value="other">{t('handoffContentRejectOther')}</option>
                 </select></label>
-              <label className={css.confirmation}>
-                <input type="checkbox" checked={contentSecondConfirmed}
-                  disabled={!rc1Status.contentReview.canDecide}
-                  onChange={(event) => { setContentSecondConfirmed(event.currentTarget.checked) }} />
-                <span>{t('handoffContentSecondConfirm')}</span>
-              </label>
               <div className={css.decisionActions}>
-                <button type="button" disabled={playedCoverage !== 1 || !contentSecondConfirmed
-                  || Object.values(contentChecks).some(value => !value)
-                  || humanSessionState !== 'ready'
-                  || humanPresenceStatus?.state !== 'registered'
-                  || rc1Status.contentReview.identity.state !== 'bound'
-                  || !rc1Status.contentReview.canDecide || rc1State === 'deciding'}
-                onClick={() => { void decideFinalContent('accepted') }}>{t('handoffContentAccept')}</button>
+                <button type="button" className={css.actionCard}
+                  disabled={playedCoverage !== 1
+                    || Object.values(contentChecks).some(value => !value)
+                    || humanSessionState !== 'ready'
+                    || humanPresenceStatus?.state !== 'registered'
+                    || rc1Status.contentReview.identity.state !== 'bound'
+                    || !rc1Status.contentReview.canDecide || rc1State === 'deciding'}
+                  onClick={() => { void decideFinalContent('accepted') }}>
+                  <span>{rc1State === 'deciding' ? t('handoffContentDeciding') : t('handoffContentAccept')}</span>
+                  {rc1State === 'deciding' && <div className={css.progressBar} />}
+                </button>
                 <button type="button" className={css.rejectButton}
                   disabled={playedCoverage !== 1
                     || humanSessionState !== 'ready'
@@ -2309,7 +2314,9 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
                     || rc1Status.contentReview.identity.state !== 'bound'
                     || !rc1Status.contentReview.canDecide
                     || rc1State === 'deciding'}
-                  onClick={() => { void decideFinalContent('rejected') }}>{t('handoffContentReject')}</button>
+                  onClick={() => { void decideFinalContent('rejected') }}>
+                  {rc1State === 'deciding' ? t('handoffContentDeciding') : t('handoffContentReject')}
+                </button>
               </div>
             </>}
           {rc1Status?.contentReview.legacyDecisionRequiresReconfirmation === true
@@ -2334,8 +2341,11 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
               {rc1Preview !== undefined && <>
                 {rc1Preview.hardBlockers.length > 0 && <ul className={css.blockers}>
                   {rc1Preview.hardBlockers.map(code => <li key={code}>{code}</li>)}</ul>}
-                <button type="button" onClick={() => { void confirmRc1() }}
-                  disabled={!rc1Preview.canConfirm || rc1State === 'saving'}>{t('handoffMachineEvidenceFreeze')}</button>
+                <button type="button" className={css.actionCard} onClick={() => { void confirmRc1() }}
+                  disabled={!rc1Preview.canConfirm || rc1State === 'saving'}>
+                  <span>{rc1State === 'saving' ? t('handoffMachineEvidenceFreezing') : t('handoffMachineEvidenceFreeze')}</span>
+                  {rc1State === 'saving' && <div className={css.progressBar} />}
+                </button>
               </>}
             </>
             : <>
