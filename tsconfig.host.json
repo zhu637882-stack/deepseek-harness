@@ -293,6 +293,7 @@
     { "path": "./packages/experimental/tool-agent-team" },
     { "path": "./packages/experimental/qingmu-web" },
     { "path": "./packages/experimental/qingmu-imago-method-adapter" },
+    { "path": "./packages/experimental/qingmu-creative-skill-catalog" },
     { "path": "./packages/experimental/qingmu-director-context-bridge" },
     { "path": "./packages/experimental/qingmu-project-context" },
     { "path": "./packages/experimental/qingmu-yimeng-command-adapter" },

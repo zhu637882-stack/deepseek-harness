@@ -243,6 +243,8 @@
       "@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/*": ["./packages/experimental/qingmu-yimeng-read-adapter/src/*"],
       "@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter": ["./packages/experimental/qingmu-imago-method-adapter/src"],
       "@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter/*": ["./packages/experimental/qingmu-imago-method-adapter/src/*"],
+      "@deepseek-ai/dsh-experimental-qingmu-creative-skill-catalog": ["./packages/experimental/qingmu-creative-skill-catalog/src"],
+      "@deepseek-ai/dsh-experimental-qingmu-creative-skill-catalog/*": ["./packages/experimental/qingmu-creative-skill-catalog/src/*"],
       "@deepseek-ai/dsh-experimental-qingmu-project-context": ["./packages/experimental/qingmu-project-context/src"],
       "@deepseek-ai/dsh-experimental-qingmu-project-context/*": ["./packages/experimental/qingmu-project-context/src/*"],
       "@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter": ["./packages/experimental/qingmu-yimeng-command-adapter/src"],
