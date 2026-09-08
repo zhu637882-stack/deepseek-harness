@@ -44,6 +44,7 @@ const RC1_PREVIEW_PATH = '/api/qingmu/editorial-handoff/rc1-preview'
 const RC1_CONFIRM_PATH = '/api/qingmu/editorial-handoff/rc1'
 const FINAL_CONTENT_DECISION_PATH = '/api/qingmu/editorial-handoff/final-content-decision'
 const NATURAL_PERSON_IDENTITY_PATH = '/api/qingmu/editorial-handoff/natural-person-identity'
+const HUMAN_PRESENCE_CREDENTIAL_PATH = '/api/qingmu/editorial-handoff/human-presence-credential'
 const HUMAN_SESSION_PATH = '/api/qingmu/editorial-handoff/human-session'
 const FINAL_MEDIA_PATH = '/api/qingmu/editorial-handoff/final-media'
 const RC1_EVIDENCE_PATH = '/api/qingmu/editorial-handoff/rc1-evidence.zip'
@@ -2254,6 +2255,10 @@ function normalizeRc1Status(
     && safeIdentifier(typeof currentDecision.idempotencyKey === 'string'
       ? currentDecision.idempotencyKey : null)
     && currentDecision.releaseSignoffGranted === false && currentDecision.publishReady === false
+    && ['platform_verified', 'legacy_unverified'].includes(
+      String(currentDecision.humanAuthorityStatus),
+    )
+    && typeof currentDecision.humanAuthorityVerified === 'boolean'
   )
   if (item === undefined || item.schema !== 'jason.qingmu-editorial-handoff-rc1-status.v1'
     || item.projectId !== projectId || item.episodeId !== episodeId
@@ -2264,7 +2269,9 @@ function normalizeRc1Status(
     || review.projectId !== projectId || review.episodeId !== episodeId
     || !(review.binding === undefined || binding !== undefined) || !currentDecisionValid
     || !identityValid
-    || typeof review.canDecide !== 'boolean' || review.releaseSignoffGranted !== false
+    || typeof review.canDecide !== 'boolean'
+    || typeof review.legacyDecisionRequiresReconfirmation !== 'boolean'
+    || review.releaseSignoffGranted !== false
     || review.publishReady !== false || signoff === undefined || signoff.granted !== false
     || signoff.readOnly !== true || !safeQcStringList(signoff.blockers)) return undefined
   return item
@@ -2599,7 +2606,7 @@ function humanBrowserHeaders(
   // the real Writer origin on the second hop. The browser cookie remains the
   // only human credential; no launcher Bearer is added on this path.
   const headers = new Headers({ accept: 'application/json', origin: upstream.origin,
-    host: upstream.host })
+    host: upstream.host, 'x-qingmu-browser-origin': origin })
   if (tokenCookie !== undefined) headers.set('cookie', tokenCookie)
   return headers
 }
@@ -2612,7 +2619,10 @@ async function writerHumanRequest(
 ): Promise<{ readonly response: Response; readonly raw: unknown } | undefined> {
   const headers = humanBrowserHeaders(req, upstream)
   if (headers === undefined) return undefined
-  for (const [name, value] of new Headers(init.headers)) headers.set(name, value)
+  for (const [name, value] of new Headers(init.headers)) {
+    if (!['origin', 'host', 'x-qingmu-browser-origin', 'authorization', 'cookie']
+      .includes(name.toLowerCase())) headers.set(name, value)
+  }
   try {
     const response = await dependencies.fetch(upstream, {
       ...init, redirect: 'error', headers,
@@ -2629,6 +2639,49 @@ function humanIntentProof(value: unknown, action: string): string | undefined {
     || item.action !== action || typeof item.proof !== 'string'
     || item.proof.length < 100 || item.proof.length > 8192) return undefined
   return item.proof
+}
+
+function platformHumanPresenceOptions(value: unknown): Record<string, unknown> | undefined {
+  const item = safeSelectionPayload(value)
+  const publicKey = safeSelectionPayload(item?.publicKey)
+  const ceremony = typeof item?.ceremony === 'string' ? item.ceremony : ''
+  if (item?.schema !== 'jason.qingmu-platform-human-presence-options.v1'
+    || !['registration', 'authentication'].includes(ceremony)
+    || typeof item.challengeId !== 'string' || item.challengeId.length < 16
+    || item.challengeId.length > 200 || publicKey === undefined
+    || typeof publicKey.challenge !== 'string' || publicKey.challenge.length < 16
+    || publicKey.userVerification !== 'required'
+    || (ceremony === 'registration' && (
+      safeSelectionPayload(publicKey.authenticatorSelection)?.authenticatorAttachment !== 'platform'
+      || safeSelectionPayload(publicKey.authenticatorSelection)?.userVerification !== 'required'
+    ))) return undefined
+  return item
+}
+
+function platformAssertion(value: unknown): Record<string, unknown> | undefined {
+  const item = safeSelectionPayload(value)
+  const credential = safeSelectionPayload(item?.credential)
+  if (item === undefined || Object.keys(item).length !== 2
+    || typeof item.challengeId !== 'string' || item.challengeId.length < 16
+    || item.challengeId.length > 200 || credential === undefined
+    || Object.keys(credential).length > 12) return undefined
+  return item
+}
+
+function normalizeHumanPresenceStatus(
+  value: unknown, projectId: string, userId: string,
+): Record<string, unknown> | undefined {
+  const item = safeSelectionPayload(value)
+  if (item?.schema !== 'jason.qingmu-platform-human-presence-status.v1'
+    || item.projectId !== projectId || item.actorUserId !== userId
+    || !['registered', 'unregistered'].includes(String(item.state))
+    || item.userVerification !== 'required' || item.authenticatorAttachment !== 'platform'
+    || item.businessAuthorityGranted !== false
+    || !(item.credentialSha256 === null
+      || (typeof item.credentialSha256 === 'string' && SHA256.test(item.credentialSha256)))) {
+    return undefined
+  }
+  return item
 }
 
 function normalizeNaturalPersonIdentity(
@@ -3473,6 +3526,64 @@ export function registerEditorialHandoffDownload(
       }
     },
   })
+  const disposeHumanPresenceCredential = webServer.register({
+    kind: 'exact', path: HUMAN_PRESENCE_CREDENTIAL_PATH, handler: async (req, res) => {
+      if (!['GET', 'POST'].includes(req.method ?? '') || !isTrustedApiRequest(req, [])) {
+        json(res, 403, { code: 'human_presence_credential_forbidden' }); return
+      }
+      const scope = scopeAccess(query(req))
+      if (scope === undefined) {
+        json(res, 400, { code: 'human_presence_credential_forbidden' }); return
+      }
+      const base = `/api/qingmu/projects/${encodeURIComponent(scope.projectId)}`
+        + '/human-presence-credential'
+      try {
+        if (req.method === 'POST') {
+          const raw = safeSelectionPayload(await readBoundedJsonBody(req, 256 * 1024))
+          if (raw === undefined) throw new Error('human_presence_credential_request_invalid')
+          const assertion = platformAssertion(raw.platformAssertion ?? raw)
+          if (Object.keys(raw).length === 0) {
+            const options = await writerHumanRequest(
+              dependencies, req, new URL(`${base}/options`, dependencies.baseUrl),
+              { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+            )
+            const normalized = options?.response.ok === true
+              ? platformHumanPresenceOptions(options.raw) : undefined
+            if (normalized === undefined || normalized.ceremony !== 'registration') {
+              throw new Error('human_presence_credential_options_failed')
+            }
+            json(res, 200, normalized); return
+          }
+          if (assertion === undefined) throw new Error('human_presence_credential_request_invalid')
+          const submitted = await writerHumanRequest(
+            dependencies, req, new URL(base, dependencies.baseUrl), {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(assertion),
+            },
+          )
+          if (submitted?.response.ok !== true) {
+            throw new Error('human_presence_credential_commit_failed')
+          }
+        }
+        const status = await writerHumanRequest(
+          dependencies, req, new URL(base, dependencies.baseUrl), { method: 'GET' },
+        )
+        const candidate = safeSelectionPayload(status?.raw)
+        const actor = typeof candidate?.actorUserId === 'string' ? candidate.actorUserId : ''
+        const normalized = status?.response.ok === true
+          ? normalizeHumanPresenceStatus(status.raw, scope.projectId, actor) : undefined
+        if (normalized === undefined) throw new Error('human_presence_credential_status_failed')
+        json(res, 200, normalized)
+      } catch (error) {
+        const bad = error instanceof Error
+          && error.message === 'human_presence_credential_request_invalid'
+        json(res, bad ? 400 : 409, {
+          code: bad ? 'human_presence_credential_request_invalid'
+            : 'human_presence_credential_unknown_or_failed',
+        })
+      }
+    },
+  })
   const disposeNaturalPersonIdentity = webServer.register({
     kind: 'exact', path: NATURAL_PERSON_IDENTITY_PATH, handler: async (req, res) => {
       if (!['GET', 'POST'].includes(req.method ?? '') || !isTrustedApiRequest(req, [])) {
@@ -3485,8 +3596,13 @@ export function registerEditorialHandoffDownload(
       if (req.method === 'POST') {
         try {
           const item = safeSelectionPayload(await readBoundedJsonBody(req, 4096))
-          if (item === undefined || Object.keys(item).length !== 2 || item.confirmed !== true
+          const assertion = platformAssertion(item?.platformAssertion)
+          if (item === undefined || ![2, 3].includes(Object.keys(item).length)
+            || item.confirmed !== true
             || typeof item.idempotencyKey !== 'string' || !IDENTIFIER.test(item.idempotencyKey)) {
+            throw new Error('natural_person_identity_request_invalid')
+          }
+          if (Object.hasOwn(item, 'platformAssertion') && assertion === undefined) {
             throw new Error('natural_person_identity_request_invalid')
           }
           const body = JSON.stringify(item)
@@ -3495,6 +3611,11 @@ export function registerEditorialHandoffDownload(
             dependencies, req, new URL(`${base}/intent`, dependencies.baseUrl),
             { method: 'POST', headers: { 'content-type': 'application/json' }, body },
           )
+          const options = issued?.response.ok === true
+            ? platformHumanPresenceOptions(issued.raw) : undefined
+          if (assertion === undefined && options?.ceremony === 'authentication') {
+            json(res, 200, options); return
+          }
           const proof = issued?.response.ok === true
             ? humanIntentProof(issued.raw, 'natural_person_identity.enroll') : undefined
           if (proof === undefined) throw new Error('natural_person_identity_reauthentication_required')
@@ -3507,8 +3628,19 @@ export function registerEditorialHandoffDownload(
           )
           const candidate = safeSelectionPayload(submitted?.raw)
           const actor = typeof candidate?.actorUserId === 'string' ? candidate.actorUserId : ''
-          const identity = submitted?.response.ok === true
+          let identity = submitted?.response.ok === true
             ? normalizeNaturalPersonIdentity(submitted.raw, scope.projectId, actor) : undefined
+          if (identity === undefined
+            && (submitted === undefined || submitted.response.status >= 500)) {
+            const recovered = await writerHumanRequest(
+              dependencies, req, new URL(base, dependencies.baseUrl), { method: 'GET' },
+            )
+            const value = safeSelectionPayload(recovered?.raw)
+            const recoveredActor = typeof value?.actorUserId === 'string' ? value.actorUserId : ''
+            const candidate = recovered?.response.ok === true
+              ? normalizeNaturalPersonIdentity(recovered.raw, scope.projectId, recoveredActor) : undefined
+            identity = candidate?.state === 'bound' ? candidate : undefined
+          }
           if (identity === undefined) {
             if (submitted?.response.status === 401 || submitted?.response.status === 403) {
               throw new Error('natural_person_identity_reauthentication_required')
@@ -3661,7 +3793,9 @@ export function registerEditorialHandoffDownload(
         const checks = safeSelectionPayload(item?.checks)
         const checkFields = ['picture_and_timing_reviewed', 'dialogue_and_audio_reviewed',
           'continuity_and_content_reviewed']
-        if (item === undefined || Object.keys(item).length !== 8 || binding === undefined
+        const assertion = platformAssertion(item?.platformAssertion)
+        if (item === undefined || ![8, 9].includes(Object.keys(item).length)
+          || binding === undefined
           || !['accepted', 'rejected'].includes(String(item.decision))
           || typeof item.playedCoverage !== 'number' || item.playedCoverage < 0 || item.playedCoverage > 1
           || checks === undefined || Object.keys(checks).length !== checkFields.length
@@ -3670,6 +3804,9 @@ export function registerEditorialHandoffDownload(
           || !(item.reason === null || typeof item.reason === 'string')
           || !(item.note === null || typeof item.note === 'string')
           || typeof item.idempotencyKey !== 'string' || !IDENTIFIER.test(item.idempotencyKey)) {
+          throw new Error('content_decision_request_invalid')
+        }
+        if (Object.hasOwn(item, 'platformAssertion') && assertion === undefined) {
           throw new Error('content_decision_request_invalid')
         }
         const requestBody = {
@@ -3685,11 +3822,36 @@ export function registerEditorialHandoffDownload(
         const body = JSON.stringify(item)
         const base = `/api/qingmu/projects/${encodeURIComponent(scope.projectId)}`
           + `/episodes/${encodeURIComponent(scope.episodeId)}/editorial-handoff/final-content-decision`
+        const recoverySuffix = `final-content-decisions/${encodeURIComponent(item.idempotencyKey)}`
+          + `?requestSha256=${requestSha}`
+        const prior = await writerSelectionRequest(
+          dependencies, token, scope.projectId, scope.episodeId, recoverySuffix, { method: 'GET' },
+        )
+        if (prior?.response.ok === true) {
+          const recovered = safeSelectionPayload(prior.raw)
+          if (recovered?.schema === 'jason.episode-final-content-decision.v1'
+            && recovered.projectId === scope.projectId && recovered.episodeId === scope.episodeId
+            && recovered.idempotencyKey === item.idempotencyKey && recovered.decision === item.decision
+            && recovered.requestSha256 === requestSha
+            && canonicalJson(recovered.binding) === canonicalJson(binding)
+            && recovered.releaseSignoffGranted === false && recovered.publishReady === false) {
+            json(res, 200, recovered); return
+          }
+          throw new Error('content_decision_commit_failed')
+        }
+        if (prior !== undefined && prior.response.status !== 404) {
+          throw new Error('content_decision_commit_failed')
+        }
         const issued = await writerHumanRequest(
           dependencies, req, new URL(`${base}/intent`, dependencies.baseUrl), {
             method: 'POST', headers: { 'content-type': 'application/json' }, body,
           },
         )
+        const options = issued?.response.ok === true
+          ? platformHumanPresenceOptions(issued.raw) : undefined
+        if (assertion === undefined && options?.ceremony === 'authentication') {
+          json(res, 200, options); return
+        }
         const proof = issued?.response.ok === true
           ? humanIntentProof(issued.raw, 'episode_final_content_decision.record') : undefined
         if (proof === undefined) throw new Error('content_decision_intent_failed')
@@ -3701,11 +3863,9 @@ export function registerEditorialHandoffDownload(
           },
         )
         let result = submitted?.response.ok === true ? safeSelectionPayload(submitted.raw) : undefined
-        if (result === undefined && (submitted === undefined || submitted.response.status >= 500)) {
-          const suffix = `final-content-decisions/${encodeURIComponent(item.idempotencyKey)}`
-            + `?requestSha256=${requestSha}`
+        if (result === undefined && (submitted === undefined || submitted.response.status >= 409)) {
           const recovered = await writerSelectionRequest(
-            dependencies, token, scope.projectId, scope.episodeId, suffix, { method: 'GET' },
+            dependencies, token, scope.projectId, scope.episodeId, recoverySuffix, { method: 'GET' },
           )
           result = recovered?.response.ok === true ? safeSelectionPayload(recovered.raw) : undefined
         }
@@ -3934,6 +4094,7 @@ export function registerEditorialHandoffDownload(
   })
   return () => {
     disposeHumanSession()
+    disposeHumanPresenceCredential()
     disposeNaturalPersonIdentity()
     disposeRc1Evidence()
     disposeFinalMedia()

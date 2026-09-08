@@ -271,6 +271,8 @@ interface FinalContentDecisionResult {
   readonly commandReceiptId: string
   readonly releaseSignoffGranted: false
   readonly publishReady: false
+  readonly humanAuthorityStatus: 'platform_verified' | 'legacy_unverified'
+  readonly humanAuthorityVerified: boolean
 }
 
 function finalContentBindingIdentity(binding: FinalContentBinding): string {
@@ -290,6 +292,120 @@ interface NaturalPersonIdentityStatus {
   readonly canEnroll: boolean
   readonly legalIdentityVerified: false
   readonly humanSignoffGranted: false
+}
+
+interface HumanPresenceStatus {
+  readonly schema: 'jason.qingmu-platform-human-presence-status.v1'
+  readonly projectId: string
+  readonly actorUserId: string
+  readonly state: 'registered' | 'unregistered'
+  readonly credentialSha256: string | null
+  readonly userVerification: 'required'
+  readonly authenticatorAttachment: 'platform'
+  readonly businessAuthorityGranted: false
+}
+
+interface PlatformPresenceOptions {
+  readonly schema: 'jason.qingmu-platform-human-presence-options.v1'
+  readonly ceremony: 'registration' | 'authentication'
+  readonly challengeId: string
+  readonly publicKey: Record<string, unknown>
+}
+
+interface PlatformAssertion {
+  readonly challengeId: string
+  readonly credential: Record<string, unknown>
+}
+
+function decodeBase64Url(value: unknown): ArrayBuffer {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 4096) {
+    throw new Error('platform_presence_options_invalid')
+  }
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+  const decoded = globalThis.atob(normalized + '='.repeat((4 - normalized.length % 4) % 4))
+  return Uint8Array.from(decoded, char => char.charCodeAt(0)).buffer
+}
+
+function encodeBase64Url(value: ArrayBuffer | null): string | null {
+  if (value === null) return null
+  const bytes = new Uint8Array(value)
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return globalThis.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+async function performPlatformPresence(
+  options: PlatformPresenceOptions, signal: AbortSignal,
+): Promise<PlatformAssertion> {
+  if (!Reflect.has(globalThis, 'PublicKeyCredential') || !Reflect.has(navigator, 'credentials')) {
+    throw new Error('platform_presence_unavailable')
+  }
+  const source = options.publicKey
+  const challenge = decodeBase64Url(source.challenge)
+  let credential: Credential | null
+  if (options.ceremony === 'registration') {
+    const user = source.user as Record<string, unknown> | undefined
+    const selection = source.authenticatorSelection as AuthenticatorSelectionCriteria | undefined
+    if (user === undefined || typeof user.name !== 'string' || typeof user.displayName !== 'string'
+      || selection?.authenticatorAttachment !== 'platform'
+      || selection.userVerification !== 'required') {
+      throw new Error('platform_presence_options_invalid')
+    }
+    credential = await navigator.credentials.create({
+      signal,
+      publicKey: {
+        ...(source as unknown as PublicKeyCredentialCreationOptions),
+        challenge,
+        user: { ...user, id: decodeBase64Url(user.id) } as PublicKeyCredentialUserEntity,
+      },
+    })
+  } else {
+    const allowCredentials = Array.isArray(source.allowCredentials)
+      ? source.allowCredentials.map((item) => {
+        const value = item as Record<string, unknown>
+        return { ...value, id: decodeBase64Url(value.id) } as PublicKeyCredentialDescriptor
+      }) : []
+    if (source.userVerification !== 'required' || allowCredentials.length !== 1) {
+      throw new Error('platform_presence_options_invalid')
+    }
+    credential = await navigator.credentials.get({
+      signal,
+      publicKey: {
+        ...(source as unknown as PublicKeyCredentialRequestOptions),
+        challenge,
+        allowCredentials,
+      },
+    })
+  }
+  if (!(credential instanceof PublicKeyCredential)
+    || credential.authenticatorAttachment !== 'platform') {
+    throw new Error('platform_presence_not_verified')
+  }
+  const response = credential.response
+  const serializedResponse: Record<string, unknown> = {
+    clientDataJSON: encodeBase64Url(response.clientDataJSON),
+  }
+  if (response instanceof AuthenticatorAttestationResponse) {
+    serializedResponse.attestationObject = encodeBase64Url(response.attestationObject)
+    serializedResponse.transports = response.getTransports()
+  } else if (response instanceof AuthenticatorAssertionResponse) {
+    serializedResponse.authenticatorData = encodeBase64Url(response.authenticatorData)
+    serializedResponse.signature = encodeBase64Url(response.signature)
+    serializedResponse.userHandle = encodeBase64Url(response.userHandle)
+  } else {
+    throw new Error('platform_presence_not_verified')
+  }
+  return {
+    challengeId: options.challengeId,
+    credential: {
+      id: credential.id,
+      rawId: encodeBase64Url(credential.rawId),
+      type: credential.type,
+      authenticatorAttachment: credential.authenticatorAttachment,
+      clientExtensionResults: credential.getClientExtensionResults(),
+      response: serializedResponse,
+    },
+  }
 }
 
 export function continuousPlayedCoverage(
@@ -323,6 +439,7 @@ interface Rc1Status {
     readonly binding?: FinalContentBinding
     readonly currentDecision: FinalContentDecisionResult | null
     readonly canDecide: boolean
+    readonly legacyDecisionRequiresReconfirmation: boolean
     readonly blockers?: readonly string[]
     readonly identity: NaturalPersonIdentityStatus
     readonly releaseSignoffGranted: false
@@ -449,6 +566,9 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   const [humanUsername, setHumanUsername] = useState('')
   const [humanPassword, setHumanPassword] = useState('')
   const [humanSessionState, setHumanSessionState] = useState<'idle' | 'saving' | 'ready' | 'failed'>('idle')
+  const [humanPresenceStatus, setHumanPresenceStatus] = useState<HumanPresenceStatus>()
+  const [humanPresenceState, setHumanPresenceState] = useState<'idle' | 'loading' | 'prompting' | 'ready' | 'failed'>('idle')
+  const [humanPresenceError, setHumanPresenceError] = useState<string>()
   const generation = useRef(0)
   const downloadGeneration = useRef(0)
   const importGeneration = useRef(0)
@@ -469,6 +589,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
   const contentDecisionKey = useRef('')
   const contentDecisionBinding = useRef('')
   const identityEnrollmentKey = useRef('')
+  const humanPresenceController = useRef<AbortController>()
   const importErrorRef = useRef<HTMLDivElement>(null)
 
   const resetContentReviewDraft = useCallback(() => {
@@ -1436,6 +1557,75 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     }
   }, [episodeId, loadRc1Status, projectId, rc1Preview, rc1State])
 
+  const loadHumanPresenceStatus = useCallback(async (): Promise<HumanPresenceStatus | undefined> => {
+    if (projectId === '' || episodeId === '') return undefined
+    const params = new URLSearchParams({ projectId, episodeId })
+    const response = await fetch(
+      `/api/qingmu/editorial-handoff/human-presence-credential?${params.toString()}`,
+      { method: 'GET', cache: 'no-store', credentials: 'same-origin' },
+    )
+    if (!response.ok) return undefined
+    const result = await response.json() as HumanPresenceStatus
+    setHumanPresenceStatus(result)
+    setHumanPresenceState(result.state === 'registered' ? 'ready' : 'idle')
+    return result
+  }, [episodeId, projectId])
+
+  const requestWithPlatformPresence = useCallback(async (
+    url: string, body: Record<string, unknown>, controller: AbortController,
+  ): Promise<Response> => {
+    const initial = await fetch(url, {
+      method: 'POST', cache: 'no-store', credentials: 'same-origin', signal: controller.signal,
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    })
+    if (!initial.ok) return initial
+    const rawOptions = await initial.json() as Record<string, unknown>
+    if (rawOptions.schema !== 'jason.qingmu-platform-human-presence-options.v1') {
+      throw new Error('platform_presence_options_invalid')
+    }
+    const options = rawOptions as unknown as PlatformPresenceOptions
+    setHumanPresenceState('prompting')
+    const assertion = await performPlatformPresence(options, controller.signal)
+    return fetch(url, {
+      method: 'POST', cache: 'no-store', credentials: 'same-origin', signal: controller.signal,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...body, platformAssertion: assertion }),
+    })
+  }, [])
+
+  const registerHumanPresence = useCallback(async () => {
+    if (humanSessionState !== 'ready' || humanPresenceState === 'prompting') return
+    const controller = new AbortController()
+    humanPresenceController.current?.abort()
+    humanPresenceController.current = controller
+    setHumanPresenceState('loading')
+    setHumanPresenceError(undefined)
+    try {
+      const params = new URLSearchParams({ projectId, episodeId })
+      const response = await requestWithPlatformPresence(
+        `/api/qingmu/editorial-handoff/human-presence-credential?${params.toString()}`,
+        {},
+        controller,
+      )
+      if (!response.ok) throw new Error('platform_presence_registration_failed')
+      const status = await response.json() as HumanPresenceStatus
+      setHumanPresenceStatus(status)
+      setHumanPresenceState(status.state === 'registered' ? 'ready' : 'failed')
+    } catch (cause) {
+      if (controller.signal.aborted) {
+        setHumanPresenceError('platform_presence_cancelled')
+        setHumanPresenceState(humanPresenceStatus?.state === 'registered' ? 'ready' : 'failed')
+      } else {
+        setHumanPresenceError(cause instanceof Error
+          ? cause.message : 'platform_presence_registration_failed')
+        setHumanPresenceState('failed')
+      }
+    } finally {
+      if (humanPresenceController.current === controller) humanPresenceController.current = undefined
+    }
+  }, [episodeId, humanPresenceState, humanPresenceStatus, humanSessionState, projectId,
+    requestWithPlatformPresence])
+
   const authenticateHumanSession = useCallback(async () => {
     if (humanSessionState === 'saving' || humanUsername.trim() === '' || humanPassword === '') return
     setHumanSessionState('saving')
@@ -1448,46 +1638,55 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       if (!response.ok) throw new Error('human_session_login_failed')
       setHumanPassword('')
       setHumanSessionState('ready')
+      await loadHumanPresenceStatus()
     } catch {
       setHumanSessionState('failed')
     }
-  }, [humanPassword, humanSessionState, humanUsername])
+  }, [humanPassword, humanSessionState, humanUsername, loadHumanPresenceStatus])
 
   const enrollNaturalPersonIdentity = useCallback(async () => {
     if (identitySaving || humanSessionState !== 'ready'
+      || humanPresenceStatus?.state !== 'registered'
       || rc1Status?.contentReview.identity?.canEnroll !== true) return
     if (identityEnrollmentKey.current === '') {
       identityEnrollmentKey.current = `natural-person-${globalThis.crypto.randomUUID()}`
     }
     setIdentitySaving(true)
     setIdentityError(undefined)
+    const controller = new AbortController()
+    humanPresenceController.current?.abort()
+    humanPresenceController.current = controller
     try {
       const params = new URLSearchParams({ projectId, episodeId })
-      const response = await fetch(
+      const response = await requestWithPlatformPresence(
         `/api/qingmu/editorial-handoff/natural-person-identity?${params.toString()}`,
-        {
-          method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ confirmed: true, idempotencyKey: identityEnrollmentKey.current }),
-        },
+        { confirmed: true, idempotencyKey: identityEnrollmentKey.current },
+        controller,
       )
       if (!response.ok) throw new Error(response.status === 401
         ? 'natural_person_identity_relogin_required' : 'natural_person_identity_unknown_or_failed')
       identityEnrollmentKey.current = ''
+      setHumanPresenceState('ready')
       await loadRc1Status()
     } catch (cause) {
       const failure = cause instanceof Error
         ? cause.message : 'natural_person_identity_unknown_or_failed'
       if (failure === 'natural_person_identity_relogin_required') setHumanSessionState('idle')
+      if (controller.signal.aborted) setHumanPresenceError('platform_presence_cancelled')
       setIdentityError(failure)
       await loadRc1Status()
     } finally {
       setIdentitySaving(false)
+      if (humanPresenceController.current === controller) humanPresenceController.current = undefined
+      setHumanPresenceState('ready')
     }
-  }, [episodeId, humanSessionState, identitySaving, loadRc1Status, projectId, rc1Status])
+  }, [episodeId, humanPresenceStatus, humanSessionState, identitySaving, loadRc1Status,
+    projectId, rc1Status, requestWithPlatformPresence])
 
   const decideFinalContent = useCallback(async (decision: 'accepted' | 'rejected') => {
     const binding = rc1Status?.contentReview.binding
-    if (humanSessionState !== 'ready' || binding === undefined || rc1Status?.contentReview.currentDecision !== null
+    if (humanSessionState !== 'ready' || humanPresenceStatus?.state !== 'registered'
+      || binding === undefined || rc1Status?.contentReview.canDecide !== true
       || rc1State === 'deciding') return
     if (contentDecisionKey.current === '') {
       const nonce = globalThis.crypto.randomUUID()
@@ -1497,19 +1696,20 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     const controller = new AbortController()
     rc1Controller.current?.abort()
     rc1Controller.current = controller
+    humanPresenceController.current = controller
     setRc1State('deciding')
     setRc1Error(undefined)
     try {
       const params = new URLSearchParams({ projectId, episodeId })
-      const response = await fetch(`/api/qingmu/editorial-handoff/final-content-decision?${params.toString()}`, {
-        method: 'POST', cache: 'no-store', signal: controller.signal,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ decision, binding, playedCoverage,
+      const response = await requestWithPlatformPresence(
+        `/api/qingmu/editorial-handoff/final-content-decision?${params.toString()}`, {
+          decision, binding, playedCoverage,
           checks: contentChecks, secondConfirmed: contentSecondConfirmed,
           reason: decision === 'rejected' ? contentRejectReason : null,
           note: contentNote.trim() === '' ? null : contentNote.trim(),
-          idempotencyKey: contentDecisionKey.current }),
-      })
+          idempotencyKey: contentDecisionKey.current,
+        }, controller,
+      )
       if (!response.ok) {
         const failure = await response.json().catch(() => undefined) as { code?: unknown } | undefined
         throw new Error(typeof failure?.code === 'string'
@@ -1517,18 +1717,26 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       }
       if (current === rc1Generation.current) await loadRc1Status()
     } catch (cause) {
-      if (current === rc1Generation.current && !controller.signal.aborted) {
+      if (current === rc1Generation.current) {
         const failure = cause instanceof Error ? cause.message : 'final_content_decision_unknown_or_failed'
         if (failure === 'final_content_decision_reauthentication_required') setHumanSessionState('idle')
+        if (controller.signal.aborted) {
+          setHumanPresenceError('platform_presence_cancelled')
+        }
         setRc1State('previewed')
-        await loadRc1Status()
-        setRc1Error(failure)
+        if (!controller.signal.aborted) {
+          await loadRc1Status()
+          setRc1Error(failure)
+        }
       }
     } finally {
       if (current === rc1Generation.current) rc1Controller.current = undefined
+      if (humanPresenceController.current === controller) humanPresenceController.current = undefined
+      setHumanPresenceState('ready')
     }
   }, [contentChecks, contentNote, contentRejectReason, contentSecondConfirmed,
-    episodeId, humanSessionState, loadRc1Status, playedCoverage, projectId, rc1State, rc1Status])
+    episodeId, humanPresenceStatus, humanSessionState, loadRc1Status, playedCoverage,
+    projectId, rc1State, rc1Status, requestWithPlatformPresence])
 
   if (projectId === '' || episodeId === '') return <p className={css.empty}>{t('handoffChooseEpisode')}</p>
   const blockerLabel = (code: string) => t(BLOCKER_KEYS[code] ?? 'handoffBlockerUnknown')
@@ -2013,13 +2221,33 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
                     && <p role="alert" className={css.error}>{t('handoffHumanSessionFailed')}</p>}
                 </>}
               </div>
+              {humanSessionState === 'ready' && <div className={humanPresenceStatus?.state === 'registered'
+                ? css.success : css.warning} role="status">
+                <p>{humanPresenceStatus?.state === 'registered'
+                  ? t('handoffHumanPresenceReady') : t('handoffHumanPresenceRequired')}</p>
+                {humanPresenceStatus?.state !== 'registered' && <button type="button"
+                  disabled={humanPresenceState === 'prompting'}
+                  onClick={() => { void registerHumanPresence() }}>
+                  {humanPresenceState === 'prompting'
+                    ? t('handoffHumanPresencePrompting') : t('handoffHumanPresenceRegister')}
+                </button>}
+                {humanPresenceState === 'prompting' && <button type="button" className={css.rejectButton}
+                  onClick={() => { humanPresenceController.current?.abort() }}>
+                  {t('handoffHumanPresenceCancel')}
+                </button>}
+                {humanPresenceState === 'failed' && <p role="alert" className={css.error}>
+                  {humanPresenceError === 'platform_presence_cancelled'
+                    ? t('handoffHumanPresenceCancelled') : t('handoffHumanPresenceFailed')}
+                </p>}
+              </div>}
               {rc1Status.contentReview.identity.state === 'bound'
                 ? <p className={css.success}>{t('handoffIdentityBound')}</p>
                 : <div className={css.warning} role="status">
                   <p>{rc1Status.contentReview.identity.state === 'unbound'
                     ? t('handoffIdentityUnbound') : t('handoffIdentityInvalid')}</p>
                   {rc1Status.contentReview.identity.canEnroll && <button type="button"
-                    disabled={identitySaving || humanSessionState !== 'ready'}
+                    disabled={identitySaving || humanSessionState !== 'ready'
+                      || humanPresenceStatus?.state !== 'registered'}
                     onClick={() => { void enrollNaturalPersonIdentity() }}>
                     {identitySaving ? t('handoffIdentitySaving') : t('handoffIdentityEnroll')}
                   </button>}
@@ -2039,7 +2267,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
               <p className={playedCoverage === 1 ? css.success : css.warning}>
                 {t('handoffContentPlayback')}: {(playedCoverage * 100).toFixed(0)}%
               </p>
-              <fieldset className={css.reviewChecks} disabled={rc1Status.contentReview.currentDecision !== null}>
+              <fieldset className={css.reviewChecks} disabled={!rc1Status.contentReview.canDecide}>
                 <legend>{t('handoffContentChecks')}</legend>
                 {([
                   ['picture_and_timing_reviewed', 'handoffContentCheckPicture'],
@@ -2056,10 +2284,10 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
               </fieldset>
               <label className={css.formField}><span>{t('handoffContentNote')}</span>
                 <textarea value={contentNote} maxLength={2000}
-                  disabled={rc1Status.contentReview.currentDecision !== null}
+                  disabled={!rc1Status.contentReview.canDecide}
                   onChange={(event) => { setContentNote(event.currentTarget.value) }} /></label>
               <label className={css.formField}><span>{t('handoffContentRejectReason')}</span>
-                <select value={contentRejectReason} disabled={rc1Status.contentReview.currentDecision !== null}
+                <select value={contentRejectReason} disabled={!rc1Status.contentReview.canDecide}
                   onChange={(event) => { setContentRejectReason(event.currentTarget.value) }}>
                   <option value="picture_or_timing">{t('handoffContentRejectPicture')}</option>
                   <option value="dialogue_or_audio">{t('handoffContentRejectAudio')}</option>
@@ -2068,7 +2296,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
                 </select></label>
               <label className={css.confirmation}>
                 <input type="checkbox" checked={contentSecondConfirmed}
-                  disabled={rc1Status.contentReview.currentDecision !== null}
+                  disabled={!rc1Status.contentReview.canDecide}
                   onChange={(event) => { setContentSecondConfirmed(event.currentTarget.checked) }} />
                 <span>{t('handoffContentSecondConfirm')}</span>
               </label>
@@ -2076,20 +2304,25 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
                 <button type="button" disabled={playedCoverage !== 1 || !contentSecondConfirmed
                   || Object.values(contentChecks).some(value => !value)
                   || humanSessionState !== 'ready'
+                  || humanPresenceStatus?.state !== 'registered'
                   || rc1Status.contentReview.identity.state !== 'bound'
-                  || rc1Status.contentReview.currentDecision !== null || rc1State === 'deciding'}
+                  || !rc1Status.contentReview.canDecide || rc1State === 'deciding'}
                 onClick={() => { void decideFinalContent('accepted') }}>{t('handoffContentAccept')}</button>
                 <button type="button" className={css.rejectButton}
                   disabled={playedCoverage !== 1
                     || humanSessionState !== 'ready'
+                    || humanPresenceStatus?.state !== 'registered'
                     || rc1Status.contentReview.identity.state !== 'bound'
-                    || rc1Status.contentReview.currentDecision !== null
+                    || !rc1Status.contentReview.canDecide
                     || rc1State === 'deciding'}
                   onClick={() => { void decideFinalContent('rejected') }}>{t('handoffContentReject')}</button>
               </div>
             </>}
+          {rc1Status?.contentReview.legacyDecisionRequiresReconfirmation === true
+            && <p className={css.warning} role="status">{t('handoffContentLegacyUnverified')}</p>}
           {rc1Status?.contentReview.currentDecision !== null
             && rc1Status?.contentReview.currentDecision !== undefined
+            && rc1Status.contentReview.currentDecision.humanAuthorityVerified
             && <p className={rc1Status.contentReview.currentDecision.decision === 'accepted'
               ? css.success : css.warning} role="status">
               {rc1Status.contentReview.currentDecision.decision === 'accepted'

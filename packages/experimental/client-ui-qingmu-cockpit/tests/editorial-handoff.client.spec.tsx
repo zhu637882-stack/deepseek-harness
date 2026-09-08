@@ -123,6 +123,47 @@ async function authenticateHumanSession() {
   await waitFor(() => { expect(screen.getByText(zh.handoffHumanSessionReady)).toBeTruthy() })
 }
 
+function platformAuthenticationOptions() {
+  return {
+    schema: 'jason.qingmu-platform-human-presence-options.v1', ceremony: 'authentication',
+    challengeId: 'challenge-platform-12345678', expiresAt: '2026-09-02T12:00:00Z',
+    publicKey: { challenge: 'AAAAAAAAAAAAAAAA', rpId: '127.0.0.1', timeout: 60_000,
+      userVerification: 'required', allowCredentials: [{ type: 'public-key', id: 'BAUG' }] },
+  }
+}
+
+function installPlatformAssertionMock() {
+  class FakeAttestationResponse { readonly fixture = true }
+  class FakeAssertionResponse {
+    clientDataJSON = Uint8Array.of(1).buffer
+    authenticatorData = Uint8Array.of(2).buffer
+    signature = Uint8Array.of(3).buffer
+    userHandle = null
+  }
+  class FakePublicKeyCredential {
+    id = 'platform-credential-test'
+    rawId = Uint8Array.of(4, 5, 6).buffer
+    type = 'public-key'
+    authenticatorAttachment = 'platform'
+    response = new FakeAssertionResponse()
+    getClientExtensionResults() { return {} }
+  }
+  vi.stubGlobal('AuthenticatorAttestationResponse', FakeAttestationResponse)
+  vi.stubGlobal('AuthenticatorAssertionResponse', FakeAssertionResponse)
+  vi.stubGlobal('PublicKeyCredential', FakePublicKeyCredential)
+  Object.defineProperty(navigator, 'credentials', { configurable: true, value: {
+    get: vi.fn(async () => new FakePublicKeyCredential()),
+  } })
+}
+
+function registeredPlatformPresence() {
+  return {
+    schema: 'jason.qingmu-platform-human-presence-status.v1', ...SCOPE,
+    state: 'registered', credentialId: 'platform-credential-test',
+    registeredAt: '2026-09-02T00:00:00Z', platformOnly: true, userVerificationRequired: true,
+  }
+}
+
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
@@ -982,6 +1023,7 @@ describe('editorial handoff panel', () => {
   })
 
   it('keeps RC1 machine evidence, user content review, and release signoff separate', async () => {
+    installPlatformAssertionMock()
     const editorialHandoff = vi.fn().mockResolvedValue(handoff())
     const port = { editorialHandoff } as unknown as QingmuYimengReadPort
     const binding = {
@@ -1006,6 +1048,9 @@ describe('editorial handoff panel', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = fetchUrl(input)
       if (url.includes('/human-session')) return new Response(JSON.stringify({ ok: true }), { status: 200 })
+      if (url.includes('/human-presence-credential')) {
+        return new Response(JSON.stringify(registeredPlatformPresence()), { status: 200 })
+      }
       if (url.includes('/rc1-status?')) {
         return new Response(JSON.stringify({
           schema: 'jason.qingmu-editorial-handoff-rc1-status.v1', ...SCOPE,
@@ -1013,6 +1058,7 @@ describe('editorial handoff panel', () => {
           contentReview: {
             schema: 'jason.episode-final-content-decision-status.v1', binding,
             currentDecision: decision, canDecide: decision === null,
+            legacyDecisionRequiresReconfirmation: false,
             identity: { schema: 'jason.qingmu-natural-person-identity-status.v1',
               projectId: SCOPE.projectId, actorUserId: 'owner', state: 'bound',
               naturalPersonId: 'local-person-test', canEnroll: false,
@@ -1024,6 +1070,9 @@ describe('editorial handoff panel', () => {
       }
       if (url.includes('/final-content-decision?') && init?.method === 'POST') {
         const body = JSON.parse(typeof init.body === 'string' ? init.body : '') as Record<string, unknown>
+        if (body.platformAssertion === undefined) {
+          return new Response(JSON.stringify(platformAuthenticationOptions()), { status: 200 })
+        }
         posts.push(body)
         decision = {
           schema: 'jason.episode-final-content-decision.v1', ...SCOPE,
@@ -1031,6 +1080,7 @@ describe('editorial handoff panel', () => {
           idempotencyKey: body.idempotencyKey, commandReceiptId: 'receipt-decision',
           changeSetId: 'changeset-decision', requestSha256: '9'.repeat(64),
           playedCoverage: 1, checks: body.checks, secondConfirmed: false,
+          humanAuthorityStatus: 'platform_verified', humanAuthorityVerified: true,
           releaseSignoffGranted: false, publishReady: false,
         }
         return new Response(JSON.stringify(decision), {
@@ -1070,7 +1120,120 @@ describe('editorial handoff panel', () => {
     expect(localStorage.getItem('isolated rejection note')).toBeNull()
   })
 
+  it('can cancel the native platform registration prompt without writing a human decision', async () => {
+    class PendingPublicKeyCredential { readonly fixture = true }
+    vi.stubGlobal('PublicKeyCredential', PendingPublicKeyCredential)
+    let registrationPosts = 0
+    let decisionPosts = 0
+    Object.defineProperty(navigator, 'credentials', { configurable: true, value: {
+      create: vi.fn(async ({ signal }: CredentialCreationOptions) => new Promise((_, reject) => {
+        signal?.addEventListener('abort', () => { reject(new DOMException('cancelled', 'AbortError')) },
+          { once: true })
+      })),
+    } })
+    const binding = {
+      ...SCOPE, contentReviewToken: 'a'.repeat(64), finalOutputId: 'final-rc1',
+      finalAssetId: 'asset-rc1', finalSha256: 'b'.repeat(64), finalBytes: 2048,
+      materializedSha256: 'b'.repeat(64), verifyEvidenceSha256: 'c'.repeat(64),
+      rc1PackageId: 'evidence-rc1', rc1ManifestSha256: 'd'.repeat(64),
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = fetchUrl(input)
+      if (url.includes('/human-session')) return new Response(JSON.stringify({ ok: true }), { status: 200 })
+      if (url.includes('/human-presence-credential')) {
+        if (init?.method === 'GET') return new Response(JSON.stringify({
+          ...registeredPlatformPresence(), state: 'unregistered', credentialId: null,
+        }), { status: 200 })
+        registrationPosts += 1
+        return new Response(JSON.stringify({
+          schema: 'jason.qingmu-platform-human-presence-options.v1', ceremony: 'registration',
+          challengeId: 'challenge-platform-12345678', expiresAt: '2026-09-02T12:00:00Z',
+          publicKey: { challenge: 'AAAAAAAAAAAAAAAA', rp: { id: '127.0.0.1', name: 'Qingmu OS' },
+            user: { id: 'AAAAAAAAAAAAAAAA', name: 'owner', displayName: 'Qingmu local user' },
+            pubKeyCredParams: [{ type: 'public-key', alg: -7 }], timeout: 60_000,
+            attestation: 'none', authenticatorSelection: { authenticatorAttachment: 'platform',
+              residentKey: 'required', requireResidentKey: true, userVerification: 'required' } },
+        }), { status: 200 })
+      }
+      if (url.includes('/rc1-status?')) return new Response(JSON.stringify({
+        schema: 'jason.qingmu-editorial-handoff-rc1-status.v1', ...SCOPE,
+        rc1Package: { packageLevel: 'RC1', currentPackage: null, preview: {
+          schema: 'jason.qingmu-canonical-evidence-freeze-preview.v1', ...SCOPE,
+          subject: { packageLevel: 'RC1', buildIdentity: { commit: 'e'.repeat(40) } },
+          previewSha256: '1'.repeat(64), idempotencyKey: 'rc1-preview-12345678',
+          canConfirm: false, hardBlockers: ['fixture_rc1_not_frozen'],
+        } },
+        contentReview: { schema: 'jason.episode-final-content-decision-status.v1', binding,
+          currentDecision: null, canDecide: false, legacyDecisionRequiresReconfirmation: false,
+          identity: { schema: 'jason.qingmu-natural-person-identity-status.v1',
+            projectId: SCOPE.projectId, actorUserId: 'owner', state: 'unbound', naturalPersonId: null,
+            canEnroll: false, legalIdentityVerified: false, humanSignoffGranted: false },
+          releaseSignoffGranted: false, publishReady: false },
+        releaseSignoff: { granted: false, readOnly: true, blockers: [] },
+      }), { status: 200 })
+      if (url.includes('/final-content-decision') || url.includes('/natural-person-identity')) {
+        decisionPosts += 1
+      }
+      return new Response('{}', { status: 404 })
+    }))
+    const port = { editorialHandoff: vi.fn().mockResolvedValue(handoff()) } as unknown as QingmuYimengReadPort
+    render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
+    await screen.findByRole('button', { name: zh.handoffRefresh })
+    await authenticateHumanSession()
+    fireEvent.click(screen.getByRole('button', { name: zh.handoffHumanPresenceRegister }))
+    const cancel = await screen.findByRole('button', { name: zh.handoffHumanPresenceCancel })
+    fireEvent.click(cancel)
+    await waitFor(() => { expect(screen.getByText(zh.handoffHumanPresenceCancelled)).toBeTruthy() })
+    expect(registrationPosts).toBe(1)
+    expect(decisionPosts).toBe(0)
+  })
+
+  it('projects a legacy decision as unverified and keeps reconfirmation available', async () => {
+    const binding = {
+      ...SCOPE, contentReviewToken: 'a'.repeat(64), finalOutputId: 'final-legacy',
+      finalAssetId: 'asset-legacy', finalSha256: 'b'.repeat(64), finalBytes: 2048,
+      rc1PackageId: 'evidence-legacy', rc1ManifestSha256: 'd'.repeat(64),
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      if (!fetchUrl(input).includes('/rc1-status?')) return new Response('{}', { status: 404 })
+      return new Response(JSON.stringify({
+        schema: 'jason.qingmu-editorial-handoff-rc1-status.v1', ...SCOPE,
+        rc1Package: { packageLevel: 'RC1', currentPackage: { packageLevel: 'RC1',
+          packageId: 'evidence-legacy', manifestSha256: 'd'.repeat(64), zipSha256: 'e'.repeat(64),
+          zipBytes: 2048, commandReceiptId: 'receipt-legacy' }, preview: {
+          schema: 'jason.qingmu-canonical-evidence-freeze-preview.v1', ...SCOPE,
+          subject: { packageLevel: 'RC1', buildIdentity: { commit: 'e'.repeat(40) } },
+          previewSha256: '1'.repeat(64), idempotencyKey: 'rc1-preview-12345678',
+          canConfirm: false, hardBlockers: [],
+        } },
+        contentReview: { schema: 'jason.episode-final-content-decision-status.v1', binding,
+          currentDecision: { schema: 'jason.episode-final-content-decision.v1', ...SCOPE,
+            binding, decision: 'accepted', humanAuthorityStatus: 'legacy_unverified',
+            humanAuthorityVerified: false },
+          canDecide: true, legacyDecisionRequiresReconfirmation: true,
+          identity: { schema: 'jason.qingmu-natural-person-identity-status.v1',
+            projectId: SCOPE.projectId, actorUserId: 'owner', state: 'bound',
+            naturalPersonId: 'local-person-test', canEnroll: false,
+            legalIdentityVerified: false, humanSignoffGranted: false },
+          releaseSignoffGranted: false, publishReady: false },
+        releaseSignoff: { granted: false, readOnly: true,
+          blockers: ['content_review_human_authority_unverified'] },
+      }), { status: 200 })
+    }))
+    const port = { editorialHandoff: vi.fn().mockResolvedValue(handoff()) } as unknown as QingmuYimengReadPort
+    render(<EditorialHandoff {...SCOPE} port={port} t={t} />)
+    fireEvent.click(await screen.findByRole('button', { name: zh.handoffRefresh }))
+    expect(await screen.findByText(zh.handoffContentLegacyUnverified)).toBeTruthy()
+    expect(screen.queryByText(zh.handoffContentAccepted)).toBeNull()
+    const note = screen.getByLabelText(zh.handoffContentNote)
+    expect((note as HTMLTextAreaElement).disabled).toBe(false)
+    const accept = screen.getByRole('button', { name: zh.handoffContentAccept })
+    if (!(accept instanceof HTMLButtonElement)) throw new Error('accept_control_not_button')
+    expect(accept.disabled).toBe(true)
+  })
+
   it('returns to the human login form when identity enrollment requires recent authentication', async () => {
+    installPlatformAssertionMock()
     const editorialHandoff = vi.fn().mockResolvedValue(handoff())
     const port = { editorialHandoff } as unknown as QingmuYimengReadPort
     const binding = {
@@ -1084,6 +1247,9 @@ describe('editorial handoff panel', () => {
       if (url.includes('/human-session')) {
         return new Response(JSON.stringify({ ok: true }), { status: 200 })
       }
+      if (url.includes('/human-presence-credential')) {
+        return new Response(JSON.stringify(registeredPlatformPresence()), { status: 200 })
+      }
       if (url.includes('/rc1-status?')) {
         return new Response(JSON.stringify({
           schema: 'jason.qingmu-editorial-handoff-rc1-status.v1', ...SCOPE,
@@ -1094,7 +1260,7 @@ describe('editorial handoff panel', () => {
             canConfirm: false, hardBlockers: ['fixture_rc1_not_frozen'],
           } },
           contentReview: { schema: 'jason.episode-final-content-decision-status.v1', binding,
-            currentDecision: null, canDecide: false,
+            currentDecision: null, canDecide: false, legacyDecisionRequiresReconfirmation: false,
             identity: { schema: 'jason.qingmu-natural-person-identity-status.v1',
               projectId: SCOPE.projectId, actorUserId: 'owner', state: 'unbound',
               naturalPersonId: null, canEnroll: true,
@@ -1104,6 +1270,10 @@ describe('editorial handoff panel', () => {
         }), { status: 200, headers: { 'content-type': 'application/json' } })
       }
       if (url.includes('/natural-person-identity?') && init?.method === 'POST') {
+        const body = JSON.parse(typeof init.body === 'string' ? init.body : '') as Record<string, unknown>
+        if (body.platformAssertion === undefined) {
+          return new Response(JSON.stringify(platformAuthenticationOptions()), { status: 200 })
+        }
         return new Response(JSON.stringify({ code: 'natural_person_identity_relogin_required' }), {
           status: 401, headers: { 'content-type': 'application/json' },
         })
@@ -1123,6 +1293,7 @@ describe('editorial handoff panel', () => {
   })
 
   it('rotates the decision idempotency key when the episode binding changes', async () => {
+    installPlatformAssertionMock()
     const secondScope = { projectId: 'project-e8-next', episodeId: 'episode-e8-next' }
     const editorialHandoff = vi.fn().mockImplementation(async () => handoff())
     const port = { editorialHandoff } as unknown as QingmuYimengReadPort
@@ -1135,6 +1306,9 @@ describe('editorial handoff panel', () => {
       const scope = {
         projectId: url.searchParams.get('projectId') ?? '',
         episodeId: url.searchParams.get('episodeId') ?? '',
+      }
+      if (url.pathname.endsWith('/human-presence-credential')) {
+        return new Response(JSON.stringify({ ...registeredPlatformPresence(), ...scope }), { status: 200 })
       }
       const binding = {
         ...scope,
@@ -1154,7 +1328,7 @@ describe('editorial handoff panel', () => {
             previewSha256: '1'.repeat(64), idempotencyKey: 'rc1-preview-12345678',
             canConfirm: false, hardBlockers: [] } },
           contentReview: { schema: 'jason.episode-final-content-decision-status.v1', binding,
-            currentDecision: null, canDecide: true,
+            currentDecision: null, canDecide: true, legacyDecisionRequiresReconfirmation: false,
             identity: { schema: 'jason.qingmu-natural-person-identity-status.v1',
               projectId: scope.projectId, actorUserId: 'owner', state: 'bound',
               naturalPersonId: 'local-person-test', canEnroll: false,
@@ -1165,6 +1339,9 @@ describe('editorial handoff panel', () => {
       }
       if (url.pathname.endsWith('/final-content-decision') && init?.method === 'POST') {
         const body = JSON.parse(typeof init.body === 'string' ? init.body : '') as Record<string, unknown>
+        if (body.platformAssertion === undefined) {
+          return new Response(JSON.stringify(platformAuthenticationOptions()), { status: 200 })
+        }
         keys.push(String(body.idempotencyKey))
         return new Response(JSON.stringify({ schema: 'jason.episode-final-content-decision.v1',
           ...scope, decision: 'rejected', reason: 'picture_or_timing', binding,
@@ -1173,6 +1350,7 @@ describe('editorial handoff panel', () => {
           playedCoverage: 1, checks: { picture_and_timing_reviewed: false,
             dialogue_and_audio_reviewed: false, continuity_and_content_reviewed: false },
           secondConfirmed: false,
+          humanAuthorityStatus: 'platform_verified', humanAuthorityVerified: true,
           releaseSignoffGranted: false, publishReady: false,
         }), { status: 200, headers: { 'content-type': 'application/json' } })
       }
@@ -1196,6 +1374,7 @@ describe('editorial handoff panel', () => {
   })
 
   it('clears the whole decision draft when the same episode binding drifts', async () => {
+    installPlatformAssertionMock()
     const port = { editorialHandoff: vi.fn().mockResolvedValue(handoff()) } as unknown as QingmuYimengReadPort
     let bindingVersion = 0
     const keys: string[] = []
@@ -1203,6 +1382,9 @@ describe('editorial handoff panel', () => {
       const url = new URL(fetchUrl(input), 'http://localhost')
       if (url.pathname.endsWith('/human-session')) {
         return new Response(JSON.stringify({ ok: true }), { status: 200 })
+      }
+      if (url.pathname.endsWith('/human-presence-credential')) {
+        return new Response(JSON.stringify(registeredPlatformPresence()), { status: 200 })
       }
       const binding = {
         ...SCOPE, contentReviewToken: (bindingVersion === 0 ? 'a' : 'f').repeat(64),
@@ -1216,7 +1398,7 @@ describe('editorial handoff panel', () => {
           schema: 'jason.qingmu-editorial-handoff-rc1-status.v1', ...SCOPE,
           rc1Package: { packageLevel: 'RC1', currentPackage: { packageLevel: 'RC1' }, preview: null },
           contentReview: { schema: 'jason.episode-final-content-decision-status.v1', binding,
-            currentDecision: null, canDecide: true,
+            currentDecision: null, canDecide: true, legacyDecisionRequiresReconfirmation: false,
             identity: { schema: 'jason.qingmu-natural-person-identity-status.v1',
               projectId: SCOPE.projectId, actorUserId: 'owner', state: 'bound',
               naturalPersonId: 'local-person-test', canEnroll: false,
@@ -1228,10 +1410,14 @@ describe('editorial handoff panel', () => {
       if (url.pathname.endsWith('/final-content-decision') && init?.method === 'POST') {
         if (typeof init.body !== 'string') throw new Error('missing JSON body')
         const body = JSON.parse(init.body) as Record<string, unknown>
+        if (body.platformAssertion === undefined) {
+          return new Response(JSON.stringify(platformAuthenticationOptions()), { status: 200 })
+        }
         keys.push(String(body.idempotencyKey))
         return new Response(JSON.stringify({ schema: 'jason.episode-final-content-decision.v1',
           ...SCOPE, binding, decision: 'rejected', reason: 'picture_or_timing',
           idempotencyKey: body.idempotencyKey, releaseSignoffGranted: false, publishReady: false,
+          humanAuthorityStatus: 'platform_verified', humanAuthorityVerified: true,
         }), { status: 200, headers: { 'content-type': 'application/json' } })
       }
       return new Response('{}', { status: 404 })

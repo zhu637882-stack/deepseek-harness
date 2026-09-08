@@ -1,4 +1,4 @@
-// E8-4A repair: Chromium -> built Host -> actual FastAPI -> persistent rejection.
+// E8-4A repair: Chromium -> built Host -> actual FastAPI -> platform presence required, zero write.
 import { execFile as execFileCallback, spawn, type ChildProcess } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -37,9 +37,10 @@ async function stopFixture(child: ChildProcess | undefined): Promise<void> {
 }
 
 const writerRoot = process.env.QINGMU_E8_YIMENG_ROOT
+const artifactDir = process.env.QINGMU_E8_4A_ARTIFACT_DIR
 
 describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot)(
-  'web e2e: RC1 natural-person rejection persists', () => {
+  'web e2e: RC1 platform presence remains an explicit human-only gate', () => {
     let root: string | undefined
     let child: ChildProcess | undefined
     let scaffold: WebScaffold | undefined
@@ -114,11 +115,15 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       }
       const workbench = page.getByRole('button', { name: '青木制作台', exact: true })
       try {
-        await workbench.click({ timeout: 5_000 })
+        await workbench.click({ timeout: 15_000 })
       } catch (error) {
         if (!await readOnly.isVisible()) {
           const dialogs = await page.getByRole('dialog').allInnerTexts()
-          throw new Error(`workbench blocked by modal: ${JSON.stringify(dialogs)}`, { cause: error })
+          const body = await page.locator('body').innerText().catch(() => '')
+          throw new Error(
+            `workbench unavailable; dialogs=${JSON.stringify(dialogs)} body=${body.slice(0, 2000)}`,
+            { cause: error },
+          )
         }
         await readOnly.click()
         await workbench.click()
@@ -211,7 +216,7 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       }
     })
 
-    it('plays the bound final continuously, posts only rejection, and recovers after restart', async () => {
+    it('plays the bound final and keeps decisions disabled and unwritten across restart', async () => {
       if (context === undefined || browser === undefined || writerRoot === undefined) {
         throw new Error('E2E dependencies were not started')
       }
@@ -300,41 +305,34 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       await dialog.getByLabel('密码').fill('fixture-password')
       await dialog.getByRole('button', { name: '验证本人会话', exact: true }).click()
       await expect.poll(() => dialog.getByText(
-        '已建立最近的本人浏览器会话；后端仍会逐次核对对象和版本。',
+        '账号登录已通过；登录本身不证明本人在场，每次决定还需使用这台 Mac 的平台通行密钥确认。',
       ).isVisible()).toBe(true)
-      await dialog.getByLabel('给本次内容决定的备注（可选）').fill('隔离自动化：画面节奏需返修。')
-      await dialog.getByLabel('退回修改原因').selectOption('picture_or_timing')
-      const submitted = page.waitForResponse(response => response.request().method() === 'POST'
-        && new URL(response.url()).pathname === '/api/qingmu/editorial-handoff/final-content-decision')
-      await dialog.getByRole('button', { name: '退回修改', exact: true }).click()
-      const submittedResponse = await submitted
-      if (submittedResponse.status() !== 200) {
-        const committed = await execFile(join(writerRoot, '.venv/bin/python'), ['-c', [
-          'import sqlite3,sys',
-          'c=sqlite3.connect(sys.argv[1])',
-          'print(c.execute("SELECT count(*) FROM command_receipts WHERE command_type=?",("episode.final_content_decision.record.v1",)).fetchone()[0])',
-        ].join('\n'), fixture.sqlitePath], { env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: '1' } })
-        throw new Error(
-          `human rejection failed ${String(submittedResponse.status())}; committed=${committed.stdout.trim()}`,
-        )
+      expect(await dialog.getByText(
+        '尚未设置这台 Mac 的平台通行密钥。账号密码和 Host 不能代替触碰或生物识别确认。',
+      ).isVisible()).toBe(true)
+      expect(await dialog.getByRole(
+        'button', { name: '设置这台 Mac 的平台通行密钥', exact: true },
+      ).isEnabled()).toBe(true)
+      expect(await dialog.getByRole('button', { name: '接受当前最终成片', exact: true })
+        .isDisabled()).toBe(true)
+      expect(await dialog.getByRole('button', { name: '退回修改', exact: true }).isDisabled())
+        .toBe(true)
+      if (artifactDir !== undefined) {
+        await mkdir(artifactDir, { recursive: true })
+        await page.screenshot({ path: join(artifactDir, 'e8-4a-platform-presence-required-1280x800.png'),
+          fullPage: true })
       }
-      await expect.poll(
-        () => dialog.getByText('当前成片已退回修改，不得进入组织发布。').isVisible(),
-      ).toBe(true)
-      expect(decisionPosts).toHaveLength(1)
-      expect(JSON.parse(decisionPosts[0] ?? '{}')).toMatchObject({
-        decision: 'rejected', playedCoverage: 1, reason: 'picture_or_timing',
-      })
+      expect(decisionPosts).toHaveLength(0)
       expect(externalRequests).toEqual([])
 
       const facts = await execFile(join(writerRoot, '.venv/bin/python'), ['-c', [
         'import json,sqlite3,sys',
         'c=sqlite3.connect(sys.argv[1])',
-        'r=c.execute("SELECT response_json FROM command_receipts WHERE command_type=?",("episode.final_content_decision.record.v1",)).fetchall()',
-        'print(json.dumps({"count":len(r),"decision":json.loads(r[0][0])["decision"] if r else None}))',
+        'd=c.execute("SELECT count(*) FROM command_receipts WHERE command_type=?",("episode.final_content_decision.record.v1",)).fetchone()[0]',
+        'p=c.execute("SELECT count(*) FROM command_receipts WHERE command_type=?",("qingmu.human_presence_credential.register.v1",)).fetchone()[0]',
+        'print(json.dumps({"decisionCount":d,"presenceCredentialCount":p}))',
       ].join('\n'), fixture.sqlitePath], { env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: '1' } })
-      expect(JSON.parse(facts.stdout)).toEqual({ count: 1, decision: 'rejected' })
-
+      expect(JSON.parse(facts.stdout)).toEqual({ decisionCount: 0, presenceCredentialCount: 0 })
       await stopFixture(child)
       fixture = await startFixture(true)
       process.env.YIMENG_API_TOKEN = fixture.token
@@ -349,14 +347,19 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
           && request.method() === 'POST') decisionPosts.push(request.postData() ?? '')
       })
       const freshDialog = await enterRc1(freshPage)
-      await expect.poll(
-        () => freshDialog.getByText('当前成片已退回修改，不得进入组织发布。').isVisible(),
-        { timeout: 15_000 },
-      ).toBe(true)
+      expect(await freshDialog.getByText('用户本人整集内容决定', { exact: true }).isVisible())
+        .toBe(true)
+      expect(await freshDialog.getByText('当前成片已由本人接受。').isVisible()).toBe(false)
+      expect(await freshDialog.getByText('当前成片已退回修改，不得进入组织发布。').isVisible())
+        .toBe(false)
       await expect.poll(
         () => freshDialog.getByRole('button', { name: '接受当前最终成片', exact: true }).isDisabled(),
       ).toBe(true)
-      expect(decisionPosts).toHaveLength(1)
+      if (artifactDir !== undefined) {
+        await freshPage.screenshot({ path: join(artifactDir, 'e8-4a-zero-authority-after-restart-1440x900.png'),
+          fullPage: true })
+      }
+      expect(decisionPosts).toHaveLength(0)
       expect(externalRequests).toEqual([])
     }, 90_000)
   },

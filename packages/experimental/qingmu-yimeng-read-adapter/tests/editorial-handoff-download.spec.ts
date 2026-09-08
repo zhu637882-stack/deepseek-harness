@@ -1033,6 +1033,7 @@ describe('editorial handoff Host download bridge', () => {
       requestSha256: 'f'.repeat(64), commandReceiptId: 'receipt-content-decision',
       changeSetId: 'changeset-content-decision', eventId: 'event-content-decision',
       actorUserId: 'user-owner', actorNaturalPersonId: 'natural-person-owner',
+      humanAuthorityStatus: 'platform_verified', humanAuthorityVerified: true,
       decidedAt: '2026-09-01T00:00:04Z', note: 'test rejection', playedCoverage: 1,
       playbackAttestation: { schema: 'jason.owner-declared-playback-coverage.v1', coverage: 1,
         continuousFromStart: true, declaredByOwner: true, unforgeableTelemetry: false },
@@ -1045,6 +1046,8 @@ describe('editorial handoff Host download bridge', () => {
     let decisionPosts = 0
     let intentPosts = 0
     let decisionRecoveries = 0
+    let originalDecisionRequestSha: string | undefined
+    let decisionCommitted = false
     const fetchUpstream = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const target = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
       const url = new URL(target)
@@ -1072,8 +1075,16 @@ describe('editorial handoff Host download bridge', () => {
         expect(headers.get('cookie')).toBe('jason_token=cookie-test')
         expect(headers.get('origin')).toBe('http://127.0.0.1:18815')
         expect(headers.get('host')).toBe('127.0.0.1:18815')
-        return new Response(JSON.stringify({
-          schema: 'jason.qingmu-human-authority-intent.v1',
+        const body = JSON.parse(typeof init?.body === 'string' ? init.body : '') as Record<string, unknown>
+        if (body.platformAssertion === undefined) {
+          return new Response(JSON.stringify({
+            schema: 'jason.qingmu-platform-human-presence-options.v1', ceremony: 'authentication',
+            challengeId: 'challenge-platform-12345678', expiresAt: '2026-09-02T12:00:00Z',
+            publicKey: { challenge: 'AAAAAAAAAAAAAAAA', rpId: '127.0.0.1', timeout: 60_000,
+              userVerification: 'required', allowCredentials: [{ type: 'public-key', id: 'BAUG' }] },
+          }), { status: 200, headers: { 'content-type': 'application/json' } })
+        }
+        return new Response(JSON.stringify({ schema: 'jason.qingmu-human-authority-intent.v1',
           action: 'episode_final_content_decision.record', proof: 'p'.repeat(160),
         }), { status: 200, headers: { 'content-type': 'application/json' } })
       }
@@ -1084,6 +1095,7 @@ describe('editorial handoff Host download bridge', () => {
             status: 409, headers: { 'content-type': 'application/json' },
           })
         }
+        decisionCommitted = true
         const response = new Response(JSON.stringify(decision), {
           status: 200, headers: { 'content-type': 'application/json' },
         })
@@ -1096,6 +1108,13 @@ describe('editorial handoff Host download bridge', () => {
         decisionRecoveries += 1
         const requestSha256 = url.searchParams.get('requestSha256')
         expect(requestSha256).toMatch(/^[0-9a-f]{64}$/)
+        if (!decisionCommitted) return new Response('{}', { status: 404 })
+        if (originalDecisionRequestSha !== undefined && requestSha256 !== originalDecisionRequestSha) {
+          return new Response(JSON.stringify({ detail: { code: 'idempotency_key_payload_mismatch' } }), {
+            status: 409, headers: { 'content-type': 'application/json' },
+          })
+        }
+        originalDecisionRequestSha = String(requestSha256)
         return new Response(JSON.stringify({ ...decision, requestSha256 }), {
           status: 200, headers: { 'content-type': 'application/json' },
         })
@@ -1113,7 +1132,7 @@ describe('editorial handoff Host download bridge', () => {
     expect(rc1.status).toBe(200)
     expect((await rc1.json()) as unknown).toEqual(packageResult)
 
-    const content = await fetch(
+    const challenge = await fetch(
       `${base}/api/qingmu/editorial-handoff/final-content-decision?${scope.toString()}`,
       { method: 'POST', headers: { 'content-type': 'application/json', origin: base,
         cookie: 'jason_token=cookie-test' }, body: JSON.stringify({
@@ -1124,10 +1143,45 @@ describe('editorial handoff Host download bridge', () => {
         idempotencyKey: decision.idempotencyKey,
       }) },
     )
+    const challengePayload = await challenge.json() as Record<string, unknown>
+    expect(challenge.status).toBe(200)
+    expect(challengePayload).toMatchObject({
+      schema: 'jason.qingmu-platform-human-presence-options.v1', ceremony: 'authentication',
+    })
+    expect(JSON.stringify(challengePayload)).not.toContain('proof')
+
+    const content = await fetch(
+      `${base}/api/qingmu/editorial-handoff/final-content-decision?${scope.toString()}`,
+      { method: 'POST', headers: { 'content-type': 'application/json', origin: base,
+        cookie: 'jason_token=cookie-test' }, body: JSON.stringify({
+        decision: 'rejected', binding, playedCoverage: 1,
+        checks: { picture_and_timing_reviewed: false, dialogue_and_audio_reviewed: true,
+          continuity_and_content_reviewed: true },
+        secondConfirmed: false, reason: 'picture_or_timing', note: 'fixture rejection',
+        idempotencyKey: decision.idempotencyKey,
+        platformAssertion: { challengeId: 'challenge-platform-12345678', credential: {
+          id: 'platform-credential-test', type: 'public-key', authenticatorAttachment: 'platform',
+        } },
+      }) },
+    )
     expect(content.status).toBe(200)
     const recoveredDecision = (await content.json()) as Record<string, unknown>
     expect(recoveredDecision).toMatchObject({ ...decision, requestSha256: recoveredDecision.requestSha256 })
     expect(recoveredDecision.requestSha256).toMatch(/^[0-9a-f]{64}$/)
+
+    const duplicate = await fetch(
+      `${base}/api/qingmu/editorial-handoff/final-content-decision?${scope.toString()}`,
+      { method: 'POST', headers: { 'content-type': 'application/json', origin: base,
+        cookie: 'jason_token=cookie-test' }, body: JSON.stringify({
+        decision: 'rejected', binding, playedCoverage: 1,
+        checks: { picture_and_timing_reviewed: false, dialogue_and_audio_reviewed: true,
+          continuity_and_content_reviewed: true },
+        secondConfirmed: false, reason: 'picture_or_timing', note: 'fixture rejection',
+        idempotencyKey: decision.idempotencyKey,
+      }) },
+    )
+    expect(duplicate.status).toBe(200)
+    expect((await duplicate.json()) as unknown).toEqual(recoveredDecision)
 
     const mismatch = await fetch(
       `${base}/api/qingmu/editorial-handoff/final-content-decision?${scope.toString()}`,
@@ -1138,11 +1192,14 @@ describe('editorial handoff Host download bridge', () => {
           continuity_and_content_reviewed: true },
         secondConfirmed: false, reason: 'picture_or_timing', note: 'different payload',
         idempotencyKey: decision.idempotencyKey,
+        platformAssertion: { challengeId: 'challenge-platform-12345678', credential: {
+          id: 'platform-credential-test', type: 'public-key', authenticatorAttachment: 'platform',
+        } },
       }) },
     )
     expect(mismatch.status).toBe(409)
     expect({ rc1Posts, rc1Recoveries, intentPosts, decisionPosts, decisionRecoveries }).toEqual({
-      rc1Posts: 1, rc1Recoveries: 1, intentPosts: 2, decisionPosts: 2, decisionRecoveries: 1,
+      rc1Posts: 1, rc1Recoveries: 1, intentPosts: 2, decisionPosts: 1, decisionRecoveries: 5,
     })
   })
 
