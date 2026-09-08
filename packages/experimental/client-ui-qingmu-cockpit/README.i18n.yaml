@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/experimental/client-ui-qingmu-cockpit/README.md
 README.md: e2bba7f096cd4e59f529ebc73bee433d0f9fdf6b
-README.zh.md: 6afebe9ab44b28a2d4b8f9dc06ffb749d484a650
+README.zh.md: 2dbd501534e348afc6bc0244d29c9dd55e07eb0e

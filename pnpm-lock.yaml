@@ -4198,6 +4198,9 @@ importers:
       '@deepseek-ai/dsh-client-runtime':
         specifier: workspace:^
         version: link:../../client/runtime
+      '@deepseek-ai/dsh-client-ui-layout':
+        specifier: workspace:^
+        version: link:../../client/ui-layout
       '@deepseek-ai/dsh-client-ui-primitives':
         specifier: workspace:^
         version: link:../../client/ui-primitives
@@ -4207,6 +4210,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-slots':
         specifier: workspace:^
         version: link:../../client/ui-slots
+      '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge':
+        specifier: workspace:^
+        version: link:../qingmu-director-context-bridge
       '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter':
         specifier: workspace:^
         version: link:../qingmu-imago-method-adapter
@@ -4244,6 +4250,82 @@ importers:
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
 
+  packages/experimental/qingmu-director-context-bridge:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/cordis-plugin-include':
+        specifier: workspace:^
+        version: link:../../../vendor/include
+      '@deepseek-ai/cordis-plugin-loader':
+        specifier: workspace:^
+        version: link:../../../vendor/loader
+      '@deepseek-ai/dsh-agent':
+        specifier: workspace:^
+        version: link:../../core/agent
+      '@deepseek-ai/dsh-agent-loop':
+        specifier: workspace:^
+        version: link:../../core/agent-loop
+      '@deepseek-ai/dsh-agent-presets':
+        specifier: workspace:^
+        version: link:../../preset/agent-presets
+      '@deepseek-ai/dsh-client-connection':
+        specifier: workspace:^
+        version: link:../../client/connection
+      '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter':
+        specifier: workspace:^
+        version: link:../qingmu-imago-method-adapter
+      '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter':
+        specifier: workspace:^
+        version: link:../qingmu-yimeng-command-adapter
+      '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter':
+        specifier: workspace:^
+        version: link:../qingmu-yimeng-read-adapter
+      '@deepseek-ai/dsh-host-apiproxy':
+        specifier: workspace:^
+        version: link:../../host/apiproxy
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:^
+        version: link:../../llm/llm
+      '@deepseek-ai/dsh-persona':
+        specifier: workspace:^
+        version: link:../../preset/persona
+      '@deepseek-ai/dsh-scope':
+        specifier: workspace:^
+        version: link:../../core/scope
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../../core/session
+      '@deepseek-ai/dsh-session-persistence-jsonl':
+        specifier: workspace:^
+        version: link:../../session/session-persistence-jsonl
+      '@deepseek-ai/dsh-session-projection':
+        specifier: workspace:^
+        version: link:../../session/session-projection
+      '@deepseek-ai/dsh-spill-local':
+        specifier: workspace:^
+        version: link:../../spill/spill-local
+      '@deepseek-ai/dsh-spill-policy':
+        specifier: workspace:^
+        version: link:../../spill/spill-policy
+      '@deepseek-ai/dsh-system-prompt':
+        specifier: workspace:^
+        version: link:../../core/system-prompt
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:^
+        version: link:../../core/tools
+
   packages/experimental/qingmu-imago-method-adapter:
     dependencies:
       '@deepseek-ai/schemastery':
@@ -4266,6 +4348,33 @@ importers:
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
 
+  packages/experimental/qingmu-project-context:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-client-connection':
+        specifier: workspace:^
+        version: link:../../client/connection
+      '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter':
+        specifier: workspace:^
+        version: link:../qingmu-imago-method-adapter
+      '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter':
+        specifier: workspace:^
+        version: link:../qingmu-yimeng-read-adapter
+      '@deepseek-ai/dsh-host-apiproxy':
+        specifier: workspace:^
+        version: link:../../host/apiproxy
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../../core/session
+      '@deepseek-ai/dsh-session-persistence-jsonl':
+        specifier: workspace:^
+        version: link:../../session/session-persistence-jsonl
+
   packages/experimental/qingmu-web:
     dependencies:
       '@deepseek-ai/dsh-experimental-client-ui-brand-qingmu':
@@ -4274,6 +4383,9 @@ importers:
       '@deepseek-ai/dsh-experimental-client-ui-qingmu-cockpit':
         specifier: workspace:^
         version: link:../client-ui-qingmu-cockpit
+      '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge':
+        specifier: workspace:^
+        version: link:../qingmu-director-context-bridge
       '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter':
         specifier: workspace:^
         version: link:../qingmu-imago-method-adapter
@@ -4283,6 +4395,9 @@ importers:
       '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter':
         specifier: workspace:^
         version: link:../qingmu-yimeng-read-adapter
+      '@deepseek-ai/dsh-persona':
+        specifier: workspace:^
+        version: link:../../preset/persona
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^
@@ -4318,6 +4433,9 @@ importers:
       '@deepseek-ai/dsh-host-apiproxy':
         specifier: workspace:^
         version: link:../../host/apiproxy
+      '@deepseek-ai/dsh-host-webserver':
+        specifier: workspace:^
+        version: link:../../host/webserver
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
