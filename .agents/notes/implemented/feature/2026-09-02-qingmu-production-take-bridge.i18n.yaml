@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-02-qingmu-production-take-bridge.md
+2026-09-02-qingmu-production-take-bridge.md: bcf136c7820d5db8e333fca3a75c1ec7cca1e79a
+2026-09-02-qingmu-production-take-bridge.zh.md: 1f1765f2ca2bc9999a53d96241c8b586216e202e

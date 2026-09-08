@@ -60,6 +60,66 @@ export interface ImagoDirectorReplayMethodResponse extends ImagoMethodJsonObject
   readonly methodPackageSha256: string
 }
 
+/** Fixed current-directing method capabilities available as paged Host-only text. */
+export type ImagoDirectorInstructionsCapability = 'director_development' | 'shot_design'
+
+/** Caller selects a fixed capability package, never a Core path or a project scope. */
+export interface ImagoDirectorInstructionsRequest {
+  readonly capability: ImagoDirectorInstructionsCapability
+  /** Fixed supplementary C5 reference; no arbitrary path is accepted. */
+  readonly resourceId?: 'rough_final_feedback'
+}
+
+/** One fixed source in the current capability package, without its body. */
+export interface ImagoDirectorInstructionsSourceBinding {
+  readonly resourceId: string
+  readonly path: string
+  readonly kind: 'skill' | 'direct_reference'
+  readonly sha256: string
+  readonly byteLength: number
+}
+
+/** One complete source page, never a truncated prefix. */
+export interface ImagoDirectorInstructionsResource extends ImagoDirectorInstructionsSourceBinding {
+  readonly content: string
+}
+
+/** A direct mandatory reference available through a fixed optional second read. */
+export interface ImagoDirectorInstructionsAdditionalReference {
+  readonly resourceId: 'rough_final_feedback'
+  readonly path: string
+  readonly required: true
+}
+
+/** Read-only full Skill text plus a bounded selected set of direct method references. */
+export interface ImagoDirectorInstructionsResponse extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-director-instructions.v1'
+  readonly capability: ImagoDirectorInstructionsCapability
+  readonly packagePath: string
+  readonly sourceBindings: readonly ImagoDirectorInstructionsSourceBinding[]
+  readonly sources: readonly ImagoDirectorInstructionsResource[]
+  /** Direct mandatory references available through a fixed optional second read. */
+  readonly additionalReferences: readonly ImagoDirectorInstructionsAdditionalReference[]
+  /** Exact capability boundary for the selected reference set. */
+  readonly methodScope: string
+  readonly maxResourceBytes: number
+  readonly maxPackageBytes: number
+  readonly packageSha256: string
+  /** Null returns the primary Skill plus selected references; otherwise one fixed additional reference. */
+  readonly requestedResourceId: 'rough_final_feedback' | null
+  readonly authority: {
+    readonly readOnly: true
+    readonly businessTruth: 'yimeng'
+    readonly methodSource: 'imago_os'
+    readonly providerCalls: 0
+    readonly maximumCostCny: '0'
+    readonly approvalGranted: false
+    readonly humanDecisionInferred: false
+    readonly formalQcInferred: false
+    readonly projectStateWrite: false
+  }
+}
+
 /** Element kinds with an explicit current IMAGO profile-editing method. */
 export type ImagoElementKind = 'actor' | 'scene' | 'prop'
 
@@ -252,6 +312,53 @@ export interface ImagoPromptIrEditableReplacements extends ImagoMethodJsonObject
   readonly negativePrompt?: string
 }
 
+/** Provenance-verified director method card bound to one PromptIR stage. */
+export interface ImagoPromptIrDirectorCardBinding extends ImagoMethodJsonObject {
+  readonly kind: 'director_method_card'
+  readonly stage_id: 'D' | 'E'
+  readonly repo_id: string
+  readonly repository_commit: string
+  readonly path: string
+  readonly sha256: string
+  readonly provenance_sha256: string
+}
+
+/** Current Core contract identity for one PromptIR-producing stage. */
+export interface ImagoPromptIrStageContractBinding extends ImagoMethodJsonObject {
+  readonly stage_id: 'D' | 'E'
+  readonly contract_sha256: string
+}
+
+/** Exact stage and method-card sources that constrain one editable PromptIR field. */
+export interface ImagoPromptIrFieldMappingEntry extends ImagoMethodJsonObject {
+  readonly field: ImagoPromptIrEditableField
+  readonly stage_ids: readonly ('D' | 'E')[]
+  readonly stage_contract_bindings: readonly ImagoPromptIrStageContractBinding[]
+  readonly method_sha256: string
+  readonly card_bindings: readonly ImagoPromptIrDirectorCardBinding[]
+}
+
+/** Versioned five-field director guidance mapping, hashed without its `sha256` member. */
+export interface ImagoPromptIrFieldMapping extends ImagoMethodJsonObject {
+  readonly schema: 'qingmu.imago-prompt-ir-field-mapping.v1'
+  readonly version: 1
+  readonly fields: readonly ImagoPromptIrFieldMappingEntry[]
+  readonly sha256: string
+}
+
+/** Current Core method identity plus the Host-owned director-card field mapping. */
+export interface ImagoPromptIrMethodDefinition extends ImagoMethodJsonObject {
+  readonly id: 'imago-v6-e-provider-neutral-prompt-ir-edit-method'
+  readonly version: 1
+  readonly sha256: string
+  readonly stage_contract_sha256: string
+  readonly role_capability_sha256: string
+  readonly prompt_ir_schema: 'IMAGO-V6-VideoPromptIR-v1'
+  readonly field_mapping: ImagoPromptIrFieldMapping
+  readonly agent_path: string
+  readonly skill_path: string
+}
+
 /** Exact Yimeng authority and candidate input for one stateless PromptIR method compile. */
 export interface ImagoPromptIrMethodRequest {
   readonly projectId: string
@@ -290,7 +397,7 @@ export interface ImagoPromptIrMethodProjection extends ImagoMethodJsonObject {
   readonly changed_paths: readonly string[]
   readonly blockers: readonly string[]
   readonly warnings: readonly string[]
-  readonly method_definition: ImagoMethodJsonObject
+  readonly method_definition: ImagoPromptIrMethodDefinition
   readonly source_bindings: readonly ImagoMethodJsonObject[]
   readonly field_hints: readonly ImagoMethodJsonObject[]
   readonly checklist: readonly ImagoMethodJsonObject[]
@@ -299,6 +406,7 @@ export interface ImagoPromptIrMethodProjection extends ImagoMethodJsonObject {
   readonly project_state_persisted: false
   readonly providerCalls: 0
   readonly workerStarted: false
+  readonly maximumCostCny: '0'
   readonly selection_executed: false
   readonly human_approval_inferred: false
   readonly human_signoff_inferred: false
@@ -329,6 +437,8 @@ export interface ImagoPromptIrMethodResponse extends ImagoMethodJsonObject {
 export interface ImagoPromptIrBootstrapMethodRequest {
   readonly context: ImagoMethodJsonObject
   readonly contextSnapshotSha256: string
+  /** Optional creative text; reference identities and Draft authority remain compiler-owned. */
+  readonly editableProjection?: ImagoMethodJsonObject
   readonly selectionChallenge?: ImagoPromptIrBootstrapSelectionChallenge
 }
 
@@ -358,6 +468,7 @@ export interface ImagoPromptIrBootstrapMethodSnapshot extends ImagoMethodJsonObj
   readonly schema: 'qingmu.prompt-ir-bootstrap-method-snapshot.v1'
   readonly context: ImagoMethodJsonObject
   readonly contextSnapshotSha256: string
+  readonly editableProjection?: ImagoMethodJsonObject
   readonly authority: {
     readonly business_truth: 'yimeng'
     readonly method_source: 'imago_os_current'
@@ -502,10 +613,27 @@ export interface ImagoShotLocalCurrentReferenceLineage extends ImagoMethodJsonOb
   readonly rightsRecordSha256: string
 }
 
-/** Exact immutable coordinates of either qualified current-reference path. */
+/** Exact immutable proof that the owner made the final creative decision. */
+export interface ImagoShotOwnerFinalCurrentReferenceLineage extends ImagoMethodJsonObject {
+  readonly projectId: string
+  readonly sourceEpisodeId: string
+  readonly ownerType: ImagoElementKind
+  readonly ownerId: string
+  readonly role: string
+  readonly sourceRevisionId: string
+  readonly qualificationKind: 'owner_human_finalization'
+  readonly finalizationReceiptIdentity: string
+  readonly humanReviewIdentity: string
+  readonly inheritedPrescreenReviewIdentity: string
+  /** Required only for an actor's canonical front-turnaround cohort. */
+  readonly actorCohortIdentity?: string
+}
+
+/** Exact immutable coordinates of every qualified current-reference path. */
 export type ImagoShotCurrentReferenceLineage =
   | ImagoShotProviderCurrentReferenceLineage
   | ImagoShotLocalCurrentReferenceLineage
+  | ImagoShotOwnerFinalCurrentReferenceLineage
 
 /** Read-only E4-3 reference binding exposed to the E5-3 method. */
 export interface ImagoShotCurrentReference extends ImagoMethodJsonObject {
@@ -1641,6 +1769,7 @@ export interface ImagoStageArtifactMethodResponse extends ImagoMethodJsonObject 
 
 /** Result values exposed by `/qingmu-imago-method`. */
 export interface ImagoMethodEndpointMap {
+  readonly directorInstructions: ImagoDirectorInstructionsResponse
   readonly directorReplayMethod: ImagoDirectorReplayMethodResponse
   readonly elementMethod: ImagoElementMethodResponse
   readonly referenceAssetMethod: ImagoReferenceAssetMethodResponse

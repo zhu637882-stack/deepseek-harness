@@ -1,4 +1,8 @@
 # Qingmu OS distribution layer. Apply after dsh-base and dsh-web-app.
+- id: agent-presets
+  config:
+    default: qingmu-director
+
 - id: ui-brand-official
   disabled: true
 
@@ -11,5 +15,7 @@
       name: '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter'
     - id: qingmu-yimeng-command-adapter
       name: '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter'
+    - id: qingmu-director-context-bridge
+      name: '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge'
     - id: ui-qingmu-cockpit
       name: '@deepseek-ai/dsh-experimental-client-ui-qingmu-cockpit'

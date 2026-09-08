@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/experimental/qingmu-imago-method-adapter/README.md
-README.md: cdb80caa4288d6ff8a35ce896a2c7cc2fa45b373
-README.zh.md: de2aa7c01b1eda4e4b0cd656ad2a4b52294ffdcf
+README.md: 0294a845f8567fd97aca4563b1819e40712ceb8c
+README.zh.md: 2cbe05a8b872814ba113bdb2dbe8d8ed4ce6e634

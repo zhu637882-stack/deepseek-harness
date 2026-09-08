@@ -535,6 +535,48 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源：[`packages/plan/plan-mode/src/index.ts:53`](../packages/plan/plan-mode/src/index.ts)
 
+### `qingmu-director-context/*`
+
+<a id="qingmu-director-contextstate--log-only"></a>
+
+#### `qingmu-director-context/state` — 仅日志
+
+```ts persistence-catalog
+/** Whole-value, log-only binding; null clears an obsolete object before switch I/O. */
+'qingmu-director-context/state': DirectorContextBindingState | null
+```
+
+来源：[`packages/experimental/qingmu-director-context-bridge/src/types.ts:257`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+
+### `qingmu-director-dialogue/*`
+
+<a id="qingmu-director-dialoguereceipt--log-only"></a>
+
+#### `qingmu-director-dialogue/receipt` — 仅日志
+
+```ts persistence-catalog
+/** Full host input retained outside model context; usable only with its matching successful tool result. */
+'qingmu-director-dialogue/receipt': {
+  readonly callId: string
+  readonly toolName: string
+  readonly value: JsonValue
+  readonly visibleSha256: string
+}
+```
+
+来源：[`packages/experimental/qingmu-director-context-bridge/src/types.ts:261`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+
+<a id="qingmu-director-dialoguestate--log-only"></a>
+
+#### `qingmu-director-dialogue/state` — 仅日志
+
+```ts persistence-catalog
+/** A UI view of a native tool operation, never a second business ledger. */
+'qingmu-director-dialogue/state': NativeDialogueExecution
+```
+
+来源：[`packages/experimental/qingmu-director-context-bridge/src/types.ts:259`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+
 ### `request/*`
 
 <a id="requestcontext--log-only"></a>

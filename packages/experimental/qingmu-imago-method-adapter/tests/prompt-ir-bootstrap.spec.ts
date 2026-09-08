@@ -1,7 +1,7 @@
 import { createHash, createHmac } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createImagoMethodHandler } from '../src/index.ts'
-import type { ImagoPromptIrBootstrapMethodSnapshot } from '../src/types.ts'
+import type { ImagoPromptIrBootstrapMethodSnapshot, ImagoPromptIrBootstrapMethodResponse } from '../src/types.ts'
 
 function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
@@ -26,7 +26,7 @@ describe('first PromptIR method Host adapter', () => {
   it('attests one exact zero-execution Draft projection and rejects context drift', async () => {
     vi.stubEnv('QINGMU_IMAGO_ATTESTATION_KEY', 'prompt-ir-bootstrap-test-key-at-least-32-bytes')
     const compiler = vi.fn(async (snapshot: ImagoPromptIrBootstrapMethodSnapshot) => {
-      const candidate = { editableProjection: { imageGenPrompt: '开场', lastFrameImagePrompt: '',
+      const candidate = { editableProjection: snapshot.editableProjection ?? { imageGenPrompt: '开场', lastFrameImagePrompt: '',
         videoGenPrompt: '缓慢前推', motionPrompt: '轻微运动', negativePrompt: '不新增元素' },
       subjectArray: [], advisoryOnly: true, status: 'Draft' }
       return { schema: 'qingmu.imago-prompt-ir-bootstrap-method-projection.v1',
@@ -80,8 +80,32 @@ describe('first PromptIR method Host adapter', () => {
       ...request, selectionChallenge: { ...selectionChallenge, signature: '0'.repeat(64) },
     }, new AbortController().signal)).toMatchObject({ ok: false, error: { code: 'bad-request' } })
     expect(compiler).toHaveBeenCalledTimes(2)
+    const editable = (result.value as ImagoPromptIrBootstrapMethodResponse)
+      .projection.candidate.editableProjection as Record<string, string>
+    const legacy = await handler('promptIrBootstrapMethod', { ...request, selectionChallenge, editableProjection: editable }, new AbortController().signal)
+    expect(legacy).toMatchObject({ ok: true, value: { projectionSha256: value.projectionSha256 } })
+    expect(compiler).toHaveBeenCalledTimes(3)
+    expect(await handler('promptIrBootstrapMethod', { ...request, selectionChallenge,
+      editableProjection: { ...editable, imageGenPrompt: 'changed' } }, new AbortController().signal)).toMatchObject({ ok: false })
+
+    const newRequest = { ...request, editableProjection: { ...editable, imageGenPrompt: '副驾后方机位' } }
+    const directed = await handler('promptIrBootstrapMethod', newRequest, new AbortController().signal)
+    if (!directed.ok) throw new Error('expected authored draft')
+    const authored = directed.value as ImagoPromptIrBootstrapMethodResponse
+    const newUnsigned = { ...unsignedChallenge, methodProjectionSha256: authored.projectionSha256,
+      candidateSha256: authored.projection.candidate_sha256 }
+    const newChallenge = { ...newUnsigned, signature: createHmac('sha256', 'prompt-ir-bootstrap-test-key-at-least-32-bytes')
+      .update('qingmu.prompt-ir-bootstrap.selection-challenge.v1\0').update(canonical(newUnsigned)).digest('hex') }
+    expect(await handler('promptIrBootstrapMethod', { ...newRequest, selectionChallenge: newChallenge }, new AbortController().signal))
+      .toMatchObject({ ok: true, value: { projectionSha256: authored.projectionSha256 } })
+    expect(await handler('promptIrBootstrapMethod', { ...newRequest, editableProjection: { ...newRequest.editableProjection, status: 'Ready' } }, new AbortController().signal))
+      .toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    for (const text of [17, ' padded ', 'nul\u0000text', 'x'.repeat(30001)]) {
+      expect(await handler('promptIrBootstrapMethod', { ...newRequest, editableProjection: { ...newRequest.editableProjection, imageGenPrompt: text } }, new AbortController().signal))
+        .toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    }
     expect(await handler('promptIrBootstrapMethod', { ...request, contextSnapshotSha256: '0'.repeat(64) },
       new AbortController().signal)).toMatchObject({ ok: false, error: { code: 'bad-request' } })
-    expect(compiler).toHaveBeenCalledTimes(2)
+    expect(compiler).toHaveBeenCalledTimes(6)
   })
 })

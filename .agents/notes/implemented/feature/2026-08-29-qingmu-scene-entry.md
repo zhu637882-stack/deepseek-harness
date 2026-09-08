@@ -14,6 +14,8 @@ The [planning workspace](../../../../packages/experimental/client-ui-qingmu-cock
 
 Structural Ready records a planning snapshot, not creative approval. Empty references and absent PromptIR stay missing. Same-name actors in other scenes are not merged. Browser recovery retains exact commands and input; GET recovery precedes explicit retry or re-preparation. A competing first initialization loads the winner only after preserving the losing input locally and explicit confirmation.
 
+The embedded cockpit emits a versioned save notification only after it has reread the saved planning and current Director context. The notification binds the exact parent origin, project, episode, scene, shot, context SHA and receipt. The outer Writer rejects any other source, origin, shape or scope, deduplicates the event, rereads both canonical resources, refreshes its workflow projection and locates only that exact shot. A stale canonical read remains a visible failure and never becomes an outer success state.
+
 ## Alternatives considered
 
 **A fabricated empty Ready predecessor.** It would claim a snapshot without real frames merely to satisfy Insert. The narrow first-snapshot operation instead validates and snapshots actual rows atomically.
@@ -24,4 +26,4 @@ Structural Ready records a planning snapshot, not creative approval. Empty refer
 
 ## Consequences
 
-The [real browser path](../../../../apps/web/tests/qingmu-scene-planning.e2e.ts) uses the normal launcher and empty isolated database, creates/imports through the UI, loses an actual successful reply, edits and restarts into a fresh browser. Focused contracts cover ownership, source conflicts, atomic rollback and journal recovery. Planning remains single-scene; external director methods, PromptIR readiness, media generation and content acceptance are separate work.
+The [real browser path](../../../../apps/web/tests/qingmu-scene-planning.e2e.ts) uses the normal launcher and empty isolated database, creates/imports through the UI, loses an actual successful reply, exercises the real outer refresh/locate receiver, rejects duplicate, wrong-source, wrong-scope and stale notifications, then edits and restarts into a fresh browser. Focused contracts cover ownership, source conflicts, atomic rollback and journal recovery. Planning remains single-scene; external director methods, PromptIR readiness, media generation and content acceptance are separate work.

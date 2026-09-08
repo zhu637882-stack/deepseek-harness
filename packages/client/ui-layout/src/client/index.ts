@@ -32,6 +32,8 @@ declare module '@deepseek-ai/cordis' {
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
+    /** Product workspace. Without a registrant the standard conversation frame renders. */
+    'shell.workspace': { kind: 'single'; scope: 'root'; owner: { onOpenTools: () => void } }
     // The 'root' entry itself is the runtime's built-in slot (declared
     // there); these four are the frame's children, declared by the same
     // register() call that contributes AppFrame. Session owners never pass
@@ -120,6 +122,7 @@ export function apply(ctx: ClientContext): void {
     const disposeRegistration = ctx.slots.register({
       name: 'root',
       children: {
+        'shell.workspace': { kind: 'single', scope: 'root' },
         'sidebar': { kind: 'single', scope: 'root' },
         'conversation': { kind: 'single', scope: 'session-maybe' },
         'details': { kind: 'single', scope: 'session' },

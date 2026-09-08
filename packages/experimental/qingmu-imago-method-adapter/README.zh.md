@@ -8,13 +8,23 @@
 
 ## 证明边界
 
-除只读 `worksetMethod` 与 `continuityMethod` 外，各端点都只从 Host 进程环境读取 `QINGMU_IMAGO_ATTESTATION_KEY`。原始环境字符串就是 HMAC 密钥：不做 trim，并且必须至少包含 32 个 UTF-8 字节。缺失、空串或不足长度时，这些方法会在编译前失败关闭。密钥不会进入 Cordis 配置、编译器子进程环境、浏览器响应、日志或错误正文。两个只读方法既不需要该密钥，也不签发批准证明。
+带证明的端点只从 Host 进程环境读取 `QINGMU_IMAGO_ATTESTATION_KEY`。原始环境字符串就是 HMAC 密钥：不做 trim，并且必须至少包含 32 个 UTF-8 字节。缺失、空串或不足长度时，这些方法会在编译前失败关闭。密钥不会进入 Cordis 配置、编译器子进程环境、浏览器响应、日志或错误正文。`worksetMethod`、`continuityMethod`、`directorInstructions` 等只读指引既不需要该密钥，也不签发批准证明。
 
 对带证明的方法，Host 验证当前 Core 投影后，返回投影、投影 SHA-256，以及方法专用证明。Shot 关系证明通过下文的 E5-3 哈希投影，绑定准确的编译器输入、目标、Host 派生的 `relationSnapshotSha256` 和当前所选 canonical Shot。Hero Frame Storyboard 证明还绑定所选 Shot SHA、完整 Hero Frame 血缘绑定、原始标注 SHA 和编译结果 SHA。所选 Shot 始终是易梦故事板 frame ID，Beat ID 始终只在所属 Shot 内有效。浏览器只能转发证明，不能在缺少服务端密钥时签发或验证。
 
 Host 从已校验的易梦关系输入派生关系权威 SHA 和所选 Shot SHA。`heroFrameStoryboardMethod` 还由 Host 派生 Hero Frame 绑定 SHA 和原始标注 SHA；浏览器不能提供这些权威哈希，也不能提供第二套 Shot 身份。Host 要求目标、关系图、画布、确定性编译结果、来源绑定、工作单、合法工作集合和权威字段全部精确匹配。方法可以描述通过易梦 ChangeSet 执行 `replaceStoryboardCanvas`，但本适配器不执行该写入，并拒绝生成、选择、批准、签收、Provider 或 Worker 回执。它不创建关系身份、画布仓库、数据库记录、项目状态或第二状态机。
 
 Core 根目录继续由部署环境决定。非空白 `config.coreRoot` 优先，否则必须提供 `IMAGO_OS_CORE_ROOT`。本包不包含任何机器专属 Core 路径。
+
+## 只读导演方法正文
+
+Host 专属 `directorInstructions` 端点读取当前 Core 的真实 Skill 与参考正文，不是架构方案摘录或已注册能力清单。它只接受 `capability: director_development | shot_design` 和可选固定 C5 参考 `resourceId: rough_final_feedback`。浏览器 RPC 不能调用；请求不能指定 Core 根目录、文件路径、项目或批准状态。
+
+C 方法包提供导演证据、表演与调度、覆盖与媒体审看方法。C5 方法包提供执行闭合、镜头语法与连续性及 LSU、导演与分镜及生产循环。两个响应均保留完整 Skill 和三份直接参考。C5 在 `additionalReferences` 中声明第四份必读反馈闭合参考；第二次请求携带其固定资源 ID 时返回完整正文。消费端须实际补读，不能把来源哈希当作正文。
+
+每份来源绑定相对路径、原始字节 SHA-256 和字节长度；方法包摘要绑定能力与完整来源清单。读取限制在解析后的 Core 根目录内，拒绝指向根外的符号链接和非法 UTF-8，并在读取每个文件前限制分配大小。单文件上限为 128 KiB，整包全部来源字节上限为 512 KiB。来源缺失、超限或不可用时失败，不替造方法。部署方须在读取期间保持本地方法树稳定；这不是防御并发特权文件替换的沙箱。
+
+该端点不初始化 IMAGO 项目，不运行控制器，不编译工作单，不批准阶段，不写业务状态，也不调用 Provider。可选[原生导演工具](../qingmu-director-context-bridge/README.zh.md)是其模型消费端；本包自身不注册模型工具。Writer 仍是业务真源，Core 仍是方法来源。
 
 ## Shot River 节奏与参考约定
 
@@ -94,11 +104,21 @@ Host 在编译前后独立读取七份固定 Core 来源。当前仅 V6 的活�
 
 [注册表](src/director-assets/registry.ts)与[来源清单](DIRECTOR_ASSET_SBOM.json)把八个选定仓库固定在 `assets/director/<repo-id>/<full-commit>/` 下，并保留许可证、逐文件 SHA-256 账本和准入/修改记录。`verifyAllDirectorAssets` 拒绝缺失或额外文件、符号链接、畸形或已变更账本以及字节漂移。[第三方声明](../../../THIRD_PARTY_NOTICES.md)披露这些未激活来源。使用 `pnpm exec tsx scripts/gen-director-asset-sbom.ts` 重新生成清单；`--check` 校验其是否与来源一致。
 
-[静态装配](src/director-assets/assembly.ts)把准入文件映射到候选 IMAGO 阶段和卡片类别。未知阶段不返回卡片。`loadDirectorAssetFile` 先校验完整资产包，再返回不执行的 UTF-8 源文本。这两个 API 均未接入 Host RPC、工作单、skill 或可执行工具；阶段覆盖不等于激活授权。调用方须在校验和读取期间保持本地资产树稳定；完整性检查不是进程沙箱。BlueFish 的未解析占位符阻塞仍被记录，其模块须另行修复并验证后才能激活。
+[静态装配](src/director-assets/assembly.ts)把准入文件映射到候选 IMAGO 阶段和卡片类别。未知阶段不返回卡片。`loadDirectorAssetFile` 先校验完整资产包，再返回不执行的 UTF-8 源文本。调用方须在校验和读取期间保持本地资产树稳定；完整性检查不是进程沙箱。BlueFish 的未解析占位符阻塞仍被记录，其模块须另行修复并验证后才能激活。
+
+[阶段卡片旁路](src/director-stage-cards.ts)通过方法处理器提供两项严格校验的端点：`directorStageCardsMethod`（`{stageId}` → 卡片列表）与 `directorStageCardMethod`（`{repoId, path}` → 已核验谱系的内容）。响应携带只限指导的权威块（Provider 调用为零、费用为零、无选择或决策语义）；未登记或遭篡改的卡片失败关闭。这些端点不接触工作单、skill 或可执行工具。PromptIR 方法仅通过下述字段映射消费两个已登记的 D/E 文本方法卡片；不会激活工具模块。
+
+## PromptIR 导演字段映射
+
+最终 `promptIrMethod` 投影在 `method_definition.field_mapping` 中携带 schema `qingmu.imago-prompt-ir-field-mapping.v1`、版本 `1` 和规范映射 SHA-256。D 阶段关键帧卡片约束 `imageGenPrompt` 与 `lastFrameImagePrompt`；E 阶段视频卡片约束 `videoGenPrompt` 与 `motionPrompt`；`negativePrompt` 同时绑定两个阶段。每个字段条目都固定 Core 方法 SHA-256、每个适用阶段各自不同的合同 SHA-256，以及准确卡片内容、仓库提交和谱系哈希。同样两张卡片会追加到 `source_bindings`，五项字段提示均绑定映射 SHA-256 及其准确卡片哈希。
+
+字段条目缺失、多余、重排或放错阶段，以及任何方法、合同、卡片、谱系、来源绑定或提示漂移都会失败关闭。只有完整映射已经附加并重新校验后，方法才不再发出映射警告。该映射当前只属于 `promptIrMethod` 适配器投影；业务链消费仍是后续集成。这些指导仍然无状态且仅供建议：Provider 调用、Worker 和最高费用保持为零，不推断数据库写入、项目状态变更、选择、批准或人工签收。
 
 ## 首个 PromptIR 引导方法
 
 `promptIrBootstrap` 用精确的易梦上下文快照调用带版本的 Core 编译器，并校验其签证、方法 SHA、稳定有序参考、仅建议标志和五字段输出。选择 Draft 时，Host 先校验短时 Writer challenge，只重新编译一次，再签发绑定该 challenge 和投影的域分离新鲜度证明。方法只声明如何准备 Draft；它不拥有业务状态、Provider 路由、选择、批准或执行权。环境参考必需，人物与道具参考只在镜头上下文要求时出现。详见[首个 PromptIR Agent Note](../../../.agents/notes/implemented/feature/2026-08-31-qingmu-first-prompt-ir-bootstrap.zh.md)。
+
+引导请求可包含完整 `editableProjection`：严格限定为五个有长度上限的文本字段。Core 保留这些创作决定，同时仍负责参考绑定、Draft 状态和仅建议标志。选择时重新编译已保存文字。旧草稿若原始输入省略了这些字段，适配器只重构该省略输入的哈希，且必须让完整投影 SHA 匹配已验签的 Writer challenge 才接受。候选、方法、来源或上下文漂移仍失败；不进行第二次编译，也不降低为局部哈希比较。
 
 ## 模型体验
 
@@ -106,15 +126,15 @@ Host 在编译前后独立读取七份固定 Core 来源。当前仅 V6 的活�
 
 #### 模型看到的内容
 
-无。`shotRelationMethod` 和 `worksetMethod` 等端点是私有浏览器 RPC，不是模型工具、提示词段落或会话事件。
+单独使用时，无。`shotRelationMethod` 和 `worksetMethod` 等端点是私有浏览器 RPC，不是模型工具、提示词段落或会话事件。独立的原生工具消费端可以把 Host 专属 `directorInstructions` 结果写入其持久化工具历史。
 
 #### Token 影响
 
-无。RPC 响应不会进入模型上下文。
+直接使用 RPC 时无影响。显式启用的原生消费端会把所请求方法正文与来源元数据作为工具结果 token 加入。
 
 #### KV Cache 影响
 
-无。没有新增模型可见 token。
+直接使用 RPC 时无影响。原生消费端追加工具结果后缀，不把这些方法注入更早的系统提示词。
 
 ## 已知限制与延期工作
 

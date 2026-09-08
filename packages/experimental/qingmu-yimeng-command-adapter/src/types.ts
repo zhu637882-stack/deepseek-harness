@@ -1,11 +1,17 @@
 /** Browser-safe creation contracts; importing this leaf never loads Host Context merges. */
 export type {
-  CreationScope, ProjectInitializationRequest, ProjectInitializationRecovery, ProjectInitializationResult,
+  CreationScope, CreativeContract, CreativeContractMethodRef, CreativeContractState,
+  ProjectInitializationRequest, ProjectInitializationRecovery, ProjectInitializationResult,
   TextImportReadRequest, TextImportRequest, TextImportLine, TextImportDraft, TextImportState,
   TextImportCorrection, TextImportConfirmationRequest, TextImportConfirmation,
 } from './creation.ts'
 /** Browser-safe planning values; no runtime Host imports. */
-export type { PlanningShot, PlanningBase, PlanningOperation, ScenePlanningRequest, PlanningRevision, PlanningSource, PlanningScene, ScenePlanningState, ScenePlanningResult } from './scene-planning.ts'
+export type { PlanningShot, PlanningBase, PlanningOperation, AutomaticPlanningShot, AutomaticPlanningOperation, AnyPlanningOperation, ScenePlanningRequest, PlanningRevision, CanonicalStoryboard, PlanningSource, PlanningScene, AutomaticPlanningScene, ScenePlanningScene, ScenePlanningState, ImportedScenePlanningResult, AutomaticScenePlanningResult, ScenePlanningResult } from './scene-planning.ts'
+/** Browser-safe paid advisory projections; no claim, credential, or Provider payload. */
+export type {
+  DirectorPaidAvailability, DirectorPaidWorkOrder, DirectorPaidWorkOrderRequest,
+  DirectorPaidWorkOrderStatus, DirectorPaidWorkOrderStatusRequest,
+} from './director-paid-work-order.ts'
 /** Replay-only director suggestions; adopting them still uses planning commands. */
 export type {
   DirectorContextSnapshot, DirectorInferenceWorkOrder, DirectorProposalField,
@@ -24,6 +30,93 @@ export type {
   LocalReferenceContentRequest, LocalReferenceElementKind, LocalReferenceScope,
   LocalReferenceQualificationRequest, LocalReferenceQualificationResult, LocalReferenceUploadRequest,
 } from './local-reference-candidate.ts'
+
+/** Browser intent for one numbered production-Take attempt; all authority is re-read by Host. */
+export interface YimengQueueProductionTakeIntent {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly storyboardRevisionId: string
+  readonly frameId: string
+  readonly takeKind: 'initial' | 'targeted_rework'
+  readonly takeOrdinal: 1 | 2 | 3
+  /** Explicit user confirmation; this is intent only and never substitutes for Writer authority. */
+  readonly confirmReady: true
+  readonly firstFrameSelectionReceiptSha256: string
+  readonly selectedFirstFrameAssetId: string
+  readonly selectedFirstFrameMaterializedSha256: string
+  readonly videoPreflightSha256: string
+  readonly videoQuoteProjectionSha256: string
+  readonly maximumReservationCny: number
+  readonly candidateCount: 1
+  readonly maxAttempts: 1
+  readonly selectAsOfficial: false
+  readonly paidConfirmed: true
+  readonly paidConfirmationText: string
+}
+
+/** SHA-only method evidence returned to the browser; no Provider route or credential is exposed. */
+export interface YimengProductionTakeMethodEvidence {
+  readonly projectionSha256: string
+  readonly fieldMappingSha256: string
+  readonly fields: readonly {
+    readonly field: 'imageGenPrompt' | 'lastFrameImagePrompt' | 'videoGenPrompt' | 'motionPrompt' | 'negativePrompt'
+    readonly stageIds: readonly ('D' | 'E')[]
+    readonly contractSha256s: readonly string[]
+    readonly cardSha256s: readonly string[]
+    readonly sourceSha256s: readonly string[]
+    readonly hintSha256: string
+  }[]
+}
+
+/** Strict Writer receipt retained behind the Host bridge. */
+export interface YimengProductionTakeReceipt extends YimengCommandJsonObject {
+  readonly schema: 'jason.qingmu-writer-production-take.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly sceneId: string
+  readonly shotId: string
+  readonly storyboardRevisionId: string
+  readonly promptIr: {
+    readonly id: string
+    readonly version: number
+    readonly contentSha256: string
+    readonly videoPromptSha256: string
+  }
+  readonly authoritySnapshotSha256: string
+  readonly firstFrameQuoteProjectionSha256: string
+  readonly firstFrameSelectionReceiptSha256: string
+  readonly selectedFirstFrameAssetId: string
+  readonly selectedFirstFrameMaterializedSha256: string
+  readonly videoPreflightSha256: string
+  readonly videoQuoteProjectionSha256: string
+  readonly maximumReservationCny: number
+  readonly candidateCount: 1
+  readonly maxAttempts: 1
+  readonly selectAsOfficial: false
+  readonly paidConfirmed: true
+  readonly paidConfirmationTextSha256: string
+  readonly referenceBindings: readonly YimengCommandJsonObject[]
+  readonly takeKind: 'initial' | 'targeted_rework'
+  readonly takeOrdinal: 1 | 2
+  readonly takeLimit: 2
+  readonly taskId: string
+  readonly taskStatus: string
+  readonly requestIdempotencyKey: string
+  readonly idempotencyKey: string
+  readonly deduplicated: boolean
+  readonly recovered: boolean
+  readonly queued: boolean
+}
+
+/** Browser-safe result of Host verification plus one Writer queue/recovery call. */
+export interface YimengProductionTakeResult {
+  readonly schema: 'qingmu.production-take-host-result.v1'
+  readonly method: YimengProductionTakeMethodEvidence
+  readonly receipt: YimengProductionTakeReceipt
+  readonly providerCalls: 0
+  readonly workerStarted: false
+  readonly maximumCostCny: '0'
+}
 
 /** JSON object retained from a Yimeng command response. */
 export interface YimengCommandJsonObject {
@@ -2886,7 +2979,16 @@ export interface YimengReworkRouteAuthorityProbe {
 
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
+  readonly readDialogueEditCapability: {
+    readonly schema: 'qingmu.dialogue-transaction-capability.v1'
+    readonly referenceSchema: 'qingmu.dialogue-edit-reference.v1'
+    readonly atomicScriptAndFrames: true
+  }
+  /** Host-only; the browser channel rejects this endpoint. */
+  readonly readDirectorContext: import('./director-proposal.ts').DirectorContextSnapshot
+  readonly readCreativeContract: import('./creation.ts').CreativeContractState
   readonly requestDirectorProposal: import('./director-proposal.ts').DirectorReplayProposal
+  readonly readDirectorProviderAvailability: import('./director-paid-work-order.ts').DirectorPaidAvailability
   readonly issueDirectorProviderWorkOrder: import('./director-paid-work-order.ts').DirectorPaidWorkOrder
   readonly readDirectorProviderWorkOrderStatus: import('./director-paid-work-order.ts').DirectorPaidWorkOrderStatus
   readonly checkDirectorProposalFreshness: import('./director-proposal.ts').DirectorProposalFreshnessResult
@@ -2960,6 +3062,7 @@ export interface YimengCommandEndpointMap {
   readonly bootstrapPromptIr: YimengBootstrapPromptIrResponse
   readonly recoverPromptIrBootstrap: YimengBootstrapPromptIrResponse
   readonly selectBootstrapPromptIr: YimengSelectPromptIrResponse
+  readonly queueProductionTake: YimengProductionTakeResult
 }
 
 /** Endpoint names accepted by `/qingmu-yimeng-command`. */

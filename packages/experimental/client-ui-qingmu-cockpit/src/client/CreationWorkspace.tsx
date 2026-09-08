@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import type {
-  CreationScope, ProjectInitializationRequest, ProjectInitializationResult, TextImportDraft,
+  CreationScope, CreativeContractState, ProjectInitializationRequest, ProjectInitializationResult, TextImportDraft,
   TextImportState, TextImportRequest,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
 import css from './CreationWorkspace.module.css'
 
-type Port = Pick<QingmuYimengPort, 'initializeProject' | 'recoverProjectInitialization' | 'readTextImport' | 'createTextImport' | 'correctTextImport' | 'confirmTextImport'>
+type Port = Pick<QingmuYimengPort, 'readCreativeContract' | 'initializeProject' | 'recoverProjectInitialization' | 'readTextImport' | 'createTextImport' | 'correctTextImport' | 'confirmTextImport'>
 const NEW_PROJECT = 'qingmu.creation.project.v1'
 const LABELS = { scene: '场景', action: '动作', dialogue: '对白', narration: '旁白', transition: '转场', skip: '忽略' }
 const errorText = (error: unknown): string => {
@@ -37,7 +37,46 @@ function base64(bytes: Uint8Array): string {
 function decode(value: string): Uint8Array {
   return Uint8Array.from(atob(value), char => char.charCodeAt(0))
 }
-interface ProjectLocal { name: string; aspectRatio: ProjectInitializationRequest['aspectRatio']; intent?: ProjectInitializationRequest }
+interface ProjectLocal {
+  name: string
+  aspectRatio: ProjectInitializationRequest['aspectRatio']
+  creationType: ProjectInitializationRequest['creationType']
+  episodeCount: number
+  duration: string
+  textInput: string
+  intent?: ProjectInitializationRequest
+}
+const DEFAULT_PROJECT: ProjectLocal = {
+  name: '', aspectRatio: '9:16', creationType: 'story_idea', episodeCount: 1,
+  duration: '1-2分钟', textInput: '',
+}
+function normalizeProjectLocal(value: unknown): ProjectLocal {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return DEFAULT_PROJECT
+  const raw = value as Record<string, unknown>
+  const aspectRatio = ['9:16', '16:9', '1:1'].includes(String(raw.aspectRatio))
+    ? raw.aspectRatio as ProjectLocal['aspectRatio'] : DEFAULT_PROJECT.aspectRatio
+  const creationType = ['story_idea', 'novel_adapt', 'script_adapt', 'original_script'].includes(String(raw.creationType))
+    ? raw.creationType as ProjectLocal['creationType'] : DEFAULT_PROJECT.creationType
+  const episodeCount = typeof raw.episodeCount === 'number' && Number.isSafeInteger(raw.episodeCount)
+    && raw.episodeCount >= 1 && raw.episodeCount <= 30 ? raw.episodeCount : DEFAULT_PROJECT.episodeCount
+  const base: ProjectLocal = {
+    name: typeof raw.name === 'string' ? raw.name.slice(0, 100) : '',
+    aspectRatio, creationType, episodeCount,
+    duration: typeof raw.duration === 'string' ? raw.duration.slice(0, 32) : DEFAULT_PROJECT.duration,
+    textInput: typeof raw.textInput === 'string' ? raw.textInput.slice(0, 64000) : '',
+  }
+  const candidate = raw.intent
+  if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) return base
+  const intent = candidate as Record<string, unknown>
+  if (typeof intent.name !== 'string' || typeof intent.style !== 'string'
+    || !['9:16', '16:9', '1:1'].includes(String(intent.aspectRatio)) || intent.mode !== 'whole_series'
+    || !['story_idea', 'novel_adapt', 'script_adapt', 'original_script'].includes(String(intent.creationType))
+    || typeof intent.episodeCount !== 'number' || !Number.isSafeInteger(intent.episodeCount)
+    || typeof intent.duration !== 'string' || typeof intent.textInput !== 'string'
+    || (intent.stylePackId !== null && typeof intent.stylePackId !== 'string')
+    || typeof intent.idempotencyKey !== 'string') return base
+  return { ...base, intent: intent as unknown as ProjectInitializationRequest }
+}
 
 /** Empty-state entry; only the server receipt decides which project was created. */
 export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
@@ -45,8 +84,7 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
   readonly onCreated: (result: ProjectInitializationResult) => Promise<void>
   readonly onCancel?: (() => void) | undefined
 }) {
-  const [local, setLocal] = useState<ProjectLocal>(() =>
-    readLocal(NEW_PROJECT) as ProjectLocal | null ?? { name: '', aspectRatio: '9:16' })
+  const [local, setLocal] = useState<ProjectLocal>(() => normalizeProjectLocal(readLocal(NEW_PROJECT)))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [retryAllowed, setRetryAllowed] = useState(false)
@@ -62,14 +100,21 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
     if (lock.current) return
     lock.current = true; setBusy(true); setError('')
     try {
-      const intent = local.intent ?? { name: local.name.trim(), style: 'realistic', aspectRatio: local.aspectRatio, idempotencyKey: crypto.randomUUID() }
+      const intent = local.intent ?? {
+        name: local.name.trim(), style: 'realistic', aspectRatio: local.aspectRatio,
+        mode: 'whole_series' as const, creationType: local.creationType, episodeCount: local.episodeCount,
+        duration: local.duration.trim(), textInput: local.textInput.trim(), stylePackId: null,
+        idempotencyKey: crypto.randomUUID(),
+      }
       if (!recover) {
         saveLocal(NEW_PROJECT, { ...local, intent }); setLocal({ ...local, intent })
         await finish(await port.initializeProject(intent))
       } else {
         // Matches the canonical sorted request keys used by the Host and API.
         const requestSha256 = await digest(new TextEncoder().encode(JSON.stringify({
-          aspectRatio: intent.aspectRatio, name: intent.name, style: intent.style,
+          aspectRatio: intent.aspectRatio, creationType: intent.creationType, duration: intent.duration,
+          episodeCount: intent.episodeCount, mode: intent.mode, name: intent.name, style: intent.style,
+          stylePackId: intent.stylePackId, textInput: intent.textInput,
         })))
         await finish(await port.recoverProjectInitialization({ idempotencyKey: intent.idempotencyKey, requestSha256 }))
       }
@@ -82,19 +127,34 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
     } finally { lock.current = false; setBusy(false) }
   }
   return <section className={css.workspace} aria-label="新建创作项目">
-    <header><span className={css.eyebrow}>创作入口</span><h3>从一段剧本开始</h3>
-      <p>新建项目和第 1 集，再粘贴文字或导入 TXT。这里只保存创作输入，不生成媒体、不启动制作。</p></header>
+    <header><span className={css.eyebrow}>唯一创作入口</span><h3>先锁定故事与创作设定</h3>
+      <p>输入故事、类型和画面设定，原子创建项目与首集，并保存不可变创作合同。不会调用模型、生成媒体或启动制作。</p></header>
     <label>项目名称<input autoFocus maxLength={100} value={local.name} disabled={busy || local.intent !== undefined}
       onChange={(event) => { update({ ...local, name: event.target.value }) }} placeholder="例如：雨夜来信" /></label>
-    <details><summary>项目设置</summary><p>画风：写实。沿用易梦风格目录；本片不激活模型或导演资产。</p>
+    <label>故事 / 创作原点<textarea rows={6} maxLength={64000} value={local.textInput} disabled={busy || local.intent !== undefined}
+      onChange={(event) => { update({ ...local, textInput: event.target.value }) }}
+      placeholder="写下故事梗概、人物关系或已有剧本正文。该输入的 SHA 会进入创作合同。" /></label>
+    <details open><summary>创作设定</summary><p>画风：写实。方法版本和来源 SHA 由易梦写入创作合同；这里不激活 Provider。</p>
+      <label>创作类型<select value={local.creationType} disabled={busy || local.intent !== undefined}
+        onChange={(event) => { update({ ...local, creationType: event.target.value as ProjectLocal['creationType'] }) }}>
+        <option value="story_idea">故事创意</option><option value="novel_adapt">小说改编</option>
+        <option value="script_adapt">剧本改编</option><option value="original_script">原创剧本</option>
+      </select></label>
       <label>画幅<select value={local.aspectRatio} disabled={busy || local.intent !== undefined}
         onChange={(event) => { update({ ...local, aspectRatio: event.target.value as ProjectLocal['aspectRatio'] }) }}>
         <option value="9:16">竖屏 9:16</option><option value="16:9">横屏 16:9</option><option value="1:1">方形 1:1</option>
-      </select></label></details>
+      </select></label>
+      <label>计划集数<input type="number" min={1} max={30} value={local.episodeCount} disabled={busy || local.intent !== undefined}
+        onChange={(event) => { update({ ...local, episodeCount: Number(event.target.value) }) }} /></label>
+      <label>单集时长<input maxLength={32} value={local.duration} disabled={busy || local.intent !== undefined}
+        onChange={(event) => { update({ ...local, duration: event.target.value }) }} placeholder="例如：1-2分钟" /></label>
+    </details>
     {error !== '' && <p role="alert" className={css.notice}>{error}</p>}
     {local.intent !== undefined && <p role="status">保留了本次创建意图。先读取服务端回执，不按项目名称猜测结果。</p>}
     <div className={css.actions}>
-      <button className={css.primary} disabled={busy || local.name.trim() === '' || (local.intent !== undefined && !retryAllowed)} onClick={() => { void run(false) }}>
+      <button className={css.primary} disabled={busy || local.name.trim() === '' || local.textInput.trim() === ''
+        || local.duration.trim() === '' || local.episodeCount < 1 || local.episodeCount > 30
+        || (local.intent !== undefined && !retryAllowed)} onClick={() => { void run(false) }}>
         {busy ? '正在确认…' : retryAllowed ? '重试同一创建请求' : '新建项目与第 1 集'}</button>
       {local.intent !== undefined && <button disabled={busy} onClick={() => { void run(true) }}>读取创建恢复</button>}
       {onCancel !== undefined && <button disabled={busy} onClick={onCancel}>返回项目</button>}
@@ -119,6 +179,7 @@ export function TextImportWorkspace({ port, projectId, episodeId, onSaved }: Cre
   const cacheKey = `qingmu.creation.text.v1:${projectId}:${episodeId}`
   const [local, setLocal] = useState<ImportLocal>(() => readLocal(cacheKey) as ImportLocal | null ?? EMPTY)
   const [state, setState] = useState<TextImportState>()
+  const [contract, setContract] = useState<CreativeContractState>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -148,7 +209,17 @@ export function TextImportWorkspace({ port, projectId, episodeId, onSaved }: Cre
   }
   useEffect(() => {
     mounted.current = true
-    void load().catch((cause: unknown) => { if (mounted.current) setError(errorText(cause)) })
+    void Promise.all([load(), port.readCreativeContract({ projectId }).then((value) => {
+      if (mounted.current) {
+        setContract(value)
+        if (value.configured && value.sourceText !== null && live.current.text.trim() === ''
+          && live.current.pending === undefined) {
+          persist({ ...live.current, text: value.sourceText, filename: '创作入口剧本.txt', rawBase64: undefined })
+          setNotice('已沿用唯一创作入口的原文；无需重复粘贴。请检查解析后再确认保存。')
+        }
+      }
+    })])
+      .catch((cause: unknown) => { if (mounted.current) setError(errorText(cause)) })
     return () => { mounted.current = false }
   // A keyed workspace owns one canonical scope for its whole lifetime.
   }, [projectId, episodeId])
@@ -222,6 +293,18 @@ export function TextImportWorkspace({ port, projectId, episodeId, onSaved }: Cre
   const pending = local.pending !== undefined
   const scenes = state?.script?.scenes
   return <section className={css.workspace} aria-label="剧本导入工作区">
+    <section className={css.saved} aria-label="创作设定合同">
+      <header><span className={css.eyebrow}>创作设定锁</span><h4>{contract?.configured ? '创作合同已保存' : '创作合同未配置'}</h4></header>
+      {contract?.configured && contract.contract !== null ? <>
+        <p>版本 {contract.revision} · 已锁定 · 来源 SHA {contract.contract.source.textSha256.slice(0, 12)}…</p>
+        <p>类型：{contract.contract.project.creationType} · {contract.contract.project.aspectRatio}
+          {' · '}{contract.contract.project.episodeCount} 集 · {contract.contract.project.duration}</p>
+        <details><summary>方法版本与完整 SHA</summary><pre>{JSON.stringify({
+          contractSha256: contract.sha256, methods: contract.contract.methods,
+        }, null, 2)}</pre></details>
+      </> : <p role="status">{contract?.message ?? '正在读取创作合同…'}</p>}
+      <p>锁定只表示创作来源和方法坐标固定，不代表内容批准、生成授权或人工签收。</p>
+    </section>
     <header><span className={css.eyebrow}>第 1 步 · 剧本</span><h3>导入并整理你的剧本</h3>
       <p>粘贴文字或选择 UTF-8 TXT。先检查解析，再明确保存；不会调用模型或开始制作。</p></header>
     <div className={css.columns}>

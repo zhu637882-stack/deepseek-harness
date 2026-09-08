@@ -8,13 +8,23 @@ This private experimental Host plugin compiles current IMAGO OS methods into bro
 
 ## Attestation boundary
 
-Except for the read-only `worksetMethod` and `continuityMethod`, endpoints read `QINGMU_IMAGO_ATTESTATION_KEY` only from the Host process environment. The raw environment string is the HMAC key: it is not trimmed and must contain at least 32 UTF-8 bytes. A missing, empty, or shorter key fails closed before those methods compile. The key is absent from Cordis configuration, compiler child-process environment, browser responses, logs, and error text. The two read-only methods neither require this key nor issue an approval proof.
+Attested endpoints read `QINGMU_IMAGO_ATTESTATION_KEY` only from the Host process environment. The raw environment string is the HMAC key: it is not trimmed and must contain at least 32 UTF-8 bytes. A missing, empty, or shorter key fails closed before those methods compile. The key is absent from Cordis configuration, compiler child-process environment, browser responses, logs, and error text. Read-only guidance such as `worksetMethod`, `continuityMethod`, and `directorInstructions` does not require this key or issue an approval proof.
 
 After validating a current Core projection for an attested method, the Host returns the projection, its SHA-256, and a method-specific proof. The Shot relation proof binds the exact compiler input, target, Host-derived `relationSnapshotSha256`, and selected canonical Shot, using the E5-3 hash projection described below. The Hero Frame Storyboard proof additionally binds the selected Shot SHA, the full Hero Frame lineage binding, the raw-annotation SHA, and the compiled-result SHA. The selected Shot remains the Yimeng storyboard frame ID, and Beat IDs remain local to their parent Shot. The browser may forward a proof but cannot issue or verify it without the server-only key.
 
 The Host derives the relation authority and selected Shot SHAs from the validated Yimeng relation input. For `heroFrameStoryboardMethod`, it also derives the Hero Frame binding and raw-annotation SHAs; the browser cannot supply those authority hashes or a second Shot identity. The Host requires exact target, graph, canvas, deterministic compiled result, source-binding, work-order, legal-work, and authority fields. The method may describe `replaceStoryboardCanvas` through a Yimeng ChangeSet, but this adapter never performs that write and rejects generation, selection, approval, signoff, Provider, or worker receipts. It creates no relation identity, canvas repository, database record, project state, or second state machine.
 
 The Core root remains deployment-specific. A non-blank `config.coreRoot` takes precedence; otherwise `IMAGO_OS_CORE_ROOT` is required. No machine-specific Core path is included in this package.
+
+## Read-only director instruction text
+
+The Host-only `directorInstructions` endpoint reads actual current Core Skill and reference text, not an architecture-plan excerpt or a list of registered capabilities. It accepts only `capability: director_development | shot_design` and the optional fixed C5 reference `resourceId: rough_final_feedback`. Browser RPCs cannot call it; requests cannot choose a Core root, filesystem path, project, or approval state.
+
+The C package supplies the director evidence, performance/blocking, and coverage/media-review methods. The C5 package supplies execution closure, shot grammar/continuity/LSU, and the director/storyboard/production loop. Both responses preserve the entire Skill and three direct references. C5 declares its fourth required feedback-closure reference in `additionalReferences`; a second request with its fixed resource ID returns that full text. Consumers must read the missing reference rather than treating its source hash as content.
+
+Every source is bound by relative path, raw-byte SHA-256, and byte length; the package digest binds the capability and complete source manifest. Reads stay inside the resolved Core root, reject outward symbolic links and invalid UTF-8, and bound allocation before reading each file. Limits are 128 KiB per file and 512 KiB for all package source bytes. Missing, oversized, or unavailable sources fail without a substitute method. The deployment must keep the local method tree stable while reads are in flight; this is not a sandbox against concurrent privileged filesystem replacement.
+
+This endpoint neither initializes an IMAGO project nor runs its controller, compiles a work order, approves a stage, writes business state, or invokes a Provider. The opt-in [native director tools](../qingmu-director-context-bridge/README.md) are its model consumer; this package alone does not register model tools. Writer remains the business truth and Core remains the method source.
 
 ## Shot River rhythm and reference contract
 
@@ -94,11 +104,21 @@ The exact projection binds a non-empty sorted set of already registered `LSU[0-9
 
 The [registry](src/director-assets/registry.ts) and [source inventory](DIRECTOR_ASSET_SBOM.json) pin eight selected repositories under `assets/director/<repo-id>/<full-commit>/`, with licenses, per-file SHA-256 ledgers, and admission/modification records. `verifyAllDirectorAssets` rejects missing or extra files, symbolic links, malformed or changed ledgers, and byte drift. The [third-party notices](../../../THIRD_PARTY_NOTICES.md) disclose these inactive sources. Regenerate the inventory with `pnpm exec tsx scripts/gen-director-asset-sbom.ts`; `--check` verifies freshness.
 
-The [static assembly](src/director-assets/assembly.ts) maps admitted files to candidate IMAGO stages and card kinds. Unknown stages return no cards. `loadDirectorAssetFile` verifies the complete package before returning inert UTF-8 source text. Neither API is connected to Host RPC, work orders, skills, or executable tools; stage coverage is not activation authority. The caller owns a stable local asset tree during verification and reading; this integrity check is not a process sandbox. BlueFish's unresolved-placeholder blocker remains recorded and its module cannot be activated until separately repaired and verified.
+The [static assembly](src/director-assets/assembly.ts) maps admitted files to candidate IMAGO stages and card kinds. Unknown stages return no cards. `loadDirectorAssetFile` verifies the complete package before returning inert UTF-8 source text. The caller owns a stable local asset tree during verification and reading; this integrity check is not a process sandbox. BlueFish's unresolved-placeholder blocker remains recorded and its module cannot be activated until separately repaired and verified.
+
+The [stage-cards side band](src/director-stage-cards.ts) serves that assembly over the method handler as two strictly validated endpoints: `directorStageCardsMethod` (`{stageId}` → card list) and `directorStageCardMethod` (`{repoId, path}` → provenance-verified content). Responses carry a guidance-only authority block (zero provider calls, zero cost, no selection or decision semantics); unregistered or tampered cards fail closed. These endpoints do not touch work orders, skills, or executable tools. The PromptIR method consumes only the two registered D/E text method cards through the field mapping below; no tool module is activated.
+
+## PromptIR director field mapping
+
+The final `promptIrMethod` projection carries `method_definition.field_mapping` with schema `qingmu.imago-prompt-ir-field-mapping.v1`, version `1`, and a canonical mapping SHA-256. Stage D's keyframe card constrains `imageGenPrompt` and `lastFrameImagePrompt`; Stage E's video card constrains `videoGenPrompt` and `motionPrompt`; `negativePrompt` binds both stages. Every field entry pins the Core method SHA-256, each applicable stage's distinct contract SHA-256, and the exact card content, repository-commit, and provenance hashes. The same two cards are appended to `source_bindings`, and all five field hints bind the mapping SHA-256 and their exact card hashes.
+
+Missing, extra, reordered, or stage-misplaced entries, and any method, contract, card, provenance, source-binding, or hint drift fail closed. The method emits no mapping warning only after the complete mapping has been attached and revalidated. This mapping currently belongs only to the `promptIrMethod` adapter projection; business-chain consumption remains a later integration. The guidance remains stateless and advisory: Provider calls, workers, and maximum cost stay at zero, and no database write, project-state mutation, selection, approval, or human signoff is inferred.
 
 ## First PromptIR bootstrap method
 
 `promptIrBootstrap` invokes the versioned Core compiler with the exact Yimeng context snapshot and validates its attestation, method SHA, stable ordered references, advisory-only flags, and five-field output. For Draft selection, the Host first verifies the short-lived Writer challenge, recompiles once, and signs a domain-separated freshness proof bound to that challenge and projection. The method declares how to prepare a Draft; it owns no business state, Provider route, selection, approval, or execution authority. A scene reference is mandatory, while actor and prop references appear only when the shot context requires them. See the [first-PromptIR Agent Note](../../../.agents/notes/implemented/feature/2026-08-31-qingmu-first-prompt-ir-bootstrap.md).
+
+The bootstrap request may include a complete `editableProjection`: exactly five bounded text fields. Core preserves these creative decisions while retaining ownership of reference bindings, Draft status and advisory flags. Selection recompiles the saved text. For legacy drafts whose original input omitted those fields, the adapter reconstructs only that omitted-input hash and accepts it only when the entire projection SHA matches the verified Writer challenge. Candidate, method, source or context drift still fails; no second compilation or weaker partial-hash comparison is used.
 
 ## Model Experience
 
@@ -106,15 +126,15 @@ The [static assembly](src/director-assets/assembly.ts) maps admitted files to ca
 
 #### What the model sees
 
-Nothing. Endpoints such as `shotRelationMethod` and `worksetMethod` are private browser RPCs, not model tools, prompt sections, or session events.
+By themselves, nothing. Endpoints such as `shotRelationMethod` and `worksetMethod` are private browser RPCs, not model tools, prompt sections, or session events. A separate native-tool consumer can put the Host-only `directorInstructions` result into its durable tool history.
 
 #### Token effect
 
-None. The RPC response remains outside model context.
+None for direct RPC use. An opted-in native consumer adds the requested method text and source metadata as tool-result tokens.
 
 #### KV Cache effect
 
-None. No model-facing tokens are added.
+None for direct RPC use. A native consumer appends a tool-result suffix; it does not inject these methods into an earlier system prompt.
 
 ## Known Limitations and Deferred Work
 

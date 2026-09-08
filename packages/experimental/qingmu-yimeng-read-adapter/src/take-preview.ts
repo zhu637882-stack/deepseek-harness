@@ -32,8 +32,8 @@ export function normalizeTakePreview(value: unknown, request: YimengTakePreviewR
     || v.projectId !== request.projectId || v.episodeId !== request.episodeId || v.frameId !== request.frameId
     || v.takeId !== request.takeId || v.outputSha256 !== request.expectedOutputSha256
     || (v.mimeType !== 'video/mp4' && v.mimeType !== 'video/webm')
-    || typeof v.bytes !== 'number' || !Number.isSafeInteger(v.bytes) || v.bytes < 1 || v.bytes > 16 * 1024 * 1024
-    || typeof v.base64 !== 'string' || v.base64.length > Math.ceil(16 * 1024 * 1024 / 3) * 4) {
+    || typeof v.bytes !== 'number' || !Number.isSafeInteger(v.bytes) || v.bytes < 1 || v.bytes > 64 * 1024 * 1024
+    || typeof v.base64 !== 'string' || v.base64.length > Math.ceil(64 * 1024 * 1024 / 3) * 4) {
     throw new Error('invalid preview binding')
   }
   const data = Buffer.from(v.base64, 'base64')

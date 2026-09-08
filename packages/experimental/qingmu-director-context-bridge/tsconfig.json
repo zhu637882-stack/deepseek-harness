@@ -1,0 +1,22 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../core/agent" },
+    { "path": "../../preset/agent-presets" },
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../../vendor/schemastery" },
+    { "path": "../../core/tools" },
+    { "path": "../../core/scope" },
+    { "path": "../qingmu-imago-method-adapter" },
+    { "path": "../../core/session" },
+    { "path": "../../session/session-projection" },
+    { "path": "../qingmu-yimeng-command-adapter" },
+    { "path": "../qingmu-yimeng-read-adapter" },
+    { "path": "../../runtime-diagnostics/invariants" }
+  ]
+}

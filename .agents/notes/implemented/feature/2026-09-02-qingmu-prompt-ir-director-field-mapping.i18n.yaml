@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-02-qingmu-prompt-ir-director-field-mapping.md
+2026-09-02-qingmu-prompt-ir-director-field-mapping.md: ecee60c68e376ecf058c090a794bd799cd23f93a
+2026-09-02-qingmu-prompt-ir-director-field-mapping.zh.md: fb25afd5772263b7e0d974382274a3445a73d390

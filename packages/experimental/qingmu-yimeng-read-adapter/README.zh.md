@@ -2,7 +2,11 @@
 
 [English](README.md) | 中文
 
-这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`capabilityCatalog`、`costRehearsal`、`gateAControlEvidence`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates`、`selectedVideoReview`、`takeVersions`、`takeComments`、`takeAcceptance`、`takeReviewAuthority`、`takeTechnicalQc`、`takeApprovalLifecycle`、`shotFindings`、`productionUnits`、`lsuPlanSource`、`stageSources` 和 `workflow`；它不暴露任何写入端点。
+这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`capabilityCatalog`、`costRehearsal`、`gateAControlEvidence`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates`、`selectedVideoReview`、`takeVersions`、`takeComments`、`takeAcceptance`、`takeReviewAuthority`、`takeTechnicalQc`、`takeApprovalLifecycle`、`shotFindings`、`productionUnits`、`lsuPlanSource`、`stageSources` 和 `workflow`；它不暴露任何写入端点。独立的 `/api/qingmu/entity-draft-human-review/state` 路由是自然人审核面板使用的 cookie 认证同源读取。
+
+## PromptIR 实体草稿审核状态
+
+专用状态路由只转发 `jason_token` cookie，并拒绝 Bearer header、不受信请求、未知坐标、重定向、超限响应和无效 Writer schema。它只接受当前 Ready PromptIR；其关联草稿必须携带精确的草稿、元素 profile、已选参考和参考包绑定，并且 Writer 已认证的自然人身份必须唯一。它不返回 Provider、任务修改、outbox、提示词批准、媒体批准或签收权威。参见[决策记录](../../../.agents/notes/implemented/feature/2026-09-02-qingmu-prompt-ir-entity-draft-human-review.zh.md)。
 
 ## 单集证据与显式核验
 

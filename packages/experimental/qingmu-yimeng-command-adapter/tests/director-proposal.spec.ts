@@ -31,12 +31,25 @@ const methodBody = {
     formalQcInferred: false, selectionGranted: false, readyGranted: false },
 } as const
 const method = { ...methodBody, methodPackageSha256: sha(methodBody) }
+const creativeContract = {
+  schema: 'qingmu.creative-contract.v2', revision: 1, locked: true,
+  identity: { projectId: scope.projectId },
+  source: { textSha256: '1'.repeat(64), textVersion: 'creation-text-v1' },
+  project: { mode: 'whole_series', creationType: 'story_idea', aspectRatio: '9:16', episodeCount: 1, duration: '1-2分钟' },
+  methods: {
+    visualStyle: { id: 'realistic', version: 'catalog-v1', sha256: '2'.repeat(64) },
+    stylePackId: { id: 'realistic_cinema', version: '1.0.0', sha256: '3'.repeat(64) },
+    writingSkills: [], directorSkills: [{ id: 'shot_blocking_director', version: '1.0.0', sha256: '4'.repeat(64) }],
+    cameraSkills: [], soundSkills: [],
+  },
+} as const
 const context = (narrative = '相遇') => {
   const body = { schema: 'jason.qingmu-director-context-snapshot.v1', ...scope,
     script: { revision: 1, sha256: 'b'.repeat(64) }, sceneSource: { sceneIndex: 1 },
     sourceScene: { sceneIndex: 1, title: '雨夜' },
     storyboard: { id: 'revision_1', version: 1, sourceHash: 'c'.repeat(64), status: 'Ready' },
     shot: { id: 'shot_1', title: '门口', narrative, visual: '雨夜门口', action: '开门', durationSec: 3.5, dialogueLineIds: ['line_1'] },
+    creativeContract: { revision: 1, sha256: sha(creativeContract), contract: creativeContract },
     selectedReferences: [], sourceTime: '2026-08-29T00:00:00+00:00', providerCalls: 0,
     costAmountCny: '0', businessStateChanged: false, humanDecisionInferred: false,
     formalQcInferred: false, selectionGranted: false, readyGranted: false }
@@ -73,21 +86,99 @@ function setup(stale = false) {
   ) }
 }
 
+describe('Writer full director context compatibility', () => {
+  const extension = {
+    episodeScenes: [{ sceneIndex: 1, title: '雨夜', actionSummary: '相遇', current: true }],
+    cast: [{ role: '女主', actorId: 'actor_1', name: '小雨', identity: '短发' }],
+    adjacentShots: { previous: null, next: { id: 'shot_2', title: '反应', visual: '门内', action: '停顿' } },
+  }
+  const snapshot = (extra: Record<string, unknown>) => {
+    const { contextSnapshotSha256: _sha, ...body } = context()
+    const expanded = { ...body, ...extra }
+    return { ...expanded, contextSnapshotSha256: sha(expanded) }
+  }
+  async function read(value: unknown) {
+    const handler = createYimengCommandHandler({}, { fetch: async () => Response.json(value), readToken: () => 'test-only' })
+    return handler('readDirectorContext', scope, new AbortController().signal)
+  }
+  it('preserves all three Writer context layers and the exact digest, while accepting legacy snapshots', async () => {
+    const value = snapshot(extension)
+    expect(await read(value)).toEqual({ ok: true, value })
+    expect(await read(context())).toEqual({ ok: true, value: context() })
+  })
+  it('rejects partial extensions, invalid neighbors and unrecognized top-level fields', async () => {
+    for (const extra of [
+      { cast: extension.cast },
+      { ...extension, cast: {} },
+      { ...extension, episodeScenes: [null] },
+      { ...extension, adjacentShots: { previous: null, next: {} } },
+      { ...extension, adjacentShots: { previous: null, next: null, extra: true } },
+      { ...extension, approval: true },
+    ]) expect(await read(snapshot(extra))).toMatchObject({ ok: false })
+  })
+  it('rejects changed contextual content without a new digest and never infers authority', async () => {
+    const value = snapshot(extension)
+    expect(await read({ ...value, cast: [] })).toMatchObject({ ok: false })
+    expect(await read(snapshot({ ...extension, readyGranted: true }))).toMatchObject({ ok: false })
+  })
+  it.each(['', '/yimeng-golden'])('accepts renewed Writer credentials under prefix %s without accepting changed identity', async (prefix) => {
+    const url = `https://media.example${prefix}/api/media/media_1`
+    const ref = { assetId: 'asset_1', assetSha256: 'a'.repeat(64), mediaUrl: `${url}?variant=thumbnail&other=a%20b` }
+    const value = snapshot({ ...extension, contextHashPolicy: 'writer-media-transport-v1', selectedReferences: [ref] })
+    const original = structuredClone(value)
+    for (const expires of [70, 80]) {
+      const renewed = { ...value, selectedReferences: [{ ...ref,
+        mediaUrl: `${url}?expires=${expires}&variant=thumbnail&signature=${'b'.repeat(64)}&other=a%20b` }] }
+      expect(await read(renewed)).toEqual({ ok: true, value: renewed })
+      for (const change of [{ assetId: 'asset_2' }, { assetSha256: 'b'.repeat(64) },
+        { mediaUrl: renewed.selectedReferences[0]!.mediaUrl.replace('media_1', 'media_2') },
+        { mediaUrl: renewed.selectedReferences[0]!.mediaUrl.replace('media.example', 'other.example') },
+        { mediaUrl: renewed.selectedReferences[0]!.mediaUrl.replace('/api/media/', '/different-prefix/api/media/') },
+        { mediaUrl: renewed.selectedReferences[0]!.mediaUrl.replace('thumbnail', 'full') },
+        { mediaUrl: renewed.selectedReferences[0]!.mediaUrl.replace('a%20b', 'a+b') }]) {
+        expect(await read({ ...renewed, selectedReferences: [{ ...ref, ...change }] })).toMatchObject({ ok: false })
+      }
+      expect(await read({ ...renewed, shot: { ...context().shot, visual: '车外' } })).toMatchObject({ ok: false })
+    }
+    expect(value).toEqual(original)
+    expect(await read(snapshot({ contextHashPolicy: 'unknown' }))).toMatchObject({ ok: false })
+    expect(await read(snapshot({ contextHashPolicy: null }))).toMatchObject({ ok: false })
+  })
+  it('fully hashes legacy, external and malformed URLs', async () => {
+    const url = `https://media.example/api/media/media_1?expires=1&signature=${'a'.repeat(64)}`
+    for (const mediaUrl of [null, url.replace('/api/media/media_1', '/image'), url.replace('expires=1', 'expires=1&expires=2'),
+      url.replace('signature=', 'signature=bad'), `${url}#fragment`, `${url}\n`]) {
+      const value = snapshot({ contextHashPolicy: 'writer-media-transport-v1', selectedReferences: [{ mediaUrl }] })
+      expect(await read(value)).toEqual({ ok: true, value })
+    }
+    const legacy = snapshot({ selectedReferences: [{ mediaUrl: url }] })
+    expect(await read(legacy)).toEqual({ ok: true, value: legacy })
+    expect(await read({ ...legacy, selectedReferences: [{ mediaUrl: url.replace('expires=1', 'expires=2') }] })).toMatchObject({ ok: false })
+  })
+})
+
 describe('Host-only director replay proposal', () => {
   it('issues a browser-safe paid-capable work order without exposing Host claim or payload', async () => {
-    const paidRequest = { ...scope, purpose: 'director_text_proposal_canary' as const,
+    const paidRequest = { ...scope, purpose: 'bounded_director_suggestion' as const,
+      suggestionType: 'text_director_proposal' as const,
       methodPackageVersion: 'director-paid.v1', methodPackageSha256: 'd'.repeat(64),
       expectedContextSnapshotSha256: 'e'.repeat(64), idempotencyKey: 'f'.repeat(64) }
     const response = { schema: 'jason.qingmu-director-provider-work-order.v1',
       workOrderId: 'work_order_1', generationTaskId: 'task_1', ...scope,
-      provider: 'fake', model: 'model_1', inputSha256: paidRequest.expectedContextSnapshotSha256,
+      provider: 'deepseek-official', model: 'deepseek-v4-pro', inputSha256: paidRequest.expectedContextSnapshotSha256,
       promptSha256: 'a'.repeat(64), outputContractSha256: '9'.repeat(64), workOrderSha256: 'b'.repeat(64),
       methodPackage: { version: paidRequest.methodPackageVersion, sha256: paidRequest.methodPackageSha256 },
-      pricingSnapshot: { sha256: 'c'.repeat(64) }, requestPolicy: { maxAttempts: 1, maxRetries: 0 },
+      pricingSnapshot: { sha256: 'c'.repeat(64), currency: 'CNY', estimatedAmountCny: '0.13305600' },
+      requestPolicy: { maxAttempts: 1, maxRetries: 0 },
       dispatchState: 'DispatchPending', internalDebug: 'must-not-cross-the-Host-boundary' }
     const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(response))
+    const queueDirectorProductionTask = vi.fn()
     const handler = createYimengCommandHandler(
-      { baseUrl: 'http://127.0.0.1:49123' }, { fetch, readToken: () => 'private-token' },
+      { baseUrl: 'http://127.0.0.1:49123', directorProductionInteractiveEnabled: true,
+        directorProductionProjectId: scope.projectId, directorProductionEpisodeId: scope.episodeId,
+        directorProductionMethodVersion: paidRequest.methodPackageVersion,
+        directorProductionMethodSha256: paidRequest.methodPackageSha256 },
+      { fetch, readToken: () => 'private-token', queueDirectorProductionTask },
     )
     const result = await handler('issueDirectorProviderWorkOrder', paidRequest, new AbortController().signal)
     const publicResponse: Record<string, unknown> = { ...response }
@@ -95,6 +186,9 @@ describe('Host-only director replay proposal', () => {
     expect(result).toEqual({ ok: true, value: publicResponse })
     expect(JSON.stringify(result)).not.toContain('claimToken')
     expect(JSON.stringify(result)).not.toContain('messages')
+    expect(queueDirectorProductionTask).toHaveBeenCalledWith(
+      response.generationTaskId, paidRequest.methodPackageVersion, paidRequest.methodPackageSha256,
+    )
   })
 
   it('reads only the owning users browser-safe terminal status', async () => {
@@ -102,6 +196,7 @@ describe('Host-only director replay proposal', () => {
     const response = { state: 'settled', generationTaskId: request.generationTaskId,
       executionReceipt: { schema: 'qingmu.director-provider-execution-receipt.v1', outputSha256: 'a'.repeat(64) },
       costAccounting: { reservedUpperBoundCny: '0.01', actualAmountCny: null, billingReconciliation: 'pending' },
+      classification: null, errorCode: null, transportFacts: null,
       automaticRetry: false }
     const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(response))
     const handler = createYimengCommandHandler(
@@ -112,6 +207,37 @@ describe('Host-only director replay proposal', () => {
     expect(requestUrl(fetch.mock.calls[0]![0])).toContain(`/provider-work-orders/${request.generationTaskId}`)
     expect(JSON.stringify(result)).not.toContain('claimToken')
     expect(JSON.stringify(result)).not.toContain('payload')
+  })
+
+  it('keeps production issuance disabled by default and reports only exact enabled scope', async () => {
+    const signal = new AbortController().signal
+    const disabled = createYimengCommandHandler(
+      { baseUrl: 'http://127.0.0.1:49123' },
+      { fetch: vi.fn(), readToken: () => 'private-token' },
+    )
+    await expect(disabled('readDirectorProviderAvailability', {
+      projectId: scope.projectId, episodeId: scope.episodeId,
+    }, signal)).resolves.toMatchObject({ ok: true, value: { enabled: false, provider: null } })
+    const request = { ...scope, purpose: 'bounded_director_suggestion' as const,
+      suggestionType: 'text_director_proposal' as const,
+      methodPackageVersion: 'director-paid.v1', methodPackageSha256: 'd'.repeat(64),
+      expectedContextSnapshotSha256: 'e'.repeat(64), idempotencyKey: 'f'.repeat(64) }
+    await expect(disabled('issueDirectorProviderWorkOrder', request, signal))
+      .resolves.toMatchObject({ ok: false, error: { code: 'internal' } })
+
+    const scoped = createYimengCommandHandler(
+      { baseUrl: 'http://127.0.0.1:49123', directorProductionInteractiveEnabled: true,
+        directorProductionProjectId: scope.projectId, directorProductionEpisodeId: scope.episodeId,
+        directorProductionMethodVersion: request.methodPackageVersion,
+        directorProductionMethodSha256: request.methodPackageSha256 },
+      { fetch: vi.fn(), readToken: () => 'private-token', queueDirectorProductionTask: vi.fn() },
+    )
+    await expect(scoped('readDirectorProviderAvailability', {
+      projectId: 'project-other', episodeId: scope.episodeId,
+    }, signal)).resolves.toMatchObject({ ok: true, value: { enabled: false, provider: null } })
+    await expect(scoped('issueDirectorProviderWorkOrder', {
+      ...request, projectId: 'project-other',
+    }, signal)).resolves.toMatchObject({ ok: false, error: { code: 'internal' } })
   })
 
   it('returns one deterministic advisory proposal and never calls a network Provider', async () => {

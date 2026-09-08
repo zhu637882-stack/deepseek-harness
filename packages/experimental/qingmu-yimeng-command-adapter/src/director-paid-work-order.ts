@@ -4,7 +4,8 @@ export interface DirectorPaidWorkOrderRequest {
   readonly episodeId: string
   readonly sceneId: string
   readonly shotId: string
-  readonly purpose: 'director_text_proposal_canary'
+  readonly purpose: 'bounded_director_suggestion'
+  readonly suggestionType: 'text_director_proposal'
   readonly methodPackageVersion: string
   readonly methodPackageSha256: string
   readonly expectedContextSnapshotSha256: string
@@ -27,7 +28,11 @@ export interface DirectorPaidWorkOrder {
   readonly outputContractSha256: string
   readonly workOrderSha256: string
   readonly methodPackage: { readonly version: string; readonly sha256: string }
-  readonly pricingSnapshot: { readonly sha256: string }
+  readonly pricingSnapshot: {
+    readonly sha256: string
+    readonly currency: 'CNY'
+    readonly estimatedAmountCny: string
+  }
   readonly requestPolicy: { readonly maxAttempts: 1; readonly maxRetries: 0 }
   readonly dispatchState: string
 }
@@ -46,6 +51,25 @@ export interface DirectorPaidWorkOrderStatus {
   readonly executionReceipt: Readonly<Record<string, unknown>> | null
   readonly costAccounting: Readonly<Record<string, unknown>> | null
   readonly automaticRetry: false
+  readonly classification: string | null
+  readonly errorCode: string | null
+  readonly transportFacts: Readonly<Record<string, unknown>> | null
+}
+
+/** Host-owned activation facts safe to show before an explicit paid action. */
+export interface DirectorPaidAvailability {
+  readonly enabled: boolean
+  readonly provider: 'deepseek-official' | null
+  readonly model: 'deepseek-v4-pro' | null
+  readonly maxPaidCny: '0.30000000' | null
+  readonly maxInputTokens: 8000 | null
+  readonly maxOutputTokens: 2000 | null
+  readonly maxAttempts: 1 | null
+  readonly maxRetries: 0 | null
+  readonly projectId: string | null
+  readonly episodeId: string | null
+  readonly methodPackageVersion: string | null
+  readonly methodPackageSha256: string | null
 }
 
 const id = (value: unknown, field: string): string => {
@@ -69,13 +93,15 @@ const object = (value: unknown, field: string): Record<string, unknown> => {
 export function parseDirectorPaidWorkOrderRequest(value: unknown): DirectorPaidWorkOrderRequest {
   const root = object(value, 'director paid work order request')
   const keys = ['episodeId', 'expectedContextSnapshotSha256', 'idempotencyKey', 'methodPackageSha256',
-    'methodPackageVersion', 'projectId', 'purpose', 'sceneId', 'shotId']
+    'methodPackageVersion', 'projectId', 'purpose', 'sceneId', 'shotId', 'suggestionType']
   if (Object.keys(root).sort().join('\0') !== keys.sort().join('\0')
-    || root.purpose !== 'director_text_proposal_canary') throw new Error('director paid work order request invalid')
+    || root.purpose !== 'bounded_director_suggestion'
+    || root.suggestionType !== 'text_director_proposal') throw new Error('director paid work order request invalid')
   return {
     projectId: id(root.projectId, 'projectId'), episodeId: id(root.episodeId, 'episodeId'),
     sceneId: id(root.sceneId, 'sceneId'), shotId: id(root.shotId, 'shotId'),
-    purpose: 'director_text_proposal_canary', methodPackageVersion: id(root.methodPackageVersion, 'methodPackageVersion'),
+    purpose: 'bounded_director_suggestion', suggestionType: 'text_director_proposal',
+    methodPackageVersion: id(root.methodPackageVersion, 'methodPackageVersion'),
     methodPackageSha256: digest(root.methodPackageSha256, 'methodPackageSha256'),
     expectedContextSnapshotSha256: digest(root.expectedContextSnapshotSha256, 'expectedContextSnapshotSha256'),
     idempotencyKey: digest(root.idempotencyKey, 'idempotencyKey'),
@@ -107,6 +133,10 @@ export function normalizeDirectorPaidWorkOrder(
     || 'claimToken' in root || 'payload' in root || 'dispatch' in root) {
     throw new Error('director paid work order authority mismatch')
   }
+  if (pricing.currency !== 'CNY' || typeof pricing.estimatedAmountCny !== 'string'
+    || !/^0\.\d{8}$/.test(pricing.estimatedAmountCny)) {
+    throw new Error('director paid work order pricing mismatch')
+  }
   for (const [field, item] of Object.entries({ inputSha256: root.inputSha256, promptSha256: root.promptSha256,
     outputContractSha256: root.outputContractSha256, workOrderSha256: root.workOrderSha256,
     pricingSnapshotSha256: pricing.sha256 })) digest(item, field)
@@ -129,7 +159,11 @@ export function normalizeDirectorPaidWorkOrder(
       version: id(method.version, 'methodPackage.version'),
       sha256: digest(method.sha256, 'methodPackage.sha256'),
     },
-    pricingSnapshot: { sha256: digest(pricing.sha256, 'pricingSnapshot.sha256') },
+    pricingSnapshot: {
+      sha256: digest(pricing.sha256, 'pricingSnapshot.sha256'),
+      currency: 'CNY',
+      estimatedAmountCny: pricing.estimatedAmountCny,
+    },
     requestPolicy: { maxAttempts: 1, maxRetries: 0 },
     dispatchState: id(root.dispatchState, 'dispatchState'),
   }
@@ -161,15 +195,19 @@ export function normalizeDirectorPaidWorkOrderStatus(
   request: DirectorPaidWorkOrderStatusRequest,
 ): DirectorPaidWorkOrderStatus {
   const root = object(value, 'director paid status')
-  const keys = ['automaticRetry', 'costAccounting', 'executionReceipt', 'generationTaskId', 'state']
+  const keys = ['automaticRetry', 'classification', 'costAccounting', 'errorCode', 'executionReceipt',
+    'generationTaskId', 'state', 'transportFacts']
   if (Object.keys(root).sort().join('\0') !== keys.join('\0')
     || root.generationTaskId !== request.generationTaskId || root.automaticRetry !== false
     || typeof root.state !== 'string' || !/^[a-z_]{1,64}$/.test(root.state)
     || ['claimToken', 'payload', 'dispatch'].some(field => field in root)) {
     throw new Error('director paid status contract mismatch')
   }
-  for (const field of ['executionReceipt', 'costAccounting'] as const) {
+  for (const field of ['executionReceipt', 'costAccounting', 'transportFacts'] as const) {
     if (root[field] !== null) object(root[field], `director paid status ${field}`)
+  }
+  for (const field of ['classification', 'errorCode'] as const) {
+    if (root[field] !== null) id(root[field], `director paid status ${field}`)
   }
   return root as unknown as DirectorPaidWorkOrderStatus
 }

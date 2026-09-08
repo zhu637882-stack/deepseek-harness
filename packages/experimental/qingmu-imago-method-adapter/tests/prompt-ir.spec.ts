@@ -7,7 +7,6 @@ import {
 } from '../src/index.ts'
 import type {
   ImagoPromptIrEditableProjection,
-  ImagoPromptIrMethodProjection,
   ImagoPromptIrMethodRequest,
   ImagoPromptIrMethodResponse,
   ImagoPromptIrMethodSnapshot,
@@ -41,6 +40,44 @@ const SOURCE_KINDS = [
   'role_agent',
   'role_method',
 ] as const
+const D_STAGE_CONTRACT_SHA256 = 'a'.repeat(64)
+const E_STAGE_CONTRACT_SHA256 = 'd'.repeat(64)
+
+interface MutablePromptIrMappingEntry {
+  stage_ids: string[]
+  stage_contract_bindings: { stage_id: string; contract_sha256: string }[]
+  method_sha256: string
+  card_bindings: { sha256: string; provenance_sha256: string }[]
+}
+
+interface MutablePromptIrProjection {
+  method_definition: { field_mapping: { fields: MutablePromptIrMappingEntry[] } }
+  source_bindings: { sha256?: string }[]
+  field_hints: { mapping_sha256?: string }[]
+}
+
+function firstMappingEntry(value: MutablePromptIrProjection): MutablePromptIrMappingEntry {
+  const entry = value.method_definition.field_mapping.fields[0]
+  if (entry === undefined) throw new Error('expected baseline PromptIR mapping entry')
+  return entry
+}
+
+function firstCardBinding(value: MutablePromptIrProjection): MutablePromptIrMappingEntry['card_bindings'][number] {
+  const binding = firstMappingEntry(value).card_bindings[0]
+  if (binding === undefined) throw new Error('expected baseline PromptIR card binding')
+  return binding
+}
+
+function stageContractBinding(
+  value: MutablePromptIrProjection,
+  fieldIndex: number,
+  bindingIndex: number,
+): MutablePromptIrMappingEntry['stage_contract_bindings'][number] {
+  const binding = value.method_definition.field_mapping.fields[fieldIndex]
+    ?.stage_contract_bindings[bindingIndex]
+  if (binding === undefined) throw new Error('expected baseline PromptIR stage contract binding')
+  return binding
+}
 
 function compareUnicodeCodePoints(left: string, right: string): number {
   const leftPoints = Array.from(left, character => character.codePointAt(0) ?? 0)
@@ -108,7 +145,7 @@ const REQUEST: ImagoPromptIrMethodRequest = {
   baseSnapshotSha256: canonicalSha256(BASE_SUBJECT),
 }
 
-function projection(snapshot: ImagoPromptIrMethodSnapshot): ImagoPromptIrMethodProjection {
+function projection(snapshot: ImagoPromptIrMethodSnapshot): Record<string, unknown> {
   const normalizedCandidate: ImagoPromptIrEditableProjection = {
     ...snapshot.baseEditableProjection,
     ...snapshot.candidateEditableProjection,
@@ -189,7 +226,18 @@ function projection(snapshot: ImagoPromptIrMethodSnapshot): ImagoPromptIrMethodP
 function dependencies(
   runPromptIrCompiler: NonNullable<ImagoMethodAdapterDependencies['runPromptIrCompiler']>,
 ): ImagoMethodAdapterDependencies {
-  return { runCompiler: vi.fn(), runPromptIrCompiler }
+  return {
+    runCompiler: vi.fn(),
+    runPromptIrCompiler,
+    readPromptIrStageContracts: vi.fn(async () => ({
+      source_path: SOURCE_PATHS[2],
+      source_sha256: 'f'.repeat(64),
+      bindings: [
+        { stage_id: 'D', contract_sha256: D_STAGE_CONTRACT_SHA256 },
+        { stage_id: 'E', contract_sha256: E_STAGE_CONTRACT_SHA256 },
+      ],
+    })),
+  }
 }
 
 describe('qingmu PromptIR method adapter', () => {
@@ -249,12 +297,71 @@ describe('qingmu PromptIR method adapter', () => {
         },
         changed_paths: ['/editableProjection/videoGenPrompt'],
         blockers: [],
-        warnings: ['yimeng_v2_to_imago_v1_field_mapping_not_declared'],
+        warnings: [],
         providerCalls: 0,
         workerStarted: false,
+        maximumCostCny: '0',
         selection_executed: false,
       },
     })
+    expect(value.projection.method_definition.field_mapping.fields.map(entry => ({
+      field: entry.field,
+      stage_ids: entry.stage_ids,
+      stage_contracts: entry.stage_contract_bindings.map(binding => ({
+        stage_id: binding.stage_id,
+        contract_sha256: binding.contract_sha256,
+      })),
+      card_paths: entry.card_bindings.map(binding => binding.path),
+    }))).toEqual([
+      {
+        field: 'imageGenPrompt',
+        stage_ids: ['D'],
+        stage_contracts: [{ stage_id: 'D', contract_sha256: D_STAGE_CONTRACT_SHA256 }],
+        card_paths: ['assets/keyframe-prompt-template.md'],
+      },
+      {
+        field: 'lastFrameImagePrompt',
+        stage_ids: ['D'],
+        stage_contracts: [{ stage_id: 'D', contract_sha256: D_STAGE_CONTRACT_SHA256 }],
+        card_paths: ['assets/keyframe-prompt-template.md'],
+      },
+      {
+        field: 'videoGenPrompt',
+        stage_ids: ['E'],
+        stage_contracts: [{ stage_id: 'E', contract_sha256: E_STAGE_CONTRACT_SHA256 }],
+        card_paths: ['assets/video-prompt-template.md'],
+      },
+      {
+        field: 'motionPrompt',
+        stage_ids: ['E'],
+        stage_contracts: [{ stage_id: 'E', contract_sha256: E_STAGE_CONTRACT_SHA256 }],
+        card_paths: ['assets/video-prompt-template.md'],
+      },
+      {
+        field: 'negativePrompt',
+        stage_ids: ['D', 'E'],
+        stage_contracts: [
+          { stage_id: 'D', contract_sha256: D_STAGE_CONTRACT_SHA256 },
+          { stage_id: 'E', contract_sha256: E_STAGE_CONTRACT_SHA256 },
+        ],
+        card_paths: ['assets/keyframe-prompt-template.md', 'assets/video-prompt-template.md'],
+      },
+    ])
+    const fieldMapping = value.projection.method_definition.field_mapping
+    expect(fieldMapping.schema).toBe('qingmu.imago-prompt-ir-field-mapping.v1')
+    expect(fieldMapping.version).toBe(1)
+    expect(fieldMapping.sha256).toMatch(/^[0-9a-f]{64}$/u)
+    const directorBindings = value.projection.source_bindings.slice(-2)
+    expect(directorBindings.map(binding => binding.stage_id)).toEqual(['D', 'E'])
+    for (const binding of directorBindings) {
+      expect(binding.kind).toBe('director_method_card')
+      expect(binding.sha256).toMatch(/^[0-9a-f]{64}$/u)
+      expect(binding.provenance_sha256).toMatch(/^[0-9a-f]{64}$/u)
+    }
+    expect(value.projection.field_hints).toHaveLength(5)
+    expect(value.projection.field_hints.map(hint => hint.mapping_sha256)).toEqual(
+      Array(5).fill(value.projection.method_definition.field_mapping.sha256),
+    )
     expect(REQUEST.baseContentSha256).not.toBe(canonicalSha256(REQUEST.baseEditableProjection))
     expect(value.methodAttestation).toMatchObject({
       schema: 'qingmu.imago-prompt-ir-method-attestation.v1',
@@ -320,7 +427,7 @@ describe('qingmu PromptIR method adapter', () => {
       const handler = createImagoMethodHandler(
         { coreRoot: '/opt/imago-os-core' },
         dependencies(async (snapshot) => {
-          const value = structuredClone(projection(snapshot)) as unknown as Record<string, unknown>
+          const value = structuredClone(projection(snapshot))
           mutate(value)
           return value
         }),
@@ -332,8 +439,72 @@ describe('qingmu PromptIR method adapter', () => {
     }
   })
 
+  it('rejects missing, duplicate, misplaced, or SHA-drifted explicit field mappings', async () => {
+    const bootstrapHandler = createImagoMethodHandler(
+      { coreRoot: '/opt/imago-os-core' },
+      dependencies(async snapshot => projection(snapshot)),
+    )
+    const baselineResult = await bootstrapHandler('promptIrMethod', REQUEST, signal())
+    expect(baselineResult.ok).toBe(true)
+    if (!baselineResult.ok) throw new Error(baselineResult.error.message)
+    const baseline = (baselineResult.value as ImagoPromptIrMethodResponse).projection
+    const variants: ((value: MutablePromptIrProjection) => void)[] = [
+      (value) => { value.method_definition.field_mapping.fields.pop() },
+      (value) => { value.method_definition.field_mapping.fields.push(
+        structuredClone(firstMappingEntry(value)),
+      ) },
+      (value) => { firstMappingEntry(value).stage_ids = ['E'] },
+      (value) => { stageContractBinding(value, 0, 0).contract_sha256 = 'b'.repeat(64) },
+      (value) => { stageContractBinding(value, 2, 0).contract_sha256 = 'b'.repeat(64) },
+      (value) => { stageContractBinding(value, 4, 1).stage_id = 'D' },
+      (value) => { firstMappingEntry(value).method_sha256 = 'a'.repeat(64) },
+      (value) => { firstCardBinding(value).sha256 = 'a'.repeat(64) },
+      (value) => { firstCardBinding(value).provenance_sha256 = 'a'.repeat(64) },
+      (value) => {
+        const binding = value.source_bindings.at(-1)
+        if (binding === undefined) throw new Error('expected baseline PromptIR source binding')
+        binding.sha256 = 'a'.repeat(64)
+      },
+      (value) => {
+        const hint = value.field_hints[0]
+        if (hint === undefined) throw new Error('expected baseline PromptIR field hint')
+        hint.mapping_sha256 = 'a'.repeat(64)
+      },
+    ]
+
+    for (const mutate of variants) {
+      const handler = createImagoMethodHandler(
+        { coreRoot: '/opt/imago-os-core' },
+        dependencies(async () => {
+          const value = structuredClone(baseline) as unknown as MutablePromptIrProjection
+          mutate(value)
+          return value
+        }),
+      )
+      const result = await handler('promptIrMethod', REQUEST, signal())
+      expect(result).toMatchObject({ ok: false, error: { code: 'internal' } })
+    }
+  })
+
+  it('produces the same mapping and projection SHA for the same input', async () => {
+    const handler = createImagoMethodHandler(
+      { coreRoot: '/opt/imago-os-core' },
+      dependencies(async snapshot => projection(snapshot)),
+    )
+    const first = await handler('promptIrMethod', REQUEST, signal())
+    const second = await handler('promptIrMethod', REQUEST, signal())
+    expect(first.ok).toBe(true)
+    expect(second.ok).toBe(true)
+    if (!first.ok || !second.ok) throw new Error('deterministic PromptIR mapping should compile')
+    const firstValue = first.value as ImagoPromptIrMethodResponse
+    const secondValue = second.value as ImagoPromptIrMethodResponse
+    expect(secondValue.projection.method_definition.field_mapping.sha256)
+      .toBe(firstValue.projection.method_definition.field_mapping.sha256)
+    expect(secondValue.projectionSha256).toBe(firstValue.projectionSha256)
+  })
+
   it.runIf(INTEGRATION_CORE_ROOT !== undefined && INTEGRATION_CORE_ROOT !== '')(
-    'runs the reviewed current PromptIR compiler without mapping or execution authority',
+    'runs the reviewed current PromptIR compiler with exact D/E mapping and no execution authority',
     async () => {
       const coreRoot = INTEGRATION_CORE_ROOT
       expect(existsSync(`${coreRoot}/scripts/compile_qingmu_prompt_ir_method.py`)).toBe(true)
@@ -350,15 +521,20 @@ describe('qingmu PromptIR method adapter', () => {
           ...REQUEST.candidateEditableProjection,
         }),
         changed_paths: ['/editableProjection/videoGenPrompt'],
-        warnings: ['yimeng_v2_to_imago_v1_field_mapping_not_declared'],
+        warnings: [],
         project_state_persisted: false,
         providerCalls: 0,
         workerStarted: false,
+        maximumCostCny: '0',
         selection_executed: false,
         human_approval_inferred: false,
         human_signoff_inferred: false,
       })
       expect(value.projection).not.toHaveProperty('provider_package')
+      const fields = value.projection.method_definition.field_mapping.fields
+      expect(fields[0]?.stage_contract_bindings[0]?.contract_sha256)
+        .not.toBe(fields[2]?.stage_contract_bindings[0]?.contract_sha256)
+      expect(fields[4]?.stage_contract_bindings.map(binding => binding.stage_id)).toEqual(['D', 'E'])
     },
   )
 })

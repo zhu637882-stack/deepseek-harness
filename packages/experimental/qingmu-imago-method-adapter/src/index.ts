@@ -2,6 +2,7 @@
 
 import { spawn } from 'node:child_process'
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
@@ -11,8 +12,28 @@ import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import { loadDirectorReplayMethod } from './director-replay.ts'
+import {
+  DirectorInstructionsInputError,
+  loadDirectorInstructions,
+  parseDirectorInstructionsRequest,
+} from './director-instructions.ts'
+import {
+  loadDirectorStageCard,
+  loadDirectorStageCardBinding,
+  loadDirectorStageCards,
+} from './director-stage-cards.ts'
 
 export { loadDirectorReplayMethod } from './director-replay.ts'
+export {
+  loadDirectorInstructions,
+  parseDirectorInstructionsRequest,
+} from './director-instructions.ts'
+export {
+  loadDirectorStageCard,
+  loadDirectorStageCardBinding,
+  loadDirectorStageCards,
+} from './director-stage-cards.ts'
+export type { DirectorStageCardBinding } from './director-stage-cards.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -22,6 +43,7 @@ declare module '@deepseek-ai/cordis' {
 }
 import type {
   ImagoStageArtifactMethodSnapshot,
+  ImagoDirectorInstructionsResponse,
   ImagoDirectorReplayMethodResponse,
   ImagoStageSourceMethodRequest,
   ImagoStageSourceMethodSnapshot,
@@ -58,6 +80,10 @@ import type {
   ImagoPromptIrEditableField,
   ImagoPromptIrEditableProjection,
   ImagoPromptIrEditableReplacements,
+  ImagoPromptIrDirectorCardBinding,
+  ImagoPromptIrFieldMapping,
+  ImagoPromptIrFieldMappingEntry,
+  ImagoPromptIrStageContractBinding,
   ImagoPromptIrMethodAttestation,
   ImagoPromptIrMethodProjection,
   ImagoPromptIrMethodRequest,
@@ -155,6 +181,12 @@ import {
 
 export type {
   ImagoStageArtifact,
+  ImagoDirectorInstructionsCapability,
+  ImagoDirectorInstructionsAdditionalReference,
+  ImagoDirectorInstructionsRequest,
+  ImagoDirectorInstructionsResource,
+  ImagoDirectorInstructionsResponse,
+  ImagoDirectorInstructionsSourceBinding,
   ImagoStageArtifactMachineValidation,
   ImagoStageArtifactMethodAttestation,
   ImagoStageArtifactMethodDefinition,
@@ -249,6 +281,11 @@ export type {
   ImagoPromptIrEditableField,
   ImagoPromptIrEditableProjection,
   ImagoPromptIrEditableReplacements,
+  ImagoPromptIrDirectorCardBinding,
+  ImagoPromptIrFieldMapping,
+  ImagoPromptIrFieldMappingEntry,
+  ImagoPromptIrMethodDefinition,
+  ImagoPromptIrStageContractBinding,
   ImagoPromptIrMethodAttestation,
   ImagoPromptIrMethodProjection,
   ImagoPromptIrMethodRequest,
@@ -395,7 +432,33 @@ const PROMPT_IR_SOURCE_KINDS = [
   'role_agent',
   'role_method',
 ] as const
-const PROMPT_IR_MAPPING_WARNING = 'yimeng_v2_to_imago_v1_field_mapping_not_declared'
+const PROMPT_IR_LEGACY_MAPPING_WARNING = 'yimeng_v2_to_imago_v1_field_mapping_not_declared'
+const PROMPT_IR_DIRECTOR_CARD_SPECS = [
+  {
+    stageId: 'D',
+    repoId: 'director-skill-core',
+    path: 'assets/keyframe-prompt-template.md',
+  },
+  {
+    stageId: 'E',
+    repoId: 'director-skill-core',
+    path: 'assets/video-prompt-template.md',
+  },
+] as const
+const PROMPT_IR_FIELD_STAGE_IDS = {
+  imageGenPrompt: ['D'],
+  lastFrameImagePrompt: ['D'],
+  videoGenPrompt: ['E'],
+  motionPrompt: ['E'],
+  negativePrompt: ['D', 'E'],
+} as const satisfies Readonly<Record<ImagoPromptIrEditableField, readonly ('D' | 'E')[]>>
+const PROMPT_IR_FIELD_HINTS = {
+  imageGenPrompt: ['首帧图像提示词', '应用 D 阶段关键帧方法卡。'],
+  lastFrameImagePrompt: ['尾帧图像提示词', '应用 D 阶段关键帧方法卡。'],
+  videoGenPrompt: ['视频生成提示词', '应用 E 阶段视频提示词方法卡。'],
+  motionPrompt: ['运动提示词', '应用 E 阶段视频提示词方法卡。'],
+  negativePrompt: ['共享负面提示词', '同时应用 D 与 E 阶段方法卡。'],
+} as const satisfies Readonly<Record<ImagoPromptIrEditableField, readonly [string, string]>>
 const SHOT_RELATION_SOURCE_PATHS = [
   ...COMMON_SOURCE_PATHS,
   'pipeline/v6-director-storyboard-production-loop-policy.json',
@@ -690,6 +753,11 @@ export interface ImagoMethodAdapterDependencies {
   /** Optional injectable boundary for the provider-neutral PromptIR method compiler. */
   readonly runPromptIrCompiler?: (
     snapshot: ImagoPromptIrMethodSnapshot,
+    execution: ImagoMethodCompilerExecution,
+    signal: AbortSignal,
+  ) => Promise<unknown>
+  /** Optional injectable read of the exact current D/E stage contracts used by PromptIR guidance. */
+  readonly readPromptIrStageContracts?: (
     execution: ImagoMethodCompilerExecution,
     signal: AbortSignal,
   ) => Promise<unknown>
@@ -1145,6 +1213,7 @@ function parseShotCurrentReference(
   value: unknown,
   field: string,
   projectId: string,
+  episodeId: string,
   element: ImagoShotRelationElement,
 ): ImagoShotCurrentReference {
   const reference = parseExactInputObject(value, ['assetId', 'sha256', 'lineage'], field)
@@ -1172,13 +1241,30 @@ function parseShotCurrentReference(
     'uploadCommandReceiptId',
     'rightsRecordSha256',
   ] as const
-  const local = Object.hasOwn(lineageValue, 'qualificationKind')
-  const lineage = parseExactInputObject(reference.lineage, local ? localKeys : providerKeys, lineageField)
+  const ownerKeys = [
+    'projectId',
+    'sourceEpisodeId',
+    'ownerType',
+    'ownerId',
+    'role',
+    'sourceRevisionId',
+    'qualificationKind',
+    'finalizationReceiptIdentity',
+    'humanReviewIdentity',
+    'inheritedPrescreenReviewIdentity',
+  ] as const
+  const ownerActorKeys = [...ownerKeys, 'actorCohortIdentity'] as const
+  const qualified = Object.hasOwn(lineageValue, 'qualificationKind')
+  const ownerFinal = lineageValue.qualificationKind === 'owner_human_finalization'
+  const expectedKeys = ownerFinal
+    ? element.elementKind === 'actor' ? ownerActorKeys : ownerKeys
+    : qualified ? localKeys : providerKeys
+  const lineage = parseExactInputObject(reference.lineage, expectedKeys, lineageField)
   if (lineage.ownerType !== 'actor' && lineage.ownerType !== 'scene' && lineage.ownerType !== 'prop') {
     throw new InputError(`${lineageField}.ownerType must be actor, scene, or prop`)
   }
   const ownerType: ImagoElementKind = lineage.ownerType
-  if (local && lineage.qualificationKind !== 'local_file_integrity') {
+  if (qualified && !ownerFinal && lineage.qualificationKind !== 'local_file_integrity') {
     throw new InputError(`${lineageField}.qualificationKind must be local_file_integrity`)
   }
   const common = {
@@ -1188,29 +1274,59 @@ function parseShotCurrentReference(
     role: parseIdentifier(lineage.role, `${lineageField}.role`),
     sourceRevisionId: parseIdentifier(lineage.sourceRevisionId, `${lineageField}.sourceRevisionId`),
   }
-  const normalizedLineage: ImagoShotCurrentReference['lineage'] = local
+  const normalizedLineage: ImagoShotCurrentReference['lineage'] = ownerFinal
     ? {
       ...common,
-      qualificationKind: 'local_file_integrity',
-      qualificationCheckId: parseIdentifier(lineage.qualificationCheckId, `${lineageField}.qualificationCheckId`),
-      qualificationIdentity: parseInputSha256(lineage.qualificationIdentity, `${lineageField}.qualificationIdentity`),
-      uploadCommandReceiptId: parseIdentifier(lineage.uploadCommandReceiptId, `${lineageField}.uploadCommandReceiptId`),
-      rightsRecordSha256: parseInputSha256(lineage.rightsRecordSha256, `${lineageField}.rightsRecordSha256`),
-    }
-    : {
-      ...common,
       sourceEpisodeId: parseIdentifier(lineage.sourceEpisodeId, `${lineageField}.sourceEpisodeId`),
-      generationJobId: parseIdentifier(lineage.generationJobId, `${lineageField}.generationJobId`),
-      formalConsistencyCheckId: parseIdentifier(
-        lineage.formalConsistencyCheckId,
-        `${lineageField}.formalConsistencyCheckId`,
+      qualificationKind: 'owner_human_finalization',
+      finalizationReceiptIdentity: parseInputSha256(
+        lineage.finalizationReceiptIdentity,
+        `${lineageField}.finalizationReceiptIdentity`,
       ),
+      humanReviewIdentity: parseInputSha256(
+        lineage.humanReviewIdentity,
+        `${lineageField}.humanReviewIdentity`,
+      ),
+      inheritedPrescreenReviewIdentity: parseInputSha256(
+        lineage.inheritedPrescreenReviewIdentity,
+        `${lineageField}.inheritedPrescreenReviewIdentity`,
+      ),
+      ...(element.elementKind === 'actor'
+        ? { actorCohortIdentity: parseInputSha256(
+          lineage.actorCohortIdentity,
+          `${lineageField}.actorCohortIdentity`,
+        ) }
+        : {}),
     }
+    : qualified
+      ? {
+        ...common,
+        qualificationKind: 'local_file_integrity',
+        qualificationCheckId: parseIdentifier(lineage.qualificationCheckId, `${lineageField}.qualificationCheckId`),
+        qualificationIdentity: parseInputSha256(lineage.qualificationIdentity, `${lineageField}.qualificationIdentity`),
+        uploadCommandReceiptId: parseIdentifier(lineage.uploadCommandReceiptId, `${lineageField}.uploadCommandReceiptId`),
+        rightsRecordSha256: parseInputSha256(lineage.rightsRecordSha256, `${lineageField}.rightsRecordSha256`),
+      }
+      : {
+        ...common,
+        sourceEpisodeId: parseIdentifier(lineage.sourceEpisodeId, `${lineageField}.sourceEpisodeId`),
+        generationJobId: parseIdentifier(lineage.generationJobId, `${lineageField}.generationJobId`),
+        formalConsistencyCheckId: parseIdentifier(
+          lineage.formalConsistencyCheckId,
+          `${lineageField}.formalConsistencyCheckId`,
+        ),
+      }
   if (
     normalizedLineage.projectId !== projectId
     || normalizedLineage.ownerType !== element.elementKind
     || normalizedLineage.ownerId !== element.elementId
     || !SHOT_CURRENT_REFERENCE_ROLES[element.elementKind].has(normalizedLineage.role)
+    || ('qualificationKind' in normalizedLineage
+      && normalizedLineage.qualificationKind === 'owner_human_finalization'
+      && (
+        normalizedLineage.sourceEpisodeId !== episodeId
+        || (element.elementKind === 'actor' && normalizedLineage.role !== 'turnaround_front')
+      ))
   ) {
     throw new InputError(`${lineageField} subject mismatch`)
   }
@@ -1313,6 +1429,7 @@ function parseShotRelationRequest(payload: unknown): ImagoShotRelationMethodRequ
         rawElement.currentReference,
         `elements[${String(index)}].currentReference`,
         relations.projectId,
+        relations.episodeId,
         element,
       ),
     }
@@ -1561,21 +1678,21 @@ function parsePromptText(value: unknown, field: string, allowEmpty = false): str
   return value
 }
 
-function parseCompletePromptIrProjection(value: unknown): ImagoPromptIrEditableProjection {
+function parseCompletePromptIrProjection(value: unknown, field = 'baseEditableProjection'): ImagoPromptIrEditableProjection {
   const input = parseInputObject(value)
   if (!isDeepStrictEqual(Object.keys(input).sort(), [...PROMPT_IR_EDITABLE_FIELDS].sort())) {
-    throw new InputError('baseEditableProjection must contain exactly the five canonical editable fields')
+    throw new InputError(`${field} must contain exactly the five canonical editable fields`)
   }
   return {
-    imageGenPrompt: parsePromptText(input.imageGenPrompt, 'baseEditableProjection.imageGenPrompt', true),
+    imageGenPrompt: parsePromptText(input.imageGenPrompt, `${field}.imageGenPrompt`, true),
     lastFrameImagePrompt: parsePromptText(
       input.lastFrameImagePrompt,
-      'baseEditableProjection.lastFrameImagePrompt',
+      `${field}.lastFrameImagePrompt`,
       true,
     ),
-    videoGenPrompt: parsePromptText(input.videoGenPrompt, 'baseEditableProjection.videoGenPrompt', true),
-    motionPrompt: parsePromptText(input.motionPrompt, 'baseEditableProjection.motionPrompt', true),
-    negativePrompt: parsePromptText(input.negativePrompt, 'baseEditableProjection.negativePrompt', true),
+    videoGenPrompt: parsePromptText(input.videoGenPrompt, `${field}.videoGenPrompt`, true),
+    motionPrompt: parsePromptText(input.motionPrompt, `${field}.motionPrompt`, true),
+    negativePrompt: parsePromptText(input.negativePrompt, `${field}.negativePrompt`, true),
   }
 }
 
@@ -1643,9 +1760,26 @@ function parsePromptIrRequest(payload: unknown): ImagoPromptIrMethodRequest {
   return request
 }
 
+/** Verify Writer's receipt projection before any method can attest user-supplied context. */
+function verifyBootstrapHumanDecisions(context: Readonly<Record<string, unknown>>, key: string): void {
+  const references = context.requiredReferences
+  if (!Array.isArray(references)) return // The compiler owns the complete reference schema.
+  for (const reference of references) {
+    if (!isJsonObject(reference) || reference.qualificationKind !== 'human_final_decision') continue
+    const proof = parseInputObject(reference.humanFinalDecision)
+    const signature = parseInputSha256(proof.signature, 'humanFinalDecision.signature')
+    const { signature: _signature, ...unsigned } = proof
+    const expected = createHmac('sha256', key).update('qingmu.bootstrap-human-final-decision.v1\0')
+      .update(e53CanonicalJson(unsigned, 'humanFinalDecision')).digest('hex')
+    if (!timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'))) {
+      throw new InputError('humanFinalDecision is not a verified Writer receipt')
+    }
+  }
+}
+
 function parsePromptIrBootstrapRequest(payload: unknown): ImagoPromptIrBootstrapMethodRequest {
   const input = parseInputObject(payload)
-  assertOnlyInputKeys(input, ['context', 'contextSnapshotSha256', 'selectionChallenge'])
+  assertOnlyInputKeys(input, ['context', 'contextSnapshotSha256', 'selectionChallenge', 'editableProjection'])
   if (!isJsonObject(input.context)) throw new InputError('context must be an object')
   assertSafeJsonNumbers(input.context, 'context')
   const contextSnapshotSha256 = parseInputSha256(
@@ -1655,7 +1789,14 @@ function parsePromptIrBootstrapRequest(payload: unknown): ImagoPromptIrBootstrap
   if (e53CanonicalSha256(input.context, 'context') !== contextSnapshotSha256) {
     throw new InputError('contextSnapshotSha256 does not match context')
   }
-  if (input.selectionChallenge === undefined) return { context: input.context, contextSnapshotSha256 }
+  const edits = input.editableProjection === undefined ? {} : {
+    editableProjection: parseCompletePromptIrProjection(input.editableProjection, 'editableProjection'),
+  }
+  const editable = edits.editableProjection
+  if (editable !== undefined && PROMPT_IR_EDITABLE_FIELDS.some(field => editable[field].length > 30000)) {
+    throw new InputError('editableProjection text limit is 30000 characters per field')
+  }
+  if (input.selectionChallenge === undefined) return { context: input.context, contextSnapshotSha256, ...edits }
   const raw = parseInputObject(input.selectionChallenge)
   const challengeKeys = [
     'schema', 'actorId', 'projectId', 'episodeId', 'storyboardRevisionId', 'frameId',
@@ -1686,7 +1827,7 @@ function parsePromptIrBootstrapRequest(payload: unknown): ImagoPromptIrBootstrap
     expiresAtUnix: parseInputPositiveInteger(raw.expiresAtUnix, 'selectionChallenge.expiresAtUnix'),
     signature: parseInputSha256(raw.signature, 'selectionChallenge.signature'),
   }
-  return { context: input.context, contextSnapshotSha256, selectionChallenge }
+  return { context: input.context, contextSnapshotSha256, selectionChallenge, ...edits }
 }
 
 function buildSnapshot(request: ImagoElementMethodRequest): ImagoElementMethodSnapshot {
@@ -1766,6 +1907,7 @@ function buildPromptIrBootstrapSnapshot(
     schema: 'qingmu.prompt-ir-bootstrap-method-snapshot.v1',
     context: request.context,
     contextSnapshotSha256: request.contextSnapshotSha256,
+    ...(request.editableProjection === undefined ? {} : { editableProjection: request.editableProjection }),
     authority: {
       business_truth: 'yimeng',
       method_source: 'imago_os_current',
@@ -2812,9 +2954,193 @@ function normalizePromptIrEditableProjection(
   return normalized
 }
 
+interface ExpectedPromptIrDirectorMapping {
+  readonly fieldMapping: ImagoPromptIrFieldMapping
+  readonly cardBindings: readonly ImagoPromptIrDirectorCardBinding[]
+  readonly fieldHints: readonly ImagoMethodJsonObject[]
+}
+
+interface PromptIrStageContractSnapshot extends ImagoMethodJsonObject {
+  readonly source_path: typeof PROMPT_IR_SOURCE_PATHS[2]
+  readonly source_sha256: string
+  readonly bindings: readonly ImagoPromptIrStageContractBinding[]
+}
+
+async function readPromptIrStageContracts(
+  execution: ImagoMethodCompilerExecution,
+  signal: AbortSignal,
+): Promise<PromptIrStageContractSnapshot> {
+  if (signal.aborted) throw new CompilerCancelledError()
+  try {
+    const content = await readFile(join(execution.coreRoot, PROMPT_IR_SOURCE_PATHS[2]), 'utf8')
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- the signal can abort while the file read is awaited.
+    if (signal.aborted) throw new CompilerCancelledError()
+    const root = requireObject(JSON.parse(content) as unknown, 'PromptIR stage contracts')
+    const contracts = requireObjectArray(root.contracts, 'PromptIR stage contracts.contracts')
+    const bindings = (['D', 'E'] as const).map((stageId) => {
+      const matches = contracts.filter(item => item.stage_id === stageId)
+      if (matches.length !== 1) {
+        throw new ProjectionContractError(`PromptIR stage contract ${stageId} must occur exactly once`)
+      }
+      return {
+        stage_id: stageId,
+        contract_sha256: requireSha256(
+          matches[0]?.contract_sha256,
+          `PromptIR stage contracts.${stageId}.contract_sha256`,
+        ),
+      }
+    })
+    return {
+      source_path: PROMPT_IR_SOURCE_PATHS[2],
+      source_sha256: createHash('sha256').update(content, 'utf8').digest('hex'),
+      bindings,
+    }
+  } catch (error) {
+    if (error instanceof CompilerCancelledError || error instanceof ProjectionContractError) throw error
+    throw new CompilerExecutionError()
+  }
+}
+
+function normalizePromptIrStageContractBindings(
+  value: unknown,
+  rawProjection: unknown,
+): readonly ImagoPromptIrStageContractBinding[] {
+  const snapshot = requireExactObject(value, ['source_path', 'source_sha256', 'bindings'], 'PromptIR stage contracts')
+  if (snapshot.source_path !== PROMPT_IR_SOURCE_PATHS[2]) {
+    throw new ProjectionContractError('PromptIR stage contract source path mismatch')
+  }
+  const sourceSha256 = requireSha256(snapshot.source_sha256, 'PromptIR stage contracts.source_sha256')
+  const projection = requireObject(rawProjection, 'projection')
+  const sourceBindings = requireObjectArray(projection.source_bindings, 'projection.source_bindings')
+  const stageContractSource = requireExactObject(
+    sourceBindings[PROMPT_IR_SOURCE_PATHS.indexOf('pipeline/v6-stage-contracts.json')],
+    ['kind', 'path', 'sha256'],
+    'projection.source_bindings.stage_contracts',
+  )
+  if (
+    stageContractSource.kind !== 'stage_contracts'
+    || stageContractSource.path !== PROMPT_IR_SOURCE_PATHS[2]
+    || stageContractSource.sha256 !== sourceSha256
+  ) {
+    throw new ProjectionContractError('PromptIR stage contract source binding mismatch')
+  }
+  const bindings = requireObjectArray(snapshot.bindings, 'PromptIR stage contracts.bindings')
+  if (bindings.length !== 2) throw new ProjectionContractError('PromptIR D/E stage contracts are incomplete')
+  const normalized = (['D', 'E'] as const).map((stageId, index) => {
+    const binding = requireExactObject(
+      bindings[index],
+      ['stage_id', 'contract_sha256'],
+      `PromptIR stage contracts.bindings[${String(index)}]`,
+    )
+    if (binding.stage_id !== stageId) throw new ProjectionContractError('PromptIR stage contract order mismatch')
+    return {
+      stage_id: stageId,
+      contract_sha256: requireSha256(
+        binding.contract_sha256,
+        `PromptIR stage contracts.bindings[${String(index)}].contract_sha256`,
+      ),
+    }
+  })
+  const definition = requireObject(projection.method_definition, 'projection.method_definition')
+  const eStageContract = normalized[1]
+  if (eStageContract === undefined) throw new ProjectionContractError('PromptIR E stage contract missing')
+  if (definition.stage_contract_sha256 !== eStageContract.contract_sha256) {
+    throw new ProjectionContractError('PromptIR Core E-stage contract binding mismatch')
+  }
+  return normalized
+}
+
+async function buildExpectedPromptIrDirectorMapping(
+  value: unknown,
+  stageContractSnapshot: unknown,
+): Promise<ExpectedPromptIrDirectorMapping> {
+  const root = requireObject(value, 'projection')
+  const definition = requireObject(root.method_definition, 'projection.method_definition')
+  const methodSha256 = requireSha256(definition.sha256, 'projection.method_definition.sha256')
+  const stageContractBindings = normalizePromptIrStageContractBindings(stageContractSnapshot, value)
+  const contractByStage = new Map(stageContractBindings.map(binding => [binding.stage_id, binding]))
+  const cardBindings = await Promise.all(PROMPT_IR_DIRECTOR_CARD_SPECS.map(
+    spec => loadDirectorStageCardBinding(spec.stageId, spec.repoId, spec.path),
+  )) as readonly ImagoPromptIrDirectorCardBinding[]
+  const byStage = new Map(cardBindings.map(binding => [binding.stage_id, binding]))
+  const fields: ImagoPromptIrFieldMappingEntry[] = PROMPT_IR_EDITABLE_FIELDS.map((field) => {
+    const stageIds = PROMPT_IR_FIELD_STAGE_IDS[field]
+    const bindings = stageIds.map((stageId) => {
+      const binding = byStage.get(stageId)
+      if (binding === undefined) throw new ProjectionContractError('PromptIR director card stage missing')
+      return binding
+    })
+    const contracts = stageIds.map((stageId) => {
+      const binding = contractByStage.get(stageId)
+      if (binding === undefined) throw new ProjectionContractError('PromptIR stage contract missing')
+      return binding
+    })
+    return {
+      field,
+      stage_ids: stageIds,
+      stage_contract_bindings: contracts,
+      method_sha256: methodSha256,
+      card_bindings: bindings,
+    }
+  })
+  const unsigned = {
+    schema: 'qingmu.imago-prompt-ir-field-mapping.v1',
+    version: 1,
+    fields,
+  } as const
+  const fieldMapping: ImagoPromptIrFieldMapping = {
+    ...unsigned,
+    sha256: canonicalSha256(unsigned, 'projection.method_definition.field_mapping'),
+  }
+  return {
+    fieldMapping,
+    cardBindings,
+    fieldHints: fields.map((entry) => {
+      const [title, guidance] = PROMPT_IR_FIELD_HINTS[entry.field]
+      return {
+        hint_id: `director-method-card-${entry.field}`,
+        field: entry.field,
+        title,
+        guidance,
+        mapping_sha256: fieldMapping.sha256,
+        stage_ids: entry.stage_ids,
+        card_sha256s: entry.card_bindings.map(binding => binding.sha256),
+      }
+    }),
+  }
+}
+
+function attachPromptIrDirectorMapping(
+  value: unknown,
+  expected: ExpectedPromptIrDirectorMapping,
+): unknown {
+  const root = requireObject(value, 'projection')
+  const definition = requireObject(root.method_definition, 'projection.method_definition')
+  if (
+    definition.field_mapping !== 'not_declared'
+    || !isDeepStrictEqual(root.warnings, [PROMPT_IR_LEGACY_MAPPING_WARNING])
+  ) {
+    return root
+  }
+  const bindings = requireObjectArray(root.source_bindings, 'projection.source_bindings')
+  const fieldHints = requireObjectArray(root.field_hints, 'projection.field_hints')
+  if (fieldHints.length === 0) throw new ProjectionContractError('projection field hints must not be empty')
+  const workOrder = requireObject(root.work_order_projection, 'projection.work_order_projection')
+  return {
+    ...root,
+    warnings: [],
+    method_definition: { ...definition, field_mapping: expected.fieldMapping },
+    source_bindings: [...bindings, ...expected.cardBindings],
+    field_hints: expected.fieldHints,
+    work_order_projection: { ...workOrder, maximumCostCny: '0' },
+    maximumCostCny: '0',
+  }
+}
+
 function normalizePromptIrProjection(
   value: unknown,
   snapshot: ImagoPromptIrMethodSnapshot,
+  expectedDirectorMapping: ExpectedPromptIrDirectorMapping,
 ): ImagoPromptIrMethodProjection {
   assertSafeJsonNumbers(value, 'projection')
   const root = requireExactObject(value, [
@@ -2835,6 +3161,7 @@ function normalizePromptIrProjection(
     'project_state_persisted',
     'providerCalls',
     'workerStarted',
+    'maximumCostCny',
     'selection_executed',
     'human_approval_inferred',
     'human_signoff_inferred',
@@ -2884,7 +3211,7 @@ function normalizePromptIrProjection(
     expectedChangedPaths.length === 0 ? ['candidate_has_no_editable_changes'] : [],
     'projection.blockers',
   )
-  requireExactArray(root.warnings, [PROMPT_IR_MAPPING_WARNING], 'projection.warnings')
+  requireExactArray(root.warnings, [], 'projection.warnings')
 
   const definition = requireExactObject(root.method_definition, [
     'id',
@@ -2901,7 +3228,6 @@ function normalizePromptIrProjection(
     definition.id !== 'imago-v6-e-provider-neutral-prompt-ir-edit-method'
     || requireInteger(definition.version, 'projection.method_definition.version', 1) !== 1
     || definition.prompt_ir_schema !== 'IMAGO-V6-VideoPromptIR-v1'
-    || definition.field_mapping !== 'not_declared'
     || definition.agent_path !== PROMPT_IR_SOURCE_PATHS[5]
     || definition.skill_path !== PROMPT_IR_SOURCE_PATHS[6]
   ) {
@@ -2910,12 +3236,15 @@ function normalizePromptIrProjection(
   for (const field of ['sha256', 'stage_contract_sha256', 'role_capability_sha256']) {
     requireSha256(definition[field], `projection.method_definition.${field}`)
   }
+  if (!isDeepStrictEqual(definition.field_mapping, expectedDirectorMapping.fieldMapping)) {
+    throw new ProjectionContractError('projection PromptIR field mapping mismatch')
+  }
 
   const bindings = requireObjectArray(root.source_bindings, 'projection.source_bindings')
-  if (bindings.length !== PROMPT_IR_SOURCE_PATHS.length) {
+  if (bindings.length !== PROMPT_IR_SOURCE_PATHS.length + expectedDirectorMapping.cardBindings.length) {
     throw new ProjectionContractError('projection source bindings mismatch')
   }
-  bindings.forEach((bindingValue, index) => {
+  bindings.slice(0, PROMPT_IR_SOURCE_PATHS.length).forEach((bindingValue, index) => {
     const binding = requireExactObject(
       bindingValue,
       ['kind', 'path', 'sha256'],
@@ -2926,21 +3255,17 @@ function normalizePromptIrProjection(
     }
     requireSha256(binding.sha256, `projection.source_bindings[${String(index)}].sha256`)
   })
+  if (!isDeepStrictEqual(
+    bindings.slice(PROMPT_IR_SOURCE_PATHS.length),
+    expectedDirectorMapping.cardBindings,
+  )) {
+    throw new ProjectionContractError('projection director card source bindings mismatch')
+  }
 
   const fieldHints = requireObjectArray(root.field_hints, 'projection.field_hints')
-  if (fieldHints.length === 0) throw new ProjectionContractError('projection field hints must not be empty')
-  fieldHints.forEach((hintValue, index) => {
-    const hint = requireExactObject(
-      hintValue,
-      ['hint_id', 'field', 'title', 'guidance'],
-      `projection.field_hints[${String(index)}]`,
-    )
-    for (const field of ['hint_id', 'field', 'title', 'guidance']) {
-      if (requireString(hint[field], `projection.field_hints[${String(index)}].${field}`).length === 0) {
-        throw new ProjectionContractError('projection field hints must not contain empty strings')
-      }
-    }
-  })
+  if (!isDeepStrictEqual(fieldHints, expectedDirectorMapping.fieldHints)) {
+    throw new ProjectionContractError('projection field hints do not match the PromptIR field mapping')
+  }
   const checklist = requireObjectArray(root.checklist, 'projection.checklist')
   if (checklist.length === 0) throw new ProjectionContractError('projection checklist must not be empty')
   checklist.forEach((itemValue, index) => {
@@ -2968,6 +3293,7 @@ function normalizePromptIrProjection(
     'after_compile',
     'providerCalls',
     'workerStarted',
+    'maximumCostCny',
   ], 'projection.work_order_projection')
   if (
     !isDeepStrictEqual(workOrder.target, snapshot.target)
@@ -3003,6 +3329,7 @@ function normalizePromptIrProjection(
   if (
     workOrder.providerCalls !== 0
     || requireBoolean(workOrder.workerStarted, 'projection.work_order_projection.workerStarted')
+    || workOrder.maximumCostCny !== '0'
   ) {
     throw new ProjectionContractError('projection work order execution boundary mismatch')
   }
@@ -3012,6 +3339,7 @@ function normalizePromptIrProjection(
     || requireBoolean(root.project_state_persisted, 'projection.project_state_persisted')
     || root.providerCalls !== 0
     || requireBoolean(root.workerStarted, 'projection.workerStarted')
+    || root.maximumCostCny !== '0'
     || requireBoolean(root.selection_executed, 'projection.selection_executed')
     || requireBoolean(root.human_approval_inferred, 'projection.human_approval_inferred')
     || requireBoolean(root.human_signoff_inferred, 'projection.human_signoff_inferred')
@@ -3051,6 +3379,9 @@ function normalizePromptIrBootstrapProjection(
     'projection.candidate',
   )
   normalizePromptIrEditableProjection(candidate.editableProjection, 'projection.candidate.editableProjection')
+  if (snapshot.editableProjection !== undefined && !isDeepStrictEqual(candidate.editableProjection, snapshot.editableProjection)) {
+    throw new ProjectionContractError('bootstrap compiler changed the supplied creative text')
+  }
   requireObjectArray(candidate.subjectArray, 'projection.candidate.subjectArray')
   if (candidate.advisoryOnly !== true || candidate.status !== 'Draft') {
     throw new ProjectionContractError('bootstrap candidate authority mismatch')
@@ -3922,6 +4253,7 @@ const DEFAULT_DEPENDENCIES: ImagoMethodAdapterDependencies = {
   runReferenceRightsCompiler: runReferenceRightsCompilerProcess,
   runReferenceRightsExceptionReleaseCompiler: runReferenceRightsExceptionReleaseCompilerProcess,
   runPromptIrCompiler: runPromptIrCompilerProcess,
+  readPromptIrStageContracts,
   runPromptIrBootstrapCompiler: runPromptIrBootstrapCompilerProcess,
   runShotRelationCompiler: runShotRelationCompilerProcess,
   runHeroFrameStoryboardCompiler: runHeroFrameStoryboardCompilerProcess,
@@ -3947,6 +4279,7 @@ export function createImagoMethodHandler(
     try {
       if (
         endpoint !== 'elementMethod'
+        && endpoint !== 'directorInstructions'
         && endpoint !== 'directorReplayMethod'
         && endpoint !== 'referenceAssetMethod'
         && endpoint !== 'promptIrMethod'
@@ -3964,8 +4297,56 @@ export function createImagoMethodHandler(
         && endpoint !== 'stageArtifactMethod'
         && endpoint !== 'lsuPlanMethod'
         && endpoint !== 'reworkRouteMethod'
+        && endpoint !== 'directorStageCardsMethod'
+        && endpoint !== 'directorStageCardMethod'
       ) {
         throw new InputError(`unknown IMAGO method endpoint: ${endpoint}`)
+      }
+      if (endpoint === 'directorStageCardsMethod') {
+        if (signal.aborted) return cancelled()
+        if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+          throw new InputError('director stage cards request is invalid')
+        }
+        const request = payload as Record<string, unknown>
+        if (Object.keys(request).length !== 1 || typeof request.stageId !== 'string') {
+          throw new InputError('director stage cards request is invalid')
+        }
+        if (!/^[A-Z0-9]{1,12}$/u.test(request.stageId)) throw new InputError('director stage cards request is invalid')
+        const value = loadDirectorStageCards(request.stageId)
+        return { ok: true, value }
+      }
+      if (endpoint === 'directorStageCardMethod') {
+        if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+          throw new InputError('director stage card request is invalid')
+        }
+        const request = payload as Record<string, unknown>
+        if (Object.keys(request).length !== 2 || typeof request.repoId !== 'string' || typeof request.path !== 'string') {
+          throw new InputError('director stage card request is invalid')
+        }
+        if (request.repoId.trim() === '' || request.path.trim() === '') {
+          throw new InputError('director stage card request is invalid')
+        }
+        if (signal.aborted) return cancelled()
+        try {
+          const value = await loadDirectorStageCard(request.repoId, request.path)
+          // oxlint-disable-next-line typescript/no-unnecessary-condition -- file provenance verification is asynchronous.
+          if (signal.aborted) return cancelled()
+          return { ok: true, value }
+        } catch (error) {
+          const code = error instanceof Error ? error.message : 'director_stage_card_unavailable'
+          if (code.startsWith('director_asset_') || code === 'director_stage_card_not_registered') {
+            throw new InputError(code)
+          }
+          throw error
+        }
+      }
+      if (endpoint === 'directorInstructions') {
+        const request = parseDirectorInstructionsRequest(payload)
+        if (signal.aborted) return cancelled()
+        const value: ImagoDirectorInstructionsResponse = await loadDirectorInstructions(execution.coreRoot, request, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- fixed source reads can complete after cancellation.
+        if (signal.aborted) return cancelled()
+        return { ok: true, value }
       }
       if (endpoint === 'directorReplayMethod') {
         if (
@@ -4360,7 +4741,21 @@ export function createImagoMethodHandler(
         const rawProjection = await dependencies.runPromptIrCompiler(snapshot, execution, signal)
         // oxlint-disable-next-line typescript/no-unnecessary-condition -- the signal can abort while the compiler is awaited.
         if (signal.aborted) return cancelled()
-        const projection = normalizePromptIrProjection(rawProjection, snapshot)
+        if (dependencies.readPromptIrStageContracts === undefined) throw new CompilerExecutionError()
+        const stageContractSnapshot = await dependencies.readPromptIrStageContracts(execution, signal)
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- the stage contract read is asynchronous.
+        if (signal.aborted) return cancelled()
+        const expectedDirectorMapping = await buildExpectedPromptIrDirectorMapping(
+          rawProjection,
+          stageContractSnapshot,
+        )
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- asset verification can be aborted by the caller.
+        if (signal.aborted) return cancelled()
+        const projection = normalizePromptIrProjection(
+          attachPromptIrDirectorMapping(rawProjection, expectedDirectorMapping),
+          snapshot,
+          expectedDirectorMapping,
+        )
         const methodAttestation = createPromptIrMethodAttestation(attestationKey, projection, snapshot)
         const value: ImagoPromptIrMethodResponse = {
           schema: 'qingmu.imago-prompt-ir-method-adapter-result.v1',
@@ -4372,6 +4767,7 @@ export function createImagoMethodHandler(
       }
       if (endpoint === 'promptIrBootstrapMethod') {
         const request = parsePromptIrBootstrapRequest(payload)
+        verifyBootstrapHumanDecisions(request.context, attestationKey)
         const selectionChallenge = verifyPromptIrBootstrapSelectionChallenge(attestationKey, request)
         const snapshot = buildPromptIrBootstrapSnapshot(request)
         if (signal.aborted) return cancelled()
@@ -4379,7 +4775,15 @@ export function createImagoMethodHandler(
         const rawProjection = await dependencies.runPromptIrBootstrapCompiler(snapshot, execution, signal)
         // oxlint-disable-next-line typescript/no-unnecessary-condition -- abort may happen while awaited.
         if (signal.aborted) return cancelled()
-        const projection = normalizePromptIrBootstrapProjection(rawProjection, snapshot)
+        let projection = normalizePromptIrBootstrapProjection(rawProjection, snapshot)
+        // A saved template Draft predates optional text input. Recover its exact signed projection
+        // from the current compiler output; changed text or methods cannot match the complete hash.
+        if (selectionChallenge !== undefined && snapshot.editableProjection !== undefined
+          && e53CanonicalSha256(projection, 'projection') !== selectionChallenge.methodProjectionSha256) {
+          const { editableProjection: _edits, ...originalSnapshot } = snapshot
+          const original = { ...projection, input_snapshot_sha256: e53CanonicalSha256(originalSnapshot, 'snapshot') }
+          if (e53CanonicalSha256(original, 'projection') === selectionChallenge.methodProjectionSha256) projection = original
+        }
         const methodAttestation = createPromptIrBootstrapMethodAttestation(attestationKey, projection, snapshot)
         const selectionFreshnessAttestation = selectionChallenge === undefined
           ? undefined
@@ -4455,7 +4859,7 @@ export function createImagoMethodHandler(
       }
       return { ok: true, value }
     } catch (error) {
-      if (error instanceof InputError || error instanceof WorksetInputError
+      if (error instanceof InputError || error instanceof DirectorInstructionsInputError || error instanceof WorksetInputError
         || error instanceof ContinuityInputError || error instanceof ShotFindingInputError || error instanceof ProductionUnitInputError
         || error instanceof TakeAcceptanceInputError || error instanceof TakeTechnicalQcInputError
         || error instanceof TakeApprovalLifecycleInputError
@@ -4534,7 +4938,7 @@ export function apply(ctx: Context, config: ImagoMethodAdapterConfig): void {
   })
   ctx.provide('qingmuImagoMethod', handler)
   const browserHandler: ConnectionRpcHandler = async (endpoint, payload, signal) =>
-    endpoint === 'takeTechnicalQcMethod' || endpoint === 'directorReplayMethod'
+    endpoint === 'takeTechnicalQcMethod' || endpoint === 'directorReplayMethod' || endpoint === 'directorInstructions'
       ? internalError('Requested IMAGO Method is Host-internal')
       : await handler(endpoint, payload, signal)
   ctx.connection.rpc.handle(CHANNEL, browserHandler, { authority: 'loopback' })

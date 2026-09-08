@@ -38,6 +38,8 @@ The tree composes over an empty root:
 
 Bundles named in `dsh.profile.bundles` resolve from the dsh installation first (`@deepseek-ai/dsh-base`, `@deepseek-ai/dsh-web-app`, `@deepseek-ai/dsh-headless`), then from the profile's own `node_modules`, where pnpm installs out-of-tree plugins.
 
+At boot, the preset roster includes the stock installed root followed by [bundle-declared preset roots](../../packages/boot/app-boot/README.md#profiles) in profile order. The roster retains its own user-root setting and default selection; existing sessions keep their recorded preset.
+
 Use `--dump-default-config` and `--dump-config` to inspect the composed tree without booting it.
 
 The [CLI behavior reference](reference/README.md) owns exact layer precedence, flags, shutdown behavior, deployment defaults, and source execution.

@@ -124,6 +124,33 @@ function fallbackDefinition(start: () => string): ConversationNodeDefinition<str
 }
 
 describe('ConversationNodeAssembler', () => {
+  it.each([null, 'cleared', false, 0])('keeps subsequent tool errors visible after an extension payload %j', (payload) => {
+    const definition: ConversationNodeDefinition = {
+      kind: 'tool-error', target: 'chat',
+      match: event => event.type === 'tool/result' ? { id: 'result', role: 'start' } : null,
+      start: (_context, match) => match.event.data,
+      update: context => context.state,
+      buildViewNode: context => node(context, context.state),
+    }
+    const assembler = new ConversationNodeAssembler(
+      new TestEventDefinitions([definition]), new TestViewDefinitions([testView()]),
+    )
+    const events = [
+      input(at(1, 'turn/start', { turn: 0 })),
+      input(at(2, 'step/start', { turn: 0, step: 0 })),
+      input(at(3, 'extension/state', payload)),
+      input(at(4, 'tool/result', { turn: 0, step: 0, message: {
+        source: { kind: 'tool-result', callId: 'old-request' },
+        content: [{ type: 'tool-result', callId: 'old-request', isError: true, content: 'Selection changed' }],
+      } })),
+    ]
+    assembler.replaceWindow(events.slice(0, 2), false)
+    assembler.append(events[2]!); assembler.append(events[3]!); assembler.flush()
+    expect([...chatSnapshot(assembler)!.nodes.values()].map(value => value.data)).toEqual([events[3]!.event.data])
+    assembler.replaceWindow(events, false); assembler.flush()
+    expect([...chatSnapshot(assembler)!.nodes.values()].map(value => value.data)).toEqual([events[3]!.event.data])
+  })
+
   it('appends through an exact business-id Context without replaying unrelated Contexts', () => {
     const starts = vi.fn((
       _context: ConversationNodeContext<{ callSeq: number; results: number }>,

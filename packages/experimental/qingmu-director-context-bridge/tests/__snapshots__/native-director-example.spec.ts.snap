@@ -1,0 +1,118 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`authors a first-draft suggestion through the shipped preset and actual native loop 1`] = `
+{
+  "calls": [
+    "qingmu_read_first_draft",
+    "qingmu_propose_first_draft",
+  ],
+  "proposal": {
+    "ok": true,
+    "value": {
+      "proposal": {
+        "editableProjection": {
+          "imageGenPrompt": "她站在门口。",
+          "lastFrameImagePrompt": "",
+          "motionPrompt": "停步",
+          "negativePrompt": "不要增加人物",
+          "videoGenPrompt": "门铃响起，她停住。",
+        },
+        "input": {
+          "contextSnapshotSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "receiptId": "9745ff777b34c2fee8c6a8bc4c16daccb05716169c442a7de0400b26c046b247",
+          "scope": {
+            "episodeId": "example-episode",
+            "projectId": "example-project",
+            "sceneId": "example-scene",
+            "shotId": "example-shot",
+          },
+          "storyboardRevisionId": "revision-1",
+        },
+        "reason": "先交代空间，再推进动作与铃声。",
+        "schema": "qingmu.native-first-draft-proposal.v1",
+      },
+      "status": "current",
+    },
+  },
+  "results": [
+    "{"schema":"qingmu.native-first-draft-input.v1","receiptId":"9745ff777b34c2fee8c6a8bc4c16daccb05716169c442a7de0400b26c046b247","scope":{"projectId":"example-project","episodeId":"example-episode","sceneId":"example-scene","shotId":"example-shot"},"bindingSeq":0,"context":{"schema":"jason.qingmu-director-context-snapshot.v1","projectId":"example-project","episodeId":"example-episode","sceneId":"example-scene","shotId":"example-shot","contextSnapshotSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","script":{"revision":1,"sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"sceneSource":{},"sourceTime":"2026-09-07T00:00:00Z","storyboard":{"id":"revision-1","version":1,"status":"Ready","sourceHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"shot":{"id":"example-shot","title":"门口停顿","narrative":"门铃响起，她停在门口。","visual":"门在画面左侧。","action":"她停住并听铃声。","durationSec":4,"dialogueLineIds":[]},"sourceScene":{},"creativeContract":null,"selectedReferences":[],"episodeScenes":[{"sceneIndex":1,"title":"门口","current":true}],"cast":[{"actorId":"example-actor","name":"小雨","identity":"短发"}],"adjacentShots":{"previous":null,"next":{"id":"example-shot-2","title":"反应","action":"停顿"}},"providerCalls":0,"costAmountCny":"0","businessStateChanged":false,"humanDecisionInferred":false,"formalQcInferred":false,"selectionGranted":false,"readyGranted":false},"bootstrap":{"schema":"jason.qingmu-prompt-ir-bootstrap-state.v1","context":{"projectId":"example-project","episodeId":"example-episode","storyboard":{"id":"revision-1"},"frame":{"id":"example-shot"}},"contextSnapshotSha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","referenceNames":[],"draft":null,"ready":null,"draftMethodSha256":null,"selectionChallenge":null,"providerCalls":0,"workerStarted":false,"humanApprovalInferred":false,"humanSignoff":false,"selectionExecuted":false},"methods":[{"schema":"qingmu.imago-director-instructions.v1","capability":"shot_design","requestedResourceId":null,"sources":[{"resourceId":"skill","path":"example/skill.md","kind":"skill","sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","byteLength":120,"content":"从场景意图确定机位、遮挡与表演，先界定首帧的开始状态。"}],"sourceBindings":[{"resourceId":"skill","path":"example/skill.md","kind":"skill","sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","byteLength":120}],"packageSha256":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","packagePath":"example","additionalReferences":[{"resourceId":"rough_final_feedback","required":true,"path":"example/feedback.md"}],"methodScope":"keyless example","maxResourceBytes":131072,"maxPackageBytes":524288,"authority":{"readOnly":true,"businessTruth":"yimeng","methodSource":"imago_os","providerCalls":0,"maximumCostCny":"0","approvalGranted":false,"humanDecisionInferred":false,"formalQcInferred":false,"projectStateWrite":false}},{"schema":"qingmu.imago-director-instructions.v1","capability":"shot_design","requestedResourceId":"rough_final_feedback","sources":[{"resourceId":"rough_final_feedback","path":"example/rough_final_feedback.md","kind":"skill","sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","byteLength":120,"content":"逐镜比对锁定意图、表演、空间关系、声画线索和连续性。"}],"sourceBindings":[{"resourceId":"rough_final_feedback","path":"example/rough_final_feedback.md","kind":"skill","sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","byteLength":120}],"packageSha256":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","packagePath":"example","additionalReferences":[],"methodScope":"keyless example","maxResourceBytes":131072,"maxPackageBytes":524288,"authority":{"readOnly":true,"businessTruth":"yimeng","methodSource":"imago_os","providerCalls":0,"maximumCostCny":"0","approvalGranted":false,"humanDecisionInferred":false,"formalQcInferred":false,"projectStateWrite":false}}]}",
+    "{"schema":"qingmu.native-first-draft-proposal.v1","input":{"receiptId":"9745ff777b34c2fee8c6a8bc4c16daccb05716169c442a7de0400b26c046b247","scope":{"projectId":"example-project","episodeId":"example-episode","sceneId":"example-scene","shotId":"example-shot"},"contextSnapshotSha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","storyboardRevisionId":"revision-1"},"editableProjection":{"imageGenPrompt":"她站在门口。","lastFrameImagePrompt":"","videoGenPrompt":"门铃响起，她停住。","motionPrompt":"停步","negativePrompt":"不要增加人物"},"reason":"先交代空间，再推进动作与铃声。"}",
+  ],
+  "tools": [
+    "qingmu_get_imago_method",
+    "qingmu_propose_first_draft",
+    "qingmu_propose_prompt_edit",
+    "qingmu_read_bound_context",
+    "qingmu_read_first_draft",
+    "qingmu_read_prompt_draft",
+  ],
+}
+`;
+
+exports[`runs the keyless shipped-preset example through the native loop 1`] = `
+{
+  "calls": [
+    "qingmu_read_bound_context",
+    "qingmu_get_imago_method",
+  ],
+  "inactiveReadiness": {
+    "missingTools": [
+      "qingmu_read_bound_context",
+      "qingmu_get_imago_method",
+      "qingmu_read_prompt_draft",
+      "qingmu_propose_prompt_edit",
+      "qingmu_read_first_draft",
+      "qingmu_propose_first_draft",
+    ],
+    "presetId": null,
+    "status": "inactive",
+    "tools": [],
+  },
+  "methodInNextRequest": true,
+  "ordinaryReadiness": {
+    "missingTools": [
+      "qingmu_read_bound_context",
+      "qingmu_get_imago_method",
+      "qingmu_read_prompt_draft",
+      "qingmu_propose_prompt_edit",
+      "qingmu_read_first_draft",
+      "qingmu_propose_first_draft",
+    ],
+    "presetId": null,
+    "status": "missing-tools",
+    "tools": [],
+  },
+  "preset": "qingmu-director",
+  "readiness": {
+    "missingTools": [
+      "qingmu_read_prompt_draft",
+      "qingmu_propose_prompt_edit",
+      "qingmu_read_first_draft",
+      "qingmu_propose_first_draft",
+    ],
+    "presetId": "qingmu-director",
+    "status": "missing-tools",
+    "tools": [
+      "qingmu_read_bound_context",
+      "qingmu_get_imago_method",
+    ],
+  },
+  "results": [
+    "{"schema":"qingmu.native-director-context.v1","scope":{"projectId":"example-project","episodeId":"example-episode","sceneId":"example-scene","shotId":"example-shot"},"contextSnapshotSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contextSnapshot":{"schema":"jason.qingmu-director-context-snapshot.v1","projectId":"example-project","episodeId":"example-episode","sceneId":"example-scene","shotId":"example-shot","contextSnapshotSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","shot":{"id":"example-shot","narrative":"门铃响起，她停在门口。"},"sourceScene":{},"selectedReferences":[],"providerCalls":0,"costAmountCny":"0","businessStateChanged":false,"humanDecisionInferred":false,"formalQcInferred":false,"selectionGranted":false,"readyGranted":false},"authority":{"readOnly":true,"businessStateChanged":false,"humanApprovalGranted":false,"providerCalls":0},"guidance":"Base suggestions on this snapshot. Missing information is unknown, not permission to invent story facts or approve assets. Reread before applying changes."}",
+    "{"schema":"qingmu.native-director-method.v1","scope":{"projectId":"example-project","episodeId":"example-episode","sceneId":"example-scene","shotId":"example-shot"},"contextSnapshotSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","method":{"schema":"qingmu.imago-director-instructions.v1","capability":"shot_design","requestedResourceId":"rough_final_feedback","sourceBindings":[{"resourceId":"rough_final_feedback","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],"sources":[{"resourceId":"rough_final_feedback","content":"第四参考：粗剪到终版反馈闭环。\\n逐镜比对锁定意图、表演、空间关系、声画线索和连续性。\\n证据不足时保留未知，回到人工创作决定。"}]},"authority":{"readOnly":true,"businessStateChanged":false,"humanApprovalGranted":false,"providerCalls":0},"guidance":"Use this method to prepare editable suggestions from the bound Writer context. Read any required additionalReferences with a follow-up tool call; listed source hashes are not proof that their content was read. This is not IMAGO project initialization, a completed stage, content approval, or permission to invoke a Provider."}",
+  ],
+  "rootTools": [],
+  "system": "你是青木的导演助手，帮助创作者理解剧本、发展剧情、安排表演与镜头。
+先读取当前绑定的项目和镜头，区分剧本事实、用户决定、你的建议和无法确认的内容。未绑定镜头时请用户在工作台选择镜头，不猜测人物、场景、素材或其他项目内容。
+进行导演分析前读取 IMAGO 的 director_development 方法；设计或修改分镜时再读取 shot_design 方法及其列出的必需后续参考。以实际读取的方法为依据，不把能力名称当作已经执行。
+从整场戏的目标、冲突、人物动机、信息变化和节奏理解本镜；根据剧情安排自然对白、动作和情绪，不机械追求多对白或少对白。明确谁在哪里、摄影机在哪里、能看见什么、动作从何处开始和结束，以及与相邻镜头的连续性。身份参考不等于构图参考，背影或远景不应强求正脸。
+给出简洁、可修改的创作建议，并说明影响哪些镜头。当 qingmu_read_prompt_draft 和 qingmu_propose_prompt_edit 可用时，先读取实际提示词与完整分镜方法，再用该次 receiptId 提交一个字段的完整替换建议；原文变化后须重新读取、重新考虑，不能给旧建议换标签。用户在工作台查看并采用到草稿后，仍可修改、检查和保存。没有这些工具时如实说明只能提供文字建议，不猜测提示词原文。
+提交建议不等于已经采用、保存、生成、审核通过或完成交付。方法中提到的生产步骤不是本会话已有的工具或授权。遇到失败如实说明原因，不伪造工具结果或签收。
+当前镜头还没有提示词时，调用 qingmu_read_first_draft 读取已锁定上游、已选参考和完整 C5 方法，再用该回执调用 qingmu_propose_first_draft 提出五项可编辑首稿。首帧写动作开始状态，视频写动作变化与继承的对白、表演和声音决定；参考身份由系统保留，不杜撰人物或资产。首稿只进入网页候选，用户可修改、预览和保存；已存在 Draft 或 Ready 时不得覆盖重建。
+用户决定作品的创意与素材是否满意。不要要求用户填写技术字段、哈希、内部阶段或审批口令，也不要用外部编程软件代替工作台操作。",
+  "tools": [
+    "qingmu_get_imago_method",
+    "qingmu_read_bound_context",
+  ],
+}
+`;

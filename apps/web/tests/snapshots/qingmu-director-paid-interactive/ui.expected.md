@@ -1,0 +1,25 @@
+- region "真实 DeepSeek 导演建议（Provider 生成）":
+  - text: 真实 Provider · DeepSeek · 纯文本 · 付费
+  - heading "真实 DeepSeek 导演建议（Provider 生成）" [level=3]
+  - button "请求真实 DeepSeek 导演建议（会产生费用）"
+  - paragraph: 与上方 replay 演练严格分开。结果只作建议展示，不自动写草稿，不创建 PromptIR、媒体、正式质检、Ready 或人工决定。
+  - term: 模型
+  - definition: deepseek-v4-pro
+  - term: 单次授权上限
+  - definition: ¥0.30000000
+  - term: 请求边界
+  - definition: 8000 输入 / 2000 输出 token；最多 1 次；0 重试
+  - term: 本次预估
+  - definition: ¥0.13305600
+  - term: 任务状态
+  - definition: settled
+  - term: 实际账单
+  - definition: 待 Provider 账单对账
+  - article:
+    - term: 当前原值
+    - definition: 建立人物第一次相遇
+    - term: 真实 Provider 建议
+    - definition: 让开门动作承担情绪转折
+    - term: 影响
+    - definition: 仅为隔离 mock 建议，不授予正式状态
+  - group: Provider 回执、usage 与 SHA

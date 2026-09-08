@@ -118,6 +118,37 @@ describe('resolveBundleDir', () => {
 })
 
 describe('loadProfile', () => {
+  it('resolves bundle-owned presets without adding them to other profiles', () => {
+    const anchor = stageInstallation({ director: { patch: '[]\n' }, stock: { patch: '[]\n' } })
+    const packageDir = join(anchor, '..', 'node_modules', 'director')
+    mkdirSync(join(packageDir, 'agent-presets'))
+    writeFileSync(join(packageDir, 'package.json'), JSON.stringify({
+      name: 'director', dsh: { bundle: { patch: './cordis.patch.yml', agentPresets: './agent-presets' } },
+    }))
+    const home = tmp()
+    initProfile(resolveProfileDir('creative', home), ['stock', 'director'])
+    initProfile(resolveProfileDir('coding', home), ['stock'])
+    const profile = loadProfile('t', 'creative', anchor, home)
+    expect(profile.layers[0]).not.toHaveProperty('agentPresetRoot')
+    expect(profile.layers[1]?.agentPresetRoot).toMatch(/director[/\\]agent-presets$/)
+    expect(loadProfile('t', 'coding', anchor, home).layers.every(layer => layer.agentPresetRoot === undefined)).toBe(true)
+  })
+
+  it('rejects missing, non-directory, absolute, traversal and outward-symlink preset roots', () => {
+    const anchor = stageInstallation({ director: { patch: '[]\n' } })
+    const packageDir = join(anchor, '..', 'node_modules', 'director')
+    const outside = tmp()
+    symlinkSync(outside, join(packageDir, 'escape'), process.platform === 'win32' ? 'junction' : 'dir')
+    const home = tmp()
+    initProfile(resolveProfileDir('creative', home), ['director'])
+    for (const agentPresets of ['', ' ', '.', '..', '../outside', '..\\outside', outside, 'missing', 'cordis.patch.yml', 'escape', 42, null]) {
+      writeFileSync(join(packageDir, 'package.json'), JSON.stringify({
+        name: 'director', dsh: { bundle: { patch: './cordis.patch.yml', agentPresets } },
+      }))
+      expect(() => loadProfile('t', 'creative', anchor, home)).toThrow('dsh.bundle.agentPresets')
+    }
+  })
+
   it('resolves each dsh.profile.bundles entry to its patch layer in order, plus the user layer', () => {
     const anchor = stageInstallation({
       'bundle-a': { patch: '- insert:\n    - id: a\n      name: pkg-a\n' },

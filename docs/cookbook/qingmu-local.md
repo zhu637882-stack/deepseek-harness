@@ -2,20 +2,20 @@
 
 English | [中文](qingmu-local.zh.md)
 
-This guide starts a dedicated single-user Qingmu instance with a persistent SQLite database. It does not upgrade another Yimeng installation. Prerequisites: this Harness checkout built with `pnpm run build --profile qingmu`, Node, Python 3, the Yimeng Writer checkout with its `.venv`, and IMAGO Core.
+This guide starts a dedicated single-user Qingmu instance with a persistent SQLite database. It does not upgrade another Yimeng installation. The one launcher owns the Yimeng API, the DSh Host/director service, and the Yimeng six-stage frontend. Prerequisites: this Harness checkout built with the Qingmu profile, Node 20 for the frontend and a Harness-supported Node runtime, Python 3, the Yimeng Writer checkout with its `.venv` and a production frontend build made with `QINGMU_LOCAL_RUNTIME_PROXY=1`, and IMAGO Core. Initialization records the first local build identity; after either checkout or its artifacts change, stop the instance, complete the affected builds, and run `record-build` before the next start.
 
 ## Initialize and open
 
 Run from the Harness directory. Initialization refuses any existing destination directory. The default is `~/Library/Application Support/QingmuOS`; add `--root /absolute/new/path` to every command for a custom instance.
 
 ```sh
-python3 scripts/qingmu-local.py init --yimeng-root /Users/a1234/yimeng-worktrees/qingmu-phase3-changeset-20260826 --core-root /Users/a1234/Downloads/imago-os-core
+python3 scripts/qingmu-local.py init --yimeng-root /absolute/path/to/yimeng-writer --core-root /absolute/path/to/imago-os-core --frontend-node /absolute/path/to/node20
 python3 scripts/qingmu-local.py start
 python3 scripts/qingmu-local.py login
 python3 scripts/qingmu-local.py status
 ```
 
-Open the `webUrl` printed by `status`, choose “进入青木 OS”, then “先以只读方式进入” on first use and “青木制作台”. The first-use option skips model setup, not authenticated editing permissions. `ready: true` requires both owned processes, the API's exact database/storage identity, and the Host's loopback listener and page. Login is a separate status. This is a persistent integration environment with a script creation path, not complete product acceptance.
+Open the single `entryUrl` printed by `status`. It establishes the normal HttpOnly local session and goes directly to the Qingmu-branded Yimeng project workspace; there is no generic DSh chat or extra Qingmu modal first. `ready: true` requires the API, one scoped Worker, DSh Host and frontend. Without explicit project-production activation, the Worker retains the parent-bound text or heartbeat-only behavior and a separate asset Worker may run only for its exact confirmed parent. Activation replaces both with one full production Worker restricted to the bound project and episode, one task per lane tick, one attempt and one concurrent dispatch. The API's exact database/storage identity, the DSh Host listener/page, and the six-stage frontend listener/page remain independently verified. Their status fields remain separate for diagnosis. The six-stage page embeds the scope-bound Director workspace. After a planning save or GET-only recovery, the outer page accepts only the exact iframe origin/source and project/episode scope, rereads canonical planning and Director context, refreshes the workflow projection and locates the saved shot. Rejected or stale notifications stay visible and do not create a false success. This is a persistent integration environment, not complete product acceptance.
 
 ## Write the first script
 
@@ -34,30 +34,74 @@ If a reply is lost, use “读取创建恢复” or “读取恢复 / 刷新预�
 
 For an unknown result, choose “读取恢复” before retrying. A rejected intent can be explicitly prepared against the fresh unchanged script after its missing receipt is confirmed. If another session already initialized this scene, “保留输入副本，载入已存在镜头” keeps a browser-only copy and loads the existing objects without overwriting them. Changed script sources cannot be silently rebound. Unsubmitted text survives ordinary re-entry in this browser, not browser-storage deletion.
 
-## Stop, restart and renew login
+## Activate one project's full production Worker
+
+Project-runtime binding records an inactive production scope. Activate it only while the instance is cleanly stopped and name the exact instance, project and episode. The command changes private launcher configuration and writes an audit receipt; it does not call a Provider or mutate business data. Starting the instance after activation lets the existing Yimeng workflow create, submit, poll, download and ingest eligible work only inside that scope. Each Provider task still passes ProviderGate and uses the existing task, budget and outbox ledgers. Deactivation restores the parent-bound text or heartbeat-only mode on the next start.
 
 ```sh
 python3 scripts/qingmu-local.py stop
+python3 scripts/qingmu-local.py activate-project-production --instance-id EXACT_INSTANCE_ID --project-id EXACT_PROJECT_ID --episode-id EXACT_EPISODE_ID
+python3 scripts/qingmu-local.py start
+python3 scripts/qingmu-local.py login
+python3 scripts/qingmu-local.py status
+python3 scripts/qingmu-local.py stop
+python3 scripts/qingmu-local.py deactivate-project-production --instance-id EXACT_INSTANCE_ID --project-id EXACT_PROJECT_ID --episode-id EXACT_EPISODE_ID
+```
+
+An active Worker allows polling of already submitted tasks but never retries an unknown submission. Historical public-media freshness and submission-unknown findings remain visible for diagnosis; they do not block a newly confirmed, SHA-bound local project task. Disable production before changing the bound scope or source worktrees.
+
+## Stop, restart and renew login
+
+Before updating, inspect pending tasks and disable an active production scope as described above. Deactivation can still leave an explicitly bound text or asset parent eligible, so check those bindings too. Do not rebuild a checkout while the instance is loading or serving its files. After a Harness source change, complete the Qingmu root build; a bare client bundle does not inject the required profile. An unchanged Writer frontend need not be rebuilt solely because backend Python changed.
+
+```sh
+python3 scripts/qingmu-local.py stop
+DSH_BUILD_CLIENT_PROFILE=qingmu pnpm run build
+node --import tsx/esm scripts/qingmu-client-build-check.ts "$PWD" "$(git rev-parse HEAD)"
+python3 scripts/qingmu-local.py record-build
 python3 scripts/qingmu-local.py start
 python3 scripts/qingmu-local.py login
 ```
 
-Stopping preserves data. Starting never reseeds projects. Ports remain stable across restarts; an occupied saved port fails without killing its owner. Repeated start reports the same live instance. A stale PID is diagnostic only; commands never signal it. A broken or externally killed supervisor fails closed and may need operator diagnosis of its orphaned children; do not kill an unknown listener by port.
+The standalone client check is read-only. Full `record-build` repeats it before replacing any manifest: the existing complete client-build record must match the Qingmu profile, current source commit prefix and artifact digest. Missing, stale or wrong-profile builds are rejected without changing the preceding manifest. The release identity also binds the native director model-tools entry, runtime and attachment readers, both Qingmu client entries and shipped preset files. Routine `status` compares the selected release artifacts; it does not rerun the complete client digest or a model call. Review-only recording deliberately excludes the Host and this check. None of these identity checks proves that plugins started or a real model completed a business operation; verify those separately after deployment. Manifest history records identity, not recoverable artifact copies.
 
-The dedicated local account uses a random password in `private/login.json`, protected by the current macOS user's private directory. `login` submits that credential to the existing API, renews its normal 24-hour JWT and restarts only this instance's Host. It neither changes business data nor replays commands. Refresh the browser afterward. If a save outcome is unknown, query its original receipt before retrying; do not create a second command. This device-local identity is not evidence of human content approval. Anyone with access to this macOS account or its loopback service has the local user's capabilities.
+Stopping preserves data. `record-build` requires a clean stopped instance and clean Writer/Harness worktrees, then atomically binds their commits, the Core checkout state, the frontend BUILD_ID, required Host artifact SHA-256 values, ports and data root in `build-manifest/current.json`; it retains any preceding record under `build-manifest/history/`. Starting and `status` compare that record with disk and fail closed on missing or drifted identity. Starting never reseeds projects. Ports remain stable across restarts; an occupied saved port fails without killing its owner. Repeated start reports the same live instance. A stale PID is diagnostic only; commands never signal it. A broken or externally killed supervisor fails closed and may need operator diagnosis of its orphaned children; do not kill an unknown listener by port.
+
+After an external supervisor crash, use `recover-crash` only while the instance remains stopped and only with the exact public instance ID. The command holds the lifecycle lock and verifies the generation-numbered process ledger, every recorded PID, each loopback port, the control socket, database/WAL handles and immutable integrity. It never sends a signal or calls a Provider. A durable recovery intent makes an interrupted recovery repeatable; a surviving intent blocks start and backup until the same command finishes it.
+
+```sh
+python3 scripts/qingmu-local.py recover-crash --instance-id EXACT_INSTANCE_ID
+```
+
+The dedicated local account uses a random password in `private/login.json`, protected by the current macOS user's private directory. `login` submits that credential to the existing API, renews its normal 24-hour JWT and restarts only this instance's Host and frontend so both receive the renewed private session. It neither changes business data nor replays commands. Open the `entryUrl` printed by `status` again so the browser receives the new HttpOnly cookie; refreshing an existing project URL keeps the old cookie. If a save outcome is unknown, query its original receipt before retrying; do not create a second command. This device-local identity is not evidence of human content approval. Anyone with access to this macOS account or its loopback service has the local user's capabilities.
+
+## Rotate local private credentials
+
+If local instance credentials may have been exposed, first stop normally and create a non-overwriting cold backup. After confirming that the current Harness and Writer worktrees are clean, use the exact instance ID from public `status` output:
+
+```sh
+python3 scripts/qingmu-local.py stop
+python3 scripts/qingmu-local.py backup
+python3 scripts/qingmu-local.py rotate-private-credentials --instance-id EXACT_INSTANCE_ID
+```
+
+Rotation runs only while holding the stopped-instance lock. It regenerates the five local credential classes—JWT signing, attestation, control, director execution and editing handoff—together, updates the random `qingmu-local` login password and the one matching database password hash, and clears the old session. It then automatically rebinds the current build identity, starts the instance, proves in the same launcher process that both the old password and prior session are unauthorized, and logs in with the new password. The command and audit receipt report only categories, booleans, timestamps, permissions and public build identity; they never print credentials or hashes. A mismatched instance ID, running instance, account count other than exactly one, private file that is not a `0600` regular file owned by the current user, unknown sibling secret field, or any failed step closes the operation. A controlled failure before commit restores a consistent stopped state.
+
+After rotation, run `stop`, `start` and `status` once more to confirm a full restart remains `ready: true` with a matching build identity. The old cold backup remains available, but `restore` now always regenerates all five credential classes and the local login password for the new directory, synchronizes the new database password hash and discards the old session, so restored data cannot reactivate old authentication values.
 
 ## Data and backup reference
 
-`storage/jason.db` and `storage/` hold Yimeng data/media; `dsh/` is the independent Harness home/profile; `private/` holds secrets/session/configuration; `logs/` holds startup diagnostics. Keep the whole root private. Neither private files nor backups belong in Git. The launcher scrubs inherited credentials, never reads an old production `.env`, binds only `127.0.0.1`, and leaves paid Provider access disabled.
+`storage/jason.db` and `storage/` hold Yimeng data/media; `dsh/` is the independent Harness home/profile; `private/` holds secrets/session/configuration; `logs/` holds startup diagnostics. Keep the whole root private. Neither private files nor backups belong in Git. The launcher scrubs inherited credentials and binds only `127.0.0.1`. An unbound or inactive instance keeps general paid production execution disabled. An explicit project-runtime binding supplies an owner-only credential file and one exact project/episode scope; activation plus start can process that scope, while each paid workflow action still requires its own preflight and recorded confirmation.
 
 ```sh
 python3 scripts/qingmu-local.py stop
 python3 scripts/qingmu-local.py backup
 python3 scripts/qingmu-local.py restore --backup /absolute/backup/path --root /absolute/new/restore-path
+python3 scripts/qingmu-local.py record-build --root /absolute/new/restore-path
 python3 scripts/qingmu-local.py start --root /absolute/new/restore-path
 python3 scripts/qingmu-local.py login --root /absolute/new/restore-path
 ```
 
-Backup requires confirmed clean shutdown, creates a new timestamped directory, and checks SQLite integrity plus media SHA-256. A free lock after an abnormal supervisor exit does not prove shutdown: a persistent dirty marker blocks start/backup and reports unknown status until operator diagnosis. Restore requires the complete storage hash inventory and writes only a nonexistent new directory; it preserves the source instance, allocates a new process identity and requires login. Keep a verified backup before changing the bound source checkouts. Stop this instance and return to the recorded source commits to roll back code; database schema rollback is not automatic.
+Backup requires confirmed clean shutdown, creates a new timestamped directory, and checks SQLite integrity plus storage, audit and build-manifest SHA-256 values. A missing build identity is recorded as `unknown_missing`, not inferred. A free lock after an abnormal supervisor exit does not prove shutdown: a persistent dirty marker blocks start/backup and reports unknown status until the explicit fail-closed recovery above succeeds. Restore requires the complete hash inventory and writes only a nonexistent new directory; it preserves the source instance, allocates a new process identity, fully rekeys local private credentials and login authentication, and deliberately leaves the copied build identity mismatched until `record-build` binds the new root. Keep a verified backup before changing the bound source checkouts. Stop this instance and return to the recorded source commits to roll back code; database schema rollback is not automatic.
 
-The launcher does not install system autostart, expose a public server, migrate formal data, run Provider jobs, or sign off content. See the [ownership decision](../../.agents/notes/implemented/architecture/2026-08-29-qingmu-local-instance.md).
+The launcher does not install system autostart, expose a public server, migrate formal data, submit an unconfirmed Provider job, or sign off content. See the [ownership decision](../../.agents/notes/implemented/architecture/2026-08-29-qingmu-local-instance.md).

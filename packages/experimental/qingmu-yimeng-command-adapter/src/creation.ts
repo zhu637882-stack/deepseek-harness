@@ -7,7 +7,54 @@ export interface ProjectInitializationRequest {
   readonly name: string
   readonly style: string
   readonly aspectRatio: '9:16' | '16:9' | '1:1'
+  readonly mode: 'whole_series'
+  readonly creationType: 'story_idea' | 'novel_adapt' | 'script_adapt' | 'original_script'
+  readonly episodeCount: number
+  readonly duration: string
+  readonly textInput: string
+  readonly stylePackId: string | null
   readonly idempotencyKey: string
+}
+/** Immutable method coordinate stored inside one project creative contract. */
+export interface CreativeContractMethodRef {
+  readonly id: string
+  readonly version: string
+  readonly sha256: string
+}
+/** Project-level creation contract. It locks sources and methods, not approval. */
+export interface CreativeContract {
+  readonly schema: 'qingmu.creative-contract.v1' | 'qingmu.creative-contract.v2'
+  readonly revision: 1
+  readonly locked: true
+  readonly identity?: { readonly projectId: string }
+  readonly source: { readonly textSha256: string; readonly textVersion?: 'creation-text-v1' }
+  readonly project: {
+    readonly mode: 'whole_series'
+    readonly creationType: ProjectInitializationRequest['creationType']
+    readonly aspectRatio: ProjectInitializationRequest['aspectRatio']
+    readonly episodeCount: number
+    readonly duration: string
+  }
+  readonly methods: {
+    readonly visualStyle: CreativeContractMethodRef
+    readonly stylePackId: CreativeContractMethodRef | null
+    readonly writingSkills: readonly CreativeContractMethodRef[]
+    readonly directorSkills: readonly CreativeContractMethodRef[]
+    readonly cameraSkills: readonly CreativeContractMethodRef[]
+    readonly soundSkills: readonly CreativeContractMethodRef[]
+  }
+}
+/** Authenticated readback of the immutable project contract. */
+export interface CreativeContractState {
+  readonly schema: 'jason.qingmu-creative-contract-state.v1'
+  readonly projectId: string
+  readonly configured: boolean
+  readonly locked: boolean
+  readonly revision: 1 | null
+  readonly sha256: string | null
+  readonly contract: CreativeContract | null
+  readonly sourceText: string | null
+  readonly message: string
 }
 /** Recovery addresses an existing request, not a guessed project name. */
 export interface ProjectInitializationRecovery { readonly idempotencyKey: string; readonly requestSha256: string }
@@ -26,6 +73,8 @@ export interface ProjectInitializationResult {
   readonly providerCalls: 0
   readonly stageStarted: false
   readonly approvalGranted: false
+  readonly creativeContract: CreativeContract
+  readonly creativeContractSha256: string
 }
 /** Exact canonical project and episode coordinates. */
 export interface CreationScope { readonly projectId: string; readonly episodeId: string }
@@ -113,6 +162,11 @@ function text(value: unknown, error: ErrorFactory, max = 160): string {
   if (typeof value !== 'string' || value.length === 0 || value.length > max || value !== value.trim() || /[\x00-\x1f]/.test(value)) throw error('creation text invalid')
   return value
 }
+function storyText(value: unknown, error: ErrorFactory): string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 64000 || value !== value.trim()
+    || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(value)) throw error('creation story text invalid')
+  return value
+}
 function identifier(value: unknown, error: ErrorFactory): string {
   const result = text(value, error)
   if (!/^[A-Za-z0-9_.-]+$/.test(result)) throw error('creation coordinate invalid')
@@ -129,6 +183,58 @@ function sha(value: unknown, error: ErrorFactory): string {
 function key(value: unknown, error: ErrorFactory): string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9._:-]{8,128}$/.test(value)) throw error('creation intent invalid')
   return value
+}
+function methodRef(value: unknown, error: ErrorFactory): CreativeContractMethodRef {
+  const raw = exact(value, ['id', 'version', 'sha256'], error)
+  return { id: text(raw.id, error), version: text(raw.version, error), sha256: sha(raw.sha256, error) }
+}
+/**
+ * Validate and normalize one complete Writer-owned creative contract.
+ *
+ * @param value Candidate contract from the canonical project projection.
+ * @param error Static adapter error factory used for fail-closed validation.
+ * @param expectedProjectId Required project binding for the current v2 contract.
+ * @returns A detached, strictly validated v1 or v2 contract.
+ */
+export function normalizeCreativeContract(
+  value: unknown,
+  error: ErrorFactory,
+  expectedProjectId?: string,
+): CreativeContract {
+  const candidate = object(value, error)
+  const current = candidate.schema === 'qingmu.creative-contract.v2'
+  const raw = exact(value, current
+    ? ['schema', 'revision', 'locked', 'identity', 'source', 'project', 'methods']
+    : ['schema', 'revision', 'locked', 'source', 'project', 'methods'], error)
+  if (!['qingmu.creative-contract.v1', 'qingmu.creative-contract.v2'].includes(String(raw.schema))
+    || raw.revision !== 1 || raw.locked !== true) {
+    throw error('creative contract identity invalid')
+  }
+  if (current) {
+    const identity = exact(raw.identity, ['projectId'], error)
+    const projectId = identifier(identity.projectId, error)
+    if (expectedProjectId === undefined || projectId !== expectedProjectId) {
+      throw error('creative contract project binding invalid')
+    }
+  }
+  const source = exact(raw.source, current ? ['textSha256', 'textVersion'] : ['textSha256'], error)
+  sha(source.textSha256, error)
+  if (current && source.textVersion !== 'creation-text-v1') throw error('creative contract text version invalid')
+  const project = exact(raw.project, ['mode', 'creationType', 'aspectRatio', 'episodeCount', 'duration'], error)
+  if (project.mode !== 'whole_series'
+    || !['story_idea', 'novel_adapt', 'script_adapt', 'original_script'].includes(String(project.creationType))
+    || !['9:16', '16:9', '1:1'].includes(String(project.aspectRatio))) throw error('creative contract project invalid')
+  integer(project.episodeCount, error, 1); text(project.duration, error, 32)
+  const methods = exact(raw.methods, ['visualStyle', 'stylePackId', 'writingSkills', 'directorSkills', 'cameraSkills', 'soundSkills'], error)
+  methodRef(methods.visualStyle, error)
+  if (methods.stylePackId !== null) methodRef(methods.stylePackId, error)
+  for (const field of ['writingSkills', 'directorSkills', 'cameraSkills', 'soundSkills'] as const) {
+    if (!Array.isArray(methods[field]) || methods[field].length > 64) throw error('creative contract methods invalid')
+    for (const entry of methods[field]) methodRef(entry, error)
+  }
+  if (current && (methods.stylePackId === null || !Array.isArray(methods.directorSkills)
+    || methods.directorSkills.length === 0)) throw error('creative contract current methods invalid')
+  return raw as unknown as CreativeContract
 }
 function scope(raw: Record<string, unknown>, error: ErrorFactory): CreationScope {
   return { projectId: identifier(raw.projectId, error), episodeId: identifier(raw.episodeId, error) }
@@ -174,9 +280,36 @@ export function prepareCreationCommand(endpoint: string, value: unknown, helpers
   let method: 'GET' | 'POST' = 'POST'
   let body: YimengCommandJsonObject | undefined
   let normalize: (value: unknown) => unknown
-  if (endpoint === 'initializeProject' || endpoint === 'recoverProjectInitialization') {
+  if (endpoint === 'readCreativeContract') {
+    const coordinate = exact(raw, ['projectId'], fail)
+    const projectId = identifier(coordinate.projectId, fail)
+    path = `/api/qingmu/projects/${encodeURIComponent(projectId)}/creative-contract`
+    method = 'GET'
+    normalize = (value) => {
+      const result = exact(value, ['schema', 'projectId', 'configured', 'locked', 'revision', 'sha256', 'contract', 'sourceText', 'message'], bad)
+      if (result.schema !== 'jason.qingmu-creative-contract-state.v1' || result.projectId !== projectId
+        || typeof result.configured !== 'boolean' || typeof result.locked !== 'boolean') throw bad('creative contract state mismatch')
+      text(result.message, bad, 1000)
+      if (!result.configured) {
+        if (result.locked || result.revision !== null || result.sha256 !== null || result.contract !== null
+          || result.sourceText !== null) throw bad('creative contract absent state invalid')
+      } else {
+        if (!result.locked || result.revision !== 1) throw bad('creative contract lock invalid')
+        const contract = normalizeCreativeContract(result.contract, bad, projectId)
+        const contractSha = createHash('sha256').update(helpers.canonicalJson(contract, 'creative contract')).digest('hex')
+        if (sha(result.sha256, bad) !== contractSha) throw bad('creative contract SHA invalid')
+        const sourceText = storyText(result.sourceText, bad)
+        if (createHash('sha256').update(sourceText).digest('hex') !== contract.source.textSha256) {
+          throw bad('creative contract source invalid')
+        }
+      }
+      return result
+    }
+  } else if (endpoint === 'initializeProject' || endpoint === 'recoverProjectInitialization') {
     const recover = endpoint === 'recoverProjectInitialization'
-    exact(raw, recover ? ['idempotencyKey', 'requestSha256'] : ['name', 'style', 'aspectRatio', 'idempotencyKey'], fail)
+    exact(raw, recover ? ['idempotencyKey', 'requestSha256'] : [
+      'name', 'style', 'aspectRatio', 'mode', 'creationType', 'episodeCount', 'duration', 'textInput', 'stylePackId', 'idempotencyKey',
+    ], fail)
     const intent = key(raw.idempotencyKey, fail)
     let requestSha: string
     path = '/api/qingmu/project-initializations'
@@ -185,8 +318,16 @@ export function prepareCreationCommand(endpoint: string, value: unknown, helpers
       path += `/receipt?${new URLSearchParams({ idempotencyKey: intent, requestSha256: requestSha }).toString()}`
       method = 'GET'
     } else {
-      const settings = { name: text(raw.name, fail, 100), style: text(raw.style, fail, 128), aspectRatio: text(raw.aspectRatio, fail) }
+      const settings = {
+        name: text(raw.name, fail, 100), style: text(raw.style, fail, 128), aspectRatio: text(raw.aspectRatio, fail),
+        mode: raw.mode, creationType: raw.creationType, episodeCount: integer(raw.episodeCount, fail, 1),
+        duration: text(raw.duration, fail, 32), textInput: storyText(raw.textInput, fail),
+        stylePackId: raw.stylePackId === null ? null : text(raw.stylePackId, fail, 128),
+      }
       if (!['9:16', '16:9', '1:1'].includes(settings.aspectRatio)) throw fail('aspect ratio invalid')
+      if (settings.mode !== 'whole_series'
+        || !['story_idea', 'novel_adapt', 'script_adapt', 'original_script'].includes(String(settings.creationType))
+        || settings.episodeCount > 30) throw fail('creative settings invalid')
       requestSha = createHash('sha256').update(helpers.canonicalJson(settings, 'initialization')).digest('hex')
       body = { ...settings, idempotencyKey: intent }
     }
@@ -195,6 +336,20 @@ export function prepareCreationCommand(endpoint: string, value: unknown, helpers
       if (result.schema !== 'jason.qingmu-project-bootstrap-result.v1' || result.idempotencyKey !== intent || result.requestSha256 !== requestSha
         || result.providerCalls !== 0 || result.stageStarted !== false || result.approvalGranted !== false) throw bad('initialization receipt mismatch')
       for (const field of ['projectId', 'seriesId', 'episodeId', 'owner', 'commandReceiptId', 'eventId']) identifier(result[field], bad)
+      if (!recover) {
+        const contract = normalizeCreativeContract(result.creativeContract, bad, identifier(result.projectId, bad))
+        if (contract.source.textSha256 !== createHash('sha256').update(String(raw.textInput)).digest('hex')
+          || contract.project.mode !== raw.mode || contract.project.creationType !== raw.creationType
+          || contract.project.aspectRatio !== raw.aspectRatio || contract.project.episodeCount !== raw.episodeCount
+          || contract.project.duration !== raw.duration
+          || sha(result.creativeContractSha256, bad) !== createHash('sha256').update(helpers.canonicalJson(contract, 'creative contract')).digest('hex')) {
+          throw bad('initialization creative contract mismatch')
+        }
+      } else {
+        const contract = normalizeCreativeContract(result.creativeContract, bad, identifier(result.projectId, bad))
+        const contractSha = createHash('sha256').update(helpers.canonicalJson(contract, 'creative contract')).digest('hex')
+        if (sha(result.creativeContractSha256, bad) !== contractSha) throw bad('initialization creative contract SHA invalid')
+      }
       return result
     }
   } else {

@@ -1,6 +1,6 @@
 // Qingmu-only browser regression for bounded script and element-profile ChangeSet paths.
-// The assembled Host talks only to a loopback Yimeng double; no model, Provider,
-// production service, or persistent business database participates.
+// The assembled Host talks only to a loopback Yimeng double and an isolated Writer
+// service backed by temporary SQLite; no model, Provider, or production database participates.
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { Buffer } from 'node:buffer'
 import { createHash, createHmac } from 'node:crypto'
@@ -50,6 +50,14 @@ import {
   PRODUCTION_UNIT_BROWSER_RULE_PATHS,
 } from './qingmu-production-unit-fixture.ts'
 import { createStageSourceDouble, STAGE_SOURCE_BROWSER_RULE_PATHS } from './qingmu-stage-source-fixture.ts'
+import {
+  hasProductionTakeWriterFixturePrerequisites,
+  productionTakeQuoteFixture,
+  restartProductionTakeWriterFixture,
+  startProductionTakeWriterFixture,
+  stopProductionTakeWriterFixture,
+  type WriterFixture,
+} from './qingmu-production-take-fixture.ts'
 
 const YIMENG_TOKEN = 'qingmu-script-workspace-test-token'
 const CHANGE_SET_ID = 'changeset-episode-script-1'
@@ -177,6 +185,7 @@ function resolveQingmuOverlayEntrypoints(source: string): string {
     ['@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter', 'packages/experimental/qingmu-yimeng-read-adapter/lib/index.js'],
     ['@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter', 'packages/experimental/qingmu-imago-method-adapter/lib/index.js'],
     ['@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter', 'packages/experimental/qingmu-yimeng-command-adapter/lib/index.js'],
+    ['@deepseek-ai/dsh-experimental-qingmu-director-context-bridge', 'packages/experimental/qingmu-director-context-bridge/lib/index.js'],
     ['@deepseek-ai/dsh-experimental-client-ui-qingmu-cockpit', 'packages/experimental/client-ui-qingmu-cockpit/lib/index.js'],
   ] as const
 
@@ -2584,6 +2593,7 @@ async function startYimengDouble(
   propReferenceCandidateReads: ReturnType<typeof propReferenceCandidatesFixture>[],
   promptIrWorkflowStatuses: string[],
   referenceRightsMethodProjectionSha256: Promise<string>,
+  writerBaseUrl: string,
 ): Promise<{
   readonly server: Server
   readonly baseUrl: string
@@ -2826,6 +2836,35 @@ async function startYimengDouble(
         cookie: request.headers.cookie,
         body,
       })
+
+      const writerOwnedPath = url.pathname.includes('/first-frame-selection')
+        || url.pathname.startsWith('/api/media/')
+        || url.pathname.endsWith('/production-takes/video-quote')
+      if (writerOwnedPath) {
+        const target = new URL(path, writerBaseUrl)
+        const writerOrigin = new URL(writerBaseUrl).origin
+        const headers = new Headers()
+        for (const name of ['accept', 'authorization', 'cookie', 'idempotency-key', 'x-qingmu-human-intent']) {
+          const value = request.headers[name]
+          if (typeof value === 'string') headers.set(name, value)
+        }
+        if (body !== undefined) headers.set('content-type', 'application/json')
+        if (request.method === 'POST') headers.set('origin', writerOrigin)
+        const upstream = await fetch(target, {
+          ...(request.method === undefined ? {} : { method: request.method }),
+          headers,
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          redirect: 'manual',
+        })
+        const bytes = Buffer.from(await upstream.arrayBuffer())
+        response.writeHead(upstream.status, {
+          'content-type': upstream.headers.get('content-type') ?? 'application/octet-stream',
+          'content-length': String(bytes.byteLength),
+          'cache-control': upstream.headers.get('cache-control') ?? 'no-store',
+        })
+        response.end(bytes)
+        return
+      }
 
       if (request.method === 'GET' && url.pathname === '/api/health') {
         json(response, 200, {
@@ -3462,6 +3501,13 @@ async function startYimengDouble(
         && url.pathname === `/api/qingmu/projects/project-1/episodes/episode-1/storyboard-revisions/${PROMPT_IR_STORYBOARD_REVISION_ID}/frames/${PROMPT_IR_FRAME_ID}/prompt-ir`
       ) {
         json(response, 200, promptIrReadFixture(promptIrSelected))
+        return
+      }
+      if (
+        request.method === 'GET'
+        && url.pathname === `/api/qingmu/projects/project-1/episodes/episode-1/storyboard-revisions/${PROMPT_IR_STORYBOARD_REVISION_ID}/frames/${PROMPT_IR_FRAME_ID}/first-frame-quote`
+      ) {
+        json(response, 200, productionTakeQuoteFixture())
         return
       }
       if (request.method === 'GET' && url.pathname === '/api/episodes/episode-1/script') {
@@ -4775,7 +4821,8 @@ async function expectNoVisibleTechnicalBrand(page: Page): Promise<void> {
 describe.skipIf(
   process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu'
   || IMAGO_CORE_ROOT === undefined
-  || IMAGO_CORE_ROOT === '',
+  || IMAGO_CORE_ROOT === ''
+  || !hasProductionTakeWriterFixturePrerequisites(),
 )(
   'web e2e: Qingmu episode script ChangeSet workspace',
   () => {
@@ -4784,7 +4831,9 @@ describe.skipIf(
     let page: Page
     let tripwire: ReturnType<typeof watchConsole>
     let yimengServer: Server | undefined
+    let writerFixture: WriterFixture | undefined
     let overlayRoot: string | undefined
+    let overlayPath: string | undefined
     let commitAccepted: Promise<void> | undefined
     let releaseCommitResponse: (() => void) | undefined
     let actorCommitAccepted: Promise<void> | undefined
@@ -4849,6 +4898,8 @@ describe.skipIf(
       }
       process.env.YIMENG_API_TOKEN = YIMENG_TOKEN
       process.env.QINGMU_IMAGO_ATTESTATION_KEY = IMAGO_ATTESTATION_KEY
+      overlayRoot = await mkdtemp(join(tmpdir(), 'dsh-qingmu-script-e2e-'))
+      writerFixture = await startProductionTakeWriterFixture(overlayRoot)
       const yimeng = await startYimengDouble(
         capturedRequests,
         scriptReadRevisions,
@@ -4861,6 +4912,7 @@ describe.skipIf(
         propReferenceCandidateReads,
         promptIrWorkflowStatuses,
         referenceRightsMethodProjectionSha256,
+        writerFixture.baseUrl,
       )
       yimengServer = yimeng.server
       commitAccepted = yimeng.commitAccepted
@@ -4895,13 +4947,13 @@ describe.skipIf(
       reworkRouteDouble = yimeng.reworkRoutes
       productionUnitDouble = yimeng.productionUnits
       stageSourceDouble = yimeng.stageSources
-      overlayRoot = await mkdtemp(join(tmpdir(), 'dsh-qingmu-script-e2e-'))
-      const overlayPath = join(overlayRoot, 'qingmu-script.overlay.yml')
+      overlayPath = join(overlayRoot, 'qingmu-script.overlay.yml')
       const qingmuOverlay = resolveQingmuOverlayEntrypoints(await readFile(QINGMU_OVERLAY, 'utf8'))
       const integrationOverlay = `${qingmuOverlay.trimEnd()}\n\n`
         + `- id: qingmu-yimeng-read-adapter\n  config:\n    baseUrl: ${JSON.stringify(yimeng.baseUrl)}\n    timeoutMs: 5000\n\n`
-        + `- id: qingmu-yimeng-command-adapter\n  config:\n    baseUrl: ${JSON.stringify(yimeng.baseUrl)}\n    timeoutMs: 5000\n`
+        + `- id: qingmu-yimeng-command-adapter\n  config:\n    baseUrl: ${JSON.stringify(yimeng.baseUrl)}\n    productionTakeBaseUrl: ${JSON.stringify(writerFixture.baseUrl)}\n    timeoutMs: 5000\n`
       expect(integrationOverlay).not.toContain('coreRoot:')
+      expect(integrationOverlay).not.toContain("name: '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge'")
       expect(integrationOverlay).not.toContain('QINGMU_IMAGO_ATTESTATION_KEY')
       expect(integrationOverlay).not.toContain(IMAGO_ATTESTATION_KEY)
       await writeFile(overlayPath, integrationOverlay)
@@ -4921,6 +4973,10 @@ describe.skipIf(
       const executablePath = process.env.DSH_PLAYWRIGHT_EXECUTABLE_PATH
       browser = await chromium.launch(executablePath === undefined ? {} : { executablePath })
       page = await browser.newPage({ viewport: { width: 1680, height: 1100 }, locale: ZH_BROWSER_LOCALE })
+      await page.context().addCookies([{
+        name: 'jason_token', value: 'fixture-cookie', url: scaffold.baseUrl,
+        httpOnly: true, sameSite: 'Lax',
+      }])
       page.on('request', (request) => {
         const requestPath = new URL(request.url()).pathname
         if (!requestPath.startsWith('/qingmu-imago-method/') && ![
@@ -4951,6 +5007,7 @@ describe.skipIf(
           '/qingmu-yimeng/takeApprovalLifecycle',
           '/qingmu-yimeng-command/transitionTakeApprovalLifecycle',
           '/qingmu-yimeng-command/recoverTakeApprovalLifecycleTransition',
+          '/qingmu-yimeng-command/queueProductionTake',
         ].includes(requestPath)) return
         browserRpcRequests.push({ path: requestPath, body: request.postDataJSON() as unknown })
       })
@@ -4998,7 +5055,8 @@ describe.skipIf(
           ...tripwire,
         })}`, { cause: error })
       }
-      await page.getByRole('button', { name: '进入青木 OS' }).click()
+      const enterQingmu = page.getByRole('button', { name: '进入青木 OS' })
+      if (await enterQingmu.isVisible()) await enterQingmu.click()
     }, 120_000)
 
     afterAll(async () => {
@@ -5121,6 +5179,7 @@ describe.skipIf(
       }
       await browser?.close().catch((error: unknown) => failures.push(error))
       await scaffold?.close().catch((error: unknown) => failures.push(error))
+      await stopProductionTakeWriterFixture(writerFixture).catch((error: unknown) => failures.push(error))
       await closeServer(yimengServer).catch((error: unknown) => failures.push(error))
       if (overlayRoot !== undefined) {
         await rm(overlayRoot, { recursive: true, force: true }).catch((error: unknown) => failures.push(error))
@@ -9348,6 +9407,414 @@ describe.skipIf(
       await expectNoVisibleTechnicalBrand(page)
       expect(tripwire.pageErrors).toEqual([])
       expect(tripwire.warnings).toEqual([])
+    }, 120_000)
+
+    it('queues at most two Ready-bound production Takes and recovers a lost Writer receipt', async () => {
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-qingmu-production-take'))
+      if (writerFixture === undefined) throw new Error('isolated Writer fixture is unavailable')
+      const rpcStart = browserRpcRequests.length
+      const writerState = async () => {
+        const response = await fetch(`${writerFixture!.baseUrl}/__fixture/state`)
+        if (!response.ok) throw new Error(`Writer fixture state failed: ${String(response.status)}`)
+        return await response.json() as {
+          counts: Record<string, number>
+          tasks: readonly unknown[]
+          providerCalls: number
+          promptOverrideCalls: number
+          writerCalls: number
+          routeStatuses: number[]
+          firstFrames: { assets: number; selected: number; receipts: number }
+        }
+      }
+      const openProduction = async (currentPage: Page = page): Promise<{
+        dialog: Locator
+        director: Locator
+        production: Locator
+      }> => {
+        await currentPage.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+        const enter = currentPage.getByRole('button', { name: '进入青木 OS' })
+        if (await enter.isVisible()) await enter.click()
+        const dialog = currentPage.getByRole('dialog', { name: '青木 OS 制作驾驶舱' })
+        if (!await dialog.isVisible()) await currentPage.getByRole('button', { name: '青木制作台' }).click()
+        await dialog.waitFor({ timeout: 10_000 })
+        await dialog.getByRole('tab', { name: '分镜与镜头', exact: true }).click()
+        await dialog.locator(`[data-shot-id="${SHOT_RIVER_FIRST_FRAME_ID}"]`).waitFor({ timeout: 20_000 })
+        await dialog.getByRole('region', { name: 'IMAGO 镜头关系方法' })
+          .getByText('Scene / Shot / Beat / Element 关系检查', { exact: true }).waitFor({ timeout: 20_000 })
+        await dialog.getByRole('list', { name: '镜头选择' })
+          .getByRole('button', { name: /frame-1/ }).click()
+        await dialog.locator(`[data-shot-id="${PROMPT_IR_FRAME_ID}"]`).waitFor({ timeout: 20_000 })
+        await dialog.getByRole('tab', { name: '导演工作区', exact: true }).click()
+        const advanced = dialog.getByText('已有提示词、Take 与高级分镜', { exact: true })
+        if ((await advanced.locator('..').getAttribute('open')) === null) await advanced.click()
+        const director = dialog.getByRole('region', { name: '导演工作区', exact: true })
+        const production = director.getByRole('region', { name: '正式生产 Take', exact: true })
+        await production.waitFor({ timeout: 30_000 })
+        return { dialog, director, production }
+      }
+      let hostRestartWarningStart = 0
+      const restartHost = async (): Promise<void> => {
+        if (overlayPath === undefined) throw new Error('Qingmu overlay is unavailable for Host restart')
+        const hostPort = Number(new URL(scaffold.baseUrl).port)
+        hostRestartWarningStart = tripwire.warnings.length
+        await scaffold.close()
+        scaffold = await launchWebScaffold({ extraOverlayPath: overlayPath, webPort: hostPort })
+        await mountQingmuClientPackage(
+          scaffold,
+          '@deepseek-ai/dsh-experimental-client-ui-brand-qingmu',
+          'packages/experimental/client-ui-brand-qingmu',
+        )
+        await mountQingmuClientPackage(
+          scaffold,
+          '@deepseek-ai/dsh-experimental-client-ui-qingmu-cockpit',
+          'packages/experimental/client-ui-qingmu-cockpit',
+        )
+        await scaffold.ctx.loader.await()
+        await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
+      }
+
+      await page.reload({ waitUntil: 'load' })
+      const first = await openProduction()
+      const before = await writerState()
+      expect(before.tasks).toEqual([])
+      expect(before.providerCalls).toBe(0)
+      expect(before.counts).toMatchObject({
+        generation_tasks: 0,
+        provider_preflights: 0,
+        provider_authorization_reservations: 0,
+        provider_submission_outbox: 0,
+        provider_budget_events: 0,
+      })
+      expect(before.firstFrames).toEqual({ assets: 1, selected: 0, receipts: 0 })
+      await first.director.getByRole('button', {
+        name: '检查首帧生成条件（不调用模型）', exact: true,
+      }).click()
+      await first.production.getByText('首帧候选（必须显式选择）', { exact: true })
+        .waitFor({ timeout: 5_000 })
+        .catch(async () => {
+          throw new Error(JSON.stringify({
+            alerts: await first.director.getByRole('alert').allTextContents(),
+            production: await first.production.innerText(),
+            requests: capturedRequests.slice(-8),
+          }, null, 2))
+        })
+      const firstFrameScope = '/api/qingmu/projects/project-1/episodes/episode-1'
+        + `/storyboard-revisions/${PROMPT_IR_STORYBOARD_REVISION_ID}`
+        + `/frames/${PROMPT_IR_FRAME_ID}/first-frame-selection`
+      const selectionStateResponse = await fetch(`${writerFixture.baseUrl}${firstFrameScope}`)
+      expect(selectionStateResponse.status).toBe(200)
+      const selectionState = await selectionStateResponse.json() as {
+        candidates: ReadonlyArray<{ assetId: string; materializedSha256: string }>
+      }
+      expect(selectionState.candidates).toHaveLength(1)
+      const selectedCandidate = selectionState.candidates[0]
+      if (selectedCandidate === undefined) throw new Error('first-frame candidate is missing')
+      const stalePreviewStatus = await page.evaluate(async ({ assetId, storyboardRevisionId, frameId }) => {
+        const query = new URLSearchParams({
+          projectId: 'project-1', episodeId: 'episode-1', storyboardRevisionId, frameId,
+          assetId, expectedMaterializedSha256: '0'.repeat(64),
+        })
+        return (await fetch(`/api/qingmu/first-frame-selection/media?${query.toString()}`)).status
+      }, {
+        assetId: selectedCandidate.assetId,
+        storyboardRevisionId: PROMPT_IR_STORYBOARD_REVISION_ID,
+        frameId: PROMPT_IR_FRAME_ID,
+      })
+      expect(stalePreviewStatus).toBe(409)
+      await first.director.getByRole('button', {
+        name: '点击加载并校验候选图片', exact: true,
+      }).click()
+      await first.production.getByRole('img', {
+        name: `首帧候选（必须显式选择） ${selectedCandidate.assetId}`, exact: true,
+      }).waitFor()
+      let lostSelectionResponses = 0
+      let lostSelectionUpstream: { status: number; body: string } | undefined
+      await page.route('**/api/qingmu/first-frame-selection/decision?*', async (route) => {
+        lostSelectionResponses += 1
+        const upstream = await route.fetch()
+        lostSelectionUpstream = { status: upstream.status(), body: await upstream.text() }
+        await route.abort('failed')
+      }, { times: 1 })
+      await first.production.getByRole('checkbox', {
+        name: '我确认选择此候选作为本镜头首帧', exact: true,
+      }).check()
+      await first.production.getByRole('button', { name: '选为本镜头首帧', exact: true }).dblclick()
+      await expect.poll(() => lostSelectionResponses).toBe(1)
+      await expect.poll(() => lostSelectionUpstream).toBeDefined()
+      if (lostSelectionUpstream?.status !== 200) {
+        const current = await fetch(`${writerFixture.baseUrl}${firstFrameScope}`).then(async response => await response.json() as unknown)
+        throw new Error(JSON.stringify({ lostSelectionUpstream, current }, null, 2))
+      }
+      await expect.poll(async () => (await writerState()).firstFrames).toEqual({
+        assets: 1, selected: 1, receipts: 1,
+      })
+      await first.director.getByText(/结果未知时只允许重读首帧状态，不会重发选择。/u).waitFor()
+      await first.director.getByRole('button', {
+        name: '检查首帧生成条件（不调用模型）', exact: true,
+      }).click()
+      await first.production.getByText(/首帧选择回执 SHA:/u).waitFor()
+      const selectionPosts = capturedRequests.filter(request => request.method === 'POST'
+        && new URL(request.path, 'http://127.0.0.1').pathname === firstFrameScope)
+      expect(selectionPosts).toHaveLength(1)
+      await first.production.getByRole('button', { name: '读取视频报价', exact: true }).click()
+      const paidConfirmationText = '我确认本次镜头视频生成最高费用为 0.2000 CNY。'
+      await first.production.getByText(`服务端确认原文：${paidConfirmationText}`, { exact: true }).waitFor()
+      const paidConfirmation = first.production.getByRole('checkbox', { name: paidConfirmationText, exact: true })
+      await paidConfirmation.check()
+      const driftControl = await fetch(`${writerFixture.baseUrl}/__fixture/drift-next-first-frame-reservation`, {
+        method: 'POST',
+      })
+      expect(driftControl.status).toBe(200)
+      const driftResponsePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng-command/queueProductionTake')
+      await first.production.getByRole('button', { name: '排队 Take 1（初始）', exact: true }).click()
+      const driftResponse = await driftResponsePromise
+      expect(driftResponse.status()).toBe(200)
+      const driftWire = await driftResponse.json() as unknown
+      if (!isRecord(driftWire) || !isRecord(driftWire.result) || !isRecord(driftWire.result.error)) {
+        throw new Error(`drift rejection response contract mismatch: ${JSON.stringify(driftWire)}`)
+      }
+      expect(driftWire.result.ok).toBe(false)
+      expect(driftWire.result.error.message).toContain('HTTP 409')
+      const afterDrift = await writerState()
+      expect(afterDrift.writerCalls).toBe(1)
+      expect(afterDrift.tasks).toEqual([])
+      expect(afterDrift.providerCalls).toBe(0)
+      expect(afterDrift.routeStatuses).toEqual([409])
+      expect(afterDrift.firstFrames).toEqual({ assets: 2, selected: 1, receipts: 1 })
+      expect(afterDrift.counts).toMatchObject({
+        generation_tasks: 0,
+        provider_preflights: 1,
+        provider_authorization_reservations: 0,
+        provider_submission_outbox: 0,
+        provider_budget_events: 0,
+      })
+      const postDriftSelection = await fetch(`${writerFixture.baseUrl}${firstFrameScope}`)
+      expect(postDriftSelection.status).toBe(200)
+      const postDriftState = await postDriftSelection.json() as {
+        candidates: ReadonlyArray<{ assetId: string; materializedSha256: string }>
+        selectedAssetId: string | null
+      }
+      expect(postDriftState.selectedAssetId).toBe(selectedCandidate.assetId)
+      expect(postDriftState.candidates.find(candidate => candidate.assetId === selectedCandidate.assetId))
+        .toMatchObject({ materializedSha256: selectedCandidate.materializedSha256 })
+      await page.reload({ waitUntil: 'load' })
+      const retry = await openProduction()
+      await retry.director.getByRole('button', {
+        name: '检查首帧生成条件（不调用模型）', exact: true,
+      }).click()
+      await retry.production.getByText(/首帧选择回执 SHA:/u).waitFor()
+      await retry.production.getByRole('button', { name: '读取视频报价', exact: true }).click()
+      await retry.production.getByRole('checkbox', { name: paidConfirmationText, exact: true }).check()
+      const markerPrefix = [
+        'qingmu:production-take-recovery:v2', 'project-1', 'episode-1',
+        PROMPT_IR_STORYBOARD_REVISION_ID, PROMPT_IR_FRAME_ID,
+      ].map(encodeURIComponent).join(':')
+      let lostResponses = 0
+      let lostUpstream: { status: number; body: string } | undefined
+      await page.route('**/qingmu-yimeng-command/queueProductionTake', async (route) => {
+        lostResponses += 1
+        const upstream = await route.fetch()
+        lostUpstream = { status: upstream.status(), body: await upstream.text() }
+        await route.abort('failed')
+      }, { times: 1 })
+      await retry.production.getByRole('button', { name: '按原 Take 意图恢复', exact: true }).dblclick()
+      await expect.poll(() => page.evaluate(prefix => Object.keys(localStorage)
+        .filter(key => key.startsWith(prefix)).length, markerPrefix)).toBe(1)
+      await expect.poll(() => lostResponses).toBe(1)
+      await expect.poll(() => lostUpstream, { timeout: 20_000 }).toBeDefined()
+      expect(lostUpstream?.status).toBe(200)
+      expect(lostUpstream?.body).toContain('"result"')
+      const lostEnvelope = JSON.parse(lostUpstream!.body) as { result?: { ok?: boolean } }
+      if (lostEnvelope.result?.ok !== true) {
+        throw new Error(`${lostUpstream!.body}\nWriter fixture stderr:\n${writerFixture.stderr()}`)
+      }
+      await expect.poll(async () => (await writerState()).tasks.length).toBe(1)
+      expect(lostResponses).toBe(1)
+      expect((await writerState()).routeStatuses).toEqual([409, 201])
+
+      writerFixture = await restartProductionTakeWriterFixture(writerFixture)
+      await restartHost()
+      const recovered = await openProduction()
+      const hostRestartWarnings = tripwire.warnings.splice(hostRestartWarningStart)
+      expect(hostRestartWarnings.length).toBeGreaterThan(0)
+      expect(hostRestartWarnings.every(message => /^\[web-runtime\] connection lost, retry #\d+$/u.test(message))).toBe(true)
+      await recovered.production.getByRole('button', { name: '按原 Take 意图恢复', exact: true }).click()
+      await recovered.production.getByText('Writer 已排队', { exact: true }).waitFor({ timeout: 30_000 })
+      await recovered.production.getByText('排队不等于已生成；本回执不代表内容批准、人工签收或发布。', {
+        exact: true,
+      }).waitFor()
+      expect(await page.evaluate(prefix => Object.keys(localStorage)
+        .filter(key => key.startsWith(prefix)).length, markerPrefix)).toBe(0)
+      const afterRecovery = await writerState()
+      expect(afterRecovery.writerCalls).toBe(0)
+      expect(afterRecovery.tasks).toHaveLength(1)
+      expect(afterRecovery.providerCalls).toBe(0)
+      expect(afterRecovery.promptOverrideCalls).toBe(0)
+      expect(afterRecovery.routeStatuses).toEqual([200])
+      expect(afterRecovery.counts).toMatchObject({
+        generation_tasks: 1,
+        provider_preflights: 2,
+        provider_authorization_reservations: 0,
+        provider_submission_outbox: 0,
+        provider_budget_events: 0,
+      })
+
+      const freshContext = await browser.newContext({ viewport: { width: 1680, height: 1100 }, locale: ZH_BROWSER_LOCALE })
+      try {
+        await freshContext.addCookies(await page.context().cookies(scaffold.baseUrl))
+        const freshPage = await freshContext.newPage()
+        await freshPage.goto(page.url(), { waitUntil: 'load' })
+        const fresh = await openProduction(freshPage)
+        await fresh.director.getByRole('button', {
+          name: '检查首帧生成条件（不调用模型）', exact: true,
+        }).click()
+        await fresh.production.getByText(/首帧选择回执 SHA:/u).waitFor({ timeout: 5_000 })
+          .catch(async () => {
+            throw new Error(JSON.stringify({
+              alerts: await fresh.director.getByRole('alert').allTextContents(),
+              production: await fresh.production.innerText(),
+              state: await writerState(),
+              firstFrame: await fetch(`${writerFixture!.baseUrl}${firstFrameScope}`).then(async response => ({
+                status: response.status,
+                body: await response.text(),
+              })),
+            }, null, 2))
+          })
+        await fresh.production.getByRole('button', { name: '读取视频报价', exact: true }).click()
+        await fresh.production.getByRole('checkbox', {
+          name: paidConfirmationText,
+        }).check()
+        await fresh.production.getByRole('button', { name: '排队 Take 1（初始）', exact: true }).click()
+        await fresh.production.getByText('Writer 已排队', { exact: true }).waitFor({ timeout: 30_000 })
+        const afterFreshBrowser = await writerState()
+        expect(afterFreshBrowser.tasks).toHaveLength(1)
+        expect(afterFreshBrowser.writerCalls).toBe(0)
+        expect(afterFreshBrowser.routeStatuses).toEqual([200, 200])
+      } finally {
+        await freshContext.close()
+      }
+
+      await fetch(`${writerFixture.baseUrl}/__fixture/finish-active`, { method: 'POST' })
+      await recovered.director.getByRole('button', {
+        name: '检查首帧生成条件（不调用模型）', exact: true,
+      }).click()
+      await recovered.production.getByText(/首帧选择回执 SHA:/u).waitFor()
+      await recovered.production.getByRole('button', { name: '读取视频报价', exact: true }).click()
+      await recovered.production.getByRole('checkbox', {
+        name: paidConfirmationText,
+      }).check()
+      const takeTwoResponsePromise = page.waitForResponse(response =>
+        new URL(response.url()).pathname === '/qingmu-yimeng-command/queueProductionTake')
+      await recovered.production.getByRole('button', { name: '排队 Take 2（定向返工）', exact: true }).click()
+      const takeTwoResponse = await takeTwoResponsePromise
+      const takeTwoBody = await takeTwoResponse.text()
+      const takeTwoEnvelope = JSON.parse(takeTwoBody) as { result?: { ok?: boolean } }
+      if (takeTwoEnvelope.result?.ok !== true) {
+        throw new Error(`${takeTwoBody}\nWriter state:\n${JSON.stringify(await writerState())}\nWriter fixture stderr:\n${writerFixture.stderr()}`)
+      }
+      await expect.poll(() => recovered.production.textContent(), { timeout: 30_000 }).toContain('2 / 2')
+      const takeThree = recovered.production.getByRole('button', { name: 'Take 3 不可用（上限 2）', exact: true })
+      expect(await takeThree.isDisabled()).toBe(true)
+      const afterTakeTwo = await writerState()
+      expect(afterTakeTwo.writerCalls).toBe(1)
+      expect(afterTakeTwo.tasks).toHaveLength(2)
+      expect(afterTakeTwo.providerCalls).toBe(0)
+      expect(afterTakeTwo.counts).toMatchObject({
+        generation_tasks: 2,
+        provider_preflights: 3,
+        provider_authorization_reservations: 0,
+        provider_submission_outbox: 0,
+        provider_budget_events: 0,
+      })
+
+      const takeOneIntent = browserRpcRequests.slice(rpcStart)
+        .find(request => request.path === '/qingmu-yimeng-command/queueProductionTake')?.body
+      if (!isRecord(takeOneIntent) || !isRecord(takeOneIntent.payload)) {
+        throw new Error('first Production Take browser intent is missing')
+      }
+      const takeThreeWire = await page.evaluate(async (payload) => {
+        const response = await fetch('/qingmu-yimeng-command/queueProductionTake', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            type: 'client-request',
+            rpcId: 'qingmu-production-take-3-cap',
+            method: 'queueProductionTake',
+            payload,
+          }),
+        })
+        return { status: response.status, body: await response.json() as unknown }
+      }, { ...takeOneIntent.payload, takeKind: 'targeted_rework', takeOrdinal: 3 })
+      expect(takeThreeWire.status).toBe(200)
+      if (!isRecord(takeThreeWire.body) || !isRecord(takeThreeWire.body.result)
+        || !isRecord(takeThreeWire.body.result.error)) {
+        throw new Error(`third Take response contract mismatch: ${JSON.stringify(takeThreeWire.body)}`)
+      }
+      expect(takeThreeWire.body.result.ok).toBe(false)
+      expect(takeThreeWire.body.result.error.message).toContain('HTTP 409')
+      await expect.poll(async () => (await writerState()).routeStatuses.length).toBe(4)
+      const afterTakeThree = await writerState()
+      expect(afterTakeThree.tasks).toHaveLength(2)
+      expect(afterTakeThree.routeStatuses).toEqual([200, 200, 201, 409])
+      expect(afterTakeThree.providerCalls).toBe(0)
+      expect(afterTakeThree.counts).toMatchObject({
+        generation_tasks: 2,
+        provider_preflights: 3,
+        provider_authorization_reservations: 0,
+        provider_submission_outbox: 0,
+        provider_budget_events: 0,
+      })
+
+      const productionRpcs = browserRpcRequests.slice(rpcStart)
+        .filter(request => request.path === '/qingmu-yimeng-command/queueProductionTake')
+      expect(productionRpcs).toHaveLength(5)
+      for (const request of productionRpcs) {
+        if (!isRecord(request.body) || !isRecord(request.body.payload)) {
+          throw new Error('production Take browser intent missing')
+        }
+        expect(Object.keys(request.body.payload).sort()).toEqual([
+          'projectId', 'episodeId', 'storyboardRevisionId', 'frameId',
+          'takeKind', 'takeOrdinal', 'confirmReady',
+          'firstFrameSelectionReceiptSha256', 'selectedFirstFrameAssetId',
+          'selectedFirstFrameMaterializedSha256', 'videoPreflightSha256',
+          'videoQuoteProjectionSha256', 'maximumReservationCny', 'candidateCount',
+          'maxAttempts', 'selectAsOfficial', 'paidConfirmed', 'paidConfirmationText',
+        ].sort())
+        for (const forbidden of ['ownerId', 'ready', 'selected', 'approved', 'force', 'provider', 'model', 'route']) {
+          expect(request.body.payload).not.toHaveProperty(forbidden)
+        }
+      }
+      expect((productionRpcs[1]?.body as { payload?: unknown }).payload)
+        .toEqual((productionRpcs[0]?.body as { payload?: unknown }).payload)
+
+      const aria = (await captureStableAria(
+        page,
+        'role=region[name="正式生产 Take"]',
+        scaffold.workspaceCwd,
+      ))
+        .replace(/task_[0-9a-f]+/g, 'task_<id>')
+        .replace(/asset_[0-9a-f]+/g, 'asset_<id>')
+        .replace(/(首帧选择回执 SHA: )[0-9a-f]{64}/gu, '$1<sha256>')
+      const goldenPath = join(REPO_ROOT, 'apps/web/tests/snapshots/qingmu-production-take/ui.expected.md')
+      if (scaffold.mode === 'refresh') await mkdir(dirname(goldenPath), { recursive: true })
+      await compareOrRefreshGolden(goldenPath, aria, scaffold.mode)
+      for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }]) {
+        await page.setViewportSize(viewport)
+        await recovered.production.scrollIntoViewIfNeeded()
+        expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false)
+        expect(await recovered.production.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
+        const screenshotDir = process.env.QINGMU_E1_C_SCREENSHOT_DIR?.trim()
+        if (screenshotDir) {
+          await mkdir(screenshotDir, { recursive: true })
+          await page.screenshot({ path: join(screenshotDir, `production-take-${viewport.width}x${viewport.height}.png`) })
+        }
+      }
+      expect(await page.content()).not.toContain(YIMENG_TOKEN)
+      expect(await page.locator('html').innerHTML()).not.toContain(IMAGO_ATTESTATION_KEY)
+      expect(tripwire.pageErrors).toEqual([])
+      expect(tripwire.warnings.filter(message =>
+        !/^\[web-runtime\] connection lost, retry #\d+$/u.test(message))).toEqual([])
+      await recovered.dialog.getByRole('button', { name: '关闭青木制作驾驶舱' }).click()
     }, 120_000)
 
     it('connects the Ready PromptIR edit and separate selection pipeline with GET-only recovery', async () => {

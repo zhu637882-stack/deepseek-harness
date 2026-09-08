@@ -17,6 +17,11 @@ import { QingmuCockpit, type QingmuCockpitProps } from '../src/client/QingmuCock
 import { buildHeroFrameRelationRequest, buildShotRelationMethodRequest } from '../src/client/ShotRelationMethodView.tsx'
 import { ShotRelationsView } from '../src/client/ShotRelationsView.tsx'
 import type { QingmuYimengPort } from '../src/client/contracts.ts'
+import type {
+  DirectorContextClientPort,
+  DirectorObjectScope,
+} from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
+import { parseQingmuEntryScope, type QingmuEntryScope } from '../src/client/slots.ts'
 import { zh } from '../src/client/locales.ts'
 import { unavailableWorksetResponse } from './fixtures/workset-method.client.ts'
 import { continuityResponse } from './fixtures/continuity-method.client.ts'
@@ -624,9 +629,14 @@ function shotRelationMethod(request: Parameters<QingmuYimengPort['shotRelationMe
 }
 
 function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
-  return {
+  return Object.assign({
+    queueProductionTake: vi.fn(async () => { throw new Error('Production Take uses a separate fixture') }),
+    readCreativeContract: vi.fn<QingmuYimengPort['readCreativeContract']>(async request => ({ schema: 'jason.qingmu-creative-contract-state.v1' as const,
+      projectId: request.projectId, configured: false, locked: false, revision: null, sha256: null,
+      contract: null, sourceText: null, message: '创作合同未配置' })),
     editorialHandoff: vi.fn(async () => { throw new Error('Editorial handoff uses a separate fixture') }),
     firstFrameQuote: vi.fn(async () => { throw new Error('First-frame quote uses a separate fixture') }),
+    videoQuote: vi.fn(async () => { throw new Error('Video quote uses a separate fixture') }),
     promptIrBootstrap: vi.fn(async () => { throw new Error('PromptIR bootstrap uses a separate fixture') }),
     promptIrBootstrapMethod: vi.fn(async () => { throw new Error('PromptIR bootstrap method uses a separate fixture') }),
     bootstrapPromptIr: vi.fn(async () => { throw new Error('PromptIR bootstrap command uses a separate fixture') }),
@@ -636,6 +646,11 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
       scriptRevision: 0, scriptSha256: null, scenes: [], storyboard: null, planning: null })),
     requestDirectorProposal: vi.fn(async () => { throw new Error('Director replay uses a separate fixture') }),
     checkDirectorProposalFreshness: vi.fn(async () => { throw new Error('Director freshness uses a separate fixture') }),
+    readDirectorProviderAvailability: vi.fn(async () => ({ enabled: false as const, provider: null, model: null,
+      maxPaidCny: null, maxInputTokens: null, maxOutputTokens: null, maxAttempts: null, maxRetries: null,
+      projectId: null, episodeId: null, methodPackageVersion: null, methodPackageSha256: null })),
+    issueDirectorProviderWorkOrder: vi.fn(async () => { throw new Error('Paid Director uses a separate fixture') }),
+    readDirectorProviderWorkOrderStatus: vi.fn(async () => { throw new Error('Paid Director status uses a separate fixture') }),
     saveScenePlanning: vi.fn(async () => { throw new Error('Planning uses a separate fixture') }),
     recoverScenePlanning: vi.fn(async () => { throw new Error('Planning uses a separate fixture') }),
     initializeProject: vi.fn(async () => { throw new Error('Creation uses a separate fixture') }),
@@ -872,16 +887,26 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     previewStoryboardCanvas: vi.fn(async () => { throw new Error('storyboard canvas preview is not part of this fixture') }),
     commitStoryboardCanvas: vi.fn(async () => { throw new Error('storyboard canvas commit is not part of this fixture') }),
     recoverStoryboardCanvasCommit: vi.fn(async () => { throw new Error('storyboard canvas recovery is not part of this fixture') }),
-    ...overrides,
-  }
+  }, overrides)
 }
 
-function mount(port: QingmuYimengPort) {
+function mount(port: QingmuYimengPort, entryScope?: QingmuEntryScope | null, applicationShell = false) {
   const root = document.createElement('div')
   root.id = 'root'
   document.body.append(root)
+  const directorBridge: DirectorContextClientPort = {
+    clear: vi.fn(async () => ({ status: 'cleared' as const, state: null, changed: true, manualWorkAllowed: true as const })),
+    enter: vi.fn(async (_sessionId: string, scope: DirectorObjectScope) => ({ status: 'current' as const, changed: true, manualWorkAllowed: true as const,
+      state: { version: 1 as const, binding: { scope, contextSnapshotSha256: 'd'.repeat(64) }, proposal: null,
+        transition: 'enter' as const } })),
+    recover: vi.fn(async () => ({ status: 'unbound' as const, manualWorkAllowed: true as const })),
+    bindProposal: vi.fn(async () => { throw new Error('proposal binding uses a separate fixture') }),
+  }
+  const useSessions = ((selector: (state: { current: string }) => unknown) => selector({ current: 'session_1' })) as never
+  const entryScopeProps = entryScope === undefined ? {} : { entryScope }
   return render(
-    <QingmuCockpit wide port={port} t={t} useSessions={neverHook} useWorkspaces={neverHook} />,
+    <QingmuCockpit wide port={port} directorBridge={directorBridge} {...entryScopeProps} t={t} applicationShell={applicationShell}
+      useSessions={useSessions} useWorkspaces={neverHook} />,
     { container: root },
   )
 }
@@ -889,11 +914,97 @@ function mount(port: QingmuYimengPort) {
 beforeEach(() => {
   document.body.innerHTML = ''
   sessionStorage.clear()
+  localStorage.clear()
+  history.replaceState({}, '', '/')
 })
 
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+})
+
+describe('embedded Qingmu entry scope', () => {
+  it('occupies the application instead of opening a cockpit over the conversation', async () => {
+    const port = makePort()
+    mount(port, undefined, true)
+    const navigation = screen.getByRole('navigation', { name: '创作流程' })
+    expect(within(navigation).getAllByRole('button')).toHaveLength(5)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('button', { name: zh.trigger })).toBeNull()
+    await waitFor(() => { expect(port.workflow).toHaveBeenCalled() })
+    expect(document.getElementById('root')?.hasAttribute('inert')).toBe(false)
+    fireEvent.click(within(navigation).getByRole('button', { name: /故事/ }))
+    expect(await screen.findByRole('heading', { name: '故事' })).toBeTruthy()
+    expect(new URLSearchParams(location.search).get('qingmuView')).toBe('story')
+    fireEvent.click(within(navigation).getByRole('button', { name: /拍摄与审看/ }))
+    expect(screen.getByRole('navigation', { name: '创作流程' })).toBe(navigation)
+    expect(port.commitScript).not.toHaveBeenCalled()
+    expect(port.createHumanDecision).not.toHaveBeenCalled()
+    expect(port.selectTakeVersion).not.toHaveBeenCalled()
+  })
+
+  it('restores the chosen creative step on reload without adopting or submitting', async () => {
+    history.replaceState({}, '', '/?qingmuView=story')
+    const port = makePort()
+    mount(port, undefined, true)
+    expect(await screen.findByRole('heading', { name: '故事' })).toBeTruthy()
+    await waitFor(() => { expect(port.workflow).toHaveBeenCalled() })
+    expect(screen.getByRole('button', { name: /01故事/ }).getAttribute('aria-current')).toBe('step')
+    expect(port.commitScript).not.toHaveBeenCalled()
+    expect(port.createHumanDecision).not.toHaveBeenCalled()
+  })
+
+  it('decodes only a complete, bounded project and episode handoff', () => {
+    expect(parseQingmuEntryScope('http://127.0.0.1:49901/')).toBeUndefined()
+    expect(parseQingmuEntryScope('http://127.0.0.1:49901/?qingmuEmbedded=1&qingmuProjectId=project-2'))
+      .toBeNull()
+    expect(parseQingmuEntryScope('http://127.0.0.1:49901/?qingmuEmbedded=1&qingmuProjectId=project-2&qingmuEpisodeId=episode-3'))
+      .toEqual({ projectId: 'project-2', episodeId: 'episode-3' })
+  })
+
+  it('locks an embedded panel to the outer project and episode instead of selecting the first rows', async () => {
+    const projects = vi.fn(async () => ({ items: [
+      { id: 'project-1', name: '错误默认项目' }, { id: 'project-2', name: '外层当前项目' },
+    ], pagination: { page: 1, pageSize: 100, pages: 1, total: 2 } }))
+    const episodes = vi.fn(async (request: Parameters<QingmuYimengPort['episodes']>[0]) => ({
+      items: request.projectId === 'project-2'
+        ? [{ id: 'episode-3', projectId: 'project-2', episodeNumber: 1, name: '外层当前集' }]
+        : [{ id: 'episode-1', projectId: 'project-1', episodeNumber: 1, name: '错误默认集' }],
+    }))
+    const workflow = vi.fn(async (request: Parameters<QingmuYimengPort['workflow']>[0]) =>
+      workflowFor(request.projectId, request.episodeId, 'bound-shot', '绑定镜头'))
+    const readScenePlanning = vi.fn(async (request: CreationScope) => ({
+      schema: 'jason.qingmu-scene-planning-state.v1' as const, ...request,
+      scriptRevision: 0, scriptSha256: null, scenes: [], storyboard: null, planning: null,
+    }))
+    mount(makePort({ projects, episodes, workflow, readScenePlanning }), { projectId: 'project-2', episodeId: 'episode-3' })
+    fireEvent.click(screen.getByRole('button', { name: zh.trigger }))
+    const dialog = await screen.findByRole('dialog', { name: zh.title })
+    await waitFor(() => {
+      expect(workflow).toHaveBeenCalledWith(
+        { projectId: 'project-2', episodeId: 'episode-3' }, expect.any(AbortSignal),
+      )
+    })
+    expect(workflow).not.toHaveBeenCalledWith(
+      { projectId: 'project-1', episodeId: 'episode-1' }, expect.anything(),
+    )
+    await waitFor(() => {
+      expect(readScenePlanning).toHaveBeenCalledWith({ projectId: 'project-2', episodeId: 'episode-3' })
+    })
+    expect(readScenePlanning).not.toHaveBeenCalledWith({ projectId: '', episodeId: '' })
+    expect(within(dialog).getByRole('combobox', { name: zh.project }).hasAttribute('disabled')).toBe(true)
+    expect(within(dialog).getByRole('combobox', { name: zh.episode }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('fails closed when the outer project is absent instead of falling back', async () => {
+    const episodes = vi.fn(async () => ({ items: [] }))
+    const workflow = vi.fn(async () => WORKFLOW)
+    mount(makePort({ episodes, workflow }), { projectId: 'project-missing', episodeId: 'episode-missing' })
+    fireEvent.click(screen.getByRole('button', { name: zh.trigger }))
+    expect((await screen.findByRole('alert')).textContent).toContain('拒绝回退到其他项目')
+    expect(episodes).not.toHaveBeenCalled()
+    expect(workflow).not.toHaveBeenCalled()
+  })
 })
 
 describe('buildShotRelationMethodRequest', () => {
@@ -1034,17 +1145,65 @@ describe('ShotRelationsView', () => {
     expect(onSelectShotId).toHaveBeenCalledOnce()
     expect(onSelectShotId).toHaveBeenCalledWith('shot-b')
   })
+
+  it('shows the exact owner-final receipt as the current-reference proof', () => {
+    const finalizationReceiptIdentity = '8'.repeat(64)
+    const ownerReference = {
+      assetId: 'asset-character-owner-final-1',
+      sha256: '7'.repeat(64),
+      lineage: {
+        projectId: 'project-1',
+        sourceEpisodeId: 'episode-1',
+        ownerType: 'actor' as const,
+        ownerId: 'character-1',
+        role: 'turnaround_front',
+        sourceRevisionId: 'revision-character-owner-final-1',
+        qualificationKind: 'owner_human_finalization' as const,
+        finalizationReceiptIdentity,
+        humanReviewIdentity: '9'.repeat(64),
+        inheritedPrescreenReviewIdentity: 'a'.repeat(64),
+        actorCohortIdentity: 'b'.repeat(64),
+      },
+    }
+    const relations: YimengShotRelationsProjection = {
+      ...structuredClone(SHOT_RELATIONS),
+      shots: SHOT_RELATIONS.shots.map((shot, shotIndex) => ({
+        ...structuredClone(shot),
+        elements: shot.elements.map((element, elementIndex) => (
+          shotIndex === 0 && elementIndex === 0
+            ? {
+              ...structuredClone(element),
+              currentReferenceAvailability: 'available' as const,
+              currentReference: ownerReference,
+            }
+            : structuredClone(element)
+        )),
+      })),
+    }
+
+    render(
+      <ShotRelationsView
+        relations={relations}
+        selectedShotId="frame-1"
+        onSelectShotId={vi.fn()}
+        t={t}
+      />,
+    )
+
+    const selected = document.querySelector('[data-shot-id="frame-1"]')
+    expect(selected).toBeTruthy()
+    if (!(selected instanceof HTMLElement)) throw new Error('Shot detail is missing')
+    expect(within(selected).getByText('project-1 · episode-1 · actor:character-1')).toBeTruthy()
+    expect(within(selected).getByText(finalizationReceiptIdentity)).toBeTruthy()
+  })
 })
 
 describe('QingmuCockpit journey', () => {
-  it('opens the five-tab projection, states authority boundaries, and restores trigger focus on close', async () => {
+  it('opens directly in the director workspace, retains all projections, and restores trigger focus on close', async () => {
     const workflow = vi.fn(async () => WORKFLOW)
     const port = makePort({ workflow })
     mount(port)
     const trigger = screen.getByRole('button', { name: zh.trigger })
-    trigger.focus()
-    fireEvent.click(trigger)
-
     const dialog = await screen.findByRole('dialog', { name: zh.title })
     await waitFor(() => {
       expect(workflow).toHaveBeenCalledWith(
@@ -1069,6 +1228,9 @@ describe('QingmuCockpit journey', () => {
       zh.tabGeneration,
       zh.tabDelivery,
     ])
+    expect(within(dialog).getByRole('tab', { name: zh.tabDirector }).getAttribute('aria-selected')).toBe('true')
+    expect(within(dialog).getByRole('region', { name: '场景与镜头规划' })).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabOverview }))
     expect(within(dialog).getByRole('heading', { name: zh.stages })).toBeTruthy()
 
     fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabAssets }))
@@ -1076,7 +1238,7 @@ describe('QingmuCockpit journey', () => {
     expect(within(dialog).getByText(zh.humanPending)).toBeTruthy()
 
     fireEvent.click(within(dialog).getByRole('tab', { name: zh.tabShots }))
-    expect(within(dialog).getByText('雨夜相遇')).toBeTruthy()
+    expect(within(dialog).getByRole('heading', { name: '雨夜相遇' })).toBeTruthy()
     expect(within(dialog).getAllByText('frame-1').length).toBeGreaterThanOrEqual(1)
     expect(within(dialog).getAllByText('scene-1').length).toBeGreaterThanOrEqual(1)
     expect(within(dialog).getByText('beat-1')).toBeTruthy()
@@ -1200,7 +1362,9 @@ describe('QingmuCockpit journey', () => {
     await waitFor(() => {
       expect(dialog.querySelector('[data-shot-id="frame-1"]')).toBeTruthy()
     })
-    expect(storageWrite).not.toHaveBeenCalled()
+    const scopedKeys = storageWrite.mock.calls.every(([key]) =>
+      /^qingmu:cockpit:shooting-workspace:v1:project-1:episode-1:(shot|tab)$/.test(String(key)))
+    expect(scopedKeys).toBe(true)
   })
 
   it('fails closed when the IMAGO relation method claims a project-state write', async () => {

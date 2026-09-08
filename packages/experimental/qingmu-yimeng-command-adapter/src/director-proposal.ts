@@ -1,7 +1,7 @@
 /** Host-only deterministic replay proposal over a fresh Yimeng director snapshot. */
 import { createHash } from 'node:crypto'
 import type { ImagoDirectorReplayMethodResponse } from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter/types'
-import type { CreationScope } from './creation.ts'
+import { normalizeCreativeContract, type CreationScope, type CreativeContract } from './creation.ts'
 import type { PlanningShot } from './scene-planning.ts'
 
 /** Advisory proposal variants allowed by the replay-only seam. */
@@ -19,13 +19,27 @@ export interface DirectorProposalRequest extends CreationScope {
 /** SHA-bound read-only Yimeng context for one real scene-planning shot. */
 export interface DirectorContextSnapshot extends CreationScope {
   readonly schema: 'jason.qingmu-director-context-snapshot.v1'
+  /** Absent on persisted legacy contexts hashed with their complete media URLs. */
+  readonly contextHashPolicy?: 'writer-media-transport-v1'
   readonly sceneId: string
   readonly shotId: string
   readonly script: { readonly revision: number; readonly sha256: string }
   readonly sceneSource: Readonly<Record<string, unknown>>
   readonly sourceScene: Readonly<Record<string, unknown>>
+  /** Writer's complete context extension is absent only for legacy snapshots. */
+  readonly episodeScenes?: readonly Readonly<Record<string, unknown>>[]
+  readonly cast?: readonly Readonly<Record<string, unknown>>[]
+  readonly adjacentShots?: {
+    readonly previous: Readonly<Record<string, unknown>> | null
+    readonly next: Readonly<Record<string, unknown>> | null
+  }
   readonly storyboard: { readonly id: string; readonly version: number; readonly sourceHash: string; readonly status: 'Ready' }
   readonly shot: PlanningShot & { readonly id: string }
+  readonly creativeContract: {
+    readonly revision: 1
+    readonly sha256: string
+    readonly contract: CreativeContract
+  } | null
   readonly selectedReferences: readonly Readonly<Record<string, unknown>>[]
   readonly sourceTime: string
   readonly contextSnapshotSha256: string
@@ -231,6 +245,24 @@ export function parseDirectorProposalRequest(value: unknown, helpers: Helpers): 
 }
 
 /**
+ * Parse the exact read-only context scope used by the Host bridge.
+ * @param value Untrusted Host request payload.
+ * @param helpers Adapter error factories and canonical JSON helper.
+ * @returns A validated scene and shot scoped context request.
+ */
+export function parseDirectorContextRequest(value: unknown, helpers: Helpers): DirectorProposalRequest {
+  const root = object(value, helpers.inputError, 'director context request')
+  exact(root, ['projectId', 'episodeId', 'sceneId', 'shotId'], helpers.inputError, 'director context request')
+  return {
+    projectId: id(root.projectId, helpers.inputError, 'projectId'),
+    episodeId: id(root.episodeId, helpers.inputError, 'episodeId'),
+    sceneId: id(root.sceneId, helpers.inputError, 'sceneId'),
+    shotId: id(root.shotId, helpers.inputError, 'shotId'),
+    suggestionType: 'text_director_proposal',
+  }
+}
+
+/**
  * Validate the IMAGO replay method identity, authority flags and package SHA.
  * @param value Untrusted Host method response.
  * @param helpers Adapter error factories.
@@ -270,10 +302,13 @@ export function normalizeDirectorContext(
   helpers: Helpers,
 ): DirectorContextSnapshot {
   const root = object(value, helpers.responseError, 'director context')
+  const extended = ['episodeScenes', 'cast', 'adjacentShots']
+  const hasExtended = extended.some(key => Object.hasOwn(root, key))
   exact(root, ['schema', 'projectId', 'episodeId', 'sceneId', 'shotId', 'script', 'sceneSource', 'sourceScene',
-    'storyboard', 'shot', 'selectedReferences', 'sourceTime', 'contextSnapshotSha256', 'providerCalls',
+    'storyboard', 'shot', 'creativeContract', 'selectedReferences', 'sourceTime', 'contextSnapshotSha256', 'providerCalls',
     'costAmountCny', 'businessStateChanged', 'humanDecisionInferred', 'formalQcInferred', 'selectionGranted',
-    'readyGranted'], helpers.responseError, 'director context')
+    'readyGranted', ...(hasExtended ? extended : []),
+    ...(Object.hasOwn(root, 'contextHashPolicy') ? ['contextHashPolicy'] : [])], helpers.responseError, 'director context')
   if (root.schema !== 'jason.qingmu-director-context-snapshot.v1'
     || root.projectId !== expected.projectId || root.episodeId !== expected.episodeId
     || root.sceneId !== expected.sceneId || root.shotId !== expected.shotId) {
@@ -283,8 +318,32 @@ export function normalizeDirectorContext(
   digest(root.contextSnapshotSha256, helpers.responseError, 'director context SHA')
   const contextBody = { ...root }
   Reflect.deleteProperty(contextBody, 'contextSnapshotSha256')
+  if (Object.hasOwn(root, 'contextHashPolicy')) {
+    if (root.contextHashPolicy !== 'writer-media-transport-v1') {
+      throw helpers.responseError('director context hash policy invalid')
+    }
+    if (!Array.isArray(root.selectedReferences)) throw helpers.responseError('director context arrays invalid')
+    contextBody.selectedReferences = root.selectedReferences.map((value) => {
+      const ref = object(value, helpers.responseError, 'director reference')
+      return Object.hasOwn(ref, 'mediaUrl') ? { ...ref, mediaUrl: stableWriterMediaUrl(ref.mediaUrl) } : ref
+    })
+  }
   if (directorJcsSha256(contextBody, 'director context', helpers.responseError) !== root.contextSnapshotSha256) {
     throw helpers.responseError('director context SHA mismatch')
+  }
+  if (hasExtended) {
+    for (const field of ['episodeScenes', 'cast']) {
+      if (!Array.isArray(root[field])) throw helpers.responseError(`director ${field} must be an array`)
+      for (const item of root[field]) object(item, helpers.responseError, `director ${field} item`)
+    }
+    const adjacent = object(root.adjacentShots, helpers.responseError, 'director adjacent shots')
+    exact(adjacent, ['previous', 'next'], helpers.responseError, 'director adjacent shots')
+    for (const field of ['previous', 'next']) {
+      if (adjacent[field] !== null) {
+        const neighbor = object(adjacent[field], helpers.responseError, `director adjacent ${field}`)
+        id(neighbor.id, helpers.responseError, `director adjacent ${field} id`)
+      }
+    }
   }
   const shot = object(root.shot, helpers.responseError, 'director shot')
   if (shot.id !== expected.shotId) throw helpers.responseError('director shot identity mismatch')
@@ -297,7 +356,43 @@ export function normalizeDirectorContext(
   if (!Array.isArray(shot.dialogueLineIds) || !Array.isArray(root.selectedReferences)) {
     throw helpers.responseError('director context arrays invalid')
   }
+  if (root.creativeContract !== null) {
+    const binding = object(root.creativeContract, helpers.responseError, 'director creative contract')
+    exact(binding, ['revision', 'sha256', 'contract'], helpers.responseError, 'director creative contract')
+    if (binding.revision !== 1) throw helpers.responseError('director creative contract revision invalid')
+    const contract = normalizeCreativeContract(binding.contract, helpers.responseError, expected.projectId)
+    if (digest(binding.sha256, helpers.responseError, 'director creative contract SHA')
+      !== directorJcsSha256(contract, 'director creative contract', helpers.responseError)) {
+      throw helpers.responseError('director creative contract SHA mismatch')
+    }
+  }
   return value as DirectorContextSnapshot
+}
+
+/**
+ * Match Writer's raw URL projection without decoding or reordering query bytes.
+ * Only renewable signer fields are excluded from creative freshness; origin,
+ * media ID, variant and other query fields remain bound. Full paid prompt hashes
+ * still cover the actual URL, and this does not validate or extend access rights.
+ */
+function stableWriterMediaUrl(value: unknown): unknown {
+  if (typeof value !== 'string') return value
+  const pattern =
+    /^(https?:\/\/[-A-Za-z0-9.:\[\]]+(?:\/[A-Za-z0-9._~%+-]+)*\/api\/media\/[A-Za-z0-9_.:-]+)\?([A-Za-z0-9._~!$'()*+,;=:@%&/?-]+)$/
+  const match = pattern.exec(value)
+  if (!match || match[0] !== value) return value
+  const [, base, query] = match
+  if (base === undefined || query === undefined) return value
+  const parts = query.split('&')
+  const expires = parts.filter(part => part.startsWith('expires='))
+  const signatures = parts.filter(part => part.startsWith('signature='))
+  const [expiry] = expires
+  const [signature] = signatures
+  if (expires.length !== 1 || signatures.length !== 1
+    || expiry === undefined || signature === undefined
+    || !/^expires=[0-9]+$/.test(expiry) || !/^signature=[a-f0-9]{64}$/.test(signature)) return value
+  const remaining = parts.filter(part => part !== expiry && part !== signature)
+  return base + (remaining.length ? `?${remaining.join('&')}` : '')
 }
 
 /**

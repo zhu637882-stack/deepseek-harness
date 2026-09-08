@@ -29,12 +29,20 @@ import { EpisodeEvidenceLedger } from './EpisodeEvidenceLedger.tsx'
 import { EditorialHandoff } from './EditorialHandoff.tsx'
 import css from './QingmuCockpit.module.css'
 import { DirectorWorkspace } from './DirectorWorkspace.tsx'
+import { NativeDirectorSession } from './NativeDirectorSession.tsx'
+import { ShootingReviewWorkspace } from './ShootingReviewWorkspace.tsx'
+import { QingmuApplicationFrame, creativeStepFromSearch, creativeStepLabel, type CreativeStep } from './QingmuApplicationFrame.tsx'
 
-export type QingmuCockpitProps = PropsRuntime<'sidebar.footer.action'>
+export type QingmuCockpitProps = PropsRuntime<'root'>
+  & { readonly wide?: boolean; readonly onOpenTools?: () => void }
   & InjectFace<QingmuCockpitFace>
   & PropsLocale<'qingmuCockpit'>
 
 type Tab = 'overview' | 'director' | 'assets' | 'shots' | 'generation' | 'delivery'
+const STEP_TABS: Record<CreativeStep, Tab> = { story: 'overview', assets: 'assets', storyboard: 'director', shooting: 'shots', delivery: 'delivery' }
+function creativeStepForTab(tab: Tab): CreativeStep {
+  return (Object.entries(STEP_TABS).find(([, value]) => value === tab)?.[0] ?? 'shooting') as CreativeStep
+}
 
 const TABS: readonly { readonly id: Tab; readonly label: QingmuCockpitKey }[] = [
   { id: 'overview', label: 'tabOverview' },
@@ -77,6 +85,22 @@ function short(value: unknown): string {
   } catch {
     return '[unavailable]'
   }
+}
+
+function shootingWorkspaceKey(projectId: string, episodeId: string, field: 'shot' | 'tab'): string {
+  return `qingmu:cockpit:shooting-workspace:v1:${encodeURIComponent(projectId)}:${encodeURIComponent(episodeId)}:${field}`
+}
+
+function storedShootingWorkspaceValue(projectId: string, episodeId: string, field: 'shot' | 'tab'): string | null {
+  try { return localStorage.getItem(shootingWorkspaceKey(projectId, episodeId, field)) } catch { return null }
+}
+
+function saveShootingWorkspaceValue(projectId: string, episodeId: string, field: 'shot' | 'tab', value: string): void {
+  try { localStorage.setItem(shootingWorkspaceKey(projectId, episodeId, field), value) } catch { /* optional browser restoration only */ }
+}
+
+function clearShootingWorkspaceValue(projectId: string, episodeId: string, field: 'shot' | 'tab'): void {
+  try { localStorage.removeItem(shootingWorkspaceKey(projectId, episodeId, field)) } catch { /* optional browser restoration only */ }
 }
 
 function projectLabel(project: JsonRecord, fallback: string): string {
@@ -149,10 +173,15 @@ function errorMessage(error: unknown): string {
   return String(error)
 }
 
-/** Qingmu production cockpit mounted in the generic sidebar footer. */
-export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
-  const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<Tab>('overview')
+/** Qingmu product workspace; the unregistered modal branch supports older embedded callers. */
+export function QingmuCockpit({
+  wide, port, directorBridge, nativeDirectorSession, hostSync, entryScope, t, useSessions, applicationShell, onOpenTools,
+}: QingmuCockpitProps) {
+  const [open, setOpen] = useState(true)
+  const [tab, setTab] = useState<Tab>(() => applicationShell
+    ? STEP_TABS[creativeStepFromSearch(globalThis.location?.search ?? '')]
+    : new URLSearchParams(globalThis.location?.search ?? '').get('qingmuView') === 'shooting' ? 'shots' : 'director')
+  const [shootingAction, setShootingAction] = useState<string>()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
   const [health, setHealth] = useState<YimengHealth>()
@@ -164,6 +193,8 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   const [projection, setProjection] = useState<YimengWorkflowProjection>()
   const [selectedShotId, setSelectedShotId] = useState('')
   const [generationCatalog, setGenerationCatalog] = useState<YimengCapabilityCatalogResponse>()
+  const directorSessionId = useSessions(state => state.current)
+  const [directorRefresh, setDirectorRefresh] = useState(0)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
@@ -172,6 +203,21 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   const directorDirty = useRef(false)
   const onDirectorDirty = useCallback((dirty: boolean) => { directorDirty.current = dirty }, [])
   const mayLeaveDirector = (): boolean => !directorDirty.current || window.confirm(t('directorLeaveConfirm'))
+  useEffect(() => {
+    if (!applicationShell) return
+    const changed = () => {
+      if (mayLeaveDirector()) { setCreating(false); setTab(STEP_TABS[creativeStepFromSearch(location.search)]) }
+      else { const url = new URL(location.href); url.searchParams.set('qingmuView', creativeStepForTab(tab)); history.replaceState(history.state, '', url) }
+    }
+    window.addEventListener('popstate', changed)
+    return () => window.removeEventListener('popstate', changed)
+  }, [applicationShell, tab, t])
+  useEffect(() => {
+    if (!applicationShell) return
+    const url = new URL(location.href)
+    url.searchParams.set('qingmuView', creativeStepForTab(tab))
+    history.replaceState(history.state, '', url)
+  }, [applicationShell, tab])
   const handleGenerationCatalog = useCallback((result: YimengCapabilityCatalogResponse | undefined) => {
     setGenerationCatalog(result)
   }, [])
@@ -190,7 +236,16 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
     const request = begin()
     setLoading(true)
     setError(undefined)
+    const scopeLocked = entryScope !== undefined
+    const requestedScope = scopeLocked ? entryScope : preferred
+    if (scopeLocked) {
+      setProjectId('')
+      setEpisodeId('')
+      setProjection(undefined)
+      setSelectedShotId('')
+    }
     try {
+      if (requestedScope === null) throw new Error('外层项目与集绑定无效；导演工作区已拒绝载入。')
       const [healthResult, projectsResult] = await Promise.allSettled([
         port.health(request.controller.signal),
         port.projects({ page: 1, pageSize: 100 }, request.controller.signal),
@@ -201,10 +256,10 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
 
       const nextProjects = projectsResult.value.items
       setProjects(nextProjects)
-      const desiredProjectId = preferred?.projectId ?? projectId
-      const nextProjectId = nextProjects.some(item => stringOf(item.id) === desiredProjectId)
-        ? desiredProjectId
-        : stringOf(nextProjects[0]?.id) ?? ''
+      const desiredProjectId = requestedScope?.projectId ?? projectId
+      const projectExists = nextProjects.some(item => stringOf(item.id) === desiredProjectId)
+      if (scopeLocked && !projectExists) throw new Error('外层项目不属于当前登录用户；导演工作区已拒绝回退到其他项目。')
+      const nextProjectId = projectExists ? desiredProjectId : stringOf(nextProjects[0]?.id) ?? ''
       setProjectId(nextProjectId)
       if (nextProjectId === '') {
         setEpisodes([])
@@ -217,10 +272,10 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
       const episodeResult = await port.episodes({ projectId: nextProjectId }, request.controller.signal)
       if (!current(request.id)) return
       setEpisodes(episodeResult.items)
-      const desiredEpisodeId = preferred?.episodeId ?? episodeId
-      const nextEpisodeId = episodeResult.items.some(item => stringOf(item.id) === desiredEpisodeId)
-        ? desiredEpisodeId
-        : stringOf(episodeResult.items[0]?.id) ?? ''
+      const desiredEpisodeId = requestedScope?.episodeId ?? episodeId
+      const episodeExists = episodeResult.items.some(item => stringOf(item.id) === desiredEpisodeId)
+      if (scopeLocked && !episodeExists) throw new Error('外层集不属于当前项目；导演工作区已拒绝回退到其他集。')
+      const nextEpisodeId = episodeExists ? desiredEpisodeId : stringOf(episodeResult.items[0]?.id) ?? ''
       setEpisodeId(nextEpisodeId)
       if (nextEpisodeId === '') {
         setProjection(undefined)
@@ -237,6 +292,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   }
 
   const chooseProject = async (nextProjectId: string): Promise<void> => {
+    if (entryScope !== undefined) return
     if (!mayLeaveDirector()) return
     setProjectId(nextProjectId)
     setEpisodeId('')
@@ -263,6 +319,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   }
 
   const chooseEpisode = async (nextEpisodeId: string): Promise<void> => {
+    if (entryScope !== undefined) return
     if (!mayLeaveDirector()) return
     setEpisodeId(nextEpisodeId)
     setProjection(undefined)
@@ -313,7 +370,11 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
     setOpen(false)
   }
 
-  useEffect(() => () => { abortRef.current?.abort() }, [])
+  useEffect(() => {
+    void refresh()
+    return () => { abortRef.current?.abort() }
+    // The Qingmu build owns this entry and opens its exact cockpit scope once on mount.
+  }, [])
 
   const shotRelations = projection?.director.shotRelations
   useEffect(() => {
@@ -321,12 +382,31 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
     setSelectedShotId(currentShotId => (
       relationShots.some(shot => shot.shotId === currentShotId)
         ? currentShotId
-        : relationShots[0]?.shotId ?? ''
+        : relationShots.some(shot => shot.shotId === storedShootingWorkspaceValue(projectId, episodeId, 'shot'))
+          ? storedShootingWorkspaceValue(projectId, episodeId, 'shot') ?? relationShots[0]?.shotId ?? ''
+          : relationShots[0]?.shotId ?? ''
     ))
   }, [projectId, episodeId, shotRelations])
 
   useEffect(() => {
-    if (!open) return
+    if (projectId === '' || episodeId === '' || selectedShotId === '') return
+    if (!shotRelations?.shots.some(shot => shot.shotId === selectedShotId)) return
+    saveShootingWorkspaceValue(projectId, episodeId, 'shot', selectedShotId)
+  }, [episodeId, projectId, selectedShotId, shotRelations])
+
+  useEffect(() => {
+    if (applicationShell || projectId === '' || episodeId === '') return
+    if (storedShootingWorkspaceValue(projectId, episodeId, 'tab') === 'shots') setTab('shots')
+  }, [applicationShell, episodeId, projectId])
+
+  useEffect(() => {
+    if (projectId === '' || episodeId === '') return
+    if (tab === 'shots') saveShootingWorkspaceValue(projectId, episodeId, 'tab', 'shots')
+    else clearShootingWorkspaceValue(projectId, episodeId, 'tab')
+  }, [episodeId, projectId, tab])
+
+  useEffect(() => {
+    if (applicationShell || !open) return
     const appRoot = document.getElementById('root')
     const previousInert = appRoot?.inert
     if (appRoot !== null) appRoot.inert = true
@@ -356,7 +436,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
       if (appRoot !== null) appRoot.inert = previousInert ?? false
       queueMicrotask(() => { triggerRef.current?.focus() })
     }
-  }, [open])
+  }, [open, applicationShell])
 
   const projectionRecord = recordOf(projection)
   const stages = Object.entries(recordOf(projectionRecord.stages))
@@ -482,69 +562,110 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
 
   const shotView = (
     <div className={css.stack}>
-      <Card title={t('shotsTitle')}>
-        <div className={css.metrics}>
-          <Metric label={t('shotCount')} value={numberOf(shots.count) ?? 0} />
-          <Metric label={t('groupCount')} value={numberOf(shots.shotGroupCount) ?? 0} />
-          <Metric label={t('segmentCount')} value={numberOf(shots.segmentCount) ?? 0} />
-          <Metric label={t('unresolvedAssets')} value={numberOf(shots.unresolvedAssetRefCount) ?? 0} />
-        </div>
-        {shotRelations === undefined
-          ? <p className={css.empty}>{t('noProjection')}</p>
-          : (
-            <ShotRelationsView
+      <ShootingReviewWorkspace
+        hideHeader={applicationShell === true}
+        headerActions={<>
+          <button type="button" onClick={() => { if (mayLeaveDirector()) void refresh() }} disabled={loading} aria-label="刷新页面">
+            <IconRefreshOutline16 size={16} /><span>{loading ? '正在刷新…' : '刷新'}</span>
+          </button>
+          <button type="button" onClick={close} aria-label="返回对话">返回对话</button>
+        </>}
+        projectName={projectLabel(selectedProject ?? {}, '未命名项目')}
+        episodeName={episodeLabel(selectedEpisode ?? {}, '未命名剧集')}
+        projectId={projectId}
+        episodeId={episodeId}
+        projection={projection}
+        selectedShotId={selectedShotId}
+        onSelectShotId={setSelectedShotId}
+        onNavigate={setTab}
+        onCommitted={refreshWorkflowProjectionAfterCommit}
+        onProductionAction={(_action, shotId) => { setSelectedShotId(shotId); setShootingAction(shotId) }}
+        directorAssistant={nativeDirectorSession === undefined
+          ? <p role="status">原生导演助手当前不可用；不会回退到 iframe。</p>
+          : <div className={css.inlineDirector}>
+            <NativeDirectorSession compact port={nativeDirectorSession} bridge={directorBridge} sessionId={directorSessionId}
+              onRefresh={() => { setDirectorRefresh(value => value + 1) }} />
+            <DirectorWorkspace presentation="assistant" projectId={projectId} episodeId={episodeId} projection={projection}
+              shotItems={shotItems} selectedShotId={selectedShotId} onSelectShotId={setSelectedShotId}
+              onUnsavedChange={onDirectorDirty} port={port} directorBridge={directorBridge}
+              directorSessionId={directorSessionId} directorConnection={nativeDirectorSession.connection} directorRefresh={directorRefresh}
+              nativeDirectorSession={nativeDirectorSession} hostSync={hostSync} t={t} onCommitted={refreshWorkflowProjectionAfterCommit} />
+          </div>}
+        port={port}
+        t={t}
+      />
+      {shootingAction && <div className={css.shootingAction} role="dialog" aria-modal="true" aria-label="本镜操作">
+        <button type="button" onClick={() => setShootingAction(undefined)}>返回拍摄与审看</button>
+        <PromptIrWorkspace key={`${episodeId}:${shootingAction}:shooting-action`} presentation="shooting" projectId={projectId} episodeId={episodeId} shotItems={shotItems}
+          storyboardRevisionId={shotRelations?.storyboardRevision.revisionId ?? ''} selectedShotId={shootingAction} onSelectShotId={setShootingAction}
+          port={port} t={t} onCommitted={refreshWorkflowAfterCommit} />
+      </div>}
+      <details className={css.developerLog}>
+        <summary>开发日志</summary>
+        <Card title={t('shotsTitle')}>
+          <div className={css.metrics}>
+            <Metric label={t('shotCount')} value={numberOf(shots.count) ?? 0} />
+            <Metric label={t('groupCount')} value={numberOf(shots.shotGroupCount) ?? 0} />
+            <Metric label={t('segmentCount')} value={numberOf(shots.segmentCount) ?? 0} />
+            <Metric label={t('unresolvedAssets')} value={numberOf(shots.unresolvedAssetRefCount) ?? 0} />
+          </div>
+          {shotRelations === undefined
+            ? <p className={css.empty}>{t('noProjection')}</p>
+            : (
+              <ShotRelationsView
+                relations={shotRelations}
+                selectedShotId={selectedShotId}
+                onSelectShotId={setSelectedShotId}
+                t={t}
+              />
+            )}
+          {shotRelations !== undefined && (
+            <ShotRelationMethodView
               relations={shotRelations}
               selectedShotId={selectedShotId}
-              onSelectShotId={setSelectedShotId}
+              port={port}
               t={t}
             />
           )}
-        {shotRelations !== undefined && (
-          <ShotRelationMethodView
-            relations={shotRelations}
-            selectedShotId={selectedShotId}
-            port={port}
-            t={t}
-          />
-        )}
-        {shotRelations !== undefined && (
-          <HeroFrameStoryboardCanvas
-            relations={shotRelations}
-            heroFrameStoryboards={projection?.director.heroFrameStoryboards}
-            selectedShotId={selectedShotId}
-            port={port}
-            t={t}
-            onCommitted={refreshWorkflowProjectionAfterCommit}
-          />
-        )}
-      </Card>
-      <ContinuityDeltaView
-        projectId={projectId}
-        episodeId={episodeId}
-        selectedShotId={selectedShotId}
-        projection={projection}
-        enabled={open && !loading && error === undefined}
-        port={port}
-        t={t}
-      />
-      <SelectedVideoReviewView
-        projectId={projectId}
-        episodeId={episodeId}
-        selectedShotId={selectedShotId}
-        projection={projection}
-        enabled={open && !loading && error === undefined}
-        port={port}
-        t={t}
-      />
-      <ProductionUnitView
-        projectId={projectId}
-        episodeId={episodeId}
-        selectedShotId={selectedShotId}
-        projection={projection}
-        enabled={open && !loading && error === undefined}
-        port={port}
-        t={t}
-      />
+          {shotRelations !== undefined && (
+            <HeroFrameStoryboardCanvas
+              relations={shotRelations}
+              heroFrameStoryboards={projection?.director.heroFrameStoryboards}
+              selectedShotId={selectedShotId}
+              port={port}
+              t={t}
+              onCommitted={refreshWorkflowProjectionAfterCommit}
+            />
+          )}
+        </Card>
+        <ContinuityDeltaView
+          projectId={projectId}
+          episodeId={episodeId}
+          selectedShotId={selectedShotId}
+          projection={projection}
+          enabled={open && !loading && error === undefined}
+          port={port}
+          t={t}
+        />
+        <SelectedVideoReviewView
+          projectId={projectId}
+          episodeId={episodeId}
+          selectedShotId={selectedShotId}
+          projection={projection}
+          enabled={open && !loading && error === undefined}
+          port={port}
+          t={t}
+        />
+        <ProductionUnitView
+          projectId={projectId}
+          episodeId={episodeId}
+          selectedShotId={selectedShotId}
+          projection={projection}
+          enabled={open && !loading && error === undefined}
+          port={port}
+          t={t}
+        />
+      </details>
     </div>
   )
 
@@ -637,14 +758,62 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
   )
 
   const panels: Record<Tab, ReactNode> = {
-    director: <DirectorWorkspace projectId={projectId} episodeId={episodeId} projection={projection}
-      shotItems={shotItems} selectedShotId={selectedShotId} onSelectShotId={(id) => { if (mayLeaveDirector()) setSelectedShotId(id) }}
-      onUnsavedChange={onDirectorDirty} port={port} t={t} onCommitted={refreshWorkflowProjectionAfterCommit} />,
+    director: <>
+      {nativeDirectorSession && <NativeDirectorSession port={nativeDirectorSession} bridge={directorBridge}
+        sessionId={directorSessionId} onRefresh={() => { setDirectorRefresh(value => value + 1) }} />}
+      {projectId !== '' && episodeId !== ''
+        ? <DirectorWorkspace projectId={projectId} episodeId={episodeId} projection={projection}
+          shotItems={shotItems} selectedShotId={selectedShotId} onSelectShotId={(id) => { if (mayLeaveDirector()) setSelectedShotId(id) }}
+          onUnsavedChange={onDirectorDirty} port={port} directorBridge={directorBridge}
+          directorSessionId={directorSessionId} directorConnection={nativeDirectorSession?.connection} directorRefresh={directorRefresh}
+          nativeDirectorSession={nativeDirectorSession}
+          hostSync={hostSync} t={t} onCommitted={refreshWorkflowProjectionAfterCommit} />
+        : <p role="status">导演工作区等待准确项目与剧集绑定；不会自动读取空作用域。</p>}
+    </>,
     overview,
     assets: assetView,
     shots: shotView,
     generation: generationView,
     delivery: deliveryView,
+  }
+
+  if (applicationShell) {
+    const step = creativeStepForTab(tab)
+    const applicationPanels: Record<CreativeStep, ReactNode> = {
+      story: <div className={css.creativePage}><h1>故事</h1><p>把故事写清楚，再决定如何拍。</p>
+        {episodeId && <TextImportWorkspace key={`${projectId}:${episodeId}:story`} projectId={projectId} episodeId={episodeId} port={port} onSaved={refreshWorkflowAfterCommit} />}
+        <details><summary>精细编辑剧本</summary>
+          <ScriptWorkspace projectId={projectId} episodeId={episodeId} port={port} t={t} onCommitted={refreshWorkflowAfterCommit} />
+        </details>
+      </div>,
+      assets: <div className={css.creativePage}><h1>角色与场景</h1><p>确认人物与环境，后面的镜头沿用这些资产。</p>
+        <AssetWorkbench key={`${projectId}:application-assets`} projectId={projectId} semanticAssets={semanticAssets} port={port} t={t} onCommitted={refreshWorkflowAfterCommit} />
+      </div>,
+      storyboard: <div className={css.creativePage}><h1>分镜与导演</h1><p>理解当前故事，安排每个镜头的画面与动作。</p>{panels.director}</div>,
+      shooting: shotView,
+      delivery: <div className={css.creativePage}><h1>导出与交接</h1><p>查看已选用的视频与待完成的镜头，再交给后期。</p>
+        <EditorialHandoff projectId={projectId} episodeId={episodeId} port={port} t={t} />
+      </div>,
+    }
+    return <QingmuApplicationFrame projects={projects.map(p => ({ id: stringOf(p.id) ?? '', label: projectLabel(p, '未命名项目') }))}
+      episodes={episodes.map(e => ({ id: stringOf(e.id) ?? '', label: episodeLabel(e, '未命名剧集') }))}
+      projectId={projectId} episodeId={episodeId} step={step} loading={loading} scopeLocked={entryScope !== undefined}
+      onProject={(id) => { void chooseProject(id) }} onEpisode={(id) => { void chooseEpisode(id) }}
+      onStep={(next) => { if (mayLeaveDirector()) {
+        if (next !== step) { const url = new URL(location.href); url.searchParams.set('qingmuView', next); history.pushState(history.state, '', url) }
+        setCreating(false); setTab(STEP_TABS[next])
+      } }}
+      onCreate={() => { if (mayLeaveDirector()) setCreating(true) }}
+      onRefresh={() => { if (mayLeaveDirector()) void refresh() }} onOpenTools={onOpenTools}>
+      <div className={`${css.shell} ${step === 'shooting' && !creating ? css.shootingShell : ''}`}>
+        {error && <div role="alert" className={css.error}><p>当前项目暂时无法更新。已有素材保留，请刷新重试。</p><details><summary>开发日志</summary>{error}</details></div>}
+        <div className={css.body}><main aria-label={creating ? '新建项目' : `青木 · ${creativeStepLabel(step)}`}>
+          {creating || (!loading && projects.length === 0 && !error)
+            ? <CreateProjectWorkspace port={port} onCreated={async (result) => { await refresh(result); setCreating(false); setTab('overview') }} onCancel={projects.length ? () => setCreating(false) : undefined} />
+            : applicationPanels[step]}
+        </main></div>
+      </div>
+    </QingmuApplicationFrame>
   }
 
   return (
@@ -664,8 +833,8 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
         <IconDataOutline16 size={18} />
         {wide && <span>{t('trigger')}</span>}
       </button>
-      <Modal open={open} onClose={close} title={t('title')} headless className={css.dialog as string}>
-        <div ref={dialogRef} className={`${css.shell} ${tab === 'director' || creating || projectId === '' || tab === 'assets' ? css.directorShell : ''}`}>
+      <Modal open={open} onClose={close} title={t('title')} headless className={css.dialog ?? ''}>
+        <div ref={dialogRef} className={`${css.shell} ${tab === 'director' || creating || projectId === '' || tab === 'assets' ? css.directorShell : ''} ${tab === 'shots' ? css.shootingShell : ''}`}>
           <header className={css.header}>
             <div>
               <h2 ref={headingRef} tabIndex={-1}>{t('title')}</h2>
@@ -674,7 +843,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
             <div className={css.headerActions}>
               <button type="button" onClick={() => { if (mayLeaveDirector()) void refresh() }} disabled={loading}>
                 <IconRefreshOutline16 size={16} />
-                <span>{loading ? t('refreshing') : t('refresh')}</span>
+                <span>{tab === 'shots' ? (loading ? '正在刷新…' : '刷新页面') : loading ? t('refreshing') : t('refresh')}</span>
               </button>
               <button type="button" className={css.iconButton} aria-label={t('close')} onClick={close}>
                 <IconCloseOutline16 size={18} />
@@ -706,13 +875,14 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
           </section>
 
           <div className={css.toolbar}>
-            <button type="button" onClick={() => { if (mayLeaveDirector()) setCreating(true) }} disabled={loading}>新建项目</button>
+            <button type="button" onClick={() => { if (mayLeaveDirector()) setCreating(true) }}
+              disabled={loading || entryScope !== undefined}>新建项目</button>
             <label>
               <span>{t('project')}</span>
               <select
                 value={projectId}
                 onChange={(event) => { void chooseProject(event.target.value) }}
-                disabled={loading || projects.length === 0}
+                disabled={loading || projects.length === 0 || entryScope !== undefined}
               >
                 <option value="">{projects.length === 0 ? t('noProjects') : t('chooseProject')}</option>
                 {projects.map(project => (
@@ -727,7 +897,7 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
               <select
                 value={episodeId}
                 onChange={(event) => { void chooseEpisode(event.target.value) }}
-                disabled={loading || episodes.length === 0}
+                disabled={loading || episodes.length === 0 || entryScope !== undefined}
               >
                 <option value="">{episodes.length === 0 ? t('noEpisodes') : t('chooseEpisode')}</option>
                 {episodes.map(episode => (
@@ -744,7 +914,8 @@ export function QingmuCockpit({ wide, port, t }: QingmuCockpitProps) {
               <div>
                 <strong>{error.includes('storyboard_revision_missing') ? '分镜尚未建立' : t('errorTitle')}</strong>
                 <p>{error.includes('storyboard_revision_missing')
-                  ? '完整工作流投影暂不可用；可在“剧本与资产”导入并保存剧本。没有生成分镜、资产或媒体。' : error}</p>
+                  ? '分镜暂不可用；请先在故事步骤保存剧本。' : tab === 'shots' ? '当前项目暂时无法更新。请刷新重试，已有素材和未提交草稿会保留。' : error}</p>
+                {tab === 'shots' && <details><summary>开发日志</summary><p>{error}</p></details>}
                 {error.includes('storyboard_revision_missing')
                   ? <details><summary>投影诊断</summary><p>{error}</p></details>
                   : <small>{t('errorRecovery')}</small>}

@@ -23,17 +23,21 @@
     "lib/index.js",
     "lib/invariant.js",
     "cordis.patch.yml",
+    "agent-presets/",
     "lib/types/**/*.d.ts"
   ],
   "license": "MIT",
   "dsh": {
     "bundle": {
-      "patch": "./cordis.patch.yml"
+      "patch": "./cordis.patch.yml",
+      "agentPresets": "./agent-presets"
     }
   },
   "dependencies": {
+    "@deepseek-ai/dsh-persona": "workspace:^",
     "@deepseek-ai/dsh-experimental-client-ui-brand-qingmu": "workspace:^",
     "@deepseek-ai/dsh-experimental-client-ui-qingmu-cockpit": "workspace:^",
+    "@deepseek-ai/dsh-experimental-qingmu-director-context-bridge": "workspace:^",
     "@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter": "workspace:^",
     "@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter": "workspace:^",
     "@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter": "workspace:^"

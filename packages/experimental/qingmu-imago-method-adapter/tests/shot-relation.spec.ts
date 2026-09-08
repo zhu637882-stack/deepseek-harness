@@ -543,6 +543,119 @@ describe('qingmu Shot relation method adapter', () => {
     expect(value.projection.relationship_projection.elements[1]?.currentReference).toEqual(localReference)
   })
 
+  it('preserves exact owner-final scene and actor lineage in the method snapshot', async () => {
+    const sceneReference = {
+      assetId: 'asset-scene-owner-final-1',
+      sha256: '7'.repeat(64),
+      lineage: {
+        projectId: 'project-1',
+        sourceEpisodeId: 'episode-1',
+        ownerType: 'scene' as const,
+        ownerId: 'scene-element-1',
+        role: 'scene_reference',
+        sourceRevisionId: 'source-scene-owner-final-1',
+        qualificationKind: 'owner_human_finalization' as const,
+        finalizationReceiptIdentity: '8'.repeat(64),
+        humanReviewIdentity: '9'.repeat(64),
+        inheritedPrescreenReviewIdentity: 'a'.repeat(64),
+      },
+    }
+    const actorReference = {
+      assetId: 'asset-actor-owner-final-1',
+      sha256: 'b'.repeat(64),
+      lineage: {
+        projectId: 'project-1',
+        sourceEpisodeId: 'episode-1',
+        ownerType: 'actor' as const,
+        ownerId: 'actor-1',
+        role: 'turnaround_front',
+        sourceRevisionId: 'source-actor-owner-final-1',
+        qualificationKind: 'owner_human_finalization' as const,
+        finalizationReceiptIdentity: 'c'.repeat(64),
+        humanReviewIdentity: 'd'.repeat(64),
+        inheritedPrescreenReviewIdentity: 'e'.repeat(64),
+        actorCohortIdentity: 'f'.repeat(64),
+      },
+    }
+    const request: ImagoShotRelationMethodRequest = {
+      ...REQUEST,
+      elements: REQUEST.elements.map((element, index) => index === 0
+        ? { ...element, currentReferenceAvailability: 'available', currentReference: actorReference }
+        : index === 1
+          ? { ...element, currentReferenceAvailability: 'available', currentReference: sceneReference }
+          : element),
+    }
+    const handler = createImagoMethodHandler(
+      { coreRoot: '/opt/imago-os-core' },
+      dependencies(async snapshot => projection(snapshot)),
+    )
+
+    const result = await handler('shotRelationMethod', request, signal())
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error(result.error.message)
+    const elements = (result.value as ImagoShotRelationMethodResponse)
+      .projection.relationship_projection.elements
+    expect(elements[0]?.currentReference).toEqual(actorReference)
+    expect(elements[1]?.currentReference).toEqual(sceneReference)
+  })
+
+  it('rejects owner-final lineage from another Episode or with incomplete actor proof', async () => {
+    const ownerActor = {
+      assetId: 'asset-actor-owner-final-1',
+      sha256: 'b'.repeat(64),
+      lineage: {
+        projectId: 'project-1',
+        sourceEpisodeId: 'episode-1',
+        ownerType: 'actor' as const,
+        ownerId: 'actor-1',
+        role: 'turnaround_front',
+        sourceRevisionId: 'source-actor-owner-final-1',
+        qualificationKind: 'owner_human_finalization' as const,
+        finalizationReceiptIdentity: 'c'.repeat(64),
+        humanReviewIdentity: 'd'.repeat(64),
+        inheritedPrescreenReviewIdentity: 'e'.repeat(64),
+        actorCohortIdentity: 'f'.repeat(64),
+      },
+    }
+    const variants: unknown[] = [
+      {
+        ...ownerActor,
+        lineage: { ...ownerActor.lineage, sourceEpisodeId: 'episode-other' },
+      },
+      {
+        ...ownerActor,
+        lineage: {
+          projectId: ownerActor.lineage.projectId,
+          sourceEpisodeId: ownerActor.lineage.sourceEpisodeId,
+          ownerType: ownerActor.lineage.ownerType,
+          ownerId: ownerActor.lineage.ownerId,
+          role: ownerActor.lineage.role,
+          sourceRevisionId: ownerActor.lineage.sourceRevisionId,
+          qualificationKind: ownerActor.lineage.qualificationKind,
+          finalizationReceiptIdentity: ownerActor.lineage.finalizationReceiptIdentity,
+          humanReviewIdentity: ownerActor.lineage.humanReviewIdentity,
+          inheritedPrescreenReviewIdentity: ownerActor.lineage.inheritedPrescreenReviewIdentity,
+        },
+      },
+    ]
+
+    for (const currentReference of variants) {
+      const request = {
+        ...REQUEST,
+        elements: REQUEST.elements.map((element, index) => index === 0
+          ? { ...element, currentReferenceAvailability: 'available', currentReference }
+          : element),
+      }
+      const handler = createImagoMethodHandler(
+        { coreRoot: '/opt/imago-os-core' },
+        dependencies(async snapshot => projection(snapshot)),
+      )
+      const result = await handler('shotRelationMethod', request, signal())
+      expect(result.ok).toBe(false)
+    }
+  })
+
   it('rejects browser-supplied authority, duplicate IDs, dangling relations, and unknown selected Shots before Core', async () => {
     const runShotRelationCompiler = vi.fn()
     const handler = createImagoMethodHandler(

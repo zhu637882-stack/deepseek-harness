@@ -2,7 +2,11 @@
 
 English | [中文](README.zh.md)
 
-This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `capabilityCatalog`, `costRehearsal`, `gateAControlEvidence`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `takeVersions`, `takeComments`, `takeAcceptance`, `takeReviewAuthority`, `takeTechnicalQc`, `takeApprovalLifecycle`, `shotFindings`, `productionUnits`, `lsuPlanSource`, `stageSources`, and `workflow`; it exposes no mutation endpoint.
+This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `capabilityCatalog`, `costRehearsal`, `gateAControlEvidence`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `takeVersions`, `takeComments`, `takeAcceptance`, `takeReviewAuthority`, `takeTechnicalQc`, `takeApprovalLifecycle`, `shotFindings`, `productionUnits`, `lsuPlanSource`, `stageSources`, and `workflow`; it exposes no mutation endpoint. Its separate `/api/qingmu/entity-draft-human-review/state` route is a cookie-authenticated, same-origin read for the natural-person review panel.
+
+## PromptIR entity-draft review state
+
+The dedicated state route forwards only the `jason_token` cookie and rejects bearer headers, untrusted requests, unknown coordinates, redirects, oversized responses, and invalid Writer schemas. It accepts only a current Ready PromptIR whose associated drafts carry the exact draft, element-profile, selected-reference, and reference-pack bindings, together with exactly one Writer-authenticated natural-person identity. It returns no Provider, task-mutation, outbox, prompt-approval, media-approval, or signoff authority. See the [decision record](../../../.agents/notes/implemented/feature/2026-09-02-qingmu-prompt-ir-entity-draft-human-review.md).
 
 ## Episode evidence and explicit verification
 

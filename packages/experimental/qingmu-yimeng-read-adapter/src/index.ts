@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import { normalizeContinuityDelta } from './continuity.ts'
+import { localMediaUrl } from './local-media-url.ts'
 import { normalizeSelectedVideoReview } from './selected-video-review.ts'
 import { normalizeTakeVersionStack, parseTakeVersionReadRequest } from './take-versions.ts'
 import { normalizeTakePreview, parseTakePreviewRequest } from './take-preview.ts'
@@ -42,6 +43,11 @@ import {
   registerEditorialHandoffDownload,
 } from './editorial-handoff-download.ts'
 import type { EditorialHandoffDownloadAccess } from './editorial-handoff-download.ts'
+import { registerEntityDraftReviewRead } from './entity-draft-review.ts'
+export {
+  registerEntityDraftReviewRead,
+  type EntityDraftReviewReadDependencies,
+} from './entity-draft-review.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -73,6 +79,8 @@ import type {
   YimengEpisodeEvidenceRequest,
   YimengFirstFrameQuoteRequest,
   YimengFirstFrameQuoteResponse,
+  YimengVideoQuoteRequest,
+  YimengVideoQuoteResponse,
   YimengHealth,
   YimengHumanDecision,
   YimengHumanDecisionValue,
@@ -309,7 +317,7 @@ export type {
 
 const CHANNEL = '/qingmu-yimeng'
 const DEFAULT_BASE_URL = 'http://127.0.0.1:8115'
-const DEFAULT_TIMEOUT_MS = 5_000
+const DEFAULT_TIMEOUT_MS = 20_000
 const DEFAULT_VERIFICATION_TIMEOUT_MS = 55_000
 const MAX_TIMEOUT_MS = 60_000
 const MAX_ID_LENGTH = 256
@@ -328,6 +336,7 @@ const REFERENCE_RIGHTS_EXCEPTION_RELEASE_FEED_SCHEMA = 'jason.qingmu-reference-r
 const SHA256 = /^[0-9a-f]{64}$/
 const PROTECTED_ENDPOINTS = new Set([
   'projects', 'episodes', 'script', 'promptIr', 'promptIrBootstrap', 'firstFrameQuote', 'capabilityCatalog', 'costRehearsal',
+  'videoQuote',
   'gateAControlEvidence', 'elementProfile',
   'referenceCandidates', 'reviewEvents',
   'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'takeComments', 'takeReviewAuthority', 'takeAcceptance', 'takeTechnicalQc', 'takeApprovalLifecycle', 'evidenceLedger', 'editorialHandoff', 'verifyEpisode', 'shotFindings', 'productionUnits', 'stageSources',
@@ -347,7 +356,7 @@ const REFERENCE_DECISION_KINDS = new Set<YimengReferenceCandidateDecisionKind>([
   'none', 'referenceSelection', 'humanReview',
 ])
 const REFERENCE_QUALIFICATION_KINDS = new Set<YimengReferenceCandidateQualificationKind>([
-  'none', 'provider_formal_consistency', 'local_file_integrity',
+  'none', 'provider_formal_consistency', 'local_file_integrity', 'owner_human_finalization',
 ])
 const SHOT_CURRENT_REFERENCE_ROLES = {
   actor: [
@@ -749,6 +758,15 @@ function parseFirstFrameQuoteRequest(payload: unknown): YimengFirstFrameQuoteReq
       && SHA256.test(input.promptIrContentSha256)
       ? input.promptIrContentSha256
       : (() => { throw new InputError('promptIrContentSha256 must be a lowercase SHA-256') })(),
+  }
+}
+
+function parseVideoQuoteRequest(payload: unknown): YimengVideoQuoteRequest {
+  const input = requireInputObject(payload)
+  assertOnlyInputKeys(input, ['projectId', 'episodeId', 'sceneId', 'shotId'])
+  return {
+    projectId: parseIdentifier(input.projectId, 'projectId'), episodeId: parseIdentifier(input.episodeId, 'episodeId'),
+    sceneId: parseIdentifier(input.sceneId, 'sceneId'), shotId: parseIdentifier(input.shotId, 'shotId'),
   }
 }
 
@@ -2451,14 +2469,21 @@ function normalizeFirstFrameQuote(
     requireSha256(binding.sha256, `firstFrameQuote.methodSourceBindings[${String(index)}].sha256`)
   }
   const references = requireObjectItems(authority.references, 'firstFrameQuote.authoritySnapshot.references')
+  // A human-finalized selection carries its signed proof alongside the common keys.
+  const referenceRequiredKeys = [
+    'referencePackId', 'referencePackSha256', 'role', 'elementKind', 'elementId',
+    'entityDraftId', 'entityDraftStatus', 'humanReview',
+    'assetId', 'assetSha256', 'materializedSha256', 'selectionIdentity',
+    'sourceRevisionId', 'qualificationCheckId', 'qualificationKind',
+    'rightsRecordSha256', 'profileRevision', 'profileSnapshotSha256',
+  ]
   for (const [index, reference] of references.entries()) {
-    requireExactKeys(reference, [
-      'referencePackId', 'referencePackSha256', 'role', 'elementKind', 'elementId',
-      'entityDraftId', 'entityDraftStatus', 'humanReview',
-      'assetId', 'assetSha256', 'materializedSha256', 'selectionIdentity',
-      'sourceRevisionId', 'qualificationCheckId', 'qualificationKind',
-      'rightsRecordSha256', 'profileRevision', 'profileSnapshotSha256',
-    ], `firstFrameQuote.reference[${String(index)}]`)
+    const referenceKeys = Object.keys(reference).sort().join(',')
+    const allowedKeys = [...referenceRequiredKeys, 'humanFinalDecision'].sort().join(',')
+    if (referenceKeys !== referenceRequiredKeys.slice().sort().join(',')
+      && referenceKeys !== allowedKeys) {
+      throw new UpstreamContractError(`firstFrameQuote.reference[${String(index)}] fields mismatch`)
+    }
     requireIdentifier(reference.referencePackId, `firstFrameQuote.reference[${String(index)}].referencePackId`)
     requireIdentifier(reference.entityDraftId, `firstFrameQuote.reference[${String(index)}].entityDraftId`)
     if (!requireString(reference.entityDraftStatus, `firstFrameQuote.reference[${String(index)}].entityDraftStatus`).trim()) {
@@ -2476,11 +2501,19 @@ function normalizeFirstFrameQuote(
     for (const key of [
       'referencePackSha256', 'assetSha256', 'materializedSha256',
       'rightsRecordSha256', 'profileSnapshotSha256',
-    ] as const) requireSha256(reference[key], `firstFrameQuote.reference[${String(index)}].${key}`)
+    ] as const) {
+      // An unrecorded rights trail is an explicit state carried as an empty digest.
+      if (key === 'rightsRecordSha256' && reference[key] === '') continue
+      requireSha256(reference[key], `firstFrameQuote.reference[${String(index)}].${key}`)
+    }
     for (const key of [
       'role', 'elementKind', 'elementId', 'assetId', 'selectionIdentity',
       'sourceRevisionId', 'qualificationCheckId', 'qualificationKind',
-    ] as const) requireIdentifier(reference[key], `firstFrameQuote.reference[${String(index)}].${key}`)
+    ] as const) {
+      // An undecided selection or unchecked qualification is carried as an empty id.
+      if ((key === 'selectionIdentity' || key === 'qualificationCheckId') && reference[key] === '') continue
+      requireIdentifier(reference[key], `firstFrameQuote.reference[${String(index)}].${key}`)
+    }
     requireInteger(reference.profileRevision, `firstFrameQuote.reference[${String(index)}].profileRevision`, 1)
   }
   const contextSchema = requireString(authority.contextSchema, 'firstFrameQuote.contextSchema')
@@ -3188,6 +3221,26 @@ function normalizeFirstFrameQuote(
   }
 }
 
+function normalizeVideoQuote(value: unknown): YimengVideoQuoteResponse {
+  const root = requireObject(value, 'videoQuote')
+  requireExactKeys(root, ['schema', 'preflightSha256', 'projectionSha256', 'maximumReservationCny', 'candidateCount', 'maxAttempts', 'selectAsOfficial', 'quoteReady', 'dispatchReady', 'quoteBlockers', 'dispatchBlockers', 'requiredPaidConfirmationText', 'requiredPaidConfirmationTextSha256'], 'videoQuote')
+  if (root.schema !== 'jason.qingmu-writer-video-quote.v1' || root.candidateCount !== 1 || root.maxAttempts !== 1
+    || root.selectAsOfficial !== false || typeof root.maximumReservationCny !== 'number' || root.maximumReservationCny < 0
+    || typeof root.quoteReady !== 'boolean' || typeof root.dispatchReady !== 'boolean'
+    || !Array.isArray(root.quoteBlockers) || !root.quoteBlockers.every(item => typeof item === 'string')
+    || !Array.isArray(root.dispatchBlockers) || !root.dispatchBlockers.every(item => typeof item === 'string')) {
+    throw new UpstreamContractError('videoQuote contract mismatch')
+  }
+  if (typeof root.requiredPaidConfirmationText !== 'string' || !root.requiredPaidConfirmationText.trim()
+    || canonicalJsonSha256(root.requiredPaidConfirmationText, 'videoQuote.requiredPaidConfirmationText')
+      !== requireSha256(root.requiredPaidConfirmationTextSha256, 'videoQuote.requiredPaidConfirmationTextSha256')) {
+    throw new UpstreamContractError('videoQuote confirmation contract mismatch')
+  }
+  requireSha256(root.preflightSha256, 'videoQuote.preflightSha256')
+  requireSha256(root.projectionSha256, 'videoQuote.projectionSha256')
+  return root as unknown as YimengVideoQuoteResponse
+}
+
 function requireExactKeys(value: YimengJsonObject, keys: readonly string[], field: string): void {
   const actual = Object.keys(value).sort()
   const expected = [...keys].sort()
@@ -3533,7 +3586,7 @@ function requireReferenceQualificationKind(
 ): YimengReferenceCandidateQualificationKind {
   const kind = requireString(value, field)
   if (!REFERENCE_QUALIFICATION_KINDS.has(kind as YimengReferenceCandidateQualificationKind)) {
-    throw new UpstreamContractError(`${field} must be none, provider_formal_consistency, or local_file_integrity`)
+    throw new UpstreamContractError(`${field} must be none, provider_formal_consistency, local_file_integrity, or owner_human_finalization`)
   }
   return kind as YimengReferenceCandidateQualificationKind
 }
@@ -3585,6 +3638,22 @@ function normalizeReferenceCandidate(
     candidate.rightsRecordSha256,
     `${field}.rightsRecordSha256`,
   )
+  const ownerFinalizationReceiptIdentity = requireOptionalSha256(
+    candidate.ownerFinalizationReceiptIdentity,
+    `${field}.ownerFinalizationReceiptIdentity`,
+  )
+  const ownerFinalizationHumanReviewIdentity = requireOptionalSha256(
+    candidate.ownerFinalizationHumanReviewIdentity,
+    `${field}.ownerFinalizationHumanReviewIdentity`,
+  )
+  const ownerFinalizationInheritedPrescreenReviewIdentity = requireOptionalSha256(
+    candidate.ownerFinalizationInheritedPrescreenReviewIdentity,
+    `${field}.ownerFinalizationInheritedPrescreenReviewIdentity`,
+  )
+  const ownerFinalizationActorCohortIdentity = requireOptionalSha256(
+    candidate.ownerFinalizationActorCohortIdentity,
+    `${field}.ownerFinalizationActorCohortIdentity`,
+  )
   const sourceEpisodeId = requireIdentifier(candidate.sourceEpisodeId, `${field}.sourceEpisodeId`, true)
   const generationJobId = requireIdentifier(candidate.generationJobId, `${field}.generationJobId`, true)
   const sourceRevisionId = requireIdentifier(candidate.sourceRevisionId, `${field}.sourceRevisionId`, true)
@@ -3598,25 +3667,53 @@ function normalizeReferenceCandidate(
     `${field}.formalConsistencyPassed`,
   )
   const rightsBindingValid = rightsRecorded ? rightsRecordSha256 !== '' : rightsRecordSha256 === ''
+  const ownerIdentitiesEmpty = ownerFinalizationReceiptIdentity === ''
+    && ownerFinalizationHumanReviewIdentity === ''
+    && ownerFinalizationInheritedPrescreenReviewIdentity === ''
+    && ownerFinalizationActorCohortIdentity === ''
   const providerQualificationValid = qualificationKind === 'provider_formal_consistency'
     && qualificationCheckId !== '' && qualificationCheckId === formalConsistencyCheckId
     && qualificationPassed === formalConsistencyPassed
     && sourceEpisodeId !== '' && generationJobId !== '' && sourceRevisionId !== ''
-    && qualificationIdentity === '' && uploadCommandReceiptId === '' && rightsBindingValid
+    && qualificationIdentity === '' && uploadCommandReceiptId === ''
+    && ownerIdentitiesEmpty && rightsBindingValid
   const localQualificationValid = qualificationKind === 'local_file_integrity'
     && qualificationCheckId !== '' && qualificationPassed
     && qualificationIdentity !== '' && uploadCommandReceiptId !== ''
     && rightsRecorded && rightsRecordSha256 !== ''
     && sourceRevisionId !== '' && sourceEpisodeId === '' && generationJobId === ''
     && formalConsistencyCheckId === '' && !formalConsistencyPassed
+    && ownerIdentitiesEmpty
+  const ownerIdentitiesValid = ownerFinalizationReceiptIdentity !== ''
+    && ownerFinalizationHumanReviewIdentity !== ''
+    && ownerFinalizationInheritedPrescreenReviewIdentity !== ''
+    && decisionKind === 'humanReview'
+    && decisionIdentity === ownerFinalizationHumanReviewIdentity
+  const ownerActorCanonical = expected.elementKind !== 'actor'
+    ? qualificationPassed
+      && candidate.role === (expected.elementKind === 'scene' ? 'scene_reference' : 'prop_reference')
+      && ownerFinalizationActorCohortIdentity === ''
+    : qualificationPassed
+      ? candidate.role === 'turnaround_front' && ownerFinalizationActorCohortIdentity !== ''
+      : ['identity_board', 'face_closeup', 'turnaround_left', 'turnaround_back'].includes(
+        String(candidate.role),
+      ) && ownerFinalizationActorCohortIdentity === ''
+  const ownerQualificationValid = qualificationKind === 'owner_human_finalization'
+    && ownerIdentitiesValid && ownerActorCanonical
+    && sourceEpisodeId !== '' && generationJobId !== '' && sourceRevisionId !== ''
+    && !formalConsistencyPassed
+    && qualificationIdentity === '' && uploadCommandReceiptId === ''
+    && (qualificationCheckId === formalConsistencyCheckId)
+    && rightsBindingValid
   const noQualificationValid = qualificationKind === 'none'
     && qualificationCheckId === '' && !qualificationPassed
     && qualificationIdentity === ''
     && sourceRevisionId === ''
     && formalConsistencyCheckId === '' && !formalConsistencyPassed
+    && ownerIdentitiesEmpty
     && (uploadCommandReceiptId === '' || (sourceEpisodeId === '' && generationJobId === ''))
     && rightsBindingValid
-  if (!providerQualificationValid && !localQualificationValid && !noQualificationValid) {
+  if (!providerQualificationValid && !localQualificationValid && !ownerQualificationValid && !noQualificationValid) {
     throw new UpstreamContractError(`${field} qualification lineage mismatch`)
   }
   return {
@@ -3644,6 +3741,10 @@ function normalizeReferenceCandidate(
     uploadCommandReceiptId,
     rightsRecorded,
     rightsRecordSha256,
+    ownerFinalizationReceiptIdentity,
+    ownerFinalizationHumanReviewIdentity,
+    ownerFinalizationInheritedPrescreenReviewIdentity,
+    ownerFinalizationActorCohortIdentity,
     qualityProjectionSha256: requireSha256(
       candidate.qualityProjectionSha256,
       `${field}.qualityProjectionSha256`,
@@ -4176,6 +4277,7 @@ function normalizeShotCurrentReference(
   value: unknown,
   field: string,
   projectId: string,
+  episodeId: string,
   elementKind: YimengShotRelationElementKind,
   elementId: string,
 ): YimengShotCurrentReference {
@@ -4205,14 +4307,31 @@ function normalizeShotCurrentReference(
     'uploadCommandReceiptId',
     'rightsRecordSha256',
   ] as const
-  const local = Object.hasOwn(lineage, 'qualificationKind')
-  assertExactOutputKeys(lineage, local ? localKeys : providerKeys, lineageField)
+  const ownerKeys = [
+    'projectId',
+    'sourceEpisodeId',
+    'ownerType',
+    'ownerId',
+    'role',
+    'sourceRevisionId',
+    'qualificationKind',
+    'finalizationReceiptIdentity',
+    'humanReviewIdentity',
+    'inheritedPrescreenReviewIdentity',
+  ] as const
+  const ownerActorKeys = [...ownerKeys, 'actorCohortIdentity'] as const
+  const qualified = Object.hasOwn(lineage, 'qualificationKind')
+  const ownerFinal = lineage.qualificationKind === 'owner_human_finalization'
+  const expectedKeys = ownerFinal
+    ? elementKind === 'actor' ? ownerActorKeys : ownerKeys
+    : qualified ? localKeys : providerKeys
+  assertExactOutputKeys(lineage, expectedKeys, lineageField)
   const ownerType = lineage.ownerType
   if (ownerType !== 'actor' && ownerType !== 'scene' && ownerType !== 'prop') {
     throw new UpstreamContractError(`${lineageField}.ownerType is invalid`)
   }
   const normalizedOwnerType: YimengShotRelationElementKind = ownerType
-  if (local && lineage.qualificationKind !== 'local_file_integrity') {
+  if (qualified && !ownerFinal && lineage.qualificationKind !== 'local_file_integrity') {
     throw new UpstreamContractError(`${lineageField}.qualificationKind is invalid`)
   }
   const common = {
@@ -4222,29 +4341,58 @@ function normalizeShotCurrentReference(
     role: requireIdentifier(lineage.role, `${lineageField}.role`),
     sourceRevisionId: requireIdentifier(lineage.sourceRevisionId, `${lineageField}.sourceRevisionId`),
   }
-  const normalizedLineage: YimengShotCurrentReferenceLineage = local
+  const normalizedLineage: YimengShotCurrentReferenceLineage = ownerFinal
     ? {
       ...common,
-      qualificationKind: 'local_file_integrity',
-      qualificationCheckId: requireIdentifier(lineage.qualificationCheckId, `${lineageField}.qualificationCheckId`),
-      qualificationIdentity: requireSha256(lineage.qualificationIdentity, `${lineageField}.qualificationIdentity`),
-      uploadCommandReceiptId: requireIdentifier(lineage.uploadCommandReceiptId, `${lineageField}.uploadCommandReceiptId`),
-      rightsRecordSha256: requireSha256(lineage.rightsRecordSha256, `${lineageField}.rightsRecordSha256`),
-    }
-    : {
-      ...common,
       sourceEpisodeId: requireIdentifier(lineage.sourceEpisodeId, `${lineageField}.sourceEpisodeId`),
-      generationJobId: requireIdentifier(lineage.generationJobId, `${lineageField}.generationJobId`),
-      formalConsistencyCheckId: requireIdentifier(
-        lineage.formalConsistencyCheckId,
-        `${lineageField}.formalConsistencyCheckId`,
+      qualificationKind: 'owner_human_finalization',
+      finalizationReceiptIdentity: requireSha256(
+        lineage.finalizationReceiptIdentity,
+        `${lineageField}.finalizationReceiptIdentity`,
       ),
+      humanReviewIdentity: requireSha256(
+        lineage.humanReviewIdentity,
+        `${lineageField}.humanReviewIdentity`,
+      ),
+      inheritedPrescreenReviewIdentity: requireSha256(
+        lineage.inheritedPrescreenReviewIdentity,
+        `${lineageField}.inheritedPrescreenReviewIdentity`,
+      ),
+      ...(elementKind === 'actor'
+        ? { actorCohortIdentity: requireSha256(
+          lineage.actorCohortIdentity,
+          `${lineageField}.actorCohortIdentity`,
+        ) }
+        : {}),
     }
+    : qualified
+      ? {
+        ...common,
+        qualificationKind: 'local_file_integrity',
+        qualificationCheckId: requireIdentifier(lineage.qualificationCheckId, `${lineageField}.qualificationCheckId`),
+        qualificationIdentity: requireSha256(lineage.qualificationIdentity, `${lineageField}.qualificationIdentity`),
+        uploadCommandReceiptId: requireIdentifier(lineage.uploadCommandReceiptId, `${lineageField}.uploadCommandReceiptId`),
+        rightsRecordSha256: requireSha256(lineage.rightsRecordSha256, `${lineageField}.rightsRecordSha256`),
+      }
+      : {
+        ...common,
+        sourceEpisodeId: requireIdentifier(lineage.sourceEpisodeId, `${lineageField}.sourceEpisodeId`),
+        generationJobId: requireIdentifier(lineage.generationJobId, `${lineageField}.generationJobId`),
+        formalConsistencyCheckId: requireIdentifier(
+          lineage.formalConsistencyCheckId,
+          `${lineageField}.formalConsistencyCheckId`,
+        ),
+      }
   if (
     normalizedLineage.projectId !== projectId
     || normalizedLineage.ownerType !== elementKind
     || normalizedLineage.ownerId !== elementId
     || !isShotCurrentReferenceRole(elementKind, normalizedLineage.role)
+    || (ownerFinal && (
+      !('sourceEpisodeId' in normalizedLineage)
+      || normalizedLineage.sourceEpisodeId !== episodeId
+      || (elementKind === 'actor' && normalizedLineage.role !== 'turnaround_front')
+    ))
   ) {
     throw new UpstreamContractError(`${lineageField} subject mismatch`)
   }
@@ -4354,6 +4502,7 @@ function normalizeShotRelationElement(
   value: unknown,
   field: string,
   projectId: string,
+  episodeId: string,
 ): YimengShotRelationElement {
   const element = requireObject(value, field)
   assertExactOutputKeys(
@@ -4383,6 +4532,7 @@ function normalizeShotRelationElement(
       element.currentReference,
       `${field}.currentReference`,
       projectId,
+      episodeId,
       element.elementKind,
       elementId,
     )
@@ -4508,6 +4658,7 @@ function normalizeShotRelations(
         element,
         `${shotField}.elements[${String(index)}]`,
         projectId,
+        episodeId,
       ))
     const elementKeys = elements.map(element => `${element.elementKind}:${element.elementId}`)
     if (new Set(elementKeys).size !== elementKeys.length) {
@@ -4990,7 +5141,22 @@ export function createYimengReadHandler(
           if (result.projectId !== request.projectId || result.episodeId !== request.episodeId) {
             throw new UpstreamContractError('workflow project or episode subject mismatch')
           }
-          return result
+          return {
+            ...result,
+            director: {
+              ...result.director,
+              heroFrameStoryboards: {
+                ...result.director.heroFrameStoryboards,
+                shots: result.director.heroFrameStoryboards.shots.map(shot => ({
+                  ...shot,
+                  heroFrame: shot.heroFrame === null ? null : {
+                    ...shot.heroFrame,
+                    browserUrl: localMediaUrl(shot.heroFrame.browserUrl, shot.heroFrame.assetId, baseUrl),
+                  },
+                })),
+              },
+            },
+          }
         }
       } else if (endpoint === 'script') {
         const request = parseEpisodeRequest(payload)
@@ -5019,6 +5185,11 @@ export function createYimengReadHandler(
         })
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/storyboard-revisions/${encodeURIComponent(request.storyboardRevisionId)}/frames/${encodeURIComponent(request.frameId)}/first-frame-quote?${query.toString()}`
         normalize = value => normalizeFirstFrameQuote(value, request)
+      } else if (endpoint === 'videoQuote') {
+        const request = parseVideoQuoteRequest(payload)
+        path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}`
+          + `/scenes/${encodeURIComponent(request.sceneId)}/shots/${encodeURIComponent(request.shotId)}/production-takes/video-quote`
+        normalize = value => normalizeVideoQuote(value)
       } else if (endpoint === 'selectedVideoReview') {
         const request = parseSelectedVideoReviewRequest(payload)
         path = `/api/frames/${encodeURIComponent(request.frameId)}/video-candidates`
@@ -5163,7 +5334,7 @@ export function createYimengReadHandler(
           authorizationToken,
           scrubToken,
           verification ? verificationTimeoutMs : timeoutMs,
-          preview ? 24 * 1024 * 1024 : endpoint === 'script' ? MAX_SCRIPT_JSON_BYTES : MAX_JSON_BYTES,
+          preview ? 86 * 1024 * 1024 : endpoint === 'script' ? MAX_SCRIPT_JSON_BYTES : MAX_JSON_BYTES,
           signal,
           fetchOptions,
         )
@@ -5223,6 +5394,10 @@ export function apply(ctx: Context, config: YimengReadAdapterConfig = {}): void 
   const handler = createYimengReadHandler(config, dependencies)
   ctx.provide('qingmuYimengRead', handler)
   ctx.connection.rpc.handle(CHANNEL, handler, { authority: 'loopback' })
+  ctx.effect(() => registerEntityDraftReviewRead(ctx.webServer, {
+    baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),
+    fetch: dependencies.fetch,
+  }), 'qingmu-yimeng-read: entity draft human review state')
   if (authorizer !== undefined) {
     ctx.effect(() => registerEditorialHandoffDownload(ctx.webServer, {
       baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),

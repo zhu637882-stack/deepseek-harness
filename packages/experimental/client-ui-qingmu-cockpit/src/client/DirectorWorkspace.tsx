@@ -7,9 +7,15 @@ import { PromptIrWorkspace } from './PromptIrWorkspace.tsx'
 import { TakeVersionCompareView } from './TakeVersionCompareView.tsx'
 import css from './DirectorWorkspace.module.css'
 import { ScenePlanningWorkspace } from './ScenePlanningWorkspace.tsx'
+import type { DirectorContextClientPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
+import type { QingmuHostSync } from './host-sync.ts'
+import type { HostDescriptionSource } from '@deepseek-ai/dsh-client-connection/client'
+import type { NativeDirectorSessionPort } from './native-director-session.ts'
+import { useNativeDialogueExecution } from './NativeDialogueProgress.tsx'
 
 /** Props retain Yimeng's scene/frame identities; no director state is persisted here. */
 export interface DirectorWorkspaceProps {
+  readonly presentation?: 'planning' | 'assistant' | undefined
   readonly projectId: string
   readonly episodeId: string
   readonly projection: YimengWorkflowProjection | undefined
@@ -19,6 +25,12 @@ export interface DirectorWorkspaceProps {
   readonly onUnsavedChange: (dirty: boolean) => void
   readonly onCommitted: () => Promise<YimengWorkflowProjection | undefined>
   readonly port: QingmuYimengPort
+  readonly directorBridge: DirectorContextClientPort
+  readonly directorSessionId: string | undefined
+  readonly directorConnection?: HostDescriptionSource | undefined
+  readonly directorRefresh?: number | undefined
+  readonly nativeDirectorSession?: NativeDirectorSessionPort | undefined
+  readonly hostSync?: QingmuHostSync | undefined
   readonly t: (key: QingmuCockpitKey) => string
 }
 
@@ -27,7 +39,22 @@ export interface DirectorWorkspaceProps {
  * @returns Scoped director workspace.
  */
 export function DirectorWorkspace(props: DirectorWorkspaceProps) {
+  const currentProjection = props.projection?.projectId === props.projectId
+    && props.projection.episodeId === props.episodeId ? props.projection : undefined
+  const selectedShot = currentProjection?.director.shotRelations.shots.find(shot => shot.shotId === props.selectedShotId)
+  const canonicalDirectorScope = selectedShot ? {
+    projectId: props.projectId, episodeId: props.episodeId,
+    sceneId: selectedShot.sceneId, shotId: selectedShot.shotId,
+  } : null
   const [productionMounted, setProductionMounted] = useState(false)
+  const [productionOpen, setProductionOpen] = useState(false)
+  const execution = useNativeDialogueExecution(props.nativeDirectorSession, props.directorSessionId)
+  const reviewReady = execution?.status === 'input_prepared' && canonicalDirectorScope
+    && Object.entries(canonicalDirectorScope).every(([key, value]) => execution.scope[key as keyof typeof execution.scope] === value)
+    ? `${props.directorSessionId}:${execution.commandReceiptId}` : null
+  useEffect(() => {
+    if (reviewReady) { setProductionMounted(true); setProductionOpen(true) }
+  }, [reviewReady])
   const [planningDirty, setPlanningDirty] = useState(false)
   const [promptDirty, setPromptDirty] = useState(false)
   useEffect(() => {
@@ -35,11 +62,17 @@ export function DirectorWorkspace(props: DirectorWorkspaceProps) {
     return () => { props.onUnsavedChange(false) }
   }, [planningDirty, promptDirty, props.onUnsavedChange])
   return <>
-    <ScenePlanningWorkspace key={`${props.projectId}:${props.episodeId}`} {...props} onUnsavedChange={setPlanningDirty} />
-    <details onToggle={(event) => { if (event.currentTarget.open) setProductionMounted(true) }}>
+    <ScenePlanningWorkspace key={`${props.projectId}:${props.episodeId}`} {...props}
+      canonicalDirectorScope={canonicalDirectorScope}
+      canonicalDirectorRevision={JSON.stringify(currentProjection?.director.shotRelations.storyboardRevision)}
+      onUnsavedChange={setPlanningDirty} />
+    {props.presentation !== 'assistant' && <details open={productionOpen} onToggle={(event) => {
+      setProductionOpen(event.currentTarget.open)
+      if (event.currentTarget.open) setProductionMounted(true)
+    }}>
       <summary>已有提示词、Take 与高级分镜</summary>
       {productionMounted && <ExistingDirectorWorkspace {...props} onUnsavedChange={setPromptDirty} />}
-    </details>
+    </details>}
   </>
 }
 
@@ -73,6 +106,9 @@ function ExistingDirectorWorkspace(props: DirectorWorkspaceProps) {
         {showTakes && <TakeVersionCompareView {...props} enabled readOnly />}
       </details>
       <PromptIrWorkspace {...props} storyboardRevisionId={relations.storyboardRevision.revisionId}
+        {...(shot ? { nativeDirector: { bridge: props.directorBridge, sessionId: props.directorSessionId,
+          connection: props.directorConnection,
+          scope: { projectId: props.projectId, episodeId: props.episodeId, sceneId: shot.sceneId, shotId: shot.shotId } } } : {})}
         presentation="director" onCommitted={async () => { await props.onCommitted() }} />
       <details onToggle={(event) => { setShowCanvas(event.currentTarget.open) }}>
         <summary>{t('directorStoryboard')}</summary>

@@ -24,6 +24,12 @@ import type { RpcRequest } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
 import { RpcId } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
 import { createApiProxy } from '../src/api-proxy.ts'
 
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    'test/extension-state': null | boolean | string | Record<string, never>
+  }
+}
+
 let nextRpc = 1
 function request<P>(payload: P): RpcRequest<P> {
   return { rpcId: RpcId(`models-${String(nextRpc++)}`), payload }
@@ -233,7 +239,7 @@ describe('Web session model selection', () => {
     await ctx.fiber.dispose()
   })
 
-  it('authorizes attachment bytes only when the session event stream references the id', async () => {
+  it.each([null, false, 'cleared', {}])('authorizes referenced attachments after extension payload %j without authorizing other ids', async (payload) => {
     const { ctx, agent, sessionId } = await harness()
     const ref = {
       attachmentId: 'att-authorized', mediaType: 'image/png' as const, bytes: 2, width: 1, height: 1,
@@ -244,6 +250,7 @@ describe('Web session model selection', () => {
       defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
       cwd: '/tmp',
     })
+    agent.session.append('test/extension-state', payload)
     agent.session.append('agent/inbox/spliced', {
       target: 'next-turn',
       start: 0,

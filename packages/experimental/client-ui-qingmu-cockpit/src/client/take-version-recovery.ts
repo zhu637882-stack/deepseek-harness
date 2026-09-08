@@ -1,4 +1,4 @@
-import type { YimengSelectTakeVersionRequest, YimengTakeVersionRequest } from './contracts.ts'
+import type { YimengSelectTakeVersionRequest, YimengTakeVersionRequest, YimengTakeVersionSelectionResult } from './contracts.ts'
 
 const KEYS = [
   'schema', 'projectId', 'episodeId', 'frameId', 'expectedStackSha256', 'expectedSelectedTakeId',
@@ -10,6 +10,33 @@ const KEYS = [
  */
 export interface TakeVersionSelectionRecoveryMarker extends YimengSelectTakeVersionRequest {
   readonly schema: 'qingmu.take-version-selection-recovery-marker.v1'
+}
+
+/** Verify that a committed receipt is for this exact persisted selection intent. */
+export function takeSelectionReceiptMatches(
+  result: YimengTakeVersionSelectionResult,
+  marker: TakeVersionSelectionRecoveryMarker,
+): boolean {
+  return result.schema === 'jason.qingmu-take-selection-result.v1'
+    && result.projectId === marker.projectId && result.episodeId === marker.episodeId
+    && result.frameId === marker.frameId && result.baseStackSnapshotSha256 === marker.expectedStackSha256
+    && result.idempotencyKey === marker.idempotencyKey && result.selectedTake.takeId === marker.candidateTakeId
+    && result.selectedTake.versionOrdinal === marker.candidateVersionOrdinal
+    && result.selectedTake.outputSha256 === marker.candidateOutputSha256
+    && result.authoritativeStack.selectedTakeId === marker.candidateTakeId
+    && result.selectionChanged === true && result.providerCalls === 0
+    && result.paidProviderAuthority === 'not_granted' && result.budgetMutation === false
+    && result.humanApprovalInferred === false && result.formalApprovalChanged === false
+}
+
+/** Strip recovery-only metadata before passing the request to the strict adapter DTO. */
+export function takeVersionSelectionRequestFromMarker(marker: TakeVersionSelectionRecoveryMarker): YimengSelectTakeVersionRequest {
+  return {
+    projectId: marker.projectId, episodeId: marker.episodeId, frameId: marker.frameId,
+    expectedStackSha256: marker.expectedStackSha256, expectedSelectedTakeId: marker.expectedSelectedTakeId,
+    candidateTakeId: marker.candidateTakeId, candidateVersionOrdinal: marker.candidateVersionOrdinal,
+    candidateOutputSha256: marker.candidateOutputSha256, idempotencyKey: marker.idempotencyKey,
+  }
 }
 
 /**

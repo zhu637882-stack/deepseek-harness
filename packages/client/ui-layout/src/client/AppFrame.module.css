@@ -117,3 +117,10 @@
 .overlayLayer > * {
   pointer-events: auto;
 }
+
+.workspace { height: 100%; }
+.workspace[hidden] { display: none; }
+.tools { width: 100%; height: 100%; padding: 0; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); }
+.tools > header { height: 48px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; }
+.tools > header button { border: 1px solid var(--dsw-alias-border-l2); border-radius: 4px; color: inherit; background: var(--dsw-alias-bg-layer-2); padding: 8px 12px; cursor: pointer; font: inherit; }
+.tools > .frame { height: calc(100% - 48px); }

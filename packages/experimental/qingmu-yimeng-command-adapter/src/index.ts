@@ -13,6 +13,7 @@ import {
 } from './director-execution-host.ts'
 import type { DirectorProviderTransportResult } from './director-provider-execution.ts'
 import {
+  type DirectorPaidAvailability,
   normalizeDirectorPaidWorkOrder,
   normalizeDirectorPaidWorkOrderStatus,
   parseDirectorPaidWorkOrderRequest,
@@ -33,6 +34,7 @@ export type {
   DirectorExecutionHostResult, DirectorExecutionPreparedLock,
 } from './director-execution-host.ts'
 export type {
+  DirectorPaidAvailability,
   DirectorPaidWorkOrder,
   DirectorPaidWorkOrderRequest,
   DirectorPaidWorkOrderStatus,
@@ -46,6 +48,7 @@ import {
   normalizeDirectorReplayMethod,
   normalizeDirectorWorkOrder,
   parseDirectorProposalFreshnessRequest,
+  parseDirectorContextRequest,
   parseDirectorProposalRequest,
 } from './director-proposal.ts'
 export type {
@@ -61,16 +64,34 @@ export type {
 } from './director-proposal.ts'
 export type {
   ProjectInitializationRequest, ProjectInitializationRecovery, ProjectInitializationResult,
+  CreativeContract, CreativeContractMethodRef, CreativeContractState,
   CreationScope, TextImportReadRequest, TextImportRequest, TextImportLine, TextImportDraft,
   TextImportState, TextImportCorrection, TextImportConfirmationRequest, TextImportConfirmation,
 } from './creation.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-client-connection'
+import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Host-only command handler reused by the director context bridge. */
+    qingmuYimengCommand: ConnectionRpcHandler
+    /** Existing Host-only normalized read boundary reused by the production bridge. */
+    qingmuYimengRead: ConnectionRpcHandler
+  }
+}
 import { prepareShotFindingCommand } from './shot-finding.ts'
+import { registerEntityDraftReviewCommands } from './entity-draft-review.ts'
+import { registerFirstFrameSelectionCommands } from './first-frame-selection.ts'
+import { registerShootingFirstFrame } from './shooting-first-frame.ts'
+export {
+  registerEntityDraftReviewCommands,
+  type EntityDraftReviewCommandDependencies,
+} from './entity-draft-review.ts'
 import { prepareTakeVersionCommand } from './take-version.ts'
 import { prepareTakeCommentCommand } from './take-comment.ts'
 import { prepareTakeReviewCommand } from './take-review-authority.ts'
@@ -91,6 +112,7 @@ import {
 import { prepareStageSourceCommand } from './stage-source.ts'
 import { prepareCurrentLsuPlanMethodRequest, prepareLsuPlanCommand } from './lsu-plan.ts'
 import { prepareCurrentReworkRouteMethodRequest, prepareReworkRouteCommand } from './rework-route.ts'
+import { parseQueueProductionTakeIntent, prepareProductionTakeCommand } from './production-take.ts'
 import type {
   YimengChangeSet,
   YimengChangeSetBase,
@@ -466,12 +488,14 @@ const SENSITIVE_RESPONSE_KEYS = new Set([
 /** Cordis plugin name. */
 export const name = 'experimental-qingmu-yimeng-command-adapter'
 /** Host Connection must exist before the private command channel is registered. */
-export const inject = ['connection']
+export const inject = ['connection', 'webServer']
 
 /** Deployment-tunable loopback upstream and request deadline. */
 export interface YimengCommandAdapterConfig {
   /** Pathless loopback HTTP(S) origin of the authoritative Yimeng API. */
   readonly baseUrl?: string
+  /** Optional loopback Writer origin for the production-Take route only. */
+  readonly productionTakeBaseUrl?: string
   /** Command deadline in milliseconds, from 100 through 60,000. */
   readonly timeoutMs?: number
   /** Isolated acceptance task; empty in every ordinary instance. */
@@ -500,11 +524,18 @@ export interface YimengCommandAdapterConfig {
   readonly directorProductionMethodVersion?: string
   /** Method SHA already locked into the production task. */
   readonly directorProductionMethodSha256?: string
+  /** Browser may explicitly issue one paid advisory only when this Host-owned switch is true. */
+  readonly directorProductionInteractiveEnabled?: boolean
+  /** Exact project allowed by the interactive production switch. */
+  readonly directorProductionProjectId?: string
+  /** Exact episode allowed by the interactive production switch. */
+  readonly directorProductionEpisodeId?: string
 }
 
 /** Validated Cordis configuration for the command adapter. */
 export const Config: z<YimengCommandAdapterConfig> = z.object({
   baseUrl: z.string().default(DEFAULT_BASE_URL),
+  productionTakeBaseUrl: z.string().default(''),
   timeoutMs: z.natural().min(100).default(DEFAULT_TIMEOUT_MS),
   directorFixtureTaskId: z.string().default(''),
   directorFixtureMethodVersion: z.string().default(''),
@@ -519,12 +550,21 @@ export const Config: z<YimengCommandAdapterConfig> = z.object({
   directorProductionTaskId: z.string().default(''),
   directorProductionMethodVersion: z.string().default(''),
   directorProductionMethodSha256: z.string().default(''),
+  directorProductionInteractiveEnabled: z.boolean().default(false),
+  directorProductionProjectId: z.string().default(''),
+  directorProductionEpisodeId: z.string().default(''),
 })
 
 /** Injectable Host capabilities used by isolated tests. */
 export interface YimengCommandAdapterDependencies {
   readonly fetch: typeof globalThis.fetch
   readonly readToken: () => string | undefined
+  /** Host-private scheduler; browser receives no credential, claim, or Provider payload. */
+  readonly queueDirectorProductionTask?: (
+    taskId: string,
+    methodPackageVersion: string,
+    methodPackageSha256: string,
+  ) => void
   /** Host-only stateless package mapped to the existing Qingmu integration plan. */
   readonly runDirectorReplayMethod?: (
     payload: unknown,
@@ -552,6 +592,13 @@ export interface YimengCommandAdapterDependencies {
   ) => Promise<RpcResult<unknown>>
   /** Trusted Host call that recompiles the current Take approval lifecycle method. */
   readonly runTakeApprovalLifecycleMethod?: (
+    payload: unknown,
+    signal: AbortSignal,
+  ) => Promise<RpcResult<unknown>>
+  /** Existing normalized Host-only Yimeng read boundary. */
+  readonly readYimeng?: ConnectionRpcHandler
+  /** Trusted current E1-B PromptIR Method compiler. */
+  readonly runPromptIrMethod?: (
     payload: unknown,
     signal: AbortSignal,
   ) => Promise<RpcResult<unknown>>
@@ -5259,7 +5306,33 @@ export function createYimengCommandHandler(
   },
 ): ConnectionRpcHandler {
   const baseUrl = resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL)
+  const productionTakeBaseUrl = config.productionTakeBaseUrl === undefined || config.productionTakeBaseUrl === ''
+    ? baseUrl
+    : resolveBaseUrl(config.productionTakeBaseUrl)
   const timeoutMs = resolveTimeout(config.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+  const productionAvailability = (): DirectorPaidAvailability => {
+    const methodSha = config.directorProductionMethodSha256 ?? ''
+    const enabled = config.directorProductionInteractiveEnabled === true
+      && dependencies.queueDirectorProductionTask !== undefined
+      && Boolean(config.directorProductionProjectId)
+      && Boolean(config.directorProductionEpisodeId)
+      && Boolean(config.directorProductionMethodVersion)
+      && /^[a-f0-9]{64}$/.test(methodSha)
+    return {
+      enabled,
+      provider: enabled ? 'deepseek-official' : null,
+      model: enabled ? 'deepseek-v4-pro' : null,
+      maxPaidCny: enabled ? '0.30000000' : null,
+      maxInputTokens: enabled ? 8000 : null,
+      maxOutputTokens: enabled ? 2000 : null,
+      maxAttempts: enabled ? 1 : null,
+      maxRetries: enabled ? 0 : null,
+      projectId: enabled ? config.directorProductionProjectId ?? null : null,
+      episodeId: enabled ? config.directorProductionEpisodeId ?? null : null,
+      methodPackageVersion: enabled ? config.directorProductionMethodVersion ?? null : null,
+      methodPackageSha256: enabled ? methodSha : null,
+    }
+  }
   return async (endpoint, payload, signal) => {
     try {
       const stageArtifactHelpers = {
@@ -5269,6 +5342,57 @@ export function createYimengCommandHandler(
         responseError: (message: string) => new UpstreamContractError(message),
         readAttestationKey: readReferenceAttestationKey,
         requireTimestamp: requireRfc3339Timestamp,
+      }
+      if (endpoint === 'queueProductionTake') {
+        if (dependencies.readYimeng === undefined || dependencies.runPromptIrMethod === undefined) {
+          return internalError('current Writer production prerequisites are unavailable')
+        }
+        const token = normalizeToken(dependencies.readToken())
+        if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
+        const intent = parseQueueProductionTakeIntent(payload, stageArtifactHelpers)
+        let prepared
+        try {
+          prepared = await prepareProductionTakeCommand(intent, {
+            readYimeng: dependencies.readYimeng,
+            runPromptIrMethod: dependencies.runPromptIrMethod,
+          }, stageArtifactHelpers, signal)
+        } catch (error) {
+          if (error instanceof UpstreamContractError) {
+            return internalError(`Writer production prerequisite failed: ${error.message}`)
+          }
+          throw error
+        }
+        if (signal.aborted) return cancelled()
+        const response = await fetchJson(
+          dependencies,
+          `${productionTakeBaseUrl}${prepared.path}`,
+          token,
+          { method: 'POST', body: serializeBody(prepared.body), idempotencyKey: prepared.idempotencyKey },
+          timeoutMs,
+          signal,
+          true,
+        )
+        if (!response.ok) return response
+        try {
+          return { ok: true, value: prepared.normalize(response.value) }
+        } catch (error) {
+          return error instanceof UpstreamContractError
+            ? internalError(`Writer production receipt failed: ${error.message}`)
+            : internalError('Writer production receipt failed')
+        }
+      }
+      if (endpoint === 'readDirectorContext') {
+        const request = parseDirectorContextRequest(payload, stageArtifactHelpers)
+        const token = normalizeToken(dependencies.readToken())
+        if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
+        const contextPath = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}`
+          + `/episodes/${encodeURIComponent(request.episodeId)}/director-inference/context?`
+          + new URLSearchParams({ sceneId: request.sceneId, shotId: request.shotId }).toString()
+        const contextResult = await fetchJson(
+          dependencies, `${baseUrl}${contextPath}`, token, { method: 'GET' }, timeoutMs, signal,
+        )
+        if (!contextResult.ok) return contextResult
+        return { ok: true, value: normalizeDirectorContext(contextResult.value, request, stageArtifactHelpers) }
       }
       if (endpoint === 'requestDirectorProposal') {
         const request = parseDirectorProposalRequest(payload, stageArtifactHelpers)
@@ -5314,12 +5438,36 @@ export function createYimengCommandHandler(
           request, context, freshContext, workOrder, method, stageArtifactHelpers,
         ) }
       }
+      if (endpoint === 'readDirectorProviderAvailability') {
+        const scope = requireObject(payload, 'director production availability request')
+        if (Object.keys(scope).sort().join('\0') !== 'episodeId\0projectId'
+          || typeof scope.projectId !== 'string' || typeof scope.episodeId !== 'string') {
+          throw new InputError('director production availability request invalid')
+        }
+        const availability = productionAvailability()
+        if (availability.enabled && (scope.projectId !== availability.projectId
+          || scope.episodeId !== availability.episodeId)) {
+          return { ok: true, value: { ...availability, enabled: false, provider: null, model: null,
+            maxPaidCny: null, maxInputTokens: null, maxOutputTokens: null, maxAttempts: null,
+            maxRetries: null, projectId: null, episodeId: null, methodPackageVersion: null,
+            methodPackageSha256: null } }
+        }
+        return { ok: true, value: availability }
+      }
       if (endpoint === 'issueDirectorProviderWorkOrder') {
         let paidRequest
         try {
           paidRequest = parseDirectorPaidWorkOrderRequest(payload)
         } catch (error) {
           throw new InputError(error instanceof Error ? error.message : 'director paid work order request invalid')
+        }
+        const availability = productionAvailability()
+        if (!availability.enabled
+          || paidRequest.projectId !== availability.projectId
+          || paidRequest.episodeId !== availability.episodeId
+          || paidRequest.methodPackageVersion !== availability.methodPackageVersion
+          || paidRequest.methodPackageSha256 !== availability.methodPackageSha256) {
+          return internalError('Director production suggestions are disabled for this scope')
         }
         const token = normalizeToken(dependencies.readToken())
         if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
@@ -5335,7 +5483,13 @@ export function createYimengCommandHandler(
         )
         if (!result.ok) return result
         try {
-          return { ok: true, value: normalizeDirectorPaidWorkOrder(result.value, paidRequest) }
+          const workOrder = normalizeDirectorPaidWorkOrder(result.value, paidRequest)
+          dependencies.queueDirectorProductionTask?.(
+            workOrder.generationTaskId,
+            paidRequest.methodPackageVersion,
+            paidRequest.methodPackageSha256,
+          )
+          return { ok: true, value: workOrder }
         } catch (error) {
           throw new UpstreamContractError(error instanceof Error ? error.message : 'director paid work order invalid')
         }
@@ -5577,11 +5731,24 @@ export function createYimengCommandHandler(
         path = prepared.path
         requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
         normalize = prepared.normalize
-      } else if (['initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)) {
+      } else if (['readCreativeContract', 'initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)) {
         const prepared = prepareCreationCommand(endpoint, payload, stageArtifactHelpers)
         path = prepared.path
         requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
         normalize = prepared.normalize
+      } else if (endpoint === 'readDialogueEditCapability') {
+        const request = requireInputObject(payload)
+        if (Object.keys(request).length) throw new Error('Dialogue capability takes no arguments.')
+        path = '/api/qingmu/dialogue-edit/capability'
+        requestInit = { method: 'GET' }
+        normalize = (value) => {
+          const body = requireObject(value, 'dialogue capability')
+          if (body.schema !== 'qingmu.dialogue-transaction-capability.v1'
+            || body.referenceSchema !== 'qingmu.dialogue-edit-reference.v1'
+            || body.atomicScriptAndFrames !== true) throw new Error('Dialogue transaction is not installed.')
+          return { schema: 'qingmu.dialogue-transaction-capability.v1' as const,
+            referenceSchema: 'qingmu.dialogue-edit-reference.v1' as const, atomicScriptAndFrames: true as const }
+        }
       } else if (endpoint === 'proposeScript') {
         const request = parseProposeRequest(payload)
         path = `/api/qingmu/episodes/${encodeURIComponent(request.episodeId)}/script/change-sets`
@@ -5937,7 +6104,7 @@ export function createYimengCommandHandler(
         || endpoint === 'probeReworkRouteAuthority'
       const requiresCredentialReflectionGuard = isStageArtifactCommand
         || ['readScenePlanning', 'saveScenePlanning', 'recoverScenePlanning'].includes(endpoint)
-        || ['initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)
+        || ['readCreativeContract', 'initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)
         || endpoint === 'createTakeComment' || endpoint === 'recoverTakeComment'
         || endpoint === 'createTakeReviewRecommendation'
         || endpoint === 'recoverTakeReviewRecommendation'
@@ -5981,9 +6148,52 @@ export function createYimengCommandHandler(
 
 /** Register the command adapter on a loopback-only Host Connection channel. */
 export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): void {
-  ctx.connection.rpc.handle(CHANNEL, createYimengCommandHandler(config, {
+  ctx.effect(() => registerShootingFirstFrame(ctx.webServer, resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL)), 'qingmu-yimeng-command: shooting first frame')
+  ctx.effect(() => registerEntityDraftReviewCommands(ctx.webServer, {
+    baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),
+    fetch: globalThis.fetch,
+  }), 'qingmu-yimeng-command: entity draft human review commands')
+  ctx.effect(() => registerFirstFrameSelectionCommands(ctx.webServer, {
+    baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),
     fetch: globalThis.fetch,
     readToken: () => process.env.YIMENG_API_TOKEN,
+  }), 'qingmu-yimeng-command: first-frame selection commands')
+  const interactiveController = new AbortController()
+  const activeInteractiveTasks = new Set<string>()
+  const queueDirectorProductionTask = config.directorProductionInteractiveEnabled === true
+    ? (taskId: string, methodPackageVersion: string, methodPackageSha256: string): void => {
+      if (methodPackageVersion !== config.directorProductionMethodVersion
+        || methodPackageSha256 !== config.directorProductionMethodSha256) {
+        throw new Error('Director production method scope mismatch')
+      }
+      const llm = ctx.get('llm')
+      if (llm === undefined) throw new Error('DSh LLM runtime unavailable')
+      if (activeInteractiveTasks.has(taskId)) return
+      activeInteractiveTasks.add(taskId)
+      void executeDirectorTaskOnce(
+        {
+          baseUrl: config.baseUrl ?? DEFAULT_BASE_URL,
+          executionKey: process.env.QINGMU_DIRECTOR_EXECUTION_KEY ?? '',
+          transport: config.directorDshMockBaseUrl
+            ? createDshDeepSeekDirectorTransport(llm, { mockBaseUrl: config.directorDshMockBaseUrl })
+            : createDshDeepSeekProductionDirectorTransport(llm),
+        },
+        taskId,
+        methodPackageVersion,
+        methodPackageSha256,
+        interactiveController.signal,
+      ).catch(() => {
+        ctx.logger.error('Director production interactive execution failed')
+      }).finally(() => {
+        activeInteractiveTasks.delete(taskId)
+      })
+    }
+    : undefined
+  ctx.effect(() => () => interactiveController.abort(), 'qingmu Director interactive execution lifetime')
+  const handler = createYimengCommandHandler(config, {
+    fetch: globalThis.fetch,
+    readToken: () => process.env.YIMENG_API_TOKEN,
+    ...(queueDirectorProductionTask === undefined ? {} : { queueDirectorProductionTask }),
     runDirectorReplayMethod: async (payload, signal) => {
       const method = ctx.get('qingmuImagoMethod')
       return method === undefined
@@ -6020,7 +6230,25 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
         ? internalError('current IMAGO bounded route Method is unavailable')
         : await method('reworkRouteMethod', payload, signal)
     },
-  }), { authority: 'loopback' })
+    readYimeng: async (endpoint, payload, signal) => {
+      const read = ctx.get('qingmuYimengRead')
+      return read === undefined
+        ? internalError('current Yimeng read boundary is unavailable')
+        : await read(endpoint, payload, signal)
+    },
+    runPromptIrMethod: async (payload, signal) => {
+      const method = ctx.get('qingmuImagoMethod')
+      return method === undefined
+        ? internalError('current IMAGO PromptIR Method is unavailable')
+        : await method('promptIrMethod', payload, signal)
+    },
+  })
+  ctx.provide('qingmuYimengCommand', handler)
+  const browserHandler: ConnectionRpcHandler = async (endpoint, payload, signal) =>
+    endpoint === 'readDirectorContext'
+      ? internalError('Requested Yimeng context is Host-internal')
+      : await handler(endpoint, payload, signal)
+  ctx.connection.rpc.handle(CHANNEL, browserHandler, { authority: 'loopback' })
   if (config.directorFixtureTaskId) {
     const executionKey = process.env.QINGMU_DIRECTOR_EXECUTION_KEY ?? ''
     const controller = new AbortController()

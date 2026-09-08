@@ -24,9 +24,9 @@
 
 import { createRequire } from 'node:module'
 import {
-  existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync,
+  existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, statSync, symlinkSync, unlinkSync, writeFileSync,
 } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import { applyEntryPatches, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
@@ -42,6 +42,8 @@ export const PROFILE_PATCH_FILENAME = 'cordis.patch.yml'
 export interface DshBundleManifest {
   /** The patch layer this bundle exports, relative to its package root. */
   patch: string
+  /** Optional shipped agent-preset directory, relative to and contained in this package. */
+  agentPresets?: string
 }
 
 /** The profile half of the `dsh` manifest section: what a profile directory composes. */
@@ -79,6 +81,8 @@ export interface ProfileLayer {
   patchPath: string
   /** The parsed patch list. */
   patches: PatchOptions[]
+  /** Validated shipped preset directory, when the bundle declares one. */
+  agentPresetRoot?: string
 }
 
 /** A loaded profile: resolved bundle layers plus the user's own patch layer. */
@@ -393,13 +397,41 @@ export function loadProfile(
       throw new Error(`${binName}: profile bundle ${JSON.stringify(packageName)} declares no dsh.bundle in its package.json`)
     }
     const patchPath = join(packageDir, declared)
-    return { packageName, packageDir, patchPath, patches: loadOverlayPatches(binName, patchPath) }
+    const declaredPresets = bundleManifest.dsh?.bundle?.agentPresets
+    const agentPresetRoot = declaredPresets === undefined
+      ? undefined
+      : resolveBundlePresetRoot(binName, packageName, packageDir, declaredPresets)
+    return {
+      packageName, packageDir, patchPath, patches: loadOverlayPatches(binName, patchPath),
+      ...(agentPresetRoot === undefined ? {} : { agentPresetRoot }),
+    }
   })
   const patchPath = join(dir, PROFILE_PATCH_FILENAME)
   const patches = options.userLayer !== false && existsSync(patchPath)
     ? loadOverlayPatches(binName, patchPath)
     : []
   return { name, dir, layers, patchPath, patches }
+}
+
+/** Bundle presets are installation-owned code, never a machine-specific or escaping path. */
+function resolveBundlePresetRoot(binName: string, packageName: string, packageDir: string, declared: unknown): string {
+  const problem = `${binName}: bundle ${JSON.stringify(packageName)} dsh.bundle.agentPresets must name an existing directory inside its package`
+  if (typeof declared !== 'string' || declared.trim() === '' || isAbsolute(declared) || declared.includes('\\')) {
+    throw new Error(problem)
+  }
+  const contained = (root: string, target: string): boolean => {
+    const part = relative(root, target)
+    return part !== '' && part !== '..' && !part.startsWith(`..${sep}`) && !isAbsolute(part)
+  }
+  const target = resolve(packageDir, declared)
+  if (!contained(packageDir, target)) throw new Error(problem)
+  try {
+    const realTarget = realpathSync(target)
+    if (!contained(realpathSync(packageDir), realTarget) || !statSync(realTarget).isDirectory()) throw new Error(problem)
+    return realTarget
+  } catch (cause) {
+    throw new Error(problem, { cause })
+  }
 }
 
 /**

@@ -105,10 +105,8 @@ const directorBody = (payload: Readonly<Record<string, unknown>>, provider: stri
   ])
   if (Object.keys(request).some(key => !allowed.has(key))
     || request.model !== model || request.enable_thinking !== false
-    || !Number.isSafeInteger(request.max_completion_tokens)
-    || Number(request.max_completion_tokens) < 1 || Number(request.max_completion_tokens) > 512
-    || !Number.isSafeInteger(request.estimated_input_tokens)
-    || Number(request.estimated_input_tokens) < 1 || Number(request.estimated_input_tokens) > 16_000
+    || request.max_completion_tokens !== 2_000
+    || request.estimated_input_tokens !== 8_000
     || request.estimated_output_tokens !== request.max_completion_tokens
     || !Array.isArray(request.messages) || request.messages.length !== 1) {
     throw new Error('director DSh payload invalid')

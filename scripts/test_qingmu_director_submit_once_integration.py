@@ -56,12 +56,12 @@ class _DeepSeekMock(BaseHTTPRequestHandler):
         self.wfile.write(encoded)
 
 
-@unittest.skipUnless(os.environ.get("QINGMU_C1_SOURCE_ROOT"), "requires locked synthetic C1 root")
+@unittest.skipUnless(os.environ.get("QINGMU_D1_SOURCE_ROOT"), "requires locked synthetic D1 root")
 class DirectorSubmitOnceIntegration(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="qingmu-c1-submit-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="qingmu-d1-submit-")
         self.root = Path(self.temporary.name) / "instance"
-        shutil.copytree(Path(os.environ["QINGMU_C1_SOURCE_ROOT"]), self.root, symlinks=True)
+        shutil.copytree(Path(os.environ["QINGMU_D1_SOURCE_ROOT"]), self.root, symlinks=True)
         self.root = self.root.resolve()
         config = json.loads((self.root / "private/instance.json").read_text())
         config.update(root=str(self.root), instanceId=local.secrets.token_hex(16))
@@ -90,7 +90,7 @@ class DirectorSubmitOnceIntegration(unittest.TestCase):
             "items": [{"id": "local-mock-item", "field": "narrative",
                 "proposedValue": "本地单次提交建议", "impact": "仅为导演建议"}],
         }
-        private_lock = self.root / "private/c1-pre-submit-lock.json"
+        private_lock = self.root / "private/d1-pre-submit-lock.json"
         binding = json.loads(private_lock.read_text())
         source_snapshots = {
             "scriptRevision": context["script"]["revision"],
@@ -104,9 +104,9 @@ class DirectorSubmitOnceIntegration(unittest.TestCase):
             ).hexdigest(),
             "contextSnapshotSha256": context["contextSnapshotSha256"],
         }
-        self.lock_pack = self.root / "c1-phase1-7-lock-pack.json"
+        self.lock_pack = self.root / "d1-one-shot-lock-pack.json"
         self.lock_pack.write_text(json.dumps({
-            "schema": "qingmu.c1-deepseek-text-pre-submit-lock.v3",
+            "schema": "qingmu.d1-deepseek-text-pre-submit-lock.v4",
             "status": "active",
             "submitAllowed": True,
             "canary": {"root": str(self.root), "instanceId": config["instanceId"],
@@ -137,10 +137,10 @@ class DirectorSubmitOnceIntegration(unittest.TestCase):
                 "maxAttempts": 1, "maxRetries": 0,
                 "credentialFileMetadataOnly": config["directorProductionExecution"]["credentialFile"],
                 "transportEnabled": False},
-            "pricing": {"snapshotDate": "2026-08-31", "currency": "CNY",
-                "inputCacheMissCnyPerMillion": 9, "outputCnyPerMillion": 27,
-                "reservedUpperBoundCny": 0.16,
-                "estimatedReservationCny": 0.157824, "actualCostCny": 0},
+            "pricing": {"snapshotDate": "2026-08-16", "currency": "CNY",
+                "inputCacheMissCnyPerMillion": 9.504, "outputCnyPerMillion": 28.512,
+                "reservedUpperBoundCny": 0.30,
+                "estimatedReservationCny": 0.133056, "actualCostCny": None},
             "persistedCounts": {"generation_tasks": 1, "provider_preflights": 1,
                 "provider_authorization_reservations": 0, "provider_submission_outbox": 0,
                 "assets": 0, "prompt_irs": 0, "entity_reference_packs": 0,

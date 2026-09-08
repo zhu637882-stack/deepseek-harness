@@ -7,19 +7,35 @@ import css from './TakeVersionCompareView.module.css'
  * @param props - Immutable scope, authenticated Host port and translated labels.
  * @returns A read-only video player with bounded loading and recoverable errors.
  */
-export function TakePreviewPlayer({ request, load, t }: {
+export function TakePreviewPlayer({ request, load, t, onPreviewReady, autoLoad = false }: {
   readonly request: YimengTakePreviewRequest
   readonly load: QingmuYimengPort['takePreview']
   readonly t: (key: QingmuCockpitKey) => string
+  /** Receives only the verified in-memory object URL for an existing Take. */
+  readonly onPreviewReady?: (url: string | undefined) => void
+  /** Read existing bytes on shot selection, without autoplay or generation. */
+  readonly autoLoad?: boolean
 }) {
   const [url, setUrl] = useState<string>()
   const [status, setStatus] = useState<'idle' | 'loading' | 'error' | 'ready'>('idle')
   const controller = useRef<AbortController | undefined>(undefined)
   const blob = useRef<string | undefined>(undefined)
-  useEffect(() => () => {
+  const requestKey = [request.projectId, request.episodeId, request.frameId, request.takeId, request.expectedOutputSha256].join('\u0000')
+  useEffect(() => {
     controller.current?.abort()
+    controller.current = undefined
     if (blob.current !== undefined) URL.revokeObjectURL(blob.current)
-  }, [])
+    blob.current = undefined
+    setUrl(undefined)
+    setStatus('idle')
+    onPreviewReady?.(undefined)
+    return () => {
+      controller.current?.abort()
+      if (blob.current !== undefined) URL.revokeObjectURL(blob.current)
+      blob.current = undefined
+      onPreviewReady?.(undefined)
+    }
+  }, [onPreviewReady, requestKey])
   async function preview() {
     if (controller.current !== undefined || blob.current !== undefined) return
     const run = new AbortController()
@@ -38,12 +54,21 @@ export function TakePreviewPlayer({ request, load, t }: {
       if (digest !== request.expectedOutputSha256) throw new Error('preview hash mismatch')
       blob.current = URL.createObjectURL(new Blob([bytes], { type: result.mimeType }))
       setUrl(blob.current)
+      onPreviewReady?.(blob.current)
       setStatus('ready')
     } catch {
       if (!run.signal.aborted) setStatus('error')
     } finally {
       if (controller.current === run) controller.current = undefined
     }
+  }
+  useEffect(() => {
+    if (autoLoad) void preview()
+  }, [requestKey, load, autoLoad, onPreviewReady])
+  function retryPlayback() {
+    if (blob.current !== undefined) URL.revokeObjectURL(blob.current)
+    blob.current = undefined; setUrl(undefined); onPreviewReady?.(undefined)
+    void preview()
   }
   return <div className={css.preview}>
     {url === undefined
@@ -52,6 +77,6 @@ export function TakePreviewPlayer({ request, load, t }: {
       </button>
       : <video src={url} controls playsInline preload="metadata" aria-label={`${t('takePreviewLabel')} ${request.takeId}`}
         onError={() => { setStatus('error') }} />}
-    {status === 'error' && <p role="alert">{t('takePreviewError')}</p>}
+    {status === 'error' && <><p role="alert">{t('takePreviewError')}</p>{url !== undefined && <button type="button" onClick={retryPlayback}>重新载入视频</button>}</>}
   </div>
 }

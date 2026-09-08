@@ -2,7 +2,7 @@
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import { QingmuCockpit } from './QingmuCockpit.tsx'
 import type {
   YimengEpisodeEvidenceLedgerResponse, YimengEpisodeVerificationResponse, YimengEditorialHandoffResponse,
@@ -26,6 +26,7 @@ import type {
   YimengCostRehearsalResponse,
   YimengGateAControlEvidenceResponse,
   YimengFirstFrameQuoteResponse,
+  YimengVideoQuoteResponse,
   YimengElementProfileResponse, YimengEpisodesResponse, YimengHealth, YimengPreviewElementProfileResponse,
   YimengPreviewPromptIrResponse, YimengPreviewScriptResponse, YimengPreviewStoryboardCanvasResponse,
   YimengCreateCommentResponse, YimengCreateHumanDecisionResponse, YimengElementReviewFeedResponse,
@@ -46,11 +47,20 @@ import type {
   YimengTakeReviewRecommendationResult, YimengTakeReviewRecommendationRecovery,
   YimengTakeHumanDecisionResult, YimengTakeHumanDecisionRecovery,
   YimengRecoverReferenceRightsExceptionReleaseResponse,
+  YimengProductionTakeResult,
   YimengWorkflowProjection,
 } from './contracts.ts'
 import { unwrapRpc } from './contracts.ts'
-import type { QingmuCockpitFace } from './slots.ts'
+import { createNativeDirectorSessionPort } from './native-director-session.ts'
+import { parseQingmuEntryScope, type QingmuCockpitFace } from './slots.ts'
+import { createQingmuHostSync } from './host-sync.ts'
 import { en, NS, zh } from './locales.ts'
+import type {
+  DirectorContextBridgeRpcResult,
+  DirectorContextClientPort,
+  DirectorContextEntryResult,
+  DirectorContextRecoveryResult,
+} from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 
 export type { QingmuCockpitFace } from './slots.ts'
 export type {
@@ -79,6 +89,7 @@ export type {
   YimengGateAControlEvidenceResponse, YimengGateAControlScenario, YimengGateAControlScenarioId,
   YimengGateAControlSourceBinding,
   YimengFirstFrameQuoteRequest, YimengFirstFrameQuoteResponse,
+  YimengVideoQuoteRequest, YimengVideoQuoteResponse,
   YimengElementProfileResponse, YimengEpisodesResponse, YimengHealth, YimengPreviewElementProfileResponse,
   YimengPreviewPromptIrResponse, YimengPreviewScriptResponse, YimengPreviewStoryboardCanvasResponse,
   YimengCreateCommentResponse, YimengCreateHumanDecisionResponse, YimengElementReviewFeedResponse,
@@ -135,14 +146,51 @@ export function apply(ctx: ClientContext): void {
 
   const connection = ctx.get('connection') as ConnectionHandle | undefined
   if (connection === undefined) throw new Error('Qingmu cockpit requires an active Client Connection')
+  const location: Location | undefined = globalThis.location
+  const entryScope = location === undefined ? undefined : parseQingmuEntryScope(location.href)
+  const hostSync = location === undefined ? undefined : createQingmuHostSync({
+    entryScope,
+    referrer: globalThis.document.referrer,
+    ancestorOrigin: location.ancestorOrigins.item(0) ?? undefined,
+    parent: globalThis.parent,
+    self: globalThis,
+    storage: globalThis.localStorage,
+  }) ?? undefined
   const read = async <T>(endpoint: string, payload: unknown, signal?: AbortSignal): Promise<T> =>
     unwrapRpc(await connection.rpc.call('/qingmu-yimeng', endpoint, payload, signal)) as T
   const command = async <T>(endpoint: string, payload: unknown, signal?: AbortSignal): Promise<T> =>
     unwrapRpc(await connection.rpc.call('/qingmu-yimeng-command', endpoint, payload, signal)) as T
   const method = async <T>(endpoint: string, payload: unknown, signal?: AbortSignal): Promise<T> =>
     unwrapRpc(await connection.rpc.call('/qingmu-imago-method', endpoint, payload, signal)) as T
+  const director = async <T extends DirectorContextBridgeRpcResult>(
+    endpoint: string, payload: unknown, signal?: AbortSignal,
+  ): Promise<T> => unwrapRpc(await connection.rpc.call('/qingmu-director-context', endpoint, payload, signal)) as T
+
+  const directorBridge: DirectorContextClientPort = {
+    readNativeFirstDraftProposal: async (sessionId, scope, signal) =>
+      unwrapRpc(await connection.rpc.call('/qingmu-director-context', 'readNativeFirstDraftProposal', { sessionId, scope }, signal)) as
+        import('@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types').NativeFirstDraftProposalResult,
+    readNativeDirectorReadiness: async (sessionId, signal) =>
+      unwrapRpc(await connection.rpc.call('/qingmu-director-context', 'readNativeDirectorReadiness', { sessionId }, signal)) as
+        import('@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types').NativeDirectorReadiness,
+    readNativeDraftProposal: async (sessionId, scope, signal) =>
+      unwrapRpc(await connection.rpc.call('/qingmu-director-context', 'readNativeDraftProposal', { sessionId, scope }, signal)) as
+        import('@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types').NativeDraftProposalResult,
+    enter: (sessionId, scope, signal, ownerId) => director<DirectorContextEntryResult>('enter', {
+      sessionId, scope, ...(ownerId === undefined ? {} : { ownerId }),
+    }, signal),
+    clear: (sessionId, scope, ownerId, signal) => director('clear', { sessionId, scope, ownerId }, signal),
+    recover: (sessionId, signal) => director<DirectorContextRecoveryResult>('recover', { sessionId }, signal),
+    bindProposal: (sessionId, proposal, signal) => director('bindProposal', { sessionId, proposal }, signal),
+  }
 
   const port: QingmuYimengPort = {
+    queueProductionTake: (request, signal) =>
+      command<YimengProductionTakeResult>('queueProductionTake', request, signal),
+    readCreativeContract: (request, signal) => command('readCreativeContract', request, signal),
+    readDirectorProviderAvailability: (request, signal) => command('readDirectorProviderAvailability', request, signal),
+    issueDirectorProviderWorkOrder: (request, signal) => command('issueDirectorProviderWorkOrder', request, signal),
+    readDirectorProviderWorkOrderStatus: (request, signal) => command('readDirectorProviderWorkOrderStatus', request, signal),
     requestDirectorProposal: (request, signal) => command('requestDirectorProposal', request, signal),
     checkDirectorProposalFreshness: (request, signal) => command('checkDirectorProposalFreshness', request, signal),
     listLocalReferenceCandidates: (request, signal) => command('listLocalReferenceCandidates', request, signal),
@@ -254,6 +302,7 @@ export function apply(ctx: ClientContext): void {
       read<YimengPromptIrBootstrapResponse>('promptIrBootstrap', request, signal),
     firstFrameQuote: (request, signal) =>
       read<YimengFirstFrameQuoteResponse>('firstFrameQuote', request, signal),
+    videoQuote: (request, signal) => read<YimengVideoQuoteResponse>('videoQuote', request, signal),
     shotRelationMethod: (request, signal) =>
       method<ImagoShotRelationMethodResponse>('shotRelationMethod', request, signal),
     heroFrameStoryboardMethod: (request, signal) =>
@@ -312,10 +361,12 @@ export function apply(ctx: ClientContext): void {
       command<YimengRecoverStoryboardCanvasCommitResponse>('recoverStoryboardCanvasCommit', request, signal),
   }
 
-  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
-    name: 'sidebar.footer.action',
-    id: 'qingmu-cockpit',
+  const nativeDirectorSession = createNativeDirectorSessionPort(ctx, connection)
+  ctx.slots.inject('shell.workspace', () => ctx.slots.register({
+    name: 'shell.workspace',
     locale: NS,
-    inject: (): QingmuCockpitFace => ({ port }),
+    inject: (): QingmuCockpitFace => entryScope === undefined
+      ? { port, directorBridge, nativeDirectorSession, applicationShell: true }
+      : { port, directorBridge, nativeDirectorSession, entryScope, hostSync, applicationShell: true },
   }, QingmuCockpit))
 }

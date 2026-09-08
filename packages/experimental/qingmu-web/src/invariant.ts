@@ -9,7 +9,7 @@ export const name = 'experimental-qingmu-web-invariant'
 /** Service required before the companion can reserve package ownership. */
 export const inject = ['invariants']
 
-/** No runtime invariant: the bundle only contributes a static patch layer. */
+/** No runtime invariant: this bundle ships static profile and preset compositions; their plugins own runtime checks. */
 const install: InvariantInstaller = () => {}
 
 /** Register this package's invariant companion. */

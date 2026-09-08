@@ -158,7 +158,9 @@ function imageBlockIn(content: unknown, match: (ref: ImageAttachmentRef) => bool
 
 /** Search every durable event carrier that can own model-visible content. */
 function imageInEvent(event: SessionEvent, match: (ref: ImageAttachmentRef) => boolean): ImageAttachmentRef | undefined {
-  const data = event.data as {
+  const payload: unknown = event.data
+  if (payload === null || typeof payload !== 'object') return undefined
+  const data = payload as {
     content?: unknown
     message?: { content?: unknown }
     inserted?: Array<{ content?: unknown }>

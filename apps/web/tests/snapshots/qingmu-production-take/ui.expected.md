@@ -1,0 +1,40 @@
+- region "正式生产 Take":
+  - heading "正式生产 Take" [level=4]
+  - paragraph: 浏览器只提交镜头与 Take 意图。Host 重新读取当前 Ready、方法证明和参考权威后，才向 Writer 排队；不向浏览器暴露 Provider、模型或执行路由。
+  - status:
+    - heading "首帧候选（必须显式选择）" [level=5]
+    - paragraph: "asset_<id> · 质量: passed · 选择状态: Selected 素材 SHA: 2334f5fd072e000799c8c12058adca10c4ef1e2c0bc9df8697c1a259648d0df9"
+    - button "点击加载并校验候选图片"
+    - paragraph: "首帧选择回执 SHA: <sha256>；首帧选择不是批准或内容签收。"
+  - status:
+    - button "读取视频报价"
+    - paragraph: 最高预留费用：¥0.2000
+    - paragraph: 报价阻塞：否
+    - paragraph: 派发阻塞：operator_paid_confirmation_required
+    - paragraph: 服务端确认原文：我确认本次镜头视频生成最高费用为 0.2000 CNY。
+  - list:
+    - listitem: 创作锁：当前镜头与分镜修订已定位
+    - listitem: 导演方法：Host 点击后实时验证
+    - listitem: 五字段 PromptIR：D / E 来源逐项核对
+    - listitem: Ready 确认：必须由你明确勾选
+    - listitem: Production Take：只接受 Writer 服务端回执
+  - checkbox "我确认本次镜头视频生成最高费用为 0.2000 CNY。"
+  - text: 我确认本次镜头视频生成最高费用为 0.2000 CNY。
+  - button "排队 Take 1（初始）" [disabled]
+  - button "排队 Take 2（定向返工）" [disabled]
+  - button "Take 3 不可用（上限 2）" [disabled]
+  - paragraph: 重复点击、刷新、断线或重启后，使用同一镜头与 Take 编号会按 Writer 服务端回执恢复，不会创建第三个版本。
+  - status:
+    - paragraph:
+      - strong: Writer 已排队
+    - paragraph:
+      - strong: 排队不等于已生成；本回执不代表内容批准、人工签收或发布。
+    - term: Take 编号 / 上限
+    - definition: 2 / 2
+    - term: Take 类型
+    - definition: targeted_rework
+    - term: Writer 任务
+    - definition: task_<id> · DispatchPending
+    - term: 服务端回执恢复
+    - definition: 否
+    - group: 展开方法与来源 SHA 证据

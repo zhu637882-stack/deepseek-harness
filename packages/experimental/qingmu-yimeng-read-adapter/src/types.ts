@@ -420,6 +420,31 @@ export interface YimengFirstFrameQuoteRequest extends YimengPromptIrRequest {
   readonly promptIrContentSha256: string
 }
 
+/** Read-only, Writer-authored binding for one explicit initial-video queue action. */
+export interface YimengVideoQuoteRequest {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly sceneId: string
+  readonly shotId: string
+}
+
+/** Writer-authored zero-dispatch quote and exact confirmation text for one video Take. */
+export interface YimengVideoQuoteResponse {
+  readonly schema: 'jason.qingmu-writer-video-quote.v1'
+  readonly preflightSha256: string
+  readonly projectionSha256: string
+  readonly maximumReservationCny: number
+  readonly candidateCount: 1
+  readonly maxAttempts: 1
+  readonly selectAsOfficial: false
+  readonly quoteReady: boolean
+  readonly dispatchReady: boolean
+  readonly quoteBlockers: readonly string[]
+  readonly dispatchBlockers: readonly string[]
+  readonly requiredPaidConfirmationText: string
+  readonly requiredPaidConfirmationTextSha256: string
+}
+
 /** One server-authored reason why a first-frame authorization must not proceed yet. */
 export interface YimengFirstFrameAuthorizationBlocker {
   readonly code: string
@@ -1765,6 +1790,7 @@ export type YimengReferenceCandidateQualificationKind =
   | 'none'
   | 'provider_formal_consistency'
   | 'local_file_integrity'
+  | 'owner_human_finalization'
 
 /** A reference candidate bound to one authoritative element profile. */
 export interface YimengReferenceAssetCandidate {
@@ -1792,6 +1818,10 @@ export interface YimengReferenceAssetCandidate {
   readonly uploadCommandReceiptId: string
   readonly rightsRecorded: boolean
   readonly rightsRecordSha256: string
+  readonly ownerFinalizationReceiptIdentity: string
+  readonly ownerFinalizationHumanReviewIdentity: string
+  readonly ownerFinalizationInheritedPrescreenReviewIdentity: string
+  readonly ownerFinalizationActorCohortIdentity: string
   readonly qualityProjectionSha256: string
   readonly decisionKind: YimengReferenceCandidateDecisionKind
   readonly decisionIdentity: string
@@ -1866,10 +1896,26 @@ export interface YimengShotLocalCurrentReferenceLineage {
   readonly rightsRecordSha256: string
 }
 
+/** Immutable owner-finalization lineage; machine review remains advisory. */
+export interface YimengShotOwnerFinalCurrentReferenceLineage {
+  readonly projectId: string
+  readonly sourceEpisodeId: string
+  readonly ownerType: YimengShotRelationElementKind
+  readonly ownerId: string
+  readonly role: string
+  readonly sourceRevisionId: string
+  readonly qualificationKind: 'owner_human_finalization'
+  readonly finalizationReceiptIdentity: string
+  readonly humanReviewIdentity: string
+  readonly inheritedPrescreenReviewIdentity: string
+  readonly actorCohortIdentity?: string
+}
+
 /** Exact immutable lineage for either qualified reference production path. */
 export type YimengShotCurrentReferenceLineage =
   | YimengShotProviderCurrentReferenceLineage
   | YimengShotLocalCurrentReferenceLineage
+  | YimengShotOwnerFinalCurrentReferenceLineage
 
 /**
  * Current backend reference attached to a shot.
@@ -2571,6 +2617,7 @@ export interface YimengReadEndpointMap {
   readonly promptIr: YimengPromptIrResponse
   readonly promptIrBootstrap: YimengPromptIrBootstrapResponse
   readonly firstFrameQuote: YimengFirstFrameQuoteResponse
+  readonly videoQuote: YimengVideoQuoteResponse
   readonly selectedVideoReview: YimengSelectedVideoReviewResponse
   readonly takeVersions: YimengTakeVersionStackResponse
   readonly takePreview: YimengTakePreviewResponse

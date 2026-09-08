@@ -637,19 +637,21 @@ export interface ImagoMethodAdapterConfig {
 }
 ```
 
-来源：[`packages/experimental/qingmu-imago-method-adapter/src/index.ts:569`](../packages/experimental/qingmu-imago-method-adapter/src/index.ts)
+来源：[`packages/experimental/qingmu-imago-method-adapter/src/index.ts:616`](../packages/experimental/qingmu-imago-method-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-qingmu-yimeng-command-adapter"></a>
 
 ## `@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter`
 
-需要：`connection`
+需要：`connection` · `webServer`
 
 ```ts config-catalog
 /** Deployment-tunable loopback upstream and request deadline. */
 export interface YimengCommandAdapterConfig {
   /** Pathless loopback HTTP(S) origin of the authoritative Yimeng API. */
   readonly baseUrl?: string
+  /** Optional loopback Writer origin for the production-Take route only. */
+  readonly productionTakeBaseUrl?: string
   /** Command deadline in milliseconds, from 100 through 60,000. */
   readonly timeoutMs?: number
   /** Isolated acceptance task; empty in every ordinary instance. */
@@ -678,10 +680,16 @@ export interface YimengCommandAdapterConfig {
   readonly directorProductionMethodVersion?: string
   /** Method SHA already locked into the production task. */
   readonly directorProductionMethodSha256?: string
+  /** Browser may explicitly issue one paid advisory only when this Host-owned switch is true. */
+  readonly directorProductionInteractiveEnabled?: boolean
+  /** Exact project allowed by the interactive production switch. */
+  readonly directorProductionProjectId?: string
+  /** Exact episode allowed by the interactive production switch. */
+  readonly directorProductionEpisodeId?: string
 }
 ```
 
-来源：[`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:472`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
+来源：[`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:493`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-qingmu-yimeng-read-adapter"></a>
 
@@ -701,7 +709,7 @@ export interface YimengReadAdapterConfig {
 }
 ```
 
-来源：[`packages/experimental/qingmu-yimeng-read-adapter/src/index.ts:407`](../packages/experimental/qingmu-yimeng-read-adapter/src/index.ts)
+来源：[`packages/experimental/qingmu-yimeng-read-adapter/src/index.ts:415`](../packages/experimental/qingmu-yimeng-read-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-tool-agent-team"></a>
 
@@ -3355,6 +3363,7 @@ export interface Config {
 - `@deepseek-ai/dsh-cordis-client-runner`（[`packages/extensions/cordis-client-runner/src/index.ts`](../packages/extensions/cordis-client-runner/src/index.ts)）
 - `@deepseek-ai/dsh-experimental-client-ui-brand-qingmu`（[`packages/experimental/client-ui-brand-qingmu/src/index.ts`](../packages/experimental/client-ui-brand-qingmu/src/index.ts)）
 - `@deepseek-ai/dsh-experimental-client-ui-qingmu-cockpit`（[`packages/experimental/client-ui-qingmu-cockpit/src/index.ts`](../packages/experimental/client-ui-qingmu-cockpit/src/index.ts)）
+- `@deepseek-ai/dsh-experimental-qingmu-director-context-bridge` — 需要 `sessionProjections`（[`packages/experimental/qingmu-director-context-bridge/src/index.ts`](../packages/experimental/qingmu-director-context-bridge/src/index.ts)）
 - `@deepseek-ai/dsh-experimental-qingmu-web`（[`packages/experimental/qingmu-web/src/index.ts`](../packages/experimental/qingmu-web/src/index.ts)）
 - `@deepseek-ai/dsh-fs-e2b` — 需要 `e2b`（[`packages/e2b/fs-e2b/src/index.ts`](../packages/e2b/fs-e2b/src/index.ts)）
 - `@deepseek-ai/dsh-fs-observation-policy`（[`packages/fs/fs-observation-policy/src/index.ts`](../packages/fs/fs-observation-policy/src/index.ts)）
