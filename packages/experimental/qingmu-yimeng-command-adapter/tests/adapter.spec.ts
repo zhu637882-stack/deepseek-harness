@@ -1306,7 +1306,10 @@ describe('qingmu Yimeng command adapter', () => {
       _handler: ConnectionRpcHandler,
       _options: ConnectionRpcHandlerOptions,
     ) => async () => {})
-    apply({ connection: { rpc: { handle } } } as unknown as Context)
+    const effect = vi.fn()
+    const provide = vi.fn()
+    const get = vi.fn(() => undefined)
+    apply({ connection: { rpc: { handle } }, effect, provide, get, webServer: undefined } as unknown as Context)
     expect(handle).toHaveBeenCalledOnce()
     expect(handle.mock.calls[0]?.[0]).toBe('/qingmu-yimeng-command')
     expect(handle.mock.calls[0]?.[2]).toEqual({ authority: 'loopback' })

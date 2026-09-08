@@ -1398,7 +1398,7 @@ function ReadyPromptIrWorkspace({
         t={t}
       />}
 
-      {!director && <section className={css.commitReceipt} aria-label={t('firstFrameQuoteTitle')}>
+      <section className={css.commitReceipt} aria-label={t('firstFrameQuoteTitle')}>
         <h4>{t('firstFrameQuoteTitle')}</h4>
         <p>{t('firstFrameQuoteBoundary')}</p>
         <button
@@ -1478,7 +1478,7 @@ function ReadyPromptIrWorkspace({
           <p>{firstFrameQuote.quoteReady ? t('firstFrameQuoteReady') : t('firstFrameQuoteBlocked')}</p>
           <p><strong>{t('firstFrameQuoteNotSubmitted')}</strong></p>
         </div>}
-      </section>}
+      </section>
       {director && <>
         <p role="status">{t('directorEditingDraft')} · {t('directorEffectiveReady')} v{snapshot?.subject.promptIrVersion ?? '—'}
           {draftPromptIr !== undefined && ` · Draft v${draftPromptIr.version}`}</p>
