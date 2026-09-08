@@ -1696,7 +1696,6 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     const controller = new AbortController()
     rc1Controller.current?.abort()
     rc1Controller.current = controller
-    humanPresenceController.current = controller
     setRc1State('deciding')
     setRc1Error(undefined)
     try {
@@ -1720,9 +1719,6 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       if (current === rc1Generation.current) {
         const failure = cause instanceof Error ? cause.message : 'final_content_decision_unknown_or_failed'
         if (failure === 'final_content_decision_reauthentication_required') setHumanSessionState('idle')
-        if (controller.signal.aborted) {
-          setHumanPresenceError('platform_presence_cancelled')
-        }
         setRc1State('previewed')
         if (!controller.signal.aborted) {
           await loadRc1Status()
@@ -1731,8 +1727,6 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
       }
     } finally {
       if (current === rc1Generation.current) rc1Controller.current = undefined
-      if (humanPresenceController.current === controller) humanPresenceController.current = undefined
-      setHumanPresenceState('ready')
     }
   }, [contentChecks, contentNote, contentRejectReason, contentSecondConfirmed,
     episodeId, humanPresenceStatus, humanSessionState, loadRc1Status, playedCoverage,

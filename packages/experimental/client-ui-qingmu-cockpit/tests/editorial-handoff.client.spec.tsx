@@ -159,8 +159,10 @@ function installPlatformAssertionMock() {
 function registeredPlatformPresence() {
   return {
     schema: 'jason.qingmu-platform-human-presence-status.v1', ...SCOPE,
-    state: 'registered', credentialId: 'platform-credential-test',
-    registeredAt: '2026-09-02T00:00:00Z', platformOnly: true, userVerificationRequired: true,
+    actorUserId: 'actor-platform-test',
+    state: 'registered', credentialSha256: 'a'.repeat(64),
+    userVerification: 'required', authenticatorAttachment: 'platform',
+    businessAuthorityGranted: false,
   }
 }
 
@@ -1142,7 +1144,7 @@ describe('editorial handoff panel', () => {
       if (url.includes('/human-session')) return new Response(JSON.stringify({ ok: true }), { status: 200 })
       if (url.includes('/human-presence-credential')) {
         if (init?.method === 'GET') return new Response(JSON.stringify({
-          ...registeredPlatformPresence(), state: 'unregistered', credentialId: null,
+          ...registeredPlatformPresence(), state: 'unregistered', credentialSha256: null,
         }), { status: 200 })
         registrationPosts += 1
         return new Response(JSON.stringify({
