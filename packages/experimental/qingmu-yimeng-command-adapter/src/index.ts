@@ -1,7 +1,7 @@
 /** Loopback-only Host boundary for explicit Yimeng ChangeSet commands. */
 
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
-import { prepareCreationCommand } from './creation.ts'
+import { prepareCreationCommand, prepareCreationOptionsRead } from './creation.ts'
 import { prepareScenePlanning } from './scene-planning.ts'
 import { prepareLocalReferenceCandidate } from './local-reference-candidate.ts'
 import type { DirectorProposalFreshnessResult } from './director-proposal.ts'
@@ -64,6 +64,7 @@ export type {
 } from './director-proposal.ts'
 export type {
   ProjectInitializationRequest, ProjectInitializationRecovery, ProjectInitializationResult,
+  CreationOptions, CreationTextVersion, CreationDirectorSkill, CreationVisualStyle, CreationStylePack,
   CreativeContract, CreativeContractMethodRef, CreativeContractState,
   CreationScope, TextImportReadRequest, TextImportRequest, TextImportLine, TextImportDraft,
   TextImportState, TextImportCorrection, TextImportConfirmationRequest, TextImportConfirmation,
@@ -5342,6 +5343,33 @@ export function createYimengCommandHandler(
         responseError: (message: string) => new UpstreamContractError(message),
         readAttestationKey: readReferenceAttestationKey,
         requireTimestamp: requireRfc3339Timestamp,
+      }
+      if (endpoint === 'readCreationOptions') {
+        const prepared = prepareCreationOptionsRead(payload, stageArtifactHelpers)
+        const token = normalizeToken(dependencies.readToken())
+        if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
+        const options = await fetchJson(
+          dependencies, `${baseUrl}/api/qingmu/creation-options`, token, { method: 'GET' }, timeoutMs, signal, true,
+        )
+        if (!options.ok || signal.aborted) return signal.aborted ? cancelled() : options
+        const stylePacks = await fetchJson(
+          dependencies, `${baseUrl}/api/style-packs`, token, { method: 'GET' }, timeoutMs, signal, true,
+        )
+        if (!stylePacks.ok || signal.aborted) return signal.aborted ? cancelled() : stylePacks
+        const styles = await fetchJson(
+          dependencies, `${baseUrl}/api/styles`, token, { method: 'GET' }, timeoutMs, signal, true,
+        )
+        if (!styles.ok || signal.aborted) return signal.aborted ? cancelled() : styles
+        try {
+          const value = prepared.normalize(options.value, stylePacks.value, styles.value)
+          if (containsReflectedCredential(value, token)) return internalError('Yimeng command contract failed')
+          return { ok: true, value }
+        } catch (error) {
+          if (error instanceof UpstreamContractError) {
+            return internalError(`Yimeng command contract failed: ${error.message}`)
+          }
+          return internalError('Yimeng command contract failed')
+        }
       }
       if (endpoint === 'queueReferenceVideo') {
         if (dependencies.readYimeng === undefined) return internalError('reference run readback is unavailable')

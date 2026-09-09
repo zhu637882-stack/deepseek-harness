@@ -95,6 +95,19 @@ describe('ShootingReviewWorkspace', () => {
     expect(onNavigate).toHaveBeenCalledWith('shots')
   })
 
+  it('uses the application-shell storyboard return instead of the legacy shooting destination', async () => {
+    const onNavigate = vi.fn()
+    const onReturnToStoryboard = vi.fn()
+    render(<ShootingReviewWorkspace projectName="落日公路" episodeName="第 1 集" projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" projection={projection}
+      selectedShotId="frame_34b3741b1f0a" onSelectShotId={vi.fn()} onNavigate={onNavigate} onReturnToStoryboard={onReturnToStoryboard}
+      directorAssistant={null} port={port} t={key => key} />)
+    const button = (await screen.findAllByRole('button', { name: '返回分镜核对要求' }))[0]
+    if (button === undefined) throw new Error('Missing storyboard return action')
+    fireEvent.click(button)
+    expect(onReturnToStoryboard).toHaveBeenCalledTimes(1)
+    expect(onNavigate).not.toHaveBeenCalled()
+  })
+
   it('does not carry a prior shot requirement into the next shot', async () => {
     const readyOnlyPort = {
       takeVersions: vi.fn(() => new Promise(() => {})), takePreview: vi.fn(),

@@ -5,8 +5,8 @@ import { QingmuApplicationFrame, creativeStepFromSearch } from '../src/client/Qi
 afterEach(cleanup)
 it('accepts only the five product steps from the location', () => {
   for (const step of ['story', 'assets', 'storyboard', 'shooting', 'delivery']) expect(creativeStepFromSearch(`?qingmuView=${step}`)).toBe(step)
-  expect(creativeStepFromSearch('?qingmuView=submit')).toBe('shooting')
-  expect(creativeStepFromSearch('')).toBe('shooting')
+  expect(creativeStepFromSearch('?qingmuView=submit')).toBe('story')
+  expect(creativeStepFromSearch('')).toBe('story')
 })
 const props = () => ({
   projects: [{ id: 'p', label: '落日公路' }], episodes: [{ id: 'e', label: 'EP1' }], projectId: 'p', episodeId: 'e',

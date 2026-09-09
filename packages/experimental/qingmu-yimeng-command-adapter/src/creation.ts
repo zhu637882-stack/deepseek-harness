@@ -12,8 +12,54 @@ export interface ProjectInitializationRequest {
   readonly episodeCount: number
   readonly duration: string
   readonly textInput: string
-  readonly stylePackId: string | null
+  /** Writer-owned source format; one value is currently advertised by creation-options. */
+  readonly textVersion: 'creation-text-v1'
+  /** A current Writer style-pack identity, selected explicitly by the user. */
+  readonly stylePackId: string
+  /** Current Writer director-method identities, selected from creation-options. */
+  readonly directorSkillIds: readonly string[]
   readonly idempotencyKey: string
+}
+
+/** One Writer-advertised source text version. */
+export interface CreationTextVersion {
+  readonly id: 'creation-text-v1'
+  readonly label: string
+  readonly available: boolean
+}
+/** One Writer-advertised director method; unavailable methods remain descriptive only. */
+export interface CreationDirectorSkill {
+  readonly id: string
+  readonly version: string
+  readonly sha256: string
+  readonly stage: string
+  readonly available: boolean
+  readonly disabledReason: string | null
+}
+/** A style-pack projection suitable for a creation picker; it is not a copied pack body. */
+export interface CreationVisualStyle {
+  readonly id: string
+  readonly label: string
+  readonly group: string
+  readonly groupLabel: string
+}
+/** One Writer-provided style-pack projection. */
+export interface CreationStylePack {
+  readonly id: string
+  readonly version: string
+  readonly name: string
+  readonly group: string
+  readonly groupLabel: string
+  readonly intent: string
+  readonly tone: string
+}
+/** Read-only creation picker data joined from Writer's two authoritative catalogs. */
+export interface CreationOptions {
+  readonly schema: 'jason.qingmu-creation-options.v1'
+  readonly textVersions: readonly CreationTextVersion[]
+  readonly directorSkills: readonly CreationDirectorSkill[]
+  readonly visualStyles: readonly CreationVisualStyle[]
+  readonly stylePacks: readonly CreationStylePack[]
 }
 /** Immutable method coordinate stored inside one project creative contract. */
 export interface CreativeContractMethodRef {
@@ -162,6 +208,13 @@ function text(value: unknown, error: ErrorFactory, max = 160): string {
   if (typeof value !== 'string' || value.length === 0 || value.length > max || value !== value.trim() || /[\x00-\x1f]/.test(value)) throw error('creation text invalid')
   return value
 }
+/** Catalog prose may deliberately be empty; still reject padded/control-bearing values. */
+function catalogText(value: unknown, error: ErrorFactory, max = 4000): string {
+  if (typeof value !== 'string' || value.length > max || value !== value.trim() || /[\x00-\x1f]/.test(value)) {
+    throw error('creation catalog text invalid')
+  }
+  return value
+}
 function storyText(value: unknown, error: ErrorFactory): string {
   if (typeof value !== 'string' || value.length === 0 || value.length > 64000 || value !== value.trim()
     || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(value)) throw error('creation story text invalid')
@@ -187,6 +240,80 @@ function key(value: unknown, error: ErrorFactory): string {
 function methodRef(value: unknown, error: ErrorFactory): CreativeContractMethodRef {
   const raw = exact(value, ['id', 'version', 'sha256'], error)
   return { id: text(raw.id, error), version: text(raw.version, error), sha256: sha(raw.sha256, error) }
+}
+function stringList(value: unknown, error: ErrorFactory, max: number): readonly string[] {
+  if (!Array.isArray(value) || value.length > max) throw error('creation list invalid')
+  return value.map(item => text(item, error, 800))
+}
+/** Validate Writer's three catalogs before exposing only the creation-picker projection. */
+export function prepareCreationOptionsRead(value: unknown, helpers: Helpers): {
+  normalize: (options: unknown, stylePacks: unknown, styles: unknown) => CreationOptions
+} {
+  exact(value, [], helpers.inputError)
+  const bad = helpers.responseError
+  return { normalize: (optionsValue, stylePacksValue, stylesValue) => {
+    const options = exact(optionsValue, ['schema', 'textVersions', 'directorSkills'], bad)
+    if (options.schema !== 'jason.qingmu-creation-options.v1' || !Array.isArray(options.textVersions)
+      || !Array.isArray(options.directorSkills)) throw bad('creation options invalid')
+    const textVersions = options.textVersions.map((item) => {
+      const entry = exact(item, ['id', 'label', 'available'], bad)
+      if (entry.id !== 'creation-text-v1' || typeof entry.available !== 'boolean') throw bad('creation text version invalid')
+      return { id: 'creation-text-v1' as const, label: text(entry.label, bad), available: entry.available }
+    })
+    if (textVersions.length !== 1 || !textVersions[0]?.available) throw bad('creation text version unavailable')
+    const directorIds = new Set<string>()
+    const directorSkills = options.directorSkills.map((item) => {
+      const entry = exact(item, ['id', 'version', 'sha256', 'stage', 'available', 'disabledReason'], bad)
+      const id = identifier(entry.id, bad)
+      if (directorIds.has(id) || typeof entry.available !== 'boolean'
+        || (entry.disabledReason !== null && typeof entry.disabledReason !== 'string')) throw bad('creation director skill invalid')
+      directorIds.add(id)
+      return { id, version: text(entry.version, bad), sha256: sha(entry.sha256, bad), stage: text(entry.stage, bad),
+        available: entry.available, disabledReason: entry.disabledReason === null ? null : catalogText(entry.disabledReason, bad, 1000) }
+    })
+    if (directorSkills.length > 64) throw bad('creation director skills invalid')
+    const styles = exact(stylesValue, ['items', 'total'], bad)
+    const visualTotal = styles.total
+    if (!Array.isArray(styles.items) || typeof visualTotal !== 'number' || !Number.isSafeInteger(visualTotal) || visualTotal < 0) throw bad('visual style catalog invalid')
+    const visualIds = new Set<string>(); const visualStyles: CreationVisualStyle[] = []
+    for (const item of styles.items) {
+      const style = object(item, bad)
+      const group = object(style.group, bad)
+      const id = identifier(style.key, bad)
+      if (visualIds.has(id)) throw bad('visual style identity invalid')
+      // Writer's style entries retain additional, non-picker presentation fields. Validate
+      // the projected identity only so a catalog thumbnail field cannot break creation.
+      visualIds.add(id)
+      visualStyles.push({ id, label: text(style.labelZh, bad), group: identifier(group.key, bad), groupLabel: text(group.labelZh, bad) })
+    }
+    if (visualStyles.length !== visualTotal || visualStyles.length === 0) throw bad('visual style catalog count invalid')
+    const packs = exact(stylePacksValue, ['schemaVersion', 'groups', 'total'], bad)
+    const stylePackTotal = packs.total
+    if (typeof packs.schemaVersion !== 'string' || packs.schemaVersion.trim() === '' || !Array.isArray(packs.groups)
+      || typeof stylePackTotal !== 'number' || !Number.isSafeInteger(stylePackTotal) || stylePackTotal < 0) throw bad('style pack catalog invalid')
+    const styleIds = new Set<string>(); const stylePacks: CreationStylePack[] = []
+    for (const groupValue of packs.groups) {
+      const group = exact(groupValue, ['key', 'label', 'items'], bad)
+      const groupKey = text(group.key, bad); const groupLabel = text(group.label, bad)
+      if (!Array.isArray(group.items)) throw bad('style pack group invalid')
+      for (const item of group.items) {
+        const pack = exact(item, ['id', 'version', 'name', 'group', 'groupLabel', 'intent', 'tone', 'palette', 'contrast',
+          'lightingSources', 'lensFamily', 'compositionRules', 'performanceRegister', 'editingRhythm', 'positiveFragments',
+          'negativeConstraints', 'verticalDelivery'], bad)
+        const id = identifier(pack.id, bad)
+        if (styleIds.has(id) || pack.group !== groupKey || pack.groupLabel !== groupLabel) throw bad('style pack identity invalid')
+        stringList(pack.palette, bad, 32); catalogText(pack.contrast, bad); stringList(pack.lightingSources, bad, 32)
+        catalogText(pack.lensFamily, bad); stringList(pack.compositionRules, bad, 32); catalogText(pack.performanceRegister, bad)
+        catalogText(pack.editingRhythm, bad); stringList(pack.positiveFragments, bad, 128); stringList(pack.negativeConstraints, bad, 128)
+        object(pack.verticalDelivery, bad)
+        styleIds.add(id)
+        stylePacks.push({ id, version: text(pack.version, bad), name: text(pack.name, bad), group: groupKey, groupLabel,
+          intent: catalogText(pack.intent, bad), tone: catalogText(pack.tone, bad) })
+      }
+    }
+    if (stylePacks.length !== stylePackTotal || stylePacks.length === 0) throw bad('style pack catalog count invalid')
+    return { schema: 'jason.qingmu-creation-options.v1' as const, textVersions, directorSkills, visualStyles, stylePacks }
+  } }
 }
 /**
  * Validate and normalize one complete Writer-owned creative contract.
@@ -308,26 +435,33 @@ export function prepareCreationCommand(endpoint: string, value: unknown, helpers
   } else if (endpoint === 'initializeProject' || endpoint === 'recoverProjectInitialization') {
     const recover = endpoint === 'recoverProjectInitialization'
     exact(raw, recover ? ['idempotencyKey', 'requestSha256'] : [
-      'name', 'style', 'aspectRatio', 'mode', 'creationType', 'episodeCount', 'duration', 'textInput', 'stylePackId', 'idempotencyKey',
+      'name', 'style', 'aspectRatio', 'mode', 'creationType', 'episodeCount', 'duration', 'textInput', 'textVersion', 'stylePackId', 'directorSkillIds', 'idempotencyKey',
     ], fail)
     const intent = key(raw.idempotencyKey, fail)
     let requestSha: string
+    let initialization: { readonly directorSkillIds: readonly string[] } | undefined
     path = '/api/qingmu/project-initializations'
     if (recover) {
       requestSha = sha(raw.requestSha256, fail)
       path += `/receipt?${new URLSearchParams({ idempotencyKey: intent, requestSha256: requestSha }).toString()}`
       method = 'GET'
     } else {
+      if (!Array.isArray(raw.directorSkillIds)) throw fail('director methods invalid')
+      const directorSkillIds = raw.directorSkillIds.map(item => identifier(item, fail))
       const settings = {
         name: text(raw.name, fail, 100), style: text(raw.style, fail, 128), aspectRatio: text(raw.aspectRatio, fail),
         mode: raw.mode, creationType: raw.creationType, episodeCount: integer(raw.episodeCount, fail, 1),
         duration: text(raw.duration, fail, 32), textInput: storyText(raw.textInput, fail),
-        stylePackId: raw.stylePackId === null ? null : text(raw.stylePackId, fail, 128),
+        textVersion: raw.textVersion, stylePackId: text(raw.stylePackId, fail, 128),
+        directorSkillIds,
       }
+      if (settings.textVersion !== 'creation-text-v1' || settings.directorSkillIds.length < 1 || settings.directorSkillIds.length > 4
+        || new Set(settings.directorSkillIds).size !== settings.directorSkillIds.length) throw fail('creation methods invalid')
       if (!['9:16', '16:9', '1:1'].includes(settings.aspectRatio)) throw fail('aspect ratio invalid')
       if (settings.mode !== 'whole_series'
         || !['story_idea', 'novel_adapt', 'script_adapt', 'original_script'].includes(String(settings.creationType))
         || settings.episodeCount > 30) throw fail('creative settings invalid')
+      initialization = settings
       requestSha = createHash('sha256').update(helpers.canonicalJson(settings, 'initialization')).digest('hex')
       body = { ...settings, idempotencyKey: intent }
     }
@@ -341,7 +475,9 @@ export function prepareCreationCommand(endpoint: string, value: unknown, helpers
         if (contract.source.textSha256 !== createHash('sha256').update(String(raw.textInput)).digest('hex')
           || contract.project.mode !== raw.mode || contract.project.creationType !== raw.creationType
           || contract.project.aspectRatio !== raw.aspectRatio || contract.project.episodeCount !== raw.episodeCount
-          || contract.project.duration !== raw.duration
+          || contract.project.duration !== raw.duration || contract.source.textVersion !== raw.textVersion
+          || contract.methods.stylePackId?.id !== raw.stylePackId
+          || contract.methods.directorSkills.map(item => item.id).join('\u0000') !== initialization?.directorSkillIds.join('\u0000')
           || sha(result.creativeContractSha256, bad) !== createHash('sha256').update(helpers.canonicalJson(contract, 'creative contract')).digest('hex')) {
           throw bad('initialization creative contract mismatch')
         }

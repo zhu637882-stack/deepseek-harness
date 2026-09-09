@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import type {
-  CreationScope, CreativeContractState, ProjectInitializationRequest, ProjectInitializationResult, TextImportDraft,
+  CreationOptions, CreationScope, CreativeContractState, ProjectInitializationRequest, ProjectInitializationResult, TextImportDraft,
   TextImportState, TextImportRequest,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
 import css from './CreationWorkspace.module.css'
 
-type Port = Pick<QingmuYimengPort, 'readCreativeContract' | 'initializeProject' | 'recoverProjectInitialization' | 'readTextImport' | 'createTextImport' | 'correctTextImport' | 'confirmTextImport'>
+type Port = Pick<QingmuYimengPort, 'readCreationOptions' | 'readCreativeContract' | 'initializeProject' | 'recoverProjectInitialization' | 'readTextImport' | 'createTextImport' | 'correctTextImport' | 'confirmTextImport'>
 const NEW_PROJECT = 'qingmu.creation.project.v1'
 const LABELS = { scene: '场景', action: '动作', dialogue: '对白', narration: '旁白', transition: '转场', skip: '忽略' }
 const errorText = (error: unknown): string => {
@@ -37,6 +37,13 @@ function base64(bytes: Uint8Array): string {
 function decode(value: string): Uint8Array {
   return Uint8Array.from(atob(value), char => char.charCodeAt(0))
 }
+type SavedProjectIntent = ProjectInitializationRequest
+  | (Omit<ProjectInitializationRequest, 'textVersion' | 'directorSkillIds' | 'stylePackId'> & { readonly stylePackId: string | null })
+function isCurrentIntent(intent: SavedProjectIntent): intent is ProjectInitializationRequest {
+  return 'textVersion' in intent && intent.textVersion === 'creation-text-v1'
+    && 'directorSkillIds' in intent && Array.isArray(intent.directorSkillIds) && intent.directorSkillIds.length > 0
+    && typeof intent.stylePackId === 'string' && intent.stylePackId.length > 0
+}
 interface ProjectLocal {
   name: string
   aspectRatio: ProjectInitializationRequest['aspectRatio']
@@ -44,11 +51,14 @@ interface ProjectLocal {
   episodeCount: number
   duration: string
   textInput: string
-  intent?: ProjectInitializationRequest
+  style: string
+  stylePackId: string
+  directorSkillId: string
+  intent?: SavedProjectIntent
 }
 const DEFAULT_PROJECT: ProjectLocal = {
   name: '', aspectRatio: '9:16', creationType: 'story_idea', episodeCount: 1,
-  duration: '1-2分钟', textInput: '',
+  duration: '1-2分钟', textInput: '', style: '', stylePackId: '', directorSkillId: '',
 }
 function normalizeProjectLocal(value: unknown): ProjectLocal {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return DEFAULT_PROJECT
@@ -64,6 +74,9 @@ function normalizeProjectLocal(value: unknown): ProjectLocal {
     aspectRatio, creationType, episodeCount,
     duration: typeof raw.duration === 'string' ? raw.duration.slice(0, 32) : DEFAULT_PROJECT.duration,
     textInput: typeof raw.textInput === 'string' ? raw.textInput.slice(0, 64000) : '',
+    style: typeof raw.style === 'string' ? raw.style : '',
+    stylePackId: typeof raw.stylePackId === 'string' ? raw.stylePackId : '',
+    directorSkillId: typeof raw.directorSkillId === 'string' ? raw.directorSkillId : '',
   }
   const candidate = raw.intent
   if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) return base
@@ -75,7 +88,7 @@ function normalizeProjectLocal(value: unknown): ProjectLocal {
     || typeof intent.duration !== 'string' || typeof intent.textInput !== 'string'
     || (intent.stylePackId !== null && typeof intent.stylePackId !== 'string')
     || typeof intent.idempotencyKey !== 'string') return base
-  return { ...base, intent: intent as unknown as ProjectInitializationRequest }
+  return { ...base, intent: intent as unknown as SavedProjectIntent }
 }
 
 /** Empty-state entry; only the server receipt decides which project was created. */
@@ -88,6 +101,24 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [retryAllowed, setRetryAllowed] = useState(false)
+  const [options, setOptions] = useState<CreationOptions>()
+  const [optionsError, setOptionsError] = useState('')
+  const [optionsRetry, setOptionsRetry] = useState(0)
+  useEffect(() => {
+    const controller = new AbortController()
+    setOptions(undefined); setOptionsError('')
+    void port.readCreationOptions({}, controller.signal).then((value) => {
+      if (!controller.signal.aborted) setOptions(value)
+    }).catch((cause: unknown) => {
+      if (!controller.signal.aborted) setOptionsError(errorText(cause))
+    })
+    return () => { controller.abort() }
+  }, [port, optionsRetry])
+  const textVersion = options?.textVersions.find(item => item.available)
+  const selectedPack = options?.stylePacks.find(item => item.id === local.stylePackId)
+  const selectionsReady = textVersion !== undefined && selectedPack !== undefined
+    && options?.visualStyles.some(item => item.id === local.style)
+    && options.directorSkills.some(item => item.id === local.directorSkillId && item.available)
   const lock = useRef(false)
   const update = (next: ProjectLocal) => {
     try { saveLocal(NEW_PROJECT, next); setLocal(next) } catch { setError('浏览器无法保存恢复标记，请允许本地存储后再创建。') }
@@ -100,23 +131,29 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
     if (lock.current) return
     lock.current = true; setBusy(true); setError('')
     try {
-      const intent = local.intent ?? {
-        name: local.name.trim(), style: 'realistic', aspectRatio: local.aspectRatio,
-        mode: 'whole_series' as const, creationType: local.creationType, episodeCount: local.episodeCount,
-        duration: local.duration.trim(), textInput: local.textInput.trim(), stylePackId: null,
-        idempotencyKey: crypto.randomUUID(),
+      let intent = local.intent
+      if (intent === undefined) {
+        if (!selectionsReady || textVersion === undefined) throw new Error('请先选择当前可用的画风、风格包和导演方法。')
+        intent = {
+          name: local.name.trim(), style: local.style, aspectRatio: local.aspectRatio,
+          mode: 'whole_series' as const, creationType: local.creationType, episodeCount: local.episodeCount,
+          duration: local.duration.trim(), textInput: local.textInput.trim(), stylePackId: local.stylePackId,
+          textVersion: textVersion.id, directorSkillIds: [local.directorSkillId],
+          idempotencyKey: crypto.randomUUID(),
+        }
       }
       if (!recover) {
+        if (!isCurrentIntent(intent)) {
+          throw new Error('请先选择当前可用的画风、风格包和导演方法。旧创建意图只能先读取恢复。')
+        }
         saveLocal(NEW_PROJECT, { ...local, intent }); setLocal({ ...local, intent })
         await finish(await port.initializeProject(intent))
       } else {
         // Matches the canonical sorted request keys used by the Host and API.
-        const requestSha256 = await digest(new TextEncoder().encode(JSON.stringify({
-          aspectRatio: intent.aspectRatio, creationType: intent.creationType, duration: intent.duration,
-          episodeCount: intent.episodeCount, mode: intent.mode, name: intent.name, style: intent.style,
-          stylePackId: intent.stylePackId, textInput: intent.textInput,
-        })))
-        await finish(await port.recoverProjectInitialization({ idempotencyKey: intent.idempotencyKey, requestSha256 }))
+        const { idempotencyKey, ...settings } = intent
+        const sorted = Object.fromEntries(Object.entries(settings).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0))
+        const requestSha256 = await digest(new TextEncoder().encode(JSON.stringify(sorted)))
+        await finish(await port.recoverProjectInitialization({ idempotencyKey, requestSha256 }))
       }
     } catch (cause) {
       setError(errorText(cause))
@@ -129,12 +166,34 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
   return <section className={css.workspace} aria-label="新建创作项目">
     <header><span className={css.eyebrow}>开始创作</span><h3>创建一部新作品</h3>
       <p>给故事起一个名字，填写创意和画面设定。创建后进入剧本工作区。</p></header>
-    <label>项目名称<input autoFocus maxLength={100} value={local.name} disabled={busy || local.intent !== undefined}
-      onChange={(event) => { update({ ...local, name: event.target.value }) }} placeholder="例如：雨夜来信" /></label>
-    <label>故事 / 创作原点<textarea rows={6} maxLength={64000} value={local.textInput} disabled={busy || local.intent !== undefined}
-      onChange={(event) => { update({ ...local, textInput: event.target.value }) }}
-      placeholder="写下故事梗概、人物关系或已有剧本正文。" /></label>
-    <details open><summary>创作设定</summary><p>画风：写实。选择这部作品的形式、画幅和计划时长。</p>
+    <div className={css.projectColumns}><div className={css.editor}>
+      <label>项目名称<input autoFocus maxLength={100} value={local.name} disabled={busy || local.intent !== undefined}
+        onChange={(event) => { update({ ...local, name: event.target.value }) }} placeholder="例如：雨夜来信" /></label>
+      <label>故事 / 创作原点<textarea rows={6} maxLength={64000} value={local.textInput} disabled={busy || local.intent !== undefined}
+        onChange={(event) => { update({ ...local, textInput: event.target.value }) }}
+        placeholder="写下故事梗概、人物关系或已有剧本正文。" /></label>
+    </div><details open className={css.creationSettings}><summary>创作设定</summary><p>选择整部作品的画面风格、导演方法、画幅和计划时长。</p>
+      {options === undefined && <p role="status">{optionsError || '正在读取可用的风格与导演方法…'}</p>}
+      {optionsError && <button disabled={busy} onClick={() => { setOptionsRetry(value => value + 1) }}>重新读取创作选项</button>}
+      <label>基础画风<select aria-label="基础画风" value={local.style} disabled={busy || local.intent !== undefined || !options}
+        onChange={(event) => { update({ ...local, style: event.target.value }) }}>
+        <option value="">请选择画风</option>
+        {options?.visualStyles.map(item => <option key={item.id} value={item.id}>{item.groupLabel} · {item.label}</option>)}
+      </select></label>
+      <label>全片风格包<select aria-label="全片风格包" value={local.stylePackId} disabled={busy || local.intent !== undefined || !options}
+        onChange={(event) => { update({ ...local, stylePackId: event.target.value }) }}>
+        <option value="">请选择风格包</option>
+        {options?.stylePacks.map(item => <option key={item.id} value={item.id}>{item.groupLabel} · {item.name}</option>)}
+      </select></label>
+      {selectedPack && <p>{selectedPack.intent} · {selectedPack.tone}</p>}
+      <label>导演方法<select aria-label="导演方法" value={local.directorSkillId} disabled={busy || local.intent !== undefined || !options}
+        onChange={(event) => { update({ ...local, directorSkillId: event.target.value }) }}>
+        <option value="">请选择导演方法</option>
+        {options?.directorSkills.filter(item => item.available).map(item => <option key={item.id} value={item.id}>
+          {item.id === 'shot_blocking_director' ? '镜头调度与表演设计' : item.id}</option>)}
+      </select></label>
+      <small>风格包用于统一构图、灯光、色彩与表演；导演方法用于后续镜头规划。</small>
+      {textVersion && <small>输入来源：{textVersion.label}</small>}
       <label>创作类型<select value={local.creationType} disabled={busy || local.intent !== undefined}
         onChange={(event) => { update({ ...local, creationType: event.target.value as ProjectLocal['creationType'] }) }}>
         <option value="story_idea">故事创意</option><option value="novel_adapt">小说改编</option>
@@ -148,15 +207,20 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
         onChange={(event) => { update({ ...local, episodeCount: Number(event.target.value) }) }} /></label>
       <label>单集时长<input maxLength={32} value={local.duration} disabled={busy || local.intent !== undefined}
         onChange={(event) => { update({ ...local, duration: event.target.value }) }} placeholder="例如：1-2分钟" /></label>
-    </details>
+    </details></div>
     {error !== '' && <p role="alert" className={css.notice}>{error}</p>}
     {local.intent !== undefined && <p role="status">保留了本次创建意图。先读取服务端回执，不按项目名称猜测结果。</p>}
     <div className={css.actions}>
       <button className={css.primary} disabled={busy || local.name.trim() === '' || local.textInput.trim() === ''
         || local.duration.trim() === '' || local.episodeCount < 1 || local.episodeCount > 30
+        || (local.intent === undefined ? !selectionsReady : !isCurrentIntent(local.intent))
         || (local.intent !== undefined && !retryAllowed)} onClick={() => { void run(false) }}>
         {busy ? '正在确认…' : retryAllowed ? '重试同一创建请求' : '新建项目与第 1 集'}</button>
       {local.intent !== undefined && <button disabled={busy} onClick={() => { void run(true) }}>读取创建恢复</button>}
+      {local.intent !== undefined && !isCurrentIntent(local.intent) && retryAllowed && <button disabled={busy} onClick={() => {
+        const preserved = { ...local }; delete preserved.intent
+        update(preserved); setRetryAllowed(false); setError('')
+      }}>保留输入，更新创作设定</button>}
       {onCancel !== undefined && <button disabled={busy} onClick={onCancel}>返回项目</button>}
     </div>
   </section>
@@ -172,9 +236,10 @@ interface ImportLocal {
 const EMPTY: ImportLocal = { text: '', filename: '粘贴剧本.txt', speakers: {} }
 
 /** Human-readable canonical TextImportService preview, correction and explicit save. */
-export function TextImportWorkspace({ port, projectId, episodeId, onSaved }: CreationScope & {
+export function TextImportWorkspace({ port, projectId, episodeId, onSaved, onPlanStoryboard }: CreationScope & {
   readonly port: Port
   readonly onSaved: () => Promise<void>
+  readonly onPlanStoryboard?: () => void
 }) {
   const cacheKey = `qingmu.creation.text.v1:${projectId}:${episodeId}`
   const [local, setLocal] = useState<ImportLocal>(() => readLocal(cacheKey) as ImportLocal | null ?? EMPTY)
@@ -377,6 +442,8 @@ export function TextImportWorkspace({ port, projectId, episodeId, onSaved }: Cre
         </article>
       })}
       <p className={css.notice}>检查剧本内容后，可前往角色与场景整理素材，或继续规划分镜。</p>
+      {scenes.length > 0 && onPlanStoryboard && <button className={css.primary} disabled={busy || pending}
+        onClick={onPlanStoryboard}>开始规划分镜 →</button>}
     </section>}
   </section>
 }

@@ -17,6 +17,12 @@
 .eyebrow { color: var(--qingmu-accent); font-size: 12px; letter-spacing: .12em; }
 .columns { display: grid; grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr); gap: 24px; }
 .editor { display: grid; gap: 12px; min-width: 0; }
+.projectColumns { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr); gap: 32px; align-items: start; }
+.projectColumns .editor { align-content: start; }
+.projectColumns textarea { min-height: 360px; }
+.creationSettings { border-left: 1px solid var(--dsw-alias-border-l2); padding-left: 24px; }
+.creationSettings > label { margin-top: 14px; }
+.creationSettings > small { display: block; margin-top: 8px; }
 .help { border-left: 1px solid var(--dsw-alias-border-l2); padding-left: 24px; }
 .actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .notice { border-left: 3px solid var(--qingmu-accent); padding: 10px 14px; background: var(--qingmu-soft); }
@@ -29,3 +35,4 @@
 @media (max-width: 900px) { .columns { grid-template-columns: 1fr; } .help { border-left: 0; padding-left: 0; } .line { grid-template-columns: 90px minmax(0, 1fr); } .speaker { grid-column: 2; } }
 
 @media (max-width: 600px) { .workspace { padding:16px; gap:16px; } .workspace h3 { font-size:21px; } .line { grid-template-columns:minmax(0,1fr); } .speaker { grid-column:auto; } }
+@media (max-width: 900px) { .projectColumns { grid-template-columns: minmax(0,1fr); } .creationSettings { border-left: 0; border-top: 1px solid var(--dsw-alias-border-l2); padding: 20px 0 0; } .projectColumns textarea { min-height: 240px; } }

@@ -648,6 +648,7 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
       throw new Error('Reference-video draft save uses a separate fixture')
     }),
     queueProductionTake: vi.fn(async () => { throw new Error('Production Take uses a separate fixture') }),
+    readCreationOptions: vi.fn(async () => { throw new Error('Creation options use a separate fixture') }),
     readCreativeContract: vi.fn<QingmuYimengPort['readCreativeContract']>(async request => ({ schema: 'jason.qingmu-creative-contract-state.v1' as const,
       projectId: request.projectId, configured: false, locked: false, revision: null, sha256: null,
       contract: null, sourceText: null, message: '创作合同未配置' })),
@@ -951,7 +952,6 @@ describe('embedded Qingmu entry scope', () => {
     expect(screen.queryByRole('button', { name: zh.trigger })).toBeNull()
     await waitFor(() => { expect(port.workflow).toHaveBeenCalled() })
     expect(document.getElementById('root')?.hasAttribute('inert')).toBe(false)
-    fireEvent.click(within(navigation).getByRole('button', { name: /故事/ }))
     expect(await screen.findByRole('heading', { name: '故事与剧本' })).toBeTruthy()
     expect(new URLSearchParams(location.search).get('qingmuView')).toBe('story')
     fireEvent.click(within(navigation).getByRole('button', { name: /拍摄与审看/ }))

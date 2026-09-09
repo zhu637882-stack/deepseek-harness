@@ -579,6 +579,7 @@ export function QingmuCockpit({
         selectedShotId={selectedShotId}
         onSelectShotId={setSelectedShotId}
         onNavigate={setTab}
+        onReturnToStoryboard={applicationShell ? () => { if (mayLeaveDirector()) setTab('director') } : undefined}
         onCommitted={refreshWorkflowProjectionAfterCommit}
         onProductionAction={(_action, shotId) => { setSelectedShotId(shotId); setShootingAction(shotId) }}
         directorAssistant={nativeDirectorSession === undefined
@@ -801,7 +802,9 @@ export function QingmuCockpit({
     const applicationPanels: Record<CreativeStep, ReactNode> = {
       story: <div className={css.creativePage}>
         {pageHeader('01', '故事与剧本', '写下故事、整理对白，形成这一集的创作依据。', 'assets')}{projectFacts}
-        <div className={css.stageContent}>{episodeId && <TextImportWorkspace key={`${projectId}:${episodeId}:story`} projectId={projectId} episodeId={episodeId} port={port} onSaved={refreshWorkflowAfterCommit} />}</div>
+        <div className={css.stageContent}>{episodeId && <TextImportWorkspace key={`${projectId}:${episodeId}:story`}
+          projectId={projectId} episodeId={episodeId} port={port} onSaved={refreshWorkflowAfterCommit}
+          onPlanStoryboard={() => { changeStep('storyboard') }} />}</div>
         <details className={css.stageSupporting}><summary>已存剧本与精细编辑</summary>
           <ScriptWorkspace projectId={projectId} episodeId={episodeId} port={port} t={t} onCommitted={refreshWorkflowAfterCommit} />
         </details>

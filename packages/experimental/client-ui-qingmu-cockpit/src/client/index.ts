@@ -206,6 +206,7 @@ export function apply(ctx: ClientContext): void {
     readScenePlanning: (request, signal) => command('readScenePlanning', request, signal),
     saveScenePlanning: (request, signal) => command('saveScenePlanning', request, signal),
     recoverScenePlanning: (request, signal) => command('recoverScenePlanning', request, signal),
+    readCreationOptions: (request, signal) => command('readCreationOptions', request, signal),
     initializeProject: (request, signal) => command('initializeProject', request, signal),
     recoverProjectInitialization: (request, signal) => command('recoverProjectInitialization', request, signal),
     readTextImport: (request, signal) => command('readTextImport', request, signal),

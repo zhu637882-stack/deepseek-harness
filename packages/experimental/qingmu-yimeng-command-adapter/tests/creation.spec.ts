@@ -4,7 +4,8 @@ import { createYimengCommandHandler } from '../src/index.ts'
 
 const signal = () => new AbortController().signal
 const settings = { aspectRatio: '9:16', creationType: 'story_idea', duration: '1-2分钟', episodeCount: 1,
-  mode: 'whole_series', name: '隔离样本', style: 'realistic', stylePackId: null, textInput: '雨夜里，林夏收到一封旧信。' }
+  mode: 'whole_series', name: '隔离样本', style: 'realistic', textInput: '雨夜里，林夏收到一封旧信。',
+  textVersion: 'creation-text-v1' as const, stylePackId: 'realistic_cinema', directorSkillIds: ['shot_blocking_director'] }
 const request = { ...settings, idempotencyKey: 'intent-create-1' }
 const digest = (text: string) => createHash('sha256').update(text).digest('hex')
 function canonicalJson(value: unknown): string {
@@ -26,10 +27,28 @@ const currentCreativeContract = { ...creativeContract, schema: 'qingmu.creative-
     stylePackId: { id: 'realistic_cinema', version: '1.0.0', sha256: '8'.repeat(64) },
     directorSkills: [{ id: 'shot_blocking_director', version: '1.0.0', sha256: '9'.repeat(64) }] } }
 const currentCreativeContractSha256 = digest(canonicalJson(currentCreativeContract))
+const creationCatalog = {
+  schema: 'jason.qingmu-creation-options.v1',
+  textVersions: [{ id: 'creation-text-v1', label: '当前输入文本 · 第1版', available: true }],
+  directorSkills: [{ id: 'shot_blocking_director', version: '1.0.0', sha256: '9'.repeat(64), stage: 'C', available: true, disabledReason: null }],
+}
+const styleCatalog = {
+  items: [{ key: 'realistic', labelZh: '写实电影', labelEn: 'Realistic cinema',
+    group: { key: 'real_person', labelZh: '真人', labelEn: 'Real person' }, imageUrl: '/images/tago-styles/realistic.webp',
+    imageExists: true, promptStyle: 'cinematic realism', negativePrompt: 'flat light' }], total: 1,
+}
+const stylePackCatalog = {
+  schemaVersion: 'qingmu.style-pack.v1', groups: [{ key: 'real_person', label: '真人', items: [{
+    id: 'realistic_cinema', version: '1.0.0', name: '写实电影', group: 'real_person', groupLabel: '真人',
+    intent: '自然主义叙事', tone: '克制', palette: [], contrast: '', lightingSources: [], lensFamily: '',
+    compositionRules: [], performanceRegister: '', editingRhythm: '', positiveFragments: [], negativeConstraints: [], verticalDelivery: {},
+  }] }], total: 1,
+}
 const result = { schema: 'jason.qingmu-project-bootstrap-result.v1', projectId: 'project_1', seriesId: 'series_1', episodeId: 'episode_1',
   owner: 'user_1', requestSha256: digest(canonicalJson(settings)), idempotencyKey: request.idempotencyKey,
   commandReceiptId: 'receipt_1', eventId: 'event_1', createdAt: '2026-08-29T00:00:00Z', providerCalls: 0,
-  stageStarted: false, approvalGranted: false, creativeContract, creativeContractSha256 }
+  stageStarted: false, approvalGranted: false, creativeContract: currentCreativeContract,
+  creativeContractSha256: currentCreativeContractSha256 }
 const setup = (value: unknown = result, status = 200) => {
   const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(value, { status }))
   return { fetch, handler: createYimengCommandHandler({ baseUrl: 'http://127.0.0.1:49123' }, { fetch, readToken: () => 'private-session-token' }) }
@@ -44,6 +63,38 @@ describe('bounded creation Host contract', () => {
     const copied = { ...state, contract: { ...currentCreativeContract, identity: { projectId: 'project_2' } } }
     expect(await setup(copied).handler('readCreativeContract', { projectId: 'project_1' }, signal()))
       .toMatchObject({ ok: false })
+  })
+  it('joins Writer creation, base-style, and style-pack catalogs without inventing a selection', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async (url) => {
+      const path = String(url)
+      if (path.endsWith('/api/qingmu/creation-options')) return Response.json(creationCatalog)
+      if (path.endsWith('/api/style-packs')) return Response.json(stylePackCatalog)
+      if (path.endsWith('/api/styles')) return Response.json(styleCatalog)
+      return new Response(null, { status: 404 })
+    })
+    const handler = createYimengCommandHandler({ baseUrl: 'http://127.0.0.1:49123' }, { fetch, readToken: () => 'private-session-token' })
+    await expect(handler('readCreationOptions', {}, signal())).resolves.toEqual({ ok: true, value: {
+      schema: 'jason.qingmu-creation-options.v1', textVersions: creationCatalog.textVersions,
+      directorSkills: creationCatalog.directorSkills,
+      visualStyles: [{ id: 'realistic', label: '写实电影', group: 'real_person', groupLabel: '真人' }],
+      stylePacks: [{ id: 'realistic_cinema', version: '1.0.0', name: '写实电影', group: 'real_person', groupLabel: '真人', intent: '自然主义叙事', tone: '克制' }],
+    } })
+    expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([
+      'http://127.0.0.1:49123/api/qingmu/creation-options',
+      'http://127.0.0.1:49123/api/style-packs',
+      'http://127.0.0.1:49123/api/styles',
+    ])
+  })
+  it('fails closed when an advertised creation catalog is malformed', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async (url) => {
+      if (String(url).endsWith('/api/qingmu/creation-options')) {
+        return Response.json({ ...creationCatalog, textVersions: [{ ...creationCatalog.textVersions[0], available: false }] })
+      }
+      return Response.json(stylePackCatalog)
+    })
+    const handler = createYimengCommandHandler({}, { fetch, readToken: () => 'private-session-token' })
+    await expect(handler('readCreationOptions', {}, signal())).resolves.toMatchObject({ ok: false, error: { code: 'internal' } })
+    expect(fetch).toHaveBeenCalledTimes(3)
   })
   it('creates and recovers an exact source digest without stage or generic path parameters', async () => {
     const { handler, fetch } = setup()

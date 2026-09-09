@@ -44,6 +44,8 @@ interface Props {
   readonly selectedShotId: string
   readonly onSelectShotId: (shotId: string) => void
   readonly onNavigate: (destination: Destination) => void
+  /** Optional application-shell route for correcting the current shot's storyboard requirement. */
+  readonly onReturnToStoryboard?: (() => void) | undefined
   readonly onCommitted?: () => Promise<unknown>
   readonly directorAssistant: ReactNode
   readonly onProductionAction?: (action: 'first-frame' | 'select-frame' | 'video', shotId: string) => void
@@ -99,7 +101,7 @@ export function shootingPosterVersion(stack: YimengTakeVersionStackResponse | un
 }
 /** Content-first view of existing Takes; it neither dispatches generation nor records human approval. */
 export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader, episodeName, projectId, episodeId,
-  projection, selectedShotId, onSelectShotId, onNavigate, onCommitted = async () => undefined,
+  projection, selectedShotId, onSelectShotId, onNavigate, onReturnToStoryboard, onCommitted = async () => undefined,
   directorAssistant, onProductionAction, port, t, testState }: Props) {
   const shots = projection?.director.shotRelations.shots ?? []
   const current = shots.find(shot => shot.shotId === selectedShotId) ?? shots[0]
@@ -124,7 +126,12 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
   const onRequirementStatusChange = useCallback((status: AutomaticFrameRequirementStatus) => {
     setRequirement(previous => previous.key === mediaPaneKey && previous.status === status ? previous : { key: mediaPaneKey, status })
   }, [mediaPaneKey])
-  const returnToStoryboard = useCallback(() => { onNavigate('shots') }, [onNavigate])
+  // Embedded callers retain their legacy `shots` destination. The five-stage shell
+  // supplies its exact storyboard route so a missing requirement does not loop back here.
+  const returnToStoryboard = useCallback(() => {
+    if (onReturnToStoryboard !== undefined) onReturnToStoryboard()
+    else onNavigate('shots')
+  }, [onNavigate, onReturnToStoryboard])
   function showMediaPane(pane: MediaPane): void {
     setMediaPane({ key: mediaPaneKey, pane })
     try { sessionStorage.setItem(mediaPaneKey, pane) } catch { /* Viewing still works when browser storage is unavailable. */ }

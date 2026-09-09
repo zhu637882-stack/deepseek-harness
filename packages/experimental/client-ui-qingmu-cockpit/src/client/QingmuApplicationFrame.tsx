@@ -12,7 +12,7 @@ const stepLabels: Record<CreativeStep, string> = {
 const steps = Object.entries(stepLabels) as readonly [CreativeStep, string][]
 export function creativeStepFromSearch(search: string): CreativeStep {
   const value = new URLSearchParams(search).get('qingmuView')
-  return steps.find(([id]) => id === value)?.[0] ?? 'shooting'
+  return steps.find(([id]) => id === value)?.[0] ?? 'story'
 }
 export function creativeStepLabel(step: CreativeStep): string { return stepLabels[step] }
 type Option = { readonly id: string; readonly label: string }

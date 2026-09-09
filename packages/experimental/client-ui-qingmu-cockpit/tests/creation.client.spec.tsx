@@ -1,23 +1,75 @@
 // @vitest-environment jsdom
-import { webcrypto } from 'node:crypto'
+import { createHash, webcrypto } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import type { CreativeContractState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import type { CreationOptions, CreativeContractState, TextImportState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import { CreateProjectWorkspace, TextImportWorkspace } from '../src/client/CreationWorkspace.tsx'
 
 const port = () => ({ initializeProject: vi.fn(async () => { throw new Error('unknown submission result') }),
+  readCreationOptions: vi.fn(async (): Promise<CreationOptions> => ({ schema: 'jason.qingmu-creation-options.v1',
+    textVersions: [{ id: 'creation-text-v1', label: '当前输入文本', available: true }],
+    visualStyles: [{ id: 'realistic', label: '现代写实', group: 'real_person', groupLabel: '真人' }],
+    stylePacks: [{ id: 'sp_cafe', version: '1', name: '暖光电影', group: 'real_person', groupLabel: '真人写实', intent: '暖光室内', tone: '温暖克制' }],
+    directorSkills: [{ id: 'shot_blocking_director', version: '1', sha256: 'a'.repeat(64), stage: 'director', available: true, disabledReason: null }],
+  })),
   recoverProjectInitialization: vi.fn(async () => { throw new Error('404 bootstrap_receipt_not_found') }),
   readCreativeContract: vi.fn(async (): Promise<CreativeContractState> => ({ schema: 'jason.qingmu-creative-contract-state.v1' as const,
     projectId: 'project_1', configured: false, locked: false, revision: null, sha256: null, contract: null,
     sourceText: null, message: '创作合同未配置' })),
-  readTextImport: vi.fn(async () => ({ schema: 'jason.qingmu-text-import-state.v1' as const, projectId: 'project_1', episodeId: 'episode_1', scriptRevision: 0, script: null, draft: null, draftActive: false })),
+  readTextImport: vi.fn(async (): Promise<TextImportState> => ({ schema: 'jason.qingmu-text-import-state.v1' as const, projectId: 'project_1', episodeId: 'episode_1', scriptRevision: 0, script: null, draft: null, draftActive: false })),
   createTextImport: vi.fn(async () => { throw new Error('unknown submission result') }),
   correctTextImport: vi.fn(async () => { throw new Error('unused') }),
   confirmTextImport: vi.fn(async () => { throw new Error('unused') }),
 })
 beforeEach(() => { localStorage.clear(); vi.stubGlobal('crypto', webcrypto) })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+async function selectCreationMethods() {
+  await screen.findByRole('option', { name: '镜头调度与表演设计' })
+  fireEvent.change(screen.getByRole('combobox', { name: '基础画风' }), { target: { value: 'realistic' } })
+  fireEvent.change(screen.getByRole('combobox', { name: '全片风格包' }), { target: { value: 'sp_cafe' } })
+  fireEvent.change(screen.getByRole('combobox', { name: '导演方法' }), { target: { value: 'shot_blocking_director' } })
+}
 describe('creation input and unknown-result recovery', () => {
+  it('does not invent creation methods when the real catalog is unavailable', async () => {
+    const api = port()
+    api.readCreationOptions.mockRejectedValue(new Error('catalog unavailable'))
+    render(<CreateProjectWorkspace port={api} onCreated={async () => {}} />)
+    await screen.findByRole('button', { name: '重新读取创作选项' })
+    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '咖啡馆' } })
+    fireEvent.change(screen.getByLabelText('故事 / 创作原点'), { target: { value: '两人重听旧声。' } })
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '新建项目与第 1 集' }).disabled).toBe(true)
+    expect(api.initializeProject).not.toHaveBeenCalled()
+  })
+  it('recovers a legacy intent by its original hash before allowing explicit method reconfiguration', async () => {
+    const settings = { aspectRatio: '16:9', creationType: 'original_script', duration: '24秒', episodeCount: 1,
+      mode: 'whole_series', name: '咖啡馆', style: 'realistic', stylePackId: null, textInput: '两人重听旧声。' }
+    localStorage.setItem('qingmu.creation.project.v1', JSON.stringify({ ...settings, intent: { ...settings, idempotencyKey: 'legacy-intent-1' } }))
+    const api = port()
+    render(<CreateProjectWorkspace port={api} onCreated={async () => {}} />)
+    expect(screen.queryByRole('button', { name: '保留输入，更新创作设定' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '读取创建恢复' }))
+    fireEvent.click(await screen.findByRole('button', { name: '保留输入，更新创作设定' }))
+    expect(api.recoverProjectInitialization).toHaveBeenCalledWith({ idempotencyKey: 'legacy-intent-1',
+      requestSha256: createHash('sha256').update(JSON.stringify(settings)).digest('hex') })
+    expect(screen.getByLabelText<HTMLTextAreaElement>('故事 / 创作原点').value).toBe(settings.textInput)
+    expect(api.initializeProject).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: '读取创建恢复' })).toBeNull()
+  })
+  it('offers storyboard planning only from the saved script, without submitting another import', async () => {
+    const api = port()
+    const onPlanStoryboard = vi.fn()
+    render(<TextImportWorkspace port={api} projectId="project_1" episodeId="episode_1"
+      onSaved={async () => {}} onPlanStoryboard={onPlanStoryboard} />)
+    await waitFor(() => { expect(api.readTextImport).toHaveBeenCalledOnce() })
+    expect(screen.queryByRole('button', { name: '开始规划分镜 →' })).toBeNull()
+    api.readTextImport.mockResolvedValue({ schema: 'jason.qingmu-text-import-state.v1', projectId: 'project_1',
+      episodeId: 'episode_1', scriptRevision: 1, script: { scenes: [{ title: '夜晚咖啡馆' }] }, draft: null, draftActive: false })
+    fireEvent.click(screen.getByRole('button', { name: '读取恢复 / 刷新预览' }))
+    fireEvent.click(await screen.findByRole('button', { name: '开始规划分镜 →' }))
+    expect(onPlanStoryboard).toHaveBeenCalledOnce()
+    expect(api.createTextImport).not.toHaveBeenCalled()
+    expect(api.confirmTextImport).not.toHaveBeenCalled()
+  })
   it('prefills the locked creation source once instead of asking for a second script entry', async () => {
     const api = port()
     api.readCreativeContract.mockResolvedValue({
@@ -59,12 +111,15 @@ describe('creation input and unknown-result recovery', () => {
     const api = port()
     const props = { port: api, onCreated: vi.fn(async () => {}) }
     const first = render(<CreateProjectWorkspace {...props} />)
+    await selectCreationMethods()
     fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '恢复样本' } })
     fireEvent.change(screen.getByLabelText('故事 / 创作原点'), { target: { value: '雨夜里，林夏收到一封旧信。' } })
     fireEvent.click(screen.getByText('新建项目与第 1 集'))
     fireEvent.click(screen.getByText('正在确认…'))
     await screen.findByRole('alert')
     expect(api.initializeProject).toHaveBeenCalledOnce()
+    expect(api.initializeProject).toHaveBeenCalledWith(expect.objectContaining({ textVersion: 'creation-text-v1',
+      style: 'realistic', stylePackId: 'sp_cafe', directorSkillIds: ['shot_blocking_director'] }))
     first.unmount()
     render(<CreateProjectWorkspace {...props} />)
     expect(screen.getByLabelText<HTMLInputElement>('项目名称').value).toBe('恢复样本')
@@ -73,10 +128,11 @@ describe('creation input and unknown-result recovery', () => {
     await waitFor(() =>{  expect(api.recoverProjectInitialization).toHaveBeenCalledOnce() })
     expect(api.initializeProject).toHaveBeenCalledOnce()
   })
-  it('migrates an old partial browser draft without inventing a sendable intent', () => {
+  it('migrates an old partial browser draft without inventing a sendable intent', async () => {
     localStorage.setItem('qingmu.creation.project.v1', JSON.stringify({ name: '旧草稿', aspectRatio: '16:9' }))
     const api = port()
     render(<CreateProjectWorkspace port={api} onCreated={async () => {}} />)
+    await waitFor(() => { expect(api.readCreationOptions).toHaveBeenCalledOnce() })
     expect(screen.getByLabelText<HTMLInputElement>('项目名称').value).toBe('旧草稿')
     expect(screen.getByLabelText<HTMLSelectElement>('画幅').value).toBe('16:9')
     expect(screen.getByLabelText<HTMLTextAreaElement>('故事 / 创作原点').value).toBe('')
