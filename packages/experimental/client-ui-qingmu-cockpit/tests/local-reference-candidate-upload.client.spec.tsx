@@ -235,11 +235,11 @@ it('rejects an input above 8 MiB before it can submit to Host', async () => {
 
 it('does not let a late IndexedDB restore from an earlier scope overwrite the current scope', async () => {
   const oldSaved = { request: {
-    ...scope, idempotencyKey: 'old-key', originalFileName: 'old-scope.png', contentBase64: PNG_BASE64,
+    ...scope, projectId: 'project_old_scope', targetId: 'actor_old_scope', idempotencyKey: 'old-key', originalFileName: 'old-scope.png', contentBase64: PNG_BASE64,
     sourceDeclaration: 'local_file_unverified' as const,
   }, pending: false }
   const opens: Array<Record<string, unknown>> = []
-  const gets: Array<Record<string, unknown>> = []
+  const gets: Array<{ request: Record<string, unknown>; saved: unknown }> = []
   const databaseFor = (saved: unknown) => ({
     objectStoreNames: { contains: () => true },
     transaction: () => ({ objectStore: () => ({ get: () => {
@@ -273,7 +273,7 @@ it('does not let a late IndexedDB restore from an earlier scope overwrite the cu
     opens[0]!.result = databaseFor(oldSaved)
     ;(opens[0]!.onsuccess as (() => void) | undefined)?.()
     await Promise.resolve()
-    const old = gets[0]!
+    const old = gets.at(-1)!
     old.request.result = old.saved
     ;(old.request.onsuccess as (() => void) | undefined)?.()
   })
@@ -385,7 +385,7 @@ it('removes an old legacy draft when a replacement cannot be written without Ind
   }, pending: false }
   const replacement = { request: {
     ...scope, projectId: 'project_legacy_replacement', targetId: 'actor_legacy_replacement', idempotencyKey: 'new-key',
-    originalFileName: 'new-legacy-draft.png', contentBase64: PNG_BASE64, sourceDeclaration: 'local_file_unverified',
+    originalFileName: 'new-legacy-draft.png', contentBase64: PNG_BASE64, sourceDeclaration: 'local_file_unverified' as const,
   }, pending: false }
   localStorage.setItem(key, JSON.stringify(oldDraft))
   vi.stubGlobal('indexedDB', undefined)
