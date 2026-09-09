@@ -3,6 +3,7 @@ import { localMediaUrl } from './local-media-url.ts'
 import type {
   ReferenceVideoAssetsRequest, ReferenceVideoAssetsResponse,
   ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse,
+  ReferenceVideoDraftResponse,
 } from './reference-video-types.ts'
 
 function object(value: unknown, keys?: string[]): Record<string, unknown> {
@@ -19,6 +20,43 @@ function sha(value: unknown): asserts value is string {
 }
 function integer(value: unknown, min: number, max: number): asserts value is number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min || value > max) throw new Error('invalid number')
+}
+
+/** Validate a scoped draft read.
+ * @param value - Browser scope.
+ * @returns Exact project and shot identifiers.
+ */
+export function parseReferenceVideoDraftScope(value: unknown): { projectId: string; frameId: string } {
+  const v = object(value, ['projectId', 'frameId'])
+  id(v.projectId); id(v.frameId)
+  return { projectId: v.projectId, frameId: v.frameId }
+}
+
+/** Verify persisted draft identity and verbatim request checksum.
+ * @param value - Writer snapshot.
+ * @param scope - Requested shot.
+ * @param digest - Canonical JSON hash.
+ * @returns A draft snapshot whose body and identity are consistent.
+ */
+export function normalizeReferenceVideoDraft(
+  value: unknown, scope: { projectId: string; frameId: string }, digest: (value: unknown, label: string) => string,
+): ReferenceVideoDraftResponse {
+  const v = object(value, ['schema', 'projectId', 'frameId', 'frameSha256', 'draft', 'mediaTypes', 'providerCalls', 'generationQueued'])
+  if (v.schema !== 'jason.reference-video-draft.v1' || v.projectId !== scope.projectId || v.frameId !== scope.frameId
+    || v.providerCalls !== 0 || v.generationQueued !== false) throw new Error('draft scope or effects changed')
+  sha(v.frameSha256)
+  const types = object(v.mediaTypes)
+  if (v.draft !== null) {
+    const d = object(v.draft, ['revision', 'frameSha256', 'requestSha256', 'request', 'savedAt'])
+    integer(d.revision, 1, Number.MAX_SAFE_INTEGER); sha(d.frameSha256); sha(d.requestSha256)
+    const body = object(d.request, ['frameId', 'model', 'bindings', 'promptParts', 'parameters'])
+    const request = parseReferenceVideoRequest({ ...body, projectId: scope.projectId })
+    if (request.frameId !== scope.frameId || digest(body, 'draft.request') !== d.requestSha256
+      || typeof d.savedAt !== 'string' || !Number.isFinite(Date.parse(d.savedAt))) throw new Error('draft content mismatch')
+    if (Object.keys(types).length !== request.bindings.length || request.bindings.some(b =>
+      !Object.hasOwn(types, b.bindingToken) || ![null, 'reference_image', 'reference_audio'].includes(types[b.bindingToken] as null | string))) throw new Error('draft media kind mismatch')
+  } else if (Object.keys(types).length) throw new Error('unexpected draft media')
+  return value as ReferenceVideoDraftResponse
 }
 
 /** Validate explicit source tokens and bounded model controls before HTTP.

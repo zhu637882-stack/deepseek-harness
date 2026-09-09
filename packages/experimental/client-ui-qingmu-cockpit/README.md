@@ -217,3 +217,7 @@ Opening, refreshing, or closing the cockpit does not rewrite the model prefix. A
 - Anonymous health proves liveness only; it does not prove production readiness or release identity unless the returned fields explicitly do so.
 - `releaseReady` is neither `verify_episode` success nor final human signoff.
 - The plugin requires the Qingmu build composition plus the private Host read and command adapters on the same local Harness runtime.
+
+## Saved reference drafts
+
+Reference drafts can be saved per shot and restored after refresh. Reads use `referenceVideoDraft`; writes use the command adapter `saveReferenceVideoDraft`, followed by strict readback. Writer checks the project owner, source frame SHA and draft revision in one transaction. Changed source assets are shown as unavailable, and a changed shot requires an explicit rebase. Saving does not select a PromptIR, adopt assets or submit generation.

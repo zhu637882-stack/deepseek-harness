@@ -145,3 +145,7 @@ ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只
 - 它不启动 outbox dispatcher，也不跨进程传输事件。
 - ChangeSet 提案发生冲突时，必须先重新读取权威数据，再由用户明确创建新提案。
 - 回执恢复依赖易梦保留原始命令回执；血缘错配时一律失败关闭。Finding 回执不存在时返回 `not_found`，不会重新提交写入。
+
+## 引用草稿保存
+
+`saveReferenceVideoDraft` 通过认证 Writer API 保存一份显式编辑的镜头草稿，再通过既有只读适配器校验归属、版本和请求 SHA。版本冲突及不确定回执不会触发自动重提。该操作不修改生产选择、不调用 Provider。

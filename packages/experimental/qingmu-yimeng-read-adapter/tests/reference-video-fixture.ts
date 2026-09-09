@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { ReferenceVideoPreviewRequest } from '../src/reference-video-types.ts'
-function canonical(value: unknown): string {
+export function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
   const v = value as Record<string, unknown>
@@ -30,4 +30,13 @@ export const response = {
   requestBodySha256: createHash('sha256').update(canonical(body)).digest('hex'), sourceSha256: 'f'.repeat(64),
   readOnly: true, providerCalls: 0, databaseWrites: 0, submissionReady: false, referenceAudioDurationSec: 2,
   remainingChecks: ['source_revalidation_at_dispatch', 'provider_media_reachability', 'generation_authorization'],
+}
+
+const { projectId: _projectId, ...savedRequest } = request
+export const savedDraft = {
+  schema: 'jason.reference-video-draft.v1', projectId: 'p', frameId: 'f', frameSha256: 'e'.repeat(64),
+  draft: { revision: 1, frameSha256: 'e'.repeat(64), requestSha256: createHash('sha256').update(canonical(savedRequest)).digest('hex'),
+    request: savedRequest, savedAt: '2026-09-09T12:00:00Z' },
+  mediaTypes: { lin: 'reference_image', voice: 'reference_audio', cafe: 'reference_image' },
+  providerCalls: 0, generationQueued: false,
 }

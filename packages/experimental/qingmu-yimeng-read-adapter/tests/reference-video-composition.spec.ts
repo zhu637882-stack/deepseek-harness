@@ -10,7 +10,8 @@ import { WebServer } from '@deepseek-ai/dsh-host-webserver'
 import * as Connection from '@deepseek-ai/dsh-client-connection'
 import { expect, it, vi } from 'vitest'
 import * as Adapter from '../src/index.ts'
-import { request, response } from './reference-video-fixture.ts'
+import * as Commands from '../../qingmu-yimeng-command-adapter/src/index.ts'
+import { request, response, savedDraft } from './reference-video-fixture.ts'
 
 it('loads the actual Host, Connection and read plugin through YAML and serves a verified request preview', async () => {
   const requests: { url?: string; method?: string; authorization?: string; body: string }[] = []
@@ -18,7 +19,7 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
     let body = ''
     for await (const chunk of req) body += String(chunk)
     requests.push({ url: req.url, method: req.method, authorization: req.headers.authorization, body })
-    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(response))
+    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(req.url?.includes('/drafts/') ? savedDraft : response))
   })
   await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve))
   const address = upstream.address()
@@ -33,12 +34,15 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
       "- name: '@deepseek-ai/dsh-client-connection'",
       "- name: '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'", '  config:',
       `    baseUrl: http://127.0.0.1:${address.port}`, '',
+      "- name: '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter'", '  config:',
+      `    baseUrl: http://127.0.0.1:${address.port}`, '',
     ].join('\n'))
     ctx.baseUrl = pathToFileURL(root).href + '/'
     await ctx.plugin(Loader); ctx.loader.builtins.include = Include
     const modules = new Map<string, unknown>([
       ['@deepseek-ai/dsh-host-webserver', WebServer], ['@deepseek-ai/dsh-client-connection', Connection],
       ['@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter', Adapter],
+      ['@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter', Commands],
     ])
     ctx.loader.internal = { version: 'v2', async import(specifier: string) {
       if (!modules.has(specifier)) throw new Error(`unexpected plugin: ${specifier}`)
@@ -70,6 +74,14 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
         "submissionReady": false,
       }
     `)
+    const save = await fetch(`http://127.0.0.1:${ctx.webServer.port}/qingmu-yimeng-command/saveReferenceVideoDraft`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId: 'save', method: 'saveReferenceVideoDraft', payload: {
+        projectId: 'p', frameId: 'f', expectedRevision: 0, expectedFrameSha256: savedDraft.frameSha256, request: savedDraft.draft.request,
+      } }),
+    })
+    expect((await save.json()).result).toEqual({ ok: true, value: savedDraft })
+    expect(requests.map(r => r.method)).toEqual(['POST', 'POST', 'GET'])
   } finally {
     await ctx.fiber.dispose(); upstream.closeAllConnections()
     await new Promise<void>(resolve => upstream.close(() => { resolve() }))

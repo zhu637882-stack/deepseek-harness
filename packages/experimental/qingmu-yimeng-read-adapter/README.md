@@ -172,3 +172,7 @@ Independent. Reading or cancelling a projection does not change a model request 
 - Missing Host credentials fail protected reads before any upstream request.
 - Script integrity comparisons in the browser use the Host-verified `scriptSha256`, without reproducing Python float spellings such as `1e-06`. Finding coordinates contain only safe integers and use the separately bounded canonical subject contract.
 - A healthy response proves liveness only, while a workflow projection reports facts without authorizing production or delivery.
+
+## Saved reference drafts
+
+Reference drafts can be saved per shot and restored after refresh. Reads use `referenceVideoDraft`; writes use the command adapter `saveReferenceVideoDraft`, followed by strict readback. Writer checks the project owner, source frame SHA and draft revision in one transaction. Changed source assets are shown as unavailable, and a changed shot requires an explicit rebase. Saving does not select a PromptIR, adopt assets or submit generation.

@@ -11,6 +11,7 @@ import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import { normalizeContinuityDelta } from './continuity.ts'
 import { parseReferenceVideoRequest, normalizeReferenceVideoPreview, parseReferenceVideoAssetsRequest, normalizeReferenceVideoAssets } from './reference-video.ts'
+import { parseReferenceVideoDraftScope, normalizeReferenceVideoDraft } from './reference-video.ts'
 import { localMediaUrl } from './local-media-url.ts'
 import { normalizeSelectedVideoReview } from './selected-video-review.ts'
 import { normalizeTakeVersionStack, parseTakeVersionReadRequest } from './take-versions.ts'
@@ -342,7 +343,7 @@ const PROTECTED_ENDPOINTS = new Set([
   'referenceCandidates', 'reviewEvents',
   'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'takeComments', 'takeReviewAuthority', 'takeAcceptance', 'takeTechnicalQc', 'takeApprovalLifecycle', 'evidenceLedger', 'editorialHandoff', 'verifyEpisode', 'shotFindings', 'productionUnits', 'stageSources',
   'lsuPlanSource', 'reworkRouteSource',
-  'takePreview', 'referenceVideoPreview', 'referenceVideoAssets',
+  'takePreview', 'referenceVideoPreview', 'referenceVideoAssets', 'referenceVideoDraft',
 ])
 const HUMAN_DECISION_VALUES = new Set<YimengHumanDecisionValue>([
   'approve', 'reject', 'request_changes',
@@ -5202,6 +5203,11 @@ export function createYimengReadHandler(
           + '/episodes/' + encodeURIComponent(request.episodeId)
           + '/frames/' + encodeURIComponent(request.frameId) + '/take-versions'
         normalize = value => normalizeTakeVersionStack(value, request, jcsSha256)
+      } else if (endpoint === 'referenceVideoDraft') {
+        let request
+        try { request = parseReferenceVideoDraftScope(payload) } catch { throw new InputError('invalid reference draft scope') }
+        path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/reference-video/drafts/${encodeURIComponent(request.frameId)}`
+        normalize = value => normalizeReferenceVideoDraft(value, request, canonicalJsonSha256)
       } else if (endpoint === 'referenceVideoPreview') {
         let request
         try { request = parseReferenceVideoRequest(payload) } catch { throw new InputError('invalid reference video draft') }

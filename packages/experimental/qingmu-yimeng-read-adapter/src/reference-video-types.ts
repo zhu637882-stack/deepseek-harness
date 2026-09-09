@@ -79,3 +79,30 @@ export interface ReferenceVideoAssetsResponse {
   readonly pages: number
   readonly items: readonly ReferenceVideoAsset[]
 }
+
+/** One shot's persisted working draft, without a production selection. */
+export interface ReferenceVideoDraftResponse {
+  readonly schema: 'jason.reference-video-draft.v1'
+  readonly projectId: string
+  readonly frameId: string
+  readonly frameSha256: string
+  readonly draft: null | {
+    readonly revision: number
+    readonly frameSha256: string
+    readonly requestSha256: string
+    readonly request: Omit<ReferenceVideoPreviewRequest, 'projectId'>
+    readonly savedAt: string
+  }
+  readonly mediaTypes: Readonly<Record<string, 'reference_image' | 'reference_audio' | null>>
+  readonly providerCalls: 0
+  readonly generationQueued: false
+}
+
+/** Optimistic save also binds the shot source read by the editor. */
+export interface SaveReferenceVideoDraftRequest {
+  readonly projectId: string
+  readonly frameId: string
+  readonly expectedRevision: number
+  readonly expectedFrameSha256: string
+  readonly request: Omit<ReferenceVideoPreviewRequest, 'projectId'>
+}

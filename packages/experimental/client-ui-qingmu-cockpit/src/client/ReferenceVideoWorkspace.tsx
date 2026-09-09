@@ -2,8 +2,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type {
   ReferenceVideoAsset, ReferenceVideoParameters, ReferenceVideoPreviewResponse, ReferenceVideoPromptPart,
+  ReferenceVideoDraftResponse,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
-import type { QingmuYimengReadPort } from './contracts.ts'
+import type { QingmuYimengPort } from './contracts.ts'
 import css from './ReferenceVideoWorkspace.module.css'
 
 /** One shot's local reference draft; previewing never queues paid work. */
@@ -11,10 +12,10 @@ export interface ReferenceVideoWorkspaceProps {
   readonly projectId: string
   readonly frameId: string
   readonly initialPrompt: string
-  readonly port: Pick<QingmuYimengReadPort, 'referenceVideoAssets' | 'referenceVideoPreview'>
+  readonly port: Pick<QingmuYimengPort, 'referenceVideoAssets' | 'referenceVideoPreview' | 'referenceVideoDraft' | 'saveReferenceVideoDraft'>
 }
 
-type Chosen = ReferenceVideoAsset & { readonly bindingToken: string }
+type Chosen = Omit<ReferenceVideoAsset, 'mediaType'> & { readonly bindingToken: string; readonly mediaType: ReferenceVideoAsset['mediaType'] | 'unavailable' }
 
 /** Edit reference nodes independently from literal dialogue and inspect the actual request.
  * @param props - Current shot and the authenticated host read port.
@@ -31,15 +32,72 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [draftState, setDraftState] = useState<ReferenceVideoDraftResponse>()
+  const [draftLoaded, setDraftLoaded] = useState(false)
+  const [sourceAccepted, setSourceAccepted] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [draftMessage, setDraftMessage] = useState('正在读取草稿状态…')
+  const epoch = useRef(0)
   const activeText = useRef<{ index: number; start: number; end: number }>({
     index: 0, start: initialPrompt.length, end: initialPrompt.length,
   })
   const previewAbort = useRef<AbortController | undefined>(undefined)
   const assetsAbort = useRef<AbortController | undefined>(undefined)
-  useEffect(() => () => { previewAbort.current?.abort(); assetsAbort.current?.abort() }, [])
+  const draftAbort = useRef<AbortController | undefined>(undefined)
+  const saveAbort = useRef<AbortController | undefined>(undefined)
+  useEffect(() => {
+    const controller = new AbortController(); draftAbort.current = controller
+    void port.referenceVideoDraft({ projectId, frameId }, controller.signal).then((state) => {
+      if (controller.signal.aborted) return
+      setDraftState(state)
+      if (epoch.current === 0) setDraftMessage(state.draft ? '此镜头有已存草稿，可恢复后继续编辑。' : '尚无已存草稿。')
+    }).catch(() => { if (!controller.signal.aborted) setDraftMessage('草稿状态读取失败；当前试排仍可预览，请重新读取。') })
+    return () => {
+      controller.abort(); previewAbort.current?.abort(); assetsAbort.current?.abort()
+      draftAbort.current?.abort(); saveAbort.current?.abort()
+    }
+  }, [projectId, frameId, port])
 
   const invalidate = () => {
+    epoch.current += 1
+    setDraftMessage('当前修改尚未保存。')
     previewAbort.current?.abort(); setBusy(false); setResult(undefined); setError('')
+  }
+  const restore = async () => {
+    draftAbort.current?.abort()
+    const controller = new AbortController(); draftAbort.current = controller
+    const start = epoch.current
+    try {
+      const state = await port.referenceVideoDraft({ projectId, frameId }, controller.signal)
+      if (controller.signal.aborted) return
+      if (epoch.current !== start) { setDraftMessage('读取期间又有编辑，已保留当前内容。需要恢复时请再点击。'); return }
+      setDraftState(state)
+      if (!state.draft) { setDraftLoaded(true); setSourceAccepted(true); setDraftMessage('服务器尚无草稿；当前试排已保留，可直接保存。'); return }
+      invalidate()
+      setChosen(state.draft.request.bindings.map(binding => ({ ...binding, browserUrl: '', mediaType: state.mediaTypes[binding.bindingToken] ?? 'unavailable' })))
+      setParts(state.draft.request.promptParts); setParameters(state.draft.request.parameters)
+      activeText.current = { index: 0, start: 0, end: 0 }
+      setDraftLoaded(true); setSourceAccepted(state.draft.frameSha256 === state.frameSha256)
+      setDraftMessage(`已恢复草稿版本 ${state.draft.revision}。`)
+    } catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '恢复草稿失败') }
+  }
+  const save = async () => {
+    if (saving || !draftState || !sourceAccepted || (draftState.draft && !draftLoaded)) return
+    draftAbort.current?.abort()
+    const controller = new AbortController(); saveAbort.current = controller
+    const start = epoch.current; setSaving(true); setError('')
+    try {
+      const state = await port.saveReferenceVideoDraft({ projectId, frameId,
+        expectedRevision: draftState.draft?.revision ?? 0, expectedFrameSha256: draftState.frameSha256,
+        request: { frameId, model: 'wan3.0-video',
+          bindings: chosen.map(({ bindingToken, assetId, assetSha256, label }) => ({ bindingToken, assetId, assetSha256, label })),
+          promptParts: parts, parameters } }, controller.signal)
+      if (controller.signal.aborted) return
+      setDraftState(state); setDraftLoaded(true)
+      setDraftMessage(epoch.current === start ? `已保存草稿版本 ${state.draft?.revision}。` : '上一版已保存，随后修改的内容尚未保存。')
+    } catch (cause) {
+      if (!controller.signal.aborted) setError(`保存未确认，当前内容仍保留。${cause instanceof Error ? cause.message : '请重试或重新读取草稿。'}`)
+    } finally { if (!controller.signal.aborted) setSaving(false) }
   }
   const loadAssets = async () => {
     if (loading) return
@@ -79,7 +137,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
   }
   const preview = async () => {
     if (busy) return
-    invalidate()
+    previewAbort.current?.abort(); setResult(undefined); setError('')
     const controller = new AbortController(); previewAbort.current = controller; setBusy(true)
     try {
       const response = await port.referenceVideoPreview({ projectId, frameId, model: 'wan3.0-video',
@@ -92,7 +150,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
     finally { if (!controller.signal.aborted) setBusy(false) }
   }
   let images = 0; let audios = 0
-  const aliases = new Map(chosen.map(item => [item.bindingToken, item.mediaType === 'reference_image' ? `图${++images}` : `音频${++audios}`]))
+  const aliases = new Map(chosen.map((item, index) => [item.bindingToken, item.mediaType === 'reference_image' ? `图${++images}` : item.mediaType === 'reference_audio' ? `音频${++audios}` : `失效素材${index + 1}`]))
   const move = (index: number, delta: number) => {
     const next = [...chosen]; const other = next[index + delta]; const current = next[index]
     if (!other || !current) return
@@ -103,6 +161,15 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
   return <details className={css.workspace}>
     <summary>精确引用 · 阿里视频预览</summary>
     <p>选好人物、场景和音色，在描述中插入引用。预览不生成视频、不扣费。</p>
+    <div className={css.actions}>
+      <button type="button" disabled={saving} onClick={() => { void restore() }}>恢复已存草稿（替换当前试排）</button>
+      <button type="button" disabled={saving || !draftState || !sourceAccepted || Boolean(draftState.draft && !draftLoaded) || chosen.length === 0 || chosen.some(item => item.mediaType === 'unavailable' || !item.label.trim())} onClick={() => { void save() }}>{saving ? '保存草稿…' : '保存引用草稿'}</button>
+    </div>
+    <p role="status">{draftMessage}</p>
+    {!sourceAccepted && <p role="alert">镜头在上次保存后已变化，请核对当前描述和素材。
+      <button type="button" onClick={() => { setSourceAccepted(true); invalidate() }}>基于当前镜头继续编辑</button>
+    </p>}
+    {chosen.some(item => item.mediaType === 'unavailable') && <p role="alert">部分素材已删除或版本已变化，请移除失效引用并重新选择。</p>}
     <div className={css.actions}>
       <button type="button" disabled={loading || (page > 0 && page >= pages)} onClick={() => { void loadAssets() }}>
         {loading ? '读取素材…' : page === 0 ? '读取项目素材' : page < pages ? '更多素材' : '素材已读完'}
@@ -168,7 +235,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
       <label><input type="checkbox" checked={parameters.audio} onChange={(event) => { invalidate(); setParameters({ ...parameters, audio: event.target.checked }) }} />原生声音</label>
       <label><input type="checkbox" checked={parameters.prompt_extend} onChange={(event) => { invalidate(); setParameters({ ...parameters, prompt_extend: event.target.checked }) }} />模型扩写描述</label>
     </div>
-    <button type="button" disabled={busy || images === 0 || chosen.some(item => !item.label.trim())} onClick={() => { void preview() }}>{busy ? '核对素材与请求…' : '预览实际请求'}</button>
+    <button type="button" disabled={busy || images === 0 || chosen.some(item => item.mediaType === 'unavailable' || !item.label.trim())} onClick={() => { void preview() }}>{busy ? '核对素材与请求…' : '预览实际请求'}</button>
     {error && <p role="alert">{error}</p>}
     {result && <section aria-label="阿里请求预览" aria-live="polite">
       <h4>将发送的描述</h4><p className={css.compiled}>{result.body.input.prompt}</p>
@@ -177,6 +244,6 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
       <p>请求已核对。尚未提交生成。</p>
       <details><summary>查看引用版本与完整请求</summary><pre>{JSON.stringify(result, null, 2)}</pre></details>
     </section>}
-    <p className={css.note}>这里是当前镜头的临时试排，刷新页面会清空。镜头正式素材与提示词保持原记录。</p>
+    <p className={css.note}>引用草稿按镜头保存。刷新后可恢复已保存内容；保存不会采用素材或启动生成。</p>
   </details>
 }

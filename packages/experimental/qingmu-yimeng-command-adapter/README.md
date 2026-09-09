@@ -147,3 +147,7 @@ Native shooting preview accepts an optional preceding first-frame request for ex
 - It does not start an outbox dispatcher or transport events across processes.
 - ChangeSet proposal conflicts require a fresh authoritative read and a new explicit proposal.
 - Receipt recovery depends on Yimeng retaining the original command receipt; mismatches fail closed. A missing Finding receipt returns `not_found` without resubmitting the write.
+
+## Reference draft saves
+
+`saveReferenceVideoDraft` persists one explicitly edited shot draft through the authenticated Writer API and verifies its scope, revision and request SHA through the existing read adapter. Version conflicts and uncertain responses never trigger automatic resubmission. It changes no production selection and calls no Provider.

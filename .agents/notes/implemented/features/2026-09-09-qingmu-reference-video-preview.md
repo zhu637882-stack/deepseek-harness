@@ -10,7 +10,7 @@ A director cannot reliably compare reference-based video requests when media ord
 
 ## Decision
 
-The existing read adapter forwards an explicit draft to Writer's read-only compiler. Stable reference tokens resolve independently for images and audio; literal text stays unchanged. The Host checks scope, ordering, compiled text and body SHA. The existing director editor owns a temporary local draft and clears previews on edits.
+The existing read adapter forwards an explicit draft to Writer's read-only compiler. Stable reference tokens resolve independently for images and audio; literal text stays unchanged. The Host checks scope, ordering, compiled text and body SHA. The existing director editor owns the editable buffer and clears previews on edits. Explicit save/restore uses one draft row per shot with transactional revision and source checks.
 
 ## Alternatives considered
 
@@ -20,4 +20,4 @@ The existing read adapter forwards an explicit draft to Writer's read-only compi
 
 ## Consequences
 
-The implementation extends existing DSH plugins and Writer adapters. It adds no agent loop, workflow engine or paid submission path. Saving reference drafts, validating media at dispatch and attaching these inputs to the existing generation queue remain separate work. Unit and browser interaction tests cover explicit input and stale previews; a YAML Loader composition checks the real Host and Connection RPC path with only the upstream service stubbed.
+The implementation extends existing DSH plugins and Writer adapters. It adds no agent loop, workflow engine or paid submission path. Validating media at dispatch and attaching these inputs to the existing generation queue remain separate work. Draft persistence does not alter selected PromptIRs or production state. Unit and browser interaction tests cover explicit input and stale previews; a YAML Loader composition checks the real Host and Connection RPC path with only the upstream service stubbed.

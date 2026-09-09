@@ -5343,6 +5343,38 @@ export function createYimengCommandHandler(
         readAttestationKey: readReferenceAttestationKey,
         requireTimestamp: requireRfc3339Timestamp,
       }
+      if (endpoint === 'saveReferenceVideoDraft') {
+        if (dependencies.readYimeng === undefined) return internalError('reference draft readback is unavailable')
+        const input = requireObject(payload, 'referenceDraft')
+        if (Object.keys(input).some(key => !['projectId', 'frameId', 'expectedRevision', 'expectedFrameSha256', 'request'].includes(key))
+          || typeof input.projectId !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/u.test(input.projectId)
+          || typeof input.frameId !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/u.test(input.frameId)
+          || !Number.isSafeInteger(input.expectedRevision) || Number(input.expectedRevision) < 0
+          || Number(input.expectedRevision) >= Number.MAX_SAFE_INTEGER
+          || typeof input.expectedFrameSha256 !== 'string' || !SHA256.test(input.expectedFrameSha256)) throw new InputError('invalid reference draft save')
+        const draft = requireObject(input.request, 'referenceDraft.request')
+        if (draft.frameId !== input.frameId || Object.hasOwn(draft, 'projectId')) throw new InputError('reference draft scope mismatch')
+        const token = normalizeToken(dependencies.readToken())
+        if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
+        const body = { expectedRevision: input.expectedRevision, expectedFrameSha256: input.expectedFrameSha256, request: draft }
+        const response = await fetchJson(dependencies,
+          `${baseUrl}/api/qingmu/projects/${encodeURIComponent(input.projectId)}/reference-video/drafts/${encodeURIComponent(input.frameId)}`,
+          token, { method: 'POST', body: serializeBody(body) }, timeoutMs, signal)
+        if (!response.ok || signal.aborted) return signal.aborted ? cancelled() : response
+        // Read back through the existing strict read boundary; an uncertain
+        // save can be retried with the same revision and exact request body.
+        const readback = await dependencies.readYimeng('referenceVideoDraft', { projectId: input.projectId, frameId: input.frameId }, signal)
+        if (!readback.ok) return readback
+        const saved = requireObject(readback.value, 'referenceDraft.readback')
+        const record = requireObject(saved.draft, 'referenceDraft.readback.draft')
+        if (saved.projectId !== input.projectId || saved.frameId !== input.frameId
+          || saved.frameSha256 !== input.expectedFrameSha256 || record.frameSha256 !== input.expectedFrameSha256
+          || record.requestSha256 !== canonicalJsonSha256(draft, 'referenceDraft.request')
+          || (record.revision !== input.expectedRevision && record.revision !== Number(input.expectedRevision) + 1)) {
+          return internalError('引用草稿保存后已有变化，请重新读取核对；当前文字仍保留。')
+        }
+        return readback
+      }
       if (endpoint === 'queueProductionTake') {
         if (dependencies.readYimeng === undefined || dependencies.runPromptIrMethod === undefined) {
           return internalError('current Writer production prerequisites are unavailable')
