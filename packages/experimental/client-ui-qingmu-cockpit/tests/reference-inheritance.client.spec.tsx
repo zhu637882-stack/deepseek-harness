@@ -15,6 +15,7 @@ function mount() {
     referenceVideoDraft: vi.fn(async (input: { frameId: string }, _signal?: AbortSignal) => input.frameId === 'f' ? source : current),
     referenceVideoPreview: vi.fn(async (_input: ReferenceVideoPreviewRequest) => { throw new Error('No preview in this test') }),
     referenceVideoAssets: vi.fn(async () => ({ projectId: 'p', page: 1, pages: 1, items: [] })),
+    readLocalReferenceCandidateContent: vi.fn(async () => { throw new Error('No private read in inheritance test') }),
     referenceVideoRuns: vi.fn(async () => ({ schema: 'jason.reference-video-runs.v1' as const,
       projectId: 'p', frameId: 'second', items: [], providerCalls: 0 as const })),
     referenceVideoQuote: vi.fn(async () => { throw new Error('No quote in this test') }),

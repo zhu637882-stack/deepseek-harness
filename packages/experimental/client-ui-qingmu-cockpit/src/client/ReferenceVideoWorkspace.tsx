@@ -20,7 +20,7 @@ export interface ReferenceVideoWorkspaceProps {
   readonly embedded?: boolean
   readonly referenceSources?: readonly { readonly frameId: string; readonly label: string }[]
   readonly onUnsavedChange?: (dirty: boolean) => void
-  readonly port: Pick<QingmuYimengPort, 'referenceVideoAssets' | 'referenceVideoPreview' | 'referenceVideoDraft' | 'saveReferenceVideoDraft' | 'referenceVideoQuote' | 'referenceVideoRuns' | 'queueReferenceVideo'>
+  readonly port: Pick<QingmuYimengPort, 'referenceVideoAssets' | 'readLocalReferenceCandidateContent' | 'referenceVideoPreview' | 'referenceVideoDraft' | 'saveReferenceVideoDraft' | 'referenceVideoQuote' | 'referenceVideoRuns' | 'queueReferenceVideo'>
 }
 
 type Chosen = Omit<ReferenceVideoAsset, 'mediaType'> & { readonly bindingToken: string; readonly mediaType: ReferenceVideoAsset['mediaType'] | 'unavailable' }
@@ -49,8 +49,12 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
   const [saving, setSaving] = useState(false)
   const [draftMessage, setDraftMessage] = useState('正在读取草稿状态…')
   const [inheritFrom, setInheritFrom] = useState(referenceSources?.[0]?.frameId ?? '')
+  const [inspected, setInspected] = useState<ReferenceVideoAsset>()
+  const [localPreview, setLocalPreview] = useState<{ readonly identity: string; readonly url?: string; readonly failed?: boolean }>()
+  const [previewRetry, setPreviewRetry] = useState(0)
   const [inheriting, setInheriting] = useState(false)
   const inheritAbort = useRef<AbortController | undefined>(undefined)
+  const localPreviewAbort = useRef<AbortController | undefined>(undefined)
   const epoch = useRef(0)
   const activeText = useRef<{ index: number; start: number; end: number }>({
     index: 0, start: initialPrompt.length, end: initialPrompt.length,
@@ -69,9 +73,42 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
     return () => {
       controller.abort(); previewAbort.current?.abort(); assetsAbort.current?.abort()
       draftAbort.current?.abort(); saveAbort.current?.abort()
-      inheritAbort.current?.abort()
+      inheritAbort.current?.abort(); localPreviewAbort.current?.abort()
     }
   }, [projectId, frameId, port])
+
+  const inspectedIdentity = inspected === undefined ? '' : `${projectId}:${inspected.assetId}:${inspected.assetSha256}`
+  useEffect(() => {
+    localPreviewAbort.current?.abort()
+    setLocalPreview(undefined)
+    if (inspected?.mediaType !== 'reference_image' || inspected.browserUrl !== '' || inspected.localReferenceScope === undefined) return
+    const controller = new AbortController()
+    localPreviewAbort.current = controller
+    void port.readLocalReferenceCandidateContent({
+      projectId,
+      elementKind: inspected.localReferenceScope.elementKind,
+      targetId: inspected.localReferenceScope.targetId,
+      assetId: inspected.assetId,
+      expectedSha256: inspected.assetSha256,
+    }, controller.signal).then((response) => {
+      if (!controller.signal.aborted) {
+        setLocalPreview({ identity: inspectedIdentity, url: `data:${response.mimeType};base64,${response.contentBase64}` })
+      }
+    }).catch(() => {
+      if (!controller.signal.aborted) setLocalPreview({ identity: inspectedIdentity, failed: true })
+    })
+    return () => { controller.abort() }
+  }, [inspected?.assetId, inspected?.assetSha256, inspected?.browserUrl,
+    inspected?.localReferenceScope?.elementKind, inspected?.localReferenceScope?.targetId, inspected?.mediaType,
+    inspectedIdentity, port, previewRetry, projectId])
+  const inspect = (asset: ReferenceVideoAsset) => {
+    if (asset.mediaType !== 'reference_image' || asset.browserUrl !== '' || asset.localReferenceScope === undefined) return
+    setInspected(asset)
+    setPreviewRetry(0)
+  }
+  const exactAsset = (assetId: string, assetSha256: string) => assets.find(asset => (
+    asset.assetId === assetId && asset.assetSha256 === assetSha256
+  ))
 
   const dirty = epoch.current > 0 && savedEpoch !== epoch.current
   useEffect(() => {
@@ -95,8 +132,11 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
       const added = next.length - chosen.length
       if (added === 0) { setDraftMessage('当前镜头已包含这些引用，文字和参数未改动。'); return }
       invalidate()
-      setChosen(next.map(item => ({ ...item, browserUrl: 'browserUrl' in item ? item.browserUrl
-        : assets.find(asset => asset.assetId === item.assetId && asset.assetSha256 === item.assetSha256)?.browserUrl ?? '' })))
+      setChosen(next.map((item) => {
+        const sourceAsset = exactAsset(item.assetId, item.assetSha256)
+        return { ...item, browserUrl: sourceAsset?.browserUrl ?? '',
+          ...(sourceAsset?.localReferenceScope === undefined ? {} : { localReferenceScope: sourceAsset.localReferenceScope }) }
+      }))
       setDraftMessage(`已沿用${source.label} 的 ${added} 项引用；本镜文字和参数保留，尚未保存。`)
     } catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '沿用引用失败') }
     finally { if (!controller.signal.aborted) setInheriting(false) }
@@ -153,6 +193,12 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
       if (controller.signal.aborted) return
       setAssets(previous => [...previous, ...next.items.filter(item => !previous.some(old =>
         old.assetId === item.assetId && old.assetSha256 === item.assetSha256))])
+      setChosen(previous => previous.map((chosenAsset) => {
+        const catalogAsset = next.items.find(asset => asset.assetId === chosenAsset.assetId
+          && asset.assetSha256 === chosenAsset.assetSha256)
+        return catalogAsset === undefined ? chosenAsset : { ...chosenAsset, browserUrl: catalogAsset.browserUrl,
+          ...(catalogAsset.localReferenceScope === undefined ? {} : { localReferenceScope: catalogAsset.localReferenceScope }) }
+      }))
       setPage(next.page); setPages(next.pages)
     } catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '素材读取失败') }
     finally { if (!controller.signal.aborted) setLoading(false) }
@@ -266,13 +312,37 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
             {asset.browserUrl && (asset.mediaType === 'reference_image'
               ? <img src={asset.browserUrl} alt={asset.label} loading="lazy" />
               : <audio src={asset.browserUrl} controls preload="none" aria-label={asset.label} />)}
+            {!asset.browserUrl && asset.mediaType === 'reference_image' && <div className={css.privateImage}>私有原图</div>}
             <p>{asset.label}</p>
-            <button type="button" disabled={chosen.some(item => item.assetId === asset.assetId)} onClick={() => { choose(asset) }}>加入引用</button>
+            <div className={css.assetActions}>
+              {asset.localReferenceScope !== undefined && asset.browserUrl === '' && <button type="button"
+                onClick={() => { inspect(asset) }}>查看原图</button>}
+              <button type="button" disabled={chosen.some(item => item.assetId === asset.assetId)}
+                onClick={() => { choose(asset) }}>加入引用</button>
+            </div>
           </article>)}
         </div>}
+        {inspected !== undefined && <section className={css.privatePreview} aria-label="本地原图检视">
+          <header><p className={css.kicker}>PRIVATE ORIGINAL</p><button type="button" onClick={() => { setInspected(undefined) }}>关闭原图</button></header>
+          <h5>{inspected.label}</h5>
+          {localPreview?.identity === inspectedIdentity && localPreview.url !== undefined
+            ? <img src={localPreview.url} alt={`${inspected.label} 私有原图`} />
+            : localPreview?.identity === inspectedIdentity && localPreview.failed
+              ? <div role="alert"><p>这张本地原图暂时无法读取。</p><button type="button" onClick={() => { setPreviewRetry(value => value + 1) }}>重新读取原图</button></div>
+              : <p>正在读取这张私有原图。</p>}
+        </section>}
         {chosen.length > 0 && <ol className={css.bindings} aria-label="引用顺序">
           {chosen.map((item, index) => <li key={item.bindingToken}>
-            <strong>{aliases.get(item.bindingToken)}</strong>
+            <strong>{aliases.get(item.bindingToken)} · {item.label}</strong>
+            {(() => {
+              const catalogAsset = exactAsset(item.assetId, item.assetSha256)
+              if (catalogAsset?.localReferenceScope !== undefined && catalogAsset.browserUrl === '') {
+                return <button type="button" onClick={() => { inspect(catalogAsset) }}>查看{aliases.get(item.bindingToken)}</button>
+              }
+              return item.mediaType === 'reference_image' && catalogAsset === undefined
+                ? <small className={css.previewHint}>读取项目素材后可查看原图</small>
+                : null
+            })()}
             <input aria-label={`${aliases.get(item.bindingToken)}名称`} value={item.label} maxLength={128}
               onChange={(event) => {
                 invalidate()

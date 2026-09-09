@@ -4,10 +4,11 @@ import { afterEach, expect, it, vi } from 'vitest'
 import type { ReferenceVideoQuoteRequest, ReferenceVideoQuoteResponse, ReferenceVideoAsset, ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse, ReferenceVideoDraftResponse, SaveReferenceVideoDraftRequest } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import { quoteResponse } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
 import { ReferenceVideoWorkspace } from '../src/client/ReferenceVideoWorkspace.tsx'
+import type { QingmuYimengPort } from '../src/client/contracts.ts'
 
 const assets: ReferenceVideoAsset[] = [
-  { assetId: 'asset_lin', assetSha256: 'a'.repeat(64), label: '林予', mediaType: 'reference_image', browserUrl: '' },
-  { assetId: 'asset_cafe', assetSha256: 'b'.repeat(64), label: '咖啡馆', mediaType: 'reference_image', browserUrl: '' },
+  { assetId: 'asset_lin', assetSha256: 'a'.repeat(64), label: '林予', mediaType: 'reference_image', browserUrl: '', localReferenceScope: { elementKind: 'actor', targetId: 'actor_lin' } },
+  { assetId: 'asset_cafe', assetSha256: 'b'.repeat(64), label: '咖啡馆', mediaType: 'reference_image', browserUrl: '', localReferenceScope: { elementKind: 'scene', targetId: 'scene_cafe' } },
   { assetId: 'asset_voice', assetSha256: 'c'.repeat(64), label: '音色', mediaType: 'reference_audio', browserUrl: '' },
 ]
 const result = {
@@ -23,6 +24,10 @@ function mount() {
       { ...quoteResponse, preview: result } as ReferenceVideoQuoteResponse
     )),
     referenceVideoAssets: vi.fn(async () => ({ projectId: 'p', page: 1, pages: 1, items: assets })),
+    readLocalReferenceCandidateContent: vi.fn<QingmuYimengPort['readLocalReferenceCandidateContent']>(async () => ({
+      schema: 'jason.qingmu-local-reference-candidate-content.v1' as const, assetId: 'asset_lin',
+      sha256: 'a'.repeat(64), mimeType: 'image/png', contentBase64: 'aGVsbG8=',
+    })),
     referenceVideoPreview: vi.fn(async (_request: ReferenceVideoPreviewRequest, _signal?: AbortSignal) => result),
     referenceVideoDraft: vi.fn(async (_request: { projectId: string; frameId: string }, _signal?: AbortSignal) => server),
     saveReferenceVideoDraft: vi.fn(async (request: SaveReferenceVideoDraftRequest, _signal?: AbortSignal) => {
@@ -168,4 +173,52 @@ it('ignores a late quote after editing the source', async () => {
   finish({ ...quoteResponse, preview: result } as ReferenceVideoQuoteResponse)
   await waitFor(() => { expect(screen.getByRole('button', { name: '预览实际请求' }).hasAttribute('disabled')).toBe(false) })
   expect(screen.queryByText(/目录价估算/u)).toBeNull()
+})
+
+
+it('reads one private original only after an explicit inspection and keeps its owner scope private', async () => {
+  const { port } = mount()
+  fireEvent.click(screen.getByRole('button', { name: '读取项目素材' }))
+  await screen.findByText('林予')
+  expect(port.readLocalReferenceCandidateContent).not.toHaveBeenCalled()
+  fireEvent.click(screen.getAllByRole('button', { name: '查看原图' })[0]!)
+  const preview = await screen.findByRole('img', { name: '林予 私有原图' })
+  expect(preview.getAttribute('src')).toBe('data:image/png;base64,aGVsbG8=')
+  expect(port.readLocalReferenceCandidateContent).toHaveBeenCalledWith({
+    projectId: 'p', elementKind: 'actor', targetId: 'actor_lin', assetId: 'asset_lin', expectedSha256: 'a'.repeat(64),
+  }, expect.any(AbortSignal))
+})
+
+it('aborts a previous private original read when the user inspects another image', async () => {
+  const { port } = mount()
+  fireEvent.click(screen.getByRole('button', { name: '读取项目素材' }))
+  await screen.findByText('林予')
+  let firstSignal: AbortSignal | undefined
+  port.readLocalReferenceCandidateContent.mockImplementationOnce((_request, signal) => new Promise<never>(() => {
+    firstSignal = signal
+  }))
+  const inspect = await screen.findAllByRole('button', { name: '查看原图' })
+  fireEvent.click(inspect[0]!)
+  fireEvent.click(inspect[1]!)
+  await waitFor(() => { expect(firstSignal?.aborted).toBe(true) })
+  expect(port.readLocalReferenceCandidateContent).toHaveBeenCalledTimes(2)
+})
+
+it('does not offer a private preview for a restored binding when the current catalog SHA differs', async () => {
+  const { port } = mount()
+  const oldBinding = { assetId: 'asset_lin', assetSha256: 'f'.repeat(64), label: '旧版林予', bindingToken: 'old-lin' }
+  const server = await port.referenceVideoDraft({ projectId: 'p', frameId: 'f' })
+  port.referenceVideoDraft.mockResolvedValue({ ...server, draft: {
+    revision: 1, frameSha256: server.frameSha256, requestSha256: 'd'.repeat(64), savedAt: '2026-09-10T00:00:00Z',
+    request: { frameId: 'f', model: 'wan3.0-video', bindings: [oldBinding], promptParts: [{ text: '旧版' }],
+      parameters: { duration: 8, resolution: '720P', ratio: '16:9', audio: true, prompt_extend: false } },
+  }, mediaTypes: { 'old-lin': 'reference_image' } })
+  fireEvent.click(screen.getByRole('button', { name: '恢复已存草稿（替换当前试排）' }))
+  await screen.findByText('已恢复草稿版本 1。')
+  fireEvent.click(screen.getByRole('button', { name: '读取项目素材' }))
+  await screen.findByText('林予')
+  expect(screen.queryByRole('button', { name: '查看图1' })).toBeNull()
+  expect(screen.getByText('读取项目素材后可查看原图')).toBeTruthy()
+  expect((screen.getAllByRole('button', { name: '加入引用' })[0] as HTMLButtonElement).disabled).toBe(true)
+  expect(port.readLocalReferenceCandidateContent).not.toHaveBeenCalled()
 })
