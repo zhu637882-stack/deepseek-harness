@@ -317,6 +317,15 @@ export function LocalVideoCandidateUpload({ projectId, episodeId, frameId, port,
     } else setError('浏览器仍无法清理本地恢复记录；视频已导入，不会再次提交。')
   }
 
+  const importAnother = () => {
+    if (receipt === undefined || marker !== undefined || cleanupPending || busy) return
+    setReceipt(undefined)
+    setPending(undefined)
+    setNotice('')
+    setError('')
+    setRejected(false)
+  }
+
   return <section className={css.panel} aria-label="导入本地视频对照">
     <header><h3>导入本地视频对照</h3><p>同一候选轨内比较，不会自动采用</p></header>
     {receipt === undefined && marker === undefined && <label className={css.picker}>选择 MP4（1–30 秒，最多 32 MiB）
@@ -338,6 +347,9 @@ export function LocalVideoCandidateUpload({ projectId, episodeId, frameId, port,
       <strong>{receipt.originalFileName}</strong><span>{receipt.durationSec.toFixed(1)} 秒 · {receipt.width} × {receipt.height}{receipt.hasAudio ? ' · 含音频' : ''}</span>
       <p>本地导入，来源待核实，暂不可采用</p>
       {cleanupPending && <div className={css.actions}><button type="button" disabled={busy} onClick={retryCleanup}>重试整理本地记录</button></div>}
+      {!cleanupPending && marker === undefined && !busy && <div className={css.actions}>
+        <button type="button" onClick={importAnother}>导入另一条视频</button>
+      </div>}
     </article>}
     {notice !== '' && <p role="status" className={css.notice}>{notice}</p>}
     {error !== '' && <p role="alert" className={css.error}>{error}</p>}

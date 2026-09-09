@@ -45,9 +45,9 @@ function port(overrides: Record<string, unknown> = {}) {
   }
 }
 
-async function choose(view: ReturnType<typeof render>) {
+async function choose(view: ReturnType<typeof render>, selected = file()) {
   const input = view.container.querySelector('input[type=file]') as HTMLInputElement
-  fireEvent.change(input, { target: { files: [file()] } })
+  fireEvent.change(input, { target: { files: [selected] } })
   await screen.findByRole('button', { name: '导入本镜候选' })
 }
 
@@ -116,6 +116,28 @@ it('persists before one explicit upload, refreshes the existing candidate rail, 
   expect(screen.getByText('本地导入，来源待核实，暂不可采用')).toBeTruthy()
 })
 
+it('allows a second explicit file import after a confirmed receipt clears its exact marker', async () => {
+  const upload = vi.fn(async (request: LocalVideoUploadRequest) => receipt(request))
+  const value = port({ uploadLocalVideoCandidate: upload })
+  const onStored = vi.fn(async () => {})
+  const view = render(<LocalVideoCandidateUpload {...scope} port={value} onStored={onStored} />)
+
+  await choose(view, file('ali-shot-01.mp4'))
+  fireEvent.click(screen.getByRole('button', { name: '导入本镜候选' }))
+  await screen.findByRole('button', { name: '导入另一条视频' })
+  expect(readLocalVideoRecovery(scope)).toBeUndefined()
+
+  fireEvent.click(screen.getByRole('button', { name: '导入另一条视频' }))
+  await choose(view, file('libtv-shot-01.mp4'))
+  fireEvent.click(screen.getByRole('button', { name: '导入本镜候选' }))
+  await screen.findByRole('button', { name: '导入另一条视频' })
+
+  expect(upload).toHaveBeenCalledTimes(2)
+  expect(upload.mock.calls.map(([request]) => request.originalFileName)).toEqual(['ali-shot-01.mp4', 'libtv-shot-01.mp4'])
+  expect(upload.mock.calls[1]?.[0].idempotencyKey).not.toBe(upload.mock.calls[0]?.[0].idempotencyKey)
+  expect(onStored).toHaveBeenCalledTimes(2)
+})
+
 it('recovers an unknown response by GET only and leaves a 404 marker for a later check', async () => {
   const value = port({ uploadLocalVideoCandidate: vi.fn(async () => { throw new Error('connection lost') }) })
   const first = render(<LocalVideoCandidateUpload {...scope} port={value} onStored={vi.fn(async () => {})} />)
@@ -123,6 +145,7 @@ it('recovers an unknown response by GET only and leaves a 404 marker for a later
   fireEvent.click(screen.getByRole('button', { name: '导入本镜候选' }))
   await screen.findByText('导入结果待恢复；系统不会自动再次提交。')
   expect(screen.queryByRole('button', { name: '导入本镜候选' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '导入另一条视频' })).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: '重新检查导入回执' }))
   await screen.findByText('暂未找到本次导入回执，请稍后重新检查；系统不会自动再次提交。')
   expect(value.uploadLocalVideoCandidate).toHaveBeenCalledOnce()
