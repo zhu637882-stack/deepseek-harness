@@ -7,7 +7,7 @@ import { directorConnectionFixture } from './director-connection-fixture.client.
 
 afterEach(() => { cleanup() })
 
-function fixture(read: () => Promise<never>) {
+function fixture(read: () => Promise<unknown>) {
   const transport = directorConnectionFixture()
   const activate = vi.fn(async () => {})
   return {
@@ -44,6 +44,13 @@ it('keeps the explicit recovery action in the compact card', async () => {
   const enter = screen.getByRole('button', { name: '进入 / 恢复青木导演' })
   expect(enter.hasAttribute('disabled')).toBe(false)
   expect(f.activate).not.toHaveBeenCalled()
+})
+
+it('shows a concise connected state in the compact card', async () => {
+  const f = fixture(async () => ({ status: 'mounted', presetId: 'qingmu-director', tools: [], missingTools: [] }))
+  render(<NativeDirectorSession {...f.props} compact />)
+  expect(await screen.findByText('导演已连接')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: '进入 / 恢复青木导演' })).toBeNull()
 })
 
 it('keeps a transport failure actionable without exposing its internal error', async () => {

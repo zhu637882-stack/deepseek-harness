@@ -82,6 +82,7 @@ export function NativeDirectorSession({ port, bridge, sessionId, onRefresh, comp
     }
   }
   if (compact) return <section className={css.session} aria-label="青木原生导演会话">
+    {status?.status === 'mounted' && <p role="status">导演已连接</p>}
     {(!connection || busy || status?.status !== 'mounted') && <>
       <p role="status">{!connection ? '导演暂时离线。' : busy ? '正在进入导演…'
         : sessionId ? '可以进入或恢复导演，再提出修改要求。' : '进入导演后，可以在这里提出创作要求。'}</p>

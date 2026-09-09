@@ -60,6 +60,34 @@ it('opens the explicit natural-person path when Writer requires it, without trea
   expect(api.select).not.toHaveBeenCalled()
 })
 
+it('keeps the identity form out of an empty shot and shows the actual next step', async () => {
+  api.history.mockResolvedValue([])
+  api.state.mockRejectedValueOnce(new FirstFrameSelectionIdentityRequiredError())
+  render(<ShootingFirstFrameHistory {...props} />)
+  expect(await screen.findByText('本镜还没有已落盘的首帧。请返回分镜核对要求后生成首帧。')).toBeTruthy()
+  expect(screen.queryByRole('region', { name: '本人身份确认' })).toBeNull()
+  expect(api.select).not.toHaveBeenCalled()
+})
+
+it('keeps identity recovery available for a pending adoption even after the candidate list is empty', async () => {
+  localStorage.setItem('qingmu:first-frame-adopt:p:e:r:f', JSON.stringify({
+    ...scope, assetId: 'a', expectedMaterializedSha256: 'a'.repeat(64), idempotencyKey: 'first-frame-recover',
+  }))
+  api.history.mockResolvedValue([])
+  api.state.mockRejectedValueOnce(new FirstFrameSelectionIdentityRequiredError())
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    return new Response(JSON.stringify(
+      url.includes('natural-person-identity')
+        ? { schema: 'jason.qingmu-natural-person-identity-status.v1', projectId: 'p', state: 'unbound', naturalPersonId: null, canEnroll: true }
+        : { schema: 'jason.qingmu-platform-human-presence-status.v1', projectId: 'p', state: 'unregistered' },
+    ), { status: 200, headers: { 'content-type': 'application/json' } })
+  }))
+  render(<ShootingFirstFrameHistory {...props} />)
+  expect(await screen.findByRole('region', { name: '本人身份确认' })).toBeTruthy()
+  expect(api.select).not.toHaveBeenCalled()
+})
+
 it('does not approve different bytes returned by a later state read', async () => {
   api.state.mockResolvedValue({ candidates: [{ ...image, materializedSha256: 'b'.repeat(64) }] })
   render(<ShootingFirstFrameHistory {...props} />)

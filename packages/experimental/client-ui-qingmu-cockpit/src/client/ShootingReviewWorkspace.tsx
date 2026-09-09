@@ -280,7 +280,10 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
   const visibleStack = stack?.subject.projectId === projectId && stack.subject.episodeId === episodeId
     && stack.subject.frameId === current.shotId ? stack : undefined
   const versions = visibleStack?.subject.versions ?? []; const browsed = versions.find(version => version.takeId === browseId)
-  const state = testState ?? statusOf(visibleStack, browsed, load); const primary = usable(browsed) && !visibleStack?.subject.selectedTakeId && visibleStack?.capabilities.canSelect === true && !browsed.isSelected && load === 'ready'
+  const state = testState ?? statusOf(visibleStack, browsed, load)
+  const primary = usable(browsed) && browsed.canAttemptSelection && browsed.lineageComplete
+    && !visibleStack?.subject.selectedTakeId && visibleStack?.capabilities.canSelect === true
+    && !browsed.isSelected && load === 'ready'
   const heroUrl = localHeroUrl(heroFrame?.browserUrl, heroFrame?.assetId)
   const dialogue = (current.dialogueRhythm?.cues ?? []).map(cue => cue.verbatimText).filter(Boolean)
   const inspected = inspectedFrame?.key === mediaPaneKey ? inspectedFrame : undefined

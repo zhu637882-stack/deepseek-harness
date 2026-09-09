@@ -23,6 +23,34 @@ const portFixture = {
 const port = portFixture as never
 
 describe('ShootingReviewWorkspace', () => {
+  it.each([
+    { canAttemptSelection: false, lineageComplete: true, allowed: false },
+    { canAttemptSelection: true, lineageComplete: false, allowed: false },
+    { canAttemptSelection: false, lineageComplete: false, allowed: false },
+    { canAttemptSelection: true, lineageComplete: true, allowed: true },
+  ])('requires candidate eligibility as well as playable output: %j', async ({ canAttemptSelection, lineageComplete, allowed }) => {
+    localStorage.clear(); sessionStorage.clear()
+    const candidate = { takeId: 'video-candidate', versionOrdinal: 1, outputAssetId: 'asset-video',
+      outputSha256: 'b'.repeat(64), outputBindingStatus: 'verified', qualityStatus: 'pending',
+      isSelected: false, selectionStatus: 'Unselected', canAttemptSelection, lineageComplete,
+      blockers: [], source: 'reference', durationSec: 8 }
+    const takePreview = vi.fn(() => new Promise(() => {}))
+    const selectTakeVersion = vi.fn()
+    const scopedPort = { takePreview, selectTakeVersion, recoverTakeVersionSelection: vi.fn(),
+      takeVersions: vi.fn(async ({ frameId }: { frameId: string }) => ({
+        subject: { projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', frameId,
+          selectedTakeId: null, versions: [candidate] },
+        capabilities: { canSelect: true }, stackSnapshotSha256: 'a'.repeat(64),
+      })) }
+    render(<ShootingReviewWorkspace projectName="落日公路" episodeName="第 1 集"
+      projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" projection={projection}
+      selectedShotId="frame_34b3741b1f0a" onSelectShotId={vi.fn()} onNavigate={vi.fn()}
+      directorAssistant={null} port={scopedPort as never} t={key => key} />)
+    await waitFor(() => { expect(takePreview).toHaveBeenCalled() })
+    expect(Boolean(screen.queryByRole('button', { name: '采用这条视频' }))).toBe(allowed)
+    expect(selectTakeVersion).not.toHaveBeenCalled()
+  })
+
   it('never substitutes a historical candidate for the selected video poster', () => {
     const older = { takeId:'old', outputSha256:'a'.repeat(64), outputBindingStatus:'verified' }
     const selected = { takeId:'chosen', outputSha256:'b'.repeat(64), outputBindingStatus:'verified' }
