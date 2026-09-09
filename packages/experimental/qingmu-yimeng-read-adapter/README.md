@@ -182,3 +182,5 @@ The `referenceVideoQuote` read prices the exact saved draft through Writer and P
 `referenceVideoRuns` and `referenceVideoRun` recover owner-scoped candidate tasks. The Host checks shot identity, task status and the exact signed media path, then rewrites playback to its configured Writer origin. Only decoded successful results appear as candidates; unknown submissions remain quarantined and no result implies creative acceptance.
 
 The project asset feed now identifies the actual signed media record through `preview_media_id`. Asset IDs and media IDs are independent. Reference catalogs match that exact media path, signature and expiry before rewriting to the configured Writer origin; missing or mismatched media metadata yields a card without a preview URL.
+
+Take stacks accept `source: reference` for candidates registered from a reference-video run. Their existing task and output SHA remain the lineage source; registration does not make a candidate selected or quality-approved. The shared types expose the exact registration request and receipt used by the command adapter.

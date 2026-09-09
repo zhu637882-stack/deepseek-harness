@@ -22,12 +22,17 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
   const { providerCalls: _calls, databaseWrites: _writes, ...materialFields } = materialState
   const prepared = { ...materialFields, requestId: 'composition-prepare-01', assetId: 'asset_lin',
     uploadAttempts: 1, modelCalls: 0, localStateChanged: true }
+  const registration = { schema: 'jason.reference-video-review-registration.v1', projectId: 'p', episodeId: 'e', frameId: 'f',
+    runId: 'refvideo_register', assetId: 'asset_output', assetSha256: 'c'.repeat(64), takeId: `asset_reftake_${'d'.repeat(32)}`,
+    providerCalls: 0, selectionChanged: false, formalApprovalChanged: false }
+  const registrationRequest = { projectId: 'p', frameId: 'f', runId: registration.runId,
+    assetId: registration.assetId, expectedAssetSha256: registration.assetSha256 }
   const requests: { url: string | undefined; method: string | undefined; authorization: string | undefined; body: string }[] = []
   const upstream = createServer(async (req, res) => {
     let body = ''
     for await (const chunk of req) body += String(chunk)
     requests.push({ url: req.url, method: req.method, authorization: req.headers.authorization, body })
-    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(req.url?.endsWith('/prepare') ? prepared
+    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(req.url?.includes('/review-registration') ? registration : req.url?.endsWith('/prepare') ? prepared
       : req.url?.includes('/materials') ? materialState : req.url?.includes('/runs') ? runResponse : req.url?.endsWith('/quote') ? quoteResponse : req.url?.includes('/drafts/') ? savedDraft : response))
   })
   await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve))
@@ -118,6 +123,16 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
     expect((await materialPrepare.json()).result).toEqual({ ok: true, value: prepared })
     expect(requests.slice(-3).map(r => r.method)).toEqual(['GET', 'POST', 'GET'])
     expect(requests.slice(-3).every(r => r.authorization === 'Bearer fixture-owner-token')).toBe(true)
+    for (const method of ['registerReferenceVideoCandidateForReview', 'readReferenceVideoCandidateRegistration']) {
+      const registered = await fetch(`http://127.0.0.1:${ctx.webServer.port}/qingmu-yimeng-command/${method}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ type: 'client-request', rpcId: method, method, payload: registrationRequest }),
+      })
+      expect((await registered.json()).result).toEqual({ ok: true, value: registration })
+    }
+    expect(requests.slice(-2).map(r => r.method)).toEqual(['POST', 'GET'])
+    expect(requests.slice(-2).every(r => r.authorization === 'Bearer fixture-owner-token')).toBe(true)
+    expect(requests.at(-2)?.body).toBe(JSON.stringify({ expectedAssetSha256: registration.assetSha256 }))
   } finally {
     await ctx.fiber.dispose(); upstream.closeAllConnections()
     await new Promise<void>(resolve => upstream.close(() => { resolve() }))

@@ -90,7 +90,7 @@ export function parseTakeVersionReadRequest(payload: unknown): YimengTakeVersion
 function version(value: unknown, ordinal: number): YimengTakeVersion {
   const item = exact(value, VERSION_FIELDS, `versions[${String(ordinal - 1)}]`)
   const source = item.source
-  if (source !== 'initial' && source !== 'regenerate' && source !== 'repair' && source !== 'segment') {
+  if (source !== 'initial' && source !== 'regenerate' && source !== 'repair' && source !== 'segment' && source !== 'reference') {
     throw new Error('take versions: source is invalid')
   }
   const outputBindingStatus = item.outputBindingStatus

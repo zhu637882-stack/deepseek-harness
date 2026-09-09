@@ -187,7 +187,7 @@ function version(
   const error = helpers.responseError
   const item = exact(value, VERSION_FIELDS, `authoritativeStack.versions[${String(ordinal - 1)}]`, error)
   const source = item.source
-  if (source !== 'initial' && source !== 'regenerate' && source !== 'repair' && source !== 'segment') {
+  if (source !== 'initial' && source !== 'regenerate' && source !== 'repair' && source !== 'segment' && source !== 'reference') {
     throw error('authoritativeStack version source mismatch')
   }
   const binding = item.outputBindingStatus

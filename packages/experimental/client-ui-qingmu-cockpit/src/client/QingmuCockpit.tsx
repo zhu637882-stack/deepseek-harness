@@ -212,6 +212,12 @@ export function QingmuCockpit({
   const directorDirty = useRef(false)
   const onDirectorDirty = useCallback((dirty: boolean) => { directorDirty.current = dirty }, [])
   const mayLeaveDirector = (): boolean => !directorDirty.current || window.confirm(t('directorLeaveConfirm'))
+  const openCandidateReview = (frameId: string) => {
+    if (!mayLeaveDirector()) return
+    setSelectedShotId(frameId)
+    setCreating(false)
+    setTab('shots')
+  }
   useEffect(() => {
     if (!applicationShell) return
     const changed = () => {
@@ -815,6 +821,7 @@ export function QingmuCockpit({
       {projectId !== '' && episodeId !== ''
         ? <DirectorWorkspace projectId={projectId} episodeId={episodeId} projection={projection}
           shotItems={shotItems} selectedShotId={selectedShotId} onSelectShotId={(id) => { if (mayLeaveDirector()) setSelectedShotId(id) }}
+          onOpenShooting={openCandidateReview}
           onUnsavedChange={onDirectorDirty} port={port} directorBridge={directorBridge}
           directorSessionId={directorSessionId} directorConnection={nativeDirectorSession?.connection} directorRefresh={directorRefresh}
           nativeDirectorSession={nativeDirectorSession}

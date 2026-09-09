@@ -244,3 +244,5 @@ After saving and pricing a draft, the director can explicitly queue one candidat
 ## Unified creative workspace
 
 The full Qingmu application shares one project/episode scope and five creative stages: story, assets, storyboard, shooting, and delivery. Stage navigation keeps the existing unsaved-reference guard. The asset library reads real project image/audio capabilities and previews them without adopting them; the scene desk remains the primary storyboard surface. Shooting keeps its media-first layout. Delivery foregrounds the shot list and export availability, with returned-master and archival tools in expandable sections. Mobile project/settings actions remain available through the tools menu. These changes reuse the current DSH and Writer contracts and add no generation calls or dependencies.
+
+A successful reference-video result exposes “加入本镜候选审看”. The UI first reads its exact registration state, then permits one explicit registration. An uncertain write offers receipt recovery without automatic replay. A verified receipt opens “拍摄与审看” on the same shot; adding the candidate does not adopt it.

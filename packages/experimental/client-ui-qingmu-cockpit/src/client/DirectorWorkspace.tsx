@@ -23,6 +23,7 @@ export interface DirectorWorkspaceProps {
   readonly shotItems: readonly unknown[]
   readonly selectedShotId: string
   readonly onSelectShotId: (id: string) => void
+  readonly onOpenShooting?: ((shotId: string) => void) | undefined
   readonly onUnsavedChange: (dirty: boolean) => void
   readonly onCommitted: () => Promise<YimengWorkflowProjection | undefined>
   readonly port: QingmuYimengPort
@@ -78,7 +79,7 @@ export function DirectorWorkspace(props: DirectorWorkspaceProps) {
     {props.presentation !== 'assistant' && currentProjection?.director.shotRelations && <SceneReferenceWorkspace
       projectId={props.projectId} relations={currentProjection.director.shotRelations}
       selectedShotId={props.selectedShotId} onSelectShotId={selectShot} guardUnsavedNavigation={false}
-      onUnsavedChange={setReferenceDirty} port={props.port} />}
+      onUnsavedChange={setReferenceDirty} onOpenShooting={props.onOpenShooting} port={props.port} />}
     {props.presentation === 'assistant' ? planning : <details open={!hasPlannedShots || planningOpen || planningDirty}
       onToggle={(event) => { if (hasPlannedShots && !planningDirty) setPlanningOpen(event.currentTarget.open) }}>
       <summary>场景规划与导演助手</summary>

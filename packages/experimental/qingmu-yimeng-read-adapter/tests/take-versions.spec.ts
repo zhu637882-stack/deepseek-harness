@@ -28,6 +28,13 @@ describe('Take/version read-only stack', () => {
     expect(JSON.stringify(feed)).not.toMatch(/(?:url|localPath|mediaPath)/iu)
   })
 
+  it('accepts a reference run candidate in the canonical stack', () => {
+    const feed = takeVersionStackFixture()
+    const subject = { ...feed.subject, versions: feed.subject.versions.map(v => ({ ...v, source: 'reference' as const })) }
+    const value = { ...feed, subject, stackSnapshotSha256: takeVersionSha(subject) }
+    expect(normalize(value)).toEqual(value)
+  })
+
   it('keeps an incomplete-lineage candidate visible but rejects a selectable projection', () => {
     const feed = structuredClone(takeVersionStackFixture()) as unknown as MutableObject
     const subject = mutable(feed.subject)

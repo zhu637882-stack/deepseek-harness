@@ -1,3 +1,4 @@
+import { prepareReferenceVideoReview } from './reference-video-review.ts'
 /** Loopback-only Host boundary for explicit Yimeng ChangeSet commands. */
 
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
@@ -5838,6 +5839,11 @@ export function createYimengCommandHandler(
         normalize = prepared.normalize
       } else if (['readScenePlanning', 'saveScenePlanning', 'recoverScenePlanning'].includes(endpoint)) {
         const prepared = prepareScenePlanning(endpoint, payload, stageArtifactHelpers)
+        path = prepared.path
+        requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
+        normalize = prepared.normalize
+      } else if (['registerReferenceVideoCandidateForReview', 'readReferenceVideoCandidateRegistration'].includes(endpoint)) {
+        const prepared = prepareReferenceVideoReview(endpoint, payload, stageArtifactHelpers)
         path = prepared.path
         requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
         normalize = prepared.normalize

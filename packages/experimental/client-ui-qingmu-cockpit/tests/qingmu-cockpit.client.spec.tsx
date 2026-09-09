@@ -630,6 +630,12 @@ function shotRelationMethod(request: Parameters<QingmuYimengPort['shotRelationMe
 
 function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
   const base: QingmuYimengPort = {
+    readReferenceVideoCandidateRegistration: vi.fn<QingmuYimengPort['readReferenceVideoCandidateRegistration']>(async () => {
+      throw new Error('Candidate registration uses a separate fixture')
+    }),
+    registerReferenceVideoCandidateForReview: vi.fn<QingmuYimengPort['registerReferenceVideoCandidateForReview']>(async () => {
+      throw new Error('Candidate registration uses a separate fixture')
+    }),
     readReferenceVideoMaterials: vi.fn(async () => { throw new Error('Materials use a separate fixture') }),
     prepareReferenceVideoMaterial: vi.fn(async () => { throw new Error('Materials use a separate fixture') }),
     referenceVideoDraft: vi.fn<QingmuYimengPort['referenceVideoDraft']>(async request => ({ schema: 'jason.reference-video-draft.v1',

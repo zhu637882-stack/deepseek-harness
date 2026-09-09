@@ -1454,7 +1454,7 @@ export type YimengRecoverTakeVersionSelectionRequest = YimengSelectTakeVersionRe
 export interface YimengTakeSelectionVersion {
   readonly takeId: string
   readonly versionOrdinal: number
-  readonly source: 'initial' | 'regenerate' | 'repair' | 'segment'
+  readonly source: 'initial' | 'regenerate' | 'repair' | 'segment' | 'reference'
   readonly role: string
   readonly createdAt: string
   readonly updatedAt: string
@@ -2981,6 +2981,8 @@ export interface YimengReworkRouteAuthorityProbe {
 
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
+  readonly registerReferenceVideoCandidateForReview: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types').ReferenceVideoCandidateRegistration
+  readonly readReferenceVideoCandidateRegistration: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types').ReferenceVideoCandidateRegistration
   readonly prepareReferenceVideoMaterial: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types').ReferenceVideoMaterialPreparationResult
   readonly readDialogueEditCapability: {
     readonly schema: 'qingmu.dialogue-transaction-capability.v1'

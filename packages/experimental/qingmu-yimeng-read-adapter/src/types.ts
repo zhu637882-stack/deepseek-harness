@@ -741,7 +741,7 @@ export interface YimengTakePreviewResponse extends YimengTakeVersionRequest {
 export interface YimengTakeVersion {
   readonly takeId: string
   readonly versionOrdinal: number
-  readonly source: 'initial' | 'regenerate' | 'repair' | 'segment'
+  readonly source: 'initial' | 'regenerate' | 'repair' | 'segment' | 'reference'
   readonly role: string
   readonly createdAt: string
   readonly updatedAt: string

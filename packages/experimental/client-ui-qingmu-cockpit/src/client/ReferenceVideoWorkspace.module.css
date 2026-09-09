@@ -73,6 +73,9 @@
 .taskMeta { margin:6px 0 12px; color:var(--workspace-muted); font-size:12px; }
 .candidate video { display:block; width:100%; max-height:320px; border-radius:9px; background:#05070a; }
 .reviewNote { color:var(--workspace-muted); }
+.candidateRegistration { display:flex; align-items:flex-start; flex-wrap:wrap; gap:9px; margin-top:10px; padding-top:10px; border-top:1px solid var(--workspace-line); }
+.candidateRegistration p { flex:1 1 230px; margin:0; color:var(--workspace-muted); font-size:13px; }
+.candidateRegistration [role='alert'] { color:#f0cf9e; }
 .requestPreview { margin-top:16px; padding:16px; }
 .requestPreview .compiled { margin-block:12px; padding:14px; border-radius:9px; background:#090d12; color:#e7f0f8; }
 .note { color:var(--workspace-muted); font-size:13px; }

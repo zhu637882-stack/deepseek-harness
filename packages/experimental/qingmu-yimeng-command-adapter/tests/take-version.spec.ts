@@ -114,6 +114,15 @@ function response(value: unknown, status = 200): Response {
 const signal = () => new AbortController().signal
 
 describe('Take version selection command transport', () => {
+  it('accepts a reference source in the existing selection receipt', async () => {
+    const input = request()
+    const old = result(input)
+    const authoritativeStack = { ...old.authoritativeStack, versions: old.authoritativeStack.versions.map(v => ({ ...v, source: 'reference' as const })) }
+    const expected = { ...old, authoritativeStack, authoritativeStackSnapshotSha256: sha(authoritativeStack) }
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => response(expected))
+    expect(await handler(fetch)('selectTakeVersion', input, signal())).toEqual({ ok: true, value: expected })
+  })
+
   it.each([201, 200])('sends one exact selection POST on HTTP %s and verifies the natural-person receipt', async (status) => {
     const input = request()
     const expected = { ...result(input), deduplicated: status === 200 }

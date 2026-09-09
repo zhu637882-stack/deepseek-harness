@@ -779,7 +779,7 @@ function TakeCard({
 }) {
   const selectionAllowed = canSelect && version.canAttemptSelection && version.lineageComplete && !busy
   return <article className={css.take} data-selected={version.isSelected ? 'true' : 'false'}>
-    <header><div><strong>v{version.versionOrdinal}</strong><span>{version.source}</span></div>
+    <header><div><strong>v{version.versionOrdinal}</strong><span>{{ initial: '初次生成', regenerate: '重新生成', repair: '局部修复', segment: '分段生成', reference: '参考素材生成' }[version.source]}</span></div>
       {version.isSelected && <mark>{t('takeVersionSelectedBadge')}</mark>}</header>
     {preview}
     <details open={!readOnly}><summary>{t('takeVersionEvidence')}</summary><dl>

@@ -1,3 +1,4 @@
+import type { ReferenceVideoCandidateRegistrationRequest, ReferenceVideoCandidateRegistration } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { ReferenceVideoMaterialsRequest, ReferenceVideoMaterialsState, PrepareReferenceVideoMaterialRequest, ReferenceVideoMaterialPreparationResult } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { QueueReferenceVideoRequest, ReferenceVideoRun, ReferenceVideoRunsResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { ReferenceVideoQuoteRequest, ReferenceVideoQuoteResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
@@ -581,6 +582,12 @@ export interface QingmuProductionTakeIntent extends Omit<YimengQueueProductionTa
 
 /** Read-only browser-facing methods exposed by the Qingmu Host adapter. */
 export interface QingmuYimengReadPort {
+  registerReferenceVideoCandidateForReview(
+    request: ReferenceVideoCandidateRegistrationRequest, signal?: AbortSignal,
+  ): Promise<ReferenceVideoCandidateRegistration>
+  readReferenceVideoCandidateRegistration(
+    request: ReferenceVideoCandidateRegistrationRequest, signal?: AbortSignal,
+  ): Promise<ReferenceVideoCandidateRegistration>
   readReferenceVideoMaterials(request: ReferenceVideoMaterialsRequest, signal?: AbortSignal): Promise<ReferenceVideoMaterialsState>
   prepareReferenceVideoMaterial(
     request: PrepareReferenceVideoMaterialRequest, signal?: AbortSignal,

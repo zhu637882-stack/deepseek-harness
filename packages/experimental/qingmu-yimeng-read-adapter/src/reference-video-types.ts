@@ -247,3 +247,26 @@ export interface ReferenceVideoMaterialPreparationResult extends Omit<ReferenceV
   readonly requestId: string
   readonly assetId: string
 }
+
+/** Exact generated output to register in the existing shot review stack. */
+export interface ReferenceVideoCandidateRegistrationRequest {
+  readonly projectId: string
+  readonly frameId: string
+  readonly runId: string
+  readonly assetId: string
+  readonly expectedAssetSha256: string
+}
+/** Registration retains source lineage; it grants no selection or approval. */
+export interface ReferenceVideoCandidateRegistration {
+  readonly schema: 'jason.reference-video-review-registration.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly runId: string
+  readonly assetId: string
+  readonly assetSha256: string
+  readonly takeId: string | null
+  readonly providerCalls: 0
+  readonly selectionChanged: false
+  readonly formalApprovalChanged: false
+}

@@ -19,14 +19,14 @@ it('keeps generation paused after an unreadable local receipt even when status r
   render(<ReferenceVideoRuns {...scope} port={port} quote={quoteResponse} />)
   await screen.findByRole('alert')
   fireEvent.click(screen.getByRole('button', { name: '刷新任务状态' }))
-  await waitFor(() => expect(port.referenceVideoRuns).toHaveBeenCalledTimes(2))
+  await waitFor(() => { expect(port.referenceVideoRuns).toHaveBeenCalledTimes(2) })
   expect(screen.getByRole('button', { name: '生成 1 个视频 · 上限 ¥4.80' }).hasAttribute('disabled')).toBe(true)
   expect(port.queueReferenceVideo).not.toHaveBeenCalled()
 })
 it('requires a quote, then confirms exactly its cost and version once despite repeated clicks', async () => {
   const port = ports()
   const view = render(<ReferenceVideoRuns {...scope} port={port} />)
-  await waitFor(() => expect(port.referenceVideoRuns).toHaveBeenCalledOnce())
+  await waitFor(() => { expect(port.referenceVideoRuns).toHaveBeenCalledOnce() })
   expect(screen.getByRole('button', { name: '生成 1 个视频' }).hasAttribute('disabled')).toBe(true)
   view.rerender(<ReferenceVideoRuns {...scope} port={port} quote={quoteResponse} />)
   const button = screen.getByRole('button', { name: '生成 1 个视频 · 上限 ¥4.80' })
@@ -42,12 +42,12 @@ it('requires a quote, then confirms exactly its cost and version once despite re
 it('retains an uncertain command across remount and explicitly replays the same id and quote', async () => {
   const port = ports(); port.queueReferenceVideo.mockRejectedValueOnce(new Error('lost response'))
   const view = render(<ReferenceVideoRuns {...scope} port={port} quote={quoteResponse} />)
-  await waitFor(() => expect(screen.getByRole('button', { name: '生成 1 个视频 · 上限 ¥4.80' }).hasAttribute('disabled')).toBe(false))
+  await waitFor(() => { expect(screen.getByRole('button', { name: '生成 1 个视频 · 上限 ¥4.80' }).hasAttribute('disabled')).toBe(false) })
   fireEvent.click(screen.getByRole('button', { name: '生成 1 个视频 · 上限 ¥4.80' }))
   await screen.findByText('提交结果尚未确认。先刷新状态；再次确认会使用同一个请求编号。')
   const original = port.queueReferenceVideo.mock.calls[0]?.[0]
   view.unmount(); render(<ReferenceVideoRuns {...scope} port={port} />)
-  await waitFor(() => expect(screen.getByRole('button', { name: '确认上次提交 · 上限 ¥4.80' }).hasAttribute('disabled')).toBe(false))
+  await waitFor(() => { expect(screen.getByRole('button', { name: '确认上次提交 · 上限 ¥4.80' }).hasAttribute('disabled')).toBe(false) })
   expect(port.queueReferenceVideo).toHaveBeenCalledOnce()
   fireEvent.click(screen.getByRole('button', { name: '确认上次提交 · 上限 ¥4.80' }))
   await screen.findByText('已登记这次生成，可刷新查看进度。')
@@ -76,4 +76,64 @@ it('plays returned candidates without adoption and blocks new requests while a r
   await screen.findByText('草稿版本 1 · 提交结果待核实')
   expect(screen.getByRole('button', { name: '生成 1 个视频 · 上限 ¥4.80' }).hasAttribute('disabled')).toBe(true)
   expect(port.queueReferenceVideo).not.toHaveBeenCalled()
+})
+
+function candidateRegistration(takeId: string | null) {
+  return {
+    schema: 'jason.reference-video-review-registration.v1' as const,
+    projectId: 'p', episodeId: 'e', frameId: 'f', runId: runResponse.runId,
+    assetId: 'asset_video', assetSha256: 'c'.repeat(64), takeId,
+    providerCalls: 0 as const, selectionChanged: false as const, formalApprovalChanged: false as const,
+  }
+}
+
+it('reads a generated candidate first, registers it explicitly, then opens the same shot for review', async () => {
+  const completed: ReferenceVideoRun = {
+    ...runResponse, kernelStatus: 'Succeeded', publicStatus: 'succeeded',
+    candidates: [{ assetId: 'asset_video', assetSha256: 'c'.repeat(64), mediaId: 'media_video', browserUrl: '/fixture.mp4', reviewStatus: 'pending' }],
+  }
+  const port = {
+    ...ports([completed]),
+    readReferenceVideoCandidateRegistration: vi.fn(async () => candidateRegistration(null)),
+    registerReferenceVideoCandidateForReview: vi.fn(async () => candidateRegistration('take_candidate_01')),
+  }
+  const open = vi.fn()
+  render(<ReferenceVideoRuns {...scope} port={port} onOpenShooting={open} />)
+  const join = await screen.findByRole('button', { name: '加入本镜候选审看' })
+  expect(port.readReferenceVideoCandidateRegistration).toHaveBeenCalledWith({
+    projectId: 'p', frameId: 'f', runId: runResponse.runId, assetId: 'asset_video', expectedAssetSha256: 'c'.repeat(64),
+  }, expect.any(AbortSignal))
+  fireEvent.click(join)
+  await screen.findByText('已加入本镜候选审看。尚未采用，请在拍摄与审看中比较后决定。')
+  expect(port.registerReferenceVideoCandidateForReview).toHaveBeenCalledOnce()
+  expect(port.registerReferenceVideoCandidateForReview).toHaveBeenCalledWith({
+    projectId: 'p', frameId: 'f', runId: runResponse.runId, assetId: 'asset_video', expectedAssetSha256: 'c'.repeat(64),
+  }, expect.any(AbortSignal))
+  expect(screen.queryByRole('button', { name: /采用/ })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '打开拍摄与审看' }))
+  expect(open).toHaveBeenCalledWith('f')
+})
+
+it('only reads after an unknown registration result, then requires a new explicit click to retry', async () => {
+  const completed: ReferenceVideoRun = {
+    ...runResponse, kernelStatus: 'Succeeded', publicStatus: 'succeeded',
+    candidates: [{ assetId: 'asset_video', assetSha256: 'c'.repeat(64), mediaId: 'media_video', browserUrl: '/fixture.mp4', reviewStatus: 'pending' }],
+  }
+  const port = {
+    ...ports([completed]),
+    readReferenceVideoCandidateRegistration: vi.fn(async () => candidateRegistration(null)),
+    registerReferenceVideoCandidateForReview: vi.fn()
+      .mockRejectedValueOnce(new Error('connection_lost'))
+      .mockResolvedValueOnce(candidateRegistration('take_candidate_01')),
+  }
+  render(<ReferenceVideoRuns {...scope} port={port} />)
+  fireEvent.click(await screen.findByRole('button', { name: '加入本镜候选审看' }))
+  await screen.findByText('登记结果尚未确认。请先读取登记状态；不会自动再次登记。')
+  expect(port.registerReferenceVideoCandidateForReview).toHaveBeenCalledOnce()
+  fireEvent.click(screen.getByRole('button', { name: '读取登记状态' }))
+  await screen.findByRole('button', { name: '加入本镜候选审看' })
+  expect(port.registerReferenceVideoCandidateForReview).toHaveBeenCalledOnce()
+  fireEvent.click(screen.getByRole('button', { name: '加入本镜候选审看' }))
+  await screen.findByText('已加入本镜候选审看。尚未采用，请在拍摄与审看中比较后决定。')
+  expect(port.registerReferenceVideoCandidateForReview).toHaveBeenCalledTimes(2)
 })

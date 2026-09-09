@@ -21,7 +21,8 @@ export interface ReferenceVideoWorkspaceProps {
   readonly embedded?: boolean
   readonly referenceSources?: readonly { readonly frameId: string; readonly label: string }[]
   readonly onUnsavedChange?: (dirty: boolean) => void
-  readonly port: Pick<QingmuYimengPort, 'referenceVideoAssets' | 'readLocalReferenceCandidateContent' | 'referenceVideoPreview' | 'referenceVideoDraft' | 'saveReferenceVideoDraft' | 'referenceVideoQuote' | 'referenceVideoRuns' | 'queueReferenceVideo'> & PrivateReferencePreviewPort & Partial<Pick<QingmuYimengPort, 'readReferenceVideoMaterials' | 'prepareReferenceVideoMaterial'>>
+  readonly onOpenShooting?: ((frameId: string) => void) | undefined
+  readonly port: Pick<QingmuYimengPort, 'referenceVideoAssets' | 'readLocalReferenceCandidateContent' | 'referenceVideoPreview' | 'referenceVideoDraft' | 'saveReferenceVideoDraft' | 'referenceVideoQuote' | 'referenceVideoRuns' | 'queueReferenceVideo'> & PrivateReferencePreviewPort & Partial<Pick<QingmuYimengPort, 'readReferenceVideoMaterials' | 'prepareReferenceVideoMaterial' | 'readReferenceVideoCandidateRegistration' | 'registerReferenceVideoCandidateForReview'>>
 }
 
 type Chosen = Omit<ReferenceVideoAsset, 'mediaType'> & { readonly bindingToken: string; readonly mediaType: ReferenceVideoAsset['mediaType'] | 'unavailable' }
@@ -56,7 +57,7 @@ function materialStatusText(material: ReferenceVideoMaterialsState['materials'][
  * @returns Director reference editor.
  */
 export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, port,
-  shotLabel, initialOpen, embedded, referenceSources, onUnsavedChange }: ReferenceVideoWorkspaceProps) {
+  shotLabel, initialOpen, embedded, referenceSources, onUnsavedChange, onOpenShooting }: ReferenceVideoWorkspaceProps) {
   const [assets, setAssets] = useState<readonly ReferenceVideoAsset[]>([])
   const [page, setPage] = useState(0)
   const [pages, setPages] = useState(1)
@@ -544,7 +545,8 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
           <p className={css.note}>这是当前核对的请求。生成进度见候选视频区。</p>
           <details><summary>查看引用版本与完整请求</summary><pre>{JSON.stringify(result, null, 2)}</pre></details>
         </section>}
-        <ReferenceVideoRuns projectId={projectId} frameId={frameId} quote={quoteResult} port={port} />
+        <ReferenceVideoRuns projectId={projectId} frameId={frameId} quote={quoteResult}
+          port={port} onOpenShooting={onOpenShooting} />
       </aside>
     </div>
     {error && <p role="alert">{error}</p>}
