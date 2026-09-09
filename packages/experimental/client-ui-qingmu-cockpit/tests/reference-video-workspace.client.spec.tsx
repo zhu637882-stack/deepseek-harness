@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
-import type { ReferenceVideoAsset, ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse, ReferenceVideoDraftResponse, SaveReferenceVideoDraftRequest } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
+import type { ReferenceVideoQuoteRequest, ReferenceVideoQuoteResponse, ReferenceVideoAsset, ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse, ReferenceVideoDraftResponse, SaveReferenceVideoDraftRequest } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
+import { quoteResponse } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
 import { ReferenceVideoWorkspace } from '../src/client/ReferenceVideoWorkspace.tsx'
 
 const assets: ReferenceVideoAsset[] = [
@@ -16,6 +17,9 @@ const result = {
 function mount() {
   let server: ReferenceVideoDraftResponse = { schema: 'jason.reference-video-draft.v1', projectId: 'p', frameId: 'f', frameSha256: 'f'.repeat(64), draft: null, mediaTypes: {}, providerCalls: 0, generationQueued: false }
   const port = {
+    referenceVideoQuote: vi.fn(async (_request: ReferenceVideoQuoteRequest, _signal?: AbortSignal) => (
+      { ...quoteResponse, preview: result } as ReferenceVideoQuoteResponse
+    )),
     referenceVideoAssets: vi.fn(async () => ({ projectId: 'p', page: 1, pages: 1, items: assets })),
     referenceVideoPreview: vi.fn(async (_request: ReferenceVideoPreviewRequest, _signal?: AbortSignal) => result),
     referenceVideoDraft: vi.fn(async (_request: { projectId: string; frameId: string }, _signal?: AbortSignal) => server),
@@ -132,4 +136,34 @@ it('aborts a pending preview on edit and ignores its late result', async () => {
   resolve(result)
   await waitFor(() => { expect(screen.getByRole('button', { name: '预览实际请求' }).hasAttribute('disabled')).toBe(false) })
   expect(screen.queryByRole('region', { name: '阿里请求预览' })).toBeNull()
+})
+
+
+it('prices only saved current edits and clears the quote when duration changes', async () => {
+  const { port } = mount(); await chooseAll()
+  const quote = () => screen.getByRole('button', { name: '估算已存草稿费用' })
+  expect(quote().hasAttribute('disabled')).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: '保存引用草稿' }))
+  await screen.findByText('已保存草稿版本 1。')
+  fireEvent.click(quote())
+  await screen.findByText(/目录价估算 ¥4.80/u)
+  expect(port.referenceVideoQuote.mock.calls[0]?.[0].draftRevision).toBe(1)
+  expect(port.referenceVideoQuote.mock.calls[0]?.[0].parameters.duration).toBe(8)
+  fireEvent.change(screen.getByLabelText('时长（秒）'), { target: { value: '12' } })
+  expect(screen.queryByText(/目录价估算/u)).toBeNull()
+  expect(quote().hasAttribute('disabled')).toBe(true)
+  expect(port.referenceVideoPreview).not.toHaveBeenCalled()
+})
+
+it('ignores a late quote after editing the source', async () => {
+  const { port } = mount(); await chooseAll()
+  fireEvent.click(screen.getByRole('button', { name: '保存引用草稿' }))
+  await screen.findByText('已保存草稿版本 1。')
+  let finish!: (value: ReferenceVideoQuoteResponse) => void
+  port.referenceVideoQuote.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+  fireEvent.click(screen.getByRole('button', { name: '估算已存草稿费用' }))
+  fireEvent.change(screen.getByRole('textbox', { name: '视频描述片段1' }), { target: { value: 'new action' } })
+  finish({ ...quoteResponse, preview: result } as ReferenceVideoQuoteResponse)
+  await waitFor(() => { expect(screen.getByRole('button', { name: '预览实际请求' }).hasAttribute('disabled')).toBe(false) })
+  expect(screen.queryByText(/目录价估算/u)).toBeNull()
 })

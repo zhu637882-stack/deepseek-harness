@@ -106,3 +106,42 @@ export interface SaveReferenceVideoDraftRequest {
   readonly expectedFrameSha256: string
   readonly request: Omit<ReferenceVideoPreviewRequest, 'projectId'>
 }
+
+/** The displayed editor must still match this persisted version before pricing. */
+export interface ReferenceVideoQuoteRequest extends ReferenceVideoPreviewRequest {
+  readonly draftRevision: number
+  readonly draftRequestSha256: string
+}
+
+/** Read-only list-price estimate bound to the actual saved request. */
+export interface ReferenceVideoQuoteResponse {
+  readonly schema: 'jason.reference-video-quote.v1'
+  readonly projectId: string
+  readonly frameId: string
+  readonly draftRevision: number
+  readonly draftRequestSha256: string
+  readonly sourceSha256: string
+  readonly quoteSha256: string
+  readonly preview: ReferenceVideoPreviewResponse
+  readonly cost: {
+    readonly provider: 'dashscope'
+    readonly region: 'cn-beijing'
+    readonly currency: 'CNY'
+    readonly basis: 'catalog_list_price'
+    readonly unit: 'second'
+    readonly unitPriceCny: string
+    readonly billableSeconds: number
+    readonly estimatedCny: string
+    readonly candidateCount: 1
+    readonly maxAttempts: 1
+    readonly accountDiscountApplied: false
+    readonly pricingSha256: string
+    readonly pricingCheckedAt: string
+    readonly sourceUrl: 'https://help.aliyun.com/zh/model-studio/model-pricing'
+  }
+  readonly readOnly: true
+  readonly providerCalls: 0
+  readonly databaseWrites: 0
+  readonly budgetReservedCny: 0
+  readonly generationQueued: false
+}

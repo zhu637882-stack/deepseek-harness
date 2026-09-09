@@ -1,3 +1,4 @@
+import type { ReferenceVideoQuoteResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { ReferenceVideoAssetsResponse, ReferenceVideoPreviewResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { ReferenceVideoDraftResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 /** Qingmu OS production cockpit registration. */
@@ -242,6 +243,7 @@ export function apply(ctx: ClientContext): void {
     takeVersions: (request, signal) => read<YimengTakeVersionStackResponse>('takeVersions', request, signal),
     referenceVideoAssets: (request, signal) => read<ReferenceVideoAssetsResponse>('referenceVideoAssets', request, signal),
     referenceVideoPreview: (request, signal) => read<ReferenceVideoPreviewResponse>('referenceVideoPreview', request, signal),
+    referenceVideoQuote: (request, signal) => read<ReferenceVideoQuoteResponse>('referenceVideoQuote', request, signal),
     referenceVideoDraft: (request, signal) => read<ReferenceVideoDraftResponse>('referenceVideoDraft', request, signal),
     saveReferenceVideoDraft: (request, signal) => command<ReferenceVideoDraftResponse>('saveReferenceVideoDraft', request, signal),
     takePreview: (request, signal) => read<YimengTakePreviewResponse>('takePreview', request, signal),

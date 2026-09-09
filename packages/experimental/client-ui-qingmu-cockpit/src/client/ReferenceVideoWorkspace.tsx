@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import type {
   ReferenceVideoAsset, ReferenceVideoParameters, ReferenceVideoPreviewResponse, ReferenceVideoPromptPart,
   ReferenceVideoDraftResponse,
+  ReferenceVideoQuoteResponse,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
 import css from './ReferenceVideoWorkspace.module.css'
@@ -12,7 +13,7 @@ export interface ReferenceVideoWorkspaceProps {
   readonly projectId: string
   readonly frameId: string
   readonly initialPrompt: string
-  readonly port: Pick<QingmuYimengPort, 'referenceVideoAssets' | 'referenceVideoPreview' | 'referenceVideoDraft' | 'saveReferenceVideoDraft'>
+  readonly port: Pick<QingmuYimengPort, 'referenceVideoAssets' | 'referenceVideoPreview' | 'referenceVideoDraft' | 'saveReferenceVideoDraft' | 'referenceVideoQuote'>
 }
 
 type Chosen = Omit<ReferenceVideoAsset, 'mediaType'> & { readonly bindingToken: string; readonly mediaType: ReferenceVideoAsset['mediaType'] | 'unavailable' }
@@ -29,6 +30,8 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
   const [parts, setParts] = useState<readonly ReferenceVideoPromptPart[]>([{ text: initialPrompt }])
   const [parameters, setParameters] = useState<ReferenceVideoParameters>({ duration: 8, resolution: '720P', ratio: '16:9', audio: true, prompt_extend: false })
   const [result, setResult] = useState<ReferenceVideoPreviewResponse>()
+  const [quoteResult, setQuoteResult] = useState<ReferenceVideoQuoteResponse>()
+  const [savedEpoch, setSavedEpoch] = useState(-1)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -61,7 +64,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
   const invalidate = () => {
     epoch.current += 1
     setDraftMessage('当前修改尚未保存。')
-    previewAbort.current?.abort(); setBusy(false); setResult(undefined); setError('')
+    previewAbort.current?.abort(); setBusy(false); setResult(undefined); setQuoteResult(undefined); setError('')
   }
   const restore = async () => {
     draftAbort.current?.abort()
@@ -74,6 +77,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
       setDraftState(state)
       if (!state.draft) { setDraftLoaded(true); setSourceAccepted(true); setDraftMessage('服务器尚无草稿；当前试排已保留，可直接保存。'); return }
       invalidate()
+      setSavedEpoch(epoch.current)
       setChosen(state.draft.request.bindings.map(binding => ({ ...binding, browserUrl: '', mediaType: state.mediaTypes[binding.bindingToken] ?? 'unavailable' })))
       setParts(state.draft.request.promptParts); setParameters(state.draft.request.parameters)
       activeText.current = { index: 0, start: 0, end: 0 }
@@ -93,7 +97,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
           bindings: chosen.map(({ bindingToken, assetId, assetSha256, label }) => ({ bindingToken, assetId, assetSha256, label })),
           promptParts: parts, parameters } }, controller.signal)
       if (controller.signal.aborted) return
-      setDraftState(state); setDraftLoaded(true)
+      setDraftState(state); setDraftLoaded(true); setSavedEpoch(start)
       setDraftMessage(epoch.current === start ? `已保存草稿版本 ${state.draft?.revision}。` : '上一版已保存，随后修改的内容尚未保存。')
     } catch (cause) {
       if (!controller.signal.aborted) setError(`保存未确认，当前内容仍保留。${cause instanceof Error ? cause.message : '请重试或重新读取草稿。'}`)
@@ -137,7 +141,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
   }
   const preview = async () => {
     if (busy) return
-    previewAbort.current?.abort(); setResult(undefined); setError('')
+    previewAbort.current?.abort(); setResult(undefined); setQuoteResult(undefined); setError('')
     const controller = new AbortController(); previewAbort.current = controller; setBusy(true)
     try {
       const response = await port.referenceVideoPreview({ projectId, frameId, model: 'wan3.0-video',
@@ -147,6 +151,18 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
         promptParts: parts, parameters }, controller.signal)
       if (!controller.signal.aborted) setResult(response)
     } catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '预览失败') }
+    finally { if (!controller.signal.aborted) setBusy(false) }
+  }
+  const quote = async () => {
+    const draft = draftState?.draft
+    if (busy || !draft || savedEpoch !== epoch.current || !sourceAccepted) return
+    previewAbort.current?.abort(); setResult(undefined); setQuoteResult(undefined); setError('')
+    const controller = new AbortController(); previewAbort.current = controller; setBusy(true)
+    try {
+      const response = await port.referenceVideoQuote({ projectId, ...draft.request,
+        draftRevision: draft.revision, draftRequestSha256: draft.requestSha256 }, controller.signal)
+      if (!controller.signal.aborted) { setResult(response.preview); setQuoteResult(response) }
+    } catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '估算失败，请核对已存草稿') }
     finally { if (!controller.signal.aborted) setBusy(false) }
   }
   let images = 0; let audios = 0
@@ -236,6 +252,9 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
       <label><input type="checkbox" checked={parameters.prompt_extend} onChange={(event) => { invalidate(); setParameters({ ...parameters, prompt_extend: event.target.checked }) }} />模型扩写描述</label>
     </div>
     <button type="button" disabled={busy || images === 0 || chosen.some(item => item.mediaType === 'unavailable' || !item.label.trim())} onClick={() => { void preview() }}>{busy ? '核对素材与请求…' : '预览实际请求'}</button>
+    <button type="button" disabled={busy || saving || !draftState?.draft || savedEpoch !== epoch.current || !sourceAccepted} onClick={() => { void quote() }}>估算已存草稿费用</button>
+    {quoteResult && <p role="status">目录价估算 ¥{Number(quoteResult.cost.estimatedCny).toFixed(2)} · 1 个视频 · {quoteResult.cost.billableSeconds} 秒。
+      未扣费；未计账户折扣，实际结算以阿里账单为准。<a href={quoteResult.cost.sourceUrl} target="_blank" rel="noreferrer">查看价格</a></p>}
     {error && <p role="alert">{error}</p>}
     {result && <section aria-label="阿里请求预览" aria-live="polite">
       <h4>将发送的描述</h4><p className={css.compiled}>{result.body.input.prompt}</p>

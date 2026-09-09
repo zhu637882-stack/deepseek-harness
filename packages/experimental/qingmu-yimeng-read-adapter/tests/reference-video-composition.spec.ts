@@ -11,7 +11,7 @@ import * as Connection from '@deepseek-ai/dsh-client-connection'
 import { expect, it, vi } from 'vitest'
 import * as Adapter from '../src/index.ts'
 import * as Commands from '../../qingmu-yimeng-command-adapter/src/index.ts'
-import { request, response, savedDraft } from './reference-video-fixture.ts'
+import { request, response, savedDraft, quoteRequest, quoteResponse } from './reference-video-fixture.ts'
 
 it('loads the actual Host, Connection and read plugin through YAML and serves a verified request preview', async () => {
   const requests: { url?: string; method?: string; authorization?: string; body: string }[] = []
@@ -19,7 +19,7 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
     let body = ''
     for await (const chunk of req) body += String(chunk)
     requests.push({ url: req.url, method: req.method, authorization: req.headers.authorization, body })
-    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(req.url?.includes('/drafts/') ? savedDraft : response))
+    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(req.url?.endsWith('/quote') ? quoteResponse : req.url?.includes('/drafts/') ? savedDraft : response))
   })
   await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve))
   const address = upstream.address()
@@ -82,6 +82,13 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
     })
     expect((await save.json()).result).toEqual({ ok: true, value: savedDraft })
     expect(requests.map(r => r.method)).toEqual(['POST', 'POST', 'GET'])
+    const quote = await fetch(`http://127.0.0.1:${ctx.webServer.port}/qingmu-yimeng/referenceVideoQuote`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId: 'quote', method: 'referenceVideoQuote', payload: quoteRequest }),
+    })
+    expect((await quote.json()).result).toEqual({ ok: true, value: quoteResponse })
+    expect(requests.at(-1)?.url).toBe('/api/qingmu/projects/p/reference-video/drafts/f/quote')
+
   } finally {
     await ctx.fiber.dispose(); upstream.closeAllConnections()
     await new Promise<void>(resolve => upstream.close(() => { resolve() }))

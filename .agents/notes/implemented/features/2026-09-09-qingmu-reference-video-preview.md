@@ -10,7 +10,7 @@ A director cannot reliably compare reference-based video requests when media ord
 
 ## Decision
 
-The existing read adapter forwards an explicit draft to Writer's read-only compiler. Stable reference tokens resolve independently for images and audio; literal text stays unchanged. The Host checks scope, ordering, compiled text and body SHA. The existing director editor owns the editable buffer and clears previews on edits. Explicit save/restore uses one draft row per shot with transactional revision and source checks.
+The existing read adapter forwards an explicit draft to Writer's read-only compiler. Stable reference tokens resolve independently for images and audio; literal text stays unchanged. The Host checks scope, ordering, compiled text and body SHA. The existing director editor owns the editable buffer and clears previews on edits. Explicit save/restore uses one draft row per shot with transactional revision and source checks. Saved-draft pricing uses the same compiled request and ProviderGate dry-run; the estimate remains distinct from account billing, budget reservation and generation.
 
 ## Alternatives considered
 

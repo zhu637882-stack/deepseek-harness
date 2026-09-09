@@ -176,3 +176,5 @@ Ready PromptIR 的 `firstFrameQuote` 还返回一次服务端重算、按当前�
 ## 已存引用草稿
 
 引用草稿可以按镜头保存，并在刷新后恢复。读取走 `referenceVideoDraft`；写入走命令适配器的 `saveReferenceVideoDraft`，随后严格重读校验。Writer 在同一事务中检查项目归属、镜头来源 SHA 和草稿版本。变化的素材显示为失效，镜头变化时需要显式确认基准。保存不选择 PromptIR、不采纳素材、不提交生成。
+
+`referenceVideoQuote` 只读接口通过 Writer 和 ProviderGate 的 dry-run 为已保存草稿估价，核对草稿版本、来源和实际请求预览。界面显示北京地域的目录价估算，不计账户折扣；编辑后旧估算失效。此操作不预留预算、不启动任务。

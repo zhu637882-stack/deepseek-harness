@@ -1,4 +1,4 @@
-import type { ReferenceVideoAssetsResponse, ReferenceVideoPreviewResponse, ReferenceVideoDraftResponse } from './reference-video-types.ts'
+import type { ReferenceVideoAssetsResponse, ReferenceVideoPreviewResponse, ReferenceVideoDraftResponse, ReferenceVideoQuoteResponse } from './reference-video-types.ts'
 
 /** JSON object retained from a Yimeng read response. */
 export interface YimengJsonObject {
@@ -2625,6 +2625,7 @@ export interface YimengReadEndpointMap {
   readonly referenceVideoAssets: ReferenceVideoAssetsResponse
   readonly referenceVideoPreview: ReferenceVideoPreviewResponse
   readonly referenceVideoDraft: ReferenceVideoDraftResponse
+  readonly referenceVideoQuote: ReferenceVideoQuoteResponse
   readonly takePreview: YimengTakePreviewResponse
   readonly takeComments: YimengTakeCommentFeedResponse
   readonly takeReviewAuthority: YimengTakeReviewAuthorityFeedResponse

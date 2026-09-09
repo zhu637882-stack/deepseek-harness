@@ -4,6 +4,7 @@ import type {
   ReferenceVideoAssetsRequest, ReferenceVideoAssetsResponse,
   ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse,
   ReferenceVideoDraftResponse,
+  ReferenceVideoQuoteRequest, ReferenceVideoQuoteResponse,
 } from './reference-video-types.ts'
 
 function object(value: unknown, keys?: string[]): Record<string, unknown> {
@@ -20,6 +21,54 @@ function sha(value: unknown): asserts value is string {
 }
 function integer(value: unknown, min: number, max: number): asserts value is number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min || value > max) throw new Error('invalid number')
+}
+
+/** Require the visible editor to exactly match the requested saved version.
+ * @param value - Visible draft plus saved identity.
+ * @param digest - Canonical JSON digest.
+ * @returns A validated read-only pricing request.
+ */
+export function parseReferenceVideoQuoteRequest(
+  value: unknown, digest: (value: unknown, label: string) => string,
+): ReferenceVideoQuoteRequest {
+  const v = object(value)
+  const { draftRevision, draftRequestSha256, ...draft } = v
+  integer(draftRevision, 1, Number.MAX_SAFE_INTEGER); sha(draftRequestSha256)
+  const { projectId: _projectId, ...body } = parseReferenceVideoRequest(draft)
+  if (digest(body, 'quote.request') !== draftRequestSha256) throw new Error('save current edits before pricing')
+  return value as ReferenceVideoQuoteRequest
+}
+
+/** Verify pricing against both the exact preview and the saved draft identity.
+ * @param value - Writer pricing response.
+ * @param request - Original visible saved draft.
+ * @param digest - Canonical JSON digest.
+ * @returns A price estimate, never a reservation or permission to generate.
+ */
+export function normalizeReferenceVideoQuote(
+  value: unknown, request: ReferenceVideoQuoteRequest, digest: (value: unknown, label: string) => string,
+): ReferenceVideoQuoteResponse {
+  const v = object(value, ['schema', 'projectId', 'frameId', 'draftRevision', 'draftRequestSha256', 'sourceSha256', 'quoteSha256', 'preview', 'cost', 'readOnly', 'providerCalls', 'databaseWrites', 'budgetReservedCny', 'generationQueued'])
+  if (v.schema !== 'jason.reference-video-quote.v1' || v.projectId !== request.projectId || v.frameId !== request.frameId
+    || v.draftRevision !== request.draftRevision || v.draftRequestSha256 !== request.draftRequestSha256
+    || v.readOnly !== true || v.providerCalls !== 0 || v.databaseWrites !== 0 || v.budgetReservedCny !== 0 || v.generationQueued !== false) throw new Error('quote identity or effects changed')
+  const preview = normalizeReferenceVideoPreview(v.preview, request, digest)
+  if (v.sourceSha256 !== preview.sourceSha256) throw new Error('quote source changed')
+  const c = object(v.cost, ['provider', 'region', 'currency', 'basis', 'unit', 'unitPriceCny', 'billableSeconds', 'estimatedCny', 'candidateCount', 'maxAttempts', 'accountDiscountApplied', 'pricingSha256', 'pricingCheckedAt', 'sourceUrl'])
+  if (c.provider !== 'dashscope' || c.region !== 'cn-beijing' || c.currency !== 'CNY' || c.basis !== 'catalog_list_price' || c.unit !== 'second'
+    || c.billableSeconds !== preview.body.parameters.duration || c.candidateCount !== 1 || c.maxAttempts !== 1
+    || c.accountDiscountApplied !== false
+    || c.sourceUrl !== 'https://help.aliyun.com/zh/model-studio/model-pricing') throw new Error('quote basis changed')
+  for (const amount of [c.unitPriceCny, c.estimatedCny]) {
+    if (typeof amount !== 'string' || !/^[0-9]{1,9}\.[0-9]{6}$/u.test(amount) || Number(amount) <= 0) throw new Error('invalid price')
+  }
+  if (Math.round(Number(c.unitPriceCny) * c.billableSeconds * 1e6) !== Math.round(Number(c.estimatedCny) * 1e6)) throw new Error('quote arithmetic changed')
+  sha(c.pricingSha256); sha(v.quoteSha256)
+  if (typeof c.pricingCheckedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}$/u.test(c.pricingCheckedAt)) throw new Error('pricing date missing')
+  const projection = { projectId: v.projectId, frameId: v.frameId, draftRevision: v.draftRevision, draftRequestSha256: v.draftRequestSha256,
+    sourceSha256: v.sourceSha256, cost: c }
+  if (digest(projection, 'quote.projection') !== v.quoteSha256) throw new Error('quote checksum changed')
+  return value as ReferenceVideoQuoteResponse
 }
 
 /** Validate a scoped draft read.

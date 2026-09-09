@@ -1,3 +1,4 @@
+import type { ReferenceVideoQuoteRequest, ReferenceVideoQuoteResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { ReferenceVideoAssetsRequest, ReferenceVideoAssetsResponse, ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { ReferenceVideoDraftResponse, SaveReferenceVideoDraftRequest } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 /** Stable Client-side view of the private Yimeng read-adapter RPC contract. */
@@ -580,6 +581,7 @@ export interface QingmuProductionTakeIntent extends Omit<YimengQueueProductionTa
 export interface QingmuYimengReadPort {
   referenceVideoAssets(request: ReferenceVideoAssetsRequest, signal?: AbortSignal): Promise<ReferenceVideoAssetsResponse>
   referenceVideoPreview(request: ReferenceVideoPreviewRequest, signal?: AbortSignal): Promise<ReferenceVideoPreviewResponse>
+  referenceVideoQuote(request: ReferenceVideoQuoteRequest, signal?: AbortSignal): Promise<ReferenceVideoQuoteResponse>
   referenceVideoDraft(request: { projectId: string; frameId: string }, signal?: AbortSignal): Promise<ReferenceVideoDraftResponse>
   evidenceLedger(request: YimengEpisodeEvidenceRequest, signal?: AbortSignal): Promise<YimengEpisodeEvidenceLedgerResponse>
   editorialHandoff(request: YimengEditorialHandoffRequest, signal?: AbortSignal): Promise<YimengEditorialHandoffResponse>

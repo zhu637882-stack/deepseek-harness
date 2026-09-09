@@ -221,3 +221,5 @@ Opening, refreshing, or closing the cockpit does not rewrite the model prefix. A
 ## Saved reference drafts
 
 Reference drafts can be saved per shot and restored after refresh. Reads use `referenceVideoDraft`; writes use the command adapter `saveReferenceVideoDraft`, followed by strict readback. Writer checks the project owner, source frame SHA and draft revision in one transaction. Changed source assets are shown as unavailable, and a changed shot requires an explicit rebase. Saving does not select a PromptIR, adopt assets or submit generation.
+
+The `referenceVideoQuote` read prices the exact saved draft through Writer and ProviderGate dry-run. It checks the saved revision, source and compiled preview, then displays a Beijing catalog list-price estimate without discounts. Edits invalidate that estimate. It reserves no budget and starts no task.
