@@ -364,16 +364,21 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
         </div>
         <div className={css.prompt}>
           {parts.map((part, index) => 'text' in part
-            ? <textarea key={index} aria-label={`视频描述片段${index + 1}`} rows={parts.length === 1 ? 5 : 2} value={part.text}
-              placeholder="描述本镜的动作、机位与对白；也可让导演助手保存后，恢复已存草稿。"
-              onSelect={(event) => {
-                const field = event.currentTarget
-                activeText.current = { index, start: field.selectionStart, end: field.selectionEnd }
-              }}
-              onChange={(event) => {
-                invalidate(); const text = event.target.value
-                setParts(previous => previous.map((old, i) => i === index ? { text } : old))
-              }} />
+            ? (() => {
+              const connector = parts.length > 1 && part.text.trim().length <= 40 && !part.text.includes('\n')
+              return <textarea key={index} aria-label={`视频描述片段${index + 1}`}
+                className={parts.length === 1 ? css.singleDirectorText : connector ? css.connectorText : css.directorText}
+                rows={parts.length === 1 ? 6 : connector ? 1 : 4} value={part.text}
+                placeholder="描述本镜的动作、机位与对白；也可让导演助手保存后，恢复已存草稿。"
+                onSelect={(event) => {
+                  const field = event.currentTarget
+                  activeText.current = { index, start: field.selectionStart, end: field.selectionEnd }
+                }}
+                onChange={(event) => {
+                  invalidate(); const text = event.target.value
+                  setParts(previous => previous.map((old, i) => i === index ? { text } : old))
+                }} />
+            })()
             : <button key={index} type="button" className={css.chip} aria-label={`移除描述引用${aliases.get(part.bindingToken)}`}
               onClick={() => {
                 invalidate(); setParts(previous => previous.filter((_, i) => i !== index))

@@ -222,3 +222,17 @@ it('does not offer a private preview for a restored binding when the current cat
   expect((screen.getAllByRole('button', { name: '加入引用' })[0] as HTMLButtonElement).disabled).toBe(true)
   expect(port.readLocalReferenceCandidateContent).not.toHaveBeenCalled()
 })
+
+it('keeps single director text spacious while compacting only short text around bindings', async () => {
+  mount()
+  const initial = screen.getByRole('textbox', { name: '视频描述片段1' }) as HTMLTextAreaElement
+  expect(initial.rows).toBe(6)
+  await chooseAll()
+  initial.focus(); initial.setSelectionRange(0, 0); fireEvent.select(initial)
+  fireEvent.click(screen.getByRole('button', { name: '插入图1' }))
+  const segmented = screen.getAllByRole('textbox').filter((field): field is HTMLTextAreaElement => field instanceof HTMLTextAreaElement)
+  expect(segmented.map(field => field.rows)).toEqual([1, 1])
+  fireEvent.change(segmented[1]!, { target: { value: '这是一段足够长的导演动作描述，用于验证引用之后的正文仍保留可读编辑高度，而不是被压缩为短连接词。' } })
+  const updated = screen.getAllByRole('textbox').filter((field): field is HTMLTextAreaElement => field instanceof HTMLTextAreaElement)
+  expect(updated[1]!.rows).toBe(4)
+})
