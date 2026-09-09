@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { QingmuApplicationFrame, creativeStepFromSearch } from '../src/client/QingmuApplicationFrame.tsx'
 afterEach(cleanup)
@@ -36,6 +36,24 @@ it('keeps system tools separate and does not change project or scene when openin
   expect(p.onProject).not.toHaveBeenCalled()
   expect(p.onEpisode).not.toHaveBeenCalled()
   expect(p.onStep).not.toHaveBeenCalled()
+})
+
+it('keeps project creation and settings in the compact accessible tools menu', () => {
+  const p = props()
+  render(<QingmuApplicationFrame {...p}><main>媒体</main></QingmuApplicationFrame>)
+  const more = screen.getByRole('button', { name: '更多' })
+  expect(more.getAttribute('aria-expanded')).toBe('false')
+  fireEvent.click(more)
+  expect(screen.getByRole('group', { name: '项目与系统操作' })).toBeTruthy()
+  fireEvent.click(within(screen.getByRole('group', { name: '项目与系统操作' })).getByRole('button', { name: '新建项目' }))
+  expect(p.onCreate).toHaveBeenCalledOnce()
+  fireEvent.click(more)
+  fireEvent.click(within(screen.getByRole('group', { name: '项目与系统操作' })).getByRole('button', { name: '系统设置' }))
+  expect(p.onOpenTools).toHaveBeenCalledOnce()
+  fireEvent.click(more)
+  fireEvent.keyDown(document, { key: 'Escape' })
+  expect(screen.queryByRole('group', { name: '项目与系统操作' })).toBeNull()
+  expect(document.activeElement).toBe(more)
 })
 
 it('retains the exact embedded scope rather than offering a project switch', () => {

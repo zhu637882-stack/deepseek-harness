@@ -180,3 +180,5 @@ Ready PromptIR 的 `firstFrameQuote` 还返回一次服务端重算、按当前�
 `referenceVideoQuote` 只读接口通过 Writer 和 ProviderGate 的 dry-run 为已保存草稿估价，核对草稿版本、来源和实际请求预览。界面显示北京地域的目录价估算，不计账户折扣；编辑后旧估算失效。此操作不预留预算、不启动任务。
 
 `referenceVideoRuns` 和 `referenceVideoRun` 查回当前所有者的候选任务。Host 核对镜头身份、任务状态和准确的媒体签名路径，再映射到已配置的 Writer 播放地址。只有解码成功的结果展示为候选；提交结果不明时保持待核实，结果不推导创意验收。
+
+项目素材接口通过 `preview_media_id` 标明真实的签名媒体记录；素材编号与媒体编号互相独立。引用目录核对对应媒体路径、签名和有效期后，才改写为配置中的 Writer 地址；媒体记录缺失或不匹配时，仍展示素材卡片，但不提供预览地址。

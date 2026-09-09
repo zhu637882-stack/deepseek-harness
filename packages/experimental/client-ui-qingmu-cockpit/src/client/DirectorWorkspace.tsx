@@ -56,6 +56,7 @@ export function DirectorWorkspace(props: DirectorWorkspaceProps) {
   useEffect(() => {
     if (reviewReady) { setProductionMounted(true); setProductionOpen(true) }
   }, [reviewReady])
+  const [planningOpen, setPlanningOpen] = useState(false)
   const [planningDirty, setPlanningDirty] = useState(false)
   const [promptDirty, setPromptDirty] = useState(false)
   const [referenceDirty, setReferenceDirty] = useState(false)
@@ -68,15 +69,21 @@ export function DirectorWorkspace(props: DirectorWorkspaceProps) {
     props.onUnsavedChange(planningDirty || promptDirty || referenceDirty)
     return () => { props.onUnsavedChange(false) }
   }, [planningDirty, promptDirty, referenceDirty, props.onUnsavedChange])
+  const planning = <ScenePlanningWorkspace key={`${props.projectId}:${props.episodeId}`} {...props} onSelectShotId={selectShot}
+    canonicalDirectorScope={canonicalDirectorScope}
+    canonicalDirectorRevision={JSON.stringify(currentProjection?.director.shotRelations.storyboardRevision)}
+    onUnsavedChange={setPlanningDirty} />
+  const hasPlannedShots = (currentProjection?.director.shotRelations.shots.length ?? 0) > 0
   return <>
-    <ScenePlanningWorkspace key={`${props.projectId}:${props.episodeId}`} {...props} onSelectShotId={selectShot}
-      canonicalDirectorScope={canonicalDirectorScope}
-      canonicalDirectorRevision={JSON.stringify(currentProjection?.director.shotRelations.storyboardRevision)}
-      onUnsavedChange={setPlanningDirty} />
     {props.presentation !== 'assistant' && currentProjection?.director.shotRelations && <SceneReferenceWorkspace
       projectId={props.projectId} relations={currentProjection.director.shotRelations}
       selectedShotId={props.selectedShotId} onSelectShotId={selectShot} guardUnsavedNavigation={false}
       onUnsavedChange={setReferenceDirty} port={props.port} />}
+    {props.presentation === 'assistant' ? planning : <details open={!hasPlannedShots || planningOpen || planningDirty}
+      onToggle={(event) => { if (hasPlannedShots && !planningDirty) setPlanningOpen(event.currentTarget.open) }}>
+      <summary>场景规划与导演助手</summary>
+      {planning}
+    </details>}
     {props.presentation !== 'assistant' && <details open={productionOpen} onToggle={(event) => {
       setProductionOpen(event.currentTarget.open)
       if (event.currentTarget.open) setProductionMounted(true)

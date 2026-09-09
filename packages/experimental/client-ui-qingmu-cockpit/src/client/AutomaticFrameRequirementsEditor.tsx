@@ -51,6 +51,8 @@ export function AutomaticFrameRequirementsEditor({ projectId, episodeId, shotId,
             && (['blocking', 'cameraAngle'] as const).every(field => local.pending?.request.action === 'edit_automatic' && (local.pending.request[field] === undefined || local.pending.request[field] === local[field]))))
           ? { blocking: saved?.blocking ?? '', cameraAngle: saved?.cameraAngle ?? '', ...local }
           : saved ? { shotId, imagePromptCn: saved.imagePromptCn, blocking: saved.blocking ?? '', cameraAngle: saved.cameraAngle ?? '' } : null); setLoad('ready')
+      } else if (!controller.signal.aborted && currentEpoch === epoch.current) {
+        setError('尚未找到本镜对应的首帧要求，请到分镜工作区核对后重试。'); setLoad('failed')
       }
     }).catch(() => { if (!controller.signal.aborted && currentEpoch === epoch.current) { setError('首帧要求暂不可读取；不会创建或替换素材。'); setLoad('failed') } })
     return () => controller.abort()

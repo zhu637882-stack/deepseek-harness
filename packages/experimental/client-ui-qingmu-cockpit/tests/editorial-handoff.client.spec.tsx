@@ -194,6 +194,17 @@ describe('editorial handoff panel', () => {
     expect(screen.queryByRole('button', { name: /submit|commit|提交|确认/u })).toBeNull()
   })
 
+  it('keeps compact handoff rows readable and folds machine details per shot', async () => {
+    const editorialHandoff = vi.fn().mockResolvedValue(handoff())
+    render(<EditorialHandoff {...SCOPE} compact port={{ editorialHandoff } as unknown as QingmuYimengReadPort} t={t} />)
+    await screen.findByRole('heading', { name: '镜头交付清单' })
+    expect(screen.getByText('已选 Take · 4.25s · passed')).toBeTruthy()
+    expect(screen.getAllByText(zh.handoffBlockerApprovalMissing).length).toBeGreaterThan(0)
+    const details = screen.getByText('场景：scene-1').closest('details')
+    expect(details).toBeTruthy(); expect(details?.open).toBe(false)
+    expect(screen.queryByRole('button', { name: zh.handoffShotDetailed })).toBeNull()
+  })
+
   it('performs exactly one additional read when the user refreshes', async () => {
     const { editorialHandoff } = mount()
     await waitFor(() => { expect(editorialHandoff).toHaveBeenCalledTimes(1) })

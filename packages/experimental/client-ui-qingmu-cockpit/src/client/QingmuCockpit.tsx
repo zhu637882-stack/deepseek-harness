@@ -28,6 +28,7 @@ import { TakeVersionCompareView } from './TakeVersionCompareView.tsx'
 import { EpisodeEvidenceLedger } from './EpisodeEvidenceLedger.tsx'
 import { EditorialHandoff } from './EditorialHandoff.tsx'
 import css from './QingmuCockpit.module.css'
+import { ProjectAssetLibrary } from './ProjectAssetLibrary.tsx'
 import { DirectorWorkspace } from './DirectorWorkspace.tsx'
 import { NativeDirectorSession } from './NativeDirectorSession.tsx'
 import { ShootingReviewWorkspace } from './ShootingReviewWorkspace.tsx'
@@ -759,7 +760,7 @@ export function QingmuCockpit({
 
   const panels: Record<Tab, ReactNode> = {
     director: <>
-      {nativeDirectorSession && <NativeDirectorSession port={nativeDirectorSession} bridge={directorBridge}
+      {nativeDirectorSession && <NativeDirectorSession compact={applicationShell} port={nativeDirectorSession} bridge={directorBridge}
         sessionId={directorSessionId} onRefresh={() => { setDirectorRefresh(value => value + 1) }} />}
       {projectId !== '' && episodeId !== ''
         ? <DirectorWorkspace projectId={projectId} episodeId={episodeId} projection={projection}
@@ -779,30 +780,55 @@ export function QingmuCockpit({
 
   if (applicationShell) {
     const step = creativeStepForTab(tab)
+    const changeStep = (next: CreativeStep) => {
+      if (!mayLeaveDirector()) return
+      if (next !== step) {
+        const url = new URL(location.href); url.searchParams.set('qingmuView', next); history.pushState(history.state, '', url)
+      }
+      setCreating(false); setTab(STEP_TABS[next])
+    }
+    const pageHeader = (number: string, title: string, purpose: string, next: CreativeStep | null) => <header className={css.stageHeader}>
+      <div><p className={css.stageEyebrow}>青木创作 · {number}</p><h1>{title}</h1><p>{purpose}</p></div>
+      <div className={css.stageActions}>{next && <button type="button" disabled={loading || !episodeId}
+        onClick={() => { changeStep(next) }}>前往{creativeStepLabel(next)} →</button>}</div>
+    </header>
+    const projectFacts = <div className={css.stageFacts} aria-label="当前项目概览">
+      <span>{projectLabel(selectedProject ?? {}, '当前项目')}</span>
+      <span>{episodeLabel(selectedEpisode ?? {}, '当前剧集')}</span>
+      <span>{projection ? `${shotItems.length} 个镜头` : '镜头信息待读取'}</span>
+      <span>{projection ? `${semanticAssets.length} 份素材档案` : '素材信息待读取'}</span>
+    </div>
     const applicationPanels: Record<CreativeStep, ReactNode> = {
-      story: <div className={css.creativePage}><h1>故事</h1><p>把故事写清楚，再决定如何拍。</p>
-        {episodeId && <TextImportWorkspace key={`${projectId}:${episodeId}:story`} projectId={projectId} episodeId={episodeId} port={port} onSaved={refreshWorkflowAfterCommit} />}
-        <details><summary>精细编辑剧本</summary>
+      story: <div className={css.creativePage}>
+        {pageHeader('01', '故事与剧本', '写下故事、整理对白，形成这一集的创作依据。', 'assets')}{projectFacts}
+        <div className={css.stageContent}>{episodeId && <TextImportWorkspace key={`${projectId}:${episodeId}:story`} projectId={projectId} episodeId={episodeId} port={port} onSaved={refreshWorkflowAfterCommit} />}</div>
+        <details className={css.stageSupporting}><summary>已存剧本与精细编辑</summary>
           <ScriptWorkspace projectId={projectId} episodeId={episodeId} port={port} t={t} onCommitted={refreshWorkflowAfterCommit} />
         </details>
       </div>,
-      assets: <div className={css.creativePage}><h1>角色与场景</h1><p>确认人物与环境，后面的镜头沿用这些资产。</p>
-        <AssetWorkbench key={`${projectId}:application-assets`} projectId={projectId} semanticAssets={semanticAssets} port={port} t={t} onCommitted={refreshWorkflowAfterCommit} />
+      assets: <div className={css.creativePage}>
+        {pageHeader('02', '角色、场景与音色', '建立这一部作品的素材库，让同一人物和环境贯穿各个镜头。', 'storyboard')}{projectFacts}
+        <div className={css.stageContent}><ProjectAssetLibrary key={projectId} projectId={projectId} port={port} /></div>
+        <details className={css.stageSupporting}><summary>人物与场景档案 · 上传参考</summary>
+          <AssetWorkbench key={`${projectId}:application-assets`} projectId={projectId} semanticAssets={semanticAssets} port={port} t={t} onCommitted={refreshWorkflowAfterCommit} />
+        </details>
       </div>,
-      storyboard: <div className={css.creativePage}><h1>分镜与导演</h1><p>理解当前故事，安排每个镜头的画面与动作。</p>{panels.director}</div>,
+      storyboard: <div className={css.creativePage}>
+        {pageHeader('03', '分镜与导演', '安排画面、表演和声音，明确每镜使用的素材与生成描述。', 'shooting')}{projectFacts}
+        <div className={css.stageContent}>{panels.director}</div>
+      </div>,
       shooting: shotView,
-      delivery: <div className={css.creativePage}><h1>导出与交接</h1><p>查看已选用的视频与待完成的镜头，再交给后期。</p>
-        <EditorialHandoff projectId={projectId} episodeId={episodeId} port={port} t={t} />
+      delivery: <div className={css.creativePage}>
+        {pageHeader('05', '导出与交接', '汇集已经选用的镜头，检查缺口，再导出给后期制作。', null)}{projectFacts}
+        <div className={css.stageActions}><button type="button" onClick={() => { changeStep('shooting') }}>← 返回拍摄与审看</button></div>
+        <div className={css.stageContent}><EditorialHandoff compact projectId={projectId} episodeId={episodeId} port={port} t={t} /></div>
       </div>,
     }
     return <QingmuApplicationFrame projects={projects.map(p => ({ id: stringOf(p.id) ?? '', label: projectLabel(p, '未命名项目') }))}
       episodes={episodes.map(e => ({ id: stringOf(e.id) ?? '', label: episodeLabel(e, '未命名剧集') }))}
       projectId={projectId} episodeId={episodeId} step={step} loading={loading} scopeLocked={entryScope !== undefined}
       onProject={(id) => { void chooseProject(id) }} onEpisode={(id) => { void chooseEpisode(id) }}
-      onStep={(next) => { if (mayLeaveDirector()) {
-        if (next !== step) { const url = new URL(location.href); url.searchParams.set('qingmuView', next); history.pushState(history.state, '', url) }
-        setCreating(false); setTab(STEP_TABS[next])
-      } }}
+      onStep={changeStep}
       onCreate={() => { if (mayLeaveDirector()) setCreating(true) }}
       onRefresh={() => { if (mayLeaveDirector()) void refresh() }} onOpenTools={onOpenTools}>
       <div className={`${css.shell} ${step === 'shooting' && !creating ? css.shootingShell : ''}`}>

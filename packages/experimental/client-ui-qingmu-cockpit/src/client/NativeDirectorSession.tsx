@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DirectorContextClientPort, NativeDirectorReadiness } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import { useDirectorConnection, type NativeDirectorSessionPort } from './native-director-session.ts'
+import css from './NativeDirectorSession.module.css'
 
 /** Show mount evidence and explicit native entry; no automatic session mutation or model request. */
 export function NativeDirectorSession({ port, bridge, sessionId, onRefresh, compact = false }: {
@@ -53,14 +54,14 @@ export function NativeDirectorSession({ port, bridge, sessionId, onRefresh, comp
       if (operation.current === request) { operation.current = undefined; setBusy(false) }
     }
   }
-  if (compact) return <section aria-label="青木原生导演会话">
+  if (compact) return <section className={css.session} aria-label="青木原生导演会话">
     {(!connection || busy || status?.status !== 'mounted') && <>
       <p role="status">{!connection ? '导演暂时离线。' : busy ? '正在进入导演…'
         : sessionId ? '可以进入或恢复导演，再提出修改要求。' : '进入导演后，可以在这里提出创作要求。'}</p>
       <button type="button" disabled={!connection || busy} onClick={() => { void activate() }}>进入 / 恢复青木导演</button>
     </>}
     {error && <p role="alert">导演连接暂未恢复，重新检查后再试。</p>}
-    <details><summary>开发日志 · 导演连接</summary>
+    <details className={css.diagnostics}><summary>连接详情</summary>
       <button type="button" disabled={!connection || busy} onClick={refresh}>重新检查连接</button>
       <pre>{JSON.stringify({ status, error }, null, 2)}</pre>
     </details>

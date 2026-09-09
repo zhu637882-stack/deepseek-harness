@@ -457,6 +457,7 @@ type UntrustedEvidenceFreezePayload<T extends { schema: string }> = Omit<T, 'sch
 }
 
 interface Props {
+  readonly compact?: boolean | undefined
   readonly projectId: string
   readonly episodeId: string
   readonly port: QingmuYimengReadPort
@@ -506,7 +507,7 @@ const MASTER_BLOCKER_KEYS: Readonly<Record<string, QingmuCockpitKey>> = {
 }
 
 /** E8 editorial handoff plus one explicit, unselected returned-master candidate commit. */
-export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
+export function EditorialHandoff({ projectId, episodeId, port, t, compact = false }: Props) {
   const [projection, setProjection] = useState<YimengEditorialHandoffResponse>()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
@@ -1735,12 +1736,13 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
 
   if (projectId === '' || episodeId === '') return <p className={css.empty}>{t('handoffChooseEpisode')}</p>
   const blockerLabel = (code: string) => t(BLOCKER_KEYS[code] ?? 'handoffBlockerUnknown')
+  const compactShotView = compact || shotViewMode === 'compact'
   const masterBlockerLabel = (code: string) => t(MASTER_BLOCKER_KEYS[code] ?? 'handoffMasterBlockerUnknown')
   return <section className={css.panel} aria-labelledby="qingmu-editorial-handoff-title">
     <header className={css.header}>
       <div>
-        <h3 id="qingmu-editorial-handoff-title">{t('handoffTitle')}</h3>
-        <p>{t('handoffBoundary')}</p>
+        <h3 id="qingmu-editorial-handoff-title">{compact ? '镜头交付清单' : t('handoffTitle')}</h3>
+        <p>{compact ? '确认本集选用的镜头与声音。需要处理的问题会列在对应镜头下方。' : t('handoffBoundary')}</p>
       </div>
       <button type="button" disabled={loading} onClick={() => {
         void (async () => {
@@ -1752,10 +1754,12 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
     </header>
     {error !== undefined && <p role="alert" className={css.error}>{error}</p>}
     {projection !== undefined && <>
-      <div className={css.readiness} role="status" aria-atomic="true">
-        <span>{t('handoffProductionReady')}: <strong>{t('handoffFalse')}</strong></span>
-        <span>{t('handoffReleaseReady')}: <strong>{t('handoffFalse')}</strong></span>
-      </div>
+      <details className={css.supporting} open={!compact}><summary>交付状态说明</summary>
+        <div className={css.readiness} role="status" aria-atomic="true">
+          <span>{t('handoffProductionReady')}: <strong>{t('handoffFalse')}</strong></span>
+          <span>{t('handoffReleaseReady')}: <strong>{t('handoffFalse')}</strong></span>
+        </div>
+      </details>
       <div className={css.metrics}>
         <span><strong>{projection.summary.shotCount}</strong>{t('handoffShots')}</span>
         <span><strong>{projection.summary.selectedTakeCount}</strong>{t('handoffSelectedTakes')}</span>
@@ -1763,20 +1767,37 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
         <span><strong>{projection.summary.authoritativeAudioCount}</strong>{t('handoffAudio')}</span>
         <span><strong>{projection.summary.unresolvedCount}</strong>{t('handoffUnresolved')}</span>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+      {!compact && <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
         <strong>{t('handoffShotList')}</strong>
         <div className={css.batchToggle}>
           <button type="button" aria-pressed={shotViewMode === 'detailed'} onClick={() => { setShotViewMode('detailed') }}>{t('handoffShotDetailed')}</button>
           <button type="button" aria-pressed={shotViewMode === 'compact'} onClick={() => { setShotViewMode('compact') }}>{t('handoffShotCompact')}</button>
         </div>
-      </div>
+      </div>}
+      {compact && <strong>{t('handoffShotList')}</strong>}
       <ol className={css.shots} aria-label={t('handoffShotList')}>
         {projection.source.shots.map(shot => <li key={shot.frameId}>
-          {shotViewMode === 'compact'
-            ? <div className={css.shotCompact}>
-              <strong>#{shot.frameNo} · {shot.title}</strong>
-              <span>{shot.selectedTake === null ? t('handoffNoSelectedTake') : `${shot.selectedTake.durationSec ?? '—'}s · ${shot.selectedTake.qualityStatus}`}</span>
+          {compactShotView
+            ? <><div className={css.shotCompact}>
+              <div><strong>#{shot.frameNo} · {shot.title}</strong>
+                <span>{shot.selectedTake === null ? t('handoffNoSelectedTake') : `已选 Take · ${shot.selectedTake.durationSec ?? '—'}s · ${shot.selectedTake.qualityStatus}`}</span>
+              </div>
+              <p className={shot.blockers.length > 0 ? css.warning : css.success}>
+                {shot.selectedTake === null ? '返回拍摄与审看，选择一个候选视频。'
+                  : shot.blockers.length > 0 ? blockerLabel(shot.blockers[0] ?? '') : '镜头已具备交接条件。'}
+              </p>
             </div>
+            {compact && <details className={css.shotDetails}><summary>查看交付检查</summary>
+              <p>场景：{shot.sceneId ?? t('unknown')}</p>
+              {shot.selectedTake !== null && <p>{t('handoffTake')}：{shot.selectedTake.assetId} · {shot.selectedTake.mimeType ?? '—'} · {shot.selectedTake.durationSec ?? '—'}s</p>}
+              {shot.blockers.length > 0 && <ul className={css.blockers}>
+                {shot.blockers.map(code => <li key={code}>{blockerLabel(code)}</li>)}
+              </ul>}
+              <details><summary>{t('handoffAdvanced')}</summary>
+                <p>Frame SHA: {shot.frameContentSha256}</p><p>Stack SHA: {shot.stackSnapshotSha256}</p>
+                {shot.selectedTake !== null && <p>Media SHA: {shot.selectedTake.sha256 ?? '—'}</p>}
+              </details>
+            </details>}</>
             : <>
               <header><strong>#{shot.frameNo} · {shot.title}</strong><span>{shot.sceneId ?? t('unknown')}</span></header>
               {shot.selectedTake === null
@@ -1822,506 +1843,509 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
         </button>
         {download.status === 'running' && <div className={css.inlineProgress}><span>{t('handoffDownloading')}</span><div className={css.progressBar} /></div>}
       </div>
-      <div className={css.importBox}>
-        <div>
-          <strong>{t('handoffImportTitle')}</strong>
-          <p>{t('handoffImportBoundary')}</p>
-          <label className={css.fileField}>
-            <span>{t('handoffImportChoose')}</span>
-            <input type="file" accept=".zip,application/zip"
-              disabled={importAccess === undefined || importState === 'running' || masterState === 'running'}
-              onChange={(event) => {
-                const file = event.currentTarget.files?.[0]
-                importGeneration.current += 1
-                masterGeneration.current += 1
-                candidateGeneration.current += 1
-                importController.current?.abort()
-                masterController.current?.abort()
-                candidateController.current?.abort()
-                importController.current = undefined
-                masterController.current = undefined
-                const consumedPackageAccess = importState !== 'idle' || importResult !== undefined
+      <details className={css.supporting} open={!compact}><summary>校验剪辑包与回传成片</summary>
+        <div className={css.importBox}>
+          <div>
+            <strong>{t('handoffImportTitle')}</strong>
+            <p>{t('handoffImportBoundary')}</p>
+            <label className={css.fileField}>
+              <span>{t('handoffImportChoose')}</span>
+              <input type="file" accept=".zip,application/zip"
+                disabled={importAccess === undefined || importState === 'running' || masterState === 'running'}
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0]
+                  importGeneration.current += 1
+                  masterGeneration.current += 1
+                  candidateGeneration.current += 1
+                  importController.current?.abort()
+                  masterController.current?.abort()
+                  candidateController.current?.abort()
+                  importController.current = undefined
+                  masterController.current = undefined
+                  const consumedPackageAccess = importState !== 'idle' || importResult !== undefined
                   || masterAccess !== undefined || masterState !== 'idle'
-                setSelectedPackage(file)
-                if (consumedPackageAccess) setImportAccess(undefined)
-                setImportResult(undefined)
-                setImportError(undefined)
-                setImportState('idle')
-                setMasterAccess(undefined)
-                setSelectedMaster(undefined)
-                setMasterResult(undefined)
-                setMasterError(undefined)
-                setMasterState('idle')
-                setCandidateAccess(undefined)
-                setCandidateError(undefined)
-                setCandidateState('idle')
-              }} />
-          </label>
-          {selectedPackage !== undefined && <p>{selectedPackage.name} · {selectedPackage.size.toLocaleString()} bytes</p>}
-          {importAccess === undefined && <p className={css.warning}>{t('handoffImportNeedsDownload')}</p>}
-        </div>
-        <button type="button" disabled={selectedPackage === undefined || importAccess === undefined || importState === 'running'}
-          onClick={() => { void verifyPackage() }}>
-          {importState === 'running' ? t('handoffImportRunning') : t('handoffImportVerify')}
-        </button>
-        {importState === 'running' && <div className={css.inlineProgress}><span>{t('handoffImportRunning')}</span><div className={css.progressBar} /></div>}
-      </div>
-      {importError !== undefined && <div ref={importErrorRef} role="alert" tabIndex={-1} className={css.errorSummary}>
-        <strong>{t('handoffImportFailed')}</strong><p>{t('handoffImportFailedHelp')} ({importError})</p>
-      </div>}
-      {importResult !== undefined && <section className={css.preview} aria-labelledby="handoff-import-result">
-        <header><div><strong id="handoff-import-result">{t('handoffImportResult')}</strong>
-          <p>{t('handoffImportPreviewOnly')}</p></div></header>
-        <ul className={css.conclusions} aria-label={t('handoffImportConclusions')}>
-          <li data-state="pass"><strong>{t('handoffImportReceipt')}</strong><span>{t('handoffImportMatched')}</span></li>
-          <li data-state="pass"><strong>{t('handoffImportInternal')}</strong><span>{t('handoffImportValid')}</span></li>
-          <li data-state={importResult.currentAuthority.matches ? 'pass' : 'stale'}>
-            <strong>{t('handoffImportCurrent')}</strong>
-            <span>{importResult.currentAuthority.matches ? t('handoffImportCurrentMatched') : t('handoffImportCurrentDrift')}</span>
-          </li>
-        </ul>
-        <div className={css.previewGrid}>
-          <div><strong>{t('handoffImportTracks')}</strong><ul>{importResult.preview.tracks.map(track =>
-            <li key={`${track.name}-${track.kind}`}>{track.name} · {track.kind} · {track.clipCount}</li>)}</ul></div>
-          <div><strong>{t('handoffImportShots')}</strong><ol>{importResult.preview.orderedShots.map(shot =>
-            <li key={shot.frameId ?? String(shot.order)}>#{shot.frameNo ?? shot.order} · {shot.videoRange?.durationSec ?? '—'}s<br />
-              <code>{shot.videoPath}</code><br /><code>{shot.audioPath}</code></li>)}</ol></div>
-        </div>
-        <details><summary>{t('handoffImportMedia')}</summary><ul>{importResult.preview.media.map(media =>
-          <li key={`${media.kind}-${media.path}`}><code>{media.path}</code> · {media.size.toLocaleString()} bytes</li>)}</ul></details>
-        <p>{t('handoffImportUnresolved')}: {importResult.preview.unresolved.length}</p>
-        <details><summary>{t('handoffAdvanced')}</summary>
-          <p>Package SHA: {importResult.packageSha256}</p><p>{importResult.packageSize.toLocaleString()} bytes</p>
-        </details>
-      </section>}
-      <div className={css.importBox}>
-        <div>
-          <strong>{t('handoffMasterTitle')}</strong>
-          <p>{t('handoffMasterBoundary')}</p>
-          <label className={css.fileField}>
-            <span>{t('handoffMasterChoose')}</span>
-            <input type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm"
-              aria-describedby={masterError === undefined ? undefined : 'handoff-master-error'}
-              disabled={masterAccess === undefined || masterState !== 'idle'}
-              onChange={(event) => {
-                if (masterState !== 'idle') return
-                const file = event.currentTarget.files?.[0]
-                setSelectedMaster(file)
-                setMasterResult(undefined)
-                setMasterError(undefined)
-                setMasterState('idle')
-                setCandidateAccess(undefined)
-                setCandidateError(undefined)
-                setCandidateState('idle')
-              }} />
-          </label>
-          {selectedMaster !== undefined && <p>{selectedMaster.name} · {selectedMaster.type || '—'} · {selectedMaster.size.toLocaleString()} bytes</p>}
-          {masterAccess === undefined && <p className={css.warning}>{t('handoffMasterNeedsImport')}</p>}
-          {masterState === 'succeeded' && <p className={css.warning}>{t('handoffMasterLocked')}</p>}
-        </div>
-        <button type="button" disabled={selectedMaster === undefined || masterAccess === undefined || masterState !== 'idle'}
-          onClick={() => { void verifyMaster() }}>
-          {masterState === 'running' ? t('handoffMasterRunning') : t('handoffMasterVerify')}
-        </button>
-        {masterState === 'running' && <div className={css.inlineProgress}><span>{t('handoffMasterRunning')}</span><div className={css.progressBar} /></div>}
-      </div>
-      {masterError !== undefined && <div id="handoff-master-error" role="alert" className={css.errorSummary}>
-        <strong>{t('handoffMasterFailed')}</strong><p>{t('handoffMasterFailedHelp')} ({masterError})</p>
-      </div>}
-      {masterResult !== undefined && <section className={css.preview} aria-labelledby="handoff-master-result">
-        <header><div><strong id="handoff-master-result">{t('handoffMasterResult')}</strong>
-          <p>{t('handoffMasterPreviewOnly')}</p></div></header>
-        <div className={css.masterFacts}>
-          <span><strong>{masterResult.master.container ?? '—'}</strong>{t('handoffMasterContainer')}</span>
-          <span><strong>{masterResult.master.durationSec ?? '—'}s</strong>{t('handoffMasterDuration')}</span>
-          <span><strong>{masterResult.master.width ?? '—'} × {masterResult.master.height ?? '—'}</strong>{t('handoffMasterResolution')}</span>
-          <span><strong>{masterResult.master.fps ?? '—'}</strong>{t('handoffMasterFps')}</span>
-          <span><strong>{masterResult.master.audioStreams.length}</strong>{t('handoffMasterAudioStreams')}</span>
-        </div>
-        {masterResult.blockers.length === 0
-          ? <p className={css.success}>{t('handoffMasterTechnicalPass')}</p>
-          : <div role="status"><strong>{t('handoffMasterBlockers')}</strong><ul className={css.blockers}>
-            {masterResult.blockers.map(code => <li key={code}>{masterBlockerLabel(code)} <code>{code}</code></li>)}
-          </ul></div>}
-        <p className={css.warning}>{t('handoffMasterExactBoundary')}</p>
-        {masterResult.blockers.length === 0 && <div className={css.candidateCommit}>
-          <div><strong>{t('handoffCandidateCommitTitle')}</strong><p>{t('handoffCandidateCommitBoundary')}</p>
-            {candidateAccess === undefined && candidateState !== 'succeeded'
-              && <p className={css.warning}>{t('handoffCandidateCommitUnavailable')}</p>}
-            {candidateState === 'succeeded' && <p className={css.success}>{t('handoffCandidateSaved')}</p>}
-            {candidateState === 'unknown' && <p role="alert" className={css.warning}>{t('handoffCandidateUnknown')} ({candidateError})</p>}
-            {candidateState === 'failed' && <p role="alert" className={css.error}>{t('handoffCandidateFailed')} ({candidateError})</p>}
+                  setSelectedPackage(file)
+                  if (consumedPackageAccess) setImportAccess(undefined)
+                  setImportResult(undefined)
+                  setImportError(undefined)
+                  setImportState('idle')
+                  setMasterAccess(undefined)
+                  setSelectedMaster(undefined)
+                  setMasterResult(undefined)
+                  setMasterError(undefined)
+                  setMasterState('idle')
+                  setCandidateAccess(undefined)
+                  setCandidateError(undefined)
+                  setCandidateState('idle')
+                }} />
+            </label>
+            {selectedPackage !== undefined && <p>{selectedPackage.name} · {selectedPackage.size.toLocaleString()} bytes</p>}
+            {importAccess === undefined && <p className={css.warning}>{t('handoffImportNeedsDownload')}</p>}
           </div>
-          <button type="button"
-            disabled={candidateAccess === undefined || selectedMaster === undefined
-              || candidateState === 'running' || candidateState === 'unknown' || candidateState === 'succeeded'}
-            onClick={() => { void saveCandidate() }}>
-            {candidateState === 'running' ? t('handoffCandidateSaving') : t('handoffCandidateSave')}
+          <button type="button" disabled={selectedPackage === undefined || importAccess === undefined || importState === 'running'}
+            onClick={() => { void verifyPackage() }}>
+            {importState === 'running' ? t('handoffImportRunning') : t('handoffImportVerify')}
           </button>
-          {candidateState === 'running' && <div className={css.inlineProgress}><span>{t('handoffCandidateSaving')}</span><div className={css.progressBar} /></div>}
+          {importState === 'running' && <div className={css.inlineProgress}><span>{t('handoffImportRunning')}</span><div className={css.progressBar} /></div>}
+        </div>
+        {importError !== undefined && <div ref={importErrorRef} role="alert" tabIndex={-1} className={css.errorSummary}>
+          <strong>{t('handoffImportFailed')}</strong><p>{t('handoffImportFailedHelp')} ({importError})</p>
         </div>}
-        <details><summary>{t('handoffAdvanced')}</summary>
-          <p>Master SHA: {masterResult.master.sha256}</p>
-          <p>{masterResult.master.size.toLocaleString()} bytes · {masterResult.master.mimeType ?? '—'} · {masterResult.master.formatName ?? '—'}</p>
-          <p>Package SHA: {masterResult.binding.packageSha256}</p>
-          <p>Source SHA: {masterResult.binding.sourceSnapshotSha256}</p>
-          <p>Projection SHA: {masterResult.binding.projectionSha256}</p>
+        {importResult !== undefined && <section className={css.preview} aria-labelledby="handoff-import-result">
+          <header><div><strong id="handoff-import-result">{t('handoffImportResult')}</strong>
+            <p>{t('handoffImportPreviewOnly')}</p></div></header>
+          <ul className={css.conclusions} aria-label={t('handoffImportConclusions')}>
+            <li data-state="pass"><strong>{t('handoffImportReceipt')}</strong><span>{t('handoffImportMatched')}</span></li>
+            <li data-state="pass"><strong>{t('handoffImportInternal')}</strong><span>{t('handoffImportValid')}</span></li>
+            <li data-state={importResult.currentAuthority.matches ? 'pass' : 'stale'}>
+              <strong>{t('handoffImportCurrent')}</strong>
+              <span>{importResult.currentAuthority.matches ? t('handoffImportCurrentMatched') : t('handoffImportCurrentDrift')}</span>
+            </li>
+          </ul>
+          <div className={css.previewGrid}>
+            <div><strong>{t('handoffImportTracks')}</strong><ul>{importResult.preview.tracks.map(track =>
+              <li key={`${track.name}-${track.kind}`}>{track.name} · {track.kind} · {track.clipCount}</li>)}</ul></div>
+            <div><strong>{t('handoffImportShots')}</strong><ol>{importResult.preview.orderedShots.map(shot =>
+              <li key={shot.frameId ?? String(shot.order)}>#{shot.frameNo ?? shot.order} · {shot.videoRange?.durationSec ?? '—'}s<br />
+                <code>{shot.videoPath}</code><br /><code>{shot.audioPath}</code></li>)}</ol></div>
+          </div>
+          <details><summary>{t('handoffImportMedia')}</summary><ul>{importResult.preview.media.map(media =>
+            <li key={`${media.kind}-${media.path}`}><code>{media.path}</code> · {media.size.toLocaleString()} bytes</li>)}</ul></details>
+          <p>{t('handoffImportUnresolved')}: {importResult.preview.unresolved.length}</p>
+          <details><summary>{t('handoffAdvanced')}</summary>
+            <p>Package SHA: {importResult.packageSha256}</p><p>{importResult.packageSize.toLocaleString()} bytes</p>
+          </details>
+        </section>}
+        <div className={css.importBox}>
+          <div>
+            <strong>{t('handoffMasterTitle')}</strong>
+            <p>{t('handoffMasterBoundary')}</p>
+            <label className={css.fileField}>
+              <span>{t('handoffMasterChoose')}</span>
+              <input type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm"
+                aria-describedby={masterError === undefined ? undefined : 'handoff-master-error'}
+                disabled={masterAccess === undefined || masterState !== 'idle'}
+                onChange={(event) => {
+                  if (masterState !== 'idle') return
+                  const file = event.currentTarget.files?.[0]
+                  setSelectedMaster(file)
+                  setMasterResult(undefined)
+                  setMasterError(undefined)
+                  setMasterState('idle')
+                  setCandidateAccess(undefined)
+                  setCandidateError(undefined)
+                  setCandidateState('idle')
+                }} />
+            </label>
+            {selectedMaster !== undefined && <p>{selectedMaster.name} · {selectedMaster.type || '—'} · {selectedMaster.size.toLocaleString()} bytes</p>}
+            {masterAccess === undefined && <p className={css.warning}>{t('handoffMasterNeedsImport')}</p>}
+            {masterState === 'succeeded' && <p className={css.warning}>{t('handoffMasterLocked')}</p>}
+          </div>
+          <button type="button" disabled={selectedMaster === undefined || masterAccess === undefined || masterState !== 'idle'}
+            onClick={() => { void verifyMaster() }}>
+            {masterState === 'running' ? t('handoffMasterRunning') : t('handoffMasterVerify')}
+          </button>
+          {masterState === 'running' && <div className={css.inlineProgress}><span>{t('handoffMasterRunning')}</span><div className={css.progressBar} /></div>}
+        </div>
+        {masterError !== undefined && <div id="handoff-master-error" role="alert" className={css.errorSummary}>
+          <strong>{t('handoffMasterFailed')}</strong><p>{t('handoffMasterFailedHelp')} ({masterError})</p>
+        </div>}
+        {masterResult !== undefined && <section className={css.preview} aria-labelledby="handoff-master-result">
+          <header><div><strong id="handoff-master-result">{t('handoffMasterResult')}</strong>
+            <p>{t('handoffMasterPreviewOnly')}</p></div></header>
+          <div className={css.masterFacts}>
+            <span><strong>{masterResult.master.container ?? '—'}</strong>{t('handoffMasterContainer')}</span>
+            <span><strong>{masterResult.master.durationSec ?? '—'}s</strong>{t('handoffMasterDuration')}</span>
+            <span><strong>{masterResult.master.width ?? '—'} × {masterResult.master.height ?? '—'}</strong>{t('handoffMasterResolution')}</span>
+            <span><strong>{masterResult.master.fps ?? '—'}</strong>{t('handoffMasterFps')}</span>
+            <span><strong>{masterResult.master.audioStreams.length}</strong>{t('handoffMasterAudioStreams')}</span>
+          </div>
+          {masterResult.blockers.length === 0
+            ? <p className={css.success}>{t('handoffMasterTechnicalPass')}</p>
+            : <div role="status"><strong>{t('handoffMasterBlockers')}</strong><ul className={css.blockers}>
+              {masterResult.blockers.map(code => <li key={code}>{masterBlockerLabel(code)} <code>{code}</code></li>)}
+            </ul></div>}
+          <p className={css.warning}>{t('handoffMasterExactBoundary')}</p>
+          {masterResult.blockers.length === 0 && <div className={css.candidateCommit}>
+            <div><strong>{t('handoffCandidateCommitTitle')}</strong><p>{t('handoffCandidateCommitBoundary')}</p>
+              {candidateAccess === undefined && candidateState !== 'succeeded'
+              && <p className={css.warning}>{t('handoffCandidateCommitUnavailable')}</p>}
+              {candidateState === 'succeeded' && <p className={css.success}>{t('handoffCandidateSaved')}</p>}
+              {candidateState === 'unknown' && <p role="alert" className={css.warning}>{t('handoffCandidateUnknown')} ({candidateError})</p>}
+              {candidateState === 'failed' && <p role="alert" className={css.error}>{t('handoffCandidateFailed')} ({candidateError})</p>}
+            </div>
+            <button type="button"
+              disabled={candidateAccess === undefined || selectedMaster === undefined
+              || candidateState === 'running' || candidateState === 'unknown' || candidateState === 'succeeded'}
+              onClick={() => { void saveCandidate() }}>
+              {candidateState === 'running' ? t('handoffCandidateSaving') : t('handoffCandidateSave')}
+            </button>
+            {candidateState === 'running' && <div className={css.inlineProgress}><span>{t('handoffCandidateSaving')}</span><div className={css.progressBar} /></div>}
+          </div>}
+          <details><summary>{t('handoffAdvanced')}</summary>
+            <p>Master SHA: {masterResult.master.sha256}</p>
+            <p>{masterResult.master.size.toLocaleString()} bytes · {masterResult.master.mimeType ?? '—'} · {masterResult.master.formatName ?? '—'}</p>
+            <p>Package SHA: {masterResult.binding.packageSha256}</p>
+            <p>Source SHA: {masterResult.binding.sourceSnapshotSha256}</p>
+            <p>Projection SHA: {masterResult.binding.projectionSha256}</p>
+          </details>
+        </section>}
+        <details><summary>{t('handoffAdvancedProjection')}</summary>
+          <p>Source SHA: {projection.sourceSnapshotSha256}</p>
+          <p>Projection SHA: {projection.projectionSha256}</p>
         </details>
-      </section>}
-      <details><summary>{t('handoffAdvancedProjection')}</summary>
-        <p>Source SHA: {projection.sourceSnapshotSha256}</p>
-        <p>Projection SHA: {projection.projectionSha256}</p>
       </details>
     </>}
-    <section className={css.candidateShelf} aria-labelledby="handoff-candidate-shelf">
-      <header><div><strong id="handoff-candidate-shelf">{t('handoffCandidateShelfTitle')}</strong>
-        <p>{t('handoffCandidateShelfBoundary')}</p></div>
-      <button type="button" onClick={() => {
-        void refreshReturnedMasterState()
-      }}>
-        {t('handoffCandidateRead')}
-      </button>
-      </header>
-      {candidateError !== undefined && candidateState !== 'unknown' && candidateState !== 'failed'
-        && <p role="alert" className={css.error}>{t('handoffCandidateListFailed')} ({candidateError})</p>}
-      {selectionError !== undefined && <p role="alert" className={css.error}>
-        {t('handoffSelectionFailed')} ({selectionError})
-      </p>}
-      {candidates.length === 0
-        ? <p className={css.warning}>{t('handoffCandidateEmpty')}</p>
-        : <ul>{candidates.map((candidate) => {
-          const authority = selectionStatus?.candidates.find(item => item.assetId === candidate.assetId)
-          const statusLabel = authority?.current === true ? t('handoffSelectionCurrent')
-            : authority?.selectionStatus === 'Stale' ? t('handoffSelectionStale')
-              : t('handoffCandidateUnselected')
-          const selectable = authority !== undefined && authority.mimeType === 'video/mp4'
-            && (authority.selectionStatus === 'Unselected' || authority.selectionStatus === 'Stale')
-          return <li key={candidate.assetId}>
-            <div><strong>{t('handoffCandidateStatus')}</strong><span>{statusLabel}</span></div>
-            <p>{candidate.mimeType} · {candidate.byteSize.toLocaleString()} bytes · {candidate.savedAt}</p>
-            <p className={authority?.current === true ? css.success : css.warning}>
-              {authority?.current === true ? t('handoffSelectionCurrentBoundary') : t('handoffSelectionPendingBoundary')}
-            </p>
-            <button type="button" disabled={!selectable || selectionState === 'previewing'
-              || selectionState === 'saving'} onClick={() => { void previewSelection(candidate.assetId) }}>
-              {selectionState === 'previewing' && selectionPreview?.candidate.assetId === candidate.assetId
-                ? t('handoffSelectionPreviewing') : t('handoffSelectionPreview')}
-            </button>
-            <details><summary>{t('handoffAdvanced')}</summary>
-              <p>Asset ID: {candidate.assetId}</p>
-              <p>Master SHA: {candidate.masterSha256}</p>
-              <p>Package SHA: {candidate.packageSha256}</p>
-              <p>Source SHA: {candidate.sourceSnapshotSha256}</p>
-              <p>Preflight SHA: {candidate.preflightSha256}</p>
-              <p>Receipt: {candidate.commandReceiptId}</p>
-              <p>Selection receipt: {authority?.selectionReceiptId ?? '—'}</p>
-              <p>Final output: {authority?.finalOutputId ?? '—'}</p>
-            </details>
-          </li>})}</ul>}
-      {selectionPreview !== undefined && <section className={css.preview} aria-labelledby="handoff-selection-preview">
-        <header><div><strong id="handoff-selection-preview">{t('handoffSelectionPreviewTitle')}</strong>
-          <p>{t('handoffSelectionPreviewBoundary')}</p></div></header>
-        <div className={css.previewGrid}>
-          <div><strong>{t('handoffSelectionOriginal')}</strong>
-            <p>{selectionPreview.candidate.selectionStatus} · {selectionPreview.candidate.qualityStatus}</p>
-            <p>{selectionPreview.candidate.mimeType} · {selectionPreview.candidate.byteSize.toLocaleString()} bytes</p>
-          </div>
-          <div><strong>{t('handoffSelectionImpact')}</strong>
-            <p>{t('handoffSelectionImpactInPlace')}</p>
-            <p>{selectionPreview.impact.revokePreviousFormalSelection
-              ? t('handoffSelectionReplacesCurrent') : t('handoffSelectionFirstFormal')}</p>
-          </div>
-        </div>
-        {selectionPreview.hardBlockers.length > 0 && <ul className={css.blockers}>
-          {selectionPreview.hardBlockers.map(code => <li key={code}>{code}</li>)}
-        </ul>}
-        <p className={css.warning}>{t('handoffSelectionReleaseBlocked')}</p>
-        <button type="button" className={css.actionCard}
-          disabled={!selectionPreview.canConfirm || selectionState === 'saving'}
-          onClick={() => { void confirmSelection() }}>
-          <span>{selectionState === 'saving' ? t('handoffSelectionSaving') : t('handoffSelectionSave')}</span>
-          {selectionState === 'saving' && <div className={css.progressBar} />}
+    <details className={css.supporting} open={!compact}><summary>回传成片、质检与归档</summary>
+      <section className={css.candidateShelf} aria-labelledby="handoff-candidate-shelf">
+        <header><div><strong id="handoff-candidate-shelf">{t('handoffCandidateShelfTitle')}</strong>
+          <p>{t('handoffCandidateShelfBoundary')}</p></div>
+        <button type="button" onClick={() => {
+          void refreshReturnedMasterState()
+        }}>
+          {t('handoffCandidateRead')}
         </button>
-        <details><summary>{t('handoffAdvanced')}</summary>
-          <p>Preview SHA: {selectionPreview.previewSha256}</p>
-          <p>Asset ID: {selectionPreview.candidate.assetId}</p>
-          <p>Current formal: {selectionPreview.currentFormalMaster?.assetId ?? '—'}</p>
-          <p>Release blockers: {selectionPreview.releaseConditions.blockers.join(', ')}</p>
-        </details>
-      </section>}
-      {selectionResult !== undefined && <div className={css.success} role="status">
-        <strong>{t('handoffSelectionSaved')}</strong>
-        <p>{t('handoffSelectionSavedBoundary')}</p>
-        <p>{selectionResult.selectedBy} · {selectionResult.selectedAt}</p>
-        <details><summary>{t('handoffAdvanced')}</summary>
-          <p>Receipt: {selectionResult.commandReceiptId}</p>
-          <p>Final output: {selectionResult.finalOutputId}</p>
-          <p>Release blockers: {selectionResult.releaseConditions.blockers.join(', ')}</p>
-        </details>
-      </div>}
-      <section className={css.preview} aria-labelledby="handoff-technical-qc-title">
-        <header><div><strong id="handoff-technical-qc-title">{t('handoffTechnicalQcTitle')}</strong>
-          <p>{t('handoffTechnicalQcBoundary')}</p></div></header>
-        {selectionStatus?.currentFormalMaster === null || selectionStatus === undefined
-          ? <p className={css.warning}>{t('handoffTechnicalQcNeedsMaster')}</p>
-          : <div className={css.candidateCommit}>
-            <div><strong>{t('handoffTechnicalQcCurrent')}</strong>
-              <p>{selectionStatus.currentFormalMaster.assetId} · {selectionStatus.currentFormalMaster.qualityStatus}</p>
-            </div>
-            <button type="button" disabled={technicalQcState === 'previewing'
-              || technicalQcState === 'running'} onClick={() => { void previewTechnicalQc() }}>
-              {technicalQcState === 'previewing'
-                ? t('handoffTechnicalQcPreparing') : t('handoffTechnicalQcPrepare')}
-            </button>
-          </div>}
-        {technicalQcError !== undefined && <p role="alert" className={css.error}>
-          {t('handoffTechnicalQcFailed')} ({technicalQcError})
+        </header>
+        {candidateError !== undefined && candidateState !== 'unknown' && candidateState !== 'failed'
+        && <p role="alert" className={css.error}>{t('handoffCandidateListFailed')} ({candidateError})</p>}
+        {selectionError !== undefined && <p role="alert" className={css.error}>
+          {t('handoffSelectionFailed')} ({selectionError})
         </p>}
-        {technicalQcPreview !== undefined && <div>
-          {technicalQcPreview.hardBlockers.length > 0 && <ul className={css.blockers}>
-            {technicalQcPreview.hardBlockers.map(code => <li key={code}>{code}</li>)}
+        {candidates.length === 0
+          ? <p className={css.warning}>{t('handoffCandidateEmpty')}</p>
+          : <ul>{candidates.map((candidate) => {
+            const authority = selectionStatus?.candidates.find(item => item.assetId === candidate.assetId)
+            const statusLabel = authority?.current === true ? t('handoffSelectionCurrent')
+              : authority?.selectionStatus === 'Stale' ? t('handoffSelectionStale')
+                : t('handoffCandidateUnselected')
+            const selectable = authority !== undefined && authority.mimeType === 'video/mp4'
+            && (authority.selectionStatus === 'Unselected' || authority.selectionStatus === 'Stale')
+            return <li key={candidate.assetId}>
+              <div><strong>{t('handoffCandidateStatus')}</strong><span>{statusLabel}</span></div>
+              <p>{candidate.mimeType} · {candidate.byteSize.toLocaleString()} bytes · {candidate.savedAt}</p>
+              <p className={authority?.current === true ? css.success : css.warning}>
+                {authority?.current === true ? t('handoffSelectionCurrentBoundary') : t('handoffSelectionPendingBoundary')}
+              </p>
+              <button type="button" disabled={!selectable || selectionState === 'previewing'
+              || selectionState === 'saving'} onClick={() => { void previewSelection(candidate.assetId) }}>
+                {selectionState === 'previewing' && selectionPreview?.candidate.assetId === candidate.assetId
+                  ? t('handoffSelectionPreviewing') : t('handoffSelectionPreview')}
+              </button>
+              <details><summary>{t('handoffAdvanced')}</summary>
+                <p>Asset ID: {candidate.assetId}</p>
+                <p>Master SHA: {candidate.masterSha256}</p>
+                <p>Package SHA: {candidate.packageSha256}</p>
+                <p>Source SHA: {candidate.sourceSnapshotSha256}</p>
+                <p>Preflight SHA: {candidate.preflightSha256}</p>
+                <p>Receipt: {candidate.commandReceiptId}</p>
+                <p>Selection receipt: {authority?.selectionReceiptId ?? '—'}</p>
+                <p>Final output: {authority?.finalOutputId ?? '—'}</p>
+              </details>
+            </li>})}</ul>}
+        {selectionPreview !== undefined && <section className={css.preview} aria-labelledby="handoff-selection-preview">
+          <header><div><strong id="handoff-selection-preview">{t('handoffSelectionPreviewTitle')}</strong>
+            <p>{t('handoffSelectionPreviewBoundary')}</p></div></header>
+          <div className={css.previewGrid}>
+            <div><strong>{t('handoffSelectionOriginal')}</strong>
+              <p>{selectionPreview.candidate.selectionStatus} · {selectionPreview.candidate.qualityStatus}</p>
+              <p>{selectionPreview.candidate.mimeType} · {selectionPreview.candidate.byteSize.toLocaleString()} bytes</p>
+            </div>
+            <div><strong>{t('handoffSelectionImpact')}</strong>
+              <p>{t('handoffSelectionImpactInPlace')}</p>
+              <p>{selectionPreview.impact.revokePreviousFormalSelection
+                ? t('handoffSelectionReplacesCurrent') : t('handoffSelectionFirstFormal')}</p>
+            </div>
+          </div>
+          {selectionPreview.hardBlockers.length > 0 && <ul className={css.blockers}>
+            {selectionPreview.hardBlockers.map(code => <li key={code}>{code}</li>)}
           </ul>}
+          <p className={css.warning}>{t('handoffSelectionReleaseBlocked')}</p>
           <button type="button" className={css.actionCard}
-            disabled={!technicalQcPreview.canConfirm || technicalQcState === 'running'}
-            onClick={() => { void confirmTechnicalQc() }}>
-            <span>{technicalQcState === 'running'
-              ? t('handoffTechnicalQcRunning') : t('handoffTechnicalQcRun')}</span>
-            {technicalQcState === 'running' && <div className={css.progressBar} />}
+            disabled={!selectionPreview.canConfirm || selectionState === 'saving'}
+            onClick={() => { void confirmSelection() }}>
+            <span>{selectionState === 'saving' ? t('handoffSelectionSaving') : t('handoffSelectionSave')}</span>
+            {selectionState === 'saving' && <div className={css.progressBar} />}
           </button>
           <details><summary>{t('handoffAdvanced')}</summary>
-            <p>Preview SHA: {technicalQcPreview.previewSha256}</p>
-            <p>Asset ID: {technicalQcPreview.currentFormalMaster.assetId ?? '—'}</p>
-            <p>Final output: {technicalQcPreview.currentFormalMaster.finalOutputId ?? '—'}</p>
+            <p>Preview SHA: {selectionPreview.previewSha256}</p>
+            <p>Asset ID: {selectionPreview.candidate.assetId}</p>
+            <p>Current formal: {selectionPreview.currentFormalMaster?.assetId ?? '—'}</p>
+            <p>Release blockers: {selectionPreview.releaseConditions.blockers.join(', ')}</p>
           </details>
-        </div>}
-        {technicalQcResult !== undefined && <div role="status">
-          <p className={technicalQcResult.outcome === 'passed' ? css.success : css.warning}>
-            <strong>{technicalQcResult.outcome === 'passed'
-              ? t('handoffTechnicalQcPassed')
-              : technicalQcResult.outcome === 'failed'
-                ? t('handoffTechnicalQcRejected') : t('handoffTechnicalQcUnknown')}</strong>
-          </p>
-          <div className={css.masterFacts}>
-            <span><strong>{technicalQcResult.technicalFacts.container || '—'}</strong>{t('handoffMasterContainer')}</span>
-            <span><strong>{technicalQcResult.technicalFacts.durationSec ?? '—'}s</strong>{t('handoffMasterDuration')}</span>
-            <span><strong>{technicalQcResult.technicalFacts.width ?? '—'} × {technicalQcResult.technicalFacts.height ?? '—'}</strong>{t('handoffMasterResolution')}</span>
-            <span><strong>{technicalQcResult.technicalFacts.fps || '—'}</strong>{t('handoffMasterFps')}</span>
-            <span><strong>{technicalQcResult.technicalFacts.videoCodec || '—'} / {technicalQcResult.technicalFacts.audioCodec || '—'}</strong>{t('handoffTechnicalQcCodecs')}</span>
-          </div>
-          {technicalQcResult.checks.length > 0 && <ul className={css.blockers}>
-            {technicalQcResult.checks.map(code => <li key={code}>{code}</li>)}
-          </ul>}
-          {technicalQcResult.uncertainty.length > 0 && <ul className={css.blockers}>
-            {technicalQcResult.uncertainty.map(code => <li key={code}>{code}</li>)}
-          </ul>}
-          <p className={css.warning}>{t('handoffTechnicalQcExactBoundary')}</p>
+        </section>}
+        {selectionResult !== undefined && <div className={css.success} role="status">
+          <strong>{t('handoffSelectionSaved')}</strong>
+          <p>{t('handoffSelectionSavedBoundary')}</p>
+          <p>{selectionResult.selectedBy} · {selectionResult.selectedAt}</p>
           <details><summary>{t('handoffAdvanced')}</summary>
-            <p>Receipt: {technicalQcResult.commandReceiptId}</p>
-            <p>Result SHA: {technicalQcResult.canonicalResultSha256}</p>
-            <p>Master SHA: {technicalQcResult.masterSha256}</p>
-            <p>Authority: {technicalQcResult.releaseAuthorityRevisionAtStart} → {technicalQcResult.releaseAuthorityRevision}</p>
-            <p>Release blockers: {technicalQcResult.releaseConditions.blockers.join(', ')}</p>
+            <p>Receipt: {selectionResult.commandReceiptId}</p>
+            <p>Final output: {selectionResult.finalOutputId}</p>
+            <p>Release blockers: {selectionResult.releaseConditions.blockers.join(', ')}</p>
           </details>
         </div>}
-        {technicalQcStatus !== undefined && technicalQcStatus.currentTechnicalQc === null
+        <section className={css.preview} aria-labelledby="handoff-technical-qc-title">
+          <header><div><strong id="handoff-technical-qc-title">{t('handoffTechnicalQcTitle')}</strong>
+            <p>{t('handoffTechnicalQcBoundary')}</p></div></header>
+          {selectionStatus?.currentFormalMaster === null || selectionStatus === undefined
+            ? <p className={css.warning}>{t('handoffTechnicalQcNeedsMaster')}</p>
+            : <div className={css.candidateCommit}>
+              <div><strong>{t('handoffTechnicalQcCurrent')}</strong>
+                <p>{selectionStatus.currentFormalMaster.assetId} · {selectionStatus.currentFormalMaster.qualityStatus}</p>
+              </div>
+              <button type="button" disabled={technicalQcState === 'previewing'
+              || technicalQcState === 'running'} onClick={() => { void previewTechnicalQc() }}>
+                {technicalQcState === 'previewing'
+                  ? t('handoffTechnicalQcPreparing') : t('handoffTechnicalQcPrepare')}
+              </button>
+            </div>}
+          {technicalQcError !== undefined && <p role="alert" className={css.error}>
+            {t('handoffTechnicalQcFailed')} ({technicalQcError})
+          </p>}
+          {technicalQcPreview !== undefined && <div>
+            {technicalQcPreview.hardBlockers.length > 0 && <ul className={css.blockers}>
+              {technicalQcPreview.hardBlockers.map(code => <li key={code}>{code}</li>)}
+            </ul>}
+            <button type="button" className={css.actionCard}
+              disabled={!technicalQcPreview.canConfirm || technicalQcState === 'running'}
+              onClick={() => { void confirmTechnicalQc() }}>
+              <span>{technicalQcState === 'running'
+                ? t('handoffTechnicalQcRunning') : t('handoffTechnicalQcRun')}</span>
+              {technicalQcState === 'running' && <div className={css.progressBar} />}
+            </button>
+            <details><summary>{t('handoffAdvanced')}</summary>
+              <p>Preview SHA: {technicalQcPreview.previewSha256}</p>
+              <p>Asset ID: {technicalQcPreview.currentFormalMaster.assetId ?? '—'}</p>
+              <p>Final output: {technicalQcPreview.currentFormalMaster.finalOutputId ?? '—'}</p>
+            </details>
+          </div>}
+          {technicalQcResult !== undefined && <div role="status">
+            <p className={technicalQcResult.outcome === 'passed' ? css.success : css.warning}>
+              <strong>{technicalQcResult.outcome === 'passed'
+                ? t('handoffTechnicalQcPassed')
+                : technicalQcResult.outcome === 'failed'
+                  ? t('handoffTechnicalQcRejected') : t('handoffTechnicalQcUnknown')}</strong>
+            </p>
+            <div className={css.masterFacts}>
+              <span><strong>{technicalQcResult.technicalFacts.container || '—'}</strong>{t('handoffMasterContainer')}</span>
+              <span><strong>{technicalQcResult.technicalFacts.durationSec ?? '—'}s</strong>{t('handoffMasterDuration')}</span>
+              <span><strong>{technicalQcResult.technicalFacts.width ?? '—'} × {technicalQcResult.technicalFacts.height ?? '—'}</strong>{t('handoffMasterResolution')}</span>
+              <span><strong>{technicalQcResult.technicalFacts.fps || '—'}</strong>{t('handoffMasterFps')}</span>
+              <span><strong>{technicalQcResult.technicalFacts.videoCodec || '—'} / {technicalQcResult.technicalFacts.audioCodec || '—'}</strong>{t('handoffTechnicalQcCodecs')}</span>
+            </div>
+            {technicalQcResult.checks.length > 0 && <ul className={css.blockers}>
+              {technicalQcResult.checks.map(code => <li key={code}>{code}</li>)}
+            </ul>}
+            {technicalQcResult.uncertainty.length > 0 && <ul className={css.blockers}>
+              {technicalQcResult.uncertainty.map(code => <li key={code}>{code}</li>)}
+            </ul>}
+            <p className={css.warning}>{t('handoffTechnicalQcExactBoundary')}</p>
+            <details><summary>{t('handoffAdvanced')}</summary>
+              <p>Receipt: {technicalQcResult.commandReceiptId}</p>
+              <p>Result SHA: {technicalQcResult.canonicalResultSha256}</p>
+              <p>Master SHA: {technicalQcResult.masterSha256}</p>
+              <p>Authority: {technicalQcResult.releaseAuthorityRevisionAtStart} → {technicalQcResult.releaseAuthorityRevision}</p>
+              <p>Release blockers: {technicalQcResult.releaseConditions.blockers.join(', ')}</p>
+            </details>
+          </div>}
+          {technicalQcStatus !== undefined && technicalQcStatus.currentTechnicalQc === null
           && <p className={css.warning}>{t('handoffTechnicalQcUnverified')}</p>}
-        {technicalQcStatus?.staleTechnicalQc !== null
+          {technicalQcStatus?.staleTechnicalQc !== null
           && technicalQcStatus?.staleTechnicalQc !== undefined
           && <p className={css.warning}>
             {technicalQcStatus.staleTechnicalQc.code}: {technicalQcStatus.staleTechnicalQc.driftFields.join(', ')}
           </p>}
-      </section>
-      <section className={css.preview} aria-labelledby="handoff-evidence-freeze-title">
-        <header><div><strong id="handoff-evidence-freeze-title">{t('handoffEvidenceFreezeTitle')}</strong>
-          <p>{t('handoffEvidenceFreezeBoundary')}</p></div></header>
-        <div className={css.candidateCommit}>
-          <div>
-            <strong>{t('handoffEvidenceFreezeCurrent')}</strong>
-            <p>{selectionStatus?.currentFormalMaster === null || selectionStatus === undefined
-              ? t('handoffEvidenceFreezeNeedsMaster')
-              : `${selectionStatus.currentFormalMaster.assetId} · ${selectionStatus.currentFormalMaster.qualityStatus}`}</p>
-            <p>{technicalQcStatus?.currentTechnicalQc?.outcome === 'passed'
-              ? t('handoffEvidenceFreezeQcPassed') : t('handoffEvidenceFreezeNeedsQc')}</p>
-          </div>
-          <button type="button" disabled={evidenceFreezeState === 'previewing'
+        </section>
+        <section className={css.preview} aria-labelledby="handoff-evidence-freeze-title">
+          <header><div><strong id="handoff-evidence-freeze-title">{t('handoffEvidenceFreezeTitle')}</strong>
+            <p>{t('handoffEvidenceFreezeBoundary')}</p></div></header>
+          <div className={css.candidateCommit}>
+            <div>
+              <strong>{t('handoffEvidenceFreezeCurrent')}</strong>
+              <p>{selectionStatus?.currentFormalMaster === null || selectionStatus === undefined
+                ? t('handoffEvidenceFreezeNeedsMaster')
+                : `${selectionStatus.currentFormalMaster.assetId} · ${selectionStatus.currentFormalMaster.qualityStatus}`}</p>
+              <p>{technicalQcStatus?.currentTechnicalQc?.outcome === 'passed'
+                ? t('handoffEvidenceFreezeQcPassed') : t('handoffEvidenceFreezeNeedsQc')}</p>
+            </div>
+            <button type="button" disabled={evidenceFreezeState === 'previewing'
             || evidenceFreezeState === 'saving'} onClick={() => { void previewEvidenceFreeze() }}>
-            {evidenceFreezeState === 'previewing'
-              ? t('handoffEvidenceFreezePreparing') : t('handoffEvidenceFreezePrepare')}
-          </button>
-        </div>
-        {evidenceFreezeError !== undefined && <p role="alert" className={css.error}>
-          {t('handoffEvidenceFreezeFailed')} ({evidenceFreezeError})
-        </p>}
-        {evidenceFreezePreview !== undefined && <div>
-          <div className={css.masterFacts}>
-            <span><strong>{evidenceFreezePreview.machineReady
-              ? t('handoffTrue') : t('handoffFalse')}</strong>{t('handoffEvidenceFreezeMachineReady')}</span>
-            <span><strong>{evidenceFreezePreview.subject.buildIdentity.sourceClean
-              ? t('handoffTrue') : t('handoffFalse')}</strong>{t('handoffEvidenceFreezeSourceClean')}</span>
+              {evidenceFreezeState === 'previewing'
+                ? t('handoffEvidenceFreezePreparing') : t('handoffEvidenceFreezePrepare')}
+            </button>
           </div>
-          {evidenceFreezePreview.hardBlockers.length > 0 && <div role="status">
-            <strong>{t('handoffEvidenceFreezeBlockers')}</strong>
-            <ul className={css.blockers}>{evidenceFreezePreview.hardBlockers.map(code =>
-              <li key={code}><code>{code}</code></li>)}</ul>
+          {evidenceFreezeError !== undefined && <p role="alert" className={css.error}>
+            {t('handoffEvidenceFreezeFailed')} ({evidenceFreezeError})
+          </p>}
+          {evidenceFreezePreview !== undefined && <div>
+            <div className={css.masterFacts}>
+              <span><strong>{evidenceFreezePreview.machineReady
+                ? t('handoffTrue') : t('handoffFalse')}</strong>{t('handoffEvidenceFreezeMachineReady')}</span>
+              <span><strong>{evidenceFreezePreview.subject.buildIdentity.sourceClean
+                ? t('handoffTrue') : t('handoffFalse')}</strong>{t('handoffEvidenceFreezeSourceClean')}</span>
+            </div>
+            {evidenceFreezePreview.hardBlockers.length > 0 && <div role="status">
+              <strong>{t('handoffEvidenceFreezeBlockers')}</strong>
+              <ul className={css.blockers}>{evidenceFreezePreview.hardBlockers.map(code =>
+                <li key={code}><code>{code}</code></li>)}</ul>
+            </div>}
+            <button type="button" className={css.actionCard}
+              disabled={!evidenceFreezePreview.canConfirm || evidenceFreezeState === 'saving'}
+              onClick={() => { void confirmEvidenceFreeze() }}>
+              <span>{evidenceFreezeState === 'saving'
+                ? t('handoffEvidenceFreezeSaving') : t('handoffEvidenceFreezeSave')}</span>
+              {evidenceFreezeState === 'saving' && <div className={css.progressBar} />}
+            </button>
+            <details><summary>{t('handoffAdvanced')}</summary>
+              <p>Build: {evidenceFreezePreview.subject.buildIdentity.commit}</p>
+              <p>Preview SHA: {evidenceFreezePreview.previewSha256}</p>
+              <p>Master SHA: {evidenceFreezePreview.subject.final.sha256}</p>
+              <p>Machine blockers: {evidenceFreezePreview.machineBlockers.join(', ') || '—'}</p>
+              <p>Release blockers: {evidenceFreezePreview.releaseBlockers.join(', ') || '—'}</p>
+            </details>
           </div>}
-          <button type="button" className={css.actionCard}
-            disabled={!evidenceFreezePreview.canConfirm || evidenceFreezeState === 'saving'}
-            onClick={() => { void confirmEvidenceFreeze() }}>
-            <span>{evidenceFreezeState === 'saving'
-              ? t('handoffEvidenceFreezeSaving') : t('handoffEvidenceFreezeSave')}</span>
-            {evidenceFreezeState === 'saving' && <div className={css.progressBar} />}
-          </button>
-          <details><summary>{t('handoffAdvanced')}</summary>
-            <p>Build: {evidenceFreezePreview.subject.buildIdentity.commit}</p>
-            <p>Preview SHA: {evidenceFreezePreview.previewSha256}</p>
-            <p>Master SHA: {evidenceFreezePreview.subject.final.sha256}</p>
-            <p>Machine blockers: {evidenceFreezePreview.machineBlockers.join(', ') || '—'}</p>
-            <p>Release blockers: {evidenceFreezePreview.releaseBlockers.join(', ') || '—'}</p>
-          </details>
-        </div>}
-        {evidenceFreezeResult !== undefined && <div className={css.success} role="status">
-          <strong>{t('handoffEvidenceFreezeSaved')}</strong>
-          <p>{t('handoffEvidenceFreezeSavedBoundary')}</p>
-          <p>{evidenceFreezeResult.packageId} · {evidenceFreezeResult.zipBytes.toLocaleString()} bytes</p>
-          <details><summary>{t('handoffAdvanced')}</summary>
-            <p>Manifest SHA: {evidenceFreezeResult.manifestSha256}</p>
-            <p>ZIP SHA: {evidenceFreezeResult.zipSha256}</p>
-            <p>Receipt: {evidenceFreezeResult.commandReceiptId}</p>
-            <p>Authority: {evidenceFreezeResult.releaseAuthorityRevisionBefore} → {evidenceFreezeResult.releaseAuthorityRevision}</p>
-          </details>
-        </div>}
-        {evidenceFreezeStatus?.currentPackage !== null
+          {evidenceFreezeResult !== undefined && <div className={css.success} role="status">
+            <strong>{t('handoffEvidenceFreezeSaved')}</strong>
+            <p>{t('handoffEvidenceFreezeSavedBoundary')}</p>
+            <p>{evidenceFreezeResult.packageId} · {evidenceFreezeResult.zipBytes.toLocaleString()} bytes</p>
+            <details><summary>{t('handoffAdvanced')}</summary>
+              <p>Manifest SHA: {evidenceFreezeResult.manifestSha256}</p>
+              <p>ZIP SHA: {evidenceFreezeResult.zipSha256}</p>
+              <p>Receipt: {evidenceFreezeResult.commandReceiptId}</p>
+              <p>Authority: {evidenceFreezeResult.releaseAuthorityRevisionBefore} → {evidenceFreezeResult.releaseAuthorityRevision}</p>
+            </details>
+          </div>}
+          {evidenceFreezeStatus?.currentPackage !== null
           && evidenceFreezeStatus?.currentPackage !== undefined
           && evidenceFreezeResult === undefined
           && <p className={css.success}>{t('handoffEvidenceFreezeRecovered')}</p>}
-      </section>
-      <section className={css.rc1Grid} aria-label={t('handoffRc1Workspace')}>
-        <article className={css.rc1Card} aria-labelledby="handoff-content-review-title">
-          <header><div><strong id="handoff-content-review-title">{t('handoffContentReviewTitle')}</strong>
-            <p>{t('handoffContentReviewBoundary')}</p></div></header>
-          {rc1Status?.contentReview.binding === undefined
-            ? <p className={css.warning}>{t('handoffContentReviewNeedsRc1')}</p>
-            : <>
-              <div className={humanSessionState === 'ready' ? css.success : css.warning}>
-                <p>{humanSessionState === 'ready'
-                  ? t('handoffHumanSessionReady') : t('handoffHumanSessionRequired')}</p>
-                {humanSessionState !== 'ready' && <>
-                  <label className={css.formField}><span>{t('handoffHumanUsername')}</span>
-                    <input autoComplete="username" value={humanUsername} maxLength={120}
-                      onChange={(event) => { setHumanUsername(event.currentTarget.value) }} /></label>
-                  <label className={css.formField}><span>{t('handoffHumanPassword')}</span>
-                    <input type="password" autoComplete="current-password" value={humanPassword}
-                      onChange={(event) => { setHumanPassword(event.currentTarget.value) }} /></label>
-                  <button type="button" disabled={humanSessionState === 'saving'
+        </section>
+        <section className={css.rc1Grid} aria-label={t('handoffRc1Workspace')}>
+          <article className={css.rc1Card} aria-labelledby="handoff-content-review-title">
+            <header><div><strong id="handoff-content-review-title">{t('handoffContentReviewTitle')}</strong>
+              <p>{t('handoffContentReviewBoundary')}</p></div></header>
+            {rc1Status?.contentReview.binding === undefined
+              ? <p className={css.warning}>{t('handoffContentReviewNeedsRc1')}</p>
+              : <>
+                <div className={humanSessionState === 'ready' ? css.success : css.warning}>
+                  <p>{humanSessionState === 'ready'
+                    ? t('handoffHumanSessionReady') : t('handoffHumanSessionRequired')}</p>
+                  {humanSessionState !== 'ready' && <>
+                    <label className={css.formField}><span>{t('handoffHumanUsername')}</span>
+                      <input autoComplete="username" value={humanUsername} maxLength={120}
+                        onChange={(event) => { setHumanUsername(event.currentTarget.value) }} /></label>
+                    <label className={css.formField}><span>{t('handoffHumanPassword')}</span>
+                      <input type="password" autoComplete="current-password" value={humanPassword}
+                        onChange={(event) => { setHumanPassword(event.currentTarget.value) }} /></label>
+                    <button type="button" disabled={humanSessionState === 'saving'
                     || humanUsername.trim() === '' || humanPassword === ''}
-                  onClick={() => { void authenticateHumanSession() }}>
-                    {humanSessionState === 'saving'
-                      ? t('handoffHumanSessionSaving') : t('handoffHumanSessionLogin')}
-                  </button>
-                  {humanSessionState === 'failed'
+                    onClick={() => { void authenticateHumanSession() }}>
+                      {humanSessionState === 'saving'
+                        ? t('handoffHumanSessionSaving') : t('handoffHumanSessionLogin')}
+                    </button>
+                    {humanSessionState === 'failed'
                     && <p role="alert" className={css.error}>{t('handoffHumanSessionFailed')}</p>}
-                </>}
-              </div>
-              {humanSessionState === 'ready' && <div className={humanPresenceStatus?.state === 'registered'
-                ? css.success : css.warning} role="status">
-                <p>{humanPresenceStatus?.state === 'registered'
-                  ? t('handoffHumanPresenceReady') : t('handoffHumanPresenceRequired')}</p>
-                {humanPresenceStatus?.state !== 'registered' && <button type="button"
-                  disabled={humanPresenceState === 'prompting'}
-                  onClick={() => { void registerHumanPresence() }}>
-                  {humanPresenceState === 'prompting'
-                    ? t('handoffHumanPresencePrompting') : t('handoffHumanPresenceRegister')}
-                </button>}
-                {humanPresenceState === 'prompting' && <button type="button" className={css.rejectButton}
-                  onClick={() => { humanPresenceController.current?.abort() }}>
-                  {t('handoffHumanPresenceCancel')}
-                </button>}
-                {humanPresenceState === 'failed' && <p role="alert" className={css.error}>
-                  {humanPresenceError === 'platform_presence_cancelled'
-                    ? t('handoffHumanPresenceCancelled') : t('handoffHumanPresenceFailed')}
-                </p>}
-              </div>}
-              {rc1Status.contentReview.identity.state === 'bound'
-                ? <p className={css.success}>{t('handoffIdentityBound')}</p>
-                : <div className={css.warning} role="status">
-                  <p>{rc1Status.contentReview.identity.state === 'unbound'
-                    ? t('handoffIdentityUnbound') : t('handoffIdentityInvalid')}</p>
-                  {rc1Status.contentReview.identity.canEnroll && <button type="button"
-                    disabled={identitySaving || humanSessionState !== 'ready'
-                      || humanPresenceStatus?.state !== 'registered'}
-                    onClick={() => { void enrollNaturalPersonIdentity() }}>
-                    {identitySaving ? t('handoffIdentitySaving') : t('handoffIdentityEnroll')}
+                  </>}
+                </div>
+                {humanSessionState === 'ready' && <div className={humanPresenceStatus?.state === 'registered'
+                  ? css.success : css.warning} role="status">
+                  <p>{humanPresenceStatus?.state === 'registered'
+                    ? t('handoffHumanPresenceReady') : t('handoffHumanPresenceRequired')}</p>
+                  {humanPresenceStatus?.state !== 'registered' && <button type="button"
+                    disabled={humanPresenceState === 'prompting'}
+                    onClick={() => { void registerHumanPresence() }}>
+                    {humanPresenceState === 'prompting'
+                      ? t('handoffHumanPresencePrompting') : t('handoffHumanPresenceRegister')}
                   </button>}
+                  {humanPresenceState === 'prompting' && <button type="button" className={css.rejectButton}
+                    onClick={() => { humanPresenceController.current?.abort() }}>
+                    {t('handoffHumanPresenceCancel')}
+                  </button>}
+                  {humanPresenceState === 'failed' && <p role="alert" className={css.error}>
+                    {humanPresenceError === 'platform_presence_cancelled'
+                      ? t('handoffHumanPresenceCancelled') : t('handoffHumanPresenceFailed')}
+                  </p>}
                 </div>}
-              {identityError !== undefined && <p role="alert" className={css.error}>
-                {identityError === 'natural_person_identity_relogin_required'
-                  ? t('handoffIdentityRelogin') : t('handoffIdentityUnknown')}
-              </p>}
-              <video className={css.finalPlayer} controls preload="none"
-                src={`/api/qingmu/editorial-handoff/final-media?${new URLSearchParams({
-                  projectId, episodeId, sha256: rc1Status.contentReview.binding.finalSha256,
-                }).toString()}`}
-                onTimeUpdate={(event) => {
-                  const media = event.currentTarget
-                  setPlayedCoverage(continuousPlayedCoverage(media.played, media.duration))
-                }} />
-              <p className={playedCoverage === 1 ? css.success : css.warning}>
-                {t('handoffContentPlayback')}: {(playedCoverage * 100).toFixed(0)}%
-              </p>
-              <fieldset className={css.reviewChecks} disabled={!rc1Status.contentReview.canDecide}>
-                <legend>{t('handoffContentChecks')}</legend>
-                {([
-                  ['picture_and_timing_reviewed', 'handoffContentCheckPicture'],
-                  ['dialogue_and_audio_reviewed', 'handoffContentCheckAudio'],
-                  ['continuity_and_content_reviewed', 'handoffContentCheckContinuity'],
-                ] as const).map(([key, label]) => <label key={key}>
-                  <input type="checkbox" checked={contentChecks[key] === true}
-                    onChange={(event) => {
-                      const checked = event.currentTarget.checked
-                      setContentChecks(current => ({ ...current, [key]: checked }))
-                    }} />
-                  <span>{t(label)}</span>
-                </label>)}
-              </fieldset>
-              <label className={css.formField}><span>{t('handoffContentNote')}</span>
-                <textarea value={contentNote} maxLength={2000}
-                  disabled={!rc1Status.contentReview.canDecide}
-                  onChange={(event) => { setContentNote(event.currentTarget.value) }} /></label>
-              <label className={css.formField}><span>{t('handoffContentRejectReason')}</span>
-                <select value={contentRejectReason} disabled={!rc1Status.contentReview.canDecide}
-                  onChange={(event) => { setContentRejectReason(event.currentTarget.value) }}>
-                  <option value="picture_or_timing">{t('handoffContentRejectPicture')}</option>
-                  <option value="dialogue_or_audio">{t('handoffContentRejectAudio')}</option>
-                  <option value="continuity_or_content">{t('handoffContentRejectContinuity')}</option>
-                  <option value="other">{t('handoffContentRejectOther')}</option>
-                </select></label>
-              <div className={css.decisionActions}>
-                <button type="button" className={css.actionCard}
-                  disabled={playedCoverage !== 1
+                {rc1Status.contentReview.identity.state === 'bound'
+                  ? <p className={css.success}>{t('handoffIdentityBound')}</p>
+                  : <div className={css.warning} role="status">
+                    <p>{rc1Status.contentReview.identity.state === 'unbound'
+                      ? t('handoffIdentityUnbound') : t('handoffIdentityInvalid')}</p>
+                    {rc1Status.contentReview.identity.canEnroll && <button type="button"
+                      disabled={identitySaving || humanSessionState !== 'ready'
+                      || humanPresenceStatus?.state !== 'registered'}
+                      onClick={() => { void enrollNaturalPersonIdentity() }}>
+                      {identitySaving ? t('handoffIdentitySaving') : t('handoffIdentityEnroll')}
+                    </button>}
+                  </div>}
+                {identityError !== undefined && <p role="alert" className={css.error}>
+                  {identityError === 'natural_person_identity_relogin_required'
+                    ? t('handoffIdentityRelogin') : t('handoffIdentityUnknown')}
+                </p>}
+                <video className={css.finalPlayer} controls preload="none"
+                  src={`/api/qingmu/editorial-handoff/final-media?${new URLSearchParams({
+                    projectId, episodeId, sha256: rc1Status.contentReview.binding.finalSha256,
+                  }).toString()}`}
+                  onTimeUpdate={(event) => {
+                    const media = event.currentTarget
+                    setPlayedCoverage(continuousPlayedCoverage(media.played, media.duration))
+                  }} />
+                <p className={playedCoverage === 1 ? css.success : css.warning}>
+                  {t('handoffContentPlayback')}: {(playedCoverage * 100).toFixed(0)}%
+                </p>
+                <fieldset className={css.reviewChecks} disabled={!rc1Status.contentReview.canDecide}>
+                  <legend>{t('handoffContentChecks')}</legend>
+                  {([
+                    ['picture_and_timing_reviewed', 'handoffContentCheckPicture'],
+                    ['dialogue_and_audio_reviewed', 'handoffContentCheckAudio'],
+                    ['continuity_and_content_reviewed', 'handoffContentCheckContinuity'],
+                  ] as const).map(([key, label]) => <label key={key}>
+                    <input type="checkbox" checked={contentChecks[key] === true}
+                      onChange={(event) => {
+                        const checked = event.currentTarget.checked
+                        setContentChecks(current => ({ ...current, [key]: checked }))
+                      }} />
+                    <span>{t(label)}</span>
+                  </label>)}
+                </fieldset>
+                <label className={css.formField}><span>{t('handoffContentNote')}</span>
+                  <textarea value={contentNote} maxLength={2000}
+                    disabled={!rc1Status.contentReview.canDecide}
+                    onChange={(event) => { setContentNote(event.currentTarget.value) }} /></label>
+                <label className={css.formField}><span>{t('handoffContentRejectReason')}</span>
+                  <select value={contentRejectReason} disabled={!rc1Status.contentReview.canDecide}
+                    onChange={(event) => { setContentRejectReason(event.currentTarget.value) }}>
+                    <option value="picture_or_timing">{t('handoffContentRejectPicture')}</option>
+                    <option value="dialogue_or_audio">{t('handoffContentRejectAudio')}</option>
+                    <option value="continuity_or_content">{t('handoffContentRejectContinuity')}</option>
+                    <option value="other">{t('handoffContentRejectOther')}</option>
+                  </select></label>
+                <div className={css.decisionActions}>
+                  <button type="button" className={css.actionCard}
+                    disabled={playedCoverage !== 1
                     || Object.values(contentChecks).some(value => !value)
                     || humanSessionState !== 'ready'
                     || humanPresenceStatus?.state !== 'registered'
                     || rc1Status.contentReview.identity.state !== 'bound'
                     || !rc1Status.contentReview.canDecide || rc1State === 'deciding'}
-                  onClick={() => { void decideFinalContent('accepted') }}>
-                  <span>{rc1State === 'deciding' ? t('handoffContentDeciding') : t('handoffContentAccept')}</span>
-                  {rc1State === 'deciding' && <div className={css.progressBar} />}
-                </button>
-                <button type="button" className={css.rejectButton}
-                  disabled={playedCoverage !== 1
+                    onClick={() => { void decideFinalContent('accepted') }}>
+                    <span>{rc1State === 'deciding' ? t('handoffContentDeciding') : t('handoffContentAccept')}</span>
+                    {rc1State === 'deciding' && <div className={css.progressBar} />}
+                  </button>
+                  <button type="button" className={css.rejectButton}
+                    disabled={playedCoverage !== 1
                     || humanSessionState !== 'ready'
                     || humanPresenceStatus?.state !== 'registered'
                     || rc1Status.contentReview.identity.state !== 'bound'
                     || !rc1Status.contentReview.canDecide
                     || rc1State === 'deciding'}
-                  onClick={() => { void decideFinalContent('rejected') }}>
-                  {rc1State === 'deciding' ? t('handoffContentDeciding') : t('handoffContentReject')}
-                </button>
-              </div>
-            </>}
-          {rc1Status?.contentReview.legacyDecisionRequiresReconfirmation === true
+                    onClick={() => { void decideFinalContent('rejected') }}>
+                    {rc1State === 'deciding' ? t('handoffContentDeciding') : t('handoffContentReject')}
+                  </button>
+                </div>
+              </>}
+            {rc1Status?.contentReview.legacyDecisionRequiresReconfirmation === true
             && <p className={css.warning} role="status">{t('handoffContentLegacyUnverified')}</p>}
-          {rc1Status?.contentReview.currentDecision !== null
+            {rc1Status?.contentReview.currentDecision !== null
             && rc1Status?.contentReview.currentDecision !== undefined
             && rc1Status.contentReview.currentDecision.humanAuthorityVerified
             && <p className={rc1Status.contentReview.currentDecision.decision === 'accepted'
@@ -2329,48 +2353,49 @@ export function EditorialHandoff({ projectId, episodeId, port, t }: Props) {
               {rc1Status.contentReview.currentDecision.decision === 'accepted'
                 ? t('handoffContentAccepted') : t('handoffContentRejected')}
             </p>}
-        </article>
-        <article className={css.rc1Card} aria-labelledby="handoff-machine-evidence-title">
-          <header><div><strong id="handoff-machine-evidence-title">{t('handoffMachineEvidenceTitle')}</strong>
-            <p>{t('handoffMachineEvidenceBoundary')}</p></div></header>
-          {rc1Status?.rc1Package.currentPackage === null || rc1Status === undefined
-            ? <>
-              <p className={css.warning}>{t('handoffMachineEvidenceMissing')}</p>
-              <button type="button" onClick={() => { void previewRc1() }}
-                disabled={rc1State === 'loading' || rc1State === 'saving'}>{t('handoffMachineEvidencePrepare')}</button>
-              {rc1Preview !== undefined && <>
-                {rc1Preview.hardBlockers.length > 0 && <ul className={css.blockers}>
-                  {rc1Preview.hardBlockers.map(code => <li key={code}>{code}</li>)}</ul>}
-                <button type="button" className={css.actionCard} onClick={() => { void confirmRc1() }}
-                  disabled={!rc1Preview.canConfirm || rc1State === 'saving'}>
-                  <span>{rc1State === 'saving' ? t('handoffMachineEvidenceFreezing') : t('handoffMachineEvidenceFreeze')}</span>
-                  {rc1State === 'saving' && <div className={css.progressBar} />}
-                </button>
+          </article>
+          <article className={css.rc1Card} aria-labelledby="handoff-machine-evidence-title">
+            <header><div><strong id="handoff-machine-evidence-title">{t('handoffMachineEvidenceTitle')}</strong>
+              <p>{t('handoffMachineEvidenceBoundary')}</p></div></header>
+            {rc1Status?.rc1Package.currentPackage === null || rc1Status === undefined
+              ? <>
+                <p className={css.warning}>{t('handoffMachineEvidenceMissing')}</p>
+                <button type="button" onClick={() => { void previewRc1() }}
+                  disabled={rc1State === 'loading' || rc1State === 'saving'}>{t('handoffMachineEvidencePrepare')}</button>
+                {rc1Preview !== undefined && <>
+                  {rc1Preview.hardBlockers.length > 0 && <ul className={css.blockers}>
+                    {rc1Preview.hardBlockers.map(code => <li key={code}>{code}</li>)}</ul>}
+                  <button type="button" className={css.actionCard} onClick={() => { void confirmRc1() }}
+                    disabled={!rc1Preview.canConfirm || rc1State === 'saving'}>
+                    <span>{rc1State === 'saving' ? t('handoffMachineEvidenceFreezing') : t('handoffMachineEvidenceFreeze')}</span>
+                    {rc1State === 'saving' && <div className={css.progressBar} />}
+                  </button>
+                </>}
+              </>
+              : <>
+                <p className={css.success}>{t('handoffMachineEvidenceReady')}</p>
+                <a className={css.downloadLink} href={`/api/qingmu/editorial-handoff/rc1-evidence.zip?${new URLSearchParams({
+                  projectId, episodeId,
+                  packageId: rc1Status.rc1Package.currentPackage.packageId,
+                  manifestSha256: rc1Status.rc1Package.currentPackage.manifestSha256,
+                }).toString()}`} download="qingmu-rc1-evidence.zip">{t('handoffMachineEvidenceDownload')}</a>
+                <details><summary>{t('handoffAdvanced')}</summary>
+                  <p>Package: {rc1Status.rc1Package.currentPackage.packageId}</p>
+                  <p>Manifest SHA: {rc1Status.rc1Package.currentPackage.manifestSha256}</p>
+                  <p>ZIP SHA: {rc1Status.rc1Package.currentPackage.zipSha256}</p>
+                </details>
               </>}
-            </>
-            : <>
-              <p className={css.success}>{t('handoffMachineEvidenceReady')}</p>
-              <a className={css.downloadLink} href={`/api/qingmu/editorial-handoff/rc1-evidence.zip?${new URLSearchParams({
-                projectId, episodeId,
-                packageId: rc1Status.rc1Package.currentPackage.packageId,
-                manifestSha256: rc1Status.rc1Package.currentPackage.manifestSha256,
-              }).toString()}`} download="qingmu-rc1-evidence.zip">{t('handoffMachineEvidenceDownload')}</a>
-              <details><summary>{t('handoffAdvanced')}</summary>
-                <p>Package: {rc1Status.rc1Package.currentPackage.packageId}</p>
-                <p>Manifest SHA: {rc1Status.rc1Package.currentPackage.manifestSha256}</p>
-                <p>ZIP SHA: {rc1Status.rc1Package.currentPackage.zipSha256}</p>
-              </details>
-            </>}
-        </article>
-        <article className={css.rc1Card} aria-labelledby="handoff-release-signoff-title">
-          <header><div><strong id="handoff-release-signoff-title">{t('handoffReleaseSignoffTitle')}</strong>
-            <p>{t('handoffReleaseSignoffBoundary')}</p></div></header>
-          <p className={css.warning}>{t('handoffReleaseSignoffMissing')}</p>
-          <ul className={css.blockers}>{(rc1Status?.releaseSignoff.blockers
+          </article>
+          <article className={css.rc1Card} aria-labelledby="handoff-release-signoff-title">
+            <header><div><strong id="handoff-release-signoff-title">{t('handoffReleaseSignoffTitle')}</strong>
+              <p>{t('handoffReleaseSignoffBoundary')}</p></div></header>
+            <p className={css.warning}>{t('handoffReleaseSignoffMissing')}</p>
+            <ul className={css.blockers}>{(rc1Status?.releaseSignoff.blockers
             ?? ['organization_release_signoff_missing']).map(code => <li key={code}>{code}</li>)}</ul>
-        </article>
+          </article>
+        </section>
+        {rc1Error !== undefined && <p className={css.error} role="alert">{rc1Error}</p>}
       </section>
-      {rc1Error !== undefined && <p className={css.error} role="alert">{rc1Error}</p>}
-    </section>
+    </details>
   </section>
 }

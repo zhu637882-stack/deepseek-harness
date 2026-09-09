@@ -1,21 +1,26 @@
-.application { --dsw-alias-bg-layer-1:#191d1f; --dsw-alias-bg-layer-2:#22282a; --dsw-alias-label-primary:#f3f1eb; --dsw-alias-label-secondary:#c1cac6; --dsw-alias-label-tertiary:#9ca8a2; --dsw-alias-border-l2:#37423d; --qingmu-accent:#80b4a3; --qingmu-accent-strong:#649a88; --qingmu-soft:#253b33; height:100dvh; width:100%; min-width:0; display:flex; flex-direction:column; overflow:hidden; color:#f3f1eb; background:#171b1d; color-scheme:dark; font:14px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; }
+.application { --dsw-alias-bg-layer-1:#0b1117; --dsw-alias-bg-layer-2:#121c26; --dsw-alias-label-primary:#edf4f8; --dsw-alias-label-secondary:#bac8d2; --dsw-alias-label-tertiary:#8698a5; --dsw-alias-border-l2:#2b3d4a; --qingmu-accent:#d7ff52; --qingmu-accent-strong:#b8df3f; --qingmu-soft:#1b291d; height:100dvh; width:100%; min-width:0; display:flex; flex-direction:column; overflow:hidden; color:#edf4f8; background:#090e13; color-scheme:dark; font:14px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; }
 .application *, .application *::before, .application *::after { box-sizing:border-box; }
-.header { min-height:72px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:0 24px; border-bottom:1px solid #34403b; background:#1c2123; flex:none; }
+.header { min-height:72px; display:grid; grid-template-columns:minmax(230px,1fr) auto minmax(230px,1fr); align-items:stretch; gap:20px; padding:0 24px; border-bottom:1px solid #283845; background:#0d141b; flex:none; }
 .identity { display:flex; align-items:center; gap:20px; min-width:0; }
 .brand { display:flex; align-items:center; gap:8px; flex:none; font-family:"Songti SC",serif; font-size:21px; letter-spacing:4px; }
-.brand svg { width:26px; height:30px; fill:none; stroke:#91b6a7; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; }
-.brand small { display:block; margin-top:-2px; font:8px/1.5 -apple-system,sans-serif; letter-spacing:2px; color:#91a49a; }
-.project { min-width:0; max-width:210px; padding-left:18px; border-left:1px solid #3d4742; }
+.brand svg { width:26px; height:30px; fill:none; stroke:#d7ff52; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; }
+.brand small { display:block; margin-top:-2px; font:8px/1.5 -apple-system,sans-serif; letter-spacing:2px; color:#8395a2; }
+.project { min-width:0; max-width:210px; padding-left:18px; border-left:1px solid #2b3d49; }
 .project select { display:block; width:100%; max-width:210px; min-height:25px; padding:0 16px 0 0; border:0; border-radius:0; background:transparent; color:inherit; font:inherit; text-overflow:ellipsis; }
-.project select + select { color:#aebbb4; font-size:12px; }
-.header nav { display:flex; align-self:stretch; align-items:stretch; flex:none; gap:4px; }
-.header nav button { display:flex; align-items:center; gap:7px; padding:0 13px; border:0; border-bottom:2px solid transparent; border-radius:0; background:transparent; color:#adb9b3; font:inherit; cursor:pointer; white-space:nowrap; }
-.header nav small { font-size:10px; opacity:.65; }
-.header nav button[aria-current] { color:#aed9c6; border-bottom-color:#88bba5; background:#23332c; }
-.header button:hover { color:#f3f1eb; background:#293630; }
-.tools { display:flex; gap:4px; flex:none; }
-.tools button { padding:8px 9px; border:0; border-radius:4px; font:inherit; background:transparent; color:#b8c4bd; cursor:pointer; white-space:nowrap; }
-.content { flex:1; min-height:0; min-width:0; overflow:hidden; }
-.application :focus-visible { outline:2px solid #9dccb6; outline-offset:3px; }
-@media(max-width:1350px) { .header { padding:0 16px; gap:10px; } .identity { gap:12px; } .project { max-width:176px; padding-left:12px; } .header nav button { padding:0 10px; } .tools button { padding:8px 6px; } }
-@media(max-width:1100px) { .header { flex-wrap:wrap; padding-top:10px; gap:8px; } .header nav { order:3; width:100%; height:44px; justify-content:center; } .project { max-width:260px; } }
+.project select + select { color:#9cacb8; font-size:12px; }
+.workflow { display:flex; align-self:stretch; align-items:stretch; justify-content:center; flex:none; gap:2px; }
+.workflow button { position:relative; display:flex; align-items:center; gap:7px; padding:0 13px; border:0; border-bottom:2px solid transparent; border-radius:0; background:transparent; color:#aab9c3; font:inherit; cursor:pointer; white-space:nowrap; }
+.workflow small { color:#718491; font-size:10px; font-variant-numeric:tabular-nums; }
+.workflow button[aria-current] { color:#eff7e4; border-bottom-color:#d7ff52; background:#17231b; }
+.workflow button[aria-current] small { color:#d7ff52; }
+.header button:hover { color:#edf4f8; background:#16212b; }
+.tools { display:flex; align-items:center; justify-content:flex-end; gap:4px; flex:none; }
+.tools button { padding:8px 9px; border:0; border-radius:4px; font:inherit; background:transparent; color:#b9c8d1; cursor:pointer; white-space:nowrap; }
+.moreTools { display:none; position:relative; }
+.moreMenu { position:absolute; z-index:20; top:calc(100% + 8px); right:0; display:grid; min-width:132px; padding:6px; border:1px solid #38505d; border-radius:8px; background:#121c26; box-shadow:0 14px 30px #0009; }
+.moreMenu button { width:100%; min-height:38px; text-align:left; }
+.content { flex:1; min-height:0; min-width:0; overflow:hidden; background:radial-gradient(circle at 52% -30%, #162435 0%, transparent 42%), #090e13; }
+.application :focus-visible { outline:2px solid #d7ff52; outline-offset:3px; }
+@media(max-width:1350px) { .header { grid-template-columns:minmax(195px,1fr) auto minmax(165px,1fr); padding:0 16px; gap:10px; } .identity { gap:12px; } .project { max-width:176px; padding-left:12px; } .workflow button { padding:0 10px; } .tools button { padding:8px 6px; } }
+@media(max-width:1100px) { .header { grid-template-columns:minmax(0,1fr) auto; grid-template-rows:58px 44px; gap:0 10px; padding:0 16px; } .workflow { grid-column:1 / -1; grid-row:2; justify-content:flex-start; overflow-x:auto; } .project { max-width:260px; } }
+@media(max-width:620px) { .header { grid-template-columns:minmax(0,1fr) auto; min-height:102px; padding:0 12px; } .brand { font-size:18px; letter-spacing:3px; } .project { max-width:160px; padding-left:10px; } .secondaryTool { display:none; } .moreTools { display:block; } .workflow button { padding:0 11px; } .workflow button span { font-size:12px; } }

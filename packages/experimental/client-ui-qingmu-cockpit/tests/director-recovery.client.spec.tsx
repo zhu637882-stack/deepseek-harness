@@ -80,3 +80,21 @@ it('uses the same reference-draft leave guard for planning and reference shot na
   fireEvent.click(screen.getByText('planning select'))
   expect(onSelectShotId).toHaveBeenCalledWith('h2')
 })
+
+it('keeps existing scene planning folded when the initial projection arrives late', () => {
+  const props = { projectId: 'p1', episodeId: 'e1', selectedShotId: 'h1', shotItems: [], port: {},
+    onSelectShotId: vi.fn(), onCommitted: vi.fn(), onUnsavedChange: vi.fn(), t: (k: string) => k } as unknown as DirectorWorkspaceProps
+  const view = render(<DirectorWorkspace {...props} />)
+  const details = screen.getByText('场景规划与导演助手').parentElement as HTMLDetailsElement
+  expect(details.open).toBe(true)
+  fireEvent(details, new Event('toggle'))
+  view.rerender(<DirectorWorkspace {...props} projection={{ projectId: 'p1', episodeId: 'e1', director: {
+    shotRelations: { scenes: [], shots: [{ shotId: 'h1', sceneId: 's1' }] },
+  } } as unknown as DirectorWorkspaceProps['projection']} />)
+  expect(details.open).toBe(false)
+  expect(planningRender).toHaveBeenLastCalledWith(expect.objectContaining({ canonicalDirectorScope: {
+    projectId: 'p1', episodeId: 'e1', sceneId: 's1', shotId: 'h1',
+  } }))
+  details.open = true; fireEvent(details, new Event('toggle'))
+  expect(details.open).toBe(true)
+})

@@ -1,5 +1,5 @@
 /** Validate the browser draft and the read-only Writer compilation response. */
-import { localMediaUrl } from './local-media-url.ts'
+import { localSignedMediaUrl } from './local-media-url.ts'
 import type {
   ReferenceVideoAssetsRequest, ReferenceVideoAssetsResponse,
   ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse,
@@ -214,15 +214,22 @@ export function normalizeReferenceVideoAssets(
     if (a.asset_type !== 'image' && a.asset_type !== 'audio') continue
     if (typeof a.sha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(a.sha256)) continue
     id(a.id)
-    const candidateUrl = typeof a.public_url === 'string' ? localMediaUrl(a.public_url, a.id, upstream) : ''
+    const candidateUrl = typeof a.public_url === 'string' && typeof a.preview_media_id === 'string'
+      ? localSignedMediaUrl(a.public_url, a.preview_media_id, upstream) : ''
     let browserUrl = ''
     try {
       const url = new URL(candidateUrl)
-      if (url.origin === new URL(upstream).origin && /^\/api\/media\/media_[A-Za-z0-9_-]+$/u.test(url.pathname)
+      if (url.origin === new URL(upstream).origin && typeof a.preview_media_id === 'string'
+        && /^media_[A-Za-z0-9_-]+$/u.test(a.preview_media_id) && url.pathname === `/api/media/${a.preview_media_id}`
         && /^[a-f0-9]{64}$/u.test(url.searchParams.get('signature') ?? '')
-        && /^\d+$/u.test(url.searchParams.get('expires') ?? '') && !url.username && !url.password && !url.hash) browserUrl = url.href
+        && /^\d+$/u.test(url.searchParams.get('expires') ?? '') && !url.username && !url.password && !url.hash
+        && [...url.searchParams.keys()].sort().join(',') === 'expires,signature') browserUrl = url.href
     } catch { /* Empty or non-capability URLs get a text-only asset card. */ }
-    items.push({ assetId: a.id, assetSha256: a.sha256, label: `${(typeof a.role === 'string' ? a.role : a.asset_type).slice(0, 64)} · ${a.id.slice(-8)}`,
+    const roleLabels: Record<string, string> = { scene_reference: '场景参考', character_reference: '人物参考', prop_reference: '道具参考' }
+    const label = roleLabels[typeof a.role === 'string' ? a.role : ''] ?? (a.asset_type === 'audio' ? '参考音色' : '参考图片')
+    const displayName = typeof a.display_name === 'string' ? a.display_name.trim().slice(0, 128) : ''
+    const displayLabel = displayName || `${label} ${String((request.page - 1) * 200 + items.length + 1).padStart(2, '0')}`
+    items.push({ assetId: a.id, assetSha256: a.sha256, label: displayLabel,
       mediaType: a.asset_type === 'image' ? 'reference_image' : 'reference_audio', browserUrl })
   }
   return { projectId: request.projectId, page: request.page, pages: v.pages, items }

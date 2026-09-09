@@ -8,7 +8,7 @@
 .workspace textarea { min-height: 208px; resize: vertical; }
 .workspace button { border: 1px solid var(--dsw-alias-border-l2); border-radius: 7px; background: var(--dsw-alias-bg-layer-2); color: inherit; min-height: 40px; padding: 8px 14px; cursor: pointer; font: inherit; }
 .workspace button:hover:not(:disabled) { border-color: var(--qingmu-accent); }
-.workspace .primary { background: var(--qingmu-accent-strong); border-color: var(--qingmu-accent); color: #fff; }
+.workspace .primary { background: var(--qingmu-accent); border-color: var(--qingmu-accent); color: #10170b; }
 .workspace :disabled { cursor: not-allowed; opacity: .55; }
 .workspace :focus-visible { outline: 2px solid var(--qingmu-accent); outline-offset: 3px; }
 .workspace summary { cursor: pointer; min-height: 32px; }
@@ -27,3 +27,5 @@
 .line p { padding-top: 20px; }
 .speaker { display: grid; gap: 8px; }
 @media (max-width: 900px) { .columns { grid-template-columns: 1fr; } .help { border-left: 0; padding-left: 0; } .line { grid-template-columns: 90px minmax(0, 1fr); } .speaker { grid-column: 2; } }
+
+@media (max-width: 600px) { .workspace { padding:16px; gap:16px; } .workspace h3 { font-size:21px; } .line { grid-template-columns:minmax(0,1fr); } .speaker { grid-column:auto; } }

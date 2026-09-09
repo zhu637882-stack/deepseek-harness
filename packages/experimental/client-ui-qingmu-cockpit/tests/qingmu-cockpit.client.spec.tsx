@@ -630,6 +630,11 @@ function shotRelationMethod(request: Parameters<QingmuYimengPort['shotRelationMe
 
 function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
   return Object.assign({
+    referenceVideoDraft: vi.fn<QingmuYimengPort['referenceVideoDraft']>(async request => ({ schema: 'jason.reference-video-draft.v1',
+      ...request, frameSha256: 'a'.repeat(64), draft: null, mediaTypes: {}, providerCalls: 0, generationQueued: false })),
+    referenceVideoRuns: vi.fn<QingmuYimengPort['referenceVideoRuns']>(async request => ({ schema: 'jason.reference-video-runs.v1',
+      ...request, items: [], providerCalls: 0 })),
+    referenceVideoAssets: vi.fn<QingmuYimengPort['referenceVideoAssets']>(async request => ({ ...request, page: 1, pages: 1, items: [] })),
     queueProductionTake: vi.fn(async () => { throw new Error('Production Take uses a separate fixture') }),
     readCreativeContract: vi.fn<QingmuYimengPort['readCreativeContract']>(async request => ({ schema: 'jason.qingmu-creative-contract-state.v1' as const,
       projectId: request.projectId, configured: false, locked: false, revision: null, sha256: null,
@@ -934,7 +939,7 @@ describe('embedded Qingmu entry scope', () => {
     await waitFor(() => { expect(port.workflow).toHaveBeenCalled() })
     expect(document.getElementById('root')?.hasAttribute('inert')).toBe(false)
     fireEvent.click(within(navigation).getByRole('button', { name: /故事/ }))
-    expect(await screen.findByRole('heading', { name: '故事' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: '故事与剧本' })).toBeTruthy()
     expect(new URLSearchParams(location.search).get('qingmuView')).toBe('story')
     fireEvent.click(within(navigation).getByRole('button', { name: /拍摄与审看/ }))
     expect(screen.getByRole('navigation', { name: '创作流程' })).toBe(navigation)
@@ -947,7 +952,7 @@ describe('embedded Qingmu entry scope', () => {
     history.replaceState({}, '', '/?qingmuView=story')
     const port = makePort()
     mount(port, undefined, true)
-    expect(await screen.findByRole('heading', { name: '故事' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: '故事与剧本' })).toBeTruthy()
     await waitFor(() => { expect(port.workflow).toHaveBeenCalled() })
     expect(screen.getByRole('button', { name: /01故事/ }).getAttribute('aria-current')).toBe('step')
     expect(port.commitScript).not.toHaveBeenCalled()

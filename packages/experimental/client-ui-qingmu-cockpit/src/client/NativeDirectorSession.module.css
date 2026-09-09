@@ -1,0 +1,10 @@
+.session { display:flex; flex-wrap:wrap; align-items:center; gap:10px 18px; margin:0 0 20px; padding:14px 18px; border:1px solid var(--dsw-alias-border-l2); border-radius:12px; background:var(--dsw-alias-bg-layer-2); }
+.session p { margin:0; color:var(--dsw-alias-label-secondary); font-size:13px; }
+.session button { border:1px solid var(--dsw-alias-border-l2); background:var(--dsw-alias-bg-layer-1); color:var(--dsw-alias-label-primary); padding:9px 14px; border-radius:8px; min-height:40px; font:inherit; cursor:pointer; }
+.session button:disabled { opacity:.45; cursor:default; }
+.session :focus-visible { outline:2px solid var(--qingmu-accent); outline-offset:3px; }
+.diagnostics { margin-left:auto; font-size:12px; color:var(--dsw-alias-label-secondary); }
+.diagnostics summary { cursor:pointer; padding:8px 0; }
+.diagnostics[open] { flex-basis:100%; }
+.diagnostics pre { max-height:180px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+@media(max-width:600px) { .session { padding:12px; } .session > p { flex-basis:100%; } }

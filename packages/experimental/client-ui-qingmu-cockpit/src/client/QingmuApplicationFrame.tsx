@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import css from './QingmuApplicationFrame.module.css'
 
 export type CreativeStep = 'story' | 'assets' | 'storyboard' | 'shooting' | 'delivery'
@@ -35,6 +35,18 @@ export function QingmuApplicationFrame({ projects, episodes, projectId, episodeI
   readonly onOpenTools?: (() => void) | undefined
   readonly children: ReactNode
 }) {
+  const [toolsOpen, setToolsOpen] = useState(false)
+  const moreButton = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (!toolsOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setToolsOpen(false)
+      moreButton.current?.focus()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => { document.removeEventListener('keydown', onKeyDown) }
+  }, [toolsOpen])
   return <div className={css.application} aria-label="青木 OS 创作工作区">
     <header className={css.header}>
       <div className={css.identity}>
@@ -48,12 +60,20 @@ export function QingmuApplicationFrame({ projects, episodes, projectId, episodeI
           </select>
         </div>
       </div>
-      <nav aria-label="创作流程">{steps.map(([id, label], index) => <button type="button" key={id}
-        aria-current={step === id ? 'step' : undefined} onClick={() => onStep(id)}><small>{String(index + 1).padStart(2, '0')}</small>{label}</button>)}</nav>
+      <nav className={css.workflow} aria-label="创作流程">{steps.map(([id, label], index) => <button type="button" key={id}
+        aria-current={step === id ? 'step' : undefined} onClick={() => onStep(id)}><small>{String(index + 1).padStart(2, '0')}</small><span>{label}</span></button>)}</nav>
       <div className={css.tools}>
         <button type="button" onClick={onRefresh} disabled={loading} aria-label="刷新页面">{loading ? '刷新中…' : '刷新'}</button>
-        {!scopeLocked && <button type="button" onClick={onCreate}>新建项目</button>}
-        {onOpenTools && <button type="button" onClick={onOpenTools}>系统设置</button>}
+        {(!scopeLocked || onOpenTools) && <div className={css.moreTools}>
+          <button ref={moreButton} type="button" className={css.moreButton} aria-expanded={toolsOpen}
+            aria-controls="qingmu-mobile-tools" onClick={() => { setToolsOpen(open => !open) }}>更多</button>
+          {toolsOpen && <div id="qingmu-mobile-tools" className={css.moreMenu} role="group" aria-label="项目与系统操作">
+            {!scopeLocked && <button type="button" onClick={() => { setToolsOpen(false); onCreate() }}>新建项目</button>}
+            {onOpenTools && <button type="button" onClick={() => { setToolsOpen(false); onOpenTools() }}>系统设置</button>}
+          </div>}
+        </div>}
+        {!scopeLocked && <button type="button" className={css.secondaryTool} onClick={onCreate}>新建项目</button>}
+        {onOpenTools && <button type="button" className={css.secondaryTool} onClick={onOpenTools}>系统设置</button>}
       </div>
     </header>
     <div className={css.content} data-creative-step={step}>{children}</div>

@@ -6,9 +6,9 @@
 .image img { position:absolute; inset:0; width:100%; height:100%; min-height:0; object-fit:contain; }
 .strip { display:flex; overflow-x:auto; flex-shrink:0; gap:8px; padding:4px; }
 .strip button { flex:0 0 112px; display:flex; flex-direction:column; gap:2px; padding:5px; border:1px solid var(--line); border-radius:4px; background:var(--panel); color:var(--text); text-align:left; font:inherit; font-size:12px; cursor:pointer; }
-.strip button[aria-pressed=true] { border-color:#acd0b5; background:#273a31; }
+.strip button[aria-pressed=true] { border-color:#d7ff52; background:#1b291d; }
 .strip small { font-size:11px; }
-.thumbnail { display:grid; place-items:center; width:100%; height:58px; object-fit:cover; background:#151919; color:var(--muted); font-size:11px; border-radius:3px; margin-bottom:3px; }
+.thumbnail { display:grid; place-items:center; width:100%; height:58px; object-fit:cover; background:#0b1117; color:var(--muted); font-size:11px; border-radius:3px; margin-bottom:3px; }
 .footer { flex:none; max-height:140px; overflow:auto; font-size:12px; }
 .footer p { margin:0 0 8px; }
 .footer button { min-height:40px; padding:8px 12px; background:transparent; color:var(--text); border:1px solid var(--line); border-radius:4px; cursor:pointer; font:inherit; }

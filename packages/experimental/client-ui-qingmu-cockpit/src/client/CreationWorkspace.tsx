@@ -127,14 +127,14 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
     } finally { lock.current = false; setBusy(false) }
   }
   return <section className={css.workspace} aria-label="新建创作项目">
-    <header><span className={css.eyebrow}>唯一创作入口</span><h3>先锁定故事与创作设定</h3>
-      <p>输入故事、类型和画面设定，原子创建项目与首集，并保存不可变创作合同。不会调用模型、生成媒体或启动制作。</p></header>
+    <header><span className={css.eyebrow}>开始创作</span><h3>创建一部新作品</h3>
+      <p>给故事起一个名字，填写创意和画面设定。创建后进入剧本工作区。</p></header>
     <label>项目名称<input autoFocus maxLength={100} value={local.name} disabled={busy || local.intent !== undefined}
       onChange={(event) => { update({ ...local, name: event.target.value }) }} placeholder="例如：雨夜来信" /></label>
     <label>故事 / 创作原点<textarea rows={6} maxLength={64000} value={local.textInput} disabled={busy || local.intent !== undefined}
       onChange={(event) => { update({ ...local, textInput: event.target.value }) }}
-      placeholder="写下故事梗概、人物关系或已有剧本正文。该输入的 SHA 会进入创作合同。" /></label>
-    <details open><summary>创作设定</summary><p>画风：写实。方法版本和来源 SHA 由易梦写入创作合同；这里不激活 Provider。</p>
+      placeholder="写下故事梗概、人物关系或已有剧本正文。" /></label>
+    <details open><summary>创作设定</summary><p>画风：写实。选择这部作品的形式、画幅和计划时长。</p>
       <label>创作类型<select value={local.creationType} disabled={busy || local.intent !== undefined}
         onChange={(event) => { update({ ...local, creationType: event.target.value as ProjectLocal['creationType'] }) }}>
         <option value="story_idea">故事创意</option><option value="novel_adapt">小说改编</option>
@@ -293,7 +293,7 @@ export function TextImportWorkspace({ port, projectId, episodeId, onSaved }: Cre
   const pending = local.pending !== undefined
   const scenes = state?.script?.scenes
   return <section className={css.workspace} aria-label="剧本导入工作区">
-    <section className={css.saved} aria-label="创作设定合同">
+    <details className={css.saved} aria-label="创作设定合同"><summary>本项目创作设定</summary>
       <header><span className={css.eyebrow}>创作设定锁</span><h4>{contract?.configured ? '创作合同已保存' : '创作合同未配置'}</h4></header>
       {contract?.configured && contract.contract !== null ? <>
         <p>版本 {contract.revision} · 已锁定 · 来源 SHA {contract.contract.source.textSha256.slice(0, 12)}…</p>
@@ -303,16 +303,15 @@ export function TextImportWorkspace({ port, projectId, episodeId, onSaved }: Cre
           contractSha256: contract.sha256, methods: contract.contract.methods,
         }, null, 2)}</pre></details>
       </> : <p role="status">{contract?.message ?? '正在读取创作合同…'}</p>}
-      <p>锁定只表示创作来源和方法坐标固定，不代表内容批准、生成授权或人工签收。</p>
-    </section>
+    </details>
     <header><span className={css.eyebrow}>第 1 步 · 剧本</span><h3>导入并整理你的剧本</h3>
-      <p>粘贴文字或选择 UTF-8 TXT。先检查解析，再明确保存；不会调用模型或开始制作。</p></header>
+      <p>粘贴剧本或导入 TXT，检查场景、动作与对白，再保存为本集剧本。</p></header>
     <div className={css.columns}>
       <div className={css.editor}>
         <label htmlFor="qingmu-script-text">剧本文字<textarea id="qingmu-script-text" value={local.text} maxLength={64000} disabled={busy || pending}
           onChange={(event) => { update({ ...local, text: event.target.value, filename: '粘贴剧本.txt', rawBase64: undefined }) }}
           placeholder={'场景一：雨夜旧街\n动作：门缓缓打开。\n林夏：请进。'} /></label>
-        <small>最多 128 KiB / 64000 字 / 1000 行。未提交文字保留在本浏览器；服务端草稿可跨浏览器恢复。</small>
+        <small>支持最多 64000 字。未保存的输入保留在当前浏览器。</small>
         <div className={css.actions}><label className={css.file}>导入 TXT<input type="file" accept=".txt,text/plain" disabled={busy || pending}
           onChange={(event) => { const file = event.target.files?.[0]; if (file !== undefined) void run(() => upload(file)); event.target.value = '' }} /></label>
         <button className={css.primary} disabled={busy || state === undefined || local.text.trim() === '' || (pending && (local.pending?.kind !== 'create' || !retryAllowed))}
@@ -377,7 +376,7 @@ export function TextImportWorkspace({ port, projectId, episodeId, onSaved }: Cre
           })}
         </article>
       })}
-      <p className={css.notice}>下一步：检查剧本内容，再进入导演台规划。当前尚未生成资产、分镜或 Take；本操作不会自动生成。</p>
+      <p className={css.notice}>检查剧本内容后，可前往角色与场景整理素材，或继续规划分镜。</p>
     </section>}
   </section>
 }
