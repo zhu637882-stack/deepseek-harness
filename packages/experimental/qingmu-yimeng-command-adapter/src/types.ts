@@ -2981,6 +2981,7 @@ export interface YimengReworkRouteAuthorityProbe {
 
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
+  readonly prepareReferenceVideoMaterial: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types').ReferenceVideoMaterialPreparationResult
   readonly readDialogueEditCapability: {
     readonly schema: 'qingmu.dialogue-transaction-capability.v1'
     readonly referenceSchema: 'qingmu.dialogue-edit-reference.v1'

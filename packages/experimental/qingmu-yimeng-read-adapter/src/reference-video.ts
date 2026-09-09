@@ -173,7 +173,7 @@ export function normalizeReferenceVideoPreview(
     if (mapping.alias !== alias || typeof media.url !== 'string') throw new Error('reference alias changed')
     const url = new URL(media.url)
     const temporary = media.url.length <= 2048
-      && /^oss:\/\/dashscope-instant\/(?:[A-Za-z0-9_-]+\/)+[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/u.test(media.url)
+      && /^oss:\/\/dashscope-instant\/(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*\/)+[A-Za-z0-9_-][A-Za-z0-9_.-]*$/u.test(media.url)
     if (!temporary && (url.protocol !== 'https:' || url.username || url.password || url.hash)) throw new Error('unsafe media URL')
     aliases.set(binding.bindingToken, alias)
   })

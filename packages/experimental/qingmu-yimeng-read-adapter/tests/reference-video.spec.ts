@@ -16,7 +16,8 @@ it('posts the explicit draft through the authenticated read handler without prov
   expect(init?.method).toBe('POST')
   expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer fixture-token')
   const { projectId: _projectId, ...expectedBody } = request
-  expect(JSON.parse(String(init?.body))).toEqual(expectedBody)
+  if (typeof init?.body !== 'string') throw new Error('Expected JSON request body')
+  expect(JSON.parse(init.body)).toEqual(expectedBody)
 })
 
 it.each([
@@ -123,13 +124,14 @@ it('projects private audio playback only for actor-owned local voice candidates'
 it.each([
   ['oss://dashscope-instant/project/ref.png', true],
   ['oss://dashscope-instant/project/ref.wav', true],
+  ['oss://dashscope-instant/account.region/session.v1/ref.final.wav', true],
   ['oss://dashscope-instant/project/../ref.png', false],
   ['oss://dashscope-instant/project/ref.png?token=secret', false],
   ['oss://different-bucket/project/ref.png', false],
   ['oss://dashscope-instant/project/%2fref.png', false],
 ])('accepts only canonical temporary transport %s', async (url, accepted) => {
   const nextBody = { ...response.body, input: { ...response.body.input,
-    media: response.body.input.media.map(media => ({ ...media, url: String(url) })) } }
+    media: response.body.input.media.map(media => ({ ...media, url })) } }
   const next = { ...response, body: nextBody, requestBodySha256: createHash('sha256').update(canonical(nextBody)).digest('hex') }
   const handler = createYimengReadHandler({}, { fetch: async () => Response.json(next), readToken: () => 'fixture' })
   expect((await handler('referenceVideoPreview', request, signal())).ok).toBe(accepted)
