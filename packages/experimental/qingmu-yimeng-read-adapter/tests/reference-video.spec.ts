@@ -99,8 +99,6 @@ it('projects a private local-reference scope only for valid owner-bound local as
       ],
     },
   })
-  if (result.ok) {
-    expect(result.value.items[1]?.localReferenceScope).toBeUndefined()
-    expect(result.value.items[2]?.localReferenceScope).toBeUndefined()
-  }
+  expect(result).not.toHaveProperty('value.items.1.localReferenceScope')
+  expect(result).not.toHaveProperty('value.items.2.localReferenceScope')
 })

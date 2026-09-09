@@ -150,19 +150,40 @@ it('clears a confirmed intent before a parent refresh unmounts the uploader', as
   expect(localStorage.length).toBe(0)
 })
 
-it('keeps dirty input in process memory when localStorage rejects the write', async () => {
+it('keeps a volatile draft ahead of an older legacy draft after quota failure', async () => {
+  const key = 'qingmu.local-reference.v1:project_volatile:actor:actor_volatile'
+  localStorage.setItem(key, JSON.stringify({ request: {
+    ...scope, projectId: 'project_volatile', targetId: 'actor_volatile', idempotencyKey: 'old-key',
+    originalFileName: 'old.png', contentBase64: PNG_BASE64, sourceDeclaration: 'local_file_unverified',
+  }, pending: false }))
   const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota') })
   const value = port()
-  const first = mount(value)
+  const first = render(<LocalReferenceCandidateUpload {...scope} projectId="project_volatile" targetId="actor_volatile"
+    targetName="林夏" port={value} t={t} onStored={vi.fn(async () => {})} />)
   await screen.findByText(zh.assetUploadNoCandidates)
-  fireEvent.change(first.container.querySelector('input[type=file]')!, { target: { files: [file()] } })
+  fireEvent.change(first.container.querySelector('input[type=file]')!, { target: { files: [file(BYTES, 'new.png')] } })
   await screen.findByText(zh.assetUploadPersistWarning)
   first.unmount()
-  mount(value)
-  expect(await screen.findByText('face.png')).toBeTruthy()
+  render(<LocalReferenceCandidateUpload {...scope} projectId="project_volatile" targetId="actor_volatile"
+    targetName="林夏" port={value} t={t} onStored={vi.fn(async () => {})} />)
+  expect(await screen.findByText('new.png')).toBeTruthy()
+  expect(screen.queryByText('old.png')).toBeNull()
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: zh.assetUploadSubmit }).disabled).toBe(true)
   setItem.mockRestore()
-  fireEvent.click(screen.getByRole('button', { name: zh.assetUploadSubmit }))
-  await screen.findByText(zh.assetUploadStored)
+})
+
+it('does not POST when neither IndexedDB nor legacy persistence can retain the draft', async () => {
+  vi.stubGlobal('indexedDB', undefined)
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota') })
+  const value = port()
+  const view = mount(value)
+  await screen.findByText(zh.assetUploadNoCandidates)
+  fireEvent.change(view.container.querySelector('input[type=file]')!, { target: { files: [file()] } })
+  await screen.findByText(zh.assetUploadPersistWarning)
+  const submit = screen.getByRole('button', { name: zh.assetUploadSubmit })
+  expect((submit as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.click(submit)
+  expect(value.uploadLocalReferenceCandidate).not.toHaveBeenCalled()
 })
 
 it('ignores a late response after scope exit and keeps the durable pending intent', async () => {
@@ -174,6 +195,7 @@ it('ignores a late response after scope exit and keeps the durable pending inten
   await screen.findByText(zh.assetUploadNoCandidates)
   fireEvent.change(view.container.querySelector('input[type=file]')!, { target: { files: [file()] } })
   fireEvent.click(await screen.findByRole('button', { name: zh.assetUploadSubmit }))
+  await waitFor(() => { expect(value.uploadLocalReferenceCandidate).toHaveBeenCalledOnce() })
   view.unmount()
   await act(async () => { resolve(result) })
   expect(view.onStored).not.toHaveBeenCalled()
@@ -209,4 +231,169 @@ it('rejects an input above 8 MiB before it can submit to Host', async () => {
   await waitFor(() => { expect(screen.getByRole('alert')).toBeTruthy() })
   expect(screen.queryByRole('button', { name: zh.assetUploadSubmit })).toBeNull()
   expect(value.uploadLocalReferenceCandidate).not.toHaveBeenCalled()
+})
+
+it('does not let a late IndexedDB restore from an earlier scope overwrite the current scope', async () => {
+  const oldSaved = { request: {
+    ...scope, idempotencyKey: 'old-key', originalFileName: 'old-scope.png', contentBase64: PNG_BASE64,
+    sourceDeclaration: 'local_file_unverified' as const,
+  }, pending: false }
+  const opens: Array<Record<string, unknown>> = []
+  const gets: Array<Record<string, unknown>> = []
+  const databaseFor = (saved: unknown) => ({
+    objectStoreNames: { contains: () => true },
+    transaction: () => ({ objectStore: () => ({ get: () => {
+      const request: Record<string, unknown> = {}
+      gets.push({ request, saved })
+      return request
+    } }) }),
+    close: vi.fn(),
+  })
+  vi.stubGlobal('indexedDB', { open: vi.fn(() => {
+    const request: Record<string, unknown> = {}
+    opens.push(request)
+    return request
+  }) })
+  const value = port()
+  const view = render(<LocalReferenceCandidateUpload {...scope} projectId="project_old_scope" targetId="actor_old_scope"
+    targetName="林夏" port={value} t={t} onStored={vi.fn(async () => {})} />)
+  await waitFor(() => { expect(opens).toHaveLength(1) })
+  view.rerender(<LocalReferenceCandidateUpload {...scope} projectId="project_new" targetId="actor_new"
+    targetName="林夏" port={value} t={t} onStored={vi.fn(async () => {})} />)
+  await waitFor(() => { expect(opens).toHaveLength(2) })
+  await act(async () => {
+    opens[1]!.result = databaseFor(undefined)
+    ;(opens[1]!.onsuccess as (() => void) | undefined)?.()
+    await Promise.resolve()
+    const current = gets.at(-1)!
+    current.request.result = current.saved
+    ;(current.request.onsuccess as (() => void) | undefined)?.()
+  })
+  await act(async () => {
+    opens[0]!.result = databaseFor(oldSaved)
+    ;(opens[0]!.onsuccess as (() => void) | undefined)?.()
+    await Promise.resolve()
+    const old = gets[0]!
+    old.request.result = old.saved
+    ;(old.request.onsuccess as (() => void) | undefined)?.()
+  })
+  expect(screen.queryByText('old-scope.png')).toBeNull()
+})
+
+
+it('holds same-scope selection until its pending IndexedDB restore finishes', async () => {
+  const oldSaved = { request: {
+    ...scope, projectId: 'project_same_scope', targetId: 'actor_same_scope', idempotencyKey: 'same-scope-old',
+    originalFileName: 'old-same-scope.png', contentBase64: PNG_BASE64,
+    sourceDeclaration: 'local_file_unverified' as const,
+  }, pending: false }
+  const opens: Array<Record<string, unknown>> = []
+  const gets: Array<Record<string, unknown>> = []
+  const database = {
+    objectStoreNames: { contains: () => true },
+    transaction: () => ({ objectStore: () => ({ get: () => {
+      const request: Record<string, unknown> = {}
+      gets.push(request)
+      return request
+    } }) }),
+    close: vi.fn(),
+  }
+  vi.stubGlobal('indexedDB', { open: vi.fn(() => {
+    const request: Record<string, unknown> = {}
+    opens.push(request)
+    return request
+  }) })
+  const value = port()
+  const view = render(<LocalReferenceCandidateUpload {...scope} projectId="project_same_scope" targetId="actor_same_scope"
+    targetName="林夏" port={value} t={t} onStored={vi.fn(async () => {})} />)
+  await waitFor(() => { expect(opens).toHaveLength(1) })
+  const input = view.container.querySelector<HTMLInputElement>('input[type=file]')!
+  expect(input.disabled).toBe(true)
+  fireEvent.change(input, { target: { files: [file(BYTES, 'new-same-scope.png')] } })
+  await act(async () => {
+    opens[0]!.result = database
+    ;(opens[0]!.onsuccess as (() => void) | undefined)?.()
+    await Promise.resolve()
+    gets[0]!.result = oldSaved
+    ;(gets[0]!.onsuccess as (() => void) | undefined)?.()
+  })
+  expect(screen.getByText('old-same-scope.png')).toBeTruthy()
+  expect(screen.queryByText('new-same-scope.png')).toBeNull()
+  expect(input.disabled).toBe(false)
+})
+
+it('does not restore a legacy draft whose request belongs to another scope', async () => {
+  vi.stubGlobal('indexedDB', undefined)
+  const key = 'qingmu.local-reference.v1:project_scope:actor:actor_scope'
+  localStorage.setItem(key, JSON.stringify({ request: {
+    ...scope, projectId: 'other_project', targetId: 'other_actor', idempotencyKey: 'wrong-scope',
+    originalFileName: 'wrong-scope.png', contentBase64: PNG_BASE64, sourceDeclaration: 'local_file_unverified',
+  }, pending: false }))
+  const value = port()
+  render(<LocalReferenceCandidateUpload {...scope} projectId="project_scope" targetId="actor_scope"
+    targetName="林夏" port={value} t={t} onStored={vi.fn(async () => {})} />)
+  await screen.findByText(zh.assetUploadNoCandidates)
+  expect(screen.queryByText('wrong-scope.png')).toBeNull()
+})
+
+it('invalidates an old IndexedDB draft when a replacement write and tombstone both fail', async () => {
+  const key = 'qingmu.local-reference.v1:project_replacement:actor:actor_replacement'
+  const replacement = { request: {
+    ...scope, projectId: 'project_replacement', targetId: 'actor_replacement', idempotencyKey: 'new-key',
+    originalFileName: 'new-replacement.png', contentBase64: PNG_BASE64, sourceDeclaration: 'local_file_unverified' as const,
+  }, pending: false }
+  const oldDraft = { request: {
+    ...scope, projectId: 'project_replacement', targetId: 'actor_replacement', idempotencyKey: 'old-key',
+    originalFileName: 'old-idb-draft.png', contentBase64: PNG_BASE64, sourceDeclaration: 'local_file_unverified' as const,
+  }, pending: false }
+  const open = vi.fn(() => {
+    const request: Record<string, unknown> = {}
+    queueMicrotask(() => {
+      const database = {
+        objectStoreNames: { contains: () => true },
+        transaction: () => {
+          const transaction: Record<string, unknown> = {}
+          const store = { put: () => { queueMicrotask(() => {
+            transaction.error = new Error('quota')
+            ;(transaction.onerror as (() => void) | undefined)?.()
+          }) } }
+          transaction.objectStore = () => store
+          return transaction
+        },
+        close: vi.fn(),
+        oldDraft,
+      }
+      request.result = database
+      ;(request.onsuccess as (() => void) | undefined)?.()
+    })
+    return request
+  })
+  vi.stubGlobal('indexedDB', { open })
+  const first = await import('../src/client/LocalReferenceDraftStore.ts')
+  expect(await first.saveLocalReferenceDraft(key, replacement)).toBe(false)
+  expect(localStorage.getItem(`${key}:draft-invalidated`)).toBe('1')
+  vi.resetModules()
+  const reloaded = await import('../src/client/LocalReferenceDraftStore.ts')
+  expect(await reloaded.restoreLocalReferenceDraft(key)).toEqual({ saved: undefined, durable: false })
+})
+
+it('removes an old legacy draft when a replacement cannot be written without IndexedDB', async () => {
+  const key = 'qingmu.local-reference.v1:project_legacy_replacement:actor:actor_legacy_replacement'
+  const oldDraft = { request: {
+    ...scope, projectId: 'project_legacy_replacement', targetId: 'actor_legacy_replacement', idempotencyKey: 'old-key',
+    originalFileName: 'old-legacy-draft.png', contentBase64: PNG_BASE64, sourceDeclaration: 'local_file_unverified',
+  }, pending: false }
+  const replacement = { request: {
+    ...scope, projectId: 'project_legacy_replacement', targetId: 'actor_legacy_replacement', idempotencyKey: 'new-key',
+    originalFileName: 'new-legacy-draft.png', contentBase64: PNG_BASE64, sourceDeclaration: 'local_file_unverified',
+  }, pending: false }
+  localStorage.setItem(key, JSON.stringify(oldDraft))
+  vi.stubGlobal('indexedDB', undefined)
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota') })
+  const first = await import('../src/client/LocalReferenceDraftStore.ts')
+  expect(await first.saveLocalReferenceDraft(key, replacement)).toBe(false)
+  expect(localStorage.getItem(key)).toBeNull()
+  vi.resetModules()
+  const reloaded = await import('../src/client/LocalReferenceDraftStore.ts')
+  expect(await reloaded.restoreLocalReferenceDraft(key)).toEqual({ saved: undefined, durable: false })
 })

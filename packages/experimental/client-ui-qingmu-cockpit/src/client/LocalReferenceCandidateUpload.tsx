@@ -1,31 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
   LocalReferenceCandidateList, LocalReferenceCandidateResult, LocalReferenceElementKind,
-  LocalReferenceUploadRequest,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
 import type { QingmuCockpitKey } from './locales.ts'
+import {
+  clearLocalReferenceDraft,
+  restoreLocalReferenceDraft,
+  saveLocalReferenceDraft,
+  type SavedLocalReferenceInput,
+} from './LocalReferenceDraftStore.ts'
 import css from './LocalReferenceCandidateUpload.module.css'
 
 const MAX_BYTES = 8 * 1024 * 1024
-interface SavedInput { readonly request: LocalReferenceUploadRequest; readonly pending: boolean }
-const volatileSaved = new Map<string, SavedInput>()
+type SavedInput = SavedLocalReferenceInput
+
 function keyOf(projectId: string, kind: string, targetId: string): string {
   return `qingmu.local-reference.v1:${projectId}:${kind}:${targetId}`
-}
-function readSaved(key: string): SavedInput | undefined {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(localStorage.getItem(key) ?? 'null')
-  } catch { parsed = volatileSaved.get(key) }
-  if ((parsed === null || parsed === undefined) && volatileSaved.has(key)) parsed = volatileSaved.get(key)
-  if (typeof parsed !== 'object' || parsed === null) return undefined
-  const saved = parsed as Record<string, unknown>
-  if (typeof saved.request !== 'object' || saved.request === null || typeof saved.pending !== 'boolean') return undefined
-  const request = saved.request as Record<string, unknown>
-  if (typeof request.contentBase64 !== 'string' || typeof request.originalFileName !== 'string'
-    || request.sourceDeclaration !== 'local_file_unverified') return undefined
-  return parsed as SavedInput
 }
 function makeIdempotencyKey(): string {
   const random = globalThis.crypto.randomUUID().replaceAll('-', '')
@@ -57,61 +48,103 @@ export function LocalReferenceCandidateUpload({ projectId, elementKind, targetId
   readonly onStored: () => Promise<void>
 }) {
   const storageKey = keyOf(projectId, elementKind, targetId)
-  const [saved, setSaved] = useState<SavedInput | undefined>(() => readSaved(storageKey))
+  const [saved, setSaved] = useState<SavedInput>()
+  const [durable, setDurable] = useState(false)
   const [list, setList] = useState<LocalReferenceCandidateList>()
   const [selectedId, setSelectedId] = useState('')
   const [preview, setPreview] = useState<string>()
   const [busy, setBusy] = useState(false)
+  const [restoring, setRestoring] = useState(true)
   const [error, setError] = useState('')
-  const [notice, setNotice] = useState(saved?.pending === true ? t('assetUploadPending') : '')
+  const [notice, setNotice] = useState('')
   const [persistWarning, setPersistWarning] = useState(false)
   const [retryAllowed, setRetryAllowed] = useState(false)
   const lock = useRef(false)
+  const restoreLock = useRef(true)
   const scopeGeneration = useRef(0)
+  const actionGeneration = useRef(0)
   const previewGeneration = useRef(0)
-  const uploadGeneration = useRef(0)
-  const current = useRef(saved)
+  const current = useRef<SavedInput>()
   const candidate = useMemo(() => list?.candidates.find(item => item.assetId === selectedId)
     ?? list?.candidates.at(-1), [list, selectedId])
-  const persist = (next: SavedInput | undefined) => {
+
+  const isCurrent = (scopeToken: number) => scopeToken === scopeGeneration.current
+  const saveDraft = async (next: SavedInput, scopeToken: number): Promise<boolean> => {
     current.current = next
-    setSaved(next)
-    try {
-      if (next === undefined) localStorage.removeItem(storageKey)
-      else localStorage.setItem(storageKey, JSON.stringify(next))
-      volatileSaved.delete(storageKey)
-      setPersistWarning(false)
-    } catch {
-      if (next === undefined) volatileSaved.delete(storageKey)
-      else volatileSaved.set(storageKey, next)
+    if (isCurrent(scopeToken)) setSaved(next)
+    const savedDurably = await saveLocalReferenceDraft(storageKey, next)
+    if (!isCurrent(scopeToken)) return false
+    setDurable(savedDurably)
+    setPersistWarning(!savedDurably)
+    return savedDurably
+  }
+  const clearDraft = async (scopeToken: number): Promise<boolean> => {
+    const cleared = await clearLocalReferenceDraft(storageKey)
+    if (!isCurrent(scopeToken)) return false
+    if (!cleared) {
       setPersistWarning(true)
+      return false
     }
+    current.current = undefined
+    setSaved(undefined)
+    setDurable(false)
+    setPersistWarning(false)
+    return true
   }
-  const load = async (signal?: AbortSignal, token = scopeGeneration.current) => {
+  const load = async (signal: AbortSignal | undefined, scopeToken: number) => {
     const result = await port.listLocalReferenceCandidates({ projectId, elementKind, targetId }, signal)
-    if (token !== scopeGeneration.current) return
+    if (!isCurrent(scopeToken)) return
     setList(result)
-    if (selectedId === '' && result.candidates.length > 0) setSelectedId(result.candidates.at(-1)?.assetId ?? '')
+    setSelectedId(previous => previous === '' && result.candidates.length > 0
+      ? result.candidates.at(-1)?.assetId ?? '' : previous)
   }
+
   useEffect(() => {
-    const restored = readSaved(storageKey)
-    current.current = restored
-    setSaved(restored)
-    setRetryAllowed(false)
-    setNotice(restored?.pending === true ? t('assetUploadPending') : '')
-  }, [storageKey])
-  useEffect(() => {
-    const token = ++scopeGeneration.current
+    const scopeToken = ++scopeGeneration.current
+    const restoreActionToken = actionGeneration.current
     const controller = new AbortController()
-    void load(controller.signal, token).catch((cause: unknown) => {
-      if (token === scopeGeneration.current && !controller.signal.aborted) setError(messageOf(cause))
+    current.current = undefined
+    lock.current = false
+    restoreLock.current = true
+    setRestoring(true)
+    setSaved(undefined)
+    setDurable(false)
+    setList(undefined)
+    setSelectedId('')
+    setError('')
+    setNotice('')
+    setPersistWarning(false)
+    setRetryAllowed(false)
+    setBusy(false)
+    void restoreLocalReferenceDraft(storageKey).then((restored) => {
+      if (!isCurrent(scopeToken) || restoreActionToken !== actionGeneration.current) return
+      current.current = restored.saved
+      setSaved(restored.saved)
+      setDurable(restored.durable)
+      setPersistWarning(restored.saved !== undefined && !restored.durable)
+      setNotice(restored.saved?.pending === true ? t('assetUploadPending') : '')
+    }).finally(() => {
+      if (!isCurrent(scopeToken)) return
+      restoreLock.current = false
+      setRestoring(false)
+    })
+    void load(controller.signal, scopeToken).catch((cause: unknown) => {
+      if (isCurrent(scopeToken) && !controller.signal.aborted) setError(messageOf(cause))
     })
     return () => {
-      controller.abort(); scopeGeneration.current++; uploadGeneration.current++; lock.current = false
+      controller.abort()
+      scopeGeneration.current++
+      actionGeneration.current++
+      lock.current = false
+      restoreLock.current = false
     }
-  }, [projectId, elementKind, targetId])
+  }, [storageKey])
+
   useEffect(() => {
-    if (candidate === undefined) { setPreview(undefined); return }
+    if (candidate === undefined) {
+      setPreview(undefined)
+      return
+    }
     const token = ++previewGeneration.current
     const controller = new AbortController()
     void port.readLocalReferenceCandidateContent({ projectId, elementKind, targetId, assetId: candidate.assetId,
@@ -119,11 +152,16 @@ export function LocalReferenceCandidateUpload({ projectId, elementKind, targetId
       if (token === previewGeneration.current) setPreview(`data:${result.mimeType};base64,${result.contentBase64}`)
     }).catch((cause: unknown) => {
       if (token === previewGeneration.current && !controller.signal.aborted) {
-        setPreview(undefined); setError(messageOf(cause))
+        setPreview(undefined)
+        setError(messageOf(cause))
       }
     })
-    return () => { controller.abort(); previewGeneration.current++ }
+    return () => {
+      controller.abort()
+      previewGeneration.current++
+    }
   }, [candidate?.assetId, candidate?.materializedSha256, projectId, elementKind, targetId])
+
   useEffect(() => {
     const guard = (event: BeforeUnloadEvent) => {
       if (current.current !== undefined) event.preventDefault()
@@ -131,59 +169,95 @@ export function LocalReferenceCandidateUpload({ projectId, elementKind, targetId
     window.addEventListener('beforeunload', guard)
     return () => { window.removeEventListener('beforeunload', guard) }
   }, [])
-  const choose = async (file: File) => {
-    setError(''); setNotice(''); setRetryAllowed(false)
-    if (file.size < 1 || file.size > MAX_BYTES) { setError(t('assetUploadChoose')); return }
-    const request: LocalReferenceUploadRequest = { projectId, elementKind, targetId,
-      idempotencyKey: makeIdempotencyKey(), originalFileName: file.name,
-      contentBase64: toBase64(new Uint8Array(await file.arrayBuffer())), sourceDeclaration: 'local_file_unverified' }
-    persist({ request, pending: false })
+
+  const begin = (): { readonly actionToken: number; readonly scopeToken: number } | undefined => {
+    if (lock.current || restoreLock.current) return undefined
+    lock.current = true
+    const scopeToken = scopeGeneration.current
+    const actionToken = ++actionGeneration.current
+    setBusy(true)
+    return { actionToken, scopeToken }
   }
-  const finish = async (result: LocalReferenceCandidateResult, uploadToken: number, scopeToken: number) => {
+  const end = (actionToken: number, scopeToken: number) => {
+    if (actionToken === actionGeneration.current && isCurrent(scopeToken)) {
+      lock.current = false
+      setBusy(false)
+    }
+  }
+  const choose = async (file: File) => {
+    const action = begin()
+    if (action === undefined) return
+    try {
+      setError('')
+      setNotice('')
+      setRetryAllowed(false)
+      if (file.size < 1 || file.size > MAX_BYTES) {
+        if (isCurrent(action.scopeToken)) setError(t('assetUploadChoose'))
+        return
+      }
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      if (action.actionToken !== actionGeneration.current || !isCurrent(action.scopeToken)) return
+      await saveDraft({ request: { projectId, elementKind, targetId,
+        idempotencyKey: makeIdempotencyKey(), originalFileName: file.name,
+        contentBase64: toBase64(bytes), sourceDeclaration: 'local_file_unverified' }, pending: false }, action.scopeToken)
+    } catch (cause) {
+      if (isCurrent(action.scopeToken)) setError(messageOf(cause))
+    } finally {
+      end(action.actionToken, action.scopeToken)
+    }
+  }
+  const finish = async (result: LocalReferenceCandidateResult, actionToken: number, scopeToken: number) => {
+    if (actionToken !== actionGeneration.current || !isCurrent(scopeToken)) return
     setSelectedId(result.assetId)
     await load(undefined, scopeToken)
-    if (uploadToken !== uploadGeneration.current || scopeToken !== scopeGeneration.current) return
-    persist(undefined)
+    if (actionToken !== actionGeneration.current || !isCurrent(scopeToken)) return
+    if (!await clearDraft(scopeToken)) return
+    if (actionToken !== actionGeneration.current || !isCurrent(scopeToken)) return
     setRetryAllowed(false)
     setNotice(t('assetUploadStored'))
     await onStored()
   }
   const run = async (recover: boolean) => {
-    const intent = current.current
-    if (lock.current || intent === undefined) return
-    lock.current = true; setBusy(true); setError('')
-    const token = ++uploadGeneration.current
-    const scopeToken = scopeGeneration.current
-    if (!recover) persist({ ...intent, pending: true })
+    const action = begin()
+    if (action === undefined) return
     try {
+      setError('')
+      const intent = current.current
+      if (intent === undefined || !durable) {
+        if (isCurrent(action.scopeToken)) setPersistWarning(true)
+        return
+      }
+      if (!recover && !await saveDraft({ ...intent, pending: true }, action.scopeToken)) return
+      if (action.actionToken !== actionGeneration.current || !isCurrent(action.scopeToken)) return
       const result = await (recover
         ? port.recoverLocalReferenceCandidate(intent.request)
         : port.uploadLocalReferenceCandidate(intent.request))
-      if (token === uploadGeneration.current) await finish(result, token, scopeToken)
+      if (action.actionToken === actionGeneration.current) await finish(result, action.actionToken, action.scopeToken)
     } catch (cause) {
-      if (token === uploadGeneration.current) {
+      if (action.actionToken === actionGeneration.current && isCurrent(action.scopeToken)) {
         const message = messageOf(cause)
         const missingReceipt = recover && /404|local_reference_receipt_not_found/.test(message)
         setRetryAllowed(missingReceipt)
         setError(missingReceipt ? t('assetUploadReceiptMissing') : message)
-        setNotice(intent.pending || !recover ? t('assetUploadPending') : '')
+        setNotice(current.current?.pending === true || !recover ? t('assetUploadPending') : '')
       }
     } finally {
-      if (token === uploadGeneration.current) { setBusy(false); lock.current = false }
+      end(action.actionToken, action.scopeToken)
     }
   }
+
   return <section className={css.panel} aria-label={t('assetUploadTitle')}>
     <header><div><span>{targetName}</span><h4>{t('assetUploadTitle')}</h4></div><p>{t('assetUploadBoundary')}</p></header>
     <label className={css.filePicker}>{t('assetUploadChoose')}
-      <input type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" disabled={busy}
+      <input type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" disabled={busy || restoring}
         onChange={(event) => { const file = event.target.files?.[0]; if (file !== undefined) void choose(file); event.target.value = '' }} />
     </label>
     {saved !== undefined && <div className={css.pending}>
       <strong>{saved.request.originalFileName}</strong><span>{byteLengthOfBase64(saved.request.contentBase64).toLocaleString()} B</span>
       <div className={css.actions}>
-        <button type="button" disabled={busy || (saved.pending && !retryAllowed)} onClick={() => { void run(false) }}>{busy
+        <button type="button" disabled={busy || !durable || (saved.pending && !retryAllowed)} onClick={() => { void run(false) }}>{busy
           ? t('assetUploadBusy') : retryAllowed ? t('assetUploadRetry') : t('assetUploadSubmit')}</button>
-        {saved.pending && <button type="button" disabled={busy} onClick={() => { void run(true) }}>{t('assetUploadRecover')}</button>}
+        {saved.pending && <button type="button" disabled={busy || !durable} onClick={() => { void run(true) }}>{t('assetUploadRecover')}</button>}
       </div>
     </div>}
     {persistWarning && <p role="alert" className={css.error}>{t('assetUploadPersistWarning')}</p>}
