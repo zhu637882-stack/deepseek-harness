@@ -13,7 +13,9 @@ it('settles a successful read that does not contain the current automatic shot',
         scriptRevision: 1, scriptSha256: 'a'.repeat(64), canonicalStoryboard: null })) as never,
       saveScenePlanning: save, recoverScenePlanning: vi.fn(),
     }} />)
-  await waitFor(() =>{  expect(screen.getByRole('alert').textContent).toContain('请到分镜工作区核对') })
+  await waitFor(() => {
+    expect(screen.getByRole('alert').textContent).toContain('请到分镜工作区核对')
+  })
   expect(screen.queryByText('正在读取本镜首帧要求…')).toBeNull()
   expect(screen.queryByRole('textbox')).toBeNull()
   expect(save).not.toHaveBeenCalled()
