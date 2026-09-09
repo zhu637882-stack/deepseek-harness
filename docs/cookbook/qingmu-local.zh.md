@@ -2,20 +2,22 @@
 
 [English](qingmu-local.md) | 中文
 
-本指南启动具有持久 SQLite 数据库的青木单用户专用实例，不升级其他易梦现场。同一个启动器拥有易梦 API、DSh Host/导演服务和易梦六阶段前端。前提：当前 Harness 已按青木 profile 完成构建，前端使用 Node 20、Harness 使用其支持的 Node 运行时，具备 Python 3、含 `.venv` 且已用 `QINGMU_LOCAL_RUNTIME_PROXY=1` 完成前端生产构建的易梦 Writer 工作区，以及 IMAGO Core。初始化会记录首份本地构建身份；任一工作区或其产物变化后，须先停止实例、完成受影响的构建，再运行 `record-build`，然后才可再次启动。
+本指南启动具有持久 SQLite 数据库的青木单用户专用实例。原生模式管理 Writer API、限定范围的 Worker，以及承载青木五阶段工作台的 DSH Host。它需要以 Qingmu profile 构建的 Harness、Harness 支持的 Node、带 `.venv` 的 Writer 仓库和 IMAGO Core，无需 Next 构建或 Node 20。初始化时不传 `--native-ui` 则保留旧前端，该模式额外要求以 `QINGMU_LOCAL_RUNTIME_PROXY=1` 构建的前端及 Node 20。初始化记录源码和产物身份；任一工作区或产物变化后，须停止实例、完成受影响构建，再执行 `record-build` 后启动。
 
 ## 初始化与打开
 
 在 Harness 目录执行。初始化拒绝任何已存在的目标目录。默认目录是 `~/Library/Application Support/QingmuOS`；自定义实例须在每条命令后加 `--root /absolute/new/path`。
 
 ```sh
-python3 scripts/qingmu-local.py init --yimeng-root /absolute/path/to/yimeng-writer --core-root /absolute/path/to/imago-os-core --frontend-node /absolute/path/to/node20
+python3 scripts/qingmu-local.py init --yimeng-root /absolute/path/to/yimeng-writer --core-root /absolute/path/to/imago-os-core --native-ui
 python3 scripts/qingmu-local.py start
 python3 scripts/qingmu-local.py login
 python3 scripts/qingmu-local.py status
 ```
 
-打开 `status` 输出的唯一 `entryUrl`。它建立正常的 HttpOnly 本地会话并直接进入青木品牌的易梦项目工作区，不先展示通用 DSh 对话或额外青木弹窗。`ready: true` 要求 API、一个限定范围的 Worker、DSh Host 和前端。未显式激活项目生产时，Worker 保持按父任务限定的文本模式或仅心跳模式，独立资产 Worker 只可处理其精确且已确认的父任务。激活后，两者由一个完整生产 Worker 取代；该 Worker 只处理绑定的项目和剧集，每条 lane 每轮一个任务、一次尝试且只允许一个并发提交。API 的精确数据库/媒体身份、DSh Host 监听/页面和六阶段前端监听/页面分别通过核验；状态字段保持分开，便于诊断。六阶段页面嵌入限定范围的导演工作区。规划保存或 GET-only 恢复后，外层页面只接受准确 iframe origin/source 和项目/剧集范围，重读 canonical 规划与导演上下文，刷新工作流投影，并定位已保存镜头。被拒绝或陈旧的通知保持可见，且不会制造假成功。这是持久集成环境，不代表完整产品验收。
+原生模式的 `entryUrl` 直接打开 DSH 青木工作台，`webUrl` 与 `hostUrl` 相同。就绪状态核验 API、Worker 和 Host，不声称存在独立前端进程。`login` 通过正常 API 更新 Host 服务会话；本人决定仍需浏览器身份及本人在场验证。原生模式不扩大 Worker 范围，也不授权生成。上文的前端会话引导和 iframe 行为只适用于旧模式。原生模式拒绝会停用 Host 的 `--review-only`。
+
+旧模式：打开 `status` 输出的唯一 `entryUrl`。它建立正常的 HttpOnly 本地会话并直接进入青木品牌的易梦项目工作区，不先展示通用 DSh 对话或额外青木弹窗。`ready: true` 要求 API、一个限定范围的 Worker、DSh Host 和前端。未显式激活项目生产时，Worker 保持按父任务限定的文本模式或仅心跳模式，独立资产 Worker 只可处理其精确且已确认的父任务。激活后，两者由一个完整生产 Worker 取代；该 Worker 只处理绑定的项目和剧集，每条 lane 每轮一个任务、一次尝试且只允许一个并发提交。API 的精确数据库/媒体身份、DSh Host 监听/页面和六阶段前端监听/页面分别通过核验；状态字段保持分开，便于诊断。六阶段页面嵌入限定范围的导演工作区。规划保存或 GET-only 恢复后，外层页面只接受准确 iframe origin/source 和项目/剧集范围，重读 canonical 规划与导演上下文，刷新工作流投影，并定位已保存镜头。被拒绝或陈旧的通知保持可见，且不会制造假成功。这是持久集成环境，不代表完整产品验收。
 
 <a id="write-the-first-script"></a>
 

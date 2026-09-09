@@ -180,6 +180,34 @@ def _stage_local_password_hash(connection: sqlite3.Connection, password: str) ->
         raise RuntimeError("本机账号密码哈希未精确更新一行")
 
 
+def native_ui(config: dict, *, review_only: bool = False) -> bool:
+    """Resolve the persisted entry mode; native UI requires the full DSH Host."""
+    mode = config.get("uiMode", "legacy")
+    if mode not in ("legacy", "native"):
+        raise ValueError("未知青木界面模式")
+    if mode == "native" and review_only:
+        raise ValueError("原生青木需要 DSH Host，不能使用停用 Host 的 review-only 模式")
+    return mode == "native"
+
+
+def runtime_ports(config: dict, preferred: dict) -> dict:
+    """Preserve the browser origin; native mode has no separate frontend listener."""
+    is_native = native_ui(config)
+    api_port = available_port(preferred.get("apiPort", 0))
+    host_port = available_port(preferred.get("hostPort", 0))
+    while host_port == api_port:
+        host_port = available_port()
+    web_port = host_port if is_native else available_port(preferred.get("webPort", 0))
+    if not is_native:
+        while web_port in (api_port, host_port):
+            web_port = available_port()
+    web_url = f"http://127.0.0.1:{web_port}"
+    return {"apiPort": api_port, "hostPort": host_port, "webPort": web_port,
+            "apiUrl": f"http://127.0.0.1:{api_port}",
+            "hostUrl": f"http://127.0.0.1:{host_port}", "webUrl": web_url,
+            "entryUrl": web_url + ("/" if is_native else "/qingmu-runtime/local-session")}
+
+
 def read_config(root: Path) -> dict:
     if root.is_symlink() or root.stat().st_uid != os.getuid() or root.stat().st_mode & 0o077:
         raise ValueError("专用目录必须属于当前用户且权限为0700")
@@ -192,11 +220,12 @@ def read_config(root: Path) -> dict:
     _validate_private_credential_fields(config, require_all=False)
     if config["root"] != str(root) or config["harnessRoot"] != str(HARNESS):
         raise ValueError("实例目录或 Harness 来源绑定不符；拒绝使用")
-    frontend_node = config.get("frontendNode")
-    if not isinstance(frontend_node, str) or not frontend_node:
-        raise ValueError("旧实例缺少六阶段前端运行时绑定；请恢复到新目录，不能静默借用系统 Node")
-    if node20_executable(Path(frontend_node)) != frontend_node:
-        raise ValueError("六阶段前端 Node 绑定已漂移；拒绝启动")
+    if not native_ui(config):
+        frontend_node = config.get("frontendNode")
+        if not isinstance(frontend_node, str) or not frontend_node:
+            raise ValueError("旧实例缺少六阶段前端运行时绑定；请恢复到新目录，不能静默借用系统 Node")
+        if node20_executable(Path(frontend_node)) != frontend_node:
+            raise ValueError("六阶段前端 Node 绑定已漂移；拒绝启动")
     validate_director_production_config(config.get("directorProductionExecution"))
     project_production = validate_project_production_config(
         config.get("projectProductionExecution")
@@ -341,6 +370,7 @@ def source_identity(source: Path) -> dict:
 
 def collect_build_manifest(root: Path, config: dict, *, review_only: bool = False) -> dict:
     """Bind clean release sources and built artifacts to one local instance."""
+    is_native = native_ui(config, review_only=review_only)
     writer = Path(config["yimengRoot"])
     harness = Path(config["harnessRoot"])
     core = Path(config["coreRoot"])
@@ -351,24 +381,25 @@ def collect_build_manifest(root: Path, config: dict, *, review_only: bool = Fals
     }
     if sources["writer"]["dirty"] or sources["harness"]["dirty"]:
         raise ValueError("Writer/Harness 工作树必须干净才能记录发布身份")
-    frontend_build_id = writer / "frontend/.next/BUILD_ID"
-    build_id = frontend_build_id.read_text(encoding="utf-8").strip()
-    if not build_id or "\n" in build_id:
-        raise ValueError("易梦 frontend BUILD_ID 无效")
     artifact_relatives = () if review_only else BUILD_MANIFEST_ARTIFACTS
     artifact_paths = [harness / relative for relative in artifact_relatives]
     artifacts = {
-        "frontendBuildId": {
-            "path": str(frontend_build_id),
-            "value": build_id,
-            "sha256": file_sha256(frontend_build_id),
-        },
         "host": {
             relative: {"path": str(path), "sha256": file_sha256(path)}
             for relative, path in zip(artifact_relatives, artifact_paths)
         },
     }
-    latest_mtime = max(path.stat().st_mtime for path in [frontend_build_id, *artifact_paths])
+    if not is_native:
+        frontend_build_id = writer / "frontend/.next/BUILD_ID"
+        build_id = frontend_build_id.read_text(encoding="utf-8").strip()
+        if not build_id or "\n" in build_id:
+            raise ValueError("易梦 frontend BUILD_ID 无效")
+        artifacts["frontendBuildId"] = {
+            "path": str(frontend_build_id), "value": build_id,
+            "sha256": file_sha256(frontend_build_id),
+        }
+        artifact_paths.append(frontend_build_id)
+    latest_mtime = max(path.stat().st_mtime for path in artifact_paths)
     ports_path = root / "private/ports.json"
     ports = json.loads(ports_path.read_text()) if ports_path.is_file() else None
     return {
@@ -382,7 +413,7 @@ def collect_build_manifest(root: Path, config: dict, *, review_only: bool = Fals
         },
         "sources": sources,
         "releaseSourcesClean": True,
-        "runtimeProfile": "review-only" if review_only else "full",
+        "runtimeProfile": "native" if is_native else "review-only" if review_only else "full",
         "artifacts": artifacts,
         "builtAt": utc_timestamp(latest_mtime),
         "recordedAt": utc_timestamp(),
@@ -540,14 +571,16 @@ def initialize(
     writer: Path,
     core: Path | None = None,
     frontend_node: Path | None = None,
+    *, ui_mode: str = "legacy",
 ) -> dict:
     """Exclusive new-root initialization. Existing directories are never adopted."""
+    is_native = native_ui({"uiMode": ui_mode})
     if root.exists() or root.is_symlink():
         raise FileExistsError(root)
     writer = writer.resolve(strict=True)
     if not (writer / "scripts/qingmu_local_api.py").is_file():
         raise ValueError("易梦来源缺少 qingmu_local_api.py")
-    if not (writer / "frontend/package.json").is_file():
+    if not is_native and not (writer / "frontend/package.json").is_file():
         raise ValueError("易梦来源缺少六阶段前端")
     if core is not None and not (core / "pipeline/imago-os-current.json").is_file():
         raise ValueError("Core 来源缺少当前机器入口")
@@ -558,7 +591,8 @@ def initialize(
     config = {"version": 1, "instanceId": secrets.token_hex(16), "root": str(root),
               "harnessRoot": str(HARNESS), "yimengRoot": str(writer), "coreRoot": str(core.resolve(strict=True)) if core else None,
               "node": shutil.which("node"), "jwtSecret": secrets.token_urlsafe(48),
-              "frontendNode": node20_executable(frontend_node),
+              "uiMode": ui_mode,
+              "frontendNode": None if is_native else node20_executable(frontend_node),
               "attestationKey": secrets.token_urlsafe(48), "controlKey": secrets.token_urlsafe(48),
               "directorExecutionKey": secrets.token_urlsafe(48),
               "editorialHandoffKey": secrets.token_urlsafe(48),
@@ -1285,6 +1319,7 @@ class Supervisor:
         # must not inherit an enabled project, asset, or Director dispatch
         # lane from the instance configuration.
         self.review_only = review_only
+        self.native_ui = native_ui(config, review_only=review_only)
         if tail_audit and single_shot:
             raise ValueError("scoped_review_exceptions_are_mutually_exclusive")
         if (tail_audit or single_shot) and not review_only:
@@ -1306,6 +1341,12 @@ class Supervisor:
         self.process_ledger_active = False
         self.shooting_binding = None
         self.shooting_next_poll = 0.0
+
+    def required_process_roles(self) -> tuple[str, ...]:
+        """Processes whose unexpected exit makes this instance unavailable."""
+        if self.review_only:
+            return ("api", "frontend")
+        return ("api", "worker", "host") if self.native_ui else ("api", "worker", "host", "frontend")
 
     def _shooting_module(self):
         spec = importlib.util.spec_from_file_location("qingmu_shooting_worker", Path(__file__).with_name("qingmu_shooting_worker.py"))
@@ -1646,6 +1687,8 @@ class Supervisor:
         require_native_director_preset(self.ports["hostUrl"])
 
     def start_frontend(self) -> None:
+        if self.native_ui:
+            return
         writer = Path(self.config["yimengRoot"])
         frontend = writer / "frontend"
         next_entry = frontend / "node_modules/next/dist/bin/next"
@@ -2283,10 +2326,12 @@ class Supervisor:
                 host_verified = host_alive and self.host_healthy()
             except (OSError, ValueError, subprocess.SubprocessError):
                 pass
-        try:
-            frontend_verified = frontend_alive and self.frontend_healthy()
-        except (OSError, ValueError, subprocess.SubprocessError):
-            pass
+        if not self.native_ui:
+            try:
+                frontend_verified = frontend_alive and self.frontend_healthy()
+            except (OSError, ValueError, subprocess.SubprocessError):
+                pass
+        entry_verified = host_verified if self.native_ui else frontend_verified
         session = "未登录：运行 login"
         try:
             token = json.loads((self.root / "private/session.json").read_text())["token"]
@@ -2308,6 +2353,8 @@ class Supervisor:
                 "frontendProcessAlive": frontend_alive,
                 "apiIdentityAndStorageVerified": api_verified, "hostListenerAndHttpVerified": host_verified,
                 "frontendListenerAndHttpVerified": frontend_verified,
+                "uiMode": "native" if self.native_ui else "legacy",
+                "entryListenerAndHttpVerified": entry_verified,
                 "reviewOnly": self.review_only,
                 "dispatchWorkersDisabled": self.review_only and not (self.tail_audit_scope or self.single_shot_scope),
                 "ordinaryDispatchWorkersDisabled": self.review_only,
@@ -2321,7 +2368,7 @@ class Supervisor:
                 "buildManifestMatches": manifest["matches"],
                 "ready": bool(
                     api_verified and (self.review_only or (worker_alive and (not asset_worker_required or asset_worker_alive)))
-                    and (self.review_only or host_verified) and frontend_verified and manifest["matches"]
+                    and (self.review_only or host_verified) and entry_verified and manifest["matches"]
                 ),
                 "session": session}
 
@@ -2370,17 +2417,8 @@ class Supervisor:
                     mark_lifecycle(self.root, self.config, "dirty")
                     persisted = self.root / "private/ports.json"
                     preferred = json.loads(persisted.read_text()) if persisted.exists() else {}
-                    # Preserve browser origin across restarts. Occupied ports fail closed.
-                    api_port = available_port(preferred.get("apiPort", 0))
-                    host_port = available_port(preferred.get("hostPort", 0))
-                    web_port = available_port(preferred.get("webPort", 0))
-                    while len({api_port, host_port, web_port}) != 3:
-                        host_port, web_port = available_port(), available_port()
-                    self.ports = {"apiPort": api_port, "hostPort": host_port, "webPort": web_port,
-                                  "apiUrl": f"http://127.0.0.1:{api_port}",
-                                  "hostUrl": f"http://127.0.0.1:{host_port}",
-                                  "webUrl": f"http://127.0.0.1:{web_port}",
-                                  "entryUrl": f"http://127.0.0.1:{web_port}/qingmu-runtime/local-session"}
+                    self.ports = runtime_ports(self.config, preferred)
+                    api_port = self.ports["apiPort"]
                     write_json(persisted, self.ports)
                     self.process_ledger_active = True
                     self._persist_process_ledger()
@@ -2419,7 +2457,7 @@ class Supervisor:
                             self._reap_terminal_asset_worker()
                         if any(
                             getattr(self, role) is None or getattr(self, role).poll() is not None
-                            for role in (("api", "frontend") if self.review_only else ("api", "worker", "host", "frontend"))
+                            for role in self.required_process_roles()
                         ) or (not self.review_only and self._unexpected_asset_worker_exit()):
                             raise RuntimeError("本实例子进程退出，正在清理其余自有子进程")
                         listeners = (server,) if self.review_only else (server, activation_server)
@@ -2506,6 +2544,7 @@ def start(
     tail_audit: bool = False,
     single_shot: bool = False,
 ) -> dict | tuple[dict, subprocess.Popen]:
+    native_ui(config, review_only=review_only)
     if tail_audit and single_shot:
         raise ValueError("scoped_review_exceptions_are_mutually_exclusive")
     if (tail_audit or single_shot) and not review_only:
@@ -3565,6 +3604,7 @@ def main() -> None:
     parser.add_argument("--yimeng-root", type=Path)
     parser.add_argument("--core-root", type=Path)
     parser.add_argument("--frontend-node", type=Path)
+    parser.add_argument("--native-ui", action="store_true", help="init: 使用 DSH 原生青木入口，无需旧 Next 前端")
     parser.add_argument("--backup", type=Path)
     parser.add_argument("--task-id")
     parser.add_argument("--lock-pack", type=Path)
@@ -3591,7 +3631,8 @@ def main() -> None:
         elif args.command == "init":
             if args.yimeng_root is None or args.core_root is None:
                 raise ValueError("init 必须明确 --yimeng-root 和 --core-root")
-            result = initialize(root, args.yimeng_root, args.core_root, args.frontend_node)
+            result = initialize(root, args.yimeng_root, args.core_root, args.frontend_node,
+                                ui_mode="native" if args.native_ui else "legacy")
         else:
             config = read_config(root)
             if args.command == "_supervise":

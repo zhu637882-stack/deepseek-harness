@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import socket
 import sqlite3
+import sys
 import subprocess
 import shutil
 import tempfile
@@ -20,6 +21,69 @@ spec.loader.exec_module(local)
 
 
 class OwnershipTests(unittest.TestCase):
+    def runtime_writer(self, root):
+        writer = root / "writer"
+        executable = writer / ".venv/bin/python"
+        executable.parent.mkdir(parents=True)
+        executable.symlink_to(sys.executable)
+        return str(writer)
+
+    def test_native_entry_uses_only_api_and_host_ports_and_preserves_origin(self):
+        with patch.object(local, "available_port", side_effect=[41001, 41002]) as available:
+            ports = local.runtime_ports({"uiMode": "native"}, {"apiPort": 41001, "hostPort": 41002})
+        self.assertEqual(available.call_count, 2)
+        self.assertEqual(ports["entryUrl"], "http://127.0.0.1:41002/")
+        self.assertEqual(ports["webUrl"], ports["hostUrl"])
+        self.assertEqual(ports["webPort"], ports["hostPort"])
+        with patch.object(local, "available_port", side_effect=ValueError("occupied")):
+            with self.assertRaisesRegex(ValueError, "occupied"):
+                local.runtime_ports({"uiMode": "native"}, ports)
+
+    def test_native_mode_requires_host_and_never_launches_legacy_frontend(self):
+        supervisor = local.Supervisor(Path("/unused"), {"uiMode": "native"})
+        with patch.object(supervisor, "launch_owned") as launch:
+            supervisor.start_frontend()
+        launch.assert_not_called()
+        self.assertEqual(supervisor.required_process_roles(), ("api", "worker", "host"))
+        with self.assertRaisesRegex(ValueError, "review-only"):
+            local.Supervisor(Path("/unused"), {"uiMode": "native"}, review_only=True)
+        with self.assertRaises(ValueError):
+            local.native_ui({"uiMode": "misspelled"})
+
+    def test_native_build_needs_no_next_build_but_binds_actual_host(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, config, identities = self.build_manifest_world(Path(directory))
+            config["uiMode"] = "native"
+            (Path(config["yimengRoot"]) / "frontend/.next/BUILD_ID").unlink()
+            with patch.object(local, "source_identity", side_effect=lambda path: identities[path]), \
+                 patch.object(local, "require_qingmu_client_build"):
+                self.assertTrue(local.record_build_manifest(root, config)["matches"])
+                manifest = json.loads((root / "build-manifest/current.json").read_text())
+                self.assertEqual(manifest["runtimeProfile"], "native")
+                self.assertNotIn("frontendBuildId", manifest["artifacts"])
+                artifact = Path(config["harnessRoot"]) / local.BUILD_MANIFEST_ARTIFACTS[0]
+                artifact.write_text("changed built host")
+                self.assertFalse(local.build_manifest_status(root, config)["matches"])
+
+    def test_native_ready_requires_verified_host_without_claiming_frontend_process(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            supervisor = local.Supervisor(root, {"instanceId": "unit", "uiMode": "native"})
+            supervisor.api = Mock(pid=1, poll=Mock(return_value=None))
+            supervisor.worker = Mock(pid=2, poll=Mock(return_value=None))
+            supervisor.host = Mock(pid=3, poll=Mock(return_value=None))
+            supervisor.ports = {"apiUrl": "http://127.0.0.1:1"}
+            with patch.object(supervisor, "api_identity", return_value={"ok": True}), \
+                 patch.object(supervisor, "host_healthy", return_value=True) as host, \
+                 patch.object(local, "build_manifest_status", return_value={"matches": True}):
+                status = supervisor.status()
+                self.assertTrue(status["ready"])
+                self.assertTrue(status["entryListenerAndHttpVerified"])
+                self.assertFalse(status["frontendProcessAlive"])
+                self.assertIsNone(status["frontendPid"])
+                host.return_value = False
+                self.assertFalse(supervisor.status()["ready"])
+
     def tail_supervisor(self):
         scope = {"projectId": "project", "episodeId": "episode"}
         with patch.object(local, "read_tail_audit_scope", return_value=(scope, "scope-sha")):
@@ -1094,7 +1158,7 @@ class OwnershipTests(unittest.TestCase):
                      patch.object(local.time, "monotonic", side_effect=[0.0, 76.0]), \
                      patch.object(local, "stop_child", wraps=local.stop_child) as stop_owned:
                     with self.assertRaisesRegex(RuntimeError, "启动尚未确认"):
-                        local.start(root, {}, return_owned_supervisor=True)
+                        local.start(root, {"yimengRoot": self.runtime_writer(root)}, return_owned_supervisor=True)
                 stop_owned.assert_called_once_with(owned)
                 self.assertIsNotNone(owned.poll())
         finally:
@@ -2360,7 +2424,7 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
                  patch.object(local, "require_clean"), \
                  patch.object(local, "require_build_manifest_matches"), \
                  patch.object(local.subprocess, "Popen", return_value=child) as popen:
-                result = local.start(root, {"instanceId": "unit"}, review_only=True)
+                result = local.start(root, {"instanceId": "unit", "yimengRoot": self.runtime_writer(root)}, review_only=True)
             self.assertTrue(result["reviewOnly"])
             self.assertIn("--review-only", popen.call_args.args[0])
 
