@@ -114,7 +114,7 @@ interface Helpers {
   readonly responseError: (message: string) => Error
   readonly canonicalJson: (value: unknown, field: string) => string
 }
-const MAX_BYTES = 3 * 1024 * 1024
+const MAX_BYTES = 8 * 1024 * 1024
 const MAX_BASE64 = Math.ceil(MAX_BYTES / 3) * 4
 function object(value: unknown, fail: (message: string) => Error): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw fail('local reference object required')
@@ -136,7 +136,7 @@ function digest(value: unknown, fail: (message: string) => Error): string {
 }
 function strictBase64(value: unknown, fail: (message: string) => Error): Buffer {
   const encoded = text(value, fail, MAX_BASE64)
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) throw fail('local reference base64 invalid')
+  // Canonical round-trip validation also rejects whitespace and invalid padding without regex stack growth.
   const bytes = Buffer.from(encoded, 'base64')
   if (bytes.length < 1 || bytes.length > MAX_BYTES || bytes.toString('base64') !== encoded) throw fail('local reference bytes invalid')
   return bytes

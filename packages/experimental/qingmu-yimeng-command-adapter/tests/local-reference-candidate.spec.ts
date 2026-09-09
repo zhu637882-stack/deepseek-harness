@@ -42,6 +42,41 @@ const setup = (value: unknown = result) => {
 }
 
 describe('local reference candidate Host contract', () => {
+  it('preserves an 8 MiB upload and verified preview across the scoped JSON transport', async () => {
+    const original = Buffer.alloc(8 * 1024 * 1024, 97)
+    const encoded = original.toString('base64')
+    const digest = createHash('sha256').update(original).digest('hex')
+    const largeResult = { ...result, byteSize: original.length, inputSha256: digest, materializedSha256: digest,
+      requestSha256: createHash('sha256').update(JSON.stringify({ ...identity, contentSha256: digest })).digest('hex') }
+    const { handler, fetch } = setup(largeResult)
+    expect(await handler('uploadLocalReferenceCandidate', { ...upload, contentBase64: encoded }, signal()))
+      .toEqual({ ok: true, value: largeResult })
+    expect(JSON.parse(fetch.mock.calls[0]?.[1]?.body as string).contentBase64).toBe(encoded)
+    const preview = { schema: 'jason.qingmu-local-reference-candidate-content.v1', assetId: 'asset_1',
+      sha256: digest, mimeType: 'image/png', contentBase64: encoded }
+    expect(await setup(preview).handler('readLocalReferenceCandidateContent',
+      { ...scope, assetId: 'asset_1', expectedSha256: digest }, signal())).toEqual({ ok: true, value: preview })
+  })
+  it('rejects bytes above 8 MiB before submission and keeps other responses bounded at 5 MiB', async () => {
+    const { handler, fetch } = setup()
+    expect(await handler('uploadLocalReferenceCandidate',
+      { ...upload, contentBase64: Buffer.alloc(8 * 1024 * 1024 + 1).toString('base64') }, signal()))
+      .toMatchObject({ ok: false })
+    expect(fetch).not.toHaveBeenCalled()
+    expect(await setup({ padding: 'a'.repeat(5 * 1024 * 1024) })
+      .handler('listLocalReferenceCandidates', scope, signal()))
+      .toMatchObject({ ok: false, error: { message: 'Yimeng response exceeded size limit' } })
+    expect(await setup({ padding: 'a'.repeat(12 * 1024 * 1024) })
+      .handler('readLocalReferenceCandidateContent', { ...scope, assetId: 'asset_1', expectedSha256: contentSha256 }, signal()))
+      .toMatchObject({ ok: false, error: { message: 'Yimeng response exceeded size limit' } })
+  })
+  it.each(['YWJj\n', 'YWJj ', 'YWJj=', 'YWJj$', 'YR==', 'YQ', '===='])
+  ('rejects noncanonical base64 %j before submission', async (encoded) => {
+    const { handler, fetch } = setup()
+    expect(await handler('uploadLocalReferenceCandidate', { ...upload, contentBase64: encoded }, signal()))
+      .toMatchObject({ ok: false })
+    expect(fetch).not.toHaveBeenCalled()
+  })
   it('uploads once and recovers the same byte-bound intent with GET', async () => {
     const { fetch, handler } = setup()
     expect(await handler('uploadLocalReferenceCandidate', upload, signal())).toEqual({ ok: true, value: result })

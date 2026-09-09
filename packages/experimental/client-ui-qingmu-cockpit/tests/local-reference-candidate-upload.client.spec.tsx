@@ -180,12 +180,33 @@ it('ignores a late response after scope exit and keeps the durable pending inten
   expect(localStorage.getItem('qingmu.local-reference.v1:project_1:actor:actor_1')).toContain('"pending":true')
 })
 
-it('rejects an oversized browser input without calling Host', async () => {
+it('prepares an 8 MiB original locally without submitting it to Host', async () => {
   const value = port()
   const { container } = mount(value)
   await screen.findByText(zh.assetUploadNoCandidates)
-  const oversized = file(new Uint8Array(3 * 1024 * 1024 + 1))
-  fireEvent.change(container.querySelector('input[type=file]')!, { target: { files: [oversized] } })
+  const withinBoundary = file(new Uint8Array(8 * 1024 * 1024), 'original-8m.png')
+  fireEvent.change(container.querySelector('input[type=file]')!, { target: { files: [withinBoundary] } })
+  expect(await screen.findByRole('button', { name: zh.assetUploadSubmit })).toBeTruthy()
+  expect(value.uploadLocalReferenceCandidate).not.toHaveBeenCalled()
+})
+
+it('rejects an input above 8 MiB before it can submit to Host', async () => {
+  const value = port()
+  const targetId = 'actor_above_8m'
+  const view = render(
+    <LocalReferenceCandidateUpload
+      {...scope}
+      targetId={targetId}
+      targetName="林夏"
+      port={value}
+      t={t}
+      onStored={vi.fn(async () => {})}
+    />,
+  )
+  await screen.findByText(zh.assetUploadNoCandidates)
+  const oversized = file(new Uint8Array(8 * 1024 * 1024 + 1))
+  fireEvent.change(view.container.querySelector('input[type=file]')!, { target: { files: [oversized] } })
   await waitFor(() => { expect(screen.getByRole('alert')).toBeTruthy() })
+  expect(screen.queryByRole('button', { name: zh.assetUploadSubmit })).toBeNull()
   expect(value.uploadLocalReferenceCandidate).not.toHaveBeenCalled()
 })

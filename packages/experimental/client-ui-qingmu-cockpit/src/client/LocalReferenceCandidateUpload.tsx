@@ -7,7 +7,7 @@ import type { QingmuYimengPort } from './contracts.ts'
 import type { QingmuCockpitKey } from './locales.ts'
 import css from './LocalReferenceCandidateUpload.module.css'
 
-const MAX_BYTES = 3 * 1024 * 1024
+const MAX_BYTES = 8 * 1024 * 1024
 interface SavedInput { readonly request: LocalReferenceUploadRequest; readonly pending: boolean }
 const volatileSaved = new Map<string, SavedInput>()
 function keyOf(projectId: string, kind: string, targetId: string): string {

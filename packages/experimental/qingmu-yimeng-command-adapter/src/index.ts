@@ -439,6 +439,7 @@ const DEFAULT_TIMEOUT_MS = 10_000
 const MAX_TIMEOUT_MS = 60_000
 const MAX_ID_LENGTH = 256
 const MAX_JSON_BYTES = 5 * 1024 * 1024
+const MAX_LOCAL_REFERENCE_JSON_BYTES = 12 * 1024 * 1024
 const SHA256 = /^[0-9a-f]{64}$/
 const PROMPT_IR_EDITABLE_FIELDS = [
   'imageGenPrompt',
@@ -2866,14 +2867,14 @@ function resolveTimeout(value: number): number {
   return value
 }
 
-function serializeBody(value: YimengCommandJsonObject): string {
+function serializeBody(value: YimengCommandJsonObject, maxBytes = MAX_JSON_BYTES): string {
   let body: string
   try {
     body = JSON.stringify(value)
   } catch {
     throw new InputError('payload must be JSON serializable')
   }
-  if (new TextEncoder().encode(body).byteLength > MAX_JSON_BYTES) {
+  if (new TextEncoder().encode(body).byteLength > maxBytes) {
     throw new InputError('payload exceeds the command size limit')
   }
   return body
@@ -2940,9 +2941,9 @@ function containsReflectedCredential(value: unknown, token: string, depth = 0): 
   ))
 }
 
-async function readBoundedJson(response: Response): Promise<unknown> {
+async function readBoundedJson(response: Response, maxBytes = MAX_JSON_BYTES): Promise<unknown> {
   const contentLength = response.headers.get('content-length')
-  if (contentLength !== null && /^\d+$/.test(contentLength) && Number(contentLength) > MAX_JSON_BYTES) {
+  if (contentLength !== null && /^\d+$/.test(contentLength) && Number(contentLength) > maxBytes) {
     await response.body?.cancel()
     throw new ResponseTooLargeError('response exceeds size limit')
   }
@@ -2956,7 +2957,7 @@ async function readBoundedJson(response: Response): Promise<unknown> {
       const chunk = await reader.read()
       if (chunk.done) break
       length += chunk.value.byteLength
-      if (length > MAX_JSON_BYTES) {
+      if (length > maxBytes) {
         await reader.cancel()
         throw new ResponseTooLargeError('response exceeds size limit')
       }
@@ -2997,6 +2998,7 @@ interface FetchJsonRequest {
   readonly method: 'GET' | 'POST'
   readonly body?: string
   readonly idempotencyKey?: string
+  readonly maxResponseBytes?: number
 }
 
 async function fetchJson(
@@ -3033,7 +3035,7 @@ async function fetchJson(
     let value: unknown = undefined
     let invalidJson = false
     try {
-      const upstreamValue = await readBoundedJson(response)
+      const upstreamValue = await readBoundedJson(response, request.maxResponseBytes)
       value = response.ok && preserveSuccessfulJson
         ? upstreamValue
         : sanitizeUpstreamValue(upstreamValue, token)
@@ -5815,7 +5817,13 @@ export function createYimengCommandHandler(
       } else if (['listLocalReferenceCandidates', 'uploadLocalReferenceCandidate', 'recoverLocalReferenceCandidate', 'readLocalReferenceCandidateContent', 'qualifyLocalReferenceCandidate', 'recoverLocalReferenceQualification'].includes(endpoint)) {
         const prepared = prepareLocalReferenceCandidate(endpoint, payload, stageArtifactHelpers)
         path = prepared.path
-        requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
+        requestInit = {
+          method: prepared.method,
+          ...(prepared.body === undefined ? {} : {
+            body: serializeBody(prepared.body, endpoint === 'uploadLocalReferenceCandidate' ? MAX_LOCAL_REFERENCE_JSON_BYTES : MAX_JSON_BYTES),
+          }),
+          ...(endpoint === 'readLocalReferenceCandidateContent' ? { maxResponseBytes: MAX_LOCAL_REFERENCE_JSON_BYTES } : {}),
+        }
         normalize = prepared.normalize
       } else if (['readCreativeContract', 'initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)) {
         const prepared = prepareCreationCommand(endpoint, payload, stageArtifactHelpers)
