@@ -18,6 +18,7 @@ import { dialogueInputView, dialoguePreviewView, findNativeDialogueInput, previe
 import { stageDialogueEdit, findStagedDialogue, commitStagedDialogue, dialogueContinuation } from './dialogue-command.ts'
 import { prepareDialogueVideo } from './dialogue-video.ts'
 import { retainNativeDialogueReceipt, toolValues } from './native-draft.ts'
+import { registerReferenceVideoTools } from './reference-video-tools.ts'
 
 /** Opt-in native-agent consumer; the Host binding plugin remains independently usable. */
 export const name = 'qingmu-director-model-tools'
@@ -179,6 +180,7 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   // The two context tools remain available without the optional PromptIR reader.
   ctx.inject(['qingmuYimengRead'], (draftHost) => {
+    registerReferenceVideoTools(draftHost, { readBoundContext, boundedJson: value => boundedJson(value, maxOutputBytes) })
     async function readDialogueInput(exec: ToolRunContext) {
       const current = await readBoundContext(exec)
       const input = await readNativeDialogueInput(current.context, current.state.binding.scope, {

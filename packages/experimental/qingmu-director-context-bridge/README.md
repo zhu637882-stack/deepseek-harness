@@ -22,7 +22,7 @@ The Cordis plugin registers the `qingmuDirectorContext` session projection and a
 
 ## Authority and side effects
 
-Yimeng remains the sole source of business truth. Binding events contain only object coordinates, context SHA, and immutable proposal/freshness hashes. They contain no prompt text, reference media, content approval, selection, Ready state, Provider result, fee record, or general chat history. The optional model tools below do store creative context and method text in ordinary tool-result events. The package performs zero Provider calls and zero Yimeng business writes.
+Yimeng remains the sole source of business truth. Binding events contain only object coordinates, context SHA, and immutable proposal/freshness hashes. They contain no prompt text, reference media, content approval, selection, Ready state, Provider result, fee record, or general chat history. The optional model tools below do store creative context and method text in ordinary tool-result events. Binding performs no Yimeng business write. Optional editing tools use the existing Writer command adapters; no tool here dispatches a Provider.
 
 ## Native director read tools
 
@@ -33,9 +33,11 @@ The opt-in `@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/model-t
 - `qingmu_read_bound_context({})` reads the actual normalized Writer context for the session's bound object. The model cannot supply another project, shot, or session.
 - `qingmu_get_imago_method({ capability })` reads current IMAGO instruction text for `director_development` or `shot_design`. For C5, follow a required `additionalReferences` entry with `{ capability: 'shot_design', resourceId: 'rough_final_feedback' }`; a listed hash is not proof that its text was read.
 
-Each call refreshes the binding before returning content. A changed context SHA invalidates a pending proposal; an object switch during either read rejects the late result. Missing context, missing methods, and cancellation do not generate replacement content or block manual editing. There is no proposal-adoption, business-write, approval, or generation tool in this entry.
+Each call refreshes the binding before returning content. A changed context SHA invalidates a pending proposal; an object switch during either read rejects the late result. Missing context, missing methods, and cancellation do not generate replacement content or block manual editing. These context and method reads do not adopt proposals, write business state, approve or generate media.
 
 When the scoped consumer also has `qingmuYimengRead`, it registers `qingmu_read_prompt_draft` and `qingmu_propose_prompt_edit`. The read loads the current Ready/draft prompt, bound context, and full C5 instructions including required supplementary references. The suggestion replaces one of the existing five prompt fields, using a receipt from a successfully paired native tool call/result. The Host rechecks the source before returning a suggestion. It never accepts a model-authored baseline or a legacy replay work order.
+
+With the same reader, `qingmu_read_reference_draft` loads the saved reference draft and a requested page of image/voice metadata. `qingmu_preview_reference_draft` compiles the exact text and reference mapping; `qingmu_save_reference_draft` saves a user-requested edit through the same command and authoritative readback as the workspace. The session fixes project, shot and model; the model supplies only editable fields, observed revision and frame SHA. Compilation and source/draft checks reject stale edits. A lost save response is resolved by rereading, without automatic resubmission. Tool results enter the session log without signed media URLs; metadata is not pixel or audio review. The workspace restores saved versions explicitly, preserving unsaved local input. These tools do not select media or generate candidates.
 
 `readNativeDraftProposal` is a read-only loopback facade for the latest logged native suggestion. It rechecks Writer context, prompt baseline, methods and session binding, distinguishing current, stale, unavailable and absent results. Suggestions contain only source coordinates, receipt ID, original/replacement text and rationale; context and method bodies remain in the original read result. The cockpit compares original and suggested text and explicitly adopts into an unsaved draft, rechecking freshness and preserving manual edits. Existing method checking, preview, save and authoritative Writer reread stay separate. No scene-planning save, approval, generation, additional database or queue is introduced. One-field suggestions require an existing Ready PromptIR; first-Draft bootstrap remains in its existing workspace.
 
@@ -67,7 +69,7 @@ Independent. Binding, switching, and recovery do not modify model requests.
 
 #### What the model sees
 
-The context and method tool schemas, plus the two prompt-suggestion tools when the PromptIR reader is available. Tool results persist in the existing session log and enter the next model request. Standalone method reads require separate follow-up references; prompt-draft reads include all required C5 references. Suggestion results carry compact source coordinates, not repeated method or context bodies.
+Context and method schemas, plus prompt-suggestion and reference-draft tools when the reader is available. Tool results persist in the existing session log and enter the next model request. Standalone method reads require separate follow-up references; prompt-draft reads include all required C5 references. Suggestion results carry compact source coordinates, not repeated method or context bodies.
 
 #### Token effect
 

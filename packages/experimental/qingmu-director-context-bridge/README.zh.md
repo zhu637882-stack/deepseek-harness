@@ -22,7 +22,7 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 
 ## 权威与副作用
 
-易梦仍是唯一业务真源。绑定事件只保存对象坐标、context SHA 和不可变 proposal/freshness 哈希，不保存提示词正文、参考媒体、内容签收、选择、Ready、Provider 结果、费用记录或通用聊天历史。下述可选模型工具会把创作上下文和方法正文保存在普通工具结果事件中。本包产生零 Provider 调用、零易梦业务写入。
+易梦仍是唯一业务真源。绑定事件只保存对象坐标、context SHA 和不可变 proposal/freshness 哈希，不保存提示词正文、参考媒体、内容签收、选择、Ready、Provider 结果、费用记录或通用聊天历史。下述可选模型工具会把创作上下文和方法正文保存在普通工具结果事件中。绑定操作不写入易梦业务状态。可选编辑工具使用已有 Writer 命令适配器；本包的工具不派发 Provider。
 
 ## 原生导演读取工具
 
@@ -33,9 +33,11 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 - `qingmu_read_bound_context({})` 读取会话绑定对象的真实、已规范化 Writer 上下文。模型不能指定其他项目、镜头或会话。
 - `qingmu_get_imago_method({ capability })` 读取 `director_development` 或 `shot_design` 对应的当前 IMAGO 方法正文。C5 响应若有必读 `additionalReferences`，须再调用 `{ capability: 'shot_design', resourceId: 'rough_final_feedback' }`；列出哈希不等于已经读到正文。
 
-每次调用在返回正文前刷新绑定。上下文 SHA 改变会使待处理建议失效；任一读取过程中切换对象，都会拒绝迟到结果。上下文或方法缺失、取消操作不会生成替代内容，也不阻断手工编辑。这个入口不包含采用建议、业务写入、批准或生成工具。
+每次调用在返回正文前刷新绑定。上下文 SHA 改变会使待处理建议失效；任一读取过程中切换对象，都会拒绝迟到结果。上下文或方法缺失、取消操作不会生成替代内容，也不阻断手工编辑。这两个上下文和方法读取工具不采用建议、不写业务状态、不批准或生成媒体。
 
 作用域消费方还具有 `qingmuYimengRead` 时，会注册 `qingmu_read_prompt_draft` 和 `qingmu_propose_prompt_edit`。前者读取当前 Ready/草稿提示词、绑定上下文与完整 C5 方法，包括必读追加参考。建议使用成功配对的原生工具调用与结果中的读取回执，替换现有五个提示词字段之一。Host 返回建议前重新核对来源，不接受模型自填的原文基线或旧回放工作单。
+
+同一读取器可用时，`qingmu_read_reference_draft` 读取已存引用草稿和指定页的图片/音色元数据。`qingmu_preview_reference_draft` 编译准确文字与引用映射；`qingmu_save_reference_draft` 使用页面相同的命令和权威回读保存用户要求的修改。会话固定项目、镜头和模型；模型只提供可编辑字段、已读版本与镜头 SHA。编译及来源/草稿检查拒绝过期修改。保存响应丢失时通过回读确认，不自动重提。工具结果进入会话日志，不含签名媒体 URL；元数据不代表审图或听音。页面显式恢复已存版本，保留本地未保存输入。这些工具不选定媒体、不生成候选。
 
 `readNativeDraftProposal` 是读取最新已记录原生建议的只读 loopback 接口。它重新核对 Writer 上下文、提示词基线、方法与会话绑定，区分 current、stale、unavailable 和没有建议。建议只包含来源坐标、回执 ID、原文/替换文字和理由；上下文与方法正文留在原始读取结果中。驾驶舱对照原文与建议，明确采用到未保存草稿；采用时再核对来源，并保留人工修改。既有方法检查、预览、保存和 Writer 权威回读仍独立执行，不引入场景规划保存、批准、生成、额外数据库或队列。单字段建议需要已有 Ready PromptIR；首份草稿仍走原工作区。
 
@@ -67,7 +69,7 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 
 #### 模型看到什么
 
-上下文与方法工具 schema，以及 PromptIR 读取器可用时的两个提示词建议工具。工具结果持久化到原有会话日志，并进入下一轮模型请求。单独读取方法时须另行补读必读参考；提示词草稿读取包含全部必读 C5 参考。建议结果只带精简来源坐标，不重复方法或上下文正文。
+上下文与方法工具 schema，以及读取器可用时的提示词建议和引用草稿工具。工具结果持久化到原有会话日志，并进入下一轮模型请求。单独读取方法时须另行补读必读参考；提示词草稿读取包含全部必读 C5 参考。建议结果只带精简来源坐标，不重复方法或上下文正文。
 
 #### Token 影响
 

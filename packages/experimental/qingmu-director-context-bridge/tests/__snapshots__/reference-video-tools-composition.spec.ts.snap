@@ -1,0 +1,20 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`reads, previews and saves through the shipped YAML preset and real adapters, then exposes the same version to the workspace 1`] = `
+{
+  "activeShotChanged": false,
+  "generationQueued": false,
+  "guidance": "Saved to the shot identified by scope in this result. Its draft is available from the workspace’s restore action. Existing unsaved text remains local. No candidate was generated or adopted.",
+  "mediaSelectionChanged": false,
+  "providerCalls": 0,
+  "requestSha256": "10e8c4de70c65a5559a4567d411e1c1e2a61eb7bbaa6a73d3ad6116c1eab01a8",
+  "revision": 2,
+  "schema": "qingmu.native-reference-saved.v1",
+  "scope": {
+    "episodeId": "episode-a",
+    "projectId": "p",
+    "sceneId": "scene-a",
+    "shotId": "f",
+  },
+}
+`;

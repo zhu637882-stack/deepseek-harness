@@ -8,7 +8,9 @@ When the local DSh entry is embedded with exact project and episode coordinates,
 
 ## Reference video draft
 
-The existing PromptIR director editor exposes an expandable image/voice reference draft. Users explicitly load project assets, assign labels, insert reference nodes, reorder bindings and inspect the Writer-compiled request. Literal text remains separate from reference nodes. Any edit invalidates the displayed preview and aborts its pending request; changing the active Shot remounts the draft. This draft stays in memory and is cleared on refresh. It does not save project state, select assets or submit generation.
+The existing PromptIR director editor exposes an expandable image/voice reference draft. Users explicitly load project assets, assign labels, insert reference nodes, reorder bindings and inspect the Writer-compiled request. Literal text remains separate from reference nodes. Any edit invalidates the displayed preview and aborts its pending request; changing the active Shot remounts the draft. Unsaved edits stay in memory; saved versions use the explicit restore path described below. Editing alone does not select assets or submit generation.
+
+The reference desk uses a dark blue-black palette and a lime accent for key actions. Asset thumbnails, editable director text and candidates have separate regions; narrow screens stack them in reading order. Keyboard focus remains visible. Saved drafts are restored explicitly rather than overwriting ongoing edits.
 
 ## Projection and ChangeSet workflow
 

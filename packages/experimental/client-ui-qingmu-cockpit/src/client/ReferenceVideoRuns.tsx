@@ -91,25 +91,29 @@ export function ReferenceVideoRuns({ projectId, frameId, quote, port }: Props) {
   const inflight = runs.some(run => !['Succeeded', 'Failed', 'Cancelled'].includes(run.kernelStatus)
     || run.publicStatus === 'quarantined')
   const amount = pending?.authorizationCapCny ?? quote?.cost.estimatedCny
-  return <section aria-label="生成与候选视频">
-    <div className={css.actions}>
-      <button type="button" disabled={busy || recoveryError || !loaded || (!pending && (!quote || inflight))} onClick={() => { void submit() }}>
+  return <section className={css.deliveryDesk} aria-label="生成与候选视频">
+    <div className={css.deliveryHeading}>
+      <div><p className={css.kicker}>DELIVERY DESK</p><h4>生成与候选视频</h4></div>
+      <span className={css.deliveryHint}>{runs.length ? `${runs.length} 个近期任务` : '候选将回到这里'}</span>
+    </div>
+    <div className={css.deliveryActions}>
+      <button className={css.primaryAction} type="button" disabled={busy || recoveryError || !loaded || (!pending && (!quote || inflight))} onClick={() => { void submit() }}>
         {busy ? '确认提交中…' : pending ? `确认上次提交 · 上限 ¥${Number(amount).toFixed(2)}` : `生成 1 个视频${amount ? ` · 上限 ¥${Number(amount).toFixed(2)}` : ''}`}
       </button>
       <button type="button" disabled={busy} onClick={() => { void refresh() }}>刷新任务状态</button>
     </div>
-    <p className={css.note}>生成使用阿里账户额度，每次只提交 1 个视频。候选保留供你审看，当前选用的视频不会被替换。</p>
+    <p className={css.note}>阿里直连，使用阿里账户额度，每次生成 1 个候选。候选供你审看，当前选用的视频不会被替换。</p>
     {recoveryError && <p role="alert">上次提交记录无法读取。请先在任务中心核对提交结果，核对前暂停新增生成。</p>}
     {pending && <p>上次提交：草稿版本 {pending.expectedRevision}。核对完成前保留这次请求。</p>}
     {message && <p aria-live="polite">{message}</p>}
     {runs.map(run => <article key={run.runId} className={css.candidate}>
-      <h4>草稿版本 {run.draftRevision} · {run.publicStatus === 'quarantined' ? '提交结果待核实' : statuses[run.kernelStatus] ?? '状态待核实'}</h4>
-      <p>本次上限 ¥{Number(run.authorizationCapCny).toFixed(2)} · 任务 {run.taskId}</p>
+      <div className={css.candidateHeading}><div><p className={css.kicker}>CANDIDATE · DRAFT V{run.draftRevision}</p><h4>草稿版本 {run.draftRevision} · {run.publicStatus === 'quarantined' ? '提交结果待核实' : statuses[run.kernelStatus] ?? '状态待核实'}</h4></div><span>上限 ¥{Number(run.authorizationCapCny).toFixed(2)}</span></div>
+      <p className={css.taskMeta}>任务 {run.taskId}</p>
       {run.errorCode && <p>任务需要处理：{run.errorCode}。不会自动重新生成。</p>}
       {run.candidates.map(candidate => <div key={candidate.assetId}>
         {candidate.browserUrl ? <video src={candidate.browserUrl} controls preload="none" aria-label={`草稿版本 ${run.draftRevision} 候选视频`} />
           : <p>视频地址暂不可用，请刷新状态。</p>}
-        <p>待你审看人物、服装、场景与声音。</p>
+        <p className={css.reviewNote}>请审看人物、服装、场景与声音。确认采用仍由你决定。</p>
       </div>)}
     </article>)}
   </section>
