@@ -14,12 +14,13 @@ const projection = {
   ] }, heroFrameStoryboards: { shots: [{ shotId: 'frame_34b3741b1f0a', heroFrame: { assetId: 'asset_first_frame_6', browserUrl: `http://127.0.0.1:65269/api/media/media_first_frame_6?expires=1788767261&signature=${'a'.repeat(64)}` } }] } },
 } as never
 
-const port = {
+const portFixture = {
   takeVersions: vi.fn(() => new Promise(() => {})),
   takePreview: vi.fn(),
   selectTakeVersion: vi.fn(),
   recoverTakeVersionSelection: vi.fn(),
-} as never
+}
+const port = portFixture as never
 
 describe('ShootingReviewWorkspace', () => {
   it('never substitutes a historical candidate for the selected video poster', () => {
@@ -39,7 +40,7 @@ describe('ShootingReviewWorkspace', () => {
     }))
     const props = { projectName: '落日公路', episodeName: '第 1 集', projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9',
       projection, onSelectShotId: vi.fn(), onNavigate: vi.fn(), directorAssistant: null, t: (key: string) => key,
-      port: { ...port, readScenePlanning: read, saveScenePlanning: save, recoverScenePlanning: vi.fn() } as never }
+      port: { ...portFixture, readScenePlanning: read, saveScenePlanning: save, recoverScenePlanning: vi.fn() } as never }
     const view = render(<ShootingReviewWorkspace {...props} selectedShotId="frame_34b3741b1f0a" />)
     await screen.findByDisplayValue('第一镜已保存要求')
     changingShot = true
