@@ -1,5 +1,7 @@
 # 青木易梦命令适配器
 
+已保存的逐镜拍摄要求同时覆盖自动分镜与手动规划分镜。手动规划镜头通过明确的 `edit_requirements` 操作，在核对剧本与分镜来源后保存；原规划文字与回执继续保留。空要求仍不可生成。保存及 GET 回执恢复只保存文字，不生成媒体、不授予审核批准。
+
 [English](README.md) | 中文
 
 这个私有实验性 Host 插件通过仅限回环地址的 `/qingmu-yimeng-command` 通道，暴露易梦 `episode_script` 与人物、环境、道具 `element_profile` ChangeSet 的显式流程。剧本操作继续是 `proposeScript`、`previewScript`、`commitScript` 和只读的 `recoverScriptCommit`；元素操作是 `proposeElementProfile`、`proposeReferenceAsset`、`previewElementProfile`、`commitElementProfile` 和只读的 `recoverElementProfileCommit`。绑定 Ready 的生产意图使用 `queueProductionTake`。Take 普通评论使用 `createTakeComment` 和只读的 `recoverTakeComment`。Take 审核权威使用 `createTakeReviewRecommendation`、`createTakeHumanDecision` 及各自的 GET-only 恢复操作。技术 QC 使用 `recordTakeTechnicalQc` 和 `recoverTakeTechnicalQc`。批准生命周期使用 `transitionTakeApprovalLifecycle` 和 `recoverTakeApprovalLifecycleTransition`。所选视频 Finding 使用 `recordShotFinding` 和只读的 `recoverShotFinding`。通过机器校验的阶段工件使用 `registerStageArtifact`、`commitStageArtifactDecision`，以及只读的 `recoverStageArtifactRegistration` 和 `recoverStageArtifactDecision`。完整范围 LSU 计划使用 `sealLsuPlan`、只读的 `recoverLsuPlanSeal` 和 `probeLsuPlanAuthority`。PromptIR 实体草稿决定使用独立的同源 cookie-only 浏览器路由，而不是面向模型的命令通道。

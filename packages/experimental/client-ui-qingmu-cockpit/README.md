@@ -1,10 +1,14 @@
 # Qingmu OS production cockpit
 
+Saved frame requirements now cover both automatic and manually planned shots. An imported shot uses the explicit `edit_requirements` operation after source and storyboard verification; the original planning text and receipts remain intact. Empty requirements stay unready. A save or GET receipt recovery stores text only and does not generate media or grant approval.
+
 English | [中文](README.zh.md)
 
 The standalone five-step workspace starts with Story when the entry has no valid `qingmuView`. Explicit links to assets, storyboard, shooting or delivery keep their target.
 
 Project creation reads Writer's current visual styles, style packs and director methods. Users select all three before submission; the request and recovery hash include the selected methods and text version. An older saved intent remains read-only until receipt recovery reports it absent, after which the user can retain their input and prepare current settings. A saved script offers a direct action to plan storyboards. Returning from missing shooting requirements opens the storyboard step in the standalone workspace.
+
+The Assets step has a direct **Upload person/scene reference** entry that expands and focuses the existing element archive. Users choose a person or scene there before uploading an image; successful real uploads refresh the library. This entry neither uploads voice nor adopts a reference candidate.
 
 This private experimental Client plugin adds the Qingmu OS production cockpit to the Harness sidebar. It reads Yimeng projections and provides tightly bounded human-operated ChangeSet flows for episode scripts and actor, scene, and prop profiles. Context binding never submits a paid Provider request; the separate paid-advice action requires explicit confirmation and the existing Host work-order path. Its dedicated PromptIR-associated entity-draft panel can record only an explicit natural-person acceptance or rejection through Yimeng's authority path.
 
@@ -46,6 +50,8 @@ First-frame rework obtains a new preview bound to a settled preceding request; t
 First-frame recovery distinguishes queued dispatch, quality checking, and an ended task whose candidate is not yet available. A queued receipt is not evidence of Provider execution. Recovery only reads the original request and never activates a worker or repeats submission.
 
 The cockpit opens from the sidebar into Overview, Director workspace, Script & Assets, Storyboard & Shots, Generation & QC, and Cost & Delivery. It reads `health`, `capabilityCatalog`, `costRehearsal`, `gateAControlEvidence`, `projects`, `episodes`, `script`, `workflow`, element profiles, and authoritative reference candidates over the loopback-only `/qingmu-yimeng` RPC channel.
+
+For a newly created project, `storyboard_revision_missing` is an expected planning state, not a transport success or a generic failure. The application clears any prior projection for that exact request and guides the user to save the story before entering storyboard work; authentication, contract, and other read failures remain errors.
 
 The Director workspace shares canonical scene/Shot identities with the existing storyboard canvas and Take comparison. Select a Shot, edit the five named prompt fields, run the pure method check, preview the exact diff, and confirm a Draft save. The saved Draft is reread from Yimeng; the effective Ready remains separate and unchanged. Unsaved text is a source-bound browser recovery copy, not a business record. Source drift blocks submission; unknown commits recover the original receipt before another edit. Advanced JSON, hashes, and source details are expandable. For an already Ready PromptIR, a separate production panel requires explicit confirmation and sends only Shot plus Take intent to the Host. It exposes Take 1 and Take 2, keeps Take 3 unavailable, persists an unknown-result marker across refresh, and displays only a validated Writer queued receipt. Manual PromptIR editing remains usable if the production method path fails. The workspace offers no Ready promotion, Take selection, generated-result, Provider, model, route, or approval action.
 

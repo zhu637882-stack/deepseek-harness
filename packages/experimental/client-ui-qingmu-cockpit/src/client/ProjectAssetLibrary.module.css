@@ -2,6 +2,7 @@
 .toolbar,.filters,.preview header { display:flex; gap:12px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
 .toolbar h2,.preview h3 { margin:0; font-size:18px; }
 .toolbar p { color:var(--dsw-alias-label-secondary); margin:6px 0 0; }
+.toolbar > div:last-child { display:flex; gap:8px; flex-wrap:wrap; }
 .library button,.library input { border:1px solid var(--dsw-alias-border-l2); border-radius:8px; background:var(--dsw-alias-bg-layer-2); color:var(--dsw-alias-label-primary); font:inherit; min-height:42px; padding:9px 14px; }
 .library button { cursor:pointer; }
 .library button:disabled { opacity:.45; cursor:default; }

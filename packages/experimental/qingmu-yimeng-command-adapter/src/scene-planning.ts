@@ -48,7 +48,12 @@ export interface AutomaticPlanningOperation {
   readonly blocking?: string
   readonly cameraAngle?: string
 }
-export type AnyPlanningOperation = PlanningOperation | AutomaticPlanningOperation
+/** Requirements for a verified manually planned frame, independent of script planning edits. */
+export interface PlannedFrameRequirementsOperation extends Omit<AutomaticPlanningOperation, 'action'> {
+  readonly action: 'edit_requirements'
+}
+export type FrameRequirementsOperation = AutomaticPlanningOperation | PlannedFrameRequirementsOperation
+export type AnyPlanningOperation = PlanningOperation | FrameRequirementsOperation
 /** A durable owner-scoped intent; recovery uses exactly this request. */
 export interface ScenePlanningRequest extends CreationScope {
   readonly idempotencyKey: string
@@ -99,6 +104,8 @@ export interface ScenePlanningState extends CreationScope {
   readonly storyboard: PlanningRevision | null
   /** Present only when the canonical automatic shot plan, rather than legacy planning rows, is authoritative. */
   readonly canonicalStoryboard?: CanonicalStoryboard | null
+  /** Saved shooting requirements for either verified storyboard origin. Empty prompts remain unready. */
+  readonly frameRequirements?: readonly AutomaticPlanningShot[]
   readonly planning: {
     readonly sceneId: string
     readonly sceneIndex: number
@@ -135,7 +142,10 @@ export interface AutomaticScenePlanningResult extends ScenePlanningResultBase {
   readonly shotId: string
   readonly storyboard: PlanningRevision
 }
-export type ScenePlanningResult = ImportedScenePlanningResult | AutomaticScenePlanningResult
+export interface PlannedFrameRequirementsResult extends Omit<AutomaticScenePlanningResult, 'action'> {
+  readonly action: 'edit_requirements'
+}
+export type ScenePlanningResult = ImportedScenePlanningResult | AutomaticScenePlanningResult | PlannedFrameRequirementsResult
 interface Helpers {
   readonly inputError: (message: string) => Error
   readonly responseError: (message: string) => Error
@@ -180,6 +190,20 @@ function revision(value: unknown, fail: Fail): void {
   id(r.id, fail); integer(r.version, fail, 1); digest(r.sourceHash, fail)
   if (r.status !== 'Ready') throw fail('planning structural revision untrusted')
 }
+function frameRequirements(value: unknown, fail: Fail): void {
+  if (!Array.isArray(value) || value.length > 1000) throw fail('frame requirements invalid')
+  const shotIds = new Set<string>()
+  for (const item of value) {
+    const frame = obj(item, fail); const shotId = id(frame.id, fail)
+    if (shotIds.has(shotId)) throw fail('canonical storyboard shot identity invalid')
+    shotIds.add(shotId); integer(frame.frameNo, fail, 1); str(frame.title, fail, 64000)
+    if (typeof frame.imagePromptCn !== 'string' || frame.imagePromptCn.length > 20000) throw fail('canonical storyboard image prompt invalid')
+    if (frame.firstFrameCandidateCount !== undefined) integer(frame.firstFrameCandidateCount, fail)
+    for (const field of ['blocking', 'cameraAngle', 'narrative']) {
+      if (frame[field] !== undefined && (typeof frame[field] !== 'string' || frame[field].length > 20000)) throw fail('canonical shooting field invalid')
+    }
+  }
+}
 function canonicalStoryboard(value: unknown, fail: Fail): void {
   const storyboard = obj(value, fail)
   integer(storyboard.revision, fail, 1); digest(storyboard.sourceHash, fail)
@@ -187,17 +211,7 @@ function canonicalStoryboard(value: unknown, fail: Fail): void {
   if (storyboard.origin !== 'automatic') throw fail('canonical storyboard origin invalid')
   if (storyboard.shots !== undefined) {
     if (!Array.isArray(storyboard.shots) || storyboard.shots.length !== storyboard.shotCount) throw fail('canonical storyboard shots invalid')
-    const shotIds = new Set<string>()
-    for (const value of storyboard.shots) {
-      const frame = obj(value, fail); const shotId = id(frame.id, fail)
-      if (shotIds.has(shotId)) throw fail('canonical storyboard shot identity invalid')
-      shotIds.add(shotId); integer(frame.frameNo, fail, 1); str(frame.title, fail, 64000)
-      if (typeof frame.imagePromptCn !== 'string' || frame.imagePromptCn.length > 20000) throw fail('canonical storyboard image prompt invalid')
-      if (frame.firstFrameCandidateCount !== undefined) integer(frame.firstFrameCandidateCount, fail)
-      for (const field of ['blocking', 'cameraAngle', 'narrative']) {
-        if (frame[field] !== undefined && (typeof frame[field] !== 'string' || frame[field].length > 20000)) throw fail('canonical shooting field invalid')
-      }
-    }
+    frameRequirements(storyboard.shots, fail)
   }
 }
 function source(value: unknown, fail: Fail): void {
@@ -232,7 +246,7 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
     const r = obj(raw.request, f)
     integer(r.expectedScriptRevision, f, 1); digest(r.expectedScriptSha256, f)
     integer(r.expectedStoryboardRevision, f)
-    if (r.action === 'edit_automatic') {
+    if ((r.action === 'edit_automatic' || r.action === 'edit_requirements')) {
       const required = ['action', 'expectedScriptRevision', 'expectedScriptSha256', 'expectedStoryboardRevision', 'expectedStoryboardSha256', 'imagePromptCn', 'shotId']
       if (required.some(key => !(key in r)) || Object.keys(r).some(key => ![...required, 'blocking', 'cameraAngle'].includes(key))) throw f('automatic planning fields invalid')
       for (const field of ['blocking', 'cameraAngle']) {
@@ -247,7 +261,7 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
     if (r.action === 'initialize') {
       if (!Array.isArray(r.shots) || r.shots.length < 1 || r.shots.length > 8) throw f('planning shot limit')
       for (const s of r.shots) shot(s, f)
-    } else if (r.action === 'edit') { id(r.shotId, f); shot(r.shot, f) } else if (r.action !== 'edit_automatic') throw f('planning action invalid')
+    } else if (r.action === 'edit') { id(r.shotId, f); shot(r.shot, f) } else if (r.action !== 'edit_automatic' && r.action !== 'edit_requirements') throw f('planning action invalid')
     const encoded = helpers.canonicalJson(r, 'planning request')
     if (Buffer.byteLength(encoded) > 98304) throw f('planning payload too large')
     requestSha = createHash('sha256').update(encoded).digest('hex')
@@ -284,6 +298,18 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
           || r.planning !== null
           || r.scenes.length === 0) throw b('canonical storyboard state mismatch')
       }
+      if (r.frameRequirements !== undefined) {
+        if (!Array.isArray(r.frameRequirements)) throw b('frame requirements invalid')
+        frameRequirements(r.frameRequirements, b)
+        {
+          if (r.frameRequirements.length > 0 && r.storyboard === null) throw b('frame requirements revision missing')
+          const expected = automatic ? obj(r.canonicalStoryboard, b).shots : r.planning === null ? [] : obj(r.planning, b).shots
+          if (!Array.isArray(expected) || expected.length !== r.frameRequirements.length
+            || expected.some((item, index) => obj(item, b).id !== obj((r.frameRequirements as unknown[])[index], b).id)) {
+            throw b('frame requirements scope mismatch')
+          }
+        }
+      }
       if (r.planning !== null) {
         const p = obj(r.planning, b)
         id(p.sceneId, b); integer(p.sceneIndex, b, 1); source(p.source, b); id(p.initialReceiptId, b)
@@ -295,7 +321,7 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
       for (const k of ['commandReceiptId', 'eventId']) id(r[k], b)
       const request = obj(raw.request, f)
       if (r.action !== request.action) throw b('planning receipt action mismatch')
-      if (request.action === 'edit_automatic') {
+      if ((request.action === 'edit_automatic' || request.action === 'edit_requirements')) {
         if (Object.keys(r).sort().join() !== ['action', 'approvalGranted', 'commandReceiptId', 'episodeId', 'eventId', 'idempotencyKey', 'projectId', 'providerCalls', 'requestSha256', 'schema', 'shotId', 'stageStarted', 'storyboard'].join()) throw b('automatic planning receipt fields invalid')
         if (r.shotId !== request.shotId) throw b('automatic planning receipt shot mismatch')
         id(r.shotId, b); revision(r.storyboard, b)

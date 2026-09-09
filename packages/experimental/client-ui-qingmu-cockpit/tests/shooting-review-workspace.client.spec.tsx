@@ -5,6 +5,8 @@ import { localHeroUrl, shootingPosterVersion, shootingPrimary, shootingTitle, Sh
 import { AutomaticFrameRequirementsEditor } from '../src/client/AutomaticFrameRequirementsEditor.tsx'
 import { takeVersionSelectionRequestFromMarker } from '../src/client/take-version-recovery.ts'
 
+afterEach(cleanup)
+
 const projection = {
   director: { shotRelations: { storyboardRevision: { revisionId: 'storyboard-r1' }, shots: [
     { shotId: 'frame_34b3741b1f0a', frameNo: 6, title: '落日公路', sceneId: 'scene-1', beats: [], dialogueRhythm: { cues: [] } },
@@ -37,7 +39,6 @@ describe('ShootingReviewWorkspace', () => {
     expect(shootingTitle('镜头 4', { id: 'f4', frameNo: 4, title: '镜头 4', imagePromptCn: '', blocking: '双手稳握方向盘；看见女主' })).toBe('双手稳握方向盘')
     expect(shootingTitle('雨中相遇', undefined)).toBe('雨中相遇')
   })
-  afterEach(cleanup)
   it('edits action and camera independently and preserves both on reload', async () => {
     localStorage.clear()
     const props = { projectId:'project_cd5eabc7582b', episodeId:'episode_cd4ffe357df9', shotId:'frame_34b3741b1f0a', onCommitted:async () => undefined,
@@ -165,8 +166,108 @@ describe('ShootingReviewWorkspace', () => {
     expect(Object.keys(request)).toHaveLength(9)
   })
 
+  it.each([undefined, null, { action: 'edit_requirements', imagePromptCn: null }])('ignores malformed local pending data without blocking the saved shot: %j', async (request) => {
+    const scope = { projectId: 'project-malformed', episodeId: 'episode-malformed', shotId: 'frame-malformed' }
+    localStorage.setItem(`qingmu.scene-planning.v1:${scope.projectId}:${scope.episodeId}:automatic-frame:${scope.shotId}`,
+      JSON.stringify({ shotId: scope.shotId, imagePromptCn: '损坏的本地草稿', pending: { ...scope, request } }))
+    render(<AutomaticFrameRequirementsEditor {...scope} onCommitted={async () => undefined} port={{
+      readScenePlanning: vi.fn(async () => ({ ...scope, canonicalStoryboard: null,
+        frameRequirements: [{ id: scope.shotId, imagePromptCn: '服务器已保存的画面' }] })),
+      saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn(),
+    } as never} />)
+    expect(await screen.findByDisplayValue('服务器已保存的画面')).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('button', { name: '查看原保存结果' })).toBeNull()
+  })
+
   it('keeps an empty real candidate list neutral instead of calling it failed', async () => {
     render(<ShootingReviewWorkspace projectName="落日公路" episodeName="第 1 集" projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" projection={projection} selectedShotId="frame_34b3741b1f0a" onSelectShotId={vi.fn()} onNavigate={vi.fn()} directorAssistant={null} t={key => key} port={{ takePreview: vi.fn(), selectTakeVersion: vi.fn(), recoverTakeVersionSelection: vi.fn(), takeVersions: vi.fn(async () => ({ subject: { projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', frameId: 'frame_34b3741b1f0a', selectedTakeId: null, versions: [] }, capabilities: { canSelect: false }, stackSnapshotSha256: 'a'.repeat(64) })) } as never} />)
     await waitFor(() => expect(document.querySelector('[data-state="pending-review"]')).toBeTruthy())
   })
 })
+
+it('saves missing imported frame requirements and recovers only the original intent', async () => {
+  localStorage.clear()
+  const scope = { projectId: 'project-planned', episodeId: 'episode-planned', shotId: 'frame-planned' }
+  const original = { ...scope, schema: 'jason.qingmu-scene-planning-state.v1', scriptRevision: 1, scriptSha256: 'a'.repeat(64),
+    storyboard: { id: 'revision-1', version: 1, sourceHash: 'b'.repeat(64), status: 'Ready' }, canonicalStoryboard: null,
+    frameRequirements: [{ id: scope.shotId, frameNo: 1, title: '相遇', imagePromptCn: '', blocking: '', cameraAngle: '' }] }
+  const onStatus = vi.fn()
+  const read = vi.fn().mockResolvedValue(original)
+  const save = vi.fn().mockRejectedValue(new Error('lost response'))
+  const recover = vi.fn().mockImplementation(async (pending) => {
+    read.mockResolvedValue({ ...original,
+      storyboard: { ...original.storyboard, version: 2, sourceHash: 'c'.repeat(64) },
+      frameRequirements: [{ ...original.frameRequirements[0], imagePromptCn: pending.request.imagePromptCn }],
+    })
+    return { ...scope, action: 'edit_requirements', idempotencyKey: pending.idempotencyKey, providerCalls: 0,
+      stageStarted: false, approvalGranted: false, storyboard: { version: 2, sourceHash: 'c'.repeat(64) } }
+  })
+  const props = { ...scope, port: { readScenePlanning: read, saveScenePlanning: save, recoverScenePlanning: recover },
+    onCommitted: vi.fn(async () => undefined), onRequirementStatusChange: onStatus }
+  const view = render(<AutomaticFrameRequirementsEditor {...props} />)
+  await screen.findByRole('textbox', { name: '画面要求' })
+  await waitFor(() => expect(onStatus).toHaveBeenLastCalledWith('missing'))
+  fireEvent.change(screen.getByRole('textbox', { name: '画面要求' }), { target: { value: '林予在左，陈远在右，录音笔置于桌面。' } })
+  expect(onStatus).toHaveBeenLastCalledWith('missing')
+  fireEvent.click(screen.getByRole('button', { name: '保存当前要求' }))
+  await screen.findByRole('button', { name: '查看原保存结果' })
+  const pending = save.mock.calls[0]?.[0]
+  expect(pending.request).toMatchObject({ action: 'edit_requirements', shotId: scope.shotId, expectedStoryboardRevision: 1 })
+  view.unmount()
+  render(<AutomaticFrameRequirementsEditor {...props} />)
+  fireEvent.click(await screen.findByRole('button', { name: '查看原保存结果' }))
+  await screen.findByText('当前要求已保存')
+  expect(recover).toHaveBeenCalledWith(pending)
+  expect(save).toHaveBeenCalledOnce()
+  await waitFor(() => expect(onStatus).toHaveBeenLastCalledWith('ready'))
+  cleanup()
+})
+
+it.each(['current', 'script-drift', 'scope-drift', 'read-failed', 'unknown-receipt'])(
+  'recovers a rejected requirements intent safely: %s', async (outcome) => {
+    localStorage.clear()
+    const scope = { projectId: 'project-conflict', episodeId: 'episode-conflict', shotId: 'frame-conflict' }
+    const original = { ...scope, scriptRevision: 1, scriptSha256: 'a'.repeat(64), canonicalStoryboard: null,
+      storyboard: { id: 'revision-1', version: 1, sourceHash: 'b'.repeat(64), status: 'Ready' },
+      frameRequirements: [{ id: scope.shotId, frameNo: 1, title: '相遇', imagePromptCn: '原画面', blocking: '', cameraAngle: '' }] }
+    const latest = { ...original, storyboard: { ...original.storyboard, version: 2, sourceHash: 'c'.repeat(64) },
+      frameRequirements: [{ ...original.frameRequirements[0], imagePromptCn: '另一位编辑已保存的画面' }] }
+    const read = vi.fn().mockResolvedValueOnce(original)
+    if (outcome === 'read-failed') read.mockRejectedValue(new Error('network unavailable'))
+    else read.mockResolvedValue({ ...latest,
+      ...(outcome === 'script-drift' ? { scriptRevision: 2 } : {}),
+      ...(outcome === 'scope-drift' ? { projectId: 'different-project' } : {}),
+    })
+    const save = vi.fn().mockRejectedValue(new Error('HTTP 409: planning_storyboard_conflict'))
+    const recover = vi.fn().mockRejectedValue(new Error(outcome === 'unknown-receipt' ? 'HTTP 404: proxy unavailable' : 'HTTP 404: planning_receipt_not_found'))
+    render(<AutomaticFrameRequirementsEditor {...scope} onCommitted={async () => undefined}
+      port={{ readScenePlanning: read, saveScenePlanning: save, recoverScenePlanning: recover }} />)
+    const input = await screen.findByRole('textbox', { name: '画面要求' })
+    fireEvent.change(input, { target: { value: '保留我的画面草稿' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存当前要求' }))
+    await screen.findByRole('alert')
+    const originalIntent = save.mock.calls[0]?.[0]
+    fireEvent.click(screen.getByRole('button', { name: '查看原保存结果' }))
+    await waitFor(() => expect(recover).toHaveBeenCalledWith(originalIntent))
+    await waitFor(() => expect((screen.getByRole('button', { name: '查看原保存结果' }) as HTMLButtonElement).disabled).toBe(false))
+    expect(save).toHaveBeenCalledOnce()
+    expect((input as HTMLTextAreaElement).value).toBe('保留我的画面草稿')
+    if (outcome === 'current') {
+      expect(screen.getByText(/另一位编辑已保存的画面/)).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: '保留草稿，按最新版本继续编辑' }))
+      expect((input as HTMLTextAreaElement).disabled).toBe(false)
+      expect(save).toHaveBeenCalledOnce()
+      fireEvent.click(screen.getByRole('button', { name: '保存当前要求' }))
+      await waitFor(() => expect(save).toHaveBeenCalledTimes(2))
+      const nextIntent = save.mock.calls[1]?.[0]
+      expect(nextIntent.idempotencyKey).not.toBe(originalIntent.idempotencyKey)
+      expect(nextIntent.request).toMatchObject({ expectedStoryboardRevision: 2, expectedStoryboardSha256: 'c'.repeat(64), imagePromptCn: '保留我的画面草稿' })
+    } else {
+      expect((input as HTMLTextAreaElement).disabled).toBe(true)
+      expect(screen.queryByRole('button', { name: '保留草稿，按最新版本继续编辑' })).toBeNull()
+      expect(screen.queryByRole('button', { name: '保存当前要求' })).toBeNull()
+    }
+    cleanup()
+  },
+)

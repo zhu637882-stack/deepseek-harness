@@ -174,6 +174,10 @@ function errorMessage(error: unknown): string {
   return String(error)
 }
 
+function isStoryboardRevisionMissing(error: unknown): boolean {
+  return errorMessage(error).includes('storyboard_revision_missing')
+}
+
 /** Qingmu product workspace; the unregistered modal branch supports older embedded callers. */
 export function QingmuCockpit({
   wide, port, directorBridge, nativeDirectorSession, hostSync, entryScope, t, useSessions, applicationShell, onOpenTools,
@@ -192,13 +196,17 @@ export function QingmuCockpit({
   const [episodeId, setEpisodeId] = useState('')
   const [creating, setCreating] = useState(false)
   const [projection, setProjection] = useState<YimengWorkflowProjection>()
+  const [storyboardMissing, setStoryboardMissing] = useState(false)
   const [selectedShotId, setSelectedShotId] = useState('')
   const [generationCatalog, setGenerationCatalog] = useState<YimengCapabilityCatalogResponse>()
   const directorSessionId = useSessions(state => state.current)
   const [directorRefresh, setDirectorRefresh] = useState(0)
+  const [assetWorkbenchOpen, setAssetWorkbenchOpen] = useState(false)
+  const [assetLibraryRefresh, setAssetLibraryRefresh] = useState(0)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
+  const assetWorkbenchRef = useRef<HTMLDivElement>(null)
   const requestRef = useRef(0)
   const abortRef = useRef<AbortController>()
   const directorDirty = useRef(false)
@@ -233,10 +241,36 @@ export function QingmuCockpit({
 
   const current = (id: number): boolean => id === requestRef.current
 
+  const readWorkflow = async (
+    scope: { readonly projectId: string; readonly episodeId: string },
+    request: { readonly id: number; readonly controller: AbortController },
+  ): Promise<YimengWorkflowProjection | undefined> => {
+    try {
+      const nextProjection = await port.workflow(scope, request.controller.signal)
+      if (current(request.id)) {
+        setProjection(nextProjection)
+        setStoryboardMissing(false)
+        return nextProjection
+      }
+      return undefined
+    } catch (cause) {
+      if (current(request.id) && isStoryboardRevisionMissing(cause)) {
+        // This is an expected new-project state. Clear only this request's stale
+        // projection so a previous revision cannot make the current one look ready.
+        setProjection(undefined)
+        setSelectedShotId('')
+        setStoryboardMissing(true)
+        return undefined
+      }
+      throw cause
+    }
+  }
+
   const refresh = async (preferred?: { projectId: string; episodeId: string }): Promise<void> => {
     const request = begin()
     setLoading(true)
     setError(undefined)
+    setStoryboardMissing(false)
     const scopeLocked = entryScope !== undefined
     const requestedScope = scopeLocked ? entryScope : preferred
     if (scopeLocked) {
@@ -283,8 +317,7 @@ export function QingmuCockpit({
         setSelectedShotId('')
         return
       }
-      const nextProjection = await port.workflow({ projectId: nextProjectId, episodeId: nextEpisodeId }, request.controller.signal)
-      if (current(request.id)) setProjection(nextProjection)
+      await readWorkflow({ projectId: nextProjectId, episodeId: nextEpisodeId }, request)
     } catch (cause) {
       if (!request.controller.signal.aborted && current(request.id)) setError(errorMessage(cause))
     } finally {
@@ -303,6 +336,7 @@ export function QingmuCockpit({
     const request = begin()
     setLoading(true)
     setError(undefined)
+    setStoryboardMissing(false)
     try {
       const result = await port.episodes({ projectId: nextProjectId }, request.controller.signal)
       if (!current(request.id)) return
@@ -310,8 +344,7 @@ export function QingmuCockpit({
       const nextEpisodeId = stringOf(result.items[0]?.id) ?? ''
       setEpisodeId(nextEpisodeId)
       if (nextEpisodeId === '') return
-      const nextProjection = await port.workflow({ projectId: nextProjectId, episodeId: nextEpisodeId }, request.controller.signal)
-      if (current(request.id)) setProjection(nextProjection)
+      await readWorkflow({ projectId: nextProjectId, episodeId: nextEpisodeId }, request)
     } catch (cause) {
       if (!request.controller.signal.aborted && current(request.id)) setError(errorMessage(cause))
     } finally {
@@ -329,9 +362,9 @@ export function QingmuCockpit({
     const request = begin()
     setLoading(true)
     setError(undefined)
+    setStoryboardMissing(false)
     try {
-      const nextProjection = await port.workflow({ projectId, episodeId: nextEpisodeId }, request.controller.signal)
-      if (current(request.id)) setProjection(nextProjection)
+      await readWorkflow({ projectId, episodeId: nextEpisodeId }, request)
     } catch (cause) {
       if (!request.controller.signal.aborted && current(request.id)) setError(errorMessage(cause))
     } finally {
@@ -344,13 +377,9 @@ export function QingmuCockpit({
     const request = begin()
     setLoading(true)
     setError(undefined)
+    setStoryboardMissing(false)
     try {
-      const nextProjection = await port.workflow({ projectId, episodeId }, request.controller.signal)
-      if (current(request.id)) {
-        setProjection(nextProjection)
-        return nextProjection
-      }
-      return undefined
+      return await readWorkflow({ projectId, episodeId }, request)
     } catch (cause) {
       if (!request.controller.signal.aborted && current(request.id)) setError(errorMessage(cause))
       throw cause
@@ -362,6 +391,26 @@ export function QingmuCockpit({
   const refreshWorkflowAfterCommit = async (): Promise<void> => {
     await refreshWorkflowProjectionAfterCommit()
   }
+
+  const refreshAssetsAfterCommit = async (): Promise<void> => {
+    await refreshWorkflowAfterCommit()
+    setAssetLibraryRefresh(previous => previous + 1)
+  }
+
+  const openReferenceUpload = useCallback(() => {
+    setAssetWorkbenchOpen(true)
+  }, [])
+
+  useEffect(() => {
+    if (!assetWorkbenchOpen) return
+    const frame = requestAnimationFrame(() => {
+      const target = assetWorkbenchRef.current
+      if (target === null) return
+      if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      target.focus({ preventScroll: true })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [assetWorkbenchOpen])
 
   const close = (): void => {
     if (!mayLeaveDirector()) return
@@ -796,7 +845,7 @@ export function QingmuCockpit({
     const projectFacts = <div className={css.stageFacts} aria-label="当前项目概览">
       <span>{projectLabel(selectedProject ?? {}, '当前项目')}</span>
       <span>{episodeLabel(selectedEpisode ?? {}, '当前剧集')}</span>
-      <span>{projection ? `${shotItems.length} 个镜头` : '镜头信息待读取'}</span>
+      <span>{projection ? `${shotItems.length} 个镜头` : storyboardMissing ? '分镜尚待规划' : '镜头信息待读取'}</span>
       <span>{projection ? `${semanticAssets.length} 份素材档案` : '素材信息待读取'}</span>
     </div>
     const applicationPanels: Record<CreativeStep, ReactNode> = {
@@ -811,10 +860,15 @@ export function QingmuCockpit({
       </div>,
       assets: <div className={css.creativePage}>
         {pageHeader('02', '角色、场景与音色', '建立这一部作品的素材库，让同一人物和环境贯穿各个镜头。', 'storyboard')}{projectFacts}
-        <div className={css.stageContent}><ProjectAssetLibrary key={projectId} projectId={projectId} port={port} /></div>
-        <details className={css.stageSupporting}><summary>人物与场景档案 · 上传参考</summary>
-          <AssetWorkbench key={`${projectId}:application-assets`} projectId={projectId} semanticAssets={semanticAssets} port={port} t={t} onCommitted={refreshWorkflowAfterCommit} />
-        </details>
+        <div className={css.stageContent}><ProjectAssetLibrary key={projectId} projectId={projectId} port={port}
+          refreshToken={assetLibraryRefresh} onOpenReferenceUpload={openReferenceUpload} /></div>
+        <div ref={assetWorkbenchRef} tabIndex={-1} role="group" aria-label="人物与场景参考上传">
+          <details className={css.stageSupporting} open={assetWorkbenchOpen}
+            onToggle={(event) => { setAssetWorkbenchOpen(event.currentTarget.open) }}>
+            <summary>人物与场景档案 · 上传参考</summary>
+            <AssetWorkbench key={`${projectId}:application-assets`} projectId={projectId} semanticAssets={semanticAssets} port={port} t={t} onCommitted={refreshAssetsAfterCommit} />
+          </details>
+        </div>
       </div>,
       storyboard: <div className={css.creativePage}>
         {pageHeader('03', '分镜与导演', '安排画面、表演和声音，明确每镜使用的素材与生成描述。', 'shooting')}{projectFacts}
@@ -839,7 +893,14 @@ export function QingmuCockpit({
         <div className={css.body}><main aria-label={creating ? '新建项目' : `青木 · ${creativeStepLabel(step)}`}>
           {creating || (!loading && projects.length === 0 && !error)
             ? <CreateProjectWorkspace port={port} onCreated={async (result) => { await refresh(result); setCreating(false); setTab('overview') }} onCancel={projects.length ? () => setCreating(false) : undefined} />
-            : applicationPanels[step]}
+            : <>{storyboardMissing && <section className={css.empty} role="status" aria-label="分镜待规划">
+              <h2>分镜尚待规划</h2>
+              <p>这是新项目的正常状态。先在故事与剧本保存内容，再进入分镜与导演安排镜头。</p>
+              <div className={css.stageActions}>
+                <button type="button" onClick={() => { changeStep('story') }}>前往故事与剧本</button>
+                <button type="button" onClick={() => { changeStep('storyboard') }}>打开分镜与导演</button>
+              </div>
+            </section>}{applicationPanels[step]}</>}
         </main></div>
       </div>
     </QingmuApplicationFrame>
@@ -938,15 +999,15 @@ export function QingmuCockpit({
             </label>
           </div>
 
-          {error !== undefined && (
-            <section className={css.error} role="alert">
+          {(error !== undefined || storyboardMissing) && (
+            <section className={css.error} role={storyboardMissing ? 'status' : 'alert'}>
               <div>
-                <strong>{error.includes('storyboard_revision_missing') ? '分镜尚未建立' : t('errorTitle')}</strong>
-                <p>{error.includes('storyboard_revision_missing')
+                <strong>{storyboardMissing || error?.includes('storyboard_revision_missing') ? '分镜尚未建立' : t('errorTitle')}</strong>
+                <p>{storyboardMissing || error?.includes('storyboard_revision_missing')
                   ? '分镜暂不可用；请先在故事步骤保存剧本。' : tab === 'shots' ? '当前项目暂时无法更新。请刷新重试，已有素材和未提交草稿会保留。' : error}</p>
-                {tab === 'shots' && <details><summary>开发日志</summary><p>{error}</p></details>}
-                {error.includes('storyboard_revision_missing')
-                  ? <details><summary>投影诊断</summary><p>{error}</p></details>
+                {tab === 'shots' && error && <details><summary>开发日志</summary><p>{error}</p></details>}
+                {storyboardMissing || error?.includes('storyboard_revision_missing')
+                  ? error && <details><summary>投影诊断</summary><p>{error}</p></details>
                   : <small>{t('errorRecovery')}</small>}
               </div>
               <button type="button" onClick={() => { void refresh() }}>{t('retry')}</button>

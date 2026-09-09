@@ -32,3 +32,14 @@ it('aborts the old project read and cannot display its late result in a new proj
   finish(page([picture]))
   await waitFor(()=>{expect(screen.queryByRole('button',{ name:'预览林予' })).toBeNull()})
 })
+
+it('opens the real person or scene upload surface on request and rereads after its completion signal', async () => {
+  const onOpenReferenceUpload = vi.fn()
+  const port = { referenceVideoAssets:vi.fn().mockResolvedValue(page([])) }
+  const view = render(<ProjectAssetLibrary projectId="p" port={port} onOpenReferenceUpload={onOpenReferenceUpload} />)
+  fireEvent.click(await screen.findByRole('button', { name:'上传人物/场景参考' }))
+  expect(onOpenReferenceUpload).toHaveBeenCalledOnce()
+  expect(screen.getByText(/音色暂不在此上传/)).toBeTruthy()
+  view.rerender(<ProjectAssetLibrary projectId="p" port={port} onOpenReferenceUpload={onOpenReferenceUpload} refreshToken={1} />)
+  await waitFor(() => { expect(port.referenceVideoAssets).toHaveBeenCalledTimes(2) })
+})

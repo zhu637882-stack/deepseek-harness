@@ -4,9 +4,13 @@ import type { ReferenceVideoAsset } from '@deepseek-ai/dsh-experimental-qingmu-y
 import css from './ProjectAssetLibrary.module.css'
 
 /** A project-wide media browser; preview selection is local to this view. */
-export function ProjectAssetLibrary({ projectId, port }: {
+export function ProjectAssetLibrary({ projectId, port, refreshToken = 0, onOpenReferenceUpload }: {
   readonly projectId: string
   readonly port: Pick<QingmuYimengPort, 'referenceVideoAssets'>
+  /** Bumps after a real local-reference upload completes so the catalog rereads. */
+  readonly refreshToken?: number
+  /** Opens the existing person/scene upload surface; it never adopts a candidate. */
+  readonly onOpenReferenceUpload?: () => void
 }) {
   const [items, setItems] = useState<readonly ReferenceVideoAsset[]>([])
   const [page, setPage] = useState(0)
@@ -38,14 +42,17 @@ export function ProjectAssetLibrary({ projectId, port }: {
   useEffect(() => {
     void load(1)
     return () => { operation.current?.abort(); operation.current = undefined }
-  }, [load])
+  }, [load, refreshToken])
   const filtered = items.filter(item => (kind === 'all' || item.mediaType === kind)
     && item.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
   const preview = items.find(item => item.assetId === selected)
   return <section className={css.library} aria-label="项目图片与音色库">
     <header className={css.toolbar}>
       <div><h2>项目素材</h2><p>人物、场景图片与音色，在镜头工作台中按需引用。</p></div>
-      <button type="button" disabled={busy || !projectId} onClick={() => { void load(1) }}>{busy ? '读取中…' : '刷新素材'}</button>
+      <div>
+        {onOpenReferenceUpload !== undefined && <button type="button" disabled={!projectId} onClick={onOpenReferenceUpload}>上传人物/场景参考</button>}
+        <button type="button" disabled={busy || !projectId} onClick={() => { void load(1) }}>{busy ? '读取中…' : '刷新素材'}</button>
+      </div>
     </header>
     <div className={css.filters}>
       <div role="group" aria-label="素材类型">{([
@@ -74,7 +81,7 @@ export function ProjectAssetLibrary({ projectId, port }: {
           <strong>{item.label}</strong><small>{item.mediaType === 'reference_audio' ? '音色 · 点击试听' : '图片 · 点击查看'}</small>
         </button>)}
       </div>
-      {!busy && !filtered.length && <p className={css.empty}>{items.length ? '没有找到匹配的素材。' : '项目中还没有可引用的图片或音色。可以在下方档案中上传人物与场景参考。'}</p>}
+      {!busy && !filtered.length && <p className={css.empty}>{items.length ? '没有找到匹配的素材。' : '项目中还没有可引用的图片或音色。选择人物或场景后，可上传图片参考；音色暂不在此上传。'}</p>}
     </div>
     {page < pages && <button type="button" disabled={busy} onClick={() => { void load(page + 1) }}>加载更多素材</button>}
 

@@ -48,19 +48,28 @@ describe('bounded scene planning Host channel', () => {
   ])('rejects a canonical storyboard that is not the current read-only automatic source: %j', async (change) => {
     expect(await setup({ ...automaticState, ...change }).handler('readScenePlanning', scope, new AbortController().signal)).toMatchObject({ ok: false })
   })
+  it('requires shooting requirement identities to match the saved storyboard', async () => {
+    const shots = [{ id: 'shot_1', frameNo: 1, title: '相遇', imagePromptCn: '' }]
+    const value = { ...automaticState, canonicalStoryboard: { ...automaticCanonical, shotCount: 1, shots }, frameRequirements: shots }
+    expect(await setup(value).handler('readScenePlanning', scope, new AbortController().signal)).toMatchObject({ ok: true })
+    for (const changed of [[], [{ ...shots[0], id: 'wrong_shot' }], [{ ...shots[0], imagePromptCn: null }]]) {
+      expect(await setup({ ...value, frameRequirements: changed }).handler('readScenePlanning', scope, new AbortController().signal))
+        .toMatchObject({ ok: false })
+    }
+  })
   it('keeps the legacy planning read strict about one-based imported scene indexes', async () => {
     const importedZeroBased = { ...state, scriptRevision: 1, scriptSha256: 'a'.repeat(64), scenes: [{
       sceneIndex: 0, title: '旧导入场景', actionDescription: '', importSourceLineIds: [], dialogues: [],
     }] }
     expect(await setup(importedZeroBased).handler('readScenePlanning', scope, new AbortController().signal)).toMatchObject({ ok: false })
   })
-  it.each([{}, { blocking:'缓慢抬头',cameraAngle:'驾驶员主观视角' }])('sends one automatic frame requirement with optional independent shooting fields %j', async (fields) => {
+  it.each([{}, { blocking:'缓慢抬头',cameraAngle:'驾驶员主观视角' }, { action: 'edit_requirements' }])('sends one automatic frame requirement with optional independent shooting fields %j', async (fields) => {
     const automaticRequest = { ...scope, idempotencyKey: 'automatic-1', request: { action: 'edit_automatic',
       expectedScriptRevision: 1, expectedScriptSha256: 'a'.repeat(64), expectedStoryboardRevision: 2,
       expectedStoryboardSha256: 'c'.repeat(64), shotId: 'automatic_shot_1', imagePromptCn: '雨夜街道的近景首帧。', ...fields } }
     const encoded = JSON.stringify(automaticRequest.request, Object.keys(automaticRequest.request).sort())
     const requestSha256 = (await import('node:crypto')).createHash('sha256').update(encoded).digest('hex')
-    const result = { ...scope, schema: 'jason.qingmu-scene-planning-result.v1', action: 'edit_automatic',
+    const result = { ...scope, schema: 'jason.qingmu-scene-planning-result.v1', action: automaticRequest.request.action,
       idempotencyKey: 'automatic-1', requestSha256, commandReceiptId: 'receipt_1', eventId: 'event_1',
       shotId: 'automatic_shot_1', storyboard: { ...automaticStoryboard, version: 3, sourceHash: 'd'.repeat(64) }, providerCalls: 0, stageStarted: false, approvalGranted: false }
     const { handler, fetch } = setup(result)

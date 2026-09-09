@@ -693,7 +693,7 @@ export function ScenePlanningWorkspace({
           const intent = validatedPendingIntent(local.pending, state, projectId, episodeId)
           if (intent === null) throw new Error('409 planning_pending_scope_mismatch')
           const result = await port.recoverScenePlanning(intent, controller.current.signal)
-          if (result.action === 'edit_automatic') throw new Error('409 planning_receipt_action_mismatch')
+          if (result.action === 'edit_automatic' || result.action === 'edit_requirements') throw new Error('409 planning_receipt_action_mismatch')
           await finish(result, local.pendingAdvisory ?? null, intent.request.action === 'edit' ? intent.request.shotId : undefined)
         }
         else {
@@ -793,7 +793,7 @@ export function ScenePlanningWorkspace({
         localStorage.setItem(key, JSON.stringify(pending))
         setLocal(pending)
         const result = await port.saveScenePlanning(scopedIntent, controller.current.signal)
-        if (result.action === 'edit_automatic') throw new Error('409 planning_receipt_action_mismatch')
+        if (result.action === 'edit_automatic' || result.action === 'edit_requirements') throw new Error('409 planning_receipt_action_mismatch')
         await finish(result, advisory, scopedIntent.request.action === 'edit' ? scopedIntent.request.shotId : undefined)
       }
     } catch (e) {

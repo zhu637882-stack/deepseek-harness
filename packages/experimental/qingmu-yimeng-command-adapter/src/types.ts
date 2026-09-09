@@ -7,7 +7,7 @@ export type {
   TextImportCorrection, TextImportConfirmationRequest, TextImportConfirmation,
 } from './creation.ts'
 /** Browser-safe planning values; no runtime Host imports. */
-export type { PlanningShot, PlanningBase, PlanningOperation, AutomaticPlanningShot, AutomaticPlanningOperation, AnyPlanningOperation, ScenePlanningRequest, PlanningRevision, CanonicalStoryboard, PlanningSource, PlanningScene, AutomaticPlanningScene, ScenePlanningScene, ScenePlanningState, ImportedScenePlanningResult, AutomaticScenePlanningResult, ScenePlanningResult } from './scene-planning.ts'
+export type { PlanningShot, PlanningBase, PlanningOperation, AutomaticPlanningShot, AutomaticPlanningOperation, PlannedFrameRequirementsOperation, FrameRequirementsOperation, AnyPlanningOperation, ScenePlanningRequest, PlanningRevision, CanonicalStoryboard, PlanningSource, PlanningScene, AutomaticPlanningScene, ScenePlanningScene, ScenePlanningState, ImportedScenePlanningResult, AutomaticScenePlanningResult, PlannedFrameRequirementsResult, ScenePlanningResult } from './scene-planning.ts'
 /** Browser-safe paid advisory projections; no claim, credential, or Provider payload. */
 export type {
   DirectorPaidAvailability, DirectorPaidWorkOrder, DirectorPaidWorkOrderRequest,
