@@ -13,6 +13,7 @@ import { normalizeContinuityDelta } from './continuity.ts'
 import { parseReferenceVideoRequest, normalizeReferenceVideoPreview, parseReferenceVideoAssetsRequest, normalizeReferenceVideoAssets } from './reference-video.ts'
 import { parseReferenceVideoQuoteRequest, normalizeReferenceVideoQuote, parseReferenceVideoDraftScope, normalizeReferenceVideoDraft } from './reference-video.ts'
 import { normalizeReferenceVideoRun, normalizeReferenceVideoRuns } from './reference-video-runs.ts'
+import { referenceVideoErrorMessage } from './reference-video-error.ts'
 import { localMediaUrl } from './local-media-url.ts'
 import { normalizeSelectedVideoReview } from './selected-video-review.ts'
 import { normalizeTakeVersionStack, parseTakeVersionReadRequest } from './take-versions.ts'
@@ -1013,6 +1014,7 @@ interface FetchJsonOptions {
   readonly method?: 'GET' | 'POST'
   readonly body?: string
   readonly verificationError?: boolean
+  readonly referenceVideoError?: boolean
 }
 
 const VERIFICATION_ERROR_MESSAGES = new Map<string, string>([
@@ -1077,7 +1079,14 @@ async function fetchJson(
       return internalError('Yimeng authentication failed')
     }
     if (!response.ok) {
-      const mapped = options.verificationError ? await verificationError(response, scrubToken) : undefined
+      let mapped = options.verificationError ? await verificationError(response, scrubToken) : undefined
+      if (options.referenceVideoError) {
+        try {
+          const value = await readBoundedJson(response, Math.min(maxJsonBytes, 64 * 1024))
+          const message = referenceVideoErrorMessage(value, response.status)
+          if (message !== undefined) mapped = internalError(message)
+        } catch { /* Malformed or oversized errors keep the generic response. */ }
+      }
       return mapped ?? internalError(`Yimeng service returned HTTP ${String(response.status)}`)
     }
     try {
@@ -5362,7 +5371,7 @@ export function createYimengReadHandler(
       if (preview) previewsInFlight++
       const mapsSourceErrors = verification || endpoint === 'editorialHandoff'
       const fetchOptions: FetchJsonOptions | undefined = referenceBody !== undefined
-        ? { method: 'POST', body: referenceBody }
+        ? { method: 'POST', body: referenceBody, referenceVideoError: endpoint === 'referenceVideoPreview' || endpoint === 'referenceVideoQuote' }
         : mapsSourceErrors
           ? {
             method: verification ? 'POST' : 'GET',
