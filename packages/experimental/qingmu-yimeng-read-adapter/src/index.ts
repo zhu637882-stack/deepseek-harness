@@ -1,3 +1,4 @@
+import { parseReferenceVideoMaterialsRequest, normalizeReferenceVideoMaterials } from './reference-video-materials.ts'
 /** Loopback-only Host BFF for read-only Yimeng production facts. */
 
 import { createHash } from 'node:crypto'
@@ -345,7 +346,7 @@ const PROTECTED_ENDPOINTS = new Set([
   'referenceCandidates', 'reviewEvents',
   'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'takeComments', 'takeReviewAuthority', 'takeAcceptance', 'takeTechnicalQc', 'takeApprovalLifecycle', 'evidenceLedger', 'editorialHandoff', 'verifyEpisode', 'shotFindings', 'productionUnits', 'stageSources',
   'lsuPlanSource', 'reworkRouteSource',
-  'referenceVideoRun', 'referenceVideoRuns', 'takePreview', 'referenceVideoPreview', 'referenceVideoAssets', 'referenceVideoDraft', 'referenceVideoQuote',
+  'referenceVideoMaterials', 'referenceVideoRun', 'referenceVideoRuns', 'takePreview', 'referenceVideoPreview', 'referenceVideoAssets', 'referenceVideoDraft', 'referenceVideoQuote',
 ])
 const HUMAN_DECISION_VALUES = new Set<YimengHumanDecisionValue>([
   'approve', 'reject', 'request_changes',
@@ -5228,6 +5229,11 @@ export function createYimengReadHandler(
         normalize = value => endpoint === 'referenceVideoRun'
           ? normalizeReferenceVideoRun(value, { ...request, runId: String(input.runId) }, baseUrl)
           : normalizeReferenceVideoRuns(value, request, baseUrl)
+      } else if (endpoint === 'referenceVideoMaterials') {
+        let request
+        try { request = parseReferenceVideoMaterialsRequest(payload) } catch { throw new InputError('invalid reference materials scope') }
+        path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/reference-video/drafts/${encodeURIComponent(request.frameId)}/materials?expectedRevision=${request.expectedRevision}&expectedRequestSha256=${request.expectedRequestSha256}`
+        normalize = value => normalizeReferenceVideoMaterials(value, request)
       } else if (endpoint === 'referenceVideoQuote') {
         let request
         try { request = parseReferenceVideoQuoteRequest(payload, canonicalJsonSha256) } catch { throw new InputError('invalid saved reference draft') }
@@ -5372,13 +5378,14 @@ export function createYimengReadHandler(
       const mapsSourceErrors = verification || endpoint === 'editorialHandoff'
       const fetchOptions: FetchJsonOptions | undefined = referenceBody !== undefined
         ? { method: 'POST', body: referenceBody, referenceVideoError: endpoint === 'referenceVideoPreview' || endpoint === 'referenceVideoQuote' }
-        : mapsSourceErrors
-          ? {
-            method: verification ? 'POST' : 'GET',
-            ...(verification ? { body: verificationBody as string } : {}),
-            verificationError: true,
-          }
-          : undefined
+        : endpoint === 'referenceVideoMaterials' ? { referenceVideoError: true }
+          : mapsSourceErrors
+            ? {
+              method: verification ? 'POST' : 'GET',
+              ...(verification ? { body: verificationBody as string } : {}),
+              verificationError: true,
+            }
+            : undefined
       let response: FetchJsonResult
       try {
         response = await fetchJson(

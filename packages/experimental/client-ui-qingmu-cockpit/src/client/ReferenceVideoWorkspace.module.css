@@ -46,7 +46,7 @@
 .assets p { overflow-wrap: anywhere; }
 .bindings { display:grid; gap:10px; max-height:300px; overflow-y:auto; list-style:none; padding:0 4px 0 0; margin:16px 0 0; }
 .bindings li { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:10px; border:1px solid var(--workspace-line); border-radius:10px; background:var(--workspace-bg); }
-.bindings strong { color:var(--workspace-lime); font-size:12px; }
+.bindings strong { min-width:0; overflow-wrap:anywhere; color:var(--workspace-lime); font-size:12px; }
 .bindings input { flex: 1; min-width: 120px; max-width: 260px; }
 .directorDesk { margin-top:0; padding:16px; }
 .prompt { display:grid; gap:8px; }
@@ -89,3 +89,15 @@
 .privatePreview p { margin:0; color:var(--workspace-muted); font-size:13px; }
 
 .previewHint { color:var(--workspace-muted); font-size:12px; }
+.materialsBar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:14px; padding:13px 14px; margin:-6px 0 20px; border:1px solid rgba(215,255,82,.27); border-radius:12px; background:linear-gradient(105deg,rgba(215,255,82,.08),rgba(21,29,38,.72)); }
+.materialsBar h4 { margin:0; font-size:15px; }
+.materialsBar p:not(.kicker) { max-width:62ch; margin:4px 0 0; color:var(--workspace-muted); font-size:13px; }
+.materialActions { display:flex; min-width:0; align-items:center; flex-wrap:wrap; gap:8px; }
+.materialActions small { max-width:34ch; color:#f0c98e; line-height:1.45; }
+.materialStatus { display:inline-flex; align-items:center; max-width:100%; min-height:26px; padding:3px 8px; border:1px solid var(--workspace-line); border-radius:999px; color:var(--workspace-muted); font-size:11px; line-height:1.35; }
+.materialStatus[data-state='ready'] { border-color:rgba(215,255,82,.56); color:var(--workspace-lime); background:rgba(215,255,82,.08); }
+.materialStatus[data-state='expired'],.materialStatus[data-state='failed'] { border-color:rgba(238,142,116,.56); color:#ffc1b2; background:rgba(238,142,116,.08); }
+.materialStatus[data-state='unknown'],.materialStatus[data-state='uploading'] { border-color:rgba(240,201,142,.48); color:#f0cf9e; background:rgba(240,201,142,.07); }
+.materialHint { color:var(--workspace-muted); font-size:12px; line-height:1.45; }
+.prepareAction { border-color:rgba(215,255,82,.58) !important; color:var(--workspace-lime) !important; }
+@container reference-desk (max-width:640px) { .materialsBar { align-items:flex-start; } .materialActions { width:100%; } .bindings li > :is(strong,.materialStatus,.materialHint) { width:100%; } }

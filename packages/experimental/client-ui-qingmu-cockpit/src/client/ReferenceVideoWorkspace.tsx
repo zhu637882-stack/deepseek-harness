@@ -1,9 +1,9 @@
 /** Explicit image/voice bindings and verbatim prompt editing within the director workspace. */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   ReferenceVideoAsset, ReferenceVideoParameters, ReferenceVideoPreviewResponse, ReferenceVideoPromptPart,
   ReferenceVideoDraftResponse,
-  ReferenceVideoQuoteResponse,
+  ReferenceVideoQuoteResponse, ReferenceVideoMaterialsState,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
 import css from './ReferenceVideoWorkspace.module.css'
@@ -21,10 +21,35 @@ export interface ReferenceVideoWorkspaceProps {
   readonly embedded?: boolean
   readonly referenceSources?: readonly { readonly frameId: string; readonly label: string }[]
   readonly onUnsavedChange?: (dirty: boolean) => void
-  readonly port: Pick<QingmuYimengPort, 'referenceVideoAssets' | 'readLocalReferenceCandidateContent' | 'referenceVideoPreview' | 'referenceVideoDraft' | 'saveReferenceVideoDraft' | 'referenceVideoQuote' | 'referenceVideoRuns' | 'queueReferenceVideo'> & PrivateReferencePreviewPort
+  readonly port: Pick<QingmuYimengPort, 'referenceVideoAssets' | 'readLocalReferenceCandidateContent' | 'referenceVideoPreview' | 'referenceVideoDraft' | 'saveReferenceVideoDraft' | 'referenceVideoQuote' | 'referenceVideoRuns' | 'queueReferenceVideo'> & PrivateReferencePreviewPort & Partial<Pick<QingmuYimengPort, 'readReferenceVideoMaterials' | 'prepareReferenceVideoMaterial'>>
 }
 
 type Chosen = Omit<ReferenceVideoAsset, 'mediaType'> & { readonly bindingToken: string; readonly mediaType: ReferenceVideoAsset['mediaType'] | 'unavailable' }
+
+function makeRequestId() {
+  return globalThis.crypto.randomUUID()
+}
+
+function configurationMessage(configurationError: string | null) {
+  if (configurationError?.includes('reference_video_upload_endpoint_unsupported')) {
+    return '当前阿里连接尚未开通临时素材访问。'
+  }
+  if (configurationError?.includes('credentials_missing') || configurationError?.includes('credential')) {
+    return '请配置阿里凭据后再准备素材。'
+  }
+  return '当前阿里临时素材服务暂不可用，请检查连接后再准备。'
+}
+
+function materialStatusText(material: ReferenceVideoMaterialsState['materials'][number]) {
+  if (material.status === 'ready') {
+    return material.expiresAt === null ? '已准备，可用于阿里请求' : `已准备，至 ${new Date(material.expiresAt * 1000).toLocaleString('zh-CN')} 有效`
+  }
+  if (material.status === 'expired') return '临时引用已过期'
+  if (material.status === 'failed') return '准备失败'
+  if (material.status === 'unknown') return '上传结果待确认'
+  if (material.status === 'uploading') return '正在准备'
+  return '尚未准备'
+}
 
 /** Edit reference nodes independently from literal dialogue and inspect the actual request.
  * @param props - Current shot and the authenticated host read port.
@@ -53,6 +78,9 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
   const [inspected, setInspected] = useState<ReferenceVideoAsset>()
   const [previewRetry, setPreviewRetry] = useState(0)
   const [inheriting, setInheriting] = useState(false)
+  const [materials, setMaterials] = useState<ReferenceVideoMaterialsState>()
+  const [materialsLoading, setMaterialsLoading] = useState(false)
+  const [preparingAssetId, setPreparingAssetId] = useState<string>()
   const inheritAbort = useRef<AbortController | undefined>(undefined)
   const epoch = useRef(0)
   const activeText = useRef<{ index: number; start: number; end: number }>({
@@ -62,19 +90,45 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
   const assetsAbort = useRef<AbortController | undefined>(undefined)
   const draftAbort = useRef<AbortController | undefined>(undefined)
   const saveAbort = useRef<AbortController | undefined>(undefined)
+  const materialsAbort = useRef<AbortController | undefined>(undefined)
+  const prepareAbort = useRef<AbortController | undefined>(undefined)
+  const preparing = useRef(false)
+  const readMaterials = useCallback(async (state: ReferenceVideoDraftResponse) => {
+    const draft = state.draft
+    const read = port.readReferenceVideoMaterials
+    if (!draft || read === undefined || preparing.current) return
+    materialsAbort.current?.abort()
+    const controller = new AbortController(); materialsAbort.current = controller
+    setMaterialsLoading(true)
+    try {
+      const next = await read({
+        projectId, frameId, expectedRevision: draft.revision, expectedRequestSha256: draft.requestSha256,
+      }, controller.signal)
+      if (controller.signal.aborted) return
+      if (next.projectId !== projectId || next.frameId !== frameId
+        || next.draftRevision !== draft.revision || next.draftRequestSha256 !== draft.requestSha256) {
+        throw new Error('引用素材状态与当前已存草稿不匹配，请重新读取。')
+      }
+      setMaterials(next)
+    } catch (cause) {
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '引用素材状态读取失败')
+    } finally { if (!controller.signal.aborted) setMaterialsLoading(false) }
+  }, [frameId, port, projectId])
+
   useEffect(() => {
     const controller = new AbortController(); draftAbort.current = controller
     void port.referenceVideoDraft({ projectId, frameId }, controller.signal).then((state) => {
       if (controller.signal.aborted) return
       setDraftState(state)
+      if (state.draft) void readMaterials(state)
       if (epoch.current === 0) setDraftMessage(state.draft ? '此镜头有已存草稿，可恢复后继续编辑。' : '尚无已存草稿。')
     }).catch(() => { if (!controller.signal.aborted) setDraftMessage('草稿状态读取失败；当前试排仍可预览，请重新读取。') })
     return () => {
       controller.abort(); previewAbort.current?.abort(); assetsAbort.current?.abort()
-      draftAbort.current?.abort(); saveAbort.current?.abort()
+      draftAbort.current?.abort(); saveAbort.current?.abort(); materialsAbort.current?.abort(); prepareAbort.current?.abort()
       inheritAbort.current?.abort()
     }
-  }, [projectId, frameId, port])
+  }, [port, projectId, frameId, readMaterials])
 
   const { preview: localPreview } = usePrivateReferencePreview(projectId, inspected, port, previewRetry)
   const inspect = (asset: ReferenceVideoAsset) => {
@@ -121,7 +175,8 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
   const invalidate = () => {
     epoch.current += 1
     setDraftMessage('当前修改尚未保存。')
-    previewAbort.current?.abort(); setBusy(false); setResult(undefined); setQuoteResult(undefined); setError('')
+    previewAbort.current?.abort(); materialsAbort.current?.abort(); prepareAbort.current?.abort()
+    setBusy(false); setPreparingAssetId(undefined); setMaterials(undefined); setResult(undefined); setQuoteResult(undefined); setError('')
   }
   const restore = async () => {
     draftAbort.current?.abort()
@@ -140,6 +195,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
       activeText.current = { index: 0, start: 0, end: 0 }
       setDraftLoaded(true); setSourceAccepted(state.draft.frameSha256 === state.frameSha256)
       setDraftMessage(`已恢复草稿版本 ${state.draft.revision}。`)
+      void readMaterials(state)
     } catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '恢复草稿失败') }
   }
   const save = async () => {
@@ -156,6 +212,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
       if (controller.signal.aborted) return
       setDraftState(state); setDraftLoaded(true); setSavedEpoch(start)
       setDraftMessage(epoch.current === start ? `已保存草稿版本 ${state.draft?.revision}。` : '上一版已保存，随后修改的内容尚未保存。')
+      if (epoch.current === start) void readMaterials(state)
     } catch (cause) {
       if (!controller.signal.aborted) setError(`保存未确认，当前内容仍保留。${cause instanceof Error ? cause.message : '请重试或重新读取草稿。'}`)
     } finally { if (!controller.signal.aborted) setSaving(false) }
@@ -202,6 +259,52 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
     ])
     activeText.current = { index: index + 2, start: 0, end: 0 }
   }
+  const materialFor = (item: Chosen) => materials?.materials.find(material => (
+    material.bindingToken === item.bindingToken && material.assetId === item.assetId
+      && material.assetSha256 === item.assetSha256
+  ))
+  const prepareMaterial = async (item: Chosen) => {
+    const draft = draftState?.draft
+    const existing = materialFor(item)
+    const prepare = port.prepareReferenceVideoMaterial
+    if (preparing.current || preparingAssetId !== undefined || !draft || savedEpoch !== epoch.current || !sourceAccepted
+      || prepare === undefined || !materials?.configured
+      || existing?.status === 'ready' || existing?.status === 'unknown' || existing?.status === 'uploading') return
+    preparing.current = true
+    materialsAbort.current?.abort()
+    materialsAbort.current = undefined
+    setMaterialsLoading(false)
+    prepareAbort.current?.abort()
+    const controller = new AbortController(); prepareAbort.current = controller
+    setPreparingAssetId(item.assetId); setError('')
+    try {
+      const next = await prepare({
+        projectId, frameId, assetId: item.assetId, expectedRevision: draft.revision,
+        expectedRequestSha256: draft.requestSha256, requestId: makeRequestId(),
+      }, controller.signal)
+      if (controller.signal.aborted) return
+      if (next.projectId !== projectId || next.frameId !== frameId
+        || next.draftRevision !== draft.revision || next.draftRequestSha256 !== draft.requestSha256) {
+        throw new Error('准备回执与当前已存草稿不匹配，请读取素材状态。')
+      }
+      setMaterials({ ...next, providerCalls: 0, databaseWrites: 0 })
+    } catch (cause) {
+      if (!controller.signal.aborted) {
+        setMaterials(previous => previous === undefined ? previous : {
+          ...previous, allReady: false, materials: previous.materials.map(material => (
+            material.assetId === item.assetId && material.assetSha256 === item.assetSha256
+              ? { ...material, status: 'unknown', expiresAt: null, failureCode: null }
+              : material
+          )),
+        })
+        setError(cause instanceof Error ? `${cause.message} 请读取素材状态确认。` : '素材准备结果未确认；请读取素材状态确认。')
+      }
+    } finally {
+      if (prepareAbort.current === controller) preparing.current = false
+      if (!controller.signal.aborted) setPreparingAssetId(undefined)
+    }
+  }
+
   const preview = async () => {
     if (busy) return
     previewAbort.current?.abort(); setResult(undefined); setQuoteResult(undefined); setError('')
@@ -230,6 +333,12 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
   }
   let images = 0; let audios = 0
   const aliases = new Map(chosen.map((item, index) => [item.bindingToken, item.mediaType === 'reference_image' ? `图${++images}` : item.mediaType === 'reference_audio' ? `音频${++audios}` : `失效素材${index + 1}`]))
+  const savedDraft = draftState?.draft
+  const currentMaterials = materials !== undefined && savedDraft !== null && savedDraft !== undefined
+    && materials.draftRevision === savedDraft.revision
+    && materials.draftRequestSha256 === savedDraft.requestSha256 ? materials : undefined
+  const canPrepareMaterials = currentMaterials?.configured === true && savedEpoch === epoch.current
+    && sourceAccepted && preparingAssetId === undefined && port.prepareReferenceVideoMaterial !== undefined
   const move = (index: number, delta: number) => {
     const next = [...chosen]; const other = next[index + delta]; const current = next[index]
     if (!other || !current) return
@@ -259,6 +368,26 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
       <button className={css.primaryAction} type="button" disabled={saving || !draftState || !sourceAccepted || Boolean(draftState.draft && !draftLoaded) || chosen.length === 0 || chosen.some(item => item.mediaType === 'unavailable' || !item.label.trim())} onClick={() => { void save() }}>{saving ? '保存草稿…' : '保存引用草稿'}</button>
       <p role="status">{draftMessage}</p>
     </section>
+    {port.readReferenceVideoMaterials !== undefined && <section className={css.materialsBar} aria-label="准备引用素材">
+      <div>
+        <p className={css.kicker}>ALI REFERENCE MATERIALS</p>
+        <h4>准备引用素材</h4>
+        <p>{savedEpoch !== epoch.current
+          ? '先保存当前引用草稿，再将图片或音色上传到阿里临时素材区。'
+          : currentMaterials === undefined
+            ? '读取已保存草稿的临时素材状态。保存本地草稿不等于阿里可读。'
+            : currentMaterials.configured
+              ? '逐份准备图片或音色；临时素材约 48 小时有效，不会生成视频。'
+              : '阿里临时素材尚未配置；已可访问的参考素材仍可预览。'}</p>
+      </div>
+      <div className={css.materialActions}>
+        <button type="button" disabled={materialsLoading || preparingAssetId !== undefined || !draftState?.draft || savedEpoch !== epoch.current}
+          onClick={() => { if (draftState) void readMaterials(draftState) }}>
+          {materialsLoading ? '读取准备状态…' : '读取准备状态'}
+        </button>
+        {currentMaterials?.configured === false && <small role="status">{configurationMessage(currentMaterials.configurationError)}</small>}
+      </div>
+    </section>}
     {!sourceAccepted && <p role="alert">镜头在上次保存后已变化，请核对当前描述和素材。
       <button type="button" onClick={() => { setSourceAccepted(true); invalidate() }}>基于当前镜头继续编辑</button>
     </p>}
@@ -312,6 +441,26 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
         {chosen.length > 0 && <ol className={css.bindings} aria-label="引用顺序">
           {chosen.map((item, index) => <li key={item.bindingToken}>
             <strong>{aliases.get(item.bindingToken)} · {item.label}</strong>
+            {(() => {
+              const material = currentMaterials?.materials.find(candidate => candidate.bindingToken === item.bindingToken
+                && candidate.assetId === item.assetId && candidate.assetSha256 === item.assetSha256)
+              if (material === undefined) return currentMaterials === undefined ? null : <small className={css.materialStatus} data-state="unknown">准备状态未返回</small>
+              return <span className={css.materialStatus} data-state={material.status}>{materialStatusText(material)}</span>
+            })()}
+            {(() => {
+              const material = currentMaterials?.materials.find(candidate => candidate.bindingToken === item.bindingToken
+                && candidate.assetId === item.assetId && candidate.assetSha256 === item.assetSha256)
+              if (material === undefined || !currentMaterials?.configured) return null
+              if (material.status === 'unknown' || material.status === 'uploading') return <small className={css.materialHint}>请读取准备状态确认回执；不会自动重传。</small>
+              if (material.status === 'ready') return null
+              return <button type="button" className={css.prepareAction} disabled={!canPrepareMaterials}
+                onClick={() => { void prepareMaterial(item) }}>
+                {preparingAssetId === item.assetId ? '正在准备…'
+                  : material.status === 'expired' ? `重新准备${aliases.get(item.bindingToken)}`
+                    : material.status === 'failed' ? `重试准备${aliases.get(item.bindingToken)}`
+                      : `准备${aliases.get(item.bindingToken)}`}
+              </button>
+            })()}
             {(() => {
               const catalogAsset = exactAsset(item.assetId, item.assetSha256)
               if (catalogAsset !== undefined && (catalogAsset.localReferenceScope !== undefined || catalogAsset.localVoiceScope !== undefined) && catalogAsset.browserUrl === '') {

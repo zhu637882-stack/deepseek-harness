@@ -14,12 +14,21 @@ import * as Commands from '../../qingmu-yimeng-command-adapter/src/index.ts'
 import { request, response, savedDraft, quoteRequest, quoteResponse, runRequest, runResponse } from './reference-video-fixture.ts'
 
 it('loads the actual Host, Connection and read plugin through YAML and serves a verified request preview', async () => {
+  const materialScope = { projectId: 'p', frameId: 'f', expectedRevision: 1, expectedRequestSha256: savedDraft.draft.requestSha256 }
+  const materialState = { schema: 'jason.reference-video-materials.v1', projectId: 'p', frameId: 'f', draftRevision: 1,
+    draftRequestSha256: materialScope.expectedRequestSha256, model: 'wan3.0-video', configured: true, configurationError: null,
+    materials: [{ bindingToken: 'lin', assetId: 'asset_lin', assetSha256: 'a'.repeat(64), mediaType: 'reference_image',
+      status: 'ready', expiresAt: 2000000000, failureCode: null }], allReady: true, providerCalls: 0, databaseWrites: 0, generationQueued: false }
+  const { providerCalls: _calls, databaseWrites: _writes, ...materialFields } = materialState
+  const prepared = { ...materialFields, requestId: 'composition-prepare-01', assetId: 'asset_lin',
+    uploadAttempts: 1, modelCalls: 0, localStateChanged: true }
   const requests: { url: string | undefined; method: string | undefined; authorization: string | undefined; body: string }[] = []
   const upstream = createServer(async (req, res) => {
     let body = ''
     for await (const chunk of req) body += String(chunk)
     requests.push({ url: req.url, method: req.method, authorization: req.headers.authorization, body })
-    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(req.url?.includes('/runs') ? runResponse : req.url?.endsWith('/quote') ? quoteResponse : req.url?.includes('/drafts/') ? savedDraft : response))
+    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(req.url?.endsWith('/prepare') ? prepared
+      : req.url?.includes('/materials') ? materialState : req.url?.includes('/runs') ? runResponse : req.url?.endsWith('/quote') ? quoteResponse : req.url?.includes('/drafts/') ? savedDraft : response))
   })
   await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve))
   const address = upstream.address()
@@ -96,6 +105,19 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
     expect((await queue.json()).result).toEqual({ ok: true, value: runResponse })
     expect(requests.slice(-2).map(r => r.method)).toEqual(['POST', 'GET'])
     expect(requests.at(-1)?.url).toBe(`/api/qingmu/projects/p/reference-video/drafts/f/runs/${runResponse.runId}`)
+    const materialRead = await fetch(`http://127.0.0.1:${ctx.webServer.port}/qingmu-yimeng/referenceVideoMaterials`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId: 'materials', method: 'referenceVideoMaterials', payload: materialScope }),
+    })
+    expect((await materialRead.json()).result).toEqual({ ok: true, value: materialState })
+    const materialPrepare = await fetch(`http://127.0.0.1:${ctx.webServer.port}/qingmu-yimeng-command/prepareReferenceVideoMaterial`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId: 'prepare', method: 'prepareReferenceVideoMaterial',
+        payload: { ...materialScope, requestId: prepared.requestId, assetId: prepared.assetId } }),
+    })
+    expect((await materialPrepare.json()).result).toEqual({ ok: true, value: prepared })
+    expect(requests.slice(-3).map(r => r.method)).toEqual(['GET', 'POST', 'GET'])
+    expect(requests.slice(-3).every(r => r.authorization === 'Bearer fixture-owner-token')).toBe(true)
   } finally {
     await ctx.fiber.dispose(); upstream.closeAllConnections()
     await new Promise<void>(resolve => upstream.close(() => { resolve() }))

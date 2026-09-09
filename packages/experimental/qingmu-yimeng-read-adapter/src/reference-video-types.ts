@@ -199,3 +199,51 @@ export interface ReferenceVideoRunsResponse {
   readonly items: readonly ReferenceVideoRun[]
   readonly providerCalls: 0
 }
+
+/** Saved revision whose local references are being prepared for Alibaba. */
+export interface ReferenceVideoMaterialsRequest {
+  readonly projectId: string
+  readonly frameId: string
+  readonly expectedRevision: number
+  readonly expectedRequestSha256: string
+}
+
+/** Explicit one-file upload intent; no video generation or asset adoption. */
+export interface PrepareReferenceVideoMaterialRequest extends ReferenceVideoMaterialsRequest {
+  readonly assetId: string
+  readonly requestId: string
+}
+
+/** Durable preparation state of the exact image/audio versions in a saved shot. */
+export interface ReferenceVideoMaterialsState {
+  readonly schema: 'jason.reference-video-materials.v1'
+  readonly projectId: string
+  readonly frameId: string
+  readonly draftRevision: number
+  readonly draftRequestSha256: string
+  readonly model: 'wan3.0-video'
+  readonly materials: readonly {
+    readonly bindingToken: string
+    readonly assetId: string
+    readonly assetSha256: string
+    readonly mediaType: 'reference_image' | 'reference_audio'
+    readonly status: 'not_prepared' | 'uploading' | 'unknown' | 'failed' | 'expired' | 'ready'
+    readonly expiresAt: number | null
+    readonly failureCode: string | null
+  }[]
+  readonly configured: boolean
+  readonly configurationError: string | null
+  readonly allReady: boolean
+  readonly providerCalls: 0
+  readonly databaseWrites: 0
+  readonly generationQueued: false
+}
+
+/** Acknowledgement of an explicit material upload request. */
+export interface ReferenceVideoMaterialPreparationResult extends Omit<ReferenceVideoMaterialsState, 'providerCalls' | 'databaseWrites'> {
+  readonly uploadAttempts: number
+  readonly modelCalls: 0
+  readonly localStateChanged: boolean
+  readonly requestId: string
+  readonly assetId: string
+}

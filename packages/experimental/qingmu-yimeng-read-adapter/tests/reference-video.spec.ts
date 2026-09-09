@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+import { canonical } from './reference-video-fixture.ts'
 import { expect, it, vi } from 'vitest'
 import { createYimengReadHandler } from '../src/index.ts'
 import { request, response } from './reference-video-fixture.ts'
@@ -115,4 +117,20 @@ it('projects private audio playback only for actor-owned local voice candidates'
   ] } })
   expect(result).not.toHaveProperty('value.items.1.localVoiceScope')
   expect(result).not.toHaveProperty('value.items.2.localVoiceScope')
+})
+
+
+it.each([
+  ['oss://dashscope-instant/project/ref.png', true],
+  ['oss://dashscope-instant/project/ref.wav', true],
+  ['oss://dashscope-instant/project/../ref.png', false],
+  ['oss://dashscope-instant/project/ref.png?token=secret', false],
+  ['oss://different-bucket/project/ref.png', false],
+  ['oss://dashscope-instant/project/%2fref.png', false],
+])('accepts only canonical temporary transport %s', async (url, accepted) => {
+  const nextBody = { ...response.body, input: { ...response.body.input,
+    media: response.body.input.media.map(media => ({ ...media, url: String(url) })) } }
+  const next = { ...response, body: nextBody, requestBodySha256: createHash('sha256').update(canonical(nextBody)).digest('hex') }
+  const handler = createYimengReadHandler({}, { fetch: async () => Response.json(next), readToken: () => 'fixture' })
+  expect((await handler('referenceVideoPreview', request, signal())).ok).toBe(accepted)
 })

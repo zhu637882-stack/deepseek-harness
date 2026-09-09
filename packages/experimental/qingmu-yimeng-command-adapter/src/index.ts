@@ -5400,6 +5400,32 @@ export function createYimengCommandHandler(
           || run.authorizationCapCny !== input.authorizationCapCny) return internalError('生成提交未确认，请用原请求编号重新查询。')
         return readback
       }
+      if (endpoint === 'prepareReferenceVideoMaterial') {
+        if (dependencies.readYimeng === undefined) return internalError('material readback is unavailable')
+        const input = requireObject(payload, 'materialPreparation')
+        if (Object.keys(input).some(key => !['projectId', 'frameId', 'assetId', 'requestId', 'expectedRevision', 'expectedRequestSha256'].includes(key))
+          || ![input.projectId, input.frameId, input.assetId].every(value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/u.test(value))
+          || typeof input.requestId !== 'string' || !/^[A-Za-z0-9_-]{16,64}$/u.test(input.requestId)
+          || !Number.isSafeInteger(input.expectedRevision) || Number(input.expectedRevision) < 1
+          || typeof input.expectedRequestSha256 !== 'string' || !SHA256.test(input.expectedRequestSha256)) throw new InputError('invalid material upload intent')
+        const token = normalizeToken(dependencies.readToken())
+        if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
+        const { projectId, frameId, assetId, requestId, expectedRevision, expectedRequestSha256 } = input
+        const response = await fetchJson(dependencies,
+          `${baseUrl}/api/qingmu/projects/${encodeURIComponent(String(projectId))}/reference-video/drafts/${encodeURIComponent(String(frameId))}/materials/${encodeURIComponent(String(assetId))}/prepare`,
+          token, { method: 'POST', body: serializeBody({ requestId, expectedRevision, expectedRequestSha256 }) }, Math.max(timeoutMs, 150000), signal)
+        if (!response.ok || signal.aborted) return signal.aborted ? cancelled() : response
+        const ack = requireObject(response.value, 'materialPreparation.ack')
+        if (ack.requestId !== requestId || ack.assetId !== assetId || ack.projectId !== projectId || ack.frameId !== frameId
+          || ack.draftRevision !== expectedRevision || ack.draftRequestSha256 !== expectedRequestSha256
+          || ack.modelCalls !== 0 || ack.generationQueued !== false || ![0, 1].includes(Number(ack.uploadAttempts))
+          || typeof ack.uploadAttempts !== 'number' || typeof ack.localStateChanged !== 'boolean') return internalError('素材准备回执未确认，请读取当前状态。')
+        const readback = await dependencies.readYimeng('referenceVideoMaterials', { projectId, frameId, expectedRevision, expectedRequestSha256 }, signal)
+        if (!readback.ok) return readback
+        const { providerCalls: _calls, databaseWrites: _writes, ...state } = requireObject(readback.value, 'materialPreparation.readback')
+        return { ok: true, value: { ...state, requestId, assetId, uploadAttempts: ack.uploadAttempts,
+          modelCalls: 0, localStateChanged: ack.localStateChanged } }
+      }
       if (endpoint === 'saveReferenceVideoDraft') {
         if (dependencies.readYimeng === undefined) return internalError('reference draft readback is unavailable')
         const input = requireObject(payload, 'referenceDraft')

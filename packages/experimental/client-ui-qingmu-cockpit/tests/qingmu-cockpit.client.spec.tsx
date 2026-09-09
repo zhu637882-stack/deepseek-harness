@@ -630,6 +630,8 @@ function shotRelationMethod(request: Parameters<QingmuYimengPort['shotRelationMe
 
 function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
   const base: QingmuYimengPort = {
+    readReferenceVideoMaterials: vi.fn(async () => { throw new Error('Materials use a separate fixture') }),
+    prepareReferenceVideoMaterial: vi.fn(async () => { throw new Error('Materials use a separate fixture') }),
     referenceVideoDraft: vi.fn<QingmuYimengPort['referenceVideoDraft']>(async request => ({ schema: 'jason.reference-video-draft.v1',
       ...request, frameSha256: 'a'.repeat(64), draft: null, mediaTypes: {}, providerCalls: 0, generationQueued: false })),
     referenceVideoRuns: vi.fn<QingmuYimengPort['referenceVideoRuns']>(async request => ({ schema: 'jason.reference-video-runs.v1',
