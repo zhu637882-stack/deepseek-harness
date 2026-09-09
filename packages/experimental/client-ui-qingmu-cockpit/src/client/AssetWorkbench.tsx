@@ -29,6 +29,7 @@ import type {
 } from './contracts.ts'
 import type { QingmuCockpitKey } from './locales.ts'
 import { LocalReferenceCandidateUpload } from './LocalReferenceCandidateUpload.tsx'
+import { LocalVoiceCandidateUpload } from './LocalVoiceCandidateUpload.tsx'
 import { ReferenceRightsEditor, ReferenceRightsSummary } from './ReferenceRightsEditor.tsx'
 import {
   assertCanonicalReferenceRightsRecord,
@@ -2815,6 +2816,17 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
           targetName={choices.find(choice => choice.id === targetId)?.name ?? targetId}
           port={port}
           t={t}
+          onStored={async () => { await loadSnapshot(); await onCommitted() }}
+        />
+      )}
+
+      {snapshot !== undefined && elementKind === 'actor' && targetId !== '' && (
+        <LocalVoiceCandidateUpload
+          key={`${projectId}:voice:${targetId}`}
+          projectId={projectId}
+          targetId={targetId}
+          targetName={choices.find(choice => choice.id === targetId)?.name ?? targetId}
+          port={port}
           onStored={async () => { await loadSnapshot(); await onCommitted() }}
         />
       )}

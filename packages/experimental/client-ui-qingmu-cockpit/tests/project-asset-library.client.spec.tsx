@@ -17,7 +17,7 @@ const localContent = {
 }
 function localReader() { return vi.fn(async () => localContent) }
 const page = (items: ReferenceVideoAssetsResponse['items']): ReferenceVideoAssetsResponse => ({ projectId:'p',page:1,pages:1,items })
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 it('filters real catalog entries and opens image or voice previews without a write action', async () => {
   const port = { referenceVideoAssets:vi.fn().mockResolvedValue(page([picture,voice])), readLocalReferenceCandidateContent:localReader() }
   render(<ProjectAssetLibrary projectId="p" port={port} />)
@@ -50,7 +50,7 @@ it('opens the real person or scene upload surface on request and rereads after i
   const view = render(<ProjectAssetLibrary projectId="p" port={port} onOpenReferenceUpload={onOpenReferenceUpload} />)
   fireEvent.click(await screen.findByRole('button', { name:'上传人物/场景参考' }))
   expect(onOpenReferenceUpload).toHaveBeenCalledOnce()
-  expect(screen.getByText(/音色暂不在此上传/)).toBeTruthy()
+  expect(screen.getByText(/角色音色可在人物参考区上传/)).toBeTruthy()
   view.rerender(<ProjectAssetLibrary projectId="p" port={port} onOpenReferenceUpload={onOpenReferenceUpload} refreshToken={1} />)
   await waitFor(() => { expect(port.referenceVideoAssets).toHaveBeenCalledTimes(2) })
 })
@@ -79,10 +79,49 @@ it('shows a failed local preview and retries only when requested', async () => {
   const port = { referenceVideoAssets: vi.fn().mockResolvedValue(page([localPicture])), readLocalReferenceCandidateContent: reader }
   render(<ProjectAssetLibrary projectId="p" port={port} />)
   fireEvent.click(await screen.findByRole('button', { name: '预览林予' }))
-  await screen.findByText('这张参考图暂时无法读取。')
-  expect(screen.queryByText('正在读取这张本地参考图。')).toBeNull()
+  await screen.findByText('这份参考素材暂时无法读取。')
+  expect(screen.queryByText('正在读取这份本地参考素材。')).toBeNull()
   expect(reader).toHaveBeenCalledOnce()
-  fireEvent.click(screen.getByRole('button', { name: '重新读取参考图' }))
+  fireEvent.click(screen.getByRole('button', { name: '重新读取参考素材' }))
   await waitFor(() => expect(screen.getByRole('region', { name: '素材预览' }).querySelector('img')).not.toBeNull())
   expect(reader).toHaveBeenCalledTimes(2)
+})
+
+it('reads a local voice only on selection and releases its Blob URL when closing', async () => {
+  const createObjectURL = vi.fn(() => 'blob:local-voice')
+  const revokeObjectURL = vi.fn()
+  vi.stubGlobal('URL', class extends URL { static override createObjectURL = createObjectURL; static override revokeObjectURL = revokeObjectURL })
+  const localVoice = { ...voice, browserUrl: '', localVoiceScope: { targetId: 'actor_linyu' } }
+  const content = { schema: 'jason.qingmu-local-voice-content.v1' as const, assetId: voice.assetId,
+    sha256: voice.assetSha256, mimeType: 'audio/wav' as const, contentBase64: 'AQID' }
+  const readLocalVoiceCandidateContent = vi.fn(async () => content)
+  const port = { referenceVideoAssets: vi.fn().mockResolvedValue(page([localVoice])),
+    readLocalReferenceCandidateContent: localReader(), readLocalVoiceCandidateContent }
+  render(<ProjectAssetLibrary projectId="p" port={port} />)
+  const select = await screen.findByRole('button', { name: '预览林予音色' })
+  expect(readLocalVoiceCandidateContent).not.toHaveBeenCalled()
+  fireEvent.click(select)
+  await waitFor(() => expect(screen.getByRole('region', { name: '素材预览' }).querySelector('audio')?.getAttribute('src')).toBe('blob:local-voice'))
+  expect(readLocalVoiceCandidateContent).toHaveBeenCalledWith({ projectId: 'p', elementKind: 'actor', targetId: 'actor_linyu',
+    assetId: voice.assetId, expectedSha256: voice.assetSha256 }, expect.any(AbortSignal))
+  expect(port.readLocalReferenceCandidateContent).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '关闭预览' }))
+  expect(revokeObjectURL).toHaveBeenCalledWith('blob:local-voice')
+})
+
+it('ignores a late private voice read after its selection is closed', async () => {
+  const createObjectURL = vi.fn(() => 'blob:late')
+  vi.stubGlobal('URL', class extends URL { static override createObjectURL = createObjectURL; static override revokeObjectURL = vi.fn() })
+  const localVoice = { ...voice, browserUrl: '', localVoiceScope: { targetId: 'actor_linyu' } }
+  let resolve!: (value: { schema: 'jason.qingmu-local-voice-content.v1'; assetId: string; sha256: string; mimeType: 'audio/wav'; contentBase64: string }) => void
+  const readLocalVoiceCandidateContent = vi.fn(() => new Promise<Parameters<typeof resolve>[0]>((done) => { resolve = done }))
+  const port = { referenceVideoAssets: vi.fn().mockResolvedValue(page([localVoice])),
+    readLocalReferenceCandidateContent: localReader(), readLocalVoiceCandidateContent }
+  render(<ProjectAssetLibrary projectId="p" port={port} />)
+  fireEvent.click(await screen.findByRole('button', { name: '预览林予音色' }))
+  await waitFor(() => expect(readLocalVoiceCandidateContent).toHaveBeenCalledOnce())
+  fireEvent.click(screen.getByRole('button', { name: '关闭预览' }))
+  resolve({ schema: 'jason.qingmu-local-voice-content.v1', assetId: voice.assetId, sha256: voice.assetSha256, mimeType: 'audio/wav', contentBase64: 'AQID' })
+  await waitFor(() => expect(screen.queryByRole('region', { name: '素材预览' })).toBeNull())
+  expect(createObjectURL).not.toHaveBeenCalled()
 })

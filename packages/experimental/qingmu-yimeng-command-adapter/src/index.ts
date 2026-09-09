@@ -4,6 +4,7 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { prepareCreationCommand, prepareCreationOptionsRead } from './creation.ts'
 import { prepareScenePlanning } from './scene-planning.ts'
 import { prepareLocalReferenceCandidate } from './local-reference-candidate.ts'
+import { prepareLocalVoiceCandidate } from './local-voice-candidate.ts'
 import type { DirectorProposalFreshnessResult } from './director-proposal.ts'
 import {
   createDshDeepSeekDirectorTransport,
@@ -5813,6 +5814,15 @@ export function createYimengCommandHandler(
         const prepared = prepareScenePlanning(endpoint, payload, stageArtifactHelpers)
         path = prepared.path
         requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
+        normalize = prepared.normalize
+      } else if (['uploadLocalVoiceCandidate', 'recoverLocalVoiceCandidate', 'readLocalVoiceCandidateContent'].includes(endpoint)) {
+        const prepared = prepareLocalVoiceCandidate(endpoint, payload, stageArtifactHelpers)
+        path = prepared.path
+        requestInit = {
+          method: prepared.method,
+          ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body, MAX_LOCAL_REFERENCE_JSON_BYTES) }),
+          ...(endpoint === 'readLocalVoiceCandidateContent' ? { maxResponseBytes: MAX_LOCAL_REFERENCE_JSON_BYTES } : {}),
+        }
         normalize = prepared.normalize
       } else if (['listLocalReferenceCandidates', 'uploadLocalReferenceCandidate', 'recoverLocalReferenceCandidate', 'readLocalReferenceCandidateContent', 'qualifyLocalReferenceCandidate', 'recoverLocalReferenceQualification'].includes(endpoint)) {
         const prepared = prepareLocalReferenceCandidate(endpoint, payload, stageArtifactHelpers)

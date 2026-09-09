@@ -31,6 +31,7 @@ export type {
   LocalReferenceContentRequest, LocalReferenceElementKind, LocalReferenceScope,
   LocalReferenceQualificationRequest, LocalReferenceQualificationResult, LocalReferenceUploadRequest,
 } from './local-reference-candidate.ts'
+export type { LocalVoiceUploadRequest, LocalVoiceContentRequest, LocalVoiceCandidateResult, LocalVoiceCandidateContent } from './local-voice-candidate.ts'
 
 /** Browser intent for one numbered production-Take attempt; all authority is re-read by Host. */
 export interface YimengQueueProductionTakeIntent {
@@ -2996,6 +2997,9 @@ export interface YimengCommandEndpointMap {
   readonly checkDirectorProposalFreshness: import('./director-proposal.ts').DirectorProposalFreshnessResult
   readonly listLocalReferenceCandidates: import('./local-reference-candidate.ts').LocalReferenceCandidateList
   readonly uploadLocalReferenceCandidate: import('./local-reference-candidate.ts').LocalReferenceCandidateResult
+  readonly uploadLocalVoiceCandidate: import('./local-voice-candidate.ts').LocalVoiceCandidateResult
+  readonly recoverLocalVoiceCandidate: import('./local-voice-candidate.ts').LocalVoiceCandidateResult
+  readonly readLocalVoiceCandidateContent: import('./local-voice-candidate.ts').LocalVoiceCandidateContent
   readonly recoverLocalReferenceCandidate: import('./local-reference-candidate.ts').LocalReferenceCandidateResult
   readonly readLocalReferenceCandidateContent: import('./local-reference-candidate.ts').LocalReferenceCandidateContent
   readonly qualifyLocalReferenceCandidate: import('./local-reference-candidate.ts').LocalReferenceQualificationResult

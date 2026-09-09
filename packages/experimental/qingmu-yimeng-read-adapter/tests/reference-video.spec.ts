@@ -102,3 +102,17 @@ it('projects a private local-reference scope only for valid owner-bound local as
   expect(result).not.toHaveProperty('value.items.1.localReferenceScope')
   expect(result).not.toHaveProperty('value.items.2.localReferenceScope')
 })
+
+it('projects private audio playback only for actor-owned local voice candidates', async () => {
+  const voice = { id: `asset_localvoice_${'a'.repeat(32)}`, project_id: 'p', asset_type: 'audio',
+    sha256: 'c'.repeat(64), owner_type: 'actor', owner_id: 'actor_linyu', role: 'local_voice_candidate', display_name: '林予' }
+  const handler = createYimengReadHandler({}, { readToken: () => 'fixture', fetch: async () => Response.json({
+    page: 1, page_size: 200, pages: 1, items: [voice, { ...voice, owner_type: 'frame' }, { ...voice, role: 'other' }],
+  }) })
+  const result = await handler('referenceVideoAssets', { projectId: 'p', page: 1 }, signal())
+  expect(result).toMatchObject({ ok: true, value: { items: [
+    { localVoiceScope: { targetId: 'actor_linyu' }, label: '林予 · 音色', mediaType: 'reference_audio', browserUrl: '' }, {}, {},
+  ] } })
+  expect(result).not.toHaveProperty('value.items.1.localVoiceScope')
+  expect(result).not.toHaveProperty('value.items.2.localVoiceScope')
+})

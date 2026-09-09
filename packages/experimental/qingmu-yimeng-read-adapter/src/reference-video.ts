@@ -239,9 +239,13 @@ export function normalizeReferenceVideoAssets(
       && localOwner !== undefined && /^[A-Za-z0-9_.-]{1,256}$/u.test(ownerId)
       ? { elementKind: localOwner, targetId: ownerId }
       : undefined
-    items.push({ assetId: a.id, assetSha256: a.sha256, label: displayLabel,
+    const localVoiceScope = a.asset_type === 'audio' && /^asset_localvoice_[a-f0-9]{32}$/u.test(a.id)
+      && a.role === 'local_voice_candidate' && ownerType === 'actor' && /^[A-Za-z0-9_.-]{1,256}$/u.test(ownerId)
+      ? { targetId: ownerId } : undefined
+    items.push({ assetId: a.id, assetSha256: a.sha256, label: localVoiceScope === undefined ? displayLabel : `${displayLabel} · 音色`,
       mediaType: a.asset_type === 'image' ? 'reference_image' : 'reference_audio', browserUrl,
-      ...(localReferenceScope === undefined ? {} : { localReferenceScope }) })
+      ...(localReferenceScope === undefined ? {} : { localReferenceScope }),
+      ...(localVoiceScope === undefined ? {} : { localVoiceScope }) })
   }
   return { projectId: request.projectId, page: request.page, pages: v.pages, items }
 }

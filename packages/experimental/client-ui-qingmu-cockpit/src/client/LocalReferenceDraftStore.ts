@@ -36,8 +36,9 @@ function valid(value: unknown): value is SavedLocalReferenceInput {
 }
 
 function matchesScope(key: string, saved: SavedLocalReferenceInput): boolean {
-  const prefix = 'qingmu.local-reference.v1:'
-  if (!key.startsWith(prefix)) return false
+  const prefix = ['qingmu.local-reference.v1:', 'qingmu.local-voice.v1:']
+    .find(candidate => key.startsWith(candidate))
+  if (prefix === undefined) return false
   const [projectId, elementKind, ...targetParts] = key.slice(prefix.length).split(':')
   return projectId === saved.request.projectId
     && elementKind === saved.request.elementKind

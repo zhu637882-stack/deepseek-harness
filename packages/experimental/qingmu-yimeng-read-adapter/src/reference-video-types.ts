@@ -75,6 +75,8 @@ export interface ReferenceVideoAsset {
     readonly elementKind: 'actor' | 'scene' | 'prop'
     readonly targetId: string
   }
+  /** A local WAV reference belongs to this actor; it is not an enrolled Provider voice. */
+  readonly localVoiceScope?: { readonly targetId: string }
 }
 
 /** A filtered page retains upstream pagination across other media types. */

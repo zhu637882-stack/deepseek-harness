@@ -726,6 +726,15 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     readLocalReferenceCandidateContent: vi.fn(async () => {
       throw new Error('Local reference content is not part of this fixture')
     }),
+    uploadLocalVoiceCandidate: vi.fn(async () => {
+      throw new Error('Local voice upload is not part of this fixture')
+    }),
+    recoverLocalVoiceCandidate: vi.fn(async () => {
+      throw new Error('Local voice recovery is not part of this fixture')
+    }),
+    readLocalVoiceCandidateContent: vi.fn(async () => {
+      throw new Error('Local voice content is not part of this fixture')
+    }),
     qualifyLocalReferenceCandidate: vi.fn(async () => {
       throw new Error('Local reference qualification is not part of this fixture')
     }),

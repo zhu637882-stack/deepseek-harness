@@ -687,6 +687,18 @@ export interface QingmuYimengCommandPort {
     request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceContentRequest,
     signal?: AbortSignal,
   ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceCandidateContent>
+  uploadLocalVoiceCandidate(
+    request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalVoiceUploadRequest,
+    signal?: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalVoiceCandidateResult>
+  recoverLocalVoiceCandidate(
+    request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalVoiceUploadRequest,
+    signal?: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalVoiceCandidateResult>
+  readLocalVoiceCandidateContent(
+    request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalVoiceContentRequest,
+    signal?: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalVoiceCandidateContent>
   qualifyLocalReferenceCandidate(
     request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceQualificationRequest,
     signal?: AbortSignal,
