@@ -50,6 +50,21 @@ class OwnershipTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             local.native_ui({"uiMode": "misspelled"})
 
+    def test_native_process_ledger_accepts_only_the_shared_host_entry_port(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "private").mkdir()
+            supervisor = local.Supervisor(root, {"instanceId": "native-ledger", "uiMode": "native"})
+            supervisor.ports = {"apiPort": 41001, "hostPort": 41002, "webPort": 41002}
+            ledger = supervisor._persist_process_ledger()
+            self.assertEqual(local._validate_recorded_ports(ledger, is_native=True), supervisor.ports)
+            self.assertIsNone(ledger["frontendPid"])
+            with self.assertRaises(RuntimeError):
+                local._validate_recorded_ports(ledger)
+            for invalid in ({**ledger, "apiPort": 41002}, {**ledger, "webPort": 41003}):
+                with self.assertRaises(RuntimeError):
+                    local._validate_recorded_ports(invalid, is_native=True)
+
     def test_native_build_needs_no_next_build_but_binds_actual_host(self):
         with tempfile.TemporaryDirectory() as directory:
             root, config, identities = self.build_manifest_world(Path(directory))

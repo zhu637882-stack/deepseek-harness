@@ -972,7 +972,7 @@ def _validate_recorded_pids(value: dict, *, allow_empty_children: bool) -> dict:
     return recorded
 
 
-def _validate_recorded_ports(value: dict) -> dict:
+def _validate_recorded_ports(value: dict, *, is_native: bool = False) -> dict:
     fields = ("apiPort", "hostPort", "webPort")
     recorded = {name: value.get(name) for name in fields}
     if any(
@@ -981,8 +981,11 @@ def _validate_recorded_ports(value: dict) -> dict:
         or port <= 0
         or port > 65535
         for port in recorded.values()
-    ) or len(set(recorded.values())) != len(recorded):
+    ) or (recorded["apiPort"] == recorded["hostPort"] if is_native
+          else len(set(recorded.values())) != len(recorded)):
         raise RuntimeError("历史端口记录不完整或漂移；保持崩溃锁定")
+    if is_native and recorded["webPort"] != recorded["hostPort"]:
+        raise RuntimeError("原生入口与 Host 端口不一致；保持崩溃锁定")
     return recorded
 
 
@@ -1110,7 +1113,7 @@ def recover_crashed_instance(root: Path, config: dict, expected_instance_id: str
         )
         recovery_path = root / "private/crash-recovery.json"
         ports = _read_owner_only_json(root / "private/ports.json", "实例端口记录")
-        expected_ports = _validate_recorded_ports(ports)
+        expected_ports = _validate_recorded_ports(ports, is_native=native_ui(config))
         if lifecycle == {"instanceId": expected_instance_id, "state": "clean"}:
             if not (recovery_path.exists() or recovery_path.is_symlink()):
                 raise RuntimeError("实例不是可恢复的崩溃锁定状态；未修改")
@@ -1183,7 +1186,7 @@ def recover_crashed_instance(root: Path, config: dict, expected_instance_id: str
                 recorded_pids = _validate_recorded_pids(
                     ledger, allow_empty_children=True
                 )
-                recorded_ports = _validate_recorded_ports(ledger)
+                recorded_ports = _validate_recorded_ports(ledger, is_native=native_ui(config))
                 ledger_source = "process-ledger"
                 ledger_generation = ledger["generation"]
             else:
@@ -1195,7 +1198,7 @@ def recover_crashed_instance(root: Path, config: dict, expected_instance_id: str
                 recorded_pids = _validate_recorded_pids(
                     runtime, allow_empty_children=False
                 )
-                recorded_ports = _validate_recorded_ports(runtime)
+                recorded_ports = _validate_recorded_ports(runtime, is_native=native_ui(config))
                 ledger_source = "legacy-runtime"
                 ledger_generation = None
             if recorded_ports != expected_ports:
@@ -1454,7 +1457,7 @@ class Supervisor:
             ):
                 raise RuntimeError("实例进程账本无效；拒绝继续启动")
             generation = previous["generation"] + 1
-        ports = _validate_recorded_ports(self.ports)
+        ports = _validate_recorded_ports(self.ports, is_native=self.native_ui)
         value = {
             "schema": PROCESS_LEDGER_SCHEMA,
             "instanceId": self.config["instanceId"],
@@ -2420,8 +2423,8 @@ class Supervisor:
                     self.ports = runtime_ports(self.config, preferred)
                     api_port = self.ports["apiPort"]
                     write_json(persisted, self.ports)
-                    self.process_ledger_active = True
                     self._persist_process_ledger()
+                    self.process_ledger_active = True
                     mark_build_started(self.root, self.config, self.ports, review_only=self.review_only)
                     api_env = backend_env(self.root, self.config)
                     if self.review_only:
