@@ -2403,4 +2403,77 @@ describe('AssetWorkbench', () => {
     expect(harness.referenceAssetMethod).not.toHaveBeenCalled()
     expect(harness.createReferenceRightsExceptionRelease).not.toHaveBeenCalled()
   })
+
+  it('keeps a confirmed local voice receipt through the AssetWorkbench refresh remount', async () => {
+    const actorId = 'actor-voice-1'
+    const actorSnapshot = {
+      ...SNAPSHOT,
+      subject: {
+        ...SNAPSHOT.subject,
+        elementKind: 'actor',
+        actorId,
+        name: '林予',
+        visualIdentity: '年轻女记者，短发，深色风衣。',
+      },
+    } as const
+    const { port } = createPort()
+    Object.assign(port, {
+      elementProfile: vi.fn(async () => actorSnapshot),
+      elementMethod: vi.fn(async (request: Parameters<typeof methodResponse>[0]) => methodResponse(request)),
+      referenceCandidates: vi.fn(async () => ({
+        schema: 'jason.qingmu-reference-asset-candidates.v1',
+        projectId: PROJECT_ID,
+        targetType: 'element_profile',
+        targetId: actorId,
+        elementKind: 'actor',
+        profileRevision: 3,
+        elementSnapshotSha256: BASE_SHA,
+        candidates: [],
+        humanApprovalInferred: false,
+      } as const)),
+      reviewEvents: vi.fn(async () => reviewFeed({ targetId: actorId, elementKind: 'actor' })),
+      referenceRightsExceptionReleases: vi.fn(async () => referenceRightsExceptionFeed({ targetId: actorId, elementKind: 'actor' })),
+      uploadLocalVoiceCandidate: vi.fn(async () => ({
+        schema: 'jason.qingmu-local-voice-candidate.v1',
+        projectId: PROJECT_ID,
+        elementKind: 'actor',
+        targetId: actorId,
+        assetId: 'asset_localvoice_0123456789abcdef0123456789abcdef',
+        idempotencyKey: 'local-voice-test-0001',
+        requestSha256: 'a'.repeat(64),
+        originalFileName: 'linyu.wav',
+        byteSize: 8044,
+        mimeType: 'audio/wav',
+        inputSha256: 'b'.repeat(64),
+        materializedSha256: 'b'.repeat(64),
+        durationSec: 1,
+        sampleRate: 8000,
+        channels: 1,
+        sourceDeclaration: 'local_file_unverified',
+        rightsStatus: 'not_recorded',
+        selectionStatus: 'Unselected',
+        isSelected: false,
+        providerCalls: 0,
+        generationQueued: false,
+      })),
+    })
+    mount(port, vi.fn(async () => {}), [
+      { assetId: actorId, projectId: PROJECT_ID, type: 'character', name: '林予' },
+    ])
+    const input = await screen.findByLabelText('选择 WAV（1–15 秒，最多 8 MiB）') as HTMLInputElement
+    const bytes = new Uint8Array(8044)
+    const wav = new DataView(bytes.buffer)
+    const write = (offset: number, value: string) => {
+      for (let index = 0; index < value.length; index++) bytes[offset + index] = value.charCodeAt(index)
+    }
+    write(0, 'RIFF'); wav.setUint32(4, bytes.length - 8, true); write(8, 'WAVE'); write(12, 'fmt ')
+    wav.setUint32(16, 16, true); wav.setUint16(20, 1, true); wav.setUint16(22, 1, true)
+    wav.setUint32(24, 8000, true); wav.setUint32(28, 8000, true); wav.setUint16(32, 1, true)
+    wav.setUint16(34, 8, true); write(36, 'data'); wav.setUint32(40, 8000, true)
+    const file = new File([bytes], 'linyu.wav', { type: 'audio/wav' })
+    Object.defineProperty(file, 'arrayBuffer', { value: async () => bytes.buffer.slice(0) })
+    fireEvent.change(input, { target: { files: [file] } })
+    fireEvent.click(await screen.findByRole('button', { name: '保存音色文件' }))
+    expect(await screen.findByRole('article', { name: '音色上传回执' })).toBeTruthy()
+  })
 })

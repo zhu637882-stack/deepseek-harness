@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { webcrypto } from 'node:crypto'
+import { useState } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { inspectPcmWav, LocalVoiceCandidateUpload } from '../src/client/LocalVoiceCandidateUpload.tsx'
@@ -10,6 +11,7 @@ import type {
 
 const scope = { projectId: 'project_voice', targetId: 'actor_voice' }
 const BASE64_WAVE = makeWave()
+let revokeObjectUrl: ReturnType<typeof vi.fn>
 const result = {
   schema: 'jason.qingmu-local-voice-candidate.v1' as const,
   ...scope,
@@ -83,8 +85,36 @@ function port(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function mount(value: ReturnType<typeof port>, onStored = vi.fn(async () => {})) {
-  return { onStored, ...render(<LocalVoiceCandidateUpload {...scope} targetName="林予" port={value} onStored={onStored} />) }
+function mount(
+  value: ReturnType<typeof port>,
+  onStored = vi.fn(async () => {}),
+  retainedReceipt?: typeof result,
+  onReceipt = vi.fn(),
+) {
+  return {
+    onStored,
+    onReceipt,
+    ...render(<LocalVoiceCandidateUpload {...scope} targetName="林予" port={value} retainedReceipt={retainedReceipt} onReceipt={onReceipt} onStored={onStored} />),
+  }
+}
+
+function StatefulVoiceUpload({ value, onStored }: {
+  readonly value: ReturnType<typeof port>
+  readonly onStored: () => Promise<void>
+}) {
+  const [retainedReceipt, setRetainedReceipt] = useState<typeof result>()
+  return <LocalVoiceCandidateUpload
+    {...scope}
+    targetName="林予"
+    port={value}
+    retainedReceipt={retainedReceipt}
+    onReceipt={setRetainedReceipt}
+    onStored={onStored}
+  />
+}
+
+function mountStateful(value: ReturnType<typeof port>, onStored = vi.fn(async () => {})) {
+  return { onStored, ...render(<StatefulVoiceUpload value={value} onStored={onStored} />) }
 }
 
 async function chooseWav(container: HTMLElement): Promise<void> {
@@ -97,7 +127,8 @@ async function chooseWav(container: HTMLElement): Promise<void> {
 beforeEach(() => {
   localStorage.clear()
   vi.stubGlobal('crypto', webcrypto)
-  vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:voice-preview'), revokeObjectURL: vi.fn() })
+  revokeObjectUrl = vi.fn()
+  vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:voice-preview'), revokeObjectURL: revokeObjectUrl })
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
@@ -171,6 +202,33 @@ it('only reads private WAV bytes when the user explicitly auditions the receipt'
   expect(view.container.querySelector('audio')?.getAttribute('src')).toBe('blob:voice-preview')
 })
 
+it('keeps the confirmed receipt visible when the later asset refresh fails', async () => {
+  const onStored = vi.fn(async () => { throw new Error('asset refresh offline') })
+  const value = port()
+  const view = mountStateful(value, onStored)
+  await chooseWav(view.container)
+  fireEvent.click(screen.getByRole('button', { name: '保存音色文件' }))
+  await screen.findByText('音色已保存，但素材库刷新失败：asset refresh offline')
+  expect(screen.getByRole('article', { name: '音色上传回执' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: '恢复本次回执' })).toBeNull()
+  expect(value.uploadLocalVoiceCandidate).toHaveBeenCalledOnce()
+})
+
+it('with a stateful parent, completes once then accepts a new WAV and clears its old audition URL', async () => {
+  const value = port()
+  const view = mountStateful(value)
+  await chooseWav(view.container)
+  fireEvent.click(screen.getByRole('button', { name: '保存音色文件' }))
+  await screen.findByRole('article', { name: '音色上传回执' })
+  fireEvent.click(screen.getByRole('button', { name: '试听本次音色' }))
+  await waitFor(() => { expect(view.container.querySelector('audio')).not.toBeNull() })
+  const input = view.container.querySelector('input[type=file]') as HTMLInputElement
+  fireEvent.change(input, { target: { files: [file(BASE64_WAVE, 'second.wav')] } })
+  await screen.findByText('second.wav')
+  expect(screen.queryByRole('article', { name: '音色上传回执' })).toBeNull()
+  expect(revokeObjectUrl).toHaveBeenCalledWith('blob:voice-preview')
+})
+
 it('unlocks a newly selected actor while an earlier scope upload resolves late', async () => {
   let finishUpload!: (value: typeof result) => void
   const value = port({ uploadLocalVoiceCandidate: vi.fn(() => new Promise<typeof result>((resolve) => { finishUpload = resolve })) })
@@ -179,7 +237,7 @@ it('unlocks a newly selected actor while an earlier scope upload resolves late',
   fireEvent.click(screen.getByRole('button', { name: '保存音色文件' }))
   await waitFor(() => { expect(value.uploadLocalVoiceCandidate).toHaveBeenCalledOnce() })
   expect((view.container.querySelector('input[type=file]') as HTMLInputElement).disabled).toBe(true)
-  view.rerender(<LocalVoiceCandidateUpload projectId={scope.projectId} targetId="actor_other" targetName="周宁" port={value} onStored={vi.fn(async () => {})} />)
+  view.rerender(<LocalVoiceCandidateUpload projectId={scope.projectId} targetId="actor_other" targetName="周宁" port={value} retainedReceipt={result} onReceipt={vi.fn()} onStored={vi.fn(async () => {})} />)
   const otherInput = view.container.querySelector('input[type=file]') as HTMLInputElement
   await waitFor(() => { expect(otherInput.disabled).toBe(false) })
   await act(async () => { finishUpload(result) })

@@ -102,17 +102,24 @@ export function inspectPcmWav(bytes: Uint8Array): WavInfo | undefined {
 }
 
 /** Local PCM WAV upload only. It leaves actor adoption, provider configuration and rights unchanged. */
-export function LocalVoiceCandidateUpload({ projectId, targetId, targetName, port, onStored }: {
+export function LocalVoiceCandidateUpload({ projectId, targetId, targetName, port, retainedReceipt, onReceipt, onStored }: {
   readonly projectId: string
   readonly targetId: string
   readonly targetName: string
   readonly port: LocalVoicePort
+  /** The parent keeps this receipt across an asset-library refresh. */
+  readonly retainedReceipt: LocalVoiceCandidateResult | undefined
+  readonly onReceipt: (receipt: LocalVoiceCandidateResult | undefined) => void
   readonly onStored: () => Promise<void>
 }) {
   const storageKey = keyOf(projectId, targetId)
+  const scopedRetainedReceipt = retainedReceipt?.projectId === projectId
+    && retainedReceipt.targetId === targetId
+    ? retainedReceipt
+    : undefined
   const [saved, setSaved] = useState<SavedLocalReferenceInput>()
   const [durable, setDurable] = useState(false)
-  const [receipt, setReceipt] = useState<LocalVoiceCandidateResult>()
+  const [receipt, setReceipt] = useState<LocalVoiceCandidateResult | undefined>(scopedRetainedReceipt)
   const [busy, setBusy] = useState(false)
   const [restoring, setRestoring] = useState(true)
   const [error, setError] = useState('')
@@ -144,7 +151,7 @@ export function LocalVoiceCandidateUpload({ projectId, targetId, targetName, por
     setRestoring(true)
     setSaved(undefined)
     setDurable(false)
-    setReceipt(undefined)
+    setReceipt(scopedRetainedReceipt)
     setError('')
     setNotice('')
     setPersistWarning(false)
@@ -168,6 +175,12 @@ export function LocalVoiceCandidateUpload({ projectId, targetId, targetName, por
       revokeAudio()
     }
   }, [storageKey])
+
+  // A parent refresh may remount this component after a confirmed upload. Receipt sync is
+  // deliberately separate from the request scope so it cannot cancel an active file read.
+  useEffect(() => {
+    setReceipt(scopedRetainedReceipt)
+  }, [scopedRetainedReceipt])
 
   useEffect(() => () => { revokeAudio() }, [])
 
@@ -228,6 +241,9 @@ export function LocalVoiceCandidateUpload({ projectId, targetId, targetName, por
         setError('需要 1–15 秒的 PCM WAV 文件。')
         return
       }
+      setReceipt(undefined)
+      onReceipt(undefined)
+      revokeAudio()
       await save({
         request: {
           projectId,
@@ -253,9 +269,16 @@ export function LocalVoiceCandidateUpload({ projectId, targetId, targetName, por
     if (!await clear(scopeToken)) return
     if (actionToken !== actionGeneration.current || !currentScope(scopeToken)) return
     setReceipt(result)
+    onReceipt(result)
     setRetryAllowed(false)
     setNotice('音色文件已保存，可在项目素材中试听和引用。')
-    await onStored()
+    try {
+      await onStored()
+    } catch (cause) {
+      if (actionToken === actionGeneration.current && currentScope(scopeToken)) {
+        setError(`音色已保存，但素材库刷新失败：${messageOf(cause)}`)
+      }
+    }
   }
 
   const run = async (recover: boolean) => {

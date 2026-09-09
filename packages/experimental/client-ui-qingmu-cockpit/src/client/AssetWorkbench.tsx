@@ -75,6 +75,7 @@ import {
 import type {
   LocalReferenceQualificationRequest,
   LocalReferenceQualificationResult,
+  LocalVoiceCandidateResult,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import css from './QingmuCockpit.module.css'
 
@@ -1460,6 +1461,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
   const [qualificationBusy, setQualificationBusy] = useState(false)
   const [qualificationReceipt, setQualificationReceipt] =
     useState<LocalReferenceQualificationResult>()
+  const [localVoiceReceipt, setLocalVoiceReceipt] = useState<LocalVoiceCandidateResult>()
   const [reviewFeed, setReviewFeed] = useState<YimengElementReviewFeedResponse>()
   const [reviewError, setReviewError] = useState<string>()
   const [reviewBusy, setReviewBusy] = useState<'comment' | 'decision'>()
@@ -1517,6 +1519,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
       ? undefined
       : readLocalReferenceQualificationRecovery(projectId, elementKind, targetId))
     setQualificationReceipt(undefined)
+    setLocalVoiceReceipt(undefined)
   }, [elementKind, projectId, targetId])
 
   useEffect(() => {
@@ -2827,6 +2830,8 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
           targetId={targetId}
           targetName={choices.find(choice => choice.id === targetId)?.name ?? targetId}
           port={port}
+          retainedReceipt={localVoiceReceipt}
+          onReceipt={setLocalVoiceReceipt}
           onStored={async () => { await loadSnapshot(); await onCommitted() }}
         />
       )}
