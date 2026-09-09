@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import { createHash } from 'node:crypto'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -27,12 +28,26 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
     providerCalls: 0, selectionChanged: false, formalApprovalChanged: false }
   const registrationRequest = { projectId: 'p', frameId: 'f', runId: registration.runId,
     assetId: registration.assetId, expectedAssetSha256: registration.assetSha256 }
+  const localBytes = Buffer.alloc(32); localBytes.write('ftyp', 4)
+  const hash = (value: Buffer | string) => createHash('sha256').update(value).digest('hex')
+  const localScope = { projectId: 'p', episodeId: 'e', frameId: 'f' }
+  const localRequest = { ...localScope, idempotencyKey: 'local-video-composition', originalFileName: 'original.mp4',
+    contentBase64: localBytes.toString('base64'), sourceDeclaration: 'local_file_unverified' }
+  const localSha = hash(localBytes)
+  const localReceipt = { schema: 'jason.qingmu-local-video-candidate.v1', ...localScope,
+    assetId: `asset_localvideo_${'a'.repeat(32)}`, takeId: `asset_localvideo_${'a'.repeat(32)}`,
+    idempotencyKey: localRequest.idempotencyKey, originalFileName: localRequest.originalFileName,
+    requestSha256: hash(JSON.stringify({ contentSha256: localSha, episodeId: 'e', frameId: 'f',
+      originalFileName: 'original.mp4', sourceDeclaration: 'local_file_unverified' })),
+    byteSize: 32, mimeType: 'video/mp4', inputSha256: localSha, materializedSha256: localSha,
+    durationSec: 8, width: 1280, height: 720, hasAudio: true, sourceDeclaration: 'local_file_unverified',
+    rightsStatus: 'not_recorded', selectionStatus: 'Unselected', isSelected: false, providerCalls: 0, generationQueued: false }
   const requests: { url: string | undefined; method: string | undefined; authorization: string | undefined; body: string }[] = []
   const upstream = createServer(async (req, res) => {
     let body = ''
     for await (const chunk of req) body += String(chunk)
     requests.push({ url: req.url, method: req.method, authorization: req.headers.authorization, body })
-    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(req.url?.includes('/review-registration') ? registration : req.url?.endsWith('/prepare') ? prepared
+    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(req.url?.includes('/local-video-candidates') ? localReceipt : req.url?.includes('/review-registration') ? registration : req.url?.endsWith('/prepare') ? prepared
       : req.url?.includes('/materials') ? materialState : req.url?.includes('/runs') ? runResponse : req.url?.endsWith('/quote') ? quoteResponse : req.url?.includes('/drafts/') ? savedDraft : response))
   })
   await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve))
@@ -133,6 +148,18 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
     expect(requests.slice(-2).map(r => r.method)).toEqual(['POST', 'GET'])
     expect(requests.slice(-2).every(r => r.authorization === 'Bearer fixture-owner-token')).toBe(true)
     expect(requests.at(-2)?.body).toBe(JSON.stringify({ expectedAssetSha256: registration.assetSha256 }))
+    for (const [method, payload] of [
+      ['uploadLocalVideoCandidate', localRequest],
+      ['recoverLocalVideoCandidate', { ...localScope, idempotencyKey: localRequest.idempotencyKey, requestSha256: localReceipt.requestSha256 }],
+    ] as const) {
+      const imported = await fetch(`http://127.0.0.1:${ctx.webServer.port}/qingmu-yimeng-command/${method}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ type: 'client-request', rpcId: method, method, payload }),
+      })
+      expect((await imported.json()).result).toEqual({ ok: true, value: localReceipt })
+    }
+    expect(requests.slice(-2).map(r => r.method)).toEqual(['POST', 'GET'])
+    expect(requests.at(-1)?.body).toBe('')
   } finally {
     await ctx.fiber.dispose(); upstream.closeAllConnections()
     await new Promise<void>(resolve => upstream.close(() => { resolve() }))

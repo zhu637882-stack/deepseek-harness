@@ -5,6 +5,7 @@ import type { QingmuCockpitKey } from './locales.ts'
 import type { AutomaticPlanningShot } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import { TakePreviewPlayer } from './TakePreviewPlayer.tsx'
 import { TakeThumbnail } from './TakeThumbnail.tsx'
+import { LocalVideoCandidateUpload } from './LocalVideoCandidateUpload.tsx'
 import { ShootingFirstFrame } from './ShootingFirstFrame.tsx'
 import { ShootingFirstFrameHistory } from './ShootingFirstFrameHistory.tsx'
 import { createFirstFrameSelectionClient, type FirstFrameHistoryCandidate } from './first-frame-selection.ts'
@@ -50,13 +51,24 @@ interface Props {
   readonly directorAssistant: ReactNode
   readonly onProductionAction?: (action: 'first-frame' | 'select-frame' | 'video', shotId: string) => void
   readonly port: Pick<QingmuYimengPort, 'takeVersions' | 'takePreview' | 'selectTakeVersion' | 'recoverTakeVersionSelection'>
-    & Partial<Pick<QingmuYimengPort, 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning'>>
+    & Partial<Pick<QingmuYimengPort,
+      'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning'
+      | 'uploadLocalVideoCandidate' | 'recoverLocalVideoCandidate'>>
   readonly t: (key: QingmuCockpitKey) => string
   /** Isolated visual fixture for UI tests only; production does not infer task state from loading. */
   readonly testState?: ShootingReviewState
 }
 function usable(version: YimengTakeVersion | undefined): version is YimengTakeVersion & { readonly outputSha256: string } {
   return version !== undefined && version.outputSha256 !== null && version.outputBindingStatus === 'verified'
+}
+function isLocalVideo(version: YimengTakeVersion): boolean {
+  return version.source === 'local'
+}
+function hasLocalVideoPort(port: Props['port']): port is Props['port'] & {
+  uploadLocalVideoCandidate: NonNullable<QingmuYimengPort['uploadLocalVideoCandidate']>
+  recoverLocalVideoCandidate: NonNullable<QingmuYimengPort['recoverLocalVideoCandidate']>
+} {
+  return typeof port.uploadLocalVideoCandidate === 'function' && typeof port.recoverLocalVideoCandidate === 'function'
 }
 export function localHeroUrl(source: string | undefined, assetId: string | undefined): string | undefined {
   try {
@@ -147,6 +159,13 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
     setInspectedFrame({ key: mediaPaneKey, candidate, url, ownsImagePreview })
   }, [mediaPaneKey])
   const loadedScope = useRef('')
+  const currentVideoScope = `${projectId}:${episodeId}:${current?.shotId ?? ''}`
+  const videoRefreshScope = useRef(currentVideoScope)
+  const videoRefreshGeneration = useRef(0)
+  if (videoRefreshScope.current !== currentVideoScope) {
+    videoRefreshScope.current = currentVideoScope
+    videoRefreshGeneration.current++
+  }
   const [planningShots, setPlanningShots] = useState<readonly AutomaticPlanningShot[]>([])
   const [shotStacks, setShotStacks] = useState<Readonly<Record<string, YimengTakeVersionStackResponse>>>({})
   const frameClient = useMemo(() => createFirstFrameSelectionClient(), [])
@@ -155,9 +174,22 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
   const historyFrameIds = shots.map(shot => shot.shotId).join('\u0000')
   const [historyRefresh, setHistoryRefresh] = useState(0)
   const refreshExistingMedia = useCallback(async () => {
+    if (current === undefined) return
+    const scope = `${projectId}:${episodeId}:${current.shotId}`
+    const generation = ++videoRefreshGeneration.current
     await onCommitted()
     setHistoryRefresh(value => value + 1)
-  }, [onCommitted])
+    if (videoRefreshScope.current !== scope || videoRefreshGeneration.current !== generation) return
+    const refreshed = await port.takeVersions({ projectId, episodeId, frameId: current.shotId })
+    if (videoRefreshScope.current !== scope || videoRefreshGeneration.current !== generation) return
+    if (refreshed.subject.projectId !== projectId || refreshed.subject.episodeId !== episodeId
+      || refreshed.subject.frameId !== current.shotId) return
+    setStack(refreshed)
+    setShotStacks(old => ({ ...old, [current.shotId]: refreshed }))
+    setBrowseId(old => refreshed.subject.versions.some(version => version.takeId === old)
+      ? old : refreshed.subject.selectedTakeId ?? refreshed.subject.versions[0]?.takeId ?? '')
+    setLoad('ready')
+  }, [current, episodeId, onCommitted, port, projectId])
   const [frameHistory, setFrameHistory] = useState<{
     key: string
     /** Undefined is unread, null is a failed read, and an array is the settled candidate list. */
@@ -225,29 +257,38 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
     if (current === undefined) { setStack(undefined); setLoad('failed'); return }
     const controller = new AbortController()
     const scopeKey = [projectId, episodeId, current.shotId].join(':')
+    const generation = ++videoRefreshGeneration.current
     const changedShot = loadedScope.current !== scopeKey
     if (changedShot) { setLoad('loading'); setStack(undefined); setBrowseId(''); loadedScope.current = scopeKey }
     void port.takeVersions({ projectId, episodeId, frameId: current.shotId }, controller.signal).then((value) => {
-      if (controller.signal.aborted || value.subject.projectId !== projectId
+      if (controller.signal.aborted || videoRefreshScope.current !== scopeKey
+        || videoRefreshGeneration.current !== generation || value.subject.projectId !== projectId
         || value.subject.episodeId !== episodeId || value.subject.frameId !== current.shotId) return
       setStack(value)
       setBrowseId(old => !changedShot && value.subject.versions.some(v => v.takeId === old)
         ? old : value.subject.selectedTakeId ?? value.subject.versions[0]?.takeId ?? '')
       setLoad('ready')
-    }).catch(() => { if (!controller.signal.aborted) setLoad('failed') })
+    }).catch(() => {
+      if (!controller.signal.aborted && videoRefreshScope.current === scopeKey
+        && videoRefreshGeneration.current === generation) setLoad('failed')
+    })
     return () => controller.abort()
-  }, [current, episodeId, port, projectId])
+  }, [current?.shotId, episodeId, port, projectId])
   useEffect(() => {
     if (current === undefined) return
     const scope = { projectId, episodeId, frameId: current.shotId }
     const marker = readTakeVersionSelectionMarker(scope)
     if (marker.status !== 'ready') return
+    const scopeKey = `${projectId}:${episodeId}:${current.shotId}`
     void port.recoverTakeVersionSelection(takeVersionSelectionRequestFromMarker(marker.marker)).then((result) => {
       if (result.status !== 'committed' || result.result === null) return
       if (!takeSelectionReceiptMatches(result.result, marker.marker)) return
       if (!clearTakeVersionSelectionMarker(scope, marker)) return
+      if (videoRefreshScope.current !== scopeKey) return
+      const generation = ++videoRefreshGeneration.current
       return port.takeVersions(scope).then((value) => {
-        if (value.subject.projectId === projectId && value.subject.episodeId === episodeId
+        if (videoRefreshScope.current === scopeKey && videoRefreshGeneration.current === generation
+          && value.subject.projectId === projectId && value.subject.episodeId === episodeId
           && value.subject.frameId === current.shotId) setStack(value)
       })
     }).catch(() => { /* retain exact marker; a later visit can only recover it */ })
@@ -299,6 +340,21 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
     || (planningShots.find(item => item.id === current.shotId)?.firstFrameCandidateCount ?? 0) > 0
   const productionAction = shootingPrimary(
     Boolean(heroFrame) || hasFrameCandidate, Boolean(heroFrame), Boolean(visibleStack?.subject.selectedTakeId))
+  const refreshLocalVideoCandidate = async (receipt: { readonly takeId: string; readonly frameId: string }): Promise<void> => {
+    const scope = `${projectId}:${episodeId}:${activeShot.shotId}`
+    const generation = ++videoRefreshGeneration.current
+    if (receipt.frameId !== activeShot.shotId || videoRefreshScope.current !== scope) return
+    const refreshed = await port.takeVersions({ projectId, episodeId, frameId: activeShot.shotId })
+    if (videoRefreshScope.current !== scope || videoRefreshGeneration.current !== generation) return
+    if (refreshed.subject.projectId !== projectId || refreshed.subject.episodeId !== episodeId
+      || refreshed.subject.frameId !== activeShot.shotId) throw new Error('candidate refresh scope mismatch')
+    setStack(refreshed)
+    setShotStacks(old => ({ ...old, [activeShot.shotId]: refreshed }))
+    setBrowseId(receipt.takeId)
+    setLoad('ready')
+    if (videoRefreshScope.current !== scope || videoRefreshGeneration.current !== generation) return
+    await onCommitted()
+  }
   async function adoptFirstFrame(candidate: FirstFrameHistoryCandidate): Promise<void> {
     if (adoptingId !== undefined || !storyboardRevisionId) return
     setAdoptingId(candidate.assetId); setAdoptError('')
@@ -375,17 +431,20 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
                 error: '候选暂时无法读取，请刷新重试。',
                 ariaLabel: `镜 ${current.frameNo} 首帧候选`,
               }} /></div>
-              : usable(browsed) ? <div className={css.player}><TakePreviewPlayer request={{
-                projectId, episodeId, frameId: current.shotId, takeId: browsed.takeId,
-                expectedOutputSha256: browsed.outputSha256,
-              }} load={port.takePreview} t={t} onPreviewReady={onPreviewReady} autoLoad /></div>
+              : usable(browsed) ? <div className={css.player}>
+                {isLocalVideo(browsed) && browsed.originalFileName && <span className={css.localPreviewLabel}>
+                  本地导入 · {browsed.originalFileName} · 来源待核实 · 暂不可采用
+                </span>}<TakePreviewPlayer request={{
+                  projectId, episodeId, frameId: current.shotId, takeId: browsed.takeId,
+                  expectedOutputSha256: browsed.outputSha256,
+                }} load={port.takePreview} t={t} onPreviewReady={onPreviewReady} autoLoad /></div>
                 : heroUrl !== undefined ? <div className={css.frame}><span>已选首帧</span><img src={heroUrl} alt={`镜 ${current.frameNo} 已选首帧`} onLoad={() => { setHeroMediaUrl(heroUrl); setHeroError(false) }} onError={() => setHeroError(true)} />{heroError && <p role="alert">首帧暂时无法显示，请刷新后再试。</p>}</div>
                   : load === 'ready' && projection?.director.shotRelations.storyboardRevision?.revisionId ? <ShootingFirstFrameHistory key={`${mediaPaneKey}:${projection.director.shotRelations.storyboardRevision.revisionId}`} scope={{ projectId, episodeId, frameId: current.shotId, storyboardRevisionId: projection.director.shotRelations.storyboardRevision.revisionId }} onCommitted={refreshExistingMedia} onCandidatePreview={onCandidatePreview} />
                     : <div className={css.canvas}><span>镜 {current.frameNo}</span><strong>{current.title}</strong>
                       <small>{message(state, load)}</small></div>}
           {!firstFrameOpen && !historyOpen && <>{testState !== undefined && <p className={css.mediaNotice} role="status">隔离演练状态，不代表真实任务，未提交生成。</p>}{load === 'loading' && <p className={css.mediaNotice} role="status">{message(state, load)}</p>}{load === 'failed' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}{state === 'failed' && load === 'ready' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}</>}
         </div>
-        <div className={css.candidates} aria-label="候选画面">{(!historyOpen && !firstFrameOpen ? versions : []).map(version => <button key={version.takeId} type="button" aria-pressed={!firstFrameOpen && !historyOpen && version.takeId === browseId} onClick={() => { showMediaPane('takes'); setBrowseId(version.takeId); if (version.takeId !== browseId) setMediaUrl(undefined) }}>{usable(version) ? <TakeThumbnail request={{ projectId, episodeId, frameId: current.shotId, takeId: version.takeId, expectedOutputSha256: version.outputSha256 }} load={port.takePreview} className={css.candidateThumb} alt={`视频候选 v${version.versionOrdinal} · 视频第一帧`} /> : <span className={css.videoIcon}>素材尚不可用</span>}<span>视频候选 v{version.versionOrdinal}</span><strong>{version.isSelected ? '当前选用' : version.qualityStatus === 'failed' ? '检查未通过' : version.qualityStatus === 'passed' ? '待你审看' : '等待检查'}</strong></button>)}
+        <div className={css.candidates} aria-label="候选画面">{(!historyOpen && !firstFrameOpen ? versions : []).map(version => <button className={isLocalVideo(version) ? css.localCandidate : undefined} key={version.takeId} type="button" aria-pressed={!firstFrameOpen && !historyOpen && version.takeId === browseId} onClick={() => { showMediaPane('takes'); setBrowseId(version.takeId); if (version.takeId !== browseId) setMediaUrl(undefined) }}>{usable(version) ? <TakeThumbnail request={{ projectId, episodeId, frameId: current.shotId, takeId: version.takeId, expectedOutputSha256: version.outputSha256 }} load={port.takePreview} className={css.candidateThumb} alt={`视频候选 v${version.versionOrdinal} · 视频第一帧`} /> : <span className={css.videoIcon}>素材尚不可用</span>}<span>{isLocalVideo(version) ? '本地导入视频' : `视频候选 v${version.versionOrdinal}`}</span>{isLocalVideo(version) && version.originalFileName && <small className={css.localFileName}>{version.originalFileName}</small>}<strong>{isLocalVideo(version) ? '本地导入，来源待核实，暂不可采用' : version.isSelected ? '当前选用' : version.qualityStatus === 'failed' ? '检查未通过' : version.qualityStatus === 'passed' ? '待你审看' : '等待检查'}</strong></button>)}
           {!firstFrameOpen && !historyOpen && imageShotCandidates.slice().reverse().map(candidate =>
             <div key={candidate.assetId} className={css.candidateCard}>
               <button type="button" aria-pressed={browsedImage?.assetId === candidate.assetId} onClick={() => { setBrowseId(''); setImageBrowse({ key: mediaPaneKey, assetId: candidate.assetId }) }}>
@@ -394,8 +453,11 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
               {!candidate.isSelected && candidate.selectionStatus === 'Unselected' && candidate.qualityStatus === 'passed' && <button type="button" className={css.adoptButton} disabled={adoptingId !== undefined} onClick={() => { void adoptFirstFrame(candidate) }}>{adoptingId === candidate.assetId ? '正在设为首选…' : '就用这张'}</button>}
             </div>)}
           {!firstFrameOpen && !historyOpen && versions.length === 0 && heroUrl && !imageShotCandidates.some(candidate => candidate.isSelected) && <button type="button" aria-pressed="true" onClick={() => showMediaPane('takes')}><img className={css.candidateThumb} src={heroUrl} alt="当前首帧候选" /><span>原选用首帧</span><strong>已选用</strong></button>}
+          {!firstFrameOpen && !historyOpen && hasLocalVideoPort(port) && <LocalVideoCandidateUpload
+            key={currentVideoScope} projectId={projectId} episodeId={episodeId} frameId={current.shotId} port={port}
+            onStored={refreshLocalVideoCandidate} />}
         </div>
-        {!firstFrameOpen && !historyOpen && <p className={css.browseNote} data-state={state}>{versions.length === 0 && load === 'ready' && testState === undefined ? (hasFrameCandidate ? '本镜尚无视频候选，已有首帧和要求仍保留。' : requirementStatus === 'loading' ? '正在核对本镜已保存的首帧要求；核对完成前不会生成。' : requirementsReady ? '本镜还没有首帧。点下方「生成首帧」开始；画面要求在右栏可改。' : '缺少本镜已保存的首帧要求。请返回分镜核对后再生成。') : message(state, load)}<span>单击候选只切换中区媒体，不会改变选用。</span></p>}
+        {!firstFrameOpen && !historyOpen && <p className={css.browseNote} data-state={state}>{versions.some(isLocalVideo) ? '本地导入候选来源待核实，仅供本镜对比，暂不可采用。' : versions.length === 0 && load === 'ready' && testState === undefined ? (hasFrameCandidate ? '本镜尚无视频候选，已有首帧和要求仍保留。' : requirementStatus === 'loading' ? '正在核对本镜已保存的首帧要求；核对完成前不会生成。' : requirementsReady ? '本镜还没有首帧。点下方「生成首帧」开始；画面要求在右栏可改。' : '缺少本镜已保存的首帧要求。请返回分镜核对后再生成。') : message(state, load)}<span>单击候选只切换中区媒体，不会改变选用。</span></p>}
         {selectionError && <p role="alert">{selectionError}</p>}
         {adoptError && <p role="alert">{adoptError}</p>}
         <div className={css.reworkActions} aria-label="本镜重做操作">

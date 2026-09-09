@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createHash, webcrypto } from 'node:crypto'
+import type { YimengTakeVersionStackResponse } from '../src/client/contracts.ts'
+import { takeVersionStackFixture } from '../../qingmu-yimeng-read-adapter/tests/take-version-fixture.ts'
 import { localHeroUrl, shootingPosterVersion, shootingPrimary, shootingTitle, ShootingReviewWorkspace } from '../src/client/ShootingReviewWorkspace.tsx'
 import { AutomaticFrameRequirementsEditor } from '../src/client/AutomaticFrameRequirementsEditor.tsx'
 import { takeVersionSelectionRequestFromMarker } from '../src/client/take-version-recovery.ts'
@@ -232,6 +235,92 @@ describe('ShootingReviewWorkspace', () => {
   it('keeps an empty real candidate list neutral instead of calling it failed', async () => {
     render(<ShootingReviewWorkspace projectName="落日公路" episodeName="第 1 集" projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" projection={projection} selectedShotId="frame_34b3741b1f0a" onSelectShotId={vi.fn()} onNavigate={vi.fn()} directorAssistant={null} t={key => key} port={{ takePreview: vi.fn(), selectTakeVersion: vi.fn(), recoverTakeVersionSelection: vi.fn(), takeVersions: vi.fn(async () => ({ subject: { projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', frameId: 'frame_34b3741b1f0a', selectedTakeId: null, versions: [] }, capabilities: { canSelect: false }, stackSnapshotSha256: 'a'.repeat(64) })) } as never} />)
     await waitFor(() => expect(document.querySelector('[data-state="pending-review"]')).toBeTruthy())
+  })
+
+  it('shows an imported local video in the existing candidate rail but never offers it for adoption', async () => {
+    const candidate = { takeId: 'asset_localvideo_0123456789abcdef0123456789abcdef', versionOrdinal: 1,
+      outputAssetId: 'asset_localvideo_0123456789abcdef0123456789abcdef', outputSha256: 'b'.repeat(64),
+      outputBindingStatus: 'verified', qualityStatus: 'pending', isSelected: false, selectionStatus: 'Unselected',
+      canAttemptSelection: false, lineageComplete: false, blockers: ['local_source_unverified'], source: 'local',
+      originalFileName: 'libtv-shot-01.mp4', durationSec: 8 }
+    const scopedPort = { takePreview: vi.fn(() => new Promise(() => {})), selectTakeVersion: vi.fn(),
+      recoverTakeVersionSelection: vi.fn(), uploadLocalVideoCandidate: vi.fn(), recoverLocalVideoCandidate: vi.fn(),
+      takeVersions: vi.fn(async ({ frameId }: { frameId: string }) => ({
+        subject: { projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', frameId,
+          selectedTakeId: null, versions: [candidate] }, capabilities: { canSelect: true }, stackSnapshotSha256: 'a'.repeat(64),
+      })) }
+    render(<ShootingReviewWorkspace projectName="落日公路" episodeName="第 1 集"
+      projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" projection={projection}
+      selectedShotId="frame_34b3741b1f0a" onSelectShotId={vi.fn()} onNavigate={vi.fn()}
+      directorAssistant={null} port={scopedPort as never} t={key => key} />)
+    await screen.findByText('本地导入视频')
+    expect(screen.getByText('libtv-shot-01.mp4')).toBeTruthy()
+    expect(screen.getByText('本地导入，来源待核实，暂不可采用')).toBeTruthy()
+    expect(screen.getByText('本地导入候选来源待核实，仅供本镜对比，暂不可采用。')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '采用这条视频' })).toBeNull()
+  })
+
+  it('does not let an old initial Take read overwrite a newer local-import refresh', async () => {
+    vi.stubGlobal('crypto', webcrypto)
+    const bytes = Uint8Array.from([0, 0, 0, 16, 102, 116, 121, 112, 105, 115, 111, 109, 0, 0, 0, 0])
+    const file = new File([bytes], 'libtv-shot-01.mp4', { type: 'video/mp4' })
+    Object.defineProperty(file, 'arrayBuffer', { value: async () => bytes.buffer.slice(0) })
+    let resolveInitial!: (value: YimengTakeVersionStackResponse) => void
+    const initial = new Promise<YimengTakeVersionStackResponse>((resolve) => { resolveInitial = resolve })
+    const base = takeVersionStackFixture({ projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', frameId: 'frame_34b3741b1f0a' })
+    const old = { ...base.subject.versions[0]!, takeId: 'old-take', outputAssetId: 'old-asset', outputSha256: 'a'.repeat(64),
+      canAttemptSelection: false, lineageComplete: false, blockers: ['local_source_unverified'], source: 'local' as const, originalFileName: 'old-initial.mp4' }
+    const fresh = { ...old, takeId: 'asset_localvideo_0123456789abcdef0123456789abcdef', outputAssetId: 'asset_localvideo_0123456789abcdef0123456789abcdef',
+      outputSha256: 'b'.repeat(64), originalFileName: 'libtv-shot-01.mp4' }
+    const oldStack: YimengTakeVersionStackResponse = {
+      ...base,
+      subject: { ...base.subject, selectedTakeId: null, versions: [old] },
+    }
+    const freshStack: YimengTakeVersionStackResponse = {
+      ...base,
+      subject: { ...base.subject, selectedTakeId: null, versions: [fresh] },
+    }
+    let uploaded = false
+    let reads = 0
+    const takeVersions = vi.fn(async ({ frameId }: { frameId: string }) => {
+      reads += 1
+      if (!uploaded) return initial
+      return { ...freshStack, subject: { ...freshStack.subject, frameId } }
+    })
+    const scopedPort = {
+      takeVersions,
+      takePreview: vi.fn(),
+      selectTakeVersion: vi.fn(),
+      recoverTakeVersionSelection: vi.fn(),
+      recoverLocalVideoCandidate: vi.fn(),
+      uploadLocalVideoCandidate: vi.fn(async (request: {
+        readonly idempotencyKey: string
+        readonly originalFileName: string
+        readonly contentBase64: string
+      }) => {
+        uploaded = true
+        const inputSha256 = createHash('sha256').update(Buffer.from(request.contentBase64, 'base64')).digest('hex')
+        const requestSha256 = createHash('sha256').update(JSON.stringify({ contentSha256: inputSha256,
+          episodeId: 'episode_cd4ffe357df9', frameId: 'frame_34b3741b1f0a', originalFileName: request.originalFileName,
+          sourceDeclaration: 'local_file_unverified' })).digest('hex')
+        return { schema: 'jason.qingmu-local-video-candidate.v1', projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', frameId: 'frame_34b3741b1f0a',
+          assetId: fresh.takeId, takeId: fresh.takeId, idempotencyKey: request.idempotencyKey, requestSha256,
+          originalFileName: request.originalFileName, byteSize: bytes.byteLength, mimeType: 'video/mp4', inputSha256, materializedSha256: inputSha256,
+          durationSec: 8, width: 1280, height: 720, hasAudio: true, sourceDeclaration: 'local_file_unverified', rightsStatus: 'not_recorded',
+          selectionStatus: 'Unselected', isSelected: false, providerCalls: 0, generationQueued: false }
+      }) }
+    const view = render(<ShootingReviewWorkspace projectName="落日公路" episodeName="第 1 集"
+      projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" projection={projection}
+      selectedShotId="frame_34b3741b1f0a" onSelectShotId={vi.fn()} onNavigate={vi.fn()}
+      directorAssistant={null} port={scopedPort as never} t={key => key} />)
+    const input = view.container.querySelector('input[type=file]') as HTMLInputElement
+    fireEvent.change(input, { target: { files: [file] } })
+    fireEvent.click(await screen.findByRole('button', { name: '导入本镜候选' }))
+    await screen.findByText('本地导入视频')
+    await act(async () => { resolveInitial(oldStack) })
+    expect(screen.queryByText('old-initial.mp4')).toBeNull()
+    expect(screen.getByText('本地导入视频')).toBeTruthy()
+    vi.unstubAllGlobals()
   })
 })
 

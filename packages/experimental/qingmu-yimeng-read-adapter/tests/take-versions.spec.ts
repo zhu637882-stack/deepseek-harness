@@ -35,6 +35,21 @@ describe('Take/version read-only stack', () => {
     expect(normalize(value)).toEqual(value)
   })
 
+  it('keeps an imported filename and forbids invented local generation lineage', () => {
+    const feed = takeVersionStackFixture()
+    const subject = { ...feed.subject, versions: feed.subject.versions.map((v, index) => index === 0 ? v : ({
+      ...v, source: 'local' as const, originalFileName: 'ali-shot-01.mp4',
+      taskId: null, provider: null, model: null, providerTaskId: null, routeKey: null, inputHash: null,
+      lineageComplete: false, canAttemptSelection: false,
+    })) }
+    const value = { ...feed, subject, stackSnapshotSha256: takeVersionSha(subject) }
+    expect(normalize(value)).toEqual(value)
+    for (const name of ['../private.mp4', ' video.mp4', 'video.mp4 ', 'video.mov']) {
+      const tampered = { ...subject, versions: subject.versions.map(v => v.source === 'local' ? { ...v, originalFileName: name } : v) }
+      expect(() => normalize({ ...feed, subject: tampered, stackSnapshotSha256: takeVersionSha(tampered) })).toThrow()
+    }
+  })
+
   it('keeps an incomplete-lineage candidate visible but rejects a selectable projection', () => {
     const feed = structuredClone(takeVersionStackFixture()) as unknown as MutableObject
     const subject = mutable(feed.subject)

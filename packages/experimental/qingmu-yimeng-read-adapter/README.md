@@ -184,3 +184,8 @@ The `referenceVideoQuote` read prices the exact saved draft through Writer and P
 The project asset feed now identifies the actual signed media record through `preview_media_id`. Asset IDs and media IDs are independent. Reference catalogs match that exact media path, signature and expiry before rewriting to the configured Writer origin; missing or mismatched media metadata yields a card without a preview URL.
 
 Take stacks accept `source: reference` for candidates registered from a reference-video run. Their existing task and output SHA remain the lineage source; registration does not make a candidate selected or quality-approved. The shared types expose the exact registration request and receipt used by the command adapter.
+
+Take stacks also accept `source: local` with a receipt-verified `originalFileName` (or null when
+unavailable). Local files use the same private preview and output SHA checks. Their filenames
+do not imply a Provider, and they remain ineligible for production adoption while source lineage
+is unverified. Other Take source contracts keep their existing field shape.

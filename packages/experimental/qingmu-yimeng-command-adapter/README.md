@@ -152,6 +152,13 @@ Native shooting preview accepts an optional preceding first-frame request for ex
 
 ## Reference draft saves
 
+`uploadLocalVideoCandidate` imports an original MP4 into the existing shot Take stack.
+It accepts at most 32 MiB of canonical base64 file bytes, validates the exact scope,
+filename and content SHA, and verifies Writer's byte-preserving receipt.
+`recoverLocalVideoCandidate` sends a bodyless GET using the same scope, key and request SHA.
+Unknown outcomes never cause an automatic upload retry. Both results guarantee zero Provider calls,
+no generation queue and no selection change. An imported file remains an unverified local source.
+
 `saveReferenceVideoDraft` persists one explicitly edited shot draft through the authenticated Writer API and verifies its scope, revision and request SHA through the existing read adapter. Version conflicts and uncertain responses never trigger automatic resubmission. It changes no production selection and calls no Provider.
 
 `queueReferenceVideo` submits one saved draft with its current quote, exact price cap and explicit confirmation. Writer atomically records the immutable request, TaskCenter reservation and any credit hold. The worker rechecks sources and pricing before dispatch through the existing ProviderGate/outbox. Response uncertainty retains the same request ID; the Host never resubmits automatically. The result is a candidate task, with no video adoption or human signoff.

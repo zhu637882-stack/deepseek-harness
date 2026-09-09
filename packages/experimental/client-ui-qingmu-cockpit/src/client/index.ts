@@ -204,6 +204,8 @@ export function apply(ctx: ClientContext): void {
     recoverLocalReferenceCandidate: (request, signal) => command('recoverLocalReferenceCandidate', request, signal),
     readLocalReferenceCandidateContent: (request, signal) => command('readLocalReferenceCandidateContent', request, signal),
     uploadLocalVoiceCandidate: (request, signal) => command('uploadLocalVoiceCandidate', request, signal),
+    uploadLocalVideoCandidate: (request, signal) => command('uploadLocalVideoCandidate', request, signal),
+    recoverLocalVideoCandidate: (request, signal) => command('recoverLocalVideoCandidate', request, signal),
     recoverLocalVoiceCandidate: (request, signal) => command('recoverLocalVoiceCandidate', request, signal),
     readLocalVoiceCandidateContent: (request, signal) => command('readLocalVoiceCandidateContent', request, signal),
     qualifyLocalReferenceCandidate: (request, signal) => command('qualifyLocalReferenceCandidate', request, signal),

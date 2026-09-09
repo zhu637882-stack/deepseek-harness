@@ -185,9 +185,11 @@ function version(
   helpers: TakeVersionHelpers,
 ): YimengTakeSelectionVersion {
   const error = helpers.responseError
-  const item = exact(value, VERSION_FIELDS, `authoritativeStack.versions[${String(ordinal - 1)}]`, error)
+  const local = typeof value === 'object' && value !== null && 'source' in value && value.source === 'local'
+  const fields = local ? [...VERSION_FIELDS, 'originalFileName'] : VERSION_FIELDS
+  const item = exact(value, fields, `authoritativeStack.versions[${String(ordinal - 1)}]`, error)
   const source = item.source
-  if (source !== 'initial' && source !== 'regenerate' && source !== 'repair' && source !== 'segment' && source !== 'reference') {
+  if (source !== 'initial' && source !== 'regenerate' && source !== 'repair' && source !== 'segment' && source !== 'reference' && source !== 'local') {
     throw error('authoritativeStack version source mismatch')
   }
   const binding = item.outputBindingStatus
@@ -215,6 +217,7 @@ function version(
     takeId: id(item.takeId, 'authoritativeStack.takeId', error),
     versionOrdinal: integer(item.versionOrdinal, 1, 'authoritativeStack.versionOrdinal', error),
     source,
+    ...(local ? { originalFileName: item.originalFileName === null ? null : text(item.originalFileName, 128, 'originalFileName', error, true) } : {}),
     role: text(item.role, 1024, 'authoritativeStack.role', error),
     createdAt: helpers.requireTimestamp(
       text(item.createdAt, 128, 'authoritativeStack.createdAt', error, true),
@@ -244,9 +247,13 @@ function version(
     lineageComplete: item.lineageComplete,
     canAttemptSelection: item.canAttemptSelection,
   }
+  if (result.originalFileName && (/[/\\\u0000-\u001f]/u.test(result.originalFileName)
+    || result.originalFileName.trim() !== result.originalFileName || !/\.mp4$/iu.test(result.originalFileName))) {
+    throw error('local video filename invalid')
+  }
   const qualityPassed = result.qualityStatus === 'passed' ? true
     : result.qualityStatus === 'failed' ? false : null
-  const lineageComplete = result.taskId !== null && result.provider !== null && result.model !== null
+  const lineageComplete = result.source !== 'local' && result.taskId !== null && result.provider !== null && result.model !== null
     && result.providerTaskId !== null && result.routeKey !== null && result.inputHash !== null
     && result.outputSha256 !== null && result.outputBindingStatus === 'verified'
   const canAttemptSelection = !result.isSelected && result.selectionStatus === 'Unselected'

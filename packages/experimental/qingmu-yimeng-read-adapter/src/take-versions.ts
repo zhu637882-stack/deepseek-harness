@@ -88,9 +88,11 @@ export function parseTakeVersionReadRequest(payload: unknown): YimengTakeVersion
 }
 
 function version(value: unknown, ordinal: number): YimengTakeVersion {
-  const item = exact(value, VERSION_FIELDS, `versions[${String(ordinal - 1)}]`)
+  const local = typeof value === 'object' && value !== null && 'source' in value && value.source === 'local'
+  const fields = local ? [...VERSION_FIELDS, 'originalFileName'] : VERSION_FIELDS
+  const item = exact(value, fields, `versions[${String(ordinal - 1)}]`)
   const source = item.source
-  if (source !== 'initial' && source !== 'regenerate' && source !== 'repair' && source !== 'segment' && source !== 'reference') {
+  if (source !== 'initial' && source !== 'regenerate' && source !== 'repair' && source !== 'segment' && source !== 'reference' && source !== 'local') {
     throw new Error('take versions: source is invalid')
   }
   const outputBindingStatus = item.outputBindingStatus
@@ -115,6 +117,7 @@ function version(value: unknown, ordinal: number): YimengTakeVersion {
     takeId: id(item.takeId, 'takeId'),
     versionOrdinal: integer(item.versionOrdinal, 'versionOrdinal', 1),
     source,
+    ...(local ? { originalFileName: item.originalFileName === null ? null : text(item.originalFileName, 'originalFileName', 128, true) } : {}),
     role: text(item.role, 'role'),
     createdAt: text(item.createdAt, 'createdAt'),
     updatedAt: text(item.updatedAt, 'updatedAt'),
@@ -138,9 +141,13 @@ function version(value: unknown, ordinal: number): YimengTakeVersion {
     lineageComplete: item.lineageComplete,
     canAttemptSelection: item.canAttemptSelection,
   }
+  if (result.originalFileName && (/[/\\\u0000-\u001f]/u.test(result.originalFileName)
+    || result.originalFileName.trim() !== result.originalFileName || !/\.mp4$/iu.test(result.originalFileName))) {
+    throw new Error('local video filename invalid')
+  }
   const qualityPassed = result.qualityStatus === 'passed' ? true
     : result.qualityStatus === 'failed' ? false : null
-  const lineageComplete = result.taskId !== null && result.provider !== null && result.model !== null
+  const lineageComplete = result.source !== 'local' && result.taskId !== null && result.provider !== null && result.model !== null
     && result.providerTaskId !== null && result.routeKey !== null && result.inputHash !== null
     && result.outputSha256 !== null && result.outputBindingStatus === 'verified'
   const canAttemptSelection = !result.isSelected && result.selectionStatus === 'Unselected'

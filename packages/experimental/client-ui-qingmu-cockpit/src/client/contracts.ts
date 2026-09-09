@@ -699,6 +699,14 @@ export interface QingmuYimengCommandPort {
     request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceContentRequest,
     signal?: AbortSignal,
   ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceCandidateContent>
+  uploadLocalVideoCandidate(
+    request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalVideoUploadRequest,
+    signal?: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalVideoCandidateResult>
+  recoverLocalVideoCandidate(
+    request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalVideoRecoveryRequest,
+    signal?: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalVideoCandidateResult>
   uploadLocalVoiceCandidate(
     request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalVoiceUploadRequest,
     signal?: AbortSignal,

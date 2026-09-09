@@ -181,6 +181,16 @@
   font-size: 11px;
 }
 
+.localBoundary {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--qingmu-accent);
+  background: var(--qingmu-soft);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .take dl,
 .details dl {
   display: grid;

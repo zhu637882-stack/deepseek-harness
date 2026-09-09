@@ -32,6 +32,7 @@ export type {
   LocalReferenceQualificationRequest, LocalReferenceQualificationResult, LocalReferenceUploadRequest,
 } from './local-reference-candidate.ts'
 export type { LocalVoiceUploadRequest, LocalVoiceContentRequest, LocalVoiceCandidateResult, LocalVoiceCandidateContent } from './local-voice-candidate.ts'
+export type { LocalVideoUploadRequest, LocalVideoRecoveryRequest, LocalVideoCandidateResult } from './local-video-candidate.ts'
 
 /** Browser intent for one numbered production-Take attempt; all authority is re-read by Host. */
 export interface YimengQueueProductionTakeIntent {
@@ -1454,7 +1455,9 @@ export type YimengRecoverTakeVersionSelectionRequest = YimengSelectTakeVersionRe
 export interface YimengTakeSelectionVersion {
   readonly takeId: string
   readonly versionOrdinal: number
-  readonly source: 'initial' | 'regenerate' | 'repair' | 'segment' | 'reference'
+  readonly source: 'initial' | 'regenerate' | 'repair' | 'segment' | 'reference' | 'local'
+  /** Original local filename, bound to the import receipt and output bytes. */
+  readonly originalFileName?: string | null
   readonly role: string
   readonly createdAt: string
   readonly updatedAt: string
@@ -3001,6 +3004,8 @@ export interface YimengCommandEndpointMap {
   readonly listLocalReferenceCandidates: import('./local-reference-candidate.ts').LocalReferenceCandidateList
   readonly uploadLocalReferenceCandidate: import('./local-reference-candidate.ts').LocalReferenceCandidateResult
   readonly uploadLocalVoiceCandidate: import('./local-voice-candidate.ts').LocalVoiceCandidateResult
+  readonly uploadLocalVideoCandidate: import('./local-video-candidate.ts').LocalVideoCandidateResult
+  readonly recoverLocalVideoCandidate: import('./local-video-candidate.ts').LocalVideoCandidateResult
   readonly recoverLocalVoiceCandidate: import('./local-voice-candidate.ts').LocalVoiceCandidateResult
   readonly readLocalVoiceCandidateContent: import('./local-voice-candidate.ts').LocalVoiceCandidateContent
   readonly recoverLocalReferenceCandidate: import('./local-reference-candidate.ts').LocalReferenceCandidateResult

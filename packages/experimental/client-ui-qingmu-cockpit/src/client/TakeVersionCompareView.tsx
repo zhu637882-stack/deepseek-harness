@@ -778,8 +778,12 @@ function TakeCard({
   readonly t: (key: QingmuCockpitKey) => string
 }) {
   const selectionAllowed = canSelect && version.canAttemptSelection && version.lineageComplete && !busy
+  const sourceLabel = {
+    initial: '初次生成', regenerate: '重新生成', repair: '局部修复', segment: '分段生成',
+    reference: '参考素材生成', local: version.originalFileName ? `本地导入 · ${version.originalFileName}` : '本地导入 · 来源待核实',
+  }[version.source]
   return <article className={css.take} data-selected={version.isSelected ? 'true' : 'false'}>
-    <header><div><strong>v{version.versionOrdinal}</strong><span>{{ initial: '初次生成', regenerate: '重新生成', repair: '局部修复', segment: '分段生成', reference: '参考素材生成' }[version.source]}</span></div>
+    <header><div><strong>v{version.versionOrdinal}</strong><span>{sourceLabel}</span></div>
       {version.isSelected && <mark>{t('takeVersionSelectedBadge')}</mark>}</header>
     {preview}
     <details open={!readOnly}><summary>{t('takeVersionEvidence')}</summary><dl>
@@ -792,6 +796,7 @@ function TakeCard({
     </dl></details>
     {version.blockers.length > 0 && <div className={css.blockers}><strong>{t('takeVersionBlockers')}</strong>
       <ul>{version.blockers.map(blocker => <li key={blocker}>{blocker}</li>)}</ul></div>}
+    {version.source === 'local' && <p className={css.localBoundary}>本地文件仅供对照：来源待核实，未采用，不能作为正式选用版本。</p>}
     <details><summary>{t('takeVersionEvidence')}</summary><dl>
       <div><dt>{t('takeVersionProvider')}</dt><dd>{version.provider ?? t('unknown')}</dd></div>
       <div><dt>{t('takeVersionModel')}</dt><dd>{version.model ?? t('unknown')}</dd></div>
