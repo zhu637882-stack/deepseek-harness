@@ -9,7 +9,7 @@ import { ShootingFirstFrame } from './ShootingFirstFrame.tsx'
 import { ShootingFirstFrameHistory } from './ShootingFirstFrameHistory.tsx'
 import { createFirstFrameSelectionClient, type FirstFrameHistoryCandidate } from './first-frame-selection.ts'
 import { FirstFrameCandidatePreview } from './FirstFrameCandidatePreview.tsx'
-import { AutomaticFrameRequirementsEditor } from './AutomaticFrameRequirementsEditor.tsx'
+import { AutomaticFrameRequirementsEditor, type AutomaticFrameRequirementStatus } from './AutomaticFrameRequirementsEditor.tsx'
 import {
   clearTakeVersionSelectionMarker, createTakeVersionSelectionMarker, readTakeVersionSelectionMarker,
   takeSelectionReceiptMatches, takeVersionSelectionRequestFromMarker, writeTakeVersionSelectionMarker,
@@ -106,6 +106,7 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
   const [stack, setStack] = useState<YimengTakeVersionStackResponse>(); const [load, setLoad] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [browseId, setBrowseId] = useState('')
   const [panel, setPanel] = useState<'requirements' | 'assistant'>('requirements'); const [mediaUrl, setMediaUrl] = useState<string>(); const [heroMediaUrl, setHeroMediaUrl] = useState<string>()
+  const [requirement, setRequirement] = useState<{ readonly key: string; readonly status: AutomaticFrameRequirementStatus }>({ key: '', status: 'loading' })
   const [zoom, setZoom] = useState(false); const [scale, setScale] = useState(1); const [selectionError, setSelectionError] = useState('')
   const [offset, setOffset] = useState({ x: 0, y: 0 }); const [selecting, setSelecting] = useState(false)
   const [heroError, setHeroError] = useState(false)
@@ -118,6 +119,12 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
   const pane = mediaPane.key === mediaPaneKey ? mediaPane.pane : readMediaPane(mediaPaneKey)
   const firstFrameOpen = pane === 'first-frame'
   const historyOpen = pane === 'history'
+  const requirementStatus = requirement.key === mediaPaneKey ? requirement.status : 'loading'
+  const requirementsReady = requirementStatus === 'ready'
+  const onRequirementStatusChange = useCallback((status: AutomaticFrameRequirementStatus) => {
+    setRequirement(previous => previous.key === mediaPaneKey && previous.status === status ? previous : { key: mediaPaneKey, status })
+  }, [mediaPaneKey])
+  const returnToStoryboard = useCallback(() => { onNavigate('shots') }, [onNavigate])
   function showMediaPane(pane: MediaPane): void {
     setMediaPane({ key: mediaPaneKey, pane })
     try { sessionStorage.setItem(mediaPaneKey, pane) } catch { /* Viewing still works when browser storage is unavailable. */ }
@@ -347,7 +354,7 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
         <div className={css.media} data-state={testState ?? (load === 'loading' ? 'loading' : state)}>
           {historyOpen ? <ShootingFirstFrameHistory key={`${mediaPaneKey}:${projection?.director.shotRelations.storyboardRevision?.revisionId}`} scope={{ projectId, episodeId, frameId: current.shotId, storyboardRevisionId: projection?.director.shotRelations.storyboardRevision?.revisionId ?? '' }} onCommitted={refreshExistingMedia} onCandidatePreview={onCandidatePreview} /> : firstFrameOpen ? <ShootingFirstFrame key={mediaPaneKey}
             scope={{ projectId, episodeId, frameId: current.shotId }} onCommitted={refreshExistingMedia}
-            onCandidatePreview={onCandidatePreview} />
+            onCandidatePreview={onCandidatePreview} requirementsReady={requirementsReady} onReturnToStoryboard={returnToStoryboard} />
             : browsedImage !== undefined ? <div className={css.frame}><span>候选浏览 · 不会改变选用</span>
               <FirstFrameCandidatePreview autoLoad request={{ projectId, episodeId, storyboardRevisionId, frameId: current.shotId,
                 assetId: browsedImage.assetId,
@@ -378,19 +385,19 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
             </div>)}
           {!firstFrameOpen && !historyOpen && versions.length === 0 && heroUrl && !imageShotCandidates.some(candidate => candidate.isSelected) && <button type="button" aria-pressed="true" onClick={() => showMediaPane('takes')}><img className={css.candidateThumb} src={heroUrl} alt="当前首帧候选" /><span>原选用首帧</span><strong>已选用</strong></button>}
         </div>
-        {!firstFrameOpen && !historyOpen && <p className={css.browseNote} data-state={state}>{versions.length === 0 && load === 'ready' && testState === undefined ? (hasFrameCandidate ? '本镜尚无视频候选，已有首帧和要求仍保留。' : '本镜还没有首帧。点下方「生成首帧」开始；画面要求在右栏可改。') : message(state, load)}<span>单击候选只切换中区媒体，不会改变选用。</span></p>}
+        {!firstFrameOpen && !historyOpen && <p className={css.browseNote} data-state={state}>{versions.length === 0 && load === 'ready' && testState === undefined ? (hasFrameCandidate ? '本镜尚无视频候选，已有首帧和要求仍保留。' : requirementStatus === 'loading' ? '正在核对本镜已保存的首帧要求；核对完成前不会生成。' : requirementsReady ? '本镜还没有首帧。点下方「生成首帧」开始；画面要求在右栏可改。' : '缺少本镜已保存的首帧要求。请返回分镜核对后再生成。') : message(state, load)}<span>单击候选只切换中区媒体，不会改变选用。</span></p>}
         {selectionError && <p role="alert">{selectionError}</p>}
         {adoptError && <p role="alert">{adoptError}</p>}
         <div className={css.reworkActions} aria-label="本镜重做操作">
           {(firstFrameOpen || historyOpen) && <button type="button" onClick={() => showMediaPane('takes')}>返回候选审看</button>}
-          {!firstFrameOpen && <button className={!historyOpen && !primary && productionAction === 'first-frame' ? css.primary : undefined} type="button" onClick={() => showMediaPane('first-frame')}>{heroFrame || hasFrameCandidate ? '重新生成首帧' : '生成首帧'}</button>}
+          {!firstFrameOpen && (requirementsReady ? <button className={!historyOpen && !primary && productionAction === 'first-frame' ? css.primary : undefined} type="button" onClick={() => showMediaPane('first-frame')}>{heroFrame || hasFrameCandidate ? '重新生成首帧' : '生成首帧'}</button> : <button className={css.linkAction} type="button" onClick={returnToStoryboard}>返回分镜核对要求</button>)}
           {onProductionAction && <button className={!firstFrameOpen && !historyOpen && !primary && productionAction === 'video' ? css.primary : undefined} type="button" onClick={() => onProductionAction('video', current.shotId)}>{versions.length ? '重新生成视频' : '生成视频'}</button>}
           {!historyOpen && <button className={css.linkAction} type="button" onClick={() => showMediaPane('history')}>全部首帧与采用</button>}
           {!firstFrameOpen && !historyOpen && primary && <button className={css.primary} type="button" disabled={selecting} onClick={() => { void selectCurrent() }}>{selecting ? '正在采用候选' : '采用这条视频'}</button>}
         </div>
         {zoom && <div className={css.zoom} role="dialog" aria-modal="true" aria-label="放大画面"><div className={css.zoomToolbar}><button type="button" onClick={closeZoom}>关闭放大查看</button><button type="button" onClick={() => setScale(value => Math.min(3, value + 0.25))}>放大</button><button type="button" onClick={() => setScale(value => Math.max(1, value - 0.25))}>缩小</button><button type="button" onClick={resetZoom}>还原位置</button></div><div className={css.zoomCanvas} tabIndex={0} aria-label="放大预览，方向键移动画面" onKeyDown={(event) => { const step = 40; if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return; event.preventDefault(); setOffset(old => ({ x: old.x + (event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0), y: old.y + (event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0) })) }} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={() => { drag.current = undefined }} onPointerCancel={() => { drag.current = undefined }}>{sourceIsVideo ? <video src={sourceUrl} controls playsInline style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }} /> : sourceUrl !== undefined && <img src={sourceUrl} alt={`镜 ${current.frameNo} 首帧`} style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }} />}</div></div>}
       </main>
-      <aside className={css.inspector}><div className={css.switcher}><button type="button" aria-pressed={panel === 'requirements'} onClick={() => setPanel('requirements')}>当前要求</button><button type="button" aria-label="原生导演助手" aria-pressed={panel === 'assistant'} onClick={() => setPanel('assistant')}>导演助手</button></div>{panel === 'requirements' ? <div className={css.requirements}><h2>镜 {String(current.frameNo).padStart(2, '0')} · 当前要求</h2><h3>对白</h3><p className={css.dialogue}>{dialogue.join(' / ') || '本镜暂无对白'}</p><AutomaticFrameRequirementsEditor projectId={projectId} episodeId={episodeId} shotId={current.shotId} port={port} onCommitted={onCommitted} /></div> : directorAssistant}</aside>
+      <aside className={css.inspector}><div className={css.switcher}><button type="button" aria-pressed={panel === 'requirements'} onClick={() => setPanel('requirements')}>当前要求</button><button type="button" aria-label="原生导演助手" aria-pressed={panel === 'assistant'} onClick={() => setPanel('assistant')}>导演助手</button></div>{panel === 'requirements' ? <div className={css.requirements}><h2>镜 {String(current.frameNo).padStart(2, '0')} · 当前要求</h2><h3>对白</h3><p className={css.dialogue}>{dialogue.join(' / ') || '本镜暂无对白'}</p><AutomaticFrameRequirementsEditor projectId={projectId} episodeId={episodeId} shotId={current.shotId} port={port} onCommitted={onCommitted} onRequirementStatusChange={onRequirementStatusChange} onReturnToStoryboard={returnToStoryboard} /></div> : directorAssistant}</aside>
     </div>
   </section>
 }

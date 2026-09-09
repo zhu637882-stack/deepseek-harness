@@ -27,6 +27,9 @@ const props = () => ({ projectName: '落日公路', episodeName: 'EP1', projectI
     takePreview: vi.fn(async (r: { projectId: string; episodeId: string; frameId: string; takeId: string }) => ({
       ...r, outputSha256: sha, mimeType: 'video/mp4', base64: bytes.toString('base64'),
     })), selectTakeVersion: vi.fn(), recoverTakeVersionSelection: vi.fn(),
+    readScenePlanning: vi.fn(async () => ({ projectId: 'p', episodeId: 'e', scriptRevision: 1, scriptSha256: 'a'.repeat(64),
+      canonicalStoryboard: { revision: 1, sourceHash: 'b'.repeat(64), shots: Array.from({ length: 10 }, (_, i) => ({ id: `f${i + 1}`, imagePromptCn: `镜头 ${i + 1} 已保存要求` })) },
+    })), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn(),
   } as never,
 })
 beforeEach(() => {
@@ -58,7 +61,7 @@ it('opens first-frame history directly, without preparing a video or requiring R
 
 it('restores the first-frame viewing panel after refresh without invoking a production action', async () => {
   const p = props(); const view = render(<ShootingReviewWorkspace {...p} />)
-  fireEvent.click(screen.getByRole('button', { name: '生成首帧' }))
+  fireEvent.click(await screen.findByRole('button', { name: '生成首帧' }))
   view.unmount()
   const second = render(<ShootingReviewWorkspace {...p} />)
   expect(await screen.findByRole('region', { name: '首帧生成' })).toBeTruthy()
@@ -82,7 +85,7 @@ it('exposes rework for every shot without selecting or generating, and candidate
     await waitFor(() => expect(view.container.querySelector('video')?.getAttribute('aria-label')).toContain('v2'))
     fireEvent.click(screen.getByRole('button', { name: '重新生成视频' }))
     expect(p.onProductionAction).toHaveBeenLastCalledWith('video', `f${n}`)
-    fireEvent.click(screen.getByRole('button', { name: '生成首帧' }))
+    fireEvent.click(await screen.findByRole('button', { name: '生成首帧' }))
     expect(screen.getByRole('region', { name: '首帧生成' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '返回候选审看' }))
     fireEvent.click(screen.getByRole('button', { name: /视频候选 v1.*检查未通过/ }))

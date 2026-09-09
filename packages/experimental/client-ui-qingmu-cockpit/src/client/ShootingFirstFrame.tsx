@@ -132,11 +132,14 @@ function attemptMessage(task: Attempt['task'] | undefined): string {
   }
 }
 /** Native image generation. Storyboard confirmation is explicit; media selection remains separate. */
-export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview }: {
+export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview, requirementsReady = true, onReturnToStoryboard }: {
   readonly scope: ShootingFrameScope
   readonly onCommitted?: () => Promise<unknown>
   readonly onCandidatePreview?: (candidate: FirstFrameHistoryCandidate | undefined,
     url: string | undefined, ownsImagePreview?: boolean) => void
+  /** The surrounding shooting workbench has read a saved requirement for this exact shot. */
+  readonly requirementsReady?: boolean
+  readonly onReturnToStoryboard?: () => void
 }) {
   const key = `qingmu:shooting-first-frame:${scope.projectId}:${scope.episodeId}:${scope.frameId}`
   const [preview, setPreview] = useState<Preview>(); const [attempt, setAttempt] = useState<Attempt>()
@@ -168,12 +171,13 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview }: {
   }
   const reviewQuery = new URLSearchParams({ project_id: scope.projectId, episode_id: scope.episodeId, frame_id: scope.frameId })
   useEffect(() => {
+    if (!requirementsReady) return
     const controller = new AbortController()
     void request(`review?${reviewQuery}`, undefined, controller.signal)
       .then((value) => { if (!controller.signal.aborted) setReview(assertFrameReview(value, scope.frameId)) })
       .catch((cause) => { if (!controller.signal.aborted) setError(String(cause)) })
     return () => controller.abort()
-  }, [key])
+  }, [key, requirementsReady])
   useEffect(() => {
     const controller = new AbortController()
     const load = async () => {
@@ -186,6 +190,7 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview }: {
           if (parsed.stage !== undefined && parsed.stage !== 'prepared' && parsed.stage !== 'submitted') throw new Error('原提交阶段不完整')
           setPreview(prior); if (parsed.stage !== 'prepared') setRequestId(parsed.requestId); return
         }
+        if (!requirementsReady) return
         setBusy(true)
         const value = assertShootingPreview(await request('preview', input, controller.signal), scope)
         if (!controller.signal.aborted) setPreview(value)
@@ -194,7 +199,7 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview }: {
     }
     void load()
     return () => controller.abort()
-  }, [key])
+  }, [key, requirementsReady])
   useEffect(() => {
     if (!requestId) return
     const controller = new AbortController(); let timer: ReturnType<typeof setTimeout> | undefined
@@ -219,7 +224,7 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview }: {
     return () => { controller.abort(); if (timer !== undefined) clearTimeout(timer) }
   }, [key, requestId])
   const submit = async () => {
-    if (lock.current || requestId || !preview || preview.blockers.length || busy || review?.accepted !== true) return
+    if (!requirementsReady || lock.current || requestId || !preview || preview.blockers.length || busy || review?.accepted !== true) return
     lock.current = true; setBusy(true); setError('')
     const id = `shooting-${preview.preflightId}`
     try {
@@ -233,7 +238,7 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview }: {
     finally { lock.current = false; setBusy(false) }
   }
   const resume = async () => {
-    if (busy || lock.current || !requestId || !preview) return
+    if (!requirementsReady || busy || lock.current || !requestId || !preview) return
     lock.current = true; setBusy(true); setError('')
     try {
       const value = assertAttempt(await request('submit', { ...input, candidate_request_id: requestId,
@@ -243,6 +248,7 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview }: {
     finally { lock.current = false; setBusy(false) }
   }
   const prepareAgain = async (rework = false) => {
+    if (!requirementsReady) return
     if (requestId) {
       const query = new URLSearchParams({ ...Object.fromEntries(reviewQuery), request_id: requestId })
       const latest = assertAttempt(await request(`state?${query}`), scope, requestId)
@@ -258,7 +264,7 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview }: {
     setReview(currentReview); setRequestId(''); setAttempt(undefined); lock.current = false; setPreview(fresh)
   }
   const confirm = async () => {
-    if (!review || review.accepted || !review.preflight.technicalReady || confirmingLock.current) return
+    if (!requirementsReady || !review || review.accepted || !review.preflight.technicalReady || confirmingLock.current) return
     confirmingLock.current = true; setConfirming(true); setError('')
     try {
       // Bind the revision already shown to the human. Never fetch-and-sign a newer revision.
@@ -275,6 +281,10 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview }: {
     } catch (cause) { setError(String(cause)) }
     finally { confirmingLock.current = false; setConfirming(false) }
   }
+  if (!requirementsReady) return <section aria-label="首帧生成" className={css.generation}>
+    <div className={css.preview}><div className={css.preparation} role="alert"><h3>先核对本镜分镜要求</h3><p>尚未读取到本镜已保存的首帧要求，因此没有开始预检或生成。</p>{requestId && <p role="status">正在读取已存在首帧任务；不会重新提交。</p>}</div></div>
+    <div className={css.actions}>{onReturnToStoryboard && <button className={css.primary} type="button" onClick={onReturnToStoryboard}>返回分镜核对要求</button>}</div>
+  </section>
   const blocked = submissionBlocker(attempt) ?? submissionBlocker(preview)
   return <section aria-label="首帧生成" className={css.generation} aria-busy={busy}>
     <div className={css.preview}>

@@ -199,3 +199,28 @@ it('refresh after successful confirmation never repeats confirmation or generati
   await screen.findByRole('button',{ name:'生成这张首帧（仅一次）' })
   expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/confirm') || path.endsWith('/submit'))).toHaveLength(0)
 })
+it('does not read a preview or submit when the current shot has no saved requirement', async () => {
+  const returnToStoryboard = vi.fn()
+  const fetcher = vi.fn()
+  vi.stubGlobal('fetch', fetcher)
+  render(<ShootingFirstFrame scope={scope} requirementsReady={false} onReturnToStoryboard={returnToStoryboard} />)
+  expect(screen.getByText('先核对本镜分镜要求')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: '生成这张首帧（仅一次）' })).toBeNull()
+  expect(fetcher).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '返回分镜核对要求' }))
+  expect(returnToStoryboard).toHaveBeenCalledTimes(1)
+})
+it('keeps reading an existing task when requirements are unavailable, without preparing or submitting', async () => {
+  localStorage.setItem(`qingmu:shooting-first-frame:${scope.projectId}:${scope.episodeId}:${scope.frameId}`,
+    JSON.stringify({ preview, requestId: result.requestId }))
+  const fetcher = vi.fn(async (path: string) => {
+    void path
+    return { ok: true, json: async () => ({ ...result, candidate: null, task: { id: 'task-one', kernel_status: 'Succeeded' } }) }
+  })
+  vi.stubGlobal('fetch', fetcher)
+  render(<ShootingFirstFrame scope={scope} requirementsReady={false} />)
+  await screen.findByText('正在读取已存在首帧任务；不会重新提交。')
+  await waitFor(() => expect(fetcher.mock.calls.some(([path]) => path.includes('/state?'))).toBe(true))
+  expect(fetcher.mock.calls.every(([path]) => path.includes('/state?'))).toBe(true)
+  expect(screen.queryByRole('button', { name: '生成这张首帧（仅一次）' })).toBeNull()
+})

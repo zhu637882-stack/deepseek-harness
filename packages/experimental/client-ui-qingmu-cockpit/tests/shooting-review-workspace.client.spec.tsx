@@ -83,6 +83,37 @@ describe('ShootingReviewWorkspace', () => {
     expect(screen.getByText('已选首帧')).toBeTruthy()
   })
 
+  it('blocks first-frame generation until this exact shot has a saved requirement', async () => {
+    const onNavigate = vi.fn()
+    render(<ShootingReviewWorkspace projectName="落日公路" episodeName="第 1 集" projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" projection={projection}
+      selectedShotId="frame_34b3741b1f0a" onSelectShotId={vi.fn()} onNavigate={onNavigate} directorAssistant={null} port={port} t={key => key} />)
+    const returnButtons = await screen.findAllByRole('button', { name: '返回分镜核对要求' })
+    const returnButton = returnButtons[0]
+    if (returnButton === undefined) throw new Error('Missing storyboard return action')
+    expect(screen.queryByRole('button', { name: '生成首帧' })).toBeNull()
+    fireEvent.click(returnButton)
+    expect(onNavigate).toHaveBeenCalledWith('shots')
+  })
+
+  it('does not carry a prior shot requirement into the next shot', async () => {
+    const readyOnlyPort = {
+      takeVersions: vi.fn(() => new Promise(() => {})), takePreview: vi.fn(),
+      selectTakeVersion: vi.fn(), recoverTakeVersionSelection: vi.fn(),
+      readScenePlanning: vi.fn(async () => ({
+        projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', scriptRevision: 1, scriptSha256: 'a'.repeat(64),
+        canonicalStoryboard: { revision: 1, sourceHash: 'b'.repeat(64), shots: [{ id: 'frame_34b3741b1f0a', imagePromptCn: '仅首镜已保存要求' }] },
+      })), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn(),
+    } as never
+    const view = render(<ShootingReviewWorkspace projectName="落日公路" episodeName="第 1 集" projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" projection={projection}
+      selectedShotId="frame_34b3741b1f0a" onSelectShotId={vi.fn()} onNavigate={vi.fn()} directorAssistant={null} port={readyOnlyPort} t={key => key} />)
+    expect(await screen.findByRole('button', { name: '重新生成首帧' })).toBeTruthy()
+    view.rerender(<ShootingReviewWorkspace projectName="落日公路" episodeName="第 1 集" projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" projection={projection}
+      selectedShotId="frame-7" onSelectShotId={vi.fn()} onNavigate={vi.fn()} directorAssistant={null} port={readyOnlyPort} t={key => key} />)
+    expect(screen.queryByRole('button', { name: '重新生成首帧' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '生成首帧' })).toBeNull()
+    expect((await screen.findAllByRole('button', { name: '返回分镜核对要求' })).length).toBeGreaterThan(0)
+  })
+
   it('changes the active Shot only through the Shot list and switches to the native assistant', () => {
     const onSelectShotId = vi.fn()
     const view = render(<ShootingReviewWorkspace projectName="落日公路" episodeName="第 1 集" projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" projection={projection}

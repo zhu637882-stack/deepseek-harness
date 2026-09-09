@@ -25,6 +25,7 @@
     "packages/*/*/tests/**/*.client.ts",
     // Cordis-free synthetic evidence shared by Host and client continuity tests.
     "packages/experimental/qingmu-yimeng-read-adapter/tests/continuity-fixture.ts",
+    "packages/experimental/qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts",
     "packages/experimental/qingmu-yimeng-read-adapter/tests/selected-video-review-fixture.ts",
     "packages/experimental/qingmu-yimeng-read-adapter/tests/shot-finding-fixture.ts",
     "packages/experimental/qingmu-yimeng-read-adapter/tests/take-acceptance-fixture.ts",

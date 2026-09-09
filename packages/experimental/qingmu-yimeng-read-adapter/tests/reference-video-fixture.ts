@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { ReferenceVideoPreviewRequest } from '../src/reference-video-types.ts'
+import type { ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse, ReferenceVideoQuoteResponse } from '../src/reference-video-types.ts'
 export function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
@@ -22,11 +22,11 @@ const body = {
     { type: 'reference_audio', url: 'https://owned.test/voice' },
     { type: 'reference_image', url: 'https://owned.test/cafe' },
   ] }, parameters: { ...request.parameters, watermark: false },
-}
-export const response = {
+} as const
+export const response: ReferenceVideoPreviewResponse = {
   schema: 'jason.reference-video-request-preview.v1', projectId: 'p', frameId: 'f', body,
   referenceMapping: request.bindings.map((binding, index) => ({ ...binding, mediaIndex: index,
-    mediaType: body.input.media[index]!.type, alias: ['图1', '音频1', '图2'][index] })),
+    mediaType: body.input.media[index]!.type, alias: ['图1', '音频1', '图2'][index]! })),
   requestBodySha256: createHash('sha256').update(canonical(body)).digest('hex'), sourceSha256: 'f'.repeat(64),
   readOnly: true, providerCalls: 0, databaseWrites: 0, submissionReady: false, referenceAudioDurationSec: 2,
   remainingChecks: ['source_revalidation_at_dispatch', 'provider_media_reachability', 'generation_authorization'],
@@ -48,8 +48,8 @@ const quoteProjection = {
   cost: { provider: 'dashscope', region: 'cn-beijing', currency: 'CNY', basis: 'catalog_list_price', unit: 'second',
     unitPriceCny: '0.600000', billableSeconds: 8, estimatedCny: '4.800000', candidateCount: 1, maxAttempts: 1, accountDiscountApplied: false,
     pricingSha256: 'a'.repeat(64), pricingCheckedAt: '2026-08-24', sourceUrl: 'https://help.aliyun.com/zh/model-studio/model-pricing' },
-}
-export const quoteResponse = {
+} as const
+export const quoteResponse: ReferenceVideoQuoteResponse = {
   schema: 'jason.reference-video-quote.v1', ...quoteProjection,
   quoteSha256: createHash('sha256').update(canonical(quoteProjection)).digest('hex'), preview: response,
   readOnly: true, providerCalls: 0, databaseWrites: 0, budgetReservedCny: 0, generationQueued: false,

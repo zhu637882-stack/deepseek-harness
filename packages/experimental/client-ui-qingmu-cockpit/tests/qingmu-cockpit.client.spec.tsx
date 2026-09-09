@@ -629,12 +629,24 @@ function shotRelationMethod(request: Parameters<QingmuYimengPort['shotRelationMe
 }
 
 function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
-  return Object.assign({
+  const base: QingmuYimengPort = {
     referenceVideoDraft: vi.fn<QingmuYimengPort['referenceVideoDraft']>(async request => ({ schema: 'jason.reference-video-draft.v1',
       ...request, frameSha256: 'a'.repeat(64), draft: null, mediaTypes: {}, providerCalls: 0, generationQueued: false })),
     referenceVideoRuns: vi.fn<QingmuYimengPort['referenceVideoRuns']>(async request => ({ schema: 'jason.reference-video-runs.v1',
       ...request, items: [], providerCalls: 0 })),
     referenceVideoAssets: vi.fn<QingmuYimengPort['referenceVideoAssets']>(async request => ({ ...request, page: 1, pages: 1, items: [] })),
+    referenceVideoPreview: vi.fn<QingmuYimengPort['referenceVideoPreview']>(async () => {
+      throw new Error('Reference-video preview uses a separate fixture')
+    }),
+    referenceVideoQuote: vi.fn<QingmuYimengPort['referenceVideoQuote']>(async () => {
+      throw new Error('Reference-video quote uses a separate fixture')
+    }),
+    queueReferenceVideo: vi.fn<QingmuYimengPort['queueReferenceVideo']>(async () => {
+      throw new Error('Reference-video queue uses a separate fixture')
+    }),
+    saveReferenceVideoDraft: vi.fn<QingmuYimengPort['saveReferenceVideoDraft']>(async () => {
+      throw new Error('Reference-video draft save uses a separate fixture')
+    }),
     queueProductionTake: vi.fn(async () => { throw new Error('Production Take uses a separate fixture') }),
     readCreativeContract: vi.fn<QingmuYimengPort['readCreativeContract']>(async request => ({ schema: 'jason.qingmu-creative-contract-state.v1' as const,
       projectId: request.projectId, configured: false, locked: false, revision: null, sha256: null,
@@ -892,7 +904,8 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     previewStoryboardCanvas: vi.fn(async () => { throw new Error('storyboard canvas preview is not part of this fixture') }),
     commitStoryboardCanvas: vi.fn(async () => { throw new Error('storyboard canvas commit is not part of this fixture') }),
     recoverStoryboardCanvasCommit: vi.fn(async () => { throw new Error('storyboard canvas recovery is not part of this fixture') }),
-  }, overrides)
+  }
+  return { ...base, ...overrides }
 }
 
 function mount(port: QingmuYimengPort, entryScope?: QingmuEntryScope | null, applicationShell = false) {

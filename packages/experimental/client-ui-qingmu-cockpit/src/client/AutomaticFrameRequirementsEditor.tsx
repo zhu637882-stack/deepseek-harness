@@ -10,6 +10,7 @@ interface Draft {
   readonly pending?: ScenePlanningRequest
 }
 type Port = Partial<Pick<QingmuYimengPort, 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning'>>
+export type AutomaticFrameRequirementStatus = 'loading' | 'ready' | 'missing' | 'unavailable'
 function key(projectId: string, episodeId: string, shotId: string): string { return `qingmu.scene-planning.v1:${projectId}:${episodeId}:automatic-frame:${shotId}` }
 function pendingValid(value: ScenePlanningRequest | undefined,
   projectId: string, episodeId: string, shotId: string): value is ScenePlanningRequest & { readonly request: AutomaticPlanningOperation } {
@@ -26,12 +27,18 @@ function sameScope(state: ScenePlanningState, projectId: string, episodeId: stri
 }
 
 /** The existing automatic-storyboard first-frame edit transaction, compacted for the shooting inspector. */
-export function AutomaticFrameRequirementsEditor({ projectId, episodeId, shotId, port, onCommitted }: {
+export function AutomaticFrameRequirementsEditor({
+  projectId, episodeId, shotId, port, onCommitted, onRequirementStatusChange, onReturnToStoryboard,
+}: {
   readonly projectId: string
   readonly episodeId: string
   readonly shotId: string
   readonly port: Port
   readonly onCommitted: () => Promise<unknown>
+  /** Reports whether this exact shot has an authoritative, saved image requirement. */
+  readonly onRequirementStatusChange?: (status: AutomaticFrameRequirementStatus) => void
+  /** Lets the surrounding workbench take the user back to the storyboard. */
+  readonly onReturnToStoryboard?: () => void
 }) {
   const [state, setState] = useState<ScenePlanningState | null>(null); const [draft, setDraft] = useState<Draft | null>(null)
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [load, setLoad] = useState<'loading' | 'ready' | 'failed'>('loading'); const current = useRef<AbortController>(); const epoch = useRef(0)
@@ -55,8 +62,20 @@ export function AutomaticFrameRequirementsEditor({ projectId, episodeId, shotId,
         setError('尚未找到本镜对应的首帧要求，请到分镜工作区核对后重试。'); setLoad('failed')
       }
     }).catch(() => { if (!controller.signal.aborted && currentEpoch === epoch.current) { setError('首帧要求暂不可读取；不会创建或替换素材。'); setLoad('failed') } })
-    return () => controller.abort()
+    return () => { controller.abort() }
   }, [episodeId, port, projectId, shotId, storageKey])
+  useEffect(() => {
+    let status: AutomaticFrameRequirementStatus = 'loading'
+    if (port.readScenePlanning === undefined || port.saveScenePlanning === undefined || port.recoverScenePlanning === undefined) {
+      status = 'unavailable'
+    } else if (load === 'failed') {
+      status = 'missing'
+    } else if (load === 'ready') {
+      const saved = state?.canonicalStoryboard?.shots?.find(shot => shot.id === shotId)
+      status = saved?.imagePromptCn.trim() ? 'ready' : 'missing'
+    }
+    onRequirementStatusChange?.(status)
+  }, [load, onRequirementStatusChange, port.readScenePlanning, port.recoverScenePlanning, port.saveScenePlanning, shotId, state])
   const update = (next: Draft): void => { try { localStorage.setItem(storageKey, JSON.stringify(next)); setDraft(next) } catch { setError('浏览器无法保留本镜草稿；请复制文字后再保存。') } }
   async function save(recover: boolean): Promise<void> {
     const read = port.readScenePlanning; const save = port.saveScenePlanning; const recoverSave = port.recoverScenePlanning
@@ -93,9 +112,9 @@ export function AutomaticFrameRequirementsEditor({ projectId, episodeId, shotId,
     } catch { if (runEpoch === epoch.current) setError('尚未确认是否保存成功。草稿已保留，请查看原保存结果，不要重复保存。') } finally { if (runEpoch === epoch.current) setBusy(false) }
   }
   if (port.readScenePlanning === undefined || port.saveScenePlanning === undefined || port.recoverScenePlanning === undefined) {
-    return <p role="status">当前无法编辑要求，请刷新后再试。</p>
+    return <div role="status"><p>当前无法读取本镜已保存要求；不会继续生成。</p>{onReturnToStoryboard && <button type="button" onClick={onReturnToStoryboard}>返回分镜核对要求</button>}</div>
   }
-  if (load === 'failed') return <p role="alert">{error}</p>
+  if (load === 'failed') return <div role="alert"><p>{error}</p>{onReturnToStoryboard && <button type="button" onClick={onReturnToStoryboard}>返回分镜核对要求</button>}</div>
   if (state === null || draft === null) return <p role="status">正在读取本镜首帧要求…</p>
   const saved = state.canonicalStoryboard?.shots?.find(shot => shot.id === shotId)
   function savedField(field: 'blocking' | 'cameraAngle'): string { return state?.canonicalStoryboard?.shots?.find(shot => shot.id === shotId)?.[field] ?? '' }

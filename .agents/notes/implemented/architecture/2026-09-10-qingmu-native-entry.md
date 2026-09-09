@@ -16,6 +16,8 @@ Native mode rejects review-only startup because that mode disables the Host. Exi
 
 ## Alternatives considered
 
+The shooting entry derives generation availability from saved requirements for the exact selected shot. Missing or unreadable requirements lead back to storyboarding, and switching shots cannot inherit the preceding shot's readiness. Existing task receipts remain readable independently of permission to submit new generation.
+
 Keeping a Next process just for entry duplicates hosting. A permanent browser-test fixture does not provide ordinary API lifespan, authentication or durable user ownership.
 
 ## Consequences

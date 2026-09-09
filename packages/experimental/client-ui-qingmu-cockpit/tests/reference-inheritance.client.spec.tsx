@@ -31,14 +31,14 @@ function mount() {
 it('inherits references into a second shot without copying its dialogue or model parameters, then saves only the target', async () => {
   const h = mount()
   fireEvent.change(screen.getByRole('spinbutton', { name: '时长（秒）' }), { target: { value: '6' } })
-  fireEvent.click(screen.getByRole('button', { name: '沿用引用', exact: true }))
+  fireEvent.click(screen.getByRole('button', { name: '沿用引用' }))
   await screen.findByText('已沿用镜 01 的 3 项引用；本镜文字和参数保留，尚未保存。')
   expect((screen.getByRole('textbox', { name: '视频描述片段1' }) as HTMLTextAreaElement).value).toBe('陈远：听完，再决定走不走。')
   expect(h.port.saveReferenceVideoDraft).not.toHaveBeenCalled()
   expect(h.port.referenceVideoQuote).not.toHaveBeenCalled()
   expect(h.port.queueReferenceVideo).not.toHaveBeenCalled()
   expect(h.onDirty).toHaveBeenLastCalledWith(true)
-  fireEvent.click(screen.getByRole('button', { name: '保存引用草稿', exact: true }))
+  fireEvent.click(screen.getByRole('button', { name: '保存引用草稿' }))
   await screen.findByText('已保存草稿版本 1。')
   expect(h.port.saveReferenceVideoDraft).toHaveBeenCalledWith(expect.objectContaining({
     projectId: 'p', frameId: 'second', expectedRevision: 0,
@@ -53,7 +53,7 @@ it('preserves a manual edit made while source references are loading', async () 
   await screen.findByText('尚无已存草稿。')
   let finish!: (value: ReferenceVideoDraftResponse) => void
   h.port.referenceVideoDraft.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
-  fireEvent.click(screen.getByRole('button', { name: '沿用引用', exact: true }))
+  fireEvent.click(screen.getByRole('button', { name: '沿用引用' }))
   fireEvent.change(screen.getByRole('textbox', { name: '视频描述片段1' }), { target: { value: '她接稳后，他才松手。' } })
   finish(source)
   expect((await screen.findByRole('alert')).textContent).toContain('读取期间已有新的编辑')
@@ -66,7 +66,7 @@ it('aborts inheritance on unmount so a late response cannot dirty another shot',
   await screen.findByText('尚无已存草稿。')
   let finish!: (value: ReferenceVideoDraftResponse) => void
   h.port.referenceVideoDraft.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
-  fireEvent.click(screen.getByRole('button', { name: '沿用引用', exact: true }))
+  fireEvent.click(screen.getByRole('button', { name: '沿用引用' }))
   const signal = h.port.referenceVideoDraft.mock.calls.at(-1)?.[1]
   h.view.unmount(); finish(source)
   expect(signal?.aborted).toBe(true)
