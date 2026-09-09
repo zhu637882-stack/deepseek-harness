@@ -20,4 +20,4 @@ Status: implemented
 
 ## Consequences
 
-实现沿用现有 DSH 插件和 Writer 适配器，不增加 Agent 循环、工作流引擎或付费提交通道。提交时媒体校验和接入既有生成队列仍是后续工作。草稿持久化不改变选定的 PromptIR 或生产状态。单元与浏览器交互测试覆盖明确输入和过期预览；YAML Loader 组合测试通过真实 Host、Connection RPC，仅替换上游服务。
+实现沿用现有 DSH 插件、Writer、TaskCenter、ProviderGate 和派发 outbox。明确提交单个候选的命令在同一事务绑定已存草稿与准确报价。派发前复核来源和归一化定价；提交前失败时原子释放本地积分预留。远端提交结果不明时保持待核实。成功视频须完整解码，回流后仍是未采用候选。浏览器刷新查回服务端任务，保留结果不明的原命令编号。隔离集成测试覆盖真实 Worker/Gate/媒体链，只模拟 Provider HTTP 和下载；YAML Loader 测试覆盖 Host/Connection。本次没有新增付费调用或生产部署。

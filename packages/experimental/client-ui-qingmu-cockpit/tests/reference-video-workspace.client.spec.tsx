@@ -17,6 +17,8 @@ const result = {
 function mount() {
   let server: ReferenceVideoDraftResponse = { schema: 'jason.reference-video-draft.v1', projectId: 'p', frameId: 'f', frameSha256: 'f'.repeat(64), draft: null, mediaTypes: {}, providerCalls: 0, generationQueued: false }
   const port = {
+    referenceVideoRuns: vi.fn(async () => ({ schema: 'jason.reference-video-runs.v1' as const, projectId: 'p', frameId: 'f', items: [], providerCalls: 0 as const })),
+    queueReferenceVideo: vi.fn(async () => { throw new Error('not called in preview tests') }),
     referenceVideoQuote: vi.fn(async (_request: ReferenceVideoQuoteRequest, _signal?: AbortSignal) => (
       { ...quoteResponse, preview: result } as ReferenceVideoQuoteResponse
     )),
@@ -33,7 +35,7 @@ function mount() {
     }),
   }
   const view = render(<ReferenceVideoWorkspace projectId="p" frameId="f" initialPrompt="陈远说：‘图1不应被替换。’" port={port} />)
-  fireEvent.click(screen.getByText('精确引用 · 阿里视频预览'))
+  fireEvent.click(screen.getByText('精确引用 · 导演稿与候选'))
   return { port, view }
 }
 afterEach(cleanup)
@@ -67,7 +69,7 @@ it('restores saved source tokens, literal dialogue and controls after remount', 
   const saved = port.saveReferenceVideoDraft.mock.calls[0]?.[0]
   view.unmount()
   render(<ReferenceVideoWorkspace projectId="p" frameId="f" initialPrompt="另一段初始文字" port={port} />)
-  fireEvent.click(screen.getByText('精确引用 · 阿里视频预览'))
+  fireEvent.click(screen.getByText('精确引用 · 导演稿与候选'))
   await screen.findByText('此镜头有已存草稿，可恢复后继续编辑。')
   expect(screen.getByRole('button', { name: '保存引用草稿' }).hasAttribute('disabled')).toBe(true)
   fireEvent.click(screen.getByRole('button', { name: '恢复已存草稿（替换当前试排）' }))

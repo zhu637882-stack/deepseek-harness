@@ -7,13 +7,14 @@ import type {
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
 import css from './ReferenceVideoWorkspace.module.css'
+import { ReferenceVideoRuns } from './ReferenceVideoRuns.tsx'
 
 /** One shot's local reference draft; previewing never queues paid work. */
 export interface ReferenceVideoWorkspaceProps {
   readonly projectId: string
   readonly frameId: string
   readonly initialPrompt: string
-  readonly port: Pick<QingmuYimengPort, 'referenceVideoAssets' | 'referenceVideoPreview' | 'referenceVideoDraft' | 'saveReferenceVideoDraft' | 'referenceVideoQuote'>
+  readonly port: Pick<QingmuYimengPort, 'referenceVideoAssets' | 'referenceVideoPreview' | 'referenceVideoDraft' | 'saveReferenceVideoDraft' | 'referenceVideoQuote' | 'referenceVideoRuns' | 'queueReferenceVideo'>
 }
 
 type Chosen = Omit<ReferenceVideoAsset, 'mediaType'> & { readonly bindingToken: string; readonly mediaType: ReferenceVideoAsset['mediaType'] | 'unavailable' }
@@ -175,8 +176,8 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
   }
 
   return <details className={css.workspace}>
-    <summary>精确引用 · 阿里视频预览</summary>
-    <p>选好人物、场景和音色，在描述中插入引用。预览不生成视频、不扣费。</p>
+    <summary>精确引用 · 导演稿与候选</summary>
+    <p>选好人物、场景和音色，在描述中插入引用。保存并核价后，可生成候选视频。</p>
     <div className={css.actions}>
       <button type="button" disabled={saving} onClick={() => { void restore() }}>恢复已存草稿（替换当前试排）</button>
       <button type="button" disabled={saving || !draftState || !sourceAccepted || Boolean(draftState.draft && !draftLoaded) || chosen.length === 0 || chosen.some(item => item.mediaType === 'unavailable' || !item.label.trim())} onClick={() => { void save() }}>{saving ? '保存草稿…' : '保存引用草稿'}</button>
@@ -255,12 +256,13 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
     <button type="button" disabled={busy || saving || !draftState?.draft || savedEpoch !== epoch.current || !sourceAccepted} onClick={() => { void quote() }}>估算已存草稿费用</button>
     {quoteResult && <p role="status">目录价估算 ¥{Number(quoteResult.cost.estimatedCny).toFixed(2)} · 1 个视频 · {quoteResult.cost.billableSeconds} 秒。
       未扣费；未计账户折扣，实际结算以阿里账单为准。<a href={quoteResult.cost.sourceUrl} target="_blank" rel="noreferrer">查看价格</a></p>}
+    <ReferenceVideoRuns projectId={projectId} frameId={frameId} quote={quoteResult} port={port} />
     {error && <p role="alert">{error}</p>}
     {result && <section aria-label="阿里请求预览" aria-live="polite">
       <h4>将发送的描述</h4><p className={css.compiled}>{result.body.input.prompt}</p>
       <p>{result.body.parameters.duration} 秒 · {result.body.parameters.resolution} · {result.body.parameters.ratio}
         {' · '}音色合计 {result.referenceAudioDurationSec} 秒</p>
-      <p>请求已核对。尚未提交生成。</p>
+      <p>这是当前核对的请求。生成进度见候选视频区。</p>
       <details><summary>查看引用版本与完整请求</summary><pre>{JSON.stringify(result, null, 2)}</pre></details>
     </section>}
     <p className={css.note}>引用草稿按镜头保存。刷新后可恢复已保存内容；保存不会采用素材或启动生成。</p>

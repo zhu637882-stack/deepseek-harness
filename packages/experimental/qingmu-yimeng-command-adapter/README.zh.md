@@ -149,3 +149,5 @@ ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只
 ## 引用草稿保存
 
 `saveReferenceVideoDraft` 通过认证 Writer API 保存一份显式编辑的镜头草稿，再通过既有只读适配器校验归属、版本和请求 SHA。版本冲突及不确定回执不会触发自动重提。该操作不修改生产选择、不调用 Provider。
+
+`queueReferenceVideo` 按当前报价、准确费用上限和明确确认提交一份已存草稿。Writer 原子记录不可变输入、TaskCenter 任务及适用的积分预留，Worker 经既有 ProviderGate/outbox 派发前重新核对来源与价格。响应不明时保留原请求编号，Host 不自动重发。返回的是候选任务，不采用视频或推导人工签收。

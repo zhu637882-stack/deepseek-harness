@@ -151,3 +151,5 @@ Native shooting preview accepts an optional preceding first-frame request for ex
 ## Reference draft saves
 
 `saveReferenceVideoDraft` persists one explicitly edited shot draft through the authenticated Writer API and verifies its scope, revision and request SHA through the existing read adapter. Version conflicts and uncertain responses never trigger automatic resubmission. It changes no production selection and calls no Provider.
+
+`queueReferenceVideo` submits one saved draft with its current quote, exact price cap and explicit confirmation. Writer atomically records the immutable request, TaskCenter reservation and any credit hold. The worker rechecks sources and pricing before dispatch through the existing ProviderGate/outbox. Response uncertainty retains the same request ID; the Host never resubmits automatically. The result is a candidate task, with no video adoption or human signoff.

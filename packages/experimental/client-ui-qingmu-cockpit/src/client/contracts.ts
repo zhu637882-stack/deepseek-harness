@@ -1,3 +1,4 @@
+import type { QueueReferenceVideoRequest, ReferenceVideoRun, ReferenceVideoRunsResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { ReferenceVideoQuoteRequest, ReferenceVideoQuoteResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { ReferenceVideoAssetsRequest, ReferenceVideoAssetsResponse, ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { ReferenceVideoDraftResponse, SaveReferenceVideoDraftRequest } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
@@ -579,6 +580,7 @@ export interface QingmuProductionTakeIntent extends Omit<YimengQueueProductionTa
 
 /** Read-only browser-facing methods exposed by the Qingmu Host adapter. */
 export interface QingmuYimengReadPort {
+  referenceVideoRuns(request: { projectId: string; frameId: string }, signal?: AbortSignal): Promise<ReferenceVideoRunsResponse>
   referenceVideoAssets(request: ReferenceVideoAssetsRequest, signal?: AbortSignal): Promise<ReferenceVideoAssetsResponse>
   referenceVideoPreview(request: ReferenceVideoPreviewRequest, signal?: AbortSignal): Promise<ReferenceVideoPreviewResponse>
   referenceVideoQuote(request: ReferenceVideoQuoteRequest, signal?: AbortSignal): Promise<ReferenceVideoQuoteResponse>
@@ -642,6 +644,7 @@ export interface QingmuYimengReadPort {
 
 /** Explicit ChangeSet commands exposed through the separate Host-only command channel. */
 export interface QingmuYimengCommandPort {
+  queueReferenceVideo(request: QueueReferenceVideoRequest, signal?: AbortSignal): Promise<ReferenceVideoRun>
   saveReferenceVideoDraft(request: SaveReferenceVideoDraftRequest, signal?: AbortSignal): Promise<ReferenceVideoDraftResponse>
   queueProductionTake(
     request: QingmuProductionTakeIntent,

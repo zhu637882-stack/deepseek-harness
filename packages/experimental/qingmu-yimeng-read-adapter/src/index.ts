@@ -12,6 +12,7 @@ import z from '@deepseek-ai/schemastery'
 import { normalizeContinuityDelta } from './continuity.ts'
 import { parseReferenceVideoRequest, normalizeReferenceVideoPreview, parseReferenceVideoAssetsRequest, normalizeReferenceVideoAssets } from './reference-video.ts'
 import { parseReferenceVideoQuoteRequest, normalizeReferenceVideoQuote, parseReferenceVideoDraftScope, normalizeReferenceVideoDraft } from './reference-video.ts'
+import { normalizeReferenceVideoRun, normalizeReferenceVideoRuns } from './reference-video-runs.ts'
 import { localMediaUrl } from './local-media-url.ts'
 import { normalizeSelectedVideoReview } from './selected-video-review.ts'
 import { normalizeTakeVersionStack, parseTakeVersionReadRequest } from './take-versions.ts'
@@ -343,7 +344,7 @@ const PROTECTED_ENDPOINTS = new Set([
   'referenceCandidates', 'reviewEvents',
   'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'takeComments', 'takeReviewAuthority', 'takeAcceptance', 'takeTechnicalQc', 'takeApprovalLifecycle', 'evidenceLedger', 'editorialHandoff', 'verifyEpisode', 'shotFindings', 'productionUnits', 'stageSources',
   'lsuPlanSource', 'reworkRouteSource',
-  'takePreview', 'referenceVideoPreview', 'referenceVideoAssets', 'referenceVideoDraft', 'referenceVideoQuote',
+  'referenceVideoRun', 'referenceVideoRuns', 'takePreview', 'referenceVideoPreview', 'referenceVideoAssets', 'referenceVideoDraft', 'referenceVideoQuote',
 ])
 const HUMAN_DECISION_VALUES = new Set<YimengHumanDecisionValue>([
   'approve', 'reject', 'request_changes',
@@ -5203,6 +5204,21 @@ export function createYimengReadHandler(
           + '/episodes/' + encodeURIComponent(request.episodeId)
           + '/frames/' + encodeURIComponent(request.frameId) + '/take-versions'
         normalize = value => normalizeTakeVersionStack(value, request, jcsSha256)
+      } else if (endpoint === 'referenceVideoRun' || endpoint === 'referenceVideoRuns') {
+        const input = requireObject(payload, 'referenceRun')
+        let scope
+        try {
+          const { runId, ...rest } = input
+          scope = parseReferenceVideoDraftScope(rest)
+          if (endpoint === 'referenceVideoRun' && (typeof runId !== 'string' || !/^refvideo_[A-Za-z0-9_-]{16,64}$/u.test(runId))) throw new Error('invalid run')
+          if (endpoint === 'referenceVideoRuns' && runId !== undefined) throw new Error('unexpected run')
+        } catch { throw new InputError('invalid reference run scope') }
+        path = `/api/qingmu/projects/${encodeURIComponent(scope.projectId)}/reference-video/drafts/${encodeURIComponent(scope.frameId)}/runs`
+        if (endpoint === 'referenceVideoRun') path += `/${encodeURIComponent(String(input.runId))}`
+        const request = scope
+        normalize = value => endpoint === 'referenceVideoRun'
+          ? normalizeReferenceVideoRun(value, { ...request, runId: String(input.runId) }, baseUrl)
+          : normalizeReferenceVideoRuns(value, request, baseUrl)
       } else if (endpoint === 'referenceVideoQuote') {
         let request
         try { request = parseReferenceVideoQuoteRequest(payload, canonicalJsonSha256) } catch { throw new InputError('invalid saved reference draft') }

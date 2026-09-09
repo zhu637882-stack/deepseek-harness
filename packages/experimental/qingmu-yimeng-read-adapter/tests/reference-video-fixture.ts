@@ -54,3 +54,16 @@ export const quoteResponse = {
   quoteSha256: createHash('sha256').update(canonical(quoteProjection)).digest('hex'), preview: response,
   readOnly: true, providerCalls: 0, databaseWrites: 0, budgetReservedCny: 0, generationQueued: false,
 }
+
+export const runRequest = {
+  projectId: 'p', frameId: 'f', requestId: 'fixture-run-00000001', expectedRevision: 1,
+  expectedRequestSha256: quoteRequest.draftRequestSha256, quoteSha256: quoteResponse.quoteSha256,
+  authorizationCapCny: quoteResponse.cost.estimatedCny, paidConfirmed: true as const,
+}
+export const runResponse = {
+  schema: 'jason.reference-video-run.v1' as const, projectId: 'p', frameId: 'f',
+  runId: `refvideo_${runRequest.requestId}`, taskId: 'task_fixture', kernelStatus: 'DispatchPending',
+  publicStatus: 'queued' as const, providerTaskId: null, errorCode: null, draftRevision: 1,
+  quoteSha256: quoteResponse.quoteSha256, authorizationCapCny: quoteResponse.cost.estimatedCny,
+  candidates: [], providerCalls: 0 as const, selectionChanged: false as const,
+}

@@ -5343,6 +5343,32 @@ export function createYimengCommandHandler(
         readAttestationKey: readReferenceAttestationKey,
         requireTimestamp: requireRfc3339Timestamp,
       }
+      if (endpoint === 'queueReferenceVideo') {
+        if (dependencies.readYimeng === undefined) return internalError('reference run readback is unavailable')
+        const input = requireObject(payload, 'referenceRun')
+        if (Object.keys(input).some(key => !['projectId', 'frameId', 'requestId', 'expectedRevision', 'expectedRequestSha256', 'quoteSha256', 'authorizationCapCny', 'paidConfirmed'].includes(key))
+          || !['projectId', 'frameId'].every(key => typeof input[key] === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/u.test(String(input[key])))
+          || typeof input.requestId !== 'string' || !/^[A-Za-z0-9_-]{16,64}$/u.test(input.requestId)
+          || !Number.isSafeInteger(input.expectedRevision) || Number(input.expectedRevision) < 1
+          || !['expectedRequestSha256', 'quoteSha256'].every(key => typeof input[key] === 'string' && SHA256.test(String(input[key])))
+          || typeof input.authorizationCapCny !== 'string' || !/^[0-9]{1,3}\.[0-9]{6}$/u.test(input.authorizationCapCny)
+          || Number(input.authorizationCapCny) <= 0 || input.paidConfirmed !== true) throw new InputError('invalid confirmed reference run')
+        const token = normalizeToken(dependencies.readToken())
+        if (token === undefined) return internalError('YIMENG_API_TOKEN is not configured')
+        const { projectId, frameId, ...body } = input
+        const response = await fetchJson(dependencies,
+          `${baseUrl}/api/qingmu/projects/${encodeURIComponent(String(projectId))}/reference-video/drafts/${encodeURIComponent(String(frameId))}/runs`,
+          token, { method: 'POST', body: serializeBody(body) }, timeoutMs, signal)
+        if (!response.ok || signal.aborted) return signal.aborted ? cancelled() : response
+        const readback = await dependencies.readYimeng('referenceVideoRun', {
+          projectId, frameId, runId: `refvideo_${input.requestId}`,
+        }, signal)
+        if (!readback.ok) return readback
+        const run = requireObject(readback.value, 'referenceRun.readback')
+        if (run.draftRevision !== input.expectedRevision || run.quoteSha256 !== input.quoteSha256
+          || run.authorizationCapCny !== input.authorizationCapCny) return internalError('生成提交未确认，请用原请求编号重新查询。')
+        return readback
+      }
       if (endpoint === 'saveReferenceVideoDraft') {
         if (dependencies.readYimeng === undefined) return internalError('reference draft readback is unavailable')
         const input = requireObject(payload, 'referenceDraft')

@@ -145,3 +145,50 @@ export interface ReferenceVideoQuoteResponse {
   readonly budgetReservedCny: 0
   readonly generationQueued: false
 }
+
+/** One explicitly confirmed candidate request; replay uses this same identifier. */
+export interface QueueReferenceVideoRequest {
+  readonly projectId: string
+  readonly frameId: string
+  readonly requestId: string
+  readonly expectedRevision: number
+  readonly expectedRequestSha256: string
+  readonly quoteSha256: string
+  readonly authorizationCapCny: string
+  readonly paidConfirmed: true
+}
+
+/** Queue state and technically decoded candidates, without creative adoption. */
+export interface ReferenceVideoRun {
+  readonly schema: 'jason.reference-video-run.v1'
+  readonly projectId: string
+  readonly frameId: string
+  readonly runId: string
+  readonly taskId: string
+  readonly kernelStatus: string
+  readonly publicStatus: 'queued' | 'running' | 'succeeded' | 'failed' | 'quarantined'
+  readonly providerTaskId: string | null
+  readonly errorCode: string | null
+  readonly draftRevision: number
+  readonly quoteSha256: string
+  readonly authorizationCapCny: string
+  readonly candidates: readonly {
+    readonly assetId: string
+    readonly assetSha256: string
+    readonly mediaId: string | null
+    readonly browserUrl: string
+    readonly reviewStatus: 'pending'
+  }[]
+  /** HTTP calls made by this read/queue endpoint, excluding the asynchronous Worker. */
+  readonly providerCalls: 0
+  readonly selectionChanged: false
+}
+
+/** The latest twenty runs remain discoverable after a reload or lost response. */
+export interface ReferenceVideoRunsResponse {
+  readonly schema: 'jason.reference-video-runs.v1'
+  readonly projectId: string
+  readonly frameId: string
+  readonly items: readonly ReferenceVideoRun[]
+  readonly providerCalls: 0
+}
