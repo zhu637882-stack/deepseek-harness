@@ -1,7 +1,7 @@
 /** Validate the browser draft and the read-only Writer compilation response. */
 import { localSignedMediaUrl } from './local-media-url.ts'
 import type {
-  ReferenceVideoAssetsRequest, ReferenceVideoAssetsResponse,
+  ReferenceVideoAsset, ReferenceVideoAssetsRequest, ReferenceVideoAssetsResponse,
   ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse,
   ReferenceVideoDraftResponse,
   ReferenceVideoQuoteRequest, ReferenceVideoQuoteResponse,
@@ -229,8 +229,19 @@ export function normalizeReferenceVideoAssets(
     const label = roleLabels[typeof a.role === 'string' ? a.role : ''] ?? (a.asset_type === 'audio' ? '参考音色' : '参考图片')
     const displayName = typeof a.display_name === 'string' ? a.display_name.trim().slice(0, 128) : ''
     const displayLabel = displayName || `${label} ${String((request.page - 1) * 200 + items.length + 1).padStart(2, '0')}`
+    const ownerType = typeof a.owner_type === 'string' ? a.owner_type : ''
+    const ownerId = typeof a.owner_id === 'string' ? a.owner_id : ''
+    const localOwner: 'actor' | 'scene' | 'prop' | undefined =
+      ownerType === 'actor' || ownerType === 'scene' || ownerType === 'prop'
+        ? ownerType
+        : undefined
+    const localReferenceScope: ReferenceVideoAsset['localReferenceScope'] = a.asset_type === 'image' && a.id.startsWith('asset_localref_')
+      && localOwner !== undefined && /^[A-Za-z0-9_.-]{1,256}$/u.test(ownerId)
+      ? { elementKind: localOwner, targetId: ownerId }
+      : undefined
     items.push({ assetId: a.id, assetSha256: a.sha256, label: displayLabel,
-      mediaType: a.asset_type === 'image' ? 'reference_image' : 'reference_audio', browserUrl })
+      mediaType: a.asset_type === 'image' ? 'reference_image' : 'reference_audio', browserUrl,
+      ...(localReferenceScope === undefined ? {} : { localReferenceScope }) })
   }
   return { projectId: request.projectId, page: request.page, pages: v.pages, items }
 }

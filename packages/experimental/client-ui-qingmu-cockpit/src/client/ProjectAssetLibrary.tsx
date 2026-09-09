@@ -6,7 +6,10 @@ import css from './ProjectAssetLibrary.module.css'
 /** A project-wide media browser; preview selection is local to this view. */
 export function ProjectAssetLibrary({ projectId, port, refreshToken = 0, onOpenReferenceUpload }: {
   readonly projectId: string
-  readonly port: Pick<QingmuYimengPort, 'referenceVideoAssets'>
+  readonly port: Pick<
+    QingmuYimengPort,
+    'referenceVideoAssets' | 'readLocalReferenceCandidateContent'
+  >
   /** Bumps after a real local-reference upload completes so the catalog rereads. */
   readonly refreshToken?: number
   /** Opens the existing person/scene upload surface; it never adopts a candidate. */
@@ -20,7 +23,10 @@ export function ProjectAssetLibrary({ projectId, port, refreshToken = 0, onOpenR
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState<'all' | 'reference_image' | 'reference_audio'>('all')
   const [selected, setSelected] = useState<string>()
+  const [localPreview, setLocalPreview] = useState<{ readonly identity: string; readonly url?: string; readonly failed?: boolean }>()
+  const [previewRetry, setPreviewRetry] = useState(0)
   const operation = useRef<AbortController>()
+  const previewOperation = useRef<AbortController>()
   const load = useCallback(async (nextPage: number) => {
     if (!projectId || operation.current) return
     const request = new AbortController(); operation.current = request
@@ -46,6 +52,38 @@ export function ProjectAssetLibrary({ projectId, port, refreshToken = 0, onOpenR
   const filtered = items.filter(item => (kind === 'all' || item.mediaType === kind)
     && item.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
   const preview = items.find(item => item.assetId === selected)
+  const previewIdentity = preview === undefined ? '' : `${projectId}:${preview.assetId}:${preview.assetSha256}`
+  useEffect(() => {
+    previewOperation.current?.abort()
+    setLocalPreview(undefined)
+    if (
+      preview?.mediaType !== 'reference_image' ||
+      preview.localReferenceScope === undefined ||
+      preview.browserUrl !== ''
+    ) {
+      return
+    }
+    const request = new AbortController()
+    previewOperation.current = request
+    void port.readLocalReferenceCandidateContent({
+      projectId,
+      elementKind: preview.localReferenceScope.elementKind,
+      targetId: preview.localReferenceScope.targetId,
+      assetId: preview.assetId,
+      expectedSha256: preview.assetSha256,
+    }, request.signal).then((result) => {
+      if (!request.signal.aborted) {
+        setLocalPreview({ identity: previewIdentity, url: `data:${result.mimeType};base64,${result.contentBase64}` })
+      }
+    }).catch(() => {
+      if (!request.signal.aborted) setLocalPreview({ identity: previewIdentity, failed: true })
+    }).finally(() => {
+      if (previewOperation.current === request) previewOperation.current = undefined
+    })
+    return () => { request.abort() }
+  }, [port, preview?.assetId, preview?.assetSha256, preview?.browserUrl,
+    preview?.localReferenceScope?.elementKind, preview?.localReferenceScope?.targetId, preview?.mediaType,
+    projectId, previewIdentity, previewRetry])
   return <section className={css.library} aria-label="项目图片与音色库">
     <header className={css.toolbar}>
       <div><h2>项目素材</h2><p>人物、场景图片与音色，在镜头工作台中按需引用。</p></div>
@@ -69,7 +107,13 @@ export function ProjectAssetLibrary({ projectId, port, refreshToken = 0, onOpenR
         {preview.browserUrl ? preview.mediaType === 'reference_image'
           ? <img src={preview.browserUrl} alt={preview.label} />
           : <audio controls src={preview.browserUrl} preload="metadata" aria-label={preview.label} />
-          : <p>此素材暂时没有可用的预览地址。刷新素材后重试。</p>}
+          : localPreview?.identity === previewIdentity && localPreview.url !== undefined
+            ? <img src={localPreview.url} alt={preview.label} />
+            : localPreview?.identity === previewIdentity && localPreview.failed
+              ? <div role="alert"><p>这张参考图暂时无法读取。</p><button type="button" onClick={() => { setPreviewRetry(value => value + 1) }}>重新读取参考图</button></div>
+              : preview.localReferenceScope !== undefined
+                ? <p>正在读取这张本地参考图。</p>
+                : <p>此素材暂时没有可用的预览地址。刷新素材后重试。</p>}
         <details><summary>素材标识</summary><code>{preview.assetId}</code></details>
       </section>}
       <div className={css.grid}>

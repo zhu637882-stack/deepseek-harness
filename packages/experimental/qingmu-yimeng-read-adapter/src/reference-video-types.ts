@@ -70,6 +70,11 @@ export interface ReferenceVideoAsset {
   readonly label: string
   readonly mediaType: 'reference_image' | 'reference_audio'
   readonly browserUrl: string
+  /** Local candidate bytes remain private and can only be read through this owner scope. */
+  readonly localReferenceScope?: {
+    readonly elementKind: 'actor' | 'scene' | 'prop'
+    readonly targetId: string
+  }
 }
 
 /** A filtered page retains upstream pagination across other media types. */

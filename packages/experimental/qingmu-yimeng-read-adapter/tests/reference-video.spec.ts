@@ -66,3 +66,41 @@ it('uses the returned media identity for signed thumbnails without guessing it f
   items[0]!.preview_media_id = 'media_wrong'
   expect(await handler('referenceVideoAssets', { projectId:'p',page:1 }, signal())).toMatchObject({ ok:true,value:{ items:[{ browserUrl:'' }] } })
 })
+
+it('projects a private local-reference scope only for valid owner-bound local assets', async () => {
+  const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json({
+    page: 1,
+    page_size: 200,
+    pages: 1,
+    items: [
+      {
+        id: 'asset_localref_linyu', project_id: 'p', asset_type: 'image',
+        sha256: 'c'.repeat(64), owner_type: 'actor', owner_id: 'actor_linyu',
+      },
+      {
+        id: 'asset_localref_forged', project_id: 'p', asset_type: 'image',
+        sha256: 'd'.repeat(64), owner_type: 'frame', owner_id: 'frame_1',
+      },
+      {
+        id: 'asset_not_local', project_id: 'p', asset_type: 'image',
+        sha256: 'e'.repeat(64), owner_type: 'actor', owner_id: 'actor_linyu',
+      },
+    ],
+  }))
+  const handler = createYimengReadHandler({}, { fetch, readToken: () => 'fixture' })
+  const result = await handler('referenceVideoAssets', { projectId: 'p', page: 1 }, signal())
+  expect(result).toMatchObject({
+    ok: true,
+    value: {
+      items: [
+        { assetId: 'asset_localref_linyu', localReferenceScope: { elementKind: 'actor', targetId: 'actor_linyu' } },
+        { assetId: 'asset_localref_forged' },
+        { assetId: 'asset_not_local' },
+      ],
+    },
+  })
+  if (result.ok) {
+    expect(result.value.items[1]?.localReferenceScope).toBeUndefined()
+    expect(result.value.items[2]?.localReferenceScope).toBeUndefined()
+  }
+})

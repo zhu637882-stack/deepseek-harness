@@ -5,10 +5,21 @@ import { ProjectAssetLibrary } from '../src/client/ProjectAssetLibrary.tsx'
 import type { ReferenceVideoAssetsResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 const picture = { assetId:'face', assetSha256:'a'.repeat(64), label:'林予', mediaType:'reference_image' as const, browserUrl:'/face.png' }
 const voice = { assetId:'voice', assetSha256:'b'.repeat(64), label:'林予音色', mediaType:'reference_audio' as const, browserUrl:'/voice.wav' }
+const localPicture = {
+  assetId: 'asset_localref_linyu', assetSha256: 'c'.repeat(64), label: '林予',
+  mediaType: 'reference_image' as const, browserUrl: '',
+  localReferenceScope: { elementKind: 'actor' as const, targetId: 'actor_linyu' },
+}
+const localContent = {
+  schema: 'jason.qingmu-local-reference-candidate-content.v1' as const,
+  assetId: localPicture.assetId, sha256: localPicture.assetSha256,
+  mimeType: 'image/png' as const, contentBase64: 'AQID',
+}
+function localReader() { return vi.fn(async () => localContent) }
 const page = (items: ReferenceVideoAssetsResponse['items']): ReferenceVideoAssetsResponse => ({ projectId:'p',page:1,pages:1,items })
 afterEach(cleanup)
 it('filters real catalog entries and opens image or voice previews without a write action', async () => {
-  const port = { referenceVideoAssets:vi.fn().mockResolvedValue(page([picture,voice])) }
+  const port = { referenceVideoAssets:vi.fn().mockResolvedValue(page([picture,voice])), readLocalReferenceCandidateContent:localReader() }
   render(<ProjectAssetLibrary projectId="p" port={port} />)
   fireEvent.click(await screen.findByRole('button',{ name:'预览林予' }))
   expect(screen.getByRole('region',{ name:'素材预览' }).querySelector('img')?.getAttribute('src')).toBe('/face.png')
@@ -23,7 +34,7 @@ it('filters real catalog entries and opens image or voice previews without a wri
 it('aborts the old project read and cannot display its late result in a new project', async () => {
   let finish!: (value:ReferenceVideoAssetsResponse)=>void
   const oldRead = new Promise<ReferenceVideoAssetsResponse>((resolve)=>{finish=resolve})
-  const port = { referenceVideoAssets:vi.fn().mockReturnValueOnce(oldRead).mockResolvedValueOnce({ ...page([voice]),projectId:'q' }) }
+  const port = { referenceVideoAssets:vi.fn().mockReturnValueOnce(oldRead).mockResolvedValueOnce({ ...page([voice]),projectId:'q' }), readLocalReferenceCandidateContent:localReader() }
   const view=render(<ProjectAssetLibrary key="p" projectId="p" port={port} />)
   const signal=port.referenceVideoAssets.mock.calls[0]![1] as AbortSignal
   view.rerender(<ProjectAssetLibrary key="q" projectId="q" port={port} />)
@@ -35,11 +46,43 @@ it('aborts the old project read and cannot display its late result in a new proj
 
 it('opens the real person or scene upload surface on request and rereads after its completion signal', async () => {
   const onOpenReferenceUpload = vi.fn()
-  const port = { referenceVideoAssets:vi.fn().mockResolvedValue(page([])) }
+  const port = { referenceVideoAssets:vi.fn().mockResolvedValue(page([])), readLocalReferenceCandidateContent:localReader() }
   const view = render(<ProjectAssetLibrary projectId="p" port={port} onOpenReferenceUpload={onOpenReferenceUpload} />)
   fireEvent.click(await screen.findByRole('button', { name:'上传人物/场景参考' }))
   expect(onOpenReferenceUpload).toHaveBeenCalledOnce()
   expect(screen.getByText(/音色暂不在此上传/)).toBeTruthy()
   view.rerender(<ProjectAssetLibrary projectId="p" port={port} onOpenReferenceUpload={onOpenReferenceUpload} refreshToken={1} />)
   await waitFor(() => { expect(port.referenceVideoAssets).toHaveBeenCalledTimes(2) })
+})
+
+
+it('reads a selected local candidate through its owner-and-SHA-bound port, not a public URL', async () => {
+  const readLocalReferenceCandidateContent = localReader()
+  const port = {
+    referenceVideoAssets: vi.fn().mockResolvedValue(page([localPicture, picture])),
+    readLocalReferenceCandidateContent,
+  }
+  render(<ProjectAssetLibrary projectId="p" port={port} />)
+  expect(readLocalReferenceCandidateContent).not.toHaveBeenCalled()
+  await screen.findAllByRole('button', { name: '预览林予' })
+  fireEvent.click(screen.getAllByRole('button', { name: '预览林予' })[0]!)
+  await waitFor(() => expect(readLocalReferenceCandidateContent).toHaveBeenCalledWith({
+    projectId: 'p', elementKind: 'actor', targetId: 'actor_linyu',
+    assetId: 'asset_localref_linyu', expectedSha256: 'c'.repeat(64),
+  }, expect.any(AbortSignal)))
+  expect(screen.getByRole('region', { name: '素材预览' }).querySelector('img')?.getAttribute('src'))
+    .toBe('data:image/png;base64,AQID')
+})
+
+it('shows a failed local preview and retries only when requested', async () => {
+  const reader = vi.fn().mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce(localContent)
+  const port = { referenceVideoAssets: vi.fn().mockResolvedValue(page([localPicture])), readLocalReferenceCandidateContent: reader }
+  render(<ProjectAssetLibrary projectId="p" port={port} />)
+  fireEvent.click(await screen.findByRole('button', { name: '预览林予' }))
+  await screen.findByText('这张参考图暂时无法读取。')
+  expect(screen.queryByText('正在读取这张本地参考图。')).toBeNull()
+  expect(reader).toHaveBeenCalledOnce()
+  fireEvent.click(screen.getByRole('button', { name: '重新读取参考图' }))
+  await waitFor(() => expect(screen.getByRole('region', { name: '素材预览' }).querySelector('img')).not.toBeNull())
+  expect(reader).toHaveBeenCalledTimes(2)
 })
