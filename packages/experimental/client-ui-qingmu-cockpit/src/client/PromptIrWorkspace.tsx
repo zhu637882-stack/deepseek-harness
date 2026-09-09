@@ -41,6 +41,7 @@ import { directorBufferKey, readDirectorBuffer, writeDirectorBuffer } from './di
 import { hasPromptIrBootstrapFrame, PromptIrBootstrapWorkspace } from './PromptIrBootstrapWorkspace.tsx'
 import { EntityDraftHumanReview } from './EntityDraftHumanReview.tsx'
 import { NativeDirectorDraft, mergeNativeDraft, type NativeDirectorDraftContext } from './NativeDirectorDraft.tsx'
+import { ReferenceVideoWorkspace } from './ReferenceVideoWorkspace.tsx'
 import { FirstFrameCandidatePreview } from './FirstFrameCandidatePreview.tsx'
 import {
   createFirstFrameSelectionClient,
@@ -1503,6 +1504,8 @@ function ReadyPromptIrWorkspace({
               onChange={(event) => { changeDraft(JSON.stringify({ ...fields, [field]: event.target.value }, null, 2)) }} />
           </label>)}
         </div>}
+        {active && fields && <ReferenceVideoWorkspace key={active.key} projectId={active.projectId}
+          frameId={active.frameId} initialPrompt={fields.videoGenPrompt} port={port} />}
         <details><summary>{t('directorEffectivePrompt')}</summary>
           {EDITABLE_FIELDS.map(field => <div key={field}><h4>{t(fieldLabels[field])}</h4>
             <p className={directorCss.promptText}>{snapshot?.subject.editableProjection[field] || '—'}</p></div>)}

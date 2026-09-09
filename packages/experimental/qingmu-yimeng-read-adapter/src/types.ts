@@ -1,3 +1,5 @@
+import type { ReferenceVideoAssetsResponse, ReferenceVideoPreviewResponse } from './reference-video-types.ts'
+
 /** JSON object retained from a Yimeng read response. */
 export interface YimengJsonObject {
   readonly [key: string]: unknown
@@ -2620,6 +2622,8 @@ export interface YimengReadEndpointMap {
   readonly videoQuote: YimengVideoQuoteResponse
   readonly selectedVideoReview: YimengSelectedVideoReviewResponse
   readonly takeVersions: YimengTakeVersionStackResponse
+  readonly referenceVideoAssets: ReferenceVideoAssetsResponse
+  readonly referenceVideoPreview: ReferenceVideoPreviewResponse
   readonly takePreview: YimengTakePreviewResponse
   readonly takeComments: YimengTakeCommentFeedResponse
   readonly takeReviewAuthority: YimengTakeReviewAuthorityFeedResponse
@@ -2643,3 +2647,5 @@ export interface YimengReadEndpointMap {
 
 /** Endpoint names accepted by the `/qingmu-yimeng` channel. */
 export type YimengReadEndpoint = keyof YimengReadEndpointMap
+
+export type * from './reference-video-types.ts'

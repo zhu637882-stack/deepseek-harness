@@ -1,3 +1,4 @@
+import type { ReferenceVideoAssetsRequest, ReferenceVideoAssetsResponse, ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 /** Stable Client-side view of the private Yimeng read-adapter RPC contract. */
 import type {
   ImagoStageSourceMethodRequest,
@@ -576,6 +577,8 @@ export interface QingmuProductionTakeIntent extends Omit<YimengQueueProductionTa
 
 /** Read-only browser-facing methods exposed by the Qingmu Host adapter. */
 export interface QingmuYimengReadPort {
+  referenceVideoAssets(request: ReferenceVideoAssetsRequest, signal?: AbortSignal): Promise<ReferenceVideoAssetsResponse>
+  referenceVideoPreview(request: ReferenceVideoPreviewRequest, signal?: AbortSignal): Promise<ReferenceVideoPreviewResponse>
   evidenceLedger(request: YimengEpisodeEvidenceRequest, signal?: AbortSignal): Promise<YimengEpisodeEvidenceLedgerResponse>
   editorialHandoff(request: YimengEditorialHandoffRequest, signal?: AbortSignal): Promise<YimengEditorialHandoffResponse>
   verifyEpisode(request: YimengEpisodeVerificationRequest, signal?: AbortSignal): Promise<YimengEpisodeVerificationResponse>

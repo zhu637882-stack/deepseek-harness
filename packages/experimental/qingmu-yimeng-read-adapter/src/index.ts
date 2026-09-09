@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import z from '@deepseek-ai/schemastery'
 import { normalizeContinuityDelta } from './continuity.ts'
+import { parseReferenceVideoRequest, normalizeReferenceVideoPreview, parseReferenceVideoAssetsRequest, normalizeReferenceVideoAssets } from './reference-video.ts'
 import { localMediaUrl } from './local-media-url.ts'
 import { normalizeSelectedVideoReview } from './selected-video-review.ts'
 import { normalizeTakeVersionStack, parseTakeVersionReadRequest } from './take-versions.ts'
@@ -341,7 +342,7 @@ const PROTECTED_ENDPOINTS = new Set([
   'referenceCandidates', 'reviewEvents',
   'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'takeComments', 'takeReviewAuthority', 'takeAcceptance', 'takeTechnicalQc', 'takeApprovalLifecycle', 'evidenceLedger', 'editorialHandoff', 'verifyEpisode', 'shotFindings', 'productionUnits', 'stageSources',
   'lsuPlanSource', 'reworkRouteSource',
-  'takePreview',
+  'takePreview', 'referenceVideoPreview', 'referenceVideoAssets',
 ])
 const HUMAN_DECISION_VALUES = new Set<YimengHumanDecisionValue>([
   'approve', 'reject', 'request_changes',
@@ -5078,6 +5079,7 @@ export function createYimengReadHandler(
       let normalize: (value: unknown) => unknown
       let editorialRequest: YimengEpisodeEvidenceRequest | undefined
       let verificationBody: string | undefined
+      let referenceBody: string | undefined
       if (endpoint === 'health') {
         assertEmptyRequest(payload)
         path = '/api/health'
@@ -5200,6 +5202,18 @@ export function createYimengReadHandler(
           + '/episodes/' + encodeURIComponent(request.episodeId)
           + '/frames/' + encodeURIComponent(request.frameId) + '/take-versions'
         normalize = value => normalizeTakeVersionStack(value, request, jcsSha256)
+      } else if (endpoint === 'referenceVideoPreview') {
+        let request
+        try { request = parseReferenceVideoRequest(payload) } catch { throw new InputError('invalid reference video draft') }
+        path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/reference-video/preview`
+        const { projectId: _projectId, ...body } = request
+        referenceBody = JSON.stringify(body)
+        normalize = value => normalizeReferenceVideoPreview(value, request, canonicalJsonSha256)
+      } else if (endpoint === 'referenceVideoAssets') {
+        let request
+        try { request = parseReferenceVideoAssetsRequest(payload) } catch { throw new InputError('invalid reference assets request') }
+        path = `/api/projects/${encodeURIComponent(request.projectId)}/assets?page=${request.page}&page_size=200`
+        normalize = value => normalizeReferenceVideoAssets(value, request, baseUrl)
       } else if (endpoint === 'takePreview') {
         let request
         try { request = parseTakePreviewRequest(payload) } catch { throw new InputError('invalid Take preview request') }
@@ -5312,20 +5326,22 @@ export function createYimengReadHandler(
         authorizationToken = scrubToken
       }
       const verification = endpoint === 'verifyEpisode'
-      const preview = endpoint === 'takePreview'
+      const preview = endpoint === 'takePreview' || endpoint === 'referenceVideoPreview'
       if (preview && previewsInFlight >= 2) return internalError('PREVIEW_BUSY')
       if (verification && verificationInFlight) return internalError('VERIFY_BUSY')
       if (verification && verificationBody === undefined) return internalError('Yimeng adapter failed')
       if (verification) verificationInFlight = true
       if (preview) previewsInFlight++
       const mapsSourceErrors = verification || endpoint === 'editorialHandoff'
-      const fetchOptions: FetchJsonOptions | undefined = mapsSourceErrors
-        ? {
-          method: verification ? 'POST' : 'GET',
-          ...(verification ? { body: verificationBody as string } : {}),
-          verificationError: true,
-        }
-        : undefined
+      const fetchOptions: FetchJsonOptions | undefined = referenceBody !== undefined
+        ? { method: 'POST', body: referenceBody }
+        : mapsSourceErrors
+          ? {
+            method: verification ? 'POST' : 'GET',
+            ...(verification ? { body: verificationBody as string } : {}),
+            verificationError: true,
+          }
+          : undefined
       let response: FetchJsonResult
       try {
         response = await fetchJson(
@@ -5334,7 +5350,7 @@ export function createYimengReadHandler(
           authorizationToken,
           scrubToken,
           verification ? verificationTimeoutMs : timeoutMs,
-          preview ? 86 * 1024 * 1024 : endpoint === 'script' ? MAX_SCRIPT_JSON_BYTES : MAX_JSON_BYTES,
+          endpoint === 'takePreview' ? 86 * 1024 * 1024 : endpoint === 'script' ? MAX_SCRIPT_JSON_BYTES : MAX_JSON_BYTES,
           signal,
           fetchOptions,
         )

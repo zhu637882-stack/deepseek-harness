@@ -4,6 +4,10 @@
 
 这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`capabilityCatalog`、`costRehearsal`、`gateAControlEvidence`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates`、`selectedVideoReview`、`takeVersions`、`takeComments`、`takeAcceptance`、`takeReviewAuthority`、`takeTechnicalQc`、`takeApprovalLifecycle`、`shotFindings`、`productionUnits`、`lsuPlanSource`、`stageSources` 和 `workflow`；它不暴露任何写入端点。独立的 `/api/qingmu/entity-draft-human-review/state` 路由是自然人审核面板使用的 cookie 认证同源读取。
 
+## 引用视频预览
+
+`referenceVideoAssets` 从认证后的项目素材分页中提取带哈希的图片和音频信息。`referenceVideoPreview` 将素材 ID、来源 SHA、稳定引用标记、原始文字和明确的 Wan 3 参数发给 Writer 只读编译器。Host 核对返回的项目范围、引用顺序、文字保真和请求体 SHA 后显示结果。此操作不选定素材、不提交生成；正式提交时仍须重新核对来源和媒体公共可达性。
+
 ## PromptIR 实体草稿审核状态
 
 专用状态路由只转发 `jason_token` cookie，并拒绝 Bearer header、不受信请求、未知坐标、重定向、超限响应和无效 Writer schema。它只接受当前 Ready PromptIR；其关联草稿必须携带精确的草稿、元素 profile、已选参考和参考包绑定，并且 Writer 已认证的自然人身份必须唯一。它不返回 Provider、任务修改、outbox、提示词批准、媒体批准或签收权威。参见[决策记录](../../../.agents/notes/implemented/feature/2026-09-02-qingmu-prompt-ir-entity-draft-human-review.zh.md)。
