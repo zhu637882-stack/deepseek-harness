@@ -266,18 +266,33 @@ export function LocalVoiceCandidateUpload({ projectId, targetId, targetName, por
 
   const finish = async (result: LocalVoiceCandidateResult, actionToken: number, scopeToken: number) => {
     if (actionToken !== actionGeneration.current || !currentScope(scopeToken)) return
-    if (!await clear(scopeToken)) return
-    if (actionToken !== actionGeneration.current || !currentScope(scopeToken)) return
     setReceipt(result)
     onReceipt(result)
     setRetryAllowed(false)
     setNotice('音色文件已保存，可在项目素材中试听和引用。')
+    // Server confirmation survives a failed local tombstone write. Keep the
+    // component mounted until cleanup succeeds so the old pending draft cannot
+    // hide that confirmation during the asset-library refresh.
+    if (!await clear(scopeToken)) return
+    if (actionToken !== actionGeneration.current || !currentScope(scopeToken)) return
     try {
       await onStored()
     } catch (cause) {
       if (actionToken === actionGeneration.current && currentScope(scopeToken)) {
         setError(`音色已保存，但素材库刷新失败：${messageOf(cause)}`)
       }
+    }
+  }
+
+  const retryCleanup = async () => {
+    if (receipt === undefined) return
+    const action = start()
+    if (action === undefined) return
+    try {
+      setError('')
+      await finish(receipt, action.actionToken, action.scopeToken)
+    } finally {
+      end(action.actionToken, action.scopeToken)
     }
   }
 
@@ -355,7 +370,7 @@ export function LocalVoiceCandidateUpload({ projectId, targetId, targetName, por
         }}
       />
     </label>
-    {saved !== undefined && <div className={css.pending}>
+    {saved !== undefined && receipt === undefined && <div className={css.pending}>
       <strong>{saved.request.originalFileName}</strong><span>{byteLengthOfBase64(saved.request.contentBase64).toLocaleString()} B</span>
       <div className={css.actions}>
         <button type="button" disabled={busy || !durable || (saved.pending && !retryAllowed)} onClick={() => { void run(false) }}>
@@ -364,7 +379,9 @@ export function LocalVoiceCandidateUpload({ projectId, targetId, targetName, por
         {saved.pending && <button type="button" disabled={busy || !durable} onClick={() => { void run(true) }}>恢复本次回执</button>}
       </div>
     </div>}
-    {persistWarning && <p role="alert" className={css.error}>浏览器无法安全保存此上传草稿，因此不会提交。</p>}
+    {persistWarning && <p role="alert" className={css.error}>{receipt === undefined
+      ? '浏览器无法安全保存此上传草稿，因此不会提交。'
+      : '音色已保存，但浏览器未能清理本地恢复记录。可以重试整理，不会再次上传。'}</p>}
     {error !== '' && <p role="alert" className={css.error}>{error}</p>}
     {notice !== '' && <p role="status" className={css.notice}>{notice}</p>}
     {receipt !== undefined && <article className={css.pending} aria-label="音色上传回执">
@@ -372,6 +389,7 @@ export function LocalVoiceCandidateUpload({ projectId, targetId, targetName, por
       <span>{receipt.durationSec.toFixed(1)} 秒 · {receipt.sampleRate} Hz · {receipt.channels} 声道</span>
       <div className={css.actions}>
         <button type="button" disabled={busy} onClick={() => { void audition() }}>试听本次音色</button>
+        {persistWarning && <button type="button" disabled={busy} onClick={() => { void retryCleanup() }}>重试整理本地记录</button>}
       </div>
       {audioUrl !== undefined && <audio controls src={audioUrl}>当前浏览器无法播放此音色文件。</audio>}
       <p>上传记录：作为本地参考文件保存。</p>

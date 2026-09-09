@@ -214,6 +214,25 @@ it('keeps the confirmed receipt visible when the later asset refresh fails', asy
   expect(value.uploadLocalVoiceCandidate).toHaveBeenCalledOnce()
 })
 
+it('keeps server confirmation when local cleanup fails and retries cleanup without provider I/O', async () => {
+  const value = port()
+  const view = mountStateful(value)
+  await chooseWav(view.container)
+  const remove = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('storage offline') })
+  fireEvent.click(screen.getByRole('button', { name: '保存音色文件' }))
+  await screen.findByText('音色已保存，但浏览器未能清理本地恢复记录。可以重试整理，不会再次上传。')
+  expect(screen.getByRole('article', { name: '音色上传回执' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: '恢复本次回执' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '保存音色文件' })).toBeNull()
+  expect(view.onStored).not.toHaveBeenCalled()
+  remove.mockRestore()
+  fireEvent.click(screen.getByRole('button', { name: '重试整理本地记录' }))
+  await waitFor(() => { expect(view.onStored).toHaveBeenCalledOnce() })
+  expect(screen.queryByRole('button', { name: '重试整理本地记录' })).toBeNull()
+  expect(value.uploadLocalVoiceCandidate).toHaveBeenCalledOnce()
+  expect(value.recoverLocalVoiceCandidate).not.toHaveBeenCalled()
+})
+
 it('with a stateful parent, completes once then accepts a new WAV and clears its old audition URL', async () => {
   const value = port()
   const view = mountStateful(value)
