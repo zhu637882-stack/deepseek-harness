@@ -1,8 +1,17 @@
 import { expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
 import { createYimengReadHandler } from '../src/index.ts'
-import { quoteRequest, quoteResponse } from './reference-video-fixture.ts'
+import { canonical, quoteRequest, quoteResponse } from './reference-video-fixture.ts'
 
 const signal = () => new AbortController().signal
+
+it('accepts a disabled estimate only when availability is included in its checksum', async () => {
+  const { projectId, frameId, draftRevision, draftRequestSha256, sourceSha256, cost } = quoteResponse
+  const projection = { projectId, frameId, draftRevision, draftRequestSha256, sourceSha256, cost, generationSubmissionEnabled: false }
+  const quote = { ...quoteResponse, ...projection, quoteSha256: createHash('sha256').update(canonical(projection)).digest('hex') }
+  const handler = createYimengReadHandler({}, { fetch: async () => Response.json(quote), readToken: () => 'fixture' })
+  expect(await handler('referenceVideoQuote', quoteRequest, signal())).toEqual({ ok: true, value: quote })
+})
 
 it('sends only saved revision and hash to the owner-scoped quote endpoint', async () => {
   const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json(quoteResponse))
@@ -17,6 +26,8 @@ it('sends only saved revision and hash to the owner-scoped quote endpoint', asyn
 it.each([
   { draftRevision: 2 }, { sourceSha256: 'b'.repeat(64) }, { quoteSha256: 'b'.repeat(64) },
   { budgetReservedCny: 4.8 }, { generationQueued: true }, { providerCalls: 1 },
+  { generationSubmissionEnabled: false }, { generationSubmissionEnabled: 'true' },
+  { generationSubmissionEnabled: undefined },
   { cost: { ...quoteResponse.cost, estimatedCny: 0 } },
   { cost: { ...quoteResponse.cost, billableSeconds: 12 } },
   { cost: { ...quoteResponse.cost, unitPriceCny: -1 } },

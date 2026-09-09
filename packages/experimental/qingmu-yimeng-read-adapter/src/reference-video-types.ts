@@ -129,6 +129,8 @@ export interface ReferenceVideoQuoteResponse {
   readonly draftRequestSha256: string
   readonly sourceSha256: string
   readonly quoteSha256: string
+  /** Runtime availability only; a separate current-price confirmation is still required. */
+  readonly generationSubmissionEnabled: boolean
   readonly preview: ReferenceVideoPreviewResponse
   readonly cost: {
     readonly provider: 'dashscope'

@@ -531,7 +531,8 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
           <button className={css.primaryAction} type="button" disabled={busy || saving || !draftState?.draft || savedEpoch !== epoch.current || !sourceAccepted} onClick={() => { void quote() }}>估算已存草稿费用</button>
         </div>
         {quoteResult && <p className={css.quote} role="status">目录价估算 ¥{Number(quoteResult.cost.estimatedCny).toFixed(2)} · 1 个视频 · {quoteResult.cost.billableSeconds} 秒。
-          未扣费；未计账户折扣，实际结算以阿里账单为准。<a href={quoteResult.cost.sourceUrl} target="_blank" rel="noreferrer">查看价格</a></p>}
+          未扣费；未计账户折扣，实际结算以阿里账单为准。{quoteResult.generationSubmissionEnabled === false
+            && <>当前实例未启用付费生成，估算仅供核对。</>}<a href={quoteResult.cost.sourceUrl} target="_blank" rel="noreferrer">查看价格</a></p>}
       </section>
       <aside className={css.previewColumn} aria-label="镜头预览与候选">
         <div className={css.previewPlaceholder}>

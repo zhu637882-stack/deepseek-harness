@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-09-10-qingmu-material-connection.md
+2026-09-10-qingmu-material-connection.md: a8f474411ad279306ba180035dd3b1bc69dd6b71
+2026-09-10-qingmu-material-connection.zh.md: 4df763dc1e705df9592142c0363286fcdc98a76a

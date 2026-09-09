@@ -45,6 +45,7 @@ export const quoteRequest = { ...request, draftRevision: savedDraft.draft.revisi
 const quoteProjection = {
   projectId: 'p', frameId: 'f', draftRevision: quoteRequest.draftRevision, draftRequestSha256: quoteRequest.draftRequestSha256,
   sourceSha256: response.sourceSha256,
+  generationSubmissionEnabled: true,
   cost: { provider: 'dashscope', region: 'cn-beijing', currency: 'CNY', basis: 'catalog_list_price', unit: 'second',
     unitPriceCny: '0.600000', billableSeconds: 8, estimatedCny: '4.800000', candidateCount: 1, maxAttempts: 1, accountDiscountApplied: false,
     pricingSha256: 'a'.repeat(64), pricingCheckedAt: '2026-08-24', sourceUrl: 'https://help.aliyun.com/zh/model-studio/model-pricing' },

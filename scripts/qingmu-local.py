@@ -61,6 +61,7 @@ BUILD_MANIFEST_ARTIFACTS = (
     "packages/experimental/qingmu-director-context-bridge/lib/index.js",
     "packages/experimental/qingmu-director-context-bridge/lib/model-tools.js",
     "packages/experimental/qingmu-director-context-bridge/python/qingmu_api.py",
+    "packages/experimental/qingmu-director-context-bridge/python/reference_video_connection.py",
     "packages/experimental/qingmu-director-context-bridge/python/dialogue_changeset.py",
     "packages/experimental/qingmu-director-context-bridge/python/video_frame_cas.py",
     "packages/experimental/client-ui-brand-qingmu/lib/client.js",
@@ -218,6 +219,7 @@ def read_config(root: Path) -> dict:
             raise ValueError("实例数据/配置路径不能是符号链接：" + relative)
     config = _read_owner_only_json(root / "private/instance.json", "实例私密配置")
     _validate_private_credential_fields(config, require_all=False)
+    reference_connection_module().validate_connection(config)
     if config["root"] != str(root) or config["harnessRoot"] != str(HARNESS):
         raise ValueError("实例目录或 Harness 来源绑定不符；拒绝使用")
     if not native_ui(config):
@@ -242,6 +244,82 @@ def read_config(root: Path) -> dict:
     if config.get("directorExecutionFixture") is not None and config.get("directorProductionExecution") is not None:
         raise ValueError("导演 fixture 与 production 配置不能同时启用")
     return config
+
+
+def reference_connection_module():
+    path = HARNESS / "packages/experimental/qingmu-director-context-bridge/python/reference_video_connection.py"
+    spec = importlib.util.spec_from_file_location("qingmu_reference_connection", path)
+    module = importlib.util.module_from_spec(spec)
+    # Status/config reads must not add bytecode files to the source checkout.
+    exec(compile(path.read_bytes(), str(path), "exec"), module.__dict__)
+    return module
+
+
+def configure_reference_connection(root, config, *, expected_instance_id, project_id,
+                                   episode_id, credential_env_file=None):
+    """Bind or disconnect one material-only connection on a cleanly stopped instance."""
+    if not expected_instance_id or config.get("instanceId") != expected_instance_id:
+        raise ValueError("reference_video_connection_instance_mismatch")
+    with instance_lock(root):
+        require_clean(root, config)
+        current = read_config(root)
+        if current.get("instanceId") != expected_instance_id:
+            raise ValueError("reference_video_connection_instance_mismatch")
+        updated = dict(current)
+        already_disconnected = False
+        if credential_env_file is None:
+            old = current.get("referenceVideoConnection")
+            if old is not None and (old["projectId"] != project_id or old["episodeId"] != episode_id):
+                raise ValueError("reference_video_connection_scope_mismatch")
+            already_disconnected = old is None
+            updated.pop("referenceVideoConnection", None)
+            # Removing a connection must remain possible when its DB scope is broken.
+            scope = {"projectId": project_id, "episodeId": episode_id,
+                     "storedConnectionMatched": old is not None, "databaseChecked": False}
+        else:
+            scope = _inspect_project_episode_binding(
+                root / "storage/jason.db", project_id=project_id, episode_id=episode_id
+            )
+            result = subprocess.run(
+                [str(Path(current["yimengRoot"]) / ".venv/bin/python"),
+                 str(HARNESS / "packages/experimental/qingmu-director-context-bridge/python/reference_video_connection.py"),
+                 "--probe-env", str(credential_env_file)],
+                cwd=root / "work",
+                env={**safe_env(root), "PYTHONPATH": str(Path(current["yimengRoot"]) / "backend/src")},
+                capture_output=True, text=True, timeout=15,
+            )
+            try:
+                probe = json.loads(result.stdout) if not result.returncode else None
+            except ValueError:
+                probe = None
+            if (not isinstance(probe, dict)
+                    or set(probe) != {"credentialAvailable", "providerHttpRequests", "credentialFingerprint"}
+                    or probe["credentialAvailable"] is not True or probe["providerHttpRequests"] != 0):
+                raise ValueError("reference_video_connection_credential_unavailable")
+            updated["referenceVideoConnection"] = {
+                "provider": "dashscope", "model": "wan3.0-video",
+                "projectId": project_id, "episodeId": episode_id,
+                "credentialEnvFile": str(credential_env_file),
+                "credentialFingerprint": probe["credentialFingerprint"],
+            }
+            reference_connection_module().validate_connection(updated)
+        receipt = {
+            "schema": "qingmu.reference-video-connection-receipt.v1",
+            "instanceId": expected_instance_id, "scope": scope,
+            "connected": credential_env_file is not None, "provider": "dashscope",
+            "model": "wan3.0-video", "region": "cn-beijing", "at": utc_timestamp(),
+            "modelSpendingEnabled": False, "providerHttpRequests": 0, "businessDatabaseWrites": 0,
+            "credentialFingerprint": (updated.get("referenceVideoConnection") or {}).get("credentialFingerprint"),
+            "alreadyDisconnected": already_disconnected,
+        }
+        audit = root / "audit" / ("reference-video-connection-" + secrets.token_hex(8) + ".json")
+        write_json(audit, {**receipt, "status": "pending"})
+        write_json(root / "private/instance.json", updated)
+        if read_config(root).get("referenceVideoConnection") != updated.get("referenceVideoConnection"):
+            raise RuntimeError("reference_video_connection_readback_failed")
+        receipt["status"] = "completed"
+        write_json(audit, receipt)
+        return receipt
 
 
 def safe_env(root: Path) -> dict[str, str]:
@@ -3115,6 +3193,7 @@ def bind_project_runtime(
         updated["textFoundationProductionExecution"] = text_execution
         updated["directorProductionExecution"] = director_execution
         updated["projectProductionExecution"] = project_execution
+        reference_connection_module().validate_connection(updated)
         write_json(root / "private/instance.json", updated)
         validated = read_config(root)
         if (
@@ -3601,6 +3680,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["init", "record-build", "start", "status", "stop", "login", "backup", "restore",
                                             "rotate-private-credentials", "bind-project-runtime",
+                                            "connect-reference-video", "disconnect-reference-video",
                                             "activate-project-production", "deactivate-project-production",
                                             "recover-crash", "director-submit-once", "tail-audit-tick", "single-shot-tick", "_supervise"])
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
@@ -3617,6 +3697,7 @@ def main() -> None:
     parser.add_argument("--project-id")
     parser.add_argument("--episode-id")
     parser.add_argument("--max-paid-cny", type=float)
+    parser.add_argument("--credential-env-file", type=Path)
     parser.add_argument("--text-foundation-parent-task-id")
     parser.add_argument("--asset-reference-parent-task-id")
     parser.add_argument("--review-only", action="store_true")
@@ -3651,6 +3732,16 @@ def main() -> None:
                 if not args.instance_id:
                     raise ValueError("rotate-private-credentials 必须明确 --instance-id")
                 result = rotate_private_credentials(root, args.instance_id)
+            elif args.command in {"connect-reference-video", "disconnect-reference-video"}:
+                if not args.instance_id or not args.project_id or not args.episode_id or (
+                    args.command == "connect-reference-video" and args.credential_env_file is None
+                ) or (args.command == "disconnect-reference-video" and args.credential_env_file is not None):
+                    raise ValueError("必须明确 instance-id、project-id、episode-id；连接还需 credential-env-file")
+                result = configure_reference_connection(
+                    root, config, expected_instance_id=args.instance_id,
+                    project_id=args.project_id, episode_id=args.episode_id,
+                    credential_env_file=args.credential_env_file,
+                )
             elif args.command == "bind-project-runtime":
                 if (
                     not args.instance_id

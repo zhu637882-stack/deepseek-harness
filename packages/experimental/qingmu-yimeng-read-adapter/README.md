@@ -179,6 +179,8 @@ Reference drafts can be saved per shot and restored after refresh. Reads use `re
 
 The `referenceVideoQuote` read prices the exact saved draft through Writer and ProviderGate dry-run. It checks the saved revision, source and compiled preview, then displays a Beijing catalog list-price estimate without discounts. Edits invalidate that estimate. It reserves no budget and starts no task.
 
+`generationSubmissionEnabled` is a required boolean included in the quote checksum. It reports the global runtime spending switch, positive cap and project/episode scope; it is not a reservation or user approval. A disabled instance still returns estimates and existing candidates, but rejects a fresh run before any queue write. Exact recovery of an existing run remains available.
+
 `referenceVideoRuns` and `referenceVideoRun` recover owner-scoped candidate tasks. The Host checks shot identity, task status and the exact signed media path, then rewrites playback to its configured Writer origin. Only decoded successful results appear as candidates; unknown submissions remain quarantined and no result implies creative acceptance.
 
 The project asset feed now identifies the actual signed media record through `preview_media_id`. Asset IDs and media IDs are independent. Reference catalogs match that exact media path, signature and expiry before rewriting to the configured Writer origin; missing or mismatched media metadata yields a card without a preview URL.

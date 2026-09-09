@@ -137,3 +137,24 @@ it('only reads after an unknown registration result, then requires a new explici
   await screen.findByText('已加入本镜候选审看。尚未采用，请在拍摄与审看中比较后决定。')
   expect(port.registerReferenceVideoCandidateForReview).toHaveBeenCalledTimes(2)
 })
+
+it('shows a disabled paid-generation quote but preserves existing recovery state for GET-only checks', async () => {
+  const command = { ...scope, requestId: 'fixture-disabled-0001', expectedRevision: 1, paidConfirmed: true,
+    expectedRequestSha256: 'a'.repeat(64), quoteSha256: runResponse.quoteSha256, authorizationCapCny: runResponse.authorizationCapCny }
+  sessionStorage.setItem(key, JSON.stringify(command))
+  const port = ports([runResponse])
+  const disabledQuote = { ...quoteResponse, generationSubmissionEnabled: false } as typeof quoteResponse & {
+    readonly generationSubmissionEnabled: false
+  }
+  render(<ReferenceVideoRuns {...scope} port={port} quote={disabledQuote} />)
+  await screen.findByText('草稿版本 1 · 等待生成')
+  expect(screen.getByText('已有任务和候选仍可读取；当前只能刷新状态核对。')).toBeTruthy()
+  expect(screen.getByText('上次提交：草稿版本 1。当前只能刷新任务状态核对结果，不会重新提交。')).toBeTruthy()
+  const submit = screen.getByRole('button', { name: '当前实例未启用付费生成' })
+  expect(submit.hasAttribute('disabled')).toBe(true)
+  fireEvent.click(submit)
+  fireEvent.click(screen.getByRole('button', { name: '刷新任务状态' }))
+  await waitFor(() => { expect(port.referenceVideoRuns).toHaveBeenCalledTimes(2) })
+  expect(port.queueReferenceVideo).not.toHaveBeenCalled()
+  expect(sessionStorage.getItem(key)).not.toBeNull()
+})

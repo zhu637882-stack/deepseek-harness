@@ -63,6 +63,10 @@ function isMatchingRegistration(
     && receipt.formalApprovalChanged === false
 }
 
+function generationSubmissionEnabled(quote: ReferenceVideoQuoteResponse | undefined): boolean {
+  return quote?.generationSubmissionEnabled !== false
+}
+
 function hasCandidateRegistrationPort(
   port: Props['port'],
 ): port is Props['port'] & CandidateRegistrationPort {
@@ -233,7 +237,7 @@ export function ReferenceVideoRuns({ projectId, frameId, quote, port, onOpenShoo
     // The parent mounts this workspace by shot key; the port has stable identity.
   }, [key, port])
   const submit = async () => {
-    if (submitting.current || recoveryError || !loaded || (!quote && !pending)) return
+    if (submitting.current || recoveryError || !loaded || !generationSubmissionEnabled(quote) || (!quote && !pending)) return
     submitting.current = true
     setBusy(true)
     setMessage('')
@@ -268,6 +272,7 @@ export function ReferenceVideoRuns({ projectId, frameId, quote, port, onOpenShoo
   const inflight = runs.some(run => !['Succeeded', 'Failed', 'Cancelled'].includes(run.kernelStatus)
     || run.publicStatus === 'quarantined')
   const amount = pending?.authorizationCapCny ?? quote?.cost.estimatedCny
+  const submissionEnabled = generationSubmissionEnabled(quote)
   return <section className={css.deliveryDesk} aria-label="生成与候选视频">
     <div className={css.deliveryHeading}>
       <div><p className={css.kicker}>DELIVERY DESK</p><h4>生成与候选视频</h4></div>
@@ -275,16 +280,19 @@ export function ReferenceVideoRuns({ projectId, frameId, quote, port, onOpenShoo
     </div>
     <div className={css.deliveryActions}>
       <button className={css.primaryAction} type="button"
-        disabled={busy || recoveryError || !loaded || (!pending && (!quote || inflight))}
+        disabled={busy || recoveryError || !loaded || !submissionEnabled || (!pending && (!quote || inflight))}
         onClick={() => { void submit() }}>
-        {busy ? '确认提交中…' : pending ? `确认上次提交 · 上限 ¥${Number(amount).toFixed(2)}`
-          : `生成 1 个视频${amount ? ` · 上限 ¥${Number(amount).toFixed(2)}` : ''}`}
+        {busy ? '确认提交中…' : !submissionEnabled ? '当前实例未启用付费生成'
+          : pending ? `确认上次提交 · 上限 ¥${Number(amount).toFixed(2)}`
+            : `生成 1 个视频${amount ? ` · 上限 ¥${Number(amount).toFixed(2)}` : ''}`}
       </button>
       <button type="button" disabled={busy} onClick={() => { void refresh() }}>刷新任务状态</button>
     </div>
     <p className={css.note}>阿里直连，使用阿里账户额度，每次生成 1 个候选。候选供你审看，当前选用的视频不会被替换。</p>
+    {!submissionEnabled && <p role="status">已有任务和候选仍可读取；当前只能刷新状态核对。</p>}
     {recoveryError && <p role="alert">上次提交记录无法读取。请先在任务中心核对提交结果，核对前暂停新增生成。</p>}
-    {pending && <p>上次提交：草稿版本 {pending.expectedRevision}。核对完成前保留这次请求。</p>}
+    {pending && <p>上次提交：草稿版本 {pending.expectedRevision}。{submissionEnabled
+      ? '核对完成前保留这次请求。' : '当前只能刷新任务状态核对结果，不会重新提交。'}</p>}
     {message && <p aria-live="polite">{message}</p>}
     {runs.map(run => <article key={run.runId} className={css.candidate}>
       <div className={css.candidateHeading}>

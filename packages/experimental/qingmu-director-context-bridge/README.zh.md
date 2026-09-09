@@ -81,9 +81,11 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 
 ## 已知限制与后续工作
 
+专属 Python 入口接受可选 `referenceVideoConnection`，字段严格为 `provider: dashscope`、`model: wan3.0-video`、`projectId`、`episodeId`、绝对路径 `credentialEnvFile` 和探测取得的 `credentialFingerprint`。原生实例正常停止后，`scripts/qingmu-local.py connect-reference-video` 接收 `--root`、`--instance-id`、`--project-id`、`--episode-id`、`--credential-env-file`；断开命令 `disconnect-reference-video` 使用相同身份参数但不传文件。这些操作验证私有文件中的字面量 DashScope Key，只写配置元数据。启动仅为该所有者的引用预览和素材服务复制设置；全局 API 设置与 Worker 不取得凭证，付费保持关闭。此连接不能与 production 或 fixture 模式共存。启动会拒绝已变化的 Key；轮换需显式重新连接并重启。绑定的数据库范围缺失时仍可断开；审计完成写入失败后可重复断开以恢复。回执绑定精确 Key 指纹和北京模型，不推断账号身份。显式素材准备复用现有临时上传服务，不自动重试或生成。[连接决策](../../../.agents/notes/implemented/architecture/2026-09-10-qingmu-material-connection.zh.md)记录范围与取舍。
+
 显式启用的 `tests/native-first-draft-connected.spec.ts` 在一次性合成数据上，将随包原生预设接到真实 Writer HTTP/SQLite 和真实 Core 编译器。将 `QINGMU_WRITER_TEST_ROOT` 和 `QINGMU_CORE_TEST_ROOT` 指向相应仓库后，运行 `node node_modules/vitest/vitest.mjs run packages/experimental/qingmu-director-context-bridge/tests/native-first-draft-connected.spec.ts`。Writer 需要 `.venv/bin/python` 的测试依赖。增加 `QINGMU_CONNECTED_BROWSER=1` 可验证实际引导组件的采用、编辑、保存、恢复、选择和刷新路径；还需 Python Playwright 和已安装的 Chrome（可用 `QINGMU_BROWSER_CHANNEL` 指定通道）。外部模型回复仍是脚本化响应。测试使用合成认证，不使用正式数据或凭据，零生成任务，不作内容签收；退出时移除自有进程和临时数据。浏览器测试壳转发真实业务处理器，但不加载完整生产 Host 或外层 Writer 页面。
 
 - 运行期 owner 不跨 Host 重启保留。已持久化的成功绑定仍按原会话语义恢复，已持久化空值则保持未绑定。存活的浏览器须重新进入以取得新的清理租约。离线或被拒的清理不能保证解除绑定；界面仍挂载且没有新绑定时，会报告清理未确认。
 - 使用相同 Writer/Core 路径，设置 `QINGMU_FULL_HOST_BROWSER=1` 并通过 Vitest 运行 `tests/native-first-draft-host.spec.ts`，验证随包完整 Host 和构建客户端。它使用真实服务和脚本化模型输出，覆盖原生传输、采用/编辑/保存/Ready/刷新及旧对象拒绝。runtime 和驾驶舱工件在一次性目录构建，与实际服务字节核对，共享安装包不改动。合成 Ready 选择不是人工内容签收、生产启用、真实模型创作质量或生成。
 - 旧回放建议仍由 `checkDirectorProposalFreshness` 检查漂移；原生提示词建议使用其已记录的读取回执和只读接口。
-- 本包没有启用真实 DeepSeek 路由、凭据、外部请求、费用或生产 canary。
+- 原生工具不启用真实 DeepSeek 路由、费用或生产 canary；可选的专属素材连接只允许显式 DashScope 临时上传。

@@ -358,3 +358,14 @@ it('does not let a delayed material read overwrite a newer preparation receipt',
   await waitFor(() => { expect(screen.getAllByText(/已准备，至/u)).toHaveLength(1) })
   expect((await screen.findAllByText('尚未准备')).length).toBe(2)
 })
+
+it('keeps a disabled-generation quote readable while the submission control stays unavailable', async () => {
+  const { port } = mount(); await chooseAll()
+  port.referenceVideoQuote.mockResolvedValue({ ...quoteResponse, preview: result, generationSubmissionEnabled: false })
+  fireEvent.click(screen.getByRole('button', { name: '保存引用草稿' }))
+  await screen.findByText('已保存草稿版本 1。')
+  fireEvent.click(screen.getByRole('button', { name: '估算已存草稿费用' }))
+  await screen.findByText(/当前实例未启用付费生成，估算仅供核对。/u)
+  expect(screen.getByRole('button', { name: '当前实例未启用付费生成' }).hasAttribute('disabled')).toBe(true)
+  expect(port.queueReferenceVideo).not.toHaveBeenCalled()
+})

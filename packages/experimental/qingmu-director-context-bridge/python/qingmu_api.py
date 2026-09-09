@@ -59,6 +59,8 @@ def main() -> None:
     config = json.loads((root / "private/instance.json").read_text())
     if config["root"] != str(root):
         raise ValueError("instance_root_mismatch")
+    from reference_video_connection import validate_connection, compose_reference_video_connection
+    validate_connection(config)
     upstream = load_writer_entry(Path(config["yimengRoot"]))
     # Reuse the existing validated startup configuration; only application
     # composition is owned here. No provider or runtime control is relaxed.
@@ -192,6 +194,7 @@ def main() -> None:
     })
     from jason.apps.studio import api_deps
     compose_dialogue_service(api_deps)
+    compose_reference_video_connection(api_deps, config)
     from jason.apps.studio.api_deps import auth_service, settings, store
 
     if fixture:

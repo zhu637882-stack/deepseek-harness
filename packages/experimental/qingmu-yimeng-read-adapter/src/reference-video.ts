@@ -48,9 +48,10 @@ export function parseReferenceVideoQuoteRequest(
 export function normalizeReferenceVideoQuote(
   value: unknown, request: ReferenceVideoQuoteRequest, digest: (value: unknown, label: string) => string,
 ): ReferenceVideoQuoteResponse {
-  const v = object(value, ['schema', 'projectId', 'frameId', 'draftRevision', 'draftRequestSha256', 'sourceSha256', 'quoteSha256', 'preview', 'cost', 'readOnly', 'providerCalls', 'databaseWrites', 'budgetReservedCny', 'generationQueued'])
+  const v = object(value, ['schema', 'projectId', 'frameId', 'draftRevision', 'draftRequestSha256', 'sourceSha256', 'quoteSha256', 'generationSubmissionEnabled', 'preview', 'cost', 'readOnly', 'providerCalls', 'databaseWrites', 'budgetReservedCny', 'generationQueued'])
   if (v.schema !== 'jason.reference-video-quote.v1' || v.projectId !== request.projectId || v.frameId !== request.frameId
     || v.draftRevision !== request.draftRevision || v.draftRequestSha256 !== request.draftRequestSha256
+    || typeof v.generationSubmissionEnabled !== 'boolean'
     || v.readOnly !== true || v.providerCalls !== 0 || v.databaseWrites !== 0 || v.budgetReservedCny !== 0 || v.generationQueued !== false) throw new Error('quote identity or effects changed')
   const preview = normalizeReferenceVideoPreview(v.preview, request, digest)
   if (v.sourceSha256 !== preview.sourceSha256) throw new Error('quote source changed')
@@ -66,7 +67,7 @@ export function normalizeReferenceVideoQuote(
   sha(c.pricingSha256); sha(v.quoteSha256)
   if (typeof c.pricingCheckedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}$/u.test(c.pricingCheckedAt)) throw new Error('pricing date missing')
   const projection = { projectId: v.projectId, frameId: v.frameId, draftRevision: v.draftRevision, draftRequestSha256: v.draftRequestSha256,
-    sourceSha256: v.sourceSha256, cost: c }
+    sourceSha256: v.sourceSha256, cost: c, generationSubmissionEnabled: v.generationSubmissionEnabled }
   if (digest(projection, 'quote.projection') !== v.quoteSha256) throw new Error('quote checksum changed')
   return value as ReferenceVideoQuoteResponse
 }
