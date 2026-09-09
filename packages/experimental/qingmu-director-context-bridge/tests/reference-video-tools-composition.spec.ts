@@ -19,6 +19,7 @@ import { createYimengCommandHandler } from '../../qingmu-yimeng-command-adapter/
 import { canonical, request, response, savedDraft } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import * as ModelTools from '../src/model-tools.ts'
+import { readNativeDirectorReadiness } from '../src/native-readiness.ts'
 
 const contexts: Context[] = []
 afterEach(async () => { for (const ctx of contexts.splice(0)) await ctx.fiber.dispose() })
@@ -44,13 +45,14 @@ function writer() {
   let afterSave: (() => void) | undefined
   let loseSaveResponse = false
   const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
-    const url = new URL(String(input))
+    const url = new URL(input instanceof Request ? input.url : input)
     if (url.pathname.endsWith('/director-inference/context')) return Response.json(context)
     if (url.pathname.endsWith('/assets')) return Response.json({ page: 1, page_size: 200, pages: 1,
       items: request.bindings.map(item => ({ id: item.assetId, project_id: 'p',
         asset_type: item.bindingToken === 'voice' ? 'audio' : 'image', role: item.label, sha256: item.assetSha256 })) })
     if (url.pathname.endsWith('/preview')) {
-      const input = JSON.parse(String(init?.body)) as typeof savedDraft.draft.request
+      if (typeof init?.body !== 'string') throw new Error('Expected a JSON preview body')
+      const input = JSON.parse(init.body) as typeof savedDraft.draft.request
       const prompt = input.promptParts.map(part => 'text' in part ? part.text
         : response.referenceMapping.find(item => item.bindingToken === part.bindingToken)!.alias).join('')
       const body = { ...response.body, input: { ...response.body.input, prompt }, parameters: { ...input.parameters, watermark: false } }
@@ -59,7 +61,8 @@ function writer() {
     }
     if (url.pathname === '/api/qingmu/projects/p/reference-video/drafts/f') {
       if (init?.method === 'POST') {
-        const input = JSON.parse(String(init.body)) as {
+        if (typeof init.body !== 'string') throw new Error('Expected a JSON save body')
+        const input = JSON.parse(init.body) as {
           expectedRevision: number
           expectedFrameSha256: string
           request: typeof savedDraft.draft.request
@@ -128,7 +131,8 @@ function result(agent: Agent, callId: string) {
     .filter(part => part.type === 'text').map(part => part.text).join('') }
 }
 function saves(upstream: ReturnType<typeof writer>) {
-  return upstream.fetch.mock.calls.filter(([url, init]) => String(url).endsWith('/drafts/f') && init?.method === 'POST')
+  return upstream.fetch.mock.calls.filter(([url, init]) =>
+    new URL(url instanceof Request ? url.url : url).pathname.endsWith('/drafts/f') && init?.method === 'POST')
 }
 
 it('reads, previews and saves through the shipped YAML preset and real adapters, then exposes the same version to the workspace', async () => {
@@ -138,9 +142,16 @@ it('reads, previews and saves through the shipped YAML preset and real adapters,
     toolCallResponse('save', 'qingmu_save_reference_draft', saveArgs), textResponse('已保存导演稿；可在工作台恢复。'),
   ])
   const h = await harness(adapter); await h.run()
+  const modelRequest = adapter.requests[0]!
+  expect(modelRequest.system).toContain('已有草稿就沿用这份草稿')
+  expect(modelRequest.system).toContain('优先走剧本修改流程')
+  for (const name of ['qingmu_read_reference_draft', 'qingmu_preview_reference_draft', 'qingmu_save_reference_draft']) {
+    expect(modelRequest.tools?.map(tool => tool.name)).toContain(name)
+    expect(modelRequest.system).toContain(name)
+  }
   for (const call of ['read', 'preview', 'save']) expect(result(h.agent, call).error).toBe(false)
-  const preview = JSON.parse(result(h.agent, 'preview').text)
-  expect(preview.prompt).toBe('图1在图2说：“图1也是原对白，不能改。” 她放低声音，保持原衣服与座位。')
+  const preview: unknown = JSON.parse(result(h.agent, 'preview').text)
+  expect(preview).toMatchObject({ prompt: '图1在图2说：“图1也是原对白，不能改。” 她放低声音，保持原衣服与座位。' })
   expect(result(h.agent, 'read').text).not.toContain('browserUrl')
   expect(result(h.agent, 'preview').text).not.toContain('owned.test')
   expect(saves(h.upstream)).toHaveLength(1)
@@ -156,6 +167,23 @@ it('reads, previews and saves through the shipped YAML preset and real adapters,
   await h.presets.dispose()
   expect(h.ctx.tools.get('qingmu_save_reference_draft', agentScope)).toBeUndefined()
 })
+
+it.each(['qingmu_read_reference_draft', 'qingmu_preview_reference_draft', 'qingmu_save_reference_draft'])(
+  'reports a missing reference capability even when all older tools are mounted (%s)', async (missing) => {
+    const h = await harness(new MockAdapter([]))
+    expect(readNativeDirectorReadiness(h.ctx, h.agent.session).status).toBe('mounted')
+    const registry = h.ctx.agentPresets.serviceFor(h.agent, 'tools') ?? h.ctx.tools
+    const get = registry.get.bind(registry)
+    const mounted = vi.spyOn(registry, 'get').mockImplementation((name, scope) => name === missing ? undefined : get(name, scope))
+    try {
+      const readiness = readNativeDirectorReadiness(h.ctx, h.agent.session)
+      expect(readiness).toMatchObject({ status: 'missing-tools', presetId: 'qingmu-director', missingTools: [missing] })
+      expect(readiness.tools).toHaveLength(8)
+      expect(h.upstream.fetch).not.toHaveBeenCalled()
+      expect(h.agent.session.events.filter(event => event.type === 'tool/call')).toHaveLength(0)
+    } finally { mounted.mockRestore() }
+  },
+)
 
 it('rejects a stale editor revision rather than overwriting the browser draft', async () => {
   const h = await harness(new MockAdapter([

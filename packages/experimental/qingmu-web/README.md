@@ -14,7 +14,7 @@ The same Host also requires a raw, untrimmed `QINGMU_IMAGO_ATTESTATION_KEY` of a
 
 This bundle ships the `qingmu-director` agent preset, displayed as 青木导演, through `dsh.bundle.agentPresets`. The profile launcher registers its package-relative root alongside the stock modes; no installation path or copied user preset is needed. The Qingmu patch selects it as the profile default, subject to the native user default setting. Stock profiles and existing sessions keep their modes. Users can select this preset through the native mode picker for a new or blank session; populated conversations are not switched automatically.
 
-The preset composes a complete director persona and the context bridge's [native read and suggestion tools](../qingmu-director-context-bridge/README.md). It does not add shell, arbitrary filesystem, self-modification, Provider, adoption, save, or approval tools. The existing cockpit must bind the selected shot to that same session. If no shot is bound, the tool reports it rather than inventing a project. The cockpit can adopt a logged prompt suggestion into an editable draft; this is not the complete creative workflow.
+The preset composes a complete director persona and the context bridge's [native director tools](../qingmu-director-context-bridge/README.md). It can save an explicitly requested reference-draft or script-dialogue edit through the existing Writer handlers. It does not add shell, arbitrary filesystem, self-modification, Provider, adoption or approval tools. The existing cockpit must bind the selected shot to that same session. If no shot is bound, the tool reports it rather than inventing a project. The cockpit can adopt a logged prompt suggestion into an editable draft; this is not the complete creative workflow.
 
 ## Model Experience
 
@@ -22,7 +22,7 @@ The preset composes a complete director persona and the context bridge's [native
 
 #### What the model sees
 
-Only `qingmu-director` sessions receive the stable Chinese persona in [agent.cordis.yml](agent-presets/qingmu-director/agent.cordis.yml) and scoped native tool schemas. The persona asks for actual Writer context and complete IMAGO methods before directing, separates scene intent from shot design, and can propose a single prompt-field replacement or a complete first draft when the PromptIR reader is available. First drafts require that no Draft or Ready already exists. It does not claim to save, generate, or approve content. Its exact model input is pinned through a keyless native-loop snapshot.
+Only `qingmu-director` sessions receive the stable Chinese persona in [agent.cordis.yml](agent-presets/qingmu-director/agent.cordis.yml) and scoped native tool schemas. The persona asks for actual Writer context and complete IMAGO methods before directing. Performance, camera and reference edits follow the saved reference draft through read, preview and user-requested save. It preserves dialogue verbatim; explicit canonical dialogue replacements use the existing ChangeSet tools before reconciling the reference draft. Source changes require rereading context and methods rather than rebinding old text to a new hash. PromptIR field suggestions remain available for explicit field edits or shots without a reference draft; first drafts also require that no Draft or Ready already exists. Saving a working draft does not generate or approve media. Its exact model input is pinned through a keyless native-loop snapshot.
 
 #### Token effect
 

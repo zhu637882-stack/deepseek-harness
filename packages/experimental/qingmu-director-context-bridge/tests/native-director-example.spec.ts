@@ -9,7 +9,8 @@ it('runs the keyless shipped-preset example through the native loop', async () =
   expect(result.methodInNextRequest).toBe(true)
   expect(result.rootTools).toEqual([])
   expect(result.readiness).toMatchObject({ status: 'missing-tools', presetId: 'qingmu-director',
-    missingTools: ['qingmu_read_prompt_draft', 'qingmu_propose_prompt_edit', 'qingmu_read_first_draft', 'qingmu_propose_first_draft'] })
+    missingTools: ['qingmu_read_prompt_draft', 'qingmu_propose_prompt_edit', 'qingmu_read_first_draft', 'qingmu_propose_first_draft',
+      'qingmu_read_reference_draft', 'qingmu_preview_reference_draft', 'qingmu_save_reference_draft'] })
   expect(result.ordinaryReadiness).toMatchObject({ status: 'missing-tools', tools: [] })
   expect(result.inactiveReadiness).toMatchObject({ status: 'inactive', tools: [] })
   expect(result).toMatchSnapshot()
@@ -20,7 +21,7 @@ it('records a native prompt suggestion from a real read and exposes it through t
   expect(result.calls).toEqual(['qingmu_read_prompt_draft', 'qingmu_propose_prompt_edit'])
   expect(result.tools).toContain('qingmu_propose_prompt_edit')
   expect(result.readiness).toMatchObject({ status: 'mounted', presetId: 'qingmu-director', missingTools: [] })
-  expect(result.readiness.tools).toHaveLength(6)
+  expect(result.readiness.tools).toHaveLength(9)
   expect(result.methodInNextRequest).toBe(true)
   expect(result.draftProposal).toMatchObject({ ok: true, value: { status: 'current', proposal: {
     field: 'imageGenPrompt', before: '她站在门口。', after: '她停在门口，门在画面左侧；背面中景，不要求正脸。',

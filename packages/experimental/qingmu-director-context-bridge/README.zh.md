@@ -18,7 +18,7 @@
 
 Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopback 的浏览器 facade。青木 bundle 在 cockpit 之前挂载它。工作区把旧规划镜头或选中的权威自动分镜绑定到同一当前会话；自动分镜绑定不会启用旧规划保存。facade 不会暴露底层 Host command handler、token、Provider payload 或 permit。
 
-`readNativeDirectorReadiness({ sessionId })` 检查已附着会话的运行中 agent（智能体）与作用域工具注册表，不恢复会话或加载预设。它返回 mounted、missing-tools、inactive 或 unavailable；记录中的预设名称和成功的镜头绑定都不能证明工具存在。结果只是某一时点的注册检查，不代表实际执行、模型可用、Writer 健康或创意批准。可选原生服务缺失时，绑定接口仍保留。
+`readNativeDirectorReadiness({ sessionId })` 检查已附着会话的运行中 agent（智能体）与作用域工具注册表，不恢复会话或加载预设。它要求上下文/方法两个工具、四个 PromptIR 建议工具和引用草稿的读取/预览/保存三个工具齐全，返回 mounted、missing-tools、inactive 或 unavailable；记录中的预设名称和成功的镜头绑定都不能证明工具存在。结果只是某一时点的注册检查，不代表实际执行、模型可用、Writer 健康或创意批准。可选原生服务缺失时，绑定接口仍保留。
 
 ## 权威与副作用
 
@@ -43,7 +43,7 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 
 `maxOutputBytes` 默认限制每份完整 JSON 响应为 262144 个 UTF-8 字节。超限时失败，不截断内容。IMAGO 来源加载器另设单文件 128 KiB、整包 512 KiB 上限，因此合规来源包仍可能超过本消费端的响应上限。须显式配置 Host 上限或读取固定追加参考，不能静默缩减方法。
 
-镜头既无 Draft 也无 Ready 时，`qingmu_read_first_draft` 读取当前引导前置资料与完整 C5 方法。`qingmu_propose_first_draft` 接收已记录回执、完整五个可编辑字段及理由；重新读取来源，拒绝已有提示词、作用域漂移或虚构回执。`readNativeFirstDraftProposal` 向同一会话和作用域返回最新有效建议。采用只修改导演工作区的本地首稿；既有引导编译器与 Writer 保存/选择路径负责持久化。工具不设定参考、状态或批准权。就绪检查要求这两个工具和原有四个工具都存在。
+镜头既无 Draft 也无 Ready 时，`qingmu_read_first_draft` 读取当前引导前置资料与完整 C5 方法。`qingmu_propose_first_draft` 接收已记录回执、完整五个可编辑字段及理由；重新读取来源，拒绝已有提示词、作用域漂移或虚构回执。`readNativeFirstDraftProposal` 向同一会话和作用域返回最新有效建议。采用只修改导演工作区的本地首稿；既有引导编译器与 Writer 保存/选择路径负责持久化。工具不设定参考、状态或批准权。这两个工具仍属于就绪检查的必需工具集合。
 
 工具通过原生工具注册表返回无损 JSON，不注入系统提示词，不新建事件日志、业务数据库或独立 Agent 循环。当前上下文是文本证据，不等于逐像素审图，也不代表已经具备全剧剧本。
 
