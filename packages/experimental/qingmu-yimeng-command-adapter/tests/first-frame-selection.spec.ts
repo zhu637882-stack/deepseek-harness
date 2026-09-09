@@ -96,6 +96,21 @@ function selectedState() {
 }
 
 describe('first-frame selection Host media bridge', () => {
+  it.each([
+    [FIRST_FRAME_SELECTION_STATE_PATH, 403, 'first_frame_selection_natural_person_required', 403, 'first_frame_selection_natural_person_required'],
+    [FIRST_FRAME_SELECTION_STATE_PATH, 401, 'first_frame_selection_natural_person_required', 401, 'first_frame_selection_relogin_required'],
+    [FIRST_FRAME_SELECTION_STATE_PATH, 403, 'owner_required', 401, 'first_frame_selection_relogin_required'],
+    [FIRST_FRAME_HISTORY_PATH, 403, 'first_frame_selection_natural_person_required', 401, 'first_frame_selection_relogin_required'],
+  ])('preserves only the exact state identity prerequisite (%s %s %s)', async (path, status, code, expectedStatus, expectedCode) => {
+    const upstream = vi.fn<typeof globalThis.fetch>(async () => Response.json({ detail: { code } }, { status }))
+    const base = await host(upstream, () => 'service-token-1')
+    const response = await fetch(`${base}${path}?${new URLSearchParams(coordinates)}`)
+    expect(response.status).toBe(expectedStatus)
+    expect(await response.json()).toEqual({ code: expectedCode })
+    expect(upstream).toHaveBeenCalledTimes(1)
+    expect(upstream.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true)
+  })
+
   it.each([false, true])('resolves real materialized media IDs (history=%s)', async (history) => {
     const current = state()
     current.candidates[0]!.assetId = 'asset_ingest_1234'

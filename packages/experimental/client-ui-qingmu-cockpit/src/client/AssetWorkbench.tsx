@@ -2815,7 +2815,7 @@ export function AssetWorkbench({ projectId, semanticAssets, port, t, onCommitted
           targetName={choices.find(choice => choice.id === targetId)?.name ?? targetId}
           port={port}
           t={t}
-          onStored={loadSnapshot}
+          onStored={async () => { await loadSnapshot(); await onCommitted() }}
         />
       )}
 

@@ -330,6 +330,10 @@ export function registerFirstFrameSelectionCommands(
       if (history) upstream.pathname += '/history'
       const result = await jsonUpstream(dependencies, req, upstream)
       if (result?.response.ok !== true || !(history ? historyIsCurrent : stateIsCurrent)(result.value, value)) {
+        const failure = result?.value as { readonly detail?: { readonly code?: unknown } } | undefined
+        if (!history && result?.response.status === 403 && failure?.detail?.code === 'first_frame_selection_natural_person_required') {
+          json(res, 403, { code: 'first_frame_selection_natural_person_required' }); return
+        }
         json(res, result?.response.status === 401 || result?.response.status === 403 ? 401 : 409, {
           code: result?.response.status === 401 || result?.response.status === 403
             ? 'first_frame_selection_relogin_required' : 'first_frame_selection_state_invalid',

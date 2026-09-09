@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
-import { assertFirstFrameState, createFirstFrameSelectionClient, FirstFrameSelectionUnknownError } from '../src/client/first-frame-selection.ts'
+import {
+  assertFirstFrameState, createFirstFrameSelectionClient,
+  FirstFrameSelectionIdentityRequiredError, FirstFrameSelectionUnknownError,
+} from '../src/client/first-frame-selection.ts'
 
 const sha = 'a'.repeat(64)
 const coordinates = { projectId: 'project-1', episodeId: 'episode-1', storyboardRevisionId: 'storyboard-1', frameId: 'frame-1' }
@@ -14,6 +17,18 @@ function requestUrl(input: RequestInfo | URL | undefined): URL {
   return input instanceof URL ? input : new URL(input.url, 'http://127.0.0.1')
 }
 describe('first-frame browser selection bridge', () => {
+  it.each([
+    [403, 'first_frame_selection_natural_person_required', true],
+    [401, 'first_frame_selection_natural_person_required', false],
+    [403, 'first_frame_selection_relogin_required', false],
+  ])('distinguishes identity prerequisites from authentication failures (%s %s)', async (status, code, identityRequired) => {
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ code }, { status }))
+    const error = await createFirstFrameSelectionClient(fetcher).state(coordinates).catch((cause: unknown) => cause)
+    expect(error instanceof FirstFrameSelectionIdentityRequiredError).toBe(identityRequired)
+    expect(error).toBeInstanceOf(Error)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
   it('reads only matching four-coordinate candidate state', () => {
     expect(assertFirstFrameState(state(false), coordinates).candidates).toHaveLength(1)
     expect(() => assertFirstFrameState({ ...state(false), storyboardRevisionId: 'other' }, coordinates)).toThrow(/contract mismatch/)

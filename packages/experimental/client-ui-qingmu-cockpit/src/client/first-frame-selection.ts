@@ -138,7 +138,10 @@ async function json(fetcher: typeof fetch, input: RequestInfo | URL, init?: Requ
   })
   const result: unknown = await (response.json() as Promise<unknown>).catch(() => undefined)
   if (!response.ok) {
-    const root = result as { readonly recovery?: unknown } | undefined
+    const root = result as { readonly recovery?: unknown; readonly code?: unknown } | undefined
+    if (response.status === 403 && root?.code === 'first_frame_selection_natural_person_required') {
+      throw new FirstFrameSelectionIdentityRequiredError()
+    }
     const recovery = root?.recovery as { readonly idempotencyKey?: unknown; readonly requestSha256?: unknown } | undefined
     if (typeof recovery?.idempotencyKey === 'string' && IDENTIFIER.test(recovery.idempotencyKey)
       && typeof recovery.requestSha256 === 'string' && SHA256.test(recovery.requestSha256)) {
@@ -147,6 +150,11 @@ async function json(fetcher: typeof fetch, input: RequestInfo | URL, init?: Requ
     throw new Error(`first-frame request failed (${response.status})`)
   }
   return result
+}
+
+/** Browsing is available; adopting requires the user's explicit identity workflow. */
+export class FirstFrameSelectionIdentityRequiredError extends Error {
+  constructor() { super('first_frame_selection_natural_person_required'); this.name = 'FirstFrameSelectionIdentityRequiredError' }
 }
 
 interface FirstFrameSelectionClient {

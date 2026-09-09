@@ -29,6 +29,26 @@ describe('ShootingReviewWorkspace', () => {
     expect(shootingPosterVersion({ subject: { selectedTakeId:'missing', versions:[older] } } as never)).toBeUndefined()
     expect(shootingPosterVersion({ subject: { selectedTakeId:null, versions:[older] } } as never)).toBe(older)
   })
+
+  it('unmounts the old requirements editor immediately when changing the selected shot', async () => {
+    let changingShot = false
+    const save = vi.fn()
+    const read = vi.fn(() => changingShot ? new Promise(() => {}) : Promise.resolve({
+      projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', canonicalStoryboard: null,
+      frameRequirements: [{ id: 'frame_34b3741b1f0a', imagePromptCn: '第一镜已保存要求' }, { id: 'frame-7', imagePromptCn: '第二镜要求' }],
+    }))
+    const props = { projectName: '落日公路', episodeName: '第 1 集', projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9',
+      projection, onSelectShotId: vi.fn(), onNavigate: vi.fn(), directorAssistant: null, t: (key: string) => key,
+      port: { ...port, readScenePlanning: read, saveScenePlanning: save, recoverScenePlanning: vi.fn() } as never }
+    const view = render(<ShootingReviewWorkspace {...props} selectedShotId="frame_34b3741b1f0a" />)
+    await screen.findByDisplayValue('第一镜已保存要求')
+    changingShot = true
+    view.rerender(<ShootingReviewWorkspace {...props} selectedShotId="frame-7" />)
+    expect(screen.queryByDisplayValue('第一镜已保存要求')).toBeNull()
+    expect(screen.queryByRole('button', { name: '保存当前要求' })).toBeNull()
+    expect(screen.getByText('正在读取本镜首帧要求…')).toBeTruthy()
+    expect(save).not.toHaveBeenCalled()
+  })
   it('selects one primary action from real material state', () => {
     expect(shootingPrimary(false, false, false)).toBe('first-frame')
     expect(shootingPrimary(true, false, false)).toBe('select-frame')

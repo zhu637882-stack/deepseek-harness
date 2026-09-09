@@ -4,13 +4,13 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ShootingFirstFrameHistory } from '../src/client/ShootingFirstFrameHistory.tsx'
 const api = vi.hoisted(() => ({ history: vi.fn(), state: vi.fn(), historyPreview: vi.fn(), select: vi.fn(), receipt: vi.fn() }))
 vi.mock('../src/client/first-frame-selection.ts', async importOriginal => ({ ...await importOriginal<typeof import('../src/client/first-frame-selection.ts')>(), createFirstFrameSelectionClient: () => api }))
-import { FirstFrameSelectionUnknownError } from '../src/client/first-frame-selection.ts'
+import { FirstFrameSelectionIdentityRequiredError, FirstFrameSelectionUnknownError } from '../src/client/first-frame-selection.ts'
 vi.mock('../src/client/FirstFrameCandidatePreview.tsx', () => ({ FirstFrameCandidatePreview: ({ onPreviewReady, thumbnailClassName }: { onPreviewReady: (url: string) => void; thumbnailClassName?: string }) => thumbnailClassName !== undefined ? <img alt="历史首帧缩略图" /> : <button onClick={() => onPreviewReady('blob:viewed')}>读取真实候选</button> }))
 const scope = { projectId: 'p', episodeId: 'e', storyboardRevisionId: 'r', frameId: 'f' }
 const image = { assetId: 'a', materializedSha256: 'a'.repeat(64), qualityStatus: 'passed', selectionStatus: 'Unselected', isSelected: false }
 const props = { scope, onCommitted: vi.fn(async () => undefined) }
 beforeEach(() => { localStorage.clear(); api.history.mockResolvedValue([image]); api.state.mockResolvedValue({ candidates: [image], selectedAssetId: null, selectionReceipt: null }); api.select.mockRejectedValue(new Error('lost response')) })
-afterEach(() => { cleanup(); vi.resetAllMocks() })
+afterEach(() => { cleanup(); vi.resetAllMocks(); vi.unstubAllGlobals() })
 
 it('browses historical rejected media even when eligibility is blocked, with no mutation', async () => {
   api.history.mockResolvedValue([{ ...image, selectionStatus: 'Rejected' }]); api.state.mockRejectedValue(new Error('not ready'))
@@ -36,6 +36,27 @@ it('offers a read-only retry for unavailable eligibility, never asks for another
   fireEvent.click(screen.getByRole('button', { name: '重新检查采用条件' }))
   await waitFor(() => expect(api.state).toHaveBeenCalledTimes(2))
   expect(screen.queryByRole('button', { name: '认可并采用这张首帧' })).toBeNull()
+  expect(api.select).not.toHaveBeenCalled()
+})
+
+it('opens the explicit natural-person path when Writer requires it, without treating the 403 as a network failure', async () => {
+  api.state.mockRejectedValueOnce(new FirstFrameSelectionIdentityRequiredError())
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('natural-person-identity')) return new Response(JSON.stringify({
+      schema: 'jason.qingmu-natural-person-identity-status.v1', projectId: 'p', state: 'unbound', naturalPersonId: null, canEnroll: true,
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+    return new Response(JSON.stringify({
+      schema: 'jason.qingmu-platform-human-presence-status.v1', projectId: 'p', state: 'unregistered',
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+  })
+  vi.stubGlobal('fetch', fetcher)
+  render(<ShootingFirstFrameHistory {...props} />)
+  expect(await screen.findByRole('region', { name: '本人身份确认' })).toBeTruthy()
+  expect(screen.getByText(/不会自动登录、绑定或采用/)).toBeTruthy()
+  expect(await screen.findByRole('button', { name: '登录本人账户' })).toBeTruthy()
+  expect(fetcher).toHaveBeenCalledWith(expect.stringContaining('natural-person-identity?projectId=p&episodeId=e'), expect.anything())
+  expect(fetcher).toHaveBeenCalledWith(expect.stringContaining('human-presence-credential?projectId=p&episodeId=e'), expect.anything())
   expect(api.select).not.toHaveBeenCalled()
 })
 
@@ -96,4 +117,26 @@ it('does not downgrade a confirmed adoption when the following page refresh fail
   await screen.findByRole('button', { name: '读取真实候选' })
   expect(api.select).toHaveBeenCalledTimes(1)
   expect(screen.queryByRole('button', { name: '继续原采用操作' })).toBeNull()
+})
+
+it('opens the natural-person gate when an explicit retry changes an offline failure into the identity requirement', async () => {
+  api.state
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockRejectedValueOnce(new FirstFrameSelectionIdentityRequiredError())
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('natural-person-identity')) return new Response(JSON.stringify({
+      schema: 'jason.qingmu-natural-person-identity-status.v1',
+      projectId: 'p', state: 'unbound', naturalPersonId: null, canEnroll: true,
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+    return new Response(JSON.stringify({
+      schema: 'jason.qingmu-platform-human-presence-status.v1',
+      projectId: 'p', state: 'unregistered',
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+  })
+  vi.stubGlobal('fetch', fetcher)
+  render(<ShootingFirstFrameHistory {...props} />)
+  fireEvent.click(await screen.findByRole('button', { name: '重新检查采用条件' }))
+  expect(await screen.findByRole('region', { name: '本人身份确认' })).toBeTruthy()
+  expect(api.select).not.toHaveBeenCalled()
 })

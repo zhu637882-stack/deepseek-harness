@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FirstFrameCandidatePreview } from './FirstFrameCandidatePreview.tsx'
-import { createFirstFrameSelectionClient, FirstFrameSelectionUnknownError, type FirstFrameHistoryCandidate, type FirstFrameSelectionCoordinates, type FirstFrameSelectionState, type FirstFrameSelectionIntent } from './first-frame-selection.ts'
+import { NaturalPersonIdentityGate } from './NaturalPersonIdentityGate.tsx'
+import { createFirstFrameSelectionClient, FirstFrameSelectionIdentityRequiredError, FirstFrameSelectionUnknownError, type FirstFrameHistoryCandidate, type FirstFrameSelectionCoordinates, type FirstFrameSelectionState, type FirstFrameSelectionIntent } from './first-frame-selection.ts'
 import css from './ShootingFirstFrameHistory.module.css'
 
 type Marker = FirstFrameSelectionIntent & { readonly requestSha256?: string }
+type SelectionLoad = 'loading' | 'ready' | 'failed' | 'identity-required'
+
+function selectionFailure(cause: unknown): SelectionLoad {
+  return cause instanceof FirstFrameSelectionIdentityRequiredError
+    ? 'identity-required'
+    : 'failed'
+}
 function readMarker(key: string, scope: FirstFrameSelectionCoordinates): Marker | undefined {
   const raw = localStorage.getItem(key)
   if (raw === null) return
@@ -25,7 +33,7 @@ export function ShootingFirstFrameHistory({ scope, onCommitted, onCandidatePrevi
   const client = useMemo(() => createFirstFrameSelectionClient(), [])
   const [items, setItems] = useState<readonly FirstFrameHistoryCandidate[]>()
   const [selection, setSelection] = useState<FirstFrameSelectionState>()
-  const [selectionLoad, setSelectionLoad] = useState<'loading' | 'ready' | 'failed'>('loading')
+  const [selectionLoad, setSelectionLoad] = useState<SelectionLoad>('loading')
   const [activeId, setActiveId] = useState('')
   const [viewed, setViewed] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string>()
@@ -61,7 +69,10 @@ export function ShootingFirstFrameHistory({ scope, onCommitted, onCandidatePrevi
       if (controller.signal.aborted) return
       setItems(values); setActiveId(values.at(-1)?.assetId ?? '')
     }).catch(() => { if (!controller.signal.aborted) setError('首帧历史暂时无法读取，请重新打开。') })
-    void readSelection(controller.signal).catch(() => { if (!controller.signal.aborted) setSelectionLoad('failed') })
+    void readSelection(controller.signal).catch((cause: unknown) => {
+      if (controller.signal.aborted) return
+      setSelectionLoad(selectionFailure(cause))
+    })
     return () => controller.abort()
   }, [client, readSelection])
   const onPreviewReady = useCallback((url: string | undefined) => { setViewed(url !== undefined); setPreviewUrl(url) }, [])
@@ -143,8 +154,18 @@ export function ShootingFirstFrameHistory({ scope, onCommitted, onCandidatePrevi
     </button>)}</div>
     <div className={css.footer}>
       {eligible && viewed && !pending && <button className={css.primary} type="button" disabled={busy} onClick={() => { void adopt() }}>认可并采用这张首帧</button>}
-      {selectionLoad === 'failed' ? <div role="alert"><p>采用条件暂时无法读取。你可以继续比较候选，不必因此重新生成。</p><button type="button" onClick={() => { void readSelection().catch(() => setSelectionLoad('failed')) }}>重新检查采用条件</button></div>
-        : current && !eligible && !current.isSelected && <p role="status">{selectionLoad === 'loading' ? '正在读取采用条件…' : current.qualityStatus === 'pending' ? '这张图片的检查结果尚未就绪。可继续比较，暂不能采用。' : '这张图片不符合当前采用条件，仅供对照；现有选用不会改变。'}</p>}
+      {selectionLoad === 'identity-required' ? <NaturalPersonIdentityGate projectId={scope.projectId} episodeId={scope.episodeId}
+        onBound={async () => {
+          setError(''); setSelectionLoad('loading')
+          try { await readSelection() }
+          catch (cause) { setSelectionLoad(selectionFailure(cause)) }
+        }} />
+        : selectionLoad === 'failed' ? <div role="alert"><p>采用条件暂时无法读取。你可以继续比较候选，不必因此重新生成。</p><button type="button" onClick={() => {
+          void readSelection().catch((cause: unknown) => {
+            setSelectionLoad(selectionFailure(cause))
+          })
+        }}>重新检查采用条件</button></div>
+          : current && !eligible && !current.isSelected && <p role="status">{selectionLoad === 'loading' ? '正在读取采用条件…' : current.qualityStatus === 'pending' ? '这张图片的检查结果尚未就绪。可继续比较，暂不能采用。' : '这张图片不符合当前采用条件，仅供对照；现有选用不会改变。'}</p>}
       {pending && <button type="button" disabled={busy} onClick={() => { void recover() }}>{canReadReceipt ? '读取原采用结果' : '继续原采用操作'}</button>}
       {error && <p role="alert">{error}</p>}
     </div>
