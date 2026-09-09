@@ -8,12 +8,18 @@ import type {
 import type { QingmuYimengPort } from './contracts.ts'
 import css from './ReferenceVideoWorkspace.module.css'
 import { ReferenceVideoRuns } from './ReferenceVideoRuns.tsx'
+import { inheritReferenceBindings } from './reference-draft-inheritance.ts'
 
 /** One shot's local reference draft; previewing never queues paid work. */
 export interface ReferenceVideoWorkspaceProps {
   readonly projectId: string
   readonly frameId: string
   readonly initialPrompt: string
+  readonly shotLabel?: string
+  readonly initialOpen?: boolean
+  readonly embedded?: boolean
+  readonly referenceSources?: readonly { readonly frameId: string; readonly label: string }[]
+  readonly onUnsavedChange?: (dirty: boolean) => void
   readonly port: Pick<QingmuYimengPort, 'referenceVideoAssets' | 'referenceVideoPreview' | 'referenceVideoDraft' | 'saveReferenceVideoDraft' | 'referenceVideoQuote' | 'referenceVideoRuns' | 'queueReferenceVideo'>
 }
 
@@ -23,7 +29,8 @@ type Chosen = Omit<ReferenceVideoAsset, 'mediaType'> & { readonly bindingToken: 
  * @param props - Current shot and the authenticated host read port.
  * @returns Director reference editor.
  */
-export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, port }: ReferenceVideoWorkspaceProps) {
+export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, port,
+  shotLabel, initialOpen, embedded, referenceSources, onUnsavedChange }: ReferenceVideoWorkspaceProps) {
   const [assets, setAssets] = useState<readonly ReferenceVideoAsset[]>([])
   const [page, setPage] = useState(0)
   const [pages, setPages] = useState(1)
@@ -41,6 +48,9 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
   const [sourceAccepted, setSourceAccepted] = useState(true)
   const [saving, setSaving] = useState(false)
   const [draftMessage, setDraftMessage] = useState('正在读取草稿状态…')
+  const [inheritFrom, setInheritFrom] = useState(referenceSources?.[0]?.frameId ?? '')
+  const [inheriting, setInheriting] = useState(false)
+  const inheritAbort = useRef<AbortController | undefined>(undefined)
   const epoch = useRef(0)
   const activeText = useRef<{ index: number; start: number; end: number }>({
     index: 0, start: initialPrompt.length, end: initialPrompt.length,
@@ -59,8 +69,38 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
     return () => {
       controller.abort(); previewAbort.current?.abort(); assetsAbort.current?.abort()
       draftAbort.current?.abort(); saveAbort.current?.abort()
+      inheritAbort.current?.abort()
     }
   }, [projectId, frameId, port])
+
+  const dirty = epoch.current > 0 && savedEpoch !== epoch.current
+  useEffect(() => {
+    onUnsavedChange?.(dirty)
+    return () => { onUnsavedChange?.(false) }
+  }, [dirty, onUnsavedChange])
+
+  const inherit = async () => {
+    const source = referenceSources?.find(item => item.frameId === inheritFrom && item.frameId !== frameId)
+    if (!source || inheriting || saving) return
+    inheritAbort.current?.abort()
+    const controller = new AbortController(); inheritAbort.current = controller
+    const start = epoch.current
+    setInheriting(true); setError('')
+    try {
+      const value = await port.referenceVideoDraft({ projectId, frameId: source.frameId }, controller.signal)
+      if (controller.signal.aborted) return
+      if (value.projectId !== projectId || value.frameId !== source.frameId) throw new Error('来源镜头不匹配，请重新读取。')
+      if (epoch.current !== start) throw new Error('读取期间已有新的编辑，已保留当前内容。需要沿用时请再点击。')
+      const next = inheritReferenceBindings(chosen, value)
+      const added = next.length - chosen.length
+      if (added === 0) { setDraftMessage('当前镜头已包含这些引用，文字和参数未改动。'); return }
+      invalidate()
+      setChosen(next.map(item => ({ ...item, browserUrl: 'browserUrl' in item ? item.browserUrl
+        : assets.find(asset => asset.assetId === item.assetId && asset.assetSha256 === item.assetSha256)?.browserUrl ?? '' })))
+      setDraftMessage(`已沿用${source.label} 的 ${added} 项引用；本镜文字和参数保留，尚未保存。`)
+    } catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '沿用引用失败') }
+    finally { if (!controller.signal.aborted) setInheriting(false) }
+  }
 
   const invalidate = () => {
     epoch.current += 1
@@ -175,18 +215,19 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
     invalidate(); setChosen(next)
   }
 
-  return <details className={css.workspace}>
-    <summary>
+  const Container = embedded ? 'section' : 'details'
+  return <Container className={css.workspace} data-embedded={embedded || undefined} {...(embedded ? {} : { open: initialOpen })}>
+    {!embedded && <summary>
       <span className={css.eyebrow}>SHOT REFERENCE DESK</span>
       <span>精确引用 · 导演稿与候选</span>
       <small>人物、场景、声音与镜头意图在同一处确认</small>
-    </summary>
+    </summary>}
     <div className={css.intro}>
-      <div>
+      {!embedded && <div>
         <p className={css.kicker}>青木导演工作台</p>
-        <h3>镜头 {draftState?.draft ? `· 草稿 v${draftState.draft.revision}` : '· 当前试排'}</h3>
+        <h3>{shotLabel ?? '镜头'} {draftState?.draft ? `· 草稿 v${draftState.draft.revision}` : '· 当前试排'}</h3>
         <p>确认引用、写导演意图、核价后登记候选。已选素材和候选不会自动替换。</p>
-      </div>
+      </div>}
       <div className={css.sceneStatus} aria-label="当前工作状态">
         <span>{images} 张图</span><span>{audios} 段音色</span><span>{draftState?.draft ? `草稿 v${draftState.draft.revision}` : '未保存'}</span>
       </div>
@@ -208,6 +249,18 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
             {loading ? '读取素材…' : page === 0 ? '读取项目素材' : page < pages ? '更多素材' : '素材已读完'}
           </button>
         </div>
+        {referenceSources && referenceSources.length > 0 && <div className={css.inheritReferences}>
+          <label>沿用本场引用<select aria-label="引用来源镜头" value={inheritFrom} disabled={inheriting || saving}
+            onChange={(event) => { inheritAbort.current?.abort(); setInheriting(false); setInheritFrom(event.target.value) }}>
+            {referenceSources.filter(source => source.frameId !== frameId).map(source => (
+              <option key={source.frameId} value={source.frameId}>{source.label}</option>
+            ))}
+          </select></label>
+          <button type="button" disabled={inheriting || saving || !inheritFrom} onClick={() => { void inherit() }}>
+            {inheriting ? '读取来源引用…' : '沿用引用'}
+          </button>
+          <small>保留本镜文字与参数，只合并已保存的素材引用。</small>
+        </div>}
         {assets.length > 0 && <div className={css.assets} aria-label="项目素材">
           {assets.map(asset => <article key={`${asset.assetId}:${asset.assetSha256}`}>
             {asset.browserUrl && (asset.mediaType === 'reference_image'
@@ -237,11 +290,12 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
       </section>
       <section className={css.directorDesk} aria-label="导演描述与参数">
         <div className={css.sectionHeading}><div><p className={css.kicker}>DIRECTOR'S NOTE</p><h4>视频描述</h4></div>
-          <button type="button" onClick={() => { invalidate(); setParts([{ text: initialPrompt }]); activeText.current = { index: 0, start: initialPrompt.length, end: initialPrompt.length } }}>载入当前视频描述</button>
+          <button type="button" disabled={!initialPrompt} onClick={() => { invalidate(); setParts([{ text: initialPrompt }]); activeText.current = { index: 0, start: initialPrompt.length, end: initialPrompt.length } }}>载入当前视频描述</button>
         </div>
         <div className={css.prompt}>
           {parts.map((part, index) => 'text' in part
             ? <textarea key={index} aria-label={`视频描述片段${index + 1}`} rows={parts.length === 1 ? 5 : 2} value={part.text}
+              placeholder="描述本镜的动作、机位与对白；也可让导演助手保存后，恢复已存草稿。"
               onSelect={(event) => {
                 const field = event.currentTarget
                 activeText.current = { index, start: field.selectionStart, end: field.selectionEnd }
@@ -293,5 +347,5 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
     </div>
     {error && <p role="alert">{error}</p>}
     <p className={css.note}>引用草稿按镜头保存。刷新后可恢复已保存内容；保存不会采用素材或启动生成。</p>
-  </details>
+  </Container>
 }

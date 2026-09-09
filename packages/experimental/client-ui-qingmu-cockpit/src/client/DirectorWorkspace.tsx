@@ -7,6 +7,7 @@ import { PromptIrWorkspace } from './PromptIrWorkspace.tsx'
 import { TakeVersionCompareView } from './TakeVersionCompareView.tsx'
 import css from './DirectorWorkspace.module.css'
 import { ScenePlanningWorkspace } from './ScenePlanningWorkspace.tsx'
+import { SceneReferenceWorkspace } from './SceneReferenceWorkspace.tsx'
 import type { DirectorContextClientPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import type { QingmuHostSync } from './host-sync.ts'
 import type { HostDescriptionSource } from '@deepseek-ai/dsh-client-connection/client'
@@ -57,21 +58,31 @@ export function DirectorWorkspace(props: DirectorWorkspaceProps) {
   }, [reviewReady])
   const [planningDirty, setPlanningDirty] = useState(false)
   const [promptDirty, setPromptDirty] = useState(false)
+  const [referenceDirty, setReferenceDirty] = useState(false)
+  const selectShot = (nextShotId: string) => {
+    if (nextShotId !== props.selectedShotId && referenceDirty
+      && !window.confirm('当前镜头的引用草稿尚未保存。切换镜头会保留服务器草稿，但会丢失这次试排，继续吗？')) return
+    props.onSelectShotId(nextShotId)
+  }
   useEffect(() => {
-    props.onUnsavedChange(planningDirty || promptDirty)
+    props.onUnsavedChange(planningDirty || promptDirty || referenceDirty)
     return () => { props.onUnsavedChange(false) }
-  }, [planningDirty, promptDirty, props.onUnsavedChange])
+  }, [planningDirty, promptDirty, referenceDirty, props.onUnsavedChange])
   return <>
-    <ScenePlanningWorkspace key={`${props.projectId}:${props.episodeId}`} {...props}
+    <ScenePlanningWorkspace key={`${props.projectId}:${props.episodeId}`} {...props} onSelectShotId={selectShot}
       canonicalDirectorScope={canonicalDirectorScope}
       canonicalDirectorRevision={JSON.stringify(currentProjection?.director.shotRelations.storyboardRevision)}
       onUnsavedChange={setPlanningDirty} />
+    {props.presentation !== 'assistant' && currentProjection?.director.shotRelations && <SceneReferenceWorkspace
+      projectId={props.projectId} relations={currentProjection.director.shotRelations}
+      selectedShotId={props.selectedShotId} onSelectShotId={selectShot} guardUnsavedNavigation={false}
+      onUnsavedChange={setReferenceDirty} port={props.port} />}
     {props.presentation !== 'assistant' && <details open={productionOpen} onToggle={(event) => {
       setProductionOpen(event.currentTarget.open)
       if (event.currentTarget.open) setProductionMounted(true)
     }}>
       <summary>已有提示词、Take 与高级分镜</summary>
-      {productionMounted && <ExistingDirectorWorkspace {...props} onUnsavedChange={setPromptDirty} />}
+      {productionMounted && <ExistingDirectorWorkspace {...props} onSelectShotId={selectShot} onUnsavedChange={setPromptDirty} />}
     </details>}
   </>
 }
