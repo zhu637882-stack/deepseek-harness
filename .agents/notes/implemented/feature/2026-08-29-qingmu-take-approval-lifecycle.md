@@ -22,6 +22,8 @@ Before each write, the client stores and reads back a versioned non-secret recov
 
 External originals retain unknown producer identity: uploading or registering a file is not proof of producing it. Proven canvas participants remain ineligible approvers. External acceptance binds current source registration; review feeds supply current origins so an unchanged comment SHA cannot preserve decisions across source changes. Internal generation fields remain null and generation checks stay not applicable. Current QC and human approval remain required for handoff of original picture and embedded audio.
 
+Comment coordinates round to the nearest millisecond because valid containers carry finer duration precision; original media identity and duration remain exact. Missing current media removes its current review binding while retaining immutable history and readable handoff blockers. A missing source can never supply current QC, approval, or download authority.
+
 ## Alternatives considered
 
 **Use one generic Take status.** This collapses collaboration, review, technical evidence, formal authority, and episode verification into an ambiguous flag and makes invalidation impossible to audit correctly.

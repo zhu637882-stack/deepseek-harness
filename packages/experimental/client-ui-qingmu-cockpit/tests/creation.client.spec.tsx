@@ -8,9 +8,17 @@ import { CreateProjectWorkspace, TextImportWorkspace } from '../src/client/Creat
 const port = () => ({ initializeProject: vi.fn(async () => { throw new Error('unknown submission result') }),
   readCreationOptions: vi.fn(async (): Promise<CreationOptions> => ({ schema: 'jason.qingmu-creation-options.v1',
     textVersions: [{ id: 'creation-text-v1', label: '当前输入文本', available: true }],
-    visualStyles: [{ id: 'realistic', label: '现代写实', group: 'real_person', groupLabel: '真人' }],
-    stylePacks: [{ id: 'sp_cafe', version: '1', name: '暖光电影', group: 'real_person', groupLabel: '真人写实', intent: '暖光室内', tone: '温暖克制' }],
-    directorSkills: [{ id: 'shot_blocking_director', version: '1', sha256: 'a'.repeat(64), stage: 'director', available: true, disabledReason: null }],
+    visualStyles: [{ id: 'realistic', label: '现代写实', group: 'real_person', groupLabel: '真人', previewUrl: '/api/qingmu/creation-style-preview?styleId=realistic' },
+      { id: 'donghua', label: '国漫', group: '2d', groupLabel: '2D', previewUrl: null }],
+    stylePacks: [{ id: 'sp_cafe', version: '1', name: '暖光电影', group: 'real_person', groupLabel: '真人写实', intent: '暖光室内', tone: '温暖克制' },
+      { id: 'sp_2d', version: '1', name: '霓虹国漫', group: '2d', groupLabel: '2D', intent: '霓虹城市', tone: '明快' }],
+    directorSkills: [
+      { id: 'episode_dramaturgy_architect', version: '1', sha256: 'b'.repeat(64), stage: 'story_episode', available: false, disabledReason: '由剧集阶段处理' },
+      { id: 'scene_dialogue_writer', version: '1', sha256: 'c'.repeat(64), stage: 'script', available: false, disabledReason: '由剧本阶段处理' },
+      { id: 'shot_blocking_director', version: '1', sha256: 'a'.repeat(64), stage: 'shot_plan', available: true, disabledReason: null },
+      { id: 'audio_ownership_planner', version: '1', sha256: 'd'.repeat(64), stage: 'audio_plan', available: false, disabledReason: '由声音阶段处理' },
+      { id: 'sequence_creative_qa', version: '1', sha256: 'e'.repeat(64), stage: 'creative_qa', available: false, disabledReason: '由质检阶段处理' },
+    ],
   })),
   recoverProjectInitialization: vi.fn(async () => { throw new Error('404 bootstrap_receipt_not_found') }),
   readCreativeContract: vi.fn(async (): Promise<CreativeContractState> => ({ schema: 'jason.qingmu-creative-contract-state.v1' as const,
@@ -24,12 +32,26 @@ const port = () => ({ initializeProject: vi.fn(async () => { throw new Error('un
 beforeEach(() => { localStorage.clear(); vi.stubGlobal('crypto', webcrypto) })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 async function selectCreationMethods() {
-  await screen.findByRole('option', { name: '镜头调度与表演设计' })
+  await screen.findByRole('option', { name: '镜头导演（固定）' })
   fireEvent.change(screen.getByRole('combobox', { name: '基础画风' }), { target: { value: 'realistic' } })
   fireEvent.change(screen.getByRole('combobox', { name: '全片风格包' }), { target: { value: 'sp_cafe' } })
   fireEvent.change(screen.getByRole('combobox', { name: '导演方法' }), { target: { value: 'shot_blocking_director' } })
 }
 describe('creation input and unknown-result recovery', () => {
+  it('shows the selected Host thumbnail, stage map, and only compatible style packs', async () => {
+    const api = port()
+    render(<CreateProjectWorkspace port={api} onCreated={async () => {}} />)
+    await screen.findByRole('option', { name: '镜头导演（固定）' })
+    fireEvent.change(screen.getByRole('combobox', { name: '基础画风' }), { target: { value: 'realistic' } })
+    expect(screen.getByRole('img', { name: '现代写实 画风缩略图' }).getAttribute('src')).toBe('/api/qingmu/creation-style-preview?styleId=realistic')
+    expect(screen.getByRole('option', { name: '真人写实 · 暖光电影' })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: '2D · 霓虹国漫' })).toBeNull()
+    fireEvent.change(screen.getByRole('combobox', { name: '全片风格包' }), { target: { value: 'sp_cafe' } })
+    fireEvent.change(screen.getByRole('combobox', { name: '基础画风' }), { target: { value: 'donghua' } })
+    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: '全片风格包' }).value).toBe('')
+    expect(screen.getByText('声音归属规划')).toBeTruthy()
+    expect(screen.getByText('序列创意质检')).toBeTruthy()
+  })
   it('does not invent creation methods when the real catalog is unavailable', async () => {
     const api = port()
     api.readCreationOptions.mockRejectedValue(new Error('catalog unavailable'))

@@ -99,6 +99,24 @@ function rehash(value: Record<string, unknown>): void {
 }
 
 describe('editorial handoff read adapter', () => {
+  it.each([[8.033991, 8034], [8.0334, 8033], [8.0335, 8034], [1.001, 1001]])(
+    'keeps media precision %s while binding comment timecodes to %s milliseconds', (duration, millis) => {
+      const value = projection()
+      const shot = value.source.shots[0]!
+      shot.selectedTake.durationSec = duration
+      value.summary.totalDurationSec = duration
+      const version = shot.comments.versions[0]!
+      version.takeSubject.durationMillis = millis!
+      version.takeSubjectSha256 = sha(version.takeSubject)
+      rehash(value)
+      expect(normalizeEditorialHandoff(value, request, entry => sha(entry))).toEqual(value)
+      version.takeSubject.durationMillis = millis! + 1
+      version.takeSubjectSha256 = sha(version.takeSubject)
+      rehash(value)
+      expect(() => normalizeEditorialHandoff(value, request, entry => sha(entry))).toThrow('canonical feed')
+    },
+  )
+
   it('accepts a current registered local MP4 with its embedded original audio in a v2 draft', () => {
     const value = structuredClone(projection()) as unknown as Record<string, unknown>
     const source = value.source as Record<string, unknown>
@@ -117,6 +135,10 @@ describe('editorial handoff read adapter', () => {
       registrationId: 'registration-1', registrationReceiptSha256: '8'.repeat(64), packetSha256: '9'.repeat(64),
       producerIdentityStatus: 'unknown', providerExecutionVerified: false, recordConsistencyVerified: false,
     }
+    Object.assign(shot.review as Record<string, unknown>, {
+      schema: 'jason.qingmu-take-review-authority-feed.v2',
+      currentOrigins: [{ takeId: 'asset-1', origin: selectedTake.origin }],
+    })
     shot.audio = { status: 'embedded', scopeStatus: 'valid', candidateCount: 0, asset: null,
       embeddedSource: { assetId: 'asset-1', sha256: '5'.repeat(64), packagePath: `media/${'5'.repeat(64)}.mp4`,
         codecName: 'aac', channels: 2, sampleRate: 48000 } }
@@ -134,7 +156,7 @@ describe('editorial handoff read adapter', () => {
     expect(normalizeEditorialHandoff(value, request, entry => sha(entry))).toEqual(value)
   })
 
-  it('rejects a stale or unregistered local Take from the v2 handoff path', () => {
+  it.each([false, true])('keeps damaged external provenance readable with missing media=%s and blocks export', (missing) => {
     const value = structuredClone(projection()) as unknown as Record<string, unknown>
     const source = value.source as Record<string, unknown>
     const shot = (source.shots as Array<Record<string, unknown>>)[0]!
@@ -145,9 +167,38 @@ describe('editorial handoff read adapter', () => {
     selectedTake.qualityStatus = 'pending'
     selectedTake.lineageComplete = false
     selectedTake.origin = null
+    Object.assign(shot.review as Record<string, unknown>, {
+      schema: 'jason.qingmu-take-review-authority-feed.v2',
+      currentOrigins: missing ? [] : [{ takeId: 'asset-1', origin: null }],
+    })
     ;(shot.audio as Record<string, unknown>).embeddedSource = null
+    const blockers = [
+      'editorial_handoff_approval_record_missing', 'editorial_handoff_external_source_invalid',
+      'editorial_handoff_qc_record_missing', 'editorial_handoff_selected_audio_missing',
+    ]
+    if (missing) {
+      Object.assign(selectedTake, {
+        sha256: null, size: null, materializationStatus: 'unavailable', containerTypeStatus: 'unavailable',
+        outputBindingStatus: 'materialized_file_missing', packagePath: null,
+      })
+      ;(shot.comments as Record<string, unknown>).versions = []
+      ;(shot.review as Record<string, unknown>).versions = []
+      blockers.push('editorial_handoff_selected_media_missing', 'editorial_handoff_selected_media_metadata_missing')
+    }
+    blockers.sort()
+    shot.blockers = blockers
+    value.unresolved = blockers.map(code => ({ frameId: 'frame-1', code }))
+    value.blockers = blockers.map(code => ({ scope: 'shot', frameId: 'frame-1', code }))
+    ;(value.summary as Record<string, unknown>).unresolvedCount = blockers.length
     rehash(value)
-    expect(() => normalizeEditorialHandoff(value, request, entry => sha(entry))).toThrow('selected Take origin is invalid')
+    expect(normalizeEditorialHandoff(value, request, entry => sha(entry))).toEqual(value)
+    ;(value.download as Record<string, unknown>).available = true
+    rehash(value)
+    expect(() => normalizeEditorialHandoff(value, request, entry => sha(entry))).toThrow()
+    ;(value.download as Record<string, unknown>).available = false
+    selectedTake.lineageComplete = true
+    rehash(value)
+    expect(() => normalizeEditorialHandoff(value, request, entry => sha(entry))).toThrow()
   })
 
   it('normalizes the server-authored order and routes one GET', async () => {

@@ -4,6 +4,8 @@ Saved frame requirements now cover both automatic and manually planned shots. An
 
 English | [中文](README.zh.md)
 
+The persistent Project library lists every available page of saved projects, supports name/story search, and reopens each project in its own episode scope. The URL and browser hint restore the last accessible project after reload; server project membership is checked before reading its episodes. Creating another project does not replace earlier work.
+
 The standalone five-step workspace starts with Story when the entry has no valid `qingmuView`. Explicit links to assets, storyboard, shooting or delivery keep their target.
 
 Project creation reads Writer's current visual styles, style packs and director methods. Users select all three before submission; the request and recovery hash include the selected methods and text version. An older saved intent remains read-only until receipt recovery reports it absent, after which the user can retain their input and prepare current settings. A saved script offers a direct action to plan storyboards. Returning from missing shooting requirements opens the storyboard step in the standalone workspace.
@@ -259,4 +261,6 @@ When a reference-video quote has `generationSubmissionEnabled: false`, Qingmu ke
 
 The currently browsed local video exposes its source record panel. One explicitly chosen JSON packet can be registered against the current shot; saved record metadata is labelled unverified by the platform. Source status, shot-version binding and creative adoption remain distinct. Uncertain registration keeps only scope, key and request digest in browser storage and recovers by receipt read. Switching candidates cancels pending reads and cannot apply an old packet or receipt to the new candidate.
 
-An external original with current source registration can be explicitly selected for review through the existing Take workflow. The UI distinguishes selection, pending quality, technical QC and human approval. Source changes mark old decisions stale. Editorial handoff labels embedded audio as original audio; both timeline tracks reference the unchanged MP4. Browsing a candidate never implies selection or approval.
+An external original with current source registration can be explicitly selected for review through the existing Take workflow. Shooting keeps a visible comparison entry and a separate selection control: the control remains disabled with an explicit account-permission explanation when the current actor cannot select. The UI distinguishes selection, pending quality, technical QC and human approval, and labels first-frame history separately from video comparison. Source changes mark old decisions stale. Editorial handoff labels embedded audio as original audio; both timeline tracks reference the unchanged MP4. Browsing a candidate never implies selection or approval.
+
+Creation displays catalog-backed base-style thumbnails through the Host. Full-film packs are filtered to the chosen visual group, and changing groups clears an incompatible selection. The expandable skill list explains execution stages and unavailable methods; listing a skill does not imply that the native director has invoked it.

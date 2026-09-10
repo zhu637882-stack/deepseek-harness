@@ -25,3 +25,7 @@ Canonical TextImportService owns TXT bytes, parsing drafts, corrections and fing
 ## Consequences
 
 Creation and import work with no Provider. Paste and UTF-8 TXT have explicit limits; DOC/DOCX are outside this entry. A fresh browser recovers canonical saved data, not unsubmitted browser-only text. Project transactions, stale-source rejection and filesystem failure recovery have focused tests. The [real browser test](../../../../apps/web/tests/qingmu-creation.e2e.ts) uses the normal local launcher, an empty independent database and response-loss injection without replacing the API. Local integration does not establish full product, media or human acceptance.
+
+The standalone project library reuses the existing paginated project API rather than creating a second index. Search and project switching leave saved scripts and media untouched; browser restoration is only a hint checked against the current account’s returned projects.
+
+Base styles retain their real catalog thumbnails. Film-pack selection is constrained to the same visual group in the UI and Writer initialization. The existing reference-video compiler includes locked visual settings in the actual prompt and source digest, preserving authored dialogue and reference order. Registered script/director methods still require their actual execution entry; catalog display is not evidence of an AI production run.

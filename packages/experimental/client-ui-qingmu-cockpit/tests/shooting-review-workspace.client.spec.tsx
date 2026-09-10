@@ -50,7 +50,10 @@ describe('ShootingReviewWorkspace', () => {
       selectedShotId="frame_34b3741b1f0a" onSelectShotId={vi.fn()} onNavigate={vi.fn()}
       directorAssistant={null} port={scopedPort as never} t={key => key} />)
     await waitFor(() => { expect(takePreview).toHaveBeenCalled() })
-    expect(Boolean(screen.queryByRole('button', { name: '采用这条视频' }))).toBe(allowed)
+    const action = allowed
+      ? screen.getByRole('button', { name: '选择此视频，进入审看' })
+      : screen.getByRole('button', { name: '当前视频暂不能选择' })
+    expect(action).toHaveProperty('disabled', !allowed)
     expect(selectTakeVersion).not.toHaveBeenCalled()
   })
 
@@ -256,8 +259,44 @@ describe('ShootingReviewWorkspace', () => {
     await screen.findByText('本地导入视频')
     expect(screen.getByText('libtv-shot-01.mp4')).toBeTruthy()
     expect(screen.getByText('来源待登记，暂不可采用')).toBeTruthy()
-    expect(screen.getByText('本地视频可先查看或登记来源，采用还需完成检查。')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: '采用这条视频' })).toBeNull()
+    expect(screen.getByText('本地视频可先查看或登记来源；登记完成后仍需检查才可选择。')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '当前视频暂不能选择' })).toHaveProperty('disabled', true)
+  })
+
+  it('keeps current local-source selection visible but disabled without account permission', async () => {
+    const candidate = { takeId: 'local-current', versionOrdinal: 1, outputAssetId: 'asset-local-current',
+      outputSha256: 'b'.repeat(64), outputBindingStatus: 'verified', qualityStatus: 'pending',
+      isSelected: false, selectionStatus: 'Unselected', canAttemptSelection: true, lineageComplete: false,
+      blockers: [], source: 'local', originalFileName: 'libtv-shot-03.mp4', durationSec: 8,
+      origin: { bindingStatus: 'current' } }
+    const selectTakeVersion = vi.fn()
+    const scopedPort = { takePreview: vi.fn(() => new Promise(() => {})), selectTakeVersion,
+      recoverTakeVersionSelection: vi.fn(), takeAcceptance: vi.fn(), takeAcceptanceMethod: vi.fn(),
+      takeVersions: vi.fn(async ({ frameId }: { frameId: string }) => ({
+        subject: { projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', frameId,
+          selectedTakeId: null, versions: [candidate] }, capabilities: { canSelect: false }, stackSnapshotSha256: 'a'.repeat(64),
+      })) }
+    const workspace = render(<ShootingReviewWorkspace projectName="落日公路" episodeName="第 1 集"
+      projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" projection={projection}
+      selectedShotId="frame_34b3741b1f0a" onSelectShotId={vi.fn()} onNavigate={vi.fn()}
+      directorAssistant={null} port={scopedPort as never} t={key => key} />)
+    await screen.findByText('来源已登记 · 当前账号没有选片权限')
+    expect(screen.getByText('本地视频来源已登记；当前账号没有选片权限，仍可查看或比较候选。')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '当前账号没有选片权限' })).toHaveProperty('disabled', true)
+    fireEvent.click(screen.getByText('比较与选择视频'))
+    await screen.findByText('takeVersionTitle')
+    const comparison = screen.getByText('比较与选择视频').closest('details')
+    if (comparison === null) throw new Error('comparison details missing')
+    expect(comparison.open).toBe(true)
+    workspace.rerender(<ShootingReviewWorkspace projectName="落日公路" episodeName="第 1 集"
+      projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" projection={projection}
+      selectedShotId="frame-7" onSelectShotId={vi.fn()} onNavigate={vi.fn()}
+      directorAssistant={null} port={scopedPort as never} t={key => key} />)
+    const nextComparison = screen.getByText('比较与选择视频').closest('details')
+    if (nextComparison === null) throw new Error('next comparison details missing')
+    expect(nextComparison.open).toBe(false)
+    expect(screen.queryByText('takeVersionTitle')).toBeNull()
+    expect(selectTakeVersion).not.toHaveBeenCalled()
   })
 
   it('does not let an old initial Take read overwrite a newer local-import refresh', async () => {

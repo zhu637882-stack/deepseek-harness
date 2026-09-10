@@ -42,6 +42,8 @@ export interface CreationVisualStyle {
   readonly label: string
   readonly group: string
   readonly groupLabel: string
+  /** Host-owned same-origin preview; absent when Writer has no verified thumbnail. */
+  readonly previewUrl: string | null
 }
 /** One Writer-provided style-pack projection. */
 export interface CreationStylePack {
@@ -281,10 +283,14 @@ export function prepareCreationOptionsRead(value: unknown, helpers: Helpers): {
       const group = object(style.group, bad)
       const id = identifier(style.key, bad)
       if (visualIds.has(id)) throw bad('visual style identity invalid')
-      // Writer's style entries retain additional, non-picker presentation fields. Validate
-      // the projected identity only so a catalog thumbnail field cannot break creation.
+      const imageUrl = style.imageUrl
+      const imageExists = style.imageExists
+      if (imageUrl !== `/images/tago-styles/${id}.webp` || typeof imageExists !== 'boolean') {
+        throw bad('visual style preview invalid')
+      }
       visualIds.add(id)
-      visualStyles.push({ id, label: text(style.labelZh, bad), group: identifier(group.key, bad), groupLabel: text(group.labelZh, bad) })
+      visualStyles.push({ id, label: text(style.labelZh, bad), group: identifier(group.key, bad), groupLabel: text(group.labelZh, bad),
+        previewUrl: imageExists ? `/api/qingmu/creation-style-preview?styleId=${encodeURIComponent(id)}` : null })
     }
     if (visualStyles.length !== visualTotal || visualStyles.length === 0) throw bad('visual style catalog count invalid')
     const packs = exact(stylePacksValue, ['schemaVersion', 'groups', 'total'], bad)

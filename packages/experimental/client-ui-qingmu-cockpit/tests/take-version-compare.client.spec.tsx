@@ -334,7 +334,8 @@ describe('Take version comparison and selection', () => {
       }))
       return await deferred.promise
     })
-    render(<TakeVersionCompareView {...props(port)} />)
+    const onSelectionCommitted = vi.fn()
+    render(<TakeVersionCompareView {...props(port)} onSelectionCommitted={onSelectionCommitted} />)
     const button = await screen.findByRole('button', { name: zh.takeVersionSelectButton })
     fireEvent.click(button)
     fireEvent.click(button)
@@ -345,6 +346,7 @@ describe('Take version comparison and selection', () => {
     if (stored.status !== 'ready') throw new Error('selection marker missing')
     await act(async () => { deferred.resolve(result(stored.marker)) })
     expect(await screen.findByText(zh.takeVersionSelectionCommitted)).toBeTruthy()
+    expect(onSelectionCommitted).toHaveBeenCalledOnce()
     await waitFor(() => { expect(port.takeVersions).toHaveBeenCalledTimes(2) })
     await waitFor(() => {
       expect(port.takeAcceptance).toHaveBeenCalledTimes(2)
@@ -354,6 +356,22 @@ describe('Take version comparison and selection', () => {
     expect(within(acceptanceRegion).getByText('asset-take-2')).toBeTruthy()
     expect(readTakeVersionSelectionMarker(request)).toEqual({ status: 'none' })
     expect(port.recoverTakeVersionSelection).not.toHaveBeenCalled()
+  })
+
+  it('does not notify a parent after the comparison scope has changed', async () => {
+    const deferred = pending<YimengTakeVersionSelectionResult>()
+    const port = makePort()
+    port.selectTakeVersion.mockImplementation(async () => await deferred.promise)
+    const onSelectionCommitted = vi.fn()
+    const view = render(<TakeVersionCompareView {...props(port)} onSelectionCommitted={onSelectionCommitted} />)
+    fireEvent.click(await screen.findByRole('button', { name: zh.takeVersionSelectButton }))
+    await waitFor(() => { expect(readTakeVersionSelectionMarker(scope()).status).toBe('ready') })
+    const stored = readTakeVersionSelectionMarker(scope())
+    if (stored.status !== 'ready') throw new Error('selection marker missing')
+    view.rerender(<TakeVersionCompareView {...props(port)} selectedShotId="missing-shot"
+      onSelectionCommitted={onSelectionCommitted} />)
+    await act(async () => { deferred.resolve(result(stored.marker)) })
+    expect(onSelectionCommitted).not.toHaveBeenCalled()
   })
 
   it('uses one GET recovery after an uncertain POST and never reposts the selection', async () => {
@@ -385,8 +403,10 @@ describe('Take version comparison and selection', () => {
     const port = makePort(initial)
     port.takeVersions.mockResolvedValueOnce(initial).mockResolvedValue(committed)
     port.recoverTakeVersionSelection.mockResolvedValue(recovery(marker, true))
-    render(<TakeVersionCompareView {...props(port)} />)
+    const onSelectionCommitted = vi.fn()
+    render(<TakeVersionCompareView {...props(port)} onSelectionCommitted={onSelectionCommitted} />)
     expect(await screen.findByText(zh.takeVersionSelectionCommitted)).toBeTruthy()
+    expect(onSelectionCommitted).toHaveBeenCalledOnce()
     await waitFor(() => { expect(port.takeVersions).toHaveBeenCalledTimes(2) })
     const recoveryCall = port.recoverTakeVersionSelection.mock.calls[0]
     expect(recoveryCall?.[0]).not.toHaveProperty('schema')

@@ -36,6 +36,8 @@ interface TakeVersionCompareViewProps {
   readonly projection: YimengWorkflowProjection | undefined
   readonly enabled: boolean
   readonly readOnly?: boolean
+  /** Invoked only after a current, exact selection receipt is accepted. */
+  readonly onSelectionCommitted?: () => void
   readonly port: Pick<QingmuYimengPort,
     'takeVersions' | 'takeAcceptance' | 'takeAcceptanceMethod'
     | 'selectTakeVersion' | 'recoverTakeVersionSelection'>
@@ -415,7 +417,7 @@ export function TakeVersionCompareView(props: TakeVersionCompareViewProps) {
 }
 
 function TakeVersionComparePanel({
-  projectId, episodeId, selectedShotId, projection, enabled, readOnly = false, port, t,
+  projectId, episodeId, selectedShotId, projection, enabled, readOnly = false, onSelectionCommitted, port, t,
 }: TakeVersionCompareViewProps) {
   const scope = { projectId, episodeId, frameId: selectedShotId }
   const [refresh, setRefresh] = useState(0)
@@ -469,6 +471,8 @@ function TakeVersionComparePanel({
     setReceipt(result)
     announce(run, cleared ? 'takeVersionSelectionCommitted' : 'takeVersionMarkerChanged', !cleared)
     // The receipt is evidence only. The visible stack always comes from a new authoritative GET.
+    // Parent consumers may refresh their read-only projection only after this exact receipt matched.
+    onSelectionCommitted?.()
     setRefresh(value => value + 1)
   }
 

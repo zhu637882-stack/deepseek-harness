@@ -76,7 +76,7 @@ describe('bounded creation Host contract', () => {
     await expect(handler('readCreationOptions', {}, signal())).resolves.toEqual({ ok: true, value: {
       schema: 'jason.qingmu-creation-options.v1', textVersions: creationCatalog.textVersions,
       directorSkills: creationCatalog.directorSkills,
-      visualStyles: [{ id: 'realistic', label: '写实电影', group: 'real_person', groupLabel: '真人' }],
+      visualStyles: [{ id: 'realistic', label: '写实电影', group: 'real_person', groupLabel: '真人', previewUrl: '/api/qingmu/creation-style-preview?styleId=realistic' }],
       stylePacks: [{ id: 'realistic_cinema', version: '1.0.0', name: '写实电影', group: 'real_person', groupLabel: '真人', intent: '自然主义叙事', tone: '克制' }],
     } })
     expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([

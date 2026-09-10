@@ -477,29 +477,33 @@ function shot(
     if (selectedTake.source !== 'local' && selectedTake.origin !== null) {
       throw new Error('editorial handoff: generated Take origin must be null')
     }
+    if (selectedTake.source === 'local' && selectedTake.lineageComplete) {
+      throw new Error('editorial handoff: external Take cannot claim generated lineage')
+    }
+    if (selectedTake.source === 'local' && review.schema !== 'jason.qingmu-take-review-authority-feed.v2') {
+      throw new Error('editorial handoff: external Take requires the v2 review feed')
+    }
   }
   if (selectedTake !== null) {
     const subject = comments.versions.find(entry => entry.takeSubject.takeId === selectedTake.assetId)?.takeSubject
-    const durationMillis = selectedTake.durationSec === null ? null : selectedTake.durationSec * 1000
+    // Comment timecodes use the nearest millisecond; media keeps its original precision.
+    const durationMillis = selectedTake.durationSec === null ? null : Math.round(selectedTake.durationSec * 1000)
     const canonicalSubjectRequired = selectedTake.sha256 !== null && durationMillis !== null
-      && Number.isSafeInteger(durationMillis) && durationMillis / 1000 === selectedTake.durationSec
+      && Number.isSafeInteger(durationMillis)
     const subjectMismatch = subject !== undefined && (
       subject.versionOrdinal !== selectedTake.assetRevision
       || subject.outputSha256 !== selectedTake.sha256
-      || (selectedTake.durationSec !== null && subject.durationMillis !== selectedTake.durationSec * 1000)
+      || (durationMillis !== null && subject.durationMillis !== durationMillis)
     )
     if ((subject === undefined && canonicalSubjectRequired) || subjectMismatch) {
       throw new Error('editorial handoff: selected Take does not match the canonical feed')
     }
-    if (v2) {
+    if (v2 && selectedTake.origin !== null) {
       if (subject === undefined) throw new Error('editorial handoff: v2 selected Take subject is missing')
       const origin = externalOrigin(selectedTake.origin, selectedTake, {
         ...request, frameId, frameContentSha256: sha(item.frameContentSha256, 'source.shots[].frameContentSha256'),
         storyboardRevision: subject.storyboardRevision,
       })
-      if ((selectedTake.source === 'local') !== (origin !== null)) {
-        throw new Error('editorial handoff: selected Take origin is invalid')
-      }
       Object.assign(selectedTake, { origin })
     }
   }

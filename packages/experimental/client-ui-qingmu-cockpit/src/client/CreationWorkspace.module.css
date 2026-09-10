@@ -23,6 +23,12 @@
 .creationSettings { border-left: 1px solid var(--dsw-alias-border-l2); padding-left: 24px; }
 .creationSettings > label { margin-top: 14px; }
 .creationSettings > small { display: block; margin-top: 8px; }
+.stylePreview { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 10px; margin: 10px 0 0; align-items: center; }
+.stylePreview img { width: 88px; height: 56px; object-fit: cover; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); }
+.stylePreview figcaption { color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
+.skillMap { margin-top: 12px; border-top: 1px solid var(--dsw-alias-border-l2); padding-top: 10px; }
+.skillMap p { color: var(--dsw-alias-label-secondary); font-size: 13px; }
+.skillMap strong { color: var(--dsw-alias-label-primary); }
 .help { border-left: 1px solid var(--dsw-alias-border-l2); padding-left: 24px; }
 .actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .notice { border-left: 3px solid var(--qingmu-accent); padding: 10px 14px; background: var(--qingmu-soft); }

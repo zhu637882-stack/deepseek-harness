@@ -1004,6 +1004,83 @@ describe('embedded Qingmu entry scope', () => {
     expect(port.createHumanDecision).not.toHaveBeenCalled()
   })
 
+  it('keeps all three projects discoverable across list pages, switching, and reload', async () => {
+    const items = [1, 2, 3].map(number => ({ id: `project-${number}`, name: `作品${number}`, theme: `故事${number}` }))
+    const projects = vi.fn<QingmuYimengPort['projects']>(async request => ({
+      items: request.page === 2 ? items.slice(2) : items.slice(0, 2),
+      pagination: { page: request.page ?? 1, pageSize: 100, pages: 2, total: 3 },
+    }))
+    const episodes = vi.fn<QingmuYimengPort['episodes']>(async request => ({ items: [
+      { id: `episode-${request.projectId}`, projectId: request.projectId, name: '第一集' },
+    ] }))
+    const workflow = vi.fn<QingmuYimengPort['workflow']>(async request => workflowFor(request.projectId, request.episodeId, `${request.projectId}-shot`, '项目镜头'))
+    const port = makePort({ projects, episodes, workflow })
+    const view = mount(port, undefined, true)
+    await waitFor(() => { expect(screen.getByRole('combobox', { name: '项目' }).querySelectorAll('option')).toHaveLength(3) })
+    fireEvent.click(screen.getByRole('button', { name: '项目库' }))
+    expect(await screen.findByRole('heading', { name: '我的项目' })).toBeTruthy()
+    expect(screen.getAllByRole('article')).toHaveLength(3)
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索项目' }), { target: { value: '作品3' } })
+    expect(screen.getAllByRole('article')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: '继续创作 作品3' }))
+    await waitFor(() => { expect(workflow).toHaveBeenLastCalledWith({ projectId: 'project-3', episodeId: 'episode-project-3' }, expect.any(AbortSignal)) })
+    await waitFor(() => { expect(new URLSearchParams(location.search).get('qingmuProject')).toBe('project-3') })
+    view.unmount()
+    mount(port, undefined, true)
+    await waitFor(() => { expect((screen.getByRole('combobox', { name: '项目' }) as HTMLSelectElement).value).toBe('project-3') })
+    fireEvent.click(screen.getByRole('button', { name: '项目库' }))
+    await waitFor(() => { expect(screen.getByRole('button', { name: '继续创作 作品1' }).hasAttribute('disabled')).toBe(false) })
+    fireEvent.click(screen.getByRole('button', { name: '继续创作 作品1' }))
+    await waitFor(() => { expect(workflow).toHaveBeenLastCalledWith({ projectId: 'project-1', episodeId: 'episode-project-1' }, expect.any(AbortSignal)) })
+    expect(port.initializeProject).not.toHaveBeenCalled()
+    expect(port.commitScript).not.toHaveBeenCalled()
+    expect(port.selectTakeVersion).not.toHaveBeenCalled()
+  })
+
+  it('continues the current episode when returning through the project library', async () => {
+    const episodes = vi.fn<QingmuYimengPort['episodes']>(async () => ({ items: [
+      { id: 'episode-1', projectId: 'project-1', name: '第一集' },
+      { id: 'episode-2', projectId: 'project-1', name: '第二集' },
+    ] }))
+    const workflow = vi.fn<QingmuYimengPort['workflow']>(async request => workflowFor(request.projectId, request.episodeId, 'scoped-shot', '当前集镜头'))
+    mount(makePort({ episodes, workflow }), undefined, true)
+    await waitFor(() => { expect(workflow).toHaveBeenCalled() })
+    fireEvent.change(screen.getByRole('combobox', { name: '剧集' }), { target: { value: 'episode-2' } })
+    await waitFor(() => { expect(workflow).toHaveBeenLastCalledWith({ projectId: 'project-1', episodeId: 'episode-2' }, expect.any(AbortSignal)) })
+    fireEvent.click(screen.getByRole('button', { name: '项目库' }))
+    fireEvent.click(screen.getByRole('button', { name: /继续创作/ }))
+    await waitFor(() => { expect((screen.getByRole('combobox', { name: '剧集' }) as HTMLSelectElement).value).toBe('episode-2') })
+  })
+
+  it('clears the previous project projection while a refresh loads a replacement scope', async () => {
+    history.replaceState({}, '', '/?qingmuView=shooting')
+    const projects = vi.fn<QingmuYimengPort['projects']>()
+      .mockResolvedValueOnce({ items: [{ id: 'project-1', name: '作品一' }], pagination: { page: 1, pageSize: 100, pages: 1, total: 1 } })
+      .mockResolvedValue({ items: [{ id: 'project-2', name: '作品二' }], pagination: { page: 1, pageSize: 100, pages: 1, total: 1 } })
+    const episodes = vi.fn<QingmuYimengPort['episodes']>(async request => ({ items: [{ id: `episode-${request.projectId}`, projectId: request.projectId, name: '第一集' }] }))
+    let finish!: (value: YimengWorkflowProjection) => void
+    const workflow = vi.fn<QingmuYimengPort['workflow']>()
+      .mockResolvedValueOnce(workflowFor('project-1', 'episode-project-1', 'old-shot', '前项目镜头'))
+      .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    mount(makePort({ projects, episodes, workflow }), undefined, true)
+    await screen.findByRole('heading', { name: '前项目镜头' })
+    fireEvent.click(screen.getByRole('button', { name: '刷新页面' }))
+    await waitFor(() => { expect(workflow).toHaveBeenCalledTimes(2) })
+    expect((screen.getByRole('combobox', { name: '项目' }) as HTMLSelectElement).value).toBe('project-2')
+    expect(screen.queryByRole('heading', { name: '前项目镜头' })).toBeNull()
+    finish(workflowFor('project-2', 'episode-project-2', 'new-shot', '新项目镜头'))
+    await screen.findByRole('heading', { name: '新项目镜头' })
+  })
+
+  it('does not restore an unavailable project from a previous account browser hint', async () => {
+    localStorage.setItem('qingmu.workspace.last-project.v1', JSON.stringify({ projectId: 'other-owner-project', episodeId: 'private-episode' }))
+    const port = makePort()
+    mount(port, undefined, true)
+    await waitFor(() => { expect(port.workflow).toHaveBeenCalled() })
+    expect(port.episodes).not.toHaveBeenCalledWith({ projectId: 'other-owner-project' }, expect.anything())
+    expect((screen.getByRole('combobox', { name: '项目' }) as HTMLSelectElement).value).toBe('project-1')
+  })
+
   it('treats a missing storyboard revision as a planning state and clears the prior projection', async () => {
     const workflow = vi.fn()
       .mockResolvedValueOnce(WORKFLOW)

@@ -19,7 +19,7 @@ type Option = { readonly id: string; readonly label: string }
 
 /** One product shell across every creative step; no modal or second application. */
 export function QingmuApplicationFrame({ projects, episodes, projectId, episodeId, step, loading, scopeLocked,
-  onProject, onEpisode, onStep, onCreate, onRefresh, onOpenTools, children }: {
+  onProject, onEpisode, onStep, onCreate, onRefresh, onOpenTools, onOpenProjects, projectsOpen, children }: {
   readonly projects: readonly Option[]
   readonly episodes: readonly Option[]
   readonly projectId: string
@@ -33,6 +33,8 @@ export function QingmuApplicationFrame({ projects, episodes, projectId, episodeI
   readonly onCreate: () => void
   readonly onRefresh: () => void
   readonly onOpenTools?: (() => void) | undefined
+  readonly onOpenProjects?: (() => void) | undefined
+  readonly projectsOpen?: boolean | undefined
   readonly children: ReactNode
 }) {
   const [toolsOpen, setToolsOpen] = useState(false)
@@ -51,6 +53,7 @@ export function QingmuApplicationFrame({ projects, episodes, projectId, episodeI
     <header className={css.header}>
       <div className={css.identity}>
         <span className={css.brand}><svg viewBox="0 0 28 32" aria-hidden="true"><path d="M14 3v26M14 7 5 14m9-7 9 7M14 15 3 24m11-9 11 9M9 29h10" /></svg><span>青木<small>QINGMU OS</small></span></span>
+        {!scopeLocked && onOpenProjects && <button type="button" className={css.projectLibraryButton} aria-pressed={projectsOpen === true} onClick={onOpenProjects}>项目库</button>}
         <div className={css.project}>
           <select aria-label="项目" value={projectId} disabled={loading || scopeLocked || !projects.length} onChange={e => onProject(e.target.value)}>
             {!projects.length && <option value="">选择项目</option>}{projects.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
@@ -61,7 +64,7 @@ export function QingmuApplicationFrame({ projects, episodes, projectId, episodeI
         </div>
       </div>
       <nav className={css.workflow} aria-label="创作流程">{steps.map(([id, label], index) => <button type="button" key={id}
-        aria-current={step === id ? 'step' : undefined} onClick={() => onStep(id)}><small>{String(index + 1).padStart(2, '0')}</small><span>{label}</span></button>)}</nav>
+        aria-current={!projectsOpen && step === id ? 'step' : undefined} onClick={() => onStep(id)}><small>{String(index + 1).padStart(2, '0')}</small><span>{label}</span></button>)}</nav>
       <div className={css.tools}>
         <button type="button" onClick={onRefresh} disabled={loading} aria-label="刷新页面">{loading ? '刷新中…' : '刷新'}</button>
         {(!scopeLocked || onOpenTools) && <div className={css.moreTools}>

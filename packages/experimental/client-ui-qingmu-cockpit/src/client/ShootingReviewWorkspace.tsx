@@ -7,6 +7,7 @@ import { TakePreviewPlayer } from './TakePreviewPlayer.tsx'
 import { TakeThumbnail } from './TakeThumbnail.tsx'
 import { LocalVideoCandidateUpload } from './LocalVideoCandidateUpload.tsx'
 import { LocalVideoSourcePanel } from './LocalVideoSourcePanel.tsx'
+import { TakeVersionCompareView } from './TakeVersionCompareView.tsx'
 import { ShootingFirstFrame } from './ShootingFirstFrame.tsx'
 import { ShootingFirstFrameHistory } from './ShootingFirstFrameHistory.tsx'
 import { createFirstFrameSelectionClient, type FirstFrameHistoryCandidate } from './first-frame-selection.ts'
@@ -53,7 +54,8 @@ interface Props {
   readonly onProductionAction?: (action: 'first-frame' | 'select-frame' | 'video', shotId: string) => void
   readonly port: Pick<QingmuYimengPort, 'takeVersions' | 'takePreview' | 'selectTakeVersion' | 'recoverTakeVersionSelection'>
     & Partial<Pick<QingmuYimengPort,
-      'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning'
+      'takeAcceptance' | 'takeAcceptanceMethod'
+      | 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning'
       | 'uploadLocalVideoCandidate' | 'recoverLocalVideoCandidate'
       | 'readLocalVideoSource' | 'registerLocalVideoSource' | 'recoverLocalVideoSource'>>
   readonly t: (key: QingmuCockpitKey) => string
@@ -63,13 +65,23 @@ interface Props {
 function usable(version: YimengTakeVersion | undefined): version is YimengTakeVersion & { readonly outputSha256: string } {
   return version !== undefined && version.outputSha256 !== null && version.outputBindingStatus === 'verified'
 }
-function isLocalVideo(version: YimengTakeVersion): boolean {
-  return version.source === 'local'
+function isLocalVideo(version: YimengTakeVersion | undefined): version is YimengTakeVersion & { readonly source: 'local' } {
+  return version?.source === 'local'
 }
-function localVideoSourceMessage(version: YimengTakeVersion): string {
-  if (version.origin?.bindingStatus === 'current') return '来源已登记，可选择后审看'
+function localVideoSourceMessage(version: YimengTakeVersion, canSelect: boolean): string {
+  if (version.origin?.bindingStatus === 'current') {
+    if (!canSelect) return '来源已登记 · 当前账号没有选片权限'
+    return version.canAttemptSelection ? '来源已登记 · 可选择后审看' : '来源已登记 · 完成检查后可选择'
+  }
   if (version.origin?.bindingStatus === 'stale') return '来源登记已失效，请按当前镜头重新登记'
   return '来源待登记，暂不可采用'
+}
+function localVideoBrowseMessage(version: YimengTakeVersion, canSelect: boolean): string {
+  if (version.origin?.bindingStatus === 'current' && !canSelect) return '本地视频来源已登记；当前账号没有选片权限，仍可查看或比较候选。'
+  if (version.origin?.bindingStatus === 'current' && version.canAttemptSelection) return '本地视频来源已登记；选择后进入审看，选择不等于批准。'
+  if (version.origin?.bindingStatus === 'current') return '本地视频来源已登记；完成检查后可选择进入审看。'
+  if (version.origin?.bindingStatus === 'stale') return '本地视频来源登记已失效；请按当前镜头重新登记后再选择。'
+  return '本地视频可先查看或登记来源；登记完成后仍需检查才可选择。'
 }
 function hasLocalVideoPort(port: Props['port']): port is Props['port'] & {
   uploadLocalVideoCandidate: NonNullable<QingmuYimengPort['uploadLocalVideoCandidate']>
@@ -84,6 +96,10 @@ function hasLocalVideoSourcePort(port: Props['port']): port is Props['port'] & {
 } {
   return typeof port.readLocalVideoSource === 'function' && typeof port.registerLocalVideoSource === 'function'
     && typeof port.recoverLocalVideoSource === 'function'
+}
+function hasTakeComparisonPort(port: Props['port']): port is Props['port'] & Pick<QingmuYimengPort,
+  'takeAcceptance' | 'takeAcceptanceMethod'> {
+  return typeof port.takeAcceptance === 'function' && typeof port.takeAcceptanceMethod === 'function'
 }
 export function localHeroUrl(source: string | undefined, assetId: string | undefined): string | undefined {
   try {
@@ -144,6 +160,8 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
   const [adoptError, setAdoptError] = useState('')
   const mediaPaneKey = `qingmu:shooting-pane:${projectId}:${episodeId}:${current?.shotId ?? ''}`
   const [mediaPane, setMediaPane] = useState(() => ({ key: mediaPaneKey, pane: readMediaPane(mediaPaneKey) }))
+  const [compareState, setCompareState] = useState({ key: mediaPaneKey, open: false })
+  const compareOpen = compareState.key === mediaPaneKey && compareState.open
   // A different shot must never mount the previous shot's generation panel, even for one render.
   const pane = mediaPane.key === mediaPaneKey ? mediaPane.pane : readMediaPane(mediaPaneKey)
   const firstFrameOpen = pane === 'first-frame'
@@ -342,6 +360,8 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
   const primary = usable(browsed) && browsed.canAttemptSelection
     && !visibleStack?.subject.selectedTakeId && visibleStack?.capabilities.canSelect === true
     && !browsed.isSelected && load === 'ready'
+  const selectionEntryVisible = usable(browsed) && !browsed.isSelected && !visibleStack?.subject.selectedTakeId
+  const canSelect = visibleStack?.capabilities.canSelect === true
   const heroUrl = localHeroUrl(heroFrame?.browserUrl, heroFrame?.assetId)
   const dialogue = (current.dialogueRhythm?.cues ?? []).map(cue => cue.verbatimText).filter(Boolean)
   const inspected = inspectedFrame?.key === mediaPaneKey ? inspectedFrame : undefined
@@ -450,7 +470,7 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
               }} /></div>
               : usable(browsed) ? <div className={css.player}>
                 {isLocalVideo(browsed) && browsed.originalFileName && <span className={css.localPreviewLabel}>
-                  本地导入 · {browsed.originalFileName} · 可查看或登记来源 · 暂不可采用
+                  本地导入 · {browsed.originalFileName} · {localVideoSourceMessage(browsed, canSelect)}
                 </span>}<TakePreviewPlayer request={{
                   projectId, episodeId, frameId: current.shotId, takeId: browsed.takeId,
                   expectedOutputSha256: browsed.outputSha256,
@@ -464,7 +484,7 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
         {sourcePanelVisible && <LocalVideoSourcePanel
           key={`${projectId}:${episodeId}:${current.shotId}:${browsed.takeId}`}
           scope={{ projectId, episodeId, frameId: current.shotId, assetId: browsed.takeId }} port={port} />}
-        <div className={css.candidates} aria-label="候选画面">{(!historyOpen && !firstFrameOpen ? versions : []).map(version => <button className={isLocalVideo(version) ? css.localCandidate : undefined} key={version.takeId} type="button" aria-pressed={!firstFrameOpen && !historyOpen && version.takeId === browseId} onClick={() => { showMediaPane('takes'); setBrowseId(version.takeId); if (version.takeId !== browseId) setMediaUrl(undefined) }}>{usable(version) ? <TakeThumbnail request={{ projectId, episodeId, frameId: current.shotId, takeId: version.takeId, expectedOutputSha256: version.outputSha256 }} load={port.takePreview} className={css.candidateThumb} alt={`视频候选 v${version.versionOrdinal} · 视频第一帧`} /> : <span className={css.videoIcon}>素材尚不可用</span>}<span>{isLocalVideo(version) ? '本地导入视频' : `视频候选 v${version.versionOrdinal}`}</span>{isLocalVideo(version) && version.originalFileName && <small className={css.localFileName}>{version.originalFileName}</small>}<strong>{isLocalVideo(version) ? localVideoSourceMessage(version) : version.isSelected ? '当前选用' : version.qualityStatus === 'failed' ? '检查未通过' : version.qualityStatus === 'passed' ? '待你审看' : '等待检查'}</strong></button>)}
+        <div className={css.candidates} aria-label="候选画面">{(!historyOpen && !firstFrameOpen ? versions : []).map(version => <button className={isLocalVideo(version) ? css.localCandidate : undefined} key={version.takeId} type="button" aria-pressed={!firstFrameOpen && !historyOpen && version.takeId === browseId} onClick={() => { showMediaPane('takes'); setBrowseId(version.takeId); if (version.takeId !== browseId) setMediaUrl(undefined) }}>{usable(version) ? <TakeThumbnail request={{ projectId, episodeId, frameId: current.shotId, takeId: version.takeId, expectedOutputSha256: version.outputSha256 }} load={port.takePreview} className={css.candidateThumb} alt={`视频候选 v${version.versionOrdinal} · 视频第一帧`} /> : <span className={css.videoIcon}>素材尚不可用</span>}<span>{isLocalVideo(version) ? '本地导入视频' : `视频候选 v${version.versionOrdinal}`}</span>{isLocalVideo(version) && version.originalFileName && <small className={css.localFileName}>{version.originalFileName}</small>}<strong>{isLocalVideo(version) ? localVideoSourceMessage(version, canSelect) : version.isSelected ? '当前选用' : version.qualityStatus === 'failed' ? '检查未通过' : version.qualityStatus === 'passed' ? '待你审看' : '等待检查'}</strong></button>)}
           {!firstFrameOpen && !historyOpen && imageShotCandidates.slice().reverse().map(candidate =>
             <div key={candidate.assetId} className={css.candidateCard}>
               <button type="button" aria-pressed={browsedImage?.assetId === candidate.assetId} onClick={() => { setBrowseId(''); setImageBrowse({ key: mediaPaneKey, assetId: candidate.assetId }) }}>
@@ -477,15 +497,26 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
             key={currentVideoScope} projectId={projectId} episodeId={episodeId} frameId={current.shotId} port={port}
             onStored={refreshLocalVideoCandidate} />}
         </div>
-        {!firstFrameOpen && !historyOpen && <p className={css.browseNote} data-state={state}>{versions.some(isLocalVideo) ? '本地视频可先查看或登记来源，采用还需完成检查。' : versions.length === 0 && load === 'ready' && testState === undefined ? (hasFrameCandidate ? '本镜尚无视频候选，已有首帧和要求仍保留。' : requirementStatus === 'loading' ? '正在核对本镜已保存的首帧要求；核对完成前不会生成。' : requirementsReady ? '本镜还没有首帧。点下方「生成首帧」开始；画面要求在右栏可改。' : '缺少本镜已保存的首帧要求。请返回分镜核对后再生成。') : message(state, load)}<span>单击候选只切换中区媒体，不会改变选用。</span></p>}
+        {!firstFrameOpen && !historyOpen && <p className={css.browseNote} data-state={state}>{isLocalVideo(browsed) ? localVideoBrowseMessage(browsed, canSelect) : versions.some(isLocalVideo) ? '选择本地视频可查看其来源状态和选片条件。' : versions.length === 0 && load === 'ready' && testState === undefined ? (hasFrameCandidate ? '本镜尚无视频候选，已有首帧和要求仍保留。' : requirementStatus === 'loading' ? '正在核对本镜已保存的首帧要求；核对完成前不会生成。' : requirementsReady ? '本镜还没有首帧。点下方「生成首帧」开始；画面要求在右栏可改。' : '缺少本镜已保存的首帧要求。请返回分镜核对后再生成。') : message(state, load)}<span>单击候选只切换中区媒体，不会改变选用。</span></p>}
+        {!firstFrameOpen && !historyOpen && <details className={css.takeComparison} open={compareOpen}
+          onToggle={(event) => { setCompareState({ key: mediaPaneKey, open: event.currentTarget.open }) }}>
+          <summary>比较与选择视频</summary>
+          <p>比较不会改变选用或批准；选择权限由当前账号和候选状态决定。</p>
+          {compareOpen && (hasTakeComparisonPort(port)
+            ? <TakeVersionCompareView projectId={projectId} episodeId={episodeId} selectedShotId={current.shotId}
+              projection={projection} enabled port={port} t={t}
+              onSelectionCommitted={() => { void refreshExistingMedia() }} />
+            : <p role="status">候选比较暂不可用，请刷新页面后重试。</p>)}
+        </details>}
         {selectionError && <p role="alert">{selectionError}</p>}
         {adoptError && <p role="alert">{adoptError}</p>}
         <div className={css.reworkActions} aria-label="本镜重做操作">
           {(firstFrameOpen || historyOpen) && <button type="button" onClick={() => showMediaPane('takes')}>返回候选审看</button>}
           {!firstFrameOpen && (requirementsReady ? <button className={!historyOpen && !primary && productionAction === 'first-frame' ? css.primary : undefined} type="button" onClick={() => showMediaPane('first-frame')}>{heroFrame || hasFrameCandidate ? '重新生成首帧' : '生成首帧'}</button> : <button className={css.linkAction} type="button" onClick={returnToStoryboard}>返回分镜核对要求</button>)}
           {onProductionAction && <button className={!firstFrameOpen && !historyOpen && !primary && productionAction === 'video' ? css.primary : undefined} type="button" onClick={() => onProductionAction('video', current.shotId)}>{versions.length ? '重新生成视频' : '生成视频'}</button>}
-          {!historyOpen && <button className={css.linkAction} type="button" onClick={() => showMediaPane('history')}>全部首帧与采用</button>}
-          {!firstFrameOpen && !historyOpen && primary && <button className={css.primary} type="button" disabled={selecting} onClick={() => { void selectCurrent() }}>{selecting ? '正在采用候选' : '采用这条视频'}</button>}
+          {!historyOpen && <button className={css.linkAction} type="button" onClick={() => showMediaPane('history')}>查看首帧历史</button>}
+          {!firstFrameOpen && !historyOpen && selectionEntryVisible && <button className={`${css.primary} ${css.selectionAction}`} type="button"
+            disabled={!primary || selecting} onClick={() => { void selectCurrent() }}>{selecting ? '正在选择视频…' : !canSelect ? '当前账号没有选片权限' : primary ? '选择此视频，进入审看' : '当前视频暂不能选择'}</button>}
         </div>
         {zoom && <div className={css.zoom} role="dialog" aria-modal="true" aria-label="放大画面"><div className={css.zoomToolbar}><button type="button" onClick={closeZoom}>关闭放大查看</button><button type="button" onClick={() => setScale(value => Math.min(3, value + 0.25))}>放大</button><button type="button" onClick={() => setScale(value => Math.max(1, value - 0.25))}>缩小</button><button type="button" onClick={resetZoom}>还原位置</button></div><div className={css.zoomCanvas} tabIndex={0} aria-label="放大预览，方向键移动画面" onKeyDown={(event) => { const step = 40; if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return; event.preventDefault(); setOffset(old => ({ x: old.x + (event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0), y: old.y + (event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0) })) }} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={() => { drag.current = undefined }} onPointerCancel={() => { drag.current = undefined }}>{sourceIsVideo ? <video src={sourceUrl} controls playsInline style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }} /> : sourceUrl !== undefined && <img src={sourceUrl} alt={`镜 ${current.frameNo} 首帧`} style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }} />}</div></div>}
       </main>

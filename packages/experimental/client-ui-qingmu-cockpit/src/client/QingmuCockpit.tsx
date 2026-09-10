@@ -14,6 +14,7 @@ import { AssetWorkbench } from './AssetWorkbench.tsx'
 import { PromptIrWorkspace } from './PromptIrWorkspace.tsx'
 import { ScriptWorkspace } from './ScriptWorkspace.tsx'
 import { CreateProjectWorkspace, TextImportWorkspace } from './CreationWorkspace.tsx'
+import { ProjectLibrary } from './ProjectLibrary.tsx'
 import { ShotRelationsView } from './ShotRelationsView.tsx'
 import { ShotRelationMethodView } from './ShotRelationMethodView.tsx'
 import { HeroFrameStoryboardCanvas } from './HeroFrameStoryboardCanvas.tsx'
@@ -102,6 +103,21 @@ function saveShootingWorkspaceValue(projectId: string, episodeId: string, field:
 
 function clearShootingWorkspaceValue(projectId: string, episodeId: string, field: 'shot' | 'tab'): void {
   try { localStorage.removeItem(shootingWorkspaceKey(projectId, episodeId, field)) } catch { /* optional browser restoration only */ }
+}
+
+const LAST_PROJECT_KEY = 'qingmu.workspace.last-project.v1'
+function rememberedProjectScope(): { projectId: string; episodeId: string } | undefined {
+  const query = new URLSearchParams(location.search)
+  const projectId = query.get('qingmuProject')
+  const episodeId = query.get('qingmuEpisode')
+  if (projectId && episodeId) return { projectId, episodeId }
+  try {
+    const stored = recordOf(JSON.parse(localStorage.getItem(LAST_PROJECT_KEY) ?? 'null'))
+    if (typeof stored.projectId === 'string' && typeof stored.episodeId === 'string') return {
+      projectId: stored.projectId, episodeId: stored.episodeId,
+    }
+  } catch { /* A browser hint never grants project access or blocks the saved project list. */ }
+  return undefined
 }
 
 function projectLabel(project: JsonRecord, fallback: string): string {
@@ -195,6 +211,8 @@ export function QingmuCockpit({
   const [projectId, setProjectId] = useState('')
   const [episodeId, setEpisodeId] = useState('')
   const [creating, setCreating] = useState(false)
+  const [creationFromLibrary, setCreationFromLibrary] = useState(false)
+  const [projectsOpen, setProjectsOpen] = useState(() => applicationShell === true && entryScope === undefined && new URLSearchParams(location.search).get('qingmuView') === 'projects')
   const [projection, setProjection] = useState<YimengWorkflowProjection>()
   const [storyboardMissing, setStoryboardMissing] = useState(false)
   const [selectedShotId, setSelectedShotId] = useState('')
@@ -221,18 +239,29 @@ export function QingmuCockpit({
   useEffect(() => {
     if (!applicationShell) return
     const changed = () => {
-      if (mayLeaveDirector()) { setCreating(false); setTab(STEP_TABS[creativeStepFromSearch(location.search)]) }
-      else { const url = new URL(location.href); url.searchParams.set('qingmuView', creativeStepForTab(tab)); history.replaceState(history.state, '', url) }
+      if (mayLeaveDirector()) {
+        setCreating(false); setProjectsOpen(entryScope === undefined && new URLSearchParams(location.search).get('qingmuView') === 'projects')
+        setTab(STEP_TABS[creativeStepFromSearch(location.search)])
+        const restored = rememberedProjectScope()
+        if (restored && (restored.projectId !== projectId || restored.episodeId !== episodeId)) void refresh(restored)
+      }
+      else {
+        const url = new URL(location.href)
+        url.searchParams.set('qingmuView', projectsOpen ? 'projects' : creativeStepForTab(tab))
+        if (projectId) url.searchParams.set('qingmuProject', projectId); else url.searchParams.delete('qingmuProject')
+        if (episodeId) url.searchParams.set('qingmuEpisode', episodeId); else url.searchParams.delete('qingmuEpisode')
+        history.replaceState(history.state, '', url)
+      }
     }
     window.addEventListener('popstate', changed)
     return () => { window.removeEventListener('popstate', changed) }
-  }, [applicationShell, tab, t])
+  }, [applicationShell, tab, t, entryScope, projectId, episodeId, projectsOpen])
   useEffect(() => {
     if (!applicationShell) return
     const url = new URL(location.href)
-    url.searchParams.set('qingmuView', creativeStepForTab(tab))
+    url.searchParams.set('qingmuView', projectsOpen ? 'projects' : creativeStepForTab(tab))
     history.replaceState(history.state, '', url)
-  }, [applicationShell, tab])
+  }, [applicationShell, tab, projectsOpen])
   const handleGenerationCatalog = useCallback((result: YimengCapabilityCatalogResponse | undefined) => {
     setGenerationCatalog(result)
   }, [])
@@ -278,7 +307,7 @@ export function QingmuCockpit({
     setError(undefined)
     setStoryboardMissing(false)
     const scopeLocked = entryScope !== undefined
-    const requestedScope = scopeLocked ? entryScope : preferred
+    const requestedScope = scopeLocked ? entryScope : preferred ?? (applicationShell && projectId === '' ? rememberedProjectScope() : undefined)
     if (scopeLocked) {
       setProjectId('')
       setEpisodeId('')
@@ -295,12 +324,21 @@ export function QingmuCockpit({
       if (healthResult.status === 'fulfilled') setHealth(healthResult.value)
       if (projectsResult.status === 'rejected') throw projectsResult.reason
 
-      const nextProjects = projectsResult.value.items
+      const nextProjects = [...projectsResult.value.items]
+      for (let page = 2; page <= projectsResult.value.pagination.pages; page += 1) {
+        const result = await port.projects({ page, pageSize: 100 }, request.controller.signal)
+        if (!current(request.id)) return
+        nextProjects.push(...result.items)
+      }
       setProjects(nextProjects)
       const desiredProjectId = requestedScope?.projectId ?? projectId
       const projectExists = nextProjects.some(item => stringOf(item.id) === desiredProjectId)
       if (scopeLocked && !projectExists) throw new Error('外层项目不属于当前登录用户；导演工作区已拒绝回退到其他项目。')
       const nextProjectId = projectExists ? desiredProjectId : stringOf(nextProjects[0]?.id) ?? ''
+      if (nextProjectId !== projectId) {
+        setProjection(undefined); setSelectedShotId(''); setShootingAction(undefined)
+        setEpisodes([]); setEpisodeId(''); setAssetWorkbenchOpen(false)
+      }
       setProjectId(nextProjectId)
       if (nextProjectId === '') {
         setEpisodes([])
@@ -317,6 +355,9 @@ export function QingmuCockpit({
       const episodeExists = episodeResult.items.some(item => stringOf(item.id) === desiredEpisodeId)
       if (scopeLocked && !episodeExists) throw new Error('外层集不属于当前项目；导演工作区已拒绝回退到其他集。')
       const nextEpisodeId = episodeExists ? desiredEpisodeId : stringOf(episodeResult.items[0]?.id) ?? ''
+      if (nextEpisodeId !== episodeId) {
+        setProjection(undefined); setSelectedShotId(''); setShootingAction(undefined)
+      }
       setEpisodeId(nextEpisodeId)
       if (nextEpisodeId === '') {
         setProjection(undefined)
@@ -334,7 +375,13 @@ export function QingmuCockpit({
   const chooseProject = async (nextProjectId: string): Promise<void> => {
     if (entryScope !== undefined) return
     if (!mayLeaveDirector()) return
+    const preferredEpisodeId = nextProjectId === projectId ? episodeId : ''
+    setCreating(false)
+    setProjectsOpen(false)
+    setShootingAction(undefined)
+    setAssetWorkbenchOpen(false)
     setProjectId(nextProjectId)
+    setEpisodes([])
     setEpisodeId('')
     setProjection(undefined)
     setSelectedShotId('')
@@ -347,7 +394,8 @@ export function QingmuCockpit({
       const result = await port.episodes({ projectId: nextProjectId }, request.controller.signal)
       if (!current(request.id)) return
       setEpisodes(result.items)
-      const nextEpisodeId = stringOf(result.items[0]?.id) ?? ''
+      const nextEpisodeId = result.items.some(item => stringOf(item.id) === preferredEpisodeId)
+        ? preferredEpisodeId : stringOf(result.items[0]?.id) ?? ''
       setEpisodeId(nextEpisodeId)
       if (nextEpisodeId === '') return
       await readWorkflow({ projectId: nextProjectId, episodeId: nextEpisodeId }, request)
@@ -361,6 +409,7 @@ export function QingmuCockpit({
   const chooseEpisode = async (nextEpisodeId: string): Promise<void> => {
     if (entryScope !== undefined) return
     if (!mayLeaveDirector()) return
+    setShootingAction(undefined)
     setEpisodeId(nextEpisodeId)
     setProjection(undefined)
     setSelectedShotId('')
@@ -431,6 +480,17 @@ export function QingmuCockpit({
     return () => { abortRef.current?.abort() }
     // The Qingmu build owns this entry and opens its exact cockpit scope once on mount.
   }, [])
+
+  useEffect(() => {
+    if (!applicationShell || entryScope !== undefined || loading || !projectId || !episodeId) return
+    if (!projects.some(item => stringOf(item.id) === projectId) || !episodes.some(item => stringOf(item.id) === episodeId)) return
+    const url = new URL(location.href)
+    url.searchParams.set('qingmuProject', projectId)
+    url.searchParams.set('qingmuEpisode', episodeId)
+    history.replaceState(history.state, '', url)
+    try { localStorage.setItem(LAST_PROJECT_KEY, JSON.stringify({ projectId, episodeId })) }
+    catch { /* URL restoration remains available without browser storage. */ }
+  }, [applicationShell, entryScope, loading, projectId, episodeId, projects, episodes])
 
   const shotRelations = projection?.director.shotRelations
   useEffect(() => {
@@ -839,10 +899,10 @@ export function QingmuCockpit({
     const step = creativeStepForTab(tab)
     const changeStep = (next: CreativeStep) => {
       if (!mayLeaveDirector()) return
-      if (next !== step) {
+      if (next !== step || projectsOpen) {
         const url = new URL(location.href); url.searchParams.set('qingmuView', next); history.pushState(history.state, '', url)
       }
-      setCreating(false); setTab(STEP_TABS[next])
+      setCreating(false); setProjectsOpen(false); setTab(STEP_TABS[next])
     }
     const pageHeader = (number: string, title: string, purpose: string, next: CreativeStep | null) => <header className={css.stageHeader}>
       <div><p className={css.stageEyebrow}>青木创作 · {number}</p><h1>{title}</h1><p>{purpose}</p></div>
@@ -894,21 +954,31 @@ export function QingmuCockpit({
       projectId={projectId} episodeId={episodeId} step={step} loading={loading} scopeLocked={entryScope !== undefined}
       onProject={(id) => { void chooseProject(id) }} onEpisode={(id) => { void chooseEpisode(id) }}
       onStep={changeStep}
-      onCreate={() => { if (mayLeaveDirector()) setCreating(true) }}
+      projectsOpen={projectsOpen}
+      onOpenProjects={() => { if (mayLeaveDirector()) {
+        const url = new URL(location.href); url.searchParams.set('qingmuView', 'projects'); history.pushState(history.state, '', url)
+        setCreating(false); setProjectsOpen(true)
+      } }}
+      onCreate={() => { if (mayLeaveDirector()) {
+        setCreationFromLibrary(projectsOpen); setProjectsOpen(false); setCreating(true)
+      } }}
       onRefresh={() => { if (mayLeaveDirector()) void refresh() }} onOpenTools={onOpenTools}>
-      <div className={`${css.shell} ${step === 'shooting' && !creating ? css.shootingShell : ''}`}>
+      <div className={`${css.shell} ${step === 'shooting' && !creating && !projectsOpen ? css.shootingShell : ''}`}>
         {error && <div role="alert" className={css.error}><p>当前项目暂时无法更新。已有素材保留，请刷新重试。</p><details><summary>开发日志</summary>{error}</details></div>}
-        <div className={css.body}><main aria-label={creating ? '新建项目' : `青木 · ${creativeStepLabel(step)}`}>
-          {creating || (!loading && projects.length === 0 && !error)
-            ? <CreateProjectWorkspace port={port} onCreated={async (result) => { await refresh(result); setCreating(false); setTab('overview') }} onCancel={projects.length ? () => { setCreating(false) } : undefined} />
-            : <>{storyboardMissing && <section className={css.empty} role="status" aria-label="分镜待规划">
-              <h2>分镜尚待规划</h2>
-              <p>这是新项目的正常状态。先在故事与剧本保存内容，再进入分镜与导演安排镜头。</p>
-              <div className={css.stageActions}>
-                <button type="button" onClick={() => { changeStep('story') }}>前往故事与剧本</button>
-                <button type="button" onClick={() => { changeStep('storyboard') }}>打开分镜与导演</button>
-              </div>
-            </section>}{applicationPanels[step]}</>}
+        <div className={css.body}><main aria-label={creating ? '新建项目' : projectsOpen ? '我的项目' : `青木 · ${creativeStepLabel(step)}`}>
+          {projectsOpen ? <ProjectLibrary projects={projects} currentProjectId={projectId} loading={loading}
+            onOpen={(id) => { void chooseProject(id) }}
+            onCreate={() => { setCreationFromLibrary(true); setProjectsOpen(false); setCreating(true) }} />
+            : creating || (!loading && projects.length === 0 && !error)
+              ? <CreateProjectWorkspace port={port} onCreated={async (result) => { await refresh(result); setCreating(false); setTab('overview') }} onCancel={projects.length ? () => { setCreating(false); setProjectsOpen(creationFromLibrary) } : undefined} />
+              : <>{storyboardMissing && <section className={css.empty} role="status" aria-label="分镜待规划">
+                <h2>分镜尚待规划</h2>
+                <p>这是新项目的正常状态。先在故事与剧本保存内容，再进入分镜与导演安排镜头。</p>
+                <div className={css.stageActions}>
+                  <button type="button" onClick={() => { changeStep('story') }}>前往故事与剧本</button>
+                  <button type="button" onClick={() => { changeStep('storyboard') }}>打开分镜与导演</button>
+                </div>
+              </section>}{applicationPanels[step]}</>}
         </main></div>
       </div>
     </QingmuApplicationFrame>

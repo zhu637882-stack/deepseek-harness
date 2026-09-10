@@ -92,6 +92,7 @@ declare module '@deepseek-ai/cordis' {
 import { prepareShotFindingCommand } from './shot-finding.ts'
 import { registerEntityDraftReviewCommands } from './entity-draft-review.ts'
 import { registerFirstFrameSelectionCommands } from './first-frame-selection.ts'
+import { registerCreationStylePreview } from './creation-style-preview.ts'
 import { registerShootingFirstFrame } from './shooting-first-frame.ts'
 export {
   registerEntityDraftReviewCommands,
@@ -6297,6 +6298,9 @@ export function createYimengCommandHandler(
 
 /** Register the command adapter on a loopback-only Host Connection channel. */
 export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): void {
+  ctx.effect(() => registerCreationStylePreview(ctx.webServer, {
+    baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL), fetch: globalThis.fetch,
+  }), 'qingmu-yimeng-command: creation style previews')
   ctx.effect(() => registerShootingFirstFrame(ctx.webServer, resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL)), 'qingmu-yimeng-command: shooting first frame')
   ctx.effect(() => registerEntityDraftReviewCommands(ctx.webServer, {
     baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),

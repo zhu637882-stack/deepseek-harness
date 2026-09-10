@@ -60,6 +60,11 @@ const DEFAULT_PROJECT: ProjectLocal = {
   name: '', aspectRatio: '9:16', creationType: 'story_idea', episodeCount: 1,
   duration: '1-2分钟', textInput: '', style: '', stylePackId: '', directorSkillId: '',
 }
+const directorSkillLabel = (id: string): string => ({
+  episode_dramaturgy_architect: '剧集戏剧结构', scene_dialogue_writer: '场景对白与互动',
+  shot_blocking_director: '镜头导演', audio_ownership_planner: '声音归属规划',
+  sequence_creative_qa: '序列创意质检',
+}[id] ?? id)
 function normalizeProjectLocal(value: unknown): ProjectLocal {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return DEFAULT_PROJECT
   const raw = value as Record<string, unknown>
@@ -115,10 +120,12 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
     return () => { controller.abort() }
   }, [port, optionsRetry])
   const textVersion = options?.textVersions.find(item => item.available)
+  const selectedStyle = options?.visualStyles.find(item => item.id === local.style)
+  const compatiblePacks = options?.stylePacks.filter(item => item.group === selectedStyle?.group) ?? []
   const selectedPack = options?.stylePacks.find(item => item.id === local.stylePackId)
   const selectionsReady = textVersion !== undefined && selectedPack !== undefined
-    && options?.visualStyles.some(item => item.id === local.style)
-    && options.directorSkills.some(item => item.id === local.directorSkillId && item.available)
+    && selectedStyle !== undefined && selectedPack.group === selectedStyle.group
+    && options?.directorSkills.some(item => item.id === local.directorSkillId && item.available) === true
   const lock = useRef(false)
   const update = (next: ProjectLocal) => {
     try { saveLocal(NEW_PROJECT, next); setLocal(next) } catch { setError('浏览器无法保存恢复标记，请允许本地存储后再创建。') }
@@ -176,23 +183,38 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
       {options === undefined && <p role="status">{optionsError || '正在读取可用的风格与导演方法…'}</p>}
       {optionsError && <button disabled={busy} onClick={() => { setOptionsRetry(value => value + 1) }}>重新读取创作选项</button>}
       <label>基础画风<select aria-label="基础画风" value={local.style} disabled={busy || local.intent !== undefined || !options}
-        onChange={(event) => { update({ ...local, style: event.target.value }) }}>
+        onChange={(event) => {
+          const style = event.target.value
+          const group = options?.visualStyles.find(item => item.id === style)?.group
+          const stylePackId = options?.stylePacks.some(item => item.id === local.stylePackId && item.group === group) ? local.stylePackId : ''
+          update({ ...local, style, stylePackId })
+        }}>
         <option value="">请选择画风</option>
         {options?.visualStyles.map(item => <option key={item.id} value={item.id}>{item.groupLabel} · {item.label}</option>)}
       </select></label>
-      <label>全片风格包<select aria-label="全片风格包" value={local.stylePackId} disabled={busy || local.intent !== undefined || !options}
+      {selectedStyle?.previewUrl && <figure className={css.stylePreview}>
+        <img src={selectedStyle.previewUrl} alt={`${selectedStyle.label} 画风缩略图`} loading="lazy" />
+        <figcaption>{selectedStyle.groupLabel} · {selectedStyle.label}</figcaption>
+      </figure>}
+      <label>全片风格包<select aria-label="全片风格包" value={local.stylePackId} disabled={busy || local.intent !== undefined || !options || !selectedStyle}
         onChange={(event) => { update({ ...local, stylePackId: event.target.value }) }}>
-        <option value="">请选择风格包</option>
-        {options?.stylePacks.map(item => <option key={item.id} value={item.id}>{item.groupLabel} · {item.name}</option>)}
+        <option value="">{selectedStyle ? '请选择匹配的风格包' : '请先选择基础画风'}</option>
+        {compatiblePacks.map(item => <option key={item.id} value={item.id}>{item.groupLabel} · {item.name}</option>)}
       </select></label>
+      {selectedStyle && local.stylePackId === '' && <small>切换基础画风后，原风格包已清除；请选择同一类别的全片风格包。</small>}
       {selectedPack && <p>{selectedPack.intent} · {selectedPack.tone}</p>}
       <label>导演方法<select aria-label="导演方法" value={local.directorSkillId} disabled={busy || local.intent !== undefined || !options}
         onChange={(event) => { update({ ...local, directorSkillId: event.target.value }) }}>
         <option value="">请选择导演方法</option>
         {options?.directorSkills.filter(item => item.available).map(item => <option key={item.id} value={item.id}>
-          {item.id === 'shot_blocking_director' ? '镜头调度与表演设计' : item.id}</option>)}
+          {item.id === 'shot_blocking_director' ? '镜头导演（固定）' : directorSkillLabel(item.id)}</option>)}
       </select></label>
-      <small>风格包用于统一构图、灯光、色彩与表演；导演方法用于后续镜头规划。</small>
+      {local.directorSkillId === 'shot_blocking_director' && <small>固定方法覆盖镜头语法、空间与走位、表演和互动、节奏、剪辑连续性及阿里提示适配。</small>}
+      <details className={css.skillMap}><summary>创作流程技能与阶段</summary>
+        {options?.directorSkills.map(item => <p key={item.id}><strong>{directorSkillLabel(item.id)}</strong> · 阶段：{item.stage}。
+          {item.available ? ' 当前创建固定使用。' : ` 本创建页不作为可选项。${item.disabledReason ? ` ${item.disabledReason}` : ''}`}</p>)}
+      </details>
+      <small>风格包统一构图、灯光、色彩与表演；与基础画风必须属于同一类别。</small>
       {textVersion && <small>输入来源：{textVersion.label}</small>}
       <label>创作类型<select value={local.creationType} disabled={busy || local.intent !== undefined}
         onChange={(event) => { update({ ...local, creationType: event.target.value as ProjectLocal['creationType'] }) }}>

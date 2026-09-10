@@ -6,6 +6,8 @@
 .brand svg { width:26px; height:30px; fill:none; stroke:#d7ff52; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; }
 .brand small { display:block; margin-top:-2px; font:8px/1.5 -apple-system,sans-serif; letter-spacing:2px; color:#8395a2; }
 .project { min-width:0; max-width:210px; padding-left:18px; border-left:1px solid #2b3d49; }
+.projectLibraryButton { flex:none; padding:7px 9px; border:1px solid #354957; border-radius:6px; background:#16222a; color:#d7ff52; font:inherit; cursor:pointer; white-space:nowrap; }
+.projectLibraryButton[aria-pressed=true] { border-color:#d7ff52; }
 .project select { display:block; width:100%; max-width:210px; min-height:25px; padding:0 16px 0 0; border:0; border-radius:0; background:transparent; color:inherit; font:inherit; text-overflow:ellipsis; }
 .project select + select { color:#9cacb8; font-size:12px; }
 .workflow { display:flex; align-self:stretch; align-items:stretch; justify-content:center; flex:none; gap:2px; }
