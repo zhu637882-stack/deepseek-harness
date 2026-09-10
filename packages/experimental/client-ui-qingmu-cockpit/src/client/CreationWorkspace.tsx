@@ -5,6 +5,8 @@ import type {
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
 import css from './CreationWorkspace.module.css'
+import { NativeStoryComposer } from './NativeStoryComposer.tsx'
+import type { NativeStoryPort } from './story-draft.ts'
 
 type Port = Pick<QingmuYimengPort, 'readCreationOptions' | 'readCreativeContract' | 'initializeProject' | 'recoverProjectInitialization' | 'readTextImport' | 'createTextImport' | 'correctTextImport' | 'confirmTextImport'>
 const NEW_PROJECT = 'qingmu.creation.project.v1'
@@ -262,15 +264,17 @@ interface ImportLocal {
 const EMPTY: ImportLocal = { text: '', filename: '粘贴剧本.txt', speakers: {} }
 
 /** Human-readable canonical TextImportService preview, correction and explicit save. */
-export function TextImportWorkspace({ port, projectId, episodeId, onSaved, onPlanStoryboard }: CreationScope & {
+export function TextImportWorkspace({ port, projectId, episodeId, onSaved, onPlanStoryboard, storyPort }: CreationScope & {
   readonly port: Port
   readonly onSaved: () => Promise<void>
   readonly onPlanStoryboard?: () => void
+  readonly storyPort?: NativeStoryPort | undefined
 }) {
   const cacheKey = `qingmu.creation.text.v1:${projectId}:${episodeId}`
   const [local, setLocal] = useState<ImportLocal>(() => readLocal(cacheKey) as ImportLocal | null ?? EMPTY)
   const [state, setState] = useState<TextImportState>()
   const [contract, setContract] = useState<CreativeContractState>()
+  const [options, setOptions] = useState<CreationOptions>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -300,16 +304,18 @@ export function TextImportWorkspace({ port, projectId, episodeId, onSaved, onPla
   }
   useEffect(() => {
     mounted.current = true
-    void Promise.all([load(), port.readCreativeContract({ projectId }).then((value) => {
-      if (mounted.current) {
-        setContract(value)
-        if (value.configured && value.sourceText !== null && live.current.text.trim() === ''
+    void Promise.all([load(),
+      port.readCreationOptions().then((value) => { if (mounted.current) setOptions(value) }),
+      port.readCreativeContract({ projectId }).then((value) => {
+        if (mounted.current) {
+          setContract(value)
+          if (value.configured && value.sourceText !== null && live.current.text.trim() === ''
           && live.current.pending === undefined) {
-          persist({ ...live.current, text: value.sourceText, filename: '创作入口剧本.txt', rawBase64: undefined })
-          setNotice('已沿用唯一创作入口的原文；无需重复粘贴。请检查解析后再确认保存。')
+            persist({ ...live.current, text: value.sourceText, filename: '创作入口剧本.txt', rawBase64: undefined })
+            setNotice('已沿用唯一创作入口的原文；无需重复粘贴。请检查解析后再确认保存。')
+          }
         }
-      }
-    })])
+      })])
       .catch((cause: unknown) => { if (mounted.current) setError(errorText(cause)) })
     return () => { mounted.current = false }
   // A keyed workspace owns one canonical scope for its whole lifetime.
@@ -397,6 +403,12 @@ export function TextImportWorkspace({ port, projectId, episodeId, onSaved, onPla
     </details>
     <header><span className={css.eyebrow}>第 1 步 · 剧本</span><h3>导入并整理你的剧本</h3>
       <p>粘贴剧本或导入 TXT，检查场景、动作与对白，再保存为本集剧本。</p></header>
+    {storyPort && <NativeStoryComposer key={`${projectId}:${episodeId}`} port={storyPort} projectId={projectId} episodeId={episodeId}
+      source={local.text} settings={JSON.stringify({ project: contract?.contract?.project, methods: contract?.contract?.methods,
+        visualStyle: options?.visualStyles.find(style => style.id === contract?.contract?.methods.visualStyle.id),
+        stylePack: options?.stylePacks.find(pack => pack.id === contract?.contract?.methods.stylePackId?.id) })}
+      disabled={busy || pending || state === undefined || contract === undefined || options === undefined}
+      onAdopt={(text) => { update({ ...live.current, text, filename: '青木编剧.txt', rawBase64: undefined }) }} />}
     <div className={css.columns}>
       <div className={css.editor}>
         <label htmlFor="qingmu-script-text">剧本文字<textarea id="qingmu-script-text" value={local.text} maxLength={64000} disabled={busy || pending}

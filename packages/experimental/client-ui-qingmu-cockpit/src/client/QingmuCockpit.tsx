@@ -919,7 +919,8 @@ export function QingmuCockpit({
       story: <div className={css.creativePage}>
         {pageHeader('01', '故事与剧本', '写下故事、整理对白，形成这一集的创作依据。', 'assets')}{projectFacts}
         <div className={css.stageContent}>{episodeId && <TextImportWorkspace key={`${projectId}:${episodeId}:story`}
-          projectId={projectId} episodeId={episodeId} port={port} onSaved={refreshWorkflowAfterCommit}
+          projectId={projectId} episodeId={episodeId} port={port} storyPort={nativeDirectorSession?.story}
+          onSaved={refreshWorkflowAfterCommit}
           onPlanStoryboard={() => { changeStep('storyboard') }} />}</div>
         <details className={css.stageSupporting}><summary>已存剧本与精细编辑</summary>
           <ScriptWorkspace projectId={projectId} episodeId={episodeId} port={port} t={t} onCommitted={refreshWorkflowAfterCommit} />

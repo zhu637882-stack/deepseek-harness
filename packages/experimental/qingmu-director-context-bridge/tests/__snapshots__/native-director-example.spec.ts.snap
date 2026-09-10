@@ -164,3 +164,17 @@ exports[`runs the keyless shipped-preset example through the native loop 1`] = `
   ],
 }
 `;
+
+exports[`writes in an unbound native session and recovers the completed screenplay for the story UI 1`] = `
+{
+  "calls": [
+    "skill",
+    "skill",
+    "qingmu_read_skill_resource",
+  ],
+  "script": "场景一：修理店·傍晚
+动作：父亲收起工具，女儿扶住门。
+老周：下班了。",
+  "writingInRequest": true,
+}
+`;

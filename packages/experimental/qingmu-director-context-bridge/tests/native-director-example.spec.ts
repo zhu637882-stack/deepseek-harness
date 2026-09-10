@@ -53,3 +53,14 @@ it('authors a first-draft suggestion through the shipped preset and actual nativ
   expect(result.rootTools).toEqual([])
   expect({ tools: result.tools, calls: result.calls, results: result.results, proposal: result.draftProposal }).toMatchSnapshot()
 })
+
+
+it('writes in an unbound native session and recovers the completed screenplay for the story UI', async () => {
+  const result = await runNativeDirectorExample('story')
+  expect(result.calls).toEqual(['skill', 'skill', 'qingmu_read_skill_resource'])
+  expect(result.writingInRequest).toBe(true)
+  expect(result.storyDraft).toMatchObject({ finished: true, running: false, error: '',
+    script: '场景一：修理店·傍晚\n动作：父亲收起工具，女儿扶住门。\n老周：下班了。' })
+  expect({ calls: result.calls, writingInRequest: result.writingInRequest,
+    script: result.storyDraft?.script }).toMatchSnapshot()
+})

@@ -5,6 +5,7 @@
  *   node --import tsx packages/experimental/qingmu-director-context-bridge/examples/model-tools-keyless.ts
  */
 
+import { readStoryDraft } from '../../client-ui-qingmu-cockpit/src/client/story-draft.ts'
 import { Context } from '@deepseek-ai/cordis'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
@@ -39,11 +40,23 @@ const fourthReference = [
 /** Deterministic external model stand-in; every request still comes from the native loop. */
 class ExampleModel extends LlmAdapter {
   readonly requests: GenerateOptions[] = []
-  constructor(readonly draftMode: boolean | 'first' | 'dialogue' | 'skills' = false) { super() }
+  constructor(readonly draftMode: boolean | 'first' | 'dialogue' | 'skills' | 'story' = false) { super() }
 
   async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     const step = this.requests.length
     this.requests.push(options)
+    if (this.draftMode === 'story') {
+      const calls = [{ name: 'skill', args: { name: 'cinematic-director' } },
+        { name: 'skill', args: { name: 'open-film-writer' } },
+        { name: 'qingmu_read_skill_resource', args: { skill: 'open-film-writer', path: 'references/screenplay-writing-core.md', lineCount: 500 } }]
+      const call = calls[step]
+      const block = call ? { type: 'tool-call' as const, id: CallId(`story-${step}`), name: call.name, arguments: JSON.stringify(call.args) }
+        : { type: 'text' as const, text: '完整剧本\n```txt\n场景一：修理店·傍晚\n动作：父亲收起工具，女儿扶住门。\n老周：下班了。\n```' }
+      yield { type: 'block-start', index: 0, blockType: block.type }
+      yield { type: 'block-end', index: 0, block }
+      yield { type: 'finish', reason: { kind: call ? 'tool-calls' : 'stop' } }
+      return
+    }
     if (this.draftMode === 'skills') {
       const calls = [
         { name: 'skill', args: { name: 'cinematic-director' } },
@@ -100,7 +113,7 @@ class ExampleModel extends LlmAdapter {
  * @returns the actual composed persona, tools, logged calls/results and next-request method check.
  * @throws if the shipped preset fails to load or the session cannot complete.
  */
-export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'dialogue' | 'skills' = false) {
+export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'dialogue' | 'skills' | 'story' = false) {
   const ctx = new Context()
   try {
     const presetRoot = fileURLToPath(new URL('../../qingmu-web/agent-presets/', import.meta.url))
@@ -168,7 +181,7 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'd
       meta: { agentPreset: 'qingmu-director' },
       setup: async agentCtx => void await ctx.agentPresets.mount(agentCtx, 'qingmu-director'),
     })
-    handle.agent.session.append('qingmu-director-context/state', {
+    if (draftMode !== 'story') handle.agent.session.append('qingmu-director-context/state', {
       version: 1, binding: { scope, contextSnapshotSha256 }, proposal: null, transition: 'enter',
     })
     const idle = new Promise<void>((resolve) => {
@@ -176,7 +189,7 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'd
         if (agent === handle.agent && status === 'idle') { dispose(); resolve() }
       })
     })
-    handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: draftMode === 'dialogue'
+    handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: draftMode === 'story' ? '写一场修理店关门的短剧，以 txt 代码块返回完整稿。' : draftMode === 'dialogue'
       ? '预览把“有人吗？”改成“请问，还有人在吗？”，暂不保存。' : '看看当前镜头，参考导演方法给我建议。' }], source: { kind: 'user' } }))
     await idle
     const ordinary = await ctx.agents.create({ sessionId: SessionId('ordinary-example'),
@@ -185,11 +198,13 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'd
     await ordinary.dispose()
     const result = {
       readiness: readNativeDirectorReadiness(ctx, handle.agent.session), ordinaryReadiness,
-      ...(draftMode && draftMode !== 'dialogue' && draftMode !== 'skills' ? { draftProposal: await createDirectorContextRpcHandler(ctx.sessions, {
+      ...(draftMode && draftMode !== 'dialogue' && draftMode !== 'skills' && draftMode !== 'story' ? { draftProposal: await createDirectorContextRpcHandler(ctx.sessions, {
         readDirectorContext: async () => ({ ok: true, context: draftContext as DirectorContextSnapshot }),
       }, { prompt: ctx.qingmuYimengRead, method: ctx.qingmuImagoMethod })(draftMode === 'first' ? 'readNativeFirstDraftProposal' : 'readNativeDraftProposal', {
         sessionId: handle.agent.session.id, scope,
       }, new AbortController().signal) } : {}),
+      ...(draftMode === 'story' ? { storyDraft: readStoryDraft(handle.agent.session.events.map(event => ({ event })), -1),
+        writingInRequest: JSON.stringify(model.requests[3]?.messages).includes('screenplay-writing-core.md') } : {}),
       preset: ctx.agentPresets.composedPreset(handle.agent.ctx),
       system: model.requests[0]?.system,
       tools: model.requests[0]?.tools?.map(tool => tool.name).sort(),
@@ -220,5 +235,5 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'd
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  console.log(JSON.stringify(await runNativeDirectorExample(process.argv.includes('--dialogue') ? 'dialogue' : false), null, 2))
+  console.log(JSON.stringify(await runNativeDirectorExample(process.argv.includes('--story') ? 'story' : process.argv.includes('--dialogue') ? 'dialogue' : false), null, 2))
 }

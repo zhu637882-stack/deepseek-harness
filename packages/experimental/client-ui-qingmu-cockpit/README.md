@@ -1,5 +1,7 @@
 # Qingmu OS production cockpit
 
+The Story page can write a complete screenplay through the existing native DSH director and writer skills. Each project episode keeps a separate writing session and recovers its original completed result after reopening. Adopting a draft fills the editable screenplay; the existing parse and explicit save flow writes the canonical script. Incomplete requests stay visible and are never resent by refresh.
+
 Saved frame requirements now cover both automatic and manually planned shots. An imported shot uses the explicit `edit_requirements` operation after source and storyboard verification; the original planning text and receipts remain intact. Empty requirements stay unready. A save or GET receipt recovery stores text only and does not generate media or grant approval.
 
 English | [中文](README.zh.md)
