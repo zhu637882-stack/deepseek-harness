@@ -15,6 +15,7 @@ import fcntl
 import hashlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import secrets
@@ -38,7 +39,6 @@ DEEPSEEK_PRODUCTION_CREDENTIAL_FILE = Path(
     "/Users/a1234/.dsh/.credentials.yaml"
 )
 YIMENG_PROVIDER_ENV_FILE = Path("/Users/a1234/jason-drama-runtime/.env")
-QINGMU_LOCAL_REMAINING_PAID_CNY = 999.709120
 TEXT_FOUNDATION_STAGES = (
     "story_outline",
     "story_episode",
@@ -884,7 +884,10 @@ def validate_text_foundation_production_config(value: object) -> dict | None:
             isinstance(value.get(name), str) and value[name].strip()
             for name in ("projectId", "episodeId")
         )
-        or value["maxPaidCny"] != QINGMU_LOCAL_REMAINING_PAID_CNY
+        or isinstance(value["maxPaidCny"], bool)
+        or not isinstance(value["maxPaidCny"], (int, float))
+        or not math.isfinite(value["maxPaidCny"])
+        or value["maxPaidCny"] <= 0
         or value["allowedStages"] != list(TEXT_FOUNDATION_STAGES)
         or value["credentialEnvFile"] != str(YIMENG_PROVIDER_ENV_FILE)
         or value["maxTasksPerTick"] != 1
@@ -3115,7 +3118,10 @@ def bind_project_runtime(
         config.get("instanceId") != expected_instance_id
         or not project_id.strip()
         or not episode_id.strip()
-        or max_paid_cny != QINGMU_LOCAL_REMAINING_PAID_CNY
+        or isinstance(max_paid_cny, bool)
+        or not isinstance(max_paid_cny, (int, float))
+        or not math.isfinite(max_paid_cny)
+        or max_paid_cny <= 0
         or any(
             item is not None and not item.strip()
             for item in (text_foundation_parent_task_id, asset_reference_parent_task_id)
@@ -3146,7 +3152,7 @@ def bind_project_runtime(
             "provider": "dashscope",
             "projectId": project_id,
             "episodeId": episode_id,
-            "maxPaidCny": QINGMU_LOCAL_REMAINING_PAID_CNY,
+            "maxPaidCny": max_paid_cny,
             "allowedStages": list(TEXT_FOUNDATION_STAGES),
             "credentialEnvFile": str(YIMENG_PROVIDER_ENV_FILE),
             "maxTasksPerTick": 1,
@@ -3210,7 +3216,7 @@ def bind_project_runtime(
             "textFoundation": {
                 "provider": "dashscope",
                 "allowedStages": list(TEXT_FOUNDATION_STAGES),
-                "maxPaidCny": QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "maxPaidCny": max_paid_cny,
                 "maxTasksPerTick": 1,
                 "maxAttempts": 1,
                 "parentTaskId": text_foundation_parent_task_id or None,

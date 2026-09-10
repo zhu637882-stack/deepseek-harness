@@ -4,6 +4,8 @@
 
 本指南启动具有持久 SQLite 数据库的青木单用户专用实例。原生模式管理 Writer API、限定范围的 Worker，以及承载青木五阶段工作台的 DSH Host。它需要以 Qingmu profile 构建的 Harness、Harness 支持的 Node、带 `.venv` 的 Writer 仓库和 IMAGO Core，无需 Next 构建或 Node 20。初始化时不传 `--native-ui` 则保留旧前端，该模式额外要求以 `QINGMU_LOCAL_RUNTIME_PROXY=1` 构建的前端及 Node 20。初始化记录源码和产物身份；任一工作区或产物变化后，须停止实例、完成受影响构建，再执行 `record-build` 后启动。
 
+`bind-project-runtime --max-paid-cny` 使用明确传入的有限正数作为指定项目与剧集的预算；拒绝布尔值、零、负数和非有限数。该值同时进入 API 与 Worker 配置。ProviderGate 仍计入已有消费，每次请求仍需确认；不会默认沿用其他项目的余额。
+
 ## 初始化与打开
 
 在 Harness 目录执行。初始化拒绝任何已存在的目标目录。默认目录是 `~/Library/Application Support/QingmuOS`；自定义实例须在每条命令后加 `--root /absolute/new/path`。

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/cookbook/qingmu-local.md
-qingmu-local.md: b293f98cfc6451193d20c26bf89fa152ee6a1a91
-qingmu-local.zh.md: 108ee9e9d10d2da8998968935dea5c956202a35e
+qingmu-local.md: 5fd067c781ad6c268e9e47c0fd6cc13437f4e244
+qingmu-local.zh.md: f873a7fa31d2070a791bff9632d160b22a8bf4d2

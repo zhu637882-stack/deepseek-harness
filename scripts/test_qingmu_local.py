@@ -1355,7 +1355,7 @@ class OwnershipTests(unittest.TestCase):
                 "provider": "dashscope",
                 "projectId": "project-one",
                 "episodeId": "episode-one",
-                "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "maxPaidCny": 5.0,
                 "allowedStages": list(local.TEXT_FOUNDATION_STAGES),
                 "credentialEnvFile": str(credential_env),
                 "maxTasksPerTick": 1,
@@ -1440,7 +1440,7 @@ class OwnershipTests(unittest.TestCase):
             credential_env.chmod(0o600)
             production = {
                 "productionOnly": True, "provider": "dashscope", "projectId": "project-one",
-                "episodeId": "episode-one", "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "episodeId": "episode-one", "maxPaidCny": 5.0,
                 "allowedStages": list(local.TEXT_FOUNDATION_STAGES), "credentialEnvFile": str(credential_env),
                 "maxTasksPerTick": 1, "maxAttempts": 1, "allowExistingProviderPoll": True,
                 "textFoundationParentTaskId": None, "assetReferenceParentTaskId": None,
@@ -1586,7 +1586,7 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
                 "provider": "dashscope",
                 "projectId": "project-one",
                 "episodeId": "episode-one",
-                "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "maxPaidCny": 5.0,
                 "allowedStages": list(local.TEXT_FOUNDATION_STAGES),
                 "credentialEnvFile": str(credential_env),
                 "maxTasksPerTick": 1,
@@ -1610,7 +1610,7 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
                 argv, env, label = launch.call_args.args
                 self.assertEqual(label, "worker")
                 self.assertEqual(env["ALLOW_PAID"], "true")
-                self.assertEqual(env["MAX_PAID_CNY"], str(local.QINGMU_LOCAL_REMAINING_PAID_CNY))
+                self.assertEqual(env["MAX_PAID_CNY"], str(5.0))
                 self.assertEqual(env["PROVIDER_BUDGET_BASELINE_CNY"], "0")
                 self.assertEqual(env["PROVIDER_BUDGET_WINDOW_ID"], "")
                 self.assertEqual(env["PROVIDER_PAID_SCOPE_REQUIRED"], "true")
@@ -1651,7 +1651,7 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
             credential_env.chmod(0o600)
             production = {
                 "productionOnly": True, "provider": "dashscope", "projectId": "project-one",
-                "episodeId": "episode-one", "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "episodeId": "episode-one", "maxPaidCny": 5.0,
                 "allowedStages": list(local.TEXT_FOUNDATION_STAGES),
                 "credentialEnvFile": str(credential_env), "maxTasksPerTick": 1,
                 "maxAttempts": 1, "allowExistingProviderPoll": True,
@@ -1707,7 +1707,7 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
             credential_env.chmod(0o600)
             production = {
                 "productionOnly": True, "provider": "dashscope", "projectId": "project-one",
-                "episodeId": "episode-one", "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "episodeId": "episode-one", "maxPaidCny": 5.0,
                 "allowedStages": list(local.TEXT_FOUNDATION_STAGES),
                 "credentialEnvFile": str(credential_env), "maxTasksPerTick": 1,
                 "maxAttempts": 1, "allowExistingProviderPoll": True,
@@ -1770,7 +1770,7 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
                         (root / part).mkdir(parents=True, exist_ok=True)
                     production = {
                         "productionOnly": True, "provider": "dashscope", "projectId": "project-one",
-                        "episodeId": "episode-one", "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                        "episodeId": "episode-one", "maxPaidCny": 5.0,
                         "allowedStages": list(local.TEXT_FOUNDATION_STAGES),
                         "credentialEnvFile": str(local.YIMENG_PROVIDER_ENV_FILE), "maxTasksPerTick": 1,
                         "maxAttempts": 1, "allowExistingProviderPoll": True,
@@ -1809,7 +1809,7 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
             credential_env.chmod(0o600)
             production = {
                 "productionOnly": True, "provider": "dashscope", "projectId": "project-one",
-                "episodeId": "episode-one", "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "episodeId": "episode-one", "maxPaidCny": 5.0,
                 "allowedStages": list(local.TEXT_FOUNDATION_STAGES),
                 "credentialEnvFile": str(credential_env), "maxTasksPerTick": 1,
                 "maxAttempts": 1, "allowExistingProviderPoll": True,
@@ -1874,7 +1874,7 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
                 )
             production = {
                 "productionOnly": True, "provider": "dashscope", "projectId": "project-one",
-                "episodeId": "episode-one", "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "episodeId": "episode-one", "maxPaidCny": 5.0,
                 "allowedStages": list(local.TEXT_FOUNDATION_STAGES), "credentialEnvFile": str(credential_env),
                 "maxTasksPerTick": 1, "maxAttempts": 1, "allowExistingProviderPoll": True,
             }
@@ -1919,7 +1919,7 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
                     )
             production = {
                 "productionOnly": True, "provider": "dashscope", "projectId": "project-one",
-                "episodeId": "episode-one", "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "episodeId": "episode-one", "maxPaidCny": 5.0,
                 "allowedStages": list(local.TEXT_FOUNDATION_STAGES), "credentialEnvFile": str(credential_env),
                 "maxTasksPerTick": 1, "maxAttempts": 1, "allowExistingProviderPoll": True,
                 "textFoundationParentTaskId": None, "assetReferenceParentTaskId": None,
@@ -1981,7 +1981,7 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
                 )
             production = {
                 "productionOnly": True, "provider": "dashscope", "projectId": "project-one",
-                "episodeId": "episode-one", "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "episodeId": "episode-one", "maxPaidCny": 5.0,
                 "allowedStages": list(local.TEXT_FOUNDATION_STAGES), "credentialEnvFile": str(credential_env),
                 "maxTasksPerTick": 1, "maxAttempts": 1, "allowExistingProviderPoll": True,
                 "textFoundationParentTaskId": None, "assetReferenceParentTaskId": None,
@@ -2090,7 +2090,7 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
                 connection.execute("CREATE TABLE generation_tasks (id TEXT, capability TEXT, route_key TEXT, model TEXT, local_status TEXT, provider_status TEXT, request_payload_json TEXT)")
                 connection.execute("INSERT INTO generation_tasks VALUES (?, ?, ?, ?, ?, ?, ?)", ("initial-parent", "workflow.asset_reference_batch", "pipeline.asset_reference_batch", "asset-reference-batch", "succeeded", "SUCCEEDED", json.dumps(initial)))
                 connection.execute("INSERT INTO generation_tasks VALUES (?, ?, ?, ?, ?, ?, ?)", ("audit-parent", "workflow.asset_reference_batch", "pipeline.asset_reference_audit_batch", "asset-reference-audit-batch", "queued", "QUEUED", json.dumps(audit)))
-            production = {"productionOnly": True, "provider": "dashscope", "projectId": "project-one", "episodeId": "episode-one", "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY, "allowedStages": list(local.TEXT_FOUNDATION_STAGES), "credentialEnvFile": str(credential_env), "maxTasksPerTick": 1, "maxAttempts": 1, "allowExistingProviderPoll": True, "textFoundationParentTaskId": None, "assetReferenceParentTaskId": "initial-parent"}
+            production = {"productionOnly": True, "provider": "dashscope", "projectId": "project-one", "episodeId": "episode-one", "maxPaidCny": 5.0, "allowedStages": list(local.TEXT_FOUNDATION_STAGES), "credentialEnvFile": str(credential_env), "maxTasksPerTick": 1, "maxAttempts": 1, "allowExistingProviderPoll": True, "textFoundationParentTaskId": None, "assetReferenceParentTaskId": "initial-parent"}
             config = {"instanceId": "unit-rollover", "root": str(root), "yimengRoot": str(writer), "textFoundationProductionExecution": production}
             local.write_json(root / "private/asset-activation.json", {"schema": "qingmu.asset-parent-activation.v1", "instanceId": "unit-rollover", "parentTaskId": "initial-parent", "projectId": "project-one", "episodeId": "episode-one", "manifestHash": manifest_hash, "callPlanHash": manifest_hash})
             supervisor = local.Supervisor(root, config)
@@ -2150,11 +2150,18 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
                     expected_instance_id="binding-instance",
                     project_id="project-one",
                     episode_id="episode-one",
-                    max_paid_cny=local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                    max_paid_cny=5.0,
                 )
             probe.assert_called_once()
             saved = json.loads((root / "private/instance.json").read_text())
             self.assertEqual(saved["textFoundationProductionExecution"]["projectId"], "project-one")
+            self.assertEqual(saved["textFoundationProductionExecution"]["maxPaidCny"], 5.0)
+            self.assertEqual(receipt["textFoundation"]["maxPaidCny"], 5.0)
+            for invalid_cap in (0, -1, True, "5", float("nan"), float("inf")):
+                with self.assertRaises(ValueError):
+                    local.validate_text_foundation_production_config({
+                        **saved["textFoundationProductionExecution"], "maxPaidCny": invalid_cap,
+                    })
             self.assertIsNone(saved["textFoundationProductionExecution"]["textFoundationParentTaskId"])
             self.assertIsNone(saved["textFoundationProductionExecution"]["assetReferenceParentTaskId"])
             self.assertEqual(saved["directorProductionExecution"]["episodeId"], "episode-one")
@@ -2188,7 +2195,7 @@ print(json.dumps({"instanceSecretUsed": True, "validImagesInlined": 2,
                 "provider": "dashscope",
                 "projectId": "project-one",
                 "episodeId": "episode-one",
-                "maxPaidCny": local.QINGMU_LOCAL_REMAINING_PAID_CNY,
+                "maxPaidCny": 5.0,
                 "allowedStages": list(local.TEXT_FOUNDATION_STAGES),
                 "credentialEnvFile": str(credential_env),
                 "maxTasksPerTick": 1,

@@ -4,6 +4,8 @@ English | [中文](qingmu-local.zh.md)
 
 This guide starts a dedicated single-user Qingmu instance with a persistent SQLite database. Native mode owns the Writer API, scoped workers and DSH Host containing the five-stage Qingmu workspace. It requires a Qingmu-profile Harness build, a Harness-supported Node runtime, the Writer checkout with its `.venv`, and IMAGO Core. It needs neither a Next build nor Node 20. Omitting `--native-ui` during initialization retains the legacy frontend, which additionally requires a `QINGMU_LOCAL_RUNTIME_PROXY=1` frontend build and Node 20. Initialization records source and artifact identity; after either checkout or its artifacts change, stop the instance, complete affected builds and run `record-build` before restarting.
 
+The `bind-project-runtime --max-paid-cny` value sets the explicit finite positive budget for the named project and episode; booleans, zero, negative and non-finite values are rejected. This value reaches both API and Worker settings. ProviderGate still accounts for existing spending and each request needs its own confirmation. A previous project balance is never a default budget.
+
 ## Initialize and open
 
 Run from the Harness directory. Initialization refuses any existing destination directory. The default is `~/Library/Application Support/QingmuOS`; add `--root /absolute/new/path` to every command for a custom instance.
