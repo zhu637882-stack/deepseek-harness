@@ -123,6 +123,8 @@
   .shots h2 { display:none; }
   .shots button { flex:0 0 170px; }
   .stage { height:650px; min-height:540px; }
+  .stage[data-local-source='true'] { height:auto; min-height:0; }
+  .stage[data-local-source='true'] .media { flex:none; min-height:200px; aspect-ratio:16 / 9; }
   .inspector { border-left:0; border-top:1px solid var(--line); }
   .header nav { justify-content:space-between; gap:8px; font-size:12px; }
 }

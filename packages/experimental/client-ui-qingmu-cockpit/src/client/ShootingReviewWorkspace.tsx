@@ -331,6 +331,8 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
   const visibleStack = stack?.subject.projectId === projectId && stack.subject.episodeId === episodeId
     && stack.subject.frameId === current.shotId ? stack : undefined
   const versions = visibleStack?.subject.versions ?? []; const browsed = versions.find(version => version.takeId === browseId)
+  const sourcePanelVisible = !firstFrameOpen && !historyOpen && usable(browsed) && isLocalVideo(browsed)
+    && hasLocalVideoSourcePort(port)
   const state = testState ?? statusOf(visibleStack, browsed, load)
   const primary = usable(browsed) && browsed.canAttemptSelection && browsed.lineageComplete
     && !visibleStack?.subject.selectedTakeId && visibleStack?.capabilities.canSelect === true
@@ -422,7 +424,7 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
         const title = shootingTitle(shot.title, planning)
         return <button key={shot.shotId} type="button" aria-label={`镜 ${shot.frameNo} ${title}`} aria-current={shot.shotId === current.shotId} onClick={() => onSelectShotId(shot.shotId)}>{thumb ? <img className={css.shotThumb} src={thumb} loading="lazy" alt={`镜 ${shot.frameNo} 首帧缩略图`} /> : candidate && (shot.shotId !== current.shotId || !currentPaneLoadsFrame) ? <FirstFrameCandidatePreview key={`${historyScopeKey}:${shot.shotId}:${candidate.assetId}`} autoLoad thumbnailClassName={css.shotThumb ?? ''} request={{ projectId, episodeId, storyboardRevisionId, frameId: shot.shotId, assetId: candidate.assetId, expectedMaterializedSha256: candidate.materializedSha256 }} load={frameClient.historyPreview} labels={{ load: '查看首帧', loading: '正在读取首帧', error: '缩略图未载入', ariaLabel: `镜 ${shot.frameNo} 首帧缩略图` }} /> : !candidate && previewTake ? <TakeThumbnail request={{ projectId, episodeId, frameId: shot.shotId, takeId: previewTake.takeId, expectedOutputSha256: previewTake.outputSha256 }} load={port.takePreview} className={css.shotThumb} alt={`镜 ${shot.frameNo} 视频第一帧`} /> : <span className={css.shotThumb}>{candidate ? '首帧候选' : historyCandidates[shot.shotId] === null ? '状态未知' : Object.hasOwn(historyCandidates, shot.shotId) ? '暂无首帧' : '正在读取'}</span>}<span className={css.shotText}><small>镜 {shot.frameNo}</small><strong title={title}>{title}</strong><small className={css.shotStatus} data-status={label}><i aria-hidden="true" />{label}</small></span></button>
       })}</aside>
-      <main className={css.stage}>
+      <main className={css.stage} data-local-source={sourcePanelVisible || undefined}>
         <div className={css.stageHeading}>
           <div><span>镜 {String(current.frameNo).padStart(2, '0')}</span><h1>{shootingTitle(current.title, planningShots.find(item => item.id === current.shotId))}</h1></div>
           {sourceUrl !== undefined && browsedImage === undefined && <button className={css.zoomButton} type="button" onClick={(event) => { zoomTrigger.current = event.currentTarget; resetZoom(); setZoom(true) }}>放大画面</button>}
@@ -454,8 +456,7 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
                       <small>{message(state, load)}</small></div>}
           {!firstFrameOpen && !historyOpen && <>{testState !== undefined && <p className={css.mediaNotice} role="status">隔离演练状态，不代表真实任务，未提交生成。</p>}{load === 'loading' && <p className={css.mediaNotice} role="status">{message(state, load)}</p>}{load === 'failed' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}{state === 'failed' && load === 'ready' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}</>}
         </div>
-        {!firstFrameOpen && !historyOpen && usable(browsed) && isLocalVideo(browsed)
-          && hasLocalVideoSourcePort(port) && <LocalVideoSourcePanel
+        {sourcePanelVisible && <LocalVideoSourcePanel
           key={`${projectId}:${episodeId}:${current.shotId}:${browsed.takeId}`}
           scope={{ projectId, episodeId, frameId: current.shotId, assetId: browsed.takeId }} port={port} />}
         <div className={css.candidates} aria-label="候选画面">{(!historyOpen && !firstFrameOpen ? versions : []).map(version => <button className={isLocalVideo(version) ? css.localCandidate : undefined} key={version.takeId} type="button" aria-pressed={!firstFrameOpen && !historyOpen && version.takeId === browseId} onClick={() => { showMediaPane('takes'); setBrowseId(version.takeId); if (version.takeId !== browseId) setMediaUrl(undefined) }}>{usable(version) ? <TakeThumbnail request={{ projectId, episodeId, frameId: current.shotId, takeId: version.takeId, expectedOutputSha256: version.outputSha256 }} load={port.takePreview} className={css.candidateThumb} alt={`视频候选 v${version.versionOrdinal} · 视频第一帧`} /> : <span className={css.videoIcon}>素材尚不可用</span>}<span>{isLocalVideo(version) ? '本地导入视频' : `视频候选 v${version.versionOrdinal}`}</span>{isLocalVideo(version) && version.originalFileName && <small className={css.localFileName}>{version.originalFileName}</small>}<strong>{isLocalVideo(version) ? '本地导入，来源待核实，暂不可采用' : version.isSelected ? '当前选用' : version.qualityStatus === 'failed' ? '检查未通过' : version.qualityStatus === 'passed' ? '待你审看' : '等待检查'}</strong></button>)}
