@@ -19,6 +19,13 @@ function id(value: unknown): asserts value is string {
 function sha(value: unknown): asserts value is string {
   if (typeof value !== 'string' || !/^[a-f0-9]{64}$/u.test(value)) throw new Error('invalid source SHA')
 }
+function directorSource(value: unknown): { sha256: string; prompt: string } | null {
+  if (value === null) return null
+  const v = object(value, ['sha256', 'prompt'])
+  sha(v.sha256)
+  if (typeof v.prompt !== 'string' || !v.prompt) throw new Error('missing director design')
+  return { sha256: v.sha256, prompt: v.prompt }
+}
 function integer(value: unknown, min: number, max: number): asserts value is number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min || value > max) throw new Error('invalid number')
 }
@@ -54,7 +61,7 @@ export function normalizeReferenceVideoQuote(
     || typeof v.generationSubmissionEnabled !== 'boolean'
     || v.readOnly !== true || v.providerCalls !== 0 || v.databaseWrites !== 0 || v.budgetReservedCny !== 0 || v.generationQueued !== false) throw new Error('quote identity or effects changed')
   const preview = normalizeReferenceVideoPreview(v.preview, request, digest)
-  if (v.sourceSha256 !== preview.sourceSha256) throw new Error('quote source changed')
+  if (!preview.directorSourceAligned || v.sourceSha256 !== preview.sourceSha256) throw new Error('quote source changed')
   const c = object(v.cost, ['provider', 'region', 'currency', 'basis', 'unit', 'unitPriceCny', 'billableSeconds', 'estimatedCny', 'candidateCount', 'maxAttempts', 'accountDiscountApplied', 'pricingSha256', 'pricingCheckedAt', 'sourceUrl'])
   if (c.provider !== 'dashscope' || c.region !== 'cn-beijing' || c.currency !== 'CNY' || c.basis !== 'catalog_list_price' || c.unit !== 'second'
     || c.billableSeconds !== preview.body.parameters.duration || c.candidateCount !== 1 || c.maxAttempts !== 1
@@ -79,6 +86,7 @@ export function normalizeReferenceVideoQuote(
 export function parseReferenceVideoDraftScope(value: unknown): { projectId: string; frameId: string } {
   const v = object(value, ['projectId', 'frameId'])
   id(v.projectId); id(v.frameId)
+  if (v.directorSourceSha256 !== undefined) sha(v.directorSourceSha256)
   return { projectId: v.projectId, frameId: v.frameId }
 }
 
@@ -91,15 +99,15 @@ export function parseReferenceVideoDraftScope(value: unknown): { projectId: stri
 export function normalizeReferenceVideoDraft(
   value: unknown, scope: { projectId: string; frameId: string }, digest: (value: unknown, label: string) => string,
 ): ReferenceVideoDraftResponse {
-  const v = object(value, ['schema', 'projectId', 'frameId', 'frameSha256', 'draft', 'mediaTypes', 'providerCalls', 'generationQueued'])
+  const v = object(value, ['schema', 'projectId', 'frameId', 'frameSha256', 'directorSource', 'draft', 'mediaTypes', 'providerCalls', 'generationQueued'])
   if (v.schema !== 'jason.reference-video-draft.v1' || v.projectId !== scope.projectId || v.frameId !== scope.frameId
     || v.providerCalls !== 0 || v.generationQueued !== false) throw new Error('draft scope or effects changed')
-  sha(v.frameSha256)
+  sha(v.frameSha256); directorSource(v.directorSource)
   const types = object(v.mediaTypes)
   if (v.draft !== null) {
     const d = object(v.draft, ['revision', 'frameSha256', 'requestSha256', 'request', 'savedAt'])
     integer(d.revision, 1, Number.MAX_SAFE_INTEGER); sha(d.frameSha256); sha(d.requestSha256)
-    const body = object(d.request, ['frameId', 'model', 'bindings', 'promptParts', 'parameters'])
+    const body = object(d.request, ['frameId', 'model', 'bindings', 'promptParts', 'parameters', 'directorSourceSha256'])
     const request = parseReferenceVideoRequest({ ...body, projectId: scope.projectId })
     if (request.frameId !== scope.frameId || digest(body, 'draft.request') !== d.requestSha256
       || typeof d.savedAt !== 'string' || !Number.isFinite(Date.parse(d.savedAt))) throw new Error('draft content mismatch')
@@ -114,8 +122,9 @@ export function normalizeReferenceVideoDraft(
  * @returns The validated draft, with no implicit rewriting.
  */
 export function parseReferenceVideoRequest(value: unknown): ReferenceVideoPreviewRequest {
-  const v = object(value, ['projectId', 'frameId', 'model', 'bindings', 'promptParts', 'parameters'])
+  const v = object(value, ['projectId', 'frameId', 'model', 'bindings', 'promptParts', 'parameters', 'directorSourceSha256'])
   id(v.projectId); id(v.frameId)
+  if (v.directorSourceSha256 !== undefined) sha(v.directorSourceSha256)
   if (v.model !== 'wan3.0-video' || !Array.isArray(v.bindings) || v.bindings.length < 1 || v.bindings.length > 15) throw new Error('invalid references')
   const tokens = new Set<string>()
   for (const entry of v.bindings) {
@@ -153,10 +162,12 @@ export function parseReferenceVideoRequest(value: unknown): ReferenceVideoPrevie
 export function normalizeReferenceVideoPreview(
   value: unknown, request: ReferenceVideoPreviewRequest, digest: (value: unknown, label: string) => string,
 ): ReferenceVideoPreviewResponse {
-  const v = object(value, ['schema', 'projectId', 'frameId', 'body', 'referenceMapping', 'requestBodySha256', 'sourceSha256', 'readOnly', 'databaseWrites', 'providerCalls', 'submissionReady', 'remainingChecks', 'referenceAudioDurationSec'])
+  const v = object(value, ['schema', 'projectId', 'frameId', 'body', 'referenceMapping', 'requestBodySha256', 'sourceSha256', 'readOnly', 'databaseWrites', 'providerCalls', 'submissionReady', 'remainingChecks', 'referenceAudioDurationSec', 'directorSource', 'directorSourceAligned'])
   if (v.schema !== 'jason.reference-video-request-preview.v1' || v.projectId !== request.projectId || v.frameId !== request.frameId
     || v.readOnly !== true || v.databaseWrites !== 0 || v.providerCalls !== 0 || v.submissionReady !== false) throw new Error('preview scope or effects changed')
   sha(v.requestBodySha256); sha(v.sourceSha256)
+  const source = directorSource(v.directorSource)
+  if (v.directorSourceAligned !== (request.directorSourceSha256 === source?.sha256)) throw new Error('director source changed')
   const body = object(v.body, ['model', 'input', 'parameters'])
   const input = object(body.input, ['prompt', 'media'])
   if (body.model !== request.model || !Array.isArray(v.referenceMapping) || !Array.isArray(input.media)

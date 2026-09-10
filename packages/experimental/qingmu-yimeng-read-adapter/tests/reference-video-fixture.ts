@@ -29,12 +29,13 @@ export const response: ReferenceVideoPreviewResponse = {
     mediaType: body.input.media[index]!.type, alias: ['图1', '音频1', '图2'][index]! })),
   requestBodySha256: createHash('sha256').update(canonical(body)).digest('hex'), sourceSha256: 'f'.repeat(64),
   readOnly: true, providerCalls: 0, databaseWrites: 0, submissionReady: false, referenceAudioDurationSec: 2,
+  directorSource: null, directorSourceAligned: true,
   remainingChecks: ['source_revalidation_at_dispatch', 'provider_media_reachability', 'generation_authorization'],
 }
 
 const { projectId: _projectId, ...savedRequest } = request
 export const savedDraft = {
-  schema: 'jason.reference-video-draft.v1', projectId: 'p', frameId: 'f', frameSha256: 'e'.repeat(64),
+  schema: 'jason.reference-video-draft.v1', directorSource: null, projectId: 'p', frameId: 'f', frameSha256: 'e'.repeat(64),
   draft: { revision: 1, frameSha256: 'e'.repeat(64), requestSha256: createHash('sha256').update(canonical(savedRequest)).digest('hex'),
     request: savedRequest, savedAt: '2026-09-09T12:00:00Z' },
   mediaTypes: { lin: 'reference_image', voice: 'reference_audio', cafe: 'reference_image' },

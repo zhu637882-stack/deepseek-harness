@@ -73,6 +73,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
   const [draftState, setDraftState] = useState<ReferenceVideoDraftResponse>()
   const [draftLoaded, setDraftLoaded] = useState(false)
   const [sourceAccepted, setSourceAccepted] = useState(true)
+  const [directorSourceSha256, setDirectorSourceSha256] = useState<string>()
   const [saving, setSaving] = useState(false)
   const [draftMessage, setDraftMessage] = useState('正在读取草稿状态…')
   const [inheritFrom, setInheritFrom] = useState(referenceSources?.[0]?.frameId ?? '')
@@ -193,6 +194,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
       setSavedEpoch(epoch.current)
       setChosen(state.draft.request.bindings.map(binding => ({ ...binding, browserUrl: '', mediaType: state.mediaTypes[binding.bindingToken] ?? 'unavailable' })))
       setParts(state.draft.request.promptParts); setParameters(state.draft.request.parameters)
+      setDirectorSourceSha256(state.draft.request.directorSourceSha256)
       activeText.current = { index: 0, start: 0, end: 0 }
       setDraftLoaded(true); setSourceAccepted(state.draft.frameSha256 === state.frameSha256)
       setDraftMessage(`已恢复草稿版本 ${state.draft.revision}。`)
@@ -209,7 +211,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
         expectedRevision: draftState.draft?.revision ?? 0, expectedFrameSha256: draftState.frameSha256,
         request: { frameId, model: 'wan3.0-video',
           bindings: chosen.map(({ bindingToken, assetId, assetSha256, label }) => ({ bindingToken, assetId, assetSha256, label })),
-          promptParts: parts, parameters } }, controller.signal)
+          promptParts: parts, parameters, ...(directorSourceSha256 ? { directorSourceSha256 } : {}) } }, controller.signal)
       if (controller.signal.aborted) return
       setDraftState(state); setDraftLoaded(true); setSavedEpoch(start)
       setDraftMessage(epoch.current === start ? `已保存草稿版本 ${state.draft?.revision}。` : '上一版已保存，随后修改的内容尚未保存。')
@@ -315,8 +317,11 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
         bindings: chosen.map(({ bindingToken, assetId, assetSha256, label }) => (
           { bindingToken, assetId, assetSha256, label }
         )),
-        promptParts: parts, parameters }, controller.signal)
-      if (!controller.signal.aborted) setResult(response)
+        promptParts: parts, parameters, ...(directorSourceSha256 ? { directorSourceSha256 } : {}) }, controller.signal)
+      if (!controller.signal.aborted) {
+        setResult(response)
+        setDraftState(previous => previous && { ...previous, directorSource: response.directorSource })
+      }
     } catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '预览失败') }
     finally { if (!controller.signal.aborted) setBusy(false) }
   }
@@ -392,6 +397,20 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
     {!sourceAccepted && <p role="alert">镜头在上次保存后已变化，请核对当前描述和素材。
       <button type="button" onClick={() => { setSourceAccepted(true); invalidate() }}>基于当前镜头继续编辑</button>
     </p>}
+    {draftState?.directorSource && <section aria-label="当前导演设计">
+      <details><summary>查看当前导演设计与全片风格，核对下方生成稿</summary>
+        <pre style={{ whiteSpace: 'pre-wrap' }}>{draftState.directorSource.prompt}</pre>
+      </details>
+      {directorSourceSha256 !== draftState.directorSource.sha256 && <p role="status">
+        导演设计尚未同步到这份生成稿。请结合设计修改运镜、表演、声音和引用，也可交给青木导演整理。
+      </p>}
+      <label><input type="checkbox" checked={directorSourceSha256 === draftState.directorSource.sha256}
+        onChange={(event) => {
+          setDirectorSourceSha256(event.target.checked ? draftState.directorSource?.sha256 : undefined); invalidate()
+        }} />
+        我已对照当前设计整理生成稿，保留所需细节并处理相互矛盾的描述
+      </label>
+    </section>}
     {chosen.some(item => item.mediaType === 'unavailable') && <p role="alert">部分素材已删除或版本已变化，请移除失效引用并重新选择。</p>}
     <div className={css.workbench}>
       <section className={css.referenceShelf} aria-label="参考素材">
@@ -531,7 +550,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
           <button className={css.primaryAction} type="button" disabled={busy || saving || !draftState?.draft || savedEpoch !== epoch.current || !sourceAccepted} onClick={() => { void quote() }}>估算已存草稿费用</button>
         </div>
         {quoteResult && <p className={css.quote} role="status">目录价估算 ¥{Number(quoteResult.cost.estimatedCny).toFixed(2)} · 1 个视频 · {quoteResult.cost.billableSeconds} 秒。
-          未扣费；未计账户折扣，实际结算以阿里账单为准。{quoteResult.generationSubmissionEnabled === false
+          未扣费；未计账户折扣，实际结算以阿里账单为准。{!quoteResult.generationSubmissionEnabled
             && <>当前实例未启用付费生成，估算仅供核对。</>}<a href={quoteResult.cost.sourceUrl} target="_blank" rel="noreferrer">查看价格</a></p>}
       </section>
       <aside className={css.previewColumn} aria-label="镜头预览与候选">

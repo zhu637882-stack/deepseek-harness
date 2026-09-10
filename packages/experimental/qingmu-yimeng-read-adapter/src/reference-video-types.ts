@@ -19,6 +19,12 @@ export interface ReferenceVideoParameters {
   readonly seed?: number
 }
 
+/** Latest authored design and style sources; this is not a quality verdict. */
+export interface ReferenceDirectorSource {
+  readonly sha256: string
+  readonly prompt: string
+}
+
 /** Project-owned source versions; callers cannot supply transport URLs. */
 export interface ReferenceVideoPreviewRequest {
   readonly projectId: string
@@ -26,6 +32,7 @@ export interface ReferenceVideoPreviewRequest {
   readonly model: 'wan3.0-video'
   readonly bindings: readonly ReferenceVideoBinding[]
   readonly promptParts: readonly ReferenceVideoPromptPart[]
+  readonly directorSourceSha256?: string
   readonly parameters: ReferenceVideoParameters
 }
 
@@ -58,6 +65,8 @@ export interface ReferenceVideoPreviewResponse {
   readonly submissionReady: false
   readonly remainingChecks: readonly string[]
   readonly referenceAudioDurationSec: number
+  readonly directorSource: ReferenceDirectorSource | null
+  readonly directorSourceAligned: boolean
 }
 
 /** Paginated project assets available for explicit draft references. */
@@ -93,6 +102,7 @@ export interface ReferenceVideoDraftResponse {
   readonly projectId: string
   readonly frameId: string
   readonly frameSha256: string
+  readonly directorSource: ReferenceDirectorSource | null
   readonly draft: null | {
     readonly revision: number
     readonly frameSha256: string

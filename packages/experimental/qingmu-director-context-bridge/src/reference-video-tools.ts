@@ -38,7 +38,7 @@ function assertCurrent(current: BoundRead, exec: ToolRunContext): void {
 
 function requestFor(current: BoundRead, draft: JsonValue): ReferenceVideoPreviewRequest {
   if (draft === null || typeof draft !== 'object' || Array.isArray(draft)) throw new Error('draft must be an object.')
-  exactKeys(draft, ['bindings', 'promptParts', 'parameters'])
+  exactKeys(draft, ['bindings', 'promptParts', 'parameters', ...('directorSourceSha256' in draft ? ['directorSourceSha256'] : [])])
   // The Host adapter validates every nested wire field. Scope and model are not model-editable.
   return { ...draft, projectId: current.state.binding.scope.projectId,
     frameId: current.state.binding.scope.shotId, model: 'wan3.0-video' } as unknown as ReferenceVideoPreviewRequest
@@ -46,7 +46,7 @@ function requestFor(current: BoundRead, draft: JsonValue): ReferenceVideoPreview
 
 const editableDraft = {
   type: 'json', required: true,
-  description: 'Complete editable draft with exactly bindings, promptParts, parameters. bindings contains {bindingToken,assetId,assetSha256,label}. promptParts contains {text} or {bindingToken}; preserve unchanged text verbatim. parameters contains duration, resolution (480P/720P/1080P), ratio (adaptive/16:9/4:3/1:1/3:4/9:16), audio, prompt_extend, optional seed. Use assets and hashes from the current read; keep binding tokens stable. No project, frame, URL or model fields.',
+  description: 'Complete editable draft with bindings, promptParts, parameters and optional directorSourceSha256. bindings contains {bindingToken,assetId,assetSha256,label}. promptParts contains {text} or {bindingToken}; Write one reconciled final prompt from the latest director plan, script, style and references. Remove superseded directions; do not append new design to contradictory old prose. Set directorSourceSha256 from saved.directorSource only after this reconciliation; omit it when the source is null. This digest proves source freshness, not creative quality. parameters contains duration, resolution (480P/720P/1080P), ratio (adaptive/16:9/4:3/1:1/3:4/9:16), audio, prompt_extend, optional seed. Use assets and hashes from the current read; keep binding tokens stable. No project, frame, URL or model fields.',
 } as const
 
 /** Optional reader composition; all registrations unwind with the owning preset. */
@@ -77,7 +77,7 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
         assets: { page: catalog.page, pages: catalog.pages,
           items: catalog.items.map(({ assetId, assetSha256, label, mediaType }) => ({ assetId, assetSha256, label, mediaType })) },
         providerCalls: 0, generationQueued: false,
-        guidance: 'Keep unchanged text and bindings. Use saved.frameSha256 and saved.draft.revision (0 when absent) for saving. The page restores the saved version explicitly so an unsaved local edit is not overwritten.',
+        guidance: 'Read saved.directorSource in full and reconcile it into a single final prompt, preserving stable bindings and unaffected decisions. Set draft.directorSourceSha256 only after reconciling. The preview emits your authored text verbatim, with reference aliases; it appends no hidden creative directions. Use saved.frameSha256 and saved.draft.revision (0 when absent) for saving. The page restores the saved version explicitly so an unsaved local edit is not overwritten.',
       })
     },
   }))
@@ -97,7 +97,8 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
       return ports.boundedJson({ schema: 'qingmu.native-reference-preview.v1', scope: current.state.binding.scope,
         prompt: compiled.body.input.prompt, parameters: compiled.body.parameters,
         references: compiled.referenceMapping, requestBodySha256: compiled.requestBodySha256,
-        sourceSha256: compiled.sourceSha256, remainingChecks: compiled.remainingChecks,
+        sourceSha256: compiled.sourceSha256, directorSource: compiled.directorSource,
+        directorSourceAligned: compiled.directorSourceAligned, remainingChecks: compiled.remainingChecks,
         providerCalls: 0, generationQueued: false, saved: false })
     },
   }))
@@ -118,13 +119,16 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
       const preview = await ctx.qingmuYimengRead('referenceVideoPreview', request, exec.signal)
       assertCurrent(current, exec)
       if (!preview.ok) throw new Error(`Reference draft cannot be saved: ${preview.error.message}`)
+      if (!(preview.value as ReferenceVideoPreviewResponse).directorSourceAligned) {
+        throw new Error('Read the latest directorSource and reconcile the full prompt before saving through the director tool. The existing draft remains editable.')
+      }
       const { projectId, ...body } = request
       const saved = await ctx.qingmuYimengCommand('saveReferenceVideoDraft', {
         projectId, frameId: request.frameId, expectedRevision: args.expectedRevision,
         expectedFrameSha256: args.expectedFrameSha256, request: body,
       }, exec.signal)
       if (!saved.ok) throw new Error(`Draft save was not confirmed. Read it before writing again: ${saved.error.message}`)
-      const value = saved.value as unknown as ReferenceVideoDraftResponse
+      const value = saved.value as ReferenceVideoDraftResponse
       // A selection switch after dispatch cannot undo a confirmed write; report its captured target.
       return ports.boundedJson({ schema: 'qingmu.native-reference-saved.v1', scope: current.state.binding.scope,
         revision: value.draft?.revision, requestSha256: value.draft?.requestSha256,

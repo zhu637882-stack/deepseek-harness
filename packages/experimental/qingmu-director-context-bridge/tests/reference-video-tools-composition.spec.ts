@@ -60,6 +60,7 @@ const saveArgs = { draft: edit, expectedRevision: 1, expectedFrameSha256: savedD
 
 function writer() {
   let saved = structuredClone(savedDraft)
+  let directorSource: { sha256: string; prompt: string } | null = null
   let currentContext = structuredClone(context)
   let currentPlanning = structuredClone(planning)
   const planReceipts = new Map<string, Record<string, unknown>>()
@@ -86,6 +87,8 @@ function writer() {
         frameRequirements: [{ ...currentPlanning.frameRequirements[0]!, directorPlan: body.request.directorPlan }],
         canonicalStoryboard: { ...currentPlanning.canonicalStoryboard, revision: 2, sourceHash: storyboard.sourceHash,
           shots: [{ ...currentPlanning.frameRequirements[0]!, directorPlan: body.request.directorPlan }] } }
+      const prompt = canonical(body.request.directorPlan)
+      directorSource = { sha256: sha(prompt), prompt }
       const { contextSnapshotSha256: _hash, ...source } = currentContext
       const next = { ...source, storyboard }
       currentContext = { ...next, contextSnapshotSha256: sha(next) }
@@ -106,7 +109,8 @@ function writer() {
         : response.referenceMapping.find(item => item.bindingToken === part.bindingToken)!.alias).join('')
       const body = { ...response.body, input: { ...response.body.input, prompt }, parameters: { ...input.parameters, watermark: false } }
       afterPreview?.()
-      return Response.json({ ...response, body, requestBodySha256: sha(body) })
+      return Response.json({ ...response, body, requestBodySha256: sha(body), directorSource,
+        directorSourceAligned: input.directorSourceSha256 === directorSource?.sha256 })
     }
     if (url.pathname === '/api/qingmu/projects/p/reference-video/drafts/f') {
       if (init?.method === 'POST') {
@@ -124,7 +128,7 @@ function writer() {
         afterSave?.()
         if (loseSaveResponse) throw new Error('connection lost after commit')
       }
-      return Response.json(saved)
+      return Response.json({ ...saved, directorSource })
     }
     throw new Error(`Unexpected Writer request: ${url}`)
   })
@@ -327,4 +331,25 @@ it('reports the captured save target when selection changes after dispatch, with
   })
   expect(saves(h.upstream)).toHaveLength(1)
   expect(h.upstream.saved().frameId).toBe('f')
+})
+
+
+it('reconciles a changed complete design into one final native reference draft and rejects an old source', async () => {
+  const finalDraft = { ...edit, directorSourceSha256: sha(canonical(design)),
+    promptParts: [{ bindingToken: 'lin' }, { text: '先迟疑，再试探。先推近，再横移。低声，保留吸气。嗯。我在听。' }] }
+  const adapter = new MockAdapter([
+    toolCallResponse('plan-read', 'qingmu_read_director_plan', {}),
+    toolCallResponse('plan-save', 'qingmu_save_director_plan', { receiptId: designReceipt, directorPlan: design }),
+    toolCallResponse('source-read', 'qingmu_read_reference_draft', { page: 1 }),
+    toolCallResponse('old-save', 'qingmu_save_reference_draft', saveArgs),
+    toolCallResponse('final-save', 'qingmu_save_reference_draft', { ...saveArgs, draft: finalDraft }),
+    textResponse('已整理并保存生成稿，尚未生成视频。'),
+  ])
+  const h = await harness(adapter); await h.run(true)
+  expect(result(h.agent, 'source-read').text).toContain('newMethod')
+  expect(result(h.agent, 'old-save').error).toBe(true)
+  expect(result(h.agent, 'final-save').error, result(h.agent, 'final-save').text).toBe(false)
+  expect(saves(h.upstream)).toHaveLength(1)
+  expect(h.upstream.saved().draft.request).toMatchObject(finalDraft)
+  expect(JSON.stringify(adapter.requests.at(-1))).toContain('先推近，再横移')
 })

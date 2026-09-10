@@ -13,10 +13,10 @@ const assets: ReferenceVideoAsset[] = [
 ]
 const result = {
   body: { input: { prompt: '已编译的原文' }, parameters: { duration: 8, resolution: '720P', ratio: '16:9' } },
-  referenceAudioDurationSec: 2,
+  referenceAudioDurationSec: 2, directorSource: null, directorSourceAligned: true,
 } as ReferenceVideoPreviewResponse
-function mount(options?: { configured?: boolean; configurationError?: string | null; initialMaterialStatus?: 'not_prepared' | 'unknown' | 'failed' | 'expired' | 'ready' }) {
-  let server: ReferenceVideoDraftResponse = { schema: 'jason.reference-video-draft.v1', projectId: 'p', frameId: 'f', frameSha256: 'f'.repeat(64), draft: null, mediaTypes: {}, providerCalls: 0, generationQueued: false }
+function mount(options?: { directorSource?: { sha256: string; prompt: string }; configured?: boolean; configurationError?: string | null; initialMaterialStatus?: 'not_prepared' | 'unknown' | 'failed' | 'expired' | 'ready' }) {
+  let server: ReferenceVideoDraftResponse = { schema: 'jason.reference-video-draft.v1', directorSource: options?.directorSource ?? null, projectId: 'p', frameId: 'f', frameSha256: 'f'.repeat(64), draft: null, mediaTypes: {}, providerCalls: 0, generationQueued: false }
   let latestMaterialStatus = options?.initialMaterialStatus ?? 'not_prepared'
   const materialState = (status = latestMaterialStatus) => ({
     schema: 'jason.reference-video-materials.v1' as const,
@@ -367,5 +367,26 @@ it('keeps a disabled-generation quote readable while the submission control stay
   fireEvent.click(screen.getByRole('button', { name: '估算已存草稿费用' }))
   await screen.findByText(/当前实例未启用付费生成，估算仅供核对。/u)
   expect(screen.getByRole('button', { name: '当前实例未启用付费生成' }).hasAttribute('disabled')).toBe(true)
+  expect(port.queueReferenceVideo).not.toHaveBeenCalled()
+})
+
+
+it('shows the current design without silently rewriting or blessing an old prompt', async () => {
+  const directorSource = { sha256: 'b'.repeat(64), prompt: '切手部特写，再切女方近景；低声郑重，女方嗯一声。' }
+  const { port } = mount({ directorSource }); await chooseAll()
+  expect(await screen.findByText(directorSource.prompt)).toBeTruthy()
+  const acknowledgement = screen.getByRole('checkbox', { name: /我已对照当前设计整理生成稿/u })
+  expect((acknowledgement as HTMLInputElement).checked).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: '保存引用草稿' }))
+  await screen.findByText('已保存草稿版本 1。')
+  expect(port.saveReferenceVideoDraft.mock.calls[0]?.[0].request.directorSourceSha256).toBeUndefined()
+  const field = screen.getByRole('textbox', { name: '视频描述片段1' })
+  fireEvent.change(field, { target: { value: directorSource.prompt } })
+  fireEvent.click(acknowledgement)
+  fireEvent.click(screen.getByRole('button', { name: '保存引用草稿' }))
+  await screen.findByText('已保存草稿版本 2。')
+  expect(port.saveReferenceVideoDraft.mock.calls[1]?.[0].request).toMatchObject({
+    directorSourceSha256: directorSource.sha256, promptParts: [{ text: directorSource.prompt }],
+  })
   expect(port.queueReferenceVideo).not.toHaveBeenCalled()
 })
