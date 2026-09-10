@@ -305,7 +305,7 @@ export function TextImportWorkspace({ port, projectId, episodeId, onSaved, onPla
   useEffect(() => {
     mounted.current = true
     void Promise.all([load(),
-      port.readCreationOptions().then((value) => { if (mounted.current) setOptions(value) }),
+      port.readCreationOptions({}).then((value) => { if (mounted.current) setOptions(value) }),
       port.readCreativeContract({ projectId }).then((value) => {
         if (mounted.current) {
           setContract(value)
