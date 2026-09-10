@@ -1,5 +1,7 @@
 # Qingmu director context bridge
 
+`qingmu_read_director_plan` and `qingmu_save_director_plan` read and patch the complete canonical shot design through the existing Writer scene-planning API. Creative keys are extensible; script identities and provenance remain protected. A logged read binds script/storyboard revisions, and an identical request recovers the same durable save receipt after uncertainty. A verified save can advance the current native turn's context; unrelated source or selection changes cannot. These tools generate no media. Reference drafts still need reconciliation with the newly saved design before generation.
+
 English | [中文](README.zh.md)
 
 This private experimental package binds one DSh session to one exact Yimeng `project / episode / scene / shot` and its normalized `contextSnapshotSha256`. The binding is a log-only, whole-value session event, so a restarted session rebuilds the same identity without a second database or ledger.

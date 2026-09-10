@@ -51,14 +51,14 @@ export function assertNativeTurnTarget(session: Session, callId: CallId, recover
       continue
     }
     const consumed = { events: session.events.filter(item => item.seq > start.seq && item.seq < call.seq) }
-    for (const value of toolValues(consumed, 'qingmu_commit_dialogue_edit')) {
+    for (const value of toolValues(consumed, ['qingmu_commit_dialogue_edit', 'qingmu_save_director_plan'])) {
       const saved = value as {
         schema?: string
         scope?: unknown
         result?: { recovered?: boolean }
         continuation?: { before: string; after: string }
       }
-      if (saved.schema === 'qingmu.native-dialogue-committed.v1'
+      if (['qingmu.native-dialogue-committed.v1', 'qingmu.native-director-plan-saved.v1'].includes(saved.schema ?? '')
         && saved.result?.recovered === false
         && saved.scope !== null && typeof saved.scope === 'object'
         && Object.entries(target.scope).every(([key, value]) => (saved.scope as Record<string, unknown>)[key] === value)

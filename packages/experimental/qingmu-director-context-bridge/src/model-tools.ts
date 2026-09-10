@@ -19,6 +19,7 @@ import { stageDialogueEdit, findStagedDialogue, commitStagedDialogue, dialogueCo
 import { prepareDialogueVideo } from './dialogue-video.ts'
 import { retainNativeDialogueReceipt, toolValues } from './native-draft.ts'
 import { registerReferenceVideoTools } from './reference-video-tools.ts'
+import { registerDirectorPlanTools } from './director-plan-tools.ts'
 
 /** Opt-in native-agent consumer; the Host binding plugin remains independently usable. */
 export const name = 'qingmu-director-model-tools'
@@ -141,7 +142,7 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   ctx.tools.register(defineTool({
     name: 'qingmu_get_imago_method',
-    description: 'Load actual IMAGO director or execution-storyboard instructions for the bound Qingmu shot. Read these before proposing scene intent, performance, blocking, coverage, dialogue or sound-picture changes. If additionalReferences lists a required resource, call again with that resourceId before claiming its method was read. Method instructions are guidance, not project facts or authority to run the IMAGO controller.',
+    description: 'Optionally inspect IMAGO director or execution-storyboard methods when relevant. Qingmu creative skills and current script/director choices decide the method; IMAGO is not a mandatory workflow. If reading additionalReferences, fetch their actual resource before claiming it was read. Historical constraints are not current project authority.',
     parameters: {
       capability: { type: 'string', required: true, enum: ['director_development', 'shot_design'] },
       resourceId: { type: 'string', enum: ['rough_final_feedback'] },
@@ -181,6 +182,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   // The two context tools remain available without the optional PromptIR reader.
   ctx.inject(['qingmuYimengRead'], (draftHost) => {
     registerReferenceVideoTools(draftHost, { readBoundContext, boundedJson: value => boundedJson(value, maxOutputBytes) })
+    registerDirectorPlanTools(draftHost, { readBoundContext, boundedJson: value => boundedJson(value, maxOutputBytes) })
     async function readDialogueInput(exec: ToolRunContext) {
       const current = await readBoundContext(exec)
       const input = await readNativeDialogueInput(current.context, current.state.binding.scope, {

@@ -51,6 +51,11 @@ class ExampleModel extends LlmAdapter {
         { name: 'skill', args: { name: 'ai-visual-director' } },
         { name: 'qingmu_read_skill_resource', args: { skill: 'ai-visual-director', path: 'engines/dialogue-engine.md', lineCount: 500 } },
         { name: 'qingmu_read_skill_resource', args: { skill: 'ai-visual-director', path: 'sub-skills/create/SKILL.md', lineCount: 500 } },
+        { name: 'skill', args: { name: 'open-film-writer' } },
+        { name: 'qingmu_read_skill_resource', args: { skill: 'open-film-writer', path: 'references/screenplay-writing-core.md', lineCount: 500 } },
+        { name: 'skill', args: { name: 'open-film-camera' } },
+        { name: 'qingmu_read_skill_resource', args: { skill: 'open-film-camera', path: 'references/cinematography-design-engine.md', lineCount: 500 } },
+        { name: 'qingmu_read_skill_resource', args: { skill: 'open-film-camera', path: 'references/production-contract.md', lineCount: 500 } },
       ]
       const call = calls[step]
       if (call !== undefined) {
@@ -195,10 +200,15 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'd
       ...(draftMode === 'skills' ? { creativeMethodsInNextRequest: {
         catalog: JSON.stringify(model.requests[0]?.messages).includes('cinematic-director'),
         director: JSON.stringify(model.requests[1]?.messages).includes('青木适用范围'),
+        primaryMethod: JSON.stringify(model.requests[1]?.messages).includes('六部门共同完成一份设计'),
+        assetDesign: JSON.stringify(model.requests[1]?.messages).includes('实际尺寸及相对于手'),
         dialogue: JSON.stringify(model.requests[2]?.messages).includes('Multiple speakers may share a frame'),
         visual: JSON.stringify(model.requests[3]?.messages).includes('AI Visual Director'),
         engine: JSON.stringify(model.requests[4]?.messages).includes('engines/dialogue-engine.md'),
         orchestration: JSON.stringify(model.requests[5]?.messages).includes('sub-skills/create/SKILL.md'),
+        writing: JSON.stringify(model.requests[7]?.messages).includes('screenplay-writing-core.md'),
+        camera: JSON.stringify(model.requests[9]?.messages).includes('起点、中途和终点'),
+        promptReconstruction: JSON.stringify(model.requests[10]?.messages).includes('反向还原摄影机'),
       } } : {}),
       rootTools: ctx.tools.schemas().map(tool => tool.name),
     }

@@ -375,7 +375,8 @@ it('saves missing imported frame requirements and recovers only the original int
   const recover = vi.fn().mockImplementation(async (pending) => {
     read.mockResolvedValue({ ...original,
       storyboard: { ...original.storyboard, version: 2, sourceHash: 'c'.repeat(64) },
-      frameRequirements: [{ ...original.frameRequirements[0], imagePromptCn: pending.request.imagePromptCn }],
+      frameRequirements: [{ ...original.frameRequirements[0], imagePromptCn: pending.request.imagePromptCn,
+        cameraMovement: pending.request.cameraMovement, coveragePlan: pending.request.coveragePlan }],
     })
     return { ...scope, action: 'edit_requirements', idempotencyKey: pending.idempotencyKey, providerCalls: 0,
       stageStarted: false, approvalGranted: false, storyboard: { version: 2, sourceHash: 'c'.repeat(64) } }
@@ -386,6 +387,8 @@ it('saves missing imported frame requirements and recovers only the original int
   await screen.findByRole('textbox', { name: '画面要求' })
   await waitFor(() => expect(onStatus).toHaveBeenLastCalledWith('missing'))
   fireEvent.change(screen.getByRole('textbox', { name: '画面要求' }), { target: { value: '林予在左，陈远在右，录音笔置于桌面。' } })
+  fireEvent.change(screen.getByRole('textbox', { name: '摄影机运动' }), { target: { value: '0-2秒从双人中景向前推进' } })
+  fireEvent.change(screen.getByRole('textbox', { name: '景别、焦点与切点' }), { target: { value: '2-5秒手部特写，5-8秒听者近景' } })
   expect(onStatus).toHaveBeenLastCalledWith('missing')
   fireEvent.click(screen.getByRole('button', { name: '保存当前要求' }))
   await screen.findByRole('button', { name: '查看原保存结果' })
@@ -396,6 +399,9 @@ it('saves missing imported frame requirements and recovers only the original int
   fireEvent.click(await screen.findByRole('button', { name: '查看原保存结果' }))
   await screen.findByText('当前要求已保存')
   expect(recover).toHaveBeenCalledWith(pending)
+  expect(pending.request.cameraMovement).toBe('0-2秒从双人中景向前推进')
+  expect((screen.getByRole('textbox', { name: '摄影机运动' }) as HTMLTextAreaElement).value).toBe(pending.request.cameraMovement)
+  expect((screen.getByRole('textbox', { name: '景别、焦点与切点' }) as HTMLTextAreaElement).value).toBe(pending.request.coveragePlan)
   expect(save).toHaveBeenCalledOnce()
   await waitFor(() => expect(onStatus).toHaveBeenLastCalledWith('ready'))
   cleanup()

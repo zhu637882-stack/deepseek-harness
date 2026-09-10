@@ -14,12 +14,18 @@ import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import AgentPresets from '@deepseek-ai/dsh-agent-presets'
 import * as Persona from '@deepseek-ai/dsh-persona'
+import Skills from '@deepseek-ai/dsh-skill'
+import * as SkillFilesystem from '@deepseek-ai/dsh-skill-filesystem'
+import * as ToolSkill from '@deepseek-ai/dsh-tool-skill'
+import * as SkillResources from '../src/skill-resources.ts'
 import { createYimengReadHandler } from '../../qingmu-yimeng-read-adapter/src/index.ts'
 import { createYimengCommandHandler } from '../../qingmu-yimeng-command-adapter/src/index.ts'
 import { canonical, request, response, savedDraft } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import * as ModelTools from '../src/model-tools.ts'
 import { readNativeDirectorReadiness } from '../src/native-readiness.ts'
+import { createDirectorContextBridge } from '../src/bridge.ts'
+import type { DirectorContextSnapshot } from '../../qingmu-yimeng-command-adapter/src/types.ts'
 
 const contexts: Context[] = []
 afterEach(async () => { for (const ctx of contexts.splice(0)) await ctx.fiber.dispose() })
@@ -35,18 +41,61 @@ const contextBody = {
   formalQcInferred: false, selectionGranted: false, readyGranted: false,
 }
 const context = { ...contextBody, contextSnapshotSha256: sha(contextBody) }
+const planningShots = [{ id: scope.shotId, frameNo: 1, title: '咖啡馆', imagePromptCn: '', directorPlan: {} as Record<string, unknown> }]
+const planning = {
+  schema: 'jason.qingmu-scene-planning-state.v1', projectId: scope.projectId, episodeId: scope.episodeId,
+  scriptRevision: 1, scriptSha256: context.script.sha256,
+  scenes: [{ sceneIndex: 0, title: '咖啡馆', actionDescription: '交谈', dialogues: [] }], storyboard: context.storyboard,
+  canonicalStoryboard: { revision: 1, sourceHash: context.storyboard.sourceHash, shotCount: 1, origin: 'automatic', shots: planningShots },
+  frameRequirements: planningShots,
+  planning: null, providerCalls: 0, stageStarted: false, approvalGranted: false,
+}
+const design = { performance: '先迟疑，再试探，不默认点头', cameraMovement: '镜头不要停。\n先推近，再横移。',
+  dialoguePlan: [{ character: '甲', line: '嗯。' }, { character: '乙', line: '我在听。' }],
+  soundColumns: { ambient: '窗外轻雨', dialogue: '低声，保留吸气' }, newMethod: { beats: ['试探', '回应'] } }
+const designReceipt = sha({ scope, context, planning })
 const edit = { bindings: request.bindings, parameters: request.parameters,
   promptParts: [...request.promptParts, { text: ' 她放低声音，保持原衣服与座位。' }] }
 const saveArgs = { draft: edit, expectedRevision: 1, expectedFrameSha256: savedDraft.frameSha256 }
 
 function writer() {
   let saved = structuredClone(savedDraft)
+  let currentContext = structuredClone(context)
+  let currentPlanning = structuredClone(planning)
+  const planReceipts = new Map<string, Record<string, unknown>>()
   let afterPreview: (() => void) | undefined
   let afterSave: (() => void) | undefined
   let loseSaveResponse = false
   const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input)
-    if (url.pathname.endsWith('/director-inference/context')) return Response.json(context)
+    if (url.pathname.endsWith('/director-inference/context')) return Response.json(currentContext)
+    if (url.pathname.endsWith('/scene-planning')) return Response.json(currentPlanning)
+    if (url.pathname.endsWith('/scene-planning/receipt')) {
+      const receipt = planReceipts.get(url.searchParams.get('idempotencyKey') ?? '')
+      return receipt ? Response.json(receipt) : Response.json({ detail: { code: 'planning_receipt_not_found' } }, { status: 404 })
+    }
+    if (url.pathname.endsWith('/scene-planning/commands')) {
+      if (typeof init?.body !== 'string') throw new Error('Expected a JSON request body')
+      const body = JSON.parse(init.body) as {
+        idempotencyKey: string
+        request: { directorPlan: Record<string, unknown>; expectedStoryboardRevision: number }
+      }
+      if (body.request.expectedStoryboardRevision !== currentPlanning.storyboard.version) return Response.json({ detail: { code: 'planning_storyboard_conflict' } }, { status: 409 })
+      const storyboard = { ...currentPlanning.storyboard, id: 'revision-2', version: 2, sourceHash: 'd'.repeat(64) }
+      currentPlanning = { ...currentPlanning, storyboard,
+        frameRequirements: [{ ...currentPlanning.frameRequirements[0]!, directorPlan: body.request.directorPlan }],
+        canonicalStoryboard: { ...currentPlanning.canonicalStoryboard, revision: 2, sourceHash: storyboard.sourceHash,
+          shots: [{ ...currentPlanning.frameRequirements[0]!, directorPlan: body.request.directorPlan }] } }
+      const { contextSnapshotSha256: _hash, ...source } = currentContext
+      const next = { ...source, storyboard }
+      currentContext = { ...next, contextSnapshotSha256: sha(next) }
+      const receipt = { schema: 'jason.qingmu-scene-planning-result.v1', projectId: scope.projectId, episodeId: scope.episodeId,
+        action: 'edit_automatic', shotId: scope.shotId, idempotencyKey: body.idempotencyKey, requestSha256: sha(body.request),
+        commandReceiptId: 'receipt_plan', eventId: 'event_plan', storyboard, providerCalls: 0, stageStarted: false, approvalGranted: false }
+      planReceipts.set(body.idempotencyKey, receipt)
+      if (loseSaveResponse) throw new Error('connection lost after director save')
+      return Response.json(receipt)
+    }
     if (url.pathname.endsWith('/assets')) return Response.json({ page: 1, page_size: 200, pages: 1,
       items: request.bindings.map(item => ({ id: item.assetId, project_id: 'p',
         asset_type: item.bindingToken === 'voice' ? 'audio' : 'image', role: item.label, sha256: item.assetSha256 })) })
@@ -81,7 +130,7 @@ function writer() {
   })
   const read = createYimengReadHandler({}, { fetch, readToken: () => 'test-only' })
   const command = createYimengCommandHandler({}, { fetch, readToken: () => 'test-only', readYimeng: read })
-  return { fetch, read, command, saved: () => saved,
+  return { fetch, read, command, saved: () => saved, director: () => currentPlanning.frameRequirements[0]!.directorPlan,
     afterPreview: (callback: () => void) => { afterPreview = callback },
     afterSave: (callback: () => void) => { afterSave = callback },
     loseSaveResponse: () => { loseSaveResponse = true } }
@@ -96,12 +145,16 @@ async function harness(adapter: MockAdapter, upstream = writer()) {
   ctx.loader.internal = { version: 'v2', async import(specifier: string) {
     if (specifier === '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/model-tools') return ModelTools
     if (specifier === '@deepseek-ai/dsh-persona') return Persona
+    if (specifier === '@deepseek-ai/dsh-skill-filesystem') return SkillFilesystem
+    if (specifier === '@deepseek-ai/dsh-tool-skill') return ToolSkill
+    if (specifier === '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/skill-resources') return SkillResources
     throw new Error(`Unexpected Loader import: ${specifier}`)
   } } as unknown as NonNullable<typeof ctx.loader.internal>
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(SessionStore)
   await ctx.plugin(SystemPrompt, { persona: '' })
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(Skills)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
   const presets = await ctx.plugin(AgentPresets, { default: 'qingmu-director', roots: [{ path: presetRoot, trust: 'system' }], includeUserRoot: false })
@@ -114,11 +167,16 @@ async function harness(adapter: MockAdapter, upstream = writer()) {
   const agent = handle.agent
   agent.session.append('qingmu-director-context/state', { version: 1,
     binding: { scope, contextSnapshotSha256: context.contextSnapshotSha256 }, proposal: null, transition: 'enter' })
-  async function run() {
+  async function run(scoped = false) {
+    if (scoped) await createDirectorContextBridge({
+      readDirectorContext: async () => ({ ok: true, context: context as DirectorContextSnapshot }),
+    }).enter(agent.session, scope, new AbortController().signal, 'test-owner')
     const idle = new Promise<void>((resolve) => {
       const stop = ctx.on('agent/status', ({ agent: subject, status }) => { if (subject === agent && status === 'idle') { stop(); resolve() } })
     })
-    agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: '读取参考稿，只补充她放低声音、保持衣服座位，再保存。' }] }))
+    agent.followup(createUserMessage({ source: { kind: 'user' }, content: [
+      ...(scoped ? [{ type: 'text' as const, text: JSON.stringify({ schema: 'qingmu.native-director-request.v1', sessionId: agent.session.id, ownerId: 'test-owner', scope, contextSnapshotSha256: context.contextSnapshotSha256 }) }] : []),
+      { type: 'text', text: '按导演设计修改当前镜头并保存，保留多说话人与完整运镜。' }] }))
     await idle
   }
   return { ctx, agent, handle, presets, upstream, run }
@@ -134,6 +192,38 @@ function saves(upstream: ReturnType<typeof writer>) {
   return upstream.fetch.mock.calls.filter(([url, init]) =>
     new URL(url instanceof Request ? url.url : url).pathname.endsWith('/drafts/f') && init?.method === 'POST')
 }
+
+it('saves a full director plan through the native preset and Writer adapter, then continues the scoped turn', async () => {
+  const adapter = new MockAdapter([
+    toolCallResponse('design-read', 'qingmu_read_director_plan', {}),
+    toolCallResponse('design-save', 'qingmu_save_director_plan', { receiptId: designReceipt, directorPlan: design }),
+    toolCallResponse('design-reread', 'qingmu_read_director_plan', {}),
+    textResponse('导演设计已保存；尚未生成。'),
+  ])
+  const h = await harness(adapter); await h.run(true)
+  for (const id of ['design-read', 'design-save', 'design-reread']) expect(result(h.agent, id).error, result(h.agent, id).text).toBe(false)
+  expect(h.upstream.director()).toEqual(design)
+  expect(JSON.parse(result(h.agent, 'design-reread').text)).toMatchObject({ planning: { frameRequirements: [{ directorPlan: design }] } })
+  expect(JSON.parse(result(h.agent, 'design-save').text)).toMatchObject({ result: { recovered: false, providerCalls: 0 }, continuation: { before: context.contextSnapshotSha256 } })
+  expect(JSON.stringify(adapter.requests.at(-1))).toContain('newMethod')
+  expect(h.upstream.fetch.mock.calls.filter(([url]) =>
+    new URL(url instanceof Request ? url.url : url).pathname.endsWith('/scene-planning/commands'))).toHaveLength(1)
+})
+
+it('recovers an uncertain director save with the identical command and never posts twice', async () => {
+  const upstream = writer(); upstream.loseSaveResponse()
+  const args = { receiptId: designReceipt, directorPlan: design }
+  const adapter = new MockAdapter([toolCallResponse('design-read', 'qingmu_read_director_plan', {}),
+    toolCallResponse('design-save', 'qingmu_save_director_plan', args),
+    toolCallResponse('design-recover', 'qingmu_save_director_plan', args), textResponse('已恢复保存回执。')])
+  const h = await harness(adapter, upstream); await h.run(true)
+  expect(result(h.agent, 'design-save').error).toBe(true)
+  expect(result(h.agent, 'design-recover').error, result(h.agent, 'design-recover').text).toBe(false)
+  expect(JSON.parse(result(h.agent, 'design-recover').text)).toMatchObject({ result: { recovered: true } })
+  expect(h.upstream.director()).toEqual(design)
+  expect(h.upstream.fetch.mock.calls.filter(([url]) =>
+    new URL(url instanceof Request ? url.url : url).pathname.endsWith('/scene-planning/commands'))).toHaveLength(1)
+})
 
 it('reads, previews and saves through the shipped YAML preset and real adapters, then exposes the same version to the workspace', async () => {
   const adapter = new MockAdapter([
@@ -168,7 +258,7 @@ it('reads, previews and saves through the shipped YAML preset and real adapters,
   expect(h.ctx.tools.get('qingmu_save_reference_draft', agentScope)).toBeUndefined()
 })
 
-it.each(['qingmu_read_reference_draft', 'qingmu_preview_reference_draft', 'qingmu_save_reference_draft'])(
+it.each(['qingmu_read_reference_draft', 'qingmu_preview_reference_draft', 'qingmu_save_reference_draft', 'qingmu_read_director_plan', 'qingmu_save_director_plan'])(
   'reports a missing reference capability even when all older tools are mounted (%s)', async (missing) => {
     const h = await harness(new MockAdapter([]))
     expect(readNativeDirectorReadiness(h.ctx, h.agent.session).status).toBe('mounted')
@@ -178,7 +268,7 @@ it.each(['qingmu_read_reference_draft', 'qingmu_preview_reference_draft', 'qingm
     try {
       const readiness = readNativeDirectorReadiness(h.ctx, h.agent.session)
       expect(readiness).toMatchObject({ status: 'missing-tools', presetId: 'qingmu-director', missingTools: [missing] })
-      expect(readiness.tools).toHaveLength(8)
+      expect(readiness.tools).toHaveLength(10)
       expect(h.upstream.fetch).not.toHaveBeenCalled()
       expect(h.agent.session.events.filter(event => event.type === 'tool/call')).toHaveLength(0)
     } finally { mounted.mockRestore() }

@@ -63,7 +63,7 @@ describe('bounded scene planning Host channel', () => {
     }] }
     expect(await setup(importedZeroBased).handler('readScenePlanning', scope, new AbortController().signal)).toMatchObject({ ok: false })
   })
-  it.each([{}, { blocking:'缓慢抬头',cameraAngle:'驾驶员主观视角' }, { action: 'edit_requirements' }])('sends one automatic frame requirement with optional independent shooting fields %j', async (fields) => {
+  it.each([{}, { blocking:'缓慢抬头',cameraAngle:'驾驶员主观视角' }, { action: 'edit_requirements', cameraMovement: '0-2秒向前缓推', coveragePlan: '2秒切手部特写，5秒切女主近景' }])('sends one automatic frame requirement with optional independent shooting fields %j', async (fields) => {
     const automaticRequest = { ...scope, idempotencyKey: 'automatic-1', request: { action: 'edit_automatic',
       expectedScriptRevision: 1, expectedScriptSha256: 'a'.repeat(64), expectedStoryboardRevision: 2,
       expectedStoryboardSha256: 'c'.repeat(64), shotId: 'automatic_shot_1', imagePromptCn: '雨夜街道的近景首帧。', ...fields } }

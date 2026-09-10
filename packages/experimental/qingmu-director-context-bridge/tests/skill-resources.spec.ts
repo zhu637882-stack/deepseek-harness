@@ -44,15 +44,19 @@ async function reader(root = bundle) {
 
 it('loads full creative methods and linked engines through the shipped native preset and real loop', async () => {
   const result = await runNativeDirectorExample('skills')
-  expect(result.calls).toEqual(['skill', 'qingmu_read_skill_resource', 'skill', 'qingmu_read_skill_resource', 'qingmu_read_skill_resource'])
+  expect(result.calls).toEqual([
+    'skill', 'qingmu_read_skill_resource', 'skill', 'qingmu_read_skill_resource', 'qingmu_read_skill_resource',
+    'skill', 'qingmu_read_skill_resource', 'skill', 'qingmu_read_skill_resource', 'qingmu_read_skill_resource',
+  ])
   expect(result.creativeMethodsInNextRequest).toEqual({
     catalog: true, director: true, dialogue: true, visual: true, engine: true, orchestration: true,
+    primaryMethod: true, assetDesign: true, writing: true, camera: true, promptReconstruction: true,
   })
   const sound = JSON.parse(result.results[1]!) as ResourcePage
   expect(sound).toMatchObject({ skill: 'cinematic-director', path: 'references/sound-and-dialogue.md', nextLine: null })
   expect(sound.content).toContain('Record speaker identity, voice reference, exact words, delivery, timing')
   expect(sound.sha256).not.toBe(sound.upstreamSha256)
-  for (const index of [3, 4]) {
+  for (const index of [3, 4, 6, 8, 9]) {
     const resource = JSON.parse(result.results[index]!) as ResourcePage
     const content = await readFile(join(bundle, resource.skill, resource.path), 'utf8')
     expect(resource.content + '\n').toBe(content)

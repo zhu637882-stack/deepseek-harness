@@ -14,7 +14,7 @@
         "CONTRIBUTING.md": "b457e8094b71f8619685073032b38dcb342a5df4d3439f1f20440b9f71a9d1ad",
         "LICENSE": "df731ea2e1ffd3b8890ad246da3df96ceba3301c16fb4970c16811df4c728b56",
         "README.md": "de61800434c2ff91cb5aff1b86d35d542b70d3b64716ecb09c1fa8322b9c1fd9",
-        "SKILL.md": "b4a8496d62c4a2a63bcc866a896ae4294b8c98ddb42109adad2bd2bb128c7b29",
+        "SKILL.md": "4109ed803eda546113407e244bb0976191043d4bb31df327f0f35c1f35cb9625",
         "assets/beat-sheet-template.md": "e53e846e9f43cdc80cf261bde4978001628d6383a6d4bd702762f88131e04bda",
         "assets/director-book-template.md": "d6f0901207a822220fe87a7ca2feeea0ddeaf142a168a03704456e69b0ad68b0",
         "assets/edit-timeline-template.md": "b6a6ad673094a419ada6afb9d8e613b4d2c8538cface5cb17031bc7b408fc5ee",
@@ -59,7 +59,8 @@
         "references/product-and-macro.md": "c6b791fe96db082517c8e3d639269228cee3ae68d55ddababbb7b09d967ca350",
         "references/production-workflow.md": "67d9b8d1cec798db75635c3f261435103ef6383004c946bcdb8a557119bbe472",
         "references/prompt-lexicon.md": "8e2172f9255dbc9ce51b7f54af9cb570283808a6ad4aa34fcf439c56c513138f",
-        "references/sound-and-dialogue.md": "704c21ac2649656fe9321de36660d69f8d3d9933c603e05715dd4a1a92517b9b"
+        "references/sound-and-dialogue.md": "704c21ac2649656fe9321de36660d69f8d3d9933c603e05715dd4a1a92517b9b",
+        "references/director-supplement-workflow.md": "b4a8496d62c4a2a63bcc866a896ae4294b8c98ddb42109adad2bd2bb128c7b29"
       },
       "excludedNonMethodFiles": [
         ".gitignore"
@@ -118,9 +119,10 @@
         "references/product-and-macro.md": "c6b791fe96db082517c8e3d639269228cee3ae68d55ddababbb7b09d967ca350",
         "references/production-workflow.md": "3f5e431b23931ae636d6637c92b63bc084407a1b4a8b1625fb5e9c393bb97998",
         "references/prompt-lexicon.md": "8e2172f9255dbc9ce51b7f54af9cb570283808a6ad4aa34fcf439c56c513138f",
-        "references/sound-and-dialogue.md": "fcc99cacf1bc35caf3dd5e9430a0f3c731b5b65868171cc488282559017d43de"
+        "references/sound-and-dialogue.md": "fcc99cacf1bc35caf3dd5e9430a0f3c731b5b65868171cc488282559017d43de",
+        "references/director-supplement-workflow.md": "543be6ece626beaa7dbc36b8225dcdc0b763d8044563189e842b306bb5cfd792"
       },
-      "adaptation": "Qingmu script and director decisions govern creative execution; upstream examples and model heuristics are advisory.",
+      "adaptation": "Qingmu script and director decisions govern creative execution; upstream examples and model heuristics are advisory. Primary entry is a Qingmu-authored six-department method; the previous entry remains an auxiliary resource. Leos professional-role ideas inform the adaptation, but no Leos source is bundled or licensed by this manifest. Open Film Skills supplies separately attributed writing and camera resources.",
       "adaptedFiles": [
         "SKILL.md",
         "assets/qc-checklist.md",
@@ -128,9 +130,25 @@
         "assets/video-prompt-template.md",
         "references/ai-video-tool-adapters.md",
         "references/blocking-and-staging.md",
+        "references/director-supplement-workflow.md",
         "references/failure-modes.md",
         "references/production-workflow.md",
         "references/sound-and-dialogue.md"
+      ],
+      "upstreamPaths": {
+        "references/director-supplement-workflow.md": "SKILL.md"
+      },
+      "methodReferences": [
+        {
+          "repository": "https://github.com/MasterLeos/leos-six-department-directing-team-skill-v1",
+          "commit": "2ed50edb3c7838fc9ffb68e50824e0ebff59c7d4",
+          "use": "General directing methods; Qingmu-authored adaptation; no source redistribution."
+        },
+        {
+          "repository": "https://github.com/62656456/ai-film-skills",
+          "commit": "678edc06d3318c1516f6eb73503f740427fdd831",
+          "use": "Specialist writing and cinematography; see separately bundled skills."
+        }
       ]
     },
     "ai-visual-director": {
@@ -548,6 +566,88 @@
         "sub-skills/video/SKILL.md",
         "templates/steps.md"
       ]
+    },
+    "open-film-writer": {
+      "repository": "https://github.com/62656456/ai-film-skills",
+      "commit": "678edc06d3318c1516f6eb73503f740427fdd831",
+      "license": "Apache-2.0",
+      "upstreamRoot": "skills/director-agent",
+      "files": {
+        "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+        "SKILL.md": "25a23a0cc26eb85ad7408e6e07327ff2477684b2d6459fa9af16fbe84a07cbf0",
+        "references/production-storyboard-compiler.md": "f4576c877c0ea6697412dcad5399f80e36183cb58d9ec236ac6cd2f2051c6a6c",
+        "references/screenplay-state-engine.md": "8ffa836f096e866a7652c71d8019d667b355b76a42e47f1a54ed5a2e44225332",
+        "references/director-thinking-spine.md": "c304b3e8eca5f836ad66d8a01db86c94649594d7787b12aaf83c858980a4981b",
+        "references/anti-laziness-contract.md": "14c549b200d036f2f5bcb44b49f1706f327a1ad54030d50e64f56f4381d010da",
+        "references/screenplay-writing-core.md": "9f59bc2c30d02cbaa85affe6a75c3cc0c764dc4c0e8c9f37ebd66f983d4080d1",
+        "references/screenplay-exemplar-benchmarks.md": "55186c00e144bd1c8bdb1aaf147b966ddf06512e443b82b8ba2d8cbd55795d26",
+        "references/director-workbench-protocol.md": "8de6452252362935012f8d123f29889164b04f9bd3724579cb8187ef7368f87a",
+        "references/research-update-protocol.md": "2c77e05d880886122c8ea5f5987c3bc94d82d64076a4b75310e2436db9e2e4c7",
+        "references/screenplay-cold-read-protocol.md": "db7c432d04c935de73658df9381f92824dc9a489f08d7ce79d7981e3367d2f0c",
+        "references/github-project-watchlist.md": "220f37a2caba945f2450f2b4e3cf857ad281e9f3533f6739209aec83d72b8c3e",
+        "references/screenplay-ai-execution-compiler.md": "633059e1366c0e815732f42bc3069d951c4310ee7e2716f8cdad24a53a6e69a5",
+        "references/local-knowledge-map.md": "b70d9cbadffb44877258b0ff1cc03c2b0b0c7230c78a11752fc311003c59bf8e",
+        "references/verified-director-logic.md": "b3802ec041ec5fb18cfcef575fcb7efb2a20a656defd74c4b72722df4e43da90",
+        "agents/openai.yaml": "e6956681141cef7d251eb5399876e025728955c8b67a36545229fd817e1a8033"
+      },
+      "upstreamFiles": {
+        "SKILL.md": "6c0341cdbd6b90610d224ff130ea93852495224e5ef4387a54e1c2d887842102",
+        "references/production-storyboard-compiler.md": "f4576c877c0ea6697412dcad5399f80e36183cb58d9ec236ac6cd2f2051c6a6c",
+        "references/screenplay-state-engine.md": "8ffa836f096e866a7652c71d8019d667b355b76a42e47f1a54ed5a2e44225332",
+        "references/director-thinking-spine.md": "c304b3e8eca5f836ad66d8a01db86c94649594d7787b12aaf83c858980a4981b",
+        "references/anti-laziness-contract.md": "14c549b200d036f2f5bcb44b49f1706f327a1ad54030d50e64f56f4381d010da",
+        "references/screenplay-writing-core.md": "9f59bc2c30d02cbaa85affe6a75c3cc0c764dc4c0e8c9f37ebd66f983d4080d1",
+        "references/screenplay-exemplar-benchmarks.md": "55186c00e144bd1c8bdb1aaf147b966ddf06512e443b82b8ba2d8cbd55795d26",
+        "references/director-workbench-protocol.md": "8de6452252362935012f8d123f29889164b04f9bd3724579cb8187ef7368f87a",
+        "references/research-update-protocol.md": "2c77e05d880886122c8ea5f5987c3bc94d82d64076a4b75310e2436db9e2e4c7",
+        "references/screenplay-cold-read-protocol.md": "db7c432d04c935de73658df9381f92824dc9a489f08d7ce79d7981e3367d2f0c",
+        "references/github-project-watchlist.md": "220f37a2caba945f2450f2b4e3cf857ad281e9f3533f6739209aec83d72b8c3e",
+        "references/screenplay-ai-execution-compiler.md": "633059e1366c0e815732f42bc3069d951c4310ee7e2716f8cdad24a53a6e69a5",
+        "references/local-knowledge-map.md": "b70d9cbadffb44877258b0ff1cc03c2b0b0c7230c78a11752fc311003c59bf8e",
+        "references/verified-director-logic.md": "b3802ec041ec5fb18cfcef575fcb7efb2a20a656defd74c4b72722df4e43da90",
+        "agents/openai.yaml": "e6956681141cef7d251eb5399876e025728955c8b67a36545229fd817e1a8033",
+        "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+      },
+      "adaptedFiles": [
+        "SKILL.md"
+      ],
+      "adaptation": "Qingmu specialist supplement: renamed entry and explicit creative/tool scope. All linked files copied unchanged; no scripts executed. Root LICENSE supplied from the same upstream commit.",
+      "excludedNonMethodFiles": []
+    },
+    "open-film-camera": {
+      "repository": "https://github.com/62656456/ai-film-skills",
+      "commit": "678edc06d3318c1516f6eb73503f740427fdd831",
+      "license": "Apache-2.0",
+      "upstreamRoot": "skills/ai-storyboard-director",
+      "files": {
+        "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+        "SKILL.md": "710e09a833ca8f921454a6832db6921f221925354badbbd13f2cf4234a170609",
+        "references/design-memory-protocol.md": "eb30fcffe11d24a4e875e091298d94ef41232442ddf229cc3e2089441d17544a",
+        "references/framing-and-axis.md": "85827f612659c4f56f05b0ca2fdd3d25a6a8ec9510d28bb518c30176325088ea",
+        "references/shot-design-engine.md": "ca6f7c676d89104e3ad9c965d8f655f13b6ee7d3b95defb73a3ad2c206636710",
+        "references/cinematography-design-engine.md": "f667db447734dbf7778e099e6a4388fe0ae0f377c94e52d54d53a0d2d6e02e0d",
+        "references/production-contract.md": "fa0307146b0498990ad2acfa474f849fc5b42e1a6dd7c835dacaddf77ca687e6",
+        "references/delivery-mode-guard.md": "a26f075936909ebc5133c9e50e13d9a901e7fc820da3ec192b3347500525eafe",
+        "agents/openai.yaml": "a613e48cc21e43b3da6124cc04e9f5755d62cd054fcc4646e8e3b5359afa43e1",
+        "scripts/design_memory.py": "670486d5936871dd25c9449f03fba8223db472d8ab57eddde1d124c261cd2d78"
+      },
+      "upstreamFiles": {
+        "SKILL.md": "a634b2d559fe0cd2170ba2fcdd53afd0bf193ba35b72fbf5a5dc9052aed49209",
+        "references/design-memory-protocol.md": "eb30fcffe11d24a4e875e091298d94ef41232442ddf229cc3e2089441d17544a",
+        "references/framing-and-axis.md": "85827f612659c4f56f05b0ca2fdd3d25a6a8ec9510d28bb518c30176325088ea",
+        "references/shot-design-engine.md": "ca6f7c676d89104e3ad9c965d8f655f13b6ee7d3b95defb73a3ad2c206636710",
+        "references/cinematography-design-engine.md": "f667db447734dbf7778e099e6a4388fe0ae0f377c94e52d54d53a0d2d6e02e0d",
+        "references/production-contract.md": "fa0307146b0498990ad2acfa474f849fc5b42e1a6dd7c835dacaddf77ca687e6",
+        "references/delivery-mode-guard.md": "a26f075936909ebc5133c9e50e13d9a901e7fc820da3ec192b3347500525eafe",
+        "agents/openai.yaml": "a613e48cc21e43b3da6124cc04e9f5755d62cd054fcc4646e8e3b5359afa43e1",
+        "scripts/design_memory.py": "670486d5936871dd25c9449f03fba8223db472d8ab57eddde1d124c261cd2d78",
+        "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+      },
+      "adaptedFiles": [
+        "SKILL.md"
+      ],
+      "adaptation": "Qingmu specialist supplement: renamed entry and explicit creative/tool scope. All linked files copied unchanged; no scripts executed. Root LICENSE supplied from the same upstream commit.",
+      "excludedNonMethodFiles": []
     }
   }
 }

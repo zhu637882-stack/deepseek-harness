@@ -10,7 +10,7 @@ A method name or partial template cannot carry a directing workflow. Linked soun
 
 ## Decision
 
-The Qingmu preset uses native skill discovery and loading with packaged cinematic-director and ai-visual-director sources. Its scoped resource reader verifies manifest paths and hashes, reports pagination, and records upstream and adapted provenance separately. Qingmu adaptations preserve creative methods while removing fixed speaker, action, movement and dialogue-length rules from active instructions and checklists. Historical examples and model estimates remain advisory. The script and director plan govern creative execution; capability limitations require an explicit execution alternative, not silent reduction of the work.
+The Qingmu preset uses native skill discovery and loading. Its cinematic-director entry is a Qingmu-authored adaptation of the Leos six-department method, including whole-film interpretation and asset design. Open Film Skills supplies complete writing and camera specialist packages under their upstream Apache-2.0 license; the former DirectorSKILL entry and ai-visual-director remain supporting resources. No Leos source is redistributed. The scoped reader verifies manifest paths and hashes, reports pagination, and records upstream and adapted provenance separately. Imported numeric, format and platform defaults remain advisory; the script and director plan govern execution. Capability limitations require an explicit execution alternative, not silent reduction of the work.
 
 ## Alternatives considered
 

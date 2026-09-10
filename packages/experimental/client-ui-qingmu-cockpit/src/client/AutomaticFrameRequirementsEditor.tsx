@@ -7,8 +7,13 @@ interface Draft {
   readonly imagePromptCn: string
   readonly blocking?: string
   readonly cameraAngle?: string
+  readonly cameraMovement?: string
+  readonly coveragePlan?: string
   readonly pending?: ScenePlanningRequest
 }
+const shootingFields = ['blocking', 'cameraAngle', 'cameraMovement', 'coveragePlan'] as const
+const shootingLabels = { blocking: '动作', cameraAngle: '机位', cameraMovement: '摄影机运动', coveragePlan: '景别、焦点与切点' } as const
+type ShootingField = typeof shootingFields[number]
 type Port = Partial<Pick<QingmuYimengPort, 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning'>>
 export type AutomaticFrameRequirementStatus = 'loading' | 'ready' | 'missing' | 'unavailable'
 function key(projectId: string, episodeId: string, shotId: string): string { return `qingmu.scene-planning.v1:${projectId}:${episodeId}:automatic-frame:${shotId}` }
@@ -56,12 +61,12 @@ export function AutomaticFrameRequirementsEditor({
         setState(value); const saved = requirements(value)?.find(shot => shot.id === shotId)
         const local = stored(storageKey)
         setDraft(local?.shotId === shotId && local.imagePromptCn.length > 0 && local.imagePromptCn.length <= 20000
-          && (['blocking', 'cameraAngle'] as const).every(field => local[field] === undefined || (typeof local[field] === 'string' && local[field].length <= 2000))
+          && shootingFields.every(field => local[field] === undefined || (typeof local[field] === 'string' && local[field].length <= 2000))
           && (local.pending === undefined || (pendingValid(local.pending, projectId, episodeId, shotId)
             && local.imagePromptCn === local.pending.request.imagePromptCn
-            && (['blocking', 'cameraAngle'] as const).every(field => (local.pending?.request.action === 'edit_automatic' || local.pending?.request.action === 'edit_requirements') && (local.pending.request[field] === undefined || local.pending.request[field] === local[field]))))
-          ? { blocking: saved?.blocking ?? '', cameraAngle: saved?.cameraAngle ?? '', ...local }
-          : saved ? { shotId, imagePromptCn: saved.imagePromptCn, blocking: saved.blocking ?? '', cameraAngle: saved.cameraAngle ?? '' } : null); setLoad('ready')
+            && shootingFields.every(field => (local.pending?.request.action === 'edit_automatic' || local.pending?.request.action === 'edit_requirements') && (local.pending.request[field] === undefined || local.pending.request[field] === local[field]))))
+          ? { blocking: saved?.blocking ?? '', cameraAngle: saved?.cameraAngle ?? '', cameraMovement: saved?.cameraMovement ?? '', coveragePlan: saved?.coveragePlan ?? '', ...local }
+          : saved ? { shotId, imagePromptCn: saved.imagePromptCn, blocking: saved.blocking ?? '', cameraAngle: saved.cameraAngle ?? '', cameraMovement: saved.cameraMovement ?? '', coveragePlan: saved.coveragePlan ?? '' } : null); setLoad('ready')
       } else if (!controller.signal.aborted && currentEpoch === epoch.current) {
         setError('尚未找到本镜对应的首帧要求，请到分镜工作区核对后重试。'); setLoad('failed')
       }
@@ -97,6 +102,8 @@ export function AutomaticFrameRequirementsEditor({
         shotId, imagePromptCn: draft.imagePromptCn,
         ...(draft.blocking !== undefined && draft.blocking !== savedField('blocking') ? { blocking: draft.blocking } : {}),
         ...(draft.cameraAngle !== undefined && draft.cameraAngle !== savedField('cameraAngle') ? { cameraAngle: draft.cameraAngle } : {}),
+        ...(draft.cameraMovement !== undefined && draft.cameraMovement !== savedField('cameraMovement') ? { cameraMovement: draft.cameraMovement } : {}),
+        ...(draft.coveragePlan !== undefined && draft.coveragePlan !== savedField('coveragePlan') ? { coveragePlan: draft.coveragePlan } : {}),
       } satisfies FrameRequirementsOperation }
       update({ ...draft, pending })
       const result = recover ? await recoverSave(pending) : await save(pending)
@@ -112,7 +119,7 @@ export function AutomaticFrameRequirementsEditor({
         || !sameScope(next, projectId, episodeId, shotId)) throw new Error('receipt scope mismatch')
       const saved = requirements(next)?.find(shot => shot.id === shotId)
       if (saved === undefined) throw new Error('receipt shot missing')
-      localStorage.removeItem(storageKey); setDraft({ shotId, imagePromptCn: saved.imagePromptCn, blocking: saved.blocking ?? '', cameraAngle: saved.cameraAngle ?? '' }); setState(next)
+      localStorage.removeItem(storageKey); setDraft({ shotId, imagePromptCn: saved.imagePromptCn, blocking: saved.blocking ?? '', cameraAngle: saved.cameraAngle ?? '', cameraMovement: saved.cameraMovement ?? '', coveragePlan: saved.coveragePlan ?? '' }); setState(next)
       try { await onCommitted() } catch {
         if (runEpoch === epoch.current) setError('当前要求已保存，但工作区暂未刷新。请刷新页面继续；无需重新保存。')
       }
@@ -150,15 +157,16 @@ export function AutomaticFrameRequirementsEditor({
   if (load === 'failed') return <div role="alert"><p>{error}</p>{onReturnToStoryboard && <button type="button" onClick={onReturnToStoryboard}>返回分镜核对要求</button>}</div>
   if (state === null || draft === null) return <p role="status">正在读取本镜首帧要求…</p>
   const saved = requirements(state)?.find(shot => shot.id === shotId)
-  function savedField(field: 'blocking' | 'cameraAngle'): string { return requirements(state)?.find(shot => shot.id === shotId)?.[field] ?? '' }
-  const dirty = saved !== undefined && (draft.imagePromptCn !== saved.imagePromptCn || (draft.blocking ?? '') !== savedField('blocking') || (draft.cameraAngle ?? '') !== savedField('cameraAngle'))
+  function savedField(field: ShootingField): string { return requirements(state)?.find(shot => shot.id === shotId)?.[field] ?? '' }
+  const dirty = saved !== undefined && (draft.imagePromptCn !== saved.imagePromptCn || shootingFields.some(field => (draft[field] ?? '') !== savedField(field)))
   return <section aria-label="编辑当前要求">
-    {(['blocking', 'cameraAngle'] as const).map(field => <label key={field}>
-      {field === 'blocking' ? '动作' : '机位'}
-      <textarea aria-label={field === 'blocking' ? '动作' : '机位'} rows={field === 'blocking' ? 3 : 2}
+    {shootingFields.map(field => <label key={field}>
+      {shootingLabels[field]}
+      <textarea aria-label={shootingLabels[field]} rows={field === 'blocking' ? 3 : 2}
         maxLength={2000} value={draft[field] ?? ''} disabled={busy || draft.pending !== undefined}
         onChange={event => update({ ...draft, [field]: event.target.value })} />
     </label>)}
+    <p>摄影机运动描述镜头如何移动；景别、焦点与切点描述观众何时看什么。保存后随本镜进入参考视频预览与生成请求。</p>
     <label>画面要求<textarea aria-label="画面要求" rows={7} maxLength={20000} value={draft.imagePromptCn}
       disabled={busy || draft.pending !== undefined} onChange={event => update({ ...draft, imagePromptCn: event.target.value })} /></label>
     <p role="status">{draft.pending ? '正在核实上次保存，草稿已保留。' : dirty ? '有未保存修改 · 已保留在此浏览器' : saved?.imagePromptCn.trim() ? '当前要求已保存' : '补充本镜的首帧画面要求并保存，随后可预检生成。'}</p>
@@ -168,10 +176,13 @@ export function AutomaticFrameRequirementsEditor({
     {draft.pending && rebaseState && <div>
       <p>本镜最新已保存要求：{requirements(rebaseState)?.find(shot => shot.id === shotId)?.imagePromptCn || '尚未填写'}</p>
       <p>最新动作：{requirements(rebaseState)?.find(shot => shot.id === shotId)?.blocking || '未设置'} · 最新机位：{requirements(rebaseState)?.find(shot => shot.id === shotId)?.cameraAngle || '未设置'}</p>
+      <p>最新摄影机运动：{requirements(rebaseState)?.find(shot => shot.id === shotId)?.cameraMovement || '未设置'} · 最新景别与切点：{requirements(rebaseState)?.find(shot => shot.id === shotId)?.coveragePlan || '未设置'}</p>
       <button type="button" disabled={busy} onClick={() => {
         const next = { shotId: draft.shotId, imagePromptCn: draft.imagePromptCn,
           ...(draft.blocking !== undefined ? { blocking: draft.blocking } : {}),
           ...(draft.cameraAngle !== undefined ? { cameraAngle: draft.cameraAngle } : {}),
+          ...(draft.cameraMovement !== undefined ? { cameraMovement: draft.cameraMovement } : {}),
+          ...(draft.coveragePlan !== undefined ? { coveragePlan: draft.coveragePlan } : {}),
         }
         try {
           localStorage.setItem(storageKey, JSON.stringify(next)); setDraft(next); setState(rebaseState); setRebaseState(null); setError('')

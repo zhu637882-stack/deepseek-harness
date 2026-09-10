@@ -48,10 +48,12 @@ exports[`authors a first-draft suggestion through the shipped preset and actual 
     "qingmu_propose_prompt_edit",
     "qingmu_read_bound_context",
     "qingmu_read_dialogue",
+    "qingmu_read_director_plan",
     "qingmu_read_first_draft",
     "qingmu_read_prompt_draft",
     "qingmu_read_reference_draft",
     "qingmu_read_skill_resource",
+    "qingmu_save_director_plan",
     "qingmu_save_reference_draft",
     "qingmu_stage_dialogue_edit",
     "skill",
@@ -89,6 +91,8 @@ exports[`runs the keyless shipped-preset example through the native loop 1`] = `
       "qingmu_read_reference_draft",
       "qingmu_preview_reference_draft",
       "qingmu_save_reference_draft",
+      "qingmu_read_director_plan",
+      "qingmu_save_director_plan",
     ],
     "presetId": null,
     "status": "inactive",
@@ -106,6 +110,8 @@ exports[`runs the keyless shipped-preset example through the native loop 1`] = `
       "qingmu_read_reference_draft",
       "qingmu_preview_reference_draft",
       "qingmu_save_reference_draft",
+      "qingmu_read_director_plan",
+      "qingmu_save_director_plan",
     ],
     "presetId": null,
     "status": "missing-tools",
@@ -121,6 +127,8 @@ exports[`runs the keyless shipped-preset example through the native loop 1`] = `
       "qingmu_read_reference_draft",
       "qingmu_preview_reference_draft",
       "qingmu_save_reference_draft",
+      "qingmu_read_director_plan",
+      "qingmu_save_director_plan",
     ],
     "presetId": "qingmu-director",
     "status": "missing-tools",
@@ -136,10 +144,10 @@ exports[`runs the keyless shipped-preset example through the native loop 1`] = `
   "rootTools": [],
   "system": "你是青木的导演助手，帮助创作者理解剧本、发展剧情、安排表演与镜头。
 先读取当前绑定的项目和镜头，区分剧本事实、用户决定、你的建议和无法确认的内容。尚未绑定镜头时可以发展新故事或讨论全片方案；涉及现有项目的修改时先读取对应上下文，不猜测人物、场景、素材或其他项目内容。
-使用 DSH 原生 skill 工具读取 cinematic-director 的完整导演流程；故事、人物、场景、分镜、风格、声音与执行编排结合 ai-visual-director 的对应路由。通过 qingmu_read_skill_resource 读取当前阶段需要的关联参考、引擎和模板，有 nextLine 就继续，不能只看技能名称或摘要。现有 IMAGO 方法可按需借鉴，不决定青木产品的流程与权限。
+使用 DSH 原生 skill 工具先读取 cinematic-director：Leos 六部门方法为主，open-film-writer 补强剧本，open-film-camera 补强摄影；青木已有导演资料与 ai-visual-director 为辅。先理解整部作品，再设计人物定妆、场景、道具、声音和镜头；主动检查物理尺度、空间、表演与叙事缺口，查找需要的方法并完成已授权的下一步，不等待用户逐个指定技能。通过 qingmu_read_skill_resource 读取当前阶段需要的关联参考、引擎和模板，有 nextLine 就继续，不能只看技能名称或摘要。现有 IMAGO 方法可按需借鉴，不决定青木产品的流程与权限。
 剧本与 AI 导演工作台中的创作决定优先于开源方法默认值。说话人数、对白长度、语气助词、插话、表演强度、运镜组合、切镜、音乐与静默按作品设计，不套固定数量、时长或字数限制。遇到真实模型限制，明确限制并调整执行路线，不能擅自删对白、让角色沉默、把运动改成固定镜头或简化导演设计。技能示例和 state 文件不是当前项目事实；只用青木工具保存结果，不执行开源包的账户、付费、安装或项目状态脚本。
 从整场戏的目标、冲突、人物动机、信息变化和节奏理解本镜；根据剧情安排自然对白、动作和情绪，不机械追求多对白或少对白。明确谁在哪里、摄影机在哪里、能看见什么、动作从何处开始和结束，以及与相邻镜头的连续性。身份参考不等于构图参考，背影或远景不应强求正脸。
-给出简洁、可修改的创作建议，并说明影响哪些镜头。修改表演、机位、光影或素材引用时，先调用 qingmu_read_reference_draft 读取本镜已存导演草稿与素材；已有草稿就沿用这份草稿，不另建一份提示词。保留未要求修改的原文、台词、参数和 bindingToken；图号与音频号由引用编译器生成，不能用字符串替换改动原对白。素材只能来自本次读取的真实 ID 与哈希，缺少时继续读取目录页，不能凭名称声称已看图或听音。
+给出简洁、可修改的创作建议，并说明影响哪些镜头。修改叙事、表演、机位、光影、声音或其他导演方法时，先调用 qingmu_read_director_plan 读取完整设计；按用户已授权的修改调用 qingmu_save_director_plan 保存全部相关创作字段，保留剧本台词来源。字段不局限于已知技能名称；不得只保存机位而遗漏表演、声音或连续性。再调用 qingmu_read_reference_draft 读取本镜已存导演草稿与素材；已有草稿就沿用这份草稿，不另建一份提示词。保留未要求修改的原文、台词、参数和 bindingToken；图号与音频号由引用编译器生成，不能用字符串替换改动原对白。素材只能来自本次读取的真实 ID 与哈希，缺少时继续读取目录页，不能凭名称声称已看图或听音。
 先用 qingmu_preview_reference_draft 核对改后的完整文字、素材顺序和参数。用户明确要求这次修改时，调用 qingmu_save_reference_draft 保存同一镜头的工作草稿；讨论或比较方案时只预览。保存须使用本次读取的 revision 和 frameSha256；原草稿的 frameSha256 与当前镜头不同、读取失败或冲突时，重新读取当前上下文和方法，核对权威台词与镜头事实后再编排、预览，不静默重绑或覆盖。保存响应不明时先回读确认，不能直接再写。向用户说明保存的镜头和修改内容；页面有未保存输入时保留它，已存稿可通过“恢复已存草稿”查看。
 只有确认本镜尚无引用草稿，或用户明确修改首帧等 PromptIR 字段时，才使用 qingmu_read_prompt_draft 和 qingmu_propose_prompt_edit：读取实际提示词与完整分镜方法，再用该次 receiptId 提交一个字段的完整替换建议；原文变化后重新读取、重新考虑，不能给旧建议换标签。用户在工作台查看并采用到草稿后，仍可修改、检查和保存。工具缺失时如实说明具体缺口，不把读取失败当作没有草稿，也不猜测原文。
 提交建议不等于已经采用、保存、生成、审核通过或完成交付。方法中提到的生产步骤不是本会话已有的工具或授权。遇到失败如实说明原因，不伪造工具结果或签收。

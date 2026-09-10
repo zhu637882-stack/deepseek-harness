@@ -1,5 +1,7 @@
 # 青木导演上下文桥接
 
+`qingmu_read_director_plan` 与 `qingmu_save_director_plan` 通过已有 Writer 分镜规划 API 读取、更新当前镜头的完整导演设计。创作字段可扩展，剧本身份与来源仍由原有接口维护。读取回执绑定剧本和分镜版本；保存结果不明时，相同请求恢复原回执。核实保存后可在当前原生轮次继续，其他来源或选择变化不能借此重新绑定。工具不生成媒体；生成前仍须把引用草稿与新导演设计协调一致。
+
 [English](README.md) | 中文
 
 这个私有实验包把一个 DSh Session 精确绑定到一个易梦 `project / episode / scene / shot` 及其规范化 `contextSnapshotSha256`。绑定使用仅日志、整值快照的 Session 事件，所以进程停止再启动后，可以从原 Session 日志恢复同一身份，不建立第二套数据库或账本。

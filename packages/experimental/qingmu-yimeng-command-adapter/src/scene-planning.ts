@@ -33,6 +33,10 @@ export interface AutomaticPlanningShot {
   readonly imagePromptCn: string
   readonly blocking?: string
   readonly cameraAngle?: string
+  readonly cameraMovement?: string
+  readonly coveragePlan?: string
+  /** Complete authored creative design; no fixed skill-field allowlist. */
+  readonly directorPlan?: YimengCommandJsonObject
   readonly narrative?: string
   readonly firstFrameCandidateCount?: number
 }
@@ -47,6 +51,10 @@ export interface AutomaticPlanningOperation {
   readonly imagePromptCn: string
   readonly blocking?: string
   readonly cameraAngle?: string
+  readonly cameraMovement?: string
+  readonly coveragePlan?: string
+  /** Patch creative fields in the canonical plan; script and provenance retain their owners. */
+  readonly directorPlan?: YimengCommandJsonObject
 }
 /** Requirements for a verified manually planned frame, independent of script planning edits. */
 export interface PlannedFrameRequirementsOperation extends Omit<AutomaticPlanningOperation, 'action'> {
@@ -199,7 +207,8 @@ function frameRequirements(value: unknown, fail: Fail): void {
     shotIds.add(shotId); integer(frame.frameNo, fail, 1); str(frame.title, fail, 64000)
     if (typeof frame.imagePromptCn !== 'string' || frame.imagePromptCn.length > 20000) throw fail('canonical storyboard image prompt invalid')
     if (frame.firstFrameCandidateCount !== undefined) integer(frame.firstFrameCandidateCount, fail)
-    for (const field of ['blocking', 'cameraAngle', 'narrative']) {
+    if (frame.directorPlan !== undefined) obj(frame.directorPlan, fail)
+    for (const field of ['blocking', 'cameraAngle', 'cameraMovement', 'coveragePlan', 'narrative']) {
       if (frame[field] !== undefined && (typeof frame[field] !== 'string' || frame[field].length > 20000)) throw fail('canonical shooting field invalid')
     }
   }
@@ -248,12 +257,18 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
     integer(r.expectedStoryboardRevision, f)
     if ((r.action === 'edit_automatic' || r.action === 'edit_requirements')) {
       const required = ['action', 'expectedScriptRevision', 'expectedScriptSha256', 'expectedStoryboardRevision', 'expectedStoryboardSha256', 'imagePromptCn', 'shotId']
-      if (required.some(key => !(key in r)) || Object.keys(r).some(key => ![...required, 'blocking', 'cameraAngle'].includes(key))) throw f('automatic planning fields invalid')
-      for (const field of ['blocking', 'cameraAngle']) {
+      if (required.some(key => !(key in r)) || Object.keys(r).some(key => ![...required, 'blocking', 'cameraAngle', 'cameraMovement', 'coveragePlan', 'directorPlan'].includes(key))) throw f('automatic planning fields invalid')
+      if (r.directorPlan !== undefined) {
+        const plan = obj(r.directorPlan, f)
+        if (Object.keys(plan).some(key => key.startsWith('_') || ['scenePlanning', 'sourceBinding', 'creativePlanSchema', 'clearedShootingFields', 'runtimeRepairDirectives', 'promptRepairHistory'].includes(key))) throw f('director plan metadata is not editable')
+        if (Buffer.byteLength(helpers.canonicalJson(plan, 'director plan')) > 65536) throw f('director plan too large')
+      }
+      for (const field of ['blocking', 'cameraAngle', 'cameraMovement', 'coveragePlan']) {
         if (r[field] !== undefined && (typeof r[field] !== 'string' || r[field].length > 2000)) throw f('automatic shooting field invalid')
       }
       if (typeof r.expectedStoryboardRevision !== 'number' || r.expectedStoryboardRevision < 1 || typeof r.expectedStoryboardSha256 !== 'string') throw f('automatic planning revision invalid')
-      digest(r.expectedStoryboardSha256, f); id(r.shotId, f); str(r.imagePromptCn, f, 20000)
+      digest(r.expectedStoryboardSha256, f); id(r.shotId, f)
+      if (r.directorPlan === undefined || r.imagePromptCn !== '') str(r.imagePromptCn, f, 20000)
     } else {
       integer(r.sceneIndex, f, 1)
       if (r.expectedStoryboardSha256 !== null || r.expectedStoryboardRevision !== 0) digest(r.expectedStoryboardSha256, f)
