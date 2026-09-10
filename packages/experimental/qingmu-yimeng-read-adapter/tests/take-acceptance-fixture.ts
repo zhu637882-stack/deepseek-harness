@@ -117,3 +117,45 @@ export function takeAcceptanceFixture(
     },
   }
 }
+
+/** Current locally saved external video: decoded bytes can be inspected, generation QC cannot be invented. */
+export function takeExternalAcceptanceFixture(
+  request: YimengTakeAcceptanceRequest = TAKE_ACCEPTANCE_REQUEST,
+): YimengTakeAcceptanceResponse {
+  const base = takeAcceptanceFixture(request)
+  const subject = {
+    ...base.evidence.subject,
+    schema: 'jason.qingmu-take-acceptance-subject.v2' as const,
+    taskId: null, capability: null, routeKey: null, provider: null, model: null, inputHash: null, submitId: null,
+    origin: {
+      schema: 'jason.qingmu-external-video-origin.v1' as const, kind: 'external_saved' as const, bindingStatus: 'current' as const,
+      binding: {
+        projectId: request.projectId, episodeId: request.episodeId, frameId: request.frameId,
+        assetId: base.evidence.subject.takeId, takeId: base.evidence.subject.takeId,
+        assetSha256: base.evidence.subject.outputSha256!, uploadReceiptSha256: '6'.repeat(64), uploadRequestSha256: '7'.repeat(64),
+        frameContentSha256: base.evidence.subject.frameContentSha256, storyboardRevision: base.evidence.subject.storyboardRevision,
+      },
+      registrationId: 'external-registration-1', registrationReceiptSha256: '8'.repeat(64), packetSha256: '9'.repeat(64),
+      producerIdentityStatus: 'unknown' as const, providerExecutionVerified: false as const, recordConsistencyVerified: false as const,
+    },
+  }
+  const evidence = {
+    ...base.evidence,
+    subject,
+    providerReceipt: {
+      ...base.evidence.providerReceipt, status: 'missing' as const, evidenceMode: 'unverified' as const,
+      actualProviderReceiptVerified: false, requestDryRun: null, taskRequestHashVerified: false,
+      outboxState: null, dispatchEpoch: 0, dispatchDigest: null, payloadSha256: null, responseSha256: null,
+      providerTaskId: null, providerStatus: null, localStatus: null, providerMediaBindingStatus: 'BLOCKED' as const,
+      providerMediaRecordId: null, blockers: ['EXTERNAL_VIDEO_PROVIDER_EXECUTION_UNVERIFIED'],
+    },
+    candidateQuality: {
+      schema: 'jason.qingmu-take-candidate-quality-evidence.v2' as const, status: 'NOT_APPLICABLE' as const,
+      requiredCheckTypes: [], checks: [], missingCheckTypes: [], failedOrStaleCheckTypes: [],
+    },
+  }
+  return {
+    ...base, schema: 'jason.qingmu-take-acceptance-evidence.v2', evidence,
+    evidenceSnapshotSha256: takeVersionSha(evidence),
+  }
+}

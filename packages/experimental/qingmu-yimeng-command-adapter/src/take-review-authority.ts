@@ -33,6 +33,10 @@ const DECISION_FIELDS = [
   'producerActorId', 'producerNaturalPersonId', 'participantNaturalPersonIds',
   'decidedAt',
 ] as const
+const ORIGIN_FIELDS = ['schema', 'kind', 'bindingStatus', 'binding', 'registrationId', 'registrationReceiptSha256',
+  'packetSha256', 'producerIdentityStatus', 'providerExecutionVerified', 'recordConsistencyVerified'] as const
+const ORIGIN_BINDING_FIELDS = ['projectId', 'episodeId', 'frameId', 'assetId', 'takeId', 'assetSha256',
+  'uploadReceiptSha256', 'uploadRequestSha256', 'frameContentSha256', 'storyboardRevision'] as const
 const RESULT_FLAGS = [
   'decisionRecorded', 'recommendationOnly', 'changed', 'selectionChanged',
   'technicalPassChanged', 'formalApprovalChanged', 'episodeVerificationChanged',
@@ -234,13 +238,46 @@ function compareUnicodeCodePoints(left: string, right: string): number {
   return leftPoints.length - rightPoints.length
 }
 
+function externalDecisionOrigin(value: unknown, subject: YimengTakeReviewSubject, error: ErrorFactory) {
+  const origin = exact(value, ORIGIN_FIELDS, 'takeReviewResult.decision.origin', error)
+  const binding = exact(origin.binding, ORIGIN_BINDING_FIELDS, 'takeReviewResult.decision.origin.binding', error)
+  if (origin.schema !== 'jason.qingmu-external-video-origin.v1' || origin.kind !== 'external_saved'
+    || origin.bindingStatus !== 'current' || origin.producerIdentityStatus !== 'unknown'
+    || origin.providerExecutionVerified !== false || origin.recordConsistencyVerified !== false
+    || id(binding.projectId, 'takeReviewResult.decision.origin.binding.projectId', error) !== subject.projectId
+    || id(binding.episodeId, 'takeReviewResult.decision.origin.binding.episodeId', error) !== subject.episodeId
+    || id(binding.frameId, 'takeReviewResult.decision.origin.binding.frameId', error) !== subject.frameId
+    || id(binding.assetId, 'takeReviewResult.decision.origin.binding.assetId', error) !== subject.takeId
+    || id(binding.takeId, 'takeReviewResult.decision.origin.binding.takeId', error) !== subject.takeId
+    || sha(binding.assetSha256, 'takeReviewResult.decision.origin.binding.assetSha256', error) !== subject.outputSha256
+    || sha(binding.frameContentSha256, 'takeReviewResult.decision.origin.binding.frameContentSha256', error) !== subject.frameContentSha256
+    || integer(binding.storyboardRevision, 'takeReviewResult.decision.origin.binding.storyboardRevision', 0, error) !== subject.storyboardRevision) {
+    throw error('takeReviewResult.decision external origin mismatch')
+  }
+  return {
+    schema: 'jason.qingmu-external-video-origin.v1' as const, kind: 'external_saved' as const, bindingStatus: 'current' as const,
+    binding: {
+      projectId: subject.projectId, episodeId: subject.episodeId, frameId: subject.frameId, assetId: subject.takeId, takeId: subject.takeId,
+      assetSha256: subject.outputSha256, uploadReceiptSha256: sha(binding.uploadReceiptSha256, 'takeReviewResult.decision.origin.binding.uploadReceiptSha256', error),
+      uploadRequestSha256: sha(binding.uploadRequestSha256, 'takeReviewResult.decision.origin.binding.uploadRequestSha256', error),
+      frameContentSha256: subject.frameContentSha256, storyboardRevision: subject.storyboardRevision,
+    },
+    registrationId: id(origin.registrationId, 'takeReviewResult.decision.origin.registrationId', error),
+    registrationReceiptSha256: sha(origin.registrationReceiptSha256, 'takeReviewResult.decision.origin.registrationReceiptSha256', error),
+    packetSha256: sha(origin.packetSha256, 'takeReviewResult.decision.origin.packetSha256', error),
+    producerIdentityStatus: 'unknown' as const, providerExecutionVerified: false as const, recordConsistencyVerified: false as const,
+  }
+}
+
 function normalizeDecision(
   value: unknown,
   request: DecisionRequest,
   helpers: TakeReviewHelpers,
 ): YimengTakeHumanDecisionRecord {
   const error = helpers.responseError
-  const item = exact(value, DECISION_FIELDS, 'takeReviewResult.decision', error)
+  const raw = typeof value === 'object' && value !== null && !Array.isArray(value) ? value as YimengCommandJsonObject : undefined
+  const v2 = raw?.schema === 'jason.qingmu-take-human-decision-record.v2'
+  const item = exact(value, [...DECISION_FIELDS, ...(v2 ? ['schema', 'origin'] : [])], 'takeReviewResult.decision', error)
   const takeSubject = subject(item.takeSubject, request, 'takeReviewResult.decision.takeSubject', error)
   if (item.subjectType !== 'shot_take' || item.subjectId !== request.takeId
     || item.subjectRevision !== takeSubject.versionOrdinal
@@ -256,11 +293,6 @@ function normalizeDecision(
   }
   const participants = item.participantNaturalPersonIds.map((entry, index) =>
     id(entry, `takeReviewResult.decision.participantNaturalPersonIds[${String(index)}]`, error))
-  const producerNaturalPersonId = id(
-    item.producerNaturalPersonId,
-    'takeReviewResult.decision.producerNaturalPersonId',
-    error,
-  )
   const actorNaturalPersonId = id(
     item.actorNaturalPersonId,
     'takeReviewResult.decision.actorNaturalPersonId',
@@ -269,11 +301,17 @@ function normalizeDecision(
   const sortedParticipants = [...participants].sort(compareUnicodeCodePoints)
   if (new Set(participants).size !== participants.length
     || participants.some((entry, index) => sortedParticipants[index] !== entry)
-    || !participants.includes(producerNaturalPersonId)
     || participants.includes(actorNaturalPersonId)) {
     throw error('takeReviewResult.decision participant separation mismatch')
   }
+  const externalOrigin = v2 ? externalDecisionOrigin(item.origin, takeSubject, error) : undefined
+  if (v2 && (item.producerActorId !== null || item.producerNaturalPersonId !== null)) {
+    throw error('takeReviewResult.decision external producer must remain unknown')
+  }
+  const producerNaturalPersonId = v2 ? null : id(item.producerNaturalPersonId, 'takeReviewResult.decision.producerNaturalPersonId', error)
+  if (producerNaturalPersonId !== null && !participants.includes(producerNaturalPersonId)) throw error('takeReviewResult.decision producer participant missing')
   return {
+    ...(v2 && externalOrigin !== undefined ? { schema: 'jason.qingmu-take-human-decision-record.v2' as const, origin: externalOrigin } : {}),
     decisionId: id(item.decisionId, 'takeReviewResult.decision.decisionId', error),
     subjectType: 'shot_take',
     subjectId: request.takeId,
@@ -288,7 +326,7 @@ function normalizeDecision(
     eventId: id(item.eventId, 'takeReviewResult.decision.eventId', error),
     decision: request.decision,
     reason: request.reason,
-    producerActorId: id(item.producerActorId, 'takeReviewResult.decision.producerActorId', error),
+    producerActorId: v2 ? null : id(item.producerActorId, 'takeReviewResult.decision.producerActorId', error),
     producerNaturalPersonId,
     participantNaturalPersonIds: participants,
     decidedAt: helpers.requireTimestamp(item.decidedAt, 'takeReviewResult.decision.decidedAt'),

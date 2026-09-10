@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createYimengReadHandler } from '../src/index.ts'
 import {
+  normalizePersistedTakeTechnicalQcAssessment,
   normalizeTakeTechnicalQcFeed,
   TAKE_TECHNICAL_QC_CODES,
 } from '../src/take-technical-qc.ts'
@@ -8,7 +9,7 @@ import type {
   YimengTakeTechnicalQcFeedResponse,
   YimengTakeTechnicalQcRequest,
 } from '../src/types.ts'
-import { takeAcceptanceFixture } from './take-acceptance-fixture.ts'
+import { takeAcceptanceFixture, takeExternalAcceptanceFixture } from './take-acceptance-fixture.ts'
 import { takeVersionSha } from './take-version-fixture.ts'
 
 const request: YimengTakeTechnicalQcRequest = {
@@ -50,6 +51,21 @@ function fixture(): YimengTakeTechnicalQcFeedResponse {
 }
 
 describe('takeTechnicalQc read adapter', () => {
+  it('keeps a persisted Writer v2 external-source assessment readable', () => {
+    const external = takeExternalAcceptanceFixture(request)
+    const current = fixture().assessments[0]!
+    const raw = {
+      ...current,
+      takeSubject: external.evidence.subject,
+      takeSubjectSha256: takeVersionSha(external.evidence.subject),
+      evidenceSnapshotSha256: external.evidenceSnapshotSha256,
+    } as Record<string, unknown>
+    delete raw.currentBinding
+    expect(normalizePersistedTakeTechnicalQcAssessment(raw, request, takeVersionSha)).toMatchObject({
+      takeSubject: { schema: 'jason.qingmu-take-acceptance-subject.v2' },
+    })
+  })
+
   it('accepts one exact current 12-code assessment without content authority', () => {
     const feed = fixture()
     expect(normalizeTakeTechnicalQcFeed(feed, request, takeVersionSha)).toEqual(feed)

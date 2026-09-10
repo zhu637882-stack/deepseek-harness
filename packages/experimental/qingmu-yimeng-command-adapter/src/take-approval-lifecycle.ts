@@ -15,6 +15,7 @@ import type {
   YimengTakeTechnicalQcSubject,
   YimengTransitionTakeApprovalLifecycleRequest,
 } from './types.ts'
+import { normalizeTakeTechnicalQcSubject } from './take-technical-qc.ts'
 
 const ACTIONS = ['APPROVE', 'INVALIDATE', 'REQUEST_REWORK', 'RESUBMIT'] as const
 const STATES = [
@@ -237,6 +238,10 @@ function subject(
   field: string,
   error: ErrorFactory,
 ): YimengTakeTechnicalQcSubject {
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)
+    && (value as YimengCommandJsonObject).schema === 'jason.qingmu-take-acceptance-subject.v2') {
+    return normalizeTakeTechnicalQcSubject(value, intent, field, error)
+  }
   const item = exact(value, SUBJECT_FIELDS, field, error)
   if (item.schema !== 'jason.qingmu-take-acceptance-subject.v1'
     || item.projectId !== intent.projectId || item.episodeId !== intent.episodeId

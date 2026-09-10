@@ -185,7 +185,7 @@ function evidenceStructure(value: YimengTakeAcceptanceResponse): boolean {
     && exactKeys(subject, [
       'schema', 'projectId', 'episodeId', 'frameId', 'frameNo', 'storyboardRevision', 'frameContentSha256',
       'selectionRevision', 'takeId', 'versionOrdinal', 'selectionStatus', 'outputSha256', 'taskId', 'capability',
-      'routeKey', 'provider', 'model', 'inputHash', 'submitId',
+      'routeKey', 'provider', 'model', 'inputHash', 'submitId', ...(subject.schema === 'jason.qingmu-take-acceptance-subject.v2' ? ['origin'] : []),
     ])
     && exactKeys(providerReceipt, [
       'schema', 'status', 'evidenceMode', 'actualProviderReceiptVerified', 'requestDryRun',
@@ -233,12 +233,32 @@ function fixedEvidenceValues(value: YimengTakeAcceptanceResponse): boolean {
     && JSON.stringify(providerReceipt.blockers) === JSON.stringify(['PROVIDER_RECEIPT_DRY_RUN_ONLY'])
   const unavailableProvider = (providerReceipt.status === 'missing' || providerReceipt.status === 'invalid')
     && providerReceipt.evidenceMode === 'unverified' && !providerReceipt.actualProviderReceiptVerified
-  return value.schema === 'jason.qingmu-take-acceptance-evidence.v1'
+  const external = subject.schema === 'jason.qingmu-take-acceptance-subject.v2'
+  const externalOrigin = subject.origin
+  const validExternal = external && value.schema === 'jason.qingmu-take-acceptance-evidence.v2'
+    && externalOrigin !== undefined && externalOrigin.schema === 'jason.qingmu-external-video-origin.v1'
+    && externalOrigin.kind === 'external_saved' && (externalOrigin.bindingStatus === 'current' || externalOrigin.bindingStatus === 'stale')
+    && externalOrigin.producerIdentityStatus === 'unknown' && !externalOrigin.providerExecutionVerified
+    && !externalOrigin.recordConsistencyVerified && subject.taskId === null && subject.capability === null
+    && subject.routeKey === null && subject.provider === null && subject.model === null && subject.inputHash === null
+    && subject.submitId === null && subject.outputSha256 !== null && externalOrigin.binding.projectId === subject.projectId
+    && externalOrigin.binding.episodeId === subject.episodeId && externalOrigin.binding.frameId === subject.frameId
+    && externalOrigin.binding.assetId === subject.takeId && externalOrigin.binding.takeId === subject.takeId
+    && externalOrigin.binding.assetSha256 === subject.outputSha256
+    && (externalOrigin.bindingStatus === 'current') === (externalOrigin.binding.frameContentSha256 === subject.frameContentSha256
+      && externalOrigin.binding.storyboardRevision === subject.storyboardRevision)
+    && candidateQuality.schema === 'jason.qingmu-take-candidate-quality-evidence.v2'
+    && candidateQuality.status === 'NOT_APPLICABLE' && candidateQuality.requiredCheckTypes.length === 0
+    && candidateQuality.checks.length === 0 && candidateQuality.missingCheckTypes.length === 0
+    && candidateQuality.failedOrStaleCheckTypes.length === 0
+    && unavailableProvider && !providerReceipt.taskRequestHashVerified
+    && (externalOrigin.bindingStatus !== 'stale' || technicalReceipt.status === 'BLOCKED')
+  return ((!external && value.schema === 'jason.qingmu-take-acceptance-evidence.v1') || validExternal)
     && value.productionStatus === 'UNVERIFIED_FOR_PAID_PRODUCTION' && SHA.test(value.evidenceSnapshotSha256)
     && boundaries.readOnly && !boundaries.selectedIsApproval && !boundaries.formalApprovalChanged
     && boundaries.providerCalls === 0 && boundaries.databaseWrites === 0 && !boundaries.budgetMutation
     && !boundaries.humanSignoffInferred && boundaries.paidProviderAuthority === 'not_granted'
-    && !boundaries.gateBCompleted && subject.schema === 'jason.qingmu-take-acceptance-subject.v1'
+    && !boundaries.gateBCompleted
     && subject.selectionStatus === 'Selected' && SHA.test(subject.frameContentSha256)
     && (subject.outputSha256 === null || SHA.test(subject.outputSha256))
     && (subject.inputHash === null || SHA.test(subject.inputHash))
@@ -571,7 +591,7 @@ function TakeVersionComparePanel({
     const run = runRef.current
     if (run === undefined || stack === undefined || marker.status !== 'none'
       || readOnly || !stack.capabilities.canSelect || !candidate.canAttemptSelection
-      || !candidate.lineageComplete || candidate.outputSha256 === null) return
+      || candidate.outputSha256 === null) return
     const active = begin(run, 'select')
     if (active === undefined) return
     let stored: TakeVersionSelectionRecoveryMarker | undefined
@@ -721,6 +741,8 @@ function TakeAcceptancePanel({
     {state?.status === 'error' && <p role="alert" className={card.warning}>{t('takeAcceptanceUnavailable')}</p>}
     {ready !== undefined && evidence !== undefined && evaluation !== undefined && <>
       <p className={css.acceptanceWarning}>{t('takeAcceptanceUnverified')}</p>
+      {evidence.subject.schema === 'jason.qingmu-take-acceptance-subject.v2'
+        && <p className={css.acceptanceWarning}>外部原片 · 生成阶段自动检查不适用，请完成逐项审看</p>}
       <div className={css.acceptanceGrid}>
         <AcceptanceCard title={t('takeAcceptanceTechnical')} status={evaluation.technicalReceiptStatus}>
           <dl><div><dt>{t('takeAcceptanceDecode')}</dt><dd>{evaluation.fullVideoDecodeStatus}</dd></div>
@@ -777,10 +799,10 @@ function TakeCard({
   readonly onSelect: (version: YimengTakeVersion) => Promise<void>
   readonly t: (key: QingmuCockpitKey) => string
 }) {
-  const selectionAllowed = canSelect && version.canAttemptSelection && version.lineageComplete && !busy
+  const selectionAllowed = canSelect && version.canAttemptSelection && !busy
   const sourceLabel = {
     initial: '初次生成', regenerate: '重新生成', repair: '局部修复', segment: '分段生成',
-    reference: '参考素材生成', local: version.originalFileName ? `本地导入 · ${version.originalFileName}` : '本地导入 · 来源待核实',
+    reference: '参考素材生成', local: version.originalFileName ? `本地导入 · ${version.originalFileName}` : '本地导入',
   }[version.source]
   return <article className={css.take} data-selected={version.isSelected ? 'true' : 'false'}>
     <header><div><strong>v{version.versionOrdinal}</strong><span>{sourceLabel}</span></div>
@@ -796,7 +818,11 @@ function TakeCard({
     </dl></details>
     {version.blockers.length > 0 && <div className={css.blockers}><strong>{t('takeVersionBlockers')}</strong>
       <ul>{version.blockers.map(blocker => <li key={blocker}>{blocker}</li>)}</ul></div>}
-    {version.source === 'local' && <p className={css.localBoundary}>本地文件仅供对照：来源待核实，未采用，不能作为正式选用版本。</p>}
+    {version.source === 'local' && <p className={css.localBoundary}>{version.origin?.bindingStatus === 'current'
+      ? '来源已登记，可选择后审看。选择不等于批准。'
+      : version.origin?.bindingStatus === 'stale'
+        ? '来源登记已失效：当前镜头内容或分镜修订已变化，请重新登记来源后再选择。'
+        : '来源尚未登记：请先保存本地视频的来源记录，再选择后审看。'}</p>}
     <details><summary>{t('takeVersionEvidence')}</summary><dl>
       <div><dt>{t('takeVersionProvider')}</dt><dd>{version.provider ?? t('unknown')}</dd></div>
       <div><dt>{t('takeVersionModel')}</dt><dd>{version.model ?? t('unknown')}</dd></div>

@@ -62,7 +62,85 @@ function feed() {
   }
 }
 
+function externalOrigin(takeSubject: ReturnType<typeof takeCommentSubject>) {
+  return {
+    schema: 'jason.qingmu-external-video-origin.v1' as const, kind: 'external_saved' as const,
+    bindingStatus: 'current' as const,
+    binding: { projectId: takeSubject.projectId, episodeId: takeSubject.episodeId, frameId: takeSubject.frameId,
+      assetId: takeSubject.takeId, takeId: takeSubject.takeId, assetSha256: takeSubject.outputSha256,
+      uploadReceiptSha256: 'a'.repeat(64), uploadRequestSha256: 'b'.repeat(64),
+      frameContentSha256: takeSubject.frameContentSha256, storyboardRevision: takeSubject.storyboardRevision },
+    registrationId: 'registration-take-1', registrationReceiptSha256: 'c'.repeat(64), packetSha256: 'd'.repeat(64),
+    producerIdentityStatus: 'unknown' as const, providerExecutionVerified: false as const, recordConsistencyVerified: false as const,
+  }
+}
+
 describe('Take review authority read projection', () => {
+  it('accepts a Writer v2 external-source decision without inventing a producer', async () => {
+    const expected = feed() as unknown as Record<string, unknown>
+    const decisions = expected.decisions as Array<Record<string, unknown>>
+    const decision = decisions[0]!
+    const subject = decision.takeSubject as ReturnType<typeof takeCommentSubject>
+    expected.schema = 'jason.qingmu-take-review-authority-feed.v2'
+    expected.currentOrigins = [{ takeId: subject.takeId, origin: externalOrigin(subject) }]
+    decision.schema = 'jason.qingmu-take-human-decision-record.v2'
+    decision.origin = externalOrigin(subject)
+    decision.producerActorId = null
+    decision.producerNaturalPersonId = null
+    decision.participantNaturalPersonIds = ['person-editor']
+    expected.currentDecision = decision
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(expected))
+    const handler = createYimengReadHandler({}, { fetch, readToken: () => 'take-review-host-token' })
+    expect(await handler('takeReviewAuthority', TAKE_COMMENT_SCOPE, signal())).toEqual({ ok: true, value: expected })
+  })
+
+  it('derives external decision currentness from the v2 current origin rather than a server boolean', async () => {
+    const expected = feed() as unknown as Record<string, unknown>
+    const decisions = expected.decisions as Array<Record<string, unknown>>
+    const decision = decisions[0]!
+    const subject = decision.takeSubject as ReturnType<typeof takeCommentSubject>
+    const recorded = externalOrigin(subject)
+    expected.schema = 'jason.qingmu-take-review-authority-feed.v2'
+    expected.currentOrigins = [{ takeId: subject.takeId, origin: {
+      ...recorded, registrationId: 'registration-take-rollover', registrationReceiptSha256: 'e'.repeat(64),
+    } }]
+    decision.schema = 'jason.qingmu-take-human-decision-record.v2'
+    decision.origin = recorded
+    decision.producerActorId = null
+    decision.producerNaturalPersonId = null
+    decision.participantNaturalPersonIds = ['person-editor']
+    decision.currentBinding = true
+    expected.currentDecision = decision
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(expected))
+    const handler = createYimengReadHandler({}, { fetch, readToken: () => 'take-review-host-token' })
+    expect(await handler('takeReviewAuthority', TAKE_COMMENT_SCOPE, signal()))
+      .toMatchObject({ ok: false, error: { code: 'internal' } })
+  })
+
+  it.each([
+    ['a non-string registration ID', 'registrationId', 1],
+    ['a malformed registration receipt SHA', 'registrationReceiptSha256', 'invalid'],
+    ['a non-string source packet SHA', 'packetSha256', null],
+  ] as const)('rejects an external origin with %s', async (_name, field, value) => {
+    const expected = feed() as unknown as Record<string, unknown>
+    const decisions = expected.decisions as Array<Record<string, unknown>>
+    const decision = decisions[0]!
+    const subject = decision.takeSubject as ReturnType<typeof takeCommentSubject>
+    const origin = { ...externalOrigin(subject), [field]: value }
+    expected.schema = 'jason.qingmu-take-review-authority-feed.v2'
+    expected.currentOrigins = [{ takeId: subject.takeId, origin }]
+    decision.schema = 'jason.qingmu-take-human-decision-record.v2'
+    decision.origin = origin
+    decision.producerActorId = null
+    decision.producerNaturalPersonId = null
+    decision.participantNaturalPersonIds = ['person-editor']
+    expected.currentDecision = decision
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(expected))
+    const handler = createYimengReadHandler({}, { fetch, readToken: () => 'take-review-host-token' })
+    expect(await handler('takeReviewAuthority', TAKE_COMMENT_SCOPE, signal()))
+      .toMatchObject({ ok: false, error: { code: 'internal' } })
+  })
+
   it('keeps Reviewer advice and Approver HumanDecision distinct on one authenticated GET', async () => {
     const expected = feed()
     const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(expected))

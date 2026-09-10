@@ -114,6 +114,38 @@ function response(value: unknown, status = 200): Response {
 const signal = () => new AbortController().signal
 
 describe('Take version selection command transport', () => {
+  it('accepts a recovered selection whose authoritative V2 stack has a current saved external origin', async () => {
+    const input = request()
+    const old = result(input)
+    const local = {
+      ...old.authoritativeStack.versions[1]!, source: 'local' as const, originalFileName: 'libtv-shot-01.mp4',
+      qualityStatus: 'pending', qualityPassed: null, taskId: null, provider: null, model: null,
+      providerTaskId: null, routeKey: null, inputHash: null,
+      lineageComplete: false, canAttemptSelection: false,
+      origin: {
+        schema: 'jason.qingmu-external-video-origin.v1' as const, kind: 'external_saved' as const,
+        bindingStatus: 'current' as const,
+        binding: {
+          projectId: input.projectId, episodeId: input.episodeId, frameId: input.frameId,
+          assetId: input.candidateTakeId, takeId: input.candidateTakeId, assetSha256: input.candidateOutputSha256,
+          uploadReceiptSha256: '6'.repeat(64), uploadRequestSha256: '7'.repeat(64),
+          frameContentSha256: old.authoritativeStack.frameContentSha256,
+          storyboardRevision: old.authoritativeStack.storyboardRevision,
+        },
+        registrationId: 'source-registration-2', registrationReceiptSha256: '8'.repeat(64), packetSha256: '9'.repeat(64),
+        producerIdentityStatus: 'unknown' as const, providerExecutionVerified: false as const,
+        recordConsistencyVerified: false as const,
+      },
+    }
+    const authoritativeStack = {
+      ...old.authoritativeStack, schema: 'jason.qingmu-take-version-stack-subject.v2' as const,
+      versions: [{ ...old.authoritativeStack.versions[0]!, origin: null }, local],
+    }
+    const expected = { ...old, authoritativeStack, authoritativeStackSnapshotSha256: sha(authoritativeStack) }
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => response(expected))
+    expect(await handler(fetch)('selectTakeVersion', input, signal())).toEqual({ ok: true, value: expected })
+  })
+
   it('accepts a reference source in the existing selection receipt', async () => {
     const input = request()
     const old = result(input)

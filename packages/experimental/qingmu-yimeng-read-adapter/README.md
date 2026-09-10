@@ -190,6 +190,6 @@ The project asset feed now identifies the actual signed media record through `pr
 Take stacks accept `source: reference` for candidates registered from a reference-video run. Their existing task and output SHA remain the lineage source; registration does not make a candidate selected or quality-approved. The shared types expose the exact registration request and receipt used by the command adapter.
 
 Take stacks also accept `source: local` with a receipt-verified `originalFileName` (or null when
-unavailable). Local files use the same private preview and output SHA checks. Their filenames
-do not imply a Provider, and they remain ineligible for production adoption while source lineage
-is unverified. Other Take source contracts keep their existing field shape.
+unavailable). Local files use the same private preview and output SHA checks. Their filenames do not imply a Provider; current source registration permits selection for review. Other Take source contracts keep their existing field shape.
+
+External originals use versioned Take, acceptance and review feeds while generated-only feeds retain v1. Their origin binds the upload receipt, source registration, video bytes and shot revision without claiming platform execution. Review v2 exposes current origins so source changes invalidate old decisions even when the comment subject is unchanged. Editorial v2 can bind a decoded original MP4 as picture and embedded audio; it still requires current QC and approval.

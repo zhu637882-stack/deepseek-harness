@@ -28,7 +28,7 @@ const port = portFixture as never
 describe('ShootingReviewWorkspace', () => {
   it.each([
     { canAttemptSelection: false, lineageComplete: true, allowed: false },
-    { canAttemptSelection: true, lineageComplete: false, allowed: false },
+    { canAttemptSelection: true, lineageComplete: false, allowed: true },
     { canAttemptSelection: false, lineageComplete: false, allowed: false },
     { canAttemptSelection: true, lineageComplete: true, allowed: true },
   ])('requires candidate eligibility as well as playable output: %j', async ({ canAttemptSelection, lineageComplete, allowed }) => {
@@ -255,7 +255,7 @@ describe('ShootingReviewWorkspace', () => {
       directorAssistant={null} port={scopedPort as never} t={key => key} />)
     await screen.findByText('本地导入视频')
     expect(screen.getByText('libtv-shot-01.mp4')).toBeTruthy()
-    expect(screen.getByText('本地导入，来源待核实，暂不可采用')).toBeTruthy()
+    expect(screen.getByText('来源待登记，暂不可采用')).toBeTruthy()
     expect(screen.getByText('本地视频可先查看或登记来源，采用还需完成检查。')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '采用这条视频' })).toBeNull()
   })

@@ -20,6 +20,8 @@ E7-4 permits only `APPROVE`, `INVALIDATE`, `REQUEST_REWORK`, and `RESUBMIT` when
 
 Before each write, the client stores and reads back a versioned non-secret recovery marker. The browser RPC receives only the exact command intent; local marker schema metadata is stripped. An uncertain write is resolved only with the original GET-only receipt lookup, never by repeating the POST. A confirmed receipt triggers a fresh Yimeng read before the UI presents current authority.
 
+External originals retain unknown producer identity: uploading or registering a file is not proof of producing it. Proven canvas participants remain ineligible approvers. External acceptance binds current source registration; review feeds supply current origins so an unchanged comment SHA cannot preserve decisions across source changes. Internal generation fields remain null and generation checks stay not applicable. Current QC and human approval remain required for handoff of original picture and embedded audio.
+
 ## Alternatives considered
 
 **Use one generic Take status.** This collapses collaboration, review, technical evidence, formal authority, and episode verification into an ambiguous flag and makes invalidation impossible to audit correctly.
@@ -29,6 +31,8 @@ Before each write, the client stores and reads back a versioned non-secret recov
 **Automatically retry uncertain POST requests.** Idempotency helps duplicate control but does not turn an unknown outcome into a confirmed receipt. GET-only recovery preserves the distinction.
 
 **Execute rework from the lifecycle action.** Approval routing must not start workers, call Providers, spend budget, mutate selection, or close Findings. It records only the bounded preparation state.
+
+**Invent generation lineage for imported files.** A saved platform response proves neither platform execution nor producer identity. Binding actual bytes and saved sources keeps review possible without those claims.
 
 ## Consequences
 

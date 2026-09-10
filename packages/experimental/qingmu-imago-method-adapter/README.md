@@ -143,3 +143,5 @@ None for direct RPC use. A native consumer appends a tool-result suffix; it does
 - Attestation proves Host validation and exact input binding. It does not grant paid Provider authority, asset selection, human approval, or production-state writes.
 - Key rotation and multi-key verification are not part of this bounded slice.
 - Workset templates are not approved business stages. Named Stage/LSU authority must be supplied by a future explicit business contract before actual legal-work recommendations or shadow comparisons can be shown; no legacy status fallback is used.
+
+Acceptance methods accept external-video v2 subjects with exact source evidence and null generation identifiers. Internal generation quality checks are not applicable to these files; this is not a quality pass. Technical assessment and human decisions remain explicit inputs to approval, and origin changes invalidate prior evidence.

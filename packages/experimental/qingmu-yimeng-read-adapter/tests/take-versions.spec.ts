@@ -5,6 +5,7 @@ import {
   TAKE_VERSION_REQUEST as request,
   takeVersionSha,
   takeVersionStackFixture,
+  takeVersionStackV2Fixture,
 } from './take-version-fixture.ts'
 
 type MutableObject = Record<string, unknown>
@@ -33,6 +34,44 @@ describe('Take/version read-only stack', () => {
     const subject = { ...feed.subject, versions: feed.subject.versions.map(v => ({ ...v, source: 'reference' as const })) }
     const value = { ...feed, subject, stackSnapshotSha256: takeVersionSha(subject) }
     expect(normalize(value)).toEqual(value)
+  })
+
+  it('accepts a current saved external-video origin and rejects stale or forged origin claims', () => {
+    const feed = takeVersionStackV2Fixture()
+    expect(normalize(feed)).toEqual(feed)
+    const subject = mutable(structuredClone(feed.subject))
+    const versions = subject.versions as MutableObject[]
+    const origin = mutable(versions[1]!.origin)
+    origin.bindingStatus = 'stale'
+    ;(mutable(origin.binding)).frameContentSha256 = 'a'.repeat(64)
+    versions[1]!.canAttemptSelection = false
+    const stale = { ...feed, subject, stackSnapshotSha256: takeVersionSha(subject) }
+    expect(normalize(stale).subject.versions[1]).toMatchObject({ canAttemptSelection: false })
+    const forged = structuredClone(stale) as unknown as MutableObject
+    const forgedSubject = mutable(forged.subject)
+    const forgedOrigin = mutable((forgedSubject.versions as MutableObject[])[1]!.origin)
+    forgedOrigin.providerExecutionVerified = true
+    forged.stackSnapshotSha256 = takeVersionSha(forgedSubject)
+    expect(() => normalize(forged)).toThrow('external origin')
+
+    const crossed = structuredClone(feed) as unknown as MutableObject
+    const crossedSubject = mutable(crossed.subject)
+    const crossedOrigin = mutable((crossedSubject.versions as MutableObject[])[1]!.origin)
+    ;(mutable(crossedOrigin.binding)).assetSha256 = 'b'.repeat(64)
+    crossed.stackSnapshotSha256 = takeVersionSha(crossedSubject)
+    expect(() => normalize(crossed)).toThrow('external origin binding')
+
+    const failed = structuredClone(feed) as unknown as MutableObject
+    const failedSubject = mutable(failed.subject)
+    const local = (failedSubject.versions as MutableObject[])[1]!
+    local.qualityStatus = 'failed'
+    local.qualityPassed = false
+    local.canAttemptSelection = false
+    failed.stackSnapshotSha256 = takeVersionSha(failedSubject)
+    expect(normalize(failed).subject.versions[1]).toMatchObject({ canAttemptSelection: false })
+    local.canAttemptSelection = true
+    failed.stackSnapshotSha256 = takeVersionSha(failedSubject)
+    expect(() => normalize(failed)).toThrow('derived state')
   })
 
   it('keeps an imported filename and forbids invented local generation lineage', () => {

@@ -1810,9 +1810,10 @@ export function EditorialHandoff({ projectId, episodeId, port, t, compact = fals
                   <div><dt>{t('handoffMedia')}</dt><dd>{shot.selectedTake.mimeType ?? '—'} · {shot.selectedTake.durationSec ?? '—'}s</dd></div>
                   <div><dt>{t('handoffGeometry')}</dt><dd>{shot.selectedTake.aspectRatio ?? '—'} · {shot.selectedTake.fps ?? '—'} fps</dd></div>
                   <div><dt>{t('handoffQc')}</dt><dd>{shot.selectedTake.qualityStatus}</dd></div>
-                  <div><dt>{t('handoffAudio')}</dt><dd>{shot.audio.asset === null
-                    ? t('handoffAudioUnbound')
-                    : `${shot.audio.asset.mimeType ?? '—'} · ${shot.audio.asset.durationSec ?? '—'}s`}</dd></div>
+                  <div><dt>{t('handoffAudio')}</dt><dd>{shot.audio.status === 'embedded'
+                    ? '原片内置音轨'
+                    : shot.audio.asset === null ? t('handoffAudioUnbound')
+                      : `${shot.audio.asset.mimeType ?? '—'} · ${shot.audio.asset.durationSec ?? '—'}s`}</dd></div>
                 </dl>}
               {shot.blockers.length > 0 && <ul className={css.blockers}>
                 {shot.blockers.map(code => <li key={code}>{blockerLabel(code)}</li>)}

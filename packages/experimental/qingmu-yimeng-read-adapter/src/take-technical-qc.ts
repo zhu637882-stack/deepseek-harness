@@ -9,6 +9,7 @@ import type {
   YimengTakeTechnicalQcResult,
 } from './types.ts'
 import { parseTakeVersionReadRequest } from './take-versions.ts'
+import { normalizeTakeAcceptanceSubject } from './take-acceptance.ts'
 
 type Digest = (value: unknown, field: string) => string
 type JsonObject = Record<string, unknown>
@@ -146,6 +147,10 @@ function subject(
   request: YimengTakeTechnicalQcRequest,
   field: string,
 ): YimengTakeAcceptanceSubject {
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)
+    && (value as JsonObject).schema === 'jason.qingmu-take-acceptance-subject.v2') {
+    return normalizeTakeAcceptanceSubject(value, request)
+  }
   const item = exact(value, SUBJECT_FIELDS, field)
   if (item.schema !== 'jason.qingmu-take-acceptance-subject.v1'
     || item.projectId !== request.projectId || item.episodeId !== request.episodeId
@@ -357,9 +362,8 @@ export function normalizePersistedTakeTechnicalQcAssessment(
   digest: Digest,
 ): YimengTakeTechnicalQcResult['assessment'] {
   const raw = exact(value, ASSESSMENT_FIELDS.filter(field => field !== 'currentBinding'), 'persistedAssessment')
-  const takeSubjectValue = exact(raw.takeSubject, SUBJECT_FIELDS, 'persistedAssessment.takeSubject')
   const currentAcceptance = {
-    takeSubject: subject(takeSubjectValue, request, 'persistedAssessment.takeSubject'),
+    takeSubject: subject(raw.takeSubject, request, 'persistedAssessment.takeSubject'),
     takeSubjectSha256: sha(raw.takeSubjectSha256, 'persistedAssessment.takeSubjectSha256'),
     evidenceSnapshotSha256: sha(raw.evidenceSnapshotSha256, 'persistedAssessment.evidenceSnapshotSha256'),
     technicalReceiptStatus: raw.technicalReceiptStatus as 'PASS' | 'BLOCKED',

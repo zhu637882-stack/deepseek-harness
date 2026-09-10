@@ -4,6 +4,7 @@ import { normalizeTakeAcceptance } from '../src/take-acceptance.ts'
 import {
   TAKE_ACCEPTANCE_REQUEST as request,
   takeAcceptanceFixture,
+  takeExternalAcceptanceFixture,
 } from './take-acceptance-fixture.ts'
 import { takeVersionSha } from './take-version-fixture.ts'
 
@@ -28,6 +29,24 @@ describe('selected Take acceptance evidence', () => {
     expect(feed.productionStatus).toBe('UNVERIFIED_FOR_PAID_PRODUCTION')
     expect(feed.boundaries).toMatchObject({ selectedIsApproval: false, gateBCompleted: false })
     expect(JSON.stringify(feed)).not.toMatch(/(?:url|localPath|mediaPath|responseJson)/iu)
+  })
+
+  it('accepts a current external source only with missing provider execution and not-applicable generation QC', () => {
+    const feed = takeExternalAcceptanceFixture()
+    expect(normalize(feed)).toEqual(feed)
+    expect(feed.evidence).toMatchObject({
+      subject: { schema: 'jason.qingmu-take-acceptance-subject.v2', origin: { bindingStatus: 'current' } },
+      providerReceipt: { status: 'missing', actualProviderReceiptVerified: false },
+      candidateQuality: { status: 'NOT_APPLICABLE' },
+    })
+    const stale = structuredClone(feed) as unknown as MutableObject
+    const evidence = mutable(stale.evidence)
+    const subject = mutable(evidence.subject)
+    const origin = mutable(subject.origin)
+    origin.bindingStatus = 'stale'
+    mutable(origin.binding).frameContentSha256 = 'a'.repeat(64)
+    stale.evidenceSnapshotSha256 = takeVersionSha(evidence)
+    expect(() => normalize(stale)).toThrow('stale external source')
   })
 
   it.each(['evidence hash', 'media hash', 'frame rate', 'provider status', 'QC freshness', 'extra URL'] as const)(

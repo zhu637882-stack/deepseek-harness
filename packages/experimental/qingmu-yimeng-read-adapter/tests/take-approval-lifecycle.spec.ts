@@ -7,10 +7,27 @@ import {
   TAKE_APPROVAL_LIFECYCLE_REQUEST as request,
   takeApprovalLifecycleFixture as fixture,
 } from './take-approval-lifecycle-fixture.ts'
+import { takeExternalAcceptanceFixture } from './take-acceptance-fixture.ts'
 import { takeVersionSha } from './take-version-fixture.ts'
 const signal = () => new AbortController().signal
 
 describe('takeApprovalLifecycle read adapter', () => {
+  it('accepts an external v2 QC subject with its separately content-bound v1 HumanDecision', () => {
+    const feed = fixture() as unknown as Record<string, unknown>
+    const source = feed.source as Record<string, unknown>
+    const external = takeExternalAcceptanceFixture(request).evidence.subject
+    source.currentTake = { takeSubject: external, takeSubjectSha256: takeVersionSha(external) }
+    source.currentDecision = {
+      decisionId: 'decision-external-1', eventId: 'decision-event-external-1', takeId: external.takeId,
+      takeVersionOrdinal: external.versionOrdinal, takeSubjectSha256: 'f'.repeat(64),
+      decision: 'approve', actorId: 'approver-external-1', actorNaturalPersonId: 'person-approver-external-1',
+    }
+    feed.sourceSnapshotSha256 = takeVersionSha(source)
+    expect(normalizeTakeApprovalLifecycleFeed(feed, request, takeVersionSha)).toMatchObject({
+      source: { currentTake: { takeSubject: { schema: 'jason.qingmu-take-acceptance-subject.v2' } } },
+    })
+  })
+
   it('accepts the exact fresh source while deriving no lifecycle state in Yimeng', () => {
     const feed = fixture()
     expect(normalizeTakeApprovalLifecycleFeed(feed, request, takeVersionSha)).toEqual(feed)
@@ -46,7 +63,7 @@ describe('takeApprovalLifecycle read adapter', () => {
     },
   )
 
-  it('fails closed when the current decision names the Take but binds a stale subject SHA', () => {
+  it('accepts a generated v1 Take whose HumanDecision has its own content-bound subject SHA', () => {
     const feed = structuredClone(fixture()) as unknown as Record<string, unknown>
     const source = feed.source as Record<string, unknown>
     const current = source.currentTake as Record<string, unknown>
@@ -57,9 +74,9 @@ describe('takeApprovalLifecycle read adapter', () => {
       decision: 'approve', actorId: 'approver-1', actorNaturalPersonId: 'person-approver-1',
     }
     feed.sourceSnapshotSha256 = takeVersionSha(source)
-    expect(() => normalizeTakeApprovalLifecycleFeed(feed, request, takeVersionSha)).toThrow(
-      'source.currentDecision Take binding mismatch',
-    )
+    expect(normalizeTakeApprovalLifecycleFeed(feed, request, takeVersionSha)).toMatchObject({
+      source: { currentDecision: { takeId: take.takeId, takeSubjectSha256: '0'.repeat(64) } },
+    })
   })
 
   it('fails closed when an approval history event was authored by a director', () => {

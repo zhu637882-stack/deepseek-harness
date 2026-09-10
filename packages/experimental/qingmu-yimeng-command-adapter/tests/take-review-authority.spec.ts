@@ -119,11 +119,47 @@ function decisionResult() {
   }
 }
 
+function externalDecisionResult() {
+  const result = structuredClone(decisionResult()) as unknown as {
+    readonly decision: Record<string, unknown>
+  }
+  const takeSubject = result.decision.takeSubject as Record<string, unknown>
+  result.decision.schema = 'jason.qingmu-take-human-decision-record.v2'
+  result.decision.origin = {
+    schema: 'jason.qingmu-external-video-origin.v1', kind: 'external_saved', bindingStatus: 'current',
+    binding: { projectId: takeSubject.projectId, episodeId: takeSubject.episodeId, frameId: takeSubject.frameId,
+      assetId: takeSubject.takeId, takeId: takeSubject.takeId, assetSha256: takeSubject.outputSha256,
+      uploadReceiptSha256: 'a'.repeat(64), uploadRequestSha256: 'b'.repeat(64),
+      frameContentSha256: takeSubject.frameContentSha256, storyboardRevision: takeSubject.storyboardRevision },
+    registrationId: 'registration-take-1', registrationReceiptSha256: 'c'.repeat(64), packetSha256: 'd'.repeat(64),
+    producerIdentityStatus: 'unknown', providerExecutionVerified: false, recordConsistencyVerified: false,
+  }
+  result.decision.producerActorId = null
+  result.decision.producerNaturalPersonId = null
+  result.decision.participantNaturalPersonIds = ['person-editor']
+  return result as unknown as ReturnType<typeof decisionResult>
+}
+
 function handler(fetch: typeof globalThis.fetch) {
   return createYimengCommandHandler({}, { fetch, readToken: () => TOKEN })
 }
 
 describe('Take review authority command transport', () => {
+  it('accepts a real v2 external-source decision result and its GET-only recovery', async () => {
+    const request = decisionInput()
+    const result = externalDecisionResult()
+    const postFetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(result, { status: 201 }))
+    expect(await handler(postFetch)('createTakeHumanDecision', request, signal())).toEqual({ ok: true, value: result })
+    const recovery = {
+      schema: 'jason.qingmu-take-review-command-recovery.v1', commandType: 'qingmu.take_human_decision.record.v1',
+      projectId: request.projectId, episodeId: request.episodeId, frameId: request.frameId, takeId: request.takeId,
+      expectedTakeSubjectSha256: request.expectedTakeSubjectSha256, idempotencyKey: request.idempotencyKey,
+      status: 'committed', result,
+    }
+    const recoveryFetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(recovery))
+    expect(await handler(recoveryFetch)('recoverTakeHumanDecision', request, signal())).toEqual({ ok: true, value: recovery })
+  })
+
   it.each([
     {
       endpoint: 'createTakeReviewRecommendation' as const,

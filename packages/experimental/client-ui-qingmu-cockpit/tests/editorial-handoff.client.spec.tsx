@@ -173,6 +173,26 @@ afterEach(() => {
 })
 
 describe('editorial handoff panel', () => {
+  it('labels a v2 local MP4 audio stream as embedded source audio, never a generated WAV', async () => {
+    const value = handoff() as unknown as Record<string, unknown>
+    const source = value.source as Record<string, unknown>
+    const shot = (source.shots as Array<Record<string, unknown>>)[0]!
+    const selectedTake = shot.selectedTake as Record<string, unknown>
+    value.schema = 'jason.qingmu-editorial-handoff-draft.v2'
+    source.schema = 'jason.qingmu-editorial-handoff-source.v2'
+    selectedTake.source = 'local'
+    selectedTake.origin = null
+    shot.audio = {
+      status: 'embedded', scopeStatus: 'valid', candidateCount: 0, asset: null,
+      embeddedSource: { assetId: 'take-1', sha256: '5'.repeat(64), packagePath: `media/${'5'.repeat(64)}.mp4`,
+        codecName: 'aac', channels: 2, sampleRate: 48000 },
+    }
+    const editorialHandoff = vi.fn().mockResolvedValue(value)
+    render(<EditorialHandoff {...SCOPE} port={{ editorialHandoff } as unknown as QingmuYimengReadPort} t={t} />)
+    await waitFor(() => expect(screen.getByText('原片内置音轨')).toBeTruthy())
+    expect(screen.queryByText(/WAV/i)).toBeNull()
+  })
+
   it('does not treat a tail seek as playback but accepts continuous coverage', () => {
     expect(continuousPlayedCoverage(playedRanges([[9, 10]]), 10)).toBe(0)
     expect(continuousPlayedCoverage(playedRanges([[0, 4], [4.1, 10]]), 10)).toBe(1)

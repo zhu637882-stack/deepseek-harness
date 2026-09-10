@@ -82,3 +82,44 @@ export function takeVersionStackFixture(
     },
   }
 }
+
+/** V2 includes a local candidate whose saved records are current but not Provider-verified. */
+export function takeVersionStackV2Fixture(
+  request: YimengTakeVersionRequest = TAKE_VERSION_REQUEST,
+): YimengTakeVersionStackResponse {
+  const base = takeVersionStackSubject(request)
+  const local = {
+    ...base.versions[1]!, takeId: 'asset-local-3', versionOrdinal: 2, source: 'local' as const,
+    originalFileName: 'libtv-shot-01.mp4', qualityStatus: 'pending', qualityPassed: null,
+    taskId: null, provider: null, model: null,
+    providerTaskId: null, routeKey: null, inputHash: null, lineageComplete: false,
+    canAttemptSelection: true,
+    origin: {
+      schema: 'jason.qingmu-external-video-origin.v1' as const, kind: 'external_saved' as const,
+      bindingStatus: 'current' as const,
+      binding: {
+        projectId: request.projectId, episodeId: request.episodeId, frameId: request.frameId,
+        assetId: 'asset-local-3', takeId: 'asset-local-3', assetSha256: '4'.repeat(64),
+        uploadReceiptSha256: '6'.repeat(64), uploadRequestSha256: '7'.repeat(64),
+        frameContentSha256: base.frameContentSha256, storyboardRevision: base.storyboardRevision,
+      },
+      registrationId: 'local-source-registration-3', registrationReceiptSha256: '8'.repeat(64),
+      packetSha256: '9'.repeat(64), producerIdentityStatus: 'unknown' as const,
+      providerExecutionVerified: false as const, recordConsistencyVerified: false as const,
+    },
+  }
+  const initial = { ...base.versions[0]!, origin: null }
+  const subject = {
+    ...base, schema: 'jason.qingmu-take-version-stack-subject.v2' as const,
+    versions: [initial, local],
+  }
+  return {
+    schema: 'jason.qingmu-take-version-stack.v2', subject, stackSnapshotSha256: takeVersionSha(subject),
+    capabilities: { canCompare: true, canSelect: true },
+    boundaries: {
+      takeIdAuthority: 'yimeng.assets.id', versionOrdinalPersistence: false,
+      versionOrdinalRule: 'created_at_then_asset_id_ascending', selectedIsApproval: false,
+      formalApprovalChanged: false, providerAuthority: 'not_granted',
+    },
+  }
+}

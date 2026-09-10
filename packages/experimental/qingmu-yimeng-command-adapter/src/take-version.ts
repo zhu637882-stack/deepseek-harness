@@ -125,6 +125,58 @@ function optionalNumber(value: unknown, field: string, error: ErrorFactory): num
   return value
 }
 
+function externalOrigin(
+  value: unknown,
+  version: Pick<YimengTakeSelectionVersion, 'takeId' | 'source' | 'outputSha256' | 'taskId' | 'provider' | 'model' | 'providerTaskId' | 'routeKey' | 'inputHash' | 'lineageComplete'>,
+  subject: Pick<YimengTakeSelectionStackSubject, 'projectId' | 'episodeId' | 'frameId' | 'frameContentSha256' | 'storyboardRevision'>,
+  error: ErrorFactory,
+): NonNullable<YimengTakeSelectionVersion['origin']> | null {
+  if (value === null) return null
+  const item = exact(value, [
+    'schema', 'kind', 'bindingStatus', 'binding', 'registrationId', 'registrationReceiptSha256',
+    'packetSha256', 'producerIdentityStatus', 'providerExecutionVerified', 'recordConsistencyVerified',
+  ], 'authoritativeStack.origin', error)
+  const binding = exact(item.binding, [
+    'projectId', 'episodeId', 'frameId', 'assetId', 'takeId', 'assetSha256', 'uploadReceiptSha256',
+    'uploadRequestSha256', 'frameContentSha256', 'storyboardRevision',
+  ], 'authoritativeStack.origin.binding', error)
+  if (item.schema !== 'jason.qingmu-external-video-origin.v1' || item.kind !== 'external_saved'
+    || (item.bindingStatus !== 'current' && item.bindingStatus !== 'stale')
+    || item.producerIdentityStatus !== 'unknown' || item.providerExecutionVerified !== false
+    || item.recordConsistencyVerified !== false || version.source !== 'local' || version.outputSha256 === null
+    || version.taskId !== null || version.provider !== null || version.model !== null
+    || version.providerTaskId !== null || version.routeKey !== null || version.inputHash !== null
+    || version.lineageComplete !== false) throw error('authoritativeStack external origin mismatch')
+  const normalized = {
+    schema: 'jason.qingmu-external-video-origin.v1' as const, kind: 'external_saved' as const,
+    bindingStatus: item.bindingStatus as 'current' | 'stale',
+    binding: {
+      projectId: id(binding.projectId, 'authoritativeStack.origin.binding.projectId', error),
+      episodeId: id(binding.episodeId, 'authoritativeStack.origin.binding.episodeId', error),
+      frameId: id(binding.frameId, 'authoritativeStack.origin.binding.frameId', error),
+      assetId: id(binding.assetId, 'authoritativeStack.origin.binding.assetId', error),
+      takeId: id(binding.takeId, 'authoritativeStack.origin.binding.takeId', error),
+      assetSha256: sha(binding.assetSha256, 'authoritativeStack.origin.binding.assetSha256', error),
+      uploadReceiptSha256: sha(binding.uploadReceiptSha256, 'authoritativeStack.origin.binding.uploadReceiptSha256', error),
+      uploadRequestSha256: sha(binding.uploadRequestSha256, 'authoritativeStack.origin.binding.uploadRequestSha256', error),
+      frameContentSha256: sha(binding.frameContentSha256, 'authoritativeStack.origin.binding.frameContentSha256', error),
+      storyboardRevision: integer(binding.storyboardRevision, 0, 'authoritativeStack.origin.binding.storyboardRevision', error),
+    },
+    registrationId: id(item.registrationId, 'authoritativeStack.origin.registrationId', error),
+    registrationReceiptSha256: sha(item.registrationReceiptSha256, 'authoritativeStack.origin.registrationReceiptSha256', error),
+    packetSha256: sha(item.packetSha256, 'authoritativeStack.origin.packetSha256', error),
+    producerIdentityStatus: 'unknown' as const, providerExecutionVerified: false as const,
+    recordConsistencyVerified: false as const,
+  }
+  const current = normalized.binding.frameContentSha256 === subject.frameContentSha256
+    && normalized.binding.storyboardRevision === subject.storyboardRevision
+  if (normalized.binding.projectId !== subject.projectId || normalized.binding.episodeId !== subject.episodeId
+    || normalized.binding.frameId !== subject.frameId || normalized.binding.assetId !== version.takeId
+    || normalized.binding.takeId !== version.takeId || normalized.binding.assetSha256 !== version.outputSha256
+    || (normalized.bindingStatus === 'current') !== current) throw error('authoritativeStack external origin binding mismatch')
+  return normalized
+}
+
 function jcs(value: unknown, field: string, error: ErrorFactory, depth = 0): string {
   if (depth > 100) throw error(`${field} nesting exceeds limit`)
   if (value === null) return 'null'
@@ -183,16 +235,19 @@ function version(
   value: unknown,
   ordinal: number,
   helpers: TakeVersionHelpers,
+  subject: Pick<YimengTakeSelectionStackSubject,
+    'schema' | 'projectId' | 'episodeId' | 'frameId' | 'frameContentSha256' | 'storyboardRevision'>,
 ): YimengTakeSelectionVersion {
   const error = helpers.responseError
   const local = typeof value === 'object' && value !== null && 'source' in value && value.source === 'local'
-  const fields = local ? [...VERSION_FIELDS, 'originalFileName'] : VERSION_FIELDS
+  const v2 = subject.schema === 'jason.qingmu-take-version-stack-subject.v2'
+  const fields = [...VERSION_FIELDS, ...(local ? ['originalFileName'] : []), ...(v2 ? ['origin'] : [])]
   const item = exact(value, fields, `authoritativeStack.versions[${String(ordinal - 1)}]`, error)
-  const source = item.source
+  const source = item.source as YimengTakeSelectionVersion['source']
   if (source !== 'initial' && source !== 'regenerate' && source !== 'repair' && source !== 'segment' && source !== 'reference' && source !== 'local') {
     throw error('authoritativeStack version source mismatch')
   }
-  const binding = item.outputBindingStatus
+  const binding = item.outputBindingStatus as YimengTakeSelectionVersion['outputBindingStatus']
   if (binding !== 'verified' && binding !== 'recorded_sha_missing'
     && binding !== 'materialized_file_missing' && binding !== 'recorded_sha_mismatch') {
     throw error('authoritativeStack output binding mismatch')
@@ -213,7 +268,7 @@ function version(
     })) {
     throw error('authoritativeStack blockers are not canonical')
   }
-  const result: YimengTakeSelectionVersion = {
+  const result = {
     takeId: id(item.takeId, 'authoritativeStack.takeId', error),
     versionOrdinal: integer(item.versionOrdinal, 1, 'authoritativeStack.versionOrdinal', error),
     source,
@@ -256,14 +311,16 @@ function version(
   const lineageComplete = result.source !== 'local' && result.taskId !== null && result.provider !== null && result.model !== null
     && result.providerTaskId !== null && result.routeKey !== null && result.inputHash !== null
     && result.outputSha256 !== null && result.outputBindingStatus === 'verified'
+  const origin = v2 ? externalOrigin(item.origin, result, subject, error) : undefined
   const canAttemptSelection = !result.isSelected && result.selectionStatus === 'Unselected'
     && result.outputSha256 !== null && result.outputBindingStatus === 'verified'
-    && lineageComplete
+    && (lineageComplete || (origin?.bindingStatus === 'current' && result.qualityStatus === 'pending'))
   if (result.versionOrdinal !== ordinal || result.isSelected !== (result.selectionStatus === 'Selected')
     || result.qualityPassed !== qualityPassed || result.canAttemptSelection !== canAttemptSelection
     || result.lineageComplete !== lineageComplete) {
     throw error('authoritativeStack derived state mismatch')
   }
+  if (v2) return { ...result, origin: externalOrigin(item.origin, result, subject, error) }
   return result
 }
 
@@ -274,12 +331,17 @@ function stack(
 ): YimengTakeSelectionStackSubject {
   const error = helpers.responseError
   const item = exact(value, STACK_FIELDS, 'authoritativeStack', error)
-  if (item.schema !== 'jason.qingmu-take-version-stack-subject.v1'
+  if (item.schema !== 'jason.qingmu-take-version-stack-subject.v1' && item.schema !== 'jason.qingmu-take-version-stack-subject.v2'
     || item.projectId !== request.projectId || item.episodeId !== request.episodeId
     || item.frameId !== request.frameId || !Array.isArray(item.versions)) {
     throw error('authoritativeStack subject mismatch')
   }
-  const versions = item.versions.map((entry, index) => version(entry, index + 1, helpers))
+  const context = {
+    schema: item.schema, projectId: request.projectId, episodeId: request.episodeId, frameId: request.frameId,
+    frameContentSha256: sha(item.frameContentSha256, 'authoritativeStack.frameContentSha256', error),
+    storyboardRevision: integer(item.storyboardRevision, 0, 'authoritativeStack.storyboardRevision', error),
+  } as const
+  const versions = item.versions.map((entry, index) => version(entry, index + 1, helpers, context))
   const selected = versions.filter(entry => entry.isSelected)
   const selectedTakeId = optionalId(item.selectedTakeId, 'authoritativeStack.selectedTakeId', error)
   if (new Set(versions.map(entry => entry.takeId)).size !== versions.length
@@ -287,13 +349,13 @@ function stack(
     throw error('authoritativeStack selection is ambiguous')
   }
   return {
-    schema: 'jason.qingmu-take-version-stack-subject.v1',
+    schema: context.schema,
     projectId: request.projectId,
     episodeId: request.episodeId,
     frameId: request.frameId,
     frameNo: integer(item.frameNo, 1, 'authoritativeStack.frameNo', error),
-    storyboardRevision: integer(item.storyboardRevision, 0, 'authoritativeStack.storyboardRevision', error),
-    frameContentSha256: sha(item.frameContentSha256, 'authoritativeStack.frameContentSha256', error),
+    storyboardRevision: context.storyboardRevision,
+    frameContentSha256: context.frameContentSha256,
     selectionRevision: integer(item.selectionRevision, 1, 'authoritativeStack.selectionRevision', error),
     selectedTakeId,
     versions,

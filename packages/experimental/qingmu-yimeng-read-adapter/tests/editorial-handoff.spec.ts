@@ -91,7 +91,7 @@ function projection() {
   return { ...body, projectionSha256: sha(body) }
 }
 
-function rehash(value: ReturnType<typeof projection>): void {
+function rehash(value: Record<string, unknown>): void {
   value.sourceSnapshotSha256 = sha(value.source)
   value.projectionSha256 = sha(Object.fromEntries(
     Object.entries(value).filter(([key]) => key !== 'projectionSha256'),
@@ -99,6 +99,55 @@ function rehash(value: ReturnType<typeof projection>): void {
 }
 
 describe('editorial handoff read adapter', () => {
+  it('accepts a current registered local MP4 with its embedded original audio in a v2 draft', () => {
+    const value = structuredClone(projection()) as unknown as Record<string, unknown>
+    const source = value.source as Record<string, unknown>
+    const shot = (source.shots as Array<Record<string, unknown>>)[0]!
+    value.schema = 'jason.qingmu-editorial-handoff-draft.v2'
+    source.schema = 'jason.qingmu-editorial-handoff-source.v2'
+    const selectedTake = shot.selectedTake as Record<string, unknown>
+    selectedTake.source = 'local'
+    selectedTake.qualityStatus = 'pending'
+    selectedTake.lineageComplete = false
+    selectedTake.origin = {
+      schema: 'jason.qingmu-external-video-origin.v1', kind: 'external_saved', bindingStatus: 'current',
+      binding: { projectId: request.projectId, episodeId: request.episodeId, frameId: 'frame-1', assetId: 'asset-1', takeId: 'asset-1',
+        assetSha256: '5'.repeat(64), uploadReceiptSha256: '6'.repeat(64), uploadRequestSha256: '7'.repeat(64),
+        frameContentSha256: '3'.repeat(64), storyboardRevision: 1 },
+      registrationId: 'registration-1', registrationReceiptSha256: '8'.repeat(64), packetSha256: '9'.repeat(64),
+      producerIdentityStatus: 'unknown', providerExecutionVerified: false, recordConsistencyVerified: false,
+    }
+    shot.audio = { status: 'embedded', scopeStatus: 'valid', candidateCount: 0, asset: null,
+      embeddedSource: { assetId: 'asset-1', sha256: '5'.repeat(64), packagePath: `media/${'5'.repeat(64)}.mp4`,
+        codecName: 'aac', channels: 2, sampleRate: 48000 } }
+    shot.blockers = [
+      'editorial_handoff_approval_record_missing', 'editorial_handoff_qc_record_missing',
+    ]
+    value.unresolved = shot.blockers.map((code: string) => ({ frameId: 'frame-1', code }))
+    value.blockers = shot.blockers.map((code: string) => ({ scope: 'shot', frameId: 'frame-1', code }))
+    value.summary.authoritativeAudioCount = 1
+    value.summary.unresolvedCount = 2
+    value.download.blockerCode = 'editorial_handoff_approval_record_missing'
+    rehash(value)
+    expect(normalizeEditorialHandoff(value, request, entry => sha(entry))).toEqual(value)
+  })
+
+  it('rejects a stale or unregistered local Take from the v2 handoff path', () => {
+    const value = structuredClone(projection()) as unknown as Record<string, unknown>
+    const source = value.source as Record<string, unknown>
+    const shot = (source.shots as Array<Record<string, unknown>>)[0]!
+    value.schema = 'jason.qingmu-editorial-handoff-draft.v2'
+    source.schema = 'jason.qingmu-editorial-handoff-source.v2'
+    const selectedTake = shot.selectedTake as Record<string, unknown>
+    selectedTake.source = 'local'
+    selectedTake.qualityStatus = 'pending'
+    selectedTake.lineageComplete = false
+    selectedTake.origin = null
+    ;(shot.audio as Record<string, unknown>).embeddedSource = null
+    rehash(value)
+    expect(() => normalizeEditorialHandoff(value, request, entry => sha(entry))).toThrow('selected Take origin is invalid')
+  })
+
   it('normalizes the server-authored order and routes one GET', async () => {
     const value = projection()
     expect(normalizeEditorialHandoff(value, request, entry => sha(entry))).toEqual(value)

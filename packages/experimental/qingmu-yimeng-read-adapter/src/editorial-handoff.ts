@@ -27,6 +27,15 @@ const OUTPUT_BINDING_STATUSES = [
   'verified', 'recorded_sha_missing', 'materialized_file_missing', 'recorded_sha_mismatch',
 ] as const
 const QUALITY_STATUSES = ['pending', 'passed', 'failed'] as const
+const TAKE_SOURCES = ['initial', 'regenerate', 'repair', 'segment', 'reference', 'local'] as const
+const ORIGIN_FIELDS = [
+  'schema', 'kind', 'bindingStatus', 'binding', 'registrationId', 'registrationReceiptSha256',
+  'packetSha256', 'producerIdentityStatus', 'providerExecutionVerified', 'recordConsistencyVerified',
+] as const
+const ORIGIN_BINDING_FIELDS = [
+  'projectId', 'episodeId', 'frameId', 'assetId', 'takeId', 'assetSha256', 'uploadReceiptSha256',
+  'uploadRequestSha256', 'frameContentSha256', 'storyboardRevision',
+] as const
 const MEDIA_EXTENSIONS = new Map<string, string>([
   ['video/mp4', 'mp4'], ['video/quicktime', 'mov'], ['video/webm', 'webm'],
   ['audio/wav', 'wav'], ['audio/x-wav', 'wav'], ['audio/mpeg', 'mp3'],
@@ -114,11 +123,11 @@ function rejectPrivateData(value: unknown, field = 'response'): void {
   }
 }
 
-function media(value: unknown, field: string): YimengEditorialHandoffMedia {
+function media(value: unknown, field: string, v2 = false): YimengEditorialHandoffMedia {
   const item = exact(value, [
     'assetId', 'assetRevision', 'sha256', 'size', 'recordedOutputSha256', 'materializationStatus', 'outputBindingStatus',
     'mimeType', 'containerTypeStatus', 'durationSec', 'fps', 'width', 'height', 'aspectRatio', 'selectionStatus',
-    'qualityStatus', 'lineageComplete', 'packagePath',
+    'qualityStatus', 'lineageComplete', 'packagePath', ...(v2 ? ['source', 'origin'] : []),
   ], field)
   const width = positiveFinite(item.width, `${field}.width`, true)
   const height = positiveFinite(item.height, `${field}.height`, true)
@@ -167,7 +176,56 @@ function media(value: unknown, field: string): YimengEditorialHandoffMedia {
     selectionStatus: 'Selected',
     qualityStatus: qualityStatus as YimengEditorialHandoffMedia['qualityStatus'],
     lineageComplete: item.lineageComplete, packagePath: declaredPackagePath,
+    ...(v2 ? { source: item.source as NonNullable<YimengEditorialHandoffMedia['source']>, origin: item.origin as NonNullable<YimengEditorialHandoffMedia['origin']> } : {}),
   }
+}
+
+function externalOrigin(
+  value: unknown,
+  media: YimengEditorialHandoffMedia,
+  coordinate: {
+    readonly projectId: string
+    readonly episodeId: string
+    readonly frameId: string
+    readonly frameContentSha256: string
+    readonly storyboardRevision: number
+  },
+): NonNullable<YimengEditorialHandoffMedia['origin']> | null {
+  if (value === null) return null
+  const origin = exact(value, ORIGIN_FIELDS, 'source.shots[].selectedTake.origin')
+  const binding = exact(origin.binding, ORIGIN_BINDING_FIELDS, 'source.shots[].selectedTake.origin.binding')
+  if (origin.schema !== 'jason.qingmu-external-video-origin.v1' || origin.kind !== 'external_saved'
+    || (origin.bindingStatus !== 'current' && origin.bindingStatus !== 'stale')
+    || origin.producerIdentityStatus !== 'unknown' || origin.providerExecutionVerified !== false
+    || origin.recordConsistencyVerified !== false || media.source !== 'local' || media.sha256 === null
+    || media.lineageComplete !== false) throw new Error('editorial handoff: external origin is invalid')
+  const normalized = {
+    schema: 'jason.qingmu-external-video-origin.v1' as const, kind: 'external_saved' as const,
+    bindingStatus: origin.bindingStatus as 'current' | 'stale',
+    binding: {
+      projectId: text(binding.projectId, 'origin.binding.projectId') as string,
+      episodeId: text(binding.episodeId, 'origin.binding.episodeId') as string,
+      frameId: text(binding.frameId, 'origin.binding.frameId') as string,
+      assetId: text(binding.assetId, 'origin.binding.assetId') as string,
+      takeId: text(binding.takeId, 'origin.binding.takeId') as string,
+      assetSha256: sha(binding.assetSha256, 'origin.binding.assetSha256'),
+      uploadReceiptSha256: sha(binding.uploadReceiptSha256, 'origin.binding.uploadReceiptSha256'),
+      uploadRequestSha256: sha(binding.uploadRequestSha256, 'origin.binding.uploadRequestSha256'),
+      frameContentSha256: sha(binding.frameContentSha256, 'origin.binding.frameContentSha256'),
+      storyboardRevision: count(binding.storyboardRevision, 'origin.binding.storyboardRevision'),
+    },
+    registrationId: text(origin.registrationId, 'origin.registrationId') as string,
+    registrationReceiptSha256: sha(origin.registrationReceiptSha256, 'origin.registrationReceiptSha256'),
+    packetSha256: sha(origin.packetSha256, 'origin.packetSha256'), producerIdentityStatus: 'unknown' as const,
+    providerExecutionVerified: false as const, recordConsistencyVerified: false as const,
+  }
+  const current = normalized.binding.frameContentSha256 === coordinate.frameContentSha256
+    && normalized.binding.storyboardRevision === coordinate.storyboardRevision
+  if (normalized.binding.projectId !== coordinate.projectId || normalized.binding.episodeId !== coordinate.episodeId
+    || normalized.binding.frameId !== coordinate.frameId || normalized.binding.assetId !== media.assetId
+    || normalized.binding.takeId !== media.assetId || normalized.binding.assetSha256 !== media.sha256
+    || (normalized.bindingStatus === 'current') !== current) throw new Error('editorial handoff: external origin binding is invalid')
+  return normalized
 }
 
 function audioMedia(value: unknown, field: string): YimengEditorialHandoffAudio {
@@ -275,6 +333,7 @@ function expectedShotBlockers(
   audioScopeStatus: 'valid' | 'cross_scope',
   qc: YimengEpisodeEvidenceQcRecords | null,
   approval: YimengEpisodeEvidenceLifecycleRecords | null,
+  audioStatus: 'available' | 'embedded' | 'unavailable' = 'unavailable',
 ): readonly string[] {
   const result: string[] = []
   if (sceneId === null) result.push('editorial_handoff_scene_missing')
@@ -294,18 +353,25 @@ function expectedShotBlockers(
     if (selectedTake.containerTypeStatus === 'mismatch') {
       result.push('editorial_handoff_selected_media_type_mismatch')
     }
-    if (!selectedTake.lineageComplete) result.push('editorial_handoff_selected_take_lineage_incomplete')
+    const externalLocal = selectedTake.source === 'local'
+    if (externalLocal && selectedTake.origin?.bindingStatus !== 'current') {
+      result.push('editorial_handoff_external_source_invalid')
+    }
+    if (!externalLocal && !selectedTake.lineageComplete) result.push('editorial_handoff_selected_take_lineage_incomplete')
     if (selectedTake.mimeType === null || selectedTake.durationSec === null || selectedTake.fps === null
       || selectedTake.width === null || selectedTake.height === null || selectedTake.aspectRatio === null
       || selectedTake.size === null || selectedTake.packagePath === null) {
       result.push('editorial_handoff_selected_media_metadata_missing')
     }
-    if (selectedTake.qualityStatus !== 'passed') {
+    if ((externalLocal && selectedTake.qualityStatus !== 'pending')
+      || (!externalLocal && selectedTake.qualityStatus !== 'passed')) {
       result.push('editorial_handoff_selected_take_qc_not_passed')
     }
   }
   if (audioScopeStatus === 'cross_scope') {
     result.push('editorial_handoff_selected_audio_scope_invalid')
+  } else if (audioStatus === 'embedded') {
+    // A current local MP4 supplies its own original audio stream.
   } else if (audio === null) {
     result.push(audioCandidateCount === 0
       ? 'editorial_handoff_selected_audio_missing'
@@ -363,6 +429,7 @@ function shot(
   digest: Digest,
   previousFrameNo: number,
   scenes: ReadonlyMap<string, YimengEditorialHandoffScene>,
+  v2: boolean,
 ): YimengEditorialHandoffShot {
   const item = exact(value, [
     'frameId', 'frameNo', 'sceneId', 'title', 'frameContentSha256', 'stackSnapshotSha256',
@@ -370,8 +437,9 @@ function shot(
   ], 'source.shots[]')
   const frameNo = count(item.frameNo, 'source.shots[].frameNo')
   if (frameNo < 1 || frameNo <= previousFrameNo) throw new Error('editorial handoff: shot order is invalid')
-  const audioBinding = exact(item.audio, ['status', 'scopeStatus', 'candidateCount', 'asset'], 'source.shots[].audio')
-  if (!['available', 'unavailable'].includes(audioBinding.status as string)) {
+  const audioBinding = exact(item.audio, ['status', 'scopeStatus', 'candidateCount', 'asset', ...(v2 ? ['embeddedSource'] : [])], 'source.shots[].audio')
+  if (!['available', 'embedded', 'unavailable'].includes(audioBinding.status as string)
+    || (!v2 && audioBinding.status === 'embedded')) {
     throw new Error('editorial handoff: audio authority is invalid')
   }
   if (!['valid', 'cross_scope'].includes(audioBinding.scopeStatus as string)) {
@@ -390,7 +458,7 @@ function shot(
     throw new Error('editorial handoff: audio candidate count is invalid')
   }
   if ((audioBinding.status === 'available') !== (audio !== null && expectedShotBlockers(
-    sceneId, null, audio, audioCandidateCount, audioScopeStatus, null, null,
+    sceneId, null, audio, audioCandidateCount, audioScopeStatus, null, null, audioBinding.status as 'available' | 'embedded' | 'unavailable',
   ).every(code => !code.startsWith('editorial_handoff_selected_audio_')))) {
     throw new Error('editorial handoff: audio status is invalid')
   }
@@ -401,7 +469,15 @@ function shot(
   if (!isDeepStrictEqual(comments.versions, review.versions)) {
     throw new Error('editorial handoff: comment and review Take subjects disagree')
   }
-  const selectedTake = item.selectedTake === null ? null : media(item.selectedTake, 'source.shots[].selectedTake')
+  const selectedTake = item.selectedTake === null ? null : media(item.selectedTake, 'source.shots[].selectedTake', v2)
+  if (selectedTake !== null && v2) {
+    if (!TAKE_SOURCES.includes(selectedTake.source as typeof TAKE_SOURCES[number])) {
+      throw new Error('editorial handoff: selected Take source is invalid')
+    }
+    if (selectedTake.source !== 'local' && selectedTake.origin !== null) {
+      throw new Error('editorial handoff: generated Take origin must be null')
+    }
+  }
   if (selectedTake !== null) {
     const subject = comments.versions.find(entry => entry.takeSubject.takeId === selectedTake.assetId)?.takeSubject
     const durationMillis = selectedTake.durationSec === null ? null : selectedTake.durationSec * 1000
@@ -415,6 +491,17 @@ function shot(
     if ((subject === undefined && canonicalSubjectRequired) || subjectMismatch) {
       throw new Error('editorial handoff: selected Take does not match the canonical feed')
     }
+    if (v2) {
+      if (subject === undefined) throw new Error('editorial handoff: v2 selected Take subject is missing')
+      const origin = externalOrigin(selectedTake.origin, selectedTake, {
+        ...request, frameId, frameContentSha256: sha(item.frameContentSha256, 'source.shots[].frameContentSha256'),
+        storyboardRevision: subject.storyboardRevision,
+      })
+      if ((selectedTake.source === 'local') !== (origin !== null)) {
+        throw new Error('editorial handoff: selected Take origin is invalid')
+      }
+      Object.assign(selectedTake, { origin })
+    }
   }
   const qc = item.qc === null ? null
     : immutableRecords(item.qc, 'jason.qingmu-take-qc-records.v1', 'source.shots[].qc', coordinate, digest)
@@ -427,6 +514,8 @@ function shot(
       && subject.frameContentSha256 === item.frameContentSha256
       && subject.takeId === selectedTake.assetId && subject.versionOrdinal === selectedTake.assetRevision
       && subject.outputSha256 === selectedTake.sha256 && subject.selectionStatus === 'Selected'
+      && (selectedTake.source !== 'local' || (subject.schema === 'jason.qingmu-take-acceptance-subject.v2'
+        && isDeepStrictEqual(subject.origin, selectedTake.origin)))
   })
   if (qc !== null && qc.currentBinding !== (currentQc === undefined ? 'not_current' : 'current')) {
     throw new Error('editorial handoff: QC current binding is invalid')
@@ -443,9 +532,29 @@ function shot(
   if (approval !== null && approval.currentBinding !== (approvalCurrent ? 'current' : 'not_current')) {
     throw new Error('editorial handoff: approval current binding is invalid')
   }
+  const embeddedSource = (() => {
+    if (!v2) return undefined
+    if (audioBinding.embeddedSource === null) return null
+    const embedded = exact(audioBinding.embeddedSource, ['assetId', 'sha256', 'packagePath', 'codecName', 'channels', 'sampleRate'], 'source.shots[].audio.embeddedSource')
+    return { assetId: text(embedded.assetId, 'embeddedSource.assetId') as string,
+      sha256: sha(embedded.sha256, 'embeddedSource.sha256'), packagePath: text(embedded.packagePath, 'embeddedSource.packagePath') as string,
+      codecName: text(embedded.codecName, 'embeddedSource.codecName') as string,
+      channels: positiveCount(embedded.channels, 'embeddedSource.channels'), sampleRate: positiveCount(embedded.sampleRate, 'embeddedSource.sampleRate') }
+  })()
+  if (audioBinding.status === 'embedded') {
+    if (!v2 || audio !== null || audioCandidateCount !== 0 || audioScopeStatus !== 'valid'
+      || selectedTake?.source !== 'local' || selectedTake.origin?.bindingStatus !== 'current'
+      || embeddedSource === null || embeddedSource === undefined || selectedTake.sha256 === null
+      || selectedTake.packagePath === null || embeddedSource.assetId !== selectedTake.assetId
+      || embeddedSource.sha256 !== selectedTake.sha256 || embeddedSource.packagePath !== selectedTake.packagePath) {
+      throw new Error('editorial handoff: embedded audio binding is invalid')
+    }
+  } else if (embeddedSource !== undefined && embeddedSource !== null) {
+    throw new Error('editorial handoff: unexpected embedded audio source')
+  }
   const blockers = codes(item.blockers, 'source.shots[].blockers')
   if (!isDeepStrictEqual(blockers, expectedShotBlockers(
-    sceneId, selectedTake, audio, audioCandidateCount, audioScopeStatus, qc, approval,
+    sceneId, selectedTake, audio, audioCandidateCount, audioScopeStatus, qc, approval, audioBinding.status as 'available' | 'embedded' | 'unavailable',
   ))) {
     throw new Error('editorial handoff: shot blockers do not match normalized source facts')
   }
@@ -462,6 +571,7 @@ function shot(
       scopeStatus: audioScopeStatus,
       candidateCount: audioCandidateCount,
       asset: audio,
+      ...(v2 ? { embeddedSource: embeddedSource ?? null } : {}),
     },
     comments,
     review,
@@ -490,7 +600,8 @@ export function normalizeEditorialHandoff(
     'yimengEpisodeReleaseReady', 'readOnly', 'providerCalls', 'businessMutations',
     'projectionSha256',
   ], 'response')
-  if (root.schema !== 'jason.qingmu-editorial-handoff-draft.v1'
+  const v2 = root.schema === 'jason.qingmu-editorial-handoff-draft.v2'
+  if ((!v2 && root.schema !== 'jason.qingmu-editorial-handoff-draft.v1')
     || root.projectId !== request.projectId || root.episodeId !== request.episodeId
     || root.aokiVideoProductionHandoffReady !== false || root.yimengEpisodeReleaseReady !== false
     || root.readOnly !== true || root.providerCalls !== 0 || root.businessMutations !== 0) {
@@ -500,7 +611,7 @@ export function normalizeEditorialHandoff(
     'schema', 'projectId', 'episodeId', 'evidenceSourceSnapshotSha256',
     'verificationInputsSha256', 'scenes', 'shots', 'audioPolicy',
   ], 'source')
-  if (source.schema !== 'jason.qingmu-editorial-handoff-source.v1'
+  if (source.schema !== (v2 ? 'jason.qingmu-editorial-handoff-source.v2' : 'jason.qingmu-editorial-handoff-source.v1')
     || source.projectId !== request.projectId || source.episodeId !== request.episodeId
     || source.audioPolicy !== 'only_authoritatively_bound_assets'
     || !Array.isArray(source.scenes) || !Array.isArray(source.shots)) {
@@ -523,15 +634,18 @@ export function normalizeEditorialHandoff(
   const sceneMap = new Map(scenes.map(item => [item.sceneId, item]))
   let previous = 0
   const shots = source.shots.map((item) => {
-    const result = shot(item, request, digest, previous, sceneMap)
+    const result = shot(item, request, digest, previous, sceneMap, v2)
     previous = result.frameNo
     return result
   })
   if (new Set(shots.map(item => item.frameId)).size !== shots.length) {
     throw new Error('editorial handoff: shots are duplicated')
   }
+  if (v2 !== shots.some(item => item.selectedTake?.source === 'local')) {
+    throw new Error('editorial handoff: external-source schema is inconsistent')
+  }
   const normalizedSource = {
-    schema: 'jason.qingmu-editorial-handoff-source.v1' as const,
+    schema: v2 ? 'jason.qingmu-editorial-handoff-source.v2' as const : 'jason.qingmu-editorial-handoff-source.v1' as const,
     projectId: request.projectId,
     episodeId: request.episodeId,
     evidenceSourceSnapshotSha256: sha(source.evidenceSourceSnapshotSha256, 'source.evidenceSourceSnapshotSha256'),
@@ -588,7 +702,7 @@ export function normalizeEditorialHandoff(
   }
   if (normalizedSummary.shotCount !== shots.length
     || normalizedSummary.selectedTakeCount !== shots.filter(item => item.selectedTake !== null).length
-    || normalizedSummary.authoritativeAudioCount !== shots.filter(item => item.audio.status === 'available').length
+    || normalizedSummary.authoritativeAudioCount !== shots.filter(item => item.audio.status === 'available' || item.audio.status === 'embedded').length
     || normalizedSummary.unresolvedCount !== unresolved.length
     || blockers.length !== unresolved.length
     || finite(summary.totalDurationSec, 'summary.totalDurationSec') !== normalizedSummary.totalDurationSec) {
@@ -615,7 +729,7 @@ export function normalizeEditorialHandoff(
   }
   const projectionSha256 = sha(root.projectionSha256, 'projectionSha256')
   const normalized = {
-    schema: 'jason.qingmu-editorial-handoff-draft.v1' as const,
+    schema: v2 ? 'jason.qingmu-editorial-handoff-draft.v2' as const : 'jason.qingmu-editorial-handoff-draft.v1' as const,
     authenticatedUserId: text(root.authenticatedUserId, 'authenticatedUserId') as string,
     ...request,
     source: normalizedSource,

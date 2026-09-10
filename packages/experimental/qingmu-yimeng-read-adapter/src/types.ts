@@ -737,6 +737,31 @@ export interface YimengTakePreviewResponse extends YimengTakeVersionRequest {
   readonly databaseWrites: 0
 }
 
+/** A saved external-video registration bound to one local Take rather than Provider execution. */
+export interface YimengExternalVideoOrigin {
+  readonly schema: 'jason.qingmu-external-video-origin.v1'
+  readonly kind: 'external_saved'
+  readonly bindingStatus: 'current' | 'stale'
+  readonly binding: {
+    readonly projectId: string
+    readonly episodeId: string
+    readonly frameId: string
+    readonly assetId: string
+    readonly takeId: string
+    readonly assetSha256: string
+    readonly uploadReceiptSha256: string
+    readonly uploadRequestSha256: string
+    readonly frameContentSha256: string
+    readonly storyboardRevision: number
+  }
+  readonly registrationId: string
+  readonly registrationReceiptSha256: string
+  readonly packetSha256: string
+  readonly producerIdentityStatus: 'unknown'
+  readonly providerExecutionVerified: false
+  readonly recordConsistencyVerified: false
+}
+
 /** One existing video asset projected as a Take version; no second Take identity is created. */
 export interface YimengTakeVersion {
   readonly takeId: string
@@ -766,11 +791,13 @@ export interface YimengTakeVersion {
   readonly inputHash: string | null
   readonly lineageComplete: boolean
   readonly canAttemptSelection: boolean
+  /** V1 omits this member. V2 supplies null or a strictly bound external registration. */
+  readonly origin?: YimengExternalVideoOrigin | null
 }
 
 /** Content-addressed current stack built from Yimeng assets and selection state. */
 export interface YimengTakeVersionStackSubject extends YimengTakeVersionRequest {
-  readonly schema: 'jason.qingmu-take-version-stack-subject.v1'
+  readonly schema: 'jason.qingmu-take-version-stack-subject.v1' | 'jason.qingmu-take-version-stack-subject.v2'
   readonly frameNo: number
   readonly storyboardRevision: number
   readonly frameContentSha256: string
@@ -781,7 +808,7 @@ export interface YimengTakeVersionStackSubject extends YimengTakeVersionRequest 
 
 /** Read-only stack contract; Selected remains separate from formal Approval. */
 export interface YimengTakeVersionStackResponse {
-  readonly schema: 'jason.qingmu-take-version-stack.v1'
+  readonly schema: 'jason.qingmu-take-version-stack.v1' | 'jason.qingmu-take-version-stack.v2'
   readonly subject: YimengTakeVersionStackSubject
   readonly stackSnapshotSha256: string
   readonly capabilities: {
@@ -877,6 +904,7 @@ export interface YimengTakeReviewRecommendation {
 
 /** One formal decision event. It records a decision without mutating Take state. */
 export interface YimengTakeHumanDecision {
+  readonly schema?: 'jason.qingmu-take-human-decision-record.v2'
   readonly decisionId: string
   readonly subjectType: 'shot_take'
   readonly subjectId: string
@@ -891,19 +919,28 @@ export interface YimengTakeHumanDecision {
   readonly eventId: string
   readonly decision: YimengTakeReviewAction
   readonly reason: string
-  readonly producerActorId: string
-  readonly producerNaturalPersonId: string
+  readonly producerActorId: string | null
+  readonly producerNaturalPersonId: string | null
   readonly participantNaturalPersonIds: readonly string[]
   readonly decidedAt: string
   readonly currentBinding: boolean
+  readonly origin?: YimengExternalVideoOrigin
 }
 
 /** Exact coordinates for the separate recommendation/decision authority feed. */
 export type YimengTakeReviewAuthorityRequest = YimengTakeVersionRequest
 
+/** The latest registered external origin for one local Take in a review feed. */
+export interface YimengTakeReviewCurrentOrigin {
+  readonly takeId: string
+  readonly origin: YimengExternalVideoOrigin | null
+}
+
 /** Strict read feed; recommendation authority and formal decision authority stay separate. */
 export interface YimengTakeReviewAuthorityFeedResponse extends YimengTakeReviewAuthorityRequest {
-  readonly schema: 'jason.qingmu-take-review-authority-feed.v1'
+  readonly schema: 'jason.qingmu-take-review-authority-feed.v1' | 'jason.qingmu-take-review-authority-feed.v2'
+  /** Present only in v2, once the current stack contains a local Take. */
+  readonly currentOrigins?: readonly YimengTakeReviewCurrentOrigin[]
   readonly capabilities: {
     readonly canReview: boolean
     readonly canDecide: boolean
@@ -1178,6 +1215,10 @@ export interface YimengEditorialHandoffMedia {
   readonly qualityStatus: 'pending' | 'passed' | 'failed'
   readonly lineageComplete: boolean
   readonly packagePath: string | null
+  /** Present on every selected Take in a v2 external-source handoff. */
+  readonly source?: YimengTakeVersion['source']
+  /** External provenance, or null for a generated Take in the same v2 projection. */
+  readonly origin?: YimengExternalVideoOrigin | null
 }
 
 /** Selected dialogue audio accepted by Writer as an editorial source. */
@@ -1219,10 +1260,19 @@ export interface YimengEditorialHandoffShot extends YimengJsonObject {
   readonly stackSnapshotSha256: string
   readonly selectedTake: YimengEditorialHandoffMedia | null
   readonly audio: {
-    readonly status: 'available' | 'unavailable'
+    readonly status: 'available' | 'embedded' | 'unavailable'
     readonly scopeStatus: 'valid' | 'cross_scope'
     readonly candidateCount: number
     readonly asset: YimengEditorialHandoffAudio | null
+    /** Native audio stream in the selected local MP4; never a synthesized WAV. */
+    readonly embeddedSource?: {
+      readonly assetId: string
+      readonly sha256: string
+      readonly packagePath: string
+      readonly codecName: string
+      readonly channels: number
+      readonly sampleRate: number
+    } | null
   }
   readonly comments: YimengTakeCommentFeedResponse
   readonly review: YimengTakeReviewAuthorityFeedResponse
@@ -1241,9 +1291,9 @@ export interface YimengEditorialHandoffScene extends YimengJsonObject {
 
 /** Read-only, SHA-bound handoff draft; false readiness flags are never approvals. */
 export interface YimengEditorialHandoffResponse extends YimengEpisodeEvidenceRequest {
-  readonly schema: 'jason.qingmu-editorial-handoff-draft.v1'
+  readonly schema: 'jason.qingmu-editorial-handoff-draft.v1' | 'jason.qingmu-editorial-handoff-draft.v2'
   readonly source: YimengJsonObject & {
-    readonly schema: 'jason.qingmu-editorial-handoff-source.v1'
+    readonly schema: 'jason.qingmu-editorial-handoff-source.v1' | 'jason.qingmu-editorial-handoff-source.v2'
     readonly projectId: string
     readonly episodeId: string
     readonly evidenceSourceSnapshotSha256: string
@@ -1336,7 +1386,7 @@ export type YimengTakeAcceptanceRequest = YimengTakeVersionRequest
 
 /** Selected Take identity bound to the current storyboard and generation lineage. */
 export interface YimengTakeAcceptanceSubject extends YimengTakeAcceptanceRequest {
-  readonly schema: 'jason.qingmu-take-acceptance-subject.v1'
+  readonly schema: 'jason.qingmu-take-acceptance-subject.v1' | 'jason.qingmu-take-acceptance-subject.v2'
   readonly frameNo: number
   readonly storyboardRevision: number
   readonly frameContentSha256: string
@@ -1352,6 +1402,8 @@ export interface YimengTakeAcceptanceSubject extends YimengTakeAcceptanceRequest
   readonly model: string | null
   readonly inputHash: string | null
   readonly submitId: string | null
+  /** V2 external-source evidence. V1 omits this member. */
+  readonly origin?: YimengExternalVideoOrigin
 }
 
 /** Provider outbox and downloaded-media evidence without URLs or raw responses. */
@@ -1422,8 +1474,8 @@ export interface YimengTakeQualityCheck {
 
 /** Required macro/micro check set and its fail-closed derived state. */
 export interface YimengTakeCandidateQuality {
-  readonly schema: 'jason.qingmu-take-candidate-quality-evidence.v1'
-  readonly status: 'PASS' | 'BLOCKED'
+  readonly schema: 'jason.qingmu-take-candidate-quality-evidence.v1' | 'jason.qingmu-take-candidate-quality-evidence.v2'
+  readonly status: 'PASS' | 'BLOCKED' | 'NOT_APPLICABLE'
   readonly requiredCheckTypes: readonly string[]
   readonly checks: readonly YimengTakeQualityCheck[]
   readonly missingCheckTypes: readonly string[]
@@ -1440,7 +1492,7 @@ export interface YimengTakeAcceptanceEvidence {
 
 /** Read-only selected Take evidence; it does not grant Gate B or human approval. */
 export interface YimengTakeAcceptanceResponse {
-  readonly schema: 'jason.qingmu-take-acceptance-evidence.v1'
+  readonly schema: 'jason.qingmu-take-acceptance-evidence.v1' | 'jason.qingmu-take-acceptance-evidence.v2'
   readonly evidence: YimengTakeAcceptanceEvidence
   readonly evidenceSnapshotSha256: string
   readonly productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION'

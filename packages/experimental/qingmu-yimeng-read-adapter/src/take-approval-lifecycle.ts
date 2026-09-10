@@ -10,6 +10,7 @@ import type {
   YimengTakeApprovalLifecycleTransition,
 } from './types.ts'
 import { parseTakeVersionReadRequest } from './take-versions.ts'
+import { normalizeTakeAcceptanceSubject } from './take-acceptance.ts'
 
 type Digest = (value: unknown, field: string) => string
 type JsonObject = Record<string, unknown>
@@ -117,6 +118,10 @@ function subject(
   request: YimengTakeApprovalLifecycleRequest,
   field: string,
 ): YimengTakeAcceptanceSubject {
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)
+    && (value as JsonObject).schema === 'jason.qingmu-take-acceptance-subject.v2') {
+    return normalizeTakeAcceptanceSubject(value, request)
+  }
   const item = exact(value, SUBJECT_FIELDS, field)
   if (item.schema !== 'jason.qingmu-take-acceptance-subject.v1'
     || item.projectId !== request.projectId || item.episodeId !== request.episodeId
@@ -148,7 +153,6 @@ function subject(
 function decision(
   value: unknown,
   take: YimengTakeAcceptanceSubject,
-  takeSha: string,
   field: string,
 ): YimengTakeApprovalLifecycleDecision | null {
   if (value === null) return null
@@ -166,8 +170,12 @@ function decision(
     actorId: text(item.actorId, `${field}.actorId`),
     actorNaturalPersonId: text(item.actorNaturalPersonId, `${field}.actorNaturalPersonId`),
   }
-  if (result.takeId !== take.takeId || result.takeVersionOrdinal !== take.versionOrdinal
-    || result.takeSubjectSha256 !== takeSha) {
+  // A HumanDecision is content-bound to its comment subject, while this feed's current
+  // Take is an acceptance subject. Those are distinct contracts for both v1 generated
+  // and v2 external takes, so their valid SHA-256 values must not be compared here.
+  // The Writer remains authoritative for their complete binding; this adapter verifies
+  // the digest format plus the shared immutable take identity and version.
+  if (result.takeId !== take.takeId || result.takeVersionOrdinal !== take.versionOrdinal) {
     throw new Error(`take approval lifecycle: ${field} Take binding mismatch`)
   }
   return result
@@ -322,7 +330,7 @@ export function normalizeTakeApprovalLifecycleSource(
     schema: 'jason.qingmu-take-approval-lifecycle-source.v1', ...request,
     currentTake: { takeSubject, takeSubjectSha256 },
     currentDecision: decision(
-      root.currentDecision, takeSubject, takeSubjectSha256, 'source.currentDecision',
+      root.currentDecision, takeSubject, 'source.currentDecision',
     ),
     currentAssessment: assessment(
       root.currentAssessment, takeSubject, takeSubjectSha256, 'source.currentAssessment',

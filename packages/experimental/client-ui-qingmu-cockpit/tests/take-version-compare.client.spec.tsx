@@ -15,6 +15,7 @@ import {
 import { zh, type QingmuCockpitKey } from '../src/client/locales.ts'
 import {
   takeVersionSha, takeVersionStackFixture,
+  takeVersionStackV2Fixture,
 } from '../../qingmu-yimeng-read-adapter/tests/take-version-fixture.ts'
 import { takeAcceptanceFixture } from '../../qingmu-yimeng-read-adapter/tests/take-acceptance-fixture.ts'
 import { continuitySource } from './fixtures/continuity-method.client.ts'
@@ -293,6 +294,25 @@ describe('Take version comparison and selection', () => {
     expect(within(screen.getByRole('region', { name: zh.takeVersionCompare })).getAllByRole('article')).toHaveLength(2)
   })
 
+  it('shows a current saved local source as selectable without selecting it automatically', async () => {
+    const base = takeVersionStackV2Fixture(scope())
+    const source = continuitySource()
+    const revision = source.director.shotRelations.storyboardRevision.episodeRevision
+    const frameNo = source.director.shotRelations.shots.find(shot => shot.shotId === 'frame-a')?.frameNo
+    if (frameNo === undefined) throw new Error('fixture frame missing')
+    const versions = base.subject.versions.map(version => version.origin === undefined || version.origin === null ? version : ({
+      ...version, origin: { ...version.origin, binding: { ...version.origin.binding, storyboardRevision: revision } },
+    }))
+    const subject = { ...base.subject, frameNo, storyboardRevision: revision, versions }
+    const feed = { ...base, subject, stackSnapshotSha256: takeVersionSha(subject) }
+    const port = makePort(feed)
+    render(<TakeVersionCompareView {...props(port)} />)
+    await screen.findByText('来源已登记，可选择后审看。选择不等于批准。')
+    const button = await screen.findByRole('button', { name: zh.takeVersionSelectButton })
+    expect((button as HTMLButtonElement).disabled).toBe(false)
+    expect(port.selectTakeVersion).not.toHaveBeenCalled()
+  })
+
   it('stores recovery coordinates before one POST, clears on receipt, and rereads Yimeng', async () => {
     const first = stack()
     const second = stack('asset-take-2')
@@ -386,7 +406,7 @@ describe('Take version comparison and selection', () => {
     expect(port.selectTakeVersion).not.toHaveBeenCalled()
   })
 
-  it('fails closed in the UI when an upstream candidate claims selectable with incomplete lineage', async () => {
+  it('uses the normalized server eligibility flag without adding a client lineage rule', async () => {
     const base = stack()
     const versions = base.subject.versions.map(version => version.takeId === 'asset-take-2'
       ? { ...version, providerTaskId: null, lineageComplete: false, canAttemptSelection: true }
@@ -396,9 +416,9 @@ describe('Take version comparison and selection', () => {
     render(<TakeVersionCompareView {...props(port)} />)
 
     const button = await screen.findByRole('button', { name: zh.takeVersionSelectButton })
-    expect(button.hasAttribute('disabled')).toBe(true)
+    expect(button.hasAttribute('disabled')).toBe(false)
     fireEvent.click(button)
-    expect(port.selectTakeVersion).not.toHaveBeenCalled()
+    await waitFor(() => expect(port.selectTakeVersion).toHaveBeenCalledOnce())
   })
 
   it('blocks selection for an invalid marker until an explicit local-only discard', async () => {

@@ -66,6 +66,11 @@ function usable(version: YimengTakeVersion | undefined): version is YimengTakeVe
 function isLocalVideo(version: YimengTakeVersion): boolean {
   return version.source === 'local'
 }
+function localVideoSourceMessage(version: YimengTakeVersion): string {
+  if (version.origin?.bindingStatus === 'current') return '来源已登记，可选择后审看'
+  if (version.origin?.bindingStatus === 'stale') return '来源登记已失效，请按当前镜头重新登记'
+  return '来源待登记，暂不可采用'
+}
 function hasLocalVideoPort(port: Props['port']): port is Props['port'] & {
   uploadLocalVideoCandidate: NonNullable<QingmuYimengPort['uploadLocalVideoCandidate']>
   recoverLocalVideoCandidate: NonNullable<QingmuYimengPort['recoverLocalVideoCandidate']>
@@ -334,7 +339,7 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
   const sourcePanelVisible = !firstFrameOpen && !historyOpen && usable(browsed) && isLocalVideo(browsed)
     && hasLocalVideoSourcePort(port)
   const state = testState ?? statusOf(visibleStack, browsed, load)
-  const primary = usable(browsed) && browsed.canAttemptSelection && browsed.lineageComplete
+  const primary = usable(browsed) && browsed.canAttemptSelection
     && !visibleStack?.subject.selectedTakeId && visibleStack?.capabilities.canSelect === true
     && !browsed.isSelected && load === 'ready'
   const heroUrl = localHeroUrl(heroFrame?.browserUrl, heroFrame?.assetId)
@@ -459,7 +464,7 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
         {sourcePanelVisible && <LocalVideoSourcePanel
           key={`${projectId}:${episodeId}:${current.shotId}:${browsed.takeId}`}
           scope={{ projectId, episodeId, frameId: current.shotId, assetId: browsed.takeId }} port={port} />}
-        <div className={css.candidates} aria-label="候选画面">{(!historyOpen && !firstFrameOpen ? versions : []).map(version => <button className={isLocalVideo(version) ? css.localCandidate : undefined} key={version.takeId} type="button" aria-pressed={!firstFrameOpen && !historyOpen && version.takeId === browseId} onClick={() => { showMediaPane('takes'); setBrowseId(version.takeId); if (version.takeId !== browseId) setMediaUrl(undefined) }}>{usable(version) ? <TakeThumbnail request={{ projectId, episodeId, frameId: current.shotId, takeId: version.takeId, expectedOutputSha256: version.outputSha256 }} load={port.takePreview} className={css.candidateThumb} alt={`视频候选 v${version.versionOrdinal} · 视频第一帧`} /> : <span className={css.videoIcon}>素材尚不可用</span>}<span>{isLocalVideo(version) ? '本地导入视频' : `视频候选 v${version.versionOrdinal}`}</span>{isLocalVideo(version) && version.originalFileName && <small className={css.localFileName}>{version.originalFileName}</small>}<strong>{isLocalVideo(version) ? '本地导入，来源待核实，暂不可采用' : version.isSelected ? '当前选用' : version.qualityStatus === 'failed' ? '检查未通过' : version.qualityStatus === 'passed' ? '待你审看' : '等待检查'}</strong></button>)}
+        <div className={css.candidates} aria-label="候选画面">{(!historyOpen && !firstFrameOpen ? versions : []).map(version => <button className={isLocalVideo(version) ? css.localCandidate : undefined} key={version.takeId} type="button" aria-pressed={!firstFrameOpen && !historyOpen && version.takeId === browseId} onClick={() => { showMediaPane('takes'); setBrowseId(version.takeId); if (version.takeId !== browseId) setMediaUrl(undefined) }}>{usable(version) ? <TakeThumbnail request={{ projectId, episodeId, frameId: current.shotId, takeId: version.takeId, expectedOutputSha256: version.outputSha256 }} load={port.takePreview} className={css.candidateThumb} alt={`视频候选 v${version.versionOrdinal} · 视频第一帧`} /> : <span className={css.videoIcon}>素材尚不可用</span>}<span>{isLocalVideo(version) ? '本地导入视频' : `视频候选 v${version.versionOrdinal}`}</span>{isLocalVideo(version) && version.originalFileName && <small className={css.localFileName}>{version.originalFileName}</small>}<strong>{isLocalVideo(version) ? localVideoSourceMessage(version) : version.isSelected ? '当前选用' : version.qualityStatus === 'failed' ? '检查未通过' : version.qualityStatus === 'passed' ? '待你审看' : '等待检查'}</strong></button>)}
           {!firstFrameOpen && !historyOpen && imageShotCandidates.slice().reverse().map(candidate =>
             <div key={candidate.assetId} className={css.candidateCard}>
               <button type="button" aria-pressed={browsedImage?.assetId === candidate.assetId} onClick={() => { setBrowseId(''); setImageBrowse({ key: mediaPaneKey, assetId: candidate.assetId }) }}>

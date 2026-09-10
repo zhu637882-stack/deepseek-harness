@@ -20,6 +20,14 @@ const SUBJECT_FIELDS = [
   'selectionStatus', 'outputSha256', 'taskId', 'capability', 'routeKey', 'provider',
   'model', 'inputHash', 'submitId',
 ] as const
+const ORIGIN_FIELDS = [
+  'schema', 'kind', 'bindingStatus', 'binding', 'registrationId', 'registrationReceiptSha256',
+  'packetSha256', 'producerIdentityStatus', 'providerExecutionVerified', 'recordConsistencyVerified',
+] as const
+const ORIGIN_BINDING_FIELDS = [
+  'projectId', 'episodeId', 'frameId', 'assetId', 'takeId', 'assetSha256', 'uploadReceiptSha256',
+  'uploadRequestSha256', 'frameContentSha256', 'storyboardRevision',
+] as const
 const PROVIDER_FIELDS = [
   'schema', 'status', 'evidenceMode', 'actualProviderReceiptVerified',
   'requestDryRun', 'taskRequestHashVerified', 'outboxState', 'dispatchEpoch',
@@ -136,15 +144,17 @@ export function parseTakeAcceptanceReadRequest(payload: unknown): YimengTakeAcce
   return parseTakeVersionReadRequest(payload)
 }
 
-function normalizeSubject(value: unknown, request: YimengTakeAcceptanceRequest): YimengTakeAcceptanceSubject {
-  const item = exact(value, SUBJECT_FIELDS, 'evidence.subject')
-  if (item.schema !== 'jason.qingmu-take-acceptance-subject.v1'
+export function normalizeTakeAcceptanceSubject(value: unknown, request: YimengTakeAcceptanceRequest): YimengTakeAcceptanceSubject {
+  const raw = typeof value === 'object' && value !== null && !Array.isArray(value) ? value as JsonObject : undefined
+  const v2 = raw?.schema === 'jason.qingmu-take-acceptance-subject.v2'
+  const item = exact(value, [...SUBJECT_FIELDS, ...(v2 ? ['origin'] : [])], 'evidence.subject')
+  if ((item.schema !== 'jason.qingmu-take-acceptance-subject.v1' && !v2)
     || item.projectId !== request.projectId || item.episodeId !== request.episodeId
     || item.frameId !== request.frameId || item.selectionStatus !== 'Selected') {
     throw new Error('take acceptance: subject mismatch')
   }
-  return {
-    schema: 'jason.qingmu-take-acceptance-subject.v1',
+  const result = {
+    schema: item.schema as YimengTakeAcceptanceSubject['schema'],
     ...request,
     frameNo: integer(item.frameNo, 'subject.frameNo', 1),
     storyboardRevision: integer(item.storyboardRevision, 'subject.storyboardRevision'),
@@ -152,7 +162,7 @@ function normalizeSubject(value: unknown, request: YimengTakeAcceptanceRequest):
     selectionRevision: integer(item.selectionRevision, 'subject.selectionRevision'),
     takeId: id(item.takeId, 'subject.takeId'),
     versionOrdinal: integer(item.versionOrdinal, 'subject.versionOrdinal', 1),
-    selectionStatus: 'Selected',
+    selectionStatus: 'Selected' as const,
     outputSha256: nullableSha(item.outputSha256, 'subject.outputSha256'),
     taskId: nullableId(item.taskId, 'subject.taskId'),
     capability: nullableText(item.capability, 'subject.capability'),
@@ -162,6 +172,45 @@ function normalizeSubject(value: unknown, request: YimengTakeAcceptanceRequest):
     inputHash: nullableSha(item.inputHash, 'subject.inputHash'),
     submitId: nullableId(item.submitId, 'subject.submitId'),
   }
+  if (!v2) return result
+  if (result.taskId !== null || result.capability !== null || result.routeKey !== null || result.provider !== null
+    || result.model !== null || result.inputHash !== null || result.submitId !== null || result.outputSha256 === null) {
+    throw new Error('take acceptance: external subject generation fields are invalid')
+  }
+  const origin = exact(item.origin, ORIGIN_FIELDS, 'subject.origin')
+  const binding = exact(origin.binding, ORIGIN_BINDING_FIELDS, 'subject.origin.binding')
+  if (origin.schema !== 'jason.qingmu-external-video-origin.v1' || origin.kind !== 'external_saved'
+    || (origin.bindingStatus !== 'current' && origin.bindingStatus !== 'stale')
+    || origin.producerIdentityStatus !== 'unknown' || origin.providerExecutionVerified !== false
+    || origin.recordConsistencyVerified !== false) throw new Error('take acceptance: external origin is invalid')
+  const normalizedOrigin = {
+    schema: 'jason.qingmu-external-video-origin.v1' as const, kind: 'external_saved' as const,
+    bindingStatus: origin.bindingStatus as 'current' | 'stale',
+    binding: {
+      projectId: id(binding.projectId, 'subject.origin.binding.projectId'),
+      episodeId: id(binding.episodeId, 'subject.origin.binding.episodeId'),
+      frameId: id(binding.frameId, 'subject.origin.binding.frameId'),
+      assetId: id(binding.assetId, 'subject.origin.binding.assetId'), takeId: id(binding.takeId, 'subject.origin.binding.takeId'),
+      assetSha256: sha(binding.assetSha256, 'subject.origin.binding.assetSha256'),
+      uploadReceiptSha256: sha(binding.uploadReceiptSha256, 'subject.origin.binding.uploadReceiptSha256'),
+      uploadRequestSha256: sha(binding.uploadRequestSha256, 'subject.origin.binding.uploadRequestSha256'),
+      frameContentSha256: sha(binding.frameContentSha256, 'subject.origin.binding.frameContentSha256'),
+      storyboardRevision: integer(binding.storyboardRevision, 'subject.origin.binding.storyboardRevision'),
+    },
+    registrationId: id(origin.registrationId, 'subject.origin.registrationId'),
+    registrationReceiptSha256: sha(origin.registrationReceiptSha256, 'subject.origin.registrationReceiptSha256'),
+    packetSha256: sha(origin.packetSha256, 'subject.origin.packetSha256'),
+    producerIdentityStatus: 'unknown' as const, providerExecutionVerified: false as const, recordConsistencyVerified: false as const,
+  }
+  const current = normalizedOrigin.binding.frameContentSha256 === result.frameContentSha256
+    && normalizedOrigin.binding.storyboardRevision === result.storyboardRevision
+  if (normalizedOrigin.binding.projectId !== result.projectId || normalizedOrigin.binding.episodeId !== result.episodeId
+    || normalizedOrigin.binding.frameId !== result.frameId || normalizedOrigin.binding.assetId !== result.takeId
+    || normalizedOrigin.binding.takeId !== result.takeId || normalizedOrigin.binding.assetSha256 !== result.outputSha256
+    || (normalizedOrigin.bindingStatus === 'current') !== current) {
+    throw new Error('take acceptance: external origin binding is invalid')
+  }
+  return { ...result, origin: normalizedOrigin }
 }
 
 function normalizeProvider(value: unknown, subject: YimengTakeAcceptanceSubject): YimengTakeProviderReceipt {
@@ -218,6 +267,11 @@ function normalizeProvider(value: unknown, subject: YimengTakeAcceptanceSubject)
     || ((receipt.status === 'missing' || receipt.status === 'invalid')
       && (receipt.evidenceMode !== 'unverified' || receipt.actualProviderReceiptVerified || receipt.blockers.length === 0))) {
     throw new Error('take acceptance: provider derived state is inconsistent')
+  }
+  if (subject.schema === 'jason.qingmu-take-acceptance-subject.v2'
+    && (receipt.status !== 'missing' || receipt.evidenceMode !== 'unverified'
+      || receipt.actualProviderReceiptVerified || receipt.taskRequestHashVerified)) {
+    throw new Error('take acceptance: external provider receipt cannot verify execution')
   }
   return receipt
 }
@@ -303,6 +357,10 @@ function normalizeTechnical(value: unknown, subject: YimengTakeAcceptanceSubject
   if ((item.status === 'PASS') !== passing || (media.sha256 !== null && media.sha256 !== subject.outputSha256)) {
     throw new Error('take acceptance: technical receipt derived state is inconsistent')
   }
+  if (subject.schema === 'jason.qingmu-take-acceptance-subject.v2'
+    && subject.origin?.bindingStatus === 'stale' && item.status !== 'BLOCKED') {
+    throw new Error('take acceptance: stale external source is blocked')
+  }
   return {
     schema: 'jason.qingmu-technical-video-receipt.v1',
     imagoReceiptSchema: 'IMAGO-V6-TechnicalVideoReceipt-v1',
@@ -316,8 +374,19 @@ function normalizeTechnical(value: unknown, subject: YimengTakeAcceptanceSubject
   }
 }
 
-function normalizeQuality(value: unknown): YimengTakeCandidateQuality {
+function normalizeQuality(value: unknown, subject: YimengTakeAcceptanceSubject): YimengTakeCandidateQuality {
   const item = exact(value, QUALITY_FIELDS, 'evidence.candidateQuality')
+  if (subject.schema === 'jason.qingmu-take-acceptance-subject.v2') {
+    if (item.schema !== 'jason.qingmu-take-candidate-quality-evidence.v2' || item.status !== 'NOT_APPLICABLE'
+      || ![item.requiredCheckTypes, item.checks, item.missingCheckTypes, item.failedOrStaleCheckTypes]
+        .every(entry => Array.isArray(entry) && entry.length === 0)) {
+      throw new Error('take acceptance: external candidate quality is invalid')
+    }
+    return {
+      schema: 'jason.qingmu-take-candidate-quality-evidence.v2', status: 'NOT_APPLICABLE',
+      requiredCheckTypes: [], checks: [], missingCheckTypes: [], failedOrStaleCheckTypes: [],
+    }
+  }
   if (item.schema !== 'jason.qingmu-take-candidate-quality-evidence.v1'
     || (item.status !== 'PASS' && item.status !== 'BLOCKED')) {
     throw new Error('take acceptance: candidate quality schema or status is invalid')
@@ -378,17 +447,21 @@ export function normalizeTakeAcceptance(
   digest: Digest,
 ): YimengTakeAcceptanceResponse {
   const root = exact(value, ['schema', 'evidence', 'evidenceSnapshotSha256', 'productionStatus', 'boundaries'], 'feed')
-  if (root.schema !== 'jason.qingmu-take-acceptance-evidence.v1'
+  if ((root.schema !== 'jason.qingmu-take-acceptance-evidence.v1' && root.schema !== 'jason.qingmu-take-acceptance-evidence.v2')
     || root.productionStatus !== 'UNVERIFIED_FOR_PAID_PRODUCTION') {
     throw new Error('take acceptance: feed schema or production status is invalid')
   }
   const evidenceValue = exact(root.evidence, ['subject', 'providerReceipt', 'technicalReceipt', 'candidateQuality'], 'evidence')
-  const subject = normalizeSubject(evidenceValue.subject, request)
+  const subject = normalizeTakeAcceptanceSubject(evidenceValue.subject, request)
+  if ((root.schema === 'jason.qingmu-take-acceptance-evidence.v2')
+    !== (subject.schema === 'jason.qingmu-take-acceptance-subject.v2')) {
+    throw new Error('take acceptance: feed and subject schema mismatch')
+  }
   const evidence: YimengTakeAcceptanceEvidence = {
     subject,
     providerReceipt: normalizeProvider(evidenceValue.providerReceipt, subject),
     technicalReceipt: normalizeTechnical(evidenceValue.technicalReceipt, subject),
-    candidateQuality: normalizeQuality(evidenceValue.candidateQuality),
+    candidateQuality: normalizeQuality(evidenceValue.candidateQuality, subject),
   }
   const evidenceSnapshotSha256 = sha(root.evidenceSnapshotSha256, 'evidenceSnapshotSha256')
   const boundaries = exact(root.boundaries, [
@@ -405,7 +478,7 @@ export function normalizeTakeAcceptance(
     throw new Error('take acceptance: hash or authority boundary mismatch')
   }
   return {
-    schema: 'jason.qingmu-take-acceptance-evidence.v1',
+    schema: root.schema,
     evidence,
     evidenceSnapshotSha256,
     productionStatus: 'UNVERIFIED_FOR_PAID_PRODUCTION',

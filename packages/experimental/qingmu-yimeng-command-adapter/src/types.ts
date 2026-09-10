@@ -1451,6 +1451,31 @@ export interface YimengSelectTakeVersionRequest {
 /** GET-only receipt lookup for an uncertain selection command. */
 export type YimengRecoverTakeVersionSelectionRequest = YimengSelectTakeVersionRequest
 
+/** Command-side copy of a saved external registration. It never verifies Provider execution. */
+export interface YimengTakeSelectionExternalVideoOrigin {
+  readonly schema: 'jason.qingmu-external-video-origin.v1'
+  readonly kind: 'external_saved'
+  readonly bindingStatus: 'current' | 'stale'
+  readonly binding: {
+    readonly projectId: string
+    readonly episodeId: string
+    readonly frameId: string
+    readonly assetId: string
+    readonly takeId: string
+    readonly assetSha256: string
+    readonly uploadReceiptSha256: string
+    readonly uploadRequestSha256: string
+    readonly frameContentSha256: string
+    readonly storyboardRevision: number
+  }
+  readonly registrationId: string
+  readonly registrationReceiptSha256: string
+  readonly packetSha256: string
+  readonly producerIdentityStatus: 'unknown'
+  readonly providerExecutionVerified: false
+  readonly recordConsistencyVerified: false
+}
+
 /** Command-side copy of one Yimeng-owned Take projection. */
 export interface YimengTakeSelectionVersion {
   readonly takeId: string
@@ -1484,11 +1509,12 @@ export interface YimengTakeSelectionVersion {
   readonly inputHash: string | null
   readonly lineageComplete: boolean
   readonly canAttemptSelection: boolean
+  readonly origin?: YimengTakeSelectionExternalVideoOrigin | null
 }
 
 /** Authoritative Yimeng readback returned by a committed selection. */
 export interface YimengTakeSelectionStackSubject {
-  readonly schema: 'jason.qingmu-take-version-stack-subject.v1'
+  readonly schema: 'jason.qingmu-take-version-stack-subject.v1' | 'jason.qingmu-take-version-stack-subject.v2'
   readonly projectId: string
   readonly episodeId: string
   readonly frameId: string
@@ -1693,6 +1719,8 @@ export interface YimengTakeReviewRecommendationRecord {
  * Durable backend record for a human Take decision.
  */
 export interface YimengTakeHumanDecisionRecord {
+  /** V1 omits schema/origin; V2 records an external current source without inventing a producer. */
+  readonly schema?: 'jason.qingmu-take-human-decision-record.v2'
   readonly decisionId: string
   readonly subjectType: 'shot_take'
   readonly subjectId: string
@@ -1707,10 +1735,11 @@ export interface YimengTakeHumanDecisionRecord {
   readonly eventId: string
   readonly decision: YimengTakeReviewAction
   readonly reason: string
-  readonly producerActorId: string
-  readonly producerNaturalPersonId: string
+  readonly producerActorId: string | null
+  readonly producerNaturalPersonId: string | null
   readonly participantNaturalPersonIds: readonly string[]
   readonly decidedAt: string
+  readonly origin?: YimengTakeTechnicalQcExternalOrigin
 }
 
 interface YimengTakeReviewImpactFlags {
@@ -1806,8 +1835,32 @@ export interface YimengRecordTakeTechnicalQcRequest {
 export type YimengRecoverTakeTechnicalQcRequest = YimengRecordTakeTechnicalQcRequest
 
 /** Exact selected-Take identity retained in the immutable QC journal. */
+export interface YimengTakeTechnicalQcExternalOrigin {
+  readonly schema: 'jason.qingmu-external-video-origin.v1'
+  readonly kind: 'external_saved'
+  readonly bindingStatus: 'current' | 'stale'
+  readonly binding: {
+    readonly projectId: string
+    readonly episodeId: string
+    readonly frameId: string
+    readonly assetId: string
+    readonly takeId: string
+    readonly assetSha256: string
+    readonly uploadReceiptSha256: string
+    readonly uploadRequestSha256: string
+    readonly frameContentSha256: string
+    readonly storyboardRevision: number
+  }
+  readonly registrationId: string
+  readonly registrationReceiptSha256: string
+  readonly packetSha256: string
+  readonly producerIdentityStatus: 'unknown'
+  readonly providerExecutionVerified: false
+  readonly recordConsistencyVerified: false
+}
+
 export interface YimengTakeTechnicalQcSubject {
-  readonly schema: 'jason.qingmu-take-acceptance-subject.v1'
+  readonly schema: 'jason.qingmu-take-acceptance-subject.v1' | 'jason.qingmu-take-acceptance-subject.v2'
   readonly projectId: string
   readonly episodeId: string
   readonly frameId: string
@@ -1826,6 +1879,7 @@ export interface YimengTakeTechnicalQcSubject {
   readonly model: string | null
   readonly inputHash: string | null
   readonly submitId: string | null
+  readonly origin?: YimengTakeTechnicalQcExternalOrigin
 }
 
 /** Immutable technical-QC assessment. It is neither content approval nor selection. */

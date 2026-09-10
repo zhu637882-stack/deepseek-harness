@@ -35,6 +35,10 @@ const SUBJECT_FIELDS = [
   'selectionRevision', 'takeId', 'versionOrdinal', 'selectionStatus', 'outputSha256', 'taskId', 'capability',
   'routeKey', 'provider', 'model', 'inputHash', 'submitId',
 ] as const
+const ORIGIN_FIELDS = ['schema', 'kind', 'bindingStatus', 'binding', 'registrationId', 'registrationReceiptSha256',
+  'packetSha256', 'producerIdentityStatus', 'providerExecutionVerified', 'recordConsistencyVerified'] as const
+const ORIGIN_BINDING_FIELDS = ['projectId', 'episodeId', 'frameId', 'assetId', 'takeId', 'assetSha256',
+  'uploadReceiptSha256', 'uploadRequestSha256', 'frameContentSha256', 'storyboardRevision'] as const
 const PROVIDER_FIELDS = [
   'schema', 'status', 'evidenceMode', 'actualProviderReceiptVerified', 'requestDryRun', 'taskRequestHashVerified',
   'outboxState', 'dispatchEpoch', 'dispatchDigest', 'payloadSha256', 'responseSha256', 'providerTaskId',
@@ -186,8 +190,10 @@ export function parseTakeAcceptanceMethodRequest(payload: unknown): ImagoTakeAcc
 }
 
 function validateSubject(value: unknown, request: ImagoTakeAcceptanceMethodRequest): YimengTakeAcceptanceSubject {
-  const subject = exact(value, SUBJECT_FIELDS, 'evidence.subject')
-  if (subject.schema !== 'jason.qingmu-take-acceptance-subject.v1' || subject.selectionStatus !== 'Selected'
+  const raw = object(value, 'evidence.subject')
+  const v2 = raw.schema === 'jason.qingmu-take-acceptance-subject.v2'
+  const subject = exact(value, [...SUBJECT_FIELDS, ...(v2 ? ['origin'] : [])], 'evidence.subject')
+  if ((subject.schema !== 'jason.qingmu-take-acceptance-subject.v1' && !v2) || subject.selectionStatus !== 'Selected'
     || subject.projectId !== request.projectId || subject.episodeId !== request.episodeId || subject.frameId !== request.frameId
     || !identifier(subject.projectId) || !identifier(subject.episodeId) || !identifier(subject.frameId)
     || !identifier(subject.takeId) || !integer(subject.frameNo, 1) || !integer(subject.storyboardRevision)
@@ -196,6 +202,29 @@ function validateSubject(value: unknown, request: ImagoTakeAcceptanceMethodReque
     || !optionalIdentifier(subject.submitId) || !optionalText(subject.capability) || !optionalText(subject.routeKey)
     || !optionalText(subject.provider) || !optionalText(subject.model)) {
     throw new TakeAcceptanceContractError('selected Take subject is invalid')
+  }
+  if (!v2) return subject as unknown as YimengTakeAcceptanceSubject
+  if (subject.taskId !== null || subject.capability !== null || subject.routeKey !== null || subject.provider !== null
+    || subject.model !== null || subject.inputHash !== null || subject.submitId !== null || subject.outputSha256 === null) {
+    throw new TakeAcceptanceContractError('external selected Take generation fields are invalid')
+  }
+  const origin = exact(subject.origin, ORIGIN_FIELDS, 'evidence.subject.origin')
+  const binding = exact(origin.binding, ORIGIN_BINDING_FIELDS, 'evidence.subject.origin.binding')
+  if (origin.schema !== 'jason.qingmu-external-video-origin.v1' || origin.kind !== 'external_saved'
+    || !['current', 'stale'].includes(origin.bindingStatus as string) || origin.producerIdentityStatus !== 'unknown'
+    || origin.providerExecutionVerified !== false || origin.recordConsistencyVerified !== false
+    || !identifier(binding.projectId) || !identifier(binding.episodeId) || !identifier(binding.frameId)
+    || !identifier(binding.assetId) || !identifier(binding.takeId) || !sha(binding.assetSha256)
+    || !sha(binding.uploadReceiptSha256) || !sha(binding.uploadRequestSha256) || !sha(binding.frameContentSha256)
+    || !integer(binding.storyboardRevision) || !identifier(origin.registrationId)
+    || !sha(origin.registrationReceiptSha256) || !sha(origin.packetSha256)) {
+    throw new TakeAcceptanceContractError('external selected Take origin is invalid')
+  }
+  const current = binding.frameContentSha256 === subject.frameContentSha256 && binding.storyboardRevision === subject.storyboardRevision
+  if (binding.projectId !== subject.projectId || binding.episodeId !== subject.episodeId || binding.frameId !== subject.frameId
+    || binding.assetId !== subject.takeId || binding.takeId !== subject.takeId || binding.assetSha256 !== subject.outputSha256
+    || (origin.bindingStatus === 'current') !== current) {
+    throw new TakeAcceptanceContractError('external selected Take origin binding is invalid')
   }
   return subject as unknown as YimengTakeAcceptanceSubject
 }
@@ -230,6 +259,11 @@ function validateProvider(value: unknown, subject: YimengTakeAcceptanceSubject):
     || (['missing', 'invalid'].includes(receipt.status as string)
       && (receipt.evidenceMode !== 'unverified' || receipt.actualProviderReceiptVerified || blockers.length === 0))) {
     throw new TakeAcceptanceContractError('Provider receipt state is inconsistent')
+  }
+  if (subject.schema === 'jason.qingmu-take-acceptance-subject.v2'
+    && (receipt.status !== 'missing' || receipt.evidenceMode !== 'unverified'
+      || receipt.actualProviderReceiptVerified || receipt.taskRequestHashVerified)) {
+    throw new TakeAcceptanceContractError('external provider receipt cannot verify execution')
   }
   return receipt as unknown as YimengTakeProviderReceipt
 }
@@ -283,11 +317,23 @@ function validateTechnical(value: unknown, subject: YimengTakeAcceptanceSubject)
   const passing = blockers.length === 0 && media.bytes !== null && media.sha256 !== null
     && decode.status === 'PASS' && decode.returncode === 0 && receipt.video !== null
   if ((receipt.status === 'PASS') !== passing) throw new TakeAcceptanceContractError('technical receipt state is inconsistent')
+  if (subject.schema === 'jason.qingmu-take-acceptance-subject.v2'
+    && subject.origin?.bindingStatus === 'stale' && receipt.status !== 'BLOCKED') {
+    throw new TakeAcceptanceContractError('stale external source is blocked')
+  }
   return receipt as unknown as YimengTakeTechnicalReceipt
 }
 
-function validateQuality(value: unknown): YimengTakeCandidateQuality {
+function validateQuality(value: unknown, subject: YimengTakeAcceptanceSubject): YimengTakeCandidateQuality {
   const quality = exact(value, QUALITY_FIELDS, 'evidence.candidateQuality')
+  if (subject.schema === 'jason.qingmu-take-acceptance-subject.v2') {
+    if (quality.schema !== 'jason.qingmu-take-candidate-quality-evidence.v2' || quality.status !== 'NOT_APPLICABLE'
+      || ![quality.requiredCheckTypes, quality.checks, quality.missingCheckTypes, quality.failedOrStaleCheckTypes]
+        .every(entry => Array.isArray(entry) && entry.length === 0)) {
+      throw new TakeAcceptanceContractError('external candidate quality evidence is invalid')
+    }
+    return quality as unknown as YimengTakeCandidateQuality
+  }
   if (quality.schema !== 'jason.qingmu-take-candidate-quality-evidence.v1'
     || !['PASS', 'BLOCKED'].includes(quality.status as string) || !Array.isArray(quality.checks)) {
     throw new TakeAcceptanceContractError('candidate quality evidence is invalid')
@@ -346,13 +392,14 @@ export function buildTakeAcceptanceSnapshot(
     subject,
     providerReceipt: validateProvider(evidenceValue.providerReceipt, subject),
     technicalReceipt: validateTechnical(evidenceValue.technicalReceipt, subject),
-    candidateQuality: validateQuality(evidenceValue.candidateQuality),
+    candidateQuality: validateQuality(evidenceValue.candidateQuality, subject),
   }
   const boundaries = exact(root.boundaries, [
     'readOnly', 'selectedIsApproval', 'formalApprovalChanged', 'providerCalls', 'databaseWrites', 'budgetMutation',
     'humanSignoffInferred', 'paidProviderAuthority', 'gateBCompleted',
   ], 'feed.boundaries')
-  if (root.schema !== 'jason.qingmu-take-acceptance-evidence.v1'
+  if ((root.schema !== 'jason.qingmu-take-acceptance-evidence.v1' && root.schema !== 'jason.qingmu-take-acceptance-evidence.v2')
+    || (root.schema === 'jason.qingmu-take-acceptance-evidence.v2') !== (subject.schema === 'jason.qingmu-take-acceptance-subject.v2')
     || root.productionStatus !== 'UNVERIFIED_FOR_PAID_PRODUCTION' || !sha(root.evidenceSnapshotSha256)
     || root.evidenceSnapshotSha256 !== sha256(evidence, serialize, 'takeAcceptance.evidence')
     || boundaries.readOnly !== true || boundaries.selectedIsApproval !== false || boundaries.formalApprovalChanged !== false

@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   TAKE_ACCEPTANCE_REQUEST as request,
   takeAcceptanceFixture,
+  takeExternalAcceptanceFixture,
 } from '../../qingmu-yimeng-read-adapter/tests/take-acceptance-fixture.ts'
 import { apply, createImagoMethodHandler } from '../src/index.ts'
 import {
@@ -127,6 +128,16 @@ describe('current Take acceptance method boundary', () => {
       { ...request, frameId: '\ud800' }, { ...request, projectId: 'line\nbreak' }]) {
       expect(() => parseTakeAcceptanceMethodRequest(value)).toThrow()
     }
+  })
+
+  it('keeps external decoded video in manual macro and micro review', () => {
+    const feed = takeExternalAcceptanceFixture()
+    const snapshot = buildTakeAcceptanceSnapshot(request, feed)
+    const evaluation = evaluateTakeAcceptance(snapshot.evidence)
+    expect(evaluation).toMatchObject({
+      technicalReceiptStatus: 'PASS', macroQc: { status: 'BLOCKED' }, microQc: { status: 'BLOCKED' },
+      formalAcceptanceAllowed: false,
+    })
   })
 
   it('matches RFC 8785 number and UTF-16 key ordering semantics', () => {

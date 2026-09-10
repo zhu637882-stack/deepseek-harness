@@ -32,6 +32,10 @@ const SUBJECT_FIELDS = [
   'selectionStatus', 'outputSha256', 'taskId', 'capability', 'routeKey', 'provider',
   'model', 'inputHash', 'submitId',
 ] as const
+const ORIGIN_FIELDS = ['schema', 'kind', 'bindingStatus', 'binding', 'registrationId', 'registrationReceiptSha256',
+  'packetSha256', 'producerIdentityStatus', 'providerExecutionVerified', 'recordConsistencyVerified'] as const
+const ORIGIN_BINDING_FIELDS = ['projectId', 'episodeId', 'frameId', 'assetId', 'takeId', 'assetSha256',
+  'uploadReceiptSha256', 'uploadRequestSha256', 'frameContentSha256', 'storyboardRevision'] as const
 const METHOD_FIELDS = [
   'schema', 'subject', 'evidenceSnapshotSha256', 'technicalReceiptStatus',
   'definition', 'ruleBindings', 'rulesSha256',
@@ -230,21 +234,23 @@ function nullableSha(value: unknown, field: string, error: ErrorFactory): string
   return value === null ? null : sha(value, field, error)
 }
 
-function subject(
+export function normalizeTakeTechnicalQcSubject(
   value: unknown,
-  intent: YimengRecordTakeTechnicalQcRequest,
+  intent: Pick<YimengRecordTakeTechnicalQcRequest, 'projectId' | 'episodeId' | 'frameId' | 'takeId'>,
   field: string,
   error: ErrorFactory,
 ): YimengTakeTechnicalQcSubject {
-  const item = exact(value, SUBJECT_FIELDS, field, error)
-  if (item.schema !== 'jason.qingmu-take-acceptance-subject.v1'
+  const raw = typeof value === 'object' && value !== null && !Array.isArray(value) ? value as YimengCommandJsonObject : undefined
+  const v2 = raw?.schema === 'jason.qingmu-take-acceptance-subject.v2'
+  const item = exact(value, [...SUBJECT_FIELDS, ...(v2 ? ['origin'] : [])], field, error)
+  if ((item.schema !== 'jason.qingmu-take-acceptance-subject.v1' && !v2)
     || item.projectId !== intent.projectId || item.episodeId !== intent.episodeId
     || item.frameId !== intent.frameId || item.takeId !== intent.takeId
     || item.selectionStatus !== 'Selected') {
     throw error(`${field} binding mismatch`)
   }
-  return {
-    schema: 'jason.qingmu-take-acceptance-subject.v1',
+  const result = {
+    schema: item.schema as YimengTakeTechnicalQcSubject['schema'],
     projectId: intent.projectId, episodeId: intent.episodeId, frameId: intent.frameId,
     frameNo: integer(item.frameNo, 1, `${field}.frameNo`, error),
     storyboardRevision: integer(item.storyboardRevision, 0, `${field}.storyboardRevision`, error),
@@ -252,7 +258,7 @@ function subject(
     selectionRevision: integer(item.selectionRevision, 0, `${field}.selectionRevision`, error),
     takeId: intent.takeId,
     versionOrdinal: integer(item.versionOrdinal, 1, `${field}.versionOrdinal`, error),
-    selectionStatus: 'Selected',
+    selectionStatus: 'Selected' as const,
     outputSha256: nullableSha(item.outputSha256, `${field}.outputSha256`, error),
     taskId: nullableId(item.taskId, `${field}.taskId`, error),
     capability: nullableText(item.capability, `${field}.capability`, error),
@@ -262,6 +268,39 @@ function subject(
     inputHash: nullableSha(item.inputHash, `${field}.inputHash`, error),
     submitId: nullableId(item.submitId, `${field}.submitId`, error),
   }
+  if (!v2) return result
+  if (result.taskId !== null || result.capability !== null || result.routeKey !== null || result.provider !== null
+    || result.model !== null || result.inputHash !== null || result.submitId !== null || result.outputSha256 === null) {
+    throw error(`${field} external generation fields mismatch`)
+  }
+  const origin = exact(item.origin, ORIGIN_FIELDS, `${field}.origin`, error)
+  const binding = exact(origin.binding, ORIGIN_BINDING_FIELDS, `${field}.origin.binding`, error)
+  if (origin.schema !== 'jason.qingmu-external-video-origin.v1' || origin.kind !== 'external_saved'
+    || (origin.bindingStatus !== 'current' && origin.bindingStatus !== 'stale')
+    || origin.producerIdentityStatus !== 'unknown' || origin.providerExecutionVerified !== false
+    || origin.recordConsistencyVerified !== false) throw error(`${field} external origin mismatch`)
+  const normalized = {
+    schema: 'jason.qingmu-external-video-origin.v1' as const, kind: 'external_saved' as const,
+    bindingStatus: origin.bindingStatus as 'current' | 'stale',
+    binding: {
+      projectId: id(binding.projectId, `${field}.origin.binding.projectId`, error), episodeId: id(binding.episodeId, `${field}.origin.binding.episodeId`, error),
+      frameId: id(binding.frameId, `${field}.origin.binding.frameId`, error), assetId: id(binding.assetId, `${field}.origin.binding.assetId`, error),
+      takeId: id(binding.takeId, `${field}.origin.binding.takeId`, error), assetSha256: sha(binding.assetSha256, `${field}.origin.binding.assetSha256`, error),
+      uploadReceiptSha256: sha(binding.uploadReceiptSha256, `${field}.origin.binding.uploadReceiptSha256`, error), uploadRequestSha256: sha(binding.uploadRequestSha256, `${field}.origin.binding.uploadRequestSha256`, error),
+      frameContentSha256: sha(binding.frameContentSha256, `${field}.origin.binding.frameContentSha256`, error), storyboardRevision: integer(binding.storyboardRevision, 0, `${field}.origin.binding.storyboardRevision`, error),
+    },
+    registrationId: id(origin.registrationId, `${field}.origin.registrationId`, error), registrationReceiptSha256: sha(origin.registrationReceiptSha256, `${field}.origin.registrationReceiptSha256`, error),
+    packetSha256: sha(origin.packetSha256, `${field}.origin.packetSha256`, error), producerIdentityStatus: 'unknown' as const,
+    providerExecutionVerified: false as const, recordConsistencyVerified: false as const,
+  }
+  const current = normalized.binding.frameContentSha256 === result.frameContentSha256
+    && normalized.binding.storyboardRevision === result.storyboardRevision
+  if (normalized.binding.projectId !== result.projectId
+    || normalized.binding.episodeId !== result.episodeId || normalized.binding.frameId !== result.frameId
+    || normalized.binding.assetId !== result.takeId || normalized.binding.takeId !== result.takeId
+    || normalized.binding.assetSha256 !== result.outputSha256
+    || (normalized.bindingStatus === 'current') !== current) throw error(`${field} external origin binding mismatch`)
+  return { ...result, origin: normalized }
 }
 
 function methodDefinition(value: unknown, error: ErrorFactory): YimengCommandJsonObject {
@@ -336,7 +375,7 @@ function currentMethod(
     throw error('takeTechnicalQcMethod schema mismatch')
   }
   const item = exact(response.projection, METHOD_FIELDS, 'methodProjection', error)
-  const boundSubject = subject(item.subject, intent, 'methodProjection.subject', error)
+  const boundSubject = normalizeTakeTechnicalQcSubject(item.subject, intent, 'methodProjection.subject', error)
   const evidenceSnapshotSha256 = sha(
     item.evidenceSnapshotSha256,
     'methodProjection.evidenceSnapshotSha256',
@@ -396,7 +435,7 @@ function normalizeAssessment(
 ): YimengTakeTechnicalQcAssessment {
   const error = helpers.responseError
   const item = exact(value, ASSESSMENT_FIELDS, 'takeTechnicalQcResult.assessment', error)
-  const takeSubject = subject(item.takeSubject, intent, 'takeTechnicalQcResult.assessment.takeSubject', error)
+  const takeSubject = normalizeTakeTechnicalQcSubject(item.takeSubject, intent, 'takeTechnicalQcResult.assessment.takeSubject', error)
   const takeSubjectSha256 = sha(
     item.takeSubjectSha256,
     'takeTechnicalQcResult.assessment.takeSubjectSha256',
