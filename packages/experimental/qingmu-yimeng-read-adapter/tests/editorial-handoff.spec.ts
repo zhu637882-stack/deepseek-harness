@@ -120,14 +120,16 @@ describe('editorial handoff read adapter', () => {
     shot.audio = { status: 'embedded', scopeStatus: 'valid', candidateCount: 0, asset: null,
       embeddedSource: { assetId: 'asset-1', sha256: '5'.repeat(64), packagePath: `media/${'5'.repeat(64)}.mp4`,
         codecName: 'aac', channels: 2, sampleRate: 48000 } }
-    shot.blockers = [
+    const blockers = [
       'editorial_handoff_approval_record_missing', 'editorial_handoff_qc_record_missing',
     ]
-    value.unresolved = shot.blockers.map((code: string) => ({ frameId: 'frame-1', code }))
-    value.blockers = shot.blockers.map((code: string) => ({ scope: 'shot', frameId: 'frame-1', code }))
-    value.summary.authoritativeAudioCount = 1
-    value.summary.unresolvedCount = 2
-    value.download.blockerCode = 'editorial_handoff_approval_record_missing'
+    shot.blockers = blockers
+    value.unresolved = blockers.map(code => ({ frameId: 'frame-1', code }))
+    value.blockers = blockers.map(code => ({ scope: 'shot', frameId: 'frame-1', code }))
+    const summary = value.summary as Record<string, unknown>
+    summary.authoritativeAudioCount = 1
+    summary.unresolvedCount = 2
+    ;(value.download as Record<string, unknown>).blockerCode = 'editorial_handoff_approval_record_missing'
     rehash(value)
     expect(normalizeEditorialHandoff(value, request, entry => sha(entry))).toEqual(value)
   })
