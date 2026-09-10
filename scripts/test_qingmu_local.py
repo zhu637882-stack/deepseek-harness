@@ -1348,10 +1348,20 @@ class OwnershipTests(unittest.TestCase):
                 self.assertEqual(env["JASON_ENV_FILE"], str(root / "private/no-ambient.env"))
                 self.assertEqual(env["ALLOW_PAID"], "false")
                 self.assertEqual(env["MAX_PAID_CNY"], "0")
+                self.assertEqual(env["ALLOW_REMOTE_DOWNLOAD"], "false")
                 self.assertNotIn("DEEPSEEK_API_KEY", env)
                 self.assertNotIn("QINGMU_DIRECTOR_EXECUTION_KEY", env)
             finally:
                 local.stop_child(child)
+
+    def test_reference_connection_enables_download_without_paid_dispatch(self):
+        supervisor = local.Supervisor(Path("/unused"), {
+            "jwtSecret": "test", "referenceVideoConnection": {"provider": "dashscope"},
+        })
+        env = supervisor._worker_environment(Path("/writer"), None, project_production_active=False)
+        self.assertEqual(env["ALLOW_REMOTE_DOWNLOAD"], "true")
+        self.assertEqual(env["ALLOW_PAID"], "false")
+        self.assertEqual(env["MAX_PAID_CNY"], "0")
 
     def test_active_project_worker_uses_exact_all_lane_and_production_environment(self):
         with tempfile.TemporaryDirectory() as directory:

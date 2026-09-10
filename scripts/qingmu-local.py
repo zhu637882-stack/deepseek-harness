@@ -1831,6 +1831,9 @@ class Supervisor:
             "QINGMU_CHANGESET_ENABLED": "true",
             "PUBLIC_REGISTRATION_ENABLED": "false",
             "ALLOW_PAID": "true" if production else "false",
+            "ALLOW_REMOTE_DOWNLOAD": (
+                "true" if production or self.config.get("referenceVideoConnection") else "false"
+            ),
             "MAX_PAID_CNY": str(production["maxPaidCny"] if production else 0),
             "PROVIDER_BUDGET_BASELINE_CNY": "0",
             "PROVIDER_BUDGET_WINDOW_ID": "",
