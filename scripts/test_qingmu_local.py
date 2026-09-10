@@ -632,6 +632,7 @@ class OwnershipTests(unittest.TestCase):
         for relative in ("packages/client/runtime/lib/client.js", "packages/host/apiproxy/lib/index.js",
                          "packages/boot/app-boot/lib/index.js",
                          "packages/experimental/qingmu-director-context-bridge/lib/model-tools.js",
+                         "packages/experimental/qingmu-director-context-bridge/lib/skill-resources.js",
                          "packages/experimental/client-ui-brand-qingmu/lib/client.js",
                          "packages/experimental/qingmu-web/cordis.patch.yml",
                          "packages/experimental/qingmu-web/agent-presets/qingmu-director/preset.yml",
@@ -639,6 +640,21 @@ class OwnershipTests(unittest.TestCase):
                          ".dsh-build/client-build-environment.json"):
             with self.subTest(artifact=relative):
                 self.assertIn(relative, local.BUILD_MANIFEST_ARTIFACTS)
+
+    def test_missing_director_skill_reader_cannot_replace_valid_build_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, config, identities = self.build_manifest_world(Path(directory))
+            current = root / "build-manifest/current.json"
+            current.write_text('{"previous":"preserve"}\n')
+            reader = Path(config["harnessRoot"]) / "packages/experimental/qingmu-director-context-bridge/lib/skill-resources.js"
+            reader.unlink()
+            with patch.object(local, "source_identity", side_effect=lambda path: identities[path]), \
+                 patch.object(local, "require_qingmu_client_build") as check:
+                with self.assertRaisesRegex(ValueError, "发布产物缺失.*skill-resources"):
+                    local.record_build_manifest(root, config)
+            check.assert_not_called()
+            self.assertEqual(current.read_text(), '{"previous":"preserve"}\n')
+            self.assertFalse((root / "build-manifest/history").exists())
 
     def test_build_manifest_detects_artifact_and_source_drift(self):
         with tempfile.TemporaryDirectory() as directory:

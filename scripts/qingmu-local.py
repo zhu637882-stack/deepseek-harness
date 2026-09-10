@@ -60,6 +60,7 @@ BUILD_MANIFEST_ARTIFACTS = (
     "packages/experimental/qingmu-imago-method-adapter/lib/index.js",
     "packages/experimental/qingmu-director-context-bridge/lib/index.js",
     "packages/experimental/qingmu-director-context-bridge/lib/model-tools.js",
+    "packages/experimental/qingmu-director-context-bridge/lib/skill-resources.js",
     "packages/experimental/qingmu-director-context-bridge/python/qingmu_api.py",
     "packages/experimental/qingmu-director-context-bridge/python/reference_video_connection.py",
     "packages/experimental/qingmu-director-context-bridge/python/dialogue_changeset.py",
