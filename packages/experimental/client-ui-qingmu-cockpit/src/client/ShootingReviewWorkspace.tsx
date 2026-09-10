@@ -497,7 +497,7 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
             key={currentVideoScope} projectId={projectId} episodeId={episodeId} frameId={current.shotId} port={port}
             onStored={refreshLocalVideoCandidate} />}
         </div>
-        {!firstFrameOpen && !historyOpen && <p className={css.browseNote} data-state={state}>{isLocalVideo(browsed) ? localVideoBrowseMessage(browsed, canSelect) : versions.some(isLocalVideo) ? '选择本地视频可查看其来源状态和选片条件。' : versions.length === 0 && load === 'ready' && testState === undefined ? (hasFrameCandidate ? '本镜尚无视频候选，已有首帧和要求仍保留。' : requirementStatus === 'loading' ? '正在核对本镜已保存的首帧要求；核对完成前不会生成。' : requirementsReady ? '本镜还没有首帧。点下方「生成首帧」开始；画面要求在右栏可改。' : '缺少本镜已保存的首帧要求。请返回分镜核对后再生成。') : message(state, load)}<span>单击候选只切换中区媒体，不会改变选用。</span></p>}
+        {!firstFrameOpen && !historyOpen && <p className={css.browseNote} data-state={state}>{isLocalVideo(browsed) ? localVideoBrowseMessage(browsed, canSelect) : versions.some(isLocalVideo) ? '选择本地视频可查看其来源状态和选片条件。' : versions.length === 0 && load === 'ready' && testState === undefined ? (hasFrameCandidate ? '本镜尚无视频候选，已有首帧和要求仍保留。' : requirementStatus === 'loading' ? '正在核对本镜已保存的首帧要求；核对完成前不会生成。' : requirementsReady ? '可直接用人物、场景和声音参考生成视频；也可先生成首帧。画面要求在右栏可改。' : '缺少本镜已保存的首帧要求。请返回分镜核对后再生成。') : message(state, load)}<span>单击候选只切换中区媒体，不会改变选用。</span></p>}
         {!firstFrameOpen && !historyOpen && <details className={css.takeComparison} open={compareOpen}
           onToggle={(event) => { setCompareState({ key: mediaPaneKey, open: event.currentTarget.open }) }}>
           <summary>比较与选择视频</summary>

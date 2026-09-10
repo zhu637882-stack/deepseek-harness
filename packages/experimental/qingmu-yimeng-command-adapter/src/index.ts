@@ -5841,7 +5841,7 @@ export function createYimengCommandHandler(
           ...(prepared.request.idempotencyKey === undefined ? {} : { idempotencyKey: prepared.request.idempotencyKey }),
         }
         normalize = prepared.normalize
-      } else if (['readAssetDesign', 'saveAssetDesign', 'quoteAssetImage', 'generateAssetImage', 'readAssetImageRuns'].includes(endpoint)) {
+      } else if (['readAssetDesign', 'saveAssetDesign', 'quoteAssetImage', 'generateAssetImage', 'readAssetImageRuns', 'quoteAssetVoice', 'generateAssetVoice', 'readAssetVoiceRuns'].includes(endpoint)) {
         const prepared = prepareAssetDesign(endpoint, payload, stageArtifactHelpers)
         path = prepared.path
         requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
@@ -6259,7 +6259,7 @@ export function createYimengCommandHandler(
         || endpoint === 'recoverReworkRoute'
         || endpoint === 'probeReworkRouteAuthority'
       const requiresCredentialReflectionGuard = isStageArtifactCommand
-        || ['readAssetDesign', 'saveAssetDesign', 'quoteAssetImage', 'generateAssetImage', 'readAssetImageRuns'].includes(endpoint)
+        || ['readAssetDesign', 'saveAssetDesign', 'quoteAssetImage', 'generateAssetImage', 'readAssetImageRuns', 'quoteAssetVoice', 'generateAssetVoice', 'readAssetVoiceRuns'].includes(endpoint)
         || ['readScenePlanning', 'saveScenePlanning', 'recoverScenePlanning'].includes(endpoint)
         || ['readCreativeContract', 'initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)
         || endpoint === 'createTakeComment' || endpoint === 'recoverTakeComment'

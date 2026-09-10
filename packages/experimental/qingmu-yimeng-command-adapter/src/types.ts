@@ -3043,6 +3043,9 @@ export interface YimengCommandEndpointMap {
   readonly quoteAssetImage: import('./asset-design.ts').AssetImageQuote
   readonly generateAssetImage: import('./asset-design.ts').AssetImageSubmission
   readonly readAssetImageRuns: import('./asset-design.ts').AssetImageRuns
+  readonly quoteAssetVoice: import('./asset-design.ts').AssetImageQuote
+  readonly generateAssetVoice: import('./asset-design.ts').AssetImageSubmission
+  readonly readAssetVoiceRuns: import('./asset-design.ts').AssetImageRuns
   readonly registerReferenceVideoCandidateForReview: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types').ReferenceVideoCandidateRegistration
   readonly readReferenceVideoCandidateRegistration: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types').ReferenceVideoCandidateRegistration
   readonly prepareReferenceVideoMaterial: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types').ReferenceVideoMaterialPreparationResult

@@ -6,7 +6,7 @@ import type { QingmuYimengPort } from './contracts.ts'
 import { NativeStoryComposer } from './NativeStoryComposer.tsx'
 import css from './NativeDirectorComposer.module.css'
 
-type Port = Pick<QingmuYimengPort, 'readAssetDesign' | 'saveAssetDesign' | 'quoteAssetImage' | 'generateAssetImage' | 'readAssetImageRuns'>
+type Port = Pick<QingmuYimengPort, 'readAssetDesign' | 'saveAssetDesign' | 'quoteAssetImage' | 'generateAssetImage' | 'readAssetImageRuns' | 'readAssetVoiceRuns' | 'quoteAssetVoice' | 'generateAssetVoice'>
 const names = { actor: '人物', scene: '场景', prop: '道具' } as const
 function parseDesign(text: string): AssetDesign {
   const value: unknown = JSON.parse(text)
@@ -37,15 +37,18 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
 }) {
   const [state, setState] = useState<AssetDesignState>(), [design, setDesign] = useState<AssetDesign>()
   const [quote, setQuote] = useState<AssetImageQuote>(), [runs, setRuns] = useState<AssetImageRuns['items']>([])
+  const [voiceRuns, setVoiceRuns] = useState<AssetImageRuns['items']>([])
   const [busy, setBusy] = useState(false), [notice, setNotice] = useState(''), [changes, setChanges] = useState('')
   const [dirty, setDirty] = useState(false), [manual, setManual] = useState('')
   const lock = useRef(false), live = useRef(true)
   const scope = { projectId, episodeId }
   const readRuns = useCallback(async () => {
     const result = await port.readAssetImageRuns({ projectId, episodeId })
-    if (live.current) setRuns(result.items)
-    for (const run of result.items) {
-      const key = `qingmu.asset-request:${projectId}:${episodeId}:${run.entityId}`
+    const voices = await port.readAssetVoiceRuns({ projectId, episodeId })
+    if (live.current) { setRuns(result.items); setVoiceRuns(voices.items) }
+    for (const run of [...result.items, ...voices.items]) {
+      const medium = voices.items.includes(run) ? 'audio' : 'image'
+      const key = `qingmu.asset-request:${projectId}:${episodeId}:${medium}:${run.entityId}`
       try {
         const saved: unknown = JSON.parse(localStorage.getItem(key) ?? 'null')
         if (saved && typeof saved === 'object' && 'requestId' in saved && saved.requestId === run.requestId) localStorage.removeItem(key)
@@ -60,13 +63,13 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
     void readRuns().catch(() => { /* Initial asset read reports missing script or authentication above. */ })
     return () => { live.current = false }
   }, [projectId, episodeId, port, readRuns])
-  const pending = runs.some(run => !run.assetId && !['Failed', 'Cancelled', 'Succeeded', 'Completed'].includes(run.status))
+  const pending = [...runs, ...voiceRuns].some(run => !run.assetId && !['Failed', 'Cancelled', 'Succeeded', 'Completed'].includes(run.status))
   useEffect(() => {
     if (!pending) return
     const timer = setTimeout(() => { void readRuns().catch((error: unknown) => { if (live.current) setNotice(String(error)) }) }, 6000)
     return () => { clearTimeout(timer) }
-  }, [pending, runs, readRuns])
-  const materialized = runs.filter(run => run.assetId).map(run => run.assetId).join(',')
+  }, [pending, runs, voiceRuns, readRuns])
+  const materialized = [...runs, ...voiceRuns].filter(run => run.assetId).map(run => run.assetId).join(',')
   const refresh = useRef(onGenerated); refresh.current = onGenerated
   useEffect(() => { if (materialized) refresh.current() }, [materialized])
   async function perform(work: () => Promise<void>) {
@@ -99,6 +102,7 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
       }} /></label>)}</details>
       {design.assets.map((item, index) => {
         const run = runs.find(value => value.entityId === item.id)
+        const voice = voiceRuns.find(value => value.entityId === item.id)
         return <section key={`${item.kind}:${index}`} aria-label={`${names[item.kind]} ${item.name}`}>
           <h3>{names[item.kind]} · {item.name}</h3>
           <label>画面描述<textarea value={item.imagePrompt}
@@ -109,6 +113,11 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
               void perform(async () => {
                 if (item.id) setQuote(await port.quoteAssetImage({ ...scope, entityId: item.id }))
               }) }}>查看生成费用</button>
+          {item.kind === 'actor' && <><button type="button" disabled={busy || dirty || !item.id || !item.voiceIdentity?.trim() || (voice !== undefined && !['Failed', 'Cancelled', 'Succeeded', 'Completed'].includes(voice.status))}
+            onClick={() => {
+              void perform(async () => { if (item.id) setQuote(await port.quoteAssetVoice({ ...scope, entityId: item.id })) })
+            }}>生成声音试听</button>
+          {voice && <p role="status">{voice.assetId ? '声音已生成，可在素材库试听并引用' : `声音进度：${voice.status}${voice.errorCode ? ` · ${voice.errorCode}` : ''}`}</p>}</>}
           {run && <p role="status">{run.assetId ? '图片已生成，可在下方素材库查看' : run.status === 'Failed' ? `生成失败：${run.errorCode ?? '请查看任务详情'}` : `生成进度：${run.status}`}</p>}
         </section>
       })}
@@ -120,21 +129,21 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
           if (live.current) { setState(result); setDesign(result.design ?? undefined); setDirty(false); setNotice('素材设计已保存。现在可以逐项生成图片。') }
         }) }}>保存素材设计</button>
     </>}
-    {quote && <section aria-label="确认图片生成"><h3>生成 {quote.entity.name}</h3><p>{quote.model} · 一张图片 · ¥{Number(quote.estimatedCny).toFixed(2)}</p>
+    {quote && <section aria-label={quote.mediaType === 'audio' ? '确认声音生成' : '确认图片生成'}><h3>生成 {quote.entity.name}</h3><p>{quote.model} · {quote.mediaType === 'audio' ? '一段声音试听' : '一张图片'} · ¥{Number(quote.estimatedCny).toFixed(2)}</p>
       <button type="button" disabled={busy || dirty || !quote.generationAvailable} onClick={() => {
         void perform(async () => {
           const newCommand = { requestId: crypto.randomUUID(), kind: quote.entity.kind,
             quoteSha256: quote.quoteSha256, authorizationCapCny: quote.estimatedCny, paidConfirmed: true as const }
-          const key = `qingmu.asset-request:${projectId}:${episodeId}:${quote.entity.id}`
+          const key = `qingmu.asset-request:${projectId}:${episodeId}:${quote.mediaType ?? 'image'}:${quote.entity.id}`
           const previous: unknown = JSON.parse(localStorage.getItem(key) ?? 'null')
           const command = previous && typeof previous === 'object' && 'requestId' in previous ? previous as typeof newCommand : newCommand
           localStorage.setItem(key, JSON.stringify(command))
           try {
-            await port.generateAssetImage({ ...scope, entityId: quote.entity.id, command }); setQuote(undefined)
+            await (quote.mediaType === 'audio' ? port.generateAssetVoice : port.generateAssetImage)({ ...scope, entityId: quote.entity.id, command }); setQuote(undefined)
             setNotice('已提交，离开或刷新页面后可继续读取同一任务。')
           } catch (error) { setQuote(undefined); throw error }
           finally { await readRuns() }
-        }) }}>确认费用并生成一张</button>
+        }) }}>{quote.mediaType === 'audio' ? '确认费用并生成试听' : '确认费用并生成一张'}</button>
       {!quote.generationAvailable && <p>当前账户尚未开通图片生成额度。</p>}
     </section>}
     <button type="button" disabled={busy} onClick={() => { void perform(readRuns) }}>刷新生成进度</button>

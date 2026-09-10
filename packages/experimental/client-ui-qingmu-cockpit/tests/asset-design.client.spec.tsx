@@ -5,12 +5,16 @@ import { NativeAssetDesign } from '../src/client/NativeAssetDesign.tsx'
 import type { AssetDesignState, AssetImageRuns } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 const scope = { projectId: 'p', episodeId: 'e' }
 const state: AssetDesignState = { ...scope, schema: 'qingmu.asset-design-state.v1', stateSha256: 'a'.repeat(64), scriptSha256: 'b'.repeat(64), scriptRevision: 1, script: {}, model: 'wan2.7-image-pro',
-  design: { sourceScriptSha256: 'b'.repeat(64), assets: [{ id: 'actor_1', kind: 'actor', name: '父亲', imagePrompt: '真人定妆照' }], director: {
+  design: { sourceScriptSha256: 'b'.repeat(64), assets: [{ id: 'actor_1', kind: 'actor', name: '父亲', imagePrompt: '真人定妆照', voiceIdentity: '成年温厚自然中低音' }], director: {
     visualStyle: '写实', tone: '温暖', colorPalette: ['灰蓝'], lightingRules: '窗光', cameraGrammar: '跟随动作', performanceRules: '自然', characterContinuityRules: '服装稳定',
   } } }
 afterEach(() => { cleanup(); localStorage.clear() })
 function setup() {
-  const port = { readAssetDesign: vi.fn(async () => state), saveAssetDesign: vi.fn(async () => state),
+  const port = {
+    readAssetVoiceRuns: vi.fn(async (): Promise<AssetImageRuns> => ({ ...scope, items: [] })),
+    quoteAssetVoice: vi.fn(async () => ({ ...scope, entity: { ...state.design!.assets[0]!, id: 'actor_1' }, quoteSha256: 'd'.repeat(64), estimatedCny: '0.000000', generationAvailable: true, model: 'cosyvoice-v3.5-plus', prompt: '成年温厚自然中低音', mediaType: 'audio' as const })),
+    generateAssetVoice: vi.fn(async () => ({ requestId: 'voice-1', taskId: 'task_voice', status: 'Queued', estimatedCny: '0.000000', selectionChanged: false as const })),
+    readAssetDesign: vi.fn(async () => state), saveAssetDesign: vi.fn(async () => state),
     quoteAssetImage: vi.fn(async () => ({ ...scope, entity: { ...state.design!.assets[0]!, id: 'actor_1' }, quoteSha256: 'c'.repeat(64), estimatedCny: '0.500000', generationAvailable: true, model: state.model, prompt: '真人定妆照' })),
     generateAssetImage: vi.fn(async () => ({ requestId: 'image-1', taskId: 'task_1', status: 'Queued', estimatedCny: '0.500000', selectionChanged: false as const })),
     readAssetImageRuns: vi.fn(async (): Promise<AssetImageRuns> => ({ ...scope, items: [] })) }
@@ -40,4 +44,17 @@ it('rereads an existing image run on reload without charging again', async () =>
   await screen.findByText('图片已生成，可在下方素材库查看')
   expect(port.generateAssetImage).not.toHaveBeenCalled()
   expect(onGenerated).toHaveBeenCalledTimes(1)
+})
+
+it('quotes and queues voice separately from the image and restores progress on reload', async () => {
+  const port = setup()
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  const button = await screen.findByRole('button', { name: '生成声音试听' })
+  await waitFor(() => { expect((button as HTMLButtonElement).disabled).toBe(false) })
+  fireEvent.click(button)
+  const confirm = await screen.findByRole('button', { name: '确认费用并生成试听' })
+  expect(port.generateAssetVoice).not.toHaveBeenCalled()
+  fireEvent.click(confirm); fireEvent.click(confirm)
+  await waitFor(() => { expect(port.generateAssetVoice).toHaveBeenCalledTimes(1) })
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
 })

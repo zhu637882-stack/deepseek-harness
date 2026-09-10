@@ -35,6 +35,7 @@ export interface AssetDesignState extends CreationScope {
 }
 /** Quotation is tied to exact source, prompt, model and price. */
 export interface AssetImageQuote extends CreationScope {
+  readonly mediaType?: 'audio'
   readonly entity: AssetDesignItem & { readonly id: string }
   readonly quoteSha256: string
   readonly estimatedCny: string
@@ -98,14 +99,17 @@ export function prepareAssetDesign(endpoint: string, value: unknown, helpers: He
   switch (endpoint) {
     case 'readAssetDesign': break
     case 'readAssetImageRuns': path += '/runs'; break
+    case 'readAssetVoiceRuns': path += '/voice/runs'; break
     case 'saveAssetDesign':
       fields = [...fields, 'expectedStateSha256', 'design']; method = 'POST'
       if (typeof raw.expectedStateSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(raw.expectedStateSha256)) throw f('asset state SHA invalid')
       body = { expectedStateSha256: raw.expectedStateSha256, design: object(raw.design, f) }; break
+    case 'quoteAssetVoice':
     case 'quoteAssetImage':
-      fields.push('entityId'); path += `/${identifier(raw.entityId, f)}/quote`; break
+      fields.push('entityId'); path += `/${identifier(raw.entityId, f)}/${endpoint === 'quoteAssetVoice' ? 'voice/' : ''}quote`; break
+    case 'generateAssetVoice':
     case 'generateAssetImage':
-      fields.push('entityId', 'command'); path += `/${identifier(raw.entityId, f)}/generate`; method = 'POST'
+      fields.push('entityId', 'command'); path += `/${identifier(raw.entityId, f)}/${endpoint === 'generateAssetVoice' ? 'voice/' : ''}generate`; method = 'POST'
       body = object(raw.command, f)
       if (body.paidConfirmed !== true) throw f('image cost confirmation required')
       break
@@ -114,15 +118,15 @@ export function prepareAssetDesign(endpoint: string, value: unknown, helpers: He
   if (Object.keys(raw).sort().join() !== fields.sort().join()) throw f('asset design fields invalid')
   return { path, method, body, normalize: (value) => {
     const result = object(value, b)
-    if (endpoint === 'generateAssetImage') {
+    if ((endpoint === 'generateAssetImage' || endpoint === 'generateAssetVoice')) {
       const command = object(raw.command, f)
       if (result.requestId !== command.requestId || result.estimatedCny !== command.authorizationCapCny || result.selectionChanged !== false) throw b('asset image receipt mismatch')
       identifier(result.taskId, b)
     } else {
       if (result.projectId !== projectId || result.episodeId !== episodeId) throw b('asset design scope mismatch')
-      if (endpoint === 'readAssetImageRuns') {
+      if ((endpoint === 'readAssetImageRuns' || endpoint === 'readAssetVoiceRuns')) {
         if (!Array.isArray(result.items)) throw b('asset runs missing')
-      } else if (endpoint === 'quoteAssetImage') {
+      } else if ((endpoint === 'quoteAssetImage' || endpoint === 'quoteAssetVoice')) {
         if (object(result.entity, b).id !== raw.entityId || typeof result.generationAvailable !== 'boolean'
           || typeof result.estimatedCny !== 'string' || !/^\d+\.\d{6}$/.test(result.estimatedCny)
           || typeof result.quoteSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(result.quoteSha256)) throw b('asset quote invalid')

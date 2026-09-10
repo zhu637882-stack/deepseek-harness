@@ -831,9 +831,13 @@ export interface QingmuYimengCommandPort {
   saveAssetDesign(request: CreationScope & { expectedStateSha256: string; design: AssetDesign },
     signal?: AbortSignal): Promise<AssetDesignState>
   quoteAssetImage(request: CreationScope & { entityId: string }, signal?: AbortSignal): Promise<AssetImageQuote>
+  quoteAssetVoice(request: CreationScope & { entityId: string }, signal?: AbortSignal): Promise<AssetImageQuote>
   generateAssetImage(request: CreationScope & { entityId: string; command: AssetImageCommand },
     signal?: AbortSignal): Promise<AssetImageSubmission>
+  generateAssetVoice(request: CreationScope & { entityId: string; command: AssetImageCommand },
+    signal?: AbortSignal): Promise<AssetImageSubmission>
   readAssetImageRuns(request: CreationScope, signal?: AbortSignal): Promise<AssetImageRuns>
+  readAssetVoiceRuns(request: CreationScope, signal?: AbortSignal): Promise<AssetImageRuns>
   readScenePlanning(request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').CreationScope, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ScenePlanningState>
   saveScenePlanning(request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ScenePlanningRequest, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ScenePlanningResult>
   recoverScenePlanning(request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ScenePlanningRequest, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ScenePlanningResult>

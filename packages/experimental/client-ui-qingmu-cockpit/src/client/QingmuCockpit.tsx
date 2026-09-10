@@ -12,6 +12,7 @@ import type { QingmuCockpitFace } from './slots.ts'
 import type { QingmuCockpitKey } from './locales.ts'
 import { AssetWorkbench } from './AssetWorkbench.tsx'
 import { PromptIrWorkspace } from './PromptIrWorkspace.tsx'
+import { SceneReferenceWorkspace } from './SceneReferenceWorkspace.tsx'
 import { ScriptWorkspace } from './ScriptWorkspace.tsx'
 import { CreateProjectWorkspace, TextImportWorkspace } from './CreationWorkspace.tsx'
 import { ProjectLibrary } from './ProjectLibrary.tsx'
@@ -204,6 +205,7 @@ export function QingmuCockpit({
     ? STEP_TABS[creativeStepFromSearch(typeof location === 'undefined' ? '' : location.search)]
     : new URLSearchParams(typeof location === 'undefined' ? '' : location.search).get('qingmuView') === 'shooting' ? 'shots' : 'director')
   const [shootingAction, setShootingAction] = useState<string>()
+  const [shootingActionKind, setShootingActionKind] = useState<'first-frame' | 'select-frame' | 'video'>('video')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
   const [health, setHealth] = useState<YimengHealth>()
@@ -697,7 +699,7 @@ export function QingmuCockpit({
         onNavigate={setTab}
         onReturnToStoryboard={applicationShell ? () => { if (mayLeaveDirector()) setTab('director') } : undefined}
         onCommitted={refreshWorkflowProjectionAfterCommit}
-        onProductionAction={(_action, shotId) => { setSelectedShotId(shotId); setShootingAction(shotId) }}
+        onProductionAction={(action, shotId) => { setSelectedShotId(shotId); setShootingActionKind(action); setShootingAction(shotId) }}
         directorAssistant={nativeDirectorSession === undefined
           ? <p role="status">原生导演助手当前不可用；不会回退到 iframe。</p>
           : <div className={css.inlineDirector}>
@@ -713,10 +715,13 @@ export function QingmuCockpit({
         t={t}
       />
       {shootingAction && <div className={css.shootingAction} role="dialog" aria-modal="true" aria-label="本镜操作">
-        <button type="button" onClick={() => { setShootingAction(undefined) }}>返回拍摄与审看</button>
-        <PromptIrWorkspace key={`${episodeId}:${shootingAction}:shooting-action`} presentation="shooting" projectId={projectId} episodeId={episodeId} shotItems={shotItems}
-          storyboardRevisionId={shotRelations?.storyboardRevision.revisionId ?? ''} selectedShotId={shootingAction} onSelectShotId={setShootingAction}
-          port={port} t={t} onCommitted={refreshWorkflowAfterCommit} />
+        <button type="button" onClick={() => { if (mayLeaveDirector()) setShootingAction(undefined) }}>返回拍摄与审看</button>
+        {shootingActionKind === 'video' && shotRelations ? <SceneReferenceWorkspace projectId={projectId} relations={shotRelations}
+          selectedShotId={shootingAction} onSelectShotId={(id) => { setSelectedShotId(id); setShootingAction(id) }}
+          onUnsavedChange={onDirectorDirty} port={port} /> :
+          <PromptIrWorkspace key={`${episodeId}:${shootingAction}:shooting-action`} presentation="shooting" projectId={projectId} episodeId={episodeId} shotItems={shotItems}
+            storyboardRevisionId={shotRelations?.storyboardRevision.revisionId ?? ''} selectedShotId={shootingAction} onSelectShotId={setShootingAction}
+            port={port} t={t} onCommitted={refreshWorkflowAfterCommit} />}
       </div>}
       <details className={css.developerLog}>
         <summary>开发日志</summary>

@@ -28,3 +28,14 @@ it('recovers original image task without a new submission', async () => {
   expect(await handler('readAssetImageRuns', scope, new AbortController().signal)).toMatchObject({ ok: true, value: result })
   expect(fetch.mock.calls[0]?.[1]).toMatchObject({ method: 'GET' })
 })
+it('uses scoped voice quotation and original voice-task recovery routes', async () => {
+  const quote = { ...scope, entity: { id: 'actor_1' }, mediaType: 'audio', generationAvailable: true,
+    estimatedCny: '0.000000', quoteSha256: 'b'.repeat(64) }
+  const quoted = setup(quote)
+  expect(await quoted.handler('quoteAssetVoice', { ...scope, entityId: 'actor_1' }, new AbortController().signal)).toMatchObject({ ok: true, value: quote })
+  expect(quoted.fetch.mock.calls[0]?.[0]).toContain('/asset-design/actor_1/voice/quote')
+  const result = { ...scope, items: [] }
+  const recovered = setup(result)
+  expect(await recovered.handler('readAssetVoiceRuns', scope, new AbortController().signal)).toMatchObject({ ok: true, value: result })
+  expect(recovered.fetch.mock.calls[0]?.[0]).toContain('/asset-design/voice/runs')
+})
