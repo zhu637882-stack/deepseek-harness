@@ -39,10 +39,11 @@ function decode(value: string): Uint8Array {
 }
 type SavedProjectIntent = ProjectInitializationRequest
   | (Omit<ProjectInitializationRequest, 'textVersion' | 'directorSkillIds' | 'stylePackId'> & { readonly stylePackId: string | null })
-function isCurrentIntent(intent: SavedProjectIntent): intent is ProjectInitializationRequest {
+function isCurrentIntent(intent: unknown): intent is ProjectInitializationRequest {
+  if (intent === null || typeof intent !== 'object') return false
   return 'textVersion' in intent && intent.textVersion === 'creation-text-v1'
     && 'directorSkillIds' in intent && Array.isArray(intent.directorSkillIds) && intent.directorSkillIds.length > 0
-    && typeof intent.stylePackId === 'string' && intent.stylePackId.length > 0
+    && 'stylePackId' in intent && typeof intent.stylePackId === 'string' && intent.stylePackId.length > 0
 }
 interface ProjectLocal {
   name: string
@@ -61,6 +62,8 @@ const DEFAULT_PROJECT: ProjectLocal = {
   duration: '1-2分钟', textInput: '', style: '', stylePackId: '', directorSkillId: '',
 }
 const directorSkillLabel = (id: string): string => ({
+  'cinematic-director': 'Leos 六部门 · 青木导演',
+  'open-film-writer': 'Open Film 编剧', 'open-film-camera': 'Open Film 摄影',
   episode_dramaturgy_architect: '剧集戏剧结构', scene_dialogue_writer: '场景对白与互动',
   shot_blocking_director: '镜头导演', audio_ownership_planner: '声音归属规划',
   sequence_creative_qa: '序列创意质检',
@@ -140,7 +143,7 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
     try {
       let intent = local.intent
       if (intent === undefined) {
-        if (!selectionsReady || textVersion === undefined) throw new Error('请先选择当前可用的画风、风格包和导演方法。')
+        if (!selectionsReady) throw new Error('请先选择当前可用的画风、风格包和导演方法。')
         intent = {
           name: local.name.trim(), style: local.style, aspectRatio: local.aspectRatio,
           mode: 'whole_series' as const, creationType: local.creationType, episodeCount: local.episodeCount,
@@ -207,12 +210,13 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
         onChange={(event) => { update({ ...local, directorSkillId: event.target.value }) }}>
         <option value="">请选择导演方法</option>
         {options?.directorSkills.filter(item => item.available).map(item => <option key={item.id} value={item.id}>
-          {item.id === 'shot_blocking_director' ? '镜头导演（固定）' : directorSkillLabel(item.id)}</option>)}
+          {directorSkillLabel(item.id)}</option>)}
       </select></label>
-      {local.directorSkillId === 'shot_blocking_director' && <small>固定方法覆盖镜头语法、空间与走位、表演和互动、节奏、剪辑连续性及阿里提示适配。</small>}
+      {local.directorSkillId === 'cinematic-director' && <small>总导演、表演指导、镜内执行、摄影、提示词编译与连续性审看统筹作品，Open Film 补强编剧与摄影；具体拍法由剧本和导演决定。</small>}
+      {local.directorSkillId === 'shot_blocking_director' && <small>镜头语法、空间走位、表演互动、节奏与剪辑连续性。</small>}
       <details className={css.skillMap}><summary>创作流程技能与阶段</summary>
         {options?.directorSkills.map(item => <p key={item.id}><strong>{directorSkillLabel(item.id)}</strong> · 阶段：{item.stage}。
-          {item.available ? ' 当前创建固定使用。' : ` 本创建页不作为可选项。${item.disabledReason ? ` ${item.disabledReason}` : ''}`}</p>)}
+          {item.available ? ' 随项目保存。' : ` ${item.disabledReason ?? ''}`}</p>)}
       </details>
       <small>风格包统一构图、灯光、色彩与表演；与基础画风必须属于同一类别。</small>
       {textVersion && <small>输入来源：{textVersion.label}</small>}

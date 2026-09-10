@@ -32,7 +32,7 @@ const port = () => ({ initializeProject: vi.fn(async () => { throw new Error('un
 beforeEach(() => { localStorage.clear(); vi.stubGlobal('crypto', webcrypto) })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 async function selectCreationMethods() {
-  await screen.findByRole('option', { name: '镜头导演（固定）' })
+  await screen.findByRole('option', { name: '镜头导演' })
   fireEvent.change(screen.getByRole('combobox', { name: '基础画风' }), { target: { value: 'realistic' } })
   fireEvent.change(screen.getByRole('combobox', { name: '全片风格包' }), { target: { value: 'sp_cafe' } })
   fireEvent.change(screen.getByRole('combobox', { name: '导演方法' }), { target: { value: 'shot_blocking_director' } })
@@ -41,7 +41,7 @@ describe('creation input and unknown-result recovery', () => {
   it('shows the selected Host thumbnail, stage map, and only compatible style packs', async () => {
     const api = port()
     render(<CreateProjectWorkspace port={api} onCreated={async () => {}} />)
-    await screen.findByRole('option', { name: '镜头导演（固定）' })
+    await screen.findByRole('option', { name: '镜头导演' })
     fireEvent.change(screen.getByRole('combobox', { name: '基础画风' }), { target: { value: 'realistic' } })
     expect(screen.getByRole('img', { name: '现代写实 画风缩略图' }).getAttribute('src')).toBe('/api/qingmu/creation-style-preview?styleId=realistic')
     expect(screen.getByRole('option', { name: '真人写实 · 暖光电影' })).toBeTruthy()

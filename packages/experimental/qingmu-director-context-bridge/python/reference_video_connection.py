@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -21,6 +22,7 @@ def validate_connection(config):
         or any(config.get(name) is not None for name in (
             "directorExecutionFixture", "directorProductionExecution",
             "textFoundationProductionExecution", "projectProductionExecution",
+            "nativeProductionExecution",
         ))
         or not isinstance(value, dict)
         or set(value) != {"provider", "model", "projectId", "episodeId", "credentialEnvFile", "credentialFingerprint"}
@@ -37,6 +39,54 @@ def validate_connection(config):
     ):
         raise ValueError("reference_video_connection_invalid")
     return dict(value)
+
+
+def validate_production(config):
+    """One owner can create multiple projects under a single explicit allowance."""
+    value = config.get("nativeProductionExecution")
+    if value is None:
+        return None
+    if (config.get("uiMode") != "native" or not isinstance(value, dict)
+            or any(config.get(name) is not None for name in (
+                "referenceVideoConnection", "directorExecutionFixture", "directorProductionExecution",
+                "textFoundationProductionExecution", "projectProductionExecution"))
+            or set(value) != {"provider", "ownerId", "credentialEnvFile", "credentialFingerprint",
+                              "maxPaidCny", "budgetBaselineCny", "budgetWindowId"}
+            or value.get("provider") != "dashscope"):
+        raise ValueError("native_production_config_invalid")
+    for name in ("ownerId", "budgetWindowId"):
+        if not isinstance(value[name], str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", value[name]):
+            raise ValueError("native_production_config_invalid")
+    for name, positive in (("maxPaidCny", True), ("budgetBaselineCny", False)):
+        number = value[name]
+        if (type(number) not in (int, float) or not math.isfinite(number)
+                or number < 0 or (positive and number == 0)):
+            raise ValueError("native_production_budget_invalid")
+    # Reuse the material connection's private credential metadata contract.
+    validate_connection({"uiMode": "native", "referenceVideoConnection": {
+        "provider": "dashscope", "model": "wan3.0-video", "projectId": "metadata", "episodeId": "metadata",
+        "credentialEnvFile": value["credentialEnvFile"], "credentialFingerprint": value["credentialFingerprint"],
+    }})
+    return dict(value)
+
+
+def production_environment(config):
+    """Used by API and Worker before Settings loads; ambient credentials never win."""
+    value = validate_production(config)
+    if value is None:
+        return {}
+    return {
+        "ALLOW_PAID": "true", "ALLOW_REMOTE_DOWNLOAD": "true",
+        "MAX_PAID_CNY": str(value["maxPaidCny"]),
+        "PROVIDER_BUDGET_BASELINE_CNY": str(value["budgetBaselineCny"]),
+        "PROVIDER_BUDGET_WINDOW_ID": value["budgetWindowId"],
+        "PROVIDER_PAID_SCOPE_REQUIRED": "false",
+        "PROVIDER_PAID_SCOPE_PROJECT_ID": "", "PROVIDER_PAID_SCOPE_EPISODE_ID": "",
+        "PROVIDER_PAID_SCOPE_OWNER_ID": value["ownerId"],
+        "DASHSCOPE_API_KEY": bound_key(value),
+        "DASHSCOPE_BASE_URL": "https://dashscope.aliyuncs.com", "DASHSCOPE_REGION": "cn-beijing",
+        "DASHSCOPE_WORKSPACE_ID": "",
+    }
 
 
 def read_key(filename):

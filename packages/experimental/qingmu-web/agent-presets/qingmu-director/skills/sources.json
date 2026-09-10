@@ -14,7 +14,7 @@
         "CONTRIBUTING.md": "b457e8094b71f8619685073032b38dcb342a5df4d3439f1f20440b9f71a9d1ad",
         "LICENSE": "df731ea2e1ffd3b8890ad246da3df96ceba3301c16fb4970c16811df4c728b56",
         "README.md": "de61800434c2ff91cb5aff1b86d35d542b70d3b64716ecb09c1fa8322b9c1fd9",
-        "SKILL.md": "4109ed803eda546113407e244bb0976191043d4bb31df327f0f35c1f35cb9625",
+        "SKILL.md": "4891f16113213518fc30627659dff67c2393cdc510214874694ab373229b0722",
         "assets/beat-sheet-template.md": "e53e846e9f43cdc80cf261bde4978001628d6383a6d4bd702762f88131e04bda",
         "assets/director-book-template.md": "d6f0901207a822220fe87a7ca2feeea0ddeaf142a168a03704456e69b0ad68b0",
         "assets/edit-timeline-template.md": "b6a6ad673094a419ada6afb9d8e613b4d2c8538cface5cb17031bc7b408fc5ee",
@@ -648,6 +648,75 @@
       ],
       "adaptation": "Qingmu specialist supplement: renamed entry and explicit creative/tool scope. All linked files copied unchanged; no scripts executed. Root LICENSE supplied from the same upstream commit.",
       "excludedNonMethodFiles": []
+    },
+    "character-asset": {
+      "repository": "https://github.com/62656456/ai-film-skills",
+      "commit": "678edc06d3318c1516f6eb73503f740427fdd831",
+      "license": "Apache-2.0",
+      "files": {
+        "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+        "SKILL.md": "f9babf3ed42e498d9c7b38d3581c67cbf6d7c3228a7d17ee7589503125b934cb",
+        "references/cinematic-image-direction.md": "b2fc8b2dd6dbd1bcf78bc2671806575352db95481796dc5cae5a5c6a6befb945",
+        "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
+        "agents/openai.yaml": "a7e8d276f3c726dac65f4e8afa535e5213effee2c820c76d03130da0510a9600"
+      },
+      "upstreamFiles": {
+        "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+        "SKILL.md": "ff1214ab9c544702596a9f4ee0809611bfd0ed201a63df7c76672b49ead8612e",
+        "references/cinematic-image-direction.md": "b2fc8b2dd6dbd1bcf78bc2671806575352db95481796dc5cae5a5c6a6befb945",
+        "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
+        "agents/openai.yaml": "a7e8d276f3c726dac65f4e8afa535e5213effee2c820c76d03130da0510a9600"
+      },
+      "adaptation": "Full asset skill and references; Qingmu scope and delegated creative-review precedence added.",
+      "adaptedFiles": [
+        "SKILL.md"
+      ]
+    },
+    "scene-asset": {
+      "repository": "https://github.com/62656456/ai-film-skills",
+      "commit": "678edc06d3318c1516f6eb73503f740427fdd831",
+      "license": "Apache-2.0",
+      "files": {
+        "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+        "SKILL.md": "8d5975c4c68a03affe9a15b1b09a28d1ae6cad9e4353960f146aa690c911666e",
+        "references/cinematic-image-direction.md": "b2fc8b2dd6dbd1bcf78bc2671806575352db95481796dc5cae5a5c6a6befb945",
+        "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
+        "agents/openai.yaml": "7ffb6718d97e5858e5070dbf6e1330a7118f817c372dcb43da6ebb2949c16084"
+      },
+      "upstreamFiles": {
+        "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+        "SKILL.md": "c2341db79673bbf4cf7adcdd599c5a8ea640b534febb6610e362849b37db42e3",
+        "references/cinematic-image-direction.md": "b2fc8b2dd6dbd1bcf78bc2671806575352db95481796dc5cae5a5c6a6befb945",
+        "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
+        "agents/openai.yaml": "7ffb6718d97e5858e5070dbf6e1330a7118f817c372dcb43da6ebb2949c16084"
+      },
+      "adaptation": "Full asset skill and references; Qingmu scope and delegated creative-review precedence added.",
+      "adaptedFiles": [
+        "SKILL.md"
+      ]
+    },
+    "prop-asset": {
+      "repository": "https://github.com/62656456/ai-film-skills",
+      "commit": "678edc06d3318c1516f6eb73503f740427fdd831",
+      "license": "Apache-2.0",
+      "files": {
+        "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+        "SKILL.md": "c4e1b929d8f6f3308fff00cbe7e902ad7a00cfbc51ec40ec6487dafd373da130",
+        "references/cinematic-image-direction.md": "b2fc8b2dd6dbd1bcf78bc2671806575352db95481796dc5cae5a5c6a6befb945",
+        "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
+        "agents/openai.yaml": "a007a9763e7bbcc88cf05e5a5b492d9ad5621ef582b90425ece906ce0ce12520"
+      },
+      "upstreamFiles": {
+        "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+        "SKILL.md": "470bd06279ee13a39d7c36d9ff8ff60ba159842709ffc083edaaeb7da3c8ca31",
+        "references/cinematic-image-direction.md": "b2fc8b2dd6dbd1bcf78bc2671806575352db95481796dc5cae5a5c6a6befb945",
+        "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
+        "agents/openai.yaml": "a007a9763e7bbcc88cf05e5a5b492d9ad5621ef582b90425ece906ce0ce12520"
+      },
+      "adaptation": "Full asset skill and references; Qingmu scope and delegated creative-review precedence added.",
+      "adaptedFiles": [
+        "SKILL.md"
+      ]
     }
   }
 }

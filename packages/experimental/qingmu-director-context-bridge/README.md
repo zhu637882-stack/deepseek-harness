@@ -26,7 +26,11 @@ The Cordis plugin registers the `qingmuDirectorContext` session projection and a
 
 ## Authority and side effects
 
+Native local instances may bind `nativeProductionExecution` to one operator and one budget window. The API and existing Writer worker load the same verified DashScope credential and allowance; new projects owned by that operator share the allowance. This mode excludes the older project-scoped execution and material-only connection configurations. Ownership, saved request validation, quote confirmation, budget reservation, and idempotent dispatch remain enforced by Writer. It does not alter DSH model requests or token usage. See the [native production decision](../../../.agents/notes/implemented/feature/2026-09-11-qingmu-native-production.md).
+
 Yimeng remains the sole source of business truth. Binding events contain only object coordinates, context SHA, and immutable proposal/freshness hashes. They contain no prompt text, reference media, content approval, selection, Ready state, Provider result, fee record, or general chat history. The optional model tools below do store creative context and method text in ordinary tool-result events. Binding performs no Yimeng business write. Optional editing tools use the existing Writer command adapters; no tool here dispatches a Provider.
+
+Native creation reads `QINGMU_CREATIVE_SKILL_ROOT` from the same preset directory, checks `sources.json` against each method body, and stores the director, writing and camera identities with the project. Run `examples/native-production-keyless.py /path/to/writer` with Writer’s Python environment to exercise the actual creation router and shared budget gate against an isolated database; its adjacent JSON snapshot verifies two projects without Provider requests.
 
 ## Native director read tools
 

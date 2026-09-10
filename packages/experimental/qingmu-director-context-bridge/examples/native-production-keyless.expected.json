@@ -1,0 +1,13 @@
+{
+  "projectsCreated": 2,
+  "selectableDirectorMethods": ["cinematic-director"],
+  "savedMethods": {
+    "writingSkills": ["open-film-writer"],
+    "directorSkills": ["cinematic-director"],
+    "cameraSkills": ["open-film-camera"]
+  },
+  "secondProjectInitiallyAllowed": true,
+  "sharedBudgetAfterSpend": "paid_budget_exceeded",
+  "unknownProjectDenied": "paid_scope_violation",
+  "providerRequests": 0
+}

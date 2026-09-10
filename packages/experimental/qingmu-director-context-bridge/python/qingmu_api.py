@@ -59,8 +59,12 @@ def main() -> None:
     config = json.loads((root / "private/instance.json").read_text())
     if config["root"] != str(root):
         raise ValueError("instance_root_mismatch")
-    from reference_video_connection import validate_connection, compose_reference_video_connection
+    from reference_video_connection import (
+        validate_connection, compose_reference_video_connection, validate_production,
+        production_environment,
+    )
     validate_connection(config)
+    validate_production(config)
     upstream = load_writer_entry(Path(config["yimengRoot"]))
     # Reuse the existing validated startup configuration; only application
     # composition is owned here. No provider or runtime control is relaxed.
@@ -162,6 +166,7 @@ def main() -> None:
     os.environ.update({
         "JASON_PROJECT_ROOT": str(root),
         "JASON_CONFIG_ROOT": config["yimengRoot"],
+        "QINGMU_CREATIVE_SKILL_ROOT": str(Path(config["harnessRoot"]) / "packages/experimental/qingmu-web/agent-presets/qingmu-director/skills"),
         "JASON_ENV_FILE": (
             text_production["credentialEnvFile"]
             if text_production
@@ -192,6 +197,7 @@ def main() -> None:
         "BUILD_MANIFEST_DIR": str(root / "build-manifest"),
         "OPERATOR_AUDIT_DIR": str(root / "audit"),
     })
+    os.environ.update(production_environment(config))
     from jason.apps.studio import api_deps
     compose_dialogue_service(api_deps)
     compose_reference_video_connection(api_deps, config)

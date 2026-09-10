@@ -62,6 +62,7 @@ BUILD_MANIFEST_ARTIFACTS = (
     "packages/experimental/qingmu-director-context-bridge/lib/model-tools.js",
     "packages/experimental/qingmu-director-context-bridge/lib/skill-resources.js",
     "packages/experimental/qingmu-director-context-bridge/python/qingmu_api.py",
+    "packages/experimental/qingmu-director-context-bridge/python/qingmu_worker.py",
     "packages/experimental/qingmu-director-context-bridge/python/reference_video_connection.py",
     "packages/experimental/qingmu-director-context-bridge/python/dialogue_changeset.py",
     "packages/experimental/qingmu-director-context-bridge/python/video_frame_cas.py",
@@ -221,6 +222,7 @@ def read_config(root: Path) -> dict:
     config = _read_owner_only_json(root / "private/instance.json", "实例私密配置")
     _validate_private_credential_fields(config, require_all=False)
     reference_connection_module().validate_connection(config)
+    reference_connection_module().validate_production(config)
     if config["root"] != str(root) or config["harnessRoot"] != str(HARNESS):
         raise ValueError("实例目录或 Harness 来源绑定不符；拒绝使用")
     if not native_ui(config):
@@ -1964,6 +1966,19 @@ class Supervisor:
         id.  A missing id leaves the process in no-credential heartbeat mode.
         """
         writer = Path(self.config["yimengRoot"])
+        native_production = reference_connection_module().validate_production(self.config)
+        if native_production:
+            self._text_worker_heartbeat_only = False
+            env = self._worker_environment(writer, None)
+            command = [str(writer / ".venv/bin/python"), "-B",
+                       str(HARNESS / "packages/experimental/qingmu-director-context-bridge/python/qingmu_worker.py"),
+                       "--lane", "all", "--max-tasks", "2", "--max-attempts", "1",
+                       "--max-concurrent-dispatches", "2", "--allow-existing-provider-poll",
+                       "--disable-durable-director-orchestration"]
+            self.worker = self.launch_owned("worker", command, env, "worker")
+            if self.worker.poll() is not None:
+                raise RuntimeError("青木生成队列启动失败；查看本实例 logs/worker.log")
+            return
         production = validate_text_foundation_production_config(
             self.config.get("textFoundationProductionExecution")
         )

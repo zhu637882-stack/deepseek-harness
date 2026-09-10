@@ -26,7 +26,11 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 
 ## 权威与副作用
 
+原生实例可通过 `nativeProductionExecution` 绑定一个操作者和一个预算窗口。API 与现有 Writer 工作进程加载同一份经校验的 DashScope 凭据及额度；该操作者的新项目共用此额度。此模式与旧的单项目执行及仅素材连接配置互斥。Writer 继续验证归属、已存请求、报价确认、预算预留和幂等派发。该配置不改变 DSH 模型请求及 Token 费用。见[原生生成决策](../../../.agents/notes/implemented/feature/2026-09-11-qingmu-native-production.zh.md)。
+
 易梦仍是唯一业务真源。绑定事件只保存对象坐标、context SHA 和不可变 proposal/freshness 哈希，不保存提示词正文、参考媒体、内容签收、选择、Ready、Provider 结果、费用记录或通用聊天历史。下述可选模型工具会把创作上下文和方法正文保存在普通工具结果事件中。绑定操作不写入易梦业务状态。可选编辑工具使用已有 Writer 命令适配器；本包的工具不派发 Provider。
+
+原生创建从同一个预设目录读取 `QINGMU_CREATIVE_SKILL_ROOT`，按 `sources.json` 核对方法正文，将导演、编剧、摄影方法身份随项目保存。用 Writer 的 Python 环境运行 `examples/native-production-keyless.py /path/to/writer`，可在隔离数据库上执行实际创建路由及共享预算闸门；相邻 JSON 快照验证两个项目，不发出 Provider 请求。
 
 ## 原生导演读取工具
 
