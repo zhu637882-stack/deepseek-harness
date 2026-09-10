@@ -6,7 +6,7 @@ import type {
 import type { QingmuYimengPort } from './contracts.ts'
 import css from './CreationWorkspace.module.css'
 import { NativeStoryComposer } from './NativeStoryComposer.tsx'
-import type { NativeStoryPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/src/story-draft.ts'
+import type { NativeStoryPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft'
 
 type Port = Pick<QingmuYimengPort, 'readCreationOptions' | 'readCreativeContract' | 'initializeProject' | 'recoverProjectInitialization' | 'readTextImport' | 'createTextImport' | 'correctTextImport' | 'confirmTextImport'>
 const NEW_PROJECT = 'qingmu.creation.project.v1'

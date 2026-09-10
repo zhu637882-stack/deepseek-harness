@@ -28,6 +28,10 @@
     "./skill-resources": {
       "types": "./lib/types/skill-resources.d.ts",
       "default": "./lib/skill-resources.js"
+    },
+    "./story-draft": {
+      "types": "./lib/types/story-draft.d.ts",
+      "default": "./lib/story-draft.js"
     }
   },
   "files": [

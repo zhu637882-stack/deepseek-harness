@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { NativeStoryComposer } from '../src/client/NativeStoryComposer.tsx'
-import { readStoryDraft } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/src/story-draft.ts'
+import { readStoryDraft } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft'
 
 afterEach(() => { cleanup(); localStorage.clear() })
 const event = (seq: number, type: string, data: unknown) => ({ event: { seq, type, data } })

@@ -81,6 +81,12 @@ describe('client bundle purity gate', () => {
     expect(resolveId('@deepseek-ai/dsh-brand')).toBeNull()
   })
 
+  it('inlines the pure screenplay event projection without admitting the Host plugin', () => {
+    expect(resolveId('@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft')).toBeNull()
+    expect(() => resolveId('@deepseek-ai/dsh-experimental-qingmu-director-context-bridge')).toThrow(/purity/)
+    expect(() => resolveId('@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/model-tools')).toThrow(/purity/)
+  })
+
   it('lets exact generated Remote contributions inline without admitting their package implementation', () => {
     expect(resolveId('@deepseek-ai/dsh-goal/remote')).toBeNull()
     expect(() => resolveId('@deepseek-ai/dsh-goal')).toThrow(/purity/)

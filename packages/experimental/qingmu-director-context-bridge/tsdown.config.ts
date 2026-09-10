@@ -3,7 +3,7 @@ import { defineConfig } from 'tsdown'
 /** Node-only session projection plugin and UI-mountable bridge factory. */
 export default defineConfig([
   {
-    entry: ['lib/types/index.js', 'lib/types/invariant.js', 'lib/types/model-tools.js', 'lib/types/skill-resources.js'],
+    entry: ['lib/types/index.js', 'lib/types/invariant.js', 'lib/types/model-tools.js', 'lib/types/skill-resources.js', 'lib/types/story-draft.js'],
     outDir: 'lib',
     format: ['esm'],
     platform: 'node',

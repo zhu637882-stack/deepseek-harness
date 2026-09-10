@@ -1,6 +1,6 @@
 /** Native AI writing produces a reviewable draft for the existing project text-import flow. */
 import { useEffect, useRef, useState } from 'react'
-import type { NativeStoryPort, StoryDraftResult } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/src/story-draft.ts'
+import type { NativeStoryPort, StoryDraftResult } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft'
 import css from './NativeDirectorComposer.module.css'
 
 interface WritingRequest { sessionId: string; baseline: number; submitted: boolean }
