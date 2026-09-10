@@ -256,7 +256,7 @@ describe('ShootingReviewWorkspace', () => {
     await screen.findByText('本地导入视频')
     expect(screen.getByText('libtv-shot-01.mp4')).toBeTruthy()
     expect(screen.getByText('本地导入，来源待核实，暂不可采用')).toBeTruthy()
-    expect(screen.getByText('本地导入候选来源待核实，仅供本镜对比，暂不可采用。')).toBeTruthy()
+    expect(screen.getByText('本地视频可先查看或登记来源，采用还需完成检查。')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '采用这条视频' })).toBeNull()
   })
 

@@ -3004,6 +3004,9 @@ export interface YimengCommandEndpointMap {
   readonly listLocalReferenceCandidates: import('./local-reference-candidate.ts').LocalReferenceCandidateList
   readonly uploadLocalReferenceCandidate: import('./local-reference-candidate.ts').LocalReferenceCandidateResult
   readonly uploadLocalVoiceCandidate: import('./local-voice-candidate.ts').LocalVoiceCandidateResult
+  readonly readLocalVideoSource: import('./local-video-source-types.ts').LocalVideoSourceState
+  readonly registerLocalVideoSource: import('./local-video-source-types.ts').LocalVideoSourceResult
+  readonly recoverLocalVideoSource: import('./local-video-source-types.ts').LocalVideoSourceResult
   readonly uploadLocalVideoCandidate: import('./local-video-candidate.ts').LocalVideoCandidateResult
   readonly recoverLocalVideoCandidate: import('./local-video-candidate.ts').LocalVideoCandidateResult
   readonly recoverLocalVoiceCandidate: import('./local-voice-candidate.ts').LocalVoiceCandidateResult
@@ -3081,3 +3084,5 @@ export interface YimengCommandEndpointMap {
 
 /** Endpoint names accepted by `/qingmu-yimeng-command`. */
 export type YimengCommandEndpoint = keyof YimengCommandEndpointMap
+
+export type { LocalVideoSourceScope, LocalVideoSourceBinding, LocalVideoSourceRecord, LocalVideoSourcePacket, LocalVideoSourceRequest, LocalVideoSourceRecoveryRequest, LocalVideoSourceReceipt, LocalVideoSourceResult, LocalVideoSourceState } from './local-video-source-types.ts'

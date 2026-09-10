@@ -6,6 +6,7 @@ import type { AutomaticPlanningShot } from '@deepseek-ai/dsh-experimental-qingmu
 import { TakePreviewPlayer } from './TakePreviewPlayer.tsx'
 import { TakeThumbnail } from './TakeThumbnail.tsx'
 import { LocalVideoCandidateUpload } from './LocalVideoCandidateUpload.tsx'
+import { LocalVideoSourcePanel } from './LocalVideoSourcePanel.tsx'
 import { ShootingFirstFrame } from './ShootingFirstFrame.tsx'
 import { ShootingFirstFrameHistory } from './ShootingFirstFrameHistory.tsx'
 import { createFirstFrameSelectionClient, type FirstFrameHistoryCandidate } from './first-frame-selection.ts'
@@ -53,7 +54,8 @@ interface Props {
   readonly port: Pick<QingmuYimengPort, 'takeVersions' | 'takePreview' | 'selectTakeVersion' | 'recoverTakeVersionSelection'>
     & Partial<Pick<QingmuYimengPort,
       'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning'
-      | 'uploadLocalVideoCandidate' | 'recoverLocalVideoCandidate'>>
+      | 'uploadLocalVideoCandidate' | 'recoverLocalVideoCandidate'
+      | 'readLocalVideoSource' | 'registerLocalVideoSource' | 'recoverLocalVideoSource'>>
   readonly t: (key: QingmuCockpitKey) => string
   /** Isolated visual fixture for UI tests only; production does not infer task state from loading. */
   readonly testState?: ShootingReviewState
@@ -69,6 +71,14 @@ function hasLocalVideoPort(port: Props['port']): port is Props['port'] & {
   recoverLocalVideoCandidate: NonNullable<QingmuYimengPort['recoverLocalVideoCandidate']>
 } {
   return typeof port.uploadLocalVideoCandidate === 'function' && typeof port.recoverLocalVideoCandidate === 'function'
+}
+function hasLocalVideoSourcePort(port: Props['port']): port is Props['port'] & {
+  readLocalVideoSource: NonNullable<QingmuYimengPort['readLocalVideoSource']>
+  registerLocalVideoSource: NonNullable<QingmuYimengPort['registerLocalVideoSource']>
+  recoverLocalVideoSource: NonNullable<QingmuYimengPort['recoverLocalVideoSource']>
+} {
+  return typeof port.readLocalVideoSource === 'function' && typeof port.registerLocalVideoSource === 'function'
+    && typeof port.recoverLocalVideoSource === 'function'
 }
 export function localHeroUrl(source: string | undefined, assetId: string | undefined): string | undefined {
   try {
@@ -433,7 +443,7 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
               }} /></div>
               : usable(browsed) ? <div className={css.player}>
                 {isLocalVideo(browsed) && browsed.originalFileName && <span className={css.localPreviewLabel}>
-                  本地导入 · {browsed.originalFileName} · 来源待核实 · 暂不可采用
+                  本地导入 · {browsed.originalFileName} · 可查看或登记来源 · 暂不可采用
                 </span>}<TakePreviewPlayer request={{
                   projectId, episodeId, frameId: current.shotId, takeId: browsed.takeId,
                   expectedOutputSha256: browsed.outputSha256,
@@ -444,6 +454,10 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
                       <small>{message(state, load)}</small></div>}
           {!firstFrameOpen && !historyOpen && <>{testState !== undefined && <p className={css.mediaNotice} role="status">隔离演练状态，不代表真实任务，未提交生成。</p>}{load === 'loading' && <p className={css.mediaNotice} role="status">{message(state, load)}</p>}{load === 'failed' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}{state === 'failed' && load === 'ready' && <p className={css.mediaNotice} role="alert">{message(state, load)}</p>}</>}
         </div>
+        {!firstFrameOpen && !historyOpen && usable(browsed) && isLocalVideo(browsed)
+          && hasLocalVideoSourcePort(port) && <LocalVideoSourcePanel
+          key={`${projectId}:${episodeId}:${current.shotId}:${browsed.takeId}`}
+          scope={{ projectId, episodeId, frameId: current.shotId, assetId: browsed.takeId }} port={port} />}
         <div className={css.candidates} aria-label="候选画面">{(!historyOpen && !firstFrameOpen ? versions : []).map(version => <button className={isLocalVideo(version) ? css.localCandidate : undefined} key={version.takeId} type="button" aria-pressed={!firstFrameOpen && !historyOpen && version.takeId === browseId} onClick={() => { showMediaPane('takes'); setBrowseId(version.takeId); if (version.takeId !== browseId) setMediaUrl(undefined) }}>{usable(version) ? <TakeThumbnail request={{ projectId, episodeId, frameId: current.shotId, takeId: version.takeId, expectedOutputSha256: version.outputSha256 }} load={port.takePreview} className={css.candidateThumb} alt={`视频候选 v${version.versionOrdinal} · 视频第一帧`} /> : <span className={css.videoIcon}>素材尚不可用</span>}<span>{isLocalVideo(version) ? '本地导入视频' : `视频候选 v${version.versionOrdinal}`}</span>{isLocalVideo(version) && version.originalFileName && <small className={css.localFileName}>{version.originalFileName}</small>}<strong>{isLocalVideo(version) ? '本地导入，来源待核实，暂不可采用' : version.isSelected ? '当前选用' : version.qualityStatus === 'failed' ? '检查未通过' : version.qualityStatus === 'passed' ? '待你审看' : '等待检查'}</strong></button>)}
           {!firstFrameOpen && !historyOpen && imageShotCandidates.slice().reverse().map(candidate =>
             <div key={candidate.assetId} className={css.candidateCard}>
@@ -457,7 +471,7 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
             key={currentVideoScope} projectId={projectId} episodeId={episodeId} frameId={current.shotId} port={port}
             onStored={refreshLocalVideoCandidate} />}
         </div>
-        {!firstFrameOpen && !historyOpen && <p className={css.browseNote} data-state={state}>{versions.some(isLocalVideo) ? '本地导入候选来源待核实，仅供本镜对比，暂不可采用。' : versions.length === 0 && load === 'ready' && testState === undefined ? (hasFrameCandidate ? '本镜尚无视频候选，已有首帧和要求仍保留。' : requirementStatus === 'loading' ? '正在核对本镜已保存的首帧要求；核对完成前不会生成。' : requirementsReady ? '本镜还没有首帧。点下方「生成首帧」开始；画面要求在右栏可改。' : '缺少本镜已保存的首帧要求。请返回分镜核对后再生成。') : message(state, load)}<span>单击候选只切换中区媒体，不会改变选用。</span></p>}
+        {!firstFrameOpen && !historyOpen && <p className={css.browseNote} data-state={state}>{versions.some(isLocalVideo) ? '本地视频可先查看或登记来源，采用还需完成检查。' : versions.length === 0 && load === 'ready' && testState === undefined ? (hasFrameCandidate ? '本镜尚无视频候选，已有首帧和要求仍保留。' : requirementStatus === 'loading' ? '正在核对本镜已保存的首帧要求；核对完成前不会生成。' : requirementsReady ? '本镜还没有首帧。点下方「生成首帧」开始；画面要求在右栏可改。' : '缺少本镜已保存的首帧要求。请返回分镜核对后再生成。') : message(state, load)}<span>单击候选只切换中区媒体，不会改变选用。</span></p>}
         {selectionError && <p role="alert">{selectionError}</p>}
         {adoptError && <p role="alert">{adoptError}</p>}
         <div className={css.reworkActions} aria-label="本镜重做操作">

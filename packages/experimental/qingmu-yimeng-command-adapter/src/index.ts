@@ -6,6 +6,7 @@ import { prepareCreationCommand, prepareCreationOptionsRead } from './creation.t
 import { prepareScenePlanning } from './scene-planning.ts'
 import { prepareLocalReferenceCandidate } from './local-reference-candidate.ts'
 import { prepareLocalVoiceCandidate } from './local-voice-candidate.ts'
+import { prepareLocalVideoSource } from './local-video-source.ts'
 import { MAX_LOCAL_VIDEO_JSON_BYTES, prepareLocalVideoCandidate } from './local-video-candidate.ts'
 import type { DirectorProposalFreshnessResult } from './director-proposal.ts'
 import {
@@ -5845,6 +5846,11 @@ export function createYimengCommandHandler(
         normalize = prepared.normalize
       } else if (['registerReferenceVideoCandidateForReview', 'readReferenceVideoCandidateRegistration'].includes(endpoint)) {
         const prepared = prepareReferenceVideoReview(endpoint, payload, stageArtifactHelpers)
+        path = prepared.path
+        requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
+        normalize = prepared.normalize
+      } else if (['readLocalVideoSource', 'registerLocalVideoSource', 'recoverLocalVideoSource'].includes(endpoint)) {
+        const prepared = prepareLocalVideoSource(endpoint, payload, stageArtifactHelpers)
         path = prepared.path
         requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
         normalize = prepared.normalize

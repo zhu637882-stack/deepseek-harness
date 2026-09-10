@@ -153,3 +153,5 @@ ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只
 `saveReferenceVideoDraft` 通过认证 Writer API 保存一份显式编辑的镜头草稿，再通过既有只读适配器校验归属、版本和请求 SHA。版本冲突及不确定回执不会触发自动重提。该操作不修改生产选择、不调用 Provider。
 
 `queueReferenceVideo` 按当前报价、准确费用上限和明确确认提交一份已存草稿。Writer 原子记录不可变输入、TaskCenter 任务及适用的积分预留，Worker 经既有 ProviderGate/outbox 派发前重新核对来源与价格。响应不明时保留原请求编号，Host 不自动重发。返回的是候选任务，不采用视频或推导人工签收。
+
+`readLocalVideoSource`、`registerLocalVideoSource` 和 `recoverLocalVideoSource` 通过 Writer 读取、保存和恢复已有候选的来源记录。登记绑定原上传回执、视频原字节与当前镜头版本。原始输入、结果、下载 JSON 保存在大小受限的私有文件中，浏览器响应只含元数据与摘要。已保存记录无法证明实际生成请求或平台执行，因此两项核验标记均为 false。镜头变更后仍可读取历史回执，无需再次写入。登记不改变采用或审批。

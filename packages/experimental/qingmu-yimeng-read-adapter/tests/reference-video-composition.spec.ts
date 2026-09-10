@@ -12,6 +12,7 @@ import * as Connection from '@deepseek-ai/dsh-client-connection'
 import { expect, it, vi } from 'vitest'
 import * as Adapter from '../src/index.ts'
 import * as Commands from '../../qingmu-yimeng-command-adapter/src/index.ts'
+import { sourceFixture } from '../../qingmu-yimeng-command-adapter/tests/local-video-source.fixture.ts'
 import { request, response, savedDraft, quoteRequest, quoteResponse, runRequest, runResponse } from './reference-video-fixture.ts'
 
 it('loads the actual Host, Connection and read plugin through YAML and serves a verified request preview', async () => {
@@ -42,12 +43,13 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
     byteSize: 32, mimeType: 'video/mp4', inputSha256: localSha, materializedSha256: localSha,
     durationSec: 8, width: 1280, height: 720, hasAudio: true, sourceDeclaration: 'local_file_unverified',
     rightsStatus: 'not_recorded', selectionStatus: 'Unselected', isSelected: false, providerCalls: 0, generationQueued: false }
+  const localSource = sourceFixture()
   const requests: { url: string | undefined; method: string | undefined; authorization: string | undefined; body: string }[] = []
   const upstream = createServer(async (req, res) => {
     let body = ''
     for await (const chunk of req) body += String(chunk)
     requests.push({ url: req.url, method: req.method, authorization: req.headers.authorization, body })
-    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(req.url?.includes('/local-video-candidates') ? localReceipt : req.url?.includes('/review-registration') ? registration : req.url?.endsWith('/prepare') ? prepared
+    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(req.url?.includes('/source') ? (req.method === 'GET' && !req.url.includes('/receipt') ? localSource.state : localSource.result) : req.url?.includes('/local-video-candidates') ? localReceipt : req.url?.includes('/review-registration') ? registration : req.url?.endsWith('/prepare') ? prepared
       : req.url?.includes('/materials') ? materialState : req.url?.includes('/runs') ? runResponse : req.url?.endsWith('/quote') ? quoteResponse : req.url?.includes('/drafts/') ? savedDraft : response))
   })
   await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve))
@@ -159,6 +161,20 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
       expect((await imported.json()).result).toEqual({ ok: true, value: localReceipt })
     }
     expect(requests.slice(-2).map(r => r.method)).toEqual(['POST', 'GET'])
+    expect(requests.at(-1)?.body).toBe('')
+    for (const [method, payload, expected] of [
+      ['readLocalVideoSource', localSource.scope, localSource.state],
+      ['registerLocalVideoSource', localSource.request, localSource.result],
+      ['recoverLocalVideoSource', localSource.recovery, localSource.result],
+    ] as const) {
+      const response = await fetch(`http://127.0.0.1:${ctx.webServer.port}/qingmu-yimeng-command/${method}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ type: 'client-request', rpcId: method, method, payload }),
+      })
+      expect(((await response.json()) as { result: unknown }).result).toEqual({ ok: true, value: expected })
+    }
+    expect(requests.slice(-3).map(r => r.method)).toEqual(['GET', 'POST', 'GET'])
+    expect(requests.slice(-3).every(r => r.authorization === 'Bearer fixture-owner-token')).toBe(true)
     expect(requests.at(-1)?.body).toBe('')
   } finally {
     await ctx.fiber.dispose(); upstream.closeAllConnections()

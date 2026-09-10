@@ -699,6 +699,18 @@ export interface QingmuYimengCommandPort {
     request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceContentRequest,
     signal?: AbortSignal,
   ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalReferenceCandidateContent>
+  readLocalVideoSource(
+    request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalVideoSourceScope,
+    signal?: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalVideoSourceState>
+  registerLocalVideoSource(
+    request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalVideoSourceRequest,
+    signal?: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalVideoSourceResult>
+  recoverLocalVideoSource(
+    request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalVideoSourceRecoveryRequest,
+    signal?: AbortSignal,
+  ): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalVideoSourceResult>
   uploadLocalVideoCandidate(
     request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').LocalVideoUploadRequest,
     signal?: AbortSignal,
