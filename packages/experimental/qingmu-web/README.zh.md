@@ -16,13 +16,15 @@ IMAGO 方法适配器优先从 Cordis 非空白的显式 `config.coreRoot` 解�
 
 预设组装完整导演角色提示与上下文桥的[原生导演工具](../qingmu-director-context-bridge/README.zh.md)。它通过已有 Writer 处理器保存用户明确要求的引用草稿或剧本台词修改，不增加 shell、任意文件操作、自修改、Provider、采用或批准工具。现有驾驶舱必须将所选镜头绑定到同一个会话。未绑定镜头时，工具如实报告，不编造项目。驾驶舱可将已记录提示词建议采用到可编辑草稿；这不等于完整创作流程。
 
+预设复用原生技能文件提供器，只加载包内目录，并挂载原生 `skill` 工具。Web 底座将技能发现交给预设；此创作预设不扫描其他项目的已安装技能。[来源清单](agent-presets/qingmu-director/skills/sources.json) 记录仓库提交、上游哈希和适配后哈希；完整包含文字参考与模板，排除的二进制案例逐项列明。[资料读取器](../qingmu-director-context-bridge/src/skill-resources.ts) 校验包内哈希并明确分页，不静默截断。读到方法不等于已保存导演设计或已验证创作质量。
+
 ## 模型体验
 
 ### 青木导演预设
 
 #### 模型看到什么
 
-只有 `qingmu-director` 会话收到 [agent.cordis.yml](agent-presets/qingmu-director/agent.cordis.yml) 中的固定中文角色提示和限定作用域的原生工具 schema。角色提示要求先读取真实 Writer 上下文与完整 IMAGO 方法，再进行导演工作。表演、机位和引用修改沿用已存引用草稿，先读取、预览，再保存用户要求的修改。现有台词逐字保留；明确替换正式台词时先走已有 ChangeSet 工具，再核对引用草稿。来源变化时重新读取上下文和方法，不能将旧文字绑定到新哈希。明确修改 PromptIR 字段或本镜没有引用草稿时仍可使用字段建议；完整首稿还要求当前既无 Draft 也无 Ready。保存工作草稿不代表生成或批准媒体。免密钥原生循环快照锁定其实际模型输入。
+只有 `qingmu-director` 会话收到 [agent.cordis.yml](agent-presets/qingmu-director/agent.cordis.yml) 中的固定中文角色提示和限定作用域的原生工具 schema。角色提示使用真实 Writer 上下文，以及包内 cinematic-director 与 ai-visual-director 方法，通过作用域内的资料工具读取关联参考。剧本和导演决定对白、表演与运镜，开源数值经验仅供参考。表演、机位和引用修改沿用已存引用草稿，先读取、预览，再保存用户要求的修改。现有台词逐字保留；明确替换正式台词时先走已有 ChangeSet 工具，再核对引用草稿。来源变化时重新读取上下文和方法，不能将旧文字绑定到新哈希。明确修改 PromptIR 字段或本镜没有引用草稿时仍可使用字段建议；完整首稿还要求当前既无 Draft 也无 Ready。保存工作草稿不代表生成或批准媒体。免密钥原生循环快照锁定其实际模型输入。
 
 #### Token 影响
 

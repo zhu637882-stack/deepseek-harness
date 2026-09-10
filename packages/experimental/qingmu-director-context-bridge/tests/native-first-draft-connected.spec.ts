@@ -17,6 +17,10 @@ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import AgentPresets from '@deepseek-ai/dsh-agent-presets'
 import LlmRuntime, { CallId, createUserMessage, LlmAdapter, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import * as Persona from '@deepseek-ai/dsh-persona'
+import Skills from '@deepseek-ai/dsh-skill'
+import * as SkillFilesystem from '@deepseek-ai/dsh-skill-filesystem'
+import * as ToolSkill from '@deepseek-ai/dsh-tool-skill'
+import * as SkillResources from '../src/skill-resources.ts'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -143,12 +147,16 @@ it.skipIf(!writerRoot || !coreRoot)('persists a native first draft through actua
     ctx.loader.internal = { version: 'v2', async import(specifier: string) {
       if (specifier === '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/model-tools') return ModelTools
       if (specifier === '@deepseek-ai/dsh-persona') return Persona
+      if (specifier === '@deepseek-ai/dsh-skill-filesystem') return SkillFilesystem
+      if (specifier === '@deepseek-ai/dsh-tool-skill') return ToolSkill
+      if (specifier === '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/skill-resources') return SkillResources
       throw new Error(`unexpected integration plugin: ${specifier}`)
     } } as unknown as NonNullable<typeof ctx.loader.internal>
     await ctx.plugin(LlmRuntime)
     await ctx.plugin(SessionStore)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(Skills)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(AgentLoop, { agents: [] })
     await ctx.plugin(AgentPresets, { default: 'qingmu-director', roots: [{ path: presetRoot, trust: 'system' }], includeUserRoot: false })

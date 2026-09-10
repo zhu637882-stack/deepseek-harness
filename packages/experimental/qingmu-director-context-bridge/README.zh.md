@@ -4,6 +4,8 @@
 
 这个私有实验包把一个 DSh Session 精确绑定到一个易梦 `project / episode / scene / shot` 及其规范化 `contextSnapshotSha256`。绑定使用仅日志、整值快照的 Session 事件，所以进程停止再启动后，可以从原 Session 日志恢复同一身份，不建立第二套数据库或账本。
 
+预设作用域中的 `./skill-resources` 插件按清单路径读取创作参考、子技能、引擎和模板，返回来源提交、上游与适配后哈希和明确分页。文件变更、未登记路径、目录外符号链接及超大页均拒绝返回，不截断内容。原生 `skill` 负责技能入口读取。资料作为工具结果进入会话，不写项目或调用生成模型；调用方沿 `nextLine` 读完所需资料。
+
 ## 挂载接口
 
 `createDirectorContextBridge(readPort)` 提供 `enter`、`clear`、`bindProposal`、`recover`、`current` 和 `freshnessRequest`。read port 必须复用现有已规范化的 `director-inference/context` adapter 路径，不得创建 work order、调用模型、派发 Provider 或写易梦业务状态。

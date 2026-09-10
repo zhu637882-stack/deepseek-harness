@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 This private experimental package binds one DSh session to one exact Yimeng `project / episode / scene / shot` and its normalized `contextSnapshotSha256`. The binding is a log-only, whole-value session event, so a restarted session rebuilds the same identity without a second database or ledger.
 
+The preset-scoped `./skill-resources` plugin reads packaged creative references, sub-skills, engines and templates by manifest path. It returns repository revision, upstream and adapted hashes, and explicit line pagination; changed files, unlisted paths, external symlinks and oversized pages fail without partial results. Native `skill` owns entry-point loading. Resource reads add durable tool results but no project writes or provider calls; the caller follows `nextLine` to read a complete resource.
+
 ## Mount interface
 
 `createDirectorContextBridge(readPort)` exposes `enter`, `clear`, `bindProposal`, `recover`, `current`, and `freshnessRequest`. The read port must use the existing normalized `director-inference/context` adapter path. It must not create a work order, invoke a model, dispatch a Provider, or write Yimeng business state.

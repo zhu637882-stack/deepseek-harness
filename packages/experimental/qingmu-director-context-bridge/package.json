@@ -24,7 +24,11 @@
       "default": "./lib/model-tools.js"
     },
     "./src/*": "./src/*",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./skill-resources": {
+      "types": "./lib/types/skill-resources.d.ts",
+      "default": "./lib/skill-resources.js"
+    }
   },
   "files": [
     "lib/*.js",
@@ -74,6 +78,9 @@
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-session": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^",
-    "@deepseek-ai/cordis": "workspace:^"
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-skill": "workspace:^",
+    "@deepseek-ai/dsh-skill-filesystem": "workspace:^",
+    "@deepseek-ai/dsh-tool-skill": "workspace:^"
   }
 }

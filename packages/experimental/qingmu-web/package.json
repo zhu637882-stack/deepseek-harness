@@ -40,7 +40,9 @@
     "@deepseek-ai/dsh-experimental-qingmu-director-context-bridge": "workspace:^",
     "@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter": "workspace:^",
     "@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter": "workspace:^",
-    "@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter": "workspace:^"
+    "@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter": "workspace:^",
+    "@deepseek-ai/dsh-skill-filesystem": "workspace:^",
+    "@deepseek-ai/dsh-tool-skill": "workspace:^"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-invariants": "workspace:^",

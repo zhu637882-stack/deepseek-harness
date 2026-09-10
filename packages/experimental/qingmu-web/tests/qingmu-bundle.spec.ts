@@ -17,6 +17,8 @@ describe('Qingmu Web distribution composition', () => {
     expect(entries.find(entry => entry.id === 'agent-presets')?.config)
       .toEqual({ default: 'qingmu-director' })
     expect(entries.some(entry => entry.id === 'qingmu-director-model-tools')).toBe(false)
+    expect(entries.find(entry => entry.id === 'skill-filesystem')?.disabled).toBe(true)
+    expect(composeEntries(layers.slice(0, 2)).find(entry => entry.id === 'skill-filesystem')?.disabled).toBe(true)
 
     expect(entries.filter(entry => entry.id === 'ui-brand-official')).toEqual([
       expect.objectContaining({ id: 'ui-brand-official', disabled: true }),

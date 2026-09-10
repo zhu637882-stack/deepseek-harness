@@ -14,6 +14,10 @@ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import AgentPresets from '@deepseek-ai/dsh-agent-presets'
 import LlmRuntime, { CallId, createUserMessage, LlmAdapter, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import * as Persona from '@deepseek-ai/dsh-persona'
+import Skills from '@deepseek-ai/dsh-skill'
+import * as SkillFilesystem from '@deepseek-ai/dsh-skill-filesystem'
+import * as ToolSkill from '@deepseek-ai/dsh-tool-skill'
+import * as SkillResources from '../src/skill-resources.ts'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -35,11 +39,32 @@ const fourthReference = [
 /** Deterministic external model stand-in; every request still comes from the native loop. */
 class ExampleModel extends LlmAdapter {
   readonly requests: GenerateOptions[] = []
-  constructor(readonly draftMode: boolean | 'first' | 'dialogue' = false) { super() }
+  constructor(readonly draftMode: boolean | 'first' | 'dialogue' | 'skills' = false) { super() }
 
   async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     const step = this.requests.length
     this.requests.push(options)
+    if (this.draftMode === 'skills') {
+      const calls = [
+        { name: 'skill', args: { name: 'cinematic-director' } },
+        { name: 'qingmu_read_skill_resource', args: { skill: 'cinematic-director', path: 'references/sound-and-dialogue.md', lineCount: 500 } },
+        { name: 'skill', args: { name: 'ai-visual-director' } },
+        { name: 'qingmu_read_skill_resource', args: { skill: 'ai-visual-director', path: 'engines/dialogue-engine.md', lineCount: 500 } },
+        { name: 'qingmu_read_skill_resource', args: { skill: 'ai-visual-director', path: 'sub-skills/create/SKILL.md', lineCount: 500 } },
+      ]
+      const call = calls[step]
+      if (call !== undefined) {
+        yield { type: 'block-start', index: 0, blockType: 'tool-call' }
+        yield { type: 'block-end', index: 0, block: { type: 'tool-call', id: CallId(`skill-${step}`), name: call.name, arguments: JSON.stringify(call.args) } }
+        yield { type: 'finish', reason: { kind: 'tool-calls' } }
+      } else {
+        const text = '创作方法已读取；剧本和导演决定多人对话、语气与运镜。此示例未保存设计或生成媒体。'
+        yield { type: 'block-start', index: 0, blockType: 'text' }
+        yield { type: 'block-end', index: 0, block: { type: 'text', text } }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      }
+      return
+    }
     if (step < 2) {
       const name = this.draftMode === 'dialogue' ? (step === 0 ? 'qingmu_read_dialogue' : 'qingmu_preview_dialogue_edit')
         : this.draftMode === 'first' ? (step === 0 ? 'qingmu_read_first_draft' : 'qingmu_propose_first_draft')
@@ -70,7 +95,7 @@ class ExampleModel extends LlmAdapter {
  * @returns the actual composed persona, tools, logged calls/results and next-request method check.
  * @throws if the shipped preset fails to load or the session cannot complete.
  */
-export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'dialogue' = false) {
+export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'dialogue' | 'skills' = false) {
   const ctx = new Context()
   try {
     const presetRoot = fileURLToPath(new URL('../../qingmu-web/agent-presets/', import.meta.url))
@@ -82,6 +107,9 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'd
       async import(specifier: string) {
         if (specifier === '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/model-tools') return ModelTools
         if (specifier === '@deepseek-ai/dsh-persona') return Persona
+        if (specifier === '@deepseek-ai/dsh-skill-filesystem') return SkillFilesystem
+        if (specifier === '@deepseek-ai/dsh-tool-skill') return ToolSkill
+        if (specifier === '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/skill-resources') return SkillResources
         throw new Error(`unexpected example plugin: ${specifier}`)
       },
     } as unknown as NonNullable<typeof ctx.loader.internal>
@@ -89,6 +117,7 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'd
     await ctx.plugin(SessionStore)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(Skills)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(AgentLoop, { agents: [] })
     await ctx.plugin(AgentPresets, { default: 'qingmu-director', roots: [{ path: presetRoot, trust: 'system' }], includeUserRoot: false })
@@ -151,7 +180,7 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'd
     await ordinary.dispose()
     const result = {
       readiness: readNativeDirectorReadiness(ctx, handle.agent.session), ordinaryReadiness,
-      ...(draftMode && draftMode !== 'dialogue' ? { draftProposal: await createDirectorContextRpcHandler(ctx.sessions, {
+      ...(draftMode && draftMode !== 'dialogue' && draftMode !== 'skills' ? { draftProposal: await createDirectorContextRpcHandler(ctx.sessions, {
         readDirectorContext: async () => ({ ok: true, context: draftContext as DirectorContextSnapshot }),
       }, { prompt: ctx.qingmuYimengRead, method: ctx.qingmuImagoMethod })(draftMode === 'first' ? 'readNativeFirstDraftProposal' : 'readNativeDraftProposal', {
         sessionId: handle.agent.session.id, scope,
@@ -163,6 +192,14 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'd
       results: handle.agent.session.events.filter(event => event.type === 'tool/result').map(event =>
         event.data.message.content.flatMap(part => part.content).filter(block => block.type === 'text').map(block => block.text).join('')),
       methodInNextRequest: JSON.stringify(model.requests[2]?.messages).includes('逐镜比对锁定意图'),
+      ...(draftMode === 'skills' ? { creativeMethodsInNextRequest: {
+        catalog: JSON.stringify(model.requests[0]?.messages).includes('cinematic-director'),
+        director: JSON.stringify(model.requests[1]?.messages).includes('青木适用范围'),
+        dialogue: JSON.stringify(model.requests[2]?.messages).includes('Multiple speakers may share a frame'),
+        visual: JSON.stringify(model.requests[3]?.messages).includes('AI Visual Director'),
+        engine: JSON.stringify(model.requests[4]?.messages).includes('engines/dialogue-engine.md'),
+        orchestration: JSON.stringify(model.requests[5]?.messages).includes('sub-skills/create/SKILL.md'),
+      } } : {}),
       rootTools: ctx.tools.schemas().map(tool => tool.name),
     }
     await handle.dispose()

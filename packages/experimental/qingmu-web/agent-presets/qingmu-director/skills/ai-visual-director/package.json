@@ -1,0 +1,46 @@
+{
+  "name": "ai-visual-director",
+  "version": "0.1.0",
+  "description": "Claude Code skill for turning stories into visual development boards and AI video prompt packages.",
+  "license": "MIT",
+  "homepage": "https://github.com/jijiutong/ai-visual-director#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jijiutong/ai-visual-director.git"
+  },
+  "bin": {
+    "ai-visual-director": "scripts/install.mjs"
+  },
+  "files": [
+    "SKILL.md",
+    "api-config.template.env",
+    "sources/",
+    "engines/",
+    "knowledge/",
+    "rules/",
+    "templates/",
+    "platforms/",
+    "state/",
+    "projects/",
+    "imitation/",
+    "sub-skills/",
+    "docs/",
+    "examples/",
+    "scripts/install.mjs",
+    "install.sh",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "node tests/unit/architecture.test.mjs",
+    "test:integration": "node tests/integration/story-to-video-flow.test.mjs",
+    "smoke": "node scripts/smoke-create-project.mjs",
+    "smoke:obsidian": "node scripts/smoke-obsidian-novel.mjs",
+    "smoke:incremental": "npm run smoke && node scripts/smoke-incremental-update.mjs",
+    "test:e2e": "npm run smoke && node tests/e2e/smoke-project-package.test.mjs",
+    "test:e2e:obsidian": "npm run smoke:obsidian && node tests/e2e/obsidian-novel-package.test.mjs",
+    "test:incremental": "npm run smoke:incremental && node tests/e2e/incremental-update.test.mjs"
+  }
+}

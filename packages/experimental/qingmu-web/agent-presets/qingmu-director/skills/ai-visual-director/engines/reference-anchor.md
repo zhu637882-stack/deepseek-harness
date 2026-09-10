@@ -1,0 +1,223 @@
+# 参考锚点引擎
+
+根据目标平台自动分配参考图策略 + 平台硬限制校验。
+
+---
+
+## 零、资产存在性检查（必须在分配前执行）
+
+**不假设用户已生成所有资产**。分配 @图前必须检查实际有哪些。
+
+### 检查流程
+
+```
+1. 读取 asset-plan 的资产需求列表（需要哪些类型）
+2. 读取 state/asset-map.md（上次写入的记录，如果存在）
+3. 输出存在性报告：
+   ├─ 已存在 → 标注 ✅，纳入本次 @图分配
+   ├─ 不存在 → 标注 ❌，不分配 @图，提示用户先出
+   ├─ 已有资产已覆盖（如角色卡含武器）→ 跳过独立分配，标注「已含于XX」
+   └─ 功能重叠（如场景九宫格比全景更精细）→ 优先选更精细的，标注裁切原因
+4. 最终 @图包 = 实际存在 + 去重 + 不超平台上限
+```
+
+### 资产优先级（裁切时使用）
+
+| 优先级 | 类型 | 原因 |
+|--------|------|------|
+| 1 | 角色卡 | 锁面部/体态 — 最高优先级 |
+| 2 | 场景参考（九宫格 > 全景）| 锁空间/光 — 九宫格更精细 |
+| 3 | 全案图 | 全局视觉锚定 |
+| 4 | 分镜图（第一张） | 首段关键帧 |
+| 5 | 首帧/尾帧 | 起终点锚定 |
+| 6 | 余下分镜图 | 补充画面锚点 |
+| 7 | 道具卡 | 仅独立武器/配饰需要（已含于角色卡则跳过）|
+
+### 输出格式
+
+```markdown
+【资产存在性检查】
+  ✅ @图0: 场景九宫格（已存在）— 锁9视角空间
+  ✅ @图1: 角色卡（已存在）— 含碎穹剑，无需单独武器卡
+  ✅ @图2: 全案图（已存在）
+  ✅ @图3-5: 分镜图×3（已存在）
+  ➖ @图X: 场景全景 — 已被九宫格替代（更精细），裁切
+  ❌ 尾帧 — 未生成，prompt 中靠文字锚定尾帧状态
+  总计：5/5 张 ✅ | 平台上限：12 | 无超额
+
+  ⚠ 缺失：尾帧 — 视频尾帧精度可能降低，建议补出
+```
+
+---
+
+## 一、平台能力矩阵
+
+> **所有限制从 `api-config.template.env` 读取，此表为文档参考。修改 config 即全局生效。**
+
+| 平台 | 配置键 | 时长 | Prompt字数 | 参考图 | 中文 |
+|------|--------|------|-----------|--------|------|
+| Seedance | `SEEDANCE_*` | `SEEDANCE_MAX_DURATION` | `SEEDANCE_MAX_PROMPT_CHARS` | `SEEDANCE_MAX_REF_IMAGES` | `SEEDANCE_SUPPORTS_CHINESE` |
+| Runway | `RUNWAY_*` | `RUNWAY_MAX_DURATION` | `RUNWAY_MAX_PROMPT_CHARS` | `RUNWAY_MAX_REF_IMAGES` | `RUNWAY_SUPPORTS_CHINESE` |
+| 可灵 | `KELING_*` | `KELING_MAX_DURATION` | `KELING_MAX_PROMPT_CHARS` | `KELING_MAX_REF_IMAGES` | `KELING_SUPPORTS_CHINESE` |
+| Luma | `LUMA_*` | `LUMA_MAX_DURATION` | `LUMA_MAX_PROMPT_CHARS` | `LUMA_MAX_REF_IMAGES` | `LUMA_SUPPORTS_CHINESE` |
+| Sora | `SORA_*` | `SORA_MAX_DURATION` | `SORA_MAX_PROMPT_CHARS` | `SORA_MAX_REF_IMAGES` | `SORA_SUPPORTS_CHINESE` |
+| Pika | `PIKA_*` | `PIKA_MAX_DURATION` | `PIKA_MAX_PROMPT_CHARS` | `PIKA_MAX_REF_IMAGES` | `PIKA_SUPPORTS_CHINESE` |
+
+---
+
+## 二、自动锚点分配
+
+> ⚠ 以下为**理想完整包**。实际分配前必须先执行存在性检查（零节），仅分配已存在的资产，不编造 null 引用。
+
+### Seedance（参考图优先型）
+```
+上限 = SEEDANCE_MAX_REF_IMAGES（api-config.template.env，默认12）
+理想完整包：场景参考 + 角色卡 + 全案图 + 分镜图×N + 尾帧 + 首帧
+实际分配 = 已存在 ∩ 需求，按优先级排序，不超上限
+```
+
+### Runway Gen-3（Prompt优先型）
+```
+上限 = RUNWAY_MAX_REF_IMAGES（api-config.template.env，默认3）
+理想完整包：首帧 + 关键帧 + 尾帧
+缺失则降级为纯 prompt DNA 描述
+```
+
+### 可灵（首帧优先型）
+```
+上限 = KELING_MAX_REF_IMAGES（api-config.template.env，默认3）
+理想完整包：首帧 + 角色卡 + 关键帧
+缺失则降级为 prompt + 首帧为主
+```
+
+### Luma / Pika（轻量型）
+```
+上限 = LUMA_MAX_REF_IMAGES / PIKA_MAX_REF_IMAGES（api-config.template.env，默认2）
+理想完整包：首帧 + 尾帧
+缺失则纯 prompt 驱动
+```
+
+---
+
+## 三、一致性策略
+
+| 平台 | 角色一致性 | 场景一致性 |
+|------|----------|----------|
+| Seedance | 角色卡参考图 | 场景全景参考图 |
+| Runway | Prompt DNA 描述 | Prompt 场景描述 |
+| 可灵 | 首帧 + Prompt | 首帧 + Prompt |
+| Luma/Sora/Pika | Prompt 为主 | Prompt 为主 |
+
+---
+
+## 四、用途分流过滤
+
+> 分配视频参考图时，**只选 video_asset 和 consistency_asset**。display_asset 和 marketing_asset 不进视频 @图列表。
+
+### 过滤规则
+
+```
+1. 读取 asset-map 中每张图的 asset_purpose 字段
+2. 用途 = video_asset → ✅ 直接进入视频 @图引用
+3. 用途 = consistency_asset → ✅ 进入视频 @图引用（结构化的空间/角色锁定）
+4. 用途 = display_asset → ❌ 不进视频 → 提示需要派生 video_asset（见 rules/video-reference-assets.md）
+5. 用途 = marketing_asset → ❌ 不进视频 → 仅作封面/海报输出
+```
+
+### 自动降级提示
+
+当视频 @图全部为 display_asset 时：
+
+```markdown
+⚠ 视频参考图不可用：
+
+当前资产均为 📋 display_asset，不适合直接喂给 {PLATFORM}：
+  - 文字/边框/标注会污染 AI 视频模型理解
+  - 高密度排版无法作为画面锚点
+
+建议：
+  1. 生成 🎬 video_asset：clean 角色卡 + clean 场景锚点 + 首尾帧
+  2. 或使用 /declutter video-ref 从 display_asset 派生 clean 版本
+
+回复「生成视频锚点」→ 自动生成
+回复「跳过」→ 降级为纯 prompt 文字描述
+```
+
+---
+## 五、平台校验
+
+```
+1. 时长校验：≥平台上限 → 标记"需拆段"
+2. 字数校验：>平台上限 → 调用 prompt-compression
+3. 参考图校验：>平台上限 → 按优先级裁切（video_asset > consistency_asset > display_asset）
+4. 用途校验：video @图中无 video_asset → 触发自动降级提示（§四）
+5. 语言校验：从 `api-config.template.env`（视频平台硬限制 + 图像平台语言支持）读取语言支持 → 不匹配则翻译
+
+校验不通过 → auto-repair → 重新校验
+```
+
+---
+
+## 六、输出
+
+```markdown
+【参考锚点方案】
+
+目标平台：[平台名] / 策略：[参考图优先/Prompt优先/首帧优先/轻量]
+
+参考图包（[N]张）：
+  1. [类型]：[用途 📋/🎬/🔒/📢] - 用于[镜头编号]
+  2. ...
+
+平台校验：
+  ✅ 时长：[Ns] — 在限制内
+  ✅ 字数：[N字] — 在限制内
+  ✅ 参考图：[N张] — 在限制内
+  ✅ 用途：🎬 video_asset [N]张 / 🔒 consistency_asset [N]张 — 视频可用
+  ✅ 语言：[语言] — 平台支持
+  ⚠ [问题] → [修复]
+
+⚠ [若无 video_asset，显示降级提示]
+
+平台注意事项：
+  - [特殊限制/注意事项]
+```
+
+### 同时写入 `state/asset-map.md`（动态 @图映射）
+
+按平台策略生成结构化映射表，供 `video-prompt-assembly` 动态读取：
+
+```markdown
+| @编号 | type | name | source | asset_purpose | locks | video_safe | density |
+|-------|------|------|--------|---------------|-------|------------|---------|
+| @图0 | [scene_reference/character_sheet/end_frame] | [名称] | [来源路径] | [video_asset/consistency_asset/display_asset/marketing_asset] | [锁定的维度] | [true/false] | [1-5] |
+| @图1 | ... | ... | ... | ... | ... | ... | ... |
+| @图2 | ... | ... | ... | ... | ... | ... | ... |
+```
+
+**映射规则**：
+1. **先执行资产存在性检查（零节）**— 确定哪些资产实际存在
+2. 按平台能力决定上限：读取 api-config.template.env → `{PLATFORM}_MAX_REF_IMAGES`
+3. 仅分配已存在的资产，null 引用不编造
+4. 按资产优先级排序：video_asset > consistency_asset > display_asset，超平台上限时裁切低优先级
+5. **用途分流**：video_asset 和 consistency_asset 进入 @图引用；display_asset 和 marketing_asset 不进视频 @图（触发降级提示）
+6. 已有资产覆盖的跳过独立分配（角色卡含武器→不另出武器卡）
+7. 每张图标注 `type`（类型）、`name`（名称）、`asset_purpose`（📋/🎬/🔒/📢）、`locks`（锁定维度）、`video_safe`（来自 LS metadata）、`density`（1-5）
+8. `video_safe` 判定：读取 `knowledge/layout-styles.md` 当前 LS 的 `video_safe` metadata
+9. `density` 判定：读取 `state/visual-control-state.md` 当前 density_level
+10. 最终 @编号从 0 开始连续编号，只编号实际存在的图（仅 video_asset + consistency_asset）
+
+> 视频 prompt 生成时，**不硬编码 @图0=场景、@图1=角色**，而是从 `state/asset-map.md` 动态读取映射。
+
+---
+
+## 联动
+
+← 读取 `api-config.template.env`（平台限制 + 默认平台 + 语言支持）
+← 接收 `asset-plan` 的资产列表
+→ 按平台过滤和重新分配
+→ **写入 `state/asset-map.md`**（动态生成 @图编号→用途映射表，供 video-prompt-assembly 读取）
+→ **更新 `state/variable-registry.md`**（project.word_count 平台校验后更新）
+→ 校验发现问题 → `auto-repair`
+→ 通过 → `motion-physics`
+→ **平台限制从此文件读取，不硬编码**。修改 `api-config.template.env` 即全局生效。
