@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ProjectAssetLibrary } from '../src/client/ProjectAssetLibrary.tsx'
 import type { ReferenceVideoAssetsResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
@@ -15,6 +15,10 @@ const localContent = {
   assetId: localPicture.assetId, sha256: localPicture.assetSha256,
   mimeType: 'image/png' as const, contentBase64: 'AQID',
 }
+const localPictureTwo = { ...localPicture, assetId: 'asset_localref_chenyuan', assetSha256: 'd'.repeat(64), label: '陈远',
+  localReferenceScope: { elementKind: 'actor' as const, targetId: 'actor_chenyuan' } }
+const localPictureThree = { ...localPicture, assetId: 'asset_localref_cafe', assetSha256: 'e'.repeat(64), label: '咖啡馆',
+  localReferenceScope: { elementKind: 'scene' as const, targetId: 'scene_cafe' } }
 function localReader() { return vi.fn(async () => localContent) }
 const page = (items: ReferenceVideoAssetsResponse['items']): ReferenceVideoAssetsResponse => ({ projectId:'p',page:1,pages:1,items })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
@@ -56,35 +60,153 @@ it('opens the real person or scene upload surface on request and rereads after i
 })
 
 
-it('reads a selected local candidate through its owner-and-SHA-bound port, not a public URL', async () => {
+it('reads a visible local image thumbnail through its owner-and-SHA-bound port, then keeps selection preview separate', async () => {
   const readLocalReferenceCandidateContent = localReader()
   const port = {
     referenceVideoAssets: vi.fn().mockResolvedValue(page([localPicture, picture])),
     readLocalReferenceCandidateContent,
   }
   render(<ProjectAssetLibrary projectId="p" port={port} />)
-  expect(readLocalReferenceCandidateContent).not.toHaveBeenCalled()
   await screen.findAllByRole('button', { name: '预览林予' })
+  await waitFor(() => {
+    expect(readLocalReferenceCandidateContent).toHaveBeenCalledWith({
+      projectId: 'p', elementKind: 'actor', targetId: 'actor_linyu',
+      assetId: 'asset_localref_linyu', expectedSha256: 'c'.repeat(64),
+    }, expect.any(AbortSignal))
+  })
+  expect(screen.getAllByRole('button', { name: '预览林予' })[0]!.querySelector('img')?.getAttribute('src'))
+    .toBe('data:image/png;base64,AQID')
   fireEvent.click(screen.getAllByRole('button', { name: '预览林予' })[0]!)
-  await waitFor(() => expect(readLocalReferenceCandidateContent).toHaveBeenCalledWith({
-    projectId: 'p', elementKind: 'actor', targetId: 'actor_linyu',
-    assetId: 'asset_localref_linyu', expectedSha256: 'c'.repeat(64),
-  }, expect.any(AbortSignal)))
+  await waitFor(() => {
+    expect(readLocalReferenceCandidateContent).toHaveBeenLastCalledWith({
+      projectId: 'p', elementKind: 'actor', targetId: 'actor_linyu',
+      assetId: 'asset_localref_linyu', expectedSha256: 'c'.repeat(64),
+    }, expect.any(AbortSignal))
+  })
+  expect(readLocalReferenceCandidateContent).toHaveBeenCalledTimes(2)
   expect(screen.getByRole('region', { name: '素材预览' }).querySelector('img')?.getAttribute('src'))
     .toBe('data:image/png;base64,AQID')
 })
 
+it('does not read a private image thumbnail until its card approaches the viewport', async () => {
+  let callback: IntersectionObserverCallback | undefined
+  class TestIntersectionObserver {
+    constructor(next: IntersectionObserverCallback) { callback = next }
+    disconnect() {}
+    observe() {}
+  }
+  vi.stubGlobal('IntersectionObserver', TestIntersectionObserver)
+  const readLocalReferenceCandidateContent = localReader()
+  const port = { referenceVideoAssets: vi.fn().mockResolvedValue(page([localPicture])), readLocalReferenceCandidateContent }
+  render(<ProjectAssetLibrary projectId="p" port={port} />)
+  await screen.findByRole('button', { name: '预览林予' })
+  await waitFor(() => { expect(callback).toBeDefined() })
+  expect(readLocalReferenceCandidateContent).not.toHaveBeenCalled()
+  act(() => { callback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver) })
+  await waitFor(() => { expect(readLocalReferenceCandidateContent).toHaveBeenCalledOnce() })
+})
+
+it('releases a private thumbnail read when its card leaves the viewport', async () => {
+  let callback: IntersectionObserverCallback | undefined
+  class TestIntersectionObserver {
+    constructor(next: IntersectionObserverCallback) { callback = next }
+    disconnect() {}
+    observe() {}
+  }
+  vi.stubGlobal('IntersectionObserver', TestIntersectionObserver)
+  let signal: AbortSignal | undefined
+  const reader = vi.fn()
+  reader.mockImplementationOnce((_request: unknown, nextSignal: AbortSignal) => {
+    signal = nextSignal
+    return new Promise<never>(() => {})
+  })
+  reader.mockResolvedValueOnce(localContent)
+  const port = { referenceVideoAssets: vi.fn().mockResolvedValue(page([localPicture])), readLocalReferenceCandidateContent: reader }
+  render(<ProjectAssetLibrary projectId="p" port={port} />)
+  await screen.findByRole('button', { name: '预览林予' })
+  await waitFor(() => { expect(callback).toBeDefined() })
+  act(() => { callback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver) })
+  await waitFor(() => { expect(reader).toHaveBeenCalledOnce() })
+  act(() => { callback?.([{ isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver) })
+  await waitFor(() => { expect(signal?.aborted).toBe(true) })
+  act(() => { callback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver) })
+  await waitFor(() => { expect(reader).toHaveBeenCalledTimes(2) })
+  expect(screen.getByRole('button', { name: '预览林予' }).querySelector('img')?.getAttribute('src'))
+    .toBe('data:image/png;base64,AQID')
+})
+
+it('does not let public images or voices consume private thumbnail read slots', async () => {
+  const observers: { callback: IntersectionObserverCallback }[] = []
+  class TestIntersectionObserver {
+    readonly callback: IntersectionObserverCallback
+    constructor(next: IntersectionObserverCallback) { this.callback = next; observers.push(this) }
+    disconnect() {}
+    observe() {}
+  }
+  vi.stubGlobal('IntersectionObserver', TestIntersectionObserver)
+  const reader = localReader()
+  const port = {
+    referenceVideoAssets: vi.fn().mockResolvedValue(page([picture, voice, localPicture])),
+    readLocalReferenceCandidateContent: reader,
+  }
+  render(<ProjectAssetLibrary projectId="p" port={port} />)
+  await screen.findByRole('button', { name: '预览林予音色' })
+  await waitFor(() => { expect(observers).toHaveLength(3) })
+  act(() => {
+    observers.forEach((observer) => {
+      observer.callback([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)
+    })
+  })
+  await waitFor(() => { expect(reader).toHaveBeenCalledOnce() })
+  expect(reader).toHaveBeenCalledWith({ projectId: 'p', elementKind: 'actor', targetId: 'actor_linyu',
+    assetId: localPicture.assetId, expectedSha256: localPicture.assetSha256 }, expect.any(AbortSignal))
+})
+
+it('limits private thumbnail reads and cancels a queued card that leaves the viewport', async () => {
+  const observers: { callback: IntersectionObserverCallback }[] = []
+  class TestIntersectionObserver {
+    readonly callback: IntersectionObserverCallback
+    constructor(next: IntersectionObserverCallback) { this.callback = next; observers.push(this) }
+    disconnect() {}
+    observe() {}
+  }
+  vi.stubGlobal('IntersectionObserver', TestIntersectionObserver)
+  const reader = vi.fn(() => new Promise<never>(() => {}))
+  const port = {
+    referenceVideoAssets: vi.fn().mockResolvedValue(page([localPicture, localPictureTwo, localPictureThree])),
+    readLocalReferenceCandidateContent: reader,
+  }
+  render(<ProjectAssetLibrary projectId="p" port={port} />)
+  await screen.findByRole('button', { name: '预览咖啡馆' })
+  await waitFor(() => { expect(observers).toHaveLength(3) })
+  act(() => {
+    observers.forEach((observer) => {
+      observer.callback([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)
+    })
+  })
+  await waitFor(() => { expect(reader).toHaveBeenCalledTimes(2) })
+  expect(reader).toHaveBeenCalledWith({ projectId: 'p', elementKind: 'actor', targetId: 'actor_linyu',
+    assetId: localPicture.assetId, expectedSha256: localPicture.assetSha256 }, expect.any(AbortSignal))
+  expect(reader).toHaveBeenCalledWith({ projectId: 'p', elementKind: 'actor', targetId: 'actor_chenyuan',
+    assetId: localPictureTwo.assetId, expectedSha256: localPictureTwo.assetSha256 }, expect.any(AbortSignal))
+  act(() => { observers[2]!.callback([{ isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver) })
+  act(() => { observers[0]!.callback([{ isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver) })
+  await waitFor(() => { expect(reader).toHaveBeenCalledTimes(2) })
+  expect(reader).not.toHaveBeenCalledWith({ projectId: 'p', elementKind: 'scene', targetId: 'scene_cafe',
+    assetId: localPictureThree.assetId, expectedSha256: localPictureThree.assetSha256 }, expect.any(AbortSignal))
+})
+
 it('shows a failed local preview and retries only when requested', async () => {
-  const reader = vi.fn().mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce(localContent)
+  const reader = vi.fn().mockRejectedValueOnce(new Error('thumbnail unavailable')).mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce(localContent)
   const port = { referenceVideoAssets: vi.fn().mockResolvedValue(page([localPicture])), readLocalReferenceCandidateContent: reader }
   render(<ProjectAssetLibrary projectId="p" port={port} />)
   fireEvent.click(await screen.findByRole('button', { name: '预览林予' }))
   await screen.findByText('这份参考素材暂时无法读取。')
   expect(screen.queryByText('正在读取这份本地参考素材。')).toBeNull()
-  expect(reader).toHaveBeenCalledOnce()
-  fireEvent.click(screen.getByRole('button', { name: '重新读取参考素材' }))
-  await waitFor(() => expect(screen.getByRole('region', { name: '素材预览' }).querySelector('img')).not.toBeNull())
   expect(reader).toHaveBeenCalledTimes(2)
+  fireEvent.click(screen.getByRole('button', { name: '重新读取参考素材' }))
+  await waitFor(() => { expect(screen.getByRole('region', { name: '素材预览' }).querySelector('img')).not.toBeNull() })
+  expect(reader).toHaveBeenCalledTimes(3)
 })
 
 it('reads a local voice only on selection and releases its Blob URL when closing', async () => {
@@ -101,7 +223,7 @@ it('reads a local voice only on selection and releases its Blob URL when closing
   const select = await screen.findByRole('button', { name: '预览林予音色' })
   expect(readLocalVoiceCandidateContent).not.toHaveBeenCalled()
   fireEvent.click(select)
-  await waitFor(() => expect(screen.getByRole('region', { name: '素材预览' }).querySelector('audio')?.getAttribute('src')).toBe('blob:local-voice'))
+  await waitFor(() => { expect(screen.getByRole('region', { name: '素材预览' }).querySelector('audio')?.getAttribute('src')).toBe('blob:local-voice') })
   expect(readLocalVoiceCandidateContent).toHaveBeenCalledWith({ projectId: 'p', elementKind: 'actor', targetId: 'actor_linyu',
     assetId: voice.assetId, expectedSha256: voice.assetSha256 }, expect.any(AbortSignal))
   expect(port.readLocalReferenceCandidateContent).not.toHaveBeenCalled()
@@ -119,9 +241,9 @@ it('ignores a late private voice read after its selection is closed', async () =
     readLocalReferenceCandidateContent: localReader(), readLocalVoiceCandidateContent }
   render(<ProjectAssetLibrary projectId="p" port={port} />)
   fireEvent.click(await screen.findByRole('button', { name: '预览林予音色' }))
-  await waitFor(() => expect(readLocalVoiceCandidateContent).toHaveBeenCalledOnce())
+  await waitFor(() => { expect(readLocalVoiceCandidateContent).toHaveBeenCalledOnce() })
   fireEvent.click(screen.getByRole('button', { name: '关闭预览' }))
   resolve({ schema: 'jason.qingmu-local-voice-content.v1', assetId: voice.assetId, sha256: voice.assetSha256, mimeType: 'audio/wav', contentBase64: 'AQID' })
-  await waitFor(() => expect(screen.queryByRole('region', { name: '素材预览' })).toBeNull())
+  await waitFor(() => { expect(screen.queryByRole('region', { name: '素材预览' })).toBeNull() })
   expect(createObjectURL).not.toHaveBeenCalled()
 })

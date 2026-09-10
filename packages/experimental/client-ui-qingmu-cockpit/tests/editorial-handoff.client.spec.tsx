@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EditorialHandoff, continuousPlayedCoverage } from '../src/client/EditorialHandoff.tsx'
 import type { QingmuYimengReadPort, YimengEditorialHandoffResponse } from '../src/client/contracts.ts'
@@ -211,6 +211,30 @@ describe('editorial handoff panel', () => {
     fireEvent.click(screen.getByRole('button', { name: zh.handoffRefresh }))
     await waitFor(() => { expect(editorialHandoff).toHaveBeenCalledTimes(2) })
     expect(editorialHandoff).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows each blocked shot count and opens that exact shot without selecting a video', async () => {
+    const value = handoff()
+    const first = value.source.shots[0]!
+    const editorialHandoff = vi.fn().mockResolvedValue({ ...value, source: { ...value.source,
+      shots: [first, { ...first, frameId: 'frame-2', frameNo: 2, title: '咖啡馆', selectedTake: null,
+        blockers: ['editorial_handoff_approval_record_missing', 'editorial_handoff_selected_take_missing'] },
+      { ...first, frameId: 'frame-3', frameNo: 3, title: '已完成镜头', blockers: [] }],
+    } })
+    const onOpenShooting = vi.fn()
+    render(<EditorialHandoff {...SCOPE} compact onOpenShooting={onOpenShooting}
+      port={{ editorialHandoff } as unknown as QingmuYimengReadPort} t={t} />)
+    const list = await screen.findByRole('list', { name: zh.handoffShotList })
+    const rows = within(list).getAllByRole('listitem').filter(item => item.parentElement === list)
+    expect(within(rows[0]!).getByText('3 项待处理')).toBeTruthy()
+    expect(within(rows[1]!).getByText('2 项待处理')).toBeTruthy()
+    expect(within(rows[1]!).getByText('返回拍摄与审看，选择一个候选视频。')).toBeTruthy()
+    expect(screen.getByText('先选定每镜使用的视频，再完成审看与交接检查。')).toBeTruthy()
+    expect(within(rows[2]!).queryByRole('button')).toBeNull()
+    fireEvent.click(within(rows[1]!).getByRole('button', { name: '处理镜 2 · 咖啡馆' }))
+    expect(onOpenShooting).toHaveBeenCalledExactlyOnceWith('frame-2')
+    expect(editorialHandoff).toHaveBeenCalledTimes(1)
+    expect(first.selectedTake?.selectionStatus).toBe('Selected')
   })
 
   it('does not continue an old-scope refresh after project and episode change', async () => {

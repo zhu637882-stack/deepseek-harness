@@ -4,6 +4,94 @@ import type { ReferenceVideoAsset } from '@deepseek-ai/dsh-experimental-qingmu-y
 import css from './ProjectAssetLibrary.module.css'
 import { usePrivateReferencePreview, type PrivateReferencePreviewPort } from './usePrivateReferencePreview.ts'
 
+const THUMBNAIL_READ_LIMIT = 2
+let activeThumbnailReads = 0
+const waitingThumbnailReads = new Set<() => void>()
+
+function releaseThumbnailRead() {
+  activeThumbnailReads -= 1
+  const next = waitingThumbnailReads.values().next().value
+  if (next !== undefined) {
+    waitingThumbnailReads.delete(next)
+    next()
+  }
+}
+
+/** Grants a bounded private read slot while a thumbnail remains near the viewport. */
+function useThumbnailReadSlot(visible: boolean) {
+  const [granted, setGranted] = useState(false)
+  const releaseRef = useRef<(() => void) | undefined>()
+  const release = useCallback(() => { releaseRef.current?.() }, [])
+  useEffect(() => {
+    if (!visible) {
+      setGranted(false)
+      releaseRef.current = undefined
+      return
+    }
+    let subscribed = true
+    let acquired = false
+    const releaseSlot = () => {
+      waitingThumbnailReads.delete(grant)
+      if (!acquired) return
+      acquired = false
+      releaseThumbnailRead()
+    }
+    const grant = () => {
+      if (!subscribed) return
+      acquired = true
+      activeThumbnailReads += 1
+      setGranted(true)
+    }
+    if (activeThumbnailReads < THUMBNAIL_READ_LIMIT) grant()
+    else waitingThumbnailReads.add(grant)
+    releaseRef.current = releaseSlot
+    return () => {
+      subscribed = false
+      if (releaseRef.current === releaseSlot) releaseRef.current = undefined
+      releaseSlot()
+    }
+  }, [visible])
+  return [granted, release] as const
+}
+
+/** Reads a private image only while its card approaches the visible grid. */
+function AssetThumbnail({ projectId, item, port }: {
+  readonly projectId: string
+  readonly item: ReferenceVideoAsset
+  readonly port: PrivateReferencePreviewPort
+}) {
+  const target = useRef<HTMLSpanElement>(null)
+  const [visible, setVisible] = useState(false)
+  useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined') {
+      setVisible(true)
+      return
+    }
+    const element = target.current
+    if (element === null) return
+    const observer = new IntersectionObserver((entries) => {
+      setVisible(entries.some(entry => entry.isIntersecting))
+    }, { rootMargin: '180px' })
+    observer.observe(element)
+    return () => { observer.disconnect() }
+  }, [])
+  const needsPrivateImageRead = item.mediaType === 'reference_image'
+    && item.browserUrl === '' && item.localReferenceScope !== undefined
+  const [granted, releaseReadSlot] = useThumbnailReadSlot(visible && needsPrivateImageRead)
+  const privateImage = granted && visible && needsPrivateImageRead ? item : undefined
+  const { preview } = usePrivateReferencePreview(projectId, privateImage, port, 0)
+  useEffect(() => { if (preview !== undefined) releaseReadSlot() }, [preview, releaseReadSlot])
+  return <span ref={target} className={css.thumbnail}>
+    {item.mediaType === 'reference_image'
+      ? item.browserUrl
+        ? <img src={item.browserUrl} alt="" loading="lazy" />
+        : preview?.url !== undefined
+          ? <img src={preview.url} alt="" />
+          : <span className={css.mediaKind} aria-hidden="true">▧</span>
+      : <span className={css.mediaKind} aria-hidden="true">♫</span>}
+  </span>
+}
+
 /** A project-wide media browser; preview selection is local to this view. */
 export function ProjectAssetLibrary({ projectId, port, refreshToken = 0, onOpenReferenceUpload }: {
   readonly projectId: string
@@ -89,9 +177,7 @@ export function ProjectAssetLibrary({ projectId, port, refreshToken = 0, onOpenR
       <div className={css.grid}>
         {filtered.map(item => <button type="button" key={`${item.assetId}:${item.assetSha256}`} className={css.asset}
           aria-label={`预览${item.label}`} aria-pressed={item.assetId === selected} onClick={() => { setSelected(item.assetId) }}>
-          <span className={css.thumbnail}>{item.mediaType === 'reference_image' && item.browserUrl
-            ? <img src={item.browserUrl} alt={item.label} loading="lazy" />
-            : <span className={css.mediaKind}>{item.mediaType === 'reference_audio' ? '♫' : '▧'}</span>}</span>
+          <AssetThumbnail projectId={projectId} item={item} port={port} />
           <strong>{item.label}</strong><small>{item.mediaType === 'reference_audio' ? '音色 · 点击试听' : '图片 · 点击查看'}</small>
         </button>)}
       </div>

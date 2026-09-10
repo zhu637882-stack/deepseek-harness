@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ReferenceVideoAsset } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
 
-/** These ports only read byte-bound local references after the user selects one. */
+/** These ports only read byte-bound local references for scoped image previews or explicit audio playback. */
 export type PrivateReferencePreviewPort = Pick<QingmuYimengPort, 'readLocalReferenceCandidateContent'>
   & Partial<Pick<QingmuYimengPort, 'readLocalVoiceCandidateContent'>>
 

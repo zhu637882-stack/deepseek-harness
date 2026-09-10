@@ -458,6 +458,8 @@ type UntrustedEvidenceFreezePayload<T extends { schema: string }> = Omit<T, 'sch
 
 interface Props {
   readonly compact?: boolean | undefined
+  /** Navigate to the exact shot for review without changing its selection or approval. */
+  readonly onOpenShooting?: ((frameId: string) => void) | undefined
   readonly projectId: string
   readonly episodeId: string
   readonly port: QingmuYimengReadPort
@@ -507,7 +509,7 @@ const MASTER_BLOCKER_KEYS: Readonly<Record<string, QingmuCockpitKey>> = {
 }
 
 /** E8 editorial handoff plus one explicit, unselected returned-master candidate commit. */
-export function EditorialHandoff({ projectId, episodeId, port, t, compact = false }: Props) {
+export function EditorialHandoff({ projectId, episodeId, port, t, compact = false, onOpenShooting }: Props) {
   const [projection, setProjection] = useState<YimengEditorialHandoffResponse>()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
@@ -1781,6 +1783,7 @@ export function EditorialHandoff({ projectId, episodeId, port, t, compact = fals
             ? <><div className={css.shotCompact}>
               <div><strong>#{shot.frameNo} · {shot.title}</strong>
                 <span>{shot.selectedTake === null ? t('handoffNoSelectedTake') : `已选 Take · ${shot.selectedTake.durationSec ?? '—'}s · ${shot.selectedTake.qualityStatus}`}</span>
+                {shot.blockers.length > 0 && <span className={css.warning}>{shot.blockers.length} 项待处理</span>}
               </div>
               <p className={shot.blockers.length > 0 ? css.warning : css.success}>
                 {shot.selectedTake === null ? '返回拍摄与审看，选择一个候选视频。'
@@ -1820,13 +1823,19 @@ export function EditorialHandoff({ projectId, episodeId, port, t, compact = fals
                 {shot.selectedTake !== null && <p>Media SHA: {shot.selectedTake.sha256 ?? '—'}</p>}
               </details>
             </>}
+          {onOpenShooting && (shot.blockers.length > 0 || shot.selectedTake === null) && <div className={css.shotActions}>
+            <button type="button" aria-label={`处理镜 ${shot.frameNo} · ${shot.title}`}
+              onClick={() => { onOpenShooting(shot.frameId) }}>前往本镜审看 →</button>
+          </div>}
         </li>)}
       </ol>
       <div className={css.exportBox}>
         <div><strong>{t('handoffDownloadTitle')}</strong>
-          <p>{projection.download.blockerCode === null
-            ? `${projection.download.otio.distribution} ${projection.download.otio.version} · otio_json`
-            : blockerLabel(projection.download.blockerCode)}</p>
+          <p>{compact && projection.source.shots.some(shot => shot.selectedTake === null)
+            ? '先选定每镜使用的视频，再完成审看与交接检查。'
+            : projection.download.blockerCode === null
+              ? `${projection.download.otio.distribution} ${projection.download.otio.version} · otio_json`
+              : blockerLabel(projection.download.blockerCode)}</p>
           {download.status === 'succeeded' && <p className={css.success} role="status">
             {t('handoffDownloadSucceeded')} · {download.size?.toLocaleString()} bytes<br />SHA-256: {download.sha256}
           </p>}

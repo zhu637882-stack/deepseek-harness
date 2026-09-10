@@ -178,6 +178,9 @@
 .shotCompact strong { white-space: nowrap; }
 .shotCompact span { color: var(--dsw-alias-label-secondary); font-size: 0.82rem; }
 .shotCompact p { max-width:44ch; margin:0; overflow-wrap:anywhere; text-align:right; }
+.shotCompact span.warning { color:#ffd08a; }
+.shotActions { display:flex; justify-content:flex-end; margin-top:10px; }
+.shotActions button { color:var(--qingmu-accent); }
 .shotDetails { margin-top:10px; padding-top:10px; border-top:1px solid var(--dsw-alias-border-l2); }
 .shotDetails > summary { cursor:pointer; color:var(--dsw-alias-label-secondary); }
 .shotDetails[open] > summary { margin-bottom:8px; color:var(--dsw-alias-label-primary); }
@@ -210,6 +213,10 @@ details summary { cursor: pointer; }
   .rc1Card:first-child { grid-column: 1 / -1; }
 }
 @media (max-width: 760px) {
+  .shotCompact { align-items:stretch; flex-direction:column; padding:4px; }
+  .shotCompact strong { white-space:normal; overflow-wrap:anywhere; }
+  .shotCompact p { text-align:left; }
+  .shotActions button { width:100%; }
   .header, .exportBox, .importBox, .candidateCommit, .candidateShelf > header { align-items: stretch; flex-direction: column; }
   .readiness, .metrics, .shots dl, .conclusions, .previewGrid, .masterFacts { grid-template-columns: 1fr; }
   .header button, .exportBox button, .importBox button, .candidateCommit button, .candidateShelf header button { width: 100%; }

@@ -184,8 +184,8 @@ export function QingmuCockpit({
 }: QingmuCockpitProps) {
   const [open, setOpen] = useState(true)
   const [tab, setTab] = useState<Tab>(() => applicationShell
-    ? STEP_TABS[creativeStepFromSearch(globalThis.location?.search ?? '')]
-    : new URLSearchParams(globalThis.location?.search ?? '').get('qingmuView') === 'shooting' ? 'shots' : 'director')
+    ? STEP_TABS[creativeStepFromSearch(typeof location === 'undefined' ? '' : location.search)]
+    : new URLSearchParams(typeof location === 'undefined' ? '' : location.search).get('qingmuView') === 'shooting' ? 'shots' : 'director')
   const [shootingAction, setShootingAction] = useState<string>()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
@@ -225,7 +225,7 @@ export function QingmuCockpit({
       else { const url = new URL(location.href); url.searchParams.set('qingmuView', creativeStepForTab(tab)); history.replaceState(history.state, '', url) }
     }
     window.addEventListener('popstate', changed)
-    return () => window.removeEventListener('popstate', changed)
+    return () => { window.removeEventListener('popstate', changed) }
   }, [applicationShell, tab, t])
   useEffect(() => {
     if (!applicationShell) return
@@ -415,7 +415,7 @@ export function QingmuCockpit({
       if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'start', behavior: 'smooth' })
       target.focus({ preventScroll: true })
     })
-    return () => cancelAnimationFrame(frame)
+    return () => { cancelAnimationFrame(frame) }
   }, [assetWorkbenchOpen])
 
   const close = (): void => {
@@ -652,7 +652,7 @@ export function QingmuCockpit({
         t={t}
       />
       {shootingAction && <div className={css.shootingAction} role="dialog" aria-modal="true" aria-label="本镜操作">
-        <button type="button" onClick={() => setShootingAction(undefined)}>返回拍摄与审看</button>
+        <button type="button" onClick={() => { setShootingAction(undefined) }}>返回拍摄与审看</button>
         <PromptIrWorkspace key={`${episodeId}:${shootingAction}:shooting-action`} presentation="shooting" projectId={projectId} episodeId={episodeId} shotItems={shotItems}
           storyboardRevisionId={shotRelations?.storyboardRevision.revisionId ?? ''} selectedShotId={shootingAction} onSelectShotId={setShootingAction}
           port={port} t={t} onCommitted={refreshWorkflowAfterCommit} />
@@ -885,7 +885,8 @@ export function QingmuCockpit({
       delivery: <div className={css.creativePage}>
         {pageHeader('05', '导出与交接', '汇集已经选用的镜头，检查缺口，再导出给后期制作。', null)}{projectFacts}
         <div className={css.stageActions}><button type="button" onClick={() => { changeStep('shooting') }}>← 返回拍摄与审看</button></div>
-        <div className={css.stageContent}><EditorialHandoff compact projectId={projectId} episodeId={episodeId} port={port} t={t} /></div>
+        <div className={css.stageContent}><EditorialHandoff compact projectId={projectId} episodeId={episodeId}
+          port={port} t={t} onOpenShooting={openCandidateReview} /></div>
       </div>,
     }
     return <QingmuApplicationFrame projects={projects.map(p => ({ id: stringOf(p.id) ?? '', label: projectLabel(p, '未命名项目') }))}
@@ -899,7 +900,7 @@ export function QingmuCockpit({
         {error && <div role="alert" className={css.error}><p>当前项目暂时无法更新。已有素材保留，请刷新重试。</p><details><summary>开发日志</summary>{error}</details></div>}
         <div className={css.body}><main aria-label={creating ? '新建项目' : `青木 · ${creativeStepLabel(step)}`}>
           {creating || (!loading && projects.length === 0 && !error)
-            ? <CreateProjectWorkspace port={port} onCreated={async (result) => { await refresh(result); setCreating(false); setTab('overview') }} onCancel={projects.length ? () => setCreating(false) : undefined} />
+            ? <CreateProjectWorkspace port={port} onCreated={async (result) => { await refresh(result); setCreating(false); setTab('overview') }} onCancel={projects.length ? () => { setCreating(false) } : undefined} />
             : <>{storyboardMissing && <section className={css.empty} role="status" aria-label="分镜待规划">
               <h2>分镜尚待规划</h2>
               <p>这是新项目的正常状态。先在故事与剧本保存内容，再进入分镜与导演安排镜头。</p>
