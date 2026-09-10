@@ -1,5 +1,6 @@
 # Qingmu director context bridge
 
+The native asset workspace designs and edits characters, scenes and props from the saved screenplay. Owner-scoped save, exact image quotation, explicit generation and task recovery share the existing Writer image queue and budget. The director bible and original prompt reach the image request; image generation does not imply adoption. The native `model-tools-keyless.ts --assets` example reads the shipped director and three asset skills and returns an editable design.
 `qingmu_read_director_plan` and `qingmu_save_director_plan` read and patch the complete canonical shot design through the existing Writer scene-planning API. Creative keys are extensible; script identities and provenance remain protected. A logged read binds script/storyboard revisions, and an identical request recovers the same durable save receipt after uncertainty. A verified save can advance the current native turn's context; unrelated source or selection changes cannot. These tools generate no media. Reference drafts still need reconciliation with the newly saved design before generation.
 
 English | [中文](README.zh.md)

@@ -1,0 +1,144 @@
+/** Project asset designs are editable before an explicitly priced image request. */
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { NativeStoryPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft'
+import type { AssetDesign, AssetDesignItem, AssetDesignState, AssetImageQuote, AssetImageRuns } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import type { QingmuYimengPort } from './contracts.ts'
+import { NativeStoryComposer } from './NativeStoryComposer.tsx'
+import css from './NativeDirectorComposer.module.css'
+
+type Port = Pick<QingmuYimengPort, 'readAssetDesign' | 'saveAssetDesign' | 'quoteAssetImage' | 'generateAssetImage' | 'readAssetImageRuns'>
+const names = { actor: '人物', scene: '场景', prop: '道具' } as const
+function parseDesign(text: string): AssetDesign {
+  const value: unknown = JSON.parse(text)
+  if (!value || typeof value !== 'object' || !('assets' in value) || !Array.isArray(value.assets)
+    || !value.assets.length || value.assets.length > 40 || !('director' in value) || !value.director || typeof value.director !== 'object') throw new Error('设计需要人物、场景或道具，以及全片导演设定。')
+  for (const entry of value.assets as unknown[]) {
+    const item = entry as Record<string, unknown> | null
+    if (!item || typeof item !== 'object' || (typeof item.kind !== 'string' || !['actor', 'scene', 'prop'].includes(item.kind))
+      || typeof item.name !== 'string' || !item.name.trim() || typeof item.imagePrompt !== 'string' || !item.imagePrompt.trim()) throw new Error('素材设计缺少类型、名称或画面描述。')
+  }
+  const director = value.director as Record<string, unknown>
+  for (const field of ['visualStyle', 'tone', 'lightingRules', 'cameraGrammar', 'performanceRules', 'characterContinuityRules']) {
+    if (typeof director[field] !== 'string' || !director[field]) throw new Error('全片导演设定尚不完整。')
+  }
+  if (!Array.isArray(director.colorPalette) || !director.colorPalette.every(color => typeof color === 'string')) throw new Error('缺少全片色彩设计。')
+  return value as AssetDesign
+}
+/** Author, save and generate characters/scenes/props using the native director and image queue.
+ * @param props - Current episode, owner-scoped commands and native director session.
+ * @returns Editable creative cards, exact price confirmation and recovered generation progress.
+ */
+export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGenerated }: {
+  readonly projectId: string
+  readonly episodeId: string
+  readonly port: Port
+  readonly storyPort?: NativeStoryPort | undefined
+  readonly onGenerated: () => void
+}) {
+  const [state, setState] = useState<AssetDesignState>(), [design, setDesign] = useState<AssetDesign>()
+  const [quote, setQuote] = useState<AssetImageQuote>(), [runs, setRuns] = useState<AssetImageRuns['items']>([])
+  const [busy, setBusy] = useState(false), [notice, setNotice] = useState(''), [changes, setChanges] = useState('')
+  const [dirty, setDirty] = useState(false), [manual, setManual] = useState('')
+  const lock = useRef(false), live = useRef(true)
+  const scope = { projectId, episodeId }
+  const readRuns = useCallback(async () => {
+    const result = await port.readAssetImageRuns({ projectId, episodeId })
+    if (live.current) setRuns(result.items)
+    for (const run of result.items) {
+      const key = `qingmu.asset-request:${projectId}:${episodeId}:${run.entityId}`
+      try {
+        const saved: unknown = JSON.parse(localStorage.getItem(key) ?? 'null')
+        if (saved && typeof saved === 'object' && 'requestId' in saved && saved.requestId === run.requestId) localStorage.removeItem(key)
+      } catch { /* A corrupt local receipt never changes the authoritative run list. */ }
+    }
+  }, [port, projectId, episodeId])
+  useEffect(() => {
+    live.current = true
+    void port.readAssetDesign({ projectId, episodeId }).then((result) => {
+      if (live.current) { setState(result); setDesign(result.design ?? undefined) }
+    }).catch((error: unknown) => { if (live.current) setNotice(`请先保存本集剧本，再建立素材。${error instanceof Error ? error.message : ''}`) })
+    void readRuns().catch(() => { /* Initial asset read reports missing script or authentication above. */ })
+    return () => { live.current = false }
+  }, [projectId, episodeId, port, readRuns])
+  const pending = runs.some(run => !run.assetId && !['Failed', 'Cancelled', 'Succeeded', 'Completed'].includes(run.status))
+  useEffect(() => {
+    if (!pending) return
+    const timer = setTimeout(() => { void readRuns().catch((error: unknown) => { if (live.current) setNotice(String(error)) }) }, 6000)
+    return () => { clearTimeout(timer) }
+  }, [pending, runs, readRuns])
+  const materialized = runs.filter(run => run.assetId).map(run => run.assetId).join(',')
+  const refresh = useRef(onGenerated); refresh.current = onGenerated
+  useEffect(() => { if (materialized) refresh.current() }, [materialized])
+  async function perform(work: () => Promise<void>) {
+    if (lock.current) return
+    lock.current = true; setBusy(true); setNotice('')
+    try { await work() } catch (error) { if (live.current) setNotice(error instanceof Error ? error.message : '操作未确认，请刷新原结果。') }
+    finally { lock.current = false; if (live.current) setBusy(false) }
+  }
+  function adopt(text: string) {
+    try { setDesign(parseDesign(text)); setDirty(true); setQuote(undefined); setNotice('设计已放入下方卡片，检查或修改后保存。') }
+    catch (error) { setNotice(String(error)) }
+  }
+  function edit(index: number, patch: Partial<AssetDesignItem>) {
+    if (!design) return
+    setDesign({ ...design,
+      assets: design.assets.map((item, n) => n === index ? { ...item, ...patch } : item) }); setDirty(true); setQuote(undefined)
+  }
+  const prompt = `为青木当前项目设计可直接生成的角色定妆、空场与关键道具。只使用本项目剧本及现有设计。实际读取 cinematic-director、character-asset、scene-asset、prop-asset 及必要参考，先理解关系、时代、空间和表演，再写丰富具体的单张图片描述。角色定妆不执行剧情动作；服装、体态、材质、光影、场景通道、道具尺寸和比例必须一致、符合物理。声音身份与逐句语气分开。保留已有实体 id；不修改正式媒体。场景名称与剧本相同。\n剧本：${JSON.stringify(state?.script)}\n已有设计：${JSON.stringify(state?.design)}\n用户补充：${changes}\n最终只将完整 JSON 放在一个 txt 代码块内，格式：{"assets":[{"kind":"actor或scene或prop","name":"名称","description":"用途","imagePrompt":"完整文生图提示词","voiceIdentity":"仅角色声音身份"}],"director":{"visualStyle":"全片质感","tone":"情绪基调","lightingRules":"光源规则","colorPalette":["色彩"],"cameraGrammar":"摄影与运镜","performanceRules":"表演原则","characterContinuityRules":"连续性"}}。kind 必须是 actor、scene、prop 其中之一，不增加其他字段。`
+  return <section className={css.composer} aria-label="角色与场景生成">
+    <h2>设计与生成素材</h2>
+    <p>先从当前剧本设计人物、场景和道具，检查画面描述后生成图片；生成结果会进入本项目素材库。</p>
+    <label>创作补充<textarea value={changes} onChange={(event) => { setChanges(event.target.value) }} placeholder="例如人物气质、服装年代、空间布局，或道具的真实尺寸" /></label>
+    {state && storyPort && <NativeStoryComposer port={storyPort} projectId={projectId} episodeId={episodeId}
+      source={JSON.stringify(state.script)} settings="" disabled={busy} onAdopt={adopt}
+      purpose={{ key: 'asset-design', title: '让青木设计素材', description: '导演会结合剧本和素材方法提出完整设计，你可以逐项调整。',
+        prompt, action: '根据剧本设计素材', adopt: '采用到素材卡片', adopted: '请检查下方素材卡片中的设计。' }} />}
+    {design && <>
+      <details><summary>全片设计</summary>{(['visualStyle', 'tone', 'lightingRules', 'cameraGrammar', 'performanceRules', 'characterContinuityRules'] as const).map((field, index) => <label key={field}>{['画面质感', '情绪基调', '光源设计', '摄影与运镜', '表演', '连续性'][index]}<textarea value={design.director[field]} onChange={(event) => {
+        setDesign({ ...design, director: { ...design.director, [field]: event.target.value } }); setDirty(true); setQuote(undefined)
+      }} /></label>)}</details>
+      {design.assets.map((item, index) => {
+        const run = runs.find(value => value.entityId === item.id)
+        return <section key={`${item.kind}:${index}`} aria-label={`${names[item.kind]} ${item.name}`}>
+          <h3>{names[item.kind]} · {item.name}</h3>
+          <label>画面描述<textarea value={item.imagePrompt}
+            onChange={(event) => { edit(index, { imagePrompt: event.target.value }) }} /></label>
+          {item.kind === 'actor' && <label>声音身份<textarea value={item.voiceIdentity ?? ''} onChange={(event) => { edit(index, { voiceIdentity: event.target.value }) }} /></label>}
+          <button type="button" disabled={busy || dirty || !item.id || (run !== undefined && !run.assetId && !['Failed', 'Cancelled', 'Succeeded', 'Completed'].includes(run.status))}
+            onClick={() => {
+              void perform(async () => {
+                if (item.id) setQuote(await port.quoteAssetImage({ ...scope, entityId: item.id }))
+              }) }}>查看生成费用</button>
+          {run && <p role="status">{run.assetId ? '图片已生成，可在下方素材库查看' : run.status === 'Failed' ? `生成失败：${run.errorCode ?? '请查看任务详情'}` : `生成进度：${run.status}`}</p>}
+        </section>
+      })}
+      <button type="button" disabled={busy || !dirty || !state} onClick={() => {
+        void perform(async () => {
+          const result = await port.saveAssetDesign({ ...scope,
+            expectedStateSha256: state?.stateSha256 ?? '',
+            design: { assets: design.assets, director: design.director } })
+          if (live.current) { setState(result); setDesign(result.design ?? undefined); setDirty(false); setNotice('素材设计已保存。现在可以逐项生成图片。') }
+        }) }}>保存素材设计</button>
+    </>}
+    {quote && <section aria-label="确认图片生成"><h3>生成 {quote.entity.name}</h3><p>{quote.model} · 一张图片 · ¥{Number(quote.estimatedCny).toFixed(2)}</p>
+      <button type="button" disabled={busy || dirty || !quote.generationAvailable} onClick={() => {
+        void perform(async () => {
+          const newCommand = { requestId: crypto.randomUUID(), kind: quote.entity.kind,
+            quoteSha256: quote.quoteSha256, authorizationCapCny: quote.estimatedCny, paidConfirmed: true as const }
+          const key = `qingmu.asset-request:${projectId}:${episodeId}:${quote.entity.id}`
+          const previous: unknown = JSON.parse(localStorage.getItem(key) ?? 'null')
+          const command = previous && typeof previous === 'object' && 'requestId' in previous ? previous as typeof newCommand : newCommand
+          localStorage.setItem(key, JSON.stringify(command))
+          try {
+            await port.generateAssetImage({ ...scope, entityId: quote.entity.id, command }); setQuote(undefined)
+            setNotice('已提交，离开或刷新页面后可继续读取同一任务。')
+          } catch (error) { setQuote(undefined); throw error }
+          finally { await readRuns() }
+        }) }}>确认费用并生成一张</button>
+      {!quote.generationAvailable && <p>当前账户尚未开通图片生成额度。</p>}
+    </section>}
+    <button type="button" disabled={busy} onClick={() => { void perform(readRuns) }}>刷新生成进度</button>
+    <details><summary>导入已有素材设计</summary><textarea aria-label="素材设计数据" value={manual} onChange={(event) => { setManual(event.target.value) }} /><button type="button" disabled={busy || !manual.trim()} onClick={() => { adopt(manual) }}>载入设计</button></details>
+    {notice && <p role="status">{notice}</p>}
+  </section>
+}

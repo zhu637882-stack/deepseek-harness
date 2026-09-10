@@ -74,6 +74,38 @@ exports[`previews imported sourceLineId dialogue through the shipped preset and 
 }
 `;
 
+exports[`runs native asset methods and returns an editable design in the same draft channel 1`] = `
+{
+  "calls": [
+    "skill",
+    "skill",
+    "skill",
+    "skill",
+  ],
+  "design": {
+    "assets": [
+      {
+        "imagePrompt": "36厘米高的浅绿桌扇，85厘米高的工作台提供尺度对照。",
+        "kind": "prop",
+        "name": "桌扇",
+      },
+    ],
+    "director": {
+      "cameraGrammar": "随行动推进",
+      "characterContinuityRules": "服装和尺度保持一致",
+      "colorPalette": [
+        "灰蓝",
+        "浅绿",
+      ],
+      "lightingRules": "傍晚窗光",
+      "performanceRules": "自然反应",
+      "tone": "平实",
+      "visualStyle": "写实",
+    },
+  },
+}
+`;
+
 exports[`runs the keyless shipped-preset example through the native loop 1`] = `
 {
   "calls": [

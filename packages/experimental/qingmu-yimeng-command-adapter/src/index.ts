@@ -3,6 +3,7 @@ import { prepareReferenceVideoReview } from './reference-video-review.ts'
 
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { prepareCreationCommand, prepareCreationOptionsRead } from './creation.ts'
+import { prepareAssetDesign } from './asset-design.ts'
 import { prepareScenePlanning } from './scene-planning.ts'
 import { prepareLocalReferenceCandidate } from './local-reference-candidate.ts'
 import { prepareLocalVoiceCandidate } from './local-voice-candidate.ts'
@@ -5840,6 +5841,11 @@ export function createYimengCommandHandler(
           ...(prepared.request.idempotencyKey === undefined ? {} : { idempotencyKey: prepared.request.idempotencyKey }),
         }
         normalize = prepared.normalize
+      } else if (['readAssetDesign', 'saveAssetDesign', 'quoteAssetImage', 'generateAssetImage', 'readAssetImageRuns'].includes(endpoint)) {
+        const prepared = prepareAssetDesign(endpoint, payload, stageArtifactHelpers)
+        path = prepared.path
+        requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
+        normalize = prepared.normalize
       } else if (['readScenePlanning', 'saveScenePlanning', 'recoverScenePlanning'].includes(endpoint)) {
         const prepared = prepareScenePlanning(endpoint, payload, stageArtifactHelpers)
         path = prepared.path
@@ -6253,6 +6259,7 @@ export function createYimengCommandHandler(
         || endpoint === 'recoverReworkRoute'
         || endpoint === 'probeReworkRouteAuthority'
       const requiresCredentialReflectionGuard = isStageArtifactCommand
+        || ['readAssetDesign', 'saveAssetDesign', 'quoteAssetImage', 'generateAssetImage', 'readAssetImageRuns'].includes(endpoint)
         || ['readScenePlanning', 'saveScenePlanning', 'recoverScenePlanning'].includes(endpoint)
         || ['readCreativeContract', 'initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)
         || endpoint === 'createTakeComment' || endpoint === 'recoverTakeComment'
@@ -6342,7 +6349,7 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
       })
     }
     : undefined
-  ctx.effect(() => () => interactiveController.abort(), 'qingmu Director interactive execution lifetime')
+  ctx.effect(() => () =>{  interactiveController.abort() }, 'qingmu Director interactive execution lifetime')
   const handler = createYimengCommandHandler(config, {
     fetch: globalThis.fetch,
     readToken: () => process.env.YIMENG_API_TOKEN,

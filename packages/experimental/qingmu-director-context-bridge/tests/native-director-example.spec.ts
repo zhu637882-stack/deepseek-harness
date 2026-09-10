@@ -64,3 +64,12 @@ it('writes in an unbound native session and recovers the completed screenplay fo
   expect({ calls: result.calls, writingInRequest: result.writingInRequest,
     script: result.storyDraft?.script }).toMatchSnapshot()
 })
+
+it('runs native asset methods and returns an editable design in the same draft channel', async () => {
+  const result = await runNativeDirectorExample('assets')
+  expect(result.calls).toEqual(['skill', 'skill', 'skill', 'skill'])
+  expect(result.results.every(text => !text.includes('Unknown skill'))).toBe(true)
+  const design: unknown = JSON.parse(result.assetDraft!.script)
+  expect(design).toMatchObject({ assets: [{ kind: 'prop', name: '桌扇' }] })
+  expect({ calls: result.calls, design }).toMatchSnapshot()
+})

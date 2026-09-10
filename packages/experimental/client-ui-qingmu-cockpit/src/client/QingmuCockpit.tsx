@@ -29,6 +29,7 @@ import { TakeVersionCompareView } from './TakeVersionCompareView.tsx'
 import { EpisodeEvidenceLedger } from './EpisodeEvidenceLedger.tsx'
 import { EditorialHandoff } from './EditorialHandoff.tsx'
 import css from './QingmuCockpit.module.css'
+import { NativeAssetDesign } from './NativeAssetDesign.tsx'
 import { ProjectAssetLibrary } from './ProjectAssetLibrary.tsx'
 import { DirectorWorkspace } from './DirectorWorkspace.tsx'
 import { NativeDirectorSession } from './NativeDirectorSession.tsx'
@@ -928,6 +929,7 @@ export function QingmuCockpit({
       </div>,
       assets: <div className={css.creativePage}>
         {pageHeader('02', '角色、场景与音色', '建立这一部作品的素材库，让同一人物和环境贯穿各个镜头。', 'storyboard')}{projectFacts}
+        {episodeId && <div className={css.stageContent}><NativeAssetDesign key={`${projectId}:${episodeId}`} projectId={projectId} episodeId={episodeId} port={port} storyPort={nativeDirectorSession?.story} onGenerated={() => { setAssetLibraryRefresh(value => value + 1) }} /></div>}
         <div className={css.stageContent}><ProjectAssetLibrary key={projectId} projectId={projectId} port={port}
           refreshToken={assetLibraryRefresh} onOpenReferenceUpload={openReferenceUpload} /></div>
         <div ref={assetWorkbenchRef} tabIndex={-1} role="group" aria-label="人物与场景参考上传">

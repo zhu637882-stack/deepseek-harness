@@ -1,5 +1,6 @@
 # Qingmu Yimeng command adapter
 
+The native asset workspace designs and edits characters, scenes and props from the saved screenplay. Owner-scoped save, exact image quotation, explicit generation and task recovery share the existing Writer image queue and budget. The director bible and original prompt reach the image request; image generation does not imply adoption. The native `model-tools-keyless.ts --assets` example reads the shipped director and three asset skills and returns an editable design.
 Saved frame requirements now cover both automatic and manually planned shots. An imported shot uses the explicit `edit_requirements` operation after source and storyboard verification; the original planning text and receipts remain intact. Empty requirements stay unready. A save or GET receipt recovery stores text only and does not generate media or grant approval.
 
 English | [中文](README.zh.md)

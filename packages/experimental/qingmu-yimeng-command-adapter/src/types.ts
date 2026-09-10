@@ -3038,6 +3038,11 @@ export interface YimengReworkRouteAuthorityProbe {
 
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
+  readonly readAssetDesign: import('./asset-design.ts').AssetDesignState
+  readonly saveAssetDesign: import('./asset-design.ts').AssetDesignState
+  readonly quoteAssetImage: import('./asset-design.ts').AssetImageQuote
+  readonly generateAssetImage: import('./asset-design.ts').AssetImageSubmission
+  readonly readAssetImageRuns: import('./asset-design.ts').AssetImageRuns
   readonly registerReferenceVideoCandidateForReview: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types').ReferenceVideoCandidateRegistration
   readonly readReferenceVideoCandidateRegistration: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types').ReferenceVideoCandidateRegistration
   readonly prepareReferenceVideoMaterial: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types').ReferenceVideoMaterialPreparationResult
@@ -3140,3 +3145,5 @@ export interface YimengCommandEndpointMap {
 export type YimengCommandEndpoint = keyof YimengCommandEndpointMap
 
 export type { LocalVideoSourceScope, LocalVideoSourceBinding, LocalVideoSourceRecord, LocalVideoSourcePacket, LocalVideoSourceRequest, LocalVideoSourceRecoveryRequest, LocalVideoSourceReceipt, LocalVideoSourceResult, LocalVideoSourceState } from './local-video-source-types.ts'
+
+export type { AssetDesignItem, AssetDirectorDesign, AssetDesign, AssetDesignState, AssetImageQuote, AssetImageSubmission, AssetImageRuns, AssetImageCommand } from './asset-design.ts'
