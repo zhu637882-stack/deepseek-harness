@@ -45,6 +45,15 @@ def _has_old_dialogue(value, before, after):
     return bool(old) and old in text.replace(new, '')
 
 
+def _identifies_line(value, line_id):
+    ids = [value[key] for key in ("lineId", "sourceLineId") if key in value]
+    if line_id not in ids:
+        return False
+    if any(item != line_id for item in ids):
+        raise QingmuChangeSetError("dialogue_line_identity_conflict")
+    return True
+
+
 def _replace_line(value, line_id, before, after):
     """Replace only identified dialogue fields; leave acting and camera data intact."""
     if isinstance(value, list):
@@ -52,7 +61,7 @@ def _replace_line(value, line_id, before, after):
     if not isinstance(value, dict):
         return value
     result = {key: _replace_line(item, line_id, before, after) for key, item in value.items()}
-    if value.get("lineId") == line_id:
+    if _identifies_line(value, line_id):
         fields = [key for key in ("line", "verbatimText", "text") if isinstance(value.get(key), str)]
         if not fields or any(value[key] != before for key in fields):
             raise QingmuChangeSetError("dialogue_original_text_conflict")
@@ -65,7 +74,7 @@ def _line_nodes(value, line_id):
     if isinstance(value, list):
         return [node for item in value for node in _line_nodes(item, line_id)]
     if isinstance(value, dict):
-        return ([value] if value.get("lineId") == line_id else []) + [
+        return ([value] if _identifies_line(value, line_id) else []) + [
             node for item in value.values() for node in _line_nodes(item, line_id)
         ]
     return []
@@ -166,10 +175,10 @@ class _DialogueStore:
                 raise QingmuChangeSetError("dialogue_reference_changed")
             original = json.loads(stored["base_snapshot_json"])
             source_lines = [line for scene in original.get("scenes", [])
-                            for line in scene.get("dialogues", []) if line.get("lineId") == ref["lineId"]]
+                            for line in scene.get("dialogues", []) if _identifies_line(line, ref["lineId"])]
             if len(source_lines) != 1:
                 raise QingmuChangeSetError("dialogue_line_identity_invalid")
-            if any(line.get("lineId") != ref["lineId"] and any(line.get(key) == ref["before"] for key in ("line", "verbatimText", "text"))
+            if any(not _identifies_line(line, ref["lineId"]) and any(line.get(key) == ref["before"] for key in ("line", "verbatimText", "text"))
                    for scene in original.get("scenes", []) for line in scene.get("dialogues", [])):
                 raise QingmuChangeSetError("dialogue_quoted_copy_ambiguous")
             expected_script = _replace_line(original, ref["lineId"], ref["before"], ref["after"])

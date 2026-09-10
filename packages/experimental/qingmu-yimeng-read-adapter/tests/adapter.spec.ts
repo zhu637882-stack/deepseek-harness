@@ -2431,6 +2431,25 @@ describe('qingmu Yimeng read adapter', () => {
     }
   })
 
+  it.each([false, true])('reads linked imported dialogue with unverified timing; forged timing %s', async (forged) => {
+    const upstream = workflowFixture()
+    const director = upstream.director as Record<string, unknown>
+    const relations = director.shotRelations as Record<string, unknown>
+    const shot = (relations.shots as Array<Record<string, unknown>>)[0]!
+    const cue = { schemaVersion: 'dialogue-cue-linked-v1', lineId: 'line_000003', speakerId: 'actor-1',
+      verbatimText: '慢一点。', plannedStartSec: null, plannedEndSec: null, timingVerified: forged, legacy: false }
+    shot.dialogueRhythm = { cueCount: 1, timedCueCount: forged ? 1 : 0, cues: [cue] }
+    const hero = director.heroFrameStoryboards as Record<string, unknown>
+    hero.shotRelationsSha256 = createHash('sha256').update(canonicalJson(relations)).digest('hex')
+    const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(upstream), 'test-token'))
+    const result = await handler('workflow', { projectId: 'project-1', episodeId: 'episode-1' }, signal())
+    if (forged) expect(result.ok).toBe(false)
+    else {
+      if (!result.ok) throw new Error(result.error.message)
+      expect((result.value as YimengWorkflowProjection).director.shotRelations.shots[0]?.dialogueRhythm.cues).toEqual([cue])
+    }
+  })
+
   it('fails closed on invalid, duplicate, or dangling E5-1 Shot relations', async () => {
     const base = workflowFixture()
     const director = base.director as Record<string, unknown>

@@ -798,6 +798,81 @@ describe('qingmu Shot relation method adapter', () => {
     expect(value).toEqual(zeroResult.value)
   })
 
+  it('preserves numbered dialogue links without inventing timing evidence', async () => {
+    const handler = createImagoMethodHandler(
+      { coreRoot: '/opt/imago-os-core' },
+      dependencies(async snapshot => projection(snapshot)),
+    )
+    const request = structuredClone(REQUEST)
+    const cue = request.shots[0]?.dialogueRhythm.cues[0]
+    if (cue === undefined) throw new Error('fixture dialogue cue is missing')
+    Object.assign(request, { selectedShotId: request.shots[0]?.shotId })
+    Object.assign(request.shots[0]?.dialogueRhythm ?? {}, { timedCueCount: 0 })
+    Object.assign(cue, {
+      schemaVersion: 'dialogue-cue-linked-v1',
+      plannedStartSec: null,
+      plannedEndSec: null,
+      timingVerified: false,
+      legacy: false,
+    })
+
+    const result = await handler('shotRelationMethod', request, signal())
+
+    expect(result.ok, result.ok ? undefined : result.error.message).toBe(true)
+    if (!result.ok) throw new Error(result.error.message)
+    const output = (result.value as ImagoShotRelationMethodResponse)
+      .projection.relationship_projection.shots[0]?.dialogueRhythm.cues[0]
+    expect(output).toMatchObject({
+      schemaVersion: 'dialogue-cue-linked-v1',
+      lineId: 'line-1',
+      speakerId: 'actor-1',
+      verbatimText: '别动。',
+      plannedStartSec: null,
+      plannedEndSec: null,
+      timingVerified: false,
+      legacy: false,
+    })
+  })
+
+  it('rejects linked cues with missing IDs or fabricated timing before calling Core', async () => {
+    const runShotRelationCompiler = vi.fn()
+    const handler = createImagoMethodHandler(
+      { coreRoot: '/opt/imago-os-core' },
+      dependencies(runShotRelationCompiler),
+    )
+    const invalidPatches: readonly Record<string, unknown>[] = [
+      { lineId: '' },
+      { speakerId: '' },
+      { plannedStartSec: 0 },
+      { plannedEndSec: 1 },
+      { timingVerified: true },
+      { legacy: true },
+    ]
+
+    for (const patch of invalidPatches) {
+      const request = structuredClone(REQUEST)
+      const cue = request.shots[0]?.dialogueRhythm.cues[0]
+      if (cue === undefined) throw new Error('fixture dialogue cue is missing')
+      Object.assign(request, { selectedShotId: request.shots[0]?.shotId })
+      Object.assign(request.shots[0]?.dialogueRhythm ?? {}, { timedCueCount: 0 })
+      Object.assign(cue, {
+        schemaVersion: 'dialogue-cue-linked-v1',
+        plannedStartSec: null,
+        plannedEndSec: null,
+        timingVerified: false,
+        legacy: false,
+        ...patch,
+      })
+
+      const result = await handler('shotRelationMethod', request, signal())
+
+      expect(result.ok, JSON.stringify(patch)).toBe(false)
+      if (result.ok) throw new Error('invalid linked dialogue cue should fail')
+      expect(result.error.code).toBe('bad-request')
+    }
+    expect(runShotRelationCompiler).not.toHaveBeenCalled()
+  })
+
   it('rejects non-verbatim dialogue text before calling Core', async () => {
     const runShotRelationCompiler = vi.fn()
     const handler = createImagoMethodHandler(
@@ -947,6 +1022,16 @@ describe('qingmu Shot relation method adapter', () => {
       expect(pythonRoundTrippedRequest.shots[0]?.dialogueRhythm.cues[0]?.plannedEndSec).toBe(1)
       expect(pythonRoundTrippedRequest.shots[1]?.durationSec).toBe(3.5)
       expect(pythonRoundTrippedRequest.shots[1]?.dialogueRhythm.cues[0]?.plannedStartSec).toBe(0.25)
+      const linkedCue = pythonRoundTrippedRequest.shots[0]?.dialogueRhythm.cues[0]
+      if (linkedCue === undefined) throw new Error('fixture linked dialogue cue is missing')
+      Object.assign(pythonRoundTrippedRequest.shots[0]?.dialogueRhythm ?? {}, { timedCueCount: 0 })
+      Object.assign(linkedCue, {
+        schemaVersion: 'dialogue-cue-linked-v1',
+        plannedStartSec: null,
+        plannedEndSec: null,
+        timingVerified: false,
+        legacy: false,
+      })
       const handler = createImagoMethodHandler({})
 
       const result = await handler('shotRelationMethod', pythonRoundTrippedRequest, signal())
@@ -970,6 +1055,15 @@ describe('qingmu Shot relation method adapter', () => {
         selection_executed: false,
         human_approval_inferred: false,
         human_signoff_inferred: false,
+      })
+      expect(value.projection.relationship_projection.shots[0]?.dialogueRhythm.cues[0]).toMatchObject({
+        schemaVersion: 'dialogue-cue-linked-v1',
+        lineId: 'line-1',
+        speakerId: 'actor-1',
+        plannedStartSec: null,
+        plannedEndSec: null,
+        timingVerified: false,
+        legacy: false,
       })
       expect(value.projection.legal_work_set).toMatchObject({ writes: [] })
     },

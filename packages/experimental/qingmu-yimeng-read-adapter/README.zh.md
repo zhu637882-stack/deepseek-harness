@@ -36,6 +36,8 @@ Host 同时只允许一个核验。`verificationTimeoutMs` 默认 55000 毫秒�
 
 `workflow.director.shotRelations.shots` 数组投影易梦权威故事板帧，不增加 Shot 真源。每个 Shot 携带 `shotId`、唯一 Shot 排序字段 `frameNo`、`durationSec` 和派生的 `dialogueRhythm`；它绝不携带 Shot 级 `order`、`sortOrder` 或 `sequence`。每个元素携带 `currentReferenceAvailability`，并携带 `currentReference: null` 或 E4-3 唯一当前已选参考的 `assetId`、`sha256` 与血缘。适配器不选择参考，也不持久化 Shot 选择状态。
 
+导入的编号台词使用 `dialogue-cue-linked-v1`：`lineId` 保留剧本的 `sourceLineId`，`speakerId` 标识已分配演员，计划起止时间均为空，`timingVerified` 为 false。它提供可编辑关系，不虚构说话时间。编号别名冲突、重复编号、伪造时序或权威帧与导演计划副本不一致时，投影无效。
+
 包根入口导出请求与响应类型，包括 `YimengHealth`、`YimengCostRehearsalRequest`、`YimengCostRehearsalSubject`、`YimengCostRehearsalResponse`、`YimengProjectsResponse`、`YimengEpisodesResponse`、`YimengScriptResponse`、`YimengElementProfileRequest`、`YimengElementProfileResponse`、`YimengReferenceAssetCandidate`、`YimengReferenceCandidatesRequest`、`YimengReferenceCandidatesResponse`、`YimengTakeVersionStackResponse`、`YimengTakeCommentFeedResponse`、`YimengTakeAcceptanceResponse`、`YimengTakeReviewAuthorityFeedResponse`、`YimengTakeTechnicalQcFeedResponse`、`YimengTakeApprovalLifecycleFeedResponse`、`YimengShotRelationShot`、`YimengShotDialogueCue`、`YimengShotDialogueRhythm`、`YimengShotCurrentReference`、`YimengShotCurrentReferenceLineage`、`YimengShotRelationsProjection`、`YimengHeroFrameStoryboardsProjection` 和 `YimengWorkflowProjection`。
 
 ## Gate A 能力目录

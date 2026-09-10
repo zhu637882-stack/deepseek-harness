@@ -49,6 +49,10 @@ The tools return lossless JSON through the native tool registry. They add no sys
 
 Run the [keyless example](examples/model-tools-keyless.ts) from the Harness root with `node --import tsx packages/experimental/qingmu-director-context-bridge/examples/model-tools-keyless.ts`. It loads the shipped Qingmu director preset through Loader, creates a memory-only native session, and runs the real agent loop against scripted external responses. The snapshot includes the actual persona, scoped tools, durable event format and method text in the next model request. It makes no network or paid Provider request; the separate composition test also verifies cold restoration.
 
+## Imported dialogue edits
+
+Native dialogue reads and previews preserve imported `sourceLineId` identities and the assigned actor without inventing timing. The atomic Writer command updates the script and linked frame dialogue together, invalidates affected media/prompts, and refreshes the bound director context. Old reference-video drafts remain inspectable but require an explicit revision against the new frame source before reuse. The planning origin stays immutable; manual planning edits after dialogue commits require the complete validated script receipt chain and matching current frame copies. Conflicting identity aliases reject the edit. Run the keyless example with `--dialogue` to inspect the shipped preset’s actual read/preview transcript; it saves no script and generates no media. See the [decision](../../../.agents/notes/implemented/bug-fix/2026-09-10-qingmu-imported-dialogue.md).
+
 ## Model Experience
 
 ### Session binding bridge

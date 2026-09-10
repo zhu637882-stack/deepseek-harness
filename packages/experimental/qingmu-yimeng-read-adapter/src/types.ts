@@ -1946,7 +1946,7 @@ export interface YimengShotRelationElement {
  * One dialogue cue attached to a shot.
  */
 export interface YimengShotDialogueCue {
-  readonly schemaVersion: 'dialogue-cue-v2' | 'dialogue-cue-legacy-v1'
+  readonly schemaVersion: 'dialogue-cue-v2' | 'dialogue-cue-linked-v1' | 'dialogue-cue-legacy-v1'
   readonly lineId: string | null
   readonly speakerId: string | null
   readonly verbatimText: string

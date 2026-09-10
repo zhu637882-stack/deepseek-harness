@@ -17,7 +17,7 @@ import type { DirectorContextSnapshot } from '@deepseek-ai/dsh-experimental-qing
 const contexts: Context[] = []
 afterEach(async () => { for (const ctx of contexts.splice(0)) await ctx.fiber.dispose() })
 
-async function harness(bound = false) {
+async function harness(bound = false, imported = false) {
   const ctx = new Context(); contexts.push(ctx)
   await ctx.plugin(SystemPrompt); await ctx.plugin(ToolRuntime)
   const source: YimengScriptResponse = { found: true, projectId: draftScope.projectId, episodeId: draftScope.episodeId,
@@ -35,6 +35,16 @@ async function harness(bound = false) {
   }
   const current = { source, relations, context: structuredClone(draftContext) as DirectorContextSnapshot,
     failMethod: false, committed: false, unknownRecovery: false }
+  if (imported) {
+    current.source = { ...source, script: { schemaVersion: 'confirmed-script-import-v1', scenes: [{ title: '公路', dialogues: [
+      { sourceLineId: 'line6', character: '林予', line: '有人吗？' },
+    ] }] } }
+    current.context = { ...current.context, sourceScene: { dialogues: [{ sourceLineId: 'line6', character: '林予', line: '有人吗？' }] } }
+    current.relations = { ...relations, shots: relations.shots.map(shot => ({ ...shot, dialogueRhythm: {
+      ...shot.dialogueRhythm, timedCueCount: 0, cues: shot.dialogueRhythm.cues.map(item => ({ ...item,
+        schemaVersion: 'dialogue-cue-linked-v1', plannedStartSec: null, plannedEndSec: null })),
+    } })) }
+  }
   const calls: string[] = []
   ctx.provide('qingmuYimengCommand', async (endpoint, payload) => {
     calls.push(endpoint)
@@ -57,6 +67,7 @@ async function harness(bound = false) {
       current.context = { ...current.context, script: { revision: 2, sha256: 'd'.repeat(64) },
         storyboard: { ...current.context.storyboard, id: 'revision-2', version: 2 }, contextSnapshotSha256: 'e'.repeat(64) }
       current.relations = { ...current.relations, storyboardRevision: { ...current.relations.storyboardRevision, revisionId: 'revision-2' } }
+      if (imported) current.context = { ...current.context, sourceScene: { dialogues: [{ sourceLineId: 'line6', character: '林予', line: '有人在吗？' }] } }
       return { ok: true, value: receipt }
     }
     if (endpoint !== 'readDirectorContext') throw new Error('Unexpected business write')
@@ -172,8 +183,8 @@ describe('native dialogue impact', () => {
     expect((await app.run('qingmu_commit_dialogue_edit', { receiptId: (staged.value as { receiptId: string }).receiptId })).isError).toBe(true)
     expect(app.calls).not.toContain('commitScript')
   })
-  it('continues after its own save, and recovers after browser rebinding without another commit', async () => {
-    const app = await harness(true); const input = await app.read()
+  it.each([false, true])('continues after its own save and recovers without another commit; imported %s', async (imported) => {
+    const app = await harness(true, imported); const input = await app.read()
     const staged = await app.run('qingmu_stage_dialogue_edit', { receiptId: input.receiptId, ...app.edit })
     const receiptId = (staged.value as { receiptId: string }).receiptId
     const saved = await app.run('qingmu_commit_dialogue_edit', { receiptId })

@@ -33,6 +33,22 @@ describe('one dialogue edit', () => {
   it('refuses stale original text', () => {
     expect(() => prepareDialogueEdit(source, relations, { ...edit, before: '旧台词' })).toThrow('原台词已变化')
   })
+  it('edits an imported sourceLineId without rewriting its identity or import metadata', () => {
+    const imported = { ...source, script: { schemaVersion: 'confirmed-script-import-v1', scenes: [{
+      dialogues: [{ sourceLineId: 'line1', character: '林予', line: edit.before, source: 'confirmed_text_import' }],
+    }] } }
+    const before = structuredClone(imported)
+    expect(prepareDialogueEdit(imported, relations, edit).proposedScript).toEqual({ ...imported.script,
+      scenes: [{ dialogues: [{ ...imported.script.scenes[0]!.dialogues[0], line: edit.after }] }],
+    })
+    expect(imported).toEqual(before)
+    imported.script.scenes[0]!.dialogues.push({ ...imported.script.scenes[0]!.dialogues[0]! })
+    expect(() => prepareDialogueEdit(imported, relations, edit)).toThrow('缺失或重复')
+  })
+  it('refuses conflicting line identity aliases', () => {
+    const conflicting = { ...source, script: { scenes: [{ dialogues: [{ lineId: 'line1', sourceLineId: 'other', line: edit.before }] }] } }
+    expect(() => prepareDialogueEdit(conflicting, relations, edit)).toThrow('编号副本冲突')
+  })
   it('refuses missing line links rather than promising unchanged media', () => {
     const changed = { ...relations, shots: relations.shots.map(shot => ({ ...shot,
       dialogueRhythm: { ...shot.dialogueRhythm, cues: shot.dialogueRhythm.cues.map(cue => ({ ...cue, lineId: null })) },

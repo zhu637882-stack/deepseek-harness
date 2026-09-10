@@ -21,6 +21,7 @@ import * as ModelTools from '../src/model-tools.ts'
 import { draftContext, draftPrompt, draftMethod, firstDraftBootstrap } from './native-draft-fixture.ts'
 import { createDirectorContextRpcHandler } from '../src/rpc.ts'
 import { readNativeDirectorReadiness } from '../src/native-readiness.ts'
+import { importedScript, importedRelations } from './imported-dialogue-fixture.ts'
 import type { DirectorContextSnapshot } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 
 const scope = { projectId: 'example-project', episodeId: 'example-episode', sceneId: 'example-scene', shotId: 'example-shot' }
@@ -34,27 +35,31 @@ const fourthReference = [
 /** Deterministic external model stand-in; every request still comes from the native loop. */
 class ExampleModel extends LlmAdapter {
   readonly requests: GenerateOptions[] = []
-  constructor(readonly draftMode: boolean | 'first' = false) { super() }
+  constructor(readonly draftMode: boolean | 'first' | 'dialogue' = false) { super() }
 
   async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     const step = this.requests.length
     this.requests.push(options)
     if (step < 2) {
-      const name = this.draftMode === 'first' ? (step === 0 ? 'qingmu_read_first_draft' : 'qingmu_propose_first_draft')
-        : this.draftMode ? (step === 0 ? 'qingmu_read_prompt_draft' : 'qingmu_propose_prompt_edit')
-          : step === 0 ? 'qingmu_read_bound_context' : 'qingmu_get_imago_method'
+      const name = this.draftMode === 'dialogue' ? (step === 0 ? 'qingmu_read_dialogue' : 'qingmu_preview_dialogue_edit')
+        : this.draftMode === 'first' ? (step === 0 ? 'qingmu_read_first_draft' : 'qingmu_propose_first_draft')
+          : this.draftMode ? (step === 0 ? 'qingmu_read_prompt_draft' : 'qingmu_propose_prompt_edit')
+            : step === 0 ? 'qingmu_read_bound_context' : 'qingmu_get_imago_method'
       const receiptId = JSON.stringify(options.messages).match(/receiptId\\?":\\?"([a-f0-9]{64})/u)?.[1]
-      const args = this.draftMode === 'first' ? (step === 0 ? {} : { receiptId, reason: '先交代空间，再推进动作与铃声。', ...draftPrompt.subject.editableProjection })
-        : this.draftMode ? (step === 0 ? {} : { receiptId, field: 'imageGenPrompt',
-          replacement: '她停在门口，门在画面左侧；背面中景，不要求正脸。', reason: '先明确门与人物位置，保留铃响后的停顿。' })
-          : step === 0 ? {} : { capability: 'shot_design', resourceId: 'rough_final_feedback' }
+      const args = this.draftMode === 'dialogue' ? (step === 0 ? {} : { receiptId, lineId: 'line_000003', before: '有人吗？', after: '请问，还有人在吗？' })
+        : this.draftMode === 'first' ? (step === 0 ? {} : { receiptId, reason: '先交代空间，再推进动作与铃声。', ...draftPrompt.subject.editableProjection })
+          : this.draftMode ? (step === 0 ? {} : { receiptId, field: 'imageGenPrompt',
+            replacement: '她停在门口，门在画面左侧；背面中景，不要求正脸。', reason: '先明确门与人物位置，保留铃响后的停顿。' })
+            : step === 0 ? {} : { capability: 'shot_design', resourceId: 'rough_final_feedback' }
       yield { type: 'block-start', index: 0, blockType: 'tool-call' }
       yield { type: 'block-end', index: 0, block: { type: 'tool-call', id: CallId(`read-${step}`), name, arguments: JSON.stringify(args) } }
       yield { type: 'finish', reason: { kind: 'tool-calls' } }
     } else {
+      const text = this.draftMode === 'dialogue' ? '已按原台词编号预览修改，影响镜1；口型时序仍待核验。尚未保存或生成。'
+        : '建议保留门口的停顿，先听见铃声，再看她的反应。尚未保存或生成。'
       yield { type: 'block-start', index: 0, blockType: 'text' }
-      yield { type: 'text-delta', index: 0, text: '建议保留门口的停顿，先听见铃声，再看她的反应。尚未保存或生成。' }
-      yield { type: 'block-end', index: 0, block: { type: 'text', text: '建议保留门口的停顿，先听见铃声，再看她的反应。尚未保存或生成。' } }
+      yield { type: 'text-delta', index: 0, text }
+      yield { type: 'block-end', index: 0, block: { type: 'text', text } }
       yield { type: 'finish', reason: { kind: 'stop' } }
     }
   }
@@ -65,7 +70,7 @@ class ExampleModel extends LlmAdapter {
  * @returns the actual composed persona, tools, logged calls/results and next-request method check.
  * @throws if the shipped preset fails to load or the session cannot complete.
  */
-export async function runNativeDirectorExample(draftMode: boolean | 'first' = false) {
+export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'dialogue' = false) {
   const ctx = new Context()
   try {
     const presetRoot = fileURLToPath(new URL('../../qingmu-web/agent-presets/', import.meta.url))
@@ -116,6 +121,10 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' = fa
       } }
     })
     if (draftMode) ctx.provide('qingmuYimengRead', async (endpoint) => {
+      if (draftMode === 'dialogue' && endpoint === 'script') return { ok: true, value: importedScript }
+      if (draftMode === 'dialogue' && endpoint === 'workflow') return { ok: true, value: {
+        projectId: scope.projectId, episodeId: scope.episodeId, director: { shotRelations: importedRelations },
+      } }
       if (endpoint === 'promptIrBootstrap') return { ok: true, value: firstDraftBootstrap }
       if (endpoint !== 'promptIr') throw new Error('No business write allowed')
       return { ok: true, value: draftPrompt }
@@ -133,7 +142,8 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' = fa
         if (agent === handle.agent && status === 'idle') { dispose(); resolve() }
       })
     })
-    handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: '看看当前镜头，参考导演方法给我建议。' }], source: { kind: 'user' } }))
+    handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: draftMode === 'dialogue'
+      ? '预览把“有人吗？”改成“请问，还有人在吗？”，暂不保存。' : '看看当前镜头，参考导演方法给我建议。' }], source: { kind: 'user' } }))
     await idle
     const ordinary = await ctx.agents.create({ sessionId: SessionId('ordinary-example'),
       agentOptions: { provider: 'keyless', model: 'fixture' } })
@@ -141,7 +151,7 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' = fa
     await ordinary.dispose()
     const result = {
       readiness: readNativeDirectorReadiness(ctx, handle.agent.session), ordinaryReadiness,
-      ...(draftMode ? { draftProposal: await createDirectorContextRpcHandler(ctx.sessions, {
+      ...(draftMode && draftMode !== 'dialogue' ? { draftProposal: await createDirectorContextRpcHandler(ctx.sessions, {
         readDirectorContext: async () => ({ ok: true, context: draftContext as DirectorContextSnapshot }),
       }, { prompt: ctx.qingmuYimengRead, method: ctx.qingmuImagoMethod })(draftMode === 'first' ? 'readNativeFirstDraftProposal' : 'readNativeDraftProposal', {
         sessionId: handle.agent.session.id, scope,
@@ -163,5 +173,5 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' = fa
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  console.log(JSON.stringify(await runNativeDirectorExample(), null, 2))
+  console.log(JSON.stringify(await runNativeDirectorExample(process.argv.includes('--dialogue') ? 'dialogue' : false), null, 2))
 }

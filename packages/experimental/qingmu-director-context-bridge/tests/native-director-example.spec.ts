@@ -1,6 +1,16 @@
 import { expect, it } from 'vitest'
 import { runNativeDirectorExample } from '../examples/model-tools-keyless.ts'
 
+it('previews imported sourceLineId dialogue through the shipped preset and native loop', async () => {
+  const result = await runNativeDirectorExample('dialogue')
+  expect(result.calls).toEqual(['qingmu_read_dialogue', 'qingmu_preview_dialogue_edit'])
+  const input = JSON.parse(result.results[0]!) as { editableLines: unknown[] }
+  expect(input.editableLines).toEqual([expect.objectContaining({ lineId: 'line_000003', timingVerified: false, plannedStartSec: null })])
+  expect(JSON.parse(result.results[1]!)).toMatchObject({ lineId: 'line_000003', after: '请问，还有人在吗？',
+    affectedShots: [{ shotId: 'example-shot', frameNo: 1, title: '门口呼喊' }], providerCalls: 0, businessStateChanged: false })
+  expect({ calls: result.calls, results: result.results }).toMatchSnapshot()
+})
+
 it('runs the keyless shipped-preset example through the native loop', async () => {
   const result = await runNativeDirectorExample()
   expect(result.preset).toBe('qingmu-director')

@@ -1122,7 +1122,7 @@ function parseShotDialogueRhythm(
 ): ImagoShotDialogueRhythm {
   const rhythm = parseExactInputObject(value, ['cueCount', 'timedCueCount', 'cues'], field)
   if (!Array.isArray(rhythm.cues)) throw new InputError(`${field}.cues must be an array`)
-  const v2LineIds = new Set<string>()
+  const identifiedLineIds = new Set<string>()
   const cues: ImagoShotDialogueCue[] = rhythm.cues.map((value, index) => {
     const cueField = `${field}.cues[${String(index)}]`
     const cue = parseExactInputObject(value, [
@@ -1147,8 +1147,8 @@ function parseShotDialogueRhythm(
     }
     if (cue.schemaVersion === 'dialogue-cue-v2') {
       const lineId = parseIdentifier(cue.lineId, `${cueField}.lineId`)
-      if (v2LineIds.has(lineId)) throw new InputError(`${field} has duplicate v2 lineId: ${lineId}`)
-      v2LineIds.add(lineId)
+      if (identifiedLineIds.has(lineId)) throw new InputError(`${field} has duplicate identified lineId: ${lineId}`)
+      identifiedLineIds.add(lineId)
       const plannedStartSec = cue.plannedStartSec
       const plannedEndSec = cue.plannedEndSec
       if (
@@ -1172,6 +1172,29 @@ function parseShotDialogueRhythm(
         plannedStartSec: plannedStartSec === 0 ? 0 : plannedStartSec,
         plannedEndSec,
         timingVerified: true,
+        legacy: false,
+      }
+    }
+    if (cue.schemaVersion === 'dialogue-cue-linked-v1') {
+      const lineId = parseIdentifier(cue.lineId, `${cueField}.lineId`)
+      if (identifiedLineIds.has(lineId)) throw new InputError(`${field} has duplicate identified lineId: ${lineId}`)
+      identifiedLineIds.add(lineId)
+      if (
+        cue.plannedStartSec !== null
+        || cue.plannedEndSec !== null
+        || cue.timingVerified !== false
+        || cue.legacy !== false
+      ) {
+        throw new InputError(`${cueField} linked timing contract mismatch`)
+      }
+      return {
+        schemaVersion: 'dialogue-cue-linked-v1',
+        lineId,
+        speakerId: parseIdentifier(cue.speakerId, `${cueField}.speakerId`),
+        verbatimText: cue.verbatimText,
+        plannedStartSec: null,
+        plannedEndSec: null,
+        timingVerified: false,
         legacy: false,
       }
     }

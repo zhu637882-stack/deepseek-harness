@@ -8,9 +8,11 @@ import socket
 import time
 import urllib.request
 import urllib.error
+import pytest
 
 
-def test_existing_http_commit_uses_dialogue_composition(tmp_path):
+@pytest.mark.parametrize("identity_key", ["lineId", "sourceLineId"])
+def test_existing_http_commit_uses_dialogue_composition(tmp_path, identity_key):
     from jason import config
     writer = config.CONFIG_ROOT
     owned = Path(__file__).resolve().parent
@@ -108,6 +110,7 @@ assert new_projection['videoSegments'][0]['status'] == 'missing_output'
 assert api_deps.settings.allow_paid is False
 print("actual HTTP routes: script+frame committed, exact retry deduplicated; fixture only, paid disabled")
 '''
+    script = script.replace('line = {"lineId":', 'line = {"' + identity_key + '":')
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONDONTWRITEBYTECODE": "1",
            "PYTHONPATH": os.pathsep.join((str(writer / "backend/src"), str(owned))),
            "JASON_PROJECT_ROOT": str(tmp_path), "JASON_CONFIG_ROOT": str(writer),

@@ -550,9 +550,9 @@ export interface ImagoShotRelationShot extends ImagoMethodJsonObject {
   readonly beats: readonly ImagoShotRelationBeat[]
 }
 
-/** One exact E5-3 dialogue cue; legacy cues deliberately retain null timing. */
+/** One exact E5-3 dialogue cue; linked and legacy cues deliberately retain null timing. */
 export interface ImagoShotDialogueCue extends ImagoMethodJsonObject {
-  readonly schemaVersion: 'dialogue-cue-v2' | 'dialogue-cue-legacy-v1'
+  readonly schemaVersion: 'dialogue-cue-v2' | 'dialogue-cue-linked-v1' | 'dialogue-cue-legacy-v1'
   readonly lineId: string | null
   readonly speakerId: string | null
   /** Exact text: Python-strip-clean, NUL-free, and 1–256 Unicode code points. */

@@ -49,6 +49,10 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 
 在 Harness 根目录用 `node --import tsx packages/experimental/qingmu-director-context-bridge/examples/model-tools-keyless.ts` 运行[免密钥示例](examples/model-tools-keyless.ts)。它通过 Loader 加载随包青木导演预设，创建仅存内存的原生会话，并以脚本化外部响应驱动真实 Agent 循环。快照包含实际角色提示、作用域工具、持久事件格式以及进入下一轮模型请求的方法正文。不发起网络或付费 Provider 请求；独立组合测试还核验冷恢复。
 
+## 导入台词修改
+
+原生台词读取和预览保留导入的 `sourceLineId` 及已分配演员，不虚构时序。Writer 原子命令同时更新剧本与关联帧台词，使受影响的媒体和提示词失效，并刷新绑定的导演上下文。旧引用视频草稿保留供查看，复用前须针对新帧来源明确修订。分镜初始来源保持不变；台词修改后的手工分镜编辑要求完整且通过校验的剧本回执链，以及一致的当前帧副本。编号别名冲突时拒绝修改。免密钥示例加 `--dialogue` 可查看随包预设的真实读取/预览记录；示例不保存剧本、不生成媒体。见[决策说明](../../../.agents/notes/implemented/bug-fix/2026-09-10-qingmu-imported-dialogue.zh.md)。
+
 ## 模型体验
 
 ### Session 绑定桥

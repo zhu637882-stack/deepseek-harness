@@ -4,6 +4,7 @@ import type { Session } from '@deepseek-ai/dsh-session'
 import type { DirectorContextSnapshot, YimengProposeScriptResponse, YimengPreviewScriptResponse, YimengCommitScriptResponse, YimengRecoverScriptCommitResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import { digest, toolValues } from './native-draft.ts'
 import { previewNativeDialogueEdit, type readNativeDialogueInput } from './native-dialogue.ts'
+import { identifiesDialogueLine } from './dialogue-edit.ts'
 
 type Input = Awaited<ReturnType<typeof readNativeDialogueInput>>
 
@@ -17,16 +18,17 @@ type Input = Awaited<ReturnType<typeof readNativeDialogueInput>>
  */
 export function dialogueContinuation(input: Input, stage: ReturnType<typeof findStagedDialogue>,
   result: YimengCommitScriptResponse, current: DirectorContextSnapshot) {
-  if (current.schema !== input.context.schema || current.script.revision !== result.authoritativeRevision
+  if (current.script.revision !== result.authoritativeRevision
     || current.script.sha256 !== result.authoritativeSnapshotSha256
-    || current.storyboard?.version !== input.context.storyboard.version + 1
-    || current.storyboard.status !== 'Ready' || !/^[0-9a-f]{64}$/u.test(current.contextSnapshotSha256)) return null
+    || current.storyboard.version !== input.context.storyboard.version + 1
+    || !/^[0-9a-f]{64}$/u.test(current.contextSnapshotSha256)) return null
   function edited(value: unknown): unknown {
     if (Array.isArray(value)) return value.map(edited)
     if (value === null || typeof value !== 'object') return value
     const object = value as Record<string, unknown>
+    const matches = identifiesDialogueLine(object, stage.preview.lineId)
     return Object.fromEntries(Object.entries(object).map(([key, item]) => [key,
-      object.lineId === stage.preview.lineId && ['line', 'verbatimText', 'text'].includes(key)
+      matches && ['line', 'verbatimText', 'text'].includes(key)
         && item === stage.preview.before ? stage.preview.after : edited(item)]))
   }
   function stable(context: DirectorContextSnapshot) {
@@ -34,8 +36,11 @@ export function dialogueContinuation(input: Input, stage: ReturnType<typeof find
       sourceScene: _scene, selectedReferences, ...rest } = context
     return { ...rest, selectedReferences: selectedReferences.map(({ mediaUrl: _url, ...reference }) => reference) }
   }
+  let expectedScene: unknown
+  try { expectedScene = edited(input.context.sourceScene) }
+  catch { return null } // A conflicting alias cannot authorize continuation after an already saved edit.
   if (digest(stable(input.context)) !== digest(stable(current))
-    || digest(edited(input.context.sourceScene)) !== digest(current.sourceScene)) return null
+    || digest(expectedScene) !== digest(current.sourceScene)) return null
   return { before: input.context.contextSnapshotSha256, after: current.contextSnapshotSha256 }
 }
 
@@ -85,7 +90,7 @@ export async function stageDialogueEdit(input: Input, edit: { lineId: string; be
 export function findStagedDialogue(session: Session, receiptId: string) {
   type Stage = Awaited<ReturnType<typeof stageDialogueEdit>>
   const stage = toolValues(session, 'qingmu_stage_dialogue_edit').findLast(value =>
-    (value as Stage)?.schema === 'qingmu.native-dialogue-staged.v1' && (value as Stage).receiptId === receiptId) as Stage | undefined
+    (value as Partial<Stage> | null)?.schema === 'qingmu.native-dialogue-staged.v1' && (value as Stage).receiptId === receiptId) as Stage | undefined
   if (!stage) throw new Error('请先准备并核对这次台词修改。')
   const { schema: _schema, receiptId: _receipt, businessStateChanged: _changed,
     proposalStored: _stored, providerCalls: _calls, ...payload } = stage

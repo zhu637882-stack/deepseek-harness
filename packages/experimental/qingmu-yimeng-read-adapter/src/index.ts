@@ -4472,6 +4472,18 @@ function normalizeShotDialogueRhythm(
         legacy: false,
       }
     }
+    if (cue.schemaVersion === 'dialogue-cue-linked-v1') {
+      if (cue.plannedStartSec !== null || cue.plannedEndSec !== null
+        || cue.timingVerified !== false || cue.legacy !== false) {
+        throw new UpstreamContractError(`${cueField} linked timing contract mismatch`)
+      }
+      return {
+        schemaVersion: 'dialogue-cue-linked-v1',
+        lineId: requireIdentifier(cue.lineId, `${cueField}.lineId`),
+        speakerId: requireIdentifier(cue.speakerId, `${cueField}.speakerId`),
+        verbatimText, plannedStartSec: null, plannedEndSec: null, timingVerified: false, legacy: false,
+      }
+    }
     if (
       cue.schemaVersion !== 'dialogue-cue-legacy-v1'
       || cue.lineId !== null
@@ -4498,9 +4510,9 @@ function normalizeShotDialogueRhythm(
   })
   const cueCount = requireInteger(rhythm.cueCount, `${field}.cueCount`, 0)
   const timedCueCount = requireInteger(rhythm.timedCueCount, `${field}.timedCueCount`, 0)
-  const v2LineIds = cues.flatMap(cue => cue.lineId === null ? [] : [cue.lineId])
-  if (new Set(v2LineIds).size !== v2LineIds.length) {
-    throw new UpstreamContractError(`${field} v2 lineId duplicate`)
+  const lineIds = cues.flatMap(cue => cue.lineId === null ? [] : [cue.lineId])
+  if (new Set(lineIds).size !== lineIds.length) {
+    throw new UpstreamContractError(`${field} lineId duplicate`)
   }
   if (
     cueCount !== cues.length

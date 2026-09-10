@@ -28,7 +28,7 @@ C 方法包提供导演证据、表演与调度、覆盖与媒体审看方法。
 
 ## Shot River 节奏与参考约定
 
-E5-3 的 `shotRelationMethod` 请求增加权威 `frameNo`、数值 `durationSec`、对白原文及其节奏时间，以及各元素的当前参考可用性、资产 SHA 和最小血缘。Host 校验这些字段，不舍入秒值、不裁剪对白、不虚构参考，也不增加镜头排序状态。工作单只允许 `inspectCanonicalShotRelations` 与 `inspectShotRiverRhythmAndReferences`，两者均为只读。
+E5-3 的 `shotRelationMethod` 请求增加权威 `frameNo`、数值 `durationSec`、对白原文及其节奏时间，以及各元素的当前参考可用性、资产 SHA 和最小血缘。`dialogue-cue-linked-v1` 保留来自带编号来源的有效 `lineId`、`speakerId` 和逐字文本，同时明确没有时序证据：两个计划秒数均为 `null`、`timingVerified` 为 `false`、`legacy` 为 `false`。Host 校验这些字段，不舍入秒值、不裁剪对白、不虚构参考，也不增加镜头排序状态。工作单只允许 `inspectCanonicalShotRelations` 与 `inspectShotRiverRhythmAndReferences`，两者均为只读。
 
 只有 E5-3 的关系、投影和所选 Shot 摘要使用 `qingmu.e5-3-seconds-binary64-hash-projection.v1`：以 `schema`/`subject` 包装，仅为哈希把固定 `durationSec`、`plannedStartSec`、`plannedEndSec` 路径替换为 `binary64:<16 big-endian hex digits>`。`null` 仍是 `null`，负零按零计算。实际请求与响应的秒值仍为数值。输入快照 SHA 继续绑定带数值的准确 stdin 字节，因此无需改动通用 canonical 序列化器，即可避开 Python/JavaScript 指数写法的差异。Hero/E5-2 保留更窄的 ID 图与原有哈希语义。
 
