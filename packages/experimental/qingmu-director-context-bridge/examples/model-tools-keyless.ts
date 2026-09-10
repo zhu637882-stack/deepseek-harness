@@ -5,7 +5,7 @@
  *   node --import tsx packages/experimental/qingmu-director-context-bridge/examples/model-tools-keyless.ts
  */
 
-import { readStoryDraft } from '../../client-ui-qingmu-cockpit/src/client/story-draft.ts'
+import { readStoryDraft } from '../src/story-draft.ts'
 import { Context } from '@deepseek-ai/cordis'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import Loader from '@deepseek-ai/cordis-plugin-loader'

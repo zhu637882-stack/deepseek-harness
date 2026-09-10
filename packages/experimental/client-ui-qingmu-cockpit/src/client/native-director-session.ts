@@ -4,7 +4,7 @@ import type { ClientContext, ISessions } from '@deepseek-ai/dsh-client-runtime/c
 import type { ConnectionHandle, HostDescriptionSource } from '@deepseek-ai/dsh-client-connection/client'
 import type { NativeDirectorPromptTarget } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import { unwrapRpc } from './contracts.ts'
-import { readStoryDraft, type NativeStoryPort } from './story-draft.ts'
+import { readStoryDraft, type NativeStoryPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/src/story-draft.ts'
 
 /** Connection generations invalidate readiness and binding without remounting the editor. */
 export function useDirectorConnection(source?: HostDescriptionSource) {
