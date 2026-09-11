@@ -533,48 +533,6 @@ Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/
 
 Source: [`packages/plan/plan-mode/src/index.ts:53`](../packages/plan/plan-mode/src/index.ts)
 
-### `qingmu-director-context/*`
-
-<a id="qingmu-director-contextstate--log-only"></a>
-
-#### `qingmu-director-context/state` — log-only
-
-```ts persistence-catalog
-/** Whole-value, log-only binding; null clears an obsolete object before switch I/O. */
-'qingmu-director-context/state': DirectorContextBindingState | null
-```
-
-Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:257`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
-
-### `qingmu-director-dialogue/*`
-
-<a id="qingmu-director-dialoguereceipt--log-only"></a>
-
-#### `qingmu-director-dialogue/receipt` — log-only
-
-```ts persistence-catalog
-/** Full host input retained outside model context; usable only with its matching successful tool result. */
-'qingmu-director-dialogue/receipt': {
-  readonly callId: string
-  readonly toolName: string
-  readonly value: JsonValue
-  readonly visibleSha256: string
-}
-```
-
-Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:261`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
-
-<a id="qingmu-director-dialoguestate--log-only"></a>
-
-#### `qingmu-director-dialogue/state` — log-only
-
-```ts persistence-catalog
-/** A UI view of a native tool operation, never a second business ledger. */
-'qingmu-director-dialogue/state': NativeDialogueExecution
-```
-
-Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:259`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
-
 ### `qingmu/*`
 
 <a id="qingmudirector-proposal-receipt--log-only"></a>
@@ -598,6 +556,74 @@ Source: [`packages/experimental/qingmu-project-context/src/types.ts:104`](../pac
 ```
 
 Source: [`packages/experimental/qingmu-project-context/src/types.ts:102`](../packages/experimental/qingmu-project-context/src/types.ts)
+
+### `qingmu-director-context/*`
+
+<a id="qingmu-director-contextstate--log-only"></a>
+
+#### `qingmu-director-context/state` — log-only
+
+```ts persistence-catalog
+/** Whole-value, log-only binding; null clears an obsolete object before switch I/O. */
+'qingmu-director-context/state': DirectorContextBindingState | null
+```
+
+Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:261`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+
+### `qingmu-director-dialogue/*`
+
+<a id="qingmu-director-dialoguereceipt--log-only"></a>
+
+#### `qingmu-director-dialogue/receipt` — log-only
+
+```ts persistence-catalog
+/** Full host input retained outside model context; usable only with its matching successful tool result. */
+'qingmu-director-dialogue/receipt': {
+  readonly callId: string
+  readonly toolName: string
+  readonly value: JsonValue
+  readonly visibleSha256: string
+}
+```
+
+Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:265`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+
+<a id="qingmu-director-dialoguestate--log-only"></a>
+
+#### `qingmu-director-dialogue/state` — log-only
+
+```ts persistence-catalog
+/** A UI view of a native tool operation, never a second business ledger. */
+'qingmu-director-dialogue/state': NativeDialogueExecution
+```
+
+Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:263`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+
+### `qingmu-director-vision/*`
+
+<a id="qingmu-director-visionrequest--log-only"></a>
+
+#### `qingmu-director-vision/request` — log-only
+
+```ts persistence-catalog
+/** Complete auxiliary model input, including durable image references. */
+'qingmu-director-vision/request': { readonly callId: string; readonly inspectionId: string; readonly assetSha256: string; readonly request: JsonValue }
+```
+
+Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:257`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+
+<a id="qingmu-director-visionresult--log-only"></a>
+
+#### `qingmu-director-vision/result` — log-only
+
+```ts persistence-catalog
+/** Visual observations and measured usage, never creative or adoption approval. */
+'qingmu-director-vision/result': { readonly callId: string; readonly inspectionId: string; readonly status: 'completed' | 'failed'; readonly report: string | null; readonly usage: import('@deepseek-ai/dsh-llm').TokenUsage | null; readonly completionId: string | null; readonly error: string | null }
+```
+
+Types: [TokenUsage](subsystems/llm-streaming.md)
+
+Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:259`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
 
 ### `request/*`
 

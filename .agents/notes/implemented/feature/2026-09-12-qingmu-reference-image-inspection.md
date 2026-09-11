@@ -18,7 +18,7 @@ Descriptions without pixels retain the original blind spot. Arbitrary URL or fil
 
 ## Consequences
 
-Inspection requires a working attachment store and an image-capable main model or configured observer. The observer makes one bounded prepared call without automatic retries; incomplete responses are explicit failures. Its report remains attributed advice rather than the main director claiming direct visual perception. Original source hashes identify the asset; attachment references identify its normalized image. Viewing does not approve, adopt or regenerate media. Model image input uses the normal model allowance. A single view cannot prove hidden geometry, physical dimensions or full-film continuity.
+Required observation events are included in the generated runtime persistence vocabulary. The replay test checks that every emitted observation event is readable by a cold session load; ordinary webpage restoration verifies the existing log after restart. Inspection requires a working attachment store and an image-capable main model or configured observer. The observer makes one bounded prepared call without automatic retries; incomplete responses are explicit failures. Its report remains attributed advice rather than the main director claiming direct visual perception. Original source hashes identify the asset; attachment references identify its normalized image. Viewing does not approve, adopt or regenerate media. Model image input uses the normal model allowance. A single view cannot prove hidden geometry, physical dimensions or full-film continuity.
 
 ## Testing
 

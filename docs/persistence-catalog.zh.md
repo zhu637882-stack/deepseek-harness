@@ -535,6 +535,30 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源：[`packages/plan/plan-mode/src/index.ts:53`](../packages/plan/plan-mode/src/index.ts)
 
+### `qingmu/*`
+
+<a id="qingmudirector-proposal-receipt--log-only"></a>
+
+#### `qingmu/director-proposal-receipt` — 仅日志
+
+```ts persistence-catalog
+/** Informational proposal receipt; proposal content remains outside the session log. */
+'qingmu/director-proposal-receipt': QingmuDirectorProposalReceipt
+```
+
+来源： [`packages/experimental/qingmu-project-context/src/types.ts:104`](../packages/experimental/qingmu-project-context/src/types.ts)
+
+<a id="qingmuproject-context--log-only"></a>
+
+#### `qingmu/project-context` — 仅日志
+
+```ts persistence-catalog
+/** Whole-value context state reconstructed by folding the latest event. */
+'qingmu/project-context': QingmuProjectContextEvent
+```
+
+来源： [`packages/experimental/qingmu-project-context/src/types.ts:102`](../packages/experimental/qingmu-project-context/src/types.ts)
+
 ### `qingmu-director-context/*`
 
 <a id="qingmu-director-contextstate--log-only"></a>
@@ -546,7 +570,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'qingmu-director-context/state': DirectorContextBindingState | null
 ```
 
-来源：[`packages/experimental/qingmu-director-context-bridge/src/types.ts:257`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+来源： [`packages/experimental/qingmu-director-context-bridge/src/types.ts:261`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
 
 ### `qingmu-director-dialogue/*`
 
@@ -564,7 +588,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/experimental/qingmu-director-context-bridge/src/types.ts:261`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+来源： [`packages/experimental/qingmu-director-context-bridge/src/types.ts:265`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
 
 <a id="qingmu-director-dialoguestate--log-only"></a>
 
@@ -575,31 +599,33 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'qingmu-director-dialogue/state': NativeDialogueExecution
 ```
 
-来源：[`packages/experimental/qingmu-director-context-bridge/src/types.ts:259`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+来源： [`packages/experimental/qingmu-director-context-bridge/src/types.ts:263`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
 
-### `qingmu/*`
+### `qingmu-director-vision/*`
 
-<a id="qingmudirector-proposal-receipt--log-only"></a>
+<a id="qingmu-director-visionrequest--log-only"></a>
 
-#### `qingmu/director-proposal-receipt` — 仅日志
-
-```ts persistence-catalog
-/** Informational proposal receipt; proposal content remains outside the session log. */
-'qingmu/director-proposal-receipt': QingmuDirectorProposalReceipt
-```
-
-来源：[`packages/experimental/qingmu-project-context/src/types.ts:104`](../packages/experimental/qingmu-project-context/src/types.ts)
-
-<a id="qingmuproject-context--log-only"></a>
-
-#### `qingmu/project-context` — 仅日志
+#### `qingmu-director-vision/request` — 仅日志
 
 ```ts persistence-catalog
-/** Whole-value context state reconstructed by folding the latest event. */
-'qingmu/project-context': QingmuProjectContextEvent
+/** Complete auxiliary model input, including durable image references. */
+'qingmu-director-vision/request': { readonly callId: string; readonly inspectionId: string; readonly assetSha256: string; readonly request: JsonValue }
 ```
 
-来源：[`packages/experimental/qingmu-project-context/src/types.ts:102`](../packages/experimental/qingmu-project-context/src/types.ts)
+来源： [`packages/experimental/qingmu-director-context-bridge/src/types.ts:257`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+
+<a id="qingmu-director-visionresult--log-only"></a>
+
+#### `qingmu-director-vision/result` — 仅日志
+
+```ts persistence-catalog
+/** Visual observations and measured usage, never creative or adoption approval. */
+'qingmu-director-vision/result': { readonly callId: string; readonly inspectionId: string; readonly status: 'completed' | 'failed'; readonly report: string | null; readonly usage: import('@deepseek-ai/dsh-llm').TokenUsage | null; readonly completionId: string | null; readonly error: string | null }
+```
+
+类型： [TokenUsage](subsystems/llm-streaming.zh.md)
+
+来源： [`packages/experimental/qingmu-director-context-bridge/src/types.ts:259`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
 
 ### `request/*`
 

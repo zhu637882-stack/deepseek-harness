@@ -10,7 +10,7 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import LlmRuntime, { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import LocalAttachmentStore from '@deepseek-ai/dsh-attachment-local'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { KNOWN_SESSION_EVENT_TYPES, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { scopeOf } from '@deepseek-ai/dsh-scope'
@@ -279,6 +279,8 @@ it('gives a text-only director an attributed visual report with reconstructible 
   expect(observer.requests[0]?.messages[0]?.content).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'image' })]))
   const recorded = h.agent.session.events.filter(e => e.type === 'qingmu-director-vision/request' || e.type === 'qingmu-director-vision/result')
   expect(recorded).toHaveLength(2)
+  // Cold session loads reject required events absent from the runtime vocabulary.
+  for (const event of recorded) expect(KNOWN_SESSION_EVENT_TYPES.has(event.type)).toBe(true)
   expect(recorded[0]?.data).toMatchObject({ request: { messages: observer.requests[0]?.messages } })
   expect(JSON.stringify(recorded)).not.toContain('signature=')
   expect(JSON.stringify(recorded)).not.toContain(imageBytes.toString('base64'))
