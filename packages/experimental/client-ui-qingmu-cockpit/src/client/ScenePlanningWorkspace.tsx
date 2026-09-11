@@ -249,7 +249,7 @@ export function ScenePlanningWorkspace({
   readonly hostSync?: QingmuHostSync | undefined
   readonly onUnsavedChange: (dirty: boolean) => void
   readonly onCommitted: () => Promise<unknown>
-  readonly onSelectShotId: (id: string) => void
+  readonly onSelectShotId: (id: string) => boolean | void
 }) {
   const connection = useDirectorConnection(directorConnection)
   const key = `qingmu.scene-planning.v1:${projectId}:${episodeId}`
@@ -377,6 +377,21 @@ export function ScenePlanningWorkspace({
     // Scope remounts this workspace; initial hydration must not replace local edits.
   }, [projectId, episodeId, port, hostSync])
   useEffect(() => {
+    if (presentation === 'assistant' || !state || state.canonicalStoryboard || !canonicalDirectorScope
+      || canonicalDirectorScope.projectId !== projectId || canonicalDirectorScope.episodeId !== episodeId
+      || local?.dirty || local?.pending) return
+    const plan = state.scenePlans?.find(item => item.sceneId === canonicalDirectorScope.sceneId)
+      ?? (state.planning?.sceneId === canonicalDirectorScope.sceneId ? state.planning : null)
+    const selectedIndex = plan?.shots.findIndex(shot => shot.id === canonicalDirectorScope.shotId) ?? -1
+    if (!plan || selectedIndex < 0) return
+    const next = forScene(state, plan.sceneIndex)
+    const nextLocal = saved(next)
+    setState(next); setSceneIndex(plan.sceneIndex); setIndex(selectedIndex)
+    update(nextLocal && { ...nextLocal, activeIndex: selectedIndex })
+    // The parent owns shot navigation; local editing must not trigger a reload.
+  }, [canonicalDirectorScope?.projectId, canonicalDirectorScope?.episodeId,
+    canonicalDirectorScope?.sceneId, canonicalDirectorScope?.shotId, state?.storyboard?.id, presentation])
+  useEffect(() => {
     const dirty = Boolean(local?.dirty || local?.pending || automatic?.dirty || automatic?.pending)
     onUnsavedChange(dirty)
     const prevent = (event: BeforeUnloadEvent) => { if (dirty) event.preventDefault() }
@@ -398,9 +413,11 @@ export function ScenePlanningWorkspace({
     : canonicalStoryboard
       ? canonicalDirectorScope?.projectId === projectId && canonicalDirectorScope.episodeId === episodeId
         ? canonicalDirectorScope : null
-      : state?.planning && currentShotId ? {
-        projectId, episodeId, sceneId: state.planning.sceneId, shotId: currentShotId,
-      } : null
+      : state?.planning && currentShotId && (canonicalDirectorScope === undefined
+        || (canonicalDirectorScope?.projectId === projectId && canonicalDirectorScope.episodeId === episodeId
+          && canonicalDirectorScope.sceneId === state.planning.sceneId && canonicalDirectorScope.shotId === currentShotId)) ? {
+          projectId, episodeId, sceneId: state.planning.sceneId, shotId: currentShotId,
+        } : null
   const directorIdentityKey = JSON.stringify([directorSessionId, directorScope, canonicalDirectorRevision, directorRefresh])
   const visibleAutomaticShot = presentation === 'assistant'
     ? canonicalStoryboard?.shots?.find(shot => shot.id === directorScope?.shotId)
@@ -821,6 +838,8 @@ export function ScenePlanningWorkspace({
   }
   const select = (next: number) => {
     if (local?.shotIds.length && local.dirty) { setError('请先保存当前镜头再切换；当前修改已保留。'); return }
+    const shotId = local?.shotIds[next]
+    if (shotId && onSelectShotId(shotId) === false) return
     clearProposal(); clearPaidProposal()
     if (local) update({ ...local, activeIndex: next })
     setIndex(next); setPreview(false)
@@ -845,9 +864,9 @@ export function ScenePlanningWorkspace({
       {state?.scenes.map(s => <button type="button" key={s.sceneIndex} aria-pressed={s.sceneIndex === (local?.sceneIndex ?? sceneIndex)}
         disabled={Boolean(local?.dirty || local?.pending) || busy} onClick={() => {
           const next = forScene(state, s.sceneIndex)
-          clearProposal(); clearPaidProposal(); setState(next); update(saved(next)); setSceneIndex(s.sceneIndex); setIndex(0)
           const first = next.planning?.shots[0]
-          if (first) onSelectShotId(first.id)
+          if (first && onSelectShotId(first.id) === false) return
+          clearProposal(); clearPaidProposal(); setState(next); update(saved(next)); setSceneIndex(s.sceneIndex); setIndex(0)
         }}>{s.title}</button>)}
       {local?.shots.map((s, i) => <button type="button" key={local.shotIds[i] ?? i} aria-pressed={i === index}
         disabled={busy || Boolean(local.pending)} onClick={() => { select(i) }}>{String(i + 1).padStart(2, '0')} · {s.title}<small>{s.durationSec} 秒 · 规划镜头</small></button>)}

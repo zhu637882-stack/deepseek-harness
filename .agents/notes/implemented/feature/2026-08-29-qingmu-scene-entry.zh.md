@@ -10,7 +10,9 @@ Status: implemented
 
 ## Decision
 
-[规划工作区](../../../../packages/experimental/client-ui-qingmu-cockpit/src/client/ScenePlanningWorkspace.tsx)衔接独立的[项目与剧本创作入口](2026-08-29-qingmu-creation-entry.zh.md)。易梦把已确认剧本中一场戏的版本、完整 SHA 和来源行绑定到新文本实体、1–8 个真实镜头与首个 canonical 分镜快照，在同一个既有 Store 事务中保存 ChangeSet/outbox/回执记录。Edit 复用既有内核修改。不增加 schema 或第二份业务存储。
+[规划工作区](../../../../packages/experimental/client-ui-qingmu-cockpit/src/client/ScenePlanningWorkspace.tsx)衔接独立的[项目与剧本创作入口](2026-08-29-qingmu-creation-entry.zh.md)。Writer 把已确认剧本中一场戏的版本、完整 SHA 和来源行绑定到文本实体及每次最多 64 个真实镜头，并受请求大小限制。既有 Store 事务保存 canonical 分镜及 ChangeSet/outbox/回执记录。后续场次追加到本集，之前保存的规划仍可编辑。Edit 复用既有内核修改，不增加第二份业务存储。
+
+外层镜头选择同时决定引用工作区和场景规划编辑器的当前镜头。任一处选镜都会更新另一处；规划存在本地未保存输入时，保存或恢复前不能切换。导演目标与可见编辑器不一致期间保持未绑定。若分别维护局部选择，即使底层上下文绑定自身有效，用户对可见镜头提出的要求仍可能发送到另一个镜头。
 
 结构 Ready 记录规划快照，不表示创意批准。空参考和缺失 PromptIR 仍保持缺失。不合并其他场景中的同名人物。浏览器恢复保留准确命令和输入；显式重试或重新准备前先 GET 恢复。首版初始化竞争时，只有保留落败请求的本地输入并明确确认后，才载入先保存的版本。
 
@@ -26,4 +28,4 @@ Status: implemented
 
 ## Consequences
 
-[真实浏览器路径](../../../../apps/web/tests/qingmu-scene-planning.e2e.ts)使用正常启动器和独立空库，经 UI 创建/导入、丢弃一次真实成功响应、运行真实外层刷新/定位 receiver、拒绝重复通知、错误来源、错误范围和陈旧通知，随后修改并重启到新浏览器。聚焦约定覆盖所有权、来源冲突、原子回滚和事务日志恢复。规划仍限单场；外部导演方法、PromptIR 就绪、媒体生成和内容验收属于独立工作。
+[创建浏览器路径](../../../../apps/web/tests/qingmu-scene-planning.e2e.ts)覆盖持久化及外层通知。[无需模型密钥的选镜快照](../../../../apps/web/tests/qingmu-scene-selection.spec.ts)在正常启动器上运行，使用至少包含三个已保存镜头的测试场景。设置 `QINGMU_SELECTION_URL` 和 `QINGMU_SELECTION_STORAGE_STATE` 后，验证两处选择与未保存输入，不发送模型或业务写入请求。聚焦测试另外覆盖跨场景选择和过期导演解绑。规划与选镜不代表媒体生成或内容验收。

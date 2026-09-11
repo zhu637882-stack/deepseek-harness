@@ -61,10 +61,13 @@ export function DirectorWorkspace(props: DirectorWorkspaceProps) {
   const [planningDirty, setPlanningDirty] = useState(false)
   const [promptDirty, setPromptDirty] = useState(false)
   const [referenceDirty, setReferenceDirty] = useState(false)
+  const [selectionNotice, setSelectionNotice] = useState('')
   const selectShot = (nextShotId: string) => {
     if (nextShotId !== props.selectedShotId && referenceDirty
-      && !window.confirm('当前镜头的引用草稿尚未保存。切换镜头会保留服务器草稿，但会丢失这次试排，继续吗？')) return
+      && !window.confirm('当前镜头的引用草稿尚未保存。切换镜头会保留服务器草稿，但会丢失这次试排，继续吗？')) return false
+    setSelectionNotice('')
     props.onSelectShotId(nextShotId)
+    return true
   }
   useEffect(() => {
     props.onUnsavedChange(planningDirty || promptDirty || referenceDirty)
@@ -78,8 +81,16 @@ export function DirectorWorkspace(props: DirectorWorkspaceProps) {
   return <>
     {props.presentation !== 'assistant' && currentProjection?.director.shotRelations && <SceneReferenceWorkspace
       projectId={props.projectId} relations={currentProjection.director.shotRelations}
-      selectedShotId={props.selectedShotId} onSelectShotId={selectShot} guardUnsavedNavigation={false}
+      selectedShotId={props.selectedShotId} onSelectShotId={(id) => {
+        if (id !== props.selectedShotId && planningDirty) {
+          setSelectionNotice('请先保存或恢复下方正在编辑的分镜，再切换镜头。')
+          setPlanningOpen(true)
+          return
+        }
+        selectShot(id)
+      }} guardUnsavedNavigation={false}
       onUnsavedChange={setReferenceDirty} onOpenShooting={props.onOpenShooting} port={props.port} />}
+    {selectionNotice && <p role="status">{selectionNotice}</p>}
     {props.presentation === 'assistant' ? planning : <details open={!hasPlannedShots || planningOpen || planningDirty}
       onToggle={(event) => { if (hasPlannedShots && !planningDirty) setPlanningOpen(event.currentTarget.open) }}>
       <summary>场景规划与导演助手</summary>

@@ -98,3 +98,20 @@ it('keeps existing scene planning folded when the initial projection arrives lat
   details.open = true; fireEvent(details, new Event('toggle'))
   expect(details.open).toBe(true)
 })
+
+it('blocks reference navigation while a planning edit is unsaved and exposes that editor', () => {
+  const onSelectShotId = vi.fn()
+  const props = { projectId: 'p1', episodeId: 'e1', selectedShotId: 'h1', shotItems: [], port: {},
+    projection: { projectId: 'p1', episodeId: 'e1', director: { shotRelations: {
+      shots: [{ shotId: 'h1', sceneId: 's1' }, { shotId: 'h2', sceneId: 's1' }],
+    } } }, onSelectShotId, onCommitted: vi.fn(), onUnsavedChange: vi.fn(), t: (k: string) => k } as unknown as DirectorWorkspaceProps
+  render(<DirectorWorkspace {...props} />)
+  fireEvent.click(screen.getByText('planning dirty'))
+  fireEvent.click(screen.getByText('reference select'))
+  expect(onSelectShotId).not.toHaveBeenCalled()
+  expect(screen.getByRole('status').textContent).toBe('请先保存或恢复下方正在编辑的分镜，再切换镜头。')
+  expect((screen.getByText('场景规划与导演助手').parentElement as HTMLDetailsElement).open).toBe(true)
+  fireEvent.click(screen.getByText('planning clean'))
+  fireEvent.click(screen.getByText('reference select'))
+  expect(onSelectShotId).toHaveBeenLastCalledWith('h2')
+})

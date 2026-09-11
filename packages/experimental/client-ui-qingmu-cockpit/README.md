@@ -80,6 +80,8 @@ Immediately before a commit `POST`, the browser synchronously stores and reads b
 
 The workflow view accepts only the `jason.episode-workflow-projection.v1` contract produced by the Host adapter. Runtime identity, project and episode scope, source fingerprint, blockers, status facts, and lineage remain visible as a projection; none of those fields becomes a command.
 
+The scene shot strip and planning editor share the same selected shot, including saved plans in other scenes. The native director binds only when its target matches the visible editor. Unsaved planning edits keep the current shot selected and expose the editor; a declined reference-draft discard also leaves selection unchanged. Navigation does not save content or send a model request.
+
 ## Read-only Gate A capability catalog
 
 Generation & QC lazily reads Yimeng's RFC 8785 content-addressed Provider capability snapshots only while that tab is visible. Harness independently verifies snapshot bytes and recomputes the SHA-bound preflight decision before the browser receives it. Each card separates model identity, inputs and outputs, geometry, declared capabilities, mutual-exclusion rules, catalog SHA, and per-model snapshot SHA. Missing mutual-exclusion declarations remain visibly incomplete and fail closed; the cockpit does not hardcode or infer model compatibility.
