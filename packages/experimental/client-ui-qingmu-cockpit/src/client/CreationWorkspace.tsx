@@ -5,6 +5,7 @@ import type {
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
 import css from './CreationWorkspace.module.css'
+import { StyleGallery } from './StyleGallery.tsx'
 import { NativeStoryComposer } from './NativeStoryComposer.tsx'
 import type { NativeStoryPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft'
 
@@ -187,26 +188,18 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
     </div><details open className={css.creationSettings}><summary>创作设定</summary><p>选择整部作品的画面风格、导演方法、画幅和计划时长。</p>
       {options === undefined && <p role="status">{optionsError || '正在读取可用的风格与导演方法…'}</p>}
       {optionsError && <button disabled={busy} onClick={() => { setOptionsRetry(value => value + 1) }}>重新读取创作选项</button>}
-      <label>基础画风<select aria-label="基础画风" value={local.style} disabled={busy || local.intent !== undefined || !options}
-        onChange={(event) => {
-          const style = event.target.value
+      <StyleGallery styles={options?.visualStyles ?? []} value={local.style}
+        disabled={busy || local.intent !== undefined || !options} onChange={(style) => {
           const group = options?.visualStyles.find(item => item.id === style)?.group
           const stylePackId = options?.stylePacks.some(item => item.id === local.stylePackId && item.group === group) ? local.stylePackId : ''
           update({ ...local, style, stylePackId })
-        }}>
-        <option value="">请选择画风</option>
-        {options?.visualStyles.map(item => <option key={item.id} value={item.id}>{item.groupLabel} · {item.label}</option>)}
-      </select></label>
-      {selectedStyle?.previewUrl && <figure className={css.stylePreview}>
-        <img src={selectedStyle.previewUrl} alt={`${selectedStyle.label} 画风缩略图`} loading="lazy" />
-        <figcaption>{selectedStyle.groupLabel} · {selectedStyle.label}</figcaption>
-      </figure>}
+        }} />
       <label>全片风格包<select aria-label="全片风格包" value={local.stylePackId} disabled={busy || local.intent !== undefined || !options || !selectedStyle}
         onChange={(event) => { update({ ...local, stylePackId: event.target.value }) }}>
         <option value="">{selectedStyle ? '请选择匹配的风格包' : '请先选择基础画风'}</option>
         {compatiblePacks.map(item => <option key={item.id} value={item.id}>{item.groupLabel} · {item.name}</option>)}
       </select></label>
-      {selectedStyle && local.stylePackId === '' && <small>切换基础画风后，原风格包已清除；请选择同一类别的全片风格包。</small>}
+      {selectedStyle && local.stylePackId === '' && <small>请选择同一类别的全片风格包；跨类别切换画风时会清除原风格包。</small>}
       {selectedPack && <p>{selectedPack.intent} · {selectedPack.tone}</p>}
       <label>导演方法<select aria-label="导演方法" value={local.directorSkillId} disabled={busy || local.intent !== undefined || !options}
         onChange={(event) => { update({ ...local, directorSkillId: event.target.value }) }}>
@@ -220,7 +213,7 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
         {options?.directorSkills.map(item => <p key={item.id}><strong>{directorSkillLabel(item.id)}</strong> · 阶段：{item.stage}。
           {item.available ? ' 随项目保存。' : ` ${item.disabledReason ?? ''}`}</p>)}
       </details>
-      <small>风格包统一构图、灯光、色彩与表演；与基础画风必须属于同一类别。</small>
+      <small>基础画风的媒介、材质与明确色彩优先；风格包提供相容的全片设计建议，剧本事实与逐镜导演设计优先。</small>
       {textVersion && <small>输入来源：{textVersion.label}</small>}
       <label>创作类型<select value={local.creationType} disabled={busy || local.intent !== undefined}
         onChange={(event) => { update({ ...local, creationType: event.target.value as ProjectLocal['creationType'] }) }}>
@@ -396,8 +389,10 @@ export function TextImportWorkspace({ port, projectId, episodeId, onSaved, onPla
         <p>版本 {contract.revision} · 已锁定 · 来源 SHA {contract.contract.source.textSha256.slice(0, 12)}…</p>
         <p>类型：{contract.contract.project.creationType} · {contract.contract.project.aspectRatio}
           {' · '}{contract.contract.project.episodeCount} 集 · {contract.contract.project.duration}</p>
+        <p>{contract.message}</p>
+        {contract.methodUpgrades?.map(upgrade => <p key={upgrade.from.id}>{directorSkillLabel(upgrade.to.id)}：{upgrade.reason}</p>)}
         <details><summary>方法版本与完整 SHA</summary><pre>{JSON.stringify({
-          contractSha256: contract.sha256, methods: contract.contract.methods,
+          contractSha256: contract.sha256, methods: contract.contract.methods, methodUpgrades: contract.methodUpgrades,
         }, null, 2)}</pre></details>
       </> : <p role="status">{contract?.message ?? '正在读取创作合同…'}</p>}
     </details>
@@ -405,6 +400,7 @@ export function TextImportWorkspace({ port, projectId, episodeId, onSaved, onPla
       <p>粘贴剧本或导入 TXT，检查场景、动作与对白，再保存为本集剧本。</p></header>
     {storyPort && <NativeStoryComposer key={`${projectId}:${episodeId}`} port={storyPort} projectId={projectId} episodeId={episodeId}
       source={local.text} settings={JSON.stringify({ project: contract?.contract?.project, methods: contract?.contract?.methods,
+        methodUpgrades: contract?.methodUpgrades,
         visualStyle: options?.visualStyles.find(style => style.id === contract?.contract?.methods.visualStyle.id),
         stylePack: options?.stylePacks.find(pack => pack.id === contract?.contract?.methods.stylePackId?.id) })}
       disabled={busy || pending || state === undefined || contract === undefined || options === undefined}

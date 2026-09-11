@@ -103,6 +103,11 @@ export interface CreativeContractState {
   readonly contract: CreativeContract | null
   readonly sourceText: string | null
   readonly message: string
+  readonly methodUpgrades?: readonly {
+    readonly from: CreativeContractMethodRef
+    readonly to: CreativeContractMethodRef
+    readonly reason: string
+  }[]
 }
 /** Recovery addresses an existing request, not a guessed project name. */
 export interface ProjectInitializationRecovery { readonly idempotencyKey: string; readonly requestSha256: string }
@@ -419,13 +424,15 @@ export function prepareCreationCommand(endpoint: string, value: unknown, helpers
     path = `/api/qingmu/projects/${encodeURIComponent(projectId)}/creative-contract`
     method = 'GET'
     normalize = (value) => {
-      const result = exact(value, ['schema', 'projectId', 'configured', 'locked', 'revision', 'sha256', 'contract', 'sourceText', 'message'], bad)
+      const candidate = object(value, bad)
+      const result = exact(value, ['schema', 'projectId', 'configured', 'locked', 'revision', 'sha256', 'contract', 'sourceText', 'message',
+        ...('methodUpgrades' in candidate ? ['methodUpgrades'] : [])], bad)
       if (result.schema !== 'jason.qingmu-creative-contract-state.v1' || result.projectId !== projectId
         || typeof result.configured !== 'boolean' || typeof result.locked !== 'boolean') throw bad('creative contract state mismatch')
       text(result.message, bad, 1000)
       if (!result.configured) {
         if (result.locked || result.revision !== null || result.sha256 !== null || result.contract !== null
-          || result.sourceText !== null) throw bad('creative contract absent state invalid')
+          || result.sourceText !== null || result.methodUpgrades !== undefined) throw bad('creative contract absent state invalid')
       } else {
         if (!result.locked || result.revision !== 1) throw bad('creative contract lock invalid')
         const contract = normalizeCreativeContract(result.contract, bad, projectId)
@@ -434,6 +441,23 @@ export function prepareCreationCommand(endpoint: string, value: unknown, helpers
         const sourceText = storyText(result.sourceText, bad)
         if (createHash('sha256').update(sourceText).digest('hex') !== contract.source.textSha256) {
           throw bad('creative contract source invalid')
+        }
+        if (result.methodUpgrades !== undefined) {
+          if (!Array.isArray(result.methodUpgrades) || result.methodUpgrades.length === 0 || result.methodUpgrades.length > 64) {
+            throw bad('creative method upgrades invalid')
+          }
+          const seen = new Set<string>()
+          const refs = [...contract.methods.writingSkills, ...contract.methods.directorSkills,
+            ...contract.methods.cameraSkills, ...contract.methods.soundSkills]
+          for (const entry of result.methodUpgrades) {
+            const upgrade = exact(entry, ['from', 'to', 'reason'], bad)
+            const from = methodRef(upgrade.from, bad); const to = methodRef(upgrade.to, bad)
+            text(upgrade.reason, bad, 1000)
+            const directorPromotion = from.id === 'shot_blocking_director' && to.id === 'cinematic-director'
+            if ((from.id !== to.id && !directorPromotion) || from.sha256 === to.sha256 || seen.has(from.id)
+              || !refs.some(ref => ref.id === from.id && ref.version === from.version && ref.sha256 === from.sha256)) throw bad('creative method upgrade binding invalid')
+            seen.add(from.id)
+          }
         }
       }
       return result

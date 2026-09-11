@@ -64,6 +64,22 @@ describe('bounded creation Host contract', () => {
     expect(await setup(copied).handler('readCreativeContract', { projectId: 'project_1' }, signal()))
       .toMatchObject({ ok: false })
   })
+  it('preserves the frozen contract while validating an explicit method upgrade', async () => {
+    const from = currentCreativeContract.methods.directorSkills[0]!
+    const to = { ...from, version: '2.0.0', sha256: 'a'.repeat(64) }
+    const state = { schema: 'jason.qingmu-creative-contract-state.v1', projectId: 'project_1', configured: true,
+      locked: true, revision: 1, sha256: currentCreativeContractSha256, contract: currentCreativeContract,
+      sourceText: settings.textInput, message: '方法已兼容更新', methodUpgrades: [{ from, to, reason: '补充整场声音设计' }] }
+    expect(await setup(state).handler('readCreativeContract', { projectId: 'project_1' }, signal()))
+      .toMatchObject({ ok: true, value: { contract: currentCreativeContract, methodUpgrades: state.methodUpgrades } })
+    for (const upgrade of [
+      { from: { ...from, sha256: 'f'.repeat(64) }, to, reason: 'wrong predecessor' },
+      { from, to: { ...to, id: 'another-method' }, reason: 'wrong identity' },
+    ]) {
+      expect(await setup({ ...state, methodUpgrades: [upgrade] }).handler('readCreativeContract', { projectId: 'project_1' }, signal()))
+        .toMatchObject({ ok: false })
+    }
+  })
   it('joins Writer creation, base-style, and style-pack catalogs without inventing a selection', async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async (url) => {
       const path = String(url)

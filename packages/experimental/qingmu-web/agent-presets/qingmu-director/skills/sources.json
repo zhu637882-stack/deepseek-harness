@@ -149,6 +149,22 @@
           "commit": "678edc06d3318c1516f6eb73503f740427fdd831",
           "use": "Specialist writing and cinematography; see separately bundled skills."
         }
+      ],
+      "compatiblePredecessors": [
+        {
+          "version": "c65ae0d14457053efb1e354c7e7f7e120d97fad1:4891f16113213518",
+          "sha256": "4891f16113213518fc30627659dff67c2393cdc510214874694ab373229b0722",
+          "upgradeToSha256": "d372e62d49c97c804c6348c052c2cd54e172606d82a13c60bf39e96651f7ecb6",
+          "sourceCommit": "d1d1f1fbd02e0a4b826ed78a7adae9b5cabe7101",
+          "reason": "保留 Leos 六部门与既有导演决策，补充整场声音设计、空间声学和跨镜连续性检查。"
+        },
+        {
+          "id": "shot_blocking_director",
+          "version": "shot-blocking-director-v1+screenwriting-domain-specs-v1+director-domain-specs-v2",
+          "sha256": "4c488e61a033af09259200c759295c5e94291df228edf0240808c301e4750733",
+          "upgradeToSha256": "d372e62d49c97c804c6348c052c2cd54e172606d82a13c60bf39e96651f7ecb6",
+          "reason": "按青木已确定的方法取舍，以 Leos 六部门统筹，原镜头导演保留为辅助，补入 Open Film 编剧与摄影。"
+        }
       ]
     },
     "ai-visual-director": {

@@ -17,15 +17,23 @@
 .eyebrow { color: var(--qingmu-accent); font-size: 12px; letter-spacing: .12em; }
 .columns { display: grid; grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr); gap: 24px; }
 .editor { display: grid; gap: 12px; min-width: 0; }
-.projectColumns { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr); gap: 32px; align-items: start; }
+.projectColumns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(350px, 1.2fr); gap: 32px; align-items: start; }
 .projectColumns .editor { align-content: start; }
 .projectColumns textarea { min-height: 360px; }
 .creationSettings { border-left: 1px solid var(--dsw-alias-border-l2); padding-left: 24px; }
 .creationSettings > label { margin-top: 14px; }
 .creationSettings > small { display: block; margin-top: 8px; }
-.stylePreview { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 10px; margin: 10px 0 0; align-items: center; }
-.stylePreview img { width: 88px; height: 56px; object-fit: cover; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); }
-.stylePreview figcaption { color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
+.styleGallery { display: grid; gap: 10px; margin-top: 16px; min-width: 0; }
+.styleFilters { display: flex; gap: 6px; flex-wrap: wrap; }
+.workspace .styleFilters button { min-height: 44px; padding: 6px 12px; }
+.styleFilters button[aria-pressed="true"] { color: var(--qingmu-accent); border-color: var(--qingmu-accent); background: var(--qingmu-soft); }
+.styleSearch { font-size: 12px; }
+.styleGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; max-height: 400px; overflow-y: auto; padding: 4px; scrollbar-gutter: stable; }
+.workspace .styleCard { min-width: 0; padding: 0; overflow: hidden; text-align: left; font-size: 12px; }
+.styleCard img, .stylePlaceholder { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: cover; background: var(--dsw-alias-bg-layer-2); }
+.stylePlaceholder { display: grid; place-items: center; color: var(--dsw-alias-label-secondary); }
+.styleCard > span:last-child { display: block; padding: 8px; overflow-wrap: anywhere; }
+.workspace .styleCard[aria-pressed="true"] { border-color: var(--qingmu-accent); box-shadow: inset 0 0 0 1px var(--qingmu-accent); color: var(--qingmu-accent); }
 .skillMap { margin-top: 12px; border-top: 1px solid var(--dsw-alias-border-l2); padding-top: 10px; }
 .skillMap p { color: var(--dsw-alias-label-secondary); font-size: 13px; }
 .skillMap strong { color: var(--dsw-alias-label-primary); }
