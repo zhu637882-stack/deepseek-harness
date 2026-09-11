@@ -20,4 +20,4 @@ The existing command adapter forwards bounded project name and archive updates t
 
 ## Consequences
 
-No new database or media pipeline is introduced. Covers fall back to a title card when unavailable. Adapter, UI and API tests cover persistence, scope, invalid input and failed saves; archiving is not task cancellation.
+No new database or media pipeline is introduced. Covers fall back to an owner-scoped reference preview when available, then a title card. A reference preview is labeled and does not grant selection or media approval. Adapter, UI and API tests cover persistence, scope, invalid input and failed saves; archiving is not task cancellation.

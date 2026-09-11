@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useState } from 'react'
 import { ProjectLibrary } from '../src/client/ProjectLibrary.tsx'
+import { PrivateProjectCover } from '../src/client/PrivateProjectCover.tsx'
 import type { ProjectUpdateRequest } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { YimengJsonObject } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 afterEach(cleanup)
@@ -54,4 +55,19 @@ it('retains the draft after a save failure and does not submit a blank name', as
   fireEvent.click(screen.getByRole('button', { name: '保存名称' }))
   expect((await screen.findByRole('alert')).textContent).toContain('连接中断')
   expect(screen.getByLabelText<HTMLInputElement>('项目名称').value).toBe('待保存名称')
+})
+
+it('uses a project and hash bound private preview without changing asset selection', async () => {
+  const reference = { assetId: 'asset_prop', assetSha256: 'a'.repeat(64), mediaType: 'reference_image' as const,
+    label: '收音机', browserUrl: '', localReferenceScope: { elementKind: 'prop' as const, targetId: 'prop_radio' } }
+  const port = {
+    referenceVideoAssets: vi.fn(async () => ({ projectId: 'p1', page: 1, pages: 1, items: [reference] })),
+    readLocalReferenceCandidateContent: vi.fn(async () => ({ schema: 'jason.qingmu-local-reference-candidate-content.v1' as const,
+      assetId: reference.assetId, sha256: reference.assetSha256, mimeType: 'image/png' as const, contentBase64: 'AQID' })),
+  }
+  const view = render(<PrivateProjectCover projectId="p1" name="时差修理铺" port={port} />)
+  await waitFor(() => { expect(view.container.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AQID') })
+  expect(port.readLocalReferenceCandidateContent).toHaveBeenCalledWith({ projectId: 'p1', assetId: 'asset_prop',
+    expectedSha256: reference.assetSha256, elementKind: 'prop', targetId: 'prop_radio' }, expect.any(AbortSignal))
+  expect(screen.getByText('素材预览')).toBeTruthy()
 })

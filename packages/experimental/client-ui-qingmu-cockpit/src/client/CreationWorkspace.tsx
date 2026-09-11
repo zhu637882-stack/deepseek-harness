@@ -390,6 +390,11 @@ export function TextImportWorkspace({ port, projectId, episodeId, onSaved, onPla
         <p>类型：{contract.contract.project.creationType} · {contract.contract.project.aspectRatio}
           {' · '}{contract.contract.project.episodeCount} 集 · {contract.contract.project.duration}</p>
         <p>{contract.message}</p>
+        <p>基础画风：{options?.visualStyles.find(item => item.id === contract.contract?.methods.visualStyle.id)?.label
+          ?? contract.contract.methods.visualStyle.id}</p>
+        <p>全片风格包：{options?.stylePacks.find(item => item.id === contract.contract?.methods.stylePackId?.id)?.name
+          ?? contract.contract.methods.stylePackId?.id ?? '未选用'}</p>
+        <p>导演方法：{contract.contract.methods.directorSkills.map(item => directorSkillLabel(item.id)).join('、') || '尚未配置'}</p>
         {contract.methodUpgrades?.map(upgrade => <p key={upgrade.from.id}>{directorSkillLabel(upgrade.to.id)}：{upgrade.reason}</p>)}
         <details><summary>方法版本与完整 SHA</summary><pre>{JSON.stringify({
           contractSha256: contract.sha256, methods: contract.contract.methods, methodUpgrades: contract.methodUpgrades,

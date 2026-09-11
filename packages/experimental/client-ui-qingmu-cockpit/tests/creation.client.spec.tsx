@@ -128,6 +128,9 @@ describe('creation input and unknown-result recovery', () => {
     render(<TextImportWorkspace port={api} projectId="project_1" episodeId="episode_1" onSaved={async () => {}} />)
     await waitFor(() => { expect(screen.getByLabelText<HTMLTextAreaElement>('剧本文字').value).toContain('林夏：请进。') })
     expect(screen.getByRole('status').textContent).toContain('无需重复粘贴')
+    fireEvent.click(screen.getByText('本项目创作设定'))
+    expect(screen.getByText('基础画风：现代写实')).toBeTruthy()
+    expect(screen.getByText('全片风格包：未选用')).toBeTruthy()
     expect(api.createTextImport).not.toHaveBeenCalled()
   })
   it('lets a rejected stale intent be explicitly rebased only after a read, preserving all input', async () => {

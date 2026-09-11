@@ -1,5 +1,7 @@
 # Qingmu OS production cockpit
 
+When no official cover exists, visible project cards reuse private, owner-scoped reference reads and label the image as a material preview. Saved creation settings show the chosen style, style pack and director method by name.
+
 The project library shows saved media covers and separates active, archived and all projects. Owner-editable projects can be renamed, archived and restored through the same Writer metadata service. Archiving retains episodes and assets, and does not cancel generation or revoke editing. Reload reads the saved status; a failed save retains the name draft and reports the error.
 
 Native character designs now include an explicit voice audition quotation, generation and original-task recovery through the existing audio queue. Materialized previews become reusable audio references. The shooting page opens the precise-reference video workspace from its Generate Video action; first-frame operations retain their existing entry. These actions do not imply creative approval.

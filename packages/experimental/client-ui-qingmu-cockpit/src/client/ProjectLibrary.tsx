@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import type { YimengJsonObject } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { ProjectUpdateRequest } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import css from './ProjectLibrary.module.css'
+import { PrivateProjectCover, type ProjectCoverPort } from './PrivateProjectCover.tsx'
 
 const text = (value: unknown): string => typeof value === 'string' ? value : ''
 
@@ -15,13 +16,14 @@ function ProjectCover({ url, name }: { readonly url: string; readonly name: stri
 }
 
 /** The saved project index stays independent of the currently open episode. */
-export function ProjectLibrary({ projects, currentProjectId, loading, onOpen, onCreate, onUpdate }: {
+export function ProjectLibrary({ projects, currentProjectId, loading, onOpen, onCreate, onUpdate, mediaPort }: {
   readonly projects: readonly YimengJsonObject[]
   readonly currentProjectId: string
   readonly loading: boolean
   readonly onOpen: (id: string) => void
   readonly onCreate: () => void
   readonly onUpdate: (request: ProjectUpdateRequest) => Promise<void>
+  readonly mediaPort?: ProjectCoverPort
 }) {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<'active' | 'archived' | 'all'>('active')
@@ -58,7 +60,9 @@ export function ProjectLibrary({ projects, currentProjectId, loading, onOpen, on
       const date = created ? new Date(created) : undefined
       const dateText = date && Number.isFinite(date.getTime()) ? date.toLocaleDateString('zh-CN') : ''
       return <article key={id} className={css.card} aria-label={name}>
-        <ProjectCover key={text(project.thumbnail_url)} url={text(project.thumbnail_url)} name={name} />
+        {mediaPort && !text(project.thumbnail_url)
+          ? <PrivateProjectCover projectId={id} name={name} port={mediaPort} />
+          : <ProjectCover key={text(project.thumbnail_url)} url={text(project.thumbnail_url)} name={name} />}
         <div className={css.details}><div className={css.title}><h2>{name}</h2>
           {archived ? <span>已归档</span> : id === currentProjectId && <span>当前项目</span>}</div>
         <p>{text(project.theme) || '进入项目查看故事、角色、分镜与视频。'}</p>
