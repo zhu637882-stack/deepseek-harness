@@ -61,7 +61,7 @@ describe('creation input and unknown-result recovery', () => {
     fireEvent.click(card)
     expect(card.getAttribute('aria-pressed')).toBe('true')
     fireEvent.change(screen.getByRole('combobox', { name: '全片风格包' }), { target: { value: 'sp_cafe' } })
-    fireEvent.click(screen.getByRole('button', { name: '2D', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: '2D' }))
     expect(screen.queryByRole('button', { name: '选择画风：现代写实' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '选择画风：国漫' }))
     expect(screen.getByRole<HTMLSelectElement>('combobox', { name: '全片风格包' }).value).toBe('')
