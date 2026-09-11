@@ -271,3 +271,11 @@ An external original with current source registration can be explicitly selected
 Creation displays catalog-backed base-style thumbnails through the Host. Full-film packs are filtered to the chosen visual group, and changing groups clears an incompatible selection. The expandable skill list explains execution stages and unavailable methods; listing a skill does not imply that the native director has invoked it.
 
 The delivery page provides candidate-version choices, ordered source trims and local MP4 rendering through the existing immutable timeline engine. It retains earlier cuts and native source audio; working choices do not grant formal Take approval. Reopening a reference draft restores its saved bindings and parameters, while a late read preserves new edits.
+
+
+The delivery working cut supports durable edit drafts plus independent music, ambience, Foley and
+dialogue tracks. Import local WAV/MP3/M4A/FLAC (32 MB / 10 minutes), audition sources, place cues in
+assembled-film seconds, trim, set gain and fades, then save or compose an MP4. Cue timing is independent
+of shot boundaries. Original audio gain is explicit and affects its entire mix; the editor does not
+claim to separate music, infer dialogue ducking or repair room acoustics. Original candidates and
+prior film versions remain available. Both manual UI and native director use the same scoped API.

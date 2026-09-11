@@ -831,6 +831,10 @@ export interface QingmuYimengCommandPort {
   readWorkingCut(request: CreationScope, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').WorkingCutState>
   /** Save an ordered cut and queue one recoverable local render. */
   renderWorkingCut(request: CreationScope & { command: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').WorkingCutCommand }, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').WorkingCutState>
+  /** Save an editable cut without rendering or paid generation. */
+  saveWorkingCut(request: CreationScope & { command: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').WorkingCutCommand }, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').WorkingCutState>
+  /** Import a bounded local music, ambience, effect or dialogue source. */
+  uploadWorkingCutAudio(request: CreationScope & { command: { filename: string; contentBase64: string } }, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').WorkingCutState>
   readAssetDesign(request: CreationScope, signal?: AbortSignal): Promise<AssetDesignState>
   saveAssetDesign(request: CreationScope & { expectedStateSha256: string; design: AssetDesign },
     signal?: AbortSignal): Promise<AssetDesignState>

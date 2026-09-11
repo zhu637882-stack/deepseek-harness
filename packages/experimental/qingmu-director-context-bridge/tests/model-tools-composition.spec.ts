@@ -16,6 +16,10 @@ import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import AgentPresets from '@deepseek-ai/dsh-agent-presets'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import Skills from '@deepseek-ai/dsh-skill'
+import * as SkillFilesystem from '@deepseek-ai/dsh-skill-filesystem'
+import * as ToolSkill from '@deepseek-ai/dsh-tool-skill'
+import * as SkillResources from '../src/skill-resources.ts'
 import * as Persona from '@deepseek-ai/dsh-persona'
 import * as SpillPolicy from '@deepseek-ai/dsh-spill-policy'
 import SpillLocal from '@deepseek-ai/dsh-spill-local'
@@ -101,6 +105,9 @@ async function harness(adapter: MockAdapter, sessionRoot?: string, dialogue = fa
     version: 'v2',
     async import(specifier: string) {
       if (specifier === '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/model-tools') return ModelTools
+      if (specifier === '@deepseek-ai/dsh-skill-filesystem') return SkillFilesystem
+      if (specifier === '@deepseek-ai/dsh-tool-skill') return ToolSkill
+      if (specifier === '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/skill-resources') return SkillResources
       if (specifier === '@deepseek-ai/dsh-persona') return Persona
       throw new Error(`unexpected Loader import: ${specifier}`)
     },
@@ -109,6 +116,7 @@ async function harness(adapter: MockAdapter, sessionRoot?: string, dialogue = fa
   await ctx.plugin(SessionStore)
   await ctx.plugin(SystemPrompt, { persona: '' })
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(Skills)
   const spillRoot = await mkdtemp(join(tmpdir(), 'qingmu-dialogue-spill-')); roots.push(spillRoot)
   await ctx.plugin(SpillLocal, { root: spillRoot })
   await ctx.plugin(SpillPolicy, { maxInlineBytes: 50000 })
@@ -331,15 +339,15 @@ describe('Qingmu model tools through a real preset and agent loop', () => {
     expect(ctx.tools.schemas()).toEqual([])
     expect(ctx.tools.schemas(ordinary.agent)).toEqual([])
     expect(ctx.tools.schemas(first.agent).map(tool => tool.name).sort())
-      .toEqual(['qingmu_get_imago_method', 'qingmu_read_bound_context'])
+      .toEqual(['qingmu_get_imago_method', 'qingmu_read_bound_context', 'qingmu_read_skill_resource', 'skill'])
     expect(ctx.tools.schemas(second.agent).map(tool => tool.name).sort())
-      .toEqual(['qingmu_get_imago_method', 'qingmu_read_bound_context'])
+      .toEqual(['qingmu_get_imago_method', 'qingmu_read_bound_context', 'qingmu_read_skill_resource', 'skill'])
     expect(first.agent.session.events.at(-1)?.data).toMatchObject({ binding: { contextSnapshotSha256: '1'.repeat(64) } })
     expect(second.agent.session.events.at(-1)?.data).toMatchObject({ binding: { contextSnapshotSha256: '2'.repeat(64) } })
 
     await first.dispose()
     expect(ctx.tools.schemas(second.agent).map(tool => tool.name).sort())
-      .toEqual(['qingmu_get_imago_method', 'qingmu_read_bound_context'])
+      .toEqual(['qingmu_get_imago_method', 'qingmu_read_bound_context', 'qingmu_read_skill_resource', 'skill'])
     expect(ctx.tools.schemas()).toEqual([])
     await second.dispose()
     await ordinary.dispose()
@@ -367,7 +375,7 @@ describe('Qingmu model tools through a real preset and agent loop', () => {
       setup: async agentCtx => void await resumed.agentPresets.mount(agentCtx, 'qingmu-director'),
     })
     expect(resumed.tools.schemas(handle.agent).map(tool => tool.name).sort())
-      .toEqual(['qingmu_get_imago_method', 'qingmu_read_bound_context'])
+      .toEqual(['qingmu_get_imago_method', 'qingmu_read_bound_context', 'qingmu_read_skill_resource', 'skill'])
 
     handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: '恢复后读取。' }], source: { kind: 'user' } }))
     await waitForIdle(resumed, handle.agent)

@@ -9,17 +9,39 @@ export interface WorkingClip {
   readonly sha256: string
   readonly inSec: number
   readonly outSec: number
+  readonly sourceGainDb?: number
+}
+/** Independent sound cue placed on the assembled film, across camera cuts. */
+export interface WorkingAudioCue {
+  readonly assetId: string
+  readonly sha256: string
+  readonly kind: 'music' | 'ambience' | 'effect' | 'dialogue'
+  readonly startSec: number
+  readonly inSec: number
+  readonly outSec: number
+  readonly gainDb: number
+  readonly fadeInSec: number
+  readonly fadeOutSec: number
 }
 /** Recoverable command for one immutable timeline revision and local render. */
 export interface WorkingCutCommand {
   readonly requestId: string
   readonly expectedRevision: number
   readonly clips: readonly WorkingClip[]
+  readonly audioCues?: readonly WorkingAudioCue[]
+  readonly soundPlan?: string
 }
 /** Current shot choices plus retained MP4 versions. */
 export interface WorkingCutState extends CreationScope {
   readonly schema: 'qingmu-working-cut-v1'
   readonly revision: number
+  readonly audioLibrary?: readonly {
+    readonly assetId: string
+    readonly sha256: string
+    readonly name: string
+    readonly duration: number
+    readonly url: string
+  }[]
   readonly shots: readonly {
     readonly frameId: string
     readonly frameNo: number
@@ -36,6 +58,8 @@ export interface WorkingCutState extends CreationScope {
     readonly revisionId: string
     readonly version: number
     readonly clips: readonly WorkingClip[]
+    readonly audioCues?: readonly WorkingAudioCue[]
+    readonly soundPlan?: string
     readonly requestId: string
     readonly taskId: string | null
     readonly status: string
@@ -65,22 +89,24 @@ export function prepareWorkingCut(endpoint: string, value: unknown, helpers: {
     return v
   }
   const projectId = id(raw.projectId), episodeId = id(raw.episodeId)
-  const render = endpoint === 'renderWorkingCut'
-  const fields = render ? ['projectId', 'episodeId', 'command'] : ['projectId', 'episodeId']
+  const operation = ({ readWorkingCut: '', renderWorkingCut: '/render', saveWorkingCut: '/save', uploadWorkingCutAudio: '/audio' } as Record<string, string>)[endpoint]
+  if (operation === undefined) throw fail('working cut endpoint invalid')
+  const write = operation !== ''
+  const fields = write ? ['projectId', 'episodeId', 'command'] : ['projectId', 'episodeId']
   if (Object.keys(raw).some(k => !fields.includes(k))) throw fail('working cut field invalid')
   let body: YimengCommandJsonObject | undefined
-  if (render) {
+  if (write) {
     if (!raw.command || typeof raw.command !== 'object' || Array.isArray(raw.command)) throw fail('working cut command required')
     body = raw.command as YimengCommandJsonObject
-  } else if (endpoint !== 'readWorkingCut') throw fail('working cut endpoint invalid')
-  return { path: `/api/qingmu/projects/${projectId}/episodes/${episodeId}/working-cut${render ? '/render' : ''}`,
-    method: render ? 'POST' : 'GET', body,
+  }
+  return { path: `/api/qingmu/projects/${projectId}/episodes/${episodeId}/working-cut${operation}`,
+    method: write ? 'POST' : 'GET', body,
     normalize: (value) => {
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw helpers.responseError('working cut response invalid')
-      const state = value as WorkingCutState
+      const state = value as Record<string, unknown>
       if (state.schema !== 'qingmu-working-cut-v1' || state.projectId !== projectId || state.episodeId !== episodeId
         || !Array.isArray(state.shots) || !Array.isArray(state.cuts) || !Number.isSafeInteger(state.revision)
         || state.providerCalls !== 0 || state.humanApprovalChanged !== false) throw helpers.responseError('working cut response scope invalid')
-      return state
+      return value as WorkingCutState
     } }
 }

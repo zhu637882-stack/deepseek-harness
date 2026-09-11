@@ -9,7 +9,7 @@ import type { NativeDirectorReadiness } from './types.ts'
 const required = ['qingmu_read_bound_context', 'qingmu_get_imago_method',
   'qingmu_read_prompt_draft', 'qingmu_propose_prompt_edit', 'qingmu_read_first_draft', 'qingmu_propose_first_draft',
   'qingmu_read_reference_draft', 'qingmu_preview_reference_draft', 'qingmu_save_reference_draft',
-  'qingmu_read_director_plan', 'qingmu_save_director_plan'] as const
+  'qingmu_read_director_plan', 'qingmu_save_director_plan', 'qingmu_read_working_cut', 'qingmu_save_working_cut'] as const
 
 /**
  * Read the live agent's scoped tool registry, not its recorded preset label.

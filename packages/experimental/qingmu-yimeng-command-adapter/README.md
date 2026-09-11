@@ -175,3 +175,10 @@ The existing Take selection command accepts a playable local video with a curren
 Base-style previews use the read-only same-origin `/api/qingmu/creation-style-preview?styleId=…` route. It accepts a strict catalog ID, fetches only the fixed Writer WebP path, rejects redirects and validates media type and size. Creation options expose this Host URL only for an existing matching catalog image; browser credentials are not forwarded upstream.
 
 `readWorkingCut` and `renderWorkingCut` use owner-scoped routes for completed reference-video candidates. Rendering is local, persists an immutable timeline revision, recovers by request identity and leaves formal approval unchanged.
+
+
+Working-cut commands include `readWorkingCut`, `saveWorkingCut`, `renderWorkingCut` and
+`uploadWorkingCutAudio`. Sound uploads alone allow up to 45 MB of JSON for bounded base64 audio;
+other command limits are unchanged. Paths and returned project/episode scopes remain validated.
+Audio cues carry source hashes, source trim, film start, gain and fades; saves retain sound design
+without requiring a render. Sources remain unapproved local editing inputs.

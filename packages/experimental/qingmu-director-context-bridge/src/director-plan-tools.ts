@@ -46,6 +46,55 @@ function continuation(before: DirectorContextSnapshot, after: DirectorContextSna
 export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
   const output = { schema: { type: 'json' as const }, render: (_args: unknown, value: JsonValue) => [{ type: 'text' as const, text: JSON.stringify(value) }] }
   ctx.tools.register(defineTool({
+    name: 'qingmu_read_working_cut',
+    description: 'Read the current episode assembled cut, retained versions and imported audio sources. Plan music cues, uninterrupted scene ambience, Foley and dialogue on film time after editing. Source URLs are for actual listening, not evidence that listening happened. No provider calls.',
+    parameters: {}, output,
+    presentCall: () => ({ card: 'generic', kind: 'read', title: '读取整片剪辑与声音' }),
+    async execute(_args, exec) {
+      const current = await ports.readBoundContext(exec)
+      const { projectId, episodeId } = current.state.binding.scope
+      const scope = { projectId, episodeId }
+      const response = await ctx.qingmuYimengCommand('readWorkingCut', scope, exec.signal)
+      assertCurrent(current, exec)
+      if (!response.ok) throw new Error(response.error.message)
+      return ports.boundedJson({ schema: 'qingmu.native-working-cut.v1', scope, cut: response.value,
+        receiptId: digest({ scope, cut: response.value }), providerCalls: 0,
+        guidance: 'Use qingmu_save_working_cut with this receipt to save clips, audioCues and soundPlan. Audio cues require an imported assetId/sha256. Import local WAV/MP3/M4A/FLAC in the delivery page. Do not invent an asset or claim an unavailable music generator ran. Environment stays continuous under speech. Music and ambience have independent timing and fades; native mixed audio is not automatically separated. Scene acoustics and listening feedback remain director decisions.' })
+    },
+  }))
+  ctx.tools.register(defineTool({
+    name: 'qingmu_save_working_cut',
+    description: 'Save the assembled-film clips, independent sound cues and director sound plan to a retained editable revision. Optionally render a local MP4 when authorized. Music/ambience/effect/dialogue cues can span shots. No paid model, source replacement or human signoff. Retry identical arguments after an uncertain result.',
+    parameters: {
+      receiptId: { type: 'string', required: true },
+      cut: { type: 'json', required: true, description: 'Object with clips (frameId, assetId, sha256, inSec, outSec, optional sourceGainDb), audioCues (assetId, sha256, kind music/ambience/effect/dialogue, startSec on assembled film, inSec/outSec on source, gainDb -60..6, fadeInSec/fadeOutSec) and soundPlan string. Cues cannot exceed source/film duration. Lowering sourceGainDb also lowers its dialogue and ambience; never treat it as music separation.' },
+      render: { type: 'boolean', description: 'Default false: save without rendering. True requests local MP4 composition, not creative approval.' },
+    }, output,
+    presentCall: () => ({ card: 'generic', kind: 'edit', title: '保存整片剪辑与声音' }),
+    async execute(args, exec) {
+      if (!exec.agent) throw new Error('需要当前导演会话。')
+      const current = await ports.readBoundContext(exec)
+      assertCurrent(current, exec)
+      const input = toolValues(current.session, 'qingmu_read_working_cut').findLast(value => (value as { receiptId?: string } | null)?.receiptId === args.receiptId) as {
+        schema: string
+        scope: { projectId: string; episodeId: string }
+        cut: { revision: number }
+      } | undefined
+      const { projectId, episodeId } = current.state.binding.scope
+      if (!input || input.schema !== 'qingmu.native-working-cut.v1' || digest({ scope: input.scope, cut: input.cut }) !== args.receiptId
+        || digest(input.scope) !== digest({ projectId, episodeId })) throw new Error('请先读取当前整片剪辑。')
+      const cut = args.cut
+      if (!cut || typeof cut !== 'object' || Array.isArray(cut) || Object.keys(cut).some(key => !['clips', 'audioCues', 'soundPlan'].includes(key))) throw new Error('剪辑只接受镜头、声音轨和声音设计。')
+      const command = { ...cut, requestId: `cut-${digest({ receipt: args.receiptId, cut }).slice(0, 40)}`, expectedRevision: input.cut.revision }
+      const response = await ctx.qingmuYimengCommand(args.render === true ? 'renderWorkingCut' : 'saveWorkingCut',
+        { projectId, episodeId, command }, exec.signal)
+      assertCurrent(current, exec)
+      if (!response.ok) throw new Error(response.error.message)
+      return ports.boundedJson({ schema: 'qingmu.native-working-cut-result.v1', cut: response.value,
+        providerCalls: 0, humanApprovalChanged: false, guidance: 'Read the saved result and listen to the actual MP4 at shot/cue joins. Export success does not prove sound continuity, dialogue quality or creative acceptance.' })
+    },
+  }))
+  ctx.tools.register(defineTool({
     name: 'qingmu_read_director_plan',
     description: 'Read the complete saved director plan for the selected shot, canonical script and planning revisions. Use these current facts with the creative skills. All creative fields are available, including unfamiliar method output. No generation or approval.',
     parameters: {}, output,

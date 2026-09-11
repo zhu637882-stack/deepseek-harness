@@ -284,3 +284,15 @@ No true digital silence anywhere. The bed never falls below -45 relative to dial
 ```
 
 Cross-checks before this plan is finished: every shot has a room-tone entry; the bed is one region per layer; each silence is placed and inside the duration limits; the cue has a `must_not` line; all scripted words, speaker assignments, intended overlaps, breaths and response timing survive the execution plan. Failures in generated audio and lip-sync are diagnosed as F15 and F18 in [failure-modes.md](failure-modes.md); per-tool audio control surfaces are in [ai-video-tool-adapters.md](ai-video-tool-adapters.md).
+
+## Qingmu whole-cut execution
+
+After the picture edit, design one sound timeline for the scene rather than restarting a musical cue at every generated shot. Read `qingmu_read_working_cut` for actual trimmed durations, current revision and available audio assets. Save `clips`, `audioCues` and `soundPlan` through `qingmu_save_working_cut`; a saved paragraph without an executable cue is still a plan.
+
+Separate five decisions: voice identity, line performance, acoustic perspective, continuous ambience, and narrative music/Foley. Clear dialogue does not imply a close dry microphone. A small room has early reflections; a car has enclosed resonances and outside sound filtered by windows; an open street has spatial background activity; a cave can have long reflections. Describe the actual space, source/listener distance, occlusion and changes of perspective. Preserve these in the native generation prompt, or process an isolated dialogue/Foley track later. Never apply a blanket echo to a finished mixed track.
+
+Use independent music, ambience, effect and dialogue cues when the sources exist. Each cue names a real asset and hash, its source in/out, assembled-film start, gain in dB and fade lengths. Music follows dramatic changes and a musically sensible exit, not shot duration. Ambience bridges coverage within the same place and continues underneath dialogue; design transitions when the story moves to a different acoustic space. Choose gain by listening with dialogue, and use separate overlapping cues or source trims for planned level changes. This editor does not yet infer dialogue ducking or remove music automatically.
+
+Before adding music, listen to the original video audio. If unwanted music is already mixed with speech, lowering that whole track also lowers speech and ambience. Prefer a suitable isolated source, evaluated separation, or bounded source repair; preserve the good performance. Music generation may require provider access. An unavailable provider is an unresolved source, not permission to claim a track exists.
+
+Inspect every cut in context, every cue entrance/exit and speech-to-pause transition. Record exact time ranges and what actually happened. After rendering, listen to the exported file, including its end; inspect technical decode/loudness separately. Carry the user's open defects forward until the actual affected sound or image has been repaired and reviewed.

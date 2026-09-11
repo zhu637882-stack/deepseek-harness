@@ -102,3 +102,19 @@ The opt-in `tests/native-first-draft-connected.spec.ts` connects the shipped nat
 - With the same Writer/Core roots, set `QINGMU_FULL_HOST_BROWSER=1` and run `tests/native-first-draft-host.spec.ts` through Vitest for the shipped full Host and built client. This checks native transport, adopt/edit/save/Ready/reload and old-target rejection using real services and scripted model output. Runtime and cockpit artifacts are built in a disposable directory and verified against served bytes; shared installed bundles remain untouched. Synthetic Ready selection is not human content signoff, production activation, real-model creative quality or generation.
 - Legacy replay proposal drift remains checked by `checkDirectorProposalFreshness`; native prompt suggestions use their recorded read receipts and the read-only facade instead.
 - Native tools do not enable a real DeepSeek route, fee or production canary. The optional owned material connection enables explicit DashScope temporary upload only.
+
+
+## Whole-film sound execution
+
+`qingmu_read_working_cut` reads the current episode cut, imported audio sources and retained versions.
+`qingmu_save_working_cut` consumes a logged read receipt and saves clips, independent audio cues and
+sound design to the Writer working-cut revision. Optional `render: true` queues only local FFmpeg.
+The tools preserve scope, optimistic revision and retry identity, never infer source approval, and
+are included in native readiness. The sound method explains post-edit music, continuous ambience,
+acoustic perspective and full-cut listening. Missing audio must be imported through the delivery UI;
+these tools cannot invent sources, separate native mixed audio, or generate paid music.
+
+The keyless whole-cut composition example runs in
+`tests/reference-video-tools-composition.spec.ts`: shipped YAML preset, native agent loop, actual
+read/command adapters, scripted Writer HTTP and model responses. It demonstrates read, save and
+readback of a scene-spanning ambience cue without rendering or provider generation.

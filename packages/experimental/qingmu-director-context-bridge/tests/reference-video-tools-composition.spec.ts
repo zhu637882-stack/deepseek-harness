@@ -50,7 +50,7 @@ const planning = {
   frameRequirements: planningShots,
   planning: null, providerCalls: 0, stageStarted: false, approvalGranted: false,
 }
-const design = { performance: '先迟疑，再试探，不默认点头', cameraMovement: '镜头不要停。\n先推近，再横移。',
+const design = { narrative: 'The listener understands the concealed loss only after the pause.', lighting: 'Window key stays on the same world side after the reverse angle.', continuity: { blocking: 'Walk around the table via the free aisle; keep one fan.', acoustics: 'Room reflections and street bed continue beneath both speakers.' }, performance: '先迟疑，再试探，不默认点头', cameraMovement: '镜头不要停。\n先推近，再横移。',
   dialoguePlan: [{ character: '甲', line: '嗯。' }, { character: '乙', line: '我在听。' }],
   soundColumns: { ambient: '窗外轻雨', dialogue: '低声，保留吸气' }, newMethod: { beats: ['试探', '回应'] } }
 const designReceipt = sha({ scope, context, planning })
@@ -58,7 +58,11 @@ const edit = { bindings: request.bindings, parameters: request.parameters,
   promptParts: [...request.promptParts, { text: ' 她放低声音，保持原衣服与座位。' }] }
 const saveArgs = { draft: edit, expectedRevision: 1, expectedFrameSha256: savedDraft.frameSha256 }
 
+const initialCut = { schema:'qingmu-working-cut-v1',projectId:'p',episodeId:'episode-a',revision:0,shots:[],cuts:[],
+  audioLibrary:[{ assetId:'room',sha256:'b'.repeat(64),duration:30,name:'Room.wav',url:'' }],providerCalls:0,humanApprovalChanged:false }
 function writer() {
+  let workingCut: Record<string, unknown> = structuredClone(initialCut)
+
   let saved = structuredClone(savedDraft)
   let directorSource: { sha256: string; prompt: string } | null = null
   let currentContext = structuredClone(context)
@@ -69,6 +73,12 @@ function writer() {
   let loseSaveResponse = false
   const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input)
+    if (url.pathname.endsWith('/working-cut')) return Response.json(workingCut)
+    if (url.pathname.endsWith('/working-cut/save')) {
+      const command = JSON.parse(String(init?.body)) as Record<string, unknown>
+      workingCut = { ...initialCut, revision:1,cuts:[{ ...command,version:1,revisionId:'cut-1',status:'NotQueued' }] }
+      return Response.json(workingCut)
+    }
     if (url.pathname.endsWith('/director-inference/context')) return Response.json(currentContext)
     if (url.pathname.endsWith('/scene-planning')) return Response.json(currentPlanning)
     if (url.pathname.endsWith('/scene-planning/receipt')) {
@@ -262,7 +272,7 @@ it('reads, previews and saves through the shipped YAML preset and real adapters,
   expect(h.ctx.tools.get('qingmu_save_reference_draft', agentScope)).toBeUndefined()
 })
 
-it.each(['qingmu_read_reference_draft', 'qingmu_preview_reference_draft', 'qingmu_save_reference_draft', 'qingmu_read_director_plan', 'qingmu_save_director_plan'])(
+it.each(['qingmu_read_reference_draft', 'qingmu_preview_reference_draft', 'qingmu_save_reference_draft', 'qingmu_read_director_plan', 'qingmu_save_director_plan', 'qingmu_read_working_cut', 'qingmu_save_working_cut'])(
   'reports a missing reference capability even when all older tools are mounted (%s)', async (missing) => {
     const h = await harness(new MockAdapter([]))
     expect(readNativeDirectorReadiness(h.ctx, h.agent.session).status).toBe('mounted')
@@ -272,7 +282,7 @@ it.each(['qingmu_read_reference_draft', 'qingmu_preview_reference_draft', 'qingm
     try {
       const readiness = readNativeDirectorReadiness(h.ctx, h.agent.session)
       expect(readiness).toMatchObject({ status: 'missing-tools', presetId: 'qingmu-director', missingTools: [missing] })
-      expect(readiness.tools).toHaveLength(10)
+      expect(readiness.tools).toHaveLength(12)
       expect(h.upstream.fetch).not.toHaveBeenCalled()
       expect(h.agent.session.events.filter(event => event.type === 'tool/call')).toHaveLength(0)
     } finally { mounted.mockRestore() }
@@ -352,4 +362,23 @@ it('reconciles a changed complete design into one final native reference draft a
   expect(saves(h.upstream)).toHaveLength(1)
   expect(h.upstream.saved().draft.request).toMatchObject(finalDraft)
   expect(JSON.stringify(adapter.requests.at(-1))).toContain('先推近，再横移')
+})
+
+
+it('saves scene-spanning sound through the shipped director preset, real loop and command adapter', async () => {
+  const cut = { clips:[{ frameId:'f',assetId:'video',sha256:'a'.repeat(64),inSec:0,outSec:15 }],
+    audioCues:[{ assetId:'room',sha256:'b'.repeat(64),kind:'ambience',startSec:0,inSec:0,outSec:15,gainDb:-18,fadeInSec:1,fadeOutSec:2 }],
+    soundPlan:'Room reflections and street ambience continue under dialogue; music follows scene emotion.' }
+  const receiptId = sha({ scope:{ projectId:'p',episodeId:'episode-a' },cut:initialCut })
+  const adapter = new MockAdapter([toolCallResponse('cut-read','qingmu_read_working_cut',{}),
+    toolCallResponse('cut-save','qingmu_save_working_cut',{ receiptId,cut }),
+    toolCallResponse('cut-reread','qingmu_read_working_cut',{}),textResponse('Sound plan saved.')])
+  const h = await harness(adapter); await h.run(true)
+  for (const id of ['cut-read','cut-save','cut-reread']) expect(result(h.agent,id).error,result(h.agent,id).text).toBe(false)
+  expect(JSON.parse(result(h.agent,'cut-reread').text)).toMatchObject({ cut:{ cuts:[{ audioCues:cut.audioCues,soundPlan:cut.soundPlan,status:'NotQueued' }] } })
+  const writes = h.upstream.fetch.mock.calls.filter(([url,init]) => new URL(url instanceof Request ? url.url : url).pathname.endsWith('/working-cut/save') && init?.method==='POST')
+  expect(writes).toHaveLength(1)
+  expect(JSON.parse(String(writes[0]?.[1]?.body))).toMatchObject({ ...cut,expectedRevision:0 })
+  expect(JSON.stringify(adapter.requests.at(-1))).toContain('Room reflections and street ambience')
+  expect(JSON.stringify(h.upstream.fetch.mock.calls)).not.toContain('/working-cut/render')
 })

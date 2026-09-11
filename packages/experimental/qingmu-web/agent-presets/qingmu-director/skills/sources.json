@@ -14,7 +14,7 @@
         "CONTRIBUTING.md": "b457e8094b71f8619685073032b38dcb342a5df4d3439f1f20440b9f71a9d1ad",
         "LICENSE": "df731ea2e1ffd3b8890ad246da3df96ceba3301c16fb4970c16811df4c728b56",
         "README.md": "de61800434c2ff91cb5aff1b86d35d542b70d3b64716ecb09c1fa8322b9c1fd9",
-        "SKILL.md": "4891f16113213518fc30627659dff67c2393cdc510214874694ab373229b0722",
+        "SKILL.md": "d372e62d49c97c804c6348c052c2cd54e172606d82a13c60bf39e96651f7ecb6",
         "assets/beat-sheet-template.md": "e53e846e9f43cdc80cf261bde4978001628d6383a6d4bd702762f88131e04bda",
         "assets/director-book-template.md": "d6f0901207a822220fe87a7ca2feeea0ddeaf142a168a03704456e69b0ad68b0",
         "assets/edit-timeline-template.md": "b6a6ad673094a419ada6afb9d8e613b4d2c8538cface5cb17031bc7b408fc5ee",
@@ -59,7 +59,7 @@
         "references/product-and-macro.md": "c6b791fe96db082517c8e3d639269228cee3ae68d55ddababbb7b09d967ca350",
         "references/production-workflow.md": "67d9b8d1cec798db75635c3f261435103ef6383004c946bcdb8a557119bbe472",
         "references/prompt-lexicon.md": "8e2172f9255dbc9ce51b7f54af9cb570283808a6ad4aa34fcf439c56c513138f",
-        "references/sound-and-dialogue.md": "704c21ac2649656fe9321de36660d69f8d3d9933c603e05715dd4a1a92517b9b",
+        "references/sound-and-dialogue.md": "4e025bf7c49bb8cdaa2e4589212e06121d1b8fe3f03f161ce5ed3c57c5370424",
         "references/director-supplement-workflow.md": "b4a8496d62c4a2a63bcc866a896ae4294b8c98ddb42109adad2bd2bb128c7b29"
       },
       "excludedNonMethodFiles": [
