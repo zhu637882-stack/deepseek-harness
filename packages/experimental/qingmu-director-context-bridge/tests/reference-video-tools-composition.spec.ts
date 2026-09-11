@@ -279,13 +279,15 @@ it('gives a text-only director an attributed visual report with reconstructible 
   expect(observer.requests[0]?.messages[0]?.content).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'image' })]))
   const recorded = h.agent.session.events.filter(e => e.type === 'qingmu-director-vision/request' || e.type === 'qingmu-director-vision/result')
   expect(recorded).toHaveLength(2)
+  expect(recorded[0]?.data).toMatchObject({ request: { messages: observer.requests[0]?.messages } })
   expect(JSON.stringify(recorded)).not.toContain('signature=')
   expect(JSON.stringify(recorded)).not.toContain(imageBytes.toString('base64'))
   expect(JSON.stringify(adapter.requests.at(-1))).toContain(output.report)
   const tool = h.agent.session.events.find(e => e.type === 'tool/result' && e.data.message.source.callId === 'view')
   if (tool?.type !== 'tool/result') throw new Error('Missing visual report')
   expect(tool.data.message.content.flatMap(p => p.content).some(p => p.type === 'image')).toBe(false)
-  expect({ content: tool.data.message.content.flatMap(p => p.content), observerInput: observer.requests[0]?.messages }).toMatchSnapshot()
+  expect({ content: tool.data.message.content.flatMap(p => p.content),
+    observerInput: observer.requests[0]?.messages.map(({ role, source, content }) => ({ role, source, content })) }).toMatchSnapshot()
 })
 
 it.each(['truncated', 'missing usage', 'switched shot'])('retains observer receipts without misrepresenting %s as a delivered report', async (condition) => {

@@ -47,7 +47,6 @@ exports[`gives a text-only director an attributed visual report with reconstruct
           "type": "image",
         },
       ],
-      "id": "8b78b5ec-5107-4bfe-b782-b474545997df",
       "role": "user",
       "source": {
         "kind": "plugin",
