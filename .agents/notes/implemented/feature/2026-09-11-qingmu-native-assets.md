@@ -27,3 +27,5 @@ A real screenplay run revealed that unbound writing was incorrectly treated as e
 Asset design now consumes effective creation settings at authoring time as well as at image submission. The director-method update declares exact compatible predecessors, preserving existing project contracts and selected media.
 
 The second real writing candidate still rationalized a missing required world exception. Add an optional source-only screenplay revision through a separate native session, reusing draft adoption and recovery. The critic receives original intent and current text, not the writer’s claims about its own correctness.
+
+Qingmu uses the native Pro model default for new creative sessions after a real Flash screenplay and independent review produced contradictory actions and false chronology corrections. User selections remain authoritative. Asset refinement receives current unsaved card edits as well as saved source data, so references and world decisions survive a refinement request.

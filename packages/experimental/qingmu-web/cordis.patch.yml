@@ -3,6 +3,11 @@
   config:
     default: qingmu-director
 
+- id: agent-default-model
+  config:
+    provider: deepseek-official
+    model: deepseek-v4-pro
+
 - id: ui-brand-official
   disabled: true
 

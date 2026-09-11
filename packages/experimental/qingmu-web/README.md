@@ -42,3 +42,5 @@ The persona and schemas form a stable prefix for this preset. Requested context 
 - The separate stateless IMAGO adapter now projects prop field guidance, checklists, work orders, and review cards into the cockpit. It does not copy IMAGO state or expose a second Stage/DAG.
 - The source package stays private and experimental while the product distribution namespace is being established.
 - Existing populated sessions do not gain this preset, and a saved user default can override the distribution default. Read-tool tests do not prove browser binding, real-provider judgment, proposal adoption, or production deployment.
+
+The Qingmu distribution defaults new sessions to `deepseek-v4-pro` through the native default-model service; the DeepSeek adapter supplies its default high reasoning effort. Saved user model choices and existing sessions retain their selection. Stock Web keeps its own default. Model choice improves the available reasoning capacity but does not establish script or film quality.

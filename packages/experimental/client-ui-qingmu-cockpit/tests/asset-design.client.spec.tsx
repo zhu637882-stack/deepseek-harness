@@ -92,8 +92,10 @@ it('carries resolved creation settings into the native design request before gen
   const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
     read: vi.fn(async () => ({ text: '', script: '', lastSeq: 0, running: false, finished: false, error: '' })) }
   render(<NativeAssetDesign {...scope} port={port} storyPort={storyPort} onGenerated={vi.fn()} />)
+  fireEvent.change(await screen.findByLabelText('画面描述'), { target: { value: '保留当前未保存的服装设计' } })
   fireEvent.click(await screen.findByRole('button', { name: '根据剧本设计素材' }))
   await waitFor(() => { expect(storyPort.send).toHaveBeenCalledTimes(1) })
   expect(storyPort.send.mock.calls[0]).toEqual([expect.any(String), expect.stringContaining(JSON.stringify(creativeSettings))])
+  expect(storyPort.send.mock.calls[0]).toEqual([expect.any(String), expect.stringContaining('保留当前未保存的服装设计')])
   expect(port.generateAssetImage).not.toHaveBeenCalled()
 })

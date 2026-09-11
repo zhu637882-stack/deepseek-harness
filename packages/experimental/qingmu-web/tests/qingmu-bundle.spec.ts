@@ -12,6 +12,10 @@ describe('Qingmu Web distribution composition', () => {
       'packages/experimental/qingmu-web/cordis.patch.yml',
     ].map(path => loadOverlayPatches('qingmu-test', `${ROOT}/${path}`))
     const entries = composeEntries(layers)
+    expect(composeEntries(layers.slice(0, 2)).find(entry => entry.id === 'agent-default-model')?.config)
+      .toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+    expect(entries.find(entry => entry.id === 'agent-default-model')?.config)
+      .toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-pro' })
     expect(composeEntries(layers.slice(0, 2)).find(entry => entry.id === 'agent-presets')?.config)
       .toEqual({ default: 'standard' })
     expect(entries.find(entry => entry.id === 'agent-presets')?.config)
