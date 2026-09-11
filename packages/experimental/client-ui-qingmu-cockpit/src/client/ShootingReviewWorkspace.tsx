@@ -4,6 +4,7 @@ import type { QingmuYimengPort, YimengTakeVersion, YimengTakeVersionStackRespons
 import type { QingmuCockpitKey } from './locales.ts'
 import type { AutomaticPlanningShot } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import { TakePreviewPlayer } from './TakePreviewPlayer.tsx'
+import { NativeVideoReview } from './NativeVideoReview.tsx'
 import { TakeThumbnail } from './TakeThumbnail.tsx'
 import { LocalVideoCandidateUpload } from './LocalVideoCandidateUpload.tsx'
 import { LocalVideoSourcePanel } from './LocalVideoSourcePanel.tsx'
@@ -508,6 +509,9 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
               onSelectionCommitted={() => { void refreshExistingMedia() }} />
             : <p role="status">候选比较暂不可用，请刷新页面后重试。</p>)}
         </details>}
+        {!firstFrameOpen && !historyOpen && usable(browsed) && <NativeVideoReview
+          key={`${current.shotId}:${browsed.takeId}:${browsed.outputSha256}`} episodeId={episodeId}
+          frameId={current.shotId} assetId={browsed.takeId} sha256={browsed.outputSha256} />}
         {selectionError && <p role="alert">{selectionError}</p>}
         {adoptError && <p role="alert">{adoptError}</p>}
         <div className={css.reworkActions} aria-label="本镜重做操作">

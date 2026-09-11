@@ -1,5 +1,7 @@
 # Qingmu Yimeng command adapter
 
+The same-origin native video review bridge forwards explicit POST submissions and read-only GET recovery to Writer with the existing browser or native identity. Writer verifies episode ownership and candidate bytes, preserves the generation-bound prompt and deduplicates equivalent audits. Route disposal removes the bridge.
+
 Asset cards keep `visualIdentity` (complete entity appearance, structure and layout) separate from `imagePrompt` (the current image or edit request). Image edits preserve the identity used by later scene design. Legacy reads retain their saved description; legacy saves without the new field preserve an existing entity. An explicit identity edit retains selected media and invalidates unsent quotations. Both descriptions reach the image request when they differ.
 
 `updateProject` changes an existing project's display name or active/archived state through the owner-checked Writer PATCH route. The adapter restricts fields and checks the returned project and saved values. It neither creates media nor alters the creation contract; project-list reads recover the saved state after reload.

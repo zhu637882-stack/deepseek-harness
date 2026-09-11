@@ -95,6 +95,7 @@ declare module '@deepseek-ai/cordis' {
 import { prepareShotFindingCommand } from './shot-finding.ts'
 import { registerEntityDraftReviewCommands } from './entity-draft-review.ts'
 import { registerFirstFrameSelectionCommands } from './first-frame-selection.ts'
+import { registerNativeVideoReview } from './native-video-review.ts'
 import { registerCreationStylePreview } from './creation-style-preview.ts'
 import { registerShootingFirstFrame } from './shooting-first-frame.ts'
 export {
@@ -6332,6 +6333,11 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
     fetch: globalThis.fetch,
     readToken: () => process.env.YIMENG_API_TOKEN,
   }), 'qingmu-yimeng-command: first-frame selection commands')
+  ctx.effect(() => registerNativeVideoReview(ctx.webServer, {
+    baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),
+    fetch: globalThis.fetch,
+    readToken: () => process.env.YIMENG_API_TOKEN,
+  }), 'qingmu-yimeng-command: native video review')
   const interactiveController = new AbortController()
   const activeInteractiveTasks = new Set<string>()
   const queueDirectorProductionTask = config.directorProductionInteractiveEnabled === true

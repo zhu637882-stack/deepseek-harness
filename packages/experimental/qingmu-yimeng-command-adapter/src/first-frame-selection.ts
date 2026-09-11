@@ -270,7 +270,8 @@ function serviceTokenOf(dependencies: FirstFrameSelectionCommandDependencies): s
   return token
 }
 
-async function jsonUpstream(
+/** Forward bounded Writer JSON with the existing browser or native-service identity; writes require same origin. */
+export async function jsonUpstream(
   dependencies: FirstFrameSelectionCommandDependencies,
   req: IncomingMessage,
   upstream: URL,
