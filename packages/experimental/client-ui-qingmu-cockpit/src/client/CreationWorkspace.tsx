@@ -5,11 +5,12 @@ import type {
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
 import css from './CreationWorkspace.module.css'
+import { StyleCompositionPreview, VisualSettingsSummary } from './StyleCompositionPreview.tsx'
 import { StyleGallery } from './StyleGallery.tsx'
 import { NativeStoryComposer } from './NativeStoryComposer.tsx'
 import type { NativeStoryPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft'
 
-type Port = Pick<QingmuYimengPort, 'readCreationOptions' | 'readCreativeContract' | 'initializeProject' | 'recoverProjectInitialization' | 'readTextImport' | 'createTextImport' | 'correctTextImport' | 'confirmTextImport'>
+type Port = Pick<QingmuYimengPort, 'readStyleComposition' | 'readCreationOptions' | 'readCreativeContract' | 'initializeProject' | 'recoverProjectInitialization' | 'readTextImport' | 'createTextImport' | 'correctTextImport' | 'confirmTextImport'>
 const NEW_PROJECT = 'qingmu.creation.project.v1'
 const LABELS = { scene: '场景', action: '动作', dialogue: '对白', narration: '旁白', transition: '转场', skip: '忽略' }
 const errorText = (error: unknown): string => {
@@ -200,7 +201,7 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
         {compatiblePacks.map(item => <option key={item.id} value={item.id}>{item.groupLabel} · {item.name}</option>)}
       </select></label>
       {selectedStyle && local.stylePackId === '' && <small>请选择同一类别的全片风格包；跨类别切换画风时会清除原风格包。</small>}
-      {selectedPack && <p>{selectedPack.intent} · {selectedPack.tone}</p>}
+      {selectedPack && <StyleCompositionPreview port={port} style={local.style} stylePackId={selectedPack.id} />}
       <label>导演方法<select aria-label="导演方法" value={local.directorSkillId} disabled={busy || local.intent !== undefined || !options}
         onChange={(event) => { update({ ...local, directorSkillId: event.target.value }) }}>
         <option value="">请选择导演方法</option>
@@ -382,10 +383,9 @@ export function TextImportWorkspace({ port, projectId, episodeId, onSaved, onPla
   const editable = draft?.status === 'draft' && state?.draftActive && draft.baseScriptRevision === state.scriptRevision && !savedCurrent
   const pending = local.pending !== undefined
   const scenes = state?.script?.scenes
-  const writingSettings = JSON.stringify({ project: contract?.contract?.project, methods: contract?.contract?.methods,
-    methodUpgrades: contract?.methodUpgrades,
-    visualStyle: options?.visualStyles.find(style => style.id === contract?.contract?.methods.visualStyle.id),
-    stylePack: options?.stylePacks.find(pack => pack.id === contract?.contract?.methods.stylePackId?.id) })
+  const effectiveMethods = contract?.effectiveMethods ?? contract?.contract?.methods
+  const writingSettings = JSON.stringify({ project: contract?.contract?.project, methods: effectiveMethods,
+    methodUpgrades: contract?.methodUpgrades, visualSettings: contract?.visualSettings })
   return <section className={css.workspace} aria-label="剧本导入工作区">
     <details className={css.saved} aria-label="创作设定合同"><summary>本项目创作设定</summary>
       <header><span className={css.eyebrow}>创作设定锁</span><h4>{contract?.configured ? '创作合同已保存' : '创作合同未配置'}</h4></header>
@@ -398,12 +398,17 @@ export function TextImportWorkspace({ port, projectId, episodeId, onSaved, onPla
           ?? contract.contract.methods.visualStyle.id}</p>
         <p>全片风格包：{options?.stylePacks.find(item => item.id === contract.contract?.methods.stylePackId?.id)?.name
           ?? contract.contract.methods.stylePackId?.id ?? '未选用'}</p>
-        <p>导演方法：{contract.contract.methods.directorSkills.map(item => directorSkillLabel(item.id)).join('、') || '尚未配置'}</p>
+        <p>创建时导演方法：{contract.contract.methods.directorSkills.map(item => directorSkillLabel(item.id)).join('、') || '尚未配置'}</p>
         {contract.methodUpgrades?.map(upgrade => <p key={upgrade.from.id}>{directorSkillLabel(upgrade.to.id)}：{upgrade.reason}</p>)}
         <details><summary>方法版本与完整 SHA</summary><pre>{JSON.stringify({
           contractSha256: contract.sha256, methods: contract.contract.methods, methodUpgrades: contract.methodUpgrades,
         }, null, 2)}</pre></details>
       </> : <p role="status">{contract?.message ?? '正在读取创作合同…'}</p>}
+      {effectiveMethods && <p>后续创作使用：{effectiveMethods.directorSkills.map(item => directorSkillLabel(item.id)).join('、') || '尚未配置'}
+        {effectiveMethods.writingSkills.some(item => item.id === 'open-film-writer') && '；Open Film 编剧'}
+        {effectiveMethods.cameraSkills.some(item => item.id === 'open-film-camera') && '；Open Film 摄影'}</p>}
+      {contract?.methodUpgrades?.length ? <small>旧剧本、素材和成片保留。新方法用于后续创作；原镜头需经导演重新整理才会采用新的设计。</small> : null}
+      {contract?.visualSettings && <VisualSettingsSummary settings={contract.visualSettings} />}
     </details>
     <header><span className={css.eyebrow}>第 1 步 · 剧本</span><h3>导入并整理你的剧本</h3>
       <p>粘贴剧本或导入 TXT，检查场景、动作与对白，再保存为本集剧本。</p></header>

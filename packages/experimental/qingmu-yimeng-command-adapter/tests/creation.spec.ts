@@ -54,6 +54,26 @@ const setup = (value: unknown = result, status = 200) => {
   return { fetch, handler: createYimengCommandHandler({ baseUrl: 'http://127.0.0.1:49123' }, { fetch, readToken: () => 'private-session-token' }) }
 }
 describe('bounded creation Host contract', () => {
+  it('reads a bound style composition and rejects a response for another selection', async () => {
+    const preview = { styleId: 'real_person_classic_bw', styleLabel: '经典黑白', stylePackId: 'sp_urban_emotion_realistic',
+      stylePackName: '都市情感写实', effectivePrompt: '黑白灰阶\n具体导演决定优先', effectiveNegative: '', adjustments: ['暖米色'] }
+    const request = { style: preview.styleId, stylePackId: preview.stylePackId }
+    const api = setup(preview)
+    expect(await api.handler('readStyleComposition', request, signal())).toEqual({ ok: true, value: preview })
+    expect(api.fetch.mock.calls[0]?.[0]).toContain('/api/qingmu/style-composition?style=real_person_classic_bw')
+    expect(await setup({ ...preview, styleId: 'realistic' }).handler('readStyleComposition', request, signal())).toMatchObject({ ok: false })
+    expect(await api.handler('readStyleComposition', { ...request, paidConfirmed: true }, signal())).toMatchObject({ ok: false })
+  })
+  it('exposes current methods and visual guidance without inventing a saved legacy contract', async () => {
+    const state = { schema: 'jason.qingmu-creative-contract-state.v1', projectId: 'project_1', configured: false,
+      locked: false, revision: null, sha256: null, contract: null, sourceText: null, message: '旧设定保留',
+      effectiveMethods: { writingSkills: [], directorSkills: [{ ...method, id: 'cinematic-director' }], cameraSkills: [], soundSkills: [] },
+      visualSettings: { styleId: 'realistic', styleLabel: '写实', stylePackId: null, stylePackName: null,
+        effectivePrompt: '自然摄影', effectiveNegative: '', adjustments: [] } }
+    expect(await setup(state).handler('readCreativeContract', { projectId: 'project_1' }, signal())).toEqual({ ok: true, value: state })
+    const invalid = { ...state, effectiveMethods: { ...state.effectiveMethods, directorSkills: [method, method] } }
+    expect(await setup(invalid).handler('readCreativeContract', { projectId: 'project_1' }, signal())).toMatchObject({ ok: false })
+  })
   it('accepts a project-bound current contract and rejects a copied binding', async () => {
     const state = { schema: 'jason.qingmu-creative-contract-state.v1', projectId: 'project_1', configured: true,
       locked: true, revision: 1, sha256: currentCreativeContractSha256, contract: currentCreativeContract,

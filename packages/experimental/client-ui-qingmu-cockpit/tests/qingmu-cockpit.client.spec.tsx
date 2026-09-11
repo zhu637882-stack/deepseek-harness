@@ -668,6 +668,7 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
       throw new Error('Reference-video draft save uses a separate fixture')
     }),
     queueProductionTake: vi.fn(async () => { throw new Error('Production Take uses a separate fixture') }),
+    readStyleComposition: vi.fn<QingmuYimengPort['readStyleComposition']>(async request => ({ styleId: request.style, styleLabel: '写实', stylePackId: request.stylePackId, stylePackName: '电影', effectivePrompt: '自然', effectiveNegative: '', adjustments: [] })),
     readCreationOptions: vi.fn<QingmuYimengPort['readCreationOptions']>(async () => ({ schema: 'jason.qingmu-creation-options.v1',
       textVersions: [], visualStyles: [], stylePacks: [], directorSkills: [] })),
     readCreativeContract: vi.fn<QingmuYimengPort['readCreativeContract']>(async request => ({ schema: 'jason.qingmu-creative-contract-state.v1' as const,

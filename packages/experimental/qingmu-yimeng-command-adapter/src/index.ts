@@ -5906,7 +5906,7 @@ export function createYimengCommandHandler(
         path = prepared.path
         requestInit = { method: 'PATCH', body: serializeBody(prepared.body) }
         normalize = prepared.normalize
-      } else if (['readCreativeContract', 'initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)) {
+      } else if (['readStyleComposition', 'readCreativeContract', 'initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)) {
         const prepared = prepareCreationCommand(endpoint, payload, stageArtifactHelpers)
         path = prepared.path
         requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
@@ -6283,7 +6283,7 @@ export function createYimengCommandHandler(
         || ['readWorkingCut', 'renderWorkingCut', 'saveWorkingCut', 'uploadWorkingCutAudio'].includes(endpoint)
         || ['readAssetDesign', 'saveAssetDesign', 'quoteAssetImage', 'generateAssetImage', 'readAssetImageRuns', 'quoteAssetVoice', 'generateAssetVoice', 'readAssetVoiceRuns'].includes(endpoint)
         || ['readScenePlanning', 'saveScenePlanning', 'recoverScenePlanning'].includes(endpoint)
-        || ['readCreativeContract', 'initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)
+        || ['readStyleComposition', 'readCreativeContract', 'initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)
         || endpoint === 'createTakeComment' || endpoint === 'recoverTakeComment'
         || endpoint === 'createTakeReviewRecommendation'
         || endpoint === 'recoverTakeReviewRecommendation'

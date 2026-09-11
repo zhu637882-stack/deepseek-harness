@@ -4,8 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { CreationOptions, CreativeContractState, TextImportState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import { CreateProjectWorkspace, TextImportWorkspace } from '../src/client/CreationWorkspace.tsx'
+import { StyleCompositionPreview } from '../src/client/StyleCompositionPreview.tsx'
 
-const port = () => ({ initializeProject: vi.fn(async () => { throw new Error('unknown submission result') }),
+const port = () => ({
+  readStyleComposition: vi.fn(async ({ style, stylePackId }: { style: string; stylePackId: string }) => ({
+    styleId: style, styleLabel: '现代写实', stylePackId, stylePackName: '暖光电影',
+    effectivePrompt: '生效画风描述', effectiveNegative: '', adjustments: ['预设零配乐'] })),
+  initializeProject: vi.fn(async () => { throw new Error('unknown submission result') }),
   readCreationOptions: vi.fn(async (): Promise<CreationOptions> => ({ schema: 'jason.qingmu-creation-options.v1',
     textVersions: [{ id: 'creation-text-v1', label: '当前输入文本', available: true }],
     visualStyles: [{ id: 'realistic', label: '现代写实', group: 'real_person', groupLabel: '真人', previewUrl: '/api/qingmu/creation-style-preview?styleId=realistic' },
@@ -38,6 +43,20 @@ async function selectCreationMethods() {
   fireEvent.change(screen.getByRole('combobox', { name: '导演方法' }), { target: { value: 'shot_blocking_director' } })
 }
 describe('creation input and unknown-result recovery', () => {
+  it('shows current preset adjustments and ignores a late response after another style is selected', async () => {
+    const api = port()
+    let resolveOld!: (value: Awaited<ReturnType<typeof api.readStyleComposition>>) => void
+    api.readStyleComposition.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))
+    const view = render(<StyleCompositionPreview port={api} style="realistic" stylePackId="sp_cafe" />)
+    view.rerender(<StyleCompositionPreview port={api} style="donghua" stylePackId="sp_anime" />)
+    await screen.findByText(/已按基础画风调和/)
+    resolveOld({ styleId: 'realistic', styleLabel: '旧选择不能覆盖', stylePackId: 'sp_cafe', stylePackName: '旧包',
+      effectivePrompt: '旧内容', effectiveNegative: '', adjustments: [] })
+    await waitFor(() => { expect(screen.queryByText('旧选择不能覆盖')).toBeNull() })
+    fireEvent.click(screen.getByText('查看调整的预设建议（1 项）'))
+    expect(screen.getByText('预设零配乐')).toBeTruthy()
+    expect(api.initializeProject).not.toHaveBeenCalled()
+  })
   it('shows the selected Host thumbnail, stage map, and only compatible style packs', async () => {
     const api = port()
     render(<CreateProjectWorkspace port={api} onCreated={async () => {}} />)

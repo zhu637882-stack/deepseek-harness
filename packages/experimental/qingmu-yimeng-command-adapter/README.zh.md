@@ -180,3 +180,5 @@ ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只
 场景规划保留镜头时长、动作时间及创作尺度中的小数。保存与恢复使用与 Writer 一致的 RFC 8785 请求编码，包括 UTF-16 键排序；非有限数值和不安全整数在传输前被拒。
 
 私密参考图片和音色读取也支持复制后的素材标识。Writer 验证复制回执与原上传字节，响应仍绑定所请求的素材及 SHA。复制不会公开本地上传素材。详见[项目库 Agent Note](../../../.agents/notes/implemented/feature/2026-09-11-qingmu-project-library-management.zh.md)。
+
+`readStyleComposition` 读取 Writer 对指定基础画风与风格包的调和结果。`readCreativeContract` 将当前执行方法与生效视觉设定独立于不可变创建记录返回。这些读取不改写已保存的创作决定，也不生成媒体。

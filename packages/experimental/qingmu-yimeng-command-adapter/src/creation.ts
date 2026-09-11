@@ -69,6 +69,16 @@ export interface CreativeContractMethodRef {
   readonly version: string
   readonly sha256: string
 }
+/** Writer's composed catalog guidance, also consumed by native authoring. */
+export interface CreativeVisualSettings {
+  readonly styleId: string
+  readonly styleLabel: string
+  readonly stylePackId: string | null
+  readonly stylePackName: string | null
+  readonly effectivePrompt: string
+  readonly effectiveNegative: string
+  readonly adjustments: readonly string[]
+}
 /** Project-level creation contract. It locks sources and methods, not approval. */
 export interface CreativeContract {
   readonly schema: 'qingmu.creative-contract.v1' | 'qingmu.creative-contract.v2'
@@ -103,6 +113,9 @@ export interface CreativeContractState {
   readonly contract: CreativeContract | null
   readonly sourceText: string | null
   readonly message: string
+  /** Current execution methods, separate from the immutable creation history. */
+  readonly effectiveMethods?: Pick<CreativeContract['methods'], 'writingSkills' | 'directorSkills' | 'cameraSkills' | 'soundSkills'>
+  readonly visualSettings?: CreativeVisualSettings
   readonly methodUpgrades?: readonly {
     readonly from: CreativeContractMethodRef
     readonly to: CreativeContractMethodRef
@@ -214,6 +227,18 @@ function exact(value: unknown, keys: readonly string[], error: ErrorFactory): Re
 function text(value: unknown, error: ErrorFactory, max = 160): string {
   if (typeof value !== 'string' || value.length === 0 || value.length > max || value !== value.trim() || /[\x00-\x1f]/.test(value)) throw error('creation text invalid')
   return value
+}
+function normalizeVisualSettings(value: unknown, bad: ErrorFactory): CreativeVisualSettings {
+  const raw = exact(value, ['styleId', 'styleLabel', 'stylePackId', 'stylePackName',
+    'effectivePrompt', 'effectiveNegative', 'adjustments'], bad)
+  const styleId = identifier(raw.styleId, bad); const styleLabel = text(raw.styleLabel, bad)
+  const stylePackId = raw.stylePackId === null ? null : identifier(raw.stylePackId, bad)
+  const stylePackName = raw.stylePackName === null ? null : text(raw.stylePackName, bad)
+  if ((stylePackId === null) !== (stylePackName === null)) throw bad('style pack name mismatch')
+  if (!Array.isArray(raw.adjustments) || raw.adjustments.length > 256) throw bad('style adjustments invalid')
+  return { styleId, styleLabel, stylePackId, stylePackName,
+    effectivePrompt: storyText(raw.effectivePrompt, bad), effectiveNegative: catalogText(raw.effectiveNegative, bad, 16000),
+    adjustments: raw.adjustments.map(item => text(item, bad, 4000)) }
 }
 /** Catalog prose may deliberately be empty; still reject padded/control-bearing values. */
 function catalogText(value: unknown, error: ErrorFactory, max = 4000): string {
@@ -418,7 +443,17 @@ export function prepareCreationCommand(endpoint: string, value: unknown, helpers
   let method: 'GET' | 'POST' = 'POST'
   let body: YimengCommandJsonObject | undefined
   let normalize: (value: unknown) => unknown
-  if (endpoint === 'readCreativeContract') {
+  if (endpoint === 'readStyleComposition') {
+    const selection = exact(raw, ['style', 'stylePackId'], fail)
+    const style = identifier(selection.style, fail); const stylePackId = identifier(selection.stylePackId, fail)
+    path = `/api/qingmu/style-composition?${new URLSearchParams({ style, stylePackId }).toString()}`
+    method = 'GET'
+    normalize = (value) => {
+      const settings = normalizeVisualSettings(value, bad)
+      if (settings.styleId !== style || settings.stylePackId !== stylePackId) throw bad('style composition selection mismatch')
+      return settings
+    }
+  } else if (endpoint === 'readCreativeContract') {
     const coordinate = exact(raw, ['projectId'], fail)
     const projectId = identifier(coordinate.projectId, fail)
     path = `/api/qingmu/projects/${encodeURIComponent(projectId)}/creative-contract`
@@ -426,10 +461,21 @@ export function prepareCreationCommand(endpoint: string, value: unknown, helpers
     normalize = (value) => {
       const candidate = object(value, bad)
       const result = exact(value, ['schema', 'projectId', 'configured', 'locked', 'revision', 'sha256', 'contract', 'sourceText', 'message',
-        ...('methodUpgrades' in candidate ? ['methodUpgrades'] : [])], bad)
+        ...['methodUpgrades', 'effectiveMethods', 'visualSettings'].filter(key => key in candidate)], bad)
       if (result.schema !== 'jason.qingmu-creative-contract-state.v1' || result.projectId !== projectId
         || typeof result.configured !== 'boolean' || typeof result.locked !== 'boolean') throw bad('creative contract state mismatch')
       text(result.message, bad, 1000)
+      if (result.visualSettings !== undefined) normalizeVisualSettings(result.visualSettings, bad)
+      if (result.effectiveMethods !== undefined) {
+        const stages = ['writingSkills', 'directorSkills', 'cameraSkills', 'soundSkills']
+        const methods = exact(result.effectiveMethods, stages, bad)
+        for (const stage of stages) {
+          const refs = methods[stage]
+          if (!Array.isArray(refs) || refs.length > 64) throw bad('effective methods invalid')
+          const ids = refs.map(ref => methodRef(ref, bad).id)
+          if (new Set(ids).size !== ids.length) throw bad('duplicate effective method')
+        }
+      }
       if (!result.configured) {
         if (result.locked || result.revision !== null || result.sha256 !== null || result.contract !== null
           || result.sourceText !== null || result.methodUpgrades !== undefined) throw bad('creative contract absent state invalid')

@@ -1,6 +1,7 @@
 /** Browser-safe creation contracts; importing this leaf never loads Host Context merges. */
 export type {
-  CreationScope, CreationOptions, CreationTextVersion, CreationDirectorSkill, CreationVisualStyle, CreationStylePack,
+  CreativeVisualSettings, CreationScope, CreationOptions, CreationTextVersion, CreationDirectorSkill,
+  CreationVisualStyle, CreationStylePack,
   CreativeContract, CreativeContractMethodRef, CreativeContractState,
   ProjectInitializationRequest, ProjectInitializationRecovery, ProjectInitializationResult,
   TextImportReadRequest, TextImportRequest, TextImportLine, TextImportDraft, TextImportState,
@@ -3067,6 +3068,7 @@ export interface YimengCommandEndpointMap {
   }
   /** Host-only; the browser channel rejects this endpoint. */
   readonly readDirectorContext: import('./director-proposal.ts').DirectorContextSnapshot
+  readonly readStyleComposition: import('./creation.ts').CreativeVisualSettings
   readonly readCreationOptions: import('./creation.ts').CreationOptions
   readonly readCreativeContract: import('./creation.ts').CreativeContractState
   readonly requestDirectorProposal: import('./director-proposal.ts').DirectorReplayProposal

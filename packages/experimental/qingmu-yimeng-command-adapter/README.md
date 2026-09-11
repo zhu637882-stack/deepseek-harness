@@ -200,3 +200,5 @@ Imported scene planning now supports continuation across all script scenes. Each
 Scene planning preserves fractional shot durations, action timings and creative measurements. Its RFC 8785 request encoding matches Writer for both save and recovery, including UTF-16 key ordering; nonfinite values and unsafe integers are rejected before transport.
 
 Private reference-image and voice content reads also accept copied asset identities. Writer validates the copy receipt and original upload bytes; the response remains bound to the requested asset and SHA. Copying does not publish private uploads. See the [project library Agent Note](../../../.agents/notes/implemented/feature/2026-09-11-qingmu-project-library-management.md).
+
+`readStyleComposition` reads Writer’s catalog composition for the exact selected base style and style pack. `readCreativeContract` exposes effective execution methods and composed visual settings separately from immutable creation references. These reads neither upgrade stored creative decisions nor generate media.
