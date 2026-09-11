@@ -207,7 +207,7 @@ async function harness(adapter: MockAdapter, upstream = writer(), images = false
   await ctx.plugin(AgentLoop, { agents: [] })
   const presets = await ctx.plugin(AgentPresets, { default: 'qingmu-director', roots: [{ path: presetRoot, trust: 'system' }], includeUserRoot: false })
   ctx.llm.registerAdapter(['mock'], adapter)
-  if (observer) ctx.llm.registerAdapter(['deepseek-official'], observer)
+  if (observer) ctx.llm.registerAdapter(['qingmu-vision'], observer)
   ctx.provide('qingmuYimengRead', upstream.read)
   ctx.provide('qingmuYimengCommand', upstream.command)
   ctx.provide('qingmuImagoMethod', async () => { throw new Error('No method requested by this fixture') })
@@ -257,7 +257,7 @@ function visionAdapter(args: object = imageArgs) {
 
 function observerAdapter(script = [textResponse('可见事实：两盏灯。空间与结构：电源线从背板右下方引出。不能确认精确尺寸。')]) {
   const adapter = new MockAdapter(script)
-  vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'deepseek-official', id: 'deepseek-v4-flash-vision-exp', name: 'vision', inputModalities: ['text', 'image'], reasoning: { efforts: [{ id: ReasoningEffortId('off'), name: 'Off' }] } })
+  vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'qingmu-vision', id: 'qwen3.7-plus-2026-05-26', name: 'vision', inputModalities: ['text', 'image'], reasoning: { efforts: [{ id: ReasoningEffortId('off'), name: 'Off' }] } })
   return adapter
 }
 
