@@ -249,11 +249,11 @@ export function normalizeReferenceVideoAssets(
       ownerType === 'actor' || ownerType === 'scene' || ownerType === 'prop'
         ? ownerType
         : undefined
-    const localReferenceScope: ReferenceVideoAsset['localReferenceScope'] = a.asset_type === 'image' && a.id.startsWith('asset_localref_')
+    const localReferenceScope: ReferenceVideoAsset['localReferenceScope'] = a.asset_type === 'image' && /^(?:asset_localref_|asset_copy_)/u.test(a.id)
       && localOwner !== undefined && /^[A-Za-z0-9_.-]{1,256}$/u.test(ownerId)
       ? { elementKind: localOwner, targetId: ownerId }
       : undefined
-    const localVoiceScope = a.asset_type === 'audio' && /^asset_localvoice_[a-f0-9]{32}$/u.test(a.id)
+    const localVoiceScope = a.asset_type === 'audio' && /^(?:asset_localvoice_[a-f0-9]{32}|asset_copy_[a-f0-9]{12})$/u.test(a.id)
       && a.role === 'local_voice_candidate' && ownerType === 'actor' && /^[A-Za-z0-9_.-]{1,256}$/u.test(ownerId)
       ? { targetId: ownerId } : undefined
     items.push({ assetId: a.id, assetSha256: a.sha256, label: localVoiceScope === undefined ? displayLabel : `${displayLabel} · 音色`,

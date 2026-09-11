@@ -81,7 +81,7 @@ export function prepareLocalVoiceCandidate(endpoint: string, payload: unknown, h
   const path = `/api/qingmu/projects/${encodeURIComponent(projectId)}/actors/${encodeURIComponent(targetId)}/local-voice-candidates`
   if (endpoint === 'readLocalVoiceCandidateContent') {
     exact(p, ['projectId', 'elementKind', 'targetId', 'assetId', 'expectedSha256'], input)
-    if (typeof p.assetId !== 'string' || !/^asset_localvoice_[a-f0-9]{32}$/u.test(p.assetId)
+    if (typeof p.assetId !== 'string' || !/^(?:asset_localvoice_[a-f0-9]{32}|asset_copy_[a-f0-9]{12})$/u.test(p.assetId)
       || typeof p.expectedSha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(p.expectedSha256)) throw input('local voice content identity invalid')
     return { method: 'GET' as const, path: `${path}/${p.assetId}/content?expectedSha256=${p.expectedSha256}`,
       normalize: (value: unknown): LocalVoiceCandidateContent => {

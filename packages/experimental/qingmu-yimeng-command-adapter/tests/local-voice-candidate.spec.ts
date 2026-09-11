@@ -29,10 +29,10 @@ it('uploads exact bytes once and recovers through GET with the same intent diges
   const { handler, fetch } = setup()
   expect(await handler('uploadLocalVoiceCandidate', request, signal())).toEqual({ ok: true, value: result })
   expect(fetch.mock.calls[0]?.[1]?.method).toBe('POST')
-  expect(JSON.parse(fetch.mock.calls[0]?.[1]?.body as string).contentBase64).toBe(request.contentBase64)
+  expect(JSON.parse(fetch.mock.calls[0]?.[1]?.body as string)).toMatchObject({ contentBase64: request.contentBase64 })
   expect(await handler('recoverLocalVoiceCandidate', request, signal())).toEqual({ ok: true, value: result })
   expect(fetch.mock.calls[1]?.[1]?.method).toBe('GET')
-  expect(String(fetch.mock.calls[1]?.[0])).toContain(`requestSha256=${result.requestSha256}`)
+  expect(fetch.mock.calls[1]?.[0]).toContain(`requestSha256=${result.requestSha256}`)
   expect(fetch).toHaveBeenCalledTimes(2)
 })
 
@@ -53,10 +53,10 @@ it('rejects invalid inputs before transport and does not retry errors', async ()
   expect(failed.fetch).toHaveBeenCalledTimes(1)
 })
 
-it('verifies private WAV bytes and SHA before returning audio to the client', async () => {
-  const content = { schema: 'jason.qingmu-local-voice-content.v1', assetId: result.assetId,
+it.each([result.assetId, 'asset_copy_012345abcdef'])('verifies private WAV bytes and SHA for %s before returning audio', async (assetId) => {
+  const content = { schema: 'jason.qingmu-local-voice-content.v1', assetId,
     sha256: contentSha256, mimeType: 'audio/wav', contentBase64: request.contentBase64 }
-  const input = { ...scope, assetId: result.assetId, expectedSha256: contentSha256 }
+  const input = { ...scope, assetId, expectedSha256: contentSha256 }
   const { handler } = setup(content)
   expect(await handler('readLocalVoiceCandidateContent', input, signal())).toEqual({ ok: true, value: content })
   const changed = Buffer.from(raw); changed[changed.length - 1] = 1

@@ -120,6 +120,21 @@ it('projects private audio playback only for actor-owned local voice candidates'
   expect(result).not.toHaveProperty('value.items.2.localVoiceScope')
 })
 
+it('keeps copied private images and voice references readable under the copied owner scope', async () => {
+  const image = { id: 'asset_copy_012345abcdef', project_id: 'p', asset_type: 'image',
+    sha256: 'c'.repeat(64), owner_type: 'actor', owner_id: 'actor_copied' }
+  const voice = { ...image, id: 'asset_copy_abcdef012345', asset_type: 'audio', role: 'local_voice_candidate' }
+  const handler = createYimengReadHandler({}, { readToken: () => 'fixture', fetch: async () => Response.json({
+    page: 1, page_size: 200, pages: 1, items: [image, voice],
+  }) })
+  expect(await handler('referenceVideoAssets', { projectId: 'p', page: 1 }, signal())).toMatchObject({
+    ok: true, value: { items: [
+      { assetId: image.id, browserUrl: '', localReferenceScope: { elementKind: 'actor', targetId: 'actor_copied' } },
+      { assetId: voice.id, browserUrl: '', localVoiceScope: { targetId: 'actor_copied' } },
+    ] },
+  })
+})
+
 
 it.each([
   ['oss://dashscope-instant/project/ref.png', true],

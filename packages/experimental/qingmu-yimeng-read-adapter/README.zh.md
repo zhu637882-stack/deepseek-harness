@@ -194,3 +194,5 @@ Ready PromptIR 的 `firstFrameQuote` 还返回一次服务端重算、按当前�
 评论时间坐标取最近的毫秒，原片时长和 SHA 保持不变。媒体或来源登记缺失时，交接仍可读取，但显示阻塞且没有当前批准。当前来源只引用可读取的 Take 对象；历史决定仍可查看，不具有当前批准效力。
 
 签名媒体预览接受完整 URL 或 Writer 相对浏览器路径，仅解析到配置的本地 Writer。无签名路径和不匹配的媒体身份不可用于预览。本地浏览器预览不需要供 Provider 访问的公网地址。
+
+项目素材目录为复制后的图片和音色保留私密预览范围。已复制供应商媒体关联的素材使用既有签名预览通道；本地上传素材仍使用认证内容读取通道。详见[项目库 Agent Note](../../../.agents/notes/implemented/feature/2026-09-11-qingmu-project-library-management.zh.md)。
