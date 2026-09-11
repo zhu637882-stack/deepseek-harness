@@ -3,7 +3,7 @@ import { webcrypto } from 'node:crypto'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ScenePlanningWorkspace } from '../src/client/ScenePlanningWorkspace.tsx'
-import type { DirectorProposalFreshnessResult, DirectorReplayProposal, ScenePlanningState, ScenePlanningResult } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import type { DirectorProposalFreshnessResult, DirectorReplayProposal, ScenePlanningState, ScenePlanningResult, ScenePlanningRequest } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { DirectorContextBindingState, DirectorContextClientPort, DirectorObjectScope } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import type { QingmuHostSync, QingmuScenePlanningSavedMessage } from '../src/client/host-sync.ts'
 import { directorConnectionFixture } from './director-connection-fixture.client.ts'
@@ -745,4 +745,47 @@ it('aborts and hides a paid proposal before showing another shot', async () => {
   expect(screen.getByLabelText<HTMLTextAreaElement>('叙事目的').value).toBe('对峙')
   expect(port.issueDirectorProviderWorkOrder).toHaveBeenCalledOnce()
   expect(port.saveScenePlanning).not.toHaveBeenCalled()
+})
+
+it('appends another scene and restores its selection while keeping both scenes editable', async () => {
+  const first = { sceneId: 'scene_1', sceneIndex: 1, initialReceiptId: 'receipt_1', actorIds: {},
+    source: { sceneIndex: 1, scriptRevision: 1, scriptSha256: state.scriptSha256!, inputSha256: 'c'.repeat(64), sourceLineIds: ['line_1'] },
+    shots: [{ id: 'shot_1', title: '开门相遇', narrative: '', visual: '', action: '开门', durationSec: 3, dialogueLineIds: ['line_1'] }] }
+  let current: ScenePlanningState = { ...state, scenes: [...state.scenes, { sceneIndex: 2, title: '室内', actionDescription: '坐下', importSourceLineIds: [], dialogues: [] }],
+    storyboard: { id: 'revision_1', version: 1, sourceHash: 'b'.repeat(64), status: 'Ready' }, planning: first, scenePlans: [first] }
+  const onCommitted = vi.fn(async () => {}), selected = vi.fn()
+  const save = vi.fn(async (intent: ScenePlanningRequest) => {
+    if (intent.request.action !== 'initialize') throw new Error('Unexpected fixture operation')
+    const plan = { ...first, sceneId: 'scene_2', sceneIndex: 2, initialReceiptId: 'receipt_2',
+      source: { ...first.source, sceneIndex: 2, sourceLineIds: [] },
+      shots: intent.request.shots.map((shot, i) => ({ ...shot, id: `shot_2_${i}` })) }
+    current = { ...current, storyboard: { id: 'revision_2', version: 2, sourceHash: 'd'.repeat(64), status: 'Ready' }, scenePlans: [first, plan] }
+    return { ...state, schema: 'jason.qingmu-scene-planning-result.v1', action: 'initialize', ...intent,
+      requestSha256: 'e'.repeat(64), commandReceiptId: 'receipt_2', eventId: 'event_2', sceneId: plan.sceneId, seriesId: 'series_1',
+      shotIds: plan.shots.map(shot => shot.id), actorIds: {}, source: plan.source, storyboard: current.storyboard,
+      providerCalls: 0, stageStarted: false, approvalGranted: false } as ScenePlanningResult
+  })
+  const port = { readScenePlanning: vi.fn(async () => current), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: save, recoverScenePlanning: vi.fn() }
+  const show = () => render(<ScenePlanningWorkspace {...state} port={port} onCommitted={onCommitted}
+    onSelectShotId={selected} onUnsavedChange={vi.fn()} />)
+  const mounted = show()
+  expect((await screen.findByLabelText('镜头名称') as HTMLTextAreaElement).value).toBe('开门相遇')
+  fireEvent.click(screen.getByRole('button', { name: '室内', exact: true }))
+  fireEvent.click(screen.getByRole('button', { name: '建立本场镜头' }))
+  expect((screen.getByRole('button', { name: '雨夜', exact: true }) as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.change(screen.getByLabelText('镜头名称'), { target: { value: '室内落座' } })
+  fireEvent.click(screen.getByText('预览保存影响')); fireEvent.click(screen.getByText('确认保存规划'))
+  await waitFor(() => { expect(onCommitted).toHaveBeenCalledOnce() })
+  expect(save.mock.calls[0]?.[0].request).toMatchObject({ action: 'initialize', sceneIndex: 2, expectedStoryboardRevision: 1 })
+  expect((screen.getByLabelText('镜头名称') as HTMLTextAreaElement).value).toBe('室内落座')
+  fireEvent.click(screen.getByRole('button', { name: '读取恢复' }))
+  await waitFor(() => expect(port.readScenePlanning).toHaveBeenCalledTimes(3))
+  expect((screen.getByLabelText('镜头名称') as HTMLTextAreaElement).value).toBe('室内落座')
+  mounted.unmount(); show()
+  expect((await screen.findByLabelText('镜头名称') as HTMLTextAreaElement).value).toBe('室内落座')
+  fireEvent.click(screen.getByRole('button', { name: '雨夜', exact: true }))
+  expect((screen.getByLabelText('镜头名称') as HTMLTextAreaElement).value).toBe('开门相遇')
+  expect(selected).toHaveBeenLastCalledWith('shot_1')
+  expect(save).toHaveBeenCalledOnce()
 })

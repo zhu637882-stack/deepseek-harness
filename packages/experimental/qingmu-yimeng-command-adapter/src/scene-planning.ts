@@ -124,6 +124,8 @@ export interface ScenePlanningState extends CreationScope {
     readonly initialReceiptId: string
     readonly shots: readonly (PlanningShot & { readonly id: string })[]
   } | null
+  /** Independently saved scenes share the episode's current storyboard revision. */
+  readonly scenePlans?: readonly NonNullable<ScenePlanningState['planning']>[]
 }
 /** Persisted IDs and the original receipt, without generation or approval. */
 interface ScenePlanningResultBase extends CreationScope {
@@ -235,6 +237,15 @@ function source(value: unknown, fail: Fail): void {
   integer(s.scriptRevision, fail, 1); integer(s.sceneIndex, fail, 1)
   digest(s.scriptSha256, fail); digest(s.inputSha256, fail); ids(s.sourceLineIds, fail)
 }
+function scenePlan(value: unknown, fail: Fail): Record<string, unknown> {
+  const p = obj(value, fail)
+  id(p.sceneId, fail); integer(p.sceneIndex, fail, 1); source(p.source, fail); id(p.initialReceiptId, fail)
+  if (obj(p.source, fail).sceneIndex !== p.sceneIndex) throw fail('planning scene source mismatch')
+  if (!Array.isArray(p.shots) || !p.shots.length || p.shots.length > 64) throw fail('planning shots invalid')
+  for (const s of p.shots) { id(obj(s, fail).id, fail); shot(s, fail) }
+  ids(p.shots.map(s => obj(s, fail).id), fail)
+  return p
+}
 
 /** Parse one allowlisted planning operation and validate its returned identities.
  * @param endpoint - Read, save or recover a planning intent.
@@ -310,6 +321,18 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
         }
       }
       if (r.storyboard !== null) revision(r.storyboard, b)
+      if (r.planning !== null) scenePlan(r.planning, b)
+      let plans: Record<string, unknown>[] | undefined
+      if (r.scenePlans !== undefined) {
+        if (!Array.isArray(r.scenePlans) || r.scenePlans.length > 1000 || (automatic && r.scenePlans.length)) throw b('planning scenes invalid')
+        plans = r.scenePlans.map(p => scenePlan(p, b))
+        const indexes = plans.map(p => p.sceneIndex)
+        const sceneIndexes = new Set(r.scenes.map(s => obj(s, b).sceneIndex))
+        if (new Set(indexes).size !== indexes.length || indexes.some(index => !sceneIndexes.has(index))) throw b('planning scene identity mismatch')
+        ids(plans.flatMap(p => (p.shots as unknown[]).map(s => obj(s, b).id)), b)
+        const legacy = r.planning === null ? null : obj(r.planning, b)
+        if (legacy === null ? plans.length > 0 : !plans.some(p => helpers.canonicalJson(p, 'scene plan') === helpers.canonicalJson(legacy, 'scene plan'))) throw b('planning primary scene mismatch')
+      }
       if (r.canonicalStoryboard !== undefined && r.canonicalStoryboard !== null) {
         canonicalStoryboard(r.canonicalStoryboard, b)
         const canonical = obj(r.canonicalStoryboard, b)
@@ -325,18 +348,15 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
         frameRequirements(r.frameRequirements, b)
         {
           if (r.frameRequirements.length > 0 && r.storyboard === null) throw b('frame requirements revision missing')
-          const expected = automatic ? obj(r.canonicalStoryboard, b).shots : r.planning === null ? [] : obj(r.planning, b).shots
+          const expected = automatic ? obj(r.canonicalStoryboard, b).shots
+            : plans?.flatMap(p => p.shots as unknown[]) ?? (r.planning === null ? [] : obj(r.planning, b).shots)
+          const requiredIds = new Set(r.frameRequirements.map(item => obj(item, b).id))
           if (!Array.isArray(expected) || expected.length !== r.frameRequirements.length
-            || expected.some((item, index) => obj(item, b).id !== obj((r.frameRequirements as unknown[])[index], b).id)) {
+            || expected.some((item, index) => !automatic && plans ? !requiredIds.has(obj(item, b).id)
+              : obj(item, b).id !== obj((r.frameRequirements as unknown[])[index], b).id)) {
             throw b('frame requirements scope mismatch')
           }
         }
-      }
-      if (r.planning !== null) {
-        const p = obj(r.planning, b)
-        id(p.sceneId, b); integer(p.sceneIndex, b, 1); source(p.source, b); id(p.initialReceiptId, b)
-        if (!Array.isArray(p.shots) || p.shots.length > 64) throw b('planning shots invalid')
-        for (const s of p.shots) { id(obj(s, b).id, b); shot(s, b) }
       }
     } else {
       if (r.schema !== 'jason.qingmu-scene-planning-result.v1' || r.idempotencyKey !== raw.idempotencyKey || r.requestSha256 !== requestSha) throw b('planning receipt mismatch')

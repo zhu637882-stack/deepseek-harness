@@ -48,6 +48,10 @@ function base(state: ScenePlanningState, sceneIndex: number): PlanningBase {
   return { sceneIndex, expectedScriptRevision: state.scriptRevision, expectedScriptSha256: state.scriptSha256,
     expectedStoryboardRevision: state.storyboard?.version ?? 0, expectedStoryboardSha256: state.storyboard?.sourceHash ?? null }
 }
+function forScene(state: ScenePlanningState, sceneIndex: number): ScenePlanningState {
+  return { ...state, planning: state.scenePlans?.find(plan => plan.sceneIndex === sceneIndex)
+    ?? (state.planning?.sceneIndex === sceneIndex ? state.planning : null) }
+}
 function saved(state: ScenePlanningState): LocalPlan | null {
   const p = state.planning
   return p === null ? null : { sceneIndex: p.sceneIndex, base: base(state, p.sceneIndex),
@@ -321,7 +325,10 @@ export function ScenePlanningWorkspace({
   }
   useEffect(() => {
     let active = true
-    void port.readScenePlanning({ projectId, episodeId }).then((next) => {
+    void port.readScenePlanning({ projectId, episodeId }).then((snapshot) => {
+      const target = hostSync?.pendingTarget()
+      const targetScene = snapshot.scenePlans?.find(plan => plan.sceneId === target?.sceneId)?.sceneIndex
+      const next = forScene(snapshot, local?.sceneIndex ?? targetScene ?? snapshot.planning?.sceneIndex ?? 1)
       if (!active) return
       if (next.projectId !== projectId || next.episodeId !== episodeId) throw new Error('409 planning_read_scope_mismatch')
       setState(next)
@@ -581,7 +588,7 @@ export function ScenePlanningWorkspace({
     intendedShotId?: string,
   ) => {
     if (!isLive()) return
-    const next = await port.readScenePlanning({ projectId, episodeId }, controller.current.signal)
+    const next = forScene(await port.readScenePlanning({ projectId, episodeId }, controller.current.signal), result.source.sceneIndex)
     if (!isLive()) return
     const selected = intendedShotId ?? result.shotIds[index]
     if (result.projectId !== projectId
@@ -601,7 +608,7 @@ export function ScenePlanningWorkspace({
     setReceipt(result)
     const nextPlan = saved(next)
     const nextIndex = nextPlan?.shotIds.findIndex(id => id === selected) ?? -1
-    setState(next)
+    setState(next); setSceneIndex(result.source.sceneIndex)
     update(nextPlan === null ? null : { ...nextPlan, activeIndex: nextIndex >= 0 ? nextIndex : 0 })
     if (nextIndex >= 0) setIndex(nextIndex)
     setRetryAllowed(false); setRecoveryRead(false)
@@ -701,8 +708,9 @@ export function ScenePlanningWorkspace({
         else {
           const next = await port.readScenePlanning({ projectId, episodeId }, controller.current.signal)
           if (!isLive()) return
-          setState(next)
-          if (!local?.dirty) update(saved(next))
+          const selected = forScene(next, local?.sceneIndex ?? sceneIndex)
+          setState(selected)
+          if (!local?.dirty) update(saved(selected))
         }
       } else if (local && current) {
         const shotId = local.shotIds[index]
@@ -806,7 +814,7 @@ export function ScenePlanningWorkspace({
         try {
           const next = await port.readScenePlanning({ projectId, episodeId }, controller.current.signal)
           if (!isLive()) return
-          setState(next); setRecoveryRead(true)
+          setState(forScene(next, local?.sceneIndex ?? sceneIndex)); setRecoveryRead(true)
         } catch (readError) { if (isLive()) { setRecoveryRead(false); setError(errorText(readError)) } }
       }
     } finally { lock.current = false; if (isLive()) setBusy(false) }
@@ -820,7 +828,7 @@ export function ScenePlanningWorkspace({
   const canRebase = Boolean(local?.pending && retryAllowed && recoveryRead && state
     && state.scriptSha256 === local.base.expectedScriptSha256
     && ((state.planning && local.shotIds[index] === state.planning.shots[index]?.id)
-      || (state.storyboard === null && local.shotIds.length === 0)))
+      || (state.planning === null && !state.canonicalStoryboard && local.shotIds.length === 0)))
   if (presentation === 'assistant') return <section className={css.assistant} aria-label="当前镜头导演助手">
     <p>说出你想改的地方，导演会结合当前镜头处理。</p>
     {nativeDirectorSession && <NativeDirectorComposer port={nativeDirectorSession} sessionId={directorSessionId}
@@ -835,7 +843,12 @@ export function ScenePlanningWorkspace({
     <nav className={css.navigation} aria-label="剧本场景与规划镜头">
       <h3>场景与镜头</h3>
       {state?.scenes.map(s => <button type="button" key={s.sceneIndex} aria-pressed={s.sceneIndex === (local?.sceneIndex ?? sceneIndex)}
-        disabled={Boolean(local) || busy} onClick={() => { setSceneIndex(s.sceneIndex) }}>{s.title}</button>)}
+        disabled={Boolean(local?.dirty || local?.pending) || busy} onClick={() => {
+          const next = forScene(state, s.sceneIndex)
+          clearProposal(); clearPaidProposal(); setState(next); update(saved(next)); setSceneIndex(s.sceneIndex); setIndex(0)
+          const first = next.planning?.shots[0]
+          if (first) onSelectShotId(first.id)
+        }}>{s.title}</button>)}
       {local?.shots.map((s, i) => <button type="button" key={local.shotIds[i] ?? i} aria-pressed={i === index}
         disabled={busy || Boolean(local.pending)} onClick={() => { select(i) }}>{String(i + 1).padStart(2, '0')} · {s.title}<small>{s.durationSec} 秒 · 规划镜头</small></button>)}
     </nav>
@@ -899,7 +912,8 @@ export function ScenePlanningWorkspace({
       {!canonicalStoryboard && !state?.scenes.length && <p>尚无可规划场景。请先到“剧本与资产”确认导入并保存剧本。</p>}
       {planningScene && <details open={!local}><summary>已保存原文 · 只读对照</summary><p>{planningScene.actionDescription || '原文未提供动作描述'}</p>
         {planningScene.dialogues.map(d => <p key={d.sourceLineId}><strong>{d.character}</strong>：{d.line}</p>)}</details>}
-      {planningScene && state?.storyboard === null && state.scriptSha256 && nativeDirectorSession?.story && port.readAssetDesign
+      {planningScene && state?.planning === null && !canonicalStoryboard && state.scriptSha256
+        && nativeDirectorSession?.story && port.readAssetDesign
         && <NativeSceneDesign key={`${sceneIndex}:${state.scriptSha256}`} projectId={projectId} episodeId={episodeId}
           scene={planningScene} scriptSha256={state.scriptSha256} readAssetDesign={port.readAssetDesign}
           storyPort={nativeDirectorSession.story} disabled={busy || Boolean(local?.pending)} onAdopt={(shots) => {
@@ -909,9 +923,9 @@ export function ScenePlanningWorkspace({
             update({ sceneIndex, shots, base: base(state, sceneIndex), shotIds: [], dirty: true })
             setIndex(0); setPreview(false)
           }} />}
-      {planningScene && local === null && state?.storyboard === null && <><p>初始提供两个空白规划卡；动作来自原文，对白初始分配需你核对，其他字段由你填写。</p>
+      {planningScene && local === null && state?.planning === null && !canonicalStoryboard && <>
+        <p>初始提供两个空白规划卡；动作来自原文，对白初始分配需你核对，其他字段由你填写。</p>
         <button type="button" className={css.primary} onClick={begin}>建立本场镜头</button></>}
-      {state?.storyboard && !canonicalStoryboard && local === null && <p>本集已有分镜；此入口不覆盖已有对象，请使用当前导演工作区。</p>}
       {local && current && <fieldset disabled={busy || Boolean(local.pending)} className={css.editor}>
         <legend>镜头 {index + 1} · {local.shotIds.length ? '编辑已保存规划' : '尚未保存'}</legend>
         {(Object.keys(labels) as (keyof typeof labels)[]).map(field => <label key={field}>{labels[field]}
@@ -1013,7 +1027,7 @@ export function ScenePlanningWorkspace({
         }, null, 2)}</pre></details>}
       </section>}
       {preview && local && <section className={css.notice} aria-label="规划保存预览"><h3>保存影响</h3>
-        <p>{local.shotIds.length ? '仅修改当前镜头，生成新的结构快照；旧依赖按现有规则失效。' : `新建 1 个真实场景、${new Set(planningScene?.dialogues.map(d => d.character)).size} 个独立文本人物和 ${local.shots.length} 个规划镜头。不同场景的同名人物不会静默合并。`}</p>
+        <p>{local.shotIds.length ? '仅修改当前镜头，生成新的结构快照；旧依赖按现有规则失效。' : `保存本场 ${local.shots.length} 个镜头，复用项目已有人物与场景，追加至本集末尾。`}</p>
         {(local.shotIds.length ? [index] : local.shots.map((_, i) => i)).map(i => <article key={i}>
           <h4>{local.shots[i]?.title}</h4><p>{(Object.keys(labels) as (keyof typeof labels)[]).map(k =>
             `${labels[k]}：${state?.planning?.shots[i]?.[k] ?? '（无）'} → ${local.shots[i]?.[k] || '（未填写）'}`).join('\n')}</p>

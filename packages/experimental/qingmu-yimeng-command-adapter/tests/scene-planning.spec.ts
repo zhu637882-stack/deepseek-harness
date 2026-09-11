@@ -103,3 +103,22 @@ describe('bounded scene planning Host channel', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 })
+
+it('reads all scene plans and checks their complete frame identities independently of scene creation order', async () => {
+  const plans = [1, 2].map(n => ({ sceneId: `scene_${n}`, sceneIndex: n, initialReceiptId: `receipt_${n}`, actorIds: {},
+    source: { sceneIndex: n, scriptRevision: 1, scriptSha256: 'a'.repeat(64), inputSha256: 'b'.repeat(64), sourceLineIds: [] },
+    shots: [{ ...request.request.shots[0], id: `shot_${n}` }] }))
+  const frameRequirements = [2, 1].map((n, i) => ({ id: `shot_${n}`, frameNo: i + 1, title: '镜头', imagePromptCn: '' }))
+  const value = { ...state, scriptRevision: 1, scriptSha256: 'a'.repeat(64),
+    scenes: [1, 2].map(n => ({ sceneIndex: n, title: `场景${n}`, actionDescription: '', importSourceLineIds: [], dialogues: [] })),
+    storyboard: { id: 'revision_2', version: 2, sourceHash: 'c'.repeat(64), status: 'Ready' },
+    planning: plans[0], scenePlans: plans, frameRequirements }
+  expect(await setup(value).handler('readScenePlanning', scope, new AbortController().signal)).toMatchObject({ ok: true, value })
+  for (const change of [
+    { scenePlans: [plans[0], plans[0]] },
+    { scenePlans: [{ ...plans[0], sceneIndex: 3 }, plans[1]] },
+    { frameRequirements: [frameRequirements[0]] },
+    { frameRequirements: [{ ...frameRequirements[0], id: 'unrelated' }, frameRequirements[1]] },
+    { planning: null },
+  ]) expect(await setup({ ...value, ...change }).handler('readScenePlanning', scope, new AbortController().signal)).toMatchObject({ ok: false })
+})

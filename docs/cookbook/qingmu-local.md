@@ -30,11 +30,15 @@ Legacy mode: Open the single `entryUrl` printed by `status`. It establishes the 
 
 If a reply is lost, use “读取创建恢复” or “读取恢复 / 刷新预览” first. Inputs remain in this browser; canonical drafts and scripts live in Yimeng. An explicit same-intent retry cannot duplicate the original operation. When the script version changed and the original import is confirmed absent, “保留文字，按当前版本重新准备” unlocks the retained text without submitting it. An unfinished draft index can be completed only by explicit same-key retry while it is still current. Browser recovery storage is not a backup; a new browser recovers saved data, not unsubmitted local text.
 
-## Plan one scene
+<a id="plan-one-scene"></a>
 
-1. After saving a script, open “导演工作区”, select one text scene and choose “建立本场镜头”. The two initial cards copy only original action/dialogue; blank narrative and visual fields are not generated suggestions.
-2. Enter shot names, narrative purposes, visual descriptions, actions and durations (0.5–30 seconds); check dialogue assignment. Add up to eight shots. Choose “预览保存影响”, then “确认保存规划”.
+## Plan scenes
+
+1. After saving the script and asset design, open “导演工作区” and select a scene. Ask the native director for a design and adopt it into editable cards, or choose “建立本场镜头” to fill cards manually. Manual initial cards copy only original action/dialogue.
+2. Enter shot names, narrative purposes, visual descriptions, actions and durations (0.5–30 seconds); check dialogue assignment. A request supports up to 64 shots, subject to its payload limit. Choose “预览保存影响”, then “确认保存规划”.
 3. The saved scene, dialogue actors and shots have canonical Yimeng IDs and original source-line bindings. Select a shot, edit its fields and explicitly save a new structural version. Refresh or restart reads those same objects. Reference media and the first legal PromptIR remain separate prerequisites; structural Ready is not content approval.
+
+After saving a scene, select another to append its shots to the episode. Saved scenes remain editable. Unsaved changes or unresolved saves keep the current scene selected until resolved. Refresh retains the selected scene without recreating others.
 
 For an unknown result, choose “读取恢复” before retrying. A rejected intent can be explicitly prepared against the fresh unchanged script after its missing receipt is confirmed. If another session already initialized this scene, “保留输入副本，载入已存在镜头” keeps a browser-only copy and loads the existing objects without overwriting them. Changed script sources cannot be silently rebound. Unsubmitted text survives ordinary re-entry in this browser, not browser-storage deletion.
 

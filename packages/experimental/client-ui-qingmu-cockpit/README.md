@@ -291,3 +291,5 @@ Native asset cards preserve script facts, director inferences and explicit world
 Asset authoring receives the current project medium, resolved style pack and effective director methods before it writes image descriptions. The source hash includes these settings, so changed settings invalidate an unsaved design rather than being appended after an incompatible design has been written.
 
 The screenplay page offers an optional continuity revision in a separate native session. It reads the current draft and original creative intent without inheriting the writer’s self-audit, returns an editable full screenplay, and adopts only into the text editor. Its own request is recoverable and does not overwrite the canonical script.
+
+Imported scene planning now supports continuation across all script scenes. Each scene retains its source and receipt; appended shots share the latest episode revision. The UI restores the selected scene and allows switching after edits are saved.
