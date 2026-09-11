@@ -114,7 +114,7 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
         <button type="button" disabled={busy || running || !valid} onClick={() => { void render() }}>{busy ? '正在提交…' : running ? '正在合成 MP4…' : pending.current ? '恢复上次导出' : '合成并导出 MP4'}</button>
         <span>{dirty ? '剪辑修改将在导出时保存' : '本地合成不调用付费生成模型'}</span></div>
       {state.cuts[0]?.status === 'Failed' && <p role="alert">合成失败：{state.cuts[0].errorCode}。原片仍保留。</p>}
-      {latest && <section aria-label="成片播放器"><h3>成片 · 版本 {latest.version}</h3><video controls preload="metadata" src={latest.url} /><a href={latest.url} download={`青木-成片-v${latest.version}.mp4`} target="_blank" rel="noreferrer">下载 MP4</a></section>}
+      {latest && <section aria-label="成片播放器"><h3>成片 · 版本 {latest.version}</h3><video controls preload="metadata" src={latest.url} /><a href={`${latest.url}${latest.url?.includes('?') ? '&' : '?'}download=true`} download={`青木-成片-v${latest.version}.mp4`} target="_blank" rel="noreferrer">下载 MP4</a></section>}
       {state.cuts.length > 1 && <details><summary>历史成片 · {state.cuts.length} 版</summary>{state.cuts.map(c => <p key={c.revisionId}>版本 {c.version} · {c.status} {c.url && <a href={c.url} target="_blank" rel="noreferrer">播放 / 下载</a>}</p>)}</details>}
     </>}
   </section>
