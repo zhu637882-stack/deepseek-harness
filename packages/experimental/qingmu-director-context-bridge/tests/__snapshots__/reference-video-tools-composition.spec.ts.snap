@@ -78,7 +78,7 @@ exports[`reads, previews and saves through the shipped YAML preset and real adap
 
 exports[`saves a selected design from an episode larger than the real inline result limit without losing its receipt 1`] = `
 {
-  "coverage": "Complete selected-shot design and bound script, cast, scene, style and adjacent-shot context. Other planning copies are retained in the session receipt, not repeated here.",
+  "coverage": "Complete selected-shot design and bound script, cast, scene, style and adjacent-shot context. Episode continuity lists saved start/end states in storyboard order, not observed media. Compare adjoining states and explain intended cuts, time jumps and action ellipses from the script; do not force unrelated scenes to share a state. Save only the selected shot; other changes need their own shot selection. Other full planning copies are retained in the session receipt, not repeated here.",
   "directorPlan": {
     "actionBeats": [
       {

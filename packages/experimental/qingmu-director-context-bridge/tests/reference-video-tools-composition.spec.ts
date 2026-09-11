@@ -82,7 +82,7 @@ function writer(extraShots = 0, image?: { sha256: string; url: string }) {
   if (extraShots > 0) {
     const shots = [...currentPlanning.frameRequirements, ...Array.from({ length: extraShots }, (_, index) => ({
       ...planningShots[0]!, id: `other-${index}`, frameNo: index + 2,
-      directorPlan: { choreography: '其他镜头的完整表演与空间调度。'.repeat(400) },
+      directorPlan: { choreography: '其他镜头的完整表演与空间调度。'.repeat(400), continuity: { start: `开始${index}`, end: `结束${index}` } },
     }))]
     currentPlanning = { ...currentPlanning, frameRequirements: shots,
       canonicalStoryboard: { ...currentPlanning.canonicalStoryboard, shots, shotCount: shots.length } }
@@ -412,9 +412,12 @@ it('saves a selected design from an episode larger than the real inline result l
     coverage: string
     scope: typeof scope
     planning: { frameRequirements: typeof planningShots }
+    episodeContinuity: { shotId: string; continuity: unknown }[]
   }
   expect(Buffer.byteLength(result(h.agent, 'large-read').text)).toBeLessThan(48000)
   expect(visible.planning.frameRequirements.map((shot: { id: string }) => shot.id)).toEqual(['f'])
+  expect(visible.episodeContinuity).toHaveLength(9)
+  expect(visible.episodeContinuity.at(-1)).toMatchObject({ shotId: 'other-7', continuity: { start: '开始7', end: '结束7' } })
   const retained = h.agent.session.events.find(event => event.type === 'qingmu-director-dialogue/receipt'
     && event.data.callId === 'large-read')
   expect(Buffer.byteLength(JSON.stringify(retained))).toBeGreaterThan(50000)

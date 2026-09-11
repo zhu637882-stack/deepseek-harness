@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FrameRequirementsOperation, ScenePlanningRequest, ScenePlanningState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
+import { continuityFields, continuityText, ShotContinuityView } from './ShotContinuityView.tsx'
 
 interface Draft {
   readonly shotId: string
@@ -9,10 +10,15 @@ interface Draft {
   readonly cameraAngle?: string
   readonly cameraMovement?: string
   readonly coveragePlan?: string
+  readonly continuityStart?: string
+  readonly continuityEnd?: string
   readonly pending?: ScenePlanningRequest
 }
 const shootingFields = ['blocking', 'cameraAngle', 'cameraMovement', 'coveragePlan'] as const
 const shootingLabels = { blocking: '动作', cameraAngle: '机位', cameraMovement: '摄影机运动', coveragePlan: '景别、焦点与切点' } as const
+const continuityKeys = ['continuityStart', 'continuityEnd'] as const
+const continuityLabels = { continuityStart: '本镜开始状态', continuityEnd: '本镜结束状态' } as const
+const boundary = { continuityStart: 'start', continuityEnd: 'end' } as const
 type ShootingField = typeof shootingFields[number]
 type Port = Partial<Pick<QingmuYimengPort, 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning'>>
 export type AutomaticFrameRequirementStatus = 'loading' | 'ready' | 'missing' | 'unavailable'
@@ -28,6 +34,13 @@ function pendingValid(value: ScenePlanningRequest | undefined,
     && /^[a-f0-9]{64}$/.test(value.request.expectedStoryboardSha256)
 }
 function stored(keyName: string): Draft | null { try { const value = JSON.parse(localStorage.getItem(keyName) ?? 'null') as Draft; return typeof value?.imagePromptCn === 'string' && typeof value?.shotId === 'string' ? value : null } catch { return null } }
+function pendingContinuityMatches(draft: Draft): boolean {
+  const operation = draft.pending?.request
+  if (operation?.action !== 'edit_automatic' && operation?.action !== 'edit_requirements') return false
+  const value = operation.directorPlan?.continuity
+  return continuityKeys.every(field => draft[field] === undefined || (value !== null && typeof value === 'object'
+    && !Array.isArray(value) && (value as Record<string, unknown>)[boundary[field]] === draft[field]))
+}
 function requirements(state: ScenePlanningState | null) { return state?.frameRequirements ?? state?.canonicalStoryboard?.shots }
 function sameScope(state: ScenePlanningState, projectId: string, episodeId: string, shotId: string): boolean {
   return state.projectId === projectId && state.episodeId === episodeId
@@ -62,8 +75,10 @@ export function AutomaticFrameRequirementsEditor({
         const local = stored(storageKey)
         setDraft(local?.shotId === shotId && local.imagePromptCn.length > 0 && local.imagePromptCn.length <= 20000
           && shootingFields.every(field => local[field] === undefined || (typeof local[field] === 'string' && local[field].length <= 2000))
+          && continuityKeys.every(field => local[field] === undefined || (typeof local[field] === 'string' && local[field].length <= 12000))
           && (local.pending === undefined || (pendingValid(local.pending, projectId, episodeId, shotId)
             && local.imagePromptCn === local.pending.request.imagePromptCn
+            && pendingContinuityMatches(local)
             && shootingFields.every(field => (local.pending?.request.action === 'edit_automatic' || local.pending?.request.action === 'edit_requirements') && (local.pending.request[field] === undefined || local.pending.request[field] === local[field]))))
           ? { blocking: saved?.blocking ?? '', cameraAngle: saved?.cameraAngle ?? '', cameraMovement: saved?.cameraMovement ?? '', coveragePlan: saved?.coveragePlan ?? '', ...local }
           : saved ? { shotId, imagePromptCn: saved.imagePromptCn, blocking: saved.blocking ?? '', cameraAngle: saved.cameraAngle ?? '', cameraMovement: saved.cameraMovement ?? '', coveragePlan: saved.coveragePlan ?? '' } : null); setLoad('ready')
@@ -104,6 +119,11 @@ export function AutomaticFrameRequirementsEditor({
         ...(draft.cameraAngle !== undefined && draft.cameraAngle !== savedField('cameraAngle') ? { cameraAngle: draft.cameraAngle } : {}),
         ...(draft.cameraMovement !== undefined && draft.cameraMovement !== savedField('cameraMovement') ? { cameraMovement: draft.cameraMovement } : {}),
         ...(draft.coveragePlan !== undefined && draft.coveragePlan !== savedField('coveragePlan') ? { coveragePlan: draft.coveragePlan } : {}),
+        ...(continuityKeys.some(field => draft[field] !== undefined) ? { directorPlan: { continuity: {
+          ...continuityFields(requirements(state)?.find(shot => shot.id === shotId)),
+          ...(draft.continuityStart === undefined ? {} : { start: draft.continuityStart }),
+          ...(draft.continuityEnd === undefined ? {} : { end: draft.continuityEnd }),
+        } } } : {}),
       } satisfies FrameRequirementsOperation }
       update({ ...draft, pending })
       const result = recover ? await recoverSave(pending) : await save(pending)
@@ -158,8 +178,21 @@ export function AutomaticFrameRequirementsEditor({
   if (state === null || draft === null) return <p role="status">正在读取本镜首帧要求…</p>
   const saved = requirements(state)?.find(shot => shot.id === shotId)
   function savedField(field: ShootingField): string { return requirements(state)?.find(shot => shot.id === shotId)?.[field] ?? '' }
-  const dirty = saved !== undefined && (draft.imagePromptCn !== saved.imagePromptCn || shootingFields.some(field => (draft[field] ?? '') !== savedField(field)))
+  const continuity = continuityFields(saved)
+  const dirty = saved !== undefined && (draft.imagePromptCn !== saved.imagePromptCn || shootingFields.some(field => (draft[field] ?? '') !== savedField(field))
+    || continuityKeys.some(field => draft[field] !== undefined && draft[field] !== continuityText(continuity[boundary[field]])))
   return <section aria-label="编辑当前要求">
+    <ShotContinuityView state={state} shotId={shotId} />
+    <fieldset disabled={busy || draft.pending !== undefined}>
+      <legend>本镜连续性</legend>
+      {continuity.notes !== undefined && <p>既有连续性说明：{continuityText(continuity.notes)}</p>}
+      {continuityKeys.map(field => <label key={field}>{continuityLabels[field]}
+        <textarea aria-label={continuityLabels[field]} rows={3} maxLength={12000}
+          value={draft[field] ?? continuityText(continuity[boundary[field]])}
+          onChange={event => update({ ...draft, [field]: event.target.value })} />
+      </label>)}
+      <p>首帧对应开始状态；取物、转身、接线等动作发生后的结果写入结束状态。保存后请让导演据此更新视频提示词，再预览生成。</p>
+    </fieldset>
     {shootingFields.map(field => <label key={field}>
       {shootingLabels[field]}
       <textarea aria-label={shootingLabels[field]} rows={field === 'blocking' ? 3 : 2}
@@ -177,12 +210,16 @@ export function AutomaticFrameRequirementsEditor({
       <p>本镜最新已保存要求：{requirements(rebaseState)?.find(shot => shot.id === shotId)?.imagePromptCn || '尚未填写'}</p>
       <p>最新动作：{requirements(rebaseState)?.find(shot => shot.id === shotId)?.blocking || '未设置'} · 最新机位：{requirements(rebaseState)?.find(shot => shot.id === shotId)?.cameraAngle || '未设置'}</p>
       <p>最新摄影机运动：{requirements(rebaseState)?.find(shot => shot.id === shotId)?.cameraMovement || '未设置'} · 最新景别与切点：{requirements(rebaseState)?.find(shot => shot.id === shotId)?.coveragePlan || '未设置'}</p>
+      <p>最新开始状态：{continuityText(continuityFields(requirements(rebaseState)?.find(shot => shot.id === shotId)).start) || '尚未设计'}</p>
+      <p>最新结束状态：{continuityText(continuityFields(requirements(rebaseState)?.find(shot => shot.id === shotId)).end) || '尚未设计'}</p>
       <button type="button" disabled={busy} onClick={() => {
         const next = { shotId: draft.shotId, imagePromptCn: draft.imagePromptCn,
           ...(draft.blocking !== undefined ? { blocking: draft.blocking } : {}),
           ...(draft.cameraAngle !== undefined ? { cameraAngle: draft.cameraAngle } : {}),
           ...(draft.cameraMovement !== undefined ? { cameraMovement: draft.cameraMovement } : {}),
           ...(draft.coveragePlan !== undefined ? { coveragePlan: draft.coveragePlan } : {}),
+          ...(draft.continuityStart !== undefined ? { continuityStart: draft.continuityStart } : {}),
+          ...(draft.continuityEnd !== undefined ? { continuityEnd: draft.continuityEnd } : {}),
         }
         try {
           localStorage.setItem(storageKey, JSON.stringify(next)); setDraft(next); setState(rebaseState); setRebaseState(null); setError('')

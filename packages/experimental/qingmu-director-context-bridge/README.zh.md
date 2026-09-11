@@ -116,3 +116,5 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 [免密钥整片组合示例](tests/reference-video-tools-composition.spec.ts) 使用随包 YAML 预设、原生 Agent 循环、真实读取与命令适配器，以及脚本化的 Writer HTTP 和模型响应。它演示跨镜环境声的读取、保存和回读，不渲染或调用供应商生成。
 
 动作时间的小数保持原样；恢复查询失败时返回适配器诊断，不发起保存。
+
+完整导演读取还按分镜顺序返回 episodeContinuity：镜头身份、标题及已保存的连续性值。这些是创作设计，不是画面观察。导演结合剧本对照相邻状态，包括合理的剪切和时间跳跃；保存仍只作用于当前选择镜头。

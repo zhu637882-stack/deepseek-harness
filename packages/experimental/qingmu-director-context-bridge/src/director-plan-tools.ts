@@ -117,7 +117,9 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
         ports.boundedJson(input), { ...input,
           planning: { schema, projectId, episodeId, scriptRevision, scriptSha256, storyboard,
             frameRequirements: [selectedShot] },
-          coverage: 'Complete selected-shot design and bound script, cast, scene, style and adjacent-shot context. Other planning copies are retained in the session receipt, not repeated here.',
+          episodeContinuity: planning.frameRequirements?.map(shot => ({ shotId: shot.id, frameNo: shot.frameNo,
+            title: shot.title, continuity: shot.directorPlan?.continuity ?? null })),
+          coverage: 'Complete selected-shot design and bound script, cast, scene, style and adjacent-shot context. Episode continuity lists saved start/end states in storyboard order, not observed media. Compare adjoining states and explain intended cuts, time jumps and action ellipses from the script; do not force unrelated scenes to share a state. Save only the selected shot; other changes need their own shot selection. Other full planning copies are retained in the session receipt, not repeated here.',
         }))
     },
   }))
