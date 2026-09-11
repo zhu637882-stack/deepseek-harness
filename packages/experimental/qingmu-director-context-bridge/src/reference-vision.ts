@@ -49,7 +49,7 @@ export async function inspectReferenceImage(ctx: Context, attachment: ImageAttac
     reasoningEffort: ReasoningEffortId(config.reasoningEffort), maxTokens: config.maxTokens }, signal)
   assertCurrent()
   if (!prepared.inputModalities?.includes('image')) throw new Error('The prepared visual observer does not support images.')
-  const request = { ...prepared.config, sessionId: agent.session.id, purpose: 'director-proposal' as const,
+  const request = { ...prepared.config, sessionId: agent.session.id,
     messages: [createUserMessage({ source: { kind: 'plugin', plugin: 'qingmu-reference-vision' },
       content: [{ type: 'text', text: observationPrompt }, { type: 'image', attachment }] })] }
   agent.session.append('qingmu-director-vision/request', { callId: exec.callId, inspectionId, assetSha256,
