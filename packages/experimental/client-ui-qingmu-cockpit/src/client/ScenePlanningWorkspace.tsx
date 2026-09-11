@@ -23,6 +23,7 @@ import type { HostDescriptionSource } from '@deepseek-ai/dsh-client-connection/c
 import { useDirectorConnection } from './native-director-session.ts'
 import type { NativeDirectorSessionPort } from './native-director-session.ts'
 import { NativeDirectorComposer } from './NativeDirectorComposer.tsx'
+import { NativeSceneDesign } from './NativeSceneDesign.tsx'
 
 interface LocalPlan {
   activeIndex?: number
@@ -102,6 +103,7 @@ function validStoredShot(value: unknown): value is PlanningShot {
     && Array.isArray(shot.dialogueLineIds) && shot.dialogueLineIds.length <= 100
     && new Set(shot.dialogueLineIds).size === shot.dialogueLineIds.length
     && shot.dialogueLineIds.every(id => typeof id === 'string')
+    && (shot.directorPlan === undefined || objectOf(shot.directorPlan) !== null)
 }
 
 function isPlanningScene(value: ScenePlanningState['scenes'][number] | undefined): value is PlanningScene {
@@ -123,12 +125,12 @@ function validPlanningBase(value: unknown): value is PlanningBase {
 function retainedInput(value: unknown): LocalPlan | null {
   const candidate = objectOf(value)
   if (candidate === null || !Number.isSafeInteger(candidate.sceneIndex) || (candidate.sceneIndex as number) < 1
-    || !validPlanningBase(candidate.base) || !Array.isArray(candidate.shots) || candidate.shots.length < 1 || candidate.shots.length > 8
+    || !validPlanningBase(candidate.base) || !Array.isArray(candidate.shots) || candidate.shots.length < 1 || candidate.shots.length > 64
     || !candidate.shots.every(validStoredShot) || typeof candidate.dirty !== 'boolean') return null
   if (candidate.activeIndex !== undefined
     && (!Number.isSafeInteger(candidate.activeIndex) || (candidate.activeIndex as number) < 0
       || (candidate.activeIndex as number) >= candidate.shots.length)) return null
-  if (!Array.isArray(candidate.shotIds) || candidate.shotIds.length > 8
+  if (!Array.isArray(candidate.shotIds) || candidate.shotIds.length > 64
     || new Set(candidate.shotIds).size !== candidate.shotIds.length
     || !candidate.shotIds.every(id => typeof id === 'string')) return null
   let encoded: string
@@ -210,7 +212,7 @@ function validatedPendingIntent(
   return request.action === 'initialize'
     && Array.isArray(request.shots)
     && request.shots.length >= 1
-    && request.shots.length <= 8
+    && request.shots.length <= 64
     && request.shots.every(validStoredShot)
     ? value as ScenePlanningRequest
     : null
@@ -231,7 +233,7 @@ export function ScenePlanningWorkspace({
   readonly port: Pick<QingmuYimengPort, 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning'
     | 'requestDirectorProposal' | 'checkDirectorProposalFreshness'>
     & Partial<Pick<QingmuYimengPort, 'readDirectorProviderAvailability'
-      | 'issueDirectorProviderWorkOrder' | 'readDirectorProviderWorkOrderStatus'>>
+      | 'issueDirectorProviderWorkOrder' | 'readDirectorProviderWorkOrderStatus' | 'readAssetDesign'>>
   readonly directorBridge?: DirectorContextClientPort | undefined
   readonly directorSessionId?: string | undefined
   readonly directorConnection?: HostDescriptionSource | undefined
@@ -897,6 +899,16 @@ export function ScenePlanningWorkspace({
       {!canonicalStoryboard && !state?.scenes.length && <p>尚无可规划场景。请先到“剧本与资产”确认导入并保存剧本。</p>}
       {planningScene && <details open={!local}><summary>已保存原文 · 只读对照</summary><p>{planningScene.actionDescription || '原文未提供动作描述'}</p>
         {planningScene.dialogues.map(d => <p key={d.sourceLineId}><strong>{d.character}</strong>：{d.line}</p>)}</details>}
+      {planningScene && state?.storyboard === null && state.scriptSha256 && nativeDirectorSession?.story && port.readAssetDesign
+        && <NativeSceneDesign key={`${sceneIndex}:${state.scriptSha256}`} projectId={projectId} episodeId={episodeId}
+          scene={planningScene} scriptSha256={state.scriptSha256} readAssetDesign={port.readAssetDesign}
+          storyPort={nativeDirectorSession.story} disabled={busy || Boolean(local?.pending)} onAdopt={(shots) => {
+            if (!Array.isArray(shots) || !shots.length || shots.length > 64 || !shots.every(validStoredShot)) {
+              throw new Error('分镜字段不完整或超过本次提交范围，原设计文字已保留。')
+            }
+            update({ sceneIndex, shots, base: base(state, sceneIndex), shotIds: [], dirty: true })
+            setIndex(0); setPreview(false)
+          }} />}
       {planningScene && local === null && state?.storyboard === null && <><p>初始提供两个空白规划卡；动作来自原文，对白初始分配需你核对，其他字段由你填写。</p>
         <button type="button" className={css.primary} onClick={begin}>建立本场镜头</button></>}
       {state?.storyboard && !canonicalStoryboard && local === null && <p>本集已有分镜；此入口不覆盖已有对象，请使用当前导演工作区。</p>}
@@ -905,6 +917,7 @@ export function ScenePlanningWorkspace({
         {(Object.keys(labels) as (keyof typeof labels)[]).map(field => <label key={field}>{labels[field]}
           <textarea aria-label={labels[field]} rows={field === 'title' ? 1 : 2} maxLength={field === 'title' ? 120 : 2000} value={current[field]}
             onChange={(e) => { change({ ...current, [field]: e.target.value }) }} /></label>)}
+        {current.directorPlan && <details><summary>本镜完整导演设计</summary><pre>{JSON.stringify(current.directorPlan, null, 2)}</pre></details>}
         <label>规划时长（秒）<input aria-label="规划时长（秒）" type="number" min="0.5" max="30" step="0.5" value={current.durationSec}
           onChange={(e) => { change({ ...current, durationSec: Number(e.target.value) }) }} /></label>
         <div><h3>对白分配</h3><p>保留原文与来源行；此处未核验语音时序。</p>
@@ -917,10 +930,10 @@ export function ScenePlanningWorkspace({
                     ...(i === target ? [d.sourceLineId] : [])] })) })
               }}>{local.shots.map((_, i) => <option key={i} value={i}>镜头 {i + 1}</option>)}</select></label>)}
         </div>
-        {!local.shotIds.length && <button type="button" disabled={local.shots.length >= 8} onClick={() => {
+        {!local.shotIds.length && <button type="button" disabled={local.shots.length >= 64} onClick={() => {
           update({ ...local, shots: [...local.shots, { title: `镜头 ${local.shots.length + 1}`,
             narrative: '', visual: '', action: '', durationSec: 3, dialogueLineIds: [] }], dirty: true })
-        }}>增加镜头（最多 8 个）</button>}
+        }}>增加镜头（本次最多 64 个）</button>}
         <button type="button" disabled={!local.dirty || local.shots.some(s => !s.title.trim() || s.durationSec < 0.5 || s.durationSec > 30)} onClick={() => { setPreview(true) }}>预览保存影响</button>
       </fieldset>}
       {local?.shotIds[index] && current && <section className={css.proposal} aria-label="演练建议（非模型生成）">

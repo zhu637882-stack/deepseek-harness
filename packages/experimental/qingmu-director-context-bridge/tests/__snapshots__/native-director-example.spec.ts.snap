@@ -63,6 +63,52 @@ exports[`authors a first-draft suggestion through the shipped preset and actual 
 }
 `;
 
+exports[`designs an unbound scene through native director and camera methods with full department output 1`] = `
+{
+  "calls": [
+    "skill",
+    "skill",
+    "qingmu_read_skill_resource",
+  ],
+  "cameraInRequest": true,
+  "design": {
+    "sceneIndex": 1,
+    "shots": [
+      {
+        "action": "主人让出通道",
+        "dialogueLineIds": [
+          "line1",
+        ],
+        "directorPlan": {
+          "cameraMovement": "跟随后停在听者肩后",
+          "continuity": {
+            "end": "来客进门仍持伞",
+            "start": "来客在门外持伞",
+          },
+          "dialoguePlan": [
+            {
+              "character": "主人",
+              "delivery": "迟疑后低声",
+              "line": "请进。",
+              "sourceLineId": "line1",
+            },
+          ],
+          "performance": "观察后轻声邀请",
+          "soundPlan": {
+            "ambience": "对白中雨声持续",
+          },
+        },
+        "durationSec": 6,
+        "narrative": "允许来客接近",
+        "title": "邀请进门",
+        "visual": "门内望向来客",
+      },
+    ],
+    "sourceScriptSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  },
+}
+`;
+
 exports[`previews imported sourceLineId dialogue through the shipped preset and native loop 1`] = `
 {
   "calls": [

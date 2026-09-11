@@ -23,3 +23,5 @@ Native writing uses the configured model and its existing billing. Refreshing or
 ## Testing
 
 Focused browser checks cover adoption, completed text extraction, hidden reasoning exclusion, failed turns, isolation and unknown-admission protection. The runnable `model-tools-keyless.ts --story` example uses the shipped preset and actual agent loop, replaces only the external model, reads the writer method, and projects the resulting screenplay through the same UI parser. Its transcript has a regression snapshot. Real model quality and the full film are separate runtime checks.
+
+Scene design shares this unbound writing channel and keeps a separate session per scene. It reads saved assets and effective film settings before requesting complete Leos direction. Adoption validates source and dialogue coverage, while the scene-planning save binds identities and preserves department fields for video compilation. The keyless `model-tools-keyless.ts --scene` example exercises the shipped director and camera methods through the native loop; its completed structured output has a transcript snapshot.

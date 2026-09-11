@@ -9,6 +9,8 @@
 
 这个私有实验性 Host 插件通过仅限回环地址的 `/qingmu-yimeng-command` 通道，暴露易梦 `episode_script` 与人物、环境、道具 `element_profile` ChangeSet 的显式流程。剧本操作继续是 `proposeScript`、`previewScript`、`commitScript` 和只读的 `recoverScriptCommit`；元素操作是 `proposeElementProfile`、`proposeReferenceAsset`、`previewElementProfile`、`commitElementProfile` 和只读的 `recoverElementProfileCommit`。绑定 Ready 的生产意图使用 `queueProductionTake`。Take 普通评论使用 `createTakeComment` 和只读的 `recoverTakeComment`。Take 审核权威使用 `createTakeReviewRecommendation`、`createTakeHumanDecision` 及各自的 GET-only 恢复操作。技术 QC 使用 `recordTakeTechnicalQc` 和 `recoverTakeTechnicalQc`。批准生命周期使用 `transitionTakeApprovalLifecycle` 和 `recoverTakeApprovalLifecycleTransition`。所选视频 Finding 使用 `recordShotFinding` 和只读的 `recoverShotFinding`。通过机器校验的阶段工件使用 `registerStageArtifact`、`commitStageArtifactDecision`，以及只读的 `recoverStageArtifactRegistration` 和 `recoverStageArtifactDecision`。完整范围 LSU 计划使用 `sealLsuPlan`、只读的 `recoverLsuPlanSeal` 和 `probeLsuPlanAuthority`。PromptIR 实体草稿决定使用独立的同源 cookie-only 浏览器路由，而不是面向模型的命令通道。
 
+分镜规划卡片可携带完整 `directorPlan`；后端将对白语气绑定到真实来源行和人物身份。单次请求最多 64 个镜头；内部元数据不可编辑，改镜头名称保留之后另行保存的导演细化。
+
 ## 命令边界
 
 ### PromptIR 关联实体草稿审核

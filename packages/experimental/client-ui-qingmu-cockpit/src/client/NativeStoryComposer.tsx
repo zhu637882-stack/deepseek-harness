@@ -89,7 +89,9 @@ export function NativeStoryComposer({ port, projectId, episodeId, source, settin
     {result?.error && <p role="alert">创作未完成：{result.error}</p>}
     {result?.text && <details open={!purpose}><summary>{purpose ? '查看完整设计文字' : '编剧完整稿'}</summary><pre>{result.text}</pre></details>}
     {result?.script && <button type="button" disabled={disabled || busy} onClick={() => {
-      onAdopt(result.script); setNotice(purpose?.adopted ?? '已放入剧本文字。可继续修改，解析后保存为本集剧本。')
+      try {
+        onAdopt(result.script); setNotice(purpose?.adopted ?? '已放入剧本文字。可继续修改，解析后保存为本集剧本。')
+      } catch (error) { setNotice(`没有采用：${error instanceof Error ? error.message : String(error)}`) }
     }}>{purpose?.adopt ?? '采用到剧本文字'}</button>}
     {result?.finished && !result.error && !result.script && <p>这次返回缺少可采用的独立正文块。可参考完整文字，重新发起创作。</p>}
   </section>

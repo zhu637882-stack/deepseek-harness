@@ -11,6 +11,8 @@ export interface PlanningShot {
   readonly action: string
   readonly durationSec: number
   readonly dialogueLineIds: readonly string[]
+  /** Authored creative departments, preserved by initial scene planning. */
+  readonly directorPlan?: YimengCommandJsonObject
 }
 /** Immutable script and structural storyboard compare-and-swap coordinates. */
 export interface PlanningBase {
@@ -192,6 +194,11 @@ function shot(value: unknown, fail: Fail): void {
   for (const k of ['narrative', 'visual', 'action']) if (typeof s[k] !== 'string' || s[k].length > 2000) throw fail('planning shot text invalid')
   if (typeof s.durationSec !== 'number' || !Number.isFinite(s.durationSec) || s.durationSec < 0.5 || s.durationSec > 30) throw fail('planning duration invalid')
   ids(s.dialogueLineIds, fail)
+  if (s.directorPlan !== undefined) {
+    const plan = obj(s.directorPlan, fail)
+    if (Object.keys(plan).some(key => key.startsWith('_') || ['scenePlanning', 'sourceBinding', 'creativePlanSchema', 'clearedShootingFields', 'runtimeRepairDirectives', 'promptRepairHistory'].includes(key))) throw fail('director metadata is not editable')
+    if (Buffer.byteLength(JSON.stringify(plan)) > 65536) throw fail('director plan too large')
+  }
 }
 function revision(value: unknown, fail: Fail): void {
   const r = obj(value, fail)
@@ -274,7 +281,7 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
       if (r.expectedStoryboardSha256 !== null || r.expectedStoryboardRevision !== 0) digest(r.expectedStoryboardSha256, f)
     }
     if (r.action === 'initialize') {
-      if (!Array.isArray(r.shots) || r.shots.length < 1 || r.shots.length > 8) throw f('planning shot limit')
+      if (!Array.isArray(r.shots) || r.shots.length < 1 || r.shots.length > 64) throw f('planning shot limit')
       for (const s of r.shots) shot(s, f)
     } else if (r.action === 'edit') { id(r.shotId, f); shot(r.shot, f) } else if (r.action !== 'edit_automatic' && r.action !== 'edit_requirements') throw f('planning action invalid')
     const encoded = helpers.canonicalJson(r, 'planning request')
@@ -328,7 +335,7 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
       if (r.planning !== null) {
         const p = obj(r.planning, b)
         id(p.sceneId, b); integer(p.sceneIndex, b, 1); source(p.source, b); id(p.initialReceiptId, b)
-        if (!Array.isArray(p.shots) || p.shots.length > 8) throw b('planning shots invalid')
+        if (!Array.isArray(p.shots) || p.shots.length > 64) throw b('planning shots invalid')
         for (const s of p.shots) { id(obj(s, b).id, b); shot(s, b) }
       }
     } else {

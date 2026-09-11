@@ -85,4 +85,21 @@ describe('bounded scene planning Host channel', () => {
     expect(fetch.mock.calls[1]?.[1]?.method).toBe('GET')
     expect(fetch.mock.calls[1]?.[0]).toMatch(/receipt\?idempotencyKey=planning-1&requestSha256=[a-f0-9]{64}$/)
   })
+
+  it('forwards full scene direction for more than eight shots without a creative-field filter', async () => {
+    const directorPlan = { cameraMovement: '跟随再推进', soundPlan: { ambience: '雨声持续' },
+      performance: { reaction: '听完再回应' }, customDepartment: { decision: '动作衔接' } }
+    const operation = { ...request.request, shots: Array.from({ length: 9 }, (_, index) => ({
+      ...request.request.shots[0], title: `镜头 ${index + 1}`, directorPlan,
+    })) }
+    const { handler, fetch } = setup()
+    await handler('saveScenePlanning', { ...request, request: operation }, new AbortController().signal)
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body)).request).toEqual(operation)
+    fetch.mockClear()
+    await handler('saveScenePlanning', { ...request, request: { ...operation, shots: [{
+      ...operation.shots[0], directorPlan: { sourceBinding: { forged: true } },
+    }] } }, new AbortController().signal)
+    expect(fetch).not.toHaveBeenCalled()
+  })
 })

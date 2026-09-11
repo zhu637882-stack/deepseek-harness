@@ -40,18 +40,22 @@ const fourthReference = [
 /** Deterministic external model stand-in; every request still comes from the native loop. */
 class ExampleModel extends LlmAdapter {
   readonly requests: GenerateOptions[] = []
-  constructor(readonly draftMode: boolean | 'first' | 'dialogue' | 'skills' | 'story' | 'assets' = false) { super() }
+  constructor(readonly draftMode: boolean | 'first' | 'dialogue' | 'skills' | 'story' | 'assets' | 'scene' = false) { super() }
 
   async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     const step = this.requests.length
     this.requests.push(options)
-    if (this.draftMode === 'story' || this.draftMode === 'assets') {
-      const calls = this.draftMode === 'assets' ? ['cinematic-director', 'character-asset', 'scene-asset', 'prop-asset'].map(name => ({ name: 'skill', args: { name } })) : [{ name: 'skill', args: { name: 'cinematic-director' } },
+    if (this.draftMode === 'story' || this.draftMode === 'assets' || this.draftMode === 'scene') {
+      const calls = this.draftMode === 'scene' ? [
+        { name: 'skill', args: { name: 'cinematic-director' } },
+        { name: 'skill', args: { name: 'open-film-camera' } },
+        { name: 'qingmu_read_skill_resource', args: { skill: 'open-film-camera', path: 'references/cinematography-design-engine.md', lineCount: 500 } },
+      ] : this.draftMode === 'assets' ? ['cinematic-director', 'character-asset', 'scene-asset', 'prop-asset'].map(name => ({ name: 'skill', args: { name } })) : [{ name: 'skill', args: { name: 'cinematic-director' } },
         { name: 'skill', args: { name: 'open-film-writer' } },
         { name: 'qingmu_read_skill_resource', args: { skill: 'open-film-writer', path: 'references/screenplay-writing-core.md', lineCount: 500 } }]
       const call = calls[step]
       const block = call ? { type: 'tool-call' as const, id: CallId(`story-${step}`), name: call.name, arguments: JSON.stringify(call.args) }
-        : { type: 'text' as const, text: this.draftMode === 'assets' ? '素材设计\n```txt\n{"assets":[{"kind":"prop","name":"桌扇","imagePrompt":"36厘米高的浅绿桌扇，85厘米高的工作台提供尺度对照。"}],"director":{"visualStyle":"写实","tone":"平实","lightingRules":"傍晚窗光","colorPalette":["灰蓝","浅绿"],"cameraGrammar":"随行动推进","performanceRules":"自然反应","characterContinuityRules":"服装和尺度保持一致"}}\n```' : '完整剧本\n```txt\n场景一：修理店·傍晚\n动作：父亲收起工具，女儿扶住门。\n老周：下班了。\n```' }
+        : { type: 'text' as const, text: this.draftMode === 'scene' ? '整场导演设计\n```txt\n' + JSON.stringify({ sourceScriptSha256: 'a'.repeat(64), sceneIndex: 1, shots: [{ title: '邀请进门', narrative: '允许来客接近', visual: '门内望向来客', action: '主人让出通道', durationSec: 6, dialogueLineIds: ['line1'], directorPlan: { cameraMovement: '跟随后停在听者肩后', performance: '观察后轻声邀请', soundPlan: { ambience: '对白中雨声持续' }, continuity: { start: '来客在门外持伞', end: '来客进门仍持伞' }, dialoguePlan: [{ sourceLineId: 'line1', character: '主人', line: '请进。', delivery: '迟疑后低声' }] } }] }) + '\n```' : this.draftMode === 'assets' ? '素材设计\n```txt\n{"assets":[{"kind":"prop","name":"桌扇","imagePrompt":"36厘米高的浅绿桌扇，85厘米高的工作台提供尺度对照。"}],"director":{"visualStyle":"写实","tone":"平实","lightingRules":"傍晚窗光","colorPalette":["灰蓝","浅绿"],"cameraGrammar":"随行动推进","performanceRules":"自然反应","characterContinuityRules":"服装和尺度保持一致"}}\n```' : '完整剧本\n```txt\n场景一：修理店·傍晚\n动作：父亲收起工具，女儿扶住门。\n老周：下班了。\n```' }
       yield { type: 'block-start', index: 0, blockType: block.type }
       yield { type: 'block-end', index: 0, block }
       yield { type: 'finish', reason: { kind: call ? 'tool-calls' : 'stop' } }
@@ -113,7 +117,7 @@ class ExampleModel extends LlmAdapter {
  * @returns the actual composed persona, tools, logged calls/results and next-request method check.
  * @throws if the shipped preset fails to load or the session cannot complete.
  */
-export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'dialogue' | 'skills' | 'story' | 'assets' = false) {
+export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'dialogue' | 'skills' | 'story' | 'assets' | 'scene' = false) {
   const ctx = new Context()
   try {
     const presetRoot = fileURLToPath(new URL('../../qingmu-web/agent-presets/', import.meta.url))
@@ -181,7 +185,7 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'd
       meta: { agentPreset: 'qingmu-director' },
       setup: async agentCtx => void await ctx.agentPresets.mount(agentCtx, 'qingmu-director'),
     })
-    if (draftMode !== 'story' && draftMode !== 'assets') handle.agent.session.append('qingmu-director-context/state', {
+    if (draftMode !== 'story' && draftMode !== 'assets' && draftMode !== 'scene') handle.agent.session.append('qingmu-director-context/state', {
       version: 1, binding: { scope, contextSnapshotSha256 }, proposal: null, transition: 'enter',
     })
     const idle = new Promise<void>((resolve) => {
@@ -189,7 +193,7 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'd
         if (agent === handle.agent && status === 'idle') { dispose(); resolve() }
       })
     })
-    handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: draftMode === 'assets' ? '为当前修理店剧本设计定妆、场景和道具，返回 txt 块中的素材设计 JSON。' : draftMode === 'story' ? '写一场修理店关门的短剧，以 txt 代码块返回完整稿。' : draftMode === 'dialogue'
+    handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: draftMode === 'scene' ? '当前为整场分镜设计，尚未绑定镜头。全剧关系从试探到信任；场景1门口，主人请来客进入，原对白line1：主人：请进。读导演与摄影方法后返回完整导演设计 JSON，来源SHA为' + 'a'.repeat(64) : draftMode === 'assets' ? '为当前修理店剧本设计定妆、场景和道具，返回 txt 块中的素材设计 JSON。' : draftMode === 'story' ? '写一场修理店关门的短剧，以 txt 代码块返回完整稿。' : draftMode === 'dialogue'
       ? '预览把“有人吗？”改成“请问，还有人在吗？”，暂不保存。' : '看看当前镜头，参考导演方法给我建议。' }], source: { kind: 'user' } }))
     await idle
     const ordinary = await ctx.agents.create({ sessionId: SessionId('ordinary-example'),
@@ -198,11 +202,12 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'd
     await ordinary.dispose()
     const result = {
       readiness: readNativeDirectorReadiness(ctx, handle.agent.session), ordinaryReadiness,
-      ...(draftMode && draftMode !== 'dialogue' && draftMode !== 'skills' && draftMode !== 'story' && draftMode !== 'assets' ? { draftProposal: await createDirectorContextRpcHandler(ctx.sessions, {
+      ...(draftMode && draftMode !== 'dialogue' && draftMode !== 'skills' && draftMode !== 'story' && draftMode !== 'assets' && draftMode !== 'scene' ? { draftProposal: await createDirectorContextRpcHandler(ctx.sessions, {
         readDirectorContext: async () => ({ ok: true, context: draftContext as DirectorContextSnapshot }),
       }, { prompt: ctx.qingmuYimengRead, method: ctx.qingmuImagoMethod })(draftMode === 'first' ? 'readNativeFirstDraftProposal' : 'readNativeDraftProposal', {
         sessionId: handle.agent.session.id, scope,
       }, new AbortController().signal) } : {}),
+      ...(draftMode === 'scene' ? { sceneDraft: readStoryDraft(handle.agent.session.events.map(event => ({ event })), -1), cameraInRequest: JSON.stringify(model.requests[3]?.messages).includes('起点、中途和终点') } : {}),
       ...(draftMode === 'assets' ? { assetDraft: readStoryDraft(handle.agent.session.events.map(event => ({ event })), -1) } : {}),
       ...(draftMode === 'story' ? { storyDraft: readStoryDraft(handle.agent.session.events.map(event => ({ event })), -1),
         writingInRequest: JSON.stringify(model.requests[3]?.messages).includes('screenplay-writing-core.md') } : {}),
@@ -236,5 +241,5 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'd
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  console.log(JSON.stringify(await runNativeDirectorExample(process.argv.includes('--assets') ? 'assets' : process.argv.includes('--story') ? 'story' : process.argv.includes('--dialogue') ? 'dialogue' : false), null, 2))
+  console.log(JSON.stringify(await runNativeDirectorExample(process.argv.includes('--scene') ? 'scene' : process.argv.includes('--assets') ? 'assets' : process.argv.includes('--story') ? 'story' : process.argv.includes('--dialogue') ? 'dialogue' : false), null, 2))
 }

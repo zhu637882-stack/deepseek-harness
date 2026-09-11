@@ -73,3 +73,14 @@ it('runs native asset methods and returns an editable design in the same draft c
   expect(design).toMatchObject({ assets: [{ kind: 'prop', name: '桌扇' }] })
   expect({ calls: result.calls, design }).toMatchSnapshot()
 })
+
+it('designs an unbound scene through native director and camera methods with full department output', async () => {
+  const result = await runNativeDirectorExample('scene')
+  expect(result.calls).toEqual(['skill', 'skill', 'qingmu_read_skill_resource'])
+  expect(result.cameraInRequest).toBe(true)
+  const design: unknown = JSON.parse(result.sceneDraft!.script)
+  expect(design).toMatchObject({ sceneIndex: 1, shots: [{ directorPlan: {
+    soundPlan: { ambience: '对白中雨声持续' }, dialoguePlan: [{ delivery: '迟疑后低声' }],
+  } }] })
+  expect({ calls: result.calls, cameraInRequest: result.cameraInRequest, design }).toMatchSnapshot()
+})
