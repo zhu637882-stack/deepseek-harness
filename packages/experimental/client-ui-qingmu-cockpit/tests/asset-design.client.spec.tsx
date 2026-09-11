@@ -83,3 +83,17 @@ it('saves ordered image references and world exceptions before a quotation witho
   } }])
   expect(port.generateAssetImage).not.toHaveBeenCalled()
 })
+
+it('carries resolved creation settings into the native design request before generating images', async () => {
+  const port = setup()
+  const creativeSettings = { visualStyle: { label: '透明水彩', prompt: '透明水彩色层' },
+    stylePack: { palette: ['水彩明度层次'] }, styleAdjustments: ['高饱和金属反射'] }
+  port.readAssetDesign.mockResolvedValue({ ...state, creativeSettings })
+  const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
+    read: vi.fn(async () => ({ text: '', script: '', lastSeq: 0, running: false, finished: false, error: '' })) }
+  render(<NativeAssetDesign {...scope} port={port} storyPort={storyPort} onGenerated={vi.fn()} />)
+  fireEvent.click(await screen.findByRole('button', { name: '根据剧本设计素材' }))
+  await waitFor(() => { expect(storyPort.send).toHaveBeenCalledTimes(1) })
+  expect(storyPort.send.mock.calls[0]).toEqual([expect.any(String), expect.stringContaining(JSON.stringify(creativeSettings))])
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})

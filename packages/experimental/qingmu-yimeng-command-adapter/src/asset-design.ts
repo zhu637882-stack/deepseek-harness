@@ -51,6 +51,7 @@ export interface AssetDesignState extends CreationScope {
   readonly stateSha256: string
   readonly scriptSha256: string
   readonly scriptRevision: number
+  readonly creativeSettings?: YimengCommandJsonObject
   readonly script: YimengCommandJsonObject
   readonly model: string
   readonly retainedSelections?: Readonly<Record<string, readonly string[]>>

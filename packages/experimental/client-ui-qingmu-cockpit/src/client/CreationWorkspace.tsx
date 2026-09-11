@@ -382,6 +382,10 @@ export function TextImportWorkspace({ port, projectId, episodeId, onSaved, onPla
   const editable = draft?.status === 'draft' && state?.draftActive && draft.baseScriptRevision === state.scriptRevision && !savedCurrent
   const pending = local.pending !== undefined
   const scenes = state?.script?.scenes
+  const writingSettings = JSON.stringify({ project: contract?.contract?.project, methods: contract?.contract?.methods,
+    methodUpgrades: contract?.methodUpgrades,
+    visualStyle: options?.visualStyles.find(style => style.id === contract?.contract?.methods.visualStyle.id),
+    stylePack: options?.stylePacks.find(pack => pack.id === contract?.contract?.methods.stylePackId?.id) })
   return <section className={css.workspace} aria-label="剧本导入工作区">
     <details className={css.saved} aria-label="创作设定合同"><summary>本项目创作设定</summary>
       <header><span className={css.eyebrow}>创作设定锁</span><h4>{contract?.configured ? '创作合同已保存' : '创作合同未配置'}</h4></header>
@@ -404,12 +408,18 @@ export function TextImportWorkspace({ port, projectId, episodeId, onSaved, onPla
     <header><span className={css.eyebrow}>第 1 步 · 剧本</span><h3>导入并整理你的剧本</h3>
       <p>粘贴剧本或导入 TXT，检查场景、动作与对白，再保存为本集剧本。</p></header>
     {storyPort && <NativeStoryComposer key={`${projectId}:${episodeId}`} port={storyPort} projectId={projectId} episodeId={episodeId}
-      source={local.text} settings={JSON.stringify({ project: contract?.contract?.project, methods: contract?.contract?.methods,
-        methodUpgrades: contract?.methodUpgrades,
-        visualStyle: options?.visualStyles.find(style => style.id === contract?.contract?.methods.visualStyle.id),
-        stylePack: options?.stylePacks.find(pack => pack.id === contract?.contract?.methods.stylePackId?.id) })}
+      source={local.text} settings={writingSettings}
       disabled={busy || pending || state === undefined || contract === undefined || options === undefined}
       onAdopt={(text) => { update({ ...live.current, text, filename: '青木编剧.txt', rawBase64: undefined }) }} />}
+    {storyPort && <details className={css.saved}><summary>检查剧本的叙事与连续性</summary>
+      <NativeStoryComposer key={`review:${projectId}:${episodeId}`} port={storyPort} projectId={projectId} episodeId={episodeId}
+        source={local.text} settings={writingSettings}
+        disabled={busy || pending || state === undefined || contract === undefined || options === undefined}
+        onAdopt={(text) => { update({ ...live.current, text, filename: '青木剧本复核.txt', rawBase64: undefined }) }}
+        purpose={{ key: 'story-review', title: '剧本复核', description: '从当前正文重新检查故事、世界设定和动作衔接，给出可比较的修订稿。采用后才会替换下方文字。',
+          action: '复核并提出修订稿', adopt: '采用修订到剧本文字', adopted: '修订稿已放入剧本文字。检查后可解析保存。',
+          prompt: `复核青木当前整集剧本，项目 ${projectId}，剧集 ${episodeId}。实际读取 cinematic-director 和 open-film-writer 及必要参考。仅凭本次创作原点、设定和正文重读，不继承原作者的自审结论。检查人物动机和信息因果、观众能否理解剧情、对白与倾听、年代及明确例外是否兑现、道具持有与空间状态、器具结构及动作前提、声音连续性，以及实际说话和动作能否落入目标时长。创作原点中的明确要求不能被导演的默认偏好取消；无依据的推导应作为建议。允许合理省略、多人对话、文字和复合运镜，不制定通用创作禁令。发现问题直接修订正文，保持已成立的人物和故事；不要只列检查表，不宣称内容已获认可。先简述具体修改和未决问题，再给一份完整可编辑剧本放在一个 txt 代码块，每行以“场景一：地点·时间”“动作：具体行动”“姓名：台词”组织；正文包含理解剧情必需的事实，正文外说明不得与它矛盾。保存由本页采用和解析流程处理。\n创作原点：${contract?.sourceText ?? ''}\n当前创作设定：${writingSettings}\n本次待复核正文：\n${local.text}` }} />
+    </details>}
     <div className={css.columns}>
       <div className={css.editor}>
         <label htmlFor="qingmu-script-text">剧本文字<textarea id="qingmu-script-text" value={local.text} maxLength={64000} disabled={busy || pending}

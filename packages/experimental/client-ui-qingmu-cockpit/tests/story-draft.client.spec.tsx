@@ -41,3 +41,17 @@ it('does not send twice after an uncertain response or expose another project ca
   fireEvent.click(screen.getByRole('button', { name: '读取原创作结果' }))
   expect(port.send).toHaveBeenCalledTimes(1)
 })
+
+it('keeps a screenplay review separate from the original writer request and result', async () => {
+  localStorage.setItem('qingmu.story-session.v1:p:e', JSON.stringify({ sessionId: 'session-writer', baseline: 1, submitted: true }))
+  const port = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
+    read: vi.fn(async () => readStoryDraft([], -1)) }
+  render(<NativeStoryComposer port={port} projectId="p" episodeId="e" source="当前正文" settings="{}" disabled={false} onAdopt={vi.fn()}
+    purpose={{ key: 'story-review', title: '剧本复核', description: '复核正文', prompt: '原点和当前正文', action: '复核', adopt: '采用修订', adopted: '已放入文字' }} />)
+  expect(port.read).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '复核' }))
+  await waitFor(() => { expect(port.send).toHaveBeenCalledTimes(1) })
+  expect(port.send.mock.calls[0]).toEqual([expect.not.stringMatching(/^session-writer$/), expect.stringContaining('原点和当前正文')])
+  expect(localStorage.getItem('qingmu.story-session.v1:p:e')).toContain('session-writer')
+  expect(localStorage.getItem('qingmu.story-review-session.v1:p:e')).not.toContain('session-writer')
+})

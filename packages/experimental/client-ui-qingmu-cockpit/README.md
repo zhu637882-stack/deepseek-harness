@@ -287,3 +287,7 @@ claim to separate music, infer dialogue ducking or repair room acoustics. Origin
 prior film versions remain available. Both manual UI and native director use the same scoped API.
 
 Native asset cards preserve script facts, director inferences and explicit world exceptions. Each image keeps its relevant design basis, view and up to nine ordered project references with exact hashes and reuse instructions; optional regions use original-image pixels. Wan editing receives those image bytes and instructions through the existing task queue. A changed source invalidates the quote. Updating a description retains selected images and flags them for comparison; generating a candidate never replaces them. Authored scene views and requested text are preserved, and overlong requests fail without truncation. Reference previews and quotation do not upload or generate media.
+
+Asset authoring receives the current project medium, resolved style pack and effective director methods before it writes image descriptions. The source hash includes these settings, so changed settings invalidate an unsaved design rather than being appended after an incompatible design has been written.
+
+The screenplay page offers an optional continuity revision in a separate native session. It reads the current draft and original creative intent without inheriting the writer’s self-audit, returns an editable full screenplay, and adopts only into the text editor. Its own request is recoverable and does not overwrite the canonical script.
