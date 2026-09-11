@@ -17,7 +17,7 @@ import { findNativeFirstDraftInput, firstDraftSource, readNativeFirstDraftInput 
 import { dialogueInputView, dialoguePreviewView, findNativeDialogueInput, previewNativeDialogueEdit, readNativeDialogueInput } from './native-dialogue.ts'
 import { stageDialogueEdit, findStagedDialogue, commitStagedDialogue, dialogueContinuation } from './dialogue-command.ts'
 import { prepareDialogueVideo } from './dialogue-video.ts'
-import { retainNativeDialogueReceipt, toolValues } from './native-draft.ts'
+import { retainNativeToolReceipt, toolValues } from './native-draft.ts'
 import { registerReferenceVideoTools } from './reference-video-tools.ts'
 import { registerDirectorPlanTools } from './director-plan-tools.ts'
 
@@ -203,7 +203,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         exactArgs(args, [])
         const input = await readDialogueInput(exec)
         if (!exec.agent) throw new Error('A native director session is required.')
-        return boundedJson(retainNativeDialogueReceipt(exec.agent.session, exec.callId, 'qingmu_read_dialogue',
+        return boundedJson(retainNativeToolReceipt(exec.agent.session, exec.callId, 'qingmu_read_dialogue',
           boundedJson(input, maxOutputBytes), dialogueInputView(input)), maxOutputBytes)
       },
     }))
@@ -238,7 +238,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         if ((await readDialogueInput(exec)).receiptId !== input.receiptId) throw new Error('输入已变化，请重新判断修改范围。')
         const staged = await stageDialogueEdit(input, { lineId: args.lineId, before: args.before, after: args.after },
           ctx.qingmuYimengCommand, exec.agent.session.id, exec.signal)
-        const output = boundedJson(retainNativeDialogueReceipt(exec.agent.session, exec.callId, 'qingmu_stage_dialogue_edit',
+        const output = boundedJson(retainNativeToolReceipt(exec.agent.session, exec.callId, 'qingmu_stage_dialogue_edit',
           boundedJson(staged, maxOutputBytes), { ...staged, preview: dialoguePreviewView(staged.preview) }), maxOutputBytes)
         exec.agent.session.append('qingmu-director-dialogue/state', { scope: staged.scope,
           before: args.before, after: args.after, affectedShots: staged.preview.affectedShots,

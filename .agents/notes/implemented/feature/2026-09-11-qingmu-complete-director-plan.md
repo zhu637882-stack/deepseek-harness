@@ -14,6 +14,8 @@ The native director tools read the complete planning response and patch creative
 
 ## Alternatives considered
 
+Complete planning data is retained in the existing session receipt event, while the model receives the full selected-shot design and bound context without duplicate episode planning copies. This keeps ordinary multi-shot episodes below the tool-result spill limit without weakening source checks. The receipt becomes usable only after its matching successful view is logged; session replay preserves that pairing. The shipped preset regression includes the actual spill policy and an episode larger than its inline limit.
+
 **Another design store** would split project truth. **Prompt-only edits** leave the canonical design unchanged. **A fixed list of creative fields** discards future specialist output. The existing planning operation owns persistence and concurrency.
 
 ## Consequences

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { CallId, createToolResultMessage } from '@deepseek-ai/dsh-llm'
-import { retainNativeDialogueReceipt, toolValues } from '../src/native-draft.ts'
+import { retainNativeToolReceipt, toolValues } from '../src/native-draft.ts'
 
 const tool = 'qingmu_read_dialogue'
 const callId = CallId('read-1')
@@ -10,7 +10,7 @@ const full = { receiptId: 'input-1', source: { script: { text: '完整剧本'.re
 function pending() {
   const session = Session.create(SessionId('receipt-owner'))
   session.append('tool/call', { turn: 0, step: 0, callId, name: tool, arguments: '{}' })
-  const visible = retainNativeDialogueReceipt(session, callId, tool, full, { receiptId: full.receiptId, editableLines: ['有人吗？'] })
+  const visible = retainNativeToolReceipt(session, callId, tool, full, { receiptId: full.receiptId, editableLines: ['有人吗？'] })
   return { session, visible }
 }
 
@@ -45,7 +45,7 @@ describe('session-owned full dialogue receipts', () => {
 
   it('refuses oversized model views before retaining a receipt', () => {
     const session = Session.create(SessionId('too-large'))
-    expect(() => retainNativeDialogueReceipt(session, callId, tool, full, { text: '中'.repeat(16000) })).toThrow('未截断')
+    expect(() => retainNativeToolReceipt(session, callId, tool, full, { text: '中'.repeat(16000) })).toThrow('未截断')
     expect(session.events.some(e => e.type === 'qingmu-director-dialogue/receipt')).toBe(false)
   })
 })

@@ -4,7 +4,7 @@ import type { JsonValue, Session } from '@deepseek-ai/dsh-session'
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { DirectorContextSnapshot, ScenePlanningState, ScenePlanningResult, YimengCommandJsonObject } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter'
-import { digest, toolValues } from './native-draft.ts'
+import { digest, retainNativeToolReceipt, toolValues } from './native-draft.ts'
 import { assertNativeTurnTarget } from './native-prompt-target.ts'
 import type { DirectorContextBindingState } from './types.ts'
 
@@ -107,10 +107,18 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
       if (!response.ok) throw new Error(`导演设计读取失败：${response.error.message}`)
       const planning = response.value as ScenePlanningState
       if (digest(planning.storyboard) !== digest(current.context.storyboard) || planning.scriptRevision !== current.context.script.revision || planning.scriptSha256 !== current.context.script.sha256) throw new Error('读取期间剧本或分镜已变化，请重新读取。')
-      if (!planning.frameRequirements?.some(shot => shot.id === scope.shotId)) throw new Error('当前镜头未在分镜中找到。')
+      const selectedShot = planning.frameRequirements?.find(shot => shot.id === scope.shotId)
+      if (!selectedShot) throw new Error('当前镜头未在分镜中找到。')
       const source = { scope, context: current.context, planning }
-      return ports.boundedJson({ schema: 'qingmu.native-director-plan.v1', receiptId: digest(source), ...source,
-        guidance: 'Save creative fields with qingmu_save_director_plan. The tool preserves the image prompt, script identities and provenance. Explicit empty values clear decisions; omitted fields stay. Script dialogue text changes use the dialogue edit tools. Speakers, actions, camera moves and overlaps follow the script and director, with no fixed one-speaker rule.', providerCalls: 0 })
+      const input = { schema: 'qingmu.native-director-plan.v1', receiptId: digest(source), ...source,
+        guidance: 'Save creative fields with qingmu_save_director_plan. The tool preserves the image prompt, script identities and provenance. Explicit empty values clear decisions; omitted fields stay. Script dialogue text changes use the dialogue edit tools. Speakers, actions, camera moves and overlaps follow the script and director, with no fixed one-speaker rule.', providerCalls: 0 }
+      const { schema, projectId, episodeId, scriptRevision, scriptSha256, storyboard } = planning
+      return ports.boundedJson(retainNativeToolReceipt(current.session, exec.callId, 'qingmu_read_director_plan',
+        ports.boundedJson(input), { ...input,
+          planning: { schema, projectId, episodeId, scriptRevision, scriptSha256, storyboard,
+            frameRequirements: [selectedShot] },
+          coverage: 'Complete selected-shot design and bound script, cast, scene, style and adjacent-shot context. Other planning copies are retained in the session receipt, not repeated here.',
+        }))
     },
   }))
   ctx.tools.register(defineTool({

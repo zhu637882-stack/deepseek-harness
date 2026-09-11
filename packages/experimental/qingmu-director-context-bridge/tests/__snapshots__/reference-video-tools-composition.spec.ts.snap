@@ -18,3 +18,51 @@ exports[`reads, previews and saves through the shipped YAML preset and real adap
   },
 }
 `;
+
+exports[`saves a selected design from an episode larger than the real inline result limit without losing its receipt 1`] = `
+{
+  "coverage": "Complete selected-shot design and bound script, cast, scene, style and adjacent-shot context. Other planning copies are retained in the session receipt, not repeated here.",
+  "directorPlan": {
+    "cameraMovement": "镜头不要停。
+先推近，再横移。",
+    "continuity": {
+      "acoustics": "Room reflections and street bed continue beneath both speakers.",
+      "blocking": "Walk around the table via the free aisle; keep one fan.",
+    },
+    "dialoguePlan": [
+      {
+        "character": "甲",
+        "line": "嗯。",
+      },
+      {
+        "character": "乙",
+        "line": "我在听。",
+      },
+    ],
+    "lighting": "Window key stays on the same world side after the reverse angle.",
+    "narrative": "The listener understands the concealed loss only after the pause.",
+    "newMethod": {
+      "beats": [
+        "试探",
+        "回应",
+      ],
+    },
+    "performance": "先迟疑，再试探，不默认点头",
+    "soundColumns": {
+      "ambient": "窗外轻雨",
+      "dialogue": "低声，保留吸气",
+    },
+  },
+  "readScope": {
+    "episodeId": "episode-a",
+    "projectId": "p",
+    "sceneId": "scene-a",
+    "shotId": "f",
+  },
+  "saved": {
+    "mediaGenerated": false,
+    "providerCalls": 0,
+    "schema": "qingmu.native-director-plan-saved.v1",
+  },
+}
+`;

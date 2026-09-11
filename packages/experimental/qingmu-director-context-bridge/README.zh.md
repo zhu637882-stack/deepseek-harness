@@ -5,6 +5,8 @@
 
 [English](README.md) | 中文
 
+导演设计读取将完整规划响应保存在已有会话回执中，向模型返回当前镜头的全部创作字段及绑定的剧本、场景、角色、风格和相邻镜头上下文，不重复发送整集规划副本。使用回执需要匹配且成功的工具结果；失败、截断或被修改的视图不能授权保存。当前镜头视图仍超过内联容量时明确报错，不丢弃创作字段。
+
 这个私有实验包把一个 DSh Session 精确绑定到一个易梦 `project / episode / scene / shot` 及其规范化 `contextSnapshotSha256`。绑定使用仅日志、整值快照的 Session 事件，所以进程停止再启动后，可以从原 Session 日志恢复同一身份，不建立第二套数据库或账本。
 
 预设作用域中的 `./skill-resources` 插件按清单路径读取创作参考、子技能、引擎和模板，返回来源提交、上游与适配后哈希和明确分页。文件变更、未登记路径、目录外符号链接及超大页均拒绝返回，不截断内容。原生 `skill` 负责技能入口读取。资料作为工具结果进入会话，不写项目或调用生成模型；调用方沿 `nextLine` 读完所需资料。
@@ -102,3 +104,9 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 - 使用相同 Writer/Core 路径，设置 `QINGMU_FULL_HOST_BROWSER=1` 并通过 Vitest 运行 `tests/native-first-draft-host.spec.ts`，验证随包完整 Host 和构建客户端。它使用真实服务和脚本化模型输出，覆盖原生传输、采用/编辑/保存/Ready/刷新及旧对象拒绝。runtime 和驾驶舱工件在一次性目录构建，与实际服务字节核对，共享安装包不改动。合成 Ready 选择不是人工内容签收、生产启用、真实模型创作质量或生成。
 - 旧回放建议仍由 `checkDirectorProposalFreshness` 检查漂移；原生提示词建议使用其已记录的读取回执和只读接口。
 - 原生工具不启用真实 DeepSeek 路由、费用或生产 canary；可选的专属素材连接只允许显式 DashScope 临时上传。
+
+## 整片声音执行
+
+`qingmu_read_working_cut` 读取当前集剪辑、已导入音源及保留版本。`qingmu_save_working_cut` 使用已记录的读取回执，将镜头、独立声音片段及声音设计保存到 Writer 剪辑版本。可选 `render: true` 只排入本地 FFmpeg 任务。工具保留作用域、乐观版本与重试身份，不推断音源已获批准，并纳入原生就绪检查。声音方法包含剪辑后配乐、连续环境声、声学视点及整片听审。缺失音源须从交付界面导入；这些工具不能虚构音源、分离原生混合音轨或生成付费音乐。
+
+[免密钥整片组合示例](tests/reference-video-tools-composition.spec.ts) 使用随包 YAML 预设、原生 Agent 循环、真实读取与命令适配器，以及脚本化的 Writer HTTP 和模型响应。它演示跨镜环境声的读取、保存和回读，不渲染或调用供应商生成。

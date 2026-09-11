@@ -134,11 +134,11 @@ export function toolValues(session: Pick<Session, 'events'>, name: string | read
  * @param view Task-relevant content, not a second editable source.
  * @returns Model-facing JSON with its full-input identity.
  */
-export function retainNativeDialogueReceipt(session: Session, callId: string, toolName: string,
+export function retainNativeToolReceipt(session: Session, callId: string, toolName: string,
   value: JsonValue, view: Record<string, unknown>) {
   const visible = { ...view, nativeReceiptSha256: digest(value) }
   if (Buffer.byteLength(JSON.stringify(visible), 'utf8') > 48000) {
-    throw new Error('本次台词的导演上下文过大，未截断输入或提交修改。请缩小到单个镜头。')
+    throw new Error('本次导演上下文过大，未截断输入或提交修改。请缩小到单个镜头。')
   }
   session.append('qingmu-director-dialogue/receipt', { callId, toolName, value, visibleSha256: digest(visible) })
   return visible

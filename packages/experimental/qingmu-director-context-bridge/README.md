@@ -5,6 +5,8 @@ The native asset workspace designs and edits characters, scenes and props from t
 
 English | [中文](README.zh.md)
 
+The director-plan read retains the complete planning response in the existing session receipt and returns the selected shot's full creative fields with its bound screenplay, scene, cast, style and adjacent-shot context. Duplicate episode planning copies stay out of the model view. A matching successful tool result is required to use the receipt; failed, truncated or altered views cannot authorize a save. A selected-shot view exceeding the inline allowance fails explicitly without dropping creative fields.
+
 This private experimental package binds one DSh session to one exact Yimeng `project / episode / scene / shot` and its normalized `contextSnapshotSha256`. The binding is a log-only, whole-value session event, so a restarted session rebuilds the same identity without a second database or ledger.
 
 The preset-scoped `./skill-resources` plugin reads packaged creative references, sub-skills, engines and templates by manifest path. It returns repository revision, upstream and adapted hashes, and explicit line pagination; changed files, unlisted paths, external symlinks and oversized pages fail without partial results. Native `skill` owns entry-point loading. Resource reads add durable tool results but no project writes or provider calls; the caller follows `nextLine` to read a complete resource.
@@ -106,15 +108,6 @@ The opt-in `tests/native-first-draft-connected.spec.ts` connects the shipped nat
 
 ## Whole-film sound execution
 
-`qingmu_read_working_cut` reads the current episode cut, imported audio sources and retained versions.
-`qingmu_save_working_cut` consumes a logged read receipt and saves clips, independent audio cues and
-sound design to the Writer working-cut revision. Optional `render: true` queues only local FFmpeg.
-The tools preserve scope, optimistic revision and retry identity, never infer source approval, and
-are included in native readiness. The sound method explains post-edit music, continuous ambience,
-acoustic perspective and full-cut listening. Missing audio must be imported through the delivery UI;
-these tools cannot invent sources, separate native mixed audio, or generate paid music.
+`qingmu_read_working_cut` reads the current episode cut, imported audio sources and retained versions. `qingmu_save_working_cut` consumes a logged read receipt and saves clips, independent audio cues and sound design to the Writer working-cut revision. Optional `render: true` queues only local FFmpeg. The tools preserve scope, optimistic revision and retry identity, never infer source approval, and are included in native readiness. The sound method explains post-edit music, continuous ambience, acoustic perspective and full-cut listening. Missing audio must be imported through the delivery UI; these tools cannot invent sources, separate native mixed audio, or generate paid music.
 
-The keyless whole-cut composition example runs in
-`tests/reference-video-tools-composition.spec.ts`: shipped YAML preset, native agent loop, actual
-read/command adapters, scripted Writer HTTP and model responses. It demonstrates read, save and
-readback of a scene-spanning ambience cue without rendering or provider generation.
+The [keyless whole-cut composition example](tests/reference-video-tools-composition.spec.ts) uses the shipped YAML preset, native agent loop, actual read/command adapters, scripted Writer HTTP and model responses. It demonstrates read, save and readback of a scene-spanning ambience cue without rendering or provider generation.

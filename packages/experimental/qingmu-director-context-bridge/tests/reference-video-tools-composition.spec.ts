@@ -1,5 +1,8 @@
 /** Shipped YAML preset + agent loop + real adapters; only Writer HTTP and model responses are scripted. */
 import { createHash } from 'node:crypto'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -18,6 +21,8 @@ import Skills from '@deepseek-ai/dsh-skill'
 import * as SkillFilesystem from '@deepseek-ai/dsh-skill-filesystem'
 import * as ToolSkill from '@deepseek-ai/dsh-tool-skill'
 import * as SkillResources from '../src/skill-resources.ts'
+import * as SpillPolicy from '@deepseek-ai/dsh-spill-policy'
+import SpillLocal from '@deepseek-ai/dsh-spill-local'
 import { createYimengReadHandler } from '../../qingmu-yimeng-read-adapter/src/index.ts'
 import { createYimengCommandHandler } from '../../qingmu-yimeng-command-adapter/src/index.ts'
 import { canonical, request, response, savedDraft } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
@@ -28,7 +33,11 @@ import { createDirectorContextBridge } from '../src/bridge.ts'
 import type { DirectorContextSnapshot } from '../../qingmu-yimeng-command-adapter/src/types.ts'
 
 const contexts: Context[] = []
-afterEach(async () => { for (const ctx of contexts.splice(0)) await ctx.fiber.dispose() })
+const roots: string[] = []
+afterEach(async () => {
+  for (const ctx of contexts.splice(0)) await ctx.fiber.dispose()
+  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
+})
 const scope = { projectId: 'p', episodeId: 'episode-a', sceneId: 'scene-a', shotId: 'f' }
 const sha = (value: unknown) => createHash('sha256').update(canonical(value)).digest('hex')
 const contextBody = {
@@ -60,13 +69,22 @@ const saveArgs = { draft: edit, expectedRevision: 1, expectedFrameSha256: savedD
 
 const initialCut = { schema:'qingmu-working-cut-v1',projectId:'p',episodeId:'episode-a',revision:0,shots:[],cuts:[],
   audioLibrary:[{ assetId:'room',sha256:'b'.repeat(64),duration:30,name:'Room.wav',url:'' }],providerCalls:0,humanApprovalChanged:false }
-function writer() {
+function writer(extraShots = 0) {
   let workingCut: Record<string, unknown> = structuredClone(initialCut)
 
   let saved = structuredClone(savedDraft)
   let directorSource: { sha256: string; prompt: string } | null = null
   let currentContext = structuredClone(context)
   let currentPlanning = structuredClone(planning)
+  if (extraShots > 0) {
+    const shots = [...currentPlanning.frameRequirements, ...Array.from({ length: extraShots }, (_, index) => ({
+      ...planningShots[0]!, id: `other-${index}`, frameNo: index + 2,
+      directorPlan: { choreography: '其他镜头的完整表演与空间调度。'.repeat(400) },
+    }))]
+    currentPlanning = { ...currentPlanning, frameRequirements: shots,
+      canonicalStoryboard: { ...currentPlanning.canonicalStoryboard, shots, shotCount: shots.length } }
+  }
+  const inputReceipt = sha({ scope, context: currentContext, planning: currentPlanning })
   const planReceipts = new Map<string, Record<string, unknown>>()
   let afterPreview: (() => void) | undefined
   let afterSave: (() => void) | undefined
@@ -93,10 +111,12 @@ function writer() {
       }
       if (body.request.expectedStoryboardRevision !== currentPlanning.storyboard.version) return Response.json({ detail: { code: 'planning_storyboard_conflict' } }, { status: 409 })
       const storyboard = { ...currentPlanning.storyboard, id: 'revision-2', version: 2, sourceHash: 'd'.repeat(64) }
+      const shots = currentPlanning.frameRequirements.map(shot => shot.id === scope.shotId
+        ? { ...shot, directorPlan: body.request.directorPlan } : shot)
       currentPlanning = { ...currentPlanning, storyboard,
-        frameRequirements: [{ ...currentPlanning.frameRequirements[0]!, directorPlan: body.request.directorPlan }],
+        frameRequirements: shots,
         canonicalStoryboard: { ...currentPlanning.canonicalStoryboard, revision: 2, sourceHash: storyboard.sourceHash,
-          shots: [{ ...currentPlanning.frameRequirements[0]!, directorPlan: body.request.directorPlan }] } }
+          shots } }
       const prompt = canonical(body.request.directorPlan)
       directorSource = { sha256: sha(prompt), prompt }
       const { contextSnapshotSha256: _hash, ...source } = currentContext
@@ -144,7 +164,7 @@ function writer() {
   })
   const read = createYimengReadHandler({}, { fetch, readToken: () => 'test-only' })
   const command = createYimengCommandHandler({}, { fetch, readToken: () => 'test-only', readYimeng: read })
-  return { fetch, read, command, saved: () => saved, director: () => currentPlanning.frameRequirements[0]!.directorPlan,
+  return { fetch, read, command, inputReceipt, saved: () => saved, director: () => currentPlanning.frameRequirements[0]!.directorPlan,
     afterPreview: (callback: () => void) => { afterPreview = callback },
     afterSave: (callback: () => void) => { afterSave = callback },
     loseSaveResponse: () => { loseSaveResponse = true } }
@@ -169,6 +189,9 @@ async function harness(adapter: MockAdapter, upstream = writer()) {
   await ctx.plugin(SystemPrompt, { persona: '' })
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(Skills)
+  const spillRoot = await mkdtemp(join(tmpdir(), 'qingmu-reference-spill-')); roots.push(spillRoot)
+  await ctx.plugin(SpillLocal, { root: spillRoot })
+  await ctx.plugin(SpillPolicy, { maxInlineBytes: 50000 })
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
   const presets = await ctx.plugin(AgentPresets, { default: 'qingmu-director', roots: [{ path: presetRoot, trust: 'system' }], includeUserRoot: false })
@@ -222,6 +245,31 @@ it('saves a full director plan through the native preset and Writer adapter, the
   expect(JSON.stringify(adapter.requests.at(-1))).toContain('newMethod')
   expect(h.upstream.fetch.mock.calls.filter(([url]) =>
     new URL(url instanceof Request ? url.url : url).pathname.endsWith('/scene-planning/commands'))).toHaveLength(1)
+})
+
+it('saves a selected design from an episode larger than the real inline result limit without losing its receipt', async () => {
+  const upstream = writer(8)
+  const adapter = new MockAdapter([
+    toolCallResponse('large-read', 'qingmu_read_director_plan', {}),
+    toolCallResponse('large-save', 'qingmu_save_director_plan', { receiptId: upstream.inputReceipt, directorPlan: design }),
+    toolCallResponse('large-reread', 'qingmu_read_director_plan', {}),
+    textResponse('完整导演设计已保存，未生成媒体。'),
+  ])
+  const h = await harness(adapter, upstream); await h.run(true)
+  for (const id of ['large-read', 'large-save', 'large-reread']) expect(result(h.agent, id).error, result(h.agent, id).text).toBe(false)
+  const visible = JSON.parse(result(h.agent, 'large-read').text)
+  expect(Buffer.byteLength(result(h.agent, 'large-read').text)).toBeLessThan(48000)
+  expect(visible.planning.frameRequirements.map((shot: { id: string }) => shot.id)).toEqual(['f'])
+  const retained = h.agent.session.events.find(event => event.type === 'qingmu-director-dialogue/receipt'
+    && event.data.callId === 'large-read')
+  expect(Buffer.byteLength(JSON.stringify(retained))).toBeGreaterThan(50000)
+  expect(h.upstream.director()).toEqual(design)
+  const saved = JSON.parse(result(h.agent, 'large-save').text)
+  const reread = JSON.parse(result(h.agent, 'large-reread').text)
+  expect({ coverage: visible.coverage, readScope: visible.scope,
+    saved: { schema: saved.schema, providerCalls: saved.providerCalls, mediaGenerated: saved.mediaGenerated },
+    directorPlan: reread.planning.frameRequirements[0].directorPlan,
+  }).toMatchSnapshot()
 })
 
 it('recovers an uncertain director save with the identical command and never posts twice', async () => {
