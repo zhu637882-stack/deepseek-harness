@@ -1,5 +1,7 @@
 # Qingmu OS production cockpit
 
+The project library shows saved media covers and separates active, archived and all projects. Owner-editable projects can be renamed, archived and restored through the same Writer metadata service. Archiving retains episodes and assets, and does not cancel generation or revoke editing. Reload reads the saved status; a failed save retains the name draft and reports the error.
+
 Native character designs now include an explicit voice audition quotation, generation and original-task recovery through the existing audio queue. Materialized previews become reusable audio references. The shooting page opens the precise-reference video workspace from its Generate Video action; first-frame operations retain their existing entry. These actions do not imply creative approval.
 
 The native asset workspace designs and edits characters, scenes and props from the saved screenplay. Owner-scoped save, exact image quotation, explicit generation and task recovery share the existing Writer image queue and budget. The director bible and original prompt reach the image request; image generation does not imply adoption. The native `model-tools-keyless.ts --assets` example reads the shipped director and three asset skills and returns an editable design.

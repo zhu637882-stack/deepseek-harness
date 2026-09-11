@@ -617,6 +617,7 @@ export interface QingmuYimengReadPort {
   productionUnits(request: YimengProductionUnitsRequest, signal?: AbortSignal): Promise<YimengProductionUnitsResponse>
   health(signal?: AbortSignal): Promise<YimengHealth>
   projects(request: YimengProjectsRequest, signal?: AbortSignal): Promise<YimengProjectsResponse>
+  updateProject(request: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ProjectUpdateRequest, signal?: AbortSignal): Promise<JsonRecord>
   episodes(request: YimengEpisodesRequest, signal?: AbortSignal): Promise<YimengEpisodesResponse>
   elementProfile(request: YimengElementProfileRequest, signal?: AbortSignal): Promise<YimengElementProfileResponse>
   referenceCandidates(request: YimengReferenceCandidatesRequest, signal?: AbortSignal): Promise<YimengReferenceCandidatesResponse>

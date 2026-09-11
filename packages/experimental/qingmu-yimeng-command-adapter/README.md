@@ -1,5 +1,7 @@
 # Qingmu Yimeng command adapter
 
+`updateProject` changes an existing project's display name or active/archived state through the owner-checked Writer PATCH route. The adapter restricts fields and checks the returned project and saved values. It neither creates media nor alters the creation contract; project-list reads recover the saved state after reload.
+
 Native character designs now include an explicit voice audition quotation, generation and original-task recovery through the existing audio queue. Materialized previews become reusable audio references. The shooting page opens the precise-reference video workspace from its Generate Video action; first-frame operations retain their existing entry. These actions do not imply creative approval.
 
 The native asset workspace designs and edits characters, scenes and props from the saved screenplay. Owner-scoped save, exact image quotation, explicit generation and task recovery share the existing Writer image queue and budget. The director bible and original prompt reach the image request; image generation does not imply adoption. The native `model-tools-keyless.ts --assets` example reads the shipped director and three asset skills and returns an editable design.

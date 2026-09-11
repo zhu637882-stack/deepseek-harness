@@ -979,6 +979,10 @@ export function QingmuCockpit({
         <div className={css.body}><main aria-label={creating ? '新建项目' : projectsOpen ? '我的项目' : `青木 · ${creativeStepLabel(step)}`}>
           {projectsOpen ? <ProjectLibrary projects={projects} currentProjectId={projectId} loading={loading}
             onOpen={(id) => { void chooseProject(id) }}
+            onUpdate={async (request) => {
+              const result = await port.updateProject(request)
+              setProjects(previous => previous.map(project => project.id === request.projectId ? { ...project, ...result } : project))
+            }}
             onCreate={() => { setCreationFromLibrary(true); setProjectsOpen(false); setCreating(true) }} />
             : creating || (!loading && projects.length === 0 && !error)
               ? <CreateProjectWorkspace port={port} onCreated={async (result) => { await refresh(result); setCreating(false); setTab('overview') }} onCancel={projects.length ? () => { setCreating(false); setProjectsOpen(creationFromLibrary) } : undefined} />

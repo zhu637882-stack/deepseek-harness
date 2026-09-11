@@ -4,6 +4,7 @@ import { prepareReferenceVideoReview } from './reference-video-review.ts'
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { prepareCreationCommand, prepareCreationOptionsRead } from './creation.ts'
 import { prepareAssetDesign } from './asset-design.ts'
+import { prepareProjectUpdate } from './project-management.ts'
 import { prepareWorkingCut } from './working-cut.ts'
 import { prepareScenePlanning } from './scene-planning.ts'
 import { prepareLocalReferenceCandidate } from './local-reference-candidate.ts'
@@ -3002,7 +3003,7 @@ interface FetchJsonSuccess {
 type FetchJsonResult = FetchJsonSuccess | RpcResult<never>
 
 interface FetchJsonRequest {
-  readonly method: 'GET' | 'POST'
+  readonly method: 'GET' | 'POST' | 'PATCH'
   readonly body?: string
   readonly idempotencyKey?: string
   readonly maxResponseBytes?: number
@@ -5893,6 +5894,11 @@ export function createYimengCommandHandler(
           ...(endpoint === 'readLocalReferenceCandidateContent' ? { maxResponseBytes: MAX_LOCAL_REFERENCE_JSON_BYTES } : {}),
         }
         normalize = prepared.normalize
+      } else if (endpoint === 'updateProject') {
+        const prepared = prepareProjectUpdate(payload, stageArtifactHelpers)
+        path = prepared.path
+        requestInit = { method: 'PATCH', body: serializeBody(prepared.body) }
+        normalize = prepared.normalize
       } else if (['readCreativeContract', 'initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)) {
         const prepared = prepareCreationCommand(endpoint, payload, stageArtifactHelpers)
         path = prepared.path
@@ -6265,6 +6271,7 @@ export function createYimengCommandHandler(
         || endpoint === 'recoverReworkRoute'
         || endpoint === 'probeReworkRouteAuthority'
       const requiresCredentialReflectionGuard = isStageArtifactCommand
+        || endpoint === 'updateProject'
         || ['readWorkingCut', 'renderWorkingCut', 'saveWorkingCut', 'uploadWorkingCutAudio'].includes(endpoint)
         || ['readAssetDesign', 'saveAssetDesign', 'quoteAssetImage', 'generateAssetImage', 'readAssetImageRuns', 'quoteAssetVoice', 'generateAssetVoice', 'readAssetVoiceRuns'].includes(endpoint)
         || ['readScenePlanning', 'saveScenePlanning', 'recoverScenePlanning'].includes(endpoint)

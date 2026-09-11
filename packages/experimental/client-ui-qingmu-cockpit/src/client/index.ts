@@ -254,6 +254,7 @@ export function apply(ctx: ClientContext): void {
     recoverProductionUnitBinding: (request, signal) => command<YimengProductionUnitRecovery>('recoverProductionUnitBinding', request, signal),
     health: signal => read<YimengHealth>('health', {}, signal),
     projects: (request, signal) => read<YimengProjectsResponse>('projects', request, signal),
+    updateProject: (request, signal) => command('updateProject', request, signal),
     episodes: (request, signal) => read<YimengEpisodesResponse>('episodes', request, signal),
     elementProfile: (request, signal) => read<YimengElementProfileResponse>('elementProfile', request, signal),
     referenceCandidates: (request, signal) =>

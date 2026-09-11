@@ -6,6 +6,8 @@ export type {
   TextImportReadRequest, TextImportRequest, TextImportLine, TextImportDraft, TextImportState,
   TextImportCorrection, TextImportConfirmationRequest, TextImportConfirmation,
 } from './creation.ts'
+/** Existing project metadata edits, without media or creation mutations. */
+export type { ProjectUpdateRequest } from './project-management.ts'
 /** Browser-safe planning values; no runtime Host imports. */
 export type { PlanningShot, PlanningBase, PlanningOperation, AutomaticPlanningShot, AutomaticPlanningOperation, PlannedFrameRequirementsOperation, FrameRequirementsOperation, AnyPlanningOperation, ScenePlanningRequest, PlanningRevision, CanonicalStoryboard, PlanningSource, PlanningScene, AutomaticPlanningScene, ScenePlanningScene, ScenePlanningState, ImportedScenePlanningResult, AutomaticScenePlanningResult, PlannedFrameRequirementsResult, ScenePlanningResult } from './scene-planning.ts'
 /** Browser-safe paid advisory projections; no claim, credential, or Provider payload. */
@@ -3038,6 +3040,7 @@ export interface YimengReworkRouteAuthorityProbe {
 
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
+  readonly updateProject: YimengCommandJsonObject
   readonly readWorkingCut: import('./working-cut.ts').WorkingCutState
   readonly renderWorkingCut: import('./working-cut.ts').WorkingCutState
   readonly saveWorkingCut: import('./working-cut.ts').WorkingCutState

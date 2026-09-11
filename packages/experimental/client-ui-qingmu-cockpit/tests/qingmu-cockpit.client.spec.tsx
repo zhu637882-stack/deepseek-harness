@@ -668,7 +668,8 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
       throw new Error('Reference-video draft save uses a separate fixture')
     }),
     queueProductionTake: vi.fn(async () => { throw new Error('Production Take uses a separate fixture') }),
-    readCreationOptions: vi.fn(async () => { throw new Error('Creation options use a separate fixture') }),
+    readCreationOptions: vi.fn<QingmuYimengPort['readCreationOptions']>(async () => ({ schema: 'jason.qingmu-creation-options.v1',
+      textVersions: [], visualStyles: [], stylePacks: [], directorSkills: [] })),
     readCreativeContract: vi.fn<QingmuYimengPort['readCreativeContract']>(async request => ({ schema: 'jason.qingmu-creative-contract-state.v1' as const,
       projectId: request.projectId, configured: false, locked: false, revision: null, sha256: null,
       contract: null, sourceText: null, message: '创作合同未配置' })),
@@ -692,6 +693,7 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     saveScenePlanning: vi.fn(async () => { throw new Error('Planning uses a separate fixture') }),
     recoverScenePlanning: vi.fn(async () => { throw new Error('Planning uses a separate fixture') }),
     initializeProject: vi.fn(async () => { throw new Error('Creation uses a separate fixture') }),
+    updateProject: vi.fn(async () => { throw new Error('Project management uses a separate fixture') }),
     recoverProjectInitialization: vi.fn(async () => { throw new Error('Creation uses a separate fixture') }),
     readTextImport: vi.fn(async (request: TextImportReadRequest) => ({
       schema: 'jason.qingmu-text-import-state.v1' as const,
