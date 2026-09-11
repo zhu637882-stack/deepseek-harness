@@ -24,6 +24,8 @@ export interface AssetDesignItem {
   readonly name: string
   readonly description?: string
   readonly imagePrompt: string
+  /** Entity appearance/structure, independent of the current image view or edit. */
+  readonly visualIdentity?: string
   readonly voiceIdentity?: string
   readonly designBasis?: string
   readonly view?: string

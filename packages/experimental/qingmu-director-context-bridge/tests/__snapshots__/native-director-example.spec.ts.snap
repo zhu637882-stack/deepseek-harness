@@ -133,9 +133,10 @@ exports[`runs native asset methods and returns an editable design in the same dr
   "design": {
     "assets": [
       {
-        "imagePrompt": "36厘米高的浅绿桌扇，85厘米高的工作台提供尺度对照。",
+        "imagePrompt": "生成背面视角，85厘米高的工作台提供尺度对照。",
         "kind": "prop",
         "name": "桌扇",
+        "visualIdentity": "36厘米高的浅绿桌扇，电源线从后壳底部引出。",
       },
     ],
     "director": {

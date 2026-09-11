@@ -99,6 +99,32 @@ it('carries resolved creation settings into the native design request before gen
   expect(storyPort.send.mock.calls[0]).toEqual([expect.any(String), expect.stringContaining('保留当前未保存的服装设计')])
   expect(storyPort.send.mock.calls[0]).toEqual([expect.any(String), expect.stringContaining('无人空场不等于空房')])
   expect(storyPort.send.mock.calls[0]).toEqual([expect.any(String), expect.stringContaining('由导演决定信息密度与留白')])
+  expect(storyPort.send.mock.calls[0]).toEqual([expect.any(String), expect.stringContaining('visualIdentity 记录主体完整外观')])
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
+
+it('keeps the entity description separate from an imported image edit and restores both', async () => {
+  const port = setup()
+  const view = render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  expect((await screen.findByLabelText('主体完整设定') as HTMLTextAreaElement).value).toBe('真人定妆照')
+  fireEvent.change(screen.getByLabelText('主体完整设定'), { target: { value: '成年男子，灰蓝夹克配暗红毛衣' } })
+  const imported = { ...state.design!, assets: [{ kind: 'actor', name: '父亲', imagePrompt: '改为背面视角' }] }
+  fireEvent.change(screen.getByLabelText('素材设计数据'), { target: { value: JSON.stringify(imported) } })
+  fireEvent.click(screen.getByRole('button', { name: '载入设计' }))
+  expect((screen.getByLabelText('主体完整设定') as HTMLTextAreaElement).value).toBe('成年男子，灰蓝夹克配暗红毛衣')
+  expect((screen.getByLabelText('画面描述') as HTMLTextAreaElement).value).toBe('改为背面视角')
+  const saved = { ...state, design: { ...state.design!, assets: [{ ...state.design!.assets[0]!,
+    visualIdentity: '成年男子，灰蓝夹克配暗红毛衣', imagePrompt: '改为背面视角' }] } }
+  port.saveAssetDesign.mockResolvedValue(saved)
+  fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
+  await waitFor(() => { expect(port.saveAssetDesign).toHaveBeenCalledTimes(1) })
+  expect(port.saveAssetDesign.mock.calls[0]).toMatchObject([{ design: { assets: [{
+    visualIdentity: '成年男子，灰蓝夹克配暗红毛衣', imagePrompt: '改为背面视角',
+  }] } }])
+  view.unmount(); port.readAssetDesign.mockResolvedValue(saved)
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  expect((await screen.findByLabelText('主体完整设定') as HTMLTextAreaElement).value).toBe('成年男子，灰蓝夹克配暗红毛衣')
+  expect((screen.getByLabelText('画面描述') as HTMLTextAreaElement).value).toBe('改为背面视角')
   expect(port.generateAssetImage).not.toHaveBeenCalled()
 })
 

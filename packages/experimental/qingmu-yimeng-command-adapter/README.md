@@ -1,5 +1,7 @@
 # Qingmu Yimeng command adapter
 
+Asset cards keep `visualIdentity` (complete entity appearance, structure and layout) separate from `imagePrompt` (the current image or edit request). Image edits preserve the identity used by later scene design. Legacy reads retain their saved description; legacy saves without the new field preserve an existing entity. An explicit identity edit retains selected media and invalidates unsent quotations. Both descriptions reach the image request when they differ.
+
 `updateProject` changes an existing project's display name or active/archived state through the owner-checked Writer PATCH route. The adapter restricts fields and checks the returned project and saved values. It neither creates media nor alters the creation contract; project-list reads recover the saved state after reload.
 
 Native character designs now include an explicit voice audition quotation, generation and original-task recovery through the existing audio queue. Materialized previews become reusable audio references. The shooting page opens the precise-reference video workspace from its Generate Video action; first-frame operations retain their existing entry. These actions do not imply creative approval.

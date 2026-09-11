@@ -1,5 +1,7 @@
 # Qingmu OS production cockpit
 
+Asset cards keep `visualIdentity` (complete entity appearance, structure and layout) separate from `imagePrompt` (the current image or edit request). Image edits preserve the identity used by later scene design. Legacy reads retain their saved description; legacy saves without the new field preserve an existing entity. An explicit identity edit retains selected media and invalidates unsent quotations. Both descriptions reach the image request when they differ.
+
 The native creation entry identifies the current stage and supplies its source. Screenplay, asset and scene drafts do not require a shot binding; bound-shot read/write rules apply only to existing-shot editing. The director method checks actual screenplay action prerequisites, object transfers, device states and visible world exceptions before returning a draft. Duration remains an estimate until measured.
 
 When no official cover exists, visible project cards reuse private, owner-scoped reference reads and label the image as a material preview. Saved creation settings show the chosen style, style pack and director method by name.

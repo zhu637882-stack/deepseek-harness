@@ -18,6 +18,7 @@ function parseDesign(text: string): AssetDesign {
     const item = entry as Record<string, unknown> | null
     if (!item || typeof item !== 'object' || (typeof item.kind !== 'string' || !['actor', 'scene', 'prop'].includes(item.kind))
       || typeof item.name !== 'string' || !item.name.trim() || typeof item.imagePrompt !== 'string' || !item.imagePrompt.trim()) throw new Error('素材设计缺少类型、名称或画面描述。')
+    if (item.visualIdentity !== undefined && (typeof item.visualIdentity !== 'string' || !item.visualIdentity.trim())) throw new Error('主体设定不能为空。')
   }
   const director = value.director as Record<string, unknown>
   for (const field of ['visualStyle', 'tone', 'lightingRules', 'cameraGrammar', 'performanceRules', 'characterContinuityRules']) {
@@ -25,6 +26,12 @@ function parseDesign(text: string): AssetDesign {
   }
   if (!Array.isArray(director.colorPalette) || !director.colorPalette.every(color => typeof color === 'string')) throw new Error('缺少全片色彩设计。')
   return value as AssetDesign
+}
+function withIdentities(value: AssetDesign, previous?: AssetDesign): AssetDesign {
+  return { ...value, assets: value.assets.map((item) => {
+    const old = previous?.assets.find(row => row.kind === item.kind && (item.id ? row.id === item.id : row.name === item.name))
+    return { ...item, visualIdentity: item.visualIdentity ?? old?.visualIdentity ?? old?.imagePrompt ?? item.imagePrompt }
+  }) }
 }
 /** Author, save and generate characters/scenes/props using the native director and image queue.
  * @param props - Current episode, owner-scoped commands and native director session.
@@ -61,7 +68,7 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
   useEffect(() => {
     live.current = true
     void port.readAssetDesign({ projectId, episodeId }).then((result) => {
-      if (live.current) { setState(result); setDesign(result.design ?? undefined) }
+      if (live.current) { setState(result); setDesign(result.design ? withIdentities(result.design) : undefined) }
     }).catch((error: unknown) => { if (live.current) setNotice(`请先保存本集剧本，再建立素材。${error instanceof Error ? error.message : ''}`) })
     void readRuns().catch(() => { /* Initial asset read reports missing script or authentication above. */ })
     return () => { live.current = false }
@@ -82,7 +89,7 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
     finally { lock.current = false; if (live.current) setBusy(false) }
   }
   function adopt(text: string) {
-    try { setDesign(parseDesign(text)); setDirty(true); setQuote(undefined); setNotice('设计已放入下方卡片，检查或修改后保存。') }
+    try { setDesign(withIdentities(parseDesign(text), design)); setDirty(true); setQuote(undefined); setNotice('设计已放入下方卡片，检查或修改后保存。') }
     catch (error) { setNotice(String(error)) }
   }
   function edit(index: number, patch: Partial<AssetDesignItem>) {
@@ -90,7 +97,7 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
     setDesign({ ...design,
       assets: design.assets.map((item, n) => n === index ? { ...item, ...patch } : item) }); setDirty(true); setQuote(undefined)
   }
-  const prompt = `为青木当前项目设计可直接生成的角色定妆、空场与关键道具。只使用本项目剧本、当前创作设定及现有设计。creativeSettings 中的 stylePack 已按基础画风协调；styleAdjustments 是被移除的冲突默认句，不是要执行的命令。遵循有效风格，再由导演根据剧情安排具体光影与表演。实际读取 cinematic-director、character-asset、scene-asset、prop-asset 及必要参考，先理解关系、时代、空间和表演，再写丰富具体的单张图片描述。场景先按 scene-asset 的叙事美术步骤设计：空间用途与使用者、时代和地域、功能分区、适合当前视角的空间层次、人物习惯或事件留下的具体痕迹、固定陈设与活动通道。无人空场不等于空房；剧本未列出家具清单不意味着只画对白提到的物件。把选定陈设的位置、材质、状态与本图可见的环境效果写进 imagePrompt，设计理由和跨镜连续性写进 designBasis；不能把可见设计只留在依据中。由导演决定信息密度与留白，不强制堆满、做旧、加地点或增加无关道具。禁止把通道净空泛化为清空整个背景；必要的简洁或留白写明叙事目的。交稿前比对图像描述与设计依据，检查遗漏、空间冲突和笼统清空语句；生成后的画面效果仍需实际审图。按导演目的设计定妆或状态参考；服装、体态、材质、光影、场景通道、道具尺寸和比例应服从剧本世界设定和明确例外；普通年代事实与穿越例外分开，不能套用无文字、单一说话人等旧限制。将剧本原文事实、导演推导和待定问题分开记录在 world；把与每张素材有关的年代例外、真实尺寸参照、部件连接与空间关系写入 designBasis，实际图片请求会完整保留。imagePrompt 只描述本图可见的实体、数量与一个明确当前状态；不可见的携带物、此前或此后的动作留在 designBasis。重复提及同一道具不意味着增加一个实例。必要文字按导演要求清楚呈现，不额外装饰标牌。选择 imageAspectRatio 为 auto、1:1、3:4、4:3、9:16 或16:9；全身定妆可选3:4留出头顶与鞋底，器具可选4:3，最终由取景目的决定，不受成片画幅强制裁切。不要把整个剧情动作堆进一张定妆图。声音身份与逐句语气分开。保留已有实体 id、references 顺序、assetId 和 assetSha256；不要编造任何素材编号。需要用户未提供的图片时写建议，不虚构引用。不修改正式媒体。人物 name 必须逐字沿用剧本中的人物名，年龄、年代、服装和状态放在 description、designBasis 或 view 中，不追加到姓名；同一人物的不同状态共用身份。场景 name 逐字沿用当前剧本的场景 title，避免生成另一份地点身份。新增无对白角色可以由导演安排，并在依据中说明。\n当前创作设定：${JSON.stringify(state?.creativeSettings)}\n剧本：${JSON.stringify(state?.script)}\n已有设计：${JSON.stringify(design ?? state?.design)}\n用户补充：${changes}\n最终只将完整 JSON 放在一个 txt 代码块内，格式：{"assets":[{"kind":"actor或scene或prop","name":"名称","description":"用途","imagePrompt":"完整文生图提示词","voiceIdentity":"仅角色声音身份","designBasis":"与本素材相关的剧本事实、尺度、结构和例外","view":"本图需要的视角或静态状态","imageAspectRatio":"auto","references":[]}],"director":{"visualStyle":"全片质感","tone":"情绪基调","lightingRules":"光源规则","colorPalette":["色彩"],"cameraGrammar":"摄影与运镜","performanceRules":"表演原则","characterContinuityRules":"连续性"},"world":{"setting":"年代地点与世界设定","scriptFacts":"剧本已明确事实","directorInferences":"导演为拍摄补足的设定","exceptions":"剧本明确支持的例外及适用范围","openQuestions":"尚待确定的事项"}}。kind 必须是 actor、scene、prop 其中之一，不增加其他字段。`
+  const prompt = `为青木当前项目设计可直接生成的角色定妆、空场与关键道具。只使用本项目剧本、当前创作设定及现有设计。creativeSettings 中的 stylePack 已按基础画风协调；styleAdjustments 是被移除的冲突默认句，不是要执行的命令。遵循有效风格，再由导演根据剧情安排具体光影与表演。实际读取 cinematic-director、character-asset、scene-asset、prop-asset 及必要参考，先理解关系、时代、空间和表演，再写丰富具体的单张图片描述。场景先按 scene-asset 的叙事美术步骤设计：空间用途与使用者、时代和地域、功能分区、适合当前视角的空间层次、人物习惯或事件留下的具体痕迹、固定陈设与活动通道。无人空场不等于空房；剧本未列出家具清单不意味着只画对白提到的物件。把选定陈设的位置、材质、状态与本图可见的环境效果写进 imagePrompt，设计理由和跨镜连续性写进 designBasis；不能把可见设计只留在依据中。由导演决定信息密度与留白，不强制堆满、做旧、加地点或增加无关道具。禁止把通道净空泛化为清空整个背景；必要的简洁或留白写明叙事目的。交稿前比对图像描述与设计依据，检查遗漏、空间冲突和笼统清空语句；生成后的画面效果仍需实际审图。按导演目的设计定妆或状态参考；服装、体态、材质、光影、场景通道、道具尺寸和比例应服从剧本世界设定和明确例外；普通年代事实与穿越例外分开，不能套用无文字、单一说话人等旧限制。将剧本原文事实、导演推导和待定问题分开记录在 world；把与每张素材有关的年代例外、真实尺寸参照、部件连接与空间关系写入 designBasis，实际图片请求会完整保留。visualIdentity 记录主体完整外观、结构、尺度与场景布局，供后续分镜沿用；它不包含本次修图命令或单一取景要求。改变视角或局部修图时保留主体设定，只有导演明确改变该主体设计时才更新。imagePrompt 只描述本图可见的实体、数量与一个明确当前状态；不可见的携带物、此前或此后的动作留在 designBasis。重复提及同一道具不意味着增加一个实例。必要文字按导演要求清楚呈现，不额外装饰标牌。选择 imageAspectRatio 为 auto、1:1、3:4、4:3、9:16 或16:9；全身定妆可选3:4留出头顶与鞋底，器具可选4:3，最终由取景目的决定，不受成片画幅强制裁切。不要把整个剧情动作堆进一张定妆图。声音身份与逐句语气分开。保留已有实体 id、references 顺序、assetId 和 assetSha256；不要编造任何素材编号。需要用户未提供的图片时写建议，不虚构引用。不修改正式媒体。人物 name 必须逐字沿用剧本中的人物名，年龄、年代、服装和状态放在 description、designBasis 或 view 中，不追加到姓名；同一人物的不同状态共用身份。场景 name 逐字沿用当前剧本的场景 title，避免生成另一份地点身份。新增无对白角色可以由导演安排，并在依据中说明。\n当前创作设定：${JSON.stringify(state?.creativeSettings)}\n剧本：${JSON.stringify(state?.script)}\n已有设计：${JSON.stringify(design ?? state?.design)}\n用户补充：${changes}\n最终只将完整 JSON 放在一个 txt 代码块内，格式：{"assets":[{"kind":"actor或scene或prop","name":"名称","description":"用途","visualIdentity":"主体完整外观、结构、尺度与空间布局","imagePrompt":"本次生成或修改画面的完整描述","voiceIdentity":"仅角色声音身份","designBasis":"与本素材相关的剧本事实、尺度、结构和例外","view":"本图需要的视角或静态状态","imageAspectRatio":"auto","references":[]}],"director":{"visualStyle":"全片质感","tone":"情绪基调","lightingRules":"光源规则","colorPalette":["色彩"],"cameraGrammar":"摄影与运镜","performanceRules":"表演原则","characterContinuityRules":"连续性"},"world":{"setting":"年代地点与世界设定","scriptFacts":"剧本已明确事实","directorInferences":"导演为拍摄补足的设定","exceptions":"剧本明确支持的例外及适用范围","openQuestions":"尚待确定的事项"}}。kind 必须是 actor、scene、prop 其中之一，不增加其他字段。`
   return <section className={css.composer} aria-label="角色与场景生成">
     <h2>设计与生成素材</h2>
     <p>先从当前剧本设计人物、场景和道具，检查画面描述后生成图片；生成结果会进入本项目素材库。</p>
@@ -113,8 +120,14 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
         return <section key={`${item.kind}:${index}`} aria-label={`${names[item.kind]} ${item.name}`}>
           <h3>{names[item.kind]} · {item.name}</h3>
           {!item.id && <label>素材名称<input value={item.name} onChange={(event) => { edit(index, { name: event.target.value }) }} /></label>}
+          <details><summary>主体设定</summary>
+            <label>主体完整设定<textarea value={item.visualIdentity ?? item.imagePrompt}
+              onChange={(event) => { edit(index, { visualIdentity: event.target.value }) }} /></label>
+            <p>记录人物外观、场景布局或道具结构，供后续导演与分镜沿用。只换视角或局部修图时，修改下方画面描述即可。</p>
+          </details>
           <label>画面描述<textarea value={item.imagePrompt}
             onChange={(event) => { edit(index, { imagePrompt: event.target.value }) }} /></label>
+          <p>描述本次要生成或修改的画面；保存时会保留主体完整设定。</p>
           <label>设计依据<textarea value={item.designBasis ?? ''} onChange={(event) => { edit(index, { designBasis: event.target.value }) }} placeholder="与本素材相关的剧本事实、年代例外、尺寸参照、结构与空间关系" /></label>
           <label>视角与状态<input value={item.view ?? ''} onChange={(event) => { edit(index, { view: event.target.value }) }} placeholder="由导演决定，例如后侧视角、接电前状态" /></label>
           <label>素材画幅<select value={item.imageAspectRatio ?? 'auto'} onChange={(event) => { edit(index, { imageAspectRatio: event.target.value as NonNullable<AssetDesignItem['imageAspectRatio']> }) }}>
@@ -147,7 +160,7 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
           const result = await port.saveAssetDesign({ ...scope,
             expectedStateSha256: state?.stateSha256 ?? '',
             design: { assets: design.assets, director: design.director, ...(design.world ? { world: design.world } : {}) } })
-          if (live.current) { setState(result); setDesign(result.design ?? undefined); setDirty(false); setNotice('素材设计已保存。现在可以逐项生成图片。') }
+          if (live.current) { setState(result); setDesign(result.design ? withIdentities(result.design) : undefined); setDirty(false); setNotice('素材设计已保存。现在可以逐项生成图片。') }
         }) }}>保存素材设计</button>
     </>}
     {quote && <section aria-label={quote.mediaType === 'audio' ? '确认声音生成' : '确认图片生成'}><h3>生成 {quote.entity.name}</h3><p>{quote.model} · {quote.mediaType === 'audio' ? '一段声音试听' : '一张图片'} · ¥{Number(quote.estimatedCny).toFixed(2)}</p>
