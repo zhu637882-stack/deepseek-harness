@@ -192,3 +192,5 @@ Native asset cards preserve script facts, director inferences and explicit world
 Asset authoring receives the current project medium, resolved style pack and effective director methods before it writes image descriptions. The source hash includes these settings, so changed settings invalidate an unsaved design rather than being appended after an incompatible design has been written.
 
 Imported scene planning now supports continuation across all script scenes. Each scene retains its source and receipt; appended shots share the latest episode revision. The UI restores the selected scene and allows switching after edits are saved.
+
+Scene planning preserves fractional shot durations, action timings and creative measurements. Its RFC 8785 request encoding matches Writer for both save and recovery, including UTF-16 key ordering; nonfinite values and unsafe integers are rejected before transport.

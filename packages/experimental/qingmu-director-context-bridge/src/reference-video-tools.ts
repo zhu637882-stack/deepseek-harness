@@ -6,7 +6,7 @@ import type {
   ReferenceVideoAssetsResponse, ReferenceVideoDraftResponse,
   ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
-import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
+import { parseReferenceVideoRequest } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter'
 import { assertNativeTurnTarget } from './native-prompt-target.ts'
 import type { DirectorContextBindingState } from './types.ts'
@@ -40,8 +40,8 @@ function requestFor(current: BoundRead, draft: JsonValue): ReferenceVideoPreview
   if (draft === null || typeof draft !== 'object' || Array.isArray(draft)) throw new Error('draft must be an object.')
   exactKeys(draft, ['bindings', 'promptParts', 'parameters', ...('directorSourceSha256' in draft ? ['directorSourceSha256'] : [])])
   // The Host adapter validates every nested wire field. Scope and model are not model-editable.
-  return { ...draft, projectId: current.state.binding.scope.projectId,
-    frameId: current.state.binding.scope.shotId, model: 'wan3.0-video' } as unknown as ReferenceVideoPreviewRequest
+  return parseReferenceVideoRequest({ ...draft, projectId: current.state.binding.scope.projectId,
+    frameId: current.state.binding.scope.shotId, model: 'wan3.0-video' })
 }
 
 const editableDraft = {
@@ -115,11 +115,13 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
       exactKeys(args, ['draft', 'expectedRevision', 'expectedFrameSha256'])
       const current = await ports.readBoundContext(exec)
       const request = requestFor(current, args.draft)
-      // Compile before the write; the existing save handler enforces source and draft CAS again.
-      const preview = await ctx.qingmuYimengRead('referenceVideoPreview', request, exec.signal)
+      // Draft persistence precedes temporary uploads. Provider preview requires those uploads.
+      const source = await ctx.qingmuYimengRead('referenceVideoDraft', {
+        projectId: request.projectId, frameId: request.frameId,
+      }, exec.signal)
       assertCurrent(current, exec)
-      if (!preview.ok) throw new Error(`Reference draft cannot be saved: ${preview.error.message}`)
-      if (!(preview.value as ReferenceVideoPreviewResponse).directorSourceAligned) {
+      if (!source.ok) throw new Error(`Reference draft cannot be saved: ${source.error.message}`)
+      if (request.directorSourceSha256 !== (source.value as ReferenceVideoDraftResponse).directorSource?.sha256) {
         throw new Error('Read the latest directorSource and reconcile the full prompt before saving through the director tool. The existing draft remains editable.')
       }
       const { projectId, ...body } = request
@@ -134,7 +136,7 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
         revision: value.draft?.revision, requestSha256: value.draft?.requestSha256,
         providerCalls: 0, generationQueued: false, mediaSelectionChanged: false,
         activeShotChanged: current.session.events.findLast(event => event.type === 'qingmu-director-context/state')?.seq !== current.seq,
-        guidance: 'Saved to the shot identified by scope in this result. Its draft is available from the workspace’s restore action. Existing unsaved text remains local. No candidate was generated or adopted.',
+        guidance: 'Saved to the shot identified by scope in this result. Restore it in the workspace, prepare its reference materials, then preview and quote before generating. Existing unsaved text remains local. No candidate was generated or adopted.',
       })
     },
   }))

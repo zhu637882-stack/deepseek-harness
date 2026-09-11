@@ -3,6 +3,19 @@ import { createHash } from 'node:crypto'
 import type { CreationScope } from './creation.ts'
 import type { YimengCommandJsonObject } from './types.ts'
 
+/** Planning uses Writer's RFC 8785 JSON, including fractional creative timings. */
+function canonicalPlanningJson(value: unknown, fail: Fail): string {
+  if (value === null || typeof value === 'boolean' || typeof value === 'string') return JSON.stringify(value)
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) throw fail('planning number must be finite and lossless')
+    return JSON.stringify(value)
+  }
+  if (Array.isArray(value)) return `[${value.map(item => canonicalPlanningJson(item, fail)).join(',')}]`
+  const record = obj(value, fail)
+  // RFC 8785 sorts UTF-16 code units, including supplementary character keys.
+  return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${canonicalPlanningJson(record[key], fail)}`).join(',')}}`
+}
+
 /** Editable planning values, not prompts or approved content. */
 export interface PlanningShot {
   readonly title: string
@@ -161,7 +174,6 @@ export type ScenePlanningResult = ImportedScenePlanningResult | AutomaticScenePl
 interface Helpers {
   readonly inputError: (message: string) => Error
   readonly responseError: (message: string) => Error
-  readonly canonicalJson: (value: unknown, field: string) => string
 }
 type Fail = Helpers['inputError']
 function obj(value: unknown, fail: Fail): Record<string, unknown> {
@@ -279,7 +291,7 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
       if (r.directorPlan !== undefined) {
         const plan = obj(r.directorPlan, f)
         if (Object.keys(plan).some(key => key.startsWith('_') || ['scenePlanning', 'sourceBinding', 'creativePlanSchema', 'clearedShootingFields', 'runtimeRepairDirectives', 'promptRepairHistory'].includes(key))) throw f('director plan metadata is not editable')
-        if (Buffer.byteLength(helpers.canonicalJson(plan, 'director plan')) > 65536) throw f('director plan too large')
+        if (Buffer.byteLength(canonicalPlanningJson(plan, f)) > 65536) throw f('director plan too large')
       }
       for (const field of ['blocking', 'cameraAngle', 'cameraMovement', 'coveragePlan']) {
         if (r[field] !== undefined && (typeof r[field] !== 'string' || r[field].length > 2000)) throw f('automatic shooting field invalid')
@@ -295,7 +307,7 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
       if (!Array.isArray(r.shots) || r.shots.length < 1 || r.shots.length > 64) throw f('planning shot limit')
       for (const s of r.shots) shot(s, f)
     } else if (r.action === 'edit') { id(r.shotId, f); shot(r.shot, f) } else if (r.action !== 'edit_automatic' && r.action !== 'edit_requirements') throw f('planning action invalid')
-    const encoded = helpers.canonicalJson(r, 'planning request')
+    const encoded = canonicalPlanningJson(r, f)
     if (Buffer.byteLength(encoded) > 98304) throw f('planning payload too large')
     requestSha = createHash('sha256').update(encoded).digest('hex')
     if (recover) path += `/receipt?${new URLSearchParams({ idempotencyKey: key, requestSha256: requestSha }).toString()}`
@@ -331,7 +343,7 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
         if (new Set(indexes).size !== indexes.length || indexes.some(index => !sceneIndexes.has(index))) throw b('planning scene identity mismatch')
         ids(plans.flatMap(p => (p.shots as unknown[]).map(s => obj(s, b).id)), b)
         const legacy = r.planning === null ? null : obj(r.planning, b)
-        if (legacy === null ? plans.length > 0 : !plans.some(p => helpers.canonicalJson(p, 'scene plan') === helpers.canonicalJson(legacy, 'scene plan'))) throw b('planning primary scene mismatch')
+        if (legacy === null ? plans.length > 0 : !plans.some(p => canonicalPlanningJson(p, b) === canonicalPlanningJson(legacy, b))) throw b('planning primary scene mismatch')
       }
       if (r.canonicalStoryboard !== undefined && r.canonicalStoryboard !== null) {
         canonicalStoryboard(r.canonicalStoryboard, b)
@@ -349,7 +361,7 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
         {
           if (r.frameRequirements.length > 0 && r.storyboard === null) throw b('frame requirements revision missing')
           const expected = automatic ? obj(r.canonicalStoryboard, b).shots
-            : plans?.flatMap(p => p.shots as unknown[]) ?? (r.planning === null ? [] : obj(r.planning, b).shots)
+            : plans?.flatMap(p => p.shots) ?? (r.planning === null ? [] : obj(r.planning, b).shots)
           const requiredIds = new Set(r.frameRequirements.map(item => obj(item, b).id))
           if (!Array.isArray(expected) || expected.length !== r.frameRequirements.length
             || expected.some((item, index) => !automatic && plans ? !requiredIds.has(obj(item, b).id)

@@ -4,7 +4,7 @@ exports[`reads, previews and saves through the shipped YAML preset and real adap
 {
   "activeShotChanged": false,
   "generationQueued": false,
-  "guidance": "Saved to the shot identified by scope in this result. Its draft is available from the workspace’s restore action. Existing unsaved text remains local. No candidate was generated or adopted.",
+  "guidance": "Saved to the shot identified by scope in this result. Restore it in the workspace, prepare its reference materials, then preview and quote before generating. Existing unsaved text remains local. No candidate was generated or adopted.",
   "mediaSelectionChanged": false,
   "providerCalls": 0,
   "requestSha256": "10e8c4de70c65a5559a4567d411e1c1e2a61eb7bbaa6a73d3ad6116c1eab01a8",
@@ -23,6 +23,18 @@ exports[`saves a selected design from an episode larger than the real inline res
 {
   "coverage": "Complete selected-shot design and bound script, cast, scene, style and adjacent-shot context. Other planning copies are retained in the session receipt, not repeated here.",
   "directorPlan": {
+    "actionBeats": [
+      {
+        "action": "停顿后抬眼",
+        "endSec": 1.9,
+        "startSec": 0,
+      },
+      {
+        "action": "试探回应",
+        "endSec": 2.5,
+        "startSec": 1.9,
+      },
+    ],
     "cameraMovement": "镜头不要停。
 先推近，再横移。",
     "continuity": {
@@ -63,6 +75,25 @@ exports[`saves a selected design from an episode larger than the real inline res
     "mediaGenerated": false,
     "providerCalls": 0,
     "schema": "qingmu.native-director-plan-saved.v1",
+  },
+}
+`;
+
+exports[`saves local references before upload preparation even when provider preview is unavailable 1`] = `
+{
+  "activeShotChanged": false,
+  "generationQueued": false,
+  "guidance": "Saved to the shot identified by scope in this result. Restore it in the workspace, prepare its reference materials, then preview and quote before generating. Existing unsaved text remains local. No candidate was generated or adopted.",
+  "mediaSelectionChanged": false,
+  "providerCalls": 0,
+  "requestSha256": "10e8c4de70c65a5559a4567d411e1c1e2a61eb7bbaa6a73d3ad6116c1eab01a8",
+  "revision": 2,
+  "schema": "qingmu.native-reference-saved.v1",
+  "scope": {
+    "episodeId": "episode-a",
+    "projectId": "p",
+    "sceneId": "scene-a",
+    "shotId": "f",
   },
 }
 `;

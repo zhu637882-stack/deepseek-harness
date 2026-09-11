@@ -60,6 +60,7 @@ const planning = {
   planning: null, providerCalls: 0, stageStarted: false, approvalGranted: false,
 }
 const design = { narrative: 'The listener understands the concealed loss only after the pause.', lighting: 'Window key stays on the same world side after the reverse angle.', continuity: { blocking: 'Walk around the table via the free aisle; keep one fan.', acoustics: 'Room reflections and street bed continue beneath both speakers.' }, performance: '先迟疑，再试探，不默认点头', cameraMovement: '镜头不要停。\n先推近，再横移。',
+  actionBeats: [{ startSec: 0, endSec: 1.9, action: '停顿后抬眼' }, { startSec: 1.9, endSec: 2.5, action: '试探回应' }],
   dialoguePlan: [{ character: '甲', line: '嗯。' }, { character: '乙', line: '我在听。' }],
   soundColumns: { ambient: '窗外轻雨', dialogue: '低声，保留吸气' }, newMethod: { beats: ['试探', '回应'] } }
 const designReceipt = sha({ scope, context, planning })
@@ -86,14 +87,16 @@ function writer(extraShots = 0) {
   }
   const inputReceipt = sha({ scope, context: currentContext, planning: currentPlanning })
   const planReceipts = new Map<string, Record<string, unknown>>()
-  let afterPreview: (() => void) | undefined
+  let afterDraftRead: (() => void) | undefined
   let afterSave: (() => void) | undefined
   let loseSaveResponse = false
+  let unpreparedMaterials = false
   const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input)
     if (url.pathname.endsWith('/working-cut')) return Response.json(workingCut)
     if (url.pathname.endsWith('/working-cut/save')) {
-      const command = JSON.parse(String(init?.body)) as Record<string, unknown>
+      if (typeof init?.body !== 'string') throw new Error('Expected JSON request body')
+      const command = JSON.parse(init.body) as Record<string, unknown>
       workingCut = { ...initialCut, revision:1,cuts:[{ ...command,version:1,revisionId:'cut-1',status:'NotQueued' }] }
       return Response.json(workingCut)
     }
@@ -133,12 +136,12 @@ function writer(extraShots = 0) {
       items: request.bindings.map(item => ({ id: item.assetId, project_id: 'p',
         asset_type: item.bindingToken === 'voice' ? 'audio' : 'image', role: item.label, sha256: item.assetSha256 })) })
     if (url.pathname.endsWith('/preview')) {
+      if (unpreparedMaterials) return Response.json({ detail: { code: 'reference_video_material_not_prepared' } }, { status: 422 })
       if (typeof init?.body !== 'string') throw new Error('Expected a JSON preview body')
       const input = JSON.parse(init.body) as typeof savedDraft.draft.request
       const prompt = input.promptParts.map(part => 'text' in part ? part.text
         : response.referenceMapping.find(item => item.bindingToken === part.bindingToken)!.alias).join('')
       const body = { ...response.body, input: { ...response.body.input, prompt }, parameters: { ...input.parameters, watermark: false } }
-      afterPreview?.()
       return Response.json({ ...response, body, requestBodySha256: sha(body), directorSource,
         directorSourceAligned: input.directorSourceSha256 === directorSource?.sha256 })
     }
@@ -157,7 +160,7 @@ function writer(extraShots = 0) {
           request: input.request, requestSha256: sha(input.request) } }
         afterSave?.()
         if (loseSaveResponse) throw new Error('connection lost after commit')
-      }
+      } else afterDraftRead?.()
       return Response.json({ ...saved, directorSource })
     }
     throw new Error(`Unexpected Writer request: ${url}`)
@@ -165,8 +168,9 @@ function writer(extraShots = 0) {
   const read = createYimengReadHandler({}, { fetch, readToken: () => 'test-only' })
   const command = createYimengCommandHandler({}, { fetch, readToken: () => 'test-only', readYimeng: read })
   return { fetch, read, command, inputReceipt, saved: () => saved, director: () => currentPlanning.frameRequirements[0]!.directorPlan,
-    afterPreview: (callback: () => void) => { afterPreview = callback },
+    afterDraftRead: (callback: () => void) => { afterDraftRead = callback },
     afterSave: (callback: () => void) => { afterSave = callback },
+    unpreparedMaterials: () => { unpreparedMaterials = true },
     loseSaveResponse: () => { loseSaveResponse = true } }
 }
 
@@ -257,18 +261,22 @@ it('saves a selected design from an episode larger than the real inline result l
   ])
   const h = await harness(adapter, upstream); await h.run(true)
   for (const id of ['large-read', 'large-save', 'large-reread']) expect(result(h.agent, id).error, result(h.agent, id).text).toBe(false)
-  const visible = JSON.parse(result(h.agent, 'large-read').text)
+  const visible = JSON.parse(result(h.agent, 'large-read').text) as {
+    coverage: string
+    scope: typeof scope
+    planning: { frameRequirements: typeof planningShots }
+  }
   expect(Buffer.byteLength(result(h.agent, 'large-read').text)).toBeLessThan(48000)
   expect(visible.planning.frameRequirements.map((shot: { id: string }) => shot.id)).toEqual(['f'])
   const retained = h.agent.session.events.find(event => event.type === 'qingmu-director-dialogue/receipt'
     && event.data.callId === 'large-read')
   expect(Buffer.byteLength(JSON.stringify(retained))).toBeGreaterThan(50000)
   expect(h.upstream.director()).toEqual(design)
-  const saved = JSON.parse(result(h.agent, 'large-save').text)
-  const reread = JSON.parse(result(h.agent, 'large-reread').text)
+  const saved = JSON.parse(result(h.agent, 'large-save').text) as { schema: string; providerCalls: number; mediaGenerated: boolean }
+  const reread = JSON.parse(result(h.agent, 'large-reread').text) as typeof visible
   expect({ coverage: visible.coverage, readScope: visible.scope,
     saved: { schema: saved.schema, providerCalls: saved.providerCalls, mediaGenerated: saved.mediaGenerated },
-    directorPlan: reread.planning.frameRequirements[0].directorPlan,
+    directorPlan: reread.planning.frameRequirements[0]!.directorPlan,
   }).toMatchSnapshot()
 })
 
@@ -297,6 +305,7 @@ it('reads, previews and saves through the shipped YAML preset and real adapters,
   const modelRequest = adapter.requests[0]!
   expect(modelRequest.system).toContain('已有草稿就沿用这份草稿')
   expect(modelRequest.system).toContain('优先走剧本修改流程')
+  expect(modelRequest.system).toContain('本地素材尚未上传或临时链接已过期，不阻止保存')
   for (const name of ['qingmu_read_reference_draft', 'qingmu_preview_reference_draft', 'qingmu_save_reference_draft']) {
     expect(modelRequest.tools?.map(tool => tool.name)).toContain(name)
     expect(modelRequest.system).toContain(name)
@@ -356,14 +365,30 @@ it.each([
   expect(saves(h.upstream)).toHaveLength(0)
 })
 
-it('rejects a shot switch during compilation before dispatching a save', async () => {
+it('rejects a shot switch during source reading before dispatching a save', async () => {
   const h = await harness(new MockAdapter([toolCallResponse('switch', 'qingmu_save_reference_draft', saveArgs), textResponse('镜头已变化。')]))
-  h.upstream.afterPreview(() => h.agent.session.append('qingmu-director-context/state', {
+  h.upstream.afterDraftRead(() => h.agent.session.append('qingmu-director-context/state', {
     version: 1, binding: { scope: { ...scope, shotId: 'other' }, contextSnapshotSha256: context.contextSnapshotSha256 },
     proposal: null, transition: 'enter',
   }))
   await h.run(); expect(result(h.agent, 'switch').error).toBe(true)
   expect(saves(h.upstream)).toHaveLength(0)
+})
+
+it('saves local references before upload preparation even when provider preview is unavailable', async () => {
+  const h = await harness(new MockAdapter([
+    toolCallResponse('unprepared-preview', 'qingmu_preview_reference_draft', { draft: edit }),
+    toolCallResponse('local-save', 'qingmu_save_reference_draft', saveArgs),
+    toolCallResponse('local-reread', 'qingmu_read_reference_draft', { page: 1 }),
+    textResponse('草稿已保存；现在可恢复草稿并准备引用素材。'),
+  ]))
+  h.upstream.unpreparedMaterials(); await h.run()
+  expect(result(h.agent, 'unprepared-preview').error).toBe(true)
+  expect(result(h.agent, 'local-save').error, result(h.agent, 'local-save').text).toBe(false)
+  expect(h.upstream.saved().draft.request).toEqual({ ...edit, frameId: 'f', model: 'wan3.0-video' })
+  expect(saves(h.upstream)).toHaveLength(1)
+  expect(h.upstream.fetch.mock.calls.filter(([url]) => new URL(url instanceof Request ? url.url : url).pathname.endsWith('/preview'))).toHaveLength(1)
+  expect(JSON.parse(result(h.agent, 'local-save').text)).toMatchSnapshot()
 })
 
 it('does not retry a lost save response, and a read recovers the committed version', async () => {
@@ -426,7 +451,9 @@ it('saves scene-spanning sound through the shipped director preset, real loop an
   expect(JSON.parse(result(h.agent,'cut-reread').text)).toMatchObject({ cut:{ cuts:[{ audioCues:cut.audioCues,soundPlan:cut.soundPlan,status:'NotQueued' }] } })
   const writes = h.upstream.fetch.mock.calls.filter(([url,init]) => new URL(url instanceof Request ? url.url : url).pathname.endsWith('/working-cut/save') && init?.method==='POST')
   expect(writes).toHaveLength(1)
-  expect(JSON.parse(String(writes[0]?.[1]?.body))).toMatchObject({ ...cut,expectedRevision:0 })
+  const body = writes[0]?.[1]?.body
+  if (typeof body !== 'string') throw new Error('Expected JSON request body')
+  expect(JSON.parse(body)).toMatchObject({ ...cut,expectedRevision:0 })
   expect(JSON.stringify(adapter.requests.at(-1))).toContain('Room reflections and street ambience')
   expect(JSON.stringify(h.upstream.fetch.mock.calls)).not.toContain('/working-cut/render')
 })

@@ -6,6 +6,8 @@ This private experimental Host plugin is the read-only BFF between Qingmu OS and
 
 ## Reference video previews
 
+The exported `parseReferenceVideoRequest` validates complete editable drafts without network access or rewriting. Native draft saves reuse it before persistence so local references do not require a successful provider preview before upload preparation.
+
 `referenceVideoAssets` projects paginated, hashed image and audio metadata from the authenticated project asset feed. `referenceVideoPreview` forwards a bounded draft with asset IDs, source SHAs, stable reference tokens, literal text and explicit Wan 3 controls to Writer's read-only compiler. The Host verifies returned scope, reference order, text fidelity and request-body SHA before display. No asset selection or Provider submission occurs. Public media reachability and source revalidation at dispatch remain required.
 
 ## PromptIR entity-draft review state

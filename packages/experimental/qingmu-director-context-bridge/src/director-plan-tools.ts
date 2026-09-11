@@ -153,7 +153,7 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
       let result: ScenePlanningResult
       if (recovered.ok) result = recovered.value as ScenePlanningResult
       else {
-        if (recovered.error.message !== 'Yimeng rejected command (HTTP 404: planning_receipt_not_found)') throw new Error('保存结果无法核实，请用相同内容重试；没有新提交。')
+        if (recovered.error.message !== 'Yimeng rejected command (HTTP 404: planning_receipt_not_found)') throw new Error(`保存结果无法核实：${recovered.error.message}；没有新提交。`)
         const current = await ports.readBoundContext(exec)
         assertCurrent(current, exec)
         if (current.context.contextSnapshotSha256 !== input.context.contextSnapshotSha256) throw new Error('导演设计来源已变化，请重新读取并合并修改。')
