@@ -34,7 +34,9 @@ export function NativeSceneDesign({ projectId, episodeId, scene, scriptSha256, r
     return () => { controller.abort() }
   }, [projectId, episodeId, scriptSha256, readAssetDesign, refresh])
   const ready = basis?.scriptSha256 === scriptSha256
+    && (!basis.design || basis.design.sourceScriptSha256 === scriptSha256)
   function adopt(text: string) {
+    if (!ready) throw new Error('当前素材设计与剧本尚未对齐，请先更新创作依据。')
     const parsed: unknown = JSON.parse(text)
     if (!parsed || typeof parsed !== 'object' || !('sourceScriptSha256' in parsed)
       || parsed.sourceScriptSha256 !== scriptSha256 || !('sceneIndex' in parsed)

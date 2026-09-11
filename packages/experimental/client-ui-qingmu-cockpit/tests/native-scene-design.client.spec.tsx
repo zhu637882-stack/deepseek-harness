@@ -47,3 +47,16 @@ it.each([
   expect(port.send).not.toHaveBeenCalled()
   expect(screen.getByRole('button', { name: '采用到分镜卡片' })).toBeTruthy()
 })
+
+it('does not use an asset design authored against an older script', async () => {
+  const port = { prepare: vi.fn(), send: vi.fn(), read: vi.fn() }
+  const oldDesign = { sourceScriptSha256: 'c'.repeat(64), assets: [], director: {
+    visualStyle: '写实', tone: '温暖', lightingRules: '窗光', colorPalette: ['灰'],
+    cameraGrammar: '平视', performanceRules: '自然', characterContinuityRules: '按剧本',
+  } }
+  render(<NativeSceneDesign projectId="p" episodeId="e" scene={scene} scriptSha256={sha}
+    readAssetDesign={vi.fn(async () => ({ ...basis, design: oldDesign }))} storyPort={port} disabled={false} onAdopt={vi.fn()} />)
+  await screen.findByText('素材设计对应的剧本已变化，请先回素材页更新依据。')
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '让导演设计本场分镜' }).disabled).toBe(true)
+  expect(port.send).not.toHaveBeenCalled()
+})

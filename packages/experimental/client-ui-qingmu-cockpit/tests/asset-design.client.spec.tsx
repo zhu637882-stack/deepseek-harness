@@ -99,3 +99,19 @@ it('carries resolved creation settings into the native design request before gen
   expect(storyPort.send.mock.calls[0]).toEqual([expect.any(String), expect.stringContaining('保留当前未保存的服装设计')])
   expect(port.generateAssetImage).not.toHaveBeenCalled()
 })
+
+it('saves independent image framing before requoting and restores it on reopen', async () => {
+  const port = setup()
+  const view = render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  fireEvent.change(await screen.findByLabelText('素材画幅'), { target: { value: '3:4' } })
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '查看生成费用' }).disabled).toBe(true)
+  const saved = { ...state, design: { ...state.design!, assets: [{ ...state.design!.assets[0]!, imageAspectRatio: '3:4' as const }] } }
+  port.saveAssetDesign.mockResolvedValue(saved)
+  fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
+  await waitFor(() => { expect(port.saveAssetDesign).toHaveBeenCalledTimes(1) })
+  expect(port.saveAssetDesign.mock.calls[0]).toMatchObject([{ design: { assets: [{ imageAspectRatio: '3:4' }] } }])
+  view.unmount(); port.readAssetDesign.mockResolvedValue(saved)
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  expect((await screen.findByLabelText('素材画幅') as HTMLSelectElement).value).toBe('3:4')
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})

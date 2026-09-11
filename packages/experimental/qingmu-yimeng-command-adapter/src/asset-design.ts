@@ -27,6 +27,8 @@ export interface AssetDesignItem {
   readonly voiceIdentity?: string
   readonly designBasis?: string
   readonly view?: string
+  /** Auto follows project framing for text-to-image and the last source image for edits. */
+  readonly imageAspectRatio?: 'auto' | '1:1' | '3:4' | '4:3' | '9:16' | '16:9'
   readonly references?: readonly AssetImageReference[]
 }
 /** Shared film choices authored by the director, without inferred media acceptance. */
