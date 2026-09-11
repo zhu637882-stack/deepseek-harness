@@ -13,6 +13,8 @@ This private experimental package binds one DSh session to one exact Yimeng `pro
 
 The preset-scoped `./skill-resources` plugin reads packaged creative references, sub-skills, engines and templates by manifest path. It returns repository revision, upstream and adapted hashes, and explicit line pagination; changed files, unlisted paths, external symlinks and oversized pages fail without partial results. Native `skill` owns entry-point loading. Resource reads add durable tool results but no project writes or provider calls; the caller follows `nextLine` to read a complete resource.
 
+`qingmu_view_reference_image` reads actual pixels for an exact asset ID, SHA256 and catalog page in the bound project. The read adapter supplies a signed local Writer media URL; the model cannot supply a URL or project. The tool checks the original bytes against the asset hash, applies the host attachment limits and decoder, and emits an image with a durable attachment reference in the ordinary tool result. Signed URLs and base64 stay out of the transcript. Missing image capability, unavailable media, a changed selection or invalid bytes produces an explicit error. Inspection neither adopts nor generates media; subsequent vision-model input consumes the normal model allowance. The preset inspects relevant changed references before visual decisions and distinguishes visible facts from unseen geometry or inferred scale.
+
 ## Mount interface
 
 `createDirectorContextBridge(readPort)` exposes `enter`, `clear`, `bindProposal`, `recover`, `current`, and `freshnessRequest`. The read port must use the existing normalized `director-inference/context` adapter path. It must not create a work order, invoke a model, dispatch a Provider, or write Yimeng business state.

@@ -9,6 +9,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import LlmRuntime, { createUserMessage } from '@deepseek-ai/dsh-llm'
+import LocalAttachmentStore from '@deepseek-ai/dsh-attachment-local'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -35,6 +36,7 @@ import type { DirectorContextSnapshot } from '../../qingmu-yimeng-command-adapte
 const contexts: Context[] = []
 const roots: string[] = []
 afterEach(async () => {
+  vi.restoreAllMocks()
   for (const ctx of contexts.splice(0)) await ctx.fiber.dispose()
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
@@ -70,7 +72,7 @@ const saveArgs = { draft: edit, expectedRevision: 1, expectedFrameSha256: savedD
 
 const initialCut = { schema:'qingmu-working-cut-v1',projectId:'p',episodeId:'episode-a',revision:0,shots:[],cuts:[],
   audioLibrary:[{ assetId:'room',sha256:'b'.repeat(64),duration:30,name:'Room.wav',url:'' }],providerCalls:0,humanApprovalChanged:false }
-function writer(extraShots = 0) {
+function writer(extraShots = 0, image?: { sha256: string; url: string }) {
   let workingCut: Record<string, unknown> = structuredClone(initialCut)
 
   let saved = structuredClone(savedDraft)
@@ -134,7 +136,8 @@ function writer(extraShots = 0) {
     }
     if (url.pathname.endsWith('/assets')) return Response.json({ page: 1, page_size: 200, pages: 1,
       items: request.bindings.map(item => ({ id: item.assetId, project_id: 'p',
-        asset_type: item.bindingToken === 'voice' ? 'audio' : 'image', role: item.label, sha256: item.assetSha256 })) })
+        asset_type: item.bindingToken === 'voice' ? 'audio' : 'image', role: item.label, sha256: item.assetSha256,
+        ...(image && item.assetId === 'asset_cafe' ? { sha256: image.sha256, public_url: image.url, preview_media_id: 'media_cafe' } : {}) })) })
     if (url.pathname.endsWith('/preview')) {
       if (unpreparedMaterials) return Response.json({ detail: { code: 'reference_video_material_not_prepared' } }, { status: 422 })
       if (typeof init?.body !== 'string') throw new Error('Expected a JSON preview body')
@@ -174,7 +177,7 @@ function writer(extraShots = 0) {
     loseSaveResponse: () => { loseSaveResponse = true } }
 }
 
-async function harness(adapter: MockAdapter, upstream = writer()) {
+async function harness(adapter: MockAdapter, upstream = writer(), images = false) {
   const presetRoot = fileURLToPath(new URL('../../qingmu-web/agent-presets/', import.meta.url))
   const ctx = new Context(); contexts.push(ctx)
   ctx.baseUrl = pathToFileURL(presetRoot).href + '/'
@@ -189,6 +192,10 @@ async function harness(adapter: MockAdapter, upstream = writer()) {
     throw new Error(`Unexpected Loader import: ${specifier}`)
   } } as unknown as NonNullable<typeof ctx.loader.internal>
   await ctx.plugin(LlmRuntime)
+  if (images) {
+    const imageRoot = await mkdtemp(join(tmpdir(), 'qingmu-reference-images-')); roots.push(imageRoot)
+    await ctx.plugin(LocalAttachmentStore, { dshHome: imageRoot, maxImageBytes: 4096 })
+  }
   await ctx.plugin(SessionStore)
   await ctx.plugin(SystemPrompt, { persona: '' })
   await ctx.plugin(ToolRuntime)
@@ -233,6 +240,92 @@ function saves(upstream: ReturnType<typeof writer>) {
   return upstream.fetch.mock.calls.filter(([url, init]) =>
     new URL(url instanceof Request ? url.url : url).pathname.endsWith('/drafts/f') && init?.method === 'POST')
 }
+
+const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNgZGIGAAAOAAeCcsnOAAAAAElFTkSuQmCC', 'base64')
+const imageSha = createHash('sha256').update(imageBytes).digest('hex')
+const imageUrl = `http://127.0.0.1:8115/api/media/media_cafe?signature=${'e'.repeat(64)}&expires=9999999999`
+const imageArgs = { page: 1, assetId: 'asset_cafe', assetSha256: imageSha }
+function visionAdapter(args: object = imageArgs) {
+  const adapter = new MockAdapter([
+    toolCallResponse('view', 'qingmu_view_reference_image', args),
+    textResponse('已读取图像；可见事实与导演判断分开记录，未选用或生成。'),
+  ])
+  vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'mock', id: 'mock', name: 'mock', inputModalities: ['text', 'image'] })
+  return adapter
+}
+
+it('delivers catalog image pixels through the shipped director preset and persists reconstructible attachments', async () => {
+  const adapter = visionAdapter()
+  const media = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(imageBytes, { headers: { 'content-type': 'image/png' } }))
+  const h = await harness(adapter, writer(0, { sha256: imageSha, url: imageUrl }), true)
+  await h.run(true)
+  expect(result(h.agent, 'view').error, result(h.agent, 'view').text).toBe(false)
+  const entry = h.agent.session.events.find(event => event.type === 'tool/result' && event.data.message.source.callId === 'view')
+  if (entry?.type !== 'tool/result') throw new Error('Missing image result')
+  const content = entry.data.message.content.flatMap(part => part.content)
+  const image = content.find(part => part.type === 'image')
+  if (image?.type !== 'image') throw new Error('Missing model-visible image')
+  const stored = await h.ctx.attachments.readImage(image.attachment)
+  expect(stored.data.byteLength).toBeGreaterThan(0)
+  const visible = JSON.stringify(adapter.requests.at(-1))
+  expect(visible).toContain(image.attachment.attachmentId)
+  expect(visible).not.toContain('signature=')
+  expect(visible).not.toContain(imageBytes.toString('base64'))
+  expect(JSON.stringify(entry)).not.toContain('signature=')
+  expect(media).toHaveBeenCalledOnce()
+  expect(media.mock.calls[0]?.[1]).toMatchObject({ redirect: 'error', credentials: 'omit' })
+  expect(content).toMatchSnapshot()
+})
+
+it.each([
+  ['wrong project asset', { ...imageArgs, assetId: 'asset_from_other_project' }, 'not on this current project'],
+  ['stale version', { ...imageArgs, assetSha256: 'a'.repeat(64) }, 'not on this current project'],
+  ['voice instead of image', { page: 1, assetId: 'asset_voice', assetSha256: 'b'.repeat(64) }, 'not on this current project'],
+  ['arbitrary URL argument', { ...imageArgs, url: imageUrl }, 'Only the declared'],
+])('refuses %s before fetching image bytes', async (_name, args, error) => {
+  const media = vi.spyOn(globalThis, 'fetch')
+  const h = await harness(visionAdapter(args), writer(0, { sha256: imageSha, url: imageUrl }), true)
+  await h.run(true)
+  expect(result(h.agent, 'view').error).toBe(true)
+  expect(result(h.agent, 'view').text).toContain(error)
+  expect(media).not.toHaveBeenCalled()
+})
+
+it.each(['non-vision model', 'no attachment store', 'unverified URL'])('refuses image inspection with %s', async (reason) => {
+  const adapter = visionAdapter()
+  if (reason === 'non-vision model') vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'mock', id: 'mock', name: 'mock', inputModalities: ['text'] })
+  const media = vi.spyOn(globalThis, 'fetch')
+  const h = await harness(adapter, writer(0, { sha256: imageSha, url: reason === 'unverified URL' ? 'https://example.com/image.png' : imageUrl }), reason !== 'no attachment store')
+  await h.run(true)
+  expect(result(h.agent, 'view').error).toBe(true)
+  expect(media).not.toHaveBeenCalled()
+})
+
+it.each([
+  ['different source bytes', () => new Response('changed', { headers: { 'content-type': 'image/png' } }), 'do not match'],
+  ['unsupported media', () => new Response('audio', { headers: { 'content-type': 'audio/wav' } }), 'not a supported raster'],
+  ['large content length', () => new Response(imageBytes, { headers: { 'content-type': 'image/png', 'content-length': '9000' } }), 'byte limit'],
+  ['large chunked body', () => new Response(new Uint8Array(5000), { headers: { 'content-type': 'image/png' } }), 'byte limit'],
+  ['expired link', () => new Response('', { status: 403 }), 'HTTP 403'],
+])('does not project an image from %s', async (_name, response, error) => {
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => response())
+  const h = await harness(visionAdapter(), writer(0, { sha256: imageSha, url: imageUrl }), true)
+  await h.run(true)
+  expect(result(h.agent, 'view').error).toBe(true)
+  expect(result(h.agent, 'view').text).toContain(error)
+  expect(JSON.stringify(h.agent.session.events.filter(event => event.type === 'tool/result'))).not.toContain('"attachmentId"')
+})
+
+it('discards a downloaded image when the bound shot changes during the read', async () => {
+  const h = await harness(visionAdapter(), writer(0, { sha256: imageSha, url: imageUrl }), true)
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+    h.agent.session.append('qingmu-director-context/state', null)
+    return new Response(imageBytes, { headers: { 'content-type': 'image/png' } })
+  })
+  await h.run(true)
+  expect(result(h.agent, 'view').error).toBe(true)
+  expect(JSON.stringify(h.agent.session.events.filter(event => event.type === 'tool/result'))).not.toContain('"attachmentId"')
+})
 
 it('saves a full director plan through the native preset and Writer adapter, then continues the scoped turn', async () => {
   const adapter = new MockAdapter([

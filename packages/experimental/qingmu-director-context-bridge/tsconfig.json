@@ -7,6 +7,8 @@
   "include": ["src"],
   "references": [
     { "path": "../../core/agent" },
+    { "path": "../../attachment/attachment" },
+    { "path": "../../llm/llm" },
     { "path": "../../preset/agent-presets" },
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },

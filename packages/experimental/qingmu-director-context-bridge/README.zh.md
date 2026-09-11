@@ -13,6 +13,8 @@
 
 预设作用域中的 `./skill-resources` 插件按清单路径读取创作参考、子技能、引擎和模板，返回来源提交、上游与适配后哈希和明确分页。文件变更、未登记路径、目录外符号链接及超大页均拒绝返回，不截断内容。原生 `skill` 负责技能入口读取。资料作为工具结果进入会话，不写项目或调用生成模型；调用方沿 `nextLine` 读完所需资料。
 
+`qingmu_view_reference_image` 按绑定项目的素材 ID、SHA256 和目录页码读取真实像素。读取适配器提供签名的本地 Writer 媒体地址，模型不能指定网址或项目。工具核对原始文件哈希，再复用 Host 附件限制与图像解码，将图片及持久附件引用写入普通工具结果；签名地址和 base64 不进入会话正文。模型不支持图片、媒体不可用、选择发生变化或图像无效时明确报错。查看不选用或生成媒体，后续视觉模型输入按正常模型额度计费。预设要求在视觉决策前检查相关且变化的参考图，区分可见事实、不可见结构和推测尺度。
+
 ## 挂载接口
 
 `createDirectorContextBridge(readPort)` 提供 `enter`、`clear`、`bindProposal`、`recover`、`current` 和 `freshnessRequest`。read port 必须复用现有已规范化的 `director-inference/context` adapter 路径，不得创建 work order、调用模型、派发 Provider 或写易梦业务状态。

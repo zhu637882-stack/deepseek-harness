@@ -1,5 +1,25 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`delivers catalog image pixels through the shipped director preset and persists reconstructible attachments 1`] = `
+[
+  {
+    "text": "{"schema":"qingmu.reference-image.v1","scope":{"projectId":"p","episodeId":"episode-a","sceneId":"scene-a","shotId":"f"},"assetId":"asset_cafe","assetSha256":"999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee","label":"参考图片 03","attachment":{"attachmentId":"sha256:999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee","mediaType":"image/png","width":1,"height":1,"bytes":90,"name":"参考图片 03"},"guidance":"Describe visible evidence and uncertainty. A reference view does not establish unseen geometry, exact physical dimensions or creative acceptance.","generationQueued":false,"selectionChanged":false}",
+    "type": "text",
+  },
+  {
+    "attachment": {
+      "attachmentId": "sha256:999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee",
+      "bytes": 90,
+      "height": 1,
+      "mediaType": "image/png",
+      "name": "参考图片 03",
+      "width": 1,
+    },
+    "type": "image",
+  },
+]
+`;
+
 exports[`reads, previews and saves through the shipped YAML preset and real adapters, then exposes the same version to the workspace 1`] = `
 {
   "activeShotChanged": false,

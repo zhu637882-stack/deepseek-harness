@@ -1,6 +1,7 @@
 /** Session-bound edits of the same reference draft used by the director workspace. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { JsonValue, Session } from '@deepseek-ai/dsh-session'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type {
   ReferenceVideoAssetsResponse, ReferenceVideoDraftResponse,
@@ -10,6 +11,7 @@ import { parseReferenceVideoRequest } from '@deepseek-ai/dsh-experimental-qingmu
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter'
 import { assertNativeTurnTarget } from './native-prompt-target.ts'
 import type { DirectorContextBindingState } from './types.ts'
+import { readReferenceImage } from './reference-image.ts'
 
 interface BoundRead {
   session: Session
@@ -55,6 +57,36 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
     schema: { type: 'json' as const },
     render: (_args: unknown, value: JsonValue) => [{ type: 'text' as const, text: JSON.stringify(value) }],
   }
+  ctx.tools.register(defineTool({
+    name: 'qingmu_view_reference_image',
+    description: 'View the actual pixels of one image from the current project asset catalog. Use its exact page, asset ID and SHA from qingmu_read_reference_draft. Inspect relevant scene, costume, prop structure or composition before visual directing decisions. Separate visible observations from inference; viewing does not approve or adopt an asset. No image generation; the active model processes an image input.',
+    parameters: {
+      page: { type: 'integer', required: true, description: 'Catalog page containing the image, starting at 1.' },
+      assetId: { type: 'string', required: true, description: 'Exact image asset ID from the current project catalog.' },
+      assetSha256: { type: 'string', required: true, description: 'Exact SHA256 from that catalog entry.' },
+    },
+    output: { schema: { type: 'json' }, render: (_args, value) => {
+      const image = value as unknown as { attachment: ImageAttachmentRef }
+      return [{ type: 'text', text: JSON.stringify(value) }, { type: 'image', attachment: image.attachment }]
+    } },
+    presentCall: () => ({ card: 'generic', kind: 'read', title: '查看当前项目参考图' }),
+    async execute(args, exec) {
+      exactKeys(args, ['page', 'assetId', 'assetSha256'])
+      const current = await ports.readBoundContext(exec)
+      const scope = current.state.binding.scope
+      const read = await ctx.qingmuYimengRead('referenceVideoAssets', { projectId: scope.projectId, page: args.page }, exec.signal)
+      assertCurrent(current, exec)
+      if (!read.ok) throw new Error(`Reference assets read failed: ${read.error.message}`)
+      const catalog = read.value as ReferenceVideoAssetsResponse
+      const asset = catalog.items.find(item => item.assetId === args.assetId && item.assetSha256 === args.assetSha256)
+      if (!asset || asset.mediaType !== 'reference_image') throw new Error('The selected image and hash are not on this current project catalog page. Read the catalog again.')
+      const attachment = await readReferenceImage(ctx, asset, exec, () => { assertCurrent(current, exec) })
+      return ports.boundedJson({ schema: 'qingmu.reference-image.v1', scope,
+        assetId: asset.assetId, assetSha256: asset.assetSha256, label: asset.label, attachment,
+        guidance: 'Describe visible evidence and uncertainty. A reference view does not establish unseen geometry, exact physical dimensions or creative acceptance.',
+        generationQueued: false, selectionChanged: false })
+    },
+  }))
   ctx.tools.register(defineTool({
     name: 'qingmu_read_reference_draft',
     description: 'Read this shot’s saved reference-video draft and one page of available image/voice metadata. Call before editing reference text or bindings. The draft shares the director workspace’s save/restore path. Names and metadata are not pixel inspection or creative approval. No generation or fee.',
