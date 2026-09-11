@@ -157,7 +157,7 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
         <span>{dirty ? '剪辑与声音设计尚未保存' : '本地合成不调用付费生成模型'}</span></div>
       {state.cuts[0]?.status === 'Failed' && <p role="alert">合成失败：{state.cuts[0].errorCode}。原片仍保留。</p>}
       {latest && <section aria-label="成片播放器"><h3>成片 · 版本 {latest.version}</h3><video controls preload="metadata" src={latest.url} /><a href={`${latest.url}${latest.url.includes('?') ? '&' : '?'}download=true`} download={`青木-成片-v${latest.version}.mp4`} target="_blank" rel="noreferrer">下载 MP4</a></section>}
-      {state.cuts.length > 1 && <details><summary>历史成片 · {state.cuts.length} 版</summary>{state.cuts.map(c => <p key={c.revisionId}>版本 {c.version} · {c.status === 'NotQueued' ? '剪辑草稿' : c.status} {c.url && <a href={c.url} target="_blank" rel="noreferrer">播放 / 下载</a>}</p>)}</details>}
+      {state.cuts.length > 1 && <details><summary>剪辑记录 · {state.cuts.length} 版</summary>{state.cuts.map(c => <p key={c.revisionId}>版本 {c.version} · {c.status === 'NotQueued' ? '剪辑草稿' : c.status === 'Succeeded' ? '已合成' : c.status === 'Failed' ? '合成失败' : '合成中'} {c.url && <a href={c.url} target="_blank" rel="noreferrer">播放 / 下载</a>}</p>)}</details>}
     </>}
   </section>
 }
