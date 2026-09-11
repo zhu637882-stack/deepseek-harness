@@ -1,5 +1,7 @@
 # Qingmu Yimeng command adapter
 
+Project copy commands preview an owner-scoped snapshot, submit one exact copy intent and recover its receipt. The adapter checks source identity, request hash and zero-generation flags. Writer owns identity remapping, current-source conflicts and transactional receipt replay.
+
 The same-origin native video review bridge forwards explicit POST submissions and read-only GET recovery to Writer with the existing browser or native identity. Writer verifies episode ownership and candidate bytes, preserves the generation-bound prompt and deduplicates equivalent audits. Route disposal removes the bridge.
 
 Asset cards keep `visualIdentity` (complete entity appearance, structure and layout) separate from `imagePrompt` (the current image or edit request). Image edits preserve the identity used by later scene design. Legacy reads retain their saved description; legacy saves without the new field preserve an existing entity. An explicit identity edit retains selected media and invalidates unsent quotations. Both descriptions reach the image request when they differ.

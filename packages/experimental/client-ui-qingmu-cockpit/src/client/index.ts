@@ -255,6 +255,8 @@ export function apply(ctx: ClientContext): void {
     health: signal => read<YimengHealth>('health', {}, signal),
     projects: (request, signal) => read<YimengProjectsResponse>('projects', request, signal),
     updateProject: (request, signal) => command('updateProject', request, signal),
+    previewProjectCopy: (request, signal) => command('previewProjectCopy', request, signal),
+    copyProject: (request, signal) => command('copyProject', request, signal),
     episodes: (request, signal) => read<YimengEpisodesResponse>('episodes', request, signal),
     elementProfile: (request, signal) => read<YimengElementProfileResponse>('elementProfile', request, signal),
     referenceCandidates: (request, signal) =>

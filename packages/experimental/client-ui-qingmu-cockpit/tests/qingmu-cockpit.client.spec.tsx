@@ -694,6 +694,8 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     recoverScenePlanning: vi.fn(async () => { throw new Error('Planning uses a separate fixture') }),
     initializeProject: vi.fn(async () => { throw new Error('Creation uses a separate fixture') }),
     updateProject: vi.fn(async () => { throw new Error('Project management uses a separate fixture') }),
+    previewProjectCopy: vi.fn(async () => { throw new Error('Project copy uses a separate fixture') }),
+    copyProject: vi.fn(async () => { throw new Error('Project copy uses a separate fixture') }),
     recoverProjectInitialization: vi.fn(async () => { throw new Error('Creation uses a separate fixture') }),
     readTextImport: vi.fn(async (request: TextImportReadRequest) => ({
       schema: 'jason.qingmu-text-import-state.v1' as const,

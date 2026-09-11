@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`uses the project-library copy action and retains the exact request across a lost response and remount > project-library-copy-preview 1`] = `"<section class="_copyPanel_cd12ea" aria-label="复制项目 夜航"><h2>复制创作内容</h2><p>沿用已保存的剧本、人物、场景、道具、素材和导演设计，创建可独立修改的新版本。</p><p>剪辑、生成任务和审核记录保留在原项目。素材共用已有文件，复制不会调用生成模型。</p><p>2 集 · 18 个镜头 · 6 份素材</p><form><label>副本名称<input value="夜航 · 副本"></label><div class="_actions_cd12ea"><button type="submit">创建独立副本</button><button type="button">关闭</button></div></form></section>"`;

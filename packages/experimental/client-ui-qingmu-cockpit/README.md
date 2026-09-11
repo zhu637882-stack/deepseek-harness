@@ -1,5 +1,7 @@
 # Qingmu OS production cockpit
 
+Project cards offer independent creative copies. The copy panel previews saved episode, shot and asset counts and persists its exact request for recovery after refresh or a lost reply. Copies retain scripts, designs and media references; editing, generation and review history stay in the original project.
+
 The shooting workspace offers sound and picture review for the browsed video candidate. Explicit submission uses the existing Writer audit queue; automatic refresh only reads the original task. Six sound categories retain evidence and uncertain results. Reviews remain advisory and do not select or approve a take.
 
 Asset cards keep `visualIdentity` (complete entity appearance, structure and layout) separate from `imagePrompt` (the current image or edit request). Image edits preserve the identity used by later scene design. Legacy reads retain their saved description; legacy saves without the new field preserve an existing entity. An explicit identity edit retains selected media and invalidates unsent quotations. Both descriptions reach the image request when they differ.

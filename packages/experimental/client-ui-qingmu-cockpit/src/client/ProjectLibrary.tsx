@@ -3,6 +3,8 @@ import type { YimengJsonObject } from '@deepseek-ai/dsh-experimental-qingmu-yime
 import type { ProjectUpdateRequest } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import css from './ProjectLibrary.module.css'
 import { PrivateProjectCover, type ProjectCoverPort } from './PrivateProjectCover.tsx'
+import { ProjectCopyPanel, type ProjectCopyPort } from './ProjectCopyPanel.tsx'
+import type { ProjectCopyResult } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 
 const text = (value: unknown): string => typeof value === 'string' ? value : ''
 
@@ -16,7 +18,7 @@ function ProjectCover({ url, name }: { readonly url: string; readonly name: stri
 }
 
 /** The saved project index stays independent of the currently open episode. */
-export function ProjectLibrary({ projects, currentProjectId, loading, onOpen, onCreate, onUpdate, mediaPort }: {
+export function ProjectLibrary({ projects, currentProjectId, loading, onOpen, onCreate, onUpdate, mediaPort, copyPort, onCopied }: {
   readonly projects: readonly YimengJsonObject[]
   readonly currentProjectId: string
   readonly loading: boolean
@@ -24,12 +26,15 @@ export function ProjectLibrary({ projects, currentProjectId, loading, onOpen, on
   readonly onCreate: () => void
   readonly onUpdate: (request: ProjectUpdateRequest) => Promise<void>
   readonly mediaPort?: ProjectCoverPort
+  readonly copyPort?: ProjectCopyPort
+  readonly onCopied?: (result: ProjectCopyResult) => Promise<void>
 }) {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<'active' | 'archived' | 'all'>('active')
   const [editing, setEditing] = useState(''), [nameDraft, setNameDraft] = useState('')
   const [saving, setSaving] = useState(''), [notice, setNotice] = useState(''), [error, setError] = useState('')
   const lock = useRef(false)
+  const [copying, setCopying] = useState<{ id: string; name: string }>()
   const matches = projects.filter(project => (filter === 'all' || (text(project.status) === 'archived') === (filter === 'archived'))
     && `${text(project.name)} ${text(project.theme)}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
   const save = async (request: ProjectUpdateRequest) => {
@@ -50,6 +55,8 @@ export function ProjectLibrary({ projects, currentProjectId, loading, onOpen, on
     <div className={css.filters} role="group" aria-label="项目状态">{([['active', '创作中'], ['archived', '已归档'], ['all', '全部']] as const).map(([id, label]) =>
       <button key={id} type="button" aria-pressed={filter === id} onClick={() => { setFilter(id); setEditing('') }} disabled={saving !== ''}>{label}</button>)}</div>
     {notice && <p role="status">{notice}</p>}{error && <p role="alert" className={css.error}>{error}</p>}
+    {copying && copyPort && onCopied && <ProjectCopyPanel key={copying.id} projectId={copying.id} name={copying.name} port={copyPort}
+      onClose={() => { setCopying(undefined) }} onCreated={onCopied} />}
     {!loading && matches.length === 0 && <p role="status">{search ? '没有找到匹配的项目。换个关键词试试。' : filter === 'archived' ? '暂无归档项目。' : projects.length ? '这里暂时没有项目，可查看“全部”或新建作品。' : '从第一个故事开始，建立你的作品库。'}</p>}
     <div className={css.grid}>{matches.map((project) => {
       const id = text(project.id)
@@ -79,6 +86,7 @@ export function ProjectLibrary({ projects, currentProjectId, loading, onOpen, on
             <button type="submit" disabled={loading || saving !== '' || !nameDraft.trim() || Array.from(nameDraft.trim()).length > 200}>{saving === id ? '保存中…' : '保存名称'}</button>
             <button type="button" disabled={saving !== ''} onClick={() => { setEditing('') }}>取消</button>
           </form> : <><button type="button" disabled={loading || saving !== ''} aria-label={`重命名 ${name}`} onClick={() => { setEditing(id); setNameDraft(name); setError('') }}>重命名</button>
+            {copyPort && onCopied && <button type="button" disabled={loading || saving !== '' || copying !== undefined} aria-label={`复制 ${name}`} onClick={() => { setCopying({ id, name }) }}>复制项目</button>}
             <button type="button" disabled={loading || saving !== ''} aria-label={`${archived ? '恢复' : '归档'} ${name}`} onClick={() => { void save({ projectId: id, status: archived ? 'active' : 'archived' }) }}>{saving === id ? '保存中…' : archived ? '恢复项目' : '归档'}</button></>}
         </div>}
         </div>

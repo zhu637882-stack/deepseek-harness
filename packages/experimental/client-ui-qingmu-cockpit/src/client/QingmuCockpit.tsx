@@ -990,6 +990,10 @@ export function QingmuCockpit({
         {error && <div role="alert" className={css.error}><p>当前项目暂时无法更新。已有素材保留，请刷新重试。</p><details><summary>开发日志</summary>{error}</details></div>}
         <div className={css.body}><main aria-label={creating ? '新建项目' : projectsOpen ? '我的项目' : `青木 · ${creativeStepLabel(step)}`}>
           {projectsOpen ? <ProjectLibrary projects={projects} currentProjectId={projectId} loading={loading} mediaPort={port}
+            copyPort={port} onCopied={async (result) => {
+              await refresh({ projectId: result.projectId, episodeId: result.episodeIds[0] ?? '' })
+              setProjectsOpen(false); changeStep('story')
+            }}
             onOpen={(id) => { void chooseProject(id) }}
             onUpdate={async (request) => {
               const result = await port.updateProject(request)

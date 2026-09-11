@@ -8,6 +8,7 @@ export type {
 } from './creation.ts'
 /** Existing project metadata edits, without media or creation mutations. */
 export type { ProjectUpdateRequest } from './project-management.ts'
+export type { ProjectCopyPreview, ProjectCopyRequest, ProjectCopyResult } from './project-copy.ts'
 /** Browser-safe planning values; no runtime Host imports. */
 export type { PlanningShot, PlanningBase, PlanningOperation, AutomaticPlanningShot, AutomaticPlanningOperation, PlannedFrameRequirementsOperation, FrameRequirementsOperation, AnyPlanningOperation, ScenePlanningRequest, PlanningRevision, CanonicalStoryboard, PlanningSource, PlanningScene, AutomaticPlanningScene, ScenePlanningScene, ScenePlanningState, ImportedScenePlanningResult, AutomaticScenePlanningResult, PlannedFrameRequirementsResult, ScenePlanningResult } from './scene-planning.ts'
 /** Browser-safe paid advisory projections; no claim, credential, or Provider payload. */
@@ -3040,6 +3041,9 @@ export interface YimengReworkRouteAuthorityProbe {
 
 /** Result values exposed by the private command channel. */
 export interface YimengCommandEndpointMap {
+  readonly previewProjectCopy: import('./project-copy.ts').ProjectCopyPreview
+  readonly copyProject: import('./project-copy.ts').ProjectCopyResult
+  readonly recoverProjectCopy: import('./project-copy.ts').ProjectCopyResult
   readonly updateProject: YimengCommandJsonObject
   readonly readWorkingCut: import('./working-cut.ts').WorkingCutState
   readonly renderWorkingCut: import('./working-cut.ts').WorkingCutState

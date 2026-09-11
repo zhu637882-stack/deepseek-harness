@@ -12,6 +12,8 @@ Creators need to find and organize earlier works while starting new ones. The li
 
 The existing command adapter forwards bounded project name and archive updates to Writer's owner-checked PATCH route. The library displays saved covers, filters active and archived projects, and retains a failed edit draft. Writer keeps project contents and creative settings unchanged.
 
+The copy action creates an independent creative project from a current source snapshot. Writer reassigns entity and frame identities, rebuilds planning origins, and retains current script, design and media selections. Media bytes retain their original provenance. One Store transaction commits the project and copy receipt together; browser persistence and receipt replay recover the same operation after an ambiguous response. Editing, generation jobs and review history remain in the source project.
+
 ## Alternatives considered
 
 **Browser-only archives** would disappear across browsers and disagree with the project store, so archive state uses the existing project status field.

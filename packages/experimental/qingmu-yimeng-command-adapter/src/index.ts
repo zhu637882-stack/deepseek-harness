@@ -5,6 +5,7 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { prepareCreationCommand, prepareCreationOptionsRead } from './creation.ts'
 import { prepareAssetDesign } from './asset-design.ts'
 import { prepareProjectUpdate } from './project-management.ts'
+import { prepareProjectCopy } from './project-copy.ts'
 import { prepareWorkingCut } from './working-cut.ts'
 import { prepareScenePlanning } from './scene-planning.ts'
 import { prepareLocalReferenceCandidate } from './local-reference-candidate.ts'
@@ -5895,6 +5896,11 @@ export function createYimengCommandHandler(
           ...(endpoint === 'readLocalReferenceCandidateContent' ? { maxResponseBytes: MAX_LOCAL_REFERENCE_JSON_BYTES } : {}),
         }
         normalize = prepared.normalize
+      } else if (['previewProjectCopy', 'copyProject', 'recoverProjectCopy'].includes(endpoint)) {
+        const prepared = prepareProjectCopy(endpoint, payload, stageArtifactHelpers)
+        path = prepared.path
+        requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
+        normalize = prepared.normalize
       } else if (endpoint === 'updateProject') {
         const prepared = prepareProjectUpdate(payload, stageArtifactHelpers)
         path = prepared.path
@@ -6273,6 +6279,7 @@ export function createYimengCommandHandler(
         || endpoint === 'probeReworkRouteAuthority'
       const requiresCredentialReflectionGuard = isStageArtifactCommand
         || endpoint === 'updateProject'
+        || ['previewProjectCopy', 'copyProject', 'recoverProjectCopy'].includes(endpoint)
         || ['readWorkingCut', 'renderWorkingCut', 'saveWorkingCut', 'uploadWorkingCutAudio'].includes(endpoint)
         || ['readAssetDesign', 'saveAssetDesign', 'quoteAssetImage', 'generateAssetImage', 'readAssetImageRuns', 'quoteAssetVoice', 'generateAssetVoice', 'readAssetVoiceRuns'].includes(endpoint)
         || ['readScenePlanning', 'saveScenePlanning', 'recoverScenePlanning'].includes(endpoint)

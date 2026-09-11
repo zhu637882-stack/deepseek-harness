@@ -34,4 +34,9 @@
 .actions label { display:flex; flex-direction:column; gap:6px; width:100%; }
 .actions input { box-sizing:border-box; width:100%; min-width:0; background:#101a23; color:#edf4f8; border:1px solid #354957; border-radius:7px; padding:10px 12px; font:inherit; }
 .error { color:#ffb5ae; }
+.copyPanel { padding:24px; margin:0 0 24px; border:1px solid #73853c; border-radius:12px; background:#152127; }
+.copyPanel h2 { margin-top:0; font-size:20px; }
+.copyPanel p { color:#aabcc5; line-height:1.6; }
+.copyPanel label { display:flex; flex-direction:column; gap:8px; }
+.copyPanel input { box-sizing:border-box; width:100%; max-width:520px; padding:12px; border:1px solid #354957; border-radius:7px; background:#101a23; color:#edf4f8; font:inherit; }
 @media(max-width:620px) { .library { padding:24px 16px 48px; } .heading { align-items:flex-start; flex-direction:column; gap:16px; } .heading h1 { font-size:26px; } .toolbar { align-items:flex-start; flex-direction:column; gap:10px; } .toolbar label { width:100%; flex-direction:column; align-items:flex-start; gap:6px; } .toolbar input { width:100%; } .grid { grid-template-columns:1fr; gap:16px; } }
