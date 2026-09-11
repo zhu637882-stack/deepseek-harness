@@ -1,5 +1,11 @@
 # AGENTS.md
 
+## 青木 OS 工作入口
+
+开展青木 OS 工作时，先读取 [青木 OS 产品定位与工作职责](../AGENTS.md)（当前完整路径：`/Users/a1234/qingmu-workspace/qingmu-director-implementation/AGENTS.md`）。该文件是完整正文的唯一维护位置；本文件及子目录的工程约定与其冲突时，青木工作遵循用户最新明确指令与该定位，保留不冲突的 DSH 工程规范。
+
+青木当前进度读取 [STATE.md](../STATE.md)。下文 DSH 预发布阶段的兼容性约定不得作为拒绝青木旧项目兼容、删除已确认素材或放弃成片交付的依据；青木的产品与创作流程按上述主文件执行。
+
 DeepSeek Harness is a plugin-based agent harness on vendored Cordis: **everything is a plugin**. Read [docs/architecture.md](docs/architecture.md) before changing `packages/`; follow [docs/AGENTS.md](docs/AGENTS.md) for documentation.
 
 ## Pre-release stance: foundation over blast radius
