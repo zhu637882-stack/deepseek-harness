@@ -20,6 +20,7 @@ import { prepareDialogueVideo } from './dialogue-video.ts'
 import { retainNativeToolReceipt, toolValues } from './native-draft.ts'
 import { registerReferenceVideoTools } from './reference-video-tools.ts'
 import { registerDirectorPlanTools } from './director-plan-tools.ts'
+import type { ReferenceVisionConfig } from './reference-vision.ts'
 
 /** Opt-in native-agent consumer; the Host binding plugin remains independently usable. */
 export const name = 'qingmu-director-model-tools'
@@ -30,11 +31,19 @@ export const inject = ['tools', 'qingmuYimengCommand', 'qingmuImagoMethod']
 export interface Config {
   /** Maximum UTF-8 bytes in a model-visible response; positive integer. */
   maxOutputBytes?: number
+  /** Bounded image observer used only when the main director model cannot view images. */
+  referenceVision?: ReferenceVisionConfig
 }
 
 /** Validate the per-response acquisition limit for this consumer. */
 export const Config: z<Config> = z.object({
   maxOutputBytes: z.number().step(1).min(1).default(262144),
+  referenceVision: z.union([z.object({
+    provider: z.string().required(), model: z.string().required(),
+    reasoningEffort: z.string().required(),
+    maxTokens: z.number().step(1).min(1).required(),
+    timeoutMs: z.number().step(1).min(1).max(2147483647).required(),
+  })]),
 })
 
 function exactArgs(args: object, keys: readonly string[]): void {
@@ -181,7 +190,8 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   // The two context tools remain available without the optional PromptIR reader.
   ctx.inject(['qingmuYimengRead'], (draftHost) => {
-    registerReferenceVideoTools(draftHost, { readBoundContext, boundedJson: value => boundedJson(value, maxOutputBytes) })
+    registerReferenceVideoTools(draftHost, { readBoundContext, boundedJson: value => boundedJson(value, maxOutputBytes),
+      ...(config.referenceVision ? { referenceVision: config.referenceVision } : {}) })
     registerDirectorPlanTools(draftHost, { readBoundContext, boundedJson: value => boundedJson(value, maxOutputBytes) })
     async function readDialogueInput(exec: ToolRunContext) {
       const current = await readBoundContext(exec)

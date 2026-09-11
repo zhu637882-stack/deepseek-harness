@@ -12,6 +12,7 @@ import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter
 import { assertNativeTurnTarget } from './native-prompt-target.ts'
 import type { DirectorContextBindingState } from './types.ts'
 import { readReferenceImage } from './reference-image.ts'
+import { inspectReferenceImage, type ReferenceVisionConfig } from './reference-vision.ts'
 
 interface BoundRead {
   session: Session
@@ -20,6 +21,7 @@ interface BoundRead {
 }
 
 interface Ports {
+  referenceVision?: ReferenceVisionConfig
   readBoundContext(exec: ToolRunContext): Promise<BoundRead>
   boundedJson(value: unknown): JsonValue
 }
@@ -59,15 +61,17 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
   }
   ctx.tools.register(defineTool({
     name: 'qingmu_view_reference_image',
-    description: 'View the actual pixels of one image from the current project asset catalog. Use its exact page, asset ID and SHA from qingmu_read_reference_draft. Inspect relevant scene, costume, prop structure or composition before visual directing decisions. Separate visible observations from inference; viewing does not approve or adopt an asset. No image generation; the active model processes an image input.',
+    description: 'Inspect one image from the current project asset catalog using its exact page, asset ID and SHA from qingmu_read_reference_draft. Image-capable directors receive the image; text-only directors receive an attributed visual-model report. Check relevant scene, costume, prop structure or composition before visual decisions. Reports may be mistaken: distinguish observations, inference and unresolved details. No adoption or media generation. A visual-model call consumes normal model allowance; unchanged successful observations are reused.',
     parameters: {
       page: { type: 'integer', required: true, description: 'Catalog page containing the image, starting at 1.' },
       assetId: { type: 'string', required: true, description: 'Exact image asset ID from the current project catalog.' },
       assetSha256: { type: 'string', required: true, description: 'Exact SHA256 from that catalog entry.' },
     },
     output: { schema: { type: 'json' }, render: (_args, value) => {
-      const image = value as unknown as { attachment: ImageAttachmentRef }
-      return [{ type: 'text', text: JSON.stringify(value) }, { type: 'image', attachment: image.attachment }]
+      const image = value as unknown as { attachment: ImageAttachmentRef; mode: string }
+      return image.mode === 'direct_image'
+        ? [{ type: 'text', text: JSON.stringify(value) }, { type: 'image', attachment: image.attachment }]
+        : [{ type: 'text', text: JSON.stringify(value) }]
     } },
     presentCall: () => ({ card: 'generic', kind: 'read', title: '查看当前项目参考图' }),
     async execute(args, exec) {
@@ -80,9 +84,12 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
       const catalog = read.value as ReferenceVideoAssetsResponse
       const asset = catalog.items.find(item => item.assetId === args.assetId && item.assetSha256 === args.assetSha256)
       if (!asset || asset.mediaType !== 'reference_image') throw new Error('The selected image and hash are not on this current project catalog page. Read the catalog again.')
-      const attachment = await readReferenceImage(ctx, asset, exec, () => { assertCurrent(current, exec) })
+      const attachment = await readReferenceImage(ctx, asset, exec, () => { assertCurrent(current, exec) }, ports.referenceVision)
+      const inspection = await inspectReferenceImage(ctx, attachment, asset.assetSha256, exec,
+        () => { assertCurrent(current, exec) }, ports.referenceVision)
       return ports.boundedJson({ schema: 'qingmu.reference-image.v1', scope,
         assetId: asset.assetId, assetSha256: asset.assetSha256, label: asset.label, attachment,
+        ...inspection,
         guidance: 'Describe visible evidence and uncertainty. A reference view does not establish unseen geometry, exact physical dimensions or creative acceptance.',
         generationQueued: false, selectionChanged: false })
     },

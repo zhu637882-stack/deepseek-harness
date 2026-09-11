@@ -253,6 +253,10 @@ export interface DirectorContextClientPort {
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
+    /** Complete auxiliary model input, including durable image references. */
+    'qingmu-director-vision/request': { readonly callId: string; readonly inspectionId: string; readonly assetSha256: string; readonly request: JsonValue }
+    /** Visual observations and measured usage, never creative or adoption approval. */
+    'qingmu-director-vision/result': { readonly callId: string; readonly inspectionId: string; readonly status: 'completed' | 'failed'; readonly report: string | null; readonly usage: import('@deepseek-ai/dsh-llm').TokenUsage | null; readonly completionId: string | null; readonly error: string | null }
     /** Whole-value, log-only binding; null clears an obsolete object before switch I/O. */
     'qingmu-director-context/state': DirectorContextBindingState | null
     /** A UI view of a native tool operation, never a second business ledger. */

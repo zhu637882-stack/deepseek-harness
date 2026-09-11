@@ -8,7 +8,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
-import LlmRuntime, { createUserMessage } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import LocalAttachmentStore from '@deepseek-ai/dsh-attachment-local'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -27,7 +27,7 @@ import SpillLocal from '@deepseek-ai/dsh-spill-local'
 import { createYimengReadHandler } from '../../qingmu-yimeng-read-adapter/src/index.ts'
 import { createYimengCommandHandler } from '../../qingmu-yimeng-command-adapter/src/index.ts'
 import { canonical, request, response, savedDraft } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
-import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
+import { MockAdapter, textResponse, toolCallResponse, maxTokensResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import * as ModelTools from '../src/model-tools.ts'
 import { readNativeDirectorReadiness } from '../src/native-readiness.ts'
 import { createDirectorContextBridge } from '../src/bridge.ts'
@@ -177,7 +177,7 @@ function writer(extraShots = 0, image?: { sha256: string; url: string }) {
     loseSaveResponse: () => { loseSaveResponse = true } }
 }
 
-async function harness(adapter: MockAdapter, upstream = writer(), images = false) {
+async function harness(adapter: MockAdapter, upstream = writer(), images = false, observer?: MockAdapter) {
   const presetRoot = fileURLToPath(new URL('../../qingmu-web/agent-presets/', import.meta.url))
   const ctx = new Context(); contexts.push(ctx)
   ctx.baseUrl = pathToFileURL(presetRoot).href + '/'
@@ -207,6 +207,7 @@ async function harness(adapter: MockAdapter, upstream = writer(), images = false
   await ctx.plugin(AgentLoop, { agents: [] })
   const presets = await ctx.plugin(AgentPresets, { default: 'qingmu-director', roots: [{ path: presetRoot, trust: 'system' }], includeUserRoot: false })
   ctx.llm.registerAdapter(['mock'], adapter)
+  if (observer) ctx.llm.registerAdapter(['deepseek-official'], observer)
   ctx.provide('qingmuYimengRead', upstream.read)
   ctx.provide('qingmuYimengCommand', upstream.command)
   ctx.provide('qingmuImagoMethod', async () => { throw new Error('No method requested by this fixture') })
@@ -253,6 +254,55 @@ function visionAdapter(args: object = imageArgs) {
   vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'mock', id: 'mock', name: 'mock', inputModalities: ['text', 'image'] })
   return adapter
 }
+
+function observerAdapter(script = [textResponse('可见事实：两盏灯。空间与结构：电源线从背板右下方引出。不能确认精确尺寸。')]) {
+  const adapter = new MockAdapter(script)
+  vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'deepseek-official', id: 'deepseek-v4-flash-vision-exp', name: 'vision', inputModalities: ['text', 'image'], reasoning: { efforts: [{ id: ReasoningEffortId('off'), name: 'Off' }] } })
+  return adapter
+}
+
+it('gives a text-only director an attributed visual report with reconstructible inputs and reuses unchanged observations', async () => {
+  const adapter = new MockAdapter([
+    toolCallResponse('view', 'qingmu_view_reference_image', imageArgs),
+    toolCallResponse('again', 'qingmu_view_reference_image', imageArgs),
+    textResponse('依据视觉观察员的报告安排两盏灯，保持主导演设计。'),
+  ])
+  const observer = observerAdapter()
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(imageBytes, { headers: { 'content-type': 'image/png' } }))
+  const h = await harness(adapter, writer(0, { sha256: imageSha, url: imageUrl }), true, observer)
+  await h.run(true)
+  expect(result(h.agent, 'view').error, result(h.agent, 'view').text).toBe(false)
+  const output = JSON.parse(result(h.agent, 'view').text)
+  expect(output).toMatchObject({ mode: 'vision_report', reused: false, status: 'completed', usage: { inputTokens: 10 } })
+  expect(JSON.parse(result(h.agent, 'again').text)).toMatchObject({ reused: true, inspectionId: output.inspectionId })
+  expect(observer.requests).toHaveLength(1)
+  expect(observer.requests[0]?.messages[0]?.content).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'image' })]))
+  const recorded = h.agent.session.events.filter(e => e.type === 'qingmu-director-vision/request' || e.type === 'qingmu-director-vision/result')
+  expect(recorded).toHaveLength(2)
+  expect(JSON.stringify(recorded)).not.toContain('signature=')
+  expect(JSON.stringify(recorded)).not.toContain(imageBytes.toString('base64'))
+  expect(JSON.stringify(adapter.requests.at(-1))).toContain(output.report)
+  const tool = h.agent.session.events.find(e => e.type === 'tool/result' && e.data.message.source.callId === 'view')
+  if (tool?.type !== 'tool/result') throw new Error('Missing visual report')
+  expect(tool.data.message.content.flatMap(p => p.content).some(p => p.type === 'image')).toBe(false)
+  expect({ content: tool.data.message.content.flatMap(p => p.content), observerInput: observer.requests[0]?.messages }).toMatchSnapshot()
+})
+
+it.each(['truncated', 'missing usage', 'switched shot'])('retains observer receipts without misrepresenting %s as a delivered report', async (condition) => {
+  const adapter = new MockAdapter([toolCallResponse('view', 'qingmu_view_reference_image', imageArgs), textResponse('未完成当前镜头核验。')])
+  const observer = observerAdapter()
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(imageBytes, { headers: { 'content-type': 'image/png' } }))
+  const h = await harness(adapter, writer(0, { sha256: imageSha, url: imageUrl }), true, observer)
+  vi.spyOn(observer, 'stream').mockImplementation(async function* () {
+    if (condition === 'switched shot') h.agent.session.append('qingmu-director-context/state', null)
+    yield* (condition === 'truncated' ? maxTokensResponse('部分内容') : textResponse('观察内容').filter(c => condition !== 'missing usage' || c.type !== 'usage'))
+  })
+  await h.run(true)
+  expect(result(h.agent, 'view').error).toBe(true)
+  expect(observer.stream).toHaveBeenCalledOnce()
+  const receipt = h.agent.session.events.findLast(e => e.type === 'qingmu-director-vision/result')
+  expect(receipt?.data).toMatchObject({ status: condition === 'switched shot' ? 'completed' : 'failed' })
+})
 
 it('delivers catalog image pixels through the shipped director preset and persists reconstructible attachments', async () => {
   const adapter = visionAdapter()

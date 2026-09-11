@@ -4,6 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import type {} from '@deepseek-ai/dsh-llm'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
+import type { ReferenceVisionConfig } from './reference-vision.ts'
 
 /**
  * Admit a catalog-selected image without exposing its signed transport URL.
@@ -11,6 +12,7 @@ import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
  * @param asset - Exact image selected from the current project's validated catalog.
  * @param exec - Current native director tool execution.
  * @param assertCurrent - Recheck cancellation and the bound shot after asynchronous work.
+ * @param vision - Optional host-selected visual observer for a text-only director.
  * @returns Durable image reference after source hash and decoder verification.
  */
 export async function readReferenceImage(
@@ -18,6 +20,7 @@ export async function readReferenceImage(
   asset: { browserUrl: string; assetSha256: string; label: string },
   exec: ToolRunContext,
   assertCurrent: () => void,
+  vision?: ReferenceVisionConfig,
 ): Promise<ImageAttachmentRef> {
   assertCurrent()
   const store = ctx.get('attachments')
@@ -28,7 +31,12 @@ export async function readReferenceImage(
   if (!store || !llm || !provider || !model) throw new Error('The director needs an attachment store and a resolved image-capable model.')
   const info = await llm.resolveModelInfo(provider, model, exec.signal)
   assertCurrent()
-  if (!info.inputModalities?.includes('image')) throw new Error('The current director model does not declare image input; metadata cannot substitute for viewing the picture.')
+  if (!info.inputModalities?.includes('image')) {
+    if (!vision) throw new Error('The current director model does not declare image input; configure a visual observer before inspecting references.')
+    const observer = await llm.resolveModelInfo(vision.provider, vision.model, exec.signal)
+    assertCurrent()
+    if (!observer.inputModalities?.includes('image')) throw new Error('The configured visual observer does not support image input.')
+  }
   // The read adapter has restricted this URL to its configured Writer origin.
   if (!asset.browserUrl) throw new Error('This image has no verified local media URL. Refresh the asset catalog.')
   let response: Response

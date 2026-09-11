@@ -13,7 +13,7 @@
 
 预设作用域中的 `./skill-resources` 插件按清单路径读取创作参考、子技能、引擎和模板，返回来源提交、上游与适配后哈希和明确分页。文件变更、未登记路径、目录外符号链接及超大页均拒绝返回，不截断内容。原生 `skill` 负责技能入口读取。资料作为工具结果进入会话，不写项目或调用生成模型；调用方沿 `nextLine` 读完所需资料。
 
-`qingmu_view_reference_image` 按绑定项目的素材 ID、SHA256 和目录页码读取真实像素。读取适配器提供签名的本地 Writer 媒体地址，模型不能指定网址或项目。工具核对原始文件哈希，再复用 Host 附件限制与图像解码，将图片及持久附件引用写入普通工具结果；签名地址和 base64 不进入会话正文。模型不支持图片、媒体不可用、选择发生变化或图像无效时明确报错。查看不选用或生成媒体，后续视觉模型输入按正常模型额度计费。预设要求在视觉决策前检查相关且变化的参考图，区分可见事实、不可见结构和推测尺度。
+`qingmu_view_reference_image` 按目录页、ID 和 SHA256 读取当前项目的确切素材。读取适配器验证 Writer 签名地址；源文件通过哈希、大小和解码检查后进入持久附件存储。支持图像的导演直接获得图片；文字导演使用 Host 可选的 `referenceVision`，由其指定 provider、model、reasoningEffort、maxTokens 和 timeoutMs。已交付预设使用 DeepSeek 视觉兼容别名、2500 输出 token 和 120 秒限制。一次 prepared call 接收真实图片，完整输入、报告与实测用量写入会话日志，签名地址和 base64 不进入正文。同一会话中图片、指令和配置均未改变的成功观察会复用。能力缺失、输出不完整或选择改变不能成为当前镜头的成功工具结果。不自动重试模型调用、不生成媒体、不选用素材。报告是注明来源的模型观察，不是创意验收，也不能证明隐藏结构和精确尺寸；主导演保留创作职责。
 
 ## 挂载接口
 
@@ -35,7 +35,7 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 
 原生实例可通过 `nativeProductionExecution` 绑定一个操作者和一个预算窗口。API 与现有 Writer 工作进程加载同一份经校验的 DashScope 凭据及额度；该操作者的新项目共用此额度。此模式与旧的单项目执行及仅素材连接配置互斥。Writer 继续验证归属、已存请求、报价确认、预算预留和幂等派发。该配置不改变 DSH 模型请求及 Token 费用。见[原生生成决策](../../../.agents/notes/implemented/feature/2026-09-11-qingmu-native-production.zh.md)。
 
-易梦仍是唯一业务真源。绑定事件只保存对象坐标、context SHA 和不可变 proposal/freshness 哈希，不保存提示词正文、参考媒体、内容签收、选择、Ready、Provider 结果、费用记录或通用聊天历史。下述可选模型工具会把创作上下文和方法正文保存在普通工具结果事件中。绑定操作不写入易梦业务状态。可选编辑工具使用已有 Writer 命令适配器；本包的工具不派发 Provider。
+易梦仍是唯一业务真源。绑定事件只保存对象坐标、context SHA 和不可变 proposal/freshness 哈希，不保存提示词正文、参考媒体、内容签收、选择、Ready、Provider 结果、费用记录或通用聊天历史。下述可选模型工具会把创作上下文和方法正文保存在普通工具结果事件中。绑定操作不写入易梦业务状态。可选编辑工具使用已有 Writer 命令适配器；视觉检查可派发一次已配置的辅助 LLM 调用，不派发图片或视频生成。
 
 原生创建从同一个预设目录读取 `QINGMU_CREATIVE_SKILL_ROOT`，按 `sources.json` 核对方法正文，将导演、编剧、摄影方法身份随项目保存。用 Writer 的 Python 环境运行 `examples/native-production-keyless.py /path/to/writer`，可在隔离数据库上执行实际创建路由及共享预算闸门；相邻 JSON 快照验证两个项目，不发出 Provider 请求。
 
