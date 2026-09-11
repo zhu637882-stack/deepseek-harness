@@ -1,0 +1,31 @@
+.entry > button { width:100%; min-height:44px; margin-bottom:16px; padding:10px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--accent); text-align:left; }
+.dialog { width:min(1200px, calc(100vw - 32px)); max-width:none; height:min(800px, calc(100dvh - 32px)); max-height:none; padding:0; border:1px solid var(--line); border-radius:12px; background:var(--panel); color:var(--text); font:14px/1.7 -apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif; }
+.dialog[open] { display:flex; flex-direction:column; }
+.dialog::backdrop { background:rgb(0 0 0 / 72%); }
+.header { display:flex; align-items:center; flex:none; gap:12px; padding:20px 24px; border-bottom:1px solid var(--line); }
+.header > div { flex:1; }
+.header h2 { margin:0; color:var(--text); font-size:20px; font-weight:600; }
+.header p { margin:4px 0 0; color:var(--muted); }
+.dialog button { min-height:44px; padding:8px 12px; border:1px solid var(--line); border-radius:6px; color:var(--text); background:var(--bg); }
+.dialog button:hover { border-color:var(--accent); }
+.help { flex:none; margin:0; padding:12px 24px; color:var(--muted); }
+.scroll { min-height:0; flex:1; overflow:auto; overscroll-behavior:contain; padding:0 24px 24px; }
+.table { width:100%; table-layout:fixed; border-collapse:separate; border-spacing:0; text-align:left; }
+.identityColumn { width:20%; }
+.table th,.table td { padding:16px; vertical-align:top; overflow-wrap:anywhere; border-bottom:1px solid var(--line); }
+.table thead th { position:sticky; top:0; background:var(--panel); color:var(--muted); font-size:13px; font-weight:500; }
+.table tbody th { font-weight:500; }
+.table tbody th small { display:block; margin-top:6px; color:var(--muted); }
+.table tbody th button { display:block; margin-top:12px; color:var(--accent); }
+.table tr[aria-current='true'] { background:color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+.table details { margin-top:12px; color:var(--muted); font-size:13px; }
+.table details p { margin:8px 0 0; }
+.table summary { cursor:pointer; }
+@media (max-width:700px) {
+  .dialog { width:calc(100vw - 16px); height:calc(100dvh - 16px); font-size:16px; }
+  .header { flex-wrap:wrap; padding:12px; gap:8px; }
+  .header > div { flex-basis:100%; }
+  .help { padding:12px; }
+  .scroll { padding:0 12px 12px; }
+  .table { min-width:760px; }
+}

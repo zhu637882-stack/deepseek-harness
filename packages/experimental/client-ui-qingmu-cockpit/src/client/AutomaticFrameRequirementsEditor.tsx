@@ -49,7 +49,7 @@ function sameScope(state: ScenePlanningState, projectId: string, episodeId: stri
 
 /** Saved frame requirements across imported and automatic storyboards, using their respective transactions. */
 export function AutomaticFrameRequirementsEditor({
-  projectId, episodeId, shotId, port, onCommitted, onRequirementStatusChange, onReturnToStoryboard,
+  projectId, episodeId, shotId, port, onCommitted, onRequirementStatusChange, onReturnToStoryboard, onSelectShot,
 }: {
   readonly projectId: string
   readonly episodeId: string
@@ -60,6 +60,7 @@ export function AutomaticFrameRequirementsEditor({
   readonly onRequirementStatusChange?: (status: AutomaticFrameRequirementStatus) => void
   /** Lets the surrounding workbench take the user back to the storyboard. */
   readonly onReturnToStoryboard?: () => void
+  readonly onSelectShot?: ((shotId: string) => void) | undefined
 }) {
   const [state, setState] = useState<ScenePlanningState | null>(null); const [draft, setDraft] = useState<Draft | null>(null)
   const [rebaseState, setRebaseState] = useState<ScenePlanningState | null>(null)
@@ -182,7 +183,7 @@ export function AutomaticFrameRequirementsEditor({
   const dirty = saved !== undefined && (draft.imagePromptCn !== saved.imagePromptCn || shootingFields.some(field => (draft[field] ?? '') !== savedField(field))
     || continuityKeys.some(field => draft[field] !== undefined && draft[field] !== continuityText(continuity[boundary[field]])))
   return <section aria-label="编辑当前要求">
-    <ShotContinuityView state={state} shotId={shotId} />
+    <ShotContinuityView state={state} shotId={shotId} onSelectShot={onSelectShot} />
     <fieldset disabled={busy || draft.pending !== undefined}>
       <legend>本镜连续性</legend>
       {continuity.notes !== undefined && <p>既有连续性说明：{continuityText(continuity.notes)}</p>}

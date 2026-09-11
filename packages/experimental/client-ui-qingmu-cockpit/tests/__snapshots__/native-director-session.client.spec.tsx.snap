@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`prepares a complete reference reconciliation request for the bound director without sending on selection > complete draft reconciliation request 1`] = `"请整理当前镜头的视频生成稿。读取已保存的完整导演设计、全片镜头衔接、剧本、当前引用草稿和素材；依据 Leos 六部门及本片已选方法，把空间与动作起止状态、运镜的起点路径终点、表演反应、逐句对白与语气停顿、光影、环境底声和空间声学完整转为一份可执行生成稿。保留导演明确安排的换场、时间跳跃、多人对白和画面文字。逐个说明引用素材的用途，处理参考图与目标状态的冲突，清除已被新设计替代的旧描述，不在旧稿末尾追加另一套指令，不缩写成摘要。保留未要求修改的台词、素材绑定和生成参数；确有冲突时说明理由。保存本镜引用草稿后读取回执并预览实际请求，说明调整与未解决问题。不要提交视频、选用候选或修改其他镜头。"`;

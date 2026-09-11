@@ -22,6 +22,7 @@ export interface ReferenceVideoWorkspaceProps {
   readonly referenceSources?: readonly { readonly frameId: string; readonly label: string }[]
   readonly onUnsavedChange?: (dirty: boolean) => void
   readonly onOpenShooting?: ((frameId: string) => void) | undefined
+  readonly onRequestDirector?: (() => void) | undefined
   readonly port: Pick<QingmuYimengPort, 'referenceVideoAssets' | 'readLocalReferenceCandidateContent' | 'referenceVideoPreview' | 'referenceVideoDraft' | 'saveReferenceVideoDraft' | 'referenceVideoQuote' | 'referenceVideoRuns' | 'queueReferenceVideo'> & PrivateReferencePreviewPort & Partial<Pick<QingmuYimengPort, 'readReferenceVideoMaterials' | 'prepareReferenceVideoMaterial' | 'readReferenceVideoCandidateRegistration' | 'registerReferenceVideoCandidateForReview'>>
 }
 
@@ -57,7 +58,7 @@ function materialStatusText(material: ReferenceVideoMaterialsState['materials'][
  * @returns Director reference editor.
  */
 export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, port,
-  shotLabel, initialOpen, embedded, referenceSources, onUnsavedChange, onOpenShooting }: ReferenceVideoWorkspaceProps) {
+  shotLabel, initialOpen, embedded, referenceSources, onUnsavedChange, onOpenShooting, onRequestDirector }: ReferenceVideoWorkspaceProps) {
   const [assets, setAssets] = useState<readonly ReferenceVideoAsset[]>([])
   const [page, setPage] = useState(0)
   const [pages, setPages] = useState(1)
@@ -415,13 +416,8 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
       {directorSourceSha256 !== draftState.directorSource.sha256 && <p role="status">
         导演设计尚未同步到这份生成稿。请结合设计修改运镜、表演、声音和引用，也可交给青木导演整理。
       </p>}
-      <button type="button" disabled={busy || saving} onClick={() => {
-        const source = draftState.directorSource
-        if (!source) return
-        setParts(previous => previous.some(part => 'text' in part && part.text.includes(source.prompt))
-          ? previous : [...previous, { text: `\n${source.prompt}\n` }])
-        setDirectorSourceSha256(source.sha256); invalidate()
-      }}>加入完整导演设计</button>
+      {onRequestDirector && <button type="button" disabled={busy || saving || dirty} onClick={onRequestDirector}>展开导演助手</button>}
+      <p>{dirty ? '先保存引用草稿，再交给导演整理。' : '导演读取已保存的草稿与最新设计，整理为一份生成稿；完成后点击“恢复已存草稿”查看。'}</p>
       <label><input type="checkbox" checked={directorSourceSha256 === draftState.directorSource.sha256}
         onChange={(event) => {
           setDirectorSourceSha256(event.target.checked ? draftState.directorSource?.sha256 : undefined); invalidate()

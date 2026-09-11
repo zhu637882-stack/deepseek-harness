@@ -12,13 +12,14 @@ export interface SceneReferenceWorkspaceProps {
   readonly onSelectShotId: (shotId: string) => void
   readonly onUnsavedChange: (dirty: boolean) => void
   readonly onOpenShooting?: ((shotId: string) => void) | undefined
+  readonly onRequestDirector?: (() => void) | undefined
   readonly guardUnsavedNavigation?: boolean
   readonly port: QingmuYimengPort
 }
 
 /** Start a current-scene reference draft without requiring a pre-existing PromptIR. */
 export function SceneReferenceWorkspace({ projectId, relations, selectedShotId, onSelectShotId,
-  onUnsavedChange, onOpenShooting, guardUnsavedNavigation = true, port }: SceneReferenceWorkspaceProps) {
+  onUnsavedChange, onOpenShooting, onRequestDirector, guardUnsavedNavigation = true, port }: SceneReferenceWorkspaceProps) {
   const [dirty, setDirty] = useState(false)
   const projectionMatchesProject = relations.projectId === projectId
   const shot = projectionMatchesProject ? relations.shots.find(item => item.shotId === selectedShotId) : undefined
@@ -78,7 +79,7 @@ export function SceneReferenceWorkspace({ projectId, relations, selectedShotId, 
       projectId={projectId} frameId={shot.shotId}
       shotLabel={`镜${String(shot.frameNo).padStart(2, '0')} · ${shot.title ?? '未命名镜头'}`} initialPrompt="" initialOpen embedded
       referenceSources={referenceSources} onUnsavedChange={setDirty}
-      onOpenShooting={onOpenShooting} port={port} />
+      onOpenShooting={onOpenShooting} onRequestDirector={onRequestDirector} port={port} />
     </>}
   </section>
 }

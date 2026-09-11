@@ -4,8 +4,8 @@ exports[`preserves boundaries through lost-response recovery with image requirem
 [
   "镜头 / 场次开始状态结束状态",
   "1 · 断电尚未设计插头平放桌面",
-  "2 · 检修（当前）补充说明：axis：保持桌旁轴线prop：断电；hand：持螺丝刀检查结束",
-  "3 · 次日补充说明：notes：次日换场，由剧本解释省略尚未设计尚未设计",
+  "2 · 检修（当前）prop：断电；hand：持螺丝刀补充说明axis：保持桌旁轴线检查结束",
+  "3 · 次日尚未设计补充说明notes：次日换场，由剧本解释省略尚未设计",
 ]
 `;
 
@@ -13,7 +13,7 @@ exports[`preserves boundaries through lost-response recovery with image requirem
 [
   "镜头 / 场次开始状态结束状态",
   "1 · 断电尚未设计插头平放桌面",
-  "2 · 检修（当前）补充说明：axis：保持桌旁轴线prop：断电；hand：持螺丝刀检查结束",
-  "3 · 次日补充说明：notes：次日换场，由剧本解释省略尚未设计尚未设计",
+  "2 · 检修（当前）prop：断电；hand：持螺丝刀补充说明axis：保持桌旁轴线检查结束",
+  "3 · 次日尚未设计补充说明notes：次日换场，由剧本解释省略尚未设计",
 ]
 `;

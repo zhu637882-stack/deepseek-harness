@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { ScenePlanningRequest, ScenePlanningState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import { AutomaticFrameRequirementsEditor } from '../src/client/AutomaticFrameRequirementsEditor.tsx'
 
+beforeEach(() => {
+  HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', '') }
+  HTMLDialogElement.prototype.close = function () { this.removeAttribute('open') }
+  Element.prototype.scrollIntoView = vi.fn()
+})
 afterEach(() => { cleanup(); localStorage.clear() })
 const scope = { projectId: 'p', episodeId: 'e', shotId: 'f' }
 function state(): ScenePlanningState {
@@ -40,6 +45,7 @@ it.each(['authored image', ''])('preserves boundaries through lost-response reco
   const input = await screen.findByRole('textbox', { name: '本镜结束状态' })
   fireEvent.click(screen.getByText('全片镜头衔接 · 3 镜'))
   expect(within(screen.getByRole('table')).getAllByRole('row').map(row => row.textContent)).toMatchSnapshot('saved episode boundaries')
+  fireEvent.click(screen.getByRole('button', { name: '关闭对照' }))
   fireEvent.change(input, { target: { value: '插头仍在台面；右手放下螺丝刀' } })
   fireEvent.click(screen.getByRole('button', { name: '保存当前要求' }))
   await screen.findByRole('button', { name: '查看原保存结果' })
@@ -53,6 +59,23 @@ it.each(['authored image', ''])('preserves boundaries through lost-response reco
   expect(recover).toHaveBeenCalledWith(intent)
   expect(save).toHaveBeenCalledOnce()
   expect((screen.getByRole('textbox', { name: '本镜结束状态' }) as HTMLTextAreaElement).value).toBe('插头仍在台面；右手放下螺丝刀')
+})
+
+it('opens episode comparison, selects a shot and preserves an unsaved local boundary', async () => {
+  const onSelectShot = vi.fn()
+  const save = vi.fn()
+  render(<AutomaticFrameRequirementsEditor {...scope} onCommitted={async () => undefined} onSelectShot={onSelectShot}
+    port={{ readScenePlanning: async () => state(), saveScenePlanning: save, recoverScenePlanning: vi.fn() }} />)
+  fireEvent.change(await screen.findByRole('textbox', { name: '本镜结束状态' }), { target: { value: '未保存的导演衔接' } })
+  fireEvent.click(screen.getByRole('button', { name: '全片镜头衔接 · 3 镜' }))
+  const dialog = screen.getByRole('dialog', { name: '全片镜头衔接' })
+  expect(within(dialog).getAllByRole('row')).toHaveLength(4)
+  expect(within(dialog).getByRole('row', { current: true }).textContent).toContain('检修')
+  fireEvent.click(within(dialog).getByRole('button', { name: '编辑镜 3 · 次日' }))
+  expect(onSelectShot).toHaveBeenCalledWith('after')
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(localStorage.getItem('qingmu.scene-planning.v1:p:e:automatic-frame:f')).toContain('未保存的导演衔接')
+  expect(save).not.toHaveBeenCalled()
 })
 
 it('rebases only edited boundaries and keeps the latest unedited continuity decisions', async () => {

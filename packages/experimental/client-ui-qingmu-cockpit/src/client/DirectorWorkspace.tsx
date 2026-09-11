@@ -1,5 +1,5 @@
 /** Single-scene composition of canonical shot context, PromptIR editing and Take comparison. */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { QingmuYimengPort, YimengWorkflowProjection } from './contracts.ts'
 import type { QingmuCockpitKey } from './locales.ts'
 import { HeroFrameStoryboardCanvas } from './HeroFrameStoryboardCanvas.tsx'
@@ -58,6 +58,7 @@ export function DirectorWorkspace(props: DirectorWorkspaceProps) {
     if (reviewReady) { setProductionMounted(true); setProductionOpen(true) }
   }, [reviewReady])
   const [planningOpen, setPlanningOpen] = useState(false)
+  const planningPanel = useRef<HTMLDetailsElement>(null)
   const [planningDirty, setPlanningDirty] = useState(false)
   const [promptDirty, setPromptDirty] = useState(false)
   const [referenceDirty, setReferenceDirty] = useState(false)
@@ -89,9 +90,10 @@ export function DirectorWorkspace(props: DirectorWorkspaceProps) {
         }
         selectShot(id)
       }} guardUnsavedNavigation={false}
-      onUnsavedChange={setReferenceDirty} onOpenShooting={props.onOpenShooting} port={props.port} />}
+      onUnsavedChange={setReferenceDirty} onOpenShooting={props.onOpenShooting} port={props.port}
+      onRequestDirector={() => { setPlanningOpen(true); requestAnimationFrame(() => { planningPanel.current?.scrollIntoView({ block: 'start' }) }) }} />}
     {selectionNotice && <p role="status">{selectionNotice}</p>}
-    {props.presentation === 'assistant' ? planning : <details open={!hasPlannedShots || planningOpen || planningDirty}
+    {props.presentation === 'assistant' ? planning : <details ref={planningPanel} open={!hasPlannedShots || planningOpen || planningDirty}
       onToggle={(event) => { if (hasPlannedShots && !planningDirty) setPlanningOpen(event.currentTarget.open) }}>
       <summary>场景规划与导演助手</summary>
       {planning}

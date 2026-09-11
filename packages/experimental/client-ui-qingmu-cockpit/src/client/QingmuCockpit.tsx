@@ -206,6 +206,8 @@ export function QingmuCockpit({
     ? STEP_TABS[creativeStepFromSearch(typeof location === 'undefined' ? '' : location.search)]
     : new URLSearchParams(typeof location === 'undefined' ? '' : location.search).get('qingmuView') === 'shooting' ? 'shots' : 'director')
   const [shootingAction, setShootingAction] = useState<string>()
+  const [referenceDirectorOpen, setReferenceDirectorOpen] = useState(false)
+  const referenceDirectorPanel = useRef<HTMLDetailsElement>(null)
   const [shootingActionKind, setShootingActionKind] = useState<'first-frame' | 'select-frame' | 'video'>('video')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
@@ -680,6 +682,18 @@ export function QingmuCockpit({
     </div>
   )
 
+  const shootingDirector = nativeDirectorSession === undefined
+    ? <p role="status">原生导演助手当前不可用；不会回退到 iframe。</p>
+    : <div className={css.inlineDirector}>
+      <NativeDirectorSession compact port={nativeDirectorSession} bridge={directorBridge} sessionId={directorSessionId}
+        onRefresh={() => { setDirectorRefresh(value => value + 1) }} />
+      <DirectorWorkspace presentation="assistant" projectId={projectId} episodeId={episodeId} projection={projection}
+        shotItems={shotItems} selectedShotId={selectedShotId} onSelectShotId={setSelectedShotId}
+        onUnsavedChange={onDirectorDirty} port={port} directorBridge={directorBridge}
+        directorSessionId={directorSessionId} directorConnection={nativeDirectorSession.connection} directorRefresh={directorRefresh}
+        nativeDirectorSession={nativeDirectorSession} hostSync={hostSync} t={t} onCommitted={refreshWorkflowProjectionAfterCommit} />
+    </div>
+
   const shotView = (
     <div className={css.stack}>
       <ShootingReviewWorkspace
@@ -701,17 +715,7 @@ export function QingmuCockpit({
         onReturnToStoryboard={applicationShell ? () => { if (mayLeaveDirector()) setTab('director') } : undefined}
         onCommitted={refreshWorkflowProjectionAfterCommit}
         onProductionAction={(action, shotId) => { setSelectedShotId(shotId); setShootingActionKind(action); setShootingAction(shotId) }}
-        directorAssistant={nativeDirectorSession === undefined
-          ? <p role="status">原生导演助手当前不可用；不会回退到 iframe。</p>
-          : <div className={css.inlineDirector}>
-            <NativeDirectorSession compact port={nativeDirectorSession} bridge={directorBridge} sessionId={directorSessionId}
-              onRefresh={() => { setDirectorRefresh(value => value + 1) }} />
-            <DirectorWorkspace presentation="assistant" projectId={projectId} episodeId={episodeId} projection={projection}
-              shotItems={shotItems} selectedShotId={selectedShotId} onSelectShotId={setSelectedShotId}
-              onUnsavedChange={onDirectorDirty} port={port} directorBridge={directorBridge}
-              directorSessionId={directorSessionId} directorConnection={nativeDirectorSession.connection} directorRefresh={directorRefresh}
-              nativeDirectorSession={nativeDirectorSession} hostSync={hostSync} t={t} onCommitted={refreshWorkflowProjectionAfterCommit} />
-          </div>}
+        directorAssistant={shootingAction ? null : shootingDirector}
         port={port}
         t={t}
       />
@@ -719,10 +723,18 @@ export function QingmuCockpit({
         <button type="button" onClick={() => { if (mayLeaveDirector()) setShootingAction(undefined) }}>返回拍摄与审看</button>
         {shootingActionKind === 'video' && shotRelations ? <SceneReferenceWorkspace projectId={projectId} relations={shotRelations}
           selectedShotId={shootingAction} onSelectShotId={(id) => { setSelectedShotId(id); setShootingAction(id) }}
-          onUnsavedChange={onDirectorDirty} port={port} /> :
+          onUnsavedChange={onDirectorDirty} port={port} onRequestDirector={() => {
+            setReferenceDirectorOpen(true)
+            requestAnimationFrame(() => { referenceDirectorPanel.current?.scrollIntoView({ block: 'start' }) })
+          }} /> :
           <PromptIrWorkspace key={`${episodeId}:${shootingAction}:shooting-action`} presentation="shooting" projectId={projectId} episodeId={episodeId} shotItems={shotItems}
             storyboardRevisionId={shotRelations?.storyboardRevision.revisionId ?? ''} selectedShotId={shootingAction} onSelectShotId={setShootingAction}
             port={port} t={t} onCommitted={refreshWorkflowAfterCommit} />}
+        {shootingActionKind === 'video' && <details ref={referenceDirectorPanel} open={referenceDirectorOpen}
+          onToggle={(event) => { setReferenceDirectorOpen(event.currentTarget.open) }}>
+          <summary>本镜导演助手</summary>
+          {referenceDirectorOpen && shootingDirector}
+        </details>}
       </div>}
       <details className={css.developerLog}>
         <summary>开发日志</summary>

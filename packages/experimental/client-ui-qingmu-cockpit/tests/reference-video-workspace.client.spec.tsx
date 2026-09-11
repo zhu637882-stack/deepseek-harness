@@ -15,7 +15,7 @@ const result = {
   body: { input: { prompt: '已编译的原文' }, parameters: { duration: 8, resolution: '720P', ratio: '16:9' } },
   referenceAudioDurationSec: 2, directorSource: null, directorSourceAligned: true,
 } as ReferenceVideoPreviewResponse
-function mount(options?: { directorSource?: { sha256: string; prompt: string }; configured?: boolean; configurationError?: string | null; initialMaterialStatus?: 'not_prepared' | 'unknown' | 'failed' | 'expired' | 'ready' }) {
+function mount(options?: { onRequestDirector?: () => void; directorSource?: { sha256: string; prompt: string }; configured?: boolean; configurationError?: string | null; initialMaterialStatus?: 'not_prepared' | 'unknown' | 'failed' | 'expired' | 'ready' }) {
   let server: ReferenceVideoDraftResponse = { schema: 'jason.reference-video-draft.v1', directorSource: options?.directorSource ?? null, projectId: 'p', frameId: 'f', frameSha256: 'f'.repeat(64), draft: null, mediaTypes: {}, providerCalls: 0, generationQueued: false }
   let latestMaterialStatus = options?.initialMaterialStatus ?? 'not_prepared'
   const materialState = (status = latestMaterialStatus) => ({
@@ -62,7 +62,7 @@ function mount(options?: { directorSource?: { sha256: string; prompt: string }; 
       return server
     }),
   }
-  const view = render(<ReferenceVideoWorkspace projectId="p" frameId="f" initialPrompt="陈远说：‘图1不应被替换。’" port={port} />)
+  const view = render(<ReferenceVideoWorkspace projectId="p" frameId="f" initialPrompt="陈远说：‘图1不应被替换。’" port={port} onRequestDirector={options?.onRequestDirector} />)
   fireEvent.click(screen.getByText('精确引用 · 导演稿与候选'))
   return { port, view, setMaterialStatus: (status: typeof latestMaterialStatus) => { latestMaterialStatus = status } }
 }
@@ -389,15 +389,23 @@ it('shows the current design without silently rewriting or blessing an old promp
   expect(port.queueReferenceVideo).not.toHaveBeenCalled()
 })
 
-it('copies complete current direction into the request without dropping authored dialogue or duplicating it', async () => {
-  const directorSource = { sha256: 'b'.repeat(64), prompt: '完整导演：先推近，停顿，再反打；气声回答，保留全部表演与声音。' }
-  const { port } = mount({ directorSource }); await chooseAll()
-  fireEvent.click(screen.getByRole('button', { name: '加入完整导演设计' }))
-  fireEvent.click(screen.getByRole('button', { name: '加入完整导演设计' }))
+it('hands a saved draft to the director without appending or marking conflicting directions as reconciled', async () => {
+  const directorSource = { sha256: 'b'.repeat(64), prompt: '从双人全景推至侧面中景；插头仍未接通。' }
+  const onRequestDirector = vi.fn()
+  const { port } = mount({ directorSource, onRequestDirector }); await chooseAll()
+  const field = screen.getByRole('textbox', { name: '视频描述片段1' })
+  fireEvent.change(field, { target: { value: '旧稿：固定机位，电器已启动。' } })
+  expect(screen.queryByRole('button', { name: '加入完整导演设计' })).toBeNull()
+  const handoff = screen.getByRole('button', { name: '展开导演助手' })
+  expect(handoff.hasAttribute('disabled')).toBe(true)
+  fireEvent.click(handoff)
+  expect(onRequestDirector).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole('button', { name: '保存引用草稿' }))
   await screen.findByText('已保存草稿版本 1。')
-  expect(port.saveReferenceVideoDraft.mock.calls[0]?.[0].request.promptParts).toEqual([
-    { text: '陈远说：‘图1不应被替换。’' }, { text: `\n${directorSource.prompt}\n` },
-  ])
-  expect(port.saveReferenceVideoDraft.mock.calls[0]?.[0].request.directorSourceSha256).toBe(directorSource.sha256)
+  fireEvent.click(handoff)
+  expect(onRequestDirector).toHaveBeenCalledOnce()
+  expect(port.saveReferenceVideoDraft).toHaveBeenCalledOnce()
+  expect(port.saveReferenceVideoDraft.mock.calls[0]?.[0].request.promptParts).toEqual([{ text: '旧稿：固定机位，电器已启动。' }])
+  expect(port.saveReferenceVideoDraft.mock.calls[0]?.[0].request.directorSourceSha256).toBeUndefined()
+  expect(port.queueReferenceVideo).not.toHaveBeenCalled()
 })

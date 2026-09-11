@@ -239,3 +239,16 @@ it('keeps unsent director text per shot across closing and reopening, without di
   expect(screen.getByLabelText('导演要求')).toHaveProperty('value', '保留车外的莉娜')
   expect(f.api.sessions.prompt).not.toHaveBeenCalled()
 })
+
+it('prepares a complete reference reconciliation request for the bound director without sending on selection', async () => {
+  const f = fixture(false, 'qingmu-director')
+  const prompt = vi.fn(async () => undefined)
+  render(<NativeDirectorComposer port={{ ...f.port, prompt }} sessionId="s1" scopeKey="shot1" target={f.target} ready />)
+  fireEvent.click(screen.getByRole('button', { name: '整理本镜生成稿' }))
+  const input = screen.getByRole('textbox', { name: '导演要求' }) as HTMLTextAreaElement
+  expect(input.value).toMatchSnapshot('complete draft reconciliation request')
+  expect(prompt).not.toHaveBeenCalled()
+  expect(screen.getByRole('button', { name: '整理本镜生成稿' }).hasAttribute('disabled')).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: '发送给当前导演' }))
+  await waitFor(() => expect(prompt).toHaveBeenCalledExactlyOnceWith(f.target, expect.stringContaining('不要提交视频'), expect.any(AbortSignal)))
+})
