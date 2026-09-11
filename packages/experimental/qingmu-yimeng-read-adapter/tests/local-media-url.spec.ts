@@ -15,6 +15,13 @@ describe('local Writer media links', () => {
     expect(localMediaUrl(source, 'asset_ingest_6', 'http://127.0.0.1:65269'))
       .toBe(`http://127.0.0.1:65269/api/media/media_ingest_6${query}`)
   })
+  it('resolves a signed browser path while leaving unsigned media paths unchanged', () => {
+    const path = '/api/media/media_ingest_6'
+    expect(localMediaUrl(path + query, 'asset_ingest_6', 'http://127.0.0.1:65269'))
+      .toBe(`http://127.0.0.1:65269${path}${query}`)
+    expect(localMediaUrl(path, 'asset_ingest_6', 'http://127.0.0.1:65269')).toBe(path)
+    expect(localMediaUrl(path + query, 'asset_other', 'http://127.0.0.1:65269')).toBe(path + query)
+  })
   it.each([
     source.replace('media_ingest_6', 'media_other'), source.replace(signature, 'invalid'),
     source + '&token=secret', source + '#fragment', source.replace('https://', 'https://user:pass@'),

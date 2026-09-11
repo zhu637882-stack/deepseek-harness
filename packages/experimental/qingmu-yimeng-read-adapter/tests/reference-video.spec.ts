@@ -58,10 +58,10 @@ it('projects only versioned image/audio metadata from the current project asset 
   expect(JSON.stringify(result)).not.toContain('/private')
 })
 
-it('uses the returned media identity for signed thumbnails without guessing it from the asset', async () => {
+it.each(['https://public.example', ''])('uses the returned media identity for signed thumbnails from %s', async (origin) => {
   const signature = 'a'.repeat(64)
   const items = [{ id: 'asset_face', project_id: 'p', asset_type: 'image', sha256: 'b'.repeat(64),
-    display_name: '林予', preview_media_id: 'media_independent', public_url: `https://public.example/api/media/media_independent?expires=2000000000&signature=${signature}` }]
+    display_name: '林予', preview_media_id: 'media_independent', public_url: `${origin}/api/media/media_independent?expires=2000000000&signature=${signature}` }]
   const handler = createYimengReadHandler({}, { readToken: () => 'fixture', fetch: async () => Response.json({ page:1,page_size:200,pages:1,items }) })
   const result = await handler('referenceVideoAssets', { projectId:'p',page:1 }, signal())
   expect(result).toMatchObject({ ok:true,value:{ items:[{ assetId:'asset_face',label:'林予',browserUrl:`http://127.0.0.1:8115/api/media/media_independent?expires=2000000000&signature=${signature}` }] } })

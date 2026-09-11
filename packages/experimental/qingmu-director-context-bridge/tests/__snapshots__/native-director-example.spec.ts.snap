@@ -151,6 +151,7 @@ exports[`runs native asset methods and returns an editable design in the same dr
       "visualStyle": "写实",
     },
   },
+  "sceneDesignInRequest": true,
 }
 `;
 

@@ -97,6 +97,8 @@ it('carries resolved creation settings into the native design request before gen
   await waitFor(() => { expect(storyPort.send).toHaveBeenCalledTimes(1) })
   expect(storyPort.send.mock.calls[0]).toEqual([expect.any(String), expect.stringContaining(JSON.stringify(creativeSettings))])
   expect(storyPort.send.mock.calls[0]).toEqual([expect.any(String), expect.stringContaining('保留当前未保存的服装设计')])
+  expect(storyPort.send.mock.calls[0]).toEqual([expect.any(String), expect.stringContaining('无人空场不等于空房')])
+  expect(storyPort.send.mock.calls[0]).toEqual([expect.any(String), expect.stringContaining('由导演决定信息密度与留白')])
   expect(port.generateAssetImage).not.toHaveBeenCalled()
 })
 

@@ -14,7 +14,7 @@ const shots = [{ title: '邀请', narrative: '允许接近', visual: '门内望�
     dialoguePlan: [{ ...scene.dialogues[0], delivery: '犹豫后轻声' }] } }]
 afterEach(() => { cleanup(); localStorage.clear() })
 it('sends the whole-film basis and scene to the native director, then adopts the full design without saving it', async () => {
-  const text = JSON.stringify({ sourceScriptSha256: sha, sceneIndex: 1, shots })
+  const text = JSON.stringify({ sourceScriptSha256: sha, sourceAssetStateSha256: basis.stateSha256, sceneIndex: 1, shots })
   const port = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
     read: vi.fn(async () => ({ lastSeq: 10, running: false, finished: true, text, script: text, error: '' })) }
   const onAdopt = vi.fn()
@@ -27,7 +27,7 @@ it('sends the whole-film basis and scene to the native director, then adopts the
   expect(port.send.mock.calls[0]).toEqual([expect.any(String), expect.stringContaining(JSON.stringify(basis))])
   expect(port.send.mock.calls[0]).toEqual([expect.any(String), expect.stringContaining(JSON.stringify(scene))])
   fireEvent.click(await screen.findByRole('button', { name: '采用到分镜卡片' }))
-  expect(onAdopt).toHaveBeenCalledExactlyOnceWith(shots)
+  await waitFor(() => { expect(onAdopt).toHaveBeenCalledExactlyOnceWith(shots) })
 })
 it.each([
   { sourceScriptSha256: 'c'.repeat(64), sceneIndex: 1, shots },
@@ -59,4 +59,21 @@ it('does not use an asset design authored against an older script', async () => 
   await screen.findByText('素材设计对应的剧本已变化，请先回素材页更新依据。')
   expect(screen.getByRole<HTMLButtonElement>('button', { name: '让导演设计本场分镜' }).disabled).toBe(true)
   expect(port.send).not.toHaveBeenCalled()
+})
+
+it('rejects an otherwise valid completed director draft after asset changes without script changes', async () => {
+  const text = JSON.stringify({ sourceScriptSha256: sha, sourceAssetStateSha256: basis.stateSha256, sceneIndex: 1, shots })
+  localStorage.setItem('qingmu.scene-design-1-session.v1:p:e', JSON.stringify({ sessionId: 'existing', baseline: 1, submitted: true }))
+  const readAssetDesign = vi.fn().mockResolvedValueOnce(basis).mockResolvedValue({ ...basis, stateSha256: 'd'.repeat(64) })
+  const port = { prepare: vi.fn(), send: vi.fn(), read: vi.fn(async () => ({ lastSeq: 10, running: false, finished: true, text, script: text, error: '' })) }
+  const onAdopt = vi.fn()
+  render(<NativeSceneDesign projectId="p" episodeId="e" scene={scene} scriptSha256={sha}
+    readAssetDesign={readAssetDesign} storyPort={port} disabled={false} onAdopt={onAdopt} />)
+  const adopt = await screen.findByRole<HTMLButtonElement>('button', { name: '采用到分镜卡片' })
+  await waitFor(() => { expect(adopt.disabled).toBe(false) })
+  fireEvent.click(adopt)
+  await screen.findByText(/没有采用：素材或创作设定已更新/)
+  expect(onAdopt).not.toHaveBeenCalled()
+  expect(port.send).not.toHaveBeenCalled()
+  expect(screen.getByText(text)).toBeTruthy()
 })

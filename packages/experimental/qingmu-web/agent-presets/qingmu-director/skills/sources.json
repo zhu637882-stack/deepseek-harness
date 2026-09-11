@@ -701,7 +701,7 @@
       "license": "Apache-2.0",
       "files": {
         "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
-        "SKILL.md": "8d5975c4c68a03affe9a15b1b09a28d1ae6cad9e4353960f146aa690c911666e",
+        "SKILL.md": "a765cb2c8e7249bda31468b85d289f875682a3fd233282ffa4c3b20269b3c650",
         "references/cinematic-image-direction.md": "b2fc8b2dd6dbd1bcf78bc2671806575352db95481796dc5cae5a5c6a6befb945",
         "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
         "agents/openai.yaml": "7ffb6718d97e5858e5070dbf6e1330a7118f817c372dcb43da6ebb2949c16084"
@@ -713,7 +713,7 @@
         "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
         "agents/openai.yaml": "7ffb6718d97e5858e5070dbf6e1330a7118f817c372dcb43da6ebb2949c16084"
       },
-      "adaptation": "Full asset skill and references; Qingmu scope and delegated creative-review precedence added.",
+      "adaptation": "Full asset skill and references; Qingmu creative delegation, narrative production design, intentional negative space and image-review diagnosis added.",
       "adaptedFiles": [
         "SKILL.md"
       ]

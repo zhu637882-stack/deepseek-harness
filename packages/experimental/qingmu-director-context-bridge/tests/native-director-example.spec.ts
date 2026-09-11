@@ -69,9 +69,10 @@ it('runs native asset methods and returns an editable design in the same draft c
   const result = await runNativeDirectorExample('assets')
   expect(result.calls).toEqual(['skill', 'skill', 'skill', 'skill'])
   expect(result.results.every(text => !text.includes('Unknown skill'))).toBe(true)
+  expect(result.sceneDesignInRequest).toBe(true)
   const design: unknown = JSON.parse(result.assetDraft!.script)
   expect(design).toMatchObject({ assets: [{ kind: 'prop', name: '桌扇' }] })
-  expect({ calls: result.calls, design }).toMatchSnapshot()
+  expect({ calls: result.calls, sceneDesignInRequest: result.sceneDesignInRequest, design }).toMatchSnapshot()
 })
 
 it('designs an unbound scene through native director and camera methods with full department output', async () => {

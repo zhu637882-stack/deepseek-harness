@@ -7,14 +7,14 @@ export function localMediaUrl(source: string, assetId: string, upstream: string)
   return localSignedMediaUrl(source, assetId.replace(/^asset_/, 'media_'), upstream)
 }
 
-/** Resolve a signed media capability using the media identity supplied by Writer. */
+/** Resolve a signed absolute URL or browser path using the media identity supplied by Writer. */
 export function localSignedMediaUrl(source: string, mediaId: string, upstream: string): string {
   const base = new URL(upstream)
   if (!['http:', 'https:'].includes(base.protocol) || !(base.hostname === 'localhost' || base.hostname === '[::1]' || /^127\.(?:\d+\.){2}\d+$/.test(base.hostname))) {
     throw new Error('media upstream must be the configured loopback Writer')
   }
   let url: URL
-  try { url = new URL(source) } catch { return source }
+  try { url = new URL(source, base) } catch { return source }
   if (!/^media_[A-Za-z0-9_-]+$/.test(mediaId)
     || !['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash
     || !url.pathname.endsWith(`/api/media/${mediaId}`)

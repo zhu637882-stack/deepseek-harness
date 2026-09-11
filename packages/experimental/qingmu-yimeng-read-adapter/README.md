@@ -195,3 +195,5 @@ unavailable). Local files use the same private preview and output SHA checks. Th
 External originals use versioned Take, acceptance and review feeds while generated-only feeds retain v1. Their origin binds the upload receipt, source registration, video bytes and shot revision without claiming platform execution. Review v2 exposes current origins so source changes invalidate old decisions even when the comment subject is unchanged. Editorial v2 can bind a decoded original MP4 as picture and embedded audio; it still requires current QC and approval.
 
 Comment timecodes use the nearest millisecond; original media duration and SHA remain unchanged. Missing media or source registration stays readable as a blocked handoff with no current approval. Current origins only reference readable Take subjects; historical decisions remain visible without current authority.
+
+Signed media previews accept an absolute URL or a Writer-relative browser path and resolve only to the configured loopback Writer. Unsigned paths and mismatched media identities remain unavailable. A local browser preview does not require a public address for Provider access.

@@ -34,7 +34,7 @@ export function NativeStoryComposer({ port, projectId, episodeId, source, settin
   readonly source: string
   readonly settings: string
   readonly disabled: boolean
-  readonly onAdopt: (text: string) => void
+  readonly onAdopt: (text: string) => void | Promise<void>
 }) {
   const key = `qingmu.${purpose?.key ?? 'story'}-session.v1:${projectId}:${episodeId}`
   const [request, setRequest] = useState(() => restore(key))
@@ -78,6 +78,16 @@ export function NativeStoryComposer({ port, projectId, episodeId, source, settin
     } finally { lock.current = false; if (mounted.current) setBusy(false) }
   }
   const pending = request?.submitted === true && !result?.finished
+  async function adoptResult(text: string) {
+    if (disabled || lock.current) return
+    lock.current = true; setBusy(true)
+    try {
+      await onAdopt(text)
+      if (mounted.current) setNotice(purpose?.adopted ?? '已放入剧本文字。可继续修改，解析后保存为本集剧本。')
+    } catch (error) {
+      if (mounted.current) setNotice(`没有采用：${error instanceof Error ? error.message : String(error)}`)
+    } finally { lock.current = false; if (mounted.current) setBusy(false) }
+  }
   return <section className={css.composer} aria-label={purpose?.title ?? 'AI 编剧'}>
     <h4>{purpose?.title ?? '让青木写剧本'}</h4>
     <p>{purpose?.description ?? '把故事想法或修改要求写在下方，青木会调用编剧与导演方法，给出一份可编辑的完整稿。'}</p>
@@ -89,9 +99,7 @@ export function NativeStoryComposer({ port, projectId, episodeId, source, settin
     {result?.error && <p role="alert">创作未完成：{result.error}</p>}
     {result?.text && <details open={!purpose}><summary>{purpose ? '查看完整设计文字' : '编剧完整稿'}</summary><pre>{result.text}</pre></details>}
     {result?.script && <button type="button" disabled={disabled || busy} onClick={() => {
-      try {
-        onAdopt(result.script); setNotice(purpose?.adopted ?? '已放入剧本文字。可继续修改，解析后保存为本集剧本。')
-      } catch (error) { setNotice(`没有采用：${error instanceof Error ? error.message : String(error)}`) }
+      void adoptResult(result.script)
     }}>{purpose?.adopt ?? '采用到剧本文字'}</button>}
     {result?.finished && !result.error && !result.script && <p>这次返回缺少可采用的独立正文块。可参考完整文字，重新发起创作。</p>}
   </section>
