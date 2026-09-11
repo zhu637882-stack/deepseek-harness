@@ -827,6 +827,10 @@ export interface QingmuYimengCommandPort {
     signal?: AbortSignal,
   ): Promise<YimengRecoverReferenceRightsExceptionReleaseResponse>
   proposeScript(request: YimengProposeScriptRequest, signal?: AbortSignal): Promise<YimengProposeScriptResponse>
+  /** Load candidate choices and retained local MP4 cuts. */
+  readWorkingCut(request: CreationScope, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').WorkingCutState>
+  /** Save an ordered cut and queue one recoverable local render. */
+  renderWorkingCut(request: CreationScope & { command: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').WorkingCutCommand }, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').WorkingCutState>
   readAssetDesign(request: CreationScope, signal?: AbortSignal): Promise<AssetDesignState>
   saveAssetDesign(request: CreationScope & { expectedStateSha256: string; design: AssetDesign },
     signal?: AbortSignal): Promise<AssetDesignState>

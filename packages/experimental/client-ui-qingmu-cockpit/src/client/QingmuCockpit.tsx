@@ -29,6 +29,7 @@ import { GenerationGateAControlEvidence } from './GenerationGateAControlEvidence
 import { TakeVersionCompareView } from './TakeVersionCompareView.tsx'
 import { EpisodeEvidenceLedger } from './EpisodeEvidenceLedger.tsx'
 import { EditorialHandoff } from './EditorialHandoff.tsx'
+import { WorkingCut } from './WorkingCut.tsx'
 import css from './QingmuCockpit.module.css'
 import { NativeAssetDesign } from './NativeAssetDesign.tsx'
 import { ProjectAssetLibrary } from './ProjectAssetLibrary.tsx'
@@ -951,10 +952,12 @@ export function QingmuCockpit({
       </div>,
       shooting: shotView,
       delivery: <div className={css.creativePage}>
-        {pageHeader('05', '导出与交接', '汇集已经选用的镜头，检查缺口，再导出给后期制作。', null)}{projectFacts}
+        {pageHeader('05', '成片与导出', '选择视频版本，调整剪辑，导出可播放的完整作品。', null)}{projectFacts}
         <div className={css.stageActions}><button type="button" onClick={() => { changeStep('shooting') }}>← 返回拍摄与审看</button></div>
-        <div className={css.stageContent}><EditorialHandoff compact projectId={projectId} episodeId={episodeId}
-          port={port} t={t} onOpenShooting={openCandidateReview} /></div>
+        <div className={css.stageContent}><WorkingCut key={`${projectId}:${episodeId}`} projectId={projectId} episodeId={episodeId} port={port} onOpenShooting={openCandidateReview} />
+          <details className={css.stageSupporting}><summary>专业剪辑交接与审核记录</summary>
+            <EditorialHandoff compact projectId={projectId} episodeId={episodeId}
+              port={port} t={t} onOpenShooting={openCandidateReview} /></details></div>
       </div>,
     }
     return <QingmuApplicationFrame projects={projects.map(p => ({ id: stringOf(p.id) ?? '', label: projectLabel(p, '未命名项目') }))}

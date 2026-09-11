@@ -306,7 +306,7 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
         && videoRefreshGeneration.current === generation) setLoad('failed')
     })
     return () => controller.abort()
-  }, [current?.shotId, episodeId, port, projectId])
+  }, [current?.shotId, episodeId, port, projectId, projection])
   useEffect(() => {
     if (current === undefined) return
     const scope = { projectId, episodeId, frameId: current.shotId }
@@ -515,7 +515,8 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
           {!firstFrameOpen && (requirementsReady ? <button className={!historyOpen && !primary && productionAction === 'first-frame' ? css.primary : undefined} type="button" onClick={() => showMediaPane('first-frame')}>{heroFrame || hasFrameCandidate ? '重新生成首帧' : '生成首帧'}</button> : <button className={css.linkAction} type="button" onClick={returnToStoryboard}>返回分镜核对要求</button>)}
           {onProductionAction && <button className={!firstFrameOpen && !historyOpen && !primary && productionAction === 'video' ? css.primary : undefined} type="button" onClick={() => onProductionAction('video', current.shotId)}>{versions.length ? '重新生成视频' : '生成视频'}</button>}
           {!historyOpen && <button className={css.linkAction} type="button" onClick={() => showMediaPane('history')}>查看首帧历史</button>}
-          {!firstFrameOpen && !historyOpen && selectionEntryVisible && <button className={`${css.primary} ${css.selectionAction}`} type="button"
+          {!firstFrameOpen && !historyOpen && versions.length > 0 && <button type="button" onClick={() => onNavigate('delivery')}>去成片剪辑</button>}
+          {!firstFrameOpen && !historyOpen && selectionEntryVisible && canSelect && <button className={`${css.primary} ${css.selectionAction}`} type="button"
             disabled={!primary || selecting} onClick={() => { void selectCurrent() }}>{selecting ? '正在选择视频…' : !canSelect ? '当前账号没有选片权限' : primary ? '选择此视频，进入审看' : '当前视频暂不能选择'}</button>}
         </div>
         {zoom && <div className={css.zoom} role="dialog" aria-modal="true" aria-label="放大画面"><div className={css.zoomToolbar}><button type="button" onClick={closeZoom}>关闭放大查看</button><button type="button" onClick={() => setScale(value => Math.min(3, value + 0.25))}>放大</button><button type="button" onClick={() => setScale(value => Math.max(1, value - 0.25))}>缩小</button><button type="button" onClick={resetZoom}>还原位置</button></div><div className={css.zoomCanvas} tabIndex={0} aria-label="放大预览，方向键移动画面" onKeyDown={(event) => { const step = 40; if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return; event.preventDefault(); setOffset(old => ({ x: old.x + (event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0), y: old.y + (event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0) })) }} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={() => { drag.current = undefined }} onPointerCancel={() => { drag.current = undefined }}>{sourceIsVideo ? <video src={sourceUrl} controls playsInline style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }} /> : sourceUrl !== undefined && <img src={sourceUrl} alt={`镜 ${current.frameNo} 首帧`} style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }} />}</div></div>}

@@ -123,7 +123,18 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
       if (controller.signal.aborted) return
       setDraftState(state)
       if (state.draft) void readMaterials(state)
-      if (epoch.current === 0) setDraftMessage(state.draft ? '此镜头有已存草稿，可恢复后继续编辑。' : '尚无已存草稿。')
+      if (epoch.current === 0) {
+        if (state.draft) {
+          setChosen(state.draft.request.bindings.map(binding => ({ ...binding, browserUrl: '', mediaType: state.mediaTypes[binding.bindingToken] ?? 'unavailable' })))
+          setParts(state.draft.request.promptParts); setParameters(state.draft.request.parameters)
+          setDirectorSourceSha256(state.draft.request.directorSourceSha256)
+          activeText.current = { index: 0, start: 0, end: 0 }
+          setSourceAccepted(state.draft.frameSha256 === state.frameSha256)
+          setSavedEpoch(0)
+        }
+        setDraftLoaded(true)
+        setDraftMessage(state.draft ? `已载入草稿版本 ${state.draft.revision}。` : '尚无已存草稿。')
+      }
     }).catch(() => { if (!controller.signal.aborted) setDraftMessage('草稿状态读取失败；当前试排仍可预览，请重新读取。') })
     return () => {
       controller.abort(); previewAbort.current?.abort(); assetsAbort.current?.abort()
@@ -404,6 +415,13 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
       {directorSourceSha256 !== draftState.directorSource.sha256 && <p role="status">
         导演设计尚未同步到这份生成稿。请结合设计修改运镜、表演、声音和引用，也可交给青木导演整理。
       </p>}
+      <button type="button" disabled={busy || saving} onClick={() => {
+        const source = draftState.directorSource
+        if (!source) return
+        setParts(previous => previous.some(part => 'text' in part && part.text.includes(source.prompt))
+          ? previous : [...previous, { text: `\n${source.prompt}\n` }])
+        setDirectorSourceSha256(source.sha256); invalidate()
+      }}>加入完整导演设计</button>
       <label><input type="checkbox" checked={directorSourceSha256 === draftState.directorSource.sha256}
         onChange={(event) => {
           setDirectorSourceSha256(event.target.checked ? draftState.directorSource?.sha256 : undefined); invalidate()

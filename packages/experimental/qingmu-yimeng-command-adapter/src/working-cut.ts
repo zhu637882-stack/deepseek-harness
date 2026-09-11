@@ -1,0 +1,86 @@
+/** Editable candidate choices and local MP4 cuts; no formal approval is inferred. */
+import type { CreationScope } from './creation.ts'
+import type { YimengCommandJsonObject } from './types.ts'
+
+/** Exact source and playback range in one ordered cut. */
+export interface WorkingClip {
+  readonly frameId: string
+  readonly assetId: string
+  readonly sha256: string
+  readonly inSec: number
+  readonly outSec: number
+}
+/** Recoverable command for one immutable timeline revision and local render. */
+export interface WorkingCutCommand {
+  readonly requestId: string
+  readonly expectedRevision: number
+  readonly clips: readonly WorkingClip[]
+}
+/** Current shot choices plus retained MP4 versions. */
+export interface WorkingCutState extends CreationScope {
+  readonly schema: 'qingmu-working-cut-v1'
+  readonly revision: number
+  readonly shots: readonly {
+    readonly frameId: string
+    readonly frameNo: number
+    readonly title: string
+    readonly candidates: readonly {
+      readonly assetId: string
+      readonly sha256: string
+      readonly duration: number
+      readonly taskId: string
+      readonly url: string
+    }[]
+  }[]
+  readonly cuts: readonly {
+    readonly revisionId: string
+    readonly version: number
+    readonly clips: readonly WorkingClip[]
+    readonly requestId: string
+    readonly taskId: string | null
+    readonly status: string
+    readonly errorCode: string | null
+    readonly assetId: string | null
+    readonly sha256: string | null
+    readonly url: string
+  }[]
+  readonly providerCalls: 0
+  readonly humanApprovalChanged: false
+}
+/** Prepare authenticated fixed-scope working-cut reads and local renders.
+ * @param endpoint - Read or render operation.
+ * @param value - Untrusted browser payload.
+ * @param helpers - Host error factories.
+ * @returns Fixed route, validated body and scoped response parser.
+ */
+export function prepareWorkingCut(endpoint: string, value: unknown, helpers: {
+  inputError: (message: string) => Error
+  responseError: (message: string) => Error
+}): { path: string; method: 'GET' | 'POST'; body: YimengCommandJsonObject | undefined; normalize: (value: unknown) => WorkingCutState } {
+  const fail = helpers.inputError
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw fail('working cut object required')
+  const raw = value as Record<string, unknown>
+  const id = (v: unknown): string => {
+    if (typeof v !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(v)) throw fail('working cut scope invalid')
+    return v
+  }
+  const projectId = id(raw.projectId), episodeId = id(raw.episodeId)
+  const render = endpoint === 'renderWorkingCut'
+  const fields = render ? ['projectId', 'episodeId', 'command'] : ['projectId', 'episodeId']
+  if (Object.keys(raw).some(k => !fields.includes(k))) throw fail('working cut field invalid')
+  let body: YimengCommandJsonObject | undefined
+  if (render) {
+    if (!raw.command || typeof raw.command !== 'object' || Array.isArray(raw.command)) throw fail('working cut command required')
+    body = raw.command as YimengCommandJsonObject
+  } else if (endpoint !== 'readWorkingCut') throw fail('working cut endpoint invalid')
+  return { path: `/api/qingmu/projects/${projectId}/episodes/${episodeId}/working-cut${render ? '/render' : ''}`,
+    method: render ? 'POST' : 'GET', body,
+    normalize: (value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw helpers.responseError('working cut response invalid')
+      const state = value as WorkingCutState
+      if (state.schema !== 'qingmu-working-cut-v1' || state.projectId !== projectId || state.episodeId !== episodeId
+        || !Array.isArray(state.shots) || !Array.isArray(state.cuts) || !Number.isSafeInteger(state.revision)
+        || state.providerCalls !== 0 || state.humanApprovalChanged !== false) throw helpers.responseError('working cut response scope invalid')
+      return state
+    } }
+}

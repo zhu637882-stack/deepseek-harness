@@ -1,0 +1,19 @@
+.panel { padding: 24px; background: var(--qm-surface, #181a1a); color: var(--qm-text, #efefed); border: 1px solid #343733; border-radius: 16px; }
+.panel header { display: flex; justify-content: space-between; gap: 20px; align-items: start; }
+.panel h2 { margin: 0 0 8px; }
+.panel p { color: #b1b6ac; line-height: 1.6; }
+.panel button, .panel select, .panel input { border: 1px solid #4b5145; border-radius: 7px; background: #22251f; color: inherit; padding: 8px 10px; font: inherit; }
+.panel button { cursor: pointer; }
+.panel button:disabled { opacity: .45; cursor: default; }
+.panel input { width: 80px; }
+.clips { list-style: none; padding: 0; display: grid; gap: 10px; }
+.clips li { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px; background: #121510; border-radius: 8px; }
+.clips strong { min-width: 48px; }
+.actions { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; margin: 24px 0; }
+.actions button { background: #c4f169; color: #142004; font-weight: 650; }
+.actions span { font-size: 13px; color: #a7b09a; }
+.panel video { display: block; width: 100%; max-height: 540px; background: #000; border-radius: 8px; margin: 12px 0; }
+.panel a { color: #c4f169; display: inline-block; margin: 8px 0; }
+.clips details { max-width: 360px; }
+.panel summary { cursor: pointer; }
+@media (max-width: 700px) { .panel { padding: 14px; } .panel header { flex-direction: column; } }

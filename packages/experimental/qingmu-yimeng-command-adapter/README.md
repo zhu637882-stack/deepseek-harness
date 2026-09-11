@@ -173,3 +173,5 @@ no generation queue and no selection change. An imported file remains an unverif
 The existing Take selection command accepts a playable local video with a current source registration for review. Selection leaves its quality pending and creates neither generation lineage nor approval. QC and lifecycle commands accept the exact external acceptance subject. Source or media drift rejects fresh commands; uncertain results use the original receipt lookup.
 
 Base-style previews use the read-only same-origin `/api/qingmu/creation-style-preview?styleId=…` route. It accepts a strict catalog ID, fetches only the fixed Writer WebP path, rejects redirects and validates media type and size. Creation options expose this Host URL only for an existing matching catalog image; browser credentials are not forwarded upstream.
+
+`readWorkingCut` and `renderWorkingCut` use owner-scoped routes for completed reference-video candidates. Rendering is local, persists an immutable timeline revision, recovers by request identity and leaves formal approval unchanged.

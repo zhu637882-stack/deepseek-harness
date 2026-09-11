@@ -630,6 +630,8 @@ function shotRelationMethod(request: Parameters<QingmuYimengPort['shotRelationMe
 
 function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
   const base: QingmuYimengPort = {
+    readWorkingCut: vi.fn(async () => { throw new Error('Dedicated working cut fixture') }),
+    renderWorkingCut: vi.fn(async () => { throw new Error('Dedicated working cut fixture') }),
     readAssetVoiceRuns: vi.fn(async () => { throw new Error('Dedicated asset fixture') }),
     quoteAssetVoice: vi.fn(async () => { throw new Error('Dedicated asset fixture') }),
     generateAssetVoice: vi.fn(async () => { throw new Error('Dedicated asset fixture') }),

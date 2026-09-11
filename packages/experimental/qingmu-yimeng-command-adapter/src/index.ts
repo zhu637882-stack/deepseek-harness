@@ -4,6 +4,7 @@ import { prepareReferenceVideoReview } from './reference-video-review.ts'
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { prepareCreationCommand, prepareCreationOptionsRead } from './creation.ts'
 import { prepareAssetDesign } from './asset-design.ts'
+import { prepareWorkingCut } from './working-cut.ts'
 import { prepareScenePlanning } from './scene-planning.ts'
 import { prepareLocalReferenceCandidate } from './local-reference-candidate.ts'
 import { prepareLocalVoiceCandidate } from './local-voice-candidate.ts'
@@ -5841,6 +5842,11 @@ export function createYimengCommandHandler(
           ...(prepared.request.idempotencyKey === undefined ? {} : { idempotencyKey: prepared.request.idempotencyKey }),
         }
         normalize = prepared.normalize
+      } else if (['readWorkingCut', 'renderWorkingCut'].includes(endpoint)) {
+        const prepared = prepareWorkingCut(endpoint, payload, stageArtifactHelpers)
+        path = prepared.path
+        requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
+        normalize = prepared.normalize
       } else if (['readAssetDesign', 'saveAssetDesign', 'quoteAssetImage', 'generateAssetImage', 'readAssetImageRuns', 'quoteAssetVoice', 'generateAssetVoice', 'readAssetVoiceRuns'].includes(endpoint)) {
         const prepared = prepareAssetDesign(endpoint, payload, stageArtifactHelpers)
         path = prepared.path
@@ -6259,6 +6265,7 @@ export function createYimengCommandHandler(
         || endpoint === 'recoverReworkRoute'
         || endpoint === 'probeReworkRouteAuthority'
       const requiresCredentialReflectionGuard = isStageArtifactCommand
+        || ['readWorkingCut', 'renderWorkingCut'].includes(endpoint)
         || ['readAssetDesign', 'saveAssetDesign', 'quoteAssetImage', 'generateAssetImage', 'readAssetImageRuns', 'quoteAssetVoice', 'generateAssetVoice', 'readAssetVoiceRuns'].includes(endpoint)
         || ['readScenePlanning', 'saveScenePlanning', 'recoverScenePlanning'].includes(endpoint)
         || ['readCreativeContract', 'initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)

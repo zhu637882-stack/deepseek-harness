@@ -213,6 +213,8 @@ export function apply(ctx: ClientContext): void {
     readLocalVoiceCandidateContent: (request, signal) => command('readLocalVoiceCandidateContent', request, signal),
     qualifyLocalReferenceCandidate: (request, signal) => command('qualifyLocalReferenceCandidate', request, signal),
     recoverLocalReferenceQualification: (request, signal) => command('recoverLocalReferenceQualification', request, signal),
+    readWorkingCut: (request, signal) => command('readWorkingCut', request, signal),
+    renderWorkingCut: (request, signal) => command('renderWorkingCut', request, signal),
     readAssetDesign: (request, signal) => command('readAssetDesign', request, signal),
     saveAssetDesign: (request, signal) => command('saveAssetDesign', request, signal),
     quoteAssetImage: (request, signal) => command('quoteAssetImage', request, signal),

@@ -98,14 +98,12 @@ it('restores saved source tokens, literal dialogue and controls after remount', 
   view.unmount()
   render(<ReferenceVideoWorkspace projectId="p" frameId="f" initialPrompt="另一段初始文字" port={port} />)
   fireEvent.click(screen.getByText('精确引用 · 导演稿与候选'))
-  await screen.findByText('此镜头有已存草稿，可恢复后继续编辑。')
-  expect(screen.getByRole('button', { name: '保存引用草稿' }).hasAttribute('disabled')).toBe(true)
-  fireEvent.click(screen.getByRole('button', { name: '恢复已存草稿（替换当前试排）' }))
-  await screen.findByText('已恢复草稿版本 1。')
+  await screen.findByText('已载入草稿版本 1。')
+  expect(screen.getByRole('button', { name: '保存引用草稿' }).hasAttribute('disabled')).toBe(false)
   fireEvent.click(screen.getByRole('button', { name: '预览实际请求' }))
   await screen.findByRole('region', { name: '阿里请求预览' })
   expect(port.referenceVideoPreview.mock.calls[0]?.[0]).toEqual({ projectId: 'p', ...saved?.request })
-  expect(screen.getByRole('status').textContent).toBe('已恢复草稿版本 1。')
+  expect(screen.getByRole('status').textContent).toBe('已载入草稿版本 1。')
 })
 
 it('keeps edits made while a save is pending and advances only the saved revision', async () => {
@@ -389,4 +387,17 @@ it('shows the current design without silently rewriting or blessing an old promp
     directorSourceSha256: directorSource.sha256, promptParts: [{ text: directorSource.prompt }],
   })
   expect(port.queueReferenceVideo).not.toHaveBeenCalled()
+})
+
+it('copies complete current direction into the request without dropping authored dialogue or duplicating it', async () => {
+  const directorSource = { sha256: 'b'.repeat(64), prompt: '完整导演：先推近，停顿，再反打；气声回答，保留全部表演与声音。' }
+  const { port } = mount({ directorSource }); await chooseAll()
+  fireEvent.click(screen.getByRole('button', { name: '加入完整导演设计' }))
+  fireEvent.click(screen.getByRole('button', { name: '加入完整导演设计' }))
+  fireEvent.click(screen.getByRole('button', { name: '保存引用草稿' }))
+  await screen.findByText('已保存草稿版本 1。')
+  expect(port.saveReferenceVideoDraft.mock.calls[0]?.[0].request.promptParts).toEqual([
+    { text: '陈远说：‘图1不应被替换。’' }, { text: `\n${directorSource.prompt}\n` },
+  ])
+  expect(port.saveReferenceVideoDraft.mock.calls[0]?.[0].request.directorSourceSha256).toBe(directorSource.sha256)
 })
