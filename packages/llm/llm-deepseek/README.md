@@ -37,11 +37,12 @@ The package root exposes the Cordis plugin contract and `DeepSeekAdapter`; wire 
         maxDelayMs: 10000
         jitterRatio: 0.1
     defaultContextWindow: 1000000 # optional positive-integer fallback; this is the default
-    models:                  # optional; defaults to V4 Flash, V4 Pro, and V4 Flash Vision Exp
-      - id: deepseek-v4-flash
-        name: DeepSeek-V4-Flash
+    models:                  # optional; defaults to V4.1 Flash, V4 Pro, and both legacy Flash aliases
+      - id: deepseek-flash
+        name: DeepSeek-V4.1-Flash
+        inputModalities: [text, image]
       - id: deepseek-v4-flash-vision-exp
-        name: DeepSeek-V4-Flash-Vision-Exp
+        name: DeepSeek-V4.1-Flash (vision-exp alias)
         inputModalities: [text, image]
         imagePixelBudget: 640000
         imageMaxBytes: 1048576
@@ -50,7 +51,7 @@ The package root exposes the Cordis plugin contract and `DeepSeekAdapter`; wire 
         contextWindow: 512000
 ```
 
-The plugin registers the single provider route `deepseek-official` together with its resolved `retryPolicy`; omission resolves to normal mode with five retries. A request selects it with `provider: deepseek-official`; its `model` is passed through as the wire `model` string, so changing DeepSeek models does not require lifecycle-time registration. Omitting `models` advertises `deepseek-v4-flash`, `deepseek-v4-pro`, and the image-capable `deepseek-v4-flash-vision-exp`, each with a 1,000,000-token context window; an explicit list replaces those defaults, while `models: []` advertises none. Catalog entries are exposed through `ctx.llm.listModels('deepseek-official')` for clients such as ACP editors and the Web selector, but remain advisory: unlisted model ids still pass through unchanged as text-only routes. An omitted entry name defaults to its id, and omitted `inputModalities` means `text` only.
+The plugin registers the single provider route `deepseek-official` together with its resolved `retryPolicy`; omission resolves to normal mode with five retries. A request selects it with `provider: deepseek-official`; its `model` is passed through as the wire `model` string, so changing DeepSeek models does not require lifecycle-time registration. Omitting `models` advertises image-capable `deepseek-flash` (V4.1 Flash), text-only `deepseek-v4-pro`, and the image-capable compatibility aliases `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp`, each with a 1,000,000-token context window; an explicit list replaces those defaults, while `models: []` advertises none. Catalog entries are exposed through `ctx.llm.listModels('deepseek-official')` for clients such as ACP editors and the Web selector, but remain advisory: unlisted model ids still pass through unchanged as text-only routes. An omitted entry name defaults to its id, and omitted `inputModalities` means `text` only. Use `deepseek-flash` for new configurations; the [official release notes](https://api-docs.deepseek.com/updates/) document both legacy aliases routing to V4.1 Flash. Explicit custom catalogs must declare image support themselves.
 
 An image-capable catalog entry declares `inputModalities: [text, image]` and may set `imagePixelBudget`, `imageMaxBytes`, or `imageDetail: low`. The ordinary default is 640,000 total pixels and 1MiB encoded bytes; low detail defaults to 512 by 512 total pixels. The attachment store scales by `min(1, sqrt(pixelBudget / (width * height)))` and rounds inward to keep the pixel count at or below the hard cap, so a 2048 by 1024 normalized attachment becomes about 1130 by 565 instead of a forced square. Request encoders run lazily: low-color images try PNG (palette only without alpha) then WebP 85 and 80, other alpha images try WebP 85 then 80, and other opaque images try JPEG 85 then 80; dimensions shrink only when both quality attempts exceed 1MiB. Concurrent generation of one `variantId` shares one transform. A caller can cancel its own wait without interrupting other waiters; the transform stops when no waiter remains. The adapter normally uploads the exact derived request bytes through `POST /files` and sends `{type: "file", file_id}` blocks. A failed or timed-out file-id resolution rebuilds the whole chat request with those same request versions as base64 data URLs; one request never mixes file ids and inline images. Every retained image is preceded by stable text naming the complete attachment id and actual request dimensions. User, tool-result, agent-loop, compaction, and direct `ctx.llm.stream` requests all use this projection. Text-only routes receive stable attachment placeholders while durable history keeps its image references.
 

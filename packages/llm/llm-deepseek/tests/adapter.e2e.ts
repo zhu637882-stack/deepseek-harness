@@ -28,9 +28,9 @@ import { assemble, type AssembledResult } from './assemble.ts'
  * requires $DEEPSEEK_VISION_E2E=1 (see vitest.e2e.config.ts).
  */
 
-const FLASH = 'deepseek-v4-flash'
+const FLASH = 'deepseek-flash'
 const PRO = 'deepseek-v4-pro'
-const VISION = 'deepseek-v4-flash-vision-exp'
+const VISION = 'deepseek-flash'
 const VISION_E2E_ENABLED = process.env.DEEPSEEK_VISION_E2E === '1'
 const TEST_PNG = Uint8Array.from(readFileSync(
   new URL('../../llm-pi-ai/tests/fixtures/qr-code.png', import.meta.url),

@@ -635,7 +635,7 @@ export interface ImagoMethodAdapterConfig {
 }
 ```
 
-Source: [`packages/experimental/qingmu-imago-method-adapter/src/index.ts:616`](../packages/experimental/qingmu-imago-method-adapter/src/index.ts)
+Source: [`packages/experimental/qingmu-imago-method-adapter/src/index.ts:632`](../packages/experimental/qingmu-imago-method-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-qingmu-yimeng-command-adapter"></a>
 
@@ -687,7 +687,7 @@ export interface YimengCommandAdapterConfig {
 }
 ```
 
-Source: [`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:493`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
+Source: [`packages/experimental/qingmu-yimeng-command-adapter/src/index.ts:505`](../packages/experimental/qingmu-yimeng-command-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-qingmu-yimeng-read-adapter"></a>
 
@@ -707,7 +707,7 @@ export interface YimengReadAdapterConfig {
 }
 ```
 
-Source: [`packages/experimental/qingmu-yimeng-read-adapter/src/index.ts:415`](../packages/experimental/qingmu-yimeng-read-adapter/src/index.ts)
+Source: [`packages/experimental/qingmu-yimeng-read-adapter/src/index.ts:422`](../packages/experimental/qingmu-yimeng-read-adapter/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-tool-agent-team"></a>
 
@@ -1026,7 +1026,7 @@ export interface Config {
   maxTokens?: number
   /** Positive context capacity used when the selected model has no exact value (default 1,000,000). */
   defaultContextWindow?: number
-  /** Advisory models shown by discovery consumers; defaults to V4 Flash, V4 Pro, and V4 Flash Vision Exp. */
+  /** Advisory models shown by discovery consumers; defaults to V4.1 Flash, V4 Pro, and both legacy Flash aliases. */
   models?: DeepSeekCatalogModel[]
   /** Maximum provider idle time while one stream read is outstanding (default five minutes). */
   streamIdleTimeoutMs?: number
@@ -1079,7 +1079,7 @@ export interface DeepSeekCatalogModel {
 
 Depends on: [`ModelModality`](../packages/llm/llm/src/index.ts) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts)
 
-Source: [`packages/llm/llm-deepseek/src/index.ts:107`](../packages/llm/llm-deepseek/src/index.ts)
+Source: [`packages/llm/llm-deepseek/src/index.ts:122`](../packages/llm/llm-deepseek/src/index.ts)
 
 <a id="deepseek-aidsh-llm-pi-ai"></a>
 
