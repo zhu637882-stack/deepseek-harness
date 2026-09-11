@@ -1,5 +1,7 @@
 # Qingmu OS production cockpit
 
+The native creation entry identifies the current stage and supplies its source. Screenplay, asset and scene drafts do not require a shot binding; bound-shot read/write rules apply only to existing-shot editing. The director method checks actual screenplay action prerequisites, object transfers, device states and visible world exceptions before returning a draft. Duration remains an estimate until measured.
+
 When no official cover exists, visible project cards reuse private, owner-scoped reference reads and label the image as a material preview. Saved creation settings show the chosen style, style pack and director method by name.
 
 The project library shows saved media covers and separates active, archived and all projects. Owner-editable projects can be renamed, archived and restored through the same Writer metadata service. Archiving retains episodes and assets, and does not cancel generation or revoke editing. Reload reads the saved status; a failed save retains the name draft and reports the error.

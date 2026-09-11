@@ -70,7 +70,8 @@ export function NativeStoryComposer({ port, projectId, episodeId, source, settin
       if (previous.running) { persist({ ...current, submitted: true }); setNotice('原创作仍在运行，正在读取进展。'); return }
       const next = { ...current, baseline: previous.lastSeq, submitted: true }
       persist(next); setResult(undefined)
-      await port.send(current.sessionId, purpose?.prompt ?? `为青木当前项目写出完整可拍摄的中文短剧。项目：${projectId}，剧集：${episodeId}。本次文字是当前创作依据，不读取其他项目或镜头。\n创作设定：${settings}\n创作原点或现有稿：\n${source}\n请实际读取 cinematic-director、open-film-writer 及其必要写作参考，先理解人物目标、因果与关系变化，再完成自然对白和可见行动；不要只返回大纲或计划。完整剧本单独放在一个 txt 代码块，格式为“场景一：地点·时间”“动作：具体动作”“姓名：台词”，每项各占一行。人物表、导演阐述和时长安排放在代码块外。遵守本项目已选风格和时长。新构思由你提出供用户采用；不要改动现有正式剧本或媒体，不声称用户已审看。`)
+      const prompt = purpose?.prompt ?? `为青木当前项目写出完整可拍摄的中文短剧。项目：${projectId}，剧集：${episodeId}。本次文字是当前创作依据，不读取其他项目或镜头。\n创作设定：${settings}\n创作原点或现有稿：\n${source}\n请实际读取 cinematic-director、open-film-writer 及其必要写作参考，先理解人物目标、因果与关系变化，再完成自然对白和可见行动；不要只返回大纲或计划。完整剧本单独放在一个 txt 代码块，格式为“场景一：地点·时间”“动作：具体动作”“姓名：台词”，每项各占一行。理解剧情不可缺少的年代、人物关系和世界例外必须落实到正文中可见或可听的事实；人物表、导演阐述和时长估算放在代码块外。交稿前从正文检查关键道具的持有、位置、连接与运行状态，以及行动前提和结果；发现矛盾先修正文，允许有据可循的省略剪辑。遵守本项目已选风格和时长。新构思由你提出供用户采用；不要改动现有正式剧本或媒体，不声称用户已审看。`
+      await port.send(current.sessionId, `本次工作阶段：${purpose?.title ?? '整集编剧'}。入口已提供本次来源，输出供本页采用的候选正文；不是已有镜头修改，不要求镜头绑定，不调用镜头写入工具。只有完成本页采用与保存后才成为项目正式内容。\n${prompt}`)
       setNotice('青木已开始创作。你可以离开此页，回来继续查看原结果。')
     } catch (error) {
       if (mounted.current) setNotice(`本次发送或读取未获确认，请先读取原结果，避免重复调用。${error instanceof Error ? error.message : ''}`)

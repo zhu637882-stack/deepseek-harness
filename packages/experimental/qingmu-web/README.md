@@ -1,5 +1,7 @@
 # Qingmu OS Web distribution Bundle
 
+The native creation entry identifies the current stage and supplies its source. Screenplay, asset and scene drafts do not require a shot binding; bound-shot read/write rules apply only to existing-shot editing. The director method checks actual screenplay action prerequisites, object transfers, device states and visible world exceptions before returning a draft. Duration remains an estimate until measured.
+
 English | [中文](README.zh.md)
 
 This private Bundle is the Qingmu OS distribution layer over the stock Harness `base` and `web-app` bundles. It disables the official brand occupant row, inserts the Qingmu browser brand, then composes the loopback-only Yimeng read adapter, the stateless IMAGO method adapter, the separately pluggable command adapter, and the production cockpit in dependency order. Generic sidebar and conversation packages remain stock Harness components.
