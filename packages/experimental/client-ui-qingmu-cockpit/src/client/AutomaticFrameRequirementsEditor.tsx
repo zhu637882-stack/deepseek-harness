@@ -28,7 +28,7 @@ function pendingValid(value: ScenePlanningRequest | undefined,
   return value?.projectId === projectId && value.episodeId === episodeId && (value.request?.action === 'edit_automatic' || value.request?.action === 'edit_requirements')
     && typeof value.idempotencyKey === 'string' && /^[A-Za-z0-9._:-]{8,128}$/.test(value.idempotencyKey)
     && value.request.shotId === shotId && typeof value.request.imagePromptCn === 'string' && value.request.imagePromptCn.length <= 20000
-    && value.request.imagePromptCn.trim() !== '' && Number.isSafeInteger(value.request.expectedScriptRevision)
+    && (value.request.imagePromptCn.trim() !== '' || value.request.directorPlan !== undefined) && Number.isSafeInteger(value.request.expectedScriptRevision)
     && value.request.expectedScriptRevision >= 1 && /^[a-f0-9]{64}$/.test(value.request.expectedScriptSha256)
     && Number.isSafeInteger(value.request.expectedStoryboardRevision) && value.request.expectedStoryboardRevision >= 1
     && /^[a-f0-9]{64}$/.test(value.request.expectedStoryboardSha256)
@@ -73,7 +73,7 @@ export function AutomaticFrameRequirementsEditor({
       if (!controller.signal.aborted && currentEpoch === epoch.current && sameScope(value, projectId, episodeId, shotId)) {
         setState(value); const saved = requirements(value)?.find(shot => shot.id === shotId)
         const local = stored(storageKey)
-        setDraft(local?.shotId === shotId && local.imagePromptCn.length > 0 && local.imagePromptCn.length <= 20000
+        setDraft(local?.shotId === shotId && local.imagePromptCn.length <= 20000
           && shootingFields.every(field => local[field] === undefined || (typeof local[field] === 'string' && local[field].length <= 2000))
           && continuityKeys.every(field => local[field] === undefined || (typeof local[field] === 'string' && local[field].length <= 12000))
           && (local.pending === undefined || (pendingValid(local.pending, projectId, episodeId, shotId)
@@ -204,7 +204,9 @@ export function AutomaticFrameRequirementsEditor({
       disabled={busy || draft.pending !== undefined} onChange={event => update({ ...draft, imagePromptCn: event.target.value })} /></label>
     <p role="status">{draft.pending ? '正在核实上次保存，草稿已保留。' : dirty ? '有未保存修改 · 已保留在此浏览器' : saved?.imagePromptCn.trim() ? '当前要求已保存' : '补充本镜的首帧画面要求并保存，随后可预检生成。'}</p>
     {error && <p role="alert">{error}</p>}
-    {(dirty || busy) && !draft.pending && <button type="button" disabled={busy || !draft.imagePromptCn.trim()} onClick={() => { void save(false) }}>{busy ? '正在保存…' : '保存当前要求'}</button>}
+    {(dirty || busy) && !draft.pending && <button type="button"
+      disabled={busy || (!draft.imagePromptCn.trim() && !continuityKeys.some(field => draft[field] !== undefined))}
+      onClick={() => { void save(false) }}>{busy ? '正在保存…' : '保存当前要求'}</button>}
     {draft.pending && <button type="button" disabled={busy} onClick={() => { void save(true) }}>查看原保存结果</button>}
     {draft.pending && rebaseState && <div>
       <p>本镜最新已保存要求：{requirements(rebaseState)?.find(shot => shot.id === shotId)?.imagePromptCn || '尚未填写'}</p>

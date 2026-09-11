@@ -18,8 +18,9 @@ function state(): ScenePlanningState {
     ] }
 }
 
-it('shows ordered boundaries and preserves structured unedited decisions through lost-response recovery', async () => {
+it.each(['authored image', ''])('preserves boundaries through lost-response recovery with image requirement %s', async (imagePromptCn) => {
   let current = state()
+  current = { ...current, frameRequirements: current.frameRequirements!.map(shot => shot.id === 'f' ? { ...shot, imagePromptCn } : shot) }
   const read = vi.fn(async () => current)
   const save = vi.fn(async (intent: ScenePlanningRequest) => {
     if (intent.request.action !== 'edit_requirements') throw Error('unexpected action')
@@ -48,7 +49,7 @@ it('shows ordered boundaries and preserves structured unedited decisions through
   expect(current.frameRequirements![1]!.directorPlan?.soundPlan).toEqual({ ambience: '连续雨声' })
   view.unmount(); render(<AutomaticFrameRequirementsEditor {...props} />)
   fireEvent.click(await screen.findByRole('button', { name: '查看原保存结果' }))
-  await screen.findByText('当前要求已保存')
+  await waitFor(() => expect(screen.queryByRole('button', { name: '查看原保存结果' })).toBeNull())
   expect(recover).toHaveBeenCalledWith(intent)
   expect(save).toHaveBeenCalledOnce()
   expect((screen.getByRole('textbox', { name: '本镜结束状态' }) as HTMLTextAreaElement).value).toBe('插头仍在台面；右手放下螺丝刀')
