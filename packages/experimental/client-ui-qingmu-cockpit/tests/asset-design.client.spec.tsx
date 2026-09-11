@@ -11,6 +11,8 @@ const state: AssetDesignState = { ...scope, schema: 'qingmu.asset-design-state.v
 afterEach(() => { cleanup(); localStorage.clear() })
 function setup() {
   const port = {
+    referenceVideoAssets: vi.fn(async () => ({ projectId: 'p', page: 1, pages: 1, items: [{ assetId: 'asset_ref', assetSha256: 'e'.repeat(64), label: '已采用人物', mediaType: 'reference_image' as const, browserUrl: '' }] })),
+    readLocalReferenceCandidateContent: vi.fn(async () => { throw new Error('unused') }),
     readAssetVoiceRuns: vi.fn(async (): Promise<AssetImageRuns> => ({ ...scope, items: [] })),
     quoteAssetVoice: vi.fn(async () => ({ ...scope, entity: { ...state.design!.assets[0]!, id: 'actor_1' }, quoteSha256: 'd'.repeat(64), estimatedCny: '0.000000', generationAvailable: true, model: 'cosyvoice-v3.5-plus', prompt: '成年温厚自然中低音', mediaType: 'audio' as const })),
     generateAssetVoice: vi.fn(async () => ({ requestId: 'voice-1', taskId: 'task_voice', status: 'Queued', estimatedCny: '0.000000', selectionChanged: false as const })),
@@ -34,7 +36,8 @@ it('requires saved design and displayed price before one image submission', asyn
   expect(port.generateAssetImage).not.toHaveBeenCalled()
   fireEvent.click(confirm); fireEvent.click(confirm)
   await waitFor(() => { expect(port.generateAssetImage).toHaveBeenCalledTimes(1) })
-  expect(port.generateAssetImage.mock.calls[0]).toEqual([{ ...scope, entityId: 'actor_1', command: expect.objectContaining({ paidConfirmed: true, authorizationCapCny: '0.500000' }) }])
+  expect(port.generateAssetImage.mock.calls[0]).toMatchObject([{ ...scope, entityId: 'actor_1',
+    command: { paidConfirmed: true, authorizationCapCny: '0.500000' } }])
 })
 it('rereads an existing image run on reload without charging again', async () => {
   const port = setup()
@@ -56,5 +59,27 @@ it('quotes and queues voice separately from the image and restores progress on r
   expect(port.generateAssetVoice).not.toHaveBeenCalled()
   fireEvent.click(confirm); fireEvent.click(confirm)
   await waitFor(() => { expect(port.generateAssetVoice).toHaveBeenCalledTimes(1) })
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
+
+
+it('saves ordered image references and world exceptions before a quotation without changing media selection', async () => {
+  const port = setup()
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  fireEvent.click(await screen.findByRole('button', { name: '参考与局部修改 · 0 张图' }))
+  const select = await screen.findByLabelText('添加参考图')
+  await screen.findByRole('option', { name: '已采用人物' })
+  fireEvent.change(select, { target: { value: 'asset_ref' } })
+  fireEvent.change(await screen.findByLabelText('图 1 的用途'), { target: { value: '保持脸和衣服，生成背面视角' } })
+  fireEvent.change(screen.getByLabelText('剧本例外'), { target: { value: '穿越者可携带现代手机' } })
+  fireEvent.change(screen.getByLabelText('设计依据'), { target: { value: '手机来自穿越者' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
+  await waitFor(() => { expect(port.saveAssetDesign).toHaveBeenCalledTimes(1) })
+  expect(port.saveAssetDesign.mock.calls[0]).toMatchObject([{ design: {
+    world: { exceptions: '穿越者可携带现代手机' },
+    assets: [{ designBasis: '手机来自穿越者', references: [{
+      assetId: 'asset_ref', assetSha256: 'e'.repeat(64), purpose: '保持脸和衣服，生成背面视角', boxes: [],
+    }] }],
+  } }])
   expect(port.generateAssetImage).not.toHaveBeenCalled()
 })

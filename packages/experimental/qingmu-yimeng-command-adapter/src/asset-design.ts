@@ -3,6 +3,21 @@ import type { CreationScope } from './creation.ts'
 import type { YimengCommandJsonObject } from './types.ts'
 
 /** A single image design, with stable voice identity separate from acting direction. */
+export interface AssetImageReference {
+  readonly assetId: string
+  readonly assetSha256: string
+  readonly purpose: string
+  readonly boxes?: readonly (readonly [number, number, number, number])[]
+}
+/** The script's world and explicit exceptions remain distinct from director proposals. */
+export interface AssetWorldDesign {
+  readonly setting: string
+  readonly scriptFacts: string
+  readonly directorInferences: string
+  readonly exceptions: string
+  readonly openQuestions: string
+}
+/** One editable image design and its ordered sources. */
 export interface AssetDesignItem {
   readonly kind: 'actor' | 'scene' | 'prop'
   readonly id?: string | null
@@ -10,6 +25,9 @@ export interface AssetDesignItem {
   readonly description?: string
   readonly imagePrompt: string
   readonly voiceIdentity?: string
+  readonly designBasis?: string
+  readonly view?: string
+  readonly references?: readonly AssetImageReference[]
 }
 /** Shared film choices authored by the director, without inferred media acceptance. */
 export interface AssetDirectorDesign {
@@ -22,7 +40,11 @@ export interface AssetDirectorDesign {
   readonly characterContinuityRules: string
 }
 /** Editable design saved atomically to native characters, scenes, props and director bible. */
-export interface AssetDesign { readonly assets: readonly AssetDesignItem[]; readonly director: AssetDirectorDesign }
+export interface AssetDesign {
+  readonly assets: readonly AssetDesignItem[]
+  readonly director: AssetDirectorDesign
+  readonly world?: AssetWorldDesign
+}
 /** Current script and asset design compared before saving or generating. */
 export interface AssetDesignState extends CreationScope {
   readonly schema: 'qingmu.asset-design-state.v1'
@@ -31,6 +53,7 @@ export interface AssetDesignState extends CreationScope {
   readonly scriptRevision: number
   readonly script: YimengCommandJsonObject
   readonly model: string
+  readonly retainedSelections?: Readonly<Record<string, readonly string[]>>
   readonly design: (AssetDesign & { readonly sourceScriptSha256: string }) | null
 }
 /** Quotation is tied to exact source, prompt, model and price. */
@@ -42,6 +65,8 @@ export interface AssetImageQuote extends CreationScope {
   readonly generationAvailable: boolean
   readonly model: string
   readonly prompt: string
+  readonly capability?: 'image.generate' | 'image.edit'
+  readonly references?: readonly AssetImageReference[]
 }
 /** Image submission reserves one task; materialization and media selection are separate. */
 export interface AssetImageSubmission {

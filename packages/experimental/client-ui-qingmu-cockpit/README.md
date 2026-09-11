@@ -283,3 +283,5 @@ assembled-film seconds, trim, set gain and fades, then save or compose an MP4. C
 of shot boundaries. Original audio gain is explicit and affects its entire mix; the editor does not
 claim to separate music, infer dialogue ducking or repair room acoustics. Original candidates and
 prior film versions remain available. Both manual UI and native director use the same scoped API.
+
+Native asset cards preserve script facts, director inferences and explicit world exceptions. Each image keeps its relevant design basis, view and up to nine ordered project references with exact hashes and reuse instructions; optional regions use original-image pixels. Wan editing receives those image bytes and instructions through the existing task queue. A changed source invalidates the quote. Updating a description retains selected images and flags them for comparison; generating a candidate never replaces them. Authored scene views and requested text are preserved, and overlong requests fail without truncation. Reference previews and quotation do not upload or generate media.

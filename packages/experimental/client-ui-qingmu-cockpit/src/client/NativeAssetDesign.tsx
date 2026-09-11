@@ -1,12 +1,14 @@
 /** Project asset designs are editable before an explicitly priced image request. */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { NativeStoryPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft'
-import type { AssetDesign, AssetDesignItem, AssetDesignState, AssetImageQuote, AssetImageRuns } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import type { AssetDesign, AssetDesignItem, AssetDesignState, AssetImageQuote, AssetImageRuns, AssetWorldDesign } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
 import { NativeStoryComposer } from './NativeStoryComposer.tsx'
 import css from './NativeDirectorComposer.module.css'
+import { AssetImageReferences, type AssetImageReferencePort } from './AssetImageReferences.tsx'
 
-type Port = Pick<QingmuYimengPort, 'readAssetDesign' | 'saveAssetDesign' | 'quoteAssetImage' | 'generateAssetImage' | 'readAssetImageRuns' | 'readAssetVoiceRuns' | 'quoteAssetVoice' | 'generateAssetVoice'>
+type Port = Pick<QingmuYimengPort, 'readAssetDesign' | 'saveAssetDesign' | 'quoteAssetImage' | 'generateAssetImage' | 'readAssetImageRuns' | 'readAssetVoiceRuns' | 'quoteAssetVoice' | 'generateAssetVoice'> & AssetImageReferencePort
+const emptyWorld: AssetWorldDesign = { setting: '', scriptFacts: '', directorInferences: '', exceptions: '', openQuestions: '' }
 const names = { actor: '人物', scene: '场景', prop: '道具' } as const
 function parseDesign(text: string): AssetDesign {
   const value: unknown = JSON.parse(text)
@@ -39,6 +41,7 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
   const [quote, setQuote] = useState<AssetImageQuote>(), [runs, setRuns] = useState<AssetImageRuns['items']>([])
   const [voiceRuns, setVoiceRuns] = useState<AssetImageRuns['items']>([])
   const [busy, setBusy] = useState(false), [notice, setNotice] = useState(''), [changes, setChanges] = useState('')
+  const [referenceEditor, setReferenceEditor] = useState<number>()
   const [dirty, setDirty] = useState(false), [manual, setManual] = useState('')
   const lock = useRef(false), live = useRef(true)
   const scope = { projectId, episodeId }
@@ -87,7 +90,7 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
     setDesign({ ...design,
       assets: design.assets.map((item, n) => n === index ? { ...item, ...patch } : item) }); setDirty(true); setQuote(undefined)
   }
-  const prompt = `为青木当前项目设计可直接生成的角色定妆、空场与关键道具。只使用本项目剧本及现有设计。实际读取 cinematic-director、character-asset、scene-asset、prop-asset 及必要参考，先理解关系、时代、空间和表演，再写丰富具体的单张图片描述。角色定妆不执行剧情动作；服装、体态、材质、光影、场景通道、道具尺寸和比例必须一致、符合物理。声音身份与逐句语气分开。保留已有实体 id；不修改正式媒体。场景名称与剧本相同。\n剧本：${JSON.stringify(state?.script)}\n已有设计：${JSON.stringify(state?.design)}\n用户补充：${changes}\n最终只将完整 JSON 放在一个 txt 代码块内，格式：{"assets":[{"kind":"actor或scene或prop","name":"名称","description":"用途","imagePrompt":"完整文生图提示词","voiceIdentity":"仅角色声音身份"}],"director":{"visualStyle":"全片质感","tone":"情绪基调","lightingRules":"光源规则","colorPalette":["色彩"],"cameraGrammar":"摄影与运镜","performanceRules":"表演原则","characterContinuityRules":"连续性"}}。kind 必须是 actor、scene、prop 其中之一，不增加其他字段。`
+  const prompt = `为青木当前项目设计可直接生成的角色定妆、空场与关键道具。只使用本项目剧本及现有设计。实际读取 cinematic-director、character-asset、scene-asset、prop-asset 及必要参考，先理解关系、时代、空间和表演，再写丰富具体的单张图片描述。按导演目的设计定妆或状态参考；服装、体态、材质、光影、场景通道、道具尺寸和比例应服从剧本世界设定和明确例外；普通年代事实与穿越例外分开，不能套用无文字、单一说话人等旧限制。将剧本原文事实、导演推导和待定问题分开记录在 world；把与每张素材有关的年代例外、真实尺寸参照、部件连接与空间关系写入 designBasis，实际图片请求会完整保留。不要把整个剧情动作堆进一张定妆图。声音身份与逐句语气分开。保留已有实体 id、references 顺序、assetId 和 assetSha256；不要编造任何素材编号。需要用户未提供的图片时写建议，不虚构引用。不修改正式媒体。场景名称与剧本相同。\n剧本：${JSON.stringify(state?.script)}\n已有设计：${JSON.stringify(state?.design)}\n用户补充：${changes}\n最终只将完整 JSON 放在一个 txt 代码块内，格式：{"assets":[{"kind":"actor或scene或prop","name":"名称","description":"用途","imagePrompt":"完整文生图提示词","voiceIdentity":"仅角色声音身份","designBasis":"与本素材相关的剧本事实、尺度、结构和例外","view":"本图需要的视角或静态状态","references":[]}],"director":{"visualStyle":"全片质感","tone":"情绪基调","lightingRules":"光源规则","colorPalette":["色彩"],"cameraGrammar":"摄影与运镜","performanceRules":"表演原则","characterContinuityRules":"连续性"},"world":{"setting":"年代地点与世界设定","scriptFacts":"剧本已明确事实","directorInferences":"导演为拍摄补足的设定","exceptions":"剧本明确支持的例外及适用范围","openQuestions":"尚待确定的事项"}}。kind 必须是 actor、scene、prop 其中之一，不增加其他字段。`
   return <section className={css.composer} aria-label="角色与场景生成">
     <h2>设计与生成素材</h2>
     <p>先从当前剧本设计人物、场景和道具，检查画面描述后生成图片；生成结果会进入本项目素材库。</p>
@@ -97,6 +100,10 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
       purpose={{ key: 'asset-design', title: '让青木设计素材', description: '导演会结合剧本和素材方法提出完整设计，你可以逐项调整。',
         prompt, action: '根据剧本设计素材', adopt: '采用到素材卡片', adopted: '请检查下方素材卡片中的设计。' }} />}
     {design && <>
+      <details><summary>剧本世界与设计依据</summary>{(['setting', 'scriptFacts', 'directorInferences', 'exceptions', 'openQuestions'] as const).map((field, index) => <label key={field}>{['年代与世界设定', '剧本明确事实', '导演推导', '剧本例外', '待定事项'][index]}<textarea value={(design.world ?? emptyWorld)[field]} onChange={(event) => {
+        setDesign({ ...design, world: { ...(design.world ?? emptyWorld), [field]: event.target.value } })
+        setDirty(true); setQuote(undefined)
+      }} /></label>)}</details>
       <details><summary>全片设计</summary>{(['visualStyle', 'tone', 'lightingRules', 'cameraGrammar', 'performanceRules', 'characterContinuityRules'] as const).map((field, index) => <label key={field}>{['画面质感', '情绪基调', '光源设计', '摄影与运镜', '表演', '连续性'][index]}<textarea value={design.director[field]} onChange={(event) => {
         setDesign({ ...design, director: { ...design.director, [field]: event.target.value } }); setDirty(true); setQuote(undefined)
       }} /></label>)}</details>
@@ -107,6 +114,13 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
           <h3>{names[item.kind]} · {item.name}</h3>
           <label>画面描述<textarea value={item.imagePrompt}
             onChange={(event) => { edit(index, { imagePrompt: event.target.value }) }} /></label>
+          <label>设计依据<textarea value={item.designBasis ?? ''} onChange={(event) => { edit(index, { designBasis: event.target.value }) }} placeholder="与本素材相关的剧本事实、年代例外、尺寸参照、结构与空间关系" /></label>
+          <label>视角与状态<input value={item.view ?? ''} onChange={(event) => { edit(index, { view: event.target.value }) }} placeholder="由导演决定，例如后侧视角、接电前状态" /></label>
+          {item.id && (state?.retainedSelections?.[item.id]?.length ?? 0) > 0 && <p>描述已更新，原来采用的图片已保留。新设计是否需要换图，可在素材库比较后决定。</p>}
+          <button type="button" disabled={busy} aria-expanded={referenceEditor === index} onClick={() => { setReferenceEditor(referenceEditor === index ? undefined : index) }}>参考与局部修改 · {item.references?.length ?? 0} 张图</button>
+          {referenceEditor === index && <AssetImageReferences projectId={projectId} references={item.references ?? []}
+            port={port} disabled={busy}
+            onChange={(references) => { edit(index, { references }) }} />}
           {item.kind === 'actor' && <label>声音身份<textarea value={item.voiceIdentity ?? ''} onChange={(event) => { edit(index, { voiceIdentity: event.target.value }) }} /></label>}
           <button type="button" disabled={busy || dirty || !item.id || (run !== undefined && !run.assetId && !['Failed', 'Cancelled', 'Succeeded', 'Completed'].includes(run.status))}
             onClick={() => {
@@ -125,11 +139,13 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
         void perform(async () => {
           const result = await port.saveAssetDesign({ ...scope,
             expectedStateSha256: state?.stateSha256 ?? '',
-            design: { assets: design.assets, director: design.director } })
+            design: { assets: design.assets, director: design.director, ...(design.world ? { world: design.world } : {}) } })
           if (live.current) { setState(result); setDesign(result.design ?? undefined); setDirty(false); setNotice('素材设计已保存。现在可以逐项生成图片。') }
         }) }}>保存素材设计</button>
     </>}
     {quote && <section aria-label={quote.mediaType === 'audio' ? '确认声音生成' : '确认图片生成'}><h3>生成 {quote.entity.name}</h3><p>{quote.model} · {quote.mediaType === 'audio' ? '一段声音试听' : '一张图片'} · ¥{Number(quote.estimatedCny).toFixed(2)}</p>
+      {quote.mediaType !== 'audio' && <p>{quote.references?.length ? `使用 ${quote.references.length} 张参考图派生，新图作为候选保留。` : '根据文字设计生成新候选。'}</p>}
+      <details><summary>查看完整生成描述</summary><pre>{quote.prompt}</pre></details>
       <button type="button" disabled={busy || dirty || !quote.generationAvailable} onClick={() => {
         void perform(async () => {
           const newCommand = { requestId: crypto.randomUUID(), kind: quote.entity.kind,

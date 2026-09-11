@@ -184,3 +184,5 @@ Working-cut commands include `readWorkingCut`, `saveWorkingCut`, `renderWorkingC
 other command limits are unchanged. Paths and returned project/episode scopes remain validated.
 Audio cues carry source hashes, source trim, film start, gain and fades; saves retain sound design
 without requiring a render. Sources remain unapproved local editing inputs.
+
+Native asset cards preserve script facts, director inferences and explicit world exceptions. Each image keeps its relevant design basis, view and up to nine ordered project references with exact hashes and reuse instructions; optional regions use original-image pixels. Wan editing receives those image bytes and instructions through the existing task queue. A changed source invalidates the quote. Updating a description retains selected images and flags them for comparison; generating a candidate never replaces them. Authored scene views and requested text are preserved, and overlong requests fail without truncation. Reference previews and quotation do not upload or generate media.
