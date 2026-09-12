@@ -25,6 +25,7 @@ import { parseQingmuEntryScope, type QingmuEntryScope } from '../src/client/slot
 import { zh } from '../src/client/locales.ts'
 import { unavailableWorksetResponse } from './fixtures/workset-method.client.ts'
 import { continuityResponse } from './fixtures/continuity-method.client.ts'
+import { runResponse } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
 import {
   createScriptCommitRecoveryMarker,
   readScriptCommitRecoveryMarker,
@@ -996,6 +997,43 @@ afterEach(() => {
 })
 
 describe('embedded Qingmu entry scope', () => {
+  it('returns a registered generated candidate to the same shot and refreshes review without selecting or resubmitting', async () => {
+    history.replaceState({}, '', '/?qingmuView=shooting')
+    const port = makePort({
+      workflow: vi.fn(async () => structuredClone(WORKFLOW)),
+      referenceVideoRuns: vi.fn(async request => ({
+        schema: 'jason.reference-video-runs.v1', ...request, providerCalls: 0,
+        items: [{ ...runResponse, ...request, kernelStatus: 'Succeeded', publicStatus: 'succeeded',
+          candidates: [{ assetId: 'video-1', assetSha256: 'c'.repeat(64), mediaId: 'media-1',
+            browserUrl: '/candidate.mp4', reviewStatus: 'pending' }] }],
+      })),
+      readReferenceVideoCandidateRegistration: vi.fn(async request => ({
+        schema: 'jason.reference-video-review-registration.v1', ...request, episodeId: 'episode-1',
+        assetSha256: request.expectedAssetSha256, takeId: 'take-1', providerCalls: 0,
+        selectionChanged: false, formalApprovalChanged: false,
+      })),
+    })
+    mount(port, undefined, true)
+    fireEvent.click(await screen.findByRole('button', { name: '生成视频' }))
+    const dialog = screen.getByRole('dialog', { name: '本镜操作' })
+    const open = await within(dialog).findByRole('button', { name: '打开拍摄与审看' })
+    const workflowReads = vi.mocked(port.workflow).mock.calls.length
+    const takeReads = vi.mocked(port.takeVersions).mock.calls.length
+    fireEvent.click(open)
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '本镜操作' })).toBeNull()
+      expect(vi.mocked(port.workflow).mock.calls.length).toBeGreaterThan(workflowReads)
+      expect(vi.mocked(port.takeVersions).mock.calls.length).toBeGreaterThan(takeReads)
+    })
+    expect(port.takeVersions).toHaveBeenCalledWith(
+      { projectId: 'project-1', episodeId: 'episode-1', frameId: 'frame-1' }, expect.any(AbortSignal),
+    )
+    expect(port.registerReferenceVideoCandidateForReview).not.toHaveBeenCalled()
+    expect(port.queueReferenceVideo).not.toHaveBeenCalled()
+    expect(port.selectTakeVersion).not.toHaveBeenCalled()
+    expect(port.createTakeHumanDecision).not.toHaveBeenCalled()
+  })
+
   it('occupies the application instead of opening a cockpit over the conversation', async () => {
     const port = makePort()
     mount(port, undefined, true)

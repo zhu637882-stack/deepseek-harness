@@ -242,7 +242,9 @@ export function QingmuCockpit({
     if (!mayLeaveDirector()) return
     setSelectedShotId(frameId)
     setCreating(false)
+    setShootingAction(undefined)
     setTab('shots')
+    void refreshWorkflowProjectionAfterCommit().catch(() => { /* Refresh failures are shown by the workflow reader. */ })
   }
   useEffect(() => {
     if (!applicationShell) return
@@ -726,7 +728,7 @@ export function QingmuCockpit({
         <button type="button" onClick={() => { if (mayLeaveDirector()) setShootingAction(undefined) }}>返回拍摄与审看</button>
         {shootingActionKind === 'video' && shotRelations ? <SceneReferenceWorkspace projectId={projectId} relations={shotRelations}
           selectedShotId={shootingAction} onSelectShotId={(id) => { setSelectedShotId(id); setShootingAction(id) }}
-          onUnsavedChange={onDirectorDirty} port={port} onRequestDirector={() => {
+          onUnsavedChange={onDirectorDirty} onOpenShooting={openCandidateReview} port={port} onRequestDirector={() => {
             setReferenceDirectorOpen(true)
             requestAnimationFrame(() => { referenceDirectorPanel.current?.scrollIntoView({ block: 'start' }) })
           }} /> :
