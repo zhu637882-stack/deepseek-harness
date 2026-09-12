@@ -142,7 +142,15 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
             <option value="1:1">1:1 方形</option><option value="3:4">3:4 竖幅</option><option value="4:3">4:3 横幅</option>
             <option value="9:16">9:16 竖屏</option><option value="16:9">16:9 横屏</option>
           </select></label>
+          <label>图片模型<select value={item.imageModel ?? ''} onChange={(event) => { edit(index, { imageModel: event.target.value || null, imagePromptExtend: false }) }}>
+            <option value="">默认 · {state?.model}</option>
+            {item.imageModel && !state?.imageModels?.some(model => model.id === item.imageModel)
+              && <option value={item.imageModel}>{item.imageModel} · 当前不可用</option>}
+            {state?.imageModels?.map(model => <option key={model.id} value={model.id}>{model.name} · 最多 {model.maxReferences} 张参考{model.supportsBoxes ? ' · 支持框选' : ''}</option>)}
+          </select></label>
           <p>只决定本张素材的取景，不改变全片画幅。全身定妆可选竖幅；背景依据中的其他剧情状态不需要同时出现在本图。</p>
+          {(item.imageModel ?? state?.model)?.startsWith('qwen-image-3.0') && <label><input type="checkbox" checked={item.imagePromptExtend ?? false}
+            onChange={(event) => { edit(index, { imagePromptExtend: event.target.checked }) }} />启用模型描述优化与思考（可能调整细节）</label>}
           {item.id && (state?.retainedSelections?.[item.id]?.length ?? 0) > 0 && <p>描述已更新，原来采用的图片已保留。新设计是否需要换图，可在素材库比较后决定。</p>}
           <button type="button" disabled={busy} aria-expanded={referenceEditor === index} onClick={() => { setReferenceEditor(referenceEditor === index ? undefined : index) }}>参考与局部修改 · {item.references?.length ?? 0} 张图</button>
           {referenceEditor === index && <AssetImageReferences projectId={projectId} references={item.references ?? []}

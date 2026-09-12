@@ -19,7 +19,7 @@ it('recovers missing quote escapes without losing design prose or changing exist
     target: { value: JSON.stringify(design).replaceAll('\\"', '"') },
   })
   fireEvent.click(screen.getByRole('button', { name: '载入设计' }))
-  expect((screen.getByLabelText('设计依据') as HTMLTextAreaElement).value).toBe(design.assets[0]!.designBasis)
+  expect((screen.getByLabelText<HTMLTextAreaElement>('设计依据')).value).toBe(design.assets[0]!.designBasis)
   expect(screen.getByText(/已修正正文引号的格式/)).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
   await waitFor(() => { expect(port.saveAssetDesign).toHaveBeenCalledTimes(1) })
@@ -36,7 +36,7 @@ it.each(['missing closing brace', 'omitted content'])('preserves current cards w
   fireEvent.change(screen.getByLabelText('素材设计数据'), { target: { value: incomplete } })
   fireEvent.click(screen.getByRole('button', { name: '载入设计' }))
   expect(screen.getByText(/设计格式不完整/)).toBeTruthy()
-  expect((screen.getByLabelText('画面描述') as HTMLTextAreaElement).value).toBe('真人定妆照')
+  expect((screen.getByLabelText<HTMLTextAreaElement>('画面描述')).value).toBe('真人定妆照')
   expect(port.saveAssetDesign).not.toHaveBeenCalled()
   expect(port.generateAssetImage).not.toHaveBeenCalled()
 })
@@ -47,12 +47,31 @@ function setup() {
     readAssetVoiceRuns: vi.fn(async (): Promise<AssetImageRuns> => ({ ...scope, items: [] })),
     quoteAssetVoice: vi.fn(async () => ({ ...scope, entity: { ...state.design!.assets[0]!, id: 'actor_1' }, quoteSha256: 'd'.repeat(64), estimatedCny: '0.000000', generationAvailable: true, model: 'cosyvoice-v3.5-plus', prompt: '成年温厚自然中低音', mediaType: 'audio' as const })),
     generateAssetVoice: vi.fn(async () => ({ requestId: 'voice-1', taskId: 'task_voice', status: 'Queued', estimatedCny: '0.000000', selectionChanged: false as const })),
-    readAssetDesign: vi.fn(async () => state), saveAssetDesign: vi.fn(async () => state),
+    readAssetDesign: vi.fn(async () => state), saveAssetDesign: vi.fn(async (_input?: unknown) => state),
     quoteAssetImage: vi.fn(async () => ({ ...scope, entity: { ...state.design!.assets[0]!, id: 'actor_1' }, quoteSha256: 'c'.repeat(64), estimatedCny: '0.500000', generationAvailable: true, model: state.model, prompt: '真人定妆照' })),
     generateAssetImage: vi.fn(async () => ({ requestId: 'image-1', taskId: 'task_1', status: 'Queued', estimatedCny: '0.500000', selectionChanged: false as const })),
     readAssetImageRuns: vi.fn(async (): Promise<AssetImageRuns> => ({ ...scope, items: [] })) }
   return port
 }
+it('persists a per-image model, invalidates the quote and restores the same choice', async () => {
+  const port = setup()
+  const models = [{ id: 'qwen-image-3.0-pro', name: 'Qwen-Image 3.0 Pro', maxReferences: 3, supportsBoxes: false }]
+  port.readAssetDesign.mockResolvedValue({ ...state, imageModels: models })
+  port.saveAssetDesign.mockImplementation(async (input: unknown) => ({ ...state, imageModels: models,
+    design: { ...state.design!, ...(input as { design: object }).design } }))
+  const view = render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  fireEvent.change(await screen.findByLabelText('图片模型'), { target: { value: models[0]!.id } })
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '查看生成费用' }).disabled).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
+  await waitFor(() => { expect(port.saveAssetDesign).toHaveBeenCalledTimes(1) })
+  expect(port.saveAssetDesign.mock.calls[0]).toMatchObject([{ design: { assets: [{ imageModel: models[0]!.id }] } }])
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+  const saved = await (port.saveAssetDesign.mock.results[0]!.value as Promise<AssetDesignState>)
+  port.readAssetDesign.mockResolvedValue(saved)
+  view.unmount()
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  expect((await screen.findByLabelText<HTMLSelectElement>('图片模型')).value).toBe(models[0]!.id)
+})
 it('requires saved design and displayed price before one image submission', async () => {
   const port = setup()
   render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
@@ -137,13 +156,13 @@ it('carries resolved creation settings into the native design request before gen
 it('keeps the entity description separate from an imported image edit and restores both', async () => {
   const port = setup()
   const view = render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
-  expect((await screen.findByLabelText('主体完整设定') as HTMLTextAreaElement).value).toBe('真人定妆照')
+  expect((await screen.findByLabelText<HTMLTextAreaElement>('主体完整设定')).value).toBe('真人定妆照')
   fireEvent.change(screen.getByLabelText('主体完整设定'), { target: { value: '成年男子，灰蓝夹克配暗红毛衣' } })
   const imported = { ...state.design!, assets: [{ kind: 'actor', name: '父亲', imagePrompt: '改为背面视角' }] }
   fireEvent.change(screen.getByLabelText('素材设计数据'), { target: { value: JSON.stringify(imported) } })
   fireEvent.click(screen.getByRole('button', { name: '载入设计' }))
-  expect((screen.getByLabelText('主体完整设定') as HTMLTextAreaElement).value).toBe('成年男子，灰蓝夹克配暗红毛衣')
-  expect((screen.getByLabelText('画面描述') as HTMLTextAreaElement).value).toBe('改为背面视角')
+  expect((screen.getByLabelText<HTMLTextAreaElement>('主体完整设定')).value).toBe('成年男子，灰蓝夹克配暗红毛衣')
+  expect((screen.getByLabelText<HTMLTextAreaElement>('画面描述')).value).toBe('改为背面视角')
   const saved = { ...state, design: { ...state.design!, assets: [{ ...state.design!.assets[0]!,
     visualIdentity: '成年男子，灰蓝夹克配暗红毛衣', imagePrompt: '改为背面视角' }] } }
   port.saveAssetDesign.mockResolvedValue(saved)
@@ -154,8 +173,8 @@ it('keeps the entity description separate from an imported image edit and restor
   }] } }])
   view.unmount(); port.readAssetDesign.mockResolvedValue(saved)
   render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
-  expect((await screen.findByLabelText('主体完整设定') as HTMLTextAreaElement).value).toBe('成年男子，灰蓝夹克配暗红毛衣')
-  expect((screen.getByLabelText('画面描述') as HTMLTextAreaElement).value).toBe('改为背面视角')
+  expect((await screen.findByLabelText<HTMLTextAreaElement>('主体完整设定')).value).toBe('成年男子，灰蓝夹克配暗红毛衣')
+  expect((screen.getByLabelText<HTMLTextAreaElement>('画面描述')).value).toBe('改为背面视角')
   expect(port.generateAssetImage).not.toHaveBeenCalled()
 })
 
@@ -171,7 +190,7 @@ it('saves independent image framing before requoting and restores it on reopen',
   expect(port.saveAssetDesign.mock.calls[0]).toMatchObject([{ design: { assets: [{ imageAspectRatio: '3:4' }] } }])
   view.unmount(); port.readAssetDesign.mockResolvedValue(saved)
   render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
-  expect((await screen.findByLabelText('素材画幅') as HTMLSelectElement).value).toBe('3:4')
+  expect((await screen.findByLabelText<HTMLSelectElement>('素材画幅')).value).toBe('3:4')
   expect(port.generateAssetImage).not.toHaveBeenCalled()
 })
 

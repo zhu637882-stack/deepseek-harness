@@ -27,6 +27,9 @@ export interface AssetDesignItem {
   /** Explicitly authored complete frame; identity and story basis stay in provenance, not image instructions.
    * Omitted/false retains legacy context composition. */
   readonly selfContainedImagePrompt?: boolean
+  /** Per-image model; absent/null retains the configured default. */
+  readonly imageModel?: string | null
+  readonly imagePromptExtend?: boolean
   /** Entity appearance/structure, independent of the current image view or edit. */
   readonly visualIdentity?: string
   readonly voiceIdentity?: string
@@ -61,6 +64,12 @@ export interface AssetDesignState extends CreationScope {
   readonly creativeSettings?: YimengCommandJsonObject
   readonly script: YimengCommandJsonObject
   readonly model: string
+  readonly imageModels?: readonly {
+    readonly id: string
+    readonly name: string
+    readonly maxReferences: number
+    readonly supportsBoxes: boolean
+  }[]
   readonly retainedSelections?: Readonly<Record<string, readonly string[]>>
   readonly design: (AssetDesign & { readonly sourceScriptSha256: string }) | null
 }
