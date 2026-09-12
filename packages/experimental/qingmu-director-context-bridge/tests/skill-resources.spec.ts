@@ -80,6 +80,35 @@ it('preserves source hashes for every bundled file and distinguishes Qingmu adap
   }
 })
 
+it('keeps released director methods compatible with the installed method without rewriting history', async () => {
+  const sources = JSON.parse(await readFile(join(bundle, 'sources.json'), 'utf8')) as {
+    skills: Record<string, {
+      files: Record<string, string>
+      compatiblePredecessors?: {
+        id?: string
+        version: string
+        sha256: string
+        upgradeToSha256: string
+        reason: string
+      }[]
+    }>
+  }
+  for (const [name, source] of Object.entries(sources.skills)) {
+    for (const prior of source.compatiblePredecessors ?? []) {
+      expect(prior.upgradeToSha256, `${name}: ${prior.version}`).toBe(source.files['SKILL.md'])
+      expect(prior.reason.trim()).not.toBe('')
+    }
+  }
+  // These released creation-time references must keep resolving after method-only updates.
+  const director = sources.skills['cinematic-director']!
+  const known = director.compatiblePredecessors!.map(ref => ref.sha256)
+  for (const digest of ['4891f16113213518fc30627659dff67c2393cdc510214874694ab373229b0722',
+    'd372e62d49c97c804c6348c052c2cd54e172606d82a13c60bf39e96651f7ecb6',
+    '8a86892706f6d29859d0f371a6eac0a3d5d6e082f47f858469274cc4b7504fcc']) {
+    expect(known).toContain(digest)
+  }
+})
+
 it('reads complete paged content, rejects unlisted paths and removes the tool on disposal', async () => {
   const app = await reader()
   const args = { skill: 'cinematic-director', path: 'references/sound-and-dialogue.md', lineCount: 17 }
