@@ -34,11 +34,17 @@ function assertCurrent(current: BoundRead, exec: ToolRunContext): void {
 
 function continuation(before: DirectorContextSnapshot, after: DirectorContextSnapshot, result: ScenePlanningResult) {
   const stable = ({
-    storyboard: _storyboard, sourceTime: _time, contextSnapshotSha256: _hash, selectedReferences, ...rest
+    storyboard: _storyboard, shot: _shot, sourceTime: _time, contextSnapshotSha256: _hash, selectedReferences, ...rest
   }: DirectorContextSnapshot) => ({
     ...rest, selectedReferences: selectedReferences.map(({ mediaUrl: _url, ...reference }) => reference),
   })
-  if (digest(stable(before)) !== digest(stable(after)) || digest(after.storyboard) !== digest(result.storyboard)) return null
+  // The shot is revisioned creative data. The save receipt pins its new revision;
+  // script, cast, references and other context must still match the admitted read.
+  if ((result.action !== 'edit_automatic' && result.action !== 'edit_requirements')
+    || result.projectId !== before.projectId || result.episodeId !== before.episodeId
+    || result.shotId !== before.shotId || after.shot.id !== before.shot.id
+    || digest(stable(before)) !== digest(stable(after))
+    || digest(after.storyboard) !== digest(result.storyboard)) return null
   return { before: before.contextSnapshotSha256, after: after.contextSnapshotSha256 }
 }
 

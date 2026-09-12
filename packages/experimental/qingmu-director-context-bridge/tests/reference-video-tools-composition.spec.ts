@@ -125,7 +125,9 @@ function writer(extraShots = 0, image?: { sha256: string; url: string }) {
       const prompt = canonical(body.request.directorPlan)
       directorSource = { sha256: sha(prompt), prompt }
       const { contextSnapshotSha256: _hash, ...source } = currentContext
-      const next = { ...source, storyboard }
+      // Writer projects the saved creative fields into the bound shot as well as its revision.
+      const next = { ...source, storyboard,
+        shot: { ...source.shot, ...body.request.directorPlan, directorPlan: body.request.directorPlan } }
       currentContext = { ...next, contextSnapshotSha256: sha(next) }
       const receipt = { schema: 'jason.qingmu-scene-planning-result.v1', projectId: scope.projectId, episodeId: scope.episodeId,
         action: 'edit_automatic', shotId: scope.shotId, idempotencyKey: body.idempotencyKey, requestSha256: sha(body.request),
@@ -585,6 +587,40 @@ it('reconciles a changed complete design into one final native reference draft a
   expect(saves(h.upstream)).toHaveLength(1)
   expect(h.upstream.saved().draft.request).toMatchObject(finalDraft)
   expect(JSON.stringify(adapter.requests.at(-1))).toContain('先推近，再横移')
+  expect({
+    continued: (JSON.parse(result(h.agent, 'plan-save').text) as { continuation: unknown }).continuation !== null,
+    sourceReadSucceeded: !result(h.agent, 'source-read').error,
+    oldDraftRejected: result(h.agent, 'old-save').error,
+    saved: h.upstream.saved().draft.request.promptParts,
+  }).toMatchSnapshot()
+})
+
+it.each(['storyboard', 'script', 'scene'] as const)('does not continue across an unrelated %s change after its own director save', async (changed) => {
+  const upstream = writer(), original = upstream.fetch.getMockImplementation()!
+  let committed = false
+  upstream.fetch.mockImplementation(async (input, init) => {
+    const response = await original(input, init)
+    const path = new URL(input instanceof Request ? input.url : input).pathname
+    if (path.endsWith('/scene-planning/commands') && response.ok) committed = true
+    if (!committed || !path.endsWith('/director-inference/context')) return response
+    const { contextSnapshotSha256: _hash, ...body } = await response.json() as typeof context
+    if (changed === 'storyboard') body.storyboard = { ...body.storyboard, id: 'external-revision', version: 3, sourceHash: 'e'.repeat(64) }
+    if (changed === 'script') body.script = { revision: 2, sha256: 'f'.repeat(64) }
+    if (changed === 'scene') body.sourceScene = { actionDescription: 'Changed outside this director request.' }
+    return Response.json({ ...body, contextSnapshotSha256: sha(body) })
+  })
+  const h = await harness(new MockAdapter([
+    toolCallResponse('plan-read', 'qingmu_read_director_plan', {}),
+    toolCallResponse('plan-save', 'qingmu_save_director_plan', { receiptId: designReceipt, directorPlan: design }),
+    toolCallResponse('source-read', 'qingmu_read_reference_draft', { page: 1 }),
+    textResponse('设计已保存；外部来源变化，需要重新核对。'),
+  ]), upstream)
+  await h.run(true)
+  expect(result(h.agent, 'plan-save').error, result(h.agent, 'plan-save').text).toBe(false)
+  expect((JSON.parse(result(h.agent, 'plan-save').text) as { continuation: unknown }).continuation).toBeNull()
+  expect(result(h.agent, 'source-read').error).toBe(true)
+  expect(result(h.agent, 'source-read').text).toContain('context has changed')
+  expect(saves(upstream)).toHaveLength(0)
 })
 
 
