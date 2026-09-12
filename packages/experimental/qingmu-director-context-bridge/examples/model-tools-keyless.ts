@@ -10,6 +10,9 @@ import { Context } from '@deepseek-ai/cordis'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
+import Group from '@deepseek-ai/cordis-plugin-group'
+import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
+import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import AgentPresets from '@deepseek-ai/dsh-agent-presets'
@@ -124,11 +127,13 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'd
     ctx.baseUrl = pathToFileURL(presetRoot).href + '/'
     await ctx.plugin(Loader)
     ctx.loader.builtins.include = Include
+    ctx.loader.builtins.group = Group
     ctx.loader.internal = {
       version: 'v2',
       async import(specifier: string) {
         if (specifier === '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/model-tools') return ModelTools
         if (specifier === '@deepseek-ai/dsh-persona') return Persona
+        if (specifier === '@deepseek-ai/dsh-compaction-basic') return BasicCompactionEngine
         if (specifier === '@deepseek-ai/dsh-skill-filesystem') return SkillFilesystem
         if (specifier === '@deepseek-ai/dsh-tool-skill') return ToolSkill
         if (specifier === '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/skill-resources') return SkillResources
@@ -136,6 +141,7 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'd
       },
     } as unknown as NonNullable<typeof ctx.loader.internal>
     await ctx.plugin(LlmRuntime)
+    await ctx.plugin(TokenMeter)
     await ctx.plugin(SessionStore)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)

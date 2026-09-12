@@ -218,6 +218,7 @@ it('carries resolved creation settings into the native design request before gen
   expect(storyPort.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining('保留当前未保存的服装设计')])
   expect(storyPort.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining('无人空场不等于空房')])
   expect(storyPort.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining('由导演决定信息密度与留白')])
+  expect(storyPort.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining('qingmu_check_camera_geometry')])
   expect(storyPort.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining('visualIdentity 记录主体完整外观')])
   expect(storyPort.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining('哪个地标进入近景、哪些对象转到摄影机身后或被遮挡')])
   expect(storyPort.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining(JSON.stringify(imageModels))])

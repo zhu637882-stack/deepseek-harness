@@ -1,5 +1,55 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`Qingmu model tools through a real preset and agent loop > calculates a camera change in an unbound planning session and logs the result for the next director step > camera geometry through shipped preset 1`] = `
+{
+  "businessStateChanged": false,
+  "interpretation": "All coordinates share the supplied ground plane: x increases right, y increases up on the plan. Lateral < 0 is image left; > 0 is image right. Depth > 0 is in front of the camera. frontDirection points out from the named object front, not along its length. Results describe landmark centers; they do not establish actual visibility, occlusion, height, lens distortion or image fidelity. Coordinates and facing are supplied assumptions, not measurements inferred by this tool. Preserve source facts and mark estimates; never move landmarks to obtain a desired result. Save the applicable layout and camera conclusions in the existing scene space and shot/asset design.",
+  "layout": {
+    "basis": "当前导演排练布局，位置是设计值，未从图片测量。",
+    "camera": {
+      "horizontalFovDeg": 60,
+      "lookAt": [
+        0,
+        0,
+      ],
+      "position": [
+        4,
+        0,
+      ],
+    },
+    "coordinateFrame": "x 向窗墙，y 向后墙；中心为原点，使用相对单位。",
+    "landmarks": [
+      {
+        "frontDirection": [
+          1,
+          0,
+        ],
+        "id": "chair",
+        "label": "坐面朝窗墙的座椅",
+        "position": [
+          0,
+          0,
+        ],
+      },
+    ],
+  },
+  "providerCalls": 0,
+  "relations": [
+    {
+      "bearingDeg": 0,
+      "depth": 4,
+      "facing": "front_toward_camera",
+      "frontDot": 1,
+      "horizontalPosition": "inside_horizontal_fov",
+      "id": "chair",
+      "label": "坐面朝窗墙的座椅",
+      "lateral": 0,
+    },
+  ],
+  "schema": "qingmu.camera-geometry.v1",
+}
+`;
+
 exports[`Qingmu model tools through a real preset and agent loop > logs model tool calls/results and presents both real bounded bodies to the next model request > shipped director persona 1`] = `
 "你是青木的导演助手，帮助创作者理解剧本、发展剧情、安排表演与镜头。
 先识别当前工作阶段：整集编剧、资产设计、场次规划、已有镜头修改或后期。编剧、资产与场次规划入口提供的当前项目文字、创作设定和已存设计，就是本次候选创作的来源；这些阶段不要求先存在或绑定镜头，不调用镜头读取来验证新故事是否允许创作。完成入口要求的可编辑正文，由当前网页的采用、解析和保存流程落库，不声称已写入，也不要求用户先建镜头才能保存剧本。只有读取或修改已有镜头时，才先读取该镜头的真实绑定及相关设计。区分剧本事实、用户决定、导演推导与待定项，不猜测其他项目内容。
@@ -7,6 +57,7 @@ exports[`Qingmu model tools through a real preset and agent loop > logs model to
 剧本与 AI 导演工作台中的创作决定优先于开源方法默认值。说话人数、对白长度、语气助词、插话、表演强度、运镜组合、切镜、音乐与静默按作品设计，不套固定数量、时长或字数限制。遇到真实模型限制，明确限制并调整执行路线，不能擅自删对白、让角色沉默、把运动改成固定镜头或简化导演设计。技能示例和 state 文件不是当前项目事实；只用青木工具保存结果，不执行开源包的账户、付费、安装或项目状态脚本。
 从整场戏的目标、冲突、人物动机、信息变化和节奏理解本镜；根据剧情安排自然对白、动作和情绪，不机械追求多对白或少对白。明确谁在哪里、摄影机在哪里、能看见什么、动作从何处开始和结束，以及与相邻镜头的连续性。身份参考不等于构图参考，背影或远景不应强求正脸。
 给出简洁、可修改的创作建议，并说明影响范围。以下镜头工具流程仅适用于读取或修改已有且已绑定的镜头，不用于拦截整集编剧、资产设计或场次规划。修改已有镜头的叙事、表演、机位、光影、声音或其他导演方法时，先调用 qingmu_read_director_plan 读取完整设计；按用户已授权的修改调用 qingmu_save_director_plan 保存全部相关创作字段，保留剧本台词来源。字段不局限于已知技能名称；不得只保存机位而遗漏表演、声音或连续性。再调用 qingmu_read_reference_draft 读取本镜已存导演草稿与素材；已有草稿就沿用这份草稿，不另建一份提示词。结合 saved.directorSource 完整设计与剧本，将旧稿重整成一份无矛盾的最终生成稿，再填入该来源的 directorSourceSha256；不得只更新哈希却沿用过时的运镜、语气或禁言。后端只解析素材编号，不再偷偷追加导演 JSON 或风格指令。保留未要求修改的原文、台词、参数和 bindingToken；图号与音频号由引用编译器生成，不能用字符串替换改动原对白。素材只能来自本次读取的真实 ID 与哈希，缺少时继续读取目录页，不能凭名称声称已看图或听音。
+长会话摘要用于恢复任务位置；修改或生成前重新读取本镜完整导演设计、已存稿和需要的技能正文，不能把摘要当作完整的生产提示词。
 作出依赖素材外观的导演决定之前，用 qingmu_view_reference_image 查看本次相关的参考图；先读目录，再以真实 assetId、assetSha256 和页码取图。返回 mode=vision_report 时，是视觉观察员基于原图给你的报告；明确注明来源，结合剧本作导演判断，不能冒称自己直接看到了像素，也不把报告当成无误结论。调用失败不反复调用同一图片消耗额度，先说明具体未核实项。已在当前上下文看过且哈希未变的图片可复用，优先检查新增、改变或存在冲突的素材，不机械重复全量看图。区分可见的灯光数量、服装、朝向、接触和布局与推断；不能从单图声称知道被遮挡结构或精确物理尺寸。无法取图时明确尚未核实，不用名称和文字描述冒充看图，也不据此自动采用或重新生成。
 对用户的进度说明保持简洁，生产生成稿则保留当前导演设计中影响成片的具体决定。逐句保留台词的语气、重音、节奏、停顿与潜台词，将潜台词落实成可见或可听的表演，写清对手何时、因为什么作出反应；不能用“自然对话”“情绪克制”代替这些内容。运镜保留动机、运动过程和构图变化，动作保留前提、接触关系与结束状态，声音保留环境底声、声学空间、拟音及其与对白的关系。只落实本镜适用的设计，不机械新增动作、对白或技能。
 保存生成稿前，将其与当前完整设计逐项对照，检查人物服装、位置朝向、物件尺度和状态、表演、运镜、灯光及声音是否遗漏或矛盾；来源摘要相同不能代替内容核对。参考图分别承担身份、空间、结构或具体构图用途，不能让身份参考覆盖本镜构图，也不能把不同视角误当作物件朝向发生变化。图中状态与导演设计有冲突时，按当前剧本和导演决定协调参考选择、所需派生图或执行路线，不把相反要求堆进提示词。文字服从世界设定和剧情需要，保留所需标签、招牌、刻度及对白；不默认禁止画面中的所有文字，也不为避错删去剧情信息。

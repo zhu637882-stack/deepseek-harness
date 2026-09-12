@@ -20,6 +20,7 @@ import { prepareDialogueVideo } from './dialogue-video.ts'
 import { retainNativeToolReceipt, toolValues } from './native-draft.ts'
 import { registerReferenceVideoTools } from './reference-video-tools.ts'
 import { registerDirectorPlanTools } from './director-plan-tools.ts'
+import { registerCameraGeometryTool } from './camera-geometry.ts'
 import type { ReferenceVisionConfig } from './reference-vision.ts'
 
 /** Opt-in native-agent consumer; the Host binding plugin remains independently usable. */
@@ -82,6 +83,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes <= 0) {
     throw new Error('maxOutputBytes must be a positive safe integer.')
   }
+  registerCameraGeometryTool(ctx, value => boundedJson(value, maxOutputBytes))
 
   async function readBoundContext(exec: ToolRunContext): Promise<{
     session: Session

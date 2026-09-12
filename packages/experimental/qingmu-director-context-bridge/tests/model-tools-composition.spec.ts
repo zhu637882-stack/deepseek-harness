@@ -8,6 +8,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
+import Group from '@deepseek-ai/cordis-plugin-group'
+import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
+import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import LlmRuntime, { createUserMessage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -24,7 +27,13 @@ import * as Persona from '@deepseek-ai/dsh-persona'
 import * as SpillPolicy from '@deepseek-ai/dsh-spill-policy'
 import SpillLocal from '@deepseek-ai/dsh-spill-local'
 import { findNativeDialogueInput } from '../src/native-dialogue.ts'
-import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
+import { MockAdapter as BaseMockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
+
+class MockAdapter extends BaseMockAdapter {
+  override async resolveModel(provider: string, model: string) {
+    return { ...await super.resolveModel(provider, model), context: { contextWindow: 1048576 } }
+  }
+}
 import * as ModelTools from '../src/model-tools.ts'
 import type { DirectorContextSnapshot } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import { draftMethod } from '../examples/native-draft-fixture.ts'
@@ -101,6 +110,7 @@ async function harness(adapter: MockAdapter, sessionRoot?: string, dialogue = fa
   ctx.baseUrl = pathToFileURL(presetRoot).href + '/'
   await ctx.plugin(Loader)
   ctx.loader.builtins.include = Include
+  ctx.loader.builtins.group = Group
   ctx.loader.internal = {
     version: 'v2',
     async import(specifier: string) {
@@ -109,10 +119,12 @@ async function harness(adapter: MockAdapter, sessionRoot?: string, dialogue = fa
       if (specifier === '@deepseek-ai/dsh-tool-skill') return ToolSkill
       if (specifier === '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/skill-resources') return SkillResources
       if (specifier === '@deepseek-ai/dsh-persona') return Persona
+      if (specifier === '@deepseek-ai/dsh-compaction-basic') return BasicCompactionEngine
       throw new Error(`unexpected Loader import: ${specifier}`)
     },
   } as unknown as NonNullable<typeof ctx.loader.internal>
   await ctx.plugin(LlmRuntime)
+  await ctx.plugin(TokenMeter)
   await ctx.plugin(SessionStore)
   await ctx.plugin(SystemPrompt, { persona: '' })
   await ctx.plugin(ToolRuntime)
@@ -185,6 +197,30 @@ async function createQingmuAgent(ctx: Context, id: string): Promise<{ agent: Age
 }
 
 describe('Qingmu model tools through a real preset and agent loop', () => {
+  it('calculates a camera change in an unbound planning session and logs the result for the next director step', async () => {
+    const adapter = new MockAdapter([
+      toolCallResponse('geometry', 'qingmu_check_camera_geometry', { layout: {
+        coordinateFrame: 'x 向窗墙，y 向后墙；中心为原点，使用相对单位。',
+        basis: '当前导演排练布局，位置是设计值，未从图片测量。',
+        camera: { position: [4, 0], lookAt: [0, 0], horizontalFovDeg: 60 },
+        landmarks: [{ id: 'chair', label: '坐面朝窗墙的座椅', position: [0, 0], frontDirection: [1, 0] }],
+      } }), textResponse('新机位看到座椅正面，保留布局。尚未保存或生成。'),
+    ])
+    const ctx = await harness(adapter)
+    const handle = await createQingmuAgent(ctx, 'geometry-planning')
+    handle.agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: '核对新机位。' }] }))
+    await waitForIdle(ctx, handle.agent)
+    const result = JSON.parse(resultText(handle.agent.session.events, 'qingmu_check_camera_geometry'))
+    expect(result.relations[0]).toMatchObject({ facing: 'front_toward_camera', lateral: 0, depth: 4 })
+    expect(result).toMatchObject({ providerCalls: 0, businessStateChanged: false })
+    expect(JSON.stringify(adapter.requests[1]?.messages)).toContain('front_toward_camera')
+    expect(result).toMatchSnapshot('camera geometry through shipped preset')
+    expect(ctx.tools.schemas()).toEqual([])
+    await handle.dispose()
+    const registry = ctx.tools
+    await ctx.fiber.dispose(); contexts.splice(contexts.indexOf(ctx), 1)
+    expect(registry.get('qingmu_check_camera_geometry', handle.agent)).toBeUndefined()
+  })
   it('loads a full dialogue receipt through real persistence after a cold restart', async () => {
     const sessionRoot = await mkdtemp(join(tmpdir(), 'qingmu-dialogue-cold-')); roots.push(sessionRoot)
     const notes = '大剧本正文'.repeat(30000)
@@ -339,15 +375,15 @@ describe('Qingmu model tools through a real preset and agent loop', () => {
     expect(ctx.tools.schemas()).toEqual([])
     expect(ctx.tools.schemas(ordinary.agent)).toEqual([])
     expect(ctx.tools.schemas(first.agent).map(tool => tool.name).sort())
-      .toEqual(['qingmu_get_imago_method', 'qingmu_read_bound_context', 'qingmu_read_skill_resource', 'skill'])
+      .toEqual(['qingmu_check_camera_geometry', 'qingmu_get_imago_method', 'qingmu_read_bound_context', 'qingmu_read_skill_resource', 'skill'])
     expect(ctx.tools.schemas(second.agent).map(tool => tool.name).sort())
-      .toEqual(['qingmu_get_imago_method', 'qingmu_read_bound_context', 'qingmu_read_skill_resource', 'skill'])
+      .toEqual(['qingmu_check_camera_geometry', 'qingmu_get_imago_method', 'qingmu_read_bound_context', 'qingmu_read_skill_resource', 'skill'])
     expect(first.agent.session.events.at(-1)?.data).toMatchObject({ binding: { contextSnapshotSha256: '1'.repeat(64) } })
     expect(second.agent.session.events.at(-1)?.data).toMatchObject({ binding: { contextSnapshotSha256: '2'.repeat(64) } })
 
     await first.dispose()
     expect(ctx.tools.schemas(second.agent).map(tool => tool.name).sort())
-      .toEqual(['qingmu_get_imago_method', 'qingmu_read_bound_context', 'qingmu_read_skill_resource', 'skill'])
+      .toEqual(['qingmu_check_camera_geometry', 'qingmu_get_imago_method', 'qingmu_read_bound_context', 'qingmu_read_skill_resource', 'skill'])
     expect(ctx.tools.schemas()).toEqual([])
     await second.dispose()
     await ordinary.dispose()
@@ -375,7 +411,7 @@ describe('Qingmu model tools through a real preset and agent loop', () => {
       setup: async agentCtx => void await resumed.agentPresets.mount(agentCtx, 'qingmu-director'),
     })
     expect(resumed.tools.schemas(handle.agent).map(tool => tool.name).sort())
-      .toEqual(['qingmu_get_imago_method', 'qingmu_read_bound_context', 'qingmu_read_skill_resource', 'skill'])
+      .toEqual(['qingmu_check_camera_geometry', 'qingmu_get_imago_method', 'qingmu_read_bound_context', 'qingmu_read_skill_resource', 'skill'])
 
     handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: '恢复后读取。' }], source: { kind: 'user' } }))
     await waitForIdle(resumed, handle.agent)
