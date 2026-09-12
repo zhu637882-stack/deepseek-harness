@@ -165,7 +165,9 @@ describe('same-Shot Finding authoring', () => {
   it('rejects the revisionVersion domain even when the feed subject is correctly rehashed', async () => {
     const source = shotFindingSource()
     const feed = shotFindingFeed(source)
-    const wrong = changedFeed(feed, { storyboardRevision: source.director.shotRelations.storyboardRevision.revisionVersion })
+    const revisionVersion = source.director.shotRelations.storyboardRevision.revisionVersion
+    if (revisionVersion === null) throw new Error('Fixture must contain an existing storyboard')
+    const wrong = changedFeed(feed, { storyboardRevision: revisionVersion })
     const port = makePort(wrong)
     render(<ShotFindingView {...props(port, source)} />)
     expect(await screen.findByText(zh.findingLoadError)).toBeTruthy()

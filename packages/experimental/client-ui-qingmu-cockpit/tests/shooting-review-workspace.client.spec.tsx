@@ -458,7 +458,7 @@ it.each(['current', 'script-drift', 'scope-drift', 'read-failed', 'unknown-recei
 
 it('waits for the shooting scope before reading scene planning', async () => {
   const readScenePlanning = vi.fn(async () => ({ frameRequirements: [], canonicalStoryboard: null }))
-  const props = { projectName: '', episodeName: '', selectedShotId: '', onSelectShotId: vi.fn(), onNavigate: vi.fn(),
+  const props = { projection: undefined, projectName: '', episodeName: '', selectedShotId: '', onSelectShotId: vi.fn(), onNavigate: vi.fn(),
     directorAssistant: null, t: (key: string) => key, port: { ...portFixture, readScenePlanning } as never }
   const view = render(<ShootingReviewWorkspace {...props} projectId="" episodeId="" />)
   expect(readScenePlanning).not.toHaveBeenCalled()
