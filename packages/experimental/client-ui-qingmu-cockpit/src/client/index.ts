@@ -214,6 +214,7 @@ export function apply(ctx: ClientContext): void {
     qualifyLocalReferenceCandidate: (request, signal) => command('qualifyLocalReferenceCandidate', request, signal),
     recoverLocalReferenceQualification: (request, signal) => command('recoverLocalReferenceQualification', request, signal),
     readWorkingCut: (request, signal) => command('readWorkingCut', request, signal),
+    reviewWorkingCutSound: (request, signal) => command('reviewWorkingCutSound', request, signal),
     renderWorkingCut: (request, signal) => command('renderWorkingCut', request, signal),
     saveWorkingCut: (request, signal) => command('saveWorkingCut', request, signal),
     uploadWorkingCutAudio: (request, signal) => command('uploadWorkingCutAudio', request, signal),

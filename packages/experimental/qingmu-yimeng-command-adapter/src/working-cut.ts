@@ -37,6 +37,21 @@ export interface WorkingCutCommand {
   readonly audioCues?: readonly WorkingAudioCue[]
   readonly soundPlan?: string
 }
+/** Model observations tied to one rendered version, never creative acceptance. */
+export interface WorkingCutSoundReview {
+  readonly state: 'none' | 'pending' | 'complete' | 'failed'
+  readonly advisoryOnly: true
+  readonly taskId?: string
+  readonly model?: string
+  readonly summary?: string
+  readonly errorCode?: string | null
+  readonly checks: readonly {
+    readonly kind: string
+    readonly status: 'pass' | 'fail' | 'unverified' | 'not_applicable'
+    readonly evidence: string
+    readonly timeRanges: readonly (readonly [number, number])[]
+  }[]
+}
 /** Current shot choices plus retained MP4 versions. */
 export interface WorkingCutState extends CreationScope {
   readonly schema: 'qingmu-working-cut-v1'
@@ -87,6 +102,7 @@ export interface WorkingCutState extends CreationScope {
     readonly assetId: string | null
     readonly sha256: string | null
     readonly url: string
+    readonly soundReview?: WorkingCutSoundReview
   }[]
   readonly providerCalls: 0
   readonly humanApprovalChanged: false
@@ -109,7 +125,7 @@ export function prepareWorkingCut(endpoint: string, value: unknown, helpers: {
     return v
   }
   const projectId = id(raw.projectId), episodeId = id(raw.episodeId)
-  const operation = ({ readWorkingCut: '', renderWorkingCut: '/render', saveWorkingCut: '/save', uploadWorkingCutAudio: '/audio' } as Record<string, string>)[endpoint]
+  const operation = ({ readWorkingCut: '', renderWorkingCut: '/render', saveWorkingCut: '/save', uploadWorkingCutAudio: '/audio', reviewWorkingCutSound: '/sound-review' } as Record<string, string>)[endpoint]
   if (operation === undefined) throw fail('working cut endpoint invalid')
   const write = operation !== ''
   const fields = write ? ['projectId', 'episodeId', 'command'] : ['projectId', 'episodeId']

@@ -5850,7 +5850,7 @@ export function createYimengCommandHandler(
           ...(prepared.request.idempotencyKey === undefined ? {} : { idempotencyKey: prepared.request.idempotencyKey }),
         }
         normalize = prepared.normalize
-      } else if (['readWorkingCut', 'renderWorkingCut', 'saveWorkingCut', 'uploadWorkingCutAudio'].includes(endpoint)) {
+      } else if (['readWorkingCut', 'renderWorkingCut', 'saveWorkingCut', 'uploadWorkingCutAudio', 'reviewWorkingCutSound'].includes(endpoint)) {
         const prepared = prepareWorkingCut(endpoint, payload, stageArtifactHelpers)
         path = prepared.path
         requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body, endpoint === 'uploadWorkingCutAudio' ? 45 * 1024 * 1024 : MAX_JSON_BYTES) }) }
@@ -6290,7 +6290,7 @@ export function createYimengCommandHandler(
       const requiresCredentialReflectionGuard = isStageArtifactCommand
         || endpoint === 'updateProject'
         || ['previewProjectCopy', 'copyProject', 'recoverProjectCopy'].includes(endpoint)
-        || ['readWorkingCut', 'renderWorkingCut', 'saveWorkingCut', 'uploadWorkingCutAudio'].includes(endpoint)
+        || ['readWorkingCut', 'renderWorkingCut', 'saveWorkingCut', 'uploadWorkingCutAudio', 'reviewWorkingCutSound'].includes(endpoint)
         || ['readAssetDesign', 'saveAssetDesign', 'quoteAssetImage', 'generateAssetImage', 'readAssetImageRuns', 'quoteAssetVoice', 'generateAssetVoice', 'readAssetVoiceRuns'].includes(endpoint)
         || ['readScenePlanning', 'saveScenePlanning', 'recoverScenePlanning'].includes(endpoint)
         || ['readStyleComposition', 'readCreativeContract', 'initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)

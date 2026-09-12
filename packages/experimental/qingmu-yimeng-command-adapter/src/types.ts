@@ -3050,6 +3050,7 @@ export interface YimengCommandEndpointMap {
   readonly renderWorkingCut: import('./working-cut.ts').WorkingCutState
   readonly saveWorkingCut: import('./working-cut.ts').WorkingCutState
   readonly uploadWorkingCutAudio: import('./working-cut.ts').WorkingCutState
+  readonly reviewWorkingCutSound: import('./working-cut.ts').WorkingCutState
   readonly readAssetDesign: import('./asset-design.ts').AssetDesignState
   readonly saveAssetDesign: import('./asset-design.ts').AssetDesignState
   readonly quoteAssetImage: import('./asset-design.ts').AssetImageQuote
@@ -3166,4 +3167,4 @@ export type { LocalVideoSourceScope, LocalVideoSourceBinding, LocalVideoSourceRe
 
 export type { AssetImageReference, AssetWorldDesign, AssetDesignItem, AssetSceneSpace, AssetImageStage, AssetDirectorDesign, AssetDesign, AssetDesignState, AssetImageQuote, AssetImageSubmission, AssetImageRuns, AssetImageCommand } from './asset-design.ts'
 
-export type { WorkingClip, WorkingAudioCue, WorkingCutCommand, WorkingCutState } from './working-cut.ts'
+export type { WorkingClip, WorkingAudioCue, WorkingCutCommand, WorkingCutState, WorkingCutSoundReview } from './working-cut.ts'

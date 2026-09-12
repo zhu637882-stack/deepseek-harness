@@ -7,6 +7,50 @@ const state: WorkingCutState = { schema:'qingmu-working-cut-v1',projectId:'p',ep
   shots:[{ frameId:'f',frameNo:1,title:'动作',candidates:[{ assetId:'a',sha256:'a'.repeat(64),duration:15,taskId:'t',url:'' }] }],
   cuts:[],providerCalls:0,humanApprovalChanged:false }
 afterEach(() => { cleanup();localStorage.clear() })
+it('reviews the exact rendered version, preserves edits and recovers timed findings on reopen', async () => {
+  const clip = { frameId: 'f', assetId: 'a', sha256: 'a'.repeat(64), inSec: 0, outSec: 15 }
+  const cut = { revisionId: 'cut-1', version: 1, clips: [clip], requestId: 'cut-request', taskId: 'render-task',
+    status: 'Succeeded', errorCode: null, assetId: 'film-1', sha256: 'b'.repeat(64), url: '/film-1.mp4' }
+  let server: WorkingCutState = { ...state, revision: 1, cuts: [cut] }
+  const review = vi.fn(async (_input: unknown) => {
+    server = { ...server, cuts: [{ ...cut, soundReview: {
+      state: 'complete', advisoryOnly: true, taskId: 'review-1', summary: '音乐在转场处突然停止。',
+      checks: [{ kind: 'music', status: 'fail', evidence: '乐句在8秒处中断。', timeRanges: [[7.5, 8.5]] }],
+    } }] }
+    return server
+  })
+  const port = { readWorkingCut: vi.fn(async () => server), reviewWorkingCutSound: review,
+    saveWorkingCut: vi.fn(), renderWorkingCut: vi.fn(), uploadWorkingCutAudio: vi.fn() }
+  let view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
+  await screen.findByRole('button', { name: '检查此版整片声音' })
+  expect(review).not.toHaveBeenCalled()
+  fireEvent.change(screen.getByRole('spinbutton', { name: '镜 1 终点秒' }), { target: { value: '12' } })
+  fireEvent.click(screen.getByRole('button', { name: '检查此版整片声音' }))
+  await screen.findByText('音乐与转场 · 发现问题')
+  expect(review).toHaveBeenCalledExactlyOnceWith({ projectId: 'p', episodeId: 'e', command: {
+    revisionId: 'cut-1', assetId: 'film-1', sha256: 'b'.repeat(64),
+  } })
+  expect(screen.getByRole('spinbutton', { name: '镜 1 终点秒' })).toHaveProperty('value', '12')
+  expect(screen.getByText(/当前剪辑已有修改/)).toBeTruthy()
+  const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
+  fireEvent.click(screen.getByRole('button', { name: '0:07.5—0:08.5 回听' }))
+  expect(view.container.querySelector('[aria-label="成片播放器"] video')).toHaveProperty('currentTime', 7.5)
+  expect(play).toHaveBeenCalledTimes(1)
+  view.unmount()
+  view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
+  await screen.findByText('音乐与转场 · 发现问题')
+  expect(review).toHaveBeenCalledTimes(1)
+  expect(port.renderWorkingCut).not.toHaveBeenCalled()
+  server = { ...server, revision: 2, cuts: [{ ...cut, revisionId: 'cut-2', version: 2,
+    assetId: 'film-2', sha256: 'c'.repeat(64), url: '/film-2.mp4' }, ...server.cuts] }
+  fireEvent.click(screen.getByRole('button', { name: '刷新成片状态' }))
+  await screen.findByRole('button', { name: '检查此版整片声音' })
+  expect(screen.queryByText('音乐与转场 · 发现问题')).toBeNull()
+  fireEvent.change(screen.getByRole('combobox', { name: '成片播放版本' }), { target: { value: 'cut-1' } })
+  expect(screen.getByText('音乐与转场 · 发现问题')).toBeTruthy()
+  expect(review).toHaveBeenCalledTimes(1)
+  play.mockRestore()
+})
 it('imports a bundled response without losing edits or adding an impulse as music', async () => {
   const source = { assetId: 'voice', sha256: 'b'.repeat(64), duration: 15, name: 'Voice.wav', url: '' }
   const preset = { id: 'bedroom', name: '居住房间', description: '卧室实录', sourceUrl: 'https://example.com/source',
@@ -16,7 +60,8 @@ it('imports a bundled response without losing edits or adding an impulse as musi
   let server = { ...state, acousticPresets: [preset], audioLibrary: [source] }
   const uploadWorkingCutAudio = vi.fn(async (_input: unknown) => { server = { ...server, audioLibrary: [source, room] }; return server })
   const saveWorkingCut = vi.fn(async (_input: { command: WorkingCutCommand }) => server)
-  const port = { readWorkingCut: vi.fn(async () => server), saveWorkingCut, uploadWorkingCutAudio, renderWorkingCut: vi.fn() }
+  const port = { reviewWorkingCutSound: vi.fn(),
+    readWorkingCut: vi.fn(async () => server), saveWorkingCut, uploadWorkingCutAudio, renderWorkingCut: vi.fn() }
   render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
   fireEvent.change(await screen.findByRole('spinbutton', { name: '镜 1 终点秒' }), { target: { value: '12' } })
   fireEvent.click(screen.getByText('选择空间声学 · 房间、咖啡店与走廊'))
@@ -43,7 +88,8 @@ it('saves room response and cross-cut tail, rejects overrun, and reopens without
       status: 'NotQueued', errorCode: null, assetId: null, sha256: null, url: '' }] }
     return server
   })
-  const port = { readWorkingCut: vi.fn(async () => server), saveWorkingCut: save,
+  const port = { reviewWorkingCutSound: vi.fn(),
+    readWorkingCut: vi.fn(async () => server), saveWorkingCut: save,
     renderWorkingCut: vi.fn(), uploadWorkingCutAudio: vi.fn() }
   const view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
   fireEvent.click((await screen.findAllByRole('button', { name: '加入音轨' }))[0]!)
@@ -73,7 +119,8 @@ it('previews framing, retains it on reopen and can restore the unmodified source
       revisionId: 'revision', taskId: null, status: 'NotQueued', errorCode: null, assetId: null, sha256: null, url: '' }] }
     return server
   })
-  const port = { readWorkingCut: vi.fn(async () => server), saveWorkingCut: save,
+  const port = { reviewWorkingCutSound: vi.fn(),
+    readWorkingCut: vi.fn(async () => server), saveWorkingCut: save,
     renderWorkingCut: vi.fn(), uploadWorkingCutAudio: vi.fn() }
   let view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
   const openFraming = async () => {
@@ -108,7 +155,8 @@ it('previews framing, retains it on reopen and can restore the unmodified source
 })
 it('submits the chosen source range and retains the same command after an uncertain response', async () => {
   const renderCut=vi.fn().mockRejectedValueOnce(new Error('timeout')).mockResolvedValue({ ...state,revision:1,cuts:[] })
-  const port={ readWorkingCut:vi.fn(async()=>state),saveWorkingCut:vi.fn(),uploadWorkingCutAudio:vi.fn(),renderWorkingCut:renderCut }
+  const port={ reviewWorkingCutSound: vi.fn(),
+    readWorkingCut:vi.fn(async()=>state),saveWorkingCut:vi.fn(),uploadWorkingCutAudio:vi.fn(),renderWorkingCut:renderCut }
   render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
   await screen.findByRole('combobox',{ name:'镜 1 视频版本' })
   fireEvent.change(screen.getByRole('spinbutton',{ name:'镜 1 起点秒' }),{ target:{ value:'1.8' } })
@@ -121,7 +169,7 @@ it('submits the chosen source range and retains the same command after an uncert
 })
 it('opens a missing shot for generation and reads existing film versions without creating work', async () => {
   const open=vi.fn(),generate=vi.fn()
-  render(<WorkingCut projectId="p" episodeId="e" port={{ readWorkingCut:vi.fn(async()=>({ ...state,shots:[{ frameId:'missing',frameNo:1,title:'未生成',candidates:[] }] })),saveWorkingCut:vi.fn(),uploadWorkingCutAudio:vi.fn(),renderWorkingCut:generate }} onOpenShooting={open} />)
+  render(<WorkingCut projectId="p" episodeId="e" port={{ reviewWorkingCutSound: vi.fn(), readWorkingCut:vi.fn(async()=>({ ...state,shots:[{ frameId:'missing',frameNo:1,title:'未生成',candidates:[] }] })),saveWorkingCut:vi.fn(),uploadWorkingCutAudio:vi.fn(),renderWorkingCut:generate }} onOpenShooting={open} />)
   fireEvent.click(await screen.findByRole('button',{ name:'去生成' }))
   expect(open).toHaveBeenCalledWith('missing');expect(generate).not.toHaveBeenCalled()
   expect(screen.getByRole('button',{ name:'合成并导出 MP4' })).toHaveProperty('disabled',true)
@@ -134,7 +182,8 @@ it('saves whole-cut ambience with independent fades and recovers it on reopen', 
     server = { ...server,revision:1,cuts:[{ ...command,revisionId:'rev-1',version:1,status:'NotQueued',taskId:null,errorCode:null,assetId:null,sha256:null,url:'' }] }
     return server
   })
-  const port = { readWorkingCut:vi.fn(async()=>server),renderWorkingCut:vi.fn(),saveWorkingCut:save,uploadWorkingCutAudio:vi.fn() }
+  const port = { reviewWorkingCutSound: vi.fn(),
+    readWorkingCut:vi.fn(async()=>server),renderWorkingCut:vi.fn(),saveWorkingCut:save,uploadWorkingCutAudio:vi.fn() }
   const view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
   fireEvent.click(await screen.findByRole('button',{ name:'加入音轨' }))
   fireEvent.change(screen.getByRole('combobox',{ name:'音轨 1 用途' }),{ target:{ value:'ambience' } })

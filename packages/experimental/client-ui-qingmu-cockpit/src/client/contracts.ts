@@ -834,6 +834,8 @@ export interface QingmuYimengCommandPort {
   proposeScript(request: YimengProposeScriptRequest, signal?: AbortSignal): Promise<YimengProposeScriptResponse>
   /** Load candidate choices and retained local MP4 cuts. */
   readWorkingCut(request: CreationScope, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').WorkingCutState>
+  /** Queue or recover advisory sound observations for an exact rendered cut. */
+  reviewWorkingCutSound(request: CreationScope & { command: { revisionId: string; assetId: string; sha256: string } }, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').WorkingCutState>
   /** Save an ordered cut and queue one recoverable local render. */
   renderWorkingCut(request: CreationScope & { command: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').WorkingCutCommand }, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').WorkingCutState>
   /** Save an editable cut without rendering or paid generation. */

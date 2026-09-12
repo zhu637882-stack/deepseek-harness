@@ -635,6 +635,7 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     readWorkingCut: vi.fn(async () => { throw new Error('Dedicated working cut fixture') }),
     renderWorkingCut: vi.fn(async () => { throw new Error('Dedicated working cut fixture') }),
     saveWorkingCut: vi.fn(async () => { throw new Error('Dedicated working cut fixture') }),
+    reviewWorkingCutSound: vi.fn(async () => { throw new Error('Dedicated sound review fixture') }),
     uploadWorkingCutAudio: vi.fn(async () => { throw new Error('Dedicated working cut fixture') }),
     readAssetVoiceRuns: vi.fn(async () => { throw new Error('Dedicated asset fixture') }),
     quoteAssetVoice: vi.fn(async () => { throw new Error('Dedicated asset fixture') }),

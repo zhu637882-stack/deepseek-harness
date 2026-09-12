@@ -5,6 +5,7 @@ import type { QingmuYimengPort } from './contracts.ts'
 import css from './WorkingCut.module.css'
 import { WorkingCutSound } from './WorkingCutSound.tsx'
 import { WorkingCutReframe } from './WorkingCutReframe.tsx'
+import { WorkingCutSoundReview } from './WorkingCutSoundReview.tsx'
 
 /** Choose generated takes, trim their source ranges and render with native sound.
  * @param props - Active project/episode and authenticated command port.
@@ -13,7 +14,7 @@ import { WorkingCutReframe } from './WorkingCutReframe.tsx'
 export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
   readonly projectId: string
   readonly episodeId: string
-  readonly port: Pick<QingmuYimengPort, 'readWorkingCut' | 'renderWorkingCut' | 'saveWorkingCut' | 'uploadWorkingCutAudio'>
+  readonly port: Pick<QingmuYimengPort, 'readWorkingCut' | 'renderWorkingCut' | 'saveWorkingCut' | 'uploadWorkingCutAudio' | 'reviewWorkingCutSound'>
   readonly onOpenShooting: (frameId: string) => void
 }) {
   const [state, setState] = useState<WorkingCutState>()
@@ -24,6 +25,8 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [dirty, setDirty] = useState(false)
+  const [playingVersion, setPlayingVersion] = useState<string>()
+  const player = useRef<HTMLVideoElement>(null)
   const live = useRef(true), editing = useRef(false)
   const pending = useRef<WorkingCutCommand>()
   const pendingMode = useRef<'save' | 'render'>('render')
@@ -60,11 +63,12 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
     return () => { live.current = false }
   }, [read, scopeKey])
   const running = state?.cuts.some(c => !['Succeeded', 'Failed', 'Cancelled', 'NotQueued'].includes(c.status)) ?? false
+  const reviewRunning = state?.cuts.some(c => c.soundReview?.state === 'pending') ?? false
   useEffect(() => {
-    if (!running) return
+    if (!running && !reviewRunning) return
     const timer = setInterval(() => { void read().catch((cause: unknown) => { if (live.current) setError(String(cause)) }) }, 5000)
     return () => { clearInterval(timer) }
-  }, [read, running])
+  }, [read, running, reviewRunning])
   const change = (value: readonly WorkingClip[]) => { editing.current = true; setDirty(true); setClips(value) }
   const update = (index: number, clip: WorkingClip) => { change(clips.map((old, i) => i === index ? clip : old)) }
   const render = async (mode: 'save' | 'render' = 'render') => {
@@ -111,7 +115,19 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
       && c.inSec >= 0 && c.outSec > c.inSec && c.outSec <= source.duration
   })
   const locked = busy || running || !!pending.current
-  const latest = state?.cuts.find(c => c.status === 'Succeeded' && c.url)
+  const rendered = state?.cuts.filter(c => c.status === 'Succeeded' && c.url) ?? []
+  const latest = rendered.find(c => c.revisionId === playingVersion) ?? rendered[0]
+  const reviewSound = async () => {
+    if (busy || !latest?.assetId || !latest.sha256) return
+    setBusy(true); setError('')
+    try {
+      const next = await port.reviewWorkingCutSound({ projectId, episodeId, command: {
+        revisionId: latest.revisionId, assetId: latest.assetId, sha256: latest.sha256,
+      } })
+      if (live.current) setState(next)
+    } catch (cause) { if (live.current) setError(`检查请求尚未确认，请刷新状态恢复同一次检查。${String(cause)}`) }
+    finally { if (live.current) setBusy(false) }
+  }
   return <section className={css.panel} aria-label="成片剪辑">
     <header><div><h2>成片剪辑</h2><p>选择镜头、调整剪辑，再为整场安排声音，保存并导出 MP4。</p></div>
       <button type="button" disabled={busy} onClick={() => { setError(''); void read().catch((cause: unknown) => { setError(String(cause)) }) }}>刷新成片状态</button></header>
@@ -183,7 +199,18 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
         <button type="button" disabled={busy || running || !valid} onClick={() => { void render() }}>{busy ? '正在提交…' : running ? '正在合成 MP4…' : pending.current ? pendingMode.current === 'save' ? '恢复上次保存' : '恢复上次导出' : '合成并导出 MP4'}</button>
         <span>{dirty ? '剪辑与声音设计尚未保存' : '本地合成不调用付费生成模型'}</span></div>
       {state.cuts[0]?.status === 'Failed' && <p role="alert">合成失败：{state.cuts[0].errorCode}。原片仍保留。</p>}
-      {latest && <section aria-label="成片播放器"><h3>成片 · 版本 {latest.version}</h3><video controls preload="metadata" src={latest.url} /><a href={`${latest.url}${latest.url.includes('?') ? '&' : '?'}download=true`} download={`青木-成片-v${latest.version}.mp4`} target="_blank" rel="noreferrer">下载 MP4</a></section>}
+      {latest && <section aria-label="成片播放器"><h3>成片 · 版本 {latest.version}</h3>
+        {rendered.length > 1 && <label>播放版本 <select aria-label="成片播放版本" value={latest.revisionId}
+          onChange={(e) => { setPlayingVersion(e.target.value) }}>{rendered.map(c =>
+            <option key={c.revisionId} value={c.revisionId}>版本 {c.version}</option>)}</select></label>}
+        <video key={latest.revisionId} ref={player} controls preload="metadata" src={latest.url} />
+        <a href={`${latest.url}${latest.url.includes('?') ? '&' : '?'}download=true`} download={`青木-成片-v${latest.version}.mp4`} target="_blank" rel="noreferrer">下载 MP4</a>
+        <WorkingCutSoundReview review={latest.soundReview} busy={busy} changed={dirty || latest.revisionId !== state.cuts[0]?.revisionId}
+          onReview={() => { void reviewSound() }} onSeek={(seconds) => {
+            const video = player.current
+            if (video) { video.currentTime = seconds; void video.play().catch(() => { video.focus() }) }
+          }} />
+      </section>}
       {state.cuts.length > 1 && <details><summary>剪辑记录 · {state.cuts.length} 版</summary>{state.cuts.map(c => <p key={c.revisionId}>版本 {c.version} · {c.status === 'NotQueued' ? '剪辑草稿' : c.status === 'Succeeded' ? '已合成' : c.status === 'Failed' ? '合成失败' : '合成中'} {c.url && <a href={c.url} target="_blank" rel="noreferrer">播放 / 下载</a>}</p>)}</details>}
     </>}
   </section>

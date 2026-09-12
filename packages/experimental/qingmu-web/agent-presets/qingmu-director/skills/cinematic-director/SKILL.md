@@ -91,7 +91,7 @@ metadata:
 
 ## 声音导演与整片复核
 
-声音从剧本和导演阶段设计，在粗剪后落实到整场时间线。先读 `references/sound-and-dialogue.md` 的整场后期方法，再读 `references/editing-and-assembly.md` 的接点与节奏检查。用 `qingmu_read_working_cut` 读取实际已剪片段、时长、版本和音频素材；用 `qingmu_save_working_cut` 保存镜头、独立声音轨及声音设计，需要时合成本地 MP4。素材没有导入、轨道没有保存或没有试听导出，就不能称为声音已完成。
+声音从剧本和导演阶段设计，在粗剪后落实到整场时间线。先读 `references/sound-and-dialogue.md` 的整场后期方法，再读 `references/editing-and-assembly.md` 的接点与节奏检查。用 `qingmu_read_working_cut` 读取实际已剪片段、时长、版本和音频素材；用 `qingmu_save_working_cut` 保存镜头、独立声音轨及声音设计，需要时合成本地 MP4。素材没有导入、轨道没有保存或没有试听导出，就不能称为声音已完成。 成片页可对选定版本执行整片声音检查；`qingmu_read_working_cut` 的 `cuts[].soundReview` 返回该版本的模型观察及成片时间点。先核对播放版本与问题位置，再修改声音设计或音轨；旧版结果不能代表新版通过，模型结论不能代替实际回听。
 
 每场决定对白声学与距离、连续环境底声、动作拟音、叙事声音和音乐进入退出的理由。配乐用整场情绪段落组织，可以跨切镜；不能因为一句对白开始就让世界静音。室内、车内、街道、空旷地和洞穴需要不同的直达声、反射、混响与遮蔽判断。不要将所有对白写成近麦干声，也不要对全部原生混音统一套混响。
 
