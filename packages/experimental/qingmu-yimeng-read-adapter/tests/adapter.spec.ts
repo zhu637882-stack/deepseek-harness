@@ -2450,6 +2450,37 @@ describe('qingmu Yimeng read adapter', () => {
     }
   })
 
+  it.each(['完整动作设计。'.repeat(100) + '\n最后保留雨声。', '详细调度'.repeat(5000)])(
+    'reads complete beat prose without applying the identifier limit', async (description) => {
+      const upstream = workflowFixture()
+      const director = upstream.director as Record<string, unknown>
+      const relations = director.shotRelations as Record<string, unknown>
+      const shot = (relations.shots as Array<Record<string, unknown>>)[0]!
+      const beat = (shot.beats as Array<Record<string, unknown>>)[0]!
+      beat.visualResponsibility = description
+      const hero = director.heroFrameStoryboards as Record<string, unknown>
+      hero.shotRelationsSha256 = createHash('sha256').update(canonicalJson(relations)).digest('hex')
+      const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(upstream), 'test-token'))
+      const result = await handler('workflow', { projectId: 'project-1', episodeId: 'episode-1' }, signal())
+      if (!result.ok) throw new Error(result.error.message)
+      expect((result.value as YimengWorkflowProjection).director.shotRelations.shots[0]?.beats[0]?.visualResponsibility)
+        .toBe(description)
+    },
+  )
+
+  it.each(['', ' \n ', null, 7])('rejects missing or non-text beat descriptions (%j)', async (description) => {
+    const upstream = workflowFixture()
+    const director = upstream.director as Record<string, unknown>
+    const relations = director.shotRelations as Record<string, unknown>
+    const shot = (relations.shots as Array<Record<string, unknown>>)[0]!
+    const beat = (shot.beats as Array<Record<string, unknown>>)[0]!
+    beat.visualResponsibility = description
+    const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(upstream), 'test-token'))
+    const result = await handler('workflow', { projectId: 'project-1', episodeId: 'episode-1' }, signal())
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.message).toContain('.visualResponsibility')
+  })
+
   it('fails closed on invalid, duplicate, or dangling E5-1 Shot relations', async () => {
     const base = workflowFixture()
     const director = base.director as Record<string, unknown>

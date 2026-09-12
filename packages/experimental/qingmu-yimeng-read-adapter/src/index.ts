@@ -4594,6 +4594,10 @@ function normalizeShotRelationBeat(value: unknown, field: string): YimengShotRel
   if (typeof beat.endSec !== 'number' || !Number.isFinite(beat.endSec) || beat.endSec < beat.startSec) {
     throw new UpstreamContractError(`${field}.endSec must be finite and not precede startSec`)
   }
+  const visualResponsibility = requireString(beat.visualResponsibility, `${field}.visualResponsibility`)
+  if (!visualResponsibility.trim()) {
+    throw new UpstreamContractError(`${field}.visualResponsibility must be non-empty`)
+  }
   return {
     beatId: requireIdentifier(beat.beatId, `${field}.beatId`),
     order: requireInteger(beat.order, `${field}.order`, 0),
@@ -4602,7 +4606,7 @@ function normalizeShotRelationBeat(value: unknown, field: string): YimengShotRel
     endSec: beat.endSec,
     actorIds: requireUniqueIdentifiers(beat.actorIds, `${field}.actorIds`),
     propIds: requireUniqueIdentifiers(beat.propIds, `${field}.propIds`),
-    visualResponsibility: requireIdentifier(beat.visualResponsibility, `${field}.visualResponsibility`),
+    visualResponsibility,
   }
 }
 
