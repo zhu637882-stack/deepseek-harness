@@ -11,3 +11,6 @@
 .checks h4 { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; margin: 0; font-size: 13px; }
 .checks h4 span, .checks small { color: #bcc6b5; font-weight: 400; }
 .review details { margin-top: 12px; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.times { display: flex; flex-wrap: wrap; gap: 8px; }
+.times button { min-height: 36px; padding: 4px 10px; border: 1px solid #56624a; border-radius: 6px; background: #30392b; color: #edf4e8; cursor: pointer; }
+.times button:focus-visible { outline: 2px solid #b1ce81; outline-offset: 3px; }

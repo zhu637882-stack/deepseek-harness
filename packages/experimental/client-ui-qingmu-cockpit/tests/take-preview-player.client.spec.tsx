@@ -83,3 +83,22 @@ it('lets a human reload existing bytes after a browser decode error', async () =
   await waitFor(() => expect(load).toHaveBeenCalledTimes(2))
   expect(revokeUrl).toHaveBeenCalledExactlyOnceWith('blob:fixture')
 })
+
+it('seeks only an explicit time in the verified candidate and preserves its loaded bytes', async () => {
+  const load = vi.fn(async () => response)
+  const props = { request, load, t: (key: keyof typeof zh) => zh[key], autoLoad: true }
+  const view = render(<TakePreviewPlayer {...props} />)
+  await waitFor(() => expect(view.container.querySelector('video')).not.toBeNull())
+  const video = view.container.querySelector('video')!
+  Object.defineProperty(video, 'duration', { value: 6, configurable: true })
+  video.pause = vi.fn()
+  view.rerender(<TakePreviewPlayer {...props} seek={{ takeId: 't', sha256: sha, timeSec: 2.5 }} />)
+  expect(video.currentTime).toBe(2.5)
+  expect(video.pause).toHaveBeenCalledTimes(1)
+  for (const seek of [{ takeId: 'other', sha256: sha, timeSec: 1 }, { takeId: 't', sha256: 'wrong', timeSec: 1 },
+    { takeId: 't', sha256: sha, timeSec: 7 }, { takeId: 't', sha256: sha, timeSec: -1 }]) {
+    view.rerender(<TakePreviewPlayer {...props} seek={seek} />)
+    expect(video.currentTime).toBe(2.5)
+  }
+  expect(load).toHaveBeenCalledTimes(1)
+})

@@ -10,7 +10,7 @@ A playable candidate does not prove dialogue delivery or continuous environmenta
 
 ## Decision
 
-The shooting workspace sends explicit review requests through the existing Writer queue and budget. The native review model receives the original video, full director context and verified generation-bound reference prompt. GET restores saved task evidence without submitting. Sound categories and uncertainty remain visible independently of video selection.
+The shooting workspace sends explicit review requests through the existing Writer queue and budget. The native review model receives the original video and verified generation-bound prompt once, avoiding competing current or still-image instructions. In the absence of a bound prompt it receives the saved design. Candidate review records time-based observations before comparisons; missing, out-of-range or unlinked visual evidence remains uncertain. The raw provider report remains intact. GET restores saved evidence without submitting, including older reports. A changed method permits an explicit new review without automatically scheduling it. Evidence links seek only the verified candidate and pause playback. Sound categories remain distinct from visible mouth movement; neither establishes video selection.
 
 ## Alternatives considered
 

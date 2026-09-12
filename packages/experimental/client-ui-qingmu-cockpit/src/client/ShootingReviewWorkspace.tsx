@@ -151,6 +151,7 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
   const current = shots.find(shot => shot.shotId === selectedShotId) ?? shots[0]
   const [stack, setStack] = useState<YimengTakeVersionStackResponse>(); const [load, setLoad] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [browseId, setBrowseId] = useState('')
+  const [reviewSeek, setReviewSeek] = useState<{ readonly takeId: string; readonly sha256: string; readonly timeSec: number }>()
   const [panel, setPanel] = useState<'requirements' | 'assistant'>('requirements'); const [mediaUrl, setMediaUrl] = useState<string>(); const [heroMediaUrl, setHeroMediaUrl] = useState<string>()
   const [requirement, setRequirement] = useState<{ readonly key: string; readonly status: AutomaticFrameRequirementStatus }>({ key: '', status: 'loading' })
   const [zoom, setZoom] = useState(false); const [scale, setScale] = useState(1); const [selectionError, setSelectionError] = useState('')
@@ -475,7 +476,7 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
                 </span>}<TakePreviewPlayer request={{
                   projectId, episodeId, frameId: current.shotId, takeId: browsed.takeId,
                   expectedOutputSha256: browsed.outputSha256,
-                }} load={port.takePreview} t={t} onPreviewReady={onPreviewReady} autoLoad /></div>
+                }} load={port.takePreview} t={t} onPreviewReady={onPreviewReady} seek={reviewSeek} autoLoad /></div>
                 : heroUrl !== undefined ? <div className={css.frame}><span>已选首帧</span><img src={heroUrl} alt={`镜 ${current.frameNo} 已选首帧`} onLoad={() => { setHeroMediaUrl(heroUrl); setHeroError(false) }} onError={() => setHeroError(true)} />{heroError && <p role="alert">首帧暂时无法显示，请刷新后再试。</p>}</div>
                   : load === 'ready' && projection?.director.shotRelations.storyboardRevision?.revisionId ? <ShootingFirstFrameHistory key={`${mediaPaneKey}:${projection.director.shotRelations.storyboardRevision.revisionId}`} scope={{ projectId, episodeId, frameId: current.shotId, storyboardRevisionId: projection.director.shotRelations.storyboardRevision.revisionId }} onCommitted={refreshExistingMedia} onCandidatePreview={onCandidatePreview} />
                     : <div className={css.canvas}><span>镜 {current.frameNo}</span><strong>{current.title}</strong>
@@ -511,7 +512,8 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
         </details>}
         {!firstFrameOpen && !historyOpen && usable(browsed) && <NativeVideoReview
           key={`${current.shotId}:${browsed.takeId}:${browsed.outputSha256}`} episodeId={episodeId}
-          frameId={current.shotId} assetId={browsed.takeId} sha256={browsed.outputSha256} />}
+          frameId={current.shotId} assetId={browsed.takeId} sha256={browsed.outputSha256}
+          onSeek={(timeSec) => { setReviewSeek({ takeId: browsed.takeId, sha256: browsed.outputSha256, timeSec }) }} />}
         {selectionError && <p role="alert">{selectionError}</p>}
         {adoptError && <p role="alert">{adoptError}</p>}
         <div className={css.reworkActions} aria-label="本镜重做操作">
