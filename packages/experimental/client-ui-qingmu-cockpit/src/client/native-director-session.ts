@@ -8,6 +8,30 @@ import { readStoryDraft, type NativeStoryPort } from '@deepseek-ai/dsh-experimen
 
 type NativeSessionId = NonNullable<Parameters<ConnectionHandle['api']['sessions']['create']>[0]['sessionId']>
 
+/** Stable Host identity restores a project's director without borrowing another project's history. */
+export function projectDirectorSessionId(projectId: string): string | undefined {
+  return /^[A-Za-z0-9_-]+$/.test(projectId) ? `session-qingmu-director-${projectId}` : undefined
+}
+
+async function waitForSession(sessions: ISessions, sessionId: NativeSessionId, signal: AbortSignal): Promise<void> {
+  if (sessions.list.getSnapshot().byId[sessionId]) return
+  await new Promise<void>((resolve, reject) => {
+    let unsubscribe = () => {}
+    const finish = (error?: Error) => {
+      clearTimeout(timer); unsubscribe(); signal.removeEventListener('abort', aborted)
+      if (error) reject(error); else resolve()
+    }
+    const aborted = () => { finish(new Error('导演进入操作已取消。')) }
+    const timer = setTimeout(() => { finish(new Error('导演会话已创建，列表尚未同步，请重新进入以恢复同一会话。')) }, 10000)
+    unsubscribe = sessions.list.subscribe(() => {
+      if (sessions.list.getSnapshot().byId[sessionId]) finish()
+    })
+    signal.addEventListener('abort', aborted, { once: true })
+    if (signal.aborted) aborted()
+    else if (sessions.list.getSnapshot().byId[sessionId]) finish()
+  })
+}
+
 /** Connection generations invalidate readiness and binding without remounting the editor. */
 export function useDirectorConnection(source?: HostDescriptionSource) {
   return useSyncExternalStore<ReturnType<HostDescriptionSource['getSnapshot']> | true>(
@@ -21,7 +45,7 @@ export interface NativeDirectorSessionPort {
   /** Observe durable Host progress; reconnecting never replays a business command. */
   dialogueExecution?(sessionId: string): { subscribe: (listener: () => void) => () => void; getSnapshot: () => unknown } | undefined
   /** Enter only after a user action; late completion never changes a newer navigation selection. */
-  activate(expectedSessionId: string | undefined, signal: AbortSignal): Promise<void>
+  activate(expectedSessionId: string | undefined, signal: AbortSignal, projectId?: string): Promise<void>
   /** Queue one user turn in the selected director; acceptance does not imply completion. Never retries. */
   prompt(target: NativeDirectorPromptTarget, text: string, signal: AbortSignal): Promise<void>
 }
@@ -64,7 +88,7 @@ export function createNativeDirectorSessionPort(ctx: ClientContext, connection: 
     const selected = list?.ids.map(id => list.byId[id]).find(row => row?.id === sessionId)
     return selected?.agentPreset === 'qingmu-director'
       ? sessions?.binding(selected.id)?.session.projections.faceOf('qingmuDialogueExecution') : undefined
-  }, async activate(expectedSessionId, signal) {
+  }, async activate(expectedSessionId, signal, projectId) {
     // Host and browser share Cordis service names; this port is only installed by the browser runtime.
     const sessions = ctx.get('sessions') as unknown as ISessions | undefined
     const workspaces = ctx.get('workspaces')
@@ -86,6 +110,22 @@ export function createNativeDirectorSessionPort(ctx: ClientContext, connection: 
     }
     const list = sessions.list.getSnapshot()
     const selected = list.ids.map(id => list.byId[id]).find(row => row?.id === expectedSessionId)
+    if (projectId !== undefined) {
+      const projectSessionId = projectDirectorSessionId(projectId) as NativeSessionId | undefined
+      if (!projectSessionId) throw new Error('请先选择青木项目。')
+      const existing = list.byId[projectSessionId]
+      if (existing && existing.agentPreset !== 'qingmu-director') throw new Error('项目导演会话的预设不匹配，请检查会话。')
+      const workspaceState = workspaces.list.getSnapshot()
+      const cwd = existing?.cwd ?? selected?.cwd
+        ?? workspaceState.items.find(item => item.workspaceId === workspaceState.recentWorkspaceId)?.path
+      if (!cwd) throw new Error('当前导演会话缺少工作目录，不能猜测恢复位置。')
+      unwrapRpc((await connection.api.sessions.create({ sessionId: projectSessionId, cwd, agentPreset: 'qingmu-director' })).result)
+      current()
+      await waitForSession(sessions, projectSessionId, signal)
+      current()
+      sessions.open(projectSessionId)
+      return
+    }
     let target = selected?.id
     if (selected?.agentPreset === 'qingmu-director') {
       if (!selected.cwd) throw new Error('当前导演会话缺少工作目录，不能猜测恢复位置。')
@@ -113,6 +153,9 @@ export function createNativeDirectorSessionPort(ctx: ClientContext, connection: 
   }, async prompt(target, text, signal) {
     signal.throwIfAborted()
     const { sessionId } = target
+    if (sessionId.startsWith('session-qingmu-director-') && sessionId !== projectDirectorSessionId(target.scope.projectId)) {
+      throw new Error('当前导演不属于这个项目，请进入本项目导演；没有发送。')
+    }
     const sessions = ctx.get('sessions') as unknown as ISessions | undefined
     const list = sessions?.list.getSnapshot()
     const selected = list?.ids.map(id => list.byId[id]).find(row => row?.id === sessionId)

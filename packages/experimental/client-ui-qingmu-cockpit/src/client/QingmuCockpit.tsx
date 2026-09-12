@@ -35,6 +35,7 @@ import { NativeAssetDesign } from './NativeAssetDesign.tsx'
 import { ProjectAssetLibrary } from './ProjectAssetLibrary.tsx'
 import { DirectorWorkspace } from './DirectorWorkspace.tsx'
 import { NativeDirectorSession } from './NativeDirectorSession.tsx'
+import { projectDirectorSessionId } from './native-director-session.ts'
 import { ShootingReviewWorkspace } from './ShootingReviewWorkspace.tsx'
 import { QingmuApplicationFrame, creativeStepFromSearch, creativeStepLabel, type CreativeStep } from './QingmuApplicationFrame.tsx'
 
@@ -223,7 +224,8 @@ export function QingmuCockpit({
   const [storyboardMissing, setStoryboardMissing] = useState(false)
   const [selectedShotId, setSelectedShotId] = useState('')
   const [generationCatalog, setGenerationCatalog] = useState<YimengCapabilityCatalogResponse>()
-  const directorSessionId = useSessions(state => state.current)
+  const currentSessionId = useSessions(state => state.current)
+  const directorSessionId = currentSessionId === projectDirectorSessionId(projectId) ? currentSessionId : undefined
   const [directorRefresh, setDirectorRefresh] = useState(0)
   const [assetWorkbenchOpen, setAssetWorkbenchOpen] = useState(false)
   const [assetLibraryRefresh, setAssetLibraryRefresh] = useState(0)
@@ -686,6 +688,7 @@ export function QingmuCockpit({
     ? <p role="status">原生导演助手当前不可用；不会回退到 iframe。</p>
     : <div className={css.inlineDirector}>
       <NativeDirectorSession compact port={nativeDirectorSession} bridge={directorBridge} sessionId={directorSessionId}
+        currentSessionId={currentSessionId} projectId={projectId}
         onRefresh={() => { setDirectorRefresh(value => value + 1) }} />
       <DirectorWorkspace presentation="assistant" projectId={projectId} episodeId={episodeId} projection={projection}
         shotItems={shotItems} selectedShotId={selectedShotId} onSelectShotId={setSelectedShotId}
@@ -896,7 +899,8 @@ export function QingmuCockpit({
   const panels: Record<Tab, ReactNode> = {
     director: <>
       {nativeDirectorSession && <NativeDirectorSession compact={applicationShell} port={nativeDirectorSession} bridge={directorBridge}
-        sessionId={directorSessionId} onRefresh={() => { setDirectorRefresh(value => value + 1) }} />}
+        sessionId={directorSessionId} currentSessionId={currentSessionId} projectId={projectId}
+        onRefresh={() => { setDirectorRefresh(value => value + 1) }} />}
       {projectId !== '' && episodeId !== ''
         ? <DirectorWorkspace projectId={projectId} episodeId={episodeId} projection={projection}
           shotItems={shotItems} selectedShotId={selectedShotId} onSelectShotId={(id) => { if (mayLeaveDirector()) setSelectedShotId(id) }}

@@ -14,6 +14,9 @@ const ACTIONABLE_NATIVE_ENTRY_ERRORS = new Set([
   '当前导演会话缺少工作目录，不能猜测恢复位置。',
   '请先在 DSH 选择当前项目的工作目录；不会替你选其他项目。',
   '没有可用的原生会话。',
+  '请先选择青木项目。',
+  '项目导演会话的预设不匹配，请检查会话。',
+  '导演会话已创建，列表尚未同步，请重新进入以恢复同一会话。',
 ])
 
 /** Keep bridge-only errors out of the creative UI while preserving the one recoverable state. */
@@ -26,10 +29,12 @@ function directorErrorMessage(reason: unknown, fallback: string): string {
 }
 
 /** Show mount evidence and explicit native entry; no automatic session mutation or model request. */
-export function NativeDirectorSession({ port, bridge, sessionId, onRefresh, compact = false }: {
+export function NativeDirectorSession({ port, bridge, sessionId, currentSessionId, projectId, onRefresh, compact = false }: {
   readonly port: NativeDirectorSessionPort
   readonly bridge: DirectorContextClientPort
   readonly sessionId: string | undefined
+  readonly currentSessionId?: string | undefined
+  readonly projectId?: string | undefined
   readonly onRefresh: () => void
   readonly compact?: boolean | undefined
 }) {
@@ -63,7 +68,7 @@ export function NativeDirectorSession({ port, bridge, sessionId, onRefresh, comp
   useEffect(() => {
     operation.current?.abort(); operation.current = undefined; setBusy(false)
     return () => { operation.current?.abort() }
-  }, [connection, sessionId, port])
+  }, [connection, sessionId, currentSessionId, projectId, port])
   const refresh = () => { setRevision(value => value + 1); onRefresh() }
   async function activate() {
     if (!connection || operation.current) return
@@ -71,7 +76,8 @@ export function NativeDirectorSession({ port, bridge, sessionId, onRefresh, comp
     operation.current = request
     checking.current?.abort(); setSnapshot(null); setBusy(true); setError('')
     try {
-      await port.activate(sessionId, request.signal)
+      if (projectId !== undefined) await port.activate(currentSessionId, request.signal, projectId)
+      else await port.activate(sessionId, request.signal)
       if (!request.signal.aborted) refresh()
     } catch (reason) {
       if (!request.signal.aborted) {

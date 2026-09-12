@@ -6,7 +6,7 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 import type { DirectorContextClientPort, NativeDirectorReadiness } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import { NativeDirectorSession } from '../src/client/NativeDirectorSession.tsx'
 import { NativeDirectorComposer } from '../src/client/NativeDirectorComposer.tsx'
-import { createNativeDirectorSessionPort } from '../src/client/native-director-session.ts'
+import { createNativeDirectorSessionPort, projectDirectorSessionId } from '../src/client/native-director-session.ts'
 import { directorConnectionFixture } from './director-connection-fixture.client.ts'
 
 afterEach(() => { cleanup(); sessionStorage.clear() })
@@ -22,7 +22,7 @@ function fixture(blank = true, preset = 'ordinary') {
   const workspaces = { list: { getSnapshot: () => workspaceState }, connectWorkspace: vi.fn(async () => 'new-empty') }
   const api = { agentPresets: { list: vi.fn(async () => ok({ presets: [{ id: 'qingmu-director', broken: false }] })),
     select: vi.fn(async () => ok({ agentPreset: 'qingmu-director' })) }, sessions: {
-    create: vi.fn(async () => ok({})), prompt: vi.fn(async () => ok({})) } }
+    create: vi.fn(async (_input?: unknown) => ok({})), prompt: vi.fn(async () => ok({})) } }
   const ctx = { get: (key: string) => key === 'sessions' ? sessions : key === 'workspaces' ? workspaces : undefined } as unknown as ClientContext
   const port = createNativeDirectorSessionPort(ctx, { api, hostDescription: transport.source } as unknown as ConnectionHandle)
   const target = { schema: 'qingmu.native-director-request.v1' as const, sessionId: 's1',
@@ -30,6 +30,73 @@ function fixture(blank = true, preset = 'ordinary') {
     contextSnapshotSha256: 'a'.repeat(64), ownerId: 'browser-1' }
   return { transport, row, sessionState, sessions, workspaceState, workspaces, api, port, target }
 }
+
+it('creates separate project directors and restores their own Host identities without reusing a selected old director', async () => {
+  const f = fixture(false, 'qingmu-director')
+  const rows = f.sessionState.byId as Record<string, typeof f.row>
+  f.api.sessions.create.mockImplementation(async (input?: unknown) => {
+    const { sessionId, cwd } = input as { sessionId: string; cwd: string }
+    rows[sessionId] = { id: sessionId, cwd, blank: false, agentPreset: 'qingmu-director' }
+    if (!f.sessionState.ids.includes(sessionId)) f.sessionState.ids.push(sessionId)
+    return ok({})
+  })
+  for (const projectId of ['project-a', 'project-b', 'project-a']) {
+    await f.port.activate('s1', new AbortController().signal, projectId)
+    expect(f.sessions.open).toHaveBeenLastCalledWith(projectDirectorSessionId(projectId))
+  }
+  expect(f.api.sessions.create.mock.calls.map(call => call[0])).toEqual([
+    { sessionId: projectDirectorSessionId('project-a'), cwd: '/project', agentPreset: 'qingmu-director' },
+    { sessionId: projectDirectorSessionId('project-b'), cwd: '/project', agentPreset: 'qingmu-director' },
+    { sessionId: projectDirectorSessionId('project-a'), cwd: '/project', agentPreset: 'qingmu-director' },
+  ])
+  expect(f.api.agentPresets.select).not.toHaveBeenCalled()
+  expect(f.api.sessions.prompt).not.toHaveBeenCalled()
+  expect(f.row.id).toBe('s1')
+})
+
+it('cancels project entry when navigation changes during creation', async () => {
+  const f = fixture(false, 'qingmu-director')
+  f.api.sessions.create.mockImplementation(async () => { f.sessionState.current = 'new-selection'; return ok({}) })
+  await expect(f.port.activate('s1', new AbortController().signal, 'project-a')).rejects.toThrow('当前会话已切换')
+  expect(f.sessions.open).not.toHaveBeenCalled()
+})
+
+it('waits for the Host session row before selecting a newly created project director', async () => {
+  const f = fixture(false, 'qingmu-director')
+  let publish!: () => void
+  const unsubscribe = vi.fn()
+  Object.assign(f.sessions.list, { subscribe: (listener: () => void) => { publish = listener; return unsubscribe } })
+  const result = f.port.activate('s1', new AbortController().signal, 'project-a')
+  await waitFor(() => { expect(publish).toBeTypeOf('function') })
+  expect(f.sessions.open).not.toHaveBeenCalled()
+  const id = projectDirectorSessionId('project-a')!
+  const rows = f.sessionState.byId as Record<string, typeof f.row>
+  rows[id] = { ...f.row, id }
+  publish(); await result
+  expect(f.sessions.open).toHaveBeenCalledWith(id)
+  expect(unsubscribe).toHaveBeenCalledOnce()
+})
+
+it('refuses a request whose selected project director belongs to a different project', async () => {
+  const f = fixture(false, 'qingmu-director')
+  await expect(f.port.prompt({ ...f.target, sessionId: projectDirectorSessionId('another-project')! },
+    '继续当前镜头', new AbortController().signal)).rejects.toThrow('不属于这个项目')
+  expect(f.api.sessions.prompt).not.toHaveBeenCalled()
+})
+
+it('keeps an unbound project entry separate from the globally selected conversation and aborts on project navigation', async () => {
+  const f = fixture(false, 'qingmu-director')
+  const read = vi.fn(async () => mounted)
+  const activate = vi.fn(async (_id: string | undefined, _signal: AbortSignal, _project?: string) => {})
+  const props = { port: { ...f.port, activate }, bridge: { readNativeDirectorReadiness: read } as unknown as DirectorContextClientPort,
+    sessionId: undefined, currentSessionId: 's1', projectId: 'project-a', onRefresh: vi.fn() }
+  const view = render(<NativeDirectorSession {...props} />)
+  expect(read).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '进入 / 恢复青木导演' }))
+  expect(activate).toHaveBeenCalledWith('s1', expect.any(AbortSignal), 'project-a')
+  view.rerender(<NativeDirectorSession {...props} projectId="project-b" />)
+  expect(activate.mock.calls[0]![1].aborted).toBe(true)
+})
 it('records project scope beside the pre-production prompt without inventing a shot target', async () => {
   const f = fixture(false, 'qingmu-director')
   await f.port.story!.send('creative-session', 'Keep the west window in the same room.',
