@@ -24,6 +24,7 @@ export function ReferenceImageDesign({ asset }: { readonly asset: ReferenceVideo
     <dl>{fields.filter(([, value]) => value).map(([label, value]) => <div key={label}>
       <dt>{label}</dt><dd style={{ whiteSpace: 'pre-wrap', marginInlineStart: 0 }}>{value}</dd>
     </div>)}</dl>
+    {design.spatialReference && <details><summary>生成时的空间布局与摄影机</summary><pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify({ layout: design.spatialReference.layout, camera: design.spatialReference.camera }, null, 2)}</pre></details>}
     <details><summary>原图完整描述与依据</summary>
       {[['主体设定', design.visualIdentity], ['画面描述', design.imagePrompt], ['创作依据', design.designBasis],
         ['实际提交描述', design.submittedPrompt]].filter(([, value]) => value).map(([label, value]) =>

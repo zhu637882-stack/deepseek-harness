@@ -107,6 +107,11 @@ function writer(extraShots = 0, image?: { sha256: string; url: string; config?: 
   let unpreparedMaterials = false
   const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input)
+    if (url.pathname.endsWith('/asset-design/layout-preview')) return Response.json({
+      projectId: 'p', episodeId: 'episode-a', recipe: 'qingmu-blockout-v1',
+      imageUrl: `data:image/png;base64,${imageBytes.toString('base64')}`, sha256: imageSha,
+      width: 1, height: 1, objects: [], guidance: 'Authored volumes only; compare with source images.',
+    })
     if (url.pathname.endsWith('/asset-design')) return Response.json({
       schema: 'qingmu.asset-design-state.v1', projectId: 'p', episodeId: 'episode-a',
       stateSha256: 'a'.repeat(64), script: {}, design: { assets: [{ kind: 'scene', name: 'Library',
@@ -315,6 +320,25 @@ const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA
 const imageSha = createHash('sha256').update(imageBytes).digest('hex')
 const imageUrl = `http://127.0.0.1:8115/api/media/media_cafe?signature=${'e'.repeat(64)}&expires=9999999999`
 const imageArgs = { page: 1, assetId: 'asset_cafe', assetSha256: imageSha }
+it('previews camera pixels through the shipped director loop without saving or generating', async () => {
+  const input = { layout: { basis: 'Director proposal', coordinateFrame: 'Metres, x east, y north, z up', objects: [
+    { id: 'desk', label: 'Desk', center: [0,0,0.4], size: [2,1,0.8], rotation: 0, color: '#887766' },
+  ] }, camera: { position: [0,-4,1.6], target: [0,0,1], verticalFov: 50 }, ratio: '16:9' }
+  const adapter = new MockAdapter([toolCallResponse('layout', 'qingmu_preview_scene_layout', input), textResponse('Inspect before adopting.')])
+  vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'mock', id: 'mock', name: 'mock', inputModalities: ['text', 'image'] })
+  const h = await harness(adapter, writer(), true)
+  await h.run(false, {})
+  expect(result(h.agent, 'layout').error, result(h.agent, 'layout').text).toBe(false)
+  const value = JSON.parse(result(h.agent, 'layout').text) as { attachment: { attachmentId: string; mediaType: string } }
+  expect(value).toMatchObject({ projectId: 'p', episodeId: 'episode-a', recipe: 'qingmu-blockout-v1', sha256: imageSha, saved: false, generationQueued: false, mode: 'direct_image' })
+  expect(JSON.stringify(adapter.requests.at(-1)?.messages)).toContain(value.attachment.attachmentId)
+  const calls = h.upstream.fetch.mock.calls.filter(([, init]) => init?.method === 'POST')
+  expect(calls).toHaveLength(1)
+  expect(calls[0]?.[0]).toContain('/asset-design/layout-preview')
+  expect(JSON.parse(calls[0]?.[1]?.body as string)).toEqual(input)
+  expect({ ...value, attachment: { mediaType: value.attachment.mediaType } }).toMatchSnapshot()
+})
+
 it('reads saved episode geography and actual image pixels before any shot exists', async () => {
   const adapter = new MockAdapter([
     toolCallResponse('assets', 'qingmu_read_asset_design', { page: 1 }),

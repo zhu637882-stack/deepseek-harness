@@ -9,6 +9,12 @@ export interface ReferenceImageDesign {
   readonly space?: Readonly<Record<'orientation' | 'layout' | 'scale' | 'lighting', string>>
   readonly imageStage?: Readonly<Record<'sceneName' | 'camera' | 'blocking' | 'state', string>>
   readonly sceneContext?: { readonly name: string; readonly space: NonNullable<ReferenceImageDesign['space']> }
+  /** Original authored geometry and rendered-input identity; never inferred from pixels. */
+  readonly spatialReference?: {
+    readonly layout: Readonly<Record<string, unknown>>
+    readonly camera: Readonly<Record<string, unknown>>
+    readonly sha256: string
+  }
 }
 
 const record = (value: unknown): Record<string, unknown> =>
@@ -34,9 +40,13 @@ export function referenceImageDesign(config: unknown): ReferenceImageDesign | un
     || typeof design.imagePrompt !== 'string') return undefined
   const savedSpace = space(design.space), stage = record(design.imageStage)
   const scene = record(anchor.sceneContext), sceneSpace = space(scene.space)
+  const layout = record(scene.sceneLayout ?? design.sceneLayout), camera = record(design.imageCamera)
+  const composition = record(anchor.compositionReference)
   return { name: design.name, imagePrompt: design.imagePrompt, submittedPrompt: text(record(config).prompt), view: text(design.view),
     visualIdentity: text(design.visualIdentity), designBasis: text(design.designBasis),
     ...(savedSpace ? { space: savedSpace } : {}),
+    ...(Object.keys(layout).length && Object.keys(camera).length && typeof composition.sha256 === 'string'
+      ? { spatialReference: { layout, camera, sha256: composition.sha256 } } : {}),
     ...(Object.keys(stage).length ? { imageStage: { sceneName: text(stage.sceneName),
       camera: text(stage.camera), blocking: text(stage.blocking), state: text(stage.state) } } : {}),
     ...(sceneSpace && typeof scene.name === 'string' ? { sceneContext: { name: scene.name, space: sceneSpace } } : {}) }

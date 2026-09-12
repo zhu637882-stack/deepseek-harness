@@ -110,6 +110,7 @@ it.each(['missing closing brace', 'omitted content'])('preserves current cards w
 })
 function setup() {
   const port = {
+    previewSceneLayout: vi.fn(async () => { throw new Error('unused') }),
     referenceVideoAssets: vi.fn(async () => ({ projectId: 'p', page: 1, pages: 1, items: [{ assetId: 'asset_ref', assetSha256: 'e'.repeat(64), label: '已采用人物', mediaType: 'reference_image' as const, browserUrl: '' }] })),
     readLocalReferenceCandidateContent: vi.fn(async () => { throw new Error('unused') }),
     readAssetVoiceRuns: vi.fn(async (): Promise<AssetImageRuns> => ({ ...scope, items: [] })),

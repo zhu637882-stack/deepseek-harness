@@ -70,6 +70,36 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
     render: (_args: unknown, value: JsonValue) => [{ type: 'text' as const, text: JSON.stringify(value) }],
   }
   ctx.tools.register(defineTool({
+    name: 'qingmu_preview_scene_layout',
+    description: 'Preview an authored shared scene blockout from a proposed camera, with exact visibility of the supplied opaque boxes. No generation, save or adoption. Use this before changing camera when a shared layout is useful. Coordinates are metre-based x/y ground, z up; never claim they are measured from a single image. Preserve fixed volumes when trying another camera. Openings require surrounding wall pieces, not an opaque wall behind a window. Inspect the returned image and compare with actual source images. Save the chosen layout as sceneLayout on the scene asset and camera as imageCamera on the current asset in the ordinary asset design JSON; the image request then includes this exact composition reference. It does not guarantee generated-image fidelity.',
+    parameters: {
+      layout: { type: 'json', required: true, description: '{basis,coordinateFrame,objects:[{id,label,center:[x,y,z],size:[x,y,z],rotation:degrees_about_z,color:"#rrggbb"}]}. One to 60 boxes, positive sizes, stable object IDs. Distinguish authored estimates from observed geometry. Use current sceneLayout if saved; describe changes instead of silently rearranging.' },
+      camera: { type: 'json', required: true, description: '{position:[x,y,z],target:[x,y,z],verticalFov:10..120,roll?:degrees}. Position and target must differ. Straight-down views use plan +Y as image up before roll.' },
+      ratio: { type: 'string', required: true, description: '1:1, 3:4, 4:3, 9:16 or 16:9; match the current image aspect ratio.' },
+    },
+    output: { schema: { type: 'json' }, render: (_args, value) => {
+      const image = value as unknown as { attachment: ImageAttachmentRef; mode: string }
+      return image.mode === 'direct_image' ? [{ type: 'text', text: JSON.stringify(value) }, { type: 'image', attachment: image.attachment }] : [{ type: 'text', text: JSON.stringify(value) }]
+    } },
+    presentCall: () => ({ card: 'generic', kind: 'read', title: '预览共用场景取景' }),
+    async execute(args, exec) {
+      exactKeys(args, ['layout', 'camera', 'ratio'])
+      const target = creativeRequest(exec)
+      const current = target ? undefined : await ports.readBoundContext(exec)
+      const scope = target ? { projectId: target.projectId, episodeId: target.episodeId } : current?.state.binding.scope
+      if (!scope) throw new Error('Start from the current project before previewing its scene layout.')
+      const check = () => { exec.signal.throwIfAborted(); if (current) assertCurrent(current, exec) }
+      const response = await ctx.qingmuYimengCommand('previewSceneLayout', { projectId: scope.projectId, episodeId: scope.episodeId, ...args }, exec.signal)
+      check()
+      if (!response.ok) throw new Error(`Scene layout preview unavailable: ${response.error.message}`)
+      const value = response.value as import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').SceneLayoutPreview
+      const attachment = await readReferenceImage(ctx, { browserUrl: value.imageUrl, assetSha256: value.sha256, label: 'Scene camera blockout' }, exec, check, ports.referenceVision)
+      const inspection = await inspectReferenceImage(ctx, attachment, value.sha256, exec, check, ports.referenceVision)
+      const { imageUrl: _imageUrl, ...metadata } = value
+      return ports.boundedJson({ ...metadata, attachment, ...inspection, saved: false, generationQueued: false })
+    },
+  }))
+  ctx.tools.register(defineTool({
     name: 'qingmu_read_asset_design',
     description: 'Read the current episode asset design and one page of project image metadata during screenplay, asset or scene design, before shots exist. The consumed project request fixes scope. Use qingmu_view_reference_image for relevant scene geometry, costume or prop evidence before changing a view or reconciling design conflicts. Preserve exact IDs and hashes when reusing images. This reads saved data; keep newer unsaved design supplied in the request. No save, generation or adoption.',
     parameters: { page: { type: 'integer', required: true, description: 'Project asset catalog page, starting at 1.' } }, output,

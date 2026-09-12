@@ -75,12 +75,15 @@ it('projects versioned image/audio/video metadata from the current project asset
 })
 
 it('retains original image staging without leaking authorization or filling absent history', async () => {
+  const layout = { basis: '导演布置', coordinateFrame: '米制', objects: [{ id: 'bench', center: [0, 2, 0.5], size: [2, 1, 1] }] }
+  const camera = { position: [0, -3, 1.6], target: [0, 2, 1], verticalFov: 50 }
   const oldDesign = { name: '渡口候船室', view: '入口朝检票窗', imagePrompt: '旧长椅面向检票窗',
     visualIdentity: '长椅与检票窗位于相邻墙面', designBasis: '开船前的场景',
     imageStage: { sceneName: '渡口候船室', camera: '入口内侧', blocking: '无人', state: '检票窗关闭' } }
   const asset = { id: 'room', project_id: 'p', asset_type: 'image', sha256: 'a'.repeat(64),
     generation_config_json: JSON.stringify({ prompt: '最终提交的旧窗关闭画面', anchor: { schema: 'qingmu.asset-image-authorization.v1',
-      assetDesign: oldDesign, sceneContext: { name: '渡口候船室', space: { layout: '长椅靠北墙' } },
+      assetDesign: { ...oldDesign, imageCamera: camera }, sceneContext: { name: '渡口候船室', space: { layout: '长椅靠北墙' }, sceneLayout: layout },
+      compositionReference: { sha256: 'c'.repeat(64) },
       command: { privateAuthorization: 'do-not-project' }, actor: 'private-actor' } }) }
   const handler = createYimengReadHandler({}, { readToken: () => 'fixture', fetch: async () => Response.json({
     page: 1, page_size: 200, pages: 1, items: [asset, { ...asset, id: 'legacy', generation_config_json: '{}' },
@@ -88,7 +91,8 @@ it('retains original image staging without leaking authorization or filling abse
   }) })
   const result = await handler('referenceVideoAssets', { projectId: 'p', page: 1 }, signal())
   expect(result).toMatchObject({ ok: true, value: { items: [{ imageDesign: { ...oldDesign,
-    submittedPrompt: '最终提交的旧窗关闭画面', sceneContext: { name: '渡口候船室', space: { layout: '长椅靠北墙' } } } }, {}, {}] } })
+    submittedPrompt: '最终提交的旧窗关闭画面', sceneContext: { name: '渡口候船室', space: { layout: '长椅靠北墙' } },
+    spatialReference: { layout, camera, sha256: 'c'.repeat(64) } } }, {}, {}] } })
   expect(result).not.toHaveProperty('value.items.1.imageDesign')
   expect(result).not.toHaveProperty('value.items.2.imageDesign')
   expect(JSON.stringify(result)).not.toContain('private-')

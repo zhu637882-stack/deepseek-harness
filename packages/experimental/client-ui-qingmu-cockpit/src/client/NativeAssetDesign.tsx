@@ -8,8 +8,9 @@ import { parseQuotedDesignJson } from './quoted-design-json.ts'
 import css from './NativeDirectorComposer.module.css'
 import { AssetImageReferences, type AssetImageReferencePort } from './AssetImageReferences.tsx'
 import { AssetSpatialDesign } from './AssetSpatialDesign.tsx'
+import { SceneLayoutEditor } from './SceneLayoutEditor.tsx'
 
-type Port = Pick<QingmuYimengPort, 'readAssetDesign' | 'saveAssetDesign' | 'quoteAssetImage' | 'generateAssetImage' | 'readAssetImageRuns' | 'readAssetVoiceRuns' | 'quoteAssetVoice' | 'generateAssetVoice'> & AssetImageReferencePort
+type Port = Pick<QingmuYimengPort, 'readAssetDesign' | 'previewSceneLayout' | 'saveAssetDesign' | 'quoteAssetImage' | 'generateAssetImage' | 'readAssetImageRuns' | 'readAssetVoiceRuns' | 'quoteAssetVoice' | 'generateAssetVoice'> & AssetImageReferencePort
 const emptyWorld: AssetWorldDesign = { setting: '', scriptFacts: '', directorInferences: '', exceptions: '', openQuestions: '' }
 const names = { actor: '人物', scene: '场景', prop: '道具' } as const
 function parseDesign(text: string): { design: AssetDesign; repaired: boolean } {
@@ -22,6 +23,23 @@ function parseDesign(text: string): { design: AssetDesign; repaired: boolean } {
       || typeof item.name !== 'string' || !item.name.trim() || typeof item.imagePrompt !== 'string' || !item.imagePrompt.trim()) throw new Error('素材设计缺少类型、名称或画面描述。')
     if (item.selfContainedImagePrompt !== undefined && typeof item.selfContainedImagePrompt !== 'boolean') throw new Error('完整画面描述选项需要是布尔值。')
     if (item.visualIdentity !== undefined && (typeof item.visualIdentity !== 'string' || !item.visualIdentity.trim())) throw new Error('主体设定不能为空。')
+    const vector = (v: unknown) => Array.isArray(v) && v.length === 3 && v.every(n => typeof n === 'number' && Number.isFinite(n))
+    if (item.sceneLayout != null) {
+      const layout = item.sceneLayout as Record<string, unknown>
+      if (item.kind !== 'scene' || typeof layout !== 'object' || typeof layout.basis !== 'string' || typeof layout.coordinateFrame !== 'string'
+        || !Array.isArray(layout.objects) || !layout.objects.length || layout.objects.length > 60
+        || layout.objects.some((entry: unknown) => {
+          const row = entry as Record<string, unknown> | null
+          return !row || typeof row !== 'object' || typeof row.id !== 'string' || typeof row.label !== 'string'
+          || !vector(row.center) || !vector(row.size) || (row.size as number[]).some(n => n <= 0)
+          || typeof row.rotation !== 'number' || !Number.isFinite(row.rotation) || typeof row.color !== 'string' || !/^#[a-f0-9]{6}$/i.test(row.color)
+        })) throw new Error('空间布局需要有效的物件名称、中心、尺寸、角度和识别色。')
+    }
+    if (item.imageCamera != null) {
+      const camera = item.imageCamera as Record<string, unknown>
+      if (typeof camera !== 'object' || !vector(camera.position) || !vector(camera.target)
+        || typeof camera.verticalFov !== 'number' || !Number.isFinite(camera.verticalFov)) throw new Error('空间取景需要有效的摄影机位置、目标与视野角度。')
+    }
     for (const field of ['space', 'imageStage']) {
       const block = item[field]
       if (block == null) continue
@@ -48,6 +66,8 @@ function withIdentities(value: AssetDesign, previous?: AssetDesign): AssetDesign
       ...(item.imageAspectRatio === undefined && old?.imageAspectRatio !== undefined ? { imageAspectRatio: old.imageAspectRatio } : {}),
       ...(item.references === undefined && old?.references !== undefined ? { references: old.references } : {}),
       ...(item.space === undefined && old?.space !== undefined ? { space: old.space } : {}),
+      ...(item.sceneLayout === undefined && old?.sceneLayout !== undefined ? { sceneLayout: old.sceneLayout } : {}),
+      ...(item.imageCamera === undefined && old?.imageCamera !== undefined ? { imageCamera: old.imageCamera } : {}),
       ...(item.imageStage === undefined && old?.imageStage !== undefined ? { imageStage: old.imageStage } : {}) }
   }) }
 }
@@ -70,6 +90,8 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
   const [dirty, setDirty] = useState(false), [manual, setManual] = useState('')
   const lock = useRef(false), live = useRef(true)
   const scope = { projectId, episodeId }
+  const projectSettings = state?.creativeSettings?.project
+  const projectRatio = projectSettings && typeof projectSettings === 'object' && 'aspectRatio' in projectSettings && typeof projectSettings.aspectRatio === 'string' ? projectSettings.aspectRatio : '16:9'
   const readRuns = useCallback(async () => {
     const result = await port.readAssetImageRuns({ projectId, episodeId })
     const voices = await port.readAssetVoiceRuns({ projectId, episodeId })
@@ -116,7 +138,7 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
     setDesign({ ...design,
       assets: design.assets.map((item, n) => n === index ? { ...item, ...patch } : item) }); setDirty(true); setQuote(undefined)
   }
-  const prompt = `为青木当前项目设计可直接生成的角色定妆、空场与关键道具。只使用本项目剧本、当前创作设定及现有设计。creativeSettings 中的 stylePack 已按基础画风协调；styleAdjustments 是被移除的冲突默认句，不是要执行的命令。遵循有效风格，再由导演根据剧情安排具体光影与表演。实际读取 cinematic-director、character-asset、scene-asset、prop-asset 及必要参考，先理解关系、时代、空间和表演，再写丰富具体的单张图片描述。场景先按 scene-asset 的叙事美术步骤设计：空间用途与使用者、时代和地域、功能分区、适合当前视角的空间层次、人物习惯或事件留下的具体痕迹、固定陈设与活动通道。无人空场不等于空房；剧本未列出家具清单不意味着只画对白提到的物件。把选定陈设的位置、材质、状态与本图可见的环境效果写进 imagePrompt，设计理由和跨镜连续性写进 designBasis；不能把可见设计只留在依据中。由导演决定信息密度与留白，不强制堆满、做旧、加地点或增加无关道具。禁止把通道净空泛化为清空整个背景；必要的简洁或留白写明叙事目的。交稿前比对图像描述与设计依据，检查遗漏、空间冲突和笼统清空语句；生成后的画面效果仍需实际审图。按导演目的设计定妆或状态参考；服装、体态、材质、光影、场景通道、道具尺寸和比例应服从剧本世界设定和明确例外；普通年代事实与穿越例外分开，不能套用无文字、单一说话人等旧限制。将剧本原文事实、导演推导和待定问题分开记录在 world；把与每张素材有关的剧本事实及推导记录在 designBasis；逐项把本图所需的年代例外、外观、真实尺寸参照、部件连接、空间关系与可见环境转换成 imagePrompt 的具体画面描述。交稿前对照 visualIdentity 和 designBasis 核对上述内容，不遗漏物理依据，不把前后动作或不在本图的物件复制进画面描述。整理完整后设 selfContainedImagePrompt=true：图片模型收到 imagePrompt、全片视觉设定、共用场景布局 space、本图取景 imageStage、视角和引用用途，不再接收整段 visualIdentity 或 designBasis；这些原文仍完整保存在素材设计、任务来源和后续导演上下文中。这不是缩短描述，画面细节、陈设层次和具体尺度仍须写完整。visualIdentity 记录主体完整外观、结构、尺度与场景布局，供后续分镜沿用；它不包含本次修图命令或单一取景要求。改变视角或局部修图时保留主体设定，只有导演明确改变该主体设计时才更新。imagePrompt 只描述本图可见的实体、数量与一个明确当前状态；不可见的携带物、此前或此后的动作留在 designBasis。重复提及同一道具不意味着增加一个实例。必要文字按导演要求清楚呈现，不额外装饰标牌。选择 imageAspectRatio 为 auto、1:1、3:4、4:3、9:16 或16:9；全身定妆可选3:4留出头顶与鞋底，器具可选4:3，最终由取景目的决定，不受成片画幅强制裁切。不要把整个剧情动作堆进一张定妆图。声音身份与逐句语气分开。保留已有实体 id、references 顺序、assetId 和 assetSha256；不要编造任何素材编号。需要用户未提供的图片时写建议，不虚构引用。不修改正式媒体。人物 name 必须逐字沿用剧本中的人物名，年龄、年代、服装和状态放在 description、designBasis 或 view 中，不追加到姓名；同一人物的不同状态共用身份。场景 name 逐字沿用当前剧本的场景 title，避免生成另一份地点身份。新增无对白角色可以由导演安排，并在依据中说明。\n当前可用图片模型：${JSON.stringify(state?.imageModels ?? [])}；默认模型：${state?.model}。这是当前接口能力，不能从模型名称推断已配置专用多视角控制。已有 imageModel、imagePromptExtend、imageAspectRatio 与 references 按当前选择保留；用户要求调整或发现不兼容时说明理由再提出选择，不因重新设计而重置。\n当前创作设定：${JSON.stringify(state?.creativeSettings)}\n剧本：${JSON.stringify(state?.script)}\n已有设计：${JSON.stringify(design ?? state?.design)}\n用户补充：${changes}\n最终只将完整 JSON 放在一个 txt 代码块内，格式：{"assets":[{"kind":"actor或scene或prop","name":"名称","description":"用途","visualIdentity":"主体完整外观、结构、尺度与空间布局","imagePrompt":"本次生成或修改画面的完整描述","selfContainedImagePrompt":true,"voiceIdentity":"仅角色声音身份","designBasis":"与本素材相关的剧本事实、尺度、结构和例外","view":"本图需要的视角或静态状态","imageAspectRatio":"auto","references":[]}],"director":{"visualStyle":"全片质感","tone":"情绪基调","lightingRules":"光源规则","colorPalette":["色彩"],"cameraGrammar":"摄影与运镜","performanceRules":"表演原则","characterContinuityRules":"连续性"},"world":{"setting":"年代地点与世界设定","scriptFacts":"剧本已明确事实","directorInferences":"导演为拍摄补足的设定","exceptions":"剧本明确支持的例外及适用范围","openQuestions":"尚待确定的事项"}}。kind 必须是 actor、scene、prop 其中之一。场景资产增加 space 对象：{"orientation":"以固定地标定义方位","layout":"门窗、主要陈设、区域与通道的关系","scale":"尺度、参照依据及待定项","lighting":"固定光源位置"}；从剧本及已有设计建立，同一场景换视角不重排格局，明确剧情改造可更新。每个资产可增加 imageStage：{"sceneName":null,"camera":"本图机位、看向与可见范围","blocking":"本图人物相对固定地标的位置与朝向","state":"物件的当前摆放、持有、开合与连接状态"}。场景图默认自身场景，其他资产在场景内取景时 sceneName 逐字引用本集场景素材 name；定妆或展示背景保持 null。共用布局不含暂时的站位与剧情状态。imagePrompt、space 与 imageStage 必须相容。当换机位涉及画面左右、前后或家具正背面且空间关系难以直接核对时，使用 qingmu_check_camera_geometry：先按当前布局和实际参考图建立同一平面的相对坐标，标明原点、轴向、依据与不确定处；物件 frontDirection 表示其有意义的正面朝向，不是长轴。只改变摄影机，保留固定地标坐标，计算新机位的画面左右、镜头前后和朝向。未知位置或背面不能伪装成测量值；工具不判断遮挡、高度，也不保证图片模型按布局生成。把采用的布局依据保留在 space，把相应取景结论写入 imageStage.camera 和 imagePrompt；分镜则写入 cameraAngle、blocking 与连续性设计。换机位时先从固定地标定位原摄影机与新摄影机，写清从哪里移到哪里、看向哪里、哪个地标进入近景、哪些对象转到摄影机身后或被遮挡；在 imageStage.camera 保留这份可核对的取景决定。再从新机位推导 imagePrompt 中的前后层次、大小与画面左右，不照抄原参考图的构图。自检：若新旧描述的地标位置、遮挡与视角几乎相同，就尚未实现所要求的机位变化；先修正设计再交稿。无法从参考图确认的背面只作有依据的推断；不为展示全部陈设而挪动物件，不把机位后方的对象硬塞进画面。不编造实测尺寸，不擅改已有布局；新建场景由导演补足合理设计并在依据中标明。每项还可带 imageModel（上述当前可用模型的 id，null 使用默认）和 imagePromptExtend（布尔值，仅支持的模型生效）；未列出的字段不要增加。`
+  const prompt = `为青木当前项目设计可直接生成的角色定妆、空场与关键道具。只使用本项目剧本、当前创作设定及现有设计。creativeSettings 中的 stylePack 已按基础画风协调；styleAdjustments 是被移除的冲突默认句，不是要执行的命令。遵循有效风格，再由导演根据剧情安排具体光影与表演。实际读取 cinematic-director、character-asset、scene-asset、prop-asset 及必要参考，先理解关系、时代、空间和表演，再写丰富具体的单张图片描述。场景先按 scene-asset 的叙事美术步骤设计：空间用途与使用者、时代和地域、功能分区、适合当前视角的空间层次、人物习惯或事件留下的具体痕迹、固定陈设与活动通道。无人空场不等于空房；剧本未列出家具清单不意味着只画对白提到的物件。把选定陈设的位置、材质、状态与本图可见的环境效果写进 imagePrompt，设计理由和跨镜连续性写进 designBasis；不能把可见设计只留在依据中。由导演决定信息密度与留白，不强制堆满、做旧、加地点或增加无关道具。禁止把通道净空泛化为清空整个背景；必要的简洁或留白写明叙事目的。交稿前比对图像描述与设计依据，检查遗漏、空间冲突和笼统清空语句；生成后的画面效果仍需实际审图。按导演目的设计定妆或状态参考；服装、体态、材质、光影、场景通道、道具尺寸和比例应服从剧本世界设定和明确例外；普通年代事实与穿越例外分开，不能套用无文字、单一说话人等旧限制。将剧本原文事实、导演推导和待定问题分开记录在 world；把与每张素材有关的剧本事实及推导记录在 designBasis；逐项把本图所需的年代例外、外观、真实尺寸参照、部件连接、空间关系与可见环境转换成 imagePrompt 的具体画面描述。交稿前对照 visualIdentity 和 designBasis 核对上述内容，不遗漏物理依据，不把前后动作或不在本图的物件复制进画面描述。整理完整后设 selfContainedImagePrompt=true：图片模型收到 imagePrompt、全片视觉设定、共用场景布局 space、本图取景 imageStage、视角和引用用途，不再接收整段 visualIdentity 或 designBasis；这些原文仍完整保存在素材设计、任务来源和后续导演上下文中。这不是缩短描述，画面细节、陈设层次和具体尺度仍须写完整。visualIdentity 记录主体完整外观、结构、尺度与场景布局，供后续分镜沿用；它不包含本次修图命令或单一取景要求。改变视角或局部修图时保留主体设定，只有导演明确改变该主体设计时才更新。imagePrompt 只描述本图可见的实体、数量与一个明确当前状态；不可见的携带物、此前或此后的动作留在 designBasis。重复提及同一道具不意味着增加一个实例。必要文字按导演要求清楚呈现，不额外装饰标牌。选择 imageAspectRatio 为 auto、1:1、3:4、4:3、9:16 或16:9；全身定妆可选3:4留出头顶与鞋底，器具可选4:3，最终由取景目的决定，不受成片画幅强制裁切。不要把整个剧情动作堆进一张定妆图。声音身份与逐句语气分开。保留已有实体 id、references 顺序、assetId 和 assetSha256；不要编造任何素材编号。需要用户未提供的图片时写建议，不虚构引用。不修改正式媒体。人物 name 必须逐字沿用剧本中的人物名，年龄、年代、服装和状态放在 description、designBasis 或 view 中，不追加到姓名；同一人物的不同状态共用身份。场景 name 逐字沿用当前剧本的场景 title，避免生成另一份地点身份。新增无对白角色可以由导演安排，并在依据中说明。\n空间布局需要跨机位复用时，可用 qingmu_preview_scene_layout 检查简化取景；采用的 layout 完整保存在场景资产 sceneLayout，camera 完整保存在本图 imageCamera。系统据此渲染构图图并附带到图片请求。换机位只改 imageCamera，固定布局不重建；先核对原图，未知尺寸标为设计估计。先预览，避免机位被墙体挡住或错误遮挡。复杂形状可由多个体块组成；体块颜色只是识别，不是美术配色。没有空间参考需求时保留空值；已有布局和机位在重新设计时沿用，不悄悄丢失。\n当前可用图片模型：${JSON.stringify(state?.imageModels ?? [])}；默认模型：${state?.model}。这是当前接口能力，不能从模型名称推断已配置专用多视角控制。已有 imageModel、imagePromptExtend、imageAspectRatio 与 references 按当前选择保留；用户要求调整或发现不兼容时说明理由再提出选择，不因重新设计而重置。\n当前创作设定：${JSON.stringify(state?.creativeSettings)}\n剧本：${JSON.stringify(state?.script)}\n已有设计：${JSON.stringify(design ?? state?.design)}\n用户补充：${changes}\n最终只将完整 JSON 放在一个 txt 代码块内，格式：{"assets":[{"kind":"actor或scene或prop","name":"名称","description":"用途","visualIdentity":"主体完整外观、结构、尺度与空间布局","imagePrompt":"本次生成或修改画面的完整描述","selfContainedImagePrompt":true,"voiceIdentity":"仅角色声音身份","designBasis":"与本素材相关的剧本事实、尺度、结构和例外","view":"本图需要的视角或静态状态","imageAspectRatio":"auto","references":[]}],"director":{"visualStyle":"全片质感","tone":"情绪基调","lightingRules":"光源规则","colorPalette":["色彩"],"cameraGrammar":"摄影与运镜","performanceRules":"表演原则","characterContinuityRules":"连续性"},"world":{"setting":"年代地点与世界设定","scriptFacts":"剧本已明确事实","directorInferences":"导演为拍摄补足的设定","exceptions":"剧本明确支持的例外及适用范围","openQuestions":"尚待确定的事项"}}。kind 必须是 actor、scene、prop 其中之一。场景资产增加 space 对象：{"orientation":"以固定地标定义方位","layout":"门窗、主要陈设、区域与通道的关系","scale":"尺度、参照依据及待定项","lighting":"固定光源位置"}；从剧本及已有设计建立，同一场景换视角不重排格局，明确剧情改造可更新。每个资产可增加 imageStage：{"sceneName":null,"camera":"本图机位、看向与可见范围","blocking":"本图人物相对固定地标的位置与朝向","state":"物件的当前摆放、持有、开合与连接状态"}。场景图默认自身场景，其他资产在场景内取景时 sceneName 逐字引用本集场景素材 name；定妆或展示背景保持 null。共用布局不含暂时的站位与剧情状态。imagePrompt、space 与 imageStage 必须相容。当换机位涉及画面左右、前后或家具正背面且空间关系难以直接核对时，使用 qingmu_check_camera_geometry：先按当前布局和实际参考图建立同一平面的相对坐标，标明原点、轴向、依据与不确定处；物件 frontDirection 表示其有意义的正面朝向，不是长轴。只改变摄影机，保留固定地标坐标，计算新机位的画面左右、镜头前后和朝向。未知位置或背面不能伪装成测量值；工具不判断遮挡、高度，也不保证图片模型按布局生成。把采用的布局依据保留在 space，把相应取景结论写入 imageStage.camera 和 imagePrompt；分镜则写入 cameraAngle、blocking 与连续性设计。换机位时先从固定地标定位原摄影机与新摄影机，写清从哪里移到哪里、看向哪里、哪个地标进入近景、哪些对象转到摄影机身后或被遮挡；在 imageStage.camera 保留这份可核对的取景决定。再从新机位推导 imagePrompt 中的前后层次、大小与画面左右，不照抄原参考图的构图。自检：若新旧描述的地标位置、遮挡与视角几乎相同，就尚未实现所要求的机位变化；先修正设计再交稿。无法从参考图确认的背面只作有依据的推断；不为展示全部陈设而挪动物件，不把机位后方的对象硬塞进画面。不编造实测尺寸，不擅改已有布局；新建场景由导演补足合理设计并在依据中标明。每项还可带 imageModel（上述当前可用模型的 id，null 使用默认）和 imagePromptExtend（布尔值，仅支持的模型生效）；未列出的字段不要增加。`
   return <section className={css.composer} aria-label="角色与场景生成">
     <h2>设计与生成素材</h2>
     <p>先从当前剧本设计人物、场景和道具，检查画面描述后生成图片；生成结果会进入本项目素材库。</p>
@@ -145,6 +167,11 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
             <p>记录人物外观、场景布局或道具结构，供后续导演与分镜沿用。只换视角或局部修图时，修改下方画面描述即可。</p>
           </details>
           <AssetSpatialDesign item={item} assets={design.assets} onChange={(patch) => { edit(index, patch) }} />
+          <SceneLayoutEditor {...scope} key={`${projectId}:${episodeId}:${item.id ?? index}`}
+            layout={(item.kind === 'scene' ? item : design.assets.find(row => row.kind === 'scene' && row.name === item.imageStage?.sceneName))?.sceneLayout}
+            camera={item.imageCamera} ratio={item.imageAspectRatio && item.imageAspectRatio !== 'auto' ? item.imageAspectRatio : projectRatio}
+            onLayout={item.kind === 'scene' ? (sceneLayout) => { edit(index, { sceneLayout }) } : undefined}
+            onCamera={(imageCamera) => { edit(index, { imageCamera }) }} previewLayout={port.previewSceneLayout} />
           <label>画面描述<textarea value={item.imagePrompt}
             onChange={(event) => { edit(index, { imagePrompt: event.target.value }) }} /></label>
           <label><input type="checkbox" checked={item.selfContainedImagePrompt ?? false}
@@ -198,6 +225,7 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
     {quote && <section aria-label={quote.mediaType === 'audio' ? '确认声音生成' : '确认图片生成'}><h3>生成 {quote.entity.name}</h3><p>{quote.model} · {quote.mediaType === 'audio' ? '一段声音试听' : '一张图片'} · ¥{Number(quote.estimatedCny).toFixed(2)}</p>
       {quote.mediaType !== 'audio' && <p>{quote.references?.length ? `使用 ${quote.references.length} 张参考图派生，新图作为候选保留。` : '根据文字设计生成新候选。'}</p>}
       <details><summary>查看完整生成描述</summary><pre>{quote.prompt}</pre></details>
+      {quote.compositionReference && <figure><img style={{ width: '100%', maxHeight: 450, objectFit: 'contain' }} src={quote.compositionReference.imageUrl} alt="本次生成附带的空间取景图" /><figcaption>本次额外附带的构图参考。实际外观由素材与导演描述决定。</figcaption></figure>}
       <button type="button" disabled={busy || dirty || !quote.generationAvailable} onClick={() => {
         void perform(async () => {
           const newCommand = { requestId: crypto.randomUUID(), kind: quote.entity.kind,

@@ -1,5 +1,7 @@
 # Qingmu Yimeng command adapter
 
+`previewSceneLayout` resolves the current project and episode to the local asset-design preview endpoint. It accepts bounded authored layout/camera data and an explicit ratio; its PNG result cannot supply an external URL. Scene assets persist `sceneLayout`, while each staged asset can enable `imageCamera`. Omitted fields preserve older clients and explicit null clears the choice. Quotations include the exact rendered composition reference and count it against the model image limit; a layout change invalidates an unsent quotation.
+
 Project copy commands preview an owner-scoped snapshot, submit one exact copy intent and recover its receipt. The adapter checks source identity, request hash and zero-generation flags. Writer owns identity remapping, current-source conflicts and transactional receipt replay.
 
 The same-origin native video review bridge forwards explicit POST submissions and read-only GET recovery to Writer with the existing browser or native identity. Writer verifies episode ownership and candidate bytes, preserves the generation-bound prompt and deduplicates equivalent audits. Route disposal removes the bridge.

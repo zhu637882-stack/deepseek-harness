@@ -1,5 +1,7 @@
 # Qingmu Yimeng read adapter
 
+Original image descriptions can include `spatialReference`: the generation-time scene volumes, camera and composition-image SHA. This projects authored geometry from immutable image provenance, without substituting a current draft, exposing authorization data or claiming measured geometry. Later director inspection can compare it with the actual generated pixels.
+
 Before the first storyboard exists, workflow reads preserve the exact empty, unplanned projection and its blockers. Missing revision fields are allowed only together with zero shots, the declared missing-storyboard reason and matching Hero Frame digests. Partial or corrupt graphs still fail. Unqualified generated reference candidates retain valid generation provenance without gaining qualification or selection.
 
 English | [中文](README.zh.md)

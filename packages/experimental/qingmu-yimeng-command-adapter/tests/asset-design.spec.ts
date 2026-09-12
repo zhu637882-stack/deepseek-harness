@@ -6,6 +6,16 @@ const setup = (result: unknown) => {
   const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(result))
   return { fetch, handler: createYimengCommandHandler({ baseUrl: 'http://127.0.0.1:49123' }, { fetch, readToken: () => 'private-token' }) }
 }
+it('previews only the scoped layout and rejects an external replacement image', async () => {
+  const request = { ...scope, layout: { basis: '导演布置', coordinateFrame: '米制', objects: [] },
+    camera: { position: [0, -3, 1.6], target: [0, 0, 1], verticalFov: 50 }, ratio: '16:9' }
+  const result = { ...scope, recipe: 'qingmu-blockout-v1', sha256: 'c'.repeat(64), imageUrl: 'data:image/png;base64,aGVsbG8=', objects: [] }
+  const preview = setup(result)
+  expect(await preview.handler('previewSceneLayout', request, new AbortController().signal)).toMatchObject({ ok: true, value: result })
+  expect(preview.fetch.mock.calls[0]?.[0]).toContain('/asset-design/layout-preview')
+  expect(await setup({ ...result, imageUrl: 'https://elsewhere.example/image.png' }).handler('previewSceneLayout', request, new AbortController().signal)).toMatchObject({ ok: false })
+  expect(await setup({ ...result, episodeId: 'another' }).handler('previewSceneLayout', request, new AbortController().signal)).toMatchObject({ ok: false })
+})
 it('routes native asset saves to the current episode and rejects route injection', async () => {
   const { fetch, handler } = setup(state)
   const request = { ...scope, expectedStateSha256: state.stateSha256, design: { assets: [], director: {} } }

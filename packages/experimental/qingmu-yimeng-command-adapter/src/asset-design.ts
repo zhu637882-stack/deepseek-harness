@@ -31,6 +31,42 @@ export interface AssetImageStage {
   readonly blocking?: string
   readonly state?: string
 }
+/** Authored metre-based volumes: x/y on the ground, z up, rotation about z. */
+export interface SceneLayout {
+  readonly basis: string
+  readonly coordinateFrame: string
+  readonly objects: readonly {
+    readonly id: string
+    readonly label: string
+    readonly center: readonly [number, number, number]
+    readonly size: readonly [number, number, number]
+    readonly rotation: number
+    readonly color: string
+  }[]
+}
+/** Per-image camera, separate from the shared fixed volumes. */
+export interface ImageCamera {
+  readonly position: readonly [number, number, number]
+  readonly target: readonly [number, number, number]
+  readonly verticalFov: number
+  readonly roll?: number
+}
+/** Exact deterministic input preview, without model calls or media adoption. */
+export interface SceneLayoutPreview extends CreationScope {
+  readonly recipe: 'qingmu-blockout-v1'
+  readonly imageUrl: string
+  readonly sha256: string
+  readonly width: number
+  readonly height: number
+  readonly objects: readonly {
+    readonly id: string
+    readonly label: string
+    readonly color: string
+    readonly pixelCount: number
+    readonly bounds: readonly number[] | null
+  }[]
+  readonly guidance: string
+}
 /** One editable image design and its ordered sources. */
 export interface AssetDesignItem {
   readonly kind: 'actor' | 'scene' | 'prop'
@@ -48,6 +84,8 @@ export interface AssetDesignItem {
   readonly visualIdentity?: string
   readonly space?: AssetSceneSpace | null
   readonly imageStage?: AssetImageStage | null
+  readonly sceneLayout?: SceneLayout | null
+  readonly imageCamera?: ImageCamera | null
   readonly voiceIdentity?: string
   readonly designBasis?: string
   readonly view?: string
@@ -91,6 +129,7 @@ export interface AssetDesignState extends CreationScope {
 }
 /** Quotation is tied to exact source, prompt, model and price. */
 export interface AssetImageQuote extends CreationScope {
+  readonly compositionReference?: Omit<SceneLayoutPreview, keyof CreationScope> | null
   readonly mediaType?: 'audio'
   readonly entity: AssetDesignItem & { readonly id: string }
   readonly quoteSha256: string
@@ -156,6 +195,10 @@ export function prepareAssetDesign(endpoint: string, value: unknown, helpers: He
   let fields = ['projectId', 'episodeId']
   switch (endpoint) {
     case 'readAssetDesign': break
+    case 'previewSceneLayout':
+      fields.push('layout', 'camera', 'ratio'); path += '/layout-preview'; method = 'POST'
+      if (typeof raw.ratio !== 'string' || !['1:1', '3:4', '4:3', '9:16', '16:9'].includes(raw.ratio)) throw f('layout preview ratio invalid')
+      body = { layout: object(raw.layout, f), camera: object(raw.camera, f), ratio: raw.ratio }; break
     case 'readAssetImageRuns': path += '/runs'; break
     case 'readAssetVoiceRuns': path += '/voice/runs'; break
     case 'saveAssetDesign':
@@ -182,7 +225,12 @@ export function prepareAssetDesign(endpoint: string, value: unknown, helpers: He
       identifier(result.taskId, b)
     } else {
       if (result.projectId !== projectId || result.episodeId !== episodeId) throw b('asset design scope mismatch')
-      if ((endpoint === 'readAssetImageRuns' || endpoint === 'readAssetVoiceRuns')) {
+      if (endpoint === 'previewSceneLayout') {
+        if (result.recipe !== 'qingmu-blockout-v1' || typeof result.imageUrl !== 'string'
+          || !/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/.test(result.imageUrl)
+          || result.imageUrl.length > 2 * 1024 * 1024 || typeof result.sha256 !== 'string'
+          || !/^[a-f0-9]{64}$/.test(result.sha256) || !Array.isArray(result.objects)) throw b('layout preview invalid')
+      } else if ((endpoint === 'readAssetImageRuns' || endpoint === 'readAssetVoiceRuns')) {
         if (!Array.isArray(result.items)) throw b('asset runs missing')
       } else if ((endpoint === 'quoteAssetImage' || endpoint === 'quoteAssetVoice')) {
         if (object(result.entity, b).id !== raw.entityId || typeof result.generationAvailable !== 'boolean'

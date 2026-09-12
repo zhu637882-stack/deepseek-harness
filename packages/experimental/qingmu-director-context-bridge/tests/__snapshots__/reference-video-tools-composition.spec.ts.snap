@@ -296,6 +296,25 @@ exports[`imports a room response through the native loop in the bound episode wi
 }
 `;
 
+exports[`previews camera pixels through the shipped director loop without saving or generating 1`] = `
+{
+  "attachment": {
+    "mediaType": "image/png",
+  },
+  "episodeId": "episode-a",
+  "generationQueued": false,
+  "guidance": "Authored volumes only; compare with source images.",
+  "height": 1,
+  "mode": "direct_image",
+  "objects": [],
+  "projectId": "p",
+  "recipe": "qingmu-blockout-v1",
+  "saved": false,
+  "sha256": "999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee",
+  "width": 1,
+}
+`;
+
 exports[`reads saved episode geography and actual image pixels before any shot exists 1`] = `
 {
   "assets": {
@@ -544,7 +563,7 @@ exports[`saves scene-spanning sound through the shipped director preset, real lo
       "schema": "qingmu-working-cut-v1",
       "shots": [],
     },
-    "guidance": "Use qingmu_save_working_cut with this receipt to save clips, audioCues and soundPlan. Audio cues require an imported assetId/sha256. Import local WAV/MP3/M4A/FLAC in the delivery page. acousticPresets lists bundled recorded room responses; use qingmu_import_acoustic_response with an exact presetId to add one locally, then reread this cut before saving. A bundled IR is an effect input, never a standalone music or ambience cue. Do not invent an asset or claim an unavailable music generator ran. Environment stays continuous under speech. Music and ambience have independent timing, fades and optional gainPoints for director-timed volume changes. Use actual film timing for dialogue ducking and gradual recovery; do not infer speech times from shot duration. Native mixed audio is not automatically separated. An independent cue can apply a retained mono/stereo room impulse response with space {assetId, sha256, wetDb, tailSec}. The response must be a genuine IR, at most 10 seconds, imported in this episode; ordinary speech/music/ambience recordings are not IRs. Convolution adds reflections while retaining direct sound. Its explicit tail continues beyond the source trim across cuts, must fit the film and cannot exceed the IR duration. Fades and gain points cover the extended cue. Choose the acoustic perspective from the scene and listen before applying; this is not separation or automatic removal of existing reverberation.",
+    "guidance": "Use qingmu_save_working_cut with this receipt to save clips, audioCues and soundPlan. Audio cues require an imported assetId/sha256. Import local WAV/MP3/M4A/FLAC in the delivery page. acousticPresets lists bundled recorded room responses; use qingmu_import_acoustic_response with an exact presetId to add one locally, then reread this cut before saving. A bundled IR is an effect input, never a standalone music or ambience cue. Do not invent an asset or claim an unavailable music generator ran. Environment stays continuous under speech. Music and ambience have independent timing, fades and optional gainPoints for director-timed volume changes. Use actual film timing for dialogue ducking and gradual recovery; do not infer speech times from shot duration. Native mixed audio stays original unless a clip explicitly chooses sourceAudioMode. When audioSeparation.available is true, speech_effects extracts speech and effects while removing estimated music; speech extracts dialogue only. This runs locally during export, caches results and may lose details. Preserve original media and audition before accepting; plan continuous music on independent whole-cut cues. An independent cue can apply a retained mono/stereo room impulse response with space {assetId, sha256, wetDb, tailSec}. The response must be a genuine IR, at most 10 seconds, imported in this episode; ordinary speech/music/ambience recordings are not IRs. Convolution adds reflections while retaining direct sound. Its explicit tail continues beyond the source trim across cuts, must fit the film and cannot exceed the IR duration. Fades and gain points cover the extended cue. Choose the acoustic perspective from the scene and listen before applying; this is not separation or automatic removal of existing reverberation.",
     "providerCalls": 0,
     "receiptId": "dd3e89e6146b76c6195eeb34beec5625bedef10699ad213a5f6d06f9b55895c9",
     "schema": "qingmu.native-working-cut.v1",

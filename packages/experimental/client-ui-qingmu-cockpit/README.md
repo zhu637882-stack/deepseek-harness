@@ -1,5 +1,7 @@
 # Qingmu OS production cockpit
 
+Asset cards expose an optional shared scene blockout and per-image camera. Users can drag volumes and camera targets on the plan, edit dimensions and inspect a local perspective preview before saving. Enabled composition references are included in image quotations and generation; preview alone neither saves nor spends. Linked assets reuse their scene layout. The blockout contains authored opaque boxes, not a measured reconstruction; openings require separate wall pieces and generated images still need visual review.
+
 Scene planning and shooting reads wait for both project and episode coordinates. New projects enter planning without a storyboard; advanced tools that require an existing revision stay unavailable until it exists. Loading or switching projects never submits an empty-scope request.
 
 Project cards offer independent creative copies. The copy panel previews saved episode, shot and asset counts and persists its exact request for recovery after refresh or a lost reply. Copies retain scripts, designs and media references; editing, generation and review history stay in the original project.

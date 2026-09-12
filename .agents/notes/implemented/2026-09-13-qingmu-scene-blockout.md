@@ -1,0 +1,7 @@
+# Shared scene blockout as a generation input
+
+Qingmu asset design stores one authored layout per scene and a separate camera per image. The existing queue receives a deterministic composition image in addition to appearance references, preserving source hashes and candidate selection. The local CPU renderer reuses installed OpenCV projection and resolves opaque box occlusion. There is no additional scene platform, GPU service or paid layout renderer.
+
+The workflow pattern is informed by [AI Video Production Editor World Camera](https://github.com/LudwigKienle/ai-video-production-editor/blob/27ff1bac96a918fbb848d80e3298cd1dbba0b160/src/utils/storyboardWorldCamera.ts); its application code is not copied. Projection follows [OpenCV camera geometry](https://docs.opencv.org/4.x/d9/d0c/group__calib3d.html). Model-facing previews reuse existing durable image attachments and scope checks. The UI and native director can inspect the same image supplied at generation.
+
+Volumes and dimensions are director-authored, not a reconstruction of unseen geometry. Walls require modeled openings; complex curved shapes, physical lighting and material rendering remain outside this simplified reference. Fixed-layout projection is deterministic, while compliance by the image generator is a separate visual outcome. The same layout must survive camera edits, old-client saves, project changes and image provenance. Tests cover front/reverse views, actual depth occlusion, scoped preview/quote/queue, field preservation, stale preview disposal and the shipped native director loop.
