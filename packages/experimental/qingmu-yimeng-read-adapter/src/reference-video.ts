@@ -134,11 +134,15 @@ export function parseReferenceVideoRequest(value: unknown): ReferenceVideoPrevie
   if (v.model !== 'wan3.0-video' || !Array.isArray(v.bindings) || v.bindings.length < 1 || v.bindings.length > 20) throw new Error('invalid references')
   const tokens = new Set<string>()
   for (const entry of v.bindings) {
-    const b = object(entry, ['bindingToken', 'assetId', 'assetSha256', 'label'])
+    const b = object(entry, ['bindingToken', 'assetId', 'assetSha256', 'label', 'frameRole'])
     id(b.bindingToken); id(b.assetId); sha(b.assetSha256)
     if (tokens.has(b.bindingToken) || typeof b.label !== 'string' || Array.from(b.label).length < 1 || Array.from(b.label).length > 128) throw new Error('invalid binding')
+    if (b.frameRole !== undefined && b.frameRole !== 'first_frame' && b.frameRole !== 'last_frame') throw new Error('invalid frame role')
     tokens.add(b.bindingToken)
   }
+  const roles = v.bindings.map(entry => (entry as Record<string, unknown>).frameRole)
+  if (roles.some(role => role !== undefined) && (roles.filter(role => role === 'first_frame').length !== 1
+    || roles.filter(role => role === 'last_frame').length > 1 || roles.includes(undefined))) throw new Error('Use one first frame and at most one last frame, without other references.')
   if (!Array.isArray(v.promptParts) || v.promptParts.length < 1 || v.promptParts.length > 200) throw new Error('invalid prompt')
   let length = 0
   for (const entry of v.promptParts) {
@@ -181,13 +185,15 @@ export function normalizeReferenceVideoPreview(
   const aliases = new Map<string, string>()
   let images = 0; let audios = 0; let videos = 0
   v.referenceMapping.forEach((entry, index) => {
-    const mapping = object(entry, ['bindingToken', 'assetId', 'assetSha256', 'label', 'alias', 'mediaType', 'mediaIndex'])
+    const mapping = object(entry, ['bindingToken', 'assetId', 'assetSha256', 'label', 'alias', 'mediaType', 'mediaIndex', 'frameRole'])
     const binding = request.bindings[index]
     if (!binding) throw new Error('reference count changed')
     if (Object.entries(binding).some(([key, expected]) => mapping[key] !== expected) || mapping.mediaIndex !== index) throw new Error('reference source changed')
     const media = object(input.media instanceof Array ? input.media[index] : undefined, ['type', 'url'])
-    if (mapping.mediaType !== media.type || !['reference_image', 'reference_audio', 'reference_video'].includes(String(media.type))) throw new Error('media kind changed')
-    const alias = media.type === 'reference_image' ? `图${++images}` : media.type === 'reference_audio' ? `音频${++audios}` : `视频${++videos}`
+    if (mapping.mediaType !== media.type || !['reference_image', 'reference_audio', 'reference_video', 'first_frame', 'last_frame'].includes(String(media.type))) throw new Error('media kind changed')
+    if (mapping.frameRole !== binding.frameRole || (binding.frameRole !== undefined
+      ? media.type !== binding.frameRole : media.type === 'first_frame' || media.type === 'last_frame')) throw new Error('frame role changed')
+    const alias = media.type === 'reference_image' || media.type === 'first_frame' || media.type === 'last_frame' ? `图${++images}` : media.type === 'reference_audio' ? `音频${++audios}` : `视频${++videos}`
     if (mapping.alias !== alias || typeof media.url !== 'string') throw new Error('reference alias changed')
     const url = new URL(media.url)
     const temporary = media.url.length <= 2048

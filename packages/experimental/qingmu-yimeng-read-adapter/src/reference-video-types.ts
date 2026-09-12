@@ -4,6 +4,8 @@ export interface ReferenceVideoBinding {
   readonly assetId: string
   readonly assetSha256: string
   readonly label: string
+  /** Explicit image endpoint; omission keeps the existing multimodal reference route. */
+  readonly frameRole?: 'first_frame' | 'last_frame'
 }
 
 /** Text stays verbatim; reference parts resolve through stable binding tokens. */
@@ -46,7 +48,7 @@ export interface ReferenceVideoPreviewResponse {
     readonly input: {
       readonly prompt: string
       readonly media: readonly {
-        readonly type: 'reference_image' | 'reference_audio' | 'reference_video'
+        readonly type: 'reference_image' | 'reference_audio' | 'reference_video' | 'first_frame' | 'last_frame'
         readonly url: string
       }[]
     }
@@ -55,7 +57,7 @@ export interface ReferenceVideoPreviewResponse {
   readonly referenceMapping: readonly (ReferenceVideoBinding & {
     readonly alias: string
     readonly mediaIndex: number
-    readonly mediaType: 'reference_image' | 'reference_audio' | 'reference_video'
+    readonly mediaType: 'reference_image' | 'reference_audio' | 'reference_video' | 'first_frame' | 'last_frame'
   })[]
   readonly requestBodySha256: string
   readonly sourceSha256: string

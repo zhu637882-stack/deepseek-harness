@@ -22,7 +22,12 @@ export function inheritReferenceBindings<T extends ReferenceForInheritance>(
     if (byAsset && (byAsset.assetSha256 !== binding.assetSha256 || byAsset.mediaType !== mediaType)) {
       throw new Error(`“${binding.label}”在两个镜头使用不同版本；请先决定保留哪个版本。`)
     }
-    if (!byToken && !byAsset) merged.push({ ...binding, mediaType })
+    if (!byToken && !byAsset) {
+      // A previous shot's starting/ending pose is only a reference until this
+      // shot's director explicitly chooses it as an endpoint.
+      const { frameRole: _previousRole, ...reference } = binding
+      merged.push({ ...reference, mediaType })
+    }
   }
   if (merged.filter(item => item.mediaType === 'reference_image').length > 10
     || merged.filter(item => item.mediaType === 'reference_audio').length > 5

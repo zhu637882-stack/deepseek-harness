@@ -192,3 +192,25 @@ it.each([
   const handler = createYimengReadHandler({}, { fetch: async () => Response.json(next), readToken: () => 'fixture' })
   expect((await handler('referenceVideoPreview', request, signal())).ok).toBe(accepted)
 })
+
+
+it.each([false, true])('checks explicit first/last frame bodies without allowing a silent route change (%s)', async (withLast) => {
+  const bindings = [request.bindings[0]!, request.bindings[2]!].slice(0, withLast ? 2 : 1).map((binding, index) => ({ ...binding,
+    frameRole: index === 0 ? 'first_frame' as const : 'last_frame' as const }))
+  const input = { ...request, bindings, promptParts: [{ text: '保持起始站位，缓慢走向门口。' }],
+    parameters: { ...request.parameters, ratio: 'adaptive' as const } }
+  const nextBody = { ...response.body, input: { prompt: input.promptParts[0]!.text,
+    media: bindings.map(binding => ({ type: binding.frameRole,
+      url: `oss://dashscope-instant/project/${binding.frameRole}.png` })) }, parameters: { ...input.parameters, watermark: false as const } }
+  const expected = { ...response, body: nextBody, referenceAudioDurationSec: 0,
+    referenceMapping: bindings.map((binding, index) => ({ ...binding, mediaIndex: index, mediaType: binding.frameRole, alias: `图${index + 1}` })),
+    requestBodySha256: createHash('sha256').update(canonical(nextBody)).digest('hex') }
+  let upstream: unknown = expected
+  const handler = createYimengReadHandler({}, { fetch: async () => Response.json(upstream), readToken: () => 'fixture' })
+  expect(await handler('referenceVideoPreview', input, signal())).toEqual({ ok: true, value: expected })
+  upstream = { ...expected, referenceMapping: expected.referenceMapping.map(({ frameRole: _role, ...rest }) => rest) }
+  expect((await handler('referenceVideoPreview', input, signal())).ok).toBe(false)
+  upstream = expected
+  expect((await handler('referenceVideoPreview', { ...input, bindings: input.bindings.map(({ frameRole: _role, ...rest }) => rest) }, signal())).ok).toBe(false)
+  expect((await handler('referenceVideoPreview', { ...input, bindings: [...bindings, request.bindings[1]!] }, signal())).ok).toBe(false)
+})

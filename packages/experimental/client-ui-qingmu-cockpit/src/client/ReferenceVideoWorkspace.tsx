@@ -29,7 +29,7 @@ export interface ReferenceVideoWorkspaceProps {
   readonly port: Pick<QingmuYimengPort, 'referenceVideoAssets' | 'readLocalReferenceCandidateContent' | 'referenceVideoPreview' | 'referenceVideoDraft' | 'saveReferenceVideoDraft' | 'referenceVideoQuote' | 'referenceVideoRuns' | 'queueReferenceVideo'> & PrivateReferencePreviewPort & Partial<Pick<QingmuYimengPort, 'readReferenceVideoMaterials' | 'prepareReferenceVideoMaterial' | 'readReferenceVideoCandidateRegistration' | 'registerReferenceVideoCandidateForReview' | 'captureReferenceVideoFrame' | 'readReferenceVideoFrame'>>
 }
 
-type Chosen = Omit<ReferenceVideoAsset, 'mediaType'> & { readonly bindingToken: string; readonly mediaType: ReferenceVideoAsset['mediaType'] | 'unavailable' }
+type Chosen = Omit<ReferenceVideoAsset, 'mediaType'> & { readonly bindingToken: string; readonly frameRole?: 'first_frame' | 'last_frame'; readonly mediaType: ReferenceVideoAsset['mediaType'] | 'unavailable' }
 
 function makeRequestId() {
   return globalThis.crypto.randomUUID()
@@ -228,7 +228,9 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
       const state = await port.saveReferenceVideoDraft({ projectId, frameId,
         expectedRevision: draftState.draft?.revision ?? 0, expectedFrameSha256: draftState.frameSha256,
         request: { frameId, model: 'wan3.0-video',
-          bindings: chosen.map(({ bindingToken, assetId, assetSha256, label }) => ({ bindingToken, assetId, assetSha256, label })),
+          bindings: chosen.map(({ bindingToken, assetId, assetSha256, label, frameRole }) => (
+            { bindingToken, assetId, assetSha256, label, ...(frameRole ? { frameRole } : {}) }
+          )),
           promptParts: parts, parameters, ...(directorSourceSha256 ? { directorSourceSha256 } : {}) } }, controller.signal)
       if (controller.signal.aborted) return
       setDraftState(state); setDraftLoaded(true); setSavedEpoch(start)
@@ -326,14 +328,20 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
     }
   }
 
+  const frameMode = chosen.some(item => item.frameRole !== undefined)
+  const frameModeError = frameMode && (chosen.filter(item => item.frameRole === 'first_frame').length !== 1
+    || chosen.filter(item => item.frameRole === 'last_frame').length > 1
+    || chosen.some(item => item.frameRole === undefined || item.mediaType !== 'reference_image'))
+    ? '首帧生成需要一张首帧，可加一张尾帧；不能同时带普通图片、音色或视频参考。请调整素材用途或移除多余引用。' : ''
+
   const preview = async () => {
     if (busy) return
     previewAbort.current?.abort(); setResult(undefined); setQuoteResult(undefined); setError('')
     const controller = new AbortController(); previewAbort.current = controller; setBusy(true)
     try {
       const response = await port.referenceVideoPreview({ projectId, frameId, model: 'wan3.0-video',
-        bindings: chosen.map(({ bindingToken, assetId, assetSha256, label }) => (
-          { bindingToken, assetId, assetSha256, label }
+        bindings: chosen.map(({ bindingToken, assetId, assetSha256, label, frameRole }) => (
+          { bindingToken, assetId, assetSha256, label, ...(frameRole ? { frameRole } : {}) }
         )),
         promptParts: parts, parameters, ...(directorSourceSha256 ? { directorSourceSha256 } : {}) }, controller.signal)
       if (!controller.signal.aborted) {
@@ -389,7 +397,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
     </div>
     <section className={css.draftBar} aria-label="草稿操作">
       <button type="button" disabled={saving} onClick={() => { void restore() }}>恢复已存草稿（替换当前试排）</button>
-      <button className={css.primaryAction} type="button" disabled={saving || !draftState || !sourceAccepted || Boolean(draftState.draft && !draftLoaded) || chosen.length === 0 || chosen.some(item => item.mediaType === 'unavailable' || !item.label.trim())} onClick={() => { void save() }}>{saving ? '保存草稿…' : '保存引用草稿'}</button>
+      <button className={css.primaryAction} type="button" disabled={Boolean(frameModeError) || saving || !draftState || !sourceAccepted || Boolean(draftState.draft && !draftLoaded) || chosen.length === 0 || chosen.some(item => item.mediaType === 'unavailable' || !item.label.trim())} onClick={() => { void save() }}>{saving ? '保存草稿…' : '保存引用草稿'}</button>
       <p role="status">{draftMessage}</p>
     </section>
     {port.readReferenceVideoMaterials !== undefined && <section className={css.materialsBar} aria-label="准备引用素材">
@@ -431,6 +439,9 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
         我已对照当前设计整理生成稿，保留所需细节并处理相互矛盾的描述
       </label>
     </section>}
+    <p className={css.previewHint}>要延续已经拍定的布局和站位，将完整镜头画面设为首帧；要指定动作终点，可加尾帧。人物定妆、场景或音色分别引用时，使用普通参考。首帧模式仍可按导演描述生成对白与环境声，但不能同时引用音色。</p>
+    {frameModeError && <p role="alert">{frameModeError}</p>}
+    {frameMode && !frameModeError && <p className={css.previewHint}>当前采用{chosen.length === 2 ? '首尾帧' : '首帧'}生成。画幅可选「跟随参考」以减少裁切；先核对画面本身的布局、比例和动作状态。</p>}
     {chosen.some(item => item.mediaType === 'unavailable') && <p role="alert">部分素材已删除或版本已变化，请移除失效引用并重新选择。</p>}
     <div className={css.workbench}>
       <section className={css.referenceShelf} aria-label="参考素材">
@@ -516,6 +527,20 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
                 ? <small className={css.previewHint}>读取项目素材后可查看原图</small>
                 : null
             })()}
+            {item.mediaType === 'reference_image' && <label>画面用途
+              <select aria-label={`${aliases.get(item.bindingToken)}用途`} value={item.frameRole ?? 'reference'}
+                onChange={(event) => {
+                  const role = event.target.value
+                  invalidate()
+                  setChosen(previous => previous.map((old) => {
+                    if (old.bindingToken !== item.bindingToken) return old
+                    const { frameRole: _previousRole, ...rest } = old
+                    return role === 'first_frame' || role === 'last_frame' ? { ...rest, frameRole: role } : rest
+                  }))
+                }}>
+                <option value="reference">普通参考</option><option value="first_frame">首帧 · 起始画面</option><option value="last_frame">尾帧 · 结束画面</option>
+              </select>
+            </label>}
             <input aria-label={`${aliases.get(item.bindingToken)}名称`} value={item.label} maxLength={128}
               onChange={(event) => {
                 invalidate()
@@ -566,13 +591,13 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
             {['480P', '720P', '1080P'].map(value => <option key={value}>{value}</option>)}
           </select></label>
           <label>画幅<select value={parameters.ratio} onChange={(event) => { invalidate(); setParameters({ ...parameters, ratio: event.target.value as ReferenceVideoParameters['ratio'] }) }}>
-            {['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16'].map(value => <option key={value}>{value}</option>)}
+            {['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16'].map(value => <option key={value} value={value}>{value === 'adaptive' ? '跟随参考' : value}</option>)}
           </select></label>
           <label><input type="checkbox" checked={parameters.audio} onChange={(event) => { invalidate(); setParameters({ ...parameters, audio: event.target.checked }) }} />原生声音</label>
           <label><input type="checkbox" checked={parameters.prompt_extend} onChange={(event) => { invalidate(); setParameters({ ...parameters, prompt_extend: event.target.checked }) }} />模型扩写描述</label>
         </div>
         <div className={css.previewActions}>
-          <button type="button" disabled={busy || images + videos === 0 || chosen.some(item => item.mediaType === 'unavailable' || !item.label.trim())} onClick={() => { void preview() }}>{busy ? '核对素材与请求…' : '预览实际请求'}</button>
+          <button type="button" disabled={Boolean(frameModeError) || busy || images + videos === 0 || chosen.some(item => item.mediaType === 'unavailable' || !item.label.trim())} onClick={() => { void preview() }}>{busy ? '核对素材与请求…' : '预览实际请求'}</button>
           <button className={css.primaryAction} type="button" disabled={busy || saving || !draftState?.draft || savedEpoch !== epoch.current || !sourceAccepted} onClick={() => { void quote() }}>估算已存草稿费用</button>
         </div>
         {quoteResult && <p className={css.quote} role="status">目录价估算 ¥{Number(quoteResult.cost.estimatedCny).toFixed(2)} · 1 个视频 · 计费 {quoteResult.cost.billableSeconds} 秒（输出 {quoteResult.preview.body.parameters.duration} 秒{(quoteResult.preview.referenceVideoDurationSec ?? 0) > 0 && <> + 输入 {quoteResult.preview.referenceVideoDurationSec} 秒</>}）。

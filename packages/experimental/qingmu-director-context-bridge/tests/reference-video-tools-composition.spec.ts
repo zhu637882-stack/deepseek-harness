@@ -183,8 +183,11 @@ function writer(extraShots = 0, image?: { sha256: string; url: string; config?: 
         if (input.expectedRevision !== saved.draft.revision || input.expectedFrameSha256 !== saved.frameSha256) {
           return Response.json({ detail: { code: 'reference_video_draft_revision_conflict' } }, { status: 409 })
         }
-        saved = { ...saved, draft: { ...saved.draft, revision: saved.draft.revision + 1,
-          request: input.request, requestSha256: sha(input.request) } }
+        saved = { ...saved,
+          mediaTypes: Object.fromEntries(input.request.bindings.map(binding =>
+            [binding.bindingToken, saved.mediaTypes[binding.bindingToken as keyof typeof saved.mediaTypes]])) as typeof saved.mediaTypes,
+          draft: { ...saved.draft, revision: saved.draft.revision + 1,
+            request: input.request, requestSha256: sha(input.request) } }
         afterSave?.()
         if (loseSaveResponse) throw new Error('connection lost after commit')
       } else afterDraftRead?.()
@@ -860,4 +863,18 @@ it('captures and recovers a video frame through the shipped director preset with
   expect(String(calls[0]?.[0])).toContain('/projects/p/reference-video/drafts/previous/')
   await h.presets.dispose()
   expect(h.ctx.tools.get('qingmu_capture_reference_video_frame', scopeOf(h.agent.ctx))).toBeUndefined()
+})
+
+
+it('native director saves frame endpoints through the same project-bound draft tool', async () => {
+  const frameDraft = { ...edit, bindings: [edit.bindings[0]!].map(binding => ({ ...binding, frameRole: 'first_frame' as const })),
+    promptParts: [{ text: '从画面的既有站位起步，环境声持续。' }], parameters: { ...edit.parameters, ratio: 'adaptive' as const } }
+  const h = await harness(new MockAdapter([
+    toolCallResponse('frame-save', 'qingmu_save_reference_draft', { ...saveArgs, draft: frameDraft }),
+    textResponse('已保存首帧生成草稿。'),
+  ]))
+  await h.run()
+  expect(result(h.agent, 'frame-save'), JSON.stringify(result(h.agent, 'frame-save'))).not.toHaveProperty('error', true)
+  expect(saves(h.upstream)).toHaveLength(1)
+  expect(JSON.stringify(saves(h.upstream))).toContain('first_frame')
 })

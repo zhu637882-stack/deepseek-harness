@@ -105,3 +105,12 @@ it('inherits video identity and enforces the combined video count', () => {
   }))
   expect(() => inheritReferenceBindings(existing, videoSource)).toThrow('5 段视频')
 })
+
+
+it('inherits image identity without silently copying the other shot endpoint roles', () => {
+  const framed = { ...source, draft: { ...source.draft!, request: { ...source.draft!.request,
+    bindings: source.draft!.request.bindings.slice(0, 1).map(binding => ({ ...binding, frameRole: 'first_frame' as const })) } } }
+  const next = inheritReferenceBindings([], framed)
+  expect(next[0]?.assetId).toBe(framed.draft.request.bindings[0]?.assetId)
+  expect(next[0]).not.toHaveProperty('frameRole')
+})
