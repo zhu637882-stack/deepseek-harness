@@ -10,6 +10,8 @@ export interface WorkingClip {
   readonly inSec: number
   readonly outSec: number
   readonly sourceGainDb?: number
+  /** Local source separation before trim/mix. Omission preserves original audio and retry bodies. */
+  readonly sourceAudioMode?: 'original' | 'speech_effects' | 'speech'
   /** Static source crop; zoom 1..4, x/y 0..1 across available crop travel. */
   readonly reframe?: { readonly zoom: number; readonly x: number; readonly y: number }
 }
@@ -63,6 +65,7 @@ export interface WorkingCutSoundReview {
 export interface WorkingCutState extends CreationScope {
   readonly schema: 'qingmu-working-cut-v1'
   readonly revision: number
+  readonly audioSeparation?: { readonly available: boolean; readonly model: string; readonly providerCalls: 0 }
   readonly audioLibrary?: readonly {
     readonly assetId: string
     readonly sha256: string
