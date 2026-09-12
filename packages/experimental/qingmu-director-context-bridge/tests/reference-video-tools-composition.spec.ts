@@ -741,6 +741,41 @@ it.each(['storyboard', 'script', 'scene'] as const)('does not continue across an
 })
 
 
+it('rejects acoustic imports without a current browser director target', async () => {
+  const h = await harness(new MockAdapter([
+    textResponse('Director workspace entered.'),
+    toolCallResponse('room-import', 'qingmu_import_acoustic_response', { presetId: 'bedroom' }), textResponse('Target required.'),
+  ]))
+  await h.run(true)
+  await h.run(false)
+  expect(result(h.agent, 'room-import').error).toBe(true)
+  expect(JSON.stringify(h.upstream.fetch.mock.calls)).not.toContain('/working-cut/audio')
+})
+
+it('imports a room response through the native loop in the bound episode without changing the cut', async () => {
+  const upstream = writer()
+  const original = upstream.fetch.getMockImplementation()!
+  const source = { assetId: 'room-ir', sha256: 'c'.repeat(64), name: 'Bedroom IR', duration: 1.6,
+    presetId: 'bedroom', usage: 'impulse_response', url: '' }
+  upstream.fetch.mockImplementation(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input)
+    if (url.pathname.endsWith('/working-cut/audio')) return Response.json({ ...initialCut, audioLibrary: [source] })
+    return original(input, init)
+  })
+  const h = await harness(new MockAdapter([
+    toolCallResponse('room-import', 'qingmu_import_acoustic_response', { presetId: 'bedroom' }),
+    textResponse('Room response retained; the film remains unchanged.'),
+  ]), upstream)
+  await h.run(true)
+  expect(result(h.agent, 'room-import').error, result(h.agent, 'room-import').text).toBe(false)
+  expect(JSON.parse(result(h.agent, 'room-import').text)).toMatchObject({ scope: { projectId: 'p', episodeId: 'episode-a' }, source, providerCalls: 0 })
+  const writes = upstream.fetch.mock.calls.filter(([url, init]) => new URL(url instanceof Request ? url.url : url).pathname.endsWith('/working-cut/audio') && init?.method === 'POST')
+  expect(writes).toHaveLength(1)
+  expect(JSON.parse(writes[0]![1]!.body as string)).toEqual({ presetId: 'bedroom' })
+  expect(JSON.stringify(upstream.fetch.mock.calls)).not.toContain('/working-cut/render')
+  expect(JSON.parse(result(h.agent, 'room-import').text)).toMatchSnapshot()
+})
+
 it('saves scene-spanning sound through the shipped director preset, real loop and command adapter', async () => {
   const cut = { clips:[{ frameId:'f',assetId:'video',sha256:'a'.repeat(64),inSec:0,outSec:15 }],
     audioCues:[{ assetId:'room',sha256:'b'.repeat(64),kind:'ambience',startSec:0,inSec:0,outSec:14,gainDb:-18,fadeInSec:1,fadeOutSec:2,

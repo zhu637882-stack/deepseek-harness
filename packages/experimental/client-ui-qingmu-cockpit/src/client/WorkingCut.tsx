@@ -89,7 +89,7 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
     const response = state?.audioLibrary?.find(a => a.assetId === c.space?.assetId)
     const audibleDuration = c.outSec - c.inSec + (c.space?.tailSec ?? 0)
     const points = c.gainPoints ?? []
-    return source && [c.startSec, c.inSec, c.outSec, c.gainDb, c.fadeInSec, c.fadeOutSec].every(Number.isFinite)
+    return source && source.usage !== 'impulse_response' && [c.startSec, c.inSec, c.outSec, c.gainDb, c.fadeInSec, c.fadeOutSec].every(Number.isFinite)
       && c.startSec >= 0
       && c.inSec >= 0 && c.outSec > c.inSec && c.outSec <= source.duration
       && c.startSec + audibleDuration <= total + .001 && c.gainDb >= -60 && c.gainDb <= 6
@@ -156,6 +156,13 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
         </li>
       })}</ol>
       <WorkingCutSound library={state.audioLibrary ?? []} cues={audioCues} total={total} disabled={locked} plan={soundPlan}
+        presets={state.acousticPresets ?? []} onImportPreset={async (presetId) => {
+          setBusy(true)
+          try {
+            const next = await port.uploadWorkingCutAudio({ projectId, episodeId, command: { presetId } })
+            if (live.current) setState(next)
+          } finally { if (live.current) setBusy(false) }
+        }}
         onPlan={(value) => { change(clips); setSoundPlan(value) }} onChange={(value) => { change(clips); setAudioCues(value) }}
         onUpload={async (file) => {
           setBusy(true)

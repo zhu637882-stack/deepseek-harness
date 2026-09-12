@@ -7,6 +7,33 @@ const state: WorkingCutState = { schema:'qingmu-working-cut-v1',projectId:'p',ep
   shots:[{ frameId:'f',frameNo:1,title:'动作',candidates:[{ assetId:'a',sha256:'a'.repeat(64),duration:15,taskId:'t',url:'' }] }],
   cuts:[],providerCalls:0,humanApprovalChanged:false }
 afterEach(() => { cleanup();localStorage.clear() })
+it('imports a bundled response without losing edits or adding an impulse as music', async () => {
+  const source = { assetId: 'voice', sha256: 'b'.repeat(64), duration: 15, name: 'Voice.wav', url: '' }
+  const preset = { id: 'bedroom', name: '居住房间', description: '卧室实录', sourceUrl: 'https://example.com/source',
+    sha256: 'c'.repeat(64), duration: 1.6, license: 'MIT', author: 'Conner' }
+  const room = { assetId: 'room', sha256: preset.sha256, duration: 1.6, name: '居住房间 IR.wav', url: '',
+    usage: 'impulse_response' as const, presetId: preset.id }
+  let server = { ...state, acousticPresets: [preset], audioLibrary: [source] }
+  const uploadWorkingCutAudio = vi.fn(async (_input: unknown) => { server = { ...server, audioLibrary: [source, room] }; return server })
+  const saveWorkingCut = vi.fn(async (_input: { command: WorkingCutCommand }) => server)
+  const port = { readWorkingCut: vi.fn(async () => server), saveWorkingCut, uploadWorkingCutAudio, renderWorkingCut: vi.fn() }
+  render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
+  fireEvent.change(await screen.findByRole('spinbutton', { name: '镜 1 终点秒' }), { target: { value: '12' } })
+  fireEvent.click(screen.getByText('选择空间声学 · 房间、咖啡店与走廊'))
+  fireEvent.click(screen.getByRole('button', { name: '加入居住房间响应' }))
+  await waitFor(() => { expect(uploadWorkingCutAudio).toHaveBeenCalledWith({ projectId: 'p', episodeId: 'e', command: { presetId: 'bedroom' } }) })
+  await waitFor(() => { expect(screen.getByRole('button', { name: '居住房间已加入' })).toHaveProperty('disabled', true) })
+  expect(screen.getByRole('spinbutton', { name: '镜 1 终点秒' })).toHaveProperty('value', '12')
+  expect(screen.getAllByRole('button', { name: '加入音轨' })).toHaveLength(1)
+  fireEvent.click(screen.getByRole('button', { name: '加入音轨' }))
+  fireEvent.change(screen.getByRole('combobox', { name: '音轨 1 空间响应' }), { target: { value: room.assetId } })
+  fireEvent.click(screen.getByRole('button', { name: '保存剪辑草稿' }))
+  await waitFor(() => { expect(saveWorkingCut).toHaveBeenCalledTimes(1) })
+  expect(saveWorkingCut.mock.calls[0]?.[0].command.audioCues?.[0]?.space).toEqual({
+    assetId: room.assetId, sha256: room.sha256, wetDb: -12, tailSec: 0,
+  })
+  expect(port.renderWorkingCut).not.toHaveBeenCalled()
+})
 it('saves room response and cross-cut tail, rejects overrun, and reopens without changing original sound', async () => {
   const voice = { assetId: 'voice', sha256: 'b'.repeat(64), duration: 15, name: 'Voice.wav', url: '' }
   const room = { assetId: 'response', sha256: 'c'.repeat(64), duration: 1, name: 'Room-IR.wav', url: '' }

@@ -9,6 +9,37 @@ const state: AssetDesignState = { ...scope, schema: 'qingmu.asset-design-state.v
     visualStyle: '写实', tone: '温暖', colorPalette: ['灰蓝'], lightingRules: '窗光', cameraGrammar: '跟随动作', performanceRules: '自然', characterContinuityRules: '服装稳定',
   } } }
 afterEach(() => { cleanup(); localStorage.clear() })
+it.each([false, true])('keeps omitted generation choices on redesign; explicit reset=%s remains effective', async (reset) => {
+  const port = setup()
+  const existing = { ...state.design!.assets[0]!, imageModel: 'qwen-image-3.0-pro',
+    imagePromptExtend: true, imageAspectRatio: '3:4' as const,
+    references: [{ assetId: 'asset_ref', assetSha256: 'e'.repeat(64), purpose: '保留身份与服装', boxes: [] }] }
+  const configured = { ...state, design: { ...state.design!, assets: [existing] } }
+  port.readAssetDesign.mockResolvedValue(configured)
+  port.saveAssetDesign.mockImplementation(async (input: unknown) => ({ ...configured,
+    design: { ...configured.design, ...(input as { design: object }).design } }))
+  const view = render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  await screen.findByLabelText('画面描述')
+  const changed = { ...state.design!, assets: [{ kind: 'actor', name: '父亲', imagePrompt: '同一人物侧面视角',
+    ...(reset ? { imageModel: null, imagePromptExtend: false, imageAspectRatio: 'auto', references: [] } : {}) },
+  { kind: 'prop', name: '父亲', imagePrompt: '刻有父亲二字的木牌' }] }
+  fireEvent.change(screen.getByLabelText('素材设计数据'), { target: { value: JSON.stringify(changed) } })
+  fireEvent.click(screen.getByRole('button', { name: '载入设计' }))
+  fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
+  await waitFor(() => { expect(port.saveAssetDesign).toHaveBeenCalledTimes(1) })
+  const saved = await (port.saveAssetDesign.mock.results[0]!.value as Promise<AssetDesignState>)
+  expect(saved.design?.assets[0]).toMatchObject({ id: 'actor_1', imagePrompt: '同一人物侧面视角',
+    imageModel: reset ? null : existing.imageModel, imagePromptExtend: !reset,
+    imageAspectRatio: reset ? 'auto' : '3:4', references: reset ? [] : existing.references })
+  expect(saved.design?.assets[1]?.references).toBeUndefined()
+  expect(saved.design?.assets[1]?.id).toBeUndefined()
+  view.unmount(); port.readAssetDesign.mockResolvedValue(saved)
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  const actor = within(await screen.findByRole('region', { name: '人物 父亲' }))
+  expect(actor.getByLabelText<HTMLSelectElement>('图片模型').value).toBe(reset ? '' : existing.imageModel)
+  expect(actor.getByRole('button', { name: `参考与局部修改 · ${reset ? 0 : 1} 张图` })).toBeTruthy()
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
 it('edits shared room geography and a separate reverse view, preserving both through legacy import and reload', async () => {
   const port = setup()
   const spatial = { ...state, design: { ...state.design!, assets: [state.design!.assets[0]!,
@@ -174,7 +205,8 @@ it('carries resolved creation settings into the native design request before gen
   const port = setup()
   const creativeSettings = { visualStyle: { label: '透明水彩', prompt: '透明水彩色层' },
     stylePack: { palette: ['水彩明度层次'] }, styleAdjustments: ['高饱和金属反射'] }
-  port.readAssetDesign.mockResolvedValue({ ...state, creativeSettings })
+  const imageModels = [{ id: 'qwen-image-3.0-pro', name: 'Qwen-Image 3.0 Pro', maxReferences: 3, supportsBoxes: false }]
+  port.readAssetDesign.mockResolvedValue({ ...state, creativeSettings, imageModels })
   const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
     read: vi.fn(async () => ({ text: '', script: '', lastSeq: 0, running: false, finished: false, error: '' })) }
   render(<NativeAssetDesign {...scope} port={port} storyPort={storyPort} onGenerated={vi.fn()} />)
@@ -188,6 +220,7 @@ it('carries resolved creation settings into the native design request before gen
   expect(storyPort.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining('由导演决定信息密度与留白')])
   expect(storyPort.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining('visualIdentity 记录主体完整外观')])
   expect(storyPort.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining('哪个地标进入近景、哪些对象转到摄影机身后或被遮挡')])
+  expect(storyPort.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining(JSON.stringify(imageModels))])
   expect(port.generateAssetImage).not.toHaveBeenCalled()
 })
 

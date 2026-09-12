@@ -47,6 +47,20 @@ export interface WorkingCutState extends CreationScope {
     readonly name: string
     readonly duration: number
     readonly url: string
+    /** Bundled responses are effect inputs, never standalone music cues. */
+    readonly usage?: 'impulse_response'
+    readonly presetId?: string
+    readonly sourceUrl?: string
+  }[]
+  readonly acousticPresets?: readonly {
+    readonly id: string
+    readonly name: string
+    readonly description: string
+    readonly sourceUrl: string
+    readonly sha256: string
+    readonly duration: number
+    readonly license: string
+    readonly author: string
   }[]
   readonly shots: readonly {
     readonly frameId: string

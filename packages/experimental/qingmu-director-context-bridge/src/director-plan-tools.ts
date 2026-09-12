@@ -2,7 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { JsonValue, Session } from '@deepseek-ai/dsh-session'
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
-import type { DirectorContextSnapshot, ScenePlanningState, ScenePlanningResult, YimengCommandJsonObject } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import type { DirectorContextSnapshot, ScenePlanningState, ScenePlanningResult, WorkingCutState, YimengCommandJsonObject } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter'
 import { digest, retainNativeToolReceipt, toolValues } from './native-draft.ts'
 import { assertNativeTurnTarget } from './native-prompt-target.ts'
@@ -52,6 +52,28 @@ function continuation(before: DirectorContextSnapshot, after: DirectorContextSna
 export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
   const output = { schema: { type: 'json' as const }, render: (_args: unknown, value: JsonValue) => [{ type: 'text' as const, text: JSON.stringify(value) }] }
   ctx.tools.register(defineTool({
+    name: 'qingmu_import_acoustic_response',
+    description: 'Import one bundled room impulse response from the acousticPresets catalog returned by qingmu_read_working_cut into the bound episode. Local, no provider charge; repeated imports recover the same source. This is an effect input, not ambience/music or a measurement of the film set. Importing neither changes the edit nor applies reverb.',
+    parameters: { presetId: { type: 'string', required: true, description: 'Exact ID from the current acousticPresets catalog.' } }, output,
+    presentCall: () => ({ card: 'generic', kind: 'edit', title: '加入空间声学响应' }),
+    async execute(args, exec) {
+      if (!exec.agent) throw new Error('空间响应导入需要当前导演会话。')
+      assertNativeTurnTarget(exec.agent.session, exec.callId, true)
+      const current = await ports.readBoundContext(exec)
+      assertCurrent(current, exec)
+      const { projectId, episodeId } = current.state.binding.scope
+      const scope = { projectId, episodeId }
+      const response = await ctx.qingmuYimengCommand('uploadWorkingCutAudio', { ...scope, command: { presetId: args.presetId } }, exec.signal)
+      assertCurrent(current, exec)
+      if (!response.ok) throw new Error(response.error.message)
+      const cut = response.value as WorkingCutState
+      const source = cut.audioLibrary?.find(item => item.presetId === args.presetId)
+      if (!source) throw new Error('空间响应导入结果未确认，请读取当前音频素材。')
+      return ports.boundedJson({ scope, source, providerCalls: 0,
+        guidance: 'Read qingmu_read_working_cut again before saving a cue with this response. Preserve dry sound, choose wet gain and tail from the scene design, and audition the mix. Do not add the IR itself as a soundtrack.' })
+    },
+  }))
+  ctx.tools.register(defineTool({
     name: 'qingmu_read_working_cut',
     description: 'Read the current episode assembled cut, retained versions and imported audio sources. Plan music cues, uninterrupted scene ambience, Foley and dialogue on film time after editing. Source URLs are for actual listening, not evidence that listening happened. No provider calls.',
     parameters: {}, output,
@@ -65,7 +87,7 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
       if (!response.ok) throw new Error(response.error.message)
       return ports.boundedJson({ schema: 'qingmu.native-working-cut.v1', scope, cut: response.value,
         receiptId: digest({ scope, cut: response.value }), providerCalls: 0,
-        guidance: 'Use qingmu_save_working_cut with this receipt to save clips, audioCues and soundPlan. Audio cues require an imported assetId/sha256. Import local WAV/MP3/M4A/FLAC in the delivery page. Do not invent an asset or claim an unavailable music generator ran. Environment stays continuous under speech. Music and ambience have independent timing, fades and optional gainPoints for director-timed volume changes. Use actual film timing for dialogue ducking and gradual recovery; do not infer speech times from shot duration. Native mixed audio is not automatically separated. An independent cue can apply a retained mono/stereo room impulse response with space {assetId, sha256, wetDb, tailSec}. The response must be a genuine IR, at most 10 seconds, imported in this episode; ordinary speech/music/ambience recordings are not IRs. Convolution adds reflections while retaining direct sound. Its explicit tail continues beyond the source trim across cuts, must fit the film and cannot exceed the IR duration. Fades and gain points cover the extended cue. Choose the acoustic perspective from the scene and listen before applying; this is not separation or automatic removal of existing reverberation.' })
+        guidance: 'Use qingmu_save_working_cut with this receipt to save clips, audioCues and soundPlan. Audio cues require an imported assetId/sha256. Import local WAV/MP3/M4A/FLAC in the delivery page. acousticPresets lists bundled recorded room responses; use qingmu_import_acoustic_response with an exact presetId to add one locally, then reread this cut before saving. A bundled IR is an effect input, never a standalone music or ambience cue. Do not invent an asset or claim an unavailable music generator ran. Environment stays continuous under speech. Music and ambience have independent timing, fades and optional gainPoints for director-timed volume changes. Use actual film timing for dialogue ducking and gradual recovery; do not infer speech times from shot duration. Native mixed audio is not automatically separated. An independent cue can apply a retained mono/stereo room impulse response with space {assetId, sha256, wetDb, tailSec}. The response must be a genuine IR, at most 10 seconds, imported in this episode; ordinary speech/music/ambience recordings are not IRs. Convolution adds reflections while retaining direct sound. Its explicit tail continues beyond the source trim across cuts, must fit the film and cannot exceed the IR duration. Fades and gain points cover the extended cue. Choose the acoustic perspective from the scene and listen before applying; this is not separation or automatic removal of existing reverberation.' })
     },
   }))
   ctx.tools.register(defineTool({

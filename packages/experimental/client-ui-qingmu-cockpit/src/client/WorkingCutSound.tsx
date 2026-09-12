@@ -4,7 +4,7 @@ import type { WorkingAudioCue, WorkingCutState } from '@deepseek-ai/dsh-experime
 import css from './WorkingCut.module.css'
 
 /** Edit sound sources and cue ranges in assembled-film seconds. */
-export function WorkingCutSound({ library, cues, total, disabled, plan, onPlan, onChange, onUpload }: {
+export function WorkingCutSound({ library, presets = [], cues, total, disabled, plan, onPlan, onChange, onUpload, onImportPreset }: {
   readonly library: NonNullable<WorkingCutState['audioLibrary']>
   readonly cues: readonly WorkingAudioCue[]
   readonly total: number
@@ -13,6 +13,8 @@ export function WorkingCutSound({ library, cues, total, disabled, plan, onPlan, 
   readonly onPlan: (value: string) => void
   readonly onChange: (value: readonly WorkingAudioCue[]) => void
   readonly onUpload: (file: File) => Promise<void>
+  readonly presets?: NonNullable<WorkingCutState['acousticPresets']>
+  readonly onImportPreset?: (presetId: string) => Promise<void>
 }) {
   const [error, setError] = useState('')
   const update = (index: number, patch: Partial<WorkingAudioCue>) => {
@@ -30,15 +32,24 @@ export function WorkingCutSound({ library, cues, total, disabled, plan, onPlan, 
       void onUpload(file).catch((cause: unknown) => { setError(String(cause)) })
     }} /></label>
     <p>支持 WAV、MP3、M4A、FLAC，单个文件最长 10 分钟、最大 32 MB。先试听，再加入音轨。</p>
+    {presets.length > 0 && onImportPreset && <details><summary>选择空间声学 · 房间、咖啡店与走廊</summary>
+      <p>这些实录响应决定反射与余响，不含环境底声。加入本集后，在对应音轨的“空间混响”中选择，试听混合后的声音；它们不是当前画面场地的实测数据。</p>
+      {presets.map(preset => <div className={css.source} key={preset.id}>
+        <span>{preset.name} · {preset.description} <a href={preset.sourceUrl} target="_blank" rel="noreferrer">来源 · {preset.license}</a></span>
+        <button type="button" disabled={disabled || library.some(source => source.presetId === preset.id)} onClick={() => {
+          setError(''); void onImportPreset(preset.id).catch((cause: unknown) => { setError(String(cause)) })
+        }}>{library.some(source => source.presetId === preset.id) ? `${preset.name}已加入` : `加入${preset.name}响应`}</button>
+      </div>)}
+    </details>}
     {error && <p role="alert">{error}</p>}
     {library.map(source => <div className={css.source} key={source.assetId}>
       <span>{source.name} · {source.duration.toFixed(1)} 秒</span>
-      <audio aria-label={`试听 ${source.name}`} controls preload="none" src={source.url} />
-      <button type="button" disabled={disabled || total <= 0} onClick={() => {
-        const duration = Math.min(total, Math.floor(source.duration * 1000) / 1000)
-        onChange([...cues, { assetId: source.assetId, sha256: source.sha256, kind: 'music', startSec: 0,
-          inSec: 0, outSec: duration, gainDb: -18, fadeInSec: Math.min(1, duration / 4), fadeOutSec: Math.min(2, duration / 4) }])
-      }}>加入音轨</button>
+      {source.usage === 'impulse_response' ? <span>已可用于音轨的空间混响</span> : <><audio aria-label={`试听 ${source.name}`} controls preload="none" src={source.url} />
+        <button type="button" disabled={disabled || total <= 0} onClick={() => {
+          const duration = Math.min(total, Math.floor(source.duration * 1000) / 1000)
+          onChange([...cues, { assetId: source.assetId, sha256: source.sha256, kind: 'music', startSec: 0,
+            inSec: 0, outSec: duration, gainDb: -18, fadeInSec: Math.min(1, duration / 4), fadeOutSec: Math.min(2, duration / 4) }])
+        }}>加入音轨</button></>}
     </div>)}
     {cues.map((cue, index) => {
       const source = library.find(a => a.assetId === cue.assetId)
@@ -52,7 +63,7 @@ export function WorkingCutSound({ library, cues, total, disabled, plan, onPlan, 
         !Number.isFinite(point.timeSec) || !Number.isFinite(point.gainDb)
         || point.timeSec < cue.startSec || point.timeSec > cue.startSec + duration
         || point.gainDb < -60 || point.gainDb > 6 || (i > 0 && point.timeSec <= (points[i - 1]?.timeSec ?? -1)))
-      const invalid = spaceInvalid || !source || cue.startSec < 0 || cue.inSec < 0
+      const invalid = spaceInvalid || !source || source.usage === 'impulse_response' || cue.startSec < 0 || cue.inSec < 0
         || cue.outSec <= cue.inSec || cue.outSec > source.duration
         || cue.startSec + duration > total + .001 || cue.fadeInSec + cue.fadeOutSec > duration
       const number = (field: 'startSec' | 'inSec' | 'outSec' | 'gainDb' | 'fadeInSec' | 'fadeOutSec', label: string, min: number, max: number) =>
