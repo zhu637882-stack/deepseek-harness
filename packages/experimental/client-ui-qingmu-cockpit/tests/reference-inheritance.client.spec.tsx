@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { ReferenceVideoDraftResponse, ReferenceVideoPreviewRequest, SaveReferenceVideoDraftRequest } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
-import { savedDraft } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
+import { savedDraft, videoReferenceFixture } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
 import { inheritReferenceBindings } from '../src/client/reference-draft-inheritance.ts'
 import { ReferenceVideoWorkspace } from '../src/client/ReferenceVideoWorkspace.tsx'
 
@@ -93,4 +93,15 @@ it('rejects conflicting tokens, asset versions and unavailable source media with
   }
   expect(() => inheritReferenceBindings([], { ...source, mediaTypes: { ...source.mediaTypes, lin: null } })).toThrow('来源已失效')
   expect(() => inheritReferenceBindings([], { ...source, draft: null })).toThrow('没有已保存的引用')
+})
+
+it('inherits video identity and enforces the combined video count', () => {
+  const videoSource = videoReferenceFixture().savedDraft as unknown as ReferenceVideoDraftResponse
+  const merged = inheritReferenceBindings([], videoSource)
+  expect(merged.find(item => item.bindingToken === 'previous')).toMatchObject({ mediaType: 'reference_video' })
+  const existing = Array.from({ length: 5 }, (_, i) => ({
+    bindingToken: `video_${String(i)}`, assetId: `clip_${String(i)}`, assetSha256: 'a'.repeat(64),
+    label: `Clip ${String(i)}`, mediaType: 'reference_video' as const,
+  }))
+  expect(() => inheritReferenceBindings(existing, videoSource)).toThrow('5 段视频')
 })

@@ -22,6 +22,95 @@ exports[`captures and recovers a video frame through the shipped director preset
 }
 `;
 
+exports[`carries a video reference through the native director read, preview, save and workspace restoration 1`] = `
+{
+  "preview": {
+    "directorSource": null,
+    "directorSourceAligned": true,
+    "generationQueued": false,
+    "parameters": {
+      "audio": true,
+      "duration": 8,
+      "prompt_extend": false,
+      "ratio": "16:9",
+      "resolution": "720P",
+      "watermark": false,
+    },
+    "prompt": "图1在图2说：“图1也是原对白，不能改。” 接续视频1",
+    "providerCalls": 0,
+    "references": [
+      {
+        "alias": "图1",
+        "assetId": "asset_lin",
+        "assetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bindingToken": "lin",
+        "label": "林予",
+        "mediaIndex": 0,
+        "mediaType": "reference_image",
+      },
+      {
+        "alias": "音频1",
+        "assetId": "asset_voice",
+        "assetSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "bindingToken": "voice",
+        "label": "林予音色",
+        "mediaIndex": 1,
+        "mediaType": "reference_audio",
+      },
+      {
+        "alias": "图2",
+        "assetId": "asset_cafe",
+        "assetSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "bindingToken": "cafe",
+        "label": "咖啡馆",
+        "mediaIndex": 2,
+        "mediaType": "reference_image",
+      },
+      {
+        "alias": "视频1",
+        "assetId": "asset_previous",
+        "assetSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "bindingToken": "previous",
+        "label": "前镜空间与动作",
+        "mediaIndex": 3,
+        "mediaType": "reference_video",
+      },
+    ],
+    "remainingChecks": [
+      "source_revalidation_at_dispatch",
+      "provider_media_reachability",
+      "generation_authorization",
+    ],
+    "requestBodySha256": "ddc219664fc851892ad49ef8b3ac08455506431007bcb5701ef8d0735fd49249",
+    "saved": false,
+    "schema": "qingmu.native-reference-preview.v1",
+    "scope": {
+      "episodeId": "episode-a",
+      "projectId": "p",
+      "sceneId": "scene-a",
+      "shotId": "f",
+    },
+    "sourceSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  },
+  "saved": {
+    "activeShotChanged": false,
+    "generationQueued": false,
+    "guidance": "Saved to the shot identified by scope in this result. Restore it in the workspace, prepare its reference materials, then preview and quote before generating. Existing unsaved text remains local. No candidate was generated or adopted.",
+    "mediaSelectionChanged": false,
+    "providerCalls": 0,
+    "requestSha256": "c81dd0faa825f36bcf652c6e3fd9c8ad4b21a480556327fff00f4f8854468dc3",
+    "revision": 2,
+    "schema": "qingmu.native-reference-saved.v1",
+    "scope": {
+      "episodeId": "episode-a",
+      "projectId": "p",
+      "sceneId": "scene-a",
+      "shotId": "f",
+    },
+  },
+}
+`;
+
 exports[`compacts a long shipped director session and rereads the complete saved draft without rewriting it 1`] = `
 {
   "checkpoint": "Continue the selected shot by rereading its current director design and saved reference draft.",

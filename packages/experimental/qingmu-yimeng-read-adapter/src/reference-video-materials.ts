@@ -35,22 +35,22 @@ export function normalizeReferenceVideoMaterials(value: unknown, request: Refere
     || v.model !== 'wan3.0-video' || typeof v.configured !== 'boolean' || !code(v.configurationError)
     || (v.configured ? v.configurationError !== null : v.configurationError === null)
     || v.providerCalls !== 0 || v.databaseWrites !== 0 || v.generationQueued !== false
-    || !Array.isArray(v.materials) || v.materials.length < 1 || v.materials.length > 15) throw new Error('materials scope changed')
+    || !Array.isArray(v.materials) || v.materials.length < 1 || v.materials.length > 20) throw new Error('materials scope changed')
   const tokens = new Set<unknown>()
-  let images = 0, audios = 0
+  let images = 0, audios = 0, videos = 0
   for (const item of v.materials) {
     const m = object(item)
     if (Object.keys(m).some(key => !['bindingToken', 'assetId', 'assetSha256', 'mediaType', 'status', 'expiresAt', 'failureCode'].includes(key))
       || !id(m.bindingToken) || tokens.has(m.bindingToken) || !id(m.assetId) || !sha(m.assetSha256)
-      || !['reference_image', 'reference_audio'].includes(String(m.mediaType))
+      || !['reference_image', 'reference_audio', 'reference_video'].includes(String(m.mediaType))
       || !['not_prepared', 'uploading', 'unknown', 'failed', 'expired', 'ready'].includes(String(m.status))
       || !code(m.failureCode)
       || (m.status === 'ready' ? typeof m.expiresAt !== 'number' || !Number.isFinite(m.expiresAt) || m.expiresAt <= 0 : m.expiresAt !== null)
       || (!v.configured && m.status !== 'not_prepared')) throw new Error('invalid material identity or state')
     tokens.add(m.bindingToken)
-    if (m.mediaType === 'reference_image') images++; else audios++
+    if (m.mediaType === 'reference_image') images++; else if (m.mediaType === 'reference_audio') audios++; else videos++
   }
-  if (images < 1 || images > 10 || audios > 5
+  if (images + videos < 1 || images > 10 || audios > 5 || videos > 5
     || v.allReady !== v.materials.every(item => object(item).status === 'ready')) throw new Error('invalid reference readiness')
   return value as ReferenceVideoMaterialsState
 }

@@ -2,7 +2,7 @@
 import type { ReferenceVideoBinding, ReferenceVideoDraftResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 
 export interface ReferenceForInheritance extends ReferenceVideoBinding {
-  readonly mediaType: 'reference_image' | 'reference_audio' | 'unavailable'
+  readonly mediaType: 'reference_image' | 'reference_audio' | 'reference_video' | 'unavailable'
 }
 
 /** Return the merged references or a conflict; never substitute a different version or token. */
@@ -25,8 +25,9 @@ export function inheritReferenceBindings<T extends ReferenceForInheritance>(
     if (!byToken && !byAsset) merged.push({ ...binding, mediaType })
   }
   if (merged.filter(item => item.mediaType === 'reference_image').length > 10
-    || merged.filter(item => item.mediaType === 'reference_audio').length > 5) {
-    throw new Error('合并后超过 10 张图片或 5 段音色，请先精简当前引用。')
+    || merged.filter(item => item.mediaType === 'reference_audio').length > 5
+    || merged.filter(item => item.mediaType === 'reference_video').length > 5) {
+    throw new Error('合并后超过 10 张图片、5 段音色或 5 段视频，请先精简当前引用。')
   }
   return merged
 }

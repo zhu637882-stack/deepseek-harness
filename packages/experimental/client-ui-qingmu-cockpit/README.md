@@ -322,3 +322,5 @@ Video candidates expose a local frame-capture control at the playback position. 
 
 
 Working clips accept an optional static `reframe: {zoom, x, y}`: zoom is 1–4; x/y span the available travel from left/top (0) to right/bottom (1), with .5 centered. Omission preserves the source frame. The delivery UI previews, saves, reloads and resets framing. Local export uses the same even-pixel crop before scaling to film dimensions. Source files, timing and original sound remain unchanged. Magnification retains fewer source pixels; cropping does not prove hidden world geometry is correct.
+
+The reference workspace lists project videos with inline playback, independent 视频 aliases, and explicit reference selection. Video references survive save, reopen and cross-shot inheritance without copying another shot’s text or output parameters. A video can supply the visual reference without an image. Preview and quotation show inspected input duration alongside output duration and total cost; neither action queues generation or adopts a candidate.

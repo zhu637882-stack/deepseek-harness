@@ -15,7 +15,8 @@ const result = {
   body: { input: { prompt: '已编译的原文' }, parameters: { duration: 8, resolution: '720P', ratio: '16:9' } },
   referenceAudioDurationSec: 2, directorSource: null, directorSourceAligned: true,
 } as ReferenceVideoPreviewResponse
-function mount(options?: { initialDurationSec?: number; onRequestDirector?: () => void; directorSource?: { sha256: string; prompt: string }; configured?: boolean; configurationError?: string | null; initialMaterialStatus?: 'not_prepared' | 'unknown' | 'failed' | 'expired' | 'ready' }) {
+function mount(options?: { assets?: ReferenceVideoAsset[]; initialDurationSec?: number; onRequestDirector?: () => void; directorSource?: { sha256: string; prompt: string }; configured?: boolean; configurationError?: string | null; initialMaterialStatus?: 'not_prepared' | 'unknown' | 'failed' | 'expired' | 'ready' }) {
+  const availableAssets = options?.assets ?? assets
   let server: ReferenceVideoDraftResponse = { schema: 'jason.reference-video-draft.v1', directorSource: options?.directorSource ?? null, projectId: 'p', frameId: 'f', frameSha256: 'f'.repeat(64), draft: null, mediaTypes: {}, providerCalls: 0, generationQueued: false }
   let latestMaterialStatus = options?.initialMaterialStatus ?? 'not_prepared'
   const materialState = (status = latestMaterialStatus) => ({
@@ -24,7 +25,7 @@ function mount(options?: { initialDurationSec?: number; onRequestDirector?: () =
     draftRequestSha256: server.draft?.requestSha256 ?? '0'.repeat(64), model: 'wan3.0-video' as const,
     materials: (server.draft?.request.bindings ?? []).map(binding => ({
       bindingToken: binding.bindingToken, assetId: binding.assetId, assetSha256: binding.assetSha256,
-      mediaType: assets.find(asset => asset.assetId === binding.assetId)?.mediaType ?? 'reference_image',
+      mediaType: availableAssets.find(asset => asset.assetId === binding.assetId)?.mediaType ?? 'reference_image',
       status, expiresAt: status === 'ready' ? 1_789_000_000 : null, failureCode: status === 'failed' ? 'temporary_upload_failed' : null,
     })),
     configured: options?.configured ?? true, configurationError: options?.configured === false ? options.configurationError ?? 'credentials_missing' : null,
@@ -46,7 +47,7 @@ function mount(options?: { initialDurationSec?: number; onRequestDirector?: () =
     referenceVideoQuote: vi.fn(async (_request: ReferenceVideoQuoteRequest, _signal?: AbortSignal) => (
       { ...quoteResponse, preview: result }
     )),
-    referenceVideoAssets: vi.fn(async () => ({ projectId: 'p', page: 1, pages: 1, items: assets })),
+    referenceVideoAssets: vi.fn(async () => ({ projectId: 'p', page: 1, pages: 1, items: availableAssets })),
     readLocalReferenceCandidateContent: vi.fn<QingmuYimengPort['readLocalReferenceCandidateContent']>(async () => ({
       schema: 'jason.qingmu-local-reference-candidate-content.v1' as const, assetId: 'asset_lin',
       sha256: 'a'.repeat(64), mimeType: 'image/png', contentBase64: 'aGVsbG8=',
@@ -57,7 +58,7 @@ function mount(options?: { initialDurationSec?: number; onRequestDirector?: () =
       server = { ...server, draft: { revision: request.expectedRevision + 1, frameSha256: request.expectedFrameSha256,
         request: request.request, requestSha256: 'd'.repeat(64), savedAt: '2026-09-09T12:00:00Z' },
       mediaTypes: Object.fromEntries(request.request.bindings.map(b => [
-        b.bindingToken, assets.find(a => a.assetId === b.assetId)?.mediaType ?? null,
+        b.bindingToken, availableAssets.find(a => a.assetId === b.assetId)?.mediaType ?? null,
       ])) }
       return server
     }),
@@ -67,6 +68,27 @@ function mount(options?: { initialDurationSec?: number; onRequestDirector?: () =
   return { port, view, setMaterialStatus: (status: typeof latestMaterialStatus) => { latestMaterialStatus = status } }
 }
 afterEach(cleanup)
+it('plays a source video and restores its independent alias without an image or generation', async () => {
+  const { port, view } = mount({ assets: [{ assetId: 'asset_previous', assetSha256: 'e'.repeat(64),
+    label: '前镜动作', mediaType: 'reference_video', browserUrl: '/media/previous.mp4' }] })
+  await chooseAll()
+  expect(view.container.querySelector('video')?.getAttribute('src')).toBe('/media/previous.mp4')
+  expect(screen.getByRole('button', { name: '预览实际请求' }).hasAttribute('disabled')).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: '插入视频1' }))
+  fireEvent.click(screen.getByRole('button', { name: '保存引用草稿' }))
+  await screen.findByText('已保存草稿版本 1。')
+  const saved = port.saveReferenceVideoDraft.mock.calls[0]?.[0].request
+  expect(saved?.promptParts).toContainEqual({ bindingToken: 'asset_previous' })
+  view.unmount()
+  render(<ReferenceVideoWorkspace projectId="p" frameId="f" initialPrompt="" port={port} />)
+  fireEvent.click(screen.getByText('精确引用 · 导演稿与候选'))
+  await screen.findByText('已载入草稿版本 1。')
+  expect(screen.getByRole('button', { name: '移除描述引用视频1' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '预览实际请求' }))
+  await waitFor(() => { expect(port.referenceVideoPreview).toHaveBeenCalled() })
+  expect(port.referenceVideoPreview.mock.calls[0]?.[0]).toMatchObject(saved!)
+  expect(port.queueReferenceVideo).not.toHaveBeenCalled()
+})
 async function chooseAll() {
   fireEvent.click(screen.getByRole('button', { name: '读取项目素材' }))
   const buttons = await screen.findAllByRole('button', { name: '加入引用' })

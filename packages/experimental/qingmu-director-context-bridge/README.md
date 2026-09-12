@@ -124,3 +124,5 @@ Independent audio cues accept optional `gainPoints`: 2–64 increasing `timeSec`
 
 
 Working clips accept an optional static `reframe: {zoom, x, y}`: zoom is 1–4; x/y span the available travel from left/top (0) to right/bottom (1), with .5 centered. Omission preserves the source frame. The delivery UI previews, saves, reloads and resets framing. Local export uses the same even-pixel crop before scaling to film dimensions. Source files, timing and original sound remain unchanged. Magnification retains fewer source pixels; cropping does not prove hidden world geometry is correct.
+
+The native director can read, preview, save and restore video references through the same versioned draft as the workspace. It identifies references as 视频1, 视频2 and so on, and describes the intended spatial, motion or performance reuse. Source defects require explicit review; the tool does not infer adoption, editing or continuation from merely adding a clip. The draft tool reports provider input limits and input-video billing without adding a separate generation workflow.

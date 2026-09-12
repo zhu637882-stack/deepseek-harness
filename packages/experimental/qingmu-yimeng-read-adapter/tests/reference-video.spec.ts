@@ -2,10 +2,25 @@ import { createHash } from 'node:crypto'
 import { canonical } from './reference-video-fixture.ts'
 import { expect, it, vi } from 'vitest'
 import { createYimengReadHandler } from '../src/index.ts'
-import { request, response } from './reference-video-fixture.ts'
+import { request, response, videoReferenceFixture } from './reference-video-fixture.ts'
 const body = response.body
 
 const signal = () => new AbortController().signal
+
+it('verifies mixed video references and fractional input-plus-output quotation', async () => {
+  const fixture = videoReferenceFixture()
+  let value: unknown = fixture.response
+  const handler = createYimengReadHandler({}, { fetch: async () => Response.json(value), readToken: () => 'fixture' })
+  expect(await handler('referenceVideoPreview', fixture.request, signal())).toEqual({ ok: true, value })
+  for (const seconds of [undefined, 0, 16, Number.NaN]) {
+    value = { ...fixture.response, referenceVideoDurationSec: seconds }
+    expect((await handler('referenceVideoPreview', fixture.request, signal())).ok).toBe(false)
+  }
+  value = fixture.quoteResponse
+  expect(await handler('referenceVideoQuote', fixture.quoteRequest, signal())).toEqual({ ok: true, value })
+  value = { ...fixture.quoteResponse, cost: { ...fixture.quoteResponse.cost, billableSeconds: 8, estimatedCny: '4.800000' } }
+  expect((await handler('referenceVideoQuote', fixture.quoteRequest, signal())).ok).toBe(false)
+})
 
 it('posts the explicit draft through the authenticated read handler without provider calls', async () => {
   const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json(response))
@@ -44,7 +59,7 @@ it('rejects missing credentials, URLs, duplicate tokens and dangling references 
   expect(fetch).not.toHaveBeenCalled()
 })
 
-it('projects only versioned image/audio metadata from the current project asset page', async () => {
+it('projects versioned image/audio/video metadata from the current project asset page', async () => {
   const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json({ page: 2, page_size: 200, pages: 3, items: [
     { id: 'asset_lin', project_id: 'p', asset_type: 'image', role: 'identity', sha256: 'a'.repeat(64), local_path: '/private/secret' },
     { id: 'asset_unhashed', project_id: 'p', asset_type: 'audio', sha256: '' },
@@ -54,6 +69,7 @@ it('projects only versioned image/audio metadata from the current project asset 
   const result = await handler('referenceVideoAssets', { projectId: 'p', page: 2 }, signal())
   expect(result).toEqual({ ok: true, value: { projectId: 'p', page: 2, pages: 3, items: [
     { assetId: 'asset_lin', assetSha256: 'a'.repeat(64), label: '参考图片 201', mediaType: 'reference_image', browserUrl: '' },
+    { assetId: 'asset_video', assetSha256: 'b'.repeat(64), label: '参考视频 202', mediaType: 'reference_video', browserUrl: '' },
   ] } })
   expect(JSON.stringify(result)).not.toContain('/private')
 })

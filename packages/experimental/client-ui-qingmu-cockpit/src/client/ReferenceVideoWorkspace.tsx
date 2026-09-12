@@ -259,7 +259,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
   const choose = (asset: ReferenceVideoAsset) => {
     const limit = asset.mediaType === 'reference_image' ? 10 : 5
     if (chosen.filter(item => item.mediaType === asset.mediaType).length >= limit) {
-      setError(asset.mediaType === 'reference_image' ? '最多选择 10 张图片' : '最多选择 5 段音色')
+      setError(asset.mediaType === 'reference_image' ? '最多选择 10 张图片' : asset.mediaType === 'reference_video' ? '最多选择 5 段视频，合计不超过 15 秒' : '最多选择 5 段音色')
       return
     }
     invalidate(); setChosen(previous => [...previous, { ...asset, bindingToken: asset.assetId }])
@@ -354,8 +354,8 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
     } catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '估算失败，请核对已存草稿') }
     finally { if (!controller.signal.aborted) setBusy(false) }
   }
-  let images = 0; let audios = 0
-  const aliases = new Map(chosen.map((item, index) => [item.bindingToken, item.mediaType === 'reference_image' ? `图${++images}` : item.mediaType === 'reference_audio' ? `音频${++audios}` : `失效素材${index + 1}`]))
+  let images = 0; let audios = 0; let videos = 0
+  const aliases = new Map(chosen.map((item, index) => [item.bindingToken, item.mediaType === 'reference_image' ? `图${++images}` : item.mediaType === 'reference_audio' ? `音频${++audios}` : item.mediaType === 'reference_video' ? `视频${++videos}` : `失效素材${index + 1}`]))
   const savedDraft = draftState?.draft
   const currentMaterials = materials !== undefined && savedDraft !== null && savedDraft !== undefined
     && materials.draftRevision === savedDraft.revision
@@ -383,7 +383,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
         <p>确认引用、写导演意图、核价后登记候选。已选素材和候选不会自动替换。</p>
       </div>}
       <div className={css.sceneStatus} aria-label="当前工作状态">
-        <span>{images} 张图</span><span>{audios} 段音色</span><span>{draftState?.draft ? `草稿 v${draftState.draft.revision}` : '未保存'}</span>
+        <span>{images} 张图</span><span>{audios} 段音色</span><span>{videos} 段视频</span><span>{draftState?.draft ? `草稿 v${draftState.draft.revision}` : '未保存'}</span>
       </div>
     </div>
     <section className={css.draftBar} aria-label="草稿操作">
@@ -400,7 +400,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
           : currentMaterials === undefined
             ? '读取已保存草稿的临时素材状态。保存本地草稿不等于阿里可读。'
             : currentMaterials.configured
-              ? '逐份准备图片或音色；临时素材约 48 小时有效，不会生成视频。'
+              ? '逐份准备图片、音色或参考视频；临时素材约 48 小时有效，不会生成视频。'
               : '阿里临时素材尚未配置；已可访问的参考素材仍可预览。'}</p>
       </div>
       <div className={css.materialActions}>
@@ -452,11 +452,14 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
           </button>
           <small>保留本镜文字与参数，只合并已保存的素材引用。</small>
         </div>}
+        <p className={css.note}>可引用已有镜头的表演、运镜与场面，或描述如何续接、修改。视频参考最多 5 段、合计 15 秒；输入与输出合计不超过 30 秒。先检查源片是否存在需要避免的缺陷。</p>
         {assets.length > 0 && <div className={css.assets} aria-label="项目素材">
           {assets.map(asset => <article key={`${asset.assetId}:${asset.assetSha256}`}>
             {asset.browserUrl && (asset.mediaType === 'reference_image'
               ? <img src={asset.browserUrl} alt={asset.label} loading="lazy" />
-              : <audio src={asset.browserUrl} controls preload="none" aria-label={asset.label} />)}
+              : asset.mediaType === 'reference_video'
+                ? <video src={asset.browserUrl} controls preload="metadata" aria-label={asset.label} />
+                : <audio src={asset.browserUrl} controls preload="none" aria-label={asset.label} />)}
             {!asset.browserUrl && asset.mediaType === 'reference_image' && <div className={css.privateImage}>私有原图</div>}
             <p>{asset.label}</p>
             <div className={css.assetActions}>
@@ -566,10 +569,10 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
           <label><input type="checkbox" checked={parameters.prompt_extend} onChange={(event) => { invalidate(); setParameters({ ...parameters, prompt_extend: event.target.checked }) }} />模型扩写描述</label>
         </div>
         <div className={css.previewActions}>
-          <button type="button" disabled={busy || images === 0 || chosen.some(item => item.mediaType === 'unavailable' || !item.label.trim())} onClick={() => { void preview() }}>{busy ? '核对素材与请求…' : '预览实际请求'}</button>
+          <button type="button" disabled={busy || images + videos === 0 || chosen.some(item => item.mediaType === 'unavailable' || !item.label.trim())} onClick={() => { void preview() }}>{busy ? '核对素材与请求…' : '预览实际请求'}</button>
           <button className={css.primaryAction} type="button" disabled={busy || saving || !draftState?.draft || savedEpoch !== epoch.current || !sourceAccepted} onClick={() => { void quote() }}>估算已存草稿费用</button>
         </div>
-        {quoteResult && <p className={css.quote} role="status">目录价估算 ¥{Number(quoteResult.cost.estimatedCny).toFixed(2)} · 1 个视频 · {quoteResult.cost.billableSeconds} 秒。
+        {quoteResult && <p className={css.quote} role="status">目录价估算 ¥{Number(quoteResult.cost.estimatedCny).toFixed(2)} · 1 个视频 · 计费 {quoteResult.cost.billableSeconds} 秒（输出 {quoteResult.preview.body.parameters.duration} 秒{(quoteResult.preview.referenceVideoDurationSec ?? 0) > 0 && <> + 输入 {quoteResult.preview.referenceVideoDurationSec} 秒</>}）。
           未扣费；未计账户折扣，实际结算以阿里账单为准。{!quoteResult.generationSubmissionEnabled
             && <>当前实例未启用付费生成，估算仅供核对。</>}<a href={quoteResult.cost.sourceUrl} target="_blank" rel="noreferrer">查看价格</a></p>}
       </section>
@@ -581,7 +584,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
         {result && <section className={css.requestPreview} aria-label="阿里请求预览" aria-live="polite">
           <p className={css.kicker}>REQUEST PREVIEW</p><h4>将发送的描述</h4><p className={css.compiled}>{result.body.input.prompt}</p>
           <p>{result.body.parameters.duration} 秒 · {result.body.parameters.resolution} · {result.body.parameters.ratio}
-            {' · '}音色合计 {result.referenceAudioDurationSec} 秒</p>
+            {' · '}音色合计 {result.referenceAudioDurationSec} 秒{(result.referenceVideoDurationSec ?? 0) > 0 && <> · 视频参考合计 {result.referenceVideoDurationSec} 秒</>}</p>
           <p className={css.note}>这是当前核对的请求。生成进度见候选视频区。</p>
           <details><summary>查看引用版本与完整请求</summary><pre>{JSON.stringify(result, null, 2)}</pre></details>
         </section>}

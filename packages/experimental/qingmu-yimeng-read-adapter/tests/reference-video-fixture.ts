@@ -69,3 +69,26 @@ export const runResponse = {
   quoteSha256: quoteResponse.quoteSha256, authorizationCapCny: quoteResponse.cost.estimatedCny,
   candidates: [], providerCalls: 0 as const, selectionChanged: false as const,
 }
+
+/** Mixed references and fractional input duration through the production parsers. */
+export function videoReferenceFixture() {
+  const binding = { bindingToken: 'previous', assetId: 'asset_previous', assetSha256: 'd'.repeat(64), label: '前镜空间与动作' }
+  const nextRequest: ReferenceVideoPreviewRequest = { ...request, bindings: [...request.bindings, binding],
+    promptParts: [...request.promptParts, { text: ' 接续' }, { bindingToken: 'previous' }] }
+  const nextBody = { ...response.body, input: { prompt: response.body.input.prompt + ' 接续视频1',
+    media: [...response.body.input.media, { type: 'reference_video' as const, url: 'oss://dashscope-instant/project/previous.mp4' }] } }
+  const hash = (value: unknown) => createHash('sha256').update(canonical(value)).digest('hex')
+  const nextResponse: ReferenceVideoPreviewResponse = { ...response, body: nextBody,
+    requestBodySha256: hash(nextBody), referenceVideoDurationSec: 2.5,
+    referenceMapping: [...response.referenceMapping, { ...binding, mediaIndex: 3, alias: '视频1', mediaType: 'reference_video' }] }
+  const { projectId: _project, ...draftRequest } = nextRequest
+  const nextSaved = { ...savedDraft, mediaTypes: { ...savedDraft.mediaTypes, previous: 'reference_video' },
+    draft: { ...savedDraft.draft, request: draftRequest, requestSha256: hash(draftRequest) } }
+  const nextQuoteRequest = { ...nextRequest, draftRevision: 1, draftRequestSha256: nextSaved.draft.requestSha256 }
+  const projection = { ...quoteProjection, draftRequestSha256: nextSaved.draft.requestSha256,
+    cost: { ...quoteProjection.cost, billableSeconds: 10.5, estimatedCny: '6.300000' } }
+  const nextQuote: ReferenceVideoQuoteResponse = { ...quoteResponse, ...projection,
+    quoteSha256: hash({ ...projection, cost: { ...projection.cost, billableSeconds: '10.500000' } }), preview: nextResponse }
+  return { request: nextRequest, response: nextResponse, savedDraft: nextSaved,
+    quoteRequest: nextQuoteRequest, quoteResponse: nextQuote }
+}

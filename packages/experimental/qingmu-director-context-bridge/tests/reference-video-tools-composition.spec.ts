@@ -29,7 +29,7 @@ import * as SpillPolicy from '@deepseek-ai/dsh-spill-policy'
 import SpillLocal from '@deepseek-ai/dsh-spill-local'
 import { createYimengReadHandler } from '../../qingmu-yimeng-read-adapter/src/index.ts'
 import { createYimengCommandHandler } from '../../qingmu-yimeng-command-adapter/src/index.ts'
-import { canonical, request, response, savedDraft } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
+import { canonical, request, response, savedDraft, videoReferenceFixture } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
 import { MockAdapter as BaseMockAdapter, textResponse, toolCallResponse, maxTokensResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import * as ModelTools from '../src/model-tools.ts'
 import { readNativeDirectorReadiness } from '../src/native-readiness.ts'
@@ -82,7 +82,8 @@ const saveArgs = { draft: edit, expectedRevision: 1, expectedFrameSha256: savedD
 
 const initialCut = { schema:'qingmu-working-cut-v1',projectId:'p',episodeId:'episode-a',revision:0,shots:[],cuts:[],
   audioLibrary:[{ assetId:'room',sha256:'b'.repeat(64),duration:30,name:'Room.wav',url:'' }],providerCalls:0,humanApprovalChanged:false }
-function writer(extraShots = 0, image?: { sha256: string; url: string }) {
+function writer(extraShots = 0, image?: { sha256: string; url: string }, fixture = { request, response, savedDraft }) {
+  const { request, response, savedDraft } = fixture
   let workingCut: Record<string, unknown> = structuredClone(initialCut)
 
   let saved = structuredClone(savedDraft)
@@ -148,7 +149,7 @@ function writer(extraShots = 0, image?: { sha256: string; url: string }) {
     }
     if (url.pathname.endsWith('/assets')) return Response.json({ page: 1, page_size: 200, pages: 1,
       items: request.bindings.map(item => ({ id: item.assetId, project_id: 'p',
-        asset_type: item.bindingToken === 'voice' ? 'audio' : 'image', role: item.label, sha256: item.assetSha256,
+        asset_type: response.referenceMapping.find(ref => ref.assetId === item.assetId)!.mediaType.replace('reference_', ''), role: item.label, sha256: item.assetSha256,
         ...(image && item.assetId === 'asset_cafe' ? { sha256: image.sha256, public_url: image.url, preview_media_id: 'media_cafe' } : {}) })) })
     if (url.pathname.endsWith('/preview')) {
       if (unpreparedMaterials) return Response.json({ detail: { code: 'reference_video_material_not_prepared' } }, { status: 422 })
@@ -502,6 +503,25 @@ it('recovers an uncertain director save with the identical command and never pos
   expect(h.upstream.director()).toEqual(design)
   expect(h.upstream.fetch.mock.calls.filter(([url]) =>
     new URL(url instanceof Request ? url.url : url).pathname.endsWith('/scene-planning/commands'))).toHaveLength(1)
+})
+
+it('carries a video reference through the native director read, preview, save and workspace restoration', async () => {
+  const fixture = videoReferenceFixture()
+  const draft = { bindings: fixture.request.bindings, promptParts: fixture.request.promptParts, parameters: fixture.request.parameters }
+  const adapter = new MockAdapter([
+    toolCallResponse('read', 'qingmu_read_reference_draft', { page: 1 }),
+    toolCallResponse('preview', 'qingmu_preview_reference_draft', { draft }),
+    toolCallResponse('save', 'qingmu_save_reference_draft', { draft, expectedRevision: 1, expectedFrameSha256: fixture.savedDraft.frameSha256 }),
+    textResponse('已保存源片引用，尚未生成或采用。'),
+  ])
+  const h = await harness(adapter, writer(0, undefined, fixture)); await h.run()
+  for (const call of ['read', 'preview', 'save']) expect(result(h.agent, call).error, result(h.agent, call).text).toBe(false)
+  const restored = await h.upstream.read('referenceVideoDraft', { projectId: 'p', frameId: 'f' }, new AbortController().signal)
+  expect(restored).toMatchObject({ ok: true, value: { draft: { revision: 2, request: draft }, mediaTypes: { previous: 'reference_video' } } })
+  expect(saves(h.upstream)).toHaveLength(1)
+  const preview: unknown = JSON.parse(result(h.agent, 'preview').text)
+  const saved: unknown = JSON.parse(result(h.agent, 'save').text)
+  expect({ preview, saved }).toMatchSnapshot()
 })
 
 it('reads, previews and saves through the shipped YAML preset and real adapters, then exposes the same version to the workspace', async () => {

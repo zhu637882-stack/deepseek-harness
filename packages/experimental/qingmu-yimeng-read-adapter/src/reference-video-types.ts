@@ -46,7 +46,7 @@ export interface ReferenceVideoPreviewResponse {
     readonly input: {
       readonly prompt: string
       readonly media: readonly {
-        readonly type: 'reference_image' | 'reference_audio'
+        readonly type: 'reference_image' | 'reference_audio' | 'reference_video'
         readonly url: string
       }[]
     }
@@ -55,7 +55,7 @@ export interface ReferenceVideoPreviewResponse {
   readonly referenceMapping: readonly (ReferenceVideoBinding & {
     readonly alias: string
     readonly mediaIndex: number
-    readonly mediaType: 'reference_image' | 'reference_audio'
+    readonly mediaType: 'reference_image' | 'reference_audio' | 'reference_video'
   })[]
   readonly requestBodySha256: string
   readonly sourceSha256: string
@@ -65,6 +65,8 @@ export interface ReferenceVideoPreviewResponse {
   readonly submissionReady: false
   readonly remainingChecks: readonly string[]
   readonly referenceAudioDurationSec: number
+  /** Inspected input-video seconds; absent for existing image/voice-only requests. */
+  readonly referenceVideoDurationSec?: number
   readonly directorSource: ReferenceDirectorSource | null
   readonly directorSourceAligned: boolean
 }
@@ -77,7 +79,7 @@ export interface ReferenceVideoAsset {
   readonly assetId: string
   readonly assetSha256: string
   readonly label: string
-  readonly mediaType: 'reference_image' | 'reference_audio'
+  readonly mediaType: 'reference_image' | 'reference_audio' | 'reference_video'
   readonly browserUrl: string
   /** Local candidate bytes remain private and can only be read through this owner scope. */
   readonly localReferenceScope?: {
@@ -110,7 +112,7 @@ export interface ReferenceVideoDraftResponse {
     readonly request: Omit<ReferenceVideoPreviewRequest, 'projectId'>
     readonly savedAt: string
   }
-  readonly mediaTypes: Readonly<Record<string, 'reference_image' | 'reference_audio' | null>>
+  readonly mediaTypes: Readonly<Record<string, 'reference_image' | 'reference_audio' | 'reference_video' | null>>
   readonly providerCalls: 0
   readonly generationQueued: false
 }
@@ -238,7 +240,7 @@ export interface ReferenceVideoMaterialsState {
     readonly bindingToken: string
     readonly assetId: string
     readonly assetSha256: string
-    readonly mediaType: 'reference_image' | 'reference_audio'
+    readonly mediaType: 'reference_image' | 'reference_audio' | 'reference_video'
     readonly status: 'not_prepared' | 'uploading' | 'unknown' | 'failed' | 'expired' | 'ready'
     readonly expiresAt: number | null
     readonly failureCode: string | null

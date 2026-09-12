@@ -64,18 +64,23 @@ export function normalizeReferenceVideoQuote(
   if (!preview.directorSourceAligned || v.sourceSha256 !== preview.sourceSha256) throw new Error('quote source changed')
   const c = object(v.cost, ['provider', 'region', 'currency', 'basis', 'unit', 'unitPriceCny', 'billableSeconds', 'estimatedCny', 'candidateCount', 'maxAttempts', 'accountDiscountApplied', 'pricingSha256', 'pricingCheckedAt', 'sourceUrl'])
   if (c.provider !== 'dashscope' || c.region !== 'cn-beijing' || c.currency !== 'CNY' || c.basis !== 'catalog_list_price' || c.unit !== 'second'
-    || c.billableSeconds !== preview.body.parameters.duration || c.candidateCount !== 1 || c.maxAttempts !== 1
+    || c.billableSeconds !== preview.body.parameters.duration + (preview.referenceVideoDurationSec ?? 0)
+    || c.candidateCount !== 1 || c.maxAttempts !== 1
     || c.accountDiscountApplied !== false
     || c.sourceUrl !== 'https://help.aliyun.com/zh/model-studio/model-pricing') throw new Error('quote basis changed')
   for (const amount of [c.unitPriceCny, c.estimatedCny]) {
     if (typeof amount !== 'string' || !/^[0-9]{1,9}\.[0-9]{6}$/u.test(amount) || Number(amount) <= 0) throw new Error('invalid price')
   }
-  if (Math.round(Number(c.unitPriceCny) * c.billableSeconds * 1e6) !== Math.round(Number(c.estimatedCny) * 1e6)) throw new Error('quote arithmetic changed')
+  const microAmount = Number(c.unitPriceCny) * c.billableSeconds * 1e6
+  const expectedMicro = (preview.referenceVideoDurationSec ?? 0) > 0 ? Math.ceil(microAmount - 1e-6) : Math.round(microAmount)
+  if (expectedMicro !== Math.round(Number(c.estimatedCny) * 1e6)) throw new Error('quote arithmetic changed')
   sha(c.pricingSha256); sha(v.quoteSha256)
   if (typeof c.pricingCheckedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}$/u.test(c.pricingCheckedAt)) throw new Error('pricing date missing')
   const projection = { projectId: v.projectId, frameId: v.frameId, draftRevision: v.draftRevision, draftRequestSha256: v.draftRequestSha256,
     sourceSha256: v.sourceSha256, cost: c, generationSubmissionEnabled: v.generationSubmissionEnabled }
-  if (digest(projection, 'quote.projection') !== v.quoteSha256) throw new Error('quote checksum changed')
+  const hashProjection = (preview.referenceVideoDurationSec ?? 0) > 0
+    ? { ...projection, cost: { ...c, billableSeconds: c.billableSeconds.toFixed(6) } } : projection
+  if (digest(hashProjection, 'quote.projection') !== v.quoteSha256) throw new Error('quote checksum changed')
   return value as ReferenceVideoQuoteResponse
 }
 
@@ -112,7 +117,7 @@ export function normalizeReferenceVideoDraft(
     if (request.frameId !== scope.frameId || digest(body, 'draft.request') !== d.requestSha256
       || typeof d.savedAt !== 'string' || !Number.isFinite(Date.parse(d.savedAt))) throw new Error('draft content mismatch')
     if (Object.keys(types).length !== request.bindings.length || request.bindings.some(b =>
-      !Object.hasOwn(types, b.bindingToken) || ![null, 'reference_image', 'reference_audio'].includes(types[b.bindingToken] as null | string))) throw new Error('draft media kind mismatch')
+      !Object.hasOwn(types, b.bindingToken) || ![null, 'reference_image', 'reference_audio', 'reference_video'].includes(types[b.bindingToken] as null | string))) throw new Error('draft media kind mismatch')
   } else if (Object.keys(types).length) throw new Error('unexpected draft media')
   return value as ReferenceVideoDraftResponse
 }
@@ -125,7 +130,7 @@ export function parseReferenceVideoRequest(value: unknown): ReferenceVideoPrevie
   const v = object(value, ['projectId', 'frameId', 'model', 'bindings', 'promptParts', 'parameters', 'directorSourceSha256'])
   id(v.projectId); id(v.frameId)
   if (v.directorSourceSha256 !== undefined) sha(v.directorSourceSha256)
-  if (v.model !== 'wan3.0-video' || !Array.isArray(v.bindings) || v.bindings.length < 1 || v.bindings.length > 15) throw new Error('invalid references')
+  if (v.model !== 'wan3.0-video' || !Array.isArray(v.bindings) || v.bindings.length < 1 || v.bindings.length > 20) throw new Error('invalid references')
   const tokens = new Set<string>()
   for (const entry of v.bindings) {
     const b = object(entry, ['bindingToken', 'assetId', 'assetSha256', 'label'])
@@ -162,7 +167,7 @@ export function parseReferenceVideoRequest(value: unknown): ReferenceVideoPrevie
 export function normalizeReferenceVideoPreview(
   value: unknown, request: ReferenceVideoPreviewRequest, digest: (value: unknown, label: string) => string,
 ): ReferenceVideoPreviewResponse {
-  const v = object(value, ['schema', 'projectId', 'frameId', 'body', 'referenceMapping', 'requestBodySha256', 'sourceSha256', 'readOnly', 'databaseWrites', 'providerCalls', 'submissionReady', 'remainingChecks', 'referenceAudioDurationSec', 'directorSource', 'directorSourceAligned'])
+  const v = object(value, ['schema', 'projectId', 'frameId', 'body', 'referenceMapping', 'requestBodySha256', 'sourceSha256', 'readOnly', 'databaseWrites', 'providerCalls', 'submissionReady', 'remainingChecks', 'referenceAudioDurationSec', 'referenceVideoDurationSec', 'directorSource', 'directorSourceAligned'])
   if (v.schema !== 'jason.reference-video-request-preview.v1' || v.projectId !== request.projectId || v.frameId !== request.frameId
     || v.readOnly !== true || v.databaseWrites !== 0 || v.providerCalls !== 0 || v.submissionReady !== false) throw new Error('preview scope or effects changed')
   sha(v.requestBodySha256); sha(v.sourceSha256)
@@ -173,15 +178,15 @@ export function normalizeReferenceVideoPreview(
   if (body.model !== request.model || !Array.isArray(v.referenceMapping) || !Array.isArray(input.media)
     || v.referenceMapping.length !== request.bindings.length || input.media.length !== request.bindings.length) throw new Error('reference count changed')
   const aliases = new Map<string, string>()
-  let images = 0; let audios = 0
+  let images = 0; let audios = 0; let videos = 0
   v.referenceMapping.forEach((entry, index) => {
     const mapping = object(entry, ['bindingToken', 'assetId', 'assetSha256', 'label', 'alias', 'mediaType', 'mediaIndex'])
     const binding = request.bindings[index]
     if (!binding) throw new Error('reference count changed')
     if (Object.entries(binding).some(([key, expected]) => mapping[key] !== expected) || mapping.mediaIndex !== index) throw new Error('reference source changed')
     const media = object(input.media instanceof Array ? input.media[index] : undefined, ['type', 'url'])
-    if (mapping.mediaType !== media.type || !['reference_image', 'reference_audio'].includes(String(media.type))) throw new Error('media kind changed')
-    const alias = media.type === 'reference_image' ? `图${++images}` : `音频${++audios}`
+    if (mapping.mediaType !== media.type || !['reference_image', 'reference_audio', 'reference_video'].includes(String(media.type))) throw new Error('media kind changed')
+    const alias = media.type === 'reference_image' ? `图${++images}` : media.type === 'reference_audio' ? `音频${++audios}` : `视频${++videos}`
     if (mapping.alias !== alias || typeof media.url !== 'string') throw new Error('reference alias changed')
     const url = new URL(media.url)
     const temporary = media.url.length <= 2048
@@ -190,7 +195,12 @@ export function normalizeReferenceVideoPreview(
     aliases.set(binding.bindingToken, alias)
   })
   const authored = request.promptParts.map(part => 'text' in part ? part.text : aliases.get(part.bindingToken)).join('')
-  if (input.prompt !== authored || images < 1 || images > 10 || audios > 5
+  const videoDuration = v.referenceVideoDurationSec
+  if (videos > 0
+    ? typeof videoDuration !== 'number' || !Number.isFinite(videoDuration)
+      || videoDuration < videos || videoDuration > 15 || videoDuration + request.parameters.duration > 30
+    : videoDuration !== undefined && videoDuration !== 0) throw new Error('input video duration missing or invalid')
+  if (input.prompt !== authored || images + videos < 1 || images > 10 || audios > 5 || videos > 5
     || digest(body.parameters, 'parameters') !== digest({ ...request.parameters, watermark: false }, 'parameters')
     || digest(v.body, 'reference video body') !== v.requestBodySha256) throw new Error('compiled request changed')
   if (typeof v.referenceAudioDurationSec !== 'number' || !Number.isFinite(v.referenceAudioDurationSec)
@@ -209,7 +219,7 @@ export function parseReferenceVideoAssetsRequest(value: unknown): ReferenceVideo
   return value as ReferenceVideoAssetsRequest
 }
 
-/** Project only hashed image/audio metadata from the existing project asset feed.
+/** Project only hashed image/audio/video metadata from the existing project asset feed.
  * @param value - Authenticated Writer page.
  * @param request - Requested project and page.
  * @param upstream - Configured loopback Writer origin.
@@ -225,7 +235,7 @@ export function normalizeReferenceVideoAssets(
   for (const item of v.items) {
     const a = object(item)
     if (a.project_id !== request.projectId) throw new Error('asset project changed')
-    if (a.asset_type !== 'image' && a.asset_type !== 'audio') continue
+    if (a.asset_type !== 'image' && a.asset_type !== 'audio' && a.asset_type !== 'video') continue
     if (typeof a.sha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(a.sha256)) continue
     id(a.id)
     const candidateUrl = typeof a.public_url === 'string' && typeof a.preview_media_id === 'string'
@@ -240,7 +250,7 @@ export function normalizeReferenceVideoAssets(
         && [...url.searchParams.keys()].sort().join(',') === 'expires,signature') browserUrl = url.href
     } catch { /* Empty or non-capability URLs get a text-only asset card. */ }
     const roleLabels: Record<string, string> = { scene_reference: '场景参考', character_reference: '人物参考', prop_reference: '道具参考', continuity_reference_frame: '镜头画面参考' }
-    const label = roleLabels[typeof a.role === 'string' ? a.role : ''] ?? (a.asset_type === 'audio' ? '参考音色' : '参考图片')
+    const label = roleLabels[typeof a.role === 'string' ? a.role : ''] ?? (a.asset_type === 'audio' ? '参考音色' : a.asset_type === 'video' ? '参考视频' : '参考图片')
     const displayName = typeof a.display_name === 'string' ? a.display_name.trim().slice(0, 128) : ''
     const displayLabel = displayName || `${label} ${String((request.page - 1) * 200 + items.length + 1).padStart(2, '0')}`
     const ownerType = typeof a.owner_type === 'string' ? a.owner_type : ''
@@ -257,7 +267,7 @@ export function normalizeReferenceVideoAssets(
       && a.role === 'local_voice_candidate' && ownerType === 'actor' && /^[A-Za-z0-9_.-]{1,256}$/u.test(ownerId)
       ? { targetId: ownerId } : undefined
     items.push({ assetId: a.id, assetSha256: a.sha256, label: localVoiceScope === undefined ? displayLabel : `${displayLabel} · 音色`,
-      mediaType: a.asset_type === 'image' ? 'reference_image' : 'reference_audio', browserUrl,
+      mediaType: a.asset_type === 'image' ? 'reference_image' : a.asset_type === 'audio' ? 'reference_audio' : 'reference_video', browserUrl,
       ...(localReferenceScope === undefined ? {} : { localReferenceScope }),
       ...(localVoiceScope === undefined ? {} : { localVoiceScope }) })
   }

@@ -14,6 +14,13 @@ const messages = new Map<string, string>([
   ['422:reference_video_local_media_unavailable', '本地参考文件暂时无法读取。请到角色与场景页核对原图，草稿中的引用仍保留。'],
   ['422:reference_video_total_audio_duration_exceeded', '参考音色总时长超过 15 秒，请缩短参考音频后重新核对。'],
   ['422:reference_video_audio_duration_invalid', '每段参考音色需要为 1 至 15 秒的有效音频，请核对这段素材。'],
+  ['422:reference_video_video_format_unsupported', '参考视频需要为 MP4 或 MOV 文件，请核对源片格式。'],
+  ['422:reference_video_video_probe_failed', '无法读取参考视频的画面信息，请检查源片是否完整。'],
+  ['422:reference_video_video_duration_invalid', '每段参考视频需要为 1 至 15 秒，请先截取需要参考的片段。'],
+  ['422:reference_video_video_frame_rate_invalid', '参考视频帧率需要至少 16 帧每秒，请选择符合要求的源片。'],
+  ['422:reference_video_video_dimensions_invalid', '参考视频宽高均需为 240 至 4096 像素，长短边比例不得超过 8。'],
+  ['422:reference_video_total_video_duration_exceeded', '最多引用 5 段视频，总时长不超过 15 秒，请缩短或减少参考片段。'],
+  ['422:reference_video_combined_duration_exceeded', '参考视频总时长与生成时长相加不能超过 30 秒，请调整其中一项。'],
   ['409:reference_video_asset_version_conflict', '参考素材的版本已变化。请重新读取项目素材，核对后替换旧引用。'],
   ['409:reference_video_asset_bytes_conflict', '参考文件与已保存的素材版本不一致。请核对原文件后重新导入，当前草稿仍保留。'],
 ])

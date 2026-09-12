@@ -41,7 +41,7 @@
 .assets { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; max-height:350px; overflow-y:auto; padding:4px; }
 .assets article { min-width:0; border:1px solid var(--workspace-line); padding:9px; border-radius:10px; background:var(--workspace-bg); }
 .assets article:hover { border-color:rgba(215,255,82,.36); }
-.assets img { width:100%; height:74px; object-fit:cover; border-radius:6px; background:#070a0e; }
+.assets img, .assets video { width:100%; height:74px; object-fit:cover; border-radius:6px; background:#070a0e; }
 .assets audio { width: 100%; }
 .assets p { overflow-wrap: anywhere; }
 .bindings { display:grid; gap:10px; max-height:300px; overflow-y:auto; list-style:none; padding:0 4px 0 0; margin:16px 0 0; }
