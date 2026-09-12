@@ -69,7 +69,7 @@ describe('ShootingReviewWorkspace', () => {
     let changingShot = false
     const save = vi.fn()
     const read = vi.fn(() => changingShot ? new Promise(() => {}) : Promise.resolve({
-      projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', canonicalStoryboard: null,
+      projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', scenes: [], canonicalStoryboard: null,
       frameRequirements: [{ id: 'frame_34b3741b1f0a', imagePromptCn: '第一镜已保存要求' }, { id: 'frame-7', imagePromptCn: '第二镜要求' }],
     }))
     const props = { projectName: '落日公路', episodeName: '第 1 集', projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9',
@@ -97,7 +97,7 @@ describe('ShootingReviewWorkspace', () => {
   it('edits action and camera independently and preserves both on reload', async () => {
     localStorage.clear()
     const props = { projectId:'project_cd5eabc7582b', episodeId:'episode_cd4ffe357df9', shotId:'frame_34b3741b1f0a', onCommitted:async () => undefined,
-      port: { readScenePlanning: vi.fn(async () => ({ projectId:'project_cd5eabc7582b', episodeId:'episode_cd4ffe357df9', scriptRevision:1, scriptSha256:'a'.repeat(64), canonicalStoryboard:{ revision:1,sourceHash:'b'.repeat(64),shots:[{ id:'frame_34b3741b1f0a',imagePromptCn:'原始画面',blocking:'双手握盘',cameraAngle:'平视' }] } })), saveScenePlanning:vi.fn(), recoverScenePlanning:vi.fn() } as never }
+      port: { readScenePlanning: vi.fn(async () => ({ projectId:'project_cd5eabc7582b', episodeId:'episode_cd4ffe357df9', scriptRevision:1, scriptSha256:'a'.repeat(64), scenes: [], canonicalStoryboard:{ revision:1,sourceHash:'b'.repeat(64),shots:[{ id:'frame_34b3741b1f0a',imagePromptCn:'原始画面',blocking:'双手握盘',cameraAngle:'平视' }] } })), saveScenePlanning:vi.fn(), recoverScenePlanning:vi.fn() } as never }
     const view = render(<AutomaticFrameRequirementsEditor {...props} />)
     await screen.findByDisplayValue('双手握盘')
     fireEvent.change(screen.getByRole('textbox',{ name:'动作' }),{ target:{ value:'缓慢抬头' } })
@@ -170,7 +170,7 @@ describe('ShootingReviewWorkspace', () => {
       selectTakeVersion: vi.fn(), recoverTakeVersionSelection: vi.fn(),
       readScenePlanning: vi.fn(async () => ({
         projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', scriptRevision: 1, scriptSha256: 'a'.repeat(64),
-        canonicalStoryboard: { revision: 1, sourceHash: 'b'.repeat(64), shots: [{ id: 'frame_34b3741b1f0a', imagePromptCn: '仅首镜已保存要求' }] },
+        scenes: [], canonicalStoryboard: { revision: 1, sourceHash: 'b'.repeat(64), shots: [{ id: 'frame_34b3741b1f0a', imagePromptCn: '仅首镜已保存要求' }] },
       })), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn(),
     } as never
     const view = render(<ShootingReviewWorkspace projectName="落日公路" episodeName="第 1 集" projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" projection={projection}
@@ -202,7 +202,7 @@ describe('ShootingReviewWorkspace', () => {
   it('restores an unsent first-frame draft only for its own shot', async () => {
     localStorage.setItem('qingmu.scene-planning.v1:project_cd5eabc7582b:episode_cd4ffe357df9:automatic-frame:frame_34b3741b1f0a', JSON.stringify({ shotId: 'frame_34b3741b1f0a', imagePromptCn: '本地未提交首帧要求' }))
     render(<AutomaticFrameRequirementsEditor projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" shotId="frame_34b3741b1f0a" onCommitted={async () => undefined} port={{
-      readScenePlanning: vi.fn(async () => ({ projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', scriptRevision: 1, scriptSha256: 'a'.repeat(64), canonicalStoryboard: { revision: 1, sourceHash: 'b'.repeat(64), shots: [{ id: 'frame_34b3741b1f0a', imagePromptCn: '服务端要求' }] } })),
+      readScenePlanning: vi.fn(async () => ({ projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', scriptRevision: 1, scriptSha256: 'a'.repeat(64), scenes: [], canonicalStoryboard: { revision: 1, sourceHash: 'b'.repeat(64), shots: [{ id: 'frame_34b3741b1f0a', imagePromptCn: '服务端要求' }] } })),
       saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn(),
     } as never} />)
     expect(await screen.findByDisplayValue('本地未提交首帧要求')).toBeTruthy()
@@ -210,7 +210,7 @@ describe('ShootingReviewWorkspace', () => {
 
   it('does not display a pending receipt under different draft text', async () => {
     localStorage.setItem('qingmu.scene-planning.v1:project_cd5eabc7582b:episode_cd4ffe357df9:automatic-frame:frame_34b3741b1f0a', JSON.stringify({ shotId: 'frame_34b3741b1f0a', imagePromptCn: '不同外层文案', pending: { projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', idempotencyKey: 'pending-key-123', request: { action: 'edit_automatic', shotId: 'frame_34b3741b1f0a', imagePromptCn: '回执原文', expectedScriptRevision: 1, expectedScriptSha256: 'a'.repeat(64), expectedStoryboardRevision: 1, expectedStoryboardSha256: 'b'.repeat(64) } } }))
-    render(<AutomaticFrameRequirementsEditor projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" shotId="frame_34b3741b1f0a" onCommitted={async () => undefined} port={{ readScenePlanning: vi.fn(async () => ({ projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', scriptRevision: 1, scriptSha256: 'a'.repeat(64), canonicalStoryboard: { revision: 1, sourceHash: 'b'.repeat(64), shots: [{ id: 'frame_34b3741b1f0a', imagePromptCn: '服务端要求' }] } })), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() } as never} />)
+    render(<AutomaticFrameRequirementsEditor projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" shotId="frame_34b3741b1f0a" onCommitted={async () => undefined} port={{ readScenePlanning: vi.fn(async () => ({ projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', scriptRevision: 1, scriptSha256: 'a'.repeat(64), scenes: [], canonicalStoryboard: { revision: 1, sourceHash: 'b'.repeat(64), shots: [{ id: 'frame_34b3741b1f0a', imagePromptCn: '服务端要求' }] } })), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() } as never} />)
     expect(await screen.findByDisplayValue('服务端要求')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '读取同一保存回执' })).toBeNull()
   })
@@ -226,7 +226,7 @@ describe('ShootingReviewWorkspace', () => {
     localStorage.setItem(`qingmu.scene-planning.v1:${scope.projectId}:${scope.episodeId}:automatic-frame:${scope.shotId}`,
       JSON.stringify({ shotId: scope.shotId, imagePromptCn: '损坏的本地草稿', pending: { ...scope, request } }))
     render(<AutomaticFrameRequirementsEditor {...scope} onCommitted={async () => undefined} port={{
-      readScenePlanning: vi.fn(async () => ({ ...scope, canonicalStoryboard: null,
+      readScenePlanning: vi.fn(async () => ({ ...scope, scenes: [], canonicalStoryboard: null,
         frameRequirements: [{ id: scope.shotId, imagePromptCn: '服务器已保存的画面' }] })),
       saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn(),
     } as never} />)
@@ -368,7 +368,7 @@ it('saves missing imported frame requirements and recovers only the original int
   localStorage.clear()
   const scope = { projectId: 'project-planned', episodeId: 'episode-planned', shotId: 'frame-planned' }
   const original = { ...scope, schema: 'jason.qingmu-scene-planning-state.v1', scriptRevision: 1, scriptSha256: 'a'.repeat(64),
-    storyboard: { id: 'revision-1', version: 1, sourceHash: 'b'.repeat(64), status: 'Ready' }, canonicalStoryboard: null,
+    storyboard: { id: 'revision-1', version: 1, sourceHash: 'b'.repeat(64), status: 'Ready' }, scenes: [], canonicalStoryboard: null,
     frameRequirements: [{ id: scope.shotId, frameNo: 1, title: '相遇', imagePromptCn: '', blocking: '', cameraAngle: '' }] }
   const onStatus = vi.fn()
   const read = vi.fn().mockResolvedValue(original)
@@ -412,7 +412,7 @@ it.each(['current', 'script-drift', 'scope-drift', 'read-failed', 'unknown-recei
   'recovers a rejected requirements intent safely: %s', async (outcome) => {
     localStorage.clear()
     const scope = { projectId: 'project-conflict', episodeId: 'episode-conflict', shotId: 'frame-conflict' }
-    const original = { ...scope, scriptRevision: 1, scriptSha256: 'a'.repeat(64), canonicalStoryboard: null,
+    const original = { ...scope, scriptRevision: 1, scriptSha256: 'a'.repeat(64), scenes: [], canonicalStoryboard: null,
       storyboard: { id: 'revision-1', version: 1, sourceHash: 'b'.repeat(64), status: 'Ready' },
       frameRequirements: [{ id: scope.shotId, frameNo: 1, title: '相遇', imagePromptCn: '原画面', blocking: '', cameraAngle: '' }] }
     const latest = { ...original, storyboard: { ...original.storyboard, version: 2, sourceHash: 'c'.repeat(64) },
@@ -457,7 +457,7 @@ it.each(['current', 'script-drift', 'scope-drift', 'read-failed', 'unknown-recei
 )
 
 it('waits for the shooting scope before reading scene planning', async () => {
-  const readScenePlanning = vi.fn(async () => ({ frameRequirements: [], canonicalStoryboard: null }))
+  const readScenePlanning = vi.fn(async () => ({ frameRequirements: [], scenes: [], canonicalStoryboard: null }))
   const props = { projection: undefined, projectName: '', episodeName: '', selectedShotId: '', onSelectShotId: vi.fn(), onNavigate: vi.fn(),
     directorAssistant: null, t: (key: string) => key, port: { ...portFixture, readScenePlanning } as never }
   const view = render(<ShootingReviewWorkspace {...props} projectId="" episodeId="" />)

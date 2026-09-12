@@ -178,6 +178,8 @@ export function AutomaticFrameRequirementsEditor({
   if (load === 'failed') return <div role="alert"><p>{error}</p>{onReturnToStoryboard && <button type="button" onClick={onReturnToStoryboard}>返回分镜核对要求</button>}</div>
   if (state === null || draft === null) return <p role="status">正在读取本镜首帧要求…</p>
   const saved = requirements(state)?.find(shot => shot.id === shotId)
+  const plannedVisual = (state.scenePlans ?? (state.planning ? [state.planning] : []))
+    .flatMap(plan => plan.shots).find(shot => shot.id === shotId)?.visual
   function savedField(field: ShootingField): string { return requirements(state)?.find(shot => shot.id === shotId)?.[field] ?? '' }
   const continuity = continuityFields(saved)
   const dirty = saved !== undefined && (draft.imagePromptCn !== saved.imagePromptCn || shootingFields.some(field => (draft[field] ?? '') !== savedField(field))
@@ -203,6 +205,13 @@ export function AutomaticFrameRequirementsEditor({
     <p>摄影机运动描述镜头如何移动；景别、焦点与切点描述观众何时看什么。保存后随本镜进入参考视频预览与生成请求。</p>
     <label>画面要求<textarea aria-label="画面要求" rows={7} maxLength={20000} value={draft.imagePromptCn}
       disabled={busy || draft.pending !== undefined} onChange={event => update({ ...draft, imagePromptCn: event.target.value })} /></label>
+    {plannedVisual?.trim() && plannedVisual !== draft.imagePromptCn && <details>
+      <summary>查看分镜已保存的首帧描述</summary>
+      <p>{plannedVisual}</p>
+      <button type="button" disabled={busy || draft.pending !== undefined}
+        onClick={() => { update({ ...draft, imagePromptCn: plannedVisual }) }}>采用这段首帧描述</button>
+      <p>采用后请核对当前要求并保存，已有素材保持不变。</p>
+    </details>}
     <p role="status">{draft.pending ? '正在核实上次保存，草稿已保留。' : dirty ? '有未保存修改 · 已保留在此浏览器' : saved?.imagePromptCn.trim() ? '当前要求已保存' : '补充本镜的首帧画面要求并保存，随后可预检生成。'}</p>
     {error && <p role="alert">{error}</p>}
     {(dirty || busy) && !draft.pending && <button type="button"
