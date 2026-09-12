@@ -201,3 +201,5 @@ Comment timecodes use the nearest millisecond; original media duration and SHA r
 Signed media previews accept an absolute URL or a Writer-relative browser path and resolve only to the configured loopback Writer. Unsigned paths and mismatched media identities remain unavailable. A local browser preview does not require a public address for Provider access.
 
 The project asset catalog preserves private preview scopes for copied image and voice references. Media with a copied provider binding uses the existing signed preview route; private uploads keep the authenticated content-read route. See the [project library Agent Note](../../../.agents/notes/implemented/feature/2026-09-11-qingmu-project-library-management.md).
+
+The reference library includes locally captured video frames as images. Their asset records retain the parent video and requested and actual frame times; listing an image does not approve it for a shot.

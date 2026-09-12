@@ -120,3 +120,5 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 完整导演读取还按分镜顺序返回 episodeContinuity：镜头身份、标题及已保存的连续性值。这些是创作设计，不是画面观察。导演结合剧本对照相邻状态，包括合理的剪切和时间跳跃；保存仍只作用于当前选择镜头。
 
 独立音轨支持可选 `gainPoints`：2–64 个在音轨范围内递增的成片时间 `timeSec`，以及 −60 至 6 的相对音量 `gainDb`。相邻点按 dB 平滑变化，首末点之外保持对应值；空列表保留固定音量。网页和原生导演保存同一组变化点，本地 FFmpeg 按成片时间执行。对白避让由导演安排时间，不自动检测说话，也不分离原片混合声音。
+
+`qingmu_read_reference_video_candidates` 读取当前项目来源镜头的候选 ID 与哈希。`qingmu_capture_reference_video_frame` 使用与浏览器相同的操作保存或恢复本地视频画面。导演可查看保存的图片并通过已有稿件工具引用；保存本身不批准媒体，也不调用生成模型。

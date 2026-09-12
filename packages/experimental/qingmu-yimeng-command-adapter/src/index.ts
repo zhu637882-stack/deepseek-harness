@@ -1,4 +1,5 @@
 import { prepareReferenceVideoReview } from './reference-video-review.ts'
+import { prepareReferenceVideoFrame } from './reference-video-frame.ts'
 /** Loopback-only Host boundary for explicit Yimeng ChangeSet commands. */
 
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
@@ -5860,6 +5861,11 @@ export function createYimengCommandHandler(
         path = prepared.path
         requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
         normalize = prepared.normalize
+      } else if (['captureReferenceVideoFrame', 'readReferenceVideoFrame'].includes(endpoint)) {
+        const prepared = prepareReferenceVideoFrame(endpoint, payload, stageArtifactHelpers)
+        path = prepared.path
+        requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
+        normalize = prepared.normalize
       } else if (['registerReferenceVideoCandidateForReview', 'readReferenceVideoCandidateRegistration'].includes(endpoint)) {
         const prepared = prepareReferenceVideoReview(endpoint, payload, stageArtifactHelpers)
         path = prepared.path
@@ -6298,7 +6304,7 @@ export function createYimengCommandHandler(
         `${baseUrl}${path}`,
         token,
         requestInit,
-        timeoutMs,
+        endpoint === 'captureReferenceVideoFrame' ? Math.max(timeoutMs, 75000) : timeoutMs,
         signal,
         requiresCredentialReflectionGuard,
       )

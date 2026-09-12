@@ -196,3 +196,5 @@ Ready PromptIR 的 `firstFrameQuote` 还返回一次服务端重算、按当前�
 签名媒体预览接受完整 URL 或 Writer 相对浏览器路径，仅解析到配置的本地 Writer。无签名路径和不匹配的媒体身份不可用于预览。本地浏览器预览不需要供 Provider 访问的公网地址。
 
 项目素材目录为复制后的图片和音色保留私密预览范围。已复制供应商媒体关联的素材使用既有签名预览通道；本地上传素材仍使用认证内容读取通道。详见[项目库 Agent Note](../../../.agents/notes/implemented/feature/2026-09-11-qingmu-project-library-management.zh.md)。
+
+参考素材库将本地保存的视频画面列为图片。素材记录保留父视频、请求时间和实际帧时间；图片出现在素材库中不代表它已通过镜头审核。

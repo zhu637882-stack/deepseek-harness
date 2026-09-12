@@ -9,6 +9,7 @@ import type {
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
 import css from './ReferenceVideoWorkspace.module.css'
+import { ReferenceVideoPlayer } from './ReferenceVideoPlayer.tsx'
 
 const statuses: Record<string, string> = {
   Reserved: '等待排队', DispatchPending: '等待生成', Submitted: '请求已发出', Running: '正在生成',
@@ -21,9 +22,10 @@ interface Props {
   readonly frameId: string
   readonly quote?: ReferenceVideoQuoteResponse | undefined
   readonly onOpenShooting?: ((frameId: string) => void) | undefined
+  readonly onReferenceSaved?: (() => void) | undefined
   readonly port: Pick<QingmuYimengPort,
     'referenceVideoRuns' | 'queueReferenceVideo'> & Partial<Pick<QingmuYimengPort,
-    'readReferenceVideoCandidateRegistration' | 'registerReferenceVideoCandidateForReview'>>
+    'readReferenceVideoCandidateRegistration' | 'registerReferenceVideoCandidateForReview' | 'captureReferenceVideoFrame' | 'readReferenceVideoFrame'>>
 }
 
 interface CandidateRegistrationProps {
@@ -174,7 +176,7 @@ function CandidateReviewRegistration({ projectId, frameId, run, candidate, port,
  * @param props - Shot, current saved quote and authenticated run ports.
  * @returns Generation control and recent candidate players.
  */
-export function ReferenceVideoRuns({ projectId, frameId, quote, port, onOpenShooting }: Props) {
+export function ReferenceVideoRuns({ projectId, frameId, quote, port, onOpenShooting, onReferenceSaved }: Props) {
   const key = `qingmu.reference-submit:${projectId}:${frameId}`
   const [runs, setRuns] = useState<readonly ReferenceVideoRun[]>([])
   const [pending, setPending] = useState<QueueReferenceVideoRequest>()
@@ -304,8 +306,9 @@ export function ReferenceVideoRuns({ projectId, frameId, quote, port, onOpenShoo
       <p className={css.taskMeta}>任务 {run.taskId}</p>
       {run.errorCode && <p>任务需要处理：{run.errorCode}。不会自动重新生成。</p>}
       {run.candidates.map(candidate => <div key={candidate.assetId}>
-        {candidate.browserUrl ? <video src={candidate.browserUrl} controls preload="none"
-          aria-label={`草稿版本 ${run.draftRevision} 候选视频`} />
+        {candidate.browserUrl ? <ReferenceVideoPlayer
+          key={JSON.stringify([projectId, frameId, run.runId, candidate.assetId, candidate.assetSha256])}
+          projectId={projectId} frameId={frameId} run={run} candidate={candidate} port={port} onReferenceSaved={onReferenceSaved} />
           : <p>视频地址暂不可用，请刷新状态。</p>}
         <p className={css.reviewNote}>请审看人物、服装、场景与声音。确认采用仍由你决定。</p>
         {run.kernelStatus === 'Succeeded' && run.publicStatus !== 'quarantined'

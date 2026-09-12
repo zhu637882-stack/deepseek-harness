@@ -25,7 +25,7 @@ export interface ReferenceVideoWorkspaceProps {
   readonly onUnsavedChange?: (dirty: boolean) => void
   readonly onOpenShooting?: ((frameId: string) => void) | undefined
   readonly onRequestDirector?: (() => void) | undefined
-  readonly port: Pick<QingmuYimengPort, 'referenceVideoAssets' | 'readLocalReferenceCandidateContent' | 'referenceVideoPreview' | 'referenceVideoDraft' | 'saveReferenceVideoDraft' | 'referenceVideoQuote' | 'referenceVideoRuns' | 'queueReferenceVideo'> & PrivateReferencePreviewPort & Partial<Pick<QingmuYimengPort, 'readReferenceVideoMaterials' | 'prepareReferenceVideoMaterial' | 'readReferenceVideoCandidateRegistration' | 'registerReferenceVideoCandidateForReview'>>
+  readonly port: Pick<QingmuYimengPort, 'referenceVideoAssets' | 'readLocalReferenceCandidateContent' | 'referenceVideoPreview' | 'referenceVideoDraft' | 'saveReferenceVideoDraft' | 'referenceVideoQuote' | 'referenceVideoRuns' | 'queueReferenceVideo'> & PrivateReferencePreviewPort & Partial<Pick<QingmuYimengPort, 'readReferenceVideoMaterials' | 'prepareReferenceVideoMaterial' | 'readReferenceVideoCandidateRegistration' | 'registerReferenceVideoCandidateForReview' | 'captureReferenceVideoFrame' | 'readReferenceVideoFrame'>>
 }
 
 type Chosen = Omit<ReferenceVideoAsset, 'mediaType'> & { readonly bindingToken: string; readonly mediaType: ReferenceVideoAsset['mediaType'] | 'unavailable' }
@@ -237,14 +237,14 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
       if (!controller.signal.aborted) setError(`保存未确认，当前内容仍保留。${cause instanceof Error ? cause.message : '请重试或重新读取草稿。'}`)
     } finally { if (!controller.signal.aborted) setSaving(false) }
   }
-  const loadAssets = async () => {
+  const loadAssets = async (refresh = false) => {
     if (loading) return
     const controller = new AbortController(); assetsAbort.current = controller
     setLoading(true); setError('')
     try {
-      const next = await port.referenceVideoAssets({ projectId, page: page + 1 }, controller.signal)
+      const next = await port.referenceVideoAssets({ projectId, page: refresh ? 1 : page + 1 }, controller.signal)
       if (controller.signal.aborted) return
-      setAssets(previous => [...previous, ...next.items.filter(item => !previous.some(old =>
+      setAssets(previous => refresh ? next.items : [...previous, ...next.items.filter(item => !previous.some(old =>
         old.assetId === item.assetId && old.assetSha256 === item.assetSha256))])
       setChosen(previous => previous.map((chosenAsset) => {
         const catalogAsset = next.items.find(asset => asset.assetId === chosenAsset.assetId
@@ -438,6 +438,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
           <button type="button" disabled={loading || (page > 0 && page >= pages)} onClick={() => { void loadAssets() }}>
             {loading ? '读取素材…' : page === 0 ? '读取项目素材' : page < pages ? '更多素材' : '素材已读完'}
           </button>
+          {page > 0 && <button type="button" disabled={loading} onClick={() => { void loadAssets(true) }}>刷新素材</button>}
         </div>
         {referenceSources && referenceSources.length > 0 && <div className={css.inheritReferences}>
           <label>沿用本场引用<select aria-label="引用来源镜头" value={inheritFrom} disabled={inheriting || saving}
@@ -585,7 +586,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
           <details><summary>查看引用版本与完整请求</summary><pre>{JSON.stringify(result, null, 2)}</pre></details>
         </section>}
         <ReferenceVideoRuns projectId={projectId} frameId={frameId} quote={quoteResult}
-          port={port} onOpenShooting={onOpenShooting} />
+          port={port} onOpenShooting={onOpenShooting} onReferenceSaved={() => { void loadAssets(true) }} />
       </aside>
     </div>
     {error && <p role="alert">{error}</p>}

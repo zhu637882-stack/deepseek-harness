@@ -6,6 +6,7 @@ import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type {
   ReferenceVideoAssetsResponse, ReferenceVideoDraftResponse,
   ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse,
+  ReferenceVideoRunsResponse,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import { parseReferenceVideoRequest } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter'
@@ -59,6 +60,51 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
     schema: { type: 'json' as const },
     render: (_args: unknown, value: JsonValue) => [{ type: 'text' as const, text: JSON.stringify(value) }],
   }
+  ctx.tools.register(defineTool({
+    name: 'qingmu_read_reference_video_candidates',
+    description: 'Read generated candidates for a source shot in the current project before capturing an actual video frame. Use a known shot ID from the project. No generation or selection.',
+    parameters: { sourceFrameId: { type: 'string', required: true, description: 'Source shot ID in this project; may be the previous shot.' } }, output,
+    presentCall: () => ({ card: 'generic', kind: 'read', title: '读取镜头视频来源' }),
+    async execute(args, exec) {
+      exactKeys(args, ['sourceFrameId'])
+      const current = await ports.readBoundContext(exec)
+      const read = await ctx.qingmuYimengRead('referenceVideoRuns', {
+        projectId: current.state.binding.scope.projectId, frameId: args.sourceFrameId,
+      }, exec.signal)
+      assertCurrent(current, exec)
+      if (!read.ok) throw new Error(`Video candidates unavailable: ${read.error.message}`)
+      const runs = read.value as ReferenceVideoRunsResponse
+      return ports.boundedJson({ projectId: runs.projectId, frameId: runs.frameId,
+        items: runs.items.map(run => ({ runId: run.runId, draftRevision: run.draftRevision,
+          kernelStatus: run.kernelStatus, publicStatus: run.publicStatus,
+          candidates: run.candidates.map(({ assetId, assetSha256 }) => ({ assetId, assetSha256 })) })),
+        providerCalls: 0, selectionChanged: false })
+    },
+  }))
+  ctx.tools.register(defineTool({
+    name: 'qingmu_capture_reference_video_frame',
+    description: 'Capture one actual frame from an owned generated video as a reusable project image, or read whether that exact capture already exists. Capture uses the first decoded frame at or after timestampMs and reports its actual time. Use operation=read after an uncertain response. It makes no model call and does not select or approve media. Inspect the saved image before deriving continuity; use its exact ID/SHA in subsequent draft references only when it fits the director design.',
+    parameters: {
+      sourceFrameId: { type: 'string', required: true, description: 'Source shot in the current project.' },
+      runId: { type: 'string', required: true, description: 'Exact source run from candidate read.' },
+      assetId: { type: 'string', required: true, description: 'Exact source candidate video ID.' },
+      expectedAssetSha256: { type: 'string', required: true, description: 'Source video SHA256.' },
+      timestampMs: { type: 'integer', required: true, description: 'Nonnegative playback position in milliseconds, within the video.' },
+      operation: { type: 'string', enum: ['capture', 'read'], required: true, description: 'Save the frame or recover an existing result.' },
+    }, output,
+    presentCall: args => ({ card: 'generic', kind: args.operation === 'read' ? 'read' : 'edit', title: '视频画面存为参考' }),
+    async execute(args, exec) {
+      exactKeys(args, ['sourceFrameId', 'runId', 'assetId', 'expectedAssetSha256', 'timestampMs', 'operation'])
+      const current = await ports.readBoundContext(exec)
+      assertCurrent(current, exec)
+      const result = await ctx.qingmuYimengCommand(args.operation === 'read' ? 'readReferenceVideoFrame' : 'captureReferenceVideoFrame', {
+        projectId: current.state.binding.scope.projectId, frameId: args.sourceFrameId,
+        runId: args.runId, assetId: args.assetId, expectedAssetSha256: args.expectedAssetSha256, timestampMs: args.timestampMs,
+      }, exec.signal)
+      if (!result.ok) throw new Error(`Frame capture result unconfirmed; recover the same source and timestamp: ${result.error.message}`)
+      return ports.boundedJson(result.value)
+    },
+  }))
   ctx.tools.register(defineTool({
     name: 'qingmu_view_reference_image',
     description: 'Inspect one image from the current project asset catalog using its exact page, asset ID and SHA from qingmu_read_reference_draft. Image-capable directors receive the image; text-only directors receive an attributed visual-model report. Check relevant scene, costume, prop structure or composition before visual decisions. Reports may be mistaken: distinguish observations, inference and unresolved details. No adoption or media generation. A visual-model call consumes normal model allowance; unchanged successful observations are reused.',

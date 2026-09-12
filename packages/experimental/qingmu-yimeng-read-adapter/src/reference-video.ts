@@ -239,7 +239,7 @@ export function normalizeReferenceVideoAssets(
         && /^\d+$/u.test(url.searchParams.get('expires') ?? '') && !url.username && !url.password && !url.hash
         && [...url.searchParams.keys()].sort().join(',') === 'expires,signature') browserUrl = url.href
     } catch { /* Empty or non-capability URLs get a text-only asset card. */ }
-    const roleLabels: Record<string, string> = { scene_reference: '场景参考', character_reference: '人物参考', prop_reference: '道具参考' }
+    const roleLabels: Record<string, string> = { scene_reference: '场景参考', character_reference: '人物参考', prop_reference: '道具参考', continuity_reference_frame: '镜头画面参考' }
     const label = roleLabels[typeof a.role === 'string' ? a.role : ''] ?? (a.asset_type === 'audio' ? '参考音色' : '参考图片')
     const displayName = typeof a.display_name === 'string' ? a.display_name.trim().slice(0, 128) : ''
     const displayLabel = displayName || `${label} ${String((request.page - 1) * 200 + items.length + 1).padStart(2, '0')}`

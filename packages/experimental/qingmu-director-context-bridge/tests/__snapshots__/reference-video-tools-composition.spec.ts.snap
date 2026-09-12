@@ -1,5 +1,27 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`captures and recovers a video frame through the shipped director preset with current-project scope 1`] = `
+{
+  "assetId": "asset_video",
+  "assetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "episodeId": "episode-a",
+  "frameId": "previous",
+  "image": {
+    "actualTimestampMs": 1033.333,
+    "assetId": "asset_vframe_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "assetSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "height": 1080,
+    "width": 1920,
+  },
+  "projectId": "p",
+  "providerCalls": 0,
+  "requestedTimestampMs": 1001,
+  "runId": "refvideo_previous",
+  "schema": "qingmu.reference-video-frame.v1",
+  "selectionChanged": false,
+}
+`;
+
 exports[`delivers catalog image pixels through the shipped director preset and persists reconstructible attachments 1`] = `
 [
   {

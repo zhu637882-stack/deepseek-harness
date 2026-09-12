@@ -268,6 +268,32 @@ export interface ReferenceVideoCandidateRegistrationRequest {
   readonly assetId: string
   readonly expectedAssetSha256: string
 }
+
+/** Playback position and exact video bytes to capture locally. */
+export interface ReferenceVideoFrameRequest extends ReferenceVideoCandidateRegistrationRequest {
+  readonly timestampMs: number
+}
+
+/** Recoverable image reference; capture does not select or approve the source. */
+export interface ReferenceVideoFrameReceipt {
+  readonly schema: 'qingmu.reference-video-frame.v1'
+  readonly projectId: string
+  readonly episodeId: string
+  readonly frameId: string
+  readonly runId: string
+  readonly assetId: string
+  readonly assetSha256: string
+  readonly requestedTimestampMs: number
+  readonly image: null | {
+    readonly assetId: string
+    readonly assetSha256: string
+    readonly width: number
+    readonly height: number
+    readonly actualTimestampMs: number
+  }
+  readonly providerCalls: 0
+  readonly selectionChanged: false
+}
 /** Registration retains source lineage; it grants no selection or approval. */
 export interface ReferenceVideoCandidateRegistration {
   readonly schema: 'jason.reference-video-review-registration.v1'

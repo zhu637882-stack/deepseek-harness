@@ -609,3 +609,34 @@ it('saves scene-spanning sound through the shipped director preset, real loop an
   expect(JSON.stringify(adapter.requests.at(-1))).toContain('Room reflections and street ambience')
   expect(JSON.stringify(h.upstream.fetch.mock.calls)).not.toContain('/working-cut/render')
 })
+
+it('captures and recovers a video frame through the shipped director preset with current-project scope', async () => {
+  const upstream = writer()
+  const original = upstream.fetch.getMockImplementation()!
+  const receipt = { schema: 'qingmu.reference-video-frame.v1', projectId: 'p', episodeId: 'episode-a', frameId: 'previous',
+    runId: 'refvideo_previous', assetId: 'asset_video', assetSha256: 'a'.repeat(64), requestedTimestampMs: 1001,
+    image: { assetId: `asset_vframe_${'b'.repeat(32)}`, assetSha256: 'c'.repeat(64), width: 1920, height: 1080, actualTimestampMs: 1033.333 },
+    providerCalls: 0, selectionChanged: false }
+  upstream.fetch.mockImplementation(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input)
+    if (url.pathname.endsWith('/reference-frame')) return Response.json(receipt)
+    return original(input, init)
+  })
+  const args = { sourceFrameId: 'previous', runId: 'refvideo_previous', assetId: 'asset_video', expectedAssetSha256: 'a'.repeat(64), timestampMs: 1001 }
+  const adapter = new MockAdapter([
+    toolCallResponse('capture-frame', 'qingmu_capture_reference_video_frame', { ...args, operation: 'capture' }),
+    toolCallResponse('read-frame', 'qingmu_capture_reference_video_frame', { ...args, operation: 'read' }),
+    textResponse('画面已保存在项目素材，后续引用前先核对画面。'),
+  ])
+  const h = await harness(adapter, upstream); await h.run()
+  const capture = result(h.agent, 'capture-frame'), recover = result(h.agent, 'read-frame')
+  expect(capture.error, capture.text).toBe(false)
+  expect(recover.error, recover.text).toBe(false)
+  expect(JSON.parse(capture.text)).toEqual(receipt)
+  expect(JSON.parse(recover.text)).toMatchSnapshot()
+  const calls = upstream.fetch.mock.calls.filter(([url]) => new URL(url instanceof Request ? url.url : url).pathname.endsWith('/reference-frame'))
+  expect(calls.map(([, init]) => init?.method)).toEqual(['POST', 'GET'])
+  expect(String(calls[0]?.[0])).toContain('/projects/p/reference-video/drafts/previous/')
+  await h.presets.dispose()
+  expect(h.ctx.tools.get('qingmu_capture_reference_video_frame', scopeOf(h.agent.ctx))).toBeUndefined()
+})
