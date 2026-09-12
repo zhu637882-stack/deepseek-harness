@@ -203,7 +203,10 @@ describe('Qingmu model tools through a real preset and agent loop', () => {
         coordinateFrame: 'x 向窗墙，y 向后墙；中心为原点，使用相对单位。',
         basis: '当前导演排练布局，位置是设计值，未从图片测量。',
         camera: { position: [4, 0], lookAt: [0, 0], horizontalFovDeg: 60 },
-        landmarks: [{ id: 'chair', label: '坐面朝窗墙的座椅', position: [0, 0], frontDirection: [1, 0] }],
+        landmarks: [
+          { id: 'chair', label: '坐面朝窗墙的座椅', position: [0, 0], frontDirection: [1, 0] },
+          { id: 'bench', label: '侧向座椅', position: [0, 0], frontDirection: [0, 1] },
+        ],
       } }), textResponse('新机位看到座椅正面，保留布局。尚未保存或生成。'),
     ])
     const ctx = await harness(adapter)
@@ -212,6 +215,7 @@ describe('Qingmu model tools through a real preset and agent loop', () => {
     await waitForIdle(ctx, handle.agent)
     const result = JSON.parse(resultText(handle.agent.session.events, 'qingmu_check_camera_geometry'))
     expect(result.relations[0]).toMatchObject({ facing: 'front_toward_camera', lateral: 0, depth: 4 })
+    expect(result.relations[1]).toMatchObject({ facing: 'edge_on', frontDot: 0 })
     expect(result).toMatchObject({ providerCalls: 0, businessStateChanged: false })
     expect(JSON.stringify(adapter.requests[1]?.messages)).toContain('front_toward_camera')
     expect(result).toMatchSnapshot('camera geometry through shipped preset')

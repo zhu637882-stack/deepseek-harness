@@ -18,6 +18,8 @@ A second vision model was tried and still made the orientation error. Repeated i
 
 Exercise opposite viewpoints, translation/rotation/scale invariance, behind-camera and field-of-view classification, edge-on and unknown fronts, and invalid inputs. The shipped YAML preset/native loop test records the real tool output and supplies it to the following model request; registration disposal is checked. Refresh older example fixture wiring for the already-shipped compaction plugin.
 
+The live director trial exposed signed zero in edge-on dot products. Canonicalize zero in input coordinates and rounded results so the session can preserve the complete result as lossless JSON. Replay all five valid failed layouts locally, and cover edge-on results in the assembled native loop plus fractional positions through the session snapshot function. The invalid first trial layout remains rejected.
+
 ## Risks
 
 Coordinates are authored assumptions, not measured geometry. The tool does not determine height, occlusion, hidden surfaces or model obedience; those still require image review. Director choices and screenplay exceptions remain authoritative.

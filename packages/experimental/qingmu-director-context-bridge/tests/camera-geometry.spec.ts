@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { snapshotJsonValue } from '@deepseek-ai/dsh-session'
 import { checkCameraGeometry } from '../src/camera-geometry.ts'
 
 export const layout = {
@@ -54,6 +55,21 @@ describe('camera relations keep one set while changing viewpoint', () => {
     ])
     expect(result.providerCalls).toBe(0)
     expect(result.interpretation).toContain('do not establish actual visibility')
+  })
+  it('delivers edge-on and fractional geometry through the lossless session boundary', () => {
+    const input = { ...layout,
+      camera: { position: [3.2, 8.4], lookAt: [3.4, 4.6], horizontalFovDeg: 68 },
+      landmarks: [
+        { id: 'edge', label: 'Edge-on bench', position: [3.2, 2.6], frontDirection: [1, -0] },
+        { id: 'near', label: 'Almost on view axis', position: [3.4 - 1e-9, 4.6] },
+        { id: 'origin', label: 'Plan origin', position: [-0, 0] },
+      ],
+    }
+    const result = checkCameraGeometry(input)
+    expect(result.relations[0]).toMatchObject({ facing: 'edge_on', frontDot: 0 })
+    expect(snapshotJsonValue(result)).toEqual(JSON.parse(JSON.stringify(result)))
+    expect(result.layout.landmarks[2]!.position[0]).toBe(0)
+    expect(Object.is(input.landmarks[2]!.position[0], -0)).toBe(true)
   })
   it.each([
     { ...layout, camera: { ...layout.camera, lookAt: [4, 0] } },

@@ -4,7 +4,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-session'
 
-const number = z.number().finite().min(-1000000).max(1000000)
+// The session's lossless JSON boundary cannot retain JavaScript's signed zero.
+const canonicalZero = (value: number) => value === 0 ? 0 : value
+const number = z.number().finite().min(-1000000).max(1000000).transform(canonicalZero)
 const point = z.tuple([number, number])
 const nonzero = (v: readonly [number, number]) => Math.hypot(v[0], v[1]) > 1e-9
 const layoutSchema = z.object({
@@ -37,7 +39,7 @@ export function checkCameraGeometry(input: unknown) {
   const dx = lookAt[0] - position[0], dy = lookAt[1] - position[1]
   const length = Math.hypot(dx, dy), forward = [dx / length, dy / length] as const
   const right = [forward[1], -forward[0]] as const
-  const round = (value: number) => Math.round(value * 1000000) / 1000000
+  const round = (value: number) => canonicalZero(Math.round(value * 1000000) / 1000000)
   const relations = layout.landmarks.map((item) => {
     const x = item.position[0] - position[0], y = item.position[1] - position[1]
     const distance = Math.hypot(x, y), depth = x * forward[0] + y * forward[1]
