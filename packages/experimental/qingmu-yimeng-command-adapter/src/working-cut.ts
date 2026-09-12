@@ -22,6 +22,8 @@ export interface WorkingAudioCue {
   readonly gainDb: number
   readonly fadeInSec: number
   readonly fadeOutSec: number
+  /** Optional relative dB changes; film times strictly increase within this cue. */
+  readonly gainPoints?: readonly { readonly timeSec: number; readonly gainDb: number }[]
 }
 /** Recoverable command for one immutable timeline revision and local render. */
 export interface WorkingCutCommand {

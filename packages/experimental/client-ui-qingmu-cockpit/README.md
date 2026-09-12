@@ -313,3 +313,5 @@ Creation and saved-settings panels show Writer’s composed visual guidance and 
 An unsaved reference-video draft starts with the selected shot’s director duration. Persisted draft controls remain authoritative on restore; timing is never silently rounded or clamped to a model default. Provider validation still reports unsupported requests before submission.
 
 Completed asset designs accept a single JSON or text code block. Missing quote escapes can be repaired while preserving every original character; truncated data and content-changing repairs remain rejected. The original reply stays readable, and validation failures do not report adoption or trigger another model request.
+
+Independent audio cues accept optional `gainPoints`: 2–64 increasing `timeSec` positions within the cue and relative `gainDb` values from −60 to 6. Gain interpolates in dB and holds the first/last value outside the point span; an empty list preserves constant gain. The UI and native director save the same points, and local FFmpeg rendering applies them on assembled-film time. Dialogue avoidance is authored timing, not automatic speech detection; native mixed audio is not separated.

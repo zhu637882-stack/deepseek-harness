@@ -59,7 +59,7 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
       if (!response.ok) throw new Error(response.error.message)
       return ports.boundedJson({ schema: 'qingmu.native-working-cut.v1', scope, cut: response.value,
         receiptId: digest({ scope, cut: response.value }), providerCalls: 0,
-        guidance: 'Use qingmu_save_working_cut with this receipt to save clips, audioCues and soundPlan. Audio cues require an imported assetId/sha256. Import local WAV/MP3/M4A/FLAC in the delivery page. Do not invent an asset or claim an unavailable music generator ran. Environment stays continuous under speech. Music and ambience have independent timing and fades; native mixed audio is not automatically separated. Scene acoustics and listening feedback remain director decisions.' })
+        guidance: 'Use qingmu_save_working_cut with this receipt to save clips, audioCues and soundPlan. Audio cues require an imported assetId/sha256. Import local WAV/MP3/M4A/FLAC in the delivery page. Do not invent an asset or claim an unavailable music generator ran. Environment stays continuous under speech. Music and ambience have independent timing, fades and optional gainPoints for director-timed volume changes. Use actual film timing for dialogue ducking and gradual recovery; do not infer speech times from shot duration. Native mixed audio is not automatically separated. Scene acoustics and listening feedback remain director decisions.' })
     },
   }))
   ctx.tools.register(defineTool({
@@ -67,7 +67,7 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
     description: 'Save the assembled-film clips, independent sound cues and director sound plan to a retained editable revision. Optionally render a local MP4 when authorized. Music/ambience/effect/dialogue cues can span shots. No paid model, source replacement or human signoff. Retry identical arguments after an uncertain result.',
     parameters: {
       receiptId: { type: 'string', required: true },
-      cut: { type: 'json', required: true, description: 'Object with clips (frameId, assetId, sha256, inSec, outSec, optional sourceGainDb), audioCues (assetId, sha256, kind music/ambience/effect/dialogue, startSec on assembled film, inSec/outSec on source, gainDb -60..6, fadeInSec/fadeOutSec) and soundPlan string. Cues cannot exceed source/film duration. Lowering sourceGainDb also lowers its dialogue and ambience; never treat it as music separation.' },
+      cut: { type: 'json', required: true, description: 'Object with clips (frameId, assetId, sha256, inSec, outSec, optional sourceGainDb), audioCues (assetId, sha256, kind music/ambience/effect/dialogue, startSec on assembled film, inSec/outSec on source, gainDb -60..6, fadeInSec/fadeOutSec, optional gainPoints) and soundPlan string. gainPoints: 2..64 points {timeSec, gainDb}; strictly increasing assembled-film seconds within this cue, relative gain -60..6 dB added to cue gain. Values interpolate in dB and hold outside first/last points. Use paired points around dialogue for gradual ducking/recovery; omission preserves constant cue gain. Cues cannot exceed source/film duration. Lowering sourceGainDb also lowers its dialogue and ambience; never treat it as music separation.' },
       render: { type: 'boolean', description: 'Default false: save without rendering. True requests local MP4 composition, not creative approval.' },
     }, output,
     presentCall: () => ({ card: 'generic', kind: 'edit', title: '保存整片剪辑与声音' }),

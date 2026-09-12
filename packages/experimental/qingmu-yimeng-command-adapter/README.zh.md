@@ -182,3 +182,5 @@ ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只
 私密参考图片和音色读取也支持复制后的素材标识。Writer 验证复制回执与原上传字节，响应仍绑定所请求的素材及 SHA。复制不会公开本地上传素材。详见[项目库 Agent Note](../../../.agents/notes/implemented/feature/2026-09-11-qingmu-project-library-management.zh.md)。
 
 `readStyleComposition` 读取 Writer 对指定基础画风与风格包的调和结果。`readCreativeContract` 将当前执行方法与生效视觉设定独立于不可变创建记录返回。这些读取不改写已保存的创作决定，也不生成媒体。
+
+独立音轨支持可选 `gainPoints`：2–64 个在音轨范围内递增的成片时间 `timeSec`，以及 −60 至 6 的相对音量 `gainDb`。相邻点按 dB 平滑变化，首末点之外保持对应值；空列表保留固定音量。网页和原生导演保存同一组变化点，本地 FFmpeg 按成片时间执行。对白避让由导演安排时间，不自动检测说话，也不分离原片混合声音。

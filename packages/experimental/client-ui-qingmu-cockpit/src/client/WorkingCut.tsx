@@ -85,11 +85,16 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
   const total = clips.reduce((sum, clip) => sum + clip.outSec - clip.inSec, 0)
   const audioValid = audioCues.every((c) => {
     const source = state?.audioLibrary?.find(a => a.assetId === c.assetId)
+    const points = c.gainPoints ?? []
     return source && [c.startSec, c.inSec, c.outSec, c.gainDb, c.fadeInSec, c.fadeOutSec].every(Number.isFinite)
       && c.startSec >= 0
       && c.inSec >= 0 && c.outSec > c.inSec && c.outSec <= source.duration
       && c.startSec + c.outSec - c.inSec <= total + .001 && c.gainDb >= -60 && c.gainDb <= 6
       && c.fadeInSec >= 0 && c.fadeOutSec >= 0 && c.fadeInSec + c.fadeOutSec <= c.outSec - c.inSec
+      && points.length !== 1 && points.length <= 64 && points.every((point, i) =>
+      Number.isFinite(point.timeSec) && Number.isFinite(point.gainDb)
+        && point.timeSec >= c.startSec && point.timeSec <= c.startSec + c.outSec - c.inSec
+        && point.gainDb >= -60 && point.gainDb <= 6 && (i === 0 || point.timeSec > (points[i - 1]?.timeSec ?? -1)))
   })
   const valid = audioValid && total <= 600 && clips.length > 0 && clips.every((c) => {
     const source = state?.shots.find(s => s.frameId === c.frameId)?.candidates.find(a => a.assetId === c.assetId)

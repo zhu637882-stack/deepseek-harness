@@ -43,6 +43,11 @@ export function WorkingCutSound({ library, cues, total, disabled, plan, onPlan, 
     {cues.map((cue, index) => {
       const source = library.find(a => a.assetId === cue.assetId)
       const duration = cue.outSec - cue.inSec
+      const points = cue.gainPoints ?? []
+      const pointsInvalid = points.length === 1 || points.length > 64 || points.some((point, i) =>
+        !Number.isFinite(point.timeSec) || !Number.isFinite(point.gainDb)
+        || point.timeSec < cue.startSec || point.timeSec > cue.startSec + duration
+        || point.gainDb < -60 || point.gainDb > 6 || (i > 0 && point.timeSec <= (points[i - 1]?.timeSec ?? -1)))
       const invalid = !source || cue.startSec < 0 || cue.inSec < 0 || duration <= 0 || cue.outSec > source.duration
         || cue.startSec + duration > total + .001 || cue.fadeInSec + cue.fadeOutSec > duration
       const number = (field: 'startSec' | 'inSec' | 'outSec' | 'gainDb' | 'fadeInSec' | 'fadeOutSec', label: string, min: number, max: number) =>
@@ -55,6 +60,33 @@ export function WorkingCutSound({ library, cues, total, disabled, plan, onPlan, 
         {number('startSec', '成片起点秒', 0, total)}{number('gainDb', '音量 dB', -60, 6)}
         {number('fadeInSec', '淡入秒', 0, duration)}{number('fadeOutSec', '淡出秒', 0, duration)}
         <details><summary>裁剪声音素材</summary>{number('inSec', '素材起点秒', 0, source?.duration ?? 0)}{number('outSec', '素材终点秒', 0, source?.duration ?? 0)}</details>
+        <details open={points.length > 0}><summary>音量变化与对白避让</summary>
+          <p>按成片时间设置音量增减，在相邻点之间平滑变化。0 dB 保持本轨音量，负数压低；首末点之外保持对应音量。只调整这条独立音轨。</p>
+          {!points.length ? <button type="button" disabled={disabled || invalid} onClick={() => {
+            update(index, { gainPoints: [{ timeSec: cue.startSec, gainDb: 0 }, { timeSec: cue.startSec + duration, gainDb: 0 }] })
+          }}>设置音量变化</button> : <>
+            {points.map((point, pointIndex) => <div key={pointIndex} className={css.gainPoint}>
+              <label>成片秒<input aria-label={`音轨 ${index + 1} 变化点 ${pointIndex + 1} 成片秒`} type="number" min={cue.startSec} max={cue.startSec + duration} step="0.1" value={point.timeSec} onChange={(e) => {
+                update(index, { gainPoints: points.map((p, i) => i === pointIndex ? { ...p, timeSec: Number(e.target.value) } : p) })
+              }} /></label>
+              <label>增减 dB<input aria-label={`音轨 ${index + 1} 变化点 ${pointIndex + 1} 增减 dB`} type="number" min="-60" max="6" step="1" value={point.gainDb} onChange={(e) => {
+                update(index, { gainPoints: points.map((p, i) => i === pointIndex ? { ...p, gainDb: Number(e.target.value) } : p) })
+              }} /></label>
+              <button type="button" disabled={points.length <= 2} aria-label={`音轨 ${index + 1} 移除变化点 ${pointIndex + 1}`} onClick={() => {
+                update(index, { gainPoints: points.filter((_, i) => i !== pointIndex) })
+              }}>移除</button>
+              {pointIndex < points.length - 1 && <button type="button" disabled={points.length >= 64 || pointsInvalid} aria-label={`音轨 ${index + 1} 在变化点 ${pointIndex + 1} 后插入`} onClick={() => {
+                const next = points[pointIndex + 1]
+                if (!next) return
+                update(index, { gainPoints: [...points.slice(0, pointIndex + 1),
+                  { timeSec: (point.timeSec + next.timeSec) / 2, gainDb: (point.gainDb + next.gainDb) / 2 },
+                  ...points.slice(pointIndex + 1)] })
+              }}>中间加点</button>}
+            </div>)}
+            <button type="button" onClick={() => { update(index, { gainPoints: [] }) }}>清除音量变化</button>
+          </>}
+          {pointsInvalid && <p role="alert">音量变化点需按时间递增且位于本音轨内，增减范围为 −60 至 6 dB。</p>}
+        </details>
         <span>成片 {cue.startSec.toFixed(1)}–{(cue.startSec + duration).toFixed(1)} 秒</span>
         <button type="button" onClick={() => { onChange(cues.filter((_, i) => i !== index)) }}>移除音轨 {index + 1}</button>
         {invalid && <p role="alert">请调整音轨范围：声音不能超出素材或成片，淡入和淡出总长不能超过音轨。</p>}

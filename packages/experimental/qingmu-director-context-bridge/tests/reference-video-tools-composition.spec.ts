@@ -590,7 +590,8 @@ it('reconciles a changed complete design into one final native reference draft a
 
 it('saves scene-spanning sound through the shipped director preset, real loop and command adapter', async () => {
   const cut = { clips:[{ frameId:'f',assetId:'video',sha256:'a'.repeat(64),inSec:0,outSec:15 }],
-    audioCues:[{ assetId:'room',sha256:'b'.repeat(64),kind:'ambience',startSec:0,inSec:0,outSec:15,gainDb:-18,fadeInSec:1,fadeOutSec:2 }],
+    audioCues:[{ assetId:'room',sha256:'b'.repeat(64),kind:'ambience',startSec:0,inSec:0,outSec:15,gainDb:-18,fadeInSec:1,fadeOutSec:2,
+      gainPoints:[{ timeSec:2,gainDb:0 },{ timeSec:3,gainDb:-6 },{ timeSec:8,gainDb:-6 },{ timeSec:10,gainDb:0 }] }],
     soundPlan:'Room reflections and street ambience continue under dialogue; music follows scene emotion.' }
   const receiptId = sha({ scope:{ projectId:'p',episodeId:'episode-a' },cut:initialCut })
   const adapter = new MockAdapter([toolCallResponse('cut-read','qingmu_read_working_cut',{}),
@@ -604,6 +605,7 @@ it('saves scene-spanning sound through the shipped director preset, real loop an
   const body = writes[0]?.[1]?.body
   if (typeof body !== 'string') throw new Error('Expected JSON request body')
   expect(JSON.parse(body)).toMatchObject({ ...cut,expectedRevision:0 })
+  expect({ savedCues: JSON.parse(body).audioCues, restored: JSON.parse(result(h.agent,'cut-reread').text) }).toMatchSnapshot()
   expect(JSON.stringify(adapter.requests.at(-1))).toContain('Room reflections and street ambience')
   expect(JSON.stringify(h.upstream.fetch.mock.calls)).not.toContain('/working-cut/render')
 })
