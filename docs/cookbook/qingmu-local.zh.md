@@ -83,7 +83,9 @@ python3 scripts/qingmu-local.py login
 python3 scripts/qingmu-local.py recover-crash --instance-id EXACT_INSTANCE_ID
 ```
 
-专用本地账号使用 `private/login.json` 中的随机密码，由当前 macOS 用户的私有目录保护。`login` 向既有 API 提交该凭据，更新正常 24 小时 JWT，仅重启本实例 Host 与前端，让两者取得更新后的私密会话；它不改业务数据、不重放命令。随后重新打开 `status` 输出的 `entryUrl`，让浏览器取得新的 HttpOnly Cookie；只刷新原项目地址会继续携带旧 Cookie。保存结果未知时先查原回执再决定重试，不要新建第二条命令。设备本地身份不是人工内容批准证明。能访问此 macOS 账号或 loopback 服务的主体拥有本地用户能力。
+专用本地账号使用权限为0600的 `private/login.json` 中的随机密码。原生模式在启动时正常登录，每30秒检查会话到期时间，并在到期前五分钟内沿正常登录 API 续期。管理进程先核验本机 API 实例及返回用户，再原子替换 `private/session.json`；读写适配器每次操作读取该文件。自动续期和显式 `login` 均保留正在运行的 Host 与导演会话。登录失败时保留已有状态，五分钟后再尝试；`status` 通过 `sessionRenewalError` 返回不含秘密的故障说明。认证恢复不会重发业务或付费请求；保存或生成结果未知时先查询原回执。
+
+旧前端模式继续使用显式 `login`，重启本实例 Host 与前端以更新环境令牌，再重新打开 `entryUrl` 获取 HttpOnly Cookie。原生服务令牌不进入浏览器。设备本地身份不是人工内容批准证明；能访问此 macOS 账号或 loopback 服务的主体拥有本地用户能力。
 
 ## 轮换本机私密凭据
 

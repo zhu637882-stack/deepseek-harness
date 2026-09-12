@@ -15,7 +15,7 @@ const NEW_PROJECT = 'qingmu.creation.project.v1'
 const LABELS = { scene: '场景', action: '动作', dialogue: '对白', narration: '旁白', transition: '转场', skip: '忽略' }
 const errorText = (error: unknown): string => {
   const message = error instanceof Error ? error.message : String(error)
-  if (/401|token|未登录|authentication/.test(message)) return '本地会话已过期。请运行 qingmu-local.py login，重新进入后读取恢复；输入已保留。'
+  if (/401|token|未登录|authentication/.test(message)) return '本地连接需要恢复，输入已保留。请稍候点击“读取恢复”；如仍失败，请检查青木服务状态。'
   if (/403|forbidden/.test(message)) return '当前身份无权操作这个项目。输入已保留，请检查登录身份。'
   if (/409|conflict|stale|superseded/.test(message)) return '来源或版本已变化，本次操作未获确认。输入已保留，请读取最新结果后检查。'
   return `未能确认结果，输入已保留。请先“读取恢复”，不要另开同一请求。${message}`

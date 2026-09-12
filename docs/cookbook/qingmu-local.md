@@ -81,7 +81,9 @@ After an external supervisor crash, use `recover-crash` only while the instance 
 python3 scripts/qingmu-local.py recover-crash --instance-id EXACT_INSTANCE_ID
 ```
 
-The dedicated local account uses a random password in `private/login.json`, protected by the current macOS user's private directory. `login` submits that credential to the existing API, renews its normal 24-hour JWT and restarts only this instance's Host and frontend so both receive the renewed private session. It neither changes business data nor replays commands. Open the `entryUrl` printed by `status` again so the browser receives the new HttpOnly cookie; refreshing an existing project URL keeps the old cookie. If a save outcome is unknown, query its original receipt before retrying; do not create a second command. This device-local identity is not evidence of human content approval. Anyone with access to this macOS account or its loopback service has the local user's capabilities.
+The dedicated local account uses a random password in owner-only `private/login.json`. In native mode the supervisor authenticates at startup and checks session expiry every 30 seconds, renewing through the ordinary login API within five minutes of expiry. It verifies the local API instance and the returned user before atomically replacing `private/session.json`. Read and command adapters read this file for each operation; automatic renewal and explicit `login` preserve the running Host and Director sessions. A login failure preserves existing state and retries after five minutes; `status` exposes a sanitized `sessionRenewalError`. Authentication never replays a business or paid request. Query the original receipt for an uncertain save or generation result.
+
+Legacy frontend mode keeps explicit `login`: it restarts this instance's Host and frontend to refresh their environment, then requires reopening `entryUrl` for the HttpOnly cookie. The native service token stays outside the browser. Device-local authentication is not evidence of human content approval; anyone with access to this macOS account or its loopback service has the local user's capabilities.
 
 ## Rotate local private credentials
 

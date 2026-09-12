@@ -4,6 +4,8 @@
 
 这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`capabilityCatalog`、`costRehearsal`、`gateAControlEvidence`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates`、`selectedVideoReview`、`takeVersions`、`takeComments`、`takeAcceptance`、`takeReviewAuthority`、`takeTechnicalQc`、`takeApprovalLifecycle`、`shotFindings`、`productionUnits`、`lsuPlanSource`、`stageSources` 和 `workflow`；它不暴露任何写入端点。独立的 `/api/qingmu/entity-draft-human-review/state` 路由是自然人审核面板使用的 cookie 认证同源读取。
 
+可选配置 `sessionFile` 指向包含 `token` 的绝对路径私密 JSON 文件，限当前用户拥有。Host 每次操作读取最新内容，无需重启；文件缺失、格式错误、共享权限或符号链接均拒绝认证，不回退到旧环境令牌。未配置文件时继续使用 `YIMENG_API_TOKEN`。凭据只在 Host 内使用，认证失败不重发命令，不改变人工审核权限。
+
 ## 引用视频预览
 
 导出的 `parseReferenceVideoRequest` 在不联网、不改写的前提下校验完整可编辑草稿。原生草稿保存复用此校验器，使本地参考素材在上传准备前无需先通过供应商预览。
@@ -146,7 +148,7 @@ Ready PromptIR 的 `firstFrameQuote` 还返回一次服务端重算、按当前�
 
 同一个已配置处理函数还作为仅供 Host 使用的 `qingmuYimengRead` 能力提供给内部调用方。内部调用方可以复用原有 `workflow`、`productionUnits`、`lsuPlanSource` 与 `stageSources` GET，不另建 HTTP 客户端、令牌配置或缓存。Cordis 会在所属插件卸载时移除该能力。这不会把业务阶段完成、已选媒体或未知透传字段解释为具名 IMAGO Stage/LSU 批准。
 
-默认上游为 `http://127.0.0.1:8115`。配置的基础 URL 必须继续使用 HTTP 或 HTTPS 回环地址。受保护读取从 Host 环境获取 `YIMENG_API_TOKEN`，并且只通过 `Authorization: Bearer` 请求头发送；适配器不读取 `localStorage` 或 `JWT_SECRET`、不发送 Cookie，也不返回令牌。请求使用 `cache: no-store`，并具有超时、调用方取消和失败关闭的重定向处理。普通 JSON 响应继续限制为 5 MiB；只有剧本响应单独限制为 20 MiB，使接近 5 MiB 的合法命令体仍可回传解析后剧本及其转义后的 canonical 证据，同时保持读取有界。
+默认上游为 `http://127.0.0.1:8115`。配置的基础 URL 必须继续使用 HTTP 或 HTTPS 回环地址。受保护读取使用配置的私密会话令牌（未配置会话文件时从 Host 环境获取 `YIMENG_API_TOKEN`），并且只通过 `Authorization: Bearer` 请求头发送；适配器不读取 `localStorage` 或 `JWT_SECRET`、不发送 Cookie，也不返回令牌。请求使用 `cache: no-store`，并具有超时、调用方取消和失败关闭的重定向处理。普通 JSON 响应继续限制为 5 MiB；只有剧本响应单独限制为 20 MiB，使接近 5 MiB 的合法命令体仍可回传解析后剧本及其转义后的 canonical 证据，同时保持读取有界。
 
 ## 三项相互独立的权力
 

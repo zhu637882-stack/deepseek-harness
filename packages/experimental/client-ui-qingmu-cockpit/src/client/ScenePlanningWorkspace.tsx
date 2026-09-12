@@ -59,7 +59,7 @@ function saved(state: ScenePlanningState): LocalPlan | null {
 }
 function errorText(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
-  if (/401|token|authentication/i.test(message)) return '会话已过期，请运行 qingmu-local.py login，再读取恢复。输入已保留，不会自动重发。'
+  if (/401|token|authentication/i.test(message)) return '本地连接需要恢复，输入已保留。请稍候点击“读取恢复”；如仍失败，请检查青木服务状态。不会自动重发。'
   if (/403|forbidden/.test(message)) return '当前身份无权操作此项目。输入已保留，请核对本地登录身份。'
   if (/409|conflict|mismatch/.test(message)) return '剧本或分镜版本发生冲突。输入已保留，请读取恢复，核对来源后再处理。'
   return `未能确认结果。输入已保留，请先读取恢复。${message}`

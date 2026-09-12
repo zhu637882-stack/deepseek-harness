@@ -3,6 +3,7 @@ import { prepareReferenceVideoFrame } from './reference-video-frame.ts'
 /** Loopback-only Host boundary for explicit Yimeng ChangeSet commands. */
 
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
+import { createServiceTokenReader } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import { prepareCreationCommand, prepareCreationOptionsRead } from './creation.ts'
 import { prepareAssetDesign } from './asset-design.ts'
 import { prepareProjectUpdate } from './project-management.ts'
@@ -505,6 +506,8 @@ export const inject = ['connection', 'webServer']
 
 /** Deployment-tunable loopback upstream and request deadline. */
 export interface YimengCommandAdapterConfig {
+  /** Absolute owner-only session JSON file, read afresh per operation; empty uses the environment. */
+  readonly sessionFile?: string
   /** Pathless loopback HTTP(S) origin of the authoritative Yimeng API. */
   readonly baseUrl?: string
   /** Optional loopback Writer origin for the production-Take route only. */
@@ -547,6 +550,7 @@ export interface YimengCommandAdapterConfig {
 
 /** Validated Cordis configuration for the command adapter. */
 export const Config: z<YimengCommandAdapterConfig> = z.object({
+  sessionFile: z.string().default(''),
   baseUrl: z.string().default(DEFAULT_BASE_URL),
   productionTakeBaseUrl: z.string().default(''),
   timeoutMs: z.natural().min(100).default(DEFAULT_TIMEOUT_MS),
@@ -5316,7 +5320,7 @@ export function createYimengCommandHandler(
   config: YimengCommandAdapterConfig = {},
   dependencies: YimengCommandAdapterDependencies = {
     fetch: globalThis.fetch,
-    readToken: () => process.env.YIMENG_API_TOKEN,
+    readToken: createServiceTokenReader(config.sessionFile),
   },
 ): ConnectionRpcHandler {
   const baseUrl = resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL)
@@ -6333,6 +6337,7 @@ export function createYimengCommandHandler(
 
 /** Register the command adapter on a loopback-only Host Connection channel. */
 export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): void {
+  const readToken = createServiceTokenReader(config.sessionFile)
   ctx.effect(() => registerCreationStylePreview(ctx.webServer, {
     baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL), fetch: globalThis.fetch,
   }), 'qingmu-yimeng-command: creation style previews')
@@ -6344,12 +6349,12 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
   ctx.effect(() => registerFirstFrameSelectionCommands(ctx.webServer, {
     baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),
     fetch: globalThis.fetch,
-    readToken: () => process.env.YIMENG_API_TOKEN,
+    readToken,
   }), 'qingmu-yimeng-command: first-frame selection commands')
   ctx.effect(() => registerNativeVideoReview(ctx.webServer, {
     baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),
     fetch: globalThis.fetch,
-    readToken: () => process.env.YIMENG_API_TOKEN,
+    readToken,
   }), 'qingmu-yimeng-command: native video review')
   const interactiveController = new AbortController()
   const activeInteractiveTasks = new Set<string>()
@@ -6385,7 +6390,7 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
   ctx.effect(() => () =>{  interactiveController.abort() }, 'qingmu Director interactive execution lifetime')
   const handler = createYimengCommandHandler(config, {
     fetch: globalThis.fetch,
-    readToken: () => process.env.YIMENG_API_TOKEN,
+    readToken,
     ...(queueDirectorProductionTask === undefined ? {} : { queueDirectorProductionTask }),
     runDirectorReplayMethod: async (payload, signal) => {
       const method = ctx.get('qingmuImagoMethod')

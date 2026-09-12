@@ -3,12 +3,13 @@
 
 Only the supervisor holding the instance flock owns child process handles.
 No command signals a persisted PID or an arbitrary listener. Credentials stay
-in owner-only files; login explicitly renews the normal 24-hour API session.
+in owner-only files; native mode renews its normal API session without restarting Host.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 from datetime import datetime, timezone
 import fcntl
@@ -1428,6 +1429,8 @@ class Supervisor:
         self.process_ledger_active = False
         self.shooting_binding = None
         self.shooting_next_poll = 0.0
+        self.session_next_poll = 0.0
+        self.session_renewal_error: str | None = None
 
     def required_process_roles(self) -> tuple[str, ...]:
         """Processes whose unexpected exit makes this instance unavailable."""
@@ -1650,6 +1653,8 @@ class Supervisor:
         overlay = ""
         for adapter in ("read", "command"):
             overlay += f"\n- id: qingmu-yimeng-{adapter}-adapter\n  config:\n    baseUrl: {json.dumps(self.ports['apiUrl'])}\n"
+            if self.native_ui:
+                overlay += "    sessionFile: " + json.dumps(str(self.root / "private/session.json")) + "\n"
             if adapter == "command" and not self.review_only:
                 fixture = self.config.get("directorExecutionFixture") or {}
                 if fixture.get("taskId"):
@@ -1756,7 +1761,9 @@ class Supervisor:
         if not self.review_only and self.config.get("_directorSubmitMockBaseUrl"):
             env["QINGMU_D1_LOCAL_MOCK_KEY"] = "isolated-local-mock-only"
         session = self.root / "private/session.json"
-        if session.exists():
+        if self.native_ui:
+            env.pop("YIMENG_API_TOKEN", None)
+        elif session.exists():
             env["YIMENG_API_TOKEN"] = json.loads(session.read_text())["token"]
         self.host = self.launch_owned(
             "host",
@@ -2441,7 +2448,8 @@ class Supervisor:
             identity = http(self.ports["apiUrl"] + "/api/auth/me", token=token)
             session = "已登录：" + identity["username"]
         except (OSError, ValueError):
-            session = "会话缺失或过期：运行 login，然后重新打开 entryUrl；不会自动重发命令"
+            session = ("本机会话正在恢复；恢复后重新读取当前项目，不会自动重发命令" if self.native_ui else
+                       "会话缺失或过期：运行 login，然后重新打开 entryUrl；不会自动重发命令")
         manifest = build_manifest_status(self.root, self.config, review_only=self.review_only)
         return {"instanceId": self.config["instanceId"], "root": str(self.root),
                 "supervisorPid": os.getpid(), "apiPid": self.api.pid if self.api else None,
@@ -2473,26 +2481,68 @@ class Supervisor:
                     api_verified and (self.review_only or (worker_alive and (not asset_worker_required or asset_worker_alive)))
                     and (self.review_only or host_verified) and entry_verified and manifest["matches"]
                 ),
-                "session": session}
+                "session": session,
+                "sessionRenewalError": self.session_renewal_error}
 
-    def login(self) -> dict:
+    def renew_service_session(self) -> None:
+        """Authenticate through the bound API; publish the token only after success."""
         self.api_identity()
-        credentials = json.loads((self.root / "private/login.json").read_text())
+        credentials = _read_owner_only_json(self.root / "private/login.json", "本机登录凭据")
+        if credentials.get("username") != LOCAL_USERNAME or not isinstance(credentials.get("password"), str):
+            raise RuntimeError("本机登录凭据不完整或用户不符")
         try:
             result = http(self.ports["apiUrl"] + "/api/auth/login", payload=credentials)
-        except urllib.error.HTTPError as exc:
+            token = result.get("token") if isinstance(result, dict) else None
+            if not isinstance(token, str) or not token or any(c.isspace() for c in token):
+                raise ValueError("invalid session")
+            if self.native_ui:
+                identity = http(self.ports["apiUrl"] + "/api/auth/me", token=token)
+                if not isinstance(identity, dict) or identity.get("username") != LOCAL_USERNAME:
+                    raise ValueError("unexpected service user")
+        except (OSError, ValueError) as exc:
             raise RuntimeError("登录失败；凭据未改变，Draft 与回执仍保留") from exc
-        write_json(self.root / "private/session.json", {"token": result["token"]})
-        # Explicit login restarts only our Host and frontend to refresh their environment token.
-        # It never replays an interrupted command; the existing receipt UI recovers it.
-        self.stop_owned("frontend")
-        if not self.review_only:
-            self.stop_owned("host")
-            self.start_host()
-        self.start_frontend()
+        write_json(self.root / "private/session.json", {"token": token})
+        self.session_renewal_error = None
+
+    def maintain_native_session(self, *, startup: bool = False) -> None:
+        """Renew before expiry; auth failures back off without stopping any owned process."""
+        if not self.native_ui or (not startup and time.monotonic() < self.session_next_poll):
+            return
+        self.session_next_poll = time.monotonic() + 30
+        if not startup:
+            try:
+                token = _read_owner_only_json(self.root / "private/session.json", "本机会话")["token"]
+                # Expiry is only a scheduling hint. Normal login/me remain the authority.
+                payload = token.split(".")[1]
+                claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+                expiry = claims.get("exp")
+                if isinstance(expiry, (int, float)) and math.isfinite(expiry) and expiry > time.time() + 300:
+                    return
+            except (OSError, ValueError, KeyError, IndexError, AttributeError, TypeError):
+                pass  # Missing or unreadable service state needs normal authentication.
+        try:
+            self.renew_service_session()
+        except (OSError, ValueError, RuntimeError):
+            message = "本机会话续期失败；保留当前创作，5分钟后重试登录，不会重发生成请求"
+            if self.session_renewal_error != message:
+                print(message, file=sys.stderr, flush=True)
+            self.session_renewal_error = message
+            self.session_next_poll = time.monotonic() + 300
+
+    def login(self) -> dict:
+        self.renew_service_session()
+        # Native adapters hot-read the session. Legacy Next still needs an environment refresh.
+        if not self.native_ui:
+            self.stop_owned("frontend")
+            if not self.review_only:
+                self.stop_owned("host")
+                self.start_host()
+            self.start_frontend()
         status = self.status()
         write_json(self.root / "runtime.json", status)
-        return {**status, "message": "会话已更新。请重新打开 entryUrl；未知提交结果请先恢复原回执，不要新建命令。"}
+        message = ("会话已更新，现有页面和导演会话可继续使用；未知提交结果请恢复原回执。"
+                   if self.native_ui else "会话已更新。请重新打开 entryUrl；未知提交结果请先恢复原回执，不要新建命令。")
+        return {**status, "message": message}
 
     def run(self) -> None:
         with instance_lock(self.root):
@@ -2546,6 +2596,7 @@ class Supervisor:
                         "api",
                     )
                     self.wait_ready(self.api, self.api_identity)
+                    self.maintain_native_session(startup=True)
                     if not self.review_only:
                         self.start_worker()
                         self.start_asset_worker()
@@ -2563,6 +2614,7 @@ class Supervisor:
                             for role in self.required_process_roles()
                         ) or (not self.review_only and self._unexpected_asset_worker_exit()):
                             raise RuntimeError("本实例子进程退出，正在清理其余自有子进程")
+                        self.maintain_native_session()
                         listeners = (server,) if self.review_only else (server, activation_server)
                         readable, _, _ = select.select(listeners, (), (), 0.5)
                         if not readable:

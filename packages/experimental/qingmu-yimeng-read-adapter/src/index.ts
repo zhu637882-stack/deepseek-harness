@@ -2,6 +2,8 @@ import { parseReferenceVideoMaterialsRequest, normalizeReferenceVideoMaterials }
 /** Loopback-only Host BFF for read-only Yimeng production facts. */
 
 import { createHash } from 'node:crypto'
+import { createServiceTokenReader } from './service-token.ts'
+export { createServiceTokenReader } from './service-token.ts'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
@@ -420,6 +422,8 @@ export const inject = ['connection', 'webServer']
 
 /** Deployment-tunable upstream address and request deadline. */
 export interface YimengReadAdapterConfig {
+  /** Absolute owner-only session JSON file, read afresh per operation; empty uses the environment. */
+  readonly sessionFile?: string
   /** Pathless loopback HTTP(S) origin of the authoritative Yimeng API. */
   readonly baseUrl?: string
   /** Read deadline in milliseconds, from 100 through 60,000. */
@@ -430,6 +434,7 @@ export interface YimengReadAdapterConfig {
 
 /** Validated Cordis configuration for the adapter. */
 export const Config: z<YimengReadAdapterConfig> = z.object({
+  sessionFile: z.string().default(''),
   baseUrl: z.string().default(DEFAULT_BASE_URL),
   timeoutMs: z.natural().min(100).default(DEFAULT_TIMEOUT_MS),
   verificationTimeoutMs: z.natural().min(100).default(DEFAULT_VERIFICATION_TIMEOUT_MS),
@@ -5083,14 +5088,14 @@ function normalizeWorkflow(value: unknown): YimengWorkflowProjection {
 /**
  * Create the generic Connection RPC handler without registering it.
  * @param config - loopback upstream and timeout settings.
- * @param dependencies - host fetch and token source; defaults read only `YIMENG_API_TOKEN`.
+ * @param dependencies - host fetch and token source; defaults read the configured private session or environment.
  * @returns a handler for the read-only endpoint names.
  */
 export function createYimengReadHandler(
   config: YimengReadAdapterConfig = {},
   dependencies: YimengReadAdapterDependencies = {
     fetch: globalThis.fetch,
-    readToken: () => process.env.YIMENG_API_TOKEN,
+    readToken: createServiceTokenReader(config.sessionFile),
   },
 ): ConnectionRpcHandler {
   const baseUrl = resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL)
@@ -5459,7 +5464,7 @@ export function apply(ctx: Context, config: YimengReadAdapterConfig = {}): void 
     : new EditorialHandoffDownloadAuthorizer(join(dshHome, 'state', 'qingmu-editorial-downloads.json'))
   const dependencies: YimengReadAdapterDependencies = {
     fetch: globalThis.fetch,
-    readToken: () => process.env.YIMENG_API_TOKEN,
+    readToken: createServiceTokenReader(config.sessionFile),
     ...(authorizer === undefined ? {} : {
       issueEditorialHandoffDownload: binding => authorizer.issue(binding),
     }),

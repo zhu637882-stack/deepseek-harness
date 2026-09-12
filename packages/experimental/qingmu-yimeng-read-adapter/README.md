@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 This private experimental Host plugin is the read-only BFF between Qingmu OS and the Yimeng API. It registers the loopback-only `/qingmu-yimeng` RPC channel and exposes `health`, `capabilityCatalog`, `costRehearsal`, `gateAControlEvidence`, `projects`, `episodes`, `script`, `elementProfile`, `referenceCandidates`, `selectedVideoReview`, `takeVersions`, `takeComments`, `takeAcceptance`, `takeReviewAuthority`, `takeTechnicalQc`, `takeApprovalLifecycle`, `shotFindings`, `productionUnits`, `lsuPlanSource`, `stageSources`, and `workflow`; it exposes no mutation endpoint. Its separate `/api/qingmu/entity-draft-human-review/state` route is a cookie-authenticated, same-origin read for the natural-person review panel.
 
+Optional `sessionFile` config selects an absolute owner-only JSON file containing `token`. Host operations read its latest contents without restarting; missing, malformed, shared, or symlink files fail closed and never fall back to an old environment token. With no file configured, `YIMENG_API_TOKEN` remains the token source. Credentials stay in Host, authentication failures do not replay commands, and human-review authority is unchanged.
+
 ## Reference video previews
 
 The exported `parseReferenceVideoRequest` validates complete editable drafts without network access or rewriting. Native draft saves reuse it before persistence so local references do not require a successful provider preview before upload preparation.
@@ -146,7 +148,7 @@ The canonical evidence-freeze endpoints are a separate owner action. Status and 
 
 The same configured handler is also provided as the Host-only `qingmuYimengRead` capability. Internal consumers can reuse the existing `workflow`, `productionUnits`, `lsuPlanSource`, and `stageSources` GETs without creating another HTTP client, token configuration, or cache. Cordis removes the capability when its owning plugin unloads. This does not reinterpret business-stage completion, selected media, or unknown forwarded fields as named IMAGO Stage/LSU approval.
 
-The default upstream is `http://127.0.0.1:8115`. A configured base URL must remain an HTTP or HTTPS loopback address. Protected reads take `YIMENG_API_TOKEN` from the Host environment and send it only as an `Authorization: Bearer` header; the adapter does not read `localStorage` or `JWT_SECRET`, send cookies, or return the token. Requests use `cache: no-store`, a timeout, caller cancellation, and fail-closed redirect handling. Ordinary JSON responses remain capped at 5 MiB. Only the script response is capped separately at 20 MiB so a legal command body near 5 MiB can still return the parsed script plus its escaped canonical evidence without making the read unbounded.
+The default upstream is `http://127.0.0.1:8115`. A configured base URL must remain an HTTP or HTTPS loopback address. Protected reads take the configured private session token (or `YIMENG_API_TOKEN` when no session file is configured) and send it only as an `Authorization: Bearer` header; the adapter does not read `localStorage` or `JWT_SECRET`, send cookies, or return the token. Requests use `cache: no-store`, a timeout, caller cancellation, and fail-closed redirect handling. Ordinary JSON responses remain capped at 5 MiB. Only the script response is capped separately at 20 MiB so a legal command body near 5 MiB can still return the parsed script plus its escaped canonical evidence without making the read unbounded.
 
 ## Three independent authorities
 

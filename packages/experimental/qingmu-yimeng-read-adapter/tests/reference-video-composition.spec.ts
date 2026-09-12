@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 import { createHash } from 'node:crypto'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -45,10 +45,12 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
     rightsStatus: 'not_recorded', selectionStatus: 'Unselected', isSelected: false, providerCalls: 0, generationQueued: false }
   const localSource = sourceFixture()
   const requests: { url: string | undefined; method: string | undefined; authorization: string | undefined; body: string }[] = []
+  let rejectAuthentication = false
   const upstream = createServer(async (req, res) => {
     let body = ''
     for await (const chunk of req) body += String(chunk)
     requests.push({ url: req.url, method: req.method, authorization: req.headers.authorization, body })
+    if (rejectAuthentication) { res.writeHead(401); res.end('unauthenticated'); return }
     res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(req.url?.includes('/source') ? (req.method === 'GET' && !req.url.includes('/receipt') ? localSource.state : localSource.result) : req.url?.includes('/local-video-candidates') ? localReceipt : req.url?.includes('/review-registration') ? registration : req.url?.endsWith('/prepare') ? prepared
       : req.url?.includes('/materials') ? materialState : req.url?.includes('/runs') ? runResponse : req.url?.endsWith('/quote') ? quoteResponse : req.url?.includes('/drafts/') ? savedDraft : response))
   })
@@ -56,6 +58,8 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
   const address = upstream.address()
   if (!address || typeof address === 'string') throw new Error('fixture server not listening')
   const root = await mkdtemp(join(tmpdir(), 'qingmu-reference-composition-'))
+  const sessionFile = join(root, 'session.json')
+  await writeFile(sessionFile, JSON.stringify({ token: 'fixture-owner-token' }), { mode: 0o600 })
   const ctx = new Context()
   vi.stubEnv('YIMENG_API_TOKEN', 'fixture-owner-token'); vi.stubEnv('DSH_HOME', '')
   try {
@@ -64,9 +68,9 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
       "- name: '@deepseek-ai/dsh-host-webserver'", '  config:', '    host: 127.0.0.1', '    port: 0',
       "- name: '@deepseek-ai/dsh-client-connection'",
       "- name: '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'", '  config:',
-      `    baseUrl: http://127.0.0.1:${address.port}`, '',
+      `    baseUrl: http://127.0.0.1:${address.port}`, `    sessionFile: ${JSON.stringify(sessionFile)}`, '',
       "- name: '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter'", '  config:',
-      `    baseUrl: http://127.0.0.1:${address.port}`, '',
+      `    baseUrl: http://127.0.0.1:${address.port}`, `    sessionFile: ${JSON.stringify(sessionFile)}`, '',
     ].join('\n'))
     ctx.baseUrl = pathToFileURL(root).href + '/'
     await ctx.plugin(Loader); ctx.loader.builtins.include = Include
@@ -105,6 +109,8 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
         "submissionReady": false,
       }
     `)
+    await writeFile(sessionFile + '.next', JSON.stringify({ token: 'renewed-owner-token' }), { mode: 0o600 })
+    await rename(sessionFile + '.next', sessionFile)
     const save = await fetch(`http://127.0.0.1:${ctx.webServer.port}/qingmu-yimeng-command/saveReferenceVideoDraft`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ type: 'client-request', rpcId: 'save', method: 'saveReferenceVideoDraft', payload: {
@@ -113,6 +119,7 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
     })
     expect((await save.json()).result).toEqual({ ok: true, value: savedDraft })
     expect(requests.map(r => r.method)).toEqual(['POST', 'POST', 'GET'])
+    expect(requests.slice(1).every(r => r.authorization === 'Bearer renewed-owner-token')).toBe(true)
     const quote = await fetch(`http://127.0.0.1:${ctx.webServer.port}/qingmu-yimeng/referenceVideoQuote`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ type: 'client-request', rpcId: 'quote', method: 'referenceVideoQuote', payload: quoteRequest }),
@@ -139,7 +146,7 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
     })
     expect((await materialPrepare.json()).result).toEqual({ ok: true, value: prepared })
     expect(requests.slice(-3).map(r => r.method)).toEqual(['GET', 'POST', 'GET'])
-    expect(requests.slice(-3).every(r => r.authorization === 'Bearer fixture-owner-token')).toBe(true)
+    expect(requests.slice(-3).every(r => r.authorization === 'Bearer renewed-owner-token')).toBe(true)
     for (const method of ['registerReferenceVideoCandidateForReview', 'readReferenceVideoCandidateRegistration']) {
       const registered = await fetch(`http://127.0.0.1:${ctx.webServer.port}/qingmu-yimeng-command/${method}`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -148,7 +155,7 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
       expect((await registered.json()).result).toEqual({ ok: true, value: registration })
     }
     expect(requests.slice(-2).map(r => r.method)).toEqual(['POST', 'GET'])
-    expect(requests.slice(-2).every(r => r.authorization === 'Bearer fixture-owner-token')).toBe(true)
+    expect(requests.slice(-2).every(r => r.authorization === 'Bearer renewed-owner-token')).toBe(true)
     expect(requests.at(-2)?.body).toBe(JSON.stringify({ expectedAssetSha256: registration.assetSha256 }))
     for (const [method, payload] of [
       ['uploadLocalVideoCandidate', localRequest],
@@ -174,8 +181,25 @@ it('loads the actual Host, Connection and read plugin through YAML and serves a 
       expect(((await response.json()) as { result: unknown }).result).toEqual({ ok: true, value: expected })
     }
     expect(requests.slice(-3).map(r => r.method)).toEqual(['GET', 'POST', 'GET'])
-    expect(requests.slice(-3).every(r => r.authorization === 'Bearer fixture-owner-token')).toBe(true)
+    expect(requests.slice(-3).every(r => r.authorization === 'Bearer renewed-owner-token')).toBe(true)
     expect(requests.at(-1)?.body).toBe('')
+    rejectAuthentication = true
+    const count = requests.length
+    const denied = await fetch(`http://127.0.0.1:${ctx.webServer.port}/qingmu-yimeng-command/saveReferenceVideoDraft`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId: 'denied-save', method: 'saveReferenceVideoDraft', payload: {
+        projectId: 'p', frameId: 'f', expectedRevision: 0, expectedFrameSha256: savedDraft.frameSha256, request: savedDraft.draft.request,
+      } }),
+    })
+    expect(((await denied.json()) as { result: { ok: boolean } }).result.ok).toBe(false)
+    expect(requests).toHaveLength(count + 1)
+    await rm(sessionFile)
+    const unavailable = await fetch(`http://127.0.0.1:${ctx.webServer.port}/qingmu-yimeng/referenceVideoPreview`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId: 'missing-session', method: 'referenceVideoPreview', payload: request }),
+    })
+    expect(((await unavailable.json()) as { result: { ok: boolean } }).result.ok).toBe(false)
+    expect(requests).toHaveLength(count + 1) // No stale environment fallback and no automatic write replay.
   } finally {
     await ctx.fiber.dispose(); upstream.closeAllConnections()
     await new Promise<void>(resolve => upstream.close(() => { resolve() }))
