@@ -61,6 +61,10 @@ ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只
 
 回执恢复仍只发送 GET。结果未知时，导演工作区允许用户明确按原编辑命令、原幂等键重试；Host 不会自动重试。已成功的原回执在检查今天的 Draft 来源前重放。
 
+## 工作视频选择
+
+`selectTakeVersion` 接受经 Writer 认证的项目所有者选择当前工作视频。回执可包含 `actorNaturalPersonId: null`；适配器保留该缺失值，仍校验操作者、浏览器会话、候选、来源哈希与请求。选择及只读 GET 恢复均不推断人工批准、不改变正式审核、不消耗生成预算。见[选择决定](../../../.agents/notes/implemented/bug-fix/2026-09-13-qingmu-owner-take-selection.zh.md)。
+
 ## Take 普通评论
 
 `createTakeComment` 把精确的当前 Take 主体 SHA 绑定到所选 Take、时间码或帧锚点、评论正文和一个可见 ASCII 幂等键。它只向 `/api/qingmu/projects/{projectId}/episodes/{episodeId}/frames/{frameId}/take-comments` 发送一次 `POST`；请求体准确包含 `expectedTakeSubjectSha256`、`takeId`、`anchor`、`body` 和 `idempotencyKey`，路径 ID、actor、角色与 session 均来自路由和易梦认证。结果必须保留原意图，并把 `changed`、选择、技术通过、正式批准、单集验证、人工签收、Provider 调用与预算影响保持为 false 或零。

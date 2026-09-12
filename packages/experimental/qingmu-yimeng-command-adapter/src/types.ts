@@ -1530,10 +1530,10 @@ export interface YimengTakeSelectionStackSubject {
   readonly versions: readonly YimengTakeSelectionVersion[]
 }
 
-/** Verified human identity used by the Yimeng owner-selection command. */
+/** Authenticated project owner; a recorded natural-person identity is optional for selection. */
 export interface YimengTakeSelectionIdentity {
   readonly actorUserId: string
-  readonly actorNaturalPersonId: string
+  readonly actorNaturalPersonId: string | null
   readonly actorRole: 'project_owner_selector'
   readonly authSessionId: string
 }

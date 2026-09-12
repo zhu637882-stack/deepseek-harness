@@ -155,6 +155,15 @@ describe('Take version selection command transport', () => {
     expect(await handler(fetch)('selectTakeVersion', input, signal())).toEqual({ ok: true, value: expected })
   })
 
+  it('accepts owner selection without inventing a natural-person identity', async () => {
+    const input = request()
+    const old = result(input)
+    const expected = { ...old, selectionIdentity: { ...old.selectionIdentity, actorNaturalPersonId: null } }
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => response(expected, 201))
+    expect(await handler(fetch)('selectTakeVersion', input, signal())).toEqual({ ok: true, value: expected })
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
   it.each([201, 200])('sends one exact selection POST on HTTP %s and verifies the natural-person receipt', async (status) => {
     const input = request()
     const expected = { ...result(input), deduplicated: status === 200 }

@@ -61,6 +61,10 @@ Receipt recovery performs exactly one `GET` to the Yimeng `/api/qingmu/projects/
 
 Receipt recovery remains GET-only. The director workspace can explicitly retry the original edit command with the original idempotency key after an unknown result; the Host never retries automatically. A successful original receipt is replayed before testing today's Draft source.
 
+## Working Take selection
+
+`selectTakeVersion` accepts a Writer-authenticated project owner's choice of the current working video. Its receipt may contain `actorNaturalPersonId: null`; the adapter preserves that absence and still verifies the actor, browser session, candidate, source hashes and request. Selection and GET-only recovery do not infer human approval, alter formal review or spend generation budget. See the [selection decision](../../../.agents/notes/implemented/bug-fix/2026-09-13-qingmu-owner-take-selection.md).
+
 ## Ordinary Take comments
 
 `createTakeComment` binds an exact current Take-subject SHA to a chosen Take, a timecode or frame anchor, the comment body, and one visible-ASCII idempotency key. It sends exactly one `POST` to `/api/qingmu/projects/{projectId}/episodes/{episodeId}/frames/{frameId}/take-comments`; the body contains exactly `expectedTakeSubjectSha256`, `takeId`, `anchor`, `body`, and `idempotencyKey`, while path IDs, actor, role, and session come from the route and Yimeng authentication. The result must preserve the intent and report `changed`, selection, technical-pass, formal-approval, episode-verification, human-signoff, Provider-call, and budget impacts as false or zero.

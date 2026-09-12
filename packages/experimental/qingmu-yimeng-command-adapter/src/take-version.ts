@@ -434,7 +434,7 @@ function normalizeResult(
     },
     selectionIdentity: {
       actorUserId: id(identity.actorUserId, 'selectionIdentity.actorUserId', error),
-      actorNaturalPersonId: id(
+      actorNaturalPersonId: identity.actorNaturalPersonId === null ? null : id(
         identity.actorNaturalPersonId,
         'selectionIdentity.actorNaturalPersonId',
         error,
