@@ -3,10 +3,12 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, expect, it, vi } from 'vitest'
 import { ReferenceVideoPlayer } from '../src/client/ReferenceVideoPlayer.tsx'
 import { runResponse } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
-import type { ReferenceVideoFrameReceipt } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
+import type { ReferenceVideoFrameReceipt, ReferenceVideoRun } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
+import type { QingmuYimengPort } from '../src/client/contracts.ts'
 
-const candidate = { assetId: 'asset_video', assetSha256: 'a'.repeat(64), browserUrl: '/video.mp4', mediaId: 'media_video', reviewStatus: 'pending' }
-const run = { ...runResponse, publicStatus: 'succeeded', kernelStatus: 'Succeeded', candidates: [candidate] }
+const candidate: ReferenceVideoRun['candidates'][number] = { assetId: 'asset_video', assetSha256: 'a'.repeat(64),
+  browserUrl: '/video.mp4', mediaId: 'media_video', reviewStatus: 'pending' }
+const run: ReferenceVideoRun = { ...runResponse, publicStatus: 'succeeded', kernelStatus: 'Succeeded', candidates: [candidate] }
 const receipt: ReferenceVideoFrameReceipt = { schema: 'qingmu.reference-video-frame.v1', projectId: 'p', episodeId: 'e', frameId: 'f', runId: run.runId,
   assetId: candidate.assetId, assetSha256: candidate.assetSha256, requestedTimestampMs: 1234,
   image: { assetId: `asset_vframe_${'b'.repeat(32)}`, assetSha256: 'c'.repeat(64), width: 1920, height: 1080, actualTimestampMs: 1266.667 },
@@ -14,7 +16,8 @@ const receipt: ReferenceVideoFrameReceipt = { schema: 'qingmu.reference-video-fr
 afterEach(() => { cleanup(); sessionStorage.clear(); vi.restoreAllMocks() })
 it('captures the visible playback position and recovers after remount without a second write', async () => {
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
-  const port = { captureReferenceVideoFrame: vi.fn(async () => { throw new Error('lost response') }), readReferenceVideoFrame: vi.fn(async () => receipt) }
+  const port = { captureReferenceVideoFrame: vi.fn<QingmuYimengPort['captureReferenceVideoFrame']>(async () => { throw new Error('lost response') }),
+    readReferenceVideoFrame: vi.fn<QingmuYimengPort['readReferenceVideoFrame']>(async () => receipt) }
   const onReferenceSaved = vi.fn()
   const props = { projectId: 'p', frameId: 'f', candidate, run, port, onReferenceSaved }
   const view = render(<ReferenceVideoPlayer {...props} />)
