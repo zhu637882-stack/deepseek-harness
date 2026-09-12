@@ -24,6 +24,7 @@ import { useDirectorConnection } from './native-director-session.ts'
 import type { NativeDirectorSessionPort } from './native-director-session.ts'
 import { NativeDirectorComposer } from './NativeDirectorComposer.tsx'
 import { NativeSceneDesign } from './NativeSceneDesign.tsx'
+import { SceneDirectionEditor } from './SceneDirectionEditor.tsx'
 
 interface LocalPlan {
   activeIndex?: number
@@ -951,7 +952,7 @@ export function ScenePlanningWorkspace({
         {(Object.keys(labels) as (keyof typeof labels)[]).map(field => <label key={field}>{labels[field]}
           <textarea aria-label={labels[field]} rows={field === 'title' ? 1 : 2} maxLength={field === 'title' ? 120 : 2000} value={current[field]}
             onChange={(e) => { change({ ...current, [field]: e.target.value }) }} /></label>)}
-        {current.directorPlan && <details><summary>本镜完整导演设计</summary><pre>{JSON.stringify(current.directorPlan, null, 2)}</pre></details>}
+        <SceneDirectionEditor value={current.directorPlan} onChange={(directorPlan) => { change({ ...current, directorPlan }) }} />
         <label>规划时长（秒）<input aria-label="规划时长（秒）" type="number" min="0.5" max="30" step="0.5" value={current.durationSec}
           onChange={(e) => { change({ ...current, durationSec: Number(e.target.value) }) }} /></label>
         <div><h3>对白分配</h3><p>保留原文与来源行；此处未核验语音时序。</p>

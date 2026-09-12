@@ -55,6 +55,45 @@ function replayProposal(shotId = 'shot_1'): DirectorReplayProposal {
 }
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); vi.stubGlobal('crypto', webcrypto) })
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
+it.each([false, true])('saves editable department direction and retains it after disconnection (existing=%s)', async (existing) => {
+  const directorPlan = {
+    cameraMovement: '跟随进门', performance: '迟疑', continuity: { start: '手中拿着信', end: '信放在桌上', evidence: ['source_1'] },
+    soundPlan: { ambience: '门外雨声', foley: '脚步', music: '此处留白', acoustics: { room: '木屋' } },
+    dialoguePlan: [{ character: '林夏', line: '请进。', sourceLineId: 'line_1', delivery: '轻声', emphasis: ['请'] }],
+    artDirection: { era: '剧本指定', exceptions: ['来自未来的信件'] },
+  }
+  const shot = { title: '门口', narrative: '相遇', visual: '门内', action: '走向桌边', durationSec: 6, dialogueLineIds: ['line_1'], directorPlan }
+  const current: ScenePlanningState = existing ? { ...state,
+    storyboard: { id: 'revision_1', version: 1, sourceHash: 'b'.repeat(64), status: 'Ready' },
+    planning: { sceneId: 'scene_1', sceneIndex: 1, initialReceiptId: 'receipt_1', actorIds: {},
+      source: { sceneIndex: 1, scriptRevision: 1, scriptSha256: state.scriptSha256!, inputSha256: 'c'.repeat(64), sourceLineIds: ['line_1'] },
+      shots: [{ ...shot, id: 'shot_1' }] } } : state
+  if (!existing) localStorage.setItem('qingmu.scene-planning.v1:project_1:episode_1', JSON.stringify({ ...legacyLocalPlan('门口', true), shots: [shot] }))
+  const port = { readScenePlanning: vi.fn(async () => current), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn<(request: ScenePlanningRequest) => Promise<ScenePlanningResult>>(async () => { throw new Error('disconnected') }), recoverScenePlanning: vi.fn() }
+  const props = { ...current, port, onCommitted: vi.fn(async () => {}), onSelectShotId: vi.fn(), onUnsavedChange: vi.fn() }
+  const view = render(<ScenePlanningWorkspace {...props} />)
+  fireEvent.change(await screen.findByLabelText('运镜设计'), { target: { value: '随人物后退至桌边，再停下' } })
+  fireEvent.change(screen.getByLabelText('环境与空间声'), { target: { value: '雨声连续，门合上后变闷，台词期间仍在' } })
+  fireEvent.change(screen.getByLabelText('配乐安排'), { target: { value: '' } })
+  fireEvent.change(screen.getByLabelText('对白 1 的语气与表演'), { target: { value: '重音落在请，迟疑后邀请' } })
+  fireEvent.change(screen.getByLabelText('镜头结束状态'), { target: { value: '信仍在手中，人已到桌边' } })
+  const expected = { ...directorPlan, cameraMovement: '随人物后退至桌边，再停下',
+    soundPlan: { ...directorPlan.soundPlan, ambience: '雨声连续，门合上后变闷，台词期间仍在', music: '' },
+    dialoguePlan: [{ ...directorPlan.dialoguePlan[0], delivery: '重音落在请，迟疑后邀请' }],
+    continuity: { ...directorPlan.continuity, end: '信仍在手中，人已到桌边' } }
+  expect(port.saveScenePlanning).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByText('预览保存影响')); fireEvent.click(screen.getByText('确认保存规划'))
+  await screen.findByRole('alert')
+  expect(port.saveScenePlanning).toHaveBeenCalledOnce()
+  const request = port.saveScenePlanning.mock.calls[0]?.[0]
+  expect(request?.request).toMatchObject(existing ? { action: 'edit', shotId: 'shot_1', shot: { ...shot, directorPlan: expected } }
+    : { action: 'initialize', shots: [{ ...shot, directorPlan: expected }] })
+  view.unmount(); render(<ScenePlanningWorkspace {...props} />)
+  expect((await screen.findByLabelText<HTMLTextAreaElement>('环境与空间声')).value).toBe(expected.soundPlan.ambience)
+  expect(screen.getByLabelText('运镜设计').matches(':disabled')).toBe(true)
+  expect(port.saveScenePlanning).toHaveBeenCalledOnce()
+})
 function automaticReadState(): ScenePlanningState {
   return { ...state, storyboard: { id: 'revision_10', version: 10, sourceHash: 'b'.repeat(64), status: 'Ready' },
     scenes: [{ sceneIndex: 0, title: '自动雨夜', actionDescription: '角色走进雨夜街道', dialogues: [
