@@ -36,10 +36,17 @@ describe.skipIf(!casesFile)('live native asset design recovery', () => {
           expect(await card.getByLabel(/^画面描述/).inputValue()).toBe(asset.imagePrompt)
           expect(await card.getByLabel(/^设计依据/).inputValue()).toBe(asset.designBasis)
           expect(await card.getByLabel(/^主体完整设定/).inputValue()).toBe(asset.visualIdentity)
+          const frameOption = card.getByRole('checkbox', { name: '以完整画面描述出图' })
+          expect(await frameOption.isChecked()).toBe(false)
+          await frameOption.check()
+          expect(await frameOption.isChecked()).toBe(true)
+          expect(await card.getByLabel(/^画面描述/).inputValue()).toBe(asset.imagePrompt)
+          expect(await card.getByLabel(/^设计依据/).inputValue()).toBe(asset.designBasis)
         }
         expect(await page.getByText(/已修正正文引号的格式/).count()).toBe(item.repaired ? 1 : 0)
         expect(await page.getByRole('button', { name: '保存素材设计', exact: true }).isEnabled()).toBe(true)
-        transcript.push({ label: item.label, assets: expected.assets.length, repaired: item.repaired, errors, writes })
+        transcript.push({ label: item.label, assets: expected.assets.length,
+          repaired: item.repaired, frameScopeEditable: true, errors, writes })
         expect(errors).toEqual([]); expect(writes).toEqual([])
         await context.close()
       }

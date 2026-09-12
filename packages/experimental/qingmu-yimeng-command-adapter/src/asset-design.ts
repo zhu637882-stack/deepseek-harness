@@ -24,6 +24,9 @@ export interface AssetDesignItem {
   readonly name: string
   readonly description?: string
   readonly imagePrompt: string
+  /** Explicitly authored complete frame; identity and story basis stay in provenance, not image instructions.
+   * Omitted/false retains legacy context composition. */
+  readonly selfContainedImagePrompt?: boolean
   /** Entity appearance/structure, independent of the current image view or edit. */
   readonly visualIdentity?: string
   readonly voiceIdentity?: string

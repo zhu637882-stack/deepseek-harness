@@ -174,3 +174,37 @@ it('saves independent image framing before requoting and restores it on reopen',
   expect((await screen.findByLabelText('素材画幅') as HTMLSelectElement).value).toBe('3:4')
   expect(port.generateAssetImage).not.toHaveBeenCalled()
 })
+
+
+it('keeps legacy composition until a complete frame is explicitly saved and restored', async () => {
+  const port = setup()
+  const view = render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  const option = await screen.findByRole<HTMLInputElement>('checkbox', { name: '以完整画面描述出图' })
+  expect(option.checked).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: '查看生成费用' }))
+  await screen.findByRole('button', { name: '确认费用并生成一张' })
+  fireEvent.click(option)
+  expect(screen.queryByRole('button', { name: '确认费用并生成一张' })).toBeNull()
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '查看生成费用' }).disabled).toBe(true)
+  const updated = { ...state, design: { ...state.design!, assets: [{ ...state.design!.assets[0]!, selfContainedImagePrompt: true }] } }
+  port.saveAssetDesign.mockResolvedValue(updated)
+  port.readAssetDesign.mockResolvedValue(updated)
+  fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
+  await waitFor(() => { expect(port.saveAssetDesign).toHaveBeenCalledTimes(1) })
+  expect(port.saveAssetDesign.mock.calls[0]).toMatchObject([{ design: { assets: [{ selfContainedImagePrompt: true, imagePrompt: '真人定妆照' }] } }])
+  view.unmount()
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  expect((await screen.findByRole<HTMLInputElement>('checkbox', { name: '以完整画面描述出图' })).checked).toBe(true)
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
+
+it('rejects an ambiguous frame flag from imported model output', async () => {
+  const port = setup()
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  await screen.findByLabelText('画面描述')
+  const value = { ...state.design, assets: [{ ...state.design!.assets[0], selfContainedImagePrompt: 'false' }] }
+  fireEvent.change(screen.getByLabelText('素材设计数据'), { target: { value: JSON.stringify(value) } })
+  fireEvent.click(screen.getByRole('button', { name: '载入设计' }))
+  expect(screen.getByText(/完整画面描述选项需要是布尔值/)).toBeTruthy()
+  expect(port.saveAssetDesign).not.toHaveBeenCalled()
+})

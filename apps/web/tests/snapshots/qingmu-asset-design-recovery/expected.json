@@ -3,6 +3,7 @@
     "label": "watercolor",
     "assets": 1,
     "repaired": true,
+    "frameScopeEditable": true,
     "errors": [],
     "writes": []
   },
@@ -10,6 +11,7 @@
     "label": "bw",
     "assets": 1,
     "repaired": false,
+    "frameScopeEditable": true,
     "errors": [],
     "writes": []
   }
