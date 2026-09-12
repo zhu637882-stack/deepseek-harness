@@ -1,5 +1,7 @@
 # 青木易梦只读适配器
 
+首次生成分镜前，工作流读取保留真实的空规划状态及原因。只有零镜头、明确缺少分镜的原因及匹配的首帧摘要同时成立时，才允许整组修订字段为空；部分缺失或损坏的数据仍拒绝。尚未审查的生成参考图保留其真实来源，不因此获得通过或选用。
+
 [English](README.md) | 中文
 
 这个私有实验性 Host 插件是青木 OS 与易梦 API 之间的只读 BFF。它注册仅限回环地址的 `/qingmu-yimeng` RPC 通道，并暴露 `health`、`capabilityCatalog`、`costRehearsal`、`gateAControlEvidence`、`projects`、`episodes`、`script`、`elementProfile`、`referenceCandidates`、`selectedVideoReview`、`takeVersions`、`takeComments`、`takeAcceptance`、`takeReviewAuthority`、`takeTechnicalQc`、`takeApprovalLifecycle`、`shotFindings`、`productionUnits`、`lsuPlanSource`、`stageSources` 和 `workflow`；它不暴露任何写入端点。独立的 `/api/qingmu/entity-draft-human-review/state` 路由是自然人审核面板使用的 cookie 认证同源读取。

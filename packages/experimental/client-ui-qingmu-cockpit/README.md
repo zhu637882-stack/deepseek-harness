@@ -1,5 +1,7 @@
 # Qingmu OS production cockpit
 
+Scene planning and shooting reads wait for both project and episode coordinates. New projects enter planning without a storyboard; advanced tools that require an existing revision stay unavailable until it exists. Loading or switching projects never submits an empty-scope request.
+
 Project cards offer independent creative copies. The copy panel previews saved episode, shot and asset counts and persists its exact request for recovery after refresh or a lost reply. Copies retain scripts, designs and media references; editing, generation and review history stay in the original project.
 
 The shooting workspace offers sound and picture review for the browsed video candidate. Explicit submission uses the existing Writer audit queue; automatic refresh only reads the original task. Visual observations and six sound categories retain evidence and uncertainty; time buttons pause and seek the verified candidate without reloading or generating media. Visual claims without valid linked observations remain unverified. Legacy reports stay readable and offer an explicit review with the current method. Reviews remain advisory and do not select or approve a take.

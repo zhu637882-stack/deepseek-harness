@@ -94,6 +94,8 @@ export function buildShotRelationMethodRequest(
   relations: YimengShotRelationsProjection,
   selectedShotId: string,
 ): ImagoShotRelationMethodRequest {
+  const { revisionId, revisionVersion, sourceSha256 } = relations.storyboardRevision
+  if (revisionId === null || revisionVersion === null || sourceSha256 === null) throw new Error('尚未生成分镜')
   if (relations.scenes.length === 0 || relations.shots.length === 0) throw new Error('易梦镜头关系投影为空')
   if (!relations.shots.some(shot => shot.shotId === selectedShotId)) throw new Error('所选 Shot 不属于当前关系快照')
 
@@ -154,9 +156,9 @@ export function buildShotRelationMethodRequest(
     projectId: relations.projectId,
     episodeId: relations.episodeId,
     episodeRevision: relations.storyboardRevision.episodeRevision,
-    storyboardRevisionId: relations.storyboardRevision.revisionId,
-    storyboardRevisionVersion: relations.storyboardRevision.revisionVersion,
-    storyboardSourceSha256: relations.storyboardRevision.sourceSha256,
+    storyboardRevisionId: revisionId,
+    storyboardRevisionVersion: revisionVersion,
+    storyboardSourceSha256: sourceSha256,
     selectedShotId,
     scenes,
     shots,

@@ -1918,6 +1918,21 @@ describe('qingmu Yimeng read adapter', () => {
     }, signal())).toEqual({ ok: true, value: response })
   })
 
+  it.each(['pending', 'missing-job', 'forged-pass'])(
+    'keeps generated source lineage separate from qualification: %s', async (variant) => {
+      const candidate = { ...REFERENCE_CANDIDATE, formalConsistencyCheckId: '', formalConsistencyPassed: false,
+        qualityStatus: 'pending', selectionStatus: 'Unselected', isSelected: false,
+        qualificationKind: 'none', qualificationCheckId: '', qualificationPassed: false }
+      if (variant === 'missing-job') candidate.generationJobId = ''
+      if (variant === 'forged-pass') candidate.qualificationPassed = true
+      const response = { ...REFERENCE_CANDIDATES_FIXTURE, candidates: [candidate] }
+      const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(response), 'test-token'))
+      const result = await handler('referenceCandidates', { projectId: 'project-1', elementKind: 'prop', targetId: 'prop-1' }, signal())
+      if (variant === 'pending') expect(result).toEqual({ ok: true, value: response })
+      else expect(result.ok).toBe(false)
+    },
+  )
+
   it('accepts only receipt-bound owner-final reference qualifications', async () => {
     const humanReviewIdentity = '1'.repeat(64)
     const ownerFinal = {
@@ -2400,6 +2415,39 @@ describe('qingmu Yimeng read adapter', () => {
       },
     })
   })
+
+  it.each(['empty', 'has-shots', 'partial-revision', 'wrong-hero-hash'])(
+    'reads only the coherent unplanned workflow state: %s', async (variant) => {
+      const upstream = workflowFixture()
+      const director = upstream.director as Record<string, unknown>
+      const relations = director.shotRelations as Record<string, unknown>
+      const oldShots = relations.shots
+      const revision = { episodeRevision: 0, revisionId: null, revisionVersion: null, sourceSha256: null }
+      Object.assign(relations, { storyboardRevision: revision, scenes: [], shots: [], valid: false,
+        blockers: [{ scope: 'storyboard_revision', reason: 'storyboard_revision_missing' }] })
+      const hero = director.heroFrameStoryboards as Record<string, unknown>
+      Object.assign(hero, { episodeRevision: 0,
+        storyboardRevision: { revisionId: null, revisionVersion: null, sourceSha256: null }, shots: [], valid: false,
+        blockers: [{ scope: 'shot_relations', reason: 'shot_relations_invalid' }],
+        shotRelationsSha256: createHash('sha256').update(canonicalJson(relations)).digest('hex'),
+        shotsSha256: createHash('sha256').update('[]').digest('hex') })
+      if (variant === 'has-shots') relations.shots = oldShots
+      if (variant === 'partial-revision') relations.storyboardRevision = { ...revision, revisionId: 'revision-1' }
+      if (variant === 'wrong-hero-hash') hero.shotRelationsSha256 = '0'.repeat(64)
+      const body = { schema: 'jason.qingmu-continuity-delta.v1', projectId: 'project-1', episodeId: 'episode-1',
+        storyboardRevision: revision, availability: 'unavailable', reason: 'storyboard_revision_missing', pairs: [],
+        readOnly: true, providerCalls: 0, taskMutation: false, budgetMutation: false, humanSignoffInferred: false }
+      director.continuityDelta = { ...body, snapshotSha256: createHash('sha256').update(canonicalJson(body)).digest('hex') }
+      const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(upstream), 'test-token'))
+      const result = await handler('workflow', { projectId: 'project-1', episodeId: 'episode-1' }, signal())
+      if (variant !== 'empty') { expect(result.ok).toBe(false); return }
+      if (!result.ok) throw new Error(result.error.message)
+      const workflow = result.value as YimengWorkflowProjection
+      expect(workflow.director.shotRelations).toMatchObject({ valid: false, storyboardRevision: revision, shots: [] })
+      expect(workflow.director.heroFrameStoryboards).toMatchObject({ valid: false, shots: [] })
+      expect(workflow.director.continuityDelta?.availability).toBe('unavailable')
+    },
+  )
 
   it.each(['available', 'unavailable'] as const)('retains the optional %s continuity projection on the existing workflow read', async (availability) => {
     const upstream = workflowFixture()

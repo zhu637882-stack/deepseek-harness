@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/experimental/qingmu-yimeng-read-adapter/README.md
-README.md: 0e794828885925ddaccdd1a4ed5bf3b73ee7135c
-README.zh.md: 4e972122c4e1c8e4615244945ad95966b6ad2eae
+README.md: 1e84ddbb185960291085341531c7270693034197
+README.zh.md: 844a335a646f84e94ec9d891bdcd3c657af2cf51

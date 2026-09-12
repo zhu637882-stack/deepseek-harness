@@ -291,6 +291,10 @@ function resolveCanvasContext(
   if (selectedShotId === '') return { status: 'empty', reason: 'selection' }
   try {
     if (heroProjection === undefined) return { status: 'empty', reason: 'hero' }
+    const { revisionId, revisionVersion, sourceSha256 } = relations.storyboardRevision
+    if (revisionId === null || revisionVersion === null || sourceSha256 === null) {
+      return { status: 'empty', reason: 'hero' }
+    }
     if (
       heroProjection.projectId !== relations.projectId
       || heroProjection.episodeId !== relations.episodeId
@@ -335,9 +339,9 @@ function resolveCanvasContext(
       projectId: relations.projectId,
       episodeId: relations.episodeId,
       episodeRevision: relations.storyboardRevision.episodeRevision,
-      storyboardRevisionId: relations.storyboardRevision.revisionId,
-      storyboardRevisionVersion: relations.storyboardRevision.revisionVersion,
-      storyboardSourceSha256: relations.storyboardRevision.sourceSha256,
+      storyboardRevisionId: revisionId,
+      storyboardRevisionVersion: revisionVersion,
+      storyboardSourceSha256: sourceSha256,
       shotRelationsSha256: heroProjection.shotRelationsSha256,
       heroShotsSha256: heroProjection.shotsSha256,
       frameId: selectedShotId,
@@ -351,9 +355,9 @@ function resolveCanvasContext(
       value: {
         projectId: relations.projectId,
         episodeId: relations.episodeId,
-        storyboardRevisionId: relations.storyboardRevision.revisionId,
-        storyboardRevisionVersion: relations.storyboardRevision.revisionVersion,
-        storyboardSourceSha256: relations.storyboardRevision.sourceSha256,
+        storyboardRevisionId: revisionId,
+        storyboardRevisionVersion: revisionVersion,
+        storyboardSourceSha256: sourceSha256,
         frameId: selectedShotId,
         shotSnapshotSha256,
         heroFrame,

@@ -325,6 +325,7 @@ export function ScenePlanningWorkspace({
   }
   useEffect(() => {
     let active = true
+    if (!projectId || !episodeId) return
     void port.readScenePlanning({ projectId, episodeId }).then((snapshot) => {
       const target = hostSync?.pendingTarget()
       const targetScene = snapshot.scenePlans?.find(plan => plan.sceneId === target?.sceneId)?.sceneIndex

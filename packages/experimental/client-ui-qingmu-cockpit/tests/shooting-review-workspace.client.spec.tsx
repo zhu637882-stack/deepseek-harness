@@ -455,3 +455,14 @@ it.each(['current', 'script-drift', 'scope-drift', 'read-failed', 'unknown-recei
     cleanup()
   },
 )
+
+it('waits for the shooting scope before reading scene planning', async () => {
+  const readScenePlanning = vi.fn(async () => ({ frameRequirements: [], canonicalStoryboard: null }))
+  const props = { projectName: '', episodeName: '', selectedShotId: '', onSelectShotId: vi.fn(), onNavigate: vi.fn(),
+    directorAssistant: null, t: (key: string) => key, port: { ...portFixture, readScenePlanning } as never }
+  const view = render(<ShootingReviewWorkspace {...props} projectId="" episodeId="" />)
+  expect(readScenePlanning).not.toHaveBeenCalled()
+  view.rerender(<ShootingReviewWorkspace {...props} projectId="project-new" episodeId="episode-new" />)
+  await waitFor(() => { expect(readScenePlanning).toHaveBeenCalledTimes(1) })
+  expect(readScenePlanning.mock.calls[0]).toEqual([{ projectId: 'project-new', episodeId: 'episode-new' }, expect.any(AbortSignal)])
+})

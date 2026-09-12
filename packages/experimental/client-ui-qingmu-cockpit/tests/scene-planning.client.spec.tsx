@@ -789,3 +789,14 @@ it('appends another scene and restores its selection while keeping both scenes e
   expect(selected).toHaveBeenLastCalledWith('shot_1')
   expect(save).toHaveBeenCalledOnce()
 })
+
+it('waits for the project and episode before reading scene planning', async () => {
+  const port = { readScenePlanning: vi.fn(async () => state), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() }
+  const props = { port, onCommitted: vi.fn(async () => {}), onSelectShotId: vi.fn(), onUnsavedChange: vi.fn() }
+  const view = render(<ScenePlanningWorkspace {...props} projectId="" episodeId="" />)
+  expect(port.readScenePlanning).not.toHaveBeenCalled()
+  view.rerender(<ScenePlanningWorkspace {...props} projectId={state.projectId} episodeId={state.episodeId} />)
+  await waitFor(() => { expect(port.readScenePlanning).toHaveBeenCalledTimes(1) })
+  expect(port.readScenePlanning.mock.calls[0]).toEqual([{ projectId: state.projectId, episodeId: state.episodeId }])
+})

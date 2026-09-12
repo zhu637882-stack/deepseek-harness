@@ -3724,10 +3724,13 @@ function normalizeReferenceCandidate(
     && qualificationIdentity === '' && uploadCommandReceiptId === ''
     && (qualificationCheckId === formalConsistencyCheckId)
     && rightsBindingValid
+  // A generated candidate can retain its source before any qualification exists.
+  const unqualifiedSourceValid = sourceRevisionId === ''
+    || (sourceEpisodeId !== '' && generationJobId !== '' && uploadCommandReceiptId === '')
   const noQualificationValid = qualificationKind === 'none'
     && qualificationCheckId === '' && !qualificationPassed
     && qualificationIdentity === ''
-    && sourceRevisionId === ''
+    && unqualifiedSourceValid
     && formalConsistencyCheckId === '' && !formalConsistencyPassed
     && ownerIdentitiesEmpty
     && (uploadCommandReceiptId === '' || (sourceEpisodeId === '' && generationJobId === ''))
@@ -4630,6 +4633,18 @@ function normalizeShotRelations(
   }
   if (!Array.isArray(root.blockers)) throw new UpstreamContractError(`${field}.blockers must be an array`)
   const blockers = root.blockers.map(normalizeShotRelationBlocker)
+  const emptyRevision = requireObject(root.storyboardRevision, `${field}.storyboardRevision`)
+  // Before the first storyboard, absence is an ordinary planning state, not a corrupt graph.
+  if (root.valid === false && blockers.length === 1
+    && blockers[0]?.scope === 'storyboard_revision' && blockers[0]?.reason === 'storyboard_revision_missing'
+    && Array.isArray(root.scenes) && root.scenes.length === 0 && Array.isArray(root.shots) && root.shots.length === 0
+    && emptyRevision.episodeRevision === 0 && emptyRevision.revisionId === null
+    && emptyRevision.revisionVersion === null && emptyRevision.sourceSha256 === null) {
+    assertExactOutputKeys(emptyRevision, ['episodeRevision', 'revisionId', 'revisionVersion', 'sourceSha256'], `${field}.storyboardRevision`)
+    return { schema: SHOT_RELATIONS_SCHEMA, projectId, episodeId,
+      storyboardRevision: { episodeRevision: 0, revisionId: null, revisionVersion: null, sourceSha256: null },
+      scenes: [], shots: [], valid: false, blockers }
+  }
   if (root.valid !== true || blockers.length !== 0) {
     throw new UpstreamContractError(`${field} is invalid: ${blockers[0]?.reason ?? 'unknown relation blocker'}`)
   }
@@ -4942,6 +4957,21 @@ function normalizeHeroFrameStoryboards(
   ) throw new UpstreamContractError(`${field} subject or episode revision mismatch`)
   const revision = requireObject(root.storyboardRevision, `${field}.storyboardRevision`)
   assertExactOutputKeys(revision, ['revisionId', 'revisionVersion', 'sourceSha256'], `${field}.storyboardRevision`)
+  if (relations.valid === false && root.valid === false && episodeRevision === 0
+    && revision.revisionId === null && revision.revisionVersion === null && revision.sourceSha256 === null
+    && Array.isArray(root.shots) && root.shots.length === 0 && Array.isArray(root.blockers) && root.blockers.length === 1) {
+    const blockers = root.blockers.map((blocker, index) => normalizeHeroFrameStoryboardBlocker(blocker, index, `${field}.blockers`))
+    const shotRelationsSha256 = requireSha256(root.shotRelationsSha256, `${field}.shotRelationsSha256`)
+    const shotsSha256 = requireSha256(root.shotsSha256, `${field}.shotsSha256`)
+    if (blockers[0]?.scope !== 'shot_relations' || blockers[0]?.reason !== 'shot_relations_invalid'
+      || shotRelationsSha256 !== createHash('sha256').update(canonicalJson(relations, field)).digest('hex')
+      || shotsSha256 !== createHash('sha256').update('[]').digest('hex')) {
+      throw new UpstreamContractError(`${field} unplanned source mismatch`)
+    }
+    return { schema: HERO_FRAME_STORYBOARDS_SCHEMA, projectId, episodeId, episodeRevision,
+      storyboardRevision: { revisionId: null, revisionVersion: null, sourceSha256: null },
+      shotRelationsSha256, shotsSha256, shots: [], valid: false, blockers }
+  }
   const storyboardRevision = {
     revisionId: requireIdentifier(revision.revisionId, `${field}.storyboardRevision.revisionId`),
     revisionVersion: requireInteger(revision.revisionVersion, `${field}.storyboardRevision.revisionVersion`, 1),

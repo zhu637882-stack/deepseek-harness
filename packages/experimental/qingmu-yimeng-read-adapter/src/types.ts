@@ -1909,9 +1909,10 @@ export interface YimengWorkflowRequest {
 /** Storyboard authority shared by every E5-1 relation view. */
 export interface YimengShotRelationsStoryboardRevision {
   readonly episodeRevision: number
-  readonly revisionId: string
-  readonly revisionVersion: number
-  readonly sourceSha256: string
+  /** Null together only for an empty episode whose storyboard has not been created. */
+  readonly revisionId: string | null
+  readonly revisionVersion: number | null
+  readonly sourceSha256: string | null
 }
 
 /** Canonical Scene authority referenced by one or more Shots. */
@@ -2060,7 +2061,7 @@ export interface YimengShotRelationsProjection {
   readonly storyboardRevision: YimengShotRelationsStoryboardRevision
   readonly scenes: readonly YimengShotRelationScene[]
   readonly shots: readonly YimengShotRelationShot[]
-  readonly valid: true
+  readonly valid: boolean
   readonly blockers: readonly YimengShotRelationBlocker[]
 }
 
@@ -2152,7 +2153,7 @@ export interface YimengHeroFrameStoryboardsProjection {
   readonly shotRelationsSha256: string
   readonly shots: readonly YimengHeroFrameStoryboardShot[]
   readonly shotsSha256: string
-  readonly valid: true
+  readonly valid: boolean
   readonly blockers: readonly YimengHeroFrameStoryboardBlocker[]
 }
 

@@ -278,6 +278,7 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
   }, [projectId, episodeId, port, projection])
   useEffect(() => {
     const controller = new AbortController(); setPlanningShots([])
+    if (!projectId || !episodeId) return
     void port.readScenePlanning?.({ projectId, episodeId }, controller.signal).then((value) => {
       if (!controller.signal.aborted && value.projectId === projectId && value.episodeId === episodeId) {
         setPlanningShots(value.canonicalStoryboard?.shots ?? [])

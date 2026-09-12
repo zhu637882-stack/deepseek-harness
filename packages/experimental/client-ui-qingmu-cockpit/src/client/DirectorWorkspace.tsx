@@ -116,6 +116,8 @@ function ExistingDirectorWorkspace(props: DirectorWorkspaceProps) {
   const shot = relations?.shots.find(item => item.shotId === selectedShotId)
   const scene = relations?.scenes.find(item => item.sceneId === shot?.sceneId)
   if (relations === undefined) return <p role="status">{t('directorChooseEpisode')}</p>
+  const revisionId = relations.storyboardRevision.revisionId
+  if (revisionId === null) return <p role="status">尚未生成分镜，请先在场景规划与导演助手中设计镜头。</p>
   return <section className={css.workspace} aria-label={t('directorTitle')}>
     <nav className={css.shots} aria-label={t('directorSceneShots')}>
       <h3>{t('directorSceneShots')}</h3>
@@ -137,7 +139,7 @@ function ExistingDirectorWorkspace(props: DirectorWorkspaceProps) {
         <summary>{t('directorCompareTakes')}</summary>
         {showTakes && <TakeVersionCompareView {...props} enabled readOnly />}
       </details>
-      <PromptIrWorkspace {...props} storyboardRevisionId={relations.storyboardRevision.revisionId}
+      <PromptIrWorkspace {...props} storyboardRevisionId={revisionId}
         {...(shot ? { nativeDirector: { bridge: props.directorBridge, sessionId: props.directorSessionId,
           connection: props.directorConnection,
           scope: { projectId: props.projectId, episodeId: props.episodeId, sceneId: shot.sceneId, shotId: shot.shotId } } } : {})}
