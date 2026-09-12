@@ -22,6 +22,22 @@ const localPictureThree = { ...localPicture, assetId: 'asset_localref_cafe', ass
 function localReader() { return vi.fn(async () => localContent) }
 const page = (items: ReferenceVideoAssetsResponse['items']): ReferenceVideoAssetsResponse => ({ projectId:'p',page:1,pages:1,items })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+it('filters video references and plays their picture and sound in a video element', async () => {
+  const clip = { assetId: 'video', assetSha256: 'f'.repeat(64), label: '反打参考',
+    mediaType: 'reference_video' as const, browserUrl: '/reference.mp4' }
+  const port = { referenceVideoAssets: vi.fn().mockResolvedValue(page([picture, voice, clip])),
+    readLocalReferenceCandidateContent: localReader() }
+  render(<ProjectAssetLibrary projectId="p" port={port} />)
+  await screen.findByRole('button', { name: '预览反打参考' })
+  fireEvent.click(screen.getByRole('button', { name: '视频', exact: true }))
+  expect(screen.queryByRole('button', { name: '预览林予' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '预览林予音色' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '预览反打参考' }))
+  const preview = screen.getByRole('region', { name: '素材预览' })
+  expect(preview.querySelector('video')?.getAttribute('src')).toBe('/reference.mp4')
+  expect(preview.querySelector('audio, img')).toBeNull()
+  expect(screen.getByText('视频 · 点击播放')).toBeTruthy()
+})
 it('filters real catalog entries and opens image or voice previews without a write action', async () => {
   const port = { referenceVideoAssets:vi.fn().mockResolvedValue(page([picture,voice])), readLocalReferenceCandidateContent:localReader() }
   render(<ProjectAssetLibrary projectId="p" port={port} />)
