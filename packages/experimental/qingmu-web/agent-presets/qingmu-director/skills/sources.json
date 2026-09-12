@@ -14,7 +14,7 @@
         "CONTRIBUTING.md": "b457e8094b71f8619685073032b38dcb342a5df4d3439f1f20440b9f71a9d1ad",
         "LICENSE": "df731ea2e1ffd3b8890ad246da3df96ceba3301c16fb4970c16811df4c728b56",
         "README.md": "de61800434c2ff91cb5aff1b86d35d542b70d3b64716ecb09c1fa8322b9c1fd9",
-        "SKILL.md": "8a86892706f6d29859d0f371a6eac0a3d5d6e082f47f858469274cc4b7504fcc",
+        "SKILL.md": "fdf51ab2539dfb7e5af90e4680a42498e3a9d29c0b9440a24f53e9767057971b",
         "assets/beat-sheet-template.md": "e53e846e9f43cdc80cf261bde4978001628d6383a6d4bd702762f88131e04bda",
         "assets/director-book-template.md": "d6f0901207a822220fe87a7ca2feeea0ddeaf142a168a03704456e69b0ad68b0",
         "assets/edit-timeline-template.md": "b6a6ad673094a419ada6afb9d8e613b4d2c8538cface5cb17031bc7b408fc5ee",
@@ -701,7 +701,7 @@
       "license": "Apache-2.0",
       "files": {
         "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
-        "SKILL.md": "61f247b1b1eadad193af24a8d63e15c232afaed0e836da6bb0fe0cf30e485dbb",
+        "SKILL.md": "765e108b2bb668d3847a65cad4e3cc82e101abaf34a41cb91c8d00aae8597774",
         "references/cinematic-image-direction.md": "b2fc8b2dd6dbd1bcf78bc2671806575352db95481796dc5cae5a5c6a6befb945",
         "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
         "agents/openai.yaml": "7ffb6718d97e5858e5070dbf6e1330a7118f817c372dcb43da6ebb2949c16084"
