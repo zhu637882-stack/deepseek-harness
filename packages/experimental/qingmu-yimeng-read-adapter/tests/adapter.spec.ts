@@ -2416,7 +2416,7 @@ describe('qingmu Yimeng read adapter', () => {
     })
   })
 
-  it.each(['empty', 'has-shots', 'partial-revision', 'wrong-hero-hash'])(
+  it.each(['empty', 'has-shots', 'partial-revision', 'wrong-hero-hash', 'extra-blocker'])(
     'reads only the coherent unplanned workflow state: %s', async (variant) => {
       const upstream = workflowFixture()
       const director = upstream.director as Record<string, unknown>
@@ -2424,7 +2424,8 @@ describe('qingmu Yimeng read adapter', () => {
       const oldShots = relations.shots
       const revision = { episodeRevision: 0, revisionId: null, revisionVersion: null, sourceSha256: null }
       Object.assign(relations, { storyboardRevision: revision, scenes: [], shots: [], valid: false,
-        blockers: [{ scope: 'storyboard_revision', reason: 'storyboard_revision_missing' }] })
+        blockers: [{ scope: 'storyboard_revision', reason: 'storyboard_revision_missing' },
+          { scope: 'shot', reason: 'canonical_shot_set_empty' }] })
       const hero = director.heroFrameStoryboards as Record<string, unknown>
       Object.assign(hero, { episodeRevision: 0,
         storyboardRevision: { revisionId: null, revisionVersion: null, sourceSha256: null }, shots: [], valid: false,
@@ -2432,6 +2433,7 @@ describe('qingmu Yimeng read adapter', () => {
         shotRelationsSha256: createHash('sha256').update(canonicalJson(relations)).digest('hex'),
         shotsSha256: createHash('sha256').update('[]').digest('hex') })
       if (variant === 'has-shots') relations.shots = oldShots
+      if (variant === 'extra-blocker') (relations.blockers as unknown[]).push({ scope: 'shot', reason: 'dangling_element' })
       if (variant === 'partial-revision') relations.storyboardRevision = { ...revision, revisionId: 'revision-1' }
       if (variant === 'wrong-hero-hash') hero.shotRelationsSha256 = '0'.repeat(64)
       const body = { schema: 'jason.qingmu-continuity-delta.v1', projectId: 'project-1', episodeId: 'episode-1',

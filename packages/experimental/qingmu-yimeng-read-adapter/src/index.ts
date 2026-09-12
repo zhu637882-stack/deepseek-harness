@@ -4635,8 +4635,11 @@ function normalizeShotRelations(
   const blockers = root.blockers.map(normalizeShotRelationBlocker)
   const emptyRevision = requireObject(root.storyboardRevision, `${field}.storyboardRevision`)
   // Before the first storyboard, absence is an ordinary planning state, not a corrupt graph.
-  if (root.valid === false && blockers.length === 1
-    && blockers[0]?.scope === 'storyboard_revision' && blockers[0]?.reason === 'storyboard_revision_missing'
+  const missingStoryboard = blockers.some(item => item.scope === 'storyboard_revision' && item.reason === 'storyboard_revision_missing')
+  const onlyUnplannedBlockers = blockers.every(item => (item.scope === 'storyboard_revision' && item.reason === 'storyboard_revision_missing')
+    || (item.scope === 'shot' && item.reason === 'canonical_shot_set_empty'))
+  const uniqueBlockers = new Set(blockers.map(item => `${item.scope}:${item.reason}`)).size === blockers.length
+  if (root.valid === false && missingStoryboard && onlyUnplannedBlockers && uniqueBlockers
     && Array.isArray(root.scenes) && root.scenes.length === 0 && Array.isArray(root.shots) && root.shots.length === 0
     && emptyRevision.episodeRevision === 0 && emptyRevision.revisionId === null
     && emptyRevision.revisionVersion === null && emptyRevision.sourceSha256 === null) {
