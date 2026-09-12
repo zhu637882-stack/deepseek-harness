@@ -4,6 +4,7 @@ import type { WorkingAudioCue, WorkingClip, WorkingCutCommand, WorkingCutState }
 import type { QingmuYimengPort } from './contracts.ts'
 import css from './WorkingCut.module.css'
 import { WorkingCutSound } from './WorkingCutSound.tsx'
+import { WorkingCutReframe } from './WorkingCutReframe.tsx'
 
 /** Choose generated takes, trim their source ranges and render with native sound.
  * @param props - Active project/episode and authenticated command port.
@@ -99,6 +100,8 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
   const valid = audioValid && total <= 600 && clips.length > 0 && clips.every((c) => {
     const source = state?.shots.find(s => s.frameId === c.frameId)?.candidates.find(a => a.assetId === c.assetId)
     return source && Number.isFinite(c.inSec) && Number.isFinite(c.outSec)
+      && (!c.reframe || [c.reframe.zoom, c.reframe.x, c.reframe.y].every(Number.isFinite)
+        && c.reframe.zoom >= 1 && c.reframe.zoom <= 4 && c.reframe.x >= 0 && c.reframe.x <= 1 && c.reframe.y >= 0 && c.reframe.y <= 1)
       && Number.isFinite(c.sourceGainDb ?? 0) && (c.sourceGainDb ?? 0) >= -60 && (c.sourceGainDb ?? 0) <= 6
       && c.inSec >= 0 && c.outSec > c.inSec && c.outSec <= source.duration
   })
@@ -127,8 +130,11 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
           <strong>镜 {shot?.frameNo ?? index + 1}</strong>
           <select aria-label={`镜 ${index + 1} 视频版本`} value={clip.assetId} disabled={locked} onChange={(e) => {
             const c = shot?.candidates.find(c => c.assetId === e.target.value)
-            if (c) update(index, { ...clip, assetId: c.assetId, sha256: c.sha256,
-              inSec: 0, outSec: Math.floor(c.duration * 100) / 100 })
+            if (c) {
+              const { reframe: _reframe, ...rest } = clip
+              update(index, { ...rest, assetId: c.assetId, sha256: c.sha256,
+                inSec: 0, outSec: Math.floor(c.duration * 100) / 100 })
+            }
           }}>{shot?.candidates.map((c, i) =>
               <option key={c.assetId} value={c.assetId}>版本 {i + 1} · {c.duration.toFixed(1)} 秒</option>,
             )}</select>
@@ -136,6 +142,10 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
           <label>终点 <input aria-label={`镜 ${index + 1} 终点秒`} type="number" min={clip.inSec} max={selected?.duration} step="0.1" value={clip.outSec} disabled={locked} onChange={(e) => { update(index, { ...clip, outSec: Number(e.target.value) }) }} /></label>
           <details><summary>原片声音</summary><label>原音音量 dB <input aria-label={`镜 ${index + 1} 原音音量 dB`} type="number" min="-60" max="6" step="1" value={clip.sourceGainDb ?? 0} disabled={locked} onChange={(e) => { update(index, { ...clip, sourceGainDb: Number(e.target.value) }) }} /></label><p>会同时影响该原片中的对白、环境声和音乐。</p></details>
           {selected?.url && <details><summary>播放此版本</summary><video controls preload="none" src={selected.url} /></details>}
+          {selected?.url && <WorkingCutReframe key={clip.assetId} clip={clip} url={selected.url} label={`镜 ${index + 1}`} disabled={locked} onChange={(reframe) => {
+            const { reframe: _previous, ...rest } = clip
+            update(index, reframe ? { ...rest, reframe } : rest)
+          }} />}
           <button type="button" aria-label={`镜 ${index + 1} 前移`} disabled={index === 0 || locked} onClick={() => { const before = clips[index - 1]; if (before) { const next = [...clips]; next[index - 1] = clip; next[index] = before; change(next) } }}>↑</button>
           <button type="button" disabled={locked} onClick={() => { change(clips.filter((_, i) => i !== index)) }}>移出剪辑</button>
         </li>

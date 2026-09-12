@@ -2,11 +2,51 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { WorkingCut } from '../src/client/WorkingCut.tsx'
-import type { WorkingCutState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import type { WorkingCutCommand, WorkingCutState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 const state: WorkingCutState = { schema:'qingmu-working-cut-v1',projectId:'p',episodeId:'e',revision:0,
   shots:[{ frameId:'f',frameNo:1,title:'动作',candidates:[{ assetId:'a',sha256:'a'.repeat(64),duration:15,taskId:'t',url:'' }] }],
   cuts:[],providerCalls:0,humanApprovalChanged:false }
 afterEach(() => { cleanup();localStorage.clear() })
+it('previews framing, retains it on reopen and can restore the unmodified source', async () => {
+  let server: WorkingCutState = { ...state, shots: [{ ...state.shots[0]!, candidates: [{ ...state.shots[0]!.candidates[0]!, url: '/video.mp4' }] }] }
+  const save = vi.fn(async ({ command }: { command: WorkingCutCommand }) => {
+    server = { ...server, revision: server.revision + 1, cuts: [{ ...command, version: server.revision + 1,
+      revisionId: 'revision', taskId: null, status: 'NotQueued', errorCode: null, assetId: null, sha256: null, url: '' }] }
+    return server
+  })
+  const port = { readWorkingCut: vi.fn(async () => server), saveWorkingCut: save,
+    renderWorkingCut: vi.fn(), uploadWorkingCutAudio: vi.fn() }
+  let view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
+  const openFraming = async () => {
+    const summary = await screen.findByText(/^画面取景/)
+    const details = summary.closest('details')!
+    details.open = true; fireEvent(details, new Event('toggle'))
+    return screen.findByRole('slider', { name: '镜 1 取景放大倍数' })
+  }
+  fireEvent.change(await openFraming(), { target: { value: '2' } })
+  fireEvent.change(screen.getByRole('slider', { name: '镜 1 取景上下位置' }), { target: { value: '10' } })
+  const video = screen.getByLabelText('镜 1 取景预览') as HTMLVideoElement
+  Object.defineProperty(video, 'videoWidth', { value: 1920 })
+  Object.defineProperty(video, 'videoHeight', { value: 1080 })
+  fireEvent.loadedMetadata(video)
+  expect(video.style.width).toBe('200%')
+  expect(video.style.left).toBe('-50%')
+  expect(video.style.top).toBe('-10%')
+  expect(screen.getByText(/保留原片 960 × 540 像素/)).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '保存剪辑草稿' }))
+  await waitFor(() => { expect(save).toHaveBeenCalledTimes(1) })
+  expect(save.mock.calls[0]?.[0].command.clips[0]?.reframe).toEqual({ zoom: 2, x: .5, y: .1 })
+  view.unmount()
+  view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
+  expect(await openFraming()).toHaveProperty('value', '2')
+  expect(screen.getByRole('slider', { name: '镜 1 取景上下位置' })).toHaveProperty('value', '10')
+  fireEvent.click(screen.getByRole('button', { name: '恢复原画面' }))
+  fireEvent.click(screen.getByRole('button', { name: '保存剪辑草稿' }))
+  await waitFor(() => { expect(save).toHaveBeenCalledTimes(2) })
+  expect(save.mock.calls[1]?.[0].command.clips[0]).not.toHaveProperty('reframe')
+  expect(port.renderWorkingCut).not.toHaveBeenCalled()
+  view.unmount()
+})
 it('submits the chosen source range and retains the same command after an uncertain response', async () => {
   const renderCut=vi.fn().mockRejectedValueOnce(new Error('timeout')).mockResolvedValue({ ...state,revision:1,cuts:[] })
   const port={ readWorkingCut:vi.fn(async()=>state),saveWorkingCut:vi.fn(),uploadWorkingCutAudio:vi.fn(),renderWorkingCut:renderCut }

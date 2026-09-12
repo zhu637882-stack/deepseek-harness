@@ -10,6 +10,8 @@ export interface WorkingClip {
   readonly inSec: number
   readonly outSec: number
   readonly sourceGainDb?: number
+  /** Static source crop; zoom 1..4, x/y 0..1 across available crop travel. */
+  readonly reframe?: { readonly zoom: number; readonly x: number; readonly y: number }
 }
 /** Independent sound cue placed on the assembled film, across camera cuts. */
 export interface WorkingAudioCue {

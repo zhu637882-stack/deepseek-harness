@@ -28,3 +28,10 @@
 .cue p { flex-basis: 100%; color: #f4ba88; }
 .panel :focus-visible { outline: 2px solid #c4f169; outline-offset: 3px; }
 .gainPoint { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin: 8px 0; }
+.clips details.reframe { flex-basis: 100%; max-width: 720px; width: 100%; }
+.reframeViewport { position: relative; width: 100%; overflow: hidden; background: #000; border-radius: 8px; margin: 12px 0; }
+.reframeViewport video { position: absolute; display: block; max-height: none; max-width: none; margin: 0; border-radius: 0; }
+.reframePlayback, .reframeControls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.reframeControls { margin-top: 12px; }
+.reframe label { display: grid; gap: 6px; flex: 1 1 180px; }
+.reframe input[type="range"] { width: 100%; box-sizing: border-box; padding: 0; min-height: 44px; accent-color: #c4f169; }
