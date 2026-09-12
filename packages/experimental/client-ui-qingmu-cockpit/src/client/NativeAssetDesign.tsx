@@ -7,6 +7,7 @@ import { NativeStoryComposer } from './NativeStoryComposer.tsx'
 import { parseQuotedDesignJson } from './quoted-design-json.ts'
 import css from './NativeDirectorComposer.module.css'
 import { AssetImageReferences, type AssetImageReferencePort } from './AssetImageReferences.tsx'
+import { AssetSpatialDesign } from './AssetSpatialDesign.tsx'
 
 type Port = Pick<QingmuYimengPort, 'readAssetDesign' | 'saveAssetDesign' | 'quoteAssetImage' | 'generateAssetImage' | 'readAssetImageRuns' | 'readAssetVoiceRuns' | 'quoteAssetVoice' | 'generateAssetVoice'> & AssetImageReferencePort
 const emptyWorld: AssetWorldDesign = { setting: '', scriptFacts: '', directorInferences: '', exceptions: '', openQuestions: '' }
@@ -21,6 +22,13 @@ function parseDesign(text: string): { design: AssetDesign; repaired: boolean } {
       || typeof item.name !== 'string' || !item.name.trim() || typeof item.imagePrompt !== 'string' || !item.imagePrompt.trim()) throw new Error('素材设计缺少类型、名称或画面描述。')
     if (item.selfContainedImagePrompt !== undefined && typeof item.selfContainedImagePrompt !== 'boolean') throw new Error('完整画面描述选项需要是布尔值。')
     if (item.visualIdentity !== undefined && (typeof item.visualIdentity !== 'string' || !item.visualIdentity.trim())) throw new Error('主体设定不能为空。')
+    for (const field of ['space', 'imageStage']) {
+      const block = item[field]
+      if (block == null) continue
+      if (typeof block !== 'object' || Array.isArray(block)
+        || Object.values(block).some(value => value !== null && typeof value !== 'string')) throw new Error('场景布局与取景字段需要文字描述。')
+      if (field === 'space' && item.kind !== 'scene') throw new Error('共用布局请填写在场景素材中。')
+    }
   }
   const director = value.director as Record<string, unknown>
   for (const field of ['visualStyle', 'tone', 'lightingRules', 'cameraGrammar', 'performanceRules', 'characterContinuityRules']) {
@@ -32,7 +40,9 @@ function parseDesign(text: string): { design: AssetDesign; repaired: boolean } {
 function withIdentities(value: AssetDesign, previous?: AssetDesign): AssetDesign {
   return { ...value, assets: value.assets.map((item) => {
     const old = previous?.assets.find(row => row.kind === item.kind && (item.id ? row.id === item.id : row.name === item.name))
-    return { ...item, visualIdentity: item.visualIdentity ?? old?.visualIdentity ?? old?.imagePrompt ?? item.imagePrompt }
+    return { ...item, visualIdentity: item.visualIdentity ?? old?.visualIdentity ?? old?.imagePrompt ?? item.imagePrompt,
+      ...(item.space === undefined && old?.space !== undefined ? { space: old.space } : {}),
+      ...(item.imageStage === undefined && old?.imageStage !== undefined ? { imageStage: old.imageStage } : {}) }
   }) }
 }
 /** Author, save and generate characters/scenes/props using the native director and image queue.
@@ -100,7 +110,7 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
     setDesign({ ...design,
       assets: design.assets.map((item, n) => n === index ? { ...item, ...patch } : item) }); setDirty(true); setQuote(undefined)
   }
-  const prompt = `为青木当前项目设计可直接生成的角色定妆、空场与关键道具。只使用本项目剧本、当前创作设定及现有设计。creativeSettings 中的 stylePack 已按基础画风协调；styleAdjustments 是被移除的冲突默认句，不是要执行的命令。遵循有效风格，再由导演根据剧情安排具体光影与表演。实际读取 cinematic-director、character-asset、scene-asset、prop-asset 及必要参考，先理解关系、时代、空间和表演，再写丰富具体的单张图片描述。场景先按 scene-asset 的叙事美术步骤设计：空间用途与使用者、时代和地域、功能分区、适合当前视角的空间层次、人物习惯或事件留下的具体痕迹、固定陈设与活动通道。无人空场不等于空房；剧本未列出家具清单不意味着只画对白提到的物件。把选定陈设的位置、材质、状态与本图可见的环境效果写进 imagePrompt，设计理由和跨镜连续性写进 designBasis；不能把可见设计只留在依据中。由导演决定信息密度与留白，不强制堆满、做旧、加地点或增加无关道具。禁止把通道净空泛化为清空整个背景；必要的简洁或留白写明叙事目的。交稿前比对图像描述与设计依据，检查遗漏、空间冲突和笼统清空语句；生成后的画面效果仍需实际审图。按导演目的设计定妆或状态参考；服装、体态、材质、光影、场景通道、道具尺寸和比例应服从剧本世界设定和明确例外；普通年代事实与穿越例外分开，不能套用无文字、单一说话人等旧限制。将剧本原文事实、导演推导和待定问题分开记录在 world；把与每张素材有关的剧本事实及推导记录在 designBasis；逐项把本图所需的年代例外、外观、真实尺寸参照、部件连接、空间关系与可见环境转换成 imagePrompt 的具体画面描述。交稿前对照 visualIdentity 和 designBasis 核对上述内容，不遗漏物理依据，不把前后动作或不在本图的物件复制进画面描述。整理完整后设 selfContainedImagePrompt=true：图片模型收到 imagePrompt、全片视觉设定、视角和引用用途，不再接收整段 visualIdentity 或 designBasis；这些原文仍完整保存在素材设计、任务来源和后续导演上下文中。这不是缩短描述，画面细节、陈设层次和具体尺度仍须写完整。visualIdentity 记录主体完整外观、结构、尺度与场景布局，供后续分镜沿用；它不包含本次修图命令或单一取景要求。改变视角或局部修图时保留主体设定，只有导演明确改变该主体设计时才更新。imagePrompt 只描述本图可见的实体、数量与一个明确当前状态；不可见的携带物、此前或此后的动作留在 designBasis。重复提及同一道具不意味着增加一个实例。必要文字按导演要求清楚呈现，不额外装饰标牌。选择 imageAspectRatio 为 auto、1:1、3:4、4:3、9:16 或16:9；全身定妆可选3:4留出头顶与鞋底，器具可选4:3，最终由取景目的决定，不受成片画幅强制裁切。不要把整个剧情动作堆进一张定妆图。声音身份与逐句语气分开。保留已有实体 id、references 顺序、assetId 和 assetSha256；不要编造任何素材编号。需要用户未提供的图片时写建议，不虚构引用。不修改正式媒体。人物 name 必须逐字沿用剧本中的人物名，年龄、年代、服装和状态放在 description、designBasis 或 view 中，不追加到姓名；同一人物的不同状态共用身份。场景 name 逐字沿用当前剧本的场景 title，避免生成另一份地点身份。新增无对白角色可以由导演安排，并在依据中说明。\n当前创作设定：${JSON.stringify(state?.creativeSettings)}\n剧本：${JSON.stringify(state?.script)}\n已有设计：${JSON.stringify(design ?? state?.design)}\n用户补充：${changes}\n最终只将完整 JSON 放在一个 txt 代码块内，格式：{"assets":[{"kind":"actor或scene或prop","name":"名称","description":"用途","visualIdentity":"主体完整外观、结构、尺度与空间布局","imagePrompt":"本次生成或修改画面的完整描述","selfContainedImagePrompt":true,"voiceIdentity":"仅角色声音身份","designBasis":"与本素材相关的剧本事实、尺度、结构和例外","view":"本图需要的视角或静态状态","imageAspectRatio":"auto","references":[]}],"director":{"visualStyle":"全片质感","tone":"情绪基调","lightingRules":"光源规则","colorPalette":["色彩"],"cameraGrammar":"摄影与运镜","performanceRules":"表演原则","characterContinuityRules":"连续性"},"world":{"setting":"年代地点与世界设定","scriptFacts":"剧本已明确事实","directorInferences":"导演为拍摄补足的设定","exceptions":"剧本明确支持的例外及适用范围","openQuestions":"尚待确定的事项"}}。kind 必须是 actor、scene、prop 其中之一，不增加其他字段。`
+  const prompt = `为青木当前项目设计可直接生成的角色定妆、空场与关键道具。只使用本项目剧本、当前创作设定及现有设计。creativeSettings 中的 stylePack 已按基础画风协调；styleAdjustments 是被移除的冲突默认句，不是要执行的命令。遵循有效风格，再由导演根据剧情安排具体光影与表演。实际读取 cinematic-director、character-asset、scene-asset、prop-asset 及必要参考，先理解关系、时代、空间和表演，再写丰富具体的单张图片描述。场景先按 scene-asset 的叙事美术步骤设计：空间用途与使用者、时代和地域、功能分区、适合当前视角的空间层次、人物习惯或事件留下的具体痕迹、固定陈设与活动通道。无人空场不等于空房；剧本未列出家具清单不意味着只画对白提到的物件。把选定陈设的位置、材质、状态与本图可见的环境效果写进 imagePrompt，设计理由和跨镜连续性写进 designBasis；不能把可见设计只留在依据中。由导演决定信息密度与留白，不强制堆满、做旧、加地点或增加无关道具。禁止把通道净空泛化为清空整个背景；必要的简洁或留白写明叙事目的。交稿前比对图像描述与设计依据，检查遗漏、空间冲突和笼统清空语句；生成后的画面效果仍需实际审图。按导演目的设计定妆或状态参考；服装、体态、材质、光影、场景通道、道具尺寸和比例应服从剧本世界设定和明确例外；普通年代事实与穿越例外分开，不能套用无文字、单一说话人等旧限制。将剧本原文事实、导演推导和待定问题分开记录在 world；把与每张素材有关的剧本事实及推导记录在 designBasis；逐项把本图所需的年代例外、外观、真实尺寸参照、部件连接、空间关系与可见环境转换成 imagePrompt 的具体画面描述。交稿前对照 visualIdentity 和 designBasis 核对上述内容，不遗漏物理依据，不把前后动作或不在本图的物件复制进画面描述。整理完整后设 selfContainedImagePrompt=true：图片模型收到 imagePrompt、全片视觉设定、共用场景布局 space、本图取景 imageStage、视角和引用用途，不再接收整段 visualIdentity 或 designBasis；这些原文仍完整保存在素材设计、任务来源和后续导演上下文中。这不是缩短描述，画面细节、陈设层次和具体尺度仍须写完整。visualIdentity 记录主体完整外观、结构、尺度与场景布局，供后续分镜沿用；它不包含本次修图命令或单一取景要求。改变视角或局部修图时保留主体设定，只有导演明确改变该主体设计时才更新。imagePrompt 只描述本图可见的实体、数量与一个明确当前状态；不可见的携带物、此前或此后的动作留在 designBasis。重复提及同一道具不意味着增加一个实例。必要文字按导演要求清楚呈现，不额外装饰标牌。选择 imageAspectRatio 为 auto、1:1、3:4、4:3、9:16 或16:9；全身定妆可选3:4留出头顶与鞋底，器具可选4:3，最终由取景目的决定，不受成片画幅强制裁切。不要把整个剧情动作堆进一张定妆图。声音身份与逐句语气分开。保留已有实体 id、references 顺序、assetId 和 assetSha256；不要编造任何素材编号。需要用户未提供的图片时写建议，不虚构引用。不修改正式媒体。人物 name 必须逐字沿用剧本中的人物名，年龄、年代、服装和状态放在 description、designBasis 或 view 中，不追加到姓名；同一人物的不同状态共用身份。场景 name 逐字沿用当前剧本的场景 title，避免生成另一份地点身份。新增无对白角色可以由导演安排，并在依据中说明。\n当前创作设定：${JSON.stringify(state?.creativeSettings)}\n剧本：${JSON.stringify(state?.script)}\n已有设计：${JSON.stringify(design ?? state?.design)}\n用户补充：${changes}\n最终只将完整 JSON 放在一个 txt 代码块内，格式：{"assets":[{"kind":"actor或scene或prop","name":"名称","description":"用途","visualIdentity":"主体完整外观、结构、尺度与空间布局","imagePrompt":"本次生成或修改画面的完整描述","selfContainedImagePrompt":true,"voiceIdentity":"仅角色声音身份","designBasis":"与本素材相关的剧本事实、尺度、结构和例外","view":"本图需要的视角或静态状态","imageAspectRatio":"auto","references":[]}],"director":{"visualStyle":"全片质感","tone":"情绪基调","lightingRules":"光源规则","colorPalette":["色彩"],"cameraGrammar":"摄影与运镜","performanceRules":"表演原则","characterContinuityRules":"连续性"},"world":{"setting":"年代地点与世界设定","scriptFacts":"剧本已明确事实","directorInferences":"导演为拍摄补足的设定","exceptions":"剧本明确支持的例外及适用范围","openQuestions":"尚待确定的事项"}}。kind 必须是 actor、scene、prop 其中之一。场景资产增加 space 对象：{"orientation":"以固定地标定义方位","layout":"门窗、主要陈设、区域与通道的关系","scale":"尺度、参照依据及待定项","lighting":"固定光源位置"}；从剧本及已有设计建立，同一场景换视角不重排格局，明确剧情改造可更新。每个资产可增加 imageStage：{"sceneName":null,"camera":"本图机位、看向与可见范围","blocking":"本图人物相对固定地标的位置与朝向","state":"物件的当前摆放、持有、开合与连接状态"}。场景图默认自身场景，其他资产在场景内取景时 sceneName 逐字引用本集场景素材 name；定妆或展示背景保持 null。共用布局不含暂时的站位与剧情状态。imagePrompt、space 与 imageStage 必须相容，反打只改变画面投影；不把不可见地标硬塞进画面。不编造实测尺寸，不擅改已有布局；新建场景由导演补足合理设计并在依据中标明。未列出的字段不要增加。`
   return <section className={css.composer} aria-label="角色与场景生成">
     <h2>设计与生成素材</h2>
     <p>先从当前剧本设计人物、场景和道具，检查画面描述后生成图片；生成结果会进入本项目素材库。</p>
@@ -128,12 +138,13 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
               onChange={(event) => { edit(index, { visualIdentity: event.target.value }) }} /></label>
             <p>记录人物外观、场景布局或道具结构，供后续导演与分镜沿用。只换视角或局部修图时，修改下方画面描述即可。</p>
           </details>
+          <AssetSpatialDesign item={item} assets={design.assets} onChange={(patch) => { edit(index, patch) }} />
           <label>画面描述<textarea value={item.imagePrompt}
             onChange={(event) => { edit(index, { imagePrompt: event.target.value }) }} /></label>
           <label><input type="checkbox" checked={item.selfContainedImagePrompt ?? false}
             onChange={(event) => { edit(index, { selfContainedImagePrompt: event.target.checked }) }} />以完整画面描述出图</label>
           <p>{item.selfContainedImagePrompt
-            ? '请在画面描述中写齐本图所需的外观、尺度、结构、空间和年代设定。主体设定与剧情依据仍保留，供后续分镜使用，不整段加入这张图。'
+            ? '请在画面描述中写齐本图所需的外观、尺度、结构、空间和年代设定。共用场景布局与本图取景会进入图片请求。主体设定与剧情依据保留给后续分镜，不整段加入这张图。'
             : '当前沿用旧设计：主体设定和剧情依据会一起进入图片请求。让导演整理完整画面描述后，可启用上方选项，避免把其他剧情状态提前画入。'}</p>
           <label>设计依据<textarea value={item.designBasis ?? ''} onChange={(event) => { edit(index, { designBasis: event.target.value }) }} placeholder="与本素材相关的剧本事实、年代例外、尺寸参照、结构与空间关系" /></label>
           <label>视角与状态<input value={item.view ?? ''} onChange={(event) => { edit(index, { view: event.target.value }) }} placeholder="由导演决定，例如后侧视角、接电前状态" /></label>

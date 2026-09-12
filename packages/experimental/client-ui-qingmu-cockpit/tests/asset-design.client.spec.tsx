@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { NativeAssetDesign } from '../src/client/NativeAssetDesign.tsx'
 import type { AssetDesignState, AssetImageRuns } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
@@ -9,6 +9,42 @@ const state: AssetDesignState = { ...scope, schema: 'qingmu.asset-design-state.v
     visualStyle: '写实', tone: '温暖', colorPalette: ['灰蓝'], lightingRules: '窗光', cameraGrammar: '跟随动作', performanceRules: '自然', characterContinuityRules: '服装稳定',
   } } }
 afterEach(() => { cleanup(); localStorage.clear() })
+it('edits shared room geography and a separate reverse view, preserving both through legacy import and reload', async () => {
+  const port = setup()
+  const spatial = { ...state, design: { ...state.design!, assets: [state.design!.assets[0]!,
+    { id: 'scene_1', kind: 'scene' as const, name: '工作室', imagePrompt: '木墙与侧窗',
+      space: { layout: '入口对面窗，桌子靠窗墙' }, imageStage: { camera: '入口朝窗' } },
+    { id: 'scene_2', kind: 'scene' as const, name: '院落', imagePrompt: '北侧月洞门' },
+  ] } }
+  port.readAssetDesign.mockResolvedValue(spatial)
+  port.saveAssetDesign.mockImplementation(async (input: unknown) => ({ ...spatial,
+    design: { ...spatial.design, ...(input as { design: object }).design } }))
+  const view = render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  const room = within(await screen.findByRole('region', { name: '场景 工作室' }))
+  fireEvent.change(room.getByLabelText('摄影机位置与取景'), { target: { value: '窗边朝门，反打' } })
+  fireEvent.change(room.getByLabelText('本图物件状态'), { target: { value: '门半开' } })
+  const actor = within(screen.getByRole('region', { name: '人物 父亲' }))
+  fireEvent.change(actor.getByLabelText('取景场景'), { target: { value: '工作室' } })
+  fireEvent.change(actor.getByLabelText('本图人物站位'), { target: { value: '人物站在窗与桌之间' } })
+  expect(room.getByLabelText<HTMLTextAreaElement>('格局与固定物').value).toBe('入口对面窗，桌子靠窗墙')
+  // Importing the former schema must not erase spatial edits or apply one room to another.
+  const imported = { ...spatial.design,
+    assets: spatial.design.assets.map(({ kind, id, name, imagePrompt }) => ({ kind, id, name, imagePrompt })) }
+  fireEvent.change(screen.getByLabelText('素材设计数据'), { target: { value: JSON.stringify(imported) } })
+  fireEvent.click(screen.getByRole('button', { name: '载入设计' }))
+  fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
+  await waitFor(() => { expect(port.saveAssetDesign).toHaveBeenCalledTimes(1) })
+  const saved = await (port.saveAssetDesign.mock.results[0]!.value as Promise<AssetDesignState>)
+  expect(saved.design?.assets[0]?.imageStage).toMatchObject({ sceneName: '工作室', blocking: '人物站在窗与桌之间' })
+  expect(saved.design?.assets[1]).toMatchObject({ space: { layout: '入口对面窗，桌子靠窗墙' }, imageStage: { camera: '窗边朝门，反打', state: '门半开' } })
+  expect(saved.design?.assets[2]?.space).toBeUndefined()
+  view.unmount(); port.readAssetDesign.mockResolvedValue(saved)
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  const reopened = within(await screen.findByRole('region', { name: '场景 工作室' }))
+  expect(reopened.getByLabelText<HTMLTextAreaElement>('摄影机位置与取景').value).toBe('窗边朝门，反打')
+  expect(reopened.getByLabelText<HTMLTextAreaElement>('格局与固定物').value).toBe('入口对面窗，桌子靠窗墙')
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
 it('recovers missing quote escapes without losing design prose or changing existing media', async () => {
   const port = setup()
   render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)

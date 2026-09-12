@@ -17,6 +17,20 @@ export interface AssetWorldDesign {
   readonly exceptions: string
   readonly openQuestions: string
 }
+/** Authored room geography shared across views; distances may be proposals or unknown. */
+export interface AssetSceneSpace {
+  readonly orientation?: string
+  readonly layout?: string
+  readonly scale?: string
+  readonly lighting?: string
+}
+/** One image's composition and temporal state, separate from persistent identity. */
+export interface AssetImageStage {
+  readonly sceneName?: string | null
+  readonly camera?: string
+  readonly blocking?: string
+  readonly state?: string
+}
 /** One editable image design and its ordered sources. */
 export interface AssetDesignItem {
   readonly kind: 'actor' | 'scene' | 'prop'
@@ -32,6 +46,8 @@ export interface AssetDesignItem {
   readonly imagePromptExtend?: boolean
   /** Entity appearance/structure, independent of the current image view or edit. */
   readonly visualIdentity?: string
+  readonly space?: AssetSceneSpace | null
+  readonly imageStage?: AssetImageStage | null
   readonly voiceIdentity?: string
   readonly designBasis?: string
   readonly view?: string
