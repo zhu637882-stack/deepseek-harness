@@ -36,6 +36,13 @@ export function WorkingCutSoundReview({ review, busy, changed, onReview, onSeek 
         {check.timeRanges.map(([start, end], i) => <button key={i} type="button"
           onClick={() => { onSeek(start) }}>{time(start)}—{time(end)} 回听</button>)}
       </li>)}</ul>
+      {!!review?.transcript?.length && <details><summary>对白听写与逐句回听（模型识别）</summary>
+        <ol>{review.transcript.map((line, i) => <li key={i}>
+          <button type="button" onClick={() => { onSeek(line.start_sec) }}>
+            {time(line.start_sec)}—{time(line.end_sec)} 回听对白
+          </button>{' '}{line.speaker}：{line.text}{line.delivery && <p>{line.delivery}</p>}
+        </li>)}</ol>
+      </details>}
     </>}
   </section>
 }

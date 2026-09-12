@@ -16,6 +16,7 @@ it('reviews the exact rendered version, preserves edits and recovers timed findi
     server = { ...server, cuts: [{ ...cut, soundReview: {
       state: 'complete', advisoryOnly: true, taskId: 'review-1', summary: '音乐在转场处突然停止。',
       checks: [{ kind: 'music', status: 'fail', evidence: '乐句在8秒处中断。', timeRanges: [[7.5, 8.5]] }],
+      transcript: [{ start_sec: 4.2, end_sec: 5, speaker: '女', text: '还有多久？', delivery: '迟疑' }],
     } }] }
     return server
   })
@@ -36,6 +37,9 @@ it('reviews the exact rendered version, preserves edits and recovers timed findi
   fireEvent.click(screen.getByRole('button', { name: '0:07.5—0:08.5 回听' }))
   expect(view.container.querySelector('[aria-label="成片播放器"] video')).toHaveProperty('currentTime', 7.5)
   expect(play).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByText('对白听写与逐句回听（模型识别）'))
+  fireEvent.click(screen.getByRole('button', { name: '0:04.2—0:05.0 回听对白' }))
+  expect(view.container.querySelector('[aria-label="成片播放器"] video')).toHaveProperty('currentTime', 4.2)
   view.unmount()
   view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
   await screen.findByText('音乐与转场 · 发现问题')
@@ -50,6 +54,15 @@ it('reviews the exact rendered version, preserves edits and recovers timed findi
   expect(screen.getByText('音乐与转场 · 发现问题')).toBeTruthy()
   expect(review).toHaveBeenCalledTimes(1)
   play.mockRestore()
+})
+it('waits for the selected episode before reading the cut', async () => {
+  const port = { readWorkingCut: vi.fn(async () => state), reviewWorkingCutSound: vi.fn(),
+    saveWorkingCut: vi.fn(), renderWorkingCut: vi.fn(), uploadWorkingCutAudio: vi.fn() }
+  const view = render(<WorkingCut projectId="" episodeId="" port={port} onOpenShooting={vi.fn()} />)
+  expect(port.readWorkingCut).not.toHaveBeenCalled()
+  view.rerender(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
+  await screen.findByRole('combobox', { name: '镜 1 视频版本' })
+  expect(port.readWorkingCut).toHaveBeenCalledExactlyOnceWith({ projectId: 'p', episodeId: 'e' })
 })
 it('imports a bundled response without losing edits or adding an impulse as music', async () => {
   const source = { assetId: 'voice', sha256: 'b'.repeat(64), duration: 15, name: 'Voice.wav', url: '' }

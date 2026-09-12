@@ -32,6 +32,7 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
   const pendingMode = useRef<'save' | 'render'>('render')
   const scopeKey = `qingmu:working-cut:${projectId}:${episodeId}`
   const read = useCallback(async () => {
+    if (!projectId || !episodeId) return
     const next = await port.readWorkingCut({ projectId, episodeId })
     if (!live.current) return
     setState(next)
@@ -128,6 +129,7 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
     } catch (cause) { if (live.current) setError(`检查请求尚未确认，请刷新状态恢复同一次检查。${String(cause)}`) }
     finally { if (live.current) setBusy(false) }
   }
+  if (!projectId || !episodeId) return <p role="status">正在载入项目与分集…</p>
   return <section className={css.panel} aria-label="成片剪辑">
     <header><div><h2>成片剪辑</h2><p>选择镜头、调整剪辑，再为整场安排声音，保存并导出 MP4。</p></div>
       <button type="button" disabled={busy} onClick={() => { setError(''); void read().catch((cause: unknown) => { setError(String(cause)) }) }}>刷新成片状态</button></header>

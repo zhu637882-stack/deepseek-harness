@@ -45,6 +45,13 @@ export interface WorkingCutSoundReview {
   readonly model?: string
   readonly summary?: string
   readonly errorCode?: string | null
+  readonly transcript?: readonly {
+    readonly start_sec: number
+    readonly end_sec: number
+    readonly speaker: string
+    readonly text: string
+    readonly delivery: string
+  }[]
   readonly checks: readonly {
     readonly kind: string
     readonly status: 'pass' | 'fail' | 'unverified' | 'not_applicable'
