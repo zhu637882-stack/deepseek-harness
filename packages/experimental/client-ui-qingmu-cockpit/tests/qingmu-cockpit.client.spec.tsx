@@ -630,6 +630,7 @@ function shotRelationMethod(request: Parameters<QingmuYimengPort['shotRelationMe
 
 function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
   const base: QingmuYimengPort = {
+    previewSceneLayout: vi.fn(async () => { throw new Error('Dedicated scene layout fixture') }),
     captureReferenceVideoFrame: vi.fn(async () => { throw new Error('Dedicated video frame fixture') }),
     readReferenceVideoFrame: vi.fn(async () => { throw new Error('Dedicated video frame fixture') }),
     readWorkingCut: vi.fn(async () => { throw new Error('Dedicated working cut fixture') }),
