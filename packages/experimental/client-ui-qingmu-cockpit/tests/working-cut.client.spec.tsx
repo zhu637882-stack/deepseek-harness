@@ -7,6 +7,40 @@ const state: WorkingCutState = { schema:'qingmu-working-cut-v1',projectId:'p',ep
   shots:[{ frameId:'f',frameNo:1,title:'动作',candidates:[{ assetId:'a',sha256:'a'.repeat(64),duration:15,taskId:'t',url:'' }] }],
   cuts:[],providerCalls:0,humanApprovalChanged:false }
 afterEach(() => { cleanup();localStorage.clear() })
+it('uses video audio independently and retains chosen component and film timing after reopening', async () => {
+  const video = { assetId: 'a', sha256: 'a'.repeat(64), duration: 15, url: '/original.mp4', name: '门外雨声', usage: 'video_audio' as const }
+  let server: WorkingCutState = { ...state, videoAudioSources: [video], audioSeparation: { available: true, model: 'Bandit v2', providerCalls: 0 } }
+  const save = vi.fn(async ({ command }: { command: WorkingCutCommand }) => {
+    server = { ...server, revision: 1, cuts: [{ ...command, version: 1, revisionId: 'r', taskId: null,
+      status: 'NotQueued', errorCode: null, assetId: null, sha256: null, url: '' }] }
+    return server
+  })
+  const port = { readWorkingCut: vi.fn(async () => server), saveWorkingCut: save,
+    renderWorkingCut: vi.fn(), reviewWorkingCutSound: vi.fn(), uploadWorkingCutAudio: vi.fn() }
+  let view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
+  const summary = await screen.findByText('使用已生成视频的声音'); summary.closest('details')!.open = true
+  fireEvent.click(screen.getByRole('button', { name: '单独使用 门外雨声' }))
+  fireEvent.change(screen.getByRole('combobox', { name: '音轨 1 声音内容' }), { target: { value: 'effects' } })
+  fireEvent.change(screen.getByRole('spinbutton', { name: '音轨 1 成片起点秒' }), { target: { value: '2' } })
+  screen.getByText('裁剪声音素材').closest('details')!.open = true
+  fireEvent.change(screen.getByRole('spinbutton', { name: '音轨 1 素材终点秒' }), { target: { value: '10' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存剪辑草稿' }))
+  await waitFor(() => { expect(save).toHaveBeenCalledTimes(1) })
+  expect(save.mock.calls[0]?.[0].command.audioCues?.[0]).toMatchObject({ assetId: 'a', sourceAudioMode: 'effects', startSec: 2, outSec: 10 })
+  expect(save.mock.calls[0]?.[0].command.clips).toHaveLength(1)
+  view.unmount()
+  view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
+  expect(await screen.findByRole('combobox', { name: '音轨 1 声音内容' })).toHaveProperty('value', 'effects')
+  expect(screen.getByRole('spinbutton', { name: '音轨 1 成片起点秒' })).toHaveProperty('value', '2')
+  screen.getByText('空间混响').closest('details')!.open = true
+  expect(screen.getByRole('combobox', { name: '音轨 1 空间响应' }).querySelectorAll('option')).toHaveLength(1)
+  fireEvent.change(screen.getByRole('combobox', { name: '音轨 1 声音内容' }), { target: { value: 'original' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存剪辑草稿' }))
+  await waitFor(() => { expect(save).toHaveBeenCalledTimes(2) })
+  expect(save.mock.calls[1]?.[0].command.audioCues?.[0]).not.toHaveProperty('sourceAudioMode')
+  expect(port.renderWorkingCut).not.toHaveBeenCalled()
+  expect(port.uploadWorkingCutAudio).not.toHaveBeenCalled()
+})
 it('retains source separation on reopen and restores original sound without generating', async () => {
   let server: WorkingCutState = { ...state, audioSeparation: { available: true, model: 'Bandit v2', providerCalls: 0 } }
   const save = vi.fn(async ({ command }: { command: WorkingCutCommand }) => {

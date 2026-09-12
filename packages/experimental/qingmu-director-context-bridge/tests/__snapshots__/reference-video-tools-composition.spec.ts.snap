@@ -529,6 +529,7 @@ exports[`saves scene-spanning sound through the shipped director preset, real lo
               "kind": "ambience",
               "outSec": 14,
               "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "sourceAudioMode": "effects",
               "space": {
                 "assetId": "room-ir",
                 "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
@@ -548,7 +549,7 @@ exports[`saves scene-spanning sound through the shipped director preset, real lo
             },
           ],
           "expectedRevision": 0,
-          "requestId": "cut-31fd3e30e9bef33a6423f8e0e771cd6958c43641",
+          "requestId": "cut-73a835ca660b2a6d799c4b23622bb1e2e17a2aed",
           "revisionId": "cut-1",
           "soundPlan": "Room reflections and street ambience continue under dialogue; music follows scene emotion.",
           "status": "NotQueued",
@@ -563,9 +564,9 @@ exports[`saves scene-spanning sound through the shipped director preset, real lo
       "schema": "qingmu-working-cut-v1",
       "shots": [],
     },
-    "guidance": "Use qingmu_save_working_cut with this receipt to save clips, audioCues and soundPlan. Audio cues require an imported assetId/sha256. Import local WAV/MP3/M4A/FLAC in the delivery page. acousticPresets lists bundled recorded room responses; use qingmu_import_acoustic_response with an exact presetId to add one locally, then reread this cut before saving. A bundled IR is an effect input, never a standalone music or ambience cue. Do not invent an asset or claim an unavailable music generator ran. Environment stays continuous under speech. Music and ambience have independent timing, fades and optional gainPoints for director-timed volume changes. Use actual film timing for dialogue ducking and gradual recovery; do not infer speech times from shot duration. Native mixed audio stays original unless a clip explicitly chooses sourceAudioMode. When audioSeparation.available is true, speech_effects extracts speech and effects while removing estimated music; speech extracts dialogue only. This runs locally during export, caches results and may lose details. Preserve original media and audition before accepting; plan continuous music on independent whole-cut cues. An independent cue can apply a retained mono/stereo room impulse response with space {assetId, sha256, wetDb, tailSec}. The response must be a genuine IR, at most 10 seconds, imported in this episode; ordinary speech/music/ambience recordings are not IRs. Convolution adds reflections while retaining direct sound. Its explicit tail continues beyond the source trim across cuts, must fit the film and cannot exceed the IR duration. Fades and gain points cover the extended cue. Choose the acoustic perspective from the scene and listen before applying; this is not separation or automatic removal of existing reverberation.",
+    "guidance": "Use qingmu_save_working_cut with this receipt to save clips, audioCues and soundPlan. Audio cues require an exact assetId/sha256 from audioLibrary or videoAudioSources. videoAudioSources exposes completed videos in this episode; use their audio independently across picture cuts without downloading or importing a second file. On an audio cue, optional sourceAudioMode original/speech_effects/speech/effects/music selects the full mix or a local separated component. effects includes ambience AND action Foley, not a magically clean room tone; choose source intervals accordingly. Modes other than original require audioSeparation.available. Sources without audio cannot be used. Separation occurs in the existing render task and verified cache, with no paid API. Adjust matching picture clip sound deliberately to avoid doubled voices or ambience; cue extraction does not mute the original clip. Import local WAV/MP3/M4A/FLAC in the delivery page. acousticPresets lists bundled recorded room responses; use qingmu_import_acoustic_response with an exact presetId to add one locally, then reread this cut before saving. A bundled IR is an effect input, never a standalone music or ambience cue. Do not invent an asset or claim an unavailable music generator ran. Environment stays continuous under speech. Music and ambience have independent timing, fades and optional gainPoints for director-timed volume changes. Use actual film timing for dialogue ducking and gradual recovery; do not infer speech times from shot duration. Native mixed audio stays original unless a clip explicitly chooses sourceAudioMode. When audioSeparation.available is true, speech_effects extracts speech and effects while removing estimated music; speech extracts dialogue only. This runs locally during export, caches results and may lose details. Preserve original media and audition before accepting; plan continuous music on independent whole-cut cues. An independent cue can apply a retained mono/stereo room impulse response with space {assetId, sha256, wetDb, tailSec}. The response must be a genuine IR, at most 10 seconds, imported in this episode; ordinary speech/music/ambience recordings are not IRs. Convolution adds reflections while retaining direct sound. Its explicit tail continues beyond the source trim across cuts, must fit the film and cannot exceed the IR duration. Fades and gain points cover the extended cue. Choose the acoustic perspective from the scene and listen before applying; this is not separation or automatic removal of existing reverberation.",
     "providerCalls": 0,
-    "receiptId": "dd3e89e6146b76c6195eeb34beec5625bedef10699ad213a5f6d06f9b55895c9",
+    "receiptId": "fff495cc65855b4dd556c3b1a5c3d9f39c900c8537d22e304ca431fa1688f1fe",
     "schema": "qingmu.native-working-cut.v1",
     "scope": {
       "episodeId": "episode-a",
@@ -600,6 +601,7 @@ exports[`saves scene-spanning sound through the shipped director preset, real lo
       "kind": "ambience",
       "outSec": 14,
       "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "sourceAudioMode": "effects",
       "space": {
         "assetId": "room-ir",
         "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",

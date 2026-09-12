@@ -89,8 +89,9 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
     finally { if (live.current) setBusy(false) }
   }
   const total = clips.reduce((sum, clip) => sum + clip.outSec - clip.inSec, 0)
+  const soundSources = [...(state?.audioLibrary ?? []), ...(state?.videoAudioSources ?? [])]
   const audioValid = audioCues.every((c) => {
-    const source = state?.audioLibrary?.find(a => a.assetId === c.assetId)
+    const source = soundSources.find(a => a.assetId === c.assetId)
     const response = state?.audioLibrary?.find(a => a.assetId === c.space?.assetId)
     const audibleDuration = c.outSec - c.inSec + (c.space?.tailSec ?? 0)
     const points = c.gainPoints ?? []
@@ -187,7 +188,8 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
           <button type="button" disabled={locked} onClick={() => { change(clips.filter((_, i) => i !== index)) }}>移出剪辑</button>
         </li>
       })}</ol>
-      <WorkingCutSound library={state.audioLibrary ?? []} cues={audioCues} total={total} disabled={locked} plan={soundPlan}
+      <WorkingCutSound library={soundSources} cues={audioCues} total={total} disabled={locked} plan={soundPlan}
+        separationAvailable={state.audioSeparation?.available ?? false}
         presets={state.acousticPresets ?? []} onImportPreset={async (presetId) => {
           setBusy(true)
           try {

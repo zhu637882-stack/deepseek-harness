@@ -814,7 +814,7 @@ it('imports a room response through the native loop in the bound episode without
 it('saves scene-spanning sound through the shipped director preset, real loop and command adapter', async () => {
   const cut = { clips:[{ frameId:'f',assetId:'video',sha256:'a'.repeat(64),inSec:0,outSec:15 }],
     audioCues:[{ assetId:'room',sha256:'b'.repeat(64),kind:'ambience',startSec:0,inSec:0,outSec:14,gainDb:-18,fadeInSec:1,fadeOutSec:2,
-      space:{ assetId:'room-ir',sha256:'c'.repeat(64),wetDb:-12,tailSec:1 },
+      sourceAudioMode:'effects', space:{ assetId:'room-ir',sha256:'c'.repeat(64),wetDb:-12,tailSec:1 },
       gainPoints:[{ timeSec:2,gainDb:0 },{ timeSec:3,gainDb:-6 },{ timeSec:8,gainDb:-6 },{ timeSec:10,gainDb:0 }] }],
     soundPlan:'Room reflections and street ambience continue under dialogue; music follows scene emotion.' }
   const receiptId = sha({ scope:{ projectId:'p',episodeId:'episode-a' },cut:initialCut })

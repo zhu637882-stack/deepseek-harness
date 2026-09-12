@@ -1,5 +1,7 @@
 # Qingmu OS production cockpit
 
+The delivery workspace can use a completed episode video as an independent sound cue. Choose the original mix or local speech, speech/effects, effects or music extraction; cue timing, fades and gain changes follow the assembled film. Extraction runs during export and reuses verified stems. The source video and its own clip audio remain unchanged; adjust clip sound to avoid duplication and audition the result. Effects include ambience and Foley, not isolated room tone.
+
 Asset cards expose an optional shared scene blockout and per-image camera. Users can drag volumes and camera targets on the plan, edit dimensions and inspect a local perspective preview before saving. Enabled composition references are included in image quotations and generation; preview alone neither saves nor spends. Linked assets reuse their scene layout. The blockout contains authored opaque boxes, not a measured reconstruction; openings require separate wall pieces and generated images still need visual review.
 
 Scene planning and shooting reads wait for both project and episode coordinates. New projects enter planning without a storyboard; advanced tools that require an existing revision stay unavailable until it exists. Loading or switching projects never submits an empty-scope request.

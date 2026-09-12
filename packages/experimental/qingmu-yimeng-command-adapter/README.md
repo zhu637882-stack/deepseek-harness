@@ -1,5 +1,7 @@
 # Qingmu Yimeng command adapter
 
+Working-cut reads expose videoAudioSources separately from imported audioLibrary. Audio cues accept optional sourceAudioMode original/speech_effects/speech/effects/music and exact source IDs and hashes from either list. Omission preserves existing cue bodies. Writer validates episode scope, candidate availability and source bytes; separated cues use the existing local render task.
+
 `previewSceneLayout` resolves the current project and episode to the local asset-design preview endpoint. It accepts bounded authored layout/camera data and an explicit ratio; its PNG result cannot supply an external URL. Scene assets persist `sceneLayout`, while each staged asset can enable `imageCamera`. Omitted fields preserve older clients and explicit null clears the choice. Quotations include the exact rendered composition reference and count it against the model image limit; a layout change invalidates an unsent quotation.
 
 Project copy commands preview an owner-scoped snapshot, submit one exact copy intent and recover its receipt. The adapter checks source identity, request hash and zero-generation flags. Writer owns identity remapping, current-source conflicts and transactional receipt replay.

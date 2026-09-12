@@ -26,6 +26,8 @@ export interface WorkingAudioCue {
   readonly gainDb: number
   readonly fadeInSec: number
   readonly fadeOutSec: number
+  /** Optional local stem extraction before cue trimming; no provider call. */
+  readonly sourceAudioMode?: 'original' | 'speech_effects' | 'speech' | 'effects' | 'music'
   /** Optional relative dB changes; film times strictly increase within this cue. */
   readonly gainPoints?: readonly { readonly timeSec: number; readonly gainDb: number }[]
   /** Optional mono/stereo room IR from this episode's audio library. Dry sound stays; tail extends the cue. */
@@ -73,10 +75,12 @@ export interface WorkingCutState extends CreationScope {
     readonly duration: number
     readonly url: string
     /** Bundled responses are effect inputs, never standalone music cues. */
-    readonly usage?: 'impulse_response'
+    readonly usage?: 'impulse_response' | 'video_audio'
     readonly presetId?: string
     readonly sourceUrl?: string
   }[]
+  /** Completed videos in this episode whose sound can run independently of their pictures. */
+  readonly videoAudioSources?: WorkingCutState['audioLibrary']
   readonly acousticPresets?: readonly {
     readonly id: string
     readonly name: string

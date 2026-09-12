@@ -1,5 +1,7 @@
 # 青木易梦命令适配器
 
+工作剪辑读取将 videoAudioSources 与导入的 audioLibrary 分开返回。独立音轨可引用任一清单中的准确素材编号与哈希，并接受可选 sourceAudioMode original/speech_effects/speech/effects/music。省略时保留旧音轨请求。Writer 核验集数范围、候选可用性与来源字节，分离音轨复用现有本机合成任务。
+
 `previewSceneLayout` 根据当前项目和集调用本地素材设计预览接口，接收有界的布局、摄影机及明确画幅，PNG 返回值不允许外部网址。场景素材保存 `sceneLayout`，逐图可启用 `imageCamera`。旧客户端省略字段时保留原值，显式 null 清除选择。报价包含准确渲染的构图参考并计入模型引用上限；布局改变使未提交报价失效。
 
 项目复制命令可预览校验归属的来源快照、提交精确复制请求并恢复回执。适配器核对来源标识、请求哈希及未调用生成的标记。Writer 负责标识映射、来源冲突检查和事务回执重放。

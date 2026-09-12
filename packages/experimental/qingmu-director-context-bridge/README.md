@@ -1,5 +1,7 @@
 # Qingmu director context bridge
 
+The native director can retain an episode video sound source in an independent working-cut cue, including local stem selection. Reading the cut supplies scoped videoAudioSources; saving uses the existing receipt and exact source hashes. The director chooses timing and handles duplicate source audio, separation artifacts and continuous scene sound through actual audition.
+
 `qingmu_preview_scene_layout` renders authored scene volumes and a camera within the current creative request or bound episode. It delivers a verified PNG through the existing attachment/vision path, with visible-box bounds and source limitations in the durable tool result. The director saves chosen geometry through the ordinary asset design as `sceneLayout` and `imageCamera`; image generation includes the composition reference. Reusing fixed volumes while changing camera does not certify that the generator follows them. Direct-image inspection adds one image input without a model call; a configured text-only observer uses its normal model allowance.
 
 The native asset workspace designs and edits characters, scenes and props from the saved screenplay. Owner-scoped save, exact image quotation, explicit generation and task recovery share the existing Writer image queue and budget. The director bible and original prompt reach the image request; image generation does not imply adoption. The native `model-tools-keyless.ts --assets` example reads the shipped director and three asset skills and returns an editable design.

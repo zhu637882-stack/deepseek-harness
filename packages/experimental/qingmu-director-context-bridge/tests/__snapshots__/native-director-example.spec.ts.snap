@@ -47,6 +47,7 @@ exports[`authors a first-draft suggestion through the shipped preset and actual 
     "qingmu_prepare_dialogue_video",
     "qingmu_preview_dialogue_edit",
     "qingmu_preview_reference_draft",
+    "qingmu_preview_scene_layout",
     "qingmu_propose_first_draft",
     "qingmu_propose_prompt_edit",
     "qingmu_read_asset_design",

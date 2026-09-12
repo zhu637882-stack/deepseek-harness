@@ -4,7 +4,8 @@ import type { WorkingAudioCue, WorkingCutState } from '@deepseek-ai/dsh-experime
 import css from './WorkingCut.module.css'
 
 /** Edit sound sources and cue ranges in assembled-film seconds. */
-export function WorkingCutSound({ library, presets = [], cues, total, disabled, plan, onPlan, onChange, onUpload, onImportPreset }: {
+export function WorkingCutSound({ library, presets = [], cues, total, disabled, plan,
+  onPlan, onChange, onUpload, onImportPreset, separationAvailable = false }: {
   readonly library: NonNullable<WorkingCutState['audioLibrary']>
   readonly cues: readonly WorkingAudioCue[]
   readonly total: number
@@ -15,6 +16,7 @@ export function WorkingCutSound({ library, presets = [], cues, total, disabled, 
   readonly onUpload: (file: File) => Promise<void>
   readonly presets?: NonNullable<WorkingCutState['acousticPresets']>
   readonly onImportPreset?: (presetId: string) => Promise<void>
+  readonly separationAvailable?: boolean
 }) {
   const [error, setError] = useState('')
   const update = (index: number, patch: Partial<WorkingAudioCue>) => {
@@ -42,7 +44,20 @@ export function WorkingCutSound({ library, presets = [], cues, total, disabled, 
       </div>)}
     </details>}
     {error && <p role="alert">{error}</p>}
-    {library.map(source => <div className={css.source} key={source.assetId}>
+    <details><summary>使用已生成视频的声音</summary>
+      <p>把本集视频的声音单独铺到成片上，画面切换时不会从头播放。先试听原声，加入后可选择提取对白、环境与拟音或音乐。无声视频无法提取声音。</p>
+      {library.filter(source => source.usage === 'video_audio').map(source => <div className={css.source} key={source.assetId}>
+        <span>{source.name} · {source.duration.toFixed(1)} 秒</span>
+        <audio aria-label={`试听 ${source.name}`} controls preload="none" src={source.url} />
+        <button type="button" disabled={disabled || total <= 0} onClick={() => {
+          const duration = Math.min(total, Math.floor(source.duration * 1000) / 1000)
+          onChange([...cues, { assetId: source.assetId, sha256: source.sha256, kind: 'ambience', startSec: 0,
+            inSec: 0, outSec: duration, gainDb: -12, fadeInSec: Math.min(.3, duration / 4), fadeOutSec: Math.min(.5, duration / 4) }])
+        }}>{`单独使用 ${source.name}`}</button>
+      </div>)}
+      {!library.some(source => source.usage === 'video_audio') && <p>本集还没有已生成的视频。</p>}
+    </details>
+    {library.filter(source => source.usage !== 'video_audio').map(source => <div className={css.source} key={source.assetId}>
       <span>{source.name} · {source.duration.toFixed(1)} 秒</span>
       {source.usage === 'impulse_response' ? <span>已可用于音轨的空间混响</span> : <><audio aria-label={`试听 ${source.name}`} controls preload="none" src={source.url} />
         <button type="button" disabled={disabled || total <= 0} onClick={() => {
@@ -56,6 +71,7 @@ export function WorkingCutSound({ library, presets = [], cues, total, disabled, 
       const duration = cue.outSec - cue.inSec + (cue.space?.tailSec ?? 0)
       const response = library.find(a => a.assetId === cue.space?.assetId)
       const spaceInvalid = cue.space && (!response || response.sha256 !== cue.space.sha256 || response.duration > 10
+        || response.usage === 'video_audio'
         || !Number.isFinite(cue.space.wetDb) || cue.space.wetDb < -60 || cue.space.wetDb > 6
         || !Number.isFinite(cue.space.tailSec) || cue.space.tailSec < 0 || cue.space.tailSec > response.duration)
       const points = cue.gainPoints ?? []
@@ -73,6 +89,20 @@ export function WorkingCutSound({ library, presets = [], cues, total, disabled, 
         <label>用途<select aria-label={`音轨 ${index + 1} 用途`} value={cue.kind} onChange={(e) => { update(index, { kind: e.target.value as WorkingAudioCue['kind'] }) }}>
           <option value="music">配乐</option><option value="ambience">环境底声</option><option value="effect">拟音 / 音效</option><option value="dialogue">独立对白</option>
         </select></label>
+        <label>声音内容<select aria-label={`音轨 ${index + 1} 声音内容`} value={cue.sourceAudioMode ?? 'original'} onChange={(e) => {
+          if (e.target.value === 'original') {
+            const { sourceAudioMode: _removed, ...original } = cue
+            onChange(cues.map((current, i) => i === index ? original : current))
+          } else update(index, { sourceAudioMode: e.target.value as NonNullable<WorkingAudioCue['sourceAudioMode']> })
+        }}>
+          <option value="original">使用完整原声</option>
+          <option value="speech_effects" disabled={!separationAvailable}>提取对白与环境声</option>
+          <option value="speech" disabled={!separationAvailable}>提取对白</option>
+          <option value="effects" disabled={!separationAvailable}>提取环境与拟音</option>
+          <option value="music" disabled={!separationAvailable}>提取音乐</option>
+        </select></label>
+        {cue.sourceAudioMode && cue.sourceAudioMode !== 'original' && <p>导出时在本机分离，首次处理可能较慢，后续复用同一来源的结果。分离可能残留或损失细节；环境与拟音仍在同一轨，可裁去不需要的动作声。请回听导出结果。</p>}
+        {source?.usage === 'video_audio' && <p>这里只加入声音，不增加画面。原视频若也在剪辑中，其原声仍会播放；请按需要调整对应镜头的声音内容和音量，避免重复叠加。</p>}
         {number('startSec', '成片起点秒', 0, total)}{number('gainDb', '音量 dB', -60, 6)}
         {number('fadeInSec', '淡入秒', 0, duration)}{number('fadeOutSec', '淡出秒', 0, duration)}
         <details><summary>裁剪声音素材</summary>{number('inSec', '素材起点秒', 0, source?.duration ?? 0)}{number('outSec', '素材终点秒', 0, source?.duration ?? 0)}</details>
@@ -89,7 +119,7 @@ export function WorkingCutSound({ library, presets = [], cues, total, disabled, 
           }}>
             <option value="">不加混响</option>
             {cue.space && !response && <option value={cue.space.assetId}>原空间响应不可用</option>}
-            {library.filter(a => a.duration <= 10).map(a => <option key={a.assetId} value={a.assetId}>{a.name}</option>)}
+            {library.filter(a => a.duration <= 10 && a.usage !== 'video_audio').map(a => <option key={a.assetId} value={a.assetId}>{a.name}</option>)}
           </select></label>
           {cue.space && <>
             <label>混响音量 dB<input aria-label={`音轨 ${index + 1} 混响音量 dB`} type="number" min="-60" max="6" step="1" value={cue.space.wetDb} onChange={(e) => {
