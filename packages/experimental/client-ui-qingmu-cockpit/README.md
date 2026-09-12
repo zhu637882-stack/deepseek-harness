@@ -311,3 +311,5 @@ Episode continuity opens in a full-width dialog with a scrollable comparison, cu
 Creation and saved-settings panels show Writer’s composed visual guidance and list adjusted preset suggestions. A late response for another picker selection is ignored. Saved projects distinguish original method references from current execution methods; native screenplay authoring receives the current methods and composed style, while historical media remains unchanged.
 
 An unsaved reference-video draft starts with the selected shot’s director duration. Persisted draft controls remain authoritative on restore; timing is never silently rounded or clamped to a model default. Provider validation still reports unsupported requests before submission.
+
+Completed asset designs accept a single JSON or text code block. Missing quote escapes can be repaired while preserving every original character; truncated data and content-changing repairs remain rejected. The original reply stays readable, and validation failures do not report adoption or trigger another model request.

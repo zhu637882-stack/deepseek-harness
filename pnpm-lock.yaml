@@ -4185,6 +4185,10 @@ importers:
         version: 18.3.1(react@18.3.1)
 
   packages/experimental/client-ui-qingmu-cockpit:
+    dependencies:
+      jsonrepair:
+        specifier: 3.15.0
+        version: 3.15.0
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^
@@ -13456,6 +13460,10 @@ packages:
     engines: {node: '>=6'}
     hasBin: true
 
+  jsonrepair@3.15.0:
+    resolution: {integrity: sha512-wy8OTjwsJwQRnQJkKnMJJ9vcytRdBPAgIF/Hy6+s1dAj42BHMKiyL8JzEieIl3JY7idt8eyHwBWTO8mh/+mtwA==}
+    hasBin: true
+
   jsx-ast-utils-x@0.1.0:
     resolution: {integrity: sha512-eQQBjBnsVtGacsG9uJNB8qOr3yA8rga4wAaGG1qRcBzSIvfhERLrWxMAM1hp5fcS6Abo8M4+bUBTekYR0qTPQw==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
@@ -18741,6 +18749,8 @@ snapshots:
   json-stable-stringify-without-jsonify@1.0.1: {}
 
   json5@2.2.3: {}
+
+  jsonrepair@3.15.0: {}
 
   jsx-ast-utils-x@0.1.0: {}
 

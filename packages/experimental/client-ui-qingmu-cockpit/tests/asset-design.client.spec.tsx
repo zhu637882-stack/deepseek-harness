@@ -9,6 +9,37 @@ const state: AssetDesignState = { ...scope, schema: 'qingmu.asset-design-state.v
     visualStyle: '写实', tone: '温暖', colorPalette: ['灰蓝'], lightingRules: '窗光', cameraGrammar: '跟随动作', performanceRules: '自然', characterContinuityRules: '服装稳定',
   } } }
 afterEach(() => { cleanup(); localStorage.clear() })
+it('recovers missing quote escapes without losing design prose or changing existing media', async () => {
+  const port = setup()
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  await screen.findByLabelText('画面描述')
+  const design = { ...state.design!, assets: [{ ...state.design!.assets[0]!,
+    imagePrompt: '旧木桌上放一只小碟', designBasis: '勾出"用了很多年"的场所痕迹，文字完整保留。' }] }
+  fireEvent.change(screen.getByLabelText('素材设计数据'), {
+    target: { value: JSON.stringify(design).replaceAll('\\"', '"') },
+  })
+  fireEvent.click(screen.getByRole('button', { name: '载入设计' }))
+  expect((screen.getByLabelText('设计依据') as HTMLTextAreaElement).value).toBe(design.assets[0]!.designBasis)
+  expect(screen.getByText(/已修正正文引号的格式/)).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
+  await waitFor(() => { expect(port.saveAssetDesign).toHaveBeenCalledTimes(1) })
+  expect(port.saveAssetDesign.mock.calls[0]).toMatchObject([{ design: { assets: design.assets } }])
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
+
+it.each(['missing closing brace', 'omitted content'])('preserves current cards when recovery would invent %s', async (kind) => {
+  const port = setup()
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  await screen.findByLabelText('画面描述')
+  const complete = JSON.stringify(state.design)
+  const incomplete = kind === 'missing closing brace' ? complete.slice(0, -1) : complete.replace('"assets":[', '"assets":[...,')
+  fireEvent.change(screen.getByLabelText('素材设计数据'), { target: { value: incomplete } })
+  fireEvent.click(screen.getByRole('button', { name: '载入设计' }))
+  expect(screen.getByText(/设计格式不完整/)).toBeTruthy()
+  expect((screen.getByLabelText('画面描述') as HTMLTextAreaElement).value).toBe('真人定妆照')
+  expect(port.saveAssetDesign).not.toHaveBeenCalled()
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
 function setup() {
   const port = {
     referenceVideoAssets: vi.fn(async () => ({ projectId: 'p', page: 1, pages: 1, items: [{ assetId: 'asset_ref', assetSha256: 'e'.repeat(64), label: '已采用人物', mediaType: 'reference_image' as const, browserUrl: '' }] })),

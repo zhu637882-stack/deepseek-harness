@@ -5,6 +5,23 @@ import { NativeStoryComposer } from '../src/client/NativeStoryComposer.tsx'
 import { readStoryDraft } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft'
 
 afterEach(() => { cleanup(); localStorage.clear() })
+it('adopts a retained JSON design block and reports validation failure without another model request', async () => {
+  localStorage.setItem('qingmu.asset-design-session.v1:p:e',
+    JSON.stringify({ sessionId: 'session-design', baseline: 1, submitted: true }))
+  const port = { prepare: vi.fn(), send: vi.fn(), read: vi.fn(async () => ({
+    text: '完整设计\n```json\n{"assets":[]}\n```', script: '', lastSeq: 4, running: false, finished: true, error: '',
+  })) }
+  const onAdopt = vi.fn(() => { throw new Error('缺少素材设计') })
+  render(<NativeStoryComposer port={port} projectId="p" episodeId="e" source="当前剧本" settings="{}"
+    disabled={false} onAdopt={onAdopt} purpose={{ key: 'asset-design', jsonOutput: true, title: '素材设计',
+      description: '完整设计', prompt: '设计', action: '重新设计', adopt: '采用设计', adopted: '已采用设计' }} />)
+  fireEvent.click(await screen.findByRole('button', { name: '采用设计' }))
+  await screen.findByText('没有采用：缺少素材设计')
+  expect(onAdopt).toHaveBeenCalledWith('{"assets":[]}')
+  expect(screen.queryByText('已采用设计')).toBeNull()
+  expect(port.send).not.toHaveBeenCalled()
+  expect(port.prepare).not.toHaveBeenCalled()
+})
 const event = (seq: number, type: string, data: unknown) => ({ event: { seq, type, data } })
 const completed = [event(2, 'turn/start', {}), event(3, 'assistant/message', { message: { content: [
   { type: 'reasoning', text: 'private reasoning' }, { type: 'text', text: '完整稿\n```txt\n场景一：店内\n阿宁：下班了。\n```' },

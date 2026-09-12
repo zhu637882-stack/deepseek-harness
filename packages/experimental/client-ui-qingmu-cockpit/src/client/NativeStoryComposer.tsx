@@ -21,6 +21,7 @@ function restore(key: string): WritingRequest | undefined {
 export function NativeStoryComposer({ port, projectId, episodeId, source, settings, disabled, onAdopt, purpose }: {
   readonly purpose?: {
     readonly key: string
+    readonly jsonOutput?: boolean
     readonly title: string
     readonly description: string
     readonly prompt: string
@@ -78,6 +79,9 @@ export function NativeStoryComposer({ port, projectId, episodeId, source, settin
     } finally { lock.current = false; if (mounted.current) setBusy(false) }
   }
   const pending = request?.submitted === true && !result?.finished
+  const jsonBlocks = purpose?.jsonOutput && result?.finished && !result.error
+    ? [...result.text.matchAll(/```json\s*\n([\s\S]*?)```/gi)] : []
+  const adoptable = result?.script || (jsonBlocks.length === 1 ? jsonBlocks[0]?.[1]?.trim() : '')
   async function adoptResult(text: string) {
     if (disabled || lock.current) return
     lock.current = true; setBusy(true)
@@ -98,9 +102,9 @@ export function NativeStoryComposer({ port, projectId, episodeId, source, settin
     {notice && <p role="status">{notice}</p>}
     {result?.error && <p role="alert">创作未完成：{result.error}</p>}
     {result?.text && <details open={!purpose}><summary>{purpose ? '查看完整设计文字' : '编剧完整稿'}</summary><pre>{result.text}</pre></details>}
-    {result?.script && <button type="button" disabled={disabled || busy} onClick={() => {
-      void adoptResult(result.script)
+    {adoptable && <button type="button" disabled={disabled || busy} onClick={() => {
+      void adoptResult(adoptable)
     }}>{purpose?.adopt ?? '采用到剧本文字'}</button>}
-    {result?.finished && !result.error && !result.script && <p>这次返回缺少可采用的独立正文块。可参考完整文字，重新发起创作。</p>}
+    {result?.finished && !result.error && !adoptable && <p>这次返回缺少可采用的独立正文块。完整文字已保留，可修正后导入。</p>}
   </section>
 }

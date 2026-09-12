@@ -1,0 +1,16 @@
+[
+  {
+    "label": "watercolor",
+    "assets": 1,
+    "repaired": true,
+    "errors": [],
+    "writes": []
+  },
+  {
+    "label": "bw",
+    "assets": 1,
+    "repaired": false,
+    "errors": [],
+    "writes": []
+  }
+]

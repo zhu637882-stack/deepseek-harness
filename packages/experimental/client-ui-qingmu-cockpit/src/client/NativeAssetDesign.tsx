@@ -4,14 +4,15 @@ import type { NativeStoryPort } from '@deepseek-ai/dsh-experimental-qingmu-direc
 import type { AssetDesign, AssetDesignItem, AssetDesignState, AssetImageQuote, AssetImageRuns, AssetWorldDesign } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
 import { NativeStoryComposer } from './NativeStoryComposer.tsx'
+import { parseQuotedDesignJson } from './quoted-design-json.ts'
 import css from './NativeDirectorComposer.module.css'
 import { AssetImageReferences, type AssetImageReferencePort } from './AssetImageReferences.tsx'
 
 type Port = Pick<QingmuYimengPort, 'readAssetDesign' | 'saveAssetDesign' | 'quoteAssetImage' | 'generateAssetImage' | 'readAssetImageRuns' | 'readAssetVoiceRuns' | 'quoteAssetVoice' | 'generateAssetVoice'> & AssetImageReferencePort
 const emptyWorld: AssetWorldDesign = { setting: '', scriptFacts: '', directorInferences: '', exceptions: '', openQuestions: '' }
 const names = { actor: '人物', scene: '场景', prop: '道具' } as const
-function parseDesign(text: string): AssetDesign {
-  const value: unknown = JSON.parse(text)
+function parseDesign(text: string): { design: AssetDesign; repaired: boolean } {
+  const { value, repaired } = parseQuotedDesignJson(text)
   if (!value || typeof value !== 'object' || !('assets' in value) || !Array.isArray(value.assets)
     || !value.assets.length || value.assets.length > 40 || !('director' in value) || !value.director || typeof value.director !== 'object') throw new Error('设计需要人物、场景或道具，以及全片导演设定。')
   for (const entry of value.assets as unknown[]) {
@@ -25,7 +26,7 @@ function parseDesign(text: string): AssetDesign {
     if (typeof director[field] !== 'string' || !director[field]) throw new Error('全片导演设定尚不完整。')
   }
   if (!Array.isArray(director.colorPalette) || !director.colorPalette.every(color => typeof color === 'string')) throw new Error('缺少全片色彩设计。')
-  return value as AssetDesign
+  return { design: value as AssetDesign, repaired }
 }
 function withIdentities(value: AssetDesign, previous?: AssetDesign): AssetDesign {
   return { ...value, assets: value.assets.map((item) => {
@@ -89,8 +90,9 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
     finally { lock.current = false; if (live.current) setBusy(false) }
   }
   function adopt(text: string) {
-    try { setDesign(withIdentities(parseDesign(text), design)); setDirty(true); setQuote(undefined); setNotice('设计已放入下方卡片，检查或修改后保存。') }
-    catch (error) { setNotice(String(error)) }
+    const parsed = parseDesign(text)
+    setDesign(withIdentities(parsed.design, design)); setDirty(true); setQuote(undefined)
+    setNotice(`${parsed.repaired ? '已修正正文引号的格式，设计文字完整保留。' : ''}设计已放入下方卡片，检查或修改后保存。`)
   }
   function edit(index: number, patch: Partial<AssetDesignItem>) {
     if (!design) return
@@ -104,7 +106,7 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
     <label>创作补充<textarea value={changes} onChange={(event) => { setChanges(event.target.value) }} placeholder="例如人物气质、服装年代、空间布局，或道具的真实尺寸" /></label>
     {state && storyPort && <NativeStoryComposer port={storyPort} projectId={projectId} episodeId={episodeId}
       source={JSON.stringify(state.script)} settings="" disabled={busy} onAdopt={adopt}
-      purpose={{ key: 'asset-design', title: '让青木设计素材', description: '导演会结合剧本和素材方法提出完整设计，你可以逐项调整。',
+      purpose={{ key: 'asset-design', jsonOutput: true, title: '让青木设计素材', description: '导演会结合剧本和素材方法提出完整设计，你可以逐项调整。',
         prompt, action: '根据剧本设计素材', adopt: '采用到素材卡片', adopted: '请检查下方素材卡片中的设计。' }} />}
     {design && <>
       <details><summary>剧本世界与设计依据</summary>{(['setting', 'scriptFacts', 'directorInferences', 'exceptions', 'openQuestions'] as const).map((field, index) => <label key={field}>{['年代与世界设定', '剧本明确事实', '导演推导', '剧本例外', '待定事项'][index]}<textarea value={(design.world ?? emptyWorld)[field]} onChange={(event) => {
@@ -183,7 +185,9 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
       {!quote.generationAvailable && <p>当前账户尚未开通图片生成额度。</p>}
     </section>}
     <button type="button" disabled={busy} onClick={() => { void perform(readRuns) }}>刷新生成进度</button>
-    <details><summary>导入已有素材设计</summary><textarea aria-label="素材设计数据" value={manual} onChange={(event) => { setManual(event.target.value) }} /><button type="button" disabled={busy || !manual.trim()} onClick={() => { adopt(manual) }}>载入设计</button></details>
+    <details><summary>导入已有素材设计</summary><textarea aria-label="素材设计数据" value={manual} onChange={(event) => { setManual(event.target.value) }} /><button type="button" disabled={busy || !manual.trim()} onClick={() => {
+      try { adopt(manual) } catch (error) { setNotice(String(error)) }
+    }}>载入设计</button></details>
     {notice && <p role="status">{notice}</p>}
   </section>
 }
