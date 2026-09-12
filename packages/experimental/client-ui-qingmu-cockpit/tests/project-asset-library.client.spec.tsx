@@ -29,7 +29,7 @@ it('filters video references and plays their picture and sound in a video elemen
     readLocalReferenceCandidateContent: localReader() }
   render(<ProjectAssetLibrary projectId="p" port={port} />)
   await screen.findByRole('button', { name: '预览反打参考' })
-  fireEvent.click(screen.getByRole('button', { name: '视频', exact: true }))
+  fireEvent.click(screen.getByRole('button', { name: '视频' }))
   expect(screen.queryByRole('button', { name: '预览林予' })).toBeNull()
   expect(screen.queryByRole('button', { name: '预览林予音色' })).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: '预览反打参考' }))
