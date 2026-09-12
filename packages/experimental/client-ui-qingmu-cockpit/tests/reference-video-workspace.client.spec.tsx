@@ -15,7 +15,7 @@ const result = {
   body: { input: { prompt: '已编译的原文' }, parameters: { duration: 8, resolution: '720P', ratio: '16:9' } },
   referenceAudioDurationSec: 2, directorSource: null, directorSourceAligned: true,
 } as ReferenceVideoPreviewResponse
-function mount(options?: { onRequestDirector?: () => void; directorSource?: { sha256: string; prompt: string }; configured?: boolean; configurationError?: string | null; initialMaterialStatus?: 'not_prepared' | 'unknown' | 'failed' | 'expired' | 'ready' }) {
+function mount(options?: { initialDurationSec?: number; onRequestDirector?: () => void; directorSource?: { sha256: string; prompt: string }; configured?: boolean; configurationError?: string | null; initialMaterialStatus?: 'not_prepared' | 'unknown' | 'failed' | 'expired' | 'ready' }) {
   let server: ReferenceVideoDraftResponse = { schema: 'jason.reference-video-draft.v1', directorSource: options?.directorSource ?? null, projectId: 'p', frameId: 'f', frameSha256: 'f'.repeat(64), draft: null, mediaTypes: {}, providerCalls: 0, generationQueued: false }
   let latestMaterialStatus = options?.initialMaterialStatus ?? 'not_prepared'
   const materialState = (status = latestMaterialStatus) => ({
@@ -62,7 +62,7 @@ function mount(options?: { onRequestDirector?: () => void; directorSource?: { sh
       return server
     }),
   }
-  const view = render(<ReferenceVideoWorkspace projectId="p" frameId="f" initialPrompt="陈远说：‘图1不应被替换。’" port={port} onRequestDirector={options?.onRequestDirector} />)
+  const view = render(<ReferenceVideoWorkspace projectId="p" frameId="f" initialPrompt="陈远说：‘图1不应被替换。’" initialDurationSec={options?.initialDurationSec} port={port} onRequestDirector={options?.onRequestDirector} />)
   fireEvent.click(screen.getByText('精确引用 · 导演稿与候选'))
   return { port, view, setMaterialStatus: (status: typeof latestMaterialStatus) => { latestMaterialStatus = status } }
 }
@@ -104,6 +104,31 @@ it('restores saved source tokens, literal dialogue and controls after remount', 
   await screen.findByRole('region', { name: '阿里请求预览' })
   expect(port.referenceVideoPreview.mock.calls[0]?.[0]).toEqual({ projectId: 'p', ...saved?.request })
   expect(screen.getByRole('status').textContent).toBe('已载入草稿版本 1。')
+})
+
+it('uses the director duration for a fresh request and keeps persisted controls after remount', async () => {
+  const { port, view } = mount({ initialDurationSec: 7 }); await chooseAll()
+  expect(screen.getByLabelText<HTMLInputElement>('时长（秒）').value).toBe('7')
+  fireEvent.click(screen.getByRole('button', { name: '保存引用草稿' }))
+  await screen.findByText('已保存草稿版本 1。')
+  expect(port.saveReferenceVideoDraft.mock.calls[0]?.[0].request.parameters.duration).toBe(7)
+  view.unmount()
+  render(<ReferenceVideoWorkspace projectId="p" frameId="f" initialPrompt="" initialDurationSec={5} port={port} />)
+  fireEvent.click(screen.getByText('精确引用 · 导演稿与候选'))
+  await screen.findByText('已载入草稿版本 1。')
+  expect(screen.getByLabelText<HTMLInputElement>('时长（秒）').value).toBe('7')
+  fireEvent.click(screen.getByRole('button', { name: '预览实际请求' }))
+  await screen.findByRole('region', { name: '阿里请求预览' })
+  expect(port.referenceVideoPreview.mock.calls[0]?.[0].parameters.duration).toBe(7)
+  expect(port.queueReferenceVideo).not.toHaveBeenCalled()
+})
+
+it('does not round fractional director timing into a different creative duration', async () => {
+  const { port } = mount({ initialDurationSec: 7.5 }); await chooseAll()
+  expect(screen.getByLabelText<HTMLInputElement>('时长（秒）').value).toBe('7.5')
+  fireEvent.click(screen.getByRole('button', { name: '预览实际请求' }))
+  await screen.findByRole('region', { name: '阿里请求预览' })
+  expect(port.referenceVideoPreview.mock.calls[0]?.[0].parameters.duration).toBe(7.5)
 })
 
 it('keeps edits made while a save is pending and advances only the saved revision', async () => {

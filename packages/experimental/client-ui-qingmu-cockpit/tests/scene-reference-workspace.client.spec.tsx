@@ -17,7 +17,7 @@ const relations = {
   scenes: [{ sceneId: 'cafe', name: '深夜咖啡馆' }, { sceneId: 'street', name: '街口' }],
   shots: [
     { shotId: 's1', sceneId: 'cafe', frameNo: 1, title: '窗边空镜', durationSec: 5, beats: [], dialogueRhythm: { cues: [] } },
-    { shotId: 's2', sceneId: 'cafe', frameNo: 2, title: '林予落座', durationSec: 8,
+    { shotId: 's2', sceneId: 'cafe', frameNo: 2, title: '林予落座', durationSec: 7,
       beats: [{ visualResponsibility: '林予推门坐下' }], dialogueRhythm: { cues: [{ verbatimText: '我等你很久了。' }] } },
     { shotId: 's3', sceneId: 'cafe', frameNo: 3, title: '陈远抬头', durationSec: 6, beats: [], dialogueRhythm: { cues: [] } },
     { shotId: 's4', sceneId: 'street', frameNo: 4, title: '街口远景', durationSec: 5, beats: [], dialogueRhythm: { cues: [] } },
@@ -36,7 +36,7 @@ it('starts a scene-scoped draft without PromptIR and orders prior shot reference
   expect(screen.getByRole('heading', { name: '深夜咖啡馆' })).toBeTruthy()
   expect(screen.getByRole('heading', { name: '镜02 · 林予落座' })).toBeTruthy()
   expect(referenceRender).toHaveBeenLastCalledWith(expect.objectContaining({
-    projectId: 'project-1', frameId: 's2', initialPrompt: '', initialOpen: true, embedded: true,
+    projectId: 'project-1', frameId: 's2', initialPrompt: '', initialDurationSec: 7, initialOpen: true, embedded: true,
     shotLabel: '镜02 · 林予落座', referenceSources: [
       { frameId: 's1', label: '镜01 · 窗边空镜' }, { frameId: 's3', label: '镜03 · 陈远抬头' },
     ],

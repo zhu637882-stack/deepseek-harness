@@ -76,7 +76,7 @@ export function SceneReferenceWorkspace({ projectId, relations, selectedShotId, 
       </details>
     </div>
     <ReferenceVideoWorkspace key={`${projectId}:${relations.storyboardRevision.revisionId}:${shot.shotId}`}
-      projectId={projectId} frameId={shot.shotId}
+      projectId={projectId} frameId={shot.shotId} initialDurationSec={shot.durationSec}
       shotLabel={`镜${String(shot.frameNo).padStart(2, '0')} · ${shot.title ?? '未命名镜头'}`} initialPrompt="" initialOpen embedded
       referenceSources={referenceSources} onUnsavedChange={setDirty}
       onOpenShooting={onOpenShooting} onRequestDirector={onRequestDirector} port={port} />

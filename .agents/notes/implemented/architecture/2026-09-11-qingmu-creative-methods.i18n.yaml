@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-09-11-qingmu-creative-methods.md
-2026-09-11-qingmu-creative-methods.md: 447066d80ad63c2856c9b62373be4a40181df135
-2026-09-11-qingmu-creative-methods.zh.md: 9cbf5cf65e844f871927a06ab3ace32dda1eca13
+2026-09-11-qingmu-creative-methods.md: 98970d2447ca3e0357c558c03d1a9999bb8a8ba2
+2026-09-11-qingmu-creative-methods.zh.md: 1d39fae65442f60f767809b785563fa21a82c929

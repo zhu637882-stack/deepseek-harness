@@ -16,6 +16,8 @@ export interface ReferenceVideoWorkspaceProps {
   readonly projectId: string
   readonly frameId: string
   readonly initialPrompt: string
+  /** Seed an unsaved shot from its director timing; persisted controls take precedence. */
+  readonly initialDurationSec?: number | undefined
   readonly shotLabel?: string
   readonly initialOpen?: boolean
   readonly embedded?: boolean
@@ -58,13 +60,16 @@ function materialStatusText(material: ReferenceVideoMaterialsState['materials'][
  * @returns Director reference editor.
  */
 export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, port,
-  shotLabel, initialOpen, embedded, referenceSources, onUnsavedChange, onOpenShooting, onRequestDirector }: ReferenceVideoWorkspaceProps) {
+  shotLabel, initialOpen, embedded, initialDurationSec, referenceSources, onUnsavedChange,
+  onOpenShooting, onRequestDirector }: ReferenceVideoWorkspaceProps) {
   const [assets, setAssets] = useState<readonly ReferenceVideoAsset[]>([])
   const [page, setPage] = useState(0)
   const [pages, setPages] = useState(1)
   const [chosen, setChosen] = useState<readonly Chosen[]>([])
   const [parts, setParts] = useState<readonly ReferenceVideoPromptPart[]>([{ text: initialPrompt }])
-  const [parameters, setParameters] = useState<ReferenceVideoParameters>({ duration: 8, resolution: '720P', ratio: '16:9', audio: true, prompt_extend: false })
+  const [parameters, setParameters] = useState<ReferenceVideoParameters>({
+    duration: initialDurationSec ?? 8, resolution: '720P', ratio: '16:9', audio: true, prompt_extend: false,
+  })
   const [result, setResult] = useState<ReferenceVideoPreviewResponse>()
   const [quoteResult, setQuoteResult] = useState<ReferenceVideoQuoteResponse>()
   const [savedEpoch, setSavedEpoch] = useState(-1)
