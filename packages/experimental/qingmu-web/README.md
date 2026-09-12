@@ -20,6 +20,8 @@ The preset composes a complete director persona and the context bridge's [native
 
 The preset mounts the native skill filesystem provider with only its packaged roots, and the native `skill` tool. The Web bundle leaves discovery to presets; this creative preset does not scan unrelated installed project skills. Its Qingmu-authored six-department entry leads; `open-film-writer` and `open-film-camera` provide specialist methods, with previous libraries as supplements. `character-asset`, `scene-asset` and `prop-asset` add identity, spatial layout, material, proportion and interaction checks before generation. The [source manifest](agent-presets/qingmu-director/skills/sources.json) records repository revisions, upstream hashes and adapted hashes. This includes text references and templates; excluded binary examples are listed explicitly. The [resource reader](../qingmu-director-context-bridge/src/skill-resources.ts) verifies bundle hashes and paginates without silent truncation. Reading a method does not itself save a director plan or demonstrate creative quality.
 
+The preset mounts the stock `compaction-basic` engine in an isolated session group, using the host token meter. Automatic summarization starts at 65% of the routed model context capacity, leaving room for output and tool results. It preserves the durable conversation log and retains the recent tail; saved Writer designs and drafts are unchanged. The director rereads complete current creative sources before production. No tool-result pruning is mounted. A failed summary remains a reported runtime error, not a successful recovery.
+
 ## Model Experience
 
 ### Qingmu director preset
@@ -43,6 +45,6 @@ The persona and schemas form a stable prefix for this preset. Requested context 
 - The source package stays private and experimental while the product distribution namespace is being established.
 - Existing populated sessions do not gain this preset, and a saved user default can override the distribution default. Read-tool tests do not prove browser binding, real-provider judgment, proposal adoption, or production deployment.
 
-The Qingmu distribution defaults new sessions to `deepseek-v4-pro` through the native default-model service; the DeepSeek adapter supplies its default high reasoning effort. Saved user model choices and existing sessions retain their selection. Stock Web keeps its own default. Model choice improves the available reasoning capacity but does not establish script or film quality.
+The Qingmu distribution defaults new sessions to `deepseek-flash` through the native default-model service; the DeepSeek adapter supplies its default high reasoning effort. Saved user model choices and existing sessions retain their selection. Stock Web keeps its own default. The adapter resolves this route to DeepSeek V4.1 Flash with image input; model selection does not establish script or film quality.
 
 The packaged scene asset method relates set dressing to narrative purpose, functional space and continuity, including intentional emptiness. Its image review distinguishes incomplete design, lost request content and model execution errors. Method delivery alone does not prove visual quality.

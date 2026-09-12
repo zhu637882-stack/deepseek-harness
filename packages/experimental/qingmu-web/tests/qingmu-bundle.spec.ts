@@ -15,7 +15,7 @@ describe('Qingmu Web distribution composition', () => {
     expect(composeEntries(layers.slice(0, 2)).find(entry => entry.id === 'agent-default-model')?.config)
       .toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-flash' })
     expect(entries.find(entry => entry.id === 'agent-default-model')?.config)
-      .toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+      .toEqual({ provider: 'deepseek-official', model: 'deepseek-flash' })
     expect(composeEntries(layers.slice(0, 2)).find(entry => entry.id === 'agent-presets')?.config)
       .toEqual({ default: 'standard' })
     expect(entries.find(entry => entry.id === 'agent-presets')?.config)

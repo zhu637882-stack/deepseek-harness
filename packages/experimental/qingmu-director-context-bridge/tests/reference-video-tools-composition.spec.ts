@@ -8,7 +8,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
-import LlmRuntime, { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import Group from '@deepseek-ai/cordis-plugin-group'
+import LlmRuntime, { createUserMessage, ReasoningEffortId, type LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
 import LocalAttachmentStore from '@deepseek-ai/dsh-attachment-local'
 import SessionStore, { KNOWN_SESSION_EVENT_TYPES, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -17,6 +18,8 @@ import { scopeOf } from '@deepseek-ai/dsh-scope'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import AgentPresets from '@deepseek-ai/dsh-agent-presets'
+import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
+import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import * as Persona from '@deepseek-ai/dsh-persona'
 import Skills from '@deepseek-ai/dsh-skill'
 import * as SkillFilesystem from '@deepseek-ai/dsh-skill-filesystem'
@@ -27,11 +30,18 @@ import SpillLocal from '@deepseek-ai/dsh-spill-local'
 import { createYimengReadHandler } from '../../qingmu-yimeng-read-adapter/src/index.ts'
 import { createYimengCommandHandler } from '../../qingmu-yimeng-command-adapter/src/index.ts'
 import { canonical, request, response, savedDraft } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
-import { MockAdapter, textResponse, toolCallResponse, maxTokensResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
+import { MockAdapter as BaseMockAdapter, textResponse, toolCallResponse, maxTokensResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import * as ModelTools from '../src/model-tools.ts'
 import { readNativeDirectorReadiness } from '../src/native-readiness.ts'
 import { createDirectorContextBridge } from '../src/bridge.ts'
 import type { DirectorContextSnapshot } from '../../qingmu-yimeng-command-adapter/src/types.ts'
+
+/** Model capacity comes from the adapter, as in the shipped compaction composition. */
+class MockAdapter extends BaseMockAdapter {
+  override async resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+    return { ...await super.resolveModel(provider, model), context: { contextWindow: 1048576 } }
+  }
+}
 
 const contexts: Context[] = []
 const roots: string[] = []
@@ -185,9 +195,11 @@ async function harness(adapter: MockAdapter, upstream = writer(), images = false
   ctx.baseUrl = pathToFileURL(presetRoot).href + '/'
   await ctx.plugin(Loader)
   ctx.loader.builtins.include = Include
+  ctx.loader.builtins.group = Group
   ctx.loader.internal = { version: 'v2', async import(specifier: string) {
     if (specifier === '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/model-tools') return ModelTools
     if (specifier === '@deepseek-ai/dsh-persona') return Persona
+    if (specifier === '@deepseek-ai/dsh-compaction-basic') return BasicCompactionEngine
     if (specifier === '@deepseek-ai/dsh-skill-filesystem') return SkillFilesystem
     if (specifier === '@deepseek-ai/dsh-tool-skill') return ToolSkill
     if (specifier === '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/skill-resources') return SkillResources
@@ -199,6 +211,7 @@ async function harness(adapter: MockAdapter, upstream = writer(), images = false
     await ctx.plugin(LocalAttachmentStore, { dshHome: imageRoot, maxImageBytes: 4096 })
   }
   await ctx.plugin(SessionStore)
+  await ctx.plugin(TokenMeter)
   await ctx.plugin(SystemPrompt, { persona: '' })
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(Skills)
@@ -243,6 +256,50 @@ function saves(upstream: ReturnType<typeof writer>) {
   return upstream.fetch.mock.calls.filter(([url, init]) =>
     new URL(url instanceof Request ? url.url : url).pathname.endsWith('/drafts/f') && init?.method === 'POST')
 }
+
+it('compacts a long shipped director session and rereads the complete saved draft without rewriting it', async () => {
+  const oldText = 'Earlier creative discussion. '.repeat(14400)
+  const checkpoint = 'Continue the selected shot by rereading its current director design and saved reference draft.'
+  const historyResponse = textResponse('Recorded historical discussion.')
+  historyResponse.splice(1, historyResponse.length - 1,
+    { type: 'block-end', index: 0, block: { type: 'text', text: oldText } },
+    { type: 'finish', reason: { kind: 'stop' } })
+  const adapter = new MockAdapter([
+    ...Array.from({ length: 7 }, () => historyResponse),
+    (options) => {
+      expect(JSON.stringify(options.messages.at(-1))).toContain('acting as a compaction engine')
+      return textResponse(checkpoint)
+    },
+    toolCallResponse('after-compact-plan', 'qingmu_read_director_plan', {}),
+    toolCallResponse('after-compact-draft', 'qingmu_read_reference_draft', { page: 1 }),
+    textResponse('已恢复完整设计和已存生成稿，未重复保存或生成。'),
+  ])
+  vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'mock', id: 'mock', name: 'mock',
+    context: { contextWindow: 1048576 } })
+  const h = await harness(adapter)
+  for (let turn = 0; turn < 7; turn += 1) await h.run(true)
+  expect(h.agent.session.events.some(event => event.type === 'compaction/summary')).toBe(false)
+  await h.run(true)
+
+  const summaries = h.agent.session.events.filter(event => event.type === 'compaction/summary')
+  expect(summaries).toHaveLength(1)
+  expect(JSON.stringify(summaries[0])).toContain(checkpoint)
+  expect(h.agent.session.events.some(event => event.type === 'assistant/message'
+    && event.data.message.content.some(part => part.type === 'text' && part.text === oldText))).toBe(true)
+  expect(adapter.requests).toHaveLength(11)
+  expect(JSON.stringify(adapter.requests[8]?.messages)).toContain(checkpoint)
+  const historyBefore = adapter.requests[7]!.messages.filter(message => message.content.some(part => part.type === 'text' && part.text === oldText)).length
+  const historyAfter = adapter.requests[8]!.messages.filter(message => message.content.some(part => part.type === 'text' && part.text === oldText)).length
+  expect(historyAfter).toBeLessThan(historyBefore)
+  const restored = result(h.agent, 'after-compact-draft')
+  expect(restored).toMatchObject({ error: false })
+  const restoredBody: unknown = JSON.parse(restored.text)
+  expect(restoredBody).toMatchObject({ saved: { draft: { request: savedDraft.draft.request } } })
+  expect(result(h.agent, 'after-compact-plan').error).toBe(false)
+  expect(saves(h.upstream)).toHaveLength(0)
+  expect({ checkpoint, restored: restoredBody,
+    writes: saves(h.upstream).length }).toMatchSnapshot()
+})
 
 const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNgZGIGAAAOAAeCcsnOAAAAAElFTkSuQmCC', 'base64')
 const imageSha = createHash('sha256').update(imageBytes).digest('hex')

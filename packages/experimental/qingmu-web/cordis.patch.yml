@@ -6,7 +6,7 @@
 - id: agent-default-model
   config:
     provider: deepseek-official
-    model: deepseek-v4-pro
+    model: deepseek-flash
 
 - id: ui-brand-official
   disabled: true
