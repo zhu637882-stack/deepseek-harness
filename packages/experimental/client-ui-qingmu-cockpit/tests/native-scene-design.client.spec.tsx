@@ -22,11 +22,13 @@ it('sends the whole-film basis and scene to the native director, then adopts the
     readAssetDesign={vi.fn(async () => basis)} storyPort={port} disabled={false} onAdopt={onAdopt} />)
   const start = screen.getByRole<HTMLButtonElement>('button', { name: '让导演设计本场分镜' })
   await waitFor(() => { expect(start.disabled).toBe(false) })
+  fireEvent.change(screen.getByRole('textbox', { name: '本场导演要求' }), { target: { value: '上一稿动作太密，给递物和停顿留出真实时间；保留人物关系与原对白。' } })
   fireEvent.click(start)
   await waitFor(() => { expect(port.send).toHaveBeenCalledTimes(1) })
   expect(port.send).toHaveBeenCalledWith(expect.any(String), expect.any(String), { projectId: 'p', episodeId: 'e', purpose: 'scene-design-1' })
   expect(port.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining(JSON.stringify(basis))])
   expect(port.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining(JSON.stringify(scene))])
+  expect(port.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining('上一稿动作太密，给递物和停顿留出真实时间；保留人物关系与原对白。')])
   expect(port.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining('qingmu_check_camera_geometry')])
   fireEvent.click(await screen.findByRole('button', { name: '采用到分镜卡片' }))
   await waitFor(() => { expect(onAdopt).toHaveBeenCalledExactlyOnceWith(shots) })
@@ -78,4 +80,20 @@ it('rejects an otherwise valid completed director draft after asset changes with
   expect(onAdopt).not.toHaveBeenCalled()
   expect(port.send).not.toHaveBeenCalled()
   expect(screen.getByText(text)).toBeTruthy()
+})
+
+it('recovers a completed JSON-fenced director result without calling the model again', async () => {
+  const body = JSON.stringify({ sourceScriptSha256: sha, sourceAssetStateSha256: basis.stateSha256, sceneIndex: 1, shots })
+  const text = '导演已完成本场设计。\n```json\n' + body + '\n```'
+  localStorage.setItem('qingmu.scene-design-1-session.v1:p:e', JSON.stringify({ sessionId: 'original', baseline: 2, submitted: true }))
+  const port = { prepare: vi.fn(), send: vi.fn(), read: vi.fn(async () => ({ lastSeq: 30, running: false, finished: true, text, script: '', error: '' })) }
+  const onAdopt = vi.fn()
+  render(<NativeSceneDesign projectId="p" episodeId="e" scene={scene} scriptSha256={sha}
+    readAssetDesign={vi.fn(async () => basis)} storyPort={port} disabled={false} onAdopt={onAdopt} />)
+  const adopt = await screen.findByRole<HTMLButtonElement>('button', { name: '采用到分镜卡片' })
+  await waitFor(() => { expect(adopt.disabled).toBe(false) })
+  fireEvent.click(adopt)
+  await waitFor(() => { expect(onAdopt).toHaveBeenCalledExactlyOnceWith(shots) })
+  expect(port.send).not.toHaveBeenCalled()
+  expect(port.prepare).not.toHaveBeenCalled()
 })
