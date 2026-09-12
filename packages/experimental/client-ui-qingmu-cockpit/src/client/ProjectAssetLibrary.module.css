@@ -23,7 +23,7 @@
 .withPreview { display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,36%); gap:20px; align-items:start; }
 .withPreview .grid { grid-column:1; grid-row:1; }
 .preview { grid-column:2; grid-row:1; position:sticky; top:0; min-width:0; border:1px solid var(--dsw-alias-border-l2); padding:20px; border-radius:12px; background:var(--dsw-alias-bg-layer-2); display:grid; gap:16px; }
-.preview > img { max-width:100%; max-height:65vh; justify-self:center; object-fit:contain; }
+.preview > img,.preview > video { max-width:100%; max-height:65vh; justify-self:center; object-fit:contain; }
 .preview audio { width:100%; }
 @media(max-width:900px) { .withPreview { display:flex; flex-direction:column; } .withPreview > * { width:100%; } .preview { position:static; } }
 @media(max-width:600px) { .grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; } .filters input { width:100%; max-width:none; } .filters > span { width:100%; } }
