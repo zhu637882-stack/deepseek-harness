@@ -20,21 +20,22 @@ describe.skipIf(!casesFile)('live native asset design recovery', () => {
       for (const item of cases) {
         const context = await browser.newContext({ storageState: item.storageState })
         const page = await context.newPage()
+        page.setDefaultTimeout(15000)
         const errors: string[] = [], writes: string[] = []
         page.on('pageerror', error => errors.push(error.message))
         await page.route(/\/api\/session.prompt$|\/qingmu-yimeng-command\/(saveAssetDesign|generateAssetImage)$/, async (route) => {
           writes.push(new URL(route.request().url()).pathname); await route.abort()
         })
-        await page.goto(item.url)
+        await page.goto(item.url, { waitUntil: 'domcontentloaded' })
         await page.getByRole('button', { name: '采用到素材卡片', exact: true }).click({ timeout: 30000 })
         const expected = JSON.parse(readFileSync(item.expectedJson, 'utf8')) as {
           assets: { name: string; imagePrompt: string; designBasis: string; visualIdentity: string }[]
         }
         for (const asset of expected.assets) {
           const card = page.getByRole('region', { name: `场景 ${asset.name}`, exact: true })
-          expect(await card.getByLabel('画面描述', { exact: true }).inputValue()).toBe(asset.imagePrompt)
-          expect(await card.getByLabel('设计依据', { exact: true }).inputValue()).toBe(asset.designBasis)
-          expect(await card.getByLabel('主体完整设定', { exact: true }).inputValue()).toBe(asset.visualIdentity)
+          expect(await card.getByLabel(/^画面描述/).inputValue()).toBe(asset.imagePrompt)
+          expect(await card.getByLabel(/^设计依据/).inputValue()).toBe(asset.designBasis)
+          expect(await card.getByLabel(/^主体完整设定/).inputValue()).toBe(asset.visualIdentity)
         }
         expect(await page.getByText(/已修正正文引号的格式/).count()).toBe(item.repaired ? 1 : 0)
         expect(await page.getByRole('button', { name: '保存素材设计', exact: true }).isEnabled()).toBe(true)
