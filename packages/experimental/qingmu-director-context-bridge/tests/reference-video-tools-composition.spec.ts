@@ -82,7 +82,8 @@ const saveArgs = { draft: edit, expectedRevision: 1, expectedFrameSha256: savedD
 
 const initialCut = { schema:'qingmu-working-cut-v1',projectId:'p',episodeId:'episode-a',revision:0,shots:[],cuts:[],
   audioLibrary:[{ assetId:'room',sha256:'b'.repeat(64),duration:30,name:'Room.wav',url:'' }, { assetId:'room-ir',sha256:'c'.repeat(64),duration:1,name:'Room-IR.wav',url:'' }],providerCalls:0,humanApprovalChanged:false }
-function writer(extraShots = 0, image?: { sha256: string; url: string }, fixture = { request, response, savedDraft }) {
+function writer(extraShots = 0, image?: { sha256: string; url: string; config?: Record<string, unknown> },
+  fixture = { request, response, savedDraft }) {
   const { request, response, savedDraft } = fixture
   let workingCut: Record<string, unknown> = structuredClone(initialCut)
 
@@ -155,7 +156,7 @@ function writer(extraShots = 0, image?: { sha256: string; url: string }, fixture
     if (url.pathname.endsWith('/assets')) return Response.json({ page: 1, page_size: 200, pages: 1,
       items: request.bindings.map(item => ({ id: item.assetId, project_id: 'p',
         asset_type: response.referenceMapping.find(ref => ref.assetId === item.assetId)!.mediaType.replace('reference_', ''), role: item.label, sha256: item.assetSha256,
-        ...(image && item.assetId === 'asset_cafe' ? { sha256: image.sha256, public_url: image.url, preview_media_id: 'media_cafe' } : {}) })) })
+        ...(image && item.assetId === 'asset_cafe' ? { sha256: image.sha256, public_url: image.url, preview_media_id: 'media_cafe', generation_config: image.config } : {}) })) })
     if (url.pathname.endsWith('/preview')) {
       if (unpreparedMaterials) return Response.json({ detail: { code: 'reference_video_material_not_prepared' } }, { status: 422 })
       if (typeof init?.body !== 'string') throw new Error('Expected a JSON preview body')
@@ -321,7 +322,11 @@ it('reads saved episode geography and actual image pixels before any shot exists
   ])
   vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'mock', id: 'mock', name: 'mock', inputModalities: ['text', 'image'] })
   const media = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(imageBytes, { headers: { 'content-type': 'image/png' } }))
-  const h = await harness(adapter, writer(0, { sha256: imageSha, url: imageUrl }), true)
+  const original = { name: 'Library', view: 'From the return desk', imagePrompt: 'Closed door behind the return desk',
+    imageStage: { sceneName: 'Library', camera: 'Return desk looking south', blocking: 'Empty room', state: 'Door closed' },
+    space: { layout: 'Return desk beside the south entrance.' } }
+  const h = await harness(adapter, writer(0, { sha256: imageSha, url: imageUrl,
+    config: { anchor: { schema: 'qingmu.asset-image-authorization.v1', assetDesign: original } } }), true)
   await h.run(false, {})
   expect(result(h.agent, 'assets').error, result(h.agent, 'assets').text).toBe(false)
   expect(JSON.parse(result(h.agent, 'assets').text)).toMatchObject({ scope: { projectId: 'p', episodeId: 'episode-a' },
@@ -330,6 +335,9 @@ it('reads saved episode geography and actual image pixels before any shot exists
   const visible = adapter.requests.at(-1)?.messages
   expect(JSON.stringify(visible)).toContain('attachmentId')
   expect(JSON.parse(result(h.agent, 'view').text).scope).toEqual({ projectId: 'p', episodeId: 'episode-a' })
+  expect(JSON.parse(result(h.agent, 'view').text).originalImageDesign).toMatchObject(original)
+  expect(JSON.stringify(visible)).toContain('Return desk looking south')
+  expect(result(h.agent, 'assets').text).not.toContain(original.imagePrompt)
   expect(media).toHaveBeenCalledOnce()
   expect(h.upstream.fetch.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true)
   expect(JSON.parse(result(h.agent, 'assets').text)).toMatchSnapshot()

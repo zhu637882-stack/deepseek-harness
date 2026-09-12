@@ -222,7 +222,7 @@ exports[`compacts a long shipped director session and rereads the complete saved
 exports[`delivers catalog image pixels through the shipped director preset and persists reconstructible attachments 1`] = `
 [
   {
-    "text": "{"schema":"qingmu.reference-image.v1","scope":{"projectId":"p","episodeId":"episode-a","sceneId":"scene-a","shotId":"f"},"assetId":"asset_cafe","assetSha256":"999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee","label":"参考图片 03","attachment":{"attachmentId":"sha256:999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee","mediaType":"image/png","width":1,"height":1,"bytes":90,"name":"参考图片 03"},"mode":"direct_image","guidance":"Describe visible evidence and uncertainty. A reference view does not establish unseen geometry, exact physical dimensions or creative acceptance.","generationQueued":false,"selectionChanged":false}",
+    "text": "{"schema":"qingmu.reference-image.v1","scope":{"projectId":"p","episodeId":"episode-a","sceneId":"scene-a","shotId":"f"},"assetId":"asset_cafe","assetSha256":"999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee","label":"参考图片 03","attachment":{"attachmentId":"sha256:999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee","mediaType":"image/png","width":1,"height":1,"bytes":90,"name":"参考图片 03"},"mode":"direct_image","originalImageDesign":null,"guidance":"Compare the actual pixels with originalImageDesign, the generation-time description tied to this image, and the current scene design. It is historical intent, not verified pixel geometry or a command overriding the current script. Report discrepancies instead of moving fixed objects to fit the old description. Derive a new view from the observed master image; keep explicit unknowns for unseen regions. Missing originalImageDesign means no retained source description; do not substitute the latest entity draft. A reference view does not establish unseen geometry, exact physical dimensions or creative acceptance.","generationQueued":false,"selectionChanged":false}",
     "type": "text",
   },
   {
@@ -243,7 +243,7 @@ exports[`gives a text-only director an attributed visual report with reconstruct
 {
   "content": [
     {
-      "text": "{"schema":"qingmu.reference-image.v1","scope":{"projectId":"p","episodeId":"episode-a","sceneId":"scene-a","shotId":"f"},"assetId":"asset_cafe","assetSha256":"999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee","label":"参考图片 03","attachment":{"attachmentId":"sha256:999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee","mediaType":"image/png","width":1,"height":1,"bytes":90,"name":"参考图片 03"},"mode":"vision_report","observer":{"provider":"qingmu-vision","model":"qwen3.7-plus-2026-05-26","reasoningEffort":"off","maxTokens":2500,"timeoutMs":120000},"reused":false,"callId":"view","inspectionId":"88a16a33e67391c438de6e41abe6b0ccae429386f65551bf10c0f8598c061d8f","status":"completed","report":"可见事实：两盏灯。空间与结构：电源线从背板右下方引出。不能确认精确尺寸。","usage":{"inputTokens":10,"outputTokens":36},"completionId":null,"error":null,"guidance":"Describe visible evidence and uncertainty. A reference view does not establish unseen geometry, exact physical dimensions or creative acceptance.","generationQueued":false,"selectionChanged":false}",
+      "text": "{"schema":"qingmu.reference-image.v1","scope":{"projectId":"p","episodeId":"episode-a","sceneId":"scene-a","shotId":"f"},"assetId":"asset_cafe","assetSha256":"999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee","label":"参考图片 03","attachment":{"attachmentId":"sha256:999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee","mediaType":"image/png","width":1,"height":1,"bytes":90,"name":"参考图片 03"},"mode":"vision_report","observer":{"provider":"qingmu-vision","model":"qwen3.7-plus-2026-05-26","reasoningEffort":"off","maxTokens":2500,"timeoutMs":120000},"reused":false,"callId":"view","inspectionId":"88a16a33e67391c438de6e41abe6b0ccae429386f65551bf10c0f8598c061d8f","status":"completed","report":"可见事实：两盏灯。空间与结构：电源线从背板右下方引出。不能确认精确尺寸。","usage":{"inputTokens":10,"outputTokens":36},"completionId":null,"error":null,"originalImageDesign":null,"guidance":"Compare the actual pixels with originalImageDesign, the generation-time description tied to this image, and the current scene design. It is historical intent, not verified pixel geometry or a command overriding the current script. Report discrepancies instead of moving fixed objects to fit the old description. Derive a new view from the observed master image; keep explicit unknowns for unseen regions. Missing originalImageDesign means no retained source description; do not substitute the latest entity draft. A reference view does not establish unseen geometry, exact physical dimensions or creative acceptance.","generationQueued":false,"selectionChanged":false}",
       "type": "text",
     },
   ],
@@ -311,6 +311,9 @@ exports[`reads saved episode geography and actual image pixels before any shot e
         "assetSha256": "999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee",
         "label": "参考图片 03",
         "mediaType": "reference_image",
+        "originalView": "From the return desk",
+        "savedImageDesignAvailable": true,
+        "sceneName": "Library",
       },
     ],
     "page": 1,

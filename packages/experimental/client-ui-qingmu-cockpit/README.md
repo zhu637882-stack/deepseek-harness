@@ -334,3 +334,5 @@ Bundled bedroom, coffee-shop and hallway responses are listed by the working-cut
 The film player selects retained rendered versions and offers an explicit whole-cut sound review. It uses the configured Alibaba audio/video audit model, keeps findings tied to the rendered bytes and timeline revision, and links valid film-time findings to playback. Refreshes and reopening recover existing results without paid resubmission. Draft edits remain untouched; reports are advisory and cannot approve a film.
 
 Timed model transcripts support sentence playback in the same film. Missing observation times remain unverified even when the model summary claims success. Local-only renders use a bounded review video with bit-identical copied audio; compressed review pictures cannot establish source picture quality. Initial reads wait for the project and episode to load.
+
+Asset and video reference panels expose the selected image’s retained camera, staging, space and full design in a read-only disclosure. The asset image library resets its page and results on project changes. Inspecting the source never edits the current prompt, changes selection or queues generation.

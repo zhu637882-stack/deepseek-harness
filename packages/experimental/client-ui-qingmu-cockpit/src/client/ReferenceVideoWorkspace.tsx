@@ -10,6 +10,7 @@ import css from './ReferenceVideoWorkspace.module.css'
 import { usePrivateReferencePreview, type PrivateReferencePreviewPort } from './usePrivateReferencePreview.ts'
 import { ReferenceVideoRuns } from './ReferenceVideoRuns.tsx'
 import { inheritReferenceBindings } from './reference-draft-inheritance.ts'
+import { ReferenceImageDesign } from './ReferenceImageDesign.tsx'
 
 /** One shot's local reference draft; previewing never queues paid work. */
 export interface ReferenceVideoWorkspaceProps {
@@ -462,6 +463,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
                 : <audio src={asset.browserUrl} controls preload="none" aria-label={asset.label} />)}
             {!asset.browserUrl && asset.mediaType === 'reference_image' && <div className={css.privateImage}>私有原图</div>}
             <p>{asset.label}</p>
+            <ReferenceImageDesign asset={asset} />
             <div className={css.assetActions}>
               {(asset.localReferenceScope !== undefined || asset.localVoiceScope !== undefined) && asset.browserUrl === '' && <button type="button"
                 onClick={() => { inspect(asset) }}>{asset.mediaType === 'reference_audio' ? '试听音色' : '查看原图'}</button>}
@@ -484,6 +486,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
         {chosen.length > 0 && <ol className={css.bindings} aria-label="引用顺序">
           {chosen.map((item, index) => <li key={item.bindingToken}>
             <strong>{aliases.get(item.bindingToken)} · {item.label}</strong>
+            <ReferenceImageDesign asset={exactAsset(item.assetId, item.assetSha256)} />
             {(() => {
               const material = currentMaterials?.materials.find(candidate => candidate.bindingToken === item.bindingToken
                 && candidate.assetId === item.assetId && candidate.assetSha256 === item.assetSha256)

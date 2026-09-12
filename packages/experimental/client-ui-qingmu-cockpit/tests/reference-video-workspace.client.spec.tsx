@@ -68,6 +68,19 @@ function mount(options?: { assets?: ReferenceVideoAsset[]; initialDurationSec?: 
   return { port, view, setMaterialStatus: (status: typeof latestMaterialStatus) => { latestMaterialStatus = status } }
 }
 afterEach(cleanup)
+it('shows the original room state when choosing references without changing the current shot', async () => {
+  const original = { name: '候船室', view: '入口反打', imagePrompt: '窗关闭', submittedPrompt: '原图完整提交描述',
+    visualIdentity: '木长椅', designBasis: '开船前', imageStage: { sceneName: '候船室', camera: '从门内看向检票窗', blocking: '无人', state: '检票窗关闭' } }
+  const { port } = mount({ assets: [{ ...assets[1]!, imageDesign: original }] })
+  await chooseAll()
+  const panels = screen.getAllByLabelText('咖啡馆的原图设计')
+  expect(panels.length).toBe(2)
+  fireEvent.click(panels[0]!.querySelector('summary')!)
+  expect(screen.getAllByText('检票窗关闭').length).toBe(2)
+  expect(screen.getByRole('textbox', { name: '视频描述片段1' })).toHaveProperty('value', '陈远说：‘图1不应被替换。’')
+  expect(port.queueReferenceVideo).not.toHaveBeenCalled()
+  expect(port.saveReferenceVideoDraft).not.toHaveBeenCalled()
+})
 it('plays a source video and restores its independent alias without an image or generation', async () => {
   const { port, view } = mount({ assets: [{ assetId: 'asset_previous', assetSha256: 'e'.repeat(64),
     label: '前镜动作', mediaType: 'reference_video', browserUrl: '/media/previous.mp4' }] })

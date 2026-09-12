@@ -4,6 +4,7 @@ import type { ReferenceVideoAsset } from '@deepseek-ai/dsh-experimental-qingmu-y
 import type { QingmuYimengPort } from './contracts.ts'
 import { usePrivateReferencePreview, type PrivateReferencePreviewPort } from './usePrivateReferencePreview.ts'
 import css from './AssetImageReferences.module.css'
+import { ReferenceImageDesign } from './ReferenceImageDesign.tsx'
 type Point = readonly [number, number]
 type Box = readonly [number, number, number, number]
 
@@ -57,14 +58,20 @@ function ReferenceImage({ projectId, asset, reference, port, onChange, disabled 
   </>
 }
 
-/** Choose ordered project images, their exact reuse purpose, and optional edit regions. */
-export function AssetImageReferences({ projectId, references, port, onChange, disabled }: {
+interface AssetImageReferencesProps {
   readonly projectId: string
   readonly references: readonly AssetImageReference[]
   readonly port: AssetImageReferencePort
   readonly onChange: (value: readonly AssetImageReference[]) => void
   readonly disabled: boolean
-}) {
+}
+
+/** Choose references within one project; switching projects discards the previous catalog and page. */
+export function AssetImageReferences(props: AssetImageReferencesProps) {
+  return <ProjectImageReferences key={props.projectId} {...props} />
+}
+
+function ProjectImageReferences({ projectId, references, port, onChange, disabled }: AssetImageReferencesProps) {
   const [assets, setAssets] = useState<ReferenceVideoAsset[]>([]), [page, setPage] = useState(1), [pages, setPages] = useState(1)
   const [error, setError] = useState(''), [loading, setLoading] = useState(false)
   useEffect(() => {
@@ -90,6 +97,7 @@ export function AssetImageReferences({ projectId, references, port, onChange, di
       return <section key={reference.assetId} aria-label={`参考图 ${index + 1}`}>
         <h4>图 {index + 1} · {asset?.label ?? '已绑定图片'}</h4>
         <ReferenceImage projectId={projectId} asset={asset} reference={reference} port={port} disabled={disabled} onChange={update} />
+        <ReferenceImageDesign asset={asset} />
         <label>图 {index + 1} 的用途<textarea value={reference.purpose} disabled={disabled}
           onChange={(event) => { update({ ...reference, purpose: event.target.value }) }} /></label>
         <div><button type="button" disabled={disabled || index === 0} onClick={() => {

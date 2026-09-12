@@ -74,6 +74,27 @@ it('projects versioned image/audio/video metadata from the current project asset
   expect(JSON.stringify(result)).not.toContain('/private')
 })
 
+it('retains original image staging without leaking authorization or filling absent history', async () => {
+  const oldDesign = { name: '渡口候船室', view: '入口朝检票窗', imagePrompt: '旧长椅面向检票窗',
+    visualIdentity: '长椅与检票窗位于相邻墙面', designBasis: '开船前的场景',
+    imageStage: { sceneName: '渡口候船室', camera: '入口内侧', blocking: '无人', state: '检票窗关闭' } }
+  const asset = { id: 'room', project_id: 'p', asset_type: 'image', sha256: 'a'.repeat(64),
+    generation_config_json: JSON.stringify({ prompt: '最终提交的旧窗关闭画面', anchor: { schema: 'qingmu.asset-image-authorization.v1',
+      assetDesign: oldDesign, sceneContext: { name: '渡口候船室', space: { layout: '长椅靠北墙' } },
+      command: { privateAuthorization: 'do-not-project' }, actor: 'private-actor' } }) }
+  const handler = createYimengReadHandler({}, { readToken: () => 'fixture', fetch: async () => Response.json({
+    page: 1, page_size: 200, pages: 1, items: [asset, { ...asset, id: 'legacy', generation_config_json: '{}' },
+      { ...asset, id: 'malformed', generation_config_json: 'broken' }],
+  }) })
+  const result = await handler('referenceVideoAssets', { projectId: 'p', page: 1 }, signal())
+  expect(result).toMatchObject({ ok: true, value: { items: [{ imageDesign: { ...oldDesign,
+    submittedPrompt: '最终提交的旧窗关闭画面', sceneContext: { name: '渡口候船室', space: { layout: '长椅靠北墙' } } } }, {}, {}] } })
+  expect(result).not.toHaveProperty('value.items.1.imageDesign')
+  expect(result).not.toHaveProperty('value.items.2.imageDesign')
+  expect(JSON.stringify(result)).not.toContain('private-')
+  expect(JSON.stringify(result)).not.toContain('do-not-project')
+})
+
 it.each(['https://public.example', ''])('uses the returned media identity for signed thumbnails from %s', async (origin) => {
   const signature = 'a'.repeat(64)
   const items = [{ id: 'asset_face', project_id: 'p', asset_type: 'image', sha256: 'b'.repeat(64),

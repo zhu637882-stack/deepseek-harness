@@ -1,5 +1,6 @@
 /** Validate the browser draft and the read-only Writer compilation response. */
 import { localSignedMediaUrl } from './local-media-url.ts'
+import { referenceImageDesign } from './reference-image-design.ts'
 import type {
   ReferenceVideoAsset, ReferenceVideoAssetsRequest, ReferenceVideoAssetsResponse,
   ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse,
@@ -266,8 +267,10 @@ export function normalizeReferenceVideoAssets(
     const localVoiceScope = a.asset_type === 'audio' && /^(?:asset_localvoice_[a-f0-9]{32}|asset_copy_[a-f0-9]{12})$/u.test(a.id)
       && a.role === 'local_voice_candidate' && ownerType === 'actor' && /^[A-Za-z0-9_.-]{1,256}$/u.test(ownerId)
       ? { targetId: ownerId } : undefined
+    const imageDesign = a.asset_type === 'image' ? referenceImageDesign(a.generation_config_json ?? a.generation_config) : undefined
     items.push({ assetId: a.id, assetSha256: a.sha256, label: localVoiceScope === undefined ? displayLabel : `${displayLabel} · 音色`,
       mediaType: a.asset_type === 'image' ? 'reference_image' : a.asset_type === 'audio' ? 'reference_audio' : 'reference_video', browserUrl,
+      ...(imageDesign ? { imageDesign } : {}),
       ...(localReferenceScope === undefined ? {} : { localReferenceScope }),
       ...(localVoiceScope === undefined ? {} : { localVoiceScope }) })
   }

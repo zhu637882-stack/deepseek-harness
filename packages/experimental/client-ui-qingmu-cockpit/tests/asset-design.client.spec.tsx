@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { NativeAssetDesign } from '../src/client/NativeAssetDesign.tsx'
+import { AssetImageReferences } from '../src/client/AssetImageReferences.tsx'
 import type { AssetDesignState, AssetImageRuns } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 const scope = { projectId: 'p', episodeId: 'e' }
 const state: AssetDesignState = { ...scope, schema: 'qingmu.asset-design-state.v1', stateSha256: 'a'.repeat(64), scriptSha256: 'b'.repeat(64), scriptRevision: 1, script: {}, model: 'wan2.7-image-pro',
@@ -120,6 +121,24 @@ function setup() {
     readAssetImageRuns: vi.fn(async (): Promise<AssetImageRuns> => ({ ...scope, items: [] })) }
   return port
 }
+it('starts the next project catalog at page one without retaining previous project images', async () => {
+  const read = vi.fn(async ({ projectId, page }: { projectId: string; page: number }) => ({
+    projectId, page, pages: projectId === 'first' ? 2 : 1,
+    items: [{ assetId: `${projectId}_${page}`, assetSha256: 'a'.repeat(64), label: `${projectId} 图 ${page}`,
+      mediaType: 'reference_image' as const, browserUrl: '' }],
+  }))
+  const port = { ...setup(), referenceVideoAssets: read }, onChange = vi.fn()
+  const view = render(<AssetImageReferences projectId="first" references={[]} port={port} onChange={onChange} disabled={false} />)
+  await screen.findByRole('option', { name: 'first 图 1' })
+  fireEvent.click(screen.getByRole('button', { name: '加载更多图片' }))
+  await screen.findByRole('option', { name: 'first 图 2' })
+  view.rerender(<AssetImageReferences projectId="second" references={[]} port={port} onChange={onChange} disabled={false} />)
+  await screen.findByRole('option', { name: 'second 图 1' })
+  expect(screen.queryByRole('option', { name: 'first 图 1' })).toBeNull()
+  expect(screen.queryByRole('option', { name: 'first 图 2' })).toBeNull()
+  expect(read.mock.calls.at(-1)?.[0]).toEqual({ projectId: 'second', page: 1 })
+  expect(onChange).not.toHaveBeenCalled()
+})
 it('persists a per-image model, invalidates the quote and restores the same choice', async () => {
   const port = setup()
   const models = [{ id: 'qwen-image-3.0-pro', name: 'Qwen-Image 3.0 Pro', maxReferences: 3, supportsBoxes: false }]

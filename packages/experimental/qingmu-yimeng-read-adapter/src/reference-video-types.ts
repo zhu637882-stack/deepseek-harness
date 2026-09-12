@@ -81,6 +81,8 @@ export interface ReferenceVideoAsset {
   readonly label: string
   readonly mediaType: 'reference_image' | 'reference_audio' | 'reference_video'
   readonly browserUrl: string
+  /** Frozen generation intent, not a claim about the actual pixels or current scene design. */
+  readonly imageDesign?: import('./reference-image-design.ts').ReferenceImageDesign
   /** Local candidate bytes remain private and can only be read through this owner scope. */
   readonly localReferenceScope?: {
     readonly elementKind: 'actor' | 'scene' | 'prop'

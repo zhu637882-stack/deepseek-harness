@@ -4,7 +4,7 @@ import type { JsonValue, Session } from '@deepseek-ai/dsh-session'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type {
-  ReferenceVideoAssetsResponse, ReferenceVideoDraftResponse,
+  ReferenceVideoAsset, ReferenceVideoAssetsResponse, ReferenceVideoDraftResponse,
   ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse,
   ReferenceVideoRunsResponse,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
@@ -15,6 +15,14 @@ import type { DirectorContextBindingState } from './types.ts'
 import { readReferenceImage } from './reference-image.ts'
 import { inspectReferenceImage, type ReferenceVisionConfig } from './reference-vision.ts'
 import { creativeRequest } from './creative-request.ts'
+
+// Keep catalog pages small; the exact frozen description accompanies inspection of one image.
+function imageCatalogEntry(item: ReferenceVideoAsset) {
+  return { assetId: item.assetId, assetSha256: item.assetSha256, label: item.label, mediaType: item.mediaType,
+    ...(item.imageDesign ? { originalView: item.imageDesign.view,
+      sceneName: item.imageDesign.imageStage?.sceneName || item.imageDesign.sceneContext?.name || '',
+      savedImageDesignAvailable: true } : {}) }
+}
 
 interface BoundRead {
   session: Session
@@ -81,7 +89,7 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
       return ports.boundedJson({ scope, saved: design.value,
         assets: { page: catalog.page, pages: catalog.pages,
           items: catalog.items.filter(item => item.mediaType === 'reference_image')
-            .map(({ assetId, assetSha256, label, mediaType }) => ({ assetId, assetSha256, label, mediaType })) },
+            .map(imageCatalogEntry) },
         generationQueued: false, selectionChanged: false })
     },
   }))
@@ -163,8 +171,8 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
         check, ports.referenceVision)
       return ports.boundedJson({ schema: 'qingmu.reference-image.v1', scope,
         assetId: asset.assetId, assetSha256: asset.assetSha256, label: asset.label, attachment,
-        ...inspection,
-        guidance: 'Describe visible evidence and uncertainty. A reference view does not establish unseen geometry, exact physical dimensions or creative acceptance.',
+        ...inspection, originalImageDesign: asset.imageDesign ?? null,
+        guidance: 'Compare the actual pixels with originalImageDesign, the generation-time description tied to this image, and the current scene design. It is historical intent, not verified pixel geometry or a command overriding the current script. Report discrepancies instead of moving fixed objects to fit the old description. Derive a new view from the observed master image; keep explicit unknowns for unseen regions. Missing originalImageDesign means no retained source description; do not substitute the latest entity draft. A reference view does not establish unseen geometry, exact physical dimensions or creative acceptance.',
         generationQueued: false, selectionChanged: false })
     },
   }))
@@ -188,7 +196,7 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
       return ports.boundedJson({ schema: 'qingmu.native-reference-draft.v1', scope,
         saved: draft.value as ReferenceVideoDraftResponse,
         assets: { page: catalog.page, pages: catalog.pages,
-          items: catalog.items.map(({ assetId, assetSha256, label, mediaType }) => ({ assetId, assetSha256, label, mediaType })) },
+          items: catalog.items.map(imageCatalogEntry) },
         providerCalls: 0, generationQueued: false,
         guidance: 'Read saved.directorSource in full and reconcile it into a single final prompt, preserving stable bindings and unaffected decisions. Set draft.directorSourceSha256 only after reconciling. The preview emits your authored text verbatim, with reference aliases; it appends no hidden creative directions. Use saved.frameSha256 and saved.draft.revision (0 when absent) for saving. The page restores the saved version explicitly so an unsaved local edit is not overwritten.',
       })
