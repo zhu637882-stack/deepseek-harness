@@ -14,6 +14,7 @@ import { assertNativeTurnTarget } from './native-prompt-target.ts'
 import type { DirectorContextBindingState } from './types.ts'
 import { readReferenceImage } from './reference-image.ts'
 import { inspectReferenceImage, type ReferenceVisionConfig } from './reference-vision.ts'
+import { creativeRequest } from './creative-request.ts'
 
 interface BoundRead {
   session: Session
@@ -61,6 +62,30 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
     render: (_args: unknown, value: JsonValue) => [{ type: 'text' as const, text: JSON.stringify(value) }],
   }
   ctx.tools.register(defineTool({
+    name: 'qingmu_read_asset_design',
+    description: 'Read the current episode asset design and one page of project image metadata during screenplay, asset or scene design, before shots exist. The consumed project request fixes scope. Use qingmu_view_reference_image for relevant scene geometry, costume or prop evidence before changing a view or reconciling design conflicts. Preserve exact IDs and hashes when reusing images. This reads saved data; keep newer unsaved design supplied in the request. No save, generation or adoption.',
+    parameters: { page: { type: 'integer', required: true, description: 'Project asset catalog page, starting at 1.' } }, output,
+    presentCall: () => ({ card: 'generic', kind: 'read', title: '读取当前素材设计与图片来源' }),
+    async execute(args, exec) {
+      exactKeys(args, ['page'])
+      const target = creativeRequest(exec)
+      if (!target) throw new Error('Start asset or scene design from the current project before reading its assets.')
+      const scope = { projectId: target.projectId, episodeId: target.episodeId }
+      const design = await ctx.qingmuYimengCommand('readAssetDesign', scope, exec.signal)
+      exec.signal.throwIfAborted()
+      if (!design.ok) throw new Error(`Current asset design unavailable: ${design.error.message}`)
+      const read = await ctx.qingmuYimengRead('referenceVideoAssets', { projectId: target.projectId, page: args.page }, exec.signal)
+      exec.signal.throwIfAborted()
+      if (!read.ok) throw new Error(`Project images unavailable: ${read.error.message}`)
+      const catalog = read.value as ReferenceVideoAssetsResponse
+      return ports.boundedJson({ scope, saved: design.value,
+        assets: { page: catalog.page, pages: catalog.pages,
+          items: catalog.items.filter(item => item.mediaType === 'reference_image')
+            .map(({ assetId, assetSha256, label, mediaType }) => ({ assetId, assetSha256, label, mediaType })) },
+        generationQueued: false, selectionChanged: false })
+    },
+  }))
+  ctx.tools.register(defineTool({
     name: 'qingmu_read_reference_video_candidates',
     description: 'Read generated candidates for a source shot in the current project before capturing an actual video frame. Use a known shot ID from the project. No generation or selection.',
     parameters: { sourceFrameId: { type: 'string', required: true, description: 'Source shot ID in this project; may be the previous shot.' } }, output,
@@ -107,7 +132,7 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
   }))
   ctx.tools.register(defineTool({
     name: 'qingmu_view_reference_image',
-    description: 'Inspect one image from the current project asset catalog using its exact page, asset ID and SHA from qingmu_read_reference_draft. Image-capable directors receive the image; text-only directors receive an attributed visual-model report. Check relevant scene, costume, prop structure or composition before visual decisions. Reports may be mistaken: distinguish observations, inference and unresolved details. No adoption or media generation. A visual-model call consumes normal model allowance; unchanged successful observations are reused.',
+    description: 'Inspect one image from the current project catalog using its exact page, asset ID and SHA from qingmu_read_asset_design (before shots) or qingmu_read_reference_draft (shot design). Image-capable directors receive the image; text-only directors receive an attributed visual-model report. Check relevant scene, costume, prop structure or composition before visual decisions. Reports may be mistaken: distinguish observations, inference and unresolved details. No adoption or media generation. A visual-model call consumes normal model allowance; unchanged successful observations are reused.',
     parameters: {
       page: { type: 'integer', required: true, description: 'Catalog page containing the image, starting at 1.' },
       assetId: { type: 'string', required: true, description: 'Exact image asset ID from the current project catalog.' },
@@ -122,17 +147,20 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
     presentCall: () => ({ card: 'generic', kind: 'read', title: '查看当前项目参考图' }),
     async execute(args, exec) {
       exactKeys(args, ['page', 'assetId', 'assetSha256'])
-      const current = await ports.readBoundContext(exec)
-      const scope = current.state.binding.scope
+      const target = creativeRequest(exec)
+      const current = target ? undefined : await ports.readBoundContext(exec)
+      const scope = target ? { projectId: target.projectId, episodeId: target.episodeId } : current?.state.binding.scope
+      if (!scope) throw new Error('No current project is available for image inspection.')
+      const check = () => { exec.signal.throwIfAborted(); if (current) assertCurrent(current, exec) }
       const read = await ctx.qingmuYimengRead('referenceVideoAssets', { projectId: scope.projectId, page: args.page }, exec.signal)
-      assertCurrent(current, exec)
+      check()
       if (!read.ok) throw new Error(`Reference assets read failed: ${read.error.message}`)
       const catalog = read.value as ReferenceVideoAssetsResponse
       const asset = catalog.items.find(item => item.assetId === args.assetId && item.assetSha256 === args.assetSha256)
       if (!asset || asset.mediaType !== 'reference_image') throw new Error('The selected image and hash are not on this current project catalog page. Read the catalog again.')
-      const attachment = await readReferenceImage(ctx, asset, exec, () => { assertCurrent(current, exec) }, ports.referenceVision)
+      const attachment = await readReferenceImage(ctx, asset, exec, check, ports.referenceVision)
       const inspection = await inspectReferenceImage(ctx, attachment, asset.assetSha256, exec,
-        () => { assertCurrent(current, exec) }, ports.referenceVision)
+        check, ports.referenceVision)
       return ports.boundedJson({ schema: 'qingmu.reference-image.v1', scope,
         assetId: asset.assetId, assetSha256: asset.assetSha256, label: asset.label, attachment,
         ...inspection,

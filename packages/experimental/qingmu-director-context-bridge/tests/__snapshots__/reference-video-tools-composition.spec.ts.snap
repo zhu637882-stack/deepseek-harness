@@ -276,6 +276,53 @@ exports[`gives a text-only director an attributed visual report with reconstruct
 }
 `;
 
+exports[`reads saved episode geography and actual image pixels before any shot exists 1`] = `
+{
+  "assets": {
+    "items": [
+      {
+        "assetId": "asset_lin",
+        "assetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "label": "参考图片 01",
+        "mediaType": "reference_image",
+      },
+      {
+        "assetId": "asset_cafe",
+        "assetSha256": "999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee",
+        "label": "参考图片 03",
+        "mediaType": "reference_image",
+      },
+    ],
+    "page": 1,
+    "pages": 1,
+  },
+  "generationQueued": false,
+  "saved": {
+    "design": {
+      "assets": [
+        {
+          "kind": "scene",
+          "name": "Library",
+          "space": {
+            "layout": "Return desk beside the entrance; repair table beneath the west window.",
+          },
+        },
+      ],
+    },
+    "episodeId": "episode-a",
+    "projectId": "p",
+    "schema": "qingmu.asset-design-state.v1",
+    "script": {},
+    "stateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  },
+  "scope": {
+    "episodeId": "episode-a",
+    "projectId": "p",
+  },
+  "selectionChanged": false,
+}
+`;
+
 exports[`reads, previews and saves through the shipped YAML preset and real adapters, then exposes the same version to the workspace 1`] = `
 {
   "activeShotChanged": false,

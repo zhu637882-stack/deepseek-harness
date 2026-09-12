@@ -51,7 +51,7 @@ export interface NativeStoryPort {
   /** Create or resume the caller's retained session; does not send a model request. */
   prepare(sessionId: string): Promise<void>
   /** Submit exactly one writing request through the existing DSH provider. */
-  send(sessionId: string, text: string): Promise<void>
+  send(sessionId: string, text: string, scope?: { projectId: string; episodeId: string; purpose: string }): Promise<void>
   /** Read durable progress; reading never resumes or repeats a model request. */
   read(sessionId: string, afterSeq: number): Promise<StoryDraftResult>
 }

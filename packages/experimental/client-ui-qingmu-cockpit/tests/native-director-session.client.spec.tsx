@@ -30,6 +30,18 @@ function fixture(blank = true, preset = 'ordinary') {
     contextSnapshotSha256: 'a'.repeat(64), ownerId: 'browser-1' }
   return { transport, row, sessionState, sessions, workspaceState, workspaces, api, port, target }
 }
+it('records project scope beside the pre-production prompt without inventing a shot target', async () => {
+  const f = fixture(false, 'qingmu-director')
+  await f.port.story!.send('creative-session', 'Keep the west window in the same room.',
+    { projectId: 'project-a', episodeId: 'episode-a', purpose: 'asset-design' })
+  expect(f.api.sessions.prompt).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    sessionId: 'creative-session', content: [
+      { type: 'text', text: JSON.stringify({ schema: 'qingmu.native-creative-request.v1', sessionId: 'creative-session',
+        projectId: 'project-a', episodeId: 'episode-a', purpose: 'asset-design' }) },
+      { type: 'text', text: 'Keep the west window in the same room.' },
+    ],
+  }))
+})
 
 it('selects the native preset for an empty session without creating a session or sending a model turn', async () => {
   const f = fixture()

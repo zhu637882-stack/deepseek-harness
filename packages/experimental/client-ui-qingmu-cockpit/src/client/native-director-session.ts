@@ -45,10 +45,11 @@ export function createNativeDirectorSessionPort(ctx: ClientContext, connection: 
       if (!cwd) throw new Error('当前青木工作目录尚未就绪，请刷新页面。')
       unwrapRpc((await connection.api.sessions.create({ sessionId: sessionId as NativeSessionId, cwd, agentPreset: 'qingmu-director' })).result)
     },
-    async send(sessionId, text) {
+    async send(sessionId, text, scope) {
       if (!connection.hostDescription.getSnapshot()) throw new Error('青木服务未连接，没有发送。')
       unwrapRpc((await connection.api.sessions.prompt({ sessionId: sessionId as NativeSessionId, mode: 'queue',
-        content: [{ type: 'text', text }], clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone })).result)
+        content: [...(scope ? [{ type: 'text' as const, text: JSON.stringify({ schema: 'qingmu.native-creative-request.v1', sessionId, ...scope }) }] : []),
+          { type: 'text', text }], clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone })).result)
     },
     async read(sessionId, afterSeq) {
       const value = unwrapRpc((await connection.api.sessions.history({ sessionId: sessionId as NativeSessionId, maxMessages: 64 })).result)

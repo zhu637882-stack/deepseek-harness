@@ -68,7 +68,7 @@ it('keeps a screenplay review separate from the original writer request and resu
   expect(port.read).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole('button', { name: '复核' }))
   await waitFor(() => { expect(port.send).toHaveBeenCalledTimes(1) })
-  expect(port.send.mock.calls[0]).toEqual([expect.not.stringMatching(/^session-writer$/), expect.stringContaining('原点和当前正文')])
+  expect(port.send.mock.calls[0]).toEqual([expect.not.stringMatching(/^session-writer$/), expect.stringContaining('原点和当前正文'), { projectId: 'p', episodeId: 'e', purpose: 'story-review' }])
   expect(localStorage.getItem('qingmu.story-session.v1:p:e')).toContain('session-writer')
   expect(localStorage.getItem('qingmu.story-review-session.v1:p:e')).not.toContain('session-writer')
 })

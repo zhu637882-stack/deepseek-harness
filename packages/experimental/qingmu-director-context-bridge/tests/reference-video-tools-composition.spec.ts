@@ -106,6 +106,11 @@ function writer(extraShots = 0, image?: { sha256: string; url: string }, fixture
   let unpreparedMaterials = false
   const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input)
+    if (url.pathname.endsWith('/asset-design')) return Response.json({
+      schema: 'qingmu.asset-design-state.v1', projectId: 'p', episodeId: 'episode-a',
+      stateSha256: 'a'.repeat(64), script: {}, design: { assets: [{ kind: 'scene', name: 'Library',
+        space: { layout: 'Return desk beside the entrance; repair table beneath the west window.' } }] },
+    })
     if (url.pathname.endsWith('/working-cut')) return Response.json(workingCut)
     if (url.pathname.endsWith('/working-cut/save')) {
       if (typeof init?.body !== 'string') throw new Error('Expected JSON request body')
@@ -232,7 +237,8 @@ async function harness(adapter: MockAdapter, upstream = writer(), images = false
   const agent = handle.agent
   agent.session.append('qingmu-director-context/state', { version: 1,
     binding: { scope, contextSnapshotSha256: context.contextSnapshotSha256 }, proposal: null, transition: 'enter' })
-  async function run(scoped = false) {
+  async function run(scoped = false, creative?: Record<string, unknown>) {
+    if (creative) agent.session.append('qingmu-director-context/state', null)
     if (scoped) await createDirectorContextBridge({
       readDirectorContext: async () => ({ ok: true, context: context as DirectorContextSnapshot }),
     }).enter(agent.session, scope, new AbortController().signal, 'test-owner')
@@ -240,6 +246,8 @@ async function harness(adapter: MockAdapter, upstream = writer(), images = false
       const stop = ctx.on('agent/status', ({ agent: subject, status }) => { if (subject === agent && status === 'idle') { stop(); resolve() } })
     })
     agent.followup(createUserMessage({ source: { kind: 'user' }, content: [
+      ...(creative ? [{ type: 'text' as const, text: JSON.stringify({ schema: 'qingmu.native-creative-request.v1', sessionId: agent.session.id,
+        projectId: 'p', episodeId: 'episode-a', purpose: 'asset-design', ...creative }) }] : []),
       ...(scoped ? [{ type: 'text' as const, text: JSON.stringify({ schema: 'qingmu.native-director-request.v1', sessionId: agent.session.id, ownerId: 'test-owner', scope, contextSnapshotSha256: context.contextSnapshotSha256 }) }] : []),
       { type: 'text', text: '按导演设计修改当前镜头并保存，保留多说话人与完整运镜。' }] }))
     await idle
@@ -306,6 +314,38 @@ const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA
 const imageSha = createHash('sha256').update(imageBytes).digest('hex')
 const imageUrl = `http://127.0.0.1:8115/api/media/media_cafe?signature=${'e'.repeat(64)}&expires=9999999999`
 const imageArgs = { page: 1, assetId: 'asset_cafe', assetSha256: imageSha }
+it('reads saved episode geography and actual image pixels before any shot exists', async () => {
+  const adapter = new MockAdapter([
+    toolCallResponse('assets', 'qingmu_read_asset_design', { page: 1 }),
+    toolCallResponse('view', 'qingmu_view_reference_image', imageArgs), textResponse('场景图可供换机位；不可见布局仍待核对。'),
+  ])
+  vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'mock', id: 'mock', name: 'mock', inputModalities: ['text', 'image'] })
+  const media = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(imageBytes, { headers: { 'content-type': 'image/png' } }))
+  const h = await harness(adapter, writer(0, { sha256: imageSha, url: imageUrl }), true)
+  await h.run(false, {})
+  expect(result(h.agent, 'assets').error, result(h.agent, 'assets').text).toBe(false)
+  expect(JSON.parse(result(h.agent, 'assets').text)).toMatchObject({ scope: { projectId: 'p', episodeId: 'episode-a' },
+    saved: { design: { assets: [{ space: { layout: expect.stringContaining('west window') } }] } } })
+  expect(result(h.agent, 'view').error, result(h.agent, 'view').text).toBe(false)
+  const visible = adapter.requests.at(-1)?.messages
+  expect(JSON.stringify(visible)).toContain('attachmentId')
+  expect(JSON.parse(result(h.agent, 'view').text).scope).toEqual({ projectId: 'p', episodeId: 'episode-a' })
+  expect(media).toHaveBeenCalledOnce()
+  expect(h.upstream.fetch.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true)
+  expect(JSON.parse(result(h.agent, 'assets').text)).toMatchSnapshot()
+})
+it.each([
+  ['other session', { sessionId: 'another' }, imageArgs],
+  ['scope injected by model', {}, { ...imageArgs, projectId: 'other-project' }],
+  ['foreign image', {}, { ...imageArgs, assetId: 'foreign-image' }],
+  ['stale image version', {}, { ...imageArgs, assetSha256: 'a'.repeat(64) }],
+] as const)('rejects a pre-production image with %s before fetching bytes', async (_label, target, args) => {
+  const media = vi.spyOn(globalThis, 'fetch')
+  const h = await harness(visionAdapter(args), writer(0, { sha256: imageSha, url: imageUrl }), true)
+  await h.run(false, target)
+  expect(result(h.agent, 'view').error).toBe(true)
+  expect(media).not.toHaveBeenCalled()
+})
 function visionAdapter(args: object = imageArgs) {
   const adapter = new MockAdapter([
     toolCallResponse('view', 'qingmu_view_reference_image', args),
