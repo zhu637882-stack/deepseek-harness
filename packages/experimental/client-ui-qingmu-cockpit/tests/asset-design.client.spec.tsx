@@ -10,6 +10,54 @@ const state: AssetDesignState = { ...scope, schema: 'qingmu.asset-design-state.v
     visualStyle: '写实', tone: '温暖', colorPalette: ['灰蓝'], lightingRules: '窗光', cameraGrammar: '跟随动作', performanceRules: '自然', characterContinuityRules: '服装稳定',
   } } }
 afterEach(() => { cleanup(); localStorage.clear() })
+it('adopts an AI supplement without dropping an omitted room or the existing character voice', async () => {
+  const port = setup()
+  const room = { id: 'scene_1', kind: 'scene' as const, name: '工作室', imagePrompt: '窗下木桌',
+    visualIdentity: '入口对面窗，桌子靠窗墙', space: { layout: '入口对面窗，桌子靠窗墙' },
+    imageStage: { camera: '入口朝窗' }, references: [{ assetId: 'asset_ref', assetSha256: 'e'.repeat(64), purpose: '固定格局', boxes: [] }] }
+  const configured = { ...state, design: { ...state.design!, assets: [room, state.design!.assets[0]!] } }
+  const supplement = { ...state.design, assets: [{ kind: 'actor', name: '父亲', imagePrompt: '同一父亲的侧身定妆' },
+    { kind: 'actor', name: '孩子', imagePrompt: '儿童独立定妆' }] }
+  port.readAssetDesign.mockResolvedValue(configured)
+  port.saveAssetDesign.mockImplementation(async (input: unknown) => ({ ...configured,
+    design: { ...configured.design, ...(input as { design: object }).design } }))
+  localStorage.setItem('qingmu.asset-design-session.v1:p:e', JSON.stringify({ sessionId: 'session_design', baseline: 0, submitted: true }))
+  const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
+    read: vi.fn(async () => ({ text: '补充人物，保留场景。', script: JSON.stringify(supplement), lastSeq: 10, running: false, finished: true, error: '' })) }
+  const view = render(<NativeAssetDesign {...scope} port={port} storyPort={storyPort} onGenerated={vi.fn()} />)
+  await screen.findByRole('region', { name: '场景 工作室' })
+  fireEvent.click(await screen.findByRole('button', { name: '采用到素材卡片' }))
+  expect(screen.getByRole('region', { name: '场景 工作室' })).toBeTruthy()
+  expect(screen.getByRole('region', { name: '人物 孩子' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
+  await waitFor(() => { expect(port.saveAssetDesign).toHaveBeenCalledTimes(1) })
+  const saved = await (port.saveAssetDesign.mock.results[0]!.value as Promise<AssetDesignState>)
+  expect(saved.design?.assets[0]).toEqual(room)
+  expect(saved.design?.assets[1]).toMatchObject({ id: 'actor_1', imagePrompt: '同一父亲的侧身定妆', voiceIdentity: '成年温厚自然中低音' })
+  view.unmount(); port.readAssetDesign.mockResolvedValue(saved)
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  expect(await screen.findByRole('region', { name: '场景 工作室' })).toBeTruthy()
+  expect(screen.getByRole('region', { name: '人物 孩子' })).toBeTruthy()
+  expect(storyPort.send).not.toHaveBeenCalled()
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
+it('checks the combined asset count before adopting an AI supplement', async () => {
+  const port = setup()
+  const assets = Array.from({ length: 40 }, (_, n) => ({ id: `prop_${n}`, kind: 'prop' as const, name: `器具${n}`, imagePrompt: '单件器具' }))
+  port.readAssetDesign.mockResolvedValue({ ...state, design: { ...state.design!, assets } })
+  const supplement = { ...state.design, assets: [{ kind: 'actor', name: '孩子', imagePrompt: '儿童独立定妆' }] }
+  localStorage.setItem('qingmu.asset-design-session.v1:p:e', JSON.stringify({ sessionId: 'session_design', baseline: 0, submitted: true }))
+  const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
+    read: vi.fn(async () => ({ text: '补充一个角色。', script: JSON.stringify(supplement), lastSeq: 10, running: false, finished: true, error: '' })) }
+  render(<NativeAssetDesign {...scope} port={port} storyPort={storyPort} onGenerated={vi.fn()} />)
+  await screen.findByRole('region', { name: '道具 器具39' })
+  fireEvent.click(await screen.findByRole('button', { name: '采用到素材卡片' }))
+  expect(await screen.findByText(/合并后超过当前 40 项素材上限/)).toBeTruthy()
+  expect(screen.getAllByRole('region', { name: /^道具 器具/ })).toHaveLength(40)
+  expect(screen.queryByRole('region', { name: '人物 孩子' })).toBeNull()
+  expect(port.saveAssetDesign).not.toHaveBeenCalled()
+  expect(storyPort.send).not.toHaveBeenCalled()
+})
 it.each([false, true])('keeps omitted generation choices on redesign; explicit reset=%s remains effective', async (reset) => {
   const port = setup()
   const existing = { ...state.design!.assets[0]!, imageModel: 'qwen-image-3.0-pro',

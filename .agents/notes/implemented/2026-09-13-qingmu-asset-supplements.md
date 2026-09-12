@@ -1,0 +1,5 @@
+# Adopt asset supplements without deleting other designs
+
+Native asset-design replies can contain only the requested additions while claiming to retain the existing scene. Adoption therefore merges matching entities and appends new ones, retaining cards omitted from the reply. An omitted entity is not a deletion instruction. Optional fields, including voice and spatial data, survive partial updates; explicit empty values retain their reset semantics. The existing 40-item limit applies to the combined list before any local state changes.
+
+Manual complete-design import remains an explicit list replacement with a visible notice. Neither path saves automatically, changes media selection or repeats the model request. This keeps deliberate full-list editing available without treating an AI supplement as a replacement for the project. Regression coverage exercises omission, voice retention, explicit resets, reload and combined limits; deployed browser verification reuses the original completed model reply.

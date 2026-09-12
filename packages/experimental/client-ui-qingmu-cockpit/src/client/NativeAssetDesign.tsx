@@ -55,21 +55,21 @@ function parseDesign(text: string): { design: AssetDesign; repaired: boolean } {
   if (!Array.isArray(director.colorPalette) || !director.colorPalette.every(color => typeof color === 'string')) throw new Error('缺少全片色彩设计。')
   return { design: value as AssetDesign, repaired }
 }
-function withIdentities(value: AssetDesign, previous?: AssetDesign): AssetDesign {
-  return { ...value, assets: value.assets.map((item) => {
+function withIdentities(value: AssetDesign, previous?: AssetDesign, retainOmitted = false): AssetDesign {
+  const updates = new Map<AssetDesignItem, AssetDesignItem>(), additions: AssetDesignItem[] = []
+  const incoming = value.assets.map((item) => {
     const matches = previous?.assets.filter(row => row.kind === item.kind && (item.id ? row.id === item.id : row.name === item.name))
     const old = matches?.length === 1 ? matches[0] : undefined
-    return { ...item, visualIdentity: item.visualIdentity ?? old?.visualIdentity ?? old?.imagePrompt ?? item.imagePrompt,
-      ...(item.id === undefined && old?.id !== undefined ? { id: old.id } : {}),
-      ...(item.imageModel === undefined && old?.imageModel !== undefined ? { imageModel: old.imageModel } : {}),
-      ...(item.imagePromptExtend === undefined && old?.imagePromptExtend !== undefined ? { imagePromptExtend: old.imagePromptExtend } : {}),
-      ...(item.imageAspectRatio === undefined && old?.imageAspectRatio !== undefined ? { imageAspectRatio: old.imageAspectRatio } : {}),
-      ...(item.references === undefined && old?.references !== undefined ? { references: old.references } : {}),
-      ...(item.space === undefined && old?.space !== undefined ? { space: old.space } : {}),
-      ...(item.sceneLayout === undefined && old?.sceneLayout !== undefined ? { sceneLayout: old.sceneLayout } : {}),
-      ...(item.imageCamera === undefined && old?.imageCamera !== undefined ? { imageCamera: old.imageCamera } : {}),
-      ...(item.imageStage === undefined && old?.imageStage !== undefined ? { imageStage: old.imageStage } : {}) }
-  }) }
+    const merged = { ...old, ...item, visualIdentity: item.visualIdentity ?? old?.visualIdentity ?? old?.imagePrompt ?? item.imagePrompt }
+    if (old) {
+      if (retainOmitted && updates.has(old)) throw new Error('设计重复更新同一素材，请整理为一份设计后再采用。')
+      updates.set(old, merged)
+    } else additions.push(merged)
+    return merged
+  })
+  const assets = retainOmitted && previous ? [...previous.assets.map(item => updates.get(item) ?? item), ...additions] : incoming
+  if (assets.length > 40) throw new Error('合并后超过当前 40 项素材上限。原设计已保留，请整理后再采用。')
+  return { ...value, assets }
 }
 /** Author, save and generate characters/scenes/props using the native director and image queue.
  * @param props - Current episode, owner-scoped commands and native director session.
@@ -128,10 +128,10 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
     try { await work() } catch (error) { if (live.current) setNotice(error instanceof Error ? error.message : '操作未确认，请刷新原结果。') }
     finally { lock.current = false; if (live.current) setBusy(false) }
   }
-  function adopt(text: string) {
+  function adopt(text: string, retainOmitted = false) {
     const parsed = parseDesign(text)
-    setDesign(withIdentities(parsed.design, design)); setDirty(true); setQuote(undefined)
-    setNotice(`${parsed.repaired ? '已修正正文引号的格式，设计文字完整保留。' : ''}设计已放入下方卡片，检查或修改后保存。`)
+    setDesign(withIdentities(parsed.design, design, retainOmitted)); setDirty(true); setQuote(undefined)
+    setNotice(`${parsed.repaired ? '已修正正文引号的格式，设计文字完整保留。' : ''}${retainOmitted ? '设计已合并到下方卡片，未提及的已有素材继续保留。' : '设计已放入下方卡片。'}检查或修改后保存。`)
   }
   function edit(index: number, patch: Partial<AssetDesignItem>) {
     if (!design) return
@@ -144,9 +144,9 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
     <p>先从当前剧本设计人物、场景和道具，检查画面描述后生成图片；生成结果会进入本项目素材库。</p>
     <label>创作补充<textarea value={changes} onChange={(event) => { setChanges(event.target.value) }} placeholder="例如人物气质、服装年代、空间布局，或道具的真实尺寸" /></label>
     {state && storyPort && <NativeStoryComposer port={storyPort} projectId={projectId} episodeId={episodeId}
-      source={JSON.stringify(state.script)} settings="" disabled={busy} onAdopt={adopt}
+      source={JSON.stringify(state.script)} settings="" disabled={busy} onAdopt={(text) => { adopt(text, true) }}
       purpose={{ key: 'asset-design', jsonOutput: true, title: '让青木设计素材', description: '导演会结合剧本和素材方法提出完整设计，你可以逐项调整。',
-        prompt, action: '根据剧本设计素材', adopt: '采用到素材卡片', adopted: '请检查下方素材卡片中的设计。' }} />}
+        prompt, action: '根据剧本设计素材', adopt: '采用到素材卡片', adopted: '已合并设计，未提及的已有素材继续保留。请检查下方卡片后保存。' }} />}
     {design && <>
       <details><summary>剧本世界与设计依据</summary>{(['setting', 'scriptFacts', 'directorInferences', 'exceptions', 'openQuestions'] as const).map((field, index) => <label key={field}>{['年代与世界设定', '剧本明确事实', '导演推导', '剧本例外', '待定事项'][index]}<textarea value={(design.world ?? emptyWorld)[field]} onChange={(event) => {
         setDesign({ ...design, world: { ...(design.world ?? emptyWorld), [field]: event.target.value } })
@@ -243,7 +243,7 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
       {!quote.generationAvailable && <p>当前账户尚未开通图片生成额度。</p>}
     </section>}
     <button type="button" disabled={busy} onClick={() => { void perform(readRuns) }}>刷新生成进度</button>
-    <details><summary>导入已有素材设计</summary><textarea aria-label="素材设计数据" value={manual} onChange={(event) => { setManual(event.target.value) }} /><button type="button" disabled={busy || !manual.trim()} onClick={() => {
+    <details><summary>导入已有素材设计</summary><p>导入会以这份完整清单替换下方设计卡片；已有媒体保留。请检查清单后保存。</p><textarea aria-label="素材设计数据" value={manual} onChange={(event) => { setManual(event.target.value) }} /><button type="button" disabled={busy || !manual.trim()} onClick={() => {
       try { adopt(manual) } catch (error) { setNotice(String(error)) }
     }}>载入设计</button></details>
     {notice && <p role="status">{notice}</p>}
