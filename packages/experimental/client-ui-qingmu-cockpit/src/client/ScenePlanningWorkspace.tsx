@@ -20,7 +20,7 @@ import {
 } from './host-sync.ts'
 import css from './ScenePlanningWorkspace.module.css'
 import type { HostDescriptionSource } from '@deepseek-ai/dsh-client-connection/client'
-import { useDirectorConnection } from './native-director-session.ts'
+import { projectDirectorSessionId, useDirectorConnection } from './native-director-session.ts'
 import type { NativeDirectorSessionPort } from './native-director-session.ts'
 import { NativeDirectorComposer } from './NativeDirectorComposer.tsx'
 import { NativeSceneDesign } from './NativeSceneDesign.tsx'
@@ -852,7 +852,8 @@ export function ScenePlanningWorkspace({
       || (state.planning === null && !state.canonicalStoryboard && local.shotIds.length === 0)))
   if (presentation === 'assistant') return <section className={css.assistant} aria-label="当前镜头导演助手">
     <p>说出你想改的地方，导演会结合当前镜头处理。</p>
-    {nativeDirectorSession && <NativeDirectorComposer port={nativeDirectorSession} sessionId={directorSessionId}
+    {nativeDirectorSession && <NativeDirectorComposer port={nativeDirectorSession}
+      sessionId={directorSessionId ?? projectDirectorSessionId(projectId)}
       scopeKey={JSON.stringify(canonicalDirectorScope)} ready={nativeTarget !== undefined}
       target={nativeTarget} onCommitted={onCommitted} />}
     {directorStatus !== 'current' && <p role="status">{directorStatus === 'connecting' ? '正在读取当前镜头…'
@@ -1062,7 +1063,8 @@ export function ScenePlanningWorkspace({
       {retained && <details><summary>冲突输入副本 · 仅本浏览器，未提交</summary><pre>{JSON.stringify(retained.shots, null, 2)}</pre></details>}
     </main>
     <aside className={css.properties}>
-      {nativeDirectorSession && <NativeDirectorComposer port={nativeDirectorSession} sessionId={directorSessionId}
+      {nativeDirectorSession && <NativeDirectorComposer port={nativeDirectorSession}
+        sessionId={directorSessionId ?? projectDirectorSessionId(projectId)}
         scopeKey={JSON.stringify(directorScope)} ready={nativeTarget !== undefined} target={nativeTarget} onCommitted={onCommitted} />}
       <details open><summary>导演助理连接</summary>
         <p role="status">{directorSessionId === undefined

@@ -255,6 +255,34 @@ it.each([undefined, [], [{ id: 'other_shot', frameNo: 2, title: '另一镜', ima
     expect(native.prompt).not.toHaveBeenCalled()
     expect(port.saveScenePlanning).not.toHaveBeenCalled()
   })
+it.each(['assistant', 'planning'] as const)('retains typed direction while entering the project session (%s)', async (presentation) => {
+  const automatic = { ...automaticReadState(), canonicalStoryboard: { ...automaticReadState().canonicalStoryboard!, shots: [
+    { id: 'automatic_1', frameNo: 1, title: '入口', imagePromptCn: '开门' },
+  ] } }
+  const port = { readScenePlanning: vi.fn(async () => automatic), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn(),
+    requestDirectorProposal: unavailableDirectorProposal(), checkDirectorProposalFreshness: unusedFreshness() }
+  const transport = directorConnectionFixture(), bridge = replayBridge()
+  const native = { connection: transport.source, activate: vi.fn(), prompt: vi.fn(async () => {}) }
+  const scope = { projectId: 'project_1', episodeId: 'episode_1', sceneId: 'canonical_scene', shotId: 'automatic_1' }
+  const props = { ...automatic, presentation, port, directorBridge: bridge,
+    directorConnection: transport.source, nativeDirectorSession: native, canonicalDirectorScope: scope,
+    onCommitted: vi.fn(async () => {}), onSelectShotId: vi.fn(), onUnsavedChange: vi.fn() }
+  const view = render(<ScenePlanningWorkspace {...props} />)
+  await screen.findByRole('textbox', { name: '导演要求' })
+  // Let planning load its visible shot before typing, while the native session is still disconnected.
+  if (presentation === 'planning') await screen.findByLabelText('自动分镜镜头')
+  fireEvent.change(screen.getByLabelText('导演要求'), { target: { value: '保留门窗位置，人物走向桌边' } })
+  expect(screen.getByRole('button', { name: '发送给当前导演' })).toHaveProperty('disabled', true)
+  view.rerender(<ScenePlanningWorkspace {...props} directorSessionId="session-qingmu-director-project_1" />)
+  await waitFor(() => expect(screen.getByRole('button', { name: '发送给当前导演' })).toHaveProperty('disabled', false))
+  expect(screen.getByLabelText('导演要求')).toHaveProperty('value', '保留门窗位置，人物走向桌边')
+  expect(native.prompt).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '发送给当前导演' }))
+  await waitFor(() => expect(native.prompt).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ sessionId: 'session-qingmu-director-project_1', scope }),
+    '保留门窗位置，人物走向桌边', expect.any(AbortSignal)))
+  expect(port.saveScenePlanning).not.toHaveBeenCalled()
+})
 it('uses the existing native composer inside shooting without consuming another shot planning draft', async () => {
   const automatic = { ...automaticReadState(), canonicalStoryboard: { ...automaticReadState().canonicalStoryboard!, shots:[
     { id:'automatic_1', frameNo:1, title:'入口', imagePromptCn:'开门' },
