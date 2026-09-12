@@ -1920,10 +1920,10 @@ describe('qingmu Yimeng read adapter', () => {
 
   it.each(['pending', 'missing-job', 'forged-pass'])(
     'keeps generated source lineage separate from qualification: %s', async (variant) => {
-      const candidate = { ...REFERENCE_CANDIDATE, formalConsistencyCheckId: '', formalConsistencyPassed: false,
+      const candidate = { ...REFERENCE_CANDIDATE, generationJobId: variant === 'missing-job' ? '' : REFERENCE_CANDIDATE.generationJobId,
+        formalConsistencyCheckId: '', formalConsistencyPassed: false,
         qualityStatus: 'pending', selectionStatus: 'Unselected', isSelected: false,
         qualificationKind: 'none', qualificationCheckId: '', qualificationPassed: false }
-      if (variant === 'missing-job') candidate.generationJobId = ''
       if (variant === 'forged-pass') candidate.qualificationPassed = true
       const response = { ...REFERENCE_CANDIDATES_FIXTURE, candidates: [candidate] }
       const handler = createYimengReadHandler({}, dependencies(async () => jsonResponse(response), 'test-token'))
