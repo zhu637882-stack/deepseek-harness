@@ -7,6 +7,38 @@ const state: WorkingCutState = { schema:'qingmu-working-cut-v1',projectId:'p',ep
   shots:[{ frameId:'f',frameNo:1,title:'动作',candidates:[{ assetId:'a',sha256:'a'.repeat(64),duration:15,taskId:'t',url:'' }] }],
   cuts:[],providerCalls:0,humanApprovalChanged:false }
 afterEach(() => { cleanup();localStorage.clear() })
+it('saves room response and cross-cut tail, rejects overrun, and reopens without changing original sound', async () => {
+  const voice = { assetId: 'voice', sha256: 'b'.repeat(64), duration: 15, name: 'Voice.wav', url: '' }
+  const room = { assetId: 'response', sha256: 'c'.repeat(64), duration: 1, name: 'Room-IR.wav', url: '' }
+  let server: WorkingCutState = { ...state, audioLibrary: [voice, room] }
+  const save = vi.fn(async ({ command }: { command: WorkingCutCommand }) => {
+    server = { ...server, revision: 1, cuts: [{ ...command, version: 1, revisionId: 'revision', taskId: null,
+      status: 'NotQueued', errorCode: null, assetId: null, sha256: null, url: '' }] }
+    return server
+  })
+  const port = { readWorkingCut: vi.fn(async () => server), saveWorkingCut: save,
+    renderWorkingCut: vi.fn(), uploadWorkingCutAudio: vi.fn() }
+  const view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
+  fireEvent.click((await screen.findAllByRole('button', { name: '加入音轨' }))[0]!)
+  fireEvent.change(screen.getByRole('combobox', { name: '音轨 1 空间响应' }), { target: { value: 'response' } })
+  fireEvent.change(screen.getByRole('spinbutton', { name: '音轨 1 保留尾音秒' }), { target: { value: '.8' } })
+  expect(screen.getByRole('button', { name: '保存剪辑草稿' })).toHaveProperty('disabled', true)
+  fireEvent.change(screen.getByRole('spinbutton', { name: '音轨 1 素材终点秒' }), { target: { value: '14' } })
+  fireEvent.change(screen.getByRole('spinbutton', { name: '音轨 1 混响音量 dB' }), { target: { value: '-9' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存剪辑草稿' }))
+  await waitFor(() => { expect(save).toHaveBeenCalledTimes(1) })
+  expect(save.mock.calls[0]?.[0].command.audioCues?.[0]?.space).toEqual({ assetId: 'response', sha256: room.sha256, wetDb: -9, tailSec: .8 })
+  expect(save.mock.calls[0]?.[0].command.clips[0]).not.toHaveProperty('sourceGainDb')
+  view.unmount()
+  render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
+  expect(await screen.findByRole('combobox', { name: '音轨 1 空间响应' })).toHaveProperty('value', 'response')
+  expect(screen.getByRole('spinbutton', { name: '音轨 1 保留尾音秒' })).toHaveProperty('value', '0.8')
+  fireEvent.change(screen.getByRole('combobox', { name: '音轨 1 空间响应' }), { target: { value: '' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存剪辑草稿' }))
+  await waitFor(() => { expect(save).toHaveBeenCalledTimes(2) })
+  expect(save.mock.calls[1]?.[0].command.audioCues?.[0]?.space).toBeUndefined()
+  expect(port.renderWorkingCut).not.toHaveBeenCalled()
+})
 it('previews framing, retains it on reopen and can restore the unmodified source', async () => {
   let server: WorkingCutState = { ...state, shots: [{ ...state.shots[0]!, candidates: [{ ...state.shots[0]!.candidates[0]!, url: '/video.mp4' }] }] }
   const save = vi.fn(async ({ command }: { command: WorkingCutCommand }) => {

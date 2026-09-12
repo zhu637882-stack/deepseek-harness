@@ -42,13 +42,18 @@ export function WorkingCutSound({ library, cues, total, disabled, plan, onPlan, 
     </div>)}
     {cues.map((cue, index) => {
       const source = library.find(a => a.assetId === cue.assetId)
-      const duration = cue.outSec - cue.inSec
+      const duration = cue.outSec - cue.inSec + (cue.space?.tailSec ?? 0)
+      const response = library.find(a => a.assetId === cue.space?.assetId)
+      const spaceInvalid = cue.space && (!response || response.sha256 !== cue.space.sha256 || response.duration > 10
+        || !Number.isFinite(cue.space.wetDb) || cue.space.wetDb < -60 || cue.space.wetDb > 6
+        || !Number.isFinite(cue.space.tailSec) || cue.space.tailSec < 0 || cue.space.tailSec > response.duration)
       const points = cue.gainPoints ?? []
       const pointsInvalid = points.length === 1 || points.length > 64 || points.some((point, i) =>
         !Number.isFinite(point.timeSec) || !Number.isFinite(point.gainDb)
         || point.timeSec < cue.startSec || point.timeSec > cue.startSec + duration
         || point.gainDb < -60 || point.gainDb > 6 || (i > 0 && point.timeSec <= (points[i - 1]?.timeSec ?? -1)))
-      const invalid = !source || cue.startSec < 0 || cue.inSec < 0 || duration <= 0 || cue.outSec > source.duration
+      const invalid = spaceInvalid || !source || cue.startSec < 0 || cue.inSec < 0
+        || cue.outSec <= cue.inSec || cue.outSec > source.duration
         || cue.startSec + duration > total + .001 || cue.fadeInSec + cue.fadeOutSec > duration
       const number = (field: 'startSec' | 'inSec' | 'outSec' | 'gainDb' | 'fadeInSec' | 'fadeOutSec', label: string, min: number, max: number) =>
         <label>{label}<input aria-label={`音轨 ${index + 1} ${label}`} type="number" step="0.1" min={min} max={max} value={cue[field]} disabled={disabled} onChange={(e) => { update(index, { [field]: Number(e.target.value) }) }} /></label>
@@ -60,6 +65,32 @@ export function WorkingCutSound({ library, cues, total, disabled, plan, onPlan, 
         {number('startSec', '成片起点秒', 0, total)}{number('gainDb', '音量 dB', -60, 6)}
         {number('fadeInSec', '淡入秒', 0, duration)}{number('fadeOutSec', '淡出秒', 0, duration)}
         <details><summary>裁剪声音素材</summary>{number('inSec', '素材起点秒', 0, source?.duration ?? 0)}{number('outSec', '素材终点秒', 0, source?.duration ?? 0)}</details>
+        <details open={!!cue.space}><summary>空间混响</summary>
+          <p>给本轨添加房间、走廊等空间的声学响应，原声保留。导入空间响应文件（IR，单声道或双声道，最长 10 秒），再选择；普通对白、音乐和环境录音不能代替 IR。</p>
+          <label>空间响应<select aria-label={`音轨 ${index + 1} 空间响应`} value={cue.space?.assetId ?? ''} onChange={(e) => {
+            const selected = library.find(a => a.assetId === e.target.value)
+            if (selected) update(index, { space: { assetId: selected.assetId, sha256: selected.sha256, wetDb: -12, tailSec: 0 } })
+            else onChange(cues.map((current, i) => {
+              if (i !== index) return current
+              const { space: _removed, ...unchanged } = current
+              return unchanged
+            }))
+          }}>
+            <option value="">不加混响</option>
+            {cue.space && !response && <option value={cue.space.assetId}>原空间响应不可用</option>}
+            {library.filter(a => a.duration <= 10).map(a => <option key={a.assetId} value={a.assetId}>{a.name}</option>)}
+          </select></label>
+          {cue.space && <>
+            <label>混响音量 dB<input aria-label={`音轨 ${index + 1} 混响音量 dB`} type="number" min="-60" max="6" step="1" value={cue.space.wetDb} onChange={(e) => {
+              if (cue.space) update(index, { space: { ...cue.space, wetDb: Number(e.target.value) } })
+            }} /></label>
+            <label>保留尾音秒<input aria-label={`音轨 ${index + 1} 保留尾音秒`} type="number" min="0" max={Math.min(response?.duration ?? 10, 10)} step="0.1" value={cue.space.tailSec} onChange={(e) => {
+              if (cue.space) update(index, { space: { ...cue.space, tailSec: Number(e.target.value) } })
+            }} /></label>
+            <p>尾音从素材终点继续，可跨越切镜；淡出和音量变化覆盖尾音，总时长需留在成片内。已带混响的原声需试听后再决定是否叠加。</p>
+          </>}
+          {spaceInvalid && <p role="alert">空间响应或参数已失效，请重新选择并检查混响音量与尾音长度。</p>}
+        </details>
         <details open={points.length > 0}><summary>音量变化与对白避让</summary>
           <p>按成片时间设置音量增减，在相邻点之间平滑变化。0 dB 保持本轨音量，负数压低；首末点之外保持对应音量。只调整这条独立音轨。</p>
           {!points.length ? <button type="button" disabled={disabled || invalid} onClick={() => {
@@ -92,6 +123,6 @@ export function WorkingCutSound({ library, cues, total, disabled, plan, onPlan, 
         {invalid && <p role="alert">请调整音轨范围：声音不能超出素材或成片，淡入和淡出总长不能超过音轨。</p>}
       </fieldset>
     })}
-    <p>独立音轨不会自动去掉原片已有的音乐，也不会自动改变混响。需要先试听原音；对白已与音乐混在一起时，先分离或修复源声音，避免叠加两套音乐。</p>
+    <p>空间混响只作用于选择的独立音轨。独立音轨不会自动去掉原片已有的音乐；对白已与音乐混在一起时，先分离或修复源声音，避免叠加两套音乐。</p>
   </section>
 }

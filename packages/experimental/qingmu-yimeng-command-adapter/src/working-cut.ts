@@ -26,6 +26,8 @@ export interface WorkingAudioCue {
   readonly fadeOutSec: number
   /** Optional relative dB changes; film times strictly increase within this cue. */
   readonly gainPoints?: readonly { readonly timeSec: number; readonly gainDb: number }[]
+  /** Optional mono/stereo room IR from this episode's audio library. Dry sound stays; tail extends the cue. */
+  readonly space?: { readonly assetId: string; readonly sha256: string; readonly wetDb: number; readonly tailSec: number }
 }
 /** Recoverable command for one immutable timeline revision and local render. */
 export interface WorkingCutCommand {

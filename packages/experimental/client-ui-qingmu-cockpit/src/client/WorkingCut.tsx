@@ -86,15 +86,20 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
   const total = clips.reduce((sum, clip) => sum + clip.outSec - clip.inSec, 0)
   const audioValid = audioCues.every((c) => {
     const source = state?.audioLibrary?.find(a => a.assetId === c.assetId)
+    const response = state?.audioLibrary?.find(a => a.assetId === c.space?.assetId)
+    const audibleDuration = c.outSec - c.inSec + (c.space?.tailSec ?? 0)
     const points = c.gainPoints ?? []
     return source && [c.startSec, c.inSec, c.outSec, c.gainDb, c.fadeInSec, c.fadeOutSec].every(Number.isFinite)
       && c.startSec >= 0
       && c.inSec >= 0 && c.outSec > c.inSec && c.outSec <= source.duration
-      && c.startSec + c.outSec - c.inSec <= total + .001 && c.gainDb >= -60 && c.gainDb <= 6
-      && c.fadeInSec >= 0 && c.fadeOutSec >= 0 && c.fadeInSec + c.fadeOutSec <= c.outSec - c.inSec
+      && c.startSec + audibleDuration <= total + .001 && c.gainDb >= -60 && c.gainDb <= 6
+      && c.fadeInSec >= 0 && c.fadeOutSec >= 0 && c.fadeInSec + c.fadeOutSec <= audibleDuration
+      && (!c.space || response && response.sha256 === c.space.sha256 && response.duration <= 10
+        && Number.isFinite(c.space.wetDb) && c.space.wetDb >= -60 && c.space.wetDb <= 6
+        && Number.isFinite(c.space.tailSec) && c.space.tailSec >= 0 && c.space.tailSec <= response.duration)
       && points.length !== 1 && points.length <= 64 && points.every((point, i) =>
       Number.isFinite(point.timeSec) && Number.isFinite(point.gainDb)
-        && point.timeSec >= c.startSec && point.timeSec <= c.startSec + c.outSec - c.inSec
+        && point.timeSec >= c.startSec && point.timeSec <= c.startSec + audibleDuration
         && point.gainDb >= -60 && point.gainDb <= 6 && (i === 0 || point.timeSec > (points[i - 1]?.timeSec ?? -1)))
   })
   const valid = audioValid && total <= 600 && clips.length > 0 && clips.every((c) => {
