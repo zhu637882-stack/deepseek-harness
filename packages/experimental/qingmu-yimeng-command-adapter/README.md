@@ -236,6 +236,8 @@ An imported planning edit may set `applyDirectorPlan: true` when its shot contai
 
 First-frame preview, generation submission and task recovery reuse the native Host service session when the browser has no Writer cookie. A supplied cookie retains its own authority; its rejection never retries under service credentials. Same-origin human storyboard confirmation remains cookie-only. Browser Bearer headers are rejected, and no service token is converted into a human cookie or returned to the browser.
 
+Materialized first-frame candidates use Writer's existing media signature and expiry. The adapter preserves that single-media capability against the configured Writer origin; image elements need no owner token. Unsigned URLs, unrelated paths and extra query parameters are rejected. Reading the original request renews its link without generating or selecting an image. See the [candidate playback decision](../../../.agents/notes/implemented/feature/2026-09-13-qingmu-first-frame-playback.md).
+
 First-frame preview also accepts explicit working-image bindings: asset SHA, order and purpose. Writer verifies project ownership and source bytes and binds the resulting route into the saved preview; submit cannot select a route with a browser flag. This native candidate route uses the existing image queue and does not require or grant formal reference adoption or storyboard signoff. Legacy formal-reference requests and human confirmation retain their existing boundaries.
 
 Scene-planning reads expose the film aspect ratio and each frame’s current scene ID. Null means unbound; omitted fields remain compatible with older read projections. Clients use these identities for shared-scene framing, without changing layout or media through a planning read.

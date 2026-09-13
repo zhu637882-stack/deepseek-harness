@@ -83,12 +83,25 @@ it('rejects cross-origin and ambiguous credentials before upstream',async () => 
   }
   expect(upstream).not.toHaveBeenCalled()
 })
-it('recovers only through GET and resolves media against the configured Writer',async () => {
-  const upstream=vi.fn<typeof fetch>(async () => Response.json({ candidate:{ browserUrl:'/api/media/media-one' } }))
+it('recovers only through GET and preserves the scoped expiring browser media link',async () => {
+  const path=`/api/media/media-one?expires=9999999999&signature=${'f'.repeat(64)}`
+  const upstream=vi.fn<typeof fetch>(async () => Response.json({ candidate:{ browserUrl:path } }))
   const base=await host(upstream)
   const response=await fetch(`${base}/api/qingmu/shooting-first-frame/state?project_id=p&episode_id=e&frame_id=f&request_id=r`,{ headers:{ cookie:'jason_token=test' } })
-  expect(await response.json()).toEqual({ candidate:{ browserUrl:'http://127.0.0.1:8115/api/media/media-one' } })
+  expect(await response.json()).toEqual({ candidate:{ browserUrl:`http://127.0.0.1:8115${path}` } })
   expect(upstream.mock.calls[0]![1]?.method).toBe('GET')
+})
+it.each([
+  '/api/media/media-one',
+  'https://foreign.test/api/media/media-one',
+  `/api/media/media-one?expires=9999999999&signature=${'f'.repeat(64)}&token=other`,
+  `/api/media/media-one?expires=9999999999&expires=1&signature=${'f'.repeat(64)}`,
+  `/api/media/../admin?expires=9999999999&signature=${'f'.repeat(64)}`,
+])('rejects unsigned or unrelated candidate locator %s',async (path) => {
+  const upstream=vi.fn<typeof fetch>(async () => Response.json({ candidate:{ browserUrl:path } }))
+  const base=await host(upstream,()=>'native-test')
+  const response=await fetch(`${base}/api/qingmu/shooting-first-frame/state?project_id=p&episode_id=e&frame_id=f&request_id=r`)
+  expect(response.status).toBe(502);expect(upstream).toHaveBeenCalledTimes(1)
 })
 it('confirms only one explicit SHA-bound human cookie action and does not submit images',async () => {
   const upstream=vi.fn<typeof fetch>(async () => Response.json({ status:{ accepted:true } }))

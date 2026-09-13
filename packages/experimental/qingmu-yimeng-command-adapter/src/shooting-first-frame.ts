@@ -80,8 +80,14 @@ export function registerShootingFirstFrame(
         const result = JSON.parse(text) as { candidate?: { browserUrl?: unknown } }
         if (response.ok && result.candidate) {
           const path = result.candidate.browserUrl
-          if (typeof path !== 'string' || !/^\/api\/media\/[A-Za-z0-9_-]+$/.test(path)) throw new Error('invalid_candidate_media')
-          result.candidate.browserUrl = new URL(path, upstream.origin).href
+          if (typeof path !== 'string' || !path.startsWith('/api/media/')) throw new Error('invalid_candidate_media')
+          const media = new URL(path, upstream.origin)
+          if (media.origin !== upstream.origin || !/^\/api\/media\/[A-Za-z0-9_-]+$/.test(media.pathname)
+            || media.username || media.password || media.hash
+            || [...media.searchParams.keys()].sort().join(',') !== 'expires,signature'
+            || !/^\d+$/.test(media.searchParams.get('expires') ?? '')
+            || !/^[a-f0-9]{64}$/.test(media.searchParams.get('signature') ?? '')) throw new Error('invalid_candidate_media')
+          result.candidate.browserUrl = media.href
         }
         end(response.status, result)
       } catch {
