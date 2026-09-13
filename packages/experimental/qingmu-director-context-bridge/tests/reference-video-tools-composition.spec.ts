@@ -135,7 +135,7 @@ function writer(extraShots = 0, image?: { sha256: string; url: string; config?: 
       if (typeof init?.body !== 'string') throw new Error('Expected a JSON request body')
       const body = JSON.parse(init.body) as {
         idempotencyKey: string
-        request: { directorPlan: Record<string, unknown>; expectedStoryboardRevision: number }
+        request: { directorPlan: Record<string, unknown>; expectedStoryboardRevision: number; imagePromptCn: string }
       }
       if (body.request.expectedStoryboardRevision !== currentPlanning.storyboard.version) return Response.json({ detail: { code: 'planning_storyboard_conflict' } }, { status: 409 })
       const storyboard = { ...currentPlanning.storyboard, id: 'revision-2', version: 2, sourceHash: 'd'.repeat(64) }
