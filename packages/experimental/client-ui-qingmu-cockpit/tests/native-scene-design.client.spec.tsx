@@ -26,6 +26,7 @@ it('sends the whole-film basis and scene to the native director, then adopts the
   fireEvent.click(start)
   await waitFor(() => { expect(port.send).toHaveBeenCalledTimes(1) })
   expect(port.send).toHaveBeenCalledWith(expect.any(String), expect.any(String), { projectId: 'p', episodeId: 'e', purpose: 'scene-design-1' })
+  expect(port.send.mock.calls[0]?.slice(0, 2)[1]).toMatchSnapshot('new scene director request')
   expect(port.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining(JSON.stringify(basis))])
   expect(port.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining(JSON.stringify(scene))])
   expect(port.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining('上一稿动作太密，给递物和停顿留出真实时间；保留人物关系与原对白。')])
@@ -96,4 +97,29 @@ it('recovers a completed JSON-fenced director result without calling the model a
   await waitFor(() => { expect(onAdopt).toHaveBeenCalledExactlyOnceWith(shots) })
   expect(port.send).not.toHaveBeenCalled()
   expect(port.prepare).not.toHaveBeenCalled()
+})
+
+it.each(['missing', 'invalid', 'camera', 'opt-out'] as const)('keeps new-scene camera choices executable against its shared layout (%s)', async (mode) => {
+  const imageCamera = mode === 'opt-out' ? null
+    : { position: [0, 0, 1.5], target: [0, 3, 1], verticalFov: mode === 'invalid' ? 500 : 46 }
+  const candidateShots = shots.map(shot => ({ ...shot, directorPlan: { ...shot.directorPlan, ...(mode === 'missing' ? {} : { imageCamera }) } }))
+  const current: AssetDesignState = { ...basis, design: { sourceScriptSha256: sha,
+    director: { visualStyle: '', tone: '', lightingRules: '', colorPalette: [], cameraGrammar: '', performanceRules: '', characterContinuityRules: '' },
+    assets: [{ kind: 'scene', name: scene.title, imagePrompt: 'Doorway', sceneLayout: { basis: 'Authored', coordinateFrame: 'x/y ground, z up',
+      objects: [{ id: 'door', label: 'Door', center: [0, 3, 1], size: [1, 0.1, 2], rotation: 0, color: '#884422' }] } }] } }
+  const text = JSON.stringify({ sourceScriptSha256: sha, sourceAssetStateSha256: current.stateSha256,
+    sceneIndex: 1, shots: candidateShots })
+  const port = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
+    read: vi.fn(async () => ({ lastSeq: 10, running: false, finished: true, text, script: text, error: '' })) }
+  const onAdopt = vi.fn()
+  render(<NativeSceneDesign projectId="p" episodeId="e" scene={scene} scriptSha256={sha}
+    readAssetDesign={vi.fn(async () => current)} storyPort={port} disabled={false} onAdopt={onAdopt} />)
+  const start = screen.getByRole<HTMLButtonElement>('button', { name: '让导演设计本场分镜' })
+  await waitFor(() => { expect(start.disabled).toBe(false) })
+  fireEvent.click(start)
+  fireEvent.click(await screen.findByRole('button', { name: '采用到分镜卡片' }))
+  if (mode === 'missing' || mode === 'invalid') {
+    await screen.findByText(/没有采用：/)
+    expect(onAdopt).not.toHaveBeenCalled()
+  } else await waitFor(() => { expect(onAdopt).toHaveBeenCalledExactlyOnceWith(candidateShots) })
 })
