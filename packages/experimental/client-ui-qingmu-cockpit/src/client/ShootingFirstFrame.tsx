@@ -230,10 +230,17 @@ export function ShootingFirstFrame({
       try {
         const saved = localStorage.getItem(key)
         if (saved !== null) {
-          const parsed = JSON.parse(saved) as { readonly preview: unknown; readonly requestId: string; readonly stage?: string }
+          const parsed = JSON.parse(saved) as {
+            readonly preview: unknown
+            readonly requestId: string
+            readonly stage?: string
+            readonly observedCandidateId?: unknown
+          }
           const prior = assertShootingPreview(parsed.preview, scope)
           if (parsed.requestId !== `shooting-${prior.preflightId}`) throw new Error('原提交记录不完整，禁止创建新任务')
           if (parsed.stage !== undefined && parsed.stage !== 'prepared' && parsed.stage !== 'submitted') throw new Error('原提交阶段不完整')
+          notified.current = typeof parsed.observedCandidateId === 'string'
+            ? `${parsed.requestId}:${parsed.observedCandidateId}` : ''
           setPreview(prior); setReferences(prior.referenceBindings ?? [])
           if (parsed.stage !== 'prepared') setRequestId(parsed.requestId); return
         }
@@ -258,8 +265,17 @@ export function ShootingFirstFrame({
         const value = assertAttempt(await request(`state?${query}`, undefined, controller.signal), scope, requestId)
         if (controller.signal.aborted) return
         setAttempt(value)
-        if (value.candidate && notified.current !== value.candidate.assetId) {
-          notified.current = value.candidate.assetId; await onCommitted?.()
+        if (value.candidate && notified.current !== `${requestId}:${value.candidate.assetId}`) {
+          notified.current = `${requestId}:${value.candidate.assetId}`
+          // Persist the display notification before parent refresh can remount
+          // this panel. Restoring a candidate is not another generation event.
+          try {
+            const saved = JSON.parse(localStorage.getItem(key) ?? 'null') as { requestId?: string } | null
+            if (saved?.requestId === requestId) {
+              localStorage.setItem(key, JSON.stringify({ ...saved, observedCandidateId: value.candidate.assetId }))
+            }
+          } catch { /* Keep the current view usable if browser storage becomes unavailable. */ }
+          await onCommitted?.()
         }
         // Materialization can precede quality completion. Keep reading the
         // same task until terminal so its recovery/rework actions stay current.

@@ -109,6 +109,30 @@ it('shows full prompt, submits once and restores by GET after remount', async ()
   expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/preview'))).toHaveLength(1)
   expect(screen.queryByRole('button',{ name:'采用这张' })).toBeNull()
 })
+it('notifies once per materialized request across remounts while still notifying a new request', async () => {
+  const key = `qingmu:shooting-first-frame:${scope.projectId}:${scope.episodeId}:${scope.frameId}`
+  localStorage.setItem(key, JSON.stringify({ preview, requestId:result.requestId }))
+  let current = result
+  const fetcher = vi.fn(async (path:string) => Response.json(path.includes('/review?') ? review : current))
+  vi.stubGlobal('fetch',fetcher)
+  const onCommitted = vi.fn(async () => undefined)
+  const first = render(<ShootingFirstFrame scope={scope} onCommitted={onCommitted} />)
+  await screen.findByAltText('镜头新首帧 · 待你定版')
+  await waitFor(() => expect(onCommitted).toHaveBeenCalledTimes(1))
+  first.unmount()
+  const restored = render(<ShootingFirstFrame scope={scope} onCommitted={onCommitted} />)
+  await screen.findByAltText('镜头新首帧 · 待你定版')
+  expect(onCommitted).toHaveBeenCalledTimes(1)
+  restored.unmount()
+  const next = { ...preview,preflightId:'e'.repeat(64) }
+  current = { ...result,requestId:`shooting-${next.preflightId}` }
+  localStorage.setItem(key, JSON.stringify({ preview:next,requestId:current.requestId }))
+  render(<ShootingFirstFrame scope={scope} onCommitted={onCommitted} />)
+  await screen.findByAltText('镜头新首帧 · 待你定版')
+  await waitFor(() => expect(onCommitted).toHaveBeenCalledTimes(2))
+  expect(fetcher.mock.calls.every(([path]) => path.includes('/state?') || path.includes('/review?'))).toBe(true)
+  expect(screen.queryByRole('button',{ name:'采用这张' })).toBeNull()
+})
 it('does not POST again after a lost submit response', async () => {
   localStorage.clear()
   const fetcher = vi.fn(async (path:string) => {

@@ -10,7 +10,7 @@ Native sessions can read task state through Host authentication, but browser ima
 
 ## Decision
 
-Writer signs the materialized candidate's media ID with its existing expiring media-access mechanism after checking project and task scope. The command adapter accepts only that relative media path with one expiry and signature, then resolves it against the configured Writer origin. Reading the same request renews the link without submitting another task.
+Writer signs the materialized candidate's media ID with its existing expiring media-access mechanism after checking project and task scope. The command adapter accepts only that relative media path with one expiry and signature, then resolves it against the configured Writer origin. Reading the same request renews the link without submitting another task. The cockpit records the candidate-display notification with that saved request before refreshing the parent; remounting restores the image without another refresh notification. A new request remains independently observable.
 
 ## Alternatives considered
 
