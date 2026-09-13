@@ -1,5 +1,5 @@
 /** Native AI writing produces a reviewable draft for the existing project text-import flow. */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { NativeStoryPort, StoryDraftResult } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft'
 import css from './NativeDirectorComposer.module.css'
 
@@ -57,6 +57,7 @@ export function NativeStoryComposer({ port, projectId, episodeId, source, settin
   const [result, setResult] = useState<StoryDraftResult>()
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
+  const editorId = useId()
   const mounted = useRef(true), lock = useRef(false)
   const editing = edited && request && result?.finished && !result.error
     && edited.sessionId === request.sessionId && edited.baseline === request.baseline && edited.resultSeq === result.lastSeq
@@ -141,8 +142,9 @@ export function NativeStoryComposer({ port, projectId, episodeId, source, settin
     {originalText && !editing && <button type="button" disabled={disabled || busy}
       onClick={() => { editCandidate(originalText) }}>编辑这份候选</button>}
     {editing && <div>
-      <label>候选正文<textarea rows={16} value={editing.text} disabled={disabled || busy}
-        onChange={(event) => { editCandidate(event.target.value) }} /></label>
+      <label htmlFor={editorId}>候选正文</label>
+      <textarea id={editorId} rows={16} value={editing.text} disabled={disabled || busy}
+        onChange={(event) => { editCandidate(event.target.value) }} />
       <p>这是本机编辑稿，原生生成结果仍保留。采用时继续核对来源和内容，尚未保存到项目。</p>
       <button type="button" disabled={disabled || busy} onClick={() => { localStorage.removeItem(`${key}:edited`); setEdited(undefined) }}>恢复原生候选</button>
     </div>}

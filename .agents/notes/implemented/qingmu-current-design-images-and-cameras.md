@@ -9,3 +9,5 @@ Focused assembled-tool tests cover exact, stale and missing references with no b
 Initial scene design uses the same camera guidance and validation as existing-scene coordination. Completed new-scene revisions also start from fresh current sources, while interrupted work retains its recovery session. Missing cameras cannot enter new shot cards silently; explicit opt-out remains available.
 
 Completed candidates also retain local edits against the exact native result identity. This lets the same screenplay, asset and scene workflow revise a reviewed draft without repeated model calls. Original output and source checks remain intact.
+
+The live browser recovered a 23,434-character edited scene candidate without writes or model requests. Its textarea uses an explicit separate label so the candidate body does not become part of the accessible control name.
