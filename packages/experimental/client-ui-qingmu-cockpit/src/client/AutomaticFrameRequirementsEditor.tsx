@@ -10,6 +10,7 @@ interface Draft {
   readonly cameraAngle?: string
   readonly cameraMovement?: string
   readonly coveragePlan?: string
+  readonly editorialContext?: string
   readonly continuityStart?: string
   readonly continuityEnd?: string
   readonly pending?: ScenePlanningRequest
@@ -37,6 +38,7 @@ function stored(keyName: string): Draft | null { try { const value = JSON.parse(
 function pendingContinuityMatches(draft: Draft): boolean {
   const operation = draft.pending?.request
   if (operation?.action !== 'edit_automatic' && operation?.action !== 'edit_requirements') return false
+  if (draft.editorialContext !== undefined && operation.directorPlan?.editorialContext !== draft.editorialContext) return false
   const value = operation.directorPlan?.continuity
   return continuityKeys.every(field => draft[field] === undefined || (value !== null && typeof value === 'object'
     && !Array.isArray(value) && (value as Record<string, unknown>)[boundary[field]] === draft[field]))
@@ -76,6 +78,7 @@ export function AutomaticFrameRequirementsEditor({
         const local = stored(storageKey)
         setDraft(local?.shotId === shotId && local.imagePromptCn.length <= 20000
           && shootingFields.every(field => local[field] === undefined || (typeof local[field] === 'string' && local[field].length <= 2000))
+          && (local.editorialContext === undefined || (typeof local.editorialContext === 'string' && local.editorialContext.length <= 12000))
           && continuityKeys.every(field => local[field] === undefined || (typeof local[field] === 'string' && local[field].length <= 12000))
           && (local.pending === undefined || (pendingValid(local.pending, projectId, episodeId, shotId)
             && local.imagePromptCn === local.pending.request.imagePromptCn
@@ -112,6 +115,14 @@ export function AutomaticFrameRequirementsEditor({
     try {
       if (recover && !pendingValid(draft.pending, projectId, episodeId, shotId)) throw new Error('pending scope mismatch')
       if (!recover && draft.pending !== undefined) throw new Error('recover existing receipt first')
+      const directorPlan = {
+        ...(continuityKeys.some(field => draft[field] !== undefined) ? { continuity: {
+          ...continuityFields(requirements(state)?.find(shot => shot.id === shotId)),
+          ...(draft.continuityStart === undefined ? {} : { start: draft.continuityStart }),
+          ...(draft.continuityEnd === undefined ? {} : { end: draft.continuityEnd }),
+        } } : {}),
+        ...(draft.editorialContext === undefined ? {} : { editorialContext: draft.editorialContext }),
+      }
       const pending = draft.pending ?? { projectId, episodeId, idempotencyKey: crypto.randomUUID(), request: {
         action: state.canonicalStoryboard ? 'edit_automatic' : 'edit_requirements', expectedScriptRevision: state.scriptRevision, expectedScriptSha256: state.scriptSha256,
         expectedStoryboardRevision: canonical.version, expectedStoryboardSha256: canonical.sourceHash,
@@ -120,11 +131,7 @@ export function AutomaticFrameRequirementsEditor({
         ...(draft.cameraAngle !== undefined && draft.cameraAngle !== savedField('cameraAngle') ? { cameraAngle: draft.cameraAngle } : {}),
         ...(draft.cameraMovement !== undefined && draft.cameraMovement !== savedField('cameraMovement') ? { cameraMovement: draft.cameraMovement } : {}),
         ...(draft.coveragePlan !== undefined && draft.coveragePlan !== savedField('coveragePlan') ? { coveragePlan: draft.coveragePlan } : {}),
-        ...(continuityKeys.some(field => draft[field] !== undefined) ? { directorPlan: { continuity: {
-          ...continuityFields(requirements(state)?.find(shot => shot.id === shotId)),
-          ...(draft.continuityStart === undefined ? {} : { start: draft.continuityStart }),
-          ...(draft.continuityEnd === undefined ? {} : { end: draft.continuityEnd }),
-        } } } : {}),
+        ...(Object.keys(directorPlan).length ? { directorPlan } : {}),
       } satisfies FrameRequirementsOperation }
       update({ ...draft, pending })
       const result = recover ? await recoverSave(pending) : await save(pending)
@@ -183,7 +190,8 @@ export function AutomaticFrameRequirementsEditor({
   function savedField(field: ShootingField): string { return requirements(state)?.find(shot => shot.id === shotId)?.[field] ?? '' }
   const continuity = continuityFields(saved)
   const dirty = saved !== undefined && (draft.imagePromptCn !== saved.imagePromptCn || shootingFields.some(field => (draft[field] ?? '') !== savedField(field))
-    || continuityKeys.some(field => draft[field] !== undefined && draft[field] !== continuityText(continuity[boundary[field]])))
+    || continuityKeys.some(field => draft[field] !== undefined && draft[field] !== continuityText(continuity[boundary[field]]))
+    || (draft.editorialContext !== undefined && draft.editorialContext !== continuityText(saved.directorPlan?.editorialContext)))
   return <section aria-label="编辑当前要求">
     <ShotContinuityView state={state} shotId={shotId} onSelectShot={onSelectShot} />
     <fieldset disabled={busy || draft.pending !== undefined}>
@@ -202,7 +210,11 @@ export function AutomaticFrameRequirementsEditor({
         maxLength={2000} value={draft[field] ?? ''} disabled={busy || draft.pending !== undefined}
         onChange={event => update({ ...draft, [field]: event.target.value })} />
     </label>)}
-    <p>摄影机运动描述镜头如何移动；景别、焦点与切点描述观众何时看什么。保存后随本镜进入参考视频预览与生成请求。</p>
+    <p>摄影机运动描述镜头如何移动；景别、焦点与切点描述本段内观众何时看什么，可包含多个切镜。保存后随本镜进入参考视频预览与生成请求。</p>
+    <label>前后段剪辑衔接<textarea aria-label="前后段剪辑衔接" rows={3} maxLength={12000}
+      value={draft.editorialContext ?? continuityText(saved?.directorPlan?.editorialContext)} disabled={busy || draft.pending !== undefined}
+      onChange={event => update({ ...draft, editorialContext: event.target.value })} /></label>
+    <p>接到前后段的画面、声桥和重叠覆盖写在这里，保存后在成片剪辑读取，不作为本段视频内容。旧稿由导演明确区分，不按关键词删改。</p>
     <label>画面要求<textarea aria-label="画面要求" rows={7} maxLength={20000} value={draft.imagePromptCn}
       disabled={busy || draft.pending !== undefined} onChange={event => update({ ...draft, imagePromptCn: event.target.value })} /></label>
     {plannedVisual?.trim() && plannedVisual !== draft.imagePromptCn && <details>
@@ -215,13 +227,15 @@ export function AutomaticFrameRequirementsEditor({
     <p role="status">{draft.pending ? '正在核实上次保存，草稿已保留。' : dirty ? '有未保存修改 · 已保留在此浏览器' : saved?.imagePromptCn.trim() ? '当前要求已保存' : '补充本镜的首帧画面要求并保存，随后可预检生成。'}</p>
     {error && <p role="alert">{error}</p>}
     {(dirty || busy) && !draft.pending && <button type="button"
-      disabled={busy || (!draft.imagePromptCn.trim() && !continuityKeys.some(field => draft[field] !== undefined))}
+      disabled={busy || (!draft.imagePromptCn.trim()
+        && !continuityKeys.some(field => draft[field] !== undefined) && draft.editorialContext === undefined)}
       onClick={() => { void save(false) }}>{busy ? '正在保存…' : '保存当前要求'}</button>}
     {draft.pending && <button type="button" disabled={busy} onClick={() => { void save(true) }}>查看原保存结果</button>}
     {draft.pending && rebaseState && <div>
       <p>本镜最新已保存要求：{requirements(rebaseState)?.find(shot => shot.id === shotId)?.imagePromptCn || '尚未填写'}</p>
       <p>最新动作：{requirements(rebaseState)?.find(shot => shot.id === shotId)?.blocking || '未设置'} · 最新机位：{requirements(rebaseState)?.find(shot => shot.id === shotId)?.cameraAngle || '未设置'}</p>
       <p>最新摄影机运动：{requirements(rebaseState)?.find(shot => shot.id === shotId)?.cameraMovement || '未设置'} · 最新景别与切点：{requirements(rebaseState)?.find(shot => shot.id === shotId)?.coveragePlan || '未设置'}</p>
+      <p>最新前后段衔接：{continuityText(requirements(rebaseState)?.find(shot => shot.id === shotId)?.directorPlan?.editorialContext) || '尚未设计'}</p>
       <p>最新开始状态：{continuityText(continuityFields(requirements(rebaseState)?.find(shot => shot.id === shotId)).start) || '尚未设计'}</p>
       <p>最新结束状态：{continuityText(continuityFields(requirements(rebaseState)?.find(shot => shot.id === shotId)).end) || '尚未设计'}</p>
       <button type="button" disabled={busy} onClick={() => {
@@ -230,6 +244,7 @@ export function AutomaticFrameRequirementsEditor({
           ...(draft.cameraAngle !== undefined ? { cameraAngle: draft.cameraAngle } : {}),
           ...(draft.cameraMovement !== undefined ? { cameraMovement: draft.cameraMovement } : {}),
           ...(draft.coveragePlan !== undefined ? { coveragePlan: draft.coveragePlan } : {}),
+          ...(draft.editorialContext !== undefined ? { editorialContext: draft.editorialContext } : {}),
           ...(draft.continuityStart !== undefined ? { continuityStart: draft.continuityStart } : {}),
           ...(draft.continuityEnd !== undefined ? { continuityEnd: draft.continuityEnd } : {}),
         }
