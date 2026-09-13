@@ -167,14 +167,15 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
           <details><summary>原片声音</summary>
             <label>声音内容 <select aria-label={`镜 ${index + 1} 声音内容`} value={clip.sourceAudioMode ?? 'original'} disabled={locked} onChange={(e) => {
               const mode = e.target.value
-              if (mode === 'original' || mode === 'speech_effects' || mode === 'speech') update(index, { ...clip, sourceAudioMode: mode })
+              if (mode === 'original' || mode === 'silent' || mode === 'speech_effects' || mode === 'speech') update(index, { ...clip, sourceAudioMode: mode })
             }}>
               <option value="original">保留原声</option>
+              <option value="silent">不使用镜头原声（另铺声音）</option>
               <option value="speech_effects" disabled={!state.audioSeparation?.available}>提取对白与环境声，去除原配乐</option>
               <option value="speech" disabled={!state.audioSeparation?.available}>提取对白</option>
             </select></label>
             <label>音量 dB <input aria-label={`镜 ${index + 1} 原音音量 dB`} type="number" min="-60" max="6" step="1" value={clip.sourceGainDb ?? 0} disabled={locked} onChange={(e) => { update(index, { ...clip, sourceGainDb: Number(e.target.value) }) }} /></label>
-            {(clip.sourceAudioMode ?? 'original') === 'original'
+            {clip.sourceAudioMode === 'silent' ? <p>只保留画面；整片对白、环境和配乐可在下方独立铺设。</p> : (clip.sourceAudioMode ?? 'original') === 'original'
               ? <p>音量会同时影响原片中的对白、环境声和音乐。</p>
               : <p>导出时在本机分离，不产生模型调用费用。首次处理需要数分钟，同一素材会复用结果。分离可能损失声音细节，请试听成片；可切回原声。全片配乐在下方独立铺设。</p>}
             {!state.audioSeparation?.available && <p>本机声音分离组件尚未就绪，保留原声仍可导出。</p>}

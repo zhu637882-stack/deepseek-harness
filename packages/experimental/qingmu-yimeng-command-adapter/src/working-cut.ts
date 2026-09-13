@@ -10,8 +10,8 @@ export interface WorkingClip {
   readonly inSec: number
   readonly outSec: number
   readonly sourceGainDb?: number
-  /** Local source separation before trim/mix. Omission preserves original audio and retry bodies. */
-  readonly sourceAudioMode?: 'original' | 'speech_effects' | 'speech'
+  /** Local source separation before trim/mix, or silent picture audio. Omission preserves original audio and retry bodies. */
+  readonly sourceAudioMode?: 'original' | 'silent' | 'speech_effects' | 'speech'
   /** Static source crop; zoom 1..4, x/y 0..1 across available crop travel. */
   readonly reframe?: { readonly zoom: number; readonly x: number; readonly y: number }
 }

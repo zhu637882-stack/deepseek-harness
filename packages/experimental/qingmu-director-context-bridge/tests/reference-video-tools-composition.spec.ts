@@ -842,7 +842,7 @@ it('imports a room response through the native loop in the bound episode without
 })
 
 it('saves scene-spanning sound through the shipped director preset, real loop and command adapter', async () => {
-  const cut = { clips:[{ frameId:'f',assetId:'video',sha256:'a'.repeat(64),inSec:0,outSec:15 }],
+  const cut = { clips:[{ frameId:'f',assetId:'video',sha256:'a'.repeat(64),inSec:0,outSec:15,sourceAudioMode:'silent' }],
     audioCues:[{ assetId:'room',sha256:'b'.repeat(64),kind:'ambience',startSec:0,inSec:0,outSec:14,gainDb:-18,fadeInSec:1,fadeOutSec:2,
       sourceAudioMode:'effects', space:{ assetId:'room-ir',sha256:'c'.repeat(64),wetDb:-12,tailSec:1 },
       gainPoints:[{ timeSec:2,gainDb:0 },{ timeSec:3,gainDb:-6 },{ timeSec:8,gainDb:-6 },{ timeSec:10,gainDb:0 }] }],

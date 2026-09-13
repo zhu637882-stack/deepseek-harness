@@ -45,7 +45,7 @@ export function WorkingCutSound({ library, presets = [], cues, total, disabled, 
     </details>}
     {error && <p role="alert">{error}</p>}
     <details><summary>使用已生成视频的声音</summary>
-      <p>把本集视频的声音单独铺到成片上，画面切换时不会从头播放。先试听原声，加入后可选择提取对白、环境与拟音或音乐。无声视频无法提取声音。</p>
+      <p>可选本集单镜头或已导出的整片版本，把声音独立铺到时间线上，画面切换时不会从头播放。先试听原声，加入后可选择提取对白、环境与拟音或音乐。无声视频无法提取声音。</p>
       {library.filter(source => source.usage === 'video_audio').map(source => <div className={css.source} key={source.assetId}>
         <span>{source.name} · {source.duration.toFixed(1)} 秒</span>
         <audio aria-label={`试听 ${source.name}`} controls preload="none" src={source.url} />

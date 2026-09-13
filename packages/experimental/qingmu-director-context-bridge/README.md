@@ -1,6 +1,6 @@
 # Qingmu director context bridge
 
-The native director can retain an episode video sound source in an independent working-cut cue, including local stem selection. Reading the cut supplies scoped videoAudioSources; saving uses the existing receipt and exact source hashes. The director chooses timing and handles duplicate source audio, separation artifacts and continuous scene sound through actual audition.
+The native director can retain an episode video or rendered-cut sound source in an independent working-cut cue, including local stem selection. Reading the cut supplies scoped videoAudioSources; saving uses the existing receipt and exact source hashes. The director chooses timing and handles duplicate source audio, separation artifacts and continuous scene sound through actual audition.
 
 `qingmu_preview_scene_layout` renders authored scene volumes and a camera within the current creative request or bound episode. It delivers a verified PNG through the existing attachment/vision path, with visible-box bounds and source limitations in the durable tool result. The director saves chosen geometry through the ordinary asset design as `sceneLayout` and `imageCamera`; image generation includes the composition reference. Reusing fixed volumes while changing camera does not certify that the generator follows them. Direct-image inspection adds one image input without a model call; a configured text-only observer uses its normal model allowance.
 
@@ -141,7 +141,7 @@ Bundled bedroom, coffee-shop and hallway responses are listed by the working-cut
 
 Image catalogs identify retained source designs without expanding their full text. Inspecting an image returns its complete original design alongside the pixels. The director compares that historical intent with visible evidence and the current script; discrepancies and unseen regions remain explicit. Reading an image cannot silently update its source or select a candidate.
 
-The working-cut tools expose local source-audio separation availability. A director may explicitly select sourceAudioMode original, speech_effects or speech per clip, while music and ambience cues retain whole-film timing. Saving does not run inference; rendering processes and caches the original source locally. The director must distinguish separation from volume reduction and audition for dialogue or ambience damage.
+The working-cut tools expose local source-audio separation availability. A director may explicitly select sourceAudioMode original, silent, speech_effects or speech per clip, while music and ambience cues retain whole-film timing. Saving does not run inference; rendering processes and caches the original source locally. Silent excludes picture audio without inference; frozen cut sources require checking alignment after picture edits. The director must distinguish separation from volume reduction and audition for dialogue or ambience damage.
 
 The existing reference-draft tools accept explicit first/last image roles. The director chooses a composed shot image when its starting layout matters, or multimodal references when separate identity and voice inputs matter. Frame mode cannot mix voice references, though native dialogue and ambience remain available. Tools save the same editable draft as the page; they neither generate media nor assert visual compliance.
 

@@ -41,8 +41,8 @@ it('uses video audio independently and retains chosen component and film timing 
   expect(port.renderWorkingCut).not.toHaveBeenCalled()
   expect(port.uploadWorkingCutAudio).not.toHaveBeenCalled()
 })
-it('retains source separation on reopen and restores original sound without generating', async () => {
-  let server: WorkingCutState = { ...state, audioSeparation: { available: true, model: 'Bandit v2', providerCalls: 0 } }
+it.each(['speech_effects', 'silent'] as const)('retains %s on reopen and restores original sound without generating', async (mode) => {
+  let server: WorkingCutState = { ...state, audioSeparation: { available: mode !== 'silent', model: 'Bandit v2', providerCalls: 0 } }
   const save = vi.fn(async ({ command }: { command: WorkingCutCommand }) => {
     server = { ...server, revision: server.revision + 1, cuts: [{ ...command, version: server.revision + 1,
       revisionId: 'revision', taskId: null, status: 'NotQueued', errorCode: null, assetId: null, sha256: null, url: '' }] }
@@ -57,13 +57,13 @@ it('retains source separation on reopen and restores original sound without gene
   }
   let view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
   expect(await openSound()).toHaveProperty('value', 'original')
-  fireEvent.change(screen.getByRole('combobox', { name: '镜 1 声音内容' }), { target: { value: 'speech_effects' } })
+  fireEvent.change(screen.getByRole('combobox', { name: '镜 1 声音内容' }), { target: { value: mode } })
   fireEvent.click(screen.getByRole('button', { name: '保存剪辑草稿' }))
   await waitFor(() => { expect(save).toHaveBeenCalledTimes(1) })
-  expect(save.mock.calls[0]?.[0].command.clips[0]?.sourceAudioMode).toBe('speech_effects')
+  expect(save.mock.calls[0]?.[0].command.clips[0]?.sourceAudioMode).toBe(mode)
   view.unmount()
   view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
-  expect(await openSound()).toHaveProperty('value', 'speech_effects')
+  expect(await openSound()).toHaveProperty('value', mode)
   fireEvent.change(screen.getByRole('combobox', { name: '镜 1 声音内容' }), { target: { value: 'original' } })
   fireEvent.click(screen.getByRole('button', { name: '保存剪辑草稿' }))
   await waitFor(() => { expect(save).toHaveBeenCalledTimes(2) })
@@ -75,6 +75,7 @@ it('retains source separation on reopen and restores original sound without gene
   await openSound()
   expect(screen.getByRole('option', { name: '提取对白与环境声，去除原配乐' })).toHaveProperty('disabled', true)
   expect(screen.getByRole('option', { name: '保留原声' })).toHaveProperty('disabled', false)
+  expect(screen.getByRole('option', { name: '不使用镜头原声（另铺声音）' })).toHaveProperty('disabled', false)
 })
 it('reviews the exact rendered version, preserves edits and recovers timed findings on reopen', async () => {
   const clip = { frameId: 'f', assetId: 'a', sha256: 'a'.repeat(64), inSec: 0, outSec: 15 }

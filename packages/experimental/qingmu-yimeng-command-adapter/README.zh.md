@@ -1,6 +1,6 @@
 # 青木易梦命令适配器
 
-工作剪辑读取将 videoAudioSources 与导入的 audioLibrary 分开返回。独立音轨可引用任一清单中的准确素材编号与哈希，并接受可选 sourceAudioMode original/speech_effects/speech/effects/music。省略时保留旧音轨请求。Writer 核验集数范围、候选可用性与来源字节，分离音轨复用现有本机合成任务。
+工作剪辑读取将已完成镜头及已导出成片版本放入 videoAudioSources，与导入的 audioLibrary 分开返回。独立音轨可引用任一清单中的准确素材编号与哈希，并接受可选 sourceAudioMode original/speech_effects/speech/effects/music。省略时保留旧音轨请求。Writer 核验集数范围、候选可用性与来源字节，分离音轨复用现有本机合成任务。
 
 `previewSceneLayout` 根据当前项目和集调用本地素材设计预览接口，接收有界的布局、摄影机及明确画幅，PNG 返回值不允许外部网址。场景素材保存 `sceneLayout`，逐图可启用 `imageCamera`。旧客户端省略字段时保留原值，显式 null 清除选择。报价包含准确渲染的构图参考并计入模型引用上限；布局改变使未提交报价失效。
 
@@ -200,4 +200,4 @@ ChangeSet 提案不等于提交。Client 必须展示返回的预览，并且只
 
 逐镜剪辑支持可选 `reframe: {zoom, x, y}` 静态取景：放大倍数1–4，x/y在可移动范围内从左/上0到右/下1，0.5居中。省略时保留原画面。网页“画面取景”可预览、保存、重开与恢复原画面；本地导出按相同偶数像素取整裁切，再缩放到成片尺寸。原视频、时长和原音不变；放大减少保留像素，不能证明被裁去的空间或道具结构正确。
 
-WorkingClip.sourceAudioMode 可选 original、speech_effects 或 speech。省略时保留原声，不改写既有重试内容。WorkingCutState.audioSeparation 返回本机组件是否就绪。组件缺失时可保存草稿，渲染在入队前拒绝无法执行的分离；重复的已完成请求恢复同一剪辑。
+WorkingClip.sourceAudioMode 可选 original、silent、speech_effects 或 speech。silent 关闭画面原声，无需分离组件；独立音轨不接受 silent。省略时保留原声，不改写既有重试内容。WorkingCutState.audioSeparation 返回本机组件是否就绪。组件缺失时可保存草稿，渲染在入队前拒绝无法执行的分离；重复的已完成请求恢复同一剪辑。

@@ -1,6 +1,6 @@
 # Qingmu Yimeng command adapter
 
-Working-cut reads expose videoAudioSources separately from imported audioLibrary. Audio cues accept optional sourceAudioMode original/speech_effects/speech/effects/music and exact source IDs and hashes from either list. Omission preserves existing cue bodies. Writer validates episode scope, candidate availability and source bytes; separated cues use the existing local render task.
+Working-cut reads expose completed shot videos and rendered cut versions in videoAudioSources separately from imported audioLibrary. Audio cues accept optional sourceAudioMode original/speech_effects/speech/effects/music and exact source IDs and hashes from either list. Omission preserves existing cue bodies. Writer validates episode scope, candidate availability and source bytes; separated cues use the existing local render task.
 
 `previewSceneLayout` resolves the current project and episode to the local asset-design preview endpoint. It accepts bounded authored layout/camera data and an explicit ratio; its PNG result cannot supply an external URL. Scene assets persist `sceneLayout`, while each staged asset can enable `imageCamera`. Omitted fields preserve older clients and explicit null clears the choice. Quotations include the exact rendered composition reference and count it against the model image limit; a layout change invalidates an unsent quotation.
 
@@ -224,4 +224,4 @@ Independent cues can retain `space: {assetId, sha256, wetDb, tailSec}` for a sam
 
 `reviewWorkingCutSound` submits an exact rendered asset, SHA and timeline revision to the owner-scoped working-cut sound-review API. `readWorkingCut` returns recoverable per-version sound observations; reads make no provider calls. Writer uses the existing audit queue, budget and dispatch verification, and never changes an edit or media selection.
 
-WorkingClip.sourceAudioMode optionally selects original, speech_effects or speech. Omission preserves original audio and unchanged retry bodies. WorkingCutState.audioSeparation reports local component availability. A saved draft may retain a mode while the component is unavailable, but rendering refuses unavailable processing before queueing. Repeated completed requests recover the same cut.
+WorkingClip.sourceAudioMode optionally selects original, silent, speech_effects or speech. Silent excludes picture audio without requiring a separator; independent cues do not accept silent. Omission preserves original audio and unchanged retry bodies. WorkingCutState.audioSeparation reports local component availability. A saved draft may retain a mode while the component is unavailable, but rendering refuses unavailable processing before queueing. Repeated completed requests recover the same cut.
