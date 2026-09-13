@@ -663,6 +663,47 @@ it('saves a full director plan through the native preset and Writer adapter, the
     new URL(url instanceof Request ? url.url : url).pathname.endsWith('/scene-planning/commands'))).toHaveLength(1)
 })
 
+it.each(['current', 'missing', 'changed', 'unavailable'])(
+  'requires the actual current film source before saving segment context (%s)', async (state) => {
+    const upstream = writer()
+    const source = { sha256: '4'.repeat(64), prompt: '当前共享场景：门在端墙、窗与门垂直，柜台位于中央。两位人物；年代例外按剧本保留。', generationPrompt: '本镜执行设计。' }
+    upstream.setDirectorSource(source)
+    const fetch = upstream.fetch.getMockImplementation()!
+    let sourceReads = 0
+    upstream.fetch.mockImplementation(async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : input)
+      if (url.pathname.endsWith('/reference-video/drafts/f') && init?.method !== 'POST') {
+        sourceReads++
+        if (sourceReads === 2 && state === 'changed') upstream.setDirectorSource({ ...source, sha256: '5'.repeat(64), prompt: '当前场景已修订，不能保存旧理解。' })
+        if (sourceReads === 2 && state === 'unavailable') return Response.json({ detail: 'Source unavailable' }, { status: 503 })
+      }
+      return fetch(input, init)
+    })
+    const plan = { ...design, generationContext: source.prompt }
+    const adapter = new MockAdapter([
+      toolCallResponse('plan', 'qingmu_read_director_plan', {}),
+      ...(state === 'missing' ? [] : [toolCallResponse('film', 'qingmu_read_reference_draft', { page: 1 })]),
+      toolCallResponse('save', 'qingmu_save_director_plan', { receiptId: designReceipt, directorPlan: plan }),
+      textResponse('核对完成，未生成。'),
+    ])
+    const h = await harness(adapter, upstream); await h.run(true)
+    const read = JSON.parse(result(h.agent, 'plan').text)
+    expect(read.filmSource).toMatchSnapshot()
+    if (state !== 'missing') {
+      expect(result(h.agent, 'film').error, result(h.agent, 'film').text).toBe(false)
+      expect(JSON.parse(result(h.agent, 'film').text).saved.directorSource).toEqual(source)
+      expect(JSON.stringify(adapter.requests.at(-1)?.messages)).toContain(source.prompt)
+    }
+    const saved = result(h.agent, 'save')
+    expect(saved.error, saved.text).toBe(state !== 'current')
+    expect(upstream.director()).toEqual(state === 'current' ? plan : {})
+    const writes = upstream.fetch.mock.calls.filter(([input]) => new URL(input instanceof Request ? input.url : input).pathname.endsWith('/scene-planning/commands'))
+    expect(writes).toHaveLength(state === 'current' ? 1 : 0)
+    if (state === 'missing' || state === 'changed') expect(saved.text).toContain('qingmu_read_reference_draft')
+    if (state === 'unavailable') expect(saved.text).toContain('全片导演来源无法核实')
+  },
+)
+
 it.each([undefined, '门内平视，来客停在门边。', ''])(
   'saves an explicit starting still (%s) with direction, or preserves it when omitted', async (imagePromptCn) => {
     const plan = { ...design, editorialContext: { transitionOut: '下段转到窗外，雨声跨越切点' }, visual: '来客在门边站定，与屋内听者对视；其余调度沿用。' }
@@ -725,15 +766,18 @@ it('saves a selected design from an episode larger than the real inline result l
 
 it('recovers an uncertain director save with the identical command and never posts twice', async () => {
   const upstream = writer(); upstream.loseSaveResponse()
-  const args = { receiptId: designReceipt, directorPlan: design, imagePromptCn: '断线后恢复同一画面描述。' }
+  upstream.setDirectorSource({ sha256: '4'.repeat(64), prompt: '当前完整全片来源。' })
+  const recoveredPlan = { ...design, generationContext: '本镜按当前全片来源设计。' }
+  const args = { receiptId: designReceipt, directorPlan: recoveredPlan, imagePromptCn: '断线后恢复同一画面描述。' }
   const adapter = new MockAdapter([toolCallResponse('design-read', 'qingmu_read_director_plan', {}),
+    toolCallResponse('film-read', 'qingmu_read_reference_draft', { page: 1 }),
     toolCallResponse('design-save', 'qingmu_save_director_plan', args),
     toolCallResponse('design-recover', 'qingmu_save_director_plan', args), textResponse('已恢复保存回执。')])
   const h = await harness(adapter, upstream); await h.run(true)
   expect(result(h.agent, 'design-save').error).toBe(true)
   expect(result(h.agent, 'design-recover').error, result(h.agent, 'design-recover').text).toBe(false)
   expect(JSON.parse(result(h.agent, 'design-recover').text)).toMatchObject({ result: { recovered: true } })
-  expect(h.upstream.director()).toEqual(design)
+  expect(h.upstream.director()).toEqual(recoveredPlan)
   expect(h.upstream.fetch.mock.calls.filter(([url]) =>
     new URL(url instanceof Request ? url.url : url).pathname.endsWith('/scene-planning/commands'))).toHaveLength(1)
 })

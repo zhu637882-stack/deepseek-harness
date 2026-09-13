@@ -3,6 +3,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { JsonValue, Session } from '@deepseek-ai/dsh-session'
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { DirectorContextSnapshot, ScenePlanningState, ScenePlanningResult, WorkingCutState, YimengCommandJsonObject } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import type { ReferenceVideoDraftResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter'
 import { digest, retainNativeToolReceipt, toolValues } from './native-draft.ts'
 import { assertNativeTurnTarget } from './native-prompt-target.ts'
@@ -124,7 +125,7 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
   }))
   ctx.tools.register(defineTool({
     name: 'qingmu_read_director_plan',
-    description: 'Read the complete saved director plan for the selected shot, canonical script and planning revisions. Use these current facts with the creative skills. All creative fields are available, including unfamiliar method output. No generation or approval.',
+    description: 'Read the complete saved director plan for the selected shot, canonical script and planning revisions. Full film, world and asset designs are supplied separately by qingmu_read_reference_draft in saved.directorSource.prompt; read that current source before authoring generationContext. Session history is not the current film design. All selected-shot creative fields are available, including unfamiliar method output. No generation or approval.',
     parameters: {}, output,
     presentCall: () => ({ card: 'generic', kind: 'read', title: '读取完整导演设计' }),
     async execute(_args, exec) {
@@ -147,6 +148,8 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
             frameRequirements: [selectedShot] },
           episodeContinuity: planning.frameRequirements?.map(shot => ({ shotId: shot.id, frameNo: shot.frameNo,
             title: shot.title, continuity: shot.directorPlan?.continuity ?? null })),
+          filmSource: { tool: 'qingmu_read_reference_draft', arguments: { page: 1 }, field: 'saved.directorSource.prompt',
+            guidance: 'This shot read does not include the complete film bible or current asset/world designs. Read the named current source before authoring generationContext; never fill missing facts from older session descriptions. Reconcile its current shared layout, participants, prop states and script exceptions with this shot. State a real source conflict explicitly instead of merging incompatible versions. After saving, read back the actual production prompt and check semantics, including participant count and action state, not only field presence.' },
           coverage: 'Complete selected-shot design and bound script, cast, scene, style and adjacent-shot context. Episode continuity lists saved start/end states in storyboard order, not observed media. Compare adjoining states and explain intended cuts, time jumps and action ellipses from the script; do not force unrelated scenes to share a state. Save only the selected shot; other changes need their own shot selection. Other full planning copies are retained in the session receipt, not repeated here.',
         }))
     },
@@ -188,6 +191,18 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
         const current = await ports.readBoundContext(exec)
         assertCurrent(current, exec)
         if (current.context.contextSnapshotSha256 !== input.context.contextSnapshotSha256) throw new Error('导演设计来源已变化，请重新读取并合并修改。')
+        if (typeof args.directorPlan.generationContext === 'string' && args.directorPlan.generationContext.trim()) {
+          const fullRead = toolValues(session, 'qingmu_read_reference_draft').findLast((value) => {
+            const read = value as { scope?: unknown; saved?: ReferenceVideoDraftResponse } | null
+            return read?.saved?.directorSource && read.scope && digest(read.scope) === digest(scope)
+          }) as { saved: ReferenceVideoDraftResponse } | undefined
+          if (!fullRead) throw new Error('编写本镜继承设定前，请用 qingmu_read_reference_draft 读取 saved.directorSource.prompt 中当前完整的全片、世界与资产设计；镜头设计读取和会话旧描述不能替代它。')
+          const sourceRead = await ctx.qingmuYimengRead('referenceVideoDraft', { projectId: scope.projectId, frameId: scope.shotId }, exec.signal)
+          assertCurrent(current, exec)
+          if (!sourceRead.ok) throw new Error(`全片导演来源无法核实，未保存：${sourceRead.error.message}`)
+          const source = (sourceRead.value as ReferenceVideoDraftResponse).directorSource
+          if (!source || digest(source) !== digest(fullRead.saved.directorSource)) throw new Error('全片、世界或资产设计已变化，请重新读取 qingmu_read_reference_draft，并按当前来源整理 generationContext。')
+        }
         const saved = await ctx.qingmuYimengCommand('saveScenePlanning', coordinates, exec.signal)
         if (!saved.ok) throw new Error(`未确认保存结果，请保留相同内容重试：${saved.error.message}`)
         result = saved.value as ScenePlanningResult
