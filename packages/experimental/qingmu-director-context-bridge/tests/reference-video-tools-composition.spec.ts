@@ -30,6 +30,7 @@ import SpillLocal from '@deepseek-ai/dsh-spill-local'
 import { createYimengReadHandler } from '../../qingmu-yimeng-read-adapter/src/index.ts'
 import { createYimengCommandHandler } from '../../qingmu-yimeng-command-adapter/src/index.ts'
 import { canonical, request, response, runResponse, savedDraft, videoReferenceFixture } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
+import { takeCommentFeed } from '../../qingmu-yimeng-read-adapter/tests/take-comment-fixture.ts'
 import { MockAdapter as BaseMockAdapter, textResponse, toolCallResponse, maxTokensResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import * as ModelTools from '../src/model-tools.ts'
 import { readNativeDirectorReadiness } from '../src/native-readiness.ts'
@@ -999,6 +1000,66 @@ function capturedVideoRun(runId = 'refvideo_previous', assetSha256 = 'a'.repeat(
 function capturedVideoRuns(items = [capturedVideoRun()]) {
   return { schema: 'jason.reference-video-runs.v1', projectId: 'p', frameId: 'previous', items, providerCalls: 0 }
 }
+
+it('delivers complete paged review comments with exact video bindings to the director without author credentials or writes', async () => {
+  const upstream = writer(), original = upstream.fetch.getMockImplementation()!
+  const feed = takeCommentFeed({ projectId: 'p', episodeId: 'episode-a', frameId: 'previous' })
+  const comments = Array.from({ length: 6 }, (_, i) => ({ ...feed.comments[0]!, id: `note-${i}`, eventId: `note-event-${i}`,
+    body: `Visible state at the recorded time ${i}: ` + 'retain the full observation. '.repeat(60),
+    createdAt: `2026-09-13T05:00:0${i}Z` }))
+  const fullFeed = { ...feed, comments: [...comments, feed.comments[1]!] }
+  upstream.fetch.mockImplementation(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input)
+    if (url.pathname.endsWith('/runs')) return Response.json(capturedVideoRuns([capturedVideoRun('refvideo_previous', '2'.repeat(64))]))
+    if (url.pathname.endsWith('/take-comments')) return Response.json(fullFeed)
+    return original(input, init)
+  })
+  const adapter = new MockAdapter([
+    toolCallResponse('notes-1', 'qingmu_read_reference_video_candidates', { sourceFrameId: 'previous' }),
+    toolCallResponse('notes-2', 'qingmu_read_reference_video_candidates', { sourceFrameId: 'previous', commentPage: 2 }),
+    textResponse('Review notes are evidence about the recorded video, not approval.'),
+  ])
+  const h = await harness(adapter, upstream); await h.run()
+  for (const id of ['notes-1', 'notes-2']) expect(result(h.agent, id).error, result(h.agent, id).text).toBe(false)
+  const first = JSON.parse(result(h.agent, 'notes-1').text), second = JSON.parse(result(h.agent, 'notes-2').text)
+  expect(first).toMatchObject({ advisoryOnly: true, providerCalls: 0, selectionChanged: false,
+    reviewComments: { available: true, page: 1, total: 7, nextPage: 2 } })
+  expect(first.reviewComments.items).toHaveLength(5)
+  expect(first.reviewComments.items[0]).toMatchObject({ body: comments[5]!.body, candidateAssetIds: ['asset_video'],
+    currentBinding: true, anchor: comments[5]!.anchor, outputSha256: '2'.repeat(64) })
+  expect(second.reviewComments).toMatchObject({ available: true, page: 2, total: 7, nextPage: null })
+  expect(second.reviewComments.items).toHaveLength(2)
+  expect(second.reviewComments.items[1]).toMatchObject({ body: feed.comments[1]!.body,
+    currentBinding: false, candidateAssetIds: [], outputSha256: '3'.repeat(64) })
+  expect(JSON.stringify(adapter.requests.at(-1))).toContain(comments[5]!.body)
+  for (const key of ['actorId', 'authSessionId', 'actorNaturalPersonId']) expect(result(h.agent, 'notes-1').text).not.toContain(key)
+  const reads = upstream.fetch.mock.calls.filter(([url]) => String(url).includes('/take-comments'))
+  expect(reads).toHaveLength(2)
+  expect(reads.every(([url, init]) => String(url).includes('/projects/p/episodes/episode-a/frames/previous/take-comments') && init?.method === 'GET')).toBe(true)
+  expect(upstream.fetch.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true)
+})
+
+it.each(['empty', 'unavailable', 'foreign feed'] as const)('distinguishes %s comments without losing accessible source candidates', async (mode) => {
+  const upstream = writer(), original = upstream.fetch.getMockImplementation()!
+  upstream.fetch.mockImplementation(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input)
+    if (url.pathname.endsWith('/runs')) return Response.json(capturedVideoRuns())
+    if (url.pathname.endsWith('/take-comments')) {
+      if (mode === 'unavailable') return Response.json({ detail: 'unavailable' }, { status: 503 })
+      const feed = takeCommentFeed({ projectId: mode === 'foreign feed' ? 'other' : 'p', episodeId: 'episode-a', frameId: 'previous' })
+      return Response.json({ ...feed, comments: [] })
+    }
+    return original(input, init)
+  })
+  const adapter = new MockAdapter([toolCallResponse('notes', 'qingmu_read_reference_video_candidates', { sourceFrameId: 'previous' }), textResponse('Read complete.')])
+  const h = await harness(adapter, upstream); await h.run()
+  const reply = result(h.agent, 'notes'); expect(reply.error, reply.text).toBe(false)
+  const value = JSON.parse(reply.text)
+  expect(value.items[0].candidates[0].assetId).toBe('asset_video')
+  expect(value.reviewComments.available).toBe(mode === 'empty')
+  if (mode === 'empty') expect(value.reviewComments).toMatchObject({ total: 0, items: [], nextPage: null })
+  else expect(value.reviewComments).not.toHaveProperty('items')
+})
 
 it('captures and recovers actual frame pixels through the shipped director preset with current-project scope', async () => {
   const upstream = writer()

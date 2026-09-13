@@ -7,6 +7,7 @@ import type {
   ReferenceVideoAsset, ReferenceVideoAssetsResponse, ReferenceVideoDraftResponse,
   ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse, ReferenceDirectorSource,
   ReferenceVideoRun, ReferenceVideoRunsResponse, ReferenceVideoFrameReceipt,
+  YimengTakeCommentFeedResponse,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import { parseReferenceVideoRequest } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter'
@@ -184,23 +185,49 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
   }))
   ctx.tools.register(defineTool({
     name: 'qingmu_read_reference_video_candidates',
-    description: 'Read generated candidates for a source shot in the current project before capturing an actual video frame. Use a known shot ID from the project. No generation or selection.',
-    parameters: { sourceFrameId: { type: 'string', required: true, description: 'Source shot ID in this project; may be the previous shot.' } }, output,
+    description: 'Read generated candidates and existing time-anchored review comments before choosing continuity references. Comments retain their video hash, Take and design binding; they are attributed observations, not fresh visual inspection or approval. A historical design binding does not erase an observation of the same video. Read relevant comment pages, compare actual frames with the current design, and do not silently inherit a recorded defect. Unavailable comments differ from an empty feed. Use a known shot in the current episode. No generation, comment write or selection.',
+    parameters: {
+      sourceFrameId: { type: 'string', required: true, description: 'Source shot ID in the current episode; may be the previous shot.' },
+      commentPage: { type: 'integer', description: 'Review comment page, starting at 1; five complete comments per page, newest first.' },
+    }, output,
     presentCall: () => ({ card: 'generic', kind: 'read', title: '读取镜头视频来源' }),
     async execute(args, exec) {
-      exactKeys(args, ['sourceFrameId'])
+      const { commentPage = 1, ...required } = args
+      exactKeys(required, ['sourceFrameId'])
+      if (!Number.isSafeInteger(commentPage) || commentPage < 1) throw new Error('Use a positive commentPage.')
       const current = await ports.readBoundContext(exec)
+      const scope = current.state.binding.scope
       const read = await ctx.qingmuYimengRead('referenceVideoRuns', {
-        projectId: current.state.binding.scope.projectId, frameId: args.sourceFrameId,
+        projectId: scope.projectId, frameId: args.sourceFrameId,
       }, exec.signal)
       assertCurrent(current, exec)
       if (!read.ok) throw new Error(`Video candidates unavailable: ${read.error.message}`)
       const runs = read.value as ReferenceVideoRunsResponse
+      const feedback = await ctx.qingmuYimengRead('takeComments', {
+        projectId: scope.projectId, episodeId: scope.episodeId, frameId: args.sourceFrameId,
+      }, exec.signal)
+      assertCurrent(current, exec)
+      const feed = feedback.ok ? feedback.value as YimengTakeCommentFeedResponse : undefined
+      const comments = feed?.comments.toSorted((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id.localeCompare(a.id))
+      const start = (commentPage - 1) * 5
+      if (comments && start >= comments.length && commentPage !== 1) throw new Error('Comment page is beyond the available feed.')
+      const candidates = runs.items.flatMap(run => run.candidates)
+      const reviewComments = comments ? {
+        available: true, page: commentPage, total: comments.length,
+        nextPage: start + 5 < comments.length ? commentPage + 1 : null,
+        items: comments.slice(start, start + 5).map(comment => ({
+          id: comment.id, takeId: comment.takeId, outputSha256: comment.outputSha256,
+          candidateAssetIds: [...new Set(candidates
+            .filter(candidate => candidate.assetSha256 === comment.outputSha256).map(candidate => candidate.assetId))],
+          anchor: comment.anchor, body: comment.body, createdAt: comment.createdAt,
+          frameBinding: comment.frameBinding, currentBinding: comment.currentBinding,
+        })),
+      } : { available: false, reason: 'Review comments could not be read for this episode and source shot.' }
       return ports.boundedJson({ projectId: runs.projectId, frameId: runs.frameId,
         items: runs.items.map(run => ({ runId: run.runId, draftRevision: run.draftRevision,
           kernelStatus: run.kernelStatus, publicStatus: run.publicStatus,
           candidates: run.candidates.map(({ assetId, assetSha256 }) => ({ assetId, assetSha256 })) })),
-        providerCalls: 0, selectionChanged: false })
+        reviewComments, advisoryOnly: true, providerCalls: 0, selectionChanged: false })
     },
   }))
   ctx.tools.register(defineTool({
