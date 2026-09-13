@@ -107,15 +107,19 @@ export function SceneLayoutEditor({ projectId, episodeId, layout, camera, ratio,
         onPointerUp={() => { drag.current = undefined; redraw(n => n+1) }}
         onPointerCancel={() => { drag.current = undefined; redraw(n => n+1) }}>
         {objects.map(item => <g key={item.id} onPointerDown={(e) => { start(e, item.id) }} style={{ cursor: onLayout ? 'move' : 'pointer' }}>
+          <title>{item.label}</title>
           <rect x={px(item.center[0])-item.size[0]*drawingScale/2} y={py(item.center[1])-item.size[1]*drawingScale/2}
             width={item.size[0]*drawingScale} height={item.size[1]*drawingScale} fill={item.color} fillOpacity="0.7" stroke={selected === item.id ? '#d7f388' : '#5e665f'} strokeWidth={selected === item.id ? 3 : 1}
             transform={`rotate(${-item.rotation} ${px(item.center[0])} ${py(item.center[1])})`} />
-          <text x={px(item.center[0])} y={py(item.center[1])} textAnchor="middle" fill="#fff" fontSize="12" paintOrder="stroke" stroke="#222" strokeWidth="2">{item.label}</text>
+          {(objects.length <= 5 || selected === item.id) && <text x={px(item.center[0])} y={py(item.center[1])} textAnchor="middle" fill="#fff" fontSize="12" paintOrder="stroke" stroke="#222" strokeWidth="2">{item.label}</text>}
         </g>)}
         {camera && <><line x1={px(camera.position[0])} y1={py(camera.position[1])} x2={px(camera.target[0])} y2={py(camera.target[1])} stroke="#d7f388" strokeDasharray="5 4" />
           <g onPointerDown={(e) => { start(e, '$camera') }}><circle cx={px(camera.position[0])} cy={py(camera.position[1])} r="9" fill="#d7f388" /><text x={px(camera.position[0])+13} y={py(camera.position[1])} fill="#d7f388" fontSize="12">摄影机</text></g>
           <g onPointerDown={(e) => { start(e, '$target') }}><circle cx={px(camera.target[0])} cy={py(camera.target[1])} r="8" fill="none" stroke="#d7f388" strokeWidth="3" /></g></>}
       </svg>
+      {!onLayout && <label>查看布置物件<select value={selected} onChange={(e) => { setSelected(e.target.value) }}>
+        <option value="">选择并高亮物件</option>{objects.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
+      </select></label>}
       {onLayout && <><label>布置物件<select value={selected} onChange={(e) => { setSelected(e.target.value) }}><option value="">选择物件</option>{objects.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
         <button type="button" disabled={objects.length >= 60} onClick={() => { const id = `object_${crypto.randomUUID()}`; onLayout({ ...layout, objects: [...objects, { id, label: '新物件', center: [0, 0, 0.5], size: [1, 1, 1], rotation: 0, color: '#a89f89' }] }); setSelected(id) }}>添加物件</button>
         {active && <><label>物件名称<input value={active.label} onChange={(e) => { changeObject({ label: e.target.value }) }} /></label>
@@ -125,7 +129,7 @@ export function SceneLayoutEditor({ projectId, episodeId, layout, camera, ratio,
           <label>识别色<input type="color" value={active.color} onChange={(e) => { changeObject({ color: e.target.value }) }} /></label>
           <button type="button" disabled={objects.length < 2} onClick={() => { onLayout({ ...layout, objects: objects.filter(row => row.id !== active.id) }); setSelected('') }}>移除此物件</button></>}
       </>}
-      <label><input type="checkbox" checked={!!camera} onChange={(e) => { onCamera(e.target.checked ? initialCamera : null) }} />用空间取景图辅助本图生成</label>
+      <label className={css.cameraToggle}><input type="checkbox" checked={!!camera} onChange={(e) => { onCamera(e.target.checked ? initialCamera : null) }} />用空间取景图辅助本图生成</label>
       {camera && <><VectorInput label="摄影机位置" value={camera.position} onChange={(position) => { onCamera({ ...camera, position }) }} />
         <VectorInput label="取景目标" value={camera.target} onChange={(target) => { onCamera({ ...camera, target }) }} />
         <label>垂直视野角度<input type="number" min="10" max="120" value={camera.verticalFov} onChange={(e) => { if (Number.isFinite(e.target.valueAsNumber)) onCamera({ ...camera, verticalFov: e.target.valueAsNumber }) }} /></label>
