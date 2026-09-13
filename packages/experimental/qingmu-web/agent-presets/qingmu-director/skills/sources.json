@@ -53,7 +53,7 @@
         "references/director_styles/example_comparisons.md": "d13bd746f88418fdf259b25115b6cab4d259ba31ef6d57f251fdeeaddebc9504",
         "references/editing-and-assembly.md": "8256bb843e8d45ba66aba927edef30cd586a0a32030e4a4639d26be156e850de",
         "references/failure-modes.md": "02686bf56bc0fe6c84e51bd7e2db61a23f1791caf19c5aaa46e27b2e71c5e473",
-        "references/genre-playbooks.md": "5713431b20dcd6c4804d086385106ecce9ef483210287dfdceacc351077d33e1",
+        "references/genre-playbooks.md": "ab4271e6250698ace32574c271155811613b86f6f1df74f77fc7414d22809990",
         "references/image-model-adapters.md": "307f429a66ce7ae2c4f4e7d6893e59b8017549dd12d944c2a1aefd605b2f543a",
         "references/lighting-and-color.md": "fb34edea030bbb29b047ff7e489968dded8978f1a3acb768ede230a1c106792b",
         "references/product-and-macro.md": "c6b791fe96db082517c8e3d639269228cee3ae68d55ddababbb7b09d967ca350",
@@ -133,7 +133,8 @@
         "references/director-supplement-workflow.md",
         "references/failure-modes.md",
         "references/production-workflow.md",
-        "references/sound-and-dialogue.md"
+        "references/sound-and-dialogue.md",
+        "references/genre-playbooks.md"
       ],
       "upstreamPaths": {
         "references/director-supplement-workflow.md": "SKILL.md"

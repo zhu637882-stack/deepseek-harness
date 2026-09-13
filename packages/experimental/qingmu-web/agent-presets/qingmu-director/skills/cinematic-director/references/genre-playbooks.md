@@ -4,26 +4,13 @@ Load this file when the project has a genre or format but no named director styl
 
 ## How to use a playbook
 
-A playbook is a set of pre-decided defaults for one genre. It fires at **Step 5 (Director's book)**, is written into Mode C, and carries through Step 6 (blocking), Step 7 (shot list), Step 10 (video prompts), Step 11 (sound), and Step 12 (edit). It does not replace craft reasoning — it pre-decides the twelve items every block below carries, so you argue them once per project instead of once per scene.
+This is a supplementary library of genre and format examples. In Qingmu, current user instructions and the project's script and director design govern the work. The six-department method in `SKILL.md` organizes those decisions; this reference does not replace it with an older numbered workflow.
 
-Precedence, highest wins:
+Choose useful techniques after understanding the scene's dramatic purpose. A named director lens, genre label or delivery format cannot overrule a concrete choice about performance, camera movement, lighting, sound, visible text or editing. Preserve deliberate hybrids rather than renaming the project because several defaults changed.
 
-1. Explicit user instruction ("shoot it flat, no push-ins").
-2. Director style lens chosen at Step 4 (`director_styles/`). **A lens outranks a genre on every field it defines.** If the lens sets `lighting.key_ratio: "2:1"` and the horror playbook says 8:1–16:1, you shoot 2:1. The genre still supplies what the style parameter schema does not carry at all — the dramatic engine and the audience contract — plus any dimension the lens leaves unopinionated. All twenty packaged modules fill all thirteen keys of the schema, so a packaged lens never leaves one; the unopinionated case is a lens improvised for this project from a user's reference images or a one-line brief.
-3. This file's genre defaults.
-4. Skill-level defaults in `SKILL.md`.
+The numerical ranges below are illustrative starting points, not platform requirements or validation limits. Confirm actual delivery requirements and model capabilities separately. Aspect ratio alone does not impose a minimum shot duration, a fixed face position, a hook deadline, silence or a ban on simultaneous camera and actor movement. Translate a chosen composition into the project's actual frame and camera; do not assume that switching to portrait mechanically halves a person's screen height.
 
-Four axes set the fields, and each owns different ones. Settle this before you argue any individual default:
-
-- **Delivery format owns the container.** Aspect ratio, safe margins, clip duration, the **ASL floor** — the shortest shot the format permits, never the ASL target — and the beat **structure**: hook / demonstration / claim / end card for a commercial, hook / change / change / payoff for a social vertical, premise / escalation / barrage / button for a trailer. Where a format and a genre both propose a structure, the format's blocks win and the genre fills them.
-- **The director lens owns the craft.** Camera and lens, movement, lighting, palette, blocking, sound, and pacing — including the **ASL target**, which is the number the format's floor constrains from below and nothing constrains from above. These are the seven craft dials named below. This is precedence 2 restated: a lens outranks a genre on every field it defines.
-- **The genre owns the dramaturgy.** Dramatic engine and audience contract, always — no lens carries them, and no format replaces them. The seven craft dials come from the genre only when no lens is loaded, or on a dimension an improvised lens left unopinionated.
-- **Delivery format outranks the lens on aspect and clip duration only.** It does not outrank the lens on composition. Where a lens's composition rules assume the aspect in its `aspect_bias` field, the lens is neither ignored nor pasted through unchanged: it owes a **restated** composition rule for the delivery aspect. Log the restatement in the director's book as `lens rule at <aspect_bias> → restated as <rule> at <delivery aspect>`, so every later shot inherits the restatement rather than re-deciding it.
-- **A genre is a starting position, not a cage.** Deviate freely, but log it in the director's book as `genre default X → chosen Y because Z`. If you have overridden more than three of the seven craft dials named below, you are not deviating — you have chosen a different genre or a hybrid. Say which, and re-derive from that playbook instead of drifting.
-
-Worked, format × genre. Horror delivered vertically keeps horror's 8:1–16:1 key and its silence; takes vertical's 9:16 frame, its safe margins and its top-third face placement; and takes vertical's **0.7 s ASL floor**, which is a minimum and not a range. The ASL target stays horror's 3–8 s build, because the format forbids a shot shorter than the floor and obliges nothing else. A vertical horror piece cutting at an average of 4 s is correct; one cutting at 0.4 s is out of spec.
-
-Worked, format × lens. A lens whose signature is a standing figure at 8–15% of frame height with the camera 12–22 m back ([19_michael_mann.md](director_styles/19_michael_mann.md), `aspect_bias: "2.39:1 / 1.85:1"`) cannot hold that number at 9:16. Frame-height fraction is a function of vertical field of view, so at native vertical the same figure at the same distance on the same focal reads at roughly half the fraction, and [cinematic-language.md](cinematic-language.md) is explicit that an extreme wide in vertical wastes sky and floor and leaves the subject a few pixels tall. The lens survives as a restatement, not as an abandonment: at 9:16 produce the smallness by **depth down a subject that is itself vertical** — stair core, ramp, parking-deck run, alley — and by glass-reflection layering that puts the city over the face, never by lateral distance. The 8–15% height target holds only in those genuinely vertical subjects; everywhere else the figure goes one size step tighter, per the vertical direction rules in `cinematic-language.md`. What the signature was ever about is a person small against a bright field, and vertical can still deliver that in depth — so restate it, do not drop it and do not crop to it.
+For each adopted technique, write the scene-specific result into the director plan and production description. Explain an adjustment only when it changes the intended effect. Do not copy every genre default into every shot. World, era and material checks follow the script, including explicit fantasy, time travel and other exceptions. Model failures call for a verified route or a reviewed candidate, not a permanent creative prohibition.
 
 Field key, in the order every block uses it: **dramatic engine** (what mechanically generates scenes) · **audience contract** (what the viewer is owed) · **camera** (default framing register, plus **lens bias** in mm) · **movement bias** · **lighting** (quality, motivation, and **key ratio**（布光比）) · **palette** · **pacing** (**ASL**, the average-shot-length range, and the **pacing signature**, kept on one line because they are read together; the arithmetic lives in [editing-and-assembly.md](editing-and-assembly.md)) · **sound** · **blocking bias** · **classic amateur mistake** · **AI risk + mitigation** · **seed prompt** to start Step 10 from.
 
@@ -77,7 +64,7 @@ Shot sizes, angles, moves and coverage geometry are defined in [cinematic-langua
 - Sound: a city bed that never fully stops; music sparse and instrument-specific (upright bass, one horn); gunshots short and dry, no tail.
 - Blocking: power by height and door control — who stands, who sits, who is between the other and the exit.
 - Amateur mistake: rain, neon, and a trench coat standing in for a plot with money in it. Second offense: voice-over narrating what the picture already said.
-- AI risk: hard venetian-blind shadows render as mush, and neon signage generates garbled text. Mitigation: put the shadow source off-frame and describe the shadow shape as geometry ("horizontal bars of shadow across his chest, about 8 cm apart"); keep all signage out of focus or out of frame.
+- AI risk: hard venetian-blind shadows render as mush, and neon signage generates garbled text. Mitigation: put the shadow source off-frame and describe the shadow shape as geometry ("horizontal bars of shadow across his chest, about 8 cm apart"); when signage is meant to be readable, preserve its exact wording and inspect the rendered result. Off-frame or defocused signage is an optional composition choice, not a text-generation rule.
 - Seed: `35mm, waist level, framed through an open doorway from the next room. Two men count money at a table under one hanging bulb; the doorframe cuts the foreground to black. Camera holds and does not enter. End when one man stops counting and looks up at the door.`
 
 ### Drama
@@ -107,7 +94,7 @@ Shot sizes, angles, moves and coverage geometry are defined in [cinematic-langua
 - Sound: intimate room tone with audible breath; music enters late and stays under.
 - Blocking: measure proxemics in centimeters and write them down — 120 cm at the top of the scene, 40 cm at the turn. That number is the scene's plot.
 - Amateur mistake: playing romance with the score and the sunset instead of with the blocking distance.
-- AI risk: two-person interaction is the top failure class — hands, contact, and face stability across a reverse all break. Mitigation: single-character clips with the other person implied off-frame; place any physical contact at the cut point, never inside a clip.
+- Interaction review: for the director's chosen cast and coverage, specify each person's starting position, gaze, hand ownership, contact and resulting state. Use appropriate shared references or start/end frames and inspect the result. Separate coverage or a cut at contact is an optional editorial solution; do not remove an intended two-person interaction by default.
 - Seed: `85mm at T2.0, eye level, 1.5 m from subject for a close-up, arc left about 0.5 m across the shot on a 1.5 m radius. A man listens while someone off-frame finishes a sentence; warm defocused practicals behind him, soft key camera-left with hair backlight. End with him looking down, then back up.`
 
 ### Comedy
@@ -122,7 +109,7 @@ Shot sizes, angles, moves and coverage geometry are defined in [cinematic-langua
 - Sound: no score under the punchline, and an ambience that does not pre-announce that something funny is coming.
 - Blocking: put the reactor in the same frame as the actor. Two-shots, not singles.
 - Amateur mistake: cutting to the reaction by default. A cut points at the joke and tells the audience when to laugh; keeping the reactor in the same frame lets them find it. Cut to the reaction only when the reaction *is* the joke.
-- AI risk: comic timing lives in the cut, which the model does not control, and physical gags break physics in ways that read as error rather than joke. Mitigation: generate the wide as one clip and build the timing in the edit; never ask a model for a pratfall.
+- Comedy review: distinguish intentional physical exaggeration from an unintended generation error. Direct the setup, action, reaction and timing; a fall or other physical gag may stay within one generated shot when that serves the scene. Inspect performance and physics, then choose generation or editing adjustments that preserve the joke.
 - Seed: `32mm, locked, eye level, wide enough to hold both people and the door. A man delivers a confident explanation while, in the same frame behind him, the thing he is describing quietly fails. Flat even light. No camera move. End with the second person's face doing nothing at all.`
 
 ### Action
@@ -137,7 +124,7 @@ Shot sizes, angles, moves and coverage geometry are defined in [cinematic-langua
 - Sound: impacts carry the cut; music is rhythmic and cuts with picture, not under it.
 - Blocking: choreograph in beats of three moves. Each shot shows one beat and ends in a pose the next shot starts from.
 - Amateur mistake: shake plus fast cutting to hide that no choreography exists. If it cannot be cut slow, it does not exist.
-- AI risk: multi-body contact, weapon continuity, and high speed each fail independently and compound. Mitigation: one body per clip, contact placed at the cut rather than inside a clip, and impact sound selling the frame you never generated.
+- Action review: specify multi-person positions, object ownership, contact, movement order and exit states. Check continuity and physical interaction in the generated footage. Reference conditioning, start/end frames, directed cuts or an alternative route may help; one body per clip and off-screen contact are not mandatory substitutes for choreography.
 - Seed: `24mm, chest height, tracking laterally at the runner's speed, screen left to right. A woman sprints along a loading dock, vaults one low barrier, lands and keeps running out of frame right. Hard low sun behind her at 4:1. One vault only. End as she clears frame.`
 
 ### Science fiction
@@ -152,7 +139,7 @@ Shot sizes, angles, moves and coverage geometry are defined in [cinematic-langua
 - Sound: designed machines with a distinct pitch identity per system, so the audience can hear which thing is failing. Music textural and low.
 - Blocking: person small inside a designed frame; let the architecture do the staging.
 - Amateur mistake: panel-and-prop soup with no rule behind it. One changed rule beats twenty gadgets.
-- AI risk: hardware and interface designs drift shot to shot, screen text garbles, and scale is inconsistent between clips. Mitigation: lock a reference plate per set (see [image-model-adapters.md](image-model-adapters.md)), describe geometry rather than brand ("a wall of matte grey panels, one amber strip at waist height"), and never request legible screen text.
+- AI risk: hardware and interface designs drift shot to shot, screen text garbles, and scale is inconsistent between clips. Mitigation: lock a reference plate per set (see [image-model-adapters.md](image-model-adapters.md)), describe geometry rather than brand ("a wall of matte grey panels, one amber strip at waist height"), and preserve readable screen text when the script or director requires it. Check the selected model and actual result; use a suitable reference or editing route for a failed render rather than deleting the narrative information.
 - Seed: `21mm, level, static, single-point perspective down a corridor of matte grey panels with one amber light strip at waist height. A technician walks away from camera, stops at a wall unit, places a palm on it. The strip changes color along its length toward her. End as she lowers her hand.`
 
 ### Fantasy
@@ -179,10 +166,10 @@ Shot sizes, angles, moves and coverage geometry are defined in [cinematic-langua
 - Light: period sources only — window, candle, oil, gas, early tungsten. Key ratio 3:1 to 4:1 at a window, 8:1 or steeper by candle, because a small source with no fill obeys inverse square: move a face from 0.5 m to 1 m off the flame and you lose 2 stops. Use that falloff, do not fight it.
 - Palette: dye- and pigment-limited. Choose 5–7 colorants the period could actually produce and refuse the rest.
 - ASL: 7–16 s. Pacing signature: let entrances and departures take their real duration.
-- Sound: strip the modern floor first — no distant traffic hum, no fluorescent buzz — then add correct material weight (iron, wood, heavy cloth).
+- Sound: derive the environment and material weight from this script's place and era. Preserve explicitly introduced modern devices or time-travel sources; remove a sound only when it contradicts the intended world.
 - Blocking: formal. Status decides who moves and who is moved toward.
 - Amateur mistake: costume-shop accuracy worn with modern posture, modern haircuts, and clean teeth.
-- AI risk: anachronism injection — zippers, modern eyewear, printed text, plastic, contemporary dentition. Mitigation: carry an explicit era negative list in every prompt, naming instances and never the category — "no modern objects" is unresolvable and is the mechanism behind F8 (see [prompt-lexicon.md](prompt-lexicon.md) and [failure-modes.md](failure-modes.md)) — and add a per-shot anachronism pass in QC.
+- Era review: compare materials, clothing, fixtures, devices and visible writing with the script's world and declared exceptions. Only identify concrete contradictions. Do not ban printed text, modern objects or technology by genre label when the story explicitly includes them.
 - Seed: `50mm, chest height, locked. A woman in a high-collared dress writes at a table lit only by two candles at 1 m; falloff drops the back wall to near black. No plastic, no wristwatch, no printed labels, no electric fixture. She stops, holds the pen, does not write. End with her setting it down and pinching out one candle.`
 
 ### War
@@ -252,11 +239,11 @@ Twelve playbook fields only. The depth this genre actually needs — the light-m
 - Engine: silhouette in motion. A scene exists to reveal how a garment moves and what it does to a body.
 - Contract: this is about surface. You will be shown weave, drape, and edge at a level a still photograph cannot deliver, and you will be shown how the garment behaves when the body moves.
 - Camera: full figure has priority. The frame must respect the silhouette's edges — head and toe room is a rule, not a preference. Lens bias 85–135mm for the look-book register, 24mm at ground level for attitude. Budget the throw: holding a full figure with head and toe room needs roughly 7 m at 85mm and roughly 11 m at 135mm, so pick the lens the stage can actually support.
-- Move: slow lateral track, or a locked frame the model moves through. Camera and body must not both move fast.
+- Move: slow lateral track, or a locked frame the model moves through. Simultaneous fast camera and body movement is available when the director specifies the path, timing and readable action; check the generated result.
 - Light: one hard source for texture and edge at 6:1, or one very large soft source for skin against a black surround. Pick one; do not blend.
 - Palette: garment-led. Everything else drops to neutral so the fabric is the only chroma event in frame.
 - ASL: 1–3 s cuts set against 8–15 s holds. The contrast between them is the style. Pacing signature: repetition with escalating scale — the same move shown at three sizes.
-- Sound: no dialogue. Rhythmic and non-melodic, with fabric and footstep sound pushed well above natural level.
+- Sound: one possible treatment is rhythmic, non-melodic sound with emphasized fabric and footsteps. Dialogue, music and silence follow the specific script and director plan.
 - Blocking: walk toward and past camera; turn at the frame edge; hold still, then release one gesture.
 - Amateur mistake: cropping the silhouette to get a "closer look". The silhouette is the product.
 - AI risk: fabric physics and garment identity — drape, seam, and pattern regenerate every clip. Mitigation: 2–4 s clips, one garment, motion restricted to walking or wind. Never request a fast turn.
@@ -296,7 +283,7 @@ Twelve playbook fields only. The depth this genre actually needs — the light-m
 
 - Engine: a question posed in the first second, answered before the thumb moves.
 - Contract: this pays off fast and stays legible at arm's length on a phone.
-- Contract under a lens: split the contract before you negotiate it. Structural and always surviving — a hook inside the first second, a visible change by 3 s, and a reason to keep watching at the loop point. Craft-dependent and therefore negotiable when a lens forbids them — sound-off legibility, the burned-in text hook, high saturation, front-biased light. Captions are a delivery-layer decision made at Step 12, not a craft dial: a lens's `no text in frame` rule governs the generated image, and captions may still be added in the edit over the top of it. Where the lens's register makes captions tonally wrong, the lens arbitrates and the structural items must then be paid in picture — the hook becomes an image rather than a line of type, and the change at 3 s becomes something the viewer sees rather than reads. Log each dropped item in the director's book; a contract you silently abandon is the one nobody notices missing until the completion rate comes back.
+- Contract under a lens: decide the opening, pace, information delivery, visible text and captions for this work. An immediate hook or rapid change can serve a short-form brief but is not a universal deadline. A style lens cannot erase the script's required information; choose image, performance, dialogue or captions according to the current director plan.
 - Platform grammar on Chinese platforms: the driving metric is 完播率, completion rate — which is *why* the claim lands inside the first 1.5 s instead of at the commercial's second 5. A viewer who leaves at 2 s costs more than one who never opened it. Named formats, one gloss each: 试色 swatch on the product's own surface · 手臂试色 swatch on the forearm · 上脸对比 before/after on the face · 质地特写 texture macro · 开箱 unboxing · 痛点开场 open on the problem, not the product. 种草 (first person, one benefit, no brand voice) and 硬广 (brand register) are different audience contracts — pick one per cut and never mix them, because the register break is what reads as an ad.
 - Camera: 9:16 with the face in the upper-middle third. Treat roughly the top 12% and bottom 20% as unsafe — platform chrome sits there — and confirm against the current safe-area guide for the platform you are delivering to, since those bands move. Lens bias 24–35mm equivalent, close. Wide-and-near, never far-and-long.
 - Move: snap or whip transitions, or nothing. Slow moves die on this surface.

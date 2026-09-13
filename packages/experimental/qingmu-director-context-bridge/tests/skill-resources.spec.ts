@@ -80,6 +80,17 @@ it('preserves source hashes for every bundled file and distinguishes Qingmu adap
   }
 })
 
+it('serves the genre supplement with current director authority through the native resource tool', async () => {
+  const app = await reader()
+  const result = await app.run({ skill: 'cinematic-director', path: 'references/genre-playbooks.md', lineCount: 30 })
+  expect(result.isError).toBe(false)
+  const page = result.value as ResourcePage
+  expect(page.sha256).not.toBe(page.upstreamSha256)
+  expect(page.content).toContain("current user instructions and the project's script and director design govern")
+  expect(page.content).toContain('not platform requirements or validation limits')
+  expect(page.nextLine).not.toBeNull()
+})
+
 it('keeps released director methods compatible with the installed method without rewriting history', async () => {
   const sources = JSON.parse(await readFile(join(bundle, 'sources.json'), 'utf8')) as {
     skills: Record<string, {

@@ -48,3 +48,5 @@ The persona and schemas form a stable prefix for this preset. Requested context 
 The Qingmu distribution defaults new sessions to `deepseek-flash` through the native default-model service; the DeepSeek adapter supplies its default high reasoning effort. Saved user model choices and existing sessions retain their selection. Stock Web keeps its own default. The adapter resolves this route to DeepSeek V4.1 Flash with image input; model selection does not establish script or film quality.
 
 The packaged scene asset method relates set dressing to narrative purpose, functional space and continuity, including intentional emptiness. Its image review distinguishes incomplete design, lost request content and model execution errors. Method delivery alone does not prove visual quality.
+
+The genre supplement follows the six-department method and current script/director decisions. Its numeric ranges and format examples are suggestions, not shot-duration limits or bans on readable text, dialogue or simultaneous camera and actor movement. The resource manifest distinguishes this adaptation from the preserved upstream source.
