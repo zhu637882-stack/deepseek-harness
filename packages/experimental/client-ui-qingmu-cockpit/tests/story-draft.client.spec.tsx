@@ -109,3 +109,32 @@ it('keeps a screenplay review separate from the original writer request and resu
   expect(localStorage.getItem('qingmu.story-session.v1:p:e')).toContain('session-writer')
   expect(localStorage.getItem('qingmu.story-review-session.v1:p:e')).not.toContain('session-writer')
 })
+
+it('edits and reloads a completed candidate without another model call while retaining source checks and the original', async () => {
+  const key = 'qingmu.asset-design-session.v1:p:e'
+  localStorage.setItem(key, JSON.stringify({ sessionId: 'original', baseline: 1, submitted: true, sourceKey: 'basis' }))
+  const port = { prepare: vi.fn(), send: vi.fn(), read: vi.fn(async () => ({
+    text: 'Original complete result', script: '{"assets":[]}', lastSeq: 4, running: false, finished: true, error: '',
+  })) }
+  const onAdopt = vi.fn()
+  const purpose = { key: 'asset-design', jsonOutput: true, title: '素材设计', description: '完整设计', prompt: '设计',
+    action: '重新设计', adopt: '采用设计', adopted: '已采用设计', sourceKey: 'basis' }
+  const mount = (sourceKey = 'basis') => render(<NativeStoryComposer port={port} projectId="p" episodeId="e" source="当前剧本" settings=""
+    disabled={false} onAdopt={onAdopt} purpose={{ ...purpose, sourceKey }} />)
+  mount()
+  fireEvent.click(await screen.findByRole('button', { name: '编辑这份候选' }))
+  fireEvent.change(screen.getByRole('textbox', { name: '候选正文' }), { target: { value: '{"assets":[{"name":"Reviewed design"}]}' } })
+  cleanup(); mount()
+  expect((await screen.findByRole('textbox', { name: '候选正文' }) as HTMLTextAreaElement).value).toContain('Reviewed design')
+  fireEvent.click(screen.getByRole('button', { name: '采用设计' }))
+  await waitFor(() => { expect(onAdopt).toHaveBeenCalledExactlyOnceWith('{"assets":[{"name":"Reviewed design"}]}') })
+  expect(screen.getByText('Original complete result')).toBeTruthy()
+  cleanup(); mount('changed basis')
+  fireEvent.click(await screen.findByRole('button', { name: '采用设计' }))
+  await screen.findByText(/没有采用：创作依据或本页设计已改变/)
+  expect(onAdopt).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByRole('button', { name: '恢复原生候选' }))
+  expect(screen.queryByRole('textbox', { name: '候选正文' })).toBeNull()
+  expect(localStorage.getItem(`${key}:edited`)).toBeNull()
+  expect(port.send).not.toHaveBeenCalled()
+})
