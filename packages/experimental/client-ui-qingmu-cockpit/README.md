@@ -1,5 +1,7 @@
 # Qingmu OS production cockpit
 
+Scene direction separates coverage within a generated segment from adjoining-segment editorial notes. The notes remain editable and appear in the working cut; they do not automatically apply a transition or sound bridge. Existing mixed coverage is retained for explicit director revision.
+
 A first assembly uses the source chosen in shooting. Unchosen shots remain available for explicit candidate comparison. Saved cuts retain their own versions and trims when Take choices change.
 
 The delivery workspace can use a completed episode video or rendered cut version as an independent sound cue. Choose the original mix or local speech, speech/effects, effects or music extraction; cue timing, fades and gain changes follow the assembled film. Extraction runs during export and reuses verified stems. The source remains unchanged. Explicitly mute picture clips when independent cues supply their sound, and audition the result. A rendered cut has frozen timing; later picture edits require checking cue alignment. Effects include ambience and Foley, not isolated room tone.

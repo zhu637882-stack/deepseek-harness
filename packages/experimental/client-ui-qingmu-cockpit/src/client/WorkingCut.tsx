@@ -144,6 +144,13 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
       }).catch((cause: unknown) => { setError(String(cause)) })
     }}>重新核对剪辑</button></div>}
     {!state ? <p role="status">正在读取镜头…</p> : <>
+      {state.shots.some(shot => shot.editorialContext) && <details><summary>导演的接镜与声桥安排</summary>
+        <p>以下是当前导演设计。请依据所选素材设置剪辑点与声音轨，再保存；这些说明不会自动改变成片。</p>
+        {state.shots.filter(shot => shot.editorialContext).map(shot => <div key={shot.frameId}>
+          <strong>镜 {shot.frameNo} · {shot.title}</strong>
+          <p>{typeof shot.editorialContext === 'string' ? shot.editorialContext : JSON.stringify(shot.editorialContext)}</p>
+        </div>)}
+      </details>}
       {state.shots.filter(s => !clips.some(c => c.frameId === s.frameId)).map(shot => <p key={shot.frameId}>
         镜 {shot.frameNo} · {shot.candidates.length ? shot.selectedAssetId === null ? '尚未选用视频，可加入候选比较' : '尚未加入剪辑' : '尚无已完成视频'}{' '}
         {shot.candidates.length ? <button type="button" disabled={locked} onClick={() => { const c = shot.candidates.find(c => c.assetId === shot.selectedAssetId) ?? shot.candidates.at(-1); if (c) change([...clips, { frameId: shot.frameId, assetId: c.assetId, sha256: c.sha256, inSec: 0, outSec: Math.floor(c.duration * 100) / 100 }]) }}>加入此镜</button>

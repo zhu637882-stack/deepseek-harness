@@ -3,7 +3,7 @@ import type { PlanningShot, YimengCommandJsonObject } from '@deepseek-ai/dsh-exp
 
 const departmentLabels = {
   blocking: '人物站位与调度', cameraAngle: '景别与机位', cameraMovement: '运镜设计',
-  coveragePlan: '镜头覆盖与剪辑', performance: '表演设计', lighting: '光影设计',
+  coveragePlan: '本段景别、焦点与切点', editorialContext: '前后段剪辑衔接', performance: '表演设计', lighting: '光影设计',
 } as const
 const groupLabels = {
   soundPlan: { ambience: '环境与空间声', foley: '动作拟音', music: '配乐安排' },
@@ -29,6 +29,7 @@ export function SceneDirectionEditor({ value, onChange }: {
   }
   return <details><summary>本镜完整导演设计</summary>
     <p>修改后与镜头一起保存。请同时核对画面、动作和相邻镜头，避免留下相互矛盾的安排。</p>
+    <p>本段内的切镜写在“本段景别、焦点与切点”；与前后段的接镜、声桥写在“前后段剪辑衔接”，供成片剪辑使用。旧设计不会自动改写。</p>
     {Object.entries(departmentLabels).map(([field, label]) => textField(label, plan[field], (text) => {
       onChange({ ...plan, [field]: text })
     }))}

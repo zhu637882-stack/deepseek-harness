@@ -1,5 +1,7 @@
 # 青木易梦命令适配器
 
+工作剪辑镜头可携带 editorialContext，即导演编写的前后段接镜说明。该值原样传递，不将说明当作已应用的剪辑，也不改写已保存的剪辑版本。
+
 每镜返回 selectedAssetId：按同镜来源编号与 SHA 匹配已选 Take，无法匹配时为 null。已有剪辑保留独立的选片决定。
 
 工作剪辑读取将已完成镜头及已导出成片版本放入 videoAudioSources，与导入的 audioLibrary 分开返回。独立音轨可引用任一清单中的准确素材编号与哈希，并接受可选 sourceAudioMode original/speech_effects/speech/effects/music。省略时保留旧音轨请求。Writer 核验集数范围、候选可用性与来源字节，分离音轨复用现有本机合成任务。

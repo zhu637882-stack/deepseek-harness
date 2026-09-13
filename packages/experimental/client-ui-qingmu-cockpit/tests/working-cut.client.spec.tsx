@@ -44,7 +44,7 @@ it('explicitly loops a short sound across the film, validates overlap and recove
 it('starts from the chosen Take, leaves unchosen shots out and preserves a saved edit', async () => {
   const shot = state.shots[0]!
   let server: WorkingCutState = { ...state, shots: [
-    { ...shot, selectedAssetId: 'a', candidates: [...shot.candidates, { ...shot.candidates[0]!, assetId: 'newer' }] },
+    { ...shot, editorialContext: '下段接窗外雨声，先核对真实时序', selectedAssetId: 'a', candidates: [...shot.candidates, { ...shot.candidates[0]!, assetId: 'newer' }] },
     { ...shot, frameId: 'second', frameNo: 2, selectedAssetId: null },
   ] }
   const save = vi.fn(async ({ command }: { command: WorkingCutCommand }) => {
@@ -57,6 +57,7 @@ it('starts from the chosen Take, leaves unchosen shots out and preserves a saved
   let view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
   expect(await screen.findByRole('combobox', { name: '镜 1 视频版本' })).toHaveProperty('value', 'a')
   expect(screen.queryByRole('combobox', { name: '镜 2 视频版本' })).toBeNull()
+  expect(screen.getByText('下段接窗外雨声，先核对真实时序')).toBeTruthy()
   expect(screen.getByRole('option', { name: /拍摄页已选/ })).toHaveProperty('value', 'a')
   fireEvent.change(screen.getByRole('combobox', { name: '镜 1 视频版本' }), { target: { value: 'newer' } })
   fireEvent.click(screen.getByRole('button', { name: '保存剪辑草稿' }))

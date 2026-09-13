@@ -99,6 +99,8 @@ export interface WorkingCutState extends CreationScope {
     readonly title: string
     /** Original source of the current chosen Take; null means none is available. Omitted by older servers. */
     readonly selectedAssetId?: string | null
+    /** Director-authored adjoining-segment edit notes, not automatically applied edits. */
+    readonly editorialContext?: YimengCommandJsonObject[string]
     readonly candidates: readonly {
       readonly assetId: string
       readonly sha256: string

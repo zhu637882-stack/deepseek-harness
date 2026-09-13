@@ -10,7 +10,7 @@ const basis: AssetDesignState = { schema: 'qingmu.asset-design-state.v1', projec
   stateSha256: 'b'.repeat(64), scriptRevision: 1, scriptSha256: sha, script: { story: '全剧关系由试探到信任' },
   model: 'image-model', design: null, creativeSettings: { visualStyle: { prompt: '透明水彩' } } }
 const shots = [{ title: '邀请', narrative: '允许接近', visual: '门内望向来客', action: '主人让出通道', durationSec: 6,
-  dialogueLineIds: ['line1'], directorPlan: { cameraMovement: '跟随后停稳', soundPlan: { ambience: '雨声持续' },
+  dialogueLineIds: ['line1'], directorPlan: { editorialContext: '下段接窗外雨声', coveragePlan: '本段先中景后切近景', cameraMovement: '跟随后停稳', soundPlan: { ambience: '雨声持续' },
     dialoguePlan: [{ ...scene.dialogues[0], delivery: '犹豫后轻声' }] } }]
 afterEach(() => { cleanup(); localStorage.clear() })
 it('sends the whole-film basis and scene to the native director, then adopts the full design without saving it', async () => {

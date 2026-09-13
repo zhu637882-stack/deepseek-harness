@@ -1,5 +1,7 @@
 # Qingmu Yimeng command adapter
 
+Working-cut shots may carry editorialContext, the director-authored adjoining-segment edit notes. The value is passed through without turning it into an applied edit or altering retained cut revisions.
+
 Each shot exposes selectedAssetId: the same-frame source of its chosen Take, matched by source ID and SHA, or null when unavailable. Existing cuts retain independent editorial choices.
 
 Working-cut reads expose completed shot videos and rendered cut versions in videoAudioSources separately from imported audioLibrary. Audio cues accept optional sourceAudioMode original/speech_effects/speech/effects/music and exact source IDs and hashes from either list. Omission preserves existing cue bodies. Writer validates episode scope, candidate availability and source bytes; separated cues use the existing local render task.

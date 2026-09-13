@@ -627,7 +627,7 @@ it('saves a full director plan through the native preset and Writer adapter, the
 
 it.each([undefined, '门内平视，来客停在门边。', ''])(
   'saves an explicit starting still (%s) with direction, or preserves it when omitted', async (imagePromptCn) => {
-    const plan = { ...design, visual: '来客在门边站定，与屋内听者对视；其余调度沿用。' }
+    const plan = { ...design, editorialContext: { transitionOut: '下段转到窗外，雨声跨越切点' }, visual: '来客在门边站定，与屋内听者对视；其余调度沿用。' }
     const upstream = writer(0, undefined, undefined, '原画面描述须显式修改。')
     const args = { receiptId: upstream.inputReceipt, directorPlan: plan,
       ...(imagePromptCn === undefined ? {} : { imagePromptCn }) }
