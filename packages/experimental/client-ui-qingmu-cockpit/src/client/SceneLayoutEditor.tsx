@@ -5,7 +5,7 @@ import type { QingmuYimengPort } from './contracts.ts'
 import css from './SceneLayoutEditor.module.css'
 
 type Vector = readonly [number, number, number]
-const initialCamera: ImageCamera = { position: [0, -5, 1.6], target: [0, 0, 1], verticalFov: 50 }
+const fallbackCamera: ImageCamera = { position: [0, -5, 1.6], target: [0, 0, 1], verticalFov: 50 }
 function VectorInput({ label, value, onChange, positive = false }: {
   label: string
   value: Vector
@@ -25,11 +25,13 @@ function VectorInput({ label, value, onChange, positive = false }: {
  * @param props - Current project draft, optional shared-layout edit and scoped preview command.
  * @returns A plan, camera controls and the exact composition input.
  */
-export function SceneLayoutEditor({ projectId, episodeId, layout, camera, ratio, onLayout, onCamera, previewLayout, usage = 'asset' }: {
+export function SceneLayoutEditor({ projectId, episodeId, layout, camera, defaultCamera, ratio, onLayout, onCamera, previewLayout, usage = 'asset' }: {
   readonly projectId: string
   readonly episodeId: string
   readonly layout: SceneLayout | null | undefined
   readonly camera: ImageCamera | null | undefined
+  /** Used only when the user enables a new camera; never replaces an authored shot. */
+  readonly defaultCamera?: ImageCamera | undefined
   readonly ratio: string
   readonly onLayout?: ((value: SceneLayout | null) => void) | undefined
   readonly onCamera: (value: ImageCamera | null) => void
@@ -129,7 +131,7 @@ export function SceneLayoutEditor({ projectId, episodeId, layout, camera, ratio,
           <label>识别色<input type="color" value={active.color} onChange={(e) => { changeObject({ color: e.target.value }) }} /></label>
           <button type="button" disabled={objects.length < 2} onClick={() => { onLayout({ ...layout, objects: objects.filter(row => row.id !== active.id) }); setSelected('') }}>移除此物件</button></>}
       </>}
-      <label className={css.cameraToggle}><input type="checkbox" checked={!!camera} onChange={(e) => { onCamera(e.target.checked ? initialCamera : null) }} />用空间取景图辅助本图生成</label>
+      <label className={css.cameraToggle}><input type="checkbox" checked={!!camera} onChange={(e) => { onCamera(e.target.checked ? (defaultCamera ?? fallbackCamera) : null) }} />用空间取景图辅助本图生成</label>
       {camera && <><VectorInput label="摄影机位置" value={camera.position} onChange={(position) => { onCamera({ ...camera, position }) }} />
         <VectorInput label="取景目标" value={camera.target} onChange={(target) => { onCamera({ ...camera, target }) }} />
         <label>垂直视野角度<input type="number" min="10" max="120" value={camera.verticalFov} onChange={(e) => { if (Number.isFinite(e.target.valueAsNumber)) onCamera({ ...camera, verticalFov: e.target.valueAsNumber }) }} /></label>

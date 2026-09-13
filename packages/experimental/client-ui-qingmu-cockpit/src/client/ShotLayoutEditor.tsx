@@ -56,6 +56,7 @@ export function ShotLayoutEditor({ context, value, onChange }: {
     && (sceneId === undefined ? item.name === sceneName : !!sceneId && item.id === sceneId)) ?? []
   const scene = matches.length === 1 ? matches[0] : undefined
   const camera = cameraValue(value)
+  const sceneCamera = cameraValue(scene?.imageCamera)
   return <details onToggle={(event) => { if (event.target === event.currentTarget) setOpen(event.currentTarget.open) }}>
     <summary>共用场景与本镜取景</summary>
     {open && <>
@@ -66,10 +67,11 @@ export function ShotLayoutEditor({ context, value, onChange }: {
       {scoped && !scene && <p>未找到本镜对应的唯一场景设计。请先在素材页核对场景；不会借用其他房间的布局。</p>}
       {scene && <>
         <p><strong>{scene.name}</strong> · 共用布局在素材页维护，当前镜头调整不会移动其他镜头的门窗或家具。</p>
+        {value == null && sceneCamera && <p>首次启用取景会沿用这个场景的素材机位，再按本镜设计调整。</p>}
         {scene.space && <p>{Object.values(scene.space).filter(value => typeof value === 'string').join('\n')}</p>}
         {value != null && camera === null ? <p role="alert">本镜已有其他格式的机位设计，原文保留在完整设计中；请先交给导演整理。</p>
           : ratio ? <SceneLayoutEditor projectId={projectId} episodeId={episodeId} layout={scene.sceneLayout}
-            camera={camera} ratio={ratio} onCamera={onChange} previewLayout={previewSceneLayout} usage="shot" />
+            camera={camera} defaultCamera={sceneCamera ?? undefined} ratio={ratio} onCamera={onChange} previewLayout={previewSceneLayout} usage="shot" />
             : <p>当前读取未提供影片画幅，请刷新到最新项目状态后调整机位。</p>}
       </>}
     </>}

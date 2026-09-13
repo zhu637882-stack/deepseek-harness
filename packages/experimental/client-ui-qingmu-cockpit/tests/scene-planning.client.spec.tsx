@@ -57,53 +57,61 @@ function replayProposal(shotId = 'shot_1'): DirectorReplayProposal {
 }
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); vi.stubGlobal('crypto', webcrypto) })
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
-it.each([false, true])('saves per-shot framing against the bound room and recovers it (automatic=%s)', async (automatic) => {
-  const camera = { position: [0, -3, 1.6], target: [0, 0, 1], verticalFov: 50 }
-  const layout = { basis: '当前房间布局', coordinateFrame: '东窗南门', objects: [
-    { id: 'desk', label: '窗边桌', center: [0, 0, 0.4], size: [1, 1, 0.8], rotation: 0, color: '#998877' },
-  ] }
-  const frame = { id: 'shot_1', sceneId: 'room_right', frameNo: 1, title: '门内', imagePromptCn: '开场静止画面',
-    directorPlan: { imageCamera: camera, performance: '等待来人', soundPlan: { ambience: '雨声持续' } } }
-  const manual = revisedPlanningState()
-  const current: ScenePlanningState = automatic ? { ...automaticReadState(), aspectRatio: '9:16',
-    canonicalStoryboard: { ...automaticReadState().canonicalStoryboard!, shots: [frame] } }
-    : { ...manual, aspectRatio: '9:16', frameRequirements: [frame] }
-  const assets = { projectId: 'project_1', episodeId: 'episode_1', design: { assets: [
-    { kind: 'scene', id: 'room_wrong', name: '相同名称', sceneLayout: { ...layout, basis: '另一间房间' } },
-    { kind: 'scene', id: 'room_right', name: '相同名称', sceneLayout: layout },
-  ] } } as unknown as AssetDesignState
-  const port = { readScenePlanning: vi.fn(async () => current), requestDirectorProposal: unavailableDirectorProposal(),
-    checkDirectorProposalFreshness: unusedFreshness(), readAssetDesign: vi.fn(async () => assets),
-    previewSceneLayout: vi.fn<QingmuYimengPort['previewSceneLayout']>(async () => ({ imageUrl: 'data:image/png;base64,AA==', guidance: '局部取景', objects: [] }) as unknown as SceneLayoutPreview),
-    saveScenePlanning: vi.fn(async (_r: ScenePlanningRequest) => { throw new Error('disconnected') }), recoverScenePlanning: vi.fn() }
-  const props = { ...current, port, onCommitted: vi.fn(async () => {}), onSelectShotId: vi.fn(), onUnsavedChange: vi.fn() }
-  const openLayout = async () => {
-    const details = (await screen.findByText('共用场景与本镜取景')).closest('details')!
-    details.open = true; fireEvent(details, new Event('toggle'))
-    await screen.findByLabelText('摄影机位置 Y')
-  }
-  const view = render(<ScenePlanningWorkspace {...props} />)
-  expect(port.readAssetDesign).not.toHaveBeenCalled()
-  await openLayout()
-  expect(screen.queryByText(/另一间房间/)).toBeNull()
-  expect(screen.queryByText('添加物件')).toBeNull()
-  fireEvent.change(screen.getByLabelText('摄影机位置 Y'), { target: { value: '-6' } })
-  fireEvent.click(screen.getByText('预览当前取景'))
-  await waitFor(() => { expect(port.previewSceneLayout).toHaveBeenCalledOnce() })
-  expect(port.previewSceneLayout.mock.calls[0]?.[0]).toEqual({ projectId: 'project_1', episodeId: 'episode_1',
-    layout, camera: { ...camera, position: [0, -6, 1.6] }, ratio: '9:16' })
-  if (automatic) fireEvent.click(screen.getByRole('button', { name: '保存镜头设计' }))
-  else { fireEvent.click(screen.getByText('预览保存影响')); fireEvent.click(screen.getByText('确认保存规划')) }
-  await screen.findByRole('alert')
-  const expected = { ...frame.directorPlan, imageCamera: { ...camera, position: [0, -6, 1.6] } }
-  expect(port.saveScenePlanning.mock.calls[0]?.[0].request).toMatchObject(automatic
-    ? { action: 'edit_automatic', directorPlan: expected } : { action: 'edit', shot: { directorPlan: expected } })
-  view.unmount(); render(<ScenePlanningWorkspace {...props} />)
-  await openLayout()
-  expect(screen.getByLabelText<HTMLInputElement>('摄影机位置 Y').value).toBe('-6')
-  expect(screen.getByLabelText('摄影机位置 Y').matches(':disabled')).toBe(true)
-  expect(port.saveScenePlanning).toHaveBeenCalledOnce()
-})
+it.each([{ automatic: false, authored: false }, { automatic: true, authored: false },
+  { automatic: false, authored: true }, { automatic: true, authored: true }])(
+  'saves per-shot framing against the bound room and recovers it (automatic=$automatic, authored=$authored)', async ({ automatic, authored }) => {
+    const sceneCamera = { position: [8, 7, 2.1], target: [8, 10, 1.2], verticalFov: 42, roll: 3 }
+    const camera = authored ? { position: [0, -3, 1.6], target: [0, 0, 1], verticalFov: 50 } : sceneCamera
+    const layout = { basis: '当前房间布局', coordinateFrame: '东窗南门', objects: [
+      { id: 'desk', label: '窗边桌', center: [0, 0, 0.4], size: [1, 1, 0.8], rotation: 0, color: '#998877' },
+    ] }
+    const frame = { id: 'shot_1', sceneId: 'room_right', frameNo: 1, title: '门内', imagePromptCn: '开场静止画面',
+      directorPlan: { ...(authored ? { imageCamera: camera } : {}), performance: '等待来人', soundPlan: { ambience: '雨声持续' } } }
+    const manual = revisedPlanningState()
+    const current: ScenePlanningState = automatic ? { ...automaticReadState(), aspectRatio: '9:16',
+      canonicalStoryboard: { ...automaticReadState().canonicalStoryboard!, shots: [frame] } }
+      : { ...manual, aspectRatio: '9:16', frameRequirements: [frame] }
+    const assets = { projectId: 'project_1', episodeId: 'episode_1', design: { assets: [
+      { kind: 'scene', id: 'room_wrong', name: '相同名称', sceneLayout: { ...layout, basis: '另一间房间' }, imageCamera: { ...sceneCamera, position: [99, 99, 99] } },
+      { kind: 'scene', id: 'room_right', name: '相同名称', sceneLayout: layout, imageCamera: sceneCamera },
+    ] } } as unknown as AssetDesignState
+    const port = { readScenePlanning: vi.fn(async () => current), requestDirectorProposal: unavailableDirectorProposal(),
+      checkDirectorProposalFreshness: unusedFreshness(), readAssetDesign: vi.fn(async () => assets),
+      previewSceneLayout: vi.fn<QingmuYimengPort['previewSceneLayout']>(async () => ({ imageUrl: 'data:image/png;base64,AA==', guidance: '局部取景', objects: [] }) as unknown as SceneLayoutPreview),
+      saveScenePlanning: vi.fn(async (_r: ScenePlanningRequest) => { throw new Error('disconnected') }), recoverScenePlanning: vi.fn() }
+    const props = { ...current, port, onCommitted: vi.fn(async () => {}), onSelectShotId: vi.fn(), onUnsavedChange: vi.fn() }
+    const openLayout = async () => {
+      const details = (await screen.findByText('共用场景与本镜取景')).closest('details')!
+      details.open = true; fireEvent(details, new Event('toggle'))
+      const enabled = await screen.findByLabelText<HTMLInputElement>('用空间取景图辅助本图生成')
+      if (!enabled.checked) fireEvent.click(enabled)
+      await screen.findByLabelText('摄影机位置 Y')
+    }
+    const view = render(<ScenePlanningWorkspace {...props} />)
+    expect(port.readAssetDesign).not.toHaveBeenCalled()
+    await openLayout()
+    expect(screen.queryByText(/另一间房间/)).toBeNull()
+    expect(screen.queryByText('添加物件')).toBeNull()
+    expect(screen.getByLabelText<HTMLInputElement>('摄影机位置 X').value).toBe(String(camera.position[0]))
+    expect(screen.getByLabelText<HTMLInputElement>('摄影机位置 Y').value).toBe(String(camera.position[1]))
+    expect(port.saveScenePlanning).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByLabelText('摄影机位置 Y'), { target: { value: '-6' } })
+    fireEvent.click(screen.getByText('预览当前取景'))
+    await waitFor(() => { expect(port.previewSceneLayout).toHaveBeenCalledOnce() })
+    expect(port.previewSceneLayout.mock.calls[0]?.[0]).toEqual({ projectId: 'project_1', episodeId: 'episode_1',
+      layout, camera: { ...camera, position: [camera.position[0], -6, camera.position[2]] }, ratio: '9:16' })
+    if (automatic) fireEvent.click(screen.getByRole('button', { name: '保存镜头设计' }))
+    else { fireEvent.click(screen.getByText('预览保存影响')); fireEvent.click(screen.getByText('确认保存规划')) }
+    await screen.findByRole('alert')
+    const expected = { ...frame.directorPlan, imageCamera: { ...camera, position: [camera.position[0], -6, camera.position[2]] } }
+    expect(port.saveScenePlanning.mock.calls[0]?.[0].request).toMatchObject(automatic
+      ? { action: 'edit_automatic', directorPlan: expected } : { action: 'edit', shot: { directorPlan: expected } })
+    view.unmount(); render(<ScenePlanningWorkspace {...props} />)
+    await openLayout()
+    expect(screen.getByLabelText<HTMLInputElement>('摄影机位置 Y').value).toBe('-6')
+    expect(screen.getByLabelText('摄影机位置 Y').matches(':disabled')).toBe(true)
+    expect(port.saveScenePlanning).toHaveBeenCalledOnce()
+  })
 it.each([false, true])('saves editable department direction and retains it after disconnection (existing=%s)', async (existing) => {
   const directorPlan = {
     cameraMovement: '跟随进门', performance: '迟疑', continuity: { start: '手中拿着信', end: '信放在桌上', evidence: ['source_1'] },
