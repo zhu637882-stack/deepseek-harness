@@ -72,7 +72,8 @@ export function NativeSceneReconcile({ state, sceneId, port, storyPort, disabled
   const [busy, setBusy] = useState(false), [refresh, setRefresh] = useState(0)
   const lock = useRef(false), controller = useRef(new AbortController())
   const shots = (state.frameRequirements ?? []).filter(shot => shot.sceneId === sceneId)
-  const sharedLayout = basis?.design?.assets.find(asset => asset.kind === 'scene' && asset.id === sceneId)?.sceneLayout
+  const sharedScene = basis?.design?.assets.find(asset => asset.kind === 'scene' && asset.id === sceneId)
+  const sharedLayout = sharedScene?.sceneLayout
   useEffect(() => {
     const active = new AbortController(); controller.current = active
     setBasis(undefined)
@@ -181,7 +182,7 @@ export function NativeSceneReconcile({ state, sceneId, port, storyPort, disabled
     <NativeStoryComposer port={storyPort} projectId={projectId} episodeId={episodeId} source={JSON.stringify(shots)} settings=""
       disabled={disabled || busy || !ready || !!batch && batch.completed < batch.changes.length} onAdopt={adopt}
       inspectCandidate={text => <SceneSourceFeedback text={text} projectId={projectId} episodeId={episodeId}
-        sceneId={sceneId} sceneName={state.scenes.find(scene => scene.id === sceneId)?.title ?? sceneId} />}
+        sceneId={sceneId} sceneName={sharedScene?.name ?? sceneId} />}
       purpose={{ key: `scene-reconcile-${sceneId}`, jsonOutput: true, freshRevision: true, title: '整场导演协调稿',
         description: '依据全剧、共用资产和本场全部原设计，形成可检查的协调稿。', prompt,
         action: '让导演统筹本场全部镜头', adopt: '检查通过，载入整场待保存稿', adopted: '整场稿已保存在本机；展开核对后可保存全部镜头设计。' }} />
