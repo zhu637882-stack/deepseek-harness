@@ -7,6 +7,49 @@ const preview = { ...scope,schema:'qingmu.shooting-first-frame-preview.v1',prefl
 const result = { ...scope,schema:'qingmu.shooting-first-frame-state.v1',requestId:`shooting-${preview.preflightId}`,task:{ id:'task-one',kernel_status:'Succeeded' },candidate:{ assetId:'asset-new',sha256:'c'.repeat(64),browserUrl:'http://127.0.0.1:65269/api/media/media-new',isSelected:false,qualityStatus:'pending' } }
 const review = { ...scope, frameDigest:'d'.repeat(64),accepted:true,title:'驾驶视点',imagePromptCn:'当前分镜要求',preflight:{ technicalReady:true } }
 afterEach(() => { cleanup(); localStorage.clear(); vi.unstubAllGlobals() })
+it('restores human sign-in inline but waits for another click on the newly displayed revision', async () => {
+  let signedIn = false
+  const updated = { ...review, accepted:false, frameDigest:'e'.repeat(64), imagePromptCn:'登录期间已更新的分镜要求' }
+  const fetcher = vi.fn(async (path:string, init?:RequestInit) => {
+    if (path.endsWith('/human-session')) {
+      expect(JSON.parse(String(init?.body))).toEqual({ username:'human-test',password:'private-test' })
+      signedIn = true
+      return Response.json({ ok:true })
+    }
+    if (path.endsWith('/confirm')) {
+      if (!signedIn) return Response.json({ detail:'请登录本人账户' },{ status:401 })
+      expect(JSON.parse(String(init?.body)).expected_frame_digest).toBe(updated.frameDigest)
+      return Response.json({ status:{ ...updated,accepted:true } })
+    }
+    return Response.json(path.includes('/review?') ? signedIn ? updated : { ...review,accepted:false } : preview)
+  })
+  vi.stubGlobal('fetch',fetcher)
+  render(<ShootingFirstFrame scope={scope} />)
+  fireEvent.click(await screen.findByRole('button',{ name:'确认本镜分镜' }))
+  await screen.findByRole('form',{ name:'恢复分镜确认登录' })
+  fireEvent.change(screen.getByLabelText('账户'),{ target:{ value:'human-test' } })
+  fireEvent.change(screen.getByLabelText('密码'),{ target:{ value:'private-test' } })
+  fireEvent.click(screen.getByRole('button',{ name:'登录本人账户' }))
+  await screen.findByText(updated.imagePromptCn)
+  expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/confirm'))).toHaveLength(1)
+  expect(fetcher.mock.calls.some(([path]) => path.endsWith('/submit'))).toBe(false)
+  expect(document.body.textContent).not.toContain('private-test')
+  expect(JSON.stringify(localStorage)).not.toContain('private-test')
+  fireEvent.click(await screen.findByRole('button',{ name:'确认本镜分镜' }))
+  await waitFor(() => expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/confirm'))).toHaveLength(2))
+})
+it('allows recovery when an expired browser cookie prevents the initial read, and clears failed passwords', async () => {
+  const fetcher = vi.fn(async (_path:string) => Response.json({ detail:'expired' },{ status:401 }))
+  vi.stubGlobal('fetch',fetcher)
+  render(<ShootingFirstFrame scope={scope} />)
+  await screen.findByRole('form',{ name:'恢复分镜确认登录' })
+  fireEvent.change(screen.getByLabelText('账户'),{ target:{ value:'human-test' } })
+  fireEvent.change(screen.getByLabelText('密码'),{ target:{ value:'incorrect' } })
+  fireEvent.click(screen.getByRole('button',{ name:'登录本人账户' }))
+  await screen.findByText('登录未完成，请检查账户和密码后重试。')
+  expect((screen.getByLabelText('密码') as HTMLInputElement).value).toBe('')
+  expect(fetcher.mock.calls.some(([path]) => path.endsWith('/confirm') || path.endsWith('/submit'))).toBe(false)
+})
 it.each([
   ['DispatchPending', '首帧任务已入队，等待派发进度更新；请勿重复生成。'],
   ['QualityPending', '正在检查生成结果并准备候选，尚未人工认可。'],

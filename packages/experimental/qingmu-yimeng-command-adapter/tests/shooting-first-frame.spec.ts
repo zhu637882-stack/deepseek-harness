@@ -5,15 +5,69 @@ import type { WebRoute, WebServer } from '@deepseek-ai/dsh-host-webserver'
 import { registerShootingFirstFrame } from '../src/shooting-first-frame.ts'
 let server: Server | undefined
 afterEach(async () => { if (server) { server.close(); await once(server,'close'); server=undefined } })
-async function host(upstream: typeof fetch) {
+async function host(upstream: typeof fetch, readToken: () => string | undefined = () => undefined) {
   const routes = new Map<string, WebRoute>()
-  registerShootingFirstFrame({ register(route:WebRoute) {routes.set(route.path,route);return () => routes.delete(route.path)} } as unknown as WebServer,'http://127.0.0.1:8115',upstream)
+  registerShootingFirstFrame({ register(route:WebRoute) {routes.set(route.path,route);return () => routes.delete(route.path)} } as unknown as WebServer,'http://127.0.0.1:8115',upstream,readToken)
   server=createServer((req,res) => {const route=routes.get(new URL(req.url ?? '/', 'http://local').pathname);if(route) void route.handler(req,res);else res.end()})
   server.listen(0,'127.0.0.1');await once(server,'listening')
   const address=server.address();if(!address || typeof address==='string') throw Error('missing address')
   return `http://127.0.0.1:${address.port}`
 }
 const body={ project_id:'p',episode_id:'e',frame_ids:['f'],candidate_request_id:'r',shooting_preflight_id:'a'.repeat(64),shooting_payload_hash:'b'.repeat(64) }
+it.each([
+  ['preview', 'POST', { project_id:'p', episode_id:'e', frame_ids:['f'] }],
+  ['submit', 'POST', body],
+  ['review?project_id=p&episode_id=e&frame_id=f', 'GET', undefined],
+  ['state?project_id=p&episode_id=e&frame_id=f&request_id=r', 'GET', undefined],
+  ['video-state?project_id=p&episode_id=e&scene_id=s&frame_id=f', 'GET', undefined],
+  ['video-resume', 'POST', { project_id:'p', episode_id:'e', frame_ids:['f'], scene_id:'s', task_id:'original' }],
+])('uses native identity for %s without creating a human cookie', async (path, method, payload) => {
+  const upstream=vi.fn<typeof fetch>(async () => Response.json({ ok:true }))
+  const readToken=vi.fn(() => 'native-test')
+  const base=await host(upstream,readToken)
+  const response=await fetch(`${base}/api/qingmu/shooting-first-frame/${path}`,{
+    method, headers:{ origin:base }, ...(payload === undefined ? {} : { body:JSON.stringify(payload) }),
+  })
+  expect(response.status).toBe(200);expect(upstream).toHaveBeenCalledTimes(1)
+  const headers=new Headers(upstream.mock.calls[0]![1]?.headers)
+  expect(headers.get('authorization')).toBe('Bearer native-test')
+  expect(headers.get('cookie')).toBeNull()
+  expect(await response.json()).toEqual({ ok:true })
+  expect(response.headers.get('set-cookie')).toBeNull()
+})
+it('never elevates native identity into human confirmation or trusts browser bearer headers', async () => {
+  const upstream=vi.fn<typeof fetch>()
+  const readToken=vi.fn(() => 'native-test')
+  const base=await host(upstream,readToken)
+  for (const [path,headers] of [
+    ['confirm',{ origin:base }],
+    ['preview',{ origin:'https://foreign.test' }],
+    ['preview',{ origin:base,authorization:'Bearer injected' }],
+    ['preview',{ origin:base,authorization:'' }],
+    ['preview',{ origin:base,cookie:'jason_token=' }],
+  ] as const) {
+    expect((await fetch(`${base}/api/qingmu/shooting-first-frame/${path}`,{ method:'POST',headers,body:JSON.stringify(body) })).status).toBe(401)
+  }
+  expect(upstream).not.toHaveBeenCalled();expect(readToken).not.toHaveBeenCalled()
+})
+it('preserves cookie identity and does not replace its upstream rejection with service authority', async () => {
+  const upstream=vi.fn<typeof fetch>(async () => Response.json({ detail:'expired' },{ status:401 }))
+  const readToken=vi.fn(() => 'native-test')
+  const base=await host(upstream,readToken)
+  const response=await fetch(`${base}/api/qingmu/shooting-first-frame/preview`,{
+    method:'POST',headers:{ origin:base,cookie:'jason_token=expired' },
+    body:JSON.stringify({ project_id:'p',episode_id:'e',frame_ids:['f'] }),
+  })
+  expect(response.status).toBe(401);expect(readToken).not.toHaveBeenCalled()
+  expect(upstream).toHaveBeenCalledTimes(1)
+})
+it('does not reflect a service credential in upstream error data', async () => {
+  const upstream=vi.fn<typeof fetch>(async () => Response.json({ detail:'Bearer native-private' },{ status:500 }))
+  const base=await host(upstream,() => 'native-private')
+  const response=await fetch(`${base}/api/qingmu/shooting-first-frame/review?project_id=p&episode_id=e&frame_id=f`)
+  expect(response.status).toBe(502)
+  expect(await response.text()).not.toContain('native-private')
+})
 it('forwards one same-origin cookie submit, with no retry after ambiguous failure',async () => {
   const upstream=vi.fn<typeof fetch>(async () => {throw Error('lost response')})
   const base=await host(upstream)

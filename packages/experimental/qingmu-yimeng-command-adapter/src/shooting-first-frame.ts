@@ -6,17 +6,27 @@ import { isTrustedApiRequest } from '@deepseek-ai/dsh-client-connection/src/api-
  * @param server Host web server.
  * @param baseUrl Configured Writer base URL.
  * @param fetcher Upstream transport.
+ * @param readToken Existing native service credential, never used for human confirmation.
  * @returns Route disposer.
  */
-export function registerShootingFirstFrame(server: WebServer, baseUrl: string, fetcher: typeof fetch = globalThis.fetch): () => void {
+export function registerShootingFirstFrame(
+  server: WebServer, baseUrl: string, fetcher: typeof fetch = globalThis.fetch,
+  readToken: () => string | undefined = () => undefined,
+): () => void {
   const routes = { preview: 'shooting-preview', submit: '', state: 'shooting-state', review: '', confirm: '', 'video-state': '', 'video-resume': '' } as const
   const disposers = Object.entries(routes).map(([operation, suffix]) => server.register({
     kind: 'exact', path: `/api/qingmu/shooting-first-frame/${operation}`, handler: async (req, res) => {
       res.setHeader('cache-control', 'private, no-store')
       res.setHeader('content-type', 'application/json; charset=utf-8')
       const end = (status: number, value: unknown) => { res.statusCode = status; res.end(JSON.stringify(value)) }
+      if (!isTrustedApiRequest(req, []) || req.headers.authorization !== undefined) { end(401, { detail: '请恢复青木登录会话' }); return }
       const cookie = req.headers.cookie?.split(';').map(item => item.trim()).find(item => item.startsWith('jason_token='))
-      if (!isTrustedApiRequest(req, []) || req.headers.authorization || !cookie) { end(401, { detail: '请恢复青木登录会话' }); return }
+      if (cookie !== undefined && (cookie.length <= 'jason_token='.length || cookie.length > 8192 || /[\r\n]/.test(cookie))) {
+        end(401, { detail: '请恢复青木登录会话' }); return
+      }
+      if (operation === 'confirm' && cookie === undefined) {
+        end(401, { detail: '请登录本人账户后确认当前分镜', code: 'storyboard_human_session_required' }); return
+      }
       const read = operation === 'state' || operation === 'review' || operation === 'video-state'
       if (req.method !== (read ? 'GET' : 'POST')) { end(405, { detail: 'method_not_allowed' }); return }
       const incoming = new URL(req.url ?? '', 'http://localhost')
@@ -55,10 +65,18 @@ export function registerShootingFirstFrame(server: WebServer, baseUrl: string, f
             body = JSON.stringify({ expected_frame_digest: value.expected_frame_digest, idempotency_key: value.idempotency_key, decision: 'accepted' })
           } else body = JSON.stringify(value)
         }
-        const headers = new Headers({ cookie, accept: 'application/json', origin: upstream.origin, 'content-type': 'application/json' })
+        const headers = new Headers({ accept: 'application/json', origin: upstream.origin, 'content-type': 'application/json' })
+        let serviceToken: string | undefined
+        if (cookie !== undefined) headers.set('cookie', cookie)
+        else {
+          serviceToken = readToken()?.trim()
+          if (!serviceToken || /[\r\n]/.test(serviceToken)) { end(401, { detail: '请恢复青木登录会话' }); return }
+          headers.set('authorization', `Bearer ${serviceToken}`)
+        }
         const response = await fetcher(upstream, { method: req.method, headers, redirect: 'error', signal: AbortSignal.timeout(60_000), ...(body === undefined ? {} : { body }) })
         const text = await response.text()
         if (Buffer.byteLength(text) > 512 * 1024) throw new Error('response_too_large')
+        if (serviceToken && text.includes(serviceToken)) throw new Error('credential_in_response')
         const result = JSON.parse(text) as { candidate?: { browserUrl?: unknown } }
         if (response.ok && result.candidate) {
           const path = result.candidate.browserUrl

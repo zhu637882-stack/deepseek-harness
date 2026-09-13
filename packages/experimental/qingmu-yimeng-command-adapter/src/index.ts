@@ -6341,7 +6341,7 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
   ctx.effect(() => registerCreationStylePreview(ctx.webServer, {
     baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL), fetch: globalThis.fetch,
   }), 'qingmu-yimeng-command: creation style previews')
-  ctx.effect(() => registerShootingFirstFrame(ctx.webServer, resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL)), 'qingmu-yimeng-command: shooting first frame')
+  ctx.effect(() => registerShootingFirstFrame(ctx.webServer, resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL), globalThis.fetch, readToken), 'qingmu-yimeng-command: shooting first frame')
   ctx.effect(() => registerEntityDraftReviewCommands(ctx.webServer, {
     baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),
     fetch: globalThis.fetch,

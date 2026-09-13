@@ -20,3 +20,9 @@
 .log summary { cursor:pointer; min-height:24px; }
 .log[open] { position:absolute; z-index:3; inset:12px; overflow:auto; border:1px solid var(--line,#2b3d4a); padding:16px; }
 .log pre { overflow-wrap:anywhere; }
+.login { display:flex; flex-wrap:wrap; align-items:end; gap:12px; padding:12px 16px; border-top:1px solid var(--line,#2b3d4a); }
+.login p { flex-basis:100%; margin:0; color:var(--muted,#9badb9); font-size:13px; }
+.login label { display:flex; flex-direction:column; gap:4px; font-size:13px; }
+.login input { width:180px; min-height:36px; padding:6px; border:1px solid var(--line,#2b3d4a); border-radius:4px; background:var(--bg,#0b1117); color:inherit; }
+.login button { min-height:36px; padding:6px 12px; border:0; border-radius:4px; background:var(--accent,#d7ff52); color:#101a0d; cursor:pointer; }
+.login button:disabled { opacity:.5; cursor:default; }

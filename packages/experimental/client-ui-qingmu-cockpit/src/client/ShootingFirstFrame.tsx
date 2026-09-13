@@ -94,6 +94,9 @@ export function assertShootingPreview(value: unknown, scope: ShootingFrameScope)
   }
   return value as unknown as Preview
 }
+class FrameRequestError extends Error {
+  constructor(message: string, readonly status: number) { super(message) }
+}
 async function request(path: string, body?: object, signal?: AbortSignal): Promise<unknown> {
   const response = await fetch(`/api/qingmu/shooting-first-frame/${path}`, {
     method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store', redirect: 'error',
@@ -101,7 +104,7 @@ async function request(path: string, body?: object, signal?: AbortSignal): Promi
     ...(signal === undefined ? {} : { signal }),
   })
   const value = await response.json() as { readonly detail?: unknown }
-  if (!response.ok) throw new Error(typeof value.detail === 'string' ? value.detail : JSON.stringify(value.detail ?? '本镜请求未完成'))
+  if (!response.ok) throw new FrameRequestError(typeof value.detail === 'string' ? value.detail : JSON.stringify(value.detail ?? '本镜请求未完成'), response.status)
   return value
 }
 function assertAttempt(value: unknown, scope: ShootingFrameScope, requestId: string): Attempt {
@@ -172,6 +175,15 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview, req
     return () => onCandidatePreview?.(undefined, undefined)
   }, [previewCandidate, imageKey, loadedImage, materialized?.browserUrl, ownsImagePreview, onCandidatePreview])
   const [review, setReview] = useState<FrameReview>(); const [confirming, setConfirming] = useState(false)
+  const [needsLogin, setNeedsLogin] = useState(false)
+  const [username, setUsername] = useState(''); const [password, setPassword] = useState('')
+  const [loginBusy, setLoginBusy] = useState(false); const [loginMessage, setLoginMessage] = useState('')
+  const loginLock = useRef(false); const activeScope = useRef(key); activeScope.current = key
+  useEffect(() => {
+    activeScope.current = key
+    setNeedsLogin(false); setPassword(''); setLoginMessage(''); setLoginBusy(false)
+    return () => { activeScope.current = '' }
+  }, [key])
   const confirmingLock = useRef(false)
   const lock = useRef(false); const notified = useRef('')
   const input = { project_id: scope.projectId, episode_id: scope.episodeId, frame_ids: [scope.frameId] }
@@ -187,7 +199,12 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview, req
     const controller = new AbortController()
     void request(`review?${reviewQuery}`, undefined, controller.signal)
       .then((value) => { if (!controller.signal.aborted) setReview(assertFrameReview(value, scope.frameId)) })
-      .catch((cause) => { if (!controller.signal.aborted) setError(String(cause)) })
+      .catch((cause) => {
+        if (!controller.signal.aborted) {
+          if (cause instanceof FrameRequestError && cause.status === 401) setNeedsLogin(true)
+          else setError(String(cause))
+        }
+      })
     return () => controller.abort()
   }, [key, requirementsReady])
   useEffect(() => {
@@ -276,7 +293,8 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview, req
     setReview(currentReview); setRequestId(''); setAttempt(undefined); lock.current = false; setPreview(fresh)
   }
   const confirm = async () => {
-    if (!requirementsReady || !review || review.accepted || !review.preflight.technicalReady || confirmingLock.current) return
+    if (!requirementsReady || !review || review.accepted || !review.preflight.technicalReady
+      || confirmingLock.current || needsLogin || loginBusy) return
     confirmingLock.current = true; setConfirming(true); setError('')
     try {
       // Bind the revision already shown to the human. Never fetch-and-sign a newer revision.
@@ -290,8 +308,38 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview, req
       if (!requestId || (attempt?.task === null && submissionBlocker(attempt))) {
         await prepareAgain()
       }
-    } catch (cause) { setError(String(cause)) }
+    } catch (cause) {
+      if (cause instanceof FrameRequestError && cause.status === 401) { setNeedsLogin(true); setError('') }
+      else setError(String(cause))
+    }
     finally { confirmingLock.current = false; setConfirming(false) }
+  }
+  const login = async () => {
+    if (loginLock.current || !username.trim() || !password) return
+    loginLock.current = true; setLoginBusy(true); setLoginMessage('')
+    try {
+      const response = await fetch('/api/qingmu/editorial-handoff/human-session', {
+        method: 'POST', credentials: 'same-origin', cache: 'no-store', redirect: 'error',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: username.trim(), password }),
+      })
+      if (activeScope.current !== key) return
+      setPassword('')
+      if (!response.ok) { setLoginMessage('登录未完成，请检查账户和密码后重试。'); return }
+      const currentReview = assertFrameReview(await request(`review?${reviewQuery}`), scope.frameId)
+      if (activeScope.current !== key) return
+      setReview(currentReview); setNeedsLogin(false); setError('')
+      if (!requestId) {
+        const currentPreview = assertShootingPreview(await request('preview', input), scope)
+        if (activeScope.current !== key) return
+        setPreview(currentPreview)
+      }
+      setLoginMessage('已恢复登录，请核对当前画面要求后确认本镜分镜。')
+    } catch {
+      if (activeScope.current === key) setLoginMessage('登录状态尚未核对完成，请稍后重试。')
+    } finally {
+      loginLock.current = false
+      if (activeScope.current === key) { setLoginBusy(false); setPassword('') }
+    }
   }
   if (!requirementsReady) return <section aria-label="首帧生成" className={css.generation}>
     <div className={css.preview}><div className={css.preparation} role="alert"><h3>先核对本镜分镜要求</h3><p>尚未读取到本镜已保存的首帧要求，因此没有开始预检或生成。</p>{requestId && <p role="status">正在读取已存在首帧任务；不会重新提交。</p>}</div></div>
@@ -321,6 +369,15 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview, req
         alt={`${preview.compositionReference.sceneName}的本镜空间取景参考`} /><figcaption>这张布局图随请求提交，用于位置、透视和遮挡；生成后的实际画面仍需审看。</figcaption></figure>}
       <pre style={{ whiteSpace: 'pre-wrap' }}>{preview.prompt}</pre>
     </details>}
+    {needsLogin && <form className={css.login} aria-label="恢复分镜确认登录" onSubmit={(event) => { event.preventDefault(); void login() }}>
+      <p>确认分镜需要本人账户登录。登录后可以继续核对当前分镜。</p>
+      <label>账户<input autoComplete="username" value={username} disabled={loginBusy}
+        onChange={event => setUsername(event.target.value)} /></label>
+      <label>密码<input type="password" autoComplete="current-password" value={password} disabled={loginBusy}
+        onChange={event => setPassword(event.target.value)} /></label>
+      <button type="submit" disabled={loginBusy || !username.trim() || !password}>{loginBusy ? '正在登录…' : '登录本人账户'}</button>
+    </form>}
+    {loginMessage && <p role="status" className={css.error}>{loginMessage}</p>}
     <div className={css.actions}>
       {attempt?.canActivate === true && !busy && <button type="button" onClick={() => { void resume() }}>继续原首帧任务</button>}
       {attempt?.canRegenerate === true && !busy && <button type="button" onClick={() => {
@@ -330,7 +387,7 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview, req
       }}>重新生成首帧</button>}
       {review && !review.accepted && <>
         {confirming ? <p role="status">正在保存你的本镜确认…</p>
-          : review.preflight.technicalReady && <button className={css.primary} type="button" onClick={() => { void confirm() }}>确认本镜分镜</button>}
+          : review.preflight.technicalReady && !needsLogin && <button className={css.primary} type="button" onClick={() => { void confirm() }}>确认本镜分镜</button>}
       </>}
       {review?.accepted === true && requestId && attempt?.task === null && !busy && !confirming &&
       <button type="button" onClick={() => {
