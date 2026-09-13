@@ -235,9 +235,12 @@ export function QingmuCockpit({
   const assetWorkbenchRef = useRef<HTMLDivElement>(null)
   const requestRef = useRef(0)
   const abortRef = useRef<AbortController>()
+  const cutDirty = useRef(false)
+  const onCutDirty = useCallback((dirty: boolean) => { cutDirty.current = dirty }, [])
   const directorDirty = useRef(false)
   const onDirectorDirty = useCallback((dirty: boolean) => { directorDirty.current = dirty }, [])
-  const mayLeaveDirector = (): boolean => !directorDirty.current || window.confirm(t('directorLeaveConfirm'))
+  const mayLeaveDirector = (): boolean => (!cutDirty.current || window.confirm('当前剪辑与声音修改尚未保存，离开会丢失本次修改。仍要离开吗？'))
+    && (!directorDirty.current || window.confirm(t('directorLeaveConfirm')))
   const openCandidateReview = (frameId: string) => {
     if (!mayLeaveDirector()) return
     setSelectedShotId(frameId)
@@ -972,10 +975,20 @@ export function QingmuCockpit({
       delivery: <div className={css.creativePage}>
         {pageHeader('05', '成片与导出', '选择视频版本，调整剪辑，导出可播放的完整作品。', null)}{projectFacts}
         <div className={css.stageActions}><button type="button" onClick={() => { changeStep('shooting') }}>← 返回拍摄与审看</button></div>
-        <div className={css.stageContent}><WorkingCut key={`${projectId}:${episodeId}`} projectId={projectId} episodeId={episodeId} port={port} onOpenShooting={openCandidateReview} />
-          <details className={css.stageSupporting}><summary>专业剪辑交接与审核记录</summary>
-            <EditorialHandoff compact projectId={projectId} episodeId={episodeId}
-              port={port} t={t} onOpenShooting={openCandidateReview} /></details></div>
+        <div className={css.stageContent}><WorkingCut key={`${projectId}:${episodeId}`} projectId={projectId} episodeId={episodeId} port={port} onOpenShooting={openCandidateReview}
+          onUnsavedChange={onCutDirty} renderDirector={nativeDirectorSession ? ready => <div className={css.inlineDirector}>
+            <NativeDirectorSession compact port={nativeDirectorSession} bridge={directorBridge} sessionId={directorSessionId}
+              currentSessionId={currentSessionId} projectId={projectId} onRefresh={() => { setDirectorRefresh(value => value + 1) }} />
+            <DirectorWorkspace presentation="assistant" nativePromptMode="cut-sound" nativePromptReady={ready}
+              projectId={projectId} episodeId={episodeId} projection={projection} shotItems={shotItems}
+              selectedShotId={selectedShotId} onSelectShotId={setSelectedShotId} onUnsavedChange={onDirectorDirty}
+              port={port} directorBridge={directorBridge} directorSessionId={directorSessionId}
+              directorConnection={nativeDirectorSession.connection} directorRefresh={directorRefresh}
+              nativeDirectorSession={nativeDirectorSession} hostSync={hostSync} t={t} onCommitted={refreshWorkflowProjectionAfterCommit} />
+          </div> : undefined} />
+        <details className={css.stageSupporting}><summary>专业剪辑交接与审核记录</summary>
+          <EditorialHandoff compact projectId={projectId} episodeId={episodeId}
+            port={port} t={t} onOpenShooting={openCandidateReview} /></details></div>
       </div>,
     }
     return <QingmuApplicationFrame projects={projects.map(p => ({ id: stringOf(p.id) ?? '', label: projectLabel(p, '未命名项目') }))}

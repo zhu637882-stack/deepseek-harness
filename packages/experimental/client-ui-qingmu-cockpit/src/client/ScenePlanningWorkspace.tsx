@@ -230,9 +230,11 @@ function validatedPendingIntent(
 export function ScenePlanningWorkspace({
   projectId, episodeId, port, directorBridge, directorSessionId, directorConnection, directorRefresh, nativeDirectorSession,
   hostSync, onUnsavedChange, onCommitted, onSelectShotId, canonicalDirectorScope, canonicalDirectorRevision,
-  presentation = 'planning',
+  presentation = 'planning', nativePromptMode = 'shot', nativePromptReady = true,
 }: {
   readonly presentation?: 'planning' | 'assistant' | undefined
+  readonly nativePromptMode?: 'shot' | 'cut-sound' | undefined
+  readonly nativePromptReady?: boolean | undefined
   readonly projectId: string
   readonly episodeId: string
   readonly port: Pick<QingmuYimengPort, 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning'
@@ -850,11 +852,12 @@ export function ScenePlanningWorkspace({
     && state.scriptSha256 === local.base.expectedScriptSha256
     && ((state.planning && local.shotIds[index] === state.planning.shots[index]?.id)
       || (state.planning === null && !state.canonicalStoryboard && local.shotIds.length === 0)))
-  if (presentation === 'assistant') return <section className={css.assistant} aria-label="当前镜头导演助手">
-    <p>说出你想改的地方，导演会结合当前镜头处理。</p>
+  if (presentation === 'assistant') return <section className={css.assistant} aria-label={nativePromptMode === 'cut-sound' ? '整片声音导演助手' : '当前镜头导演助手'}>
+    <p>{nativePromptMode === 'cut-sound' ? '导演依据本集已保存的完整剪辑安排声音。完成后读取保存结果，再试听并导出。' : '说出你想改的地方，导演会结合当前镜头处理。'}</p>
     {nativeDirectorSession && <NativeDirectorComposer port={nativeDirectorSession}
       sessionId={directorSessionId ?? projectDirectorSessionId(projectId)}
-      scopeKey={JSON.stringify(canonicalDirectorScope)} ready={nativeTarget !== undefined}
+      mode={nativePromptMode} scopeKey={JSON.stringify(nativePromptMode === 'cut-sound' ? { projectId, episodeId } : canonicalDirectorScope)}
+      ready={nativeTarget !== undefined && nativePromptReady}
       target={nativeTarget} onCommitted={onCommitted} />}
     {directorStatus !== 'current' && <p role="status">{directorStatus === 'connecting' ? '正在读取当前镜头…'
       : !connection ? '连接已断开，恢复后可继续。' : '当前镜头尚未连接导演，请先进入或恢复导演。'}</p>}

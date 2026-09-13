@@ -8,6 +8,39 @@ const state: WorkingCutState = { schema:'qingmu-working-cut-v1',projectId:'p',ep
   cuts:[],providerCalls:0,humanApprovalChanged:false }
 afterEach(() => { cleanup();localStorage.clear() })
 
+it('requires saved edits for the whole-cut director and rereads its saved result without a render', async () => {
+  let server: WorkingCutState = { ...state }
+  const save = vi.fn(async ({ command }: { command: WorkingCutCommand }) => {
+    server = { ...server, revision: server.revision + 1, cuts: [{ ...command, version: 1, revisionId: 'r', taskId: null,
+      status: 'NotQueued', errorCode: null, assetId: null, sha256: null, url: '' }] }
+    return server
+  })
+  const port = { readWorkingCut: vi.fn(async () => server), saveWorkingCut: save,
+    renderWorkingCut: vi.fn(), reviewWorkingCutSound: vi.fn(), uploadWorkingCutAudio: vi.fn() }
+  const dirty = vi.fn()
+  const director = vi.fn((ready: boolean) => <button disabled={!ready}>声音导演发送</button>)
+  render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()}
+    onUnsavedChange={dirty} renderDirector={director} />)
+  const details = (await screen.findByText('整片声音导演')).closest('details')!
+  expect(director).not.toHaveBeenCalled()
+  details.open = true; fireEvent(details, new Event('toggle'))
+  expect(await screen.findByRole('button', { name: '声音导演发送' })).toHaveProperty('disabled', true)
+  fireEvent.click(screen.getByRole('button', { name: '保存剪辑草稿' }))
+  await waitFor(() => { expect(screen.getByRole('button', { name: '声音导演发送' })).toHaveProperty('disabled', false) })
+  fireEvent.change(screen.getByRole('spinbutton', { name: '镜 1 终点秒' }), { target: { value: '10' } })
+  expect(dirty).toHaveBeenLastCalledWith(true)
+  expect(screen.getByRole('button', { name: '声音导演发送' })).toHaveProperty('disabled', true)
+  expect(screen.getByRole('button', { name: '读取导演保存的剪辑' })).toHaveProperty('disabled', true)
+  fireEvent.click(screen.getByRole('button', { name: '保存剪辑草稿' }))
+  await waitFor(() => { expect(dirty).toHaveBeenLastCalledWith(false) })
+  server = { ...server, revision: server.revision + 1, cuts: [{ ...server.cuts[0]!, soundPlan: '已安排整片连续环境声' }] }
+  fireEvent.click(screen.getByRole('button', { name: '读取导演保存的剪辑' }))
+  await waitFor(() => { expect(screen.getByDisplayValue('已安排整片连续环境声')).toBeTruthy() })
+  expect(screen.getByRole('spinbutton', { name: '镜 1 终点秒' })).toHaveProperty('value', '10')
+  expect(port.renderWorkingCut).not.toHaveBeenCalled()
+  expect(port.reviewWorkingCutSound).not.toHaveBeenCalled()
+})
+
 it('explicitly loops a short sound across the film, validates overlap and recovers the saved bed', async () => {
   let server: WorkingCutState = { ...state, audioLibrary: [
     { assetId: 'room', sha256: 'b'.repeat(64), name: '室内底声', duration: 2, url: '' },

@@ -241,6 +241,27 @@ it('reports transport failure without retrying the possibly accepted native turn
   await expect(f.port.prompt(f.target, '保持铁轨在右侧。', new AbortController().signal)).rejects.toThrow('lost response')
   expect(f.api.sessions.prompt).toHaveBeenCalledTimes(1)
 })
+it('keeps whole-cut sound and shot drafts separate and sends only after the saved cut is ready', async () => {
+  const f = fixture(false, 'qingmu-director')
+  const prompt = vi.fn(async () => {})
+  const props = { port: { ...f.port, prompt }, sessionId: 's1', scopeKey: 'episode1', target: f.target, ready: false }
+  const view = render(<NativeDirectorComposer {...props} mode="cut-sound" />)
+  fireEvent.click(screen.getByRole('button', { name: '安排整片声音' }))
+  const text = (screen.getByRole('textbox', { name: '导演要求' }) as HTMLTextAreaElement).value
+  expect(text).toMatchSnapshot('whole-cut sound request')
+  expect(screen.getByRole('button', { name: '发送给当前导演' })).toHaveProperty('disabled', true)
+  expect(prompt).not.toHaveBeenCalled()
+  view.rerender(<NativeDirectorComposer {...props} mode="shot" ready />)
+  expect(screen.getByRole('textbox', { name: '导演要求' })).toHaveProperty('value', '')
+  fireEvent.change(screen.getByRole('textbox', { name: '导演要求' }), { target: { value: '保留当前镜头' } })
+  view.rerender(<NativeDirectorComposer {...props} mode="cut-sound" ready />)
+  expect(screen.getByRole('textbox', { name: '导演要求' })).toHaveProperty('value', text)
+  fireEvent.click(screen.getByRole('button', { name: '发送给当前导演' }))
+  await waitFor(() => { expect(prompt).toHaveBeenCalledExactlyOnceWith(f.target, text, expect.any(AbortSignal)) })
+  expect((await screen.findByRole('status')).textContent).toContain('读取导演保存的剪辑')
+  view.rerender(<NativeDirectorComposer {...props} mode="shot" ready />)
+  expect(screen.getByRole('textbox', { name: '导演要求' })).toHaveProperty('value', '保留当前镜头')
+})
 it('submits once while pending and reports acceptance rather than creative completion', async () => {
   const f = fixture(false, 'qingmu-director')
   let finish!: () => void

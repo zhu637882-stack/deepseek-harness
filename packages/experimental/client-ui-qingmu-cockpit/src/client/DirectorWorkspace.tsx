@@ -17,6 +17,8 @@ import { useNativeDialogueExecution } from './NativeDialogueProgress.tsx'
 /** Props retain Yimeng's scene/frame identities; no director state is persisted here. */
 export interface DirectorWorkspaceProps {
   readonly presentation?: 'planning' | 'assistant' | undefined
+  readonly nativePromptMode?: 'shot' | 'cut-sound' | undefined
+  readonly nativePromptReady?: boolean | undefined
   readonly projectId: string
   readonly episodeId: string
   readonly projection: YimengWorkflowProjection | undefined

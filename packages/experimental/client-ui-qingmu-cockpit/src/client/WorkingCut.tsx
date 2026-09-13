@@ -1,5 +1,5 @@
 /** Creator-editable sequence and downloadable local MP4 versions. */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { WorkingAudioCue, WorkingClip, WorkingCutCommand, WorkingCutState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
 import css from './WorkingCut.module.css'
@@ -12,11 +12,13 @@ import { soundCueDuration, validSoundLoop } from './working-sound-loop.ts'
  * @param props - Active project/episode and authenticated command port.
  * @returns Editable film sequence and retained rendered versions.
  */
-export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
+export function WorkingCut({ projectId, episodeId, port, onOpenShooting, renderDirector, onUnsavedChange }: {
   readonly projectId: string
   readonly episodeId: string
   readonly port: Pick<QingmuYimengPort, 'readWorkingCut' | 'renderWorkingCut' | 'saveWorkingCut' | 'uploadWorkingCutAudio' | 'reviewWorkingCutSound'>
   readonly onOpenShooting: (frameId: string) => void
+  readonly renderDirector?: ((ready: boolean) => ReactNode) | undefined
+  readonly onUnsavedChange?: ((dirty: boolean) => void) | undefined
 }) {
   const [state, setState] = useState<WorkingCutState>()
   const [clips, setClips] = useState<readonly WorkingClip[]>([])
@@ -26,6 +28,11 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [dirty, setDirty] = useState(false)
+  const [directorOpen, setDirectorOpen] = useState(false)
+  useEffect(() => {
+    onUnsavedChange?.(dirty)
+    return () => { onUnsavedChange?.(false) }
+  }, [dirty, onUnsavedChange])
   const [playingVersion, setPlayingVersion] = useState<string>()
   const player = useRef<HTMLVideoElement>(null)
   const live = useRef(true), editing = useRef(false)
@@ -144,6 +151,16 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
       }).catch((cause: unknown) => { setError(String(cause)) })
     }}>重新核对剪辑</button></div>}
     {!state ? <p role="status">正在读取镜头…</p> : <>
+      {renderDirector && <details open={directorOpen} onToggle={(event) => { setDirectorOpen(event.currentTarget.open) }}>
+        <summary>整片声音导演</summary>
+        {dirty || !state.cuts.length
+          ? <p role="status">请先保存剪辑草稿，导演才能依据当前画面和音轨安排声音。</p>
+          : <p>可先让导演安排声音草稿，再核对音轨并导出。打开此面板不会发送要求。</p>}
+        {directorOpen && renderDirector(!dirty && !locked && valid && state.cuts.length > 0)}
+        <button type="button" disabled={dirty || locked} onClick={() => {
+          setError(''); void read().catch((cause: unknown) => { setError(String(cause)) })
+        }}>读取导演保存的剪辑</button>
+      </details>}
       {state.shots.some(shot => shot.editorialContext) && <details><summary>导演的接镜与声桥安排</summary>
         <p>以下是当前导演设计。请依据所选素材设置剪辑点与声音轨，再保存；这些说明不会自动改变成片。</p>
         {state.shots.filter(shot => shot.editorialContext).map(shot => <div key={shot.frameId}>
