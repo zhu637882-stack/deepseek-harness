@@ -170,6 +170,21 @@ function setup() {
     readAssetImageRuns: vi.fn(async (): Promise<AssetImageRuns> => ({ ...scope, items: [] })) }
   return port
 }
+it('shows the actual composition image input when no photographic reference is bound', async () => {
+  const port = setup()
+  const quoted = await port.quoteAssetImage()
+  port.quoteAssetImage.mockResolvedValue({ ...quoted, references: [], compositionReference: {
+    imageUrl: 'data:image/png;base64,eA==', sha256: 'f'.repeat(64), width: 1280, height: 720,
+    objects: [],
+  } } as Awaited<ReturnType<typeof port.quoteAssetImage>>)
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  fireEvent.click(await screen.findByRole('button', { name: '查看生成费用' }))
+  const quote = within(await screen.findByRole('region', { name: '确认图片生成' }))
+  expect(quote.getByText('使用 0 张素材参考图和 1 张空间取景图生成新候选。')).toBeTruthy()
+  expect(quote.getByRole('img', { name: '本次生成附带的空间取景图' }).getAttribute('src')).toBe('data:image/png;base64,eA==')
+  expect(quote.queryByText('根据文字设计生成新候选。')).toBeNull()
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
 it('starts the next project catalog at page one without retaining previous project images', async () => {
   const read = vi.fn(async ({ projectId, page }: { projectId: string; page: number }) => ({
     projectId, page, pages: projectId === 'first' ? 2 : 1,
