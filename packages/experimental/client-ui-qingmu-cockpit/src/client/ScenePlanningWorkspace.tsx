@@ -24,6 +24,7 @@ import { projectDirectorSessionId, useDirectorConnection } from './native-direct
 import type { NativeDirectorSessionPort } from './native-director-session.ts'
 import { NativeDirectorComposer } from './NativeDirectorComposer.tsx'
 import { NativeSceneDesign } from './NativeSceneDesign.tsx'
+import { NativeSceneReconcile } from './NativeSceneReconcile.tsx'
 import { SceneDirectionEditor } from './SceneDirectionEditor.tsx'
 
 interface LocalPlan {
@@ -916,13 +917,32 @@ export function ScenePlanningWorkspace({
       {state?.frameRequirements?.some(shot => shot.generationContextSource?.state === 'changed'
         || shot.generationContextSource?.state === 'untracked') && <section className={css.notice} aria-label="共用设定同步状态">
         <h3>共用设定与镜头设计</h3>
-        <p>共用场景或人物设定修改后，需由导演同步受影响镜头的首帧、调度、运镜与动作。旧稿和已有素材保留；在拍摄助手选择“同步共用设定”处理。</p>
+        <p>共用场景或人物设定修改后，需由导演同步受影响镜头的首帧、调度、运镜与动作。可在下方统筹整场，也可在拍摄助手选择“同步共用设定”单独处理；旧稿和已有素材保留。</p>
         <ul>{state.frameRequirements.filter(shot => shot.generationContextSource?.state === 'changed'
           || shot.generationContextSource?.state === 'untracked').map(shot => <li key={shot.id}>
             镜 {shot.frameNo} · {shot.title}：{shot.generationContextSource?.state === 'changed'
             ? `需要同步（${shot.generationContextSource.changes.join('、')}）` : '旧稿尚未记录来源，可由导演核对后接续'}
         </li>)}</ul>
       </section>}
+      {state && nativeDirectorSession?.story && port.readAssetDesign && (() => {
+        const boundScene = canonicalStoryboard
+          ? (canonicalStoryboard.shots?.find(shot => shot.id === automatic?.shotId) ?? canonicalStoryboard.shots?.[0])?.sceneId
+          : state.planning?.sceneId
+        if (!boundScene) return null
+        return <details><summary>统筹本场已有镜头</summary>
+          <NativeSceneReconcile key={`${projectId}:${episodeId}:${boundScene}`} state={state} sceneId={boundScene}
+            port={{ readAssetDesign: port.readAssetDesign, readScenePlanning: port.readScenePlanning,
+              saveScenePlanning: port.saveScenePlanning }}
+            storyPort={nativeDirectorSession.story}
+            disabled={busy || Boolean(local?.dirty || local?.pending || automatic?.dirty || automatic?.pending)}
+            onSaved={async () => {
+              const next = forScene(await port.readScenePlanning({ projectId, episodeId }, controller.current.signal), sceneIndex)
+              if (!isLive()) return
+              setState(next); update(saved(next)); updateAutomatic(null)
+              await onCommitted()
+            }} />
+        </details>
+      })()}
       <div className={css.actions}><button type="button" disabled={busy || state === null} onClick={() => { void run(true) }}>读取恢复</button>
         {local?.pending && retryAllowed && <button type="button" disabled={busy || canRebase} onClick={() => { void run(false) }}>重试原保存</button>}
         {canRebase && <button type="button" onClick={() => {
