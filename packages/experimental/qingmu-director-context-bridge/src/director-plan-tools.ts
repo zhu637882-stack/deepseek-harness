@@ -77,7 +77,7 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
     presentCall: () => ({ card: 'generic', kind: 'edit', title: '加入空间声学响应' }),
     async execute(args, exec) {
       if (!exec.agent) throw new Error('空间响应导入需要当前导演会话。')
-      assertNativeTurnTarget(exec.agent.session, exec.callId, true)
+      assertNativeTurnTarget(exec.agent.session, exec.callId, 'selection')
       const current = await ports.readBoundContext(exec)
       assertCurrent(current, exec)
       const { projectId, episodeId } = current.state.binding.scope
@@ -190,7 +190,7 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
     async execute(args, exec) {
       if (!exec.agent) throw new Error('导演设计需要当前会话。')
       const session = exec.agent.session
-      assertNativeTurnTarget(session, exec.callId, true)
+      assertNativeTurnTarget(session, exec.callId, 'selection')
       const input = toolValues(session, 'qingmu_read_director_plan')
         .findLast(value => (value as Partial<Input> | null)?.receiptId === args.receiptId) as Partial<Input> | undefined
       if (!input?.scope || !input.context || !input.planning || input.schema !== 'qingmu.native-director-plan.v1' || digest({ scope: input.scope, context: input.context, planning: input.planning }) !== args.receiptId) throw new Error('请先读取当前导演设计。')
@@ -234,7 +234,7 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
       let next: { before: string; after: string } | null = null
       try {
         const refreshed = await ctx.qingmuYimengCommand('readDirectorContext', input.scope, exec.signal)
-        assertNativeTurnTarget(session, exec.callId, true)
+        assertNativeTurnTarget(session, exec.callId, 'selection')
         if (refreshed.ok && !recovered.ok) next = continuation(input.context, refreshed.value as DirectorContextSnapshot, result)
       } catch { /* Report the confirmed write even if refreshing its continuation fails. */ }
       return ports.boundedJson({ schema: 'qingmu.native-director-plan-saved.v1', scope: input.scope,

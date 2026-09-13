@@ -139,12 +139,14 @@ function writer(extraShots = 0, image?: { sha256: string; url: string; config?: 
         request: { directorPlan: Record<string, unknown>; expectedStoryboardRevision: number; imagePromptCn: string }
       }
       if (body.request.expectedStoryboardRevision !== currentPlanning.storyboard.version) return Response.json({ detail: { code: 'planning_storyboard_conflict' } }, { status: 409 })
-      const storyboard = { ...currentPlanning.storyboard, id: 'revision-2', version: 2, sourceHash: 'd'.repeat(64) }
+      const version = currentPlanning.storyboard.version + 1
+      const storyboard = { ...currentPlanning.storyboard, id: `revision-${version}`, version,
+        sourceHash: version === 2 ? 'd'.repeat(64) : sha(body.request) }
       const shots = currentPlanning.frameRequirements.map(shot => shot.id === scope.shotId
         ? { ...shot, imagePromptCn: body.request.imagePromptCn, directorPlan: body.request.directorPlan } : shot)
       currentPlanning = { ...currentPlanning, storyboard,
         frameRequirements: shots,
-        canonicalStoryboard: { ...currentPlanning.canonicalStoryboard, revision: 2, sourceHash: storyboard.sourceHash,
+        canonicalStoryboard: { ...currentPlanning.canonicalStoryboard, revision: version, sourceHash: storyboard.sourceHash,
           shots } }
       const prompt = canonical(body.request.directorPlan)
       directorSource = { sha256: sha(prompt), prompt }
@@ -200,6 +202,7 @@ function writer(extraShots = 0, image?: { sha256: string; url: string; config?: 
   const read = createYimengReadHandler({}, { fetch, readToken: () => 'test-only' })
   const command = createYimengCommandHandler({}, { fetch, readToken: () => 'test-only', readYimeng: read })
   return { fetch, read, command, inputReceipt, saved: () => saved, director: () => currentPlanning.frameRequirements[0]!.directorPlan,
+    planReceipt: () => sha({ scope, context: currentContext, planning: currentPlanning }),
     setDirectorSource: (value: typeof directorSource) => { directorSource = value },
     afterDraftRead: (callback: () => void) => { afterDraftRead = callback },
     afterSave: (callback: () => void) => { afterSave = callback },
@@ -313,6 +316,54 @@ it('reads the actual image preparation through the shipped director and command 
   expect(actual).toMatchSnapshot('actual first-frame input')
   expect(JSON.stringify(adapter.requests.at(-1)?.messages)).toContain(actual.preview.prompt.split('\n')[0])
   expect(upstream.fetch.mock.calls.some(([url]) => /\/(generate|submit)$/.test(String(url)))).toBe(false)
+})
+
+it.each([false, true])('continues two director saves in one turn and rejects a stale refresh (%s)', async (staleRefresh) => {
+  const upstream = writer(), original = upstream.fetch.getMockImplementation()!
+  const references = [{ assetId: 'room', assetSha256: 'a'.repeat(64), purpose: '固定房间格局。' }]
+  let writes = 0, finalContextRead = false
+  let earlierContext: unknown
+  upstream.fetch.mockImplementation(async (input, init) => {
+    const path = new URL(input instanceof Request ? input.url : input).pathname
+    if (path.endsWith('/shooting-preview')) {
+      if (writes === 1) return Response.json({ detail: '完整提示词超过模型上限，请整理重复描述。' }, { status: 409 })
+      return Response.json({ schema: 'qingmu.shooting-first-frame-preview.v1', ...scope, frameId: scope.shotId,
+        preflightId: '6'.repeat(64), payloadHash: '7'.repeat(64), blockers: [],
+        prompt: '已整理的首帧描述，保留完整导演设计。', referenceBindings: references })
+    }
+    const response = await original(input, init)
+    if (path.endsWith('/scene-planning/commands') && response.ok) writes++
+    if (path.endsWith('/director-inference/context')) {
+      if (writes === 1) earlierContext = await response.clone().json()
+      // The save observes its current committed revision. A later refresh that
+      // returns an earlier revision must not authorize preview or another write.
+      if (writes === 2) {
+        if (staleRefresh && finalContextRead) return Response.json(earlierContext)
+        finalContextRead = true
+      }
+    }
+    return response
+  })
+  const refined = { ...design, imageStage: '演员在门外，尚未推门。' }
+  const h = await harness(new MockAdapter([
+    toolCallResponse('first-read', 'qingmu_read_director_plan', {}),
+    toolCallResponse('first-save', 'qingmu_save_director_plan', { receiptId: designReceipt, directorPlan: design }),
+    toolCallResponse('first-preview', 'qingmu_preview_first_frame', { referenceImages: references }),
+    toolCallResponse('second-read', 'qingmu_read_director_plan', {}),
+    () => toolCallResponse('second-save', 'qingmu_save_director_plan', { receiptId: upstream.planReceipt(), directorPlan: refined }),
+    toolCallResponse('second-preview', 'qingmu_preview_first_frame', { referenceImages: references }),
+    textResponse('已核对当前保存与预览结果。'),
+  ]), upstream)
+  await h.run(true)
+  for (const call of ['first-save', 'second-read', 'second-save']) expect(result(h.agent, call).error, result(h.agent, call).text).toBe(false)
+  expect(result(h.agent, 'first-preview').text).toContain('完整提示词超过模型上限')
+  expect(writes).toBe(2)
+  const last = result(h.agent, 'second-preview')
+  expect(last.error, last.text).toBe(staleRefresh)
+  if (staleRefresh) expect(last.text).toContain('context has changed')
+  else expect(JSON.parse(last.text)).toMatchObject({ schema: 'qingmu.native-first-frame-preview.v1', providerCalls: 0 })
+  expect(upstream.director()).toEqual(refined)
+  expect(upstream.fetch.mock.calls.filter(([url]) => String(url).endsWith('/shooting-preview'))).toHaveLength(staleRefresh ? 1 : 2)
 })
 
 it.each([

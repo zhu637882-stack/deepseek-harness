@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/experimental/qingmu-director-context-bridge/README.md
-README.md: 31583df77d3e70f53705f26bb0ccd31ad5f956d5
-README.zh.md: 9df7012f52904ba5bf7ab5137c711f5154b92ca4
+README.md: 680a11a34ddebb85f07f039382d4e24772b2bebb
+README.zh.md: d167cd2e5c771e4f3822f12491441771844bdd06
