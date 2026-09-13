@@ -139,7 +139,7 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
       if (!selectedShot) throw new Error('当前镜头未在分镜中找到。')
       const source = { scope, context: current.context, planning }
       const input = { schema: 'qingmu.native-director-plan.v1', receiptId: digest(source), ...source,
-        guidance: 'Save creative fields with qingmu_save_director_plan. The tool preserves the image prompt, script identities and provenance. Explicit empty values clear decisions; omitted fields stay. Script dialogue text changes use the dialogue edit tools. Speakers, actions, camera moves and overlaps follow the script and director, with no fixed one-speaker rule.', providerCalls: 0 }
+        guidance: 'Save creative fields with qingmu_save_director_plan. Omitted imagePromptCn preserves the starting still; supply it to replace that description alongside directorPlan.visual when both change. Script identities and provenance remain protected. Explicit empty values clear decisions; omitted fields stay. Script dialogue text changes use the dialogue edit tools. Speakers, actions, camera moves and overlaps follow the script and director, with no fixed one-speaker rule.', providerCalls: 0 }
       const { schema, projectId, episodeId, scriptRevision, scriptSha256, storyboard } = planning
       return ports.boundedJson(retainNativeToolReceipt(current.session, exec.callId, 'qingmu_read_director_plan',
         ports.boundedJson(input), { ...input,
@@ -153,10 +153,11 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
   }))
   ctx.tools.register(defineTool({
     name: 'qingmu_save_director_plan',
-    description: 'Save the requested full creative design into the canonical shot: narrative, camera/coverage, acting, dialogue delivery/subtext, lighting, sound, continuity and additional skill output. Patch top-level creative fields; include complete nested values. Keep scripted words and speaker identities; edit those through script tools. This updates the actual source used by reference video compilation and invalidates stale dependent material. No paid generation. Retry the exact receiptId and directorPlan after an uncertain response.',
+    description: 'Save the requested full creative design into the canonical shot: narrative, camera/coverage, acting, dialogue delivery/subtext, lighting, sound, continuity and additional skill output. Patch top-level creative fields; include complete nested values. Keep scripted words and speaker identities; edit those through script tools. This updates the actual source used by reference video compilation and invalidates stale dependent material. No paid generation. Retry identical arguments, including imagePromptCn when supplied, after an uncertain response.',
     parameters: {
       receiptId: { type: 'string', required: true, description: 'Receipt from qingmu_read_director_plan in this session.' },
-      directorPlan: { type: 'json', required: true, description: 'Creative fields only. No scenePlanning, sourceBinding, creativePlanSchema, clearedShootingFields, runtimeRepairDirectives, promptRepairHistory or internal underscore keys. No fixed list of creative methods.' },
+      directorPlan: { type: 'json', required: true, description: 'Creative fields only. Use visual for the complete current-shot visual design, superseding legacy visual description; imagePromptCn separately describes its starting still. Revise both explicitly when both change. No scenePlanning, sourceBinding, creativePlanSchema, clearedShootingFields, runtimeRepairDirectives, promptRepairHistory or internal underscore keys. No fixed list of creative methods.' },
+      imagePromptCn: { type: 'string', description: 'Optional complete replacement for the starting-image description, saved atomically with the director design. Omit to preserve it; empty string explicitly clears it. Maximum 20000 characters. Does not regenerate or replace existing images.' },
     }, output,
     presentCall: () => ({ card: 'generic', kind: 'edit', title: '保存完整导演设计' }),
     async execute(args, exec) {
@@ -173,7 +174,7 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
       if (!shot || !input.planning.storyboard || !input.planning.scriptSha256) throw new Error('当前剧本或分镜版本缺失。')
       if (args.directorPlan === null || typeof args.directorPlan !== 'object' || Array.isArray(args.directorPlan)) throw new Error('directorPlan 必须是对象。')
       const request = { action: input.planning.canonicalStoryboard ? 'edit_automatic' : 'edit_requirements',
-        shotId: input.scope.shotId, imagePromptCn: shot.imagePromptCn,
+        shotId: input.scope.shotId, imagePromptCn: args.imagePromptCn ?? shot.imagePromptCn,
         expectedScriptRevision: input.planning.scriptRevision, expectedScriptSha256: input.planning.scriptSha256,
         expectedStoryboardRevision: input.planning.storyboard.version, expectedStoryboardSha256: input.planning.storyboard.sourceHash,
         directorPlan: args.directorPlan }

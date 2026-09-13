@@ -480,6 +480,39 @@ exports[`saves a selected design from an episode larger than the real inline res
 }
 `;
 
+exports[`saves an explicit starting still () with direction, or preserves it when omitted 1`] = `
+{
+  "cameraMovement": "镜头不要停。
+先推近，再横移。",
+  "imagePromptCn": "",
+  "mediaGenerated": false,
+  "providerCalls": 0,
+  "visual": "来客在门边站定，与屋内听者对视；其余调度沿用。",
+}
+`;
+
+exports[`saves an explicit starting still (undefined) with direction, or preserves it when omitted 1`] = `
+{
+  "cameraMovement": "镜头不要停。
+先推近，再横移。",
+  "imagePromptCn": "原画面描述须显式修改。",
+  "mediaGenerated": false,
+  "providerCalls": 0,
+  "visual": "来客在门边站定，与屋内听者对视；其余调度沿用。",
+}
+`;
+
+exports[`saves an explicit starting still (门内平视，来客停在门边。) with direction, or preserves it when omitted 1`] = `
+{
+  "cameraMovement": "镜头不要停。
+先推近，再横移。",
+  "imagePromptCn": "门内平视，来客停在门边。",
+  "mediaGenerated": false,
+  "providerCalls": 0,
+  "visual": "来客在门边站定，与屋内听者对视；其余调度沿用。",
+}
+`;
+
 exports[`saves local references before upload preparation even when provider preview is unavailable 1`] = `
 {
   "activeShotChanged": false,

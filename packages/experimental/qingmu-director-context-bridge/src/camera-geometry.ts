@@ -60,7 +60,7 @@ export function checkCameraGeometry(input: unknown) {
   })
   return { schema: 'qingmu.camera-geometry.v1', layout, relations, providerCalls: 0,
     businessStateChanged: false,
-    interpretation: 'All coordinates share the supplied ground plane: x increases right, y increases up on the plan. Lateral < 0 is image left; > 0 is image right. Depth > 0 is in front of the camera. frontDirection points out from the named object front, not along its length. Results describe landmark centers; they do not establish actual visibility, occlusion, height, lens distortion or image fidelity. Coordinates and facing are supplied assumptions, not measurements inferred by this tool. Preserve source facts and mark estimates; never move landmarks to obtain a desired result. Save the applicable layout and camera conclusions in the existing scene space and shot/asset design.' }
+    interpretation: 'All coordinates share the supplied ground plane: x increases right, y increases up on the plan. Lateral < 0 is image left; > 0 is image right. Depth > 0 is in front of the camera. frontDirection points out from the named object front, not along its length. Results describe landmark centers; they do not establish actual visibility, occlusion, height, lens distortion or image fidelity. This evaluates one supplied camera, not the feasibility of every camera or the artistic validity of a shot. Coordinates and facing are supplied assumptions, not measurements inferred by this tool. Preserve source facts and mark estimates; never move landmarks to obtain a desired result. Save the applicable layout and camera conclusions in the existing scene space and shot/asset design.' }
 }
 
 /**

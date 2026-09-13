@@ -83,7 +83,7 @@ const saveArgs = { draft: edit, expectedRevision: 1, expectedFrameSha256: savedD
 const initialCut = { schema:'qingmu-working-cut-v1',projectId:'p',episodeId:'episode-a',revision:0,shots:[],cuts:[],
   audioLibrary:[{ assetId:'room',sha256:'b'.repeat(64),duration:30,name:'Room.wav',url:'' }, { assetId:'room-ir',sha256:'c'.repeat(64),duration:1,name:'Room-IR.wav',url:'' }],providerCalls:0,humanApprovalChanged:false }
 function writer(extraShots = 0, image?: { sha256: string; url: string; config?: Record<string, unknown> },
-  fixture = { request, response, savedDraft }) {
+  fixture = { request, response, savedDraft }, startingImagePrompt = planningShots[0]!.imagePromptCn) {
   const { request, response, savedDraft } = fixture
   let workingCut: Record<string, unknown> = structuredClone(initialCut)
 
@@ -91,6 +91,7 @@ function writer(extraShots = 0, image?: { sha256: string; url: string; config?: 
   let directorSource: { sha256: string; prompt: string; generationPrompt?: string } | null = null
   let currentContext = structuredClone(context)
   let currentPlanning = structuredClone(planning)
+  currentPlanning.frameRequirements[0]!.imagePromptCn = startingImagePrompt
   if (extraShots > 0) {
     const shots = [...currentPlanning.frameRequirements, ...Array.from({ length: extraShots }, (_, index) => ({
       ...planningShots[0]!, id: `other-${index}`, frameNo: index + 2,
@@ -139,7 +140,7 @@ function writer(extraShots = 0, image?: { sha256: string; url: string; config?: 
       if (body.request.expectedStoryboardRevision !== currentPlanning.storyboard.version) return Response.json({ detail: { code: 'planning_storyboard_conflict' } }, { status: 409 })
       const storyboard = { ...currentPlanning.storyboard, id: 'revision-2', version: 2, sourceHash: 'd'.repeat(64) }
       const shots = currentPlanning.frameRequirements.map(shot => shot.id === scope.shotId
-        ? { ...shot, directorPlan: body.request.directorPlan } : shot)
+        ? { ...shot, imagePromptCn: body.request.imagePromptCn, directorPlan: body.request.directorPlan } : shot)
       currentPlanning = { ...currentPlanning, storyboard,
         frameRequirements: shots,
         canonicalStoryboard: { ...currentPlanning.canonicalStoryboard, revision: 2, sourceHash: storyboard.sourceHash,
@@ -534,6 +535,34 @@ it('saves a full director plan through the native preset and Writer adapter, the
     new URL(url instanceof Request ? url.url : url).pathname.endsWith('/scene-planning/commands'))).toHaveLength(1)
 })
 
+it.each([undefined, '门内平视，来客停在门边。', ''])(
+  'saves an explicit starting still (%s) with direction, or preserves it when omitted', async (imagePromptCn) => {
+    const plan = { ...design, visual: '来客在门边站定，与屋内听者对视；其余调度沿用。' }
+    const upstream = writer(0, undefined, undefined, '原画面描述须显式修改。')
+    const args = { receiptId: upstream.inputReceipt, directorPlan: plan,
+      ...(imagePromptCn === undefined ? {} : { imagePromptCn }) }
+    const adapter = new MockAdapter([
+      toolCallResponse('read', 'qingmu_read_director_plan', {}),
+      toolCallResponse('save', 'qingmu_save_director_plan', args),
+      toolCallResponse('reread', 'qingmu_read_director_plan', {}),
+      textResponse('画面设计与起始图要求已保存，未生成媒体。'),
+    ])
+    const h = await harness(adapter, upstream); await h.run(true)
+    expect(result(h.agent, 'save').error, result(h.agent, 'save').text).toBe(false)
+    const shot = JSON.parse(result(h.agent, 'reread').text).planning.frameRequirements[0]
+    expect(shot).toMatchObject({ imagePromptCn: imagePromptCn ?? '原画面描述须显式修改。', directorPlan: plan })
+    const commands = h.upstream.fetch.mock.calls.filter(([url]) =>
+      new URL(url instanceof Request ? url.url : url).pathname.endsWith('/scene-planning/commands'))
+    expect(commands).toHaveLength(1)
+    const body = JSON.parse(commands[0]![1]!.body as string)
+    expect(body.request).toMatchObject({ imagePromptCn: shot.imagePromptCn, directorPlan: plan })
+    const saved = JSON.parse(result(h.agent, 'save').text)
+    expect({ imagePromptCn: shot.imagePromptCn, visual: shot.directorPlan.visual,
+      cameraMovement: shot.directorPlan.cameraMovement, providerCalls: saved.providerCalls,
+      mediaGenerated: saved.mediaGenerated }).toMatchSnapshot()
+  },
+)
+
 it('saves a selected design from an episode larger than the real inline result limit without losing its receipt', async () => {
   const upstream = writer(8)
   const adapter = new MockAdapter([
@@ -568,7 +597,7 @@ it('saves a selected design from an episode larger than the real inline result l
 
 it('recovers an uncertain director save with the identical command and never posts twice', async () => {
   const upstream = writer(); upstream.loseSaveResponse()
-  const args = { receiptId: designReceipt, directorPlan: design }
+  const args = { receiptId: designReceipt, directorPlan: design, imagePromptCn: '断线后恢复同一画面描述。' }
   const adapter = new MockAdapter([toolCallResponse('design-read', 'qingmu_read_director_plan', {}),
     toolCallResponse('design-save', 'qingmu_save_director_plan', args),
     toolCallResponse('design-recover', 'qingmu_save_director_plan', args), textResponse('已恢复保存回执。')])
