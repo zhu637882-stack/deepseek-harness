@@ -1,0 +1,10 @@
+[
+  {
+    "label": "existing-scene",
+    "issues": 5,
+    "recoveredInstructions": true,
+    "originalRetained": true,
+    "errors": [],
+    "writes": []
+  }
+]

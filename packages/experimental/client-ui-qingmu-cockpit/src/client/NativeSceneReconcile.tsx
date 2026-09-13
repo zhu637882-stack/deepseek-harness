@@ -7,6 +7,7 @@ import { NativeStoryComposer } from './NativeStoryComposer.tsx'
 import { generationContextGuidance } from './director-generation-guidance.ts'
 import css from './NativeDirectorComposer.module.css'
 import { imageCameraGuidance, validImageCamera } from './director-image-camera.ts'
+import { SceneSourceFeedback } from './SceneSourceFeedback.tsx'
 
 type Ports = Pick<QingmuYimengPort, 'readScenePlanning' | 'saveScenePlanning'> & {
   readAssetDesign: NonNullable<QingmuYimengPort['readAssetDesign']>
@@ -93,7 +94,7 @@ export function NativeSceneReconcile({ state, sceneId, port, storyPort, disabled
       || !Array.isArray(value.sourceIssues) || !Array.isArray(value.shots) || value.shots.length !== shots.length) {
       throw new Error('整场导演稿的来源或镜头覆盖不完整，原稿保留。')
     }
-    if (value.sourceIssues.length) throw new Error('导演指出共用设定仍有矛盾。请先在素材设计中解决完整稿列出的来源问题，再同步整场；不将冲突分摊到各镜。')
+    if (value.sourceIssues.length) throw new Error('导演指出来源仍有待核对问题。请按下方反馈修订相应创作设定，再同步整场；原稿保留。')
     const changes = value.shots.map((item: unknown, index: number): Change => {
       const original = shots[index]
       if (!original || !object(item) || item.shotId !== original.id || !original.generationContextSource) throw new Error('整场镜头身份或顺序不一致，未采用。')
@@ -179,6 +180,8 @@ export function NativeSceneReconcile({ state, sceneId, port, storyPort, disabled
     <button type="button" disabled={busy} onClick={() => { setRefresh(value => value + 1) }}>读取最新共用依据</button>
     <NativeStoryComposer port={storyPort} projectId={projectId} episodeId={episodeId} source={JSON.stringify(shots)} settings=""
       disabled={disabled || busy || !ready || !!batch && batch.completed < batch.changes.length} onAdopt={adopt}
+      inspectCandidate={text => <SceneSourceFeedback text={text} projectId={projectId} episodeId={episodeId}
+        sceneId={sceneId} sceneName={state.scenes.find(scene => scene.id === sceneId)?.title ?? sceneId} />}
       purpose={{ key: `scene-reconcile-${sceneId}`, jsonOutput: true, freshRevision: true, title: '整场导演协调稿',
         description: '依据全剧、共用资产和本场全部原设计，形成可检查的协调稿。', prompt,
         action: '让导演统筹本场全部镜头', adopt: '检查通过，载入整场待保存稿', adopted: '整场稿已保存在本机；展开核对后可保存全部镜头设计。' }} />

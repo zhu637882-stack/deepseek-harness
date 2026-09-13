@@ -10,6 +10,38 @@ const state: AssetDesignState = { ...scope, schema: 'qingmu.asset-design-state.v
     visualStyle: '写实', tone: '温暖', colorPalette: ['灰蓝'], lightingRules: '窗光', cameraGrammar: '跟随动作', performanceRules: '自然', characterContinuityRules: '服装稳定',
   } } }
 afterEach(() => { cleanup(); localStorage.clear() })
+it('recovers scene feedback, appends it without losing the user direction and keeps projects separate', async () => {
+  const key = 'qingmu.scene-feedback.v1:p:e:room'
+  const instructionKey = 'qingmu.asset-design-instructions.v1:p:e'
+  localStorage.setItem(key, JSON.stringify({ ...scope, sceneId: 'room', sceneName: '工作室',
+    scriptSha256: state.scriptSha256, assetSha256: 'old design', storyboardSha256: 'old storyboard', issues: ['核对门与桌之间的路线'] }))
+  localStorage.setItem(instructionKey, '保留暖色与年代设定')
+  const port = setup()
+  const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn(async (_id: string, _prompt: string) => {}),
+    read: vi.fn(async () => ({ text: '', script: '', lastSeq: -1, running: false, finished: false, error: '' })) }
+  const mount = () => render(<NativeAssetDesign {...scope} port={port} storyPort={storyPort} onGenerated={vi.fn()} />)
+  const view = mount()
+  await screen.findByText(/反馈后的剧本或素材已有变化/)
+  fireEvent.click(screen.getByRole('button', { name: '加入创作补充' }))
+  const text = screen.getByLabelText<HTMLTextAreaElement>('创作补充').value
+  expect(text).toContain('保留暖色与年代设定')
+  expect(text).toContain('核对门与桌之间的路线')
+  expect(text).toContain('不是新的项目事实')
+  fireEvent.click(screen.getByRole('button', { name: '加入创作补充' }))
+  expect(screen.getByLabelText<HTMLTextAreaElement>('创作补充').value).toBe(text)
+  view.unmount(); const recovered = mount()
+  expect(screen.getByLabelText<HTMLTextAreaElement>('创作补充').value).toBe(text)
+  fireEvent.click(await screen.findByRole('button', { name: '根据剧本设计素材' }))
+  await waitFor(() => { expect(storyPort.send).toHaveBeenCalledTimes(1) })
+  expect(storyPort.send.mock.calls[0]?.[1]).toContain(text)
+  expect(screen.getByRole('link', { name: '返回分镜协调' }).getAttribute('href'))
+    .toBe('?qingmuView=storyboard&qingmuProject=p&qingmuEpisode=e')
+  recovered.rerender(<NativeAssetDesign projectId="other" episodeId="other-e" port={port} onGenerated={vi.fn()} />)
+  expect(screen.getByLabelText<HTMLTextAreaElement>('创作补充').value).toBe('')
+  expect(localStorage.getItem(instructionKey)).toBe(text)
+  expect(port.saveAssetDesign).not.toHaveBeenCalled()
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
 it('authors asset designs from current world and spatial sources through the native entry', async () => {
   const port = setup()
   const configured = { ...state, design: { ...state.design!, world: {

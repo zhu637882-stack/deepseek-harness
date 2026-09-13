@@ -1,5 +1,5 @@
 /** Native AI writing produces a reviewable draft for the existing project text-import flow. */
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import type { NativeStoryPort, StoryDraftResult } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft'
 import css from './NativeDirectorComposer.module.css'
 
@@ -28,7 +28,7 @@ function restore(key: string): WritingRequest | undefined {
  * @param props Current project source and settings; adoption edits text, not the saved script.
  * @returns A native writing control with recovery from the original durable session.
  */
-export function NativeStoryComposer({ port, projectId, episodeId, source, settings, disabled, onAdopt, purpose }: {
+export function NativeStoryComposer({ port, projectId, episodeId, source, settings, disabled, onAdopt, purpose, inspectCandidate }: {
   readonly purpose?: {
     readonly key: string
     readonly jsonOutput?: boolean
@@ -50,6 +50,8 @@ export function NativeStoryComposer({ port, projectId, episodeId, source, settin
   readonly settings: string
   readonly disabled: boolean
   readonly onAdopt: (text: string) => void | Promise<void>
+  /** Local candidate inspection; does not submit or adopt the draft. */
+  readonly inspectCandidate?: (text: string) => ReactNode
 }) {
   const key = `qingmu.${purpose?.key ?? 'story'}-session.v1:${projectId}:${episodeId}`
   const [request, setRequest] = useState(() => restore(key))
@@ -148,6 +150,7 @@ export function NativeStoryComposer({ port, projectId, episodeId, source, settin
       <p>这是本机编辑稿，原生生成结果仍保留。采用时继续核对来源和内容，尚未保存到项目。</p>
       <button type="button" disabled={disabled || busy} onClick={() => { localStorage.removeItem(`${key}:edited`); setEdited(undefined) }}>恢复原生候选</button>
     </div>}
+    {result?.finished && !result.error && adoptable && inspectCandidate?.(adoptable)}
     {adoptable && <button type="button" disabled={disabled || busy} onClick={() => {
       void adoptResult(adoptable)
     }}>{purpose?.adopt ?? '采用到剧本文字'}</button>}

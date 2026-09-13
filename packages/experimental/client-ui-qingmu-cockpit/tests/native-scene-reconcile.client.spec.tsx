@@ -162,3 +162,26 @@ it('saves explicit shot cameras and the director’s intentional opt-out without
   expect(port.saveScenePlanning.mock.calls.map(([intent]) => (intent.request as { directorPlan: object }).directorPlan))
     .toEqual(candidate.shots.map(shot => shot.directorPlan))
 })
+
+it('carries unresolved scene feedback to the same episode without adopting or saving the native draft', async () => {
+  localStorage.setItem('qingmu.scene-reconcile-room-session.v1:p:e', JSON.stringify({ sessionId: 'original', baseline: 1, submitted: true }))
+  const issues = [{ source: 'Shared room', issue: 'Door and table block the route', proposedFix: 'Review the common layout' }, 'Review target duration']
+  const { port, storyPort } = setup({ ...draft, sourceIssues: issues })
+  const feedback = await screen.findByRole('region', { name: '导演待核对问题' })
+  expect(feedback.textContent).toContain('Door and table block the route')
+  expect(feedback.textContent).toContain('Review target duration')
+  expect(feedback.textContent).toMatchSnapshot('actionable scene feedback')
+  const link = screen.getByRole('link', { name: '带着问题去素材设计' })
+  expect(link.getAttribute('href')).toBe('?qingmuView=assets&qingmuProject=p&qingmuEpisode=e')
+  document.addEventListener('click', (event) => { event.preventDefault() }, { once: true })
+  fireEvent.click(link)
+  expect(JSON.parse(localStorage.getItem('qingmu.scene-feedback.v1:p:e:room')!)).toMatchObject({
+    projectId: 'p', episodeId: 'e', sceneId: 'room', scriptSha256: sha, assetSha256: basis.stateSha256,
+    storyboardSha256: initial.storyboard!.sourceHash, issues: [expect.stringContaining('Review the common layout'), 'Review target duration'],
+  })
+  fireEvent.click(screen.getByRole('button', { name: '检查通过，载入整场待保存稿' }))
+  await screen.findByText(/没有采用：导演指出来源仍有待核对问题/)
+  expect(port.saveScenePlanning).not.toHaveBeenCalled()
+  expect(storyPort.send).not.toHaveBeenCalled()
+  expect(localStorage.getItem(batchKey)).toBeNull()
+})
