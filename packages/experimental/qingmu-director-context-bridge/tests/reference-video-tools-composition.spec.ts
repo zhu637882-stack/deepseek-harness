@@ -83,7 +83,7 @@ const saveArgs = { draft: edit, expectedRevision: 1, expectedFrameSha256: savedD
 
 const initialCut = { schema:'qingmu-working-cut-v1',projectId:'p',episodeId:'episode-a',revision:0,shots:[],cuts:[],
   audioLibrary:[{ assetId:'room',sha256:'b'.repeat(64),duration:30,name:'Room.wav',url:'' }, { assetId:'room-ir',sha256:'c'.repeat(64),duration:1,name:'Room-IR.wav',url:'' }],providerCalls:0,humanApprovalChanged:false }
-function writer(extraShots = 0, image?: { sha256: string; url: string; config?: Record<string, unknown> },
+function writer(extraShots = 0, image?: { sha256: string; url: string; config?: Record<string, unknown>; source?: Record<string, unknown> },
   fixture = { request, response, savedDraft }, startingImagePrompt = planningShots[0]!.imagePromptCn) {
   const { request, response, savedDraft } = fixture
   let workingCut: Record<string, unknown> = structuredClone(initialCut)
@@ -165,7 +165,7 @@ function writer(extraShots = 0, image?: { sha256: string; url: string; config?: 
     if (url.pathname.endsWith('/assets')) return Response.json({ page: 1, page_size: 200, pages: 1,
       items: request.bindings.map(item => ({ id: item.assetId, project_id: 'p',
         asset_type: response.referenceMapping.find(ref => ref.assetId === item.assetId)!.mediaType.replace('reference_', ''), role: item.label, sha256: item.assetSha256,
-        ...(image && item.assetId === 'asset_cafe' ? { sha256: image.sha256, public_url: image.url, preview_media_id: 'media_cafe', generation_config: image.config } : {}) })) })
+        ...(image && item.assetId === 'asset_cafe' ? { ...image.source, sha256: image.sha256, public_url: image.url, preview_media_id: 'media_cafe', generation_config: image.config } : {}) })) })
     if (url.pathname.endsWith('/preview')) {
       if (unpreparedMaterials) return Response.json({ detail: { code: 'reference_video_material_not_prepared' } }, { status: 422 })
       if (typeof init?.body !== 'string') throw new Error('Expected a JSON preview body')
@@ -522,6 +522,7 @@ it('reads saved episode geography and actual image pixels before any shot exists
     imageStage: { sceneName: 'Library', camera: 'Return desk looking south', blocking: 'Empty room', state: 'Door closed' },
     space: { layout: 'Return desk beside the south entrance.' } }
   const h = await harness(adapter, writer(0, { sha256: imageSha, url: imageUrl,
+    source: { owner_type: 'scene', owner_id: 'scene-a', is_selected: 0, selection_status: 'Stale', quality_status: 'pending', humanReviewStatus: 'none' },
     config: { anchor: { schema: 'qingmu.asset-image-authorization.v1', assetDesign: original } } }), true)
   await h.run(false, {})
   expect(result(h.agent, 'assets').error, result(h.agent, 'assets').text).toBe(false)
@@ -532,6 +533,9 @@ it('reads saved episode geography and actual image pixels before any shot exists
   expect(JSON.stringify(visible)).toContain('attachmentId')
   expect(JSON.parse(result(h.agent, 'view').text).scope).toEqual({ projectId: 'p', episodeId: 'episode-a' })
   expect(JSON.parse(result(h.agent, 'view').text).originalImageDesign).toMatchObject(original)
+  const source = { ownerType: 'scene', ownerId: 'scene-a', selected: false, selectionStatus: 'Stale', qualityStatus: 'pending', humanReviewStatus: 'none' }
+  expect(JSON.parse(result(h.agent, 'assets').text).assets.items).toEqual(expect.arrayContaining([expect.objectContaining({ assetId: 'asset_cafe', source: expect.objectContaining(source) })]))
+  expect(JSON.parse(result(h.agent, 'view').text).source).toMatchObject(source)
   expect(JSON.stringify(visible)).toContain('Return desk looking south')
   expect(result(h.agent, 'assets').text).not.toContain(original.imagePrompt)
   expect(media).toHaveBeenCalledOnce()

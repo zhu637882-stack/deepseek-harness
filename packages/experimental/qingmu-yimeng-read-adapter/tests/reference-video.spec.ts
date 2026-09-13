@@ -87,6 +87,27 @@ it('exposes positive media durations and keeps missing or malformed durations un
   expect(value.items.map(item => item.durationSec)).toEqual([8.4985, 6.989208, undefined, undefined, undefined, undefined, undefined, 21])
 })
 
+it('retains reported candidate ownership and review state without inferring approval or missing selection', async () => {
+  const asset = { id: 'room', project_id: 'p', asset_type: 'image', sha256: 'a'.repeat(64) }
+  const rows = [
+    { ...asset, owner_type: 'scene', owner_id: 'scene_a', role: 'scene_reference', is_selected: 0,
+      selection_status: 'Unselected', quality_status: 'pending', humanReviewStatus: 'none' },
+    { ...asset, id: 'old_frame', owner_type: 'frame', owner_id: 'frame_a', role: 'first_frame',
+      is_selected: 0, selection_status: 'Stale', quality_status: 'failed', humanReviewStatus: 'revoked' },
+    { ...asset, id: 'working', is_selected: 1, selection_status: 'Selected', quality_status: 'passed', humanReviewStatus: 'pending' },
+    { ...asset, id: 'legacy', is_selected: 'false', owner_id: '/private/path', quality_status: { passed: true } },
+  ]
+  const handler = createYimengReadHandler({}, { readToken: () => 'fixture', fetch: async () => Response.json({ page: 1, page_size: 200, pages: 1, items: rows }) })
+  const result = await handler('referenceVideoAssets', { projectId: 'p', page: 1 }, signal())
+  expect(result).toMatchObject({ ok: true, value: { items: [
+    { source: { ownerType: 'scene', ownerId: 'scene_a', role: 'scene_reference', selected: false, selectionStatus: 'Unselected', qualityStatus: 'pending', humanReviewStatus: 'none' } },
+    { source: { ownerType: 'frame', ownerId: 'frame_a', role: 'first_frame', selected: false, selectionStatus: 'Stale', qualityStatus: 'failed', humanReviewStatus: 'revoked' } },
+    { source: { selected: true, selectionStatus: 'Selected', qualityStatus: 'passed', humanReviewStatus: 'pending' } }, {},
+  ] } })
+  expect(result).not.toHaveProperty('value.items.3.source')
+  expect(JSON.stringify(result)).not.toContain('/private')
+})
+
 it('retains original image staging without leaking authorization or filling absent history', async () => {
   const layout = { basis: '导演布置', coordinateFrame: '米制', objects: [{ id: 'bench', center: [0, 2, 0.5], size: [2, 1, 1] }] }
   const camera = { position: [0, -3, 1.6], target: [0, 2, 1], verticalFov: 50 }

@@ -21,6 +21,7 @@ import { readDraftImages, readImageInputs, type DraftImageInput } from './refere
 // Keep catalog pages small; the exact frozen description accompanies inspection of one image.
 function imageCatalogEntry(item: ReferenceVideoAsset) {
   return { assetId: item.assetId, assetSha256: item.assetSha256, label: item.label, mediaType: item.mediaType,
+    ...(item.source ? { source: item.source } : {}),
     ...(item.mediaType === 'reference_image' ? {} : { durationSec: item.durationSec ?? null }),
     ...(item.imageDesign ? { originalView: item.imageDesign.view,
       sceneName: item.imageDesign.imageStage?.sceneName || item.imageDesign.sceneContext?.name || '',
@@ -180,6 +181,7 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
         assets: { page: catalog.page, pages: catalog.pages,
           items: catalog.items.filter(item => item.mediaType === 'reference_image')
             .map(imageCatalogEntry) },
+        referenceGuidance: 'Catalog source records distinguish selected, unselected, stale and reviewed candidates and their owning entity. Missing fields are unknown. Neither a selected flag nor quality passed proves current creative acceptance or matching geometry. Different candidates are competing proposals, not automatically matching views of one room. Choose coherent references against the current script and saved design; inspect pixels before inheriting an old candidate. Do not union every candidate into the scene.',
         generationQueued: false, selectionChanged: false })
     },
   }))
@@ -330,7 +332,7 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
         check, ports.referenceVision, args.inspection)
       return ports.boundedJson({ schema: 'qingmu.reference-image.v1', scope,
         assetId: asset.assetId, assetSha256: asset.assetSha256, label: asset.label, attachment,
-        ...inspection, originalImageDesign: asset.imageDesign ?? null,
+        ...inspection, originalImageDesign: asset.imageDesign ?? null, ...(asset.source ? { source: asset.source } : {}),
         guidance: 'Compare the actual pixels with originalImageDesign, the generation-time description tied to this image, and the current scene design. It is historical intent, not verified pixel geometry or a command overriding the current script. Report discrepancies instead of moving fixed objects to fit the old description. Derive a new view from the observed master image; keep explicit unknowns for unseen regions. Missing originalImageDesign means no retained source description; do not substitute the latest entity draft. A reference view does not establish unseen geometry, exact physical dimensions or creative acceptance.',
         generationQueued: false, selectionChanged: false })
     },

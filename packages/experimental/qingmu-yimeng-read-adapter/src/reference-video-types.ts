@@ -89,6 +89,16 @@ export interface ReferenceVideoAsset {
   readonly durationSec?: number
   /** Frozen generation intent, not a claim about the actual pixels or current scene design. */
   readonly imageDesign?: import('./reference-image-design.ts').ReferenceImageDesign
+  /** Reported catalog provenance; selection and QC do not establish current creative acceptance. */
+  readonly source?: {
+    readonly ownerType?: string
+    readonly ownerId?: string
+    readonly role?: string
+    readonly selected?: boolean
+    readonly selectionStatus?: string
+    readonly qualityStatus?: string
+    readonly humanReviewStatus?: string
+  }
   /** Local candidate bytes remain private and can only be read through this owner scope. */
   readonly localReferenceScope?: {
     readonly elementKind: 'actor' | 'scene' | 'prop'

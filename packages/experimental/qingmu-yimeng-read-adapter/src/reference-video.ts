@@ -278,9 +278,20 @@ export function normalizeReferenceVideoAssets(
     const imageDesign = a.asset_type === 'image' ? referenceImageDesign(a.generation_config_json ?? a.generation_config) : undefined
     const durationSec = a.asset_type !== 'image' && typeof a.duration_sec === 'number'
       && Number.isFinite(a.duration_sec) && a.duration_sec > 0 ? a.duration_sec : undefined
+    const source: Record<string, string | boolean> = {}
+    for (const [field, name] of [['owner_type', 'ownerType'], ['owner_id', 'ownerId'],
+      ['selection_status', 'selectionStatus'], ['quality_status', 'qualityStatus'],
+      ['humanReviewStatus', 'humanReviewStatus']] as const) {
+      const value = a[field]
+      if (typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/u.test(value)) source[name] = value
+    }
+    if (a.is_selected === true || a.is_selected === 1) source.selected = true
+    else if (a.is_selected === false || a.is_selected === 0) source.selected = false
+    if (Object.keys(source).length && typeof a.role === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/u.test(a.role)) source.role = a.role
     items.push({ assetId: a.id, assetSha256: a.sha256, label: localVoiceScope === undefined ? displayLabel : `${displayLabel} · 音色`,
       mediaType: a.asset_type === 'image' ? 'reference_image' : a.asset_type === 'audio' ? 'reference_audio' : 'reference_video', browserUrl,
       ...(imageDesign ? { imageDesign } : {}),
+      ...(Object.keys(source).length ? { source } : {}),
       ...(durationSec === undefined ? {} : { durationSec }),
       ...(localReferenceScope === undefined ? {} : { localReferenceScope }),
       ...(localVoiceScope === undefined ? {} : { localVoiceScope }) })

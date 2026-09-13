@@ -511,12 +511,21 @@ exports[`reads saved episode geography and actual image pixels before any shot e
         "originalView": "From the return desk",
         "savedImageDesignAvailable": true,
         "sceneName": "Library",
+        "source": {
+          "humanReviewStatus": "none",
+          "ownerId": "scene-a",
+          "ownerType": "scene",
+          "qualityStatus": "pending",
+          "selected": false,
+          "selectionStatus": "Stale",
+        },
       },
     ],
     "page": 1,
     "pages": 1,
   },
   "generationQueued": false,
+  "referenceGuidance": "Catalog source records distinguish selected, unselected, stale and reviewed candidates and their owning entity. Missing fields are unknown. Neither a selected flag nor quality passed proves current creative acceptance or matching geometry. Different candidates are competing proposals, not automatically matching views of one room. Choose coherent references against the current script and saved design; inspect pixels before inheriting an old candidate. Do not union every candidate into the scene.",
   "saved": {
     "design": {
       "assets": [

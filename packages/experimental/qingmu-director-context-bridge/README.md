@@ -1,5 +1,7 @@
 # Qingmu director context bridge
 
+Asset design and explicit image inspection carry the catalog's reported `source` ownership, selection and review status to the native director. The read guidance distinguishes competing proposals from coherent views of one saved scene; old candidate pixels and original intent are evidence to compare, not a replacement for the current design. This is read-only context, without automatic rejection, adoption or generation.
+
 Shared director-context source tracking, reconciliation and legacy behavior are documented in the [implementation note](../../../.agents/notes/implemented/feature/2026-09-14-qingmu-shared-director-context.md).
 
 The director inspects the complete first-frame input with `qingmu_preview_first_frame`, using the shooting page image preparation. Ordered working-image IDs, hashes and purposes are explicit. Reconcile the full film source, current scene and starting state through the existing plan save, then inspect the actual compiled prompt. Preparation submits no image task; checking prose does not establish pixel quality.
