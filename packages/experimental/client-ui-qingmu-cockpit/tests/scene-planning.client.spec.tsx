@@ -79,10 +79,11 @@ it.each([false, true])('saves editable department direction and retains it after
   fireEvent.change(screen.getByLabelText('配乐安排'), { target: { value: '' } })
   fireEvent.change(screen.getByLabelText('对白 1 的语气与表演'), { target: { value: '重音落在请，迟疑后邀请' } })
   fireEvent.change(screen.getByLabelText('镜头结束状态'), { target: { value: '信仍在手中，人已到桌边' } })
+  fireEvent.change(screen.getByLabelText('首帧人物位置与朝向'), { target: { value: '门内靠东，面向桌边' } })
   const expected = { ...directorPlan, generationContext: '雨夜木屋，门窗位置沿用全片设计；未来来信按剧本例外保留。', cameraMovement: '随人物后退至桌边，再停下',
     soundPlan: { ...directorPlan.soundPlan, ambience: '雨声连续，门合上后变闷，台词期间仍在', music: '' },
     dialoguePlan: [{ ...directorPlan.dialoguePlan[0], delivery: '重音落在请，迟疑后邀请' }],
-    continuity: { ...directorPlan.continuity, end: '信仍在手中，人已到桌边' } }
+    continuity: { ...directorPlan.continuity, end: '信仍在手中，人已到桌边' }, imageStage: { blocking: '门内靠东，面向桌边' } }
   expect(port.saveScenePlanning).not.toHaveBeenCalled()
   fireEvent.click(screen.getByText('预览保存影响')); fireEvent.click(screen.getByText('确认保存规划'))
   await screen.findByRole('alert')
@@ -92,6 +93,7 @@ it.each([false, true])('saves editable department direction and retains it after
     : { action: 'initialize', shots: [{ ...shot, directorPlan: expected }] })
   view.unmount(); render(<ScenePlanningWorkspace {...props} />)
   expect((await screen.findByLabelText<HTMLTextAreaElement>('环境与空间声')).value).toBe(expected.soundPlan.ambience)
+  expect(screen.getByLabelText<HTMLTextAreaElement>('首帧人物位置与朝向').value).toBe(expected.imageStage.blocking)
   expect(screen.getByLabelText('运镜设计').matches(':disabled')).toBe(true)
   expect(port.saveScenePlanning).toHaveBeenCalledOnce()
 })

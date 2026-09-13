@@ -93,6 +93,17 @@ it('shows an activation rejection instead of pretending the pending job is runni
 it('blocks malformed, cross-frame or multi-attempt previews', () => {
   for (const patch of [{ frameId:'other' },{ maxAttempts:2 },{ n:2 },{ selectAsOfficial:true },{ payloadHash:'bad' }]) expect(() => assertShootingPreview({ ...preview,...patch },scope)).toThrow()
 })
+it('shows the actual shared-layout preview and reference numbering before submission', async () => {
+  const composition = { imageUrl: 'data:image/png;base64,AA==', sha256: 'e'.repeat(64), sceneName: '修理室' }
+  const quoted = { ...preview, references: [{ kind: '场景图', name: '修理室', role: 'scene_reference' }], compositionReference: composition }
+  const fetcher = vi.fn(async (path: string) => ({ ok: true, json: async () => path.includes('/review?') ? review : quoted }))
+  vi.stubGlobal('fetch', fetcher)
+  render(<ShootingFirstFrame scope={scope} />)
+  expect((await screen.findByAltText('修理室的本镜空间取景参考')).getAttribute('src')).toBe(composition.imageUrl)
+  expect(screen.getByText('图1 · 场景图 · 修理室')).toBeTruthy()
+  expect(fetcher.mock.calls.some(([path]) => path.endsWith('/submit'))).toBe(false)
+  expect(() => assertShootingPreview({ ...quoted, compositionReference: { ...composition, imageUrl: 'https://example.test/a' } }, scope)).toThrow()
+})
 it('prepares a distinct rework only after a click, persists it across refresh, and submits once', async () => {
   const next = { ...preview, preflightId:'e'.repeat(64), attemptOrdinal:2 }
   const nextId = `shooting-${next.preflightId}`

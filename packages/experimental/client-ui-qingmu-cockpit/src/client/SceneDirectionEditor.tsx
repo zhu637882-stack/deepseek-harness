@@ -9,6 +9,7 @@ const departmentLabels = {
 const groupLabels = {
   soundPlan: { ambience: '环境与空间声', foley: '动作拟音', music: '配乐安排' },
   continuity: { start: '镜头开始状态', end: '镜头结束状态' },
+  imageStage: { camera: '首帧取景范围', blocking: '首帧人物位置与朝向', state: '首帧道具与连接状态' },
 } as const
 
 function record(value: unknown): YimengCommandJsonObject | null {
@@ -32,13 +33,14 @@ export function SceneDirectionEditor({ value, onChange }: {
     <p>修改后与镜头一起保存。请同时核对画面、动作和相邻镜头，避免留下相互矛盾的安排。</p>
     <p>本段内的切镜写在“本段景别、焦点与切点”；与前后段的接镜、声桥写在“前后段剪辑衔接”，供成片剪辑使用。旧设计不会自动改写。</p>
     <p>“本镜沿用的全片设定”整理本镜需要的年代、人物、空间、光线和道具状态。填写后生成采用这份整理稿，全片原设定保留；留空沿用原有方式。动作、对白和各部门的具体设计仍在下方分别编辑。</p>
+    <p>首帧取景沿用已绑定场景的共用格局，填写动作开始时看见的范围、人物位置和物件状态；后续动作写入调度和结束状态。留空时使用本镜机位和开始状态。</p>
     {Object.entries(departmentLabels).map(([field, label]) => textField(label, plan[field], (text) => {
       onChange({ ...plan, [field]: text })
     }))}
     {Object.entries(groupLabels).map(([group, labels]) => {
       const current = record(plan[group])
       if (plan[group] !== undefined && current === null) return <p key={group}>
-        {group === 'soundPlan' ? '声音设计' : '接续设计'}含其他格式，可在下方完整设计中查看。
+        {group === 'soundPlan' ? '声音设计' : group === 'imageStage' ? '首帧取景' : '接续设计'}含其他格式，可在下方完整设计中查看。
       </p>
       return <div key={group}>{Object.entries(labels).map(([field, label]) =>
         textField(label, current?.[field], (text) => { onChange({ ...plan, [group]: { ...current, [field]: text } }) }))}</div>

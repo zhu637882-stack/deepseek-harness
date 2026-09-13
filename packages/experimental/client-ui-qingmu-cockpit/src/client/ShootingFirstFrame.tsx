@@ -15,6 +15,8 @@ interface Preview extends ShootingFrameScope {
   readonly maxAttempts: 1
   readonly n: 1
   readonly selectAsOfficial: false
+  readonly references?: readonly { readonly kind: string; readonly name: string; readonly role: string }[]
+  readonly compositionReference?: null | { readonly imageUrl: string; readonly sha256: string; readonly sceneName: string }
 }
 interface Attempt extends ShootingFrameScope {
   readonly schema: 'qingmu.shooting-first-frame-state.v1'
@@ -80,6 +82,16 @@ export function assertShootingPreview(value: unknown, scope: ShootingFrameScope)
     || !value.blockers.every(x => typeof x === 'string') || typeof value.povObserver !== 'string'
     || typeof value.estimatedCny !== 'number' || !Number.isFinite(value.estimatedCny) || value.estimatedCny < 0
     || value.n !== 1 || value.maxAttempts !== 1 || value.selectAsOfficial !== false) throw new Error('首帧预检回执不完整，未提交')
+  if (value.references !== undefined && (!Array.isArray(value.references) || !value.references.every(item =>
+    item && typeof item.kind === 'string' && typeof item.name === 'string' && typeof item.role === 'string'))) {
+    throw new Error('首帧参考素材说明不完整')
+  }
+  if (value.compositionReference !== undefined && value.compositionReference !== null) {
+    const composition = value.compositionReference as Record<string, unknown>
+    if (typeof composition.imageUrl !== 'string' || !/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/.test(composition.imageUrl)
+      || typeof composition.sha256 !== 'string' || !sha.test(composition.sha256)
+      || typeof composition.sceneName !== 'string') throw new Error('首帧空间取景回执不完整')
+  }
   return value as unknown as Preview
 }
 async function request(path: string, body?: object, signal?: AbortSignal): Promise<unknown> {
@@ -303,6 +315,12 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview, req
       </div>}
     </div>
     {attempt?.candidate && <div className={css.candidate} aria-label="首帧候选条"><button type="button" aria-pressed="true"><img src={attempt.candidate.browserUrl} alt="新首帧候选缩略图" /><span>本次新首帧<small>{attempt.candidate.isSelected ? '已选用' : '待定版'}</small></span></button></div>}
+    {preview && <details className={css.log}><summary>首帧画面与参考素材</summary>
+      {preview.references?.map((item, index) => <p key={index}>图{index + 1} · {item.kind} · {item.name}</p>)}
+      {preview.compositionReference && <figure><img style={{ maxWidth: '100%' }} src={preview.compositionReference.imageUrl}
+        alt={`${preview.compositionReference.sceneName}的本镜空间取景参考`} /><figcaption>这张布局图随请求提交，用于位置、透视和遮挡；生成后的实际画面仍需审看。</figcaption></figure>}
+      <pre style={{ whiteSpace: 'pre-wrap' }}>{preview.prompt}</pre>
+    </details>}
     <div className={css.actions}>
       {attempt?.canActivate === true && !busy && <button type="button" onClick={() => { void resume() }}>继续原首帧任务</button>}
       {attempt?.canRegenerate === true && !busy && <button type="button" onClick={() => {
@@ -326,7 +344,6 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview, req
       : error.includes('执行器尚未启动') ? '原任务已保存，但执行器尚未启动。请查看原任务结果，不要重复生成。'
         : '本次操作未确认完成。请保留当前候选，查看原任务结果；不要重复提交。详细原因已放入开发日志。'}</p>}
     <details className={css.log}><summary>开发日志</summary>
-      <h4>最终编译 prompt（提交前）</h4><pre style={{ whiteSpace: 'pre-wrap' }}>{preview?.prompt ?? '尚未取得完整预检'}</pre>
       <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify({ storyboardReview: review, preflightId: preview?.preflightId, payloadHash: preview?.payloadHash, estimatedCny: preview?.estimatedCny, blockers: preview?.blockers, submissionBlocker: blocked?.detail, requestId, attempt, error }, null, 2)}</pre>
     </details>
   </section>
