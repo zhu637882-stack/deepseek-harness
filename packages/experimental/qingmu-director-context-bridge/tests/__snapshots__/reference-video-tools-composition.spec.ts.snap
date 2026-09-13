@@ -879,3 +879,29 @@ exports[`saves scene-spanning sound through the shipped director preset, real lo
   ],
 }
 `;
+
+exports[`uses the film source delivered together with bound image pixels (changed=false) 1`] = `
+{
+  "imageDelivered": "attached",
+  "saved": true,
+  "source": {
+    "generationPrompt": "本段交还图书。",
+    "prompt": "窗与门垂直，借还台在房间中央；两位人物。",
+    "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+  },
+  "sourceChangedRejected": null,
+}
+`;
+
+exports[`uses the film source delivered together with bound image pixels (changed=true) 1`] = `
+{
+  "imageDelivered": "attached",
+  "saved": false,
+  "source": {
+    "generationPrompt": "本段交还图书。",
+    "prompt": "窗与门垂直，借还台在房间中央；两位人物。",
+    "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+  },
+  "sourceChangedRejected": true,
+}
+`;

@@ -166,3 +166,5 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 本镜方案读取明确指向 `qingmu_read_reference_draft` 的 `saved.directorSource.prompt`，获取当前完整全片、世界和资产来源。保存非空 `generationContext` 必须有同镜头成功记录的完整来源读取，并在新写入前复核来源；缺失、变化或读取失败时须重读，不用会话历史补缺。结果不明的已提交操作仍恢复原回执。来源可读且未变，不代表语义一致。
 
 模型在 planning.frameRequirements 中收到一次完整本镜设计。context.shot 的第二份视图只省去完全相同的字段，值不同时保留供核对；完整原上下文仍在保存回执中。丰富的导演稿不会因重复副本而无法重读，也不缩短创作正文。
+
+成功来源读取可以同时包含一段 JSON 文字与后续图片附件。回执识别接受这种多模态结果，仍要求真实配对的成功调用；额外文字、失败或溢出结果不能作为已读来源。图片不改变来源时效检查或创意批准。

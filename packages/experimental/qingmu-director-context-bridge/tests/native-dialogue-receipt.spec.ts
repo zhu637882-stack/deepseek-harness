@@ -27,7 +27,7 @@ describe('session-owned full dialogue receipts', () => {
     expect(toolValues(session, 'qingmu_stage_dialogue_edit')).toEqual([])
   })
 
-  it.each(['failed', 'spill', 'different-view', 'different-value', 'wrong-call', 'wrong-step', 'missing-record'] as const)(
+  it.each(['failed', 'spill', 'different-view', 'different-value', 'wrong-call', 'wrong-step', 'missing-record', 'extra-text'] as const)(
     'does not accept a %s result as a usable receipt', (mode) => {
       const { session, visible } = pending()
       if (mode === 'different-value') session.append('qingmu-director-dialogue/receipt', {
@@ -38,7 +38,7 @@ describe('session-owned full dialogue receipts', () => {
         : JSON.stringify(mode === 'different-view' ? { ...visible, editableLines: ['别的台词'] } : visible)
       session.append('tool/result', { turn: 0, step: mode === 'wrong-step' ? 1 : 0,
         message: createToolResultMessage({ callId: mode === 'wrong-call' ? CallId('other-call') : callId,
-          content: [{ type: 'text', text }], isError: mode === 'failed' }) }, { surfaceOp: 'append' })
+          content: [{ type: 'text', text }, ...(mode === 'extra-text' ? [{ type: 'text' as const, text: '{}' }] : [])], isError: mode === 'failed' }) }, { surfaceOp: 'append' })
       const events = mode === 'missing-record' ? session.events.filter(e => e.type !== 'qingmu-director-dialogue/receipt') : session.events
       expect(toolValues({ events }, tool)).toEqual([])
     })

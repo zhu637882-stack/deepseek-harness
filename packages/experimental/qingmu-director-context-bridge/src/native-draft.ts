@@ -94,7 +94,7 @@ export async function readNativeShotMethods(
   return methods
 }
 
-/** Read successful native tool results paired to actual calls; chat text and failed calls are not receipts.
+/** Read successful JSON results paired to actual calls, including attached images. Chat text and failed calls are not receipts.
  * @param session Native log to inspect.
  * @param name Exact tool name to match.
  * @returns Parsed values from successful paired results, in log order.
@@ -112,7 +112,7 @@ export function toolValues(session: Pick<Session, 'events'>, name: string | read
       const call = calls.get(part.toolCallId)
       if (!call || call.turn !== event.data.turn || call.step !== event.data.step || part.isError) continue
       calls.delete(part.toolCallId)
-      if (part.content.length !== 1 || part.content[0]?.type !== 'text') continue
+      if (part.content[0]?.type !== 'text' || part.content.slice(1).some(content => content.type !== 'image')) continue
       let value: unknown
       try { value = JSON.parse(part.content[0].text) } catch { continue /* A spilled or non-JSON result is not a receipt. */ }
       const receipt = receipts.get(part.toolCallId)

@@ -704,6 +704,46 @@ it.each(['current', 'missing', 'changed', 'unavailable'])(
   },
 )
 
+it.each([false, true])('uses the film source delivered together with bound image pixels (changed=%s)', async (changed) => {
+  const fixture = structuredClone({ request, response, savedDraft })
+  fixture.savedDraft.draft.request.bindings = fixture.savedDraft.draft.request.bindings.map(binding =>
+    binding.assetId === 'asset_cafe' ? { ...binding, assetSha256: imageSha } : binding)
+  fixture.savedDraft.draft.requestSha256 = sha(fixture.savedDraft.draft.request)
+  const upstream = writer(0, { sha256: imageSha, url: imageUrl }, fixture)
+  const source = { sha256: '4'.repeat(64), prompt: '窗与门垂直，借还台在房间中央；两位人物。', generationPrompt: '本段交还图书。' }
+  upstream.setDirectorSource(source)
+  const fetch = upstream.fetch.getMockImplementation()!
+  let reads = 0
+  upstream.fetch.mockImplementation(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input)
+    if (url.pathname.endsWith('/reference-video/drafts/f') && init?.method !== 'POST' && ++reads === 2 && changed)
+      upstream.setDirectorSource({ ...source, sha256: '5'.repeat(64), prompt: '共享空间已修订。' })
+    return fetch(input, init)
+  })
+  const plan = { generationContext: source.prompt }
+  const adapter = new MockAdapter([
+    toolCallResponse('plan', 'qingmu_read_director_plan', {}),
+    toolCallResponse('film-images', 'qingmu_read_reference_draft', { page: 1 }),
+    toolCallResponse('save', 'qingmu_save_director_plan', { receiptId: designReceipt, directorPlan: plan }),
+    textResponse('未生成或选用媒体。'),
+  ])
+  vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'mock', id: 'mock', name: 'mock', inputModalities: ['text', 'image'] })
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(imageBytes, { headers: { 'content-type': 'image/png' } }))
+  const h = await harness(adapter, upstream, true); await h.run(true)
+  const read = result(h.agent, 'film-images'), save = result(h.agent, 'save')
+  expect(read.error, read.text).toBe(false)
+  const film = JSON.parse(read.text) as { saved: { directorSource: typeof source }; visualInputs: import('../src/reference-draft-images.ts').DraftImageInput[] }
+  const attached = film.visualInputs.find(input => input.status === 'attached')!
+  expect(attached.attachment).toBeDefined()
+  expect(JSON.stringify(adapter.requests.at(-1)?.messages)).toContain(attached.attachment!.attachmentId)
+  expect(save.error, save.text).toBe(changed)
+  expect(upstream.director()).toEqual(changed ? {} : plan)
+  const writes = upstream.fetch.mock.calls.filter(([input]) => new URL(input instanceof Request ? input.url : input).pathname.endsWith('/scene-planning/commands'))
+  expect(writes).toHaveLength(changed ? 0 : 1)
+  expect({ source: film.saved.directorSource, imageDelivered: attached.status,
+    saved: !save.error, sourceChangedRejected: changed ? save.text.includes('全片、世界或资产设计已变化') : null }).toMatchSnapshot()
+})
+
 it.each([undefined, '门内平视，来客停在门边。', ''])(
   'saves an explicit starting still (%s) with direction, or preserves it when omitted', async (imagePromptCn) => {
     const plan = { ...design, editorialContext: { transitionOut: '下段转到窗外，雨声跨越切点' }, visual: '来客在门边站定，与屋内听者对视；其余调度沿用。' }
