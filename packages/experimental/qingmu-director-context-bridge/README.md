@@ -1,5 +1,7 @@
 # Qingmu director context bridge
 
+The director inspects the complete first-frame input with `qingmu_preview_first_frame`, using the shooting page image preparation. Ordered working-image IDs, hashes and purposes are explicit. Reconcile the full film source, current scene and starting state through the existing plan save, then inspect the actual compiled prompt. Preparation submits no image task; checking prose does not establish pixel quality.
+
 Saved reference-draft reads include `sourceAlignment`: the current director-source SHA, the saved request's source SHA and their comparison. Missing digests produce an unknown result. A planning receipt, frame hash or request hash identifies different data and cannot establish source drift. Reading never rewrites the draft; an aligned source does not certify creative quality.
 
 Native frame capture resolves an omitted runId from the current project shot's candidate video ID and SHA. Explicit runs must match the same source; older runs outside the recent list are read individually. Mismatch, ambiguity or an unverifiable source stops before capture. Recovery verifies the same binding without recapturing or changing selection.

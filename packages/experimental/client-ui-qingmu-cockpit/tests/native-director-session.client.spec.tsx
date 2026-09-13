@@ -352,3 +352,19 @@ it('prepares a complete reference reconciliation request for the bound director 
   fireEvent.click(screen.getByRole('button', { name: '发送给当前导演' }))
   await waitFor(() => expect(prompt).toHaveBeenCalledExactlyOnceWith(f.target, expect.stringContaining('不要提交视频'), expect.any(AbortSignal)))
 })
+
+it('offers starting-image reconciliation to the current director and restores the unsent instruction', async () => {
+  const f = fixture(false, 'qingmu-director')
+  const prompt = vi.fn(async () => undefined)
+  const props = { port: { ...f.port, prompt }, sessionId: 's1', scopeKey: 'shot1', target: f.target, ready: true }
+  const view = render(<NativeDirectorComposer {...props} />)
+  fireEvent.click(screen.getByRole('button', { name: '整理首帧画面' }))
+  const value = (screen.getByRole('textbox', { name: '导演要求' }) as HTMLTextAreaElement).value
+  expect(value).toMatchSnapshot('first-frame reconciliation request')
+  expect(prompt).not.toHaveBeenCalled()
+  view.unmount(); render(<NativeDirectorComposer {...props} />)
+  expect((screen.getByRole('textbox', { name: '导演要求' }) as HTMLTextAreaElement).value).toBe(value)
+  expect(screen.getByRole('button', { name: '整理本镜生成稿' }).hasAttribute('disabled')).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: '发送给当前导演' }))
+  await waitFor(() => expect(prompt).toHaveBeenCalledExactlyOnceWith(f.target, value, expect.any(AbortSignal)))
+})

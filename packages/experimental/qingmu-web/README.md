@@ -1,5 +1,7 @@
 # Qingmu OS Web distribution Bundle
 
+The primary directing method reconciles sources for first frames as well as video. It maps the current scene, world exceptions and starting state into the saved shot, then uses native first-frame preview to inspect the actual image input. Full film sources remain available; the director resolves conflicting versions without keyword deletion.
+
 The native creation entry identifies the current stage and supplies its source. Screenplay, asset and scene drafts do not require a shot binding; bound-shot read/write rules apply only to existing-shot editing. The director method checks actual screenplay action prerequisites, object transfers, device states and visible world exceptions before returning a draft. Duration remains an estimate until measured.
 
 English | [中文](README.zh.md)

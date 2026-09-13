@@ -279,6 +279,42 @@ function saves(upstream: ReturnType<typeof writer>) {
     new URL(url instanceof Request ? url.url : url).pathname.endsWith('/drafts/f') && init?.method === 'POST')
 }
 
+it('reads the actual image preparation through the shipped director and command adapter', async () => {
+  const upstream = writer()
+  upstream.setDirectorSource({ sha256: '4'.repeat(64), prompt: '旧推导桌高0.6米；当前共用场景明确桌高0.75米，门在南墙。', generationPrompt: '镜头来源。' })
+  const fetch = upstream.fetch.getMockImplementation()!
+  const references = [{ assetId: 'room', assetSha256: 'a'.repeat(64), purpose: '当前房间固定门窗；不复用参考图开门状态。' }]
+  upstream.fetch.mockImplementation(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input)
+    if (url.pathname === '/api/pipeline/first-frames/shooting-preview') {
+      expect(JSON.parse(String(init?.body))).toEqual({ project_id: 'p', episode_id: 'episode-a', frame_ids: ['f'], reference_images: references })
+      return Response.json({ schema: 'qingmu.shooting-first-frame-preview.v1', projectId: 'p', episodeId: 'episode-a', frameId: 'f',
+        preflightId: '6'.repeat(64), payloadHash: '7'.repeat(64), blockers: [],
+        prompt: `${String(upstream.director().generationContext)}\n起始画面：门关闭，演员站在桌西侧。`, referenceBindings: references })
+    }
+    return fetch(input, init)
+  })
+  const plan = { ...design, generationContext: '当前共用场景桌高0.75米（导演设计，非实测），门在南墙。' }
+  const adapter = new MockAdapter([
+    toolCallResponse('plan', 'qingmu_read_director_plan', {}),
+    toolCallResponse('film', 'qingmu_read_reference_draft', { page: 1 }),
+    toolCallResponse('save', 'qingmu_save_director_plan', { receiptId: designReceipt, directorPlan: plan, imagePromptCn: '门关闭，演员站在桌西侧。' }),
+    toolCallResponse('image-preview', 'qingmu_preview_first_frame', { referenceImages: references }),
+    textResponse('首帧输入已核对；未提交媒体。'),
+  ])
+  const h = await harness(adapter, upstream); await h.run(true)
+  const read = result(h.agent, 'image-preview')
+  expect(read.error, read.text).toBe(false)
+  const requests = upstream.fetch.mock.calls.filter(([url]) => String(url).endsWith('/shooting-preview'))
+  expect(requests).toHaveLength(1)
+  expect(result(h.agent, 'save').error, result(h.agent, 'save').text).toBe(false)
+  expect(upstream.director()).toEqual(plan)
+  const actual = JSON.parse(read.text)
+  expect(actual).toMatchSnapshot('actual first-frame input')
+  expect(JSON.stringify(adapter.requests.at(-1)?.messages)).toContain(actual.preview.prompt.split('\n')[0])
+  expect(upstream.fetch.mock.calls.some(([url]) => /\/(generate|submit)$/.test(String(url)))).toBe(false)
+})
+
 it.each([
   { title: 'compacts a long shipped director session and rereads the complete saved draft without rewriting it',
     provider: 'mock', model: 'mock', turns: 7 },

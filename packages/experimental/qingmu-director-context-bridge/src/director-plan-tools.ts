@@ -53,6 +53,24 @@ function continuation(before: DirectorContextSnapshot, after: DirectorContextSna
 export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
   const output = { schema: { type: 'json' as const }, render: (_args: unknown, value: JsonValue) => [{ type: 'text' as const, text: JSON.stringify(value) }] }
   ctx.tools.register(defineTool({
+    name: 'qingmu_preview_first_frame',
+    description: 'Read the selected shot’s actual compiled first-frame image prompt, exact ordered references and composition preview. Uses the same preparation as the shooting page. No image generation, adoption or approval. Reconcile the current full film source with the bound scene and starting state using qingmu_read_director_plan, qingmu_read_reference_draft and qingmu_save_director_plan, then preview again. This inspects instructions, not image pixels or the quality of a future result.',
+    parameters: { referenceImages: { type: 'json', description: 'Optional ordered 1..9 working images from the current project, each {assetId, assetSha256, purpose}. Obtain exact IDs and SHAs from current reference tools; purpose states what to inherit and how the image relates to this starting instant. No guessed assets, URLs or boxes. Omission uses the shot’s formal references. Missing formal references can be resolved by explicitly choosing actual working images.' } }, output,
+    presentCall: () => ({ card: 'generic', kind: 'read', title: '核对首帧实际生成输入' }),
+    async execute(args, exec) {
+      if (Object.keys(args).some(key => key !== 'referenceImages')) throw new Error('首帧预览只接受当前镜头的参考图片。')
+      const current = await ports.readBoundContext(exec)
+      assertCurrent(current, exec)
+      const { projectId, episodeId, shotId } = current.state.binding.scope
+      const response = await ctx.qingmuYimengCommand('previewShootingFirstFrame', { projectId, episodeId, frameId: shotId,
+        ...(args.referenceImages === undefined ? {} : { referenceImages: args.referenceImages }) }, exec.signal)
+      assertCurrent(current, exec)
+      if (!response.ok) throw new Error(`首帧输入核对失败：${response.error.message}`)
+      return ports.boundedJson({ schema: 'qingmu.native-first-frame-preview.v1', preview: response.value, providerCalls: 0,
+        humanApprovalChanged: false, guidance: 'The preview contains the complete prompt actually prepared for the image model. Compare it with the current bound scene, script exceptions, actor blocking, support/contact, prop scale and start state. Resolve contradictory versions in the saved source, not by appending another incompatible instruction. generationContext replaces unscoped film prose while the current scene and still remain; compare all of them. Preserve the director’s video actions, camera movement, speech and sound when editing the starting image. A preview may retain a local preparation record; it never queues or charges an image request. Pixel inspection and creative acceptance remain separate.' })
+    },
+  }))
+  ctx.tools.register(defineTool({
     name: 'qingmu_import_acoustic_response',
     description: 'Import one bundled room impulse response from the acousticPresets catalog returned by qingmu_read_working_cut into the bound episode. Local, no provider charge; repeated imports recover the same source. This is an effect input, not ambience/music or a measurement of the film set. Importing neither changes the edit nor applies reverb.',
     parameters: { presetId: { type: 'string', required: true, description: 'Exact ID from the current acousticPresets catalog.' } }, output,

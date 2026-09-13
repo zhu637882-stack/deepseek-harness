@@ -533,6 +533,33 @@ exports[`reads saved episode geography and actual image pixels before any shot e
 }
 `;
 
+exports[`reads the actual image preparation through the shipped director and command adapter > actual first-frame input 1`] = `
+{
+  "guidance": "The preview contains the complete prompt actually prepared for the image model. Compare it with the current bound scene, script exceptions, actor blocking, support/contact, prop scale and start state. Resolve contradictory versions in the saved source, not by appending another incompatible instruction. generationContext replaces unscoped film prose while the current scene and still remain; compare all of them. Preserve the director’s video actions, camera movement, speech and sound when editing the starting image. A preview may retain a local preparation record; it never queues or charges an image request. Pixel inspection and creative acceptance remain separate.",
+  "humanApprovalChanged": false,
+  "preview": {
+    "blockers": [],
+    "episodeId": "episode-a",
+    "frameId": "f",
+    "payloadHash": "7777777777777777777777777777777777777777777777777777777777777777",
+    "preflightId": "6666666666666666666666666666666666666666666666666666666666666666",
+    "projectId": "p",
+    "prompt": "当前共用场景桌高0.75米（导演设计，非实测），门在南墙。
+起始画面：门关闭，演员站在桌西侧。",
+    "referenceBindings": [
+      {
+        "assetId": "room",
+        "assetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "purpose": "当前房间固定门窗；不复用参考图开门状态。",
+      },
+    ],
+    "schema": "qingmu.shooting-first-frame-preview.v1",
+  },
+  "providerCalls": 0,
+  "schema": "qingmu.native-first-frame-preview.v1",
+}
+`;
+
 exports[`reads, previews and saves through the shipped YAML preset and real adapters, then exposes the same version to the workspace 1`] = `
 {
   "activeShotChanged": false,

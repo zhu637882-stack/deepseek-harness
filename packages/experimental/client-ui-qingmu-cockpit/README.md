@@ -1,5 +1,7 @@
 # Qingmu OS production cockpit
 
+The shot director offers “整理首帧画面” alongside video-draft preparation. Selecting it fills a recoverable instruction without sending. After explicit send, the director reads current sources, saves the starting image through existing plan tools and checks the actual image preparation. The instruction preserves video movement, performance, dialogue and sound; it requests no media generation or adoption.
+
 Scene planning and existing-shot reconciliation ask the director to author generationContext from all relevant film, world, asset and department sources. Production uses this explicit segment context instead of repeating the whole film's actions; all current-shot execution fields remain complete. Missing legacy context is retained until deliberately revised. The source and saved prompt remain inspectable, and authored completeness still requires review.
 
 The delivery page opens the existing native director to arrange sound for the saved episode cut. Opening or filling the request does not send it. Unsaved edits and pending export operations disable sending; navigation warns before discarding local cut changes. The sound request uses the existing scoped cut tools, preserves picture choices, asks for independent whole-film cues and saves an editable version. Missing sound sources remain explicit. Users reread the saved cut, audition it and export separately. Sound and shot requests retain separate browser drafts.

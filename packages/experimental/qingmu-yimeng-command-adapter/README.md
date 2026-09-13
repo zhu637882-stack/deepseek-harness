@@ -1,5 +1,7 @@
 # Qingmu Yimeng command adapter
 
+`previewShootingFirstFrame` exposes the existing shooting preview to native commands. It accepts scoped identities and exact working-image references, preserves order and purpose, validates returned shot identity and input hashes, and rejects reflected credentials. Submission and adoption remain separate.
+
 Working-cut shots may carry editorialContext, the director-authored adjoining-segment edit notes. The value is passed through without turning it into an applied edit or altering retained cut revisions.
 
 Each shot exposes selectedAssetId: the same-frame source of its chosen Take, matched by source ID and SHA, or null when unavailable. Existing cuts retain independent editorial choices.

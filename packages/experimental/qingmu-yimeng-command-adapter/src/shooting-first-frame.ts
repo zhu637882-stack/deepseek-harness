@@ -1,6 +1,48 @@
 /** Same-origin transport to Writer's existing single-attempt image pipeline. */
 import type { WebServer } from '@deepseek-ai/dsh-host-webserver'
 import { isTrustedApiRequest } from '@deepseek-ai/dsh-client-connection/src/api-request-trust.ts'
+import type { YimengCommandJsonObject } from './types.ts'
+
+/** Prepare the selected shot's actual image input without submitting a generation.
+ * @param value Untrusted native tool input with project, episode, frame and optional working references.
+ * @param helpers Existing adapter error factories.
+ * @returns The same preview request used by the shooting page, with scope-checked output.
+ */
+export function prepareShootingFirstFramePreview(value: unknown, helpers: {
+  inputError(message: string): Error
+  responseError(message: string): Error
+}): { path: string; method: 'POST'; body: YimengCommandJsonObject; normalize(value: unknown): unknown } {
+  const fail = helpers.inputError
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw fail('first frame preview input required')
+  const raw = value as Record<string, unknown>
+  if (Object.keys(raw).some(key => !['projectId', 'episodeId', 'frameId', 'referenceImages'].includes(key))
+    || [raw.projectId, raw.episodeId, raw.frameId].some(id => typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id))) throw fail('first frame preview scope invalid')
+  if (raw.referenceImages !== undefined) {
+    if (!Array.isArray(raw.referenceImages) || raw.referenceImages.length < 1 || raw.referenceImages.length > 9) throw fail('first frame references require 1..9 images')
+    const ids = new Set<string>()
+    for (const item of raw.referenceImages) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) throw fail('first frame reference invalid')
+      const ref = item as Record<string, unknown>
+      if (Object.keys(ref).sort().join() !== 'assetId,assetSha256,purpose'
+        || typeof ref.assetId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(ref.assetId)
+        || typeof ref.assetSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(ref.assetSha256)
+        || typeof ref.purpose !== 'string' || !ref.purpose.trim() || ref.purpose.length > 4000
+        || ids.has(ref.assetId)) throw fail('first frame reference identity, SHA or purpose invalid')
+      ids.add(ref.assetId)
+    }
+  }
+  const body = { project_id: raw.projectId, episode_id: raw.episodeId, frame_ids: [raw.frameId],
+    ...(raw.referenceImages === undefined ? {} : { reference_images: raw.referenceImages }) } as YimengCommandJsonObject
+  return { path: '/api/pipeline/first-frames/shooting-preview', method: 'POST', body, normalize(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw helpers.responseError('first frame preview missing')
+    const result = value as Record<string, unknown>
+    if (result.schema !== 'qingmu.shooting-first-frame-preview.v1' || result.projectId !== raw.projectId
+      || result.episodeId !== raw.episodeId || result.frameId !== raw.frameId
+      || typeof result.prompt !== 'string' || !result.prompt.trim() || !Array.isArray(result.blockers)
+      || [result.preflightId, result.payloadHash].some(sha => typeof sha !== 'string' || !/^[a-f0-9]{64}$/.test(sha))) throw helpers.responseError('first frame preview does not match selected shot')
+    return result
+  } }
+}
 
 /** Register preview, submit and read-only recovery; no retries or authority conversion.
  * @param server Host web server.

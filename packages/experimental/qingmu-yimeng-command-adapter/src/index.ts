@@ -100,7 +100,7 @@ import { registerEntityDraftReviewCommands } from './entity-draft-review.ts'
 import { registerFirstFrameSelectionCommands } from './first-frame-selection.ts'
 import { registerNativeVideoReview } from './native-video-review.ts'
 import { registerCreationStylePreview } from './creation-style-preview.ts'
-import { registerShootingFirstFrame } from './shooting-first-frame.ts'
+import { prepareShootingFirstFramePreview, registerShootingFirstFrame } from './shooting-first-frame.ts'
 export {
   registerEntityDraftReviewCommands,
   type EntityDraftReviewCommandDependencies,
@@ -5860,6 +5860,11 @@ export function createYimengCommandHandler(
         path = prepared.path
         requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
         normalize = prepared.normalize
+      } else if (endpoint === 'previewShootingFirstFrame') {
+        const prepared = prepareShootingFirstFramePreview(payload, stageArtifactHelpers)
+        path = prepared.path
+        requestInit = { method: prepared.method, body: serializeBody(prepared.body) }
+        normalize = prepared.normalize
       } else if (['readScenePlanning', 'saveScenePlanning', 'recoverScenePlanning'].includes(endpoint)) {
         const prepared = prepareScenePlanning(endpoint, payload, stageArtifactHelpers)
         path = prepared.path
@@ -6292,6 +6297,7 @@ export function createYimengCommandHandler(
         || ['previewProjectCopy', 'copyProject', 'recoverProjectCopy'].includes(endpoint)
         || ['readWorkingCut', 'renderWorkingCut', 'saveWorkingCut', 'uploadWorkingCutAudio', 'reviewWorkingCutSound'].includes(endpoint)
         || ['previewSceneLayout', 'readAssetDesign', 'saveAssetDesign', 'quoteAssetImage', 'generateAssetImage', 'readAssetImageRuns', 'quoteAssetVoice', 'generateAssetVoice', 'readAssetVoiceRuns'].includes(endpoint)
+        || endpoint === 'previewShootingFirstFrame'
         || ['readScenePlanning', 'saveScenePlanning', 'recoverScenePlanning'].includes(endpoint)
         || ['readStyleComposition', 'readCreativeContract', 'initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)
         || endpoint === 'createTakeComment' || endpoint === 'recoverTakeComment'

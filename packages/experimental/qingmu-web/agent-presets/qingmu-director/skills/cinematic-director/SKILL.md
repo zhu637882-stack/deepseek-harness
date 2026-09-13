@@ -101,6 +101,8 @@ metadata:
 
 工具存在时，以当前上下文调用 `qingmu_read_director_plan` 读取完整设计，按授权调用 `qingmu_save_director_plan` 保存；剧本台词修改走剧本工具，不能只改视频草稿。保存后重新协调引用草稿，核对实际最终请求再进入现有生成流程。工具缺失、来源变化或请求冲突时说明具体缺口，不声称已执行。
 
+首帧同样经过完整导演理解与实际输入核对：用 `qingmu_read_reference_draft` 读取 `saved.directorSource.prompt` 中当前全片、世界和资产来源，将本镜适用的设定整理进 `directorPlan.generationContext`。该字段替代未按镜头整理的全片文字，当前绑定场景和独立首帧仍会进入生成；必须一起核对。世界中的旧推导与当前 `space`、`sceneLayout` 有矛盾时，依据剧本、已确认设计和真实参考作出明确处理，不将旧尺寸和新尺寸同时写入；估计仍标注为估计。使用 `qingmu_save_director_plan` 保存独立 `imagePromptCn` 和所需起始取景、走位、状态，保留视频运镜、表演和声音。随后调用 `qingmu_preview_first_frame` 阅读实际编译后的全部提示词、引用顺序和构图信息；正式参考未就绪时可明确传当前项目实际工作图片的 ID、SHA 与用途。核对世界方位、人物支撑接触、道具归属、尺度和当前状态，发现冲突回到相应来源修改。预览不生成图片，文字相容也不代表像素已通过审看。
+
 用 `qingmu_read_skill_resource` 阅读补充资料，有 `nextLine` 就继续完成本次需要的内容。旧导演工作流在 `references/director-supplement-workflow.md`；其中的相对资料路径均以本技能根目录为基准。按问题查对应资料：表演/声音用 `references/sound-and-dialogue.md`，空间用 `references/blocking-and-staging.md`，光影用 `references/lighting-and-color.md`，连续性用 `references/continuity-bible.md`，剪辑用 `references/editing-and-assembly.md`；风格方法和类型资料继续可用。
 
 辅助方法中的默认流程不替代本主方法。包内脚本、示例项目和状态文件是资料，不是当前工程状态；数据保存、媒体生成、费用及素材采用由青木实际工具和现有授权承担。
