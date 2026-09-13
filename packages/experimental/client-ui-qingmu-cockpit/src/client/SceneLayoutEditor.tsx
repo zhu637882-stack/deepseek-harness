@@ -25,7 +25,7 @@ function VectorInput({ label, value, onChange, positive = false }: {
  * @param props - Current project draft, optional shared-layout edit and scoped preview command.
  * @returns A plan, camera controls and the exact composition input.
  */
-export function SceneLayoutEditor({ projectId, episodeId, layout, camera, ratio, onLayout, onCamera, previewLayout }: {
+export function SceneLayoutEditor({ projectId, episodeId, layout, camera, ratio, onLayout, onCamera, previewLayout, usage = 'asset' }: {
   readonly projectId: string
   readonly episodeId: string
   readonly layout: SceneLayout | null | undefined
@@ -34,6 +34,7 @@ export function SceneLayoutEditor({ projectId, episodeId, layout, camera, ratio,
   readonly onLayout?: ((value: SceneLayout | null) => void) | undefined
   readonly onCamera: (value: ImageCamera | null) => void
   readonly previewLayout: QingmuYimengPort['previewSceneLayout']
+  readonly usage?: 'asset' | 'shot'
 }) {
   const [selected, setSelected] = useState(''), [preview, setPreview] = useState<SceneLayoutPreview>()
   const [error, setError] = useState(''), [busy, setBusy] = useState(false)
@@ -62,6 +63,7 @@ export function SceneLayoutEditor({ projectId, episodeId, layout, camera, ratio,
       objects: objects.map(item => item.id === active.id ? { ...item, ...patch } : item) })
   }
   function start(event: React.PointerEvent<SVGGElement>, id: string) {
+    if (event.currentTarget.closest('fieldset:disabled')) return
     if (event.button !== 0) return
     if (id !== '$camera' && id !== '$target') setSelected(id)
     if ((!onLayout && !id.startsWith('$')) || !camera && id.startsWith('$')) return
@@ -69,6 +71,7 @@ export function SceneLayoutEditor({ projectId, episodeId, layout, camera, ratio,
     drag.current = { id, x0: minX, y0: minY, scale }
   }
   function move(event: React.PointerEvent<SVGSVGElement>) {
+    if (event.currentTarget.closest('fieldset:disabled')) return
     const d = drag.current; if (!d) return
     const rect = event.currentTarget.getBoundingClientRect()
     const x = Math.round(((event.clientX-rect.left)/rect.width*600-20)/d.scale*10+d.x0*10)/10
@@ -90,8 +93,8 @@ export function SceneLayoutEditor({ projectId, episodeId, layout, camera, ratio,
     } catch (cause) { if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : '空间预览失败') }
     finally { if (!abort.signal.aborted) setBusy(false) }
   }
-  return <details className={css.editor}><summary>空间布置与取景预览{camera ? ' · 已用于本图生成' : ''}</summary>
-    <p>共用布局记录固定位置，摄影机决定本图取景。可让导演整理，也可在图中拖动物件、摄影机与目标点。单位为米，Z 为离地高度；尺寸需要有依据。</p>
+  return <details className={css.editor}><summary>空间布置与取景预览{camera ? ' · 已启用构图辅助' : ''}</summary>
+    <p>共用布局记录固定位置，摄影机决定本图取景。{onLayout ? '可在图中拖动物件、摄影机与目标点。' : '可拖动摄影机与目标点；共用物件保持原位。'}单位为米，Z 为离地高度；尺寸需要有依据。</p>
     {!layout && onLayout && <button type="button" onClick={() => { onLayout({ basis: '导演拟定，待与剧本和参考图核对。', coordinateFrame: '米制：X 向右、Y 向上、Z 离地高；请补充入口等固定方位。', objects: [{ id: 'object_1', label: '待设定物件', center: [0, 0, 0.5], size: [1, 1, 1], rotation: 0, color: '#a89f89' }] }) }}>开始布置空间</button>}
     {!layout && !onLayout && <p>请先在对应场景素材中建立布局。</p>}
     {layout && <>
@@ -130,7 +133,7 @@ export function SceneLayoutEditor({ projectId, episodeId, layout, camera, ratio,
         <button type="button" disabled={busy} onClick={() => { void showPreview() }}>{busy ? '计算取景…' : '预览当前取景'}</button></>}
       {preview && <><img className={css.preview} src={preview.imageUrl} alt="本图空间构图参考" /><p>{preview.guidance}</p>
         <p>当前体块取景可见：{preview.objects.filter(item => item.pixelCount).map(item => item.label).join('、') || '没有物件，请调整机位'}。</p></>}
-      <p>保存素材设计后，启用的取景图会随参考素材一起发送。墙体有门窗时请分开布置墙段，空隙表示开口；体块不代表完整建筑模型。</p>
+      <p>{usage === 'shot' ? '保存本镜导演设计后，首帧预览和生成使用这个机位，沿用场景的共用布局。请同时核对上方首帧文字和人物站位。' : '保存素材设计后，启用的取景图会随参考素材一起发送。'}墙体有门窗时请分开布置墙段，空隙表示开口；体块不代表完整建筑模型。</p>
     </>}
     {error && <p role="status">{error}</p>}
   </details>

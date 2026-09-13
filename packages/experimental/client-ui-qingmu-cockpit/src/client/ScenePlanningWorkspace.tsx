@@ -249,7 +249,7 @@ export function ScenePlanningWorkspace({
   readonly port: Pick<QingmuYimengPort, 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning'
     | 'requestDirectorProposal' | 'checkDirectorProposalFreshness'>
     & Partial<Pick<QingmuYimengPort, 'readDirectorProviderAvailability'
-      | 'issueDirectorProviderWorkOrder' | 'readDirectorProviderWorkOrderStatus' | 'readAssetDesign'>>
+      | 'issueDirectorProviderWorkOrder' | 'readDirectorProviderWorkOrderStatus' | 'readAssetDesign' | 'previewSceneLayout'>>
   readonly directorBridge?: DirectorContextClientPort | undefined
   readonly directorSessionId?: string | undefined
   readonly directorConnection?: HostDescriptionSource | undefined
@@ -950,7 +950,11 @@ export function ScenePlanningWorkspace({
               changeAutomatic(e.target.value, direction)
             }} /></label>
             <fieldset disabled={Boolean(pending)}>
-              <SceneDirectionEditor value={direction} onChange={(directorPlan) => { changeAutomatic(draft, directorPlan) }} />
+              <SceneDirectionEditor key={selected.id} value={direction}
+                onChange={(directorPlan) => { changeAutomatic(draft, directorPlan) }}
+                layoutContext={port.readAssetDesign && port.previewSceneLayout ? { projectId, episodeId,
+                  sceneId: selected.sceneId ?? null, ratio: state?.aspectRatio,
+                  readAssetDesign: port.readAssetDesign, previewSceneLayout: port.previewSceneLayout } : undefined} />
             </fieldset>
             <div className={css.actions}>
               {pending && <button type="button" onClick={() => { void runAutomatic(true) }}>读取同一保存回执</button>}
@@ -984,7 +988,15 @@ export function ScenePlanningWorkspace({
         {(Object.keys(labels) as (keyof typeof labels)[]).map(field => <label key={field}>{labels[field]}
           <textarea aria-label={labels[field]} rows={field === 'title' ? 1 : 2} maxLength={field === 'title' ? 120 : 2000} value={current[field]}
             onChange={(e) => { change({ ...current, [field]: e.target.value }) }} /></label>)}
-        <SceneDirectionEditor value={current.directorPlan} onChange={(directorPlan) => { change({ ...current, directorPlan }) }} />
+        <SceneDirectionEditor key={local.shotIds[index] ?? `new-${local.sceneIndex}-${index}`} value={current.directorPlan}
+          onChange={(directorPlan) => { change({ ...current, directorPlan }) }}
+          layoutContext={port.readAssetDesign && port.previewSceneLayout ? { projectId, episodeId,
+            sceneId: local.shotIds[index] ? (() => {
+              const frame = state?.frameRequirements?.find(frame => frame.id === local.shotIds[index])
+              return frame?.sceneId !== undefined ? frame.sceneId : state?.planning?.sceneId ?? null
+            })() : undefined,
+            sceneName: planningScene?.title, ratio: state?.aspectRatio,
+            readAssetDesign: port.readAssetDesign, previewSceneLayout: port.previewSceneLayout } : undefined} />
         <label>规划时长（秒）<input aria-label="规划时长（秒）" type="number" min="0.5" max="30" step="0.5" value={current.durationSec}
           onChange={(e) => { change({ ...current, durationSec: Number(e.target.value) }) }} /></label>
         <div><h3>对白分配</h3><p>保留原文与来源行；此处未核验语音时序。</p>

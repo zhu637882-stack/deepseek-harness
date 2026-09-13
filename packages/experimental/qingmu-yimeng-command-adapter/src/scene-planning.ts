@@ -47,6 +47,8 @@ export type PlanningOperation = PlanningBase & (
 /** One editable first-frame requirement owned by an existing automatic shot. */
 export interface AutomaticPlanningShot {
   readonly id: string
+  /** Current canonical binding; null is unbound, omission is an older projection. */
+  readonly sceneId?: string | null
   readonly frameNo: number
   readonly title: string
   readonly imagePromptCn: string
@@ -125,6 +127,8 @@ export type ScenePlanningScene = PlanningScene | AutomaticPlanningScene
 /** Existing rows projected for planning; no shadow database. */
 export interface ScenePlanningState extends CreationScope {
   readonly schema: 'jason.qingmu-scene-planning-state.v1'
+  /** Film framing used by first-frame generation, independent of asset image ratios. */
+  readonly aspectRatio?: string
   readonly scriptRevision: number
   readonly scriptSha256: string | null
   readonly scenes: readonly ScenePlanningScene[]
@@ -230,6 +234,7 @@ function frameRequirements(value: unknown, fail: Fail): void {
     const frame = obj(item, fail); const shotId = id(frame.id, fail)
     if (shotIds.has(shotId)) throw fail('canonical storyboard shot identity invalid')
     shotIds.add(shotId); integer(frame.frameNo, fail, 1); str(frame.title, fail, 64000)
+    if (frame.sceneId !== undefined && frame.sceneId !== null) id(frame.sceneId, fail)
     if (typeof frame.imagePromptCn !== 'string' || frame.imagePromptCn.length > 20000) throw fail('canonical storyboard image prompt invalid')
     if (frame.firstFrameCandidateCount !== undefined) integer(frame.firstFrameCandidateCount, fail)
     if (frame.directorPlan !== undefined) obj(frame.directorPlan, fail)
@@ -340,6 +345,7 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
         }
       }
       if (r.storyboard !== null) revision(r.storyboard, b)
+      if (r.aspectRatio !== undefined && (typeof r.aspectRatio !== 'string' || !/^\d{1,4}:\d{1,4}$/u.test(r.aspectRatio))) throw b('planning aspect ratio invalid')
       if (r.planning !== null) scenePlan(r.planning, b)
       let plans: Record<string, unknown>[] | undefined
       if (r.scenePlans !== undefined) {

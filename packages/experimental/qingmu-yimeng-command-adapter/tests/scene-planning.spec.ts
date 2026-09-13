@@ -27,7 +27,7 @@ describe('bounded scene planning Host channel', () => {
     expect(await handler('readScenePlanning', { ...scope, ...change }, new AbortController().signal)).toMatchObject({ ok: false })
     expect(fetch).not.toHaveBeenCalled()
   })
-  it.each([{ projectId: 'other' }, { providerCalls: 1 }, { approvalGranted: true }, { stageStarted: true }, { scriptSha256: 'bad' }])('rejects false response authority %j', async (change) => {
+  it.each([{ projectId: 'other' }, { providerCalls: 1 }, { approvalGranted: true }, { stageStarted: true }, { scriptSha256: 'bad' }, { aspectRatio: {} }])('rejects false response authority %j', async (change) => {
     expect(await setup({ ...state, ...change }).handler('readScenePlanning', scope, new AbortController().signal)).toMatchObject({ ok: false })
   })
   const automaticStoryboard = { id: 'revision_2', version: 2, sourceHash: 'c'.repeat(64), status: 'Ready' }

@@ -13,6 +13,16 @@ const camera: ImageCamera = { position: [0,-5,1.6], target: [0,0,1], verticalFov
 const result: SceneLayoutPreview = { projectId: 'p', episodeId: 'e', recipe: 'qingmu-blockout-v1', imageUrl: 'data:image/png;base64,cHJldmlldw==',
   sha256: 'a'.repeat(64), width: 1024, height: 576, objects: [{ id: 'desk', label: '固定书桌', color: '#886655', pixelCount: 90, bounds: [1,2,30,40] }], guidance: 'Authored blockout only.' }
 
+it('prevents SVG dragging while the shot save is pending', () => {
+  const onCamera = vi.fn(), onLayout = vi.fn()
+  render(<fieldset disabled><SceneLayoutEditor projectId="p" episodeId="e" layout={layout} camera={camera}
+    ratio="16:9" onLayout={onLayout} onCamera={onCamera} previewLayout={vi.fn(async () => result)} /></fieldset>)
+  const svg = screen.getByLabelText('共用场景平面图')
+  for (const group of svg.querySelectorAll('g')) fireEvent.pointerDown(group, { button: 0, pointerId: 1 })
+  fireEvent.pointerMove(svg, { clientX: 400, clientY: 200 })
+  expect(onCamera).not.toHaveBeenCalled(); expect(onLayout).not.toHaveBeenCalled()
+})
+
 it('changes camera without moving the shared furniture and removes a stale preview on edit', async () => {
   const preview = vi.fn(async () => result), onLayout = vi.fn()
   function Editor() {
@@ -20,7 +30,7 @@ it('changes camera without moving the shared furniture and removes a stale previ
     return <SceneLayoutEditor projectId="p" episodeId="e" layout={layout} camera={value} ratio="16:9" onLayout={onLayout} onCamera={setValue} previewLayout={preview} />
   }
   render(<Editor />)
-  fireEvent.click(screen.getByText('空间布置与取景预览 · 已用于本图生成'))
+  fireEvent.click(screen.getByText('空间布置与取景预览 · 已启用构图辅助'))
   fireEvent.change(screen.getByLabelText('摄影机位置 Y'), { target: { value: '5' } })
   fireEvent.click(screen.getByRole('button', { name: '预览当前取景' }))
   await screen.findByAltText('本图空间构图参考')
@@ -37,7 +47,7 @@ it('discards a late preview after switching projects', async () => {
   const preview = vi.fn(() => new Promise<SceneLayoutPreview>((resolve) => { complete = resolve }))
   const props = { episodeId: 'e', layout, camera, ratio: '16:9', onCamera: vi.fn(), previewLayout: preview }
   const view = render(<SceneLayoutEditor {...props} projectId="p" />)
-  fireEvent.click(screen.getByText('空间布置与取景预览 · 已用于本图生成'))
+  fireEvent.click(screen.getByText('空间布置与取景预览 · 已启用构图辅助'))
   fireEvent.click(screen.getByRole('button', { name: '预览当前取景' }))
   view.rerender(<SceneLayoutEditor {...props} projectId="other" />)
   complete(result)
