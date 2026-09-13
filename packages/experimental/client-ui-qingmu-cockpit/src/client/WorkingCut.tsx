@@ -40,7 +40,8 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
       setAudioCues(next.cuts[0]?.audioCues ?? [])
       setSoundPlan(next.cuts[0]?.soundPlan ?? '')
       setClips(next.cuts[0]?.clips ?? next.shots.flatMap((shot) => {
-        const candidate = shot.candidates.at(-1)
+        const candidate = shot.selectedAssetId === undefined ? shot.candidates.at(-1)
+          : shot.candidates.find(c => c.assetId === shot.selectedAssetId)
         return candidate ? [{ frameId: shot.frameId, assetId: candidate.assetId, sha256: candidate.sha256,
           inSec: 0, outSec: Math.floor(candidate.duration * 100) / 100 }] : []
       }))
@@ -143,8 +144,8 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
     }}>重新核对剪辑</button></div>}
     {!state ? <p role="status">正在读取镜头…</p> : <>
       {state.shots.filter(s => !clips.some(c => c.frameId === s.frameId)).map(shot => <p key={shot.frameId}>
-        镜 {shot.frameNo} · {shot.candidates.length ? '尚未加入剪辑' : '尚无已完成视频'}{' '}
-        {shot.candidates.length ? <button type="button" onClick={() => { const c = shot.candidates.at(-1); if (c) change([...clips, { frameId: shot.frameId, assetId: c.assetId, sha256: c.sha256, inSec: 0, outSec: Math.floor(c.duration * 100) / 100 }]) }}>加入此镜</button>
+        镜 {shot.frameNo} · {shot.candidates.length ? shot.selectedAssetId === null ? '尚未选用视频，可加入候选比较' : '尚未加入剪辑' : '尚无已完成视频'}{' '}
+        {shot.candidates.length ? <button type="button" disabled={locked} onClick={() => { const c = shot.candidates.find(c => c.assetId === shot.selectedAssetId) ?? shot.candidates.at(-1); if (c) change([...clips, { frameId: shot.frameId, assetId: c.assetId, sha256: c.sha256, inSec: 0, outSec: Math.floor(c.duration * 100) / 100 }]) }}>加入此镜</button>
           : <button type="button" onClick={() => { onOpenShooting(shot.frameId) }}>去生成</button>}
       </p>)}
       <ol className={css.clips}>{clips.map((clip, index) => {
@@ -160,7 +161,7 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
                 inSec: 0, outSec: Math.floor(c.duration * 100) / 100 })
             }
           }}>{shot?.candidates.map((c, i) =>
-              <option key={c.assetId} value={c.assetId}>版本 {i + 1} · {c.duration.toFixed(1)} 秒</option>,
+              <option key={c.assetId} value={c.assetId}>版本 {i + 1} · {c.duration.toFixed(1)} 秒{c.assetId === shot.selectedAssetId ? ' · 拍摄页已选' : ''}</option>,
             )}</select>
           <label>起点 <input aria-label={`镜 ${index + 1} 起点秒`} type="number" min="0" max={clip.outSec} step="0.1" value={clip.inSec} disabled={locked} onChange={(e) => { update(index, { ...clip, inSec: Number(e.target.value) }) }} /></label>
           <label>终点 <input aria-label={`镜 ${index + 1} 终点秒`} type="number" min={clip.inSec} max={selected?.duration} step="0.1" value={clip.outSec} disabled={locked} onChange={(e) => { update(index, { ...clip, outSec: Number(e.target.value) }) }} /></label>

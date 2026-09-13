@@ -7,6 +7,34 @@ const state: WorkingCutState = { schema:'qingmu-working-cut-v1',projectId:'p',ep
   shots:[{ frameId:'f',frameNo:1,title:'动作',candidates:[{ assetId:'a',sha256:'a'.repeat(64),duration:15,taskId:'t',url:'' }] }],
   cuts:[],providerCalls:0,humanApprovalChanged:false }
 afterEach(() => { cleanup();localStorage.clear() })
+
+it('starts from the chosen Take, leaves unchosen shots out and preserves a saved edit', async () => {
+  const shot = state.shots[0]!
+  let server: WorkingCutState = { ...state, shots: [
+    { ...shot, selectedAssetId: 'a', candidates: [...shot.candidates, { ...shot.candidates[0]!, assetId: 'newer' }] },
+    { ...shot, frameId: 'second', frameNo: 2, selectedAssetId: null },
+  ] }
+  const save = vi.fn(async ({ command }: { command: WorkingCutCommand }) => {
+    server = { ...server, revision: 1, cuts: [{ ...command, version: 1, revisionId: 'r', taskId: null,
+      status: 'NotQueued', errorCode: null, assetId: null, sha256: null, url: '' }] }
+    return server
+  })
+  const port = { readWorkingCut: vi.fn(async () => server), saveWorkingCut: save,
+    renderWorkingCut: vi.fn(), reviewWorkingCutSound: vi.fn(), uploadWorkingCutAudio: vi.fn() }
+  let view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
+  expect(await screen.findByRole('combobox', { name: '镜 1 视频版本' })).toHaveProperty('value', 'a')
+  expect(screen.queryByRole('combobox', { name: '镜 2 视频版本' })).toBeNull()
+  expect(screen.getByRole('option', { name: /拍摄页已选/ })).toHaveProperty('value', 'a')
+  fireEvent.change(screen.getByRole('combobox', { name: '镜 1 视频版本' }), { target: { value: 'newer' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存剪辑草稿' }))
+  await waitFor(() => { expect(save).toHaveBeenCalledTimes(1) })
+  view.unmount()
+  view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
+  expect(await screen.findByRole('combobox', { name: '镜 1 视频版本' })).toHaveProperty('value', 'newer')
+  expect(save.mock.calls[0]?.[0].command.clips).toHaveLength(1)
+  expect(port.renderWorkingCut).not.toHaveBeenCalled()
+})
+
 it('uses video audio independently and retains chosen component and film timing after reopening', async () => {
   const video = { assetId: 'a', sha256: 'a'.repeat(64), duration: 15, url: '/original.mp4', name: '门外雨声', usage: 'video_audio' as const }
   let server: WorkingCutState = { ...state, videoAudioSources: [video], audioSeparation: { available: true, model: 'Bandit v2', providerCalls: 0 } }

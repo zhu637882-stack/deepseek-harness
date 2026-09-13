@@ -1,5 +1,7 @@
 # Qingmu Yimeng command adapter
 
+Each shot exposes selectedAssetId: the same-frame source of its chosen Take, matched by source ID and SHA, or null when unavailable. Existing cuts retain independent editorial choices.
+
 Working-cut reads expose completed shot videos and rendered cut versions in videoAudioSources separately from imported audioLibrary. Audio cues accept optional sourceAudioMode original/speech_effects/speech/effects/music and exact source IDs and hashes from either list. Omission preserves existing cue bodies. Writer validates episode scope, candidate availability and source bytes; separated cues use the existing local render task.
 
 `previewSceneLayout` resolves the current project and episode to the local asset-design preview endpoint. It accepts bounded authored layout/camera data and an explicit ratio; its PNG result cannot supply an external URL. Scene assets persist `sceneLayout`, while each staged asset can enable `imageCamera`. Omitted fields preserve older clients and explicit null clears the choice. Quotations include the exact rendered composition reference and count it against the model image limit; a layout change invalidates an unsent quotation.

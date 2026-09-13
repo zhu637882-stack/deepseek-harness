@@ -95,6 +95,8 @@ export interface WorkingCutState extends CreationScope {
     readonly frameId: string
     readonly frameNo: number
     readonly title: string
+    /** Original source of the current chosen Take; null means none is available. Omitted by older servers. */
+    readonly selectedAssetId?: string | null
     readonly candidates: readonly {
       readonly assetId: string
       readonly sha256: string
