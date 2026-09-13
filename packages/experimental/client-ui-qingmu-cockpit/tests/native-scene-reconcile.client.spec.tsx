@@ -24,7 +24,7 @@ const changes = [
 const draft = { sceneId: 'room', sourceScriptSha256: sha, sourceStoryboardSha256: initial.storyboard!.sourceHash,
   sourceAssetStateSha256: basis.stateSha256, sourceIssues: [], shots: changes }
 const batchKey = 'qingmu.scene-reconcile.v1:p:e:room'
-function setup(candidate: unknown = draft, automatic = false) {
+function setup(candidate: unknown = draft, automatic = false, assetBasis = basis) {
   let state = structuredClone(initial)
   if (automatic) state = { ...state, canonicalStoryboard: { revision: 1, sourceHash: initial.storyboard!.sourceHash,
     shotCount: 3, shots: state.frameRequirements!, origin: 'automatic' } }
@@ -33,7 +33,7 @@ function setup(candidate: unknown = draft, automatic = false) {
     read: vi.fn(async () => ({ lastSeq: 10, running: false, finished: true, text, script: text, error: '' })) }
   const saved = new Map<string, ScenePlanningResult>()
   const port = {
-    readAssetDesign: vi.fn(async () => basis), readScenePlanning: vi.fn(async () => structuredClone(state)),
+    readAssetDesign: vi.fn(async () => assetBasis), readScenePlanning: vi.fn(async () => structuredClone(state)),
     saveScenePlanning: vi.fn(async (intent: ScenePlanningRequest) => {
       const existing = saved.get(intent.idempotencyKey)
       if (existing) return existing
@@ -134,4 +134,31 @@ it.each([
   await screen.findByText(/没有采用：/)
   expect(port.saveScenePlanning).not.toHaveBeenCalled()
   expect(localStorage.getItem(batchKey)).toBeNull()
+})
+
+const layoutBasis: AssetDesignState = { ...basis, design: { sourceScriptSha256: sha,
+  director: { visualStyle: '', tone: '', lightingRules: '', colorPalette: [], cameraGrammar: '', performanceRules: '', characterContinuityRules: '' },
+  assets: [{ id: 'room', name: 'Room', kind: 'scene', imagePrompt: 'Room', sceneLayout: { basis: 'Authored estimate', coordinateFrame: 'x/y ground, z up',
+    objects: [{ id: 'table', label: 'Table', center: [0, 2, 0.5], size: [1, 1, 1], rotation: 0, color: '#884422' }] } }] } }
+it.each([undefined, { position: [0, 0, 1], target: [0, 0, 1], verticalFov: 46 }])('preserves a whole-scene draft whose executable camera choice is missing or invalid (%s)', async (imageCamera) => {
+  const candidate = { ...draft, shots: changes.map(change => ({ ...change, directorPlan: { ...change.directorPlan,
+    cameraMovement: 'A new angle appears only in prose', ...(imageCamera === undefined ? {} : { imageCamera }) } })) }
+  const { port } = setup(candidate, false, layoutBasis)
+  const start = screen.getByRole<HTMLButtonElement>('button', { name: '让导演统筹本场全部镜头' })
+  await waitFor(() => { expect(start.disabled).toBe(false) })
+  fireEvent.click(start)
+  fireEvent.click(await screen.findByRole('button', { name: '检查通过，载入整场待保存稿' }))
+  await screen.findByText(/没有采用：/)
+  expect(port.saveScenePlanning).not.toHaveBeenCalled()
+  expect(localStorage.getItem(batchKey)).toBeNull()
+})
+it('saves explicit shot cameras and the director’s intentional opt-out without changing motion design', async () => {
+  const cameras = [{ position: [0, 0, 1.5], target: [0, 2, 1], verticalFov: 46, roll: 0 }, null]
+  const candidate = { ...draft, shots: changes.map((change, index) => ({ ...change,
+    directorPlan: { ...change.directorPlan, imageCamera: cameras[index], cameraMovement: 'Move with the actor after the starting frame.' } })) }
+  const { port, onSaved } = setup(candidate, false, layoutBasis)
+  fireEvent.click(await loadDraft())
+  await waitFor(() => { expect(onSaved).toHaveBeenCalledOnce() })
+  expect(port.saveScenePlanning.mock.calls.map(([intent]) => (intent.request as { directorPlan: object }).directorPlan))
+    .toEqual(candidate.shots.map(shot => shot.directorPlan))
 })

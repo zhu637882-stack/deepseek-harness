@@ -83,8 +83,14 @@ const saveArgs = { draft: edit, expectedRevision: 1, expectedFrameSha256: savedD
 
 const initialCut = { schema:'qingmu-working-cut-v1',projectId:'p',episodeId:'episode-a',revision:0,shots:[],cuts:[],
   audioLibrary:[{ assetId:'room',sha256:'b'.repeat(64),duration:30,name:'Room.wav',url:'' }, { assetId:'room-ir',sha256:'c'.repeat(64),duration:1,name:'Room-IR.wav',url:'' }],providerCalls:0,humanApprovalChanged:false }
-function writer(extraShots = 0, image?: { sha256: string; url: string; config?: Record<string, unknown>; source?: Record<string, unknown> },
-  fixture = { request, response, savedDraft }, startingImagePrompt = planningShots[0]!.imagePromptCn) {
+function writer(extraShots = 0, image?: {
+  sha256: string
+  url: string
+  config?: Record<string, unknown>
+  source?: Record<string, unknown>
+  assetDesign?: Record<string, unknown>
+},
+fixture = { request, response, savedDraft }, startingImagePrompt = planningShots[0]!.imagePromptCn) {
   const { request, response, savedDraft } = fixture
   let workingCut: Record<string, unknown> = structuredClone(initialCut)
 
@@ -116,7 +122,7 @@ function writer(extraShots = 0, image?: { sha256: string; url: string; config?: 
     })
     if (url.pathname.endsWith('/asset-design')) return Response.json({
       schema: 'qingmu.asset-design-state.v1', projectId: 'p', episodeId: 'episode-a',
-      stateSha256: 'a'.repeat(64), script: {}, design: { assets: [{ kind: 'scene', name: 'Library',
+      stateSha256: 'a'.repeat(64), script: {}, design: image?.assetDesign ?? { assets: [{ kind: 'scene', name: 'Library',
         space: { layout: 'Return desk beside the entrance; repair table beneath the west window.' } }] },
     })
     if (url.pathname.endsWith('/working-cut')) return Response.json(workingCut)
@@ -1550,4 +1556,34 @@ it.each(['stale', 'missing', 'duplicate', 'ambiguous', 'too-long'] as const)('re
   expect(result(h.agent, 'copy-denied').error).toBe(true)
   expect(result(h.agent, 'preview-denied').error).toBe(true)
   expect(saves(h.upstream)).toHaveLength(0)
+})
+
+it.each(['current', 'stale', 'missing'] as const)('delivers only exact common-design references with their current purposes (%s)', async (version) => {
+  const reference = { assetId: version === 'missing' ? 'missing-image' : 'asset_cafe',
+    assetSha256: version === 'stale' ? 'a'.repeat(64) : imageSha, purpose: 'Appearance only; use the current authored layout for camera geometry.' }
+  const assetDesign = { assets: [
+    { id: 'scene-a', kind: 'scene', name: 'Room', imagePrompt: 'Current room design', references: [reference] },
+    { id: 'prop-a', kind: 'prop', name: 'Lamp', imagePrompt: 'Current lamp design', references: [{ ...reference, purpose: 'Lamp material only.' }] },
+  ] }
+  const adapter = new MockAdapter([toolCallResponse('assets', 'qingmu_read_asset_design', { page: 1 }), textResponse('Inspect the current references for their stated purpose.')])
+  vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'mock', id: 'mock', name: 'mock', inputModalities: ['text', 'image'] })
+  const media = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(imageBytes, { headers: { 'content-type': 'image/png' } }))
+  const h = await harness(adapter, writer(0, { sha256: imageSha, url: imageUrl, assetDesign,
+    source: { selected: false, selection_status: 'Stale' }, config: { image_prompt: 'Obsolete room layout' } }), true)
+  await h.run(false, {})
+  expect(result(h.agent, 'assets').error, result(h.agent, 'assets').text).toBe(false)
+  const value = JSON.parse(result(h.agent, 'assets').text)
+  expect(value.saved.design).toEqual(assetDesign)
+  expect(value.visualInputs).toHaveLength(1)
+  expect(value.visualInputs[0]).toMatchObject({ assetId: reference.assetId, assetSha256: reference.assetSha256,
+    status: version === 'current' ? 'attached' : version === 'stale' ? 'stale' : 'not_on_page',
+    currentUses: [{ entityId: 'scene-a', kind: 'scene', name: 'Room', purpose: reference.purpose },
+      { entityId: 'prop-a', kind: 'prop', name: 'Lamp', purpose: 'Lamp material only.' }] })
+  expect(value.visualInputs[0]).not.toHaveProperty('originalImageDesign')
+  const event = h.agent.session.events.find(e => e.type === 'tool/result' && e.data.message.source.callId === 'assets')
+  if (event?.type !== 'tool/result') throw new Error('Missing asset result')
+  const images = event.data.message.content.flatMap(part => part.content).filter(part => part.type === 'image')
+  expect(images).toHaveLength(version === 'current' ? 1 : 0)
+  expect(media).toHaveBeenCalledTimes(version === 'current' ? 1 : 0)
+  expect(h.upstream.fetch.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true)
 })

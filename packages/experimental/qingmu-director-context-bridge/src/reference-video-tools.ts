@@ -17,6 +17,7 @@ import { readReferenceImage } from './reference-image.ts'
 import { inspectReferenceImage, type ReferenceVisionConfig } from './reference-vision.ts'
 import { creativeRequest } from './creative-request.ts'
 import { readDraftImages, readImageInputs, type DraftImageInput } from './reference-draft-images.ts'
+import type { AssetDesignState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 
 // Keep catalog pages small; the exact frozen description accompanies inspection of one image.
 function imageCatalogEntry(item: ReferenceVideoAsset) {
@@ -130,6 +131,11 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
     schema: { type: 'json' as const },
     render: (_args: unknown, value: JsonValue) => [{ type: 'text' as const, text: JSON.stringify(value) }],
   }
+  const imageOutput = { schema: { type: 'json' as const }, render: (_args: unknown, value: JsonValue) => {
+    const result = value as unknown as { visualInputs?: DraftImageInput[] }
+    return [{ type: 'text' as const, text: JSON.stringify(value) }, ...(result.visualInputs ?? []).flatMap(input => input.attachment
+      ? [{ type: 'image' as const, attachment: input.attachment }] : [])]
+  } }
   ctx.tools.register(defineTool({
     name: 'qingmu_preview_scene_layout',
     description: 'Preview an authored shared scene blockout from a proposed camera, with exact visibility of the supplied opaque boxes. No generation, save or adoption. Use this before changing camera when a shared layout is useful. Coordinates are metre-based x/y ground, z up; never claim they are measured from a single image. Preserve fixed volumes when trying another camera. Openings require surrounding wall pieces, not an opaque wall behind a window. Inspect the returned image and compare with actual source images. Save the chosen layout as sceneLayout on the scene asset. Save imageCamera on an asset for its image, or on the current directorPlan for its starting frame; the respective image request then includes this exact composition reference. A shot camera does not change the scene layout or inherit the scene master-image camera. It does not guarantee generated-image fidelity.',
@@ -162,8 +168,8 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
   }))
   ctx.tools.register(defineTool({
     name: 'qingmu_read_asset_design',
-    description: 'Read the current episode asset design and one page of project image metadata during screenplay, asset or scene design, before shots exist. The consumed project request fixes scope. Use qingmu_view_reference_image for relevant scene geometry, costume or prop evidence before changing a view or reconciling design conflicts. Preserve exact IDs and hashes when reusing images. This reads saved data; keep newer unsaved design supplied in the request. No save, generation or adoption.',
-    parameters: { page: { type: 'integer', required: true, description: 'Project asset catalog page, starting at 1.' } }, output,
+    description: 'Read the current episode asset design and one page of project images during screenplay, asset or scene design. For an image-capable director, visualInputs delivers this page’s exact images referenced by the saved design, with their currentUses; missing or stale images are explicit, never replaced by another candidate. Inspect these pixels for their stated purpose before considering other catalog candidates. The consumed project request fixes scope. Use qingmu_view_reference_image for other relevant evidence. Preserve exact IDs and hashes. This reads saved data; keep newer unsaved design supplied in the request. No save, generation, adoption or separate observer call.',
+    parameters: { page: { type: 'integer', required: true, description: 'Project asset catalog page, starting at 1.' } }, output: imageOutput,
     presentCall: () => ({ card: 'generic', kind: 'read', title: '读取当前素材设计与图片来源' }),
     async execute(args, exec) {
       exactKeys(args, ['page'])
@@ -177,11 +183,29 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
       exec.signal.throwIfAborted()
       if (!read.ok) throw new Error(`Project images unavailable: ${read.error.message}`)
       const catalog = read.value as ReferenceVideoAssetsResponse
+      const saved = design.value as AssetDesignState
+      const references = new Map<string, {
+        bindingToken: string
+        assetId: string
+        assetSha256: string
+        currentUses: { entityId: string | null; kind: string; name: string; purpose: string }[] }>()
+      for (const entity of saved.design?.assets ?? []) for (const reference of entity.references ?? []) {
+        const key = `${reference.assetId}:${reference.assetSha256}`
+        const binding = references.get(key) ?? { bindingToken: `design-${references.size + 1}`,
+          assetId: reference.assetId, assetSha256: reference.assetSha256, currentUses: [] }
+        binding.currentUses.push({ entityId: entity.id ?? null, kind: entity.kind, name: entity.name, purpose: reference.purpose })
+        references.set(key, binding)
+      }
+      const bindings = [...references.values()]
+      const inputs = await readImageInputs(ctx, bindings, catalog.items, exec, () => exec.signal.throwIfAborted())
+      const visualInputs = inputs.map(({ originalImageDesign: _historicalDesign, ...input }, index) => ({ ...input,
+        currentUses: bindings[index]?.currentUses ?? [] }))
       return ports.boundedJson({ scope, saved: design.value,
+        visualInputs,
         assets: { page: catalog.page, pages: catalog.pages,
           items: catalog.items.filter(item => item.mediaType === 'reference_image')
             .map(imageCatalogEntry) },
-        referenceGuidance: 'Catalog source records distinguish selected, unselected, stale and reviewed candidates and their owning entity. Missing fields are unknown. Neither a selected flag nor quality passed proves current creative acceptance or matching geometry. Different candidates are competing proposals, not automatically matching views of one room. Choose coherent references against the current script and saved design; inspect pixels before inheriting an old candidate. Do not union every candidate into the scene.',
+        referenceGuidance: 'visualInputs follows the saved design’s exact references and stated currentUses, not catalog recency or media approval. Those purposes decide which appearance, identity or geometry an image contributes; a reference limited to appearance does not override an authored layout. Its current purpose differs from the historical generation description available by explicit inspection. Catalog source records distinguish selected, unselected, stale and reviewed candidates and their owning entity. Missing fields are unknown. Neither selected nor quality passed proves creative acceptance or matching geometry. Different candidates are competing proposals, not automatically matching views of one room. Do not union every candidate into the scene.',
         generationQueued: false, selectionChanged: false })
     },
   }))
@@ -341,12 +365,7 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
     name: 'qingmu_read_reference_draft',
     description: 'Read this shot’s saved reference-video draft and one project asset page. For an image-capable director, this also delivers this page’s already-bound images with exact identities and original image designs. visualInputs records each delivered or unavailable image; metadata alone is not pixel inspection. Other pages and unbound images remain available through explicit image inspection. Videos are not watched by this read: inspect actual frames before claiming continuity. No media generation, selection or separate observer call; image input uses normal director model allowance.',
     parameters: { page: { type: 'integer', required: true, description: 'Asset page, starting at 1. Read remaining pages when needed; a page may contain no matching media.' } },
-    output: { schema: { type: 'json' }, render: (_args, value) => {
-      // Persisted results from earlier sessions contain metadata only.
-      const result = value as unknown as { visualInputs?: DraftImageInput[] }
-      return [{ type: 'text', text: JSON.stringify(value) }, ...(result.visualInputs ?? []).flatMap(input => input.attachment
-        ? [{ type: 'image' as const, attachment: input.attachment }] : [])]
-    } },
+    output: imageOutput,
     presentCall: () => ({ card: 'generic', kind: 'read', title: '读取镜头参考素材与导演稿' }),
     async execute(args, exec) {
       exactKeys(args, ['page'])

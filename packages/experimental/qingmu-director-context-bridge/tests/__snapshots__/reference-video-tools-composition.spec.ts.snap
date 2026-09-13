@@ -525,7 +525,7 @@ exports[`reads saved episode geography and actual image pixels before any shot e
     "pages": 1,
   },
   "generationQueued": false,
-  "referenceGuidance": "Catalog source records distinguish selected, unselected, stale and reviewed candidates and their owning entity. Missing fields are unknown. Neither a selected flag nor quality passed proves current creative acceptance or matching geometry. Different candidates are competing proposals, not automatically matching views of one room. Choose coherent references against the current script and saved design; inspect pixels before inheriting an old candidate. Do not union every candidate into the scene.",
+  "referenceGuidance": "visualInputs follows the saved design’s exact references and stated currentUses, not catalog recency or media approval. Those purposes decide which appearance, identity or geometry an image contributes; a reference limited to appearance does not override an authored layout. Its current purpose differs from the historical generation description available by explicit inspection. Catalog source records distinguish selected, unselected, stale and reviewed candidates and their owning entity. Missing fields are unknown. Neither selected nor quality passed proves creative acceptance or matching geometry. Different candidates are competing proposals, not automatically matching views of one room. Do not union every candidate into the scene.",
   "saved": {
     "design": {
       "assets": [
@@ -549,6 +549,7 @@ exports[`reads saved episode geography and actual image pixels before any shot e
     "projectId": "p",
   },
   "selectionChanged": false,
+  "visualInputs": [],
 }
 `;
 

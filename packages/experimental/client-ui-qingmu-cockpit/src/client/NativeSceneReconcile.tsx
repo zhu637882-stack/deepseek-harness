@@ -26,10 +26,20 @@ interface Batch {
 function object(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
+function vector(value: unknown): value is number[] {
+  return Array.isArray(value) && value.length === 3 && value.every(n => typeof n === 'number' && Number.isFinite(n))
+}
+function camera(value: unknown): boolean {
+  return value === null || object(value) && vector(value.position) && vector(value.target)
+    && value.position.some((n, index) => n !== (value.target as number[])[index])
+    && typeof value.verticalFov === 'number' && value.verticalFov >= 10 && value.verticalFov <= 120
+    && (value.roll === undefined || typeof value.roll === 'number' && Number.isFinite(value.roll))
+}
 function validChange(value: unknown): value is Change {
   return object(value) && typeof value.shotId === 'string' && typeof value.imagePromptCn === 'string'
     && value.imagePromptCn.length <= 20000 && object(value.directorPlan)
     && typeof value.directorPlan.generationContext === 'string' && !!value.directorPlan.generationContext.trim()
+    && (!('imageCamera' in value.directorPlan) || camera(value.directorPlan.imageCamera))
     && typeof value.sourceSha256 === 'string' && /^[a-f0-9]{64}$/.test(value.sourceSha256)
 }
 function restore(key: string, projectId: string, episodeId: string, sceneId: string): Batch | undefined {
@@ -69,6 +79,7 @@ export function NativeSceneReconcile({ state, sceneId, port, storyPort, disabled
   const [busy, setBusy] = useState(false), [refresh, setRefresh] = useState(0)
   const lock = useRef(false), controller = useRef(new AbortController())
   const shots = (state.frameRequirements ?? []).filter(shot => shot.sceneId === sceneId)
+  const sharedLayout = basis?.design?.assets.find(asset => asset.kind === 'scene' && asset.id === sceneId)?.sceneLayout
   useEffect(() => {
     const active = new AbortController(); controller.current = active
     setBasis(undefined)
@@ -96,6 +107,9 @@ export function NativeSceneReconcile({ state, sceneId, port, storyPort, disabled
       if (!original || !object(item) || item.shotId !== original.id || !original.generationContextSource) throw new Error('整场镜头身份或顺序不一致，未采用。')
       const change = { ...item, sourceSha256: original.generationContextSource.sha256 }
       if (!validChange(change)) throw new Error('每镜需提供完整继承设定、首帧文字和受影响的导演字段，原稿保留。')
+      if (sharedLayout && !('imageCamera' in change.directorPlan)) {
+        throw new Error('本场已有共用布局。每镜需明确给出 imageCamera，或用 null 表达导演本镜不使用空间构图；只写文字机位不能替代生成参数。')
+      }
       return { shotId: change.shotId, imagePromptCn: change.imagePromptCn,
         directorPlan: change.directorPlan, sourceSha256: change.sourceSha256 }
     })
@@ -163,7 +177,7 @@ export function NativeSceneReconcile({ state, sceneId, port, storyPort, disabled
       if (!signal.aborted) setNotice(`${String(error)} 已确认保存 ${currentBatch.completed}/${currentBatch.changes.length} 镜；原稿和未确认请求保留。`)
     } finally { lock.current = false; setBusy(false) }
   }
-  const prompt = `${generationContextGuidance}\n协调当前场次的全部已有镜头，保持已有镜头ID、顺序、时长、原台词与说话人身份。读取 cinematic-director 与本片方法，从剧本目标统筹六部门。先解决本场共用事实，再设计逐镜变化。空间坐标与画面左右分开；以当前绑定场景的共同布局推导不同机位，不随反打重造房间。逐镜检查人物位置、朝向、支撑接触、持物、器具连接和动作前提/结果，使上一镜出口与下一镜入口相接。尊重剧本的跳时、穿越、改造、移动及其他明确例外。完整保留未受影响的好设计与必要丰富性，不用统一静态/单人/无字模板压平全场。\n全片世界事实与场景布局若有不能据剧本与已保存来源裁定的矛盾，写入 sourceIssues 并指出应修改的共用来源，不向各镜追加相反版本，也不要伪造它们已解决。需要看图时调用现有素材读取和看图工具；文字坐标不是像素验证。对每镜给出 generationContext（按当前来源整理的完整适用设定）与 imagePromptCn（动作开始前单幅画面），同步受影响的 visual、imageStage/imageCamera、blocking、cameraAngle/cameraMovement、actionBeats、continuity、performance、dialoguePlan、soundPlan 及其他已有部门。没有改变的部门可省略，系统保留原值；修改某个嵌套对象时给出该对象完整值，不丢其未变成员。对白源文本/角色/actorId/sourceLineId保持原样，只设计语气与表演。背景配乐按剪辑时间交后期独立音轨，环境声在对白下连续；有源音乐和导演明确选择保留。只输出候选，不调用任何镜头保存或生成工具。\n用户本次要求：${direction.trim() || '按最新共用设定统筹全场，保留叙事与有效导演设计。'}\n完整全剧与素材依据：${JSON.stringify(basis)}\n本集剧本场次：${JSON.stringify(state.scenes)}\n本场完整原镜头：${JSON.stringify(shots)}\n其他场次的接续依据：${JSON.stringify((state.frameRequirements ?? []).filter(shot => shot.sceneId !== sceneId).map((shot: AutomaticPlanningShot) => ({ id: shot.id, sceneId: shot.sceneId, frameNo: shot.frameNo, continuity: shot.directorPlan?.continuity, editorialContext: shot.directorPlan?.editorialContext })))}\n输出一个 txt 代码块中的 JSON：{"sceneId":"${sceneId}","sourceScriptSha256":"${state.scriptSha256}","sourceStoryboardSha256":"${state.storyboard?.sourceHash}","sourceAssetStateSha256":"${basis?.stateSha256}","sourceIssues":[],"shots":[{"shotId":"逐字复制本场镜头ID","imagePromptCn":"完整起始画面","directorPlan":{"generationContext":"完整适用共用设定及剧本例外"}}]}。shots 必须按原顺序完整包含本场每个镜头，directorPlan 不限于示例字段；不写内部来源元数据。代码块外简明说明全场调整、相邻状态如何衔接、还有哪些实际画面/声音待验证。`
+  const prompt = `${generationContextGuidance}\n协调当前场次的全部已有镜头，保持已有镜头ID、顺序、时长、原台词与说话人身份。读取 cinematic-director 与本片方法，从剧本目标统筹六部门。先解决本场共用事实，再设计逐镜变化。空间坐标与画面左右分开；以当前绑定场景的共同布局推导不同机位，不随反打重造房间。逐镜检查人物位置、朝向、支撑接触、持物、器具连接和动作前提/结果，使上一镜出口与下一镜入口相接。尊重剧本的跳时、穿越、改造、移动及其他明确例外。完整保留未受影响的好设计与必要丰富性，不用统一静态/单人/无字模板压平全场。\n全片世界事实与场景布局若有不能据剧本与已保存来源裁定的矛盾，写入 sourceIssues 并指出应修改的共用来源，不向各镜追加相反版本，也不要伪造它们已解决。先用 qingmu_read_asset_design 获取当前设计明确引用的图片及用途；这些工作引用不等于选用或人审。其他历史图片是竞争候选，不能当作同一空间的多视角拼接。外观用途参考不覆盖已保存布局；发现参考像素与布局差异时按用途区分，不擅自搬动固定陈设。文字坐标不是像素验证。对每镜给出 generationContext（按当前来源整理的完整适用设定）与 imagePromptCn（动作开始前单幅画面），同步受影响的 visual、imageStage/imageCamera、blocking、cameraAngle/cameraMovement、actionBeats、continuity、performance、dialoguePlan、soundPlan 及其他已有部门。本场存在 sceneLayout 时，每镜必须明确输出 directorPlan.imageCamera：使用构图就给出完整 {position:[x,y,z],target:[x,y,z],verticalFov:角度,roll:角度}，沿用原机位也逐字给出；导演选择本镜不用空间构图时明确给 null 并说明理由。先用 qingmu_preview_scene_layout 对同一完整布局预览拟采用机位，检查门窗、遮挡和取景；verticalFov 是垂直视角，不能把焦距或水平角直接写入。imageCamera 控制起始图构图，后续运镜仍按 cameraMovement/actionBeats 设计，不限制运动。其余没有改变的部门可省略，系统保留原值；修改某个嵌套对象时给出该对象完整值，不丢其未变成员。对白源文本/角色/actorId/sourceLineId保持原样，只设计语气与表演。背景配乐按剪辑时间交后期独立音轨，环境声在对白下连续；有源音乐和导演明确选择保留。只输出候选，不调用任何镜头保存或生成工具。\n用户本次要求：${direction.trim() || '按最新共用设定统筹全场，保留叙事与有效导演设计。'}\n完整全剧与素材依据：${JSON.stringify(basis)}\n本集剧本场次：${JSON.stringify(state.scenes)}\n本场完整原镜头：${JSON.stringify(shots)}\n其他场次的接续依据：${JSON.stringify((state.frameRequirements ?? []).filter(shot => shot.sceneId !== sceneId).map((shot: AutomaticPlanningShot) => ({ id: shot.id, sceneId: shot.sceneId, frameNo: shot.frameNo, continuity: shot.directorPlan?.continuity, editorialContext: shot.directorPlan?.editorialContext })))}\n输出一个 txt 代码块中的 JSON：{"sceneId":"${sceneId}","sourceScriptSha256":"${state.scriptSha256}","sourceStoryboardSha256":"${state.storyboard?.sourceHash}","sourceAssetStateSha256":"${basis?.stateSha256}","sourceIssues":[],"shots":[{"shotId":"逐字复制本场镜头ID","imagePromptCn":"完整起始画面","directorPlan":{"generationContext":"完整适用共用设定及剧本例外"}}]}。shots 必须按原顺序完整包含本场每个镜头，directorPlan 不限于示例字段；不写内部来源元数据。代码块外简明说明全场调整、相邻状态如何衔接、还有哪些实际画面/声音待验证。`
   return <section className={css.composer} aria-label="整场导演同步">
     <h3>整场导演同步 · {shots.length} 镜</h3>
     <p>导演结合最新共用设定统筹本场首帧、表演、运镜与前后接续。先查看整场稿，再保存；中断后接续同一份稿件。</p>
