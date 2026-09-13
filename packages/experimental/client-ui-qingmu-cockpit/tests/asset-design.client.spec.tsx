@@ -3,13 +3,131 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, expect, it, vi } from 'vitest'
 import { NativeAssetDesign } from '../src/client/NativeAssetDesign.tsx'
 import { AssetImageReferences } from '../src/client/AssetImageReferences.tsx'
-import type { AssetDesignState, AssetImageRuns } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import type { AssetDesignItem, AssetDesignState, AssetImageRuns } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 const scope = { projectId: 'p', episodeId: 'e' }
 const state: AssetDesignState = { ...scope, schema: 'qingmu.asset-design-state.v1', stateSha256: 'a'.repeat(64), scriptSha256: 'b'.repeat(64), scriptRevision: 1, script: {}, model: 'wan2.7-image-pro',
   design: { sourceScriptSha256: 'b'.repeat(64), assets: [{ id: 'actor_1', kind: 'actor', name: '父亲', imagePrompt: '真人定妆照', voiceIdentity: '成年温厚自然中低音' }], director: {
     visualStyle: '写实', tone: '温暖', colorPalette: ['灰蓝'], lightingRules: '窗光', cameraGrammar: '跟随动作', performanceRules: '自然', characterContinuityRules: '服装稳定',
   } } }
 afterEach(() => { cleanup(); localStorage.clear() })
+it('restores unsaved card and whole-film edits after leaving, including a temporarily empty prompt', async () => {
+  const port = setup()
+  const mount = () => render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  const view = mount()
+  fireEvent.change(await screen.findByLabelText('画面描述'), { target: { value: '' } })
+  fireEvent.change(screen.getByLabelText('摄影与运镜'), { target: { value: '同一房间反打，固定陈设不移动' } })
+  fireEvent.change(screen.getByLabelText('剧本例外'), { target: { value: '穿越者携带智能手机' } })
+  view.unmount(); mount()
+  expect((await screen.findByLabelText<HTMLTextAreaElement>('画面描述')).value).toBe('')
+  expect(screen.getByLabelText<HTMLTextAreaElement>('摄影与运镜').value).toBe('同一房间反打，固定陈设不移动')
+  expect(screen.getByLabelText<HTMLTextAreaElement>('剧本例外').value).toBe('穿越者携带智能手机')
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '保存素材设计' }).disabled).toBe(false)
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '查看生成费用' }).disabled).toBe(true)
+  expect(port.saveAssetDesign).not.toHaveBeenCalled()
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
+it('retains a stale local design for comparison and requires an explicit rebase before saving', async () => {
+  const port = setup()
+  const mount = () => render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  const view = mount()
+  fireEvent.change(await screen.findByLabelText('画面描述'), { target: { value: '我的未保存定妆' } })
+  view.unmount()
+  const latest = { ...state, stateSha256: 'c'.repeat(64), design: { ...state.design!,
+    assets: [{ ...state.design!.assets[0]!, imagePrompt: '另一处新保存的定妆' }] } }
+  port.readAssetDesign.mockResolvedValue(latest)
+  mount()
+  const comparison = await screen.findByRole('region', { name: '素材草稿版本变化' })
+  expect(comparison.textContent).toContain('另一处新保存的定妆')
+  expect(screen.getByLabelText<HTMLTextAreaElement>('画面描述').value).toBe('我的未保存定妆')
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '保存素材设计' }).disabled).toBe(true)
+  expect(port.saveAssetDesign).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '已核对，保留本机稿继续编辑' }))
+  fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
+  await waitFor(() => { expect(port.saveAssetDesign).toHaveBeenCalledTimes(1) })
+  expect(port.saveAssetDesign.mock.calls[0]).toMatchObject([{ expectedStateSha256: latest.stateSha256,
+    design: { assets: [{ imagePrompt: '我的未保存定妆' }] } }])
+  await waitFor(() => { expect(localStorage.getItem('qingmu.asset-design-draft.v1:p:e')).toBeNull() })
+})
+it('keeps each projects unsaved design separate during navigation', async () => {
+  const port = setup()
+  const first = render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  fireEvent.change(await screen.findByLabelText('画面描述'), { target: { value: '第一个项目的设计' } })
+  first.unmount()
+  port.readAssetDesign.mockResolvedValue({ ...state, projectId: 'other', episodeId: 'other-e' })
+  const second = render(<NativeAssetDesign projectId="other" episodeId="other-e" port={port} onGenerated={vi.fn()} />)
+  expect((await screen.findByLabelText<HTMLTextAreaElement>('画面描述')).value).toBe('真人定妆照')
+  fireEvent.change(screen.getByLabelText('画面描述'), { target: { value: '第二个项目的设计' } })
+  second.unmount(); port.readAssetDesign.mockResolvedValue(state)
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  expect((await screen.findByLabelText<HTMLTextAreaElement>('画面描述')).value).toBe('第一个项目的设计')
+  expect(JSON.parse(localStorage.getItem('qingmu.asset-design-draft.v1:other:other-e')!).design.assets[0].imagePrompt)
+    .toBe('第二个项目的设计')
+  expect(port.saveAssetDesign).not.toHaveBeenCalled()
+})
+it('keeps edits made during a pending save and rebases only their saved source', async () => {
+  const port = setup()
+  let finish!: (value: AssetDesignState) => void
+  port.saveAssetDesign.mockImplementation(() => new Promise((resolve) => { finish = resolve }))
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  fireEvent.change(await screen.findByLabelText('画面描述'), { target: { value: '提交的第一稿' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
+  await waitFor(() => { expect(port.saveAssetDesign).toHaveBeenCalledTimes(1) })
+  fireEvent.change(screen.getByLabelText('画面描述'), { target: { value: '保存时继续编辑的第二稿' } })
+  const saved = { ...state, stateSha256: 'd'.repeat(64), design: { ...state.design!,
+    assets: [{ ...state.design!.assets[0]!, imagePrompt: '提交的第一稿' }] } }
+  finish(saved)
+  await screen.findByText('上一份设计已保存；保存期间的新修改仍在本机草稿中。')
+  expect(screen.getByLabelText<HTMLTextAreaElement>('画面描述').value).toBe('保存时继续编辑的第二稿')
+  expect(JSON.parse(localStorage.getItem('qingmu.asset-design-draft.v1:p:e')!)).toMatchObject({
+    stateSha256: saved.stateSha256, design: { assets: [{ imagePrompt: '保存时继续编辑的第二稿' }] },
+  })
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '保存素材设计' }).disabled).toBe(false)
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
+it('checks for a newer saved source before sending a design write', async () => {
+  const port = setup()
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  fireEvent.change(await screen.findByLabelText('画面描述'), { target: { value: '未保存的侧面设计' } })
+  port.readAssetDesign.mockResolvedValue({ ...state, stateSha256: 'f'.repeat(64) })
+  fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
+  await screen.findByRole('region', { name: '素材草稿版本变化' })
+  expect(port.saveAssetDesign).not.toHaveBeenCalled()
+  expect(screen.getByLabelText<HTMLTextAreaElement>('画面描述').value).toBe('未保存的侧面设计')
+})
+it('recovers the shared room, camera, staging and ordered references without generating or saving', async () => {
+  const port = setup()
+  const room: AssetDesignItem = { id: 'scene_1', kind: 'scene', name: '工作室', imagePrompt: '窗下木桌',
+    visualIdentity: '北窗南门，木桌靠北墙',
+    space: { layout: '桌靠北墙', orientation: '北窗南门', lighting: '北窗光', scale: '导演估计' },
+    imageStage: { camera: '入口朝窗', state: '风扇未接电' },
+    sceneLayout: { basis: '导演拟定', coordinateFrame: 'X东Y北Z上', objects: [
+      { id: 'desk', label: '工作台', center: [0, 1, .4], size: [1.2, .8, .8], rotation: 0, color: '#886655' },
+    ] }, imageCamera: { position: [0, -3, 1.6], target: [0, 1, .4], verticalFov: 50 },
+    references: [{ assetId: 'reference_room', assetSha256: 'e'.repeat(64), purpose: '固定格局', boxes: [] }],
+  }
+  port.readAssetDesign.mockResolvedValue({ ...state, design: { ...state.design!, assets: [room] } })
+  const mount = () => render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  const view = mount()
+  fireEvent.change(await screen.findByLabelText('本图物件状态'), { target: { value: '线缆已接墙插，开关仍关闭' } })
+  view.unmount(); mount()
+  expect((await screen.findByLabelText<HTMLTextAreaElement>('本图物件状态')).value).toBe('线缆已接墙插，开关仍关闭')
+  const saved = JSON.parse(localStorage.getItem('qingmu.asset-design-draft.v1:p:e')!).design.assets[0]
+  expect(saved).toEqual({ ...room, imageStage: { ...room.imageStage, state: '线缆已接墙插，开关仍关闭' } })
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+  expect(port.saveAssetDesign).not.toHaveBeenCalled()
+})
+it('keeps edits on screen when browser storage is full and reports that they are not recoverable yet', async () => {
+  const port = setup()
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  const field = await screen.findByLabelText('画面描述')
+  const storage = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota exceeded') })
+  try {
+    fireEvent.change(field, { target: { value: '仍然保留在当前页面的修改' } })
+    expect(screen.getByLabelText<HTMLTextAreaElement>('画面描述').value).toBe('仍然保留在当前页面的修改')
+    await screen.findByText('本机未能保存草稿，请保持本页并保存到项目，避免丢失修改。')
+    expect(port.saveAssetDesign).not.toHaveBeenCalled()
+  } finally { storage.mockRestore() }
+})
 it('recovers scene feedback, appends it without losing the user direction and keeps projects separate', async () => {
   const key = 'qingmu.scene-feedback.v1:p:e:room'
   const instructionKey = 'qingmu.asset-design-instructions.v1:p:e'

@@ -14,16 +14,18 @@ import { AssetSourceFeedback } from './SceneSourceFeedback.tsx'
 type Port = Pick<QingmuYimengPort, 'readAssetDesign' | 'previewSceneLayout' | 'saveAssetDesign' | 'quoteAssetImage' | 'generateAssetImage' | 'readAssetImageRuns' | 'readAssetVoiceRuns' | 'quoteAssetVoice' | 'generateAssetVoice'> & AssetImageReferencePort
 const emptyWorld: AssetWorldDesign = { setting: '', scriptFacts: '', directorInferences: '', exceptions: '', openQuestions: '' }
 const names = { actor: '人物', scene: '场景', prop: '道具' } as const
-function parseDesign(text: string): { design: AssetDesign; repaired: boolean } {
+function parseDesign(text: string, incomplete = false): { design: AssetDesign; repaired: boolean } {
   const { value, repaired } = parseQuotedDesignJson(text)
   if (!value || typeof value !== 'object' || !('assets' in value) || !Array.isArray(value.assets)
     || !value.assets.length || value.assets.length > 40 || !('director' in value) || !value.director || typeof value.director !== 'object') throw new Error('设计需要人物、场景或道具，以及全片导演设定。')
   for (const entry of value.assets as unknown[]) {
     const item = entry as Record<string, unknown> | null
     if (!item || typeof item !== 'object' || (typeof item.kind !== 'string' || !['actor', 'scene', 'prop'].includes(item.kind))
-      || typeof item.name !== 'string' || !item.name.trim() || typeof item.imagePrompt !== 'string' || !item.imagePrompt.trim()) throw new Error('素材设计缺少类型、名称或画面描述。')
+      || typeof item.name !== 'string' || (!incomplete && !item.name.trim())
+      || typeof item.imagePrompt !== 'string' || (!incomplete && !item.imagePrompt.trim())) throw new Error('素材设计缺少类型、名称或画面描述。')
     if (item.selfContainedImagePrompt !== undefined && typeof item.selfContainedImagePrompt !== 'boolean') throw new Error('完整画面描述选项需要是布尔值。')
-    if (item.visualIdentity !== undefined && (typeof item.visualIdentity !== 'string' || !item.visualIdentity.trim())) throw new Error('主体设定不能为空。')
+    if (item.visualIdentity !== undefined && (typeof item.visualIdentity !== 'string'
+      || (!incomplete && !item.visualIdentity.trim()))) throw new Error('主体设定不能为空。')
     const vector = (v: unknown) => Array.isArray(v) && v.length === 3 && v.every(n => typeof n === 'number' && Number.isFinite(n))
     if (item.sceneLayout != null) {
       const layout = item.sceneLayout as Record<string, unknown>
@@ -51,7 +53,7 @@ function parseDesign(text: string): { design: AssetDesign; repaired: boolean } {
   }
   const director = value.director as Record<string, unknown>
   for (const field of ['visualStyle', 'tone', 'lightingRules', 'cameraGrammar', 'performanceRules', 'characterContinuityRules']) {
-    if (typeof director[field] !== 'string' || !director[field]) throw new Error('全片导演设定尚不完整。')
+    if (typeof director[field] !== 'string' || (!incomplete && !director[field])) throw new Error('全片导演设定尚不完整。')
   }
   if (!Array.isArray(director.colorPalette) || !director.colorPalette.every(color => typeof color === 'string')) throw new Error('缺少全片色彩设计。')
   return { design: value as AssetDesign, repaired }
@@ -97,6 +99,10 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
   const changes = instructions.key === changesKey ? instructions.text : localStorage.getItem(changesKey) ?? ''
   const [referenceEditor, setReferenceEditor] = useState<number>()
   const [dirty, setDirty] = useState(false), [manual, setManual] = useState('')
+  const draftKey = `qingmu.asset-design-draft.v1:${projectId}:${episodeId}`
+  const [draftSource, setDraftSource] = useState(''), [draftNotice, setDraftNotice] = useState('')
+  const currentDesign = useRef(design); currentDesign.current = design
+  const draftConflict = dirty && !!state && draftSource !== state.stateSha256
   const lock = useRef(false), live = useRef(true)
   const scope = { projectId, episodeId }
   const projectSettings = state?.creativeSettings?.project
@@ -115,13 +121,26 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
     }
   }, [port, projectId, episodeId])
   useEffect(() => {
+    let active = true
     live.current = true
     void port.readAssetDesign({ projectId, episodeId }).then((result) => {
-      if (live.current) { setState(result); setDesign(result.design ? withIdentities(result.design) : undefined) }
-    }).catch((error: unknown) => { if (live.current) setNotice(`请先保存本集剧本，再建立素材。${error instanceof Error ? error.message : ''}`) })
+      if (!active || result.projectId !== projectId || result.episodeId !== episodeId) return
+      setState(result); setDesign(result.design ? withIdentities(result.design) : undefined)
+      setDirty(false); setDraftSource(result.stateSha256); setDraftNotice('')
+      try {
+        const raw = localStorage.getItem(draftKey)
+        if (raw === null) return
+        const saved = JSON.parse(raw) as Record<string, unknown>
+        if (!saved || saved.projectId !== projectId || saved.episodeId !== episodeId
+          || typeof saved.stateSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(saved.stateSha256)) throw new Error('invalid asset draft')
+        const restored = parseDesign(JSON.stringify(saved.design), true).design
+        setDesign(restored); setDirty(true); setDraftSource(saved.stateSha256)
+        setDraftNotice('已恢复本机未保存的素材设计。保存后才会进入后续生成。')
+      } catch { setDraftNotice('本机草稿暂时无法读取，原记录仍保留；当前显示已保存的设计。') }
+    }).catch((error: unknown) => { if (active) setNotice(`请先保存本集剧本，再建立素材。${error instanceof Error ? error.message : ''}`) })
     void readRuns().catch(() => { /* Initial asset read reports missing script or authentication above. */ })
-    return () => { live.current = false }
-  }, [projectId, episodeId, port, readRuns])
+    return () => { active = false; live.current = false }
+  }, [projectId, episodeId, port, readRuns, draftKey])
   const pending = [...runs, ...voiceRuns].some(run => !run.assetId && !['Failed', 'Cancelled', 'Succeeded', 'Completed'].includes(run.status))
   useEffect(() => {
     if (!pending) return
@@ -137,15 +156,22 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
     try { await work() } catch (error) { if (live.current) setNotice(error instanceof Error ? error.message : '操作未确认，请刷新原结果。') }
     finally { lock.current = false; if (live.current) setBusy(false) }
   }
+  function keepDraft(next: AssetDesign, source = draftSource) {
+    currentDesign.current = next; setDesign(next); setDirty(true); setQuote(undefined); setDraftSource(source)
+    try {
+      localStorage.setItem(draftKey, JSON.stringify({ projectId, episodeId, stateSha256: source, design: next }))
+      setDraftNotice('修改已保存在本机草稿，尚未保存到项目。')
+    } catch { setDraftNotice('本机未能保存草稿，请保持本页并保存到项目，避免丢失修改。') }
+  }
   function adopt(text: string, retainOmitted = false) {
     const parsed = parseDesign(text)
-    setDesign(withIdentities(parsed.design, design, retainOmitted)); setDirty(true); setQuote(undefined)
+    keepDraft(withIdentities(parsed.design, design, retainOmitted))
     setNotice(`${parsed.repaired ? '已修正正文引号的格式，设计文字完整保留。' : ''}${retainOmitted ? '设计已合并到下方卡片，未提及的已有素材继续保留。' : '设计已放入下方卡片。'}检查或修改后保存。`)
   }
   function edit(index: number, patch: Partial<AssetDesignItem>) {
     if (!design) return
-    setDesign({ ...design,
-      assets: design.assets.map((item, n) => n === index ? { ...item, ...patch } : item) }); setDirty(true); setQuote(undefined)
+    keepDraft({ ...design,
+      assets: design.assets.map((item, n) => n === index ? { ...item, ...patch } : item) })
   }
   function changeInstructions(text: string) {
     setInstructions({ key: changesKey, text })
@@ -168,13 +194,23 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
       purpose={{ key: 'asset-design', jsonOutput: true, freshRevision: true,
         sourceKey: JSON.stringify({ stateSha256: state.stateSha256, design }), title: '让青木设计素材', description: '导演会结合剧本和素材方法提出完整设计，你可以逐项调整。',
         prompt, action: '根据剧本设计素材', adopt: '采用到素材卡片', adopted: '已合并设计，未提及的已有素材继续保留。请检查下方卡片后保存。' }} />}
+    {draftNotice && <p role="status">{draftNotice}</p>}
+    {draftConflict && state && design && <section aria-label="素材草稿版本变化">
+      <p>项目中的素材或剧本已更新。本机草稿仍在下方，核对新版本后再保存。</p>
+      <details><summary>对照当前已保存的设计</summary><pre>{JSON.stringify(state.design, null, 2)}</pre></details>
+      <button type="button" disabled={busy} onClick={() => { keepDraft(design, state.stateSha256) }}>已核对，保留本机稿继续编辑</button>
+      <button type="button" disabled={busy} onClick={() => {
+        try { localStorage.removeItem(draftKey) } catch { setDraftNotice('本机草稿未能移除，当前内容保留。'); return }
+        setDesign(state.design ? withIdentities(state.design) : undefined); setDirty(false)
+        setDraftSource(state.stateSha256); setQuote(undefined); setDraftNotice('已放弃本机修改，载入项目当前设计。')
+      }}>放弃本机修改，载入当前设计</button>
+    </section>}
     {design && <>
       <details><summary>剧本世界与设计依据</summary>{(['setting', 'scriptFacts', 'directorInferences', 'exceptions', 'openQuestions'] as const).map((field, index) => <label key={field}>{['年代与世界设定', '剧本明确事实', '导演推导', '剧本例外', '待定事项'][index]}<textarea value={(design.world ?? emptyWorld)[field]} onChange={(event) => {
-        setDesign({ ...design, world: { ...(design.world ?? emptyWorld), [field]: event.target.value } })
-        setDirty(true); setQuote(undefined)
+        keepDraft({ ...design, world: { ...(design.world ?? emptyWorld), [field]: event.target.value } })
       }} /></label>)}</details>
       <details><summary>全片设计</summary>{(['visualStyle', 'tone', 'lightingRules', 'cameraGrammar', 'performanceRules', 'characterContinuityRules'] as const).map((field, index) => <label key={field}>{['画面质感', '情绪基调', '光源设计', '摄影与运镜', '表演', '连续性'][index]}<textarea value={design.director[field]} onChange={(event) => {
-        setDesign({ ...design, director: { ...design.director, [field]: event.target.value } }); setDirty(true); setQuote(undefined)
+        keepDraft({ ...design, director: { ...design.director, [field]: event.target.value } })
       }} /></label>)}</details>
       {design.assets.map((item, index) => {
         const run = runs.find(value => value.entityId === item.id)
@@ -235,12 +271,30 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
           {run && <p role="status">{run.assetId ? '图片已生成，可在下方素材库查看' : run.status === 'Failed' ? `生成失败：${run.errorCode ?? '请查看任务详情'}` : `生成进度：${run.status}`}</p>}
         </section>
       })}
-      <button type="button" disabled={busy || !dirty || !state} onClick={() => {
+      <button type="button" disabled={busy || !dirty || !state || draftConflict} onClick={() => {
         void perform(async () => {
+          if (!state) return
+          const latest = await port.readAssetDesign(scope)
+          if (!live.current) return
+          if (latest.stateSha256 !== draftSource) { setState(latest); return }
+          const submitted = design
           const result = await port.saveAssetDesign({ ...scope,
-            expectedStateSha256: state?.stateSha256 ?? '',
+            expectedStateSha256: draftSource,
             design: { assets: design.assets, director: design.director, ...(design.world ? { world: design.world } : {}) } })
-          if (live.current) { setState(result); setDesign(result.design ? withIdentities(result.design) : undefined); setDirty(false); setNotice('素材设计已保存。现在可以逐项生成图片。') }
+          if (!live.current) return
+          setState(result)
+          if (currentDesign.current && currentDesign.current !== submitted) {
+            keepDraft(currentDesign.current, result.stateSha256)
+            setNotice('上一份设计已保存；保存期间的新修改仍在本机草稿中。')
+            return
+          }
+          setDesign(result.design ? withIdentities(result.design) : undefined); setDirty(false); setDraftSource(result.stateSha256)
+          try {
+            const cached = JSON.parse(localStorage.getItem(draftKey) ?? 'null') as { design?: unknown } | null
+            if (JSON.stringify(cached?.design) === JSON.stringify(submitted)) localStorage.removeItem(draftKey)
+            setDraftNotice('')
+          } catch { setDraftNotice('项目已保存，但本机草稿记录未能清理；再次打开时请核对保存版本。') }
+          setNotice('素材设计已保存。现在可以逐项生成图片；已有镜头请回分镜同步共用设定。')
         }) }}>保存素材设计</button>
     </>}
     {quote && <section aria-label={quote.mediaType === 'audio' ? '确认声音生成' : '确认图片生成'}><h3>生成 {quote.entity.name}</h3><p>{quote.model} · {quote.mediaType === 'audio' ? '一段声音试听' : '一张图片'} · ¥{Number(quote.estimatedCny).toFixed(2)}</p>
