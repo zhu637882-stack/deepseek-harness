@@ -74,11 +74,12 @@ it.each([false, true])('saves editable department direction and retains it after
   const props = { ...current, port, onCommitted: vi.fn(async () => {}), onSelectShotId: vi.fn(), onUnsavedChange: vi.fn() }
   const view = render(<ScenePlanningWorkspace {...props} />)
   fireEvent.change(await screen.findByLabelText('运镜设计'), { target: { value: '随人物后退至桌边，再停下' } })
+  fireEvent.change(screen.getByLabelText('本镜沿用的全片设定'), { target: { value: '雨夜木屋，门窗位置沿用全片设计；未来来信按剧本例外保留。' } })
   fireEvent.change(screen.getByLabelText('环境与空间声'), { target: { value: '雨声连续，门合上后变闷，台词期间仍在' } })
   fireEvent.change(screen.getByLabelText('配乐安排'), { target: { value: '' } })
   fireEvent.change(screen.getByLabelText('对白 1 的语气与表演'), { target: { value: '重音落在请，迟疑后邀请' } })
   fireEvent.change(screen.getByLabelText('镜头结束状态'), { target: { value: '信仍在手中，人已到桌边' } })
-  const expected = { ...directorPlan, cameraMovement: '随人物后退至桌边，再停下',
+  const expected = { ...directorPlan, generationContext: '雨夜木屋，门窗位置沿用全片设计；未来来信按剧本例外保留。', cameraMovement: '随人物后退至桌边，再停下',
     soundPlan: { ...directorPlan.soundPlan, ambience: '雨声连续，门合上后变闷，台词期间仍在', music: '' },
     dialoguePlan: [{ ...directorPlan.dialoguePlan[0], delivery: '重音落在请，迟疑后邀请' }],
     continuity: { ...directorPlan.continuity, end: '信仍在手中，人已到桌边' } }

@@ -370,3 +370,5 @@ Independent sound cues accept an explicit `loop: {durationSec, crossfadeSec}`. T
 Reference cards show recorded audio/video duration. The editor totals selected references, flags unknown durations and current model limit violations, and recalculates input-video plus output duration when timing changes. It preserves the editable draft and all speaker choices; missing duration is never treated as a complete zero-second total.
 
 Director authoring distinguishes the current shot read from complete film/world/asset sources. Existing-shot prompts require reading the current reference source before writing inherited context and checking participant, layout and action-state consistency after save; new scene planning uses its current creative-request sources.
+
+The shot direction card exposes the segment’s inherited film context alongside other department fields. Manual edits use the existing planning save and disconnected-operation recovery, preserving unedited fields and dialogue sources. Filling this context changes the production inheritance; clearing it retains legacy compilation without deleting the full film design.
