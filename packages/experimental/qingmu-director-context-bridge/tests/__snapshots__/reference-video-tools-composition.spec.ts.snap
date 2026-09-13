@@ -1,5 +1,47 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`assembles reference purposes with the complete current design as the final text: 他保持坐姿，杯子从唇边放低到膝上；近景之外的门口仍有脚步声。 1`] = `
+{
+  "generated": false,
+  "parameters": {
+    "audio": true,
+    "duration": 8,
+    "prompt_extend": false,
+    "ratio": "16:9",
+    "resolution": "720P",
+    "watermark": false,
+  },
+  "prompt": "【引用素材用途】
+图1：Source for 林予.
+音频1：Source for 林予音色.
+图2：Source for 咖啡馆.
+
+【本镜完整导演设计】
+{"action":"他保持坐姿，杯子从唇边放低到膝上；近景之外的门口仍有脚步声。","actionBeats":[{"action":"停顿后抬眼","endSec":1.9,"startSec":0},{"action":"试探回应","endSec":2.5,"startSec":1.9}],"cameraMovement":"镜头不要停。\\n先推近，再横移。","continuity":{"acoustics":"Room reflections and street bed continue beneath both speakers.","blocking":"Walk around the table via the free aisle; keep one fan."},"dialoguePlan":[{"character":"甲","line":"嗯。"},{"character":"乙","line":"我在听。"}],"lighting":"Window key stays on the same world side after the reverse angle.","narrative":"The listener understands the concealed loss only after the pause.","newMethod":{"beats":["试探","回应"]},"performance":"先迟疑，再试探，不默认点头","soundColumns":{"ambient":"窗外轻雨","dialogue":"低声，保留吸气"}}",
+}
+`;
+
+exports[`assembles reference purposes with the complete current design as the final text: 她先走出柜台，再蹲下接过孩子手中一本书；背景书架和还书堆保持原位。 1`] = `
+{
+  "generated": false,
+  "parameters": {
+    "audio": true,
+    "duration": 8,
+    "prompt_extend": false,
+    "ratio": "16:9",
+    "resolution": "720P",
+    "watermark": false,
+  },
+  "prompt": "【引用素材用途】
+图1：Source for 林予.
+音频1：Source for 林予音色.
+图2：Source for 咖啡馆.
+
+【本镜完整导演设计】
+{"action":"她先走出柜台，再蹲下接过孩子手中一本书；背景书架和还书堆保持原位。","actionBeats":[{"action":"停顿后抬眼","endSec":1.9,"startSec":0},{"action":"试探回应","endSec":2.5,"startSec":1.9}],"cameraMovement":"镜头不要停。\\n先推近，再横移。","continuity":{"acoustics":"Room reflections and street bed continue beneath both speakers.","blocking":"Walk around the table via the free aisle; keep one fan."},"dialoguePlan":[{"character":"甲","line":"嗯。"},{"character":"乙","line":"我在听。"}],"lighting":"Window key stays on the same world side after the reverse angle.","narrative":"The listener understands the concealed loss only after the pause.","newMethod":{"beats":["试探","回应"]},"performance":"先迟疑，再试探，不默认点头","soundColumns":{"ambient":"窗外轻雨","dialogue":"低声，保留吸气"}}",
+}
+`;
+
 exports[`captures and recovers actual frame pixels through the shipped director preset with current-project scope 1`] = `
 {
   "assetId": "asset_video",
@@ -156,7 +198,7 @@ exports[`compacts a long shipped director session and rereads the complete saved
       "pages": 1,
     },
     "generationQueued": false,
-    "guidance": "Read saved.directorSource in full. Use one {directorText:"current"} prompt part to copy its generationPrompt exactly, plus explicit reference-use parts. Adjacent-shot research stays out of the generated instructions. Resolve actual upstream design conflicts in the director plan before copying; keep manually requested changes editable. Set draft.directorSourceSha256 only after reconciling. The preview emits your authored text verbatim, with reference aliases; it appends no hidden creative directions. Use saved.frameSha256 and saved.draft.revision (0 when absent) for saving. The page restores the saved version explicitly so an unsaved local edit is not overwritten.",
+    "guidance": "Read saved.directorSource in full. To assemble that design, supply referenceUses:[{bindingToken,purpose}] for every binding, parameters and the current directorSourceSha256; omit promptParts. State only each reference purpose, not a rewritten shot plan or global constraints. The tool renders source aliases in input order and copies generationPrompt exactly once as the final design. Adjacent-shot research is not inserted. Resolve source-design conflicts in the director plan first. Intentionally authored manual promptParts remain editable as a separate mode. Source freshness and copying are not semantic approval. Use saved.frameSha256 and saved.draft.revision (0 when absent) for saving. The page restores the saved version explicitly so an unsaved local edit is not overwritten.",
     "providerCalls": 0,
     "saved": {
       "directorSource": null,
