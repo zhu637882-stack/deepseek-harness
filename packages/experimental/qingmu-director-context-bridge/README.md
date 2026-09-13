@@ -1,5 +1,7 @@
 # Qingmu director context bridge
 
+Native frame capture resolves an omitted runId from the current project shot's candidate video ID and SHA. Explicit runs must match the same source; older runs outside the recent list are read individually. Mismatch, ambiguity or an unverifiable source stops before capture. Recovery verifies the same binding without recapturing or changing selection.
+
 Director plans can retain adjoining-segment edit notes in editorialContext. The video source excludes that explicit field, preserves internal coverage, and the working-cut read returns the notes for editing. Legacy mixed coverage requires deliberate revision, not keyword removal.
 
 Saved reference-draft reads now deliver the bound images on the requested catalog page directly to image-capable directors. Each visual input retains its binding token, asset ID, source SHA and original image design. Missing pages, stale bindings, failed media reads and attachment limits remain explicit; they do not erase the editable draft or silently choose replacements. Unbound images are not loaded. Text-only directors keep metadata and may explicitly request the configured observer; this read never calls that observer. Video metadata remains unobserved until actual frames are inspected. Historical metadata-only results remain replayable.

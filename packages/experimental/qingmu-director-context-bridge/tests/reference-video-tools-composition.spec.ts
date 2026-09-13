@@ -29,7 +29,7 @@ import * as SpillPolicy from '@deepseek-ai/dsh-spill-policy'
 import SpillLocal from '@deepseek-ai/dsh-spill-local'
 import { createYimengReadHandler } from '../../qingmu-yimeng-read-adapter/src/index.ts'
 import { createYimengCommandHandler } from '../../qingmu-yimeng-command-adapter/src/index.ts'
-import { canonical, request, response, savedDraft, videoReferenceFixture } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
+import { canonical, request, response, runResponse, savedDraft, videoReferenceFixture } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
 import { MockAdapter as BaseMockAdapter, textResponse, toolCallResponse, maxTokensResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import * as ModelTools from '../src/model-tools.ts'
 import { readNativeDirectorReadiness } from '../src/native-readiness.ts'
@@ -955,6 +955,14 @@ it('saves scene-spanning sound through the shipped director preset, real loop an
   expect(JSON.stringify(h.upstream.fetch.mock.calls)).not.toContain('/working-cut/render')
 })
 
+function capturedVideoRun(runId = 'refvideo_previous', assetSha256 = 'a'.repeat(64)) {
+  return { ...runResponse, frameId: 'previous', runId, kernelStatus: 'Succeeded', publicStatus: 'succeeded',
+    candidates: [{ assetId: 'asset_video', assetSha256, mediaId: null, browserUrl: '', reviewStatus: 'pending' }] }
+}
+function capturedVideoRuns(items = [capturedVideoRun()]) {
+  return { schema: 'jason.reference-video-runs.v1', projectId: 'p', frameId: 'previous', items, providerCalls: 0 }
+}
+
 it('captures and recovers actual frame pixels through the shipped director preset with current-project scope', async () => {
   const upstream = writer()
   const original = upstream.fetch.getMockImplementation()!
@@ -964,6 +972,7 @@ it('captures and recovers actual frame pixels through the shipped director prese
     providerCalls: 0, selectionChanged: false }
   upstream.fetch.mockImplementation(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input)
+    if (url.pathname.endsWith('/runs')) return Response.json(capturedVideoRuns())
     if (url.pathname.endsWith('/reference-frame')) return Response.json(receipt)
     if (url.pathname.endsWith('/assets')) return Response.json({ page: 1, page_size: 200, pages: 1,
       items: [{ id: receipt.image.assetId, project_id: 'p', asset_type: 'image', sha256: imageSha,
@@ -972,7 +981,7 @@ it('captures and recovers actual frame pixels through the shipped director prese
   })
   const args = { sourceFrameId: 'previous', runId: 'refvideo_previous', assetId: 'asset_video', expectedAssetSha256: 'a'.repeat(64), timestampMs: 1001 }
   const adapter = new MockAdapter([
-    toolCallResponse('capture-frame', 'qingmu_capture_reference_video_frame', { ...args, operation: 'capture' }),
+    toolCallResponse('capture-frame', 'qingmu_capture_reference_video_frame', { sourceFrameId: args.sourceFrameId, assetId: args.assetId, expectedAssetSha256: args.expectedAssetSha256, timestampMs: args.timestampMs, operation: 'capture' }),
     toolCallResponse('read-frame', 'qingmu_capture_reference_video_frame', { ...args, operation: 'read' }),
     textResponse('收到取帧图片，只能核对这一时刻，不能声称已审完整视频或声音。'),
   ])
@@ -995,6 +1004,51 @@ it('captures and recovers actual frame pixels through the shipped director prese
   expect(h.ctx.tools.get('qingmu_capture_reference_video_frame', scopeOf(h.agent.ctx))).toBeUndefined()
 })
 
+it.each([
+  { name: 'mismatched run', runId: 'refvideo_other', expectedSha: 'a'.repeat(64), mode: 'normal' },
+  { name: 'changed video hash', runId: undefined, expectedSha: 'f'.repeat(64), mode: 'normal' },
+  { name: 'ambiguous reuse', runId: undefined, expectedSha: 'a'.repeat(64), mode: 'ambiguous' },
+  { name: 'foreign project', runId: undefined, expectedSha: 'a'.repeat(64), mode: 'foreign' },
+])('does not attempt a frame write for $name', async ({ runId, expectedSha, mode }) => {
+  const upstream = writer(), original = upstream.fetch.getMockImplementation()!
+  upstream.fetch.mockImplementation(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input)
+    if (url.pathname.endsWith('/runs')) {
+      const runs = capturedVideoRuns(mode === 'ambiguous'
+        ? [capturedVideoRun(), capturedVideoRun('refvideo_duplicate')] : [capturedVideoRun()])
+      return Response.json(mode === 'foreign' ? { ...runs, projectId: 'foreign' } : runs)
+    }
+    return original(input, init)
+  })
+  const adapter = new MockAdapter([toolCallResponse('bad-frame', 'qingmu_capture_reference_video_frame', {
+    sourceFrameId: 'previous', ...(runId ? { runId } : {}), assetId: 'asset_video', expectedAssetSha256: expectedSha,
+    timestampMs: 1001, operation: 'capture' }), textResponse('Read the correct source before any capture.')])
+  const h = await harness(adapter, upstream); await h.run()
+  expect(result(h.agent, 'bad-frame')).toMatchObject({ error: true, text: expect.stringContaining('未执行抽帧') })
+  expect(upstream.fetch.mock.calls.filter(([url]) => String(url).includes('/reference-frame'))).toHaveLength(0)
+})
+
+it('recovers an explicitly identified older video outside the recent run list without writing', async () => {
+  const upstream = writer(), original = upstream.fetch.getMockImplementation()!
+  const receipt = { schema: 'qingmu.reference-video-frame.v1', projectId: 'p', episodeId: 'episode-a', frameId: 'previous',
+    runId: 'refvideo_previous00000001', assetId: 'asset_video', assetSha256: 'a'.repeat(64), requestedTimestampMs: 1001,
+    image: null, providerCalls: 0, selectionChanged: false }
+  upstream.fetch.mockImplementation(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input)
+    if (url.pathname.endsWith('/runs')) return Response.json(capturedVideoRuns([]))
+    if (url.pathname.endsWith('/runs/refvideo_previous00000001')) return Response.json(capturedVideoRun(receipt.runId))
+    if (url.pathname.endsWith('/reference-frame')) return Response.json(receipt)
+    return original(input, init)
+  })
+  const adapter = new MockAdapter([toolCallResponse('older-frame', 'qingmu_capture_reference_video_frame', {
+    sourceFrameId: 'previous', runId: receipt.runId, assetId: receipt.assetId, expectedAssetSha256: receipt.assetSha256,
+    timestampMs: 1001, operation: 'read' }), textResponse('No prior capture exists; no new frame was saved.')])
+  const h = await harness(adapter, upstream); await h.run()
+  expect(result(h.agent, 'older-frame').error, result(h.agent, 'older-frame').text).toBe(false)
+  expect(JSON.parse(result(h.agent, 'older-frame').text)).toMatchObject(receipt)
+  expect(upstream.fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
+})
+
 it('retains a captured-frame receipt when its source pixels fail verification', async () => {
   const upstream = writer(), original = upstream.fetch.getMockImplementation()!
   const receipt = { schema: 'qingmu.reference-video-frame.v1', projectId: 'p', episodeId: 'episode-a', frameId: 'previous',
@@ -1003,6 +1057,7 @@ it('retains a captured-frame receipt when its source pixels fail verification', 
     providerCalls: 0, selectionChanged: false }
   upstream.fetch.mockImplementation(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input)
+    if (url.pathname.endsWith('/runs')) return Response.json(capturedVideoRuns())
     if (url.pathname.endsWith('/reference-frame')) return Response.json(receipt)
     if (url.pathname.endsWith('/assets')) return Response.json({ page: 1, page_size: 200, pages: 1,
       items: [{ id: receipt.image.assetId, project_id: 'p', asset_type: 'image', sha256: 'c'.repeat(64),

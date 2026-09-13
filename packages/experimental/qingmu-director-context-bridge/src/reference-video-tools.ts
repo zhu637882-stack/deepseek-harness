@@ -6,7 +6,7 @@ import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type {
   ReferenceVideoAsset, ReferenceVideoAssetsResponse, ReferenceVideoDraftResponse,
   ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse, ReferenceDirectorSource,
-  ReferenceVideoRunsResponse, ReferenceVideoFrameReceipt,
+  ReferenceVideoRun, ReferenceVideoRunsResponse, ReferenceVideoFrameReceipt,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import { parseReferenceVideoRequest } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter'
@@ -208,7 +208,7 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
     description: 'Capture one actual frame from an owned generated video as a reusable project image, or read whether that exact capture already exists. Capture uses the first decoded frame at or after timestampMs and reports its actual time. Image-capable directors also receive the captured pixels when available on catalog page 1; visualInputs reports missing images explicitly. Other pages remain accessible through image inspection. Use operation=read after an uncertain response. No separate observer or generation call, selection or approval. Image input uses normal director allowance. Compare the observed state before deriving continuity; one frame does not prove the whole action or audio was reviewed. Reuse its exact ID/SHA only when it fits the director design.',
     parameters: {
       sourceFrameId: { type: 'string', required: true, description: 'Source shot in the current project.' },
-      runId: { type: 'string', required: true, description: 'Exact source run from candidate read.' },
+      runId: { type: 'string', description: 'Usually omit: resolve the exact owned video ID/SHA from current shot candidates. Supply an exact run only for an older candidate outside the recent list or ambiguous reuse. Never guess or copy a run from another video.' },
       assetId: { type: 'string', required: true, description: 'Exact source candidate video ID.' },
       expectedAssetSha256: { type: 'string', required: true, description: 'Source video SHA256.' },
       timestampMs: { type: 'integer', required: true, description: 'Nonnegative playback position in milliseconds, within the video.' },
@@ -221,12 +221,32 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
     } },
     presentCall: args => ({ card: 'generic', kind: args.operation === 'read' ? 'read' : 'edit', title: '视频画面存为参考' }),
     async execute(args, exec) {
-      exactKeys(args, ['sourceFrameId', 'runId', 'assetId', 'expectedAssetSha256', 'timestampMs', 'operation'])
+      const { runId: _optionalRunId, ...required } = args
+      exactKeys(required, ['sourceFrameId', 'assetId', 'expectedAssetSha256', 'timestampMs', 'operation'])
       const current = await ports.readBoundContext(exec)
       assertCurrent(current, exec)
+      const sourceScope = { projectId: current.state.binding.scope.projectId, frameId: args.sourceFrameId }
+      const candidates = await ctx.qingmuYimengRead('referenceVideoRuns', sourceScope, exec.signal)
+      assertCurrent(current, exec)
+      if (!candidates.ok) throw new Error('视频来源尚未核实，未执行抽帧。请读取当前项目的候选状态；不要换时间点重复抽帧。')
+      const matches = (candidates.value as ReferenceVideoRunsResponse).items.filter(run =>
+        run.candidates.some(candidate => candidate.assetId === args.assetId && candidate.assetSha256 === args.expectedAssetSha256))
+      let run = args.runId ? matches.find(candidate => candidate.runId === args.runId) : matches.length === 1 ? matches[0] : undefined
+      if (!run && args.runId && matches.length === 0) {
+        const older = await ctx.qingmuYimengRead('referenceVideoRun', { ...sourceScope, runId: args.runId }, exec.signal)
+        assertCurrent(current, exec)
+        if (older.ok) {
+          const value = older.value as ReferenceVideoRun
+          if (value.candidates.some(candidate => candidate.assetId === args.assetId
+            && candidate.assetSha256 === args.expectedAssetSha256)) run = value
+        }
+      }
+      if (!run) throw new Error(matches.length
+        ? `生成编号与视频不对应或存在多个来源，未执行抽帧。此视频已核实的 runId：${matches.map(match => match.runId).join(', ')}。重新读取后使用匹配来源。`
+        : '当前镜头中未核实该视频 ID、SHA 与生成编号的对应关系，未执行抽帧。请读取候选来源；较早的视频可提供准确 runId，不要猜测或换时间点重试。')
       const result = await ctx.qingmuYimengCommand(args.operation === 'read' ? 'readReferenceVideoFrame' : 'captureReferenceVideoFrame', {
-        projectId: current.state.binding.scope.projectId, frameId: args.sourceFrameId,
-        runId: args.runId, assetId: args.assetId, expectedAssetSha256: args.expectedAssetSha256, timestampMs: args.timestampMs,
+        ...sourceScope, runId: run.runId, assetId: args.assetId,
+        expectedAssetSha256: args.expectedAssetSha256, timestampMs: args.timestampMs,
       }, exec.signal)
       assertCurrent(current, exec)
       if (!result.ok) throw new Error(`Frame capture result unconfirmed; recover the same source and timestamp: ${result.error.message}`)
