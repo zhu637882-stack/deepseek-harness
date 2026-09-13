@@ -160,16 +160,38 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
       const input = { schema: 'qingmu.native-director-plan.v1', receiptId: digest(source), ...source,
         guidance: 'Save creative fields with qingmu_save_director_plan. receiptId identifies this planning read for saving; it is not directorSource.sha256. Read qingmu_read_reference_draft and its sourceAlignment to check whether the saved generation draft still matches its source. Omitted imagePromptCn preserves the starting still; supply it to replace that description alongside directorPlan.visual when both change. Script identities and provenance remain protected. Explicit empty values clear decisions; omitted fields stay. Script dialogue text changes use the dialogue edit tools. Speakers, actions, camera moves and overlaps follow the script and director, with no fixed one-speaker rule.', providerCalls: 0 }
       const { schema, projectId, episodeId, scriptRevision, scriptSha256, storyboard } = planning
+      // Writer exposes the same decisions through canonical and compatibility fields.
+      // Keep one complete value and name each exact alias; differing decisions must
+      // remain visible so the director can reconcile them rather than hide a conflict.
+      const shotPath = '/planning/frameRequirements/0'
+      const fieldPath = (base: string, key: string) => `${base}/${key.replaceAll('~', '~0').replaceAll('/', '~1')}`
+      const duplicateFieldSources: Record<string, string> = {}
+      const visibleShot = Object.fromEntries(Object.entries(selectedShot).filter(([key, value]) => {
+        const planKey = key === 'imagePromptCn' ? 'visual' : key
+        if (!['id', 'title', 'frameNo', 'sceneId', 'directorPlan'].includes(key)
+          && selectedShot.directorPlan && planKey in selectedShot.directorPlan
+          && digest(value) === digest(selectedShot.directorPlan[planKey])) {
+          duplicateFieldSources[fieldPath(shotPath, key)] = fieldPath(`${shotPath}/directorPlan`, planKey)
+          return false
+        }
+        return true
+      }))
       const shotFields: Record<string, unknown> = { ...selectedShot.directorPlan, ...selectedShot }
-      const shotContext = Object.fromEntries(Object.entries(current.context.shot).filter(([key, value]) =>
-        key === 'id' || key === 'title' || !(key in shotFields) || digest(value) !== digest(shotFields[key])))
+      const shotContext = Object.fromEntries(Object.entries(current.context.shot).filter(([key, value]) => {
+        const sourceKey = key === 'imagePrompt' ? 'imagePromptCn' : key === 'action' ? 'blocking' : key
+        if (key === 'id' || key === 'title' || !(sourceKey in shotFields) || digest(value) !== digest(shotFields[sourceKey])) return true
+        const path = sourceKey in selectedShot ? fieldPath(shotPath, sourceKey) : fieldPath(`${shotPath}/directorPlan`, sourceKey)
+        duplicateFieldSources[fieldPath('/context/shot', key)] = duplicateFieldSources[path] ?? path
+        return false
+      }))
       const visibleContext = { ...current.context, shot: shotContext }
       return ports.boundedJson(retainNativeToolReceipt(current.session, exec.callId, 'qingmu_read_director_plan',
         ports.boundedJson(input), { ...input,
           context: visibleContext,
-          completeShotDesign: 'planning.frameRequirements[0]; identical fields in context.shot are not repeated; differing values remain visible for reconciliation',
+          completeShotDesign: 'planning.frameRequirements[0]; directorPlan is complete. duplicateFieldSources maps omitted exact copies to their full value by JSON pointer. Restore aliases when interpreting each field; differing values remain visible for reconciliation. The save receipt retains the original unmodified data.',
+          duplicateFieldSources,
           planning: { schema, projectId, episodeId, scriptRevision, scriptSha256, storyboard,
-            frameRequirements: [selectedShot] },
+            frameRequirements: [visibleShot] },
           episodeContinuity: planning.frameRequirements?.map(shot => ({ shotId: shot.id, frameNo: shot.frameNo,
             title: shot.title, continuity: shot.directorPlan?.continuity ?? null })),
           filmSource: { tool: 'qingmu_read_reference_draft', arguments: { page: 1 }, field: 'saved.directorSource.prompt',

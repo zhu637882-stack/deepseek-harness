@@ -928,6 +928,43 @@ it('reopens a rich saved director design without repeating its context copy or l
   expect(retained?.type === 'qingmu-director-dialogue/receipt' && (retained.data.value as unknown as { context: { shot: { directorPlan: unknown } } }).context.shot.directorPlan).toEqual(fullPlan)
 })
 
+it('keeps a rich starting image readable and editable through exact aliases without hiding conflicting decisions', async () => {
+  const visual = '门在北墙，窗在西墙；人物仍站在门内，手上没有后续才拿到的物件。'.repeat(90)
+  const fullPlan = { ...design, visual, blocking: '下一拍才从门边沿通道走到窗下。',
+    departmentDetail: '保留时代例外、物理因果、场景陈设和表演节奏。'.repeat(490) }
+  const nextPlan = { ...fullPlan, performance: '听完话后才转头，保留呼吸与街声。' }
+  const upstream = writer()
+  const adapter = new MockAdapter([
+    toolCallResponse('alias-read', 'qingmu_read_director_plan', {}),
+    toolCallResponse('alias-save', 'qingmu_save_director_plan', { receiptId: designReceipt, directorPlan: fullPlan, imagePromptCn: visual }),
+    toolCallResponse('alias-reopen', 'qingmu_read_director_plan', {}),
+    () => toolCallResponse('alias-edit', 'qingmu_save_director_plan', {
+      receiptId: upstream.planReceipt(), directorPlan: nextPlan,
+    }),
+    textResponse('完整画面及部门设计已保留，可继续编辑。'),
+  ])
+  const h = await harness(adapter, upstream); await h.run(true)
+  for (const id of ['alias-read', 'alias-save', 'alias-reopen', 'alias-edit']) expect(result(h.agent, id).error, result(h.agent, id).text).toBe(false)
+  const visible = JSON.parse(result(h.agent, 'alias-reopen').text)
+  expect(visible.planning.frameRequirements[0].directorPlan).toEqual(fullPlan)
+  expect(visible.duplicateFieldSources['/planning/frameRequirements/0/imagePromptCn']).toBe('/planning/frameRequirements/0/directorPlan/visual')
+  expect(visible.context.shot.action).toBe('交谈')
+  expect(visible.planning.frameRequirements[0].directorPlan.blocking).toBe(fullPlan.blocking)
+  expect(Buffer.byteLength(result(h.agent, 'alias-reopen').text)).toBeLessThan(48000)
+  expect(Buffer.byteLength(JSON.stringify({ ...visible,
+    planning: { ...visible.planning, frameRequirements: [{ ...visible.planning.frameRequirements[0], imagePromptCn: visual }] },
+  }))).toBeGreaterThan(48000)
+  const retained = h.agent.session.events.find(event => event.type === 'qingmu-director-dialogue/receipt'
+    && event.data.callId === 'alias-reopen')
+  type RetainedPlan = { planning: { frameRequirements: { imagePromptCn: string }[] } }
+  expect(retained?.type === 'qingmu-director-dialogue/receipt'
+    && (retained.data.value as unknown as RetainedPlan).planning.frameRequirements[0]!.imagePromptCn).toBe(visual)
+  expect(h.upstream.director()).toEqual(nextPlan)
+  const commands = h.upstream.fetch.mock.calls.filter(([url]) =>
+    new URL(url instanceof Request ? url.url : url).pathname.endsWith('/scene-planning/commands'))
+  expect(JSON.parse(commands.at(-1)![1]!.body as string).request.imagePromptCn).toBe(visual)
+})
+
 it('carries a video reference through the native director read, preview, save and workspace restoration', async () => {
   const fixture = videoReferenceFixture()
   const draft = { bindings: fixture.request.bindings, promptParts: fixture.request.promptParts, parameters: fixture.request.parameters }

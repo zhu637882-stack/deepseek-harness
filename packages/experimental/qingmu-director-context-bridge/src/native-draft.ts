@@ -137,8 +137,9 @@ export function toolValues(session: Pick<Session, 'events'>, name: string | read
 export function retainNativeToolReceipt(session: Session, callId: string, toolName: string,
   value: JsonValue, view: Record<string, unknown>) {
   const visible = { ...view, nativeReceiptSha256: digest(value) }
-  if (Buffer.byteLength(JSON.stringify(visible), 'utf8') > 48000) {
-    throw new Error('本次导演上下文过大，未截断输入或提交修改。请缩小到单个镜头。')
+  const bytes = Buffer.byteLength(JSON.stringify(visible), 'utf8')
+  if (bytes > 48000) {
+    throw new Error(`本次导演读取为${bytes}字节，超过单次48000字节容量。未截断创作内容或提交修改；需调整读取方式，相同读取重试不能解决。`)
   }
   session.append('qingmu-director-dialogue/receipt', { callId, toolName, value, visibleSha256: digest(visible) })
   return visible
