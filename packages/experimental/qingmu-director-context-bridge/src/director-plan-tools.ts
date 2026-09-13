@@ -142,8 +142,14 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
       const input = { schema: 'qingmu.native-director-plan.v1', receiptId: digest(source), ...source,
         guidance: 'Save creative fields with qingmu_save_director_plan. receiptId identifies this planning read for saving; it is not directorSource.sha256. Read qingmu_read_reference_draft and its sourceAlignment to check whether the saved generation draft still matches its source. Omitted imagePromptCn preserves the starting still; supply it to replace that description alongside directorPlan.visual when both change. Script identities and provenance remain protected. Explicit empty values clear decisions; omitted fields stay. Script dialogue text changes use the dialogue edit tools. Speakers, actions, camera moves and overlaps follow the script and director, with no fixed one-speaker rule.', providerCalls: 0 }
       const { schema, projectId, episodeId, scriptRevision, scriptSha256, storyboard } = planning
+      const shotFields: Record<string, unknown> = { ...selectedShot.directorPlan, ...selectedShot }
+      const shotContext = Object.fromEntries(Object.entries(current.context.shot).filter(([key, value]) =>
+        key === 'id' || key === 'title' || !(key in shotFields) || digest(value) !== digest(shotFields[key])))
+      const visibleContext = { ...current.context, shot: shotContext }
       return ports.boundedJson(retainNativeToolReceipt(current.session, exec.callId, 'qingmu_read_director_plan',
         ports.boundedJson(input), { ...input,
+          context: visibleContext,
+          completeShotDesign: 'planning.frameRequirements[0]; identical fields in context.shot are not repeated; differing values remain visible for reconciliation',
           planning: { schema, projectId, episodeId, scriptRevision, scriptSha256, storyboard,
             frameRequirements: [selectedShot] },
           episodeContinuity: planning.frameRequirements?.map(shot => ({ shotId: shot.id, frameNo: shot.frameNo,

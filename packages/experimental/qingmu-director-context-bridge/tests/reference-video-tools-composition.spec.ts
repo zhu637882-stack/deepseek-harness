@@ -782,6 +782,25 @@ it('recovers an uncertain director save with the identical command and never pos
     new URL(url instanceof Request ? url.url : url).pathname.endsWith('/scene-planning/commands'))).toHaveLength(1)
 })
 
+it('reopens a rich saved director design without repeating its context copy or losing creative fields', async () => {
+  const fullPlan = { ...design, departmentDetail: '保留空间表演声音。'.repeat(1200) }
+  const adapter = new MockAdapter([
+    toolCallResponse('rich-read', 'qingmu_read_director_plan', {}),
+    toolCallResponse('rich-save', 'qingmu_save_director_plan', { receiptId: designReceipt, directorPlan: fullPlan }),
+    toolCallResponse('rich-reopen', 'qingmu_read_director_plan', {}),
+    textResponse('完整设计可继续编辑。'),
+  ])
+  const h = await harness(adapter); await h.run(true)
+  for (const id of ['rich-read', 'rich-save', 'rich-reopen']) expect(result(h.agent, id).error, result(h.agent, id).text).toBe(false)
+  const visible = JSON.parse(result(h.agent, 'rich-reopen').text)
+  expect(visible.planning.frameRequirements[0].directorPlan).toEqual(fullPlan)
+  expect(visible.context.shot.directorPlan).toBeUndefined()
+  expect(visible.context.shot.id).toBe('f')
+  expect(Buffer.byteLength(result(h.agent, 'rich-reopen').text)).toBeLessThan(48000)
+  const retained = h.agent.session.events.find(event => event.type === 'qingmu-director-dialogue/receipt' && event.data.callId === 'rich-reopen')
+  expect(retained?.type === 'qingmu-director-dialogue/receipt' && (retained.data.value as unknown as { context: { shot: { directorPlan: unknown } } }).context.shot.directorPlan).toEqual(fullPlan)
+})
+
 it('carries a video reference through the native director read, preview, save and workspace restoration', async () => {
   const fixture = videoReferenceFixture()
   const draft = { bindings: fixture.request.bindings, promptParts: fixture.request.promptParts, parameters: fixture.request.parameters }

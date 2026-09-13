@@ -164,3 +164,5 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 `qingmu_read_reference_video_candidates` 同时通过已校验的 Take 评论接口读取本镜既有评论。可选 `commentPage` 每页返回五条完整观察，按时间从新到旧排列，并提供 `nextPage`；保留原时间码或帧号、视频 SHA、Take ID 以及当前或历史导演版本绑定。仅以相同输出 SHA 标注匹配的候选 ID。旧观察或未匹配观察仍可见，不自动套用到另一视频。模型输出不包含操作者和认证标识。评论读取不可用时明确报告，不冒充空列表。该读取不检查新画面、不写评论、不选用视频，也不授予审核批准。
 
 本镜方案读取明确指向 `qingmu_read_reference_draft` 的 `saved.directorSource.prompt`，获取当前完整全片、世界和资产来源。保存非空 `generationContext` 必须有同镜头成功记录的完整来源读取，并在新写入前复核来源；缺失、变化或读取失败时须重读，不用会话历史补缺。结果不明的已提交操作仍恢复原回执。来源可读且未变，不代表语义一致。
+
+模型在 planning.frameRequirements 中收到一次完整本镜设计。context.shot 的第二份视图只省去完全相同的字段，值不同时保留供核对；完整原上下文仍在保存回执中。丰富的导演稿不会因重复副本而无法重读，也不缩短创作正文。
