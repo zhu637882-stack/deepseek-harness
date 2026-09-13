@@ -8,7 +8,8 @@ interface FeedbackCase { label: string; url: string; storageState: string; issue
 async function openScene(page: Page) {
   for (const name of ['场景规划与导演助手', '统筹本场已有镜头']) {
     const details = page.locator('details').filter({ has: page.locator(':scope > summary', { hasText: name }) })
-    if (await details.count() && !await details.getAttribute('open')) await details.locator(':scope > summary').click()
+    await details.waitFor()
+    if (await details.getAttribute('open') === null) await details.locator(':scope > summary').click()
   }
   return page.getByRole('region', { name: '整场导演协调稿', exact: true })
 }
@@ -27,14 +28,14 @@ describe.skipIf(!casesFile)('live scene feedback recovery', () => {
         await page.route(/\/api\/session.prompt$|\/qingmu-yimeng-command\/(save|generate)[^/]*$/, async (route) => {
           writes.push(new URL(route.request().url()).pathname); await route.abort()
         })
-        await page.goto(item.url, { waitUntil: 'networkidle' })
+        await page.goto(item.url, { waitUntil: 'domcontentloaded' })
         const composer = await openScene(page)
         const problems = composer.getByRole('region', { name: '导演待核对问题' })
         await problems.waitFor()
         expect(await problems.locator('li').count()).toBe(item.issues)
         const original = await composer.locator('pre').textContent()
         await problems.getByRole('link', { name: '带着问题去素材设计' }).click()
-        await page.waitForURL('**qingmuView=assets**'); await page.waitForLoadState('networkidle')
+        await page.waitForURL('**qingmuView=assets**', { waitUntil: 'domcontentloaded' })
         const feedback = page.getByRole('region', { name: '整场导演反馈' })
         await feedback.waitFor()
         expect(await feedback.locator('li').count()).toBe(item.issues)
@@ -44,7 +45,7 @@ describe.skipIf(!casesFile)('live scene feedback recovery', () => {
         const edited = await instructions.inputValue()
         expect(edited).toContain('以上是待核对意见，不是新的项目事实')
         if (previous) expect(edited).toContain(previous)
-        await page.reload({ waitUntil: 'networkidle' })
+        await page.reload({ waitUntil: 'domcontentloaded' })
         expect(await instructions.inputValue()).toBe(edited)
         if (item.artifactsDir) {
           mkdirSync(item.artifactsDir, { recursive: true })
@@ -53,7 +54,7 @@ describe.skipIf(!casesFile)('live scene feedback recovery', () => {
         }
         await instructions.fill(previous)
         await feedback.getByRole('link', { name: '返回分镜协调' }).click()
-        await page.waitForURL('**qingmuView=storyboard**'); await page.waitForLoadState('networkidle')
+        await page.waitForURL('**qingmuView=storyboard**', { waitUntil: 'domcontentloaded' })
         const returned = await openScene(page)
         await returned.locator('pre').waitFor({ state: 'attached' })
         expect(await returned.locator('pre').textContent()).toBe(original)
