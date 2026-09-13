@@ -402,7 +402,7 @@ export function ShootingFirstFrame({
         alt={`${preview.compositionReference.sceneName}的本镜空间取景参考`} /><figcaption>这张布局图随请求提交，用于位置、透视和遮挡；生成后的实际画面仍需审看。</figcaption></figure>}
       <pre style={{ whiteSpace: 'pre-wrap' }}>{preview.prompt}</pre>
     </details>}
-    {referencePort && <details className={css.log}><summary>选择首帧参考图</summary>
+    {referencePort && <details className={css.referencesPanel}><summary>选择首帧参考图</summary>
       <p>明确选择本镜使用的人物、场景与道具图片，说明各图用途；生成新的工作候选。</p>
       <AssetImageReferences projectId={scope.projectId} references={references} port={referencePort}
         disabled={busy || Boolean(requestId)} allowRegions={false} onChange={setReferences} />
