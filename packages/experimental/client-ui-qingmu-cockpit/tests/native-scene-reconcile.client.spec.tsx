@@ -10,8 +10,8 @@ const initial: ScenePlanningState = {
   schema: 'jason.qingmu-scene-planning-state.v1', projectId: 'p', episodeId: 'e', scriptRevision: 1, scriptSha256: sha,
   storyboard: { id: 'revision-1', version: 1, sourceHash: 'c'.repeat(64), status: 'Ready' }, planning: null, scenes: [],
   frameRequirements: [
-    { id: 'f1', sceneId: 'room', title: '入门', frameNo: 1, imagePromptCn: '门前', directorPlan: { cameraMovement: '跟随入门', continuity: { end: '站在桌旁' } }, generationContextSource: { state: 'changed', sha256: sourceSha, changes: ['场景'] } },
-    { id: 'f2', sceneId: 'room', title: '落座', frameNo: 2, imagePromptCn: '桌旁', directorPlan: { cameraMovement: '绕到侧面', continuity: { start: '站在桌旁', end: '坐在凳面' } }, generationContextSource: { state: 'untracked', sha256: sourceSha, changes: [] } },
+    { id: 'f1', sceneId: 'room', title: '入门', frameNo: 1, imagePromptCn: '门前', durationSec: 4, dialogue: { lines: [] }, directorPlan: { cameraMovement: '跟随入门', continuity: { end: '站在桌旁' } }, generationContextSource: { state: 'changed', sha256: sourceSha, changes: ['场景'] } },
+    { id: 'f2', sceneId: 'room', title: '落座', frameNo: 2, imagePromptCn: '桌旁', durationSec: 8.25, dialogue: { lines: [{ actorId: 'actor_a', sourceLineId: 'line_a', line: '嗯，我在听。', delivery: '平稳低声' }] }, directorPlan: { cameraMovement: '绕到侧面', continuity: { start: '站在桌旁', end: '坐在凳面' } }, generationContextSource: { state: 'untracked', sha256: sourceSha, changes: [] } },
     { id: 'f3', sceneId: 'street', title: '街外', frameNo: 3, imagePromptCn: '街道', directorPlan: { continuity: { start: '门外' } }, generationContextSource: { state: 'current', sha256: sourceSha, changes: [] } },
   ],
 }
@@ -74,6 +74,9 @@ it.each([false, true])('coordinates a whole existing scene and saves through cur
   const save = await loadDraft()
   expect(port.saveScenePlanning).not.toHaveBeenCalled()
   expect(storyPort.send).toHaveBeenCalledExactlyOnceWith(expect.any(String), expect.any(String), { projectId: 'p', episodeId: 'e', purpose: 'scene-reconcile-room' })
+  const supplied = JSON.parse(storyPort.send.mock.calls[0]![1].split('本场完整原镜头：')[1]!.split('\n其他场次')[0]!)
+  expect(supplied.map((shot: { durationSec: number; dialogue: unknown }) => [shot.durationSec, shot.dialogue]))
+    .toEqual(initial.frameRequirements!.slice(0, 2).map(shot => [shot.durationSec, shot.dialogue]))
   if (!automatic) expect(storyPort.send.mock.calls[0]?.[1]).toMatchSnapshot('whole scene reconciliation request')
   fireEvent.click(save)
   await waitFor(() => { expect(onSaved).toHaveBeenCalledTimes(1) })

@@ -67,6 +67,18 @@ describe('bounded scene planning Host channel', () => {
     }] }
     expect(await setup(importedZeroBased).handler('readScenePlanning', scope, new AbortController().signal)).toMatchObject({ ok: false })
   })
+  it('preserves canonical timing and complete dialogue while retaining older projections', async () => {
+    const shot = { id: 'shot_1', frameNo: 1, title: '听与回应', imagePromptCn: '', durationSec: 12.75,
+      dialogue: { lines: [{ actorId: 'actor_a', sourceLineId: 'line_a', line: '嗯，我在听。',
+        delivery: '吸气后低声回应', startSec: 4.25, endSec: 6.5, overlap: true }], roomTone: '保持底声' } }
+    const value = { ...automaticState,
+      canonicalStoryboard: { ...automaticCanonical, shotCount: 1, shots: [shot] }, frameRequirements: [shot] }
+    expect(await setup(value).handler('readScenePlanning', scope, new AbortController().signal)).toEqual({ ok: true, value })
+    for (const patch of [{ durationSec: '12' }, { durationSec: -1 }, { dialogue: [] }]) {
+      expect(await setup({ ...value, frameRequirements: [{ ...shot, ...patch }] })
+        .handler('readScenePlanning', scope, new AbortController().signal)).toMatchObject({ ok: false })
+    }
+  })
   it.each([{}, { blocking:'缓慢抬头',cameraAngle:'驾驶员主观视角' }, { action: 'edit_requirements', cameraMovement: '0-2秒向前缓推', coveragePlan: '2秒切手部特写，5秒切女主近景' }])('sends one automatic frame requirement with optional independent shooting fields %j', async (fields) => {
     const automaticRequest = { ...scope, idempotencyKey: 'automatic-1', request: { action: 'edit_automatic',
       expectedScriptRevision: 1, expectedScriptSha256: 'a'.repeat(64), expectedStoryboardRevision: 2,

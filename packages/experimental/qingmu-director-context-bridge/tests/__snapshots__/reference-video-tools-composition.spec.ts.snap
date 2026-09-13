@@ -397,6 +397,26 @@ exports[`delivers saved bound image pixels with the draft through the shipped di
 ]
 `;
 
+exports[`delivers saved shot timing and complete dialogue through the shipped director tools > saved timing and original dialogue 1`] = `
+{
+  "dialogue": {
+    "lines": [
+      {
+        "actorId": "actor_a",
+        "delivery": "吸气后低声回应",
+        "endSec": 6.5,
+        "line": "嗯，我在听。",
+        "overlap": true,
+        "sourceLineId": "line_a",
+        "startSec": 4.25,
+      },
+    ],
+    "roomTone": "保留室内底声",
+  },
+  "durationSec": 12.75,
+}
+`;
+
 exports[`gives a text-only director an attributed visual report with reconstructible inputs and reuses unchanged observations 1`] = `
 {
   "content": [

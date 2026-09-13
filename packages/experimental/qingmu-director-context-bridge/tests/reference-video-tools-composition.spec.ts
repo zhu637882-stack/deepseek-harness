@@ -801,6 +801,35 @@ it.each(['current', 'missing', 'changed', 'unavailable'])(
   },
 )
 
+it('delivers saved shot timing and complete dialogue through the shipped director tools', async () => {
+  const upstream = writer()
+  const originalFetch = upstream.fetch.getMockImplementation()!
+  const timing = { durationSec: 12.75, dialogue: { lines: [
+    { actorId: 'actor_a', sourceLineId: 'line_a', line: '嗯，我在听。', delivery: '吸气后低声回应', startSec: 4.25, endSec: 6.5, overlap: true },
+  ], roomTone: '保留室内底声' } }
+  upstream.fetch.mockImplementation(async (input, init) => {
+    const response = await originalFetch(input, init)
+    const url = new URL(input instanceof Request ? input.url : input)
+    if (!url.pathname.endsWith('/scene-planning')) return response
+    const body = await response.json() as typeof planning
+    const shots = body.frameRequirements.map(shot => ({ ...shot, ...timing }))
+    return Response.json({ ...body, frameRequirements: shots, canonicalStoryboard: { ...body.canonicalStoryboard, shots } })
+  })
+  const adapter = new MockAdapter([
+    toolCallResponse('timing-read', 'qingmu_read_director_plan', {}), textResponse('按实际时长和原对白设计。'),
+  ])
+  const h = await harness(adapter, upstream); await h.run(true)
+  const read = result(h.agent, 'timing-read')
+  expect(read.error, read.text).toBe(false)
+  const shot = JSON.parse(read.text).planning.frameRequirements[0]
+  expect({ durationSec: shot.durationSec, dialogue: shot.dialogue }).toEqual(timing)
+  const messages = JSON.stringify(adapter.requests.at(-1)?.messages)
+  expect(messages).toContain('12.75')
+  expect(messages).toContain('吸气后低声回应')
+  expect(messages).toContain('line_a')
+  expect({ durationSec: shot.durationSec, dialogue: shot.dialogue }).toMatchSnapshot('saved timing and original dialogue')
+})
+
 it('carries the shared source read into the actual director save command', async () => {
   const upstream = writer()
   const source = { sha256: '4'.repeat(64), prompt: '当前世界改为西侧入口，保留剧本改造例外。', generationPrompt: '沿西侧门进入。' }

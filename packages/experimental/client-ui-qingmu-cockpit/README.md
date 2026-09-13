@@ -1,5 +1,7 @@
 # Qingmu OS production cockpit
 
+Whole-scene reconciliation receives each shot's saved duration and original dialogue. The director aligns performance and action beats to those values; changes to source dialogue or timing remain explicit script or storyboard edits. Missing legacy dialogue is distinguished from an empty assigned line list.
+
 Shared director-context source tracking, reconciliation and legacy behavior are documented in the [implementation note](../../../.agents/notes/implemented/feature/2026-09-14-qingmu-shared-director-context.md).
 
 The shot director offers “整理首帧画面” alongside video-draft preparation. Selecting it fills a recoverable instruction without sending. After explicit send, the director reads current sources, saves the starting image through existing plan tools and checks the actual image preparation. The instruction preserves video movement, performance, dialogue and sound; it requests no media generation or adoption.

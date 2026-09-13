@@ -58,6 +58,10 @@ export interface AutomaticPlanningShot {
   readonly frameNo: number
   readonly title: string
   readonly imagePromptCn: string
+  /** Saved shot timing, independent of action-beat estimates; older reads may omit it. */
+  readonly durationSec?: number
+  /** Complete saved dialogue with source identities and delivery; omission is not silence. */
+  readonly dialogue?: YimengCommandJsonObject
   readonly blocking?: string
   readonly cameraAngle?: string
   readonly cameraMovement?: string
@@ -246,6 +250,9 @@ function frameRequirements(value: unknown, fail: Fail): void {
     shotIds.add(shotId); integer(frame.frameNo, fail, 1); str(frame.title, fail, 64000)
     if (frame.sceneId !== undefined && frame.sceneId !== null) id(frame.sceneId, fail)
     if (typeof frame.imagePromptCn !== 'string' || frame.imagePromptCn.length > 20000) throw fail('canonical storyboard image prompt invalid')
+    if (frame.durationSec !== undefined && (typeof frame.durationSec !== 'number' || !Number.isFinite(frame.durationSec)
+      || frame.durationSec <= 0)) throw fail('canonical storyboard duration invalid')
+    if (frame.dialogue !== undefined) obj(frame.dialogue, fail)
     if (frame.firstFrameCandidateCount !== undefined) integer(frame.firstFrameCandidateCount, fail)
     if (frame.directorPlan !== undefined) obj(frame.directorPlan, fail)
     if (frame.generationContextSource !== undefined) {

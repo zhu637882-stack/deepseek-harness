@@ -1,5 +1,7 @@
 # 青木易梦命令适配器
 
+分镜读取保留每镜实际保存的 `durationSec` 和完整 `dialogue`，包括来源身份、表达方式及其他对白字段。旧读取可以缺省，缺省不代表无对白；读取不修改时长或对白。
+
 导演稿的共用来源跟踪、同步与旧稿兼容见[实施说明](../../../.agents/notes/implemented/feature/2026-09-14-qingmu-shared-director-context.zh.md)。
 
 `previewShootingFirstFrame` 将既有首帧预览接入原生命令。它接受当前范围标识与准确工作图片引用，保留顺序和用途，核对返回的镜头与输入哈希，并拒绝凭证回显。提交与采用仍然独立。
