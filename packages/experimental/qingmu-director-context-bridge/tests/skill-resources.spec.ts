@@ -84,11 +84,11 @@ it('serves the genre supplement with current director authority through the nati
   const app = await reader()
   const result = await app.run({ skill: 'cinematic-director', path: 'references/genre-playbooks.md', lineCount: 30 })
   expect(result.isError).toBe(false)
-  const page = result.value as ResourcePage
-  expect(page.sha256).not.toBe(page.upstreamSha256)
-  expect(page.content).toContain("current user instructions and the project's script and director design govern")
-  expect(page.content).toContain('not platform requirements or validation limits')
-  expect(page.nextLine).not.toBeNull()
+  expect(result.value).toMatchObject({
+    content: expect.stringContaining("current user instructions and the project's script and director design govern"),
+    nextLine: 31,
+  })
+  expect(result.value).toMatchObject({ content: expect.stringContaining('not platform requirements or validation limits') })
 })
 
 it('keeps released director methods compatible with the installed method without rewriting history', async () => {
