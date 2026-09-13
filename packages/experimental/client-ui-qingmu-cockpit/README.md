@@ -1,5 +1,7 @@
 # Qingmu OS production cockpit
 
+The scene-design and shooting-director prompts distinguish whole-cut scoring from generated segment sound. Post-edit score intentions are retained in editorialContext; soundPlan retains native dialogue, ambience, Foley and any deliberately authored source music or native score. Existing designs require explicit reconciliation; no keywords remove music automatically.
+
 Scene direction separates coverage within a generated segment from adjoining-segment editorial notes. The notes remain editable and appear in the working cut; they do not automatically apply a transition or sound bridge. Existing mixed coverage is retained for explicit director revision.
 
 A first assembly uses the source chosen in shooting. Unchosen shots remain available for explicit candidate comparison. Saved cuts retain their own versions and trims when Take choices change.
