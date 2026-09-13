@@ -10,6 +10,60 @@ const state: AssetDesignState = { ...scope, schema: 'qingmu.asset-design-state.v
     visualStyle: '写实', tone: '温暖', colorPalette: ['灰蓝'], lightingRules: '窗光', cameraGrammar: '跟随动作', performanceRules: '自然', characterContinuityRules: '服装稳定',
   } } }
 afterEach(() => { cleanup(); localStorage.clear() })
+it('authors asset designs from current world and spatial sources through the native entry', async () => {
+  const port = setup()
+  const configured = { ...state, design: { ...state.design!, world: {
+    setting: '1996年', scriptFacts: '孩子来自2026年', directorInferences: '修理间靠窗布置',
+    exceptions: '孩子携带智能手机', openQuestions: '房间尺寸尚未测量',
+  } } }
+  port.readAssetDesign.mockResolvedValue(configured)
+  const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn(async (_id: string, _prompt: string) => {}),
+    read: vi.fn(async () => ({ text: '', script: '', lastSeq: -1, running: false, finished: false, error: '' })) }
+  render(<NativeAssetDesign {...scope} port={port} storyPort={storyPort} onGenerated={vi.fn()} />)
+  fireEvent.click(await screen.findByRole('button', { name: '根据剧本设计素材' }))
+  await waitFor(() => { expect(storyPort.send).toHaveBeenCalledTimes(1) })
+  expect(storyPort.send.mock.calls[0]?.[1]).toMatchSnapshot()
+  const request = JSON.parse(localStorage.getItem('qingmu.asset-design-session.v1:p:e')!)
+  expect(JSON.parse(request.sourceKey)).toMatchObject({ stateSha256: state.stateSha256, design: { world: configured.design.world } })
+  expect(port.saveAssetDesign).not.toHaveBeenCalled()
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
+it('keeps world exceptions and room details through an AI supplement, save and reload', async () => {
+  const port = setup()
+  const world = { setting: '1996年', scriptFacts: '父亲在室内', directorInferences: '桌边留出通道',
+    exceptions: '来自2026年的孩子携带智能手机', openQuestions: '待确定窗外景观' }
+  const room = { id: 'scene_1', kind: 'scene' as const, name: '工作室', imagePrompt: '窗边工作台',
+    space: { orientation: '北窗南门', layout: '桌靠北窗', scale: '桌高约0.8米，设计估计', lighting: '北窗光' },
+    imageStage: { camera: '门边看向窗', state: '风扇未接电' } }
+  const configured = { ...state, design: { ...state.design!, world, assets: [room, state.design!.assets[0]!] } }
+  port.readAssetDesign.mockResolvedValue(configured)
+  port.saveAssetDesign.mockImplementation(async (input: unknown) => ({ ...configured,
+    design: { ...configured.design, ...(input as { design: object }).design } }))
+  const supplement = { director: state.design!.director, assets: [{ kind: 'scene', id: room.id, name: room.name,
+    imagePrompt: '从窗侧看工作台', space: { layout: '桌仍靠北窗，南门旁加一把木椅' }, imageStage: { camera: '窗边看向门' } }] }
+  localStorage.setItem('qingmu.asset-design-session.v1:p:e', JSON.stringify({ sessionId: 'session_design', baseline: 0, submitted: true }))
+  const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
+    read: vi.fn(async () => ({ text: '调整房间取景。', script: JSON.stringify(supplement), lastSeq: 10, running: false, finished: true, error: '' })) }
+  const view = render(<NativeAssetDesign {...scope} port={port} storyPort={storyPort} onGenerated={vi.fn()} />)
+  fireEvent.click(await screen.findByRole('button', { name: '采用到素材卡片' }))
+  expect(screen.getByLabelText<HTMLTextAreaElement>('剧本例外').value).toBe(world.exceptions)
+  expect(within(screen.getByRole('region', { name: '场景 工作室' })).getByLabelText<HTMLTextAreaElement>('本图物件状态').value).toBe('风扇未接电')
+  fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
+  await waitFor(() => { expect(port.saveAssetDesign).toHaveBeenCalledTimes(1) })
+  const saved = await (port.saveAssetDesign.mock.results[0]!.value as Promise<AssetDesignState>)
+  expect(saved.design?.world).toEqual(world)
+  expect(saved.design?.assets[0]?.space).toEqual({ ...room.space, layout: supplement.assets[0]!.space.layout })
+  expect(saved.design?.assets[0]?.imageStage).toEqual({ camera: '窗边看向门', state: '风扇未接电' })
+  view.unmount(); port.readAssetDesign.mockResolvedValue(saved)
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  expect((await screen.findByLabelText<HTMLTextAreaElement>('剧本例外')).value).toBe(world.exceptions)
+  fireEvent.change(screen.getByLabelText('剧本例外'), { target: { value: '' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
+  await waitFor(() => { expect(port.saveAssetDesign).toHaveBeenCalledTimes(2) })
+  expect(port.saveAssetDesign.mock.calls[1]).toMatchObject([{ design: { world: { ...world, exceptions: '' } } }])
+  expect(storyPort.send).not.toHaveBeenCalled()
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
 it('adopts an AI supplement without dropping an omitted room or the existing character voice', async () => {
   const port = setup()
   const room = { id: 'scene_1', kind: 'scene' as const, name: '工作室', imagePrompt: '窗下木桌',

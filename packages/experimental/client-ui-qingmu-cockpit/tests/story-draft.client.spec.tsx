@@ -5,6 +5,36 @@ import { NativeStoryComposer } from '../src/client/NativeStoryComposer.tsx'
 import { readStoryDraft } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft'
 
 afterEach(() => { cleanup(); localStorage.clear() })
+it('authors a fresh asset revision from current sources and rejects adoption after those sources change', async () => {
+  const key = 'qingmu.asset-design-session.v1:p:e'
+  localStorage.setItem(key, JSON.stringify({ sessionId: 'session-old', baseline: 1, submitted: true, sourceKey: 'old basis' }))
+  const finished = { text: '完成稿', script: '{"assets":[]}', lastSeq: 4, running: false, finished: true, error: '' }
+  let newSubmitted = false
+  const port = { prepare: vi.fn(async (_sessionId: string) => {}),
+    send: vi.fn(async () => { newSubmitted = true }), read: vi.fn(async (id: string) => id === 'session-old' || newSubmitted
+      ? finished : { ...finished, text: '', script: '', lastSeq: -1, finished: false }) }
+  const purpose = { key: 'asset-design', title: '素材设计', description: '设计当前素材', prompt: '当前完整剧本与共用房间',
+    action: '重新设计', adopt: '采用设计', adopted: '已采用', freshRevision: true, sourceKey: 'current basis' }
+  const onAdopt = vi.fn()
+  const view = render(<NativeStoryComposer port={port} projectId="p" episodeId="e" source="当前来源" settings=""
+    disabled={false} onAdopt={onAdopt} purpose={purpose} />)
+  fireEvent.click(await screen.findByRole('button', { name: '采用设计' }))
+  await screen.findByText(/没有采用：创作依据或本页设计已改变/)
+  expect(onAdopt).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '重新设计' }))
+  await waitFor(() => { expect(port.send).toHaveBeenCalledTimes(1) })
+  expect(port.prepare.mock.calls[0]?.[0]).not.toBe('session-old')
+  const request = JSON.parse(localStorage.getItem(key)!)
+  expect(request).toMatchObject({ baseline: -1, sourceKey: 'current basis', submitted: true })
+  view.unmount()
+  render(<NativeStoryComposer port={port} projectId="p" episodeId="e" source="已改来源" settings=""
+    disabled={false} onAdopt={onAdopt} purpose={{ ...purpose, sourceKey: 'changed during generation' }} />)
+  fireEvent.click(await screen.findByRole('button', { name: '采用设计' }))
+  await screen.findByText(/没有采用：创作依据或本页设计已改变/)
+  expect(onAdopt).not.toHaveBeenCalled()
+  expect(port.send).toHaveBeenCalledTimes(1)
+  expect(screen.getByText('完成稿')).toBeTruthy()
+})
 it('adopts a retained JSON design block and reports validation failure without another model request', async () => {
   localStorage.setItem('qingmu.asset-design-session.v1:p:e',
     JSON.stringify({ sessionId: 'session-design', baseline: 1, submitted: true }))

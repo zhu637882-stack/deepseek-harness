@@ -173,7 +173,7 @@ export function NativeSceneReconcile({ state, sceneId, port, storyPort, disabled
     <button type="button" disabled={busy} onClick={() => { setRefresh(value => value + 1) }}>读取最新共用依据</button>
     <NativeStoryComposer port={storyPort} projectId={projectId} episodeId={episodeId} source={JSON.stringify(shots)} settings=""
       disabled={disabled || busy || !ready || !!batch && batch.completed < batch.changes.length} onAdopt={adopt}
-      purpose={{ key: `scene-reconcile-${sceneId}`, jsonOutput: true, title: '整场导演协调稿',
+      purpose={{ key: `scene-reconcile-${sceneId}`, jsonOutput: true, freshRevision: true, title: '整场导演协调稿',
         description: '依据全剧、共用资产和本场全部原设计，形成可检查的协调稿。', prompt,
         action: '让导演统筹本场全部镜头', adopt: '检查通过，载入整场待保存稿', adopted: '整场稿已保存在本机；展开核对后可保存全部镜头设计。' }} />
     {batch && <div>
