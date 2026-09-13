@@ -36,6 +36,11 @@
       config:
         # Leave room for the director model's output reserve and the next tool result.
         thresholdRatio: 0.65
+        modelPolicies:
+          - provider: deepseek-official
+            model: deepseek-flash
+            thresholdRatio: 0.18
+            retainTokens: 32768
 
 - id: qingmu-director-model-tools
   name: '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/model-tools'

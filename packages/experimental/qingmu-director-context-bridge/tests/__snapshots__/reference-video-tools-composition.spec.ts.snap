@@ -1,5 +1,143 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`'compacts a long shipped director sess…' 1`] = `
+{
+  "checkpoint": "Continue the selected shot by rereading its current director design and saved reference draft.",
+  "restored": {
+    "assets": {
+      "items": [
+        {
+          "assetId": "asset_lin",
+          "assetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "label": "参考图片 01",
+          "mediaType": "reference_image",
+        },
+        {
+          "assetId": "asset_voice",
+          "assetSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "durationSec": null,
+          "label": "参考音色 02",
+          "mediaType": "reference_audio",
+        },
+        {
+          "assetId": "asset_cafe",
+          "assetSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "label": "参考图片 03",
+          "mediaType": "reference_image",
+        },
+      ],
+      "page": 1,
+      "pages": 1,
+    },
+    "generationQueued": false,
+    "guidance": "Read saved.directorSource in full. To assemble that design, supply referenceUses:[{bindingToken,purpose}] for every binding, parameters and the current directorSourceSha256; omit promptParts. State only each reference purpose, not a rewritten shot plan or global constraints. The tool renders source aliases in input order and copies generationPrompt exactly once as the final design. Adjacent-shot research is not inserted. Resolve source-design conflicts in the director plan first. Intentionally authored manual promptParts remain editable as a separate mode. Source freshness and copying are not semantic approval. Use saved.frameSha256 and saved.draft.revision (0 when absent) for saving. The page restores the saved version explicitly so an unsaved local edit is not overwritten.",
+    "providerCalls": 0,
+    "referenceLimits": {
+      "durationBasis": "catalog_metadata_reprobed_before_submission",
+      "guidance": "Missing duration is unknown. Choose voices required by this shot and its director design. Several speakers are supported; shorten reference samples when needed, never delete required dialogue or silently substitute a voice to fit a limit.",
+      "maxAudioClips": 5,
+      "maxClipDurationSec": 15,
+      "maxImages": 10,
+      "maxInputVideoPlusOutputSec": 30,
+      "maxTotalAudioSec": 15,
+      "maxTotalVideoSec": 15,
+      "maxVideoClips": 5,
+      "minClipDurationSec": 1,
+      "model": "wan3.0-video",
+    },
+    "saved": {
+      "directorSource": null,
+      "draft": {
+        "frameSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "request": {
+          "bindings": [
+            {
+              "assetId": "asset_lin",
+              "assetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "bindingToken": "lin",
+              "label": "林予",
+            },
+            {
+              "assetId": "asset_voice",
+              "assetSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "bindingToken": "voice",
+              "label": "林予音色",
+            },
+            {
+              "assetId": "asset_cafe",
+              "assetSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "bindingToken": "cafe",
+              "label": "咖啡馆",
+            },
+          ],
+          "frameId": "f",
+          "model": "wan3.0-video",
+          "parameters": {
+            "audio": true,
+            "duration": 8,
+            "prompt_extend": false,
+            "ratio": "16:9",
+            "resolution": "720P",
+          },
+          "promptParts": [
+            {
+              "bindingToken": "lin",
+            },
+            {
+              "text": "在",
+            },
+            {
+              "bindingToken": "cafe",
+            },
+            {
+              "text": "说：“图1也是原对白，不能改。”",
+            },
+          ],
+        },
+        "requestSha256": "b971244110abc7f24ac500d4545d3b81b7df9cd16506b61f98cec69e482ec40b",
+        "revision": 1,
+        "savedAt": "2026-09-09T12:00:00Z",
+      },
+      "frameId": "f",
+      "frameSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "generationQueued": false,
+      "mediaTypes": {
+        "cafe": "reference_image",
+        "lin": "reference_image",
+        "voice": "reference_audio",
+      },
+      "projectId": "p",
+      "providerCalls": 0,
+      "schema": "jason.reference-video-draft.v1",
+    },
+    "schema": "qingmu.native-reference-draft.v1",
+    "scope": {
+      "episodeId": "episode-a",
+      "projectId": "p",
+      "sceneId": "scene-a",
+      "shotId": "f",
+    },
+    "visualInputs": [
+      {
+        "assetId": "asset_lin",
+        "assetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bindingToken": "lin",
+        "reason": "Direct image input is unavailable. Use explicit image inspection with the configured observer; no observer was called by this read.",
+        "status": "unavailable",
+      },
+      {
+        "assetId": "asset_cafe",
+        "assetSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "bindingToken": "cafe",
+        "reason": "Direct image input is unavailable. Use explicit image inspection with the configured observer; no observer was called by this read.",
+        "status": "unavailable",
+      },
+    ],
+  },
+  "writes": 0,
+}
+`;
+
 exports[`assembles reference purposes with the complete current design as the final text: 他保持坐姿，杯子从唇边放低到膝上；近景之外的门口仍有脚步声。 1`] = `
 {
   "generated": false,
@@ -169,143 +307,6 @@ exports[`carries a video reference through the native director read, preview, sa
 }
 `;
 
-exports[`compacts a long shipped director session and rereads the complete saved draft without rewriting it 1`] = `
-{
-  "checkpoint": "Continue the selected shot by rereading its current director design and saved reference draft.",
-  "restored": {
-    "assets": {
-      "items": [
-        {
-          "assetId": "asset_lin",
-          "assetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "label": "参考图片 01",
-          "mediaType": "reference_image",
-        },
-        {
-          "assetId": "asset_voice",
-          "assetSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "durationSec": null,
-          "label": "参考音色 02",
-          "mediaType": "reference_audio",
-        },
-        {
-          "assetId": "asset_cafe",
-          "assetSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-          "label": "参考图片 03",
-          "mediaType": "reference_image",
-        },
-      ],
-      "page": 1,
-      "pages": 1,
-    },
-    "generationQueued": false,
-    "guidance": "Read saved.directorSource in full. To assemble that design, supply referenceUses:[{bindingToken,purpose}] for every binding, parameters and the current directorSourceSha256; omit promptParts. State only each reference purpose, not a rewritten shot plan or global constraints. The tool renders source aliases in input order and copies generationPrompt exactly once as the final design. Adjacent-shot research is not inserted. Resolve source-design conflicts in the director plan first. Intentionally authored manual promptParts remain editable as a separate mode. Source freshness and copying are not semantic approval. Use saved.frameSha256 and saved.draft.revision (0 when absent) for saving. The page restores the saved version explicitly so an unsaved local edit is not overwritten.",
-    "providerCalls": 0,
-    "referenceLimits": {
-      "durationBasis": "catalog_metadata_reprobed_before_submission",
-      "guidance": "Missing duration is unknown. Choose voices required by this shot and its director design. Several speakers are supported; shorten reference samples when needed, never delete required dialogue or silently substitute a voice to fit a limit.",
-      "maxAudioClips": 5,
-      "maxClipDurationSec": 15,
-      "maxImages": 10,
-      "maxInputVideoPlusOutputSec": 30,
-      "maxTotalAudioSec": 15,
-      "maxTotalVideoSec": 15,
-      "maxVideoClips": 5,
-      "minClipDurationSec": 1,
-      "model": "wan3.0-video",
-    },
-    "saved": {
-      "directorSource": null,
-      "draft": {
-        "frameSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-        "request": {
-          "bindings": [
-            {
-              "assetId": "asset_lin",
-              "assetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              "bindingToken": "lin",
-              "label": "林予",
-            },
-            {
-              "assetId": "asset_voice",
-              "assetSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-              "bindingToken": "voice",
-              "label": "林予音色",
-            },
-            {
-              "assetId": "asset_cafe",
-              "assetSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-              "bindingToken": "cafe",
-              "label": "咖啡馆",
-            },
-          ],
-          "frameId": "f",
-          "model": "wan3.0-video",
-          "parameters": {
-            "audio": true,
-            "duration": 8,
-            "prompt_extend": false,
-            "ratio": "16:9",
-            "resolution": "720P",
-          },
-          "promptParts": [
-            {
-              "bindingToken": "lin",
-            },
-            {
-              "text": "在",
-            },
-            {
-              "bindingToken": "cafe",
-            },
-            {
-              "text": "说：“图1也是原对白，不能改。”",
-            },
-          ],
-        },
-        "requestSha256": "b971244110abc7f24ac500d4545d3b81b7df9cd16506b61f98cec69e482ec40b",
-        "revision": 1,
-        "savedAt": "2026-09-09T12:00:00Z",
-      },
-      "frameId": "f",
-      "frameSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-      "generationQueued": false,
-      "mediaTypes": {
-        "cafe": "reference_image",
-        "lin": "reference_image",
-        "voice": "reference_audio",
-      },
-      "projectId": "p",
-      "providerCalls": 0,
-      "schema": "jason.reference-video-draft.v1",
-    },
-    "schema": "qingmu.native-reference-draft.v1",
-    "scope": {
-      "episodeId": "episode-a",
-      "projectId": "p",
-      "sceneId": "scene-a",
-      "shotId": "f",
-    },
-    "visualInputs": [
-      {
-        "assetId": "asset_lin",
-        "assetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "bindingToken": "lin",
-        "reason": "Direct image input is unavailable. Use explicit image inspection with the configured observer; no observer was called by this read.",
-        "status": "unavailable",
-      },
-      {
-        "assetId": "asset_cafe",
-        "assetSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-        "bindingToken": "cafe",
-        "reason": "Direct image input is unavailable. Use explicit image inspection with the configured observer; no observer was called by this read.",
-        "status": "unavailable",
-      },
-    ],
-  },
-  "writes": 0,
-}
-`;
 
 exports[`copies the complete current production design into ordinary saved text and the actual preview 1`] = `
 {

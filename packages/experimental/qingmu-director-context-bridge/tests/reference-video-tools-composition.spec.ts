@@ -206,7 +206,8 @@ function writer(extraShots = 0, image?: { sha256: string; url: string; config?: 
     loseSaveResponse: () => { loseSaveResponse = true } }
 }
 
-async function harness(adapter: MockAdapter, upstream = writer(), images = false, observer?: MockAdapter) {
+async function harness(adapter: MockAdapter, upstream = writer(), images = false, observer?: MockAdapter,
+  route = { provider: 'mock', model: 'mock' }) {
   const presetRoot = fileURLToPath(new URL('../../qingmu-web/agent-presets/', import.meta.url))
   const ctx = new Context(); contexts.push(ctx)
   ctx.baseUrl = pathToFileURL(presetRoot).href + '/'
@@ -238,12 +239,12 @@ async function harness(adapter: MockAdapter, upstream = writer(), images = false
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
   const presets = await ctx.plugin(AgentPresets, { default: 'qingmu-director', roots: [{ path: presetRoot, trust: 'system' }], includeUserRoot: false })
-  ctx.llm.registerAdapter(['mock'], adapter)
+  ctx.llm.registerAdapter([route.provider], adapter)
   if (observer) ctx.llm.registerAdapter(['qingmu-vision'], observer)
   ctx.provide('qingmuYimengRead', upstream.read)
   ctx.provide('qingmuYimengCommand', upstream.command)
   ctx.provide('qingmuImagoMethod', async () => { throw new Error('No method requested by this fixture') })
-  const handle = await ctx.agents.create({ sessionId: SessionId('native-reference'), agentOptions: { provider: 'mock', model: 'mock' },
+  const handle = await ctx.agents.create({ sessionId: SessionId('native-reference'), agentOptions: route,
     meta: { agentPreset: 'qingmu-director' }, setup: async agentCtx => void await ctx.agentPresets.mount(agentCtx, 'qingmu-director') })
   const agent = handle.agent
   agent.session.append('qingmu-director-context/state', { version: 1,
@@ -277,7 +278,12 @@ function saves(upstream: ReturnType<typeof writer>) {
     new URL(url instanceof Request ? url.url : url).pathname.endsWith('/drafts/f') && init?.method === 'POST')
 }
 
-it('compacts a long shipped director session and rereads the complete saved draft without rewriting it', async () => {
+it.each([
+  { title: 'compacts a long shipped director session and rereads the complete saved draft without rewriting it',
+    provider: 'mock', model: 'mock', turns: 7 },
+  { title: 'compacts Flash history earlier and rereads the complete saved draft without rewriting it',
+    provider: 'deepseek-official', model: 'deepseek-flash', turns: 2 },
+])('$title', async ({ provider, model, turns }) => {
   const oldText = 'Earlier creative discussion. '.repeat(14400)
   const checkpoint = 'Continue the selected shot by rereading its current director design and saved reference draft.'
   const historyResponse = textResponse('Recorded historical discussion.')
@@ -285,7 +291,7 @@ it('compacts a long shipped director session and rereads the complete saved draf
     { type: 'block-end', index: 0, block: { type: 'text', text: oldText } },
     { type: 'finish', reason: { kind: 'stop' } })
   const adapter = new MockAdapter([
-    ...Array.from({ length: 7 }, () => historyResponse),
+    ...Array.from({ length: turns }, () => historyResponse),
     (options) => {
       expect(JSON.stringify(options.messages.at(-1))).toContain('acting as a compaction engine')
       return textResponse(checkpoint)
@@ -294,10 +300,10 @@ it('compacts a long shipped director session and rereads the complete saved draf
     toolCallResponse('after-compact-draft', 'qingmu_read_reference_draft', { page: 1 }),
     textResponse('已恢复完整设计和已存生成稿，未重复保存或生成。'),
   ])
-  vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'mock', id: 'mock', name: 'mock',
+  vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider, id: model, name: model,
     context: { contextWindow: 1048576 } })
-  const h = await harness(adapter)
-  for (let turn = 0; turn < 7; turn += 1) await h.run(true)
+  const h = await harness(adapter, writer(), false, undefined, { provider, model })
+  for (let turn = 0; turn < turns; turn += 1) await h.run(true)
   expect(h.agent.session.events.some(event => event.type === 'compaction/summary')).toBe(false)
   await h.run(true)
 
@@ -306,18 +312,19 @@ it('compacts a long shipped director session and rereads the complete saved draf
   expect(JSON.stringify(summaries[0])).toContain(checkpoint)
   expect(h.agent.session.events.some(event => event.type === 'assistant/message'
     && event.data.message.content.some(part => part.type === 'text' && part.text === oldText))).toBe(true)
-  expect(adapter.requests).toHaveLength(11)
-  expect(JSON.stringify(adapter.requests[8]?.messages)).toContain(checkpoint)
-  const historyBefore = adapter.requests[7]!.messages.filter(message => message.content.some(part => part.type === 'text' && part.text === oldText)).length
-  const historyAfter = adapter.requests[8]!.messages.filter(message => message.content.some(part => part.type === 'text' && part.text === oldText)).length
-  expect(historyAfter).toBeLessThan(historyBefore)
+  expect(adapter.requests).toHaveLength(turns + 4)
+  expect(JSON.stringify(adapter.requests[turns + 1]?.messages)).toContain(checkpoint)
+  const historyBefore = adapter.requests[turns]!.messages.filter(message => message.content.some(part => part.type === 'text' && part.text === oldText)).length
+  const historyAfter = adapter.requests[turns + 1]!.messages.filter(message => message.content.some(part => part.type === 'text' && part.text === oldText)).length
+  expect(historyBefore + historyAfter).toBe(turns)
+  expect(historyAfter).toBeLessThan(turns)
   const restored = result(h.agent, 'after-compact-draft')
   expect(restored).toMatchObject({ error: false })
   const restoredBody: unknown = JSON.parse(restored.text)
   expect(restoredBody).toMatchObject({ saved: { draft: { request: savedDraft.draft.request } } })
   expect(result(h.agent, 'after-compact-plan').error).toBe(false)
   expect(saves(h.upstream)).toHaveLength(0)
-  expect({ checkpoint, restored: restoredBody,
+  if (provider === 'mock') expect({ checkpoint, restored: restoredBody,
     writes: saves(h.upstream).length }).toMatchSnapshot()
 })
 

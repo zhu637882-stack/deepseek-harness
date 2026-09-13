@@ -20,7 +20,7 @@ IMAGO 方法适配器优先从 Cordis 非空白的显式 `config.coreRoot` 解�
 
 预设复用原生技能文件提供器，只加载包内目录，并挂载原生 `skill` 工具。Web 底座将技能发现交给预设；此创作预设不扫描其他项目的已安装技能。青木自写的六部门入口统筹，`open-film-writer` 与 `open-film-camera` 提供专项方法，原有资料作为辅助。`character-asset`、`scene-asset`、`prop-asset` 补充生成前的人物身份、空间布局、材质、比例与交互校验。[来源清单](agent-presets/qingmu-director/skills/sources.json) 记录仓库提交、上游哈希和适配后哈希；完整包含文字参考与模板，排除的二进制案例逐项列明。[资料读取器](../qingmu-director-context-bridge/src/skill-resources.ts) 校验包内哈希并明确分页，不静默截断。读到方法不等于已保存导演设计或已验证创作质量。
 
-预设在独立会话组中挂载原生 `compaction-basic` 引擎，共用宿主的 token meter。当输入达到实际路由模型上下文容量的 65% 时自动摘要，为输出与工具结果留出空间。原始持久会话记录保留，最近对话原文继续进入上下文；Writer 中已保存的设计和草稿不变。导演在生产前重新读取完整的当前创作来源。不挂载工具结果截短组件。摘要失败仍作为运行错误报告，不表示恢复成功。
+预设在独立会话组中挂载原生 `compaction-basic` 引擎，共用宿主的 token meter。`deepseek-official/deepseek-flash` 达到上下文容量的 18% 时自动摘要（按已配置的百万 token 容量为 180,000 token），最近对话保留预算为 32,768 token；其他模型路由保留 65% 触发比例。这些是压缩触发与保留目标，并非请求硬上限；不可拆分的完整单元和当前来源读取可能超过它们。原始持久会话记录保留，Writer 中已保存的设计和草稿不变。导演在生产前重新读取完整的当前创作来源。不挂载工具结果截短组件。摘要失败仍作为运行错误报告，不表示恢复成功。
 
 ## 模型体验
 
