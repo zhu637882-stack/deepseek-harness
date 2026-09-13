@@ -74,6 +74,19 @@ it('projects versioned image/audio/video metadata from the current project asset
   expect(JSON.stringify(result)).not.toContain('/private')
 })
 
+it('exposes positive media durations and keeps missing or malformed durations unknown', async () => {
+  const durations = [8.4985, 6.989208, 0, -1, null, '7', undefined, 21]
+  const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json({ page: 1, page_size: 200, pages: 1,
+    items: durations.map((duration_sec, i) => ({ id: `asset_${i}`, project_id: 'p', asset_type: i === 7 ? 'video' : 'audio',
+      sha256: 'a'.repeat(64), duration_sec })) }))
+  const handler = createYimengReadHandler({}, { fetch, readToken: () => 'fixture' })
+  const result = await handler('referenceVideoAssets', { projectId: 'p', page: 1 }, signal())
+  expect(result.ok).toBe(true)
+  if (!result.ok) throw new Error('expected catalog')
+  const value = result.value as { items: { durationSec?: number }[] }
+  expect(value.items.map(item => item.durationSec)).toEqual([8.4985, 6.989208, undefined, undefined, undefined, undefined, undefined, 21])
+})
+
 it('retains original image staging without leaking authorization or filling absent history', async () => {
   const layout = { basis: '导演布置', coordinateFrame: '米制', objects: [{ id: 'bench', center: [0, 2, 0.5], size: [2, 1, 1] }] }
   const camera = { position: [0, -3, 1.6], target: [0, 2, 1], verticalFov: 50 }

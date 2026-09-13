@@ -1,7 +1,7 @@
 /** Safe, actionable messages for known read-only reference readiness failures. */
 const messages = new Map<string, string>([
   ['409:reference_video_director_source_conflict', '导演设计或全片设定已更新。请读取当前设计，整理生成稿并保存后再核价；原稿仍可恢复编辑。'],
-  ['422:reference_video_material_not_prepared', '请先保存此镜头，再准备引用素材；完成后可预览实际阿里请求。'],
+  ['422:reference_video_material_not_prepared', '引用素材尚未准备。请在精确引用面板读取准备状态并完成素材准备，再预览实际请求；已保存的草稿仍保留。'],
   ['422:reference_video_material_expired', '引用素材的临时有效期已结束，请重新准备后再预览。'],
   ['422:reference_video_material_unknown', '素材上传结果待确认，请读取准备状态；当前不会自动重传。'],
   ['422:reference_video_material_uploading', '素材正在准备，请稍后读取准备状态。'],

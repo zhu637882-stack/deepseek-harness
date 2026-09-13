@@ -184,6 +184,7 @@ exports[`compacts a long shipped director session and rereads the complete saved
         {
           "assetId": "asset_voice",
           "assetSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "durationSec": null,
           "label": "参考音色 02",
           "mediaType": "reference_audio",
         },
@@ -200,6 +201,19 @@ exports[`compacts a long shipped director session and rereads the complete saved
     "generationQueued": false,
     "guidance": "Read saved.directorSource in full. To assemble that design, supply referenceUses:[{bindingToken,purpose}] for every binding, parameters and the current directorSourceSha256; omit promptParts. State only each reference purpose, not a rewritten shot plan or global constraints. The tool renders source aliases in input order and copies generationPrompt exactly once as the final design. Adjacent-shot research is not inserted. Resolve source-design conflicts in the director plan first. Intentionally authored manual promptParts remain editable as a separate mode. Source freshness and copying are not semantic approval. Use saved.frameSha256 and saved.draft.revision (0 when absent) for saving. The page restores the saved version explicitly so an unsaved local edit is not overwritten.",
     "providerCalls": 0,
+    "referenceLimits": {
+      "durationBasis": "catalog_metadata_reprobed_before_submission",
+      "guidance": "Missing duration is unknown. Choose voices required by this shot and its director design. Several speakers are supported; shorten reference samples when needed, never delete required dialogue or silently substitute a voice to fit a limit.",
+      "maxAudioClips": 5,
+      "maxClipDurationSec": 15,
+      "maxImages": 10,
+      "maxInputVideoPlusOutputSec": 30,
+      "maxTotalAudioSec": 15,
+      "maxTotalVideoSec": 15,
+      "maxVideoClips": 5,
+      "minClipDurationSec": 1,
+      "model": "wan3.0-video",
+    },
     "saved": {
       "directorSource": null,
       "draft": {

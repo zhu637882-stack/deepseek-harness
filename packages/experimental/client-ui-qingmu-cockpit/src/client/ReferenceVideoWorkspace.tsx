@@ -11,6 +11,7 @@ import { usePrivateReferencePreview, type PrivateReferencePreviewPort } from './
 import { ReferenceVideoRuns } from './ReferenceVideoRuns.tsx'
 import { inheritReferenceBindings } from './reference-draft-inheritance.ts'
 import { ReferenceImageDesign } from './ReferenceImageDesign.tsx'
+import { ReferenceDurationSummary } from './ReferenceDurationSummary.tsx'
 
 /** One shot's local reference draft; previewing never queues paid work. */
 export interface ReferenceVideoWorkspaceProps {
@@ -486,7 +487,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
                 ? <video src={asset.browserUrl} controls preload="metadata" aria-label={asset.label} />
                 : <audio src={asset.browserUrl} controls preload="none" aria-label={asset.label} />)}
             {!asset.browserUrl && asset.mediaType === 'reference_image' && <div className={css.privateImage}>私有原图</div>}
-            <p>{asset.label}</p>
+            <p>{asset.label}{asset.mediaType !== 'reference_image' && <> · {asset.durationSec === undefined ? '时长未知' : `${asset.durationSec.toFixed(3)} 秒`}</>}</p>
             <ReferenceImageDesign asset={asset} />
             <div className={css.assetActions}>
               {(asset.localReferenceScope !== undefined || asset.localVoiceScope !== undefined) && asset.browserUrl === '' && <button type="button"
@@ -507,9 +508,14 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
               ? <div role="alert"><p>这份本地参考暂时无法读取。</p><button type="button" onClick={() => { setPreviewRetry(value => value + 1) }}>重新读取原图</button></div>
               : <p>正在读取这份私有参考。</p>}
         </section>}
+        <ReferenceDurationSummary assets={chosen.map(item => exactAsset(item.assetId, item.assetSha256) ?? item)}
+          outputDuration={parameters.duration} />
         {chosen.length > 0 && <ol className={css.bindings} aria-label="引用顺序">
           {chosen.map((item, index) => <li key={item.bindingToken}>
             <strong>{aliases.get(item.bindingToken)} · {item.label}</strong>
+            {(item.mediaType === 'reference_audio' || item.mediaType === 'reference_video') && <small>
+              {(exactAsset(item.assetId, item.assetSha256) ?? item).durationSec === undefined ? '时长未知' : `${(exactAsset(item.assetId, item.assetSha256) ?? item).durationSec?.toFixed(3)} 秒`}
+            </small>}
             <ReferenceImageDesign asset={exactAsset(item.assetId, item.assetSha256)} />
             {(() => {
               const material = currentMaterials?.materials.find(candidate => candidate.bindingToken === item.bindingToken

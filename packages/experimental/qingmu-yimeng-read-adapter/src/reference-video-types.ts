@@ -85,6 +85,8 @@ export interface ReferenceVideoAsset {
   readonly label: string
   readonly mediaType: 'reference_image' | 'reference_audio' | 'reference_video'
   readonly browserUrl: string
+  /** Catalog duration for planning; absence is unknown, and submission re-probes the source bytes. */
+  readonly durationSec?: number
   /** Frozen generation intent, not a claim about the actual pixels or current scene design. */
   readonly imageDesign?: import('./reference-image-design.ts').ReferenceImageDesign
   /** Local candidate bytes remain private and can only be read through this owner scope. */

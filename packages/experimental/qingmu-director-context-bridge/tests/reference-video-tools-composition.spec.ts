@@ -587,6 +587,27 @@ it('discards a downloaded image when the bound shot changes during the read', as
   expect(JSON.stringify(h.agent.session.events.filter(event => event.type === 'tool/result'))).not.toContain('"attachmentId"')
 })
 
+it('gives the director recorded audio durations and total limits without assuming one speaker', async () => {
+  const adapter = new MockAdapter([toolCallResponse('duration-read', 'qingmu_read_reference_draft', { page: 1 }), textResponse('Read only')])
+  const upstream = writer()
+  const original = upstream.fetch.getMockImplementation()!
+  upstream.fetch.mockImplementation(async (...args) => {
+    const response = await original(...args)
+    if (new URL(args[0] instanceof Request ? args[0].url : args[0]).pathname.endsWith('/assets')) {
+      const value = await response.json()
+      value.items.find((item: { id: string }) => item.id === 'asset_voice').duration_sec = 8.4985
+      return Response.json(value)
+    }
+    return response
+  })
+  const h = await harness(adapter, upstream); await h.run(true)
+  const value = JSON.parse(result(h.agent, 'duration-read').text)
+  expect(value.assets.items.find((item: { assetId: string }) => item.assetId === 'asset_voice')).toMatchObject({ durationSec: 8.4985 })
+  expect(value.referenceLimits).toMatchObject({ maxAudioClips: 5, maxTotalAudioSec: 15, maxTotalVideoSec: 15 })
+  expect(value.referenceLimits.guidance).toContain('Several speakers are supported')
+  expect(value.generationQueued).toBe(false)
+})
+
 it('saves a full director plan through the native preset and Writer adapter, then continues the scoped turn', async () => {
   const adapter = new MockAdapter([
     toolCallResponse('design-read', 'qingmu_read_director_plan', {}),

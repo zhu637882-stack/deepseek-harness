@@ -20,6 +20,7 @@ import { readDraftImages, readImageInputs, type DraftImageInput } from './refere
 // Keep catalog pages small; the exact frozen description accompanies inspection of one image.
 function imageCatalogEntry(item: ReferenceVideoAsset) {
   return { assetId: item.assetId, assetSha256: item.assetSha256, label: item.label, mediaType: item.mediaType,
+    ...(item.mediaType === 'reference_image' ? {} : { durationSec: item.durationSec ?? null }),
     ...(item.imageDesign ? { originalView: item.imageDesign.view,
       sceneName: item.imageDesign.imageStage?.sceneName || item.imageDesign.sceneContext?.name || '',
       savedImageDesignAvailable: true } : {}) }
@@ -316,6 +317,10 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
         saved, visualInputs,
         assets: { page: catalog.page, pages: catalog.pages,
           items: catalog.items.map(imageCatalogEntry) },
+        referenceLimits: { model: 'wan3.0-video', maxImages: 10, maxAudioClips: 5, maxVideoClips: 5,
+          minClipDurationSec: 1, maxClipDurationSec: 15, maxTotalAudioSec: 15, maxTotalVideoSec: 15,
+          maxInputVideoPlusOutputSec: 30, durationBasis: 'catalog_metadata_reprobed_before_submission',
+          guidance: 'Missing duration is unknown. Choose voices required by this shot and its director design. Several speakers are supported; shorten reference samples when needed, never delete required dialogue or silently substitute a voice to fit a limit.' },
         providerCalls: 0, generationQueued: false,
         guidance: 'Read saved.directorSource in full. To assemble that design, supply referenceUses:[{bindingToken,purpose}] for every binding, parameters and the current directorSourceSha256; omit promptParts. State only each reference purpose, not a rewritten shot plan or global constraints. The tool renders source aliases in input order and copies generationPrompt exactly once as the final design. Adjacent-shot research is not inserted. Resolve source-design conflicts in the director plan first. Intentionally authored manual promptParts remain editable as a separate mode. Source freshness and copying are not semantic approval. Use saved.frameSha256 and saved.draft.revision (0 when absent) for saving. The page restores the saved version explicitly so an unsaved local edit is not overwritten.',
       })

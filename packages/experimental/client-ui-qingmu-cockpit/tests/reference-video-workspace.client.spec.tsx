@@ -133,6 +133,36 @@ async function chooseAll() {
   buttons.forEach(button => fireEvent.click(button))
 }
 
+it('shows exact duration totals before preparation and retains them when restoring a saved draft', async () => {
+  const { port } = mount({ assets: [assets[0]!,
+    { ...assets[2]!, durationSec: 8.4985 },
+    { ...assets[2]!, assetId: 'voice_2', assetSha256: 'd'.repeat(64), label: '第二音色', durationSec: 6.989208 },
+  ] })
+  await chooseAll()
+  const summary = screen.getByLabelText('引用时长核对')
+  expect(summary.textContent).toContain('15.488 秒 / 15 秒')
+  expect(summary.querySelector('[role="alert"]')?.textContent).toContain('保留导演要求的说话人和对白')
+  expect(port.prepareReferenceVideoMaterial).not.toHaveBeenCalled()
+  expect(port.queueReferenceVideo).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByText('保存引用草稿'))
+  await waitFor(() => { expect(port.saveReferenceVideoDraft).toHaveBeenCalledTimes(1) })
+  fireEvent.click(screen.getByText('恢复已存草稿（替换当前试排）'))
+  await waitFor(() => { expect(port.referenceVideoDraft).toHaveBeenCalledTimes(2) })
+  expect(screen.getByLabelText('引用时长核对').textContent).toContain('15.488 秒 / 15 秒')
+})
+
+it('does not count unknown duration as a complete total and updates video limits with output timing', async () => {
+  mount({ assets: [{ ...assets[2]! }, { ...assets[0]!, mediaType: 'reference_video', durationSec: 12 }] })
+  await chooseAll()
+  expect(screen.getByLabelText('引用时长核对').textContent).toContain('1 段时长未知')
+  fireEvent.change(screen.getByLabelText('时长（秒）'), { target: { value: 19 } })
+  const summary = screen.getByLabelText('引用时长核对')
+  expect(summary.textContent).toContain('31.000 秒 / 30 秒')
+  expect(summary.querySelector('[role="alert"]')).toBeTruthy()
+  fireEvent.change(screen.getByLabelText('时长（秒）'), { target: { value: 18 } })
+  expect(summary.querySelector('[role="alert"]')).toBeNull()
+})
+
 it('loads assets explicitly, preserves literal text and submits stable tokens after reorder', async () => {
   const { port } = mount()
   expect(port.referenceVideoAssets).not.toHaveBeenCalled()

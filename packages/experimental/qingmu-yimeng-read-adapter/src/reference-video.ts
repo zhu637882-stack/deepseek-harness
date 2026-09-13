@@ -276,9 +276,12 @@ export function normalizeReferenceVideoAssets(
       && a.role === 'local_voice_candidate' && ownerType === 'actor' && /^[A-Za-z0-9_.-]{1,256}$/u.test(ownerId)
       ? { targetId: ownerId } : undefined
     const imageDesign = a.asset_type === 'image' ? referenceImageDesign(a.generation_config_json ?? a.generation_config) : undefined
+    const durationSec = a.asset_type !== 'image' && typeof a.duration_sec === 'number'
+      && Number.isFinite(a.duration_sec) && a.duration_sec > 0 ? a.duration_sec : undefined
     items.push({ assetId: a.id, assetSha256: a.sha256, label: localVoiceScope === undefined ? displayLabel : `${displayLabel} · 音色`,
       mediaType: a.asset_type === 'image' ? 'reference_image' : a.asset_type === 'audio' ? 'reference_audio' : 'reference_video', browserUrl,
       ...(imageDesign ? { imageDesign } : {}),
+      ...(durationSec === undefined ? {} : { durationSec }),
       ...(localReferenceScope === undefined ? {} : { localReferenceScope }),
       ...(localVoiceScope === undefined ? {} : { localVoiceScope }) })
   }

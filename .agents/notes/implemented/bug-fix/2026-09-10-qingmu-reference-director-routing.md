@@ -29,3 +29,5 @@ The reference editor and director assistant share one saved draft. The user reta
 ## Testing
 
 The runnable keyless native example snapshots the actual preset and required-tool output. The real preset/loop composition checks model-visible routing, preserves quoted dialogue during a performance edit, and verifies that each missing reference tool prevents mounted status without I/O. Existing regressions cover stale revisions, shot switches and recovery after an uncertain save. External model replies and Writer HTTP in that composition remain scripted; these checks do not establish autonomous model choice, media quality or paid generation.
+
+The native catalog also carries recorded audio/video durations and explicit Wan 3 reference limits. Unknown duration stays unknown. The director can plan multiple voice samples within the total duration allowance; no single-speaker rule or automatic removal of required dialogue is introduced. The browser displays the same duration metadata, while authoritative byte inspection still governs preparation.
