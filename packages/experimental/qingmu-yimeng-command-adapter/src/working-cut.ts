@@ -26,6 +26,8 @@ export interface WorkingAudioCue {
   readonly gainDb: number
   readonly fadeInSec: number
   readonly fadeOutSec: number
+  /** Explicit repeated sound bed, crossfaded at each source join; seconds exclude any room tail. */
+  readonly loop?: { readonly durationSec: number; readonly crossfadeSec: number }
   /** Optional local stem extraction before cue trimming; no provider call. */
   readonly sourceAudioMode?: 'original' | 'speech_effects' | 'speech' | 'effects' | 'music'
   /** Optional relative dB changes; film times strictly increase within this cue. */

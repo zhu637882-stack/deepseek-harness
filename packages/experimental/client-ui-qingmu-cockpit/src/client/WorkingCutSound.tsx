@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import type { WorkingAudioCue, WorkingCutState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import css from './WorkingCut.module.css'
+import { soundCueDuration, validSoundLoop } from './working-sound-loop.ts'
 
 /** Edit sound sources and cue ranges in assembled-film seconds. */
 export function WorkingCutSound({ library, presets = [], cues, total, disabled, plan,
@@ -68,7 +69,7 @@ export function WorkingCutSound({ library, presets = [], cues, total, disabled, 
     </div>)}
     {cues.map((cue, index) => {
       const source = library.find(a => a.assetId === cue.assetId)
-      const duration = cue.outSec - cue.inSec + (cue.space?.tailSec ?? 0)
+      const duration = soundCueDuration(cue)
       const response = library.find(a => a.assetId === cue.space?.assetId)
       const spaceInvalid = cue.space && (!response || response.sha256 !== cue.space.sha256 || response.duration > 10
         || response.usage === 'video_audio'
@@ -79,7 +80,7 @@ export function WorkingCutSound({ library, presets = [], cues, total, disabled, 
         !Number.isFinite(point.timeSec) || !Number.isFinite(point.gainDb)
         || point.timeSec < cue.startSec || point.timeSec > cue.startSec + duration
         || point.gainDb < -60 || point.gainDb > 6 || (i > 0 && point.timeSec <= (points[i - 1]?.timeSec ?? -1)))
-      const invalid = spaceInvalid || !source || source.usage === 'impulse_response' || cue.startSec < 0 || cue.inSec < 0
+      const invalid = !validSoundLoop(cue) || spaceInvalid || !source || source.usage === 'impulse_response' || cue.startSec < 0 || cue.inSec < 0
         || cue.outSec <= cue.inSec || cue.outSec > source.duration
         || cue.startSec + duration > total + .001 || cue.fadeInSec + cue.fadeOutSec > duration
       const number = (field: 'startSec' | 'inSec' | 'outSec' | 'gainDb' | 'fadeInSec' | 'fadeOutSec', label: string, min: number, max: number) =>
@@ -106,6 +107,27 @@ export function WorkingCutSound({ library, presets = [], cues, total, disabled, 
         {number('startSec', '成片起点秒', 0, total)}{number('gainDb', '音量 dB', -60, 6)}
         {number('fadeInSec', '淡入秒', 0, duration)}{number('fadeOutSec', '淡出秒', 0, duration)}
         <details><summary>裁剪声音素材</summary>{number('inSec', '素材起点秒', 0, source?.duration ?? 0)}{number('outSec', '素材终点秒', 0, source?.duration ?? 0)}</details>
+        <details open={!!cue.loop}><summary>循环铺声</summary>
+          <p>将裁好的声音段连续铺到指定时长，每次接头交叉淡化，切镜时不重启。适合可重复的环境底声或音乐段；会重复段内全部声音，请避开不应重复的台词和动作。</p>
+          <label><input aria-label={`音轨 ${index + 1} 循环铺声`} type="checkbox" checked={!!cue.loop} onChange={(e) => {
+            if (e.target.checked) update(index, { loop: { durationSec: total - cue.startSec - (cue.space?.tailSec ?? 0),
+              crossfadeSec: Math.min(.5, (cue.outSec - cue.inSec) / 4) } })
+            else onChange(cues.map((current, i) => {
+              if (i !== index) return current
+              const { loop: _removed, ...unchanged } = current
+              return unchanged
+            }))
+          }} />启用循环铺声</label>
+          {cue.loop && <>
+            <label>铺声时长秒<input aria-label={`音轨 ${index + 1} 铺声时长秒`} type="number" min={cue.outSec - cue.inSec} max={total - cue.startSec - (cue.space?.tailSec ?? 0)} step="0.1" value={cue.loop.durationSec} onChange={(e) => {
+              if (cue.loop) update(index, { loop: { ...cue.loop, durationSec: Number(e.target.value) } })
+            }} /></label>
+            <label>接头交叉淡化秒<input aria-label={`音轨 ${index + 1} 接头交叉淡化秒`} type="number" min="0.001" max={(cue.outSec - cue.inSec) / 2} step="0.1" value={cue.loop.crossfadeSec} onChange={(e) => {
+              if (cue.loop) update(index, { loop: { ...cue.loop, crossfadeSec: Number(e.target.value) } })
+            }} /></label>
+            <p>淡入、淡出和音量变化作用于整条铺声；空间尾音接在铺声结束后。交叉淡化需大于零、小于素材段的一半。循环不会自动匹配音乐节拍，请回听接头。</p>
+          </>}
+        </details>
         <details open={!!cue.space}><summary>空间混响</summary>
           <p>给本轨添加房间、走廊等空间的声学响应，原声保留。导入空间响应文件（IR，单声道或双声道，最长 10 秒），再选择；普通对白、音乐和环境录音不能代替 IR。</p>
           <label>空间响应<select aria-label={`音轨 ${index + 1} 空间响应`} value={cue.space?.assetId ?? ''} onChange={(e) => {

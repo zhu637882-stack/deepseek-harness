@@ -8,6 +8,39 @@ const state: WorkingCutState = { schema:'qingmu-working-cut-v1',projectId:'p',ep
   cuts:[],providerCalls:0,humanApprovalChanged:false }
 afterEach(() => { cleanup();localStorage.clear() })
 
+it('explicitly loops a short sound across the film, validates overlap and recovers the saved bed', async () => {
+  let server: WorkingCutState = { ...state, audioLibrary: [
+    { assetId: 'room', sha256: 'b'.repeat(64), name: '室内底声', duration: 2, url: '' },
+  ] }
+  const save = vi.fn(async ({ command }: { command: WorkingCutCommand }) => {
+    server = { ...server, revision: 1, cuts: [{ ...command, version: 1, revisionId: 'r', taskId: null,
+      status: 'NotQueued', errorCode: null, assetId: null, sha256: null, url: '' }] }
+    return server
+  })
+  const port = { readWorkingCut: vi.fn(async () => server), saveWorkingCut: save,
+    renderWorkingCut: vi.fn(), reviewWorkingCutSound: vi.fn(), uploadWorkingCutAudio: vi.fn() }
+  let view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
+  fireEvent.click(await screen.findByRole('button', { name: '加入音轨' }))
+  expect(screen.getByRole('checkbox', { name: '音轨 1 循环铺声' })).toHaveProperty('checked', false)
+  fireEvent.click(screen.getByRole('checkbox', { name: '音轨 1 循环铺声' }))
+  expect(screen.getByRole('spinbutton', { name: '音轨 1 铺声时长秒' })).toHaveProperty('value', '15')
+  fireEvent.change(screen.getByRole('spinbutton', { name: '音轨 1 接头交叉淡化秒' }), { target: { value: '1' } })
+  expect(screen.getByRole('button', { name: '保存剪辑草稿' })).toHaveProperty('disabled', true)
+  fireEvent.change(screen.getByRole('spinbutton', { name: '音轨 1 接头交叉淡化秒' }), { target: { value: '.4' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存剪辑草稿' }))
+  await waitFor(() => { expect(save).toHaveBeenCalledTimes(1) })
+  expect(save.mock.calls[0]?.[0].command.audioCues?.[0]?.loop).toEqual({ durationSec: 15, crossfadeSec: .4 })
+  expect(port.renderWorkingCut).not.toHaveBeenCalled()
+  view.unmount()
+  view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
+  expect(await screen.findByRole('spinbutton', { name: '音轨 1 铺声时长秒' })).toHaveProperty('value', '15')
+  fireEvent.click(screen.getByRole('checkbox', { name: '音轨 1 循环铺声' }))
+  fireEvent.click(screen.getByRole('button', { name: '保存剪辑草稿' }))
+  await waitFor(() => { expect(save).toHaveBeenCalledTimes(2) })
+  expect(save.mock.calls[1]?.[0].command.audioCues?.[0]).not.toHaveProperty('loop')
+  view.unmount()
+})
+
 it('starts from the chosen Take, leaves unchosen shots out and preserves a saved edit', async () => {
   const shot = state.shots[0]!
   let server: WorkingCutState = { ...state, shots: [

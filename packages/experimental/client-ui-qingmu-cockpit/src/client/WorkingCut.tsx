@@ -6,6 +6,7 @@ import css from './WorkingCut.module.css'
 import { WorkingCutSound } from './WorkingCutSound.tsx'
 import { WorkingCutReframe } from './WorkingCutReframe.tsx'
 import { WorkingCutSoundReview } from './WorkingCutSoundReview.tsx'
+import { soundCueDuration, validSoundLoop } from './working-sound-loop.ts'
 
 /** Choose generated takes, trim their source ranges and render with native sound.
  * @param props - Active project/episode and authenticated command port.
@@ -94,9 +95,9 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting }: {
   const audioValid = audioCues.every((c) => {
     const source = soundSources.find(a => a.assetId === c.assetId)
     const response = state?.audioLibrary?.find(a => a.assetId === c.space?.assetId)
-    const audibleDuration = c.outSec - c.inSec + (c.space?.tailSec ?? 0)
+    const audibleDuration = soundCueDuration(c)
     const points = c.gainPoints ?? []
-    return source && source.usage !== 'impulse_response' && [c.startSec, c.inSec, c.outSec, c.gainDb, c.fadeInSec, c.fadeOutSec].every(Number.isFinite)
+    return validSoundLoop(c) && source && source.usage !== 'impulse_response' && [c.startSec, c.inSec, c.outSec, c.gainDb, c.fadeInSec, c.fadeOutSec].every(Number.isFinite)
       && c.startSec >= 0
       && c.inSec >= 0 && c.outSec > c.inSec && c.outSec <= source.duration
       && c.startSec + audibleDuration <= total + .001 && c.gainDb >= -60 && c.gainDb <= 6
