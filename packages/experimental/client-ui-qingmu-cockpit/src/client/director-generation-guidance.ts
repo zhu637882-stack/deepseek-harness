@@ -1,0 +1,2 @@
+/** Shared authoring instruction for scene planning and existing-shot reconciliation. */
+export const generationContextGuidance = '为每镜在 directorPlan.generationContext 写出本镜需要继承的全片设定：先完整阅读剧本、世界与例外、场景布局、主体身份及各部门设计，再将与本段有关的时代和例外、外观材质、空间关系、光影色调、表演与声音原则具体落实；保留本镜需要的专项方法，不照抄其他段的动作、对白和完整剧情顺序。这个字段由导演主动整理，不由程序按关键词删减；它非空时，生成使用它替代未分镜的全片方案，完整全片方案仍保留在导演研究来源。逐镜动作、起止状态、段内切镜、运镜、逐字对白和声音仍完整写在原执行字段并一同生成；不把它们浓缩成摘要，也不把待定估计说成观察事实。核对继承内容与全部相关来源，避免遗漏或冲突；旧稿缺少该字段时先整理保存，再读取新来源。'

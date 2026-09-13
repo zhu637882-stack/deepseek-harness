@@ -6,6 +6,8 @@ Native frame capture resolves an omitted runId from the current project shot's c
 
 Director plans can retain adjoining-segment edit notes in editorialContext. The video source excludes that explicit field, preserves internal coverage, and the working-cut read returns the notes for editing. Legacy mixed coverage requires deliberate revision, not keyword removal.
 
+A nonempty generationContext applies film, world, asset and department decisions to the current segment. The director authors it from the complete sources; production uses it instead of the unscoped film bible while preserving every other current-shot execution field, dialogue and project style. Research retains the complete bible and its freshness checks. Omission or clearing retains legacy compilation. This does not validate the authored context's completeness or image fidelity.
+
 Saved reference-draft reads now deliver the bound images on the requested catalog page directly to image-capable directors. Each visual input retains its binding token, asset ID, source SHA and original image design. Missing pages, stale bindings, failed media reads and attachment limits remain explicit; they do not erase the editable draft or silently choose replacements. Unbound images are not loaded. Text-only directors keep metadata and may explicitly request the configured observer; this read never calls that observer. Video metadata remains unobserved until actual frames are inspected. Historical metadata-only results remain replayable.
 
 For a first assembly, the director reads selectedAssetId from the shooting choice and does not silently substitute the latest candidate. Saved editorial choices remain authoritative for that cut.
