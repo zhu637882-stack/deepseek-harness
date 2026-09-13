@@ -325,6 +325,48 @@ const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA
 const imageSha = createHash('sha256').update(imageBytes).digest('hex')
 const imageUrl = `http://127.0.0.1:8115/api/media/media_cafe?signature=${'e'.repeat(64)}&expires=9999999999`
 const imageArgs = { page: 1, assetId: 'asset_cafe', assetSha256: imageSha }
+it('delivers saved bound image pixels with the draft through the shipped director loop', async () => {
+  const fixture = structuredClone({ request, response, savedDraft })
+  fixture.savedDraft.draft.request = { ...fixture.savedDraft.draft.request,
+    bindings: fixture.savedDraft.draft.request.bindings.map(binding => binding.assetId === 'asset_cafe'
+      ? { ...binding, assetSha256: imageSha } : binding) }
+  fixture.savedDraft.draft.requestSha256 = sha(fixture.savedDraft.draft.request)
+  const adapter = new MockAdapter([toolCallResponse('draft-images', 'qingmu_read_reference_draft', { page: 1 }),
+    textResponse('The attached scene is available for visual comparison; the unavailable portrait remains unobserved.')])
+  vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'mock', id: 'mock', name: 'mock', inputModalities: ['text', 'image'] })
+  const media = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(imageBytes, { headers: { 'content-type': 'image/png' } }))
+  const original = { name: 'Library', imagePrompt: 'Closed door behind the return desk', view: 'Return desk looking south' }
+  const h = await harness(adapter, writer(0, { sha256: imageSha, url: imageUrl,
+    config: { anchor: { schema: 'qingmu.asset-image-authorization.v1', assetDesign: original } } }, fixture), true)
+  await h.run(true)
+  const read = result(h.agent, 'draft-images')
+  expect(read.error, read.text).toBe(false)
+  const value = JSON.parse(read.text) as { saved: unknown; visualInputs: import('../src/reference-draft-images.ts').DraftImageInput[] }
+  const image = value.visualInputs.find(input => input.bindingToken === 'cafe')!
+  expect(image).toMatchObject({ assetId: 'asset_cafe', assetSha256: imageSha, status: 'attached', originalImageDesign: original })
+  expect(value.visualInputs.find(input => input.bindingToken === 'lin')).toMatchObject({ status: 'unavailable' })
+  expect(value.visualInputs.some(input => input.bindingToken === 'voice')).toBe(false)
+  expect(JSON.stringify(adapter.requests.at(-1)?.messages)).toContain(image.attachment!.attachmentId)
+  expect(media).toHaveBeenCalledOnce()
+  expect(saves(h.upstream)).toHaveLength(0)
+  expect(value.saved).toMatchObject({ draft: { request: fixture.savedDraft.draft.request } })
+  expect(value.visualInputs).toMatchSnapshot()
+})
+
+it('keeps a mismatched bound image unavailable without replacing the saved version', async () => {
+  const adapter = new MockAdapter([toolCallResponse('stale-image', 'qingmu_read_reference_draft', { page: 1 }), textResponse('Resolve the scene version before visual editing.')])
+  vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'mock', id: 'mock', name: 'mock', inputModalities: ['text', 'image'] })
+  const media = vi.spyOn(globalThis, 'fetch')
+  const h = await harness(adapter, writer(0, { sha256: imageSha, url: imageUrl }), true)
+  await h.run(true)
+  const read = result(h.agent, 'stale-image')
+  expect(read.error, read.text).toBe(false)
+  expect(JSON.parse(read.text)).toMatchObject({ saved: { draft: { request: savedDraft.draft.request } },
+    visualInputs: expect.arrayContaining([{ bindingToken: 'cafe', assetId: 'asset_cafe', assetSha256: 'c'.repeat(64), status: 'stale' }]) })
+  expect(media).not.toHaveBeenCalled()
+  expect(saves(h.upstream)).toHaveLength(0)
+})
+
 it('previews camera pixels through the shipped director loop without saving or generating', async () => {
   const input = { layout: { basis: 'Director proposal', coordinateFrame: 'Metres, x east, y north, z up', objects: [
     { id: 'desk', label: 'Desk', center: [0,0,0.4], size: [2,1,0.8], rotation: 0, color: '#887766' },

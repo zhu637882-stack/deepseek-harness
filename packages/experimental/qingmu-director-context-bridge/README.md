@@ -1,5 +1,7 @@
 # Qingmu director context bridge
 
+Saved reference-draft reads now deliver the bound images on the requested catalog page directly to image-capable directors. Each visual input retains its binding token, asset ID, source SHA and original image design. Missing pages, stale bindings, failed media reads and attachment limits remain explicit; they do not erase the editable draft or silently choose replacements. Unbound images are not loaded. Text-only directors keep metadata and may explicitly request the configured observer; this read never calls that observer. Video metadata remains unobserved until actual frames are inspected. Historical metadata-only results remain replayable.
+
 For a first assembly, the director reads selectedAssetId from the shooting choice and does not silently substitute the latest candidate. Saved editorial choices remain authoritative for that cut.
 
 The native director can retain an episode video or rendered-cut sound source in an independent working-cut cue, including local stem selection. Reading the cut supplies scoped videoAudioSources; saving uses the existing receipt and exact source hashes. The director chooses timing and handles duplicate source audio, separation artifacts and continuous scene sound through actual audition.

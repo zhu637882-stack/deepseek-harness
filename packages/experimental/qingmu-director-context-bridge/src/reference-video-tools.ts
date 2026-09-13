@@ -15,6 +15,7 @@ import type { DirectorContextBindingState } from './types.ts'
 import { readReferenceImage } from './reference-image.ts'
 import { inspectReferenceImage, type ReferenceVisionConfig } from './reference-vision.ts'
 import { creativeRequest } from './creative-request.ts'
+import { readDraftImages, type DraftImageInput } from './reference-draft-images.ts'
 
 // Keep catalog pages small; the exact frozen description accompanies inspection of one image.
 function imageCatalogEntry(item: ReferenceVideoAsset) {
@@ -225,9 +226,14 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
   }))
   ctx.tools.register(defineTool({
     name: 'qingmu_read_reference_draft',
-    description: 'Read this shot’s saved reference-video draft and one page of available image/voice metadata. Call before editing reference text or bindings. The draft shares the director workspace’s save/restore path. Names and metadata are not pixel inspection or creative approval. No generation or fee.',
+    description: 'Read this shot’s saved reference-video draft and one project asset page. For an image-capable director, this also delivers this page’s already-bound images with exact identities and original image designs. visualInputs records each delivered or unavailable image; metadata alone is not pixel inspection. Other pages and unbound images remain available through explicit image inspection. Videos are not watched by this read: inspect actual frames before claiming continuity. No media generation, selection or separate observer call; image input uses normal director model allowance.',
     parameters: { page: { type: 'integer', required: true, description: 'Asset page, starting at 1. Read remaining pages when needed; a page may contain no matching media.' } },
-    output,
+    output: { schema: { type: 'json' }, render: (_args, value) => {
+      // Persisted results from earlier sessions contain metadata only.
+      const result = value as unknown as { visualInputs?: DraftImageInput[] }
+      return [{ type: 'text', text: JSON.stringify(value) }, ...(result.visualInputs ?? []).flatMap(input => input.attachment
+        ? [{ type: 'image' as const, attachment: input.attachment }] : [])]
+    } },
     presentCall: () => ({ card: 'generic', kind: 'read', title: '读取镜头参考素材与导演稿' }),
     async execute(args, exec) {
       exactKeys(args, ['page'])
@@ -240,8 +246,11 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
       assertCurrent(current, exec)
       if (!assets.ok) throw new Error(`Reference assets read failed: ${assets.error.message}`)
       const catalog = assets.value as ReferenceVideoAssetsResponse
+      const saved = draft.value as ReferenceVideoDraftResponse
+      const visualInputs = await readDraftImages(ctx, saved, catalog.items, exec, () => assertCurrent(current, exec))
+      assertCurrent(current, exec)
       return ports.boundedJson({ schema: 'qingmu.native-reference-draft.v1', scope,
-        saved: draft.value as ReferenceVideoDraftResponse,
+        saved, visualInputs,
         assets: { page: catalog.page, pages: catalog.pages,
           items: catalog.items.map(imageCatalogEntry) },
         providerCalls: 0, generationQueued: false,

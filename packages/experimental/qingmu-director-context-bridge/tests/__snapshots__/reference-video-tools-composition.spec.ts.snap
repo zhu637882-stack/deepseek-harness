@@ -214,6 +214,22 @@ exports[`compacts a long shipped director session and rereads the complete saved
       "sceneId": "scene-a",
       "shotId": "f",
     },
+    "visualInputs": [
+      {
+        "assetId": "asset_lin",
+        "assetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bindingToken": "lin",
+        "reason": "Direct image input is unavailable. Use explicit image inspection with the configured observer; no observer was called by this read.",
+        "status": "unavailable",
+      },
+      {
+        "assetId": "asset_cafe",
+        "assetSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "bindingToken": "cafe",
+        "reason": "Direct image input is unavailable. Use explicit image inspection with the configured observer; no observer was called by this read.",
+        "status": "unavailable",
+      },
+    ],
   },
   "writes": 0,
 }
@@ -255,6 +271,40 @@ exports[`delivers catalog image pixels through the shipped director preset and p
       "width": 1,
     },
     "type": "image",
+  },
+]
+`;
+
+exports[`delivers saved bound image pixels with the draft through the shipped director loop 1`] = `
+[
+  {
+    "assetId": "asset_lin",
+    "assetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "bindingToken": "lin",
+    "reason": "This image has no verified local media URL. Refresh the asset catalog.",
+    "status": "unavailable",
+  },
+  {
+    "assetId": "asset_cafe",
+    "assetSha256": "999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee",
+    "attachment": {
+      "attachmentId": "sha256:999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee",
+      "bytes": 90,
+      "height": 1,
+      "mediaType": "image/png",
+      "name": "参考图片 03",
+      "width": 1,
+    },
+    "bindingToken": "cafe",
+    "originalImageDesign": {
+      "designBasis": "",
+      "imagePrompt": "Closed door behind the return desk",
+      "name": "Library",
+      "submittedPrompt": "",
+      "view": "Return desk looking south",
+      "visualIdentity": "",
+    },
+    "status": "attached",
   },
 ]
 `;
