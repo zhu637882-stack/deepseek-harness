@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`captures and recovers a video frame through the shipped director preset with current-project scope 1`] = `
+exports[`captures and recovers actual frame pixels through the shipped director preset with current-project scope 1`] = `
 {
   "assetId": "asset_video",
   "assetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -9,9 +9,9 @@ exports[`captures and recovers a video frame through the shipped director preset
   "image": {
     "actualTimestampMs": 1033.333,
     "assetId": "asset_vframe_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    "assetSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-    "height": 1080,
-    "width": 1920,
+    "assetSha256": "999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee",
+    "height": 1,
+    "width": 1,
   },
   "projectId": "p",
   "providerCalls": 0,
@@ -19,6 +19,22 @@ exports[`captures and recovers a video frame through the shipped director preset
   "runId": "refvideo_previous",
   "schema": "qingmu.reference-video-frame.v1",
   "selectionChanged": false,
+  "visualInputs": [
+    {
+      "assetId": "asset_vframe_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "assetSha256": "999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee",
+      "attachment": {
+        "attachmentId": "sha256:999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee",
+        "bytes": 90,
+        "height": 1,
+        "mediaType": "image/png",
+        "name": "镜头画面参考 01",
+        "width": 1,
+      },
+      "bindingToken": "captured_frame",
+      "status": "attached",
+    },
+  ],
 }
 `;
 

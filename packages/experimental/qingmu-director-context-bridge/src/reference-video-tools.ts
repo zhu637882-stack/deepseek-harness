@@ -6,7 +6,7 @@ import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type {
   ReferenceVideoAsset, ReferenceVideoAssetsResponse, ReferenceVideoDraftResponse,
   ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse, ReferenceDirectorSource,
-  ReferenceVideoRunsResponse,
+  ReferenceVideoRunsResponse, ReferenceVideoFrameReceipt,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import { parseReferenceVideoRequest } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter'
@@ -15,7 +15,7 @@ import type { DirectorContextBindingState } from './types.ts'
 import { readReferenceImage } from './reference-image.ts'
 import { inspectReferenceImage, type ReferenceVisionConfig } from './reference-vision.ts'
 import { creativeRequest } from './creative-request.ts'
-import { readDraftImages, type DraftImageInput } from './reference-draft-images.ts'
+import { readDraftImages, readImageInputs, type DraftImageInput } from './reference-draft-images.ts'
 
 // Keep catalog pages small; the exact frozen description accompanies inspection of one image.
 function imageCatalogEntry(item: ReferenceVideoAsset) {
@@ -164,7 +164,7 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
   }))
   ctx.tools.register(defineTool({
     name: 'qingmu_capture_reference_video_frame',
-    description: 'Capture one actual frame from an owned generated video as a reusable project image, or read whether that exact capture already exists. Capture uses the first decoded frame at or after timestampMs and reports its actual time. Use operation=read after an uncertain response. It makes no model call and does not select or approve media. Inspect the saved image before deriving continuity; use its exact ID/SHA in subsequent draft references only when it fits the director design.',
+    description: 'Capture one actual frame from an owned generated video as a reusable project image, or read whether that exact capture already exists. Capture uses the first decoded frame at or after timestampMs and reports its actual time. Image-capable directors also receive the captured pixels when available on catalog page 1; visualInputs reports missing images explicitly. Other pages remain accessible through image inspection. Use operation=read after an uncertain response. No separate observer or generation call, selection or approval. Image input uses normal director allowance. Compare the observed state before deriving continuity; one frame does not prove the whole action or audio was reviewed. Reuse its exact ID/SHA only when it fits the director design.',
     parameters: {
       sourceFrameId: { type: 'string', required: true, description: 'Source shot in the current project.' },
       runId: { type: 'string', required: true, description: 'Exact source run from candidate read.' },
@@ -172,7 +172,12 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
       expectedAssetSha256: { type: 'string', required: true, description: 'Source video SHA256.' },
       timestampMs: { type: 'integer', required: true, description: 'Nonnegative playback position in milliseconds, within the video.' },
       operation: { type: 'string', enum: ['capture', 'read'], required: true, description: 'Save the frame or recover an existing result.' },
-    }, output,
+    },
+    output: { schema: { type: 'json' }, render: (_args, value) => {
+      const result = value as unknown as { visualInputs?: DraftImageInput[] }
+      return [{ type: 'text', text: JSON.stringify(value) }, ...(result.visualInputs ?? []).flatMap(input => input.attachment
+        ? [{ type: 'image' as const, attachment: input.attachment }] : [])]
+    } },
     presentCall: args => ({ card: 'generic', kind: args.operation === 'read' ? 'read' : 'edit', title: '视频画面存为参考' }),
     async execute(args, exec) {
       exactKeys(args, ['sourceFrameId', 'runId', 'assetId', 'expectedAssetSha256', 'timestampMs', 'operation'])
@@ -182,8 +187,25 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
         projectId: current.state.binding.scope.projectId, frameId: args.sourceFrameId,
         runId: args.runId, assetId: args.assetId, expectedAssetSha256: args.expectedAssetSha256, timestampMs: args.timestampMs,
       }, exec.signal)
+      assertCurrent(current, exec)
       if (!result.ok) throw new Error(`Frame capture result unconfirmed; recover the same source and timestamp: ${result.error.message}`)
-      return ports.boundedJson(result.value)
+      const receipt = result.value as ReferenceVideoFrameReceipt
+      let visualInputs: DraftImageInput[] = []
+      if (receipt.image) {
+        const binding = { bindingToken: 'captured_frame', assetId: receipt.image.assetId, assetSha256: receipt.image.assetSha256 }
+        try {
+          const read = await ctx.qingmuYimengRead('referenceVideoAssets', { projectId: receipt.projectId, page: 1 }, exec.signal)
+          assertCurrent(current, exec)
+          if (!read.ok) throw new Error(read.error.message)
+          visualInputs = await readImageInputs(ctx, [binding], (read.value as ReferenceVideoAssetsResponse).items,
+            exec, () => assertCurrent(current, exec))
+        } catch (error) {
+          assertCurrent(current, exec)
+          visualInputs = [{ ...binding, status: 'unavailable', reason: error instanceof Error ? error.message : 'Captured pixels are unavailable.' }]
+        }
+      }
+      assertCurrent(current, exec)
+      return ports.boundedJson({ ...receipt, visualInputs })
     },
   }))
   ctx.tools.register(defineTool({

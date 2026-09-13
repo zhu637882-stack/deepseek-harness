@@ -28,12 +28,32 @@ export interface DraftImageInput {
 export async function readDraftImages(ctx: Context, saved: ReferenceVideoDraftResponse,
   catalog: readonly ReferenceVideoAsset[], exec: ToolRunContext, check: () => void): Promise<DraftImageInput[]> {
   const bindings = saved.draft?.request.bindings.filter(item => saved.mediaTypes[item.bindingToken] === 'reference_image') ?? []
+  return readImageInputs(ctx, bindings, catalog, exec, check)
+}
+
+/**
+ * Deliver exact image identities from a verified draft or frame-capture receipt.
+ * @param ctx - Current attachment and model services.
+ * @param bindings - Images chosen by the saved source, never by catalog recency.
+ * @param catalog - Current project page supplying verified media capabilities.
+ * @param exec - Owning native turn.
+ * @param check - Revalidate cancellation and the current target after awaits.
+ * @returns Attached pixels or explicit omissions, without a model call.
+ */
+export async function readImageInputs(ctx: Context,
+  bindings: readonly Pick<DraftImageInput, 'bindingToken' | 'assetId' | 'assetSha256'>[],
+  catalog: readonly ReferenceVideoAsset[], exec: ToolRunContext, check: () => void): Promise<DraftImageInput[]> {
   if (!bindings.length) return []
   const store = ctx.get('attachments')
   const llm = ctx.get('llm')
   const route = exec.agent?.session.requestHeader()?.config ?? exec.agent?.options
+  // Missing model metadata must not discard a successfully read draft/capture receipt.
+  let capabilityFailure = ''
   const model = llm && route?.provider && route.model
-    ? await llm.resolveModelInfo(route.provider, route.model, exec.signal) : undefined
+    ? await llm.resolveModelInfo(route.provider, route.model, exec.signal).catch((error) => {
+      capabilityFailure = error instanceof Error ? error.message : 'Image capability could not be resolved.'
+      return undefined
+    }) : undefined
   check()
   const inputs: DraftImageInput[] = []
   let bytes = 0
@@ -48,7 +68,7 @@ export async function readDraftImages(ctx: Context, saved: ReferenceVideoDraftRe
       input.status = 'stale'; continue
     }
     if (!store || !model?.inputModalities?.includes('image')) {
-      input.reason = 'Direct image input is unavailable. Use explicit image inspection with the configured observer; no observer was called by this read.'
+      input.reason = capabilityFailure || 'Direct image input is unavailable. Use explicit image inspection with the configured observer; no observer was called by this read.'
       continue
     }
     if (count >= store.imageLimits.maxImagesPerMessage) {

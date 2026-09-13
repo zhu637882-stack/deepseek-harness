@@ -906,35 +906,71 @@ it('saves scene-spanning sound through the shipped director preset, real loop an
   expect(JSON.stringify(h.upstream.fetch.mock.calls)).not.toContain('/working-cut/render')
 })
 
-it('captures and recovers a video frame through the shipped director preset with current-project scope', async () => {
+it('captures and recovers actual frame pixels through the shipped director preset with current-project scope', async () => {
   const upstream = writer()
   const original = upstream.fetch.getMockImplementation()!
   const receipt = { schema: 'qingmu.reference-video-frame.v1', projectId: 'p', episodeId: 'episode-a', frameId: 'previous',
     runId: 'refvideo_previous', assetId: 'asset_video', assetSha256: 'a'.repeat(64), requestedTimestampMs: 1001,
-    image: { assetId: `asset_vframe_${'b'.repeat(32)}`, assetSha256: 'c'.repeat(64), width: 1920, height: 1080, actualTimestampMs: 1033.333 },
+    image: { assetId: `asset_vframe_${'b'.repeat(32)}`, assetSha256: imageSha, width: 1, height: 1, actualTimestampMs: 1033.333 },
     providerCalls: 0, selectionChanged: false }
   upstream.fetch.mockImplementation(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input)
     if (url.pathname.endsWith('/reference-frame')) return Response.json(receipt)
+    if (url.pathname.endsWith('/assets')) return Response.json({ page: 1, page_size: 200, pages: 1,
+      items: [{ id: receipt.image.assetId, project_id: 'p', asset_type: 'image', sha256: imageSha,
+        public_url: imageUrl, preview_media_id: 'media_cafe', role: 'continuity_reference_frame' }] })
     return original(input, init)
   })
   const args = { sourceFrameId: 'previous', runId: 'refvideo_previous', assetId: 'asset_video', expectedAssetSha256: 'a'.repeat(64), timestampMs: 1001 }
   const adapter = new MockAdapter([
     toolCallResponse('capture-frame', 'qingmu_capture_reference_video_frame', { ...args, operation: 'capture' }),
     toolCallResponse('read-frame', 'qingmu_capture_reference_video_frame', { ...args, operation: 'read' }),
-    textResponse('画面已保存在项目素材，后续引用前先核对画面。'),
+    textResponse('收到取帧图片，只能核对这一时刻，不能声称已审完整视频或声音。'),
   ])
-  const h = await harness(adapter, upstream); await h.run()
+  vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'mock', id: 'mock', name: 'mock', inputModalities: ['text', 'image'] })
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(imageBytes, { headers: { 'content-type': 'image/png' } }))
+  const h = await harness(adapter, upstream, true); await h.run()
   const capture = result(h.agent, 'capture-frame'), recover = result(h.agent, 'read-frame')
   expect(capture.error, capture.text).toBe(false)
   expect(recover.error, recover.text).toBe(false)
-  expect(JSON.parse(capture.text)).toEqual(receipt)
+  expect(JSON.parse(capture.text)).toMatchObject({ ...receipt, visualInputs: [{ bindingToken: 'captured_frame',
+    assetId: receipt.image.assetId, assetSha256: imageSha, status: 'attached' }] })
+  const attached = JSON.parse(capture.text).visualInputs[0].attachment
+  expect(JSON.stringify(adapter.requests[1]?.messages)).toContain(attached.attachmentId)
+  expect(JSON.parse(recover.text).visualInputs[0].attachment).toEqual(attached)
   expect(JSON.parse(recover.text)).toMatchSnapshot()
   const calls = upstream.fetch.mock.calls.filter(([url]) => new URL(url instanceof Request ? url.url : url).pathname.endsWith('/reference-frame'))
   expect(calls.map(([, init]) => init?.method)).toEqual(['POST', 'GET'])
   expect(String(calls[0]?.[0])).toContain('/projects/p/reference-video/drafts/previous/')
   await h.presets.dispose()
   expect(h.ctx.tools.get('qingmu_capture_reference_video_frame', scopeOf(h.agent.ctx))).toBeUndefined()
+})
+
+it('retains a captured-frame receipt when its source pixels fail verification', async () => {
+  const upstream = writer(), original = upstream.fetch.getMockImplementation()!
+  const receipt = { schema: 'qingmu.reference-video-frame.v1', projectId: 'p', episodeId: 'episode-a', frameId: 'previous',
+    runId: 'refvideo_previous', assetId: 'asset_video', assetSha256: 'a'.repeat(64), requestedTimestampMs: 1001,
+    image: { assetId: `asset_vframe_${'b'.repeat(32)}`, assetSha256: 'c'.repeat(64), width: 1, height: 1, actualTimestampMs: 1033.333 },
+    providerCalls: 0, selectionChanged: false }
+  upstream.fetch.mockImplementation(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input)
+    if (url.pathname.endsWith('/reference-frame')) return Response.json(receipt)
+    if (url.pathname.endsWith('/assets')) return Response.json({ page: 1, page_size: 200, pages: 1,
+      items: [{ id: receipt.image.assetId, project_id: 'p', asset_type: 'image', sha256: 'c'.repeat(64),
+        public_url: imageUrl, preview_media_id: 'media_cafe' }] })
+    return original(input, init)
+  })
+  const adapter = new MockAdapter([toolCallResponse('recover-frame', 'qingmu_capture_reference_video_frame', {
+    sourceFrameId: 'previous', runId: receipt.runId, assetId: receipt.assetId, expectedAssetSha256: receipt.assetSha256,
+    timestampMs: 1001, operation: 'read' }), textResponse('Capture exists; pixels are unconfirmed. Do not recapture or infer continuity.')])
+  vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'mock', id: 'mock', name: 'mock', inputModalities: ['text', 'image'] })
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(imageBytes, { headers: { 'content-type': 'image/png' } }))
+  const h = await harness(adapter, upstream, true); await h.run()
+  const read = result(h.agent, 'recover-frame')
+  expect(read.error, read.text).toBe(false)
+  expect(JSON.parse(read.text)).toMatchObject({ ...receipt, visualInputs: [{ status: 'unavailable', reason: expect.stringMatching(/hash|SHA/iu) }] })
+  expect(JSON.stringify(adapter.requests.at(-1)?.messages)).not.toContain('"type":"image"')
+  expect(upstream.fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
 })
 
 
