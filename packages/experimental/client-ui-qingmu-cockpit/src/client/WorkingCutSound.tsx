@@ -110,7 +110,8 @@ export function WorkingCutSound({ library, presets = [], cues, total, disabled, 
         <details open={!!cue.loop}><summary>循环铺声</summary>
           <p>将裁好的声音段连续铺到指定时长，每次接头交叉淡化，切镜时不重启。适合可重复的环境底声或音乐段；会重复段内全部声音，请避开不应重复的台词和动作。</p>
           <label><input aria-label={`音轨 ${index + 1} 循环铺声`} type="checkbox" checked={!!cue.loop} onChange={(e) => {
-            if (e.target.checked) update(index, { loop: { durationSec: total - cue.startSec - (cue.space?.tailSec ?? 0),
+            if (e.target.checked) update(index, { loop: {
+              durationSec: Number((total - cue.startSec - (cue.space?.tailSec ?? 0)).toFixed(6)),
               crossfadeSec: Math.min(.5, (cue.outSec - cue.inSec) / 4) } })
             else onChange(cues.map((current, i) => {
               if (i !== index) return current
@@ -119,7 +120,7 @@ export function WorkingCutSound({ library, presets = [], cues, total, disabled, 
             }))
           }} />启用循环铺声</label>
           {cue.loop && <>
-            <label>铺声时长秒<input aria-label={`音轨 ${index + 1} 铺声时长秒`} type="number" min={cue.outSec - cue.inSec} max={total - cue.startSec - (cue.space?.tailSec ?? 0)} step="0.1" value={cue.loop.durationSec} onChange={(e) => {
+            <label>铺声时长秒<input aria-label={`音轨 ${index + 1} 铺声时长秒`} type="number" min={cue.outSec - cue.inSec} max={total - cue.startSec - (cue.space?.tailSec ?? 0)} step="0.1" value={Number(cue.loop.durationSec.toFixed(6))} onChange={(e) => {
               if (cue.loop) update(index, { loop: { ...cue.loop, durationSec: Number(e.target.value) } })
             }} /></label>
             <label>接头交叉淡化秒<input aria-label={`音轨 ${index + 1} 接头交叉淡化秒`} type="number" min="0.001" max={(cue.outSec - cue.inSec) / 2} step="0.1" value={cue.loop.crossfadeSec} onChange={(e) => {
