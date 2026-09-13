@@ -38,7 +38,11 @@ export interface PlanningBase {
 /** Initialize only absent structure, or edit one current canonical frame. */
 export type PlanningOperation = PlanningBase & (
   { readonly action: 'initialize'; readonly shots: readonly PlanningShot[] } |
-  { readonly action: 'edit'; readonly shotId: string; readonly shot: PlanningShot }
+  { readonly action: 'edit'
+    readonly shotId: string
+    readonly shot: PlanningShot
+    /** Apply supplied creative fields, including deliberate restoration of original values. Omission preserves legacy comparison. */
+    readonly applyDirectorPlan?: true }
 )
 /** One editable first-frame requirement owned by an existing automatic shot. */
 export interface AutomaticPlanningShot {
@@ -306,7 +310,10 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
     if (r.action === 'initialize') {
       if (!Array.isArray(r.shots) || r.shots.length < 1 || r.shots.length > 64) throw f('planning shot limit')
       for (const s of r.shots) shot(s, f)
-    } else if (r.action === 'edit') { id(r.shotId, f); shot(r.shot, f) } else if (r.action !== 'edit_automatic' && r.action !== 'edit_requirements') throw f('planning action invalid')
+    } else if (r.action === 'edit') {
+      id(r.shotId, f); shot(r.shot, f)
+      if (r.applyDirectorPlan !== undefined && (r.applyDirectorPlan !== true || obj(r.shot, f).directorPlan === undefined)) throw f('director plan application invalid')
+    } else if (r.action !== 'edit_automatic' && r.action !== 'edit_requirements') throw f('planning action invalid')
     const encoded = canonicalPlanningJson(r, f)
     if (Buffer.byteLength(encoded) > 98304) throw f('planning payload too large')
     requestSha = createHash('sha256').update(encoded).digest('hex')

@@ -89,6 +89,24 @@ describe('bounded scene planning Host channel', () => {
     expect(fetch.mock.calls[1]?.[1]?.method).toBe('GET')
     expect(fetch.mock.calls[1]?.[0]).toMatch(/receipt\?idempotencyKey=planning-1&requestSha256=[a-f0-9]{64}$/)
   })
+  it('transports explicit current-direction edits and rejects missing designs before transport', async () => {
+    const payload = { ...scope, idempotencyKey: 'current-direction-1', request: {
+      action: 'edit', sceneIndex: 1, expectedScriptRevision: 1, expectedScriptSha256: 'a'.repeat(64),
+      expectedStoryboardRevision: 2, expectedStoryboardSha256: 'c'.repeat(64), shotId: 'shot_1', applyDirectorPlan: true,
+      shot: { ...request.request.shots[0]!, directorPlan: { cameraMovement: '恢复原来的运镜', generationContext: '' } },
+    } }
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => { throw new Error('reply lost after sending') })
+    const handler = createYimengCommandHandler({ baseUrl: 'http://127.0.0.1:49123' }, { fetch, readToken: () => 'private-token' })
+    await handler('saveScenePlanning', payload, new AbortController().signal)
+    expect(requestBody(fetch.mock.calls[0]?.[1]?.body).request).toEqual(payload.request)
+    await handler('recoverScenePlanning', payload, new AbortController().signal)
+    expect(fetch.mock.calls[1]?.[1]?.method).toBe('GET')
+    for (const invalid of [{ ...payload.request, applyDirectorPlan: false }, { ...payload.request, shot: request.request.shots[0] }]) {
+      fetch.mockClear()
+      expect(await handler('saveScenePlanning', { ...payload, request: invalid }, new AbortController().signal)).toMatchObject({ ok: false })
+      expect(fetch).not.toHaveBeenCalled()
+    }
+  })
 
   it('preserves fractional direction and matches the Writer RFC 8785 receipt for save and recovery', async () => {
     const operation = { action: 'edit_requirements', expectedScriptRevision: 1, expectedScriptSha256: 'a'.repeat(64),

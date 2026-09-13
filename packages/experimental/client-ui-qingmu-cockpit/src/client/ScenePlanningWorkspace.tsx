@@ -39,6 +39,7 @@ interface LocalPlan {
 interface AutomaticLocalPlan {
   shotId: string
   imagePromptCn: string
+  directorPlan?: PlanningShot['directorPlan']
   dirty: boolean
   pending?: ScenePlanningRequest
 }
@@ -56,7 +57,11 @@ function forScene(state: ScenePlanningState, sceneIndex: number): ScenePlanningS
 function saved(state: ScenePlanningState): LocalPlan | null {
   const p = state.planning
   return p === null ? null : { sceneIndex: p.sceneIndex, base: base(state, p.sceneIndex),
-    shots: p.shots.map(({ id: _id, ...shot }) => shot), shotIds: p.shots.map(s => s.id), dirty: false }
+    shots: p.shots.map(({ id, ...shot }) => {
+      // Planning retains receipt-bound source text; shooting owns subsequent creative edits.
+      const current = state.frameRequirements?.find(frame => frame.id === id)?.directorPlan
+      return current === undefined ? shot : { ...shot, directorPlan: current }
+    }), shotIds: p.shots.map(s => s.id), dirty: false }
 }
 function errorText(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
@@ -160,9 +165,11 @@ function storedPlan(key: string): LocalPlan | null {
 function automaticDraft(value: unknown): AutomaticLocalPlan | null {
   const draft = objectOf(value)
   if (draft === null || typeof draft.shotId !== 'string' || !/^[A-Za-z0-9_.-]+$/u.test(draft.shotId)
-    || typeof draft.imagePromptCn !== 'string' || draft.imagePromptCn.length < 1 || draft.imagePromptCn.length > 20000
+    || typeof draft.imagePromptCn !== 'string' || (draft.imagePromptCn.length < 1 && draft.directorPlan === undefined) || draft.imagePromptCn.length > 20000
+    || (draft.directorPlan !== undefined && objectOf(draft.directorPlan) === null)
     || typeof draft.dirty !== 'boolean') return null
   return { shotId: draft.shotId, imagePromptCn: draft.imagePromptCn, dirty: draft.dirty,
+    ...(draft.directorPlan === undefined ? {} : { directorPlan: draft.directorPlan as PlanningShot['directorPlan'] }),
     ...(draft.pending === undefined ? {} : { pending: draft.pending as ScenePlanningRequest }) }
 }
 function storedAutomaticDraft(key: string): AutomaticLocalPlan | null {
@@ -190,7 +197,8 @@ function validatedPendingIntent(
   if (request.action === 'edit_automatic') {
     const canonical = currentState.canonicalStoryboard
     const formatted = typeof request.shotId === 'string'
-      && typeof request.imagePromptCn === 'string' && request.imagePromptCn.length >= 1 && request.imagePromptCn.length <= 20000
+      && typeof request.imagePromptCn === 'string' && (request.imagePromptCn.length >= 1 || request.directorPlan !== undefined) && request.imagePromptCn.length <= 20000
+      && (request.directorPlan === undefined || objectOf(request.directorPlan) !== null)
       && typeof request.expectedScriptRevision === 'number' && Number.isSafeInteger(request.expectedScriptRevision) && request.expectedScriptRevision >= 1
       && typeof request.expectedScriptSha256 === 'string' && /^[a-f0-9]{64}$/u.test(request.expectedScriptSha256)
       && typeof request.expectedStoryboardRevision === 'number' && Number.isSafeInteger(request.expectedStoryboardRevision) && request.expectedStoryboardRevision >= 1
@@ -209,6 +217,7 @@ function validatedPendingIntent(
   if (request.action === 'edit') {
     return typeof request.shotId === 'string'
       && validStoredShot(request.shot)
+      && (request.applyDirectorPlan === undefined || (request.applyDirectorPlan === true && request.shot.directorPlan !== undefined))
       && currentState.planning?.sceneIndex === request.sceneIndex
       && currentState.planning.shots.some(shot => shot.id === request.shotId)
       ? value as ScenePlanningRequest
@@ -259,6 +268,8 @@ export function ScenePlanningWorkspace({
   const automaticKey = `${key}:automatic-frame`
   const [state, setState] = useState<ScenePlanningState | null>(null)
   const [local, setLocal] = useState<LocalPlan | null>(() => presentation === 'assistant' ? null : storedPlan(key))
+  const localRef = useRef(local)
+  localRef.current = local
   const [automatic, setAutomatic] = useState<AutomaticLocalPlan | null>(() => presentation === 'assistant' ? null : storedAutomaticDraft(`${key}:automatic-frame`))
   const automaticRef = useRef(automatic)
   const [retained, setRetained] = useState<LocalPlan | null>(() => retainedInput(storedPlan(`${key}:retained-input`)))
@@ -342,6 +353,10 @@ export function ScenePlanningWorkspace({
       if (next.canonicalStoryboard !== null && next.canonicalStoryboard !== undefined) {
         const restoredShot = next.canonicalStoryboard.shots?.find(shot => shot.id === automaticRef.current?.shotId)
         if (restoredShot && restoredShot.id !== canonicalDirectorScope?.shotId) onSelectShotId(restoredShot.id)
+        if (restoredShot && !automaticRef.current?.dirty && !automaticRef.current?.pending) {
+          updateAutomatic({ shotId: restoredShot.id, imagePromptCn: restoredShot.imagePromptCn,
+            directorPlan: restoredShot.directorPlan, dirty: false })
+        }
         const retainedInputCopy = local === null ? null : retainedInput(local)
         const priorRetained = retainedInput(storedPlan(`${key}:retained-input`))
         const retainedCopy = retainedInputCopy ?? priorRetained
@@ -364,22 +379,24 @@ export function ScenePlanningWorkspace({
         setError('已拒绝损坏或跨作用域的恢复标记，并载入当前权威规划；未发送恢复或保存请求。')
         return
       }
-      if (local === null) {
+      const currentLocal = localRef.current
+      if (currentLocal === null || (!currentLocal.dirty && !currentLocal.pending)) {
         const plan = saved(next)
         const target = hostSync?.pendingTarget()
         const targetIndex = plan !== null && target !== null && target !== undefined
           && next.planning?.sceneId === target.sceneId
           ? plan.shotIds.findIndex(id => id === target.shotId)
           : -1
-        const activeIndex = targetIndex >= 0 ? targetIndex : 0
+        const previousIndex = currentLocal?.activeIndex ?? 0
+        const activeIndex = targetIndex >= 0 ? targetIndex : previousIndex < (plan?.shots.length ?? 0) ? previousIndex : 0
         setLocal(plan === null ? null : { ...plan, activeIndex })
         setSceneIndex(plan?.sceneIndex ?? 1)
         setIndex(activeIndex)
       }
     }).catch((e: unknown) => { if (active) setError(errorText(e)) })
     return () => { active = false }
-    // Scope remounts this workspace; initial hydration must not replace local edits.
-  }, [projectId, episodeId, port, hostSync])
+    // Committed native revisions refresh clean drafts; local edits and pending saves stay intact.
+  }, [projectId, episodeId, port, hostSync, canonicalDirectorRevision])
   useEffect(() => {
     if (presentation === 'assistant' || !state || state.canonicalStoryboard || !canonicalDirectorScope
       || canonicalDirectorScope.projectId !== projectId || canonicalDirectorScope.episodeId !== episodeId
@@ -685,7 +702,8 @@ export function ScenePlanningWorkspace({
     const current = automaticRef.current
     const savedShot = canonical.shots.find(shot => shot.id === result.shotId)
     if (current?.pending?.idempotencyKey === intent.idempotencyKey && current.shotId === result.shotId && savedShot !== undefined) {
-      updateAutomatic({ shotId: savedShot.id, imagePromptCn: savedShot.imagePromptCn, dirty: false })
+      updateAutomatic({ shotId: savedShot.id, imagePromptCn: savedShot.imagePromptCn,
+        directorPlan: savedShot.directorPlan, dirty: false })
     }
     await onCommitted()
   }
@@ -700,7 +718,8 @@ export function ScenePlanningWorkspace({
         if (currentState.scriptSha256 === null) throw new Error('请先保存剧本')
         const request: AutomaticPlanningOperation = { action: 'edit_automatic', expectedScriptRevision: currentState.scriptRevision,
           expectedScriptSha256: currentState.scriptSha256, expectedStoryboardRevision: canonical.revision,
-          expectedStoryboardSha256: canonical.sourceHash, shotId: draft.shotId, imagePromptCn: draft.imagePromptCn }
+          expectedStoryboardSha256: canonical.sourceHash, shotId: draft.shotId, imagePromptCn: draft.imagePromptCn,
+          ...(draft.directorPlan === undefined ? {} : { directorPlan: draft.directorPlan }) }
         return { projectId, episodeId, idempotencyKey: crypto.randomUUID(), request }
       })()
       if (validatedPendingIntent(intent, currentState, projectId, episodeId, recover) === null) throw new Error('409 automatic_planning_pending_scope_mismatch')
@@ -815,7 +834,8 @@ export function ScenePlanningWorkspace({
           }
         }
         const intent: ScenePlanningRequest = local.pending ?? { projectId, episodeId, idempotencyKey: crypto.randomUUID(),
-          request: shotId ? { ...local.base, action: 'edit', shotId, shot: current }
+          request: shotId ? { ...local.base, action: 'edit', shotId, shot: current,
+            ...(current.directorPlan === undefined ? {} : { applyDirectorPlan: true }) }
             : { ...local.base, action: 'initialize', shots: local.shots } }
         const scopedIntent = validatedPendingIntent(intent, state, projectId, episodeId)
         if (scopedIntent === null) throw new Error('409 planning_pending_scope_mismatch')
@@ -901,7 +921,7 @@ export function ScenePlanningWorkspace({
       }}>保留输入副本，载入已存在镜头</button>}
       {canonicalStoryboard && <section className={css.notice} role="status" aria-label="自动分镜已建立">
         <h3>青木已自动建立 {canonicalStoryboard.shotCount} 个镜头</h3>
-        <p>这 {canonicalStoryboard.shotCount} 个镜头来自当前权威自动分镜；旧场景规划不适用。这里只保存一个镜头的首帧画面要求；不生成、不签收，也不改 imported 场景规划。</p>
+        <p>这 {canonicalStoryboard.shotCount} 个镜头来自当前自动分镜；旧场景规划不适用。可以编辑每镜的首帧画面要求与完整导演设计，保存后用于后续生成；保存本身不生成、不签收。</p>
         <p>已有提示词、Take 与高级分镜仍在其原工作区，后续动作仍受各自确认/门禁。</p>
         {canonicalStoryboard.shots === undefined && <p>当前读取尚未提供镜头帧，不能编辑画面要求；请读取恢复。</p>}
         {canonicalStoryboard.shots !== undefined && canonicalStoryboard.shots.length > 0 && ((shots) => {
@@ -909,27 +929,35 @@ export function ScenePlanningWorkspace({
           if (selected === undefined) return null
           const selectedDraft = automatic !== null && automatic.shotId === selected.id ? automatic : null
           const draft = selectedDraft === null ? selected.imagePromptCn : selectedDraft.imagePromptCn
+          const direction = selectedDraft?.directorPlan ?? selected.directorPlan
           const pending = selectedDraft?.pending
+          const changeAutomatic = (imagePromptCn: string, directorPlan: PlanningShot['directorPlan']) => {
+            updateAutomatic({ shotId: selected.id, imagePromptCn, directorPlan,
+              dirty: imagePromptCn !== selected.imagePromptCn
+                || canonicalJson(directorPlan ?? {}) !== canonicalJson(selected.directorPlan ?? {}) })
+          }
           return <fieldset disabled={busy} className={css.editor}>
-            <legend>自动镜头首帧画面要求</legend>
+            <legend>自动镜头设计</legend>
             <label>镜头<select aria-label="自动分镜镜头" value={selected.id}
               disabled={Boolean(pending) || Boolean(automatic?.dirty)} onChange={(e) => {
                 const next = shots.find(shot => shot.id === e.target.value)
                 if (next && !automatic?.dirty && automatic?.pending === undefined) {
-                  updateAutomatic({ shotId: next.id, imagePromptCn: next.imagePromptCn, dirty: false })
-                  onSelectShotId(next.id)
+                  if (onSelectShotId(next.id) === false) return
+                  updateAutomatic({ shotId: next.id, imagePromptCn: next.imagePromptCn, directorPlan: next.directorPlan, dirty: false })
                 }
               }}>{shots.map(shot => <option key={shot.id} value={shot.id}>{String(shot.frameNo).padStart(2, '0')} · {shot.title}</option>)}</select></label>
             <label>首帧画面要求<textarea aria-label="首帧画面要求" rows={4} maxLength={20000} value={draft} disabled={Boolean(pending)} onChange={(e) => {
-              updateAutomatic({ shotId: selected.id, imagePromptCn: e.target.value, dirty: e.target.value !== selected.imagePromptCn,
-                ...(pending === undefined ? {} : { pending }) })
+              changeAutomatic(e.target.value, direction)
             }} /></label>
+            <fieldset disabled={Boolean(pending)}>
+              <SceneDirectionEditor value={direction} onChange={(directorPlan) => { changeAutomatic(draft, directorPlan) }} />
+            </fieldset>
             <div className={css.actions}>
               {pending && <button type="button" onClick={() => { void runAutomatic(true) }}>读取同一保存回执</button>}
-              <button type="button" className={css.primary} disabled={!selectedDraft?.dirty || !draft.trim() || draft.length > 20000 || Boolean(pending)} onClick={() => {
-                const next = { shotId: selected.id, imagePromptCn: draft, dirty: true }
+              <button type="button" className={css.primary} disabled={!selectedDraft?.dirty || (!draft.trim() && direction === undefined) || draft.length > 20000 || Boolean(pending)} onClick={() => {
+                const next = { shotId: selected.id, imagePromptCn: draft, directorPlan: direction, dirty: true }
                 updateAutomatic(next); void runAutomatic(false, next)
-              }}>保存首帧画面要求</button>
+              }}>保存镜头设计</button>
             </div>
           </fieldset>
         })(canonicalStoryboard.shots)}

@@ -95,6 +95,59 @@ it.each([false, true])('saves editable department direction and retains it after
   expect(screen.getByLabelText('运镜设计').matches(':disabled')).toBe(true)
   expect(port.saveScenePlanning).toHaveBeenCalledOnce()
 })
+function revisedPlanningState(): ScenePlanningState {
+  return { ...state, storyboard: { id: 'revision_2', version: 2, sourceHash: 'b'.repeat(64), status: 'Ready' },
+    planning: { sceneId: 'scene_1', sceneIndex: 1, initialReceiptId: 'receipt_1', actorIds: {},
+      source: { sceneIndex: 1, scriptRevision: 1, scriptSha256: state.scriptSha256!, inputSha256: 'c'.repeat(64), sourceLineIds: ['line_1'] },
+      shots: [{ ...legacyLocalPlan('门口', false).shots[0]!, id: 'shot_1',
+        directorPlan: { cameraMovement: '旧规划运镜', soundPlan: { music: '旧配乐', ambience: '旧雨声' } } }] },
+    frameRequirements: [{ id: 'shot_1', frameNo: 1, title: '门口', imagePromptCn: '当前首帧', directorPlan: {
+      generationContext: '门窗沿用剧本设定，人物在门内等候。', cameraMovement: '最新运镜',
+      soundPlan: { music: '', ambience: '连续雨声', acoustics: { room: '木屋' } },
+      customDepartment: { staging: ['门外', '门内'], exception: '未来来信' },
+      dialoguePlan: [{ character: '林夏', line: '请进。', sourceLineId: 'line_1', actorId: 'actor_1', delivery: '迟疑后轻声' }],
+    } }] }
+}
+it.each([false, true])('edits current shooting direction instead of historical planning or clean browser cache (cached=%s)', async (cached) => {
+  const current = revisedPlanningState()
+  if (cached) localStorage.setItem('qingmu.scene-planning.v1:project_1:episode_1', JSON.stringify({
+    ...legacyLocalPlan('缓存旧规划', false), shotIds: ['shot_1'],
+  }))
+  const port = { readScenePlanning: vi.fn(async () => current), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(async (_r: ScenePlanningRequest) => { throw new Error('disconnected') }), recoverScenePlanning: vi.fn() }
+  render(<ScenePlanningWorkspace {...current} port={port} onCommitted={vi.fn(async () => {})}
+    onSelectShotId={vi.fn()} onUnsavedChange={vi.fn()} />)
+  await waitFor(() => { expect(screen.getByLabelText<HTMLTextAreaElement>('运镜设计').value).toBe('最新运镜') })
+  expect(screen.getByLabelText<HTMLTextAreaElement>('配乐安排').value).toBe('')
+  expect(screen.getByLabelText<HTMLTextAreaElement>('本镜沿用的全片设定').value).toBe(current.frameRequirements![0]!.directorPlan!.generationContext)
+  fireEvent.change(screen.getByLabelText('运镜设计'), { target: { value: '调整后的运镜' } })
+  fireEvent.click(screen.getByText('预览保存影响')); fireEvent.click(screen.getByText('确认保存规划'))
+  await screen.findByRole('alert')
+  expect(port.saveScenePlanning.mock.calls[0]?.[0].request).toMatchObject({ action: 'edit', shotId: 'shot_1', applyDirectorPlan: true,
+    shot: { directorPlan: { ...current.frameRequirements![0]!.directorPlan, cameraMovement: '调整后的运镜' } } })
+  expect(current.planning!.shots[0]!.directorPlan!.cameraMovement).toBe('旧规划运镜')
+})
+it('refreshes clean direction after a native revision while preserving edits during a later refresh', async () => {
+  let current = revisedPlanningState()
+  const port = { readScenePlanning: vi.fn(async () => current), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() }
+  const props = { ...state, port, onCommitted: vi.fn(async () => {}), onSelectShotId: vi.fn(), onUnsavedChange: vi.fn() }
+  const view = render(<ScenePlanningWorkspace {...props} canonicalDirectorRevision="revision_2" />)
+  expect((await screen.findByLabelText<HTMLTextAreaElement>('运镜设计')).value).toBe('最新运镜')
+  current = { ...current, storyboard: { ...current.storyboard!, id: 'revision_3', version: 3 }, frameRequirements: [
+    { ...current.frameRequirements![0]!, directorPlan: { cameraMovement: 'AI 新运镜', generationContext: '新的当前设定' } },
+  ] }
+  view.rerender(<ScenePlanningWorkspace {...props} canonicalDirectorRevision="revision_3" />)
+  await waitFor(() => { expect(screen.getByLabelText<HTMLTextAreaElement>('运镜设计').value).toBe('AI 新运镜') })
+  fireEvent.change(screen.getByLabelText('运镜设计'), { target: { value: '用户尚未保存的运镜' } })
+  current = { ...current, storyboard: { ...current.storyboard!, id: 'revision_4', version: 4 }, frameRequirements: [
+    { ...current.frameRequirements![0]!, directorPlan: { cameraMovement: '另一份服务端修改' } },
+  ] }
+  view.rerender(<ScenePlanningWorkspace {...props} canonicalDirectorRevision="revision_4" />)
+  await waitFor(() => { expect(port.readScenePlanning).toHaveBeenCalledTimes(3) })
+  expect(screen.getByLabelText<HTMLTextAreaElement>('运镜设计').value).toBe('用户尚未保存的运镜')
+  expect(port.saveScenePlanning).not.toHaveBeenCalled(); expect(port.recoverScenePlanning).not.toHaveBeenCalled()
+})
 function automaticReadState(): ScenePlanningState {
   return { ...state, storyboard: { id: 'revision_10', version: 10, sourceHash: 'b'.repeat(64), status: 'Ready' },
     scenes: [{ sceneIndex: 0, title: '自动雨夜', actionDescription: '角色走进雨夜街道', dialogues: [
@@ -177,7 +230,7 @@ it('saves one automatic shot first-frame requirement, rereads it, and never trea
   await waitFor(() => { expect(onUnsavedChange).toHaveBeenLastCalledWith(true) })
   expect(selector.disabled).toBe(true)
   expect(onSelectShotId).toHaveBeenCalledExactlyOnceWith('automatic_2')
-  fireEvent.click(screen.getByRole('button', { name: '保存首帧画面要求' }))
+  fireEvent.click(screen.getByRole('button', { name: '保存镜头设计' }))
   await waitFor(() => { expect(port.saveScenePlanning).toHaveBeenCalledOnce(); expect(port.readScenePlanning).toHaveBeenCalledTimes(2) })
   expect(port.saveScenePlanning).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({
     action: 'edit_automatic', shotId: 'automatic_2', imagePromptCn: '街道近景的低机位首帧',
@@ -187,6 +240,34 @@ it('saves one automatic shot first-frame requirement, rereads it, and never trea
   expect(selector.value).toBe('automatic_2')
   expect(field.value).toBe('已保存的街道近景首帧')
   expect(screen.getByText(/不生成、不签收/)).toBeTruthy()
+})
+it.each(['完整首帧', ''])('keeps complete automatic direction across disconnection even without a still requirement (%s)', async (imagePromptCn) => {
+  const directorPlan = revisedPlanningState().frameRequirements![0]!.directorPlan!
+  const automatic = { ...automaticReadState(), canonicalStoryboard: { ...automaticReadState().canonicalStoryboard!,
+    shots: [{ id: 'automatic_1', frameNo: 1, title: '门内', imagePromptCn, directorPlan }],
+  } }
+  const port = { readScenePlanning: vi.fn(async () => automatic), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(async (_r: ScenePlanningRequest) => { throw new Error('disconnected') }), recoverScenePlanning: vi.fn() }
+  const props = { ...automatic, port, onCommitted: vi.fn(async () => {}), onSelectShotId: vi.fn(), onUnsavedChange: vi.fn() }
+  const view = render(<ScenePlanningWorkspace {...props} />)
+  fireEvent.change(await screen.findByLabelText('本镜沿用的全片设定'), { target: { value: '' } })
+  fireEvent.change(screen.getByLabelText('对白 1 的语气与表演'), { target: { value: '放轻音量，句末停顿' } })
+  const savedImage = imagePromptCn ? '修改后的完整首帧' : ''
+  if (imagePromptCn) fireEvent.change(screen.getByLabelText('首帧画面要求'), { target: { value: savedImage } })
+  fireEvent.click(screen.getByRole('button', { name: '保存镜头设计' }))
+  await screen.findByRole('alert')
+  const expected = { ...directorPlan, generationContext: '', dialoguePlan: [
+    { ...(directorPlan.dialoguePlan as Record<string, unknown>[])[0], delivery: '放轻音量，句末停顿' },
+  ] }
+  const request = port.saveScenePlanning.mock.calls[0]?.[0]
+  expect(request?.request).toMatchObject({ action: 'edit_automatic', shotId: 'automatic_1',
+    imagePromptCn: savedImage, directorPlan: expected })
+  view.unmount(); render(<ScenePlanningWorkspace {...props} />)
+  expect((await screen.findByLabelText<HTMLTextAreaElement>('对白 1 的语气与表演')).value).toBe('放轻音量，句末停顿')
+  expect(screen.getByLabelText<HTMLTextAreaElement>('本镜沿用的全片设定').value).toBe('')
+  expect(screen.getByLabelText('运镜设计').matches(':disabled')).toBe(true)
+  expect(JSON.parse(localStorage.getItem('qingmu.scene-planning.v1:project_1:episode_1:automatic-frame')!).pending).toEqual(request)
+  expect(port.saveScenePlanning).toHaveBeenCalledOnce(); expect(port.recoverScenePlanning).not.toHaveBeenCalled()
 })
 it('recovers an unknown automatic save against a newer current revision without resubmitting it', async () => {
   const latest = { ...automaticReadState(), storyboard: { id: 'revision_12', version: 12, sourceHash: 'f'.repeat(64), status: 'Ready' as const },
@@ -229,7 +310,7 @@ it('rejects a same-revision automatic receipt with a different source hash and k
   render(<ScenePlanningWorkspace {...automatic} port={port} onCommitted={vi.fn(async () => {})}
     onSelectShotId={vi.fn()} onUnsavedChange={vi.fn()} />)
   fireEvent.change(await screen.findByLabelText('首帧画面要求'), { target: { value: '新首帧要求' } })
-  fireEvent.click(screen.getByRole('button', { name: '保存首帧画面要求' }))
+  fireEvent.click(screen.getByRole('button', { name: '保存镜头设计' }))
   await screen.findByRole('alert')
   expect(localStorage.getItem('qingmu.scene-planning.v1:project_1:episode_1:automatic-frame')).toContain('pending')
 })
