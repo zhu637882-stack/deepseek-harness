@@ -308,7 +308,9 @@ export function ShootingFirstFrame({
     const currentReview = assertFrameReview(await request(`review?${reviewQuery}`), scope.frameId)
     // Same inputs retain the same durable request ID; changed inputs make the
     // old preflight fail source validation. This never sends a generation POST.
-    if (rework) localStorage.setItem(key, JSON.stringify({ preview: fresh, requestId: `shooting-${fresh.preflightId}`, stage: 'prepared' }))
+    if (rework || fresh.referenceMode === 'working') {
+      localStorage.setItem(key, JSON.stringify({ preview: fresh, requestId: `shooting-${fresh.preflightId}`, stage: 'prepared' }))
+    }
     else localStorage.removeItem(key)
     setReview(currentReview); setRequestId(''); setAttempt(undefined); lock.current = false; setPreview(fresh)
   }
@@ -428,7 +430,7 @@ export function ShootingFirstFrame({
         {confirming ? <p role="status">正在保存你的本镜确认…</p>
           : review.preflight.technicalReady && !needsLogin && <button className={css.primary} type="button" onClick={() => { void confirm() }}>确认本镜分镜</button>}
       </>}
-      {review?.accepted === true && requestId && attempt?.task === null && !busy && !confirming &&
+      {(workingReferences || review?.accepted === true) && requestId && attempt?.task === null && !busy && !confirming &&
       <button type="button" onClick={() => {
         if (lock.current) return
         lock.current = true; setBusy(true)

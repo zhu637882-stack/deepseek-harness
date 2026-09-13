@@ -313,3 +313,26 @@ it('chooses exact working images, prepares without signoff, and prevents generat
   expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/submit'))).toHaveLength(1)
   expect(fetcher.mock.calls.some(([path]) => path.endsWith('/confirm'))).toBe(false)
 })
+
+it('recovers an unqueued working request and retains its references across another reload', async () => {
+  const ref = { assetId: 'scene', assetSha256: 'f'.repeat(64), purpose: '保留已选场景', boxes: [] }
+  const working = { ...preview, referenceMode: 'working', referenceBindings: [ref] }
+  const key = `qingmu:shooting-first-frame:${scope.projectId}:${scope.episodeId}:${scope.frameId}`
+  localStorage.setItem(key, JSON.stringify({ preview: working, requestId: `shooting-${preview.preflightId}`, stage: 'submitted' }))
+  const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
+    if (path.includes('/review?')) return Response.json({ ...review, accepted: false })
+    if (path.endsWith('/preview')) {
+      expect(JSON.parse(String(init?.body)).reference_images).toEqual([ref])
+      return Response.json(working)
+    }
+    return Response.json({ ...result, task: null, candidate: null })
+  })
+  vi.stubGlobal('fetch', fetcher)
+  const view = render(<ShootingFirstFrame scope={scope} />)
+  fireEvent.click(await screen.findByRole('button', { name: '重新检查本镜生成条件' }))
+  await screen.findByRole('button', { name: '生成这张首帧（仅一次）' })
+  expect(JSON.parse(localStorage.getItem(key)!)).toMatchObject({ stage: 'prepared', preview: { referenceBindings: [ref] } })
+  view.unmount(); render(<ShootingFirstFrame scope={scope} />)
+  await screen.findByRole('button', { name: '生成这张首帧（仅一次）' })
+  expect(fetcher.mock.calls.some(([path]) => path.endsWith('/submit') || path.endsWith('/confirm'))).toBe(false)
+})
