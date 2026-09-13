@@ -210,21 +210,22 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
   }))
   ctx.tools.register(defineTool({
     name: 'qingmu_view_reference_image',
-    description: 'Inspect one image from the current project catalog using its exact page, asset ID and SHA from qingmu_read_asset_design (before shots) or qingmu_read_reference_draft (shot design). Image-capable directors receive the image; text-only directors receive an attributed visual-model report. Check relevant scene, costume, prop structure or composition before visual decisions. Reports may be mistaken: distinguish observations, inference and unresolved details. No adoption or media generation. A visual-model call consumes normal model allowance; unchanged successful observations are reused.',
+    description: 'Inspect one image from the current project catalog using its exact page, asset ID and SHA from qingmu_read_asset_design (before shots) or qingmu_read_reference_draft (shot design). By default, image-capable directors receive pixels and text-only directors receive an attributed visual-model report. For uncertain contact, structure or spatial evidence, inspection=observer explicitly requests the configured visual observer even when the director can see images; it supplies the image and a separately attributed report, not a binding creative decision. Compare disagreement with visible evidence and keep unknowns explicit. No adoption or media generation. A separate visual-model call consumes normal model allowance; unchanged successful observations are reused. Do not routinely request an observer for every image.',
     parameters: {
       page: { type: 'integer', required: true, description: 'Catalog page containing the image, starting at 1.' },
       assetId: { type: 'string', required: true, description: 'Exact image asset ID from the current project catalog.' },
       assetSha256: { type: 'string', required: true, description: 'Exact SHA256 from that catalog entry.' },
+      inspection: { type: 'string', enum: ['auto', 'observer'], description: 'Omit or auto for ordinary image delivery. observer explicitly requests one configured visual-model reading for uncertain visual evidence; successful unchanged reports are reused.' },
     },
     output: { schema: { type: 'json' }, render: (_args, value) => {
-      const image = value as unknown as { attachment: ImageAttachmentRef; mode: string }
-      return image.mode === 'direct_image'
+      const image = value as unknown as { attachment: ImageAttachmentRef; mode: string; alsoAttachImage?: boolean }
+      return image.mode === 'direct_image' || image.alsoAttachImage
         ? [{ type: 'text', text: JSON.stringify(value) }, { type: 'image', attachment: image.attachment }]
         : [{ type: 'text', text: JSON.stringify(value) }]
     } },
     presentCall: () => ({ card: 'generic', kind: 'read', title: '查看当前项目参考图' }),
     async execute(args, exec) {
-      exactKeys(args, ['page', 'assetId', 'assetSha256'])
+      exactKeys(args, ['page', 'assetId', 'assetSha256', ...('inspection' in args ? ['inspection'] : [])])
       const target = creativeRequest(exec)
       const current = target ? undefined : await ports.readBoundContext(exec)
       const scope = target ? { projectId: target.projectId, episodeId: target.episodeId } : current?.state.binding.scope
@@ -238,7 +239,7 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
       if (!asset || asset.mediaType !== 'reference_image') throw new Error('The selected image and hash are not on this current project catalog page. Read the catalog again.')
       const attachment = await readReferenceImage(ctx, asset, exec, check, ports.referenceVision)
       const inspection = await inspectReferenceImage(ctx, attachment, asset.assetSha256, exec,
-        check, ports.referenceVision)
+        check, ports.referenceVision, args.inspection)
       return ports.boundedJson({ schema: 'qingmu.reference-image.v1', scope,
         assetId: asset.assetId, assetSha256: asset.assetSha256, label: asset.label, attachment,
         ...inspection, originalImageDesign: asset.imageDesign ?? null,

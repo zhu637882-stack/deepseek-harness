@@ -471,6 +471,33 @@ it('gives a text-only director an attributed visual report with reconstructible 
     observerInput: observer.requests[0]?.messages.map(({ role, source, content }) => ({ role, source, content })) }).toMatchSnapshot()
 })
 
+it('lets an image-capable director explicitly obtain and reuse a separate visual reading', async () => {
+  const adapter = new MockAdapter([
+    toolCallResponse('direct', 'qingmu_view_reference_image', imageArgs),
+    toolCallResponse('second-reading', 'qingmu_view_reference_image', { ...imageArgs, inspection: 'observer' }),
+    toolCallResponse('reuse-reading', 'qingmu_view_reference_image', { ...imageArgs, inspection: 'observer' }),
+    textResponse('Compare the attributed observations with the image; the director retains the design decision.'),
+  ])
+  vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'mock', id: 'mock', name: 'mock', inputModalities: ['text', 'image'] })
+  const observer = observerAdapter()
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(imageBytes, { headers: { 'content-type': 'image/png' } }))
+  const h = await harness(adapter, writer(0, { sha256: imageSha, url: imageUrl }), true, observer)
+  await h.run(true)
+  expect(JSON.parse(result(h.agent, 'direct').text)).toMatchObject({ mode: 'direct_image' })
+  const report = JSON.parse(result(h.agent, 'second-reading').text)
+  expect(report).toMatchObject({ mode: 'vision_report', reused: false, alsoAttachImage: true, status: 'completed' })
+  expect(JSON.parse(result(h.agent, 'reuse-reading').text)).toMatchObject({ reused: true, inspectionId: report.inspectionId })
+  expect(observer.requests).toHaveLength(1)
+  expect(observer.requests[0]?.messages[0]?.content.some(c => c.type === 'image')).toBe(true)
+  const tool = h.agent.session.events.find(e => e.type === 'tool/result' && e.data.message.source.callId === 'second-reading')
+  if (tool?.type !== 'tool/result') throw new Error('Missing second visual reading')
+  expect(tool.data.message.content.flatMap(p => p.content)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'image' })]))
+  expect(JSON.stringify(adapter.requests.at(-1)?.messages)).toContain(report.report)
+  expect(JSON.stringify(adapter.requests.at(-1)?.messages)).toContain(report.attachment.attachmentId)
+  expect(tool.data.message.content.flatMap(p => p.content)).toMatchSnapshot()
+  expect(saves(h.upstream)).toHaveLength(0)
+})
+
 it.each(['truncated', 'missing usage', 'switched shot'])('retains observer receipts without misrepresenting %s as a delivered report', async (condition) => {
   const adapter = new MockAdapter([toolCallResponse('view', 'qingmu_view_reference_image', imageArgs), textResponse('未完成当前镜头核验。')])
   const observer = observerAdapter()

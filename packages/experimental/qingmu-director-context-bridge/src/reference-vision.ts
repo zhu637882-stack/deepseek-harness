@@ -1,4 +1,4 @@
-/** Visual observations for directors whose main model accepts only text. */
+/** Attributed visual observations, also available as an explicit second reading. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { createUserMessage, ReasoningEffortId, type TokenUsage } from '@deepseek-ai/dsh-llm'
@@ -24,11 +24,12 @@ const observationPrompt = '你是青木导演的视觉观察员。只依据所�
  * @param assetSha256 - Original catalog image identity before decoder normalization.
  * @param exec - Owning director tool execution and cancellation.
  * @param assertCurrent - Recheck the selected shot before delivering observations.
- * @param config - Optional observer route for a text-only main model.
+ * @param config - Optional deployment-selected observer route.
+ * @param inspection - Explicit observer request, or ordinary capability-based delivery.
  * @returns Projection mode and, when required, a logged visual report with usage.
  */
 export async function inspectReferenceImage(ctx: Context, attachment: ImageAttachmentRef, assetSha256: string,
-  exec: ToolRunContext, assertCurrent: () => void, config?: ReferenceVisionConfig) {
+  exec: ToolRunContext, assertCurrent: () => void, config?: ReferenceVisionConfig, inspection: 'auto' | 'observer' = 'auto') {
   const llm = ctx.get('llm')
   const agent = exec.agent
   if (!llm || !agent) throw new Error('Visual inspection needs the owning director and LLM service.')
@@ -36,13 +37,15 @@ export async function inspectReferenceImage(ctx: Context, attachment: ImageAttac
   if (!route.provider || !route.model) throw new Error('The director model route is unavailable.')
   const model = await llm.resolveModelInfo(route.provider, route.model, exec.signal)
   assertCurrent()
-  if (model.inputModalities?.includes('image')) return { mode: 'direct_image' as const }
-  if (!config) throw new Error('A visual observer must be configured for this text-only director.')
+  const directImage = model.inputModalities?.includes('image') ?? false
+  if (directImage && inspection === 'auto') return { mode: 'direct_image' as const }
+  if (!config) throw new Error('A visual observer must be configured before requesting this inspection.')
+  const imageDelivery = directImage ? { alsoAttachImage: true } : {}
   const inspectionId = digest({ config, assetSha256, observationPrompt })
   const previous = agent.session.events.findLast(event => event.type === 'qingmu-director-vision/result'
     && event.data.inspectionId === inspectionId && event.data.status === 'completed')
   if (previous?.type === 'qingmu-director-vision/result') {
-    return { mode: 'vision_report' as const, observer: config, reused: true, ...previous.data }
+    return { mode: 'vision_report' as const, observer: config, reused: true, ...imageDelivery, ...previous.data }
   }
   const signal = AbortSignal.any([exec.signal, AbortSignal.timeout(config.timeoutMs)])
   const prepared = await llm.prepareCall({ provider: config.provider, model: config.model,
@@ -81,6 +84,6 @@ export async function inspectReferenceImage(ctx: Context, attachment: ImageAttac
   }
   // Retain actual provider completion and usage even if the user changed shots meanwhile.
   assertCurrent()
-  return { mode: 'vision_report' as const, observer: config, reused: false,
+  return { mode: 'vision_report' as const, observer: config, reused: false, ...imageDelivery,
     callId: exec.callId, inspectionId, status: 'completed' as const, report, usage, completionId, error: null }
 }
