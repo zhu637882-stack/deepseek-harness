@@ -50,3 +50,5 @@ The Qingmu distribution defaults new sessions to `deepseek-flash` through the na
 The packaged scene asset method relates set dressing to narrative purpose, functional space and continuity, including intentional emptiness. Its image review distinguishes incomplete design, lost request content and model execution errors. Method delivery alone does not prove visual quality.
 
 The genre supplement follows the six-department method and current script/director decisions. Its numeric ranges and format examples are suggestions, not shot-duration limits or bans on readable text, dialogue or simultaneous camera and actor movement. The resource manifest distinguishes this adaptation from the preserved upstream source.
+
+The visual supplement now selects negative descriptions against the current design, preserves story text and era exceptions, and treats bundled state files as examples. Style labels no longer require generic negative lists; prompt-length adaptation follows the selected model rather than a universal 800-character template. Previous method identities remain resolvable without rewriting saved projects.

@@ -26,7 +26,7 @@
 
 | 编号 | 错误 | 负面关键词 | 预防描述 |
 |------|------|-----------|----------|
-| TE1 | 文字乱码 | garbled text, gibberish, random characters | no readable text, text as texture only |
+| TE1 | 文字内容错误 | unintended wrong characters | 保留指定原文，核对字形、载体和可读时段，必要时局部编辑或合成 |
 | TE2 | 大文字 | large text overlay, billboard text | no large text, no text overlay |
 | TE3 | 水印 | watermark, logo, copyright mark | no watermark, no logo, no signature |
 | TE4 | UI元素 | UI overlay, menu, button, HUD | no UI elements, no HUD |
@@ -59,7 +59,7 @@
 | CE4 | 留白不足 | no breathing room, edge-to-edge | proper margins, breathing room |
 | CE5 | 不对称失衡 | awkward asymmetry, unbalanced composition | balanced composition |
 | CE6 | 风格不一致 | mixed styles, cartoon+realistic mix | consistent style throughout |
-| CE7 | 时代穿帮 | modern elements in historical scene | period-accurate elements only |
+| CE7 | 不符合剧本世界 | unmotivated era mismatch | 核对物件来源，保留剧本明确的穿越或架空例外 |
 | CE8 | 文化穿帮 | cross-cultural elements | culturally accurate details |
 | CE9 | 悬浮物体 | floating objects, unsupported items | grounded objects, proper support |
 | CE10 | 重复元素 | duplicated characters, cloned objects | unique elements |
@@ -107,7 +107,9 @@ color temperature consistency, dramatic contrast where needed
 
 ## 三、负面提示词模板
 
-### 通用负面（所有输出必须包含）
+### 历史缺陷候选（仅按当前设计选择，不自动追加）
+
+服从 `rules/negative-prompt.md`：写实皮肤、清晰度、颗粒、文字和现代元素都不是全作品禁令。剧情文字、穿越例外、玩偶/动漫/水彩和刻意粗粝风格必须保留。
 
 ```
 no watermark, no logo, no random large text, no garbled Chinese text,
@@ -122,7 +124,7 @@ no extra limbs, no missing limbs, no fused fingers, correct fingers count,
 no asymmetrical eyes, no twisted mouth, no extra heads, no third arm
 ```
 
-### GPT Image 强去燥（GPT Image / DALL-E 3 图片平台必须追加）
+### 去燥候选（仅当当前设计要求清洁成像且实际结果有数字噪点）
 
 ```
 clean crisp image, minimal digital noise, no excessive film grain,
@@ -131,7 +133,7 @@ no noise artifacts, crisp rendering, clean edges, no muddy textures,
 no over-sharpening halos, natural sharpness without grain
 ```
 
-> **触发**：当 `image_platform` = GPT Image 2 / DALL-E 3 → 所有图像 prompt 末尾自动追加上述强去燥词。
+> 不按平台名自动追加；胶片颗粒、纸张纹理、笔触及导演指定的粗粝质感不视作噪点。
 
 ### 按格式追加
 

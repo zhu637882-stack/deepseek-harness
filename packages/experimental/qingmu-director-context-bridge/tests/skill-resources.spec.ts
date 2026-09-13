@@ -91,6 +91,22 @@ it('serves the genre supplement with current director authority through the nati
   expect(result.value).toMatchObject({ content: expect.stringContaining('not platform requirements or validation limits') })
 })
 
+it('serves visual adaptation rules without automatic creative filtering', async () => {
+  const app = await reader()
+  const negative = await app.run({ skill: 'ai-visual-director', path: 'rules/negative-prompt.md', lineCount: 200 })
+  expect(negative.isError).toBe(false)
+  expect(negative.value).toMatchObject({
+    content: expect.stringContaining('正面设计与候选负面词冲突时，舍弃冲突的负面词'),
+    nextLine: null,
+  })
+  const state = await app.run({ skill: 'ai-visual-director', path: 'state/format-contract-state.md', lineCount: 100 })
+  expect(state.isError).toBe(false)
+  expect(state.value).toMatchObject({
+    content: expect.stringContaining('不是当前项目状态'),
+    nextLine: null,
+  })
+})
+
 it('keeps released director methods compatible with the installed method without rewriting history', async () => {
   const sources = JSON.parse(await readFile(join(bundle, 'sources.json'), 'utf8')) as {
     skills: Record<string, {

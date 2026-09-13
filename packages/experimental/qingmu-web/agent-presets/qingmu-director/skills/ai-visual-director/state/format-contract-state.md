@@ -1,43 +1,14 @@
-# 格式合同状态（运行时快照）
+# 格式字段示例（不是当前项目状态）
 
-> 每次生成前由 command-gate 写入。生成后由 prompt-qc 对照检查。
+此文件不包含默认片名、年代、镜数、画幅、文字禁令或已批准结论。读取青木当前项目保存的剧本、视觉设定与导演设计来取得真实值；只通过青木现有工具保存，不把本包 state 文件当业务数据库。
 
----
-
-## 当前合同
-
-| 字段 | 值 |
-|------|-----|
-| **output_type** | `full_board` + `character_sheet` + `scene_card` + `video_prompt` |
-| **asset_purpose** | `video_asset`（分镜图/视频 prompt）+ `display_asset`（角色卡/场景图可展示） |
-| **video_safe** | `true`（全部资产可进入视频 @图） |
-| **language** | `zh`（从 api-config.template.env → DEFAULT_LANGUAGE 读取，强制。GPT Image 2 中文原生 → 输出中文 prompt。Midjourney/Flux 英文平台 → 输出英文 prompt。不可跨语言。） |
-| **aspect_ratio** | `16:9` |
-| **required_modules** | 角色卡：角色名+面部DNA+体型+发型+服装；场景图：空间结构+主光源+主色调+固定元素；分镜图：6镜+景别+运镜+灯光+色彩+转场；视频prompt：角色引用+场景引用+分镜描述+平台参数 |
-| **fatal_if_missing** | 角色面部DNA、场景空间结构、分镜数量<6、视频prompt缺少@图引用 |
-| **text_allowed** | `false`（video_asset 禁止文字/边框/HUD） |
-| **border_allowed** | `false` |
-| **hud_allowed** | `false` |
-| **background** | `required`（场景必须包含完整背景） |
-| **density_level** | `2`（情绪类：留白多、焦点明确、背景简化） |
-| **subject_ratio** | `≥40%` |
-
----
-
-## 用户覆盖
-
-| 覆盖项 | 用户要求 | 覆盖默认值 |
-|--------|---------|-----------|
-| `—` | `—` | `—` |
-
----
-
-## 状态标记
-
-| 字段 | 值 |
-|------|-----|
-| **写入时间** | `2026-06-12T00:00:00Z` |
-| **写入方** | `command-gate` |
-| **合同版本** | 参照 `rules/format-contract.md` |
-| **是否已 QC** | `pending` |
-| **QC 结果** | `—` |
+| 字段 | 当前项目如何确定 |
+|------|------------------|
+| output_type / asset_purpose | 本次创作目标及素材用途 |
+| aspect_ratio | 当前项目画幅 |
+| required_modules | 该产出承担的剧情、视觉与引用任务 |
+| text_allowed | 保留剧情文字；制作标注按用途处理 |
+| border_allowed / hud_allowed | 区分镜内叙事设计与展示参考污染 |
+| background / density_level | 当前场景、取景和叙事需要，不限定所有房间同一丰富程度 |
+| language | 所选模型实际支持范围与导演表达 |
+| QC | 当前真实产物审查，不继承示例结论 |

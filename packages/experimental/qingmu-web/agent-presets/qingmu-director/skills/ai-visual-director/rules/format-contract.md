@@ -71,9 +71,9 @@
 | **asset_purpose** | `video_asset` | `video_asset`（文本） | `display_asset`（文本） | `display_asset`（文本） |
 | **video_safe** | ✅ | ✅ | — | — |
 | **aspect_ratio** | `16:9` | —（文本） | —（文本） | —（文本） |
-| **required_modules** | 完整画面 / 无文字 / 无边框 | 镜头序列 / @图引用 / 运镜 / 时长 | 角色名 / 台词 / 节奏标注 | 镜号 / 音效类型 / SD编号 / 时长 |
-| **fatal_if_missing** | 无文字、无边框 | @图引用 | — | — |
-| **text_allowed** | ❌ | ✅（Prompt 文本本身） | ✅ | ✅ |
+| **required_modules** | 完整导演画面 / 无意外施工标注 | 镜头序列 / @图引用 / 运镜 / 时长 | 角色名 / 台词 / 节奏标注 | 镜号 / 音效类型 / SD编号 / 时长 |
+| **fatal_if_missing** | 剧本与导演要求的关键画面信息 | @图引用 | — | — |
+| **text_allowed** | 按剧本与导演设计 | ✅（Prompt 文本本身） | ✅ | ✅ |
 | **border_allowed** | ❌ | — | — | — |
 | **hud_allowed** | ❌ | — | — | — |
 | **background** | 与场景一致 | — | — | — |
@@ -106,7 +106,7 @@
 | 用途 | 标识 | 可进入文字 | 可进入边框/HUD | 可进入视频 @图 | 典型输出 |
 |------|------|-----------|---------------|---------------|---------|
 | **display_asset** | 给人看 | ✅ | ✅ | ❌ | 全案板导演展示版、情绪板、世界观板 |
-| **video_asset** | 给 AI 视频模型 | ❌（施工短标注例外见 full-board-video） | ❌（帧分隔线例外见 full-board-video） | ✅ | 关键帧/首帧/尾帧、全案板视频执行版 |
+| **video_asset** | 给 AI 视频模型 | 剧情文字保留；施工标注按引用用途判断 | ❌（帧分隔线例外见 full-board-video） | ✅ | 关键帧/首帧/尾帧、全案板视频执行版 |
 | **consistency_asset** | 锁定角色/场景 | ✅ 少量标注 | 按版式 | ✅ 全量版直接可用 | 角色卡、三视图、面部一致性、场景卡、服装武器卡 |
 | **marketing_asset** | 海报/封面 | ✅ | ✅ | ❌ 禁止 | 海报 |
 
@@ -115,7 +115,7 @@
 ```
 1. marketing_asset 永远不进视频 @图。
 2. display_asset 不能直接入视频；必须先派生 clean video_asset，或生成 full-board-video 视频执行版。
-3. video_asset 有文字/边框/HUD → 阻断；full-board-video 只允许必要施工短标注和帧分隔线。
+3. 区分剧情文字/镜内界面与误带入的制作标注。前者按导演设计保留，后者修复参考污染；full-board-video 的施工短标注与帧分隔线只服务相应引用。
 4. consistency_asset 的三视图、面部一致性、角色卡、场景卡可直接用；角色卡/场景卡进视频时必须保持 asset_purpose=consistency_asset。
 5. marketing_asset 永远不进视频，poster/cover 不得被写入 video prompt 的 @图引用。
 ```
@@ -132,7 +132,7 @@
 | 默认语言 | `zh`（GPT Image 2 + Seedance = 中文原生） — 强制，不可跨语言 | `api-config.template.env` → `DEFAULT_LANGUAGE` + 平台语言表 |
 | 主体占比 | ≥ 40%（density 1→80%，density 4→无要求） | 本文件 §1 各输出类型 |
 | 背景复杂度 | ≤ density_level 对应值 | `rules/visual-cleanliness.md` §二 |
-| 负面词 | 所有图像 prompt 必须包含 | `rules/negative-prompt.md` |
+| 负面词 | 仅使用与当前设计相容的适用项，可省略 | `rules/negative-prompt.md` |
 | 可复制性 | prompt 文本必须可被直接复制使用，不含解释性文字 | 本文件 |
 
 ### Density 级别参考
@@ -152,7 +152,7 @@
 
 | 错误 | 触发条件 | 修复方向 |
 |------|---------|---------|
-| video_asset 含文字 | keyframe / clean 派生品出现可读文字 | 去文字，重新派生 |
+| 参考标注污染 | keyframe 误出现不属于导演设计的制作说明 | 清理误带入的标注，保留剧情文字 |
 | video_asset 含边框/HUD | 视频参考图有分隔线/面板 | 去边框/HUD，重新派生 |
 | 缺 fatal 模块 | required_modules 中的 fatal_if_missing 项未产出 | 补全缺失模块 |
 | 海报进视频 @图 | poster 的 @图出现在 video prompt | 移除海报 @图，替换为 video_asset |

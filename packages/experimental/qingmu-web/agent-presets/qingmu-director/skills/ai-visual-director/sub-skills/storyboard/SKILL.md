@@ -1012,7 +1012,7 @@ description: 【AI视觉导演】故事板/全案板/分镜图 — 全案板/分
 **参数要求**（GPT Image 高清模式可简化参数，Midjourney/SD 必须全参数）：
 - 画幅/风格/排版/色调/角色DNA 必须写明
 - MJ 版必须尾部追加 `--ar 16:9 --style raw --s 250 --v 6.1`
-- SD 版必须追加 SD 专属负面词
+- SD 版按所选模型能力与当前设计选择适用负面项；不强制追加，不否定已选画风或剧情内容。
 
 **全案板图输出格式**：
 ```
@@ -1135,7 +1135,7 @@ MJ 参数：--ar 16:9 --style raw --s 250 --v 6.1
 @参考：@全案板图 @角色卡 @场景参考图 @分镜图2
 中文 Prompt：...
 ```
-5. 视频完整可复制连续版（≤ {PLATFORM}_MAX_PROMPT_CHARS 字）和平台压缩版（≤ 800字，视频平台通用安全线）为衍生版本，默认不输出。用户可通过「输出连续版」/「输出平台压缩版」指令单独获取。
+5. 视频连续版和平台适配版是衍生版本，按当前模型已核实的容量与导演设计组织；没有通用800字安全线。用户需要时输出，保持与完整设计的对应。
 6. 视频版分镜表中不出现"台词/subtitle/字幕/文字内容"——模型无法稳定生成可读文字，所有台词改为视觉化描述
 
 ### 图像 Prompt 输出规范（强制）
@@ -1157,7 +1157,7 @@ MJ 参数：--ar 16:9 --style raw --s 250 --v 6.1
 ### 视频 Prompt 简化规则
 
 - 视频 Prompt（模块 7）必须精简：完整保留每个镜头的画面、表演、对白、运镜与转场设计，总字数 ≤ {PLATFORM}_MAX_PROMPT_CHARS（从 api-config.template.env 读取目标平台限制）
-- 平台压缩版（按需输出）≤ 800字（视频平台通用安全线，短于各平台硬上限），去掉场景重复描述，仅保留角色DNA+画面+运镜+转场
+- 平台适配版按当前模型限制整理重复表达，保留表演、台词、动作因果、运镜、光影和声音；容量不足时调整路线或由导演安排拆段，不裁掉创作内容。
 - 图像 Prompt（模块 8）可以更详细：每个镜头 3-5 句完整描述
 - 技术参数（焦段/T值/色温）保留在分镜表中，不进入复制 Prompt
 - 复制 Prompt 只保留：角色 DNA + 场景 DNA + 画面描述 + 运镜 + 色彩/灯光 + 负面词
@@ -1264,7 +1264,7 @@ no triumphant posing, no warm victory lighting (when restraint/tragedy is specif
 
 ### 角色 DNA 重复规则（视频连续性核心）
 
-**每个镜头的 Prompt 必须包含角色 DNA 锚定片段**。视频模型跨镜头容易漂移，唯一解是每个 Prompt 都重复相同的角色外貌描述：
+**每个镜头的 Prompt 必须包含角色 DNA 锚定片段**。视频模型跨镜头可能漂移。沿用角色身份锚点，并结合图像/视频引用、声线和当前服化状态；文字重复不是唯一方法，手持物、衣服状态与位置不能从其他时刻直接复制：
 
 ```
 固定 DNA 片段格式（中文）：
@@ -1274,51 +1274,13 @@ no triumphant posing, no warm victory lighting (when restraint/tragedy is specif
 沈照：年轻女捕快，二十五岁，黑发以素银簪束起，深靛蓝武服外罩雨布斗篷，腰间佩窄直刀，眉心一道旧细疤。
 ```
 
-**每个镜头 Prompt 都必须以角色 DNA 中文片段开头**，确保视频工具逐帧生成时角色不漂移。
+按模型引用语法明确本镜涉及的角色；DNA 描述可以辅助引用，不强制每镜以同一模板开头，也不能据此保证生成不漂移。
 
-### 禁文字规则（最高优先级）
+### 画面文字、对白与参考卡标注
 
-所有出图/视频 prompt 中，**绝对禁止**出现需要模型生成的可读文字。画面中如需出现屏幕、标识、书本等内容，改用纯视觉描述：
+当前剧本、世界例外与导演设计决定是否出现可读文字。保留姓名、数字、书页、屏幕、告示、字幕等明确内容，说明载体、位置、透视和可读时段。不要把它们替换为色块、纹理或“无声呢喃”，也不要删去原有对白。
 
-| ❌ 不可用 | ✅ 替代 |
-|-----------|--------|
-| 屏幕显示「提交成功」 | 屏幕弹出一个绿色勾选图标，柔和提示光在屏幕上跳动 |
-| 「Error」「404」 | 红色闪烁提示光、警告状态指示 |
-| 任何可读中文/英文/数字 | 色块/图标/光影条纹/模糊字符纹理 |
-
-**铭文/刻痕/名字专项规则**（防止模型生成乱字，权重最高）：
-
-| ❌ 危险词（立刻替换） | ✅ 安全替代 |
-|---------------------|-----------|
-| inscription / inscribed marks / carved text / written name | abstract scar-like glowing grooves, non-symbolic, non-calligraphic |
-| name / names / characters engraved on the surface | weathered abstract surface markings, unintelligible ancient texture |
-| bell shows a name / surface reads a name | faint luminous grooves pulse on the bronze, shapeless and unreadable |
-| readable mark / legible symbol | eroded groove catching the light, formless and ambiguous |
-
-**核心原则**：描述钟面/石碑/书页/屏幕上的标记时，只能用"沟槽""纹理""光影条纹""色块"，永远不暗示"可读"。
-
-**高频文字泄漏点专项规则**（防止模型在常见物品上自动生成乱码文字）：
-
-| 场景物品 | ❌ 危险写法 | ✅ 安全替代 |
-|---------|-----------|-----------|
-| 工牌/名牌/胸针 | `name tag` `pin-on name badge` `ID card` | `small blank metal badge, no readable text` `无字金属工牌` |
-| 店铺招牌 | `store sign` `neon sign with name` `店招` | `storefront sign cropped, blurred, or only shown as abstract glowing panels, no readable letters` `店招只作为模糊发光色块出现` |
-| 监控屏幕/CCTV | `security monitor` `CCTV footage` | `grainy monochrome image, no timestamp, no REC mark, no CCTV UI text, pure video signal` |
-| 寻人启事/海报 | `missing poster with name` `寻人启事上的文字` | `weathered poster with a blurred photograph, abstract wear patterns where text would be` `褪色海报，照片模糊，文字区域已磨损为抽象纹理` |
-| 硬币/纸币 | `coin with date` `old coin with text` | `old tarnished coin, any surface marks are worn smooth and unintelligible` |
-| 书本/报纸 | `newspaper headline` `book page with text` | `pages shown only as abstract blocks of grey tone, no readable content` |
-
-**字幕/台词禁令**：所有 Prompt 中禁止出现以下描述：
-- `subtitle can say her line` / `a subtitle shows` / `text overlay` → 全部替换为 `lips barely moving, silent murmur, no visible text`
-- 模型无法稳定生成可读字幕，字幕必须在后期剪辑中添加
-
-**强制扫描**：生成 Prompt 后必须逐句扫描，发现以下模式立即替换：
-- 引号内的中文 `「...」` → 检查是否为屏幕/书本/标识文字，是则替换为视觉描述
-- 引号内的英文 `"... "` → 同上
-- 数字序列（如 `404` `200` `500`）→ 替换为颜色+光影状态
-- 屏幕内容描述含 `display` `written` `showing` `reading` `reads` + 具体内容 → 替换为图标/光影/色块
-- **铭文/刻痕/名字描述含 `inscription` `name` `carved text` `written` `readable` `legible` `symbol` `character` → 替换为 `abstract grooves` `scar-like marks` `non-symbolic surface texture`**
-- 扫描不通过不输出。此项权重最高，出现一次扣 2 分。
+出图后核对实际字形与含义；模型不稳定时选择正确文字资产、局部编辑或后期跟踪合成，保留完整创作意图。不要因历史模型失败就预先断言所有模型不能生成文字。仅清除非导演要求、从展示参考中误带入的水印、说明字、分格线和施工标注。
 
 ### 禁动作规则（防止情绪跑偏）
 
@@ -1383,7 +1345,7 @@ no supernatural distortion — just a soft reflection, like looking through a we
 
 - **视频完整可复制连续版**（≤ {PLATFORM}_MAX_PROMPT_CHARS 字，中文，长度=当前平台上限）：用户输入 `输出连续版` 时触发。所有镜头合并为一条连续中文 prompt。
 - **视频完整可复制英文版**（≤ {PLATFORM}_MAX_PROMPT_CHARS 字，英文）：用户输入 `输出英文版` 时触发。所有镜头合并为一条连续英文 prompt，含角色DNA+场景DNA+运镜+转场+色彩。
-- **平台压缩版**（≤ 800字，视频平台通用安全线，短于各平台硬上限）：用户输入 `输出平台压缩版` 时触发。去掉场景重复描述、焦段信息、色彩渐变细节，只保留角色DNA片段 + 每镜关键画面描述 + 运镜 + 转场 + 核心负面词。标注 `【平台压缩版 · 直接复制到 Seedance / Runway / 可灵】`。如镜数≥6且平台上限紧张，建议标注"稳定性提示：可压缩为5镜"。
+- **平台适配版**：按当前所选模型的官方字符/时长/引用限制整理，不使用“通用 800 字”假设。不丢对白、运镜、焦段、光影、动作因果或时空关系；仅合并重复表达并保留与原设计的对应。仍超限时更换可承载的路线或由导演安排拆段，完整设计保持可追溯。
 
 ### 输出后交互提示
 

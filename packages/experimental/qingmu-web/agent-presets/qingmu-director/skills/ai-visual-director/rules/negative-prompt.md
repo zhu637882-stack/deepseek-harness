@@ -2,7 +2,9 @@
 
 根据选择的风格/格式/关系，自动生成该场景专属的负面提示词，不只是通用的。
 
-## 通用负面词（所有输出必加）
+## 缺陷候选（逐项判断，不自动追加）
+
+青木适配：本表是历史示例，不是筛词器。先区分画面中真实存在的文字、标志、道具、人物与误生成的水印、重复肢体、施工标注。保留剧本指定的文字原文和年代例外；画风、关系或平台名称不能自动禁止场景、色彩、动作或材质。正面设计与候选负面词冲突时，舍弃冲突的负面词，不删改导演设计。
 
 ```
 no watermark, no logo, no random large text, no garbled Chinese, no broken faces,
@@ -11,7 +13,9 @@ no speech bubbles (unless manga format), no cartoon style (unless specified),
 no flat illustration, no marketing poster style
 ```
 
-## 🔴 角色图专属负面词（所有人物角色 Prompt 必加）
+## 写实人物的候选缺陷词（仅适用于当前设计）
+
+陶瓷、玩偶、动漫、水彩、修饰人像等设计不受下列皮肤模板限制。
 
 ```
 no airbrushed skin, no beauty filter, no plastic doll skin,
@@ -19,7 +23,9 @@ no smooth featureless face, no over-smoothed skin texture,
 no digital skin retouching, no perfect porcelain skin
 ```
 
-## 按风格追加负面词
+## 历史风格候选词（风格名不触发自动追加）
+
+下表刻画的是某些单一风格的示例，不定义该题材能出现什么。古代穿越角色的现代道具、科幻中的自然景观、当代胶片影像、动漫中的写实光影，都按具体剧本与导演设计保留。
 
 | 风格 | 追加负面词 |
 |------|-----------|
@@ -88,7 +94,7 @@ extra digits, fewer digits, cropped, jpeg artifacts, signature, watermark, usern
 
 ## 在 Prompt 中使用
 
-在 prompt 结尾追加：
+只有明确发现与当前设计相悖的生成倾向时才使用适用项；不拼接所有类别。先核对模型是否支持独立负面参数；不支持时，用清楚的正面表达说明正确外观或修复目标。以下组合不是必填模板：
 
 ```
 负面提示词：[通用负面词] + [风格追加] + [格式追加] + [关系追加] + [平台追加]
