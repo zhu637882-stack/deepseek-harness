@@ -480,6 +480,35 @@ it('shows failed project reads in shooting and recovers the same typed request w
   expect(port.saveScenePlanning).not.toHaveBeenCalled()
   expect(port.recoverScenePlanning).not.toHaveBeenCalled()
 })
+it.each([false, true])('binds shooting to its saved room across scenes without restoring planner selection (currentFrames=%s)', async (currentFrames) => {
+  const first = revisedPlanningState().planning!
+  const second = { ...first, sceneId: 'scene_2', sceneIndex: 2, shots: [{ ...first.shots[0]!, id: 'shot_2' }] }
+  const current: ScenePlanningState = { ...state, storyboard: revisedPlanningState().storyboard,
+    planning: first, scenePlans: [first, second], ...(currentFrames ? {
+      frameRequirements: [{ id: 'shot_2', sceneId: 'rebound_room', frameNo: 2, title: '窗边', imagePromptCn: '窗前起始画面' }],
+    } : {}) }
+  const port = { readScenePlanning: vi.fn(async () => current), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn(),
+    requestDirectorProposal: unavailableDirectorProposal(), checkDirectorProposalFreshness: unusedFreshness() }
+  const transport = directorConnectionFixture(), bridge = replayBridge()
+  const native = { connection: transport.source, activate: vi.fn(), prompt: vi.fn(async () => {}) }
+  const scope = { projectId: 'project_1', episodeId: 'episode_1', sceneId: currentFrames ? 'rebound_room' : 'scene_2', shotId: 'shot_2' }
+  const onSelectShotId = vi.fn()
+  const props = { ...current, presentation: 'assistant' as const, port, directorBridge: bridge, directorSessionId: 'session_1',
+    directorConnection: transport.source, nativeDirectorSession: native, canonicalDirectorScope: scope,
+    onCommitted: vi.fn(async () => {}), onSelectShotId, onUnsavedChange: vi.fn() }
+  const view = render(<ScenePlanningWorkspace {...props} />)
+  fireEvent.change(screen.getByLabelText('导演要求'), { target: { value: '从当前房间反拍' } })
+  await waitFor(() => expect(screen.getByRole('button', { name: '发送给当前导演' })).toHaveProperty('disabled', false))
+  expect(bridge.enter).toHaveBeenLastCalledWith('session_1', scope, expect.any(AbortSignal), expect.any(String))
+  expect(onSelectShotId).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '发送给当前导演' }))
+  await waitFor(() => expect(native.prompt).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ scope }), '从当前房间反拍', expect.any(AbortSignal)))
+  view.rerender(<ScenePlanningWorkspace {...props} canonicalDirectorScope={{ ...scope, sceneId: 'scene_1' }} />)
+  expect(screen.getByRole('button', { name: '发送给当前导演' })).toHaveProperty('disabled', true)
+  expect(port.saveScenePlanning).not.toHaveBeenCalled()
+  expect(port.recoverScenePlanning).not.toHaveBeenCalled()
+})
 it('binds canonical shot selection to the current session without opening the legacy planner', async () => {
   const automatic = automaticReadState()
   const port = { readScenePlanning: vi.fn(async () => automatic), requestDirectorProposal: unavailableDirectorProposal(),

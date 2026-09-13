@@ -430,10 +430,13 @@ export function ScenePlanningWorkspace({
   const current = local?.shots[index]
   const currentShotId = local?.shotIds[index]
   const canonicalStoryboard = state?.canonicalStoryboard ?? null
-  const assistantShotExists = canonicalStoryboard
-    ? canonicalStoryboard.shots?.some(shot => shot.id === canonicalDirectorScope?.shotId)
-    : state?.planning?.sceneId === canonicalDirectorScope?.sceneId
-      && state?.planning?.shots.some(shot => shot.id === canonicalDirectorScope?.shotId)
+  const assistantShotExists = state?.frameRequirements !== undefined
+    ? state.frameRequirements.some(shot => shot.id === canonicalDirectorScope?.shotId && shot.sceneId === canonicalDirectorScope?.sceneId)
+    : canonicalStoryboard
+      ? canonicalStoryboard.shots?.some(shot => shot.id === canonicalDirectorScope?.shotId
+        && (shot.sceneId === undefined || shot.sceneId === canonicalDirectorScope?.sceneId))
+      : (state?.scenePlans ?? (state?.planning ? [state.planning] : [])).some(plan => plan.sceneId === canonicalDirectorScope?.sceneId
+        && plan.shots.some(shot => shot.id === canonicalDirectorScope?.shotId))
   const directorScope: DirectorObjectScope | null = presentation === 'assistant'
     ? assistantShotExists && canonicalDirectorScope?.projectId === projectId && canonicalDirectorScope.episodeId === episodeId
       ? canonicalDirectorScope : null
@@ -450,7 +453,8 @@ export function ScenePlanningWorkspace({
     ? canonicalStoryboard?.shots?.find(shot => shot.id === directorScope?.shotId)
     : canonicalStoryboard?.shots?.find(shot => shot.id === automatic?.shotId) ?? canonicalStoryboard?.shots?.[0]
   const nativeTarget = planningReadError === '' && directorStatus === 'current' && directorBinding && directorSessionId
-    && (canonicalStoryboard === null || (visibleAutomaticShot !== undefined && visibleAutomaticShot.id === directorScope?.shotId))
+    && (presentation === 'assistant' ? assistantShotExists
+      : canonicalStoryboard === null || (visibleAutomaticShot !== undefined && visibleAutomaticShot.id === directorScope?.shotId))
     && directorReadyIdentity?.key === directorIdentityKey && directorReadyIdentity.connection === connection
     ? { schema: 'qingmu.native-director-request.v1' as const, sessionId: directorSessionId,
       scope: directorBinding.binding.scope, contextSnapshotSha256: directorBinding.binding.contextSnapshotSha256,

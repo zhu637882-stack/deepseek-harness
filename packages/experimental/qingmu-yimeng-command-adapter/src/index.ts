@@ -3014,6 +3014,8 @@ interface FetchJsonRequest {
   readonly body?: string
   readonly idempotencyKey?: string
   readonly maxResponseBytes?: number
+  /** Read-only preparation can explain a rejected creative input without retrying it. */
+  readonly exposeValidationDetail?: boolean
 }
 
 async function fetchJson(
@@ -3065,7 +3067,9 @@ async function fetchJson(
       return internalError('Yimeng authentication failed')
     }
     if (!response.ok) {
-      const code = safeUpstreamCode(value)
+      const detail = request.exposeValidationDetail && response.status === 409 && isJsonObject(value)
+        && typeof value.detail === 'string' && value.detail.length <= 2048 ? value.detail : undefined
+      const code = detail ?? safeUpstreamCode(value)
       return internalError(`Yimeng rejected command (HTTP ${String(response.status)}${code === undefined ? '' : `: ${code}`})`)
     }
     if (invalidJson) return internalError('Yimeng service returned invalid JSON')
@@ -5863,7 +5867,7 @@ export function createYimengCommandHandler(
       } else if (endpoint === 'previewShootingFirstFrame') {
         const prepared = prepareShootingFirstFramePreview(payload, stageArtifactHelpers)
         path = prepared.path
-        requestInit = { method: prepared.method, body: serializeBody(prepared.body) }
+        requestInit = { method: prepared.method, body: serializeBody(prepared.body), exposeValidationDetail: true }
         normalize = prepared.normalize
       } else if (['readScenePlanning', 'saveScenePlanning', 'recoverScenePlanning'].includes(endpoint)) {
         const prepared = prepareScenePlanning(endpoint, payload, stageArtifactHelpers)

@@ -2,6 +2,8 @@
 
 The shot director offers “整理首帧画面” alongside video-draft preparation. Selecting it fills a recoverable instruction without sending. After explicit send, the director reads current sources, saves the starting image through existing plan tools and checks the actual image preparation. The instruction preserves video movement, performance, dialogue and sound; it requests no media generation or adoption.
 
+The shooting assistant resolves any selected scene from current frame bindings, with a legacy scene-plan fallback only when current frames are absent. It does not consume another scene’s planning selection. First-frame instructions use actual model rejection details to reconcile duplicate descriptions while preserving the directing design.
+
 Failed planning reads are visible in the shooting assistant, disable sending and offer a read-only retry that preserves the typed request. A connected native session alone does not mean the project is readable.
 
 Scene planning and existing-shot reconciliation ask the director to author generationContext from all relevant film, world, asset and department sources. Production uses this explicit segment context instead of repeating the whole film's actions; all current-shot execution fields remain complete. Missing legacy context is retained until deliberately revised. The source and saved prompt remain inspectable, and authored completeness still requires review.

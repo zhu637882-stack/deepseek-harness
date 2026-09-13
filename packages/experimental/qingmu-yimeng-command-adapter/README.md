@@ -2,6 +2,8 @@
 
 `previewShootingFirstFrame` exposes the existing shooting preview to native commands. It accepts scoped identities and exact working-image references, preserves order and purpose, validates returned shot identity and input hashes, and rejects reflected credentials. Submission and adoption remain separate.
 
+First-frame preparation returns bounded, credential-redacted validation details for HTTP 409. The director can distinguish input length, reference and scene errors; the adapter does not retry or expose unrelated server diagnostics.
+
 Working-cut shots may carry editorialContext, the director-authored adjoining-segment edit notes. The value is passed through without turning it into an applied edit or altering retained cut revisions.
 
 Each shot exposes selectedAssetId: the same-frame source of its chosen Take, matched by source ID and SHA, or null when unavailable. Existing cuts retain independent editorial choices.
