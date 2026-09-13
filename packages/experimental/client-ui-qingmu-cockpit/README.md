@@ -1,5 +1,7 @@
 # Qingmu OS production cockpit
 
+Shared director-context source tracking, reconciliation and legacy behavior are documented in the [implementation note](../../../.agents/notes/implemented/feature/2026-09-14-qingmu-shared-director-context.md).
+
 The shot director offers “整理首帧画面” alongside video-draft preparation. Selecting it fills a recoverable instruction without sending. After explicit send, the director reads current sources, saves the starting image through existing plan tools and checks the actual image preparation. The instruction preserves video movement, performance, dialogue and sound; it requests no media generation or adoption.
 
 The shooting assistant resolves any selected scene from current frame bindings, with a legacy scene-plan fallback only when current frames are absent. It does not consume another scene’s planning selection. First-frame instructions use actual model rejection details to reconcile duplicate descriptions while preserving the directing design.

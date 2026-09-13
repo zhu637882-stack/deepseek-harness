@@ -1,5 +1,7 @@
 # Qingmu Yimeng command adapter
 
+Shared director-context source tracking, reconciliation and legacy behavior are documented in the [implementation note](../../../.agents/notes/implemented/feature/2026-09-14-qingmu-shared-director-context.md).
+
 `previewShootingFirstFrame` exposes the existing shooting preview to native commands. It accepts scoped identities and exact working-image references, preserves order and purpose, validates returned shot identity and input hashes, and rejects reflected credentials. Submission and adoption remain separate.
 
 First-frame preparation returns bounded, credential-redacted validation details for HTTP 409. The director can distinguish input length, reference and scene errors; the adapter does not retry or expose unrelated server diagnostics.

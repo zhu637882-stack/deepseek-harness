@@ -44,6 +44,12 @@ export type PlanningOperation = PlanningBase & (
     /** Apply supplied creative fields, including deliberate restoration of original values. Omission preserves legacy comparison. */
     readonly applyDirectorPlan?: true }
 )
+/** Shared creative source tracking; freshness does not establish creative correctness. */
+export interface GenerationContextSource {
+  readonly state: 'not_applicable' | 'untracked' | 'current' | 'changed'
+  readonly sha256: string
+  readonly changes: readonly string[]
+}
 /** One editable first-frame requirement owned by an existing automatic shot. */
 export interface AutomaticPlanningShot {
   readonly id: string
@@ -60,6 +66,8 @@ export interface AutomaticPlanningShot {
   readonly directorPlan?: YimengCommandJsonObject
   readonly narrative?: string
   readonly firstFrameCandidateCount?: number
+  /** Current world/identity/layout basis compared with the authored context. */
+  readonly generationContextSource?: GenerationContextSource
 }
 /** This command edits one automatic frame requirement; it never carries imported scene fields. */
 export interface AutomaticPlanningOperation {
@@ -76,6 +84,8 @@ export interface AutomaticPlanningOperation {
   readonly coveragePlan?: string
   /** Patch creative fields in the canonical plan; script and provenance retain their owners. */
   readonly directorPlan?: YimengCommandJsonObject
+  /** Explicit reconciliation against the shared source read with this shot. */
+  readonly expectedGenerationContextSourceSha256?: string
 }
 /** Requirements for a verified manually planned frame, independent of script planning edits. */
 export interface PlannedFrameRequirementsOperation extends Omit<AutomaticPlanningOperation, 'action'> {
@@ -238,6 +248,12 @@ function frameRequirements(value: unknown, fail: Fail): void {
     if (typeof frame.imagePromptCn !== 'string' || frame.imagePromptCn.length > 20000) throw fail('canonical storyboard image prompt invalid')
     if (frame.firstFrameCandidateCount !== undefined) integer(frame.firstFrameCandidateCount, fail)
     if (frame.directorPlan !== undefined) obj(frame.directorPlan, fail)
+    if (frame.generationContextSource !== undefined) {
+      const source = obj(frame.generationContextSource, fail)
+      if (!['not_applicable', 'untracked', 'current', 'changed'].includes(String(source.state))) throw fail('director context source state invalid')
+      digest(source.sha256, fail)
+      if (!Array.isArray(source.changes) || source.changes.some(value => typeof value !== 'string')) throw fail('director context changes invalid')
+    }
     for (const field of ['blocking', 'cameraAngle', 'cameraMovement', 'coveragePlan', 'narrative']) {
       if (frame[field] !== undefined && (typeof frame[field] !== 'string' || frame[field].length > 20000)) throw fail('canonical shooting field invalid')
     }
@@ -296,11 +312,15 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
     integer(r.expectedStoryboardRevision, f)
     if ((r.action === 'edit_automatic' || r.action === 'edit_requirements')) {
       const required = ['action', 'expectedScriptRevision', 'expectedScriptSha256', 'expectedStoryboardRevision', 'expectedStoryboardSha256', 'imagePromptCn', 'shotId']
-      if (required.some(key => !(key in r)) || Object.keys(r).some(key => ![...required, 'blocking', 'cameraAngle', 'cameraMovement', 'coveragePlan', 'directorPlan'].includes(key))) throw f('automatic planning fields invalid')
+      if (required.some(key => !(key in r)) || Object.keys(r).some(key => ![...required, 'blocking', 'cameraAngle', 'cameraMovement', 'coveragePlan', 'directorPlan', 'expectedGenerationContextSourceSha256'].includes(key))) throw f('automatic planning fields invalid')
       if (r.directorPlan !== undefined) {
         const plan = obj(r.directorPlan, f)
         if (Object.keys(plan).some(key => key.startsWith('_') || ['scenePlanning', 'sourceBinding', 'creativePlanSchema', 'clearedShootingFields', 'runtimeRepairDirectives', 'promptRepairHistory'].includes(key))) throw f('director plan metadata is not editable')
         if (Buffer.byteLength(canonicalPlanningJson(plan, f)) > 65536) throw f('director plan too large')
+      }
+      if (r.expectedGenerationContextSourceSha256 !== undefined) {
+        digest(r.expectedGenerationContextSourceSha256, f)
+        if (typeof obj(r.directorPlan, f).generationContext !== 'string') throw f('director context reconciliation missing')
       }
       for (const field of ['blocking', 'cameraAngle', 'cameraMovement', 'coveragePlan']) {
         if (r[field] !== undefined && (typeof r[field] !== 'string' || r[field].length > 2000)) throw f('automatic shooting field invalid')

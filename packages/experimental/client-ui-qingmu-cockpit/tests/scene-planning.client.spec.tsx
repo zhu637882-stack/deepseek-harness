@@ -1062,3 +1062,19 @@ it('waits for the project and episode before reading scene planning', async () =
   await waitFor(() => { expect(port.readScenePlanning).toHaveBeenCalledTimes(1) })
   expect(port.readScenePlanning.mock.calls[0]).toEqual([{ projectId: state.projectId, episodeId: state.episodeId }])
 })
+
+
+it('shows affected director contexts from current sources while preserving the saved shot', async () => {
+  const original = revisedPlanningState()
+  const current: ScenePlanningState = { ...original, frameRequirements: original.frameRequirements!.map(shot => ({ ...shot,
+    generationContextSource: { state: 'changed', sha256: 'f'.repeat(64), changes: ['素材 工作室 [scene_1]'] } })) }
+  const port = { readScenePlanning: vi.fn(async () => current), requestDirectorProposal: unavailableDirectorProposal(),
+    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn() }
+  render(<ScenePlanningWorkspace {...state} port={port} onCommitted={vi.fn(async () => {})}
+    onSelectShotId={vi.fn()} onUnsavedChange={vi.fn()} />)
+  const notice = await screen.findByRole('region', { name: '共用设定同步状态' })
+  expect(notice.textContent).toContain('需要同步（素材 工作室 [scene_1]）')
+  expect(notice.textContent).toContain('同步共用设定')
+  expect(screen.getByLabelText<HTMLTextAreaElement>('本镜沿用的全片设定').value).toBe(current.frameRequirements![0]!.directorPlan!.generationContext)
+  expect(port.saveScenePlanning).not.toHaveBeenCalled()
+})

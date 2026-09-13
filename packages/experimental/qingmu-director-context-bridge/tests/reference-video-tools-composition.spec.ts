@@ -791,6 +791,47 @@ it.each(['current', 'missing', 'changed', 'unavailable'])(
   },
 )
 
+it('carries the shared source read into the actual director save command', async () => {
+  const upstream = writer()
+  const source = { sha256: '4'.repeat(64), prompt: '当前世界改为西侧入口，保留剧本改造例外。', generationPrompt: '沿西侧门进入。' }
+  upstream.setDirectorSource(source)
+  const originalFetch = upstream.fetch.getMockImplementation()!
+  const currentSource = { state: 'changed', sha256: '6'.repeat(64), changes: ['剧本世界与例外'] }
+  let readReceipt = ''
+  upstream.fetch.mockImplementation(async (input, init) => {
+    const response = await originalFetch(input, init)
+    const url = new URL(input instanceof Request ? input.url : input)
+    if (url.pathname.endsWith('/scene-planning')) {
+      const body = await response.json() as typeof planning
+      const shots = body.frameRequirements.map(shot => ({ ...shot, generationContextSource: currentSource }))
+      const value = { ...body, frameRequirements: shots, canonicalStoryboard: { ...body.canonicalStoryboard, shots } }
+      readReceipt = sha({ scope, context, planning: value })
+      return Response.json(value)
+    }
+    return response
+  })
+  // The fixture's initial read receipt is deterministic, including current source status.
+  const shots = planning.frameRequirements.map(shot => ({ ...shot, generationContextSource: currentSource }))
+  const expectedReceipt = sha({ scope, context, planning: { ...planning, frameRequirements: shots,
+    canonicalStoryboard: { ...planning.canonicalStoryboard, shots } } })
+  const adapter = new MockAdapter([
+    toolCallResponse('shared-read', 'qingmu_read_director_plan', {}),
+    toolCallResponse('shared-film', 'qingmu_read_reference_draft', { page: 1 }),
+    toolCallResponse('shared-save', 'qingmu_save_director_plan', { receiptId: expectedReceipt,
+      directorPlan: { generationContext: source.prompt, cameraMovement: '沿西侧入口跟拍' } }),
+    textResponse('已保存当前镜头的设定同步稿。'),
+  ])
+  const h = await harness(adapter, upstream); await h.run(true)
+  expect(readReceipt).toBe(expectedReceipt)
+  expect(result(h.agent, 'shared-save').error, result(h.agent, 'shared-save').text).toBe(false)
+  const read = JSON.parse(result(h.agent, 'shared-read').text)
+  expect(read.planning.frameRequirements[0].generationContextSource).toEqual(currentSource)
+  expect(read.planning.frameRequirements[0].generationContextSource).toMatchSnapshot('shared creative source status delivered to director')
+  const calls = upstream.fetch.mock.calls.filter(([input]) => new URL(input instanceof Request ? input.url : input).pathname.endsWith('/scene-planning/commands'))
+  expect(calls).toHaveLength(1)
+  expect(JSON.parse(String(calls[0]?.[1]?.body)).request.expectedGenerationContextSourceSha256).toBe(currentSource.sha256)
+})
+
 it.each([false, true])('uses the film source delivered together with bound image pixels (changed=%s)', async (changed) => {
   const fixture = structuredClone({ request, response, savedDraft })
   fixture.savedDraft.draft.request.bindings = fixture.savedDraft.draft.request.bindings.map(binding =>

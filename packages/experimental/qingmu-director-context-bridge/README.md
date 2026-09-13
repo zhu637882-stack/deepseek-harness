@@ -1,5 +1,7 @@
 # Qingmu director context bridge
 
+Shared director-context source tracking, reconciliation and legacy behavior are documented in the [implementation note](../../../.agents/notes/implemented/feature/2026-09-14-qingmu-shared-director-context.md).
+
 The director inspects the complete first-frame input with `qingmu_preview_first_frame`, using the shooting page image preparation. Ordered working-image IDs, hashes and purposes are explicit. Reconcile the full film source, current scene and starting state through the existing plan save, then inspect the actual compiled prompt. Preparation submits no image task; checking prose does not establish pixel quality.
 
 A consumed director turn can continue through several successful plan or dialogue saves. Before refreshing, its binding may match an earlier linked save receipt in that same turn; after refreshing, it must match the latest committed context. This prevents repeated editing from blocking itself without accepting unrelated source changes, stale refreshes or queued requests for an old target.

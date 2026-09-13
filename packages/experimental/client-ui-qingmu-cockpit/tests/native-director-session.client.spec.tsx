@@ -368,3 +368,18 @@ it('offers starting-image reconciliation to the current director and restores th
   fireEvent.click(screen.getByRole('button', { name: '发送给当前导演' }))
   await waitFor(() => expect(prompt).toHaveBeenCalledExactlyOnceWith(f.target, value, expect.any(AbortSignal)))
 })
+
+
+it('prepares shared-source reconciliation without sending or discarding an existing request', async () => {
+  const f = fixture(false, 'qingmu-director')
+  const prompt = vi.fn(async () => undefined)
+  render(<NativeDirectorComposer port={{ ...f.port, prompt }} sessionId="s1" scopeKey="shot1" target={f.target} ready />)
+  fireEvent.click(screen.getByRole('button', { name: '同步共用设定' }))
+  const input = screen.getByLabelText<HTMLTextAreaElement>('导演要求')
+  expect(input.value).toMatchSnapshot('shared world and director reconciliation request')
+  expect(input.value).toContain('不能只更新设定文字而留下相反机位或站位')
+  expect(screen.getByRole('button', { name: '整理首帧画面' }).hasAttribute('disabled')).toBe(true)
+  expect(prompt).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '发送给当前导演' }))
+  await waitFor(() => expect(prompt).toHaveBeenCalledExactlyOnceWith(f.target, expect.stringContaining('同步当前镜头'), expect.any(AbortSignal)))
+})

@@ -226,7 +226,9 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
         shotId: input.scope.shotId, imagePromptCn: args.imagePromptCn ?? shot.imagePromptCn,
         expectedScriptRevision: input.planning.scriptRevision, expectedScriptSha256: input.planning.scriptSha256,
         expectedStoryboardRevision: input.planning.storyboard.version, expectedStoryboardSha256: input.planning.storyboard.sourceHash,
-        directorPlan: args.directorPlan }
+        directorPlan: args.directorPlan,
+        ...(typeof args.directorPlan.generationContext === 'string' && shot.generationContextSource
+          ? { expectedGenerationContextSourceSha256: shot.generationContextSource.sha256 } : {}) }
       const coordinates = { projectId: input.scope.projectId, episodeId: input.scope.episodeId,
         idempotencyKey: `qingmu-director-${digest({ sessionId: session.id, receiptId: args.receiptId, request })}`, request } as YimengCommandJsonObject
       const recovered = await ctx.qingmuYimengCommand('recoverScenePlanning', coordinates, exec.signal)

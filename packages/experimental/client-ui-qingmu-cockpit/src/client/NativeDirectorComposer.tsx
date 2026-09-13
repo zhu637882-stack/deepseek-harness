@@ -6,6 +6,13 @@ import { useDirectorConnection, type NativeDirectorSessionPort } from './native-
 import { NativeDialogueProgress } from './NativeDialogueProgress.tsx'
 import css from './NativeDirectorComposer.module.css'
 
+const sharedContextPrompt = [
+  '请同步当前镜头与最新共用设定。先用 qingmu_read_director_plan 查看 generationContextSource 与完整原设计，再用 qingmu_read_reference_draft 读取当前剧本、全片方法、世界事实、例外与资产设计。',
+  '根据剧本与导演意图协调矛盾；保留明确的穿越、改造、移动、梦境等例外，不能把固定布局变成创作禁令。只修改确实受影响的内容，保留原稿中的叙事、表演、对白与声音。',
+  '逐项检查 generationContext、首帧 imagePromptCn/imageStage/imageCamera、visual、blocking、cameraAngle、cameraMovement、actionBeats、continuity.start/end 的方位、尺度、接触与动作前后关系；不能只更新设定文字而留下相反机位或站位。',
+  '通过 qingmu_save_director_plan 保存核对后的 generationContext 及受影响字段，沿用当前读取回执；即使核对后文字无需改变，也显式保存该 context 以记录本次依据。读取保存结果并预览实际首帧输入，检查没有再混入旧版本。',
+  '这是当前镜头的共用设定同步，不生成新媒体，不更换已选素材；其他受影响镜头仍需各自按其剧本时刻与导演意图同步，不能声称已自动更新全片。',
+].join('\n')
 const pendingKey = 'qingmu.native-director-unconfirmed.v1'
 const unknownNotice = '上次发送结果尚未确认，可能已进入原会话。请核对原会话后再解除发送保护，勿重复发送。'
 const cutSoundPrompt = [
@@ -76,6 +83,11 @@ export function NativeDirectorComposer({ port, sessionId, scopeKey, ready, targe
     }
   }
   return <section className={css.composer} aria-label={mode === 'cut-sound' ? '向整片声音导演提要求' : '向当前镜头的导演提要求'}>
+    {mode === 'shot' && <button type="button" disabled={busy || !!text.trim()} onClick={() => {
+      setDraft({ key: draftKey, text: sharedContextPrompt })
+      try { sessionStorage.setItem(draftKey, sharedContextPrompt) }
+      catch { setNotice('要求已填入；浏览器暂时无法保留，离开前请复制。') }
+    }}>同步共用设定</button>}
     {mode === 'shot' && <button type="button" disabled={busy || !!text.trim()} onClick={() => {
       setDraft({ key: draftKey, text: firstFrameDirectorPrompt })
       try { sessionStorage.setItem(draftKey, firstFrameDirectorPrompt) }

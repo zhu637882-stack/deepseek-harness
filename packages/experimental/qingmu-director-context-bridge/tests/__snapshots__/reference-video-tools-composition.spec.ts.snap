@@ -313,6 +313,16 @@ exports[`carries a video reference through the native director read, preview, sa
 }
 `;
 
+exports[`carries the shared source read into the actual director save command > shared creative source status delivered to director 1`] = `
+{
+  "changes": [
+    "剧本世界与例外",
+  ],
+  "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+  "state": "changed",
+}
+`;
+
 exports[`copies the complete current production design into ordinary saved text and the actual preview 1`] = `
 {
   "generated": false,

@@ -913,6 +913,16 @@ export function ScenePlanningWorkspace({
       <header><small>导演入场 · 结构规划</small><h2>{scene?.title ?? '从已保存剧本建立镜头'}</h2>
         <p>只保存本场文本实体与规划镜头，不生成媒体，不批准内容。</p></header>
       {error && <p role="alert" className={css.notice}>{error}</p>}
+      {state?.frameRequirements?.some(shot => shot.generationContextSource?.state === 'changed'
+        || shot.generationContextSource?.state === 'untracked') && <section className={css.notice} aria-label="共用设定同步状态">
+        <h3>共用设定与镜头设计</h3>
+        <p>共用场景或人物设定修改后，需由导演同步受影响镜头的首帧、调度、运镜与动作。旧稿和已有素材保留；在拍摄助手选择“同步共用设定”处理。</p>
+        <ul>{state.frameRequirements.filter(shot => shot.generationContextSource?.state === 'changed'
+          || shot.generationContextSource?.state === 'untracked').map(shot => <li key={shot.id}>
+            镜 {shot.frameNo} · {shot.title}：{shot.generationContextSource?.state === 'changed'
+            ? `需要同步（${shot.generationContextSource.changes.join('、')}）` : '旧稿尚未记录来源，可由导演核对后接续'}
+        </li>)}</ul>
+      </section>}
       <div className={css.actions}><button type="button" disabled={busy || state === null} onClick={() => { void run(true) }}>读取恢复</button>
         {local?.pending && retryAllowed && <button type="button" disabled={busy || canRebase} onClick={() => { void run(false) }}>重试原保存</button>}
         {canRebase && <button type="button" onClick={() => {
