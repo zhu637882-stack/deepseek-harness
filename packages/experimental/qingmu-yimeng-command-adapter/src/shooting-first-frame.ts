@@ -45,11 +45,11 @@ export function registerShootingFirstFrame(
           const parts: Buffer[] = []; let size = 0
           for await (const chunk of req) {
             const bytes = Buffer.from(chunk as Uint8Array); size += bytes.length
-            if (size > 8192) throw new Error('request_too_large')
+            if (size > 64 * 1024) throw new Error('request_too_large')
             parts.push(bytes)
           }
           const value = JSON.parse(Buffer.concat(parts).toString('utf8')) as Record<string, unknown>
-          const keys = ['project_id', 'episode_id', 'frame_ids', ...(operation === 'submit' ? ['candidate_request_id', 'shooting_preflight_id', 'shooting_payload_hash'] : operation === 'confirm' ? ['expected_frame_digest', 'idempotency_key'] : operation === 'video-resume' ? ['scene_id', 'task_id'] : operation === 'preview' && value?.candidate_request_id !== undefined ? ['candidate_request_id'] : [])]
+          const keys = ['project_id', 'episode_id', 'frame_ids', ...(operation === 'preview' && value?.reference_images !== undefined ? ['reference_images'] : []), ...(operation === 'submit' ? ['candidate_request_id', 'shooting_preflight_id', 'shooting_payload_hash'] : operation === 'confirm' ? ['expected_frame_digest', 'idempotency_key'] : operation === 'video-resume' ? ['scene_id', 'task_id'] : operation === 'preview' && value?.candidate_request_id !== undefined ? ['candidate_request_id'] : [])]
           if (!value || Object.keys(value).sort().join() !== keys.sort().join() || !Array.isArray(value.frame_ids) || value.frame_ids.length !== 1) throw new Error('invalid_request')
           if (operation === 'video-resume') {
             if ([value.project_id, value.episode_id, value.frame_ids[0], value.scene_id, value.task_id].some(id => typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id))) throw new Error('invalid_execution_scope')

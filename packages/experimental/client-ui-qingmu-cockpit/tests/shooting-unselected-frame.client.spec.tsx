@@ -11,6 +11,7 @@ const sha = createHash('sha256').update(bytes).digest('hex')
 const image = { assetId: 'asset-new', materializedSha256: sha, qualityStatus: 'pending', selectionStatus: 'Unselected', isSelected: false }
 const planningState = {
   projectId: 'p', episodeId: 'e', scriptRevision: 1, scriptSha256: 'a'.repeat(64),
+  scenes: [],
   storyboard: { version: 1, sourceHash: 'b'.repeat(64) },
   canonicalStoryboard: { shots: [{ id: 'f5', imagePromptCn: '查看手机的首帧要求' }, { id: 'f6', imagePromptCn: '向公路呼喊的首帧要求' }] },
   frameRequirements: [{ id: 'f5', imagePromptCn: '查看手机的首帧要求' }, { id: 'f6', imagePromptCn: '向公路呼喊的首帧要求' }],
@@ -79,7 +80,7 @@ it('keeps an inactive shot candidate visible without carrying it into the empty 
   const p = props(); const view = render(<ShootingReviewWorkspace {...p} />)
   await screen.findByRole('img', { name: '首帧 v1 缩略图' })
   view.rerender(<ShootingReviewWorkspace {...p} selectedShotId="f6" />)
-  await screen.findByText('本镜还没有首帧。点下方「生成首帧」开始；画面要求在右栏可改。')
+  await screen.findByText('可直接用人物、场景和声音参考生成视频；也可先生成首帧。画面要求在右栏可改。')
   expect(screen.queryByRole('img', { name: '未采用首帧候选' })).toBeNull()
   const shot5 = within(screen.getByRole('button', { name: '镜 5 查看手机' }))
   expect(await shot5.findByRole('img', { name: '镜 5 首帧缩略图' })).toBeTruthy()
@@ -124,7 +125,7 @@ it('does not reread thumbnails or clear them for a semantically unchanged projec
   const reads = api.history.mock.calls.length
   expect(api.historyPreview).toHaveBeenCalledTimes(1)
   view.rerender(<ShootingReviewWorkspace {...p} selectedShotId="f6" projection={structuredClone(projection) as never} />)
-  await screen.findByText('本镜还没有首帧。点下方「生成首帧」开始；画面要求在右栏可改。')
+  await screen.findByText('可直接用人物、场景和声音参考生成视频；也可先生成首帧。画面要求在右栏可改。')
   expect(api.history).toHaveBeenCalledTimes(reads)
   expect(api.historyPreview).toHaveBeenCalledTimes(1)
   expect(URL.revokeObjectURL).not.toHaveBeenCalled()

@@ -11,13 +11,14 @@ type Box = readonly [number, number, number, number]
 /** Reuse project-owned image reads for ordered references and region selection. */
 export type AssetImageReferencePort = Pick<QingmuYimengPort, 'referenceVideoAssets'> & PrivateReferencePreviewPort
 
-function ReferenceImage({ projectId, asset, reference, port, onChange, disabled }: {
+function ReferenceImage({ projectId, asset, reference, port, onChange, disabled, allowRegions }: {
   projectId: string
   asset: ReferenceVideoAsset | undefined
   reference: AssetImageReference
   port: AssetImageReferencePort
   onChange: (value: AssetImageReference) => void
   disabled: boolean
+  allowRegions: boolean
 }) {
   const { preview } = usePrivateReferencePreview(projectId, asset, port, 0)
   const url = asset?.browserUrl || preview?.url
@@ -31,8 +32,8 @@ function ReferenceImage({ projectId, asset, reference, port, onChange, disabled 
       Math.round(Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)) * dimensions[1])]
   }
   return <>
-    {url ? <div className={css.image} aria-label="拖动框选修改区域" onPointerDown={(event) => {
-      if (disabled || boxes.length >= 2 || !dimensions[0] || event.button !== 0) return
+    {url ? <div className={css.image} aria-label={allowRegions ? '拖动框选修改区域' : '首帧参考图片'} onPointerDown={(event) => {
+      if (!allowRegions || disabled || boxes.length >= 2 || !dimensions[0] || event.button !== 0) return
       event.currentTarget.setPointerCapture(event.pointerId); start.current = point(event)
     }} onPointerMove={(event) => {
       if (!start.current) return
@@ -53,7 +54,7 @@ function ReferenceImage({ projectId, asset, reference, port, onChange, disabled 
         width: `${(box[2] - box[0]) / dimensions[0] * 100}%`, height: `${(box[3] - box[1]) / dimensions[1] * 100}%`,
       }} />)}
     </div> : <p>参考已按原图版本绑定。图片预览暂不可用。</p>}
-    <p>可拖动框选最多两处修改区域，坐标按原图保存。也可直接描述整图派生；生成后需检查区域外内容。</p>
+    {allowRegions && <p>可拖动框选最多两处修改区域，坐标按原图保存。也可直接描述整图派生；生成后需检查区域外内容。</p>}
     {boxes.length > 0 && <button type="button" disabled={disabled} onClick={() => { onChange({ ...reference, boxes: [] }) }}>清除框选</button>}
   </>
 }
@@ -64,6 +65,7 @@ interface AssetImageReferencesProps {
   readonly port: AssetImageReferencePort
   readonly onChange: (value: readonly AssetImageReference[]) => void
   readonly disabled: boolean
+  readonly allowRegions?: boolean
 }
 
 /** Choose references within one project; switching projects discards the previous catalog and page. */
@@ -71,7 +73,7 @@ export function AssetImageReferences(props: AssetImageReferencesProps) {
   return <ProjectImageReferences key={props.projectId} {...props} />
 }
 
-function ProjectImageReferences({ projectId, references, port, onChange, disabled }: AssetImageReferencesProps) {
+function ProjectImageReferences({ projectId, references, port, onChange, disabled, allowRegions = true }: AssetImageReferencesProps) {
   const [assets, setAssets] = useState<ReferenceVideoAsset[]>([]), [page, setPage] = useState(1), [pages, setPages] = useState(1)
   const [error, setError] = useState(''), [loading, setLoading] = useState(false)
   useEffect(() => {
@@ -96,7 +98,8 @@ function ProjectImageReferences({ projectId, references, port, onChange, disable
       const update = (value: AssetImageReference) => { onChange(references.map((item, n) => n === index ? value : item)) }
       return <section key={reference.assetId} aria-label={`参考图 ${index + 1}`}>
         <h4>图 {index + 1} · {asset?.label ?? '已绑定图片'}</h4>
-        <ReferenceImage projectId={projectId} asset={asset} reference={reference} port={port} disabled={disabled} onChange={update} />
+        <ReferenceImage projectId={projectId} asset={asset} reference={reference} port={port}
+          disabled={disabled} allowRegions={allowRegions} onChange={update} />
         <ReferenceImageDesign asset={asset} />
         <label>图 {index + 1} 的用途<textarea value={reference.purpose} disabled={disabled}
           onChange={(event) => { update({ ...reference, purpose: event.target.value }) }} /></label>

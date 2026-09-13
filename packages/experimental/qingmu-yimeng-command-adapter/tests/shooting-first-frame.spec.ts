@@ -140,3 +140,15 @@ it('passes a rework predecessor only to preview, without submitting a new paid t
   expect(JSON.parse(String(upstream.mock.calls[0]![1]?.body)).candidate_request_id).toBe('shooting-old')
   expect(upstream).toHaveBeenCalledTimes(1)
 })
+
+it('carries explicit image bindings only on preparation, never as submit authority', async () => {
+  const upstream=vi.fn<typeof fetch>(async () => Response.json({ referenceMode:'working' }))
+  const base=await host(upstream,() => 'native-test')
+  const reference_images=[{ assetId:'img',assetSha256:'f'.repeat(64),purpose:'完整保留场景门窗布局。',boxes:[] }]
+  const previewBody={ project_id:'p',episode_id:'e',frame_ids:['f'],reference_images,candidate_request_id:'shooting-prior' }
+  const response=await fetch(`${base}/api/qingmu/shooting-first-frame/preview`,{ method:'POST',headers:{ origin:base },body:JSON.stringify(previewBody) })
+  expect(response.status).toBe(200)
+  expect(JSON.parse(String(upstream.mock.calls[0]![1]?.body))).toEqual(previewBody)
+  await fetch(`${base}/api/qingmu/shooting-first-frame/submit`,{ method:'POST',headers:{ origin:base },body:JSON.stringify({ ...body,reference_images,referenceMode:'working' }) })
+  expect(upstream).toHaveBeenCalledTimes(1)
+})

@@ -1,6 +1,8 @@
 /** A single image attempt with durable browser recovery and no automatic POST replay. */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FirstFrameHistoryCandidate } from './first-frame-selection.ts'
+import type { AssetImageReference } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import { AssetImageReferences, type AssetImageReferencePort } from './AssetImageReferences.tsx'
 import css from './ShootingFirstFrame.module.css'
 
 export interface ShootingFrameScope { readonly projectId: string; readonly episodeId: string; readonly frameId: string }
@@ -16,6 +18,8 @@ interface Preview extends ShootingFrameScope {
   readonly n: 1
   readonly selectAsOfficial: false
   readonly references?: readonly { readonly kind: string; readonly name: string; readonly role: string }[]
+  readonly referenceMode?: 'official' | 'working'
+  readonly referenceBindings?: readonly AssetImageReference[] | null
   readonly compositionReference?: null | { readonly imageUrl: string; readonly sha256: string; readonly sceneName: string }
 }
 interface Attempt extends ShootingFrameScope {
@@ -86,6 +90,13 @@ export function assertShootingPreview(value: unknown, scope: ShootingFrameScope)
     item && typeof item.kind === 'string' && typeof item.name === 'string' && typeof item.role === 'string'))) {
     throw new Error('首帧参考素材说明不完整')
   }
+  if (value.referenceMode === 'working' && (!Array.isArray(value.referenceBindings)
+    || value.referenceBindings.length < 1 || value.referenceBindings.length > 9
+    || !value.referenceBindings.every(item => item && typeof item.assetId === 'string'
+      && typeof item.assetSha256 === 'string' && sha.test(item.assetSha256)
+      && typeof item.purpose === 'string' && item.purpose.trim() && (!item.boxes || item.boxes.length === 0)))) {
+    throw new Error('首帧指定参考图绑定不完整')
+  }
   if (value.compositionReference !== undefined && value.compositionReference !== null) {
     const composition = value.compositionReference as Record<string, unknown>
     if (typeof composition.imageUrl !== 'string' || !/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/.test(composition.imageUrl)
@@ -147,7 +158,9 @@ function attemptMessage(task: Attempt['task'] | undefined): string {
   }
 }
 /** Native image generation. Storyboard confirmation is explicit; media selection remains separate. */
-export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview, requirementsReady = true, onReturnToStoryboard }: {
+export function ShootingFirstFrame({
+  scope, onCommitted, onCandidatePreview, requirementsReady = true, onReturnToStoryboard, referencePort,
+}: {
   readonly scope: ShootingFrameScope
   readonly onCommitted?: () => Promise<unknown>
   readonly onCandidatePreview?: (candidate: FirstFrameHistoryCandidate | undefined,
@@ -155,9 +168,13 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview, req
   /** The surrounding shooting workbench has read a saved requirement for this exact shot. */
   readonly requirementsReady?: boolean
   readonly onReturnToStoryboard?: () => void
+  readonly referencePort?: AssetImageReferencePort | undefined
 }) {
   const key = `qingmu:shooting-first-frame:${scope.projectId}:${scope.episodeId}:${scope.frameId}`
   const [preview, setPreview] = useState<Preview>(); const [attempt, setAttempt] = useState<Attempt>()
+  const [references, setReferences] = useState<readonly AssetImageReference[]>([])
+  const workingReferences = preview?.referenceMode === 'working'
+  const referencesCurrent = !workingReferences || JSON.stringify(references) === JSON.stringify(preview.referenceBindings)
   const [loadedImage, setLoadedImage] = useState<string>()
   const materialized = attempt?.candidate
   const imageKey = materialized ? `${key}:${materialized.assetId}:${materialized.sha256}:${materialized.browserUrl}` : undefined
@@ -217,7 +234,8 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview, req
           const prior = assertShootingPreview(parsed.preview, scope)
           if (parsed.requestId !== `shooting-${prior.preflightId}`) throw new Error('原提交记录不完整，禁止创建新任务')
           if (parsed.stage !== undefined && parsed.stage !== 'prepared' && parsed.stage !== 'submitted') throw new Error('原提交阶段不完整')
-          setPreview(prior); if (parsed.stage !== 'prepared') setRequestId(parsed.requestId); return
+          setPreview(prior); setReferences(prior.referenceBindings ?? [])
+          if (parsed.stage !== 'prepared') setRequestId(parsed.requestId); return
         }
         if (!requirementsReady) return
         setBusy(true)
@@ -253,7 +271,8 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview, req
     return () => { controller.abort(); if (timer !== undefined) clearTimeout(timer) }
   }, [key, requestId])
   const submit = async () => {
-    if (!requirementsReady || lock.current || requestId || !preview || preview.blockers.length || busy || review?.accepted !== true) return
+    if (!requirementsReady || lock.current || requestId || !preview || preview.blockers.length || busy
+      || !referencesCurrent || (!workingReferences && review?.accepted !== true)) return
     lock.current = true; setBusy(true); setError('')
     const id = `shooting-${preview.preflightId}`
     try {
@@ -284,13 +303,24 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview, req
       setAttempt(latest)
       if (rework ? latest.canRegenerate !== true : latest.task !== null) return
     }
-    const fresh = assertShootingPreview(await request('preview', { ...input, ...(rework ? { candidate_request_id: requestId } : {}) }), scope)
+    const fresh = assertShootingPreview(await request('preview', { ...input,
+      ...(references.length ? { reference_images: references } : {}), ...(rework ? { candidate_request_id: requestId } : {}) }), scope)
     const currentReview = assertFrameReview(await request(`review?${reviewQuery}`), scope.frameId)
     // Same inputs retain the same durable request ID; changed inputs make the
     // old preflight fail source validation. This never sends a generation POST.
     if (rework) localStorage.setItem(key, JSON.stringify({ preview: fresh, requestId: `shooting-${fresh.preflightId}`, stage: 'prepared' }))
     else localStorage.removeItem(key)
     setReview(currentReview); setRequestId(''); setAttempt(undefined); lock.current = false; setPreview(fresh)
+  }
+  const prepareReferences = async () => {
+    if (!requirementsReady || !references.length || busy || lock.current || requestId) return
+    lock.current = true; setBusy(true); setError('')
+    try {
+      const fresh = assertShootingPreview(await request('preview', { ...input, reference_images: references }), scope)
+      localStorage.setItem(key, JSON.stringify({ preview: fresh, requestId: `shooting-${fresh.preflightId}`, stage: 'prepared' }))
+      setPreview(fresh); setAttempt(undefined)
+    } catch (cause) { setError(String(cause)) }
+    finally { lock.current = false; setBusy(false) }
   }
   const confirm = async () => {
     if (!requirementsReady || !review || review.accepted || !review.preflight.technicalReady
@@ -329,7 +359,8 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview, req
       if (activeScope.current !== key) return
       setReview(currentReview); setNeedsLogin(false); setError('')
       if (!requestId) {
-        const currentPreview = assertShootingPreview(await request('preview', input), scope)
+        const currentPreview = assertShootingPreview(await request('preview', { ...input,
+          ...(references.length ? { reference_images: references } : {}) }), scope)
         if (activeScope.current !== key) return
         setPreview(currentPreview)
       }
@@ -348,11 +379,11 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview, req
   const blocked = submissionBlocker(attempt) ?? submissionBlocker(preview)
   return <section aria-label="首帧生成" className={css.generation} aria-busy={busy}>
     <div className={css.preview}>
-      {attempt?.candidate && (!review || review.accepted) ? <figure>
+      {attempt?.candidate && (workingReferences || !review || review.accepted) ? <figure>
         <img src={attempt.candidate.browserUrl} alt="镜头新首帧 · 待你定版" onLoad={() => setLoadedImage(imageKey)} onError={() => setLoadedImage(undefined)} />
         <figcaption>{attempt.candidate.isSelected ? '当前选用首帧' : '新首帧候选 · 待你审看，尚未采用'}</figcaption>
       </figure> : <div className={css.preparation}>
-        {review && !review.accepted ? <div aria-label="本镜分镜确认">
+        {review && !review.accepted && !workingReferences ? <div aria-label="本镜分镜确认">
           <h3>先确认本镜分镜</h3><p>下面是本次生成使用的画面要求。确认只针对本镜，不会启动生成。</p>
           <div className={css.reviewText}>{review.imagePromptCn}</div>
           {!review.preflight.technicalReady && <p role="alert">本镜分镜存在输入矛盾，请先修改后确认。</p>}
@@ -368,6 +399,14 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview, req
       {preview.compositionReference && <figure><img style={{ maxWidth: '100%' }} src={preview.compositionReference.imageUrl}
         alt={`${preview.compositionReference.sceneName}的本镜空间取景参考`} /><figcaption>这张布局图随请求提交，用于位置、透视和遮挡；生成后的实际画面仍需审看。</figcaption></figure>}
       <pre style={{ whiteSpace: 'pre-wrap' }}>{preview.prompt}</pre>
+    </details>}
+    {referencePort && <details className={css.log}><summary>选择首帧参考图</summary>
+      <p>明确选择本镜使用的人物、场景与道具图片，说明各图用途；生成新的工作候选。</p>
+      <AssetImageReferences projectId={scope.projectId} references={references} port={referencePort}
+        disabled={busy || Boolean(requestId)} allowRegions={false} onChange={setReferences} />
+      <button type="button" disabled={busy || Boolean(requestId) || references.length === 0}
+        onClick={() => { void prepareReferences() }}>用这些图片准备首帧</button>
+      {workingReferences && !referencesCurrent && <p role="status">引用已修改，请重新准备后生成。</p>}
     </details>}
     {needsLogin && <form className={css.login} aria-label="恢复分镜确认登录" onSubmit={(event) => { event.preventDefault(); void login() }}>
       <p>确认分镜需要本人账户登录。登录后可以继续核对当前分镜。</p>
@@ -385,7 +424,7 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview, req
         lock.current = true; setBusy(true); setError('')
         void prepareAgain(true).catch(cause => setError(String(cause))).finally(() => { lock.current = false; setBusy(false) })
       }}>重新生成首帧</button>}
-      {review && !review.accepted && <>
+      {review && !review.accepted && !workingReferences && <>
         {confirming ? <p role="status">正在保存你的本镜确认…</p>
           : review.preflight.technicalReady && !needsLogin && <button className={css.primary} type="button" onClick={() => { void confirm() }}>确认本镜分镜</button>}
       </>}
@@ -395,11 +434,14 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview, req
         lock.current = true; setBusy(true)
         void prepareAgain().catch(cause => setError(String(cause))).finally(() => { lock.current = false; setBusy(false) })
       }}>重新检查本镜生成条件</button>}
-      {!attempt?.candidate && !blocked && !requestId && !busy && preview?.blockers.length === 0 && review?.accepted === true && <button className={css.primary} type="button" onClick={() => { void submit() }}>生成这张首帧（仅一次）</button>}
+      {!attempt?.candidate && !blocked && !requestId && !busy && preview?.blockers.length === 0
+        && referencesCurrent && (workingReferences || review?.accepted === true)
+        && <button className={css.primary} type="button" onClick={() => { void submit() }}>生成这张首帧（仅一次）</button>}
     </div>
     {error && <p role="alert" className={css.error}>{error.includes('digest_mismatch') ? '分镜在确认前已发生变化，本次没有确认。请刷新，核对新的画面要求。'
       : error.includes('执行器尚未启动') ? '原任务已保存，但执行器尚未启动。请查看原任务结果，不要重复生成。'
-        : '本次操作未确认完成。请保留当前候选，查看原任务结果；不要重复提交。详细原因已放入开发日志。'}</p>}
+        : error.includes('first_frame_reference_not_ready') ? '尚未定版所需参考素材。可以展开“选择首帧参考图”，明确选择本项目图片并准备工作候选。'
+          : '本次操作未确认完成。请保留当前候选，查看原任务结果；不要重复提交。详细原因已放入开发日志。'}</p>}
     <details className={css.log}><summary>开发日志</summary>
       <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify({ storyboardReview: review, preflightId: preview?.preflightId, payloadHash: preview?.payloadHash, estimatedCny: preview?.estimatedCny, blockers: preview?.blockers, submissionBlocker: blocked?.detail, requestId, attempt, error }, null, 2)}</pre>
     </details>

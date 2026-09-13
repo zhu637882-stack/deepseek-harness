@@ -10,6 +10,7 @@ import { LocalVideoCandidateUpload } from './LocalVideoCandidateUpload.tsx'
 import { LocalVideoSourcePanel } from './LocalVideoSourcePanel.tsx'
 import { TakeVersionCompareView } from './TakeVersionCompareView.tsx'
 import { ShootingFirstFrame } from './ShootingFirstFrame.tsx'
+import type { AssetImageReferencePort } from './AssetImageReferences.tsx'
 import { ShootingFirstFrameHistory } from './ShootingFirstFrameHistory.tsx'
 import { createFirstFrameSelectionClient, type FirstFrameHistoryCandidate } from './first-frame-selection.ts'
 import { FirstFrameCandidatePreview } from './FirstFrameCandidatePreview.tsx'
@@ -54,6 +55,7 @@ interface Props {
   readonly directorAssistant: ReactNode
   readonly onProductionAction?: (action: 'first-frame' | 'select-frame' | 'video', shotId: string) => void
   readonly port: Pick<QingmuYimengPort, 'takeVersions' | 'takePreview' | 'selectTakeVersion' | 'recoverTakeVersionSelection'>
+    & Partial<AssetImageReferencePort>
     & Partial<Pick<QingmuYimengPort,
       'takeAcceptance' | 'takeAcceptanceMethod'
       | 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning'
@@ -460,7 +462,9 @@ export function ShootingReviewWorkspace({ projectName, headerActions, hideHeader
         <div className={css.media} data-state={testState ?? (load === 'loading' ? 'loading' : state)}>
           {historyOpen ? <ShootingFirstFrameHistory key={`${mediaPaneKey}:${projection?.director.shotRelations.storyboardRevision?.revisionId}`} scope={{ projectId, episodeId, frameId: current.shotId, storyboardRevisionId: projection?.director.shotRelations.storyboardRevision?.revisionId ?? '' }} onCommitted={refreshExistingMedia} onCandidatePreview={onCandidatePreview} /> : firstFrameOpen ? <ShootingFirstFrame key={mediaPaneKey}
             scope={{ projectId, episodeId, frameId: current.shotId }} onCommitted={refreshExistingMedia}
-            onCandidatePreview={onCandidatePreview} requirementsReady={requirementsReady} onReturnToStoryboard={returnToStoryboard} />
+            onCandidatePreview={onCandidatePreview} requirementsReady={requirementsReady} onReturnToStoryboard={returnToStoryboard}
+            referencePort={port.referenceVideoAssets && port.readLocalReferenceCandidateContent
+              ? port as AssetImageReferencePort : undefined} />
             : browsedImage !== undefined ? <div className={css.frame}><span>候选浏览 · 不会改变选用</span>
               <FirstFrameCandidatePreview autoLoad request={{ projectId, episodeId, storyboardRevisionId, frameId: current.shotId,
                 assetId: browsedImage.assetId,

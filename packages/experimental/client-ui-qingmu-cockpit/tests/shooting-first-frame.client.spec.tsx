@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ShootingFirstFrame, assertShootingPreview } from '../src/client/ShootingFirstFrame.tsx'
+import type { AssetImageReferencePort } from '../src/client/AssetImageReferences.tsx'
 const scope = { projectId:'project-1',episodeId:'episode-1',frameId:'frame-4' }
 const preview = { ...scope,schema:'qingmu.shooting-first-frame-preview.v1',preflightId:'a'.repeat(64),payloadHash:'b'.repeat(64),prompt:'POV视点人物：杰克；独立入画人物：莉娜',povObserver:'杰克',estimatedCny:.2,blockers:[],n:1,maxAttempts:1,selectAsOfficial:false }
 const result = { ...scope,schema:'qingmu.shooting-first-frame-state.v1',requestId:`shooting-${preview.preflightId}`,task:{ id:'task-one',kernel_status:'Succeeded' },candidate:{ assetId:'asset-new',sha256:'c'.repeat(64),browserUrl:'http://127.0.0.1:65269/api/media/media-new',isSelected:false,qualityStatus:'pending' } }
@@ -277,4 +278,38 @@ it('keeps reading an existing task when requirements are unavailable, without pr
   await waitFor(() => expect(fetcher.mock.calls.some(([path]) => path.includes('/state?'))).toBe(true))
   expect(fetcher.mock.calls.every(([path]) => path.includes('/state?'))).toBe(true)
   expect(screen.queryByRole('button', { name: '生成这张首帧（仅一次）' })).toBeNull()
+})
+
+it('chooses exact working images, prepares without signoff, and prevents generation after reference edits', async () => {
+  const ref={ assetId:'working-scene',assetSha256:'f'.repeat(64),purpose:'保持房间门窗，人物位置按本镜设计。',boxes:[] }
+  const working={ ...preview,referenceMode:'working',referenceBindings:[ref] }
+  const fetcher=vi.fn(async (path:string,init?:RequestInit) => {
+    if (path.includes('/review?')) return Response.json({ ...review,accepted:false })
+    if (path.endsWith('/preview')) {
+      const body=JSON.parse(String(init?.body))
+      if (!body.reference_images) return Response.json({ detail:'first_frame_reference_not_ready' },{ status:409 })
+      expect(body.reference_images).toEqual([ref])
+      return Response.json(working)
+    }
+    return Response.json(result)
+  })
+  vi.stubGlobal('fetch',fetcher)
+  const referencePort={ referenceVideoAssets:vi.fn(async () => ({ items:[{ assetId:ref.assetId,assetSha256:ref.assetSha256,
+    mediaType:'reference_image',label:'工作场景图',browserUrl:'' }],pages:1 })), readLocalReferenceCandidateContent:vi.fn() }
+  const view=render(<ShootingFirstFrame scope={scope} referencePort={referencePort as unknown as AssetImageReferencePort} />)
+  await screen.findByText(/尚未定版所需参考素材/)
+  await waitFor(() => expect(screen.getByRole('option',{ name:'工作场景图',hidden:true })).toBeTruthy())
+  fireEvent.change(screen.getByLabelText('添加参考图'),{ target:{ value:ref.assetId } })
+  fireEvent.change(screen.getByLabelText('图 1 的用途'),{ target:{ value:ref.purpose } })
+  fireEvent.click(screen.getByRole('button',{ name:'用这些图片准备首帧',hidden:true }))
+  await screen.findByRole('button',{ name:'生成这张首帧（仅一次）' })
+  expect(fetcher.mock.calls.some(([path]) => path.endsWith('/confirm') || path.endsWith('/submit'))).toBe(false)
+  fireEvent.change(screen.getByLabelText('图 1 的用途'),{ target:{ value:'修改后的用途' } })
+  expect(screen.queryByRole('button',{ name:'生成这张首帧（仅一次）' })).toBeNull()
+  view.unmount()
+  render(<ShootingFirstFrame scope={scope} referencePort={referencePort as unknown as AssetImageReferencePort} />)
+  fireEvent.click(await screen.findByRole('button',{ name:'生成这张首帧（仅一次）' }))
+  await screen.findByAltText('镜头新首帧 · 待你定版')
+  expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/submit'))).toHaveLength(1)
+  expect(fetcher.mock.calls.some(([path]) => path.endsWith('/confirm'))).toBe(false)
 })
