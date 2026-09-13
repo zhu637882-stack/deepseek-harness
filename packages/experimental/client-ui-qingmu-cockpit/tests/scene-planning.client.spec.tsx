@@ -455,6 +455,31 @@ it('uses the existing native composer inside shooting without consuming another 
   expect(screen.getByRole('button',{ name:'发送给当前导演' })).toHaveProperty('disabled',true)
   expect(bridge.clear).toHaveBeenCalled()
 })
+it('shows failed project reads in shooting and recovers the same typed request without sending it', async () => {
+  const current = { ...automaticReadState(), canonicalStoryboard: { ...automaticReadState().canonicalStoryboard!, shots: [
+    { id: 'automatic_1', frameNo: 1, title: '入口', imagePromptCn: '开门' },
+  ] } }
+  const read = vi.fn(async () => current).mockRejectedValueOnce(new Error('creative_contract_director_skill_catalog_stale'))
+  const port = { readScenePlanning: read, saveScenePlanning: vi.fn(), recoverScenePlanning: vi.fn(),
+    requestDirectorProposal: unavailableDirectorProposal(), checkDirectorProposalFreshness: unusedFreshness() }
+  const transport = directorConnectionFixture(), bridge = replayBridge()
+  const native = { connection: transport.source, activate: vi.fn(), prompt: vi.fn(async () => {}) }
+  const scope = { projectId: 'project_1', episodeId: 'episode_1', sceneId: 'canonical_scene', shotId: 'automatic_1' }
+  render(<ScenePlanningWorkspace {...current} presentation="assistant" port={port} directorBridge={bridge}
+    directorSessionId="session_1" directorConnection={transport.source} nativeDirectorSession={native}
+    canonicalDirectorScope={scope} onCommitted={vi.fn(async () => {})} onSelectShotId={vi.fn()} onUnsavedChange={vi.fn()} />)
+  expect((await screen.findByRole('alert')).textContent).toContain('导演方法尚未兼容')
+  fireEvent.change(screen.getByLabelText('导演要求'), { target: { value: '保留同一房间，从门口反拍' } })
+  expect(screen.getByRole('button', { name: '发送给当前导演' })).toHaveProperty('disabled', true)
+  fireEvent.click(screen.getByRole('button', { name: '重新读取镜头' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '发送给当前导演' })).toHaveProperty('disabled', false))
+  expect(read).toHaveBeenCalledTimes(2)
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(screen.getByLabelText('导演要求')).toHaveProperty('value', '保留同一房间，从门口反拍')
+  expect(native.prompt).not.toHaveBeenCalled()
+  expect(port.saveScenePlanning).not.toHaveBeenCalled()
+  expect(port.recoverScenePlanning).not.toHaveBeenCalled()
+})
 it('binds canonical shot selection to the current session without opening the legacy planner', async () => {
   const automatic = automaticReadState()
   const port = { readScenePlanning: vi.fn(async () => automatic), requestDirectorProposal: unavailableDirectorProposal(),

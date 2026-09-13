@@ -19,3 +19,5 @@ Deleting world prose by keyword loses creative intent. Another compiler would di
 ## Consequences
 
 Directors inspect the real input without paid image generation. Old projects keep their source and save path; edits preserve unrelated directing fields. Preparation may retain a local preview file but neither queues media nor grants approval. Semantic reconciliation and image fidelity require separate verification.
+
+Live verification found a missing compatibility-target update after the skill body changed. The source manifest now includes reviewed prior versions and the previous release; the existing compatibility regression covers all current targets. Planning read failures appear in the shooting assistant with a read-only retry, preserving the typed request and preventing a send until recovery.

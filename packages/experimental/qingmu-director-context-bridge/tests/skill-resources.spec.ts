@@ -131,7 +131,8 @@ it('keeps released director methods compatible with the installed method without
   const known = director.compatiblePredecessors!.map(ref => ref.sha256)
   for (const digest of ['4891f16113213518fc30627659dff67c2393cdc510214874694ab373229b0722',
     'd372e62d49c97c804c6348c052c2cd54e172606d82a13c60bf39e96651f7ecb6',
-    '8a86892706f6d29859d0f371a6eac0a3d5d6e082f47f858469274cc4b7504fcc']) {
+    '8a86892706f6d29859d0f371a6eac0a3d5d6e082f47f858469274cc4b7504fcc',
+    '81011059568a877ad828dd47bfc784b1fe722a108e831258b2bcd628984b57e1']) {
     expect(known).toContain(digest)
   }
 })

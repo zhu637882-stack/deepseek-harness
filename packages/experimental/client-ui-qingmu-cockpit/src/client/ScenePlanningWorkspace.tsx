@@ -65,6 +65,7 @@ function saved(state: ScenePlanningState): LocalPlan | null {
 }
 function errorText(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
+  if (message.includes('creative_contract_director_skill_catalog_stale')) return '当前项目的导演方法尚未兼容已安装的更新，暂时无法读取镜头。系统修复兼容后可重新读取；你的输入和已有作品保留。'
   if (/401|token|authentication/i.test(message)) return '本地连接需要恢复，输入已保留。请稍候点击“读取恢复”；如仍失败，请检查青木服务状态。不会自动重发。'
   if (/403|forbidden/.test(message)) return '当前身份无权操作此项目。输入已保留，请核对本地登录身份。'
   if (/409|conflict|mismatch/.test(message)) return '剧本或分镜版本发生冲突。输入已保留，请读取恢复，核对来源后再处理。'
@@ -278,6 +279,8 @@ export function ScenePlanningWorkspace({
   const [preview, setPreview] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [planningReadError, setPlanningReadError] = useState('')
+  const [readRevision, setReadRevision] = useState(0)
   const [receipt, setReceipt] = useState<ScenePlanningResult | null>(null)
   const [proposal, setProposal] = useState<DirectorReplayProposal | null>(null)
   const [ignoredProposalItems, setIgnoredProposalItems] = useState<readonly string[]>([])
@@ -346,6 +349,7 @@ export function ScenePlanningWorkspace({
       const next = forScene(snapshot, local?.sceneIndex ?? targetScene ?? snapshot.planning?.sceneIndex ?? 1)
       if (!active) return
       if (next.projectId !== projectId || next.episodeId !== episodeId) throw new Error('409 planning_read_scope_mismatch')
+      setPlanningReadError('')
       setState(next)
       // The shooting inspector reads the same source but must not restore a
       // different planning selection, consume its draft, or invoke a write.
@@ -393,10 +397,12 @@ export function ScenePlanningWorkspace({
         setSceneIndex(plan?.sceneIndex ?? 1)
         setIndex(activeIndex)
       }
-    }).catch((e: unknown) => { if (active) setError(errorText(e)) })
+    }).catch((e: unknown) => {
+      if (active) { const message = errorText(e); setPlanningReadError(message); setError(message) }
+    })
     return () => { active = false }
     // Committed native revisions refresh clean drafts; local edits and pending saves stay intact.
-  }, [projectId, episodeId, port, hostSync, canonicalDirectorRevision])
+  }, [projectId, episodeId, port, hostSync, canonicalDirectorRevision, readRevision])
   useEffect(() => {
     if (presentation === 'assistant' || !state || state.canonicalStoryboard || !canonicalDirectorScope
       || canonicalDirectorScope.projectId !== projectId || canonicalDirectorScope.episodeId !== episodeId
@@ -443,7 +449,7 @@ export function ScenePlanningWorkspace({
   const visibleAutomaticShot = presentation === 'assistant'
     ? canonicalStoryboard?.shots?.find(shot => shot.id === directorScope?.shotId)
     : canonicalStoryboard?.shots?.find(shot => shot.id === automatic?.shotId) ?? canonicalStoryboard?.shots?.[0]
-  const nativeTarget = directorStatus === 'current' && directorBinding && directorSessionId
+  const nativeTarget = planningReadError === '' && directorStatus === 'current' && directorBinding && directorSessionId
     && (canonicalStoryboard === null || (visibleAutomaticShot !== undefined && visibleAutomaticShot.id === directorScope?.shotId))
     && directorReadyIdentity?.key === directorIdentityKey && directorReadyIdentity.connection === connection
     ? { schema: 'qingmu.native-director-request.v1' as const, sessionId: directorSessionId,
@@ -879,7 +885,9 @@ export function ScenePlanningWorkspace({
       mode={nativePromptMode} scopeKey={JSON.stringify(nativePromptMode === 'cut-sound' ? { projectId, episodeId } : canonicalDirectorScope)}
       ready={nativeTarget !== undefined && nativePromptReady}
       target={nativeTarget} onCommitted={onCommitted} />}
-    {directorStatus !== 'current' && <p role="status">{directorStatus === 'connecting' ? '正在读取当前镜头…'
+    {planningReadError ? <div role="alert"><p>{planningReadError}</p>
+      <button type="button" onClick={() => { setError(''); setReadRevision(value => value + 1) }}>重新读取镜头</button>
+    </div> : directorStatus !== 'current' && <p role="status">{directorStatus === 'connecting' ? '正在读取当前镜头…'
       : !connection ? '连接已断开，恢复后可继续。' : '当前镜头尚未连接导演，请先进入或恢复导演。'}</p>}
     <details><summary>开发日志</summary><p>{error}</p><pre>{JSON.stringify({ scope: directorScope,
       contextSnapshotSha256: directorBinding?.binding.contextSnapshotSha256, status: directorStatus }, null, 2)}</pre></details>

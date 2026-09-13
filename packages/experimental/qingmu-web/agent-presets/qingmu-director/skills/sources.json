@@ -155,39 +155,47 @@
         {
           "version": "c65ae0d14457053efb1e354c7e7f7e120d97fad1:4891f16113213518",
           "sha256": "4891f16113213518fc30627659dff67c2393cdc510214874694ab373229b0722",
-          "upgradeToSha256": "81011059568a877ad828dd47bfc784b1fe722a108e831258b2bcd628984b57e1",
+          "upgradeToSha256": "e1fd5bd63f526dfa787af1d1aab4f0cb6a7da9aa4fcdcce5559c4becc380a868",
           "sourceCommit": "d1d1f1fbd02e0a4b826ed78a7adae9b5cabe7101",
-          "reason": "保留 Leos 六部门、原剧本与既有媒体；补充正文动作因果、空间观察与估算区分、整场声音设计及成片回听。"
+          "reason": "保留 Leos 六部门、原剧本与既有媒体；补充正文动作因果、空间观察与估算区分、整场声音设计及成片回听。 保留既有剧本、素材、导演设计和 Leos 六部门；补入独立首帧整理与真实图片输入预览，不改写项目历史。"
         },
         {
           "id": "shot_blocking_director",
           "version": "shot-blocking-director-v1+screenwriting-domain-specs-v1+director-domain-specs-v2",
           "sha256": "4c488e61a033af09259200c759295c5e94291df228edf0240808c301e4750733",
-          "upgradeToSha256": "81011059568a877ad828dd47bfc784b1fe722a108e831258b2bcd628984b57e1",
-          "reason": "以 Leos 六部门为主，原镜头导演为辅，补入编剧和摄影方法。保留 Leos 六部门、原剧本与既有媒体；补充正文动作因果、空间观察与估算区分、整场声音设计及成片回听。"
+          "upgradeToSha256": "e1fd5bd63f526dfa787af1d1aab4f0cb6a7da9aa4fcdcce5559c4becc380a868",
+          "reason": "以 Leos 六部门为主，原镜头导演为辅，补入编剧和摄影方法。保留 Leos 六部门、原剧本与既有媒体；补充正文动作因果、空间观察与估算区分、整场声音设计及成片回听。 保留既有剧本、素材、导演设计和 Leos 六部门；补入独立首帧整理与真实图片输入预览，不改写项目历史。"
         },
         {
           "id": "cinematic-director",
           "version": "c65ae0d14457053efb1e354c7e7f7e120d97fad1:d372e62d49c97c80",
           "sha256": "d372e62d49c97c804c6348c052c2cd54e172606d82a13c60bf39e96651f7ecb6",
-          "upgradeToSha256": "81011059568a877ad828dd47bfc784b1fe722a108e831258b2bcd628984b57e1",
-          "reason": "保留 Leos 六部门、原剧本与既有媒体；补充正文动作因果、空间观察与估算区分、整场声音设计及成片回听。"
+          "upgradeToSha256": "e1fd5bd63f526dfa787af1d1aab4f0cb6a7da9aa4fcdcce5559c4becc380a868",
+          "reason": "保留 Leos 六部门、原剧本与既有媒体；补充正文动作因果、空间观察与估算区分、整场声音设计及成片回听。 保留既有剧本、素材、导演设计和 Leos 六部门；补入独立首帧整理与真实图片输入预览，不改写项目历史。"
         },
         {
           "id": "cinematic-director",
           "version": "c65ae0d14457053efb1e354c7e7f7e120d97fad1:8a86892706f6d298",
           "sha256": "8a86892706f6d29859d0f371a6eac0a3d5d6e082f47f858469274cc4b7504fcc",
-          "upgradeToSha256": "81011059568a877ad828dd47bfc784b1fe722a108e831258b2bcd628984b57e1",
+          "upgradeToSha256": "e1fd5bd63f526dfa787af1d1aab4f0cb6a7da9aa4fcdcce5559c4becc380a868",
           "sourceCommit": "d9853ce94d05cfb6f3e6a034bbb35f6e86b588c3",
-          "reason": "保留 Leos 六部门、原剧本与既有媒体；补充正文动作因果、空间观察与估算区分、整场声音设计及成片回听。"
+          "reason": "保留 Leos 六部门、原剧本与既有媒体；补充正文动作因果、空间观察与估算区分、整场声音设计及成片回听。 保留既有剧本、素材、导演设计和 Leos 六部门；补入独立首帧整理与真实图片输入预览，不改写项目历史。"
         },
         {
           "id": "cinematic-director",
           "version": "c65ae0d14457053efb1e354c7e7f7e120d97fad1:fdf51ab2539dfb7e",
           "sha256": "fdf51ab2539dfb7e5af90e4680a42498e3a9d29c0b9440a24f53e9767057971b",
-          "upgradeToSha256": "81011059568a877ad828dd47bfc784b1fe722a108e831258b2bcd628984b57e1",
+          "upgradeToSha256": "e1fd5bd63f526dfa787af1d1aab4f0cb6a7da9aa4fcdcce5559c4becc380a868",
           "sourceCommit": "26712cf9217ed77fa0cfdab84d2ce5fa36c70178",
-          "reason": "保留 Leos 六部门、原剧本与既有媒体；补充正文动作因果、空间观察与估算区分、整场声音设计及成片回听。"
+          "reason": "保留 Leos 六部门、原剧本与既有媒体；补充正文动作因果、空间观察与估算区分、整场声音设计及成片回听。 保留既有剧本、素材、导演设计和 Leos 六部门；补入独立首帧整理与真实图片输入预览，不改写项目历史。"
+        },
+        {
+          "id": "cinematic-director",
+          "version": "c65ae0d14457053efb1e354c7e7f7e120d97fad1:81011059568a877a",
+          "sha256": "81011059568a877ad828dd47bfc784b1fe722a108e831258b2bcd628984b57e1",
+          "upgradeToSha256": "e1fd5bd63f526dfa787af1d1aab4f0cb6a7da9aa4fcdcce5559c4becc380a868",
+          "sourceCommit": "0483fdbc326d5777101874b01623aec2579641d0",
+          "reason": "保留既有剧本、素材、导演设计和 Leos 六部门；补入独立首帧整理与真实图片输入预览，不改写项目历史。"
         }
       ]
     },
