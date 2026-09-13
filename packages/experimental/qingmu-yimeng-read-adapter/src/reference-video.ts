@@ -4,7 +4,7 @@ import { referenceImageDesign } from './reference-image-design.ts'
 import type {
   ReferenceVideoAsset, ReferenceVideoAssetsRequest, ReferenceVideoAssetsResponse,
   ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse,
-  ReferenceVideoDraftResponse,
+  ReferenceVideoDraftResponse, ReferenceDirectorSource,
   ReferenceVideoQuoteRequest, ReferenceVideoQuoteResponse,
 } from './reference-video-types.ts'
 
@@ -20,12 +20,14 @@ function id(value: unknown): asserts value is string {
 function sha(value: unknown): asserts value is string {
   if (typeof value !== 'string' || !/^[a-f0-9]{64}$/u.test(value)) throw new Error('invalid source SHA')
 }
-function directorSource(value: unknown): { sha256: string; prompt: string } | null {
+function directorSource(value: unknown): ReferenceDirectorSource | null {
   if (value === null) return null
-  const v = object(value, ['sha256', 'prompt'])
+  const v = object(value, ['sha256', 'prompt', 'generationPrompt'])
   sha(v.sha256)
   if (typeof v.prompt !== 'string' || !v.prompt) throw new Error('missing director design')
-  return { sha256: v.sha256, prompt: v.prompt }
+  if (v.generationPrompt !== undefined && (typeof v.generationPrompt !== 'string' || !v.generationPrompt)) throw new Error('invalid production design')
+  return { sha256: v.sha256, prompt: v.prompt,
+    ...(v.generationPrompt !== undefined ? { generationPrompt: v.generationPrompt as string } : {}) }
 }
 function integer(value: unknown, min: number, max: number): asserts value is number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min || value > max) throw new Error('invalid number')

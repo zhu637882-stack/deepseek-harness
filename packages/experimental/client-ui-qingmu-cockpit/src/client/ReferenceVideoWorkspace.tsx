@@ -427,6 +427,19 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
       <details><summary>查看当前导演设计与全片风格，核对下方生成稿</summary>
         <pre style={{ whiteSpace: 'pre-wrap' }}>{draftState.directorSource.prompt}</pre>
       </details>
+      {draftState.directorSource.generationPrompt && <>
+        <button type="button" disabled={busy || saving} onClick={() => {
+          const production = draftState.directorSource?.generationPrompt
+          if (!production) return
+          const references = chosen.flatMap(item => [
+            { bindingToken: item.bindingToken }, { text: `：${item.label}\n` },
+          ])
+          invalidate(); setParts([{ text: '素材对应关系：\n' }, ...references, { text: production }])
+          setDirectorSourceSha256(undefined)
+          activeText.current = { index: references.length + 1, start: 0, end: 0 }
+        }}>载入完整导演原稿（替换当前文字）</button>
+        <p>保留引用和参数，带入世界设定、全片风格、本镜导演设计及对白。根据引用素材补充身份、布局和接续用途，核对设计中的冲突；保存前仍可编辑。</p>
+      </>}
       {directorSourceSha256 !== draftState.directorSource.sha256 && <p role="status">
         导演设计尚未同步到这份生成稿。请结合设计修改运镜、表演、声音和引用，也可交给青木导演整理。
       </p>}

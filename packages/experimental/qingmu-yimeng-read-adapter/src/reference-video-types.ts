@@ -25,6 +25,8 @@ export interface ReferenceVideoParameters {
 export interface ReferenceDirectorSource {
   readonly sha256: string
   readonly prompt: string
+  /** Editable production text; excludes adjacent-shot research and media metadata. */
+  readonly generationPrompt?: string
 }
 
 /** Project-owned source versions; callers cannot supply transport URLs. */

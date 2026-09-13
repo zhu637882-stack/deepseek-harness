@@ -88,7 +88,7 @@ function writer(extraShots = 0, image?: { sha256: string; url: string; config?: 
   let workingCut: Record<string, unknown> = structuredClone(initialCut)
 
   let saved = structuredClone(savedDraft)
-  let directorSource: { sha256: string; prompt: string } | null = null
+  let directorSource: { sha256: string; prompt: string; generationPrompt?: string } | null = null
   let currentContext = structuredClone(context)
   let currentPlanning = structuredClone(planning)
   if (extraShots > 0) {
@@ -198,6 +198,7 @@ function writer(extraShots = 0, image?: { sha256: string; url: string; config?: 
   const read = createYimengReadHandler({}, { fetch, readToken: () => 'test-only' })
   const command = createYimengCommandHandler({}, { fetch, readToken: () => 'test-only', readYimeng: read })
   return { fetch, read, command, inputReceipt, saved: () => saved, director: () => currentPlanning.frameRequirements[0]!.directorPlan,
+    setDirectorSource: (value: typeof directorSource) => { directorSource = value },
     afterDraftRead: (callback: () => void) => { afterDraftRead = callback },
     afterSave: (callback: () => void) => { afterSave = callback },
     unpreparedMaterials: () => { unpreparedMaterials = true },
@@ -877,4 +878,45 @@ it('native director saves frame endpoints through the same project-bound draft t
   expect(result(h.agent, 'frame-save'), JSON.stringify(result(h.agent, 'frame-save'))).not.toHaveProperty('error', true)
   expect(saves(h.upstream)).toHaveLength(1)
   expect(JSON.stringify(saves(h.upstream))).toContain('first_frame')
+})
+
+it('copies the complete current production design into ordinary saved text and the actual preview', async () => {
+  const production = canonical(design)
+  const source = { sha256: sha(production), prompt: production + '\nAdjacent shot research', generationPrompt: production }
+  const draft = { ...edit, directorSourceSha256: source.sha256,
+    promptParts: [{ bindingToken: 'lin' }, { text: ': identity reference only.\n' }, { directorText: 'current' }] }
+  const h = await harness(new MockAdapter([
+    toolCallResponse('copy-save', 'qingmu_save_reference_draft', { ...saveArgs, draft }),
+    toolCallResponse('copy-preview', 'qingmu_preview_reference_draft', { draft }),
+    toolCallResponse('copy-read', 'qingmu_read_reference_draft', { page: 1 }),
+    textResponse('The director design is copied into the editable draft; no video was generated.'),
+  ]))
+  h.upstream.setDirectorSource(source); await h.run()
+  for (const id of ['copy-save', 'copy-preview', 'copy-read']) expect(result(h.agent, id).error, result(h.agent, id).text).toBe(false)
+  const expanded = [{ bindingToken: 'lin' }, { text: ': identity reference only.\n' }, { text: production }]
+  expect(h.upstream.saved().draft.request.promptParts).toEqual(expanded)
+  const preview = JSON.parse(result(h.agent, 'copy-preview').text)
+  expect(preview.prompt).toBe('图1: identity reference only.\n' + production)
+  expect(preview.prompt).not.toContain('Adjacent shot research')
+  expect(preview.parameters).toMatchObject(edit.parameters)
+  expect(saves(h.upstream)).toHaveLength(1)
+  expect({ prompt: preview.prompt, savedParts: h.upstream.saved().draft.request.promptParts,
+    generated: preview.generationQueued }).toMatchSnapshot()
+})
+
+it.each(['stale', 'missing', 'duplicate', 'ambiguous', 'too-long'] as const)('refuses %s director insertion without saving or silently truncating', async (reason) => {
+  const source = { sha256: 'b'.repeat(64), prompt: 'Read the full source',
+    generationPrompt: reason === 'too-long' ? 'x'.repeat(20001) : canonical(design) }
+  const marker = reason === 'ambiguous' ? { directorText: 'current', text: 'silently replace' } : { directorText: 'current' }
+  const draft = { ...edit, directorSourceSha256: reason === 'stale' ? 'a'.repeat(64) : source.sha256,
+    promptParts: reason === 'duplicate' ? [marker, marker] : [marker] }
+  const h = await harness(new MockAdapter([
+    toolCallResponse('copy-denied', 'qingmu_save_reference_draft', { ...saveArgs, draft }),
+    toolCallResponse('preview-denied', 'qingmu_preview_reference_draft', { draft }), textResponse('Read and correct the source before saving.'),
+  ]))
+  h.upstream.setDirectorSource(reason === 'missing' ? { sha256: source.sha256, prompt: source.prompt } : source)
+  await h.run()
+  expect(result(h.agent, 'copy-denied').error).toBe(true)
+  expect(result(h.agent, 'preview-denied').error).toBe(true)
+  expect(saves(h.upstream)).toHaveLength(0)
 })

@@ -15,7 +15,7 @@ const result = {
   body: { input: { prompt: '已编译的原文' }, parameters: { duration: 8, resolution: '720P', ratio: '16:9' } },
   referenceAudioDurationSec: 2, directorSource: null, directorSourceAligned: true,
 } as ReferenceVideoPreviewResponse
-function mount(options?: { assets?: ReferenceVideoAsset[]; initialDurationSec?: number; onRequestDirector?: () => void; directorSource?: { sha256: string; prompt: string }; configured?: boolean; configurationError?: string | null; initialMaterialStatus?: 'not_prepared' | 'unknown' | 'failed' | 'expired' | 'ready' }) {
+function mount(options?: { assets?: ReferenceVideoAsset[]; initialDurationSec?: number; onRequestDirector?: () => void; directorSource?: { sha256: string; prompt: string; generationPrompt?: string }; configured?: boolean; configurationError?: string | null; initialMaterialStatus?: 'not_prepared' | 'unknown' | 'failed' | 'expired' | 'ready' }) {
   const availableAssets = options?.assets ?? assets
   let server: ReferenceVideoDraftResponse = { schema: 'jason.reference-video-draft.v1', directorSource: options?.directorSource ?? null, projectId: 'p', frameId: 'f', frameSha256: 'f'.repeat(64), draft: null, mediaTypes: {}, providerCalls: 0, generationQueued: false }
   let latestMaterialStatus = options?.initialMaterialStatus ?? 'not_prepared'
@@ -68,6 +68,31 @@ function mount(options?: { assets?: ReferenceVideoAsset[]; initialDurationSec?: 
   return { port, view, setMaterialStatus: (status: typeof latestMaterialStatus) => { latestMaterialStatus = status } }
 }
 afterEach(cleanup)
+it('explicitly loads the complete production design while preserving references and parameters for review', async () => {
+  const directorSource = { sha256: 'b'.repeat(64), prompt: 'Full source plus neighboring actions',
+    generationPrompt: '先站起绕桌，再蹲下接书。结尾才停步。镜头随演员下降；环境声持续。' }
+  const { port } = mount({ directorSource }); await chooseAll()
+  fireEvent.change(screen.getByLabelText('时长（秒）'), { target: { value: 12 } })
+  fireEvent.click(screen.getByText('载入完整导演原稿（替换当前文字）'))
+  expect(screen.getByDisplayValue(directorSource.generationPrompt)).toBeTruthy()
+  expect(screen.queryByDisplayValue('陈远说：‘图1不应被替换。’')).toBeNull()
+  expect(port.saveReferenceVideoDraft).not.toHaveBeenCalled()
+  expect(port.queueReferenceVideo).not.toHaveBeenCalled()
+  const reviewed = screen.getByRole('checkbox', { name: /我已对照当前设计/ }) as HTMLInputElement
+  expect(reviewed.checked).toBe(false)
+  fireEvent.click(reviewed)
+  fireEvent.click(screen.getByText('保存引用草稿'))
+  await waitFor(() => { expect(port.saveReferenceVideoDraft).toHaveBeenCalledTimes(1) })
+  const request = port.saveReferenceVideoDraft.mock.calls[0]![0].request
+  expect(request.bindings.map(item => item.assetId)).toEqual(assets.map(item => item.assetId))
+  expect(request.parameters.duration).toBe(12)
+  expect(request.directorSourceSha256).toBe(directorSource.sha256)
+  expect(request.promptParts.at(-1)).toEqual({ text: directorSource.generationPrompt })
+  expect(JSON.stringify(request.promptParts)).not.toContain('neighboring actions')
+  fireEvent.click(screen.getByText('恢复已存草稿（替换当前试排）'))
+  await waitFor(() => { expect(screen.getByDisplayValue(directorSource.generationPrompt)).toBeTruthy() })
+})
+
 it('shows the original room state when choosing references without changing the current shot', async () => {
   const original = { name: '候船室', view: '入口反打', imagePrompt: '窗关闭', submittedPrompt: '原图完整提交描述',
     visualIdentity: '木长椅', designBasis: '开船前', imageStage: { sceneName: '候船室', camera: '从门内看向检票窗', blocking: '无人', state: '检票窗关闭' } }

@@ -20,6 +20,8 @@ Adding a new editing service or automatic synchronization would duplicate the ex
 
 ## Consequences
 
+An explicit director-text insertion copies current production design into the existing editable draft. It retains world exceptions, film style, complete shot decisions and dialogue without a second model paraphrase; research on other shots and the complete asset catalog remain source material for assigning reference purposes. Source hashes, size validation and preview apply to the expanded text. This reduces transformation loss but cannot resolve contradictions already authored in the director plan, prove visual inspection or establish generated-media quality. The browser offers the same explicit local replacement without saving or granting review status.
+
 The reference editor and director assistant share one saved draft. The user retains control over unsaved browser edits, media adoption and generation. The change adds no database, generation authority or media selection.
 
 ## Testing

@@ -141,3 +141,4 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 整片剪辑工具提供本机原声音源分离的可用状态。导演可按镜明确选择 sourceAudioMode original、speech_effects 或 speech，配乐和环境音轨仍按全片时间组织。保存不执行推理，渲染时在本机处理原声音源并缓存；导演须区分声音分离与降低音量，并试听对白和环境声是否受损。
 
 现有引用草稿工具支持明确的首尾帧用途。导演根据需要选择完整镜头画面控制起始布局，或选择多参考来分别引用身份与音色。首帧模式不能混入音色参考，但仍可生成原生对白和环境声。工具与网页保存同一份可编辑草稿，不自动生成媒体，也不宣称画面已遵守设计。
+草稿工具接受一次显式的 `{directorText:"current"}` 提示词片段。它根据已读来源哈希，将 generationPrompt 复制为普通已存文字，再做校验和预览；不改写导演设计，也不带入相邻镜头研究。引用用途仍分别编写。来源缺失、过期、重复插入或正文超长时拒绝保存，不截断；手写文字继续可编辑。原设计中的矛盾仍需导演核对，复制不代表语义批准。参见[路由决策](../../../.agents/notes/implemented/bug-fix/2026-09-10-qingmu-reference-director-routing.zh.md)。
