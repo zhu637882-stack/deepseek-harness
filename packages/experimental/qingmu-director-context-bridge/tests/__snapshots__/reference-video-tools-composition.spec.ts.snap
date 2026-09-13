@@ -117,6 +117,12 @@ exports[`'compacts a long shipped director sess…' 1`] = `
       "sceneId": "scene-a",
       "shotId": "f",
     },
+    "sourceAlignment": {
+      "currentSourceSha256": null,
+      "guidance": "This comparison checks only the saved draft against the current directorSource.sha256. true means its recorded source is current; false means it differs; null means a source digest is missing and alignment is unknown. A director-plan receiptId, contextSnapshotSha256, frameSha256 or requestSha256 identifies different data and must not be compared with this source digest. Matching does not certify creative quality or require any rewrite.",
+      "matches": null,
+      "savedSourceSha256": null,
+    },
     "visualInputs": [
       {
         "assetId": "asset_lin",
@@ -306,7 +312,6 @@ exports[`carries a video reference through the native director read, preview, sa
   },
 }
 `;
-
 
 exports[`copies the complete current production design into ordinary saved text and the actual preview 1`] = `
 {
@@ -560,6 +565,18 @@ exports[`reconciles a changed complete design into one final native reference dr
     },
   ],
   "sourceReadSucceeded": true,
+}
+`;
+
+exports[`reports 'current' source alignment without confusing the planning receipt or rewriting the draft 1`] = `
+{
+  "planningGuidance": "Save creative fields with qingmu_save_director_plan. receiptId identifies this planning read for saving; it is not directorSource.sha256. Read qingmu_read_reference_draft and its sourceAlignment to check whether the saved generation draft still matches its source. Omitted imagePromptCn preserves the starting still; supply it to replace that description alongside directorPlan.visual when both change. Script identities and provenance remain protected. Explicit empty values clear decisions; omitted fields stay. Script dialogue text changes use the dialogue edit tools. Speakers, actions, camera moves and overlaps follow the script and director, with no fixed one-speaker rule.",
+  "sourceAlignment": {
+    "currentSourceSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "guidance": "This comparison checks only the saved draft against the current directorSource.sha256. true means its recorded source is current; false means it differs; null means a source digest is missing and alignment is unknown. A director-plan receiptId, contextSnapshotSha256, frameSha256 or requestSha256 identifies different data and must not be compared with this source digest. Matching does not certify creative quality or require any rewrite.",
+    "matches": true,
+    "savedSourceSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  },
 }
 `;
 

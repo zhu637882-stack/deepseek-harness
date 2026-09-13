@@ -332,6 +332,36 @@ const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA
 const imageSha = createHash('sha256').update(imageBytes).digest('hex')
 const imageUrl = `http://127.0.0.1:8115/api/media/media_cafe?signature=${'e'.repeat(64)}&expires=9999999999`
 const imageArgs = { page: 1, assetId: 'asset_cafe', assetSha256: imageSha }
+it.each([
+  { name: 'current', current: 'c'.repeat(64), saved: 'c'.repeat(64), matches: true },
+  { name: 'changed', current: 'c'.repeat(64), saved: 'd'.repeat(64), matches: false },
+  { name: 'untracked', current: 'c'.repeat(64), saved: null, matches: null },
+  { name: 'unavailable', current: null, saved: 'd'.repeat(64), matches: null },
+  { name: 'without source', current: null, saved: null, matches: null },
+])('reports $name source alignment without confusing the planning receipt or rewriting the draft', async ({ name, current, saved, matches }) => {
+  const fixture = structuredClone({ request, response, savedDraft })
+  fixture.savedDraft.draft.request = { ...fixture.savedDraft.draft.request,
+    ...(saved ? { directorSourceSha256: saved } : {}) }
+  fixture.savedDraft.draft.requestSha256 = sha(fixture.savedDraft.draft.request)
+  const upstream = writer(0, undefined, fixture)
+  upstream.setDirectorSource(current ? { sha256: current, prompt: 'Complete research', generationPrompt: 'Complete production' } : null)
+  const adapter = new MockAdapter([
+    toolCallResponse('alignment-plan', 'qingmu_read_director_plan', {}),
+    toolCallResponse('alignment-draft', 'qingmu_read_reference_draft', { page: 1 }),
+    textResponse('Read the saved source comparison without modifying the draft.'),
+  ])
+  const h = await harness(adapter, upstream); await h.run(true)
+  expect(result(h.agent, 'alignment-plan').error, result(h.agent, 'alignment-plan').text).toBe(false)
+  expect(result(h.agent, 'alignment-draft').error, result(h.agent, 'alignment-draft').text).toBe(false)
+  const plan = JSON.parse(result(h.agent, 'alignment-plan').text)
+  const draft = JSON.parse(result(h.agent, 'alignment-draft').text)
+  expect(plan.receiptId).not.toBe(current)
+  expect(draft.sourceAlignment).toMatchObject({ currentSourceSha256: current, savedSourceSha256: saved, matches })
+  expect(upstream.saved().draft).toEqual(fixture.savedDraft.draft)
+  expect(saves(upstream)).toHaveLength(0)
+  if (name === 'current') expect({ planningGuidance: plan.guidance, sourceAlignment: draft.sourceAlignment }).toMatchSnapshot()
+})
+
 it('delivers saved bound image pixels with the draft through the shipped director loop', async () => {
   const fixture = structuredClone({ request, response, savedDraft })
   fixture.savedDraft.draft.request = { ...fixture.savedDraft.draft.request,

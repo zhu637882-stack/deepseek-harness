@@ -333,8 +333,14 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
       const saved = draft.value as ReferenceVideoDraftResponse
       const visualInputs = await readDraftImages(ctx, saved, catalog.items, exec, () => assertCurrent(current, exec))
       assertCurrent(current, exec)
+      const currentSourceSha256 = saved.directorSource?.sha256 ?? null
+      const savedSourceSha256 = saved.draft?.request.directorSourceSha256 ?? null
       return ports.boundedJson({ schema: 'qingmu.native-reference-draft.v1', scope,
         saved, visualInputs,
+        sourceAlignment: { currentSourceSha256, savedSourceSha256,
+          matches: currentSourceSha256 && savedSourceSha256 ? currentSourceSha256 === savedSourceSha256 : null,
+          guidance: 'This comparison checks only the saved draft against the current directorSource.sha256. true means its recorded source is current; false means it differs; null means a source digest is missing and alignment is unknown. A director-plan receiptId, contextSnapshotSha256, frameSha256 or requestSha256 identifies different data and must not be compared with this source digest. Matching does not certify creative quality or require any rewrite.',
+        },
         assets: { page: catalog.page, pages: catalog.pages,
           items: catalog.items.map(imageCatalogEntry) },
         referenceLimits: { model: 'wan3.0-video', maxImages: 10, maxAudioClips: 5, maxVideoClips: 5,

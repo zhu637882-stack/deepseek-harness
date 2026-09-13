@@ -1,5 +1,7 @@
 # Qingmu director context bridge
 
+Saved reference-draft reads include `sourceAlignment`: the current director-source SHA, the saved request's source SHA and their comparison. Missing digests produce an unknown result. A planning receipt, frame hash or request hash identifies different data and cannot establish source drift. Reading never rewrites the draft; an aligned source does not certify creative quality.
+
 Native frame capture resolves an omitted runId from the current project shot's candidate video ID and SHA. Explicit runs must match the same source; older runs outside the recent list are read individually. Mismatch, ambiguity or an unverifiable source stops before capture. Recovery verifies the same binding without recapturing or changing selection.
 
 Director plans can retain adjoining-segment edit notes in editorialContext. The video source excludes that explicit field, preserves internal coverage, and the working-cut read returns the notes for editing. Legacy mixed coverage requires deliberate revision, not keyword removal.
