@@ -1,5 +1,4 @@
 /** Episode preparation and submission reuse the saved single-shot drafts and task queue. */
-import { parseReferenceVideoRequest } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type { ReferenceVideoAsset, ReferenceVideoDraftResponse, ReferenceVideoPreviewRequest,
   ReferenceVideoQuoteResponse, ReferenceVideoRun, QueueReferenceVideoRequest, ReferenceVideoMaterialsState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
@@ -56,15 +55,18 @@ export function parseBatchChoices(text: string, basis: BatchBasis): ReferenceVid
         || typeof reference.purpose !== 'string' || !reference.purpose.trim()) throw new Error('每项引用都需要真实素材和具体用途。')
       const asset = basis.assets.find(item => item.assetId === reference.assetId)
       if (!asset) throw new Error('方案引用的素材不在当前项目目录。')
+      const frameRole = 'frameRole' in reference ? reference.frameRole : undefined
+      if (frameRole !== undefined && frameRole !== 'first_frame' && frameRole !== 'last_frame') throw new Error('首尾帧用途无效。')
       return { bindingToken: `ref_${index + 1}`, assetId: asset.assetId, assetSha256: asset.assetSha256, label: asset.label,
-        ...('frameRole' in reference ? { frameRole: reference.frameRole } : {}), purpose: reference.purpose }
+        ...(frameRole ? { frameRole } : {}), purpose: reference.purpose }
     })
     const promptParts = bindings.flatMap(binding => [{ bindingToken: binding.bindingToken }, { text: `：${binding.purpose}\n` }])
-    const request = parseReferenceVideoRequest({ projectId: basis.projectId, frameId: shot.frameId, model: 'wan3.0-video',
+    // The existing Host save/preview boundary validates the complete untrusted request before writing it.
+    const request: ReferenceVideoPreviewRequest = { projectId: basis.projectId, frameId: shot.frameId, model: 'wan3.0-video',
       bindings: bindings.map(({ purpose: _purpose, ...binding }) => binding),
       promptParts: [...promptParts, { text: `\n【本镜完整导演设计】\n${source.generationPrompt}` }],
-      directorSourceSha256: source.sha256, parameters: row.parameters })
-    if (request.parameters.duration !== shot.duration) throw new Error(`${shot.label}的生成时长应沿用已保存分镜。`)
+      directorSourceSha256: source.sha256, parameters: row.parameters as ReferenceVideoPreviewRequest['parameters'] }
+    if (request.parameters?.duration !== shot.duration) throw new Error(`${shot.label}的生成时长应沿用已保存分镜。`)
     return request
   })
   if (expected.size) throw new Error(`导演方案遗漏 ${expected.size} 个镜头。`)
