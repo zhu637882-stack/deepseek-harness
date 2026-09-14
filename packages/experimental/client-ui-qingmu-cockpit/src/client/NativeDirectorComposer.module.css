@@ -7,6 +7,7 @@
 .composer > p { font-size:12px; }
 .composer section { display:grid; gap:8px; padding-top:12px; border-top:1px solid var(--dsw-alias-border-l2); }
 .composer pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+.composer section > button { min-height:40px; padding:8px 12px; border:1px solid var(--dsw-alias-border-l2); border-radius:5px; background:var(--dsw-alias-bg-layer-2); color:var(--dsw-alias-label-primary); font:inherit; cursor:pointer; }
 
 .assetSummary { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .composer summary { min-height:44px; padding:10px 0; cursor:pointer; color:var(--dsw-alias-label-primary); }

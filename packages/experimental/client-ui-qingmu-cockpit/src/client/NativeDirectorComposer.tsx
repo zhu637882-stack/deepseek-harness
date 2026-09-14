@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { NativeDirectorPromptTarget } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import { useDirectorConnection, type NativeDirectorSessionPort } from './native-director-session.ts'
 import { NativeDialogueProgress } from './NativeDialogueProgress.tsx'
+import { NativeDirectorReply } from './NativeDirectorReply.tsx'
 import css from './NativeDirectorComposer.module.css'
 
 const sharedContextPrompt = [
@@ -114,6 +115,7 @@ export function NativeDirectorComposer({ port, sessionId, scopeKey, ready, targe
       onClick={() => { void send() }}>{busy ? '正在发送…' : '发送给当前导演'}</button>
     <p>导演按你的要求处理修改；生成画面的认可仍由你决定。</p>
     {notice && <p role="status">{notice}</p>}
+    {ready && sessionId && port.story && <NativeDirectorReply port={port.story} sessionId={sessionId} scopeKey={scopeKey} />}
     {mode === 'shot' && <NativeDialogueProgress port={port} sessionId={sessionId} target={target} onCommitted={onCommitted} />}
     {!!unconfirmed && <details><summary>查看未确认的原要求</summary><pre>{unconfirmed}</pre>
       <button type="button" onClick={() => {
