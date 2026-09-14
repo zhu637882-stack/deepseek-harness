@@ -274,7 +274,7 @@ it.each([true, false])('saves and reloads a new native scene with explicit geome
   expect(port.generateAssetImage).not.toHaveBeenCalled()
 })
 
-it('keeps world exceptions and room details through an AI supplement, save and reload', async () => {
+it.each([false, true])('keeps world exceptions and room details through an AI supplement, save and reload (director omitted: %s)', async (omitDirector) => {
   const port = setup()
   const world = { setting: '1996年', scriptFacts: '父亲在室内', directorInferences: '桌边留出通道',
     exceptions: '来自2026年的孩子携带智能手机', openQuestions: '待确定窗外景观' }
@@ -285,7 +285,7 @@ it('keeps world exceptions and room details through an AI supplement, save and r
   port.readAssetDesign.mockResolvedValue(configured)
   port.saveAssetDesign.mockImplementation(async (input: unknown) => ({ ...configured,
     design: { ...configured.design, ...(input as { design: object }).design } }))
-  const supplement = { director: state.design!.director, assets: [{ kind: 'scene', id: room.id, name: room.name,
+  const supplement = { ...(omitDirector ? {} : { director: state.design!.director }), assets: [{ kind: 'scene', id: room.id, name: room.name,
     imagePrompt: '从窗侧看工作台', space: { layout: '桌仍靠北窗，南门旁加一把木椅' }, imageStage: { camera: '窗边看向门' } }] }
   localStorage.setItem('qingmu.asset-design-session.v1:p:e', JSON.stringify({ sessionId: 'session_design', baseline: 0, submitted: true }))
   const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
@@ -298,6 +298,8 @@ it('keeps world exceptions and room details through an AI supplement, save and r
   await waitFor(() => { expect(port.saveAssetDesign).toHaveBeenCalledTimes(1) })
   const saved = await (port.saveAssetDesign.mock.results[0]!.value as Promise<AssetDesignState>)
   expect(saved.design?.world).toEqual(world)
+  expect(saved.design?.director).toEqual(configured.design.director)
+  expect(saved.design?.assets[1]).toMatchObject(state.design!.assets[0]!)
   expect(saved.design?.assets[0]?.space).toEqual({ ...room.space, layout: supplement.assets[0]!.space.layout })
   expect(saved.design?.assets[0]?.imageStage).toEqual({ camera: '窗边看向门', state: '风扇未接电' })
   view.unmount(); port.readAssetDesign.mockResolvedValue(saved)

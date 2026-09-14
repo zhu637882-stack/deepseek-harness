@@ -16,8 +16,11 @@ import { imageObjectStates, imageObjectStateGuidance } from './image-object-stat
 type Port = Pick<QingmuYimengPort, 'readAssetDesign' | 'previewSceneLayout' | 'saveAssetDesign' | 'quoteAssetImage' | 'generateAssetImage' | 'readAssetImageRuns' | 'readAssetVoiceRuns' | 'quoteAssetVoice' | 'generateAssetVoice'> & AssetImageReferencePort
 const emptyWorld: AssetWorldDesign = { setting: '', scriptFacts: '', directorInferences: '', exceptions: '', openQuestions: '' }
 const names = { actor: '人物', scene: '场景', prop: '道具' } as const
-function parseDesign(text: string, incomplete = false): { design: AssetDesign; repaired: boolean } {
-  const { value, repaired } = parseQuotedDesignJson(text)
+function parseDesign(text: string, incomplete = false, previous?: AssetDesign): { design: AssetDesign; repaired: boolean } {
+  const parsed = parseQuotedDesignJson(text)
+  const { repaired } = parsed
+  const value = previous && parsed.value && typeof parsed.value === 'object' && !('director' in parsed.value)
+    ? { ...parsed.value, director: previous.director } : parsed.value
   if (!value || typeof value !== 'object' || !('assets' in value) || !Array.isArray(value.assets)
     || !value.assets.length || value.assets.length > 40 || !('director' in value) || !value.director || typeof value.director !== 'object') throw new Error('设计需要人物、场景或道具，以及全片导演设定。')
   for (const entry of value.assets as unknown[]) {
@@ -176,7 +179,7 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
     } catch { setDraftNotice('本机未能保存草稿，请保持本页并保存到项目，避免丢失修改。') }
   }
   function adopt(text: string, retainOmitted = false) {
-    const parsed = parseDesign(text)
+    const parsed = parseDesign(text, false, retainOmitted ? design : undefined)
     if (state?.design === null && state.productAssets?.length) {
       const products = state.productAssets
       const assets: AssetDesignItem[] = parsed.design.assets.map((item) => {
