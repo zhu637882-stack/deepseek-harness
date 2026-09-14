@@ -17,3 +17,5 @@ Consolidate candidate review through the same validated GET/POST helper used by 
 ## Validation and limits
 
 Focused component and flow tests cover changed sources, partial preparation, lost submission responses, remount recovery, retained candidates, existing reports, mismatched review evidence and preview filling. Existing cockpit navigation and single-shot review tests remain applicable. Browser verification checks the real deployed controls without resubmitting old media. Client command recovery is scoped to the original tab; durable provider jobs and review records remain server-owned. No new provider route, batch database or automatic creative approval is introduced. New-project media validation is still required for visual continuity and voice quality.
+
+Live browser verification exposed that the raw provider asset is not the frame-owned review candidate. Batch review now resolves the existing registration to its Take ID before both reads and submissions; a regression uses different raw and registered IDs.

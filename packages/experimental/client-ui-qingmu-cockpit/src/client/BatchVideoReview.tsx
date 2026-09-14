@@ -1,19 +1,28 @@
 import { useEffect, useRef, useState } from 'react'
 import { requestNativeVideoReview, reviewSummary, type Review } from './native-video-review.ts'
-import type { BatchBasis } from './reference-video-batch.ts'
+import type { BatchBasis, BatchPort } from './reference-video-batch.ts'
 
 /** The latest returned candidate per shot is checked with the ordinary advisory review service. */
-export function BatchVideoReview({ episodeId, basis, onOpenShot }: {
+export function BatchVideoReview({ episodeId, basis, port, onOpenShot }: {
+  readonly port: Pick<BatchPort, 'readReferenceVideoCandidateRegistration'>
   readonly episodeId: string
   readonly basis: BatchBasis
   readonly onOpenShot: (frameId: string) => void
 }) {
   const targets = basis.shots.flatMap((shot) => {
-    const candidate = shot.runs.find(run => run.publicStatus === 'succeeded')?.candidates[0]
-    return candidate ? [{ episodeId, frameId: shot.frameId, label: shot.label,
-      assetId: candidate.assetId, sha256: candidate.assetSha256 }] : []
+    const run = shot.runs.find(item => item.publicStatus === 'succeeded')
+    const candidate = run?.candidates[0]
+    return candidate && run ? [{ episodeId, frameId: shot.frameId, label: shot.label,
+      runId: run.runId, assetId: candidate.assetId, sha256: candidate.assetSha256 }] : []
   })
   const scope = JSON.stringify(targets)
+  async function request(target: typeof targets[number], method: 'GET' | 'POST', signal?: AbortSignal) {
+    const registered = await port.readReferenceVideoCandidateRegistration({ projectId: basis.projectId,
+      frameId: target.frameId, runId: target.runId, assetId: target.assetId, expectedAssetSha256: target.sha256 })
+    if (!registered.takeId) throw new Error('视频尚未进入候选审看，请先同步视频结果。')
+    return requestNativeVideoReview({ episodeId, frameId: target.frameId, assetId: registered.takeId,
+      sha256: target.sha256 }, method, signal)
+  }
   const [reports, setReports] = useState<ReadonlyMap<string, Review>>(new Map())
   const [errors, setErrors] = useState<ReadonlyMap<string, string>>(new Map())
   const [busy, setBusy] = useState(false)
@@ -26,9 +35,9 @@ export function BatchVideoReview({ episodeId, basis, onOpenShot }: {
     const current = JSON.parse(scope) as typeof targets
     async function read() {
       let pending = false
-      await Promise.allSettled(current.map(async ({ label: _label, ...target }) => {
+      await Promise.allSettled(current.map(async (target) => {
         try {
-          const result = await requestNativeVideoReview(target, 'GET', controller.signal)
+          const result = await request(target, 'GET', controller.signal)
           pending ||= result.state === 'pending'
           if (!controller.signal.aborted) {
             setReports(previous => new Map(previous).set(target.assetId, result))
@@ -47,11 +56,11 @@ export function BatchVideoReview({ episodeId, basis, onOpenShot }: {
     if (busy) return
     setBusy(true)
     // Re-read before each POST: an interrupted batch resumes only the missing/outdated reports.
-    for (const { label: _label, ...target } of targets) {
+    for (const target of targets) {
       try {
-        let result = await requestNativeVideoReview(target, 'GET')
+        let result = await request(target, 'GET')
         if (result.state !== 'pending' && (result.state !== 'complete' || result.designChanged || result.methodChanged)) {
-          result = await requestNativeVideoReview(target, 'POST')
+          result = await request(target, 'POST')
         }
         if (live.current) {
           setReports(previous => new Map(previous).set(target.assetId, result))

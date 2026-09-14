@@ -246,7 +246,7 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
         <button type="button" disabled={unavailable} onClick={() => { void collect() }}>重新同步视频结果</button>
       </div>
       <details onToggle={(event) => { setReviewOpen(event.currentTarget.open) }}><summary>整集音画检查</summary>
-        {reviewOpen && <BatchVideoReview episodeId={episodeId} basis={basis} onOpenShot={onOpenShot} />}
+        {reviewOpen && <BatchVideoReview port={port} episodeId={episodeId} basis={basis} onOpenShot={onOpenShot} />}
       </details>
       {ready.length > 0 && <small>阿里视频生成 · 每镜一条候选 · 预计 ¥
         {ready.reduce((sum, quote) => sum + Number(quote.cost.estimatedCny), 0).toFixed(2)}</small>}
