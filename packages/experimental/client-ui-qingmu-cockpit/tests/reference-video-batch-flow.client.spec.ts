@@ -210,7 +210,9 @@ it('applies revision feedback to the selected retake and reuses it after interru
   const shot = current.shots[0]!
   let saved = shot.saved
   const save = vi.fn(async (command: { request: typeof shot.saved.draft.request }) => {
-    saved = { ...saved, draft: { ...saved.draft, revision: 3, request: command.request } }
+    saved = { ...saved, draft: { ...saved.draft, revision: 3, request: JSON.parse(JSON.stringify(command.request, (_key, value: unknown) =>
+      value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value)) as typeof command.request } }
     return saved
   })
   const materials = vi.fn().mockRejectedValueOnce(new Error('temporary disconnect'))

@@ -114,14 +114,20 @@ export function parseBatchChoices(text: string, basis: BatchBasis,
   return requests
 }
 
+/** Writer sorts object keys when persisting drafts; field order is not a new edit. */
+function orderedRequest(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) => item !== null && typeof item === 'object' && !Array.isArray(item)
+    ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item)
+}
+
 /** Prepare actual references and compile the same request used by single-shot generation. */
 export async function prepareBatchShot(port: BatchPort, projectId: string, shot: BatchShot,
   request?: ReferenceVideoPreviewRequest, revise = false): Promise<ReferenceVideoQuoteResponse> {
   const current = await port.referenceVideoDraft({ projectId, frameId: shot.frameId })
   if (request && request.directorSourceSha256 !== current.directorSource?.sha256) throw new Error('导演设计已更新，请重新读取当前方案。')
   // A partial preparation can already have saved this exact replacement before an upload failed.
-  const alreadySaved = request && current.draft && JSON.stringify(current.draft.request)
-    === JSON.stringify((({ projectId: _projectId, ...rest }) => rest)(request))
+  const alreadySaved = request && current.draft && orderedRequest(current.draft.request)
+    === orderedRequest((({ projectId: _projectId, ...rest }) => rest)(request))
   if (revise && !alreadySaved && current.draft?.revision !== shot.saved.draft?.revision) {
     throw new Error('本镜草稿已在其他页面更新，请刷新后再准备修改意见。')
   }
