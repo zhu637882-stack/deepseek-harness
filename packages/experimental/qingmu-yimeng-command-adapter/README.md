@@ -255,3 +255,5 @@ First-frame preview also accepts explicit working-image bindings: asset SHA, ord
 Scene-planning reads expose the film aspect ratio and each frame’s current scene ID. Null means unbound; omitted fields remain compatible with older read projections. Clients use these identities for shared-scene framing, without changing layout or media through a planning read.
 
 `previewSceneLayout` also accepts optional `imageObjectStates`, the same per-image list stored on asset cards or a shot director plan. Each entry refers to an existing scene object ID and records its basis with optional visible/center/size/rotation changes. The Writer renders changes on a copy of the shared layout and rejects duplicate or foreign IDs. Omitted fields preserve old clients, explicit null/empty clears. Saved source changes invalidate stale quotations; queued inputs retain their frozen composition.
+
+The working-cut sound-review projection optionally carries versioned adjacent-cut observations and `methodChanged`. Legacy reports remain readable. The existing POST requests the current review method; reading the projection never submits an audit.

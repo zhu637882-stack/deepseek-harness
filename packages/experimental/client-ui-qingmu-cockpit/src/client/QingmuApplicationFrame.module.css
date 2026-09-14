@@ -26,3 +26,8 @@
 @media(max-width:1350px) { .header { grid-template-columns:minmax(195px,1fr) auto minmax(165px,1fr); padding:0 16px; gap:10px; } .identity { gap:12px; } .project { max-width:176px; padding-left:12px; } .workflow button { padding:0 10px; } .tools button { padding:8px 6px; } }
 @media(max-width:1100px) { .header { grid-template-columns:minmax(0,1fr) auto; grid-template-rows:58px 44px; gap:0 10px; padding:0 16px; } .workflow { grid-column:1 / -1; grid-row:2; justify-content:flex-start; overflow-x:auto; } .project { max-width:260px; } }
 @media(max-width:620px) { .header { grid-template-columns:minmax(0,1fr) auto; min-height:102px; padding:0 12px; } .brand { font-size:18px; letter-spacing:3px; } .project { max-width:160px; padding-left:10px; } .secondaryTool { display:none; } .moreTools { display:block; } .workflow button { padding:0 11px; } .workflow button span { font-size:12px; } }
+
+.preparation { display:flex; flex-wrap:wrap; gap:8px; padding:12px 24px; border-bottom:1px solid var(--dsw-alias-border-l2); }
+.preparation button { min-height:44px; border:1px solid var(--dsw-alias-border-l2); border-radius:8px; padding:8px 16px; font:inherit; color:var(--dsw-alias-label-secondary); background:var(--dsw-alias-bg-layer-1); cursor:pointer; }
+.preparation button[aria-current] { color:var(--qingmu-accent); border-color:var(--qingmu-accent); }
+.preparation button:focus-visible { outline:2px solid var(--qingmu-accent); outline-offset:3px; }

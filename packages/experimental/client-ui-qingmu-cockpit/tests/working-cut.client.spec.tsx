@@ -188,10 +188,10 @@ it('reviews the exact rendered version, preserves edits and recovers timed findi
   const port = { readWorkingCut: vi.fn(async () => server), reviewWorkingCutSound: review,
     saveWorkingCut: vi.fn(), renderWorkingCut: vi.fn(), uploadWorkingCutAudio: vi.fn() }
   let view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
-  await screen.findByRole('button', { name: '检查此版整片声音' })
+  await screen.findByRole('button', { name: '检查此版连续性与声音' })
   expect(review).not.toHaveBeenCalled()
   fireEvent.change(screen.getByRole('spinbutton', { name: '镜 1 终点秒' }), { target: { value: '12' } })
-  fireEvent.click(screen.getByRole('button', { name: '检查此版整片声音' }))
+  fireEvent.click(screen.getByRole('button', { name: '检查此版连续性与声音' }))
   await screen.findByText('音乐与转场 · 模型发现问题')
   expect(review).toHaveBeenCalledExactlyOnceWith({ projectId: 'p', episodeId: 'e', command: {
     revisionId: 'cut-1', assetId: 'film-1', sha256: 'b'.repeat(64),
@@ -213,7 +213,7 @@ it('reviews the exact rendered version, preserves edits and recovers timed findi
   server = { ...server, revision: 2, cuts: [{ ...cut, revisionId: 'cut-2', version: 2,
     assetId: 'film-2', sha256: 'c'.repeat(64), url: '/film-2.mp4' }, ...server.cuts] }
   fireEvent.click(screen.getByRole('button', { name: '刷新成片状态' }))
-  await screen.findByRole('button', { name: '检查此版整片声音' })
+  await screen.findByRole('button', { name: '检查此版连续性与声音' })
   expect(screen.queryByText('音乐与转场 · 模型发现问题')).toBeNull()
   fireEvent.change(screen.getByRole('combobox', { name: '成片播放版本' }), { target: { value: 'cut-1' } })
   expect(screen.getByText('音乐与转场 · 模型发现问题')).toBeTruthy()

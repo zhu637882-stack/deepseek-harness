@@ -51,6 +51,15 @@ export interface WorkingCutSoundReview {
   readonly model?: string
   readonly summary?: string
   readonly errorCode?: string | null
+  /** Older sound-only reports remain readable; a new review is explicit. */
+  readonly methodChanged?: boolean
+  readonly transitions?: readonly {
+    readonly cutIndex: number
+    readonly atSec: number
+    readonly fromFrameId: string
+    readonly toFrameId: string
+    readonly checks: WorkingCutSoundReview['checks']
+  }[]
   readonly transcript?: readonly {
     readonly start_sec: number
     readonly end_sec: number

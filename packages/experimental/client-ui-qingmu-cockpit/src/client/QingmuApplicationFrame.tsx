@@ -9,10 +9,10 @@ const stepLabels: Record<CreativeStep, string> = {
   shooting: '拍摄与审看',
   delivery: '导出',
 }
-const steps = Object.entries(stepLabels) as readonly [CreativeStep, string][]
+const steps: readonly [CreativeStep, string][] = [['story', '故事'], ['assets', '准备素材与分镜'], ['shooting', '生成与审看'], ['delivery', '成片与导出']]
 export function creativeStepFromSearch(search: string): CreativeStep {
   const value = new URLSearchParams(search).get('qingmuView')
-  return steps.find(([id]) => id === value)?.[0] ?? 'story'
+  return value && Object.hasOwn(stepLabels, value) ? value as CreativeStep : 'story'
 }
 export function creativeStepLabel(step: CreativeStep): string { return stepLabels[step] }
 type Option = { readonly id: string; readonly label: string }
@@ -64,7 +64,7 @@ export function QingmuApplicationFrame({ projects, episodes, projectId, episodeI
         </div>
       </div>
       <nav className={css.workflow} aria-label="创作流程">{steps.map(([id, label], index) => <button type="button" key={id}
-        aria-current={!projectsOpen && step === id ? 'step' : undefined} onClick={() => onStep(id)}><small>{String(index + 1).padStart(2, '0')}</small><span>{label}</span></button>)}</nav>
+        aria-current={!projectsOpen && (step === id || (step === 'storyboard' && id === 'assets')) ? 'step' : undefined} onClick={() => onStep(id)}><small>{String(index + 1).padStart(2, '0')}</small><span>{label}</span></button>)}</nav>
       <div className={css.tools}>
         <button type="button" onClick={onRefresh} disabled={loading} aria-label="刷新页面">{loading ? '刷新中…' : '刷新'}</button>
         {(!scopeLocked || onOpenTools) && <div className={css.moreTools}>
@@ -79,6 +79,10 @@ export function QingmuApplicationFrame({ projects, episodes, projectId, episodeI
         {onOpenTools && <button type="button" className={css.secondaryTool} onClick={onOpenTools}>系统设置</button>}
       </div>
     </header>
-    <div className={css.content} data-creative-step={step}>{children}</div>
+    <div className={css.content} data-creative-step={step}>
+      {!projectsOpen && (step === 'assets' || step === 'storyboard') && <nav className={css.preparation} aria-label="素材与分镜准备">
+        <button type="button" aria-current={step === 'assets' ? 'page' : undefined} onClick={() => onStep('assets')}>角色、场景与道具</button>
+        <button type="button" aria-current={step === 'storyboard' ? 'page' : undefined} onClick={() => onStep('storyboard')}>分镜与导演</button>
+      </nav>}{children}</div>
   </div>
 }

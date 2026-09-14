@@ -447,249 +447,252 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
         <span>{images} 张图</span><span>{audios} 段音色</span><span>{videos} 段视频</span><span>{draftState?.draft ? `草稿 v${draftState.draft.revision}` : '未保存'}</span>
       </div>
     </div>
-    <section className={css.draftBar} aria-label="草稿操作">
-      <button type="button" disabled={saving} onClick={() => { void restore() }}>恢复已存草稿（替换当前试排）</button>
-      <button className={css.primaryAction} type="button" disabled={Boolean(frameModeError) || saving || !draftState || !sourceAccepted || Boolean(draftState.draft && !draftLoaded) || chosen.length === 0 || chosen.some(item => item.mediaType === 'unavailable' || !item.label.trim())} onClick={() => { void save() }}>{saving ? '保存草稿…' : '保存引用草稿'}</button>
-      <p role="status">{draftMessage}</p>
-    </section>
-    {port.readReferenceVideoMaterials !== undefined && <section className={css.materialsBar} aria-label="准备引用素材">
-      <div>
-        <p className={css.kicker}>ALI REFERENCE MATERIALS</p>
-        <h4>准备引用素材</h4>
-        <p>{savedEpoch !== epoch.current
-          ? '先保存当前引用草稿，再将图片或音色上传到阿里临时素材区。'
-          : currentMaterials === undefined
-            ? '读取已保存草稿的临时素材状态。保存本地草稿不等于阿里可读。'
-            : currentMaterials.configured
-              ? '逐份准备图片、音色或参考视频；临时素材约 48 小时有效，不会生成视频。'
-              : '阿里临时素材尚未配置；已可访问的参考素材仍可预览。'}</p>
-      </div>
-      <div className={css.materialActions}>
-        <button type="button" disabled={materialsLoading || preparingAssetId !== undefined || !draftState?.draft || savedEpoch !== epoch.current}
-          onClick={() => { if (draftState) void readMaterials(draftState) }}>
-          {materialsLoading ? '读取准备状态…' : '读取准备状态'}
-        </button>
-        {currentMaterials?.configured === false && <small role="status">{configurationMessage(currentMaterials.configurationError)}</small>}
-      </div>
-    </section>}
-    {!sourceAccepted && <p role="alert">镜头在上次保存后已变化，请核对当前描述和素材。
-      <button type="button" onClick={() => { setSourceAccepted(true); invalidate() }}>基于当前镜头继续编辑</button>
-    </p>}
-    {draftState?.directorSource && <section aria-label="当前导演设计">
-      <details><summary>查看当前导演设计与全片风格，核对下方生成稿</summary>
-        <pre style={{ whiteSpace: 'pre-wrap' }}>{draftState.directorSource.prompt}</pre>
-      </details>
-      {draftState.directorSource.generationPrompt && <>
-        <button type="button" disabled={busy || saving} onClick={() => {
-          const production = draftState.directorSource?.generationPrompt
-          if (!production) return
-          const references = chosen.flatMap(item => [
-            { bindingToken: item.bindingToken }, { text: `：${item.label}\n` },
-          ])
-          invalidate(); setParts([{ text: '素材对应关系：\n' }, ...references, { text: production }])
-          setDirectorSourceSha256(undefined)
-          activeText.current = { index: references.length + 1, start: 0, end: 0 }
-        }}>载入完整导演原稿（替换当前文字）</button>
-        <p>保留引用和参数，带入世界设定、全片风格、本镜导演设计及对白。根据引用素材补充身份、布局和接续用途，核对设计中的冲突；保存前仍可编辑。</p>
-      </>}
-      {directorSourceSha256 !== draftState.directorSource.sha256 && <p role="status">
-        导演设计尚未同步到这份生成稿。请结合设计修改运镜、表演、声音和引用，也可交给青木导演整理。
+    {onRequestDirector && <button type="button" disabled={busy || saving || dirty} onClick={onRequestDirector}>让导演整理本镜</button>}
+    <details><summary>专业调整 · 引用素材、生成描述与参数</summary>
+      <section className={css.draftBar} aria-label="草稿操作">
+        <button type="button" disabled={saving} onClick={() => { void restore() }}>恢复已存草稿（替换当前试排）</button>
+        <button className={css.primaryAction} type="button" disabled={Boolean(frameModeError) || saving || !draftState || !sourceAccepted || Boolean(draftState.draft && !draftLoaded) || chosen.length === 0 || chosen.some(item => item.mediaType === 'unavailable' || !item.label.trim())} onClick={() => { void save() }}>{saving ? '保存草稿…' : '保存引用草稿'}</button>
+        <p role="status">{draftMessage}</p>
+      </section>
+      {port.readReferenceVideoMaterials !== undefined && <section className={css.materialsBar} aria-label="准备引用素材">
+        <div>
+          <p className={css.kicker}>ALI REFERENCE MATERIALS</p>
+          <h4>准备引用素材</h4>
+          <p>{savedEpoch !== epoch.current
+            ? '先保存当前引用草稿，再将图片或音色上传到阿里临时素材区。'
+            : currentMaterials === undefined
+              ? '读取已保存草稿的临时素材状态。保存本地草稿不等于阿里可读。'
+              : currentMaterials.configured
+                ? '逐份准备图片、音色或参考视频；临时素材约 48 小时有效，不会生成视频。'
+                : '阿里临时素材尚未配置；已可访问的参考素材仍可预览。'}</p>
+        </div>
+        <div className={css.materialActions}>
+          <button type="button" disabled={materialsLoading || preparingAssetId !== undefined || !draftState?.draft || savedEpoch !== epoch.current}
+            onClick={() => { if (draftState) void readMaterials(draftState) }}>
+            {materialsLoading ? '读取准备状态…' : '读取准备状态'}
+          </button>
+          {currentMaterials?.configured === false && <small role="status">{configurationMessage(currentMaterials.configurationError)}</small>}
+        </div>
+      </section>}
+      {!sourceAccepted && <p role="alert">镜头在上次保存后已变化，请核对当前描述和素材。
+        <button type="button" onClick={() => { setSourceAccepted(true); invalidate() }}>基于当前镜头继续编辑</button>
       </p>}
-      {onRequestDirector && <button type="button" disabled={busy || saving || dirty} onClick={onRequestDirector}>展开导演助手</button>}
-      <p>{dirty ? '先保存引用草稿，再交给导演整理。' : '导演保存后，这里会自动同步生成稿，再检查画面与声音引用。'}</p>
-      <label><input type="checkbox" checked={directorSourceSha256 === draftState.directorSource.sha256}
-        onChange={(event) => {
-          setDirectorSourceSha256(event.target.checked ? draftState.directorSource?.sha256 : undefined); invalidate()
-        }} />
-        我已对照当前设计整理生成稿，保留所需细节并处理相互矛盾的描述
-      </label>
-    </section>}
-    <p className={css.previewHint}>要延续已经拍定的布局和站位，将完整镜头画面设为首帧；要指定动作终点，可加尾帧。人物定妆、场景或音色分别引用时，使用普通参考。首帧模式仍可按导演描述生成对白与环境声，但不能同时引用音色。</p>
-    {frameModeError && <p role="alert">{frameModeError}</p>}
-    {frameMode && !frameModeError && <p className={css.previewHint}>当前采用{chosen.length === 2 ? '首尾帧' : '首帧'}生成。画幅可选「跟随参考」以减少裁切；先核对画面本身的布局、比例和动作状态。</p>}
-    {chosen.some(item => item.mediaType === 'unavailable') && <p role="alert">部分素材已删除或版本已变化，请移除失效引用并重新选择。</p>}
-    <div className={css.workbench}>
-      <section className={css.referenceShelf} aria-label="参考素材">
-        <div className={css.sectionHeading}>
-          <div><p className={css.kicker}>REFERENCE LIBRARY</p><h4>参考素材</h4></div>
-          <button type="button" disabled={loading || (page > 0 && page >= pages)} onClick={() => { void loadAssets() }}>
-            {loading ? '读取素材…' : page === 0 ? '读取项目素材' : page < pages ? '更多素材' : '素材已读完'}
-          </button>
-          {page > 0 && <button type="button" disabled={loading} onClick={() => { void loadAssets(true) }}>刷新素材</button>}
-        </div>
-        {referenceSources && referenceSources.length > 0 && <div className={css.inheritReferences}>
-          <label>沿用本场引用<select aria-label="引用来源镜头" value={inheritFrom} disabled={inheriting || saving}
-            onChange={(event) => { inheritAbort.current?.abort(); setInheriting(false); setInheritFrom(event.target.value) }}>
-            {referenceSources.filter(source => source.frameId !== frameId).map(source => (
-              <option key={source.frameId} value={source.frameId}>{source.label}</option>
-            ))}
-          </select></label>
-          <button type="button" disabled={inheriting || saving || !inheritFrom} onClick={() => { void inherit() }}>
-            {inheriting ? '读取来源引用…' : '沿用引用'}
-          </button>
-          <small>保留本镜文字与参数，只合并已保存的素材引用。</small>
-        </div>}
-        <p className={css.note}>可引用已有镜头的表演、运镜与场面，或描述如何续接、修改。视频参考最多 5 段、合计 15 秒；输入与输出合计不超过 30 秒。先检查源片是否存在需要避免的缺陷。</p>
-        {assets.length > 0 && <div className={css.assets} aria-label="项目素材">
-          {assets.map(asset => <article key={`${asset.assetId}:${asset.assetSha256}`}>
-            {asset.browserUrl && (asset.mediaType === 'reference_image'
-              ? <img src={asset.browserUrl} alt={asset.label} loading="lazy" />
-              : asset.mediaType === 'reference_video'
-                ? <video src={asset.browserUrl} controls preload="metadata" aria-label={asset.label} />
-                : <audio src={asset.browserUrl} controls preload="none" aria-label={asset.label} />)}
-            {!asset.browserUrl && asset.mediaType === 'reference_image' && <div className={css.privateImage}>私有原图</div>}
-            <p>{asset.label}{asset.mediaType !== 'reference_image' && <> · {asset.durationSec === undefined ? '时长未知' : `${asset.durationSec.toFixed(3)} 秒`}</>}</p>
-            <ReferenceImageDesign asset={asset} />
-            <div className={css.assetActions}>
-              {(asset.localReferenceScope !== undefined || asset.localVoiceScope !== undefined) && asset.browserUrl === '' && <button type="button"
-                onClick={() => { inspect(asset) }}>{asset.mediaType === 'reference_audio' ? '试听音色' : '查看原图'}</button>}
-              <button type="button" disabled={chosen.some(item => item.assetId === asset.assetId)}
-                onClick={() => { choose(asset) }}>加入引用</button>
-            </div>
-          </article>)}
-        </div>}
-        {inspected !== undefined && <section className={css.privatePreview} aria-label={inspected.mediaType === 'reference_audio' ? '本地音色试听' : '本地原图检视'}>
-          <header><p className={css.kicker}>PRIVATE ORIGINAL</p><button type="button" onClick={() => { setInspected(undefined) }}>{inspected.mediaType === 'reference_audio' ? '关闭试听' : '关闭原图'}</button></header>
-          <h5>{inspected.label}</h5>
-          {localPreview?.url !== undefined
-            ? inspected.mediaType === 'reference_audio'
-              ? <audio controls src={localPreview.url} preload="metadata" aria-label={`${inspected.label} 音色试听`} />
-              : <img src={localPreview.url} alt={`${inspected.label} 私有原图`} />
-            : localPreview?.failed
-              ? <div role="alert"><p>这份本地参考暂时无法读取。</p><button type="button" onClick={() => { setPreviewRetry(value => value + 1) }}>重新读取原图</button></div>
-              : <p>正在读取这份私有参考。</p>}
-        </section>}
-        <ReferenceDurationSummary assets={chosen.map(item => exactAsset(item.assetId, item.assetSha256) ?? item)}
-          outputDuration={parameters.duration} />
-        {chosen.length > 0 && <ol className={css.bindings} aria-label="引用顺序">
-          {chosen.map((item, index) => <li key={item.bindingToken}>
-            <strong>{aliases.get(item.bindingToken)} · {item.label}</strong>
-            {(item.mediaType === 'reference_audio' || item.mediaType === 'reference_video') && <small>
-              {(exactAsset(item.assetId, item.assetSha256) ?? item).durationSec === undefined ? '时长未知' : `${(exactAsset(item.assetId, item.assetSha256) ?? item).durationSec?.toFixed(3)} 秒`}
-            </small>}
-            <ReferenceImageDesign asset={exactAsset(item.assetId, item.assetSha256)} />
-            {(() => {
-              const material = currentMaterials?.materials.find(candidate => candidate.bindingToken === item.bindingToken
+      {draftState?.directorSource && <section aria-label="当前导演设计">
+        <details><summary>查看当前导演设计与全片风格，核对下方生成稿</summary>
+          <pre style={{ whiteSpace: 'pre-wrap' }}>{draftState.directorSource.prompt}</pre>
+        </details>
+        {draftState.directorSource.generationPrompt && <>
+          <button type="button" disabled={busy || saving} onClick={() => {
+            const production = draftState.directorSource?.generationPrompt
+            if (!production) return
+            const references = chosen.flatMap(item => [
+              { bindingToken: item.bindingToken }, { text: `：${item.label}\n` },
+            ])
+            invalidate(); setParts([{ text: '素材对应关系：\n' }, ...references, { text: production }])
+            setDirectorSourceSha256(undefined)
+            activeText.current = { index: references.length + 1, start: 0, end: 0 }
+          }}>载入完整导演原稿（替换当前文字）</button>
+          <p>保留引用和参数，带入世界设定、全片风格、本镜导演设计及对白。根据引用素材补充身份、布局和接续用途，核对设计中的冲突；保存前仍可编辑。</p>
+        </>}
+        {directorSourceSha256 !== draftState.directorSource.sha256 && <p role="status">
+          导演设计尚未同步到这份生成稿。请结合设计修改运镜、表演、声音和引用，也可交给青木导演整理。
+        </p>}
+        {onRequestDirector && <button type="button" disabled={busy || saving || dirty} onClick={onRequestDirector}>展开导演助手</button>}
+        <p>{dirty ? '先保存引用草稿，再交给导演整理。' : '导演保存后，这里会自动同步生成稿，再检查画面与声音引用。'}</p>
+        <label><input type="checkbox" checked={directorSourceSha256 === draftState.directorSource.sha256}
+          onChange={(event) => {
+            setDirectorSourceSha256(event.target.checked ? draftState.directorSource?.sha256 : undefined); invalidate()
+          }} />
+          我已对照当前设计整理生成稿，保留所需细节并处理相互矛盾的描述
+        </label>
+      </section>}
+      <p className={css.previewHint}>要延续已经拍定的布局和站位，将完整镜头画面设为首帧；要指定动作终点，可加尾帧。人物定妆、场景或音色分别引用时，使用普通参考。首帧模式仍可按导演描述生成对白与环境声，但不能同时引用音色。</p>
+      {frameModeError && <p role="alert">{frameModeError}</p>}
+      {frameMode && !frameModeError && <p className={css.previewHint}>当前采用{chosen.length === 2 ? '首尾帧' : '首帧'}生成。画幅可选「跟随参考」以减少裁切；先核对画面本身的布局、比例和动作状态。</p>}
+      {chosen.some(item => item.mediaType === 'unavailable') && <p role="alert">部分素材已删除或版本已变化，请移除失效引用并重新选择。</p>}
+      <div className={css.workbench}>
+        <section className={css.referenceShelf} aria-label="参考素材">
+          <div className={css.sectionHeading}>
+            <div><p className={css.kicker}>REFERENCE LIBRARY</p><h4>参考素材</h4></div>
+            <button type="button" disabled={loading || (page > 0 && page >= pages)} onClick={() => { void loadAssets() }}>
+              {loading ? '读取素材…' : page === 0 ? '读取项目素材' : page < pages ? '更多素材' : '素材已读完'}
+            </button>
+            {page > 0 && <button type="button" disabled={loading} onClick={() => { void loadAssets(true) }}>刷新素材</button>}
+          </div>
+          {referenceSources && referenceSources.length > 0 && <div className={css.inheritReferences}>
+            <label>沿用本场引用<select aria-label="引用来源镜头" value={inheritFrom} disabled={inheriting || saving}
+              onChange={(event) => { inheritAbort.current?.abort(); setInheriting(false); setInheritFrom(event.target.value) }}>
+              {referenceSources.filter(source => source.frameId !== frameId).map(source => (
+                <option key={source.frameId} value={source.frameId}>{source.label}</option>
+              ))}
+            </select></label>
+            <button type="button" disabled={inheriting || saving || !inheritFrom} onClick={() => { void inherit() }}>
+              {inheriting ? '读取来源引用…' : '沿用引用'}
+            </button>
+            <small>保留本镜文字与参数，只合并已保存的素材引用。</small>
+          </div>}
+          <p className={css.note}>可引用已有镜头的表演、运镜与场面，或描述如何续接、修改。视频参考最多 5 段、合计 15 秒；输入与输出合计不超过 30 秒。先检查源片是否存在需要避免的缺陷。</p>
+          {assets.length > 0 && <div className={css.assets} aria-label="项目素材">
+            {assets.map(asset => <article key={`${asset.assetId}:${asset.assetSha256}`}>
+              {asset.browserUrl && (asset.mediaType === 'reference_image'
+                ? <img src={asset.browserUrl} alt={asset.label} loading="lazy" />
+                : asset.mediaType === 'reference_video'
+                  ? <video src={asset.browserUrl} controls preload="metadata" aria-label={asset.label} />
+                  : <audio src={asset.browserUrl} controls preload="none" aria-label={asset.label} />)}
+              {!asset.browserUrl && asset.mediaType === 'reference_image' && <div className={css.privateImage}>私有原图</div>}
+              <p>{asset.label}{asset.mediaType !== 'reference_image' && <> · {asset.durationSec === undefined ? '时长未知' : `${asset.durationSec.toFixed(3)} 秒`}</>}</p>
+              <ReferenceImageDesign asset={asset} />
+              <div className={css.assetActions}>
+                {(asset.localReferenceScope !== undefined || asset.localVoiceScope !== undefined) && asset.browserUrl === '' && <button type="button"
+                  onClick={() => { inspect(asset) }}>{asset.mediaType === 'reference_audio' ? '试听音色' : '查看原图'}</button>}
+                <button type="button" disabled={chosen.some(item => item.assetId === asset.assetId)}
+                  onClick={() => { choose(asset) }}>加入引用</button>
+              </div>
+            </article>)}
+          </div>}
+          {inspected !== undefined && <section className={css.privatePreview} aria-label={inspected.mediaType === 'reference_audio' ? '本地音色试听' : '本地原图检视'}>
+            <header><p className={css.kicker}>PRIVATE ORIGINAL</p><button type="button" onClick={() => { setInspected(undefined) }}>{inspected.mediaType === 'reference_audio' ? '关闭试听' : '关闭原图'}</button></header>
+            <h5>{inspected.label}</h5>
+            {localPreview?.url !== undefined
+              ? inspected.mediaType === 'reference_audio'
+                ? <audio controls src={localPreview.url} preload="metadata" aria-label={`${inspected.label} 音色试听`} />
+                : <img src={localPreview.url} alt={`${inspected.label} 私有原图`} />
+              : localPreview?.failed
+                ? <div role="alert"><p>这份本地参考暂时无法读取。</p><button type="button" onClick={() => { setPreviewRetry(value => value + 1) }}>重新读取原图</button></div>
+                : <p>正在读取这份私有参考。</p>}
+          </section>}
+          <ReferenceDurationSummary assets={chosen.map(item => exactAsset(item.assetId, item.assetSha256) ?? item)}
+            outputDuration={parameters.duration} />
+          {chosen.length > 0 && <ol className={css.bindings} aria-label="引用顺序">
+            {chosen.map((item, index) => <li key={item.bindingToken}>
+              <strong>{aliases.get(item.bindingToken)} · {item.label}</strong>
+              {(item.mediaType === 'reference_audio' || item.mediaType === 'reference_video') && <small>
+                {(exactAsset(item.assetId, item.assetSha256) ?? item).durationSec === undefined ? '时长未知' : `${(exactAsset(item.assetId, item.assetSha256) ?? item).durationSec?.toFixed(3)} 秒`}
+              </small>}
+              <ReferenceImageDesign asset={exactAsset(item.assetId, item.assetSha256)} />
+              {(() => {
+                const material = currentMaterials?.materials.find(candidate => candidate.bindingToken === item.bindingToken
                 && candidate.assetId === item.assetId && candidate.assetSha256 === item.assetSha256)
-              if (material === undefined) return currentMaterials === undefined ? null : <small className={css.materialStatus} data-state="unknown">准备状态未返回</small>
-              return <span className={css.materialStatus} data-state={material.status}>{materialStatusText(material)}</span>
-            })()}
-            {(() => {
-              const material = currentMaterials?.materials.find(candidate => candidate.bindingToken === item.bindingToken
+                if (material === undefined) return currentMaterials === undefined ? null : <small className={css.materialStatus} data-state="unknown">准备状态未返回</small>
+                return <span className={css.materialStatus} data-state={material.status}>{materialStatusText(material)}</span>
+              })()}
+              {(() => {
+                const material = currentMaterials?.materials.find(candidate => candidate.bindingToken === item.bindingToken
                 && candidate.assetId === item.assetId && candidate.assetSha256 === item.assetSha256)
-              if (material === undefined || !currentMaterials?.configured) return null
-              if (material.status === 'unknown' || material.status === 'uploading') return <small className={css.materialHint}>请读取准备状态确认回执；不会自动重传。</small>
-              if (material.status === 'ready') return null
-              return <button type="button" className={css.prepareAction} disabled={!canPrepareMaterials}
-                onClick={() => { void prepareMaterial(item) }}>
-                {preparingAssetId === item.assetId ? '正在准备…'
-                  : material.status === 'expired' ? `重新准备${aliases.get(item.bindingToken)}`
-                    : material.status === 'failed' ? `重试准备${aliases.get(item.bindingToken)}`
-                      : `准备${aliases.get(item.bindingToken)}`}
-              </button>
-            })()}
-            {(() => {
-              const catalogAsset = exactAsset(item.assetId, item.assetSha256)
-              if (catalogAsset !== undefined && (catalogAsset.localReferenceScope !== undefined || catalogAsset.localVoiceScope !== undefined) && catalogAsset.browserUrl === '') {
-                return <button type="button" onClick={() => { inspect(catalogAsset) }}>查看{aliases.get(item.bindingToken)}</button>
-              }
-              return item.mediaType === 'reference_image' && catalogAsset === undefined
-                ? <small className={css.previewHint}>读取项目素材后可查看原图</small>
-                : null
-            })()}
-            {item.mediaType === 'reference_image' && <label>画面用途
-              <select aria-label={`${aliases.get(item.bindingToken)}用途`} value={item.frameRole ?? 'reference'}
+                if (material === undefined || !currentMaterials?.configured) return null
+                if (material.status === 'unknown' || material.status === 'uploading') return <small className={css.materialHint}>请读取准备状态确认回执；不会自动重传。</small>
+                if (material.status === 'ready') return null
+                return <button type="button" className={css.prepareAction} disabled={!canPrepareMaterials}
+                  onClick={() => { void prepareMaterial(item) }}>
+                  {preparingAssetId === item.assetId ? '正在准备…'
+                    : material.status === 'expired' ? `重新准备${aliases.get(item.bindingToken)}`
+                      : material.status === 'failed' ? `重试准备${aliases.get(item.bindingToken)}`
+                        : `准备${aliases.get(item.bindingToken)}`}
+                </button>
+              })()}
+              {(() => {
+                const catalogAsset = exactAsset(item.assetId, item.assetSha256)
+                if (catalogAsset !== undefined && (catalogAsset.localReferenceScope !== undefined || catalogAsset.localVoiceScope !== undefined) && catalogAsset.browserUrl === '') {
+                  return <button type="button" onClick={() => { inspect(catalogAsset) }}>查看{aliases.get(item.bindingToken)}</button>
+                }
+                return item.mediaType === 'reference_image' && catalogAsset === undefined
+                  ? <small className={css.previewHint}>读取项目素材后可查看原图</small>
+                  : null
+              })()}
+              {item.mediaType === 'reference_image' && <label>画面用途
+                <select aria-label={`${aliases.get(item.bindingToken)}用途`} value={item.frameRole ?? 'reference'}
+                  onChange={(event) => {
+                    const role = event.target.value
+                    invalidate()
+                    setChosen(previous => previous.map((old) => {
+                      if (old.bindingToken !== item.bindingToken) return old
+                      const { frameRole: _previousRole, ...rest } = old
+                      return role === 'first_frame' || role === 'last_frame' ? { ...rest, frameRole: role } : rest
+                    }))
+                  }}>
+                  <option value="reference">普通参考</option><option value="first_frame">首帧 · 起始画面</option><option value="last_frame">尾帧 · 结束画面</option>
+                </select>
+              </label>}
+              <input aria-label={`${aliases.get(item.bindingToken)}名称`} value={item.label} maxLength={128}
                 onChange={(event) => {
-                  const role = event.target.value
                   invalidate()
-                  setChosen(previous => previous.map((old) => {
-                    if (old.bindingToken !== item.bindingToken) return old
-                    const { frameRole: _previousRole, ...rest } = old
-                    return role === 'first_frame' || role === 'last_frame' ? { ...rest, frameRole: role } : rest
-                  }))
-                }}>
-                <option value="reference">普通参考</option><option value="first_frame">首帧 · 起始画面</option><option value="last_frame">尾帧 · 结束画面</option>
-              </select>
-            </label>}
-            <input aria-label={`${aliases.get(item.bindingToken)}名称`} value={item.label} maxLength={128}
-              onChange={(event) => {
-                invalidate()
-                setChosen(previous => previous.map(old => old.bindingToken === item.bindingToken
-                  ? { ...old, label: event.target.value } : old))
-              }} />
-            <div className={css.actions}>
-              <button type="button" onClick={() => { insert(item.bindingToken) }}>插入{aliases.get(item.bindingToken)}</button>
-              <button type="button" aria-label={`${item.label}前移`} disabled={index === 0} onClick={() => { move(index, -1) }}>前移</button>
-              <button type="button" aria-label={`${item.label}后移`} disabled={index === chosen.length - 1} onClick={() => { move(index, 1) }}>后移</button>
-              <button type="button" aria-label={`移除${item.label}`} onClick={() => { remove(item.bindingToken) }}>移除</button>
-            </div>
-          </li>)}
-        </ol>}
-      </section>
-      <section className={css.directorDesk} aria-label="导演描述与参数">
-        <div className={css.sectionHeading}><div><p className={css.kicker}>DIRECTOR'S NOTE</p><h4>视频描述</h4></div>
-          <button type="button" disabled={!initialPrompt} onClick={() => { invalidate(); setParts([{ text: initialPrompt }]); activeText.current = { index: 0, start: initialPrompt.length, end: initialPrompt.length } }}>载入当前视频描述</button>
-        </div>
-        <div className={css.prompt}>
-          {parts.map((part, index) => 'text' in part
-            ? (() => {
-              const connector = parts.length > 1 && part.text.trim().length <= 40 && !part.text.includes('\n')
-              return <textarea key={index} aria-label={`视频描述片段${index + 1}`}
-                className={parts.length === 1 ? css.singleDirectorText : connector ? css.connectorText : css.directorText}
-                rows={parts.length === 1 ? 6 : connector ? 1 : 4} value={part.text}
-                placeholder="描述本镜的动作、机位与对白；也可让导演助手保存后，恢复已存草稿。"
-                onSelect={(event) => {
-                  const field = event.currentTarget
-                  activeText.current = { index, start: field.selectionStart, end: field.selectionEnd }
-                }}
-                onChange={(event) => {
-                  invalidate(); const text = event.target.value
-                  setParts(previous => previous.map((old, i) => i === index ? { text } : old))
+                  setChosen(previous => previous.map(old => old.bindingToken === item.bindingToken
+                    ? { ...old, label: event.target.value } : old))
                 }} />
-            })()
-            : <button key={index} type="button" className={css.chip} aria-label={`移除描述引用${aliases.get(part.bindingToken)}`}
-              onClick={() => {
-                invalidate(); setParts(previous => previous.filter((_, i) => i !== index))
-                activeText.current = { index: 0, start: 0, end: 0 }
-              }}>
-              {aliases.get(part.bindingToken)} · {chosen.find(item => item.bindingToken === part.bindingToken)?.label} ×
-            </button>)}
-        </div>
-        <div className={css.parameters}>
-          <label>时长（秒）<input type="number" min={2} max={30} value={parameters.duration} onChange={(event) => { invalidate(); setParameters({ ...parameters, duration: Number(event.target.value) }) }} /></label>
-          <label>画质<select value={parameters.resolution} onChange={(event) => { invalidate(); setParameters({ ...parameters, resolution: event.target.value as ReferenceVideoParameters['resolution'] }) }}>
-            {['480P', '720P', '1080P'].map(value => <option key={value}>{value}</option>)}
-          </select></label>
-          <label>画幅<select value={parameters.ratio} onChange={(event) => { invalidate(); setParameters({ ...parameters, ratio: event.target.value as ReferenceVideoParameters['ratio'] }) }}>
-            {['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16'].map(value => <option key={value} value={value}>{value === 'adaptive' ? '跟随参考' : value}</option>)}
-          </select></label>
-          <label><input type="checkbox" checked={parameters.audio} onChange={(event) => { invalidate(); setParameters({ ...parameters, audio: event.target.checked }) }} />原生声音</label>
-          <label><input type="checkbox" checked={parameters.prompt_extend} onChange={(event) => { invalidate(); setParameters({ ...parameters, prompt_extend: event.target.checked }) }} />模型扩写描述</label>
-        </div>
-        <div className={css.previewActions}>
-          <button type="button" disabled={Boolean(frameModeError) || busy || images + videos === 0 || chosen.some(item => item.mediaType === 'unavailable' || !item.label.trim())} onClick={() => { void preview() }}>{busy ? '核对素材与请求…' : '预览实际请求'}</button>
-          <button className={css.primaryAction} type="button" disabled={busy || saving || !draftState?.draft || savedEpoch !== epoch.current || !sourceAccepted} onClick={() => { void quote() }}>估算已存草稿费用</button>
-        </div>
-        {quoteResult && <p className={css.quote} role="status">目录价估算 ¥{Number(quoteResult.cost.estimatedCny).toFixed(2)} · 1 个视频 · 计费 {quoteResult.cost.billableSeconds} 秒（输出 {quoteResult.preview.body.parameters.duration} 秒{(quoteResult.preview.referenceVideoDurationSec ?? 0) > 0 && <> + 输入 {quoteResult.preview.referenceVideoDurationSec} 秒</>}）。
-          未扣费；未计账户折扣，实际结算以阿里账单为准。{!quoteResult.generationSubmissionEnabled
+              <div className={css.actions}>
+                <button type="button" onClick={() => { insert(item.bindingToken) }}>插入{aliases.get(item.bindingToken)}</button>
+                <button type="button" aria-label={`${item.label}前移`} disabled={index === 0} onClick={() => { move(index, -1) }}>前移</button>
+                <button type="button" aria-label={`${item.label}后移`} disabled={index === chosen.length - 1} onClick={() => { move(index, 1) }}>后移</button>
+                <button type="button" aria-label={`移除${item.label}`} onClick={() => { remove(item.bindingToken) }}>移除</button>
+              </div>
+            </li>)}
+          </ol>}
+        </section>
+        <section className={css.directorDesk} aria-label="导演描述与参数">
+          <div className={css.sectionHeading}><div><p className={css.kicker}>DIRECTOR'S NOTE</p><h4>视频描述</h4></div>
+            <button type="button" disabled={!initialPrompt} onClick={() => { invalidate(); setParts([{ text: initialPrompt }]); activeText.current = { index: 0, start: initialPrompt.length, end: initialPrompt.length } }}>载入当前视频描述</button>
+          </div>
+          <div className={css.prompt}>
+            {parts.map((part, index) => 'text' in part
+              ? (() => {
+                const connector = parts.length > 1 && part.text.trim().length <= 40 && !part.text.includes('\n')
+                return <textarea key={index} aria-label={`视频描述片段${index + 1}`}
+                  className={parts.length === 1 ? css.singleDirectorText : connector ? css.connectorText : css.directorText}
+                  rows={parts.length === 1 ? 6 : connector ? 1 : 4} value={part.text}
+                  placeholder="描述本镜的动作、机位与对白；也可让导演助手保存后，恢复已存草稿。"
+                  onSelect={(event) => {
+                    const field = event.currentTarget
+                    activeText.current = { index, start: field.selectionStart, end: field.selectionEnd }
+                  }}
+                  onChange={(event) => {
+                    invalidate(); const text = event.target.value
+                    setParts(previous => previous.map((old, i) => i === index ? { text } : old))
+                  }} />
+              })()
+              : <button key={index} type="button" className={css.chip} aria-label={`移除描述引用${aliases.get(part.bindingToken)}`}
+                onClick={() => {
+                  invalidate(); setParts(previous => previous.filter((_, i) => i !== index))
+                  activeText.current = { index: 0, start: 0, end: 0 }
+                }}>
+                {aliases.get(part.bindingToken)} · {chosen.find(item => item.bindingToken === part.bindingToken)?.label} ×
+              </button>)}
+          </div>
+          <div className={css.parameters}>
+            <label>时长（秒）<input type="number" min={2} max={30} value={parameters.duration} onChange={(event) => { invalidate(); setParameters({ ...parameters, duration: Number(event.target.value) }) }} /></label>
+            <label>画质<select value={parameters.resolution} onChange={(event) => { invalidate(); setParameters({ ...parameters, resolution: event.target.value as ReferenceVideoParameters['resolution'] }) }}>
+              {['480P', '720P', '1080P'].map(value => <option key={value}>{value}</option>)}
+            </select></label>
+            <label>画幅<select value={parameters.ratio} onChange={(event) => { invalidate(); setParameters({ ...parameters, ratio: event.target.value as ReferenceVideoParameters['ratio'] }) }}>
+              {['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16'].map(value => <option key={value} value={value}>{value === 'adaptive' ? '跟随参考' : value}</option>)}
+            </select></label>
+            <label><input type="checkbox" checked={parameters.audio} onChange={(event) => { invalidate(); setParameters({ ...parameters, audio: event.target.checked }) }} />原生声音</label>
+            <label><input type="checkbox" checked={parameters.prompt_extend} onChange={(event) => { invalidate(); setParameters({ ...parameters, prompt_extend: event.target.checked }) }} />模型扩写描述</label>
+          </div>
+          <div className={css.previewActions}>
+            <button type="button" disabled={Boolean(frameModeError) || busy || images + videos === 0 || chosen.some(item => item.mediaType === 'unavailable' || !item.label.trim())} onClick={() => { void preview() }}>{busy ? '核对素材与请求…' : '预览实际请求'}</button>
+            <button className={css.primaryAction} type="button" disabled={busy || saving || !draftState?.draft || savedEpoch !== epoch.current || !sourceAccepted} onClick={() => { void quote() }}>估算已存草稿费用</button>
+          </div>
+          {quoteResult && <p className={css.quote} role="status">目录价估算 ¥{Number(quoteResult.cost.estimatedCny).toFixed(2)} · 1 个视频 · 计费 {quoteResult.cost.billableSeconds} 秒（输出 {quoteResult.preview.body.parameters.duration} 秒{(quoteResult.preview.referenceVideoDurationSec ?? 0) > 0 && <> + 输入 {quoteResult.preview.referenceVideoDurationSec} 秒</>}）。
+            未扣费；未计账户折扣，实际结算以阿里账单为准。{!quoteResult.generationSubmissionEnabled
             && <>当前实例未启用付费生成，估算仅供核对。</>}<a href={quoteResult.cost.sourceUrl} target="_blank" rel="noreferrer">查看价格</a></p>}
-      </section>
-      <aside className={css.previewColumn} aria-label="镜头预览与候选">
-        <div className={css.previewPlaceholder}>
-          <p className={css.kicker}>SHOT PREVIEW</p><h4>{result ? '请求已核对' : '候选预览区'}</h4>
-          <p>{result ? '这次请求的引用与参数已核对。生成后视频会在下方等待你审看。' : '保存并核价后，在这里查看候选视频。'}</p>
-        </div>
-        {result && <section className={css.requestPreview} aria-label="阿里请求预览" aria-live="polite">
-          <p className={css.kicker}>REQUEST PREVIEW</p><h4>将发送的描述</h4><p className={css.compiled}>{result.body.input.prompt}</p>
-          <p>{result.body.parameters.duration} 秒 · {result.body.parameters.resolution} · {result.body.parameters.ratio}
-            {' · '}音色合计 {result.referenceAudioDurationSec} 秒{(result.referenceVideoDurationSec ?? 0) > 0 && <> · 视频参考合计 {result.referenceVideoDurationSec} 秒</>}</p>
-          <p className={css.note}>这是当前核对的请求。生成进度见候选视频区。</p>
-          <details><summary>查看引用版本与完整请求</summary><pre>{JSON.stringify(result, null, 2)}</pre></details>
-        </section>}
-        <ReferenceVideoRuns projectId={projectId} frameId={frameId} quote={quoteResult}
-          port={port} onOpenShooting={onOpenShooting} onReferenceSaved={() => { void loadAssets(true) }} />
-      </aside>
-    </div>
+        </section>
+        <aside className={css.previewColumn} aria-label="镜头预览与候选">
+          <div className={css.previewPlaceholder}>
+            <p className={css.kicker}>SHOT PREVIEW</p><h4>{result ? '请求已核对' : '候选预览区'}</h4>
+            <p>{result ? '这次请求的引用与参数已核对。生成后视频会在下方等待你审看。' : '保存并核价后，在这里查看候选视频。'}</p>
+          </div>
+          {result && <section className={css.requestPreview} aria-label="阿里请求预览" aria-live="polite">
+            <p className={css.kicker}>REQUEST PREVIEW</p><h4>将发送的描述</h4><p className={css.compiled}>{result.body.input.prompt}</p>
+            <p>{result.body.parameters.duration} 秒 · {result.body.parameters.resolution} · {result.body.parameters.ratio}
+              {' · '}音色合计 {result.referenceAudioDurationSec} 秒{(result.referenceVideoDurationSec ?? 0) > 0 && <> · 视频参考合计 {result.referenceVideoDurationSec} 秒</>}</p>
+            <p className={css.note}>这是当前核对的请求。生成进度见候选视频区。</p>
+            <details><summary>查看引用版本与完整请求</summary><pre>{JSON.stringify(result, null, 2)}</pre></details>
+          </section>}
+        </aside>
+      </div>
+    </details>
+    <ReferenceVideoRuns projectId={projectId} frameId={frameId} quote={quoteResult}
+      port={port} onOpenShooting={onOpenShooting} onReferenceSaved={() => { void loadAssets(true) }} />
     {error && <p role="alert">{error}</p>}
     <p className={css.note}>引用草稿按镜头保存。刷新后可恢复已保存内容；保存不会采用素材或启动生成。</p>
   </Container>

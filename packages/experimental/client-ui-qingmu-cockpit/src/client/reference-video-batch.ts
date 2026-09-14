@@ -48,9 +48,9 @@ export function batchShotIncluded(shot: BatchShot, retakes: ReadonlySet<string>)
 }
 
 /** A saved draft is reusable only while its director and shot sources still match. */
-export function needsBatchDesign(shot: BatchShot): boolean {
+export function needsBatchDesign(shot: BatchShot, feedback = ''): boolean {
   const { draft, directorSource, frameSha256 } = shot.saved
-  return !draft || (draft.frameSha256 !== undefined && draft.frameSha256 !== frameSha256)
+  return Boolean(feedback.trim()) || !draft || (draft.frameSha256 !== undefined && draft.frameSha256 !== frameSha256)
     || (directorSource !== null && directorSource !== undefined && draft.request.directorSourceSha256 !== directorSource.sha256)
 }
 
@@ -74,10 +74,10 @@ export async function collectBatchShot(port: BatchPort, projectId: string, frame
 
 /** Resolve model-authored reference choices through real assets and append the saved director text once. */
 export function parseBatchChoices(text: string, basis: BatchBasis,
-  retakes: ReadonlySet<string> = new Set()): ReferenceVideoPreviewRequest[] {
+  retakes: ReadonlySet<string> = new Set(), feedback = ''): ReferenceVideoPreviewRequest[] {
   const value: unknown = JSON.parse(text)
   if (!value || typeof value !== 'object' || !('shots' in value) || !Array.isArray(value.shots)) throw new Error('导演方案需要 shots 列表。')
-  const expected = new Map(basis.shots.filter(shot => batchShotIncluded(shot, retakes) && needsBatchDesign(shot))
+  const expected = new Map(basis.shots.filter(shot => batchShotIncluded(shot, retakes) && needsBatchDesign(shot, feedback))
     .map(shot => [shot.frameId, shot]))
   const requests = value.shots.map((row: unknown) => {
     if (!row || typeof row !== 'object' || !('frameId' in row) || typeof row.frameId !== 'string'
@@ -104,7 +104,8 @@ export function parseBatchChoices(text: string, basis: BatchBasis,
     // The existing Host save/preview boundary validates the complete untrusted request before writing it.
     const request: ReferenceVideoPreviewRequest = { projectId: basis.projectId, frameId: shot.frameId, model: 'wan3.0-video',
       bindings: bindings.map(({ purpose: _purpose, ...binding }) => binding),
-      promptParts: [...promptParts, { text: `\n【本镜完整导演设计】\n${source.generationPrompt}` }],
+      promptParts: [...promptParts, { text: `\n【本镜完整导演设计】\n${source.generationPrompt}` },
+        ...(feedback.trim() ? [{ text: `\n【本次修改意见】\n${feedback.trim()}` }] : [])],
       directorSourceSha256: source.sha256, parameters: row.parameters as ReferenceVideoPreviewRequest['parameters'] }
     if (request.parameters?.duration !== shot.duration) throw new Error(`${shot.label}的生成时长应沿用已保存分镜。`)
     return request
@@ -115,10 +116,16 @@ export function parseBatchChoices(text: string, basis: BatchBasis,
 
 /** Prepare actual references and compile the same request used by single-shot generation. */
 export async function prepareBatchShot(port: BatchPort, projectId: string, shot: BatchShot,
-  request?: ReferenceVideoPreviewRequest): Promise<ReferenceVideoQuoteResponse> {
+  request?: ReferenceVideoPreviewRequest, revise = false): Promise<ReferenceVideoQuoteResponse> {
   const current = await port.referenceVideoDraft({ projectId, frameId: shot.frameId })
   if (request && request.directorSourceSha256 !== current.directorSource?.sha256) throw new Error('导演设计已更新，请重新读取当前方案。')
-  const draftRequest = request && needsBatchDesign({ ...shot, saved: current })
+  // A partial preparation can already have saved this exact replacement before an upload failed.
+  const alreadySaved = request && current.draft && JSON.stringify(current.draft.request)
+    === JSON.stringify((({ projectId: _projectId, ...rest }) => rest)(request))
+  if (revise && !alreadySaved && current.draft?.revision !== shot.saved.draft?.revision) {
+    throw new Error('本镜草稿已在其他页面更新，请刷新后再准备修改意见。')
+  }
+  const draftRequest = request && !alreadySaved && (revise || needsBatchDesign({ ...shot, saved: current }))
     ? (({ projectId: _projectId, ...rest }) => rest)(request) : undefined
   const saved = draftRequest ? await port.saveReferenceVideoDraft({ projectId, frameId: shot.frameId,
     expectedRevision: current.draft?.revision ?? 0, expectedFrameSha256: current.frameSha256, request: draftRequest }) : current
@@ -145,6 +152,29 @@ export interface BatchSubmissionItem {
 }
 export function batchSubmissionKey(projectId: string, episodeId: string): string {
   return `qingmu.reference-batch:${projectId}:${episodeId}`
+}
+
+/** Move the original tab's unfinished batch into durable browser storage without replacing another batch. */
+export function recoverBatchSubmission(storage: Storage, legacy: Storage, projectId: string, episodeId: string): BatchSubmissionItem[] {
+  const key = batchSubmissionKey(projectId, episodeId)
+  const current = readBatchSubmission(storage, projectId, episodeId)
+  const old = readBatchSubmission(legacy, projectId, episodeId)
+  if (!old.length) return current
+  if (current.length && JSON.stringify(current) !== JSON.stringify(old)) {
+    throw new Error('另一个页面有未完成的批量提交。两份记录均已保留，请先在原页面完成提交。')
+  }
+  storage.setItem(key, JSON.stringify(old))
+  legacy.removeItem(key)
+  return old
+}
+
+/** Serialize batch mutations across tabs; the backend still owns request idempotency. */
+export async function withBatchSubmissionLock(key: string, action: () => Promise<void>): Promise<void> {
+  if (!navigator.locks) throw new Error('当前浏览器不支持安全批量接续，请使用青木内置浏览器。')
+  await navigator.locks.request(key, { ifAvailable: true }, async (held) => {
+    if (!held) throw new Error('另一个页面正在提交本集，请稍后刷新进度。')
+    await action()
+  })
 }
 function commandForQuote(quote: ReferenceVideoQuoteResponse, raw: string | null): QueueReferenceVideoRequest {
   if (raw) {

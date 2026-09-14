@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ReferenceVideoBatch } from '../src/client/ReferenceVideoBatch.tsx'
 import type { BatchPort } from '../src/client/reference-video-batch.ts'
 import { request, quoteResponse } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
+beforeEach(() => { Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: async (_key: string, _options: unknown, action: (lock: object) => Promise<void>) => action({}) } }) })
 afterEach(() => { cleanup(); vi.useRealTimers(); sessionStorage.clear(); localStorage.clear() })
 
 it('retries a failed review refresh without registering the same candidate again', async () => {
@@ -141,7 +142,7 @@ it('recovers returned videos after leaving the page without another generation c
   expect(queue).not.toHaveBeenCalled()
 })
 
-it('restores an unfinished batch after remount without regenerating the confirmed first shot', async () => {
+it('restores an unfinished batch after closing the tab without regenerating the confirmed first shot', async () => {
   let release: (value: unknown) => void = () => {}
   const generated = new Set<string>()
   const queue = vi.fn(async ({ frameId }: { frameId: string }) => {
@@ -168,6 +169,7 @@ it('restores an unfinished batch after remount without regenerating the confirme
   await waitFor(() => { expect(queue).toHaveBeenCalledOnce() })
   view.unmount()
   await act(async () => { release({}); await Promise.resolve() })
+  sessionStorage.clear() // A reopened browser tab no longer has the old session storage.
   mount()
   fireEvent.click(screen.getByText('整集批量生成视频'))
   await waitFor(() => { expect(screen.getByRole('button', { name: '继续上次批量提交' })).toHaveProperty('disabled', false) })

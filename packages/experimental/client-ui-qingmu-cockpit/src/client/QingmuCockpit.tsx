@@ -977,12 +977,12 @@ export function QingmuCockpit({
         </div>
       </div>,
       storyboard: <div className={css.creativePage}>
-        {pageHeader('03', '分镜与导演', '安排画面、表演和声音，明确每镜使用的素材与生成描述。', 'shooting')}{projectFacts}
+        {pageHeader('02', '分镜与导演', '安排画面、表演和声音，明确每镜使用的素材与生成描述。', 'shooting')}{projectFacts}
         <div className={css.stageContent}>{panels.director}</div>
       </div>,
       shooting: shotView,
       delivery: <div className={css.creativePage}>
-        {pageHeader('05', '成片与导出', '选择视频版本，调整剪辑，导出可播放的完整作品。', null)}{projectFacts}
+        {pageHeader('04', '成片与导出', '选择视频版本，调整剪辑，导出可播放的完整作品。', null)}{projectFacts}
         <div className={css.stageActions}><button type="button" onClick={() => { changeStep('shooting') }}>← 返回拍摄与审看</button></div>
         <div className={css.stageContent}><WorkingCut key={`${projectId}:${episodeId}`} projectId={projectId} episodeId={episodeId} port={port} onOpenShooting={openCandidateReview}
           onUnsavedChange={onCutDirty} renderDirector={nativeDirectorSession ? ready => <div className={css.inlineDirector}>

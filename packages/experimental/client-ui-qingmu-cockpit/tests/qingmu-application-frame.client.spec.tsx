@@ -14,13 +14,13 @@ const props = () => ({
   onStep: vi.fn(), onCreate: vi.fn(), onRefresh: vi.fn(), onOpenTools: vi.fn(),
 })
 
-it('is the application, not an inner cockpit dialog, with one shared five-step navigation', () => {
+it('is the application, not an inner cockpit dialog, with four customer steps and compatible preparation routes', () => {
   const p = props()
   render(<QingmuApplicationFrame {...p}><main>真实项目镜头</main></QingmuApplicationFrame>)
   expect(screen.queryByRole('dialog')).toBeNull()
   expect(screen.queryByRole('button', { name: /打开.*驾驶舱|返回对话/ })).toBeNull()
   expect(screen.getAllByRole('navigation')).toHaveLength(1)
-  for (const [name, step] of [['故事', 'story'], ['角色与场景', 'assets'], ['分镜', 'storyboard'], ['拍摄与审看', 'shooting'], ['导出', 'delivery']]) {
+  for (const [name, step] of [['故事', 'story'], ['准备素材与分镜', 'assets'], ['生成与审看', 'shooting'], ['成片与导出', 'delivery']]) {
     fireEvent.click(screen.getByRole('button', { name: new RegExp(name!) }))
     expect(p.onStep).toHaveBeenLastCalledWith(step)
   }
@@ -61,4 +61,16 @@ it('retains the exact embedded scope rather than offering a project switch', () 
   expect(screen.getByRole('combobox', { name: '项目' }).hasAttribute('disabled')).toBe(true)
   expect(screen.getByRole('combobox', { name: '剧集' }).hasAttribute('disabled')).toBe(true)
   expect(screen.queryByRole('button', { name: '新建项目' })).toBeNull()
+})
+
+it('keeps storyboard deep links reachable inside the preparation step', () => {
+  const p = props()
+  render(<QingmuApplicationFrame {...p} step="storyboard"><main>分镜</main></QingmuApplicationFrame>)
+  expect(within(screen.getByRole('navigation', { name: '创作流程' })).getAllByRole('button')).toHaveLength(4)
+  expect(screen.getByRole('button', { name: /02准备素材与分镜/ }).getAttribute('aria-current')).toBe('step')
+  const preparation = within(screen.getByRole('navigation', { name: '素材与分镜准备' }))
+  fireEvent.click(preparation.getByRole('button', { name: '角色、场景与道具' }))
+  expect(p.onStep).toHaveBeenLastCalledWith('assets')
+  fireEvent.click(preparation.getByRole('button', { name: '分镜与导演' }))
+  expect(p.onStep).toHaveBeenLastCalledWith('storyboard')
 })

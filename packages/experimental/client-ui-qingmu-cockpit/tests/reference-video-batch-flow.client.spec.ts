@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { expect, it, vi, beforeEach } from 'vitest'
-import { collectBatchShot, readBatchBasis, parseBatchChoices, prepareBatchShot, submitBatchShot, hasBatchRun, needsBatchDesign, batchShotIncluded, createBatchSubmission, readBatchSubmission, batchSubmissionKey, type BatchBasis, type BatchPort } from '../src/client/reference-video-batch.ts'
+import { recoverBatchSubmission, withBatchSubmissionLock, collectBatchShot, readBatchBasis, parseBatchChoices, prepareBatchShot, submitBatchShot, hasBatchRun, needsBatchDesign, batchShotIncluded, createBatchSubmission, readBatchSubmission, batchSubmissionKey, type BatchBasis, type BatchPort } from '../src/client/reference-video-batch.ts'
 import { request, quoteResponse } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
 
 const source = { sha256: 'e'.repeat(64), prompt: '研究：下一镜才开门', generationPrompt: '角色保持原服装。0秒敲锣，铜锣余响。对白：请进。' }
@@ -12,7 +12,7 @@ function basis(): BatchBasis {
     } })) }
 }
 const choice = (frameId: string) => ({ frameId, references: [{ assetId: 'asset_lin', assetLabel: '林予', purpose: '本镜角色身份与衣服' }], parameters: request.parameters })
-beforeEach(() => sessionStorage.clear())
+beforeEach(() => { sessionStorage.clear(); localStorage.clear() })
 
 it('collects completed outputs into review once, skipping running videos and retaining registered candidates', async () => {
   const register = vi.fn(async () => ({ takeId: 'take_new' }))
@@ -167,4 +167,62 @@ it('uses a freshly saved design on retry and refuses a changed source before any
   await expect(prepareBatchShot({ ...port, referenceVideoDraft: async () => ({ ...saved, directorSource: { ...source, sha256: 'new' } }) } as unknown as BatchPort,
     'p', shot, choices[0])).rejects.toThrow('导演设计已更新')
   expect(materials).toHaveBeenCalledOnce()
+})
+
+
+it('migrates the original batch without changing its request IDs and preserves conflicting plans', () => {
+  const b = basis()
+  const items = createBatchSubmission([{ ...quoteResponse, projectId: 'p', frameId: 'f', generationSubmissionEnabled: true }], b, new Set(), sessionStorage)
+  const key = batchSubmissionKey('p', 'e')
+  sessionStorage.setItem(key, JSON.stringify(items))
+  expect(recoverBatchSubmission(localStorage, sessionStorage, 'p', 'e')).toEqual(items)
+  expect(sessionStorage.getItem(key)).toBeNull()
+  expect(readBatchSubmission(localStorage, 'p', 'e')).toEqual(items)
+  const other = items.map(item => ({ ...item, command: { ...item.command, requestId: 'another-intent' } }))
+  sessionStorage.setItem(key, JSON.stringify(other))
+  expect(() => recoverBatchSubmission(localStorage, sessionStorage, 'p', 'e')).toThrow('两份记录均已保留')
+  expect(readBatchSubmission(localStorage, 'p', 'e')).toEqual(items)
+  expect(readBatchSubmission(sessionStorage, 'p', 'e')).toEqual(other)
+})
+
+it('does not mutate or submit a batch while another tab owns its browser lock', async () => {
+  const action = vi.fn()
+  const requestLock = vi.fn(async (_key: string, _options: unknown, callback: (lock: null) => Promise<void>) => callback(null))
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: requestLock } })
+  await expect(withBatchSubmissionLock('batch', action)).rejects.toThrow('另一个页面正在提交本集')
+  expect(action).not.toHaveBeenCalled()
+})
+
+it('applies revision feedback to the selected retake and reuses it after interrupted preparation', async () => {
+  const b = basis()
+  const current = { ...b, shots: b.shots.map(shot => ({ ...shot,
+    runs: [{ runId: `old-${shot.frameId}`, publicStatus: 'succeeded' }] as never,
+    saved: { ...shot.saved, draft: { revision: 2, frameSha256: shot.saved.frameSha256,
+      requestSha256: 'd'.repeat(64), savedAt: '', request: { ...request, frameId: shot.frameId, directorSourceSha256: source.sha256 } } },
+  })) }
+  const feedback = '去掉茶杯参考中的窗户，保持庭院背景和原站位。'
+  const retakes = new Set(['f'])
+  expect(needsBatchDesign(current.shots[0]!)).toBe(false)
+  const choices = parseBatchChoices(JSON.stringify({ shots: [choice('f')] }), current, retakes, feedback)
+  expect(choices).toHaveLength(1)
+  expect(choices[0]?.promptParts.at(-1)).toEqual({ text: `\n【本次修改意见】\n${feedback}` })
+  expect(() => parseBatchChoices(JSON.stringify({ shots: [choice('f'), choice('f2')] }), current, retakes, feedback)).toThrow('不属于本次准备')
+  const shot = current.shots[0]!
+  let saved = shot.saved
+  const save = vi.fn(async (command: { request: typeof shot.saved.draft.request }) => {
+    saved = { ...saved, draft: { ...saved.draft, revision: 3, request: command.request } }
+    return saved
+  })
+  const materials = vi.fn().mockRejectedValueOnce(new Error('temporary disconnect'))
+    .mockResolvedValue({ configured: true, allReady: true, materials: [] })
+  const port = { referenceVideoDraft: async () => saved, saveReferenceVideoDraft: save,
+    readReferenceVideoMaterials: materials, referenceVideoQuote: async () => quoteResponse } as unknown as BatchPort
+  await expect(prepareBatchShot(port, 'p', shot, choices[0], true)).rejects.toThrow('disconnect')
+  await prepareBatchShot(port, 'p', shot, choices[0], true)
+  expect(save).toHaveBeenCalledOnce()
+  expect(saved.draft.request.promptParts.at(-1)).toEqual(choices[0]?.promptParts.at(-1))
+  expect(current.shots[1]!.saved.draft.revision).toBe(2)
+  saved = { ...saved, draft: { ...saved.draft, revision: 4, request: { ...saved.draft.request, promptParts: [{ text: 'another editor' }] } } }
+  await expect(prepareBatchShot(port, 'p', shot, choices[0], true)).rejects.toThrow('其他页面更新')
+  expect(save).toHaveBeenCalledOnce()
 })

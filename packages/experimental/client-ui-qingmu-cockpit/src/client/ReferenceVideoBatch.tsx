@@ -6,7 +6,7 @@ import { BatchVideoReview } from './BatchVideoReview.tsx'
 import { NativeStoryComposer } from './NativeStoryComposer.tsx'
 import { referenceSelectionGuidance } from './director-generation-guidance.ts'
 import styles from './ReferenceVideoBatch.module.css'
-import { batchShotIncluded, batchSubmissionKey, createBatchSubmission, readBatchSubmission, hasActiveBatchRun, needsBatchDesign, collectBatchShot, hasBatchRun, parseBatchChoices, prepareBatchShot, readBatchBasis, submitBatchShot, type BatchBasis, type BatchPort, type BatchSubmissionItem } from './reference-video-batch.ts'
+import { batchShotIncluded, batchSubmissionKey, createBatchSubmission, readBatchSubmission, recoverBatchSubmission, withBatchSubmissionLock, hasActiveBatchRun, needsBatchDesign, collectBatchShot, hasBatchRun, parseBatchChoices, prepareBatchShot, readBatchBasis, submitBatchShot, type BatchBasis, type BatchPort, type BatchSubmissionItem } from './reference-video-batch.ts'
 
 const runLabels = { queued: '等待生成', running: '正在生成', succeeded: '视频已返回，待审看', failed: '生成失败', quarantined: '结果待检查' }
 
@@ -32,9 +32,19 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
   const [pendingSubmission, setPendingSubmission] = useState<readonly BatchSubmissionItem[]>([])
   const submissionKey = batchSubmissionKey(projectId, episodeId)
   useEffect(() => {
-    try { setPendingSubmission(readBatchSubmission(sessionStorage, projectId, episodeId)) }
-    catch (cause) { setError(String(cause)) }
-  }, [projectId, episodeId])
+    const recover = () => {
+      try { setPendingSubmission(recoverBatchSubmission(localStorage, sessionStorage, projectId, episodeId)) }
+      catch (cause) { setError(String(cause)) }
+    }
+    recover()
+    const sync = (event: StorageEvent) => {
+      if (event.key !== submissionKey) return
+      try { setPendingSubmission(readBatchSubmission(localStorage, projectId, episodeId)) }
+      catch (cause) { setError(String(cause)) }
+    }
+    window.addEventListener('storage', sync)
+    return () => { window.removeEventListener('storage', sync) }
+  }, [projectId, episodeId, submissionKey])
   const [progress, setProgress] = useState<{ label: string; done: number; total: number }>()
   const active = useRef(true), lock = useRef(false)
   const collectedCallback = useRef(onCollected)
@@ -124,10 +134,10 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
   }
   async function prepare(text?: string) {
     if (lock.current || !basis) return
-    const choices = text === undefined ? [] : parseBatchChoices(text, basis, retakes)
+    const choices = text === undefined ? [] : parseBatchChoices(text, basis, retakes, notes)
     lock.current = true; setBusy(true); setError('')
     const pending = basis.shots.filter(shot => batchShotIncluded(shot, retakes)
-      && (!needsBatchDesign(shot) || choices.some(item => item.frameId === shot.frameId)))
+      && (!needsBatchDesign(shot, notes) || choices.some(item => item.frameId === shot.frameId)))
     setProgress({ label: '准备引用', done: 0, total: pending.length })
     try {
       for (const shot of pending) {
@@ -136,7 +146,7 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
         if (!request && !shot.saved.draft) continue
         mark(shot.frameId, '正在保存引用并准备生成')
         try {
-          const quote = await prepareBatchShot(port, projectId, shot, request)
+          const quote = await prepareBatchShot(port, projectId, shot, request, Boolean(notes.trim()))
           if (isActive()) setQuotes(previous => new Map(previous).set(shot.frameId, quote))
           mark(shot.frameId, quote.generationSubmissionEnabled ? '已准备' : '生成通道不可用')
         } catch (cause) { mark(shot.frameId, String(cause)) }
@@ -148,30 +158,32 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
     if (lock.current || !basis) return
     lock.current = true; setBusy(true); setError('')
     try {
-      let remaining = resume ? readBatchSubmission(sessionStorage, projectId, episodeId)
-        : createBatchSubmission([...quotes.values()].filter(quote => quote.generationSubmissionEnabled), basis, retakes, sessionStorage)
-      if (!resume && readBatchSubmission(sessionStorage, projectId, episodeId).length) throw new Error('请先继续上次批量提交。')
-      // Keep the whole authorized batch, including commands not reached before navigation or reload.
-      sessionStorage.setItem(submissionKey, JSON.stringify(remaining))
-      setPendingSubmission(remaining)
-      setProgress({ label: '提交生成', done: 0, total: remaining.length })
-      for (const item of [...remaining]) {
-        if (!isActive()) break
-        const id = item.quote.frameId
-        mark(id, '正在提交')
-        try {
-          const run = await submitBatchShot(port, item.quote, sessionStorage, item)
-          remaining = remaining.filter(row => row.command.requestId !== item.command.requestId)
-          sessionStorage.setItem(submissionKey, JSON.stringify(remaining))
-          if (isActive()) {
-            setPendingSubmission(remaining)
-            setRetakes((previous) => { const next = new Set(previous); next.delete(id); return next })
-            setQuotes((previous) => { const next = new Map(previous); next.delete(id); return next })
-          }
-          mark(id, `已进入生成队列：${runLabels[run.publicStatus]}`)
-        } catch (cause) { mark(id, String(cause)) }
-        finally { if (isActive()) setProgress(previous => previous && ({ ...previous, done: previous.done + 1 })) }
-      }
+      await withBatchSubmissionLock(submissionKey, async () => {
+        let remaining = resume ? readBatchSubmission(localStorage, projectId, episodeId)
+          : createBatchSubmission([...quotes.values()].filter(quote => quote.generationSubmissionEnabled), basis, retakes, sessionStorage)
+        if (!resume && readBatchSubmission(localStorage, projectId, episodeId).length) throw new Error('请先继续上次批量提交。')
+        // Keep the whole authorized batch, including commands not reached before navigation or reload.
+        localStorage.setItem(submissionKey, JSON.stringify(remaining))
+        setPendingSubmission(remaining)
+        setProgress({ label: '提交生成', done: 0, total: remaining.length })
+        for (const item of [...remaining]) {
+          if (!isActive()) break
+          const id = item.quote.frameId
+          mark(id, '正在提交')
+          try {
+            const run = await submitBatchShot(port, item.quote, sessionStorage, item)
+            remaining = remaining.filter(row => row.command.requestId !== item.command.requestId)
+            localStorage.setItem(submissionKey, JSON.stringify(remaining))
+            if (isActive()) {
+              setPendingSubmission(remaining)
+              setRetakes((previous) => { const next = new Set(previous); next.delete(id); return next })
+              setQuotes((previous) => { const next = new Map(previous); next.delete(id); return next })
+            }
+            mark(id, `已进入生成队列：${runLabels[run.publicStatus]}`)
+          } catch (cause) { mark(id, String(cause)) }
+          finally { if (isActive()) setProgress(previous => previous && ({ ...previous, done: previous.done + 1 })) }
+        }
+      })
     } catch (cause) { if (isActive()) setError(String(cause)) }
     finally { lock.current = false; if (isActive()) { setBusy(false); setRefreshEpoch(value => value + 1) } }
   }
@@ -196,17 +208,18 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
     } catch (cause) { if (isActive()) setError(`视频已收取，审看列表刷新失败：${String(cause)}`) }
     finally { lock.current = false; if (isActive()) setBusy(false) }
   }
-  const missing = basis?.shots.filter(shot => batchShotIncluded(shot, retakes) && needsBatchDesign(shot)) ?? []
-  const source = JSON.stringify(basis && { shots: basis.shots.map(shot => ({ frameId: shot.frameId, label: shot.label,
-    needsPreparation: batchShotIncluded(shot, retakes) && needsBatchDesign(shot),
-    duration: shot.duration, source: shot.saved.directorSource && { sha256: shot.saved.directorSource.sha256,
-      generationPrompt: shot.saved.directorSource.generationPrompt } })),
-  // Keep the selection catalog compact; historical image prompts remain available through the asset-reading tools.
-  assets: basis.assets.map(({ browserUrl: _url, imageDesign: _history, ...asset }) => asset) })
-  const prompt = `为本集所有待准备镜头统一配置视频引用。实际读取 cinematic-director、prop-asset 以及当前镜头需要的摄影、声音方法，核对真实参考图片。来源包含整集镜头：needsPreparation=false 的镜头只用于理解接续，不修改、不重新准备；仅为 needsPreparation=true 的镜头输出方案。先检查已保存设计是否与剧本、前后镜及实际素材相容，再沿用有效设计。发现影响生成的来源冲突时，指出镜头及具体字段，返回场次导演整理来源后再准备，不能用引用用途暗改剧情或把旧稿视为已审通过。${referenceSelectionGuidance}只选择本镜需要的真实素材，说明具体用途；每项引用同时逐字写入目录的 assetId 和 label（输出字段 assetLabel），交稿前按目录核对名称、编号及用途属于同一对象，不能把产品、册子或不同角色的编号串用；同一人物、场景和道具跨镜沿用同一有效版本。素材目录中的 selected、审核状态及现有引用仅作依据，实际图片优先；不得以“最新一张”代替审图，已指出错误的图不能引用。产品图只提供产品外观，广告人物或购物界面不进入剧情。人物肖像与空场不能冒充完整首帧。常规多模态引用不写 frameRole；仅完整镜头首尾帧路线才写 first_frame/last_frame，该路线不能混用其他引用。每镜按需要选取引用，不为调用功能而塞满素材。音色参考最多5段、每段1–15秒、总长不超过15秒；多人对白优先使用目录中对应人物的同源3秒音色样本，完整试听音频仍保留，不把样本台词当本镜对白，也不为满足长度而丢掉需要的说话人音色。参考视频仅在需要动作或衔接且实际审看合适时使用。没有足够可靠素材时指出具体镜头及原因，不虚构图片、不声称已解决。\n本集画幅：${aspectRatio}。当前来源：${source}\n操作者补充：${notes}\n只在一个 txt 代码块输出 {"shots":[{"frameId":"真实镜头编号","references":[{"assetId":"真实素材编号","assetLabel":"目录中的原始label","purpose":"本镜如何使用它"}],"parameters":{"duration":已保存时长,"resolution":"720P","ratio":"${aspectRatio}","audio":true,"prompt_extend":false}}]}。仅覆盖 needsPreparation=true 的全部待准备镜头，保持各镜时长和本集画幅；声音按当前导演设计，不能默认静音。资产 SHA、引用编号及完整导演文本由系统从当前来源装配。不要自行执行镜头写入或生成任务。`
+  const missing = basis?.shots.filter(shot => batchShotIncluded(shot, retakes) && needsBatchDesign(shot, notes)) ?? []
+  const source = JSON.stringify(basis && { feedback: notes.trim(),
+    shots: basis.shots.map(shot => ({ frameId: shot.frameId, label: shot.label,
+      needsPreparation: batchShotIncluded(shot, retakes) && needsBatchDesign(shot, notes),
+      duration: shot.duration, source: shot.saved.directorSource && { sha256: shot.saved.directorSource.sha256,
+        generationPrompt: shot.saved.directorSource.generationPrompt } })),
+    // Keep the selection catalog compact; historical image prompts remain available through the asset-reading tools.
+    assets: basis.assets.map(({ browserUrl: _url, imageDesign: _history, ...asset }) => asset) })
+  const prompt = `为本集所有待准备镜头统一配置视频引用。操作者补充用于本次全部待准备镜头；已有成片只有明确勾选重做的镜头才进入范围。意见与已存剧情或调度冲突时先指出具体上游来源，不用重复原请求假装修复。实际读取 cinematic-director、prop-asset 以及当前镜头需要的摄影、声音方法，核对真实参考图片。来源包含整集镜头：needsPreparation=false 的镜头只用于理解接续，不修改、不重新准备；仅为 needsPreparation=true 的镜头输出方案。先检查已保存设计是否与剧本、前后镜及实际素材相容，再沿用有效设计。发现影响生成的来源冲突时，指出镜头及具体字段，返回场次导演整理来源后再准备，不能用引用用途暗改剧情或把旧稿视为已审通过。${referenceSelectionGuidance}只选择本镜需要的真实素材，说明具体用途；每项引用同时逐字写入目录的 assetId 和 label（输出字段 assetLabel），交稿前按目录核对名称、编号及用途属于同一对象，不能把产品、册子或不同角色的编号串用；同一人物、场景和道具跨镜沿用同一有效版本。素材目录中的 selected、审核状态及现有引用仅作依据，实际图片优先；不得以“最新一张”代替审图，已指出错误的图不能引用。产品图只提供产品外观，广告人物或购物界面不进入剧情。人物肖像与空场不能冒充完整首帧。常规多模态引用不写 frameRole；仅完整镜头首尾帧路线才写 first_frame/last_frame，该路线不能混用其他引用。每镜按需要选取引用，不为调用功能而塞满素材。音色参考最多5段、每段1–15秒、总长不超过15秒；多人对白优先使用目录中对应人物的同源3秒音色样本，完整试听音频仍保留，不把样本台词当本镜对白，也不为满足长度而丢掉需要的说话人音色。参考视频仅在需要动作或衔接且实际审看合适时使用。没有足够可靠素材时指出具体镜头及原因，不虚构图片、不声称已解决。\n本集画幅：${aspectRatio}。当前来源：${source}\n操作者补充：${notes}\n只在一个 txt 代码块输出 {"shots":[{"frameId":"真实镜头编号","references":[{"assetId":"真实素材编号","assetLabel":"目录中的原始label","purpose":"本镜如何使用它"}],"parameters":{"duration":已保存时长,"resolution":"720P","ratio":"${aspectRatio}","audio":true,"prompt_extend":false}}]}。仅覆盖 needsPreparation=true 的全部待准备镜头，保持各镜时长和本集画幅；声音按当前导演设计，不能默认静音。资产 SHA、引用编号及完整导演文本由系统从当前来源装配。不要自行执行镜头写入或生成任务。`
   const ready = [...quotes.values()].filter(quote => quote.generationSubmissionEnabled)
   const unavailable = busy || syncing
-  return <details aria-label="整集批量生成" className={styles.batch}>
+  return <details aria-label="整集批量生成" className={styles.batch} open>
     <summary>整集批量生成视频</summary>
     <p>统一准备本集引用并批量生成；需要重做时勾选问题镜头，原视频保留。返回的视频自动进入候选审看。</p>
     <ol className={styles.steps} aria-label="批量制作步骤"><li>准备引用</li><li>批量生成</li><li>查看结果</li></ol>
@@ -220,7 +233,8 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
         <progress aria-label={progress.label} value={progress.done} max={Math.max(1, progress.total)} />
       </div>}
       {pendingSubmission.length > 0 && <p role="status">上次还有 {pendingSubmission.length} 镜提交待完成。<button type="button" disabled={unavailable} onClick={() => { void submit(true) }}>继续上次批量提交</button></p>}
-      <label>本次补充<textarea value={notes} onChange={(event) => { setNotes(event.target.value) }} disabled={busy} /></label>
+      <label>本次补充<textarea value={notes} onChange={(event) => { setNotes(event.target.value); setQuotes(new Map()) }}
+        disabled={unavailable || pendingSubmission.length > 0} /></label>
       {missing.length > 0 && storyPort && <NativeStoryComposer port={storyPort} projectId={projectId} episodeId={episodeId}
         source={source} settings="" disabled={unavailable || pendingSubmission.length > 0} onAdopt={prepare} purpose={{ key: 'reference-video-batch', jsonOutput: true,
           title: '整集视频准备', description: '导演结合整集接续选择引用，保留已完成镜头。', prompt,
@@ -229,9 +243,9 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
       {missing.length > 0 && !storyPort && <p>导演服务未连接，仍可准备已有草稿。</p>}
       <button type="button"
         disabled={unavailable || pendingSubmission.length > 0
-          || !basis.shots.some(shot => batchShotIncluded(shot, retakes) && !needsBatchDesign(shot))}
+          || !basis.shots.some(shot => batchShotIncluded(shot, retakes) && !needsBatchDesign(shot, notes))}
         onClick={() => { void prepare() }}>准备已有镜头草稿</button>
-      <ul className={styles.results}>{basis.shots.map(shot => <li key={shot.frameId}>{shot.runs.some(run => run.publicStatus === 'succeeded') && <label><input type="checkbox" aria-label={`重做${shot.label}`} checked={retakes.has(shot.frameId)}
+      <details><summary>逐镜进度与局部重做</summary><ul className={styles.results}>{basis.shots.map(shot => <li key={shot.frameId}>{shot.runs.some(run => run.publicStatus === 'succeeded') && <label><input type="checkbox" aria-label={`重做${shot.label}`} checked={retakes.has(shot.frameId)}
         disabled={unavailable || pendingSubmission.length > 0 || hasActiveBatchRun(shot)} onChange={(event) => {
           const checked = event.target.checked
           setRetakes((previous) => {
@@ -239,11 +253,11 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
           })
           setQuotes((previous) => { const next = new Map(previous); next.delete(shot.frameId); return next })
         }} />重做</label>}<button type="button" disabled={busy}
-        onClick={() => { onOpenShot(shot.frameId) }}>{shot.label}</button><span>{messages.get(shot.frameId)}</span></li>)}</ul>
+        onClick={() => { onOpenShot(shot.frameId) }}>{shot.label}</button><span>{messages.get(shot.frameId)}</span></li>)}</ul></details>
       <div className={styles.actions}>
         <button type="button" className={styles.primary} disabled={unavailable || pendingSubmission.length > 0 || ready.length === 0} onClick={() => { void submit() }}>
           {busy ? '正在处理…' : `批量生成 ${ready.length} 个已准备镜头`}</button>
-        <button type="button" disabled={unavailable} onClick={() => { void collect() }}>重新同步视频结果</button>
+        <details><summary>结果同步遇到问题</summary><button type="button" disabled={unavailable} onClick={() => { void collect() }}>重新同步视频结果</button></details>
       </div>
       <details onToggle={(event) => { setReviewOpen(event.currentTarget.open) }}><summary>整集音画检查</summary>
         {reviewOpen && <BatchVideoReview port={port} episodeId={episodeId} basis={basis} onOpenShot={onOpenShot} />}
