@@ -290,6 +290,8 @@ Opening, refreshing, or closing the cockpit does not rewrite the model prefix. A
 
 ## Saved reference drafts
 
+The Shooting view also offers episode batch preparation. The existing native writing session chooses references for missing drafts; the application resolves real asset versions and appends each saved director design once, including sound. Existing drafts are preserved. Preparation reuses the single-shot save, material-upload and quote ports. One explicit action queues all ready shots through the same asynchronous task service, without waiting for one render before queuing the next. Completed and in-flight shots are skipped, and uncertain submissions share the single-shot recovery key. No batch database or alternate provider route is introduced.
+
 Reference drafts can be saved per shot and restored after refresh. Reads use `referenceVideoDraft`; writes use the command adapter `saveReferenceVideoDraft`, followed by strict readback. Writer checks the project owner, source frame SHA and draft revision in one transaction. Changed source assets are shown as unavailable, and a changed shot requires an explicit rebase. Saving does not select a PromptIR, adopt assets or submit generation.
 
 The `referenceVideoQuote` read prices the exact saved draft through Writer and ProviderGate dry-run. It checks the saved revision, source and compiled preview, then displays a Beijing catalog list-price estimate without discounts. Edits invalidate that estimate. It reserves no budget and starts no task.

@@ -13,6 +13,7 @@ import type { QingmuCockpitKey } from './locales.ts'
 import { AssetWorkbench } from './AssetWorkbench.tsx'
 import { PromptIrWorkspace } from './PromptIrWorkspace.tsx'
 import { SceneReferenceWorkspace } from './SceneReferenceWorkspace.tsx'
+import { ReferenceVideoBatch } from './ReferenceVideoBatch.tsx'
 import { ScriptWorkspace } from './ScriptWorkspace.tsx'
 import { CreateProjectWorkspace, TextImportWorkspace } from './CreationWorkspace.tsx'
 import { ProjectLibrary } from './ProjectLibrary.tsx'
@@ -704,6 +705,9 @@ export function QingmuCockpit({
 
   const shotView = (
     <div className={css.stack}>
+      {episodeId && shotRelations && <ReferenceVideoBatch key={`${projectId}:${episodeId}:${shotRelations.storyboardRevision.revisionId}`}
+        projectId={projectId} episodeId={episodeId} relations={shotRelations} port={port} storyPort={nativeDirectorSession?.story} aspectRatio={stringOf(selectedProject?.aspect_ratio) || '16:9'}
+        onOpenShot={(id) => { setSelectedShotId(id); setShootingActionKind('video'); setShootingAction(id) }} />}
       <ShootingReviewWorkspace
         hideHeader={applicationShell === true}
         headerActions={<>

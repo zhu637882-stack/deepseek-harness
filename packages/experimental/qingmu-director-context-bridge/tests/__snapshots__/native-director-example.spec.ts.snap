@@ -46,6 +46,7 @@ exports[`authors a first-draft suggestion through the shipped preset and actual 
     "qingmu_import_acoustic_response",
     "qingmu_prepare_dialogue_video",
     "qingmu_preview_dialogue_edit",
+    "qingmu_preview_first_frame",
     "qingmu_preview_reference_draft",
     "qingmu_preview_scene_layout",
     "qingmu_propose_first_draft",
@@ -126,6 +127,51 @@ exports[`previews imported sourceLineId dialogue through the shipped preset and 
     "{"schema":"qingmu.native-dialogue-input.v1","receiptId":"6bad1a59e2969819de7ca87438ef95dfcd87f7ac499843bb5c0897757a672f71","scope":{"projectId":"example-project","episodeId":"example-episode","sceneId":"example-scene","shotId":"example-shot"},"source":{"revision":1,"scriptSha256":"0000000000000000000000000000000000000000000000000000000000000000","fullScriptRetainedByHost":true},"context":{"shot":{"id":"example-shot","title":"门口停顿","narrative":"门铃响起，她停在门口。","visual":"门在画面左侧。","action":"她停住并听铃声。","durationSec":4,"dialogueLineIds":[]},"script":{"revision":1,"sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"creativeContract":null,"adjacentShots":{"previous":null,"next":{"id":"example-shot-2","title":"反应","action":"停顿"}},"episodeScenes":[{"sceneIndex":1,"title":"门口","current":true}],"sourceScene":{}},"linkedShots":[{"shotId":"example-shot","sceneId":"example-scene","frameNo":1,"title":"门口呼喊","durationSec":8,"dialogueRhythm":{"cueCount":1,"timedCueCount":0,"cues":[{"schemaVersion":"dialogue-cue-linked-v1","lineId":"line_000003","speakerId":"actor-lin","verbatimText":"有人吗？","plannedStartSec":null,"plannedEndSec":null,"timingVerified":false,"legacy":false}]}}],"methods":[{"schema":"qingmu.imago-director-instructions.v1","capability":"shot_design","requestedResourceId":null,"sources":[{"resourceId":"skill","path":"example/skill.md","kind":"skill","sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","byteLength":120,"content":"从场景意图确定机位、遮挡与表演，先界定首帧的开始状态。"}],"sourceBindings":[{"resourceId":"skill","path":"example/skill.md","kind":"skill","sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","byteLength":120}],"packageSha256":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","packagePath":"example","additionalReferences":[{"resourceId":"rough_final_feedback","required":true,"path":"example/feedback.md"}],"methodScope":"keyless example","maxResourceBytes":131072,"maxPackageBytes":524288,"authority":{"readOnly":true,"businessTruth":"yimeng","methodSource":"imago_os","providerCalls":0,"maximumCostCny":"0","approvalGranted":false,"humanDecisionInferred":false,"formalQcInferred":false,"projectStateWrite":false}},{"schema":"qingmu.imago-director-instructions.v1","capability":"shot_design","requestedResourceId":"rough_final_feedback","sources":[{"resourceId":"rough_final_feedback","path":"example/rough_final_feedback.md","kind":"skill","sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","byteLength":120,"content":"逐镜比对锁定意图、表演、空间关系、声画线索和连续性。"}],"sourceBindings":[{"resourceId":"rough_final_feedback","path":"example/rough_final_feedback.md","kind":"skill","sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","byteLength":120}],"packageSha256":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","packagePath":"example","additionalReferences":[],"methodScope":"keyless example","maxResourceBytes":131072,"maxPackageBytes":524288,"authority":{"readOnly":true,"businessTruth":"yimeng","methodSource":"imago_os","providerCalls":0,"maximumCostCny":"0","approvalGranted":false,"humanDecisionInferred":false,"formalQcInferred":false,"projectStateWrite":false}}],"editableLines":[{"schemaVersion":"dialogue-cue-linked-v1","lineId":"line_000003","speakerId":"actor-lin","verbatimText":"有人吗？","plannedStartSec":null,"plannedEndSec":null,"timingVerified":false,"legacy":false}],"nativeReceiptSha256":"628327f89c846b66391d90ad7e77c31c49f05aa94c675189a9144b36bdc080f3"}",
     "{"schema":"qingmu.dialogue-edit-preview.v1","projectId":"example-project","episodeId":"example-episode","baseRevision":1,"scriptSha256":"0000000000000000000000000000000000000000000000000000000000000000","relationsSha256":"a406132ac3cfedcafd5f820be4eae4353cbdee77dc049c56cb0d5966e712e86f","lineId":"line_000003","before":"有人吗？","after":"请问，还有人在吗？","affectedShots":[{"shotId":"example-shot","frameNo":1,"title":"门口呼喊"}],"unchangedDialogueShots":[],"visualImpact":"requires_director_assessment","businessStateChanged":false,"providerCalls":0,"proposedScriptSha256":"5f6a635c1530d6d59d3a5edaa3ac5d7a1849c36897c0f535458a57049b4ec592"}",
   ],
+}
+`;
+
+exports[`returns an episode reference plan through the shipped native preset and persisted writing result 1`] = `
+{
+  "calls": [
+    "skill",
+    "skill",
+  ],
+  "plan": {
+    "shots": [
+      {
+        "frameId": "first",
+        "parameters": {
+          "audio": true,
+          "duration": 6,
+          "prompt_extend": false,
+          "ratio": "16:9",
+          "resolution": "720P",
+        },
+        "references": [
+          {
+            "assetId": "actor-photo",
+            "purpose": "保持同一人物与服装",
+          },
+        ],
+      },
+      {
+        "frameId": "second",
+        "parameters": {
+          "audio": true,
+          "duration": 6,
+          "prompt_extend": false,
+          "ratio": "16:9",
+          "resolution": "720P",
+        },
+        "references": [
+          {
+            "assetId": "actor-photo",
+            "purpose": "保持同一人物与服装",
+          },
+        ],
+      },
+    ],
+  },
 }
 `;
 

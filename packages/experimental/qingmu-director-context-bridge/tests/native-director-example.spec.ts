@@ -88,3 +88,14 @@ it('designs an unbound scene through native director and camera methods with ful
   } }] })
   expect({ calls: result.calls, cameraInRequest: result.cameraInRequest, design }).toMatchSnapshot()
 })
+
+
+it('returns an episode reference plan through the shipped native preset and persisted writing result', async () => {
+  const result = await runNativeDirectorExample('reference-batch')
+  expect(result.calls).toEqual(['skill', 'skill'])
+  expect(result.results.every(text => !text.includes('Unknown skill'))).toBe(true)
+  const plan = JSON.parse(result.batchDraft!.script) as { shots: { frameId: string; parameters: { audio: boolean } }[] }
+  expect(plan.shots.map(shot => shot.frameId)).toEqual(['first', 'second'])
+  expect(plan.shots.every(shot => shot.parameters.audio)).toBe(true)
+  expect({ calls: result.calls, plan }).toMatchSnapshot()
+})

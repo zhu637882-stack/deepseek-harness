@@ -1,0 +1,76 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`assembles every shot from real references while keeping dialogue and synchronized sound exactly once 1`] = `
+[
+  {
+    "bindings": [
+      {
+        "assetId": "asset_lin",
+        "assetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bindingToken": "ref_1",
+        "label": "林予",
+      },
+    ],
+    "directorSourceSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "frameId": "f",
+    "model": "wan3.0-video",
+    "parameters": {
+      "audio": true,
+      "duration": 8,
+      "prompt_extend": false,
+      "ratio": "16:9",
+      "resolution": "720P",
+    },
+    "projectId": "p",
+    "promptParts": [
+      {
+        "bindingToken": "ref_1",
+      },
+      {
+        "text": "：本镜角色身份与衣服
+",
+      },
+      {
+        "text": "
+【本镜完整导演设计】
+角色保持原服装。0秒敲锣，铜锣余响。对白：请进。",
+      },
+    ],
+  },
+  {
+    "bindings": [
+      {
+        "assetId": "asset_lin",
+        "assetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bindingToken": "ref_1",
+        "label": "林予",
+      },
+    ],
+    "directorSourceSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "frameId": "f2",
+    "model": "wan3.0-video",
+    "parameters": {
+      "audio": true,
+      "duration": 8,
+      "prompt_extend": false,
+      "ratio": "16:9",
+      "resolution": "720P",
+    },
+    "projectId": "p",
+    "promptParts": [
+      {
+        "bindingToken": "ref_1",
+      },
+      {
+        "text": "：本镜角色身份与衣服
+",
+      },
+      {
+        "text": "
+【本镜完整导演设计】
+角色保持原服装。0秒敲锣，铜锣余响。对白：请进。",
+      },
+    ],
+  },
+]
+`;

@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`offers one action for two prepared shots and shows each queued result 1`] = `"整集批量生成视频统一准备本集引用，已完成和正在生成的镜头自动保留。准备好的镜头可以一次进入生成队列。读取整集准备情况本次补充准备已有镜头草稿镜1 · 门口：已进入生成队列：queued镜2 · 门口：已进入生成队列：queued批量生成 0 个已准备镜头"`;
