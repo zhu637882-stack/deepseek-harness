@@ -31,6 +31,29 @@ it.each([
   expect(port.send).not.toHaveBeenCalled()
   expect(screen.getByText(text)).toBeTruthy()
 })
+it.each(['root-only', 'identical', 'conflict', 'malformed'] as const)('preserves dialogue delivery when the native candidate is %s', async (mode) => {
+  const source = shots[0]!
+  const { dialoguePlan, ...departments } = source.directorPlan
+  const candidate = { ...source, directorPlan: mode === 'root-only' ? departments : source.directorPlan,
+    dialoguePlan: mode === 'malformed' ? '轻声' : mode === 'conflict' ? [{ ...dialoguePlan[0], delivery: '喊叫' }] : dialoguePlan }
+  const text = JSON.stringify({ sourceScriptSha256: sha, sourceAssetStateSha256: basis.stateSha256, sceneIndex: 1, shots: [candidate] })
+  localStorage.setItem('qingmu.scene-design-1-session.v1:p:e', JSON.stringify({ sessionId: 'existing', baseline: 1, submitted: true }))
+  const port = { prepare: vi.fn(), send: vi.fn(), read: vi.fn(async () => ({ lastSeq: 10, running: false, finished: true, text, script: text, error: '' })) }
+  const onAdopt = vi.fn()
+  render(<NativeSceneDesign projectId="p" episodeId="e" scene={scene} scriptSha256={sha}
+    readAssetDesign={vi.fn(async () => basis)} storyPort={port} disabled={false} onAdopt={onAdopt} />)
+  const adopt = await screen.findByRole<HTMLButtonElement>('button', { name: '采用到分镜卡片' })
+  await waitFor(() => { expect(adopt.disabled).toBe(false) })
+  fireEvent.click(adopt)
+  if (mode === 'conflict' || mode === 'malformed') {
+    await screen.findByText(mode === 'conflict' ? /两份不同的对白表演/ : /对白表演格式无效/)
+    expect(onAdopt).not.toHaveBeenCalled()
+  } else {
+    await waitFor(() => { expect(onAdopt).toHaveBeenCalledExactlyOnceWith(shots) })
+  }
+  expect(port.send).not.toHaveBeenCalled()
+  expect(screen.getByText(text)).toBeTruthy()
+})
 it('sends the whole-film basis and scene to the native director, then adopts the full design without saving it', async () => {
   const text = JSON.stringify({ sourceScriptSha256: sha, sourceAssetStateSha256: basis.stateSha256, sceneIndex: 1, shots })
   const port = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
