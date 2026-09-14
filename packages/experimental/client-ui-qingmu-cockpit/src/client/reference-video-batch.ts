@@ -1,5 +1,5 @@
 /** Episode preparation and submission reuse the saved single-shot drafts and task queue. */
-import type { ReferenceVideoAsset, ReferenceVideoDraftResponse, ReferenceVideoPreviewRequest,
+import type { ReferenceVideoAsset, ReferenceVideoBinding, ReferenceVideoDraftResponse, ReferenceVideoPreviewRequest,
   ReferenceVideoQuoteResponse, ReferenceVideoRun, QueueReferenceVideoRequest, ReferenceVideoMaterialsState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
 
@@ -50,7 +50,7 @@ export function parseBatchChoices(text: string, basis: BatchBasis): ReferenceVid
     expected.delete(row.frameId)
     const source = shot.saved.directorSource
     if (!source?.generationPrompt) throw new Error(`${shot.label}尚无完整导演设计。`)
-    const bindings = row.references.map((reference: unknown, index: number) => {
+    const bindings = row.references.map((reference: unknown, index: number): ReferenceVideoBinding & { purpose: string } => {
       if (!reference || typeof reference !== 'object' || !('assetId' in reference) || !('purpose' in reference)
         || typeof reference.purpose !== 'string' || !reference.purpose.trim()) throw new Error('每项引用都需要真实素材和具体用途。')
       const asset = basis.assets.find(item => item.assetId === reference.assetId)
