@@ -26,6 +26,10 @@ function parseDesign(text: string, incomplete = false): { design: AssetDesign; r
       || typeof item.name !== 'string' || (!incomplete && !item.name.trim())
       || typeof item.imagePrompt !== 'string' || (!incomplete && !item.imagePrompt.trim())) throw new Error('素材设计缺少类型、名称或画面描述。')
     if (item.selfContainedImagePrompt !== undefined && typeof item.selfContainedImagePrompt !== 'boolean') throw new Error('完整画面描述选项需要是布尔值。')
+    // Native drafts may use null for a field that does not apply to this asset.
+    // Preserve omission for incremental edits; explicit null clears the voice.
+    if (item.voiceIdentity === null) item.voiceIdentity = ''
+    if (item.voiceIdentity !== undefined && typeof item.voiceIdentity !== 'string') throw new Error('声音身份需要文字描述。')
     if (item.visualIdentity !== undefined && (typeof item.visualIdentity !== 'string'
       || (!incomplete && !item.visualIdentity.trim()))) throw new Error('主体设定不能为空。')
     if (item.imageObjectStates !== undefined) imageObjectStates(item.imageObjectStates)

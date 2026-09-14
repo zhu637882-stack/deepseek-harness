@@ -1,5 +1,7 @@
 # Qingmu OS production cockpit
 
+Native asset drafts and imported designs normalize an explicit null voice identity to empty text before local recovery and saving. Omitted voice identity still preserves an existing voice during incremental adoption; non-text values are rejected without replacing the cards. See the [save compatibility note](../../../.agents/notes/implemented/feature/2026-09-14-qingmu-null-voice-design.md).
+
 Whole-scene reconciliation receives each shot's saved duration and original dialogue. The director aligns performance and action beats to those values; changes to source dialogue or timing remain explicit script or storyboard edits. Missing legacy dialogue is distinguished from an empty assigned line list.
 
 Shared director-context source tracking, reconciliation and legacy behavior are documented in the [implementation note](../../../.agents/notes/implemented/feature/2026-09-14-qingmu-shared-director-context.md).

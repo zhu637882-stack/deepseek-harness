@@ -10,6 +10,36 @@ const state: AssetDesignState = { ...scope, schema: 'qingmu.asset-design-state.v
     visualStyle: '写实', tone: '温暖', colorPalette: ['灰蓝'], lightingRules: '窗光', cameraGrammar: '跟随动作', performanceRules: '自然', characterContinuityRules: '服装稳定',
   } } }
 afterEach(() => { cleanup(); localStorage.clear() })
+it.each(['actor', 'scene', 'prop'] as const)('normalizes a null voice in an imported %s design before recovery and saving', async (kind) => {
+  const port = setup()
+  const mount = () => render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  const view = mount()
+  await screen.findByLabelText('画面描述')
+  const imported = { ...state.design!, assets: [{ kind, name: '素材', imagePrompt: '保留的画面描述', voiceIdentity: null }] }
+  fireEvent.change(screen.getByLabelText('素材设计数据'), { target: { value: JSON.stringify(imported) } })
+  fireEvent.click(screen.getByRole('button', { name: '载入设计' }))
+  view.unmount(); mount()
+  expect((await screen.findByLabelText<HTMLTextAreaElement>('画面描述')).value).toBe('保留的画面描述')
+  fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
+  await waitFor(() => { expect(port.saveAssetDesign).toHaveBeenCalledTimes(1) })
+  expect(port.saveAssetDesign.mock.calls[0]).toMatchObject([{ design: {
+    assets: [{ kind, name: '素材', imagePrompt: '保留的画面描述', voiceIdentity: '' }],
+  } }])
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
+it('rejects a non-text voice without replacing the existing cards', async () => {
+  const port = setup()
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  await screen.findByLabelText('画面描述')
+  fireEvent.change(screen.getByLabelText('素材设计数据'), { target: { value: JSON.stringify({ ...state.design!,
+    assets: [{ ...state.design!.assets[0], voiceIdentity: 42 }],
+  }) } })
+  fireEvent.click(screen.getByRole('button', { name: '载入设计' }))
+  await screen.findByText(/声音身份需要文字描述/)
+  expect(screen.getByRole('status').textContent).toMatchInlineSnapshot('"Error: 声音身份需要文字描述。"')
+  expect(screen.getByLabelText<HTMLTextAreaElement>('声音身份').value).toBe('成年温厚自然中低音')
+  expect(port.saveAssetDesign).not.toHaveBeenCalled()
+})
 it('restores unsaved card and whole-film edits after leaving, including a temporarily empty prompt', async () => {
   const port = setup()
   const mount = () => render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
