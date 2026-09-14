@@ -8,7 +8,7 @@ Shared director-context source tracking, reconciliation and legacy behavior are 
 
 `previewShootingFirstFrame` exposes the existing shooting preview to native commands. It accepts scoped identities and exact working-image references, preserves order and purpose, validates returned shot identity and input hashes, and rejects reflected credentials. Submission and adoption remain separate.
 
-First-frame preparation returns bounded, credential-redacted validation details for HTTP 409. The director can distinguish input length, reference and scene errors; the adapter does not retry or expose unrelated server diagnostics.
+First-frame preparation returns bounded, credential-redacted validation details for HTTP 409. Asset design and quotation also return these details for HTTP 422, so unsupported reference boxes and model limits include their repair instructions. Only a string detail of at most 2048 characters is exposed; authentication and unrelated server diagnostics remain hidden, and rejected requests are never retried.
 
 Working-cut shots may carry editorialContext, the director-authored adjoining-segment edit notes. The value is passed through without turning it into an applied edit or altering retained cut revisions.
 

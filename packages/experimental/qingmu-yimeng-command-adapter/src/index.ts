@@ -3015,7 +3015,7 @@ interface FetchJsonRequest {
   readonly idempotencyKey?: string
   readonly maxResponseBytes?: number
   /** Read-only preparation can explain a rejected creative input without retrying it. */
-  readonly exposeValidationDetail?: boolean
+  readonly validationDetailStatuses?: readonly (409 | 422)[]
 }
 
 async function fetchJson(
@@ -3067,7 +3067,7 @@ async function fetchJson(
       return internalError('Yimeng authentication failed')
     }
     if (!response.ok) {
-      const detail = request.exposeValidationDetail && response.status === 409 && isJsonObject(value)
+      const detail = request.validationDetailStatuses?.some(status => status === response.status) && isJsonObject(value)
         && typeof value.detail === 'string' && value.detail.length <= 2048 ? value.detail : undefined
       const code = detail ?? safeUpstreamCode(value)
       return internalError(`Yimeng rejected command (HTTP ${String(response.status)}${code === undefined ? '' : `: ${code}`})`)
@@ -5862,12 +5862,13 @@ export function createYimengCommandHandler(
       } else if (['previewSceneLayout', 'readAssetDesign', 'saveAssetDesign', 'quoteAssetImage', 'generateAssetImage', 'readAssetImageRuns', 'quoteAssetVoice', 'generateAssetVoice', 'readAssetVoiceRuns'].includes(endpoint)) {
         const prepared = prepareAssetDesign(endpoint, payload, stageArtifactHelpers)
         path = prepared.path
-        requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
+        requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }),
+          validationDetailStatuses: [409, 422] }
         normalize = prepared.normalize
       } else if (endpoint === 'previewShootingFirstFrame') {
         const prepared = prepareShootingFirstFramePreview(payload, stageArtifactHelpers)
         path = prepared.path
-        requestInit = { method: prepared.method, body: serializeBody(prepared.body), exposeValidationDetail: true }
+        requestInit = { method: prepared.method, body: serializeBody(prepared.body), validationDetailStatuses: [409] }
         normalize = prepared.normalize
       } else if (['readScenePlanning', 'saveScenePlanning', 'recoverScenePlanning'].includes(endpoint)) {
         const prepared = prepareScenePlanning(endpoint, payload, stageArtifactHelpers)

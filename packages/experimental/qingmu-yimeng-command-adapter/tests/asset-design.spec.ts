@@ -6,6 +6,28 @@ const setup = (result: unknown) => {
   const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(result))
   return { fetch, handler: createYimengCommandHandler({ baseUrl: 'http://127.0.0.1:49123' }, { fetch, readToken: () => 'private-token' }) }
 }
+it.each([409, 422])('shows the bounded asset validation reason on HTTP %s without retrying', async (status) => {
+  const detail = '当前模型不支持框选参数，请移除框选或改选支持框选的模型；原图和指令仍保留。'
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json({ detail }, { status }))
+  const handler = createYimengCommandHandler({ baseUrl: 'http://127.0.0.1:49123' }, { fetch, readToken: () => 'private-token' })
+  expect(await handler('quoteAssetImage', { ...scope, entityId: 'scene_1' }, new AbortController().signal))
+    .toMatchObject({ ok: false, error: { message: `Yimeng rejected command (HTTP ${status}: ${detail})` } })
+  expect(fetch).toHaveBeenCalledTimes(1)
+  expect(fetch.mock.calls[0]?.[1]?.method).toBe('GET')
+})
+it.each([
+  { status: 422, detail: '检查 private-token', expected: '检查 [REDACTED]' },
+  { status: 422, detail: '长'.repeat(2049), expected: undefined },
+  { status: 422, detail: [{ msg: 'private diagnostic' }], expected: undefined },
+  { status: 500, detail: 'private diagnostic', expected: undefined },
+])('limits asset error details: $status / $expected', async ({ status, detail, expected }) => {
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json({ detail }, { status }))
+  const handler = createYimengCommandHandler({ baseUrl: 'http://127.0.0.1:49123' }, { fetch, readToken: () => 'private-token' })
+  const result = await handler('quoteAssetImage', { ...scope, entityId: 'scene_1' }, new AbortController().signal)
+  expect(result).toMatchObject({ ok: false, error: { message: `Yimeng rejected command (HTTP ${status}${expected ? `: ${expected}` : ''})` } })
+  expect(JSON.stringify(result)).not.toContain('private-token')
+  expect(fetch).toHaveBeenCalledTimes(1)
+})
 it('previews only the scoped layout and rejects an external replacement image', async () => {
   const request = { ...scope, layout: { basis: '导演布置', coordinateFrame: '米制', objects: [] },
     camera: { position: [0, -3, 1.6], target: [0, 0, 1], verticalFov: 50 }, ratio: '16:9' }

@@ -1,0 +1,16 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`returns the actionable asset quotation rejection through the loaded browser command 1`] = `
+{
+  "result": {
+    "error": {
+      "code": "internal",
+      "details": {},
+      "message": "Yimeng rejected command (HTTP 422: 当前模型不支持框选参数，请移除框选或改选支持框选的模型；原图和指令仍保留。)",
+    },
+    "ok": false,
+  },
+  "rpcId": "asset-quote-1",
+  "type": "server-response",
+}
+`;
