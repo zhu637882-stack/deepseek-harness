@@ -5,3 +5,5 @@ An episode creative session can reread complete saved shots after compaction thr
 Asset design references are generation inputs, so an original image retained for a repair is not automatically a stale output selection. The director compares stated correction intent with inspected owned candidates before proposing later-shot references. Generation provenance remains intact.
 
 The shipped-preset composition tests cover complete paginated reads, invalid pages, missing creative scope and a read-only upstream transcript. Native scene adoption remains the existing versioned operation.
+
+Batch reference assembly also receives the aggregate audio limit and can choose compact timbre samples supplied by the existing sound finalizer. Full previews and dialogue remain independent sources.
