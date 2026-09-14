@@ -3166,6 +3166,6 @@ export type YimengCommandEndpoint = keyof YimengCommandEndpointMap
 
 export type { LocalVideoSourceScope, LocalVideoSourceBinding, LocalVideoSourceRecord, LocalVideoSourcePacket, LocalVideoSourceRequest, LocalVideoSourceRecoveryRequest, LocalVideoSourceReceipt, LocalVideoSourceResult, LocalVideoSourceState } from './local-video-source-types.ts'
 
-export type { AssetImageReference, AssetWorldDesign, AssetDesignItem, AssetSceneSpace, AssetImageStage, SceneLayout, ImageCamera, SceneLayoutPreview, AssetDirectorDesign, AssetDesign, AssetDesignState, AssetImageQuote, AssetImageSubmission, AssetImageRuns, AssetImageCommand } from './asset-design.ts'
+export type { AssetImageReference, AssetWorldDesign, AssetDesignItem, AssetSceneSpace, AssetImageStage, SceneLayout, ImageCamera, ImageObjectState, SceneLayoutPreview, AssetDirectorDesign, AssetDesign, AssetDesignState, AssetImageQuote, AssetImageSubmission, AssetImageRuns, AssetImageCommand } from './asset-design.ts'
 
 export type { WorkingClip, WorkingAudioCue, WorkingCutCommand, WorkingCutState, WorkingCutSoundReview } from './working-cut.ts'

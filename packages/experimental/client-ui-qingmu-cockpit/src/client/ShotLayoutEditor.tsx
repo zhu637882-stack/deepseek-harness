@@ -1,7 +1,8 @@
 /** Per-shot framing over the saved scene, without making a second room layout. */
 import { useEffect, useState } from 'react'
-import type { AssetDesignState, ImageCamera } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import type { AssetDesignState, ImageCamera, ImageObjectState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
+import { imageObjectStates } from './image-object-states.ts'
 import { SceneLayoutEditor } from './SceneLayoutEditor.tsx'
 
 /** Scene identity comes from the current frame; only an unmaterialized plan may use its unique scene name. */
@@ -30,9 +31,11 @@ function cameraValue(value: unknown): ImageCamera | null {
  * @param props - Bound scene, authored camera and parent-owned save callback.
  * @returns Shared geography and a per-shot framing preview; opening never generates media.
  */
-export function ShotLayoutEditor({ context, value, onChange }: {
+export function ShotLayoutEditor({ context, value, onChange, objectStates, onObjectStates }: {
   readonly context: ShotLayoutContext
   readonly value: unknown
+  readonly objectStates?: unknown
+  readonly onObjectStates?: ((states: readonly ImageObjectState[]) => void) | undefined
   readonly onChange: (camera: ImageCamera | null) => void
 }) {
   const { projectId, episodeId, sceneId, sceneName, ratio, readAssetDesign, previewSceneLayout } = context
@@ -55,12 +58,15 @@ export function ShotLayoutEditor({ context, value, onChange }: {
   const matches = scoped?.design?.assets.filter(item => item.kind === 'scene'
     && (sceneId === undefined ? item.name === sceneName : !!sceneId && item.id === sceneId)) ?? []
   const scene = matches.length === 1 ? matches[0] : undefined
+  let states: readonly ImageObjectState[] | null = null
+  let stateError = ''
+  try { states = imageObjectStates(objectStates) } catch (cause) { stateError = cause instanceof Error ? cause.message : '本图物件布置格式不兼容' }
   const camera = cameraValue(value)
   const sceneCamera = cameraValue(scene?.imageCamera)
   return <details onToggle={(event) => { if (event.target === event.currentTarget) setOpen(event.currentTarget.open) }}>
     <summary>共用场景与本镜取景</summary>
     {open && <>
-      <p>每个镜头沿用同一场景布置，在这里调整摄影机。人物站位与当前道具状态仍由本镜导演设计决定。</p>
+      <p>每个镜头沿用同一场景布置，在这里调整摄影机。人物站位与当前道具状态按本镜导演设计在本图中调整。</p>
       {!scoped && !error && <p role="status">正在读取共用场景…</p>}
       {error && <p role="alert">{error}</p>}
       <button type="button" onClick={() => { setReload(n => n + 1) }}>重新读取场景布局</button>
@@ -69,9 +75,9 @@ export function ShotLayoutEditor({ context, value, onChange }: {
         <p><strong>{scene.name}</strong> · 共用布局在素材页维护，当前镜头调整不会移动其他镜头的门窗或家具。</p>
         {value == null && sceneCamera && <p>首次启用取景会沿用这个场景的素材机位，再按本镜设计调整。</p>}
         {scene.space && <p>{Object.values(scene.space).filter(value => typeof value === 'string').join('\n')}</p>}
-        {value != null && camera === null ? <p role="alert">本镜已有其他格式的机位设计，原文保留在完整设计中；请先交给导演整理。</p>
+        {stateError ? <p role="alert">{stateError}；完整设计保留原文，请先交给导演整理。</p> : value != null && camera === null ? <p role="alert">本镜已有其他格式的机位设计，原文保留在完整设计中；请先交给导演整理。</p>
           : ratio ? <SceneLayoutEditor projectId={projectId} episodeId={episodeId} layout={scene.sceneLayout}
-            camera={camera} defaultCamera={sceneCamera ?? undefined} ratio={ratio} onCamera={onChange} previewLayout={previewSceneLayout} usage="shot" />
+            camera={camera} imageObjectStates={states} onObjectStates={onObjectStates} defaultCamera={sceneCamera ?? undefined} ratio={ratio} onCamera={onChange} previewLayout={previewSceneLayout} usage="shot" />
             : <p>当前读取未提供影片画幅，请刷新到最新项目状态后调整机位。</p>}
       </>}
     </>}

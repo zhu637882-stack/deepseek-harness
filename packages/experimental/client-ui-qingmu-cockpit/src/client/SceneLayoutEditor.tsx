@@ -1,6 +1,6 @@
 /** Shared blockout and per-image camera inside the existing asset draft. */
 import { useEffect, useRef, useState } from 'react'
-import type { ImageCamera, SceneLayout, SceneLayoutPreview } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import type { ImageCamera, ImageObjectState, SceneLayout, SceneLayoutPreview } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
 import css from './SceneLayoutEditor.module.css'
 
@@ -25,7 +25,7 @@ function VectorInput({ label, value, onChange, positive = false }: {
  * @param props - Current project draft, optional shared-layout edit and scoped preview command.
  * @returns A plan, camera controls and the exact composition input.
  */
-export function SceneLayoutEditor({ projectId, episodeId, layout, camera, defaultCamera, ratio, onLayout, onCamera, previewLayout, usage = 'asset' }: {
+export function SceneLayoutEditor({ projectId, episodeId, layout, camera, defaultCamera, ratio, onLayout, onCamera, imageObjectStates, onObjectStates, previewLayout, usage = 'asset' }: {
   readonly projectId: string
   readonly episodeId: string
   readonly layout: SceneLayout | null | undefined
@@ -35,6 +35,8 @@ export function SceneLayoutEditor({ projectId, episodeId, layout, camera, defaul
   readonly ratio: string
   readonly onLayout?: ((value: SceneLayout | null) => void) | undefined
   readonly onCamera: (value: ImageCamera | null) => void
+  readonly imageObjectStates?: readonly ImageObjectState[] | null | undefined
+  readonly onObjectStates?: ((states: readonly ImageObjectState[]) => void) | undefined
   readonly previewLayout: QingmuYimengPort['previewSceneLayout']
   readonly usage?: 'asset' | 'shot'
 }) {
@@ -43,12 +45,18 @@ export function SceneLayoutEditor({ projectId, episodeId, layout, camera, defaul
   const [, redraw] = useState(0)
   const controller = useRef<AbortController>()
   const drag = useRef<{ id: string; x0: number; y0: number; scale: number }>()
-  const signature = JSON.stringify({ projectId, episodeId, layout, camera, ratio })
+  const signature = JSON.stringify({ projectId, episodeId, layout, camera, ratio, imageObjectStates })
   const latest = useRef(signature); latest.current = signature
   useEffect(() => { setPreview(undefined); setError(''); setBusy(false); controller.current?.abort() }, [signature])
   useEffect(() => () => { controller.current?.abort() }, [])
   const objects = layout?.objects ?? []
   const active = objects.find(item => item.id === selected)
+  const currentState = imageObjectStates?.find(item => item.id === selected)
+  function changeImageObject(patch: Partial<ImageObjectState>) {
+    if (!active || !onObjectStates) return
+    const next = { id: active.id, basis: '本图导演布置', ...currentState, ...patch }
+    onObjectStates([...(imageObjectStates ?? []).filter(item => item.id !== active.id), next])
+  }
   const positions: [number, number][] = objects.flatMap((item) => {
     const radius = Math.hypot(item.size[0], item.size[1])/2
     return [[item.center[0]-radius, item.center[1]-radius], [item.center[0]+radius, item.center[1]+radius]]
@@ -90,7 +98,8 @@ export function SceneLayoutEditor({ projectId, episodeId, layout, camera, defaul
     controller.current?.abort(); const abort = new AbortController(); controller.current = abort
     setBusy(true); setError('')
     try {
-      const result = await previewLayout({ projectId, episodeId, layout, camera, ratio }, abort.signal)
+      const result = await previewLayout({ projectId, episodeId, layout, camera, ratio,
+        ...(imageObjectStates === undefined ? {} : { imageObjectStates }) }, abort.signal)
       if (!abort.signal.aborted && latest.current === signature) setPreview(result)
     } catch (cause) { if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : '空间预览失败') }
     finally { if (!abort.signal.aborted) setBusy(false) }
@@ -131,6 +140,22 @@ export function SceneLayoutEditor({ projectId, episodeId, layout, camera, defaul
           <label>识别色<input type="color" value={active.color} onChange={(e) => { changeObject({ color: e.target.value }) }} /></label>
           <button type="button" disabled={objects.length < 2} onClick={() => { onLayout({ ...layout, objects: objects.filter(row => row.id !== active.id) }); setSelected('') }}>移除此物件</button></>}
       </>}
+      {onObjectStates && <fieldset><legend>本图物件布置</legend>
+        <p>上方平面图显示共用布局。选择物件后设置本图的位置或移出画面，变化在取景预览中查看，其他图片和镜头保持原有布置。中心 Z 是物件中心离地高度。</p>
+        <label>本图调整的物件<select value={selected} onChange={(e) => { setSelected(e.target.value) }}>
+          <option value="">选择物件</option>{objects.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
+        </select></label>
+        {active && <>
+          <label><input type="checkbox" checked={currentState?.visible !== false} onChange={(e) => { changeImageObject({ visible: e.target.checked }) }} />本图保留此物件</label>
+          <label>本图布置依据<textarea value={currentState?.basis ?? ''} onChange={(e) => { changeImageObject({ basis: e.target.value }) }} /></label>
+          {currentState?.visible !== false && <>
+            <VectorInput label="本图物件中心" value={currentState?.center ?? active.center} onChange={(center) => { changeImageObject({ center }) }} />
+            <VectorInput label="本图物件尺寸" value={currentState?.size ?? active.size} positive onChange={(size) => { changeImageObject({ size }) }} />
+            <label>本图物件旋转角度<input type="number" min="-360" max="360" value={currentState?.rotation ?? active.rotation} onChange={(e) => { if (Number.isFinite(e.target.valueAsNumber)) changeImageObject({ rotation: e.target.valueAsNumber }) }} /></label>
+          </>}
+          <button type="button" disabled={!currentState} onClick={() => { onObjectStates((imageObjectStates ?? []).filter(item => item.id !== active.id)) }}>本物件恢复共用布置</button>
+        </>}
+      </fieldset>}
       <label className={css.cameraToggle}><input type="checkbox" checked={!!camera} onChange={(e) => { onCamera(e.target.checked ? (defaultCamera ?? fallbackCamera) : null) }} />用空间取景图辅助本图生成</label>
       {camera && <><VectorInput label="摄影机位置" value={camera.position} onChange={(position) => { onCamera({ ...camera, position }) }} />
         <VectorInput label="取景目标" value={camera.target} onChange={(target) => { onCamera({ ...camera, target }) }} />
@@ -139,7 +164,7 @@ export function SceneLayoutEditor({ projectId, episodeId, layout, camera, defaul
         <button type="button" disabled={busy} onClick={() => { void showPreview() }}>{busy ? '计算取景…' : '预览当前取景'}</button></>}
       {preview && <><img className={css.preview} src={preview.imageUrl} alt="本图空间构图参考" /><p>{preview.guidance}</p>
         <p>当前体块取景可见：{preview.objects.filter(item => item.pixelCount).map(item => item.label).join('、') || '没有物件，请调整机位'}。</p></>}
-      <p>{usage === 'shot' ? '保存本镜导演设计后，首帧预览和生成使用这个机位，沿用场景的共用布局。请同时核对上方首帧文字和人物站位。' : '保存素材设计后，启用的取景图会随参考素材一起发送。'}墙体有门窗时请分开布置墙段，空隙表示开口；体块不代表完整建筑模型。</p>
+      <p>{usage === 'shot' ? '保存本镜导演设计后，首帧预览和生成使用这个机位与本图物件布置，沿用场景的共用布局。请同时核对上方首帧文字和人物站位。' : '保存素材设计后，启用的取景图会随参考素材一起发送。'}墙体有门窗时请分开布置墙段，空隙表示开口；体块不代表完整建筑模型。</p>
     </>}
     {error && <p role="status">{error}</p>}
   </details>

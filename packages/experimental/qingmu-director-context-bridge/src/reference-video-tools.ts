@@ -143,6 +143,7 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
       layout: { type: 'json', required: true, description: '{basis,coordinateFrame,objects:[{id,label,center:[x,y,z],size:[x,y,z],rotation:degrees_about_z,color:"#rrggbb"}]}. One to 60 boxes, positive sizes, stable object IDs. Distinguish authored estimates from observed geometry. Use current sceneLayout if saved; describe changes instead of silently rearranging.' },
       camera: { type: 'json', required: true, description: '{position:[x,y,z],target:[x,y,z],verticalFov:10..120,roll?:degrees}. Position and target must differ. Straight-down views use plan +Y as image up before roll.' },
       ratio: { type: 'string', required: true, description: '1:1, 3:4, 4:3, 9:16 or 16:9; match the current image aspect ratio.' },
+      imageObjectStates: { type: 'json', description: 'Optional array of {id,basis,visible?,center?,size?,rotation?}; IDs must exist in layout.objects, once each. Changes apply only to this image; visible:false removes this instance, omitted objects retain the shared layout. center is the full volume centre, not its top height. Save the same states beside imageCamera on the asset or directorPlan. Keep current placement separate from permanent identity and later action.' },
     },
     output: { schema: { type: 'json' }, render: (_args, value) => {
       const image = value as unknown as { attachment: ImageAttachmentRef; mode: string }
@@ -150,7 +151,7 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
     } },
     presentCall: () => ({ card: 'generic', kind: 'read', title: '预览共用场景取景' }),
     async execute(args, exec) {
-      exactKeys(args, ['layout', 'camera', 'ratio'])
+      exactKeys(args, ['layout', 'camera', 'ratio', ...('imageObjectStates' in args ? ['imageObjectStates'] : [])])
       const target = creativeRequest(exec)
       const current = target ? undefined : await ports.readBoundContext(exec)
       const scope = target ? { projectId: target.projectId, episodeId: target.episodeId } : current?.state.binding.scope

@@ -205,7 +205,7 @@ it.each([true, false])('saves and reloads a new native scene with explicit geome
     space: { layout: '北窗南门，桌靠北墙' }, imageStage: { camera: '门边朝北窗', state: '桌面空置' },
     sceneLayout: geometry ? { basis: '导演设计估计', coordinateFrame: '米，X东Y北Z上', objects: [
       { id: 'desk', label: '木桌', center: [0, 1, .4], size: [1.2, .8, .8], rotation: 0, color: '#886655' },
-    ] } : null, imageCamera: geometry ? { position: [0, -3, 1.6], target: [0, 1, .4], verticalFov: 50 } : null }
+    ] } : null, imageObjectStates: geometry ? [{ id: 'desk', basis: '本图开始前已搬到左侧', center: [-1,1,.4] }] : null, imageCamera: geometry ? { position: [0, -3, 1.6], target: [0, 1, .4], verticalFov: 50 } : null }
   const candidate = { ...state.design, assets: [scene] }
   port.saveAssetDesign.mockImplementation(async (input: unknown) => ({ ...state, design: (input as { design: NonNullable<AssetDesignState['design']> }).design }))
   localStorage.setItem('qingmu.asset-design-session.v1:p:e', JSON.stringify({ sessionId: 'session_design', baseline: 0, submitted: true }))

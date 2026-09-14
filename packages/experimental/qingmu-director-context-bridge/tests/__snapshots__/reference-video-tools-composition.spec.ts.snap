@@ -494,7 +494,7 @@ exports[`lets an image-capable director explicitly obtain and reuse a separate v
 ]
 `;
 
-exports[`previews camera pixels through the shipped director loop without saving or generating 1`] = `
+exports[`previews camera pixels through the shipped director loop with staged objects=false 1`] = `
 {
   "attachment": {
     "mediaType": "image/png",

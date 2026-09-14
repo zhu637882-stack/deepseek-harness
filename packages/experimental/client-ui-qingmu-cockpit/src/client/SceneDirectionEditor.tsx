@@ -1,5 +1,6 @@
 /** Edits authored shot direction while retaining unexposed department fields and dialogue sources. */
 import type { PlanningShot, YimengCommandJsonObject } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import { objectStatesJson } from './image-object-states.ts'
 import { ShotLayoutEditor } from './ShotLayoutEditor.tsx'
 import type { ShotLayoutContext } from './ShotLayoutEditor.tsx'
 
@@ -37,12 +38,13 @@ export function SceneDirectionEditor({ value, onChange, layoutContext }: {
     <p>本段内的切镜写在“本段景别、焦点与切点”；与前后段的接镜、声桥写在“前后段剪辑衔接”，供成片剪辑使用。旧设计不会自动改写。</p>
     <p>“本镜沿用的全片设定”整理本镜需要的年代、人物、空间、光线和道具状态。填写后生成采用这份整理稿，全片原设定保留；留空沿用原有方式。动作、对白和各部门的具体设计仍在下方分别编辑。</p>
     <p>首帧取景沿用已绑定场景的共用格局，填写动作开始时看见的范围、人物位置和物件状态；后续动作写入调度和结束状态。留空时使用本镜机位和开始状态。</p>
-    {layoutContext && <ShotLayoutEditor context={layoutContext} value={plan.imageCamera} onChange={(camera) => {
-      onChange({ ...plan, imageCamera: camera === null ? null : {
-        position: [...camera.position], target: [...camera.target], verticalFov: camera.verticalFov,
-        ...(camera.roll === undefined ? {} : { roll: camera.roll }),
-      } })
-    }} />}
+    {layoutContext && <ShotLayoutEditor context={layoutContext} value={plan.imageCamera} objectStates={plan.imageObjectStates}
+      onObjectStates={(states) => { onChange({ ...plan, imageObjectStates: objectStatesJson(states) }) }} onChange={(camera) => {
+        onChange({ ...plan, imageCamera: camera === null ? null : {
+          position: [...camera.position], target: [...camera.target], verticalFov: camera.verticalFov,
+          ...(camera.roll === undefined ? {} : { roll: camera.roll }),
+        } })
+      }} />}
     {Object.entries(departmentLabels).map(([field, label]) => textField(label, plan[field], (text) => {
       onChange({ ...plan, [field]: text })
     }))}

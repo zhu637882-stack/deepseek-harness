@@ -51,6 +51,15 @@ export interface ImageCamera {
   readonly verticalFov: number
   readonly roll?: number
 }
+/** Per-image placement or absence of an existing layout object; shared geometry is unchanged. */
+export interface ImageObjectState {
+  readonly id: string
+  readonly basis: string
+  readonly visible?: boolean
+  readonly center?: readonly [number, number, number] | null
+  readonly size?: readonly [number, number, number] | null
+  readonly rotation?: number | null
+}
 /** Exact deterministic input preview, without model calls or media adoption. */
 export interface SceneLayoutPreview extends CreationScope {
   readonly recipe: 'qingmu-blockout-v1'
@@ -86,6 +95,7 @@ export interface AssetDesignItem {
   readonly imageStage?: AssetImageStage | null
   readonly sceneLayout?: SceneLayout | null
   readonly imageCamera?: ImageCamera | null
+  readonly imageObjectStates?: readonly ImageObjectState[] | null
   readonly voiceIdentity?: string
   readonly designBasis?: string
   readonly view?: string
@@ -196,9 +206,11 @@ export function prepareAssetDesign(endpoint: string, value: unknown, helpers: He
   switch (endpoint) {
     case 'readAssetDesign': break
     case 'previewSceneLayout':
-      fields.push('layout', 'camera', 'ratio'); path += '/layout-preview'; method = 'POST'
+      fields.push('layout', 'camera', 'ratio', ...('imageObjectStates' in raw ? ['imageObjectStates'] : [])); path += '/layout-preview'; method = 'POST'
       if (typeof raw.ratio !== 'string' || !['1:1', '3:4', '4:3', '9:16', '16:9'].includes(raw.ratio)) throw f('layout preview ratio invalid')
-      body = { layout: object(raw.layout, f), camera: object(raw.camera, f), ratio: raw.ratio }; break
+      if (raw.imageObjectStates != null && !Array.isArray(raw.imageObjectStates)) throw f('image object states must be an array')
+      body = { layout: object(raw.layout, f), camera: object(raw.camera, f), ratio: raw.ratio,
+        ...('imageObjectStates' in raw ? { imageObjectStates: raw.imageObjectStates as YimengCommandJsonObject['imageObjectStates'] } : {}) }; break
     case 'readAssetImageRuns': path += '/runs'; break
     case 'readAssetVoiceRuns': path += '/voice/runs'; break
     case 'saveAssetDesign':

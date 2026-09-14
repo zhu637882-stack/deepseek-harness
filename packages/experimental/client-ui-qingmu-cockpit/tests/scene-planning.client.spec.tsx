@@ -96,19 +96,24 @@ it.each([{ automatic: false, authored: false }, { automatic: true, authored: fal
     expect(screen.getByLabelText<HTMLInputElement>('摄影机位置 Y').value).toBe(String(camera.position[1]))
     expect(port.saveScenePlanning).not.toHaveBeenCalled()
     fireEvent.change(screen.getByLabelText('摄影机位置 Y'), { target: { value: '-6' } })
+    fireEvent.change(screen.getByLabelText('本图调整的物件'), { target: { value: 'desk' } })
+    fireEvent.change(screen.getByLabelText('本图物件中心 X'), { target: { value: '-1' } })
     fireEvent.click(screen.getByText('预览当前取景'))
     await waitFor(() => { expect(port.previewSceneLayout).toHaveBeenCalledOnce() })
     expect(port.previewSceneLayout.mock.calls[0]?.[0]).toEqual({ projectId: 'project_1', episodeId: 'episode_1',
-      layout, camera: { ...camera, position: [camera.position[0], -6, camera.position[2]] }, ratio: '9:16' })
+      layout, camera: { ...camera, position: [camera.position[0], -6, camera.position[2]] }, ratio: '9:16',
+      imageObjectStates: [{ id: 'desk', basis: '本图导演布置', center: [-1,0,.4] }] })
     if (automatic) fireEvent.click(screen.getByRole('button', { name: '保存镜头设计' }))
     else { fireEvent.click(screen.getByText('预览保存影响')); fireEvent.click(screen.getByText('确认保存规划')) }
     await screen.findByRole('alert')
-    const expected = { ...frame.directorPlan, imageCamera: { ...camera, position: [camera.position[0], -6, camera.position[2]] } }
+    const expected = { ...frame.directorPlan, imageObjectStates: [{ id: 'desk', basis: '本图导演布置', center: [-1,0,.4] }], imageCamera: { ...camera, position: [camera.position[0], -6, camera.position[2]] } }
     expect(port.saveScenePlanning.mock.calls[0]?.[0].request).toMatchObject(automatic
       ? { action: 'edit_automatic', directorPlan: expected } : { action: 'edit', shot: { directorPlan: expected } })
     view.unmount(); render(<ScenePlanningWorkspace {...props} />)
     await openLayout()
     expect(screen.getByLabelText<HTMLInputElement>('摄影机位置 Y').value).toBe('-6')
+    fireEvent.change(screen.getByLabelText('本图调整的物件'), { target: { value: 'desk' } })
+    expect(screen.getByLabelText<HTMLInputElement>('本图物件中心 X').value).toBe('-1')
     expect(screen.getByLabelText('摄影机位置 Y').matches(':disabled')).toBe(true)
     expect(port.saveScenePlanning).toHaveBeenCalledOnce()
   })

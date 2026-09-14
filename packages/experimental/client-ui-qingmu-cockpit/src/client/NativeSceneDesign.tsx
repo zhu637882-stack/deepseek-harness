@@ -1,3 +1,4 @@
+import { imageObjectStates } from './image-object-states.ts'
 import { imageCameraGuidance, validImageCamera } from './director-image-camera.ts'
 import { completeFirstFrameGuidance, generationContextGuidance } from './director-generation-guidance.ts'
 /** Scene design uses the existing DSH writing session and editable planning command. */
@@ -57,6 +58,7 @@ export function NativeSceneDesign({ projectId, episodeId, scene, scriptSha256, r
     const layouts = basis.design?.assets.filter(asset => asset.kind === 'scene' && asset.name === scene.title && asset.sceneLayout) ?? []
     for (const shot of parsed.shots) {
       const plan: unknown = shot?.directorPlan
+      if (plan && typeof plan === 'object' && 'imageObjectStates' in plan) imageObjectStates(plan.imageObjectStates)
       const hasCamera = !!plan && typeof plan === 'object' && 'imageCamera' in plan
       if (layouts.length && !hasCamera) throw new Error('本场已有共用布局，每镜需明确提供 imageCamera 或用 null 表达不使用空间构图，不能只写文字机位。')
       if (hasCamera && !validImageCamera(plan.imageCamera)) throw new Error('首帧相机参数无效，请核对位置、目标和垂直视角；原导演稿保留。')
