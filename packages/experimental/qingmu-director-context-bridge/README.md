@@ -188,3 +188,5 @@ The saved asset-design read also delivers the current page’s explicitly refere
 完整首帧描述：导演在写齐当下可见人物、材质、尺度、状态和光影后，可保存 `directorPlan.selfContainedImagePrompt:true`。首帧不再混入整段视频继承设定，使用当前起始状态与参考；带构图图时不重复全房间清单。新分镜、整场协调、首帧助手和拍摄页编辑使用同一选项；旧稿未启用则沿用原方式。视频设计与共用来源追踪保留。
 
 The shared-layout preview tool accepts optional per-image object states and sends them unchanged through the scoped command adapter. Director-plan saves retain these starting-image states. They move or remove existing object instances without silently editing the shared scene; the native director must preview and save the same states and reconcile the corresponding image prose. This extends the existing tool, without another model call or approval workflow.
+
+The real Python integration test `python/test_dialogue_planning.py` covers imported planning through two atomic dialogue edits, exact retry, refreshed reads, later duration edits, and rejection of a modified receipt. This complements generic frame tests with the Writer planning reader and its immutable source lineage.
