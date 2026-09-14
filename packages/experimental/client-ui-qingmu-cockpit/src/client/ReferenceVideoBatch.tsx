@@ -27,6 +27,7 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
   const [busy, setBusy] = useState(false), [error, setError] = useState('')
   const [syncing, setSyncing] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const [notes, setNotes] = useState('')
   const [retakes, setRetakes] = useState<ReadonlySet<string>>(new Set())
   const [pendingSubmission, setPendingSubmission] = useState<readonly BatchSubmissionItem[]>([])
@@ -73,6 +74,7 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
           const result = await readBatchBasis(port, projectId, shots)
           if (isDisposed()) return
           setBasis(result)
+          setExpanded(result.shots.some(shot => !hasBatchRun(shot)))
           loaded = true
         }
         for (const shot of shots) {
@@ -219,7 +221,8 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
   const prompt = `为本集所有待准备镜头统一配置视频引用。操作者补充用于本次全部待准备镜头；已有成片只有明确勾选重做的镜头才进入范围。意见与已存剧情或调度冲突时先指出具体上游来源，不用重复原请求假装修复。实际读取 cinematic-director、prop-asset 以及当前镜头需要的摄影、声音方法，核对真实参考图片。来源包含整集镜头：needsPreparation=false 的镜头只用于理解接续，不修改、不重新准备；仅为 needsPreparation=true 的镜头输出方案。先检查已保存设计是否与剧本、前后镜及实际素材相容，再沿用有效设计。发现影响生成的来源冲突时，指出镜头及具体字段，返回场次导演整理来源后再准备，不能用引用用途暗改剧情或把旧稿视为已审通过。${referenceSelectionGuidance}只选择本镜需要的真实素材，说明具体用途；每项引用同时逐字写入目录的 assetId 和 label（输出字段 assetLabel），交稿前按目录核对名称、编号及用途属于同一对象，不能把产品、册子或不同角色的编号串用；同一人物、场景和道具跨镜沿用同一有效版本。素材目录中的 selected、审核状态及现有引用仅作依据，实际图片优先；不得以“最新一张”代替审图，已指出错误的图不能引用。产品图只提供产品外观，广告人物或购物界面不进入剧情。人物肖像与空场不能冒充完整首帧。常规多模态引用不写 frameRole；仅完整镜头首尾帧路线才写 first_frame/last_frame，该路线不能混用其他引用。每镜按需要选取引用，不为调用功能而塞满素材。音色参考最多5段、每段1–15秒、总长不超过15秒；多人对白优先使用目录中对应人物的同源3秒音色样本，完整试听音频仍保留，不把样本台词当本镜对白，也不为满足长度而丢掉需要的说话人音色。参考视频仅在需要动作或衔接且实际审看合适时使用。没有足够可靠素材时指出具体镜头及原因，不虚构图片、不声称已解决。\n本集画幅：${aspectRatio}。当前来源：${source}\n操作者补充：${notes}\n只在一个 txt 代码块输出 {"shots":[{"frameId":"真实镜头编号","references":[{"assetId":"真实素材编号","assetLabel":"目录中的原始label","purpose":"本镜如何使用它"}],"parameters":{"duration":已保存时长,"resolution":"720P","ratio":"${aspectRatio}","audio":true,"prompt_extend":false}}]}。仅覆盖 needsPreparation=true 的全部待准备镜头，保持各镜时长和本集画幅；声音按当前导演设计，不能默认静音。资产 SHA、引用编号及完整导演文本由系统从当前来源装配。不要自行执行镜头写入或生成任务。`
   const ready = [...quotes.values()].filter(quote => quote.generationSubmissionEnabled)
   const unavailable = busy || syncing
-  return <details aria-label="整集批量生成" className={styles.batch} open>
+  return <details aria-label="整集批量生成" className={styles.batch}
+    open={expanded || pendingSubmission.length > 0} onToggle={(event) => { setExpanded(event.currentTarget.open) }}>
     <summary>整集批量生成视频</summary>
     <p>统一准备本集引用并批量生成；需要重做时勾选问题镜头，原视频保留。返回的视频自动进入候选审看。</p>
     <ol className={styles.steps} aria-label="批量制作步骤"><li>准备引用</li><li>批量生成</li><li>查看结果</li></ol>
@@ -233,8 +236,9 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
         <progress aria-label={progress.label} value={progress.done} max={Math.max(1, progress.total)} />
       </div>}
       {pendingSubmission.length > 0 && <p role="status">上次还有 {pendingSubmission.length} 镜提交待完成。<button type="button" disabled={unavailable} onClick={() => { void submit(true) }}>继续上次批量提交</button></p>}
-      <label>本次补充<textarea value={notes} onChange={(event) => { setNotes(event.target.value); setQuotes(new Map()) }}
-        disabled={unavailable || pendingSubmission.length > 0} /></label>
+      <details><summary>补充要求（可选）</summary>
+        <label>本次补充<textarea value={notes} onChange={(event) => { setNotes(event.target.value); setQuotes(new Map()) }}
+          disabled={unavailable || pendingSubmission.length > 0} /></label></details>
       {missing.length > 0 && storyPort && <NativeStoryComposer port={storyPort} projectId={projectId} episodeId={episodeId}
         source={source} settings="" disabled={unavailable || pendingSubmission.length > 0} onAdopt={prepare} purpose={{ key: 'reference-video-batch', jsonOutput: true,
           title: '整集视频准备', description: '导演结合整集接续选择引用，保留已完成镜头。', prompt,
