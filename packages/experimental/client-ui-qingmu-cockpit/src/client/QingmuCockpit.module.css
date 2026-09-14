@@ -101,13 +101,13 @@
 .directorShell .body { grid-template-columns: minmax(0, 1fr); }
 .shootingShell .truthStrip, .shootingShell .toolbar, .shootingShell .tabs, .shootingShell .evidence { display: none; }
 .shootingShell .body { display: block; }
-.shootingShell .body > main { height: 100%; padding: 0; overflow: hidden; }
+.shootingShell .body > main { height: 100%; padding: 0; overflow: auto; }
 .shootingShell { background:#0b1117; color:#edf4f8; color-scheme:dark; }
 .shootingShell > .header { min-height:48px; padding:4px 16px; background:#101923; border-color:#2b3d4a; }
 .shootingShell > .header h2 { font-size:14px; }
 .shootingShell > .header p { display:none; }
 .shootingShell > .header button { min-height:32px; color:#c7d4dc; border-color:#334754; background:transparent; border-radius:5px; }
-.shootingShell .body > main > .stack { height:100%; min-height:0; display:flex; flex-direction:column; gap:0; }
+.shootingShell .body > main > .stack { min-height:100%; display:flex; flex-direction:column; gap:0; }
 .shootingShell .body { position:relative; min-height:0; }
 .shootingShell .developerLog { flex:0 0 auto; padding:6px 16px; border:0; border-top:1px solid #2b3d4a; border-radius:0; background:#101923; color:#c7d4dc; font-size:12px; }
 .shootingShell .developerLog > summary { color:#97aab6; }
