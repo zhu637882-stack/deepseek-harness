@@ -178,6 +178,55 @@ it('authors asset designs from current world and spatial sources through the nat
   expect(port.saveAssetDesign).not.toHaveBeenCalled()
   expect(port.generateAssetImage).not.toHaveBeenCalled()
 })
+
+it.each(['missing space', 'missing choices', 'camera without layout'])('keeps existing cards when a new native scene has %s', async (defect) => {
+  const port = setup()
+  const camera = { position: [0, -3, 1.6], target: [0, 1, .4], verticalFov: 50 }
+  const scene = { kind: 'scene', name: '新房间', imagePrompt: '门口看向窗下木桌',
+    ...(defect === 'missing space' ? {} : { space: { layout: '北窗南门，桌靠北墙' } }),
+    ...(defect === 'missing choices' ? {} : { sceneLayout: null, imageCamera: defect === 'camera without layout' ? camera : null }) }
+  const candidate = { ...state.design, assets: [scene] }
+  localStorage.setItem('qingmu.asset-design-session.v1:p:e', JSON.stringify({ sessionId: 'session_design', baseline: 0, submitted: true }))
+  const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
+    read: vi.fn(async () => ({ text: '设计完成。', script: JSON.stringify(candidate), lastSeq: 10, running: false, finished: true, error: '' })) }
+  render(<NativeAssetDesign {...scope} port={port} storyPort={storyPort} onGenerated={vi.fn()} />)
+  await screen.findByRole('region', { name: '人物 父亲' })
+  fireEvent.click(await screen.findByRole('button', { name: '采用到素材卡片' }))
+  expect(await screen.findByText(/当前素材保持不变/)).toBeTruthy()
+  expect(screen.queryByRole('region', { name: '场景 新房间' })).toBeNull()
+  expect(screen.getByLabelText<HTMLTextAreaElement>('画面描述').value).toBe('真人定妆照')
+  expect(localStorage.getItem('qingmu.asset-design-draft.v1:p:e')).toBeNull()
+  expect(port.saveAssetDesign).not.toHaveBeenCalled()
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
+it.each([true, false])('saves and reloads a new native scene with explicit geometry choice %s', async (geometry) => {
+  const port = setup()
+  const scene: AssetDesignItem = { kind: 'scene', name: '新房间', imagePrompt: '门口看向窗下木桌',
+    space: { layout: '北窗南门，桌靠北墙' }, imageStage: { camera: '门边朝北窗', state: '桌面空置' },
+    sceneLayout: geometry ? { basis: '导演设计估计', coordinateFrame: '米，X东Y北Z上', objects: [
+      { id: 'desk', label: '木桌', center: [0, 1, .4], size: [1.2, .8, .8], rotation: 0, color: '#886655' },
+    ] } : null, imageCamera: geometry ? { position: [0, -3, 1.6], target: [0, 1, .4], verticalFov: 50 } : null }
+  const candidate = { ...state.design, assets: [scene] }
+  port.saveAssetDesign.mockImplementation(async (input: unknown) => ({ ...state, design: (input as { design: NonNullable<AssetDesignState['design']> }).design }))
+  localStorage.setItem('qingmu.asset-design-session.v1:p:e', JSON.stringify({ sessionId: 'session_design', baseline: 0, submitted: true }))
+  const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
+    read: vi.fn(async () => ({ text: '交付场景布局与取景选择。', script: JSON.stringify(candidate), lastSeq: 10, running: false, finished: true, error: '' })) }
+  const view = render(<NativeAssetDesign {...scope} port={port} storyPort={storyPort} onGenerated={vi.fn()} />)
+  await screen.findByRole('region', { name: '人物 父亲' })
+  fireEvent.click(await screen.findByRole('button', { name: '采用到素材卡片' }))
+  expect(screen.getByRole('region', { name: '场景 新房间' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
+  await waitFor(() => { expect(port.saveAssetDesign).toHaveBeenCalledTimes(1) })
+  const saved = await (port.saveAssetDesign.mock.results[0]!.value as Promise<AssetDesignState>)
+  expect(saved.design?.assets[1]).toEqual({ ...scene, visualIdentity: scene.imagePrompt })
+  view.unmount(); port.readAssetDesign.mockResolvedValue(saved)
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  const room = await screen.findByRole('region', { name: '场景 新房间' })
+  expect(within(room).getByLabelText<HTMLTextAreaElement>('本图物件状态').value).toBe('桌面空置')
+  expect(storyPort.send).not.toHaveBeenCalled()
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
+
 it('keeps world exceptions and room details through an AI supplement, save and reload', async () => {
   const port = setup()
   const world = { setting: '1996年', scriptFacts: '父亲在室内', directorInferences: '桌边留出通道',
