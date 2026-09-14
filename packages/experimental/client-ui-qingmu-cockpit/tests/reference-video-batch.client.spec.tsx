@@ -1,10 +1,35 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ReferenceVideoBatch } from '../src/client/ReferenceVideoBatch.tsx'
 import type { BatchPort } from '../src/client/reference-video-batch.ts'
 import { request, quoteResponse } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
-afterEach(() => { cleanup(); sessionStorage.clear(); localStorage.clear() })
+afterEach(() => { cleanup(); vi.useRealTimers(); sessionStorage.clear(); localStorage.clear() })
+
+it('retries a failed review refresh without registering the same candidate again', async () => {
+  vi.useFakeTimers()
+  const register = vi.fn(async () => ({ takeId: 'take-f' }))
+  const onCollected = vi.fn(async () => {}).mockRejectedValueOnce(new Error('projection unavailable'))
+  const port = {
+    referenceVideoAssets: async () => ({ pages: 1, items: [] }),
+    referenceVideoDraft: async () => ({ draft: null }),
+    referenceVideoRuns: async () => ({ items: [{ runId: 'run-f', publicStatus: 'succeeded',
+      candidates: [{ assetId: 'asset-f', assetSha256: 'a'.repeat(64) }] }] }),
+    readReferenceVideoCandidateRegistration: async () => ({ takeId: null }),
+    registerReferenceVideoCandidateForReview: register,
+  } as unknown as BatchPort
+  await act(async () => {
+    render(<ReferenceVideoBatch projectId="p" episodeId="e" aspectRatio="16:9" port={port}
+      onOpenShot={vi.fn()} onCollected={onCollected}
+      relations={{ projectId: 'p', shots: [{ shotId: 'f', frameNo: 1, durationSec: 8 }] } as never} />)
+  })
+  expect(onCollected).toHaveBeenCalledTimes(1)
+  expect(screen.getByText(/projection unavailable/)).toBeTruthy()
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
+  expect(onCollected).toHaveBeenCalledTimes(2)
+  expect(register).toHaveBeenCalledTimes(1)
+  expect(screen.queryByText(/projection unavailable/)).toBeNull()
+})
 
 it('sends completed shots as continuity context without preparing or generating them', async () => {
   const save = vi.fn()

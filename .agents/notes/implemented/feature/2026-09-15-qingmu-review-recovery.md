@@ -19,3 +19,5 @@ A second batch store would duplicate durable provider jobs. Automatically approv
 ## Consequences
 
 Existing accepted media and candidate choices remain intact. Reopening the page recovers submitted work; unsubmitted requests still require preparation and explicit submission. Focused tests cover collection failures, page reentry without resubmission, collapsed editable asset fields and review details. The native preset example pins the assembled director instructions. Actual generated continuity and whole-film sound still require a new media trial after common repairs.
+
+The reference editor checks the saved draft while visible and when focus returns. A changed server draft replaces clean local input and clears obsolete previews; unsaved edits retain their original revision for conflict detection. Source hashes are copied from the saved request, never automatically approved. Failed review projection refreshes are retried without repeating successful candidate registration.

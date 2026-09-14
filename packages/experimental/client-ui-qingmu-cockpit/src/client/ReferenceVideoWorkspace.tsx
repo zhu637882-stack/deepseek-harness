@@ -103,6 +103,8 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
   const materialsAbort = useRef<AbortController | undefined>(undefined)
   const prepareAbort = useRef<AbortController | undefined>(undefined)
   const preparing = useRef(false)
+  const syncState = useRef({ draftState, savedEpoch, busy, saving, inheriting })
+  syncState.current = { draftState, savedEpoch, busy, saving, inheriting }
   const readMaterials = useCallback(async (state: ReferenceVideoDraftResponse) => {
     const draft = state.draft
     const read = port.readReferenceVideoMaterials
@@ -149,6 +151,55 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
       draftAbort.current?.abort(); saveAbort.current?.abort(); materialsAbort.current?.abort(); prepareAbort.current?.abort()
       inheritAbort.current?.abort()
     }
+  }, [port, projectId, frameId, readMaterials])
+
+  // The director saves through the server, outside this editor. Refresh clean
+  // drafts without changing the revision base of an unsaved browser edit.
+  useEffect(() => {
+    let pending: AbortController | undefined
+    const sync = async () => {
+      const before = syncState.current
+      if (document.visibilityState === 'hidden' || pending || !before.draftState
+        || before.busy || before.saving || before.inheriting || preparing.current) return
+      const controller = new AbortController(); pending = controller
+      const start = epoch.current
+      try {
+        const state = await port.referenceVideoDraft({ projectId, frameId }, controller.signal)
+        if (controller.signal.aborted) return
+        if (state.projectId !== projectId || state.frameId !== frameId) throw new Error('草稿所属镜头不匹配')
+        const current = syncState.current
+        if (epoch.current !== start || current.busy || current.saving || current.inheriting || preparing.current) return
+        const prior = current.draftState
+        if (prior?.draft?.revision === state.draft?.revision
+          && prior?.draft?.requestSha256 === state.draft?.requestSha256
+          && prior?.frameSha256 === state.frameSha256
+          && prior?.directorSource?.sha256 === state.directorSource?.sha256) return
+        if (epoch.current > 0 && current.savedEpoch !== epoch.current) {
+          setDraftMessage('导演已更新服务器草稿或设计；你的未保存修改已保留，请核对后再恢复已存草稿。')
+          return
+        }
+        previewAbort.current?.abort(); materialsAbort.current?.abort()
+        setResult(undefined); setQuoteResult(undefined); setMaterials(undefined)
+        setDraftState(state)
+        if (state.draft) {
+          epoch.current += 1
+          setSavedEpoch(epoch.current)
+          setChosen(state.draft.request.bindings.map(binding => ({ ...binding, browserUrl: '', mediaType: state.mediaTypes[binding.bindingToken] ?? 'unavailable' })))
+          setParts(state.draft.request.promptParts); setParameters(state.draft.request.parameters)
+          setDirectorSourceSha256(state.draft.request.directorSourceSha256)
+          activeText.current = { index: 0, start: 0, end: 0 }
+          setDraftLoaded(true); setSourceAccepted(state.draft.frameSha256 === state.frameSha256)
+          setDraftMessage(`已自动同步草稿版本 ${state.draft.revision}。`)
+          void readMaterials(state)
+        }
+      } catch {
+        if (!controller.signal.aborted) setDraftMessage('最新草稿暂未同步，当前内容已保留；稍后自动重试。')
+      } finally { pending = undefined }
+    }
+    const refresh = () => { void sync() }
+    const timer = setInterval(refresh, 10000)
+    window.addEventListener('focus', refresh)
+    return () => { clearInterval(timer); window.removeEventListener('focus', refresh); pending?.abort() }
   }, [port, projectId, frameId, readMaterials])
 
   const { preview: localPreview } = usePrivateReferencePreview(projectId, inspected, port, previewRetry)
@@ -445,7 +496,7 @@ export function ReferenceVideoWorkspace({ projectId, frameId, initialPrompt, por
         导演设计尚未同步到这份生成稿。请结合设计修改运镜、表演、声音和引用，也可交给青木导演整理。
       </p>}
       {onRequestDirector && <button type="button" disabled={busy || saving || dirty} onClick={onRequestDirector}>展开导演助手</button>}
-      <p>{dirty ? '先保存引用草稿，再交给导演整理。' : '导演读取已保存的草稿与最新设计，整理为一份生成稿；完成后点击“恢复已存草稿”查看。'}</p>
+      <p>{dirty ? '先保存引用草稿，再交给导演整理。' : '导演保存后，这里会自动同步生成稿，再检查画面与声音引用。'}</p>
       <label><input type="checkbox" checked={directorSourceSha256 === draftState.directorSource.sha256}
         onChange={(event) => {
           setDirectorSourceSha256(event.target.checked ? draftState.directorSource?.sha256 : undefined); invalidate()

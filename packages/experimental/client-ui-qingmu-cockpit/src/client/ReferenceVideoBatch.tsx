@@ -41,13 +41,13 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
     let loaded = false
     let timer: ReturnType<typeof setTimeout> | undefined
     const collectedRuns = new Set<string>()
+    let reviewPending = false
     const shots = JSON.parse(shotScope) as Pick<BatchBasis['shots'][number], 'frameId' | 'label' | 'duration'>[]
     async function refresh(): Promise<void> {
       if (isDisposed() || !shots.length) return
       if (lock.current) { timer = setTimeout(() => { void refresh() }, 5000); return }
       lock.current = true
       setSyncing(true)
-      let refreshReview = false
       let pending = false
       try {
         if (!loaded) {
@@ -73,7 +73,7 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
               returned.forEach(run => collectedRuns.add(`${shot.frameId}:${run.runId}`))
               if (isDisposed()) return
               if (count) {
-                refreshReview = true
+                reviewPending = true
                 setMessages(previous => new Map(previous).set(shot.frameId, `${count} 条视频已进入本镜候选审看`))
               }
             }
@@ -82,7 +82,11 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
             if (!isDisposed()) setMessages(previous => new Map(previous).set(shot.frameId, `结果同步未完成：${String(cause)}`))
           }
         }
-        if (refreshReview && !isDisposed()) await collectedCallback.current?.()
+        if (reviewPending && !isDisposed()) {
+          await collectedCallback.current?.()
+          reviewPending = false
+          setError('')
+        }
       } catch (cause) { pending = true; if (!isDisposed()) setError(`进度暂未同步：${String(cause)}`) }
       finally {
         lock.current = false

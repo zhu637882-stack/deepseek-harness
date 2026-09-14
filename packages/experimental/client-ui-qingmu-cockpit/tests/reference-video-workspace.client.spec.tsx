@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { ReferenceVideoQuoteRequest, ReferenceVideoQuoteResponse, ReferenceVideoAsset, ReferenceVideoPreviewRequest, ReferenceVideoPreviewResponse, ReferenceVideoDraftResponse, ReferenceVideoMaterialsState, SaveReferenceVideoDraftRequest } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import { quoteResponse } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
@@ -65,9 +65,58 @@ function mount(options?: { assets?: ReferenceVideoAsset[]; initialDurationSec?: 
   }
   const view = render(<ReferenceVideoWorkspace projectId="p" frameId="f" initialPrompt="陈远说：‘图1不应被替换。’" initialDurationSec={options?.initialDurationSec} port={port} onRequestDirector={options?.onRequestDirector} />)
   fireEvent.click(screen.getByText('精确引用 · 导演稿与候选'))
-  return { port, view, setMaterialStatus: (status: typeof latestMaterialStatus) => { latestMaterialStatus = status } }
+  return { port, view, setMaterialStatus: (status: typeof latestMaterialStatus) => { latestMaterialStatus = status },
+    updateServer: (update: (value: ReferenceVideoDraftResponse) => ReferenceVideoDraftResponse) => { server = update(server) } }
 }
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.useRealTimers() })
+
+it('automatically reads a director-saved draft while preserving the actual source digest', async () => {
+  const { port, updateServer } = mount()
+  await screen.findByText('尚无已存草稿。')
+  await chooseAll()
+  fireEvent.click(screen.getByText('保存引用草稿'))
+  await screen.findByText('已保存草稿版本 1。')
+  updateServer(state => ({ ...state, directorSource: { sha256: 'b'.repeat(64), prompt: '新导演设计' },
+    draft: { ...state.draft!, revision: 2, requestSha256: 'e'.repeat(64), request: {
+      ...state.draft!.request, promptParts: [{ text: '女侠从街道进入院门。' }],
+    } } }))
+  await act(async () => { fireEvent(window, new Event('focus')) })
+  expect(screen.getByDisplayValue('女侠从街道进入院门。')).toBeTruthy()
+  expect(screen.getByText('已自动同步草稿版本 2。')).toBeTruthy()
+  expect(screen.getByRole('checkbox', { name: /我已对照当前设计/ })).toHaveProperty('checked', false)
+  expect(port.saveReferenceVideoDraft).toHaveBeenCalledTimes(1)
+  expect(port.queueReferenceVideo).not.toHaveBeenCalled()
+})
+
+it('preserves unsaved text and its original revision when the director updates the server', async () => {
+  const { port, updateServer } = mount()
+  await screen.findByText('尚无已存草稿。')
+  await chooseAll()
+  fireEvent.click(screen.getByText('保存引用草稿'))
+  await screen.findByText('已保存草稿版本 1。')
+  fireEvent.change(screen.getByLabelText('视频描述片段1'), { target: { value: '本地尚未保存的动作' } })
+  updateServer(state => ({ ...state, draft: { ...state.draft!, revision: 2, requestSha256: 'e'.repeat(64) } }))
+  fireEvent(window, new Event('focus'))
+  await screen.findByText(/导演已更新服务器草稿或设计/)
+  expect(screen.getByDisplayValue('本地尚未保存的动作')).toBeTruthy()
+  fireEvent.click(screen.getByText('保存引用草稿'))
+  await waitFor(() => { expect(port.saveReferenceVideoDraft).toHaveBeenCalledTimes(2) })
+  // The server can reject this stale base; background refresh must not grant a blind overwrite.
+  expect(port.saveReferenceVideoDraft.mock.calls[1]![0].expectedRevision).toBe(1)
+})
+
+it('ignores a delayed background response after another local edit', async () => {
+  const { port } = mount()
+  await screen.findByText('尚无已存草稿。')
+  let resolve!: (state: ReferenceVideoDraftResponse) => void
+  const old = await port.referenceVideoDraft({ projectId: 'p', frameId: 'f' })
+  port.referenceVideoDraft.mockImplementationOnce(() => new Promise((done) => { resolve = done }))
+  fireEvent(window, new Event('focus'))
+  fireEvent.change(screen.getByLabelText('视频描述片段1'), { target: { value: '刚输入的动作' } })
+  await act(async () => { resolve({ ...old, directorSource: { sha256: 'c'.repeat(64), prompt: '远端变更' } }) })
+  expect(screen.getByDisplayValue('刚输入的动作')).toBeTruthy()
+  expect(screen.queryByText('远端变更')).toBeNull()
+})
 it('explicitly loads the complete production design while preserving references and parameters for review', async () => {
   const directorSource = { sha256: 'b'.repeat(64), prompt: 'Full source plus neighboring actions',
     generationPrompt: '先站起绕桌，再蹲下接书。结尾才停步。镜头随演员下降；环境声持续。' }
