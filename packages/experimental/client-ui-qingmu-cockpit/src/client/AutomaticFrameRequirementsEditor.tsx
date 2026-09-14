@@ -6,6 +6,7 @@ import { continuityFields, continuityText, ShotContinuityView } from './ShotCont
 interface Draft {
   readonly shotId: string
   readonly imagePromptCn: string
+  readonly selfContainedImagePrompt?: boolean
   readonly blocking?: string
   readonly cameraAngle?: string
   readonly cameraMovement?: string
@@ -39,6 +40,8 @@ function pendingContinuityMatches(draft: Draft): boolean {
   const operation = draft.pending?.request
   if (operation?.action !== 'edit_automatic' && operation?.action !== 'edit_requirements') return false
   if (draft.editorialContext !== undefined && operation.directorPlan?.editorialContext !== draft.editorialContext) return false
+  if (draft.selfContainedImagePrompt !== undefined
+    && operation.directorPlan?.selfContainedImagePrompt !== draft.selfContainedImagePrompt) return false
   const value = operation.directorPlan?.continuity
   return continuityKeys.every(field => draft[field] === undefined || (value !== null && typeof value === 'object'
     && !Array.isArray(value) && (value as Record<string, unknown>)[boundary[field]] === draft[field]))
@@ -77,6 +80,7 @@ export function AutomaticFrameRequirementsEditor({
         setState(value); const saved = requirements(value)?.find(shot => shot.id === shotId)
         const local = stored(storageKey)
         setDraft(local?.shotId === shotId && local.imagePromptCn.length <= 20000
+          && (local.selfContainedImagePrompt === undefined || typeof local.selfContainedImagePrompt === 'boolean')
           && shootingFields.every(field => local[field] === undefined || (typeof local[field] === 'string' && local[field].length <= 2000))
           && (local.editorialContext === undefined || (typeof local.editorialContext === 'string' && local.editorialContext.length <= 12000))
           && continuityKeys.every(field => local[field] === undefined || (typeof local[field] === 'string' && local[field].length <= 12000))
@@ -116,6 +120,7 @@ export function AutomaticFrameRequirementsEditor({
       if (recover && !pendingValid(draft.pending, projectId, episodeId, shotId)) throw new Error('pending scope mismatch')
       if (!recover && draft.pending !== undefined) throw new Error('recover existing receipt first')
       const directorPlan = {
+        ...(draft.selfContainedImagePrompt === undefined ? {} : { selfContainedImagePrompt: draft.selfContainedImagePrompt }),
         ...(continuityKeys.some(field => draft[field] !== undefined) ? { continuity: {
           ...continuityFields(requirements(state)?.find(shot => shot.id === shotId)),
           ...(draft.continuityStart === undefined ? {} : { start: draft.continuityStart }),
@@ -190,6 +195,8 @@ export function AutomaticFrameRequirementsEditor({
   function savedField(field: ShootingField): string { return requirements(state)?.find(shot => shot.id === shotId)?.[field] ?? '' }
   const continuity = continuityFields(saved)
   const dirty = saved !== undefined && (draft.imagePromptCn !== saved.imagePromptCn || shootingFields.some(field => (draft[field] ?? '') !== savedField(field))
+    || (draft.selfContainedImagePrompt !== undefined
+      && draft.selfContainedImagePrompt !== (saved.directorPlan?.selfContainedImagePrompt === true))
     || continuityKeys.some(field => draft[field] !== undefined && draft[field] !== continuityText(continuity[boundary[field]]))
     || (draft.editorialContext !== undefined && draft.editorialContext !== continuityText(saved.directorPlan?.editorialContext)))
   return <section aria-label="编辑当前要求">
@@ -217,6 +224,10 @@ export function AutomaticFrameRequirementsEditor({
     <p>接到前后段的画面、声桥和重叠覆盖写在这里，保存后在成片剪辑读取，不作为本段视频内容。旧稿由导演明确区分，不按关键词删改。</p>
     <label>画面要求<textarea aria-label="画面要求" rows={7} maxLength={20000} value={draft.imagePromptCn}
       disabled={busy || draft.pending !== undefined} onChange={event => update({ ...draft, imagePromptCn: event.target.value })} /></label>
+    <label><input type="checkbox" checked={draft.selfContainedImagePrompt ?? saved?.directorPlan?.selfContainedImagePrompt === true}
+      disabled={busy || draft.pending !== undefined}
+      onChange={(event) => { update({ ...draft, selfContainedImagePrompt: event.target.checked }) }} />以完整首帧描述出图</label>
+    <p>启用前，请在画面要求中写齐本图人物、服装、材质、比例、起始状态与光影。出图沿用当前取景和引用，不再叠加整段视频设定；视频的动作、运镜、表演和声音继续保留。</p>
     {plannedVisual?.trim() && plannedVisual !== draft.imagePromptCn && <details>
       <summary>查看分镜已保存的首帧描述</summary>
       <p>{plannedVisual}</p>

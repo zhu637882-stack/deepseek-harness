@@ -758,6 +758,7 @@ exports[`saves an explicit starting still () with direction, or preserves it whe
   "imagePromptCn": "",
   "mediaGenerated": false,
   "providerCalls": 0,
+  "selfContainedImagePrompt": false,
   "visual": "来客在门边站定，与屋内听者对视；其余调度沿用。",
 }
 `;
@@ -769,6 +770,7 @@ exports[`saves an explicit starting still (undefined) with direction, or preserv
   "imagePromptCn": "原画面描述须显式修改。",
   "mediaGenerated": false,
   "providerCalls": 0,
+  "selfContainedImagePrompt": false,
   "visual": "来客在门边站定，与屋内听者对视；其余调度沿用。",
 }
 `;
@@ -780,6 +782,7 @@ exports[`saves an explicit starting still (门内平视，来客停在门边。)
   "imagePromptCn": "门内平视，来客停在门边。",
   "mediaGenerated": false,
   "providerCalls": 0,
+  "selfContainedImagePrompt": true,
   "visual": "来客在门边站定，与屋内听者对视；其余调度沿用。",
 }
 `;

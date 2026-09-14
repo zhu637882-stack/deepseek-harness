@@ -913,7 +913,8 @@ it.each([false, true])('uses the film source delivered together with bound image
 
 it.each([undefined, '门内平视，来客停在门边。', ''])(
   'saves an explicit starting still (%s) with direction, or preserves it when omitted', async (imagePromptCn) => {
-    const plan = { ...design, editorialContext: { transitionOut: '下段转到窗外，雨声跨越切点' }, visual: '来客在门边站定，与屋内听者对视；其余调度沿用。' }
+    const plan = { ...design, ...(imagePromptCn ? { selfContainedImagePrompt: true } : {}),
+      editorialContext: { transitionOut: '下段转到窗外，雨声跨越切点' }, visual: '来客在门边站定，与屋内听者对视；其余调度沿用。' }
     const upstream = writer(0, undefined, undefined, '原画面描述须显式修改。')
     const args = { receiptId: upstream.inputReceipt, directorPlan: plan,
       ...(imagePromptCn === undefined ? {} : { imagePromptCn }) }
@@ -934,6 +935,7 @@ it.each([undefined, '门内平视，来客停在门边。', ''])(
     expect(body.request).toMatchObject({ imagePromptCn: shot.imagePromptCn, directorPlan: plan })
     const saved = JSON.parse(result(h.agent, 'save').text)
     expect({ imagePromptCn: shot.imagePromptCn, visual: shot.directorPlan.visual,
+      selfContainedImagePrompt: shot.directorPlan.selfContainedImagePrompt ?? false,
       cameraMovement: shot.directorPlan.cameraMovement, providerCalls: saved.providerCalls,
       mediaGenerated: saved.mediaGenerated }).toMatchSnapshot()
   },
