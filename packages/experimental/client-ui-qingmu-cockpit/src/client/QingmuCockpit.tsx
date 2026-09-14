@@ -707,6 +707,7 @@ export function QingmuCockpit({
     <div className={css.stack}>
       {episodeId && shotRelations && <ReferenceVideoBatch key={`${projectId}:${episodeId}:${shotRelations.storyboardRevision.revisionId}`}
         projectId={projectId} episodeId={episodeId} relations={shotRelations} port={port} storyPort={nativeDirectorSession?.story} aspectRatio={stringOf(selectedProject?.aspect_ratio) || '16:9'}
+        onCollected={refreshWorkflowProjectionAfterCommit}
         onOpenShot={(id) => { setSelectedShotId(id); setShootingActionKind('video'); setShootingAction(id) }} />}
       <ShootingReviewWorkspace
         hideHeader={applicationShell === true}
