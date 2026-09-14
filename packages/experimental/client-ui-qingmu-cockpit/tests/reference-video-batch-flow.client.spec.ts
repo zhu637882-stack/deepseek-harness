@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { expect, it, vi, beforeEach } from 'vitest'
-import { collectBatchShot, readBatchBasis, parseBatchChoices, prepareBatchShot, submitBatchShot, hasBatchRun, type BatchBasis, type BatchPort } from '../src/client/reference-video-batch.ts'
+import { collectBatchShot, readBatchBasis, parseBatchChoices, prepareBatchShot, submitBatchShot, hasBatchRun, needsBatchDesign, batchShotIncluded, createBatchSubmission, readBatchSubmission, batchSubmissionKey, type BatchBasis, type BatchPort } from '../src/client/reference-video-batch.ts'
 import { request, quoteResponse } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
 
 const source = { sha256: 'e'.repeat(64), prompt: '研究：下一镜才开门', generationPrompt: '角色保持原服装。0秒敲锣，铜锣余响。对白：请进。' }
@@ -63,6 +63,7 @@ it('prepares references and queues multiple shots without waiting for video comp
   const ready = { configured: true, allReady: true, materials: [] }
   const queues: string[] = []
   const port = {
+    referenceVideoDraft: async ({ frameId }: { frameId: string }) => b.shots.find(shot => shot.frameId === frameId)!.saved,
     saveReferenceVideoDraft: vi.fn(async ({ frameId, request: saved }: { frameId: string; request: unknown }) => ({
       ...b.shots.find(shot => shot.frameId === frameId)!.saved,
       draft: { revision: 1, frameSha256: 'f'.repeat(64), requestSha256: 'd'.repeat(64), request: saved },
@@ -101,7 +102,7 @@ it('recovers a lost submission with the identical command and never auto retries
   const b = basis(), shot = b.shots[0]!
   const upload = vi.fn()
   await expect(prepareBatchShot({ referenceVideoDraft: async () => ({ ...shot.saved,
-    draft: { revision: 1, requestSha256: 'd'.repeat(64), request } }),
+    draft: { revision: 1, requestSha256: 'd'.repeat(64), request: { ...request, directorSourceSha256: source.sha256 } } }),
   readReferenceVideoMaterials: async () => ({ configured: true, allReady: false, materials: [{ status: 'unknown' }] }),
   prepareReferenceVideoMaterial: upload } as unknown as BatchPort, 'p', shot)).rejects.toThrow('正在确认')
   expect(upload).not.toHaveBeenCalled()
@@ -116,4 +117,54 @@ it('reads every catalog page and all frames, including different scenes', async 
   const read = await readBatchBasis(port, 'p', b.shots)
   expect(read.shots.map(shot => shot.frameId)).toEqual(['f', 'f2'])
   expect(assets.mock.calls.map(call => call[0].page)).toEqual([1, 2])
+})
+
+it('reconciles stale drafts while leaving completed shots outside the explicit retake scope', () => {
+  const b = basis()
+  const stale = { ...b.shots[0]!, saved: { ...b.shots[0]!.saved,
+    draft: { revision: 2, frameSha256: 'f'.repeat(64), requestSha256: 'd'.repeat(64), savedAt: '',
+      request: { ...request, directorSourceSha256: 'old' } } } }
+  expect(needsBatchDesign(stale)).toBe(true)
+  const done = { ...b.shots[1]!, runs: [{ runId: 'old', publicStatus: 'succeeded' }] as never }
+  const current = { ...b, shots: [stale, done] }
+  expect(parseBatchChoices(JSON.stringify({ shots: [choice('f')] }), current)).toHaveLength(1)
+  expect(batchShotIncluded(done, new Set())).toBe(false)
+  expect(parseBatchChoices(JSON.stringify({ shots: ['f', 'f2'].map(choice) }), current, new Set(['f2']))).toHaveLength(2)
+  expect(batchShotIncluded({ ...done, runs: [{ publicStatus: 'running' }] as never }, new Set(['f2']))).toBe(false)
+})
+
+it('freezes every authorized command and resumes only explicit retakes, even after a lost response', async () => {
+  const b = basis()
+  const previous = { runId: 'old', publicStatus: 'succeeded' }
+  const current = { ...b, shots: b.shots.map(shot => ({ ...shot, runs: [previous] as never })) }
+  const quotes = ['f', 'f2'].map(frameId => ({ ...quoteResponse, projectId: 'p', frameId, generationSubmissionEnabled: true }))
+  const items = createBatchSubmission(quotes, current, new Set(['f', 'f2']), sessionStorage)
+  sessionStorage.setItem(batchSubmissionKey('p', 'e'), JSON.stringify(items))
+  const queue = vi.fn().mockRejectedValueOnce(new Error('lost response')).mockResolvedValue({ runId: 'new', publicStatus: 'queued' })
+  const port = { referenceVideoRuns: async () => ({ items: [previous] }), queueReferenceVideo: queue } as unknown as BatchPort
+  await expect(submitBatchShot(port, quotes[0]!, sessionStorage, items[0])).rejects.toThrow('lost')
+  const restored = readBatchSubmission(sessionStorage, 'p', 'e')
+  for (const item of restored) await submitBatchShot(port, item.quote, sessionStorage, item)
+  expect(queue.mock.calls[0]![0]).toEqual(queue.mock.calls[1]![0])
+  expect(queue.mock.calls[2]![0]).toEqual(items[1]!.command)
+  expect(queue).toHaveBeenCalledTimes(3)
+  expect(current.shots[0]!.runs).toEqual([previous])
+  const another = { referenceVideoRuns: async () => ({ items: [{ runId: 'new', publicStatus: 'failed' }, previous] }), queueReferenceVideo: queue } as unknown as BatchPort
+  await submitBatchShot(another, quotes[0]!, sessionStorage, items[0])
+  expect(queue).toHaveBeenCalledTimes(3)
+})
+
+it('uses a freshly saved design on retry and refuses a changed source before any material upload', async () => {
+  const b = basis(), shot = b.shots[0]!
+  const choices = parseBatchChoices(JSON.stringify({ shots: ['f', 'f2'].map(choice) }), b)
+  const save = vi.fn(), materials = vi.fn(async () => ({ configured: true, allReady: true, materials: [] }))
+  const saved = { ...shot.saved, draft: { revision: 3, frameSha256: shot.saved.frameSha256, requestSha256: 'd'.repeat(64), request: choices[0] } }
+  const port = { referenceVideoDraft: async () => saved, saveReferenceVideoDraft: save, readReferenceVideoMaterials: materials,
+    referenceVideoQuote: async () => quoteResponse } as unknown as BatchPort
+  await prepareBatchShot(port, 'p', shot, choices[0])
+  expect(save).not.toHaveBeenCalled()
+  expect(materials).toHaveBeenCalledOnce()
+  await expect(prepareBatchShot({ ...port, referenceVideoDraft: async () => ({ ...saved, directorSource: { ...source, sha256: 'new' } }) } as unknown as BatchPort,
+    'p', shot, choices[0])).rejects.toThrow('导演设计已更新')
+  expect(materials).toHaveBeenCalledOnce()
 })

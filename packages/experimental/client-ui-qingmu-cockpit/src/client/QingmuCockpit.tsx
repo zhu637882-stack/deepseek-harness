@@ -703,12 +703,16 @@ export function QingmuCockpit({
         nativeDirectorSession={nativeDirectorSession} hostSync={hostSync} t={t} onCommitted={refreshWorkflowProjectionAfterCommit} />
     </div>
 
+  const batchVideoPanel = <>
+    {episodeId && shotRelations && <ReferenceVideoBatch key={`${projectId}:${episodeId}`}
+      projectId={projectId} episodeId={episodeId} relations={shotRelations} port={port} storyPort={nativeDirectorSession?.story} aspectRatio={stringOf(selectedProject?.aspect_ratio) || '16:9'}
+      onCollected={refreshWorkflowProjectionAfterCommit}
+      onOpenShot={(id) => { setSelectedShotId(id); setShootingActionKind('video'); setShootingAction(id) }} />}
+  </>
+
   const shotView = (
     <div className={css.stack}>
-      {episodeId && shotRelations && <ReferenceVideoBatch key={`${projectId}:${episodeId}:${shotRelations.storyboardRevision.revisionId}`}
-        projectId={projectId} episodeId={episodeId} relations={shotRelations} port={port} storyPort={nativeDirectorSession?.story} aspectRatio={stringOf(selectedProject?.aspect_ratio) || '16:9'}
-        onCollected={refreshWorkflowProjectionAfterCommit}
-        onOpenShot={(id) => { setSelectedShotId(id); setShootingActionKind('video'); setShootingAction(id) }} />}
+      {!applicationShell && batchVideoPanel}
       <ShootingReviewWorkspace
         hideHeader={applicationShell === true}
         headerActions={<>
@@ -1013,6 +1017,7 @@ export function QingmuCockpit({
       <div className={`${css.shell} ${step === 'shooting' && !creating && !projectsOpen ? css.shootingShell : ''}`}>
         {error && <div role="alert" className={css.error}><p>当前项目暂时无法更新。已有素材保留，请刷新重试。</p><details><summary>开发日志</summary>{error}</details></div>}
         <div className={css.body}><main aria-label={creating ? '新建项目' : projectsOpen ? '我的项目' : `青木 · ${creativeStepLabel(step)}`}>
+          <div hidden={step !== 'shooting' || creating || projectsOpen}>{batchVideoPanel}</div>
           {projectsOpen ? <ProjectLibrary projects={projects} currentProjectId={projectId} loading={loading} mediaPort={port}
             copyPort={port} onCopied={async (result) => {
               await refresh({ projectId: result.projectId, episodeId: result.episodeIds[0] ?? '' })

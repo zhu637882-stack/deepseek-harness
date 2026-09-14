@@ -426,3 +426,23 @@ it('saves whole-cut ambience with independent fades and recovers it on reopen', 
   fireEvent.change(screen.getByRole('spinbutton',{ name:'音轨 1 成片起点秒' }),{ target:{ value:'14' } })
   expect(screen.getByRole('button',{ name:'合成并导出 MP4' })).toHaveProperty('disabled',true)
 })
+
+it('fills missing preview shots in story order while preserving accepted versions and existing trims', async () => {
+  const first = state.shots[0]!
+  const server: WorkingCutState = { ...state, shots: [
+    { ...first, selectedAssetId: 'a', candidates: [...first.candidates, { ...first.candidates[0]!, assetId: 'newer' }] },
+    { ...first, frameId: 'second', frameNo: 2, selectedAssetId: null },
+    { ...first, frameId: 'third', frameNo: 3, selectedAssetId: 'a' },
+  ] }
+  const port = { readWorkingCut: vi.fn(async () => server), saveWorkingCut: vi.fn(),
+    renderWorkingCut: vi.fn(), reviewWorkingCutSound: vi.fn(), uploadWorkingCutAudio: vi.fn() }
+  render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
+  fireEvent.change(await screen.findByRole('spinbutton', { name: '镜 1 终点秒' }), { target: { value: '7' } })
+  fireEvent.click(screen.getByRole('button', { name: '一键补齐待看镜头' }))
+  expect(screen.getByRole('combobox', { name: '镜 1 视频版本' })).toHaveProperty('value', 'a')
+  expect(screen.getByRole('spinbutton', { name: '镜 1 终点秒' })).toHaveProperty('value', '7')
+  expect(screen.getAllByRole('combobox', { name: /视频版本/ })).toHaveLength(3)
+  expect(screen.getByText(/未选用镜头暂用最近候选/)).toBeTruthy()
+  expect(port.saveWorkingCut).not.toHaveBeenCalled()
+  expect(port.renderWorkingCut).not.toHaveBeenCalled()
+})

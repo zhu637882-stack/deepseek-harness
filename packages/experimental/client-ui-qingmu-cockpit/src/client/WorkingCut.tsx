@@ -172,6 +172,23 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting, renderD
           <p>{typeof shot.editorialContext === 'string' ? shot.editorialContext : JSON.stringify(shot.editorialContext)}</p>
         </div>)}
       </details>}
+      {state.shots.some(shot => shot.candidates.length && !clips.some(clip => clip.frameId === shot.frameId)) && <div>
+        <button type="button" disabled={locked} onClick={() => {
+          const next = [...clips]
+          for (const shot of state.shots) {
+            if (next.some(clip => clip.frameId === shot.frameId)) continue
+            const candidate = shot.candidates.find(c => c.assetId === shot.selectedAssetId) ?? shot.candidates.at(-1)
+            if (!candidate) continue
+            const clip = { frameId: shot.frameId, assetId: candidate.assetId, sha256: candidate.sha256,
+              inSec: 0, outSec: Math.floor(candidate.duration * 100) / 100 }
+            const following = next.findIndex(item => (state.shots.find(s => s.frameId === item.frameId)?.frameNo ?? 0) > shot.frameNo)
+            next.splice(following < 0 ? next.length : following, 0, clip)
+          }
+          change(next)
+          setNotice('已补齐待看镜头，已有剪辑保留。未选用镜头暂用最近候选，可切换版本；没有改变拍摄页选用。')
+        }}>一键补齐待看镜头</button>
+        <p>优先使用拍摄页已选版本，其余镜头暂用最近候选，便于连看比较。</p>
+      </div>}
       {state.shots.filter(s => !clips.some(c => c.frameId === s.frameId)).map(shot => <p key={shot.frameId}>
         镜 {shot.frameNo} · {shot.candidates.length ? shot.selectedAssetId === null ? '尚未选用视频，可加入候选比较' : '尚未加入剪辑' : '尚无已完成视频'}{' '}
         {shot.candidates.length ? <button type="button" disabled={locked} onClick={() => { const c = shot.candidates.find(c => c.assetId === shot.selectedAssetId) ?? shot.candidates.at(-1); if (c) change([...clips, { frameId: shot.frameId, assetId: c.assetId, sha256: c.sha256, inSec: 0, outSec: Math.floor(c.duration * 100) / 100 }]) }}>加入此镜</button>

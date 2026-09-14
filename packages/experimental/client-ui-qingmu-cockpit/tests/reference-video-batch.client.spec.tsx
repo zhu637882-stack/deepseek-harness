@@ -140,3 +140,38 @@ it('recovers returned videos after leaving the page without another generation c
     assetId: 'asset-f', expectedAssetSha256: 'a'.repeat(64) })
   expect(queue).not.toHaveBeenCalled()
 })
+
+it('restores an unfinished batch after remount without regenerating the confirmed first shot', async () => {
+  let release: (value: unknown) => void = () => {}
+  const generated = new Set<string>()
+  const queue = vi.fn(async ({ frameId }: { frameId: string }) => {
+    if (frameId === 'f') await new Promise((resolve) => { release = resolve })
+    generated.add(frameId)
+    return { runId: frameId, frameId, publicStatus: 'queued' }
+  })
+  const port = {
+    referenceVideoAssets: async () => ({ pages: 1, items: [] }),
+    referenceVideoDraft: async ({ frameId }: { frameId: string }) => ({ projectId: 'p', frameId, frameSha256: 'f'.repeat(64), directorSource: null,
+      draft: { revision: 1, requestSha256: 'd'.repeat(64), request: { ...request, frameId } } }),
+    referenceVideoRuns: async ({ frameId }: { frameId: string }) => ({ items: generated.has(frameId) ? [{ runId: frameId, publicStatus: 'queued', candidates: [] }] : [] }),
+    readReferenceVideoMaterials: async () => ({ configured: true, allReady: true, materials: [] }),
+    referenceVideoQuote: async ({ frameId }: { frameId: string }) => ({ ...quoteResponse, projectId: 'p', frameId, generationSubmissionEnabled: true }),
+    queueReferenceVideo: queue,
+  } as unknown as BatchPort
+  const mount = () => render(<ReferenceVideoBatch projectId="p" episodeId="e" aspectRatio="16:9" port={port}
+    onOpenShot={vi.fn()} relations={{ projectId: 'p', shots: ['f', 'f2'].map((shotId, i) => ({ shotId, frameNo: i + 1, durationSec: 8 })) } as never} />)
+  const view = mount()
+  fireEvent.click(screen.getByText('整集批量生成视频'))
+  fireEvent.click(await screen.findByRole('button', { name: '准备已有镜头草稿' }))
+  await waitFor(() => { expect(screen.getByRole('button', { name: '批量生成 2 个已准备镜头' })).toHaveProperty('disabled', false) })
+  fireEvent.click(screen.getByRole('button', { name: '批量生成 2 个已准备镜头' }))
+  await waitFor(() => { expect(queue).toHaveBeenCalledOnce() })
+  view.unmount()
+  await act(async () => { release({}); await Promise.resolve() })
+  mount()
+  fireEvent.click(screen.getByText('整集批量生成视频'))
+  await waitFor(() => { expect(screen.getByRole('button', { name: '继续上次批量提交' })).toHaveProperty('disabled', false) })
+  fireEvent.click(screen.getByRole('button', { name: '继续上次批量提交' }))
+  await waitFor(() => { expect(queue).toHaveBeenCalledTimes(2) })
+  expect(queue.mock.calls.map(call => call[0].frameId)).toEqual(['f', 'f2'])
+})

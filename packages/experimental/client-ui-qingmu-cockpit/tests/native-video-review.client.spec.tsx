@@ -27,7 +27,7 @@ it('shows heard evidence and the uncertain status without claiming approval', as
   } }))))
   const view = render(<NativeVideoReview {...props} />)
   await screen.findByText('对白开始时雨声消失。')
-  expect(view.container.textContent).toMatchInlineSnapshot('"音画检查对照导演设计检查当前视频，结果用于审看与返修。本版已检查刷新记录检查详情 · 1 项需调整 · 1 项待核实对白内容尚未确认本项没有可用的听觉证据。语气与表演无法确认音量不足，无法确认语气。环境底声需调整对白开始时雨声消失。2–4 秒空间声学尚未确认本项没有可用的听觉证据。动作拟音尚未确认本项没有可用的听觉证据。配乐衔接尚未确认本项没有可用的听觉证据。AI 检查供参考，最终是否采用由你决定。"')
+  expect(view.container.textContent).toMatchInlineSnapshot('"音画检查对照导演设计检查当前视频，结果用于审看与返修。本版已检查刷新记录检查详情 · 1 项需调整 · 14 项待核实对白内容尚未确认本项没有可用的听觉证据。语气与表演无法确认音量不足，无法确认语气。环境底声需调整对白开始时雨声消失。2–4 秒空间声学尚未确认本项没有可用的听觉证据。动作拟音尚未确认本项没有可用的听觉证据。配乐衔接尚未确认本项没有可用的听觉证据。AI 检查供参考，最终是否采用由你决定。"')
 })
 
 it('rejects a response for another candidate', async () => {
@@ -59,7 +59,7 @@ it('links a timed observation to playback and keeps unsupported claims uncertain
   const seek = vi.fn()
   render(<NativeVideoReview {...props} onSeek={seek} />)
   await screen.findByText('女子抬手指向收音机。')
-  const details = screen.getByText('检查详情 · 0 项需调整 · 1 项待核实').closest('details')!
+  const details = screen.getByText('检查详情 · 0 项需调整 · 15 项待核实').closest('details')!
   expect(details.open).toBe(false)
   fireEvent.click(details.querySelector('summary')!)
   fireEvent.click(screen.getByRole('button', { name: '查看 2 至 3.5 秒' }))

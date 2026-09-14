@@ -33,9 +33,25 @@ export async function readBatchBasis(port: BatchPort, projectId: string,
   return { projectId, shots: rows, assets }
 }
 
-/** Existing videos and in-flight tasks are preserved; retries remain a shot-level decision. */
+/** Existing videos are preserved unless the owner explicitly includes them in a retake. */
 export function hasBatchRun(shot: BatchShot): boolean {
   return shot.runs.some(run => run.publicStatus !== 'failed')
+}
+
+/** Pending/quarantined work must be resolved before creating another candidate. */
+export function hasActiveBatchRun(shot: BatchShot): boolean {
+  return shot.runs.some(run => ['queued', 'running', 'quarantined'].includes(run.publicStatus))
+}
+
+export function batchShotIncluded(shot: BatchShot, retakes: ReadonlySet<string>): boolean {
+  return !hasBatchRun(shot) || (retakes.has(shot.frameId) && !hasActiveBatchRun(shot))
+}
+
+/** A saved draft is reusable only while its director and shot sources still match. */
+export function needsBatchDesign(shot: BatchShot): boolean {
+  const { draft, directorSource, frameSha256 } = shot.saved
+  return !draft || (draft.frameSha256 !== undefined && draft.frameSha256 !== frameSha256)
+    || (directorSource !== null && directorSource !== undefined && draft.request.directorSourceSha256 !== directorSource.sha256)
 }
 
 /** Reuse the ordinary candidate handoff for finished runs; registration never selects or approves a video. */
@@ -57,10 +73,12 @@ export async function collectBatchShot(port: BatchPort, projectId: string, frame
 }
 
 /** Resolve model-authored reference choices through real assets and append the saved director text once. */
-export function parseBatchChoices(text: string, basis: BatchBasis): ReferenceVideoPreviewRequest[] {
+export function parseBatchChoices(text: string, basis: BatchBasis,
+  retakes: ReadonlySet<string> = new Set()): ReferenceVideoPreviewRequest[] {
   const value: unknown = JSON.parse(text)
   if (!value || typeof value !== 'object' || !('shots' in value) || !Array.isArray(value.shots)) throw new Error('导演方案需要 shots 列表。')
-  const expected = new Map(basis.shots.filter(shot => !hasBatchRun(shot) && !shot.saved.draft).map(shot => [shot.frameId, shot]))
+  const expected = new Map(basis.shots.filter(shot => batchShotIncluded(shot, retakes) && needsBatchDesign(shot))
+    .map(shot => [shot.frameId, shot]))
   const requests = value.shots.map((row: unknown) => {
     if (!row || typeof row !== 'object' || !('frameId' in row) || typeof row.frameId !== 'string'
       || !('references' in row) || !Array.isArray(row.references) || !('parameters' in row)) throw new Error('镜头引用方案格式不完整。')
@@ -98,11 +116,14 @@ export function parseBatchChoices(text: string, basis: BatchBasis): ReferenceVid
 /** Prepare actual references and compile the same request used by single-shot generation. */
 export async function prepareBatchShot(port: BatchPort, projectId: string, shot: BatchShot,
   request?: ReferenceVideoPreviewRequest): Promise<ReferenceVideoQuoteResponse> {
-  const draftRequest = request && (({ projectId: _projectId, ...rest }) => rest)(request)
+  const current = await port.referenceVideoDraft({ projectId, frameId: shot.frameId })
+  if (request && request.directorSourceSha256 !== current.directorSource?.sha256) throw new Error('导演设计已更新，请重新读取当前方案。')
+  const draftRequest = request && needsBatchDesign({ ...shot, saved: current })
+    ? (({ projectId: _projectId, ...rest }) => rest)(request) : undefined
   const saved = draftRequest ? await port.saveReferenceVideoDraft({ projectId, frameId: shot.frameId,
-    expectedRevision: shot.saved.draft?.revision ?? 0, expectedFrameSha256: shot.saved.frameSha256, request: draftRequest })
-    : await port.referenceVideoDraft({ projectId, frameId: shot.frameId })
+    expectedRevision: current.draft?.revision ?? 0, expectedFrameSha256: current.frameSha256, request: draftRequest }) : current
   if (!saved.draft) throw new Error('需要导演先准备本镜引用。')
+  if (needsBatchDesign({ ...shot, saved })) throw new Error('导演设计已更新，请自动准备当前设计后再生成。')
   const draft = saved.draft
   const target = { projectId, frameId: shot.frameId, expectedRevision: draft.revision, expectedRequestSha256: draft.requestSha256 }
   let materials: Pick<ReferenceVideoMaterialsState, 'configured' | 'materials' | 'allReady'> = await port.readReferenceVideoMaterials(target)
@@ -116,29 +137,68 @@ export async function prepareBatchShot(port: BatchPort, projectId: string, shot:
   return port.referenceVideoQuote({ ...draft.request, projectId, draftRevision: draft.revision, draftRequestSha256: draft.requestSha256 })
 }
 
-/** Submit quickly to the existing asynchronous queue; uncertain retries use the same persisted command. */
-export async function submitBatchShot(port: BatchPort, quote: ReferenceVideoQuoteResponse, storage: Storage): Promise<ReferenceVideoRun> {
-  const { projectId, frameId } = quote
-  const key = `qingmu.reference-submit:${projectId}:${frameId}`
-  const runs = await port.referenceVideoRuns({ projectId, frameId })
-  const raw = storage.getItem(key)
-  const existing = runs.items.find(run => run.publicStatus !== 'failed')
-  if (existing) return existing
-  let command: QueueReferenceVideoRequest
+export interface BatchSubmissionItem {
+  readonly quote: ReferenceVideoQuoteResponse
+  /** Present only for an explicitly selected retake; old candidates are retained. */
+  readonly previousRunIds?: readonly string[]
+  readonly command: QueueReferenceVideoRequest
+}
+export function batchSubmissionKey(projectId: string, episodeId: string): string {
+  return `qingmu.reference-batch:${projectId}:${episodeId}`
+}
+function commandForQuote(quote: ReferenceVideoQuoteResponse, raw: string | null): QueueReferenceVideoRequest {
   if (raw) {
-    const pending = JSON.parse(raw) as Record<string, unknown>
-    if (pending.projectId !== projectId || pending.frameId !== frameId || pending.paidConfirmed !== true
-      || typeof pending.requestId !== 'string' || pending.quoteSha256 !== quote.quoteSha256) {
+    const pending = JSON.parse(raw) as QueueReferenceVideoRequest
+    if (pending.projectId !== quote.projectId || pending.frameId !== quote.frameId || pending.paidConfirmed !== true
+      || typeof pending.requestId !== 'string' || pending.quoteSha256 !== quote.quoteSha256
+      || pending.expectedRevision !== quote.draftRevision || pending.expectedRequestSha256 !== quote.draftRequestSha256) {
       throw new Error('上次提交仍待确认，请在本镜读取原任务。')
     }
-    command = pending as unknown as QueueReferenceVideoRequest
-  } else {
-    if (!quote.generationSubmissionEnabled) throw new Error('当前生成通道不可用。')
-    command = { projectId, frameId, requestId: crypto.randomUUID(), expectedRevision: quote.draftRevision,
-      expectedRequestSha256: quote.draftRequestSha256, quoteSha256: quote.quoteSha256,
-      authorizationCapCny: quote.cost.estimatedCny, paidConfirmed: true }
-    storage.setItem(key, JSON.stringify(command))
+    return pending
   }
+  if (!quote.generationSubmissionEnabled) throw new Error('当前生成通道不可用。')
+  return { projectId: quote.projectId, frameId: quote.frameId, requestId: crypto.randomUUID(),
+    expectedRevision: quote.draftRevision, expectedRequestSha256: quote.draftRequestSha256,
+    quoteSha256: quote.quoteSha256, authorizationCapCny: quote.cost.estimatedCny, paidConfirmed: true }
+}
+
+/** Freeze every command at the owner's batch click, before the first asynchronous submission. */
+export function createBatchSubmission(quotes: readonly ReferenceVideoQuoteResponse[], basis: BatchBasis,
+  retakes: ReadonlySet<string>, storage: Storage): BatchSubmissionItem[] {
+  return quotes.map((quote) => {
+    const shot = basis.shots.find(row => row.frameId === quote.frameId)
+    if (quote.projectId !== basis.projectId || !shot || !batchShotIncluded(shot, retakes)) throw new Error('本镜当前不属于本次生成范围。')
+    return { quote, command: commandForQuote(quote, storage.getItem(`qingmu.reference-submit:${quote.projectId}:${quote.frameId}`)),
+      ...(retakes.has(shot.frameId) ? { previousRunIds: shot.runs.map(run => run.runId) } : {}) }
+  })
+}
+
+export function readBatchSubmission(storage: Storage, projectId: string, episodeId: string): BatchSubmissionItem[] {
+  const value: unknown = JSON.parse(storage.getItem(batchSubmissionKey(projectId, episodeId)) ?? '[]')
+  if (!Array.isArray(value)) throw new Error('上次批量提交记录不可读，请查看原镜头任务。')
+  for (const item of value as BatchSubmissionItem[]) {
+    if (item.quote?.projectId !== projectId) throw new Error('上次批量提交记录不属于当前项目。')
+    commandForQuote(item.quote, JSON.stringify(item.command))
+  }
+  return value as BatchSubmissionItem[]
+}
+
+/** Replay an uncertain command before considering old runs; the server owns idempotency. */
+export async function submitBatchShot(port: BatchPort, quote: ReferenceVideoQuoteResponse, storage: Storage,
+  intent?: BatchSubmissionItem): Promise<ReferenceVideoRun> {
+  const { projectId, frameId } = quote
+  const key = `qingmu.reference-submit:${projectId}:${frameId}`
+  const raw = storage.getItem(key)
+  if (!raw) {
+    const runs = await port.referenceVideoRuns({ projectId, frameId })
+    const existing = runs.items.find(run => intent?.previousRunIds
+      ? !intent.previousRunIds.includes(run.runId) || ['queued', 'running', 'quarantined'].includes(run.publicStatus)
+      : run.publicStatus !== 'failed')
+    if (existing) return existing
+  }
+  const command = commandForQuote(quote, raw ?? (intent ? JSON.stringify(intent.command) : null))
+  if (intent && command.requestId !== intent.command.requestId) throw new Error('本镜另有待确认提交，请先查看原任务。')
+  storage.setItem(key, JSON.stringify(command))
   const run = await port.queueReferenceVideo(command)
   storage.removeItem(key)
   return run

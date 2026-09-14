@@ -2,10 +2,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { NativeStoryPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft'
 import type { ReferenceVideoQuoteResponse, YimengShotRelationsProjection } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
+import { BatchVideoReview } from './BatchVideoReview.tsx'
 import { NativeStoryComposer } from './NativeStoryComposer.tsx'
 import { referenceSelectionGuidance } from './director-generation-guidance.ts'
 import styles from './ReferenceVideoBatch.module.css'
-import { collectBatchShot, hasBatchRun, parseBatchChoices, prepareBatchShot, readBatchBasis, submitBatchShot, type BatchBasis, type BatchPort } from './reference-video-batch.ts'
+import { batchShotIncluded, batchSubmissionKey, createBatchSubmission, readBatchSubmission, hasActiveBatchRun, needsBatchDesign, collectBatchShot, hasBatchRun, parseBatchChoices, prepareBatchShot, readBatchBasis, submitBatchShot, type BatchBasis, type BatchPort, type BatchSubmissionItem } from './reference-video-batch.ts'
 
 const runLabels = { queued: '等待生成', running: '正在生成', succeeded: '视频已返回，待审看', failed: '生成失败', quarantined: '结果待检查' }
 
@@ -25,7 +26,15 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
   const [messages, setMessages] = useState<ReadonlyMap<string, string>>(new Map())
   const [busy, setBusy] = useState(false), [error, setError] = useState('')
   const [syncing, setSyncing] = useState(false)
+  const [reviewOpen, setReviewOpen] = useState(false)
   const [notes, setNotes] = useState('')
+  const [retakes, setRetakes] = useState<ReadonlySet<string>>(new Set())
+  const [pendingSubmission, setPendingSubmission] = useState<readonly BatchSubmissionItem[]>([])
+  const submissionKey = batchSubmissionKey(projectId, episodeId)
+  useEffect(() => {
+    try { setPendingSubmission(readBatchSubmission(sessionStorage, projectId, episodeId)) }
+    catch (cause) { setError(String(cause)) }
+  }, [projectId, episodeId])
   const [progress, setProgress] = useState<{ label: string; done: number; total: number }>()
   const active = useRef(true), lock = useRef(false)
   const collectedCallback = useRef(onCollected)
@@ -115,15 +124,14 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
   }
   async function prepare(text?: string) {
     if (lock.current || !basis) return
-    const choices = text === undefined ? [] : parseBatchChoices(text, basis)
+    const choices = text === undefined ? [] : parseBatchChoices(text, basis, retakes)
     lock.current = true; setBusy(true); setError('')
-    const pending = basis.shots.filter(shot => !hasBatchRun(shot)
-      && (shot.saved.draft || choices.some(item => item.frameId === shot.frameId)))
+    const pending = basis.shots.filter(shot => batchShotIncluded(shot, retakes)
+      && (!needsBatchDesign(shot) || choices.some(item => item.frameId === shot.frameId)))
     setProgress({ label: '准备引用', done: 0, total: pending.length })
     try {
       for (const shot of pending) {
         if (!isActive()) break
-        if (hasBatchRun(shot)) continue
         const request = choices.find(item => item.frameId === shot.frameId)
         if (!request && !shot.saved.draft) continue
         mark(shot.frameId, '正在保存引用并准备生成')
@@ -136,23 +144,36 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
       }
     } finally { lock.current = false; if (isActive()) setBusy(false) }
   }
-  async function submit() {
-    if (lock.current) return
+  async function submit(resume = false) {
+    if (lock.current || !basis) return
     lock.current = true; setBusy(true); setError('')
-    setProgress({ label: '提交生成', done: 0, total: [...quotes.values()].filter(quote => quote.generationSubmissionEnabled).length })
     try {
-      for (const [id, quote] of quotes) {
-        if (!quote.generationSubmissionEnabled) continue
+      let remaining = resume ? readBatchSubmission(sessionStorage, projectId, episodeId)
+        : createBatchSubmission([...quotes.values()].filter(quote => quote.generationSubmissionEnabled), basis, retakes, sessionStorage)
+      if (!resume && readBatchSubmission(sessionStorage, projectId, episodeId).length) throw new Error('请先继续上次批量提交。')
+      // Keep the whole authorized batch, including commands not reached before navigation or reload.
+      sessionStorage.setItem(submissionKey, JSON.stringify(remaining))
+      setPendingSubmission(remaining)
+      setProgress({ label: '提交生成', done: 0, total: remaining.length })
+      for (const item of [...remaining]) {
         if (!isActive()) break
+        const id = item.quote.frameId
         mark(id, '正在提交')
         try {
-          const run = await submitBatchShot(port, quote, sessionStorage)
+          const run = await submitBatchShot(port, item.quote, sessionStorage, item)
+          remaining = remaining.filter(row => row.command.requestId !== item.command.requestId)
+          sessionStorage.setItem(submissionKey, JSON.stringify(remaining))
+          if (isActive()) {
+            setPendingSubmission(remaining)
+            setRetakes((previous) => { const next = new Set(previous); next.delete(id); return next })
+            setQuotes((previous) => { const next = new Map(previous); next.delete(id); return next })
+          }
           mark(id, `已进入生成队列：${runLabels[run.publicStatus]}`)
-          if (isActive()) setQuotes((previous) => { const next = new Map(previous); next.delete(id); return next })
         } catch (cause) { mark(id, String(cause)) }
         finally { if (isActive()) setProgress(previous => previous && ({ ...previous, done: previous.done + 1 })) }
       }
-    } finally { lock.current = false; if (isActive()) { setBusy(false); setRefreshEpoch(value => value + 1) } }
+    } catch (cause) { if (isActive()) setError(String(cause)) }
+    finally { lock.current = false; if (isActive()) { setBusy(false); setRefreshEpoch(value => value + 1) } }
   }
   async function collect() {
     if (lock.current || !basis) return
@@ -175,9 +196,9 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
     } catch (cause) { if (isActive()) setError(`视频已收取，审看列表刷新失败：${String(cause)}`) }
     finally { lock.current = false; if (isActive()) setBusy(false) }
   }
-  const missing = basis?.shots.filter(shot => !hasBatchRun(shot) && !shot.saved.draft) ?? []
+  const missing = basis?.shots.filter(shot => batchShotIncluded(shot, retakes) && needsBatchDesign(shot)) ?? []
   const source = JSON.stringify(basis && { shots: basis.shots.map(shot => ({ frameId: shot.frameId, label: shot.label,
-    needsPreparation: !hasBatchRun(shot) && !shot.saved.draft,
+    needsPreparation: batchShotIncluded(shot, retakes) && needsBatchDesign(shot),
     duration: shot.duration, source: shot.saved.directorSource && { sha256: shot.saved.directorSource.sha256,
       generationPrompt: shot.saved.directorSource.generationPrompt } })),
   // Keep the selection catalog compact; historical image prompts remain available through the asset-reading tools.
@@ -187,7 +208,7 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
   const unavailable = busy || syncing
   return <details aria-label="整集批量生成" className={styles.batch}>
     <summary>整集批量生成视频</summary>
-    <p>统一准备本集引用，已完成和正在生成的镜头自动保留。返回的视频自动进入候选审看，重新打开页面会恢复进度。</p>
+    <p>统一准备本集引用并批量生成；需要重做时勾选问题镜头，原视频保留。返回的视频自动进入候选审看。</p>
     <ol className={styles.steps} aria-label="批量制作步骤"><li>准备引用</li><li>批量生成</li><li>查看结果</li></ol>
     <button type="button" disabled={unavailable} onClick={() => { void read() }}>刷新准备情况</button>
     {syncing && <p role="status">正在同步生成进度…</p>}
@@ -198,23 +219,35 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
         <span>{progress.label}：已处理 {progress.done} / {progress.total} 镜{busy ? '，请稍候' : '，详见下方结果'}</span>
         <progress aria-label={progress.label} value={progress.done} max={Math.max(1, progress.total)} />
       </div>}
+      {pendingSubmission.length > 0 && <p role="status">上次还有 {pendingSubmission.length} 镜提交待完成。<button type="button" disabled={unavailable} onClick={() => { void submit(true) }}>继续上次批量提交</button></p>}
       <label>本次补充<textarea value={notes} onChange={(event) => { setNotes(event.target.value) }} disabled={busy} /></label>
       {missing.length > 0 && storyPort && <NativeStoryComposer port={storyPort} projectId={projectId} episodeId={episodeId}
-        source={source} settings="" disabled={unavailable} onAdopt={prepare} purpose={{ key: 'reference-video-batch', jsonOutput: true,
+        source={source} settings="" disabled={unavailable || pendingSubmission.length > 0} onAdopt={prepare} purpose={{ key: 'reference-video-batch', jsonOutput: true,
           title: '整集视频准备', description: '导演结合整集接续选择引用，保留已完成镜头。', prompt,
           action: '自动准备整集镜头', adopt: '使用方案并准备整集', adopted: '已处理整集方案，请查看逐镜结果。',
           freshRevision: true, sourceKey: source }} />}
       {missing.length > 0 && !storyPort && <p>导演服务未连接，仍可准备已有草稿。</p>}
       <button type="button"
-        disabled={unavailable || !basis.shots.some(shot => !hasBatchRun(shot) && shot.saved.draft)}
+        disabled={unavailable || pendingSubmission.length > 0
+          || !basis.shots.some(shot => batchShotIncluded(shot, retakes) && !needsBatchDesign(shot))}
         onClick={() => { void prepare() }}>准备已有镜头草稿</button>
-      <ul className={styles.results}>{basis.shots.map(shot => <li key={shot.frameId}><button type="button" disabled={busy}
+      <ul className={styles.results}>{basis.shots.map(shot => <li key={shot.frameId}>{shot.runs.some(run => run.publicStatus === 'succeeded') && <label><input type="checkbox" aria-label={`重做${shot.label}`} checked={retakes.has(shot.frameId)}
+        disabled={unavailable || pendingSubmission.length > 0 || hasActiveBatchRun(shot)} onChange={(event) => {
+          const checked = event.target.checked
+          setRetakes((previous) => {
+            const next = new Set(previous); if (checked) next.add(shot.frameId); else next.delete(shot.frameId); return next
+          })
+          setQuotes((previous) => { const next = new Map(previous); next.delete(shot.frameId); return next })
+        }} />重做</label>}<button type="button" disabled={busy}
         onClick={() => { onOpenShot(shot.frameId) }}>{shot.label}</button><span>{messages.get(shot.frameId)}</span></li>)}</ul>
       <div className={styles.actions}>
-        <button type="button" className={styles.primary} disabled={unavailable || ready.length === 0} onClick={() => { void submit() }}>
+        <button type="button" className={styles.primary} disabled={unavailable || pendingSubmission.length > 0 || ready.length === 0} onClick={() => { void submit() }}>
           {busy ? '正在处理…' : `批量生成 ${ready.length} 个已准备镜头`}</button>
         <button type="button" disabled={unavailable} onClick={() => { void collect() }}>重新同步视频结果</button>
       </div>
+      <details onToggle={(event) => { setReviewOpen(event.currentTarget.open) }}><summary>整集音画检查</summary>
+        {reviewOpen && <BatchVideoReview episodeId={episodeId} basis={basis} onOpenShot={onOpenShot} />}
+      </details>
       {ready.length > 0 && <small>阿里视频生成 · 每镜一条候选 · 预计 ¥
         {ready.reduce((sum, quote) => sum + Number(quote.cost.estimatedCny), 0).toFixed(2)}</small>}
     </>}
