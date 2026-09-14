@@ -225,6 +225,24 @@ describe('Qingmu model tools through a real preset and agent loop', () => {
     await ctx.fiber.dispose(); contexts.splice(contexts.indexOf(ctx), 1)
     expect(registry.get('qingmu_check_camera_geometry', handle.agent)).toBeUndefined()
   })
+  it('projects saved 3D image cameras through the shipped tool and durable model result', async () => {
+    const adapter = new MockAdapter([
+      toolCallResponse('image-camera', 'qingmu_check_camera_geometry', { layout: {
+        coordinateFrame: 'metres; x/y ground, z up', basis: 'Authored layout; not image measurements', aspectRatio: '16:9',
+        imageCamera: { position: [0, 0, 1], target: [0, 2, 1], verticalFov: 44 },
+        landmarks: [{ id: 'head', label: 'Head', position: [0, 2, 1.6] }, { id: 'behind', label: 'Behind camera', position: [0, -1, 1] }],
+      } }), textResponse('The second point is behind the camera; keep source positions and revise framing.'),
+    ])
+    const ctx = await harness(adapter), handle = await createQingmuAgent(ctx, 'image-camera-planning')
+    handle.agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Check this saved image camera.' }] }))
+    await waitForIdle(ctx, handle.agent)
+    const result = JSON.parse(resultText(handle.agent.session.events, 'qingmu_check_camera_geometry'))
+    expect(result.relations[0].framing).toBe('inside_frame')
+    expect(result.relations[1].horizontalPosition).toBe('behind_or_level_with_camera')
+    expect(JSON.stringify(adapter.requests[1]?.messages)).toContain('imagePosition')
+    expect(result).toMatchSnapshot('saved image camera through shipped preset')
+    await handle.dispose()
+  })
   it('loads a full dialogue receipt through real persistence after a cold restart', async () => {
     const sessionRoot = await mkdtemp(join(tmpdir(), 'qingmu-dialogue-cold-')); roots.push(sessionRoot)
     const notes = '大剧本正文'.repeat(30000)

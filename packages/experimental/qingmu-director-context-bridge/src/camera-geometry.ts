@@ -1,5 +1,6 @@
-/** Ground-plane camera relations from an explicit director-authored layout. */
+/** Camera relations from explicit director-authored 2D or 3D landmarks. */
 import { z } from 'zod'
+import { checkImageCameraGeometry } from './image-camera-geometry.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-session'
@@ -29,11 +30,12 @@ const layoutSchema = z.object({
 })
 
 /**
- * Project landmark centers into one camera's horizontal frame without moving the set.
- * @param input - A common planar coordinate frame, input provenance, camera and landmarks.
- * @returns Signed lateral/depth positions and facing relations conditional on the supplied layout.
+ * Project landmark points into a planar camera or the saved 3D image camera without moving the set.
+ * @param input - An attributed coordinate frame, planar camera or saved imageCamera with aspectRatio, and matching landmarks.
+ * @returns Signed camera positions and facing, plus full image framing for a saved 3D camera.
  */
 export function checkCameraGeometry(input: unknown) {
+  if (input && typeof input === 'object' && 'imageCamera' in input) return checkImageCameraGeometry(input)
   const layout = layoutSchema.parse(input)
   const { position, lookAt, horizontalFovDeg } = layout.camera
   const dx = lookAt[0] - position[0], dy = lookAt[1] - position[1]
@@ -71,9 +73,9 @@ export function checkCameraGeometry(input: unknown) {
 export function registerCameraGeometryTool(ctx: Context, boundedJson: (value: unknown) => JsonValue): void {
   ctx.tools.register(defineTool({
     name: 'qingmu_check_camera_geometry',
-    description: 'Check a camera change against one explicit ground-plane layout. Computes image left/right, front/behind, horizontal field of view and object front/back facing. Use after reading current scene design and actual reference images when spatial prose is ambiguous. Supply the same landmark coordinates for every camera; distinguish observed relationships from director-designed or approximate positions in basis. This is local math, not image analysis or a renderer; no provider call, save or approval.',
+    description: 'Check a camera change against attributed coordinates. Prefer the saved imageCamera with 3D landmarks and aspectRatio for image framing, including height, pitch, roll and vertical FOV. Legacy ground-plane camera input remains available. Computes image left/right, front/behind, horizontal field of view and object front/back facing. Use after reading current scene design and actual reference images when spatial prose is ambiguous. Supply the same landmark coordinates for every camera; distinguish observed relationships from director-designed or approximate positions in basis. This is local math, not image analysis or a renderer; no provider call, save or approval.',
     parameters: { layout: { type: 'json', required: true,
-      description: 'Object with coordinateFrame (x/y axes, origin and units), basis (source and uncertainties), camera:{position:[x,y],lookAt:[x,y],horizontalFovDeg:1..179}, landmarks:[{id,label,position:[x,y],frontDirection?:[dx,dy]}]. Same right-handed ground-plane axes throughout; x right and y up on the plan. frontDirection is the outward normal of the meaningful front (e.g. seat-facing direction), not the furniture long axis. Relative units are allowed. Omit unknown fronts. 1..128 uniquely identified landmarks; no filesystem paths.' } },
+      description: 'Preferred: {coordinateFrame,basis,aspectRatio:"16:9"|"9:16"|"4:3"|"3:4"|"1:1",imageCamera:{position:[x,y,z],target:[x,y,z],verticalFov:10..120,roll?:degrees},landmarks:[{id,label,position:[x,y,z],frontDirection?:[dx,dy,dz]}]}. Copy the actual imageCamera; metres, x/y ground, z up. Include separate head, hand, foot and prop endpoints to check their positions; this is not occlusion or silhouette analysis. Legacy planar input: object with coordinateFrame (x/y axes, origin and units), basis (source and uncertainties), camera:{position:[x,y],lookAt:[x,y],horizontalFovDeg:1..179}, landmarks:[{id,label,position:[x,y],frontDirection?:[dx,dy]}]. Same right-handed ground-plane axes throughout; x right and y up on the plan. frontDirection is the outward normal of the meaningful front (e.g. seat-facing direction), not the furniture long axis. Relative units are allowed. Omit unknown fronts. 1..128 uniquely identified landmarks; no filesystem paths.' } },
     output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
     presentCall: () => ({ card: 'generic', kind: 'read', title: '核对场景机位与朝向' }),
     async execute(args, exec) {

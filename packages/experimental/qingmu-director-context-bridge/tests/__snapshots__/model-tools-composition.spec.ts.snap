@@ -3,7 +3,7 @@
 exports[`Qingmu model tools through a real preset and agent loop > calculates a camera change in an unbound planning session and logs the result for the next director step > camera geometry through shipped preset 1`] = `
 {
   "businessStateChanged": false,
-  "interpretation": "All coordinates share the supplied ground plane: x increases right, y increases up on the plan. Lateral < 0 is image left; > 0 is image right. Depth > 0 is in front of the camera. frontDirection points out from the named object front, not along its length. Results describe landmark centers; they do not establish actual visibility, occlusion, height, lens distortion or image fidelity. Coordinates and facing are supplied assumptions, not measurements inferred by this tool. Preserve source facts and mark estimates; never move landmarks to obtain a desired result. Save the applicable layout and camera conclusions in the existing scene space and shot/asset design.",
+  "interpretation": "All coordinates share the supplied ground plane: x increases right, y increases up on the plan. Lateral < 0 is image left; > 0 is image right. Depth > 0 is in front of the camera. frontDirection points out from the named object front, not along its length. Results describe landmark centers; they do not establish actual visibility, occlusion, height, lens distortion or image fidelity. This evaluates one supplied camera, not the feasibility of every camera or the artistic validity of a shot. Coordinates and facing are supplied assumptions, not measurements inferred by this tool. Preserve source facts and mark estimates; never move landmarks to obtain a desired result. Save the applicable layout and camera conclusions in the existing scene space and shot/asset design.",
   "layout": {
     "basis": "当前导演排练布局，位置是设计值，未从图片测量。",
     "camera": {
@@ -92,4 +92,84 @@ After picture editing, read qingmu_read_working_cut and the cinematic-director s
 用户明确要求修改一句正式台词时，优先走剧本修改流程，不可只改引用草稿并声称剧本已同步，也不要让用户代点保存：调用 qingmu_read_dialogue 读取当前剧本、台词与分镜引用，再用 qingmu_preview_dialogue_edit 核对原句、替换句和影响范围；向用户简要说明哪些镜头会更新、哪些保持原样。仅在用户已经明确提出这次替换时，使用该回执调用 qingmu_stage_dialogue_edit，再调用 qingmu_commit_dialogue_edit 执行既有 Change Set。讨论、询问和候选措辞不是保存授权。不得自行改写其他台词或选择别的镜头。
 台词提交结果不明时，只恢复原 stage 回执，不创建第二份修改。保存后继续使用实际工具检查下一步，不能将已保存说成已生成。若生成或输入审核的操作工具尚未提供，明确说明具体缺口，不假装正在生成。素材认可必须由创作者本人操作，不能用台词修改授权代签首帧或视频。
 台词保存成功后，回读当前绑定与引用草稿，核对新台词及来源变化；已有引用草稿时，保留素材引用与其他内容，只同步用户要求的台词，按当前版本保存并在素材准备后预览，不另建旧流程输入。尚无引用草稿时，使用原 staged receiptId 调用 qingmu_prepare_dialogue_video，将本镜新台词和说话人编入现有 IMAGO 方法生成的输入草稿。已有输入不覆盖。返回 awaiting_input_review 时让创作者在当前页面看输入和首帧；工作草稿保存不等于素材采用、生成授权、视频已生成或作品验收，不得伪造 Ready、首帧认可或付费回执。"
+`;
+
+exports[`Qingmu model tools through a real preset and agent loop > projects saved 3D image cameras through the shipped tool and durable model result > saved image camera through shipped preset 1`] = `
+{
+  "businessStateChanged": false,
+  "horizontalFovDeg": 71.377019,
+  "interpretation": "Uses the saved imageCamera convention: metres, x/y ground and z up, verticalFov in degrees, the stated aspect ratio and roll. Image coordinates are normalized from top-left (0,0) to bottom-right (1,1); outside values remain outside. The .05 metre near plane matches the blockout renderer. These are attributed landmark points, not object extents or measured image features. Include separate head, hand, foot or prop endpoints when relevant. An in-frame point may be occluded; use the shared-layout preview and actual image review. Never move source landmarks merely to pass framing. This does not establish physical proportions or generated-image fidelity.",
+  "layout": {
+    "aspectRatio": "16:9",
+    "basis": "Authored layout; not image measurements",
+    "coordinateFrame": "metres; x/y ground, z up",
+    "imageCamera": {
+      "position": [
+        0,
+        0,
+        1,
+      ],
+      "roll": 0,
+      "target": [
+        0,
+        2,
+        1,
+      ],
+      "verticalFov": 44,
+    },
+    "landmarks": [
+      {
+        "id": "head",
+        "label": "Head",
+        "position": [
+          0,
+          2,
+          1.6,
+        ],
+      },
+      {
+        "id": "behind",
+        "label": "Behind camera",
+        "position": [
+          0,
+          -1,
+          1,
+        ],
+      },
+    ],
+  },
+  "providerCalls": 0,
+  "relations": [
+    {
+      "bearingDeg": 0,
+      "depth": 2,
+      "facing": "unknown",
+      "framing": "inside_frame",
+      "frontDot": null,
+      "horizontalPosition": "inside_horizontal_fov",
+      "id": "head",
+      "imagePosition": {
+        "x": 0.5,
+        "y": 0.128737,
+      },
+      "label": "Head",
+      "lateral": 0,
+      "verticalPosition": "inside_vertical_fov",
+    },
+    {
+      "bearingDeg": 180,
+      "depth": -1,
+      "facing": "unknown",
+      "framing": "before_near_plane",
+      "frontDot": null,
+      "horizontalPosition": "behind_or_level_with_camera",
+      "id": "behind",
+      "imagePosition": null,
+      "label": "Behind camera",
+      "lateral": 0,
+      "verticalPosition": "behind_or_level_with_camera",
+    },
+  ],
+  "schema": "qingmu.image-camera-geometry.v1",
+}
 `;
