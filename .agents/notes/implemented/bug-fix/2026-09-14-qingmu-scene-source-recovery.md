@@ -7,3 +7,5 @@ Asset design references are generation inputs, so an original image retained for
 The shipped-preset composition tests cover complete paginated reads, invalid pages, missing creative scope and a read-only upstream transcript. Native scene adoption remains the existing versioned operation.
 
 Batch reference assembly also receives the aggregate audio limit and can choose compact timbre samples supplied by the existing sound finalizer. Full previews and dialogue remain independent sources.
+
+Batch reference choices retain the catalog label alongside each asset ID. The parser rejects crossed names and IDs before saving any shot, and the compiled reference text carries the catalog name. The batch catalog omits repeated historical image prompts, which remain available through asset inspection; full saved shot generation text is unchanged. This addresses an observed native choice that described the product while pointing to a booklet image.

@@ -11,7 +11,7 @@ function basis(): BatchBasis {
       draft: null, directorSource: source, mediaTypes: {}, providerCalls: 0, generationQueued: false,
     } })) }
 }
-const choice = (frameId: string) => ({ frameId, references: [{ assetId: 'asset_lin', purpose: '本镜角色身份与衣服' }], parameters: request.parameters })
+const choice = (frameId: string) => ({ frameId, references: [{ assetId: 'asset_lin', assetLabel: '林予', purpose: '本镜角色身份与衣服' }], parameters: request.parameters })
 beforeEach(() => sessionStorage.clear())
 
 it('collects completed outputs into review once, skipping running videos and retaining registered candidates', async () => {
@@ -36,12 +36,26 @@ it('assembles every shot from real references while keeping dialogue and synchro
     expect(item.bindings[0]?.assetSha256).toBe('a'.repeat(64))
     const text = item.promptParts.flatMap(part => 'text' in part ? [part.text] : []).join('')
     expect(text.split(source.generationPrompt)).toHaveLength(2)
+    expect(text).toContain('（林予）：本镜角色身份与衣服')
     expect(text).not.toContain('下一镜才开门')
     expect(item.parameters.audio).toBe(true)
   }
   expect(requests).toMatchSnapshot()
   expect(() => parseBatchChoices(JSON.stringify({ shots: [choice('f')] }), basis())).toThrow('遗漏')
   expect(() => parseBatchChoices(JSON.stringify({ shots: [choice('f'), choice('f')] }), basis())).toThrow('重复')
+})
+
+it('rejects a valid asset id paired with a different prop name before preparing any shot', () => {
+  const b = basis()
+  const catalog = { ...b, assets: [
+    ...b.assets,
+    { assetId: 'asset_book', assetSha256: 'b'.repeat(64), label: '旧册子', browserUrl: '', mediaType: 'reference_image' as const },
+    { assetId: 'asset_product', assetSha256: 'c'.repeat(64), label: '广告产品', browserUrl: '', mediaType: 'reference_image' as const },
+  ] }
+  const wrong = { ...choice('f'), references: [{ assetId: 'asset_book', assetLabel: '广告产品', purpose: '沿用产品包装' }] }
+  expect(() => parseBatchChoices(JSON.stringify({ shots: [wrong, choice('f2')] }), catalog)).toThrow('asset_book 对应“旧册子”')
+  const corrected = { ...wrong, references: [{ ...wrong.references[0]!, assetId: 'asset_product' }] }
+  expect(parseBatchChoices(JSON.stringify({ shots: [corrected, choice('f2')] }), catalog)[0]?.bindings[0]?.assetId).toBe('asset_product')
 })
 
 it('prepares references and queues multiple shots without waiting for video completion, preserving existing candidates', async () => {

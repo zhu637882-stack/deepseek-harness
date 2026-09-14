@@ -27,7 +27,7 @@ exports[`assembles every shot from real references while keeping dialogue and sy
         "bindingToken": "ref_1",
       },
       {
-        "text": "：本镜角色身份与衣服
+        "text": "（林予）：本镜角色身份与衣服
 ",
       },
       {
@@ -62,7 +62,7 @@ exports[`assembles every shot from real references while keeping dialogue and sy
         "bindingToken": "ref_1",
       },
       {
-        "text": "：本镜角色身份与衣服
+        "text": "（林予）：本镜角色身份与衣服
 ",
       },
       {

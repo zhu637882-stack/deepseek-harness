@@ -73,12 +73,15 @@ export function parseBatchChoices(text: string, basis: BatchBasis): ReferenceVid
         || typeof reference.purpose !== 'string' || !reference.purpose.trim()) throw new Error('每项引用都需要真实素材和具体用途。')
       const asset = basis.assets.find(item => item.assetId === reference.assetId)
       if (!asset) throw new Error('方案引用的素材不在当前项目目录。')
+      if (!('assetLabel' in reference) || reference.assetLabel !== asset.label) {
+        throw new Error(`${shot.label}的素材名称与编号不一致：${asset.assetId} 对应“${asset.label}”。请让导演按当前目录修正引用。`)
+      }
       const frameRole = 'frameRole' in reference ? reference.frameRole : undefined
       if (frameRole !== undefined && frameRole !== 'first_frame' && frameRole !== 'last_frame') throw new Error('首尾帧用途无效。')
       return { bindingToken: `ref_${index + 1}`, assetId: asset.assetId, assetSha256: asset.assetSha256, label: asset.label,
         ...(frameRole ? { frameRole } : {}), purpose: reference.purpose }
     })
-    const promptParts = bindings.flatMap(binding => [{ bindingToken: binding.bindingToken }, { text: `：${binding.purpose}\n` }])
+    const promptParts = bindings.flatMap(binding => [{ bindingToken: binding.bindingToken }, { text: `（${binding.label}）：${binding.purpose}\n` }])
     // The existing Host save/preview boundary validates the complete untrusted request before writing it.
     const request: ReferenceVideoPreviewRequest = { projectId: basis.projectId, frameId: shot.frameId, model: 'wan3.0-video',
       bindings: bindings.map(({ purpose: _purpose, ...binding }) => binding),
