@@ -684,3 +684,19 @@ it('rejects an ambiguous frame flag from imported model output', async () => {
   expect(screen.getByText(/完整画面描述选项需要是布尔值/)).toBeTruthy()
   expect(port.saveAssetDesign).not.toHaveBeenCalled()
 })
+
+it('keeps technical fields collapsed without losing edits or triggering generation', async () => {
+  const port = setup()
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  const description = await screen.findByLabelText<HTMLTextAreaElement>('画面描述')
+  const settings = description.closest('details')!
+  expect(settings.open).toBe(false)
+  expect(settings.querySelector('summary')?.textContent).toBe('调整人物 · 专业设置')
+  settings.open = true
+  fireEvent.change(description, { target: { value: '保留我的定妆修改' } })
+  settings.open = false
+  fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
+  await waitFor(() => expect(port.saveAssetDesign).toHaveBeenCalledOnce())
+  expect(port.saveAssetDesign.mock.calls[0]).toMatchObject([{ design: { assets: [{ imagePrompt: '保留我的定妆修改' }] } }])
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})

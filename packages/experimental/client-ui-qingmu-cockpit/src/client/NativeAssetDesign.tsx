@@ -253,48 +253,51 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
         const voice = voiceRuns.find(value => value.entityId === item.id)
         return <section key={`${item.kind}:${index}`} aria-label={`${names[item.kind]} ${item.name}`}>
           <h3>{names[item.kind]} · {item.name}</h3>
-          {!item.id && <label>素材名称<input value={item.name} onChange={(event) => { edit(index, { name: event.target.value }) }} /></label>}
-          <details><summary>主体设定</summary>
-            <label>主体完整设定<textarea value={item.visualIdentity ?? item.imagePrompt}
-              onChange={(event) => { edit(index, { visualIdentity: event.target.value }) }} /></label>
-            <p>记录人物外观、场景布局或道具结构，供后续导演与分镜沿用。只换视角或局部修图时，修改下方画面描述即可。</p>
-          </details>
-          <AssetSpatialDesign item={item} assets={design.assets} onChange={(patch) => { edit(index, patch) }} />
-          <SceneLayoutEditor {...scope} key={`${projectId}:${episodeId}:${item.id ?? index}`}
-            layout={(item.kind === 'scene' ? item : design.assets.find(row => row.kind === 'scene' && row.name === item.imageStage?.sceneName))?.sceneLayout}
-            imageObjectStates={item.imageObjectStates} onObjectStates={(imageObjectStates) => { edit(index, { imageObjectStates }) }}
-            camera={item.imageCamera} ratio={item.imageAspectRatio && item.imageAspectRatio !== 'auto' ? item.imageAspectRatio : projectRatio}
-            onLayout={item.kind === 'scene' ? (sceneLayout) => { edit(index, { sceneLayout }) } : undefined}
-            onCamera={(imageCamera) => { edit(index, { imageCamera }) }} previewLayout={port.previewSceneLayout} />
-          <label>画面描述<textarea value={item.imagePrompt}
-            onChange={(event) => { edit(index, { imagePrompt: event.target.value }) }} /></label>
-          <label><input type="checkbox" checked={item.selfContainedImagePrompt ?? false}
-            onChange={(event) => { edit(index, { selfContainedImagePrompt: event.target.checked }) }} />以完整画面描述出图</label>
-          <p>{item.selfContainedImagePrompt
-            ? '请在画面描述中写齐本图可见的外观、尺度、结构、年代设定和光影。启用空间取景时，以该机位的构图图和完整描述出图，保留当前站位与连接状态；整场陈设保留给导演和后续分镜，不再次作为本图清单。未启用空间取景时也以基础画风和完整描述出图，请写齐本图需要的场景事实。'
-            : '当前沿用旧设计：主体设定和剧情依据会一起进入图片请求。让导演整理完整画面描述后，可启用上方选项，避免把其他剧情状态提前画入。'}</p>
-          <label>设计依据<textarea value={item.designBasis ?? ''} onChange={(event) => { edit(index, { designBasis: event.target.value }) }} placeholder="与本素材相关的剧本事实、年代例外、尺寸参照、结构与空间关系" /></label>
-          <label>视角与状态<input value={item.view ?? ''} onChange={(event) => { edit(index, { view: event.target.value }) }} placeholder="由导演决定，例如后侧视角、接电前状态" /></label>
-          <label>素材画幅<select value={item.imageAspectRatio ?? 'auto'} onChange={(event) => { edit(index, { imageAspectRatio: event.target.value as NonNullable<AssetDesignItem['imageAspectRatio']> }) }}>
-            <option value="auto">自动 · 新图沿用项目，修改沿用参考图</option>
-            <option value="1:1">1:1 方形</option><option value="3:4">3:4 竖幅</option><option value="4:3">4:3 横幅</option>
-            <option value="9:16">9:16 竖屏</option><option value="16:9">16:9 横屏</option>
-          </select></label>
-          <label>图片模型<select value={item.imageModel ?? ''} onChange={(event) => { edit(index, { imageModel: event.target.value || null, imagePromptExtend: false }) }}>
-            <option value="">默认 · {state?.model}</option>
-            {item.imageModel && !state?.imageModels?.some(model => model.id === item.imageModel)
+          <p className={css.assetSummary}>{item.visualIdentity || item.imagePrompt}</p>
+          <details><summary>调整{names[item.kind]} · 专业设置</summary>
+            {!item.id && <label>素材名称<input value={item.name} onChange={(event) => { edit(index, { name: event.target.value }) }} /></label>}
+            <details><summary>主体设定</summary>
+              <label>主体完整设定<textarea value={item.visualIdentity ?? item.imagePrompt}
+                onChange={(event) => { edit(index, { visualIdentity: event.target.value }) }} /></label>
+              <p>记录人物外观、场景布局或道具结构，供后续导演与分镜沿用。只换视角或局部修图时，修改下方画面描述即可。</p>
+            </details>
+            <AssetSpatialDesign item={item} assets={design.assets} onChange={(patch) => { edit(index, patch) }} />
+            <SceneLayoutEditor {...scope} key={`${projectId}:${episodeId}:${item.id ?? index}`}
+              layout={(item.kind === 'scene' ? item : design.assets.find(row => row.kind === 'scene' && row.name === item.imageStage?.sceneName))?.sceneLayout}
+              imageObjectStates={item.imageObjectStates} onObjectStates={(imageObjectStates) => { edit(index, { imageObjectStates }) }}
+              camera={item.imageCamera} ratio={item.imageAspectRatio && item.imageAspectRatio !== 'auto' ? item.imageAspectRatio : projectRatio}
+              onLayout={item.kind === 'scene' ? (sceneLayout) => { edit(index, { sceneLayout }) } : undefined}
+              onCamera={(imageCamera) => { edit(index, { imageCamera }) }} previewLayout={port.previewSceneLayout} />
+            <label>画面描述<textarea value={item.imagePrompt}
+              onChange={(event) => { edit(index, { imagePrompt: event.target.value }) }} /></label>
+            <label><input type="checkbox" checked={item.selfContainedImagePrompt ?? false}
+              onChange={(event) => { edit(index, { selfContainedImagePrompt: event.target.checked }) }} />以完整画面描述出图</label>
+            <p>{item.selfContainedImagePrompt
+              ? '请在画面描述中写齐本图可见的外观、尺度、结构、年代设定和光影。启用空间取景时，以该机位的构图图和完整描述出图，保留当前站位与连接状态；整场陈设保留给导演和后续分镜，不再次作为本图清单。未启用空间取景时也以基础画风和完整描述出图，请写齐本图需要的场景事实。'
+              : '当前沿用旧设计：主体设定和剧情依据会一起进入图片请求。让导演整理完整画面描述后，可启用上方选项，避免把其他剧情状态提前画入。'}</p>
+            <label>设计依据<textarea value={item.designBasis ?? ''} onChange={(event) => { edit(index, { designBasis: event.target.value }) }} placeholder="与本素材相关的剧本事实、年代例外、尺寸参照、结构与空间关系" /></label>
+            <label>视角与状态<input value={item.view ?? ''} onChange={(event) => { edit(index, { view: event.target.value }) }} placeholder="由导演决定，例如后侧视角、接电前状态" /></label>
+            <label>素材画幅<select value={item.imageAspectRatio ?? 'auto'} onChange={(event) => { edit(index, { imageAspectRatio: event.target.value as NonNullable<AssetDesignItem['imageAspectRatio']> }) }}>
+              <option value="auto">自动 · 新图沿用项目，修改沿用参考图</option>
+              <option value="1:1">1:1 方形</option><option value="3:4">3:4 竖幅</option><option value="4:3">4:3 横幅</option>
+              <option value="9:16">9:16 竖屏</option><option value="16:9">16:9 横屏</option>
+            </select></label>
+            <label>图片模型<select value={item.imageModel ?? ''} onChange={(event) => { edit(index, { imageModel: event.target.value || null, imagePromptExtend: false }) }}>
+              <option value="">默认 · {state?.model}</option>
+              {item.imageModel && !state?.imageModels?.some(model => model.id === item.imageModel)
               && <option value={item.imageModel}>{item.imageModel} · 当前不可用</option>}
-            {state?.imageModels?.map(model => <option key={model.id} value={model.id}>{model.name} · 最多 {model.maxReferences} 张参考{model.supportsBoxes ? ' · 支持框选' : ''}</option>)}
-          </select></label>
-          <p>只决定本张素材的取景，不改变全片画幅。全身定妆可选竖幅；背景依据中的其他剧情状态不需要同时出现在本图。</p>
-          {(item.imageModel ?? state?.model)?.startsWith('qwen-image-3.0') && <label><input type="checkbox" checked={item.imagePromptExtend ?? false}
-            onChange={(event) => { edit(index, { imagePromptExtend: event.target.checked }) }} />启用模型描述优化与思考（可能调整细节）</label>}
-          {item.id && (state?.retainedSelections?.[item.id]?.length ?? 0) > 0 && <p>描述已更新，原来采用的图片已保留。新设计是否需要换图，可在素材库比较后决定。</p>}
-          <button type="button" disabled={busy} aria-expanded={referenceEditor === index} onClick={() => { setReferenceEditor(referenceEditor === index ? undefined : index) }}>参考与局部修改 · {item.references?.length ?? 0} 张图</button>
-          {referenceEditor === index && <AssetImageReferences projectId={projectId} references={item.references ?? []}
-            port={port} disabled={busy}
-            onChange={(references) => { edit(index, { references }) }} />}
-          {item.kind === 'actor' && <label>声音身份<textarea value={item.voiceIdentity ?? ''} onChange={(event) => { edit(index, { voiceIdentity: event.target.value }) }} /></label>}
+              {state?.imageModels?.map(model => <option key={model.id} value={model.id}>{model.name} · 最多 {model.maxReferences} 张参考{model.supportsBoxes ? ' · 支持框选' : ''}</option>)}
+            </select></label>
+            <p>只决定本张素材的取景，不改变全片画幅。全身定妆可选竖幅；背景依据中的其他剧情状态不需要同时出现在本图。</p>
+            {(item.imageModel ?? state?.model)?.startsWith('qwen-image-3.0') && <label><input type="checkbox" checked={item.imagePromptExtend ?? false}
+              onChange={(event) => { edit(index, { imagePromptExtend: event.target.checked }) }} />启用模型描述优化与思考（可能调整细节）</label>}
+            {item.id && (state?.retainedSelections?.[item.id]?.length ?? 0) > 0 && <p>描述已更新，原来采用的图片已保留。新设计是否需要换图，可在素材库比较后决定。</p>}
+            <button type="button" disabled={busy} aria-expanded={referenceEditor === index} onClick={() => { setReferenceEditor(referenceEditor === index ? undefined : index) }}>参考与局部修改 · {item.references?.length ?? 0} 张图</button>
+            {referenceEditor === index && <AssetImageReferences projectId={projectId} references={item.references ?? []}
+              port={port} disabled={busy}
+              onChange={(references) => { edit(index, { references }) }} />}
+            {item.kind === 'actor' && <label>声音身份<textarea value={item.voiceIdentity ?? ''} onChange={(event) => { edit(index, { voiceIdentity: event.target.value }) }} /></label>}
+          </details>
           <button type="button" disabled={busy || dirty || !item.id || (run !== undefined && !run.assetId && !['Failed', 'Cancelled', 'Succeeded', 'Completed'].includes(run.status))}
             onClick={() => {
               void perform(async () => {

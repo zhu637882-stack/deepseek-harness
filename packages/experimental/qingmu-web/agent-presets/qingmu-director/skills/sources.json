@@ -763,7 +763,7 @@
       "license": "Apache-2.0",
       "files": {
         "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
-        "SKILL.md": "c4e1b929d8f6f3308fff00cbe7e902ad7a00cfbc51ec40ec6487dafd373da130",
+        "SKILL.md": "fbbc9e4d9f51b82daa93bdf5cae868eca7b91776b88fe881f411ea743d8f5ff8",
         "references/cinematic-image-direction.md": "b2fc8b2dd6dbd1bcf78bc2671806575352db95481796dc5cae5a5c6a6befb945",
         "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
         "agents/openai.yaml": "a007a9763e7bbcc88cf05e5a5b492d9ad5621ef582b90425ece906ce0ce12520"
@@ -775,7 +775,7 @@
         "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
         "agents/openai.yaml": "a007a9763e7bbcc88cf05e5a5b492d9ad5621ef582b90425ece906ce0ce12520"
       },
-      "adaptation": "Full asset skill and references; Qingmu scope and delegated creative-review precedence added.",
+      "adaptation": "Full asset skill and references; Qingmu scope, delegated creative review and clean movable-prop identity images separated from optional interaction references.",
       "adaptedFiles": [
         "SKILL.md"
       ]

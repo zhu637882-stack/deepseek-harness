@@ -103,6 +103,9 @@ export function NativeVideoReview({ episodeId, frameId, assetId, sha256, onSeek 
   }
   const checks = review?.audit?.audio_review?.checks
   const canRecheck = review?.designChanged || review?.methodChanged
+  const reportedChecks = [...Object.values(checks ?? {}), ...Object.values(review?.visualEvidence?.checks ?? {})]
+  const issues = reportedChecks.filter(check => check.status === 'fail').length
+  const uncertain = reportedChecks.filter(check => check.status === 'unverified' || check.evidenceIncomplete).length
   function times(ranges: readonly (readonly [number, number])[] | undefined) {
     return <div className={css.times}>{ranges?.map((range, index) => onSeek
       ? <button type="button" key={index} onClick={() => onSeek(range[0])} aria-label={`查看 ${range[0]} 至 ${range[1]} 秒`}>{range[0]}–{range[1]} 秒</button>
@@ -121,7 +124,9 @@ export function NativeVideoReview({ episodeId, frameId, assetId, sha256, onSeek 
     {review?.methodChanged && <p>
       这份旧检查没有完整的时间观察记录，可按更新后的方法重新检查；浏览和刷新不会发起检查。
     </p>}
-    {review?.state === 'complete' && <>
+    {review?.state === 'complete' && <details>
+      <summary>检查详情 · {issues} 项需调整{uncertain > 0 ? ` · ${uncertain} 项待核实` : ''}</summary>
+      {reportedChecks.length === 0 && <p>本次没有可用的逐项检查证据。</p>}
       {review.visualEvidence && <details open><summary>画面变化与定位</summary>
         <p>以下为 AI 观察，点击时间核对原视频；证据不足的判断保留为无法确认。</p>
         {review.visualEvidence.observations.length === 0 ? <p>本次没有可定位的画面观察。</p>
@@ -144,6 +149,6 @@ export function NativeVideoReview({ episodeId, frameId, assetId, sha256, onSeek 
       {review.reasons && review.reasons.length > 0 && <details><summary>画面与综合检查意见</summary>
         <ul>{review.reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul></details>}
       <p>AI 检查供参考，最终是否采用由你决定。</p>
-    </>}
+    </details>}
   </section>
 }

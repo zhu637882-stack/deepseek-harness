@@ -39,10 +39,11 @@ export function hasBatchRun(shot: BatchShot): boolean {
 }
 
 /** Reuse the ordinary candidate handoff for finished runs; registration never selects or approves a video. */
-export async function collectBatchShot(port: BatchPort, projectId: string, frameId: string): Promise<number> {
-  const runs = await port.referenceVideoRuns({ projectId, frameId })
+export async function collectBatchShot(port: BatchPort, projectId: string, frameId: string,
+  knownRuns?: readonly ReferenceVideoRun[]): Promise<number> {
+  const items = knownRuns ?? (await port.referenceVideoRuns({ projectId, frameId })).items
   let count = 0
-  for (const run of runs.items.filter(item => item.publicStatus === 'succeeded')) {
+  for (const run of items.filter(item => item.publicStatus === 'succeeded')) {
     for (const candidate of run.candidates) {
       const request = { projectId, frameId, runId: run.runId, assetId: candidate.assetId,
         expectedAssetSha256: candidate.assetSha256 }
