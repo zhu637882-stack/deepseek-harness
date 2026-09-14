@@ -261,7 +261,7 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
       <div className={styles.actions}>
         <button type="button" className={styles.primary} disabled={unavailable || pendingSubmission.length > 0 || ready.length === 0} onClick={() => { void submit() }}>
           {busy ? '正在处理…' : `批量生成 ${ready.length} 个已准备镜头`}</button>
-        <details><summary>结果同步遇到问题</summary><button type="button" disabled={unavailable} onClick={() => { void collect() }}>重新同步视频结果</button></details>
+        <details><summary>刷新视频结果</summary><button type="button" disabled={unavailable} onClick={() => { void collect() }}>重新同步视频结果</button></details>
       </div>
       <details onToggle={(event) => { setReviewOpen(event.currentTarget.open) }}><summary>整集音画检查</summary>
         {reviewOpen && <BatchVideoReview port={port} episodeId={episodeId} basis={basis} onOpenShot={onOpenShot} />}
