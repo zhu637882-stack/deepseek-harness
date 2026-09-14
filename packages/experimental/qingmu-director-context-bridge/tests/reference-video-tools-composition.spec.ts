@@ -518,6 +518,37 @@ it.each([false, true])('previews camera pixels through the shipped director loop
   if (!staged) expect({ ...value, attachment: { mediaType: value.attachment.mediaType } }).toMatchSnapshot()
 })
 
+it('recovers complete episode shots by page without requiring a selected shot', async () => {
+  const adapter = new MockAdapter([
+    toolCallResponse('first', 'qingmu_read_scene_design', { page: 1 }),
+    toolCallResponse('second', 'qingmu_read_scene_design', { page: 2 }),
+    toolCallResponse('beyond', 'qingmu_read_scene_design', { page: 4 }),
+    toolCallResponse('zero', 'qingmu_read_scene_design', { page: 0 }),
+    textResponse('完整设计已读取，保留原稿。'),
+  ])
+  const h = await harness(adapter, writer(2, undefined, undefined, '原始首帧全文，尚未伸手。'))
+  await h.run(false, { purpose: 'scene-reconcile-scene-a' })
+  for (const call of ['first', 'second']) expect(result(h.agent, call).error, result(h.agent, call).text).toBe(false)
+  const first = JSON.parse(result(h.agent, 'first').text)
+  expect(first.shots[0].imagePromptCn).toBe('原始首帧全文，尚未伸手。')
+  expect(first).toMatchSnapshot()
+  const second = JSON.parse(result(h.agent, 'second').text)
+  expect(second.shots).toHaveLength(1)
+  expect(second.shots[0].id).toBe('other-0')
+  expect(second.shots[0].directorPlan.choreography).toBe('其他镜头的完整表演与空间调度。'.repeat(400))
+  expect(second.nextPage).toBe(3)
+  expect(result(h.agent, 'beyond').error).toBe(true)
+  expect(result(h.agent, 'zero').error).toBe(true)
+  expect(h.upstream.fetch.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true)
+})
+
+it('does not infer an episode design request from an existing single-shot binding', async () => {
+  const h = await harness(new MockAdapter([toolCallResponse('read', 'qingmu_read_scene_design', { page: 1 }), textResponse('Use the current project request.')]))
+  await h.run(true)
+  expect(result(h.agent, 'read').error).toBe(true)
+  expect(result(h.agent, 'read').text).toContain('Start scene or episode design')
+})
+
 it('reads saved episode geography and actual image pixels before any shot exists', async () => {
   const adapter = new MockAdapter([
     toolCallResponse('assets', 'qingmu_read_asset_design', { page: 1 }),

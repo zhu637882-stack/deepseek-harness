@@ -17,7 +17,7 @@ import { readReferenceImage } from './reference-image.ts'
 import { inspectReferenceImage, type ReferenceVisionConfig } from './reference-vision.ts'
 import { creativeRequest } from './creative-request.ts'
 import { readDraftImages, readImageInputs, type DraftImageInput } from './reference-draft-images.ts'
-import type { AssetDesignState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import type { AssetDesignState, ScenePlanningState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 
 // Keep catalog pages small; the exact frozen description accompanies inspection of one image.
 function imageCatalogEntry(item: ReferenceVideoAsset) {
@@ -206,8 +206,34 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
         assets: { page: catalog.page, pages: catalog.pages,
           items: catalog.items.filter(item => item.mediaType === 'reference_image')
             .map(imageCatalogEntry) },
-        referenceGuidance: 'visualInputs follows the saved design’s exact references and stated currentUses, not catalog recency or media approval. Those purposes decide which appearance, identity or geometry an image contributes; a reference limited to appearance does not override an authored layout. Its current purpose differs from the historical generation description available by explicit inspection. Catalog source records distinguish selected, unselected, stale and reviewed candidates and their owning entity. Missing fields are unknown. Neither selected nor quality passed proves creative acceptance or matching geometry. Different candidates are competing proposals, not automatically matching views of one room. Do not union every candidate into the scene.',
+        referenceGuidance: 'visualInputs follows the saved asset design’s exact generation-input references and stated currentUses. An input may be the original image being repaired; its continued presence does not mean the corrected output is missing or that later shots must use the original. Read the requested corrections and inspect the corresponding owned output candidate before declaring a source conflict. Do not rewrite generation provenance to point at its own output. Choose later-shot references from inspected candidates that satisfy the current design and user decisions, not recency alone. Those purposes decide which appearance, identity or geometry an image contributes; a reference limited to appearance does not override an authored layout. Its current purpose differs from the historical generation description available by explicit inspection. Catalog source records distinguish selected, unselected, stale and reviewed candidates and their owning entity. Missing fields are unknown. Neither selected nor quality passed proves creative acceptance or matching geometry. Different candidates are competing proposals, not automatically matching views of one room. Do not union every candidate into the scene.',
         generationQueued: false, selectionChanged: false })
+    },
+  }))
+  ctx.tools.register(defineTool({
+    name: 'qingmu_read_scene_design',
+    description: 'Read one complete saved shot and the episode shot index during scene or episode design, including after conversation compaction. No single-shot selection is needed. The current creative request fixes project and episode. Use page to recover exact imagePromptCn, dialogue, duration and full directorPlan without reconstructing them from memory. Read relevant adjacent pages for continuity. Compare source hashes with the current request; saved reads do not replace newer unsaved input. No save, generation or adoption.',
+    parameters: { page: { type: 'integer', required: true, description: 'Shot page starting at 1, one complete shot per page; the index and nextPage locate other shots.' } }, output,
+    presentCall: () => ({ card: 'generic', kind: 'read', title: '读取本集完整镜头设计' }),
+    async execute(args, exec) {
+      exactKeys(args, ['page'])
+      if (!Number.isSafeInteger(args.page) || args.page < 1) throw new Error('Use a positive page.')
+      const target = creativeRequest(exec)
+      if (!target) throw new Error('Start scene or episode design from the current project before reading its shots.')
+      const scope = { projectId: target.projectId, episodeId: target.episodeId }
+      const read = await ctx.qingmuYimengCommand('readScenePlanning', scope, exec.signal)
+      exec.signal.throwIfAborted()
+      if (!read.ok) throw new Error(`Current scene design unavailable: ${read.error.message}`)
+      const saved = read.value as ScenePlanningState
+      const shots = saved.frameRequirements ?? saved.canonicalStoryboard?.shots ?? []
+      if (args.page > Math.max(1, shots.length)) throw new Error('Shot page is beyond the current episode.')
+      return ports.boundedJson({ scope, scriptRevision: saved.scriptRevision, scriptSha256: saved.scriptSha256,
+        storyboard: saved.storyboard, aspectRatio: saved.aspectRatio ?? null,
+        page: args.page, pages: Math.max(1, shots.length), total: shots.length,
+        nextPage: args.page < shots.length ? args.page + 1 : null,
+        index: shots.map((shot, index) => ({ page: index + 1, id: shot.id,
+          sceneId: shot.sceneId ?? null, frameNo: shot.frameNo, title: shot.title })),
+        shots: shots.slice(args.page - 1, args.page), saved: true, generationQueued: false, selectionChanged: false })
     },
   }))
   ctx.tools.register(defineTool({

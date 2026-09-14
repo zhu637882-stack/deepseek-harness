@@ -59,6 +59,7 @@ exports[`authors a first-draft suggestion through the shipped preset and actual 
     "qingmu_read_prompt_draft",
     "qingmu_read_reference_draft",
     "qingmu_read_reference_video_candidates",
+    "qingmu_read_scene_design",
     "qingmu_read_skill_resource",
     "qingmu_read_working_cut",
     "qingmu_save_director_plan",

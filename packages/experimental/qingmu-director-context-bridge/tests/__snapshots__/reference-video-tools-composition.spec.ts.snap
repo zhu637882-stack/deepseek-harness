@@ -545,7 +545,7 @@ exports[`reads saved episode geography and actual image pixels before any shot e
     "pages": 1,
   },
   "generationQueued": false,
-  "referenceGuidance": "visualInputs follows the saved design’s exact references and stated currentUses, not catalog recency or media approval. Those purposes decide which appearance, identity or geometry an image contributes; a reference limited to appearance does not override an authored layout. Its current purpose differs from the historical generation description available by explicit inspection. Catalog source records distinguish selected, unselected, stale and reviewed candidates and their owning entity. Missing fields are unknown. Neither selected nor quality passed proves creative acceptance or matching geometry. Different candidates are competing proposals, not automatically matching views of one room. Do not union every candidate into the scene.",
+  "referenceGuidance": "visualInputs follows the saved asset design’s exact generation-input references and stated currentUses. An input may be the original image being repaired; its continued presence does not mean the corrected output is missing or that later shots must use the original. Read the requested corrections and inspect the corresponding owned output candidate before declaring a source conflict. Do not rewrite generation provenance to point at its own output. Choose later-shot references from inspected candidates that satisfy the current design and user decisions, not recency alone. Those purposes decide which appearance, identity or geometry an image contributes; a reference limited to appearance does not override an authored layout. Its current purpose differs from the historical generation description available by explicit inspection. Catalog source records distinguish selected, unselected, stale and reviewed candidates and their owning entity. Missing fields are unknown. Neither selected nor quality passed proves creative acceptance or matching geometry. Different candidates are competing proposals, not automatically matching views of one room. Do not union every candidate into the scene.",
   "saved": {
     "design": {
       "assets": [
@@ -632,6 +632,63 @@ exports[`reconciles a changed complete design into one final native reference dr
     },
   ],
   "sourceReadSucceeded": true,
+}
+`;
+
+exports[`recovers complete episode shots by page without requiring a selected shot 1`] = `
+{
+  "aspectRatio": null,
+  "generationQueued": false,
+  "index": [
+    {
+      "frameNo": 1,
+      "id": "f",
+      "page": 1,
+      "sceneId": null,
+      "title": "咖啡馆",
+    },
+    {
+      "frameNo": 2,
+      "id": "other-0",
+      "page": 2,
+      "sceneId": null,
+      "title": "咖啡馆",
+    },
+    {
+      "frameNo": 3,
+      "id": "other-1",
+      "page": 3,
+      "sceneId": null,
+      "title": "咖啡馆",
+    },
+  ],
+  "nextPage": 2,
+  "page": 1,
+  "pages": 3,
+  "saved": true,
+  "scope": {
+    "episodeId": "episode-a",
+    "projectId": "p",
+  },
+  "scriptRevision": 1,
+  "scriptSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "selectionChanged": false,
+  "shots": [
+    {
+      "directorPlan": {},
+      "frameNo": 1,
+      "id": "f",
+      "imagePromptCn": "原始首帧全文，尚未伸手。",
+      "title": "咖啡馆",
+    },
+  ],
+  "storyboard": {
+    "id": "revision-1",
+    "sourceHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "status": "Ready",
+    "version": 1,
+  },
+  "total": 3,
 }
 `;
 
