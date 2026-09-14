@@ -26,8 +26,12 @@ function parseDesign(text: string, incomplete = false, previous?: AssetDesign): 
   for (const entry of value.assets as unknown[]) {
     const item = entry as Record<string, unknown> | null
     if (!item || typeof item !== 'object' || (typeof item.kind !== 'string' || !['actor', 'scene', 'prop'].includes(item.kind))
-      || typeof item.name !== 'string' || (!incomplete && !item.name.trim())
-      || typeof item.imagePrompt !== 'string' || (!incomplete && !item.imagePrompt.trim())) throw new Error('素材设计缺少类型、名称或画面描述。')
+      || typeof item.name !== 'string' || (!incomplete && !item.name.trim())) throw new Error('素材设计缺少类型、名称或画面描述。')
+    if (!Object.hasOwn(item, 'imagePrompt') && previous) {
+      const matches = previous.assets.filter(row => row.kind === item.kind && (item.id ? row.id === item.id : row.name === item.name))
+      if (matches.length === 1) item.imagePrompt = matches[0]?.imagePrompt
+    }
+    if (typeof item.imagePrompt !== 'string' || (!incomplete && !item.imagePrompt.trim())) throw new Error('素材设计缺少类型、名称或画面描述。')
     if (item.selfContainedImagePrompt !== undefined && typeof item.selfContainedImagePrompt !== 'boolean') throw new Error('完整画面描述选项需要是布尔值。')
     // Native drafts may use null for a field that does not apply to this asset.
     // Preserve omission for incremental edits; explicit null clears the voice.

@@ -701,3 +701,28 @@ it('keeps technical fields collapsed without losing edits or triggering generati
   expect(port.saveAssetDesign.mock.calls[0]).toMatchObject([{ design: { assets: [{ imagePrompt: '保留我的定妆修改' }] } }])
   expect(port.generateAssetImage).not.toHaveBeenCalled()
 })
+
+
+it.each(['matched', 'unknown-id', 'blank-prompt'] as const)('adopts reference-only native revisions only for a known existing asset: %s', async (mode) => {
+  const port = setup()
+  const references = [{ assetId: 'asset_ref', assetSha256: 'e'.repeat(64), purpose: '保留脸与服装，双手空置', boxes: [] }]
+  const revision = { assets: [{ kind: 'actor', id: mode === 'unknown-id' ? 'actor_other' : 'actor_1', name: '父亲', references,
+    ...(mode === 'blank-prompt' ? { imagePrompt: '' } : {}) }] }
+  localStorage.setItem('qingmu.asset-design-session.v1:p:e', JSON.stringify({ sessionId: 'session_design', baseline: 0, submitted: true }))
+  const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
+    read: vi.fn(async () => ({ text: '', script: JSON.stringify(revision), lastSeq: 10, running: false, finished: true, error: '' })) }
+  render(<NativeAssetDesign {...scope} port={port} storyPort={storyPort} onGenerated={vi.fn()} />)
+  fireEvent.click(await screen.findByRole('button', { name: '采用到素材卡片' }))
+  if (mode === 'matched') {
+    fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
+    await waitFor(() => { expect(port.saveAssetDesign).toHaveBeenCalledTimes(1) })
+    expect(port.saveAssetDesign).toHaveBeenCalledWith(expect.objectContaining({ design: expect.objectContaining({
+      assets: [expect.objectContaining({ ...state.design!.assets[0], references })], director: state.design!.director,
+    }) }))
+  } else {
+    expect(await screen.findByText(/没有采用：素材设计缺少类型、名称或画面描述/)).toBeTruthy()
+    expect(port.saveAssetDesign).not.toHaveBeenCalled()
+  }
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+  expect(storyPort.send).not.toHaveBeenCalled()
+})

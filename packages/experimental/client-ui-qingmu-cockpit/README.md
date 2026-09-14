@@ -445,3 +445,5 @@ Batch commands survive closing the original tab in project/episode-scoped localS
 The existing full-cut review also displays timed observations for adjacent space, cast, props, action and voice. Missing or one-sided evidence remains unverified. Reports stay bound to the rendered version; old sound-only reports are retained and never presented as continuity checks. Submitting the current method is explicit. Batch generation is prominent; shot-level controls and single-shot reference editing expand on demand.
 
 素材修订要求导演从项目图片目录取得实际编号和 SHA，将需要保持身份或外观的原图写入生成引用，并说明保留内容和纠正范围；视觉观察本身不会建立生成引用。
+
+原生素材增量修订可只更新引用；类型与唯一已有实体匹配时，缺省画面描述沿用保存值。新素材、未知编号和明确空描述仍须补齐描述，不能借合并改变另一实体。
