@@ -10,7 +10,7 @@ Reload restored a native batch candidate but discarded the operator's supplement
 
 ## Decision
 
-Persist the existing input in local browser storage by project and episode, and restore it on remount. A storage failure leaves the current input usable and reports that it has not been saved. No generation or adoption is triggered by restoration.
+Persist the existing input in local browser storage by project and episode, and restore it on remount. A storage failure leaves the current input usable and reports that it has not been saved. No generation or adoption is triggered by restoration. An unchanged instruction already embedded in a saved draft can resume preparation without another director revision; changed instructions still require a revised draft.
 
 ## Alternatives considered
 
@@ -20,4 +20,4 @@ Persist the existing input in local browser storage by project and episode, and 
 
 ## Consequences
 
-Seven batch component tests pass, including remount recovery and episode isolation. Browser-local recovery does not promise cross-device synchronization.
+Twenty focused batch tests pass, including remount recovery, episode isolation and unchanged-feedback resumption. Browser-local recovery does not promise cross-device synchronization.

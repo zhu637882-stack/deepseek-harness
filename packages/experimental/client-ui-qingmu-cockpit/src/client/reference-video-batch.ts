@@ -50,7 +50,10 @@ export function batchShotIncluded(shot: BatchShot, retakes: ReadonlySet<string>)
 /** A saved draft is reusable only while its director and shot sources still match. */
 export function needsBatchDesign(shot: BatchShot, feedback = ''): boolean {
   const { draft, directorSource, frameSha256 } = shot.saved
-  return Boolean(feedback.trim()) || !draft || (draft.frameSha256 !== undefined && draft.frameSha256 !== frameSha256)
+  const requestedFeedback = feedback.trim() && `\n【本次修改意见】\n${feedback.trim()}`
+  const feedbackChanged = requestedFeedback && !draft?.request.promptParts.some(part =>
+    'text' in part && part.text === requestedFeedback)
+  return Boolean(feedbackChanged) || !draft || (draft.frameSha256 !== undefined && draft.frameSha256 !== frameSha256)
     || (directorSource !== null && directorSource !== undefined && draft.request.directorSourceSha256 !== directorSource.sha256)
 }
 

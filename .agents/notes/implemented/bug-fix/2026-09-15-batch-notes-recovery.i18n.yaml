@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-15-batch-notes-recovery.md
-2026-09-15-batch-notes-recovery.md: 84ce8e5ba17b3db46db9719f39898edddae48edd
-2026-09-15-batch-notes-recovery.zh.md: 38f1266bc17ccfcbb94c4c40abe89aa83c2b22be
+2026-09-15-batch-notes-recovery.md: e80fd472417a950ebbd43520f4ab8e2b21e38cc1
+2026-09-15-batch-notes-recovery.zh.md: 9355e66b6ab9f171f3b3eb04e6da8881fab54ea0
