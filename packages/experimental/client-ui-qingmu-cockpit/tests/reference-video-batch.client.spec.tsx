@@ -177,3 +177,27 @@ it('restores an unfinished batch after closing the tab without regenerating the 
   await waitFor(() => { expect(queue).toHaveBeenCalledTimes(2) })
   expect(queue.mock.calls.map(call => call[0].frameId)).toEqual(['f', 'f2'])
 })
+
+
+it('restores batch instructions after remount and isolates episodes', async () => {
+  const port = {
+    referenceVideoAssets: async () => ({ pages: 1, items: [] }),
+    referenceVideoDraft: async () => ({ draft: null }),
+    referenceVideoRuns: async () => ({ items: [] }),
+  } as unknown as BatchPort
+  const props = { projectId: 'p', episodeId: 'e', aspectRatio: '16:9', port, onOpenShot: vi.fn(),
+    relations: { projectId: 'p', shots: [{ shotId: 'f', frameNo: 1, durationSec: 8 }] } as never }
+  const view = render(<ReferenceVideoBatch {...props} />)
+  await waitFor(() => { expect(screen.getByText('本集 1 镜 · 可生成 0 镜')).toBeTruthy() })
+  fireEvent.click(screen.getByText('补充要求（可选）'))
+  fireEvent.change(screen.getByLabelText('本次补充'), { target: { value: '保留各角色声音，不添加旁观者' } })
+  view.unmount()
+  const restored = render(<ReferenceVideoBatch {...props} />)
+  await waitFor(() => { expect(screen.getByText('本集 1 镜 · 可生成 0 镜')).toBeTruthy() })
+  fireEvent.click(screen.getByText('补充要求（可选）'))
+  expect((screen.getByLabelText('本次补充') as HTMLTextAreaElement).value).toBe('保留各角色声音，不添加旁观者')
+  restored.rerender(<ReferenceVideoBatch {...props} episodeId="another" />)
+  expect((screen.getByLabelText('本次补充') as HTMLTextAreaElement).value).toBe('')
+  restored.rerender(<ReferenceVideoBatch {...props} />)
+  expect((screen.getByLabelText('本次补充') as HTMLTextAreaElement).value).toBe('保留各角色声音，不添加旁观者')
+})

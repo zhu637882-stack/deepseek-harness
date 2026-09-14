@@ -28,7 +28,15 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
   const [syncing, setSyncing] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
-  const [notes, setNotes] = useState('')
+  const notesKey = `qingmu.reference-video-batch-notes.v1:${projectId}:${episodeId}`
+  const readNotes = () => { try { return localStorage.getItem(notesKey) ?? '' } catch { return '' } }
+  const [instructions, setInstructions] = useState(() => ({ key: notesKey, text: readNotes() }))
+  const notes = instructions.key === notesKey ? instructions.text : readNotes()
+  const setNotes = (text: string) => {
+    setInstructions({ key: notesKey, text })
+    try { localStorage.setItem(notesKey, text) }
+    catch { setError('本次补充暂未保存到浏览器，离开前请保留内容。') }
+  }
   const [retakes, setRetakes] = useState<ReadonlySet<string>>(new Set())
   const [pendingSubmission, setPendingSubmission] = useState<readonly BatchSubmissionItem[]>([])
   const submissionKey = batchSubmissionKey(projectId, episodeId)
