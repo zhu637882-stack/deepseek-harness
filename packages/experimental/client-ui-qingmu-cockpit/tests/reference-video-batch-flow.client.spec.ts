@@ -234,9 +234,10 @@ it('resumes a saved draft with unchanged feedback without another director revis
   const b = basis()
   const feedback = '保留庭院与每位演员原声线'
   const requests = parseBatchChoices(JSON.stringify({ shots: ['f', 'f2'].map(choice) }), b, new Set(), feedback)
-  const shot = b.shots[0]!
-  shot.saved.draft = { revision: 1, frameSha256: shot.saved.frameSha256, requestSha256: 'd'.repeat(64),
-    request: requests[0]!, savedAt: '2026-09-15T00:00:00Z' }
+  const original = b.shots[0]!
+  const shot = { ...original, saved: { ...original.saved,
+    draft: { revision: 1, frameSha256: original.saved.frameSha256, requestSha256: 'd'.repeat(64),
+      request: requests[0]!, savedAt: '2026-09-15T00:00:00Z' } } }
   expect(needsBatchDesign(shot, feedback)).toBe(false)
   expect(needsBatchDesign(shot, '修改后的表演要求')).toBe(true)
   expect(needsBatchDesign({ ...shot, saved: { ...shot.saved, directorSource: { ...source, sha256: 'b'.repeat(64) } } }, feedback)).toBe(true)
