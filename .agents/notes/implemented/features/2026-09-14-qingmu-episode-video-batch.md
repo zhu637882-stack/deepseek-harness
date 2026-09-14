@@ -17,3 +17,5 @@ A new batch database, scheduler and approval framework would duplicate the curre
 ## Consequences
 
 Preparation can report a per-shot failure while other shots remain usable. A batch action does not approve resulting media or claim every optional creative method applies to each shot. Focused tests cover sound preservation, missing/duplicate references, multiple queued shots, existing candidates and lost-response recovery; the native preset example records an episode plan through the real writing loop. Live generation quality remains separate from these checks.
+
+The same batch workspace collects completed runs into the existing shot review stack through the normal registration ports, retaining already registered candidates and leaving running tasks alone. Collection never selects or approves a video.

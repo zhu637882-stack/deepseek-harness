@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { NativeStoryPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft'
 import type { ReferenceVideoQuoteResponse, YimengShotRelationsProjection } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import { NativeStoryComposer } from './NativeStoryComposer.tsx'
-import { hasBatchRun, parseBatchChoices, prepareBatchShot, readBatchBasis, submitBatchShot, type BatchBasis, type BatchPort } from './reference-video-batch.ts'
+import { collectBatchShot, hasBatchRun, parseBatchChoices, prepareBatchShot, readBatchBasis, submitBatchShot, type BatchBasis, type BatchPort } from './reference-video-batch.ts'
 
 /** Prepare shared sources once, retain existing shots, and queue all ready videos without waiting for each render. */
 export function ReferenceVideoBatch({ projectId, episodeId, relations, port, storyPort, onOpenShot, aspectRatio }: {
@@ -73,6 +73,19 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
       }
     } finally { lock.current = false; if (isActive()) setBusy(false) }
   }
+  async function collect() {
+    if (lock.current || !basis) return
+    lock.current = true; setBusy(true)
+    try {
+      for (const shot of basis.shots) {
+        if (!isActive()) break
+        try {
+          const count = await collectBatchShot(port, projectId, shot.frameId)
+          if (count) mark(shot.frameId, `${count} 条视频已进入本镜候选审看`)
+        } catch (cause) { mark(shot.frameId, String(cause)) }
+      }
+    } finally { lock.current = false; if (isActive()) setBusy(false) }
+  }
   const missing = basis?.shots.filter(shot => !hasBatchRun(shot) && !shot.saved.draft) ?? []
   const source = JSON.stringify(basis && { shots: missing.map(shot => ({ frameId: shot.frameId, label: shot.label,
     duration: shot.duration, source: shot.saved.directorSource && { sha256: shot.saved.directorSource.sha256,
@@ -100,6 +113,7 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
         onClick={() => { onOpenShot(shot.frameId) }}>{shot.label}</button>：{messages.get(shot.frameId)}</li>)}</ul>
       <button type="button" disabled={busy || ready.length === 0} onClick={() => { void submit() }}>
         {busy ? '正在处理…' : `批量生成 ${ready.length} 个已准备镜头`}</button>
+      <button type="button" disabled={busy} onClick={() => { void collect() }}>收取已完成视频到审看</button>
       {ready.length > 0 && <small>阿里视频生成 · 每镜一条候选 · 预计 ¥
         {ready.reduce((sum, quote) => sum + Number(quote.cost.estimatedCny), 0).toFixed(2)}</small>}
     </>}

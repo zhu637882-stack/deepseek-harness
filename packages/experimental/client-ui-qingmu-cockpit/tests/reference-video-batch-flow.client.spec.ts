@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { expect, it, vi, beforeEach } from 'vitest'
-import { readBatchBasis, parseBatchChoices, prepareBatchShot, submitBatchShot, hasBatchRun, type BatchBasis, type BatchPort } from '../src/client/reference-video-batch.ts'
+import { collectBatchShot, readBatchBasis, parseBatchChoices, prepareBatchShot, submitBatchShot, hasBatchRun, type BatchBasis, type BatchPort } from '../src/client/reference-video-batch.ts'
 import { request, quoteResponse } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
 
 const source = { sha256: 'e'.repeat(64), prompt: '研究：下一镜才开门', generationPrompt: '角色保持原服装。0秒敲锣，铜锣余响。对白：请进。' }
@@ -13,6 +13,21 @@ function basis(): BatchBasis {
 }
 const choice = (frameId: string) => ({ frameId, references: [{ assetId: 'asset_lin', purpose: '本镜角色身份与衣服' }], parameters: request.parameters })
 beforeEach(() => sessionStorage.clear())
+
+it('collects completed outputs into review once, skipping running videos and retaining registered candidates', async () => {
+  const register = vi.fn(async () => ({ takeId: 'take_new' }))
+  const port = {
+    referenceVideoRuns: async () => ({ items: [
+      { runId: 'r1', publicStatus: 'succeeded', candidates: [{ assetId: 'old', assetSha256: 'a'.repeat(64) }] },
+      { runId: 'r2', publicStatus: 'succeeded', candidates: [{ assetId: 'new', assetSha256: 'b'.repeat(64) }] },
+      { runId: 'r3', publicStatus: 'running', candidates: [] },
+    ] }),
+    readReferenceVideoCandidateRegistration: async ({ assetId }: { assetId: string }) => ({ takeId: assetId === 'old' ? 'take_old' : null }),
+    registerReferenceVideoCandidateForReview: register,
+  } as unknown as BatchPort
+  expect(await collectBatchShot(port, 'p', 'f')).toBe(2)
+  expect(register).toHaveBeenCalledExactlyOnceWith({ projectId: 'p', frameId: 'f', runId: 'r2', assetId: 'new', expectedAssetSha256: 'b'.repeat(64) })
+})
 
 it('assembles every shot from real references while keeping dialogue and synchronized sound exactly once', () => {
   const requests = parseBatchChoices(JSON.stringify({ shots: ['f', 'f2'].map(choice) }), basis())

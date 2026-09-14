@@ -16,7 +16,8 @@ export interface BatchBasis {
   readonly assets: readonly ReferenceVideoAsset[]
 }
 export type BatchPort = Pick<QingmuYimengPort, 'referenceVideoDraft' | 'referenceVideoRuns' | 'referenceVideoAssets'
-  | 'saveReferenceVideoDraft' | 'readReferenceVideoMaterials' | 'prepareReferenceVideoMaterial' | 'referenceVideoQuote' | 'queueReferenceVideo'>
+  | 'saveReferenceVideoDraft' | 'readReferenceVideoMaterials' | 'prepareReferenceVideoMaterial' | 'referenceVideoQuote' | 'queueReferenceVideo'
+  | 'readReferenceVideoCandidateRegistration' | 'registerReferenceVideoCandidateForReview'>
 
 /** Read all shot sources and the actual project catalog without generating or changing selections. */
 export async function readBatchBasis(port: BatchPort, projectId: string,
@@ -35,6 +36,23 @@ export async function readBatchBasis(port: BatchPort, projectId: string,
 /** Existing videos and in-flight tasks are preserved; retries remain a shot-level decision. */
 export function hasBatchRun(shot: BatchShot): boolean {
   return shot.runs.some(run => run.publicStatus !== 'failed')
+}
+
+/** Reuse the ordinary candidate handoff for finished runs; registration never selects or approves a video. */
+export async function collectBatchShot(port: BatchPort, projectId: string, frameId: string): Promise<number> {
+  const runs = await port.referenceVideoRuns({ projectId, frameId })
+  let count = 0
+  for (const run of runs.items.filter(item => item.publicStatus === 'succeeded')) {
+    for (const candidate of run.candidates) {
+      const request = { projectId, frameId, runId: run.runId, assetId: candidate.assetId,
+        expectedAssetSha256: candidate.assetSha256 }
+      const current = await port.readReferenceVideoCandidateRegistration(request)
+      const result = current.takeId === null ? await port.registerReferenceVideoCandidateForReview(request) : current
+      if (result.takeId === null) throw new Error('候选审看登记尚未确认，请刷新原结果。')
+      count++
+    }
+  }
+  return count
 }
 
 /** Resolve model-authored reference choices through real assets and append the saved director text once. */
