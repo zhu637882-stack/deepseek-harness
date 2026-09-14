@@ -10,7 +10,7 @@ During a real batch preparation, the visual observer called a wall-mounted board
 
 ## Decision
 
-The observer separates visible structure from inferred purpose, including ambiguous panels and openings. Batch selection compares the requested correction, remaining defects and new defects across versions; an inferred label alone cannot justify returning to a known defective version. The existing prompt-based observation digest prevents reuse of observations made under the previous instructions.
+The observer separates visible structure from inferred purpose, including ambiguous panels and openings, and does not invent compass directions without an orientation reference. Batch selection compares the requested correction, remaining defects and new defects across versions; an inferred label alone cannot justify returning to a known defective version. The existing prompt-based observation digest prevents reuse of observations made under the previous instructions.
 
 ## Alternatives considered
 
