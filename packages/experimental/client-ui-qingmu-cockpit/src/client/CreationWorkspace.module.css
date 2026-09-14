@@ -5,7 +5,7 @@
 .workspace p { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .workspace label { display: grid; gap: 6px; font-weight: 500; }
 .workspace input, .workspace select, .workspace textarea { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; background: var(--dsw-alias-bg-layer-2); color: inherit; padding: 10px 12px; font: inherit; }
-.workspace textarea { min-height: 208px; resize: vertical; }
+.workspace textarea { --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); min-height: 208px; resize: vertical; }
 .workspace button { border: 1px solid var(--dsw-alias-border-l2); border-radius: 7px; background: var(--dsw-alias-bg-layer-2); color: inherit; min-height: 40px; padding: 8px 14px; cursor: pointer; font: inherit; }
 .workspace button:hover:not(:disabled) { border-color: var(--qingmu-accent); }
 .workspace .primary { background: var(--qingmu-accent); border-color: var(--qingmu-accent); color: #10170b; }
