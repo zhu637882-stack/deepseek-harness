@@ -473,6 +473,22 @@ export function ScenePlanningWorkspace({
     proposalEpoch.current += 1
     setProposal(null); setIgnoredProposalItems([]); setAdoptedProposalItems([]); setProposalBusy(false)
   }
+  // A source refresh updates context, but only a selection/connection change releases the browser lease.
+  useEffect(() => {
+    if (!directorBridge || !directorSessionId || !directorScope || !connection) return
+    const ownerId = crypto.randomUUID()
+    directorOwner.current = ownerId
+    return () => {
+      if (directorOwner.current === ownerId) directorOwner.current = undefined
+      if (directorConnection && !directorConnection.getSnapshot()) return
+      void directorBridge.clear(directorSessionId, directorScope, ownerId).catch(() => {
+        if (live.current && directorOwner.current === undefined) {
+          setError('导演上下文解除未确认；请重新选择镜头后再使用助手。人工编辑不受影响。')
+        }
+      })
+    }
+  }, [directorBridge, directorSessionId, projectId, episodeId, directorScope?.sceneId, directorScope?.shotId,
+    connection, directorConnection])
   useEffect(() => {
     clearProposal()
     setDirectorReadyIdentity(null)
@@ -485,8 +501,8 @@ export function ScenePlanningWorkspace({
       return
     }
     const operation = new AbortController()
-    const ownerId = crypto.randomUUID()
-    directorOwner.current = ownerId
+    const ownerId = directorOwner.current
+    if (!ownerId) return
     const epoch = proposalEpoch.current
     setDirectorBinding(null); setDirectorStatus('connecting')
     void directorBridge.enter(directorSessionId, directorScope, operation.signal, ownerId).then((result) => {
@@ -502,18 +518,7 @@ export function ScenePlanningWorkspace({
         setDirectorBinding(null); setDirectorStatus('unavailable')
       }
     })
-    return () => {
-      operation.abort()
-      if (directorOwner.current === ownerId) directorOwner.current = undefined
-      // Cleanup uses its own lease: a late old view cannot clear a newer view,
-      // including a newer selection of the same shot. No business state is edited.
-      if (directorConnection && !directorConnection.getSnapshot()) return
-      void directorBridge.clear(directorSessionId, directorScope, ownerId).catch(() => {
-        if (live.current && directorOwner.current === undefined) {
-          setError('导演上下文解除未确认；请重新选择镜头后再使用助手。人工编辑不受影响。')
-        }
-      })
-    }
+    return () => { operation.abort() }
   }, [directorBridge, directorSessionId, hostSync, projectId, episodeId, directorScope?.sceneId, directorScope?.shotId,
     canonicalDirectorRevision, connection, directorConnection, directorRefresh, directorIdentityKey])
   useEffect(() => {

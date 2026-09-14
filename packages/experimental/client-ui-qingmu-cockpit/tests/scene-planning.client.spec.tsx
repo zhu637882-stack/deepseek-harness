@@ -551,9 +551,9 @@ it('refreshes the same canonical shot when its source revision changes and clear
   const owner1 = bridge.enter.mock.calls[0]?.[3]
   view.rerender(<ScenePlanningWorkspace {...props} canonicalDirectorRevision="revision2" />)
   await waitFor(() => { expect(bridge.enter).toHaveBeenCalledTimes(2) })
-  expect(bridge.clear).toHaveBeenLastCalledWith('session_1', scope, owner1)
+  expect(bridge.clear).not.toHaveBeenCalled()
   const owner2 = bridge.enter.mock.calls[1]?.[3]
-  expect(owner2).not.toBe(owner1)
+  expect(owner2).toBe(owner1)
   view.unmount()
   expect(bridge.clear).toHaveBeenLastCalledWith('session_1', scope, owner2)
 })
@@ -573,6 +573,8 @@ it('rebinds after reconnect or explicit refresh without reviving stale replies o
   bridge.enter.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
   view.rerender(<ScenePlanningWorkspace {...props} directorRefresh={1} />)
   await screen.findByText('正在核对当前镜头上下文…')
+  expect(bridge.enter.mock.calls[1]?.[3]).toBe(firstOwner)
+  expect(bridge.clear).not.toHaveBeenCalled()
   const clearsBeforeOffline = bridge.clear.mock.calls.length
   act(() => { transport.publish(false) })
   await screen.findByText('导演助理暂不可用；人工编辑与保存不受影响。')
