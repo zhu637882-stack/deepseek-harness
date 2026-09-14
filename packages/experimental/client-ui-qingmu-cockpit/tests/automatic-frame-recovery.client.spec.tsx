@@ -30,7 +30,7 @@ it.each([false, true])('recovers an explicit complete-still mode change from %s 
   fireEvent.click(screen.getByRole('button', { name: '保存当前要求' }))
   await screen.findByRole('button', { name: '查看原保存结果' })
   const pending = (JSON.parse(localStorage.getItem('qingmu.scene-planning.v1:p:e:automatic-frame:target')!) as { pending: ScenePlanningRequest }).pending
-  expect(pending.request.directorPlan).toEqual({ selfContainedImagePrompt: !initial })
+  expect(pending.request).toMatchObject({ action: 'edit_requirements', directorPlan: { selfContainedImagePrompt: !initial } })
   view.unmount(); mount()
   const restored = await screen.findByRole<HTMLInputElement>('checkbox', { name: '以完整首帧描述出图' })
   expect(restored.checked).toBe(!initial)
