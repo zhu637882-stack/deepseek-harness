@@ -347,7 +347,10 @@ export function prepareScenePlanning(endpoint: string, value: unknown, helpers: 
       if (r.applyDirectorPlan !== undefined && (r.applyDirectorPlan !== true || obj(r.shot, f).directorPlan === undefined)) throw f('director plan application invalid')
     } else if (r.action !== 'edit_automatic' && r.action !== 'edit_requirements') throw f('planning action invalid')
     const encoded = canonicalPlanningJson(r, f)
-    if (Buffer.byteLength(encoded) > 98304) throw f('planning payload too large')
+    // A whole scene carries up to 64 independently bounded directing plans.
+    // Keep single-shot edits small, but do not truncate a complete scene to fit one.
+    const maxBytes = r.action === 'initialize' ? 4 * 1024 * 1024 : 98304
+    if (Buffer.byteLength(encoded) > maxBytes) throw f('planning payload too large')
     requestSha = createHash('sha256').update(encoded).digest('hex')
     if (recover) path += `/receipt?${new URLSearchParams({ idempotencyKey: key, requestSha256: requestSha }).toString()}`
     else { path += '/commands'; body = { idempotencyKey: key, request: JSON.parse(encoded) as YimengCommandJsonObject } }

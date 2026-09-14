@@ -101,6 +101,35 @@ describe('bounded scene planning Host channel', () => {
     expect(fetch.mock.calls[1]?.[1]?.method).toBe('GET')
     expect(fetch.mock.calls[1]?.[0]).toMatch(/receipt\?idempotencyKey=planning-1&requestSha256=[a-f0-9]{64}$/)
   })
+  it('preserves a complete Chinese scene over 96 KiB and recovers the same intent without resubmitting', async () => {
+    const payload = { ...request, request: { ...request.request, shots: Array.from({ length: 23 }, (_, index) => ({
+      ...request.request.shots[0]!, title: `镜头${String(index + 1)}`,
+      directorPlan: { generationContext: '本段完整空间、表演、声音与连续性设计。'.repeat(100) },
+    })) } }
+    expect(Buffer.byteLength(JSON.stringify(payload.request))).toBeGreaterThan(98304)
+    const { handler, fetch } = setup()
+    await handler('saveScenePlanning', payload, new AbortController().signal)
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(requestBody(fetch.mock.calls[0]?.[1]?.body).request).toEqual(payload.request)
+    await handler('recoverScenePlanning', payload, new AbortController().signal)
+    expect(fetch.mock.calls[1]?.[1]?.method).toBe('GET')
+    expect(fetch.mock.calls[1]?.[0]).toMatch(/receipt\?idempotencyKey=planning-1&requestSha256=[a-f0-9]{64}$/u)
+  })
+  it('retains total, per-shot and single-edit bounds before transport', async () => {
+    const richShot = { ...request.request.shots[0]!, visual: '景'.repeat(20000),
+      directorPlan: { generationContext: '空间'.repeat(10000) } }
+    const { handler, fetch } = setup()
+    const { shots: _shots, ...editBase } = request.request
+    for (const operation of [
+      { ...request.request, shots: Array.from({ length: 64 }, () => richShot) },
+      { ...request.request, shots: [{ ...richShot, directorPlan: { generationContext: '景'.repeat(22000) } }] },
+      { ...editBase, action: 'edit', shotId: 'shot_1', shot: richShot },
+    ]) {
+      expect(await handler('saveScenePlanning', { ...request, request: operation }, new AbortController().signal))
+        .toMatchObject({ ok: false })
+    }
+    expect(fetch).not.toHaveBeenCalled()
+  })
   it('transports explicit current-direction edits and rejects missing designs before transport', async () => {
     const payload = { ...scope, idempotencyKey: 'current-direction-1', request: {
       action: 'edit', sceneIndex: 1, expectedScriptRevision: 1, expectedScriptSha256: 'a'.repeat(64),

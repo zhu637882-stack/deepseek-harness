@@ -18,6 +18,8 @@ Deleting world prose by keyword loses creative intent. Another compiler would di
 
 ## Consequences
 
+A live 23-segment advertisement exceeded the inherited 96 KiB planning command limit even though each complete directing plan was valid. Scene initialization now accepts up to 4 MiB of canonical JSON, within the existing command transport cap; the 64-shot, 64 KiB-per-plan and single-edit limits remain. Save and GET receipt recovery share the same validation and digest. A loaded browser-RPC snapshot exercises a complete Chinese scene above the former limit; focused tests reject excessive scene, plan and edit payloads before transport.
+
 Directors inspect the real input without paid image generation. Old projects keep their source and save path; edits preserve unrelated directing fields. Preparation may retain a local preview file but neither queues media nor grants approval. Semantic reconciliation and image fidelity require separate verification.
 
 Live verification found a missing compatibility-target update after the skill body changed. The source manifest now includes reviewed prior versions and the previous release; the existing compatibility regression covers all current targets. Planning read failures appear in the shooting assistant with a read-only retry, preserving the typed request and preventing a send until recovery.

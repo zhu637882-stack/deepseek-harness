@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`returns the actionable asset quotation rejection through the loaded browser command 1`] = `
+exports[`retains complete asset behavior through the loaded browser command 1`] = `
 {
   "result": {
     "error": {
@@ -9,6 +9,70 @@ exports[`returns the actionable asset quotation rejection through the loaded bro
       "message": "Yimeng rejected command (HTTP 422: 当前模型不支持框选参数，请移除框选或改选支持框选的模型；原图和指令仍保留。)",
     },
     "ok": false,
+  },
+  "rpcId": "asset-quote-1",
+  "type": "server-response",
+}
+`;
+
+exports[`retains complete planning behavior through the loaded browser command 1`] = `
+{
+  "result": {
+    "ok": true,
+    "value": {
+      "action": "initialize",
+      "actorIds": {},
+      "approvalGranted": false,
+      "commandReceiptId": "receipt_fixture",
+      "episodeId": "episode_fixture",
+      "eventId": "event_fixture",
+      "idempotencyKey": "planning-fixture",
+      "projectId": "project_fixture",
+      "providerCalls": 0,
+      "requestSha256": "4c8ca3d47248d36ddb1ba644532c9e478be6d16962d0156e665e06f61fbbdbc7",
+      "sceneId": "scene_fixture",
+      "schema": "jason.qingmu-scene-planning-result.v1",
+      "seriesId": "series_fixture",
+      "shotIds": [
+        "shot_1",
+        "shot_2",
+        "shot_3",
+        "shot_4",
+        "shot_5",
+        "shot_6",
+        "shot_7",
+        "shot_8",
+        "shot_9",
+        "shot_10",
+        "shot_11",
+        "shot_12",
+        "shot_13",
+        "shot_14",
+        "shot_15",
+        "shot_16",
+        "shot_17",
+        "shot_18",
+        "shot_19",
+        "shot_20",
+        "shot_21",
+        "shot_22",
+        "shot_23",
+      ],
+      "source": {
+        "inputSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "sceneIndex": 1,
+        "scriptRevision": 1,
+        "scriptSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sourceLineIds": [],
+      },
+      "stageStarted": false,
+      "storyboard": {
+        "id": "revision_fixture",
+        "sourceHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "status": "Ready",
+        "version": 1,
+      },
+    },
   },
   "rpcId": "asset-quote-1",
   "type": "server-response",

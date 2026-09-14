@@ -4,6 +4,8 @@
 
 Scene planning reads retain each saved shot's `durationSec` and complete `dialogue`, including source identities, delivery and additional dialogue fields. Older projections may omit them; omission does not mean silence. The read path does not alter timing or dialogue.
 
+Scene initialization accepts up to 4 MiB of canonical JSON for its existing maximum of 64 shots. Each director plan retains its 64 KiB bound; single-shot edits retain the 96 KiB command bound. Save and receipt recovery validate the same complete request, without truncating Chinese dialogue or directing fields.
+
 Shared director-context source tracking, reconciliation and legacy behavior are documented in the [implementation note](../../../.agents/notes/implemented/feature/2026-09-14-qingmu-shared-director-context.md).
 
 `previewShootingFirstFrame` exposes the existing shooting preview to native commands. It accepts scoped identities and exact working-image references, preserves order and purpose, validates returned shot identity and input hashes, and rejects reflected credentials. Submission and adoption remain separate.
