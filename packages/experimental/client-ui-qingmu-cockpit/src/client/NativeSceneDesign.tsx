@@ -7,6 +7,7 @@ import type { AssetDesignState, PlanningScene, PlanningShot } from '@deepseek-ai
 import type { NativeStoryPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft'
 import type { QingmuYimengPort } from './contracts.ts'
 import { NativeStoryComposer } from './NativeStoryComposer.tsx'
+import { parseQuotedDesignJson } from './quoted-design-json.ts'
 
 /**
  * Read the saved film design before asking the director for complete scene coverage.
@@ -42,7 +43,7 @@ export function NativeSceneDesign({ projectId, episodeId, scene, scriptSha256, r
     && (!basis.design || basis.design.sourceScriptSha256 === scriptSha256)
   async function adopt(text: string) {
     if (!ready) throw new Error('当前素材设计与剧本尚未对齐，请先更新创作依据。')
-    const parsed: unknown = JSON.parse(text)
+    const { value: parsed } = parseQuotedDesignJson(text, true)
     if (!parsed || typeof parsed !== 'object' || !('sourceScriptSha256' in parsed)
       || parsed.sourceScriptSha256 !== scriptSha256 || !('sceneIndex' in parsed)
       || parsed.sceneIndex !== scene.sceneIndex || !('shots' in parsed) || !Array.isArray(parsed.shots)) {

@@ -449,3 +449,5 @@ The existing full-cut review also displays timed observations for adjacent space
 原生素材增量修订可只更新引用；类型与唯一已有实体匹配时，缺省画面描述沿用保存值。新素材、未知编号和明确空描述仍须补齐描述，不能借合并改变另一实体。
 
 Native scene adoption moves an unambiguous shot-level `dialoguePlan` into `directorPlan` without changing its delivery text. Conflicting duplicates or malformed values retain the candidate for correction. This compatibility step does not rewrite the original model response or save storyboard data.
+
+Scene adoption also recovers missing terminal container brackets after all authored values. It does not invent missing strings, values or interior separators; source and dialogue checks still run before adoption.

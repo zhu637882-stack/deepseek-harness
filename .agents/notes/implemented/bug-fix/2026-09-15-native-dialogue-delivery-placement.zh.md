@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-NativeSceneDesign 在采用时将无歧义的顶层 dialoguePlan 复制到 directorPlan。相同副本合并，冲突或无效值保留原稿供修正。原始返回和来源检查保持不变。
+NativeSceneDesign 在采用时将无歧义的顶层 dialoguePlan 复制到 directorPlan。相同副本合并，冲突或无效值保留原稿供修正。原始返回和来源检查保持不变。完整场次候选也能通过已有 JSON 修复依赖补齐末尾容器括号，不补造缺失的创作值或中间分隔符。
 
 ## Alternatives considered
 

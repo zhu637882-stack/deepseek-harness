@@ -10,7 +10,7 @@ A real native scene draft put dialogue delivery on the shot root. Planning consu
 
 ## Decision
 
-NativeSceneDesign copies an unambiguous root dialoguePlan into directorPlan on adoption. Equal duplicates collapse; conflicting or malformed values keep the draft available for correction. The original response and source checks remain unchanged.
+NativeSceneDesign copies an unambiguous root dialoguePlan into directorPlan on adoption. Equal duplicates collapse; conflicting or malformed values keep the draft available for correction. The original response and source checks remain unchanged. Complete scene candidates can also recover missing terminal container brackets using the existing JSON repair dependency; no missing creative value or interior separator is synthesized.
 
 ## Alternatives considered
 

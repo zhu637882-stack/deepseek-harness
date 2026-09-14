@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-15-native-dialogue-delivery-placement.md
-2026-09-15-native-dialogue-delivery-placement.md: b5968ee21cd62c91e151e70b76a5ecf5ccaaa490
-2026-09-15-native-dialogue-delivery-placement.zh.md: 2b77813d215612aa0f0ef48b1a332c3ccacf934c
+2026-09-15-native-dialogue-delivery-placement.md: c416d385f3edff68700e89ceb1c5c7f51b3ed3fe
+2026-09-15-native-dialogue-delivery-placement.zh.md: 9e08fa9401be0ec6b9afb5cb73943efbae2f3b2f

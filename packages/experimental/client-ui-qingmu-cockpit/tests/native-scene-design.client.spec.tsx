@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
+import { parseQuotedDesignJson } from '../src/client/quoted-design-json.ts'
 import { NativeSceneDesign } from '../src/client/NativeSceneDesign.tsx'
 import type { AssetDesignState, PlanningScene } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 const sha = 'a'.repeat(64)
@@ -203,3 +204,13 @@ it.each(['current', 'old-asset', 'wrong-script', 'changed-again'] as const)(
     expect(screen.getByText(old)).toBeTruthy()
     expect(port.send).not.toHaveBeenCalled()
   })
+
+it('recovers only missing terminal container closures, preserving complete director values', () => {
+  const complete = JSON.stringify({ shots })
+  const missing = complete.slice(0, -4) + complete.slice(-3)
+  expect(parseQuotedDesignJson(missing, true)).toEqual({ value: { shots }, repaired: true })
+  expect(() => parseQuotedDesignJson(missing)).toThrow()
+  expect(() => parseQuotedDesignJson('{"shots":[{"visual":"unfinished', true)).toThrow()
+  expect(() => parseQuotedDesignJson('{"shots":[{"visual":}]}', true)).toThrow()
+  expect(() => parseQuotedDesignJson('{"shots":[{"visual":"a" "action":"b"}]}', true)).toThrow()
+})
