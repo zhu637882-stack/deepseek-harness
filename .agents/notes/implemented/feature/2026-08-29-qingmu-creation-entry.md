@@ -14,6 +14,8 @@ The [creation workspace](../../../../packages/experimental/client-ui-qingmu-cock
 
 Canonical TextImportService owns TXT bytes, parsing drafts, corrections and fingerprint/revision-checked script confirmation. GET recovery is read-only. An incomplete draft creation can finish its own active index only through explicit same-key retry with unchanged source and predecessor; later draft creation fences old drafts as stale. Browser storage retains unsaved input and request coordinates, never authoritative project/script state. Advanced script JSON remains an expandable existing editor.
 
+Advertising creation shares the project transaction and script workflow. One to five product views become one product prop with immutable originals and derived RGB references. File hashes and order participate in creation identity; IndexedDB stores the bytes outside localStorage and the journal. The first asset-design save retains the product even when a director draft omits it; subsequent reference edits use the ordinary design rules. This avoids a second pipeline and repeated manual attachment selection. Tests cover count limits, malformed images, rollback, duplicate submission, reload/retry and the actual image-reference resolver without Provider dispatch.
+
 ## Alternatives considered
 
 **Frontend-only duplicate prevention.** A disabled button cannot recover a request after process restart or response loss; durable actor-scoped receipts own creation identity.

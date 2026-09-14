@@ -10,6 +10,23 @@ const state: AssetDesignState = { ...scope, schema: 'qingmu.asset-design-state.v
     visualStyle: '写实', tone: '温暖', colorPalette: ['灰蓝'], lightingRules: '窗光', cameraGrammar: '跟随动作', performanceRules: '自然', characterContinuityRules: '服装稳定',
   } } }
 afterEach(() => { cleanup(); localStorage.clear() })
+it.each([false, true])('retains uploaded product references in the first imported design (product included: %s)', async (included) => {
+  const port = setup()
+  const product: AssetDesignItem = { id: 'prop_product', kind: 'prop', name: '广告产品', imagePrompt: '沿用用户产品外观',
+    references: [{ assetId: 'asset_product', assetSha256: 'c'.repeat(64), purpose: '用户产品图' }] }
+  port.readAssetDesign.mockResolvedValue({ ...state, design: null, productAssets: [product] })
+  render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)
+  await screen.findByRole('heading', { name: '广告产品 · 产品图片已保存' })
+  const imported = { ...state.design!, assets: included ? [{ ...product, references: [] }] : state.design!.assets }
+  fireEvent.change(screen.getByLabelText('素材设计数据'), { target: { value: JSON.stringify(imported) } })
+  fireEvent.click(screen.getByRole('button', { name: '载入设计' }))
+  fireEvent.click(screen.getByRole('button', { name: '保存素材设计' }))
+  await waitFor(() => { expect(port.saveAssetDesign).toHaveBeenCalledOnce() })
+  expect(port.saveAssetDesign.mock.calls[0]).toMatchObject([{ design: { assets: expect.arrayContaining([
+    expect.objectContaining({ id: product.id, references: product.references }),
+  ]) } }])
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
 it.each(['actor', 'scene', 'prop'] as const)('normalizes a null voice in an imported %s design before recovery and saving', async (kind) => {
   const port = setup()
   const mount = () => render(<NativeAssetDesign {...scope} port={port} onGenerated={vi.fn()} />)

@@ -5928,7 +5928,10 @@ export function createYimengCommandHandler(
       } else if (['readStyleComposition', 'readCreativeContract', 'initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)) {
         const prepared = prepareCreationCommand(endpoint, payload, stageArtifactHelpers)
         path = prepared.path
-        requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }) }
+        requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : {
+          body: serializeBody(prepared.body, endpoint === 'initializeProject' && prepared.body.productImages !== undefined
+            ? 56 * 1024 * 1024 : MAX_JSON_BYTES),
+        }) }
         normalize = prepared.normalize
       } else if (endpoint === 'readDialogueEditCapability') {
         const request = requireInputObject(payload)

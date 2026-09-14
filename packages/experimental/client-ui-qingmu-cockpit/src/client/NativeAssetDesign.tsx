@@ -177,7 +177,22 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
   }
   function adopt(text: string, retainOmitted = false) {
     const parsed = parseDesign(text)
-    keepDraft(withIdentities(parsed.design, design, retainOmitted))
+    if (state?.design === null && state.productAssets?.length) {
+      const products = state.productAssets
+      const assets: AssetDesignItem[] = parsed.design.assets.map((item) => {
+        const product = products.find(row => row.id === item.id || (item.kind === 'prop' && row.name === item.name))
+        if (!product) return item
+        const references = product.references ?? []
+        return { ...item, ...(product.id ? { id: product.id } : {}), references: [...references,
+          ...(item.references ?? []).filter(ref => !references.some(source => source.assetId === ref.assetId))] }
+      })
+      for (const product of products) {
+        if (!assets.some(item => item.id === product.id || (item.kind === 'prop' && item.name === product.name))) assets.push(product)
+      }
+      parsed.design = { ...parsed.design, assets }
+    }
+    const previous = design ?? (state?.productAssets?.length ? { ...parsed.design, assets: state.productAssets } : undefined)
+    keepDraft(withIdentities(parsed.design, previous, retainOmitted))
     setNotice(`${parsed.repaired ? '已修正正文引号的格式，设计文字完整保留。' : ''}${retainOmitted ? '设计已合并到下方卡片，未提及的已有素材继续保留。' : '设计已放入下方卡片。'}检查或修改后保存。`)
   }
   function edit(index: number, patch: Partial<AssetDesignItem>) {
@@ -193,6 +208,12 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
   return <section className={css.composer} aria-label="角色与场景生成">
     <h2>设计与生成素材</h2>
     <p>先从当前剧本设计人物、场景和道具，检查画面描述后生成图片；生成结果会进入本项目素材库。</p>
+    {state?.productAssets?.map(product => <section key={product.id} aria-label="已上传的广告产品">
+      <h3>{product.name} · 产品图片已保存</h3>
+      <p>这组产品图会自动加入首次素材设计，作为产品道具的外观参考。产品出现的位置和方式由剧本与分镜决定。</p>
+      <AssetImageReferences projectId={projectId} references={product.references ?? []} port={port}
+        disabled onChange={() => {}} allowRegions={false} />
+    </section>)}
     {state?.projectId === projectId && state.episodeId === episodeId
       && <AssetSourceFeedback key={`${projectId}:${episodeId}`} state={state} disabled={busy} onUse={(text) => {
         const next = changes.includes(text) ? changes : [changes, text].filter(Boolean).join('\n\n')
@@ -205,7 +226,7 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
       source={JSON.stringify(state.script)} settings="" disabled={busy} onAdopt={(text) => { adopt(text, true) }}
       purpose={{ key: 'asset-design', jsonOutput: true, freshRevision: true,
         sourceKey: JSON.stringify({ stateSha256: state.stateSha256, design }), title: '让青木设计素材', description: '导演会结合剧本和素材方法提出完整设计，你可以逐项调整。',
-        prompt, action: '根据剧本设计素材', adopt: '采用到素材卡片', adopted: '已合并设计，未提及的已有素材继续保留。请检查下方卡片后保存。' }} />}
+        prompt: state.productAssets?.length ? `${prompt}\n用户上传的产品道具：${JSON.stringify(state.productAssets ?? [])}。这些是既有产品来源，沿用 id 与 references，结合剧本确认名称与用途。不要另造同一产品，不编造图片无法确认的包装文字、功效或实测尺寸。产品图片由生成链路实际引用，文字设计不能替换其外观依据。` : prompt, action: '根据剧本设计素材', adopt: '采用到素材卡片', adopted: '已合并设计，未提及的已有素材继续保留。请检查下方卡片后保存。' }} />}
     {draftNotice && <p role="status">{draftNotice}</p>}
     {draftConflict && state && design && <section aria-label="素材草稿版本变化">
       <p>项目中的素材或剧本已更新。本机草稿仍在下方，核对新版本后再保存。</p>

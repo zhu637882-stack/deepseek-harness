@@ -18,6 +18,12 @@ export interface ProjectInitializationRequest {
   readonly stylePackId: string
   /** Current Writer director-method identities, selected from creation-options. */
   readonly directorSkillIds: readonly string[]
+  /** User product photographs; at most five views of the same product. */
+  readonly productImages?: readonly {
+    readonly filename: string
+    readonly contentSha256: string
+    readonly contentBase64: string
+  }[]
   readonly idempotencyKey: string
 }
 
@@ -512,6 +518,7 @@ export function prepareCreationCommand(endpoint: string, value: unknown, helpers
     const recover = endpoint === 'recoverProjectInitialization'
     exact(raw, recover ? ['idempotencyKey', 'requestSha256'] : [
       'name', 'style', 'aspectRatio', 'mode', 'creationType', 'episodeCount', 'duration', 'textInput', 'textVersion', 'stylePackId', 'directorSkillIds', 'idempotencyKey',
+      ...('productImages' in raw ? ['productImages'] : []),
     ], fail)
     const intent = key(raw.idempotencyKey, fail)
     let requestSha: string
@@ -524,12 +531,31 @@ export function prepareCreationCommand(endpoint: string, value: unknown, helpers
     } else {
       if (!Array.isArray(raw.directorSkillIds)) throw fail('director methods invalid')
       const directorSkillIds = raw.directorSkillIds.map(item => identifier(item, fail))
+      const productImages = !('productImages' in raw) ? undefined : (() => {
+        if (!Array.isArray(raw.productImages) || raw.productImages.length < 1 || raw.productImages.length > 5) throw fail('产品图片请上传 1—5 张，最多 5 张。')
+        const images = raw.productImages.map((value) => {
+          const image = exact(value, ['filename', 'contentSha256', 'contentBase64'], fail)
+          const filename = text(image.filename, fail, 128)
+          if (filename.includes('/') || filename.includes('\\') || !/\.(png|jpe?g|webp)$/i.test(filename)) throw fail('产品图片仅支持 PNG、JPG、WebP。')
+          const contentSha256 = sha(image.contentSha256, fail)
+          if (typeof image.contentBase64 !== 'string' || image.contentBase64.length > 11184812) throw fail('每张产品图片最多 8 MB。')
+          const bytes = Buffer.from(image.contentBase64, 'base64')
+          if (!bytes.length || bytes.length > 8 * 1024 * 1024 || bytes.toString('base64') !== image.contentBase64
+            || createHash('sha256').update(bytes).digest('hex') !== contentSha256) throw fail('product image content mismatch')
+          return { filename, contentSha256, contentBase64: image.contentBase64 }
+        })
+        if (new Set(images.map(image => image.contentSha256)).size !== images.length) throw fail('产品图片重复，请选择不同图片。')
+        return images
+      })()
       const settings = {
         name: text(raw.name, fail, 100), style: text(raw.style, fail, 128), aspectRatio: text(raw.aspectRatio, fail),
         mode: raw.mode, creationType: raw.creationType, episodeCount: integer(raw.episodeCount, fail, 1),
         duration: text(raw.duration, fail, 32), textInput: storyText(raw.textInput, fail),
         textVersion: raw.textVersion, stylePackId: text(raw.stylePackId, fail, 128),
         directorSkillIds,
+        ...(productImages === undefined ? {} : {
+          productImages: productImages.map(({ filename, contentSha256 }) => ({ filename, contentSha256 })),
+        }),
       }
       if (settings.textVersion !== 'creation-text-v1' || settings.directorSkillIds.length < 1 || settings.directorSkillIds.length > 4
         || new Set(settings.directorSkillIds).size !== settings.directorSkillIds.length) throw fail('creation methods invalid')
@@ -539,7 +565,7 @@ export function prepareCreationCommand(endpoint: string, value: unknown, helpers
         || settings.episodeCount > 30) throw fail('creative settings invalid')
       initialization = settings
       requestSha = createHash('sha256').update(helpers.canonicalJson(settings, 'initialization')).digest('hex')
-      body = { ...settings, idempotencyKey: intent }
+      body = { ...settings, ...(productImages === undefined ? {} : { productImages }), idempotencyKey: intent }
     }
     normalize = (value) => {
       const result = object(value, bad)

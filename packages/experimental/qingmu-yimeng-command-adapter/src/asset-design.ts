@@ -126,6 +126,8 @@ export interface AssetDesignState extends CreationScope {
   readonly scriptSha256: string
   readonly scriptRevision: number
   readonly creativeSettings?: YimengCommandJsonObject
+  /** Imported product views available before the first director design. */
+  readonly productAssets?: readonly AssetDesignItem[]
   readonly script: YimengCommandJsonObject
   readonly model: string
   readonly imageModels?: readonly {

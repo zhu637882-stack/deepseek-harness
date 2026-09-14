@@ -39,6 +39,16 @@
 .skillMap strong { color: var(--dsw-alias-label-primary); }
 .help { border-left: 1px solid var(--dsw-alias-border-l2); padding-left: 24px; }
 .actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.entryChoices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.workspace .entryChoices button { padding: 18px; text-align: left; font-size: 18px; }
+.entryChoices button span { display: block; margin-top: 5px; font-size: 13px; color: var(--dsw-alias-label-secondary); }
+.entryChoices button[aria-pressed="true"] { border-color: var(--qingmu-accent); background: var(--qingmu-soft); }
+.productUpload { border: 1px dashed var(--dsw-alias-border-l2); border-radius: 10px; padding: 16px; }
+.productUpload p { font-size: 13px; color: var(--dsw-alias-label-secondary); }
+.productImages { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; margin-top: 12px; }
+.productImages figure { margin: 0; min-width: 0; }
+.productImages img { width: 100%; aspect-ratio: 1; object-fit: contain; background: white; border-radius: 6px; }
+.productImages figcaption { font-size: 12px; overflow-wrap: anywhere; margin: 4px 0; }
 .notice { border-left: 3px solid var(--qingmu-accent); padding: 10px 14px; background: var(--qingmu-soft); }
 .file { max-width: 240px; }
 .file input { padding: 4px; font-size: 12px; }

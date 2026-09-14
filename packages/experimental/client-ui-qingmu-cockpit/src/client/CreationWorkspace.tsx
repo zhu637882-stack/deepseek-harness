@@ -8,6 +8,7 @@ import css from './CreationWorkspace.module.css'
 import { StyleCompositionPreview, VisualSettingsSummary } from './StyleCompositionPreview.tsx'
 import { StyleGallery } from './StyleGallery.tsx'
 import { NativeStoryComposer } from './NativeStoryComposer.tsx'
+import { productImageDraft, projectRequestIdentity, type ProductImages } from './ProductImageDraft.ts'
 import type { NativeStoryPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft'
 
 type Port = Pick<QingmuYimengPort, 'readStyleComposition' | 'readCreationOptions' | 'readCreativeContract' | 'initializeProject' | 'recoverProjectInitialization' | 'readTextImport' | 'createTextImport' | 'correctTextImport' | 'confirmTextImport'>
@@ -27,7 +28,8 @@ function displayText(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : value == null ? fallback : '[不支持的文本字段]'
 }
 function saveLocal(key: string, value: unknown): void {
-  localStorage.setItem(key, JSON.stringify(value))
+  localStorage.setItem(key, JSON.stringify(value, (field, child: unknown) =>
+    key === NEW_PROJECT && field === 'contentBase64' ? '' : child))
 }
 async function digest(bytes: Uint8Array): Promise<string> {
   const result = await crypto.subtle.digest('SHA-256', new Uint8Array(bytes))
@@ -50,6 +52,8 @@ function isCurrentIntent(intent: unknown): intent is ProjectInitializationReques
     && 'stylePackId' in intent && typeof intent.stylePackId === 'string' && intent.stylePackId.length > 0
 }
 interface ProjectLocal {
+  entry: 'story' | 'advertising'
+  productDraftId?: string
   name: string
   aspectRatio: ProjectInitializationRequest['aspectRatio']
   creationType: ProjectInitializationRequest['creationType']
@@ -62,6 +66,7 @@ interface ProjectLocal {
   intent?: SavedProjectIntent
 }
 const DEFAULT_PROJECT: ProjectLocal = {
+  entry: 'story',
   name: '', aspectRatio: '9:16', creationType: 'story_idea', episodeCount: 1,
   duration: '1-2分钟', textInput: '', style: '', stylePackId: '', directorSkillId: '',
 }
@@ -82,6 +87,8 @@ function normalizeProjectLocal(value: unknown): ProjectLocal {
   const episodeCount = typeof raw.episodeCount === 'number' && Number.isSafeInteger(raw.episodeCount)
     && raw.episodeCount >= 1 && raw.episodeCount <= 30 ? raw.episodeCount : DEFAULT_PROJECT.episodeCount
   const base: ProjectLocal = {
+    entry: raw.entry === 'advertising' ? 'advertising' : 'story',
+    ...(typeof raw.productDraftId === 'string' ? { productDraftId: raw.productDraftId } : {}),
     name: typeof raw.name === 'string' ? raw.name.slice(0, 100) : '',
     aspectRatio, creationType, episodeCount,
     duration: typeof raw.duration === 'string' ? raw.duration.slice(0, 32) : DEFAULT_PROJECT.duration,
@@ -116,6 +123,20 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
   const [options, setOptions] = useState<CreationOptions>()
   const [optionsError, setOptionsError] = useState('')
   const [optionsRetry, setOptionsRetry] = useState(0)
+  const [images, setImages] = useState<ProductImages>([])
+  const [imagesReady, setImagesReady] = useState(false)
+  const [imageError, setImageError] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const imageLock = useRef(false)
+  useEffect(() => {
+    let active = true
+    setImages([]); setImagesReady(false); setImageError('')
+    if (!local.productDraftId) { setImagesReady(true); return }
+    void productImageDraft(local.productDraftId).then((value) => {
+      if (active) { setImages(value); setImagesReady(true) }
+    }).catch((cause: unknown) => { if (active) { setImageError(String(cause)); setImagesReady(true) } })
+    return () => { active = false }
+  }, [local.productDraftId])
   useEffect(() => {
     const controller = new AbortController()
     setOptions(undefined); setOptionsError('')
@@ -140,10 +161,33 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
   const finish = async (result: ProjectInitializationResult) => {
     await onCreated(result)
     localStorage.removeItem(NEW_PROJECT)
+    if (local.productDraftId) await productImageDraft(local.productDraftId, null).catch(() => {})
+  }
+  const changeImages = async (files?: FileList, remove?: string) => {
+    if (imageLock.current || !local.productDraftId || busy || (local.intent && (!retryAllowed || remove !== undefined))) return
+    imageLock.current = true; setUploading(true); setImageError('')
+    try {
+      const additions = Array.from(files ?? [])
+      if (images.length + additions.length > 5) throw new Error('最多上传 5 张产品图片，请先移除不需要的图片。')
+      const next = [...images.filter(item => item.contentSha256 !== remove)]
+      for (const file of additions) {
+        if (!/\.(png|jpe?g|webp)$/i.test(file.name) || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error('产品图片仅支持 JPG、PNG、WebP。')
+        if (!file.size || file.size > 8 * 1024 * 1024) throw new Error('每张产品图片最多 8 MB，不能上传空文件。')
+        if (file.name.length > 128) throw new Error('图片文件名过长，请缩短后上传。')
+        const bytes = new Uint8Array(await file.arrayBuffer())
+        const contentSha256 = await digest(bytes)
+        if (next.some(item => item.contentSha256 === contentSha256)) throw new Error('这张产品图片已经上传，请选择不同图片。')
+        next.push({ filename: file.name, contentSha256, contentBase64: base64(bytes) })
+      }
+      await productImageDraft(local.productDraftId, next)
+      setImages(next)
+    } catch (cause) { setImageError(cause instanceof Error ? cause.message : String(cause)) }
+    finally { imageLock.current = false; setUploading(false) }
   }
   const run = async (recover: boolean) => {
     if (lock.current) return
     lock.current = true; setBusy(true); setError('')
+    let creationConfirmed = false
     try {
       let intent = local.intent
       if (intent === undefined) {
@@ -153,6 +197,7 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
           mode: 'whole_series' as const, creationType: local.creationType, episodeCount: local.episodeCount,
           duration: local.duration.trim(), textInput: local.textInput.trim(), stylePackId: local.stylePackId,
           textVersion: textVersion.id, directorSkillIds: [local.directorSkillId],
+          ...(local.entry === 'advertising' ? { productImages: images } : {}),
           idempotencyKey: crypto.randomUUID(),
         }
       }
@@ -160,17 +205,30 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
         if (!isCurrentIntent(intent)) {
           throw new Error('请先选择当前可用的画风、风格包和导演方法。旧创建意图只能先读取恢复。')
         }
-        saveLocal(NEW_PROJECT, { ...local, intent }); setLocal({ ...local, intent })
-        await finish(await port.initializeProject(intent))
+        if (intent.productImages && (!imagesReady || images.length < 1)) throw new Error('请先上传 1—5 张产品图片。')
+        const submission = intent.productImages ? { ...intent, productImages: intent.productImages.map((item) => {
+          const image = images.find(image => image.contentSha256 === item.contentSha256 && image.filename === item.filename)
+          if (!image) throw new Error('请恢复原产品图片后重试，或读取创建恢复。')
+          return image
+        }) } : intent
+        saveLocal(NEW_PROJECT, { ...local, intent: submission }); setLocal({ ...local, intent: submission })
+        const result = await port.initializeProject(submission)
+        creationConfirmed = true
+        await finish(result)
       } else {
         // Matches the canonical sorted request keys used by the Host and API.
         const { idempotencyKey, ...settings } = intent
-        const sorted = Object.fromEntries(Object.entries(settings).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0))
+        const sorted = projectRequestIdentity(settings as Omit<ProjectInitializationRequest, 'idempotencyKey'>)
         const requestSha256 = await digest(new TextEncoder().encode(JSON.stringify(sorted)))
         await finish(await port.recoverProjectInitialization({ idempotencyKey, requestSha256 }))
       }
     } catch (cause) {
       setError(errorText(cause))
+      if (!recover && !creationConfirmed && local.entry === 'advertising' && /HTTP (400|422)[:)]/.test(String(cause))) {
+        const editable = { ...local }; delete editable.intent
+        update(editable); setRetryAllowed(false)
+        setError('创建资料未通过检查，尚未创建项目。请检查图片格式、尺寸和剧本；可移除有问题的图片再上传。输入与图片已保留。')
+      }
       if (recover && /404|bootstrap_receipt_not_found/.test(String(cause))) {
         setRetryAllowed(true)
         setError('服务端尚未找到这个创建意图。可重试同一请求；即使原请求随后完成，也只会保留一个项目。')
@@ -179,13 +237,34 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
   }
   return <section className={css.workspace} aria-label="新建创作项目">
     <header><span className={css.eyebrow}>开始创作</span><h3>创建一部新作品</h3>
-      <p>给故事起一个名字，填写创意和画面设定。创建后进入剧本工作区。</p></header>
+      <p>{local.entry === 'advertising' ? '粘贴已有剧本，上传产品图片。产品作为剧情道具，继续使用青木的短剧制作流程。' : '给故事起一个名字，填写创意和画面设定。创建后进入剧本工作区。'}</p></header>
+    <div className={css.entryChoices} aria-label="选择创作入口">
+      <button aria-pressed={local.entry === 'story'} disabled={busy || uploading || local.intent !== undefined}
+        onClick={() => { update({ ...local, entry: 'story', creationType: 'story_idea' }) }}>普通短剧<span>从创意、小说或剧本开始</span></button>
+      <button aria-pressed={local.entry === 'advertising'} disabled={busy || uploading || local.intent !== undefined}
+        onClick={() => { update({ ...local, entry: 'advertising', creationType: 'original_script', productDraftId: local.productDraftId ?? crypto.randomUUID() }) }}>广告短剧<span>已有剧本 + 产品图片</span></button>
+    </div>
     <div className={css.projectColumns}><div className={css.editor}>
       <label>项目名称<input autoFocus maxLength={100} value={local.name} disabled={busy || local.intent !== undefined}
         onChange={(event) => { update({ ...local, name: event.target.value }) }} placeholder="例如：雨夜来信" /></label>
-      <label>故事 / 创作原点<textarea rows={6} maxLength={64000} value={local.textInput} disabled={busy || local.intent !== undefined}
+      <label>{local.entry === 'advertising' ? '广告短剧剧本' : '故事 / 创作原点'}<textarea rows={6} maxLength={64000} value={local.textInput} disabled={busy || local.intent !== undefined}
         onChange={(event) => { update({ ...local, textInput: event.target.value }) }}
-        placeholder="写下故事梗概、人物关系或已有剧本正文。" /></label>
+        placeholder={local.entry === 'advertising' ? '把已经写好的广告短剧剧本粘贴在这里，包括剧情、对白及产品出现的安排。' : '写下故事梗概、人物关系或已有剧本正文。'} /></label>
+      {local.entry === 'advertising' && <section className={css.productUpload} aria-label="产品图片附件">
+        <strong>产品图片（{images.length}/5）</strong>
+        <p>上传同一产品的正面、侧面或包装细节，作为道具参考。支持 JPG、PNG、WebP，每张最多 8 MB，宽高 240—8000 像素。</p>
+        <label>上传产品图片<input type="file" accept="image/jpeg,image/png,image/webp" multiple
+          disabled={busy || uploading || !imagesReady || (local.intent !== undefined && !retryAllowed) || images.length >= 5}
+          onChange={(event) => { const files = event.target.files; if (files) void changeImages(files); event.target.value = '' }} /></label>
+        <div className={css.productImages}>{images.map(item => <figure key={item.contentSha256}>
+          <img src={`data:image/${/\.webp$/i.test(item.filename) ? 'webp' : /\.png$/i.test(item.filename) ? 'png' : 'jpeg'};base64,${item.contentBase64}`} alt={item.filename} />
+          <figcaption>{item.filename}</figcaption>
+          <button disabled={busy || uploading || local.intent !== undefined} onClick={() => { void changeImages(undefined, item.contentSha256) }} aria-label={`移除 ${item.filename}`}>移除</button>
+        </figure>)}</div>
+        {!imagesReady && <p role="status">正在恢复产品图片…</p>}
+        {uploading && <p role="status">正在保存产品图片…</p>}
+        {imageError && <p role="alert">{imageError}</p>}
+      </section>}
     </div><details open className={css.creationSettings}><summary>创作设定</summary><p>选择整部作品的画面风格、导演方法、画幅和计划时长。</p>
       {options === undefined && <p role="status">{optionsError || '正在读取可用的风格与导演方法…'}</p>}
       {optionsError && <button disabled={busy} onClick={() => { setOptionsRetry(value => value + 1) }}>重新读取创作选项</button>}
@@ -216,11 +295,11 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
       </details>
       <small>基础画风的媒介、材质与明确色彩优先；风格包提供相容的全片设计建议，剧本事实与逐镜导演设计优先。</small>
       {textVersion && <small>输入来源：{textVersion.label}</small>}
-      <label>创作类型<select value={local.creationType} disabled={busy || local.intent !== undefined}
+      {local.entry !== 'advertising' && <label>创作类型<select value={local.creationType} disabled={busy || local.intent !== undefined}
         onChange={(event) => { update({ ...local, creationType: event.target.value as ProjectLocal['creationType'] }) }}>
         <option value="story_idea">故事创意</option><option value="novel_adapt">小说改编</option>
         <option value="script_adapt">剧本改编</option><option value="original_script">原创剧本</option>
-      </select></label>
+      </select></label>}
       <label>画幅<select value={local.aspectRatio} disabled={busy || local.intent !== undefined}
         onChange={(event) => { update({ ...local, aspectRatio: event.target.value as ProjectLocal['aspectRatio'] }) }}>
         <option value="9:16">竖屏 9:16</option><option value="16:9">横屏 16:9</option><option value="1:1">方形 1:1</option>
@@ -234,6 +313,7 @@ export function CreateProjectWorkspace({ port, onCreated, onCancel }: {
     {local.intent !== undefined && <p role="status">保留了本次创建意图。先读取服务端回执，不按项目名称猜测结果。</p>}
     <div className={css.actions}>
       <button className={css.primary} disabled={busy || local.name.trim() === '' || local.textInput.trim() === ''
+        || uploading || (local.entry === 'advertising' && (!imagesReady || images.length < 1))
         || local.duration.trim() === '' || local.episodeCount < 1 || local.episodeCount > 30
         || (local.intent === undefined ? !selectionsReady : !isCurrentIntent(local.intent))
         || (local.intent !== undefined && !retryAllowed)} onClick={() => { void run(false) }}>

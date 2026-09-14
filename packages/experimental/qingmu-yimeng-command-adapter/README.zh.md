@@ -1,5 +1,7 @@
 # 青木易梦命令适配器
 
+`initializeProject` 可选接收 `productImages`：1—5 个 `{ filename, contentSha256, contentBase64 }`。Host 校验哈希、重复图片和单张 8 MiB 上限，Writer 另行核验真实图片格式与尺寸。仅该创建请求允许最多 56 MiB JSON；请求身份包含有序文件名与 SHA-256，不包含 base64。普通创建与 GET 恢复语义保持一致。Writer 将原图及转换后的 RGB 参考图保存为未选定素材，`readAssetDesign.productAssets` 在首次保存设计前提供精确参考绑定。
+
 分镜读取保留每镜实际保存的 `durationSec` 和完整 `dialogue`，包括来源身份、表达方式及其他对白字段。旧读取可以缺省，缺省不代表无对白；读取不修改时长或对白。
 
 导演稿的共用来源跟踪、同步与旧稿兼容见[实施说明](../../../.agents/notes/implemented/feature/2026-09-14-qingmu-shared-director-context.zh.md)。

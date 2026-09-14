@@ -1,5 +1,7 @@
 # Agent Note: Empty voice identity in native asset designs
 
+English | [中文](2026-09-14-qingmu-null-voice-design.zh.md)
+
 Status: implemented
 
 A real native asset candidate used `voiceIdentity: null` for its scene and prop. The client admitted and retained those cards, but Writer's string contract rejected the entire save with HTTP 422. The failure did not change the saved project.

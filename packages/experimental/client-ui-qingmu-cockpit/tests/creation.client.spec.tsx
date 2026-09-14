@@ -5,6 +5,18 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import type { CreationOptions, CreativeContractState, TextImportState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import { CreateProjectWorkspace, TextImportWorkspace } from '../src/client/CreationWorkspace.tsx'
 import { StyleCompositionPreview } from '../src/client/StyleCompositionPreview.tsx'
+import { projectRequestIdentity } from '../src/client/ProductImageDraft.ts'
+import type { ProjectInitializationRequest } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+
+const productDrafts = vi.hoisted(() => new Map<string, unknown>())
+vi.mock('../src/client/ProductImageDraft.ts', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/client/ProductImageDraft.ts')>(),
+  productImageDraft: vi.fn(async (key: string, write?: unknown) => {
+    if (write === null) productDrafts.delete(key)
+    else if (write !== undefined) productDrafts.set(key, structuredClone(write))
+    return structuredClone(productDrafts.get(key) ?? [])
+  }),
+}))
 
 const port = () => ({
   readStyleComposition: vi.fn(async ({ style, stylePackId }: { style: string; stylePackId: string }) => ({
@@ -34,7 +46,7 @@ const port = () => ({
   correctTextImport: vi.fn(async () => { throw new Error('unused') }),
   confirmTextImport: vi.fn(async () => { throw new Error('unused') }),
 })
-beforeEach(() => { localStorage.clear(); vi.stubGlobal('crypto', webcrypto) })
+beforeEach(() => { localStorage.clear(); productDrafts.clear(); vi.stubGlobal('crypto', webcrypto) })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 async function selectCreationMethods() {
   await screen.findByRole('option', { name: '镜头导演' })
@@ -43,6 +55,63 @@ async function selectCreationMethods() {
   fireEvent.change(screen.getByRole('combobox', { name: '导演方法' }), { target: { value: 'shot_blocking_director' } })
 }
 describe('creation input and unknown-result recovery', () => {
+  it('lets the user correct images after a definite creation validation rejection', async () => {
+    const api = port()
+    api.initializeProject.mockRejectedValue(new Error('Yimeng rejected command (HTTP 422: invalid_image)'))
+    localStorage.setItem('qingmu.creation.project.v1', JSON.stringify({ entry: 'advertising', productDraftId: 'draft-ad-test',
+      name: '产品验收', textInput: '场景一：桌面\n动作：产品放在桌上。', aspectRatio: '9:16', creationType: 'original_script',
+      duration: '30秒', episodeCount: 1, style: 'realistic', stylePackId: 'sp_cafe', directorSkillId: 'shot_blocking_director' }))
+    productDrafts.set('draft-ad-test', [{ filename: 'invalid.png', contentBase64: 'eA==', contentSha256: 'a'.repeat(64) }])
+    render(<CreateProjectWorkspace port={api} onCreated={async () => {}} />)
+    await waitFor(() => { expect(screen.getByRole<HTMLButtonElement>('button', { name: '新建项目与第 1 集' }).disabled).toBe(false) })
+    fireEvent.click(screen.getByRole('button', { name: '新建项目与第 1 集' }))
+    await screen.findByText(/创建资料未通过检查/)
+    expect(screen.queryByRole('button', { name: '读取创建恢复' })).toBeNull()
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '移除 invalid.png' }).disabled).toBe(false)
+    expect(screen.getByLabelText<HTMLTextAreaElement>('广告短剧剧本').value).toContain('产品放在桌上')
+  })
+  it('keeps five product views across reload, prevents six, and recovers the same metadata digest', async () => {
+    const api = port()
+    let submitted: ProjectInitializationRequest | undefined
+    api.initializeProject.mockImplementation(async (...args: unknown[]) => { submitted = args[0] as ProjectInitializationRequest; throw new Error('unknown result') })
+    const props = { port: api, onCreated: async () => {} }
+    let view = render(<CreateProjectWorkspace {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: /广告短剧/ }))
+    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '产品短剧测试' } })
+    fireEvent.change(screen.getByLabelText('广告短剧剧本'), { target: { value: '场景一：家中\n动作：她把产品放在桌上。' } })
+    await selectCreationMethods()
+    await waitFor(() => { expect(screen.getByLabelText<HTMLInputElement>('上传产品图片').disabled).toBe(false) })
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '新建项目与第 1 集' }).disabled).toBe(true)
+    const files = Array.from({ length: 6 }, (_, index) => {
+      const file = new File([`image-${index}`], `产品-${index}.png`, { type: 'image/png' })
+      Object.defineProperty(file, 'arrayBuffer', { value: async () => new TextEncoder().encode(`image-${index}`).buffer })
+      return file
+    })
+    fireEvent.change(screen.getByLabelText('上传产品图片'), { target: { files } })
+    await screen.findByText(/最多上传 5 张产品图片/)
+    expect(screen.getByRole('alert').textContent).toMatchInlineSnapshot('"最多上传 5 张产品图片，请先移除不需要的图片。"')
+    expect(productDrafts.size).toBe(0)
+    fireEvent.change(screen.getByLabelText('上传产品图片'), { target: { files: files.slice(0, 5) } })
+    await screen.findByText('产品图片（5/5）')
+    view.unmount(); view = render(<CreateProjectWorkspace {...props} />)
+    await screen.findByText('产品图片（5/5）')
+    await waitFor(() => { expect(screen.getByRole<HTMLButtonElement>('button', { name: '新建项目与第 1 集' }).disabled).toBe(false) })
+    fireEvent.click(screen.getByRole('button', { name: '新建项目与第 1 集' }))
+    await screen.findByRole('button', { name: '读取创建恢复' })
+    expect(submitted?.creationType).toBe('original_script')
+    expect(submitted?.productImages).toHaveLength(5)
+    expect(localStorage.getItem('qingmu.creation.project.v1')).not.toContain('aW1hZ2Ut')
+    view.unmount(); render(<CreateProjectWorkspace {...props} />)
+    fireEvent.click(await screen.findByRole('button', { name: '读取创建恢复' }))
+    await waitFor(() => { expect(api.recoverProjectInitialization).toHaveBeenCalledOnce() })
+    const { idempotencyKey, ...settings } = submitted!
+    expect(api.recoverProjectInitialization).toHaveBeenCalledWith({ idempotencyKey,
+      requestSha256: createHash('sha256').update(JSON.stringify(projectRequestIdentity(settings))).digest('hex') })
+    await waitFor(() => { expect(screen.getByRole<HTMLButtonElement>('button', { name: '重试同一创建请求' }).disabled).toBe(false) })
+    fireEvent.click(screen.getByRole('button', { name: '重试同一创建请求' }))
+    await waitFor(() => { expect(api.initializeProject).toHaveBeenCalledTimes(2) })
+    expect(api.initializeProject.mock.calls[0]).toEqual(api.initializeProject.mock.calls[1])
+  })
   it('shows current preset adjustments and ignores a late response after another style is selected', async () => {
     const api = port()
     let resolveOld!: (value: Awaited<ReturnType<typeof api.readStyleComposition>>) => void

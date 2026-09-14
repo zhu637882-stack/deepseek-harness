@@ -54,6 +54,26 @@ const setup = (value: unknown = result, status = 200) => {
   return { fetch, handler: createYimengCommandHandler({ baseUrl: 'http://127.0.0.1:49123' }, { fetch, readToken: () => 'private-session-token' }) }
 }
 describe('bounded creation Host contract', () => {
+  it('transports product bytes above the ordinary JSON limit but hashes only their bound identity', async () => {
+    const bytes = Buffer.alloc(4 * 1024 * 1024, 80)
+    const image = { filename: '产品.png', contentBase64: bytes.toString('base64'), contentSha256: createHash('sha256').update(bytes).digest('hex') }
+    const identity = { filename: image.filename, contentSha256: image.contentSha256 }
+    const receipt = { ...result, requestSha256: digest(canonicalJson({ ...settings, productImages: [identity] })) }
+    const { handler, fetch } = setup(receipt)
+    expect(await handler('initializeProject', { ...request, productImages: [image] }, signal())).toEqual({ ok: true, value: receipt })
+    const body = fetch.mock.calls[0]?.[1]?.body
+    if (typeof body !== 'string') throw new Error('creation request body missing')
+    expect((JSON.parse(body) as Record<string, unknown>).productImages).toEqual([image])
+    expect(await handler('recoverProjectInitialization', { idempotencyKey: request.idempotencyKey,
+      requestSha256: receipt.requestSha256 }, signal())).toEqual({ ok: true, value: receipt })
+  })
+  it.each([[], Array.from({ length: 6 }, (_, index) => ({ filename: `${index}.png`, contentBase64: 'eA==', contentSha256: digest('x') })),
+    [{ filename: 'x.png', contentBase64: 'eA==', contentSha256: 'f'.repeat(64) }],
+    [{ filename: '../x.png', contentBase64: 'eA==', contentSha256: digest('x') }]].map(productImages => ({ productImages })))('rejects invalid product attachments before dispatch', async ({ productImages }) => {
+    const { handler, fetch } = setup()
+    expect(await handler('initializeProject', { ...request, productImages }, signal())).toMatchObject({ ok: false })
+    expect(fetch).not.toHaveBeenCalled()
+  })
   it('reads a bound style composition and rejects a response for another selection', async () => {
     const preview = { styleId: 'real_person_classic_bw', styleLabel: '经典黑白', stylePackId: 'sp_urban_emotion_realistic',
       stylePackName: '都市情感写实', effectivePrompt: '黑白灰阶\n具体导演决定优先', effectiveNegative: '', adjustments: ['暖米色'] }
