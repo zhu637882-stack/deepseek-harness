@@ -1,0 +1,18 @@
+.batch { padding:20px; border:1px solid var(--dsw-alias-border-l2); border-radius:12px; background:var(--dsw-alias-bg-layer-1); margin-bottom:24px; line-height:1.6; }
+.batch > summary { cursor:pointer; font-size:18px; font-weight:600; min-height:44px; }
+.batch p, .overview { color:var(--dsw-alias-label-secondary); }
+.batch button { min-height:44px; padding:8px 14px; border:1px solid var(--dsw-alias-border-l2); border-radius:8px; color:var(--dsw-alias-label-primary); background:var(--dsw-alias-bg-layer-2); font:inherit; cursor:pointer; }
+.batch button:hover:not(:disabled) { border-color:var(--qingmu-accent); }
+.batch button:disabled { opacity:.5; cursor:default; }
+.batch button:focus-visible, .batch summary:focus-visible, .batch textarea:focus-visible { outline:2px solid var(--qingmu-accent); outline-offset:3px; }
+.batch label { display:grid; gap:8px; margin:16px 0; }
+.batch textarea { width:100%; min-height:84px; box-sizing:border-box; padding:12px; border:1px solid var(--dsw-alias-border-l2); border-radius:8px; background:var(--dsw-alias-bg-layer-2); color:var(--dsw-alias-label-primary); font:inherit; resize:vertical; }
+.steps { display:flex; flex-wrap:wrap; gap:12px 40px; padding-left:24px; color:var(--dsw-alias-label-secondary); }
+.progress { display:grid; gap:8px; margin:16px 0; }
+.progress progress { width:100%; height:8px; accent-color:var(--qingmu-accent); }
+.results { list-style:none; padding:0; margin:20px 0; display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:8px 24px; }
+.results li { display:flex; flex-wrap:wrap; gap:8px; align-items:center; border-bottom:1px solid var(--dsw-alias-border-l2); padding:8px 0; min-width:0; }
+.results li span { color:var(--dsw-alias-label-secondary); overflow-wrap:anywhere; font-size:13px; }
+.actions { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:12px; }
+.batch .primary:not(:disabled) { border-color:var(--qingmu-accent); color:var(--qingmu-accent); font-weight:600; }
+@media(max-width:700px) { .batch { padding:14px; } .actions button { flex:1 1 100%; } }
