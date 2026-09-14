@@ -141,3 +141,42 @@ it.each(['missing', 'invalid', 'camera', 'opt-out'] as const)('keeps new-scene c
     expect(onAdopt).not.toHaveBeenCalled()
   } else await waitFor(() => { expect(onAdopt).toHaveBeenCalledExactlyOnceWith(candidateShots) })
 })
+
+it.each(['current', 'old-asset', 'wrong-script', 'changed-again'] as const)(
+  'revalidates an explicitly edited old-session scene against current sources (%s)', async (mode) => {
+    const key = 'qingmu.scene-design-1-session.v1:p:e'
+    const request = { sessionId: 'retained', baseline: 1, submitted: true, sourceKey: 'old-source' }
+    localStorage.setItem(key, JSON.stringify(request))
+    const old = JSON.stringify({ sourceScriptSha256: sha, sourceAssetStateSha256: 'c'.repeat(64), sceneIndex: 1, shots })
+    const port = { prepare: vi.fn(), send: vi.fn(), read: vi.fn(async () => ({
+      lastSeq: 10, running: false, finished: true, text: old, script: old, error: '',
+    })) }
+    const read = vi.fn().mockResolvedValueOnce(basis).mockResolvedValue(
+      mode === 'changed-again' ? { ...basis, stateSha256: 'd'.repeat(64) } : basis)
+    const onAdopt = vi.fn()
+    render(<NativeSceneDesign projectId="p" episodeId="e" scene={scene} scriptSha256={sha}
+      readAssetDesign={read} storyPort={port} disabled={false} onAdopt={onAdopt} />)
+    const adopt = await screen.findByRole<HTMLButtonElement>('button', { name: '采用到分镜卡片' })
+    await waitFor(() => { expect(adopt.disabled).toBe(false) })
+    fireEvent.click(adopt)
+    await screen.findByText(/没有采用：创作依据或本页设计已改变/)
+    expect(onAdopt).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '编辑这份候选' }))
+    const body = JSON.stringify({ sourceScriptSha256: mode === 'wrong-script' ? 'd'.repeat(64) : sha,
+      sourceAssetStateSha256: mode === 'old-asset' ? 'c'.repeat(64) : basis.stateSha256, sceneIndex: 1,
+      shots: shots.map(shot => ({ ...shot, visual: '按当前门窗重新安排的起始画面' })),
+    })
+    fireEvent.change(screen.getByLabelText('候选正文'), { target: { value: body } })
+    fireEvent.click(screen.getByRole('button', { name: '按当前来源核对并采用编辑稿' }))
+    if (mode === 'current') {
+      await waitFor(() => { expect(onAdopt).toHaveBeenCalledExactlyOnceWith(JSON.parse(body).shots) })
+      expect(screen.getByRole('status').textContent).toMatchSnapshot('edited scene source validation')
+    } else {
+      await screen.findByText(mode === 'old-asset' ? /没有采用：导演稿使用的素材/ : mode === 'wrong-script'
+        ? /没有采用：设计来源与当前场景不一致/ : /没有采用：素材或创作设定已更新/)
+      expect(onAdopt).not.toHaveBeenCalled()
+    }
+    expect(JSON.parse(localStorage.getItem(key) ?? '{}')).toEqual(request)
+    expect(screen.getByText(old)).toBeTruthy()
+    expect(port.send).not.toHaveBeenCalled()
+  })

@@ -84,7 +84,7 @@ export function NativeSceneDesign({ projectId, episodeId, scene, scriptSha256, r
     {error && <p role="alert">创作依据暂未读取：{error}<button onClick={() => { setRefresh(value => value + 1) }}>重新读取设计依据</button></p>}
     {!ready && !error && <p>{basis ? '素材设计对应的剧本已变化，请先回素材页更新依据。' : '正在核对剧本与素材设计…'}</p>}
     <NativeStoryComposer port={storyPort} projectId={projectId} episodeId={episodeId}
-      source={JSON.stringify(scene)} settings="" disabled={disabled || !ready} onAdopt={adopt}
+      source={JSON.stringify(scene)} settings="" disabled={disabled || !ready} onAdopt={adopt} onAdoptEdited={adopt}
       purpose={{ key: `scene-design-${scene.sceneIndex}`, jsonOutput: true, freshRevision: true, sourceKey: JSON.stringify({ scene, stateSha256: basis?.stateSha256 }), title: '场次导演设计',
         description: '导演结合全剧、素材与创作设定安排本场镜头。采用后可以编辑，再保存到分镜。',
         prompt, action: '让导演设计本场分镜', adopt: '采用到分镜卡片', adopted: '完整设计已放入分镜卡片；检查后预览保存。' }} />

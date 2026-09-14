@@ -28,7 +28,9 @@ function restore(key: string): WritingRequest | undefined {
  * @param props Current project source and settings; adoption edits text, not the saved script.
  * @returns A native writing control with recovery from the original durable session.
  */
-export function NativeStoryComposer({ port, projectId, episodeId, source, settings, disabled, onAdopt, purpose, inspectCandidate }: {
+export function NativeStoryComposer({
+  port, projectId, episodeId, source, settings, disabled, onAdopt, onAdoptEdited, purpose, inspectCandidate,
+}: {
   readonly purpose?: {
     readonly key: string
     readonly jsonOutput?: boolean
@@ -50,6 +52,8 @@ export function NativeStoryComposer({ port, projectId, episodeId, source, settin
   readonly settings: string
   readonly disabled: boolean
   readonly onAdopt: (text: string) => void | Promise<void>
+  /** Owner must validate edited source IDs, content and a fresh source read before local adoption. */
+  readonly onAdoptEdited?: (text: string) => void | Promise<void>
   /** Local candidate inspection; does not submit or adopt the draft. */
   readonly inspectCandidate?: (text: string) => ReactNode
 }) {
@@ -114,14 +118,16 @@ export function NativeStoryComposer({ port, projectId, episodeId, source, settin
     const value = { sessionId: request.sessionId, baseline: request.baseline, resultSeq: result.lastSeq, text }
     localStorage.setItem(`${key}:edited`, JSON.stringify(value)); setEdited(value)
   }
+  const sourceChanged = request?.sourceKey !== undefined && purpose?.sourceKey !== request.sourceKey
+  const revalidateEdit = sourceChanged && editing !== undefined && editing.text !== originalText && onAdoptEdited !== undefined
   async function adoptResult(text: string) {
     if (disabled || lock.current) return
     lock.current = true; setBusy(true)
     try {
-      if (request?.sourceKey !== undefined && purpose?.sourceKey !== request.sourceKey) {
+      if (sourceChanged && !revalidateEdit) {
         throw new Error('创作依据或本页设计已改变，原结果保留；请根据当前内容重新设计后采用。')
       }
-      await onAdopt(text)
+      await (revalidateEdit ? onAdoptEdited : onAdopt)(text)
       if (mounted.current) setNotice(purpose?.adopted ?? '已放入剧本文字。可继续修改，解析后保存为本集剧本。')
     } catch (error) {
       if (mounted.current) setNotice(`没有采用：${error instanceof Error ? error.message : String(error)}`)
@@ -153,7 +159,7 @@ export function NativeStoryComposer({ port, projectId, episodeId, source, settin
     {result?.finished && !result.error && adoptable && inspectCandidate?.(adoptable)}
     {adoptable && <button type="button" disabled={disabled || busy} onClick={() => {
       void adoptResult(adoptable)
-    }}>{purpose?.adopt ?? '采用到剧本文字'}</button>}
+    }}>{revalidateEdit ? '按当前来源核对并采用编辑稿' : purpose?.adopt ?? '采用到剧本文字'}</button>}
     {result?.finished && !result.error && !adoptable && <p>这次返回缺少可采用的独立正文块。完整文字已保留，可修正后导入。</p>}
   </section>
 }
