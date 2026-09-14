@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { AssetDesignState, ScenePlanningRequest, ScenePlanningResult, ScenePlanningState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { NativeStoryPort } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft'
@@ -57,8 +57,8 @@ function setup(candidate: unknown = draft, automatic = false, assetBasis = basis
   function initialWithMode() {
     return automatic ? { ...initial, canonicalStoryboard: state.canonicalStoryboard } as ScenePlanningState : initial
   }
-  mount()
-  return { port, storyPort, onSaved, saved, mount, changeState: (next: ScenePlanningState) => { state = next } }
+  const view = mount()
+  return { port, storyPort, onSaved, saved, mount, view, changeState: (next: ScenePlanningState) => { state = next } }
 }
 async function loadDraft() {
   const start = screen.getByRole<HTMLButtonElement>('button', { name: '让导演统筹本场全部镜头' })
@@ -74,7 +74,7 @@ it.each([false, true])('coordinates a whole existing scene and saves through cur
   const save = await loadDraft()
   expect(port.saveScenePlanning).not.toHaveBeenCalled()
   expect(storyPort.send).toHaveBeenCalledExactlyOnceWith(expect.any(String), expect.any(String), { projectId: 'p', episodeId: 'e', purpose: 'scene-reconcile-room' })
-  const supplied = JSON.parse(storyPort.send.mock.calls[0]![1].split('本场完整原镜头：')[1]!.split('\n其他场次')[0]!)
+  const supplied = JSON.parse(storyPort.send.mock.calls[0]![1].split('本场完整原镜头：')[1]!.split('\n其他场次')[0]!) as { durationSec: number; dialogue: unknown }[]
   expect(supplied.map((shot: { durationSec: number; dialogue: unknown }) => [shot.durationSec, shot.dialogue]))
     .toEqual(initial.frameRequirements!.slice(0, 2).map(shot => [shot.durationSec, shot.dialogue]))
   if (!automatic) expect(storyPort.send.mock.calls[0]?.[1]).toMatchSnapshot('whole scene reconciliation request')
@@ -95,7 +95,7 @@ it('recovers an uncertain committed save using the identical intent after reload
   port.saveScenePlanning.mockImplementationOnce(async (...args) => { await original(...args); throw new Error('reply lost') })
   fireEvent.click(save)
   await screen.findByText(/reply lost/)
-  const pending = JSON.parse(localStorage.getItem(batchKey)!).pending
+  const pending = (JSON.parse(localStorage.getItem(batchKey)!) as { pending: ScenePlanningRequest }).pending
   expect(saved.size).toBe(1)
   cleanup(); mount()
   fireEvent.click(await screen.findByRole('button', { name: '保存并接续本场全部设计' }))
@@ -103,6 +103,22 @@ it('recovers an uncertain committed save using the identical intent after reload
   expect(port.saveScenePlanning.mock.calls[1]![0]).toEqual(pending)
   expect(saved.size).toBe(2)
   expect(storyPort.send).toHaveBeenCalledTimes(1)
+})
+
+it('continues the scene batch when its own first save refreshes the displayed revision', async () => {
+  const { port, storyPort, onSaved, view } = setup()
+  const save = await loadDraft()
+  const original = port.saveScenePlanning.getMockImplementation()!
+  port.saveScenePlanning.mockImplementationOnce(async (...args) => {
+    const result = await original(...args)
+    await act(async () => { view.rerender(<NativeSceneReconcile state={{ ...initial, storyboard: result.storyboard }}
+      sceneId="room" port={port} storyPort={storyPort} disabled={false} onSaved={onSaved} />) })
+    return result
+  })
+  fireEvent.click(save)
+  await waitFor(() => { expect(onSaved).toHaveBeenCalledOnce() })
+  expect(port.saveScenePlanning).toHaveBeenCalledTimes(2)
+  expect(JSON.parse(localStorage.getItem(batchKey)!)).toMatchObject({ completed: 2 })
 })
 
 it('stops remaining saves on shared-source drift and retains already committed progress', async () => {

@@ -316,6 +316,8 @@ Creation displays catalog-backed base-style thumbnails through the Host. Full-fi
 
 The delivery page provides candidate-version choices, ordered source trims and local MP4 rendering through the existing immutable timeline engine. It retains earlier cuts and native source audio; working choices do not grant formal Take approval. Reopening a reference draft restores its saved bindings and parameters, while a late read preserves new edits.
 
+Reopening an uncertain edit save or MP4 export displays the retained request's complete trims and sound design. Recovery submits that same request; confirmed server records clear the pending marker. Whole-scene director saves remain active when their own storyboard revisions refresh the page. Each next shot still checks current shared sources, and switching projects or leaving the component cancels local continuation with the pending request retained.
+
 
 The delivery working cut supports durable edit drafts plus independent music, ambience, Foley and
 dialogue tracks. Import local WAV/MP3/M4A/FLAC (32 MB / 10 minutes), audition sources, place cues in

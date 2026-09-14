@@ -76,10 +76,16 @@ export function NativeSceneReconcile({ state, sceneId, port, storyPort, disabled
   const sharedLayout = sharedScene?.sceneLayout
   useEffect(() => {
     const active = new AbortController(); controller.current = active
+    return () => { active.abort() }
+  }, [projectId, episodeId, sceneId])
+  useEffect(() => {
+    // Refreshing source display must not cancel the batch which produced that
+    // revision. Each next save separately verifies its current source hashes.
+    const active = new AbortController()
     setBasis(undefined)
     void port.readAssetDesign({ projectId, episodeId }, active.signal).then((value) => {
       if (!active.signal.aborted) setBasis(value)
-    }).catch((error) => { if (!active.signal.aborted) setNotice(String(error)) })
+    }).catch((error: unknown) => { if (!active.signal.aborted) setNotice(String(error)) })
     return () => { active.abort() }
   }, [projectId, episodeId, sceneId, state.scriptSha256, state.storyboard?.sourceHash, port.readAssetDesign, refresh])
   const persist = (value: Batch) => { localStorage.setItem(key, JSON.stringify(value)); setBatch(value) }
@@ -87,7 +93,7 @@ export function NativeSceneReconcile({ state, sceneId, port, storyPort, disabled
     && (!basis.design || basis.design.sourceScriptSha256 === state.scriptSha256)
     && shots.length > 0 && shots.length <= 64 && shots.every(shot => shot.generationContextSource)
   async function adopt(text: string) {
-    if (!ready || !basis || !state.storyboard || !state.scriptSha256) throw new Error('请先读取当前剧本、场景与分镜依据。')
+    if (!ready) throw new Error('请先读取当前剧本、场景与分镜依据。')
     if (batch && batch.completed < batch.changes.length) throw new Error('本场已有待保存稿，请先接续或明确保留副本后放弃剩余保存。')
     const value: unknown = JSON.parse(text)
     if (!object(value) || value.sceneId !== sceneId || value.sourceScriptSha256 !== state.scriptSha256

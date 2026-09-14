@@ -332,7 +332,7 @@ it('previews framing, retains it on reopen and can restore the unmodified source
   view.unmount()
 })
 it('submits the chosen source range and retains the same command after an uncertain response', async () => {
-  const renderCut=vi.fn().mockRejectedValueOnce(new Error('timeout')).mockResolvedValue({ ...state,revision:1,cuts:[] })
+  const renderCut=vi.fn<(input: { command: WorkingCutCommand }) => Promise<WorkingCutState>>().mockRejectedValueOnce(new Error('timeout')).mockResolvedValue({ ...state,revision:1,cuts:[] })
   const port={ reviewWorkingCutSound: vi.fn(),
     readWorkingCut:vi.fn(async()=>state),saveWorkingCut:vi.fn(),uploadWorkingCutAudio:vi.fn(),renderWorkingCut:renderCut }
   render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
@@ -341,10 +341,49 @@ it('submits the chosen source range and retains the same command after an uncert
   fireEvent.click(screen.getByRole('button',{ name:'合成并导出 MP4' }))
   await screen.findByRole('alert')
   fireEvent.click(screen.getByRole('button',{ name:'恢复上次导出' }))
-  await waitFor(()=>expect(renderCut).toHaveBeenCalledTimes(2))
+  await waitFor(()=>{ expect(renderCut).toHaveBeenCalledTimes(2) })
   expect(renderCut.mock.calls[0]?.[0]).toEqual(renderCut.mock.calls[1]?.[0])
   expect(renderCut.mock.calls[0]?.[0].command.clips[0]).toEqual({ frameId:'f',assetId:'a',sha256:'a'.repeat(64),inSec:1.8,outSec:15 })
 })
+it.each(['save', 'render'] as const)('reopens the exact uncertain %s intent before retrying, including sound', async (mode) => {
+  const server = { ...state, audioLibrary: [{ assetId: 'room', sha256: 'b'.repeat(64), duration: 15, name: '室内底声', url: '' }] }
+  const submit = vi.fn().mockRejectedValueOnce(new Error('response lost')).mockResolvedValue(server)
+  const port = { readWorkingCut: vi.fn(async () => server), reviewWorkingCutSound: vi.fn(),
+    saveWorkingCut: mode === 'save' ? submit : vi.fn(), renderWorkingCut: mode === 'render' ? submit : vi.fn(), uploadWorkingCutAudio: vi.fn() }
+  let view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
+  fireEvent.change(await screen.findByRole('spinbutton', { name: '镜 1 起点秒' }), { target: { value: '1.8' } })
+  fireEvent.change(screen.getByRole('spinbutton', { name: '镜 1 终点秒' }), { target: { value: '12' } })
+  fireEvent.click(screen.getByRole('button', { name: '加入音轨' }))
+  fireEvent.change(screen.getByRole('spinbutton', { name: '音轨 1 音量 dB' }), { target: { value: '-23' } })
+  fireEvent.click(screen.getByRole('button', { name: mode === 'save' ? '保存剪辑草稿' : '合成并导出 MP4' }))
+  await screen.findByRole('alert');view.unmount()
+  view = render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
+  expect(await screen.findByRole('spinbutton', { name: '镜 1 起点秒' })).toHaveProperty('value', '1.8')
+  expect(screen.getByRole('spinbutton', { name: '镜 1 终点秒' })).toHaveProperty('value', '12')
+  expect(screen.getByRole('spinbutton', { name: '音轨 1 音量 dB' })).toHaveProperty('value', '-23')
+  expect(submit).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByRole('button', { name: mode === 'save' ? '恢复上次保存' : '恢复上次导出' }))
+  await waitFor(() => { expect(submit).toHaveBeenCalledTimes(2) })
+  expect(submit.mock.calls[1]?.[0]).toEqual(submit.mock.calls[0]?.[0])
+  view.unmount()
+})
+
+it('clears an acknowledged pending request and opens the saved edit without resubmitting', async () => {
+  const command: WorkingCutCommand = { requestId: 'pending', expectedRevision: 0,
+    clips: [{ frameId: 'f', assetId: 'a', sha256: 'a'.repeat(64), inSec: 2, outSec: 10 }], soundPlan: '完整房间底声，镜头切换时延续' }
+  localStorage.setItem('qingmu:working-cut:p:e', JSON.stringify({ command, mode: 'save' }))
+  const server = { ...state, revision: 1, cuts: [{ ...command, version: 1, revisionId: 'r', taskId: null,
+    status: 'NotQueued', errorCode: null, assetId: null, sha256: null, url: '' }] }
+  const port = { readWorkingCut: vi.fn(async () => server), reviewWorkingCutSound: vi.fn(),
+    saveWorkingCut: vi.fn(), renderWorkingCut: vi.fn(), uploadWorkingCutAudio: vi.fn() }
+  render(<WorkingCut projectId="p" episodeId="e" port={port} onOpenShooting={vi.fn()} />)
+  expect(await screen.findByRole('spinbutton', { name: '镜 1 起点秒' })).toHaveProperty('value', '2')
+  expect(screen.getByDisplayValue(command.soundPlan!)).toBeTruthy()
+  expect(localStorage.getItem('qingmu:working-cut:p:e')).toBeNull()
+  expect(screen.queryByRole('button', { name: '恢复上次保存' })).toBeNull()
+  expect(port.saveWorkingCut).not.toHaveBeenCalled();expect(port.renderWorkingCut).not.toHaveBeenCalled()
+})
+
 it('opens a missing shot for generation and reads existing film versions without creating work', async () => {
   const open=vi.fn(),generate=vi.fn()
   render(<WorkingCut projectId="p" episodeId="e" port={{ reviewWorkingCutSound: vi.fn(), readWorkingCut:vi.fn(async()=>({ ...state,shots:[{ frameId:'missing',frameNo:1,title:'未生成',candidates:[] }] })),saveWorkingCut:vi.fn(),uploadWorkingCutAudio:vi.fn(),renderWorkingCut:generate }} onOpenShooting={open} />)
@@ -356,7 +395,7 @@ it('opens a missing shot for generation and reads existing film versions without
 it('saves whole-cut ambience with independent fades and recovers it on reopen', async () => {
   const source = { assetId:'room',sha256:'b'.repeat(64),duration:15,name:'Room.wav',url:'' }
   let server: WorkingCutState = { ...state, audioLibrary:[source] }
-  const save = vi.fn(async ({ command }) => {
+  const save = vi.fn(async ({ command }: { command: WorkingCutCommand }) => {
     server = { ...server,revision:1,cuts:[{ ...command,revisionId:'rev-1',version:1,status:'NotQueued',taskId:null,errorCode:null,assetId:null,sha256:null,url:'' }] }
     return server
   })
@@ -371,7 +410,7 @@ it('saves whole-cut ambience with independent fades and recovers it on reopen', 
   fireEvent.change(screen.getByRole('spinbutton',{ name:'音轨 1 变化点 2 增减 dB' }),{ target:{ value:'-9' } })
   fireEvent.change(screen.getByRole('textbox',{ name:'声音设计' }),{ target:{ value:'Street ambience continues underneath dialogue.' } })
   fireEvent.click(screen.getByRole('button',{ name:'保存剪辑草稿' }))
-  await waitFor(()=>expect(save).toHaveBeenCalledTimes(1))
+  await waitFor(()=>{ expect(save).toHaveBeenCalledTimes(1) })
   expect(port.renderWorkingCut).not.toHaveBeenCalled()
   expect(save.mock.calls[0]?.[0].command.audioCues).toEqual([expect.objectContaining({ kind:'ambience',startSec:0,outSec:15,fadeOutSec:3,
     gainPoints:[{ timeSec:0,gainDb:0 },{ timeSec:7.5,gainDb:-9 },{ timeSec:15,gainDb:0 }] })])

@@ -44,17 +44,20 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting, renderD
     const next = await port.readWorkingCut({ projectId, episodeId })
     if (!live.current) return
     setState(next)
+    const acknowledged = pending.current && next.cuts.some(c => c.requestId === pending.current?.requestId)
     if (!editing.current) {
-      setAudioCues(next.cuts[0]?.audioCues ?? [])
-      setSoundPlan(next.cuts[0]?.soundPlan ?? '')
-      setClips(next.cuts[0]?.clips ?? next.shots.flatMap((shot) => {
+      // The recovery button replays this exact command, so show its complete edit.
+      const current = pending.current && !acknowledged ? pending.current : next.cuts[0]
+      setAudioCues(current?.audioCues ?? [])
+      setSoundPlan(current?.soundPlan ?? '')
+      setClips(current?.clips ?? next.shots.flatMap((shot) => {
         const candidate = shot.selectedAssetId === undefined ? shot.candidates.at(-1)
           : shot.candidates.find(c => c.assetId === shot.selectedAssetId)
         return candidate ? [{ frameId: shot.frameId, assetId: candidate.assetId, sha256: candidate.sha256,
           inSec: 0, outSec: Math.floor(candidate.duration * 100) / 100 }] : []
       }))
     }
-    if (pending.current && next.cuts.some(c => c.requestId === pending.current?.requestId)) {
+    if (acknowledged) {
       pending.current = undefined
       try { localStorage.removeItem(scopeKey) } catch { /* In-memory recovery still works. */ }
     }
@@ -146,11 +149,12 @@ export function WorkingCut({ projectId, episodeId, port, onOpenShooting, renderD
     {notice && <p role="status">{notice}</p>}
     {error && <div role="alert"><p>{error}</p><button type="button" disabled={busy} onClick={() => {
       void read().then(() => {
-        pending.current = undefined; setError('')
+        pending.current = undefined; editing.current = true; setDirty(true); setError('')
         try { localStorage.removeItem(scopeKey) } catch { /* Next command still uses the refreshed server revision. */ }
       }).catch((cause: unknown) => { setError(String(cause)) })
     }}>重新核对剪辑</button></div>}
     {!state ? <p role="status">正在读取镜头…</p> : <>
+      {pending.current && <p role="status">已恢复上次提交的剪辑和音轨。下面的内容与待恢复请求一致，恢复不会另建一次提交。</p>}
       {renderDirector && <details open={directorOpen} onToggle={(event) => { setDirectorOpen(event.currentTarget.open) }}>
         <summary>整片声音导演</summary>
         {dirty || !state.cuts.length
