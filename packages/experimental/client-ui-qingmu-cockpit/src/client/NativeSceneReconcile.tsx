@@ -35,6 +35,29 @@ function validChange(value: unknown): value is Change {
     && (!('imageCamera' in value.directorPlan) || validImageCamera(value.directorPlan.imageCamera))
     && typeof value.sourceSha256 === 'string' && /^[a-f0-9]{64}$/.test(value.sourceSha256)
 }
+function sameValue(left: unknown, right: unknown): boolean {
+  if (left === right) return true
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length && left.every((value, i) => sameValue(value, right[i]))
+  }
+  if (!object(left) || !object(right)) return false
+  const keys = Object.keys(left)
+  return keys.length === Object.keys(right).length && keys.every(key => key in right && sameValue(left[key], right[key]))
+}
+function currentShot(state: ScenePlanningState, batch: Batch, change: Change): AutomaticPlanningShot {
+  const shot = state.frameRequirements?.find(item => item.id === change.shotId)
+  if (state.projectId !== batch.projectId || state.episodeId !== batch.episodeId
+    || state.scriptSha256 !== batch.scriptSha256 || state.scriptRevision !== batch.scriptRevision
+    || state.storyboard?.sourceHash !== batch.storyboard.sourceHash || state.storyboard.version !== batch.storyboard.version
+    || shot?.sceneId !== batch.sceneId || shot.generationContextSource?.sha256 !== change.sourceSha256) {
+    throw new Error('来源或分镜已变化，已停止剩余保存。已保存镜头保留，请读取最新依据后重新协调剩余设计。')
+  }
+  return shot
+}
+function alreadyStored(shot: AutomaticPlanningShot, change: Change): boolean {
+  return shot.generationContextSource?.state === 'current' && shot.imagePromptCn === change.imagePromptCn
+    && Object.entries(change.directorPlan).every(([key, value]) => sameValue(shot.directorPlan?.[key], value))
+}
 function restore(key: string, projectId: string, episodeId: string, sceneId: string): Batch | undefined {
   try {
     const v: unknown = JSON.parse(localStorage.getItem(key) ?? 'null')
@@ -136,12 +159,11 @@ export function NativeSceneReconcile({ state, sceneId, port, storyPort, disabled
         if (!change) throw new Error('本场保存进度缺少对应镜头，原稿保留。')
         if (!currentBatch.pending) {
           const current = await port.readScenePlanning({ projectId, episodeId }, signal)
-          const shot = current.frameRequirements?.find(item => item.id === change.shotId)
-          if (current.scriptSha256 !== currentBatch.scriptSha256 || current.scriptRevision !== currentBatch.scriptRevision
-            || current.storyboard?.sourceHash !== currentBatch.storyboard.sourceHash
-            || current.storyboard.version !== currentBatch.storyboard.version
-            || shot?.sceneId !== sceneId || shot.generationContextSource?.sha256 !== change.sourceSha256) {
-            throw new Error('来源或分镜已变化，已停止剩余保存。已保存镜头保留，请读取最新依据后重新协调剩余设计。')
+          signal.throwIfAborted()
+          if (alreadyStored(currentShot(current, currentBatch, change), change)) {
+            currentBatch = { ...currentBatch, completed: currentBatch.completed + 1 }
+            persist(currentBatch)
+            continue
           }
           const request: FrameRequirementsOperation = { action: currentBatch.action,
             expectedScriptRevision: currentBatch.scriptRevision, expectedScriptSha256: currentBatch.scriptSha256,
@@ -163,7 +185,20 @@ export function NativeSceneReconcile({ state, sceneId, port, storyPort, disabled
           || intent.request.expectedStoryboardSha256 !== currentBatch.storyboard.sourceHash
           || intent.request.expectedGenerationContextSourceSha256 !== change.sourceSha256) throw new Error('保存草稿无法核对，请保留原稿后读取恢复。')
         // An uncertain reply resumes the same idempotent save, never a second creative intent.
-        const result = await port.saveScenePlanning(intent, signal)
+        let result
+        try { result = await port.saveScenePlanning(intent, signal) }
+        catch (error: unknown) {
+          // Older clients may retain an unchanged request. Only a fresh read of
+          // that exact version and every proposed field can settle this case.
+          if (!String(error).includes('storyboard_mutation_no_effect')) throw error
+          const current = await port.readScenePlanning({ projectId, episodeId }, signal)
+          signal.throwIfAborted()
+          if (!alreadyStored(currentShot(current, currentBatch, change), change)) throw error
+          const { pending: _pending, ...settled } = currentBatch
+          currentBatch = { ...settled, completed: currentBatch.completed + 1 }
+          persist(currentBatch)
+          continue
+        }
         if (result.action !== currentBatch.action || !('shotId' in result) || result.shotId !== change.shotId
           || result.projectId !== projectId || result.episodeId !== episodeId
           || result.storyboard.version !== currentBatch.storyboard.version + 1) throw new Error('保存回执不一致，保留同一请求等待恢复。')

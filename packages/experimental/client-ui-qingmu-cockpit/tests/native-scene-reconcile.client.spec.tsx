@@ -139,6 +139,52 @@ it('stops remaining saves on shared-source drift and retains already committed p
   expect(JSON.parse(localStorage.getItem(`${batchKey}:retained`)!)).toMatchObject({ completed: 1 })
 })
 
+function withFirstChangeStored(): ScenePlanningState {
+  return { ...initial, frameRequirements: initial.frameRequirements!.map(shot => shot.id !== 'f1' ? shot : {
+    ...shot, imagePromptCn: changes[0]!.imagePromptCn,
+    directorPlan: { ...shot.directorPlan, ...changes[0]!.directorPlan,
+      continuity: { end: '桌旁站立', start: '门外' } },
+    generationContextSource: { state: 'current', sha256: sourceSha, changes: [] },
+  }) }
+}
+
+it('keeps an unchanged current shot and continues to save the changed shot without creating an empty revision', async () => {
+  const { port, onSaved, changeState } = setup()
+  const save = await loadDraft()
+  changeState(withFirstChangeStored())
+  fireEvent.click(save)
+  await waitFor(() => { expect(onSaved).toHaveBeenCalledOnce() })
+  expect(port.saveScenePlanning).toHaveBeenCalledTimes(1)
+  expect(port.saveScenePlanning.mock.calls[0]![0].request).toMatchObject({ shotId: 'f2', expectedStoryboardRevision: 1 })
+  expect(JSON.parse(localStorage.getItem(batchKey)!)).toMatchObject({ completed: 2, storyboard: { version: 2 } })
+})
+
+it.each(['current', 'changed'] as const)('recovers a retained no-effect request only when its saved design and sources are current (%s)', async (sourceState) => {
+  const { port, onSaved, changeState, mount } = setup()
+  const save = await loadDraft()
+  port.saveScenePlanning.mockRejectedValueOnce(new Error('reply lost'))
+  fireEvent.click(save)
+  await screen.findByText(/reply lost/)
+  const pending = (JSON.parse(localStorage.getItem(batchKey)!) as { pending: ScenePlanningRequest }).pending
+  const stored = withFirstChangeStored()
+  changeState({ ...stored, frameRequirements: stored.frameRequirements!.map(shot => shot.id !== 'f1' ? shot : {
+    ...shot, generationContextSource: { state: sourceState, sha256: sourceSha, changes: [] },
+  }) })
+  cleanup(); mount()
+  port.saveScenePlanning.mockRejectedValueOnce(new Error('HTTP 422: storyboard_mutation_no_effect'))
+  fireEvent.click(await screen.findByRole('button', { name: '保存并接续本场全部设计' }))
+  expect(port.saveScenePlanning.mock.calls[1]![0]).toEqual(pending)
+  if (sourceState === 'current') {
+    await waitFor(() => { expect(onSaved).toHaveBeenCalledOnce() })
+    expect(JSON.parse(localStorage.getItem(batchKey)!)).toMatchObject({ completed: 2 })
+    expect(port.saveScenePlanning.mock.calls[2]![0].request).toMatchObject({ shotId: 'f2', expectedStoryboardRevision: 1 })
+  } else {
+    await screen.findByText(/storyboard_mutation_no_effect/)
+    expect(onSaved).not.toHaveBeenCalled()
+    expect(JSON.parse(localStorage.getItem(batchKey)!)).toMatchObject({ completed: 0, pending })
+  }
+})
+
 it.each([
   { ...draft, sourceIssues: ['世界说门在北墙，场景说门在南墙，来源尚待协调'] },
   { ...draft, shots: [changes[0]] },
