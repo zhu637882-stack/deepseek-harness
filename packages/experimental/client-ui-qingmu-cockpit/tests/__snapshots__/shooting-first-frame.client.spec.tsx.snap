@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`chooses exact working images, prepares without signoff, and prevents generation after reference edits > unprepared reference edit survives reload 1`] = `"引用已修改，请重新准备后生成。"`;

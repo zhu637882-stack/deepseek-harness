@@ -60,6 +60,20 @@ function assertFrameReview(value: unknown, frameId: string): FrameReview {
   return item
 }
 const sha = /^[a-f0-9]{64}$/
+function readReferenceDraft(key: string): readonly AssetImageReference[] | undefined {
+  const saved = localStorage.getItem(`${key}:reference-draft`)
+  if (saved === null) return
+  const value: unknown = JSON.parse(saved)
+  if (!Array.isArray(value) || value.length > 9 || !value.every((item: unknown) => {
+    if (!item || typeof item !== 'object') return false
+    const ref = item as Record<string, unknown>
+    return typeof ref.assetId === 'string' && ref.assetId.length > 0
+      && typeof ref.assetSha256 === 'string' && sha.test(ref.assetSha256)
+      && typeof ref.purpose === 'string'
+      && (ref.boxes === undefined || (Array.isArray(ref.boxes) && ref.boxes.length === 0))
+  })) throw new Error('首帧引用草稿不完整')
+  return value as readonly AssetImageReference[]
+}
 function submissionBlocker(value: unknown): { message: string; detail: unknown } | undefined {
   if (!value || typeof value !== 'object') return
   const detail = (value as Record<string, unknown>).submissionBlocker
@@ -173,8 +187,10 @@ export function ShootingFirstFrame({
   const key = `qingmu:shooting-first-frame:${scope.projectId}:${scope.episodeId}:${scope.frameId}`
   const [preview, setPreview] = useState<Preview>(); const [attempt, setAttempt] = useState<Attempt>()
   const [references, setReferences] = useState<readonly AssetImageReference[]>([])
+  const [referenceDraftWarning, setReferenceDraftWarning] = useState('')
   const workingReferences = preview?.referenceMode === 'working'
-  const referencesCurrent = !workingReferences || JSON.stringify(references) === JSON.stringify(preview.referenceBindings)
+  const referencesCurrent = !referenceDraftWarning && (workingReferences
+    ? JSON.stringify(references) === JSON.stringify(preview.referenceBindings) : references.length === 0)
   const [loadedImage, setLoadedImage] = useState<string>()
   const materialized = attempt?.candidate
   const imageKey = materialized ? `${key}:${materialized.assetId}:${materialized.sha256}:${materialized.browserUrl}` : undefined
@@ -228,6 +244,13 @@ export function ShootingFirstFrame({
     const controller = new AbortController()
     const load = async () => {
       try {
+        const restoreReferences = (fallback: readonly AssetImageReference[]) => {
+          try { setReferences(readReferenceDraft(key) ?? fallback); setReferenceDraftWarning('') }
+          catch {
+            setReferences([])
+            setReferenceDraftWarning('引用草稿无法读取，请重新选择参考图。原生成记录仍保留，尚未重新提交。')
+          }
+        }
         const saved = localStorage.getItem(key)
         if (saved !== null) {
           const parsed = JSON.parse(saved) as {
@@ -241,9 +264,14 @@ export function ShootingFirstFrame({
           if (parsed.stage !== undefined && parsed.stage !== 'prepared' && parsed.stage !== 'submitted') throw new Error('原提交阶段不完整')
           notified.current = typeof parsed.observedCandidateId === 'string'
             ? `${parsed.requestId}:${parsed.observedCandidateId}` : ''
-          setPreview(prior); setReferences(prior.referenceBindings ?? [])
-          if (parsed.stage !== 'prepared') setRequestId(parsed.requestId); return
+          setPreview(prior)
+          if (parsed.stage !== 'prepared') {
+            // A submitted request always recovers its immutable inputs, never an editable draft.
+            setReferences(prior.referenceBindings ?? []); setReferenceDraftWarning(''); setRequestId(parsed.requestId)
+          } else restoreReferences(prior.referenceBindings ?? [])
+          return
         }
+        restoreReferences([])
         if (!requirementsReady) return
         setBusy(true)
         const value = assertShootingPreview(await request('preview', input, controller.signal), scope)
@@ -254,6 +282,15 @@ export function ShootingFirstFrame({
     void load()
     return () => controller.abort()
   }, [key, requirementsReady])
+  const editReferences = (value: readonly AssetImageReference[]) => {
+    setReferences(value)
+    try {
+      localStorage.setItem(`${key}:reference-draft`, JSON.stringify(value))
+      setReferenceDraftWarning('')
+    } catch {
+      setReferenceDraftWarning('引用修改暂未保存到本机，请保留本页并重试。尚未提交生成。')
+    }
+  }
   useEffect(() => {
     if (!requestId) return
     const controller = new AbortController(); let timer: ReturnType<typeof setTimeout> | undefined
@@ -325,6 +362,7 @@ export function ShootingFirstFrame({
     // Same inputs retain the same durable request ID; changed inputs make the
     // old preflight fail source validation. This never sends a generation POST.
     if (rework || fresh.referenceMode === 'working') {
+      localStorage.setItem(`${key}:reference-draft`, JSON.stringify(fresh.referenceBindings ?? []))
       localStorage.setItem(key, JSON.stringify({ preview: fresh, requestId: `shooting-${fresh.preflightId}`, stage: 'prepared' }))
     }
     else localStorage.removeItem(key)
@@ -334,9 +372,10 @@ export function ShootingFirstFrame({
     if (!requirementsReady || !references.length || busy || lock.current || requestId) return
     lock.current = true; setBusy(true); setError('')
     try {
+      localStorage.setItem(`${key}:reference-draft`, JSON.stringify(references))
       const fresh = assertShootingPreview(await request('preview', { ...input, reference_images: references }), scope)
       localStorage.setItem(key, JSON.stringify({ preview: fresh, requestId: `shooting-${fresh.preflightId}`, stage: 'prepared' }))
-      setPreview(fresh); setAttempt(undefined)
+      setReferenceDraftWarning(''); setPreview(fresh); setAttempt(undefined)
     } catch (cause) { setError(String(cause)) }
     finally { lock.current = false; setBusy(false) }
   }
@@ -408,7 +447,7 @@ export function ShootingFirstFrame({
         </div> : blocked ? <div role="alert"><h3>还未开始生成</h3><p>本镜的生成条件尚未满足，请核对当前要求与分镜确认状态。未提交本次生成。</p></div>
           : requestId ? <div role="status"><h3>{attemptMessage(attempt?.task)}</h3><p>你可以离开此页，返回后继续查看同一任务。</p></div>
             : busy ? <div role="status"><h3>正在准备首帧</h3><p>正在编译提示词与检查当前要求，尚未提交生成。</p></div>
-              : preview && <div><h3>{preview.blockers.length ? '请先调整本镜要求' : '可以生成首帧了'}</h3><p>{preview.blockers.length ? '生成条件未通过，未提交、未收费。' : '使用右侧已保存的要求，生成一张新候选。原素材保持不变。'}</p></div>}
+              : preview && <div><h3>{!referencesCurrent ? '请重新准备首帧' : preview.blockers.length ? '请先调整本镜要求' : '可以生成首帧了'}</h3><p>{!referencesCurrent ? '参考图需要重新核对，请展开下方参考图并准备，尚未提交生成。' : preview.blockers.length ? '生成条件未通过，未提交、未收费。' : '使用右侧已保存的要求，生成一张新候选。原素材保持不变。'}</p></div>}
       </div>}
     </div>
     {attempt?.candidate && <div className={css.candidate} aria-label="首帧候选条"><button type="button" aria-pressed="true"><img src={attempt.candidate.browserUrl} alt="新首帧候选缩略图" /><span>本次新首帧<small>{attempt.candidate.isSelected ? '已选用' : '待定版'}</small></span></button></div>}
@@ -421,10 +460,11 @@ export function ShootingFirstFrame({
     {referencePort && <details className={css.referencesPanel}><summary>选择首帧参考图</summary>
       <p>明确选择本镜使用的人物、场景与道具图片，说明各图用途；生成新的工作候选。</p>
       <AssetImageReferences projectId={scope.projectId} references={references} port={referencePort}
-        disabled={busy || Boolean(requestId)} allowRegions={false} onChange={setReferences} />
+        disabled={busy || Boolean(requestId)} allowRegions={false} onChange={editReferences} />
       <button type="button" disabled={busy || Boolean(requestId) || references.length === 0}
         onClick={() => { void prepareReferences() }}>用这些图片准备首帧</button>
-      {workingReferences && !referencesCurrent && <p role="status">引用已修改，请重新准备后生成。</p>}
+      {!referenceDraftWarning && !referencesCurrent && <p role="status">引用已修改，请重新准备后生成。</p>}
+      {referenceDraftWarning && <p role="status">{referenceDraftWarning}</p>}
     </details>}
     {needsLogin && <form className={css.login} aria-label="恢复分镜确认登录" onSubmit={(event) => { event.preventDefault(); void login() }}>
       <p>确认分镜需要本人账户登录。登录后可以继续核对当前分镜。</p>

@@ -312,8 +312,8 @@ it('chooses exact working images, prepares without signoff, and prevents generat
     if (path.endsWith('/preview')) {
       const body=JSON.parse(String(init?.body))
       if (!body.reference_images) return Response.json({ detail:'first_frame_reference_not_ready' },{ status:409 })
-      expect(body.reference_images).toEqual([ref])
-      return Response.json(working)
+      expect(body.reference_images[0].assetId).toBe(ref.assetId)
+      return Response.json({ ...working, referenceBindings: body.reference_images })
     }
     return Response.json(result)
   })
@@ -332,6 +332,10 @@ it('chooses exact working images, prepares without signoff, and prevents generat
   expect(screen.queryByRole('button',{ name:'生成这张首帧（仅一次）' })).toBeNull()
   view.unmount()
   render(<ShootingFirstFrame scope={scope} referencePort={referencePort as unknown as AssetImageReferencePort} />)
+  await waitFor(() => expect((screen.getByLabelText('图 1 的用途') as HTMLTextAreaElement).value).toBe('修改后的用途'))
+  expect(screen.queryByRole('button',{ name:'生成这张首帧（仅一次）' })).toBeNull()
+  expect(screen.getByRole('status').textContent).toMatchSnapshot('unprepared reference edit survives reload')
+  fireEvent.click(screen.getByRole('button',{ name:'用这些图片准备首帧',hidden:true }))
   fireEvent.click(await screen.findByRole('button',{ name:'生成这张首帧（仅一次）' }))
   await screen.findByAltText('镜头新首帧 · 待你定版')
   expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/submit'))).toHaveLength(1)
@@ -359,4 +363,84 @@ it('recovers an unqueued working request and retains its references across anoth
   view.unmount(); render(<ShootingFirstFrame scope={scope} />)
   await screen.findByRole('button', { name: '生成这张首帧（仅一次）' })
   expect(fetcher.mock.calls.some(([path]) => path.endsWith('/submit') || path.endsWith('/confirm'))).toBe(false)
+})
+
+it('keeps reference edits before preparation and isolates another shot from that draft', async () => {
+  const ref = { assetId: 'scene', assetSha256: 'f'.repeat(64), purpose: '', boxes: [] }
+  const referencePort = { referenceVideoAssets: vi.fn(async () => ({ items: [{ ...ref,
+    mediaType: 'reference_image', label: '场景图', browserUrl: '' }], pages: 1 })), readLocalReferenceCandidateContent: vi.fn() }
+  const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
+    if (path.includes('/review?')) return Response.json({ ...review, frameId: new URL(path, 'http://localhost').searchParams.get('frame_id') })
+    const body = JSON.parse(String(init?.body))
+    return Response.json({ ...preview, frameId: body.frame_ids[0] })
+  })
+  vi.stubGlobal('fetch', fetcher)
+  const props = { scope, referencePort: referencePort as unknown as AssetImageReferencePort }
+  const first = render(<ShootingFirstFrame {...props} />)
+  await screen.findByRole('button', { name: '生成这张首帧（仅一次）' })
+  fireEvent.change(screen.getByLabelText('添加参考图'), { target: { value: ref.assetId } })
+  fireEvent.change(screen.getByLabelText('图 1 的用途'), { target: { value: '保留门窗和尺度，未准备的新用途' } })
+  expect(screen.queryByRole('button', { name: '生成这张首帧（仅一次）' })).toBeNull()
+  first.unmount()
+  const second = render(<ShootingFirstFrame {...props} />)
+  await waitFor(() => expect((screen.getByLabelText('图 1 的用途') as HTMLTextAreaElement).value).toBe('保留门窗和尺度，未准备的新用途'))
+  expect(screen.queryByRole('button', { name: '生成这张首帧（仅一次）' })).toBeNull()
+  second.unmount()
+  const other = render(<ShootingFirstFrame {...props} scope={{ ...scope, frameId: 'another-frame' }} />)
+  await screen.findByRole('button', { name: '生成这张首帧（仅一次）' })
+  expect(screen.queryByLabelText('图 1 的用途')).toBeNull()
+  other.unmount()
+  render(<ShootingFirstFrame {...props} />)
+  await screen.findByLabelText('图 1 的用途')
+  fireEvent.click(screen.getByRole('button', { name: '移除此引用', hidden: true }))
+  cleanup(); render(<ShootingFirstFrame {...props} />)
+  await screen.findByRole('button', { name: '生成这张首帧（仅一次）' })
+  expect(screen.queryByLabelText('图 1 的用途')).toBeNull()
+  expect(fetcher.mock.calls.every(([path]) => path.includes('/review?') || path.endsWith('/preview'))).toBe(true)
+})
+
+it('blocks a damaged reference draft instead of offering an older prepared request', async () => {
+  const key = `qingmu:shooting-first-frame:${scope.projectId}:${scope.episodeId}:${scope.frameId}`
+  localStorage.setItem(key, JSON.stringify({ preview, requestId: result.requestId, stage: 'prepared' }))
+  localStorage.setItem(`${key}:reference-draft`, JSON.stringify([{ assetId: 'scene', assetSha256: 'invalid', purpose: '新版' }]))
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json(review)))
+  const referencePort = { referenceVideoAssets: vi.fn(async () => ({ items: [], pages: 1 })) }
+  render(<ShootingFirstFrame scope={scope} referencePort={referencePort as unknown as AssetImageReferencePort} />)
+  await screen.findByText('引用草稿无法读取，请重新选择参考图。原生成记录仍保留，尚未重新提交。')
+  expect(screen.queryByRole('button', { name: '生成这张首帧（仅一次）' })).toBeNull()
+  expect(JSON.parse(localStorage.getItem(key)!)).toMatchObject({ stage: 'prepared', preview })
+})
+
+it('recovers submitted inputs even when a different editable reference draft exists', async () => {
+  const key = `qingmu:shooting-first-frame:${scope.projectId}:${scope.episodeId}:${scope.frameId}`
+  const original = { assetId: 'original-scene', assetSha256: 'f'.repeat(64), purpose: '已提交原用途', boxes: [] }
+  const submitted = { ...preview, referenceMode: 'working', referenceBindings: [original] }
+  localStorage.setItem(key, JSON.stringify({ preview: submitted, requestId: result.requestId, stage: 'submitted' }))
+  localStorage.setItem(`${key}:reference-draft`, JSON.stringify([{ ...original, purpose: '本地未提交改动' }]))
+  const fetcher = vi.fn(async (path: string) => Response.json(path.includes('/review?') ? review : result))
+  vi.stubGlobal('fetch', fetcher)
+  const referencePort = { referenceVideoAssets: vi.fn(async () => ({ items: [], pages: 1 })) }
+  render(<ShootingFirstFrame scope={scope} referencePort={referencePort as unknown as AssetImageReferencePort} />)
+  await screen.findByAltText('镜头新首帧 · 待你定版')
+  expect((screen.getByLabelText('图 1 的用途') as HTMLTextAreaElement).value).toBe(original.purpose)
+  expect(fetcher.mock.calls.every(([path]) => path.includes('/review?') || path.includes('/state?'))).toBe(true)
+})
+
+it('keeps an unwritable purpose edit visible and prevents generation from the older preparation', async () => {
+  const ref = { assetId: 'scene', assetSha256: 'f'.repeat(64), purpose: '原用途', boxes: [] }
+  const key = `qingmu:shooting-first-frame:${scope.projectId}:${scope.episodeId}:${scope.frameId}`
+  localStorage.setItem(key, JSON.stringify({ preview: { ...preview, referenceMode: 'working', referenceBindings: [ref] },
+    requestId: result.requestId, stage: 'prepared' }))
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json(review)))
+  const referencePort = { referenceVideoAssets: vi.fn(async () => ({ items: [], pages: 1 })) }
+  render(<ShootingFirstFrame scope={scope} referencePort={referencePort as unknown as AssetImageReferencePort} />)
+  await screen.findByRole('button', { name: '生成这张首帧（仅一次）' })
+  const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota exceeded') })
+  try {
+    fireEvent.change(screen.getByLabelText('图 1 的用途'), { target: { value: '不能丢失的用途修订' } })
+    expect((screen.getByLabelText('图 1 的用途') as HTMLTextAreaElement).value).toBe('不能丢失的用途修订')
+    await screen.findByText('引用修改暂未保存到本机，请保留本页并重试。尚未提交生成。')
+    expect(screen.queryByRole('button', { name: '生成这张首帧（仅一次）' })).toBeNull()
+    expect(JSON.parse(localStorage.getItem(key)!).preview.referenceBindings).toEqual([ref])
+  } finally { write.mockRestore() }
 })

@@ -1,0 +1,7 @@
+# First-frame reference edits survive reload
+
+A user can prepare working references, change an image purpose, then refresh before preparing again. The first-frame component restored the older preparation and offered generation with the discarded purpose. Choices before the first preparation were also lost, and adding working references beside an official preview did not disable that unrelated prepared input.
+
+The existing shot component now stores ordered image bindings and editable purposes under a project/episode/shot browser key. Preparation and submitted-request recovery retain their separate records. A changed or unreadable draft cannot expose the older generation action; users explicitly prepare the edited references. A submitted request always restores its original inputs. Saving a draft does not adopt an asset, confirm a storyboard, or send a generation request. Storage failure preserves the visible edit and reports that it is not durable.
+
+Focused component coverage exercises post-preparation edits, pre-preparation edits, removal, shot isolation, damaged drafts and submitted-input recovery. The status text has a keyless snapshot. The assembled local app reproducer uses an existing user-accepted scene asset and actual read/preview endpoints, blocks generation routes, and checks the edited purpose after reload. Evidence is in ../verification/rain-system-flow-20260914/reference-draft-*. No accepted image pixels or saved shot requirements are modified.
