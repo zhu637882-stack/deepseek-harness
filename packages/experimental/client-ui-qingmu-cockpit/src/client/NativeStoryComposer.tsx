@@ -142,8 +142,9 @@ export function NativeStoryComposer({
     {purpose?.freshRevision && result?.finished && !result.error && result.text
       && <button type="button" disabled={disabled || busy || pending || !source.trim()} onClick={() => { void send(true) }}>按当前要求改进上稿</button>}
     {request && <button type="button" disabled={busy} onClick={() => { setRequest({ ...request }); setNotice('正在读取原创作结果。') }}>读取原创作结果</button>}
-    {notice && <p role="status">{notice}</p>}
-    {result?.error && <p role="alert">创作未完成：{result.error}</p>}
+    {notice && !(result?.error && notice === '青木已开始创作。你可以离开此页，回来继续查看原结果。') && <p role="status">{notice}</p>}
+    {result?.error && <p role="alert">创作未完成：{result.error === 'SSE stream ended without [DONE]'
+      ? '模型连接中断，未收到完整结果。请检查模型连接后重试；原请求记录已保留。' : result.error}</p>}
     {adoptable && purpose?.sourceKey !== undefined && request?.sourceKey === undefined
       && <p>这份旧稿没有记录当时的完整来源，请核对当前设定后再采用；重新设计会使用当前来源。</p>}
     {result?.text && <details open={!purpose}><summary>{purpose ? '查看完整设计文字' : '编剧完整稿'}</summary><pre>{result.text}</pre></details>}

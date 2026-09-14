@@ -1,5 +1,7 @@
 # Qingmu OS production cockpit
 
+An interrupted native response is shown as an incomplete creation with a connection-recovery instruction. Failed results suppress the earlier running notice, remain unadoptable and are never retried automatically.
+
 The creation workspace offers **普通短剧** and **广告短剧**. Advertising creation accepts a pasted script and one to five views of the same product (JPG, PNG or WebP, up to 8 MiB each; dimensions 240–8000 pixels, aspect ratio at most 8:1). IndexedDB preserves image bytes across reloads; localStorage retains creation coordinates and hashes. Product references enter the first asset design automatically, while the script uses the existing parse/save flow. Creation submits no paid generation or media approval.
 
 Native asset drafts and imported designs normalize an explicit null voice identity to empty text before local recovery and saving. Omitted voice identity still preserves an existing voice during incremental adoption; non-text values are rejected without replacing the cards. See the [save compatibility note](../../../.agents/notes/implemented/feature/2026-09-14-qingmu-null-voice-design.md).

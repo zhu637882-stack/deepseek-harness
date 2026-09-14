@@ -138,3 +138,17 @@ it('edits and reloads a completed candidate without another model call while ret
   expect(localStorage.getItem(`${key}:edited`)).toBeNull()
   expect(port.send).not.toHaveBeenCalled()
 })
+
+it('restores an interrupted response with a recovery instruction without retry or adoption', async () => {
+  localStorage.setItem('qingmu.story-session.v1:p:e', JSON.stringify({ sessionId: 'session-failed', baseline: 1, submitted: true }))
+  const port = { prepare: vi.fn(), send: vi.fn(), read: vi.fn(async () => readStoryDraft([
+    event(2, 'turn/start', {}), event(3, 'turn/end', { reason: { kind: 'error', error: { message: 'SSE stream ended without [DONE]' } } }),
+  ], 1)) }
+  const onAdopt = vi.fn()
+  render(<NativeStoryComposer port={port} projectId="p" episodeId="e" source="剧本" settings="" disabled={false} onAdopt={onAdopt} />)
+  expect((await screen.findByRole('alert')).textContent).toContain('模型连接中断，未收到完整结果')
+  expect(screen.queryByRole('button', { name: '采用到剧本文字' })).toBeNull()
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '根据当前文字重新写作' }).disabled).toBe(false)
+  expect(port.send).not.toHaveBeenCalled()
+  expect(onAdopt).not.toHaveBeenCalled()
+})
