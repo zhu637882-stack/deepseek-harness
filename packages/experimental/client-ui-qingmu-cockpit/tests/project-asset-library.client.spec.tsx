@@ -75,6 +75,19 @@ it('opens the real person or scene upload surface on request and rereads after i
   await waitFor(() => { expect(port.referenceVideoAssets).toHaveBeenCalledTimes(2) })
 })
 
+it('keeps an open preview when generation refreshes the catalog, and closes it when the asset disappears', async () => {
+  const port = { referenceVideoAssets: vi.fn().mockResolvedValue(page([picture])), readLocalReferenceCandidateContent: localReader() }
+  const view = render(<ProjectAssetLibrary projectId="p" port={port} />)
+  fireEvent.click(await screen.findByRole('button', { name: '预览林予' }))
+  port.referenceVideoAssets.mockResolvedValue(page([voice, picture]))
+  view.rerender(<ProjectAssetLibrary projectId="p" port={port} refreshToken={1} />)
+  await screen.findByRole('button', { name: '预览林予音色' })
+  expect(screen.getByRole('region', { name: '素材预览' }).querySelector('img')?.getAttribute('src')).toBe('/face.png')
+  port.referenceVideoAssets.mockResolvedValue(page([voice]))
+  fireEvent.click(screen.getByRole('button', { name: '刷新素材' }))
+  await waitFor(() => { expect(screen.queryByRole('region', { name: '素材预览' })).toBeNull() })
+})
+
 
 it('reads a visible local image thumbnail through its owner-and-SHA-bound port, then keeps selection preview separate', async () => {
   const readLocalReferenceCandidateContent = localReader()

@@ -124,7 +124,7 @@ export function ProjectAssetLibrary({ projectId, port, refreshToken = 0, onOpenR
       setItems(previous => nextPage === 1 ? result.items : [...previous, ...result.items.filter(item =>
         !previous.some(old => old.assetId === item.assetId && old.assetSha256 === item.assetSha256))])
       setPage(result.page); setPages(result.pages)
-      if (nextPage === 1) setSelected(undefined)
+      if (nextPage === 1) setSelected(current => result.items.some(item => item.assetId === current) ? current : undefined)
     } catch (cause) {
       if (!request.signal.aborted) setError(cause instanceof Error ? cause.message : '素材暂时无法读取')
     } finally {
