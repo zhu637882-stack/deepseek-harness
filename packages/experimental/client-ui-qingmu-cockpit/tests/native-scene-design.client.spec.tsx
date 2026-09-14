@@ -10,9 +10,27 @@ const basis: AssetDesignState = { schema: 'qingmu.asset-design-state.v1', projec
   stateSha256: 'b'.repeat(64), scriptRevision: 1, scriptSha256: sha, script: { story: '全剧关系由试探到信任' },
   model: 'image-model', design: null, creativeSettings: { visualStyle: { prompt: '透明水彩' } } }
 const shots = [{ title: '邀请', narrative: '允许接近', visual: '门内望向来客', action: '主人让出通道', durationSec: 6,
-  dialogueLineIds: ['line1'], directorPlan: { editorialContext: '下段接窗外雨声', coveragePlan: '本段先中景后切近景', cameraMovement: '跟随后停稳', soundPlan: { ambience: '雨声持续' },
+  dialogueLineIds: ['line1'], directorPlan: { selfContainedImagePrompt: true, editorialContext: '下段接窗外雨声', coveragePlan: '本段先中景后切近景', cameraMovement: '跟随后停稳', soundPlan: { ambience: '雨声持续' },
     dialoguePlan: [{ ...scene.dialogues[0], delivery: '犹豫后轻声' }] } }]
 afterEach(() => { cleanup(); localStorage.clear() })
+it.each([
+  ['selfContainedImagePrompt', true], ['imageCamera', null], ['imageObjectStates', []], ['generationContext', 'Current scene only'],
+] as const)('retains a native draft with misplaced %s instead of silently dropping its setting', async (key, value) => {
+  const candidateShots = shots.map(shot => ({ ...shot, [key]: value }))
+  const text = JSON.stringify({ sourceScriptSha256: sha, sourceAssetStateSha256: basis.stateSha256, sceneIndex: 1, shots: candidateShots })
+  localStorage.setItem('qingmu.scene-design-1-session.v1:p:e', JSON.stringify({ sessionId: 'existing', baseline: 1, submitted: true }))
+  const port = { prepare: vi.fn(), send: vi.fn(), read: vi.fn(async () => ({ lastSeq: 10, running: false, finished: true, text, script: text, error: '' })) }
+  const onAdopt = vi.fn()
+  render(<NativeSceneDesign projectId="p" episodeId="e" scene={scene} scriptSha256={sha}
+    readAssetDesign={vi.fn(async () => basis)} storyPort={port} disabled={false} onAdopt={onAdopt} />)
+  const adopt = await screen.findByRole<HTMLButtonElement>('button', { name: '采用到分镜卡片' })
+  await waitFor(() => { expect(adopt.disabled).toBe(false) })
+  fireEvent.click(adopt)
+  await screen.findByText(/没有采用：导演稿的首帧或继承设置放错层级/)
+  expect(onAdopt).not.toHaveBeenCalled()
+  expect(port.send).not.toHaveBeenCalled()
+  expect(screen.getByText(text)).toBeTruthy()
+})
 it('sends the whole-film basis and scene to the native director, then adopts the full design without saving it', async () => {
   const text = JSON.stringify({ sourceScriptSha256: sha, sourceAssetStateSha256: basis.stateSha256, sceneIndex: 1, shots })
   const port = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
