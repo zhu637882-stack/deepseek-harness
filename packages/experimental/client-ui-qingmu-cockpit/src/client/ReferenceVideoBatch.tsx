@@ -39,7 +39,23 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
     try { localStorage.setItem(notesKey, text) }
     catch { setError('本次补充暂未保存到浏览器，离开前请保留内容。') }
   }
-  const [retakes, setRetakes] = useState<ReadonlySet<string>>(new Set())
+  const retakeKey = `qingmu.reference-video-batch-retakes.v1:${projectId}:${episodeId}`
+  const readRetakes = (): ReadonlySet<string> => {
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem(retakeKey) ?? '[]')
+      return new Set(Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [])
+    } catch { return new Set() }
+  }
+  const [retakeSelection, setRetakeSelection] = useState(() => ({ key: retakeKey, ids: readRetakes() }))
+  const retakes = retakeSelection.key === retakeKey ? retakeSelection.ids : readRetakes()
+  const setRetakes = (update: (previous: ReadonlySet<string>) => ReadonlySet<string>) => {
+    setRetakeSelection(previous => ({ key: retakeKey, ids: update(previous.key === retakeKey ? previous.ids : readRetakes()) }))
+  }
+  useEffect(() => {
+    if (retakeSelection.key !== retakeKey) return
+    try { localStorage.setItem(retakeKey, JSON.stringify([...retakeSelection.ids])) }
+    catch { setError('本次重做勾选暂未保存，离开前请保留镜头范围。') }
+  }, [retakeKey, retakeSelection])
   const [pendingSubmission, setPendingSubmission] = useState<readonly BatchSubmissionItem[]>([])
   const submissionKey = batchSubmissionKey(projectId, episodeId)
   useEffect(() => {

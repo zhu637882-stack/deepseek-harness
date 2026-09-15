@@ -464,3 +464,5 @@ Candidate video observations and heard transcripts are read separately from Take
 Batch requests contain the episode shot index, planning page coordinates, source hashes and exact references. Complete per-shot generation designs and canonical dialogue are loaded on demand through `qingmu_read_scene_design` with `includeVideoSource=true`, rather than repeated for every completed shot in the initial request. Adjacent pages provide continuity; removing duplicated request text does not shorten the saved creative design.
 
 After a Host restart, reading a retained writing request recovers an interrupted turn through native persistence when the exact persisted director session is idle. The original history is preserved, its interruption becomes visible, and a new preparation action is enabled. Recovery never sends a model request or changes navigation.
+
+Batch retake selections are retained per project and episode. Returning to the page restores the preparation scope and its retained writing result without sending another request. Submission removes only shots it has actually queued.

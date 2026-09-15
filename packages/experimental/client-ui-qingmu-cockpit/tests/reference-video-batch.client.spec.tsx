@@ -241,26 +241,36 @@ it('restores an unfinished batch after closing the tab without regenerating the 
 })
 
 
-it('restores batch instructions after remount and isolates episodes', async () => {
+it('restores batch instructions and retake scope after remount without sending and isolates episodes', async () => {
   const port = {
     readScenePlanning: async () => ({ projectId: 'p', episodeId: 'e', scriptRevision: 1, scriptSha256: 's', storyboard: null }),
     referenceVideoAssets: async () => ({ pages: 1, items: [] }),
     referenceVideoDraft: async () => ({ draft: null }),
-    referenceVideoRuns: async () => ({ items: [] }),
+    referenceVideoRuns: async () => ({ items: [{ publicStatus: 'succeeded', candidates: [] }] }),
   } as unknown as BatchPort
+  const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
+    read: vi.fn(async () => ({ lastSeq: 0, running: false, finished: false, text: '', script: '', error: '' })) }
   const props = { projectId: 'p', episodeId: 'e', aspectRatio: '16:9', port, onOpenShot: vi.fn(),
+    storyPort,
     relations: { projectId: 'p', shots: [{ shotId: 'f', frameNo: 1, durationSec: 8 }] } as never }
   const view = render(<ReferenceVideoBatch {...props} />)
   await waitFor(() => { expect(screen.getByText('本集 1 镜 · 可生成 0 镜')).toBeTruthy() })
   fireEvent.click(screen.getByText('补充要求（可选）'))
   fireEvent.change(screen.getByLabelText('本次补充'), { target: { value: '保留各角色声音，不添加旁观者' } })
+  fireEvent.click(screen.getByLabelText('重做镜1 ·'))
+  expect(screen.getByText('整集视频准备')).toBeTruthy()
   view.unmount()
   const restored = render(<ReferenceVideoBatch {...props} />)
   await waitFor(() => { expect(screen.getByText('本集 1 镜 · 可生成 0 镜')).toBeTruthy() })
   fireEvent.click(screen.getByText('补充要求（可选）'))
   expect((screen.getByLabelText('本次补充') as HTMLTextAreaElement).value).toBe('保留各角色声音，不添加旁观者')
+  expect(screen.getByLabelText('重做镜1 ·')).toHaveProperty('checked', true)
+  expect(screen.getByText('整集视频准备')).toBeTruthy()
   restored.rerender(<ReferenceVideoBatch {...props} episodeId="another" />)
   expect((screen.getByLabelText('本次补充') as HTMLTextAreaElement).value).toBe('')
+  expect(screen.getByLabelText('重做镜1 ·')).toHaveProperty('checked', false)
   restored.rerender(<ReferenceVideoBatch {...props} />)
   expect((screen.getByLabelText('本次补充') as HTMLTextAreaElement).value).toBe('保留各角色声音，不添加旁观者')
+  expect(screen.getByLabelText('重做镜1 ·')).toHaveProperty('checked', true)
+  expect(storyPort.send).not.toHaveBeenCalled()
 })
