@@ -1342,10 +1342,10 @@ it('retains a long cut receipt without spilling playback URLs and resolves a sou
     name: clip.frameId, usage: 'video_audio', url: `http://localhost/media/${clip.assetId}?signature=${'b'.repeat(1200)}` }))
   const longCut = { ...initialCut, revision: 1, shots: clips.map((clip, i) => ({ frameId: clip.frameId,
     frameNo: i + 1, title: `Shot ${i + 1}`, selectedAssetId: null,
-    editorialContext: 'Keep the courtyard geography and ambience.', candidates: [{ ...sources[i], taskId: `task-${i}` }] })),
+    editorialContext: '院落格局、固定桌凳、演员位置、前后对白和原生环境底声连续。'.repeat(3), candidates: [{ ...sources[i], taskId: `task-${i}` }] })),
   videoAudioSources: sources, cuts: [
-    { revisionId: 'cut-old', version: 1, clips: clips.slice(0, 2), audioCues: [], soundPlan: 'Old plan', status: 'NotQueued' },
-    { revisionId: 'cut-long', version: 2, clips, audioCues: [], soundPlan: '', status: 'NotQueued' }] }
+    { revisionId: 'cut-long', version: 2, clips, audioCues: [], soundPlan: '', status: 'NotQueued' },
+    { revisionId: 'cut-old', version: 1, clips: clips.slice(0, 2), audioCues: [], soundPlan: 'Old plan', status: 'NotQueued' }] }
   upstream.fetch.mockImplementation(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input)
     if (url.pathname.endsWith('/working-cut') && (!init?.method || init.method === 'GET')) return Response.json(longCut)
@@ -1367,6 +1367,9 @@ it('retains a long cut receipt without spilling playback URLs and resolves a sou
   expect(JSON.parse(result(h.agent, 'old-read').text).cut.cuts[0].clips).toEqual(clips.slice(0, 2))
   expect(read.cut.shots).toHaveLength(49)
   expect(read.cut.videoAudioSources).toHaveLength(49)
+  expect(read.cut.videoAudioSources[48]).toEqual({ assetId: 'v-48', usage: 'video_audio', details: 'shots.candidates' })
+  expect(read.cut.shots[48].candidates[0].sha256).toBe('a'.repeat(64))
+  expect(Buffer.byteLength(JSON.stringify(read), 'utf8')).toBeLessThan(48000)
   expect(JSON.stringify(read)).not.toContain('signature=')
   expect(read.nativeReceiptSha256).toBeTruthy()
   expect(JSON.parse(result(h.agent, 'source-read').text).source.url).toBe(sources[48]!.url)

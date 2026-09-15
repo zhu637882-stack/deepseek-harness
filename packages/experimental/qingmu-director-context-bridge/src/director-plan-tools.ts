@@ -123,14 +123,25 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
           ? Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'url').map(([key, item]) => [key, omitPlaybackUrls(item)]))
           : value
       const view = omitPlaybackUrls(input) as Record<string, unknown>
-      const selected = args.revisionId === undefined ? cut.cuts.at(-1) : cut.cuts.find(item => item.revisionId === args.revisionId)
-      if (args.revisionId !== undefined && !selected) throw new Error('未找到所选剪辑版本，请从cutVersions读取编号。')
+      const selected = args.revisionId === undefined
+        ? [...cut.cuts].sort((a, b) => b.version - a.version)[0]
+        : cut.cuts.find(item => item.revisionId === args.revisionId)
+      if (args.revisionId !== undefined && !selected) throw new Error('未找到所选剪辑版本。请不传revisionId重新读取当前剪辑，再使用cutVersions中的完整revisionId。')
       const visibleCut = view.cut as Record<string, unknown>
+      // Candidate video and its audio source repeat the same identity metadata.
+      // Keep the full candidate once and an explicit cross-reference for audio.
+      const candidates = new Map(cut.shots.flatMap(shot => shot.candidates).map(item => [item.assetId, item]))
+      visibleCut.videoAudioSources = (cut.videoAudioSources ?? []).map((source) => {
+        const candidate = candidates.get(source.assetId)
+        return candidate?.sha256 === source.sha256 && candidate.duration === source.duration
+          ? { assetId: source.assetId, usage: source.usage, details: 'shots.candidates' }
+          : omitPlaybackUrls(source)
+      })
       visibleCut.cuts = selected ? [omitPlaybackUrls(selected)] : []
       visibleCut.cutVersions = cut.cuts.map(item => ({ revisionId: item.revisionId, version: item.version, status: item.status,
         clipCount: item.clips.length, audioCueCount: item.audioCues?.length ?? 0 }))
       return ports.boundedJson(retainNativeToolReceipt(current.session, exec.callId, 'qingmu_read_working_cut', input, {
-        ...view, guidance: 'The displayed cuts entry contains the complete selected edit (newest by default); cutVersions lists all retained edits. Read with revisionId to inspect a different version. All shot and source identities are retained. Playback URLs are omitted only from this view. Call qingmu_read_working_cut with sourceAssetId to obtain an exact source for listening. Save with this receiptId; preserve existing clips when only changing sound. Cue sources must use exact assetId/sha256. Consult qingmu_save_working_cut parameter descriptions for executable sound fields. Never claim listening or approval from a source URL or saved plan.',
+        ...view, guidance: 'The displayed cuts entry contains the complete selected edit (newest by version); cutVersions lists all retained edits. Read with exact revisionId to inspect a different version. All shot and source identities are retained. Audio sources marked details=shots.candidates share their full metadata with the matching candidate assetId. Playback URLs are omitted only from this view. Call qingmu_read_working_cut with sourceAssetId to obtain an exact source for listening. Save with this receiptId; preserve existing clips when only changing sound. Cue sources must use exact assetId/sha256. Consult qingmu_save_working_cut parameter descriptions for executable sound fields. Never claim listening or approval from a source URL or saved plan.',
       }))
     },
   }))
