@@ -24,7 +24,7 @@ It buys nothing for state errors. A changed costume, a prop that swapped hands, 
 
 Test it on your own cut: mute the bed and replay the same two shots. Muted, the cut reads as two different rooms. With the bed, it reads as one room from two angles. That is a free fix. Regenerating the shot is not.
 
-Corollary — **strip model-generated audio**. Many video models emit their own ambience. It restarts at every clip boundary, which is precisely the seam you are trying to hide. Treat model audio as a scratch guide, keep only sync-critical elements (a lip-synced line), mute everything else, and run your own continuous bed underneath.
+Preserve usable native dialogue, breaths, action Foley and ambience. A continuous bed supplements those sounds; it is not a reason to mute every source clip. Inspect the actual discontinuity before choosing an edit. Source separation estimates music and may also remove quiet speech, gong resonance, footsteps or outdoor sound. Compare the affected interval with the original before replacing it; a successful render or a nonempty stem does not prove these sounds survived. If the replacement loses wanted sound, retain the original interval and revise the sound design instead of automatically muting it. Do not apply whole-film separation merely because the facility is available. Deliberate silence still follows the director's explicit timing.
 
 ## The five-layer sound brief
 

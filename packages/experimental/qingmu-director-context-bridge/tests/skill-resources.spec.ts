@@ -55,6 +55,8 @@ it('loads full creative methods and linked engines through the shipped native pr
   const sound = JSON.parse(result.results[1]!) as ResourcePage
   expect(sound).toMatchObject({ skill: 'cinematic-director', path: 'references/sound-and-dialogue.md', nextLine: null })
   expect(sound.content).toContain('Record speaker identity, voice reference, exact words, delivery, timing')
+  expect(sound.content).toContain('Preserve usable native dialogue, breaths, action Foley and ambience.')
+  expect(sound.content).not.toContain('mute everything else')
   expect(sound.sha256).not.toBe(sound.upstreamSha256)
   for (const index of [3, 4, 6, 8, 9]) {
     const resource = JSON.parse(result.results[index]!) as ResourcePage
