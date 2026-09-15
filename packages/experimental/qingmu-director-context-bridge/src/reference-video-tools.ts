@@ -230,16 +230,18 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
   }))
   ctx.tools.register(defineTool({
     name: 'qingmu_read_reference_video_candidates',
-    description: 'Read generated candidates and existing time-anchored review comments before choosing continuity references. Comments retain their video hash, Take and design binding; they are attributed observations, not fresh visual inspection or approval. A historical design binding does not erase an observation of the same video. Read relevant comment pages, compare actual frames with the current design, and do not silently inherit a recorded defect. Unavailable comments differ from an empty feed. Use a known shot in the current episode. No generation, comment write or selection.',
+    description: 'Read generated candidates, existing independent native-video observations and time-anchored review comments before choosing continuity references. Native reviews are separate from comments: an empty comment feed does not mean no audio/video audit. Read review pages for the relevant candidate. Compare independent observations/transcript with comparisonIntent (the frozen generation request), then current design; cite actual times and uncertainties. Observation is not a verdict; legacy comparison reports may be biased by expected content. Two stills alone cannot prove a jump or complete motion, and no role images were supplied to the native observer. Comments retain their video hash, Take and design binding; they are attributed observations, not fresh visual inspection or approval. A historical design binding does not erase an observation of the same video. Read relevant comment pages, compare actual frames with the current design, and do not silently inherit a recorded defect. Unavailable comments differ from an empty feed. Use a known shot in the current episode. No generation, comment write or selection.',
     parameters: {
       sourceFrameId: { type: 'string', required: true, description: 'Source shot ID in the current episode; may be the previous shot.' },
       commentPage: { type: 'integer', description: 'Review comment page, starting at 1; five complete comments per page, newest first.' },
+      reviewPage: { type: 'integer', description: 'Candidate observation page, starting at 1; one exact candidate and its saved report per page.' },
     }, output,
     presentCall: () => ({ card: 'generic', kind: 'read', title: '读取镜头视频来源' }),
     async execute(args, exec) {
-      const { commentPage = 1, ...required } = args
+      const { commentPage = 1, reviewPage = 1, ...required } = args
       exactKeys(required, ['sourceFrameId'])
       if (!Number.isSafeInteger(commentPage) || commentPage < 1) throw new Error('Use a positive commentPage.')
+      if (!Number.isSafeInteger(reviewPage) || reviewPage < 1) throw new Error('Use a positive reviewPage.')
       const current = await ports.readBoundContext(exec)
       const scope = current.state.binding.scope
       const read = await ctx.qingmuYimengRead('referenceVideoRuns', {
@@ -257,6 +259,21 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
       const start = (commentPage - 1) * 5
       if (comments && start >= comments.length && commentPage !== 1) throw new Error('Comment page is beyond the available feed.')
       const candidates = runs.items.flatMap(run => run.candidates)
+      const unique = [...new Map(candidates.map(candidate => [`${candidate.assetId}:${candidate.assetSha256}`, candidate])).values()]
+      if (reviewPage > Math.max(1, unique.length)) throw new Error('Review page is beyond the available candidates.')
+      const candidate = unique[reviewPage - 1]
+      const review = candidate ? await ctx.qingmuYimengRead('nativeVideoReview', {
+        projectId: scope.projectId, episodeId: scope.episodeId, frameId: args.sourceFrameId,
+        assetId: candidate.assetId, expectedSha256: candidate.assetSha256,
+      }, exec.signal) : undefined
+      assertCurrent(current, exec)
+      const nativeReview = { page: reviewPage, total: unique.length,
+        nextPage: reviewPage < unique.length ? reviewPage + 1 : null,
+        index: unique.map(({ assetId, assetSha256 }, i) => ({ page: i + 1, assetId, assetSha256 })),
+        available: review?.ok ?? unique.length === 0,
+        ...(review?.ok ? { report: review.value } : candidate
+          ? { reason: 'This candidate observation could not be read; this is not evidence that no review exists.' } : {}),
+      }
       const reviewComments = comments ? {
         available: true, page: commentPage, total: comments.length,
         nextPage: start + 5 < comments.length ? commentPage + 1 : null,
@@ -272,7 +289,7 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
         items: runs.items.map(run => ({ runId: run.runId, draftRevision: run.draftRevision,
           kernelStatus: run.kernelStatus, publicStatus: run.publicStatus,
           candidates: run.candidates.map(({ assetId, assetSha256 }) => ({ assetId, assetSha256 })) })),
-        reviewComments, advisoryOnly: true, providerCalls: 0, selectionChanged: false })
+        reviewComments, nativeReview, advisoryOnly: true, providerCalls: 0, selectionChanged: false })
     },
   }))
   ctx.tools.register(defineTool({

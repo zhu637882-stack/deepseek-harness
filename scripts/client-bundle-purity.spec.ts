@@ -96,6 +96,7 @@ describe('client bundle purity gate', () => {
 
   it('inlines only the pure reference prompt assembly, keeping the Host read adapter out of the browser', () => {
     expect(resolveId('@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/reference-prompt')).toBeNull()
+    expect(resolveId('@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/native-video-review')).toBeNull()
     expect(() => resolveId('@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter')).toThrow(/purity/)
     expect(() => resolveId('@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/reference-video')).toThrow(/purity/)
   })

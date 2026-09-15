@@ -24,7 +24,11 @@
       "types": "./lib/types/reference-prompt.d.ts",
       "default": "./lib/types/reference-prompt.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./native-video-review": {
+      "types": "./lib/types/native-video-review.d.ts",
+      "default": "./lib/native-video-review.js"
+    }
   },
   "files": [
     "lib/index.js",

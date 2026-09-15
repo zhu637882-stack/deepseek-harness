@@ -1,3 +1,4 @@
+import { normalizeNativeVideoReview, parseNativeVideoReviewRequest } from './native-video-review.ts'
 import { parseReferenceVideoMaterialsRequest, normalizeReferenceVideoMaterials } from './reference-video-materials.ts'
 /** Loopback-only Host BFF for read-only Yimeng production facts. */
 
@@ -349,7 +350,7 @@ const PROTECTED_ENDPOINTS = new Set([
   'referenceCandidates', 'reviewEvents',
   'referenceRightsExceptionReleases', 'workflow', 'selectedVideoReview', 'takeVersions', 'takeComments', 'takeReviewAuthority', 'takeAcceptance', 'takeTechnicalQc', 'takeApprovalLifecycle', 'evidenceLedger', 'editorialHandoff', 'verifyEpisode', 'shotFindings', 'productionUnits', 'stageSources',
   'lsuPlanSource', 'reworkRouteSource',
-  'referenceVideoMaterials', 'referenceVideoRun', 'referenceVideoRuns', 'takePreview', 'referenceVideoPreview', 'referenceVideoAssets', 'referenceVideoDraft', 'referenceVideoQuote',
+  'nativeVideoReview', 'referenceVideoMaterials', 'referenceVideoRun', 'referenceVideoRuns', 'takePreview', 'referenceVideoPreview', 'referenceVideoAssets', 'referenceVideoDraft', 'referenceVideoQuote',
 ])
 const HUMAN_DECISION_VALUES = new Set<YimengHumanDecisionValue>([
   'approve', 'reject', 'request_changes',
@@ -5317,6 +5318,12 @@ export function createYimengReadHandler(
         try { request = parseTakePreviewRequest(payload) } catch { throw new InputError('invalid Take preview request') }
         path = `/api/qingmu/projects/${encodeURIComponent(request.projectId)}/episodes/${encodeURIComponent(request.episodeId)}/frames/${encodeURIComponent(request.frameId)}/takes/${encodeURIComponent(request.takeId)}/preview?expectedOutputSha256=${request.expectedOutputSha256}`
         normalize = value => normalizeTakePreview(value, request)
+      } else if (endpoint === 'nativeVideoReview') {
+        let request
+        try { request = parseNativeVideoReviewRequest(payload) } catch { throw new InputError('invalid candidate review scope') }
+        const query = new URLSearchParams({ asset_id: request.assetId, expected_sha256: request.expectedSha256 })
+        path = `/api/episodes/${encodeURIComponent(request.episodeId)}/frames/${encodeURIComponent(request.frameId)}/native-video-reviews?${query}`
+        normalize = value => normalizeNativeVideoReview(value, request)
       } else if (endpoint === 'takeComments') {
         const request = parseTakeCommentRequest(payload)
         path = '/api/qingmu/projects/' + encodeURIComponent(request.projectId)

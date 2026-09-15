@@ -2686,6 +2686,7 @@ export interface YimengReadEndpointMap {
   readonly referenceVideoRuns: ReferenceVideoRunsResponse
   readonly referenceVideoQuote: ReferenceVideoQuoteResponse
   readonly takePreview: YimengTakePreviewResponse
+  readonly nativeVideoReview: import('./native-video-review.ts').Review
   readonly takeComments: YimengTakeCommentFeedResponse
   readonly takeReviewAuthority: YimengTakeReviewAuthorityFeedResponse
   readonly takeAcceptance: YimengTakeAcceptanceResponse

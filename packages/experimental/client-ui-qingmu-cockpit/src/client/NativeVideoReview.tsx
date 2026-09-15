@@ -42,7 +42,9 @@ export function NativeVideoReview({ episodeId, frameId, assetId, sha256, onSeek 
     try { await request('POST') } catch { if (live.current) setError('提交结果尚未确认。请先刷新记录，避免重复操作。') }
     finally { if (live.current) setSubmitting(false) }
   }
-  const checks = review?.audit?.audio_review?.checks
+  const independent = review?.reviewStage === 'independent_observation'
+  const audio = review?.audit?.audio_review
+  const checks = audio?.checks
   const canRecheck = review?.designChanged || review?.methodChanged
   const reportedChecks = [...Object.values(checks ?? {}), ...Object.values(review?.visualEvidence?.checks ?? {})]
   function times(ranges: readonly (readonly [number, number])[] | undefined) {
@@ -51,40 +53,48 @@ export function NativeVideoReview({ episodeId, frameId, assetId, sha256, onSeek 
       : <small key={index}>{range[0]}–{range[1]} 秒</small>)}</div>
   }
   return <section className={css.review} aria-label="候选音画检查">
-    <div className={css.header}><div><h3>音画检查</h3><p>对照导演设计检查当前视频，结果用于审看与返修。</p></div>
+    <div className={css.header}><div><h3>音画检查</h3><p>先观察实际画面与声音，再交给导演对照生成要求。</p></div>
       <button type="button" disabled={submitting || review === undefined || review.state === 'pending'
         || (review.state === 'complete' && !canRecheck)}
-      onClick={() => { void submit() }}>{submitting ? '正在提交…' : review?.state === 'pending' ? '正在检查音画…' : review?.state === 'complete' && !canRecheck ? '本版已检查' : review?.methodChanged ? '按时间重新检查' : '检查当前视频'}</button>
+      onClick={() => { void submit() }}>{submitting ? '正在提交…' : review?.state === 'pending' ? '正在检查音画…' : review?.state === 'complete' && !canRecheck ? independent ? '本版观察已完成' : '本版已检查' : review?.methodChanged ? '按时间重新检查' : '检查当前视频'}</button>
       <button type="button" disabled={submitting} onClick={() => { void request('GET').catch(() => setError('记录暂未取得，请稍后刷新。')) }}>刷新记录</button></div>
     {error && <p role="alert">{error}</p>}
     <div role="status">{review?.state === 'pending' && '正在检查实际画面与原始音轨，可以切换镜头，返回后查看结果。'}
       {review?.state === 'failed' && '本次检查未完成，原视频保留。'}
       {review?.designChanged && '导演设计已有修改，下方保留的是此前设计的检查结果。'}</div>
     {review?.methodChanged && <p>
-      这份旧检查没有完整的时间观察记录，可按更新后的方法重新检查；浏览和刷新不会发起检查。
+      这份旧报告曾同时输入预期内容，可能影响观察；可按独立观察方法重新检查。浏览和刷新不会发起检查。
     </p>}
     {review?.state === 'complete' && <details>
       <summary>检查详情 · {reviewSummary(review)}</summary>
-      {reportedChecks.length === 0 && <p>本次没有可用的逐项检查证据。</p>}
+      {independent ? <p>观察模型未读取剧本或预期台词。下方是 AI 观察，仍需导演对照与原视频核实，不能视为验收通过。</p> : reportedChecks.length === 0 && <p>本次没有可用的逐项检查证据。</p>}
       {review.visualEvidence && <details open><summary>画面变化与定位</summary>
         <p>以下为 AI 观察，点击时间核对原视频；证据不足的判断保留为无法确认。</p>
         {review.visualEvidence.observations.length === 0 ? <p>本次没有可定位的画面观察。</p>
           : <ol>{review.visualEvidence.observations.map((item, index) => <li key={index}>
             {times([[item.start_sec, item.end_sec]])}<p>{item.description}</p>
           </li>)}</ol>}
-        <details><summary>逐项画面检查</summary><div className={css.checks}>{Object.entries(visualCategories).map(([key, label]) => {
-          const check = review.visualEvidence?.checks[key]
-          return <article key={key}><h4>{label}<span>{statuses[check?.status ?? ''] ?? '尚未确认'}</span></h4>
-            <p>{check?.evidence || '没有可用的画面证据。'}</p>
-            {check?.evidenceIncomplete && <p>该判断缺少有效时间或对应观察，暂不能确认。</p>}{times(check?.time_ranges)}</article>
-        })}</div></details>
+        {!independent && <details><summary>逐项画面检查</summary>
+          <div className={css.checks}>{Object.entries(visualCategories).map(([key, label]) => {
+            const check = review.visualEvidence?.checks[key]
+            return <article key={key}><h4>{label}<span>{statuses[check?.status ?? ''] ?? '尚未确认'}</span></h4>
+              <p>{check?.evidence || '没有可用的画面证据。'}</p>
+              {check?.evidenceIncomplete && <p>该判断缺少有效时间或对应观察，暂不能确认。</p>}{times(check?.time_ranges)}</article>
+          })}</div></details>}
       </details>}
-      <div className={css.checks}>{Object.entries(categories).map(([key, label]) => {
+      <details open={independent}><summary>实际听写与声音观察</summary>
+        {audio?.transcript?.length ? <ol>{audio.transcript.map((line, index) => <li key={index}>
+          {times([[line.start_sec, line.end_sec]])}<p>{line.speaker}：{line.text}</p>{line.delivery && <p>{line.delivery}</p>}
+        </li>)}</ol> : <p>没有可读听写记录；这不代表原视频没有声音。</p>}
+        {audio?.observations?.map((item, index) => <div key={index}>
+          {times([[item.start_sec, item.end_sec]])}<p>{item.description}</p></div>)}
+      </details>
+      {!independent && <div className={css.checks}>{Object.entries(categories).map(([key, label]) => {
         const check = checks?.[key]
         return <article key={key}><h4>{label}<span>{statuses[check?.status ?? ''] ?? '尚未确认'}</span></h4>
           <p>{check?.evidence ?? '本项没有可用的听觉证据。'}</p>
           {times(check?.time_ranges)}</article>
-      })}</div>
+      })}</div>}
       {review.reasons && review.reasons.length > 0 && <details><summary>画面与综合检查意见</summary>
         <ul>{review.reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul></details>}
       <p>AI 检查供参考，最终是否采用由你决定。</p>

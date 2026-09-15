@@ -227,3 +227,6 @@ Reference drafts accept optional preparationFeedback (up to 20000 characters). I
 The browser-safe `./reference-prompt` export supplies shared single-shot and batch authoring guidance and prompt-part assembly. It preserves the authored execution and reference order without provider calls; Writer still validates the final request.
 
 Existing layout and camera data direct the native author to preview scene visibility and reconcile camera-relative positions with real reference framing before writing execution. The preview does not prove actor blocking when the blockout has no actor volumes. Contradictory source design returns to its existing director or asset workflow.
+
+
+Candidate video observations and heard transcripts are read separately from Take comments, bound to the exact video and retained generation intent. Independent observation is not a comparison verdict or acceptance. The existing director performs the comparison; single and batch preparation share execution guidance. See the [shared execution Agent Note](../../../.agents/notes/implemented/bug-fix/2026-09-15-qingmu-shared-execution-prompt.md).

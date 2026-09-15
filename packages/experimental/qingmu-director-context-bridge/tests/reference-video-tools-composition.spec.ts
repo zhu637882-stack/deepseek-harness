@@ -1718,3 +1718,45 @@ it('saves and previews authored execution through native tools without filming t
   expect(saves(h.upstream)).toHaveLength(1)
   expect({ prompt: preview.prompt, parameters: preview.parameters, generated: preview.generationQueued }).toMatchSnapshot()
 })
+
+
+it.each(['complete', 'none', 'wrong hash', 'foreign frame', 'unavailable'] as const)('reads %s native observation independently of an empty comment feed without paying or losing candidates', async (mode) => {
+  const upstream = writer(), original = upstream.fetch.getMockImplementation()!
+  upstream.fetch.mockImplementation(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input)
+    if (url.pathname.endsWith('/runs')) return Response.json(capturedVideoRuns())
+    if (url.pathname.endsWith('/take-comments')) return Response.json({ ...takeCommentFeed({ projectId: 'p', episodeId: 'episode-a', frameId: 'previous' }), comments: [] })
+    if (url.pathname.endsWith('/native-video-reviews')) {
+      expect(init?.method).toBe('GET')
+      expect(url.searchParams.get('asset_id')).toBe('asset_video')
+      expect(url.searchParams.get('expected_sha256')).toBe('a'.repeat(64))
+      if (mode === 'unavailable') return Response.json({}, { status: 503 })
+      return Response.json({ projectId: 'p', episodeId: 'episode-a', frameId: mode === 'foreign frame' ? 'other' : 'previous',
+        assetId: 'asset_video', assetSha256: (mode === 'wrong hash' ? 'b' : 'a').repeat(64),
+        state: mode === 'none' ? 'none' : 'complete', taskId: 'review-original', reviewStage: 'independent_observation',
+        comparisonIntent: { generation_prompt: '只说原定的那句话，脸不入画。', sha256: 'c'.repeat(64) },
+        audit: { audio_review: { transcript: [{ start_sec: 0, end_sec: 2, speaker: '声音1', text: '额外一句话', delivery: '很响' }], checks: { dialogue: { status: 'pass', evidence: '模型擅自通过' } } } },
+        visualEvidence: { observations: [{ id: 'o1', start_sec: 0, end_sec: 2, description: '脸可见，门在左侧。' }], checks: { identity_match: { status: 'pass', evidence: '模型擅自通过' } } },
+        providerTaskId: 'not-needed', authorization: 'must-not-expose',
+      })
+    }
+    return original(input, init)
+  })
+  const adapter = new MockAdapter([toolCallResponse('observe', 'qingmu_read_reference_video_candidates', { sourceFrameId: 'previous' }), textResponse('Existing independent observation received.')])
+  const h = await harness(adapter, upstream); await h.run()
+  const reply = result(h.agent, 'observe'); expect(reply.error, reply.text).toBe(false)
+  const value = JSON.parse(reply.text)
+  expect(value.reviewComments).toMatchObject({ available: true, total: 0 })
+  expect(value.items[0].candidates[0].assetId).toBe('asset_video')
+  expect(value.nativeReview.available).toBe(['complete', 'none'].includes(mode))
+  if (['complete', 'none'].includes(mode)) {
+    expect(value.nativeReview.report.state).toBe(mode)
+    expect(value.nativeReview.report.audit.audio_review.transcript[0].text).toBe('额外一句话')
+    expect(value.nativeReview.report.comparisonIntent.generation_prompt).toContain('只说原定')
+    expect(value.nativeReview.report.audit.audio_review.checks).toEqual({})
+    expect(value.nativeReview.report.visualEvidence.checks).toEqual({})
+    expect(reply.text).not.toContain('must-not-expose')
+    expect(JSON.stringify(adapter.requests.at(-1))).toContain('脸可见，门在左侧。')
+  } else expect(value.nativeReview).not.toHaveProperty('report')
+  expect(upstream.fetch.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true)
+})

@@ -490,6 +490,7 @@ function clientConfig(id: string, entry: string): UserConfig {
         if (VENDORED_LIBRARY.test(source)) return null // vendored library: inline, no shared identity
         if (INLINE_SAFE.test(source) || source === '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft'
           || source === '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/reference-prompt'
+          || source === '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/native-video-review'
           || GENERATED_REMOTE.test(source)) return null // Pure wire projections have no plugin state to duplicate.
         throw new Error(
           `client bundle purity: "${source}" is not in the default client externals or ${id}'s dsh.client.external, an inline-safe wire layer, or a generated /remote contribution — `

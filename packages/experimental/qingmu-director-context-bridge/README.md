@@ -196,3 +196,6 @@ The camera check also accepts the exact saved `imageCamera` with its `aspectRati
 `qingmu_read_scene_design` recovers one complete saved shot per page and an episode index during an episode-scoped creative request. It preserves source hashes, original first-frame text and all director fields without a single-shot binding. Asset-reference guidance distinguishes generation inputs (including originals under repair) from inspected output candidates used by later shots; it does not replace provenance or choose by recency.
 
 Voice-reference assembly observes the provider’s 15-second aggregate audio limit. The catalog can include a three-second excerpt derived from a full actor preview; using it preserves timbre-reference coverage for up to five speakers while the complete preview remains available. These samples supply voice identity, not replacement dialogue.
+
+
+Candidate video observations and heard transcripts are read separately from Take comments, bound to the exact video and retained generation intent. Independent observation is not a comparison verdict or acceptance. The existing director performs the comparison; single and batch preparation share execution guidance. See the [shared execution Agent Note](../../../.agents/notes/implemented/bug-fix/2026-09-15-qingmu-shared-execution-prompt.md).

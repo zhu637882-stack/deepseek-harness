@@ -163,7 +163,7 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 整片剪辑工具提供本机原声音源分离的可用状态。导演可按镜明确选择 sourceAudioMode original、silent、speech_effects 或 speech，配乐和环境音轨仍按全片时间组织。保存不执行推理，渲染时在本机处理原声音源并缓存；silent 无需推理即可关闭画面原声；改动剪辑后须核对已导出音源的固定时序。导演须区分声音分离与降低音量，并试听对白和环境声是否受损。
 
 现有引用草稿工具支持明确的首尾帧用途。导演根据需要选择完整镜头画面控制起始布局，或选择多参考来分别引用身份与音色。首帧模式不能混入音色参考，但仍可生成原生对白和环境声。工具与网页保存同一份可编辑草稿，不自动生成媒体，也不宣称画面已遵守设计。
-常规草稿组装接受 `referenceUses: [{bindingToken, purpose}]`、参数与当前导演来源 SHA，每个已绑定素材恰有一项用途。工具按输入顺序渲染引用别名，将完整当前 `generationPrompt` 原样放在正文末尾一次；该模式不接收额外自由正文或末尾约束段。用途缺失、重复、未绑定，来源过期或结果超长时拒绝保存，不截断。传输和网页已存草稿仍是普通可编辑提示词片段。有意手写的 `promptParts`（含一次 `{directorText:"current"}`）保留为独立方式，不能与用途组装混用。创作修改先落到导演设计，再组装；用途文字及源设计本身的语义不因复制而获批准。参见[路由决策](../../../.agents/notes/implemented/bug-fix/2026-09-10-qingmu-reference-director-routing.zh.md)。
+常规草稿组装接受 `referenceUses: [{bindingToken, purpose}]`、编写的 `executionPrompt`、参数及当前导演来源 SHA。共用 `reference-prompt` 按素材顺序渲染别名，保留拍摄执行描述，并且只附一次逐字对白和画面约定 `executionSuffix`。完整来源用于创作依据。省略执行描述时兼容旧版整份来源组装；有意手写的 `promptParts`（含一次 `{directorText:"current"}`）仍可编辑。方式混用、来源过期或用途无效时拒绝保存。来源矛盾先返回导演设计解决，复制原文或来源新鲜不能证明语义一致。单镜与批量共用此组装方法。参见[执行决策](../../../.agents/notes/implemented/bug-fix/2026-09-15-qingmu-shared-execution-prompt.zh.md)。
 
 视频取帧及恢复读取现在共用图片输入通道：保存的图片在素材目录第1页时，直接附上其真实像素。保留来源视频哈希、请求与实际解码时间、图片身份以及无法交付图片的原因。读取已有取帧不会重新取帧或选用；图片读取失败仍保留已成功的取帧回执，目标变化则拒绝迟到结果。一张画面只证明该时刻，不能冒充整段动作或声音审核。历史上仅含元数据的结果仍可回放。
 
@@ -186,3 +186,6 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 `qingmu_read_scene_design` 在本集创作请求内按页读回完整镜头及本集索引，每页一镜，保留来源哈希、原首帧文字和全部导演字段，无需逐镜绑定。素材引用说明区分生成输入（包括待修原图）与后续镜头使用的已核对产出候选；不改写原始来源，也不按新旧顺序直接选用。
 
 音色引用按供应商的15秒音频总长限制装配。目录可提供从完整人物试听派生的3秒短样本，使最多5名说话人的音色能一起输入；完整试听仍保留。短样本提供声音身份，不替代剧本对白。
+
+
+候选视频观察与实际听写独立于 Take 评论读取，绑定精确视频及保留的生成要求。独立观察不代表已作比较或验收。原有导演负责对照，单镜与批量整理共用执行说明。详见[共用执行说明](../../../.agents/notes/implemented/bug-fix/2026-09-15-qingmu-shared-execution-prompt.zh.md)。
