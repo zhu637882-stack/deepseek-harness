@@ -1343,7 +1343,9 @@ it('retains a long cut receipt without spilling playback URLs and resolves a sou
   const longCut = { ...initialCut, revision: 1, shots: clips.map((clip, i) => ({ frameId: clip.frameId,
     frameNo: i + 1, title: `Shot ${i + 1}`, selectedAssetId: null,
     editorialContext: 'Keep the courtyard geography and ambience.', candidates: [{ ...sources[i], taskId: `task-${i}` }] })),
-  videoAudioSources: sources, cuts: [{ revisionId: 'cut-long', version: 1, clips, audioCues: [], soundPlan: '', status: 'NotQueued' }] }
+  videoAudioSources: sources, cuts: [
+    { revisionId: 'cut-old', version: 1, clips: clips.slice(0, 2), audioCues: [], soundPlan: 'Old plan', status: 'NotQueued' },
+    { revisionId: 'cut-long', version: 2, clips, audioCues: [], soundPlan: '', status: 'NotQueued' }] }
   upstream.fetch.mockImplementation(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input)
     if (url.pathname.endsWith('/working-cut') && (!init?.method || init.method === 'GET')) return Response.json(longCut)
@@ -1354,12 +1356,15 @@ it('retains a long cut receipt without spilling playback URLs and resolves a sou
   const h = await harness(new MockAdapter([
     toolCallResponse('long-read', 'qingmu_read_working_cut', {}),
     toolCallResponse('source-read', 'qingmu_read_working_cut', { sourceAssetId: 'v-48' }),
+    toolCallResponse('old-read', 'qingmu_read_working_cut', { revisionId: 'cut-old' }),
     toolCallResponse('long-save', 'qingmu_save_working_cut', { receiptId, cut }), textResponse('Saved.'),
   ]), upstream)
   await h.run(true)
-  for (const id of ['long-read', 'source-read', 'long-save']) expect(result(h.agent, id).error, result(h.agent, id).text).toBe(false)
+  for (const id of ['long-read', 'source-read', 'old-read', 'long-save']) expect(result(h.agent, id).error, result(h.agent, id).text).toBe(false)
   const read = JSON.parse(result(h.agent, 'long-read').text)
   expect(read.cut.cuts[0].clips).toEqual(clips)
+  expect(read.cut.cutVersions).toHaveLength(2)
+  expect(JSON.parse(result(h.agent, 'old-read').text).cut.cuts[0].clips).toEqual(clips.slice(0, 2))
   expect(read.cut.shots).toHaveLength(49)
   expect(read.cut.videoAudioSources).toHaveLength(49)
   expect(JSON.stringify(read)).not.toContain('signature=')
