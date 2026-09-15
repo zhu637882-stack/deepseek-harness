@@ -122,7 +122,7 @@ fixture = { request, response, savedDraft }, startingImagePrompt = planningShots
     })
     if (url.pathname.endsWith('/asset-design')) return Response.json({
       schema: 'qingmu.asset-design-state.v1', projectId: 'p', episodeId: 'episode-a',
-      stateSha256: 'a'.repeat(64), script: {}, design: image?.assetDesign ?? { assets: [{ kind: 'scene', name: 'Library',
+      stateSha256: 'a'.repeat(64), creativeSettings: { initialBrief: 'Older librarian, age  sixty; provisional wardrobe proposal, not approved.' }, script: {}, design: image?.assetDesign ?? { assets: [{ kind: 'scene', name: 'Library',
         space: { layout: 'Return desk beside the entrance; repair table beneath the west window.' } }] },
     })
     if (url.pathname.endsWith('/working-cut')) return Response.json(workingCut)
@@ -1843,6 +1843,8 @@ it('separates fresh asset authoring context from persisted draft prose without l
   const value = JSON.parse(read.text)
   expect(value.saved.design).toBeUndefined()
   expect(value.saved.entities).toBeUndefined()
+  expect(value.saved.creativeSettings.initialBrief).toContain('age  sixty')
+  expect(value.saved.creativeSettings.initialBrief).toContain('not approved')
   expect(value.saved.assetIndex).toEqual(expect.arrayContaining([
     expect.objectContaining({ space: expect.objectContaining({ layout: expect.stringContaining('west window') }) }),
   ]))

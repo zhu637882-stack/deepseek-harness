@@ -600,7 +600,11 @@ it('carries resolved creation settings into the native design request before gen
   fireEvent.click(await screen.findByRole('button', { name: '根据剧本设计素材' }))
   await waitFor(() => { expect(storyPort.send).toHaveBeenCalledTimes(1) })
   expect(storyPort.send).toHaveBeenCalledWith(expect.any(String), expect.any(String), { projectId: 'p', episodeId: 'e', purpose: 'asset-design-from-script' })
-  expect(storyPort.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining(JSON.stringify(creativeSettings))])
+  const effectiveSettings = { visualStyle: creativeSettings.visualStyle, stylePack: creativeSettings.stylePack,
+    styleAdjustments: creativeSettings.styleAdjustments }
+  expect(storyPort.send.mock.calls[0]?.slice(0, 2)).toEqual([
+    expect.any(String), expect.stringContaining(JSON.stringify(effectiveSettings)),
+  ])
   expect(storyPort.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining('保留当前未保存的服装设计')])
   expect(storyPort.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining('空场保留固定美术')])
   expect(storyPort.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining('具体美术方法由对应技能负责')])
@@ -764,7 +768,7 @@ it.each([false, true])('handles an incremental native identity update without si
   expect(port.generateAssetImage).not.toHaveBeenCalled()
 })
 
-it('authors a fresh project from its brief with no creative supplement', async () => {
+it('routes original brief prose through the source read instead of turning it into current instructions', async () => {
   const port = setup()
   const brief = '现代乡镇诊所；主角为六十岁女医生，干练整洁；诊室明亮。'
   port.readAssetDesign.mockResolvedValue({ ...state, design: null, creativeSettings: { initialBrief: brief } })
@@ -776,7 +780,8 @@ it('authors a fresh project from its brief with no creative supplement', async (
   fireEvent.click(await screen.findByRole('button', { name: '根据剧本设计素材' }))
   await waitFor(() => { expect(storyPort.send).toHaveBeenCalledOnce() })
   const prompt = storyPort.send.mock.calls[0]?.[1]
-  expect(prompt).toContain(brief)
+  expect(prompt).not.toContain(brief)
+  expect(prompt).toContain('saved.creativeSettings.initialBrief')
   expect(prompt).toContain('创作补充是可选偏好，留空也必须完成全部专业设计')
   expect(prompt).toContain('character-asset、scene-asset、prop-asset')
   expect(screen.getByLabelText<HTMLTextAreaElement>('创作补充').value).toBe('')
