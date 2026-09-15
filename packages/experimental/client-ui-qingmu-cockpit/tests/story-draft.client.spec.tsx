@@ -11,7 +11,7 @@ it('authors a fresh asset revision from current sources and rejects adoption aft
   const finished = { text: '完成稿', script: '{"assets":[]}', lastSeq: 4, running: false, finished: true, error: '' }
   let newSubmitted = false
   const port = { prepare: vi.fn(async (_sessionId: string) => {}),
-    send: vi.fn(async (_id: string, _prompt: string) => { newSubmitted = true }), read: vi.fn(async (id: string) => id === 'session-old' || newSubmitted
+    send: vi.fn(async (_id: string, _prompt: string, _scope?: { projectId: string; episodeId: string; purpose: string }) => { newSubmitted = true }), read: vi.fn(async (id: string) => id === 'session-old' || newSubmitted
       ? finished : { ...finished, text: '', script: '', lastSeq: -1, finished: false }) }
   const purpose = { key: 'asset-design', title: '素材设计', description: '设计当前素材', prompt: '当前完整剧本与共用房间',
     action: '重新设计', adopt: '采用设计', adopted: '已采用', freshRevision: true, sourceKey: 'current basis' }
@@ -24,6 +24,7 @@ it('authors a fresh asset revision from current sources and rejects adoption aft
   fireEvent.click(screen.getByRole('button', { name: '重新设计' }))
   await waitFor(() => { expect(port.send).toHaveBeenCalledTimes(1) })
   expect(port.prepare.mock.calls[0]?.[0]).not.toBe('session-old')
+  expect(port.send.mock.calls[0]?.[2]?.purpose).toBe('asset-design-from-script')
   const request = JSON.parse(localStorage.getItem(key)!)
   expect(request).toMatchObject({ baseline: -1, sourceKey: 'current basis', submitted: true })
   view.unmount()
@@ -36,6 +37,7 @@ it('authors a fresh asset revision from current sources and rejects adoption aft
   expect(screen.getByText('完成稿')).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: '按当前要求改进上稿' }))
   await waitFor(() => { expect(port.send).toHaveBeenCalledTimes(2) })
+  expect(port.send.mock.calls[1]?.[2]?.purpose).toBe('asset-design')
   expect(port.send.mock.calls[1]).toEqual([expect.any(String), expect.stringContaining('<previous_candidate>\n完成稿\n</previous_candidate>'),
     { projectId: 'p', episodeId: 'e', purpose: 'asset-design' }])
   expect(port.send.mock.calls[1]?.[1]).toMatchSnapshot()

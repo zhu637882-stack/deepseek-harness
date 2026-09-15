@@ -489,3 +489,5 @@ Default asset authoring treats creative supplements as optional and derives appe
 A real empty-supplement run copied saved descriptions despite reading the skills. The default work order now explicitly requires a design review against the brief before serializing existing fields; saved content is not treated as creative acceptance.
 
 Asset authoring now sends an identity/reference index for saved working drafts and the complete text only for unsaved local edits. The director read tool explicitly separates persistence from creative acceptance. Cinematic image prompting leads design; continuity maintenance follows design rather than freezing unreviewed drafts. Empty-supplement live behavior remains subject to runtime verification.
+
+The asset design primary action uses asset-design-from-script: the read tool returns identity/reference/spatial anchors without injecting old design prose. Revising the previous candidate and downstream authoring retain full saved reads. Neither action changes saved media or grants creative acceptance. This follows a failed live test where source labels alone still allowed unchanged character and room prompts.

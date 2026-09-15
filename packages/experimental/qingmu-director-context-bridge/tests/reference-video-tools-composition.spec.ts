@@ -1831,3 +1831,22 @@ it.each([
   expect(single.parameters).toEqual({ ...edit.parameters, watermark: false })
   expect(single.generationQueued).toBe(false)
 })
+
+it('separates fresh asset authoring context from persisted draft prose without losing spatial anchors', async () => {
+  const adapter = new MockAdapter([
+    toolCallResponse('fresh-assets', 'qingmu_read_asset_design', { page: 1 }), textResponse('Create the design from script.'),
+  ])
+  const h = await harness(adapter)
+  await h.run(false, { purpose: 'asset-design-from-script' })
+  const read = result(h.agent, 'fresh-assets')
+  expect(read.error, read.text).toBe(false)
+  const value = JSON.parse(read.text)
+  expect(value.saved.design).toBeUndefined()
+  expect(value.saved.entities).toBeUndefined()
+  expect(value.saved.assetIndex).toEqual(expect.arrayContaining([
+    expect.objectContaining({ space: expect.objectContaining({ layout: expect.stringContaining('west window') }) }),
+  ]))
+  expect(value.saved.assetIndex.every((item: Record<string, unknown>) => !('imagePrompt' in item) && !('voiceIdentity' in item) && !('designBasis' in item))).toBe(true)
+  expect(value.designAuthority.creativeApproval).toBe('not_established_by_this_read')
+  expect(h.upstream.fetch.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true)
+})

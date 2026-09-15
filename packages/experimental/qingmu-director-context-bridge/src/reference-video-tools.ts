@@ -196,7 +196,21 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
       const inputs = await readImageInputs(ctx, bindings, catalog.items, exec, () => exec.signal.throwIfAborted())
       const visualInputs = inputs.map(({ originalImageDesign: _historicalDesign, ...input }, index) => ({ ...input,
         currentUses: bindings[index]?.currentUses ?? [] }))
-      return ports.boundedJson({ scope, saved: design.value,
+      // A new design request must not silently turn into an export of the old draft.
+      // Retain entity/reference and spatial anchors; revision and downstream reads stay complete.
+      const fromScript = target.purpose === 'asset-design-from-script'
+      const designSource = fromScript ? {
+        ...Object.fromEntries(Object.entries(saved).filter(([key]) => [
+          'schema', 'stateSha256', 'scriptSha256', 'scriptRevision', 'creativeSettings',
+          'productAssets', 'script', 'model', 'imageModels', 'retainedSelections',
+        ].includes(key))),
+        designTextOmitted: 'author_from_script; persisted draft remains unchanged',
+        assetIndex: saved.design?.assets.map(asset => Object.fromEntries(Object.entries(asset).filter(([key]) => [
+          'id', 'kind', 'name', 'references', 'space', 'sceneLayout', 'imageCamera',
+          'imageModel', 'imagePromptExtend', 'imageAspectRatio',
+        ].includes(key)))) ?? [],
+      } : design.value
+      return ports.boundedJson({ scope, saved: designSource,
         designAuthority: {
           persistence: saved.design ? 'saved_working_draft' : 'no_design',
           creativeApproval: 'not_established_by_this_read',

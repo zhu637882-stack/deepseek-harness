@@ -599,7 +599,7 @@ it('carries resolved creation settings into the native design request before gen
   fireEvent.change(await screen.findByLabelText('画面描述'), { target: { value: '保留当前未保存的服装设计' } })
   fireEvent.click(await screen.findByRole('button', { name: '根据剧本设计素材' }))
   await waitFor(() => { expect(storyPort.send).toHaveBeenCalledTimes(1) })
-  expect(storyPort.send).toHaveBeenCalledWith(expect.any(String), expect.any(String), { projectId: 'p', episodeId: 'e', purpose: 'asset-design' })
+  expect(storyPort.send).toHaveBeenCalledWith(expect.any(String), expect.any(String), { projectId: 'p', episodeId: 'e', purpose: 'asset-design-from-script' })
   expect(storyPort.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining(JSON.stringify(creativeSettings))])
   expect(storyPort.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining('保留当前未保存的服装设计')])
   expect(storyPort.send.mock.calls[0]?.slice(0, 2)).toEqual([expect.any(String), expect.stringContaining('无人空场不等于空房')])
@@ -768,7 +768,9 @@ it('authors a fresh project from its brief with no creative supplement', async (
   const port = setup()
   const brief = '现代乡镇诊所；主角为六十岁女医生，干练整洁；诊室明亮。'
   port.readAssetDesign.mockResolvedValue({ ...state, design: null, creativeSettings: { initialBrief: brief } })
-  const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn<(sessionId: string, prompt: string) => Promise<void>>(async () => {}),
+  const storyPort = { prepare: vi.fn(async () => {}),
+    send: vi.fn<(sessionId: string, prompt: string,
+      scope?: { projectId: string; episodeId: string; purpose: string }) => Promise<void>>(async () => {}),
     read: vi.fn(async () => ({ text: '', script: '', lastSeq: 0, running: false, finished: false, error: '' })) }
   render(<NativeAssetDesign {...scope} port={port} storyPort={storyPort} onGenerated={vi.fn()} />)
   fireEvent.click(await screen.findByRole('button', { name: '根据剧本设计素材' }))
@@ -783,7 +785,9 @@ it('authors a fresh project from its brief with no creative supplement', async (
 
 it.each([false, true])('sends a saved design index without treating it as approval and retains unsaved edits: %s', async (edited) => {
   const port = setup()
-  const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn<(sessionId: string, prompt: string) => Promise<void>>(async () => {}),
+  const storyPort = { prepare: vi.fn(async () => {}),
+    send: vi.fn<(sessionId: string, prompt: string,
+      scope?: { projectId: string; episodeId: string; purpose: string }) => Promise<void>>(async () => {}),
     read: vi.fn(async () => ({ text: '', script: '', lastSeq: 0, running: false, finished: false, error: '' })) }
   render(<NativeAssetDesign {...scope} port={port} storyPort={storyPort} onGenerated={vi.fn()} />)
   const field = await screen.findByLabelText('画面描述')
@@ -792,6 +796,7 @@ it.each([false, true])('sends a saved design index without treating it as approv
   await waitFor(() => { expect(storyPort.send).toHaveBeenCalledOnce() })
   const prompt = storyPort.send.mock.calls[0]?.[1] ?? ''
   expect(prompt).toContain('not_established_by_persistence')
+  expect(storyPort.send.mock.calls[0]?.[2]?.purpose).toBe('asset-design-from-script')
   expect(prompt).toContain('actor_1')
   if (!edited) expect(prompt).not.toContain('真人定妆照')
   expect(prompt.includes('用户尚未保存的衣服修改')).toBe(edited)
