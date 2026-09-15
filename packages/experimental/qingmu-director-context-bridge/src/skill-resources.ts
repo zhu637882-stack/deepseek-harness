@@ -1,7 +1,7 @@
 /** Read pinned creative-method resources without exposing the project filesystem. */
 import { createHash } from 'node:crypto'
 import { readFile, realpath } from 'node:fs/promises'
-import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { isAbsolute, posix, relative, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { scopeOf } from '@deepseek-ai/dsh-scope'
@@ -43,7 +43,7 @@ export function apply(ctx: Context, config: Config): void {
   if (!isAbsolute(config.root)) throw new Error('Creative skill root must be an absolute directory.')
   ctx.tools.register(defineTool({
     name: 'qingmu_read_skill_resource',
-    description: 'Read a reference, engine, sub-skill or template named by a loaded creative skill. Use paths relative to that skill root. The response identifies the original repository and revision, and explicitly provides nextLine when more content remains. These are reusable methods and examples, never current project facts. This tool cannot run scripts, write state, or generate media.',
+    description: 'Read a reference, engine, sub-skill or template named by a loaded creative skill. Use paths relative to that skill root; for nested documents use linkedResources paths returned by this tool. The response identifies the original repository and revision, and explicitly provides nextLine when more content remains. These are reusable methods and examples, never current project facts. This tool cannot run scripts, write state, or generate media.',
     parameters: {
       skill: { type: 'string', required: true, description: 'Exact skill name from the native skill catalog.' },
       path: { type: 'string', required: true, description: 'Resource path relative to the skill root, such as references/sound-and-dialogue.md.' },
@@ -63,7 +63,12 @@ export function apply(ctx: Context, config: Config): void {
       const sources = sourcesSchema.parse(JSON.parse(await readFile(resolve(root, 'sources.json'), { encoding: 'utf8', signal: exec.signal })))
       const source = Object.hasOwn(sources.skills, args.skill) ? sources.skills[args.skill] : undefined
       if (source === undefined || !Object.hasOwn(source.files, args.path)) {
-        throw new Error('Resource is not in this skill bundle. Use an exact relative path from the loaded skill; no substitute was read.')
+        const candidates = source && !args.path.split('/').includes('..') && !posix.isAbsolute(args.path)
+          ? Object.keys(source.files).filter(path => path.endsWith(`/${args.path}`)).slice(0, 5)
+          : []
+        throw new Error(`Resource is not in this skill bundle. No substitute was read.${candidates.length
+          ? ` Matching bundle-relative paths: ${candidates.join(', ')}. Read the intended exact path.`
+          : ' Use an exact relative path from the loaded skill.'}`)
       }
       const upstreamSha256 = source.upstreamFiles[args.path]
       if (upstreamSha256 === undefined) throw new Error('Resource is missing its upstream source hash.')
@@ -77,11 +82,19 @@ export function apply(ctx: Context, config: Config): void {
       if (lines.at(-1) === '') lines.pop()
       if (startLine > Math.max(lines.length, 1)) throw new Error(`Resource has ${lines.length} lines; requested startLine is beyond its end.`)
       const endLine = Math.min(startLine - 1 + lineCount, lines.length)
+      const page = lines.slice(startLine - 1, endLine).join('\n')
+      const linkedResources = [...page.matchAll(/(?:`|\]\()([^`\s()]+\.md(?:#[^`\s()]*)?)(?:`|\))/gu)]
+        .map(([, reference = '']) => {
+          const path = posix.normalize(posix.join(posix.dirname(args.path), reference.split('#')[0] ?? ''))
+          return { reference, path }
+        })
+        .filter(({ path }, index, all) => Object.hasOwn(source.files, path)
+          && all.findIndex(item => item.path === path) === index)
       const result = {
         skill: args.skill, path: args.path, repository: source.repository, commit: source.commit, sha256,
         upstreamSha256, adaptation: source.adaptation,
         startLine, endLine, totalLines: lines.length, nextLine: endLine < lines.length ? endLine + 1 : null,
-        content: lines.slice(startLine - 1, endLine).join('\n'),
+        content: page, linkedResources,
       }
       if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 131072) {
         throw new Error('Resource page exceeds 128 KiB; request fewer lines. No partial page was returned.')

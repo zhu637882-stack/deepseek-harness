@@ -25,6 +25,7 @@ interface ResourcePage {
   sha256: string
   upstreamSha256: string
   nextLine: number | null
+  linkedResources: { reference: string; path: string }[]
 }
 
 async function reader(root = bundle) {
@@ -91,6 +92,28 @@ it('serves the genre supplement with current director authority through the nati
     nextLine: 31,
   })
   expect(result.value).toMatchObject({ content: expect.stringContaining('not platform requirements or validation limits') })
+})
+
+it('resolves nested Markdown references to exact readable bundle paths without rewriting source content', async () => {
+  const app = await reader()
+  const result = await app.run({ skill: 'production-design', path: 'image-prompting/SKILL.md' })
+  expect(result.isError).toBe(false)
+  const page = result.value as ResourcePage
+  expect(page.content + '\n').toBe(await readFile(join(bundle, page.skill, page.path), 'utf8'))
+  expect(page.linkedResources).toHaveLength(6)
+  expect(page.linkedResources).toContainEqual({
+    reference: 'references/lighting_and_photorealism.md',
+    path: 'image-prompting/references/lighting_and_photorealism.md',
+  })
+  for (const resource of page.linkedResources) {
+    const linked = await app.run({ skill: page.skill, path: resource.path })
+    expect(linked.isError, resource.path).toBe(false)
+    expect(linked.value).toMatchObject({ path: resource.path })
+  }
+  const missing = await app.run({ skill: page.skill, path: 'references/lighting_and_photorealism.md' })
+  expect(missing.isError).toBe(true)
+  expect(JSON.stringify(missing)).toContain('image-prompting/references/lighting_and_photorealism.md')
+  expect(JSON.stringify(missing)).toContain('No substitute was read')
 })
 
 it('serves visual adaptation rules without automatic creative filtering', async () => {
