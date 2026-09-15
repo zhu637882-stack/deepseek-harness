@@ -589,7 +589,8 @@ it('saves ordered image references and world exceptions before a quotation witho
 it('carries resolved creation settings into the native design request before generating images', async () => {
   const port = setup()
   const creativeSettings = { visualStyle: { label: '透明水彩', prompt: '透明水彩色层' },
-    stylePack: { palette: ['水彩明度层次'] }, styleAdjustments: ['高饱和金属反射'] }
+    stylePack: { palette: ['水彩明度层次'] }, styleAdjustments: ['高饱和金属反射'],
+    initialBrief: '人物设计：成年女官灰绿短袄。空间设定：南门西窗。' }
   const imageModels = [{ id: 'qwen-image-3.0-pro', name: 'Qwen-Image 3.0 Pro', maxReferences: 3, supportsBoxes: false }]
   port.readAssetDesign.mockResolvedValue({ ...state, creativeSettings, imageModels })
   const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
