@@ -1156,23 +1156,26 @@ export function ScenePlanningWorkspace({
       {nativeDirectorSession && <NativeDirectorComposer port={nativeDirectorSession}
         sessionId={directorSessionId ?? projectDirectorSessionId(projectId)}
         scopeKey={JSON.stringify(directorScope)} ready={nativeTarget !== undefined} target={nativeTarget} onCommitted={onCommitted} />}
-      <details open><summary>导演助理连接</summary>
-        <p role="status">{directorSessionId === undefined
-          ? '未选择 DSh 会话；人工编辑与保存仍可用。'
-          : directorStatus === 'current' ? '最近一次镜头上下文同步成功；不代表生成或审核通过。'
-            : directorStatus === 'connecting' ? '正在核对当前镜头上下文…'
-              : directorStatus === 'drifted' ? '来源已漂移；旧建议不能采用。人工草稿已保留。'
-                : '导演助理暂不可用；人工编辑与保存不受影响。'}</p>
+      <details><summary>单镜修改连接</summary>
+        {nativeDirectorSession && <p>场次创作的进度以上方“场次导演设计”为准；这里显示已保存镜头的修改连接。</p>}
+        <p role="status">{!directorScope && !canonicalStoryboard
+          ? '尚未保存分镜。先完成场次设计并保存，再选择镜头进行修改。'
+          : directorSessionId === undefined
+            ? '单镜修改会话尚未连接；场次创作与人工保存仍可用。'
+            : directorStatus === 'current' ? '最近一次镜头上下文同步成功；不代表生成或审核通过。'
+              : directorStatus === 'connecting' ? '正在核对当前镜头上下文…'
+                : directorStatus === 'drifted' ? '来源已漂移；旧建议不能采用。人工草稿已保留。'
+                  : '导演助理暂不可用；人工编辑与保存不受影响。'}</p>
         <dl><dt>项目 / 集</dt><dd>{projectId} / {episodeId}</dd>
           <dt>场景 / 镜头</dt><dd>{directorScope ? `${directorScope.sceneId} / ${directorScope.shotId}`
             : canonicalStoryboard ? `自动分镜已建立 · ${canonicalStoryboard.shotCount} 个镜头（旧场景规划不可写；后续动作仍受各自确认/门禁）`
-              : '尚未建立真实镜头'}</dd>
+              : '尚未保存规划镜头'}</dd>
           <dt>上下文 SHA</dt><dd>{directorBinding?.binding.contextSnapshotSha256 ?? '尚未绑定'}</dd></dl>
         <p>上下文绑定供当前会话的青木导演工具使用；是否能调用工具取决于会话预设。不会因此自动生成、保存或签收。</p>
       </details>
-      <details open><summary>导演属性与缺口</summary><p>规划对象，不是已审内容。</p>
+      <details><summary>当前规划信息</summary><p>保存规划后，继续准备生成并审看实际结果。</p>
         <dl><dt>当前镜头</dt><dd>{current?.title ?? '尚未建立'}</dd><dt>分镜结构版本</dt><dd>{state?.storyboard?.version ?? '尚无'}</dd>
-          <dt>参考媒体</dt><dd>本入口不创建参考；拍摄条件另行核验</dd><dt>PromptIR</dt><dd>本片不创建有效提示词</dd><dt>对白时序</dt><dd>未核验</dd></dl>
-        <p>未提交输入保留在本浏览器；已保存内容和回执由易梦持久化。清空浏览器只可恢复已提交内容。</p></details></aside>
+          <dt>视频输入</dt><dd>在“生成与审看”中核对参考素材、生成稿与对白时序。</dd></dl>
+        <p>未提交输入保留在本浏览器；已保存内容和回执保存在青木项目服务中。清空浏览器只可恢复已提交内容。</p></details></aside>
   </section>
 }

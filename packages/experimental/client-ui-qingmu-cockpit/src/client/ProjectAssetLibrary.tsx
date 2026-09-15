@@ -8,6 +8,14 @@ const THUMBNAIL_READ_LIMIT = 2
 let activeThumbnailReads = 0
 const waitingThumbnailReads = new Set<() => void>()
 
+function assetLabel(item: ReferenceVideoAsset) {
+  if (item.mediaType === 'reference_audio') {
+    if (item.source?.role === 'sound_voice_reference') return `${item.label} · 完整试听`
+    if (item.source?.role === 'sound_voice_reference_excerpt') return `${item.label} · 3秒参考片段`
+  }
+  return item.label
+}
+
 function releaseThumbnailRead() {
   activeThumbnailReads -= 1
   const next = waitingThumbnailReads.values().next().value
@@ -160,7 +168,8 @@ export function ProjectAssetLibrary({ projectId, port, refreshToken = 0, onOpenR
     {error && <div role="alert"><p>素材暂时无法更新，请重试。</p><details><summary>错误详情</summary>{error}</details></div>}
     <div className={preview ? css.withPreview : undefined}>
       {preview && <section className={css.preview} aria-label="素材预览">
-        <header><h3>{preview.label}</h3><button type="button" onClick={() => { setSelected(undefined) }}>关闭预览</button></header>
+        <header><h3>{assetLabel(preview)}</h3><button type="button" onClick={() => { setSelected(undefined) }}>关闭预览</button></header>
+        {preview.source?.role === 'sound_voice_reference_excerpt' && <p>从同次完整试听截取，供视频引用；属于同一个音色。</p>}
         {previewUrl !== undefined
           ? preview.mediaType === 'reference_video'
             ? <video controls src={previewUrl} preload="metadata" aria-label={preview.label} />
@@ -176,9 +185,9 @@ export function ProjectAssetLibrary({ projectId, port, refreshToken = 0, onOpenR
       </section>}
       <div className={css.grid}>
         {filtered.map(item => <button type="button" key={`${item.assetId}:${item.assetSha256}`} className={css.asset}
-          aria-label={`预览${item.label}`} aria-pressed={item.assetId === selected} onClick={() => { setSelected(item.assetId) }}>
+          aria-label={`预览${assetLabel(item)}`} aria-pressed={item.assetId === selected} onClick={() => { setSelected(item.assetId) }}>
           <AssetThumbnail projectId={projectId} item={item} port={port} />
-          <strong>{item.label}</strong><small>{item.mediaType === 'reference_video' ? '视频 · 点击播放'
+          <strong>{assetLabel(item)}</strong><small>{item.mediaType === 'reference_video' ? '视频 · 点击播放'
             : item.mediaType === 'reference_audio' ? '音色 · 点击试听' : '图片 · 点击查看'}</small>
         </button>)}
       </div>

@@ -240,7 +240,7 @@ it('shows a canonical automatic storyboard as read-only without reviving the leg
   expect(screen.getByText(/已有提示词、Take 与高级分镜/)).toBeTruthy()
   expect(screen.queryByText('本集已有分镜；此入口不覆盖已有对象，请使用当前导演工作区。')).toBeNull()
   expect(screen.queryByText('尚无可规划场景。请先到“剧本与资产”确认导入并保存剧本。')).toBeNull()
-  expect(screen.queryByText('尚未建立真实镜头')).toBeNull()
+  expect(screen.queryByText('尚未保存规划镜头')).toBeNull()
   expect(port.saveScenePlanning).not.toHaveBeenCalled()
   expect(onSelectShotId).not.toHaveBeenCalled()
 })

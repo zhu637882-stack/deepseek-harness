@@ -22,6 +22,21 @@ const localPictureThree = { ...localPicture, assetId: 'asset_localref_cafe', ass
 function localReader() { return vi.fn(async () => localContent) }
 const page = (items: ReferenceVideoAssetsResponse['items']): ReferenceVideoAssetsResponse => ({ projectId:'p',page:1,pages:1,items })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+it('distinguishes a full voice audition from its derived reference without changing either asset', async () => {
+  const full = { ...voice, label: '阿禾', source: { role: 'sound_voice_reference' } }
+  const excerpt = { ...voice, label: '阿禾', assetId: 'excerpt', browserUrl: '/excerpt.wav',
+    source: { role: 'sound_voice_reference_excerpt' } }
+  const port = { referenceVideoAssets: vi.fn().mockResolvedValue(page([full, excerpt])),
+    readLocalReferenceCandidateContent: localReader() }
+  render(<ProjectAssetLibrary projectId="p" port={port} />)
+  fireEvent.click(await screen.findByRole('button', { name: '预览阿禾 · 完整试听' }))
+  expect(screen.getByRole('region', { name: '素材预览' }).querySelector('audio')?.getAttribute('src')).toBe('/voice.wav')
+  fireEvent.click(screen.getByRole('button', { name: '预览阿禾 · 3秒参考片段' }))
+  expect(screen.getByText('从同次完整试听截取，供视频引用；属于同一个音色。')).toBeTruthy()
+  expect(screen.getByRole('region', { name: '素材预览' }).querySelector('audio')?.getAttribute('src')).toBe('/excerpt.wav')
+  expect(port.referenceVideoAssets).toHaveBeenCalledTimes(1)
+})
+
 it('filters video references and plays their picture and sound in a video element', async () => {
   const clip = { assetId: 'video', assetSha256: 'f'.repeat(64), label: '反打参考',
     mediaType: 'reference_video' as const, browserUrl: '/reference.mp4' }
