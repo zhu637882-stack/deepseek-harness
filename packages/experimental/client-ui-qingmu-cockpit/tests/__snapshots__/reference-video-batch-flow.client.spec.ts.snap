@@ -24,16 +24,28 @@ exports[`assembles every shot from real references while keeping dialogue and sy
     "projectId": "p",
     "promptParts": [
       {
+        "text": "【引用素材用途】
+",
+      },
+      {
         "bindingToken": "ref_1",
       },
       {
-        "text": "（林予）：本镜角色身份与衣服
+        "text": "：本镜角色身份与衣服
 ",
       },
       {
         "text": "
-【本镜完整导演设计】
-角色保持原服装。0秒敲锣，铜锣余响。对白：请进。",
+【本镜拍摄执行】
+",
+      },
+      {
+        "text": "院内只有林予，原服装。0–2秒右手击锣一次，先击后收，铜锣余响；2–8秒说第一句，结束仍面向门口。",
+      },
+      {
+        "text": "
+【原始对白与画面约定】
+本镜逐字对白：请进。",
       },
     ],
   },
@@ -59,16 +71,28 @@ exports[`assembles every shot from real references while keeping dialogue and sy
     "projectId": "p",
     "promptParts": [
       {
+        "text": "【引用素材用途】
+",
+      },
+      {
         "bindingToken": "ref_1",
       },
       {
-        "text": "（林予）：本镜角色身份与衣服
+        "text": "：本镜角色身份与衣服
 ",
       },
       {
         "text": "
-【本镜完整导演设计】
-角色保持原服装。0秒敲锣，铜锣余响。对白：请进。",
+【本镜拍摄执行】
+",
+      },
+      {
+        "text": "院内只有林予，原服装。0–2秒右手击锣一次，先击后收，铜锣余响；2–8秒说第一句，结束仍面向门口。",
+      },
+      {
+        "text": "
+【原始对白与画面约定】
+本镜逐字对白：请进。",
       },
     ],
   },

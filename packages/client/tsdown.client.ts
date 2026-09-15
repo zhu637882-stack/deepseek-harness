@@ -488,7 +488,9 @@ function clientConfig(id: string, entry: string): UserConfig {
         if (!source.startsWith('@deepseek-ai/')) return null
         if (isRequested(source)) return null // requested module-table row: external wins
         if (VENDORED_LIBRARY.test(source)) return null // vendored library: inline, no shared identity
-        if (INLINE_SAFE.test(source) || source === '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft' || GENERATED_REMOTE.test(source)) return null // wire contribution: inline is the point
+        if (INLINE_SAFE.test(source) || source === '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/story-draft'
+          || source === '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/reference-prompt'
+          || GENERATED_REMOTE.test(source)) return null // Pure wire projections have no plugin state to duplicate.
         throw new Error(
           `client bundle purity: "${source}" is not in the default client externals or ${id}'s dsh.client.external, an inline-safe wire layer, or a generated /remote contribution — `
           + 'cross-plugin value imports are forbidden; declare a non-default module request or collaborate through cordis services '

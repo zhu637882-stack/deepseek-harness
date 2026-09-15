@@ -1,5 +1,7 @@
 # Qingmu OS production cockpit
 
+Batch preparation asks the native director for each segment's executable performance, camera, space and sound, alongside reference choices. It uses the single-shot assembly to append current canonical dialogue and visual conventions; the research document stays out of the submitted prompt. A missing execution description returns a preparation error instead of silently copying source JSON. Scene planning groups continuous action and response into practical generation segments, retaining intentional short inserts and internal coverage. Existing media and selections are preserved; source freshness and successful preparation do not establish video quality.
+
 An interrupted native response is shown as an incomplete creation with a connection-recovery instruction. Failed results suppress the earlier running notice, remain unadoptable and are never retried automatically.
 
 The creation workspace offers **普通短剧** and **广告短剧**. Advertising creation accepts a pasted script and one to five views of the same product (JPG, PNG or WebP, up to 8 MiB each; dimensions 240–8000 pixels, aspect ratio at most 8:1). IndexedDB preserves image bytes across reloads; localStorage retains creation coordinates and hashes. Product references enter the first asset design automatically, while the script uses the existing parse/save flow. Creation submits no paid generation or media approval.

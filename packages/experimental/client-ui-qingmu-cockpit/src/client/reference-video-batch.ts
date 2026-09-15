@@ -1,6 +1,7 @@
 /** Episode preparation and submission reuse the saved single-shot drafts and task queue. */
 import type { ReferenceVideoAsset, ReferenceVideoBinding, ReferenceVideoDraftResponse, ReferenceVideoPreviewRequest,
   ReferenceVideoQuoteResponse, ReferenceVideoRun, QueueReferenceVideoRequest, ReferenceVideoMaterialsState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
+import { assembleReferencePrompt } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/reference-prompt'
 import type { QingmuYimengPort } from './contracts.ts'
 
 export interface BatchShot {
@@ -78,7 +79,7 @@ export async function collectBatchShot(port: BatchPort, projectId: string, frame
   return count
 }
 
-/** Resolve model-authored reference choices through real assets and append the saved director text once. */
+/** Use the same authored performance and canonical dialogue assembly as the single-shot director. */
 export function parseBatchChoices(text: string, basis: BatchBasis,
   retakes: ReadonlySet<string> = new Set(), feedback = ''): ReferenceVideoPreviewRequest[] {
   const value: unknown = JSON.parse(text)
@@ -106,11 +107,14 @@ export function parseBatchChoices(text: string, basis: BatchBasis,
       return { bindingToken: `ref_${index + 1}`, assetId: asset.assetId, assetSha256: asset.assetSha256, label: asset.label,
         ...(frameRole ? { frameRole } : {}), purpose: reference.purpose }
     })
-    const promptParts = bindings.flatMap(binding => [{ bindingToken: binding.bindingToken }, { text: `（${binding.label}）：${binding.purpose}\n` }])
+    if (!('executionPrompt' in row) || typeof row.executionPrompt !== 'string' || !row.executionPrompt.trim()) {
+      throw new Error(`${shot.label}缺少拍摄执行描述，请让导演完成动作、表演和接续后再准备。`)
+    }
+    const promptParts = assembleReferencePrompt(bindings, bindings, source, row.executionPrompt)
     // The existing Host save/preview boundary validates the complete untrusted request before writing it.
     const request: ReferenceVideoPreviewRequest = { projectId: basis.projectId, frameId: shot.frameId, model: 'wan3.0-video',
       bindings: bindings.map(({ purpose: _purpose, ...binding }) => binding),
-      promptParts: [...promptParts, { text: `\n【本镜完整导演设计】\n${source.generationPrompt}` }],
+      promptParts,
       ...(feedback.trim() ? { preparationFeedback: feedback.trim() } : {}),
       directorSourceSha256: source.sha256, parameters: row.parameters as ReferenceVideoPreviewRequest['parameters'] }
     if (request.parameters?.duration !== shot.duration) throw new Error(`${shot.label}的生成时长应沿用已保存分镜。`)

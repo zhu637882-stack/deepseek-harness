@@ -218,8 +218,10 @@ Image catalog entries retain the creative fields from the image’s saved genera
 
 An image binding can explicitly set `frameRole` to `first_frame` or `last_frame`. Frame mode requires exactly one first image and at most one last image, without multimodal references. Saved draft and quote hashes include the roles; previews verify the exact provider media type and preserve image aliases. Omitting the field retains existing request checksums and reference behavior.
 
-Director sources optionally include generationPrompt, the explicit production text alongside full research context. The adapter validates and retains it without altering saved prompt parts. Older sources may omit it; copying their full context is not a substitute. The existing 20,000-character request limit applies after native insertion.
+Director sources optionally include `executionSuffix` (canonical dialogue, visual medium and screen-text scope) and generationPrompt, the explicit production text alongside full research context. The adapter validates and retains it without altering saved prompt parts. Older sources may omit it; copying their full context is not a substitute. The existing 20,000-character request limit applies after native insertion.
 
 Audio and video catalog entries retain positive recorded `durationSec`; missing or malformed values stay unknown. Metadata helps plan reference limits; Writer still probes the source bytes before preparation and submission.
 
 Reference drafts accept optional preparationFeedback (up to 20000 characters). It participates in the saved request hash and recovery, but never in provider promptParts or the compiled video body. Existing drafts without this field remain readable.
+
+The browser-safe `./reference-prompt` export supplies shared single-shot and batch authoring guidance and prompt-part assembly. It preserves the authored execution and reference order without provider calls; Writer still validates the final request.

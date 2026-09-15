@@ -20,6 +20,10 @@
       "default": "./lib/types/types.js"
     },
     "./src/*": "./src/*",
+    "./reference-prompt": {
+      "types": "./lib/types/reference-prompt.d.ts",
+      "default": "./lib/types/reference-prompt.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

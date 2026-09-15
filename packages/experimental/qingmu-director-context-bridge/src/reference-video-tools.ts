@@ -9,6 +9,7 @@ import type {
   ReferenceVideoRun, ReferenceVideoRunsResponse, ReferenceVideoFrameReceipt,
   YimengTakeCommentFeedResponse,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
+import { assembleReferencePrompt, executionPromptGuidance } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/reference-prompt'
 import { parseReferenceVideoRequest } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter'
 import { assertNativeTurnTarget } from './native-prompt-target.ts'
@@ -69,34 +70,25 @@ function currentProduction(draft: Record<string, JsonValue>, source?: ReferenceD
 }
 
 function referenceUseParts(draft: Record<string, JsonValue>, source?: ReferenceDirectorSource | null) {
-  exactKeys(draft, ['bindings', 'referenceUses', 'parameters', 'directorSourceSha256'])
-  const production = currentProduction(draft, source)
-  if (!Array.isArray(draft.bindings) || !Array.isArray(draft.referenceUses)) {
-    throw new Error('bindings and referenceUses must be arrays.')
-  }
-  const purposes = new Map<string, string>()
-  for (const use of draft.referenceUses) {
-    if (use === null || typeof use !== 'object' || Array.isArray(use)) throw new Error('Each reference use must be an object.')
-    exactKeys(use, ['bindingToken', 'purpose'])
-    if (typeof use.bindingToken !== 'string' || typeof use.purpose !== 'string' || !use.purpose.trim()) {
-      throw new Error('Each reference use needs its bindingToken and a nonempty purpose.')
-    }
-    if (purposes.has(use.bindingToken)) throw new Error('Describe each bound reference exactly once.')
-    purposes.set(use.bindingToken, use.purpose)
-  }
-  const parts: ({ text: string } | { bindingToken: string })[] = [{ text: '【引用素材用途】\n' }]
-  for (const binding of draft.bindings) {
+  exactKeys(draft, ['bindings', 'referenceUses', 'parameters', 'directorSourceSha256',
+    ...('executionPrompt' in draft ? ['executionPrompt'] : [])])
+  if (!source) throw new Error('Read the current director source before preparing video input.')
+  currentProduction(draft, source)
+  if (!Array.isArray(draft.bindings) || !Array.isArray(draft.referenceUses)) throw new Error('bindings and referenceUses must be arrays.')
+  const bindings = draft.bindings.map((binding) => {
     if (binding === null || typeof binding !== 'object' || Array.isArray(binding) || typeof binding.bindingToken !== 'string') {
       throw new Error('Each binding needs its bindingToken.')
     }
-    const purpose = purposes.get(binding.bindingToken)
-    if (purpose === undefined) throw new Error('Describe each bound reference exactly once; do not add unbound references.')
-    purposes.delete(binding.bindingToken)
-    parts.push({ bindingToken: binding.bindingToken }, { text: `：${purpose}\n` })
-  }
-  if (purposes.size) throw new Error('Reference uses must match the bound references.')
-  parts.push({ text: '\n【本镜完整导演设计】\n' }, { text: production })
-  return parts
+    return { bindingToken: binding.bindingToken }
+  })
+  const uses = draft.referenceUses.map((use) => {
+    if (use === null || typeof use !== 'object' || Array.isArray(use)) throw new Error('Each reference use must be an object.')
+    exactKeys(use, ['bindingToken', 'purpose'])
+    if (typeof use.bindingToken !== 'string' || typeof use.purpose !== 'string') throw new Error('Invalid reference use.')
+    return { bindingToken: use.bindingToken, purpose: use.purpose }
+  })
+  if ('executionPrompt' in draft && typeof draft.executionPrompt !== 'string') throw new Error('executionPrompt must be text.')
+  return assembleReferencePrompt(bindings, uses, source, draft.executionPrompt as string | undefined)
 }
 
 function requestFor(current: BoundRead, draft: JsonValue, source?: ReferenceDirectorSource | null): ReferenceVideoPreviewRequest {
@@ -122,7 +114,7 @@ function requestFor(current: BoundRead, draft: JsonValue, source?: ReferenceDire
 const editableDraft = {
   type: 'json', required: true,
   // Assembly expands into the existing editable wire format; it adds no persisted field.
-  description: 'Normally supply bindings, referenceUses, parameters and directorSourceSha256. referenceUses is an array of {bindingToken,purpose}, exactly one for each binding: explain only what this source contributes and how it is used (identity, clothing, voice, scene appearance, starting/ending frame, motion or previous-shot continuation). The tool labels each reference in actual input order and appends the complete current generationPrompt exactly once as the final production design. Do not supply promptParts with referenceUses. Do not repeat the shot plan, invent shot-wide constraints, recount inspection history or write literal image/video aliases in purpose. Creative changes belong in the director plan before assembly; this operation assigns sources to that design. bindings contains {bindingToken,assetId,assetSha256,label,frameRole?}. To start from an already composed shot image, set frameRole to first_frame; optionally add one last_frame image for the intended ending. This mode takes only those one or two images and cannot mix ordinary image, audio or video references. Otherwise omit frameRole for all bindings to use multimodal references. Choose from the director design: an identity portrait or empty room is not automatically a complete shot frame. Inspect actual pixels and preserve the script, performance, camera and sound plan in the prompt; audio:true can generate native dialogue and ambience in either mode. Use ratio:adaptive when retaining frame composition matters. Never silently discard required identity or voice references to switch modes. For an intentionally authored manual prompt, promptParts may be supplied instead of referenceUses; it contains {text}, {bindingToken}, or one {directorText:"current"}. Existing manual drafts remain editable. Prefer referenceUses when assembling a saved director plan: it cannot append a second ending summary or global constraint section. Resolve contradictory source design through the director-plan workflow first. Source copying does not verify the semantics of purpose or the source plan. Set directorSourceSha256 from saved.directorSource only after this reconciliation; omit it when the source is null. This digest proves source freshness, not creative quality. parameters contains duration, resolution (480P/720P/1080P), ratio (adaptive/16:9/4:3/1:1/3:4/9:16), audio, prompt_extend, optional seed. Use assets and hashes from the current read; keep binding tokens stable. The catalog includes generated video candidates: use them as reference_video for prior performance, visible layout, motion or editing when appropriate. Video aliases (视频1, 视频2) count separately from images and audio. Voice references allow up to 5 clips, each 1–15 seconds, totaling at most 15 seconds. Prefer the corresponding actor’s locally derived 3-second timbre excerpt when full previews exceed this limit; excerpts retain the full preview’s voice and are not the shot dialogue. Do not silently drop required speakers. Up to 5 input videos totaling 15 seconds; input plus output <=30 seconds. Specify whether to continue, edit or use a clip as visual reference, and which observable state to preserve; do not blindly copy a known defect. Input videos are billed along with output. Preserve the complete director design and inspect relevant source frames before choosing. No automatic selection of candidates. No project, frame, URL or model fields.',
+  description: 'Normally supply bindings, referenceUses, executionPrompt, parameters and directorSourceSha256. referenceUses is an array of {bindingToken,purpose}, exactly one for each binding: explain only what this source contributes and how it is used (identity, clothing, voice, scene appearance, starting/ending frame, motion or previous-shot continuation). The tool labels references in input order, keeps your executionPrompt and appends saved.directorSource.executionSuffix once for canonical dialogue and visual conventions. Use generationPrompt as source material, not a document to paste into executionPrompt. Do not supply promptParts with referenceUses. Do not repeat the shot plan, invent shot-wide constraints, recount inspection history or write literal image/video aliases in purpose. Reconcile contradictions in the director plan first; this operation translates that design into an executable performance and assigns sources to it. bindings contains {bindingToken,assetId,assetSha256,label,frameRole?}. To start from an already composed shot image, set frameRole to first_frame; optionally add one last_frame image for the intended ending. This mode takes only those one or two images and cannot mix ordinary image, audio or video references. Otherwise omit frameRole for all bindings to use multimodal references. Choose from the director design: an identity portrait or empty room is not automatically a complete shot frame. Inspect actual pixels and preserve the script, performance, camera and sound plan in the prompt; audio:true can generate native dialogue and ambience in either mode. Use ratio:adaptive when retaining frame composition matters. Never silently discard required identity or voice references to switch modes. For an intentionally authored manual prompt, promptParts may be supplied instead of referenceUses; it contains {text}, {bindingToken}, or one {directorText:"current"}. Existing manual drafts remain editable. Prefer referenceUses with executionPrompt for production. Omitting executionPrompt retains legacy full-source assembly for existing workflows. Resolve contradictory source design through the director-plan workflow first. Source copying does not verify the semantics of purpose or the source plan. Set directorSourceSha256 from saved.directorSource only after this reconciliation; omit it when the source is null. This digest proves source freshness, not creative quality. parameters contains duration, resolution (480P/720P/1080P), ratio (adaptive/16:9/4:3/1:1/3:4/9:16), audio, prompt_extend, optional seed. Use assets and hashes from the current read; keep binding tokens stable. The catalog includes generated video candidates: use them as reference_video for prior performance, visible layout, motion or editing when appropriate. Video aliases (视频1, 视频2) count separately from images and audio. Voice references allow up to 5 clips, each 1–15 seconds, totaling at most 15 seconds. Prefer the corresponding actor’s locally derived 3-second timbre excerpt when full previews exceed this limit; excerpts retain the full preview’s voice and are not the shot dialogue. Do not silently drop required speakers. Up to 5 input videos totaling 15 seconds; input plus output <=30 seconds. Specify whether to continue, edit or use a clip as visual reference, and which observable state to preserve; do not blindly copy a known defect. Input videos are billed along with output. Preserve the complete director design and inspect relevant source frames before choosing. No automatic selection of candidates. No project, frame, URL or model fields.' + executionPromptGuidance,
 } as const
 
 /** Optional reader composition; all registrations unwind with the owning preset. */
@@ -423,7 +415,7 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
           maxInputVideoPlusOutputSec: 30, durationBasis: 'catalog_metadata_reprobed_before_submission',
           guidance: 'Missing duration is unknown. Choose voices required by this shot and its director design. Several speakers are supported; shorten reference samples when needed, never delete required dialogue or silently substitute a voice to fit a limit.' },
         providerCalls: 0, generationQueued: false,
-        guidance: 'Read saved.directorSource in full. To assemble that design, supply referenceUses:[{bindingToken,purpose}] for every binding, parameters and the current directorSourceSha256; omit promptParts. State only each reference purpose, not a rewritten shot plan or global constraints. The tool renders source aliases in input order and copies generationPrompt exactly once as the final design. Adjacent-shot research is not inserted. Resolve source-design conflicts in the director plan first. Intentionally authored manual promptParts remain editable as a separate mode. Source freshness and copying are not semantic approval. Use saved.frameSha256 and saved.draft.revision (0 when absent) for saving. The page restores the saved version explicitly so an unsaved local edit is not overwritten.',
+        guidance: executionPromptGuidance + 'Read saved.directorSource in full. To assemble that design, supply referenceUses:[{bindingToken,purpose}] for every binding, executionPrompt, parameters and the current directorSourceSha256; omit promptParts. State only each reference purpose, not a rewritten shot plan or global constraints. The tool renders source aliases in order, your executionPrompt, then the canonical executionSuffix; the full generationPrompt remains authoring context. Adjacent-shot research is not inserted. Resolve source-design conflicts in the director plan first. Intentionally authored manual promptParts remain editable as a separate mode. Source freshness and copying are not semantic approval. Use saved.frameSha256 and saved.draft.revision (0 when absent) for saving. The page restores the saved version explicitly so an unsaved local edit is not overwritten.',
       })
     },
   }))

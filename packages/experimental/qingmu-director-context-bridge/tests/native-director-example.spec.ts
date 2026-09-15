@@ -94,8 +94,12 @@ it('returns an episode reference plan through the shipped native preset and pers
   const result = await runNativeDirectorExample('reference-batch')
   expect(result.calls).toEqual(['skill', 'skill'])
   expect(result.results.every(text => !text.includes('Unknown skill'))).toBe(true)
-  const plan = JSON.parse(result.batchDraft!.script) as { shots: { frameId: string; parameters: { audio: boolean } }[] }
+  const plan = JSON.parse(result.batchDraft!.script) as {
+    shots: { frameId: string; executionPrompt: string; parameters: { audio: boolean } }[]
+  }
   expect(plan.shots.map(shot => shot.frameId)).toEqual(['first', 'second'])
   expect(plan.shots.every(shot => shot.parameters.audio)).toBe(true)
+  expect(plan.shots[0]!.executionPrompt).toContain('铜锣余响')
+  expect(plan.shots[1]!.executionPrompt).toContain('跨过门槛')
   expect({ calls: result.calls, plan }).toMatchSnapshot()
 })

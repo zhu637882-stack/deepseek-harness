@@ -27,6 +27,8 @@ export interface ReferenceDirectorSource {
   readonly prompt: string
   /** Editable production text; excludes adjacent-shot research and media metadata. */
   readonly generationPrompt?: string
+  /** Canonical dialogue, visual medium and screen-text scope appended after authored execution. */
+  readonly executionSuffix?: string
 }
 
 /** Project-owned source versions; callers cannot supply transport URLs. */

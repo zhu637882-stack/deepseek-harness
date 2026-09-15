@@ -140,6 +140,7 @@ exports[`returns an episode reference plan through the shipped native preset and
   "plan": {
     "shots": [
       {
+        "executionPrompt": "院内只有主人。0–2秒击锣一次并收槌，铜锣余响；2–6秒看向门口说第一句，停在原位。",
         "frameId": "first",
         "parameters": {
           "audio": true,
@@ -151,11 +152,13 @@ exports[`returns an episode reference plan through the shipped native preset and
         "references": [
           {
             "assetId": "actor-photo",
+            "assetLabel": "主人",
             "purpose": "保持同一人物与服装",
           },
         ],
       },
       {
+        "executionPrompt": "同一院内，来客从门外进入。0–3秒跨过门槛，3–6秒停步听主人；摄影机跟随到石桌前，衣料和脚步声自然。",
         "frameId": "second",
         "parameters": {
           "audio": true,
@@ -167,6 +170,7 @@ exports[`returns an episode reference plan through the shipped native preset and
         "references": [
           {
             "assetId": "actor-photo",
+            "assetLabel": "主人",
             "purpose": "保持同一人物与服装",
           },
         ],

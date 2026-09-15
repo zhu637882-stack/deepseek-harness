@@ -94,6 +94,12 @@ describe('client bundle purity gate', () => {
     expect(() => resolveId('@deepseek-ai/dsh-goal/remote/nested')).toThrow(/purity/)
   })
 
+  it('inlines only the pure reference prompt assembly, keeping the Host read adapter out of the browser', () => {
+    expect(resolveId('@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/reference-prompt')).toBeNull()
+    expect(() => resolveId('@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter')).toThrow(/purity/)
+    expect(() => resolveId('@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/reference-video')).toThrow(/purity/)
+  })
+
   it('throws on any other @deepseek-ai leak', () => {
     expect(() => resolveId('@deepseek-ai/dsh-agent')).toThrow(/purity/)
     expect(() => resolveId('@deepseek-ai/dsh-client-web')).toThrow(/purity/)

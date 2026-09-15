@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { expect, it, vi, beforeEach } from 'vitest'
 import { recoverBatchSubmission, withBatchSubmissionLock, collectBatchShot, readBatchBasis, parseBatchChoices, prepareBatchShot, submitBatchShot, hasBatchRun, needsBatchDesign, batchShotIncluded, createBatchSubmission, readBatchSubmission, batchSubmissionKey, type BatchBasis, type BatchPort } from '../src/client/reference-video-batch.ts'
+import { assembleReferencePrompt } from '../../qingmu-yimeng-read-adapter/src/reference-prompt.ts'
 import { request, quoteResponse } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
 
-const source = { sha256: 'e'.repeat(64), prompt: '研究：下一镜才开门', generationPrompt: '角色保持原服装。0秒敲锣，铜锣余响。对白：请进。' }
+const source = { sha256: 'e'.repeat(64), prompt: '研究：下一镜才开门', generationPrompt: '研究设计 JSON：角色保持原服装。0秒敲锣，铜锣余响。对白：请进。', executionSuffix: '本镜逐字对白：请进。' }
 function basis(): BatchBasis {
   return { projectId: 'p', assets: [{ assetId: 'asset_lin', assetSha256: 'a'.repeat(64), label: '林予', browserUrl: '', mediaType: 'reference_image' }],
     shots: ['f', 'f2'].map((frameId, i) => ({ frameId, label: `镜${i + 1}`, duration: 8, runs: [], saved: {
@@ -11,7 +12,7 @@ function basis(): BatchBasis {
       draft: null, directorSource: source, mediaTypes: {}, providerCalls: 0, generationQueued: false,
     } })) }
 }
-const choice = (frameId: string) => ({ frameId, references: [{ assetId: 'asset_lin', assetLabel: '林予', purpose: '本镜角色身份与衣服' }], parameters: request.parameters })
+const choice = (frameId: string) => ({ frameId, executionPrompt: '院内只有林予，原服装。0–2秒右手击锣一次，先击后收，铜锣余响；2–8秒说第一句，结束仍面向门口。', references: [{ assetId: 'asset_lin', assetLabel: '林予', purpose: '本镜角色身份与衣服' }], parameters: request.parameters })
 beforeEach(() => { sessionStorage.clear(); localStorage.clear() })
 
 it('collects completed outputs into review once, skipping running videos and retaining registered candidates', async () => {
@@ -35,8 +36,11 @@ it('assembles every shot from real references while keeping dialogue and synchro
   for (const item of requests) {
     expect(item.bindings[0]?.assetSha256).toBe('a'.repeat(64))
     const text = item.promptParts.flatMap(part => 'text' in part ? [part.text] : []).join('')
-    expect(text.split(source.generationPrompt)).toHaveLength(2)
-    expect(text).toContain('（林予）：本镜角色身份与衣服')
+    expect(text.split(source.executionSuffix)).toHaveLength(2)
+    expect(text).toContain(choice('f').executionPrompt)
+    expect(text).not.toContain('研究设计 JSON')
+    expect(item.promptParts).toEqual(assembleReferencePrompt(item.bindings, [{ bindingToken: 'ref_1', purpose: '本镜角色身份与衣服' }], source, choice('f').executionPrompt))
+    expect(text).toContain('：本镜角色身份与衣服')
     expect(text).not.toContain('下一镜才开门')
     expect(item.parameters.audio).toBe(true)
   }
@@ -258,4 +262,9 @@ it('keeps another shot correction out of production and refreshes legacy appende
     request: { ...requests[0]!, promptParts: [...requests[0]!.promptParts, { text: `\n【本次修改意见】\n${feedback}` }] },
   } } }
   expect(needsBatchDesign(saved, feedback)).toBe(true)
+})
+
+it('does not silently reuse full-source pasting when the director omitted execution', () => {
+  const { executionPrompt: _omitted, ...missing } = choice('f')
+  expect(() => parseBatchChoices(JSON.stringify({ shots: [missing, choice('f2')] }), basis())).toThrow('缺少拍摄执行描述')
 })

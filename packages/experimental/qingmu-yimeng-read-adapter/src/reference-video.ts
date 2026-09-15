@@ -22,11 +22,13 @@ function sha(value: unknown): asserts value is string {
 }
 function directorSource(value: unknown): ReferenceDirectorSource | null {
   if (value === null) return null
-  const v = object(value, ['sha256', 'prompt', 'generationPrompt'])
+  const v = object(value, ['sha256', 'prompt', 'generationPrompt', 'executionSuffix'])
   sha(v.sha256)
   if (typeof v.prompt !== 'string' || !v.prompt) throw new Error('missing director design')
   if (v.generationPrompt !== undefined && (typeof v.generationPrompt !== 'string' || !v.generationPrompt)) throw new Error('invalid production design')
+  if (v.executionSuffix !== undefined && (typeof v.executionSuffix !== 'string' || !v.executionSuffix)) throw new Error('invalid execution suffix')
   return { sha256: v.sha256, prompt: v.prompt,
+    ...(v.executionSuffix !== undefined ? { executionSuffix: v.executionSuffix as string } : {}),
     ...(v.generationPrompt !== undefined ? { generationPrompt: v.generationPrompt as string } : {}) }
 }
 function integer(value: unknown, min: number, max: number): asserts value is number {

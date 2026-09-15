@@ -1694,3 +1694,27 @@ it.each(['current', 'stale', 'missing'] as const)('delivers only exact common-de
   expect(media).toHaveBeenCalledTimes(version === 'current' ? 1 : 0)
   expect(h.upstream.fetch.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true)
 })
+
+it('saves and previews authored execution through native tools without filming the source document', async () => {
+  const executionPrompt = '书店柜台内只有店主。0–3秒先放下杯子，3–8秒走到通道后转身；镜头随行。说第一句时压低声音，门外雨声不断。'
+  const suffix = '本镜唯一逐字对白清单（按顺序各执行一次，明确重复的条目照常保留）：\n{"lines":[{"character":"店主","line":"请稍等。"}]}'
+  const source = { sha256: sha('current'), prompt: 'Complete research with previous and next shots',
+    generationPrompt: '原始设计文档，不直接拍进画面。', executionSuffix: suffix }
+  const draft = { bindings: edit.bindings, parameters: edit.parameters,
+    referenceUses: edit.bindings.map(binding => ({ bindingToken: binding.bindingToken, purpose: `Source for ${binding.label}.` })),
+    executionPrompt, directorSourceSha256: source.sha256 }
+  const h = await harness(new MockAdapter([
+    toolCallResponse('execution-save', 'qingmu_save_reference_draft', { ...saveArgs, draft }),
+    toolCallResponse('execution-preview', 'qingmu_preview_reference_draft', { draft }), textResponse('Prepared for review.'),
+  ]))
+  h.upstream.setDirectorSource(source); await h.run()
+  for (const id of ['execution-save', 'execution-preview']) expect(result(h.agent, id).error, result(h.agent, id).text).toBe(false)
+  const preview = JSON.parse(result(h.agent, 'execution-preview').text)
+  expect(preview.prompt).toContain(executionPrompt)
+  expect(preview.prompt.split('请稍等。')).toHaveLength(2)
+  expect(preview.prompt).not.toContain(source.generationPrompt)
+  expect(preview.prompt).not.toContain(source.prompt)
+  expect(h.upstream.saved().draft.request).not.toHaveProperty('executionPrompt')
+  expect(saves(h.upstream)).toHaveLength(1)
+  expect({ prompt: preview.prompt, parameters: preview.parameters, generated: preview.generationQueued }).toMatchSnapshot()
+})
