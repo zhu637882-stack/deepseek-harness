@@ -550,6 +550,21 @@ it('does not infer an episode design request from an existing single-shot bindin
   expect(result(h.agent, 'read').text).toContain('Start scene or episode design')
 })
 
+it('loads the complete video source and exact references for one batch page, without old execution text', async () => {
+  const h = await harness(new MockAdapter([
+    toolCallResponse('video-page', 'qingmu_read_scene_design', { page: 1, includeVideoSource: true }), textResponse('Source read.'),
+  ]))
+  h.upstream.setDirectorSource({ sha256: 'c'.repeat(64), prompt: 'Authoring archive, not execution.', generationPrompt: 'Current production basis.' })
+  await h.run(false, { purpose: 'reference-video-batch' })
+  const read = result(h.agent, 'video-page')
+  expect(read.error, read.text).toBe(false)
+  const value = JSON.parse(read.text) as { videoSource: unknown }
+  expect(value.videoSource).toEqual({ frameId: 'f', frameSha256: savedDraft.frameSha256,
+    directorSource: { sha256: 'c'.repeat(64), generationPrompt: 'Current production basis.' }, existingReferences: request.bindings })
+  expect(read.text).not.toContain('Authoring archive')
+  expect(h.upstream.fetch.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true)
+})
+
 it('reads saved episode geography and actual image pixels before any shot exists', async () => {
   const adapter = new MockAdapter([
     toolCallResponse('assets', 'qingmu_read_asset_design', { page: 1 }),

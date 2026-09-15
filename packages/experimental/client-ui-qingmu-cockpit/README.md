@@ -460,3 +460,5 @@ Batch preparation includes each shot’s saved reference bindings, with asset ID
 
 
 Candidate video observations and heard transcripts are read separately from Take comments, bound to the exact video and retained generation intent. Independent observation is not a comparison verdict or acceptance. The existing director performs the comparison; single and batch preparation share execution guidance. See the [shared execution Agent Note](../../../.agents/notes/implemented/bug-fix/2026-09-15-qingmu-shared-execution-prompt.md).
+
+Batch requests contain the episode shot index, planning page coordinates, source hashes and exact references. Complete per-shot generation designs and canonical dialogue are loaded on demand through `qingmu_read_scene_design` with `includeVideoSource=true`, rather than repeated for every completed shot in the initial request. Adjacent pages provide continuity; removing duplicated request text does not shorten the saved creative design.

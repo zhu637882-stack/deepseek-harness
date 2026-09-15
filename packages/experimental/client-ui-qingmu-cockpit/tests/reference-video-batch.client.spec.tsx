@@ -76,11 +76,12 @@ it('retries a failed review refresh without registering the same candidate again
   expect(screen.queryByText(/projection unavailable/)).toBeNull()
 })
 
-it('sends completed shots as continuity context without preparing or generating them', async () => {
+it('sends the episode index and exact references while loading full designs by page', async () => {
   const save = vi.fn()
   const queue = vi.fn()
   const port = {
-    readScenePlanning: async () => ({ projectId: 'p', episodeId: 'e', scriptRevision: 1, scriptSha256: 's', storyboard: null }),
+    readScenePlanning: async () => ({ projectId: 'p', episodeId: 'e', scriptRevision: 1, scriptSha256: 's', storyboard: null,
+      frameRequirements: [{ id: 'f2' }, { id: 'f' }] }),
     referenceVideoAssets: async () => ({ pages: 1, items: [] }),
     referenceVideoDraft: async ({ frameId }: { frameId: string }) => ({ draft: frameId === 'f' ? {
       revision: 2, requestSha256: 'd'.repeat(64), request: { ...request, frameId,
@@ -88,7 +89,7 @@ it('sends completed shots as continuity context without preparing or generating 
         promptParts: [{ text: 'old execution text must not become current instructions' }] },
     } : null,
     directorSource: { sha256: 'a'.repeat(64), generationPrompt: frameId === 'f'
-      ? 'The host stays in the courtyard; the visitor is outside the south gate.'
+      ? 'The host stays in the courtyard; the visitor is outside the south gate.'.repeat(10000)
       : 'The visitor enters from the street; the courtyard is behind the camera.' } }),
     referenceVideoRuns: async ({ frameId }: { frameId: string }) => ({ items: frameId === 'f'
       ? [{ publicStatus: 'succeeded', candidates: [] }] : [] }),
@@ -105,9 +106,13 @@ it('sends completed shots as continuity context without preparing or generating 
   fireEvent.click(await screen.findByRole('button', { name: '自动准备整集镜头' }))
   await waitFor(() => { expect(send).toHaveBeenCalledTimes(1) })
   const prompt = send.mock.calls[0]![1]
-  const source = JSON.parse(prompt.split('当前来源：')[1]!.split('\n操作者补充：')[0]!) as { shots: { frameId: string; needsPreparation: boolean; existingReferences: unknown[]; source: { generationPrompt: string } }[] }
+  const source = JSON.parse(prompt.split('当前来源：')[1]!.split('\n操作者补充：')[0]!) as { shots: { frameId: string; designPage: number; needsPreparation: boolean; existingReferences: unknown[]; source: { sha256: string } }[] }
   expect(source.shots.map(shot => [shot.frameId, shot.needsPreparation])).toEqual([['f', false], ['f2', true]])
-  expect(source.shots[0]!.source.generationPrompt).toContain('outside the south gate')
+  expect(source.shots.map(shot => shot.designPage)).toEqual([2, 1])
+  expect(source.shots[0]!.source).toEqual({ sha256: 'a'.repeat(64) })
+  expect(prompt).not.toContain('outside the south gate')
+  expect(prompt.length).toBeLessThan(16000)
+  expect(prompt).toContain('includeVideoSource=true')
   expect(source.shots[0]!.existingReferences).toEqual([{ bindingToken: 'scene', assetId: 'scene-corrected',
     assetSha256: 'c'.repeat(64), label: 'Courtyard' }])
   expect(source.shots[1]!.existingReferences).toEqual([])
