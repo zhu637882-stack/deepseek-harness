@@ -48,7 +48,7 @@
     maxOutputBytes: 1048576
     referenceVision:
       provider: qingmu-vision
-      model: qwen3.7-plus-2026-05-26
+      model: qwen3.8-flash
       reasoningEffort: 'off'
       maxTokens: 2500
       timeoutMs: 120000
