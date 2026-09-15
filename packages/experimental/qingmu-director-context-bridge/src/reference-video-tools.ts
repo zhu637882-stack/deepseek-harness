@@ -197,6 +197,11 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
       const visualInputs = inputs.map(({ originalImageDesign: _historicalDesign, ...input }, index) => ({ ...input,
         currentUses: bindings[index]?.currentUses ?? [] }))
       return ports.boundedJson({ scope, saved: design.value,
+        designAuthority: {
+          persistence: saved.design ? 'saved_working_draft' : 'no_design',
+          creativeApproval: 'not_established_by_this_read',
+          basis: 'Saved descriptions and their self-reported designBasis are working content. Only explicit user decisions or the corresponding asset review can establish acceptance within their stated scope. Missing review evidence is unknown, not approval or rejection.',
+        },
         visualInputs,
         assets: { page: catalog.page, pages: catalog.pages,
           items: catalog.items.filter(item => item.mediaType === 'reference_image')

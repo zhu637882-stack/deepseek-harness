@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-15-qingmu-setting-and-director-status.md
-2026-09-15-qingmu-setting-and-director-status.md: 6415e564b80b54bf8dcfe48fb7c497bfad4695bc
-2026-09-15-qingmu-setting-and-director-status.zh.md: 7a54e898e9b8ad4bcc188e87ba5e7b2d85b2b82b
+2026-09-15-qingmu-setting-and-director-status.md: 1c06144101c2e2fbd19703fe73e7730666a3cb35
+2026-09-15-qingmu-setting-and-director-status.zh.md: 6933556992ea942bc57cccaa4cea3439f3619276

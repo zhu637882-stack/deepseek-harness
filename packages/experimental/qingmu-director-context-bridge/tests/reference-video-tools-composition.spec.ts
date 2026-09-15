@@ -581,6 +581,7 @@ it('reads saved episode geography and actual image pixels before any shot exists
   await h.run(false, {})
   expect(result(h.agent, 'assets').error, result(h.agent, 'assets').text).toBe(false)
   expect(JSON.parse(result(h.agent, 'assets').text)).toMatchObject({ scope: { projectId: 'p', episodeId: 'episode-a' },
+    designAuthority: { persistence: 'saved_working_draft', creativeApproval: 'not_established_by_this_read' },
     saved: { design: { assets: [{ space: { layout: expect.stringContaining('west window') } }] } } })
   expect(result(h.agent, 'view').error, result(h.agent, 'view').text).toBe(false)
   const visible = adapter.requests.at(-1)?.messages

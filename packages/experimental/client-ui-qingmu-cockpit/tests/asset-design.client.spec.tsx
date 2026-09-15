@@ -780,3 +780,22 @@ it('authors a fresh project from its brief with no creative supplement', async (
   expect(screen.getByLabelText<HTMLTextAreaElement>('创作补充').value).toBe('')
   expect(port.generateAssetImage).not.toHaveBeenCalled()
 })
+
+it.each([false, true])('sends a saved design index without treating it as approval and retains unsaved edits: %s', async (edited) => {
+  const port = setup()
+  const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn<(sessionId: string, prompt: string) => Promise<void>>(async () => {}),
+    read: vi.fn(async () => ({ text: '', script: '', lastSeq: 0, running: false, finished: false, error: '' })) }
+  render(<NativeAssetDesign {...scope} port={port} storyPort={storyPort} onGenerated={vi.fn()} />)
+  const field = await screen.findByLabelText('画面描述')
+  if (edited) fireEvent.change(field, { target: { value: '用户尚未保存的衣服修改' } })
+  fireEvent.click(screen.getByRole('button', { name: '根据剧本设计素材' }))
+  await waitFor(() => { expect(storyPort.send).toHaveBeenCalledOnce() })
+  const prompt = storyPort.send.mock.calls[0]?.[1] ?? ''
+  expect(prompt).toContain('not_established_by_persistence')
+  expect(prompt).toContain('actor_1')
+  if (!edited) expect(prompt).not.toContain('真人定妆照')
+  expect(prompt.includes('用户尚未保存的衣服修改')).toBe(edited)
+  expect(prompt).toContain(edited ? 'unsaved_local_draft' : 'saved_working_draft')
+  expect(port.saveAssetDesign).not.toHaveBeenCalled()
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})

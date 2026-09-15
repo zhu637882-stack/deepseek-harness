@@ -1,11 +1,11 @@
 ---
 name: production-design
-description: "Create and maintain continuity bibles for characters, locations, props, costumes, color palettes, style rules, reference assets, and cross-shot visual anchors."
+description: "Design characters, costumes, locations, props and audible voice identities from the screenplay; compile complete image prompts, then preserve evidenced continuity anchors."
 ---
 
 ## 青木接入：美术设计与提示词编排
 
-本技能由 0xhughs/director-skills 的角色/场景/道具设定与电影图片提示词两个完整方法组成，供青木导演在素材设计时使用。先读本入口与当前项目，再通过 qingmu_read_skill_resource 读取 `image-prompting/SKILL.md`，按任务读取相应支持文件；图片提示词阶段至少读取 `image-prompting/references/prompt_anatomy.md`。原始 image-prompting 入口的相对链接以 image-prompting/ 为根。模板仅辅助推导，不新增输出文件流程。
+本技能以 0xhughs/director-skills 的 cinematic-image-prompting 为默认设计主方法，character-location-prop-bible 仅用于设计完成后的连续性维护。初次设计与重新设计均先从创作意图推导可见选择，不从旧稿抽取不可变锚点。先读本入口与当前项目，再通过 qingmu_read_skill_resource 读取 `image-prompting/SKILL.md`，按任务读取相应支持文件；图片提示词阶段至少读取 `image-prompting/references/prompt_anatomy.md`。原始 image-prompting 入口的相对链接以 image-prompting/ 为根。模板仅辅助推导，不新增输出文件流程。
 
 创作意图先形成可见的美术选择，再整理为模型实际可接收的文字。身份、场景等级与材质须由导演根据本片来源独立设计；“皇家、豪华、古装、电影感”等词只表示目标，不能代替建筑、服装形制、妆发及材质设计。使用 character-asset、scene-asset、prop-asset 的相关细则具体化。实际项目未指定历史朝代时保持架空美术一致性，不谎称精确史实。
 
@@ -25,79 +25,10 @@ description: "Create and maintain continuity bibles for characters, locations, p
 
 空间先按 scene-asset 的坐标与支承面核对，再预览构图；预览成功只表示能渲染，不证明家具落地、门能通行或提示词一致。修正发现的矛盾后，交付同一次最终预览采用的布局和文字，不混用旧试算。
 
-# character-location-prop-bible
+## 来源判读与执行顺序
 
-## When to use
-- The user needs consistency across images, shots, scenes, or models.
-- The user asks for a character bible, location bible, prop list, wardrobe continuity, style bible, or continuity checklist.
-- The project is moving from idea/script into repeatable image/video generation.
-
-## When not to use
-- The user only wants one disposable prompt with no continuity need.
-- The task is pure model parameter research.
-- The user asks for story structure without visual asset continuity.
-
-## Required inputs
-- Project title or scene
-- Existing descriptions or outputs
-- Characters/locations/props/costumes to track
-- Target visual style
-
-## Optional inputs
-- Reference images
-- Shot list
-- Model-specific requirements
-- Palette or genre anchors
-- Version history
-
-## Workflow
-1. Create stable IDs for characters, locations, props, costumes, and style rules.
-2. Record immutable anchors: identity, silhouette, proportions, palette, materials, prop condition, location geography, and lighting baseline.
-3. Separate mutable state: emotion, wardrobe changes, damage, weather, time of day, prop position, and story-state changes.
-4. Create golden-image reference prompt entries for clean sheets before dramatic variants.
-5. After each generated output or script change, update only the changed fields and preserve a changelog note.
-6. Prepare a continuity packet for prompting: minimal anchors for each shot plus exclusions for drift-prone details.
-
-## Decision logic
-- If a detail must never change, place it in immutable anchors.
-- If a detail changes by scene, place it in state timeline.
-- If two sources conflict, prefer the latest user-approved bible entry and log the conflict.
-- If model transfer causes drift, route to model-adaptation and use reference-image workflows where supported.
-
-## Output formats
-- Character profile
-- Location profile
-- Prop profile
-- Costume profile
-- Visual style bible
-- Continuity checklist
-- Reference asset index
-- Golden image plan
-- State timeline
-
-## Quality checks
-- Every recurring asset has an ID and stable anchor fields.
-- Mutable state is tied to scene/shot numbers.
-- Prompt anchors are concise enough to reuse.
-- Style rules distinguish creative intent from execution details.
-- Conflicts are logged instead of silently resolved.
-
-## Anti-patterns
-- Changing character descriptions between prompts
-- Mixing immutable identity with temporary emotion
-- Overlong bible entries that agents cannot practically reuse
-- Ignoring prop state after action beats
-- Relying on text-only consistency when references are available.
-
-## Exit criteria
-- A concise continuity packet exists for downstream screenplay, shot list, image prompts, video prompts, and model exports.
-
-## Supporting files
-Read only the supporting file needed for the active task:
-- `references/continuity_system.md`
-- `references/visual_bible_system.md`
-- `references/identity_anchors.md`
-- `references/golden_image_workflow.md`
-- `templates/character_profile.md`
-- `templates/location_profile.md`
-- `templates/continuity_checklist.md`
+1. 先读当前剧本和入口资料，区分剧情事实、用户明确决定与资料自己标明的“建议/工作稿/待设计”。建议是设计起点，不能因复制进数据库而升级为已认可；旧 designBasis 中自称“已认可”也不是认可证据。复核角色的戏剧作用、年龄与形象目标，场所的使用者及等级，以及道具的动作需求。
+2. 在读取旧设计正文前，按 image-prompting 主方法确定本次的整体美术方向和每类资产的关键设计需求。原始资料存在笼统或不充分的建议时，从其叙事目的补足具体选择，不原样转录成最终提示词。不要无依据增加剧情人物、地点或改变事实。
+3. 再用 qingmu_read_asset_design 读取工作稿及真实引用。它返回的 designAuthority 标明保存状态不能证明认可；媒体审查只作用于其对应 assetId/SHA，不扩展成整份设计通过。没有认可记录只能说未知，不能宣称认可，也不能擅自删除或重画。对照第一步的需求判断旧稿哪些可复用、哪些不足，分别在对应 designBasis 记录依据和实际决定。
+4. 输出完整的图片描述和可听辨的声音身份。角色声音的年龄不能只写数字：按角色设计共鸣位置、厚薄、气息、颗粒感、起音和句尾习惯，检查同片声线的辨识差异；避免同时要求年长声质又消除所有年龄特征。材料名称不能代替场景的承重结构，身份称谓不能代替服装剪裁与妆发设计。
+5. 设计完成后再维护连续性。需要时读取 continuity.md 与其 references/、templates/；“immutable anchors”“update only changed fields”仅维护有来源支持的既定事实和确实需要保留的设计，不能把待复核旧稿整体冻结。任何新文字仍是候选，采用、保存、生成与认可分别由现有流程处理。

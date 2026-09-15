@@ -786,7 +786,7 @@
       "license": "MIT",
       "files": {
         "LICENSE": "5c609a7d9174ac54756c1cf35d486920618adb9a0a9ee8688121ea9a0d80ee70",
-        "SKILL.md": "e599aa26896082aecf44312f6931ba9757e04f1284608c2c35b36d3ba5d5f7d4",
+        "SKILL.md": "8b040f2546fb818dab390490716dea6324ecfa7556497688f1410e10ff620a17",
         "image-prompting/SKILL.md": "41e9c8bf3cecf2c929c3169f41aaeec6195a4fc50ce4d669dac025a7db400fde",
         "references/continuity_system.md": "efa14c202f76222bbb85469be2957abc56953571ca3f3d43e1a19c4d63cf68d5",
         "references/visual_bible_system.md": "2cf0c241bebe49a5f1c7d80afad2a3ca2cdb3d88411c9f242c1e27ae1cbe84d4",
@@ -800,7 +800,8 @@
         "image-prompting/references/prompt_anatomy.md": "5b2960a8551eac5be60c17c7e3c48b4f482b7404167051613e28ee0341cf802e",
         "image-prompting/references/negative_prompt_patterns.md": "ffcbb7f09c27c8f2713b4e8b2f5953e7ec87836f4d4439263e55784e0da439b1",
         "image-prompting/templates/cinematic_still_prompt.md": "d4e04bbcc84d34f7a032253a201e8d21082af3b087ace88bc579735de02aca69",
-        "image-prompting/templates/character_reference_sheet_prompt.md": "70dd42d286c6f0b2ba21382475c21e6c6e87797d0be64994a9dc68feb2fd1965"
+        "image-prompting/templates/character_reference_sheet_prompt.md": "70dd42d286c6f0b2ba21382475c21e6c6e87797d0be64994a9dc68feb2fd1965",
+        "continuity.md": "3aa7722fc49475551f92f93565148596c54d8c6a65f317baad3299fd64110201"
       },
       "upstreamFiles": {
         "LICENSE": "5c609a7d9174ac54756c1cf35d486920618adb9a0a9ee8688121ea9a0d80ee70",
@@ -818,9 +819,10 @@
         "image-prompting/references/prompt_anatomy.md": "5b2960a8551eac5be60c17c7e3c48b4f482b7404167051613e28ee0341cf802e",
         "image-prompting/references/negative_prompt_patterns.md": "ffcbb7f09c27c8f2713b4e8b2f5953e7ec87836f4d4439263e55784e0da439b1",
         "image-prompting/templates/cinematic_still_prompt.md": "d4e04bbcc84d34f7a032253a201e8d21082af3b087ace88bc579735de02aca69",
-        "image-prompting/templates/character_reference_sheet_prompt.md": "70dd42d286c6f0b2ba21382475c21e6c6e87797d0be64994a9dc68feb2fd1965"
+        "image-prompting/templates/character_reference_sheet_prompt.md": "70dd42d286c6f0b2ba21382475c21e6c6e87797d0be64994a9dc68feb2fd1965",
+        "continuity.md": "3aa7722fc49475551f92f93565148596c54d8c6a65f317baad3299fd64110201"
       },
-      "adaptation": "Two pinned upstream methods and all their linked resources, preserved unchanged except the main entry name and Qingmu workflow/field mapping. No scripts, image model clients or external execution. Qingmu read-back guidance separates retained media from complete prompt updates and verifies component dimensions and supporting surfaces.",
+      "adaptation": "Cinematic image prompting is the default authoring method. The full continuity method is preserved in continuity.md for subsequent maintenance. Qingmu mapping distinguishes source suggestions, saved working drafts and asset-specific review evidence; no generation or approval is implied.",
       "adaptedFiles": [
         "SKILL.md"
       ],
@@ -840,7 +842,8 @@
         "image-prompting/references/prompt_anatomy.md": "skills/cinematic-image-prompting/references/prompt_anatomy.md",
         "image-prompting/references/negative_prompt_patterns.md": "skills/cinematic-image-prompting/references/negative_prompt_patterns.md",
         "image-prompting/templates/cinematic_still_prompt.md": "skills/cinematic-image-prompting/templates/cinematic_still_prompt.md",
-        "image-prompting/templates/character_reference_sheet_prompt.md": "skills/cinematic-image-prompting/templates/character_reference_sheet_prompt.md"
+        "image-prompting/templates/character_reference_sheet_prompt.md": "skills/cinematic-image-prompting/templates/character_reference_sheet_prompt.md",
+        "continuity.md": "skills/character-location-prop-bible/SKILL.md"
       }
     }
   }
