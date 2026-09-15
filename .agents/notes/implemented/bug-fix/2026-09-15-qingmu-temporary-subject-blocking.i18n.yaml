@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-15-qingmu-temporary-subject-blocking.md
+2026-09-15-qingmu-temporary-subject-blocking.md: 6c459fe596c3546ff46e66d6499582526cfe123d
+2026-09-15-qingmu-temporary-subject-blocking.zh.md: 4251326eed0b769d8a19d29dc5273740e83bf62c

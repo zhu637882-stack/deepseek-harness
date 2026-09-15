@@ -199,3 +199,5 @@ Voice-reference assembly observes the provider’s 15-second aggregate audio lim
 
 
 Candidate video observations and heard transcripts are read separately from Take comments, bound to the exact video and retained generation intent. Independent observation is not a comparison verdict or acceptance. The existing director performs the comparison; single and batch preparation share execution guidance. See the [shared execution Agent Note](../../../.agents/notes/implemented/bug-fix/2026-09-15-qingmu-shared-execution-prompt.md).
+
+`qingmu_preview_scene_layout` also accepts `imageSubjects`: temporary, labelled actor or prop boxes with a placement basis. The same list persists in asset images or shot director plans and enters their composition reference. IDs cannot collide with fixed scene objects. Authors include current actors to check screen side and occlusion, and separate head/torso boxes for cropping. Boxes do not verify pose, gaze or performance; a room-only preview cannot verify actor blocking. Video preparation shares this guidance between single-shot and batch entry, without automatically adding a box image to video references.

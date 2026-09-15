@@ -60,6 +60,12 @@ export interface ImageObjectState {
   readonly size?: readonly [number, number, number] | null
   readonly rotation?: number | null
 }
+/** Temporary actor or prop volume for one image, excluded from shared scene geometry. */
+export type ImageSubject = Omit<SceneLayout['objects'][number], 'rotation' | 'color'> & {
+  readonly basis: string
+  readonly rotation?: number
+  readonly color?: string
+}
 /** Exact deterministic input preview, without model calls or media adoption. */
 export interface SceneLayoutPreview extends CreationScope {
   readonly recipe: 'qingmu-blockout-v1'
@@ -96,6 +102,7 @@ export interface AssetDesignItem {
   readonly sceneLayout?: SceneLayout | null
   readonly imageCamera?: ImageCamera | null
   readonly imageObjectStates?: readonly ImageObjectState[] | null
+  readonly imageSubjects?: readonly ImageSubject[] | null
   readonly voiceIdentity?: string
   readonly designBasis?: string
   readonly view?: string
@@ -208,11 +215,13 @@ export function prepareAssetDesign(endpoint: string, value: unknown, helpers: He
   switch (endpoint) {
     case 'readAssetDesign': break
     case 'previewSceneLayout':
-      fields.push('layout', 'camera', 'ratio', ...('imageObjectStates' in raw ? ['imageObjectStates'] : [])); path += '/layout-preview'; method = 'POST'
+      fields.push('layout', 'camera', 'ratio', ...['imageObjectStates', 'imageSubjects'].filter(key => key in raw)); path += '/layout-preview'; method = 'POST'
       if (typeof raw.ratio !== 'string' || !['1:1', '3:4', '4:3', '9:16', '16:9'].includes(raw.ratio)) throw f('layout preview ratio invalid')
       if (raw.imageObjectStates != null && !Array.isArray(raw.imageObjectStates)) throw f('image object states must be an array')
+      if (raw.imageSubjects != null && !Array.isArray(raw.imageSubjects)) throw f('image subjects must be an array')
       body = { layout: object(raw.layout, f), camera: object(raw.camera, f), ratio: raw.ratio,
-        ...('imageObjectStates' in raw ? { imageObjectStates: raw.imageObjectStates as YimengCommandJsonObject['imageObjectStates'] } : {}) }; break
+        ...('imageObjectStates' in raw ? { imageObjectStates: raw.imageObjectStates as YimengCommandJsonObject['imageObjectStates'] } : {}),
+        ...('imageSubjects' in raw ? { imageSubjects: raw.imageSubjects as YimengCommandJsonObject['imageSubjects'] } : {}) }; break
     case 'readAssetImageRuns': path += '/runs'; break
     case 'readAssetVoiceRuns': path += '/voice/runs'; break
     case 'saveAssetDesign':

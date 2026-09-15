@@ -498,11 +498,12 @@ it('keeps a mismatched bound image unavailable without replacing the saved versi
   expect(saves(h.upstream)).toHaveLength(0)
 })
 
-it.each([false, true])('previews camera pixels through the shipped director loop with staged objects=%s', async (staged) => {
+it.each(['base', 'staged', 'subjects'])('previews camera pixels through the shipped director loop with placement=%s', async (mode) => {
   const input = { layout: { basis: 'Director proposal', coordinateFrame: 'Metres, x east, y north, z up', objects: [
     { id: 'desk', label: 'Desk', center: [0,0,0.4], size: [2,1,0.8], rotation: 0, color: '#887766' },
   ] }, camera: { position: [0,-4,1.6], target: [0,0,1], verticalFov: 50 }, ratio: '16:9',
-  ...(staged ? { imageObjectStates: [{ id: 'desk', basis: 'This scene begins after the table was moved.', center: [2,0,0.4] }] } : {}) }
+  ...(mode === 'staged' ? { imageObjectStates: [{ id: 'desk', basis: 'This scene begins after the table was moved.', center: [2,0,0.4] }] } : {}),
+  ...(mode === 'subjects' ? { imageSubjects: [{ id: 'actor-a', label: 'Actor A', basis: 'Current blocking, estimated height', center: [-1,0,.85], size: [.5,.35,1.7], color: '#456789' }] } : {}) }
   const adapter = new MockAdapter([toolCallResponse('layout', 'qingmu_preview_scene_layout', input), textResponse('Inspect before adopting.')])
   vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'mock', id: 'mock', name: 'mock', inputModalities: ['text', 'image'] })
   const h = await harness(adapter, writer(), true)
@@ -515,7 +516,7 @@ it.each([false, true])('previews camera pixels through the shipped director loop
   expect(calls).toHaveLength(1)
   expect(calls[0]?.[0]).toContain('/asset-design/layout-preview')
   expect(JSON.parse(calls[0]?.[1]?.body as string)).toEqual(input)
-  if (!staged) expect({ ...value, attachment: { mediaType: value.attachment.mediaType } }).toMatchSnapshot()
+  if (mode === 'base') expect({ ...value, attachment: { mediaType: value.attachment.mediaType } }).toMatchSnapshot()
 })
 
 it('recovers complete episode shots by page without requiring a selected shot', async () => {

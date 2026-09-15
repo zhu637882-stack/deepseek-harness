@@ -189,3 +189,5 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 
 
 候选视频观察与实际听写独立于 Take 评论读取，绑定精确视频及保留的生成要求。独立观察不代表已作比较或验收。原有导演负责对照，单镜与批量整理共用执行说明。详见[共用执行说明](../../../.agents/notes/implemented/bug-fix/2026-09-15-qingmu-shared-execution-prompt.zh.md)。
+
+`qingmu_preview_scene_layout` 同时接收 `imageSubjects`：带标签与布置依据的临时人物或道具体块。同一列表保存在素材单图或分镜导演设计中，并进入其构图参考；编号不能与固定场景物件冲突。导演加入本镜演员来核对画面左右和遮挡，头肩裁切则分开描述头部与躯干。体块不验证姿态、目光或表演，只有房间的预览也不能验证演员站位。单镜与批量视频准备共用这份指引，不自动把体块图追加到视频引用。
