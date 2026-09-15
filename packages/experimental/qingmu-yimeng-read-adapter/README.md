@@ -221,3 +221,5 @@ An image binding can explicitly set `frameRole` to `first_frame` or `last_frame`
 Director sources optionally include generationPrompt, the explicit production text alongside full research context. The adapter validates and retains it without altering saved prompt parts. Older sources may omit it; copying their full context is not a substitute. The existing 20,000-character request limit applies after native insertion.
 
 Audio and video catalog entries retain positive recorded `durationSec`; missing or malformed values stay unknown. Metadata helps plan reference limits; Writer still probes the source bytes before preparation and submission.
+
+Reference drafts accept optional preparationFeedback (up to 20000 characters). It participates in the saved request hash and recovery, but never in provider promptParts or the compiled video body. Existing drafts without this field remain readable.

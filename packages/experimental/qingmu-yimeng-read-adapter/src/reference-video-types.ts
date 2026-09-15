@@ -36,6 +36,8 @@ export interface ReferenceVideoPreviewRequest {
   readonly model: 'wan3.0-video'
   readonly bindings: readonly ReferenceVideoBinding[]
   readonly promptParts: readonly ReferenceVideoPromptPart[]
+  /** Director preparation notes; retained in the draft hash, excluded from the provider prompt. */
+  readonly preparationFeedback?: string
   readonly directorSourceSha256?: string
   readonly parameters: ReferenceVideoParameters
 }

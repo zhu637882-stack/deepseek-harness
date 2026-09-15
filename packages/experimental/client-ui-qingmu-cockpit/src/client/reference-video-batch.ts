@@ -50,9 +50,12 @@ export function batchShotIncluded(shot: BatchShot, retakes: ReadonlySet<string>)
 /** A saved draft is reusable only while its director and shot sources still match. */
 export function needsBatchDesign(shot: BatchShot, feedback = ''): boolean {
   const { draft, directorSource, frameSha256 } = shot.saved
-  const requestedFeedback = feedback.trim() && `\n【本次修改意见】\n${feedback.trim()}`
-  const feedbackChanged = requestedFeedback && !draft?.request.promptParts.some(part =>
-    'text' in part && part.text === requestedFeedback)
+  // Older batches copied the entire episode correction into every provider prompt.
+  // Reprepare those drafts once; preparation notes now live outside filmed content.
+  const legacyFeedback = draft?.request.promptParts.some(part =>
+    'text' in part && part.text.startsWith('\n【本次修改意见】\n'))
+  const feedbackChanged = Boolean(legacyFeedback) || Boolean(feedback.trim()
+    && draft?.request.preparationFeedback !== feedback.trim())
   return Boolean(feedbackChanged) || !draft || (draft.frameSha256 !== undefined && draft.frameSha256 !== frameSha256)
     || (directorSource !== null && directorSource !== undefined && draft.request.directorSourceSha256 !== directorSource.sha256)
 }
@@ -107,8 +110,8 @@ export function parseBatchChoices(text: string, basis: BatchBasis,
     // The existing Host save/preview boundary validates the complete untrusted request before writing it.
     const request: ReferenceVideoPreviewRequest = { projectId: basis.projectId, frameId: shot.frameId, model: 'wan3.0-video',
       bindings: bindings.map(({ purpose: _purpose, ...binding }) => binding),
-      promptParts: [...promptParts, { text: `\n【本镜完整导演设计】\n${source.generationPrompt}` },
-        ...(feedback.trim() ? [{ text: `\n【本次修改意见】\n${feedback.trim()}` }] : [])],
+      promptParts: [...promptParts, { text: `\n【本镜完整导演设计】\n${source.generationPrompt}` }],
+      ...(feedback.trim() ? { preparationFeedback: feedback.trim() } : {}),
       directorSourceSha256: source.sha256, parameters: row.parameters as ReferenceVideoPreviewRequest['parameters'] }
     if (request.parameters?.duration !== shot.duration) throw new Error(`${shot.label}的生成时长应沿用已保存分镜。`)
     return request

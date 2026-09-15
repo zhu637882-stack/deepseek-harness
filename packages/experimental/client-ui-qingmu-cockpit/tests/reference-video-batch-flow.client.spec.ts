@@ -205,7 +205,8 @@ it('applies revision feedback to the selected retake and reuses it after interru
   expect(needsBatchDesign(current.shots[0]!)).toBe(false)
   const choices = parseBatchChoices(JSON.stringify({ shots: [choice('f')] }), current, retakes, feedback)
   expect(choices).toHaveLength(1)
-  expect(choices[0]?.promptParts.at(-1)).toEqual({ text: `\n【本次修改意见】\n${feedback}` })
+  expect(choices[0]?.preparationFeedback).toBe(feedback)
+  expect(JSON.stringify(choices[0]?.promptParts)).not.toContain(feedback)
   expect(() => parseBatchChoices(JSON.stringify({ shots: [choice('f'), choice('f2')] }), current, retakes, feedback)).toThrow('不属于本次准备')
   const shot = current.shots[0]!
   let saved = shot.saved
@@ -241,4 +242,20 @@ it('resumes a saved draft with unchanged feedback without another director revis
   expect(needsBatchDesign(shot, feedback)).toBe(false)
   expect(needsBatchDesign(shot, '修改后的表演要求')).toBe(true)
   expect(needsBatchDesign({ ...shot, saved: { ...shot.saved, directorSource: { ...source, sha256: 'b'.repeat(64) } } }, feedback)).toBe(true)
+})
+
+
+it('keeps another shot correction out of production and refreshes legacy appended feedback', () => {
+  const b = basis(), feedback = '只在镜2让人物说：开门。镜1保持无对白。'
+  const requests = parseBatchChoices(JSON.stringify({ shots: ['f', 'f2'].map(choice) }), b, new Set(), feedback)
+  for (const request of requests) {
+    expect(request.preparationFeedback).toBe(feedback)
+    expect(JSON.stringify(request.promptParts)).not.toContain('只在镜2')
+    expect(JSON.stringify(request.promptParts)).not.toContain('【本次修改意见】')
+  }
+  const saved = { ...b.shots[0]!, saved: { ...b.shots[0]!.saved, draft: {
+    revision: 1, frameSha256: b.shots[0]!.saved.frameSha256, requestSha256: 'd'.repeat(64), savedAt: '',
+    request: { ...requests[0]!, promptParts: [...requests[0]!.promptParts, { text: `\n【本次修改意见】\n${feedback}` }] },
+  } } }
+  expect(needsBatchDesign(saved, feedback)).toBe(true)
 })

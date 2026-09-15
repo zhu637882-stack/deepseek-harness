@@ -451,3 +451,5 @@ The existing full-cut review also displays timed observations for adjacent space
 Native scene adoption moves an unambiguous shot-level `dialoguePlan` into `directorPlan` without changing its delivery text. Conflicting duplicates or malformed values retain the candidate for correction. This compatibility step does not rewrite the original model response or save storyboard data.
 
 Scene adoption also recovers missing terminal container brackets after all authored values. It does not invent missing strings, values or interior separators; source and dialogue checks still run before adoption.
+
+Batch preparation stores operator feedback separately from filmed prompt content. Changed dialogue, performance, blocking or sound belongs in the saved director plan before reference preparation. Legacy appended episode feedback requires preparation again. Whole-cut review recovers expectations from each chosen take’s frozen generation request, distinguishing intentional silence from missing dialogue sources; current storyboard edits cannot rewrite older video expectations.

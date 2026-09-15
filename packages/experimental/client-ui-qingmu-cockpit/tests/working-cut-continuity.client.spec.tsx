@@ -24,7 +24,7 @@ it('does not upgrade an old sound report or submit a new check on page load', ()
   const review = vi.fn()
   render(<WorkingCutSoundReview busy={false} changed={false} onSeek={vi.fn()} onReview={review}
     review={{ state: 'complete', methodChanged: true, advisoryOnly: true, checks: [], transcript: [] }} />)
-  expect(screen.getByText(/旧版声音报告/)).toBeTruthy()
+  expect(screen.getByText(/旧版报告/)).toBeTruthy()
   expect(screen.queryByLabelText('前后镜连续性报告')).toBeNull()
   expect(review).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole('button', { name: '检查此版连续性与声音' }))

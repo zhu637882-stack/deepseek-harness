@@ -248,3 +248,14 @@ it.each([false, true])('checks explicit first/last frame bodies without allowing
   expect((await handler('referenceVideoPreview', { ...input, bindings: input.bindings.map(({ frameRole: _role, ...rest }) => rest) }, signal())).ok).toBe(false)
   expect((await handler('referenceVideoPreview', { ...input, bindings: [...bindings, request.bindings[1]!] }, signal())).ok).toBe(false)
 })
+
+it('retains preparation feedback through transport without treating it as filmed prompt content', async () => {
+  const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json(response))
+  const handler = createYimengReadHandler({}, { fetch, readToken: () => 'fixture-token' })
+  const draft = { ...request, preparationFeedback: '只在下一镜安排台词。' }
+  expect(await handler('referenceVideoPreview', draft, signal())).toEqual({ ok: true, value: response })
+  expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body)).preparationFeedback).toBe(draft.preparationFeedback)
+  expect(body.input.prompt).not.toContain(draft.preparationFeedback)
+  expect((await handler('referenceVideoPreview', { ...draft, preparationFeedback: 12 }, signal())).ok).toBe(false)
+  expect(fetch).toHaveBeenCalledOnce()
+})

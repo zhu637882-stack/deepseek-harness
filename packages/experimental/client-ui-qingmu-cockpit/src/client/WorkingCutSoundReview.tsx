@@ -27,11 +27,11 @@ export function WorkingCutSoundReview({ review, busy, changed, onReview, onSeek 
     {changed && <p>当前剪辑已有修改。下方检查对应正在播放的已合成版本；重新合成后可检查新版。</p>}
     {(state === 'none' || review?.methodChanged) && <><button type="button" disabled={busy || state === 'pending'} onClick={onReview}>检查此版连续性与声音</button>
       <p>调用阿里音画审片模型，使用已配置的 API 额度。</p></>}
-    {review?.methodChanged && <p>保留的是旧版声音报告，尚未检查实际前后镜连续性。</p>}
+    {review?.methodChanged && <p>保留的是旧版报告，尚未按选用视频的生成依据检查。</p>}
     {state === 'pending' && <p role="status">正在检查此版成片，离开后可回来查看结果。</p>}
     {state === 'failed' && <p role="alert">整片检查未完成：{review?.errorCode ?? '未取得结果'}。原片仍可播放，未自动重复调用。</p>}
     {state === 'complete' && <>
-      <p>本次检查没有提供与原片绑定的锁定台词，只能用于听写和听感观察。模型意见中若提到“与剧本一致”，不代表完成了逐字比对。</p>
+      <p>新版检查对照选用视频当时的对白与导演设计；缺少依据的镜头仍需核实。听写和判断均来自模型，不等于人工验收。</p>
       {review?.summary && <p>模型原始意见：{review.summary}</p>}
       {!!review?.transitions?.length && <div aria-label="前后镜连续性报告">
         {review.transitions.map(transition => <details key={transition.cutIndex}>

@@ -115,7 +115,7 @@ export function normalizeReferenceVideoDraft(
   if (v.draft !== null) {
     const d = object(v.draft, ['revision', 'frameSha256', 'requestSha256', 'request', 'savedAt'])
     integer(d.revision, 1, Number.MAX_SAFE_INTEGER); sha(d.frameSha256); sha(d.requestSha256)
-    const body = object(d.request, ['frameId', 'model', 'bindings', 'promptParts', 'parameters', 'directorSourceSha256'])
+    const body = object(d.request, ['frameId', 'model', 'bindings', 'promptParts', 'parameters', 'directorSourceSha256', 'preparationFeedback'])
     const request = parseReferenceVideoRequest({ ...body, projectId: scope.projectId })
     if (request.frameId !== scope.frameId || digest(body, 'draft.request') !== d.requestSha256
       || typeof d.savedAt !== 'string' || !Number.isFinite(Date.parse(d.savedAt))) throw new Error('draft content mismatch')
@@ -130,9 +130,11 @@ export function normalizeReferenceVideoDraft(
  * @returns The validated draft, with no implicit rewriting.
  */
 export function parseReferenceVideoRequest(value: unknown): ReferenceVideoPreviewRequest {
-  const v = object(value, ['projectId', 'frameId', 'model', 'bindings', 'promptParts', 'parameters', 'directorSourceSha256'])
+  const v = object(value, ['projectId', 'frameId', 'model', 'bindings', 'promptParts', 'parameters', 'directorSourceSha256', 'preparationFeedback'])
   id(v.projectId); id(v.frameId)
   if (v.directorSourceSha256 !== undefined) sha(v.directorSourceSha256)
+  if (v.preparationFeedback !== undefined && (typeof v.preparationFeedback !== 'string'
+    || Array.from(v.preparationFeedback).length > 20000)) throw new Error('invalid preparation feedback')
   if (v.model !== 'wan3.0-video' || !Array.isArray(v.bindings) || v.bindings.length < 1 || v.bindings.length > 20) throw new Error('invalid references')
   const tokens = new Set<string>()
   for (const entry of v.bindings) {
