@@ -5,6 +5,7 @@
  *   node --import tsx packages/experimental/qingmu-director-context-bridge/examples/model-tools-keyless.ts
  */
 
+import { executionPromptGuidance } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/reference-prompt'
 import { readStoryDraft } from '../src/story-draft.ts'
 import { Context } from '@deepseek-ai/cordis'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -199,7 +200,7 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'd
         if (agent === handle.agent && status === 'idle') { dispose(); resolve() }
       })
     })
-    handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: draftMode === 'reference-batch' ? '为本集first和second两个镜头配置引用。已保存完整导演设计，两镜6秒；actor-photo是当前人物图片。读取适用方法，沿用身份、动作、对白和敲锣音效，逐镜写executionPrompt的可执行动作、空间、摄影、表演与声音，逐字对白由系统附上；交付txt块中的shots拍摄及引用方案，不生成视频。' : draftMode === 'scene' ? '当前为整场分镜设计，尚未绑定镜头。全剧关系从试探到信任；场景1门口，主人请来客进入，原对白line1：主人：请进。读导演与摄影方法后返回完整导演设计 JSON，来源SHA为' + 'a'.repeat(64) : draftMode === 'assets' ? '为当前修理店剧本设计定妆、场景和道具，返回 txt 块中的素材设计 JSON。' : draftMode === 'story' ? '写一场修理店关门的短剧，以 txt 代码块返回完整稿。' : draftMode === 'dialogue'
+    handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: draftMode === 'reference-batch' ? executionPromptGuidance + '为本集first和second两个镜头配置引用。已保存完整导演设计，两镜6秒；actor-photo是当前人物图片。读取适用方法，沿用身份、动作、对白和敲锣音效，逐镜写executionPrompt的可执行动作、空间、摄影、表演与声音，逐字对白由系统附上；交付txt块中的shots拍摄及引用方案，不生成视频。' : draftMode === 'scene' ? '当前为整场分镜设计，尚未绑定镜头。全剧关系从试探到信任；场景1门口，主人请来客进入，原对白line1：主人：请进。读导演与摄影方法后返回完整导演设计 JSON，来源SHA为' + 'a'.repeat(64) : draftMode === 'assets' ? '为当前修理店剧本设计定妆、场景和道具，返回 txt 块中的素材设计 JSON。' : draftMode === 'story' ? '写一场修理店关门的短剧，以 txt 代码块返回完整稿。' : draftMode === 'dialogue'
       ? '预览把“有人吗？”改成“请问，还有人在吗？”，暂不保存。' : '看看当前镜头，参考导演方法给我建议。' }], source: { kind: 'user' } }))
     await idle
     const ordinary = await ctx.agents.create({ sessionId: SessionId('ordinary-example'),
@@ -213,7 +214,7 @@ export async function runNativeDirectorExample(draftMode: boolean | 'first' | 'd
       }, { prompt: ctx.qingmuYimengRead, method: ctx.qingmuImagoMethod })(draftMode === 'first' ? 'readNativeFirstDraftProposal' : 'readNativeDraftProposal', {
         sessionId: handle.agent.session.id, scope,
       }, new AbortController().signal) } : {}),
-      ...(draftMode === 'reference-batch' ? { batchDraft: readStoryDraft(handle.agent.session.events.map(event => ({ event })), -1) } : {}),
+      ...(draftMode === 'reference-batch' ? { spatialGuidanceInRequest: JSON.stringify(model.requests[0]?.messages).includes('qingmu_preview_scene_layout'), batchDraft: readStoryDraft(handle.agent.session.events.map(event => ({ event })), -1) } : {}),
       ...(draftMode === 'scene' ? { sceneDraft: readStoryDraft(handle.agent.session.events.map(event => ({ event })), -1), cameraInRequest: JSON.stringify(model.requests[3]?.messages).includes('起点、中途和终点') } : {}),
       ...(draftMode === 'assets' ? { assetDraft: readStoryDraft(handle.agent.session.events.map(event => ({ event })), -1),
         sceneDesignInRequest: JSON.stringify(model.requests[4]?.messages).includes('### 1.1 叙事美术与场景丰富度') } : {}),

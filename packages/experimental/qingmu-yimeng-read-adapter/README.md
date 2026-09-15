@@ -225,3 +225,5 @@ Audio and video catalog entries retain positive recorded `durationSec`; missing 
 Reference drafts accept optional preparationFeedback (up to 20000 characters). It participates in the saved request hash and recovery, but never in provider promptParts or the compiled video body. Existing drafts without this field remain readable.
 
 The browser-safe `./reference-prompt` export supplies shared single-shot and batch authoring guidance and prompt-part assembly. It preserves the authored execution and reference order without provider calls; Writer still validates the final request.
+
+Existing layout and camera data direct the native author to preview scene visibility and reconcile camera-relative positions with real reference framing before writing execution. The preview does not prove actor blocking when the blockout has no actor volumes. Contradictory source design returns to its existing director or asset workflow.

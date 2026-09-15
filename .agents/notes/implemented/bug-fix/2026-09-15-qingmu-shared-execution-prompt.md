@@ -23,3 +23,5 @@ This extends the [reference routing decision](2026-09-10-qingmu-reference-direct
 ## Consequences
 
 The existing preparation model turn performs more creative work, without adding a generation call or customer step. Source freshness is not semantic verification: the director can still omit or misinterpret a detail, and actual media must be reviewed. Existing videos and selected takes are unchanged. Focused native-composition and batch tests cover shared assembly, canonical lines, omitted execution, source preservation and frozen review; these are not acceptance of a regenerated film.
+
+The authoring guidance uses the existing scene preview when layout and camera are present, comparing visibility and camera-relative positions with actual reference framing. A blockout without actors cannot verify their staging. This is director preparation guidance, not a new mandatory approval gate or a promise of model compliance.

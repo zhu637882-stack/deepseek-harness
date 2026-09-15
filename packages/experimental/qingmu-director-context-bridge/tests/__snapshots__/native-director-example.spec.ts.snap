@@ -177,6 +177,7 @@ exports[`returns an episode reference plan through the shipped native preset and
       },
     ],
   },
+  "spatialGuidanceInRequest": true,
 }
 `;
 
