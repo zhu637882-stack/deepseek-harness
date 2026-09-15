@@ -1747,6 +1747,9 @@ class Supervisor:
         overlay_path.write_text(overlay)
         env = safe_env(self.root)
         env["QINGMU_IMAGO_ATTESTATION_KEY"] = self.config["attestationKey"]
+        # The director capsule queue lives beside the runtime identity; pass the
+        # root explicitly so the host-side tool resolves it without guessing.
+        env["QINGMU_RUNTIME_ROOT"] = str(self.root)
         if self.review_only:
             # The API and DSh host each receive an explicit fail-closed marker.
             # Do not expose the Director dispatch or editorial authority keys
