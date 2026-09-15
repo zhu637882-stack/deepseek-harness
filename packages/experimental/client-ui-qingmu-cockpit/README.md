@@ -469,3 +469,7 @@ Writing progress follows older history pages until it finds the current turn or 
 
 Batch retake selections are retained per project and episode. Returning to the page restores the preparation scope and its retained writing result without sending another request. Submission removes only shots it has actually queued.
 The batch panel chooses its initial expansion once per project/episode. Later progress refreshes preserve the user's open or closed state; active work opens the panel on first load.
+
+Reusable asset designs distinguish carriers from their contents. Identity references explicitly leave pockets, holders and racks empty when they only show capacity; an authored carrying or installation state specifies its actual contents and count. The director compares character, scene and prop references for duplicate movable objects before downstream use. This is design guidance, not automatic image approval.
+
+For narrative prop text, the director quotes each exact visible string separately from layout instructions and leaves unresolved text blank instead of rendering placeholder explanations.

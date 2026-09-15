@@ -25,3 +25,7 @@ Creative settings include the hash-validated original `initialBrief`. The existi
 Writing can inspect its own product inputs. Clients must tolerate a missing screenplay during read-only discovery. This does not permit asset-design saves or generation without their existing prerequisites. Writer regression tests exercise a fresh product project, cross-owner rejection and unchanged storage after reads and rejected saves; adapter tests retain the null fields and references across the GET boundary.
 
 The initial brief increases design context by its original size. Writer tests retain its exact contents; the UI test passes outside-screenplay character and room details through the actual composer input. Visual execution still requires generated-media inspection.
+
+Actual image inspection exposed a separate state ambiguity: a capacity-only pocket gained a phone, and a scene rack gained multiple movable brushes. Shared asset authoring now distinguishes a carrier from its contents, expresses empty identity-reference carriers explicitly, and retains authored carrying-state exceptions. It asks the director to compare references before reuse. The existing composer snapshot covers delivery of this guidance; corrected images still require real inspection.
+
+The receipt image also rendered layout labels and an unresolved signature description as visible text. The shared authoring prompt now requests exact quoted visible strings, separates layout prose, and leaves unspecified text blank.

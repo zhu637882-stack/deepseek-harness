@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-15-qingmu-prescript-product-read.md
-2026-09-15-qingmu-prescript-product-read.md: 31f722d647e7cd92d2ed7c3b8f9b91b0a378cad3
-2026-09-15-qingmu-prescript-product-read.zh.md: 9ebcb8cf7628e8e6a067e656e989f1fd78be632e
+2026-09-15-qingmu-prescript-product-read.md: 7882a6eb7e07bfaa3b4f656fdd4d6d44f2da7718
+2026-09-15-qingmu-prescript-product-read.zh.md: a9b140e2c470bebdfc6546cd2ed1113789cc80e6
