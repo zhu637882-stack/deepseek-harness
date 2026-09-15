@@ -1,5 +1,5 @@
 /** Scene feedback travels to asset revision without adopting a candidate or sending a model request. */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { AssetDesignState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 
 interface Scope { projectId: string; episodeId: string }
@@ -83,16 +83,20 @@ export function SceneSourceFeedback({ text, projectId, episodeId, sceneId, scene
 }
 
 /**
- * Recover scene feedback as optional asset revision context, separate from current project facts.
- * @param props Current asset state and an explicit callback that edits the user's revision text.
+ * Recover scene feedback as attributed asset revision context, separate from current project facts.
+ * @param props Current asset state and a callback that supplies attributed request context.
  * @returns Per-scene feedback, source-change notice and return navigation.
  */
-export function AssetSourceFeedback({ state, onUse, disabled }: {
+export function AssetSourceFeedback({ state, onContext, disabled }: {
   readonly state: AssetDesignState
-  readonly onUse: (text: string) => void
+  readonly onContext: (text: string) => void
   readonly disabled: boolean
 }) {
   const [items, setItems] = useState(() => read(state))
+  const context = items.length ? JSON.stringify(items.map(item => ({ ...item,
+    sourceChanged: state.scriptSha256 !== item.scriptSha256 || state.stateSha256 !== item.assetSha256,
+  }))) : ''
+  useEffect(() => { onContext(context) }, [context, onContext])
   if (!items.length) return null
   return <section aria-label="整场导演反馈">
     <h3>来自整场导演的待核对问题</h3>
@@ -101,14 +105,11 @@ export function AssetSourceFeedback({ state, onUse, disabled }: {
       {(state.scriptSha256 !== item.scriptSha256 || state.stateSha256 !== item.assetSha256)
         && <p>反馈后的剧本或素材已有变化。请对照当前版本核对，旧意见不覆盖新设计。</p>}
       <Issues issues={item.issues} />
-      <button type="button" disabled={disabled} onClick={() => { onUse(
-        `整场导演反馈（${item.sceneName}）：\n${item.issues.join('\n\n')}\n以上是待核对意见，不是新的项目事实。请按当前剧本与设计核对，只协调素材职责内的问题；保留其他有效设计，剧本、时长或逐镜问题指出相应处理位置。不要声称反馈已自动解决。`,
-      ) }}>加入创作补充</button>
       <button type="button" disabled={disabled} onClick={() => {
         localStorage.removeItem(prefix(item) + item.sceneId); setItems(items.filter(value => value.sceneId !== item.sceneId))
       }}>移除此条反馈</button>
     </article>)}
-    <p>加入补充只编辑本机要求；设计保存后，再回分镜读取最新依据并协调整场。移除反馈不会批准或采用原导演稿。</p>
+    <p>以上意见会随下一次素材设计请求自动交给导演核对，无需加入创作补充。意见仅保存在本浏览器；保存设计后仍需回分镜协调整场。移除反馈不会批准或采用原导演稿。</p>
     <a href={href(state, 'storyboard')}>返回分镜协调</a>
   </section>
 }

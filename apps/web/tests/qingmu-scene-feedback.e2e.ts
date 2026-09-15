@@ -14,7 +14,7 @@ async function openScene(page: Page) {
   return page.getByRole('region', { name: '整场导演协调稿', exact: true })
 }
 describe.skipIf(!casesFile)('live scene feedback recovery', () => {
-  it('carries completed feedback to asset instructions, recovers it and returns to the original scene draft', async () => {
+  it('carries completed feedback automatically, preserves supplements and returns to the original scene draft', async () => {
     const cases = JSON.parse(readFileSync(casesFile!, 'utf8')) as FeedbackCase[]
     const browser = await chromium.launch({ channel: 'chrome', headless: true })
     const transcript: unknown[] = []
@@ -41,12 +41,12 @@ describe.skipIf(!casesFile)('live scene feedback recovery', () => {
         expect(await feedback.locator('li').count()).toBe(item.issues)
         const instructions = page.getByRole('textbox', { name: '创作补充', exact: true })
         const previous = await instructions.inputValue()
-        await feedback.getByRole('button', { name: '加入创作补充' }).click()
-        const edited = await instructions.inputValue()
-        expect(edited).toContain('以上是待核对意见，不是新的项目事实')
-        if (previous) expect(edited).toContain(previous)
+        expect(await feedback.getByRole('button', { name: '加入创作补充' }).count()).toBe(0)
+        expect(await feedback.textContent()).toContain('下一次素材设计请求自动交给导演核对')
+        expect(await instructions.inputValue()).toBe(previous)
         await page.reload({ waitUntil: 'domcontentloaded' })
-        expect(await instructions.inputValue()).toBe(edited)
+        expect(await instructions.inputValue()).toBe(previous)
+        expect(await feedback.locator('li').count()).toBe(item.issues)
         if (item.artifactsDir) {
           mkdirSync(item.artifactsDir, { recursive: true })
           await feedback.scrollIntoViewIfNeeded()

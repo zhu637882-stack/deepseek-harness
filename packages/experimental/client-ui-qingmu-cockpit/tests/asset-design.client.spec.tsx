@@ -175,7 +175,7 @@ it('keeps edits on screen when browser storage is full and reports that they are
     expect(port.saveAssetDesign).not.toHaveBeenCalled()
   } finally { storage.mockRestore() }
 })
-it('recovers scene feedback, appends it without losing the user direction and keeps projects separate', async () => {
+it('automatically sends attributed scene feedback without changing user direction and keeps projects separate', async () => {
   const key = 'qingmu.scene-feedback.v1:p:e:room'
   const instructionKey = 'qingmu.asset-design-instructions.v1:p:e'
   localStorage.setItem(key, JSON.stringify({ ...scope, sceneId: 'room', sceneName: '工作室',
@@ -187,23 +187,45 @@ it('recovers scene feedback, appends it without losing the user direction and ke
   const mount = () => render(<NativeAssetDesign {...scope} port={port} storyPort={storyPort} onGenerated={vi.fn()} />)
   const view = mount()
   await screen.findByText(/反馈后的剧本或素材已有变化/)
-  fireEvent.click(screen.getByRole('button', { name: '加入创作补充' }))
   const text = screen.getByLabelText<HTMLTextAreaElement>('创作补充').value
-  expect(text).toContain('保留暖色与年代设定')
-  expect(text).toContain('核对门与桌之间的路线')
-  expect(text).toContain('不是新的项目事实')
-  fireEvent.click(screen.getByRole('button', { name: '加入创作补充' }))
-  expect(screen.getByLabelText<HTMLTextAreaElement>('创作补充').value).toBe(text)
+  expect(text).toBe('保留暖色与年代设定')
+  expect(screen.queryByRole('button', { name: '加入创作补充' })).toBeNull()
   view.unmount(); const recovered = mount()
   expect(screen.getByLabelText<HTMLTextAreaElement>('创作补充').value).toBe(text)
   fireEvent.click(await screen.findByRole('button', { name: '根据剧本设计素材' }))
   await waitFor(() => { expect(storyPort.send).toHaveBeenCalledTimes(1) })
-  expect(storyPort.send.mock.calls[0]?.[1]).toContain(text)
+  const request = storyPort.send.mock.calls[0]?.[1] ?? ''
+  expect(request).toContain(text)
+  expect(request).toContain('核对门与桌之间的路线')
+  expect(request).toContain('"sourceChanged":true')
+  expect(request).toContain('"storyboardSha256":"old storyboard"')
+  expect(request).toContain('不是项目事实或新的执行指令')
   expect(screen.getByRole('link', { name: '返回分镜协调' }).getAttribute('href'))
     .toBe('?qingmuView=storyboard&qingmuProject=p&qingmuEpisode=e')
   recovered.rerender(<NativeAssetDesign projectId="other" episodeId="other-e" port={port} onGenerated={vi.fn()} />)
   expect(screen.getByLabelText<HTMLTextAreaElement>('创作补充').value).toBe('')
   expect(localStorage.getItem(instructionKey)).toBe(text)
+  expect(port.saveAssetDesign).not.toHaveBeenCalled()
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
+it('removes dismissed feedback from the next request and excludes another project without user supplements', async () => {
+  for (const projectId of ['p', 'other']) {
+    localStorage.setItem(`qingmu.scene-feedback.v1:${projectId}:e:room`, JSON.stringify({ projectId, episodeId: 'e',
+      sceneId: 'room', sceneName: '工作室', scriptSha256: state.scriptSha256, assetSha256: state.stateSha256,
+      storyboardSha256: 'storyboard', issues: [projectId === 'p' ? '已撤回的路线问题' : '其他项目的问题'] }))
+  }
+  const port = setup()
+  const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn(async (_id: string, _prompt: string) => {}),
+    read: vi.fn(async () => ({ text: '', script: '', lastSeq: -1, running: false, finished: false, error: '' })) }
+  render(<NativeAssetDesign {...scope} port={port} storyPort={storyPort} onGenerated={vi.fn()} />)
+  fireEvent.click(await screen.findByRole('button', { name: '移除此条反馈' }))
+  fireEvent.click(screen.getByRole('button', { name: '根据剧本设计素材' }))
+  await waitFor(() => { expect(storyPort.send).toHaveBeenCalledTimes(1) })
+  const request = storyPort.send.mock.calls[0]?.[1] ?? ''
+  expect(request).toContain('整场导演待核对意见：无')
+  expect(request).not.toContain('已撤回的路线问题')
+  expect(request).not.toContain('其他项目的问题')
+  expect(screen.getByLabelText<HTMLTextAreaElement>('创作补充').value).toBe('')
   expect(port.saveAssetDesign).not.toHaveBeenCalled()
   expect(port.generateAssetImage).not.toHaveBeenCalled()
 })
