@@ -1,6 +1,6 @@
 # 青木导演上下文桥接
 
-单镜导演通过 referenceUses、executionPrompt、parameters 和当前来源 SHA 准备视频；共用函数按引用顺序、拍摄执行描述、executionSuffix 装配，保留逐字对白一次。旧调用可省略 executionPrompt 沿用完整来源复制，手工 promptParts 仍可编辑。设计冲突须回导演设计整理，来源一致与编译通过不等于语义或画面合格。
+单镜导演通过 referenceUses、executionPrompt、parameters 和当前来源 SHA 准备视频；共用函数按引用顺序、拍摄执行描述、executionSuffix 装配，保留逐字对白一次。单镜和批量的新 referenceUses 请求都必须提供非空 executionPrompt 与当前对白后缀，缺失时不再退回完整来源复制；已保存及明确手工编写的 promptParts 仍可编辑。设计冲突须回导演设计整理，来源一致与编译通过不等于语义或画面合格。
 
 素材设计读取与单图查看将目录已报告的 `source` 所属实体、选用及审核状态传给原生导演。读取说明区分不同提案与同一已存场景的相容视角；旧候选像素和原描述供对照，不替代当前设计。这只是只读上下文，不自动拒绝、采用或生成。
 

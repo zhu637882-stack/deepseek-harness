@@ -9,13 +9,13 @@ export const executionPromptGuidance = '已有候选的返修先用 qingmu_read_
  * @param bindings Ordered media bindings.
  * @param uses Authored purpose of each binding.
  * @param source Saved director context and canonical suffix.
- * @param executionPrompt Authored executable direction; absent only for legacy callers.
+ * @param executionPrompt Authored executable direction for every new preparation.
  * @returns Saved provider prompt parts in reference order.
  */
 export function assembleReferencePrompt(
   bindings: readonly { readonly bindingToken: string }[],
   uses: readonly { readonly bindingToken: string; readonly purpose: string }[],
-  source: ReferenceDirectorSource, executionPrompt?: string,
+  source: ReferenceDirectorSource, executionPrompt: string,
 ): ReferenceVideoPromptPart[] {
   const purposes = new Map<string, string>()
   for (const use of uses) {
@@ -33,15 +33,11 @@ export function assembleReferencePrompt(
     parts.push({ bindingToken: binding.bindingToken }, { text: `：${purpose}\n` })
   }
   if (purposes.size) throw new Error('Reference uses must match the bound references.')
-  if (executionPrompt !== undefined) {
-    if (typeof executionPrompt !== 'string' || !executionPrompt.trim()) throw new Error('请导演完成本镜拍摄执行描述。')
-    if (!source.executionSuffix) throw new Error('请重新读取当前导演来源与逐字对白。')
-    parts.push({ text: '\n【本镜拍摄执行】\n' }, { text: executionPrompt },
-      { text: '\n【原始对白与画面约定】\n' + source.executionSuffix })
-  } else {
-    // Previously authored drafts remain readable and editable; new preparation authors execution explicitly.
-    if (!source.generationPrompt) throw new Error('Read the current director production design before assembly.')
-    parts.push({ text: '\n【本镜完整导演设计】\n' }, { text: source.generationPrompt })
-  }
+  // Stored drafts already contain promptParts and do not pass through this authoring step.
+  // A missing execution must never turn research context into a new generation prompt.
+  if (typeof executionPrompt !== 'string' || !executionPrompt.trim()) throw new Error('请导演完成本镜拍摄执行描述。')
+  if (!source.executionSuffix) throw new Error('请重新读取当前导演来源与逐字对白。')
+  parts.push({ text: '\n【本镜拍摄执行】\n' }, { text: executionPrompt },
+    { text: '\n【原始对白与画面约定】\n' + source.executionSuffix })
   return parts
 }

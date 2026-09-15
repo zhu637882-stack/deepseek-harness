@@ -59,9 +59,13 @@ export function needsBatchDesign(shot: BatchShot, feedback = ''): boolean {
   // Reprepare those drafts once; preparation notes now live outside filmed content.
   const legacyFeedback = draft?.request.promptParts.some(part =>
     'text' in part && part.text.startsWith('\n【本次修改意见】\n'))
+  // This marker belongs to the former automatic fallback, not manual prose.
+  // A matching source SHA does not upgrade its full-document assembly to execution.
+  const legacySource = draft?.request.promptParts.some(part =>
+    'text' in part && part.text === '\n【本镜完整导演设计】\n')
   const feedbackChanged = Boolean(legacyFeedback) || Boolean(feedback.trim()
     && draft?.request.preparationFeedback !== feedback.trim())
-  return Boolean(feedbackChanged) || !draft || (draft.frameSha256 !== undefined && draft.frameSha256 !== frameSha256)
+  return Boolean(legacySource || feedbackChanged) || !draft || (draft.frameSha256 !== undefined && draft.frameSha256 !== frameSha256)
     || (directorSource !== null && directorSource !== undefined && draft.request.directorSourceSha256 !== directorSource.sha256)
 }
 

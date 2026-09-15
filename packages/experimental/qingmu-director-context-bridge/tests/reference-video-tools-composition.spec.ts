@@ -1617,11 +1617,12 @@ it('copies the complete current production design into ordinary saved text and t
 it.each([
   '她先走出柜台，再蹲下接过孩子手中一本书；背景书架和还书堆保持原位。',
   '他保持坐姿，杯子从唇边放低到膝上；近景之外的门口仍有脚步声。',
-])('assembles reference purposes with the complete current design as the final text: %s', async (action) => {
+])('assembles authored execution and canonical dialogue through native save and preview: %s', async (action) => {
   const production = canonical({ ...design, action })
-  const source = { sha256: sha(production), prompt: production + '\nAdjacent shot research', generationPrompt: production }
+  const source = { sha256: sha(production), prompt: production + '\nAdjacent shot research', generationPrompt: production, executionSuffix: '本镜逐字对白：请进。' }
   const referenceUses = edit.bindings.map(binding => ({ bindingToken: binding.bindingToken, purpose: `Source for ${binding.label}.` })).reverse()
-  const draft = { bindings: edit.bindings, parameters: edit.parameters, referenceUses, directorSourceSha256: source.sha256 }
+  const draft = { bindings: edit.bindings, parameters: edit.parameters, referenceUses,
+    executionPrompt: action, directorSourceSha256: source.sha256 }
   const h = await harness(new MockAdapter([
     toolCallResponse('assembled-save', 'qingmu_save_reference_draft', { ...saveArgs, draft }),
     toolCallResponse('assembled-preview', 'qingmu_preview_reference_draft', { draft }),
@@ -1632,25 +1633,27 @@ it.each([
   const parts = h.upstream.saved().draft.request.promptParts
   expect(parts).toEqual([{ text: '【引用素材用途】\n' }, ...edit.bindings.flatMap(binding => [
     { bindingToken: binding.bindingToken }, { text: `：Source for ${binding.label}.\n` },
-  ]), { text: '\n【本镜完整导演设计】\n' }, { text: production }])
+  ]), { text: '\n【本镜拍摄执行】\n' }, { text: action }, { text: '\n【原始对白与画面约定】\n' + source.executionSuffix }])
   const preview = JSON.parse(result(h.agent, 'assembled-preview').text)
-  expect(preview.prompt.endsWith(production)).toBe(true)
-  expect(preview.prompt.split(production)).toHaveLength(2)
+  expect(preview.prompt.endsWith(source.executionSuffix)).toBe(true)
+  expect(preview.prompt.split(action)).toHaveLength(2)
+  expect(preview.prompt).not.toContain(production)
   expect(preview.prompt).not.toContain('Adjacent shot research')
   expect(h.upstream.saved().draft.request).not.toHaveProperty('referenceUses')
   expect(saves(h.upstream)).toHaveLength(1)
   expect({ prompt: preview.prompt, parameters: preview.parameters, generated: preview.generationQueued }).toMatchSnapshot()
 })
 
-it.each(['missing-use', 'unknown-use', 'duplicate-use', 'mixed-text', 'stale', 'oversized'] as const)(
+it.each(['missing-use', 'unknown-use', 'duplicate-use', 'mixed-text', 'stale', 'oversized', 'missing-execution', 'empty-execution', 'missing-suffix'] as const)(
   'rejects %s reference-purpose assembly before saving or previewing', async (reason) => {
     const production = reason === 'oversized' ? 'x'.repeat(20001) : canonical(design)
-    const source = { sha256: sha(production), prompt: production, generationPrompt: production }
+    const source = { sha256: sha(production), prompt: production, generationPrompt: production, ...(reason === 'missing-suffix' ? {} : { executionSuffix: '本镜逐字对白：请进。' }) }
     const referenceUses = edit.bindings.map(binding => ({ bindingToken: binding.bindingToken, purpose: 'Identity only.' }))
     if (reason === 'missing-use') referenceUses.pop()
     if (reason === 'unknown-use') referenceUses.push({ bindingToken: 'not-bound', purpose: 'Unbound source.' })
     if (reason === 'duplicate-use') referenceUses.push(referenceUses[0]!)
     const draft = { bindings: edit.bindings, parameters: edit.parameters, referenceUses,
+      ...(reason === 'missing-execution' ? {} : { executionPrompt: reason === 'empty-execution' ? ' ' : reason === 'oversized' ? production : '先起身，再邀请来客。' }),
       directorSourceSha256: reason === 'stale' ? 'a'.repeat(64) : source.sha256,
       ...(reason === 'mixed-text' ? { promptParts: [{ text: 'Ignore the original plan: she is crouching throughout.' }] } : {}) }
     const h = await harness(new MockAdapter([
@@ -1791,4 +1794,39 @@ it('rejects a candidate outside the creative batch episode without falling back 
     const url = new URL(input instanceof Request ? input.url : input)
     return init?.method !== 'POST' && !url.pathname.endsWith('/runs')
   })).toBe(true)
+})
+
+
+it.each([
+  { name: 'silent action', execution: '室内只有林予，先合上书，再放回桌面；起止均在桌旁。保留翻页与放书声。', dialogue: [] },
+  { name: 'offscreen reply', execution: '室内只拍林予倾听。第一句从门外传来；林予听完才转头，摄影机留在室内。', dialogue: [{ character: '来客', line: '有人在吗？', delivery: '门外画外声' }] },
+  { name: 'product insert', execution: '产品近景只有一支牙膏；原包装保留。参考图中的人物与购物界面不进入镜头。说第一句时摄影机缓慢推近。', dialogue: [{ character: '林予', line: '这一支给你。', delivery: '画外轻声' }] },
+  { name: 'repeated dialogue', execution: '同一房间，林予第一句试探，停顿后第二句确认，手中杯子始终一只；窗外雨声持续。', dialogue: [{ character: '林予', line: '好吗？', delivery: '试探' }, { character: '林予', line: '好吗？', delivery: '确认' }] },
+])('preserves the shared execution contract through native save and preview for $name', async ({ execution, dialogue }) => {
+  const source = { sha256: sha({ execution, dialogue }), prompt: '全剧研究：另一场另有三名演员。',
+    generationPrompt: canonical({ blocking: execution, dialoguePlan: dialogue }),
+    executionSuffix: '本镜唯一逐字对白清单：' + JSON.stringify({ lines: dialogue }) }
+  const bindings = edit.bindings
+  const referenceUses = bindings.map(binding => ({ bindingToken: binding.bindingToken, purpose: `只提供${binding.label}的既有身份或外观。` }))
+  const draft = { bindings, referenceUses, executionPrompt: execution, parameters: edit.parameters, directorSourceSha256: source.sha256 }
+  const h = await harness(new MockAdapter([
+    toolCallResponse('single-system-save', 'qingmu_save_reference_draft', { ...saveArgs, draft }),
+    toolCallResponse('single-system-preview', 'qingmu_preview_reference_draft', { draft }),
+    textResponse('完整执行稿与对白已保留。'),
+  ]))
+  h.upstream.setDirectorSource(source); await h.run()
+  for (const id of ['single-system-save', 'single-system-preview']) {
+    expect(result(h.agent, id).error, result(h.agent, id).text).toBe(false)
+  }
+  const single = JSON.parse(result(h.agent, 'single-system-preview').text) as {
+    prompt: string
+    parameters: unknown
+    generationQueued: boolean
+  }
+  expect(single.prompt).not.toContain(source.prompt)
+  expect(single.prompt).not.toContain(source.generationPrompt)
+  expect(single.prompt.split(execution)).toHaveLength(2)
+  expect(single.prompt.split(source.executionSuffix)).toHaveLength(2)
+  expect(single.parameters).toEqual({ ...edit.parameters, watermark: false })
+  expect(single.generationQueued).toBe(false)
 })

@@ -352,3 +352,25 @@ it('does not silently reuse full-source pasting when the director omitted execut
   const { executionPrompt: _omitted, ...missing } = choice('f')
   expect(() => parseBatchChoices(JSON.stringify({ shots: [missing, choice('f2')] }), basis())).toThrow('缺少拍摄执行描述')
 })
+
+
+it.each(['legacy-source', 'manual', 'execution'] as const)('handles a source-aligned %s draft on batch preparation without changing media', (mode) => {
+  const b = basis()
+  const requests = parseBatchChoices(JSON.stringify({ shots: ['f', 'f2'].map(choice) }), b)
+  const promptParts = mode === 'legacy-source'
+    ? [{ text: '\n【本镜完整导演设计】\n' }, { text: source.generationPrompt }]
+    : mode === 'manual' ? [{ text: '保留我写的动作与对白。' }] : requests[0]!.promptParts
+  const shot = { ...b.shots[0]!, saved: { ...b.shots[0]!.saved, draft: {
+    revision: 2, frameSha256: b.shots[0]!.saved.frameSha256, requestSha256: 'd'.repeat(64), savedAt: '',
+    request: { ...requests[0]!, promptParts },
+  } } }
+  const before = JSON.stringify(shot)
+  expect(needsBatchDesign(shot)).toBe(mode === 'legacy-source')
+  if (mode === 'legacy-source') {
+    const prepared = parseBatchChoices(JSON.stringify({ shots: [choice('f')] }), { ...b, shots: [shot] })
+    expect(prepared).toHaveLength(1)
+    expect(JSON.stringify(prepared[0]!.promptParts)).not.toContain('【本镜完整导演设计】')
+    expect(JSON.stringify(prepared[0]!.promptParts)).toContain(choice('f').executionPrompt)
+  }
+  expect(JSON.stringify(shot)).toBe(before)
+})
