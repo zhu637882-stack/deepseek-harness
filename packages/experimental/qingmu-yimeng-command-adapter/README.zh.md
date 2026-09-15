@@ -1,5 +1,7 @@
 # 青木易梦命令适配器
 
+`readAssetDesign` 在剧本确认前也能读取已上传产品和创作设定。此时 `script` 和 `scriptSha256` 为 null、修订为零。读取保留归属校验且不创建内容；保存素材设计仍要求已有正式剧本。
+
 `initializeProject` 可选接收 `productImages`：1—5 个 `{ filename, contentSha256, contentBase64 }`。Host 校验哈希、重复图片和单张 8 MiB 上限，Writer 另行核验真实图片格式与尺寸。仅该创建请求允许最多 56 MiB JSON；请求身份包含有序文件名与 SHA-256，不包含 base64。普通创建与 GET 恢复语义保持一致。Writer 将原图及转换后的 RGB 参考图保存为未选定素材，`readAssetDesign.productAssets` 在首次保存设计前提供精确参考绑定。
 
 分镜读取保留每镜实际保存的 `durationSec` 和完整 `dialogue`，包括来源身份、表达方式及其他对白字段。旧读取可以缺省，缺省不代表无对白；读取不修改时长或对白。

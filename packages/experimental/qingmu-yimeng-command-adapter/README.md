@@ -1,5 +1,7 @@
 # Qingmu Yimeng command adapter
 
+`readAssetDesign` exposes uploaded products and creative settings before screenplay confirmation. In that state, `script` and `scriptSha256` are null and the revision is zero. Reading retains ownership checks and creates nothing; saving a design still requires a confirmed screenplay.
+
 `initializeProject` optionally accepts `productImages`: one to five `{ filename, contentSha256, contentBase64 }` items. The Host verifies unique hashes and the 8 MiB per-image limit; Writer also verifies image format and dimensions. Only this creation payload permits up to 56 MiB JSON. Request identity includes ordered filenames and SHA-256 values, excluding base64. Normal creation and GET recovery retain their existing semantics. Writer saves originals and derived RGB references as unselected assets; `readAssetDesign.productAssets` supplies exact references before the first saved design.
 
 Scene planning reads retain each saved shot's `durationSec` and complete `dialogue`, including source identities, delivery and additional dialogue fields. Older projections may omit them; omission does not mean silence. The read path does not alter timing or dialogue.

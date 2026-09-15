@@ -130,12 +130,13 @@ export interface AssetDesign {
 export interface AssetDesignState extends CreationScope {
   readonly schema: 'qingmu.asset-design-state.v1'
   readonly stateSha256: string
-  readonly scriptSha256: string
+  readonly scriptSha256: string | null
   readonly scriptRevision: number
   readonly creativeSettings?: YimengCommandJsonObject
   /** Imported product views available before the first director design. */
   readonly productAssets?: readonly AssetDesignItem[]
-  readonly script: YimengCommandJsonObject
+  /** Absent while the screenwriter inspects uploaded products for a new project. */
+  readonly script: YimengCommandJsonObject | null
   readonly model: string
   readonly imageModels?: readonly {
     readonly id: string

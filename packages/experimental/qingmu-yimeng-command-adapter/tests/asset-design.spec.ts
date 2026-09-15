@@ -6,6 +6,15 @@ const setup = (result: unknown) => {
   const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(result))
   return { fetch, handler: createYimengCommandHandler({ baseUrl: 'http://127.0.0.1:49123' }, { fetch, readToken: () => 'private-token' }) }
 }
+it('reads uploaded products before the first confirmed screenplay', async () => {
+  const draft = { ...state, script: null, scriptSha256: null, scriptRevision: 0,
+    productAssets: [{ id: 'product_1', kind: 'prop', references: [{ assetId: 'image_1' }] }] }
+  const { fetch, handler } = setup(draft)
+  expect(await handler('readAssetDesign', scope, new AbortController().signal))
+    .toMatchObject({ ok: true, value: draft })
+  expect(fetch.mock.calls[0]?.[1]?.method).toBe('GET')
+  expect(fetch).toHaveBeenCalledTimes(1)
+})
 it.each([409, 422])('shows the bounded asset validation reason on HTTP %s without retrying', async (status) => {
   const detail = '当前模型不支持框选参数，请移除框选或改选支持框选的模型；原图和指令仍保留。'
   const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json({ detail }, { status }))
