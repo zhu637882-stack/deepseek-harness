@@ -1334,6 +1334,42 @@ it('saves scene-spanning sound through the shipped director preset, real loop an
   expect(JSON.stringify(h.upstream.fetch.mock.calls)).not.toContain('/working-cut/render')
 })
 
+it('retains a long cut receipt without spilling playback URLs and resolves a source on demand', async () => {
+  const upstream = writer(), original = upstream.fetch.getMockImplementation()!
+  const clips = Array.from({ length: 49 }, (_, i) => ({ frameId: `f-${i}`, assetId: `v-${i}`,
+    sha256: 'a'.repeat(64), inSec: 0, outSec: 3 }))
+  const sources = clips.map(clip => ({ assetId: clip.assetId, sha256: clip.sha256, duration: 3,
+    name: clip.frameId, usage: 'video_audio', url: `http://localhost/media/${clip.assetId}?signature=${'b'.repeat(1200)}` }))
+  const longCut = { ...initialCut, revision: 1, shots: clips.map((clip, i) => ({ frameId: clip.frameId,
+    frameNo: i + 1, title: `Shot ${i + 1}`, selectedAssetId: null,
+    editorialContext: 'Keep the courtyard geography and ambience.', candidates: [{ ...sources[i], taskId: `task-${i}` }] })),
+  videoAudioSources: sources, cuts: [{ revisionId: 'cut-long', version: 1, clips, audioCues: [], soundPlan: '', status: 'NotQueued' }] }
+  upstream.fetch.mockImplementation(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input)
+    if (url.pathname.endsWith('/working-cut') && (!init?.method || init.method === 'GET')) return Response.json(longCut)
+    return original(input, init)
+  })
+  const receiptId = sha({ scope: { projectId: 'p', episodeId: 'episode-a' }, cut: longCut })
+  const cut = { clips, audioCues: [], soundPlan: 'Keep existing native sound for audition.' }
+  const h = await harness(new MockAdapter([
+    toolCallResponse('long-read', 'qingmu_read_working_cut', {}),
+    toolCallResponse('source-read', 'qingmu_read_working_cut', { sourceAssetId: 'v-48' }),
+    toolCallResponse('long-save', 'qingmu_save_working_cut', { receiptId, cut }), textResponse('Saved.'),
+  ]), upstream)
+  await h.run(true)
+  for (const id of ['long-read', 'source-read', 'long-save']) expect(result(h.agent, id).error, result(h.agent, id).text).toBe(false)
+  const read = JSON.parse(result(h.agent, 'long-read').text)
+  expect(read.cut.cuts[0].clips).toEqual(clips)
+  expect(read.cut.shots).toHaveLength(49)
+  expect(read.cut.videoAudioSources).toHaveLength(49)
+  expect(JSON.stringify(read)).not.toContain('signature=')
+  expect(read.nativeReceiptSha256).toBeTruthy()
+  expect(JSON.parse(result(h.agent, 'source-read').text).source.url).toBe(sources[48]!.url)
+  const writes = upstream.fetch.mock.calls.filter(([url, init]) => new URL(url instanceof Request ? url.url : url).pathname.endsWith('/working-cut/save') && init?.method === 'POST')
+  expect(writes).toHaveLength(1)
+  expect(JSON.parse(writes[0]![1]!.body as string)).toMatchObject({ ...cut, expectedRevision: 1 })
+})
+
 function capturedVideoRun(runId = 'refvideo_previous', assetSha256 = 'a'.repeat(64)) {
   return { ...runResponse, frameId: 'previous', runId, kernelStatus: 'Succeeded', publicStatus: 'succeeded',
     candidates: [{ assetId: 'asset_video', assetSha256, mediaId: null, browserUrl: '', reviewStatus: 'pending' }] }

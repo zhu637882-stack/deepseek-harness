@@ -95,18 +95,36 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
   ctx.tools.register(defineTool({
     name: 'qingmu_read_working_cut',
     description: 'Read the current episode assembled cut, retained versions and imported audio sources. Plan music cues, uninterrupted scene ambience, Foley and dialogue on film time after editing. Source URLs are for actual listening, not evidence that listening happened. No provider calls.',
-    parameters: {}, output,
+    parameters: { sourceAssetId: { type: 'string', description: 'Optional exact assetId from a previous cut read. Returns that current source with its listening URL; no save receipt or mutation.' } }, output,
     presentCall: () => ({ card: 'generic', kind: 'read', title: '读取整片剪辑与声音' }),
-    async execute(_args, exec) {
+    async execute(args, exec) {
       const current = await ports.readBoundContext(exec)
       const { projectId, episodeId } = current.state.binding.scope
       const scope = { projectId, episodeId }
       const response = await ctx.qingmuYimengCommand('readWorkingCut', scope, exec.signal)
       assertCurrent(current, exec)
       if (!response.ok) throw new Error(response.error.message)
-      return ports.boundedJson({ schema: 'qingmu.native-working-cut.v1', scope, cut: response.value,
+      const cut = response.value as WorkingCutState
+      if (args.sourceAssetId !== undefined) {
+        const source = [...(cut.audioLibrary ?? []), ...(cut.videoAudioSources ?? []),
+          ...cut.shots.flatMap(shot => shot.candidates)].find(item => item.assetId === args.sourceAssetId)
+        if (!source) throw new Error('当前集未找到该声音或视频来源，请先读取剪辑中的素材编号。')
+        return ports.boundedJson({ scope, source, providerCalls: 0 })
+      }
+      const input = ports.boundedJson({ schema: 'qingmu.native-working-cut.v1', scope, cut,
         receiptId: digest({ scope, cut: response.value }), providerCalls: 0,
         guidance: 'Use qingmu_save_working_cut with this receipt to save clips, audioCues and soundPlan. shots.editorialContext contains the director\'s adjoining-segment edit and sound-bridge intentions. Reconcile them against the chosen clips and actual film timing; they are notes, not applied edits. For a first assembly, shots.selectedAssetId identifies the source chosen in shooting; null is unchosen, never substitute the newest candidate silently. Existing cut choices take precedence over later Take selection. Audio cues require an exact assetId/sha256 from audioLibrary or videoAudioSources. videoAudioSources exposes completed shot videos and rendered cut versions in this episode; use their audio independently across picture cuts without downloading or importing a second file. On an audio cue, optional sourceAudioMode original/speech_effects/speech/effects/music selects the full mix or a local separated component. effects includes ambience AND action Foley, not a magically clean room tone; choose source intervals accordingly. Modes other than original require audioSeparation.available. Sources without audio cannot be used. Separation occurs in the existing render task and verified cache, with no paid API. Adjust matching picture clip sound deliberately to avoid doubled voices or ambience; cue extraction does not mute the original clip. Import local WAV/MP3/M4A/FLAC in the delivery page. acousticPresets lists bundled recorded room responses; use qingmu_import_acoustic_response with an exact presetId to add one locally, then reread this cut before saving. A bundled IR is an effect input, never a standalone music or ambience cue. Do not invent an asset or claim an unavailable music generator ran. Environment stays continuous under speech. A cue may explicitly set loop {durationSec, crossfadeSec} to repeat its trimmed sound with equal-power crossfades across picture cuts. durationSec is the complete bed length before room tail (at least source trim length, at most 600); crossfadeSec must be positive and strictly less than half the trim. Use only deliberately repeatable content; this repeats all source sounds and does not align musical beats or remove dialogue. Fades and gain points apply once over the complete bed. Music and ambience have independent timing, fades and optional gainPoints for director-timed volume changes. Use actual film timing for dialogue ducking and gradual recovery; do not infer speech times from shot duration. Native mixed audio stays original unless a clip explicitly chooses sourceAudioMode. silent disables picture audio without separation or model runtime; use it when an independent cue supplies the complete dialogue/ambience mix. A rendered cut is an immutable sound source at its saved edit timing; later picture reorders or trims require reconciling that cue, not stretching it automatically. When audioSeparation.available is true, speech_effects extracts speech and effects while removing estimated music; speech extracts dialogue only. This runs locally during export, caches results and may lose details. Preserve original media and audition before accepting; plan continuous music on independent whole-cut cues. An independent cue can apply a retained mono/stereo room impulse response with space {assetId, sha256, wetDb, tailSec}. The response must be a genuine IR, at most 10 seconds, imported in this episode; ordinary speech/music/ambience recordings are not IRs. Convolution adds reflections while retaining direct sound. Its explicit tail continues beyond the source trim or complete looped bed across cuts, must fit the film and cannot exceed the IR duration. Fades and gain points cover the extended cue. Choose the acoustic perspective from the scene and listen before applying; this is not separation or automatic removal of existing reverberation.' })
+      if (Buffer.byteLength(JSON.stringify(input), 'utf8') <= 47000) return input
+      // Signed playback URLs dominate long cuts and are not editorial decisions.
+      // Keep every shot, cue, source and revision; resolve listening URLs on demand.
+      const omitPlaybackUrls = (value: unknown): unknown => Array.isArray(value) ? value.map(omitPlaybackUrls)
+        : value && typeof value === 'object'
+          ? Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'url').map(([key, item]) => [key, omitPlaybackUrls(item)]))
+          : value
+      const view = omitPlaybackUrls(input) as Record<string, unknown>
+      return ports.boundedJson(retainNativeToolReceipt(current.session, exec.callId, 'qingmu_read_working_cut', input, {
+        ...view, guidance: 'All edit decisions, revisions and source identities are retained. Playback URLs are omitted only from this view. Call qingmu_read_working_cut with sourceAssetId to obtain an exact source for listening. Save with this receiptId; preserve existing clips when only changing sound. Cue sources must use exact assetId/sha256. Consult qingmu_save_working_cut parameter descriptions for executable sound fields. Never claim listening or approval from a source URL or saved plan.',
+      }))
     },
   }))
   ctx.tools.register(defineTool({
