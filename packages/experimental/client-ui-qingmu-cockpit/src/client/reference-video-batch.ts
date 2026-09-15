@@ -2,6 +2,7 @@
 import type { ReferenceVideoAsset, ReferenceVideoBinding, ReferenceVideoDraftResponse, ReferenceVideoPreviewRequest,
   ReferenceVideoQuoteResponse, ReferenceVideoRun, QueueReferenceVideoRequest, ReferenceVideoMaterialsState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import { assembleReferencePrompt } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/reference-prompt'
+import type { ScenePlanningState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { QingmuYimengPort } from './contracts.ts'
 
 export interface BatchShot {
@@ -15,14 +16,16 @@ export interface BatchBasis {
   readonly projectId: string
   readonly shots: readonly BatchShot[]
   readonly assets: readonly ReferenceVideoAsset[]
+  readonly planning?: ScenePlanningState
 }
 export type BatchPort = Pick<QingmuYimengPort, 'referenceVideoDraft' | 'referenceVideoRuns' | 'referenceVideoAssets'
   | 'saveReferenceVideoDraft' | 'readReferenceVideoMaterials' | 'prepareReferenceVideoMaterial' | 'referenceVideoQuote' | 'queueReferenceVideo'
+  | 'readScenePlanning' | 'saveScenePlanning' | 'recoverScenePlanning'
   | 'readReferenceVideoCandidateRegistration' | 'registerReferenceVideoCandidateForReview'>
 
 /** Read all shot sources and the actual project catalog without generating or changing selections. */
 export async function readBatchBasis(port: BatchPort, projectId: string,
-  shots: readonly Pick<BatchShot, 'frameId' | 'label' | 'duration'>[]): Promise<BatchBasis> {
+  shots: readonly Pick<BatchShot, 'frameId' | 'label' | 'duration'>[], episodeId?: string): Promise<BatchBasis> {
   const first = await port.referenceVideoAssets({ projectId, page: 1 })
   const assets = [...first.items]
   for (let page = 2; page <= first.pages; page++) assets.push(...(await port.referenceVideoAssets({ projectId, page })).items)
@@ -31,7 +34,8 @@ export async function readBatchBasis(port: BatchPort, projectId: string,
       port.referenceVideoRuns({ projectId, frameId: shot.frameId })])
     return { ...shot, saved, runs: runs.items }
   }))
-  return { projectId, shots: rows, assets }
+  const planning = episodeId === undefined ? undefined : await port.readScenePlanning({ projectId, episodeId })
+  return { projectId, shots: rows, assets, ...(planning ? { planning } : {}) }
 }
 
 /** Existing videos are preserved unless the owner explicitly includes them in a retake. */
@@ -81,10 +85,11 @@ export async function collectBatchShot(port: BatchPort, projectId: string, frame
 
 /** Use the same authored performance and canonical dialogue assembly as the single-shot director. */
 export function parseBatchChoices(text: string, basis: BatchBasis,
-  retakes: ReadonlySet<string> = new Set(), feedback = ''): ReferenceVideoPreviewRequest[] {
+  retakes: ReadonlySet<string> = new Set(), feedback = '', preparedFrameIds?: readonly string[]): ReferenceVideoPreviewRequest[] {
   const value: unknown = JSON.parse(text)
   if (!value || typeof value !== 'object' || !('shots' in value) || !Array.isArray(value.shots)) throw new Error('导演方案需要 shots 列表。')
-  const expected = new Map(basis.shots.filter(shot => batchShotIncluded(shot, retakes) && needsBatchDesign(shot, feedback))
+  const expected = new Map(basis.shots.filter(shot => batchShotIncluded(shot, retakes) && (preparedFrameIds
+    ? preparedFrameIds.includes(shot.frameId) : needsBatchDesign(shot, feedback)))
     .map(shot => [shot.frameId, shot]))
   const requests = value.shots.map((row: unknown) => {
     if (!row || typeof row !== 'object' || !('frameId' in row) || typeof row.frameId !== 'string'

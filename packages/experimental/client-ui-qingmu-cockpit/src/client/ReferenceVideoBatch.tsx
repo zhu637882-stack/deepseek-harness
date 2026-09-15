@@ -7,7 +7,8 @@ import { BatchVideoReview } from './BatchVideoReview.tsx'
 import { NativeStoryComposer } from './NativeStoryComposer.tsx'
 import { referenceSelectionGuidance } from './director-generation-guidance.ts'
 import styles from './ReferenceVideoBatch.module.css'
-import { batchShotIncluded, batchSubmissionKey, createBatchSubmission, readBatchSubmission, recoverBatchSubmission, withBatchSubmissionLock, hasActiveBatchRun, needsBatchDesign, collectBatchShot, hasBatchRun, parseBatchChoices, prepareBatchShot, readBatchBasis, submitBatchShot, type BatchBasis, type BatchPort, type BatchSubmissionItem } from './reference-video-batch.ts'
+import { reconcileBatchChoices } from './reference-video-batch-repair.ts'
+import { batchShotIncluded, batchSubmissionKey, createBatchSubmission, readBatchSubmission, recoverBatchSubmission, withBatchSubmissionLock, hasActiveBatchRun, needsBatchDesign, collectBatchShot, hasBatchRun, prepareBatchShot, readBatchBasis, submitBatchShot, type BatchBasis, type BatchPort, type BatchSubmissionItem } from './reference-video-batch.ts'
 
 const runLabels = { queued: '等待生成', running: '正在生成', succeeded: '视频已返回，待审看', failed: '生成失败', quarantined: '结果待检查' }
 
@@ -80,7 +81,7 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
       let pending = false
       try {
         if (!loaded) {
-          const result = await readBatchBasis(port, projectId, shots)
+          const result = await readBatchBasis(port, projectId, shots, episodeId)
           if (isDisposed()) return
           setBasis(result)
           setExpanded(result.shots.some(shot => !hasBatchRun(shot)))
@@ -135,7 +136,7 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
     try {
       const result = await readBatchBasis(port, projectId, relations.shots.map(shot => ({
         frameId: shot.shotId, label: `镜${shot.frameNo} · ${shot.title ?? ''}`, duration: shot.durationSec,
-      })))
+      })), episodeId)
       if (!isActive()) return
       setBasis(result); setQuotes(new Map())
       setMessages(new Map(result.shots.map(shot => [shot.frameId, hasBatchRun(shot)
@@ -145,24 +146,32 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
   }
   async function prepare(text?: string) {
     if (lock.current || !basis) return
-    const choices = text === undefined ? [] : parseBatchChoices(text, basis, retakes, notes)
-    lock.current = true; setBusy(true); setError('')
-    const pending = basis.shots.filter(shot => batchShotIncluded(shot, retakes)
-      && (!needsBatchDesign(shot, notes) || choices.some(item => item.frameId === shot.frameId)))
-    setProgress({ label: '准备引用', done: 0, total: pending.length })
+    lock.current = true; setBusy(true); setError(''); setQuotes(new Map())
     try {
+      setProgress({ label: '协调导演设计', done: 0, total: 1 })
+      const prepared = text === undefined ? { basis, requests: [] }
+        : await reconcileBatchChoices(port, episodeId, basis, text, retakes, notes)
+      if (!isActive()) return
+      const pending = prepared.basis.shots.filter(shot => batchShotIncluded(shot, retakes)
+        && (!needsBatchDesign(shot, notes) || prepared.requests.some(item => item.frameId === shot.frameId)))
+      setProgress({ label: '准备引用', done: 0, total: pending.length })
+      let failed = false
       for (const shot of pending) {
         if (!isActive()) break
-        const request = choices.find(item => item.frameId === shot.frameId)
+        const request = prepared.requests.find(item => item.frameId === shot.frameId)
         if (!request && !shot.saved.draft) continue
         mark(shot.frameId, '正在保存引用并准备生成')
         try {
           const quote = await prepareBatchShot(port, projectId, shot, request, Boolean(notes.trim()))
           if (isActive()) setQuotes(previous => new Map(previous).set(shot.frameId, quote))
           mark(shot.frameId, quote.generationSubmissionEnabled ? '已准备' : '生成通道不可用')
-        } catch (cause) { mark(shot.frameId, String(cause)) }
+        } catch (cause) { failed = true; mark(shot.frameId, String(cause)) }
         finally { if (isActive()) setProgress(previous => previous && ({ ...previous, done: previous.done + 1 })) }
       }
+      if (!failed && isActive()) setBasis(prepared.basis)
+    } catch (cause) {
+      if (isActive()) setError(String(cause))
+      throw cause
     } finally { lock.current = false; if (isActive()) setBusy(false) }
   }
   async function submit(resume = false) {
@@ -221,6 +230,8 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
   }
   const missing = basis?.shots.filter(shot => batchShotIncluded(shot, retakes) && needsBatchDesign(shot, notes)) ?? []
   const source = JSON.stringify(basis && { feedback: notes.trim(),
+    planning: basis.planning && { scriptRevision: basis.planning.scriptRevision, scriptSha256: basis.planning.scriptSha256,
+      storyboard: basis.planning.storyboard },
     shots: basis.shots.map(shot => ({ frameId: shot.frameId, label: shot.label,
       needsPreparation: batchShotIncluded(shot, retakes) && needsBatchDesign(shot, notes),
       existingReferences: shot.saved.draft?.request.bindings ?? [],
@@ -228,7 +239,7 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
         generationPrompt: shot.saved.directorSource.generationPrompt, executionSuffix: shot.saved.directorSource.executionSuffix } })),
     // Keep the selection catalog compact; historical image prompts remain available through the asset-reading tools.
     assets: basis.assets.map(({ browserUrl: _url, imageDesign: _history, ...asset }) => asset) })
-  const prompt = `为本集所有待准备镜头统一完成拍摄执行描述与视频引用。${executionPromptGuidance}每镜 existingReferences 是当前已保存引用的精确版本，不代表已验收。已有引用时先按 assetId 和 assetSha256 查看该版本的实际图片，再判断保留或替换；同名旧图不能代替当前绑定图，其他候选只是替换备选。版本缺失或确需更换时说明具体依据，不按目录第一张或最新一张默认替换。操作者补充是准备工作的上下文，按镜头分别理解适用范围，不原样发送给视频模型。引用选择意见落实到对应引用用途；涉及对白、表演、调度或声音的改动，须先返回导演设计中保存后再准备，不用用途覆盖旧设计。已有成片只有明确勾选重做的镜头才进入范围。意见与已存剧情或调度冲突时先指出具体上游来源，不用重复原请求假装修复。实际读取 cinematic-director、prop-asset 以及当前镜头需要的摄影、声音方法，核对真实参考图片。来源包含整集镜头：needsPreparation=false 的镜头只用于理解接续，不修改、不重新准备；仅为 needsPreparation=true 的镜头输出方案。先检查已保存设计是否与剧本、前后镜及实际素材相容，再沿用有效设计。发现影响生成的来源冲突时，指出镜头及具体字段，返回场次导演整理来源后再准备，不能用引用用途暗改剧情或把旧稿视为已审通过。${referenceSelectionGuidance}只选择本镜需要的真实素材，说明具体用途；每项引用同时逐字写入目录的 assetId 和 label（输出字段 assetLabel），交稿前按目录核对名称、编号及用途属于同一对象，不能把产品、册子或不同角色的编号串用；同一人物、场景和道具跨镜沿用同一有效版本。素材目录中的 selected、审核状态及现有引用仅作依据，实际图片优先；不得以“最新一张”代替审图，已指出错误的图不能引用。同一素材有修正版时，对照原缺陷逐项判断图中实际改变、仍存问题和新增问题；视觉观察报告中的用途或类别推测需与可见结构分开，不能把推测当成已证实缺陷而退回有已知错误的旧版。产品图只提供产品外观，广告人物或购物界面不进入剧情。人物肖像与空场不能冒充完整首帧。常规多模态引用不写 frameRole；仅完整镜头首尾帧路线才写 first_frame/last_frame，该路线不能混用其他引用。每镜按需要选取引用，不为调用功能而塞满素材。音色参考最多5段、每段1–15秒、总长不超过15秒；多人对白优先使用目录中对应人物的同源3秒音色样本，完整试听音频仍保留，不把样本台词当本镜对白，也不为满足长度而丢掉需要的说话人音色。参考视频仅在需要动作或衔接且实际审看合适时使用。没有足够可靠素材时指出具体镜头及原因，不虚构图片、不声称已解决。\n本集画幅：${aspectRatio}。当前来源：${source}\n操作者补充：${notes}\n来源仍有未解决冲突时，只返回具体核查结论和需先修订的字段，不输出shots方案，不把假设上游已修好的执行稿混入可采用结果。来源相容时，在一个 txt 代码块输出 {"shots":[{"frameId":"真实镜头编号","executionPrompt":"本段可拍摄的完整动作、表演、空间、摄影及声音描述","references":[{"assetId":"真实素材编号","assetLabel":"目录中的原始label","purpose":"本镜如何使用它"}],"parameters":{"duration":已保存时长,"resolution":"720P","ratio":"${aspectRatio}","audio":true,"prompt_extend":false}}]}。仅覆盖 needsPreparation=true 的全部待准备镜头，保持各镜时长和本集画幅；声音按当前导演设计，不能默认静音。资产 SHA、引用编号及当前逐字对白由系统装配；executionPrompt 使用你整理后的拍摄执行描述，整份设计文档不再拼入生成请求。不要自行执行镜头写入或生成任务。`
+  const prompt = `为本集所有待准备镜头统一完成拍摄执行描述与视频引用。${executionPromptGuidance}每镜 existingReferences 是当前已保存引用的精确版本，不代表已验收。已有引用时先按 assetId 和 assetSha256 查看该版本的实际图片，再判断保留或替换；同名旧图不能代替当前绑定图，其他候选只是替换备选。版本缺失或确需更换时说明具体依据，不按目录第一张或最新一张默认替换。操作者补充是准备工作的上下文，按镜头分别理解适用范围，不原样发送给视频模型。引用选择意见落实到对应引用用途；涉及表演、调度、机位或声音设计的必要修正，与引用方案一起列入 directorRepairs，由本页采用时先保存来源再准备；不靠用途覆盖旧设计，不改写剧本原话或说话者。已有成片只有明确勾选重做的镜头才进入范围。意见与已存剧情或调度冲突时先指出具体上游来源，不用重复原请求假装修复。实际读取 cinematic-director、prop-asset 以及当前镜头需要的摄影、声音方法，核对真实参考图片。来源包含整集镜头：needsPreparation=false 的镜头只用于理解接续，不修改、不重新准备；仅为 needsPreparation=true 的镜头输出方案。先检查已保存设计是否与剧本、前后镜及实际素材相容，再沿用有效设计。发现影响生成的来源冲突时，读取 qingmu_read_scene_design 对应页与 qingmu_read_asset_design 的当前设定，将有依据的修正整理为 directorRepairs。统一 visual、首帧、imageStage、imageCamera、imageSubjects、blocking、cameraAngle、coveragePlan、generationContext、continuity 等实际涉及处；嵌套值完整提交，未涉及字段省略。保持剧本事实、时长和未纳入范围的镜头；若修订改变相邻接续，需要核对相邻原稿，不偷偷改未选镜头。用空间预览核对相同的演员体块与机位，不能只发现矛盾就照搬旧稿。${referenceSelectionGuidance}只选择本镜需要的真实素材，说明具体用途；每项引用同时逐字写入目录的 assetId 和 label（输出字段 assetLabel），交稿前按目录核对名称、编号及用途属于同一对象，不能把产品、册子或不同角色的编号串用；同一人物、场景和道具跨镜沿用同一有效版本。素材目录中的 selected、审核状态及现有引用仅作依据，实际图片优先；不得以“最新一张”代替审图，已指出错误的图不能引用。同一素材有修正版时，对照原缺陷逐项判断图中实际改变、仍存问题和新增问题；视觉观察报告中的用途或类别推测需与可见结构分开，不能把推测当成已证实缺陷而退回有已知错误的旧版。产品图只提供产品外观，广告人物或购物界面不进入剧情。人物肖像与空场不能冒充完整首帧。常规多模态引用不写 frameRole；仅完整镜头首尾帧路线才写 first_frame/last_frame，该路线不能混用其他引用。每镜按需要选取引用，不为调用功能而塞满素材。音色参考最多5段、每段1–15秒、总长不超过15秒；多人对白优先使用目录中对应人物的同源3秒音色样本，完整试听音频仍保留，不把样本台词当本镜对白，也不为满足长度而丢掉需要的说话人音色。参考视频仅在需要动作或衔接且实际审看合适时使用。没有足够可靠素材时指出具体镜头及原因，不虚构图片、不声称已解决。\n本集画幅：${aspectRatio}。当前来源：${source}\n操作者补充：${notes}\n本次能依据现有来源解决的冲突，输出已协调的完整方案；directorRepairs 可选，格式为 [{"frameId":"本次待准备镜头编号","directorPlan":{"相关创作字段":"完整修订值"},"imagePromptCn":"完整起始画面描述"}]，放在 shots 同级。系统采用时通过普通导演保存接口依次保存这些修订，再按最新来源装配各镜执行稿；候选文字本身不是已经保存。没有修订时省略 directorRepairs。缺少必要素材、剧情决定或涉及未纳入范围的修订而无法自洽时，说明具体缺口，不输出可采用方案，也不要求一律重画场景。朝向与参考不一致时先明确参考贡献的是外观还是构图，不把矛盾全部归咎于模型。执行稿必须对应这份方案修订后的设计。在一个 txt 代码块输出 {"shots":[{"frameId":"真实镜头编号","executionPrompt":"本段可拍摄的完整动作、表演、空间、摄影及声音描述","references":[{"assetId":"真实素材编号","assetLabel":"目录中的原始label","purpose":"本镜如何使用它"}],"parameters":{"duration":已保存时长,"resolution":"720P","ratio":"${aspectRatio}","audio":true,"prompt_extend":false}}]}。仅覆盖 needsPreparation=true 的全部待准备镜头，保持各镜时长和本集画幅；声音按当前导演设计，不能默认静音。资产 SHA、引用编号及当前逐字对白由系统装配；executionPrompt 使用你整理后的拍摄执行描述，整份设计文档不再拼入生成请求。不要自行执行镜头写入或生成任务。`
   const ready = [...quotes.values()].filter(quote => quote.generationSubmissionEnabled)
   const unavailable = busy || syncing
   return <details aria-label="整集批量生成" className={styles.batch}
@@ -251,14 +262,14 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
           disabled={unavailable || pendingSubmission.length > 0} /></label></details>
       {missing.length > 0 && storyPort && <NativeStoryComposer port={storyPort} projectId={projectId} episodeId={episodeId}
         source={source} settings="" disabled={unavailable || pendingSubmission.length > 0} onAdopt={prepare} purpose={{ key: 'reference-video-batch', jsonOutput: true,
-          title: '整集视频准备', description: '导演结合整集接续选择引用，保留已完成镜头。', prompt,
+          title: '整集视频准备', description: '导演统一整理接续、修正冲突并选择引用，保留原视频。', prompt,
           action: '自动准备整集镜头', adopt: '使用方案并准备整集', adopted: '已处理整集方案，请查看逐镜结果。',
           freshRevision: true, sourceKey: source }} />}
       {missing.length > 0 && !storyPort && <p>导演服务未连接，仍可准备已有草稿。</p>}
       <button type="button"
         disabled={unavailable || pendingSubmission.length > 0
           || !basis.shots.some(shot => batchShotIncluded(shot, retakes) && !needsBatchDesign(shot, notes))}
-        onClick={() => { void prepare() }}>准备已有镜头草稿</button>
+        onClick={() => { void prepare().catch(() => { /* The panel retains the preparation error. */ }) }}>准备已有镜头草稿</button>
       <details><summary>逐镜进度与局部重做</summary><ul className={styles.results}>{basis.shots.map(shot => <li key={shot.frameId}>{shot.runs.some(run => run.publicStatus === 'succeeded') && <label><input type="checkbox" aria-label={`重做${shot.label}`} checked={retakes.has(shot.frameId)}
         disabled={unavailable || pendingSubmission.length > 0 || hasActiveBatchRun(shot)} onChange={(event) => {
           const checked = event.target.checked

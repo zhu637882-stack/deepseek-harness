@@ -231,7 +231,7 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
   }))
   ctx.tools.register(defineTool({
     name: 'qingmu_read_reference_video_candidates',
-    description: 'Read generated candidates, existing independent native-video observations and time-anchored review comments before choosing continuity references. Native reviews are separate from comments: an empty comment feed does not mean no audio/video audit. Read review pages for the relevant candidate. Compare independent observations/transcript with comparisonIntent (the frozen generation request), then current design; cite actual times and uncertainties. Observation is not a verdict. A model transcript or description is reported evidence, not independently verified media: attribute discrepancies to the report and mark suspected extra speech as requiring playback confirmation; do not upgrade certainty by comparing one model report with text. Only state media-confirmed facts when actual playback evidence supports them. Legacy comparison reports may be biased by expected content. Two stills alone cannot prove a jump or complete motion, and no role images were supplied to the native observer. Comments retain their video hash, Take and design binding; they are attributed observations, not fresh visual inspection or approval. A historical design binding does not erase an observation of the same video. Read relevant comment pages, compare actual frames with the current design, and do not silently inherit a recorded defect. Unavailable comments differ from an empty feed. Use a known shot in the current episode. No generation, comment write or selection.',
+    description: 'Read generated candidates, existing independent native-video observations and time-anchored review comments before choosing continuity references. Native reviews are separate from comments: an empty comment feed does not mean no audio/video audit. Read review pages for the relevant candidate. Compare independent observations/transcript with comparisonIntent (the frozen generation request), then current design; cite actual times and uncertainties. Observation is not a verdict. A model transcript or description is reported evidence, not independently verified media: attribute discrepancies to the report and mark suspected extra speech as requiring playback confirmation; do not upgrade certainty by comparing one model report with text. Only state media-confirmed facts when actual playback evidence supports them. Legacy comparison reports may be biased by expected content. Two stills alone cannot prove a jump or complete motion, and no role images were supplied to the native observer. Comments retain their video hash, Take and design binding; they are attributed observations, not fresh visual inspection or approval. A historical design binding does not erase an observation of the same video. Read relevant comment pages, compare actual frames with the current design, and do not silently inherit a recorded defect. Unavailable comments differ from an empty feed. During episode preparation, the current creative request fixes scope and no single-shot selection is required. Use a known shot in the current episode. No generation, comment write or selection.',
     parameters: {
       sourceFrameId: { type: 'string', required: true, description: 'Source shot ID in the current episode; may be the previous shot.' },
       commentPage: { type: 'integer', description: 'Review comment page, starting at 1; five complete comments per page, newest first.' },
@@ -243,18 +243,30 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
       exactKeys(required, ['sourceFrameId'])
       if (!Number.isSafeInteger(commentPage) || commentPage < 1) throw new Error('Use a positive commentPage.')
       if (!Number.isSafeInteger(reviewPage) || reviewPage < 1) throw new Error('Use a positive reviewPage.')
-      const current = await ports.readBoundContext(exec)
-      const scope = current.state.binding.scope
+      const target = creativeRequest(exec)
+      const current = target ? undefined : await ports.readBoundContext(exec)
+      const scope = target ? { projectId: target.projectId, episodeId: target.episodeId } : current?.state.binding.scope
+      if (!scope) throw new Error('Start from the current episode before reading its video candidates.')
+      const check = () => { exec.signal.throwIfAborted(); if (current) assertCurrent(current, exec) }
+      if (target) {
+        const planning = await ctx.qingmuYimengCommand('readScenePlanning', scope, exec.signal)
+        check()
+        if (!planning.ok) throw new Error(`Current episode unavailable: ${planning.error.message}`)
+        const saved = planning.value as ScenePlanningState
+        if (!(saved.frameRequirements ?? saved.canonicalStoryboard?.shots ?? []).some(shot => shot.id === args.sourceFrameId)) {
+          throw new Error('The requested video shot is not in the current episode.')
+        }
+      }
       const read = await ctx.qingmuYimengRead('referenceVideoRuns', {
         projectId: scope.projectId, frameId: args.sourceFrameId,
       }, exec.signal)
-      assertCurrent(current, exec)
+      check()
       if (!read.ok) throw new Error(`Video candidates unavailable: ${read.error.message}`)
       const runs = read.value as ReferenceVideoRunsResponse
       const feedback = await ctx.qingmuYimengRead('takeComments', {
         projectId: scope.projectId, episodeId: scope.episodeId, frameId: args.sourceFrameId,
       }, exec.signal)
-      assertCurrent(current, exec)
+      check()
       const feed = feedback.ok ? feedback.value as YimengTakeCommentFeedResponse : undefined
       const comments = feed?.comments.toSorted((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id.localeCompare(a.id))
       const start = (commentPage - 1) * 5
@@ -267,7 +279,7 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
         projectId: scope.projectId, episodeId: scope.episodeId, frameId: args.sourceFrameId,
         assetId: candidate.assetId, expectedSha256: candidate.assetSha256,
       }, exec.signal) : undefined
-      assertCurrent(current, exec)
+      check()
       const nativeReview = { page: reviewPage, total: unique.length,
         nextPage: reviewPage < unique.length ? reviewPage + 1 : null,
         index: unique.map(({ assetId, assetSha256 }, i) => ({ page: i + 1, assetId, assetSha256 })),

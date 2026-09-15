@@ -1,17 +1,61 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { webcrypto } from 'node:crypto'
 import { ReferenceVideoBatch } from '../src/client/ReferenceVideoBatch.tsx'
 import type { BatchPort } from '../src/client/reference-video-batch.ts'
 import { request, quoteResponse } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
 beforeEach(() => { Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: async (_key: string, _options: unknown, action: (lock: object) => Promise<void>) => action({}) } }) })
-afterEach(() => { cleanup(); vi.useRealTimers(); sessionStorage.clear(); localStorage.clear() })
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); sessionStorage.clear(); localStorage.clear() })
+
+it('adopts source repairs through the existing batch button before saving the refreshed execution draft', async () => {
+  vi.stubGlobal('crypto', webcrypto)
+  const events: string[] = []
+  let version = 1, saved: unknown = null
+  const directorSource = () => ({ sha256: `${version}`.repeat(64), generationPrompt: `Saved camera ${version}`, executionSuffix: '本镜逐字对白：请。' })
+  const frame = () => ({ projectId: 'p', frameId: 'f', frameSha256: `${version}`.repeat(64), draft: saved, directorSource: directorSource() })
+  const storyboard = () => ({ id: `v${version}`, version, sourceHash: `${version}`.repeat(64), status: 'Ready' })
+  const repair = { frameId: 'f', directorPlan: { blocking: '同一院内，演员位置与机位协调。' }, imagePromptCn: '院内起始画面。' }
+  const proposal = JSON.stringify({ directorRepairs: [repair], shots: [{ frameId: 'f', executionPrompt: '0–8秒先放杯，再转身说第一句。',
+    references: [{ assetId: 'asset_lin', assetLabel: '林予', purpose: '人物外观' }], parameters: request.parameters }] })
+  const port = {
+    readScenePlanning: async () => ({ projectId: 'p', episodeId: 'e', scriptRevision: 1, scriptSha256: 's'.repeat(64), storyboard: storyboard(),
+      canonicalStoryboard: { origin: 'automatic' }, frameRequirements: [{ id: 'f' }] }),
+    recoverScenePlanning: async () => { throw new Error('HTTP 404: planning_receipt_not_found') },
+    saveScenePlanning: vi.fn(async ({ idempotencyKey }: { idempotencyKey: string }) => {
+      events.push('repair'); version++
+      return { action: 'edit_automatic', projectId: 'p', episodeId: 'e', shotId: 'f', idempotencyKey, storyboard: storyboard() }
+    }),
+    referenceVideoAssets: async () => ({ pages: 1, items: [{ assetId: 'asset_lin', assetSha256: 'a'.repeat(64), label: '林予', mediaType: 'reference_image' }] }),
+    referenceVideoDraft: async () => frame(), referenceVideoRuns: async () => ({ items: [] }),
+    saveReferenceVideoDraft: vi.fn(async ({ request: draft }: { request: Record<string, unknown> }) => {
+      events.push('draft'); expect(draft.directorSourceSha256).toBe('2'.repeat(64))
+      saved = { revision: 1, frameSha256: '2'.repeat(64), requestSha256: 'd'.repeat(64), request: draft }
+      return frame()
+    }),
+    readReferenceVideoMaterials: async () => ({ configured: true, allReady: true, materials: [] }),
+    referenceVideoQuote: async () => { events.push('quote'); return { ...quoteResponse, generationSubmissionEnabled: true } },
+    queueReferenceVideo: vi.fn(),
+  }
+  const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
+    read: vi.fn(async () => ({ lastSeq: 1, running: false, finished: true, text: proposal, script: proposal, error: '' })) }
+  render(<ReferenceVideoBatch projectId="p" episodeId="e" aspectRatio="16:9" port={port as unknown as BatchPort} storyPort={storyPort}
+    onOpenShot={vi.fn()} relations={{ projectId: 'p', shots: [{ shotId: 'f', frameNo: 1, durationSec: 8 }] } as never} />)
+  const start = await screen.findByRole('button', { name: '自动准备整集镜头' })
+  await waitFor(() => { expect(start.hasAttribute('disabled')).toBe(false) })
+  fireEvent.click(start)
+  fireEvent.click(await screen.findByRole('button', { name: '使用方案并准备整集' }))
+  await waitFor(() => { expect(events).toEqual(['repair', 'draft', 'quote']) })
+  expect(port.queueReferenceVideo).not.toHaveBeenCalled()
+  expect(screen.getByRole('button', { name: '批量生成 1 个已准备镜头' }).hasAttribute('disabled')).toBe(false)
+})
 
 it('retries a failed review refresh without registering the same candidate again', async () => {
   vi.useFakeTimers()
   const register = vi.fn(async () => ({ takeId: 'take-f' }))
   const onCollected = vi.fn(async () => {}).mockRejectedValueOnce(new Error('projection unavailable'))
   const port = {
+    readScenePlanning: async () => ({ projectId: 'p', episodeId: 'e', scriptRevision: 1, scriptSha256: 's', storyboard: null }),
     referenceVideoAssets: async () => ({ pages: 1, items: [] }),
     referenceVideoDraft: async () => ({ draft: null }),
     referenceVideoRuns: async () => ({ items: [{ runId: 'run-f', publicStatus: 'succeeded',
@@ -36,6 +80,7 @@ it('sends completed shots as continuity context without preparing or generating 
   const save = vi.fn()
   const queue = vi.fn()
   const port = {
+    readScenePlanning: async () => ({ projectId: 'p', episodeId: 'e', scriptRevision: 1, scriptSha256: 's', storyboard: null }),
     referenceVideoAssets: async () => ({ pages: 1, items: [] }),
     referenceVideoDraft: async ({ frameId }: { frameId: string }) => ({ draft: frameId === 'f' ? {
       revision: 2, requestSha256: 'd'.repeat(64), request: { ...request, frameId,
@@ -76,6 +121,7 @@ it('refreshes review after collecting candidates while retaining per-shot failur
   const registered: string[] = []
   const onCollected = vi.fn(async () => { expect(registered).toEqual(['f']) })
   const port = {
+    readScenePlanning: async () => ({ projectId: 'p', episodeId: 'e', scriptRevision: 1, scriptSha256: 's', storyboard: null }),
     referenceVideoAssets: async () => ({ pages: 1, items: [] }),
     referenceVideoDraft: async () => ({ draft: null }),
     referenceVideoRuns: async ({ frameId }: { frameId: string }) => ({ items: [{
@@ -100,6 +146,7 @@ it('refreshes review after collecting candidates while retaining per-shot failur
 it('offers one action for two prepared shots and shows each queued result', async () => {
   const queue = vi.fn(async ({ frameId }: { frameId: string }) => ({ frameId, publicStatus: 'queued' }))
   const port = {
+    readScenePlanning: async () => ({ projectId: 'p', episodeId: 'e', scriptRevision: 1, scriptSha256: 's', storyboard: null }),
     referenceVideoAssets: async () => ({ pages: 1, items: [] }),
     referenceVideoDraft: async ({ frameId }: { frameId: string }) => ({ projectId: 'p', frameId, frameSha256: 'f'.repeat(64),
       directorSource: null, draft: { revision: 1, requestSha256: 'd'.repeat(64), request: { ...request, frameId } } }),
@@ -128,6 +175,7 @@ it('recovers returned videos after leaving the page without another generation c
   const register = vi.fn(async () => ({ takeId: 'take-f' }))
   const onCollected = vi.fn(async () => {})
   const port = {
+    readScenePlanning: async () => ({ projectId: 'p', episodeId: 'e', scriptRevision: 1, scriptSha256: 's', storyboard: null }),
     referenceVideoAssets: async () => ({ pages: 1, items: [] }),
     referenceVideoDraft: async () => ({ draft: null }),
     referenceVideoRuns: async () => ({ items: [{ runId: 'original-run', publicStatus: returned ? 'succeeded' : 'running',
@@ -159,6 +207,7 @@ it('restores an unfinished batch after closing the tab without regenerating the 
     return { runId: frameId, frameId, publicStatus: 'queued' }
   })
   const port = {
+    readScenePlanning: async () => ({ projectId: 'p', episodeId: 'e', scriptRevision: 1, scriptSha256: 's', storyboard: null }),
     referenceVideoAssets: async () => ({ pages: 1, items: [] }),
     referenceVideoDraft: async ({ frameId }: { frameId: string }) => ({ projectId: 'p', frameId, frameSha256: 'f'.repeat(64), directorSource: null,
       draft: { revision: 1, requestSha256: 'd'.repeat(64), request: { ...request, frameId } } }),
@@ -189,6 +238,7 @@ it('restores an unfinished batch after closing the tab without regenerating the 
 
 it('restores batch instructions after remount and isolates episodes', async () => {
   const port = {
+    readScenePlanning: async () => ({ projectId: 'p', episodeId: 'e', scriptRevision: 1, scriptSha256: 's', storyboard: null }),
     referenceVideoAssets: async () => ({ pages: 1, items: [] }),
     referenceVideoDraft: async () => ({ draft: null }),
     referenceVideoRuns: async () => ({ items: [] }),

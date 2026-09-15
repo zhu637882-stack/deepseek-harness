@@ -1721,10 +1721,13 @@ it('saves and previews authored execution through native tools without filming t
 })
 
 
-it.each(['complete', 'none', 'wrong hash', 'foreign frame', 'unavailable'] as const)('reads %s native observation independently of an empty comment feed without paying or losing candidates', async (mode) => {
+it.each(['complete', 'none', 'wrong hash', 'foreign frame', 'unavailable', 'batch'] as const)('reads %s native observation independently of an empty comment feed without paying or losing candidates', async (mode) => {
   const upstream = writer(), original = upstream.fetch.getMockImplementation()!
   upstream.fetch.mockImplementation(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input)
+    if (mode === 'batch' && url.pathname.endsWith('/scene-planning')) return Response.json({ ...planning,
+      canonicalStoryboard: { ...planning.canonicalStoryboard, shots: [{ ...planningShots[0], id: 'previous' }] },
+      frameRequirements: [{ ...planningShots[0], id: 'previous' }] })
     if (url.pathname.endsWith('/runs')) return Response.json(capturedVideoRuns())
     if (url.pathname.endsWith('/take-comments')) return Response.json({ ...takeCommentFeed({ projectId: 'p', episodeId: 'episode-a', frameId: 'previous' }), comments: [] })
     if (url.pathname.endsWith('/native-video-reviews')) {
@@ -1744,14 +1747,14 @@ it.each(['complete', 'none', 'wrong hash', 'foreign frame', 'unavailable'] as co
     return original(input, init)
   })
   const adapter = new MockAdapter([toolCallResponse('observe', 'qingmu_read_reference_video_candidates', { sourceFrameId: 'previous' }), textResponse('Existing independent observation received.')])
-  const h = await harness(adapter, upstream); await h.run()
+  const h = await harness(adapter, upstream); await h.run(false, mode === 'batch' ? { purpose: 'reference-video-batch' } : undefined)
   const reply = result(h.agent, 'observe'); expect(reply.error, reply.text).toBe(false)
   const value = JSON.parse(reply.text)
   expect(value.reviewComments).toMatchObject({ available: true, total: 0 })
   expect(value.items[0].candidates[0].assetId).toBe('asset_video')
-  expect(value.nativeReview.available).toBe(['complete', 'none'].includes(mode))
-  if (['complete', 'none'].includes(mode)) {
-    expect(value.nativeReview.report.state).toBe(mode)
+  expect(value.nativeReview.available).toBe(['complete', 'none', 'batch'].includes(mode))
+  if (['complete', 'none', 'batch'].includes(mode)) {
+    expect(value.nativeReview.report.state).toBe(mode === 'none' ? 'none' : 'complete')
     expect(value.nativeReview.report.audit.audio_review.transcript[0].text).toBe('额外一句话')
     expect(value.nativeReview.report.comparisonIntent.generation_prompt).toContain('只说原定')
     expect(value.nativeReview.report.audit.audio_review.checks).toEqual({})
@@ -1760,4 +1763,17 @@ it.each(['complete', 'none', 'wrong hash', 'foreign frame', 'unavailable'] as co
     expect(JSON.stringify(adapter.requests.at(-1))).toContain('脸可见，门在左侧。')
   } else expect(value.nativeReview).not.toHaveProperty('report')
   expect(upstream.fetch.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true)
+})
+
+it('rejects a candidate outside the creative batch episode without falling back to a selected shot', async () => {
+  const h = await harness(new MockAdapter([
+    toolCallResponse('outside', 'qingmu_read_reference_video_candidates', { sourceFrameId: 'foreign' }), textResponse('Stopped.'),
+  ]))
+  await h.run(false, { purpose: 'reference-video-batch' })
+  expect(result(h.agent, 'outside')).toMatchObject({ error: true })
+  expect(result(h.agent, 'outside').text).toContain('not in the current episode')
+  expect(h.upstream.fetch.mock.calls.every(([input, init]) => {
+    const url = new URL(input instanceof Request ? input.url : input)
+    return init?.method !== 'POST' && !url.pathname.endsWith('/runs')
+  })).toBe(true)
 })

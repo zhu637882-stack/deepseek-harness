@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
-import { expect, it, vi, beforeEach } from 'vitest'
+import { expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { webcrypto } from 'node:crypto'
+import type { ScenePlanningRequest, ScenePlanningState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import { reconcileBatchChoices } from '../src/client/reference-video-batch-repair.ts'
 import { recoverBatchSubmission, withBatchSubmissionLock, collectBatchShot, readBatchBasis, parseBatchChoices, prepareBatchShot, submitBatchShot, hasBatchRun, needsBatchDesign, batchShotIncluded, createBatchSubmission, readBatchSubmission, batchSubmissionKey, type BatchBasis, type BatchPort } from '../src/client/reference-video-batch.ts'
 import { assembleReferencePrompt } from '../../qingmu-yimeng-read-adapter/src/reference-prompt.ts'
 import { request, quoteResponse } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
@@ -14,6 +17,87 @@ function basis(): BatchBasis {
 }
 const choice = (frameId: string) => ({ frameId, executionPrompt: '院内只有林予，原服装。0–2秒右手击锣一次，先击后收，铜锣余响；2–8秒说第一句，结束仍面向门口。', references: [{ assetId: 'asset_lin', assetLabel: '林予', purpose: '本镜角色身份与衣服' }], parameters: request.parameters })
 beforeEach(() => { sessionStorage.clear(); localStorage.clear() })
+afterEach(() => { vi.unstubAllGlobals() })
+
+function repairHarness() {
+  vi.stubGlobal('crypto', webcrypto)
+  const initial = basis()
+  const planning: ScenePlanningState = { schema: 'jason.qingmu-scene-planning-state.v1', projectId: 'p', episodeId: 'e',
+    scriptRevision: 1, scriptSha256: 's'.repeat(64), scenes: [], planning: null,
+    storyboard: { id: 'v1', version: 1, sourceHash: '1'.repeat(64), status: 'Ready' },
+    canonicalStoryboard: { revision: 1, sourceHash: '1'.repeat(64), shotCount: 2, origin: 'automatic' },
+    frameRequirements: initial.shots.map(shot => ({ id: shot.frameId, frameNo: 1, title: '', imagePromptCn: 'old',
+      generationContextSource: { state: 'current', sha256: 'c'.repeat(64), changes: [] } })) }
+  const original = { ...initial, planning }
+  let current: BatchBasis = original
+  const receipts = new Map<string, unknown>()
+  const save = vi.fn(async (command: ScenePlanningRequest) => {
+    const op = command.request
+    if (op.action !== 'edit_automatic') throw new Error('Unexpected action')
+    if (op.expectedStoryboardRevision !== current.planning!.storyboard!.version) throw new Error('revision conflict')
+    const version = op.expectedStoryboardRevision + 1
+    const storyboard = { id: `v${version}`, version, sourceHash: `${version}`.repeat(64), status: 'Ready' as const }
+    current = { ...current, planning: { ...current.planning!, storyboard }, shots: current.shots.map(shot => ({ ...shot,
+      saved: { ...shot.saved, ...(shot.frameId === op.shotId ? { frameSha256: `${version}`.repeat(64) } : {}),
+        directorSource: { ...source, sha256: `${version}`.repeat(64),
+          generationPrompt: shot.frameId === op.shotId ? 'Corrected saved camera and staging.' : shot.saved.directorSource!.generationPrompt!,
+        } } })) }
+    const receipt = { projectId: 'p', episodeId: 'e', action: op.action, shotId: op.shotId, idempotencyKey: command.idempotencyKey, storyboard }
+    receipts.set(command.idempotencyKey, receipt)
+    return receipt
+  })
+  const port = { saveScenePlanning: save,
+    recoverScenePlanning: vi.fn(async (command: ScenePlanningRequest) => {
+      const saved = receipts.get(command.idempotencyKey)
+      if (!saved) throw new Error('HTTP 404: planning_receipt_not_found')
+      return saved
+    }),
+    readScenePlanning: vi.fn(async () => current.planning),
+    referenceVideoAssets: async () => ({ pages: 1, items: current.assets }),
+    referenceVideoDraft: vi.fn(async ({ frameId }: { frameId: string }) => current.shots.find(shot => shot.frameId === frameId)!.saved),
+    referenceVideoRuns: async () => ({ items: [] }),
+    prepareReferenceVideoMaterial: vi.fn(), queueReferenceVideo: vi.fn(),
+  }
+  const repairs = ['f', 'f2'].map(frameId => ({ frameId, directorPlan: { blocking: 'Left through the camera, facing the listener.', generationContext: 'Same courtyard.' }, imagePromptCn: 'Coherent complete opening composition.' }))
+  const text = JSON.stringify({ shots: ['f', 'f2'].map(choice), directorRepairs: repairs })
+  return { original, port, repairs, text, save, current: () => current }
+}
+
+it('saves batch corrections with sequential ordinary planning revisions and compiles fresh sources with dialogue once', async () => {
+  const h = repairHarness()
+  const result = await reconcileBatchChoices(h.port as unknown as BatchPort, 'e', h.original, h.text, new Set(), '')
+  expect(h.save.mock.calls.map(([command]) => command.request.expectedStoryboardRevision)).toEqual([1, 2])
+  expect(h.save.mock.calls[0]![0].request).toMatchObject({ expectedGenerationContextSourceSha256: 'c'.repeat(64) })
+  expect(result.basis.planning!.storyboard!.version).toBe(3)
+  expect(result.requests.map(item => item.directorSourceSha256)).toEqual(['3'.repeat(64), '3'.repeat(64)])
+  expect(result.requests[0]!.promptParts.flatMap(part => 'text' in part ? [part.text] : []).join('').split(source.executionSuffix)).toHaveLength(2)
+  expect(h.port.prepareReferenceVideoMaterial).not.toHaveBeenCalled()
+  expect(h.port.queueReferenceVideo).not.toHaveBeenCalled()
+})
+
+it('recovers a committed batch correction after response loss without saving it twice', async () => {
+  const h = repairHarness(), save = h.save.getMockImplementation()!
+  h.save.mockImplementationOnce(async (command) => { await save(command); throw new Error('connection lost after commit') })
+  await expect(reconcileBatchChoices(h.port as unknown as BatchPort, 'e', h.original, h.text, new Set(), '')).rejects.toThrow('connection lost')
+  const result = await reconcileBatchChoices(h.port as unknown as BatchPort, 'e', h.original, h.text, new Set(), '')
+  expect(h.save).toHaveBeenCalledTimes(2)
+  expect(h.port.recoverScenePlanning.mock.calls[0]![0]).toEqual(h.port.recoverScenePlanning.mock.calls[1]![0])
+  expect(result.requests).toHaveLength(2)
+})
+
+it.each(['foreign shot', 'duplicate repair', 'missing execution', 'uncertain receipt', 'changed frame'])('rejects %s before saving batch corrections or preparing media', async (mode) => {
+  const h = repairHarness()
+  let text = h.text
+  if (mode === 'foreign shot') text = JSON.stringify({ shots: ['f', 'f2'].map(choice), directorRepairs: [{ ...h.repairs[0], frameId: 'outside' }] })
+  if (mode === 'duplicate repair') text = JSON.stringify({ shots: ['f', 'f2'].map(choice), directorRepairs: [h.repairs[0], h.repairs[0]] })
+  if (mode === 'missing execution') text = JSON.stringify({ shots: [choice('f')], directorRepairs: h.repairs })
+  if (mode === 'uncertain receipt') h.port.recoverScenePlanning.mockRejectedValue(new Error('HTTP 503: unavailable'))
+  if (mode === 'changed frame') h.port.referenceVideoDraft.mockResolvedValue({ ...h.original.shots[0]!.saved, frameSha256: 'changed' })
+  await expect(reconcileBatchChoices(h.port as unknown as BatchPort, 'e', h.original, text, new Set(), '')).rejects.toThrow()
+  expect(h.save).not.toHaveBeenCalled()
+  expect(h.port.prepareReferenceVideoMaterial).not.toHaveBeenCalled()
+  expect(h.port.queueReferenceVideo).not.toHaveBeenCalled()
+})
 
 it('collects completed outputs into review once, skipping running videos and retaining registered candidates', async () => {
   const register = vi.fn(async () => ({ takeId: 'take_new' }))
