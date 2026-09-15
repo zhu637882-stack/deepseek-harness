@@ -740,7 +740,7 @@
       "license": "Apache-2.0",
       "files": {
         "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
-        "SKILL.md": "2a9df20b49c7842b495b5341b48b3a604588cd0c8cf5eb8d23cd0020bd8ab5f0",
+        "SKILL.md": "eab355d174434cd9eff8512f1d507d3e918c6e2baebb7ab7471f935ef64c72b1",
         "references/cinematic-image-direction.md": "b2fc8b2dd6dbd1bcf78bc2671806575352db95481796dc5cae5a5c6a6befb945",
         "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
         "agents/openai.yaml": "7ffb6718d97e5858e5070dbf6e1330a7118f817c372dcb43da6ebb2949c16084"
@@ -786,7 +786,7 @@
       "license": "MIT",
       "files": {
         "LICENSE": "5c609a7d9174ac54756c1cf35d486920618adb9a0a9ee8688121ea9a0d80ee70",
-        "SKILL.md": "7fc7426084859991f6ebda5f7b4bb1a658d11d205d5c58adf26579f6088f50ba",
+        "SKILL.md": "ed16189cc059709264f17476d93c0c141da6c637f08cc382b7919ba4b19fca0f",
         "image-prompting/SKILL.md": "41e9c8bf3cecf2c929c3169f41aaeec6195a4fc50ce4d669dac025a7db400fde",
         "references/continuity_system.md": "efa14c202f76222bbb85469be2957abc56953571ca3f3d43e1a19c4d63cf68d5",
         "references/visual_bible_system.md": "2cf0c241bebe49a5f1c7d80afad2a3ca2cdb3d88411c9f242c1e27ae1cbe84d4",
@@ -820,7 +820,7 @@
         "image-prompting/templates/cinematic_still_prompt.md": "d4e04bbcc84d34f7a032253a201e8d21082af3b087ace88bc579735de02aca69",
         "image-prompting/templates/character_reference_sheet_prompt.md": "70dd42d286c6f0b2ba21382475c21e6c6e87797d0be64994a9dc68feb2fd1965"
       },
-      "adaptation": "Two pinned upstream methods and all their linked resources, preserved unchanged except the main entry name and Qingmu workflow/field mapping. No scripts, image model clients or external execution.",
+      "adaptation": "Two pinned upstream methods and all their linked resources, preserved unchanged except the main entry name and Qingmu workflow/field mapping. No scripts, image model clients or external execution. Qingmu read-back guidance separates retained media from complete prompt updates and verifies component dimensions and supporting surfaces.",
       "adaptedFiles": [
         "SKILL.md"
       ],

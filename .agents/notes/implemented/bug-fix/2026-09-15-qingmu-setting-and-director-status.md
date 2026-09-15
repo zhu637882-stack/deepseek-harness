@@ -19,3 +19,5 @@ The media preview now offers explicit manual deletion and restoration. Deleted m
 Reusable prop methods and the shared authoring prompt also distinguish net weight, package dimensions and physical object dimensions, preserve source confidence and propagate consistent scale into hand-held and container relationships. Exact vendor measurements remain a source question, not an inference from image pixels.
 
 Asset-library changes refresh generation progress as well as reference pickers. Deleted outputs leave the active run view; restoring an output reuses its original task without generating again. Unsaved design text remains intact.
+
+Native authoring exposed a further mismatch: retained prop prompts omitted dimensions added to their identity text, and layout blocks used inconsistent supporting heights. Shared production-design read-back now distinguishes preserving media from updating its complete description; scene guidance checks ground and support surfaces, thin components, rotated extents and real openings before composition previews. Preview rendering is not physical validation.

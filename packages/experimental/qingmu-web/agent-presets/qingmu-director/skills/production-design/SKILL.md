@@ -11,6 +11,14 @@ description: "Create and maintain continuity bibles for characters, locations, p
 
 使用青木已有 ID 和字段：稳定外观写 visualIdentity，具体可见画面写 imagePrompt，依据写 designBasis，场景结构写 space/sceneLayout，当前状态写 imageStage；不要另建一套合同。优先级是当前用户决定、当前剧本与已保存设计；未确认的旧候选不是必守外观。用户要求重新设计时可以变更待重做部分，不擅自替换保留素材。复用精简、可辨识的锚点，不把全剧资料和设计过程写进图片文字；不得执行任何外部脚本、自动出图、自动采用或固定多视图扩建。
 
+### 交稿前：按实际消费者读回设计
+
+逐项把更新后的 visualIdentity 与 imagePrompt 对照：身份和年代的可见特征、整体尺寸与单位、当前可见的结构和相对比例，必须在完整 imagePrompt 中自足；voiceIdentity 则独立包含已知年龄及可听出的声质。selfContainedImagePrompt=true 时模型不会再收到整段 visualIdentity 或 designBasis，不能依赖它们补救遗漏。只转写当前画面需要的事实，不复制全剧情、内部说明或跨场动作。
+
+“保留图片、不重画”约束素材选择和生成动作，不代表冻结有遗漏的文字设计。补全保留素材的尺度和结构时，同步相关 imagePrompt，原图片 ID 与引用保持不变，不能借此重新生成。只有真正完全未变的字段可以省略。复核容器内净尺寸、开口尺寸与物体装入方向；区分整体包围厚度与局部薄壁、压缝、纸张的材料厚度，不将身体最厚处套给每个部件。估值保留可修正标记。
+
+空间先按 scene-asset 的坐标与支承面核对，再预览构图；预览成功只表示能渲染，不证明家具落地、门能通行或提示词一致。修正发现的矛盾后，交付同一次最终预览采用的布局和文字，不混用旧试算。
+
 # character-location-prop-bible
 
 ## When to use
