@@ -768,7 +768,7 @@ it('authors a fresh project from its brief with no creative supplement', async (
   const port = setup()
   const brief = '现代乡镇诊所；主角为六十岁女医生，干练整洁；诊室明亮。'
   port.readAssetDesign.mockResolvedValue({ ...state, design: null, creativeSettings: { initialBrief: brief } })
-  const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
+  const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn<(sessionId: string, prompt: string) => Promise<void>>(async () => {}),
     read: vi.fn(async () => ({ text: '', script: '', lastSeq: 0, running: false, finished: false, error: '' })) }
   render(<NativeAssetDesign {...scope} port={port} storyPort={storyPort} onGenerated={vi.fn()} />)
   fireEvent.click(await screen.findByRole('button', { name: '根据剧本设计素材' }))
