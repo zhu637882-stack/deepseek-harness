@@ -161,6 +161,10 @@ export function NativeAssetDesign({ projectId, episodeId, port, storyPort, onGen
     void readRuns().catch(() => { /* Initial asset read reports missing script or authentication above. */ })
     return () => { active = false; live.current = false }
   }, [projectId, episodeId, port, readRuns, draftKey])
+  useEffect(() => {
+    if (!libraryRefreshToken) return
+    void readRuns().catch((error: unknown) => { if (live.current) setNotice(String(error)) })
+  }, [libraryRefreshToken, readRuns])
   const pending = [...runs, ...voiceRuns].some(run => !run.assetId && !['Failed', 'Cancelled', 'Succeeded', 'Completed'].includes(run.status))
   useEffect(() => {
     if (!pending) return

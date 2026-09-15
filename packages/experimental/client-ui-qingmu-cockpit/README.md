@@ -481,3 +481,5 @@ Scene authoring turns the screenplay location, user identity, social status and 
 Asset voice descriptions preserve the character’s stated age and audible identity. Saving them synchronizes the actor profile consumed by shot preparation; omitted voice fields retain existing direction, while an explicit empty value clears the description without replacing enrolled voices or media. The library distinguishes a complete voice audition from its locally derived three-second reference.
 
 Project asset previews support manual deletion and a separate recoverable trash view. A successful change refreshes reference pickers without discarding unsaved design edits. No candidate is automatically deleted or adopted.
+
+Asset-library changes refresh generation progress as well as reference pickers. Deleted outputs leave the active run view; restoring an output reuses its original task without generating again. Unsaved design text remains intact.

@@ -727,3 +727,17 @@ it.each(['matched', 'unknown-id', 'blank-prompt'] as const)('adopts reference-on
   expect(port.generateAssetImage).not.toHaveBeenCalled()
   expect(storyPort.send).not.toHaveBeenCalled()
 })
+
+it('refreshes removed media progress without replacing an unsaved design', async () => {
+  const port = setup()
+  port.readAssetImageRuns.mockResolvedValue({ ...scope, items: [{ taskId: 'task_1', entityId: 'actor_1', requestId: 'original', status: 'Succeeded', assetId: 'asset_1', errorCode: null }] })
+  const onGenerated = vi.fn()
+  const view = render(<NativeAssetDesign {...scope} port={port} onGenerated={onGenerated} libraryRefreshToken={0} />)
+  await screen.findByText('图片已生成，可在下方素材库查看')
+  fireEvent.change(screen.getByLabelText('画面描述'), { target: { value: '保留正在编辑的描述' } })
+  port.readAssetImageRuns.mockResolvedValue({ ...scope, items: [] })
+  view.rerender(<NativeAssetDesign {...scope} port={port} onGenerated={onGenerated} libraryRefreshToken={1} />)
+  await waitFor(() => { expect(screen.queryByText('图片已生成，可在下方素材库查看')).toBeNull() })
+  expect(screen.getByLabelText<HTMLTextAreaElement>('画面描述').value).toBe('保留正在编辑的描述')
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
