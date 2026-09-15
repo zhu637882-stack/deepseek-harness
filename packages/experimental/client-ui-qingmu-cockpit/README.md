@@ -483,3 +483,5 @@ Asset voice descriptions preserve the character’s stated age and audible ident
 Project asset previews support manual deletion and a separate recoverable trash view. A successful change refreshes reference pickers without discarding unsaved design edits. No candidate is automatically deleted or adopted.
 
 Asset-library changes refresh generation progress as well as reference pickers. Deleted outputs leave the active run view; restoring an output reuses its original task without generating again. Unsaved design text remains intact.
+
+Default asset authoring treats creative supplements as optional and derives appearance, construction, scale and audible identity from the brief and script. Native partial updates may retain an image prompt only when the subject identity is unchanged; voice-only revisions remain supported. Pending candidates retain their submitted supplement context so later edits cannot silently change its meaning. Empty-supplement request tests verify input routing, not media quality.

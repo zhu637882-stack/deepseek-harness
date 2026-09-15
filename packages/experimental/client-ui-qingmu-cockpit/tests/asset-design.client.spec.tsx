@@ -741,3 +741,42 @@ it('refreshes removed media progress without replacing an unsaved design', async
   expect(screen.getByLabelText<HTMLTextAreaElement>('画面描述').value).toBe('保留正在编辑的描述')
   expect(port.generateAssetImage).not.toHaveBeenCalled()
 })
+
+// An omitted derived prompt may be reused only while its subject stays unchanged.
+it.each([false, true])('handles an incremental native identity update without silently reusing its old prompt (changed: %s)', async (changed) => {
+  const port = setup()
+  const candidate = { assets: [{ kind: 'actor', id: 'actor_1', name: '父亲',
+    ...(changed ? { visualIdentity: '年长男子，深色长衫，白发' } : { voiceIdentity: '年长男声，厚实胸腔共鸣，沉稳慢速' }),
+  }] }
+  localStorage.setItem('qingmu.asset-design-session.v1:p:e', JSON.stringify({ sessionId: 'session_design', baseline: 0, submitted: true }))
+  const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
+    read: vi.fn(async () => ({ text: '设计', script: JSON.stringify(candidate), lastSeq: 10, running: false, finished: true, error: '' })) }
+  render(<NativeAssetDesign {...scope} port={port} storyPort={storyPort} onGenerated={vi.fn()} />)
+  await screen.findByLabelText('画面描述')
+  fireEvent.click(await screen.findByRole('button', { name: '采用到素材卡片' }))
+  if (changed) {
+    expect(await screen.findByText(/主体设计已改变，但导演没有交付对应画面描述/)).toBeTruthy()
+    expect(localStorage.getItem('qingmu.asset-design-draft.v1:p:e')).toBeNull()
+  } else {
+    expect(screen.getByLabelText<HTMLTextAreaElement>('声音身份').value).toBe('年长男声，厚实胸腔共鸣，沉稳慢速')
+  }
+  expect(screen.getByLabelText<HTMLTextAreaElement>('画面描述').value).toBe('真人定妆照')
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
+
+it('authors a fresh project from its brief with no creative supplement', async () => {
+  const port = setup()
+  const brief = '现代乡镇诊所；主角为六十岁女医生，干练整洁；诊室明亮。'
+  port.readAssetDesign.mockResolvedValue({ ...state, design: null, creativeSettings: { initialBrief: brief } })
+  const storyPort = { prepare: vi.fn(async () => {}), send: vi.fn(async () => {}),
+    read: vi.fn(async () => ({ text: '', script: '', lastSeq: 0, running: false, finished: false, error: '' })) }
+  render(<NativeAssetDesign {...scope} port={port} storyPort={storyPort} onGenerated={vi.fn()} />)
+  fireEvent.click(await screen.findByRole('button', { name: '根据剧本设计素材' }))
+  await waitFor(() => { expect(storyPort.send).toHaveBeenCalledOnce() })
+  const prompt = storyPort.send.mock.calls[0]?.[1]
+  expect(prompt).toContain(brief)
+  expect(prompt).toContain('创作补充是可选偏好，留空也必须完成全部专业设计')
+  expect(prompt).toContain('character-asset、scene-asset、prop-asset')
+  expect(screen.getByLabelText<HTMLTextAreaElement>('创作补充').value).toBe('')
+  expect(port.generateAssetImage).not.toHaveBeenCalled()
+})
