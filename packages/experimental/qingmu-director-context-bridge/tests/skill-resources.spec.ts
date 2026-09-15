@@ -98,7 +98,7 @@ it('resolves nested Markdown references to exact readable bundle paths without r
   const app = await reader()
   const result = await app.run({ skill: 'production-design', path: 'image-prompting/SKILL.md' })
   expect(result.isError).toBe(false)
-  const page = result.value as ResourcePage
+  const page = result.value as unknown as ResourcePage
   expect(page.content + '\n').toBe(await readFile(join(bundle, page.skill, page.path), 'utf8'))
   expect(page.linkedResources).toHaveLength(6)
   expect(page.linkedResources).toContainEqual({
