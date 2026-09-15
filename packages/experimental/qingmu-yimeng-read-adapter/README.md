@@ -232,3 +232,5 @@ Existing layout and camera data direct the native author to preview scene visibi
 Candidate video observations and heard transcripts are read separately from Take comments, bound to the exact video and retained generation intent. Independent observation is not a comparison verdict or acceptance. The existing director performs the comparison; single and batch preparation share execution guidance. See the [shared execution Agent Note](../../../.agents/notes/implemented/bug-fix/2026-09-15-qingmu-shared-execution-prompt.md).
 
 For existing layout/camera preparation, shared execution guidance uses the current `imageSubjects` actor volumes alongside fixed-object states. It asks the director to check screen side, occlusion and head/torso cropping using the same saved preview data. These are approximate occupied volumes, not evidence of correct acting or generated continuity.
+
+`referenceVideoAssets` optionally accepts `deleted: true` for the isolated trash catalog. Default reads exclude deleted assets.

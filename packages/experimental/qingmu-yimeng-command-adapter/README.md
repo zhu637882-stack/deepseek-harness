@@ -261,3 +261,5 @@ Scene-planning reads expose the film aspect ratio and each frame’s current sce
 The working-cut sound-review projection optionally carries versioned adjacent-cut observations and `methodChanged`. Legacy reports remain readable. The existing POST requests the current review method; reading the projection never submits an audit.
 
 Optional `imageSubjects` carries up to 60 temporary actor/prop volumes beside `imageObjectStates`. Each volume has an ID, label, placement basis, centre, size and optional rotation/colour. The Writer renders them with the fixed room and rejects duplicate IDs or collisions with fixed objects. Preview and saved image generation use the same composition; omitted asset fields preserve older clients and null/empty clears the temporary list. Shared room geometry stays unchanged.
+
+`setAssetLibraryState` posts exact project/episode, asset ID, expected SHA and deletion state to the existing asset-design API; the reply must match every binding.

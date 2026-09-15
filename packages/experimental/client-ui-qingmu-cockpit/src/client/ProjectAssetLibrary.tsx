@@ -101,16 +101,18 @@ function AssetThumbnail({ projectId, item, port }: {
 }
 
 /** A project-wide media browser; preview selection is local to this view. */
-export function ProjectAssetLibrary({ projectId, port, refreshToken = 0, onOpenReferenceUpload }: {
+export function ProjectAssetLibrary({ projectId, episodeId, port, refreshToken = 0, onOpenReferenceUpload, onLibraryChanged }: {
   readonly projectId: string
+  readonly episodeId?: string
   readonly port: Pick<
     QingmuYimengPort,
     'referenceVideoAssets'
-  > & PrivateReferencePreviewPort
+  > & PrivateReferencePreviewPort & Partial<Pick<QingmuYimengPort, 'setAssetLibraryState'>>
   /** Bumps after a real local-reference upload completes so the catalog rereads. */
   readonly refreshToken?: number
   /** Opens the existing person/scene upload surface; it never adopts a candidate. */
   readonly onOpenReferenceUpload?: () => void
+  readonly onLibraryChanged?: () => void
 }) {
   const [items, setItems] = useState<readonly ReferenceVideoAsset[]>([])
   const [page, setPage] = useState(0)
@@ -118,6 +120,9 @@ export function ProjectAssetLibrary({ projectId, port, refreshToken = 0, onOpenR
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
+  const [deleted, setDeleted] = useState(false)
+  const [changing, setChanging] = useState(false)
+  const [notice, setNotice] = useState('')
   const [kind, setKind] = useState<'all' | ReferenceVideoAsset['mediaType']>('all')
   const [selected, setSelected] = useState<string>()
   const [previewRetry, setPreviewRetry] = useState(0)
@@ -127,7 +132,7 @@ export function ProjectAssetLibrary({ projectId, port, refreshToken = 0, onOpenR
     const request = new AbortController(); operation.current = request
     setBusy(true); setError('')
     try {
-      const result = await port.referenceVideoAssets({ projectId, page: nextPage }, request.signal)
+      const result = await port.referenceVideoAssets({ projectId, page: nextPage, ...(deleted ? { deleted: true } : {}) }, request.signal)
       if (request.signal.aborted) return
       setItems(previous => nextPage === 1 ? result.items : [...previous, ...result.items.filter(item =>
         !previous.some(old => old.assetId === item.assetId && old.assetSha256 === item.assetSha256))])
@@ -139,11 +144,25 @@ export function ProjectAssetLibrary({ projectId, port, refreshToken = 0, onOpenR
       if (operation.current === request) operation.current = undefined
       if (!request.signal.aborted) setBusy(false)
     }
-  }, [projectId, port])
+  }, [projectId, port, deleted])
   useEffect(() => {
     void load(1)
     return () => { operation.current?.abort(); operation.current = undefined }
   }, [load, refreshToken])
+  async function changeLibraryState(item: ReferenceVideoAsset) {
+    if (!episodeId || !port.setAssetLibraryState || changing) return
+    setChanging(true); setNotice('')
+    try {
+      await port.setAssetLibraryState({ projectId, episodeId, assetId: item.assetId,
+        expectedSha256: item.assetSha256, deleted: !deleted })
+      setSelected(undefined)
+      await load(1)
+      onLibraryChanged?.()
+      setNotice(deleted ? '素材已恢复。' : '素材已删除，不再出现在可选素材中；可在已删除素材中恢复。')
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '素材未能更新，请重试。')
+    } finally { setChanging(false) }
+  }
   const filtered = items.filter(item => (kind === 'all' || item.mediaType === kind)
     && item.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
   const preview = items.find(item => item.assetId === selected)
@@ -163,8 +182,11 @@ export function ProjectAssetLibrary({ projectId, port, refreshToken = 0, onOpenR
       ] as const).map(([value, label]) => <button type="button" key={value} aria-pressed={kind === value}
         onClick={() => { setKind(value) }}>{label}</button>)}</div>
       <input aria-label="搜索素材" placeholder="搜索素材名称" value={query} onChange={(event) => { setQuery(event.target.value) }} />
+      {port.setAssetLibraryState && episodeId && <button type="button" disabled={busy || changing} aria-pressed={deleted}
+        onClick={() => { setSelected(undefined); setItems([]); setNotice(''); setDeleted(value => !value) }}>{deleted ? '返回素材库' : '已删除素材'}</button>}
       <span aria-live="polite">已载入 {items.length} 项</span>
     </div>
+    {notice && <p role="status">{notice}</p>}
     {error && <div role="alert"><p>素材暂时无法更新，请重试。</p><details><summary>错误详情</summary>{error}</details></div>}
     <div className={preview ? css.withPreview : undefined}>
       {preview && <section className={css.preview} aria-label="素材预览">
@@ -181,6 +203,8 @@ export function ProjectAssetLibrary({ projectId, port, refreshToken = 0, onOpenR
             : privateAvailable
               ? <p>正在读取这份本地参考素材。</p>
               : <p>此素材暂时没有可用的预览地址。刷新素材后重试。</p>}
+        {port.setAssetLibraryState && episodeId && <button type="button" disabled={changing || busy}
+          onClick={() => { void changeLibraryState(preview) }}>{changing ? '更新中…' : deleted ? '恢复素材' : '删除此素材'}</button>}
         <details><summary>素材标识</summary><code>{preview.assetId}</code></details>
       </section>}
       <div className={css.grid}>
@@ -191,7 +215,7 @@ export function ProjectAssetLibrary({ projectId, port, refreshToken = 0, onOpenR
             : item.mediaType === 'reference_audio' ? '音色 · 点击试听' : '图片 · 点击查看'}</small>
         </button>)}
       </div>
-      {!busy && !filtered.length && <p className={css.empty}>{items.length ? '没有找到匹配的素材。' : '项目中还没有可引用的图片或音色。选择人物或场景后，可上传图片参考；角色音色可在人物参考区上传。'}</p>}
+      {!busy && !filtered.length && <p className={css.empty}>{items.length ? '没有找到匹配的素材。' : deleted ? '没有已删除素材。' : '项目中还没有可引用的图片或音色。选择人物或场景后，可上传图片参考；角色音色可在人物参考区上传。'}</p>}
     </div>
     {page < pages && <button type="button" disabled={busy} onClick={() => { void load(page + 1) }}>加载更多素材</button>}
 

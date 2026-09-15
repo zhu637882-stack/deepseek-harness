@@ -3051,6 +3051,13 @@ export interface YimengCommandEndpointMap {
   readonly saveWorkingCut: import('./working-cut.ts').WorkingCutState
   readonly uploadWorkingCutAudio: import('./working-cut.ts').WorkingCutState
   readonly reviewWorkingCutSound: import('./working-cut.ts').WorkingCutState
+  readonly setAssetLibraryState: {
+    readonly projectId: string
+    readonly episodeId: string
+    readonly assetId: string
+    readonly assetSha256: string
+    readonly deleted: boolean
+  }
   readonly readAssetDesign: import('./asset-design.ts').AssetDesignState
   readonly previewSceneLayout: import('./asset-design.ts').SceneLayoutPreview
   readonly saveAssetDesign: import('./asset-design.ts').AssetDesignState

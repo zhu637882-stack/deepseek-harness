@@ -965,9 +965,10 @@ export function QingmuCockpit({
       </div>,
       assets: <div className={css.creativePage}>
         {pageHeader('02', '角色、场景与音色', '建立这一部作品的素材库，让同一人物和环境贯穿各个镜头。', 'storyboard')}{projectFacts}
-        {episodeId && <div className={css.stageContent}><NativeAssetDesign key={`${projectId}:${episodeId}`} projectId={projectId} episodeId={episodeId} port={port} storyPort={nativeDirectorSession?.story} onGenerated={() => { setAssetLibraryRefresh(value => value + 1) }} /></div>}
-        <div className={css.stageContent}><ProjectAssetLibrary key={projectId} projectId={projectId} port={port}
-          refreshToken={assetLibraryRefresh} onOpenReferenceUpload={openReferenceUpload} /></div>
+        {episodeId && <div className={css.stageContent}><NativeAssetDesign key={`${projectId}:${episodeId}`} projectId={projectId} episodeId={episodeId} port={port} storyPort={nativeDirectorSession?.story} libraryRefreshToken={assetLibraryRefresh} onGenerated={() => { setAssetLibraryRefresh(value => value + 1) }} /></div>}
+        <div className={css.stageContent}><ProjectAssetLibrary key={projectId} projectId={projectId} episodeId={episodeId} port={port}
+          refreshToken={assetLibraryRefresh} onOpenReferenceUpload={openReferenceUpload}
+          onLibraryChanged={() => { setAssetLibraryRefresh(value => value + 1) }} /></div>
         <div ref={assetWorkbenchRef} tabIndex={-1} role="group" aria-label="人物与场景参考上传">
           <details className={css.stageSupporting} open={assetWorkbenchOpen}
             onToggle={(event) => { setAssetWorkbenchOpen(event.currentTarget.open) }}>

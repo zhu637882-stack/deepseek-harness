@@ -215,6 +215,13 @@ export function prepareAssetDesign(endpoint: string, value: unknown, helpers: He
   let fields = ['projectId', 'episodeId']
   switch (endpoint) {
     case 'readAssetDesign': break
+    case 'setAssetLibraryState':
+      fields.push('assetId', 'expectedSha256', 'deleted'); path += '/library-state'; method = 'POST'
+      identifier(raw.assetId, f)
+      if (typeof raw.expectedSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(raw.expectedSha256)
+        || typeof raw.deleted !== 'boolean') throw f('asset library state invalid')
+      body = { assetId: raw.assetId as string, expectedSha256: raw.expectedSha256, deleted: raw.deleted }; break
+
     case 'previewSceneLayout':
       fields.push('layout', 'camera', 'ratio', ...['imageObjectStates', 'imageSubjects'].filter(key => key in raw)); path += '/layout-preview'; method = 'POST'
       if (typeof raw.ratio !== 'string' || !['1:1', '3:4', '4:3', '9:16', '16:9'].includes(raw.ratio)) throw f('layout preview ratio invalid')
@@ -249,7 +256,10 @@ export function prepareAssetDesign(endpoint: string, value: unknown, helpers: He
       identifier(result.taskId, b)
     } else {
       if (result.projectId !== projectId || result.episodeId !== episodeId) throw b('asset design scope mismatch')
-      if (endpoint === 'previewSceneLayout') {
+      if (endpoint === 'setAssetLibraryState') {
+        if (result.assetId !== raw.assetId || result.assetSha256 !== raw.expectedSha256
+          || result.deleted !== raw.deleted) throw b('asset library receipt mismatch')
+      } else if (endpoint === 'previewSceneLayout') {
         if (result.recipe !== 'qingmu-blockout-v1' || typeof result.imageUrl !== 'string'
           || !/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/.test(result.imageUrl)
           || result.imageUrl.length > 2 * 1024 * 1024 || typeof result.sha256 !== 'string'

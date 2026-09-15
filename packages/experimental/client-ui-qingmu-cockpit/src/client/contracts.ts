@@ -842,6 +842,8 @@ export interface QingmuYimengCommandPort {
   saveWorkingCut(request: CreationScope & { command: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').WorkingCutCommand }, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').WorkingCutState>
   /** Import a bounded local music, ambience, effect or dialogue source. */
   uploadWorkingCutAudio(request: CreationScope & { command: { filename: string; contentBase64: string } | { presetId: string } }, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').WorkingCutState>
+  setAssetLibraryState(request: CreationScope & { assetId: string; expectedSha256: string; deleted: boolean },
+    signal?: AbortSignal): Promise<{ projectId: string; episodeId: string; assetId: string; assetSha256: string; deleted: boolean }>
   readAssetDesign(request: CreationScope, signal?: AbortSignal): Promise<AssetDesignState>
   /** Render authored scene volumes locally; this neither saves nor generates media. */
   previewSceneLayout(request: CreationScope & { imageObjectStates?: readonly import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ImageObjectState[] | null; layout: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').SceneLayout; camera: import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').ImageCamera; ratio: string }, signal?: AbortSignal): Promise<import('@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types').SceneLayoutPreview>

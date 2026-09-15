@@ -5311,7 +5311,7 @@ export function createYimengReadHandler(
       } else if (endpoint === 'referenceVideoAssets') {
         let request
         try { request = parseReferenceVideoAssetsRequest(payload) } catch { throw new InputError('invalid reference assets request') }
-        path = `/api/projects/${encodeURIComponent(request.projectId)}/assets?page=${request.page}&page_size=200`
+        path = `/api/projects/${encodeURIComponent(request.projectId)}/assets?page=${request.page}&page_size=200${request.deleted ? '&deleted=true' : ''}`
         normalize = value => normalizeReferenceVideoAssets(value, request, baseUrl)
       } else if (endpoint === 'takePreview') {
         let request

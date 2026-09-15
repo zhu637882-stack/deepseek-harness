@@ -225,3 +225,5 @@ Ready PromptIR 的 `firstFrameQuote` 还返回一次服务端重算、按当前�
 候选视频观察与实际听写独立于 Take 评论读取，绑定精确视频及保留的生成要求。独立观察不代表已作比较或验收。原有导演负责对照，单镜与批量整理共用执行说明。详见[共用执行说明](../../../.agents/notes/implemented/bug-fix/2026-09-15-qingmu-shared-execution-prompt.zh.md)。
 
 对已有布局和机位的生成准备，共用执行指引将当前 `imageSubjects` 演员体块与固定物件状态一起使用，要求导演用相同的保存与预览数据核对画面左右、遮挡和头肩裁切。体块只是占位估计，不是表演正确或生成连续性通过的证据。
+
+`referenceVideoAssets` 可传入 `deleted: true` 读取独立的已删除素材目录；默认读取排除已删除素材。

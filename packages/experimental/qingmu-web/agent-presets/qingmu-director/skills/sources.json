@@ -717,7 +717,7 @@
       "license": "Apache-2.0",
       "files": {
         "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
-        "SKILL.md": "f9babf3ed42e498d9c7b38d3581c67cbf6d7c3228a7d17ee7589503125b934cb",
+        "SKILL.md": "410472f4c2cf8e48fb952956c8d075ea23fcfc14acbd09c4806c4570221ba872",
         "references/cinematic-image-direction.md": "b2fc8b2dd6dbd1bcf78bc2671806575352db95481796dc5cae5a5c6a6befb945",
         "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
         "agents/openai.yaml": "a7e8d276f3c726dac65f4e8afa535e5213effee2c820c76d03130da0510a9600"
@@ -729,7 +729,7 @@
         "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
         "agents/openai.yaml": "a7e8d276f3c726dac65f4e8afa535e5213effee2c820c76d03130da0510a9600"
       },
-      "adaptation": "Full asset skill and references; Qingmu scope and delegated creative-review precedence added.",
+      "adaptation": "Full asset skill and references; Qingmu scope and delegated creative-review precedence added. Qingmu production-design synthesis distinguishes era/status, visible construction and immutable appearance from shot state.",
       "adaptedFiles": [
         "SKILL.md"
       ]
@@ -740,7 +740,7 @@
       "license": "Apache-2.0",
       "files": {
         "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
-        "SKILL.md": "1a0510608e88b5f1c46ccb3d2455ba796abe7b169dafdf34b832eddfa6aebf78",
+        "SKILL.md": "2a9df20b49c7842b495b5341b48b3a604588cd0c8cf5eb8d23cd0020bd8ab5f0",
         "references/cinematic-image-direction.md": "b2fc8b2dd6dbd1bcf78bc2671806575352db95481796dc5cae5a5c6a6befb945",
         "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
         "agents/openai.yaml": "7ffb6718d97e5858e5070dbf6e1330a7118f817c372dcb43da6ebb2949c16084"
@@ -752,7 +752,7 @@
         "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
         "agents/openai.yaml": "7ffb6718d97e5858e5070dbf6e1330a7118f817c372dcb43da6ebb2949c16084"
       },
-      "adaptation": "Full asset skill and references; Qingmu creative delegation, narrative production design, intentional negative space and image-review diagnosis added.",
+      "adaptation": "Full asset skill and references; Qingmu creative delegation, narrative production design, intentional negative space and image-review diagnosis added. Qingmu production-design synthesis distinguishes era/status, visible construction and immutable appearance from shot state.",
       "adaptedFiles": [
         "SKILL.md"
       ]
@@ -763,7 +763,7 @@
       "license": "Apache-2.0",
       "files": {
         "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
-        "SKILL.md": "fbbc9e4d9f51b82daa93bdf5cae868eca7b91776b88fe881f411ea743d8f5ff8",
+        "SKILL.md": "962cc1ef0ba66bbd94d5f3477ace74b0983e3578992e2269d3d14316d60fdeed",
         "references/cinematic-image-direction.md": "b2fc8b2dd6dbd1bcf78bc2671806575352db95481796dc5cae5a5c6a6befb945",
         "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
         "agents/openai.yaml": "a007a9763e7bbcc88cf05e5a5b492d9ad5621ef582b90425ece906ce0ce12520"
@@ -775,10 +775,73 @@
         "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
         "agents/openai.yaml": "a007a9763e7bbcc88cf05e5a5b492d9ad5621ef582b90425ece906ce0ce12520"
       },
-      "adaptation": "Full asset skill and references; Qingmu scope, delegated creative review and clean movable-prop identity images separated from optional interaction references.",
+      "adaptation": "Full asset skill and references; Qingmu scope, delegated creative review and clean movable-prop identity images separated from optional interaction references. Qingmu production-design synthesis distinguishes era/status, visible construction and immutable appearance from shot state.",
       "adaptedFiles": [
         "SKILL.md"
       ]
+    },
+    "production-design": {
+      "repository": "https://github.com/0xhughs/director-skills",
+      "commit": "35ca0a2b4cd55b0668aa9ea0f40273324b774bb4",
+      "license": "MIT",
+      "files": {
+        "LICENSE": "5c609a7d9174ac54756c1cf35d486920618adb9a0a9ee8688121ea9a0d80ee70",
+        "SKILL.md": "7fc7426084859991f6ebda5f7b4bb1a658d11d205d5c58adf26579f6088f50ba",
+        "image-prompting/SKILL.md": "41e9c8bf3cecf2c929c3169f41aaeec6195a4fc50ce4d669dac025a7db400fde",
+        "references/continuity_system.md": "efa14c202f76222bbb85469be2957abc56953571ca3f3d43e1a19c4d63cf68d5",
+        "references/visual_bible_system.md": "2cf0c241bebe49a5f1c7d80afad2a3ca2cdb3d88411c9f242c1e27ae1cbe84d4",
+        "references/identity_anchors.md": "d69cfe6da70d63524a6d53e0c468f407b79bf71f8fa00e22730158683584eb74",
+        "references/golden_image_workflow.md": "5d75414810241720d2d5288eb0c61b3ca18a9451363c0bebb4cef616269a554d",
+        "templates/character_profile.md": "6ac8d89c3d9188f6ff76869d94e2171a40e903a28e3894f3ba8f1aec7e154072",
+        "templates/location_profile.md": "831f1774919fa0781f5726ae4713cdbc1a5e58bb8fba620e1497c1fbe3081a7e",
+        "templates/continuity_checklist.md": "235955e059a8f8f43f2ce22766eb59571c7c0a69277b728ef392b60050baa484",
+        "image-prompting/references/image_prompt_components.md": "0dddab119176e7a897fadcceaeb65b7694600a01a457fe2802ccf7f9133387e9",
+        "image-prompting/references/lighting_and_photorealism.md": "5cf854b7714429fb21ff854134833d5ddd58db3c43d4f4130354d4cf548f9fa7",
+        "image-prompting/references/prompt_anatomy.md": "5b2960a8551eac5be60c17c7e3c48b4f482b7404167051613e28ee0341cf802e",
+        "image-prompting/references/negative_prompt_patterns.md": "ffcbb7f09c27c8f2713b4e8b2f5953e7ec87836f4d4439263e55784e0da439b1",
+        "image-prompting/templates/cinematic_still_prompt.md": "d4e04bbcc84d34f7a032253a201e8d21082af3b087ace88bc579735de02aca69",
+        "image-prompting/templates/character_reference_sheet_prompt.md": "70dd42d286c6f0b2ba21382475c21e6c6e87797d0be64994a9dc68feb2fd1965"
+      },
+      "upstreamFiles": {
+        "LICENSE": "5c609a7d9174ac54756c1cf35d486920618adb9a0a9ee8688121ea9a0d80ee70",
+        "SKILL.md": "3aa7722fc49475551f92f93565148596c54d8c6a65f317baad3299fd64110201",
+        "image-prompting/SKILL.md": "41e9c8bf3cecf2c929c3169f41aaeec6195a4fc50ce4d669dac025a7db400fde",
+        "references/continuity_system.md": "efa14c202f76222bbb85469be2957abc56953571ca3f3d43e1a19c4d63cf68d5",
+        "references/visual_bible_system.md": "2cf0c241bebe49a5f1c7d80afad2a3ca2cdb3d88411c9f242c1e27ae1cbe84d4",
+        "references/identity_anchors.md": "d69cfe6da70d63524a6d53e0c468f407b79bf71f8fa00e22730158683584eb74",
+        "references/golden_image_workflow.md": "5d75414810241720d2d5288eb0c61b3ca18a9451363c0bebb4cef616269a554d",
+        "templates/character_profile.md": "6ac8d89c3d9188f6ff76869d94e2171a40e903a28e3894f3ba8f1aec7e154072",
+        "templates/location_profile.md": "831f1774919fa0781f5726ae4713cdbc1a5e58bb8fba620e1497c1fbe3081a7e",
+        "templates/continuity_checklist.md": "235955e059a8f8f43f2ce22766eb59571c7c0a69277b728ef392b60050baa484",
+        "image-prompting/references/image_prompt_components.md": "0dddab119176e7a897fadcceaeb65b7694600a01a457fe2802ccf7f9133387e9",
+        "image-prompting/references/lighting_and_photorealism.md": "5cf854b7714429fb21ff854134833d5ddd58db3c43d4f4130354d4cf548f9fa7",
+        "image-prompting/references/prompt_anatomy.md": "5b2960a8551eac5be60c17c7e3c48b4f482b7404167051613e28ee0341cf802e",
+        "image-prompting/references/negative_prompt_patterns.md": "ffcbb7f09c27c8f2713b4e8b2f5953e7ec87836f4d4439263e55784e0da439b1",
+        "image-prompting/templates/cinematic_still_prompt.md": "d4e04bbcc84d34f7a032253a201e8d21082af3b087ace88bc579735de02aca69",
+        "image-prompting/templates/character_reference_sheet_prompt.md": "70dd42d286c6f0b2ba21382475c21e6c6e87797d0be64994a9dc68feb2fd1965"
+      },
+      "adaptation": "Two pinned upstream methods and all their linked resources, preserved unchanged except the main entry name and Qingmu workflow/field mapping. No scripts, image model clients or external execution.",
+      "adaptedFiles": [
+        "SKILL.md"
+      ],
+      "upstreamPaths": {
+        "LICENSE": "LICENSE",
+        "SKILL.md": "skills/character-location-prop-bible/SKILL.md",
+        "image-prompting/SKILL.md": "skills/cinematic-image-prompting/SKILL.md",
+        "references/continuity_system.md": "skills/character-location-prop-bible/references/continuity_system.md",
+        "references/visual_bible_system.md": "skills/character-location-prop-bible/references/visual_bible_system.md",
+        "references/identity_anchors.md": "skills/character-location-prop-bible/references/identity_anchors.md",
+        "references/golden_image_workflow.md": "skills/character-location-prop-bible/references/golden_image_workflow.md",
+        "templates/character_profile.md": "skills/character-location-prop-bible/templates/character_profile.md",
+        "templates/location_profile.md": "skills/character-location-prop-bible/templates/location_profile.md",
+        "templates/continuity_checklist.md": "skills/character-location-prop-bible/templates/continuity_checklist.md",
+        "image-prompting/references/image_prompt_components.md": "skills/cinematic-image-prompting/references/image_prompt_components.md",
+        "image-prompting/references/lighting_and_photorealism.md": "skills/cinematic-image-prompting/references/lighting_and_photorealism.md",
+        "image-prompting/references/prompt_anatomy.md": "skills/cinematic-image-prompting/references/prompt_anatomy.md",
+        "image-prompting/references/negative_prompt_patterns.md": "skills/cinematic-image-prompting/references/negative_prompt_patterns.md",
+        "image-prompting/templates/cinematic_still_prompt.md": "skills/cinematic-image-prompting/templates/cinematic_still_prompt.md",
+        "image-prompting/templates/character_reference_sheet_prompt.md": "skills/cinematic-image-prompting/templates/character_reference_sheet_prompt.md"
+      }
     }
   }
 }

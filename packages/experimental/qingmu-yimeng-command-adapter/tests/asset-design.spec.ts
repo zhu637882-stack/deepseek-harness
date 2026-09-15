@@ -80,3 +80,13 @@ it('uses scoped voice quotation and original voice-task recovery routes', async 
   expect(await recovered.handler('readAssetVoiceRuns', scope, new AbortController().signal)).toMatchObject({ ok: true, value: result })
   expect(recovered.fetch.mock.calls[0]?.[0]).toContain('/asset-design/voice/runs')
 })
+
+it('binds recoverable library deletion to the exact asset and rejects mismatched receipts', async () => {
+  const request = { ...scope, assetId: 'image_1', expectedSha256: 'b'.repeat(64), deleted: true }
+  const receipt = { ...scope, assetId: request.assetId, assetSha256: request.expectedSha256, deleted: true }
+  const { fetch, handler } = setup(receipt)
+  expect(await handler('setAssetLibraryState', request, new AbortController().signal)).toMatchObject({ ok: true, value: receipt })
+  expect(fetch.mock.calls[0]?.[0]).toContain('/asset-design/library-state')
+  expect(fetch.mock.calls[0]?.[1]?.method).toBe('POST')
+  expect(await setup({ ...receipt, assetId: 'other' }).handler('setAssetLibraryState', request, new AbortController().signal)).toMatchObject({ ok: false })
+})

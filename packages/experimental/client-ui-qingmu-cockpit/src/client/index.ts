@@ -218,6 +218,7 @@ export function apply(ctx: ClientContext): void {
     renderWorkingCut: (request, signal) => command('renderWorkingCut', request, signal),
     saveWorkingCut: (request, signal) => command('saveWorkingCut', request, signal),
     uploadWorkingCutAudio: (request, signal) => command('uploadWorkingCutAudio', request, signal),
+    setAssetLibraryState: (request, signal) => command('setAssetLibraryState', request, signal),
     readAssetDesign: (request, signal) => command('readAssetDesign', request, signal),
     previewSceneLayout: (request, signal) => command('previewSceneLayout', request, signal),
     saveAssetDesign: (request, signal) => command('saveAssetDesign', request, signal),

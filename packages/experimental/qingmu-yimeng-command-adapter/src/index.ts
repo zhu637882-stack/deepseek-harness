@@ -5859,7 +5859,7 @@ export function createYimengCommandHandler(
         path = prepared.path
         requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body, endpoint === 'uploadWorkingCutAudio' ? 45 * 1024 * 1024 : MAX_JSON_BYTES) }) }
         normalize = prepared.normalize
-      } else if (['previewSceneLayout', 'readAssetDesign', 'saveAssetDesign', 'quoteAssetImage', 'generateAssetImage', 'readAssetImageRuns', 'quoteAssetVoice', 'generateAssetVoice', 'readAssetVoiceRuns'].includes(endpoint)) {
+      } else if (['setAssetLibraryState', 'previewSceneLayout', 'readAssetDesign', 'saveAssetDesign', 'quoteAssetImage', 'generateAssetImage', 'readAssetImageRuns', 'quoteAssetVoice', 'generateAssetVoice', 'readAssetVoiceRuns'].includes(endpoint)) {
         const prepared = prepareAssetDesign(endpoint, payload, stageArtifactHelpers)
         path = prepared.path
         requestInit = { method: prepared.method, ...(prepared.body === undefined ? {} : { body: serializeBody(prepared.body) }),
@@ -6304,7 +6304,7 @@ export function createYimengCommandHandler(
         || endpoint === 'updateProject'
         || ['previewProjectCopy', 'copyProject', 'recoverProjectCopy'].includes(endpoint)
         || ['readWorkingCut', 'renderWorkingCut', 'saveWorkingCut', 'uploadWorkingCutAudio', 'reviewWorkingCutSound'].includes(endpoint)
-        || ['previewSceneLayout', 'readAssetDesign', 'saveAssetDesign', 'quoteAssetImage', 'generateAssetImage', 'readAssetImageRuns', 'quoteAssetVoice', 'generateAssetVoice', 'readAssetVoiceRuns'].includes(endpoint)
+        || ['setAssetLibraryState', 'previewSceneLayout', 'readAssetDesign', 'saveAssetDesign', 'quoteAssetImage', 'generateAssetImage', 'readAssetImageRuns', 'quoteAssetVoice', 'generateAssetVoice', 'readAssetVoiceRuns'].includes(endpoint)
         || endpoint === 'previewShootingFirstFrame'
         || ['readScenePlanning', 'saveScenePlanning', 'recoverScenePlanning'].includes(endpoint)
         || ['readStyleComposition', 'readCreativeContract', 'initializeProject', 'recoverProjectInitialization', 'readTextImport', 'createTextImport', 'correctTextImport', 'confirmTextImport'].includes(endpoint)

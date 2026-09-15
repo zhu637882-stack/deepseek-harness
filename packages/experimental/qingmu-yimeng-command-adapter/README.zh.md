@@ -233,3 +233,5 @@ WorkingClip.sourceAudioMode 可选 original、silent、speech_effects 或 speech
 剪辑声音检查投影可包含绑定版本的前后镜观察及 `methodChanged`。旧报告继续可读；现有 POST 请求当前检查方法，读取投影不会提交审片。
 
 可选 `imageSubjects` 与 `imageObjectStates` 并列，提供最多60个临时人物或道具体块。每个体块记录编号、标签、布置依据、中心、尺寸以及可选旋转和颜色。Writer 与固定场地一起渲染，拒绝重复编号及覆盖固定物件。预览和保存后的图片生成使用同一构图；旧素材客户端省略时保留，显式 null 或空列表清除临时主体，共用场地几何不变。
+
+`setAssetLibraryState` 向现有素材设计 API 提交项目/集、素材 ID、预期 SHA 和删除状态，回执必须与所有绑定相符。

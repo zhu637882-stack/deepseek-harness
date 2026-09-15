@@ -227,7 +227,9 @@ export function normalizeReferenceVideoPreview(
  * @returns Project and page.
  */
 export function parseReferenceVideoAssetsRequest(value: unknown): ReferenceVideoAssetsRequest {
-  const v = object(value, ['projectId', 'page'])
+  const v = object(value)
+  if (Object.keys(v).some(key => !['projectId', 'page', 'deleted'].includes(key))
+    || ('deleted' in v && typeof v.deleted !== 'boolean')) throw new Error('invalid asset page filter')
   id(v.projectId); integer(v.page, 1, 1000000)
   return value as ReferenceVideoAssetsRequest
 }

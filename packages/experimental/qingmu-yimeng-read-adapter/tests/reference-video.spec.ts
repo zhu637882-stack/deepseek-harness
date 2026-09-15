@@ -259,3 +259,15 @@ it('retains preparation feedback through transport without treating it as filmed
   expect((await handler('referenceVideoPreview', { ...draft, preparationFeedback: 12 }, signal())).ok).toBe(false)
   expect(fetch).toHaveBeenCalledOnce()
 })
+
+it('reads trash only through the explicit deleted catalog flag', async () => {
+  const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () =>
+    Response.json({ page: 1, pages: 1, page_size: 200, items: [] }))
+  const handler = createYimengReadHandler({}, { fetch, readToken: () => 'fixture' })
+  expect((await handler('referenceVideoAssets', { projectId: 'p', page: 1, deleted: true }, signal())).ok).toBe(true)
+  expect(String(fetch.mock.calls[0]?.[0])).toContain('&deleted=true')
+  expect((await handler('referenceVideoAssets', { projectId: 'p', page: 1 }, signal())).ok).toBe(true)
+  expect(String(fetch.mock.calls[1]?.[0])).not.toContain('deleted=')
+  expect((await handler('referenceVideoAssets', { projectId: 'p', page: 1, deleted: 'true' }, signal())).ok).toBe(false)
+  expect(fetch).toHaveBeenCalledTimes(2)
+})

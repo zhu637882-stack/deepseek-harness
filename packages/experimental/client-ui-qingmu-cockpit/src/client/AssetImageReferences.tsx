@@ -66,11 +66,12 @@ interface AssetImageReferencesProps {
   readonly onChange: (value: readonly AssetImageReference[]) => void
   readonly disabled: boolean
   readonly allowRegions?: boolean
+  readonly refreshToken?: number
 }
 
 /** Choose references within one project; switching projects discards the previous catalog and page. */
 export function AssetImageReferences(props: AssetImageReferencesProps) {
-  return <ProjectImageReferences key={props.projectId} {...props} />
+  return <ProjectImageReferences key={`${props.projectId}:${props.refreshToken ?? 0}`} {...props} />
 }
 
 function ProjectImageReferences({ projectId, references, port, onChange, disabled, allowRegions = true }: AssetImageReferencesProps) {

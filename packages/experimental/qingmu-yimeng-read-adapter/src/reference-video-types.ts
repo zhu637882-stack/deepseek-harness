@@ -80,7 +80,7 @@ export interface ReferenceVideoPreviewResponse {
 }
 
 /** Paginated project assets available for explicit draft references. */
-export interface ReferenceVideoAssetsRequest { readonly projectId: string; readonly page: number }
+export interface ReferenceVideoAssetsRequest { readonly projectId: string; readonly page: number; readonly deleted?: boolean }
 
 /** Asset metadata is a selectable draft source, without implying creative approval. */
 export interface ReferenceVideoAsset {

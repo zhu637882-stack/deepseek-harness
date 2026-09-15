@@ -291,3 +291,41 @@ it('ignores a late private voice read after its selection is closed', async () =
   await waitFor(() => { expect(screen.queryByRole('region', { name: '素材预览' })).toBeNull() })
   expect(createObjectURL).not.toHaveBeenCalled()
 })
+
+it('deletes only the opened asset and restores it from a separate trash view', async () => {
+  let deleted = false
+  const port = { referenceVideoAssets: vi.fn(async (request: { deleted?: boolean }) =>
+    page(Boolean(request.deleted) === deleted ? [picture] : [])),
+  readLocalReferenceCandidateContent: localReader(),
+  setAssetLibraryState: vi.fn(async (request: {
+    projectId: string
+    episodeId: string
+    assetId: string
+    expectedSha256: string
+    deleted: boolean
+  }) => {
+    deleted = request.deleted
+    return { ...request, assetSha256: request.expectedSha256 }
+  }) }
+  render(<ProjectAssetLibrary projectId="p" episodeId="ep" port={port} />)
+  fireEvent.click(await screen.findByRole('button', { name: '预览林予' }))
+  fireEvent.click(screen.getByRole('button', { name: '删除此素材' }))
+  await screen.findByText('素材已删除，不再出现在可选素材中；可在已删除素材中恢复。')
+  expect(port.setAssetLibraryState).toHaveBeenCalledWith({ projectId: 'p', episodeId: 'ep', assetId: 'face', expectedSha256: 'a'.repeat(64), deleted: true })
+  expect(screen.queryByRole('button', { name: '预览林予' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '已删除素材' }))
+  fireEvent.click(await screen.findByRole('button', { name: '预览林予' }))
+  fireEvent.click(screen.getByRole('button', { name: '恢复素材' }))
+  await screen.findByText('素材已恢复。')
+  fireEvent.click(screen.getByRole('button', { name: '返回素材库' }))
+  expect(await screen.findByRole('button', { name: '预览林予' })).toBeTruthy()
+})
+it('retains the preview when deleting an in-use asset is refused', async () => {
+  const port = { referenceVideoAssets: vi.fn(async () => page([picture])), readLocalReferenceCandidateContent: localReader(),
+    setAssetLibraryState: vi.fn().mockRejectedValue(new Error('素材仍被已保存的设计引用')) }
+  render(<ProjectAssetLibrary projectId="p" episodeId="ep" port={port} />)
+  fireEvent.click(await screen.findByRole('button', { name: '预览林予' }))
+  fireEvent.click(screen.getByRole('button', { name: '删除此素材' }))
+  expect(await screen.findByText('素材仍被已保存的设计引用')).toBeTruthy()
+  expect(screen.getByRole('region', { name: '素材预览' })).toBeTruthy()
+})
