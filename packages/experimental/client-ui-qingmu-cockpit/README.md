@@ -485,3 +485,5 @@ Project asset previews support manual deletion and a separate recoverable trash 
 Asset-library changes refresh generation progress as well as reference pickers. Deleted outputs leave the active run view; restoring an output reuses its original task without generating again. Unsaved design text remains intact.
 
 Default asset authoring treats creative supplements as optional and derives appearance, construction, scale and audible identity from the brief and script. Native partial updates may retain an image prompt only when the subject identity is unchanged; voice-only revisions remain supported. Pending candidates retain their submitted supplement context so later edits cannot silently change its meaning. Empty-supplement request tests verify input routing, not media quality.
+
+A real empty-supplement run copied saved descriptions despite reading the skills. The default work order now explicitly requires a design review against the brief before serializing existing fields; saved content is not treated as creative acceptance.
