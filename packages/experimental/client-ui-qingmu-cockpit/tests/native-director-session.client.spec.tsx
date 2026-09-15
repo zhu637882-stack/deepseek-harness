@@ -11,6 +11,7 @@ import { directorConnectionFixture } from './director-connection-fixture.client.
 
 afterEach(() => { cleanup(); sessionStorage.clear() })
 const ok = <T,>(value: T) => ({ result: { ok: true as const, value } })
+type WritingEvent = { event: { seq: number; type: string; data: Record<string, unknown> } }
 const mounted: NativeDirectorReadiness = { status: 'mounted', presetId: 'qingmu-director',
   tools: ['qingmu_read_bound_context', 'qingmu_get_imago_method', 'qingmu_read_prompt_draft', 'qingmu_propose_prompt_edit'], missingTools: [] }
 function fixture(blank = true, preset = 'ordinary') {
@@ -22,7 +23,10 @@ function fixture(blank = true, preset = 'ordinary') {
   const workspaces = { list: { getSnapshot: () => workspaceState }, connectWorkspace: vi.fn(async () => 'new-empty') }
   const api = { agentPresets: { list: vi.fn(async () => ok({ presets: [{ id: 'qingmu-director', broken: false }] })),
     select: vi.fn(async () => ok({ agentPreset: 'qingmu-director' })) }, sessions: {
-    create: vi.fn(async (_input?: unknown) => ok({})), prompt: vi.fn(async () => ok({})) } }
+    create: vi.fn(async (_input?: unknown) => ok({})), prompt: vi.fn(async () => ok({})),
+    history: vi.fn(async (_input?: unknown) => ok({ events: [] as WritingEvent[] })),
+    list: vi.fn(async () => ok({ items: [{ sessionId: 'creative-session', cwd: '/retained-project',
+      running: false, agentPreset: 'qingmu-director' }] })) } }
   const ctx = { get: (key: string) => key === 'sessions' ? sessions : key === 'workspaces' ? workspaces : undefined } as unknown as ClientContext
   const port = createNativeDirectorSessionPort(ctx, { api, hostDescription: transport.source } as unknown as ConnectionHandle)
   const target = { schema: 'qingmu.native-director-request.v1' as const, sessionId: 's1',
@@ -30,6 +34,50 @@ function fixture(blank = true, preset = 'ordinary') {
     contextSnapshotSha256: 'a'.repeat(64), ownerId: 'browser-1' }
   return { transport, row, sessionState, sessions, workspaceState, workspaces, api, port, target }
 }
+
+it('repairs a cold interrupted writing turn through native recovery without resending or changing navigation', async () => {
+  const f = fixture(false, 'qingmu-director')
+  const events: WritingEvent[] = [{ event: { seq: 5, type: 'turn/start', data: {} } }]
+  f.api.sessions.history.mockImplementation(async () => ok({ events: [...events] }))
+  f.api.sessions.create.mockImplementation(async () => {
+    events.push({ event: { seq: 6, type: 'turn/end', data: { reason: { kind: 'interrupted' } } } })
+    return ok({})
+  })
+  const result = await f.port.story?.read('creative-session', 4)
+  expect(result).toMatchObject({ running: false, finished: true, script: '', error: '编剧已停止，当前稿尚未完成。' })
+  expect(f.api.sessions.create).toHaveBeenCalledExactlyOnceWith({ sessionId: 'creative-session',
+    cwd: '/retained-project', agentPreset: 'qingmu-director' })
+  expect(f.api.sessions.history).toHaveBeenCalledTimes(2)
+  expect(f.api.sessions.prompt).not.toHaveBeenCalled()
+  expect(f.sessions.open).not.toHaveBeenCalled()
+  await f.port.story?.read('creative-session', 4)
+  expect(f.api.sessions.create).toHaveBeenCalledTimes(1)
+})
+
+it('leaves a live writing turn running and propagates uncertain recovery without replay', async () => {
+  const f = fixture(false, 'qingmu-director')
+  f.api.sessions.history.mockResolvedValue(ok({ events: [{ event: { seq: 5, type: 'turn/start', data: {} } }] }))
+  f.api.sessions.list.mockResolvedValueOnce(ok({ items: [{ sessionId: 'creative-session', cwd: '/retained-project',
+    running: true, agentPreset: 'qingmu-director' }] }))
+  expect(await f.port.story?.read('creative-session', 4)).toMatchObject({ running: true, finished: false })
+  expect(f.api.sessions.create).not.toHaveBeenCalled()
+  f.api.sessions.create.mockRejectedValueOnce(new Error('connection lost'))
+  await expect(f.port.story?.read('creative-session', 4)).rejects.toThrow('connection lost')
+  expect(f.api.sessions.create).toHaveBeenCalledTimes(1)
+  expect(f.api.sessions.prompt).not.toHaveBeenCalled()
+})
+
+it('does not recover an unverified writing composition or treat an unstarted queue as interrupted', async () => {
+  const f = fixture(false, 'qingmu-director')
+  expect(await f.port.story?.read('creative-session', 4)).toMatchObject({ running: false, finished: false })
+  expect(f.api.sessions.list).not.toHaveBeenCalled()
+  f.api.sessions.history.mockResolvedValue(ok({ events: [{ event: { seq: 5, type: 'turn/start', data: {} } }] }))
+  f.api.sessions.list.mockResolvedValue(ok({ items: [{ sessionId: 'creative-session', cwd: '/retained-project',
+    running: false, agentPreset: 'ordinary' }] }))
+  await expect(f.port.story?.read('creative-session', 4)).rejects.toThrow('会话身份不完整')
+  expect(f.api.sessions.create).not.toHaveBeenCalled()
+  expect(f.api.sessions.prompt).not.toHaveBeenCalled()
+})
 
 it('creates separate project directors and restores their own Host identities without reusing a selected old director', async () => {
   const f = fixture(false, 'qingmu-director')

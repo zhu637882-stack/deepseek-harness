@@ -76,11 +76,28 @@ export function createNativeDirectorSessionPort(ctx: ClientContext, connection: 
           { type: 'text', text }], clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone })).result)
     },
     async read(sessionId, afterSeq) {
-      const value = unwrapRpc((await connection.api.sessions.history({ sessionId: sessionId as NativeSessionId, maxMessages: 64 })).result)
-      if (!value || typeof value !== 'object' || !('events' in value) || !Array.isArray(value.events)) {
-        throw new Error('编剧历史响应不完整，请读取原结果。')
+      const history = async () => {
+        const response = await connection.api.sessions.history({ sessionId: sessionId as NativeSessionId, maxMessages: 64 })
+        const value = unwrapRpc(response.result)
+        if (!value || typeof value !== 'object' || !('events' in value) || !Array.isArray(value.events)) {
+          throw new Error('编剧历史响应不完整，请读取原结果。')
+        }
+        return readStoryDraft(value.events, afterSeq)
       }
-      return readStoryDraft(value.events, afterSeq)
+      const draft = await history()
+      if (!draft.running) return draft
+      // Cold history deliberately preserves an open crash tail. Resume its exact idle
+      // composition so native persistence records interruption; never resend a prompt.
+      const catalog = (await connection.api.sessions.list({})).result
+      if (!catalog.ok) throw new Error(catalog.error.message)
+      const retained = catalog.value.items.find(item => item.sessionId === sessionId)
+      if (!retained || retained.running) return draft
+      if (!retained.cwd || retained.agentPreset !== 'qingmu-director' || retained.parentSessionId) {
+        throw new Error('原创作会话身份不完整，无法恢复中断记录。')
+      }
+      unwrapRpc((await connection.api.sessions.create({ sessionId: sessionId as NativeSessionId,
+        cwd: retained.cwd, agentPreset: retained.agentPreset })).result)
+      return history()
     },
   }, dialogueExecution(sessionId) {
     const sessions = ctx.get('sessions') as unknown as ISessions | undefined
